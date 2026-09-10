@@ -8,18 +8,47 @@
    measurements, why Yango cancellations are counted into a THIRD bucket
    rather than assigned. This file adds the two things the page needs around
    it: the window, and the sentence that says what the numbers do not cover. */
-import { win } from './window.js';
+import { winDays } from './window.js';
 import { cancellationsSql } from './cancellation_sql.js';
 
 export function cancellationRoutes(app, { q, wrap }) {
   app.get('/api/cancellations', wrap(async (req, res) => {
-    const [from, to] = win(req);
-    /* Bound on the same local_day the rest of the product groups by, not on
-       requested_at directly: a window that means "this month" to the reader
-       has to mean the Dubai month here, and trip_norm exists to stop every
-       call site re-deriving that. */
+    const [from, to] = winDays(req);
+    /* BOUND ON local_day, WHICH IS THE DUBAI CALENDAR DATE — not on
+       requested_at, which is an instant in UTC.
+       ─────────────────────────────────────────────────────────────────────
+       This comment already said that and the query underneath it did not.
+       It bound `n.requested_at >= $1 AND n.requested_at <= $2` against the
+       output of win(), which is a pair of naked date strings the server's
+       UTC session reads as UTC midnights. sql/schema_v18.sql:84 builds
+       local_day as (requested_at AT TIME ZONE 'Asia/Dubai')::date, so the
+       two bounds are the same window slid four hours: a "day" here began at
+       04:00 Dubai and ran to 03:59 the next morning. Every other windowed
+       route in the product — twenty-seven call sites, all of them
+       `local_day BETWEEN $1::date AND $2::date` — bounds the other way, so
+       this page disagreed with all of them, and the shorter the window the
+       larger the share of it that was wrong.
+
+       MEASURED on production 2026-09-10, this endpoint against the daily
+       rollup over identical windows (both count outcome = 'not_completed'):
+
+         window            rollup   this page   out by
+         today             77       65          -12   (-16%)
+         yesterday         85       88           +3
+         week (07-10)     354      343          -11
+         month (01-10)    856      846          -10
+
+       Today loses its own first four hours and has not yet reached the four
+       it borrows from tomorrow, which is why the live figure was always the
+       one most wrong — and the live figure is the one on screen. The fix is
+       not a new rule, it is the rule everything else already follows.
+
+       winDays() rather than win(): win() widens the upper bound to
+       23:59:59.999 for exactly the timestamptz comparison being removed
+       here, and against a date column that string would have to be cast
+       back down again. */
     const rows = await q(cancellationsSql({
-      where: 'n.requested_at >= $1 AND n.requested_at <= $2 AND n.is_booking',
+      where: 'n.local_day BETWEEN $1::date AND $2::date AND n.is_booking',
     }), [from, to]);
 
     /* WHAT THIS PAGE CANNOT TELL YOU, computed rather than asserted.

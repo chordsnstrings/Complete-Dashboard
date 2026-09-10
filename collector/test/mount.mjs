@@ -15,7 +15,11 @@
    listed; a module nobody adds to a list is a module nothing executes. */
 import express from 'express';
 import { readFileSync, readdirSync } from 'node:fs';
-import { win, winDays, grainOf, previousWindow, foldGrain, GRAINS, PERIODS,
+/* dubaiSpanSql is in this list because the mounted slice now uses it: the map
+   and track endpoints bind a raw timestamptz, and an identifier the slice
+   references and this list omits is a ReferenceError before the first
+   assertion of every route test. */
+import { win, winDays, dubaiSpanSql, grainOf, previousWindow, foldGrain, GRAINS, PERIODS,
   isPeriod, periodPartial } from '../api/window.js';
 import { rollupGrainSql } from '../src/rollup.js';
 /* The real redaction, not a stub: GET /api/settings now answers a
@@ -104,6 +108,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
   const src = readFileSync('api/server.js', 'utf8');
   const injected = {
     q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin, win, winDays,
+    dubaiSpanSql,
     grainOf, previousWindow, foldGrain, GRAINS, PERIODS, isPeriod, periodPartial,
     isAdmin, redactSettings, secretField, redactSampleValue, RAW_ALIASES, spanGaps,
     IDENTITY_DOCS, stripIdentity, withheldNote, photoHref, withPhotos,

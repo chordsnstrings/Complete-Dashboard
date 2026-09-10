@@ -827,6 +827,41 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A window bound on a raw timestamp is four hours out of step with every
+  other figure on the page.** `local_day` is
+  `(requested_at AT TIME ZONE 'Asia/Dubai')::date` — `sql/schema_v18.sql:84` —
+  and Dubai is UTC+4, so the calendar day `2026-08-01` begins at
+  `2026-07-31T20:00Z`. A predicate written `col BETWEEN $1 AND $2` against the
+  pair `win()` builds binds those dates as UTC midnights in a UTC session: it
+  drops 00:00–04:00 Dubai on the window's first day and picks up the same slice
+  of the day *after* the last one. `win()` widens the upper bound to
+  `23:59:59.999`, so the bound **looks** careful; the lower one is the half
+  nothing widened.
+
+  This has now been found and fixed **four separate times** — the driver detail
+  page (283 trips against a stored 285), then `/api/cancellations`, the whole
+  vehicle detail page, the cohort comparison and the map day picker, all in one
+  sweep on 2026-09-10. Measured on production that day:
+
+  | surface | bounded on `local_day` | bounded on the raw timestamp |
+  |---|---|---|
+  | cancellations, `period=today` | 77 | **65** |
+  | cancellations, `period=week` | 354 | **343** |
+  | cancellations, `period=month` | 856 | **846** |
+  | L36397 trips, `period=today` | 26 (directory) | **25** (its own page) |
+
+  **The shorter the window, the larger the share of it that is wrong**, and the
+  live figure is both the shortest window and the one on screen. Over ten days
+  the two often agree exactly, which is how it keeps surviving review.
+
+  Bound on `local_day` where the query reads `trip_norm`; use
+  `dubaiSpanSql()` from `api/window.js` for a table that has only a raw
+  timestamptz — `alert.occurred_at`, `telemetry_snapshot.captured_at`,
+  `occupancy_segment.started_at`. Pass `winDays(req)`, not `win(req)`.
+  `test/dubai_day_window.test.mjs` proves the behaviour and then greps every
+  `api/*.js` for the pattern, so a fifth occurrence fails the suite rather than
+  waiting to be re-measured.
+
 * **A migration that DROPs a column fails on production and passes in the
   tests, because the tests build a fresh database.** `sql/schema_v53.sql` drops
   and re-adds `person_key`; `sql/schema_v62.sql` defines `trip_ext` as

@@ -16,7 +16,7 @@
    Bounded by construction: the id list is the cohort, and a cohort is at most
    a few hundred rows. Every query below is `= ANY($1)` against an indexed
    column over that list, so this costs what one entity page costs, once. */
-import { win, winDays } from './window.js';
+import { winDays, dubaiSpanSql } from './window.js';
 
 const MAX_IDS = 400;
 
@@ -41,9 +41,7 @@ export function cohortRoutes(app, { q, wrap }) {
     const ids = idList(req.query.ids);
     if (!ids.length) return res.json({ ids: [], rows: [] });
     const [from, to] = winDays(req);
-    const [ts, te] = win(req);
     const P = [ids, from, to];
-    const T = [ids, ts, te];
 
     const [work, pay, avail, standing, compliance, cars, alerts, perf, cancels] = await Promise.all([
       /* What they drove, per channel — bookings only, so a telematics twin of
@@ -118,9 +116,9 @@ export function cohortRoutes(app, { q, wrap }) {
              ON v.plate = a.plate
             AND v.day = (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date
           WHERE v.driver_ext_id = ANY($1)
-            AND a.occurred_at BETWEEN $2 AND $3
+            AND ${dubaiSpanSql('a.occurred_at', '$2', '$3')}
           GROUP BY 1, 2
-          ORDER BY 3 DESC`, T),
+          ORDER BY 3 DESC`, P),
       /* The platform's own scorecard, where it publishes one. */
       q(`SELECT driver_ext_id AS id, platform,
                 round(sum(hours_online)::numeric, 1) AS hours_online,
@@ -177,9 +175,7 @@ export function cohortRoutes(app, { q, wrap }) {
     const plates = idList(req.query.ids).map(normPlate).filter(Boolean);
     if (!plates.length) return res.json({ ids: [], rows: [] });
     const [from, to] = winDays(req);
-    const [ts, te] = win(req);
     const P = [plates, from, to];
-    const T = [plates, ts, te];
 
     const [spec, work, custody, docs, tel, alerts, segs, util] = await Promise.all([
       q(`SELECT p.plate,
@@ -230,17 +226,17 @@ export function cohortRoutes(app, { q, wrap }) {
           ORDER BY plate, captured_at DESC`, [plates]),
       q(`SELECT plate, alert_type, count(*)::int AS n, max(occurred_at) AS last_at
            FROM alert
-          WHERE plate = ANY($1) AND occurred_at BETWEEN $2 AND $3
+          WHERE plate = ANY($1) AND ${dubaiSpanSql('occurred_at', '$2', '$3')}
           GROUP BY 1, 2
-          ORDER BY 3 DESC`, T),
+          ORDER BY 3 DESC`, P),
       /* What the seat sensor saw. "partial" is the largest bucket on this
          fleet and appears on no page of its own. */
       q(`SELECT plate, verdict, count(*)::int AS n,
                 round(sum(distance_km)::numeric, 0) AS km,
                 round(sum(duration_min)::numeric, 0) AS minutes
            FROM occupancy_segment
-          WHERE plate = ANY($1) AND started_at BETWEEN $2 AND $3
-          GROUP BY 1, 2`, T),
+          WHERE plate = ANY($1) AND ${dubaiSpanSql('started_at', '$2', '$3')}
+          GROUP BY 1, 2`, P),
       q(`SELECT plate, platform,
                 round(sum(hours_online)::numeric, 1) AS hours_online,
                 round(sum(hours_on_trip)::numeric, 1) AS hours_on_trip,

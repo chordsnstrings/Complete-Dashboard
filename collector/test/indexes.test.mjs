@@ -55,8 +55,24 @@ for (const [table, col] of DUBAI_DAY) {
 
 /* And the reverse: a table filtered this way in the API but missing from the
    list above would never be checked. This catches the list going stale. */
+/* COMMENTS STRIPPED FIRST, and that is not a loosening.
+   ─────────────────────────────────────────────────────────────────────────
+   This scan is for a filter that will scan the table, and a filter lives in
+   SQL, not in prose. api/window.js explains the Dubai-day window by writing
+   out the form it does NOT use — `(col AT TIME ZONE 'Asia/Dubai')::date
+   BETWEEN …`, which wraps the indexed column and so cannot use an index — and
+   this check read that sentence as a query and demanded an index on a table
+   called `col`. A check that reports a column nobody wrote is a check nobody
+   will believe, which the note thirty lines below already says about a
+   different way of getting the same wrong answer.
+
+   Nothing real is lost: a column that appears ONLY inside a comment is not
+   filtered on by anything. */
 const api = readdirSync('api').filter((f) => f.endsWith('.js'))
-  .map((f) => readFileSync(`api/${f}`, 'utf8')).join('\n');
+  .map((f) => readFileSync(`api/${f}`, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, ''))
+  .join('\n');
 /* The alias is optional and must be matched as a UNIT: written `\w*\.?(\w+)`
    the greedy prefix eats all but the last character of an unqualified column,
    so `captured_at` was read as the column `t` — a check that reports a column

@@ -13,7 +13,7 @@
    "is this asset earning, and is it legal to be on the road". */
 
 import { peopleCount, personKey } from './custody_sql.js';
-import { win, winDays } from './window.js';
+import { winDays, dubaiSpanSql } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
 /* The alerts-per-distance rule, shared with the fleet headline, both economics
@@ -31,8 +31,51 @@ const DIR_LIMIT = 5000;
 
 export function vehicleRoutes(app, { q, wrap, endOfDay }) {
 
-  // `$1..$2` window, `$3` plate — same argument order in every query below.
-  const TW = `plate = $3 AND requested_at BETWEEN $1 AND $2`;
+  /* `$1..$2` window, `$3` plate — same argument order in every query below.
+
+     BOUND ON local_day, THE DUBAI CALENDAR DATE, not on requested_at.
+     ───────────────────────────────────────────────────────────────────────
+     This was `requested_at BETWEEN $1 AND $2` against the pair win() builds,
+     which the server's UTC session reads as UTC instants. sql/schema_v18.sql
+     defines local_day as (requested_at AT TIME ZONE 'Asia/Dubai')::date, so
+     the two bounds are the same window slid four hours: a "day" on this page
+     began at 04:00 Dubai and ran to 03:59 the next morning.
+
+     The vehicles DIRECTORY, thirty lines below, has always bounded on
+     local_day — as does /api/vehicle/drivers in this same file — so the list
+     and the car's own page were answering the same question two ways.
+     MEASURED on production 2026-09-10 for L36397 at period=today: the
+     directory said 26 trips and /api/vehicle/kpis said 25. Over ten days they
+     happened to agree, which is how this survived: the shorter the window,
+     the larger the share of it that is wrong, and nobody cross-checks a
+     ten-day figure against a list.
+
+     Every query below reads trip_norm rather than trip for this — the view is
+     `SELECT t.*` plus the derived keys, so it carries every base column, and
+     three queries here were on the base table purely because they predate the
+     view. One bound, one definition, twenty-eight call sites across the
+     product that all mean the same day. */
+  const TW = `plate = $3 AND local_day BETWEEN $1::date AND $2::date`;
+
+  /* The SAME window, for the tables that have no local_day to bound on —
+     alert.occurred_at, telemetry_snapshot.captured_at,
+     occupancy_segment.started_at. Fourteen queries behind this page bound
+     those columns as `BETWEEN $1 AND $2`, which was the identical four-hour
+     UTC/Dubai error TW carried, on the safety and movement figures rather
+     than on the trip counts.
+
+     `$1::date::timestamp AT TIME ZONE 'Asia/Dubai'` reads the naked date as a
+     Dubai wall-clock midnight and returns the instant that happened — the
+     same boundary local_day is cut on, so a car's alerts and its trips are
+     counted over one day rather than two overlapping ones. Half-open at the
+     top, over `<= end-of-day`, because a millisecond is a bad place to keep a
+     boundary: `($2::date + 1)` is the next Dubai midnight and `<` excludes it
+     cleanly.
+
+     The expression itself lives in api/window.js, which explains the
+     conversion and carries the measurement; it is shared with
+     api/cohort_routes.js and api/server.js, which had the same bug. */
+  const TS = (col) => dubaiSpanSql(col, '$1', '$2');
 
   const withVehicle = (fn) => wrap(async (req, res) => {
     const plate = normPlate(req.query.plate);
@@ -45,7 +88,10 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          UNION ALL SELECT plate FROM vehicle_document WHERE plate = $1
        ) s LIMIT 1`, [plate]);
     if (!seen) return res.status(404).json({ error: 'vehicle not found' });
-    return fn(req, res, plate, [...win(req), plate]);
+    /* winDays, not win: TW compares against a date column now, and win()
+       exists to widen a date into an end-of-day timestamp for exactly the
+       timestamptz comparison being removed. */
+    return fn(req, res, plate, [...winDays(req), plate]);
   });
 
   /* ── directory ─────────────────────────────────────────────────────────
@@ -858,19 +904,19 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        denominator name the same day set explicitly rather than by luck. */
     const [a] = await q(
       `SELECT ${drivingCount()} alerts, ${deviceCount()} device_alerts FROM alert
-       WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2
+       WHERE plate = $3 AND ${TS('occurred_at')}
          AND (occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($4::date[])`,
       [...p, cov.days]);
     const [gap] = await q(
       `SELECT extract(epoch from (now() - max(captured_at)))/3600 hours_since_fix,
               count(*)::int fixes
-       FROM telemetry_snapshot WHERE plate = $3 AND captured_at BETWEEN $1 AND $2`, p);
+       FROM telemetry_snapshot WHERE plate = $3 AND ${TS('captured_at')}`, p);
     // Idle days: days the tracker reported but no platform recorded a trip —
     // the asset was present and powered, and earned nothing.
     const [idle] = await q(
       `WITH seen AS (
          SELECT DISTINCT (captured_at AT TIME ZONE 'Asia/Dubai')::date AS day
-         FROM telemetry_snapshot WHERE plate = $3 AND captured_at BETWEEN $1 AND $2),
+         FROM telemetry_snapshot WHERE plate = $3 AND ${TS('captured_at')}),
        /* A day the tracker twinned a booking is not a day the car earned
           nothing. This read raw "trip", so an FMS twin counted as earning and
           the tile disagreed with the caption printed directly beneath it:
@@ -1026,10 +1072,10 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        SELECT (captured_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int fixes,
               round(max(speed)::numeric,0) top_speed,
               round(avg(fuel_level)::numeric,0) fuel_level
-       FROM telemetry_snapshot WHERE plate = $3 AND captured_at BETWEEN $1 AND $2 GROUP BY 1),
+       FROM telemetry_snapshot WHERE plate = $3 AND ${TS('captured_at')} GROUP BY 1),
      a AS (
        SELECT (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int alerts
-       FROM alert WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2 GROUP BY 1),
+       FROM alert WHERE plate = $3 AND ${TS('occurred_at')} GROUP BY 1),
      d AS (
        SELECT day, string_agg(DISTINCT driver_name, ', ') drivers_named
        FROM vehicle_driver_day WHERE plate = $3 AND day BETWEEN $1::date AND $2::date GROUP BY day)
@@ -1188,12 +1234,12 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               verdict, verdict_reason, unavailable_sources, matched_platform,
               low_confidence, max_gap_min, ignition_ratio,
               start_lat, start_lng, end_lat, end_lng
-       FROM occupancy_segment WHERE plate = $3 AND started_at BETWEEN $1 AND $2
+       FROM occupancy_segment WHERE plate = $3 AND ${TS('started_at')}
        ORDER BY started_at DESC LIMIT 200`, p);
     const byVerdict = await q(
       `SELECT coalesce(verdict,'unknown') verdict, count(*)::int n,
               round(sum(distance_km)::numeric,0) km, round(sum(duration_min)::numeric,0) AS minutes
-       FROM occupancy_segment WHERE plate = $3 AND started_at BETWEEN $1 AND $2
+       FROM occupancy_segment WHERE plate = $3 AND ${TS('started_at')}
        GROUP BY 1 ORDER BY n DESC`, p);
     /* Only fixes that can be drawn. The replay picker offered "Aug 25 · 119
        fixes" and /api/map/journey then returned 108 for the same day, because
@@ -1203,13 +1249,13 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
     const days = await q(
       `SELECT (captured_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int fixes
        FROM telemetry_snapshot
-       WHERE plate = $3 AND captured_at BETWEEN $1 AND $2 AND lat IS NOT NULL
+       WHERE plate = $3 AND ${TS('captured_at')} AND lat IS NOT NULL
        GROUP BY 1 HAVING count(*) >= 3 ORDER BY 1 DESC LIMIT 90`, p);
     // Where it spends its stationary time — depot, driver's home, or a rank.
     const parked = await q(
       `SELECT round(lat::numeric,3) lat, round(lng::numeric,3) lng, count(*)::int fixes
        FROM telemetry_snapshot
-       WHERE plate = $3 AND captured_at BETWEEN $1 AND $2 AND coalesce(speed,0) < 2 AND lat IS NOT NULL
+       WHERE plate = $3 AND ${TS('captured_at')} AND coalesce(speed,0) < 2 AND lat IS NOT NULL
        GROUP BY 1,2 HAVING count(*) >= 3 ORDER BY fixes DESC LIMIT 60`, p);
     res.json({ segments, by_verdict: byVerdict, days, parked });
   }));
@@ -1228,7 +1274,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
     const byType = await q(
       `SELECT alert_type, count(*)::int n, max(occurred_at) latest,
               ${DEVICE_FAULT_SQL('alert_type')} AS device
-       FROM alert WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2
+       FROM alert WHERE plate = $3 AND ${TS('occurred_at')}
        GROUP BY 1 ORDER BY n DESC LIMIT 20`, p);
     // Attributed to whoever held the vehicle that day, so a harsh-driving
     // pattern points at a person rather than at an inanimate object.
@@ -1270,7 +1316,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          SELECT (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day,
                 count(*) FILTER (WHERE NOT ${DEVICE_FAULT_SQL('alert_type')})::int n,
                 count(*) FILTER (WHERE ${DEVICE_FAULT_SQL('alert_type')})::int device
-         FROM alert WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2 GROUP BY 1
+         FROM alert WHERE plate = $3 AND ${TS('occurred_at')} GROUP BY 1
        ),
        ev AS (
          SELECT coalesce(c.driver_name,'unattributed') driver_name,
@@ -1313,14 +1359,14 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
     for (const r of byDriver) { delete r._drivers; delete r._alerts; delete r._device; }
     const daily = await q(
       `SELECT (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int alerts
-       FROM alert WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2 GROUP BY 1 ORDER BY 1`, p);
+       FROM alert WHERE plate = $3 AND ${TS('occurred_at')} GROUP BY 1 ORDER BY 1`, p);
     const recent = await q(
       `SELECT alert_type, occurred_at, location, lat, lng, video_url
-       FROM alert WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2
+       FROM alert WHERE plate = $3 AND ${TS('occurred_at')}
        ORDER BY occurred_at DESC LIMIT 100`, p);
     const [recentTot] = await q(
       `SELECT count(*)::int alerts FROM alert
-       WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2`, p);
+       WHERE plate = $3 AND ${TS('occurred_at')}`, p);
     res.json({
       by_type: byType, by_driver: byDriver, daily, recent,
       /* Sibling counts rather than a {rows,...} wrapper: this response is
@@ -1353,7 +1399,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
       [one('product'), one('payment_type'), one('platform'), one('status')]);
     const hours = await q(
       `SELECT extract(hour from requested_at AT TIME ZONE 'Asia/Dubai')::int h, count(*)::int trips
-       FROM trip WHERE ${TW} GROUP BY 1 ORDER BY 1`, p);
+       FROM trip_norm WHERE ${TW} GROUP BY 1 ORDER BY 1`, p);
     res.json({ product, payment, platform, status, hours });
   }));
 
@@ -1368,9 +1414,9 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
       q(`SELECT platform, external_id, requested_at, ended_at, driver_name, driver_ext_id,
                 pickup_addr, dropoff_addr, distance_km, duration_s, status, product,
                 payment_type, price, currency
-         FROM trip WHERE ${TW}
+         FROM trip_norm WHERE ${TW}
          ORDER BY requested_at DESC LIMIT ${limit} OFFSET ${offset}`, p),
-      q(`SELECT count(*)::int n FROM trip WHERE ${TW}`, p),
+      q(`SELECT count(*)::int n FROM trip_norm WHERE ${TW}`, p),
     ]);
     const total = t?.n ?? rows.length;
     res.json({ rows, total, shown: rows.length, offset, limit,

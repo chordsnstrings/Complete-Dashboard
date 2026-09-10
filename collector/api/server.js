@@ -12,7 +12,7 @@ import { recognise, unrecognised } from '../src/credkit.js';
 import { checkAll } from '../src/credcheck.js';
 import { proposeKeys } from '../src/credmodel.js';
 import { SETTING_DEFS } from '../src/settings.js';
-import { win, winDays, grainOf, previousWindow, foldGrain, GRAINS, PERIODS,
+import { win, winDays, dubaiSpanSql, grainOf, previousWindow, foldGrain, GRAINS, PERIODS,
   isPeriod, periodPartial } from './window.js';
 import { rollupGrainSql, rollupState, refreshRollups } from '../src/rollup.js';
 import { responseCache } from './cache.js';
@@ -1701,7 +1701,7 @@ app.get('/api/track', wrap(async (req, res) => {
     `SELECT captured_at, lat, lng, speed, status, seat_occupied, ignition, source
      FROM telemetry_snapshot
      WHERE plate=$1 AND lat IS NOT NULL AND lng IS NOT NULL
-       AND captured_at BETWEEN $2 AND $3
+       AND ${dubaiSpanSql('captured_at', '$2', '$3')}
      ORDER BY captured_at`,
     [req.query.plate.toUpperCase().replace(/[\s-]+/g, ''), ...win(req)]));
 }));
@@ -1731,7 +1731,7 @@ app.get('/api/map/days', wrap(async (req, res) => {
        FROM telemetry_snapshot t
        WHERE t.lat IS NOT NULL
          AND ($1::text IS NULL OR t.plate = $1)
-         AND t.captured_at BETWEEN $2 AND $3
+         AND ${dubaiSpanSql('t.captured_at', '$2', '$3')}
        GROUP BY 1,2,3
        HAVING count(*) >= 2)
      SELECT d.*,
@@ -1752,7 +1752,7 @@ app.get('/api/map/days', wrap(async (req, res) => {
     `SELECT count(*)::int n FROM (
        SELECT 1 FROM telemetry_snapshot t
         WHERE t.lat IS NOT NULL AND ($1::text IS NULL OR t.plate = $1)
-          AND t.captured_at BETWEEN $2 AND $3
+          AND ${dubaiSpanSql('t.captured_at', '$2', '$3')}
         GROUP BY (t.captured_at AT TIME ZONE 'Asia/Dubai')::date, t.plate
        HAVING count(*) >= 2) g`, [plate, ...win(req)]);
   /* Still a bare array, deliberately, unlike the other capped lists in this

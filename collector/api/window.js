@@ -261,6 +261,37 @@ export const bucketSql = (grain, col = 'local_day') => (
     : grain === 'week' ? `date_trunc('week', ${col})::date`
       : `${col}::date`);
 
+/* The SAME window, for a column that is a raw timestamptz with no local_day
+   beside it — alert.occurred_at, telemetry_snapshot.captured_at,
+   occupancy_segment.started_at.
+   ─────────────────────────────────────────────────────────────────────────
+   Written here because it has now been needed in four files, and because the
+   thing it replaces was the same bug in each of them: `col BETWEEN $1 AND $2`
+   against the pair win() builds, bound in a UTC session. Dubai is UTC+4, so
+   the calendar day 2026-08-01 begins at 2026-07-31T20:00Z — a bound starting
+   at 2026-08-01T00:00Z drops 00:00-04:00 Dubai on the window's first day and
+   picks up the same slice of the day AFTER the last one. Every figure so
+   bound describes a day four hours out of step with the trips it is printed
+   beside. MEASURED on production 2026-09-10: /api/cancellations at
+   period=today said 65 where the daily rollup said 77, and /api/vehicle/kpis
+   said 25 trips for L36397 where the vehicles directory said 26.
+
+   `$1::date::timestamp AT TIME ZONE 'Asia/Dubai'` reads the naked date as a
+   Dubai wall-clock midnight and returns the instant that happened, which is
+   exactly the boundary sql/schema_v18.sql cuts local_day on. Half-open at the
+   top — `< the next Dubai midnight` rather than `<= 23:59:59.999` — because a
+   millisecond is a bad place to keep a boundary.
+
+   It also stays sargable: the indexed column is compared against two computed
+   constants rather than wrapped in a function, so an index on (plate,
+   occurred_at) is still usable. `(col AT TIME ZONE 'Asia/Dubai')::date
+   BETWEEN …` says the same thing more plainly and cannot use one.
+
+   `lo`/`hi` name the placeholders because the call sites do not agree on
+   argument order — some carry an id array first. */
+export const dubaiSpanSql = (col, lo = '$1', hi = '$2') => `${col} >= (${lo}::date::timestamp AT TIME ZONE 'Asia/Dubai')
+       AND ${col} < ((${hi}::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')`;
+
 /* Calendar-day bounds: `[from, to]` as YYYY-MM-DD, for queries that compare
    against local_day (a date) or apply their own timezone conversion. */
 export function winDays(req, now = Date.now()) {
