@@ -175,17 +175,35 @@ console.log('\nthe dangling ONLINE is kept, and closed at the last moment we ask
   const r = await day('dang', PAST);
   check('the day answers at all', r && Array.isArray(r.online), JSON.stringify(r).slice(0, 160));
   const on = r.online || [];
-  /* Minute 515, not 514: the endpoint reports whole minutes of the Dubai day
-     and 08:34:46 is nearer 08:35 than 08:34. */
-  check('the driver is online from the first heartbeat', on.length && on[0].s === 515,
+  /* MINUTE 514, NOT 515, AND THE CHANGE OF CONVENTION IS THE POINT.
+     ─────────────────────────────────────────────────────────────────────
+     This asserted 515 on the reasoning that "08:34:46 is nearer 08:35 than
+     08:34" — nearest-minute, which is what a bare ::int cast does in Postgres.
+     It is a defensible convention on its own and it conflicts with every other
+     minute-of-day figure on the same response: collected_to_min uses floor(),
+     and last_event_min is hour*60 + minute, which is structurally a floor.
+
+     That conflict was invisible until closed_by started asserting that the
+     band's right edge IS the collection reach. Then the two printed the same
+     instant two ways — measured on production 2026-09-10, a run finishing at
+     13:17:52 gave a band ending 798 (13:18) beside a caption reading "last
+     reached 13:17".
+
+     collected_to_min is the one that cannot move: rounding it up would claim
+     we had asked Uber about 14 seconds we had not, which is the substitution
+     this whole fix exists to refuse. So the spans floor instead, and a minute
+     of the day means the minute an instant falls IN: at 08:34:46 the driver is
+     online during minute 514, and 515 claimed they were not. */
+  check('the driver is online from the first heartbeat', on.length && on[0].s === 514,
     JSON.stringify(on));
   /* THE DEFECT, AND THE CEILING, IN ONE NUMBER.
-     08:35→09:59 is 84 minutes — what the deleted-dangling rule answered.
-     08:35→midnight is 925 — what closing at the end of the day alone would
+     08:34→09:59 is 85 minutes — what the deleted-dangling rule answered.
+     08:34→midnight is 926 — what closing at the end of the day alone would
      answer, 6h 43m of it after the last moment anybody asked Uber.
-     08:35→10:17 is 102, and 10:17 is when the collector last ran. */
+     08:34→10:17 is 103, and 10:17 is when the collector last ran. The three
+     are far enough apart that this one number tells them apart. */
   check('the last ONLINE is kept, and stops where the collection stopped',
-    mins(on) === 617 - 515, `${mins(on)} minutes: ${JSON.stringify(on)}`);
+    mins(on) === 617 - 514, `${mins(on)} minutes: ${JSON.stringify(on)}`);
   check('it is one merged span, not one per heartbeat', on.length === 1, JSON.stringify(on));
   check('and it is marked open-ended, so a caller can tell it from a closed one',
     on[on.length - 1].open_ended === true, JSON.stringify(on));
@@ -214,7 +232,7 @@ console.log('\nan error run is not a moment anybody was asked');
      collected nothing, and 6h 43m of unasked-for availability would come
      straight back. */
   const on = (await day('dang', PAST)).online || [];
-  check('the ceiling ignores the failed 23:00 pass', mins(on) === 617 - 515,
+  check('the ceiling ignores the failed 23:00 pass', mins(on) === 617 - 514,
     JSON.stringify(on));
 }
 
@@ -359,7 +377,7 @@ console.log('\nthe month-long shift panel draws the same spans');
   const on = d.online || [];
   check('the shift panel answers with a band for the day', on.length === 1,
     JSON.stringify(r).slice(0, 200));
-  check('the same 08:35 to 10:17, to the minute', on.length && mins(on) === 617 - 515,
+  check('the same 08:34 to 10:17, to the minute', on.length && mins(on) === 617 - 514,
     JSON.stringify(on));
   check('carrying the same open-ended flag and the same bound',
     on.length && on[0].open_ended === true && on[0].closed_by === 'collection',

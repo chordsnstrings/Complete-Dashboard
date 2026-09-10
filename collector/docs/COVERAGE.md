@@ -951,6 +951,24 @@ driver's 222 tracker fixes.
   lock at all. It **waits** rather than using `pg_try_advisory_lock`: a service
   that skipped migrations to avoid a wait would go on to serve against a schema
   it had not applied.
+* **A bare `::int` cast rounds in Postgres, and every other minute-of-day
+  figure in this codebase floors.** `/api/driver/day`'s online spans cast
+  `extract(epoch …)/60` straight to int, so 08:34:46 rendered as minute 515;
+  `collected_to_min` uses `floor()`, `last_event_min` is `hour*60+minute`, and
+  `api/online_routes.js`'s `minsInto` is `h*60+m` — all floors. The Online Time
+  page therefore said a driver went online at **08:34** while the driver-day
+  band drew **08:35** for the same event, on two pages, for months. It became
+  a same-page contradiction the moment `closed_by: 'collection'` asserted the
+  band's right edge IS the collection reach: measured on production
+  2026-09-10, a run finishing 13:17:52 gave a band ending 798 (13:18) beside a
+  caption reading "last reached 13:17". `collected_to_min` is the figure that
+  cannot move — rounding it up claims we asked Uber about seconds we did not —
+  so the spans floor. A minute of the day is the minute an instant falls IN.
+  **Residual, and it is inherent:** a band drawn on a minute grid can be up to
+  a minute wider than the duration it represents (514→617 draws 103 for
+  102.23 real minutes, and `driver_day.online_min` correctly stores 102). No
+  surface prints both — `cohort.js` renders `online_min` in hours — but a
+  future one must not put them side by side without saying which is which.
 * **A fixture that redraws on every request cannot certify agreement between
   two surfaces.** `mockapi.mjs`'s `/api/trips/daily` built its series inside the
   handler with unseeded `Math.random()`, so two calls seconds apart returned 66

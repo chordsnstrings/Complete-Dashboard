@@ -2114,12 +2114,23 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                 span_start, span_end, open_ended, closed_by
            FROM spans)
        SELECT to_char(d, 'YYYY-MM-DD') AS day,
-              greatest(0, extract(epoch FROM (
+              /* FLOOR, NOT A BARE ::int — Postgres rounds an int cast, and
+                 every other minute-of-day figure on this response floors:
+                 collected_to_min uses floor(), last_event_min is
+                 hour*60+minute. That mismatch was invisible until closed_by
+                 asserted the band's right edge IS the collection reach, and
+                 then it printed the SAME INSTANT two ways — measured on
+                 production 2026-09-10, a run finishing 13:17:52 rendered a
+                 band ending 798 (13:18) beside a caption reading "last reached
+                 13:17". One minute, and it is still the page contradicting
+                 itself about one moment. A minute of the day is a floor: at
+                 13:17:52 you have completed 797 whole minutes, not 798. */
+              floor(greatest(0, extract(epoch FROM (
                 greatest(span_start AT TIME ZONE 'Asia/Dubai', d::timestamp)
-                - d::timestamp))/60)::int AS s,
-              least(1440, extract(epoch FROM (
+                - d::timestamp))/60))::int AS s,
+              floor(least(1440, extract(epoch FROM (
                 least(span_end AT TIME ZONE 'Asia/Dubai', d::timestamp + interval '1 day')
-                - d::timestamp))/60)::int AS e,
+                - d::timestamp))/60))::int AS e,
               /* Only on the day the span actually runs out on. A shift that
                  crosses midnight is one span and two bars, and the earlier bar
                  ends at 24:00 because the day does, not because the record
@@ -2318,12 +2329,24 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       `WITH ${onlineSpansSql({ where: `driver_ext_id = ANY($1)
               AND at >= (($2::date - 1)::timestamp AT TIME ZONE 'Asia/Dubai')
               AND at <  (($2::date + 2)::timestamp AT TIME ZONE 'Asia/Dubai')` })}
-       SELECT greatest(0, extract(epoch FROM (
+       SELECT
+              /* FLOOR, NOT A BARE ::int — Postgres rounds an int cast, and
+                 every other minute-of-day figure on this response floors:
+                 collected_to_min uses floor(), last_event_min is
+                 hour*60+minute. That mismatch was invisible until closed_by
+                 asserted the band's right edge IS the collection reach, and
+                 then it printed the SAME INSTANT two ways — measured on
+                 production 2026-09-10, a run finishing 13:17:52 rendered a
+                 band ending 798 (13:18) beside a caption reading "last reached
+                 13:17". One minute, and it is still the page contradicting
+                 itself about one moment. A minute of the day is a floor: at
+                 13:17:52 you have completed 797 whole minutes, not 798. */
+              floor(greatest(0, extract(epoch FROM (
                 greatest(span_start AT TIME ZONE 'Asia/Dubai', $2::timestamp)
-                - $2::timestamp))/60)::int AS s,
-              least(1440, extract(epoch FROM (
+                - $2::timestamp))/60))::int AS s,
+              floor(least(1440, extract(epoch FROM (
                 least(span_end AT TIME ZONE 'Asia/Dubai', $2::timestamp + interval '1 day')
-                - $2::timestamp))/60)::int AS e,
+                - $2::timestamp))/60))::int AS e,
               /* Open-ended only where the span really runs out inside this day.
                  A span that merely crosses the day's far edge is clipped at
                  24:00 because the day ends, which is not a claim about the
