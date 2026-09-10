@@ -300,6 +300,38 @@ the collection ceiling sits above that day and cannot bind. Those spans still
 run to their own midnight, `closed_by: 'day'`, `open_ended: true`. Pinned as a
 test rather than described as a caveat.
 
+## One instant, one minute — PROVEN ON PRODUCTION, 2026-09-10
+
+A bare `::int` cast rounds in Postgres; `collected_to_min` (`floor()`),
+`last_event_min` (`hour*60+minute`) and `online_routes.js`'s `minsInto`
+(`h*60+m`) all floor. The online spans were the only rounding figure, and
+`closed_by: 'collection'` turned that into a same-page contradiction by
+asserting the band's right edge IS the collection reach.
+
+Measured on production before and after the deploy, same three drivers, same
+day, same `collected_to_min` of 797 throughout:
+
+| driver | Online Time page | band start before → after | band end before → after |
+|---|---|---|---|
+| `39042c26` | 645 | 646 → **645** | 798 → **797** |
+| `3d3e3fa2` | 591 | 591 → 591 | 798 → **797** |
+| `369dd9c1` | 514 | 515 → **514** | 798 → **797** |
+
+| claim | state | the proof |
+|---|---|---|
+| The band and the Online Time page name one event with one minute | **proven** | the table above; two of three disagreed before, none after |
+| A `closed_by: 'collection'` span ends exactly on the collection reach | **proven** | every band end is 797, and `collected_to_min` is 797 |
+| The hover and the caption cannot print the same instant two ways | **proven** | both now derive 13:17 from minute 797 |
+
+**Not fixed, and inherent rather than deferred:** a band drawn on a minute grid
+can be up to a minute wider than the duration it represents — 514→797 draws 283
+where the interval is 282.x minutes, and `driver_day.online_min` stores the
+duration. They are different quantities. No surface prints both today
+(`cohort.js` renders `online_min` in hours); a future one must say which is
+which. In `docs/COVERAGE.md`.
+
+---
+
 ## Tesla — REGISTERED, AND BLOCKED ON A HUMAN, 2026-09-10
 
 | claim | state | the proof |
