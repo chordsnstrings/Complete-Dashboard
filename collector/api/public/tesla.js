@@ -201,6 +201,54 @@ function livePanel(s) {
   return p;
 }
 
+/* THE STEP NOBODY EXPECTS: THE APP IS ALLOWED IN, THE CARS ARE NOT.
+   ──────────────────────────────────────────────────────────────────────────
+   Measured 2026-09-10, and it is the answer to "why give us a Fleet API if the
+   fleet is not in it". Tesla separates PERMISSION TO ASK from PERMISSION PER
+   CAR, and we have only the first:
+
+     the application is registered   proven — Tesla returns our public key from
+                                     /api/1/partner_accounts/public_key
+     both token types work           proven — a third-party token and a partner
+                                     token both reach the API and answer 200
+     cars in the list                ZERO, on both
+
+   `/api/1/vehicles` answering 200 with an empty array is Tesla being precise:
+   "you may ask, and you have no cars". It is not 401 and it is not a fault.
+   The account that signed in carries account_type `person` — read out of the
+   token itself — and the 82 Teslas belong to a Tesla BUSINESS account, so no
+   car has ever been attached to this application.
+
+   Attaching one is the vehicle owner's action and cannot be done from here:
+   Tesla's virtual-key flow hands the owner a link that opens the Tesla mobile
+   app, and they add the app to a car from there. So this panel exists to hand
+   over that link, because the link is the only thing this end can contribute.
+
+   NOT VERIFIED FROM HERE, and said so on the page: Tesla's edge refuses this
+   server's network on tesla.com as well as on the auth hosts, so we cannot
+   fetch the pairing page to confirm it renders. It is the documented URL
+   shape and it costs one tap to find out. */
+function pairPanel(s) {
+  const p = panel('Attach the cars to this application',
+    'The application is allowed in; the cars are not — and that is a different permission');
+  const host = location.hostname;
+  const url = `https://tesla.com/_ak/${host}`;
+  p.body.append(note('Tesla answered our last request with HTTP 200 and an empty list of '
+    + 'vehicles. That is not a failure and not a missing token — it means no car has been '
+    + 'attached to this application yet. Signing in grants the APP access to Tesla; each CAR '
+    + 'is a separate permission that only its owner can give.'));
+  p.body.append(el('p', 'cap', 'Open this on a phone that has the Tesla app installed, signed '
+    + 'in as the account that owns the cars:'));
+  const a = el('a', 'tesla-url');
+  a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = url;
+  p.body.append(a);
+  p.body.append(note('Try it on ONE car first. If that car then appears under “What Tesla '
+    + 'returns” below, the route is proven and the rest can follow. If it does not, the cars '
+    + 'are held by a Tesla Business account that has to attach the application itself — and '
+    + 'that is worth knowing before anybody works through eighty-two of them.'));
+  return p;
+}
+
 /* WHAT TESLA ACTUALLY HOLDS PER CAR, verified against Tesla's own docs on
    2026-09-10 rather than remembered.
    ──────────────────────────────────────────────────────────────────────────
@@ -312,6 +360,9 @@ export async function renderTesla(root) {
   root.innerHTML = '';
   root.append(kpiRow(heldTiles(s)));
   root.append(grantPanel(s).panel);
+  /* Only once the grant exists: before that the empty list has a different
+     cause and this panel would be answering a question nobody has yet. */
+  if (s.granted) root.append(pairPanel(s).panel);
   root.append(heldPanel(s).panel);
   root.append(livePanel(s).panel);
   root.append(canPanel().panel);
