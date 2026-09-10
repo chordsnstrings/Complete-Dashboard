@@ -25,7 +25,7 @@ export const TESLA_AUTH = 'https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3';
 
 /* The scopes a READ-ONLY fleet view needs, and deliberately not one more.
    `vehicle_cmds` and `vehicle_charging_cmds` would let this application open
-   doors and start charging sessions on eighty cars; nothing here wants that,
+   doors and start charging sessions on eighty-two cars; nothing here wants that,
    and a grant is far easier to widen later than to explain afterwards. */
 export const READ_SCOPES = 'openid offline_access vehicle_device_data vehicle_location';
 

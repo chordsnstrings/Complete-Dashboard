@@ -1,9 +1,14 @@
 /* TESLA: the grant, and what it is worth.
    ──────────────────────────────────────────────────────────────────────────
-   The fleet owns 80 Teslas — 70 Model Y and 10 Model 3 of 273 plates,
-   measured on production 2026-09-10 — and every one of them carries a VIN,
-   which is Tesla's own join key. So the cars are already identified; what is
-   missing is permission to ask Tesla about them.
+   The fleet owns 82 Teslas — 72 Model Y and 10 Model 3 of 273 plates,
+   measured on production 2026-09-10 through this very endpoint — and 78 of
+   them carry a VIN, which is Tesla's own join key. So most of the cars are
+   already identified; what is missing is permission to ask Tesla about them.
+
+   The four Model Ys with no VIN are not a Tesla problem and will not be fixed
+   by the grant: a car Tesla can answer about is a car we can NAME to Tesla,
+   and a plate is not a name Tesla knows. They will render absent with that
+   reason rather than silently dropping out of a count of 82.
 
    That permission has exactly one shape and only a human can grant it. The
    client id and secret in Settings authenticate this APPLICATION, and an
