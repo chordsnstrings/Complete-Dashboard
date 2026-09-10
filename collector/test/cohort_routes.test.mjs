@@ -54,8 +54,17 @@ await q(`INSERT INTO driver_day (driver_ext_id,day,fleet_id,platforms,plates,tri
 await q(`INSERT INTO driver_platform_state (platform,driver_ext_id,fleet_id,full_name,state,can_earn,plate,observed_at)
          VALUES ('uber','d-ali','ecosine','Ali Rahman','active',true,'C1',now()),
                 ('uber','d-sara','ecosine','Sara Iqbal','deactivated',false,'C2',now())`);
+/* RELATIVE TO NOW, not a literal that decays into a failure.
+   ─────────────────────────────────────────────────────────────────────────
+   This read '2026-09-10' and the assertion below wants licence_days_left > 0.
+   Both were true when it was written and both stopped being true on
+   2026-09-10, when a licence expiring "today" correctly reported 0 days left
+   and a green suite went red over the calendar rather than over the code. The
+   assertion is about the ARITHMETIC — that the endpoint computes days-left
+   once, server-side — so the fixture has to be a date that is always in the
+   future for it to be arithmetic about. */
 await q(`INSERT INTO driver_compliance (platform,driver_ext_id,fleet_id,full_name,licence_expires,state,rating)
-         VALUES ('uber','d-ali','ecosine','Ali Rahman','2026-09-10','ACTIVE',4.8)`);
+         VALUES ('uber','d-ali','ecosine','Ali Rahman',(now() + interval '30 days')::date,'ACTIVE',4.8)`);
 await q(`INSERT INTO driver_performance (platform,fleet_id,driver_ext_id,driver_name,period_start,period_end,
            trips,hours_online,hours_on_trip,acceptance_rate,rating)
          VALUES ('uber','ecosine','d-ali','Ali Rahman','2026-08-01','2026-08-28',120,180,44,0.93,4.8)`);

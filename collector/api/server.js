@@ -2218,6 +2218,21 @@ app.get('/api/finance/ledger', wrap(async (req, res) => res.json(await q(
 app.get('/api/finance/daily', wrap(async (req, res) => {
   const [from, to, platform, fleet] = range(req);
   const p = [from, to, platform, fleet];
+  /* THE OPEN STATEMENT PERIOD, resolved FIRST because two separate things read
+     it — the window total below and the day rows further down.
+     ──────────────────────────────────────────────────────────────────────
+     Uber files weekly and src/rollup.js divides each statement across the days
+     it covers. For a week still running that divides a partial amount over
+     seven days, three of which have not happened — measured 2026-09-10, the
+     closed week showed AED 25,768.69 a day and the open one AED 4,444.39, an
+     83% cliff on a fleet whose bookings had not moved at all. See
+     api/statement_fill_sql.js for the measurement and the backtest.
+
+     Declared HERE and not beside the day queries: the window total is folded
+     ~30 lines above them, so a const sitting with the day queries was in the
+     temporal dead zone when applyFillToPlatforms() reached for it and every
+     call to this endpoint answered 500. */
+  const fillDaily = await resolveOpenFill({ q, from, to, platform, fleet });
   /* THE SAME RULE THE TILES ABOVE THIS CHART USE, day by day.
      ──────────────────────────────────────────────────────────────────────
      The first version of this summed driver_day.money and was quietly wrong on
@@ -2287,16 +2302,6 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
   const USES_STATEMENT = new Set([...byPlat.values()]
     .filter((r) => r.basis === 'statement' || r.basis === 'partial_statement')
     .map((r) => r.platform));
-
-  /* THE OPEN STATEMENT PERIOD, resolved before the day rows are folded.
-     ──────────────────────────────────────────────────────────────────────
-     Uber files weekly and src/rollup.js divides each statement across the days
-     it covers. For a week still running that divides a partial amount over
-     seven days, three of which have not happened — measured 2026-09-10, the
-     closed week showed AED 25,768.69 a day and the open one AED 4,444.39, an
-     83% cliff on a fleet whose bookings had not moved at all. See
-     api/statement_fill_sql.js for the measurement and the backtest. */
-  const fillDaily = await resolveOpenFill({ q, from, to, platform, fleet });
 
   const [cal, dayFare, dayPay, dayStmt, led] = await Promise.all([
     q(`SELECT to_char(d, 'YYYY-MM-DD') AS d
