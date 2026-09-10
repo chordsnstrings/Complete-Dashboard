@@ -118,17 +118,22 @@ if (cmd === 'status') {
   /* Spends the code the dashboard held when its own exchange was refused. */
   const id = need('TESLA_CLIENT_ID'); const secret = need('TESLA_CLIENT_SECRET');
   const s = await settings();
-  const raw = String(s.TESLA_PENDING_CODE?.value || '');
-  if (!raw && s.TESLA_PENDING_CODE?.configured) die(
-    'A sign-in code IS held, but this reader cannot see it: /api/settings redacts secrets.\n'
-    + '  Run this with an admin token in ADMIN_TOKEN, or from where the dashboard will serve it '
-    + 'unredacted.');
-  if (!raw) die('No held sign-in code. Open the Tesla page in the dashboard, use the sign-in '
-    + 'link as the person who owns the cars, and run this immediately afterwards.');
-  const cut = raw.lastIndexOf('.');
-  const code = cut > 0 ? raw.slice(0, cut) : raw;
-  const age = cut > 0 ? Math.round((Date.now() - Number(raw.slice(cut + 1))) / 1000) : null;
-  if (age != null) console.log(`\n  the held code is ${age}s old`);
+  /* TAKEN AS AN ARGUMENT, because it cannot be read back out of the
+     dashboard: api/admin_gate.js's redactSettings blanks `value` on every row
+     for a non-admin reader, whatever the secret flag says. The callback page
+     prints the code for exactly this reason — the person who signed in is the
+     one who has it. */
+  const code = process.argv[3];
+  if (!code) {
+    if (s.TESLA_PENDING_CODE?.configured) {
+      die('A sign-in code IS held, but it cannot be read back out — the dashboard redacts every\n'
+        + '  stored value for a non-admin reader. It is printed on the page the operator saw\n'
+        + '  after signing in. Pass it here:\n\n    node bin/tesla-token.mjs claim <code>\n');
+    }
+    die('No sign-in has been completed. Open the Tesla page in the dashboard, use the sign-in\n'
+      + '  link as the person who owns the cars, then run this with the code that page prints:\n'
+      + '\n    node bin/tesla-token.mjs claim <code>\n');
+  }
   const host = await tokenHost();
   const data = await post(host, { grant_type: 'authorization_code', client_id: id,
     client_secret: secret, code, redirect_uri: REDIRECT,

@@ -107,6 +107,8 @@ const page = (title, body) => `<!doctype html><meta charset="utf-8">
   h1{font-size:1.4rem;margin:0 0 .5rem}
   p{margin:.6rem 0}
   code{background:rgba(127,127,127,.18);padding:.1rem .3rem;border-radius:4px}
+  pre{background:rgba(127,127,127,.18);padding:.6rem .7rem;border-radius:6px;
+      white-space:pre-wrap;word-break:break-all;font-size:.85rem;line-height:1.5}
   a{color:inherit}
 </style>
 <h1>${esc(title)}</h1>${body}`;
@@ -257,11 +259,17 @@ export function teslaRoutes(app, { q, wrap }) {
           ? '<p>The approval itself worked — Tesla sent us back a valid code. What failed is '
             + 'this server exchanging that code for a token, and it failed at Tesla&rsquo;s front '
             + 'door rather than at the sign-in.</p>'
-            + '<p><b>Your sign-in has not been wasted.</b> The code has been kept, and it can be '
-            + 'exchanged from a network Tesla answers — which finishes the connection without '
+            + '<p><b>Your sign-in has not been wasted.</b> Tesla&rsquo;s code is below. It has to '
+            + 'be exchanged from a network Tesla answers, which finishes the connection without '
             + 'you signing in again.</p>'
-            + '<p>Nothing else is needed from you. <b>Do not sign in again</b>; a second sign-in '
-            + 'replaces this code and starts over.</p>'
+            /* PRINTED, because the person reading this page is the person who
+               just signed in, and they are the only one who needs it. It
+               cannot be read back out of the settings store — redactSettings
+               blanks every value for a non-admin reader — so a code that only
+               lived in the database would be a code nobody could spend. */
+            + `<p><b>Send this to whoever is finishing the setup:</b></p><pre>${esc(code)}</pre>`
+            + '<p><b>Do not sign in again</b> — a second sign-in replaces this code and starts '
+            + 'over. It is single-use and lasts only a few minutes, so pass it on now.</p>'
           : '<p><b>Nothing has been stored.</b> You can start again from the Tesla page.</p>'));
     }
     await setSetting('TESLA_REFRESH_TOKEN', out.refresh, true);

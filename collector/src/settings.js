@@ -217,26 +217,24 @@ export const SETTING_DEFS = [
      So it is kept, briefly, for `bin/tesla-token.mjs` to spend from a network
      Tesla answers. A code is single-use and short-lived by design, which is
      also why holding one is a small thing to hold. */
-  /* NOT MARKED SECRET, and that is a reasoned trade rather than an oversight.
+  /* MARKED SECRET, and the argument for not marking it was simply wrong.
      ────────────────────────────────────────────────────────────────────────
-     Marked secret, /api/settings redacts it to an empty string and the one
-     tool that exists to spend it cannot read it — the store would be holding a
-     value solely to withhold it from its only reader, which is a way of
-     failing that looks like working.
+     This was set to `secret: false` on the reasoning that redaction would
+     otherwise hide the code from the only tool that exists to spend it. That
+     reasoning was not checked, and it is false: api/admin_gate.js's
+     redactSettings blanks `value` on EVERY row it is given, secret or not —
+     the flag decides encryption at rest, not whether a non-admin can read the
+     value back. So the change gave up encryption and bought no readability at
+     all, which is the worst of both.
 
-     What is actually being exposed. An OAuth authorization code is single use,
-     lives for minutes, and CANNOT BE EXCHANGED WITHOUT THE CLIENT SECRET —
-     which stays secret, stays redacted, and is the thing that matters. A code
-     on its own buys nobody anything, and this one is cleared the moment it is
-     spent.
-
-     If the admin gate is ever closed (api/admin_gate.js is deliberately held
-     open while ADMIN_TOKEN is unset), revisit this: with a real gate, secret
-     is free and the tool can present a token. */
+     The code reaches the person who needs it by being PRINTED ON THE CALLBACK
+     PAGE — they have just completed the sign-in, so they are exactly the
+     right audience for it, and nothing has to be read back out of the store
+     at all. bin/tesla-token.mjs takes it as an argument. */
   { key: 'TESLA_PENDING_CODE', group: 'Tesla', label: 'Unspent sign-in code (set automatically)',
-    secret: false,
+    secret: true,
     hint: 'Written when Tesla returns a code this server cannot exchange, and cleared once it '
-      + 'is spent. Useless without the client secret, and it expires in minutes.' },
+      + 'is spent. The callback page shows it; it is not read back out of here.' },
   { key: 'TESLA_TOKEN_HOST', group: 'Tesla', label: 'OAuth token host', secret: false,
     hint: 'Leave blank for the documented default. Set it to '
       + 'https://auth.tesla.com/oauth2/v3 if the default is refused from this server.' },
