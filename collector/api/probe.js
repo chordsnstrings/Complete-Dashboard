@@ -1149,6 +1149,80 @@ export function probeRoutes(app, { wrap }) {
 
      Read-only despite the verb — it is a query endpoint. It sends no state and
      changes nothing at the provider. */
+  /* WHERE THIS SERVER STANDS, AS FAR AS TESLA IS CONCERNED.
+     ────────────────────────────────────────────────────────────────────────
+     A code exchange from production comes back as HTTP 403 with an Akamai
+     "Access Denied" page, while the identical request from another network
+     reaches OAuth and gets an ordinary JSON refusal. That is the CALLER being
+     refused rather than the credential, and it raises the only question that
+     decides whether any of this is possible from here: how deep does the
+     refusal go?
+
+       - If only the AUTH host is refused, a token minted elsewhere still
+         cannot be refreshed from here — refresh_token goes to the same host —
+         so the integration would need its tokens kept alive off this server.
+       - If the DATA host is reachable, that workaround at least has somewhere
+         to send the token it keeps alive.
+       - If both are refused, no arrangement of tokens helps and the answer is
+         a different egress address.
+
+     So this asks all three, from production, and reports the address the
+     outside world sees us at — which is the thing a Tesla support ticket has
+     to name and the thing this diagnosis has so far only inferred.
+
+     NO CREDENTIAL IS SENT. The auth probe deliberately posts an invalid grant
+     and the data probe sends no token at all: a reachable host answers both
+     with a JSON refusal, and a blocked one answers with HTML. Telling those
+     two apart is the whole measurement, and it needs no secret to make. */
+  app.get('/api/probe/tesla/egress', wrap(async (_req, res) => {
+    const { http } = await import('../src/http.js');
+    const shape = (r) => {
+      const body = typeof r.data === 'string' ? r.data : JSON.stringify(r.data ?? null);
+      const html = /<html|access denied/i.test(body);
+      return { status: r.status, blocked_at_edge: html,
+        /* The reference, decoded, because it is what a ticket is answered
+           against — see src/auth/tesla.js for what the escaped version cost. */
+        reference: html
+          ? (body.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+            .match(/Reference[^#0-9]*(#?[0-9a-f.]{8,})/i) || [])[1] || null
+          : null,
+        answered: body.slice(0, 200) };
+    };
+    const out = {};
+    /* The address, first, so it is reported even if Tesla refuses everything.
+       Two independent services, because one of them being down would look
+       exactly like not having an answer. */
+    for (const [name, url] of [['ipify', 'https://api.ipify.org?format=json'],
+      ['aws', 'https://checkip.amazonaws.com']]) {
+      try {
+        const r = await http(url, { timeoutMs: 8000, retries: 0, expect: 'text' });
+        out[`egress_${name}`] = String(typeof r.data === 'string' ? r.data : (r.data?.ip ?? ''))
+          .trim().slice(0, 64) || null;
+      } catch (e) { out[`egress_${name}`] = `unreachable: ${String(e.message || e).slice(0, 80)}`; }
+    }
+    try {
+      out.auth_host = shape(await http('https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token', {
+        method: 'POST', timeoutMs: 20000, retries: 0,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: 'grant_type=invalid_probe' }));
+    } catch (e) { out.auth_host = { error: String(e.message || e).slice(0, 200) }; }
+    try {
+      out.data_host = shape(await http(
+        'https://fleet-api.prd.eu.vn.cloud.tesla.com/api/1/vehicles',
+        { timeoutMs: 20000, retries: 0 }));
+    } catch (e) { out.data_host = { error: String(e.message || e).slice(0, 200) }; }
+
+    out.reading = out.auth_host?.blocked_at_edge && out.data_host?.blocked_at_edge
+      ? 'Both Tesla hosts refuse this address at the edge. No arrangement of tokens fixes that '
+        + '— it needs a different egress address, or Tesla allowing this one.'
+      : out.auth_host?.blocked_at_edge
+        ? 'The auth host refuses this address but the data host answers. Tokens cannot be minted '
+          + 'or refreshed from here, but they can be USED from here — so keeping a token alive '
+          + 'off this server and storing it would work.'
+        : 'Tesla answers this address normally. If a sign-in still fails, it is not the egress.';
+    res.json(out);
+  }));
+
   app.get('/api/probe/uber/realtime', wrap(async (req, res) => {
     await loadSettings();
     const org = config.uber.org;

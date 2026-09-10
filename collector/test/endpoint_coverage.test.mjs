@@ -66,6 +66,12 @@ const EXEMPT = {
     + 'driver on one day, with that day\u2019s trips beside them and the status vocabulary the '
     + 'feed actually uses \u2014 the spans every page derives are an inference, and when a page '
     + 'and the data disagree the spans cannot settle it',
+  '/api/probe/tesla/egress': 'operator tool: asks, FROM PRODUCTION, what Tesla\u2019s auth host '
+    + 'and data host answer this server and what address the outside world sees us at. A code '
+    + 'exchange here comes back as an Akamai block page rather than an OAuth refusal, which is '
+    + 'the caller being refused and not the credential \u2014 and whether the data host is also '
+    + 'refused decides whether any workaround exists. Sends no credential: an invalid grant and '
+    + 'an unauthenticated GET are enough, because the measurement is HTML-versus-JSON',
   '/api/probe/uber/realtime': 'operator tool: asks the live per-trip transaction feed with the verb '
     + 'it documents (POST) rather than the GET all three existing probes send, and reports which '
     + 'parameter shape Uber accepts — the gate on getting Uber money at day grain instead of a '

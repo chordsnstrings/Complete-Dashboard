@@ -59,8 +59,17 @@ const refusal = (what, status, data) => {
   const body = typeof data === 'string' ? data : '';
   if (/<html|access denied/i.test(body)) {
     /* Akamai's reference number is the only part of that page worth keeping —
-       it is what a provider support ticket is answered against. */
-    const ref = body.match(/Reference[^0-9a-z]*([0-9a-z.#&;\-]+)/i);
+       it is what a provider support ticket is answered against, so it has to
+       come out READABLE. The block page is HTML, so the reference arrives as
+       `&#35;18&#46;ccd5ce17&#46;…`; lifted verbatim into a page that escapes
+       its input again it rendered as `32;&#35;18&#46;ccd5ce17`, which an
+       operator cannot retype into a support ticket — and retyping it into a
+       support ticket is the only thing the number is for. Decoded here, once,
+       before anything escapes it for display. */
+    const unent = (t) => t.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+      .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+      .replace(/&amp;/g, '&');
+    const ref = unent(body).match(/Reference[^#0-9]*(#?[0-9a-f.]{8,})/i);
     return { err: `${what}: Tesla's edge refused the request with HTTP ${status} before the `
       + 'sign-in server saw it. This is not a credential problem — the same request from a '
       + 'different network reaches Tesla normally. It is the address this server calls from '
