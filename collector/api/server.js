@@ -2398,13 +2398,20 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
   }
   for (const r of dayStmt) {
     const o = day.get(key(r.d)); if (!o) continue;
-    o.nothing_recorded = false;
-    if (!USES_STATEMENT.has(r.platform)) continue;
     /* Inside an open period the smear is replaced by that day's OWN fares at
        the fleet's measured commission. Outside one — every closed week — the
        statement stands untouched: it is Uber's own filed number and it
        reconciles against the bank wire, so nothing derived may displace it. */
-    const sub = fillDaily.fill.byDay.get(`${r.platform}\u0000${r.d}`);
+    const sub = USES_STATEMENT.has(r.platform)
+      ? fillDaily.fill.byDay.get(`${r.platform}\u0000${r.d}`) : null;
+    /* A day the open period covers but nobody has driven yet — the 11th, 12th
+       and 13th, when the week runs to the 13th and today is the 10th. It has
+       no money and it must not CLAIM to have none either: the statement row
+       exists, so clearing nothing_recorded here would draw a solid bar at zero
+       on a day that has not happened. Left untouched it stays a hole. */
+    if (sub && sub.now == null) continue;
+    o.nothing_recorded = false;
+    if (!USES_STATEMENT.has(r.platform)) continue;
     const net = sub ? sub.now : r.statement_net;
     if (sub) { o.money_derived = true; o.statement_gross = (o.statement_gross || 0) + sub.gross; }
     add(o, 'statement_part', net); add(o, 'money', net);

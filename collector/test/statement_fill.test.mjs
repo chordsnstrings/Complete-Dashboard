@@ -122,9 +122,13 @@ const fill = fillOpenDays({
 check('a day that ran is its own gross at the measured commission',
   fill.byDay.get(K('uber', '2026-09-07')).now === 750,
   String(fill.byDay.get(K('uber', '2026-09-07'))?.now));
-check('a day with no trip yet is NOTHING, never an average',
-  fill.byDay.get(K('uber', '2026-09-11')).now === 0,
-  'this is arithmetic over trips that have already run — a forecast is a different claim');
+check('a day with no trip yet is ABSENT, never an average and never a zero',
+  fill.byDay.get(K('uber', '2026-09-11')).now === null,
+  'the open period runs to the end of its week, so it covers days nobody has lived; '
+  + '0 there is a measurement of one, and the house rule forbids exactly that');
+check('…and its smear is still removed, so nothing is left claiming to be a statement',
+  fill.byDay.get(K('uber', '2026-09-11')).was === 200,
+  'was is subtracted from the delta whether or not anything replaces it');
 check('the window delta is the sum of what moved',
   fill.delta === (750 * 3) - (200 * 5), String(fill.delta));
 check('…and it is carried per platform, because the basis is chosen per channel',
@@ -158,8 +162,8 @@ console.log('\nend to end, against the database');
   check('each running day lands on its own gross times the measured rate',
     ['2026-09-07', '2026-09-08', '2026-09-09'].every((d) => at(d).now === 750),
     JSON.stringify(['2026-09-07', '2026-09-08', '2026-09-09'].map((d) => at(d)?.now)));
-  check('…and the days with no trips contribute nothing at all',
-    ['2026-09-11', '2026-09-12', '2026-09-13'].every((d) => at(d).now === 0));
+  check('…and the days with no trips contribute nothing at all, as null not zero',
+    ['2026-09-11', '2026-09-12', '2026-09-13'].every((d) => at(d).now === null));
   check('the note names the week, the rate, and what it is built from',
     /week to 2026-09-13 has not closed/.test(r.notes[0].why)
     && /75\.0%/.test(r.notes[0].why) && /not a forecast/.test(r.notes[0].why), r.notes[0]?.why);

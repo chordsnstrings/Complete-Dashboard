@@ -219,11 +219,21 @@ export function fillOpenDays({ openDays, periods, rates }) {
     if (r.d < per.open_start || r.d > per.open_end) continue;
     const was = r.statement_net == null ? 0 : Number(r.statement_net);
     const gross = r.gross == null ? 0 : Number(r.gross);
-    const now = +(gross * rate).toFixed(2);
+    /* NULL, not zero, for a day with no priced trip yet.
+       ──────────────────────────────────────────────────────────────────────
+       The open period runs to the end of its week, so on 2026-09-10 it covers
+       the 11th, 12th and 13th — days that have not happened. Returning 0 for
+       those states that the fleet earned nothing on them, which is a
+       measurement of a day nobody has lived; the house rule is that an
+       unmeasurable figure renders absent WITH A REASON and never as zero. The
+       smear they carried before is still removed either way — `was` is
+       subtracted from the delta below whether or not anything replaces it. */
+    const now = gross > 0 ? +(gross * rate).toFixed(2) : null;
     byDay.set(`${r.platform}\u0000${r.d}`, { platform: r.platform, d: r.d, was, gross, now });
-    byPlatform.set(r.platform, +((byPlatform.get(r.platform) || 0) + (now - was)).toFixed(2));
-    delta += now - was;
-    total += now;
+    byPlatform.set(r.platform,
+      +((byPlatform.get(r.platform) || 0) + ((now ?? 0) - was)).toFixed(2));
+    delta += (now ?? 0) - was;
+    total += now ?? 0;
     applied++;
   }
   return { byDay, byPlatform, delta: +delta.toFixed(2), total: +total.toFixed(2), applied };
