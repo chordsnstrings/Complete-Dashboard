@@ -2223,12 +2223,14 @@ const dailySeries = () => {
 app.get('/api/cancellations', (req, r) => {
   const rows = [
     { person_key: 'p1', driver_name: 'Raja Aliyan Khalil', driver_ext_ids: ['d-1'],
+      driver_ext_id: 'd-1', plates: ['L36397', 'L40561'],
       platforms: ['uber', 'yango'], bookings: 212, completed: 168,
       cancelled: 44, by_driver: 9, by_rider: 29, unattributed: 6,
       unattributed_platforms: ['yango'],
       driver_after_accept: 2, driver_declined_offer: 4, driver_cancelled_uber: 3,
       rating: 4.99, rating_platform: 'uber', phone: '971501234567' },
     { person_key: 'p2', driver_name: 'Ahmed Hassan', driver_ext_ids: ['d-2'],
+      driver_ext_id: 'd-2', plates: ['L40759'],
       platforms: ['uber', 'bolt'], bookings: 190, completed: 171,
       cancelled: 19, by_driver: 2, by_rider: 17, unattributed: 0,
       unattributed_platforms: [],
@@ -2237,6 +2239,7 @@ app.get('/api/cancellations', (req, r) => {
     /* No phone on the roster, and no rating filed. Both are real states and
        both have their own sentence rather than a dash. */
     { person_key: 'p3', driver_name: 'Muhammad Sameer', driver_ext_ids: ['d-3'],
+      driver_ext_id: 'd-3', plates: [],
       platforms: ['bolt'], bookings: 61, completed: 54,
       cancelled: 7, by_driver: 6, by_rider: 1, unattributed: 0,
       unattributed_platforms: [],

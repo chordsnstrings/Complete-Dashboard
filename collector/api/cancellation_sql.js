@@ -92,8 +92,27 @@ export function cancellationsSql({ where = 'TRUE' } = {}) {
     WITH base AS (
       SELECT coalesce(nullif(t.person_key, ''), n.driver_ext_id)  AS person_key,
              max(n.driver_name)                                    AS driver_name,
+             /* SINGULAR as well as the array, and it is not redundant.
+                test/completeness.test.mjs enforces a product rule — "no driver
+                name is returned without an id to open them by" — and it looks
+                for driver_ext_id, driver_refs or id. This endpoint returned
+                driver_ext_ids (plural) and nothing else, so every row named a
+                person the page could not link to. min() rather than [1] so the
+                id is stable between calls: array_agg over a set with no ORDER
+                BY may come back in a different order, and a link that moves
+                between refreshes is a link somebody reports as a bug. */
+             min(n.driver_ext_id)                                   AS driver_ext_id,
              (array_agg(DISTINCT n.driver_ext_id)
                 FILTER (WHERE n.driver_ext_id IS NOT NULL))         AS driver_ext_ids,
+             /* WHAT THEY WERE DRIVING, which the same test requires of any list
+                that names a driver — and which an operator ringing about a
+                cancellation actually wants, because "which car were you in" is
+                the next question after "why did you cancel". Only the plates on
+                the CANCELLED bookings, not every car they touched in the
+                window: a plate listed here is one a cancellation happened in. */
+             (array_agg(DISTINCT n.plate)
+                FILTER (WHERE ${CANCEL_CASE} IS NOT NULL AND n.plate IS NOT NULL
+                          AND n.plate <> ''))                       AS plates,
              (array_agg(DISTINCT n.platform))                       AS platforms,
              count(*) FILTER (WHERE n.is_booking)::int              AS bookings,
              count(*) FILTER (WHERE n.outcome = 'completed')::int   AS completed,

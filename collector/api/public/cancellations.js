@@ -69,7 +69,22 @@ export async function renderCancellations(root) {
   }
   p.body.append(tableFrom(rows, [
     { label: 'Driver', key: 'driver_name',
-      render: (r) => entity('driver', (r.driver_ext_ids || [])[0], r.driver_name || '(unnamed)') },
+      /* driver_ext_id, not driver_ext_ids[0]: the endpoint now returns a
+         stable singular id for exactly this, so the link does not move
+         between refreshes when array_agg happens to reorder. */
+      render: (r) => entity('driver', r.driver_ext_id, r.driver_name || '(unnamed)') },
+    /* The car the cancellation happened in — "which car were you in" is the
+       next question after "why did you cancel", and it is the first thing a
+       driver is asked. Only plates from CANCELLED bookings, so a plate here is
+       one something went wrong in. */
+    { label: 'Car', key: 'plates',
+      absent: 'No cancelled booking in this window carries a plate.',
+      render: (r) => {
+        const ps = r.plates || [];
+        if (!ps.length) return '<span class="dim">no plate on the booking</span>';
+        return ps.slice(0, 2).map((x) => entity('vehicle', x, x)).join(' ')
+          + (ps.length > 2 ? `<span class="dim"> +${ps.length - 2}</span>` : '');
+      } },
     /* The only thing on this page that may build a tel: href — ui.js's
        dialable() puts a stored 971… into E.164 so the phone actually dials.
        An absent number says the roster has none rather than rendering an
