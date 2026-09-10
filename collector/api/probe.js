@@ -1166,7 +1166,18 @@ export function probeRoutes(app, { wrap }) {
           top_level_keys: data && typeof data === 'object' && !Array.isArray(data)
             ? Object.keys(data).slice(0, 20) : [],
           count: Array.isArray(arr) ? arr.length : 0,
-          fields: arr && arr.length ? describe(arr) : [] });
+          fields: arr && arr.length ? describe(arr) : [],
+          /* ONE WHOLE ROW, on a shape that answered.
+             ──────────────────────────────────────────────────────────────
+             describe() flattens one level, and on this surface the money is
+             one level deeper: `transactionInfo.breakDowns` is an array of
+             {amountE5, currencyCode, …} and renders as an empty [] in a field
+             summary. A probe whose whole job is to establish what a surface
+             carries has to show the part that matters, so a single record is
+             returned verbatim. The fleet's own driver names and its own
+             amounts — nothing here belongs to anybody else. */
+          sample: Array.isArray(arr) && arr.length && status >= 200 && status < 300
+            ? arr[0] : undefined });
       } catch (e) { out.push({ attempt: a.name, method: a.method, error: String(e).slice(0, 240) }); }
     }
 
