@@ -261,7 +261,9 @@ export function teslaRoutes(app, { q, wrap }) {
     await loadSettings(true);
     const t = await accessToken();
     if (t.err) return res.status(409).json({ error: t.err, granted: false });
-    if (t.refresh) await setSetting('TESLA_REFRESH_TOKEN', t.refresh, true);
+    /* The rotated refresh token is stored by accessToken() itself now — see
+       src/auth/tesla.js. It was stored here and NOT in the other caller, which
+       is exactly the asymmetry that made /api/tesla/status sign the fleet out. */
     const { http } = await import('../src/http.js');
     const { data, status } = await http(`${teslaBase()}/api/1/vehicles`, {
       timeoutMs: 45000, retries: 1, headers: { authorization: `Bearer ${t.token}` } });

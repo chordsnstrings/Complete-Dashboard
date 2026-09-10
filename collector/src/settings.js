@@ -199,6 +199,16 @@ export const SETTING_DEFS = [
      bytes, still compared in constant time, still single-use — consumed on
      the first match — and now it also has an explicit expiry stored beside
      it, which the Map only ever had by accident of process lifetime. */
+  /* WHICH TOKEN HOST TO USE, as a setting rather than a constant.
+     Tesla documents two auth hosts — auth.tesla.com for the authorize step and
+     fleet-auth.prd.vn.cloud.tesla.com for the token exchange — and both answer
+     a token POST. Tesla's edge refuses this server's provider range on one of
+     them, so being able to point at the other without a deploy is the
+     difference between a setting change and an infrastructure project.
+     /api/probe/tesla/egress reports which one this server can reach. */
+  { key: 'TESLA_TOKEN_HOST', group: 'Tesla', label: 'OAuth token host', secret: false,
+    hint: 'Leave blank for the documented default. Set it to '
+      + 'https://auth.tesla.com/oauth2/v3 if the default is refused from this server.' },
   { key: 'TESLA_OAUTH_STATE', group: 'Tesla', label: 'Pending sign-in (set automatically)',
     secret: true,
     hint: 'Written when a sign-in link is minted and cleared the moment it is used. Not '

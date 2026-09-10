@@ -1266,6 +1266,34 @@ export function probeRoutes(app, { wrap }) {
         + 'header set will clear it. Tesla has to allow it, or the calls have to leave from '
         + 'somewhere else.';
 
+    /* IS THERE ANOTHER DOOR? Tesla's own documentation uses TWO auth hosts:
+       the authorize step is documented against auth.tesla.com and the token
+       exchange against fleet-auth.prd.vn.cloud.tesla.com. Both answer a token
+       POST — verified off-network, both give the same JSON refusal to an
+       invalid grant — so they are alternatives rather than one being wrong.
+       If the block is per-hostname rather than per-range, the documented
+       authorize host may be reachable from here when the token host is not,
+       and that is a one-constant fix rather than an infrastructure project. */
+    out.hosts = [];
+    for (const host of ['https://auth.tesla.com/oauth2/v3/token',
+      'https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token']) {
+      try {
+        const sh = shape(await http(host, { method: 'POST', timeoutMs: 20000, retries: 0,
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: 'grant_type=invalid_probe' }));
+        out.hosts.push({ host, status: sh.status, reached_oauth: !sh.blocked_at_edge,
+          answered: sh.answered.slice(0, 90) });
+      } catch (e) {
+        out.hosts.push({ host, error: String(e.message || e).slice(0, 120) });
+      }
+    }
+    const open = out.hosts.filter((h) => h.reached_oauth).map((h) => h.host);
+    out.host_reading = open.length
+      ? `A DOOR IS OPEN: ${open.join(', ')} reaches OAuth from this address. Point TESLA_AUTH `
+        + 'there and the handshake works from production with no proxy and no token-keeper.'
+      : 'Both documented auth hosts are refused from this address, so it is the range and not '
+        + 'the hostname.';
+
     out.reading = out.auth_host?.blocked_at_edge && out.data_host?.blocked_at_edge
       ? 'Both Tesla hosts refuse this address at the edge. No arrangement of tokens fixes that '
         + '— it needs a different egress address, or Tesla allowing this one.'

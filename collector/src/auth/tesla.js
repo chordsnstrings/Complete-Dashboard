@@ -19,9 +19,31 @@
    Tesla routes through `eu` — confirmed by registering this domain against
    both hosts and getting the same account id back either way. */
 import { http } from '../http.js';
-import { get } from '../settings.js';
+import { get, setSetting } from '../settings.js';
 
-export const TESLA_AUTH = 'https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3';
+/* TWO HOSTS, AND TESLA'S OWN DOCUMENTATION USES A DIFFERENT ONE FOR EACH STEP.
+   ──────────────────────────────────────────────────────────────────────────
+   The authorization-code documentation sends the human to
+   `auth.tesla.com/oauth2/v3/authorize` and the code exchange to
+   `fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token`. Both hosts answer a
+   token POST — verified against both with an invalid grant, same JSON refusal
+   — so they are alternatives rather than one being a mistake, and this file
+   used the fleet-auth host for both steps.
+
+   That matters here for a reason beyond tidiness. Tesla's edge refuses this
+   server's whole provider range on the token host (measured: four different
+   request shapes, all 403 with an Akamai block page, from two different
+   DigitalOcean addresses). If the refusal is per-hostname rather than
+   per-range, the other documented host is a way through — so the token host is
+   a SETTING, changeable without a deploy, and `/api/probe/tesla/egress` reports
+   which of the two this server can actually reach. */
+export const TESLA_AUTHORIZE_HOST = 'https://auth.tesla.com/oauth2/v3';
+export const teslaTokenHost = () =>
+  String(get('TESLA_TOKEN_HOST', 'https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3')
+    || 'https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3').trim().replace(/\/+$/, '');
+/* Kept as the token host, because every existing caller means the token
+   endpoint by it. */
+export const TESLA_AUTH = teslaTokenHost();
 
 /* The scopes a READ-ONLY fleet view needs, and deliberately not one more.
    `vehicle_cmds` and `vehicle_charging_cmds` would let this application open
@@ -87,7 +109,7 @@ const refusal = (what, status, data) => {
 export async function partnerToken() {
   const { id, secret } = creds();
   if (!id || !secret) return { err: 'TESLA_CLIENT_ID and TESLA_CLIENT_SECRET are not set' };
-  const { data, status } = await http(`${TESLA_AUTH}/token`, {
+  const { data, status } = await http(`${teslaTokenHost()}/token`, {
     method: 'POST', timeoutMs: 30000, retries: 1,
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: form({ grant_type: 'client_credentials', client_id: id, client_secret: secret,
@@ -108,16 +130,33 @@ export async function accessToken() {
       + 'not the vehicles — until somebody signs in, Tesla returns an empty vehicle list, and '
       + 'that is a fact about the grant rather than about the fleet.' };
   }
-  const { data, status } = await http(`${TESLA_AUTH}/token`, {
+  const { data, status } = await http(`${teslaTokenHost()}/token`, {
     method: 'POST', timeoutMs: 30000, retries: 1,
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: form({ grant_type: 'refresh_token', client_id: id, refresh_token: refresh }),
   });
   if (data?.access_token) {
+    /* STORED HERE, NOT LEFT TO THE CALLER — and the difference is the whole
+       integration staying signed in.
+       ────────────────────────────────────────────────────────────────────
+       Tesla's documentation is explicit: "the refresh token is single use
+       only and expires after 3 months", with a grace period of up to 24 hours
+       on the most recently used one. So every exchange INVALIDATES the token
+       it was given and issues a replacement, and a caller that does not store
+       the replacement has signed this fleet out — quietly, and up to a day
+       later when the grace period lapses.
+
+       It was left to the caller, and one of the two callers dropped it:
+       /api/tesla/status called accessToken() to report whether the grant was
+       live and threw the new token away. The endpoint whose entire job is to
+       answer "are we still connected?" was the thing disconnecting us, and it
+       would have looked like Tesla revoking access.
+
+       A rule nobody can forget beats a rule everybody has to remember, so the
+       rotation is persisted at the one place it arrives. */
+    if (data.refresh_token) await setSetting('TESLA_REFRESH_TOKEN', data.refresh_token);
     return { token: data.access_token,
       expires_in: data.expires_in,
-      /* Tesla rotates the refresh token on some exchanges. A caller that does
-         not store the new one is one exchange away from being signed out. */
       refresh: data.refresh_token || null };
   }
   return refusal('access token refused', status, data);
@@ -128,14 +167,14 @@ export async function accessToken() {
 export function authorizeUrl({ redirectUri, state, scopes = READ_SCOPES }) {
   const { id } = creds();
   if (!id) return null;
-  return `${TESLA_AUTH}/authorize?${form({
+  return `${TESLA_AUTHORIZE_HOST}/authorize?${form({
     response_type: 'code', client_id: id, redirect_uri: redirectUri, scope: scopes, state })}`;
 }
 
 export async function exchangeCode({ code, redirectUri }) {
   const { id, secret } = creds();
   if (!id || !secret) return { err: 'TESLA_CLIENT_ID and TESLA_CLIENT_SECRET are not set' };
-  const { data, status } = await http(`${TESLA_AUTH}/token`, {
+  const { data, status } = await http(`${teslaTokenHost()}/token`, {
     method: 'POST', timeoutMs: 30000, retries: 1,
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: form({ grant_type: 'authorization_code', client_id: id, client_secret: secret,
