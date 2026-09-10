@@ -5715,6 +5715,37 @@ app.get('/sw.js', (_req, res) => {
   return res.send(src);
 });
 
+/* TESLA'S PARTNER PUBLIC KEY, at the exact path Tesla fetches it from.
+   ──────────────────────────────────────────────────────────────────────────
+   Registering a partner account with the Tesla Fleet API requires the domain
+   to publish an EC public key at
+   `/.well-known/appspecific/com.tesla.3p.public-key.pem`, and Tesla fetches it
+   itself before it will accept the registration.
+
+   Served by hand rather than by express.static because express.static's
+   default `dotfiles: 'ignore'` 404s every path with a dot-segment, and
+   `.well-known` is one. Turning dotfiles on globally would publish every
+   dotfile under api/public, which is a much larger promise than this needs.
+
+   THIS FILE IS A PUBLIC KEY AND IS MEANT TO BE PUBLIC — it is not a
+   credential and CLAUDE.md's rule about secrets does not apply to it. Its
+   private half is not in this repository and is not on this server: the
+   Fleet API's read surface never needs it, and signing vehicle COMMANDS is
+   the only thing that would. If a later change needs it, it belongs in the
+   app's environment, never in the checkout. */
+app.get('/.well-known/appspecific/com.tesla.3p.public-key.pem', (_req, res) => {
+  let pem;
+  try {
+    pem = readFileSync(
+      join(__dir, 'public', '.well-known', 'appspecific', 'com.tesla.3p.public-key.pem'), 'utf8');
+  } catch { return res.status(404).end(); }
+  res.setHeader('Content-Type', 'application/x-pem-file');
+  /* Tesla re-fetches this to verify the domain still owns the key, so it must
+     not be answered from a stale cache after a rotation. */
+  res.setHeader('Cache-Control', 'no-cache, max-age=0, must-revalidate');
+  return res.send(pem);
+});
+
 app.use(express.static(join(__dir, 'public'), {
   etag: true,
   setHeaders(res, path) {
