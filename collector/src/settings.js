@@ -153,8 +153,19 @@ export const SETTING_DEFS = [
   // Single-use: the portal rotates it on every exchange and invalidates the one
   // presented, so the collector writes the successor back here. Per fleet,
   // because a token is issued to one fleet owner and the two fleets have two.
-  { key: 'BOLT_REFRESH_TOKEN_ECOSINE', group: 'Bolt', label: 'Portal refresh token — Ecosine', secret: true, hint: 'Rotates on use; the collector keeps it current. Paste a fresh one only when it has expired.' },
-  { key: 'BOLT_REFRESH_TOKEN_EGARI', group: 'Bolt', label: 'Portal refresh token — Egari', secret: true, hint: 'Rotates on use; the collector keeps it current. Paste a fresh one only when it has expired.' },
+  /* "Rotates on use; the collector keeps it current" was the hint on both of
+     these, and it is measured false. Spending a token against
+     fleetOwnerPortal/getAccessToken on 2026-09-10 returned an access token and
+     NO new refresh token — `code: 0`, and the refresh token that went in is the
+     one still in hand. So nothing keeps it current: the JWT carries a hard
+     seven-day life in its own claims (iat 13:59 on the 10th, exp 13:59 on the
+     17th) and when that runs out somebody re-captures it from the portal.
+
+     The difference is a week of collection. A hint saying the collector
+     maintains it tells an operator there is nothing to diarise, and the first
+     they would learn otherwise is Bolt going quiet. */
+  { key: 'BOLT_REFRESH_TOKEN_ECOSINE', group: 'Bolt', label: 'Portal refresh token — Ecosine', secret: true, hint: 'Hard 7-day life and it does NOT rotate — re-capture from the Bolt portal when it expires. The JWT carries its own exp; the Sources page counts it down.' },
+  { key: 'BOLT_REFRESH_TOKEN_EGARI', group: 'Bolt', label: 'Portal refresh token — Egari', secret: true, hint: 'Hard 7-day life and it does NOT rotate — re-capture from the Bolt portal when it expires. The JWT carries its own exp; the Sources page counts it down.' },
 
   { key: 'HOTEL_TOKEN', group: 'Hotel (ecosine.ae)', label: 'Operations manager bearer token', secret: true },
   { key: 'HOTEL_DOMAIN', group: 'Hotel (ecosine.ae)', label: 'x-domain header', secret: false },
