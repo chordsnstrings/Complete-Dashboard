@@ -47,24 +47,48 @@
    four cannot drift from it again.
 
    ── HOW A DANGLING ONLINE IS CLOSED ─────────────────────────────────────
-   At the earlier of now() and the end of the Dubai day the ONLINE opened in,
-   and it is marked `open_ended` so a caller can tell a closed span from one
-   that is still running.
+   At the earliest of THREE bounds, and the span carries which one closed it:
 
-   now() alone is not enough, and the difference is not academic: 4 of those
-   60 drivers dangle on a day that is not today, and closed at now() each of
-   them would claim every hour since — days of invented availability, in the
-   direction that inflates supply. The end of its own Dubai day bounds the
-   claim to the day the event is evidence about, which is also the grain every
-   reader of these spans draws at (driver_day rows, a day band, an hour-of-week
-   heatmap).
+     now()                        it cannot have run into the future
+     the end of its own Dubai day the day is the grain every reader of these
+                                  spans draws at — driver_day rows, a day
+                                  band, an hour-of-week heatmap
+     the last successful          WE CANNOT CLAIM SOMEBODY WAS ONLINE AFTER
+     uber_timeline collection     THE LAST MOMENT WE ACTUALLY ASKED UBER
 
-   It is still a claim rather than a measurement, and the residual error runs
-   the wrong way for one shape: a driver whose feed goes quiet mid-afternoon
-   and does not come back is credited to midnight. That is why open_ended is
-   carried out rather than swallowed — a surface that must not overstate can
-   refuse it, and /api/driver/day says on the page that the day is still
-   being collected.
+   The third is the one that makes the other two honest. The timeline runs on
+   UBER_TIMELINE_CRON — every three hours as shipped — so at any moment the
+   most recent hours of today have not been fetched. Closing a dangling ONLINE
+   at now() credits a driver with all of them: it converts "we have not asked
+   yet" into "they were working", which is the exact substitution this
+   dashboard exists to refuse. 56 of the 60 dangling drivers measured on
+   2026-09-10 were dangling on TODAY, so this is the common case and not the
+   corner: at a three-hourly cadence it is up to three hours of invented
+   availability per driver, and about 84 driver-hours across those 56 at the
+   mean gap. The figure now grows as collection catches up, which is the
+   self-healing direction and the same one api/online_routes.js's
+   `awaiting_feed` runs in.
+
+   PER FLEET, and with no cross-fleet fallback. src/sources/uber_timeline.js
+   stamps both the events (:143) and the run row (:290) with the same `o.fleet`,
+   so the two cannot drift. A fleet whose timeline has never completed a run
+   has no evidence of when it was last asked, so it gets no ceiling and falls
+   back to the first two bounds — the coordinator's rule, and the only one
+   available: borrowing another fleet's collection clock would be a claim about
+   a collection that never happened.
+
+   A run that finished BEFORE the event does not bind either. That combination
+   means we hold an event we could not have fetched, which is a contradiction
+   in the bookkeeping rather than evidence about the driver, and resolving it
+   by deleting the span would throw away the one thing we do know.
+
+   ── WHAT IS LEFT AFTER ALL THREE ───────────────────────────────────────
+   A dangling ONLINE on a day the collector has since covered many times over
+   is still run to that day's midnight: the ceiling is above the day, so it
+   does not bind. That is the 4-of-60 case, and the honest reading of it is
+   that we asked repeatedly and Uber never sent anything later. It remains a
+   claim, so `closed_by` says 'day' and `open_ended` stays true, and every
+   surface that must not overstate can refuse it on that flag alone.
 
    ── WHY THE JOB STREAM IS UNIONED IN ────────────────────────────────────
    Uber does not assign a job to an offline driver, so the interval from a
@@ -98,6 +122,11 @@ const DAY_END = (col) =>
    open_ended)`. Returned without a leading WITH and without a trailing comma
    so a caller can drop it into a larger WITH list.
 
+   Each span also carries `closed_by`: 'event' when a later status event or a
+   job's own last event closed it, and otherwise which of the three bounds
+   above was the binding one — 'collection', 'now' or 'day'. A reader can then
+   tell "still online as far as we know" from "we stopped asking".
+
    `where`  bounds driver_timeline_event. It is applied to BOTH streams, so it
             must be written in terms the job rows can also answer — a range on
             `at`, an id set, and nothing about `status`.
@@ -111,20 +140,54 @@ const DAY_END = (col) =>
             for two, because the OFFLINE that ended the shift carried the
             other fleet_id and was filtered away. */
 export function onlineSpansSql({ where = 'TRUE', keep = 'TRUE' } = {}) {
-  return `ev AS (
+  const CAP2 = `least(now(), ${DAY_END('at')})`;
+  const CAP3 = `least(now(), ${DAY_END('at')}, feed_at)`;
+  /* feed_at binds only when it is a real bound: a run recorded as finishing
+     before the event it would truncate is a contradiction in the bookkeeping,
+     not evidence about the driver. */
+  const CEILING = 'feed_at IS NOT NULL AND feed_at > at';
+  return `feed AS (
+     /* When this fleet's timeline last completed. status <> 'error' rather
+        than status = 'ok', because a PARTIAL run did reach the provider and
+        did collect something — refusing to credit it would push the ceiling
+        backwards on exactly the runs that were working hardest. A row with no
+        finished_at is a run still going, which has reached nothing yet.
+
+        Named feed_fleet/feed_at rather than fleet_id/finished_at so that a
+        caller's own predicate — api/supply_routes.js passes one naming bare
+        platform and fleet_id — cannot become ambiguous against this join. */
+     SELECT fleet_id AS feed_fleet, max(finished_at) AS feed_at
+       FROM collection_run
+      WHERE source = 'uber_timeline' AND status <> 'error'
+        AND finished_at IS NOT NULL
+      GROUP BY 1),
+   ev AS (
      /* PARTITIONED BY ACCOUNT, and that is correctness rather than tidiness:
         one ordering across two Uber accounts closes an ONLINE on account A
         with an OFFLINE on account B and yields spans belonging to neither. */
-     SELECT driver_ext_id, at, status, platform, fleet_id,
-            lead(at) OVER (PARTITION BY driver_ext_id ORDER BY at) AS next_at
-       FROM driver_timeline_event
-      WHERE kind = 'status' AND status <> '' AND (${where})),
+     /* The LEFT JOIN cannot multiply rows — feed is grouped by fleet, so it
+        holds at most one row per fleet_id. That is worth stating, because a
+        join inside an aggregate that DOES multiply is this codebase's most
+        expensive recurring trap. */
+     SELECT dte.driver_ext_id, dte.at, dte.status, dte.platform, dte.fleet_id,
+            lead(dte.at) OVER (PARTITION BY dte.driver_ext_id ORDER BY dte.at) AS next_at,
+            f.feed_at
+       FROM driver_timeline_event dte
+       LEFT JOIN feed f ON f.feed_fleet = dte.fleet_id
+      WHERE dte.kind = 'status' AND dte.status <> '' AND (${where})),
    status_span AS (
-     /* coalesce, not a next_at IS NOT NULL filter. See the header: the one it
-           replaces deleted the most recent ONLINE of 60 of 89 drivers. */
+     /* coalesce, not a next_at IS NOT NULL filter. See the header: the filter
+        this replaces deleted the most recent ONLINE of 60 of 89 drivers. */
      SELECT driver_ext_id, at AS span_start,
-            coalesce(next_at, least(now(), ${DAY_END('at')})) AS span_end,
-            next_at IS NULL AS open_ended
+            coalesce(next_at,
+                     CASE WHEN ${CEILING} THEN ${CAP3} ELSE ${CAP2} END) AS span_end,
+            next_at IS NULL AS open_ended,
+            /* WHICH bound closed it, so a reader can tell "still online as far
+               as we know" from "this is where we stopped asking". */
+            CASE WHEN next_at IS NOT NULL THEN 'event'
+                 WHEN ${CEILING} AND feed_at < ${CAP2} THEN 'collection'
+                 WHEN now() < ${DAY_END('at')} THEN 'now'
+                 ELSE 'day' END AS closed_by
        FROM ev
       WHERE status = 'ONLINE' AND (${keep})),
    job_row AS (
@@ -139,10 +202,13 @@ export function onlineSpansSql({ where = 'TRUE', keep = 'TRUE' } = {}) {
             (array_agg(fleet_id ORDER BY at))[1] AS fleet_id
        FROM job_row GROUP BY driver_ext_id, job_ext_id),
    piece AS (
-     SELECT driver_ext_id, span_start, span_end, open_ended FROM status_span
+     SELECT driver_ext_id, span_start, span_end, open_ended, closed_by
+       FROM status_span
       WHERE span_end > span_start
       UNION ALL
-     SELECT driver_ext_id, span_start, span_end, false FROM job_span
+     /* A job interval ends on an event we actually hold, so it needs no
+        ceiling and is never open-ended. */
+     SELECT driver_ext_id, span_start, span_end, false, 'event' FROM job_span
       WHERE span_end > span_start AND (${keep})),
    edge AS (
      /* Gaps and islands. A piece opens a new island only when it starts after
@@ -150,22 +216,25 @@ export function onlineSpansSql({ where = 'TRUE', keep = 'TRUE' } = {}) {
         not the previous row, because a long heartbeat span contains several
         short job intervals and "previous row" would reopen the island on each
         of them. Touching counts as continuous, so the test is <= and not <. */
-     SELECT driver_ext_id, span_start, span_end, open_ended,
+     SELECT driver_ext_id, span_start, span_end, open_ended, closed_by,
             CASE WHEN span_start <= max(span_end) OVER (
                    PARTITION BY driver_ext_id ORDER BY span_start, span_end
                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
                  THEN 0 ELSE 1 END AS opens
        FROM piece),
    islanded AS (
-     SELECT driver_ext_id, span_start, span_end, open_ended,
+     SELECT driver_ext_id, span_start, span_end, open_ended, closed_by,
             sum(opens) OVER (PARTITION BY driver_ext_id ORDER BY span_start, span_end
                              ROWS UNBOUNDED PRECEDING) AS grp
        FROM edge),
    spans AS (
      /* bool_or is exact rather than approximate here: every piece is bounded
-        above by least(now(), end of its own Dubai day), so an open-ended piece
-        always supplies its island's max end. */
+        above by the three-way least(), so an open-ended piece always supplies
+        its island's max end — and closed_by is read off that same piece rather
+        than folded, because how an island ENDS is a fact about one of its
+        members and not about the set. */
      SELECT driver_ext_id, min(span_start) AS span_start, max(span_end) AS span_end,
-            bool_or(open_ended) AS open_ended
+            bool_or(open_ended) AS open_ended,
+            (array_agg(closed_by ORDER BY span_end DESC, open_ended DESC))[1] AS closed_by
        FROM islanded GROUP BY driver_ext_id, grp)`;
 }

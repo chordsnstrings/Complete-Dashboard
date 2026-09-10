@@ -276,6 +276,53 @@ administers it.
 
 ---
 
+## The dropped online tail — PROVEN ON PRODUCTION, 2026-09-10
+
+| claim | state | the proof |
+|---|---|---|
+| A dangling ONLINE is kept, not deleted | **proven** | `/api/driver/day` for 369dd9c1… on 2026-09-10 returns one span `{515 → 748, open_ended: true}`; before the fix, two spans totalling 84 min ending at 09:59 |
+| Every trip now falls inside the online record | **proven** | trips at 515→551, 599→627, 644→663 all inside 515→748 |
+| The span says which bound closed it | **proven** | `closed_by` ∈ `now` / `day` / `collection`, carried to the page and named in the hover |
+| The page says when the day is still filling | **proven** | `collection: { last_run_at, collected_to_min 617, last_event_min 605, complete: false, why }` |
+| The ratio refuses rather than exceeding 100% | **written, test-proven, not yet seen on a live 100%+ case** | the overlap fixture reproduces 167% and the guard refuses it; no production driver has been observed over 100% since the fix |
+| `driver_day.online_min` is written long, not short | **written and deployed, not yet re-measured** | `src/rollup.js:1070` uses the shared builder; the nightly rollup has not run since the deploy |
+
+**Not proven, and stated as such:** the ~84 driver-hours a day that closing at
+`now()` would have invented across the 56 drivers dangling on today is
+**derived from the cron cadence and the dangling count, not measured**. The
+probe reports the tail that was dropped, not the tail that would have been
+invented. Measuring it needs a second aggregate in
+`/api/probe/uber/timeline` — last successful run against each dangling event.
+
+**A residual that the ceiling does NOT close, kept visible rather than
+claimed:** 4 of the 60 dangle on a day the collector has long since covered, so
+the collection ceiling sits above that day and cannot bind. Those spans still
+run to their own midnight, `closed_by: 'day'`, `open_ended: true`. Pinned as a
+test rather than described as a caveat.
+
+## Tesla — REGISTERED, AND BLOCKED ON A HUMAN, 2026-09-10
+
+| claim | state | the proof |
+|---|---|---|
+| The app's credentials are valid | **proven** | partner token issued, 8 h life, both `eu` and `na` audiences |
+| The partner domain is registered | **proven** | `POST /api/1/partner_accounts` returned account `9cafefcf…`, tier `pay_as_you_go`; `GET /partner_accounts/public_key?domain=…` returns our key |
+| Tesla can fetch our public key | **proven** | `https://…/.well-known/appspecific/com.tesla.3p.public-key.pem` serves it; Tesla accepted the registration on that basis |
+| The fleet's Teslas are identified | **proven** | 82 — 72 Model Y, 10 Model 3; 78 carry a VIN, Tesla's own join key |
+| Tesla will tell us anything about them | **NO — blocked** | a partner token answers `GET /api/1/vehicles` with 200 and **count 0**. It authenticates the application, not an account. |
+
+**The one remaining step is not ours:** somebody signed into the Tesla account
+that owns the cars must approve the app once, at the link
+`/api/tesla/connect` mints. Until then every Tesla-native figure is absent with
+that reason, which is what `/api/tesla/status` returns.
+
+**Two facts that bound what this can ever become**, from Tesla's own docs:
+there is **no per-trip, drive or odometer history in the Fleet API at all** —
+history accrues only forward from the day streaming is switched on — and the
+**UAE is not on Tesla's payment-supported country list**, with a default
+billing limit of $0.
+
+---
+
 ## How to re-check any row here without re-reading the audit
 
 Every proof in the Batch 1 table is a single anonymous curl with `&_=$RANDOM`

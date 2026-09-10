@@ -2123,6 +2123,12 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .dday-ontot{font-family:"IBM Plex Mono",monospace;font-size:var(--t4);color:var(--ink-3);flex:0 0 auto}
 .dday-online{position:relative;flex:1 1 auto;height:8px;background:var(--surface-2);border-radius:4px}
 .dday-online>i{position:absolute;top:0;height:8px;border-radius:4px;background:var(--s1);opacity:.55}
+/* An OPEN-ENDED online span: the last ONLINE Uber sent, with no closing event
+   yet. It is drawn to the earliest of now, the end of the day and the last
+   moment we actually asked Uber — so its right-hand edge is where the RECORD
+   stops, not where the driver did. The fade says that; a hard edge would make
+   the two look like the same claim. The hover names which bound it was. */
+.dday-online>i.open{background:linear-gradient(90deg,var(--s1) 0%,var(--s1) 65%,transparent 100%)}
 /* Where the shift started, under the bar that says when it did. Indented to
    the same column as the bar itself so it reads as a caption on that row and
    not as a new fact about the day. */

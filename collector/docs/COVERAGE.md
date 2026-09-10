@@ -905,6 +905,21 @@ driver's 222 tracker fixes.
 * An express fixture that promises a `content-length` it never sends poisons the
   keep-alive socket for the *next* request — a fixture bug wearing a product
   bug's clothes, one run in three.
+* **`WHERE next_at IS NOT NULL` over a `lead()` deletes the newest fact.** Uber
+  sends ONLINE as a repeated heartbeat and stops sending it while a driver is on
+  a job, so the span with no successor is the one belonging to somebody
+  currently working. It was in four of the five places that built a span and it
+  cost 125 driver-hours in one day; `api/online_span_sql.js` is the one
+  definition now. Before writing a span from an event stream, check whether the
+  opening event is a TRANSITION or a HEARTBEAT.
+* **An open interval must not be closed at `now()` when the collector's clock
+  is behind it.** Repairing the above by running the last ONLINE to `now()`
+  swaps one invention for another: everything between the last collection and
+  now becomes availability nobody asked about. Close an open interval at the
+  earliest of now, the grain being drawn, **and the last successful run of the
+  feed that would have told you otherwise** — and carry out which bound it was,
+  because "still running" and "we stopped asking" are opposite claims that look
+  identical on a chart.
 * `/api/driver/day` derives its position feed from **that day's trips**
   (`api/driver_routes.js`), so a driver with zero trips gets `fixes: 0` — which
   is exactly the cohort any "online but idle" question is about. Take the plate
@@ -1722,6 +1737,94 @@ and any notion of a scheduled or rostered start — the expected start time is
 the reader's own, held in `localStorage` under `online-time:start` and shared
 by both shells.
 
+**ONLINE IS A HEARTBEAT, NOT A TRANSITION — and it stops during a job.**
+Measured on production 2026-09-10. `kind='status'` holds only ONLINE and
+OFFLINE; job progress is a separate `kind='job'` stream keyed by `job_ext_id`
+(DJ_ASSIGNED / DJ_PICKUP_ARRIVED / DJ_PICKUP / DJ_COMPLETED / DJ_CANCELED /
+DJ_UNASSIGNED). Uber REPEATS ONLINE — 132 rows for one driver in one day,
+90,389 fleet-wide over thirty days — so an ONLINE is almost never followed by
+an OFFLINE, it is followed by the next ONLINE. And it **stops for the length of
+a booking**: the status stream goes quiet while the driver is dispatched and
+resumes afterwards.
+
+Two consequences, and the product had both wrong in four places:
+
+- The last ONLINE of a driver's stream has no successor, so a span built as
+  `ONLINE → lead(at)` with `WHERE next_at IS NOT NULL` **deletes it** — and
+  because the heartbeat stops when work starts, the deleted event is the one
+  immediately before the work. `GET /api/probe/uber/timeline` counts it live in
+  `dangling_online`: **60 of 89 drivers, 56 of them dated today, 7,518 minutes
+  (125 driver-hours) dropped from that single day.** Driver
+  `369dd9c1-ae0a-4526-8d46-d91a8c217121` went online 09:59:15, was dispatched
+  six seconds later, and `/api/driver/day` drew him online 08:35→09:59 and
+  printed "99% of online time" — 83 minutes of job time taken from the whole
+  day, divided into an 84-minute window that stopped before two of his three
+  trips.
+- A `kind='job'` interval is **direct evidence of being online**: Uber does not
+  dispatch an offline driver, and those intervals cover exactly the stretches
+  the heartbeat omits.
+
+`api/online_span_sql.js` is now the single definition — dangling ONLINE kept,
+closed at the bound described below, marked `open_ended` and carrying
+`closed_by`; job intervals unioned in; the two de-overlapped so nothing is
+counted twice; OFFLINE still closes. `api/online_routes.js` had it right all
+along and says why: *"A dangling ONLINE … still starts a span. Its start is a
+fact even when its end is not."*
+
+**A dangling ONLINE is closed at the earliest of three bounds**, and the span
+says which one did it:
+
+| bound | `closed_by` | why it exists |
+|---|---|---|
+| `now()` | `now` | it cannot have run into the future |
+| end of its own Dubai day | `day` | the day is the grain every reader draws at |
+| last successful `uber_timeline` `collection_run.finished_at`, **per fleet** | `collection` | **we cannot claim somebody was online after the last moment we actually asked Uber** |
+
+The third is the one that makes the other two honest, and it is the one that
+matters most: **56 of the 60 dangling drivers were dangling on TODAY**. The
+timeline runs on `UBER_TIMELINE_CRON`, every three hours as shipped, so at any
+moment the most recent hours of today have not been fetched. Closing at `now()`
+credits a driver with all of them — it converts *"we have not asked yet"* into
+*"they were working"*, which is the exact substitution this dashboard exists to
+refuse. At a three-hourly cadence that is up to three hours per driver and, at
+the mean gap across those 56, on the order of **84 driver-hours a day** (derived
+from the cron and the dangling count, not measured — the probe reports the
+dropped tail, not the invented one). The figure now grows as collection catches
+up, which is the self-healing direction `awaiting_feed` already runs in.
+
+*Per fleet, with no cross-fleet fallback.* `src/sources/uber_timeline.js` stamps
+both the events (:143) and the run row (:290) with the same `o.fleet`, so the
+two cannot drift. A fleet whose timeline has never completed a run has no
+evidence of when it was last asked, so it gets no ceiling and falls back to the
+first two bounds — borrowing another fleet's collection clock would be a claim
+about a collection that never happened. `status <> 'error'`, not `= 'ok'`: a
+`partial` run did reach the provider and did collect something, while an `error`
+row must never push the ceiling forward on the strength of a run that collected
+nothing.
+
+*A run that finished BEFORE the event does not bind either.* That combination
+means we hold an event we could not have fetched — a contradiction in the
+bookkeeping rather than evidence about the driver — and resolving it by
+truncating the span would throw away the one thing we do know.
+
+**The residual, stated rather than hidden.** The ceiling does **not** close the
+other case: a dangling ONLINE on a day the collector has since covered many
+times over sits below the ceiling, so the ceiling cannot bind and the span still
+runs to that day's midnight. That is the **4 of 60** on a day that is not today,
+and the honest reading is that we asked repeatedly and Uber never sent anything
+later — which is evidence, but not proof that the driver stayed online. So it
+remains a claim: `closed_by` says `day`, `open_ended` stays true, and every
+surface that must not overstate can refuse it on that flag alone.
+`/api/driver/day` carries `collection` — the last run, the minute of the day it
+reached, and whether the day is complete — so the page says *"this day is still
+being collected"* rather than letting a band that stops read as a driver who
+stopped. **That sentence is scoped to the person's own fleets, exactly as the
+ceiling is**: a global `max(finished_at)` would print "collected to 22:17"
+beside a band that stops at 10:17 because that is when THAT fleet was last
+asked, which is the page contradicting itself in two adjacent lines.
+`test/dangling_online.test.mjs` pins all of it — every bound, the per-fleet
+independence in both directions, and this residual.
+
 ### Traps this added to the list
 
 - **A collector's window is in the collector's units.** Restating a rolling
@@ -1738,6 +1841,10 @@ by both shells.
   *currently* lists. `trip` is who drove. For anything about attendance the
   answer is the union, and taking ids from the roster alone silently drops the
   people most likely to be worth a phone call.
+- **A repeated status event is not a transition, and `WHERE next_at IS NOT
+  NULL` throws away the newest fact you hold.** See above. The filter reads as
+  hygiene — "drop the incomplete row" — and what it actually drops is the most
+  recent thing the provider told you about every currently-working driver.
 - **`driver_timeline_event` needs `driver_ext_id` bound.** Its only useful
   index leads on the id (`schema_v37:56`); the other is on the Dubai-DATE
   expression, so a raw `at` range matches neither and scans ~197k rows.

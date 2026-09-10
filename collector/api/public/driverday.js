@@ -161,8 +161,11 @@ export function onlineShare({ online = [], trips = [], collection = null } = {})
        from a hard-coded 'uber', so a second channel filing one tomorrow does
        not leave this sentence lying. */
     const feeds = new Set(collection?.platforms || []);
+    /* Named with sourceLabel, never with the database key. ui.js's SOURCE_LABEL
+       exists because "fms" and "cabman" were rendered raw as panel headings,
+       and a reason sentence is no more the place for a key than a heading is. */
     const noFeed = [...new Set(uncovered.map((u) => u.platform).filter(Boolean))]
-      .filter((pf) => !feeds.has(pf)).sort();
+      .filter((pf) => !feeds.has(pf)).sort().map((pf) => sourceLabel(pf));
     if (noFeed.length) {
       return { ...base, basis: 'refused', pct: null,
         why: `${listWords(noFeed)} file no availability`,
@@ -293,15 +296,23 @@ export async function renderDriverDay(root, id, day) {
   if (online.length) {
     const ob = el('div', 'dday-online');
     /* An OPEN-ENDED span is one whose closing event has not arrived: the last
-       ONLINE Uber sent, with nothing after it yet. It is drawn to the earlier
-       of now and the end of the day and says so on hover, because "online
-       until 14:00" and "online at 14:00, and that is the last we were told"
-       are different claims and the bar looks identical. */
+       ONLINE Uber sent, with nothing after it yet. "Online until 14:00" and
+       "online at 14:00, and that is the last we were told" are different
+       claims and the bar looks identical, so the hover says WHICH BOUND ended
+       it — the three are not interchangeable and only one of them is about the
+       driver. 'collection' in particular is a fact about us: it is where we
+       stopped asking Uber, not where they stopped working. */
+    const endWhy = (o) => ({
+      collection: `online from ${hhmm(o.s)}; ${hhmm(o.e)} is the last moment we asked Uber `
+        + 'about this driver, not a moment they stopped',
+      now: `online from ${hhmm(o.s)}; no later event has arrived, so this is drawn to now`,
+      day: `online from ${hhmm(o.s)}; no later event has ever arrived, so this is drawn to the `
+        + 'end of the day',
+    }[o.closed_by] || `online from ${hhmm(o.s)}; no later event has arrived, so this is drawn `
+      + `to ${hhmm(o.e)}`);
     ob.innerHTML = online.map((o) =>
-      `<i style="left:${pct(o.s)}%;width:${pct(Math.max(2, o.e - o.s))}%" title="${
-        o.open_ended
-          ? `online from ${esc(hhmm(o.s))}; no later event has arrived, so this is drawn to ${esc(hhmm(o.e))}`
-          : `online ${esc(hhmm(o.s))}–${esc(hhmm(o.e))}`}"></i>`).join('');
+      `<i class="${o.open_ended ? 'open' : ''}" style="left:${pct(o.s)}%;width:${pct(Math.max(2, o.e - o.s))}%" title="${
+        o.open_ended ? esc(endWhy(o)) : `online ${esc(hhmm(o.s))}–${esc(hhmm(o.e))}`}"></i>`).join('');
     const row = el('div', 'dday-onrow');
     row.innerHTML = '<span class="dday-onlab">online per Uber</span>';
     row.append(ob);

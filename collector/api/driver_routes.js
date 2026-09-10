@@ -2111,7 +2111,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          SELECT generate_series((span_start AT TIME ZONE 'Asia/Dubai')::date,
                                 (span_end AT TIME ZONE 'Asia/Dubai')::date,
                                 interval '1 day')::date AS d,
-                span_start, span_end, open_ended
+                span_start, span_end, open_ended, closed_by
            FROM spans)
        SELECT to_char(d, 'YYYY-MM-DD') AS day,
               greatest(0, extract(epoch FROM (
@@ -2129,7 +2129,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                  day it was actually drawn on. */
               (open_ended
                AND (span_end AT TIME ZONE 'Asia/Dubai') <= d::timestamp + interval '1 day')
-                AS open_ended
+                AS open_ended,
+              CASE WHEN open_ended
+                    AND (span_end AT TIME ZONE 'Asia/Dubai') <= d::timestamp + interval '1 day'
+                   THEN closed_by END AS closed_by
          FROM days
         ORDER BY 1, 2`, p);          // same $1..$3 order as TW, deliberately
 
@@ -2140,7 +2143,8 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       /* open_ended travels with the span: a bar that stops because the record
          stops is not the same claim as one that stops because the driver went
          offline, and only the caller can decide how to draw the difference. */
-      onlineByDay.get(r.day).push({ s: r.s, e: r.e, open_ended: r.open_ended });
+      onlineByDay.get(r.day).push({ s: r.s, e: r.e,
+        open_ended: r.open_ended, closed_by: r.closed_by });
     }
     /* Attached to the day rows the chart already draws, and only where the day
        HAS availability: a day with none must render as it always did rather
@@ -2326,7 +2330,15 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                  driver. */
               (open_ended
                AND (span_end AT TIME ZONE 'Asia/Dubai') <= $2::timestamp + interval '1 day')
-                AS open_ended
+                AS open_ended,
+              /* And WHICH bound closed it — 'collection' where the span stops
+                 at the last moment we actually asked Uber, 'now' where it is
+                 still running as far as we know, 'day' where only the calendar
+                 stopped it. Carried only on the spans that are open-ended in
+                 this day, because for the rest there is nothing to explain. */
+              CASE WHEN open_ended
+                    AND (span_end AT TIME ZONE 'Asia/Dubai') <= $2::timestamp + interval '1 day'
+                   THEN closed_by END AS closed_by
          FROM spans
         WHERE span_end > (($2::date)::timestamp AT TIME ZONE 'Asia/Dubai')
           AND span_start < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
@@ -2352,17 +2364,29 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        'error' rather than status = 'ok', so a partial run — which did collect
        something — still counts as having reached the day. */
     const [feed] = await q(
-      /* The day alone, not the driver's ids: this asks about the FEED, which
-         has one clock for everybody. Passing the whole of `p` to a statement
-         that never mentions $1 leaves that parameter with no inferable type
-         and Postgres refuses the query outright. */
-      `SELECT max(finished_at) AS last_run_at,
+      /* SCOPED TO THIS PERSON'S OWN FLEETS, because the ceiling that bounds
+         their online band is (api/online_span_sql.js). The collector runs per
+         fleet and files a collection_run row per fleet, so a global max()
+         here would print "collected to 22:17" beside a band that stops at
+         10:17 because that is when THIS fleet was last asked — the page
+         contradicting itself in two adjacent sentences.
+
+         Falls back to the feed as a whole when we hold no timeline events for
+         this person at all: then there is no fleet to scope to, and the
+         question "has the collector reached this day" still has an answer. */
+      `WITH fl AS (
+         SELECT DISTINCT fleet_id FROM driver_timeline_event
+          WHERE driver_ext_id = ANY($1))
+       SELECT max(finished_at) AS last_run_at,
               greatest(0, least(1440, floor(extract(epoch FROM (
-                least(max(finished_at), (($1::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai'))
-                - (($1::date)::timestamp AT TIME ZONE 'Asia/Dubai')))/60)))::int
+                least(max(finished_at), (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai'))
+                - (($2::date)::timestamp AT TIME ZONE 'Asia/Dubai')))/60)))::int
                 AS collected_to_min
          FROM collection_run
-        WHERE source = 'uber_timeline' AND status <> 'error'`, [day]);
+        WHERE source = 'uber_timeline' AND status <> 'error'
+          AND finished_at IS NOT NULL
+          AND (NOT EXISTS (SELECT 1 FROM fl)
+               OR fleet_id IN (SELECT fleet_id FROM fl))`, p);
     const [reach] = await q(
       `SELECT max(at) AS last_event_at,
               max((extract(hour FROM at AT TIME ZONE 'Asia/Dubai') * 60
