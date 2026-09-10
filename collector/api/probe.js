@@ -1212,6 +1212,60 @@ export function probeRoutes(app, { wrap }) {
         { timeoutMs: 20000, retries: 0 }));
     } catch (e) { out.data_host = { error: String(e.message || e).slice(0, 200) }; }
 
+    /* WHICH VARIABLE IS ACTUALLY BEING JUDGED — the address, or how the
+       request looks?
+       ──────────────────────────────────────────────────────────────────────
+       The working comparison was made from a different network AND a
+       different client, so it changed two things at once and proved neither.
+       Akamai scores both, and only one of them is fixable in code: if some
+       shape of request gets through from THIS address, the fix is a header
+       set; if none does, the address is the rule and only Tesla can move it.
+
+       So the same request is sent several ways from the same place, and the
+       answer is read off which — if any — reaches OAuth. A JSON refusal means
+       it got through; an HTML page means it did not. */
+    out.variants = [];
+    const VARIANTS = [
+      { name: 'ours', headers: {} },
+      /* No user-agent at all. Some rules key on absence, some on the value. */
+      { name: 'no-user-agent', headers: { 'user-agent': '' } },
+      /* What curl sends, which is what reached OAuth from another network. */
+      { name: 'curl-like', headers: { 'user-agent': 'curl/8.5.0', accept: '*/*' } },
+      /* A full browser header set. If the rule is a bot-detection score rather
+         than an address, this is the shape most likely to clear it. */
+      { name: 'browser-like',
+        headers: {
+          'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
+            + '(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+          accept: 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9',
+          origin: 'https://fleet-dashboard-wpeqb.ondigitalocean.app',
+          referer: 'https://fleet-dashboard-wpeqb.ondigitalocean.app/',
+          'sec-ch-ua': '"Chromium";v="128", "Not;A=Brand";v="24"',
+          'sec-ch-ua-mobile': '?0', 'sec-ch-ua-platform': '"macOS"',
+        } },
+    ];
+    for (const v of VARIANTS) {
+      try {
+        const r = await http('https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token', {
+          method: 'POST', timeoutMs: 20000, retries: 0,
+          headers: { 'content-type': 'application/x-www-form-urlencoded', ...v.headers },
+          body: 'grant_type=invalid_probe' });
+        const sh = shape(r);
+        out.variants.push({ variant: v.name, status: sh.status,
+          reached_oauth: !sh.blocked_at_edge, answered: sh.answered.slice(0, 90) });
+      } catch (e) {
+        out.variants.push({ variant: v.name, error: String(e.message || e).slice(0, 120) });
+      }
+    }
+    const through = out.variants.filter((v) => v.reached_oauth).map((v) => v.variant);
+    out.variant_reading = through.length
+      ? `FIXABLE IN CODE: ${through.join(', ')} reached OAuth from this address, so the rule is `
+        + 'about how the request looks rather than where it comes from.'
+      : 'Every shape of request is refused from this address, so the rule is the ADDRESS and no '
+        + 'header set will clear it. Tesla has to allow it, or the calls have to leave from '
+        + 'somewhere else.';
+
     out.reading = out.auth_host?.blocked_at_edge && out.data_host?.blocked_at_edge
       ? 'Both Tesla hosts refuse this address at the edge. No arrangement of tokens fixes that '
         + '— it needs a different egress address, or Tesla allowing this one.'
