@@ -4049,20 +4049,44 @@ app.get('/api/auth', (_, r) => {
     detail: 'BOLT_CLIENT_ID is not entitled to company_id 142868 (ecosine): NOT_AUTHORIZED '
       + 'hint=COMPANIES_NOT_ALLOWED. The same token read 142897 (egari), so the secret is fine. '
       + 'Add 142868 to this fleet-integration app in the Bolt portal.',
+    /* DEGRADED, not stopped — and the numbers on this row are why.
+       run_age_h 3.2 against a 24h limit means the CHANNEL is collecting: Bolt's
+       portal delivers Ecosine's trips on the same run the fleet-integration
+       roster is refused on. Production had 34,897 Bolt bookings for ecosine
+       beside a banner reading "collecting nothing" (2026-09-10).
+       last_ok_age_h stays null because the CREDENTIAL has never authenticated
+       — both facts are true at once, and telling them apart is the whole
+       point of the state. */
     surface: 'fleet-integration getDrivers', last_ok_at: null, checked_at: dayISO(0),
-    last_ok_age_h: null, run_age_h: 3.2, stall_limit_h: 24, severity: 'stopped' });
+    last_ok_age_h: null, run_age_h: 3.2, stall_limit_h: 24,
+    still_collecting: true, severity: 'degraded' });
   rows.push({ provider: 'yango', fleet_id: 'ecosine', credential: 'YANGO_CONSOLE',
     state: 'blocked',
     detail: 'fleet.yango.com HTTP 403; without a cookie: HTTP 401. The park id and API key are '
       + 'proven every run by fleet-api.yango.tech, which serves trips, the roster and the cars; '
       + 'only the weekly driver aggregate and the payment ledger are behind this host.',
+    /* Still STOPPED, and deliberately: run_age_h 21.4 against a 12h limit means
+       nothing is arriving on this one. The pair is the point — two rows in the
+       same surface-level state, one collecting and one not, so the fixture
+       exercises both branches rather than only the new one. */
     surface: '/api/reports-api/v2/summary/drivers/list', last_ok_at: dayISO(1),
     checked_at: dayISO(0), last_ok_age_h: 21.4, run_age_h: 21.4, stall_limit_h: 12,
-    severity: 'stopped' });
+    still_collecting: false, severity: 'stopped' });
   const bad = rows.filter((x) => x.severity === 'stopped');
+  /* DERIVED, not written down. These counts were literals — `stopped: 1,
+     unentitled: 1` — and a literal is a second opinion that cannot be wrong
+     until it is. Re-scoring the Bolt row to 'degraded' changed three of them
+     at once, and hand-editing three numbers to match a fourth is how a fixture
+     starts disagreeing with the endpoint it exists to imitate. */
+  const degradedRows = rows.filter((x) => x.severity === 'degraded');
   const label = (x) => `${x.provider}${x.fleet_id && x.fleet_id !== '*' ? ` · ${x.fleet_id}` : ''} (${x.credential})`;
   r.json({ rows, stopped: bad.length, at_risk: 1, missing: 0,
-    moved: 1, unentitled: 1, blocked: 1, observed: true,
+    degraded: degradedRows.length,
+    degraded_rows: degradedRows.map((x) => ({ label: label(x), provider: x.provider,
+      fleet_id: x.fleet_id, state: x.state, surface: x.surface, detail: x.detail })),
+    moved: rows.filter((x) => x.state === 'moved').length,
+    unentitled: rows.filter((x) => x.state === 'unentitled').length,
+    blocked: rows.filter((x) => x.state === 'blocked').length, observed: true,
     errands: [
       { state: 'moved', noun: 'endpoint', count: 1,
         rows: bad.filter((x) => x.state === 'moved').map(label) },
