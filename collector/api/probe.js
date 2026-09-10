@@ -1086,10 +1086,36 @@ export function probeRoutes(app, { wrap }) {
          FROM driver_timeline_event
         WHERE at > now() - interval '30 days'
         GROUP BY 1,2,3 ORDER BY 4 DESC LIMIT 40`);
+    /* HOW MANY DRIVERS THIS COSTS, FLEET-WIDE, RIGHT NOW.
+       ─────────────────────────────────────────────────────────────────────
+       Four of the five places this product builds an online span drop the
+       LAST one — `WHERE next_at IS NOT NULL` — so a driver whose most recent
+       status event is ONLINE contributes nothing from that instant onward.
+       Uber stops sending ONLINE heartbeats while a driver is on a job, so the
+       last event before a trip is exactly the one that dangles. This counts
+       who is in that state and how much time is being dropped. */
+    const dangling = await pool.query(
+      `WITH last AS (
+         SELECT DISTINCT ON (driver_ext_id) driver_ext_id, at, status
+           FROM driver_timeline_event
+          WHERE kind = 'status' AND status <> ''
+            AND at > now() - interval '7 days'
+          ORDER BY driver_ext_id, at DESC)
+       SELECT count(*) FILTER (WHERE status = 'ONLINE')::int AS drivers_left_online,
+              count(*)::int AS drivers_with_any_event,
+              round(sum(extract(epoch FROM (now() - at))/60)
+                    FILTER (WHERE status = 'ONLINE'
+                        AND at > (now() AT TIME ZONE 'Asia/Dubai')::date
+                                 AT TIME ZONE 'Asia/Dubai'))::int AS minutes_dropped_today,
+              count(*) FILTER (WHERE status = 'ONLINE'
+                           AND at > (now() AT TIME ZONE 'Asia/Dubai')::date
+                                    AT TIME ZONE 'Asia/Dubai')::int AS dangling_today
+         FROM last`);
     res.json({ id, day,
       events: evs.rows, trips: trips.rows,
       this_driver_this_day: counts.rows,
-      every_value_the_feed_has_sent_in_30_days: vocab.rows });
+      every_value_the_feed_has_sent_in_30_days: vocab.rows,
+      dangling_online: dangling.rows[0] });
   }));
 
   /* THE REALTIME TRANSACTION FEED, ASKED WITH THE VERB IT DOCUMENTS.
