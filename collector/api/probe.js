@@ -1030,6 +1030,116 @@ export function probeRoutes(app, { wrap }) {
       surfaces: out,
     });
   }));
+  /* THE REALTIME TRANSACTION FEED, ASKED WITH THE VERB IT DOCUMENTS.
+     ─────────────────────────────────────────────────────────────────────────
+     docs/fleet-tracking-api-reference.md:200 documents this surface as
+     `POST /v1/vehicle-suppliers/transactions?org_id=…`, a live per-trip feed
+     over a window of at most fifteen minutes, carrying transactionUuid,
+     tripUuid, processedAt and an earnings breakdown. All three probes in this
+     codebase issue it as a GET (src/probe.js:309, api/probe.js:920 and :990),
+     collect the 404 that a POST-only route returns to a GET, and record the
+     conclusion "the provider serves nothing here". That conclusion is about
+     our verb, not about Uber.
+
+     It matters because of what the money chart does without it. Uber files
+     this fleet WEEKLY, src/rollup.js spreads `net / days` across the period's
+     days, and a week still in progress therefore divides a partial amount
+     across seven days — three of which have not happened. Measured 2026-09-10:
+     the closed week 31 Aug–6 Sept shows AED 25,768.69/day and the open week
+     7–13 Sept shows AED 4,444.39/day, while the fleet's bookings over those
+     days were 675/787/763 against 665–820. The work did not fall by 83%; only
+     the reporting had not arrived. A per-trip feed is the only thing that can
+     answer "what did we earn TODAY" without dividing a week by seven.
+
+     So this probe exists to settle one question empirically rather than by
+     reading: does the surface answer at all, and in what shape. It tries the
+     documented verb against several plausible parameter placements, because
+     Uber's supplier APIs are inconsistent about query-vs-body and snake-vs-
+     camel case across endpoints, and a 400 naming the field it wanted is worth
+     more than any amount of guessing. The GET is kept as a CONTROL: if it 404s
+     while a POST does not, that is the finding stated in one row.
+
+     Read-only despite the verb — it is a query endpoint. It sends no state and
+     changes nothing at the provider. */
+  app.get('/api/probe/uber/realtime', wrap(async (req, res) => {
+    await loadSettings();
+    const org = config.uber.org;
+    if (!org) return res.status(400).json({ error: 'no Uber org configured' });
+
+    /* At most fifteen minutes, per the documented ceiling, and ending NOW
+       rather than at a date the caller picked: the feed's stated lookback is
+       24 hours and the point of it is freshness. A caller may narrow it. */
+    const mins = Math.min(15, Math.max(1, Number(req.query.minutes) || 15));
+    const end = new Date();
+    const start = new Date(end.getTime() - mins * 60000);
+    const ms = (d) => d.getTime();
+    const iso = (d) => d.toISOString();
+
+    const token = await uberOAuthToken();
+    const base = 'https://api.uber.com/v1/vehicle-suppliers/transactions';
+    const auth = { authorization: `Bearer ${token}` };
+    const json = { ...auth, 'content-type': 'application/json' };
+
+    /* Each attempt names what it is testing, so the result reads as an
+       experiment rather than as a list of failures. */
+    const attempts = [
+      { name: 'GET (control — what the three existing probes send)',
+        url: `${base}?${qs({ org_id: org, limit: 50 })}`, method: 'GET', headers: auth },
+      { name: 'POST, org_id in query, empty body',
+        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json, body: {} },
+      { name: 'POST, org_id in query, epoch-ms window in body',
+        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
+        body: { start_time: ms(start), end_time: ms(end), limit: 50 } },
+      { name: 'POST, org_id in query, ISO window in body, camelCase',
+        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
+        body: { startTime: iso(start), endTime: iso(end), limit: 50 } },
+      { name: 'POST, everything in the body, snake_case',
+        url: base, method: 'POST', headers: json,
+        body: { org_id: org, start_time: ms(start), end_time: ms(end), limit: 50 } },
+      { name: 'POST, everything in the body, camelCase',
+        url: base, method: 'POST', headers: json,
+        body: { orgId: org, startTime: iso(start), endTime: iso(end), limit: 50 } },
+      { name: 'POST, whole window in the query as the GET shape did',
+        url: `${base}?${qs({ org_id: org, start_time: ms(start), end_time: ms(end), limit: 50 })}`,
+        method: 'POST', headers: json, body: {} },
+    ];
+
+    const out = [];
+    for (const a of attempts) {
+      try {
+        const { data, status } = await http(a.url, { method: a.method, headers: a.headers,
+          timeoutMs: 30000, retries: 0,
+          ...(a.method === 'POST' ? { body: JSON.stringify(a.body) } : {}) });
+        const arr = Array.isArray(data) ? data
+          : Object.values(data || {}).find((v) => Array.isArray(v) && v.length && typeof v[0] === 'object');
+        out.push({ attempt: a.name, method: a.method, status: status || 0,
+          /* The provider's own words about what was wrong. This is the whole
+             value of the probe: a 400 that names a field converges the next
+             attempt, where a bare status does not. */
+          message: (data && typeof data === 'object'
+            ? (data.message || data.error || data.error_description
+              || data.errors?.[0]?.message || null)
+            : String(data || '').slice(0, 300)) || null,
+          top_level_keys: data && typeof data === 'object' && !Array.isArray(data)
+            ? Object.keys(data).slice(0, 20) : [],
+          count: Array.isArray(arr) ? arr.length : 0,
+          fields: arr && arr.length ? describe(arr) : [] });
+      } catch (e) { out.push({ attempt: a.name, method: a.method, error: String(e).slice(0, 240) }); }
+    }
+
+    /* Stated rather than left for a reader to work out from seven rows. */
+    const answered = out.filter((r) => r.status >= 200 && r.status < 300);
+    res.json({
+      window: [iso(start), iso(end)], minutes: mins,
+      verdict: answered.length
+        ? `${answered.length} of ${out.length} shapes answered; the surface is reachable`
+        : 'no shape answered — the surface is not reachable with these parameters, '
+          + 'which is a different finding from the 404 a GET returns',
+      answered: answered.map((r) => r.attempt),
+      attempts: out,
+    });
+  }));
+
   /* Ask Uber whether the past we hold is the past it has.
      ─────────────────────────────────────────────────────────────────────────
      Every completeness figure in this product is computed from our own rows.

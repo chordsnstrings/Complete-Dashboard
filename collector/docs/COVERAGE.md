@@ -1761,3 +1761,102 @@ assumes a country code **only** where the number cannot be anything else — a
 UAE national number (`0` + 9 digits) or a bare 9-digit mobile starting `5`.
 Anything else keeps its digits and gets no `+`: a wrong country code dials a
 stranger.
+
+### Uber money at DAY grain, and the week that has not closed — 2026-09-10
+
+**The defect.** Uber files this fleet weekly. `src/rollup.js:916` divides each
+statement by the days it covers — `p.net / p.days` across
+`generate_series(period_start, period_end)` — and writes one row per day into
+`driver_statement_day`. For a **closed** week that is right, and `period_days`
+travels beside it so a reader knows the day is an allocation.
+
+For a week still running it fails twice over. Measured on production
+2026-09-10, with the week 7–13 Sept open:
+
+| week | filed net / day | bookings on its days |
+|---|---|---|
+| 31 Aug – 6 Sept (closed) | AED 25,768.69 | 665–820 |
+| 7 – 13 Sept (open) | AED 4,444.39 | 675, 787, 763 |
+
+An 83% collapse the fleet did not have. The numerator is only what Uber has
+settled so far, and the denominator is all seven days — **three of which had
+not happened**, so money that *was* earned is spread across days with no work
+in them.
+
+**What we already hold, and it is better.** Uber's per-trip fare is on
+`trip.price` at Dubai-day grain for 88–92% of bookings (the rest are
+cancellations, which correctly carry no fare). That gross **is** the
+statement's own `fare` line, and the statement's net is that gross less Uber's
+commission — which this fleet can *measure* rather than assume:
+
+```
+net / gross, by closed statement week, 29 Jun – 6 Sept 2026
+0.7481  0.7496  0.7526  0.7372  0.7500
+0.7458  0.7484  0.7497  0.7449  0.7459        mean 0.7468, spread ±1%
+```
+
+**Backtested, not asserted.** Predicting each closed week's *filed* net from
+its own gross times the ratio of the weeks **before** it:
+
+| week | predicted | Uber filed | error |
+|---|---|---|---|
+| 27 Jul | 92,163 | 92,550 | −0.42% |
+| 3 Aug | 94,375 | 94,160 | +0.23% |
+| 10 Aug | 98,051 | 98,207 | −0.16% |
+| 17 Aug | 114,061 | 114,410 | −0.30% |
+| 24 Aug | 131,930 | 131,414 | +0.39% |
+| 31 Aug | 180,724 | 180,381 | +0.19% |
+
+Worst error **0.42%** over six consecutive out-of-sample weeks, against a
+smeared open week that is **83% low**.
+
+**What the product does now** (`api/statement_fill_sql.js`): a day inside an
+**open** statement period is answered from its own trips at the measured
+commission; a day in a **closed** period keeps the statement untouched, because
+that is Uber's own filed number and it reconciles against the bank wire. Both
+`/api/finance/daily` and `/api/kpis` apply the same correction to the same
+platform rows, so the bars and the tile above them cannot disagree. A channel
+whose commission cannot be measured — no closed period, or under eight closed
+days — keeps its statement and gets a sentence saying so; nothing is defaulted.
+
+It is **not a forecast**: every fare in it is one Uber has already published
+against a trip that has already run, and a day with no trips yet contributes
+nothing rather than an average.
+
+**TODAY reads low under this rule, and that is the honest answer.** The Uber
+fare walk does not run on the half-hourly incremental — the payments report has
+a generation cap of its own — so today's trips are not priced until the 21:00
+UTC catch-up (`src/sources/uber.js:1896`, and `FARES_LAG` in
+`api/public/today.js:103` is the existing sentence for it). Measured
+2026-09-10 at 09:07 Dubai: 95 Uber bookings, **2 priced**. So today's derived
+figure is small, its bar is drawn hollow, and it says it is still being
+collected — which is true. The figure it replaced was a seventh of a partial
+week, which was not today's money either; both are incomplete and only one of
+them says so.
+
+**Uber surfaces that would serve day-grain money directly, and their state:**
+
+| surface | verdict |
+|---|---|
+| `POST /v1/vehicle-suppliers/transactions` | Documented POST, ≤15-min window, ≤24 h lookback, per-trip `tripUUID` + earnings. **All three of our probes issued it as a GET** and recorded the resulting 404 as "the provider has nothing". `/api/probe/uber/realtime` now asks with the documented verb across seven parameter shapes. Cannot backfill — a freshness tier, never a history one. |
+| `POST /v1/vehicle-suppliers/analytics-data/query` | Documented `vs:TotalEarnings` (vehicle-only), minimum 1-hour range, no lookback wall — the best odds of the four. **Never called by anything.** |
+| `getPerformanceReport` (supplier GraphQL) | Returns `totalEarnings` per driver. **Never called**; the `PerformanceReportRequest__Input` shape is recorded nowhere, and introspection is disabled. |
+| `earners/payments` (REST, per day) | Serves a one-day ask, but Uber attributes an item to the period it **settles** in — sliced into days the components lose 2–3% of fare and 9–16% of tips. A measurement of settlement, not of earning. |
+
+### Traps this added to the list
+
+- **A weekly figure divided by seven is not a daily figure while the week is
+  open.** Check whether the period has *ended* before treating its per-day
+  share as a measurement. `period_days` says how long the period is; it does
+  not say whether it is finished.
+- **A statement period can extend into the future.** `driver_statement_day`
+  carries rows for days that have not happened. Any query that takes
+  `max(day)` as "the last day we hold data for" will be wrong by up to a week.
+- **Detect an open period WITHOUT the display window.** A reader looking at
+  1–9 Sept must still be told the 7th–9th sit in a period running to the 13th;
+  a query bounded by their window sees a last day of the 9th and concludes the
+  period closed.
+- **Uber's commission is 25% of the fare branch and measurable per week.**
+  `net = fare + service_fee`, and the service fee is exactly −25.00% of fare on
+  29 of 29 sampled rows. The fleet-level net/gross lands at 0.7468 because the
+  remaining spread is tips and taxes.

@@ -17,6 +17,7 @@ import { win, winDays, grainOf, previousWindow, foldGrain, GRAINS, PERIODS,
 import { rollupGrainSql, rollupState, refreshRollups } from '../src/rollup.js';
 import { responseCache } from './cache.js';
 import { platformFares, platformPayouts, platformStatements, fleetIncome } from './income_sql.js';
+import { resolveOpenFill, applyFillToPlatforms } from './statement_fill_sql.js';
 import { startWarmer } from './warm.js';
 import { log } from '../src/log.js';
 /* The operator ledger's own module. The import route below is the only thing
@@ -643,7 +644,28 @@ app.get('/api/kpis', wrap(async (req, res) => {
     statement_tips: num(t.statement_tips), statement_salik: num(t.statement_salik),
     statement_days: t.statement_days });
   const windowDays = Math.round((Date.parse(p[1]) - Date.parse(p[0])) / 86400000) + 1;
+  /* THE SAME CORRECTION THE DAILY SERIES MAKES, on the same rows, so the tile
+     and the bars beneath it cannot disagree about an open statement week. A
+     window that ends before the open period began gets no correction at all —
+     resolveOpenFill clips to the intersection and returns nothing. */
+  const fillKpi = await resolveOpenFill({ q, from: p[0], to: p[1], platform: p[2], fleet: p[3] });
+  applyFillToPlatforms(byPlat, fillKpi.fill);
   const income = fleetIncome([...byPlat.values()], windowDays);
+  /* NAME THE HALF THAT IS NOT A STATEMENT.
+     ──────────────────────────────────────────────────────────────────────
+     accounted_statements sums the platform rows' statement_net, and those
+     rows have just had an open period's derived money added to them — so
+     without this, money the fleet derived from its own trips would be
+     reported under a figure whose caption says Uber filed it. The TOTAL is
+     right either way; which half it sits in is what has to be true. */
+  if (fillKpi.fill.total) {
+    income.accounted_derived = fillKpi.fill.total;
+    income.accounted_derived_note = fillKpi.notes.filter((n) => n.rate != null).map((n) => n.why);
+    if (income.accounted_statements != null) {
+      income.accounted_statements =
+        +(income.accounted_statements - fillKpi.fill.total).toFixed(2) || null;
+    }
+  }
 
   const share = (n, d) => (d ? +((n / d) * 100).toFixed(1) : null);
   const payoutDays = Math.max(0, ...payRows.map((r) => r.payout_days || 0));
@@ -2240,6 +2262,10 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
   for (const t of stmtRows) Object.assign(plat(t.platform), {
     statement_net: num(t.statement_net), statement_days: t.statement_days });
   const windowDays = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
+  /* The window total moves onto the same basis as the days it is drawn over.
+     Without this the panel's own reconciliation note fires on every open week,
+     accusing the bars of the correction they had just been given. */
+  applyFillToPlatforms(byPlat, fillDaily.fill);
   /* Mutates each row with `basis` and `best`, which is what the loop below
      reads. Identical call to the one in /api/kpis. */
   const income = fleetIncome([...byPlat.values()], windowDays);
@@ -2261,6 +2287,16 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
   const USES_STATEMENT = new Set([...byPlat.values()]
     .filter((r) => r.basis === 'statement' || r.basis === 'partial_statement')
     .map((r) => r.platform));
+
+  /* THE OPEN STATEMENT PERIOD, resolved before the day rows are folded.
+     ──────────────────────────────────────────────────────────────────────
+     Uber files weekly and src/rollup.js divides each statement across the days
+     it covers. For a week still running that divides a partial amount over
+     seven days, three of which have not happened — measured 2026-09-10, the
+     closed week showed AED 25,768.69 a day and the open one AED 4,444.39, an
+     83% cliff on a fleet whose bookings had not moved at all. See
+     api/statement_fill_sql.js for the measurement and the backtest. */
+  const fillDaily = await resolveOpenFill({ q, from, to, platform, fleet });
 
   const [cal, dayFare, dayPay, dayStmt, led] = await Promise.all([
     q(`SELECT to_char(d, 'YYYY-MM-DD') AS d
@@ -2359,7 +2395,14 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
     const o = day.get(key(r.d)); if (!o) continue;
     o.nothing_recorded = false;
     if (!USES_STATEMENT.has(r.platform)) continue;
-    add(o, 'statement_part', r.statement_net); add(o, 'money', r.statement_net);
+    /* Inside an open period the smear is replaced by that day's OWN fares at
+       the fleet's measured commission. Outside one — every closed week — the
+       statement stands untouched: it is Uber's own filed number and it
+       reconciles against the bank wire, so nothing derived may displace it. */
+    const sub = fillDaily.fill.byDay.get(`${r.platform}\u0000${r.d}`);
+    const net = sub ? sub.now : r.statement_net;
+    if (sub) { o.money_derived = true; o.statement_gross = (o.statement_gross || 0) + sub.gross; }
+    add(o, 'statement_part', net); add(o, 'money', net);
     /* Same grain rule as the payout loop above, and it matters more here:
        statements are filed weekly and spread evenly across their days, so a
        day's share is an allocation on every row Uber writes. */
@@ -2382,7 +2425,15 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
       fares_part: o.fares_part == null ? null : +o.fares_part.toFixed(2),
       payout_part: o.payout_part == null ? null : +o.payout_part.toFixed(2),
       statement_part: o.statement_part == null ? null : +o.statement_part.toFixed(2),
-      money_period_days: o.money == null ? null : o.money_period_days,
+      /* A DERIVED day is a one-day measurement, not a seven-day allocation, so
+         it must not keep the coarse grain that made it one. Leaving
+         money_period_days at 7 here would have the caption say "up to 7 days
+         of this is a statement divided across its days" over a figure built
+         from that single day's own trips — the grain claim contradicting the
+         basis claim, on the same row. */
+      money_period_days: o.money == null ? null : (o.money_derived ? 1 : o.money_period_days),
+      money_derived: !!o.money_derived,
+      statement_gross: o.statement_gross == null ? null : +o.statement_gross.toFixed(2),
       money_source: o.money == null ? null : parts.length > 1 ? 'mixed' : parts[0] };
   });
   const sum = (k) => {
@@ -2393,6 +2444,11 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
     totals: { money: sum('money'), fares: sum('revenue'), payout: sum('payout'),
       money_fares_part: sum('fares_part'), money_payout_part: sum('payout_part'),
       money_statement_part: sum('statement_part'),
+      /* Of that statement part, how much is the open period's derived money
+         rather than a filed statement. The caption subtracts it so the
+         sentence "X is what Uber reported earning on its own statements" is
+         about statements only. */
+      money_derived_part: fillDaily.fill.total || null,
       bookings: rows.reduce((a, r) => a + (r.bookings || 0), 0),
       priced_trips: rows.reduce((a, r) => a + (r.priced_trips || 0), 0),
       /* The window figure this series must add up to, from the identical call
@@ -2402,6 +2458,11 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
     money_basis: [...byPlat.values()].map((r) => ({ platform: r.platform, basis: r.basis,
       best: r.best })),
     unknown_grain: unknownGrain,
+    /* WHICH DAYS ARE NOT THE STATEMENT'S, AND WHY — one sentence per channel,
+       built in api/statement_fill_sql.js so both shells and both endpoints
+       word the same fact identically. Empty on every window that does not
+       reach into an open statement period, which is most of them. */
+    open_statement: fillDaily.notes,
     /* The platform chip narrows both halves here, because both are built from
        per-platform rows. Kept as fields so a page cannot assume either way. */
     money_narrowed_by_platform: platform != null,

@@ -55,6 +55,10 @@ const EXEMPT = {
     + 'tier — Blue, Gold, Platinum, Diamond — by trying introspection, then a fixed list of candidate fields '
     + 'on GetDriver, then a fixed list of candidate operations. Every candidate is written in the file; nothing '
     + 'the caller sends becomes part of a query. Not a page: it answers whether a page COULD exist',
+  '/api/probe/uber/realtime': 'operator tool: asks the live per-trip transaction feed with the verb '
+    + 'it documents (POST) rather than the GET all three existing probes send, and reports which '
+    + 'parameter shape Uber accepts — the gate on getting Uber money at day grain instead of a '
+    + 'weekly statement divided by seven',
   '/api/probe/uber/audit': 'operator tool: re-asks Uber for a window we already hold and compares its '
     + 'Trip UUIDs against ours, by hand and for a week at a time. The PAGE reads /api/coverage/verified, '
     + 'which is where the nightly audit job stores the same comparison for whole months — a report costs '

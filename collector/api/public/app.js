@@ -2739,9 +2739,21 @@ V.finance = async (root) => {
           .filter((b) => /^(partial_)?statement$/.test(b.basis || ''))
           .map((b) => sourceLabel(b.platform));
         const bits = [];
-        if (t.money_statement_part != null) {
-          bits.push(`${money(t.money_statement_part)} is what ${andList(onStatement)} `
+        /* STATEMENTS ONLY. money_statement_part carries the open period's
+           derived money too — the endpoint puts it there so the bars add up —
+           and a sentence reading "what Uber reported earning on its own
+           statements" over a figure that includes money Uber has not filed
+           would be the house rule's own failure: a reason that is not the true
+           one. The derived half gets its own clause. */
+        const filed = t.money_statement_part == null ? null
+          : +(t.money_statement_part - (t.money_derived_part || 0)).toFixed(2);
+        if (filed != null && filed > 0) {
+          bits.push(`${money(filed)} is what ${andList(onStatement)} `
             + 'reported earning on its own statements, after its commission');
+        }
+        if (t.money_derived_part) {
+          bits.push(`${money(t.money_derived_part)} is the open week, worked out from those `
+            + 'days\u2019 own fares because its statement has not been filed yet');
         }
         if (t.money_fares_part != null) {
           bits.push(`${money(t.money_fares_part)}`
@@ -2754,6 +2766,15 @@ V.finance = async (root) => {
         }
         parts.push(`${bits.join('; ')}. Across the whole window ${fmt(t.priced_trips)} of `
           + `${fmt(t.bookings)} bookings carry a fare of their own.`);
+      }
+      /* WHICH DAYS ARE NOT THE STATEMENT'S, said before the grain sentence
+         rather than after it. A reader who has just been told the bars are
+         weekly allocations will read the last three as allocations too, and
+         they are the opposite — each is that day's own trips. The endpoint
+         builds the sentence (api/statement_fill_sql.js) so this shell and the
+         phone cannot word the same fact differently. */
+      for (const o of fin.open_statement || []) {
+        if (o.why) parts.push(o.why);
       }
       if (unknownGrain) {
         parts.push('Part of this cannot say what period it was reported over, so it is drawn '
