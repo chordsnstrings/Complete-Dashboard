@@ -586,7 +586,7 @@ function identityCard(p) {
     : lic != null ? pill(`licence ${lic < 0 ? `expired ${Math.abs(lic)}d ago` : `${lic}d left`}`, licTone) : ''}
       </div>
       <div class="idfacts">
-        ${c.phone ? `<span><b>Phone</b> <a class="lnk" href="tel:${esc(dialable(c.phone))}">${esc(c.phone)}</a></span>` : ''}
+        ${c.phone ? `<span><b>Phone</b> <a class="lnk" href="tel:${esc(dialable(c.phone))}">${esc(dialable(c.phone))}</a></span>` : ''}
         ${c.email ? `<span><b>Email</b> <a class="lnk" href="mailto:${esc(c.email)}">${esc(c.email)}</a></span>` : ''}
         ${idFact('licence_no', 'Licence')}
         ${idFact('emirates_id', 'Emirates ID')}

@@ -65,7 +65,7 @@ export function peopleCards(refs) {
     /* tel: and mailto: are the point of the card. A number rendered as text is
        a number somebody retypes into a handset. */
     const contact = [
-      p.phone ? `<a class="lnk" href="tel:${esc(dialable(p.phone))}">${esc(p.phone)}</a>` : '',
+      p.phone ? `<a class="lnk" href="tel:${esc(dialable(p.phone))}">${esc(dialable(p.phone))}</a>` : '',
       p.email ? `<a class="lnk" href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '',
     ].filter(Boolean).join('<span class="dim"> · </span>');
     const stateTone = /suspend|deact|block|reject|ban/i.test(p.state_raw || p.state || '') ? 'bad'

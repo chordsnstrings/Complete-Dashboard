@@ -183,7 +183,7 @@ export async function renderOnlineTime(root) {
           : '<span class="ent-off" title="no Uber booking on this day">—</span>') },
       { label: 'Phone', key: 'phone',
         render: (r) => (r.phone
-          ? `<a href="tel:${esc(dialable(r.phone))}">${esc(r.phone)}</a>`
+          ? `<a href="tel:${esc(dialable(r.phone))}">${esc(dialable(r.phone))}</a>`
           : '<span class="ent-off" title="no phone on this driver’s compliance record">—</span>') },
       { label: 'Car', key: 'plate',
         render: (r) => (r.plate

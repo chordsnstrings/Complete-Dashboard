@@ -100,10 +100,20 @@ export async function renderCancellations(root) {
     /* The only thing on this page that may build a tel: href — ui.js's
        dialable() puts a stored 971… into E.164 so the phone actually dials.
        An absent number says the roster has none rather than rendering an
-       em-dash that reads as a page fault. */
+       em-dash that reads as a page fault.
+
+       The LINK TEXT is the normalised form too, not the raw column. It was
+       the raw column, and the roster does not store one shape: on production
+       2026-09-10 this table printed +971551667768 and 971561881739 in
+       adjacent rows, three of the first fifteen missing the plus. Both dial —
+       the href was always normalised — but a column of numbers where some
+       carry a country-code marker and some do not reads as a column where
+       some numbers are incomplete, and an operator working down it has to
+       stop and check. The same substitution is made on the three other
+       surfaces that print a phone, for the same reason. */
     { label: 'Phone', key: 'phone',
       render: (r) => (dialable(r.phone)
-        ? `<a href="tel:${esc(dialable(r.phone))}">${esc(r.phone)}</a>`
+        ? `<a href="tel:${esc(dialable(r.phone))}">${esc(dialable(r.phone))}</a>`
         : '<span class="dim" title="No channel this driver works has filed a phone number">'
           + 'not on the roster</span>') },
     /* Uber's own rating, and it says WHOSE. A rating with no platform beside

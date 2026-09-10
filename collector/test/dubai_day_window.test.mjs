@@ -249,6 +249,27 @@ for (const [plate, day, trips] of [['L1', '2026-08-05', 3], ['L2', '2026-08-06',
     offenders.length === 0, offenders.join(' | '));
 }
 
+/* ── a phone column must not print two shapes of the same thing ──────────
+   The href was always normalised through dialable(); the LINK TEXT was the raw
+   roster column, and the roster does not store one shape. On production
+   2026-09-10 the cancellations table printed +971551667768 and 971561881739 in
+   adjacent rows. Both dial. But an operator reading down a column where some
+   numbers carry a country-code marker and some do not has to stop and check
+   whether the bare ones are incomplete, which is the whole cost of it. */
+{
+  const surfaces = ['cancellations.js', 'onlinetime.js', 'people.js', 'driver.js'];
+  const raw = [];
+  for (const f of surfaces) {
+    const code = readFileSync(`api/public/${f}`, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    /* A tel: link whose text is the bare column rather than the same
+       dialable() the href is built from. */
+    if (/href="tel:\$\{esc\(dialable\([^)]*\)\)\}">\$\{esc\((?!dialable)/.test(code)) raw.push(f);
+  }
+  check('every surface that prints a phone prints the number it dials',
+    raw.length === 0, raw.join(' '));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
