@@ -2210,6 +2210,20 @@ policy for datacentre ranges.
 That retires the advice this file carried an hour earlier ("ask Tesla to allow
 164.92.186.179"). What is left:
 
+**And it is not the hostname either.** Tesla documents two auth hosts —
+`auth.tesla.com/oauth2/v3` for the authorize step and
+`fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3` for the token exchange — and both
+answer a token POST identically off-network. From production **both are 403
+with the block page**. Three variables have now been eliminated by measurement:
+the request shape (four header sets), the hostname (both documented hosts), and
+any single address (three different egress IPs across three deploys —
+164.92.186.179, 165.232.77.209, 165.22.66.25, all DigitalOcean).
+
+**The conclusion, and it is the range.** Tesla's edge refuses DigitalOcean's
+address space on the auth hosts. That is ordinary Akamai policy for datacentre
+ranges and it is not something a header, a hostname or an allowlist request for
+one IP will move.
+
 | way out | what it needs | catch |
 |---|---|---|
 | A **stable dedicated egress** for the app, then ask Tesla to allow that one address | a DO feature on a paid tier, plus Tesla acting | still needs Tesla to move, but now there is a durable address to ask about |

@@ -357,6 +357,7 @@ Akamai "Access Denied" page rather than an OAuth refusal.
 | Tesla's **auth** host refuses this server | **proven** | 403 + Akamai ref `#18.ccd5ce17.1789035013.1637d0b9` from 164.92.186.179 |
 | Tesla's **data** host does **not** | **proven** | 401 with no block page — a normal unauthenticated answer |
 | It is the egress address, not the request shape | **proven** | four header sets from production — ours, no-UA, curl-like, full browser with sec-ch-ua/origin/referer — all 403 with the block page |
+| It is the hostname, not the range | **DISPROVEN** | both documented auth hosts — `auth.tesla.com` and `fleet-auth.prd.vn.cloud.tesla.com` — answer 403 with the block page from production, while both answer JSON off-network |
 | A single IP allowlist would fix it | **DISPROVEN** | the egress is per-container: 164.92.186.179, then 165.232.77.209 after a redeploy, then that one five times running. Both DigitalOcean ranges — the next deploy moves off any address Tesla allows |
 
 **What that means for the design, and it is not a detail:** a token minted
