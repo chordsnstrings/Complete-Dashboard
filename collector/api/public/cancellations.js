@@ -19,7 +19,19 @@
    skip caveats. */
 import { el, esc, panel, loading, note, kpiRow, tableFrom, pill, fmt, entity,
   dialable, sourceLabel } from './ui.js';
-import { api, filterQuery } from './data.js';
+/* q(), NOT api() + filterQuery(). filterQuery builds the query string for a
+   LINK — it deliberately omits the window on views that hide the range
+   control, and it is not what a page fetches with. params()/q() is, and every
+   other page in this product uses it.
+
+   Getting that wrong did not fail loudly: the page rendered, the table filled,
+   and the numbers were the WHOLE RECORD. Production showed 68,194
+   cancellations and 5,321 bookings against one driver under a URL that said
+   `period=yesterday`, because with no window in the query the route falls back
+   to 2000-01-01..2100-01-01. A window control that silently governs nothing is
+   worse than no control: it tells the reader a figure is bounded when it is
+   not. */
+import { q } from './data.js';
 
 /* Declining an offer and abandoning an accepted job are different behaviours
    and only the second leaves a rider standing in the street, so the driver
@@ -37,7 +49,7 @@ export async function renderCancellations(root) {
   loading(root);
   let d;
   try {
-    d = await api(`/api/cancellations?${filterQuery('cancellations')}`);
+    d = await q('/api/cancellations');
   } catch (e) {
     root.innerHTML = '';
     root.append(note(`The cancellation list could not be read: ${String(e.message || e)}`));
