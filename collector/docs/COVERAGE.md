@@ -2238,3 +2238,56 @@ elsewhere.
 the CALLER, and it took a page saying so, then a probe measuring it, to stop
 this reading as a credential problem. Both now exist; neither did when the
 integration was written.
+
+
+## Tesla: the fleet is not reachable because the APPLICATION is personal
+
+Measured 2026-09-10, and this is the root cause under every other Tesla
+symptom in this file.
+
+**The partner token — the application's own identity, minted from
+`client_credentials` with no human involved — carries `account_type: "person"`.**
+
+```
+sub           9cafefcf-37b1-4c49-8735-3112f8cf1db8
+gty           client-credentials
+account_type  person          ← this
+```
+
+A partner token is documented as being for "managing a partner's account or
+**devices they own**". Ours owns no devices, because the developer application
+was created under a personal Tesla account (`Ecosine transporta LLC`,
+mamoon@egari.ae) rather than under the Tesla **Business** account
+(`Ecosine Transports LLC`) that holds the 82 cars.
+
+| what was tested | result |
+|---|---|
+| Third-party token (a human signs in) | 200, **0 vehicles**, `account_type: person` |
+| Partner token (the app itself) | 200, **0 vehicles**, `account_type: person` |
+| Partner registration | valid — Tesla returns our public key |
+| Region | correct — the NA host redirects to EU |
+
+Both token types reach Tesla and both see an empty fleet. That rules out
+tokens, scopes, region, and the edge block as the reason the cars are missing:
+those were all real problems and none of them was this one.
+
+**Why per-car virtual-key pairing is not the answer here.** It is a real
+mechanism and it would attach cars one at a time to an application — 82 taps on
+82 phones, and Model 3 and Model Y both require the Vehicle Command Protocol so
+none of it can be automated. That is a workaround for an app that belongs to
+the wrong account, not a fleet integration.
+
+**The fleet-level fix is account ownership**: the developer application has to
+belong to the Tesla Business account that owns the vehicles. Tesla's own
+best-practices page points at the same place — *"Ensure all email addresses are
+registered as an App Developer or Admin on application accounts. To Add/modify
+contacts navigate to the Account → User Management section of the Tesla
+business portal."*
+
+**Not proven, and stated as such:** that re-registering the application under
+the business account flips `account_type` to `business` and exposes the fleet.
+It is the only lever that operates at fleet level and it explains every
+measurement above, but Tesla's public documentation does not describe the
+business-fleet association step at all, and only Tesla can confirm it.
+`docs/tesla-support-request.md` is the question to ask them, with every
+identifier already filled in.
