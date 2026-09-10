@@ -30,10 +30,16 @@ integration and cannot see any vehicles.
 `GET /api/1/vehicles` returns **HTTP 200 with an empty array** on BOTH token
 types.
 
-**What we think the cause is**
+**The account situation, stated precisely**
 
-Both tokens carry `"account_type": "person"` — including the partner token,
-which represents the application itself:
+The Tesla account `mamoon@egari.ae` is a member of the Business account
+**Ecosine Transports LLC** with the role **Fleet Manager**, and the same
+account owns the developer application. So this is not an application sitting
+outside the business.
+
+Both tokens nevertheless carry `"account_type": "person"` — including the
+partner token, which represents the application itself and involves no human
+login at all:
 
 ```
 sub           9cafefcf-37b1-4c49-8735-3112f8cf1db8
@@ -41,21 +47,27 @@ gty           client-credentials
 account_type  person
 ```
 
-The developer application appears to have been created under a personal Tesla
-account (Ecosine transporta LLC) rather than under the Business account that
-owns the vehicles (Ecosine Transports LLC).
+In the business portal, the vehicles appear under **Owned Vehicles** (owned by
+the business, not by any individual), and the **Vehicle Management** column is
+empty for every one of the 82 cars.
 
 **Our questions**
 
-1. Does the developer application have to be created or owned by the Tesla
-   Business account for its vehicles to appear? If so, how do we move or
-   re-register it without losing the client id and the registered domain?
-2. Is there a fleet-level way for a Business account to grant an application
-   access to all of its vehicles at once — as opposed to virtual-key pairing on
-   each of 82 cars individually?
-3. Should we be using "Third-party for Business" tokens, and if so what is the
-   flow? Your documentation names the token type but does not describe how a
+1. What populates the **Vehicle Management** column on the Fleet page, and is
+   that the mechanism by which a business attaches an application to its
+   vehicles? It is empty for all 82 of ours.
+2. Does a **Fleet Manager** have the authority to make that association, or
+   must it be an Owner or Admin of the business account?
+3. Is there a fleet-level grant — selecting all vehicles and authorising an
+   application once — as opposed to virtual-key pairing on each of 82 cars
+   individually? Model 3 and Model Y both require the Vehicle Command Protocol,
+   so per-car pairing cannot be automated for any of our fleet.
+4. Should we be using "Third-party for Business" tokens, and if so what is the
+   flow? Your documentation names the token type but never describes how a
    business authorises an application.
+5. Why does a `client_credentials` partner token for an application owned by a
+   business member report `"account_type": "person"`? If that is expected, what
+   distinguishes a token that can see business-owned vehicles?
 
 **A separate, smaller issue on the same integration**
 
