@@ -1066,11 +1066,16 @@ export function probeRoutes(app, { wrap }) {
     const org = config.uber.org;
     if (!org) return res.status(400).json({ error: 'no Uber org configured' });
 
-    /* At most fifteen minutes, per the documented ceiling, and ending NOW
-       rather than at a date the caller picked: the feed's stated lookback is
-       24 hours and the point of it is freshness. A caller may narrow it. */
-    const mins = Math.min(15, Math.max(1, Number(req.query.minutes) || 15));
-    const end = new Date();
+    /* At most fifteen minutes, per the documented ceiling — and ending SIX
+       MINUTES AGO rather than now. The documentation states that startTime
+       must not be within five minutes of the present, which round three's
+       window violated by construction: it ended at `new Date()`. "invalid
+       start time" is exactly what a request breaching that rule would draw,
+       so the window has to be legal before the value's FORMAT can be blamed
+       for anything. */
+    const LAG_MIN = 6;
+    const mins = Math.min(14, Math.max(1, Number(req.query.minutes) || 14));
+    const end = new Date(Date.now() - LAG_MIN * 60000);
     const start = new Date(end.getTime() - mins * 60000);
     const ms = (d) => d.getTime();
     const iso = (d) => d.toISOString();
@@ -1080,62 +1085,56 @@ export function probeRoutes(app, { wrap }) {
     const auth = { authorization: `Bearer ${token}` };
     const json = { ...auth, 'content-type': 'application/json' };
 
-    /* WHAT UBER HAS TOLD US SO FAR, round by round, on production 2026-09-10.
+    /* WHAT UBER HAS TOLD US, round by round, on production 2026-09-10.
        ──────────────────────────────────────────────────────────────────────
-       Round 1 — the verb.
-         GET  -> 404 "404 page not found"                    (the control)
-         POST -> 400 "required field filters not found in data"
-       The surface is REACHABLE and only the verb was ever wrong. Three probes
-       here send a GET, collect that 404, and record "the provider serves
-       nothing" — a statement about our request kept as a fact about Uber.
+       R1, the verb.   GET -> 404 "page not found"; POST -> 400 "required
+         field filters not found in data". The surface is REACHABLE and only
+         the verb was ever wrong. Three probes here send a GET, collect that
+         404, and record "the provider serves nothing" — a statement about our
+         request kept as a fact about Uber.
 
-       Round 2 — the shape, three faults named one at a time.
-         value as an object -> "toField: value, ReadArrayCB: expect [ or n"
-             so `value` is an ARRAY, not a {startTime,endTime} pair.
-         operator 'IN_RANGE' -> "unknown enum value string:IN_R…"
-             so the FILTER_OPERATOR_ prefix is required, and every attempt
-             carrying it drew no complaint about the operator at all.
-         filters:[] -> "required field pagination_options not found in data"
-             so the envelope is SNAKE_CASE. paginationOptions was silently the
-             wrong key; the empty-filters attempt is the only one that could
-             have surfaced that, which is why it is worth sending a request
-             you expect to fail.
+       R2, the envelope.  value as an object -> "ReadArrayCB: expect [ or n",
+         so `value` is an ARRAY. operator 'IN_RANGE' -> "unknown enum value",
+         so the FILTER_OPERATOR_ prefix is required. filters:[] -> "required
+         field pagination_options", so the envelope is SNAKE_CASE — which only
+         the attempt expected to fail could have surfaced.
 
-       Round 3 asks with all three corrections and varies only the field name
-       and the value's units, because those are the two things nothing has
-       named yet. */
-    const isoPair = [iso(start), iso(end)];
-    const msPair = [ms(start), ms(end)];
+       R3, the field and the units.  filters:[] -> "No Time Range provided in
+         request", so the envelope is now correct and a range is mandatory.
+         field 'timeRange' -> "invalid start time"; every other spelling
+         ('time_range', 'processed_at', 'processedAt', and a deliberate
+         nonsense name) -> "Invalid filter passed in request". So timeRange is
+         THE field: it is the only one that reached value validation at all.
+         Numeric values -> "expected string value, got ValueType(2)", so the
+         two instants are STRINGS.
+
+       R4 asks with a legal window — see LAG_MIN above — and varies only the
+       string format, which is the one thing left unnamed. */
+    const fmts = {
+      'epoch millis as strings': [String(ms(start)), String(ms(end))],
+      'epoch seconds as strings': [String(Math.floor(ms(start) / 1000)),
+        String(Math.floor(ms(end) / 1000))],
+      'ISO 8601 without milliseconds': [iso(start).replace(/\.\d{3}Z$/, 'Z'),
+        iso(end).replace(/\.\d{3}Z$/, 'Z')],
+      'ISO 8601 with milliseconds': [iso(start), iso(end)],
+      'RFC3339 at the Dubai offset': [iso(start).replace(/\.\d{3}Z$/, '+00:00'),
+        iso(end).replace(/\.\d{3}Z$/, '+00:00')],
+    };
     const page = { page_size: 50 };
-    const filt = (field, value, operator = 'FILTER_OPERATOR_IN_RANGE') =>
-      ({ filters: [{ field, operator, value }], pagination_options: page });
+    const withValue = (value) => ({
+      filters: [{ field: 'timeRange', operator: 'FILTER_OPERATOR_IN_RANGE', value }],
+      pagination_options: page });
 
     const attempts = [
-      /* No filter at all. If the feed defaults to its own recent window this
-         answers outright, and it is the shortest path to seeing a row. */
-      { name: 'POST, no filters, snake_case pagination_options',
+      ...Object.entries(fmts).map(([label, value]) => ({
+        name: `POST, timeRange IN_RANGE, ${label}`,
+        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
+        body: withValue(value) })),
+      /* The control that proves the envelope is still right even when every
+         format above is refused: it should keep saying "No Time Range". */
+      { name: 'POST, no filters (envelope control — expect "No Time Range")',
         url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
         body: { filters: [], pagination_options: page } },
-      { name: 'POST, timeRange IN_RANGE, value as [ISO, ISO]',
-        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: filt('timeRange', isoPair) },
-      { name: 'POST, time_range IN_RANGE, value as [ISO, ISO]',
-        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: filt('time_range', isoPair) },
-      { name: 'POST, timeRange IN_RANGE, value as [epoch-ms, epoch-ms]',
-        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: filt('timeRange', msPair) },
-      { name: 'POST, processed_at IN_RANGE, value as [ISO, ISO]',
-        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: filt('processed_at', isoPair) },
-      { name: 'POST, processedAt IN_RANGE, value as [ISO, ISO]',
-        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: filt('processedAt', isoPair) },
-      /* A deliberately wrong field name, to make Uber enumerate the ones it
-         accepts — the same trick that produced pagination_options above. */
-      { name: 'POST, a field name that cannot exist, to draw out the valid set',
-        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: filt('not_a_real_field', isoPair) },
       { name: 'GET (control — what the three existing probes send)',
         url: `${base}?${qs({ org_id: org, limit: 50 })}`, method: 'GET', headers: auth },
     ];
