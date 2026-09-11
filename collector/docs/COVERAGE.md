@@ -827,6 +827,37 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **Only Uber publishes a timeline; every other channel publishes finished
+  trips, and a trip is a ONE-SIDED bound on when somebody came online.** A job
+  cannot be given to a driver who is not online, so a trip at 06:19 proves they
+  were there by 06:19. A trip at 12:14 proves nothing about the morning — the
+  gap between coming online and the first job is a median 68–73 minutes on this
+  fleet, p90 197–380, max 907. **The evidence may clear somebody and must never
+  accuse them.**
+
+  `/api/online-time` gathered that evidence from Uber trips alone, which made
+  it useless for exactly the people it could have helped: no Uber trip means no
+  Uber timeline, which is what puts a driver in the grey bucket in the first
+  place. Measured on production 2026-09-10, **0 of the 72 unjudged rows carried
+  a first trip**, while four of them were driving hotel jobs that day — and
+  three of the four sat in `cannot_earn`, so an operations page told somebody
+  they could not take work on a day they took five jobs. `can_earn` is read off
+  the **Uber** standing; it says nothing about the hotel channel.
+
+  So the aggregate is split in two and both halves are needed:
+  `platform = 'uber'` still decides `awaiting_feed` (only an Uber trip can mean
+  Uber's timeline is behind), and `platform <> 'fms'` gathers the evidence. FMS
+  is excluded because it watches cars: a GPS journey is not somebody being
+  given a job.
+
+* **A caption built from flat per-basis totals stops adding up the moment a
+  basis becomes judgeable.** The "cannot be judged" tile listed its states from
+  totals that count every row of a basis, judged or not. That held only while
+  no basis could ever be judged; when a driver could be cleared by a trip while
+  keeping the basis that explains the missing stamp, the caption named 4 states
+  under a figure of 5. Breakdowns of a filtered figure must be **counted over
+  the filtered rows**, not assembled from unfiltered ones.
+
 * **Bolt files an OFFER as a trip row and Uber does not, so a cancellation
   count is not comparable between two drivers on different channels.** Uber's
   export contains dispatched trips; the offers that preceded them are not in

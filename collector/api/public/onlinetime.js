@@ -51,6 +51,13 @@ export const GREY = {
   not_asked: 'not asked',
   cannot_earn: 'cannot earn',
   absent: 'no event',
+  /* A sixth, and it is the only one of these that is not an absence: the
+     person was demonstrably working, on a channel that reports finished trips
+     and never reports when somebody came online. It sits in this map because
+     the Online column has no time to print for them — but the row is not grey,
+     and where the first trip lands before the start time the chip goes green
+     and says "driving by 06:19" instead of any of these words. */
+  worked_elsewhere: 'drove, no timeline',
 };
 
 export async function renderOnlineTime(root) {
@@ -117,9 +124,20 @@ export async function renderOnlineTime(root) {
       { label: 'Late', value: judged ? fmt(t.late ?? 0) : '—',
         tone: judged && t.late ? 'bad' : null,
         sub: judged ? `came online after ${esc(d.expected_start)}` : 'no start time to judge against' },
+      /* Two strengths of claim under one number, and the sub-line says so.
+         Most of these came off Uber's own ONLINE transition. The rest are
+         people with no timeline at all who were already driving a job by the
+         start time — which proves they were online, because a job cannot be
+         given to a driver who is not, but does not say when. Merging the two
+         silently would let a reader take a bound for a measurement. */
       { label: 'On time', value: judged ? fmt(t.on_time ?? 0) : '—',
         tone: judged && t.on_time ? 'good' : null,
-        sub: judged ? `online by ${esc(d.expected_start)}` : 'no start time to judge against' },
+        sub: judged
+          ? `online by ${esc(d.expected_start)}`
+            + (t.on_time_by_trip
+              ? ` · ${fmt(t.on_time_by_trip)} of them proved by a trip, not a timeline`
+              : '')
+          : 'no start time to judge against' },
       /* The grey number is a first-class figure and not a remainder. It is the
          count of people this page REFUSES to judge, and an operator who cannot
          see it will read the two numbers beside it as the whole fleet. */
@@ -131,18 +149,36 @@ export async function renderOnlineTime(root) {
          own figure is the same defect the trip-value tile shipped with once
          and was pinned for. */
       { label: 'Cannot be judged', value: judged ? fmt(t.unjudged ?? 0) : fmt(t.people),
+        /* Built from `unjudged_by_basis`, which counts only the rows that are
+           actually grey. The flat per-basis totals count judged rows too, and
+           the moment a basis became clearable — a driver with no online stamp
+           who was demonstrably driving before the start — this caption named 4
+           states under a figure of 5. */
         sub: judged
-          ? `${fmt(t.already_online)} already on · ${fmt(t.awaiting_feed)} not in yet · `
-            + `${fmt(t.not_asked)} never asked · ${fmt(t.cannot_earn)} cannot earn · `
-            + `${fmt(t.absent)} no event`
+          ? Object.entries(t.unjudged_by_basis || {})
+            .filter(([, n]) => n > 0)
+            .map(([b, n]) => `${fmt(n)} ${GREY[b] || b}`)
+            .join(' · ')
+            /* The slice of the grey an operator can still act on: they drove,
+               so the question is not whether they worked but when they
+               started, and their first trip landed too late to answer it. */
+            + (t.unjudged_but_worked
+              ? ` — ${fmt(t.unjudged_but_worked)} of these did drive, just not before `
+                + `${esc(d.expected_start)}`
+              : '')
           : `everyone, for want of a start time · ${fmt(t.already_online + t.awaiting_feed
-            + t.not_asked + t.cannot_earn + t.absent)} would be grey anyway` },
+            + t.not_asked + t.cannot_earn + t.absent + (t.worked_elsewhere || 0))} would be `
+            + 'grey anyway' },
       /* The denominator is people who COULD have driven. Counting the 30
          suspended and deactivated standings into "of 157 with an Uber account"
          made the fleet look a third idler than it is. */
-      { label: 'Drove', value: fmt(t.drove),
-        sub: `of ${fmt(t.people - (t.cannot_earn || 0))} allowed to take work`
-          + (t.cannot_earn ? ` · ${fmt(t.cannot_earn)} more cannot` : '') },
+      /* `worked`, not `drove`: the latter counts Uber bookings alone, which on
+         a page that now reads every channel would print a smaller number than
+         the table beside it shows first trips for. */
+      { label: 'Drove', value: fmt(t.worked ?? t.drove),
+        sub: `of ${fmt(t.people - (t.cannot_earn || 0))} allowed to take work on Uber`
+          + ((t.worked ?? t.drove) > t.drove
+            ? ` · ${fmt((t.worked ?? t.drove) - t.drove)} of them on another channel only` : '') },
     ]));
 
     if (t.not_asked) {
@@ -173,14 +209,30 @@ export async function renderOnlineTime(root) {
             + `${esc(r.online_local)}</span>`
             + (r.late ? `<span class="dim" title="after the ${esc(d.expected_start)} you set">`
               + ` +${fmt(r.minutes_late)}m</span>` : '')
-          : `<span class="tag dim" title="${esc(r.online_why)}">${esc(GREY[r.online_basis] || '—')}</span>`) },
-      /* Evidence, never a verdict — see the header. Shown for every row that
-         has one, including the green ones, because "online 06:12, first job
-         07:30" is the gap an operator actually acts on. */
-      { label: 'First trip', key: 'first_trip_local', num: true,
-        render: (r) => (r.first_trip_local
-          ? `${esc(r.first_trip_local)}<span class="dim"> · ${fmt(r.trips)}</span>`
-          : '<span class="ent-off" title="no Uber booking on this day">—</span>') },
+          : `<span class="tag ${r.judged_by === 'first_trip' ? 'ok' : 'dim'}" `
+            + `title="${esc(r.online_why)}">${esc(r.judged_by === 'first_trip'
+              ? `driving by ${r.worked_first_local}` : (GREY[r.online_basis] || '—'))}</span>`) },
+      /* Evidence, never a verdict — see the endpoint's header. Shown for every
+         row that has one, including the green ones, because "online 06:12,
+         first job 07:30" is the gap an operator actually acts on.
+
+         EVERY EARNING CHANNEL, not just Uber. This column read
+         `first_trip_local`, which is Uber's own first trip, so it was empty for
+         precisely the people it could have helped: a driver with no Uber trip
+         is a driver with no Uber timeline, which is what put them in the grey
+         bucket in the first place. Measured on production 2026-09-10, 0 of the
+         72 unjudged rows carried a value here and 4 of them were driving hotel
+         jobs. The channel is named beside the time, because "07:25" means
+         something different when Uber never saw it. */
+      { label: 'First trip', key: 'worked_first_local', num: true,
+        absent: 'A blank here is a driver who took no booking on any channel that day.',
+        render: (r) => (r.worked_first_local
+          ? `${esc(r.worked_first_local)}`
+            + `<span class="dim" title="${esc(`first booking of ${r.worked_trips} on `
+              + `${(r.worked_platforms || []).map(sourceLabel).join(' and ')}`)}"> `
+            + `${esc(sourceLabel(r.worked_first_platform))} · ${fmt(r.worked_trips)}</span>`
+          : '<span class="ent-off" title="no booking on any channel on this day — not '
+            + 'Uber, not the hotel channel, not Bolt or Yango">—</span>') },
       { label: 'Phone', key: 'phone',
         render: (r) => (r.phone
           ? `<a href="tel:${esc(dialable(r.phone))}">${esc(dialable(r.phone))}</a>`

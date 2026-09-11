@@ -56,6 +56,7 @@
    driver-days-with-trips is 100% from that date and exactly 0% before it. */
 
 import { placeAt } from './place_sql.js';
+import { channelWords } from '../src/channels.js';
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const hhmm = (n) => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
@@ -162,7 +163,7 @@ export function onlineRoutes(app, { q, wrap }) {
        page as its own row instead of merging or vanishing. */
     const PK = (a) => `coalesce(nullif(${a}.person_key, ''), ${a}.driver_ext_id)`;
 
-    const [people, drove, recent, custody, phones, feed] = await Promise.all([
+    const [people, drove, worked, recent, custody, phones, feed] = await Promise.all([
       /* WHO THE PAGE IS ABOUT. Everyone holding an Uber account, folded to the
          PERSON — api/identity_map.js applies 130 entries over 124 people, and
          in 37 of them the surviving canonical record is not the Uber one, so a
@@ -223,6 +224,37 @@ export function onlineRoutes(app, { q, wrap }) {
                 array_remove(array_agg(DISTINCT driver_ext_id), NULL) AS drove_ids
            FROM trip t
           WHERE platform = 'uber'
+            AND (requested_at AT TIME ZONE 'Asia/Dubai')::date = $1::date
+          GROUP BY 1`, p),
+      /* WHAT THEY DID ON EVERY OTHER CHANNEL, which is the difference between
+         "we know nothing about this person today" and "this person was driving
+         a hotel job at 06:19".
+         ─────────────────────────────────────────────────────────────────────
+         The aggregate above is `platform = 'uber'` and has to stay that way:
+         it decides `awaiting_feed` — "a trip exists and its ONLINE event has
+         not landed yet" — and that sentence is only true of an UBER trip,
+         because Uber's timeline is the only feed that could be behind. A
+         hotel-only driver folded into it would be told the timeline was
+         catching up on them when Uber was never asked about them at all.
+
+         So the evidence is gathered separately. `platform <> 'fms'` rather
+         than a list of names: schema_v7 defines is_booking that way, and FMS
+         is a telematics feed that watches cars rather than a channel that
+         sells rides — a GPS journey is not proof that somebody was working,
+         only that a vehicle moved.
+
+         MEASURED on production over 2026-09-08, -09 and -10: four people each
+         day sit in the unjudged bucket while holding hotel trips on the very
+         day the page says nothing can be said about them. Three of the four
+         are worse than unjudged — they are in `cannot_earn`, so the page tells
+         an operator they cannot take work while they are taking it. */
+      q(`SELECT ${PK('t')} AS person_key,
+                min(requested_at) AS work_first_at,
+                count(*)::int AS work_trips,
+                array_agg(DISTINCT platform ORDER BY platform) AS work_platforms,
+                (array_agg(platform ORDER BY requested_at))[1] AS work_first_platform
+           FROM trip t
+          WHERE platform <> 'fms'
             AND (requested_at AT TIME ZONE 'Asia/Dubai')::date = $1::date
           GROUP BY 1`, p),
       /* WAS UBER EVER ASKED ABOUT THIS PERSON, in the collector's own units.
@@ -337,6 +369,7 @@ export function onlineRoutes(app, { q, wrap }) {
 
     const byKey = (rows) => new Map(rows.map((r) => [r.person_key, r]));
     const droveBy = byKey(drove);
+    const workedBy = byKey(worked);
     const recentBy = byKey(recent);
     const custodyBy = byKey(custody);
     const phoneBy = new Map(phones.map((r) => [r.driver_ext_id, r.phone]));
@@ -363,6 +396,11 @@ export function onlineRoutes(app, { q, wrap }) {
     for (const key of keys) {
       const pp = peopleBy.get(key) || { person_key: key, uber_ids: [], all_ids: [], portals: [] };
       const d = droveBy.get(key);
+      const w = workedBy.get(key);
+      /* Minutes into the Dubai day of the first booking on ANY earning
+         channel. Named `worked` rather than `first trip` because that is what
+         it establishes: somebody had to be online to be given the job. */
+      const workedMin = w?.work_first_at == null ? null : minsInto(w.work_first_at);
       const trips = d?.trips || 0;
       /* The earliest transition across the person's Uber accounts. min over the
          accounts rather than a single id, because the fold is the point. */
@@ -394,6 +432,39 @@ export function onlineRoutes(app, { q, wrap }) {
           + 'different clocks'
           + (feedAt ? ` — the timeline last ran at ${new Date(feedAt).toISOString().slice(11, 16)} UTC. ` : '. ')
           + 'It fills in on the next pass; it is not evidence about the driver.';
+      } else if ((w?.work_trips || 0) > 0) {
+        /* THEY WERE DRIVING, on a channel that does not publish a timeline.
+           ───────────────────────────────────────────────────────────────────
+           Checked BEFORE cannot_earn, and that ordering is the point. `can_earn`
+           is read off the UBER standing, so a driver Uber has waitlisted while
+           the hotel channel keeps giving them jobs was being told, on an
+           operations page, that they cannot take work — on days they took five
+           of them. Measured on production 2026-09-08, -09 and -10: three people
+           every day, every one of them driving hotel jobs under a sentence
+           saying they could not.
+
+           Checked AFTER awaiting_feed for the opposite reason: if an UBER trip
+           exists then Uber's timeline genuinely is behind, and that is a more
+           specific and more useful thing to say than this. */
+        const chans = channelWords(w.work_platforms);
+        basis = 'worked_elsewhere';
+        why = `No Uber online event for this day, and none is expected: this driver worked `
+          + `${chans}, which report finished trips and never publish when somebody came `
+          + `online. The first of ${w.work_trips === 1 ? 'their trips' : `their ${w.work_trips} trips`} `
+          + `was at ${hhmm(workedMin)}, so they were online at or before then — a trip cannot `
+          + 'be given to a driver who is not.'
+          /* And when that proof lands AFTER the start time it is not proof of
+             anything about the start time. Said here rather than left for the
+             reader to work out, because the natural reading of "first trip
+             12:14" under a heading about lateness is that the person turned up
+             at noon, and the header of this file measures the gap between
+             coming online and the first trip at a median of 68 to 73 minutes
+             and a maximum of 907. */
+          + (start != null && workedMin > start
+            ? ` That is after ${hhmm(start)}, which does not make them late: a driver `
+              + 'online from first thing who is offered nothing until midday has the same '
+              + 'first trip as one who started at midday. It is not judged either way.'
+            : '');
       } else if (pp.can_earn === false) {
         /* A FIFTH state, and it was found on production rather than designed:
            of 157 people holding an Uber account on 2026-09-09, 30 held one
@@ -438,6 +509,18 @@ export function onlineRoutes(app, { q, wrap }) {
         first_trip_at: d?.first_trip_at || null,
         first_trip_local: d?.first_trip_at == null ? null : hhmm(minsInto(d.first_trip_at)),
         trips,
+        /* THE SAME BOUND, OVER EVERY EARNING CHANNEL. `first_trip_at` above is
+           Uber's alone, which is right beside an Uber online stamp and useless
+           for the person whose whole day was hotel jobs — they had no Uber trip
+           BY DEFINITION of being in this bucket, so the column was empty for
+           every single one of the people it could have helped. Measured on
+           production 2026-09-10: 0 of the 72 unjudged rows carried an Uber
+           first trip, and 4 of them were driving. */
+        worked_first_at: w?.work_first_at || null,
+        worked_first_local: workedMin == null ? null : hhmm(workedMin),
+        worked_first_platform: w?.work_first_platform || null,
+        worked_platforms: w?.work_platforms || [],
+        worked_trips: w?.work_trips || 0,
         plate: custodyBy.get(key)?.plate || d?.trip_plate || pp.state_plate || null,
         plate_basis: (custodyBy.get(key)?.plate || d?.trip_plate)
           ? 'held that day'
@@ -451,8 +534,35 @@ export function onlineRoutes(app, { q, wrap }) {
         /* Filled by the placement pass below, for the rows that have a moment
            to place. */
         where: null, where_why: null,
-        ...(start == null || onlineMin == null ? { late: null, minutes_late: null }
-          : { late: onlineMin > start, minutes_late: onlineMin - start }),
+        /* THE VERDICT, and the one-sided rule that governs the second source.
+           ───────────────────────────────────────────────────────────────────
+           An online stamp is two-sided: it says when they came on, so it can
+           mark somebody late OR on time. A first trip is not. It proves
+           somebody was online at or before it — a job cannot be given to a
+           driver who is not — so:
+
+             a trip at or before the start   PROVES they were there in time.
+             a trip after the start          proves NOTHING about lateness.
+                                             They may have been online from
+                                             06:00 and been offered nothing.
+                                             The header measures the gap at a
+                                             median 68-73 minutes and a max of
+                                             907, so reading a late first trip
+                                             as a late start would invent a
+                                             phone call out of a quiet morning.
+
+           So the evidence is only ever allowed to clear somebody, never to
+           accuse them, and it is applied only where the online stamp said
+           nothing at all. `minutes_late` stays null on those rows: we know they
+           were in time, not how early. `judged_by` names which source decided,
+           because "on time" established two ways is two different strengths of
+           claim and the page has to be able to say which it holds. */
+        ...(start == null ? { late: null, minutes_late: null, judged_by: null }
+          : onlineMin != null
+            ? { late: onlineMin > start, minutes_late: onlineMin - start, judged_by: 'online' }
+            : workedMin != null && workedMin <= start
+              ? { late: false, minutes_late: null, judged_by: 'first_trip' }
+              : { late: null, minutes_late: null, judged_by: null }),
       });
     }
 
@@ -564,11 +674,43 @@ export function onlineRoutes(app, { q, wrap }) {
         not_asked: count((r) => r.online_basis === 'not_asked'),
         cannot_earn: count((r) => r.online_basis === 'cannot_earn'),
         absent: count((r) => r.online_basis === 'absent'),
+        worked_elsewhere: count((r) => r.online_basis === 'worked_elsewhere'),
         drove: count((r) => r.trips > 0),
+        /* Anybody who took a booking on any channel. `drove` above is Uber's
+           count and stays that way — it pairs with the Uber-shaped bases — but
+           an operator asking "how many of my people worked today" means this
+           one. */
+        worked: count((r) => r.worked_trips > 0),
         ...(start == null ? {} : {
           late: count((r) => r.late === true),
           on_time: count((r) => r.late === false),
+          /* Of those, how many were established by a trip rather than by an
+             online stamp. The tile prints it: "on time" proved by somebody
+             driving at 06:19 is a different strength of claim from "on time"
+             read off Uber's own transition, and a page that shows one number
+             for both has quietly merged them. */
+          on_time_by_trip: count((r) => r.late === false && r.judged_by === 'first_trip'),
           unjudged: count((r) => r.late == null),
+          /* THE BREAKDOWN OF THE GREY, counted over the grey rows themselves.
+             ───────────────────────────────────────────────────────────────
+             The per-basis totals above count every row of that basis, judged
+             or not, and the tile's caption was built from them. That held only
+             while no basis could ever be judged — and now one can: a driver
+             cleared by a trip keeps whatever basis explains their missing
+             online stamp while moving into "on time". The caption immediately
+             stopped adding up to the figure above it, 4 named under a 5, which
+             is the defect that tile's own comment says it was pinned for once
+             already. Restricted to the unjudged rows, it adds up by
+             construction rather than by the two happening to agree. */
+          unjudged_by_basis: Object.fromEntries(
+            ['already_online', 'awaiting_feed', 'not_asked', 'cannot_earn', 'absent',
+              'worked_elsewhere']
+              .map((b) => [b, count((r) => r.late == null && r.online_basis === b)])),
+          /* Unjudged people who WERE demonstrably driving — their first trip
+             just landed after the start time, so it cannot say whether they
+             were late. Worth its own number because it is the one slice of the
+             unjudged bucket an operator can still do something about. */
+          unjudged_but_worked: count((r) => r.late == null && r.worked_trips > 0),
         }),
       },
       feed: {

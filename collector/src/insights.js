@@ -100,7 +100,9 @@ const s_ = (n, one, many = `${one}s`) => (Math.abs(Number(n)) === 1 ? one : many
 
 /* Channel names as the dashboard writes them. A finding is a sentence, and it
    was reading "11% of uber jobs cancel". */
-const CHANNEL = { uber: 'Uber', yango: 'Yango', bolt: 'Bolt', hotel: 'Hotel', fms: 'FMS telematics' };
+/* One spelling for a channel — src/channels.js. This copy was missing
+   CABMAN, which is exactly how a duplicated map fails. */
+import { CHANNEL_NAMES as CHANNEL } from './channels.js';
 const LABEL = (v) => CHANNEL[String(v || '').toLowerCase()] || String(v || '');
 const n_ = (n, one, many) => `${n} ${s_(n, one, many)}`;
 

@@ -1,9 +1,8 @@
 import { personFold, JOIN_TRIP } from './custody_sql.js';
 
-/* One spelling for a channel, matching the dashboard's own label map. */
-const CHANNEL_NAMES = { uber: 'Uber', yango: 'Yango', bolt: 'Bolt', hotel: 'Hotel',
-  fms: 'FMS telematics', cabman: 'CABMAN' };
-const CHANNEL_LABEL = (v) => CHANNEL_NAMES[String(v || '').toLowerCase()] || String(v || '');
+/* One spelling for a channel — src/channels.js, which says why it is not
+   defined here any more. */
+import { CHANNEL_NAMES, channelLabel as CHANNEL_LABEL } from '../src/channels.js';
 /* The roster: who is on the books, and who is actually earning.
    ──────────────────────────────────────────────────────────────────────────
    Four providers each report a driver's standing and none of them knows what

@@ -187,16 +187,39 @@ check('…and the row says we hold no evidence either way',
 console.log('\nthe verdict, and what may never produce one');
 check('the reader’s start time decides late, and only for a reported time',
   rep.late === true && rep.minutes_late === 12, JSON.stringify([rep.late, rep.minutes_late]));
-check('nobody without a reported time is judged at all',
-  [mid, lag, cold].every((r) => r.late === null && r.minutes_late === null),
-  JSON.stringify([mid.late, lag.late, cold.late]));
-/* The first trip is an UPPER bound — a trip is necessarily after going online,
-   by a median 68 to 73 minutes on production. It is evidence, never a verdict. */
+/* THE FIRST TRIP IS A ONE-SIDED BOUND, and these three fixtures are one of
+   each case at a 06:00 start. This block used to assert that nobody without a
+   reported time was judged at all, which was the right protection written as
+   too broad a rule: a trip is necessarily AFTER going online, by a median 68
+   to 73 minutes on production, so it can never show somebody was late — and it
+   can perfectly well show they were already there.
+
+     Bilal Noor  drove at 02:00, four hours before the start. He was online
+                 then, because a job cannot be given to a driver who is not.
+                 Cleared, and the verdict says it came from a trip.
+     Sana Iqbal  drove at 06:30, half an hour after it. That proves she was
+                 working; it says nothing about 06:00, because a driver online
+                 from first thing who is offered nothing until 06:30 has the
+                 same first trip as one who started at 06:30. Not judged.
+     Omar Farid  no booking on the day at all. Not judged, and no evidence
+                 either way is still the honest answer. */
+check('a trip BEFORE the start clears somebody with no online stamp',
+  mid.late === false && mid.judged_by === 'first_trip' && mid.worked_first_local === '02:00',
+  JSON.stringify([mid.late, mid.judged_by, mid.worked_first_local]));
+check('…without inventing a minutes figure, a bound being no measurement',
+  mid.minutes_late === null, String(mid.minutes_late));
+check('a trip AFTER the start judges nobody, in either direction',
+  lag.late === null && lag.minutes_late === null && lag.worked_first_local === '06:30',
+  JSON.stringify([lag.late, lag.worked_first_local]));
+check('and no booking on the day is still no evidence either way',
+  cold.late === null && cold.worked_trips === 0,
+  JSON.stringify([cold.late, cold.worked_trips]));
 check('the first trip is carried as evidence',
   lag.first_trip_local === '06:30' && rep.first_trip_local === '07:30',
   JSON.stringify([lag.first_trip_local, rep.first_trip_local]));
 check('…and never colours anyone late by itself',
-  lag.late === null, 'a first trip is an upper bound and a lateness verdict built on it is too kind');
+  [mid, lag, cold].every((r) => r.late !== true),
+  'a first trip is an upper bound and a lateness verdict built on it is too kind');
 
 console.log('\nwhat operations needs beside the time');
 check('the phone number is on the row, so somebody can be called',
@@ -224,11 +247,17 @@ check('the totals name each reason rather than lumping them as missing',
   && d.totals.awaiting_feed === 2 && d.totals.not_asked === 2
   && d.totals.cannot_earn === 1 && d.totals.absent === 1, JSON.stringify(d.totals));
 check('and the counted verdict matches the rows',
-  d.totals.late === 2 && d.totals.on_time === 1 && d.totals.unjudged === 7,
+  d.totals.late === 2 && d.totals.on_time === 2 && d.totals.unjudged === 6,
   JSON.stringify(d.totals));
-check('…and every person carries exactly one of the six reasons',
+/* One of the two was cleared by a trip rather than by an online stamp, and the
+   page has to be able to say which — "on time" proved two ways is two different
+   strengths of claim. */
+check('…and says how many of the on-time were proved by a trip, not a timeline',
+  d.totals.on_time_by_trip === 1, JSON.stringify(d.totals));
+check('…and every person carries exactly one of the seven reasons',
   d.totals.reported + d.totals.already_online + d.totals.awaiting_feed
-  + d.totals.not_asked + d.totals.cannot_earn + d.totals.absent === d.totals.people,
+  + d.totals.not_asked + d.totals.cannot_earn + d.totals.absent
+  + d.totals.worked_elsewhere === d.totals.people,
   JSON.stringify(d.totals));
 check('…and the three counts partition the page, leaving nobody unaccounted for',
   d.totals.late + d.totals.on_time + d.totals.unjudged === d.totals.people,

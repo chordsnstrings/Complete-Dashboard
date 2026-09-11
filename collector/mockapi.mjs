@@ -4925,12 +4925,45 @@ app.get('/api/online-time', (req, r) => {
        fixture that silently covers less than it says it covers is worse than a
        small one — the smoke run went green over an untested path. Anchoring on
        the end of the list makes the coverage independent of its length. */
-    const GREY = ['already_online', 'awaiting_feed', 'not_asked', 'cannot_earn'];
+    /* Five now, and the fifth is the one this fixture exists to exercise:
+       `worked_elsewhere` is somebody with no Uber timeline who was driving a
+       hotel job anyway. Its row is built so the first trip lands BEFORE any
+       sensible start time, because the whole behaviour being covered is that
+       such a person turns green on the strength of a trip rather than a
+       timeline. The one after it drives too, and too late to be cleared — the
+       other half of the same rule. */
+    const GREY = ['already_online', 'awaiting_feed', 'not_asked', 'cannot_earn',
+      'worked_elsewhere', 'worked_late'];
     const back = drivers.length - 1 - i;
-    const basis = back < GREY.length ? GREY[back] : 'reported';
+    const raw = back < GREY.length ? GREY[back] : 'reported';
+    const basis = raw === 'worked_late' ? 'worked_elsewhere' : raw;
     const min = basis === 'reported' ? 300 + ((i * 37) % 260) : null;
     const trips = basis === 'not_asked' ? 0 : 4 + (i % 14);
-    const late = startMin == null || min == null ? null : min > startMin;
+    /* Every channel, which is what the page now reads. `not_asked` is the one
+       state that means no booking anywhere — that is what makes it not_asked. */
+    /* THE FIXTURE MUST OBEY THE ENDPOINT'S OWN INVARIANTS, and two of these
+       were found by rendering it rather than by reading it.
+
+       `cannot_earn` gets NO trips. The real route checks "did they drive
+       anywhere" BEFORE it checks the Uber standing, precisely so that a driver
+       Uber has waitlisted while the hotel channel keeps giving them work is
+       never told they cannot take work — so a cannot_earn row carrying six
+       hotel trips is a shape the endpoint cannot produce, and the mock was
+       rendering exactly the sentence the change exists to delete.
+
+       And the early one is 05:10, not 06:19: the page's own default start is
+       06:00, so a 06:19 trip clears nobody and the green "driving by" chip —
+       the single most important thing this fixture covers — never appeared on
+       screen at all. */
+    const workedMin = basis === 'not_asked' || basis === 'cannot_earn' ? null
+      : raw === 'worked_late' ? 730                       // 12:10 — drove, too late to clear
+        : raw === 'worked_elsewhere' ? 310                // 05:10 — drove, before the start
+          : (min ?? 330) + 40;
+    const workedPlats = raw === 'worked_elsewhere' || raw === 'worked_late'
+      ? ['hotel'] : (i % 3 === 1 ? ['hotel', 'uber'] : ['uber']);
+    const late = startMin == null ? null
+      : min != null ? min > startMin
+        : (workedMin != null && workedMin <= startMin ? false : null);
     return {
       person_key: `pk-${i}`, name, driver_ext_id: `drv-${i}`, uber_ids: [`drv-${i}`],
       can_earn: true,
@@ -4948,12 +4981,30 @@ app.get('/api/online-time', (req, r) => {
             : basis === 'cannot_earn'
               ? 'Uber turned this application down. This account is not coming online, now or '
                 + 'later, and it should not be on a call list at all.'
-              : 'Uber was never asked about this driver. The timeline is only requested for people who '
+              : basis === 'worked_elsewhere'
+                ? 'No Uber online event for this day, and none is expected: this driver worked '
+                  + 'Hotel, which reports finished trips and never publishes when somebody came '
+                  + `online. The first of their ${trips} trips was at ${hhmm(workedMin)}, so they `
+                  + 'were online at or before then — a trip cannot be given to a driver who is not.'
+                  + (raw === 'worked_late'
+                    ? ' That is after the start you set, which does not make them late: a driver '
+                      + 'online from first thing who is offered nothing until midday has the same '
+                      + 'first trip as one who started at midday. It is not judged either way.'
+                    : '')
+                : 'Uber was never asked about this driver. The timeline is only requested for people who '
               + 'took a trip in the previous two days, and this person took none — so we hold no '
               + 'evidence either way, and none is coming until somebody runs the roster sweep.',
       first_trip_at: trips ? `${day}T${hhmm((min ?? 330) + 40)}:00+04:00` : null,
       first_trip_local: trips ? hhmm((min ?? 330) + 40) : null,
       trips,
+      worked_first_at: workedMin == null ? null : `${day}T${hhmm(workedMin)}:00+04:00`,
+      worked_first_local: workedMin == null ? null : hhmm(workedMin),
+      worked_first_platform: workedMin == null ? null : workedPlats[0],
+      worked_platforms: workedMin == null ? [] : workedPlats,
+      worked_trips: workedMin == null ? 0 : trips,
+      judged_by: startMin == null ? null
+        : min != null ? 'online'
+          : (workedMin != null && workedMin <= startMin ? 'first_trip' : null),
       plate: plates[i % plates.length],
       plate_basis: basis === 'not_asked'
         ? 'attached on the Uber roster — not a car we saw them drive today' : 'held that day',
@@ -4980,10 +5031,18 @@ app.get('/api/online-time', (req, r) => {
       not_asked: n((x) => x.online_basis === 'not_asked'),
       cannot_earn: n((x) => x.online_basis === 'cannot_earn'),
       absent: 0,
+      worked_elsewhere: n((x) => x.online_basis === 'worked_elsewhere'),
       drove: n((x) => x.trips > 0),
+      worked: n((x) => x.worked_trips > 0),
       ...(startMin == null ? {} : {
         late: n((x) => x.late === true), on_time: n((x) => x.late === false),
+        on_time_by_trip: n((x) => x.late === false && x.judged_by === 'first_trip'),
         unjudged: n((x) => x.late == null),
+        unjudged_but_worked: n((x) => x.late == null && x.worked_trips > 0),
+        unjudged_by_basis: Object.fromEntries(
+          ['already_online', 'awaiting_feed', 'not_asked', 'cannot_earn', 'absent',
+            'worked_elsewhere']
+            .map((b) => [b, n((x) => x.late == null && x.online_basis === b)])),
       }),
     },
     feed: {
