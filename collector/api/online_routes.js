@@ -313,15 +313,29 @@ export function onlineRoutes(app, { q, wrap }) {
          returned nothing for. The product was understating what it knows over
          exactly the period it knows most about.
 
-         `window_end` is EXCLUSIVE here. The run records the instant it woke as
-         the end, so the last day in the range is only partly covered, and a
-         partly covered day claimed as fully asked is the error that runs
-         towards `absent` — the state that asserts evidence. The comment above
-         chose the other direction deliberately and this keeps that choice. */
-      q(`SELECT fleet_id, max(finished_at) AS swept_at
+         A PARTLY COVERED DAY IS NOT AN UNCOVERED ONE. The run records the
+         instant it woke as its end, so its last day is covered only up to that
+         moment — and the tick's last day is ALWAYS TODAY, the day the page is
+         actually read. Excluding it outright, which is what this did first,
+         meant today's readers kept the "we never asked" sentence about people
+         Uber had been asked about all morning: 37 of them on 2026-09-11, over
+         a pass that had run at 16:18 Dubai.
+
+         So the coverage carries HOW FAR INTO THE DAY it reaches, as minutes
+         from that day's Dubai midnight, capped at a whole day. The question
+         this page asks is "were they online by the start time", and a pass
+         that ran past the start time answers it; one that stopped before it
+         does not, and that day stays unclaimed. The error still falls towards
+         `not_asked`, the state that asserts nothing — which is the direction
+         the comment above chose and this keeps. */
+      q(`SELECT fleet_id, max(finished_at) AS swept_at,
+                max(least(
+                  extract(epoch from (finished_at
+                    - ($1::date::timestamp AT TIME ZONE 'Asia/Dubai'))) / 60,
+                  1440))::int AS covered_minutes
            FROM collection_run
           WHERE source = 'uber_timeline' AND mode = 'roster' AND status = 'ok'
-            AND window_start <= $1::date AND window_end > $1::date
+            AND window_start <= $1::date AND window_end >= $1::date
           GROUP BY 1`, [p[0]]),
       /* The car they held that day, from the shared definition every other
          vehicle fact uses. Trip-derived, so it is empty for a driver with no
@@ -455,9 +469,21 @@ export function onlineRoutes(app, { q, wrap }) {
          a recent trip; the whole-roster sweep reaches everybody on the fleet's
          books. Both are real asks and either one makes "we never asked" false,
          so the page must test both or it prints a sentence it cannot support. */
-      const sweptAt = (pp.fleets || []).map((f) => sweptBy.get(f)).filter(Boolean)
-        .map((r) => r.swept_at).sort().pop() || null;
-      const askedAbout = (recentBy.get(key)?.n || 0) > 0 || sweptAt != null;
+      const sweeps = (pp.fleets || []).map((f) => sweptBy.get(f)).filter(Boolean);
+      const coveredMin = sweeps.length
+        ? Math.max(...sweeps.map((r) => Number(r.covered_minutes) || 0)) : null;
+      /* How far into this day a whole-roster pass reached, and whether that is
+         far enough to answer the question on screen. A pass that stopped before
+         the start time cannot say whether somebody was late by it, so the day
+         stays unclaimed rather than being reported as asked-and-nothing. With
+         no start time set there is no threshold to clear, so only a whole day
+         counts. */
+      const sweptWhole = coveredMin != null && coveredMin >= 1440;
+      const sweptEnough = sweptWhole
+        || (coveredMin != null && start != null && coveredMin >= start);
+      const sweptAt = sweptEnough
+        ? sweeps.map((r) => r.swept_at).filter(Boolean).sort().pop() || null : null;
+      const askedAbout = (recentBy.get(key)?.n || 0) > 0 || sweptEnough;
 
       let basis, why;
       if (firstAt) {
@@ -545,9 +571,17 @@ export function onlineRoutes(app, { q, wrap }) {
            books for a whole span at once; the incremental tick asked because
            this person had a recent trip. */
         why = sweptAt
-          ? 'Uber was asked about every driver on the roster for this day — the whole-roster '
-            + `sweep of ${new Date(sweptAt).toISOString().slice(0, 10)} covered it — and returned `
-            + 'no online event for this person. They did not come online.'
+          ? 'Uber was asked about every driver on the roster '
+            + (sweptWhole
+              ? 'for this day'
+              /* The cut-off, said out loud. "Asked and nothing" over half a day
+                 is a weaker claim than over a whole one, and an operator
+                 deciding whether to ring somebody is entitled to know which
+                 they are holding. */
+              : `for this day up to ${hhmm(coveredMin)}`)
+            + ` — the whole-roster sweep of ${new Date(sweptAt).toISOString().slice(0, 10)} `
+            + 'covered it — and returned no online event for this person. They did not come '
+            + `online${sweptWhole ? '' : ` before ${hhmm(coveredMin)}`}.`
           : 'Uber was asked about this driver and returned no online event for this day.';
       }
 
@@ -785,7 +819,7 @@ export function onlineRoutes(app, { q, wrap }) {
           + 'not asked rather than as absent.',
         /* When a whole-roster pass last covered THIS day, which is what lets
            the rows above say "asked and nothing" rather than "never asked". */
-        roster_swept_at: (swept || []).map((r) => r.swept_at).sort().pop() || null,
+        roster_swept_at: (swept || []).map((r) => r.swept_at).filter(Boolean).sort().pop() || null,
       },
     });
   }));

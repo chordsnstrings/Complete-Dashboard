@@ -856,9 +856,17 @@ driver's 222 tracker fixes.
   **44–49 people a day as never asked about**, people Uber had been asked about
   and returned nothing for. It reads `collection_run` now (`mode='roster'`,
   `status='ok'`, `window_start <= day < window_end`, per fleet). `window_end`
-  is exclusive on purpose: the run stores the instant it woke, so the last day
-  is only part-covered, and claiming it would err towards the state that
-  asserts evidence about a person.
+  A PARTLY COVERED DAY IS NOT AN UNCOVERED ONE, and getting this wrong the
+  first time cost the fix most of its value: a run stores the instant it woke
+  as its window end, so its last day is covered only up to that moment — and
+  for the three-hourly tick that last day is **always today**, the day the page
+  is read. Excluding it outright left 37 people on 2026-09-11 reading "we never
+  asked" over a pass that had run at 16:18 Dubai. So coverage carries how far
+  into the day it reached (minutes from that day's Dubai midnight, capped at
+  1440), and a pass counts when it ran **past the start time the reader set** —
+  which is the question the page asks. A pass that stopped before it claims
+  nothing, and with no start time only a whole covered day counts. The sentence
+  names the cut-off when the day is partial.
 
 * **Only Uber publishes a timeline; every other channel publishes finished
   trips, and a trip is a ONE-SIDED bound on when somebody came online.** A job

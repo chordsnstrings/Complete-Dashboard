@@ -84,17 +84,43 @@ const row = (n) => body.rows.find((r) => r.name === n);
     r.online_why);
 }
 
-/* ── the boundary, which must fall towards claiming nothing ─────────────── */
+/* ── the partly covered day, which is the one people actually read ──────
+   A run records the instant it woke as its window end, so its LAST day is
+   covered only up to that moment — and for the three-hourly tick that last day
+   is always today. Excluding it outright, which is what this did first, kept
+   the "we never asked" sentence on today's page about people Uber had been
+   asked about all morning: 37 of them on production on 2026-09-11, over a pass
+   that had run at 16:18 Dubai.
+
+   So coverage carries how far into the day it reached. The question the page
+   asks is "were they online by the start time"; a pass that ran past the start
+   answers it, and one that stopped before it does not. This fixture's sweep
+   finished at 07:31 UTC — 11:31 Dubai — on 2026-08-27. */
 {
-  /* window_end is the instant the run woke, so the last day in the range is
-     only PARTLY covered. Claiming it as fully asked is the error that runs
-     towards `absent`, the state that asserts evidence about a person. */
   const end = await get('day=2026-08-27&start=08:00');
-  check('the last day of a sweep window is not claimed as swept, being only part-covered',
-    end.rows.find((r) => r.name === 'Swept Roster')?.online_basis === 'not_asked',
-    end.rows.find((r) => r.name === 'Swept Roster')?.online_basis);
+  const r = end.rows.find((x) => x.name === 'Swept Roster');
+  check('a pass that ran PAST the start time can answer the day it stopped inside',
+    r?.online_basis === 'absent', r?.online_basis);
+  check('…and the sentence names the cut-off rather than claiming the whole day',
+    /up to 11:31/.test(r.online_why) && /did not come online before 11:31/.test(r.online_why),
+    r.online_why);
+
+  /* The other direction, which is the one that protects somebody: a pass that
+     stopped BEFORE the start time cannot say whether they were late by it. */
+  const early = await get('day=2026-08-27&start=14:00');
+  check('a pass that stopped BEFORE the start time claims nothing about that day',
+    early.rows.find((x) => x.name === 'Swept Roster')?.online_basis === 'not_asked',
+    early.rows.find((x) => x.name === 'Swept Roster')?.online_basis);
+
+  /* And with no start time there is no threshold to clear, so only a day
+     covered end to end counts. */
+  const noStart = await get('day=2026-08-27');
+  check('with no start time set, only a whole covered day counts as asked',
+    noStart.rows.find((x) => x.name === 'Swept Roster')?.online_basis === 'not_asked',
+    noStart.rows.find((x) => x.name === 'Swept Roster')?.online_basis);
+
   const first = await get('day=2026-07-28&start=08:00');
-  check('while the first day of it is, being whole',
+  check('while a day the pass covered end to end is claimed whole',
     first.rows.find((r) => r.name === 'Swept Roster')?.online_basis === 'absent',
     first.rows.find((r) => r.name === 'Swept Roster')?.online_basis);
   const before = await get('day=2026-07-27&start=08:00');
