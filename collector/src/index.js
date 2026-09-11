@@ -23,11 +23,17 @@ async function main() {
   if (cmd === 'incremental') return incremental();
   if (cmd === 'analyst') return analystPass();
   if (cmd === 'probe') return probePass();
-  /* `timeline` and `timeline-roster`: the scheduled tick asks about drivers who
-     drove, which cannot find a driver who was online all evening and never got
-     a job. That driver is the point of the panel, so the full sweep is a
-     command rather than something nobody can run. */
-  if (cmd === 'timeline') return uberTimelineTick();
+  /* `timeline` and `timeline-roster`. This note used to say the scheduled tick
+     "asks about drivers who drove, which cannot find a driver who was online
+     all evening and never got a job", and that the full sweep was therefore a
+     command "rather than something nobody can run" — a correct diagnosis with
+     the wrong remedy, since nobody did run it: it last went on 2026-08-27.
+
+     The scheduled tick asks about the whole roster now and a thirty-day sweep
+     runs weekly, so these two are what they should always have been: the same
+     asks, on demand, for somebody who wants one immediately rather than at the
+     next tick. `timeline` matches the cron; `timeline-roster` is the deep one. */
+  if (cmd === 'timeline') return uberTimelineTick({ roster: true });
   if (cmd === 'timeline-roster') return uberTimelineTick({ roster: true, days: 30 });
   /* `profile`: Uber's own rating, lifetime trips, banned flag, compliance
      status and vehicle attachment, one call per driver. A command as well as a
@@ -244,7 +250,14 @@ async function main() {
              of this data, so a session that turns out to be broken has already
              cost history that cannot be recovered later. `timeline-roster`
              sweeps the whole roster rather than the drivers who drove. */
-          else if (job.mode === 'timeline') await uberTimelineTick();
+          /* The SAME ask the cron makes, roster and all. This said
+             `uberTimelineTick()` — the narrow set — so an operator pressing
+             "run the timeline now" got a different answer from the scheduled
+             tick that ran twenty minutes earlier, and would have concluded the
+             schedule was broken rather than that the button was. A manual
+             trigger that does something other than what it is triggering is
+             the kind of drift this file has been bitten by before. */
+          else if (job.mode === 'timeline') await uberTimelineTick({ roster: true });
           /* One call per driver, so it takes the job id and checkpoints per
              driver: a deploy landing mid-sweep resumes where it stopped. */
           else if (job.mode === 'profile') await uberProfileTick({ fleet: job.fleet || null, jobId: job.id });

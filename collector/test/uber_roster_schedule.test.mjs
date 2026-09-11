@@ -72,6 +72,21 @@ check('…and a two-day window is no cheaper per driver than a month',
 check('past a month it chunks, so 30 days is the most one ask can cover',
   windows(new Date('2026-07-01'), new Date('2026-08-31')).length > 1);
 
+/* ── the button and the schedule must do the same thing ─────────────────── */
+{
+  /* An operator can trigger a timeline run from Settings. It called
+     `uberTimelineTick()` — the narrow set — so pressing it gave a different
+     answer from the cron that had run twenty minutes earlier, and the person
+     would reasonably conclude the schedule was broken rather than the button. */
+  check('the on-demand timeline job makes the same ask as the cron',
+    /job\.mode === 'timeline'\) await uberTimelineTick\(\{ roster: true \}\)/.test(index));
+  check('and the command-line timeline does too, so all three agree',
+    /cmd === 'timeline'\) return uberTimelineTick\(\{ roster: true \}\)/.test(index));
+  check('and the deep sweep stays a separate, explicit job',
+    /job\.mode === 'timeline-roster'\) await uberTimelineTick\(\{ roster: true, days: 30 \}\)/
+      .test(index));
+}
+
 /* ── the narrow mode survives as the documented fallback ────────────────── */
 {
   const src = readFileSync('src/sources/uber_timeline.js', 'utf8');
