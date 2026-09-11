@@ -327,7 +327,7 @@ const VIEWS = [
   { id: 'platforms', label: 'Platforms', ic: '◨', sec: 'Work', sub: 'How Uber, Yango and Bolt compare on share, car tier and jobs accepted' },
   { id: 'corridors', label: 'Popular routes', ic: '⇄', sec: 'Work', sub: 'Which pickup areas feed which drop-off areas' },
   { id: 'drivers', label: 'Drivers', ic: '◧', sec: 'People', sub: 'Trips, quality and platform activity for every driver' },
-  { id: 'online-time', label: 'Online time', ic: '◔', sec: 'People', sub: 'When each driver came online on Uber, against the time you expect them to start' },
+  { id: 'online-time', label: 'Online time', ic: '◔', sec: 'People', sub: 'When each driver came online on Uber — or, where Uber has no timeline for them, when they were first given a job on another channel — against the time you expect them to start' },
   { id: 'cancellations', label: 'Cancellations', ic: '⊘', sec: 'People', sub: 'Every driver with a cancelled booking, and whether they or the rider called it off' },
   { id: 'roster', label: 'Driver roster', ic: '☰', sec: 'People', sub: 'Every driver on the books on each platform, and who is earning nothing' },
   { id: 'top-performers', label: 'Top performers', ic: '▲', sec: 'People', sub: 'The best drivers of the last complete week, and what they did differently' },

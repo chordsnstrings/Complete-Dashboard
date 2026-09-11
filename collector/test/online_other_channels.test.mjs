@@ -165,6 +165,18 @@ check('and "drove" counts every channel, not only Uber',
     /from '\.\.\/src\/channels\.js'/.test(src));
 }
 
+/* ── the page must not describe itself as Uber-only any more ─────────────
+   The shell prints a view's one-line description from the VIEWS register, and
+   it said "when each driver came online on Uber" over a page that now clears
+   people on the strength of a hotel job. A subtitle is a claim like any other
+   figure on the screen. */
+{
+  const app = readFileSync('api/public/app.js', 'utf8');
+  const sub = (app.match(/id: 'online-time'[^}]*?sub: '([^']+)'/) || [])[1] || '';
+  check('the view description says the page reads more than Uber',
+    /another channel/.test(sub), sub);
+}
+
 /* ── the grey caption must add up to the grey figure ─────────────────────
    The tile prints "N cannot be judged" with a breakdown under it. That
    breakdown was built from the flat per-basis totals, which count every row of
