@@ -9,7 +9,7 @@
    rather than assigned. This file adds the two things the page needs around
    it: the window, and the sentence that says what the numbers do not cover. */
 import { winDays } from './window.js';
-import { cancellationsSql } from './cancellation_sql.js';
+import { cancellationsSql, OFFER_CHANNELS } from './cancellation_sql.js';
 
 export function cancellationRoutes(app, { q, wrap }) {
   app.get('/api/cancellations', wrap(async (req, res) => {
@@ -65,9 +65,22 @@ export function cancellationRoutes(app, { q, wrap }) {
         drivers: rows.length,
         cancelled: rows.reduce((a, r) => a + (r.cancelled || 0), 0),
         by_driver: rows.reduce((a, r) => a + (r.by_driver || 0), 0),
+        /* The two halves of by_driver, reported apart because they are two
+           different acts — see api/cancellation_sql.js, which carries the
+           measurement. by_driver is kept beside them so the three-bucket total
+           still adds up and so a caller written against the old shape is not
+           broken by this. */
+        dropped: rows.reduce((a, r) => a + (r.dropped || 0), 0),
+        declined: rows.reduce((a, r) => a + (r.declined || 0), 0),
         by_rider: rows.reduce((a, r) => a + (r.by_rider || 0), 0),
         unattributed: unattr,
       },
+      /* How many of these people are even on a channel that reports an offer.
+         The page needs it to word the offers column honestly: "3 of 45 drivers
+         in this window work a channel that files offers" is a different
+         sentence from "42 drivers turned nothing down". */
+      offer_channel_drivers: rows.filter((r) => r.on_offer_channel).length,
+      offer_channels: OFFER_CHANNELS,
       /* One sentence, written here so the desktop and the phone cannot word
          the same limitation differently. */
       unattributed_why: unattr

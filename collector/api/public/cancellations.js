@@ -34,14 +34,54 @@ import { el, esc, panel, loading, note, kpiRow, tableFrom, pill, fmt, entity,
 import { q } from './data.js';
 
 /* Declining an offer and abandoning an accepted job are different behaviours
-   and only the second leaves a rider standing in the street, so the driver
-   column carries its own breakdown rather than one number for both. */
-const driverDetail = (r) => {
+   and only the second leaves a rider standing in the street. They used to be
+   one column with this breakdown in a hover, which meant the number on the
+   page — and the sort that used it — added them.
+
+   It should not have. Over 2026 to date, 5,307 of the fleet's 7,032
+   driver-attributed cancellations are Bolt offers nobody picked up, against
+   566 jobs accepted and then abandoned. Bolt files an offer as a row and Uber
+   does not, so one column ranked people by which app they work: the driver at
+   the top had 433 offers he did not take and 7 jobs he dropped, above every
+   Uber driver who left a real rider waiting. A hover cannot fix a sort.
+
+   So they are two columns now, and each says what it is made of. */
+const droppedDetail = (r) => {
   const bits = [];
-  if (r.driver_after_accept) bits.push(`${fmt(r.driver_after_accept)} after accepting`);
   if (r.driver_cancelled_uber) bits.push(`${fmt(r.driver_cancelled_uber)} cancelled on Uber`);
-  if (r.driver_declined_offer) bits.push(`${fmt(r.driver_declined_offer)} never took the offer`);
+  if (r.driver_after_accept) bits.push(`${fmt(r.driver_after_accept)} abandoned after accepting`);
+  /* The rate an operator can actually compare between two people, which is not
+     the one in the Cancelled column: a Bolt driver's booking count includes
+     offers they never took, so a share of bookings flatters and damns the same
+     row at once. Over the jobs that reached them as a dispatch instead. */
+  if (r.accepted) bits.push(`${Math.round((r.dropped / r.accepted) * 100)}% of the ${fmt(r.accepted)} jobs that reached them`);
   return bits.join(' · ');
+};
+
+/* Only Bolt files an offer at all, which is why this column is blank for most
+   of the fleet and why a blank must say so. An Uber-only driver has no offers
+   on record because Uber's export contains dispatched trips and the offers
+   that preceded them are not in it — not because they took everything they
+   were shown, which is what an em-dash here would let a reader conclude about
+   a named person. */
+const declinedCell = (r) => {
+  if (r.declined) {
+    return pill(fmt(r.declined), r.declined >= 20 ? 'warn' : null,
+      'Offered and either declined or left unanswered. Bolt broadcasts an offer '
+      + 'to several drivers at once, so one ride can be declined by several people, '
+      + 'and nobody was left waiting by it.');
+  }
+  if (r.on_offer_channel) return '0';
+  /* SHORT, because this cell is in every row of a ten-column table and the long
+     form pushed the last column off a 1440px screen — the reader then has to
+     scroll to find "Nobody said who", which is a worse outcome than a terse
+     cell with the reason on hover. The reason is not hidden behind that hover:
+     it is on the column's tile ("only Bolt reports these") and spelled out in
+     full under the table. */
+  return '<span class="dim" title="Only Bolt files the offers a driver was shown; '
+    + 'Uber, Yango, the hotel channel and CABMAN report dispatched trips only. '
+    + 'This driver worked no Bolt booking in this window, so there is nothing to '
+    + 'count here — it does not mean they turned nothing down.">not reported</span>';
 };
 
 export async function renderCancellations(root) {
@@ -60,8 +100,15 @@ export async function renderCancellations(root) {
   const t = d.totals || {};
   root.append(kpiRow([
     { label: 'Cancellations', value: fmt(t.cancelled), sub: 'in this window' },
-    { label: 'By the driver', value: fmt(t.by_driver),
-      sub: t.cancelled ? `${Math.round((t.by_driver / t.cancelled) * 100)}% of them` : null },
+    /* Split, for the same reason the column is. One tile reading "by the
+       driver" over a number that is three-quarters declined offers is the
+       headline version of the same error. */
+    { label: 'Dropped a job', value: fmt(t.dropped),
+      sub: 'accepted, then ended by the driver' },
+    { label: 'Turned down an offer', value: fmt(t.declined),
+      sub: d.offer_channels?.length
+        ? `only ${d.offer_channels.map(sourceLabel).join(' and ')} reports these`
+        : 'no channel reports these' },
     { label: 'By the rider', value: fmt(t.by_rider),
       sub: t.cancelled ? `${Math.round((t.by_rider / t.cancelled) * 100)}% of them` : null },
     /* Rendered even at zero — a zero here means "every channel in this window
@@ -72,7 +119,7 @@ export async function renderCancellations(root) {
   ]));
 
   const p = panel('Cancellations by driver',
-    'Ordered by how many, over the window chosen above');
+    'Ordered by the jobs somebody was left waiting for. Every column sorts.');
   const rows = d.rows || [];
   if (!rows.length) {
     p.body.append(note('No booking was cancelled in this window, on any channel.'));
@@ -123,13 +170,29 @@ export async function renderCancellations(root) {
       render: (r) => (r.rating == null ? '—'
         : `${Number(r.rating).toFixed(2)}<span class="dim"> ${esc(sourceLabel(r.rating_platform))}</span>`) },
     { label: 'Bookings', key: 'bookings', num: true },
+    /* The percentage is over BOOKINGS, and for anyone on an offer-filing channel
+       that denominator contains offers they never accepted. The figure is not
+       wrong — it is "of everything put in front of you, how much did not
+       happen" — but it is not comparable with an Uber-only driver's, whose
+       bookings are all dispatches. Median over 2026: 64% across the 53 people
+       who only work Bolt against 15% across the 68 who only work Uber. Said on
+       the cell rather than footnoted, because the cell is where it is read. */
     { label: 'Cancelled', key: 'cancelled', num: true,
-      render: (r) => `${fmt(r.cancelled)}<span class="dim"> ${r.bookings
+      render: (r) => `${fmt(r.cancelled)}<span class="dim"${r.on_offer_channel
+        ? ' title="Of all bookings, which on Bolt includes offers this driver never'
+          + ' accepted. Not comparable with a driver who only works a channel that'
+          + ' reports dispatched trips."' : ''}> ${r.bookings
         ? `${Math.round((r.cancelled / r.bookings) * 100)}%` : ''}</span>` },
-    { label: 'By the driver', key: 'by_driver', num: true,
-      render: (r) => (r.by_driver
-        ? pill(fmt(r.by_driver), r.by_driver >= 5 ? 'err' : 'warn', driverDetail(r) || undefined)
+    /* The act an operator is ringing about: this person accepted a job and
+       then ended it, and somebody was waiting for it. */
+    { label: 'Dropped a job', key: 'dropped', num: true,
+      absent: 'Nobody accepted a job and then ended it in this window.',
+      render: (r) => (r.dropped
+        ? pill(fmt(r.dropped), r.dropped >= 5 ? 'err' : 'warn', droppedDetail(r) || undefined)
         : '—') },
+    /* A different act, on a channel most of the fleet does not work. */
+    { label: 'Turned down an offer', key: 'declined', num: true,
+      render: declinedCell },
     { label: 'By the rider', key: 'by_rider', num: true },
     { label: 'Nobody said who', key: 'unattributed', num: true,
       absent: 'Every cancellation in this window came from a channel that names who did it.',
@@ -138,8 +201,31 @@ export async function renderCancellations(root) {
           `${(r.unattributed_platforms || []).map(sourceLabel).join(', ')} do not report who `
           + 'cancelled')
         : '—') },
-  ], { sortable: true, defaultSort: { key: 'cancelled', dir: 'desc' } }));
+    /* Sorted on the jobs somebody was left waiting for, matching the ORDER BY
+       the endpoint already applies. This said `cancelled`, and a client-side
+       defaultSort RE-SORTS the rows the server ordered — so the SQL change
+       alone did nothing to what a reader sees, and the header marker said
+       CANCELLED while the page claimed to be ordered by something else. Caught
+       by rendering it, which is the only way that class of disagreement shows
+       up at all. */
+  ], { sortable: true, defaultSort: { key: 'dropped', dir: 'desc' } }));
 
   if (d.unattributed_why) p.body.append(note(d.unattributed_why));
+  /* Printed WHENEVER the offers column has anything in it, because the column
+     is the part of this page most easily misread: the two numbers beside each
+     other invite a reader to add them, and they do not add to anything an
+     operator should act on. Says how many of the people on screen are even on
+     a channel that reports an offer, so the blanks are accounted for. */
+  if (t.declined) {
+    const ch = (d.offer_channels || []).map(sourceLabel).join(' and ') || 'no channel';
+    p.body.append(note(
+      `${fmt(t.declined)} of these are offers a driver declined or left unanswered, and `
+      + `${ch} is the only channel that files them — `
+      + `${fmt(d.offer_channel_drivers)} of the ${fmt(rows.length)} drivers here worked it in `
+      + 'this window. They are shown apart from dropped jobs rather than added to them: '
+      + 'an offer is broadcast to several drivers at once and refusing one leaves nobody '
+      + 'waiting, while abandoning a job that was accepted does. Added together they rank '
+      + 'a driver by which app they are on.'));
+  }
   root.append(p.panel);
 }

@@ -827,6 +827,48 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **Bolt files an OFFER as a trip row and Uber does not, so a cancellation
+  count is not comparable between two drivers on different channels.** Uber's
+  export contains dispatched trips; the offers that preceded them are not in
+  it. Bolt's portal returns `driver_did_not_respond`, `driver_rejected` and
+  `offer_rejected` — a broadcast offer the driver let go past, sent to several
+  drivers at once, leaving nobody waiting.
+
+  Measured over 2026 to date: of 7,032 driver-attributed cancellations
+  fleet-wide, **5,307 are declined Bolt offers**, 566 are jobs accepted and
+  then abandoned, and 1,159 are Uber `driver_cancelled`. Added into one number
+  that count ranks people by which app they work — the worst "driver" on the
+  page was a Bolt-only driver with 433 offers he did not take and 7 jobs he
+  dropped, above every Uber driver who abandoned a real dispatch.
+
+  It reaches the RATE as well, because Bolt's offer rows are bookings:
+
+  | | median cancellation rate |
+  |---|---|
+  | the 53 people who only work Bolt | **64%** |
+  | the 68 people who only work Uber | **15%** |
+
+  That is two companies writing their logs differently, not a four-fold
+  difference in behaviour. **The comparable denominator is `accepted`** —
+  bookings minus the offers that never became a dispatch — which
+  `api/cancellation_sql.js` now returns beside the split counts `dropped` and
+  `declined`. Any new surface that ranks or judges drivers on cancellations
+  must use those, not `by_driver` and not `cancelled / bookings`.
+  `test/cancellation_split.test.mjs` pins it with a fixture where the two
+  orderings disagree.
+
+* **The busiest four hours in the dataset are real, and were nearly
+  "corrected" away.** 1 January 2026 carries 1,273 cancellations against a
+  normal day's ~180, 87% of them in Dubai hours 00:00–03:59, with Bolt filing
+  1,040 bookings and only 49 completions. That looks exactly like a backfill
+  whose timestamps collapsed onto the first day of a collected range — and it
+  is not. It is New Year's Eve: the hours form a demand curve (174 → 528 → 493
+  → 115) where a clamp would collapse onto one instant, 1 January is the only
+  day in the data with a 04:00–10:00 trough, Bolt's history runs back to
+  November 2025 so there is no range start to clamp to, and the statuses are
+  offers rather than completions. **Before re-dating or deleting a spike,
+  check the shape of it.** A pile-up has no shape.
+
 * **A window bound on a raw timestamp is four hours out of step with every
   other figure on the page.** `local_day` is
   `(requested_at AT TIME ZONE 'Asia/Dubai')::date` — `sql/schema_v18.sql:84` —

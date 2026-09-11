@@ -2221,29 +2221,37 @@ const dailySeries = () => {
    Shapes match api/cancellation_sql.js exactly — driver_ext_ids and
    unattributed_platforms are arrays, because the page maps over both. */
 app.get('/api/cancellations', (req, r) => {
+  /* `dropped` and `declined` are the two halves of by_driver and the fixture
+     makes them DISAGREE about who is worst, because that is the whole point of
+     splitting them: p3 works Bolt only and has the larger by_driver, almost
+     all of it offers he did not take; p1 dropped more actual jobs. A fixture
+     where the two orderings agree would render a page that looks right whether
+     or not the split works. */
   const rows = [
     { person_key: 'p1', driver_name: 'Raja Aliyan Khalil', driver_ext_ids: ['d-1'],
       driver_ext_id: 'd-1', plates: ['L36397', 'L40561'],
-      platforms: ['uber', 'yango'], bookings: 212, completed: 168,
-      cancelled: 44, by_driver: 9, by_rider: 29, unattributed: 6,
-      unattributed_platforms: ['yango'],
-      driver_after_accept: 2, driver_declined_offer: 4, driver_cancelled_uber: 3,
+      platforms: ['uber', 'yango'], bookings: 212, completed: 168, accepted: 212,
+      cancelled: 44, by_driver: 9, dropped: 9, declined: 0, by_rider: 29, unattributed: 6,
+      unattributed_platforms: ['yango'], on_offer_channel: false,
+      driver_after_accept: 2, driver_declined_offer: 0, driver_cancelled_uber: 7,
       rating: 4.99, rating_platform: 'uber', phone: '971501234567' },
     { person_key: 'p2', driver_name: 'Ahmed Hassan', driver_ext_ids: ['d-2'],
       driver_ext_id: 'd-2', plates: ['L40759'],
-      platforms: ['uber', 'bolt'], bookings: 190, completed: 171,
-      cancelled: 19, by_driver: 2, by_rider: 17, unattributed: 0,
-      unattributed_platforms: [],
+      platforms: ['uber', 'bolt'], bookings: 190, completed: 171, accepted: 189,
+      cancelled: 19, by_driver: 2, dropped: 1, declined: 1, by_rider: 17, unattributed: 0,
+      unattributed_platforms: [], on_offer_channel: true,
       driver_after_accept: 1, driver_declined_offer: 1, driver_cancelled_uber: 0,
       rating: 4.86, rating_platform: 'uber', phone: '971559876543' },
     /* No phone on the roster, and no rating filed. Both are real states and
-       both have their own sentence rather than a dash. */
+       both have their own sentence rather than a dash. Bolt only, and his
+       by_driver is the largest on the page while his dropped count is the
+       smallest — the ranking this split exists to stop. */
     { person_key: 'p3', driver_name: 'Muhammad Sameer', driver_ext_ids: ['d-3'],
       driver_ext_id: 'd-3', plates: [],
-      platforms: ['bolt'], bookings: 61, completed: 54,
-      cancelled: 7, by_driver: 6, by_rider: 1, unattributed: 0,
-      unattributed_platforms: [],
-      driver_after_accept: 3, driver_declined_offer: 3, driver_cancelled_uber: 0,
+      platforms: ['bolt'], bookings: 61, completed: 54, accepted: 33,
+      cancelled: 35, by_driver: 34, dropped: 6, declined: 28, by_rider: 1, unattributed: 0,
+      unattributed_platforms: [], on_offer_channel: true,
+      driver_after_accept: 3, driver_declined_offer: 28, driver_cancelled_uber: 3,
       rating: null, rating_platform: null, phone: null },
   ];
   const sum = (k) => rows.reduce((a, x) => a + (x[k] || 0), 0);
@@ -2251,7 +2259,10 @@ app.get('/api/cancellations', (req, r) => {
   r.json({
     from: dayISO(30), to: dayISO(0), rows,
     totals: { drivers: rows.length, cancelled: sum('cancelled'), by_driver: sum('by_driver'),
+      dropped: sum('dropped'), declined: sum('declined'),
       by_rider: sum('by_rider'), unattributed: unattr },
+    offer_channel_drivers: rows.filter((r) => r.on_offer_channel).length,
+    offer_channels: ['bolt'],
     unattributed_why: unattr
       ? `${unattr} cancellations in this window came from Yango, which files the bare word `
         + '"cancelled" and never says who did it. They are counted and kept separate rather '
