@@ -205,8 +205,13 @@ check('and "drove" counts every channel, not only Uber',
    in a passing test run. Found by looking at the page, not by reading it. */
 {
   const mock = readFileSync('mockapi.mjs', 'utf8');
+  /* Asserted as membership rather than as one exact expression: the list grew
+     to include `absent` and a regex pinned to the two-name form failed on that
+     without anything being wrong. What matters is that cannot_earn is in the
+     set that gets no trips. */
+  const noTrips = (mock.match(/const workedMin = (\[[^\]]*\])\.includes\(basis\)/) || [])[1] || '';
   check('the mock gives no trips to a driver it files as unable to take work',
-    /basis === 'not_asked' \|\| basis === 'cannot_earn' \? null/.test(mock));
+    /'cannot_earn'/.test(noTrips), noTrips);
   /* And its "drove early" row has to land before the page's own default start,
      or the green chip this whole change produces never renders in the smoke
      run. The default lives in the page; both are read here so they cannot

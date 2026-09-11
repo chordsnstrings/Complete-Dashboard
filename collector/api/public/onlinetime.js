@@ -182,14 +182,26 @@ export async function renderOnlineTime(root) {
     ]));
 
     if (t.not_asked) {
-      /* Named on the page rather than left in a tooltip, because it is the one
-         state that does not fix itself: the roster sweep has no schedule. */
+      /* This said the state "does not fix itself: the roster sweep has no
+         schedule", which was true when it was written. The sweep has one now —
+         the three-hourly tick covers the whole roster, and a thirty-day pass
+         runs weekly — so the warning has to stop telling a reader to give up
+         on a number that is about to arrive. It is still a warning: a day
+         nothing has reached is a day nobody can be judged on. */
       tiles.append(el('p', 'note warn',
         `${fmt(t.not_asked)} of these ${fmt(t.people - (t.cannot_earn || 0))} people who could `
-        + 'have worked were never asked about. Uber\'s '
-        + 'timeline is only requested for drivers who took a trip in the previous two days, so '
-        + 'somebody who worked nowhere near a car is not "late" here — they are unmeasured, and '
-        + 'will stay that way until a whole-roster sweep runs.'));
+        + 'have worked have not been asked about for this day, so they are unmeasured rather '
+        + 'than late. The timeline tick covers the whole roster every three hours over a '
+        + 'two-day window, so a recent day fills in by itself'
+        /* If a pass HAS covered this day and somebody is still unasked, the two
+           facts sit next to each other and look like a contradiction. They are
+           not: a sweep runs per fleet, and these people are on one it did not
+           reach. Said outright, because a reader who spots the tension and is
+           not given the reason concludes the page is confused. */
+        + (d.feed?.roster_swept_at
+          ? `. A whole-roster pass last covered this day at ${timeStr(d.feed.roster_swept_at)}`
+            + ' — those run per fleet, and these people are on one it did not reach.'
+          : ' — none has reached this day yet.')));
     }
 
     if (!d.rows.length) { empty(list.body, 'Nobody is on the books for that day'); return; }

@@ -48,13 +48,43 @@ async function main() {
     cron.schedule('*/30 * * * *', () => incremental().catch((e) => log.error('scheduler', 'incremental', { err: String(e) })));
     /* The driver availability timeline gets a cron of its OWN rather than a
        place in the incremental, because its cost is one request per driver per
-       window. Scoped to drivers who worked in the window that is about 74
-       requests a run across both fleets; on the thirty-minute incremental that
-       would be ten thousand requests a day at a provider that has never been
-       asked for more than a few hundred. Three-hourly, and the window is wide
-       enough that a missed tick loses nothing. */
-    cron.schedule(config.uberTimelineCron, () => uberTimelineTick()
+       window; on the thirty-minute incremental that would be ten thousand
+       requests a day at a provider that has never been asked for more than a
+       few hundred. Three-hourly, and the window is wide enough that a missed
+       tick loses nothing.
+
+       THE WHOLE ROSTER, not only the drivers who took a trip.
+       ─────────────────────────────────────────────────────────────────────
+       This asked about ~74 working drivers a run, and the reason written down
+       for that was "asking about the other 143 buys a timeline that is empty
+       by construction — they were not working". That premise is wrong on this
+       product's own terms: a driver who comes online at 07:00 and is offered
+       nothing has an ONLINE event and no trip. "No trip" is not "not working",
+       and refusing that inference is the whole reason the Online time page
+       exists. Among the people already asked about, 1 to 6 a day are online
+       with no trip; the ones inactive for three days could not be seen at all,
+       which left 39 people a day permanently unmeasurable and a page saying
+       "never asked about" — for ever, because the sweep that would have fixed
+       it had no schedule.
+
+       The cost is real but small, and it is measured rather than guessed:
+       MAX_WINDOW_DAYS is 30, so any window up to a month is ONE request per
+       driver, and a two-day whole-roster ask costs the same ~280 requests as
+       the thirty-day sweep did. That sweep wrote 132,038 rows across both
+       fleets and its two fleet runs finished 97 seconds apart.
+
+       IF UBER STARTS REFUSING, this is the first thing to reconsider: it is
+       about 3.7x the request rate against a session cookie. The collector
+       already records an auth-shaped refusal as a credential state and the
+       Sources page says so, so the failure is visible rather than silent —
+       drop back to UBER_ROSTER_CRON alone and this tick to `roster: false`. */
+    cron.schedule(config.uberTimelineCron, () => uberTimelineTick({ roster: true })
       .catch((e) => log.error('scheduler', 'uber timeline', { err: String(e) })));
+    /* And the deep pass, weekly. Thirty days rather than two: Uber serves at
+       most 31, so this is what keeps the recoverable month repaired as the
+       window slides. It had no schedule at all and last ran 2026-08-27. */
+    cron.schedule(config.uberRosterCron, () => uberTimelineTick({ roster: true, days: 30 })
+      .catch((e) => log.error('scheduler', 'uber roster sweep', { err: String(e) })));
     /* Rollups on their own schedule as well as at the end of each run.
        The run-end refresh covers the normal path, but CABMAN writes trips on a
        five-minute tick of its own and a failed incremental leaves the rollups

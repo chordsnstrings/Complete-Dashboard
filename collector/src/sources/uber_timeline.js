@@ -171,16 +171,33 @@ export function toRows(o, driverUuid, events) {
   });
 }
 
-/* Drivers who actually WORKED in this window, not the whole roster.
+/* WHO TO ASK UBER ABOUT — and the scheduled tick now asks about everyone.
    ─────────────────────────────────────────────────────────────────────────
    This is one call per driver per window, so the driver set is the cost. The
    Ecosine roster is 154 and Egari's 63; on any given day about 50 and 24 of
-   them drive. Asking about the other 143 buys a timeline that is empty by
-   construction — they were not working — at two thirds of the request budget.
+   them drive. The narrow set was the default, and the reason written here was:
+   "asking about the other 143 buys a timeline that is empty by construction —
+   they were not working".
 
-   `roster` widens it to everyone for a deliberate full sweep, because "who was
-   online but never got a job" is a real question and those drivers have no
-   trip to find them by. It is not what the scheduled tick does. */
+   THAT PREMISE IS WRONG, on this product's own terms. A driver who comes
+   online at 07:00 and is offered nothing has an ONLINE event and no trip. "No
+   trip" is not "not working" — refusing exactly that inference is the reason
+   the Online time page exists, and its header says so three paragraphs in.
+   Measured on production: among the drivers the narrow set DID reach, 1 to 6 a
+   day were online having taken no trip, and anyone inactive for three days
+   could not be reached at all. That left 39 people a day whose attendance was
+   unmeasurable by construction, under a sentence reading "Uber was never asked
+   about this driver … none is coming until somebody runs the roster sweep" —
+   which had no cron and last ran 2026-08-27.
+
+   The saving was never large either, and MAX_WINDOW_DAYS is why: a window of
+   up to thirty days is ONE request per driver, so a two-day whole-roster ask
+   costs the same ~280 requests as the thirty-day sweep, which wrote 132,038
+   rows with its two fleet runs finishing 97 seconds apart.
+
+   `roster: false` is kept — it is the fallback if Uber begins refusing the
+   session cookie under roughly 3.7x the request rate, and src/index.js says so
+   at the cron. */
 async function driverIdsFor(fleet, from, to, { roster = false } = {}) {
   const { rows } = roster
     ? await pool.query(

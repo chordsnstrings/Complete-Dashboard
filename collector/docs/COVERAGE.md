@@ -827,6 +827,39 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A driver with no trip is not a driver who was not working, and the
+  collector was built on the opposite assumption.** `uber_timeline` asks Uber
+  once per driver per window, and the scheduled tick asked only about drivers
+  with a trip in the last two days, on the recorded grounds that asking about
+  the rest "buys a timeline that is empty by construction — they were not
+  working". A driver who comes online at 07:00 and is offered nothing has an
+  ONLINE event and no trip. Measured: 1–6 people a day were online with no
+  trip among those the narrow set reached, and 39 a day could not be reached at
+  all — permanently, because the whole-roster sweep that would have found them
+  **had no cron and last ran 2026-08-27**.
+
+  The saving was never the point either. `MAX_WINDOW_DAYS` is 30, so **a window
+  of up to a month is ONE request per driver** — a two-day whole-roster ask
+  costs the same ~280 requests as the thirty-day sweep, which wrote 132,038
+  rows with its two fleet runs finishing 97 seconds apart. The tick asks about
+  the whole roster now (`roster: true`), with `UBER_ROSTER_CRON` running the
+  thirty-day pass weekly to repair history as Uber's 31-day window slides.
+  **If Uber starts refusing the session cookie, this is the first thing to
+  reconsider** — it is roughly 3.7× the request rate — and the fallback is
+  `roster: false` plus the weekly sweep alone.
+
+* **"We never asked" has to mean nobody asked, by any route.**
+  `/api/online-time` chose between `not_asked` ("no evidence either way") and
+  `absent` ("Uber was asked and had nothing") by reconstructing the incremental
+  tick's selection rule, and knew nothing about whole-roster runs. So across
+  2026-07-28 to 2026-08-27 — the month the sweep actually covered — it reported
+  **44–49 people a day as never asked about**, people Uber had been asked about
+  and returned nothing for. It reads `collection_run` now (`mode='roster'`,
+  `status='ok'`, `window_start <= day < window_end`, per fleet). `window_end`
+  is exclusive on purpose: the run stores the instant it woke, so the last day
+  is only part-covered, and claiming it would err towards the state that
+  asserts evidence about a person.
+
 * **Only Uber publishes a timeline; every other channel publishes finished
   trips, and a trip is a ONE-SIDED bound on when somebody came online.** A job
   cannot be given to a driver who is not online, so a trip at 06:19 proves they

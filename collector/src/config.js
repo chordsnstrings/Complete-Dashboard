@@ -14,6 +14,7 @@ export const config = {
   // CABMAN realtime GPS: fixed 5-minute refresh saved to telemetry_snapshot.
   get cabmanCron() { return get('CABMAN_CRON', D.CABMAN_CRON); },
   get uberTimelineCron() { return get('UBER_TIMELINE_CRON', D.UBER_TIMELINE_CRON); },
+  get uberRosterCron() { return get('UBER_ROSTER_CRON', D.UBER_ROSTER_CRON); },
   /* Areas holding a charging station, as they are written in trip addresses.
      Not a credential — a fact about the fleet that decides whether an idle
      hour reads as waste or as refuelling, which for a largely electric fleet

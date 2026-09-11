@@ -163,7 +163,7 @@ export function onlineRoutes(app, { q, wrap }) {
        page as its own row instead of merging or vanishing. */
     const PK = (a) => `coalesce(nullif(${a}.person_key, ''), ${a}.driver_ext_id)`;
 
-    const [people, drove, worked, recent, custody, phones, feed] = await Promise.all([
+    const [people, drove, worked, recent, swept, custody, phones, feed] = await Promise.all([
       /* WHO THE PAGE IS ABOUT. Everyone holding an Uber account, folded to the
          PERSON — api/identity_map.js applies 130 entries over 124 people, and
          in 37 of them the surviving canonical record is not the Uber one, so a
@@ -176,6 +176,11 @@ export function onlineRoutes(app, { q, wrap }) {
                   FILTER (WHERE platform = 'uber'), NULL) AS uber_ids,
                 array_remove(array_agg(DISTINCT driver_ext_id), NULL) AS all_ids,
                 array_agg(DISTINCT platform ORDER BY platform) AS portals,
+                /* WHICH FLEET'S SWEEP WOULD HAVE ASKED ABOUT THEM. The
+                   whole-roster pass runs per fleet and takes the union of
+                   driver_platform_state and trip for that fleet, so a dps row
+                   here is exactly the thing that puts somebody in it. */
+                array_remove(array_agg(DISTINCT fleet_id), NULL) AS fleets,
                 bool_or(platform = 'uber' AND can_earn) AS can_earn,
                 /* BOTH words for the standing. The normalised one
                    (schema_v13:26 — active | waitlist | onboarding | suspended |
@@ -290,6 +295,34 @@ export function onlineRoutes(app, { q, wrap }) {
             AND requested_at <  least(${D1}, now())
             AND requested_at >= least(${D1}, now()) - interval '48 hours'
           GROUP BY 1`, p),
+      /* THE OTHER WAY SOMEBODY GETS ASKED ABOUT: a whole-roster sweep.
+         ─────────────────────────────────────────────────────────────────────
+         The query above reconstructs the INCREMENTAL tick's selection rule —
+         a trip in the previous 48 hours — and that was the only test. It is
+         not the only way the collector reaches a driver: `timeline-roster`
+         asks about every driver on the fleet's books regardless of trips, and
+         src/sources/uber_timeline.js takes the union of driver_platform_state
+         and trip to build that list.
+
+         So for every day such a sweep covered, this page was printing the
+         WEAKER AND WRONGER of its two sentences. Measured on production before
+         this was added: the sweep of 2026-08-27 covered 2026-07-28 to
+         2026-08-27, and across that month the page reported 44 to 49 people a
+         day as "Uber was never asked about this driver … we hold no evidence
+         either way" — about people Uber was definitively asked about and
+         returned nothing for. The product was understating what it knows over
+         exactly the period it knows most about.
+
+         `window_end` is EXCLUSIVE here. The run records the instant it woke as
+         the end, so the last day in the range is only partly covered, and a
+         partly covered day claimed as fully asked is the error that runs
+         towards `absent` — the state that asserts evidence. The comment above
+         chose the other direction deliberately and this keeps that choice. */
+      q(`SELECT fleet_id, max(finished_at) AS swept_at
+           FROM collection_run
+          WHERE source = 'uber_timeline' AND mode = 'roster' AND status = 'ok'
+            AND window_start <= $1::date AND window_end > $1::date
+          GROUP BY 1`, [p[0]]),
       /* The car they held that day, from the shared definition every other
          vehicle fact uses. Trip-derived, so it is empty for a driver with no
          trip — the state plate above is the only thing left for those, and the
@@ -370,6 +403,8 @@ export function onlineRoutes(app, { q, wrap }) {
     const byKey = (rows) => new Map(rows.map((r) => [r.person_key, r]));
     const droveBy = byKey(drove);
     const workedBy = byKey(worked);
+    /* Keyed on fleet, not person: a sweep covers a fleet's whole roster. */
+    const sweptBy = new Map((swept || []).map((r) => [r.fleet_id, r]));
     const recentBy = byKey(recent);
     const custodyBy = byKey(custody);
     const phoneBy = new Map(phones.map((r) => [r.driver_ext_id, r.phone]));
@@ -416,7 +451,13 @@ export function onlineRoutes(app, { q, wrap }) {
         if (o.covered_midnight) midnight = true;
         if (o.first_at && (!firstAt || new Date(o.first_at) < new Date(firstAt))) firstAt = o.first_at;
       }
-      const askedAbout = (recentBy.get(key)?.n || 0) > 0;
+      /* ASKED ABOUT, BY EITHER ROUTE. The incremental tick reaches people with
+         a recent trip; the whole-roster sweep reaches everybody on the fleet's
+         books. Both are real asks and either one makes "we never asked" false,
+         so the page must test both or it prints a sentence it cannot support. */
+      const sweptAt = (pp.fleets || []).map((f) => sweptBy.get(f)).filter(Boolean)
+        .map((r) => r.swept_at).sort().pop() || null;
+      const askedAbout = (recentBy.get(key)?.n || 0) > 0 || sweptAt != null;
 
       let basis, why;
       if (firstAt) {
@@ -484,12 +525,30 @@ export function onlineRoutes(app, { q, wrap }) {
         why = standingWords(pp.state_word, pp.state_raw);
       } else if (!askedAbout) {
         basis = 'not_asked';
-        why = 'Uber was never asked about this driver. The timeline is only requested for people '
-          + 'who took a trip in the previous two days, and this person took none — so we hold no '
-          + 'evidence either way, and none is coming until somebody runs the roster sweep.';
+        /* The sentence used to end "and none is coming until somebody runs the
+           roster sweep", which was true and is not any more: the three-hourly
+           tick asks about the whole roster now, and there is a weekly deep
+           sweep behind it (src/index.js). So this state stops meaning "nobody
+           will ever look" and starts meaning "no pass has reached this day
+           yet" — which is a different thing to tell an operator, because one
+           of them is worth waiting for. */
+        why = 'Uber was never asked about this driver for this day, so we hold no evidence '
+          + 'either way. The timeline tick covers the whole roster over a two-day window every '
+          + 'three hours and a thirty-day sweep runs weekly, so a recent day fills in by itself; '
+          + 'a day that stays like this is older than any pass has reached, or a pass that '
+          + 'could not sign in to Uber.';
       } else {
         basis = 'absent';
-        why = 'Uber was asked about this driver and returned no online event for this day.';
+        /* WHICH ask found nothing, because the two are different strengths of
+           evidence and an operator deciding whether to ring somebody should be
+           told which one this is. A sweep asked about every driver on the
+           books for a whole span at once; the incremental tick asked because
+           this person had a recent trip. */
+        why = sweptAt
+          ? 'Uber was asked about every driver on the roster for this day — the whole-roster '
+            + `sweep of ${new Date(sweptAt).toISOString().slice(0, 10)} covered it — and returned `
+            + 'no online event for this person. They did not come online.'
+          : 'Uber was asked about this driver and returned no online event for this day.';
       }
 
       const onlineMin = basis === 'reported' ? minsInto(firstAt) : null;
@@ -715,9 +774,18 @@ export function onlineRoutes(app, { q, wrap }) {
       },
       feed: {
         last_run_at: feedAt,
-        note: 'Uber’s timeline runs every three hours and is only asked about drivers who '
-          + 'took a trip in the previous two days. A driver with no trip was never asked, and '
-          + 'renders as such rather than as absent.',
+        /* WHAT THE COLLECTOR ACTUALLY DOES, which changed under this sentence.
+           It said the timeline was "only asked about drivers who took a trip in
+           the previous two days" — the reason 39 people a day were unmeasurable
+           — and the tick now asks about the whole roster. A caption describing
+           a schedule the collector no longer runs is the same class of defect
+           as a figure describing a window the query no longer uses. */
+        note: 'Uber’s timeline runs every three hours and asks about every driver on the '
+          + 'roster, not only those who took a trip. A day no pass has reached yet renders as '
+          + 'not asked rather than as absent.',
+        /* When a whole-roster pass last covered THIS day, which is what lets
+           the rows above say "asked and nothing" rather than "never asked". */
+        roster_swept_at: (swept || []).map((r) => r.swept_at).sort().pop() || null,
       },
     });
   }));

@@ -4932,13 +4932,21 @@ app.get('/api/online-time', (req, r) => {
        such a person turns green on the strength of a trip rather than a
        timeline. The one after it drives too, and too late to be cleared — the
        other half of the same rule. */
+    /* Seven, and the last two are a pair that must be able to coexist. A
+       whole-roster sweep runs PER FLEET, so on one day one fleet's people can
+       be `absent` — asked, and Uber had nothing — while another fleet's are
+       `not_asked`, because no pass reached them. Without an `absent` row here
+       the fixture rendered "1 person has not been asked about for this day"
+       directly above "a whole-roster pass last covered this day at 09:40",
+       which is a shape the real endpoint cannot produce: if a pass covered the
+       day for somebody's fleet, they are not in the not-asked state. */
     const GREY = ['already_online', 'awaiting_feed', 'not_asked', 'cannot_earn',
-      'worked_elsewhere', 'worked_late'];
+      'worked_elsewhere', 'worked_late', 'absent'];
     const back = drivers.length - 1 - i;
     const raw = back < GREY.length ? GREY[back] : 'reported';
     const basis = raw === 'worked_late' ? 'worked_elsewhere' : raw;
     const min = basis === 'reported' ? 300 + ((i * 37) % 260) : null;
-    const trips = basis === 'not_asked' ? 0 : 4 + (i % 14);
+    const trips = ['not_asked', 'absent'].includes(basis) ? 0 : 4 + (i % 14);
     /* Every channel, which is what the page now reads. `not_asked` is the one
        state that means no booking anywhere — that is what makes it not_asked. */
     /* THE FIXTURE MUST OBEY THE ENDPOINT'S OWN INVARIANTS, and two of these
@@ -4955,7 +4963,7 @@ app.get('/api/online-time', (req, r) => {
        06:00, so a 06:19 trip clears nobody and the green "driving by" chip —
        the single most important thing this fixture covers — never appeared on
        screen at all. */
-    const workedMin = basis === 'not_asked' || basis === 'cannot_earn' ? null
+    const workedMin = ['not_asked', 'cannot_earn', 'absent'].includes(basis) ? null
       : raw === 'worked_late' ? 730                       // 12:10 — drove, too late to clear
         : raw === 'worked_elsewhere' ? 310                // 05:10 — drove, before the start
           : (min ?? 330) + 40;
@@ -4981,7 +4989,11 @@ app.get('/api/online-time', (req, r) => {
             : basis === 'cannot_earn'
               ? 'Uber turned this application down. This account is not coming online, now or '
                 + 'later, and it should not be on a call list at all.'
-              : basis === 'worked_elsewhere'
+              : basis === 'absent'
+                ? 'Uber was asked about every driver on the roster for this day — the '
+                  + 'whole-roster sweep of 2026-08-27 covered it — and returned no online '
+                  + 'event for this person. They did not come online.'
+                : basis === 'worked_elsewhere'
                 ? 'No Uber online event for this day, and none is expected: this driver worked '
                   + 'Hotel, which reports finished trips and never publishes when somebody came '
                   + `online. The first of their ${trips} trips was at ${hhmm(workedMin)}, so they `
@@ -5030,7 +5042,7 @@ app.get('/api/online-time', (req, r) => {
       awaiting_feed: n((x) => x.online_basis === 'awaiting_feed'),
       not_asked: n((x) => x.online_basis === 'not_asked'),
       cannot_earn: n((x) => x.online_basis === 'cannot_earn'),
-      absent: 0,
+      absent: n((x) => x.online_basis === 'absent'),
       worked_elsewhere: n((x) => x.online_basis === 'worked_elsewhere'),
       drove: n((x) => x.trips > 0),
       worked: n((x) => x.worked_trips > 0),
@@ -5053,9 +5065,10 @@ app.get('/api/online-time', (req, r) => {
          anything. A fixture whose shape differs from the endpoint's is a
          fixture that green-lights a rendering bug. */
       last_run_at: new Date(Date.now() - 95 * 6e4).toISOString(),
-      note: 'Uber\u2019s timeline runs every three hours and is only asked about drivers who took a '
-        + 'trip in the previous two days. A driver with no trip was never asked, and renders as such '
-        + 'rather than as absent.',
+      note: 'Uber\u2019s timeline runs every three hours and asks about every driver on the '
+        + 'roster, not only those who took a trip. A day no pass has reached yet renders as not '
+        + 'asked rather than as absent.',
+      roster_swept_at: new Date(Date.now() - 5 * 36e5).toISOString(),
     },
   });
 });

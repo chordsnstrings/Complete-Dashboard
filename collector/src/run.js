@@ -398,8 +398,11 @@ export async function cabmanTick() {
    window, and the backfill's whole design note above is about a long step
    starving the ones behind it — putting a 2,600-request source in front of FMS
    would recreate exactly that. It also must not ride the thirty-minute
-   incremental: ~74 working drivers a run is ten thousand requests a day at a
-   surface nobody has asked for more than a few hundred from.
+   incremental: even the narrow set of ~74 working drivers a run is ten
+   thousand requests a day at a surface nobody has asked for more than a few
+   hundred from, and the scheduled tick now asks about the whole roster —
+   ~280 — for the reason src/sources/uber_timeline.js records at
+   driverIdsFor().
 
    The window is deliberately wider than the cadence. A driver's evening
    straddles midnight, a missed tick must cost nothing, and re-asking is

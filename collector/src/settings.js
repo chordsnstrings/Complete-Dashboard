@@ -51,6 +51,23 @@ export const SETTING_DEFAULTS = {
   /* Three-hourly, offset off the hour so it does not start alongside the
      thirty-minute incremental and compete with it for the same session. */
   UBER_TIMELINE_CRON: '17 */3 * * *',
+  /* THE WHOLE-ROSTER SWEEP, which had no schedule at all and last ran
+     2026-08-27.
+     ────────────────────────────────────────────────────────────────────────
+     The three-hourly tick now asks about the whole roster over two days, so
+     the daily hole is closed by that. This is the deep one: thirty days, which
+     is what repairs history as Uber's window slides. Uber serves at most 31
+     days, so a day that falls out of that window is unrecoverable for ever —
+     nothing before 2026-07-28 exists because that is when the only sweep ever
+     run started.
+
+     Weekly, at 03:40 Dubai on a Sunday (23:40 UTC Saturday), which is the
+     quietest hour the fleet has and well clear of the 02:40 Dubai full
+     re-collection. Measured cost: the 2026-08-27 sweep wrote 132,038 rows
+     across both fleets and the two fleet runs finished 97 seconds apart, so it
+     is a two-minute job — there was never a cost reason for it to be
+     unscheduled. */
+  UBER_ROSTER_CRON: '40 23 * * 6',
   /* Uber runs two OAuth environments and an application belongs to ONE of
      them. A Test-environment client answers `unauthorized_client — the current
      application environment is mismatched with the OAuth server runtime` on
@@ -288,6 +305,12 @@ export const SETTING_DEFS = [
   { key: 'BACKFILL_MONTHS', group: 'Collector', label: 'Backfill months', secret: false },
   { key: 'INCREMENTAL_DAYS', group: 'Collector', label: 'Incremental window (days)', secret: false },
   { key: 'CABMAN_CRON', group: 'Collector', label: 'CABMAN schedule (cron)', secret: false },
+  { key: 'UBER_ROSTER_CRON', group: 'Collector', secret: false,
+    label: 'Uber whole-roster timeline sweep (cron)',
+    help: 'The deep repair pass: every driver on the roster, thirty days back. The three-hourly '
+      + 'timeline tick already asks about the whole roster over two days; this one refills '
+      + 'history as Uber\u2019s 31-day window slides, and a day that falls out of it cannot be '
+      + 'recovered. Weekly is enough; it is a two-minute job.' },
   { key: 'UBER_TIMELINE_CRON', group: 'Collector', label: 'Uber driver-timeline schedule (cron)', secret: false,
     hint: 'One request per working driver per run — three-hourly by default' },
 

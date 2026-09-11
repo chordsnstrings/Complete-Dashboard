@@ -328,15 +328,27 @@ console.log('\nthe operator ledger, which is an import and not a poll');
 console.log('\nwhat src/index.js actually schedules');
 
 {
-  /* Read, not edited — src/index.js belongs to another agent. This pins the
-     diagnosis so that scheduling the roster sweep later has to come with a
-     change here. */
+  /* THE SWEEP IS SCHEDULED NOW, and this assertion is the reason the change
+     could not be made quietly.
+     ─────────────────────────────────────────────────────────────────────────
+     This block used to read "nothing schedules the whole-roster timeline sweep
+     — it is a command and an on-demand job only", with a note saying it pinned
+     the diagnosis "so that scheduling the roster sweep later has to come with
+     a change here". It did exactly that: the sweep had no cron and last ran
+     2026-08-27, which left 39 people a day unmeasurable on the Online time
+     page under a sentence promising a pass that was never going to come.
+
+     So the claim is inverted rather than deleted. A diagnosis that has been
+     fixed should leave a guard behind that fails if it comes back, not an
+     empty space where somebody has to notice it again. */
   const idx = readFileSync('src/index.js', 'utf8');
   const crons = [...idx.matchAll(/cron\.schedule\(([^;]*?)\)\s*;/gs)].map((m) => m[1]);
-  check('nothing schedules the whole-roster timeline sweep — it is a command '
-    + 'and an on-demand job only',
-    !crons.some((c) => /roster/.test(c)),
-    crons.filter((c) => /roster/.test(c)).join(' | '));
+  check('the whole-roster timeline sweep is scheduled, not waiting to be run by hand',
+    crons.some((c) => /uberRosterCron/.test(c) && /roster: true, days: 30/.test(c)),
+    crons.join(' | ').slice(0, 200));
+  check('…and the three-hourly tick asks about the whole roster too',
+    crons.some((c) => /uberTimelineCron/.test(c) && /roster: true/.test(c)),
+    crons.filter((c) => /uberTimelineCron/.test(c)).join(' | '));
   check('nothing schedules a ledger import — it is an operator CSV pushed '
     + 'through bin/import-ledger.mjs',
     !/ledger/i.test(idx));
