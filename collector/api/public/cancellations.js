@@ -105,7 +105,7 @@ export async function renderCancellations(root) {
        headline version of the same error. */
     { label: 'Dropped a job', value: fmt(t.dropped),
       sub: 'accepted, then ended by the driver' },
-    { label: 'Turned down an offer', value: fmt(t.declined),
+    { label: 'Offers not taken', value: fmt(t.declined),
       sub: d.offer_channels?.length
         ? `only ${d.offer_channels.map(sourceLabel).join(' and ')} reports these`
         : 'no channel reports these' },
@@ -126,6 +126,20 @@ export async function renderCancellations(root) {
     root.append(p.panel);
     return;
   }
+  /* EVERY `absent` SENTENCE HERE DESCRIBES WHAT A BLANK MEANS, not how many
+     blanks there are, and that is a requirement of the component rather than a
+     style preference. ui.js prints `absent` in two situations: when a column is
+     entirely empty, and — with "n of N rows carry one" in front of it — when
+     fewer than a quarter of the rows have a value. A sentence written for the
+     first case is FALSE in the second, and it was: production rendered
+
+       Nobody said who — 2 of 102 rows carry one;
+       Every cancellation in this window came from a channel that names who did it.
+
+     over a tile reading 6, in the same eyeful. Phrased as what a blank is, the
+     sentence is true at any fill level. (The other pages in this product have
+     67 more of these sentences and most are written the first way; they are
+     not touched here.) */
   p.body.append(tableFrom(rows, [
     { label: 'Driver', key: 'driver_name',
       /* driver_ext_id, not driver_ext_ids[0]: the endpoint now returns a
@@ -137,7 +151,7 @@ export async function renderCancellations(root) {
        driver is asked. Only plates from CANCELLED bookings, so a plate here is
        one something went wrong in. */
     { label: 'Car', key: 'plates',
-      absent: 'No cancelled booking in this window carries a plate.',
+      absent: 'A blank here is a cancellation whose channel filed no plate with it.',
       render: (r) => {
         const ps = r.plates || [];
         if (!ps.length) return '<span class="dim">no plate on the booking</span>';
@@ -166,7 +180,7 @@ export async function renderCancellations(root) {
     /* Uber's own rating, and it says WHOSE. A rating with no platform beside
        it invites the reader to assume it covers every channel they work. */
     { label: 'Rating', key: 'rating', num: true,
-      absent: 'No channel has filed a rating for any driver in this window.',
+      absent: 'A blank here is a driver no channel this product reads has filed a rating for.',
       render: (r) => (r.rating == null ? '—'
         : `${Number(r.rating).toFixed(2)}<span class="dim"> ${esc(sourceLabel(r.rating_platform))}</span>`) },
     { label: 'Bookings', key: 'bookings', num: true },
@@ -186,16 +200,23 @@ export async function renderCancellations(root) {
     /* The act an operator is ringing about: this person accepted a job and
        then ended it, and somebody was waiting for it. */
     { label: 'Dropped a job', key: 'dropped', num: true,
-      absent: 'Nobody accepted a job and then ended it in this window.',
+      absent: 'A blank here is a driver who ended no job they had already accepted.',
       render: (r) => (r.dropped
         ? pill(fmt(r.dropped), r.dropped >= 5 ? 'err' : 'warn', droppedDetail(r) || undefined)
         : '—') },
     /* A different act, on a channel most of the fleet does not work. */
-    { label: 'Turned down an offer', key: 'declined', num: true,
+    /* "Offers not taken" rather than "Turned down an offer": it covers both
+       an offer declined and one left unanswered without accusing anybody of
+       either, and it is the shortest honest wording. The long form was the
+       widest header on the page at 163px and pushed "Nobody said who" out of
+       the ~1090px a 1440px screen gives this table — measured against
+       production names, which are longer than a fixture's. */
+    { label: 'Offers not taken', key: 'declined', num: true,
       render: declinedCell },
     { label: 'By the rider', key: 'by_rider', num: true },
     { label: 'Nobody said who', key: 'unattributed', num: true,
-      absent: 'Every cancellation in this window came from a channel that names who did it.',
+      absent: 'A blank here is a driver every one of whose cancellations came from a '
+        + 'channel that names who did it.',
       render: (r) => (r.unattributed
         ? pill(fmt(r.unattributed), null,
           `${(r.unattributed_platforms || []).map(sourceLabel).join(', ')} do not report who `

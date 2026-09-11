@@ -129,8 +129,16 @@ check('and names which channels file an offer at all, rather than the page guess
     /key: 'dropped'/.test(page) && /key: 'declined'/.test(page)
       && !/key: 'by_driver'/.test(page));
   check('the headline tiles are split the same way',
-    /Dropped a job/.test(page) && /Turned down an offer/.test(page)
+    /Dropped a job/.test(page) && /Offers not taken/.test(page)
       && !/label: 'By the driver'/.test(page));
+  /* The tile and the column must carry the SAME words. They did not for one
+     render — the header was shortened to fit a 1440px table and the tile above
+     it still read "Turned down an offer", so the page named one quantity two
+     ways a few centimetres apart. */
+  const tile = (page.match(/\{ label: '([^']+)', value: fmt\(t\.declined\)/) || [])[1];
+  const col = (page.match(/\{ label: '([^']+)', key: 'declined'/) || [])[1];
+  check('and the tile and the column call it the same thing', tile === col && !!tile,
+    `tile "${tile}" vs column "${col}"`);
   /* The cell text is deliberately terse — it is in every row of a ten-column
      table — so the assertion is that the cell BRANCHES on whether the driver is
      even on an offer-filing channel and carries a reason, not that it contains
@@ -170,6 +178,29 @@ check('and names which channels file an offer at all, rather than the page guess
     t.dropped + t.declined + t.by_rider + t.unattributed === t.cancelled
       && t.dropped + t.declined === t.by_driver,
     JSON.stringify(t));
+}
+
+/* ── an "absent" sentence must be true at any fill level ─────────────────
+   ui.js prints a column's `absent` sentence in TWO situations: when the column
+   is entirely empty, and — with "n of N rows carry one" in front of it — when
+   fewer than a quarter of the rows have a value. A sentence written for the
+   first case is false in the second. Production rendered
+
+     Nobody said who — 2 of 102 rows carry one;
+     Every cancellation in this window came from a channel that names who did it.
+
+   directly under a tile reading 6. Phrased as what a BLANK is rather than as
+   how many there are, the sentence holds either way. Asserted for this page
+   only: the product has 67 more of these and most are written the first way,
+   which is a sweep of its own and not this change. */
+{
+  const page = readFileSync('api/public/cancellations.js', 'utf8');
+  const sentences = [...page.matchAll(/absent: '([^']+)'/g)].map((m) => m[1]);
+  check('this page declares an absent sentence for every column that can be blank',
+    sentences.length === 4, String(sentences.length));
+  const universal = sentences.filter((x) => !/^A blank here is/.test(x));
+  check('and each says what a blank MEANS, not that there are none',
+    universal.length === 0, universal.join(' | '));
 }
 
 server.close();
