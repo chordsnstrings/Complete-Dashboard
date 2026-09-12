@@ -394,16 +394,21 @@ async function today(deck, ctx) {
           sub: `the channel does not report it${pct(k.cancelled_unsaid)}`,
           value: fmt(k.cancelled_unsaid) })
         : null,
-      /* The remainder, named rather than dropped. A booking whose status this
-         product has not placed is neither completed nor cancelled, and on
-         2026-09-10 that was one row out of 789 — small, and the difference
-         between a breakdown that adds up and one that nearly does. */
-      unplaced
-        ? row({ title: 'Not placed yet',
-          sub: 'a booking status this product has not mapped to an outcome',
-          value: fmt(unplaced) })
-        : null,
     ]);
+    /* The remainder is NOT a fifth bucket, and it was rendered as one — a peer
+       row under a heading asking who called the cancellations off, which reads
+       as part of the 1,007 when it is not a cancellation at all. It is a
+       booking that is neither completed nor cancelled: a status this product
+       has not mapped. Named rather than dropped, because it is the difference
+       between a breakdown that adds up and one that nearly does, but named
+       BELOW the list rather than inside it. */
+    if (unplaced) {
+      const cap = el('p', 'm-cap');
+      cap.style.cssText = 'margin:8px 2px 0';
+      cap.textContent = `${fmt(unplaced)} more booking${unplaced === 1 ? ' is' : 's are'} neither `
+        + 'completed nor cancelled — a status this product has not mapped to an outcome.';
+      deck.append(cap);
+    }
   }
 
   /* What needs a person, not a chart. A source that stopped and a car that

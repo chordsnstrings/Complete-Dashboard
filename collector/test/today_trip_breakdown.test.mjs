@@ -128,6 +128,19 @@ check('the remainder is named rather than dropped',
   check('…and breaks the cancellations down, the phone having no Cancellations screen',
     /Who called it off/.test(phone) && /cancelled_by_rider/.test(phone)
       && /cancelled_by_driver/.test(phone) && /declined_offers/.test(phone));
+  /* The unplaced remainder is not a fifth bucket. It was rendered as a peer row
+     under "Who called it off", which reads as part of the cancellation total
+     when it is not a cancellation at all — it is a booking that is neither
+     completed nor cancelled. It belongs below the list, not in it. */
+  const block = phone.slice(phone.indexOf('Who called it off'));
+  const listEnd = block.indexOf(']);');
+  check('the unplaced remainder is not rendered as a fifth cancellation bucket',
+    !block.slice(0, listEnd).includes('unplaced'),
+    'it must sit below the list, not among the four');
+  check('…but is still named, so the breakdown accounts for every booking',
+    /neither\s*\n?\s*.?completed nor cancelled/.test(block)
+      || /neither `\s*$/m.test(block) || block.includes('completed nor cancelled'),
+    'the remainder must be printed somewhere');
   check('the desktop tile leads with the count too, so the two shells agree',
     /k\.completed_trips\)\} of \$\{fmt\(k\.bookable_trips\)/.test(desk));
   check('…and carries the same split',
