@@ -59,9 +59,15 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 1300 } });
 await page.goto(`${base}/?ui=desktop#overview?from=2026-08-01&to=2026-08-31`, { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(6000);
 
+/* The sub-line too. The Completion tile now leads with a COUNT and carries its
+   percentage underneath — an operator asked for the number of actual trips,
+   having been given two percentages and neither of the things they compare —
+   so a check that reads only the tile's headline would compare a count against
+   a rate and fail on the improvement. */
 const tiles = await page.evaluate(() => [...document.querySelectorAll('.kpi')].map((k) => ({
   l: (k.querySelector('.l,.lbl,span')?.textContent || '').trim(),
   v: (k.querySelector('.v,.n,b')?.textContent || '').trim(),
+  s: (k.querySelector('.s,.sub,p')?.textContent || '').trim(),
 })));
 check('the overview rendered its tiles at all', tiles.length > 0, String(tiles.length));
 
@@ -79,8 +85,18 @@ check('the trips tile is the trips the endpoint answered',
   near(tile(/^Trips/i), +api.trips), `${tile(/^Trips/i)} vs ${api.trips}`);
 check('…the distance tile likewise',
   near(tile(/^Distance/i), Math.round(+api.km)), `${tile(/^Distance/i)} vs ${api.km}`);
-check('…the completion tile likewise',
-  near(tile(/^Completion/i), +api.completion_pct), `${tile(/^Completion/i)} vs ${api.completion_pct}`);
+/* Both halves of it: the count it leads with, and the rate it explains that
+   count by. Checking one and not the other is how a tile comes to show a real
+   number over a stale percentage. */
+{
+  const t = tiles.find((x) => /^Completion/i.test(x.l));
+  check('…the completion tile leads with the count the endpoint answered',
+    near(num(t?.v), +api.completed_trips), `${t?.v} vs ${api.completed_trips}`);
+  check('…and carries the rate, and the cancellation count, beside it',
+    new RegExp(`\\b${api.completion_pct}% completed\\b`).test(t?.s || '')
+      && new RegExp(`\\b${api.cancelled_trips} cancelled\\b`).test(t?.s || ''),
+    `${t?.s} vs ${api.completion_pct}% / ${api.cancelled_trips}`);
+}
 check('…and the vehicles tile likewise',
   near(tile(/^Vehicles/i), +api.vehicles), `${tile(/^Vehicles/i)} vs ${api.vehicles}`);
 

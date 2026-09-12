@@ -218,7 +218,8 @@ const alertCoverage = (windowDays = 30) => {
 };
 
 app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03, completion_pct: 89,
-  cancel_pct: 10.7, drivers: 56, drivers_seen: 58, vehicles: 52, vehicles_seen: 55, revenue: 41188, live_vehicles: 48, fresh: 44,
+  cancel_pct: 10.7, drivers: 56, drivers_seen: 58, vehicles: 52, vehicles_seen: 55,
+  revenue: 41188, live_vehicles: 48, fresh: 44,
   /* Liveness is measured on the FIX, so a fleet always has trackers listed
      that have stopped answering — the mock carries some, or a page that
      renders them would never be exercised. */
@@ -239,6 +240,19 @@ app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03,
   bookable_trips: 2043, priced_km: 3990, revenue_per_km: 10.32,
   // Coverage: how much of the headline each figure was actually measured over.
   completed_trips: 1818, cancelled_trips: 225, trips_with_distance: 1996, attributed_trips: 1930,
+  /* The four buckets the cancellation total is made of, and they ADD UP on
+     purpose: 150 + 50 + 21 + 4 = 225, which is cancelled_trips, and
+     1818 + 225 = 2043, which is trips. A fixture whose breakdown does not sum
+     renders a screen whose breakdown does not sum, inside a passing test run.
+
+     Declared HERE rather than beside the rates at the top of this object,
+     which is where they went first: completed_trips, cancelled_trips and
+     bookable_trips are already on these lines, so the earlier copy was
+     SHADOWED by this one and the desktop tile drew 225 over a breakdown
+     summing to 219. A duplicate key in an object literal is silent, and the
+     screen is where it showed up. */
+  cancelled_by_rider: 150, cancelled_by_driver: 50, declined_offers: 21,
+  cancelled_unsaid: 4, other_outcome: 0, no_outcome: 0,
   platforms: 4, priced_pct: 9.2, attributed_pct: 94.5,
   // The numerator revenue_per_km is actually over, and the bookings that
   // belong to no vehicle at all — without which the vehicle table sums to

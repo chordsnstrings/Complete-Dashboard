@@ -333,11 +333,78 @@ async function today(deck, ctx) {
     { label: 'Money in', value: money(n(k.accounted) ?? n(k.revenue)),
       sub: n(k.accounted) ? 'each channel counted once, on its own report'
         : 'fares on record' },
-    { label: 'Completed', value: `${n(k.completion_pct) ?? '—'}%`,
-      sub: `${n(k.cancel_pct) ?? 0}% cancelled`,
+    /* THE COUNT, with the rate under it — not the rate alone.
+       ─────────────────────────────────────────────────────────────────────
+       This tile read "88.7%" over "11.2% cancelled" and gave no number at
+       all, so the screen showed 789 bookings and nothing that said how many
+       of them were actual rides. The operator asked for exactly that: "it
+       should show a breakdown of total trips, actual number of trips,
+       cancelled trips, rider cancelled and driver cancelled." A percentage
+       is a comparison; a count is the thing being compared, and the tile had
+       only the comparison. */
+    { label: 'Completed', value: fmt(k.completed_trips),
+      sub: n(k.completion_pct) != null ? `${n(k.completion_pct)}% of ${fmt(k.bookable_trips)}`
+        : 'no booking in this range carries an outcome',
       tone: n(k.completion_pct) >= 90 ? 'good' : n(k.completion_pct) >= 80 ? null : 'warn' },
+    { label: 'Cancelled', value: fmt(k.cancelled_trips),
+      sub: n(k.cancel_pct) != null ? `${n(k.cancel_pct)}% of ${fmt(k.bookable_trips)}`
+        : 'no booking in this range carries an outcome',
+      tone: n(k.cancel_pct) >= 20 ? 'warn' : null },
     { label: 'Distance', value: `${fmt(k.km)} km`, sub: `${n(k.avg_km) ?? '—'} km a trip` },
   ]);
+
+  /* WHO CALLED THE CANCELLATIONS OFF, as rows rather than four more tiles: a
+     breakdown is a list of parts of one number and tiles read as separate
+     figures. Rendered only when there is something to break down.
+
+     FOUR lines, not the two that were asked for, because two do not add up.
+     api/cancellation_sql.js carries the measurement: over 2026, 5,307 of the
+     fleet's 7,032 driver-attributed cancellations are Bolt offers nobody
+     picked up — broadcast to several drivers at once, so refusing one leaves
+     nobody waiting, and Uber never files them at all. Folding those into
+     "driver cancelled" would make the line three-quarters an artefact of which
+     app a driver works. Yango's are the fourth: it files the bare word
+     'cancelled' and never names an actor. */
+  if (n(k.cancelled_trips)) {
+    /* The separator is part of the string, not a space: without it the row read
+       "changed their mind or did not show 67% of them", which runs one clause
+       into the next and makes the reader parse where the sentence ended. */
+    const pct = (v) => (k.cancelled_trips
+      ? ` · ${Math.round((v / k.cancelled_trips) * 100)}% of them` : '');
+    const unplaced = n(k.other_outcome) || 0;
+    deck.append(el('p', 'm-sec', 'Who called it off'));
+    rows(deck, [
+      row({ title: 'The rider', sub: `changed their mind or did not show${pct(k.cancelled_by_rider)}`,
+        value: fmt(k.cancelled_by_rider) }),
+      row({ title: 'The driver', sub: `took the job, then ended it${pct(k.cancelled_by_driver)}`,
+        value: fmt(k.cancelled_by_driver),
+        tone: n(k.cancelled_by_driver) ? 'bad' : null }),
+      n(k.declined_offers)
+        ? row({ title: 'Offer not taken',
+          /* SHORT, because the row's sub-line is one line on a phone and the
+             longer form truncated mid-word at 420px — "and nobody was left w…"
+             is worse than a shorter sentence that finishes. The clause that
+             had to survive is the one that stops a reader adding this to the
+             line above it. */
+          sub: `Bolt only — nobody was left waiting${pct(k.declined_offers)}`,
+          value: fmt(k.declined_offers) })
+        : null,
+      n(k.cancelled_unsaid)
+        ? row({ title: 'Nobody said who',
+          sub: `the channel does not report it${pct(k.cancelled_unsaid)}`,
+          value: fmt(k.cancelled_unsaid) })
+        : null,
+      /* The remainder, named rather than dropped. A booking whose status this
+         product has not placed is neither completed nor cancelled, and on
+         2026-09-10 that was one row out of 789 — small, and the difference
+         between a breakdown that adds up and one that nearly does. */
+      unplaced
+        ? row({ title: 'Not placed yet',
+          sub: 'a booking status this product has not mapped to an outcome',
+          value: fmt(unplaced) })
+        : null,
+    ]);
+  }
 
   /* What needs a person, not a chart. A source that stopped and a car that
      moved with nobody's name on it are the two things worth a phone buzzing. */

@@ -827,6 +827,28 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **An expression exported for reuse cannot depend on what its callers happen
+  to filter.** `CANCEL_CASE` in `api/cancellation_sql.js` opened with
+  `WHEN n.outcome <> 'not_completed' THEN NULL`. A NULL outcome makes that
+  inequality return NULL rather than true, so the branch does not fire and the
+  row falls through to `ELSE 'unattributed'` — and **every FMS telematics
+  journey has no outcome at all**, because `sql/schema_v18.sql` gives one only
+  to bookings. It was invisible while the single caller filtered `is_booking`
+  in its own WHERE; the first surface to reuse the expression without that
+  filter counted 9 telematics rows out of 13 as unattributable cancellations.
+  `IS DISTINCT FROM` is the fix.
+
+* **A duplicate key in a JavaScript object literal is silent, and the screen is
+  where it shows up.** `mockapi.mjs`'s `/api/kpis` fixture declares
+  `completed_trips`, `cancelled_trips` and `bookable_trips` part-way down the
+  object. New counts added beside the rates at the TOP were shadowed by them,
+  and the desktop tile drew 225 cancellations over a breakdown summing to 219.
+  `test/today_trip_breakdown.test.mjs` now asserts each of those keys is
+  declared exactly once. And when deleting a block from that fixture, check the
+  last line: the keys after it often share a line, which is how `drivers`,
+  `revenue` and five others were removed with it — caught only by
+  `test/mockapi.test.mjs` comparing the fixture's shape against the real route.
+
 * **A driver with no trip is not a driver who was not working, and the
   collector was built on the opposite assumption.** `uber_timeline` asks Uber
   once per driver per window, and the scheduled tick asked only about drivers

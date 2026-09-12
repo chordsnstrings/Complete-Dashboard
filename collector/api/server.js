@@ -12,6 +12,9 @@ import { recognise, unrecognised } from '../src/credkit.js';
 import { checkAll } from '../src/credcheck.js';
 import { proposeKeys } from '../src/credmodel.js';
 import { SETTING_DEFS } from '../src/settings.js';
+/* The one definition of a cancellation and of who caused it — see
+   api/cancellation_sql.js, which carries the measurements. */
+import { CANCEL_CASE, DROPPED_SQL, DECLINED_SQL } from './cancellation_sql.js';
 import { win, winDays, dubaiSpanSql, grainOf, previousWindow, foldGrain, GRAINS, PERIODS,
   isPeriod, periodPartial } from './window.js';
 import { rollupGrainSql, rollupState, refreshRollups } from '../src/rollup.js';
@@ -427,6 +430,39 @@ app.get('/api/kpis', wrap(async (req, res) => {
        count(*) FILTER (WHERE n.outcome = 'completed')::int completed_trips,
        count(*) FILTER (WHERE n.outcome = 'not_completed')::int cancelled_trips,
        count(*) FILTER (WHERE n.outcome IS NOT NULL)::int bookable_trips,
+       /* WHO CALLED IT OFF, from the one definition this product has.
+          ────────────────────────────────────────────────────────────────────
+          api/cancellation_sql.js owns the attribution and carries the
+          measurements behind it; this reads its expressions rather than
+          re-deriving them, because a cancellation counted two ways is how the
+          Today screen and the Cancellations page come to disagree about the
+          same morning. That file's own header says exactly this about
+          trip_norm.outcome.
+
+          FOUR buckets, not two, and the extra pair is the honest part:
+
+            dropped   accepted and then ended by the driver, or cancelled on
+                      Uber. A rider was left waiting. This is the one an
+                      operator is ringing about.
+            declined  a Bolt offer nobody picked up. Broadcast to several
+                      drivers at once, so refusing it leaves nobody waiting,
+                      and Uber never files these at all. Measured over 2026:
+                      5,307 of the fleet's 7,032 driver-attributed
+                      cancellations are these, so folding them into "driver
+                      cancelled" would make the figure three-quarters an
+                      artefact of which app a driver works.
+            rider     the rider, on Uber or Bolt.
+            unsaid    Yango, which files the bare word 'cancelled' and never
+                      names an actor. */
+       count(*) FILTER (WHERE n.is_booking AND ${DROPPED_SQL})::int cancelled_by_driver,
+       count(*) FILTER (WHERE n.is_booking AND ${DECLINED_SQL})::int declined_offers,
+       count(*) FILTER (WHERE ${CANCEL_CASE} = 'rider')::int cancelled_by_rider,
+       count(*) FILTER (WHERE ${CANCEL_CASE} = 'unattributed')::int cancelled_unsaid,
+       /* A booking with a status this product has not placed — neither a
+          completion nor a cancellation. On 2026-09-10 it was one row out of
+          789, and a breakdown that quietly loses it does not add up. */
+       count(*) FILTER (WHERE n.is_booking AND n.outcome = 'other')::int other_outcome,
+       count(*) FILTER (WHERE n.is_booking AND n.outcome IS NULL)::int no_outcome,
        round(100.0*count(*) FILTER (WHERE n.outcome = 'completed')
              / nullif(count(*) FILTER (WHERE n.outcome IS NOT NULL),0),1) completion_pct,
        round(100.0*count(*) FILTER (WHERE n.outcome = 'not_completed')

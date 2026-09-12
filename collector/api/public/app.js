@@ -849,7 +849,23 @@ V.overview = async (root) => {
         ].filter(Boolean).join(' · ')
           + ` · ${(k.accounted_platforms || []).map(sourceLabel).join(', ') || 'no platform'}`
         : 'no fare and no payout statement in this range'],
-    ['Completion', k.completion_pct != null ? k.completion_pct + '%' : '—', `${k.cancel_pct ?? 0}% cancelled`],
+    /* THE COUNT LEADS, and the rate explains it. This tile was "88.7%" over
+       "11.2% cancelled" — two comparisons and not one of the things being
+       compared, on a screen already showing 789 bookings. The operator asked
+       for the counts by name. The split under it is the same four buckets the
+       Cancellations page draws, from the same expressions in
+       api/cancellation_sql.js, so the tile and the page cannot disagree; the
+       page is one click away for the per-driver detail. */
+    ['Completion', k.completed_trips != null
+      ? `${fmt(k.completed_trips)} of ${fmt(k.bookable_trips)}` : '—',
+      [k.completion_pct != null ? `${k.completion_pct}% completed` : null,
+        k.cancelled_trips != null ? `${fmt(k.cancelled_trips)} cancelled` : null,
+        k.cancelled_by_rider != null
+          ? `${fmt(k.cancelled_by_rider)} by the rider · ${fmt(k.cancelled_by_driver)} by the driver`
+            + (k.declined_offers ? ` · ${fmt(k.declined_offers)} offers not taken` : '')
+            + (k.cancelled_unsaid ? ` · ${fmt(k.cancelled_unsaid)} unsaid` : '')
+          : null,
+      ].filter(Boolean).join(' · ')],
     /* Booking-scoped, and the tracker-only cars named rather than absorbed.
        This tile read "102 · with a trip in this range" while the Vehicles page
        read "97 took a booking" — the same window, the same fleet, two numbers

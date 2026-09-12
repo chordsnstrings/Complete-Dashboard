@@ -19,6 +19,11 @@ import { readFileSync, readdirSync } from 'node:fs';
    and track endpoints bind a raw timestamptz, and an identifier the slice
    references and this list omits is a ReferenceError before the first
    assertion of every route test. */
+/* /api/kpis now splits its cancellations with the shared definitions, and
+   the harness evaluates that region as a function body — an identifier it
+   references and this list omits is a ReferenceError before the first
+   assertion of every route test. */
+import { CANCEL_CASE, DROPPED_SQL, DECLINED_SQL } from '../api/cancellation_sql.js';
 import { win, winDays, dubaiSpanSql, grainOf, previousWindow, foldGrain, GRAINS, PERIODS,
   isPeriod, periodPartial } from '../api/window.js';
 import { rollupGrainSql } from '../src/rollup.js';
@@ -108,7 +113,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
   const src = readFileSync('api/server.js', 'utf8');
   const injected = {
     q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin, win, winDays,
-    dubaiSpanSql,
+    dubaiSpanSql, CANCEL_CASE, DROPPED_SQL, DECLINED_SQL,
     grainOf, previousWindow, foldGrain, GRAINS, PERIODS, isPeriod, periodPartial,
     isAdmin, redactSettings, secretField, redactSampleValue, RAW_ALIASES, spanGaps,
     IDENTITY_DOCS, stripIdentity, withheldNote, photoHref, withPhotos,

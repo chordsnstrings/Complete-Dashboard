@@ -115,7 +115,19 @@ const list = (a) => a.map((s) => `'${s}'`).join(', ');
    "cancelled" in one product is how two pages come to disagree. */
 export const CANCEL_CASE = `
   CASE
-    WHEN n.outcome <> 'not_completed' THEN NULL
+    /* IS DISTINCT FROM, not a plain inequality. A NULL outcome makes the
+       inequality return NULL rather than true, so the branch does not fire and
+       the row falls all the way
+       through to ELSE — and every FMS telematics journey, which has no outcome
+       at all because sql/schema_v18.sql gives one only to bookings, was
+       classified as an unattributable CANCELLATION.
+
+       It was invisible while the only caller filtered is_booking in its own
+       WHERE, which api/cancellation_routes.js does. The moment a second surface
+       used this expression without that filter it counted 9 telematics rows out
+       of a fixture of 13 as cancellations nobody could attribute. An expression
+       exported for reuse cannot depend on what its callers happen to filter. */
+    WHEN n.outcome IS DISTINCT FROM 'not_completed' THEN NULL
     WHEN ${BARE} IN (${list(DRIVER_SET)}) THEN 'driver'
     WHEN ${BARE} IN (${list(RIDER_SET)})  THEN 'rider'
     ELSE 'unattributed'
@@ -123,6 +135,14 @@ export const CANCEL_CASE = `
 
 export const DRIVER_STATUSES = DRIVER_SET;
 export const RIDER_STATUSES = RIDER_SET;
+
+/* The two halves of the driver bucket, as SQL, exported because a second
+   surface needs them and a second surface writing its own copy is how the
+   Today screen and this page would come to disagree about one morning. The
+   whole reason this file exists is that there is one definition of a
+   cancellation; there is one of who caused it too. */
+export const DROPPED_SQL = `${BARE} IN (${list(DROPPED_SET)})`;
+export const DECLINED_SQL = `${BARE} IN (${list(DECLINED_SET)})`;
 
 /* Per person, over the window the reader chose. Grouped on person_key so a
    driver who works two channels is one row — the same identity rule the rest
@@ -166,8 +186,8 @@ export function cancellationsSql({ where = 'TRUE' } = {}) {
              count(*) FILTER (WHERE ${CANCEL_CASE} IS NOT NULL)::int          AS cancelled,
              count(*) FILTER (WHERE ${CANCEL_CASE} = 'driver')::int           AS by_driver,
              /* The two halves of it, which are the columns the page draws. */
-             count(*) FILTER (WHERE ${BARE} IN (${list(DROPPED_SET)}))::int   AS dropped,
-             count(*) FILTER (WHERE ${BARE} IN (${list(DECLINED_SET)}))::int  AS declined,
+             count(*) FILTER (WHERE ${DROPPED_SQL})::int                      AS dropped,
+             count(*) FILTER (WHERE ${DECLINED_SQL})::int                     AS declined,
              /* The only denominator a drop rate can honestly have: the jobs
                 that actually reached this person as a dispatch. A Bolt driver's
                 booking count includes offers they never took, so dropped over
@@ -175,7 +195,7 @@ export function cancellationsSql({ where = 'TRUE' } = {}) {
                 wrong answer in Bolt's favour on the numerator and against it on
                 the denominator at the same time. */
              (count(*) FILTER (WHERE n.is_booking)
-              - count(*) FILTER (WHERE ${BARE} IN (${list(DECLINED_SET)})))::int AS accepted,
+              - count(*) FILTER (WHERE ${DECLINED_SQL}))::int                  AS accepted,
              /* Does this person work a channel that files offers in this
                 window? Without it a zero in the offers column is unreadable:
                 an Uber-only driver has no offers on record because Uber does
