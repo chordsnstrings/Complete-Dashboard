@@ -514,7 +514,7 @@ is the identity work beside it.
 | L5 | similar names become PROPOSALS and fold nothing | written | **reverting the gate in `api/identity_links.js` fails 1** |
 | L6 | the simultaneous-trip disproof matched on `driver_ext_id` alone | written | **reverting the platform predicate fails 3** |
 | L7 | `/api/same-person` was cached 30s against a version a verdict never bumps | written | **reverting the NEVER entry fails 2** (`8 then 8` — the same body) |
-| L8 | the report-types probe called a **rate-limited** type invalid | written | disproved on production: `REPORT_TYPE_PAYMENTS_ORDER` returned 399 rows |
+| L8 | the report-types probe called a **rate-limited** type invalid | written | shown on production: `REPORT_TYPE_PAYMENTS_ORDER` returned 399 rows. **Note the corrected scope** — this did NOT cause the old "only four types are valid" belief (that was sixteen invented names, already fixed), and that report is already collected |
 
 ### The three that were only found by reverting
 
@@ -546,7 +546,7 @@ defect, which is what the column is for.
 | # | proof |
 |---|---|
 | L1/L2 | `/api/status/fleet`: **158** drivers carrying a status against a pre-deploy baseline of **13** (`/api/live`, ONLINE 8 / ONTRIP 3 / OFFLINE 2). 63 working — 26 on a trip, 37 waiting. **66 of the 158 have no plate**, so were unreachable by the plate-keyed row by construction. Collector log: `[uber] driver status {"fleet":"ecosine","drivers":114,…,"contacts":114}` and `{"fleet":"egari","drivers":44,…,"contacts":44}` |
-| L8 | `?only=REPORT_TYPE_PAYMENTS_ORDER,REPORT_TYPE_DRIVER_STATUS` → **both `accepted`**, `limit_note: null`. The two types the old probe called invalid are valid; only the 3-in-flight limit and the list order ever said otherwise |
+| L8 | `?only=REPORT_TYPE_PAYMENTS_ORDER,REPORT_TYPE_DRIVER_STATUS` → **both `accepted`**, `limit_note: null`. Both were reported invalid by the unfixed probe; the 3-in-flight limit and the list order were the whole of it. `PAYMENTS_ORDER` was already collected — `DRIVER_STATUS` is not, and whether it adds anything to the live feed is unmeasured |
 
 **And the defect the first production read found.** 66 of those 158 rows carry
 `statusEntries: []` — a row present, status null — a case no fixture had. The

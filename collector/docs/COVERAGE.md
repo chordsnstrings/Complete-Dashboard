@@ -2660,7 +2660,25 @@ carry a **simultaneous trip in two different cars** is disproved and never
 reaches the queue — the same observation that holds back five pairs in the
 register.
 
-### Uber's report catalogue: "only four types are valid" was a rate limit
+### The report-types probe books a RATE LIMIT as "invalid" — 2026-09-14
+
+**Correction, written the same day, before this note was a day old.** The first
+draft of this section claimed the standing "only four report types are valid"
+belief came from the rate limit described below. It did not, and saying so
+would have overwritten a diagnosis this codebase had already made correctly.
+
+The real history is at `api/probe.js:48` and `src/sources/uber.js:233`: the
+probe used to ask about **sixteen INVENTED report names**, only four of which
+happened to be real — "true of what it asked, and read by everybody as a fact
+about Uber". That was found, fixed, and documented before this session;
+`CANDIDATE_REPORTS` now carries Uber's published list, and
+`REPORT_TYPE_PAYMENTS_ORDER` has been **collected** ever since
+(`src/sources/uber.js:605`, `csvToPayments`, `test/uber_payments_order.test.mjs`).
+
+What is genuinely new below is narrower, and is about the probe as it stands
+today rather than about how the old belief arose. Both are worth holding: a
+correct diagnosis can be overwritten by a plausible later one, and the note
+that replaces it reads just as confidently.
 
 Measured on production 2026-09-14, `/api/probe/uber/report-types?fleet=ecosine`,
 window 2026-09-11..14. Sixteen candidate types, asked in list order:
@@ -2671,19 +2689,28 @@ window 2026-09-11..14. Sixteen candidate types, asked in list order:
   `Code: rate-limited, Message: too many ongoing and in progress reports, please
   wait for reports to complete. Limit: 3`
 
-That is the list order, not a fact about Uber. The probe booked `valid: false`
-for all twelve, and **that artefact is where the standing claim "only four
-report types are valid" comes from.**
+That is the list order, not a fact about Uber — and the probe booked
+`valid: false` for all twelve. So the probe that exists to answer "does this
+provider expose something we are not collecting?" reports twelve UNKNOWNS as
+twelve NOs, which is the failure mode it was rewritten once already to avoid:
+a diagnostic whose wrong answer is plausible is worse than no diagnostic.
 
-**Disproved directly.** `/api/probe/uber/report-columns?type=REPORT_TYPE_PAYMENTS_ORDER`
-— a type the report-types probe calls invalid — returned **399 rows** over the
+**Shown directly.** `/api/probe/uber/report-columns?type=REPORT_TYPE_PAYMENTS_ORDER`
+— a type the report-types probe calls invalid, and one this product has been
+collecting for weeks — returned **399 rows** over the
 same window, with a per-transaction column set including `transaction UUID`,
 `Driver UUID`, **`Trip UUID`** (joins straight onto `trip.external_id`),
 `Paid to you : Your earnings : Fare`, `… : Trip balance : Payouts : Cash
 collected`, `… : Service fee`, `… : Tax on Service Fee`, `… : Fare :
 Cancellation` and toll refunds, and `Description` taking four values
 (`trip completed order`, `trip fare adjust order`, and the two Business Order
-forms). The type is valid and rich.
+forms). The type is valid, and the "invalid" verdict beside it was the throttle.
+
+Asked again after the fix with `?only=REPORT_TYPE_PAYMENTS_ORDER,REPORT_TYPE_DRIVER_STATUS`
+— two types, so no throttle — **both answered `accepted`**, `limit_note: null`.
+`REPORT_TYPE_DRIVER_STATUS` is the one of those two this product does **not**
+collect; whether it says anything the live `drivers/actions` feed does not is
+not yet measured.
 
 `api/probe/uber/report-types` now answers `valid: null, throttled: true` for a
 throttled type with a `limit_note` saying how many were never actually tested,
@@ -2696,8 +2723,13 @@ the budget of three on the eleven ahead of it.
   it looks at the type.** Any loop that asks about N report types in order will
   report the tail as broken. A rate-limited answer is *unknown*, never *invalid*
   — booking it as invalid is a reason that is not the true one, which is the one
-  thing this product's principle forbids, and it stood as a documented fact
-  about Uber for weeks.
+  thing this product's principle forbids.
+- **A correct diagnosis already in the tree can be overwritten by a plausible
+  later one.** The first draft of this section attributed the old "only four
+  types are valid" belief to this rate limit. The true cause — sixteen invented
+  names — was already written down in two files, and the replacement would have
+  read just as confidently to the next person. Before writing WHY something was
+  believed, grep for whether the tree already says why.
 - **`driver_ext_id` is unique WITHIN a provider and nowhere else.** Uber issues a
   UUID, the hotel channel a short numeric id, CABMAN another; two providers can
   name different people with the same string. The simultaneous-trip disproof

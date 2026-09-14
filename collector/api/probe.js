@@ -754,12 +754,21 @@ export function probeRoutes(app, { wrap }) {
            twelve came back rate-limited, which is exactly the list order and
            not a fact about Uber.
 
-           That artefact is where the standing claim "only four report types
-           are valid" comes from. It is a reason that is not the true one,
-           which is the one thing this product's own principle forbids: a
-           throttled type is UNKNOWN, so it now answers null and says so, and
-           ?only= exists to ask about one without spending the budget on the
-           eleven ahead of it. */
+           This is NOT where the old "only four report types are valid"
+           belief came from — that was sixteen INVENTED names, diagnosed and
+           fixed at :48 above, and REPORT_TYPE_PAYMENTS_ORDER has been
+           collected ever since (src/sources/uber.js:605). Said explicitly
+           because the first draft of this comment claimed otherwise, and a
+           plausible wrong cause written over a correct one reads just as
+           confidently to whoever comes next.
+
+           What IS true is narrower and about this route as it stands: a
+           throttled type is UNKNOWN, and booking it as invalid is a reason
+           that is not the true one — the one thing this product's own
+           principle forbids, in the very route whose job is to find what we
+           are NOT collecting. So it answers null and says so, and ?only=
+           exists to ask about one type without spending the budget of three
+           on the eleven ahead of it. */
         const throttled = /rate-limited|too many ongoing/i.test(detail);
         out.push({ reportType, valid: throttled ? null : ok,
           throttled, detail: throttled ? `not asked — ${detail}` : detail });
