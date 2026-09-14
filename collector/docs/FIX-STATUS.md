@@ -418,7 +418,39 @@ and a fleet page, **Better or worse** (`#performance`), both served by
 | P3 | the fleet term — a driver who falls WITH the fleet is not marked down | written | removed from `judge()` and the same suite fails: MOVER goes from "within range" to z = −3.29 |
 | P4 | `test/sql_module_names.test.mjs` — the `api/*_sql.js` export-collision guard | written | rename reverted, guard goes red on `GRAINS` |
 | P5 | Record tab and Better-or-worse page render at 1500 / 820 / 400 px | written | `bin/render-audit.mjs`-style pass against the mock: 0 overflow at 1500 and 820, 24px at 400 which is the product-wide nav figure |
-| — | deployed and re-measured on production | *pending* | |
+| P6 | `/api/performance/fleet` warmed at both grains | written | `test/warm.test.mjs` — which also forced the page's default request to be a literal, because the guard can only check what it can read in the source |
+| — | deployed and re-measured on production | **proven** | see below |
+
+**Proven on production 2026-09-14**, deployment `0998fae`, phase ACTIVE.
+
+The check that matters is that the new surface cannot disagree with the old
+one. For Zubair Khan Shaukat Ali (`6616229`) in the week beginning 2026-09-07,
+`/api/performance/driver` returns **completed 79, accepted 83, dropped 0,
+declined 5, bookings 88** — and `/api/cancellations?from=2026-09-07&to=2026-09-13`
+returns the same five numbers for the same person. They are the same
+expressions out of `api/cancellation_sql.js`, so this is agreement by
+construction rather than by coincidence, which is the property worth having.
+
+Measured at the same time, cold (cache miss):
+
+| endpoint | time | size |
+|---|---|---|
+| `/api/performance/fleet?grain=week` | 4.4s | 114 KB |
+| `/api/performance/driver?id=…&grain=week` | 3.7s | 22 KB |
+
+The fleet endpoint is now in `api/warm.js`'s BARE_PATHS at both grains, so the
+first reader of the People section does not pay for it. The per-driver one is
+deliberately not warmed: it is keyed on a person nobody has opened yet.
+
+What the page found on its first real week, which is the argument for it
+existing: **3 drivers of 112 did something different**, all three of them
+UP, and all three because of ATTENDANCE rather than pace — baselines of 0.8,
+1.3 and 4.3 active days a week rising to 5, 7 and 7. None of them is near the
+top of either ranking, so neither `#top-performers` nor `#low-performers` would
+have shown them. The two positions also disagree where they should: Nalini
+Chakrapani is 1st of 112 on jobs and 6th on value, and Zeeshan Ahmad Ur Rahman
+is 13th on jobs and 3rd on value — one is working short hops and the other long
+ones, which is the finding a blended score would have hidden.
 
 **Three things this pair deliberately refuses to do**, each of which was a
 measurement before it was a rule (`api/performance_sql.js` carries them):

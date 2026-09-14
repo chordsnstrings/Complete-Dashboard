@@ -192,10 +192,24 @@ function rankTable(host, rows, basis, d) {
           : `<span class="ent-off">${esc(r.driver_name || '—')}</span>`) },
     onValue
       ? { label: 'Trip value', key: 'value', num: true, render: (r) => money(r.value) }
-      : { label: 'Jobs done', key: 'completed', num: true },
-    { label: 'Percentile', key: 'pctl', num: true,
-      render: (r) => ordinal((onValue ? r.value_position : r.jobs_position)?.percentile) },
-    { label: 'Days', key: 'active_days', num: true },
+      /* "Jobs", not "Jobs done" — the panel heading above already says which
+         work is counted, and the two words cost this table the column that
+         matters most. See the header of the last column below. */
+      : { label: 'Jobs', key: 'completed', num: true },
+    /* No percentile column here, deliberately — it is on the driver's own
+       Record tab, where it earns its width. Across periods the ordinal and the
+       percentile say different things, because the active roster moves and
+       "40th" means something different every week. Within ONE period they say
+       the same thing, and the ordinal already rides inside the name. The width
+       goes to "Against their usual", which was being pushed into a sideways
+       scroll on a 1500px screen by real driver names. */
+    /* No "Days" column. Measured on production it was the 60px that kept
+       "vs usual" off the screen, and it is the least informative of the six: on
+       a finished week nearly every active driver on this fleet shows 7, and the
+       thing a reader actually wants from it — were these jobs done in a full
+       week or in two days — is what "Jobs a day" beside it says. The days
+       themselves are on the driver's own Record tab, one click away, where
+       they sit against the same driver's other weeks and mean something. */
     onValue
       ? { label: 'Average fare', key: 'value_per_job', num: true,
         render: (r) => (r.value_per_job == null ? '—' : money(r.value_per_job, 'AED', 0)) }
@@ -213,7 +227,16 @@ function rankTable(host, rows, basis, d) {
           : `<span class="dim" title="${esc(r.value_absent || '')}">not ranked</span>`),
         absent: 'no driver in this period has a fare on enough of their completed trips to be '
           + 'ranked on value' },
-    { label: 'Against their usual', key: 'z', num: true,
+    /* "vs usual", short, and the shortness is the point.
+       ─────────────────────────────────────────────────────────────────────
+       Written out as "Against their usual" this column set its own minimum
+       width at about 140px and was the one pushed off the right edge on a
+       1500px screen — measured against production names, which wrap to three
+       lines and make the identity column wide. It is the column that separates
+       this page from #top-performers, so it is the last one that may be cut;
+       the heading above the table and the sentence below it both say what it
+       measures, which is where a long phrase belongs. */
+    { label: 'vs usual', key: 'z', num: true,
       render: (r) => {
         if (r.z == null) return `<span class="dim">${esc(r.no_verdict || 'no baseline yet')}</span>`;
         const v = Math.round(r.split?.total ?? 0);
@@ -268,9 +291,26 @@ export async function renderPerformance(root, periodParam) {
 
   let d;
   try {
-    const q = new URLSearchParams({ grain });
-    if (periodParam) q.set('period', periodParam);
-    d = await api(`/api/performance/fleet?${q}`);
+    /* THE DEFAULT REQUEST IS WRITTEN OUT, once per grain, rather than
+       assembled from a URLSearchParams.
+       ─────────────────────────────────────────────────────────────────────
+       api/warm.js warms exactly these two keys, the response cache keys on the
+       full URL, and test/warm.test.mjs reads BOTH files to check that what is
+       warmed is what is asked for — by looking for the literal inside the
+       api() call, which is the only thing it can check from source. That guard
+       exists because a warmed key differing from the requested one by a single
+       character warms nothing and looks like it worked: seventeen paths times
+       four windows were warmed that way for weeks, the warmer logging a
+       successful pass the whole time.
+
+       A chosen period is a different key and is not warmed — a reader who
+       clicks back through the chips pays for that query, which is the right
+       trade for thirteen keys per grain nobody may open. */
+    d = periodParam
+      ? await api(`/api/performance/fleet?grain=${grain}&period=${encodeURIComponent(periodParam)}`)
+      : grain === 'month'
+        ? await api('/api/performance/fleet?grain=month')
+        : await api('/api/performance/fleet?grain=week');
   } catch (e) {
     vHost.innerHTML = '';
     vHost.append(note(`This page could not be read: ${String(e && e.message ? e.message : e)}`, 'warn'));
@@ -368,11 +408,17 @@ export async function renderPerformance(root, periodParam) {
     onClick: (row) => { location.hash = href('performance', row.iso, null, { grain }).slice(1); },
     aria: `Jobs done by the middle driver each ${L}`,
   });
+  /* COMPLETE periods on both ends of that range. Ending it on the period in
+     progress compares a full roster against however many people have worked so
+     far this week — on production that read "moved from 77 to 80" on a week
+     whose finished predecessor had 112, which is the opposite of the point the
+     sentence is making. */
+  const done = d.periods.filter((p) => p.complete);
   trend.body.append(el('p', 'cap',
     'The MEDIAN driver, deliberately, not the fleet total. The number of active drivers moved '
-    + `from ${fmt(series[0]?.drivers ?? 0)} to ${fmt(series[series.length - 1]?.drivers ?? 0)} `
-    + `over these ${countOf(series.length, L)}, and a total would move with it — which would be `
-    + 'read as every driver improving. Click a bar to rank that period.'));
+    + `from ${fmt(done[0]?.drivers ?? 0)} to ${fmt(done[done.length - 1]?.drivers ?? 0)} `
+    + `over the ${countOf(done.length, 'finished ' + L)} here, and a total would move with it — `
+    + 'which would be read as every driver improving. Click a bar to rank that period.'));
 
   const how = panel('How to read this', 'Every rule here is measured on this fleet, not assumed');
   root.append(how.panel);

@@ -80,6 +80,24 @@ const PATHS = [
 const BARE_PATHS = [
   '/api/trend/monthly', '/api/insights',
   '/api/compliance/drivers', '/api/coverage',
+  /* Better or worse, at both grains. It belongs in THIS list rather than the
+     windowed one because the page does not use the reader's range at all: it
+     computes its own thirteen periods from the Dubai day and asks bare, so a
+     windowed key would be four entries nobody requests and the one key every
+     reader hits would stay cold — the exact failure this list's header
+     describes about /api/coverage.
+
+     Worth warming: measured on production 2026-09-14 the cold response is
+     4.4 seconds, which is a scan of thirteen weeks of trip_norm for every
+     driver. That is well inside what this pass already carries (the drivers
+     directory is 8.3s) and it is the first thing a reader of the People
+     section opens. The month grain is a different thirteen periods and a
+     different scan, so it is its own key.
+
+     The driver-level /api/performance/driver is deliberately NOT here: it is
+     keyed on a person nobody has opened yet, which is the rule this file's
+     header gives for leaving detail pages out. */
+  '/api/performance/fleet?grain=week', '/api/performance/fleet?grain=month',
   /* And /api/platforms, deliberately in BOTH lists, for the same reason
      /api/coverage is: #platforms asks through qAll and needs the windowed key,
      while #settings and #sources hide the range control entirely and ask bare.

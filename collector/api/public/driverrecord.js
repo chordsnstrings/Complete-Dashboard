@@ -69,7 +69,11 @@ const periodShort = (iso, grain) => new Date(`${iso}T12:00:00Z`).toLocaleDateStr
 const moreFewer = (n, one = 'job', many = 'jobs') => {
   const v = Math.round(Number(n) || 0);
   if (!v) return `no change in ${many}`;
-  return `${fmt(Math.abs(v))} ${plural(Math.abs(v), one, many)} ${v > 0 ? 'more' : 'fewer'}`;
+  /* "29 more jobs", not "29 jobs more". Both are grammatical; the second one
+     read badly three times in one sentence on production — "Of the 29 jobs
+     more, 2 jobs more from working 0.2 days more and 27 jobs more from the
+     pace" — because the qualifier keeps landing at the end of the clause. */
+  return `${fmt(Math.abs(v))} ${v > 0 ? 'more' : 'fewer'} ${plural(Math.abs(v), one, many)}`;
 };
 
 /* How the fleet moved, as a clause that can be dropped into a sentence. */
