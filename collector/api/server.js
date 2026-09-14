@@ -53,6 +53,7 @@ import { onlineRoutes } from './online_routes.js';
 import { reconcileRoutes } from './reconcile_routes.js';
 import { performerRoutes } from './performer_routes.js';
 import { compareRoutes } from './compare_routes.js';
+import { performanceRoutes } from './performance_routes.js';
 import { probeRoutes } from './probe.js';
 import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
 /* The one place that decides what a reader with no credential may see of a
@@ -5635,6 +5636,14 @@ performerRoutes(app, { q, wrap });
    a seven-hour today against a twenty-four-hour yesterday reports a collapse
    every single morning. */
 compareRoutes(app, { q, wrap });
+
+/* One driver against their own record, week by week and month by month, with
+   their position among the people who were active in the same period — and
+   the fleet's own movement taken out of the comparison first, so a quiet
+   fortnight is not charged to the individual. Two positions, jobs done and
+   trip value, never blended; api/performance_sql.js carries the measurements
+   behind every rule in it. */
+performanceRoutes(app, { q, wrap });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this

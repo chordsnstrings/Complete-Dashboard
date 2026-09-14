@@ -33,7 +33,7 @@ export const TABS = [
   /* 'online-time' is a People page and has a phone screen of its own — the
      one screen here whose rows dial rather than drill, because chasing a
      driver who has not come online is done from the phone in your hand. */
-  { id: 'people', route: 'people', label: 'People', ic: '◧', owns: ['people', 'drivers', 'driver', 'online-time'] },
+  { id: 'people', route: 'people', label: 'People', ic: '◧', owns: ['people', 'drivers', 'driver', 'online-time', 'performance'] },
   { id: 'fleet', route: 'fleet', label: 'Fleet', ic: '▤', owns: ['fleet', 'vehicles', 'vehicle'] },
   { id: 'more', route: 'more', label: 'More', ic: '⋯',
     owns: ['more', 'live', 'map', 'safety', 'unauthorized', 'insights', 'compliance',
@@ -56,6 +56,11 @@ export function titleFor(view, param) {
     money: ['Money', WINDOW_NOTE()],
     people: ['People', WINDOW_NOTE()],
     'online-time': ['Online time', 'When each driver came online'],
+    /* Rendered by the desktop module through SCREENS.fallback, like every
+       other People page without a phone screen of its own — but NAMED here,
+       because a header reading "performance" is the router's word for the page
+       and not the product's. */
+    performance: ['Better or worse', 'Against each driver\u2019s own record'],
     fleet: ['Fleet', WINDOW_NOTE()],
     more: ['More', 'Everything else'],
     trips: ['Every trip', WINDOW_NOTE()],

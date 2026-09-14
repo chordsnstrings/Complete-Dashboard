@@ -17,6 +17,9 @@ import { win, winDays } from './window.js';
    drifted into the same defect at once; see the module header for the
    measurement. */
 import { onlineSpansSql } from './online_span_sql.js';
+/* One definition of a driver's position among their peers — see the pct()
+   helper below, which used to be a second copy of it. */
+import { position } from './performance_sql.js';
 import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
 /* The alerts-per-distance rule, shared with the fleet headline and both
    economics ledgers so this page cannot disagree with the tables that link
@@ -2763,18 +2766,28 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        given width wants. Exact equality is the right test: the metrics that
        actually tie are integer counts (days, bookings), and a float that ties
        to the last bit genuinely is the same measurement. */
+    /* The arithmetic moved to api/performance_sql.js and this calls it.
+       ─────────────────────────────────────────────────────────────────────
+       It was written out here, and then the driver Record tab needed the same
+       percentile and copied it — two definitions of a driver's position on
+       adjacent tabs of one page, which is the defect this product keeps
+       paying for in other guises. One function now, and the properties this
+       block's comment argues for are properties of that function:
+       strictly-below over n-1, a lone member at 50, the tie size travelling
+       with the number.
+
+       position() returns the UNROUNDED percentile as well, and the inversion
+       below uses it: rounding first and subtracting from 100 differs by a
+       point from subtracting and then rounding, at an exact half. */
     const pct = (key, higherIsBetter = true) => {
-      const vals = pop.map((c) => +c[key] || 0).sort((a, b) => a - b);
       const v = +me[key] || 0;
-      let below = 0; while (below < vals.length && vals[below] < v) below++;
-      let tied = 0; for (const x of vals) if (x === v) tied++;
-      const raw = vals.length > 1 ? (below / (vals.length - 1)) * 100 : 50;
-      return { value: v, percentile: Math.round(higherIsBetter ? raw : 100 - raw),
-        median: vals[Math.floor(vals.length / 2)],
+      const p = position(pop.map((c) => +c[key] || 0), v);
+      return { value: v, percentile: Math.round(higherIsBetter ? p.raw : 100 - p.raw),
+        median: p.median,
         /* Both, so a reader of the response can compute the share without
            knowing n_peers is the same population — it is, and saying so twice
            is cheaper than a caller assuming it wrongly. */
-        tied, population: vals.length };
+        tied: p.tied, population: p.of };
     };
     res.json({
       n_peers: pop.length,

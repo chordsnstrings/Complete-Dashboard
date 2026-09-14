@@ -827,6 +827,54 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **`test/mount.mjs` spreads every `api/*_sql.js` export LAST, over the named
+  helpers above it — so a new export silently replaces one of them.** The
+  injection set is `{ q, wrap, …, GRAINS, …, ...allSqlModules }`. `api/window.js`
+  exports `GRAINS` (the product's grain table, with `day` and `quarter` in it)
+  and the mounted slice of `api/server.js` uses it; `api/performance_sql.js` was
+  written exporting a two-entry `GRAINS` of its own. Nothing throws — every
+  route in the harness simply stops recognising half the grains, **in the tests
+  only**, which is the worst place for the test application and the real one to
+  differ. Renamed to `PERF_GRAINS`, and `test/sql_module_names.test.mjs` now
+  fails on any export of an `api/*_sql.js` module that shadows a named helper or
+  collides with another `_sql.js` module. Three names *are* shared on purpose —
+  `CANCEL_CASE`, `DROPPED_SQL`, `DECLINED_SQL` — and the test asserts they are
+  the identical binding rather than taking it on trust.
+
+* **`tableFrom`'s column renderer is `render:`, not `fmt:`** (`api/public/ui.js`
+  — the cell is `c.render ? c.render(r) : plainCell(c, r)`). A column written
+  with `fmt:` is not an error: the option is ignored and `plainCell` prints the
+  raw value, so a column holding an object renders `[object Object]` and a
+  column holding a number loses its unit. Two new pages were written with `fmt:`
+  throughout and the browser render is where it surfaced — 110 occurrences of
+  `[object Object]` on one page. `bin/render-audit.mjs` counts those strings in
+  the body text for exactly this reason; run it before believing a new table.
+
+* **A grid item is `min-width: auto` by default, which is the MIN-CONTENT width
+  of whatever is inside it — so a `.tscroll` in a grid cell never scrolls and
+  the PAGE scrolls sideways instead.** At 400px the two halves of a panel
+  refused to narrow below 508px and pushed the document 147px sideways, while
+  the identical table on `#top-performers` sat happily inside its own scroller.
+  The scroller cannot do its job until the grid item is allowed to be narrower
+  than its contents: `.pcol{min-width:0}` in `api/public/app.css`. Note that
+  **every page in this product already overflows 24px at 400px** from the nav
+  strip, so measure against a control page rather than against zero.
+
+* **Uber DOES publish a per-trip fare now, and the comment in
+  `sql/schema_v18.sql` saying it does not is stale.** That comment — "The Uber
+  trip export has no fare column at all, so price is NULL on every Uber row" —
+  was about the trip export; the payments walk fills `trip.price` afterwards.
+  Measured from `/api/revenue` on production 2026-09-14, priced bookings against
+  all bookings, per month: 2025-09 25,711/28,210 · 2025-12 24,101/26,649 ·
+  2026-02 22,638/25,437 · 2026-03 5,091/6,065 · 2026-06 9,066/10,047 ·
+  2026-08 11,248/12,445 — 89% to 91% every month back to the start of the
+  record, and 100.0% of the bookings that *could* carry a fare, the remainder
+  being cancellations that charged nothing. So a gross trip-value figure over
+  `sum(price) FILTER (has_fare)` covers this fleet's main channel and is what
+  `/api/performance/*` ranks on. It is still **not** the fleet's receipts: Uber
+  takes 25% out of it, Yango around 23%, and the driver has already pocketed any
+  cash — `driver_day.money` remains the receipts basis.
+
 * **An expression exported for reuse cannot depend on what its callers happen
   to filter.** `CANCEL_CASE` in `api/cancellation_sql.js` opened with
   `WHEN n.outcome <> 'not_completed' THEN NULL`. A NULL outcome makes that

@@ -48,6 +48,10 @@ import { renderRevenue } from './revenue.js';
 import { renderReconcile } from './reconcile.js';
 import { renderEconomics, UNIT_TABS } from './economics.js';
 import { renderPerformers, renderPerformer, isWeek } from './performers.js';
+/* Every active driver for one period on both bases, and — the part the two
+   ranking pages cannot show — who is doing something different from what they
+   themselves usually do. */
+import { renderPerformance } from './performance.js';
 import { renderCompare } from './compare.js';
 import { renderSupply } from './supply.js';
 import { renderOptimise } from './optimise.js';
@@ -332,6 +336,11 @@ const VIEWS = [
   { id: 'roster', label: 'Driver roster', ic: '☰', sec: 'People', sub: 'Every driver on the books on each platform, and who is earning nothing' },
   { id: 'top-performers', label: 'Top performers', ic: '▲', sec: 'People', sub: 'The best drivers of the last complete week, and what they did differently' },
   { id: 'low-performers', label: 'Low performers', ic: '▼', sec: 'People', sub: 'The weakest drivers of the last complete week, and what the data cannot explain' },
+  /* Beneath the two ranking pages because it is the question they cannot
+     answer. They rank a week; this one measures each driver against their OWN
+     record, so a steadily excellent driver never appears on it and one in the
+     middle who has quietly halved does. */
+  { id: 'performance', label: 'Better or worse', ic: '◲', sec: 'People', sub: 'Every active driver ranked on jobs and on trip value separately, and who is doing something different from what they usually do' },
   { id: 'retention', label: 'Joiners & leavers', ic: '⇅', sec: 'People', sub: 'Whether the driver count fell because people left or because nobody joined' },
   { id: 'compliance', label: 'Compliance', ic: '❑', sec: 'People', sub: 'Driver licences and vehicle papers, and when each one expires' },
   /* Because the fold is now partly a RULE, and a rule that joins two humans
@@ -1896,6 +1905,10 @@ V.provenance = async (root) => renderProvenance(root);
 V.unit = async (root) => renderEconomics(root);
 V['top-performers'] = async (root) => renderPerformers(root, 'top');
 V['low-performers'] = async (root) => renderPerformers(root, 'low');
+/* `#performance` is the latest complete period; `#performance/<YYYY-MM-DD>` is
+   the period starting that day, so a reader can send somebody the exact week
+   they are looking at rather than "the one that was showing". */
+V.performance = async (root) => renderPerformance(root, state.param);
 /* `#performer/<id>/<monday>` — the week the reader was ranking when they
    clicked, so the drill-down shows the week they came from. */
 V.performer = async (root) => renderPerformer(root, state.param, state.sub);

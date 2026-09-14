@@ -9,6 +9,7 @@
      #driver/<id>/territory  territory  — where they work, and where they wait
      #driver/<id>/earnings   earnings   — what the work paid
      #driver/<id>/quality    quality    — completion, cancellations, driving
+     #driver/<id>/record     record     — their own week-by-week and month-by-month
      #driver/<id>/trips      trips      — the underlying records
 
    Every panel here answers over *all* of a person's platform accounts, because
@@ -24,6 +25,10 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
 import { qAll, href, currentGen, alive } from './data.js';
 import { driversVerdict } from './verdicts.js';
 import { renderDriverDay } from './driverday.js';
+/* One driver against their own record, week by week and month by month. Its
+   own module for the same reason driverday.js is: this file is already the
+   longest view in the product. */
+import { renderDriverRecord } from './driverrecord.js';
 
 /* Why a whole column is empty, in the words the page prints under it.
    ─────────────────────────────────────────────────────────────────────────
@@ -47,6 +52,10 @@ export const DRIVER_TABS = [
   { id: 'territory', label: 'Territory', ic: '◍' },
   { id: 'earnings', label: 'Earnings', ic: '◈' },
   { id: 'quality', label: 'Quality', ic: '△' },
+  /* Between Quality and Trips deliberately. Record is a reading of the same
+     person over time rather than a new subject, so it sits after the panels
+     that describe them and before the raw rows that evidence them. */
+  { id: 'record', label: 'Record', ic: '◲' },
   { id: 'trips', label: 'Trips', ic: '▤' },
 ];
 
@@ -1792,7 +1801,7 @@ async function tabTrips(root, id) {
 }
 
 const TABS = { overview: tabOverview, activity: tabActivity, territory: tabTerritory,
-  earnings: tabEarnings, quality: tabQuality, trips: tabTrips };
+  earnings: tabEarnings, quality: tabQuality, record: renderDriverRecord, trips: tabTrips };
 
 /* ── page shell ──────────────────────────────────────────────────────────── */
 export async function renderDriver(root, id, tab = 'overview') {

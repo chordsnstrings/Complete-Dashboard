@@ -27,6 +27,7 @@
    fleet median 9.1% · lowest in the fleet" — that metric is ranked inverted,
    so percentile 0 is the WORST canceller in the fleet. */
 import { standingNote } from '../api/public/ui.js';
+import { position } from '../api/performance_sql.js';
 import { readFileSync } from 'node:fs';
 
 let pass = 0, fail = 0;
@@ -86,10 +87,18 @@ console.log('\na count of bookings is not a count of completions');
 console.log('\nthe endpoint returns the size of the tie, because 0 cannot express it');
 {
   const routes = readFileSync('api/driver_routes.js', 'utf8');
-  check('pct counts how many hold the same value',
-    /let tied = 0; for \(const x of vals\) if \(x === v\) tied\+\+;/.test(routes));
+  /* The arithmetic moved to api/performance_sql.js when the driver Record tab
+     needed the same percentile — one definition rather than two on adjacent
+     tabs of one page. These were assertions on the inline source text, which
+     is why they went red on a refactor that changed nothing a reader sees. The
+     property is what matters, so it is now asserted on the function that holds
+     it, and the route is asserted to pass it through. */
+  check('the percentile counts how many hold the same value',
+    position([5, 5, 5, 9], 5).tied === 3 && position([1, 2, 3], 2).tied === 1,
+    JSON.stringify(position([5, 5, 5, 9], 5)));
   check('…and returns it with the population it was counted over',
-    /tied, population: vals\.length/.test(routes));
+    position([5, 5, 5, 9], 5).of === 4
+      && /tied: p\.tied, population: p\.of/.test(routes));
 }
 
 console.log('\nwhat a percentile is allowed to be called');

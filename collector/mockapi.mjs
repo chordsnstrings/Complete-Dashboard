@@ -2,6 +2,11 @@
 // Not shipped — used only to render and screenshot the dashboard during development.
 import express from 'express';
 import { foldGrain, grainOf, previousWindow, PERIODS } from './api/window.js';
+/* The period arithmetic and the percentile come from the real module, not a
+   copy. A fixture that invents its own weeks drifts from the product the
+   moment either changes, and the browser tests that read this would then be
+   certifying a shape nothing ships. */
+import { shape, windowOf, driverRecord, fleetRecord } from './api/performance_routes.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -1207,6 +1212,90 @@ app.get('/api/driver/standing', (req, r) => {
     mk('cancel', 'Cancellation rate', 3.1 + i * .3, Math.max(12, 72 - i * 9), 5.4),
     mk('revenue', 'Revenue booked', 9120 - i * 700, Math.max(6, 90 - i * 11), 5400),
   ] });
+});
+
+/* ── one driver against their own record ─────────────────────────────────
+   The fixture fabricates ROWS in the shape api/performance_sql.js returns and
+   then calls the product's own shape(), driverRecord() and fleetRecord() over
+   them. Nothing about the response is restated here.
+
+   That is deliberate and it is the lesson of every other fixture in this file:
+   a hand-written copy of a response drifts from the product the moment either
+   side changes, and the browser tests then certify a screen against a shape
+   nothing ships. The right thing to fake is the DATABASE, not the answer.
+
+   The people are shaped so every branch the Record tab can render is on screen
+   at once — a rise that is real, a fall the whole fleet shares, a driver too
+   new to have a baseline, one whose fares have not arrived, and one on the
+   only channel that files an offer nobody took. */
+const PERF_PEOPLE = 56;
+const perfName = (i) => (i < drivers.length ? drivers[i] : `Fleet Driver ${i + 1}`);
+const perfKey = (i) => `drv-${i}`;
+
+function perfRows(series) {
+  const rows = [];
+  const n = series.length;
+  series.forEach((period, k) => {
+    /* The whole fleet is quiet in the last COMPLETE period. Without it the
+       fleet term has nothing to correct for and the page renders as though it
+       did not exist. */
+    const slump = k === n - 2 ? 0.62 : 1;
+    for (let i = 0; i < PERF_PEOPLE; i++) {
+      if (i === 2 && k < 4) continue;                       // joined four periods in
+      const days = i === 4 ? 5 : 6;
+      const base = Math.max(3, 46 - i * 0.7);
+      const wobble = ((k * 7 + i * 3) % 9) - 4;
+      let jobs = Math.round((base + wobble) * slump);
+      if (i === 0 && k === n - 2) jobs = Math.round(base * 1.55);   // a rise that IS real
+      if (k === n - 1) jobs = Math.round(jobs * 0.4);               // the period in progress
+      jobs = Math.max(1, jobs);
+      const declined = i === 4 ? 6 : 0;
+      const dropped = (i + k) % 5 === 0 ? 2 : 0;
+      const rider = (i + k) % 3;
+      const fare = 26 + (i % 7) * 4;
+      /* Driver 3's channel has not filed a fare for anything. The value column
+         must go ABSENT with the reason, never to zero. */
+      const priced = i === 3 ? 0 : jobs;
+      rows.push({
+        person_key: perfKey(i),
+        period,
+        driver_name: perfName(i),
+        driver_ext_id: perfKey(i),
+        completed: jobs,
+        bookings: jobs + dropped + rider + declined,
+        accepted: jobs + dropped + rider,
+        declined,
+        dropped,
+        rider_cancelled: rider,
+        unattributed: 0,
+        value: priced ? priced * fare : null,
+        priced,
+        priced_completed: priced,
+        km: jobs * 11.4,
+        measured: jobs,
+        active_days: k === n - 1 ? Math.max(1, Math.round(days * 0.4)) : days,
+        offered_only_days: i === 4 ? 1 : 0,
+        platforms: i === 4 ? ['bolt', 'uber'] : i === 3 ? ['hotel'] : ['uber'],
+      });
+    }
+  });
+  return rows;
+}
+
+const perfCtx = (req) => {
+  const grain = req.query.grain === 'month' ? 'month' : 'week';
+  const show = Math.min(Math.max(parseInt(req.query.periods, 10) || 13, 2), 26);
+  const w = windowOf(grain, show);
+  return shape(perfRows(w.series), { grain, show, today: w.today });
+};
+
+app.get('/api/performance/driver', (req, r) => {
+  const i = idIndex(req.query.id);
+  r.json(driverRecord(perfCtx(req), perfKey(i), { id: req.query.id, keys: [perfKey(i)] }));
+});
+
+app.get('/api/performance/fleet', (req, r) => {
+  r.json(fleetRecord(perfCtx(req), { period: req.query.period || null }));
 });
 
 app.get('/api/driver/territory', (req, r) => {

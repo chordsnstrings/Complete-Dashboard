@@ -399,6 +399,41 @@ Telemetry configuration**, which its documentation says "will not be restored"
 
 ---
 
+## Driver performance — better or worse, against their own record
+
+The operator's ask, in their words: performance "week by week, and month by
+month, a comparison of what they used to do, out of the active drivers what was
+their position, and whether it got better or worse" — and the subject of it:
+"it's a performance difference of the solo driver not comparison between the
+fleet drivers."
+
+Two surfaces: a **Record** tab on every driver's own page (`#driver/<id>/record`)
+and a fleet page, **Better or worse** (`#performance`), both served by
+`/api/performance/driver` and `/api/performance/fleet` over one query.
+
+| # | what | state | proof |
+|---|---|---|---|
+| P1 | `api/performance_sql.js` — per person per period, two positions, active-day denominator | written | `test/performance_record.test.mjs`, 31 assertions; the row-multiplication defect reintroduced and the suite fails on 3 of them |
+| P2 | the comparison arithmetic — symmetric split, fleet term, overdispersed z, Wilson, Bonferroni | written | `test/performance_math.test.mjs`, 45 assertions; the split identity swept over 400 combinations |
+| P3 | the fleet term — a driver who falls WITH the fleet is not marked down | written | removed from `judge()` and the same suite fails: MOVER goes from "within range" to z = −3.29 |
+| P4 | `test/sql_module_names.test.mjs` — the `api/*_sql.js` export-collision guard | written | rename reverted, guard goes red on `GRAINS` |
+| P5 | Record tab and Better-or-worse page render at 1500 / 820 / 400 px | written | `bin/render-audit.mjs`-style pass against the mock: 0 overflow at 1500 and 820, 24px at 400 which is the product-wide nav figure |
+| — | deployed and re-measured on production | *pending* | |
+
+**Three things this pair deliberately refuses to do**, each of which was a
+measurement before it was a rule (`api/performance_sql.js` carries them):
+
+* No blended score. Jobs done and trip value are ranked separately, on the
+  operator's instruction and because `api/income_sql.js`'s two money bases make
+  a blend meaningless.
+* No position for a rate at week grain. Consecutive-week rank correlation is
+  0.71–0.83 for completed jobs and 0.15–0.53 (median 0.29) for completion
+  percentage, so counts get a position and rates get an interval.
+* No verdict on a period that has not finished, and none on a driver's first
+  period. Both render absent **with the true reason**, not as zero.
+
+---
+
 ## How to re-check any row here without re-reading the audit
 
 Every proof in the Batch 1 table is a single anonymous curl with `&_=$RANDOM`

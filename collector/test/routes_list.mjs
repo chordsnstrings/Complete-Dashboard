@@ -13,6 +13,11 @@ export const ROUTES = [
   /* Both lists, and two drill-downs: drv-0 has an Uber status row, drv-9
      deliberately has none, so the branch that says so is rendered too. */
   'top-performers', 'low-performers', 'performer/drv-0', 'performer/drv-9',
+  /* Better or worse, in the three shapes it is reachable in: the default
+     (the latest COMPLETE period), an explicit period, and the month grain —
+     which is a different set of periods and a different set of baselines, not
+     a relabelling of the same page. */
+  'performance', 'performance?grain=month',
   'overview', 'demand', 'day/2026-08-14', 'day/not-a-date', 'drivers',
   /* Compare, in all four shapes it is reachable in: no days at all (today
      against yesterday), one day, two days, and the reader's override that
@@ -21,6 +26,10 @@ export const ROUTES = [
   'compare/2026-08-25/2026-08-24?cut=full', 'compare/not-a-date',
   'driver/drv-0', 'driver/drv-0/activity', 'driver/drv-0/territory',
   'driver/drv-0/earnings', 'driver/drv-0/quality', 'driver/drv-0/trips',
+  /* The Record tab at both grains, and on the driver the fixture gives no
+     fares at all — the branch where the value column has to go absent with a
+     reason rather than to zero is the one worth auditing every render. */
+  'driver/drv-0/record', 'driver/drv-0/record?grain=month', 'driver/drv-3/record',
   /* The call list. Audited from the day it existed, because a page whose
      whole product is refusing to colour a row it cannot support is a page
      whose rendering has to be looked at. */

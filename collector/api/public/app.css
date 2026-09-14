@@ -2359,6 +2359,31 @@ a.tesla-url:hover{border-color:var(--rule-strong)}
 ul.tesla-limits{margin:0;padding-left:1.1rem}
 ul.tesla-limits li{margin:.5rem 0;line-height:1.55;color:var(--ink-2)}
 
+/* ── "how to read this", on the two performance pages ──────────────────────
+   The same shape as the Tesla limits list above, and the same reason for
+   existing: a page that applies a rule the reader cannot see is a page the
+   reader has to take on trust. Both performance surfaces close with the rules
+   they applied, in the order they were applied, and the list is the one piece
+   of prose on either page that is allowed to be long. */
+ul.bul{margin:0;padding-left:1.1rem}
+ul.bul li{margin:.55rem 0;line-height:1.55;color:var(--ink-2)}
+ul.bul li b{color:var(--ink)}
+
+/* A chip that is a LINK, and the one of them that is current.
+   The period picker on #performance is thirteen addresses rather than a
+   <select>: every period is its own URL, so a reader can send somebody the
+   week they are looking at. A selected chip therefore has to be visibly the
+   current one and not merely the one that was clicked last. */
+/* A grid item that is allowed to be narrower than the table inside it.
+   Without this a .tscroll in a grid cell never scrolls — the cell grows to the
+   table's min-content width and the PAGE scrolls sideways instead, which is
+   the one thing no view in this product may do. */
+.pcol{min-width:0}
+
+a.chip{text-decoration:none}
+a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
+.chip.on{border-color:var(--accent);background:var(--accent-soft);color:var(--ink);font-weight:600}
+
 /* ── a refused feed on a channel that is still collecting ──────────────────
    Neither red nor amber, deliberately. Bolt Ecosine's fleet-integration roster
    is permanently refused — the company is not on the app — while the portal
