@@ -169,15 +169,79 @@ export function shape(rows, { grain, show, today = dubaiIso() } = {}) {
   return { today, grain, series, visible, from, to, rows, byPeriod, byPerson, periodMeta, periods };
 }
 
+/* ONE SCAN PER GRAIN PER DATA VERSION, NOT ONE PER PERIOD.
+   ─────────────────────────────────────────────────────────────────────────
+   The response cache keys on the whole URL, which is right for every other
+   endpoint in this product and wrong for this one in a way that shows up as a
+   nineteen-second page. Measured on production 2026-09-14, cache-busted:
+
+     /api/performance/fleet?grain=week     4.7s
+     /api/performance/fleet?grain=month   18.7s   (the month grain over 17
+                                                   months IS the whole record)
+
+   The page's default key is warmed (api/warm.js) and answers in 0.4–0.5s. But
+   the period picker is thirteen chips, each of them its own URL and therefore
+   its own cache key — and the SQL behind every one of them is IDENTICAL. Only
+   fleetRecord()'s choice of which period to table differs, and that is pure
+   JavaScript over a result set already in memory. So the first chip a reader
+   clicks on the month view paid the full nineteen seconds, and so did the
+   second.
+
+   The shaped context is therefore held here, keyed on the same DATA VERSION
+   the response cache uses — the latest finish time of a collection run or a
+   rollup — so it is valid for exactly as long as the data behind it has not
+   moved, and never longer. That is the property api/cache.js's header argues
+   for at length, and copying the rule rather than inventing a TTL is what
+   keeps the two from disagreeing about what "fresh" means.
+
+   Two grains times at most two fleets is four contexts, a few thousand row
+   objects. An in-flight map beside it so that two readers arriving together on
+   a cold key run ONE nineteen-second query rather than two: this database is
+   shared with the collector, and a basic-xxs feels the difference. */
+const CTX = new Map();            // version|grain|show|fleet|today -> ctx
+const CTX_INFLIGHT = new Map();   // the same key -> the promise already running
+
+/* The version, read the same way api/cache.js and api/warm.js read it. On any
+   error this returns a value that cannot repeat, so a database that cannot
+   answer the question degrades to no caching rather than to stale caching —
+   the safe direction, and the one that does not need explaining to a reader
+   looking at a number they think is current. */
+async function dataVersion(q) {
+  try {
+    const [r] = await q(`SELECT (SELECT max(finished_at) FROM collection_run) AS c,
+                                (SELECT max(finished_at) FROM rollup_state)   AS r`);
+    return `${r?.c || '-'}|${r?.r || '-'}`;
+  } catch {
+    return `unknown-${Date.now()}-${Math.random()}`;
+  }
+}
+
 /* The query, and then shape(). Kept apart so the shaping above has no database
    in it and the mock can reach it. */
 async function load(q, { grain, show, fleet }) {
   const w = windowOf(grain, show);
-  const params = [w.from, w.to];
-  let where = 'n.local_day BETWEEN $1::date AND $2::date';
-  if (fleet) { params.push(fleet); where += ` AND n.fleet_id = $${params.length}`; }
-  const rows = await q(periodsSql({ grain, where }), params);
-  return shape(rows, { grain, show, today: w.today });
+  const key = `${await dataVersion(q)}|${grain}|${show}|${fleet || ''}|${w.today}`;
+  const held = CTX.get(key);
+  if (held) return held;
+  const running = CTX_INFLIGHT.get(key);
+  if (running) return running;
+
+  const run = (async () => {
+    const params = [w.from, w.to];
+    let where = 'n.local_day BETWEEN $1::date AND $2::date';
+    if (fleet) { params.push(fleet); where += ` AND n.fleet_id = $${params.length}`; }
+    const rows = await q(periodsSql({ grain, where }), params);
+    const ctx = shape(rows, { grain, show, today: w.today });
+    /* Only the current version is kept. The map is cleared rather than grown
+       because an entry for a version the data has moved past can never be read
+       again, and a cache that only ever adds is a leak with a nicer name. */
+    CTX.clear();
+    CTX.set(key, ctx);
+    return ctx;
+  })().finally(() => CTX_INFLIGHT.delete(key));
+
+  CTX_INFLIGHT.set(key, run);
+  return run;
 }
 
 /* ── WAS IT THEM, OR WAS IT THE WEEK? ────────────────────────────────────

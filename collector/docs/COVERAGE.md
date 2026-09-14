@@ -827,6 +827,24 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **The response cache keys on the whole URL, so a page whose picker is
+  thirteen addresses over ONE query pays for the query thirteen times.**
+  `/api/performance/fleet` runs the same scan whatever period is asked for —
+  only which period gets tabled differs, and that is JavaScript over a result
+  set already in memory — but `?period=2026-05-01` is a different key from
+  `?period=2026-06-01`, so each chip was a fresh scan. Measured on production
+  2026-09-14, cache-busted: the week grain is 4.7s and **the month grain is
+  18.7s**, because thirteen months plus four of baseline is the whole record
+  for this fleet. Warmed, both answer in 0.4–0.5s — but only on the page's
+  default key, which is the one `api/warm.js` holds. The fix is to hold the
+  SHAPED CONTEXT in the route module, keyed on the same data version
+  `api/cache.js` uses (the latest finish of a collection run or a rollup) so it
+  is valid exactly as long as the data has not moved, with an in-flight map
+  beside it so two readers arriving together on a cold key run one scan rather
+  than two. `test/performance_record.test.mjs` counts the scans through a
+  proxied `query` — a timing assertion on a fixture that small would pass
+  either way.
+
 * **`test/mount.mjs` spreads every `api/*_sql.js` export LAST, over the named
   helpers above it — so a new export silently replaces one of them.** The
   injection set is `{ q, wrap, …, GRAINS, …, ...allSqlModules }`. `api/window.js`

@@ -292,6 +292,39 @@ const missing = await get('/api/performance/driver?id=NOBODY-AT-ALL');
 check('an id nothing has ever seen is a 404, not an empty success',
   missing.status === 404, String(missing.status));
 
+/* ── the scan happens once per grain, not once per period ────────────────
+   The response cache keys on the whole URL, so every one of the thirteen
+   period chips is its own key — and the SQL behind all thirteen is identical,
+   because only which period gets tabled differs and that is JavaScript over a
+   result set already in memory. Measured on production the month grain is a
+   nineteen-second scan, so a reader clicking a second chip paid it twice.
+
+   Counted here rather than timed: a timing assertion on a fixture this small
+   would pass whether the context were held or not. */
+{
+  let scans = 0;
+  const counting = {
+    query: (text, params) => {
+      if (/LATERAL unnest/.test(String(text))) scans++;
+      return db.query(text, params);
+    },
+  };
+  const m2 = await mountAll(counting);
+  await m2.get('/api/performance/fleet?grain=week&periods=7');
+  const after1 = scans;
+  await m2.get(`/api/performance/fleet?grain=week&periods=7&period=${W[3]}`);
+  await m2.get(`/api/performance/fleet?grain=week&periods=7&period=${W[4]}`);
+  await m2.get('/api/performance/driver?id=HELD&grain=week&periods=7');
+  check('the first request scans trip_norm', after1 === 1, String(after1));
+  check('…and three more requests at the same grain do not scan again',
+    scans === 1, `${scans} scans`);
+  /* A different grain is a different set of periods and a different window,
+     so it genuinely is a different question and must scan. */
+  await m2.get('/api/performance/fleet?grain=month&periods=4');
+  check('a different grain does scan', scans === 2, `${scans} scans`);
+  m2.server.close();
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
