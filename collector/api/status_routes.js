@@ -130,6 +130,24 @@ export function statusRoutes(app, { q, wrap }) {
         LIMIT 1`, [all]);
 
     const spans = await q(SPANS_SQL, [all, day]);
+
+    /* WHEN DOES OUR RECORD OF THIS PERSON BEGIN?
+       ─────────────────────────────────────────────────────────────────────
+       driver_status_event starts when the collector started writing it, which
+       for this fleet was the afternoon of 2026-09-14. So on that day — and on
+       any day for a driver whose first event falls inside it — "1h 40m online
+       today" is a FLOOR, not a day total, and the driver page printed it
+       beside the availability feed's "online 4h 48m of it" for the same
+       driver on the same day. Two figures for one thing, differing by three
+       hours, both presented as fact.
+
+       Reported rather than corrected: the shorter figure is not wrong, it is
+       measured over a shorter record, and the honest fix is to say which. */
+    const [begins] = await q(
+      `SELECT min(at) AS at FROM driver_status_event
+        WHERE platform = 'uber' AND driver_ext_id = ANY($1::text[])`, [all]);
+    const dayStart = new Date(`${day}T00:00:00+04:00`);
+    const partial = !!begins?.at && new Date(begins.at) > dayStart;
     const working = spans.filter((s) => WORKING.includes(s.status));
     const onlineMin = working.reduce((a, s) => a + (s.minutes || 0), 0);
     const onTripMin = spans.filter((s) => s.status === 'ontrip')
@@ -203,6 +221,14 @@ export function statusRoutes(app, { q, wrap }) {
            and not selling, which is the figure the Idle hours page is about. */
         waiting_minutes: Math.max(0, onlineMin - onTripMin),
         spans: spans.map((s) => ({ status: s.status, from: s.from_local, minutes: s.minutes })),
+        /* The figures above are a floor when our record starts mid-day. */
+        history_from: begins?.at ?? null,
+        partial,
+        partial_why: partial
+          ? 'This is the time recorded since the status feed began keeping a history for this '
+            + 'driver, part-way through the day — not the whole day. Anything earlier is not '
+            + 'missing from their shift, it is missing from our record of it.'
+          : null,
         absent: spans.length ? null
           : 'No status change is on record for this driver on this day. The history begins '
             + 'when this fleet started keeping it, so a day before that has none.',

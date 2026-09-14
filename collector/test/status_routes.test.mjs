@@ -147,6 +147,32 @@ check('…which is a DIFFERENT sentence from having no row at all',
 check('…and it is not dressed up as a stale reading of something',
   sil.stale_why === null, String(sil.stale_why));
 
+/* ── A DAY OUR RECORD ONLY PART-COVERS ───────────────────────────────────
+   driver_status_event begins when the collector began writing it. On that
+   first day the driver page printed "1h 40m online today" from this endpoint
+   directly beside the availability feed's "online 4h 48m of it", for the same
+   driver and the same day — two figures for one thing, three hours apart,
+   neither saying what it was measured over. The shorter one is not wrong; it
+   is measured over a shorter record, and it has to say so. */
+console.log('\na day whose history starts part-way through it');
+const partial = await J(`/api/status/driver?id=dayshift&day=${day}`);
+check('a day whose first event is its own start of record is flagged partial',
+  partial.today.partial === true, JSON.stringify(partial.today.partial));
+check('…and says the time is missing from the record, not from the shift',
+  /missing from our record/.test(partial.today.partial_why || ''),
+  String(partial.today.partial_why).slice(0, 80));
+check('…and reports when the record begins, so the claim is checkable',
+  !!partial.today.history_from, String(partial.today.history_from));
+/* The control: an event BEFORE the day means the day is fully covered, and the
+   flag must go off — otherwise "partial" is just always true and says nothing. */
+await q(`INSERT INTO driver_status_event (platform, driver_ext_id, at, status, status_raw, fleet_id)
+         VALUES ('uber','dayshift',$1,'offline','DRIVER_STATUS_OFFLINE','ecosine')
+         ON CONFLICT DO NOTHING`, [at(prev, '22:00')]);
+const full = await J(`/api/status/driver?id=dayshift&day=${day}`);
+check('…while a day our record reaches back before is not flagged',
+  full.today.partial === false && full.today.partial_why === null,
+  JSON.stringify([full.today.partial, full.today.partial_why]));
+
 console.log('\nthe fleet view');
 const f = await J('/api/status/fleet');
 check('the fleet totals count ontrip as working',

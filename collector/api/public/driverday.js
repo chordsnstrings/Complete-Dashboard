@@ -200,6 +200,25 @@ export function onlineShare({ online = [], trips = [], collection = null } = {})
     why: null, reason: null };
 }
 
+/* What went wrong, in the words an operator uses. The badge used to print the
+   raw token — 'not_completed' — which is both machine-speak and the least
+   informative thing on the row: it says a job did not happen without saying
+   who stopped it, and "rider cancelled" and "driver cancelled" are different
+   conversations. `status` carries the provider's more specific word, so it is
+   preferred over `outcome` and tidied rather than mapped through a lookup that
+   would answer 'unknown' the first time a provider adds a value. */
+/* Did this job actually happen? See the long note at the call site: this was
+   `/completed/i.test(outcome)`, and "not_completed" contains "completed". */
+export function jobCompleted(t) {
+  return String(t?.outcome || '').trim().toLowerCase() === 'completed';
+}
+
+export function outcomeWord(t) {
+  const raw = String(t.status || t.outcome || '').trim();
+  if (!raw) return 'outcome not reported';
+  return raw.replace(/_/g, ' ').toLowerCase();
+}
+
 export async function renderDriverDay(root, id, day) {
   root.innerHTML = '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ''))) {
@@ -366,8 +385,39 @@ export async function renderDriverDay(root, id, day) {
   const list = el('div', 'dday-list');
   const gapBefore = new Map(gaps.map((g) => [g.before, g]));
 
+  /* THE HOLE A GAP CANNOT BE DRAWN ACROSS.
+     ─────────────────────────────────────────────────────────────────────────
+     `gaps` above only advances its cursor on a job that ENDED, which is right:
+     a cancelled job has no end time, so the moment the driver became free is
+     unknown and any waiting figure measured from it would be invented.
+
+     But the consequence was silence. On 2026-09-14 one driver's day ran eight
+     cancellations to 01:18 and the next job at 16:00, and the fourteen and a
+     half hours between them appeared as nothing at all — no block, no note —
+     under a heading that promises "every job, and the gaps between them". A
+     reader sees the hole; the page has to account for it.
+
+     So it is named and NOT measured. It is deliberately not pushed into
+     `gaps`, because `waited` sums that array and a hole we cannot measure must
+     not become minutes in a total — which would be the same lie one level up.
+     Ninety minutes is the threshold the page already treats as notable, so the
+     seven minutes between two consecutive cancellations stay quiet. */
+  const UNMEASURED_MIN = 90;
+  let prevJob = null;
+
   for (const t of trips) {
     const g = gapBefore.get(t);
+    if (!g && prevJob && prevJob.e == null && t.s - prevJob.s >= UNMEASURED_MIN) {
+      const row = el('div', 'dday-gap');
+      row.innerHTML = `<div class="dday-gaphead"><b>${esc(dur(t.s - prevJob.s))} unaccounted for</b>`
+        + `<span class="dim">until ${esc(hhmm(t.s))}</span></div>`;
+      row.append(el('div', 'dday-where dim',
+        `The job before this one was ${esc(outcomeWord(prevJob))} and has no end time, so there `
+        + 'is no moment to measure a wait from. This time is not counted as waiting anywhere on '
+        + 'this page.'));
+      list.append(row);
+    }
+    prevJob = t;
     if (g) {
       const mins = g.to - g.from;
       const mo = gapMotion(fixes, g.from, g.to);
@@ -408,7 +458,31 @@ export async function renderDriverDay(root, id, day) {
       list.append(row);
     }
 
-    const done = /completed/i.test(t.outcome || '');
+    /* EQUALITY, NOT A SUBSTRING MATCH — this read `/completed/i.test(t.outcome)`
+       and "not_completed" CONTAINS "completed", so every cancelled job on this
+       page was badged COMPLETED and styled as a normal one.
+       ─────────────────────────────────────────────────────────────────────
+       Found on production 2026-09-14 on one driver's day: eight consecutive
+       rider cancellations between 00:12 and 01:18 — no distance, no drop-off
+       time, outcome 'not_completed' — every one of them rendered with a
+       COMPLETED pill. The page that says "every job, and the gaps between
+       them" was reporting thirteen completed jobs where five had happened.
+
+       Two lines above in this same file get it right
+       (`/not_completed|cancel/i`, which tests the negative first), which is
+       what made this survive: the row's colour class came from the correct
+       test and the badge from the broken one, so the two disagreed silently.
+
+       outcome is exactly 'completed' or 'not_completed' everywhere else in
+       this product — src/analyst.js, api/driver_routes.js and
+       api/cancellation_sql.js all compare it with =, never with a regex — so
+       this compares it the same way.
+
+       Exported rather than inlined so test/driver_day_outcome.test.mjs can put
+       the real production row through it. The first version of this guard was
+       a regex nobody could test without rendering a page, which is most of why
+       it survived. */
+    const done = jobCompleted(t);
     const item = el('div', `dday-job${done ? '' : ' bad'}`);
     const when = el('div', 'dday-when');
     when.innerHTML = `<b>${esc(hhmm(t.s))}</b><span>${t.e != null ? esc(hhmm(t.e)) : '—'}</span>`;
@@ -417,8 +491,17 @@ export async function renderDriverDay(root, id, day) {
       <div class="dday-leg">
         <div class="dday-pt"><i class="o"></i><span class="dday-lab">pick-up</span>
           <b>${esc(t.pickup_addr || 'no address reported')}</b></div>
-        <div class="dday-pt"><i class="x"></i><span class="dday-lab">drop-off</span>
-          <b>${esc(t.dropoff_addr || 'no address reported')}</b></div>
+        ${done || (t.dropoff_addr && t.dropoff_addr !== t.pickup_addr)
+    ? `<div class="dday-pt"><i class="x"></i><span class="dday-lab">drop-off</span>
+          <b>${esc(t.dropoff_addr || 'no address reported')}</b></div>`
+    /* A JOB THAT DID NOT HAPPEN HAS NO DROP-OFF, and Uber echoes the pick-up
+       into the drop-off column when there was none — so the page was printing
+       the address the car was waiting at under a DROP-OFF heading, which reads
+       as a statement about where somebody was taken. There is no drop-off time
+       and no distance on these rows either; the echo is the only thing that
+       made it look like a journey. */
+    : `<div class="dday-pt"><i class="x"></i><span class="dday-lab">drop-off</span>
+          <b class="dim">none — this job did not take place</b></div>`}
       </div>
       <div class="dday-facts">
         ${t.distance_km != null ? `<span><b>${esc(fmt(t.distance_km, 2))}</b> km</span>` : ''}
@@ -426,7 +509,7 @@ export async function renderDriverDay(root, id, day) {
         ${t.product ? `<span>tier <b>${esc(tierLabel(t.product))}</b></span>` : ''}
         ${t.payment_type ? `<span>paid <b>${esc(t.payment_type)}</b></span>` : ''}
         ${t.price != null ? `<span><b>${esc(money(t.price))}</b></span>` : ''}
-        <span class="dday-out">${pill(done ? 'completed' : (t.outcome || t.status || 'unknown'),
+        <span class="dday-out">${pill(done ? 'completed' : outcomeWord(t),
     done ? 'ok' : 'bad')}</span>
       </div>`;
     const open = el('a', 'dday-open', 'open ↗');

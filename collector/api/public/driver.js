@@ -574,10 +574,16 @@ function statusStrip(st) {
   const t = st.today || {};
   if (t.online_minutes) {
     const h = Math.floor(t.online_minutes / 60), m = t.online_minutes % 60;
+    /* "online today" only where the record covers today. Where it starts
+       part-way through, the same page was carrying this figure beside the
+       availability feed's larger one for the same driver and the same day,
+       both unqualified — so the shorter one has to say what it is measured
+       over, or it reads as a contradiction of the longer one. */
     box.append(el('span', 'lstat-sum',
-      `${h}h ${String(m).padStart(2, '0')}m online today`
+      `${h}h ${String(m).padStart(2, '0')}m online ${t.partial ? `since ${t.online_since_local || 'the feed began'}` : 'today'}`
       + (t.on_trip_minutes ? ` · ${Math.round(t.on_trip_minutes / 60 * 10) / 10}h on trips` : '')
-      + (t.online_since_local ? ` · from ${t.online_since_local}` : '')));
+      + (t.online_since_local && !t.partial ? ` · from ${t.online_since_local}` : '')));
+    if (t.partial_why) box.append(el('span', 'lstat-why', t.partial_why));
   } else if (t.absent) {
     box.append(el('span', 'lstat-why', t.absent));
   }

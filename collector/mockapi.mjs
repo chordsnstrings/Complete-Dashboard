@@ -1388,6 +1388,17 @@ app.get('/api/status/driver', (req, r) => {
         spans: [{ status: 'online', from: dubaiClockOf(startedAt), minutes: onlineMin - onTripMin },
           { status: 'ontrip', from: dubaiClockOf(onTripAt), minutes: onTripMin }],
         absent: null,
+        /* One driver whose record only starts part-way through the day, which
+           is every driver on the day the status history began. The page must
+           not print that figure as a day total — it sat beside the
+           availability feed's larger one and read as a contradiction. */
+        history_from: startedAt.toISOString(),
+        partial: i % 4 === 1,
+        partial_why: i % 4 === 1
+          ? 'This is the time recorded since the status feed began keeping a history for this '
+            + 'driver, part-way through the day — not the whole day. Anything earlier is not '
+            + 'missing from their shift, it is missing from our record of it.'
+          : null,
       };
     })(),
   });

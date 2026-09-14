@@ -2803,3 +2803,74 @@ beside them, with `unknown_note` saying it in words.
   case in `mockapi.mjs` and `test/status_routes.test.mjs` was a case somebody
   imagined; the 66 empty rows were not, and no amount of green suite would have
   found them. The first production read after a deploy is not a formality.
+
+### "not_completed" contains "completed" — 2026-09-14
+
+Reported by the operator from one driver's day (Hammad Ahmad Ahmad, 14 Sept):
+thirteen jobs, **every one badged COMPLETED**. Five were.
+
+The other eight — 00:12 to 01:18, all `status: rider_cancelled`,
+`outcome: not_completed`, no distance, no drop-off time — came from
+`api/public/driverday.js`:
+
+```js
+const done = /completed/i.test(t.outcome || '')   // TRUE for 'not_completed'
+```
+
+A substring match on a value whose negative form contains its positive form.
+Everywhere else in this product `outcome` is compared with `=` against
+`'completed'` / `'not_completed'` — `src/analyst.js`, `api/driver_routes.js`,
+`api/cancellation_sql.js` — and only this one line used a regex.
+
+**Why it survived.** Two lines above in the same file the row's COLOUR class is
+decided by `/not_completed|cancel/i`, which tests the negative first and is
+correct. So the row was styled as a cancellation and badged as a success
+simultaneously, and neither half looked broken on its own. The page's own
+cancellation counter was right too — it reads the same correct predicate.
+
+**Three separate lies came out of the one regex**, and all three are fixed:
+
+1. the badge said COMPLETED;
+2. the **drop-off** printed the pick-up address. Uber echoes the pick-up into
+   the drop-off column when a trip never ran, so the page asserted where a
+   passenger was taken on a row with no drop-off time and no distance;
+3. the badge for a genuine cancellation printed the raw token `not_completed`
+   — machine-speak, and the least informative word available, since `status`
+   carries `rider_cancelled` and "who cancelled" is the whole question.
+
+`test/driver_day_outcome.test.mjs` holds all three against the real production
+row. `jobCompleted()` and `outcomeWord()` are exported so the predicate can be
+tested directly — the original was a regex nobody could exercise without
+rendering a page, which is most of why it lasted.
+
+### Two "online today" figures on one page, three hours apart — 2026-09-14
+
+Found in the same read, and caused by what shipped that morning. The driver
+page carried the new live strip's **"1h 40m online today"** directly beside the
+availability feed's **"00:12 to 18:57, online 4h 48m of it"** — same driver,
+same day, both unqualified.
+
+Neither is wrong. `driver_status_event` began at 13:41 UTC on 2026-09-14
+because that is when the collector started writing it, so the strip's figure is
+a **floor measured over a shorter record**, not a day total. `/api/status/driver`
+now reports `history_from`, `partial` and `partial_why`, and the strip reads
+"2h 53m online **since 16:30**" with the reason beneath it rather than
+"online today".
+
+### Traps this added to the list
+
+- **Never test a status with a substring when its negative contains its
+  positive.** `not_completed`, `not_found`, `unconfirmed`, `disabled` — a
+  regex that matches the happy word matches the unhappy one too. Compare the
+  whole value, and prefer the comparison the rest of the codebase already
+  uses on that column.
+- **A predicate that can only be exercised by rendering a page will not be
+  tested, and will be wrong for longer.** Export it.
+- **Two correct-looking derivations of the same fact in one file is a smell,
+  not redundancy.** The colour class and the badge disagreed for months; had
+  either been the single source the other read from, there would have been
+  nothing to disagree.
+- **A new feed's "today" is not the day's total until the feed has covered a
+  whole day.** Any figure derived from a history that starts part-way through
+  a period must say what it is measured over, especially when an older,
+  longer-running feed is reporting the same quantity on the same screen.
