@@ -300,7 +300,14 @@ check('an id nothing has ever seen is a 404, not an empty success',
    nineteen-second scan, so a reader clicking a second chip paid it twice.
 
    Counted here rather than timed: a timing assertion on a fixture this small
-   would pass whether the context were held or not. */
+   would pass whether the context were held or not.
+
+   The period counts here are deliberately ones no earlier assertion in this
+   file used. The held context is module-global — one process, one instance,
+   which is what production is — so a second mount in the same process inherits
+   whatever the first one filled, and reusing `periods=7` here would have this
+   block measure zero scans and call it a pass. Distinct counts also make the
+   point that the key discriminates on the window as well as the grain. */
 {
   let scans = 0;
   const counting = {
@@ -310,18 +317,26 @@ check('an id nothing has ever seen is a 404, not an empty success',
     },
   };
   const m2 = await mountAll(counting);
-  await m2.get('/api/performance/fleet?grain=week&periods=7');
+  await m2.get('/api/performance/fleet?grain=week&periods=11');
   const after1 = scans;
-  await m2.get(`/api/performance/fleet?grain=week&periods=7&period=${W[3]}`);
-  await m2.get(`/api/performance/fleet?grain=week&periods=7&period=${W[4]}`);
-  await m2.get('/api/performance/driver?id=HELD&grain=week&periods=7');
+  await m2.get(`/api/performance/fleet?grain=week&periods=11&period=${W[3]}`);
+  await m2.get(`/api/performance/fleet?grain=week&periods=11&period=${W[4]}`);
+  await m2.get('/api/performance/driver?id=HELD&grain=week&periods=11');
   check('the first request scans trip_norm', after1 === 1, String(after1));
   check('…and three more requests at the same grain do not scan again',
     scans === 1, `${scans} scans`);
   /* A different grain is a different set of periods and a different window,
      so it genuinely is a different question and must scan. */
-  await m2.get('/api/performance/fleet?grain=month&periods=4');
+  await m2.get('/api/performance/fleet?grain=month&periods=6');
   check('a different grain does scan', scans === 2, `${scans} scans`);
+  /* And the one that the first version of this memo got wrong: asking for the
+     week again, AFTER a month request, must not scan. The store used to clear
+     the whole map before writing, so the two grains evicted each other — which
+     on production made api/warm.js's own pass throw away a context a reader
+     had just waited twenty-eight seconds for. */
+  await m2.get('/api/performance/fleet?grain=week&periods=11');
+  check('…and the first grain is still held after the second one ran',
+    scans === 2, `${scans} scans`);
   m2.server.close();
 }
 

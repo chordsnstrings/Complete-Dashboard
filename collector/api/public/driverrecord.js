@@ -302,9 +302,22 @@ export async function renderDriverRecord(root, id, prof) {
   const val = panel(`Trip value, ${L} by ${L}`,
     'Gross — what riders were charged, before any platform commission and before the cash the driver already took');
   root.append(val.panel);
+  /* WHERE THEY SAT AMONG THE PEOPLE WHO WERE THERE, period by period.
+     ─────────────────────────────────────────────────────────────────────
+     The third comparison this page makes, and the one the two charts above it
+     cannot: those show what the driver DID, and a driver can do more every
+     week while the fleet does more still. This shows where that put them.
+
+     It is a percentile rather than an ordinal, deliberately: the active set on
+     this fleet moved from 77 to 112 people inside thirteen weeks, so "40th"
+     means a different thing every week and a chart of it would draw a change
+     that is only the roster. */
+  const pos = panel(`Where they stood, ${L} by ${L}`,
+    'Their percentile among the drivers who were active in the same period — 50 is the middle driver');
+  root.append(pos.panel);
   const tbl = panel('Every period on record', `Position is out of the drivers who were active in that ${L}`);
   root.append(tbl.panel);
-  [jobs.body, val.body, tbl.body].forEach(loading);
+  [jobs.body, val.body, pos.body, tbl.body].forEach(loading);
 
   let rec;
   try {
@@ -312,7 +325,7 @@ export async function renderDriverRecord(root, id, prof) {
   } catch (e) {
     vHost.innerHTML = '';
     vHost.append(note(`The record could not be read: ${String(e && e.message ? e.message : e)}`, 'warn'));
-    [jobs.body, val.body, tbl.body].forEach((b) => { b.innerHTML = ''; });
+    [jobs.body, val.body, pos.body, tbl.body].forEach((b) => { b.innerHTML = ''; });
     return;
   }
   if (!alive(gen)) return;
@@ -320,7 +333,7 @@ export async function renderDriverRecord(root, id, prof) {
   vHost.innerHTML = '';
   if (rec.absent) {
     vHost.append(note(`This driver has ${rec.absent}.`));
-    [jobs.body, val.body, tbl.body].forEach((b) => { b.innerHTML = ''; empty(b, 'Nothing in this range'); });
+    [jobs.body, val.body, pos.body, tbl.body].forEach((b) => { b.innerHTML = ''; empty(b, 'Nothing in this range'); });
     return;
   }
 
@@ -381,6 +394,61 @@ export async function renderDriverRecord(root, id, prof) {
         ? ` ${short.length} of these ${L}s ${short.length === 1 ? 'is' : 'are'} drawn but not `
           + 'ranked — not every completed trip in them carries a fare yet.'
         : '')));
+  }
+
+  /* ── where they stood ────────────────────────────────────────────────── */
+  pos.body.innerHTML = '';
+  const placed = rec.periods.filter((p) => p.jobs_position);
+  if (!placed.length) {
+    pos.body.append(note(`This driver accepted no work in any ${L} on this page, so there is no `
+      + 'period in which they can be placed against the people who were working.'));
+  } else {
+    gapBars(pos.body, rec.periods.map((p) => ({
+      period: periodShort(p.period, grain),
+      pctl: p.jobs_position ? p.jobs_position.percentile : 0,
+      vpctl: p.value_position ? p.value_position.percentile : 0,
+      /* A period they did not work is an ABSENCE, not a percentile of nought.
+         gapBars hatches the whole height of the plot for one of these, which
+         is the distinction: nought means they were placed last, and hatched
+         means they were not placed at all. Drawing the first where the second
+         is true would be the plainest lie this page could tell. */
+      unplaced: !p.jobs_position,
+      partial: !p.complete,
+      days: p.elapsed_days,
+      of_days: p.total_days,
+    })), {
+      x: 'period', y: 'pctl', label: 'percentile on jobs done',
+      gapKey: 'unplaced',
+      gapLabel: 'they accepted no work, so they are not placed against the people who did',
+      secondary: 'vpctl', secondaryLabel: 'their percentile on trip value',
+      max: 100, inProgress: false,
+      /* Plain numbers up the side, the word in the tooltip. "0th" is not an
+         axis label anybody reads, and "32nd percentile" is exactly what the
+         hovered bar is. */
+      axisFmt: (v) => fmt(v),
+      valueFmt: (v) => `${ordinal(v)} percentile`,
+      aria: `Percentile among active drivers each ${L}`,
+    });
+    /* The last FINISHED period, not the last one with a position on it. The
+       week in progress has a real percentile — it is placed against the people
+       who have worked so far this week — and summarising somebody's standing
+       from three days of it is the same mistake as giving that week a verdict.
+       The chart still draws it, hollow; the sentence does not speak for it. */
+    const last = placed.filter((p) => p.complete).slice(-1)[0] || null;
+    pos.body.append(el('p', 'cap',
+      `The bar is their position on JOBS DONE and the outline behind it their position on TRIP `
+      + `VALUE, both out of the drivers who were active in the same ${L}. A driver whose outline `
+      + 'sits well above their bar is earning more per job than the people around them; one whose '
+      + 'outline sits below is doing more jobs for less. '
+      + (last
+        ? `In ${periodLabel(last.period, grain)} they sat in the `
+          + `${ordinal(last.jobs_position.percentile)} percentile on jobs, `
+          + `${ordinal(last.jobs_position.rank)} of ${fmt(last.jobs_position.of)} active drivers`
+          + (last.value_position
+            ? `, and the ${ordinal(last.value_position.percentile)} percentile on value.`
+            : ', and were not placed on value — no fare is on record for enough of their '
+              + 'completed trips.')
+        : `No ${L} on this page has finished with them placed in it yet.`)));
   }
 
   /* ── the table ───────────────────────────────────────────────────────── */

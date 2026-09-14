@@ -198,7 +198,7 @@ export function shape(rows, { grain, show, today = dubaiIso() } = {}) {
    objects. An in-flight map beside it so that two readers arriving together on
    a cold key run ONE nineteen-second query rather than two: this database is
    shared with the collector, and a basic-xxs feels the difference. */
-const CTX = new Map();            // version|grain|show|fleet|today -> ctx
+const CTX = new Map();            // grain|show|fleet|today -> { version, ctx }
 const CTX_INFLIGHT = new Map();   // the same key -> the promise already running
 
 /* The version, read the same way api/cache.js and api/warm.js read it. On any
@@ -220,9 +220,24 @@ async function dataVersion(q) {
    in it and the mock can reach it. */
 async function load(q, { grain, show, fleet }) {
   const w = windowOf(grain, show);
-  const key = `${await dataVersion(q)}|${grain}|${show}|${fleet || ''}|${w.today}`;
+  /* The version is held BESIDE the entry, not inside the key.
+     ─────────────────────────────────────────────────────────────────────
+     It was part of the key, and the store then cleared the whole map before
+     writing — which meant the week context and the month context evicted each
+     other, every time, for as long as both were being asked for. Measured on
+     production 2026-09-14 after the first deploy of this memo: five month
+     chips in a row came back 24.9s, 1.1s, 0.7s, 28.4s, 27.9s. The pattern is
+     api/warm.js's own pass, which asks for BOTH grains on every version
+     change: its week request landed between two of mine and threw away the
+     month context I had just paid twenty-eight seconds for.
+
+     So the map is keyed on the QUESTION and carries the version as data. A
+     stale entry is dropped when it is found stale, and entries for other
+     questions are left alone. */
+  const key = `${grain}|${show}|${fleet || ''}|${w.today}`;
+  const version = await dataVersion(q);
   const held = CTX.get(key);
-  if (held) return held;
+  if (held && held.version === version) return held.ctx;
   const running = CTX_INFLIGHT.get(key);
   if (running) return running;
 
@@ -232,11 +247,12 @@ async function load(q, { grain, show, fleet }) {
     if (fleet) { params.push(fleet); where += ` AND n.fleet_id = $${params.length}`; }
     const rows = await q(periodsSql({ grain, where }), params);
     const ctx = shape(rows, { grain, show, today: w.today });
-    /* Only the current version is kept. The map is cleared rather than grown
-       because an entry for a version the data has moved past can never be read
-       again, and a cache that only ever adds is a leak with a nicer name. */
-    CTX.clear();
-    CTX.set(key, ctx);
+    CTX.set(key, { version, ctx });
+    /* Anything for a version the data has moved past can never be read again,
+       so it goes — a cache that only ever adds is a leak with a nicer name.
+       Only the stale ones: this is the line whose first version cleared the
+       whole map. */
+    for (const [k, v] of CTX) if (v.version !== version) CTX.delete(k);
     return ctx;
   })().finally(() => CTX_INFLIGHT.delete(key));
 

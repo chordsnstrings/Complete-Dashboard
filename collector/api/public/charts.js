@@ -361,9 +361,28 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
 
      Opt-out rather than opt-in: `inProgress: false` for a series where the
      last bucket is not a day in progress. */
-  inProgress = true, aria = null } = {}) {
+  inProgress = true,
+  /* A ceiling the DATA does not get to choose.
+     ─────────────────────────────────────────────────────────────────────
+     barChart has always had this; gapBars never needed it until a series
+     arrived whose scale is part of its meaning. A percentile chart drawn to
+     the driver's own maximum puts their best week at the top of the plot
+     whether that week was the 94th percentile or the 31st, so every driver's
+     record looks the same shape and the one number the chart exists to show —
+     how high — is the one it throws away. Passed straight through to the same
+     yTicks/yAxis pair barChart uses, so the two cannot round differently. */
+  max: fixedMax = null,
+  /* The axis and the tooltip are not the same formatter — barChart's own
+     header argues this at length and gapBars had only the one. A tooltip names
+     a single value and wants its unit; an axis is four labels on one scale.
+     DEFAULTS TO valueFmt, so every existing caller draws exactly the axis it
+     drew before and only a caller that asks gets a different one: the money
+     charts here read better with "AED 2,000" up the side, and a percentile
+     chart reads "0th, 33rd, 67th, 100th" if it is given the same treatment. */
+  axisFmt = null, aria = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
+  const axisF = axisFmt || valueFmt;
   const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 34;
   const vals = data.filter((d) => !d[gapKey]).map((d) => +d[y] || 0);
   const raw = Math.max(...vals, secondary ? Math.max(...data.map((d) => +d[secondary] || 0)) : 0) || 1;
@@ -392,7 +411,7 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
     mk('line', { x1: 6, y1: 0, x2: 0, y2: 6, stroke: 'var(--rule-strong)', 'stroke-width': 1 }));
   defs.append(pat); svg.append(defs);
 
-  const { max } = yAxis(svg, { hi: raw, pl, pr, pt, ih, W, fmt: valueFmt });
+  const { max } = yAxis(svg, { hi: raw, pl, pr, pt, ih, W, fmt: axisF, fixedMax });
   const xAt = new Set(xTickIndices(data.length));
 
   data.forEach((d, i) => {
