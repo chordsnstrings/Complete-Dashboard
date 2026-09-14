@@ -442,6 +442,35 @@ The fleet endpoint is now in `api/warm.js`'s BARE_PATHS at both grains, so the
 first reader of the People section does not pay for it. The per-driver one is
 deliberately not warmed: it is keyed on a person nobody has opened yet.
 
+**A fourth comparison view and a performance fix, proven 2026-09-14 on
+`f71a5d0`.**
+
+| # | what | state | proof |
+|---|---|---|---|
+| P7 | "Where they stood" — percentile among active drivers, period by period, jobs as the bar and trip value as the outline behind it | **proven** | rendered against production through `bin/live-ui.mjs`; Zubair Khan Shaukat Ali's value outline sits above his jobs bar through July and converges in September |
+| P8 | one scan per grain per data version, not one per period chip | **proven** | the measurements below |
+
+The period picker is thirteen addresses so a reader can send somebody the exact
+week they are looking at, and the response cache keys on the whole URL — so
+every chip was its own key over an identical query. The shaped context is now
+held in the route module against the same data version `api/cache.js` uses.
+Measured on production, five month chips in a row:
+
+| | before the fix | with the version inside the key (568e675) | fixed (f71a5d0) |
+|---|---|---|---|
+| chip 1 | 18.7s | 24.9s | 20.2s |
+| chip 2 | 18.7s | 1.1s | 0.85s |
+| chip 3 | 18.7s | 0.7s | 0.62s |
+| chip 4 | 18.7s | 28.4s | 0.67s |
+| chip 5 | 18.7s | 27.9s | 0.58s |
+
+The middle column is the bug the first version shipped: the version was part of
+the key and the store cleared the whole map, so `api/warm.js` — which asks for
+BOTH grains on every version change — threw away the month context a reader had
+just waited twenty-eight seconds for. Week chips after the fix: 0.56s, 0.64s,
+0.68s, 0.67s. The first month chip is still the cold scan, and it is cold only
+until the warm pass reaches it.
+
 What the page found on its first real week, which is the argument for it
 existing: **3 drivers of 112 did something different**, all three of them
 UP, and all three because of ATTENDANCE rather than pace — baselines of 0.8,
