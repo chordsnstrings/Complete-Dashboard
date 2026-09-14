@@ -789,8 +789,52 @@ export function probeRoutes(app, { wrap }) {
     // Cardinality per column, so a low-cardinality column (a dimension) is
     // distinguishable from an identifier without echoing the rows.
     const cells = lines.slice(1, 400).map((l) => l.split(','));
+
+    /* WHAT DOES THIS COLUMN ACTUALLY LOOK LIKE?
+       ──────────────────────────────────────────────────────────────────────
+       Cardinality alone answers "is this a dimension or an identifier", which
+       is what this probe was built for. It does not answer the question that
+       comes next, which is how to PARSE the thing — and a date format is the
+       one guess in this codebase that fails silently rather than loudly: a
+       parser that reads 03/09 as the third of September when the provider
+       meant the ninth of March returns a date, not an error, and nothing
+       downstream can tell. REPORT_TYPE_DRIVER_STATUS carries a "Last online
+       time" with eighteen distinct values across a hundred and fourteen rows,
+       which is above the ceiling below and is exactly the column a collector
+       has to read.
+
+       So a caller may ask for sample values of ONE named column — and the
+       module's own rule still holds: full records never leave here. A column
+       is refused if its NAME suggests identity, and refused again if its
+       VALUES look like one, which catches a provider that renames a field
+       between reports. Both tests, because either alone has a gap: a column
+       called "Reference" can hold an email, and a column called "Driver
+       email address" might be empty in the sample and pass a value test. */
+    const IDENTITY_NAME = /name|email|phone|mobile|uuid|licen[cs]e|emirates|address|passport|iban|account/i;
+    const IDENTITY_VALUE = (v) => /@/.test(v)                       // an email
+      || /(?:\+|\b00)?\d[\d\s-]{7,}/.test(v)                       // a phone-shaped run of digits
+      || /[0-9a-f]{8}-[0-9a-f]{4}-/i.test(v)                        // a uuid
+      || /^[0-9a-f]{24}$/i.test(v);                                 // a mongo object id
+    let sample = null;
+    if (req.query.samples) {
+      const want = String(req.query.samples);
+      const i = header.findIndex((h) => h.toLowerCase() === want.toLowerCase());
+      if (i < 0) {
+        sample = { column: want, refused: 'no column of that name in this report' };
+      } else if (IDENTITY_NAME.test(header[i])) {
+        sample = { column: header[i], refused: 'the column name identifies a person' };
+      } else {
+        const vals = [...new Set(cells.map((c) => (c[i] || '').replace(/^"|"$/g, '')).filter(Boolean))];
+        const unsafe = vals.filter(IDENTITY_VALUE);
+        sample = unsafe.length
+          ? { column: header[i], refused: `${unsafe.length} of ${vals.length} values are identity-shaped` }
+          : { column: header[i], distinct: vals.length, sample: vals.slice(0, 8) };
+      }
+    }
+
     res.json({
       reportType, window: [from, to], rows_sampled: cells.length,
+      ...(sample ? { sample } : {}),
       columns: header.map((h, i) => {
         const vals = new Set(cells.map((c) => (c[i] || '').replace(/^"|"$/g, '')).filter(Boolean));
         return { column: h, distinct_seen: vals.size, values: vals.size <= 12 ? [...vals] : null };
