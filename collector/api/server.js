@@ -54,6 +54,8 @@ import { reconcileRoutes } from './reconcile_routes.js';
 import { performerRoutes } from './performer_routes.js';
 import { compareRoutes } from './compare_routes.js';
 import { performanceRoutes } from './performance_routes.js';
+import { statusRoutes } from './status_routes.js';
+import { samePersonRoutes } from './sameperson_routes.js';
 import { probeRoutes } from './probe.js';
 import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
 /* The one place that decides what a reader with no credential may see of a
@@ -5644,6 +5646,16 @@ compareRoutes(app, { q, wrap });
    trip value, never blended; api/performance_sql.js carries the measurements
    behind every rule in it. */
 performanceRoutes(app, { q, wrap });
+
+/* Is this driver online right now. Under /api/status/ deliberately: that
+   prefix is on api/cache.js's NEVER list, and a cached live status is a wrong
+   live status. */
+statusRoutes(app, { q, wrap });
+
+/* The pairs a rule cannot settle, and a person's verdict on them. A phone or
+   an email merges on its own; a name that sits inside another name is a
+   proposal and folds nothing until somebody answers it. */
+samePersonRoutes(app, { q, wrap });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this

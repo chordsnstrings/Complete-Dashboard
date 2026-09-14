@@ -526,6 +526,53 @@ const isPlaceholderLicence = (c) => !!(c.licence_placeholder
   || (c.placeholder_date && String(c.licence_expires || '').slice(0, 10) === String(c.placeholder_date).slice(0, 10))
   || /^0*123456$/.test(String(c.licence_no || '')));
 
+/* ── IS THIS PERSON ONLINE RIGHT NOW ──────────────────────────────────────
+   The operator's question, from a FleetHub screenshot: a driver Uber reports
+   as online for five hours, reading as nothing here. The status was arriving
+   every two minutes all along and being discarded — sql/schema_v70.sql carries
+   the measurement — and this is where it surfaces, at the top of the page
+   about that person.
+
+   Three things on the strip and all three are needed. WHAT the status is;
+   WHEN the provider says it changed, because "online" without "since 06:14" is
+   not actionable; and when the FEED last answered, because a status read off a
+   dead feed looks exactly like a live one and is a claim about the past. */
+function statusStrip(st) {
+  const box = el('div', 'lstat');
+  if (!st || st.absent) {
+    box.classList.add('off');
+    box.innerHTML = `<span class="lstat-dot"></span><b>No live status</b>`;
+    box.append(el('span', 'lstat-why', st?.absent
+      || 'Uber is the only channel that reports one to this fleet.'));
+    return box;
+  }
+  const tone = st.stale ? 'stale' : st.status === 'ontrip' ? 'ontrip'
+    : st.status === 'online' ? 'on' : 'off';
+  box.classList.add(tone);
+  const word = st.status === 'ontrip' ? 'On a trip'
+    : st.status === 'online' ? 'Online' : 'Offline';
+  box.innerHTML = `<span class="lstat-dot"></span><b>${esc(word)}</b>`;
+  /* SINCE, not AT. The provider gives the instant the status changed, so the
+     honest phrasing is a duration with the clock time behind it. */
+  if (st.status_at) {
+    box.append(el('span', 'lstat-since', `since ${timeStr(st.status_at)}`));
+  }
+  const t = st.today || {};
+  if (t.online_minutes) {
+    const h = Math.floor(t.online_minutes / 60), m = t.online_minutes % 60;
+    box.append(el('span', 'lstat-sum',
+      `${h}h ${String(m).padStart(2, '0')}m online today`
+      + (t.on_trip_minutes ? ` · ${Math.round(t.on_trip_minutes / 60 * 10) / 10}h on trips` : '')
+      + (t.online_since_local ? ` · from ${t.online_since_local}` : '')));
+  } else if (t.absent) {
+    box.append(el('span', 'lstat-why', t.absent));
+  }
+  /* The staleness sentence is never optional when it applies: this is the one
+     line that stops a reader acting on a status the feed stopped confirming. */
+  if (st.stale && st.stale_why) box.append(el('span', 'lstat-why', st.stale_why));
+  return box;
+}
+
 function identityCard(p) {
   const c = p.compliance?.[0] || {};
   /* The identity documents the API refused to send, and — separately — whether
@@ -1809,6 +1856,7 @@ export async function renderDriver(root, id, tab = 'overview') {
      never got filled in. It went to the endpoint and printed the API's own
      complaint. #day has always answered this properly; these four did not. */
   if (!id) return noneChosen(root, 'driver', 'drivers', 'Every driver');
+  const gen = currentGen();
   const head = el('div'); root.append(head); loading(head);
   const body = el('div', 'stack'); root.append(body);
 
@@ -1821,6 +1869,19 @@ export async function renderDriver(root, id, tab = 'overview') {
   }
   head.innerHTML = '';
   head.append(identityCard(prof));
+  /* The live strip, fetched separately and never blocking the page.
+     /api/status/driver is on api/cache.js's NEVER list — a cached live status
+     is a wrong live status — so it is its own request rather than a field on
+     the profile, which IS cached and should stay that way. */
+  const live = el('div'); head.append(live);
+  qAll('/api/status/driver', { id })
+    .then((st) => { if (alive(gen)) { live.innerHTML = ''; live.append(statusStrip(st)); } })
+    /* ABSENT WITH A REASON, not a blank. A strip that silently fails to load
+       is indistinguishable from a driver with no live status, and those are
+       different facts — one is about the driver and one is about us. */
+    .catch(() => { if (alive(gen)) { live.innerHTML = ''; live.append(statusStrip(
+      { absent: 'The live status could not be loaded just now. This says nothing about '
+        + 'whether the driver is online — the request for it failed.' })); } });
   head.append(tabBar(DRIVER_TABS, tab, (t) => href('driver', id, t === 'overview' ? null : t)));
   /* The SPLIT between accounts, which the identity card cannot show.
      ─────────────────────────────────────────────────────────────────────────

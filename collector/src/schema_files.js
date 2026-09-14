@@ -85,4 +85,10 @@ export const SCHEMA_FILES = [
      provider's closing stamp — and so filed every Yango trip as ending before
      it started. Possible only because trip.raw holds the whole order. */
   'schema_v69.sql',
+  /* The driver's own online status, which /v1/vehicle-suppliers/drivers/actions
+     has been delivering every two minutes since the live map was built and
+     which was being discarded — kept only as a plate-keyed telemetry row, and
+     only for the drivers who happened to have a vehicle attached. Two tables:
+     what is true now, and every change the provider has timestamped. */
+  'schema_v70.sql',
 ];

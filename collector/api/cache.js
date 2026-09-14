@@ -52,7 +52,22 @@ const MAX_BYTES = Number(process.env.CACHE_MAX_BYTES || 64 * 1024 * 1024);
    never anything to save. */
 const NEVER = ['/api/live', '/api/track', '/api/settings', '/api/rollups',
   '/api/status', '/api/health', '/api/ready', '/api/probe', '/api/cache-stats',
-  '/api/coverage/verified'];
+  '/api/coverage/verified',
+  /* THE TWO A PERSON'S OWN CLICK CHANGES.
+     ───────────────────────────────────────────────────────────────────────
+     Every other entry above is here because the answer moves faster than the
+     cache. These two are here because the answer moves when the READER moves
+     it, and the version this cache keys on only advances on a collection run
+     or a rollup — a verdict on #same-person bumps neither.
+
+     So without this, the sequence is: the reviewer clicks "Yes — one person",
+     the POST lands and the fold is real, the page re-reads /api/same-person
+     within the thirty-second TTL, gets the body from before the click, and
+     redraws the pair exactly where it was. The click appears to have done
+     nothing, and the obvious response to that is to click it again. The
+     identity-links page reads the same verdict and would be stale in the same
+     way. Both are small reads over one table; neither is worth a cache. */
+  '/api/same-person', '/api/drivers/identity-links'];
 
 export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
   maxBytes = MAX_BYTES } = {}) {

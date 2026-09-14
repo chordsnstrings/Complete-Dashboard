@@ -2576,3 +2576,144 @@ is a thing for a person to look at, and the naming is so somebody can.
   like the exact thing the guard was written to ignore. When a guard silently
   drops a whole source, that is a finding about the source, not hygiene —
   count what a discard removes, per source, or it will keep something from you.
+
+## The live driver status was arriving every two minutes and being discarded — measured 2026-09-14
+
+The operator, from an Uber FleetHub screenshot: *"some drivers are apparently
+online and it shows online on uber as well, but not on our site."* The driver on
+the screen read **Hours Online 5.16, Trips Taken 0**.
+
+The obvious explanation was the one that was wrong. Our online times come from
+`supplier.uber.com/chronicle` (`src/sources/uber_timeline.js`), one request per
+driver on `17 */3 * * *` — so the page can be three hours behind a screen that
+is live, and a driver with **no trips** is never selected for it at all, because
+selection is made from `trip`. Both true, and neither is the cause.
+
+**The cause: we already had it.** `pullLiveOrg` in `src/sources/uber.js` calls
+`/v1/vehicle-suppliers/drivers/actions` every `LIVE_STATUS_SECONDS` (120) and
+has done since the live map was built. Each driver in that response carries:
+
+```
+statusEntries  [{ status: DRIVER_STATUS_ONLINE | OFFLINE | ONTRIP,
+                  timestamp: 2026-09-04T17:07:17.859Z }]
+driverInfo     { firstName, lastName, email, phone, driverUuid }
+onboardingStatus
+```
+
+Every one of those fields was discarded. The only row written was a
+`telemetry_snapshot` keyed on **plate**, filtered `plate !== 'UNKNOWN'` — so the
+driver's own status survived attached to a car rather than to a person, and only
+for drivers who had a car attached. Measured on production 2026-09-14 through
+`/api/live`: **11 rows carried an Uber status (ONLINE 5, ONTRIP 4, OFFLINE 2)
+out of a roster of 152.** A driver with no vehicle attached is precisely the
+person an operator is looking for when they ask who is online and not working.
+
+This feed beats the chronicle timeline on every axis that matters: live rather
+than three-hourly, every driver rather than every driver with a trip, and it
+carries **the instant the status changed** rather than the instant we asked.
+
+**What was added.** `sql/schema_v70.sql` — `driver_status_now` (one row per
+platform account, overwritten) and `driver_status_event` (append-only, keyed on
+the provider's own timestamp, so re-reading the same entries is idempotent).
+`driverStatusFrom()` in `src/sources/uber.js` is the pure function that shapes
+both, plus the contact rows. Served by `api/status_routes.js` at
+`/api/status/driver` and `/api/status/fleet`, both under a prefix on
+`api/cache.js`'s NEVER list — a cached live status is a wrong live status.
+
+**Contacts, as a side effect worth naming.** The same response carries a phone
+**and an email** for every Uber account. Before this, contact details came only
+from the per-driver portal pull, and `src/identity_link.js`'s phone rule reached
+433 of 808 accounts. Email is now a second conclusive key (`emailLinks`), with
+the same two guards the phone rule keeps: an address on three records is a
+shared mailbox, and an address twice inside one channel is a duplicate account.
+
+### Names that look like one person, and the queue that does not merge them
+
+The operator asked for automatic merging across feeds, *"and if you need human
+involvement create a page in people"*. The split between those two halves is the
+safety property:
+
+| evidence | what happens |
+|---|---|
+| shared phone, shared email | **identifier** — merges with nobody asked |
+| one name is a strict token subset of the other | **proposal** — folds nothing until a person answers |
+
+A similar name is not an identifier. `MUHAMMAD SHAFIQ` is a strict subset of
+`MUHAMMAD SHAFIQ UMAR RAZIQ` and equally of `MUHAMMAD SHAFIQ AHMED`; one of
+those is the same man and nothing in the strings says which. CLAUDE.md forbids
+the shortcut in as many words — who is one person is *"a hand-reviewed LIST of
+verified pairs — never a name rule"*.
+
+So `nameCandidates()` writes **proposals**, and `api/identity_links.js` applies a
+link only where `basis IN ('shared_phone','shared_email') OR confirmed_at IS NOT
+NULL`. That one predicate is the whole enforcement. `#same-person` (People) is
+where a human answers; `POST /api/same-person/decide` records the verdict and
+refuses a conclusive basis with 409, because rejecting a phone merge belongs to
+the links page that shows the phone evidence.
+
+The rule is a **strict token subset with at least two shared tokens**, not a
+similarity score: a trigram score proposes `Muhammad Khalid`/`Muhammad Khalifa`
+(two men, refused by hand in `api/identity_map.js`) at a high score and misses
+`Shafiq`/`Shafiq Umar Raziq` at a low one. Two tokens minimum because one is
+`Muhammad` and this fleet has forty. Cross-channel only. A pair whose two records
+carry a **simultaneous trip in two different cars** is disproved and never
+reaches the queue — the same observation that holds back five pairs in the
+register.
+
+### Uber's report catalogue: "only four types are valid" was a rate limit
+
+Measured on production 2026-09-14, `/api/probe/uber/report-types?fleet=ecosine`,
+window 2026-09-11..14. Sixteen candidate types, asked in list order:
+
+* the first **four** — `TRIP_ACTIVITY`, `DRIVER_ACTIVITY`, `DRIVER_QUALITY`,
+  `DRIVER_PERFORMANCE` — came back `accepted`
+* the remaining **twelve** came back
+  `Code: rate-limited, Message: too many ongoing and in progress reports, please
+  wait for reports to complete. Limit: 3`
+
+That is the list order, not a fact about Uber. The probe booked `valid: false`
+for all twelve, and **that artefact is where the standing claim "only four
+report types are valid" comes from.**
+
+**Disproved directly.** `/api/probe/uber/report-columns?type=REPORT_TYPE_PAYMENTS_ORDER`
+— a type the report-types probe calls invalid — returned **399 rows** over the
+same window, with a per-transaction column set including `transaction UUID`,
+`Driver UUID`, **`Trip UUID`** (joins straight onto `trip.external_id`),
+`Paid to you : Your earnings : Fare`, `… : Trip balance : Payouts : Cash
+collected`, `… : Service fee`, `… : Tax on Service Fee`, `… : Fare :
+Cancellation` and toll refunds, and `Description` taking four values
+(`trip completed order`, `trip fare adjust order`, and the two Business Order
+forms). The type is valid and rich.
+
+`api/probe/uber/report-types` now answers `valid: null, throttled: true` for a
+throttled type with a `limit_note` saying how many were never actually tested,
+and takes `?only=REPORT_TYPE_…` so one type can be asked about without spending
+the budget of three on the eleven ahead of it.
+
+### Traps this added to the list
+
+- **Uber allows THREE reports in flight at once, and refuses the fourth before
+  it looks at the type.** Any loop that asks about N report types in order will
+  report the tail as broken. A rate-limited answer is *unknown*, never *invalid*
+  — booking it as invalid is a reason that is not the true one, which is the one
+  thing this product's principle forbids, and it stood as a documented fact
+  about Uber for weeks.
+- **`driver_ext_id` is unique WITHIN a provider and nowhere else.** Uber issues a
+  UUID, the hotel channel a short numeric id, CABMAN another; two providers can
+  name different people with the same string. The simultaneous-trip disproof
+  matched on the id alone and so could pull a third person's trips in under one
+  side of a pair and manufacture an overlap — suppressing a valid proposal
+  silently, and for a reason that is not the true one. Match on
+  `(platform, driver_ext_id)`, always. `test/identity_proposals.test.mjs` holds
+  it; reverting the platform predicate fails three assertions.
+- **A test can assert the right sentence about the wrong row and prove nothing.**
+  The assertion that a name proposal folds nothing named an alias that had been
+  *rejected* earlier in the same file — so `NOT rejected` excluded it and the
+  test passed with the fold gate deleted. It was caught only by reverting the
+  fix and watching the suite stay green. When a guard has several exclusion
+  paths, assert first that the row under test is excluded by **none** of the
+  others.
+- **A live figure that fails to load must say so, not render blank.** A status
+  strip whose fetch rejects is indistinguishable from a driver who genuinely has
+  no live status, and those are different facts — one is about the driver and
+  one is about us.

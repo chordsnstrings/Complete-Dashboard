@@ -2374,6 +2374,62 @@ ul.bul li b{color:var(--ink)}
    <select>: every period is its own URL, so a reader can send somebody the
    week they are looking at. A selected chip therefore has to be visibly the
    current one and not merely the one that was clicked last. */
+/* ── two records, one question ────────────────────────────────────────────
+   The two sides are laid out IDENTICALLY and given equal weight. A card that
+   presents the surviving record more prominently than the alias invites the
+   reviewer to agree with the proposal rather than judge it, and the whole
+   value of this page is the judgement. */
+.sp-pair{
+  border:1px solid var(--rule);border-radius:12px;padding:14px 16px;margin:0 0 12px;
+  background:var(--surface);
+}
+.sp-pair.done{opacity:.72;background:var(--surface-2)}
+.sp-pair.done.same{border-left:3px solid var(--good)}
+.sp-pair.done.different{border-left:3px solid var(--ink-3)}
+.sp-body{display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:start}
+.sp-side{min-width:0}
+.sp-cap{font-size:var(--t4);text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3)}
+.sp-name{font-size:var(--t2);font-weight:600;margin:2px 0 6px}
+.sp-meta{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+.sp-facts{margin:0;padding-left:1.05rem;color:var(--ink-2);font-size:var(--t3);line-height:1.6}
+.sp-mid{align-self:center;text-align:center;color:var(--ink-3)}
+.sp-q{font-size:var(--t4);text-transform:uppercase;letter-spacing:.08em}
+.sp-ev{font-size:var(--t3);color:var(--ink-2);margin:10px 0 0;line-height:1.55}
+.sp-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+.sp-hint{font-size:var(--t4);color:var(--ink-3);flex:1 1 260px}
+.sp-verdict{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;
+  font-size:var(--t3);color:var(--ink-2)}
+@media (max-width:720px){
+  .sp-body{grid-template-columns:1fr;gap:10px}
+  .sp-mid{text-align:left}
+}
+
+/* ── the live status strip on a driver page ───────────────────────────────
+   One line, at the top of the page about that person: what Uber says they are
+   doing, since when, and how long today. The dot carries the state as well as
+   the colour does, because a reader who cannot separate the two greens still
+   has the word beside it — the colour is never the only carrier.
+
+   `stale` is deliberately NOT red. A feed that stopped answering is not a
+   driver behaving badly, and colouring it as a fault teaches people to read a
+   real fault as a shrug. It goes grey with the sentence that says so. */
+.lstat{
+  display:flex;flex-wrap:wrap;align-items:center;gap:10px;
+  margin:10px 0 0;padding:9px 14px;border-radius:10px;
+  border:1px solid var(--rule);background:var(--surface-2);
+  font-size:var(--t3);color:var(--ink-2);
+}
+.lstat b{color:var(--ink);font-size:var(--t2)}
+.lstat-dot{width:9px;height:9px;border-radius:50%;background:var(--ink-3);flex:none}
+.lstat.on{border-color:var(--good);background:var(--good-bg,var(--surface-2))}
+.lstat.on .lstat-dot{background:var(--good)}
+.lstat.ontrip{border-color:var(--accent);background:var(--accent-soft)}
+.lstat.ontrip .lstat-dot{background:var(--accent)}
+.lstat.off .lstat-dot,.lstat.stale .lstat-dot{background:var(--ink-3)}
+.lstat-since{font-family:"IBM Plex Mono",ui-monospace,monospace;color:var(--ink-2)}
+.lstat-sum{color:var(--ink-2)}
+.lstat-why{color:var(--ink-3);font-size:var(--t4);flex-basis:100%}
+
 /* A grid item that is allowed to be narrower than the table inside it.
    Without this a .tscroll in a grid cell never scrolls — the cell grows to the
    table's min-content width and the PAGE scrolls sideways instead, which is

@@ -55,6 +55,22 @@ export async function identityLinks(q = null, { now = Date.now() } = {}) {
               confirmed_at, confirmed_by
          FROM driver_identity_link
         WHERE NOT rejected
+          /* CONCLUSIVE, OR CONFIRMED BY A PERSON. Nothing else folds.
+             ───────────────────────────────────────────────────────────────
+             A phone and an email are IDENTIFIERS: two records carrying one are
+             one person and the rule may apply itself. A similar NAME is not —
+             "MUHAMMAD SHAFIQ" sits inside "MUHAMMAD SHAFIQ UMAR RAZIQ" and
+             equally inside "MUHAMMAD SHAFIQ AHMED", and merging on that pools
+             two people's work and money. CLAUDE.md forbids it in as many
+             words: who is one person is "a hand-reviewed LIST of verified
+             pairs — never a name rule".
+
+             So src/identity_link.js writes those as PROPOSALS and they sit in
+             this table doing nothing until somebody answers them on
+             #same-person. This predicate is the whole enforcement of that, and
+             it is one line: without it a proposal would fold the moment it was
+             discovered, which is the failure the queue exists to prevent. */
+          AND (basis IN ('shared_phone', 'shared_email') OR confirmed_at IS NOT NULL)
         ORDER BY canonical_name NULLS LAST, alias_name NULLS LAST`);
   } catch {
     /* A database that has not run the migration yet answers with an error, and

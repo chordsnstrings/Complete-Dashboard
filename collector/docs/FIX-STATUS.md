@@ -495,6 +495,69 @@ measurement before it was a rule (`api/performance_sql.js` carries them):
 
 ---
 
+## Live driver status, and the same-person queue — 2026-09-14
+
+The operator's question was *"some drivers are apparently online and it shows
+online on uber as well, but not on our site"*, and the answer turned out not to
+be about the feed or the cadence at all: the status had been arriving every two
+minutes and being discarded. `docs/COVERAGE.md` carries the measurement. The
+second half of the same instruction — *"names can be different it needs to be
+automatically merged … if you need human involvement create a page in people"* —
+is the identity work beside it.
+
+| # | what | state | how it was checked |
+|---|---|---|---|
+| L1 | the live `drivers/actions` status was written only as a plate-keyed telemetry row, so 11 of 152 drivers had one | written | `sql/schema_v70.sql` + `driverStatusFrom()`; `test/driver_status_live.test.mjs` |
+| L2 | `/api/status/driver` and `/api/status/fleet`, night shifts included via the opening-state CTE | written | `test/status_routes.test.mjs`, with a Dubai wall-clock fixture helper |
+| L3 | the driver page strip, and the fleet line on `#online-time` | written | four rendered variants read back off the DOM — online, absent, stale, fleet |
+| L4 | email as a second conclusive merge key | written | `test/identity_proposals.test.mjs`; **reverting the `full_name` guard fails 1** |
+| L5 | similar names become PROPOSALS and fold nothing | written | **reverting the gate in `api/identity_links.js` fails 1** |
+| L6 | the simultaneous-trip disproof matched on `driver_ext_id` alone | written | **reverting the platform predicate fails 3** |
+| L7 | `/api/same-person` was cached 30s against a version a verdict never bumps | written | **reverting the NEVER entry fails 2** (`8 then 8` — the same body) |
+| L8 | the report-types probe called a **rate-limited** type invalid | written | disproved on production: `REPORT_TYPE_PAYMENTS_ORDER` returned 399 rows |
+
+### The three that were only found by reverting
+
+L5, L6 and L7 are the reason this file has a "proven" column at all.
+
+**L5 is the worst of them, because the first test PASSED with the fix removed.**
+The assertion "a similar-name proposal folds nothing" named an alias that had
+been *rejected* a few lines earlier in the same file — so `NOT rejected`
+excluded it and the gate was never exercised. The suite was green, the feature
+looked proved, and the whole safety property of the queue rested on a predicate
+no test touched. It surfaced only by deleting the predicate and watching the
+suite stay green. The fix names a pair the file first asserts is excluded by
+nothing else:
+
+```
+✗ a similar-name proposal folds NOTHING while it sits unanswered ["b-named","shared-id"]
+```
+
+**A guard with several exclusion paths needs the row under test to be excluded
+by none of the others** — otherwise the test asserts a true sentence about the
+wrong row, which is indistinguishable from a passing test until the day it
+matters.
+
+### Not yet proven
+
+Everything above is **written** and **committed**. None of it is `proven` in the
+sense this file means: proven is re-measured on production *after* the deploy.
+For this batch that means, once deployed: `/api/status/fleet` returning a
+working count over a roster larger than the 11 the plate-keyed row reached, and
+a `similar_name` row in `driver_identity_link` that `/api/drivers/identity-links`
+does **not** list.
+
+### One thing an operator has to be told
+
+`POST /api/same-person/decide` is **not** admin-gated, unlike most writes in
+this product. That is deliberate — it is the one write the reviewer this page
+exists for has to be able to make — but it means anybody who can reach the API
+can record a verdict. It refuses a conclusive basis with 409, and it can never
+merge on its own; the worst it can do is fold or split a pair a name rule
+already proposed, reversibly. Worth a decision rather than a default.
+
+---
+
 ## How to re-check any row here without re-reading the audit
 
 Every proof in the Batch 1 table is a single anonymous curl with `&_=$RANDOM`

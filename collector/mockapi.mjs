@@ -12,6 +12,12 @@ import { dirname, join } from 'node:path';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const app = express();
+/* The real server mounts this at api/server.js:100; the mock did not, because
+   until now every mock route was a GET. POST /api/same-person/decide reads
+   req.body.verdict, and without a body parser that is undefined on every
+   request — the fixture would answer 404 "no such proposal" to a verdict the
+   operator could see themselves click. */
+app.use(express.json({ limit: '256kb' }));
 const plates = ['L45235', 'L12615', 'L46174', 'L40971', 'L94178', 'L36397', 'L76098', 'L82923'];
 /* One person's category, in one place. The roster fixture and the cohort
    drill-down fixture both read it, so a mock driver who is "stopped
@@ -543,6 +549,13 @@ const dayISO = (back) => new Date(Date.now() - back * 864e5).toISOString().slice
    the previous date, which is the exact off-by-one the day keys exist to
    avoid. en-CA is the locale that formats as YYYY-MM-DD. */
 const dubaiDayOf = (d) => d.toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' });
+/* The wall clock a Dubai operator reads, from the same instant the fixture
+   reports in UTC beside it. The status fixture used to hard-code '06:1N' next
+   to an online_since of "now minus two hours", so at any hour but 08:10 Dubai
+   the two fields contradicted each other — and the smoke test that reads the
+   strip would have certified a local-time conversion that was never done. */
+const dubaiClockOf = (d) => d.toLocaleTimeString('en-GB',
+  { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit', hour12: false });
 const driverIds = drivers.map((_, i) => `drv-${i}`);
 const idIndex = (id) => Math.max(0, driverIds.indexOf(id));
 
@@ -1296,6 +1309,162 @@ app.get('/api/performance/driver', (req, r) => {
 
 app.get('/api/performance/fleet', (req, r) => {
   r.json(fleetRecord(perfCtx(req), { period: req.query.period || null }));
+});
+
+/* ── is this driver online right now ─────────────────────────────────────
+   Shaped so every branch of the strip renders across the eight mock drivers:
+   online, on a trip, offline, a feed that has gone stale, and a driver Uber
+   reports nothing about at all — which is the one the page must not render as
+   "offline", because only Uber publishes a status and three of this fleet's
+   four channels never will. */
+const STATUS_BY_INDEX = ['online', 'ontrip', 'offline', 'online', null, 'offline', 'ontrip', 'online'];
+app.get('/api/status/driver', (req, r) => {
+  const i = idIndex(req.query.id);
+  const status = STATUS_BY_INDEX[i % STATUS_BY_INDEX.length];
+  const stale = i % STATUS_BY_INDEX.length === 3;         // one driver on a dead feed
+  const day = dubaiDayOf(new Date());
+  if (!status) {
+    return r.json({ day, driver_ext_id: req.query.id, uber_ids: [], status: null,
+      status_word: null, status_at: null, observed_at: null, observed_age_min: null, stale: true,
+      absent: 'Uber has not reported a status for this driver. Only Uber publishes one to this '
+        + 'fleet, so a driver who works the hotel channel, Bolt or Yango has none by '
+        + 'construction — it is not a driver who is offline.',
+      stale_why: null,
+      today: { online_since: null, online_since_local: null, online_minutes: 0,
+        on_trip_minutes: 0, waiting_minutes: 0, spans: [],
+        absent: 'No status change is on record for this driver on this day.' } });
+  }
+  const sinceMin = 60 + i * 37;
+  const onlineMin = 120 + i * 53;
+  const onTripMin = Math.round(onlineMin * 0.4);
+  const ageMin = stale ? 46 : 1;
+  return r.json({
+    day, driver_ext_id: req.query.id, uber_ids: [req.query.id],
+    status, status_word: { online: 'online and waiting for a job', ontrip: 'on a trip',
+      offline: 'offline' }[status],
+    status_raw: `DRIVER_STATUS_${status.toUpperCase()}`,
+    status_at: new Date(Date.now() - sinceMin * 60000).toISOString(),
+    onboarding: 'ONBOARDING_STATUS_ACTIVE', plate: plates[i % plates.length],
+    observed_at: new Date(Date.now() - ageMin * 60000).toISOString(),
+    observed_age_min: ageMin, stale,
+    absent: null,
+    stale_why: stale
+      ? `The live feed last answered ${ageMin} minutes ago, and it answers every two minutes `
+        + 'when it is healthy. This is the last status it gave, not necessarily the status now.'
+      : null,
+    today: (() => {
+      /* Both spans are derived from the one instant the day started, so the
+         second begins exactly where the first ends and the totals are the sum
+         of the parts. A fixture whose spans do not add up to their own start
+         times teaches the page that they need not. */
+      const startedAt = new Date(Date.now() - onlineMin * 60000);
+      const onTripAt = new Date(startedAt.getTime() + (onlineMin - onTripMin) * 60000);
+      return {
+        online_since: startedAt.toISOString(),
+        online_since_local: dubaiClockOf(startedAt),
+        online_minutes: onlineMin, on_trip_minutes: onTripMin,
+        waiting_minutes: onlineMin - onTripMin,
+        spans: [{ status: 'online', from: dubaiClockOf(startedAt), minutes: onlineMin - onTripMin },
+          { status: 'ontrip', from: dubaiClockOf(onTripAt), minutes: onTripMin }],
+        absent: null,
+      };
+    })(),
+  });
+});
+
+app.get('/api/status/fleet', (_req, r) => {
+  const rows = drivers.map((name, i) => ({
+    driver_ext_id: `drv-${i}`, fleet_id: i % 2 ? 'egari' : 'ecosine',
+    status: STATUS_BY_INDEX[i % STATUS_BY_INDEX.length] || 'offline',
+    status_at: new Date(Date.now() - (30 + i * 11) * 60000).toISOString(),
+    plate: plates[i % plates.length], observed_at: new Date(Date.now() - 60000).toISOString(),
+    onboarding: 'ONBOARDING_STATUS_ACTIVE', person_key: name.toLowerCase(), full_name: name,
+  }));
+  const count = (s) => rows.filter((x) => x.status === s).length;
+  r.json({ rows, feed_at: new Date(Date.now() - 60000).toISOString(), feed_age_min: 1,
+    stale: false, stale_after_min: 8,
+    totals: { drivers: rows.length, online: count('online'), ontrip: count('ontrip'),
+      offline: count('offline'), working: count('online') + count('ontrip') },
+    basis: 'Uber is the only channel that reports a live driver status to this fleet. A '
+      + 'driver on the hotel channel, Bolt or Yango does not appear here, and their absence '
+      + 'is not a claim that they are offline.' });
+});
+
+/* ── the pairs a rule cannot settle ──────────────────────────────────────
+   Three shapes, because the page renders each differently and a fixture that
+   shows only the easy one certifies only the easy one: a pair waiting, a pair
+   confirmed, and a pair ruled to be two people. Held in memory so the decide
+   endpoint actually moves a card between the two panels — a mock that accepts
+   a verdict and changes nothing tests the button and not the page. */
+const SP = [
+  { alias_ext_id: 'drv-4', basis: 'similar_name', verdict: null,
+    alias: { driver_ext_id: 'drv-4', name: 'MUHAMMAD SHAFIQ', platform: 'bolt', trips: 392,
+      first_trip: '2024-12-28T11:18:21.000Z', last_trip: '2026-05-19T14:50:12.000Z',
+      plates: ['L78493'], fleets: ['ecosine'] },
+    canonical: { driver_ext_id: 'drv-0', name: 'MUHAMMAD SHAFIQ UMAR RAZIQ', platform: 'uber',
+      trips: 877, first_trip: '2025-04-05T09:29:06.000Z', last_trip: '2026-09-13T13:45:50.000Z',
+      plates: ['L46173', 'L78493'], fleets: ['ecosine'] },
+    shared_plates: ['L78493'] },
+  { alias_ext_id: 'drv-5', basis: 'similar_name', verdict: null,
+    alias: { driver_ext_id: 'drv-5', name: 'ALI HASSAN', platform: 'yango', trips: 12,
+      first_trip: '2026-02-01T09:00:00.000Z', last_trip: '2026-02-20T18:00:00.000Z',
+      plates: [], fleets: ['egari'] },
+    canonical: { driver_ext_id: 'drv-6', name: 'ALI HASSAN MOHAMMED', platform: 'uber', trips: 640,
+      first_trip: '2024-11-02T06:00:00.000Z', last_trip: '2026-09-14T08:00:00.000Z',
+      plates: ['L12615'], fleets: ['egari'] },
+    shared_plates: [] },
+  { alias_ext_id: 'drv-7', basis: 'similar_name', verdict: 'same', decided_by: 'operations',
+    alias: { driver_ext_id: 'drv-7', name: 'ROY OCDOL', platform: 'hotel', trips: 44,
+      first_trip: '2025-06-01T06:00:00.000Z', last_trip: '2026-08-02T06:00:00.000Z',
+      plates: ['L40971'], fleets: ['ecosine'] },
+    canonical: { driver_ext_id: 'drv-3', name: 'Roy Vellespen Ocdol', platform: 'uber', trips: 512,
+      first_trip: '2024-10-10T06:00:00.000Z', last_trip: '2026-09-14T07:00:00.000Z',
+      plates: ['L40971'], fleets: ['ecosine'] },
+    shared_plates: ['L40971'] },
+  { alias_ext_id: 'drv-2', basis: 'similar_name', verdict: 'different',
+    decided_note: 'two brothers on one address — checked by phone 2026-09-01',
+    alias: { driver_ext_id: 'drv-2', name: 'ASAD KHAN', platform: 'bolt', trips: 77,
+      first_trip: '2026-01-04T06:00:00.000Z', last_trip: '2026-09-10T06:00:00.000Z',
+      plates: ['L94178'], fleets: ['ecosine'] },
+    canonical: { driver_ext_id: 'drv-1', name: 'ASAD KHAN KHAN', platform: 'uber', trips: 431,
+      first_trip: '2025-03-03T06:00:00.000Z', last_trip: '2026-09-14T06:00:00.000Z',
+      plates: ['L36397'], fleets: ['ecosine'] },
+    shared_plates: [] },
+];
+const spEvidence = (p) => `${p.canonical.platform} filed \u201C${p.canonical.name}\u201D and `
+  + `${p.alias.platform} filed \u201C${p.alias.name}\u201D. Every part of the shorter name `
+  + 'appears in the longer one, which is what one person filed twice usually looks like \u2014 '
+  + 'and is also what two relatives look like. Nothing here proves it either way, which is why '
+  + 'it is being asked rather than applied.';
+const spPlateNote = (p) => (p.shared_plates.length
+  ? `Both records have driven ${p.shared_plates.join(', ')} \u2014 the same car, which one `
+    + 'person doing two jobs looks like.'
+  : 'These records have never driven the same car. On a fleet this size that is the ordinary '
+    + 'case and is not evidence either way.');
+const spOut = (p) => ({ ...p, evidence: spEvidence(p), plate_note: spPlateNote(p),
+  phone_tail: null, proposed_at: '2026-09-14T06:00:00.000Z' });
+
+app.get('/api/same-person', (_req, r) => r.json({
+  pending: SP.filter((p) => !p.verdict).map(spOut),
+  decided: SP.filter((p) => p.verdict).map(spOut),
+  conclusive_bases: ['shared_phone', 'shared_email'],
+  why: 'A phone number or an email address on two records is an identifier, so those merge '
+    + 'without asking. These are pairs where the only evidence is that one name sits inside '
+    + 'the other \u2014 which is what one person filed twice looks like, and equally what two '
+    + 'relatives look like. Nothing here has been applied.',
+  refuted_note: 'A pair where both records carry a trip at the same moment in two different '
+    + 'cars is two people, and never reaches this queue \u2014 it is ruled out before the '
+    + 'proposal is written.',
+}));
+
+app.post('/api/same-person/decide', (req, r) => {
+  const p = SP.find((x) => x.alias_ext_id === req.body?.alias_ext_id);
+  if (!p) return r.status(404).json({ error: 'no such proposal' });
+  const v = req.body?.verdict;
+  p.verdict = v === 'undecided' ? null : v;
+  p.decided_by = v === 'same' ? 'you' : p.decided_by;
+  return r.json({ ok: true, alias_ext_id: p.alias_ext_id, verdict: v, applied_now: v === 'same',
+    effect: 'mock' });
 });
 
 app.get('/api/driver/territory', (req, r) => {

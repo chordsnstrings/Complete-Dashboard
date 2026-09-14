@@ -379,6 +379,13 @@ export const NO_PLATFORM_FLEET = ['driver', 'vehicle', 'property', 'coverage'];
    asks for one fleet's list, and move this id to NO_RANGE at the same time. */
 export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights',
   'online-time',
+  /* #same-person is the whole queue of unsettled pairs, and /api/same-person
+     takes no window, no platform and no fleet: a pair is a pair whenever
+     either record drove. All three controls would govern nothing, and would
+     ride along into every driver link leaving the page — sending a reviewer
+     who clicked a name into a driver page narrowed to a month that has
+     nothing to do with why they clicked. */
+  'same-person',
   /* #trip is ONE booking addressed by the provider's own id. /api/trip takes a
      platform and an id and nothing else — a range, a channel or a fleet
      control above it would govern nothing, and would ride along into every

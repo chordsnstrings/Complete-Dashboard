@@ -259,13 +259,31 @@ check('there is more than one file defining the column, so this found them',
 check('the register migration runs after every file that defines the column',
   DEFINES_KEY.every((f) => at(f) < at('schema_v53.sql')),
   DEFINES_KEY.map((f) => `${f}@${at(f)}`).join(' ') + ` v53@${at('schema_v53.sql')}`);
-/* And nothing may rebuild person_key after it, or the register's CASE is
-   dropped again by a later ADD COLUMN and the merge silently comes undone. */
-const REBUILDS = /ADD COLUMN person_key|GENERATED ALWAYS AS[\s\S]{0,200}?STORED/;
+/* And nothing may rebuild PERSON_KEY after it, or the register's CASE is
+   dropped again by a later ADD COLUMN and the merge silently comes undone.
+
+   The pattern used to be `ADD COLUMN person_key|GENERATED ALWAYS AS…STORED`,
+   with the second half standing in for "somebody redefined the column". That
+   proxy outlived its accuracy: sql/schema_v70.sql adds driver_status_event
+   with a generated `local_day` — the same Dubai-day expression trip_norm uses
+   — and the guard failed a migration that does not go near person_key. A test
+   that forbids a whole SQL feature in order to protect one column will keep
+   doing that, and each time somebody will have to decide whether to weaken the
+   rule or work around it; both answers are worse than naming the column.
+
+   So both halves name it. The property is unchanged and the assertion is now
+   about the thing it is for. */
+const REBUILDS = /ADD COLUMN\s+person_key|person_key[\s\S]{0,80}?GENERATED ALWAYS AS[\s\S]{0,200}?STORED/i;
 const after53 = SCHEMA_FILES.slice(at('schema_v53.sql') + 1);
 check('and no migration after it rebuilds the column',
   after53.every((f) => !REBUILDS.test(body(f))),
-  `checked ${after53.length}: ${after53.join(', ') || 'none'}`);
+  `checked ${after53.length}: ${after53.filter((f) => REBUILDS.test(body(f))).join(', ') || 'none offending'}`);
+/* …and the narrowed pattern must still CATCH the thing it is for, or this is
+   a guard that passes because it stopped looking. */
+check('the guard still fires on a migration that does rebuild person_key',
+  REBUILDS.test('ALTER TABLE trip ADD COLUMN person_key text')
+    && REBUILDS.test("person_key text GENERATED ALWAYS AS (lower(driver_name)) STORED")
+    && !REBUILDS.test("local_day DATE GENERATED ALWAYS AS ((at AT TIME ZONE 'Asia/Dubai')::date) STORED"));
 /* The name fold itself is untouched. If personFold ever learns about ids, the
    rule has widened and every name in the fleet is exposed to it. */
 check('personFold is still the NAME rule and knows nothing about any id',

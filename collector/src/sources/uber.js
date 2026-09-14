@@ -1758,6 +1758,93 @@ export function uberOrgs(fleet = null) {
   return fleet ? all.filter((o) => o.fleet === fleet) : all;
 }
 
+/* THE DRIVER'S OWN STATUS, WHICH THIS FUNCTION HAS BEEN THROWING AWAY.
+   ─────────────────────────────────────────────────────────────────────────
+   Everything below this line used to be the whole of it: map each overview
+     to a row keyed on PLATE, drop the ones without a vehicle, write it as
+     vehicle telemetry. The driver's status went into that row as a string and
+     the driver went nowhere at all.
+
+     The cost of that was the operator's question — a driver Uber shows online
+     for five hours who does not read as online here. Our online times came
+     from supplier.uber.com/chronicle on a three-hourly cron, one request per
+     driver, while THIS response has carried the same fact every two minutes
+     all along, for every driver, with the instant it changed:
+
+       statusEntries [{status: DRIVER_STATUS_ONLINE|OFFLINE|ONTRIP,
+                       timestamp: 2026-09-04T17:07:17.859Z}]
+
+     Measured on production 2026-09-14 through /api/live: 11 rows carried an
+     Uber status out of a roster of 152, because `plate !== 'UNKNOWN'` is
+     exactly the filter that removes a driver with no car attached — and a
+     driver with no car attached is precisely the person an operator is
+     looking for when they ask who is online and not working.
+
+     So the status is now written per DRIVER as well, and the plate-keyed
+     telemetry row is left exactly as it was: the live map reads it, it is not
+     wrong, it is simply not about a person. */
+export function driverStatusFrom(overviews, fleet, seenAt = new Date().toISOString()) {
+  const shortStatus = (raw) => {
+    const w = String(raw || '').replace('DRIVER_STATUS_', '').toLowerCase();
+    return ['online', 'offline', 'ontrip'].includes(w) ? w : (w || null);
+  };
+  const nowRows = [];
+  const events = [];
+  const contacts = [];
+  for (const d of overviews) {
+    const id = d.driverInfo?.driverUuid;
+    if (!id || id === 'undefined') continue;
+    const entries = (d.statusEntries || []).filter((e) => e && e.status && e.timestamp);
+    /* The LATEST entry, chosen by its timestamp rather than by its position.
+       The array's order is the provider's business and this reads it as a set:
+       an entries[0] that is newest today and oldest next month is the kind of
+       assumption that produces a driver who came online yesterday. */
+    const latest = entries.slice()
+      .sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp))).pop() || null;
+    nowRows.push({
+      platform: SRC, driver_ext_id: id, fleet_id: fleet,
+      status: shortStatus(latest?.status), status_raw: latest?.status || null,
+      status_at: latest?.timestamp || null,
+      onboarding: d.onboardingStatus || null,
+      plate: d.vehicleInfo?.licensePlate ? normPlate(d.vehicleInfo.licensePlate) : null,
+      observed_at: seenAt,
+    });
+    for (const e of entries) {
+      events.push({ platform: SRC, driver_ext_id: id, at: e.timestamp,
+        status: shortStatus(e.status), status_raw: e.status, fleet_id: fleet });
+    }
+    /* AND THE CONTACT DETAILS, which are the other thing this response has
+       been carrying unread. driver_compliance is where this product has always
+       held them and src/identity_link.js reads it to decide that two records
+       on two channels are one person — a rule that reaches 433 of 808 accounts
+       today because the rest carry no phone. Every Uber account here carries
+       both a phone and an email.
+
+       Only rows that actually carry something, exactly as
+       src/sources/uber_profile.js does at :318: a record with neither must not
+       overwrite what is on file with two nulls. */
+    const phone = d.driverInfo?.phone || null;
+    const email = d.driverInfo?.email || null;
+    /* The NAME goes with them, built the way src/sources/uber_profile.js
+       builds it at :155 — the same provider and the same two fields, so this
+       overwrites Uber's name with Uber's name and never with a worse one.
+       Without it a driver this feed meets before the three-hourly profile pull
+       does lands on driver_compliance with contact details and no name, and a
+       nameless record is one src/identity_link.js cannot reason about and one
+       the roster pages would render as a blank row.
+
+       driver_compliance carries no person_key (that column lives on trip,
+       sql/schema_v53.sql), so a name written here moves nobody's identity. */
+    const name = [d.driverInfo?.firstName, d.driverInfo?.lastName].filter(Boolean).join(' ');
+    if (phone || email) {
+      contacts.push({ platform: SRC, driver_ext_id: id, fleet_id: fleet,
+        ...(name ? { full_name: name } : {}),
+        ...(phone ? { phone } : {}), ...(email ? { email } : {}) });
+    }
+  }
+  return { nowRows, events, contacts };
+}
+
 async function pullLiveOrg(o) {
   const token = await uberOAuthToken(o);
   /* Paged. This asked once, with no limit and no cursor, and took whatever came
@@ -1818,6 +1905,26 @@ async function pullLiveOrg(o) {
     log.info(SRC, 'roster', { drivers: roster.length,
       cannot_earn: roster.filter((r) => r.can_earn === false).length });
   }
+
+  /* The driver-level status, the events behind it and the contact details,
+     all three of which this response has carried unread since the live map was
+     built. driverStatusFrom() has the whole argument. */
+  const { nowRows, events, contacts } = driverStatusFrom(overviews, o.fleet);
+  if (nowRows.length) {
+    await upsertMany('driver_status_now', nowRows, ['platform', 'driver_ext_id']);
+  }
+  if (events.length) {
+    /* Idempotent by construction: the key is the provider's own timestamp, so
+       re-reading the same entries on the next tick writes the same rows. */
+    await upsertMany('driver_status_event', events, ['platform', 'driver_ext_id', 'at']);
+  }
+  if (contacts.length) {
+    await upsertMany('driver_compliance', contacts, ['platform', 'driver_ext_id']);
+  }
+  log.info(SRC, 'driver status', { fleet: o.fleet, drivers: nowRows.length,
+    online: nowRows.filter((r) => r.status === 'online').length,
+    ontrip: nowRows.filter((r) => r.status === 'ontrip').length,
+    events: events.length, contacts: contacts.length });
 
   const rows = overviews.map((d) => ({
     source: SRC, fleet_id: o.fleet, plate: normPlate(d.vehicleInfo?.licensePlate || 'UNKNOWN'),

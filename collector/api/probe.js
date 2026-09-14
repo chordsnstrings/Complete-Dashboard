@@ -718,8 +718,18 @@ export function probeRoutes(app, { wrap }) {
        they typed, not for the fleet's clock. */
     const to = req.query.to || dubaiIso();
     const from = req.query.from || dubaiIso(new Date(Date.now() - 3 * 864e5));
+    /* One type, when the caller names it. Without this the ONLY way to ask
+       about REPORT_TYPE_PAYMENTS_ORDER is to ask about the eleven types listed
+       before it first — which, given the limit below, is the same as not being
+       able to ask about it at all. */
+    const only = req.query.only ? String(req.query.only).split(',').map((x) => x.trim()) : null;
+    const list = only ? CANDIDATE_REPORTS.filter((t) => only.includes(t)) : CANDIDATE_REPORTS;
+    if (only && !list.length) {
+      return res.status(400).json({ error: 'no such report type in the candidate list',
+        asked: only, candidates: CANDIDATE_REPORTS });
+    }
     const out = [];
-    for (const reportType of CANDIDATE_REPORTS) {
+    for (const reportType of list) {
       try {
         const { data } = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`, {
           method: 'POST', timeoutMs: 30000, retries: 0, headers: uberWebHeaders(uberOrg()),
@@ -730,11 +740,44 @@ export function probeRoutes(app, { wrap }) {
           }),
         });
         const ok = data?.status === 'success';
-        out.push({ reportType, valid: ok,
-          detail: ok ? 'accepted' : String(JSON.stringify(data?.data?.meta?.details || data?.data || data)).slice(0, 160) });
-      } catch (e) { out.push({ reportType, valid: false, detail: String(e).slice(0, 160) }); }
+        const detail = ok ? 'accepted'
+          : String(JSON.stringify(data?.data?.meta?.details || data?.data || data)).slice(0, 160);
+        /* THROTTLED IS NOT INVALID, and this route said it was.
+           ────────────────────────────────────────────────────────────────
+           Uber allows THREE reports in flight at once and answers the fourth
+           with `Code: rate-limited, Message: too many ongoing and in progress
+           reports … Limit: 3`. This loop asks for sixteen in a fixed order, so
+           the first few are accepted and every one after them is throttled —
+           and `valid: ok` booked all of those as FALSE. Measured on production
+           2026-09-14 (ecosine, window 2026-09-11..14): the four types at the
+           head of CANDIDATE_REPORTS came back `accepted` and the remaining
+           twelve came back rate-limited, which is exactly the list order and
+           not a fact about Uber.
+
+           That artefact is where the standing claim "only four report types
+           are valid" comes from. It is a reason that is not the true one,
+           which is the one thing this product's own principle forbids: a
+           throttled type is UNKNOWN, so it now answers null and says so, and
+           ?only= exists to ask about one without spending the budget on the
+           eleven ahead of it. */
+        const throttled = /rate-limited|too many ongoing/i.test(detail);
+        out.push({ reportType, valid: throttled ? null : ok,
+          throttled, detail: throttled ? `not asked — ${detail}` : detail });
+      } catch (e) { out.push({ reportType, valid: false, throttled: false, detail: String(e).slice(0, 160) }); }
     }
-    res.json({ window: [from, to], types: out });
+    const throttled = out.filter((t) => t.throttled).length;
+    res.json({
+      window: [from, to],
+      types: out,
+      /* Said in the response rather than left for the reader to infer from
+         sixteen repeated strings. */
+      limit_note: throttled
+        ? `${throttled} of ${out.length} were never actually tested: Uber allows three reports `
+          + 'in flight at once and refused the rest before looking at the type. They are '
+          + 'neither valid nor invalid on this evidence — ask about one directly with '
+          + '?only=REPORT_TYPE_… once the in-flight reports have finished.'
+        : null,
+    });
   }));
 
   /* The shape of one generated report's CSV header — column names only. */

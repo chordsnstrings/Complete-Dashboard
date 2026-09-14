@@ -30,6 +30,9 @@ app.use('/api', cache);
 app.get('/api/thing', (req, res) => { calls++; res.json({ n: calls, days: req.query.days || null }); });
 app.get('/api/boom', (_q, res) => { calls++; res.status(500).json({ error: 'internal' }); });
 app.get('/api/live/now', (_q, res) => { calls++; res.json({ n: calls }); });
+/* The two a reviewer's own click changes, rather than a collection run. */
+app.get('/api/same-person', (_q, res) => { calls++; res.json({ n: calls }); });
+app.get('/api/drivers/identity-links', (_q, res) => { calls++; res.json({ n: calls }); });
 app.post('/api/thing', (_q, res) => { calls++; res.json({ n: calls }); });
 const server = app.listen(0);
 const port = server.address().port;
@@ -79,6 +82,23 @@ const l1 = await get('/api/live/now');
 const l2 = await get('/api/live/now');
 check('a realtime route is never cached, however cacheable it looks',
   l1.body.n !== l2.body.n, `${l1.body.n} then ${l2.body.n}`);
+
+/* A QUEUE A PERSON ANSWERS IS NOT A CACHEABLE READ.
+   ─────────────────────────────────────────────────────────────────────────
+   The cache keys on a version that advances on a collection run or a rollup,
+   and a human's verdict on #same-person advances neither. Cached, the sequence
+   is: the reviewer clicks "Yes — one person", the POST lands and the fold is
+   real, the page re-reads within the TTL, gets the body from before the click
+   and redraws the pair where it was. The click looks like it did nothing.
+
+   Asserted on both, because they read the same verdict and the links page
+   would go stale in exactly the same way. */
+for (const path of ['/api/same-person', '/api/drivers/identity-links']) {
+  const a = await get(path);
+  const b = await get(path);
+  check(`${path} is never cached — a verdict must show on the next read`,
+    a.body.n !== b.body.n, `${a.body.n} then ${b.body.n}`);
+}
 
 const before = calls;
 await get('/api/thing', { method: 'POST' });

@@ -24,7 +24,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, entity, pill, sourceLabel, 
   dialable } from './ui.js';
 import { dubaiDay } from './tz.js';
 import { empty, fmt } from './charts.js';
-import { api, href } from './data.js';
+import { api, qAll, href } from './data.js';
 
 /* Remembered per reader, because the expected start is a property of how this
    fleet runs and not of the page load. localStorage rather than the URL: it is
@@ -85,6 +85,58 @@ export async function renderOnlineTime(root) {
   };
   controls.append(lab('Day', dayIn), lab('Expected start', startIn));
   head.body.append(controls);
+
+  /* WHO IS ONLINE AT THIS MOMENT, which is a different question from every
+     other number on this page.
+     ─────────────────────────────────────────────────────────────────────
+     Everything below answers "when did they come online on this day" from the
+     history. This one line answers "and who is online RIGHT NOW", off the feed
+     that answers every two minutes — the feed whose per-driver status this
+     product was throwing away until sql/schema_v70.sql. An operator standing
+     up at nine in the morning wants the second question first.
+
+     It renders only for TODAY. On any other day a live count is a statement
+     about now placed under a heading about a past date, which is the most
+     confidently wrong thing this page could print. */
+  const liveHost = el('div');
+  head.body.append(liveHost);
+  const paintLive = () => {
+    liveHost.innerHTML = '';
+    if (day !== dubaiDay()) return;
+    qAll('/api/status/fleet').then((f) => {
+      if (day !== dubaiDay()) return;
+      liveHost.innerHTML = '';
+      const t = f.totals || {};
+      const box = el('div', `lstat${f.stale ? ' stale' : t.working ? ' on' : ' off'}`);
+      box.innerHTML = `<span class="lstat-dot"></span><b>${fmt(t.working || 0)} working right now</b>`;
+      box.append(el('span', 'lstat-sum',
+        `${fmt(t.ontrip || 0)} on a trip · ${fmt(t.online || 0)} online and waiting · `
+        + `${fmt(t.offline || 0)} offline`));
+      /* The feed's own age, always. A live count off a feed that stopped
+         answering an hour ago is a claim about an hour ago and looks
+         identical to one about now. */
+      box.append(el('span', 'lstat-why', f.stale
+        ? `The live feed last answered ${f.feed_age_min == null ? 'we do not know when' : `${f.feed_age_min} minutes ago`}`
+          + ` and answers every two minutes when healthy, so this is the last it said — not `
+          + 'necessarily what is true now.'
+        : `${f.basis} Refreshed ${f.feed_age_min === 0 ? 'less than a minute'
+          : `${f.feed_age_min} minute${f.feed_age_min === 1 ? '' : 's'}`} ago.`));
+      liveHost.append(box);
+    /* ABSENT WITH A REASON. "0 working right now" would be a measurement; a
+       blank would read as one too, on a page whose every other line is full.
+       What is true is that we asked and did not get an answer, so that is what
+       it says. */
+    }).catch(() => {
+      if (day !== dubaiDay()) return;
+      liveHost.innerHTML = '';
+      const box = el('div', 'lstat off');
+      box.innerHTML = '<span class="lstat-dot"></span><b>Live count unavailable</b>';
+      box.append(el('span', 'lstat-why', 'The request for the live feed failed. This says '
+        + 'nothing about how many drivers are working — the figures below are unaffected.'));
+      liveHost.append(box);
+    });
+  };
+  paintLive();
 
   const tiles = el('div'); head.body.append(tiles);
   /* "Late last" was wrong about its own table. The default sort is the online
@@ -275,7 +327,11 @@ export async function renderOnlineTime(root) {
         : '')));
   };
 
-  dayIn.onchange = () => { day = dayIn.value || dubaiDay(); draw(); };
+  /* paintLive() as well as draw(), because the live line renders only for
+     today: moving off today must clear it, and moving back must bring it
+     back. Leaving it on screen under a past date is a count about now under a
+     heading about then. */
+  dayIn.onchange = () => { day = dayIn.value || dubaiDay(); paintLive(); draw(); };
   /* Re-fetched rather than recoloured in the browser, so the counts in the
      tiles and the colours in the table can never come from two different
      start times. */

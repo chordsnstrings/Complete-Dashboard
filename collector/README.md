@@ -32,7 +32,12 @@ Local (no Docker): `npm install && npm run migrate && npm run backfill && npm st
   - **CABMAN every 5 minutes** (`CABMAN_CRON=*/5 * * * *`) — pulls `GetIVDData` and saves each snapshot
     to `telemetry_snapshot`. `polled_at` advances every poll (so "last seen" is never >5 min stale),
     while position rows dedupe on the device fix time so idle vehicles don't create fake movement.
-  - Uber/FMS live status every `LIVE_STATUS_SECONDS` (default 120s).
+  - Uber/FMS live status every `LIVE_STATUS_SECONDS` (default 120s). The Uber leg
+    (`/v1/vehicle-suppliers/drivers/actions`) writes three things besides the plate-keyed
+    `telemetry_snapshot`: `driver_status_now` / `driver_status_event` (the driver's own
+    ONLINE/ONTRIP/OFFLINE with **the instant the provider says it changed**), and the phone
+    and email on `driver_compliance`. All three were being discarded until 2026-09-14 — see
+    `docs/COVERAGE.md`, "The live driver status was arriving every two minutes".
   - a cron **incremental** every 30 min re-pulls the trailing `INCREMENTAL_DAYS` of trips/earnings.
 - All writes are **idempotent upserts** keyed on the source's natural id (Uber Trip UUID, Yango order
   id, FMS `plate|start`, CABMAN `plate|fix-time`), so re-runs never duplicate.
