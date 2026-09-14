@@ -1317,12 +1317,33 @@ app.get('/api/performance/fleet', (req, r) => {
    reports nothing about at all — which is the one the page must not render as
    "offline", because only Uber publishes a status and three of this fleet's
    four channels never will. */
-const STATUS_BY_INDEX = ['online', 'ontrip', 'offline', 'online', null, 'offline', 'ontrip', 'online'];
+/* 'silent' is the case production found and no fixture had: Uber LISTS the
+   driver and reports no status for them, so the row exists and its status is
+   null. It is a different absence from `null` here (no row at all — a driver
+   Uber does not know about), and the page must say a different sentence for
+   each. Both are in the fixture because a mock that shows only one of them
+   certifies only one of them. */
+const STATUS_BY_INDEX = ['online', 'ontrip', 'offline', 'online', null, 'silent', 'ontrip', 'online'];
 app.get('/api/status/driver', (req, r) => {
   const i = idIndex(req.query.id);
   const status = STATUS_BY_INDEX[i % STATUS_BY_INDEX.length];
   const stale = i % STATUS_BY_INDEX.length === 3;         // one driver on a dead feed
   const day = dubaiDayOf(new Date());
+  if (status === 'silent') {
+    /* A row, and nothing in it. Never `stale`: staleness is a claim about a
+       status, and there is no status here to be stale. */
+    return r.json({ day, driver_ext_id: req.query.id, uber_ids: [req.query.id], status: null,
+      status_word: null, status_raw: null, status_at: null, onboarding: 'ONBOARDING_STATUS_ACTIVE',
+      plate: null, observed_at: new Date(Date.now() - 60000).toISOString(),
+      observed_age_min: 1, stale: false,
+      absent: 'Uber lists this driver but has reported no status for them — their record '
+        + 'carries no status entry at all. That is not a driver who is offline; it is a driver '
+        + 'Uber is telling us nothing about.',
+      stale_why: null,
+      today: { online_since: null, online_since_local: null, online_minutes: 0,
+        on_trip_minutes: 0, waiting_minutes: 0, spans: [],
+        absent: 'No status change is on record for this driver on this day.' } });
+  }
   if (!status) {
     return r.json({ day, driver_ext_id: req.query.id, uber_ids: [], status: null,
       status_word: null, status_at: null, observed_at: null, observed_age_min: null, stale: true,
@@ -1375,16 +1396,32 @@ app.get('/api/status/driver', (req, r) => {
 app.get('/api/status/fleet', (_req, r) => {
   const rows = drivers.map((name, i) => ({
     driver_ext_id: `drv-${i}`, fleet_id: i % 2 ? 'egari' : 'ecosine',
-    status: STATUS_BY_INDEX[i % STATUS_BY_INDEX.length] || 'offline',
+    /* null for BOTH absences — the silent row and the missing one alike carry
+       no status, which is the whole point. It used to read `|| 'offline'`,
+       which is the production bug written into the fixture. */
+    status: (() => { const v = STATUS_BY_INDEX[i % STATUS_BY_INDEX.length];
+      return v && v !== 'silent' ? v : null; })(),
     status_at: new Date(Date.now() - (30 + i * 11) * 60000).toISOString(),
     plate: plates[i % plates.length], observed_at: new Date(Date.now() - 60000).toISOString(),
     onboarding: 'ONBOARDING_STATUS_ACTIVE', person_key: name.toLowerCase(), full_name: name,
   }));
   const count = (s) => rows.filter((x) => x.status === s).length;
+  const unknown = rows.filter((x) => !x.status).length;
+  /* Working first, then the rows that say nothing — the same order the real
+     endpoint's NULLS LAST produces. */
+  rows.sort((a, b) => (b.status === 'ontrip') - (a.status === 'ontrip')
+    || (b.status === 'online') - (a.status === 'online')
+    || (!!b.status) - (!!a.status));
   r.json({ rows, feed_at: new Date(Date.now() - 60000).toISOString(), feed_age_min: 1,
     stale: false, stale_after_min: 8,
-    totals: { drivers: rows.length, online: count('online'), ontrip: count('ontrip'),
+    totals: { drivers: rows.length, with_status: rows.length - unknown, unknown,
+      online: count('online'), ontrip: count('ontrip'),
       offline: count('offline'), working: count('online') + count('ontrip') },
+    unknown_note: unknown
+      ? `${unknown} of these ${rows.length} carry no status at all: Uber lists the driver and `
+        + 'reports nothing about them. They are not offline — nothing is known about them '
+        + 'either way.'
+      : null,
     basis: 'Uber is the only channel that reports a live driver status to this fleet. A '
       + 'driver on the hotel channel, Bolt or Yango does not appear here, and their absence '
       + 'is not a claim that they are offline.' });

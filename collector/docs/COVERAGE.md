@@ -2717,3 +2717,57 @@ the budget of three on the eleven ahead of it.
   strip whose fetch rejects is indistinguishable from a driver who genuinely has
   no live status, and those are different facts — one is about the driver and
   one is about us.
+
+### The row that exists and says nothing — measured on production 2026-09-14
+
+Found within the hour of deploying the section above, by looking at production
+rather than at the fixtures, and it is worth writing down because **the fix for
+a false figure introduced a new false figure of exactly the same kind.**
+
+`/v1/vehicle-suppliers/drivers/actions` returns a record for every driver Uber
+LISTS, whether or not it reports a status for them. Measured 2026-09-14 at
+13:47 UTC: **158 rows, of which 66 carried `statusEntries: []`** — a row
+present, `status` null.
+
+| | before the fix | after |
+|---|---|---|
+| rows carrying an Uber driver status | 13 (via the plate-keyed row) | 158 |
+| …of those, with a status Uber actually stated | 13 | 92 |
+| …with **no plate**, so invisible before | 0 | 66 |
+| working right now | not answerable | 63 (26 on a trip, 37 waiting) |
+
+`/api/status/driver` set `absent` only when there was **no row**. So those 66
+answered `status: null, absent: null`, and the strip's guard
+(`if (!st || st.absent)`) fell through to a word ladder whose last rung is
+`Offline` — reporting sixty-six drivers Uber had said nothing about as offline,
+confidently, on a page whose entire premise is the opposite.
+
+The two absences are different facts and now carry different sentences: *Uber
+does not list this driver* (no row — they work another channel) versus *Uber
+lists this driver and has reported no status* (a row, empty). Neither is
+"offline".
+
+The fleet totals had the matching defect one level up: `drivers` counted all
+158 while `online + ontrip + offline` summed to 92, so a reader closing that
+gap would read the 66 as offline. `with_status` and `unknown` are now reported
+beside them, with `unknown_note` saying it in words.
+
+### Traps this added to the list
+
+- **An absence flag must key on the FIGURE being null, not on the row being
+  missing.** A provider that lists everyone it knows about will hand you rows
+  with nothing in them, and "we have a record" is not "we have an answer". The
+  guard `if (!st || st.absent)` had two ways to be true and neither of them was
+  the one that mattered; it now also checks `!st.status`, because the branch it
+  falls through to makes a confident claim and being wrong there is silent.
+- **`ORDER BY x = 'y' DESC` sorts NULL FIRST in Postgres.** A boolean
+  comparison against a NULL column is NULL, not false, so the fleet list opened
+  with the 66 rows that say nothing and buried the people actually working.
+  `DESC NULLS LAST` on every such expression.
+- **Totals that do not sum to their own denominator get summed by the reader
+  anyway**, and the gap gets read as whichever bucket is nearest. Either report
+  the remainder as its own named figure or do not report the denominator.
+- **Fixtures written from a spec certify the spec, not the provider.** Every
+  case in `mockapi.mjs` and `test/status_routes.test.mjs` was a case somebody
+  imagined; the 66 empty rows were not, and no amount of green suite would have
+  found them. The first production read after a deploy is not a formality.

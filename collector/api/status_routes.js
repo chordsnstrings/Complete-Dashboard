@@ -140,6 +140,27 @@ export function statusRoutes(app, { q, wrap }) {
       ? Math.round((Date.now() - new Date(now.observed_at).getTime()) / 60000) : null;
     const stale = ageMin == null || ageMin > STALE_AFTER_MIN;
 
+    /* A ROW THAT EXISTS AND CARRIES NO STATUS IS STILL ABSENT.
+       ─────────────────────────────────────────────────────────────────────
+       Found on production the hour this shipped, and it is the exact failure
+       this feature was written to prevent. `absent` was set only when there
+       was NO row — but the live feed lists every driver Uber knows of, and
+       writes a row for each whether or not it reports a status for them. On
+       2026-09-14, 66 of 158 rows came back with statusEntries empty: a row
+       present, `status` null.
+
+       The strip reads `if (!st || st.absent)`, so a null `absent` fell through
+       to the word ladder, whose last rung is "Offline" — and sixty-six drivers
+       Uber had said NOTHING about were being reported as offline, confidently,
+       in a product whose first principle is that a figure that cannot be
+       measured renders absent with the TRUE reason.
+
+       It is a different reason from having no row at all, so it gets a
+       different sentence: one says Uber does not list this person, the other
+       says Uber lists them and has reported no status. Both are honest; only
+       "Offline" was not. */
+    const known = !!now?.status;
+
     res.json({
       day,
       driver_ext_id: id,
@@ -156,11 +177,15 @@ export function statusRoutes(app, { q, wrap }) {
       observed_at: now?.observed_at ?? null,
       observed_age_min: ageMin,
       stale,
-      absent: now ? null
-        : 'Uber has not reported a status for this driver. Only Uber publishes one to this '
-          + 'fleet, so a driver who works the hotel channel, Bolt or Yango has none by '
-          + 'construction — it is not a driver who is offline.',
-      stale_why: stale && now
+      absent: known ? null
+        : now
+          ? 'Uber lists this driver but has reported no status for them — their record carries '
+            + 'no status entry at all. That is not a driver who is offline; it is a driver Uber '
+            + 'is telling us nothing about.'
+          : 'Uber has not reported a status for this driver. Only Uber publishes one to this '
+            + 'fleet, so a driver who works the hotel channel, Bolt or Yango has none by '
+            + 'construction — it is not a driver who is offline.',
+      stale_why: stale && known
         ? `The live feed last answered ${ageMin == null ? 'we do not know when'
             : `${ageMin} minute${ageMin === 1 ? '' : 's'} ago`}`
           + `, and it answers every two minutes when it is healthy. This is the last status it `
@@ -201,7 +226,15 @@ export function statusRoutes(app, { q, wrap }) {
            ON c.platform = 'uber' AND c.driver_ext_id = s.driver_ext_id
         WHERE s.platform = 'uber'
           AND ($1::text IS NULL OR s.fleet_id = $1)
-        ORDER BY s.status = 'ontrip' DESC, s.status = 'online' DESC, c.full_name`,
+        /* NULLS LAST on both, deliberately. The expression s.status = 'ontrip'
+           is NULL for a driver carrying no status, and Postgres sorts NULL
+           FIRST under DESC — so the fleet list opened with the sixty-six rows
+           that say nothing and buried the people actually working below them.
+           (No backticks in this comment: it sits inside a template literal,
+           and one would end the string here rather than quote anything.) */
+        ORDER BY (s.status = 'ontrip') DESC NULLS LAST,
+                 (s.status = 'online') DESC NULLS LAST,
+                 c.full_name`,
       [req.query.fleet || null]);
 
     const freshest = rows.reduce((a, r) => (
@@ -215,12 +248,25 @@ export function statusRoutes(app, { q, wrap }) {
       stale: ageMin == null || ageMin > STALE_AFTER_MIN,
       stale_after_min: STALE_AFTER_MIN,
       totals: {
+        /* `drivers` is every row the feed returned, and `with_status` is how
+           many of those Uber actually said something about. Reported apart
+           because online + ontrip + offline does NOT add up to drivers and a
+           reader who assumes it does will read the difference as offline —
+           which is the same wrong answer, one level up. */
         drivers: rows.length,
+        with_status: rows.filter((r) => r.status).length,
+        unknown: rows.filter((r) => !r.status).length,
         online: rows.filter((r) => r.status === 'online').length,
         ontrip: rows.filter((r) => r.status === 'ontrip').length,
         offline: rows.filter((r) => r.status === 'offline').length,
         working: rows.filter((r) => WORKING.includes(r.status)).length,
       },
+      /* Said in words as well as counted, for the same reason. */
+      unknown_note: rows.some((r) => !r.status)
+        ? `${rows.filter((r) => !r.status).length} of these ${rows.length} carry no status at `
+          + 'all: Uber lists the driver and reports nothing about them. They are not offline — '
+          + 'nothing is known about them either way.'
+        : null,
       /* Only Uber publishes this. Said here so a page reporting "31 online"
          cannot be read as a statement about the whole fleet. */
       basis: 'Uber is the only channel that reports a live driver status to this fleet. A '

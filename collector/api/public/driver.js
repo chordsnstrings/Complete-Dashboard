@@ -539,11 +539,25 @@ const isPlaceholderLicence = (c) => !!(c.licence_placeholder
    dead feed looks exactly like a live one and is a claim about the past. */
 function statusStrip(st) {
   const box = el('div', 'lstat');
-  if (!st || st.absent) {
+  /* `!st.status` as well as `st.absent`, and not only because the endpoint now
+     always sets one alongside the other. The last rung of the word ladder
+     below is "Offline", so ANY future shape that reaches it without a status
+     prints a confident claim about a driver nobody has measured — the failure
+     found on production the hour this shipped, when 66 of 158 rows came back
+     with a row present and no status. Two guards for one fact, deliberately:
+     this is the branch where being wrong is silent. */
+  if (!st || st.absent || !st.status) {
     box.classList.add('off');
     box.innerHTML = `<span class="lstat-dot"></span><b>No live status</b>`;
     box.append(el('span', 'lstat-why', st?.absent
       || 'Uber is the only channel that reports one to this fleet.'));
+    /* Even with no status of their own, the day may hold events — and if it
+       does, saying nothing about them would be its own small lie. */
+    if (st?.today?.online_minutes) {
+      const h = Math.floor(st.today.online_minutes / 60), m = st.today.online_minutes % 60;
+      box.append(el('span', 'lstat-sum',
+        `${h}h ${String(m).padStart(2, '0')}m online earlier today`));
+    }
     return box;
   }
   const tone = st.stale ? 'stale' : st.status === 'ontrip' ? 'ontrip'

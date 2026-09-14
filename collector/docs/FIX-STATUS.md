@@ -538,14 +538,31 @@ by none of the others** — otherwise the test asserts a true sentence about the
 wrong row, which is indistinguishable from a passing test until the day it
 matters.
 
-### Not yet proven
+### Proven on production, 2026-09-14 — and what the proving found
 
-Everything above is **written** and **committed**. None of it is `proven` in the
-sense this file means: proven is re-measured on production *after* the deploy.
-For this batch that means, once deployed: `/api/status/fleet` returning a
-working count over a roster larger than the 11 the plate-keyed row reached, and
-a `similar_name` row in `driver_identity_link` that `/api/drivers/identity-links`
-does **not** list.
+Deployed `c24e9bd`, then measured. Two rows reached **proven**; one found a new
+defect, which is what the column is for.
+
+| # | proof |
+|---|---|
+| L1/L2 | `/api/status/fleet`: **158** drivers carrying a status against a pre-deploy baseline of **13** (`/api/live`, ONLINE 8 / ONTRIP 3 / OFFLINE 2). 63 working — 26 on a trip, 37 waiting. **66 of the 158 have no plate**, so were unreachable by the plate-keyed row by construction. Collector log: `[uber] driver status {"fleet":"ecosine","drivers":114,…,"contacts":114}` and `{"fleet":"egari","drivers":44,…,"contacts":44}` |
+| L8 | `?only=REPORT_TYPE_PAYMENTS_ORDER,REPORT_TYPE_DRIVER_STATUS` → **both `accepted`**, `limit_note: null`. The two types the old probe called invalid are valid; only the 3-in-flight limit and the list order ever said otherwise |
+
+**And the defect the first production read found.** 66 of those 158 rows carry
+`statusEntries: []` — a row present, status null — a case no fixture had. The
+`absent` flag keyed on the row being missing, so those answered `status: null,
+absent: null` and the strip reported **sixty-six drivers Uber had said nothing
+about as "Offline"**. The fix for a false figure had introduced a false figure
+of the same kind, in the same file, within the hour. `docs/COVERAGE.md` carries
+the measurement and the three traps. Fixed, proven by revert (`[null,null]` —
+the production symptom exactly), and the mock now carries both absences.
+
+### Still not proven
+
+The identity half. `refreshIdentityLinks` runs inside the incremental job, so
+proposals appear on the next pass. Proven will be: a `similar_name` row in
+`driver_identity_link` that `/api/drivers/identity-links` does **not** list, and
+`/api/same-person` showing it as pending.
 
 ### One thing an operator has to be told
 

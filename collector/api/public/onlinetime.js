@@ -111,7 +111,12 @@ export async function renderOnlineTime(root) {
       box.innerHTML = `<span class="lstat-dot"></span><b>${fmt(t.working || 0)} working right now</b>`;
       box.append(el('span', 'lstat-sum',
         `${fmt(t.ontrip || 0)} on a trip · ${fmt(t.online || 0)} online and waiting · `
-        + `${fmt(t.offline || 0)} offline`));
+        + `${fmt(t.offline || 0)} offline`
+        /* The unknowns are named rather than folded into offline. Without this
+           the three figures above do not add up to the roster and the reader
+           closes the gap themselves, in the only direction available. */
+        + (t.unknown ? ` · ${fmt(t.unknown)} not reported on` : '')));
+      if (f.unknown_note) box.append(el('span', 'lstat-why', f.unknown_note));
       /* The feed's own age, always. A live count off a feed that stopped
          answering an hour ago is a claim about an hour ago and looks
          identical to one about now. */

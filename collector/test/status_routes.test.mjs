@@ -120,12 +120,55 @@ check('and the status reads in words as well as as a token',
   fresh.status === 'online' && /waiting for a job/.test(fresh.status_word || ''),
   String(fresh.status_word));
 
+/* ── A ROW THAT EXISTS AND SAYS NOTHING ──────────────────────────────────
+   Found on production the hour this shipped, and not by any fixture here: the
+   live feed writes a row for every driver Uber lists, whether or not it
+   reports a status for them. On 2026-09-14, 66 of 158 rows came back with no
+   statusEntries at all — a row PRESENT, status null.
+
+   `absent` was set only when there was NO row, so those 66 answered status
+   null and absent null, and the strip's word ladder — whose last rung is
+   "Offline" — reported sixty-six drivers Uber had said nothing about as
+   offline. The distinction this file exists to hold is exactly that one. */
+console.log('\na row that exists and carries no status is still absent');
+await q(`INSERT INTO driver_status_now
+           (platform, driver_ext_id, fleet_id, status, status_raw, status_at, observed_at)
+         VALUES ('uber','listed-silent','ecosine',NULL,NULL,NULL,now())`);
+const sil = await J(`/api/status/driver?id=listed-silent&day=${day}`);
+check('a row with a null status answers absent, not "offline"',
+  sil.status === null && !!sil.absent, JSON.stringify([sil.status, sil.absent]));
+check('…with the TRUE reason: Uber lists them and reports nothing',
+  /lists this driver but has reported no status/.test(sil.absent || ''),
+  String(sil.absent).slice(0, 90));
+check('…which is a DIFFERENT sentence from having no row at all',
+  sil.absent !== (await J(`/api/status/driver?id=nobody-at-all&day=${day}`)).absent);
+/* A driver we know nothing about cannot be stale — staleness is a claim about
+   a status, and there is none to be stale. */
+check('…and it is not dressed up as a stale reading of something',
+  sil.stale_why === null, String(sil.stale_why));
+
 console.log('\nthe fleet view');
 const f = await J('/api/status/fleet');
 check('the fleet totals count ontrip as working',
   f.totals.working === f.totals.online + f.totals.ontrip, JSON.stringify(f.totals));
 check('and the response says which channel this is about',
   /only channel that reports a live driver status/.test(f.basis || ''));
+/* THE TOTALS MUST NOT INVITE THE SUBTRACTION. online + ontrip + offline does
+   not equal drivers, and a reader who assumes it does reads the difference as
+   offline — the same wrong answer one level up. */
+check('the unknowns are counted, not folded into offline',
+  f.totals.unknown === 1 && f.totals.with_status === f.totals.drivers - f.totals.unknown,
+  JSON.stringify(f.totals));
+check('…and the three statuses account for exactly the rows that have one',
+  f.totals.online + f.totals.ontrip + f.totals.offline === f.totals.with_status,
+  JSON.stringify(f.totals));
+check('…and it is said in words as well as counted',
+  /carry no status at all/.test(f.unknown_note || ''), String(f.unknown_note).slice(0, 90));
+/* The list must open with the people who are working, not with the rows that
+   say nothing — `status = 'ontrip'` is NULL for those, and NULL sorts FIRST
+   under a bare DESC. */
+check('the fleet list does not open with the rows that say nothing',
+  !!f.rows[0].status, JSON.stringify(f.rows.map((r) => r.status)));
 
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
