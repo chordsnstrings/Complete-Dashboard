@@ -332,7 +332,38 @@ which. In `docs/COVERAGE.md`.
 
 ---
 
-## Tesla — REGISTERED, AND BLOCKED ON A HUMAN, 2026-09-10
+## Tesla — PAGE REMOVED 2026-09-15; INTEGRATION REGISTERED AND STILL BLOCKED
+
+**The #tesla page no longer exists.** It was removed on the operator's
+instruction after the stored access token expired on 2026-09-10 and this server
+proved unable to mint a new one: Tesla's auth edge refuses DigitalOcean egress
+(measured below), so the page had been rendering the vehicle register and no
+live Tesla data for five days. A page whose every live figure is absent, with
+the same reason each time, is a page that has stopped earning its rail row.
+
+**What was removed:** `api/public/tesla.js`, its nav entry, its view binding,
+its stylesheet block and its entry in the no-window-control list. Nothing else.
+
+**What was deliberately kept, and why:** `api/tesla_routes.js` and all four of
+its routes, `src/auth/tesla.js`, `bin/tesla-token.mjs`, the Tesla settings keys,
+and the `/.well-known/appspecific/com.tesla.3p.public-key.pem` route and file.
+Tesla re-fetches that key to verify this domain still owns it, so deleting it
+would break the partner registration — which is not a code change that can be
+reverted. `/api/tesla/connect` and `/teslaredirect` are the OAuth handshake by
+which a token is renewed; they are the browser route back to a working
+integration and they still answer.
+
+The three `/api/tesla/*` routes are now exempted in
+`test/endpoint_coverage.test.mjs` with that reason written out. The exemption
+was wrong once before — it claimed a page rendered from the routes when no page
+existed — so it now says plainly that the page was removed and that the routes
+are kept for renewal, not for a view that is coming back.
+
+**The 82 Teslas are untouched.** They remain in the vehicle register and appear
+on #fleet, #vehicles and everywhere else exactly as before. Nothing was migrated
+and no schema changed.
+
+### The registration, as it stood — still true, 2026-09-10
 
 | claim | state | the proof |
 |---|---|---|

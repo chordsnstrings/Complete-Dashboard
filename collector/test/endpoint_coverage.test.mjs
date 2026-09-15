@@ -55,13 +55,31 @@ const EXEMPT = {
     + 'tier — Blue, Gold, Platinum, Diamond — by trying introspection, then a fixed list of candidate fields '
     + 'on GetDriver, then a fixed list of candidate operations. Every candidate is written in the file; nothing '
     + 'the caller sends becomes part of a query. Not a page: it answers whether a page COULD exist',
-  /* The three Tesla routes were exempted here, and the exemption for
-     /api/tesla/status read "the Tesla section renders from it" — describing a
-     page that did not exist. An exemption is a claim about the product, and
-     that one was false the day it was written: the API and the handshake were
-     built and no page, no view and no rail row ever were, so the whole
-     integration was reachable only by curl. #tesla now exists and calls all
-     three, so all three are ordinary UI routes with ordinary fixtures. */
+  /* The three Tesla routes, exempt again — and the history matters, because
+     this exemption has been wrong once before. It originally read "the Tesla
+     section renders from it", describing a page that did not exist: the API
+     and the handshake were built and no page, no view and no rail row ever
+     were. #tesla was then built and the exemption was correctly removed.
+
+     #tesla has now been REMOVED, on the operator's instruction, after Tesla's
+     stored access token expired and this server proved unable to mint a new
+     one — Tesla refuses its network, so the page had been showing the vehicle
+     register and no live data for days. The routes are deliberately kept:
+     /api/tesla/connect and the /teslaredirect callback are the OAuth handshake
+     by which a token is renewed, and deleting them would remove the only
+     browser route back to a working integration. So this is an exemption with
+     a true reason rather than a page that is coming back next week — restore
+     it by rebuilding a view that calls them, not by editing this list. */
+  '/api/tesla/status': 'was #tesla, removed. Reports whether the Tesla Fleet API client is '
+    + 'configured, whether the fleet grant is in place, and why the live call is failing. Kept '
+    + 'because it is how an operator checks whether a renewed token took, and it is the one '
+    + 'endpoint that distinguishes a blocked integration from a broken one',
+  '/api/tesla/connect': 'was #tesla, removed. Mints the Tesla sign-in URL that begins the OAuth '
+    + 'handshake. Kept deliberately: with /teslaredirect it is the only browser route by which the '
+    + 'expired access token can be renewed, and bin/tesla-token.mjs needs a machine Tesla answers',
+  '/api/tesla/vehicles': 'was #tesla, removed. Asks Tesla itself what it will say about the 82 '
+    + 'Teslas on the register. Kept so the integration can be proven working again the moment a '
+    + 'token is renewed, without first rebuilding a page to call it from',
   '/api/probe/uber/timeline': 'operator tool: returns the raw driver_timeline_event rows for one '
     + 'driver on one day, with that day\u2019s trips beside them and the status vocabulary the '
     + 'feed actually uses \u2014 the spans every page derives are an inference, and when a page '

@@ -2339,6 +2339,16 @@ within a minute of the trip ending.
 
 ## Tesla Fleet API — what it holds, verified 2026-09-10
 
+> **No page reads any of this as of 2026-09-15.** `#tesla` was removed on the
+> operator's instruction: the stored access token expired on 2026-09-10 and this
+> server cannot mint a new one, because Tesla's auth edge refuses DigitalOcean
+> egress (measured — see the block section below). The API routes, the OAuth
+> handshake and the partner public key are all still in place and still answer;
+> only the view is gone. The 82 Teslas remain in the vehicle register and are
+> unaffected. Everything below describes what the integration WOULD serve once a
+> token is renewed from a machine Tesla answers, via `bin/tesla-token.mjs`.
+
+
 Checked against Tesla's own documentation, not recalled. An earlier note in
 `FIX-STATUS.md` said there was "no per-trip, drive or odometer history at all";
 that was wrong about the odometer and wrong about charging, and it is corrected
