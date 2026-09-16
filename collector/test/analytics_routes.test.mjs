@@ -336,9 +336,31 @@ const W = 'from=2026-08-01&to=2026-08-31';
      hands" and "n drivers holding cash" are numbers somebody sizes a cash
      control on; both were the length and sum of a list the endpoint caps at
      200 rows, which understates by exactly the tail nobody is watching. */
-  check('the driver count is its own number, not the length of the list',
-    typeof c.driver_count === 'number' && c.driver_count === c.drivers.length,
-    `${c.driver_count} vs ${c.drivers.length}`);
+  /* TWO NUMBERS NOW, AND THEY ARE DIFFERENT ON PURPOSE.
+     ──────────────────────────────────────────────────────────────────────
+     This used to be one assertion because there was one number: driver_count
+     was count(*) over the holders CTE — one row per (name, platform id) — and
+     the tile above the list reads "Drivers holding cash". On production over
+     from=2026-06-01&to=2026-09-16 that answered 252 on a fleet where 151
+     people drove at all, and of the 200 rows the endpoint returns only 126
+     were distinct people.
+
+     The list still shows one row per account, deliberately: the statement is
+     filed under the NAME, both spellings match it, and blanking one would hide
+     the money from whichever spelling the reader searched for. So the row
+     count and the person count are two different true things and the response
+     returns both — driver_rows describes the list, driver_count describes the
+     fleet. The twin pair in this fixture is one man under two spellings, which
+     is why the two differ by exactly one here. */
+  check('the ROW count is its own number, not the length of the capped list',
+    typeof c.driver_rows === 'number' && c.driver_rows === c.drivers.length,
+    `${c.driver_rows} vs ${c.drivers.length}`);
+  check('…and the tile\u2019s "Drivers holding cash" counts PEOPLE, folded',
+    c.driver_count === c.drivers.length - 1,
+    `${c.driver_count} people over ${c.drivers.length} rows`);
+  check('…so the twin\u2019s two rows each say they are the same human',
+    c.drivers.filter((d) => d.person_rows === 2).length === 2,
+    JSON.stringify(c.drivers.map((d) => [d.driver_name, d.person_rows])));
   check('the response says whether the list was cut', c.truncated === false, String(c.truncated));
   check('the cash total is not a sum over the visible page',
     c.total_cash_trips === c.drivers.reduce((a, d) => a + d.cash_trips, 0),
@@ -381,9 +403,13 @@ const W = 'from=2026-08-01&to=2026-08-31';
   const palm = r.rows.filter((x) => x.counterparty === 'Palm Grand');
   check('a property owing money is one row, not one row per driver who drove for it',
     palm.length === 1, JSON.stringify(palm.map((x) => [x.trips, x.amount])));
-  check('and the drivers behind it are kept, so the row is still a drill-down',
-    palm[0].drivers > 1 && Array.isArray(palm[0].driver_ids) && palm[0].driver_ids.length > 1,
-    JSON.stringify(palm[0].driver_ids));
+  /* `driver_accounts` — see test/receivables_ageing.test.mjs for the reasoning.
+     The count is the size of the driver_ids array beside it, so it counts
+     platform accounts and now says so. */
+  check('and the accounts behind it are kept, so the row is still a drill-down',
+    palm[0].driver_accounts > 1 && Array.isArray(palm[0].driver_ids)
+    && palm[0].driver_ids.length > 1,
+    JSON.stringify([palm[0].driver_accounts, palm[0].driver_ids]));
   check('the counterparty count equals the number of distinct counterparties',
     r.counterparties === new Set(r.rows.map((x) => `${x.settlement_class}|${x.counterparty}`)).size,
     `${r.counterparties} vs ${r.rows.length} rows`);

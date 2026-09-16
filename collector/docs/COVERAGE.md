@@ -827,6 +827,85 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **`trip_ext` and `trip_norm` DO NOT carry `person_key`, whatever a note
+  telling you to fold on it may say.** `sql/schema_v18.sql` creates `trip_norm`
+  as `SELECT t.* … FROM trip t` — BEFORE `sql/schema_v20.sql` adds the column —
+  and a view's star is frozen at creation, so the column is not in it.
+  `sql/schema_v62.sql` then rebuilds `trip_ext` as `SELECT t.* … FROM trip_norm
+  t`, so `trip_ext` inherits `trip_norm`'s frozen star and not `trip`'s. **Both
+  views are therefore two hops from the stored key and neither can read it.**
+  This cost an afternoon in the driver-vs-account sweep: a hand-off document
+  asserted "trip_ext CARRIES person_key, so this folds with no join" for three
+  separate call sites — `/api/day`, `/api/playbook` and
+  `/api/settlement/cash-exposure` — and all three were written that way and all
+  three 500'd with `column "person_key" does not exist`. Verified against the
+  replayed schema rather than argued about, and the one-liner that settles it in
+  ten seconds is worth keeping:
+
+  ```js
+  // node, from collector/
+  const { PGlite } = await import('@electric-sql/pglite');
+  const { applySchema } = await import('./test/schema.mjs');
+  const db = new PGlite(); await applySchema(db);
+  await db.query(`SELECT column_name FROM information_schema.columns
+                   WHERE table_name = $1 AND column_name = 'person_key'`, ['trip_ext']);
+  ```
+
+  Measured on the current schema: `trip`, `vehicle_driver_day`, `money_event`,
+  `driver_payout_day` and `driver_statement_day` HAVE it (all five are on
+  `sql/schema_v53.sql`'s rebuild list, together with `driver_platform_state`);
+  `trip_norm`, `trip_ext` and the `driver_payout` VIEW do NOT. So: a query over
+  `trip_norm` reaches the stored key through `JOIN_TRIP` (cheap — the join key
+  is trip's primary key, so it is 1:1 and cannot multiply a row), and a query
+  over `trip_ext` either joins the same way or uses `peopleCount()` /
+  `personKey()`, the COMPUTED fold, which is the same value
+  (`test/person_key.test.mjs`) and carries the merge register through
+  `identityCase`. The computed form costs two `regexp_replace` calls per row and
+  is affordable on a one-day or one-slot query and NOT on a whole-table scan —
+  `sql/schema_v20.sql` measured that trade at 2,434ms against 129ms.
+
+* **A count named `drivers` is a count of platform ACCOUNTS unless somebody
+  made it otherwise, and on this fleet that is 75% too high.** Measured on
+  production over `from=2026-06-01&to=2026-09-16`: `/api/drivers/cross-platform`
+  reports **151 people holding 265 platform accounts**, and
+  `/api/drivers/directory` holds **403 people over 800 distinct ids fleet-wide
+  (1.99x)**. 56% of the people who held a car hold more than one account. A
+  sweep of `api/*.js` found 23 sites computing `count(DISTINCT … driver_ext_id)`
+  and most of them were rendered under the word "drivers" or "people".
+
+  **The dangerous direction is the DIVISOR, not the count.** A count 24% too
+  high makes the average it divides 19.4% too LOW, and nothing on the page looks
+  wrong: `/api/day?day=2026-09-15` printed *"Drivers out 124 · 8.0 bookings each
+  on average"* where the truth is *"100 · 9.9"*. Worse than a plain divisor is a
+  numerator and denominator folded on DIFFERENT keys —
+  `/api/alerts/by-driver` grouped its rows on the raw name while its `km` CTE
+  grouped on `person_key`, so one man's three rows each got his WHOLE distance
+  as their denominator and he appeared at 87.8, 2.66 and 1.39 alerts per 100 km
+  where his real rate is 91.9. **On a leaderboard whose only purpose is choosing
+  who to coach, splitting a person moves them DOWN it.**
+
+  The rule, now applied across the sweep: fold on `PERSON_OF` wherever the label
+  says drivers or people or a per-driver average divides by it; **leave a count
+  that genuinely means accounts alone and keep its name** (folding it would hide
+  a real distinction and is the same defect facing the other way); and where
+  both readings are useful **return both and name both**, so a page can say "58
+  people across 71 platform accounts". Pinned by
+  `test/person_vs_account_counts.test.mjs`, whose 64 assertions were each proved
+  by reverting the expression and watching them fail.
+
+* **`driver_earnings_component` has no person key and cannot cheaply be given
+  one.** It is the one table in the sweep where the fold is not affordable:
+  `sql/schema_v42.sql` added the generated column to `money_event`, not to this
+  table, and `sql/schema_v53.sql` rebuilds `person_key` on a FIXED list of six
+  tables of which this is not one. A column added in a new `schema_v72` would
+  carry the NAME fold and **not the merge register**, and would silently stop
+  tracking `api/identity_map.js` the next time the register is edited — so doing
+  it properly means adding the table to `bin/gen-schema-v53.mjs` and
+  regenerating v53, which is a column drop and an index rebuild on a live table
+  and a deploy of its own. Until then `/api/earnings/components` and
+  `/api/revenue`'s component tree return the figure as `driver_accounts` and say
+  so, rather than folding it badly or claiming it is people.
+
 * **A `vehicle_driver_day` row can carry an account and an EMPTY name, and
   `driver_name IS NOT NULL` admits it — so a record gets counted as a human.**
   `sql/schema_v19.sql` builds a custody row whenever EITHER an id or a name is

@@ -22,7 +22,7 @@ import { areaOf } from '../api/analytics_routes.js';
 import { seedFleet } from './fixture.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
-import { custodyOverWindow, custodyCountOverWindow } from '../api/custody_sql.js';
+import { custodyOverWindow, custodyCountOverWindow, personKeyStored, personKey, NAMED } from '../api/custody_sql.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -211,19 +211,48 @@ console.log('\nproduct-by-vehicle resolves custody once per plate');
   const serverSrc = readFileSync('api/server.js', 'utf8');
   const at = serverSrc.indexOf("app.get('/api/product/by-vehicle'");
   let newSql = serverSrc.slice(serverSrc.indexOf('`WITH agg AS (', at) + 1);
-  newSql = newSql.slice(0, newSql.indexOf('`, range(req)')).replace('${F}', F2);
+  /* The shipped SQL is read as TEXT, so every interpolation in it has to be
+     filled in here by hand — and the list grew when the custody CTE learned to
+     fold on the person. personKeyStored() and NAMED() are the REAL helpers,
+     imported rather than spelled out, so this harness cannot drift from the
+     expression the server actually ships: a copy of
+     "coalesce(nullif(v.person_key,''), v.driver_ext_id)" in this file would go
+     on passing the day somebody changed the fold. */
+  newSql = newSql.slice(0, newSql.indexOf('`, range(req)')).replace('${F}', F2)
+    .replaceAll("${personKeyStored('v')}", personKeyStored('v'))
+    .replaceAll("${NAMED('v')}", NAMED('v'));
 
   const P = ['2026-08-01', '2026-08-31', null, null];
   const before = (await db.query(oldSql, P)).rows;
   const after = (await db.query(newSql, P)).rows;
   check('the rewrite returns the same number of rows',
     before.length === after.length && before.length > 0, `${before.length} vs ${after.length}`);
+  /* driver_accounts is stripped before the comparison because it is a column
+     the rewrite ADDED, not a value it changed. driver_n and driver_refs are
+     compared as they are, and they must still match: custodyCountOverWindow()
+     on the old side has always folded on PERSON_OF, so making the CTE fold the
+     same way is what brings the one-pass form back into agreement with it —
+     before, the CTE counted driver_ext_id and the subquery counted people, and
+     this assertion only passed because no fixture driver held two accounts. */
+  const bare = (rows) => rows.map(({ driver_accounts, ...r }) => r);
   check('and the same values in the same order',
-    JSON.stringify(before) === JSON.stringify(after),
-    JSON.stringify(after.slice(0, 1)));
+    JSON.stringify(before) === JSON.stringify(bare(after)),
+    JSON.stringify(bare(after).slice(0, 1)));
+  check('…and the accounts reading rides beside the people count, named',
+    after.every((r) => typeof r.driver_accounts === 'number'
+      && r.driver_accounts >= r.driver_n),
+    JSON.stringify(after.slice(0, 2).map((r) => [r.driver_n, r.driver_accounts])));
+  /* Comments stripped before matching. This asserted that the two correlated
+     subqueries are not back in the SELECT list, by grepping the route's source
+     for their names — and it fired on a BLOCK COMMENT that mentions
+     custodyOverWindow by name while explaining why the CTE orders its rows the
+     way that helper does. A source-text check a comment can trip is a check
+     that punishes the house style for documenting itself, so the comments come
+     out first and the code alone is matched. */
+  const codeOnly = serverSrc.slice(at, serverSrc.indexOf('range(req)', at))
+    .replace(/\/\*[\s\S]*?\*\//g, '');
   check('custody is resolved in one pass, not per row',
-    !/custodyOverWindow|custodyCountOverWindow/.test(
-      serverSrc.slice(at, serverSrc.indexOf('range(req)', at))),
+    !/custodyOverWindow|custodyCountOverWindow/.test(codeOnly),
     'a correlated subquery is back in the select list');
 }
 
@@ -312,14 +341,24 @@ console.log('\ncash exposure aggregates the window once');
   const analyticsSrc = readFileSync('api/analytics_routes.js', 'utf8');
   const cashAt = analyticsSrc.indexOf("app.get('/api/settlement/cash-exposure'");
   let newSql = analyticsSrc.slice(analyticsSrc.indexOf('`WITH holders AS (', cashAt) + 1);
-  newSql = newSql.slice(0, newSql.indexOf('`, p)')).replace('${FB}', FB2);
+  /* Same rule as the product-by-vehicle slice above: the shipped SQL is read as
+     TEXT, so every interpolation has to be filled in here, and the person fold
+     is filled from the REAL helper rather than a copy of its output. */
+  newSql = newSql.slice(0, newSql.indexOf('`, p)')).replace('${FB}', FB2)
+    .replaceAll('${personKey()}', personKey());
 
   const P = ['2026-08-01', '2026-08-31', null, null];
   /* The window aggregates ride on the rows, and so does the statement-cash
      join added beside the booking figure — neither belongs in a comparison
      with the query that had neither. */
-  const strip = (rs) => rs.map(({ _drivers, _cash_trips, _priced, _value, _stmt_cash,
-    _stmt_drivers, _nk, _name_rows, _name_rn, statement_cash, statement_days, ...r }) => r);
+  /* _people and _person_rows join this list for the same reason _nk and
+     _name_rows are on it: they are internals the route deletes before the page
+     sees a row. _pk is the folded person key the tile's count is taken over —
+     the tile reads "Drivers holding cash" and used to count ROWS, which on
+     production answered 252 on a fleet of 151 people. */
+  const strip = (rs) => rs.map(({ _drivers, _people, _cash_trips, _priced, _value, _stmt_cash,
+    _stmt_drivers, _nk, _pk, _name_rows, _name_rn, _person_rows,
+    statement_cash, statement_days, ...r }) => r);
   const before = await cq(oldRows, P);
   const [beforeT] = await cq(oldTotals, P);
   const after = await cq(newSql, P);

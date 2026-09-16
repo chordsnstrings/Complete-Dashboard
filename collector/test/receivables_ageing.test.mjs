@@ -69,8 +69,15 @@ check('a property owing money is one row, not one per driver who drove for it',
   lm.length === 1, JSON.stringify(mo.rows.map((r) => [r.counterparty, r.trips])));
 check('and its amount is the whole debt, not one driver\'s slice',
   Number(lm[0].amount) === 9 * 100 + 6 * 70, String(lm[0].amount));
-check('the drivers behind it are kept, so the row is still a drill-down',
-  lm[0].drivers === 3 && lm[0].driver_ids.length === 3, JSON.stringify(lm[0].driver_ids));
+/* `driver_accounts`, not `drivers`. The figure is the SIZE OF THE driver_ids
+   ARRAY beside it — the deliberate drill-down this assertion is about — so it
+   is an ACCOUNTS reading and is now named one. It was the single genuinely
+   ambiguous count in the person-vs-account sweep and it was resolved by keeping
+   the arithmetic and fixing the word: api/custody_sql.js's rule is that the
+   count beside a list has to be a count OF that list, and the list is ids. */
+check('the accounts behind it are kept, so the row is still a drill-down',
+  lm[0].driver_accounts === 3 && lm[0].driver_ids.length === 3,
+  JSON.stringify([lm[0].driver_accounts, lm[0].driver_ids]));
 check('the counterparty tile equals the number of counterparties listed',
   mo.counterparties === mo.rows.length && mo.counterparties === 2,
   `${mo.counterparties} vs ${mo.rows.length}`);

@@ -54,6 +54,12 @@ import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
 import { MERGES } from '../api/identity_map.js';
+/* The builder itself, tested directly. platformPayouts()'s per-platform count
+   feeds the Finance tile through api/server.js's byPlat fold and is not
+   projected on any response as a per-platform row, so the only way to hold it
+   is to run it — which is legitimate here because it is an exported, pure SQL
+   builder taking the same four parameters every caller binds. */
+import { platformPayouts } from '../api/income_sql.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -405,6 +411,17 @@ console.log('\n6d. the Finance tile per-platform row folds the same way');
     !uber || uber.payout_drivers === 2, JSON.stringify(uber && uber.payout_drivers));
 }
 
+/* REVERSION FOR THE BUILDER ITSELF: put platformPayouts()'s `drivers` back to
+   count(DISTINCT driver_ext_id) and uber reads 3 where it paid 2 people. */
+console.log('\n6e. platformPayouts() itself folds, and keeps the accounts figure');
+{
+  const rows = await q(platformPayouts(), ['2026-09-01', '2026-09-30', null, null]);
+  const uber = rows.find((x) => x.platform === 'uber');
+  check('the builder returns people under `drivers`', uber.drivers === 2, String(uber?.drivers));
+  check('…and accounts under `driver_accounts`, both named',
+    uber.driver_accounts === 3, String(uber?.driver_accounts));
+}
+
 /* ══ 7. CASH, AND THE CARD THAT LINKS TO IT ══════════════════════════════
    REVERSION: in api/analytics_routes.js /api/settlement/cash-exposure put
    driver_count back to `count(*) OVER ()` and in api/playbook_routes.js put
@@ -457,6 +474,20 @@ console.log('\n8. a figure that genuinely counts accounts is left alone');
    assertion is that both keys survive — a later pass "tidying up" by folding
    driver_accounts onto person_key would destroy the only place the product
    states the distinction out loud. */
+console.log('\n8a. the leaderboard\u2019s "N accounts" is left counting accounts');
+{
+  const r = await get(`/api/drivers/leaderboard?${WIN}`);
+  const rows = r.body.rows || r.body.drivers || r.body;
+  const al = rows.find((x) => /aliyan/i.test(x.driver_name || ''));
+  check('the route answers', r.status === 200, String(r.status));
+  /* Computed INSIDE a GROUP BY t.person_key, so it answers "how many accounts
+     does this ONE person hold" — and api/public/economics.js:909 appends it to
+     the name as "N accounts". Folding it would make every row read 1 and the
+     page would lose the only thing it can say about a man with four records. */
+  check('a folded person\u2019s row still reports his four platform accounts',
+    al && al.accounts === 4, JSON.stringify(al && al.accounts));
+}
+
 console.log('\n8b. /api/compare/period keeps BOTH readings and names both');
 {
   const r = await get(`/api/compare/period?${WIN}`);

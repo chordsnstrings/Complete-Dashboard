@@ -272,7 +272,11 @@ app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03,
   /* Platform payouts, and the two channels together. Revenue is sum(price) over
      the trip table and covers 9% of trips on this fleet, so the headline was
      the hotel channel presented as the whole business. */
+  /* payout_drivers is PEOPLE paid, counted once fleet-wide; payout_accounts is
+     the statements-per-account reading. Production printed 247 under the word
+     drivers, beside this same response's folded 151. */
   payouts: 196178, payout_cash: 834.44, payout_days: 28, payout_drivers: 148,
+  payout_accounts: 241,
   payout_platforms: ['uber', 'yango'], payout_coverage_pct: 93.3,
   /* accounted is the best figure PER PLATFORM summed, so it is not fares plus
      payouts: yango reports both here and is counted on its payout only. */
@@ -1955,7 +1959,11 @@ app.get('/api/vehicle/kpis', (req, r) => {
        cover a tenth of the bookings and the attributed driver pay is the rest,
        so a fixture where the two are comparable would let a page that quietly
        swapped or summed them still look right. */
+    /* attributed_drivers is PEOPLE who held this car — the desktop tile has
+       always folded and the phone tile did not, so one vehicle answered two
+       different driver counts depending on which shell asked. */
     attributed_earnings: 5082.65, attributed_platforms: 1, attributed_drivers: 2,
+    attributed_accounts: 3,
     any_even_split: true,
     /* And the two together, per platform — hotel counted on its fares, uber on
        its payout, so accounted is their sum and not fares + every payout. */
@@ -2655,7 +2663,8 @@ app.get('/api/trips/daily', (req, r) => {
    header line is the CSV equivalent of "fixture rows lack X", so the columns
    here MUST track api/export_routes.js. */
 const EXPORT_COLS = {
-  day: ['day', 'fleet', 'channel', 'bookings', 'completed', 'drivers', 'vehicles',
+  day: ['day', 'fleet', 'channel', 'bookings', 'completed', 'drivers', 'driver_accounts',
+    'vehicles',
     'km', 'priced_bookings', 'fares', 'currency'],
   trip: ['day', 'fleet', 'channel', 'trip_id', 'requested_at', 'ended_at', 'driver_name',
     'driver_ext_id', 'plate', 'pickup_addr', 'dropoff_addr', 'distance_km',
@@ -3010,7 +3019,10 @@ app.get('/api/export/trips.csv', (req, r) => {
      with no fleet chip set the export covers both organisations and each row
      names its own. A single-fleet fixture would let that regress unseen. */
   const row = (fleet) => (grain === 'day'
-    ? [day, fleet, 'uber', 120, 113, 31, 28, 1480.5, 18, 4210.75, 'AED']
+    /* drivers then driver_accounts — two columns on purpose, because Finance
+       reconciles this file against the pages and a header that does not say
+       which reading it carries is a number nobody can re-derive. */
+    ? [day, fleet, 'uber', 120, 113, 31, 47, 28, 1480.5, 18, 4210.75, 'AED']
     : [day, fleet, 'uber', `uber-1-1-${fleet}`, `${day}T09:12:00.000Z`, `${day}T09:41:00.000Z`,
       'Khalid A', 'u-khalid', 'A 12345', 'Dubai Marina', 'DXB T3', 24.4,
       'UberX', 'card', 'completed', 'completed', 78.5, 'AED']);
@@ -3047,7 +3059,7 @@ app.get('/api/revenue', (_, r) => {
       km: 78400, drivers: 61, vehicles: 74, payouts: null, cash: null, payout_periods: 0,
       components: null, tips: null, fare_coverage_pct: 0, revenue_per_km: null,
       per_km_basis: null, per_km_km: null,
-      first_at: dayISO(30), last_at: dayISO(0), best: null, payout_drivers: 0,
+      first_at: dayISO(30), last_at: dayISO(0), best: null, payout_drivers: 0, payout_accounts: 0,
       first_period: null, last_period: null, payout_days: 0, payout_coverage_pct: null,
       booking_days: 31, payout_coverage_days: null, payout_coverage_base: null,
       basis: 'none', basis_note: 'no fare on any booking and no payout reported — this channel’s money is dark',
@@ -3058,7 +3070,7 @@ app.get('/api/revenue', (_, r) => {
       km: 15600, drivers: 22, vehicles: 31, payouts: null, cash: null, payout_periods: 0,
       components: null, tips: null, fare_coverage_pct: 100, revenue_per_km: 3.94,
       per_km_basis: 'fares', per_km_km: 15600,
-      first_at: dayISO(30), last_at: dayISO(0), best: 61400, payout_drivers: 0,
+      first_at: dayISO(30), last_at: dayISO(0), best: 61400, payout_drivers: 0, payout_accounts: 0,
       first_period: null, last_period: null, payout_days: 0, payout_coverage_pct: null,
       booking_days: 31, payout_coverage_days: null, payout_coverage_base: null,
       basis: 'fares', basis_note: 'fares reported on 1267 of 1267 bookings',
@@ -3077,7 +3089,7 @@ app.get('/api/revenue', (_, r) => {
       km: 2640, drivers: 9, vehicles: 11, payouts: 3210, cash: 640, payout_periods: 12,
       components: null, tips: null, fare_coverage_pct: 44.9, revenue_per_km: 1.22,
       per_km_basis: 'payout', per_km_km: 2640,
-      first_at: dayISO(30), last_at: dayISO(0), best: 3210, payout_drivers: 9,
+      first_at: dayISO(30), last_at: dayISO(0), best: 3210, payout_drivers: 9, payout_accounts: 12,
       first_period: dayISO(28).slice(0, 10), last_period: dayISO(0).slice(0, 10),
       payout_days: 17, payout_coverage_pct: 54.8,
       /* Coverage is measured against the days the channel WORKED (booking_days),
@@ -3092,7 +3104,7 @@ app.get('/api/revenue', (_, r) => {
     { platform: 'bolt', bookings: 618, priced_bookings: 121, chargeable_bookings: 445, uncharged_bookings: 173, fares: 5100, priced_km: 1490,
       km: 7300, drivers: 14, vehicles: 18, payouts: null, cash: null, payout_periods: 0,
       components: null, tips: null, fare_coverage_pct: 19.6, revenue_per_km: 3.42,
-      first_at: dayISO(30), last_at: dayISO(0), best: 5100, payout_drivers: 0,
+      first_at: dayISO(30), last_at: dayISO(0), best: 5100, payout_drivers: 0, payout_accounts: 0,
       first_period: null, last_period: null, payout_days: 0, payout_coverage_pct: null,
       basis: 'partial_fares',
       basis_note: 'fares on only 121 of 618 bookings (19.6%) — the rest of this channel’s money is not collected' },
@@ -3357,7 +3369,10 @@ app.get('/api/settlement/mix', (_, r) => r.json({
   ],
 }));
 app.get('/api/settlement/cash-exposure', (_, r) => r.json({
-  driver_count: 63, shown: 8, truncated: true,
+  /* Two numbers, both true, both named: driver_count is PEOPLE (the tile) and
+     driver_rows is the rows of the list under it, which still shows one row per
+     platform account on purpose. On production these read 159 and 252. */
+  driver_count: 63, driver_rows: 71, shown: 8, truncated: true,
   drivers: drivers.map((d, i) => ({ driver_name: d, driver_ext_id: `drv-${i}`, cash_trips: 60 - i * 6,
     priced_cash_trips: Math.max(0, 14 - i * 2), cash_value: Math.max(0, 14 - i * 2) * 95,
     value_known_pct: Math.round((Math.max(0, 14 - i * 2) / (60 - i * 6)) * 100),
@@ -3370,6 +3385,10 @@ app.get('/api/settlement/cash-exposure', (_, r) => r.json({
     /* One name spelled two ways is the production shape; both rows carry the
        same money and say so, so the dagger branch is reachable. */
     statement_name_rows: i === 1 || i === 2 ? 2 : 1,
+    /* How many rows on this page are the same HUMAN. statement_name_rows asks
+       the same question of the normalised name, which cannot reach the pairs
+       the merge register holds. */
+    person_rows: i === 1 || i === 2 ? 2 : 1,
     platforms: ['uber', 'hotel'], plates: [plates[i], plates[(i + 1) % plates.length]],
     last_cash_trip: new Date(Date.now() - i * 36e5).toISOString() })),
   total_cash_trips: 430, total_cash_value_known: 7300, value_known_pct: 20,
@@ -3568,6 +3587,7 @@ app.get('/api/tiers/by-vehicle', (_, r) => r.json({
       driver_refs: [{ name: drivers[i % drivers.length], id: `drv-${i % drivers.length}`, days: 24 },
         { name: drivers[(i + 1) % drivers.length], id: `drv-${(i + 1) % drivers.length}`, days: 4 }],
       driver_n: 2 + (i % 2),
+      driver_accounts: 2 + (i % 2) + 1,
       // The shortfall is against the same MODEL's best, never the fleet's — a
       // BYD compared against a Lexus is a spec sheet, not a finding.
       premium_gap_pct: (() => {
@@ -4037,7 +4057,12 @@ app.get('/api/day', (req, r) => {
       completed: TODAY.completed, not_completed: TODAY.cancelled,
       bookable: TODAY.bookings, priced: TODAY.priced, revenue: TODAY.revenue,
       avg_fare: 101.95, booked_km: TODAY.km,
-      telematics_km: 4210, drivers: TODAY.drivers, vehicles: TODAY.vehicles,
+      /* drivers is PEOPLE and it is the divisor of the tile's own sub-line,
+         "N bookings each on average"; driver_accounts is the platform records
+         behind them. On production 2026-09-15 those were 100 and 124, and the
+         average read 8.0 instead of 9.9 while it divided by the larger one. */
+      telematics_km: 4210, drivers: TODAY.drivers,
+      driver_accounts: TODAY.drivers + 18, vehicles: TODAY.vehicles,
       completion_pct: 93.5,
       /* The day's income: fares from the hotel channel plus a share of the
          weekly Uber statements covering this day. payout_basis is what stops
@@ -4084,13 +4109,18 @@ app.get('/api/day', (req, r) => {
       { platform: 'hotel', n: 41, bookings: 41, priced: 41, completed: 41, bookable: 41, revenue: 4180, km: 690, completion_pct: 100 },
       { platform: 'yango', n: 6, bookings: 6, priced: 6, completed: 5, bookable: 6, revenue: 210, km: 90, completion_pct: 83.3 },
     ],
+    /* One row per PERSON — accounts says how many platform records that one
+       row stands for, so a reader can see the fold rather than only its
+       result. */
     drivers: drivers.map((name, i) => ({ driver_name: name, driver_ext_id: `drv-${i}`,
+      accounts: 1 + (i % 3),
       trips: 22 - i * 2, cancelled: i % 3, revenue: i % 2 ? (22 - i * 2) * 96 : null,
       km: (22 - i * 2) * 13, platforms: i % 2 ? ['uber'] : ['uber', 'hotel'],
       plates: [plates[i % plates.length]],
       first_trip: `${day}T03:0${i}:00Z`, last_trip: `${day}T19:1${i}:00Z` })),
     vehicles: plates.map((p2, i) => ({ plate: p2, bookings: 30 - i * 3, telematics: 34 - i * 3,
-      km: (30 - i * 3) * 14, drivers: 1 + (i % 2), revenue: i % 2 ? (30 - i * 3) * 88 : null,
+      km: (30 - i * 3) * 14, drivers: 1 + (i % 2),
+      driver_accounts: 1 + (i % 2) + (i % 2), revenue: i % 2 ? (30 - i * 3) * 88 : null,
       // Named, not counted — the plate alone is not somebody you can ring.
       driver_names: i % 2 ? drivers[i % drivers.length] : `${drivers[i % drivers.length]}, ${drivers[(i + 1) % drivers.length]}`,
       driver_refs: (i % 2 ? [i] : [i, i + 1]).map((j) => ({
@@ -4170,6 +4200,10 @@ app.get('/api/alerts/by-driver', (req, r) => {
   const drive = i === 5 ? 0 : brake + accel + turn + over;
   const allDev = i === 5 ? brake + accel + turn + over + 7 : 0;
   return { driver_name: name, driver_ext_id: `drv-${i}`,
+    /* How many platform accounts this one folded person holds. The row is a
+       PERSON — grouped on the stored person key, so his events are not split
+       across his spellings and his distance is not divided into each slice. */
+    accounts: 1 + (i % 3),
     alerts: drive + dev + allDev,
     driving_alerts: drive, device_alerts: dev + allDev,
     harsh_brake: i === 5 ? 0 : brake, harsh_accel: i === 5 ? 0 : accel,
@@ -4218,7 +4252,11 @@ app.get('/api/alerts/by-vehicle', (_, r) => r.json({ totals: { vehicles: 118, al
   const brake = 30 - i * 3, accel = 18 - i * 2, turn = i % 3, over = i % 2, other = i % 4 === 0 ? 5 : 0;
   return { plate: p2, alerts: brake + accel + turn + over + other,
     harsh_brake: brake, harsh_accel: accel, sharp_turn: turn, overspeed: over, other,
+    /* drivers is PEOPLE that window; driver_accounts is the platform records
+       behind them. The column beside this one is headed "Most often" and names
+       a person, so the count next to it has to be people too. */
     unattributed: i === 3 ? 4 : 0, drivers: 1 + (i % 2),
+    driver_accounts: 1 + (i % 2) + (i % 3 ? 1 : 0),
     /* Ranked by their OWN event count, not alphabetically — the column is
        headed "Most often" and used to return whichever custodian's name came
        first in the alphabet, which on L45255 named the 322-event driver over
@@ -4662,7 +4700,10 @@ app.get('/api/slot', (req, r) => {
     })),
     /* 40 of a slot's 62 drivers were listed with nothing saying so, on a page
        whose subject is how few people cover an hour. */
-    drivers_total: 6, drivers_shown: 6, drivers_truncated: false,
+    /* drivers_total is PEOPLE and matches headline.drivers — the page used to
+       print one folded and one raw a few centimetres apart, 110 against 126,
+       with the raw one under the word "people". */
+    drivers_total: 6, driver_accounts_total: 8, drivers_shown: 6, drivers_truncated: false,
     peers: Array.from({ length: 7 }, (_, d) => ({ dow: d, trips: 20 + ((d * 11 + hour) % 40), days: 4 })),
     settlement: [
       { settlement_class: 'cash', trips: Math.round(trips * 0.5), revenue: 700 },
@@ -4727,9 +4768,11 @@ app.get('/api/drivers/performance', (_, r) => {
   r.json({
     rows, shown: rows.length, truncated: true,
     periods: [
-      { platform: 'uber', period_start: '2026-08-14', period_end: '2026-08-20', drivers: 150, earnings: 31176.79 },
-      { platform: 'uber', period_start: '2026-08-07', period_end: '2026-08-13', drivers: 148, earnings: 29840.12 },
-      { platform: 'yango', period_start: '2026-08-14', period_end: '2026-08-20', drivers: 9, earnings: 1210.4 },
+      /* drivers is people paid, driver_accounts the statements filed — a payout
+         is filed per ACCOUNT, so both are real and both are named. */
+      { platform: 'uber', period_start: '2026-08-14', period_end: '2026-08-20', drivers: 150, driver_accounts: 233, earnings: 31176.79 },
+      { platform: 'uber', period_start: '2026-08-07', period_end: '2026-08-13', drivers: 148, driver_accounts: 229, earnings: 29840.12 },
+      { platform: 'yango', period_start: '2026-08-14', period_end: '2026-08-20', drivers: 9, driver_accounts: 11, earnings: 1210.4 },
     ],
     totals: { total: 1840, periods: 16, people: 152, payout_days: 112, earnings: 214880.5,
       cash_earnings: 41200.75, platforms: ['uber', 'yango', 'bolt'] },
@@ -4955,6 +4998,7 @@ app.get('/api/reconcile/periods', (req, r) => {
     current_by_grain: byGrain.map((g) => ({ period_days: g,
       driver_days: all.filter((x) => x.period_days === g).length * 40,
       drivers: g === 1 ? 44 : 136,
+      driver_accounts: g === 1 ? 68 : 221,
       earnings: +(sum('net', all.filter((x) => x.period_days === g))
         * (g === 1 ? 1 : 0.25)).toFixed(2) })),
     current_total: +byGrain.reduce((a, g) => a + sum('net',
@@ -5765,7 +5809,12 @@ app.get('/api/unauthorized/by-vehicle', (_, r) => r.json({
   rows: plates.map((p, i) => ({
     plate: p, unauthorized: Math.max(0, 6 - i), authorized: 20 + i,
     sensor_suspect: i % 3, unauth_km: Math.max(0, 70 - i * 11),
+    /* The accused names, folded to one per PERSON, with the pairs form beside
+       the string so every name on an accusation is openable — the same shape
+       every other custody surface returns. */
     drivers: i % 5 === 4 ? null : drivers[i],
+    driver_refs: i % 5 === 4 ? null : [{ name: drivers[i], id: `drv-${i}` }],
+    driver_n: i % 5 === 4 ? null : 1,
   })) }));
 
 app.get('/api/unauthorized/daily', (_, r) => r.json(
@@ -5902,7 +5951,11 @@ app.get('/api/product/by-vehicle', (_, r) => r.json(
     // Who ran the car over the window: a tier mix is a finding about
     // dispatch and driving, not only about the asset.
     driver_refs: [{ name: drivers[i % drivers.length], id: `drv-${i % drivers.length}`, days: 21 }],
+    /* driver_n is PEOPLE and driver_accounts is the platform records behind
+       them — always the larger of the two, because somebody on this fleet is
+       always holding an Uber account and a Bolt one. */
     driver_n: 1 + (i % 3),
+    driver_accounts: 1 + (i % 3) + (i % 2),
   })))));
 
 app.get('/api/schema/raw-fields', (req, r) => r.json({

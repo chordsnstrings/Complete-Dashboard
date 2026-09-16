@@ -827,3 +827,75 @@ the disclosure — the tooltip now says which kind of nought it is. The
 items:start}` working as the stylesheet intends; stretching it would produce an
 empty box rather than a short one. The Trips tab's handling of a 404 from
 `/api/driver/unauthorized` was already correct.
+
+---
+
+## A driver is a human, an account is a record — the person-vs-account sweep
+
+**Written 2026-09-16. Not committed by this pass, not deployed, not proven on
+production.** The suite is green; that means the tests agree with the code, not
+that the code agrees with the fleet. Every figure below is re-measurable on
+production with a pinned `from=2026-06-01&to=2026-09-16` and `&_=$RANDOM`, and
+nothing here is finished until somebody has done that.
+
+The class: one human holds an Uber record, a Bolt record, a Yango record and a
+hotel record. `api/identity_map.js` is the register of which are one person and
+`api/custody_sql.js` folds on it. 23 sites in `api/*.js` computed
+`count(DISTINCT … driver_ext_id)`; the sweep classified each by **what the
+consumer calls the number**, not by the SQL alias.
+
+**The ruler.** `/api/drivers/cross-platform` reports 151 people across 265
+platform accounts over that window, so a raw id count is **+75.5%** fleet-wide.
+
+| # | site | was | now | how it was proved |
+|---|---|---|---|---|
+| P1 | `api/server.js` `/api/unauthorized/by-vehicle` | `string_agg(DISTINCT driver_name)` — three spellings of one accused man on a bar label, plus a leading comma from a blank-named row | folded on `PERSON_OF`, `NAMED()` guard, `driver_refs` + `driver_n` beside it | reversion → test §1 fails |
+| P2 | `api/server.js` `/api/product/by-vehicle` | `GROUP BY (plate, driver_name, driver_ext_id)`; 63/109 plates printed one man 2–3× and duplicates evicted the real second driver at `rn<=3`; `sum(driver_n)` 394 over 247 people | grouped on the stored person key; `driver_n` people, `driver_accounts` accounts | reversion → §2 fails |
+| P3 | `api/analytics_routes.js` `/api/tiers/by-vehicle` | the same CTE, copied; 63/101 plates | same fix, moved together | reversion → §2 fails |
+| P4 | `api/server.js` `/api/alerts/by-driver` | rows grouped on the raw name while `km` grouped on `person_key` — **numerator and denominator folded on different keys**, so one man read 87.8 / 2.66 / 1.39 per 100 km against a true 91.9 | grouped on the stored key, `mode()` for the surviving spelling, `accounts` on the row | reversion → §3 fails |
+| P5 | `api/server.js` `/api/alerts/by-vehicle` | `count(DISTINCT driver_name)`; `top` picked the largest SLICE of a split person — the wrong-person-coached defect its own comment says it fixed | custody CTE selects `person_key`; `per_driver` groups on it | reversion → §3b fails |
+| P6 | `api/day_routes.js` `/api/day` ×3 | **the divisor.** 2026-09-15: 124 names → 100 people, so the tile read "8.0 bookings each" against a true 9.9 | `peopleCount()` (trip_ext cannot reach the stored key — see COVERAGE traps); list grouped on `personKey()`; per-vehicle count folded beside its folded list | reversion → §4 fails |
+| P7 | `api/segment_routes.js` `/api/slot` ×2 | the page contradicted itself: folded `head.drivers` 110 beside raw `drivers_total` 126, the raw one rendered under the word "people"; list `GROUP BY driver_ext_id` filled 3 of 40 rota rows with one man | both folded; `driver_accounts_total` beside them | reversion → §5 fails |
+| P8 | `api/income_sql.js` + `api/server.js` `/api/kpis` | `payout_drivers` 247 printed as "247 drivers" beside the same response's folded 151 — **and the per-platform rows were then SUMMED**, so a man paid on two platforms counted twice however well each row folded | `platformPayouts()` folds; new `payoutPeople()` answers the fleet question once; `payout_accounts` beside it | reversion → §6, §6e fail |
+| P9 | `api/revenue_routes.js` `/api/revenue` | second copy of P8 over the same rows; uber 235 | `peopleCountStored`, `payout_accounts` | reversion → §6c fails |
+| P10 | `api/income_sql.js` `platformStatements` | folded on `name_key` — lower()+whitespace only, so it folded nothing measurable and could never reach the register | folded on `person_key`, `name_key` kept as last-resort fallback; `statement_accounts` beside it | covered by §6 shape |
+| P11 | `api/revenue_routes.js` `/api/finance/receipts` ×2 | a column headed, literally, **"People"**, counting accounts, at both grains | `money_event.person_key`; both grains moved together; `driver_accounts` beside | reversion → §6b |
+| P12 | `api/analytics_routes.js` `/api/settlement/cash-exposure` | tile "Drivers holding cash" = 252 rows; of 200 listed rows only 126 are people; AED 233,665 of AED 361,489 sits on split people | `driver_count` = people, `driver_rows` = rows, `person_rows` on each row; `api/public/settlement.js` says which is which | reversion → §7 fails |
+| P13 | `api/playbook_routes.js` `/api/playbook` | the card said "cash held by 252 drivers" — more than the 151 who drove at all — and LINKS to P12 | folded; the card and the page it opens are now one number | reversion → §9 fails |
+| P14 | `api/compare_routes.js` `/api/compare` ×2 | cut and uncut "Drivers out" both raw over `trip_norm` | `JOIN_TRIP` + `peopleCountStored`, both moved together | shape asserted §8b |
+| P15 | `api/vehicle_routes.js` `/api/vehicle/kpis` | phone tile "Drivers · held this car" raw while the DESKTOP tile for the same car was folded — two shells, two answers | `api/attribution_sql.js` brings `d.person_key` up; **weighting untouched, a payout is filed per account** | — |
+| P16 | `api/economics_routes.js`, `api/attribution_sql.js` | `payout_drivers` and `unattributedEarnings.drivers` raw | same one-column change; the unattributed half uses `peopleCount()` because `driver_payout` is a view with no key and the two halves must partition ONE set of periods | — |
+| P17 | `api/vehicle_routes.js` `/api/vehicle/daily` | `string_agg(DISTINCT driver_name)` beside a folded count, no empty-name guard | `custodyNames()` | — |
+| P18 | `api/export_routes.js` `/api/export/trips.csv?grain=day` | one column `drivers` holding accounts, in a file Finance reconciles against the pages | `drivers` folded via `JOIN_TRIP`, **`driver_accounts` added as its own column** so the header says which is which | reversion → §10 fails |
+| P19 | `api/server.js` `/api/drivers/performance`, `/api/reconcile/periods` | raw over `driver_payout_day`, which the same handlers already fold 8 lines away; one 7-day grain claimed 243 "Drivers" against a 108-day fleet headcount of 151 | `peopleCountStored` + `driver_accounts` | — |
+
+**Left raw on purpose, with the reason in the code:**
+
+| site | why |
+|---|---|
+| `api/server.js` `/api/earnings/components`, `api/revenue_routes.js` component tree | `driver_earnings_component` has **no person key** and cannot cheaply be given one without regenerating `sql/schema_v53.sql` — see COVERAGE traps. Returned as `driver_accounts` and named; `api/public/revenue.js` relabelled **"Accounts"** |
+| `api/supply_routes.js` `/api/supply/balance` | built from `driver_timeline_event`, no person key, and the fold would sit inside a `generate_series` expansion for a figure **nothing renders**. Field renamed `accounts`; the cheap route (fold in the `spans` CTE, before the expansion) is written down |
+| `api/analytics_routes.js` `/api/settlement/receivables` | genuinely an ACCOUNTS reading — it is the size of the `driver_ids` array beside it, and the grouping already puts one counterparty per row. Renamed `driver_accounts` |
+| `api/probe.js` `/api/probe/zero-distance` | a diagnostic counting RECORDS. Returns **both** — `accounts` and `people` |
+
+**Left alone entirely, and checked that the label really says accounts:**
+`server.js:808` (`driver_accounts`, beside a `basis` string that says so),
+`server.js:1355` and `server.js:1524` (both computed INSIDE `GROUP BY
+t.person_key`, so they answer "how many accounts does this ONE person hold"; the
+column on screen is headed **"Accounts"**), `server.js:1617` (counts FILINGS),
+`vehicle_routes.js:193`, `reconcile_routes.js:190`, `cancellation_sql.js:172`,
+`online_routes.js:175`, `retention_routes.js:60`, `probe.js:1255`. **Folding any
+of these would be the same defect facing the other way, and worse, because it
+hides a real distinction.** Two of them are pinned against exactly that by
+`test/person_vs_account_counts.test.mjs` §8 and §8a.
+
+**Proof method.** `test/person_vs_account_counts.test.mjs`, 64 assertions
+against a real PGlite database through `mountAll`. The population is the
+register's own: `MERGES[0]`'s verified Aliyan Khalil pair — *the same words in
+the opposite order*, so **no spelling rule reaches them and only the register
+does** — plus a case variant, a fourth account on the SAME platform (without
+which no per-platform fold is measurable), a genuine second human, and two
+records with no name at all. **18 reversions were run, one per expression, and
+every one broke an assertion**; the list is in the test's header beside the
+block it proves.
+

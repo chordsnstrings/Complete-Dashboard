@@ -124,7 +124,19 @@ const CARRIED = ['_drivers', '_alerts', '_unattributed'];
    tracker losing power from a driver braking hard — is tested in
    test/device_fault.test.mjs against its own fixtures, where a device fault
    actually exists to be separated. */
-const ADDED = ['other', 'alert_km', 'per_100km', 'driving_alerts', 'device_alerts'];
+/* `accounts` joins this list for the same reason the other five are on it: it
+   is a column the rewrite ADDED, not a value it changed. /api/alerts/by-driver
+   now groups on the stored person key rather than on the raw custody name — one
+   man spelled three ways was three rows, each handed his WHOLE distance as its
+   denominator, so he read 87.8, 2.66 and 1.39 alerts per 100 km against a true
+   91.9 — and `accounts` is how many platform records the folded row stands for.
+   The equivalence this file asserts is about the alert_km / per_100km rewrite,
+   so a new column must be excluded from it or the snapshot compares shapes
+   instead of arithmetic. The FOLD itself is asserted in
+   test/person_vs_account_counts.test.mjs, against a fixture that actually
+   contains one person under several ids; every driver in this file's fixture
+   holds exactly one, which is why the row VALUES here are unchanged. */
+const ADDED = ['other', 'alert_km', 'per_100km', 'driving_alerts', 'device_alerts', 'accounts'];
 const uncap = (s) => s.replace('LIMIT 100', '');
 const bare = (r) => { const c = { ...r }; for (const k of [...CARRIED, ...ADDED]) delete c[k]; return c; };
 // Order within a tie is the planner's, on both sides. Compare the sets.

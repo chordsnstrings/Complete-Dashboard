@@ -436,8 +436,13 @@ console.log('\n/api/export/trips.csv — 262,162 rows of pickup and drop-off to 
     if (/SELECT DISTINCT local_day/.test(sql)) return [{ d: '2026-08-05' }];
     if (/external_id AS trip_id/.test(sql)) return TRIPS.map((r) => ({ ...r }));
     if (/GROUP BY 1, 2, 3/.test(sql)) {
+      /* Two PEOPLE across three platform ACCOUNTS. The day grain now carries
+         both columns and the header says which is which, because Finance
+         reconciles this file against the pages and one column called `drivers`
+         holding a raw id count is a number nobody downstream can re-derive. */
       return [{ day: '2026-08-05', fleet: 'ecosine', channel: 'uber', bookings: 2, completed: 2,
-        drivers: 2, vehicles: 2, km: 12.3, priced_bookings: 2, fares: 52.1, currency: 'AED' }];
+        drivers: 2, driver_accounts: 3, vehicles: 2, km: 12.3, priced_bookings: 2,
+        fares: 52.1, currency: 'AED' }];
     }
     throw new Error(`unexpected SQL in the export: ${sql.slice(0, 80)}`);
   };
@@ -486,7 +491,7 @@ console.log('\n/api/export/trips.csv — 262,162 rows of pickup and drop-off to 
   const dayAdmin = await api.get(`/api/export/trips.csv?grain=day&${WIN}`,
     { 'x-admin-token': process.env.ADMIN_TOKEN });
   check('grain=day is identical for both callers', dayAnon.text === dayAdmin.text
-    && dayAnon.text.includes('2026-08-05,ecosine,uber,2,2,2,2,12.3,2,52.1,AED'),
+    && dayAnon.text.includes('2026-08-05,ecosine,uber,2,2,2,3,2,12.3,2,52.1,AED'),
   dayAnon.text.slice(0, 200));
   api.close();
 }
