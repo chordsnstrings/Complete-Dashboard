@@ -5148,6 +5148,90 @@ app.get('/api/drivers/identity-links', (_, r) => r.json({
    test pass on a page that cannot draw the others: a weekly filing, a daily
    filing, and a pair where a short filing is superseded by the long one that
    covers it. */
+/* The payout register. The figures are the REAL ones measured on production
+   2026-09-16 rather than invented, because this fixture is what the browser
+   smoke test renders and a made-up shape renders a made-up page: Uber's Monday
+   transfer of 103,567.54, the daily balances that chain across that week, and
+   Bolt's own dated payouts. Yango appears with no payout and a reason, which is
+   the case this page exists to get right. */
+app.get('/api/finance/payouts', (_, r) => {
+  const payouts = [
+    { platform: 'uber', fleet_id: 'ecosine', paid_on: '2026-09-07', amount: 103567.54,
+      currency: 'AED', period_start: '2026-08-31', period_end: '2026-09-06', method: 'bank',
+      source: 'REPORT_TYPE_PAYMENTS_ORGANIZATION (one-day window)', payout_ext_id: 'ecosine:2026-09-07' },
+    { platform: 'bolt', fleet_id: 'ecosine', paid_on: '2026-09-07', amount: 3184.22,
+      currency: 'AED', period_start: null, period_end: null, method: 'bank',
+      source: 'fleetOwnerPortal/getPayouts', payout_ext_id: '2210441' },
+    { platform: 'bolt', fleet_id: 'egari', paid_on: '2026-09-07', amount: 1290.15,
+      currency: 'AED', period_start: null, period_end: null, method: 'bank',
+      source: 'fleetOwnerPortal/getPayouts', payout_ext_id: '2210442' },
+    { platform: 'uber', fleet_id: 'ecosine', paid_on: '2026-08-31', amount: 96204.11,
+      currency: 'AED', period_start: '2026-08-24', period_end: '2026-08-30', method: 'bank',
+      source: 'REPORT_TYPE_PAYMENTS_ORGANIZATION (one-day window)', payout_ext_id: 'ecosine:2026-08-31' },
+  ];
+  const totals = [
+    { platform: 'bolt', fleet_id: 'ecosine', currency: 'AED', transfers: 1, dates: 1,
+      total: 3184.22, earliest: '2026-09-07', latest: '2026-09-07' },
+    { platform: 'bolt', fleet_id: 'egari', currency: 'AED', transfers: 1, dates: 1,
+      total: 1290.15, earliest: '2026-09-07', latest: '2026-09-07' },
+    { platform: 'uber', fleet_id: 'ecosine', currency: 'AED', transfers: 2, dates: 2,
+      total: 199771.65, earliest: '2026-08-31', latest: '2026-09-07' },
+  ];
+  const days = [
+    { platform: 'uber', fleet_id: 'ecosine', day: '2026-09-11', basis: 'statement', currency: 'AED',
+      opening_balance: 64029.2, closing_balance: 82086.09, earnings: 21066.24,
+      refunds_expenses: 1291.88, cash_collected: -4135.73, bank_transferred: 0,
+      commission: null, tips: 214, taxes: -348.6 },
+    { platform: 'uber', fleet_id: 'ecosine', day: '2026-09-07', basis: 'statement', currency: 'AED',
+      opening_balance: 103567.54, closing_balance: 14199.06, earnings: 15985.57,
+      refunds_expenses: 1030.14, cash_collected: -2816.65, bank_transferred: -103567.54,
+      commission: null, tips: 168.5, taxes: -262.9 },
+    { platform: 'yango', fleet_id: 'ecosine', day: '2026-09-07', basis: 'ledger', currency: 'AED',
+      opening_balance: null, closing_balance: null, earnings: 184.4,
+      refunds_expenses: null, cash_collected: 61, bank_transferred: null,
+      commission: -49.62, tips: 3.5, taxes: -12 },
+  ];
+  r.json({
+    window: ['2026-08-18', '2026-09-16'],
+    filters: { platform: null, fleet: null },
+    payouts, totals, days,
+    coverage: [
+      { platform: 'uber', publishes_payouts: true,
+        how: 'Uber’s organisation payment statement, asked one day at a time. The transfer '
+          + 'column is empty on a day with no transfer, so the date is the provider’s and not ours.',
+        cadence: 'Uber wires on a Monday, settling the Monday-to-Sunday week that ended the day '
+          + 'before — proven over two consecutive weeks: the transfer equals the previous week’s '
+          + 'closing balance to the fils.',
+        in_window: totals.filter((t) => t.platform === 'uber'),
+        record_span: [{ platform: 'uber', fleet_id: 'ecosine', earliest: '2026-08-31',
+          latest: '2026-09-07', transfers: 2 }],
+        absent: null },
+      { platform: 'bolt', publishes_payouts: true,
+        how: 'Bolt’s fleet portal lists every payout with the second it completed, so each row '
+          + 'is already a date.',
+        cadence: 'One payout per date, with no fixed weekday.',
+        in_window: totals.filter((t) => t.platform === 'bolt'),
+        record_span: [
+          { platform: 'bolt', fleet_id: 'ecosine', earliest: '2024-12-30', latest: '2026-09-07', transfers: 89 },
+          { platform: 'bolt', fleet_id: 'egari', earliest: '2024-12-23', latest: '2026-09-07', transfers: 86 },
+        ],
+        absent: null },
+      { platform: 'yango', publishes_payouts: false, how: null, cadence: null,
+        in_window: [], record_span: [],
+        absent: 'Yango does not publish a transfer to the company at all. Its park ledger is a '
+          + 'driver-account ledger: the only categories that mention a bank sit in a group Yango '
+          + 'names "Payouts from account balance to contractors" — the park paying its own '
+          + 'drivers — and none of them has ever carried a row for this park. What Yango does '
+          + 'give, dated to the second, is what it collected and what it charged; that is on the '
+          + 'daily movement below, and it is not a transfer.' },
+    ],
+    note: 'A row here is a transfer that reached the company’s bank on the date beside it, taken '
+      + 'from the provider’s own books. It is NOT the same figure as the "bank payout" on Bank '
+      + 'reconciliation, which is the sum of what drivers earned in a month — measured 7.1% '
+      + 'higher on the one week both were checked, because it counts a different event.',
+  });
+});
+
 app.get('/api/finance/receipts', (_, r) => {
   const rows = [
     { source: 'uber_graphql_breakdown', platform: 'uber', fleet_id: 'ecosine', kind: 'payout',

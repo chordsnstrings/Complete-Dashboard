@@ -57,8 +57,19 @@ check('trips file the driver under the register, not the raw endpoint string',
 check('…and no trip, ledger or performance row is filed under a raw endpoint name',
   !/(driver_name|full_name|name):\s*(o|t|it)\.[a-z_]*(full_name|driver_name)\b/.test(CODE),
   (CODE.match(/(driver_name|full_name|name):\s*(o|t|it)\.[a-z_]*(full_name|driver_name)\b/g) || []).join('; '));
+/* THE KEY HOST NAMES THIS FIELD DIFFERENTLY, and the old spelling would have
+   passed against a collector filing every ledger row under a null driver. The
+   console sent driver_id and driver_name flat; fleet-api.yango.tech sends
+   driver_profile_id and no name at all, so the register is the ONLY source of
+   a name for these rows — which is the case this whole file exists for. Both
+   spellings are accepted, because a park still on the console is not a park
+   with a bug. */
 check('the ledger does too',
-  /driver_name:\s*nameFor\(t\.driver_id,\s*t\.driver_name\)/.test(CODE));
+  /driver_name:\s*nameFor\(t\.driver_profile_id,\s*null\)/.test(CODE)
+  || /driver_name:\s*nameFor\(t\.driver_id,\s*t\.driver_name\)/.test(CODE));
+check('…and the ledger reads the key host\u2019s own id field, not the console\u2019s',
+  /driver_ext_id:\s*t\.driver_profile_id/.test(CODE),
+  'mapping t.driver_id against this host writes a ledger with every driver null');
 check('the weekly performance row uses the one composition',
   /driver_name:\s*decomposed\(it\.driver\)/.test(CODE));
 check('and so does the roster snapshot',

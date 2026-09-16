@@ -45,7 +45,7 @@
 import { config, normPlate } from '../config.js';
 import { http } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
-import { iso, closedWeeks } from '../util.js';
+import { iso, closedWeeks, dubaiIso } from '../util.js';
 import { log } from '../log.js';
 import { stateRow, rawJson } from '../roster.js';
 import { noteCredential } from '../auth_state.js';
@@ -66,13 +66,34 @@ export const YANGO_SURFACES = Object.freeze({
     orders: '/v1/parks/orders/list',
     drivers: '/v1/parks/driver-profiles/list',
     cars: '/v1/parks/cars/list',
+    /* THE LEDGER, WHICH WAS NEVER MISSING — WE WERE ASKING v1.
+       ──────────────────────────────────────────────────────────────────
+       This file has said since the key host was adopted that
+       "/v1/parks/transactions/list and /v1/parks/summary/drivers/list both
+       answer 404 path_not_found, so the ledger and the weekly per-driver
+       aggregate stay on the console host and stay refused". The 404 is real
+       and was measured. The conclusion drawn from it was wrong: Yango's own
+       published Fleet API index lists SEVEN transaction paths and every one
+       of them is v2 or v3. There is no v1 under Transactions to find.
+
+       Proved on production 2026-09-16 through /api/probe/yango/ledger, both
+       versions asked side by side in one pass with the same key and the same
+       client id: v1 404 path_not_found, v2 200 with 1,325 rows over ninety
+       days, complete, carrying event_at, category_id, category_name,
+       group_id, amount, currency_code, driver_profile_id and order_id.
+
+       So the ledger comes off the API key, with no cookie, and the weekly
+       paste it was waiting for is not needed for it. The per-driver AGGREGATE
+       is a separate question and still has no key-host path; that one stays
+       on the console below. */
+    ledger: '/v2/parks/transactions/list',
+    ledgerCategories: '/v2/parks/transactions/categories/list',
   }),
   /* fleet.yango.com — the console, which wants a session and is refused by an
-     edge. Neither of these exists on the key host (both 404 path_not_found),
-     which is the only reason they are still here. */
+     edge. What is left here does not exist on the key host, which is the only
+     reason it is still here. */
   console: Object.freeze({
     summary: '/api/reports-api/v2/summary/drivers/list',
-    ledger: '/api/v1/reports/transactions/park/list',
   }),
 });
 const headers = () => ({
@@ -805,21 +826,157 @@ async function maybeRoster(data) {
   if (roster.length) await upsertMany('driver_platform_state', roster, ['platform', 'driver_ext_id']);
 }
 
+/* WHAT EACH LEDGER GROUP IS, AS A HEADLINE COLUMN.
+   ─────────────────────────────────────────────────────────────────────────
+   Yango publishes 89 transaction categories in 17 groups. Grouping is the
+   provider's own — group_id arrives on every row — so this maps GROUPS and
+   not categories, which is what makes it survive Yango adding a category.
+
+   Measured on the Ecosine park over the ninety days to 2026-09-16, the eleven
+   categories that actually carried a row:
+
+     card                    platform_card         255 rows   +8,659.40
+     cash_collected          cash_collected        235 rows   +4,214.00
+     platform_ride_fee       platform_fees         238 rows   -2,710.84
+     card_toll_road          platform_card         130 rows     +540.00
+     platform_mandatory_fee  mandatory_taxes_fee   106 rows     -530.00
+     platform_reposition_fee platform_fees          77 rows     -266.30
+     platform_ride_vat       platform_fees         238 rows     -135.54
+     promotion_discount      platform_promotion     15 rows     +133.00
+     promotion_promocode     platform_promotion     15 rows      +89.60
+     tip                     platform_tip           14 rows      +53.25
+     compensation            platform_card           2 rows       +0.00
+
+   THIS IS THE COMMISSION THIS FILE SAYS CANNOT BE MEASURED. The comment at the
+   head of this module states, and has stated since the key host was adopted,
+   that "an order carries no commission field, and Yango's commission is about
+   24% of the gross (Aliyan Khalil, August 2026: gross 3,069.00 against
+   -749.58)" — and that sentence is the reason driver_performance.earnings
+   holds the GROSS for this provider under a column api/income_sql.js describes
+   to a reader as "the money that arrived".
+
+   The estimate was the right order and is now a measurement: fees of 3,642.68
+   (platform_fees 3,112.68 + mandatory_taxes_fee 530.00) against a gross of
+   13,413.40 (card 8,659.40 + cash 4,214.00 + tolls 540.00) is 27.2%.
+
+   A group this table does not know is NOT silently dropped and NOT folded into
+   a headline. It lands in `components` and in `unclassified`, and the run logs
+   it by name — because a new group quietly added to `earnings` would move a
+   money figure with nothing anywhere saying why. */
+const LEDGER_GROUPS = Object.freeze({
+  cash_collected: 'cash_collected',
+  platform_card: 'earnings',
+  platform_corporate: 'earnings',
+  platform_promotion: 'earnings',
+  partner_rides: 'earnings',
+  platform_marketing_other: 'earnings',
+  platform_other: 'earnings',
+  partner_contractor_other: 'earnings',
+  platform_fees: 'commission',
+  partner_fees: 'commission',
+  mandatory_taxes_fee: 'taxes',
+  platform_tip: 'tips',
+});
+
 async function pullLedger(from, to) {
   let cursor, total = 0, guard = 0;
+  /* Per Dubai DAY, accumulated as the pages arrive rather than held as rows.
+     The whole point of this pull for the Payout tab is a per-date figure, and
+     summing at the end would mean holding every transaction of a backfill in
+     memory on a basic-xxs instance to produce ninety numbers. */
+  const days = new Map();
+  const unknownGroups = new Set();
   do {
-    const { data } = await post(YANGO_SURFACES.console.ledger,
-      { query: { park: { transaction: { event_at: { from: dubai(from), to: dubai(to, true) } } } }, limit: 100, ...(cursor ? { cursor } : {}) });
+    const { data } = await keyPost(YANGO_SURFACES.key.ledger, {
+      query: { park: { id: config.yango.parkId,
+        transaction: { event_at: { from: dubai(from), to: dubai(to, true) } } } },
+      /* A THOUSAND, which is the documented ceiling. The console path asked
+         for a hundred because that was its ceiling; carrying that number over
+         to a host that allows ten times as much would have made a ninety-day
+         backfill thirteen round trips instead of two. */
+      limit: 1000,
+      ...(cursor ? { cursor } : {}),
+    });
     const txns = data?.transactions || [];
     const rows = txns.map((t) => ({
-      platform: SRC, external_id: t.id, fleet_id: config.yango.fleet, driver_ext_id: t.driver_id,
-      driver_name: nameFor(t.driver_id, t.driver_name), order_ref: t.order_id, event_at: t.event_at,
-      category: t.category_id, amount: t.amount, currency: t.currency_code || 'AED', description: t.description, raw: t,
+      platform: SRC, external_id: t.id, fleet_id: config.yango.fleet,
+      /* THE KEY HOST NAMES THIS FIELD DIFFERENTLY. The console sent driver_id
+         and driver_name flat; this host sends driver_profile_id and no name at
+         all. Mapping the console's names against this host's rows would have
+         written a ledger with every driver null — the same class of silent
+         mis-mapping the trip mapper at the head of this file was fixed for. */
+      driver_ext_id: t.driver_profile_id,
+      driver_name: nameFor(t.driver_profile_id, null),
+      order_ref: t.order_id, event_at: t.event_at,
+      category: t.category_id, amount: t.amount,
+      currency: t.currency_code || 'AED', description: t.description, raw: t,
     })).filter((r) => r.external_id);
     if (rows.length) total += await upsertMany('ledger_entry', rows, ['platform', 'external_id']);
+
+    for (const t of txns) {
+      const amt = Number(t.amount);
+      const day = dubaiIso(new Date(t.event_at));
+      if (!Number.isFinite(amt) || !day) continue;
+      const d = days.get(day) || { day, earnings: 0, cash_collected: 0, commission: 0,
+        taxes: 0, tips: 0, unclassified: 0, components: {}, currency: t.currency_code || 'AED' };
+      const col = LEDGER_GROUPS[t.group_id];
+      if (col) d[col] += amt;
+      else { d.unclassified += amt; if (t.group_id) unknownGroups.add(t.group_id); }
+      const k = t.category_id || 'unknown';
+      const c = d.components[k] || { rows: 0, sum: 0, group: t.group_id || null,
+        name: t.category_name || null };
+      c.rows += 1; c.sum += amt;
+      d.components[k] = c;
+      days.set(day, d);
+    }
+
     cursor = data?.cursor;
     if (txns.length === 0) break;
   } while (cursor && ++guard < 2000);
+
+  if (unknownGroups.size) {
+    log.warn(SRC, 'ledger groups this collector does not classify', {
+      groups: [...unknownGroups].join(', '),
+      effect: 'their amounts are in platform_account_day.unclassified and in components, '
+        + 'and in none of earnings, commission, taxes or tips',
+    });
+  }
+
+  /* One row per day into the provider's-own-books table. Every figure here is
+     SUMMED BY US from dated rows, which is a weaker thing than Uber's daily
+     statement — Uber publishes an opening and a closing balance that can be
+     checked against each other, and this has nothing to check against. basis
+     says which, and the page must not present them as the same kind of fact.
+
+     bank_transferred is NULL and stays NULL. Yango publishes no category
+     anywhere in its 89 for a transfer from Yango to the company: the three
+     that mention a bank — bank_payment, partner_service_transfer,
+     partner_service_financial_statement — are in a group Yango itself names
+     "Payouts from account balance to contractors", which is the PARK paying
+     its DRIVERS, and none of the three carries a row for this park. A zero
+     here would be a figure we cannot measure rendered as a number, which is
+     the one thing this product exists not to do. */
+  const rows = [...days.values()].map((d) => ({
+    platform: SRC, fleet_id: config.yango.fleet, day: d.day, currency: d.currency,
+    basis: 'ledger',
+    opening_balance: null, closing_balance: null,
+    earnings: Number(d.earnings.toFixed(2)),
+    refunds_expenses: null,
+    cash_collected: Number(d.cash_collected.toFixed(2)),
+    bank_transferred: null,
+    commission: Number(d.commission.toFixed(2)),
+    tips: Number(d.tips.toFixed(2)),
+    taxes: Number(d.taxes.toFixed(2)),
+    components: { ...Object.fromEntries(Object.entries(d.components)
+      .map(([k, v]) => [k, { ...v, sum: Number(v.sum.toFixed(2)) }])),
+    ...(d.unclassified ? { _unclassified: { sum: Number(d.unclassified.toFixed(2)) } } : {}) },
+    raw: null,
+  }));
+  if (rows.length) {
+    await upsertMany('platform_account_day', rows, ['platform', 'fleet_id', 'day']);
+    log.info(SRC, 'ledger summed per day', { days: rows.length,
+      from: rows.map((r) => r.day).sort()[0], to: rows.map((r) => r.day).sort().at(-1) });
+  }
   return total;
 }
 
@@ -859,19 +1016,24 @@ export async function collect({ from, to, mode }) {
     roster = await surface('roster', pullRoster);
     cars = await surface('cars', pullCars);
     trips = await surface('trips', () => pullTrips(from, to));
-    /* The two the key host does not serve.
+    /* The one the key host does not serve.
        ─────────────────────────────────────────────────────────────────────
-       /v1/parks/summary/drivers/list and /v1/parks/transactions/list both
-       answer 404 path_not_found, so these stay on the console — which is
-       refused, so they are expected to fail and their failure is not news.
-       They are still ATTEMPTED, every run, because "the console started
-       working again" is a fact nobody will go and check by hand, and this is
-       the only thing that would notice. surface() records each refusal
-       separately, so the run comes back 'partial' with the two named rather
-       than 'ok' with two silent holes. */
+       /v1/parks/summary/drivers/list answers 404 path_not_found and Yango
+       publishes no key-host replacement for the weekly per-driver aggregate,
+       so this stays on the console — which is refused at Yandex's edge, so it
+       is expected to fail and its failure is not news. It is still ATTEMPTED,
+       every run, because "the console started working again" is a fact nobody
+       will go and check by hand and this is the only thing that would notice.
+
+       THE LEDGER USED TO BE IN THIS SENTENCE AND WAS NEVER ENTITLED TO BE.
+       It was filed as console-only on the strength of a 404 at
+       /v1/parks/transactions/list — a path Yango has never published, because
+       every one of its seven transaction endpoints is v2 or v3. It is now on
+       the key host with the rest of the collector, needs no cookie, and no
+       longer waits on a session nobody can restore. */
     drivers = await surface('drivers (weekly aggregate — console only)',
       () => pullDrivers(from, to, chunks));
-    ledger = await surface('ledger (console only)', () => pullLedger(from, to));
+    ledger = await surface('ledger', () => pullLedger(from, to));
     log.info(SRC, 'names', { seeded: known, known: nameById.size });
     /* A floor the chunks can only worsen: logRun turns some-windows-failed into
        'partial' and all-failed into 'error', but it cannot see that a whole

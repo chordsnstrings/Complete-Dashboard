@@ -894,6 +894,160 @@ async function oneFleet(c, from, to, fails, allChunks, plates) {
   }
   return total;
 }
+/* ── WHAT BOLT ACTUALLY TRANSFERRED, AND ON WHICH DATE ────────────────────
+   /fleetOwnerPortal/getPayouts, a path this collector has never called.
+   Found by reading the portal's own published bundle (fleets.bolt.eu, the
+   apiProvider chunk of version 3.2295.0) rather than guessed at, and then
+   measured on production 2026-09-16 with both fleets' live tokens:
+
+     ecosine  89 payouts, 89 distinct days, 2024-12-30 -> 2026-09-07, AED 282,522.60
+     egari    86 payouts, 86 distinct days, 2024-12-23 -> 2026-09-07, AED 108,343.76
+
+   One row per transfer, already dated. That is the whole of the difficulty
+   with this provider, and it is absent: Uber files Monday-to-Sunday and only
+   gives a date if you ask it one day at a time; Bolt hands over `finished` as
+   a unix second per payout and there is nothing to divide, apportion or infer.
+
+   The shape, from the same measurement:
+
+     id          number   Bolt's own payout id — the natural key
+     client_name string   the fleet's own registered name, not a person
+     created     number   unix s, when the payout was raised
+     finished    number   unix s, when it completed — THE DATE
+     sum         number   the amount, positive
+     currency    string   'aed' lowercase
+     strategy    string   how it was paid
+
+   THE WHOLE LIST COMES BACK EVERY TIME. getPayouts takes no arguments at all
+   — the portal's own page slices the response client-side fifty at a time —
+   so this is one request per fleet per run for the entire history, and there
+   is no window to walk and no cursor to lose. It is upserted on Bolt's id, so
+   running it hourly for a year costs 89 unchanged rows a time. */
+const PAYOUT_EPOCH_MIN = 1262304000;   // 2010-01-01, below which a stamp is not a date
+
+/* One portal payout row to one platform_payout row, or null if it is not one.
+   Exported and pure so test/payout_register.test.mjs can drive it against the
+   shapes the portal actually sends — a mapper that is only reachable through a
+   live token is a mapper nothing checks. */
+export function payoutRow(p, fleet) {
+  const sec = Number(p?.finished);
+  /* Number(null) IS 0 AND 0 IS FINITE, which is the whole reason this is a
+     named helper rather than three inline coercions. `sum: null` on a payout
+     Bolt has raised but not settled would have passed a bare Number.isFinite
+     test and been written as a transfer of AED 0 — an imaginary wire, in the
+     one table whose entire claim is that every row in it is a real one.
+     test/payout_register.test.mjs caught it, on the first run. */
+  const amt = p?.sum == null || p.sum === '' ? NaN : Number(p.sum);
+  /* A payout with no finish stamp has not finished, and a payout with no
+     amount is not a payout. Neither is written: a row that fails this table's
+     claim would quietly weaken every total drawn from it. The caller counts
+     these and reports them, because the NEWEST payout genuinely has no
+     `finished` while it is still in flight and that is not a fault. */
+  if (!Number.isFinite(sec) || sec < PAYOUT_EPOCH_MIN || !Number.isFinite(amt) || p?.id == null) {
+    return null;
+  }
+  return {
+    platform: SRC,
+    fleet_id: fleet,
+    payout_ext_id: String(p.id),
+    /* THE FLEET'S DAY. Dubai is UTC+4 all year, so a payout finishing at 02:00
+       local is 22:00 the previous day in UTC and a plain toISOString() would
+       file it on the wrong date. dubaiIso owns that arithmetic for the whole
+       codebase, and test/probe_window_dubai.test.mjs forbids the other
+       spelling outright. */
+    paid_on: dubaiIso(new Date(sec * 1000)),
+    /* POSITIVE. platform_payout's claim is "this much reached the bank", and
+       Uber files its own transfers negative because from the account's point of
+       view they leave it. A table whose sign depended on which provider filled
+       the row would be summed wrongly by the first query that touched both. */
+    amount: Math.abs(amt),
+    currency: String(p.currency || 'aed').toUpperCase(),
+    /* Bolt does not say which period a payout settles, and NULL here means
+       "not stated" rather than "the same day". Inventing the week from the
+       finish date would be a reason that is not the true one. */
+    period_start: null,
+    period_end: null,
+    method: 'bank',
+    source: 'fleetOwnerPortal/getPayouts',
+    raw: p,
+  };
+}
+
+async function pullPayouts(fails, rowsByFleet) {
+  let total = 0;
+  for (const c of config.bolt.companies) {
+    const credKey = get(RT_KEY(c.fleet)) ? RT_KEY(c.fleet) : 'BOLT_REFRESH_TOKEN';
+    try {
+      const { at, err } = await portalToken(c);
+      if (!at) {
+        /* NOT noteCredential'd here. The trips half of this collector asks the
+           same token seconds earlier and records the verdict against the same
+           key; writing it twice from two surfaces is how a credential row ends
+           up flapping between states that describe the same fact. The run row
+           still carries it, so it is not silent. */
+        fails.push({ fleet: c.fleet, text: `payouts ${c.fleet}: ${err}` });
+        continue;
+      }
+      const { data } = await http(
+        `${config.bolt.portalBase}/getPayouts`
+          + `?language=en-us&version=FO.3.856&company_id=${c.companyId}&user_id=${c.userId}&brand=bolt`,
+        { method: 'GET', headers: { authorization: `Bearer ${at}`, 'content-type': 'application/json' } });
+
+      /* HTTP 200 IS NOT SUCCESS ON THIS HOST. Bolt answers 200 and puts the
+         refusal in its own `code` field — the trap AUTH_CODES above exists
+         for, and the one that let `data?.data?.orders || []` report a healthy
+         empty window over 547 real trips for the life of the portal path. */
+      if (Number(data?.code) !== 0) {
+        const says = [data?.message, data?.error_hint && `hint=${data.error_hint}`,
+          data?.code != null && `code=${data.code}`].filter(Boolean).join(' ') || 'no code in response';
+        fails.push({ fleet: c.fleet, text: `payouts ${c.fleet}: ${says}` });
+        if (AUTH_CODES.has(Number(data?.code))) {
+          await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: credKey,
+            state: 'invalid', surface: 'getPayouts', detail: says });
+        }
+        continue;
+      }
+      const list = Array.isArray(data?.data?.list) ? data.data.list : null;
+      if (!list) {
+        /* A 200 with code 0 and no list is a SHAPE change, not an empty
+           account, and the two must not read alike. This is the exact failure
+           the portal's order table had for a year: an array that was never
+           there, read as zero rows. */
+        fails.push({ fleet: c.fleet,
+          text: `payouts ${c.fleet}: answered OK with no \`list\` array — has the portal renamed it? `
+            + `top-level keys: ${Object.keys(data?.data || {}).slice(0, 8).join(', ') || 'none'}` });
+        continue;
+      }
+
+      let dropped = 0;
+      const rows = [];
+      for (const p of list) {
+        const row = payoutRow(p, c.fleet);
+        if (!row) { dropped += 1; continue; }
+        rows.push(row);
+      }
+      if (dropped) {
+        log.warn(SRC, `payouts ${c.fleet}: ${dropped} rows had no usable finish date or amount`,
+          { hint: 'a payout still in flight has no `finished` — this is expected for the newest row' });
+      }
+      const n = await upsertMany('platform_payout', rows, ['platform', 'fleet_id', 'payout_ext_id']);
+      total += n;
+      rowsByFleet.set(c.fleet, (rowsByFleet.get(c.fleet) || 0) + n);
+      const days = new Set(rows.map((r) => r.paid_on));
+      log.info(SRC, `payouts ${c.fleet}`, { rows: rows.length, distinct_days: days.size,
+        earliest: rows.length ? [...days].sort()[0] : null,
+        latest: rows.length ? [...days].sort().at(-1) : null });
+      await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: credKey,
+        state: 'ok', surface: 'getPayouts', detail: null });
+    } catch (e) {
+      const why = String(e && e.message ? e.message : e).slice(0, 200);
+      log.error(SRC, `payouts ${c.fleet} failed`, { err: why });
+      fails.push({ fleet: c.fleet, text: `payouts ${c.fleet}: ${why}` });
+    }
+  }
+  return total;
+}
+
 export async function collect({ from, to, mode }) {
   /* Every one of the four surfaces here — two fleets on the FI roster, two on
      the portal — could fail while this recorded status 'ok' with rows_written
@@ -910,6 +1064,7 @@ export async function collect({ from, to, mode }) {
   const rowsByFleet = new Map();
   let roster = 0;
   let trips = 0;
+  let payouts = 0;
   try {
     /* EACH SURFACE ON ITS OWN. The roster is a snapshot of who exists; the portal
        is every trip and every fare. They share nothing but this function, and a
@@ -952,6 +1107,21 @@ export async function collect({ from, to, mode }) {
       const why = String(e && e.message ? e.message : e).slice(0, 200);
       log.error(SRC, 'portal failed', { err: why });
       fails.push({ fleet: null, text: `portal: ${why}` });
+    }
+
+    /* A THIRD SURFACE, and on its own for the same reason the first two are.
+       The payout list is one GET per fleet for the whole history and takes no
+       window, so it costs almost nothing — but it must not be able to take
+       the trips down with it, and the trips must not be able to take it down.
+       Run on EVERY mode, including the half-hourly incremental: the request
+       is a single unwindowed read and a transfer that lands at 09:00 should
+       not wait for the nightly pass to become visible. */
+    try {
+      payouts = await pullPayouts(fails, rowsByFleet);
+    } catch (e) {
+      const why = String(e && e.message ? e.message : e).slice(0, 200);
+      log.error(SRC, 'payouts failed', { err: why });
+      fails.push({ fleet: null, text: `payouts: ${why}` });
     }
 
     /* The windows go on the run. Bolt was the only chunking source whose windows
@@ -1012,7 +1182,7 @@ export async function collect({ from, to, mode }) {
     }
     const failedChunks = chunks.filter((c) => c.error).length;
     log[fails.length ? 'warn' : 'info'](SRC, 'done',
-      { roster, trips, windows: chunks.length || undefined,
+      { roster, trips, payouts, windows: chunks.length || undefined,
         failed_windows: failedChunks || undefined, failed: fails.length || undefined });
   } catch (e) {
     /* Both surfaces are guarded above, so nothing ordinary reaches here — this

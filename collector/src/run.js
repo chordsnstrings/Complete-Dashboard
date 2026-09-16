@@ -4,6 +4,13 @@ import * as uber from './sources/uber.js';
 import * as uberFleet from './sources/uber_fleet.js';
 import * as uberTimeline from './sources/uber_timeline.js';
 import * as uberProfile from './sources/uber_profile.js';
+/* Uber's own daily statement, and the bank transfer inside it. Its own module
+   and its own step because its cost is unlike every other Uber surface: the
+   payment-report generator has a limiter SEPARATE from the three-in-flight cap
+   the rest of the pipeline contends for, and tighter — three one-day payment
+   reports asked at once shut it for minutes. So it walks one day at a time,
+   bounded per run, and skips a day it has already stored. */
+import * as uberPayout from './sources/uber_payout.js';
 import * as yango from './sources/yango.js';
 import * as bolt from './sources/bolt.js';
 import * as cabman from './sources/cabman.js';
@@ -39,7 +46,14 @@ import { loadCheckpoint, NO_CHECKPOINT } from './checkpoint.js';
    Uber has the largest hole and its windows are report-pull requests that cost
    minutes; FMS has the most rows already and by far the longest run, so it goes
    last where being cut short costs the least. */
-const HISTORICAL = { uber, uberFleet, yango, bolt, hotel, external, events, fms };
+/* uberPayout sits LATE and before fms, deliberately. It asks the provider for
+   one report per missing day and the limiter behind those reports is shut for
+   minutes at a time, so putting it early would spend the head of a run waiting
+   on a surface that is bounded at two dozen days anyway — while trips, which
+   are the product, waited behind it. Before fms because fms is the four-and-a-
+   half-hour walk, and a run that is cut short should be cut short after the
+   money rather than before it. */
+const HISTORICAL = { uber, uberFleet, yango, bolt, hotel, external, events, uberPayout, fms };
 
 /* Only one historical collection at a time.
    The scheduler runs an incremental every thirty minutes and an on-demand

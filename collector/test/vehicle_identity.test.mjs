@@ -161,13 +161,26 @@ console.log('\nthe key API\'s shapes, which are not the console\'s');
   check('the parser refuses an empty string rather than calling it zero',
     /const num = \(v\) => \{[\s\S]{0,200}v === ''\) return null/.test(CODE));
 
-  /* The two surfaces the key host does not serve must not be faked from the
-     orders: an order carries no commission, and Yango's is about 24%. */
+  /* The weekly aggregate the key host does not serve must not be faked from
+     the orders: an order carries no commission, and Yango's is about 24%. */
   check('nothing computes driver_performance earnings from the orders',
     !/driver_performance[\s\S]{0,400}earnings:[\s\S]{0,80}o\.price/.test(CODE),
     'that would restate a net figure as gross, which this collector was fixed for');
-  check('and the collector still ASKS the console for them, so a recovery is noticed',
-    /YANGO_SURFACES\.console\.summary/.test(CODE) && /YANGO_SURFACES\.console\.ledger/.test(CODE));
+  /* ONE surface on the console now, not two. The ledger was filed as
+     console-only on the strength of a 404 at /v1/parks/transactions/list — a
+     path Yango has never published, because every one of its seven transaction
+     endpoints is v2 or v3. Proved on production 2026-09-16 by
+     /api/probe/yango/ledger, both versions asked side by side with the same
+     key: v1 404 path_not_found, v2 200 with 1,325 rows over ninety days. So
+     the ledger moved to the key host with the rest of the collector, and only
+     the weekly per-driver aggregate is still waiting on a session nobody can
+     restore. */
+  check('the weekly aggregate is still ASKED of the console, so a recovery is noticed',
+    /YANGO_SURFACES\.console\.summary/.test(CODE));
+  check('…and the ledger is NOT, because it is on the key host now',
+    /YANGO_SURFACES\.key\.ledger/.test(CODE) && !/YANGO_SURFACES\.console\.ledger/.test(CODE),
+    'the ledger needs no cookie — asking the refused host for it would keep a working '
+    + 'surface permanently red');
 
   /* The cars pull is what makes a second VIN source exist at all. */
   check('the cars pull writes vehicle_profile keyed per channel, not over Uber\'s rows',

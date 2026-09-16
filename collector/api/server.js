@@ -47,6 +47,11 @@ import { authRoutes } from './auth_routes.js';
 import { exportRoutes } from './export_routes.js';
 import { supplyRoutes } from './supply_routes.js';
 import { capacityRoutes } from './capacity_routes.js';
+/* The payout register: what each platform actually transferred to the bank and
+   on which date. Its own module because the figure #reconcile has been calling
+   "bank payout" is not a transfer at all, and the two must be able to sit on
+   the same page without either being mistaken for the other. */
+import { payoutRoutes } from './payout_routes.js';
 import { revenueRoutes, receiptRoutes } from './revenue_routes.js';
 import { placeEnds, RATE_SQL, forgone } from './place_sql.js';
 import { onlineRoutes } from './online_routes.js';
@@ -5621,6 +5626,7 @@ retentionRoutes(app, { q, wrap });
 /* Where next month's forecast work lands against who currently covers it —
    the join between the forecast and the rota. */
 capacityRoutes(app, { q, wrap });
+payoutRoutes(app, { q, wrap, range });
 revenueRoutes(app, { q, wrap, range });
 /* The finance team's own register, kept beside the revenue routes because it
    reads the same table and must not drift from how that table's restatements

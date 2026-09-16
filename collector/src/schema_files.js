@@ -91,4 +91,12 @@ export const SCHEMA_FILES = [
      only for the drivers who happened to have a vehicle attached. Two tables:
      what is true now, and every change the provider has timestamped. */
   'schema_v70.sql',
+  /* What each platform actually transferred to the company's bank, and on
+     which date. The figure #reconcile has been calling "bank payout" is the
+     per-driver earnings of a week, not a wire, and the two are 7.1% apart on
+     the one week both were measured. Two tables: the transfers themselves
+     (Uber and Bolt publish them; Yango publishes no such category at all), and
+     the provider's own daily statement, which is what makes a transfer
+     checkable rather than merely stated. */
+  'schema_v71.sql',
 ];

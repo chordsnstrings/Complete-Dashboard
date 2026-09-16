@@ -27,6 +27,10 @@ import { renderCancellations } from './cancellations.js';
 import { peopleCards, peopleResolved, namesLine } from './people.js';
 import { renderProvenance } from './provenance.js';
 import { renderReceipts } from './receipts.js';
+/* The payout register. Separate from #receipts, which lists every figure a
+   provider FILED: this one lists only the money that actually moved, on the
+   date it moved, which is a strictly smaller and differently-sourced set. */
+import { renderPayouts } from './payouts.js';
 import { renderIdentity } from './identity.js';
 import { renderCorporate, renderProperty, CORP_TABS, PROPERTY_TABS } from './corporate.js';
 import { renderTrip } from './trip.js';
@@ -316,6 +320,14 @@ const VIEWS = [
      into the account, which date, from the source exactly". Above Bank
      reconciliation because it is what reconciliation is done AGAINST. */
   { id: 'receipts', label: 'What landed, and when', ic: '⑉', sec: 'Finance', sub: 'Every figure a provider filed — the dates it covers, what it was for, and when it reached us' },
+  /* ABOVE Bank reconciliation, deliberately, and this is not a cosmetic
+     ordering. Reconciliation's "bank payout" is the sum of what drivers earned
+     in a month — a real quantity, and not a transfer. This page holds the
+     transfers themselves, and a reader who meets the derived figure first will
+     read the measured one as contradicting it. Measured on Ecosine's closed
+     week of 7–13 Sep 2026: reconciliation says AED 110,962.09 and Uber's own
+     books say the wire was AED 103,567.54. */
+  { id: 'payouts', label: 'Payouts to the bank', ic: '⇛', sec: 'Finance', sub: 'Every transfer a platform actually made to the company account, on the date it arrived' },
   { id: 'reconcile', label: 'Bank reconciliation', ic: '⇌', sec: 'Finance', sub: 'For each month, what the platforms paid us against what their statements say they owed' },
   { id: 'settlement', label: 'Cash and unpaid', ic: '◫', sec: 'Finance', sub: 'Who pays for the ride, how much cash drivers hold, and what is still unpaid' },
   { id: 'provenance', label: 'Where each figure came from', ic: '⌗', sec: 'Finance',
@@ -1897,6 +1909,7 @@ V.optimise = async (root) => renderOptimise(root);
 V.capacity = async (root) => renderCapacity(root);
 V.trips = async (root) => renderTrips(root);
 V.receipts = async (root) => renderReceipts(root);
+V.payouts = async (root) => renderPayouts(root);
 V.identity = async (root) => renderIdentity(root);
 V.provenance = async (root) => renderProvenance(root);
 /* The first screen: the fleet as a ledger rather than as a trip count. */

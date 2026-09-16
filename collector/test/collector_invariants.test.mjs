@@ -282,7 +282,18 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
      least, and the source with the largest hole goes first. */
   const order = run.match(/const HISTORICAL = \{([^}]*)\}/)?.[1]
     .split(',').map((x) => x.trim()).filter(Boolean) || [];
-  check('every historical source is still in the sequence', order.length === 8, order.join(','));
+  /* NINE since uberPayout joined. It walks Uber's organisation payment
+     statement one day at a time — the surface that carries the exact bank
+     transfer — and the payment-report generator behind it has a limiter
+     SEPARATE from the three-in-flight cap the rest of the pipeline contends
+     for, and tighter. So it goes late, where waiting on a shut limiter costs
+     the least, and before fms, so a run that is cut short is cut short after
+     the money rather than before it. */
+  check('every historical source is still in the sequence', order.length === 9, order.join(','));
+  check('and the payout statement walk is one of them, late and before fms',
+    order.indexOf('uberPayout') > order.indexOf('uber')
+    && order.indexOf('uberPayout') === order.indexOf('fms') - 1,
+    order.join(','));
   check('the four-and-a-half-hour source runs last, not first',
     order[order.length - 1] === 'fms', order.join(','));
   check('the source with the largest hole runs first', order[0] === 'uber', order.join(','));
