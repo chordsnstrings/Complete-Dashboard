@@ -47,6 +47,72 @@ export const pool = new pg.Pool(poolConfig());
    to do is refuse to be fatal. */
 pool.on('error', (err) => log.error('db', 'idle client error', { err: err.message, code: err.code }));
 
+/* NINETY-TWO SECONDS OF LLVM FOR A QUERY THAT RUNS IN TWENTY-FIVE
+   MILLISECONDS.
+   ─────────────────────────────────────────────────────────────────────────
+   THE DEFECT, MEASURED ON PRODUCTION 2026-09-16 BY EXPLAIN (ANALYZE, BUFFERS)
+   OF THE EXACT STATEMENT THE ROUTE SENDS. /api/unauthorized/attributed
+   answered a window containing ZERO segments in 67 to 113 seconds, and the
+   cost was flat against the number of segments — 5 segments 98.6 s, 16 78.2 s,
+   123 84.1 s, none at all 67.0 s. Two diagnoses read out of the source were
+   wrong (the attribution ladder, which an empty window never runs; then an
+   unindexed min() over driver_status_event, which sql/schema_v73.sql fixed and
+   which moved the floor not at all). The plan settled it:
+
+     Limit … (actual time=92208.833..92209.316 rows=0 loops=1)
+       ->  Nested Loop Left Join … (actual time=24.255..24.738 rows=0 loops=1)
+     Planning Time: 150.308 ms
+     JIT:
+       Functions: 2153
+       Options: Inlining true, Optimization true, Expressions true, Deforming true
+       Timing: Generation 368.210 ms, Inlining 314.023 ms,
+               Optimization 50213.092 ms, Emission 41657.475 ms,
+               Total 92552.800 ms
+     Execution Time: 92636.076 ms
+
+   The query itself takes 24.7 ms. Postgres spent 92.55 SECONDS compiling it —
+   50 s in LLVM optimisation and 42 s emitting machine code for 2,153
+   functions — and then ran the result on zero rows.
+
+   WHY IT FIRES HERE AND WHY IT WILL FIRE AGAIN. JIT is gated on the planner's
+   ESTIMATED total cost, not on how long anything takes: jit_above_cost
+   (100,000) turns it on, jit_optimize_above_cost and jit_inline_above_cost
+   (500,000 each) turn on the two expensive halves. That statement estimates at
+   10,536,749 — a hundred times the inlining threshold — because it is 143,000
+   characters of SQL with roughly thirty CTEs and three nested laterals per
+   segment. The estimate is what it is whether or not a single row qualifies,
+   so an empty window pays the full compile. And both services are basic-xxs:
+   one vCPU, where LLVM's optimiser is the slowest thing in the system.
+
+   OFF FOR THE WHOLE POOL, DELIBERATELY. The API's own slow-query log on that
+   same boot shows the tax is not confined to one route — statements at 18.7 s,
+   17.4 s, 12.9 s and 11.1 s across the driver, vehicle and roster pages, all
+   of them wide expression-heavy scans over the same tables, which is exactly
+   the shape that clears jit_above_cost. JIT earns its keep on a long scan
+   where compiled expression evaluation repays the compile over millions of
+   rows; this fleet's largest table is 175,000 rows on a single vCPU, so the
+   compile is rarely repaid and is sometimes, as above, three thousand times
+   the cost of the work.
+
+   REVERSIBLE WITHOUT A DEPLOY. PG_JIT=on restores the default, so the trade
+   can be re-measured against the same endpoints rather than argued about. Set
+   per connection rather than in the connection string's `options`, because a
+   failure here must be a warning on one connection and never a pool that
+   cannot hand out clients. */
+export const sessionSql = (env = process.env) => (env.PG_JIT === 'on' ? null : 'SET jit = off');
+
+export async function applySessionSettings(client, env = process.env) {
+  const sql = sessionSql(env);
+  if (!sql) return null;
+  await client.query(sql);
+  return sql;
+}
+
+pool.on('connect', (client) => {
+  applySessionSettings(client).catch(
+    (err) => log.warn('db', 'session setting refused', { err: err.message }));
+});
+
 
 /* Every deploy replayed all thirty-one files in full, and three of them are
    expensive.

@@ -827,6 +827,45 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A query that is slow on an EMPTY window, on a `basic-xxs` box, is JIT
+  until proved otherwise — and the plan says so in one block.** The exact
+  statement behind `/api/unauthorized/attributed`, EXPLAIN (ANALYZE, BUFFERS)
+  on production 2026-09-16, over a window holding zero segments:
+
+  ```
+  Limit … (actual time=92208.833..92209.316 rows=0 loops=1)
+    ->  Nested Loop Left Join … (actual time=24.255..24.738 rows=0 loops=1)
+  Planning Time: 150.308 ms
+  JIT:
+    Functions: 2153
+    Timing: Generation 368.210 ms, Inlining 314.023 ms,
+            Optimization 50213.092 ms, Emission 41657.475 ms, Total 92552.800 ms
+  Execution Time: 92636.076 ms
+  ```
+
+  **The query runs in 24.7 ms and Postgres spent 92.55 seconds compiling it.**
+  JIT is gated on the planner's ESTIMATED cost — 10,536,749 for this statement,
+  against `jit_above_cost` 100,000 and `jit_optimize_above_cost` /
+  `jit_inline_above_cost` 500,000 — and an estimate does not care that nothing
+  qualifies, so an empty window pays the whole compile. 143,000 characters of
+  SQL, ~30 CTEs, three nested laterals, one vCPU. `src/db.js` now sets
+  `jit = off` on every pooled connection; `PG_JIT=on` restores the default so
+  the trade can be re-measured without a deploy. **Read `Execution Time` minus
+  the JIT `Total` before blaming any query for its own latency.**
+
+* **Two wrong diagnoses were read out of the source before that plan was
+  fetched, and both were plausible.** First the attribution ladder (ten
+  correlated per-plate reads per segment, four unbounded, materialised three
+  times per request) — ruled out by the empty window, where it never runs.
+  Then an unindexed `min(at)` over `driver_status_event` — real, fixed in
+  `sql/schema_v73.sql`, and it moved the floor **not at all**. The lesson is
+  not "those were bad guesses": both were true statements about the code. It is
+  that **there is no substitute for the production plan**, and from this
+  sandbox the database is unreachable except through the service, so the way to
+  get one is to make the service explain its own statement —
+  `/api/unauthorized/attributed/plan?q=rows|count|dist`, built from the same
+  `attributedStatements()` the route uses so the plan cannot be of a copy.
+
 * **A fixture keyed to `now()` and a fixture keyed to a fixed date drift past
   each other, and the collision is a landmine with a date on it.**
   `test/reconcile.test.mjs` seeds six statement/payout rows relative to the

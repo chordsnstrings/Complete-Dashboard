@@ -946,6 +946,43 @@ called by these two endpoints and by nothing else in the codebase.
   identical before and after. Every value assertion in that file stays green
   across the reversion, which is the point.
 
+### The floor was JIT, and the first two fixes were not it
+
+Re-measured after deploying `sql/schema_v73.sql`: the same empty window went
+from 67.0 s to **86.1 s**, and `days=1` to 113.3 s. The index is right and the
+no-op-upsert guard is right; neither was the floor. The API's own slow-query
+log then named the rows query at 79,906 ms on a window with zero segments,
+which the plan on a local PGlite says is impossible — so the production plan
+was fetched, by making the service explain its own statement
+(`/api/unauthorized/attributed/plan`, built from the same
+`attributedStatements()` the route runs, so it cannot explain a copy):
+
+```
+Limit … (actual time=92208.833..92209.316 rows=0 loops=1)
+  ->  Nested Loop Left Join … (actual time=24.255..24.738 rows=0 loops=1)
+Planning Time: 150.308 ms
+JIT:
+  Functions: 2153
+  Timing: Generation 368.210 ms, Inlining 314.023 ms,
+          Optimization 50213.092 ms, Emission 41657.475 ms, Total 92552.800 ms
+Execution Time: 92636.076 ms
+```
+
+**The query executes in 24.7 ms.** The other 92.55 seconds is LLVM compiling
+2,153 functions, because the planner's ESTIMATED cost for 143,000 characters of
+SQL is 10,536,749 against a `jit_above_cost` of 100,000 — an estimate that does
+not care whether a single row qualifies. On `basic-xxs`, one vCPU.
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | JIT compiled every wide statement on a one-vCPU box and charged more for the compile than the query | `src/db.js` sets `jit = off` on every pooled connection, `PG_JIT=on` restores the default | written, committed — **deploy and proof pending** |
+
+Off for the whole pool rather than for one route, because the same boot's
+slow-query log carries statements at 18.7 s, 17.4 s, 12.9 s and 11.1 s across
+the driver, vehicle and roster pages — all wide expression-heavy scans, the
+shape that clears `jit_above_cost`. JIT repays its compile over millions of
+rows; the largest table here is 175,000.
+
 **Not yet proven.** The two reversions above are what the SUITE can show, and
 this file's own header is that the suite agreeing with the code is not the code
 agreeing with the fleet. The proof is the empty-window curl re-run against
