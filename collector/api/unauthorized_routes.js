@@ -241,6 +241,79 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
      /api/unauthorized/list is a hard LIMIT 300 with no offset and no total,
      and "another tab of ALL unauthorized trips" is precisely the request a cap
      with no total cannot honour. */
+  /* THE THREE STATEMENTS, BUILT ONCE.
+     ───────────────────────────────────────────────────────────────────────
+     They were built inline, three times, and the plan endpoint below could
+     only ever have explained a COPY of them — a copy that drifts, and then
+     explains a query production does not run. One builder, two callers, and
+     the plan is by construction the plan of the statement that was slow. */
+  const ATTR_WHERE = `${DAYWIN('o.started_at')}
+     AND ($3::text IS NULL OR o.fleet_id = $3)
+     AND ($4 = 'all' OR o.verdict = $4)`;
+  const attributedStatements = (limit = 200, offset = 0) => ({
+    ROWS_SQL: `SELECT ${SEG_COLS}, ${ATTRIBUTION_COLS}, st.statuses AS candidate_statuses,
+                nb.nearest_booking
+           FROM occupancy_segment o
+           ${attributionJoin('o')}
+           ${statusJoin('o')}
+           ${nearestJoin('o')}
+          WHERE ${ATTR_WHERE} AND ($5::text IS NULL OR att.tier = $5)
+          ORDER BY o.started_at DESC LIMIT ${limit} OFFSET ${offset}`,
+    COUNT_SQL: `SELECT count(*)::int n FROM occupancy_segment o ${attributionJoin('o')}
+          WHERE ${ATTR_WHERE} AND ($5::text IS NULL OR att.tier = $5)`,
+    /* Four parameters, not five — see the note at the call site. */
+    DIST_SQL: `SELECT att.tier AS key, count(*)::int n,
+                round(sum(o.distance_km)::numeric, 1) AS km
+           FROM occupancy_segment o ${attributionJoin('o')}
+          WHERE ${ATTR_WHERE} GROUP BY 1`,
+  });
+
+  /* ── what the slow one is actually DOING, because reasoning got it wrong ──
+     THE MEASUREMENT THIS EXISTS FOR. /api/unauthorized/attributed answered a
+     window containing ZERO segments in 67 to 109 seconds, repeatedly, across
+     two deployments — cost flat against segment count (5 segments 98.6 s, 16
+     segments 78.2 s, 123 segments 84.1 s, 0 segments 67.0 s). Two diagnoses
+     were made from the source alone and both were wrong: first the attribution
+     ladder (ruled out by the empty window, where it never runs), then
+     `SELECT min(at) FROM driver_status_event` (indexed in sql/schema_v73.sql;
+     the floor did not move). The API's own slow-query log then named the rows
+     query at 79.9 s on that empty window, which the plan on a local PGlite —
+     filter at the occupancy_segment scan, laterals above it — says should be
+     impossible.
+
+     So this stops guessing. It EXPLAIN ANALYZEs the statement the route runs,
+     built by the same function, bound to the same parameters, on production's
+     own data and statistics. There is no other way to see a production plan
+     from here: the database is not reachable except through this service.
+
+     NOT A GENERAL SQL ENDPOINT. It runs one of three fixed statements chosen
+     by name; every value is bound, nothing is interpolated, and `range()` and
+     `verdictOf()` validate the window and the verdict exactly as the real
+     route does. It is as expensive as the query it explains, which is the
+     point — and why it is a diagnostic to be read and then removed or gated,
+     not a page. */
+  app.get('/api/unauthorized/attributed/plan', wrap(async (req, res) => {
+    const [from, to, , fleet] = range(req);
+    const { verdict } = verdictOf(req);
+    const raw = String(first(req.query.q) ?? 'rows');
+    const which = ['rows', 'count', 'dist'].includes(raw) ? raw : 'rows';
+    const S = attributedStatements(
+      Math.min(500, Math.max(1, Number(first(req.query.limit)) || 1)), 0);
+    const sql = { rows: S.ROWS_SQL, count: S.COUNT_SQL, dist: S.DIST_SQL }[which];
+    const params = which === 'dist'
+      ? [from, to, fleet, verdict]
+      : [from, to, fleet, verdict, null];
+    const t0 = Date.now();
+    const out = await q(`EXPLAIN (ANALYZE, BUFFERS, TIMING ON) ${sql}`, params);
+    res.json({
+      which,
+      window: { from, to, fleet, verdict },
+      wall_ms: Date.now() - t0,
+      sql_chars: sql.length,
+      plan: out.map((r) => r['QUERY PLAN']),
+    });
+  }));
+
   app.get('/api/unauthorized/attributed', wrap(async (req, res) => {
     const [from, to, , fleet] = range(req);
     /* The platform chip is not bound here, deliberately, and api/server.js
@@ -253,21 +326,11 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
     const limit = Math.min(500, Math.max(1, Number(first(req.query.limit)) || 200));
     const offset = Math.max(0, Number(first(req.query.offset)) || 0);
     const p = [from, to, fleet, verdict, tier];
-    const WHERE = `${DAYWIN('o.started_at')}
-       AND ($3::text IS NULL OR o.fleet_id = $3)
-       AND ($4 = 'all' OR o.verdict = $4)`;
+    const { ROWS_SQL, COUNT_SQL } = attributedStatements(limit, offset);
 
     const [rows, [tot], dist, coverage, { rate, basis }, historyFrom] = await Promise.all([
-      q(`SELECT ${SEG_COLS}, ${ATTRIBUTION_COLS}, st.statuses AS candidate_statuses,
-                nb.nearest_booking
-           FROM occupancy_segment o
-           ${attributionJoin('o')}
-           ${statusJoin('o')}
-           ${nearestJoin('o')}
-          WHERE ${WHERE} AND ($5::text IS NULL OR att.tier = $5)
-          ORDER BY o.started_at DESC LIMIT ${limit} OFFSET ${offset}`, p),
-      q(`SELECT count(*)::int n FROM occupancy_segment o ${attributionJoin('o')}
-          WHERE ${WHERE} AND ($5::text IS NULL OR att.tier = $5)`, p),
+      q(ROWS_SQL, p),
+      q(COUNT_SQL, p),
       /* THE DISTRIBUTION, over the WINDOW rather than over the current filter.
          A tier count that changes when you pick a tier tells a reader nothing
          about what else is there — the same rule /api/segments applies to its
@@ -279,10 +342,7 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
          refuses a bind that supplies more parameters than the statement uses
          ("bind message supplies 5 parameters, but prepared statement requires
          4"). The tier filter is deliberately absent — see the note above. */
-      q(`SELECT att.tier AS key, count(*)::int n,
-                round(sum(o.distance_km)::numeric, 1) AS km
-           FROM occupancy_segment o ${attributionJoin('o')}
-          WHERE ${WHERE} GROUP BY 1`, [from, to, fleet, verdict]),
+      q(attributedStatements().DIST_SQL, [from, to, fleet, verdict]),
       coverageOf(from, to, fleet),
       rateOf(from, to, fleet),
       statusHistoryFrom(),
