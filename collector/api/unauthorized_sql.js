@@ -1976,10 +1976,57 @@ LEFT JOIN LATERAL (
             and is identical in meaning to the coalesce it replaces: reading
             them side by side, person_key non-blank selects arm one and
             person_key blank selects arm two, exactly as the coalesce did. */
+         /* TWO ARMS UNIONED, BECAUSE AN OR ACROSS TWO COLUMNS IS NOT SARGABLE
+            EITHER — AND THE PLAN SAID SO.
+            ──────────────────────────────────────────────────────────────────
+            THE DEFECT, MEASURED. The note below is the previous fix, which
+            split a coalesce() into two arms so the first would be a plain
+            equality on the indexed column. It is still the right shape and it
+            still did not work: joined by OR the two arms are one clause over
+            two different columns, and Postgres can only use an index for that
+            by proving a BitmapOr over both — which it declined, because the
+            second arm's 'coalesce(btrim(person_key),'') = ''' is an expression
+            no index covers. EXPLAIN (ANALYZE, BUFFERS) on production,
+            2026-09-16, the rows query over a 16-day window:
+
+              -> Index Only Scan using trip_econ_day_idx on trip t3
+                 (actual time=692.331..1770.390 rows=1842 loops=28)
+
+            1.77 seconds per execution, 28 executions, 49.6 s of a 55.1 s
+            response — 90% of the whole query, in the ONE subquery whose
+            comment says it was made sargable. It was not scanning trip
+            sequentially any more; it was scanning an unrelated index end to
+            end instead, which is the same amount of work wearing a better name.
+
+            UNION, so each arm is its own scan with its own index:
+              arm 1  person_key = c.key            -> trip_person_key_idx
+              arm 2  driver_ext_id = c.key         -> trip_driver_requested_idx
+            and UNION rather than UNION ALL does the DISTINCT this replaces.
+
+            't3.person_key <> ''' IS LOAD-BEARING and is not tidying.
+            trip_person_key_idx (sql/schema_v53.sql:753) is PARTIAL on
+            'person_key IS NOT NULL AND person_key <> '''. Equality proves the
+            IS NOT NULL half on its own; nothing proves the other half, and
+            without it the planner cannot show the index covers the rows the
+            query wants, so it declines the partial index and the arm is a scan
+            again. It changes no result: a candidate key is
+            personKeyStored() = coalesce(nullif(person_key,''), driver_ext_id),
+            which can never BE the empty string, so 'person_key = c.key' never
+            matches a row whose person_key is ''.
+
+            Meaning is unchanged in the other direction too: arm 1 selects rows
+            whose person_key IS the key, arm 2 rows with no usable person_key
+            whose account id is, and no row can satisfy both — exactly the
+            partition the OR expressed. */
          AND e.driver_ext_id IN (
-           SELECT DISTINCT t3.driver_ext_id FROM trip t3
-            WHERE (t3.person_key = c.key
-                   OR (coalesce(btrim(t3.person_key), '') = '' AND t3.driver_ext_id = c.key))
+           SELECT t3.driver_ext_id FROM trip t3
+            WHERE t3.person_key = c.key
+              AND t3.person_key IS NOT NULL AND t3.person_key <> ''
+              AND coalesce(btrim(t3.driver_ext_id), '') <> ''
+           UNION
+           SELECT t3.driver_ext_id FROM trip t3
+            WHERE t3.driver_ext_id = c.key
+              AND coalesce(btrim(t3.person_key), '') = ''
               AND coalesce(btrim(t3.driver_ext_id), '') <> '')
        ORDER BY e.at DESC LIMIT 1) s ON true
 ) st ON true`;

@@ -983,13 +983,49 @@ the driver, vehicle and roster pages — all wide expression-heavy scans, the
 shape that clears `jit_above_cost`. JIT repays its compile over millions of
 rows; the largest table here is 175,000.
 
-**Not yet proven.** The two reversions above are what the SUITE can show, and
-this file's own header is that the suite agreeing with the code is not the code
-agreeing with the fleet. The proof is the empty-window curl re-run against
-production after the deploy — the same measurement that found it, which is the
-one that separates fixed cost from per-row cost in a single request. **These two
-rows move to `proven` only when that curl comes back, and this paragraph is
-replaced by its number.** See `docs/COVERAGE.md` traps.
+**Proven on production 2026-09-16**, by the same measurement that found it —
+the empty-window curl, which separates fixed cost from per-row cost in one
+request. All three rows above are now `deployed, proven`:
+
+| window | before | after JIT off |
+|---|---|---|
+| empty window, 0 segments | 67.0–109.1 s | **0.93 s** |
+| `days=1`, 6 segments | 98.6 s | **4.14 s** |
+| `days=3`, 17 segments | 78.2 s | **3.51 s** |
+| `days=30`, 124 segments | 84.1 s | **2.42 s** |
+
+**With the floor gone, the ladder's real cost is finally measurable**, and it is
+not the four unbounded per-plate reads either. A 16-day window at the page's own
+`limit=200` took 55.5 s, and the plan says where:
+
+```
+-> Index Only Scan using trip_econ_day_idx on trip t3
+   (actual time=692.331..1770.390 rows=1842 loops=28)
+```
+
+1.77 s per execution × 28 = 49.6 s of 55.1 s — **90% of the response in one
+subquery**, the candidate→Uber-account lookup in `statusJoin()`, whose own
+comment says it was made sargable. It was: the `coalesce()` became two arms.
+But the two arms are joined by **OR** across two different columns, and the
+planner declined a BitmapOr because the second arm's
+`coalesce(btrim(person_key),'') = ''` is an expression no index covers — so it
+scanned an unrelated index end to end instead, which is the same work under a
+better name.
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | `statusJoin()`'s person→accounts lookup scanned an index end to end, once per candidate per segment | `api/unauthorized_sql.js` — the two arms UNIONed so each gets its own index (`trip_person_key_idx`, `trip_driver_requested_idx`), plus the `person_key <> ''` the PARTIAL index needs to be applicable | written, committed — **deploy and proof pending** |
+
+**Proof method.** `test/status_join_arms.test.mjs` runs the OLD form and the
+NEW form side by side over a fixture carrying every shape the column can be in
+— a person on two accounts, a nameless account standing in for a missing key, a
+row with no id at all, a key nobody holds, `''` and NULL — and asserts they
+agree key by key, then asserts the answers are the RIGHT answers rather than
+merely the same ones. A rewrite for a plan is only safe if it returns the same
+rows, and "the suite still passes" is not that proof. Removing the
+`person_key <> ''` turns the file red.
+
+See `docs/COVERAGE.md` traps.
 
 **Still open, and now measurable.** The ladder's real cost was never established,
 because a 67-second floor was hiding it. With the floor gone, the per-segment
