@@ -1154,9 +1154,29 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    is quieter: no box, no border, an underline on the current page and a weight
    change. The folder-tab treatment stays where it means "these swap the panel
    below me". */
+/* A TAB CLIPPED MID-WORD, ON EVERY PAGE OF EVERY SECTION WITH NINE OF THEM.
+   ─────────────────────────────────────────────────────────────────────────
+   Measured on the driver page at a 1440px viewport: this strip's scrollWidth
+   is 1345 against a clientWidth of 1132, "One person, two records" renders as
+   "One perso" and "Same person?" is off the end. `white-space:nowrap` was
+   already here, so the text was not wrapping — the ANCHOR was shrinking.
+   flex-shrink defaults to 1, so nine items in a nowrap row each gave up width
+   until the row fitted, and the overflow-x:auto above them therefore never had
+   anything to scroll. `flex:0 0 auto` makes each tab keep its own width and
+   hands the overflow to the scroller that was always there for it.
+
+   And the scroller says so. `scrollbar-width:none` is deliberate — a permanent
+   gutter under a 34px strip is worse than the problem — so the affordance is a
+   fade on the right edge instead. The items are left-packed, so the fade only
+   ever touches a tab when there IS one past the edge; on a strip that fits it
+   falls on empty space and is invisible. */
 .sectabs .tabs a{
   white-space:nowrap;padding:10px 11px;font-size:var(--t5);border:0;top:0;
-  border-radius:0;background:none;
+  border-radius:0;background:none;flex:0 0 auto;
+}
+.sectabs .tabs{
+  -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);
+  mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);
 }
 .sectabs .tabs a:hover{background:none;color:var(--ink)}
 .sectabs .tabs a.on{

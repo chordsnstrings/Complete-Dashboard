@@ -76,7 +76,15 @@ const F = {
     kpis: { trips: 0, days_worked: 0, bookings: 0, priced_trips: 0, outcome_n: 0, revenue: null,
       km: null, avg_fare: null, completion_pct: null, reported_earnings: null, cash_earnings: null,
       cash_bookings: 0, statement_fares: null, priced_km: null, priced_measured_revenue: null,
-      statement_platforms: ['uber'] },
+      statement_platforms: ['uber'],
+      /* THE DAY-LEVEL MONEY, EXACTLY AS PRODUCTION ANSWERS IT. day_money 0 is a
+         nought the platform PUBLISHED: Uber filed statements for 13 of these 16
+         days and every line of them reads 0.00. It must stay a number — and the
+         sentence beside it has to say that, rather than the generic line the
+         tile fell through to. */
+      window_days: 16, day_money: 0, day_money_days: 13, day_money_period_days: 7,
+      day_money_source: 'statement', day_stmt_net: 0, day_stmt_days: 13, day_cash: null,
+      day_cash_days: 0, day_rows: 13 },
     mix: { distance: [], product: [], payment: [], status: [], platform: [] },
     /* THE THIRTEEN DAYS PRODUCTION REALLY RETURNS for this person: a feed
        reached each date and reported nothing on it. trips 0, km null, revenue
@@ -91,8 +99,11 @@ const F = {
     periods: [
       { platform: 'uber', period_start: '2026-09-01', period_end: '2026-09-07', period_days: 7,
         days_used: 7, trips: null, earnings: '0.00', counted: null, cash_earnings: null },
-      { platform: 'uber', period_start: '2026-09-08', period_end: '2026-09-14', period_days: 7,
-        days_used: 7, trips: null, earnings: '0.00', counted: null, cash_earnings: null },
+      /* days_used 6, exactly as production answers: this period straddles the
+         window's opening edge, so six of its seven days fall inside. 7 + 6 = 13
+         resolved days, and the caption has to say 13. */
+      { platform: 'uber', period_start: '2026-08-31', period_end: '2026-09-06', period_days: 7,
+        days_used: 6, trips: null, earnings: '0.00', counted: null, cash_earnings: null },
     ],
     tips: null, tip_pct: null, statement_days: 0, fare: null, statement_cash: null },
   },
@@ -143,10 +154,77 @@ const F = {
       payment: [{ label: 'card', n: 84, revenue: 12400 }] },
     daily: [{ day: '2026-09-01', trips: 6, km: 70, revenue: 900, first_hour: 7.5, cancelled: 0 }],
     earnings: { components: [{ category: 'your_earnings', parent: null, amount: '9300.00', currency: 'AED' }],
+      /* TWO periods, one of which carries no counted figure — the shape that
+         made the caption say "counted across 2 statements" over a total summed
+         from one of them. */
       periods: [{ platform: 'uber', period_start: '2026-09-01', period_end: '2026-09-07',
         period_days: 7, days_used: 7, trips: 40, earnings: '4400.00', counted: '4400.00',
+        cash_earnings: null },
+      { platform: 'uber', period_start: '2026-09-08', period_end: '2026-09-14',
+        period_days: 7, days_used: 7, trips: 44, earnings: '4900.00', counted: null,
         cash_earnings: null }],
       tips: 120, tip_pct: 1.3, statement_days: 7, fare: 9300, statement_cash: null },
+  },
+  /* PUBLISHED AT NOUGHT. 84 bookings, 12 of them cash, and the statement says
+     in as many words that the cash taken was AED 0.00. "not reported" about a
+     figure the platform reported is the same defect facing the other way. */
+  zerocash: {
+    profile: { name: 'Zero Cash', id: 'zerocash', platforms: ['uber'], ids: ['z2'],
+      accounts: [UBER_ACC(900, '2025-10-17T04:00:00Z', '2026-09-15T18:00:00Z')],
+      span: { trips: 84, days_worked: 19, vehicles: 1, first_trip: '2026-09-01T05:00:00Z',
+        last_trip: '2026-09-15T18:00:00Z' },
+      compliance: [], standing: [], vehicles: [], identity_withheld: [], identity_held: [],
+      banned_on: [], platform_compliance: [] },
+    kpis: { trips: 84, days_worked: 19, bookings: 84, priced_trips: 84, outcome_n: 84,
+      revenue: 12400, km: 980, avg_fare: 147.6, reported_earnings: 9300, cash_earnings: 0,
+      statement_fares: null, priced_km: 980, priced_measured_revenue: 12400, priced_measured_trips: 84 },
+    mix: { distance: [], product: [], status: [], platform: [],
+      payment: [{ label: 'cash', n: 12, revenue: 0 }, { label: 'card', n: 72, revenue: 12400 }] },
+    daily: [{ day: '2026-09-01', trips: 6, km: 70, revenue: 900, first_hour: 7.5, cancelled: 0 }],
+    earnings: { components: [], periods: [], tips: null, tip_pct: null, statement_days: 0,
+      fare: null, statement_cash: null },
+  },
+  /* WORKED, AND NOBODY RECORDED HOW ANY OF IT WAS PAID. /api/driver/mix
+     coalesces a null payment_type to 'unknown', so the row exists and never
+     matches CASH_LABEL. AED 0 here claims a measurement over rows where none
+     was taken. */
+  unknownpay: {
+    profile: { name: 'Unknown Pay', id: 'unknownpay', platforms: ['uber'], ids: ['z3'],
+      accounts: [UBER_ACC(900, '2025-10-17T04:00:00Z', '2026-09-15T18:00:00Z')],
+      span: { trips: 84, days_worked: 19, vehicles: 1, first_trip: '2026-09-01T05:00:00Z',
+        last_trip: '2026-09-15T18:00:00Z' },
+      compliance: [], standing: [], vehicles: [], identity_withheld: [], identity_held: [],
+      banned_on: [], platform_compliance: [] },
+    kpis: { trips: 84, days_worked: 19, bookings: 84, priced_trips: 84, outcome_n: 84,
+      revenue: 12400, km: 980, avg_fare: 147.6, reported_earnings: 9300, cash_earnings: null,
+      statement_fares: null },
+    mix: { distance: [], product: [], status: [], platform: [],
+      payment: [{ label: 'unknown', n: 84, revenue: null }] },
+    daily: [{ day: '2026-09-01', trips: 6, km: 70, revenue: 900, first_hour: 7.5, cancelled: 0 }],
+    earnings: { components: [], periods: [], tips: null, tip_pct: null, statement_days: 0,
+      fare: null, statement_cash: null },
+    /* Plainly worked, and no row carries a normalised outcome — the shape the
+       Quality tab's empty branch used to call "worked no day in this window". */
+    quality: { cancels: [], alerts: [], cancel_daily: [], alert_km: null,
+      telematics_journeys: 3, fleet_alerts_per_100km: null, alert_coverage: null },
+  },
+  /* NO PAYOUT-PERIOD STATEMENT, AND A DAY-LEVEL ONE THAT REPORTS REAL MONEY.
+     The banner and the caption both denied money this same tab prints. */
+  daylevel: {
+    profile: { name: 'Day Level', id: 'daylevel', platforms: ['uber'], ids: ['z4'],
+      accounts: [UBER_ACC(900, '2025-10-17T04:00:00Z', '2026-09-15T18:00:00Z')],
+      span: { trips: 84, days_worked: 19, vehicles: 1, first_trip: '2026-09-01T05:00:00Z',
+        last_trip: '2026-09-15T18:00:00Z' },
+      compliance: [], standing: [], vehicles: [], identity_withheld: [], identity_held: [],
+      banned_on: [], platform_compliance: [] },
+    kpis: { trips: 84, days_worked: 19, bookings: 84, priced_trips: 0, outcome_n: 84,
+      revenue: null, km: 980, avg_fare: null, reported_earnings: null, cash_earnings: null,
+      statement_fares: null },
+    mix: { distance: [], product: [], status: [], platform: [],
+      payment: [{ label: 'card', n: 84, revenue: null }] },
+    daily: [],
+    earnings: { components: [], periods: [], tips: null, tip_pct: null, statement_days: 7,
+      fare: '6000.00', statement_cash: '250.00', statement_gross: null },
   },
 };
 
@@ -167,8 +245,13 @@ app.get('/api/driver/earnings', send('earnings'));
 app.get('/api/status/driver', (req, res) => res.json({ absent: 'not collected in this test' }));
 app.get('/api/driver/trips', (req, res) => res.json({ rows: [], total: 0, offset: 0, truncated: false }));
 app.get('/api/driver/standing', (req, res) => res.json([]));
-app.get('/api/driver/quality', (req, res) => res.json({ cancels: [], alerts: [], cancel_daily: [],
-  alert_km: null, fleet_alerts_per_100km: null, alert_coverage: null }));
+/* Per fixture where one is given. The DEFAULT carries telematics_journeys
+   null, which is what production returns for the operator's driver: no custody
+   row places him in a car on any day of this window, so the harsh-event count
+   was never taken over any population at all. */
+app.get('/api/driver/quality', (req, res) => res.json((F[req.query.id] || {}).quality || {
+  cancels: [], alerts: [], cancel_daily: [], alert_km: null, telematics_journeys: null,
+  fleet_alerts_per_100km: null, alert_coverage: null }));
 app.get('/api/driver/heatmap', (req, res) => res.json([]));
 app.get('/api/driver/custody', (req, res) => res.json([]));
 app.get('/api/driver/shift', (req, res) => res.json([]));
@@ -333,6 +416,217 @@ check('…with a reason that names the population it was measured over',
   cc && /none of the 84 bookings in this window whose payment method was recorded was paid in cash/
     .test(cc.sub), cc && cc.sub);
 
+console.log('\na nought the PLATFORM published is not a figure nobody reported');
+
+/* THE OVER-CORRECTION, IN THE EXACT EXPRESSION THE FIRST FIX REWROTE.
+   The repaired tile opened `if (v) return money(v);` — a TRUTHINESS test on the
+   end of a `??` chain whose entire job is telling null from zero. A statement
+   saying the cash taken was AED 0.00 fell straight through it, and with cash
+   trips present the tile then printed "not reported": the page asserting that
+   the platform reported nothing about a figure the platform reported. Uber
+   publishes 0.00 lines for this fleet routinely — the driver in this very
+   defect gets `payouts 0.00` back from /api/driver/earnings.
+
+   REVERSION THAT PROVES THIS: restore `if (v) return money(v);` in place of
+   `if (v != null) return money(v);`. The value becomes "not reported" and both
+   assertions below fail. */
+const zc = await render('zerocash', 'earnings');
+const zt = tile(zc, 'Cash collected');
+check('a cash figure the platform published AT nought still reads AED 0',
+  zt && zt.value === 'AED 0', JSON.stringify(zt));
+check('…and is never described as not reported',
+  zt && zt.value !== 'not reported', zt && zt.value);
+
+console.log('\na population is not coverage: nobody recorded how any of it was paid');
+
+/* THE THIRD CAUSE OF cashTrips === 0, which the first fix did not separate: the
+   bookings exist and nobody recorded how any of them was settled.
+   /api/driver/mix builds the breakdown as `coalesce(payment_type,'unknown')`,
+   so an unlabelled booking produces a row that never matches CASH_LABEL. The
+   repaired sentence was STRONGER than the one it replaced — "none of their 84
+   bookings in this window was paid in cash" — with no extra test behind it.
+
+   REVERSION THAT PROVES THIS: drop `&& labelledTrips` from the tile's value and
+   collapse the sub back to the two-branch `worked ? … : …`. The value returns
+   to AED 0 and the sentence returns to claiming a measurement over 84 bookings
+   nobody classified. */
+const up = await render('unknownpay', 'earnings');
+const ut = tile(up, 'Cash collected');
+check('a window whose every booking is unlabelled draws no cash figure at all',
+  ut && ut.value === '\u2014', JSON.stringify(ut));
+check('…and says nobody recorded how it was paid, not that none of it was cash',
+  ut && /records how it was paid/.test(ut.sub) && !/was paid in cash/.test(ut.sub), ut && ut.sub);
+/* The panel under the tiles has to tell the same story the tile does, or the
+   reader has two accounts of one fact. Asserted on `quiet`, whose payment list
+   is EMPTY — unknownpay has a real 'unknown' row and draws a real ring, which
+   is correct.
+
+   REVERSION: restore the unconditional `donut(pay.body, mix.payment, {max:6})`.
+   charts.js:donut falls through to empty() and "No data for this range yet"
+   comes back on the one tab that is entirely about money. */
+check('…and the payment panel gives a reason rather than the generic box',
+  /no payment to break down/.test(quiet.all) && !/No data for this range yet/.test(quiet.all),
+  (quiet.notes.join(' | ') || '').slice(0, 300));
+
+console.log('\nthe Counted column states the reason the payload supports');
+
+/* BOTH NEW SENTENCES NAMED A CAUSE THE PAYLOAD DISPROVES.
+   api/driver_routes.js computes `days_used = count(*)` and
+   `counted = round(sum(earnings),2)` over the SAME driver_payout_day rows,
+   already restricted to `day BETWEEN $1 AND $2`. So `counted` is null exactly
+   when in-window days DO exist and every one of them carries a null earnings —
+   the days were resolved. MEASURED on production for the operator's driver:
+   days_used 7 and 6, counted null on both, and the table printed "7" and
+   "6 of 7" in its Days column while the sentence beneath it said none of them
+   had been resolved onto a day inside the window.
+
+   REVERSION THAT PROVES THIS: restore the single-branch caption "…and the
+   server resolved none of them onto a day inside it…" and the static `absent:`
+   string on the Counted column. Both assertions below fail. */
+check('the caption does not claim the statements resolved onto no day here',
+  !/resolved no(ne of them| part of)[^.]*onto a day inside it/.test(quiet.all),
+  quiet.caps.filter((c) => /statement/i.test(c)).join(' | ').slice(0, 400));
+check('…it says the resolved days carry no earnings figure',
+  /resolved them onto 13 days inside it/.test(quiet.all)
+  && /carries no earnings figure at all/.test(quiet.all),
+  quiet.caps.filter((c) => /resolv/i.test(c)).join(' | ').slice(0, 400));
+
+console.log('\nthe Quality tab does not tell a working driver they did not work');
+
+/* `cd` is cancel_daily filtered to trips > 0, and cancel_daily.trips is
+   `count(*) FILTER (WHERE outcome IS NOT NULL)` over trip_norm — NULL for every
+   platform='fms' row and every row with a null status. So cd.length === 0 means
+   "no row carries a normalised outcome", not "nobody worked". The first fix
+   replaced hedged copy with a confident claim about a person's month.
+
+   REVERSION THAT PROVES THIS: drop the `&& !workedQ` from the empty branch. The
+   Quality tab tells a driver with 84 trips and 19 days worked that they worked
+   no day in this window, and both assertions below fail. */
+const upq = await render('unknownpay', 'quality');
+check('a driver with 84 trips is not told they worked no day in this window',
+  !/worked no day in this window/.test(upq.all),
+  (upq.notes.join(' | ') || '').slice(0, 300));
+check('…it says no day carries a trip whose outcome any platform reported',
+  /no day of it carries a trip whose outcome any platform reported/.test(upq.all),
+  (upq.notes.join(' | ') || '').slice(0, 300));
+
+console.log('\na count over a population that does not exist is not a count');
+
+/* HARSH EVENTS read 0 under "no matched distance" while PER 100 KM, the same
+   numerator over a denominator, correctly read "not measured" beside it.
+   Attribution is a join of alert rows against vehicle_driver_day rows; with no
+   custody row the join has nothing on its right and the count comes back 0 for
+   a reason that has nothing to do with driving. `telematics_journeys` is null
+   exactly when plate_days is 0.
+
+   REVERSION THAT PROVES THIS: remove the `qy.telematics_journeys === null`
+   branch from the Harsh events tile. The digit comes back. */
+const qual2 = await render('quiet', 'quality');
+const he = tile(qual2, 'Harsh events');
+check('harsh events over a window with no custody day draws no count',
+  he && he.value === '\u2014', JSON.stringify(he));
+check('…with a reason that says it is unmeasured, not clean',
+  he && /no custody record places this driver in a car/.test(he.sub), he && he.sub);
+/* THE GUARD AGAINST OVER-CORRECTING: a driver whose cars ARE on the feed and
+   who triggered nothing still gets the digit. telematics_journeys 3 on the
+   unknownpay fixture. */
+const he2 = tile(upq, 'Harsh events');
+check('…while a driver the feed did see still reads a real 0',
+  he2 && he2.value === '0', JSON.stringify(he2));
+
+console.log('\nno full-size axis with nothing under it');
+
+/* Trips per day drew a 1090x327 SVG holding 13 zero-height rects and no caption
+   at all, on the first tab a reader opens — barChart's own empty() never fires
+   because the ROWS exist and it is the VALUES that are nought.
+
+   REVERSION THAT PROVES THIS: restore the unconditional
+   `barChart(vol.body, daily.map(…), { x:'label', y:'trips' })`. The axis
+   returns and the sentence goes. */
+const ov = await render('quiet', 'overview');
+check('trips per day says why it is empty instead of drawing an empty axis',
+  /carries a trip for this driver, so every bar would be nought/.test(ov.all),
+  (ov.notes.join(' | ') || '').slice(0, 300));
+/* REVERSION: restore the unconditional percentileBars call. charts.js:empty()
+   draws "NOTHING TO SHOW / No data for this range yet" above the true sentence
+   and this fails. */
+check('…and no panel on the tab prints the generic empty box at all',
+  !/No data for this range yet/.test(ov.all),
+  (ov.all.match(/Nothing to show[^.]{0,80}/g) || []).join(' | '));
+
+console.log('\nthe one money tile that still drew a nought, and why it stays one');
+
+/* MONEY IN read AED 0 on the tab the page OPENS on — one loud money nought
+   beside four money tiles correctly reading an em dash, under a banner saying
+   no trip of this driver's falls in the window. MEASURED on production:
+   day_money 0, day_money_days 13, day_stmt_net 0, window_days 16.
+
+   The FIGURE is right and must stay a digit: moneyParts returns NaN when
+   day_money is null, and the tile already renders that as an absence, so a zero
+   here means rows existed and summed to nought. By this brief's own rule that
+   is a report about the window.
+
+   The REASON was the defect. Both halves of `parts` test their value for TRUTH,
+   so a statement half of nought and a priced half of nought both dropped out
+   and the tile fell through to "what the platforms report this driver earned,
+   across every channel" — a description of the tile, not a statement about
+   these dates.
+
+   REVERSION THAT PROVES THIS: remove the `if (p.gross === 0)` branch from
+   moneyInTile in api/public/ui.js. The value is unchanged and the second
+   assertion fails, which is the point: the number was never the bug. */
+const mi = tile(ov, 'Money in');
+check('a nought the platforms published is still a number',
+  mi && mi.value === 'AED 0', JSON.stringify(mi));
+check('\u2026and the reason beside it names the days it was measured over',
+  mi && /13 days in this window/.test(mi.sub) && /published about this window/.test(mi.sub),
+  mi && mi.sub);
+check('\u2026and does not fall through to a description of the tile',
+  mi && !/^what the platforms report this driver earned/.test(mi.sub), mi && mi.sub);
+
+console.log('\nthe Record tab is not four headings and a blank');
+
+/* /api/performance/driver answers 404 for an id /api/driver/profile answers in
+   full. The catch branch emptied all four panel bodies and returned, so the tab
+   rendered as 92/110/92/92px of whitespace under four headings — literally the
+   wall of blanks the operator sent a screenshot of.
+
+   REVERSION THAT PROVES THIS: restore
+   `[jobs.body, val.body, pos.body, tbl.body].forEach((b) => { b.innerHTML = ''; })`
+   in driverrecord.js. All three assertions below fail. */
+const recTab = await render('quiet', 'record');
+check('a failed record read puts a reason in every panel it emptied',
+  (recTab.notes.filter((n) => /could not be read/.test(n)).length) >= 5,
+  `${recTab.notes.length} notes: ${recTab.notes.join(' | ').slice(0, 300)}`);
+check('…and says the failure is not a measurement of the driver',
+  /says nothing either way about what they did/.test(recTab.all), recTab.all.slice(0, 300));
+/* REVERSION: drop the `tab === 'record'` branch from emptyWindowNote. The
+   banner goes back to asserting the record is intact directly above a strip
+   saying the record could not be read. */
+check('…and the banner above it no longer claims the record is intact',
+  !/not the record of it/.test(recTab.banner || ''), recTab.banner);
+
+console.log('\nthe banner does not deny money the tab prints underneath it');
+
+/* moneyMeasured never consulted e.fare, e.statement_cash, e.statement_gross or
+   the periods' own cash_earnings, all four of which this tab renders. So one
+   render could carry "none of it carries a money figure … no statement covering
+   these dates has reached us" and, four lines lower, "The day-level statements
+   covering 7 days of this window report AED 6,000 net, AED 250 already taken in
+   cash."
+
+   REVERSION THAT PROVES THIS: remove `e.fare != null || e.statement_cash != null`
+   from moneyMeasured. The banner returns and the first assertion fails; restore
+   the caption's old wording and the second fails. */
+const dl = await render('daylevel', 'earnings');
+check('a tab printing AED 6,000 does not open by saying no money was measured',
+  !/none of it carries a money figure/.test(dl.all),
+  (dl.notes.join(' | ') || '').slice(0, 300));
+check('…and the empty statement table names the PAYOUT-PERIOD feed, not every feed',
+  /No payout-period statement from any platform/.test(dl.all)
+  && !/No statement from any platform covers a day of this window/.test(dl.all),
+  dl.caps.join(' | ').slice(0, 300));
+
 console.log('\na count of nought is a true count and stays a count');
 
 /* REVERSION: none needed — this is the guard against over-correcting. If a
@@ -487,6 +781,42 @@ check('no hbars caller in app.js coerces a null amount to a zero-length bar',
 check('…and componentTree records whether anything behind a category was valued',
   /cur\.measured = true/.test(appSrc) && /c\.amount != null/.test(appSrc),
   'api/public/app.js aggregates amounts from a zero seed regardless of nulls');
+/* THE HALF OF THAT FIX THAT STOPPED AT THE CHART. `measured` gated the bars and
+   the net, and the children table eighty lines below went on reading `c.amount`
+   — seeded at 0 and left there — so one category was named in words as carrying
+   no amount and then printed AED 0.00 in a column of measured ones.
+
+   REVERSION THAT PROVES THIS: restore `amount: c.amount` in componentTree's
+   rows.push and this fails. */
+check('…and its children table carries an unvalued category through as null',
+  /amount: c\.measured \? c\.amount : null/.test(appSrc),
+  'api/public/app.js still prints AED 0.00 for a category nobody valued');
+/* The fleet cash tile's denominator: /api/settlement/mix classifies only what
+   it can and returns unlabelled_trips beside the classes, and the Finance
+   page's own settlement caption says so. Naming k.trips as "bookings" quoted a
+   denominator the same page calls the wrong one.
+
+   REVERSION: restore `+k.trips > 0 ? money(0) : '—'` and the k.trips sentence. */
+check('…and the fleet cash tile counts the bookings whose route was recorded',
+  /settle\.unlabelled_trips/.test(appSrc)
+  && /whose settlement route is/.test(appSrc),
+  'api/public/app.js still measures cash over every booking in the range');
+
+console.log('\nthe statement caption counts the statements that contributed');
+
+/* "counted across 16 statements" was over e.periods.length while the total
+   beside it was summed over the rows that carry a figure — and on a working
+   driver measured through bin/live-ui.mjs one of those sixteen is null.
+
+   REVERSION THAT PROVES THIS: restore
+   `${countOf(e.periods.length, 'statement')}` in that caption. The sentence
+   says 2 where 1 contributed and this fails. */
+check('the total is stated across the statements it was summed over',
+  /counted across 1 statement\b/.test(card.all) && !/counted across 2 statements/.test(card.all),
+  (card.all.match(/AED[^.]{0,14} counted across[^.]*\./g) || []).join(' | '));
+check('…and the ones that carried no figure are named rather than folded in',
+  /carry no earnings figure on any day of|carries no earnings figure on any day of/.test(card.all),
+  card.caps.filter((c) => /counted across/.test(c)).join(' | ').slice(0, 400));
 
 await browser.close();
 server.close();

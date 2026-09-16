@@ -1862,6 +1862,44 @@ export function moneyInTile(k, { label = 'Money in' } = {}) {
       + 'so this is a floor rather than the total — Uber files its fares in a weekly payments '
       + 'report, and those bookings are worth nothing here until it lands. '
     : '';
+  /* A NOUGHT THE PLATFORMS PUBLISHED, SAID AS ONE.
+     ─────────────────────────────────────────────────────────────────────────
+     MEASURED on production for e3cd308b2b5f48e19877b924b48bbb9d over
+     2026-09-01..09-16: day_money 0, day_money_days 13, day_stmt_net 0,
+     day_money_period_days 7, window_days 16. So this tile rendered a bold
+     AED 0 beside four money tiles correctly reading an em dash, on the tab the
+     page opens on, directly under a banner saying no trip of this driver's
+     falls in the window.
+
+     The FIGURE is right and stays a number: day_money is null when nothing
+     reached these dates — the branch above catches that — so a zero here means
+     rows existed and summed to nought, which is Uber having filed statements
+     for 13 of these 16 days with every line reading 0.00. By the house rule
+     that is a report about the window and must not become an absence.
+
+     The REASON beside it was the fault. Both halves of `parts` test their
+     value for truth, so a net of nought and a priced remainder of nought both
+     dropped out and the tile fell through to "what the platforms report this
+     driver earned, across every channel" — a description of the tile, not a
+     statement about these dates. A reader met a bold nought under a generic
+     line and had no way to tell a fleet that earned nothing from a fleet
+     nobody measured. The count of days the figure was taken over is the thing
+     that separates them, and the endpoint has always returned it. */
+  if (p.gross === 0) {
+    const days = Number(k && k.day_money_days);
+    const win = Number(k && k.window_days);
+    return { label, value: money(0), long: true,
+      sub: (Number.isFinite(days) && days > 0
+        ? `every one of the ${fmt(days)} day${days === 1 ? '' : 's'} in this window that a platform `
+          + 'statement or a priced booking reached reports nought'
+          + (Number.isFinite(win) && win > days
+            ? `, and the other ${fmt(win - days)} of the window's ${fmt(win)} were not reached at all`
+            : '')
+        : 'what reached these dates reports nought')
+        + '. That is a figure the platforms published about this window — not one nobody took, and '
+        + 'not a driver whose earnings are missing'
+        + grainClause(p, 'what was earned', { alignment: true }) };
+  }
   return { label, value: (unpriced ? 'at least ' : '') + money(p.gross), long: true,
     sub: floorClause
       + (parts.join(' · ')

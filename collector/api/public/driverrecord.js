@@ -323,9 +323,36 @@ export async function renderDriverRecord(root, id, prof) {
   try {
     rec = await api(`/api/performance/driver?id=${encodeURIComponent(id)}&grain=${grain}`);
   } catch (e) {
+    /* FOUR PANELS OF HEADING AND SUBTITLE AND THEN NOTHING AT ALL.
+       ═══════════════════════════════════════════════════════════════════════
+       This emptied the four bodies and returned, so a failed read rendered as
+       92, 110, 92 and 92 pixels of pure whitespace under four headings — no
+       chart, no table, no note, not even the generic empty box. Measured on
+       production for e3cd308b2b5f48e19877b924b48bbb9d over 2026-09-01..09-16:
+       /api/performance/driver answers 404 {"error":"unknown driver"} for an id
+       /api/driver/profile answers in full, and this tab was literally the wall
+       of blanks the operator sent a screenshot of.
+
+       A panel whose data could not be fetched is not a panel with no data in
+       it, and neither of those is a blank rectangle. The reason goes in each
+       body, because a reader scrolled to the third chart cannot see a strip at
+       the top of the tab — and it says what the failure does and does not
+       prove, since "unknown driver" from this endpoint is a statement about a
+       performance record, not about the person. */
+    const why = String(e && e.message ? e.message : e);
     vHost.innerHTML = '';
-    vHost.append(note(`The record could not be read: ${String(e && e.message ? e.message : e)}`, 'warn'));
-    [jobs.body, val.body, pos.body, tbl.body].forEach((b) => { b.innerHTML = ''; });
+    vHost.append(note(`The record could not be read: ${why}. `
+      + 'Nothing below is a measurement of this driver — the request for it failed, which says '
+      + 'nothing either way about what they did.'
+      + (/\b404\b/.test(why)
+        ? ' A 404 from this endpoint means no PERFORMANCE record has been built for this id; the '
+          + 'rest of this profile reads from the trip and statement feeds and is unaffected.'
+        : ''), 'warn'));
+    [jobs.body, val.body, pos.body, tbl.body].forEach((b) => {
+      b.innerHTML = '';
+      b.append(note('This panel is drawn from the record above, which could not be read. It is empty '
+        + 'because the request failed, not because there was nothing in it.'));
+    });
     return;
   }
   if (!alive(gen)) return;

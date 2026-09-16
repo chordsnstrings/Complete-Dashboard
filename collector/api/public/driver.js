@@ -940,22 +940,33 @@ async function tabOverview(root, id, prof) {
   // panel is opened for, and days-held answered a different one.
   const heldRows = [...(prof.vehicles || [])]
     .sort((a, b) => String(b.last_day || '').localeCompare(String(a.last_day || '')));
-  const vt = tableFrom(heldRows.slice(0, 8), [
-    /* entity(), not a hand-rolled anchor: href() drops falsy parts, so a null
-       plate produced `#vehicle` — a link with empty text that silently opened
-       the whole vehicle directory instead of saying there was nothing to open. */
-    { label: 'Plate', key: 'plate',
-      render: (r) => entity('vehicle', r.plate, r.plate)
-        + (r.ever_primary ? ' <span class="dim" title="primary holder on at least one day">●</span>' : '') },
-    { label: 'Last held', key: 'last_day', render: (r) => dateStr(r.last_day) },
-    { label: 'Days', key: 'days', num: true },
-    { label: 'Trips', key: 'trips', num: true },
-    { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-  ], { compact: true, sortable: true, sortId: 'held', defaultSort: { key: 'last_day', dir: 'desc' } });
-  veh.body.append(vt);
-  veh.body.append(el('p', 'cap', '● marks a vehicle this driver was the primary holder of. '
-    + `Custody is over the whole record, not the window above${heldRows.length > 8
-      ? ` — showing the ${fmt(Math.min(8, heldRows.length))} most recent of ${fmt(heldRows.length)}` : ''}.`));
+  /* tableFrom falls through to the generic empty box on an empty list, and
+     "No data for this range yet" is wrong twice on this panel: it is not a
+     range — the subtitle says so in its own title — and it is not a reason. */
+  if (!heldRows.length) {
+    veh.body.innerHTML = '';
+    veh.body.append(note('No custody record has ever placed this driver in a vehicle. Custody is '
+      + 'written from the trips and handovers of each day, so a person whose work reaches us through '
+      + 'a channel that names no plate has none — which is not the same as a driver who has never '
+      + 'held a car.'));
+  } else {
+    const vt = tableFrom(heldRows.slice(0, 8), [
+      /* entity(), not a hand-rolled anchor: href() drops falsy parts, so a null
+         plate produced `#vehicle` — a link with empty text that silently opened
+         the whole vehicle directory instead of saying there was nothing to open. */
+      { label: 'Plate', key: 'plate',
+        render: (r) => entity('vehicle', r.plate, r.plate)
+          + (r.ever_primary ? ' <span class="dim" title="primary holder on at least one day">●</span>' : '') },
+      { label: 'Last held', key: 'last_day', render: (r) => dateStr(r.last_day) },
+      { label: 'Days', key: 'days', num: true },
+      { label: 'Trips', key: 'trips', num: true },
+      { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
+    ], { compact: true, sortable: true, sortId: 'held', defaultSort: { key: 'last_day', dir: 'desc' } });
+    veh.body.append(vt);
+    veh.body.append(el('p', 'cap', '● marks a vehicle this driver was the primary holder of. '
+      + `Custody is over the whole record, not the window above${heldRows.length > 8
+        ? ` — showing the ${fmt(Math.min(8, heldRows.length))} most recent of ${fmt(heldRows.length)}` : ''}.`));
+  }
 
   startScatter(start.body, daily);
   /* Both of these fell through to charts.js:empty()'s "No data for this range
@@ -1233,8 +1244,24 @@ async function tabActivity(root, id) {
           ? 'the statement behind this figure does not record the period it covered, so whether '
             + 'it was measured on this day is not something we can say'
           : n > 1
-            ? `a ${n}-day statement divided across its days \u2014 right for the period, not `
-              + 'measured on this day'
+            /* A SHARE OF NOUGHT IS THE ONE SHARE THAT LOSES NOTHING.
+               ───────────────────────────────────────────────────────────
+               Thirteen rows of "AED 0 \u00b7 1/7" sat above a caption saying the
+               figure on any one day inside a period is not something anybody
+               measured, and the two read as the page printing a number and
+               then denying it. For every other value that tension is real and
+               the tag is the disclosure. For nought it is not: the share is
+               the period divided by its days, so a share of nought is a PERIOD
+               of nought \u2014 Uber filed a statement for that week and every line
+               of it reads 0.00. That is a figure the platform published, and
+               the tooltip says which kind of nought it is rather than leaving
+               a reader to assume this one was estimated like the others. */
+            ? (+r.money === 0
+              ? `the ${n}-day statement covering this day reports nought over the whole of it, so `
+                + 'this day\u2019s share of it is nought too \u2014 a figure the platform published '
+                + 'about that week, not a day anybody measured'
+              : `a ${n}-day statement divided across its days \u2014 right for the period, not `
+                + 'measured on this day')
             : r.money_source === 'fares'
               ? 'the channel priced each booking on this day'
               : r.money_source === 'mixed'
@@ -1251,7 +1278,11 @@ async function tabActivity(root, id) {
         + 'driver who was never online',
       render: (r) => (r.hours_online
         ? `${fmt(r.hours_online, 1)} h` + (r.hours_online_basis === 'availability'
-          ? '<span class="dim" title="from the availability feed\u2019s ONLINE spans, not a figure the platform published"> \u00b7 spans</span>' : '')
+          /* "4.9 h \u00b7 spans" parsed as a count whose number had gone missing,
+             because the column two to its left uses "\u00b7 1/7" for exactly that
+             shape. A provenance marker has to read as a phrase, not as a
+             truncated figure. */
+          ? '<span class="dim" title="from the availability feed\u2019s ONLINE spans, not a figure the platform published"> \u00b7 from spans</span>' : '')
         : '\u2014') },
     { label: 'On job', key: 'hours_on_job', num: true,
       absent: 'no job on these days carries both a request and a dropoff time',
@@ -2073,17 +2104,49 @@ async function tabEarnings(root, id, prof) {
       + '. That is an absent figure, not a total of nought: the Statement column beside it is '
       + 'the platform\u2019s figure over its whole period, which is a different measurement and is '
       + 'not the same money as this window\u2019s.' + colTail));
-  } else per.body.append(el('p', 'cap', `${money(counted)} counted across ${countOf(e.periods.length, 'statement')}`
-    + (displaced.length
-      ? ` — ${fmt(displaced.length)} of them overlap another statement, and only the days no other `
-        + 'statement covers are counted. Adding the Statement column instead would count those days twice.'
-      : '. None of them overlap, so Statement and Counted agree.')
-    + colTail
-    + (Math.abs(counted - Number(k.reported_earnings || 0)) > 1 && k.reported_earnings
-      ? ` The Platform-earnings tile above reads ${money(k.reported_earnings)}: that is the sum of the `
-        + 'statements as published, and this is the part of them that falls inside the window — a '
-        + 'statement straddling the edge contributes only its days inside it.'
-      : '')));
+  } else {
+    /* THE COUNT IN THE SENTENCE IS THE COUNT THAT CONTRIBUTED.
+       ─────────────────────────────────────────────────────────────────────
+       "counted across 16 statements" was over e.periods.length while the total
+       beside it was summed over countedRows — and on a working driver measured
+       through bin/live-ui.mjs for 2026-09-01..09-16, one of those sixteen
+       carries counted null, so the sentence described a denominator its own
+       numerator had excluded. The rows that carry no figure are named as such
+       instead, which is the same treatment the components chart above gets.
+
+       AND THE RECONCILIATION SENTENCE NOW HAS TWO BRANCHES.
+       It fired only when Counted and Platform earnings DISAGREED by more than
+       a dirham, which was its whole reason for existing when Counted was being
+       computed with `r.counted ?? r.earnings` and came out too big. With the
+       total now summed over the clamped column the two agree on that driver —
+       AED 7,432 on both — and the sentence silently vanished, leaving nothing
+       on the page to tell a reader that the two figures are the same money.
+       Agreement is worth one clause; it is the thing a reader checks for. */
+    const nulls = e.periods.length - countedRows.length;
+    const rep = k.reported_earnings == null ? null : Number(k.reported_earnings);
+    per.body.append(el('p', 'cap', `${money(counted)} counted across `
+      + `${countOf(countedRows.length, 'statement')}`
+      + (nulls
+        ? ` — the other ${countOf(nulls, 'statement')} ${plural(nulls, 'reaches', 'reach')} into `
+          + `this window and ${plural(nulls, 'carries', 'carry')} no earnings figure on any day of `
+          + 'it, so nothing of theirs could be counted'
+        : '')
+      + (displaced.length
+        ? `${nulls ? '. ' : ' — '}${fmt(displaced.length)} of them overlap another statement, and `
+          + 'only the days no other statement covers are counted. Adding the Statement column instead '
+          + 'would count those days twice.'
+        : '. None of them overlap, so Statement and Counted agree.')
+      + colTail
+      + (rep == null ? ''
+        : Math.abs(counted - rep) > 1
+          ? ` The Platform-earnings tile above reads ${money(rep)}: that is the sum of the `
+            + 'statements as published, and this is the part of them that falls inside the window — a '
+            + 'statement straddling the edge contributes only its days inside it.'
+          : ` The Platform-earnings tile above reads ${money(rep)}, which is this same money: no `
+            + 'statement here straddles the edge of the window with days outside it that carry an '
+            + 'amount, so the published sum and the part of it counted in these dates come to one '
+            + 'figure. They are one number checked two ways, not two numbers that happen to match.')));
+  }
   /* The statement's own split, at the grain it was filed at.
      ─────────────────────────────────────────────────────────────────────────
      driver_statement_day is one row per driver per day with the overlapping
@@ -3371,8 +3434,23 @@ export function emptyWindowNote(prof, tab) {
   const record = evTrips
     ? `, and ${countOf(evTrips, 'trip')} ${plural(evTrips, 'sits', 'sit')} on their record`
     : '';
-  return `No trip of this driver's falls in ${win}. ${when}${record}. Every figure below is `
-    + `measured over those dates, so what is missing here is the work, not the record of it.${tail}`;
+  /* THE CLOSING CLAUSE IS NOT TRUE ON EVERY TAB.
+     ─────────────────────────────────────────────────────────────────────────
+     "Every figure below is measured over those dates, so what is missing here
+     is the work, not the record of it" is the right sentence on seven tabs and
+     wrong on one. The Record tab is not windowed at all — it reads whole weeks
+     and months from /api/performance/driver — and for this very driver that
+     endpoint answers 404, so the banner asserted the record was intact
+     directly above a warn strip saying the record could not be read. Two
+     sentences contradicting each other in adjacent paragraphs is worse than
+     either of them alone. */
+  const closing = tab === 'record'
+    ? 'Nothing below is measured over those dates: a record is read over whole weeks and months of '
+      + 'this person’s work, so what this tab shows is governed by what has been built for them '
+      + 'and not by the window on the toolbar.'
+    : 'Every figure below is measured over those dates, so what is missing here is the work, not '
+      + 'the record of it.';
+  return `No trip of this driver's falls in ${win}. ${when}${record}. ${closing}${tail}`;
 }
 
 const TABS = { overview: tabOverview, activity: tabActivity, territory: tabTerritory,

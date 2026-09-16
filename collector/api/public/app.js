@@ -259,10 +259,23 @@ function componentTree(components) {
     const rows = [];
     for (const [p, list] of byParent) {
       const parentAmt = byLabel.get(String(p).replace(/_/g, ' ')) ?? byLabel.get(p);
+      /* THE HALF OF THE FIX THAT STOPPED AT THE CHART.
+         ───────────────────────────────────────────────────────────────────
+         `measured` was introduced above so an unmeasured category could be
+         kept off the bars and named in words instead — and this table, built
+         from the same objects eighty lines later, went on reading `c.amount`,
+         which is seeded at 0 and left there when every contributing row
+         carried a null. So one category was described two ways on one panel:
+         "carries no amount and is not drawn" in the caption, and AED 0.00 in a
+         column of measured amounts directly beneath it, with a share computed
+         against its parent. Carried through as null here, the same way
+         api/public/driver.js's children table already does it, with the same
+         `absent:` sentence so the column prunes rather than printing dashes. */
       list.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)).forEach((c) => {
-        rows.push({ within: String(p).replace(/_/g, ' '), label: c.label, amount: c.amount,
+        rows.push({ within: String(p).replace(/_/g, ' '), label: c.label,
+          amount: c.measured ? c.amount : null,
           drivers: c.drivers,
-          share: parentAmt ? (c.amount / parentAmt) * 100 : null });
+          share: parentAmt && c.measured ? (c.amount / parentAmt) * 100 : null });
       });
     }
     host.append(tableFrom(rows, [
@@ -270,10 +283,15 @@ function componentTree(components) {
       { label: 'Component', key: 'label' },
       // money() writes the sign now; this used to do it by hand.
       { label: 'Amount', key: 'amount', num: true,
-        render: (r) => money(r.amount, 'AED', 2) },
+        absent: 'the statements name these components and put an amount on none of them, so there is '
+          + 'nothing to put in this column — they are components nobody valued, not components '
+          + 'worth nothing',
+        render: (r) => (r.amount == null ? '—' : money(r.amount, 'AED', 2)) },
       { label: 'Share of its parent', key: 'share', num: true,
         render: (r) => (r.share == null
-          ? '<span class="ent-off" title="the parent component was not returned for this window">—</span>'
+          ? `<span class="ent-off" title="${r.amount == null
+            ? 'this component carries no amount, so it has no share of anything'
+            : 'the parent component was not returned for this window'}">—</span>`
           : pct(r.share, 1)) },
       /* A component everybody carries and one that applies to three drivers
          are different findings, and the amount alone cannot tell them apart. */
@@ -2801,17 +2819,45 @@ V.finance = async (root) => {
        same range and carries the range's own booking count. The sub-line has
        the same fault — "no cash booking in this range" is true in case (b) and
        narrower than what happened, because no booking of ANY kind was in it. */
-    { label: 'Cash collected — measured portion',
-      value: cash ? (cash.revenue == null ? 'not reported' : money(cash.revenue))
-        : (+k.trips > 0 ? money(0) : '\u2014'),
-      sub: cash
-        ? `the ${fmt(cash.priced_trips)} of ${fmt(cash.trips)} cash bookings that report a fare `
-          + `(${pct(cash.trips ? (cash.priced_trips / cash.trips) * 100 : 0, 1)}) — the rest are `
-          + 'real money with no figure attached'
-        : +k.trips > 0
-          ? `none of the ${fmt(k.trips)} bookings in this range was paid in cash`
-          : 'no booking of any kind falls in this range, so no cash was measured either way',
-      tone: cash && cash.priced_trips < cash.trips ? 'warn' : null },
+    /* THE DENOMINATOR HAS TO BE THE POPULATION THE ANSWER WAS TAKEN OVER.
+       ───────────────────────────────────────────────────────────────────────
+       The repair above gated on `k.trips` and then named `k.trips` as the
+       population: "none of the 2,043 bookings in this range was paid in cash".
+       /api/settlement/mix classifies a trip only where it can — it returns
+       `unlabelled_trips` beside the classes for exactly this reason — and the
+       settlement caption four panels below this row already says so in as many
+       words: "402 of 2,043 trips record no payment type (FMS telematics) and
+       are left out rather than counted as cash". So the sentence quoted a
+       denominator the same page calls the wrong one.
+
+       Three states, not two. Bookings with a settlement route and none of them
+       cash is a measurement and stays AED 0. Bookings none of which carries a
+       route is an absence with its own reason. No booking at all is the third,
+       and keeps the sentence the first repair gave it. */
+    (() => {
+      const total = Number(settle.total_trips);
+      const unl = Number(settle.unlabelled_trips) || 0;
+      const classified = Number.isFinite(total) ? total - unl
+        : (settle.classes || []).reduce((a, c) => a + (+c.trips || 0), 0);
+      const any = +k.trips > 0 || classified > 0;
+      return { label: 'Cash collected — measured portion',
+        value: cash ? (cash.revenue == null ? 'not reported' : money(cash.revenue))
+          : (classified > 0 ? money(0) : '\u2014'),
+        sub: cash
+          ? `the ${fmt(cash.priced_trips)} of ${fmt(cash.trips)} cash bookings that report a fare `
+            + `(${pct(cash.trips ? (cash.priced_trips / cash.trips) * 100 : 0, 1)}) — the rest are `
+            + 'real money with no figure attached'
+          : classified > 0
+            ? `none of the ${fmt(classified)} bookings in this range whose settlement route is `
+              + 'recorded was paid in cash'
+              + (unl ? `; the other ${fmt(unl)} record none and are left out rather than counted as `
+                + 'not-cash' : '')
+            : any
+              ? `not one of the ${fmt(total || k.trips)} bookings in this range records how it was `
+                + 'settled, so whether any of it was cash is not something anybody measured'
+              : 'no booking of any kind falls in this range, so no cash was measured either way',
+        tone: cash && cash.priced_trips < cash.trips ? 'warn' : null };
+    })(),
     { label: 'Tips', value: tipTotal ? money(tipTotal) : '—',
       sub: fareTotal
         ? `${((tipTotal / fareTotal) * 100).toFixed(2)}% of net fare`
