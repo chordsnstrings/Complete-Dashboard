@@ -365,6 +365,17 @@ const VIEWS = [
   { id: 'same-person', label: 'Same person?', ic: '⩸', sec: 'People', sub: 'Pairs whose names look like one driver, waiting for somebody to confirm or deny it — a phone or an email merges on its own and never appears here' },
   { id: 'vehicles', label: 'Vehicles', ic: '▤', sec: 'Fleet', sub: 'How much each car is used, and how much money it brings in' },
   { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', sec: 'Fleet', sub: 'Trips where the seat sensor saw a rider but no platform has a booking' },
+  /* THE LIST ITSELF, WITH AN ADDRESS. Asked for as "another tab of all
+     unauthorized trips" — and until now there was no way to ask for one. The
+     page above folds its segment list to eight of N and has no tab bar;
+     #segments has always held the full filterable list and was reachable only
+     by clicking a donut slice or a verdict chip, which is not a destination
+     anybody can be sent to. It is the same page, not a second one: it now
+     carries the attribution — who the evidence names beside each journey, on
+     which rung, and how much of the list cannot be narrowed to one person at
+     all. DRILL_PAGE already mapped `segments` into this section, so the strip
+     lit correctly before this row existed and still does. */
+  { id: 'segments', label: 'All unauthorized trips', ic: '≣', sec: 'Fleet', sub: 'Every unexplained journey in the fleet, with who the evidence can name beside it, how firmly, and how many cannot be narrowed to one person' },
   { id: 'safety', label: 'Safety', ic: '△', sec: 'Fleet', sub: 'Harsh braking, speeding and sharp turns from the car trackers, plus tracker faults' },
   { id: 'live', label: 'Live fleet', ic: '◉', sec: 'Fleet', sub: 'Live vehicle positions, refreshed by CABMAN every 5 minutes' },
   { id: 'map', label: 'Map & replay', ic: '◍', sec: 'Fleet', sub: 'Where every vehicle is now, and where it went on any given day' },

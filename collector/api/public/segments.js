@@ -16,10 +16,10 @@
 
 import { empty, fmt, areaChart, hbars, donut } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
-         dtStr, timeStr, dayStr, dateStr, money, custody,
+         dtStr, timeStr, dayStr, dateStr, money, custody, verdict, foldRows,
          sourceLabel, countOf, plural, asList, noneChosen,
          trackerState, trackerSpeed, stillNote, UBER_FARE_WHY } from './ui.js';
-import { q, api, href, state, unfiltered } from './data.js';
+import { q, qAll, api, href, state, unfiltered } from './data.js';
 
 const VERDICT_TONE = { unauthorized: 'bad', authorized: 'ok', sensor_suspect: 'warn',
   partial: 'warn', stationary: null, unverifiable: 'warn', pending: null };
@@ -36,15 +36,417 @@ const VERDICT_MEANS = {
 
 const vTag = (v) => `<span class="tag ${VERDICT_TONE[v] || 'dim'}">${esc(v || '—')}</span>`;
 
+/* ═══ WHO WAS DRIVING, WHEN NOTHING BOOKED THE JOURNEY ══════════════════════
+   Asked for in these words: "we can get the unauthorized trips on the time and
+   date and we can match who drove that car using uber ... along with another
+   tab of all unauthorized trips".
+
+   THE DEFECT THIS ANSWERS. This list has always carried a column headed
+   "Driver that day", fed by day-grain custody. The heading is honest and the
+   column is useless at the moment it matters: a HANDOVER DAY names two people
+   for one journey that had one driver, and an operator holding two names has
+   an accusation they cannot act on. Measured on production over
+   from=2026-08-01&to=2026-09-16, 120 unauthorized segments: 33 carried NO
+   custody at all, 46 exactly one, 32 two, 8 three, 1 four. So 41 of 120 named
+   more people than drove, and 33 named nobody while the column simply read
+   "unknown" with no reason for it.
+
+   WHAT REPLACES IT. /api/unauthorized/attributed runs a four-rung ladder whose
+   SQL and whose measurements live in api/unauthorized_sql.js — nothing is
+   decided in this file. Every name it produces is an INFERENCE (an unexplained
+   journey is by definition one no booking explains, so no booking names its
+   driver), and the page's job is to make the strength of each claim impossible
+   to miss and impossible to average away:
+
+     - the TIER is printed in front of the name, in every place a name appears;
+     - the DISTRIBUTION of the tiers is printed ABOVE the list, so a reader
+       knows what the page is before they read a single name. Measured over
+       2026-06-01..2026-09-16: 13 named by time, 48 by day custody alone, 26
+       with more than one candidate and 33 with nobody — two thirds of this
+       feature is custody and absence, and a page that leads with names would
+       be the dishonest version of it;
+     - `ambiguous` prints EVERY candidate joined by "or", never a likeliest;
+     - `unknown` prints the absence and its true reason, never the car's usual
+       driver and never the nearest booking.
+
+   The SENTENCES that define each tier are deliberately not written here. They
+   arrive on the response as `tier_means`, authored beside the SQL that assigns
+   them, so this page cannot come to explain a rung differently from the rule
+   that fills it. What is local is the short label a chip and a table cell have
+   room for, and the colour. */
+const TIER_ORDER = ['bracketed', 'sole_custodian', 'ambiguous', 'unknown'];
+const TIER_LABEL = {
+  bracketed: 'Named by time',
+  sole_custodian: 'Only custodian that day',
+  ambiguous: 'More than one candidate',
+  unknown: 'Nobody can be named',
+};
+/* Room for four words in a table cell, and the cell has a name beside it. */
+const TIER_SHORT = { bracketed: 'by time', sole_custodian: 'only custodian',
+  ambiguous: 'one of several', unknown: 'nobody' };
+const TIER_TONE = { bracketed: 'ok', sole_custodian: null, ambiguous: 'warn', unknown: 'dim' };
+/* Which rungs are a claim about ONE person and which are not. The band, the
+   chips, the per-person table and the driver page all have to agree about
+   this; four copies of `t === 'bracketed' || t === 'sole_custodian'` is four
+   chances for one surface to count an ambiguous row as an accusation. */
+const FIRM = ['bracketed', 'sole_custodian'];
+const isFirm = (t) => FIRM.includes(t);
+
+/* `tier` and `who` ride in the address's QUERY STRING rather than in a path
+   slot. The router's KINDS list — verdict|plate|day|driver — lives in
+   api/public/app.js and this file does not own it, and a filter that dies on
+   reload is the thing #segments exists to have stopped doing. Same read the
+   shell already does for `#driver/<id>?on=`. */
+const hashQ = (k) => new URLSearchParams(location.hash.split('?')[1] || '').get(k);
+
+/* Keyed on the PARSED instant, not on the string.
+   /api/segments and /api/unauthorized/attributed both select the same
+   `occupancy_segment.started_at`, but they are two responses and a timestamp
+   that round-trips as `2026-08-24T05:33:00.000Z` on one and `...+00:00` on the
+   other would silently match nothing — every row would fall back to day
+   custody and the feature would look like an empty deployment. */
+const segKey = (r) => `${r.plate}|${Date.parse(r.started_at)}`;
+
+/* The attribution fields, named rather than spread wholesale.
+   `clock_skew_min` is DELIBERATELY not in this list: /api/segments computes it
+   by regex over verdict_reason (api/segment_routes.js SKEW) and the page's
+   clock-skew warning is built from it, so letting the attribution response's
+   own copy overwrite it would make the two disagree about which segments are
+   unusable. Everything else here exists only on the attribution response. */
+const ATT_FIELDS = ['attribution_tier', 'attribution_candidates', 'attribution_candidate_count',
+  'attribution_candidate_keys', 'attribution_evidence', 'bracket_before_min', 'bracket_after_min',
+  'custodian_count', 'candidate_statuses', 'nearest_booking', 'status_note',
+  'forgone_aed', 'aed_per_km', 'rate_basis'];
+
+/* WHO THE EVIDENCE NAMES, as one table cell.
+   ──────────────────────────────────────────────────────────────────────────
+   Three disciplines, and each one is a way this cell could accuse somebody:
+
+     - the TIER is in front of the name and is never optional, so a name
+       cannot be read without the strength of the claim behind it;
+     - on `ambiguous` every candidate is printed and joined by "or", not by a
+       comma. A comma reads as a list of people who did it; "or" reads as the
+       question it actually is;
+     - on `unknown` nothing is printed but the absence and its reason. The
+       nearest booking is on the row and is NOT offered here — its median gap
+       over production's 106 populated rows is 97 minutes and its maximum is
+       11,309, and on precisely the rows where nobody can be named it is the
+       plausible name a reader would take for an answer.
+
+   A row with no attribution at all is not the same as tier `unknown`, and the
+   two must not render alike: `unknown` means the ladder ran and reached
+   nobody, while an absent tier means the ladder was never run on this row —
+   because it is not an unexplained journey, or because it is past the cap of
+   the attribution list. That row keeps the day-custody content this column has
+   always had, labelled as day custody so it cannot be read as a narrowed name. */
+const attributionCell = (r) => {
+  const tier = r.attribution_tier;
+  if (!tier) {
+    const day = custody(r, { title: 'This driver’s other flagged segments',
+      hrefFor: (dr) => href('segments', 'driver', dr.name) });
+    return `<span class="tag dim" title="${esc(r.attribution_absent
+      || 'no attribution was computed for this row')}">day custody</span> ${day}`;
+  }
+  const cands = Array.isArray(r.attribution_candidates) ? r.attribution_candidates : [];
+  /* The evidence sentence and the corroboration sentence, together, because
+     they are read together: "their trip ended 54 minutes before and the next
+     began 75 after" and "both candidates were offline on Uber for the whole
+     window" answer different halves of the same doubt. */
+  const why = [r.attribution_evidence, r.status_note].filter(Boolean).join(' ');
+  const tag = `<span class="tag ${TIER_TONE[tier] || 'dim'}" title="${esc(why)}">${
+    esc(TIER_SHORT[tier] || tier)}</span>`;
+  if (!cands.length) {
+    return `${tag} <span class="ent-off" title="${esc(why)}">nobody can be named</span>`;
+  }
+  const names = cands.map((c) => entity('driver', c.id, c.name))
+    .join(tier === 'ambiguous' ? '<span class="dim"> or </span>' : ', ');
+  /* Both gaps, stated rather than summarised. "Bracketed" is not checkable;
+     "their trip ended 34 minutes before this and the next began 19 minutes
+     after" can be checked against the car's own trip list in one click. */
+  const gaps = tier === 'bracketed' && r.bracket_before_min != null && r.bracket_after_min != null
+    ? `<span class="dim" title="their own Uber booking on this car ended this many minutes before `
+      + `the journey opened, and their next began this many minutes after it closed"> · `
+      + `−${fmt(r.bracket_before_min)}m / +${fmt(r.bracket_after_min)}m</span>`
+    : '';
+  return `${tag} ${names}${gaps}`;
+};
+
+/* ── the band that has to be read before any name is ───────────────────────
+   "If most rows are ambiguous, the page must say so at the top." The four
+   figures are the ones that tell an operator whether to trust the list at all,
+   and the last of them is the one that decides it. Computed from
+   `distribution`, which the endpoint measures over the WHOLE WINDOW rather
+   than over the current filter — a tier count that changes when you pick a
+   tier tells a reader nothing about what else is there. */
+function attributionBand(root, att) {
+  const dist = att.distribution || {};
+  const tiers = dist.by_tier || [];
+  const n = dist.segments || 0;
+  const firm = (dist.bracketed || 0) + (dist.sole_custodian || 0);
+  const open = (dist.ambiguous || 0) + (dist.unknown || 0);
+  const km = tiers.reduce((a, t) => a + (Number(t.km) || 0), 0);
+  const rate = att.value?.aed_per_km;
+
+  const ladder = `${fmt(dist.bracketed || 0)} named by time, ${fmt(dist.sole_custodian || 0)} by `
+    + `day custody alone, ${fmt(dist.ambiguous || 0)} with more than one candidate and `
+    + `${fmt(dist.unknown || 0)} with nobody`;
+  verdict(root, {
+    claim: n === 0
+      ? 'No unexplained journey in this window to attribute'
+      : open > firm
+        ? 'Most of this list cannot be narrowed to one person'
+        : 'Most of this list narrows to one person',
+    tone: n === 0 ? null : open > firm ? 'warn' : 'ok',
+    figure: n === 0 ? null : fmt(firm),
+    unit: `of ${fmt(n)} narrowed to one person`,
+    meta: n ? `${fmt(open)} not narrowed` : null,
+    sub: n === 0
+      ? (att.coverage?.note
+        || 'Nothing the seat sensor recorded in this window went unexplained.')
+      : `${ladder}. Every name below is an inference from the booking record, never a trip `
+        + 'record of the journey itself — so a tier is printed in front of every one of them, '
+        + 'and where the evidence cannot single out one person the page lists every candidate '
+        + 'rather than choosing.',
+  });
+
+  root.append(kpiRow([
+    { label: 'Unexplained journeys', value: fmt(n), tone: n ? 'bad' : 'good',
+      sub: 'the seat sensor saw a rider, the car covered real distance, and no booking on any '
+        + 'collected channel overlaps the window' },
+    /* Revenue forgone, never "cost", and never without its rate — the same
+       convention forgoneCell below and the segment page already use. */
+    { label: 'Worth of the distance',
+      value: rate == null || !km ? '—' : `AED ${fmt(km * rate, 0)}`,
+      sub: rate == null
+        ? (att.value?.basis || 'no booking in this window carries both a fare and a distance, '
+          + 'so there is no rate to value this at')
+        /* Not "cost", and test/segment_routes.test.mjs enforces it within 600
+           characters of the words "Revenue forgone" — which this tile is now
+           the first occurrence of in the file. The product of a rate and a
+           distance is what those kilometres would have earned, not a bill
+           anybody paid; the fuel and wear behind them is a different, smaller
+           number nothing here measures. */
+        : `${fmt(km, 1)} km at the fleet’s own AED ${rate}/km. Revenue forgone — what those `
+          + 'kilometres would have earned had they been sold, not money anybody paid out.' },
+    { label: 'Firmly attributed', value: fmt(firm), tone: firm ? 'ok' : null,
+      sub: `${fmt(dist.bracketed || 0)} bracketed by the same person’s own Uber trips either `
+        + `side · ${fmt(dist.sole_custodian || 0)} where one person held the car all day` },
+    /* THE NUMBER THAT SAYS WHETHER TO TRUST THE LIST. Two absences, kept
+       apart: more than one candidate is a question, no candidate at all is a
+       gap in the trip record. Adding them into one "unattributed" would hide
+       which of the two an operator can actually do something about. */
+    { label: 'Cannot be narrowed', value: fmt(open), tone: open > firm ? 'bad' : open ? 'warn' : null,
+      sub: `${fmt(dist.ambiguous || 0)} have two or more people who held the car that day and `
+        + `nothing separates them · ${fmt(dist.unknown || 0)} have no custody record at all` },
+  ]));
+}
+
+/* ── the ladder, as the filter it should always have been ──────────────────
+   "Group or filter by TIER so an operator can see at a glance how much of the
+   list is firmly attributed and how much is ambiguous."
+
+   The counts on these chips come from `distribution` — the whole window — and
+   NOT from the rows on screen, for the same reason the verdict facet above
+   does: a menu whose counts are computed after the filter is applied tells you
+   only about the thing you already picked. */
+function tierChips(root, att, { kind, value, tier, who }) {
+  const dist = att.distribution || {};
+  const means = att.tier_means || {};
+  const p = panel('How firmly each journey is attributed',
+    'Four rungs, strongest first. Click one to see only those.');
+  root.append(p.panel);
+  const chip = (key, label, n, title) => `<a class="chip${tier === key ? ' on' : ''}" `
+    + `title="${esc(title)}" href="${esc(href('segments', kind, value,
+      { tier: key, who }))}">${esc(label)} <b>${fmt(n)}</b></a>`;
+  p.body.append(el('div', 'chips',
+    [chip(null, 'Every rung', dist.segments || 0,
+      'every unexplained journey in this window, whatever the evidence says about it')]
+      .concat(TIER_ORDER.map((k) => chip(k, TIER_LABEL[k], dist[k] || 0, means[k] || k)))
+      .join('')));
+  /* The vocabulary, written out rather than left in a tooltip. A reader who
+     has to hover to find out what "sole custodian" claims is a reader who will
+     read it as "the driver", which is the misreading this whole surface is
+     built to prevent. */
+  const dl = el('div', 'grid g2');
+  TIER_ORDER.forEach((k) => {
+    const box = el('div', 'note' + (TIER_TONE[k] === 'warn' ? ' warn' : ''));
+    box.innerHTML = `<b>${esc(TIER_LABEL[k])}</b> — <span class="dim">${fmt(dist[k] || 0)} in `
+      + `this window</span><br>${esc(means[k] || '')}`;
+    dl.append(box);
+  });
+  p.body.append(dl);
+  if (att.bracket?.rule) {
+    p.body.append(el('p', 'cap',
+      `${att.bracket.rule} The cap is ${fmt(att.bracket.cap_min)} minutes and the channel is `
+      + `${(att.bracket.platforms || []).map(sourceLabel).join(', ')} — both were chosen by `
+      + 'measurement and both move this distribution when they change, so they are stated here '
+      + 'rather than buried in the rule.'));
+  }
+  /* WHY THERE IS NO "ON SHIFT" RUNG. Uber's own status feed is the strongest
+     evidence in the building for "who was working at 14:32", and it names
+     nobody on this population — a reader who knows the feed exists will ask,
+     and the honest answer is a measurement rather than silence. */
+  if (att.status_feed?.role) p.body.append(el('p', 'cap', att.status_feed.role));
+}
+
+/* ── who is named most often, keyed on the PERSON and not on the spelling ──
+   The `driver` facet this page already had is `ILIKE '%name%'` against a
+   comma-joined string of custodians: it matches by spelling, it will match a
+   substring of somebody else's name, and it cannot be reached by person key.
+   So there has never been a "who has the most unexplained journeys" ranking in
+   the product, and the one built here keeps the two counts APART.
+
+   They are two different claims about a person and they must never be added:
+   "named beside this journey" and "held this car on a day something
+   unexplained happened, along with somebody else" are not the same accusation,
+   and a single total is the number that would get quoted. */
+function whoPanel(root, rows, { kind, value, tier, who }) {
+  const byKey = new Map();
+  rows.forEach((r) => {
+    const t = r.attribution_tier;
+    if (!t || t === 'unknown') return;
+    (Array.isArray(r.attribution_candidates) ? r.attribution_candidates : []).forEach((c) => {
+      const key = c.key || c.id || c.name;
+      if (!key) return;
+      const cur = byKey.get(key)
+        || { key, id: c.id, name: c.name, named: 0, candidate: 0, km: 0, aed: 0 };
+      if (isFirm(t)) {
+        cur.named += 1;
+        cur.km += Number(r.distance_km) || 0;
+        cur.aed += Number(r.forgone_aed) || 0;
+      } else cur.candidate += 1;
+      byKey.set(key, cur);
+    });
+  });
+  const people = [...byKey.values()]
+    .sort((a, b) => b.named - a.named || b.candidate - a.candidate
+      || String(a.name).localeCompare(String(b.name)));
+  if (!people.length) return;
+
+  const p = panel('Who the evidence names',
+    'Two counts per person, and they are never added together');
+  root.append(p.panel);
+  const t = tableFrom(people, [
+    { label: 'Person', key: 'name', render: (r) => entity('driver', r.id, r.name) },
+    { label: 'Named beside', key: 'named', num: true,
+      render: (r) => (r.named
+        ? `<b>${fmt(r.named)}</b>`
+        : '<span class="ent-off" title="nothing on this list is attributed to this person">—</span>') },
+    { label: 'One of several', key: 'candidate', num: true,
+      render: (r) => (r.candidate
+        ? `<span class="tag warn">${fmt(r.candidate)}</span>`
+        : '<span class="ent-off">—</span>') },
+    { label: 'Distance named', key: 'km', num: true,
+      render: (r) => (r.km ? `${fmt(r.km, 1)} km` : '<span class="ent-off">—</span>') },
+    { label: 'Worth', key: 'aed', num: true,
+      render: (r) => (r.aed ? `AED ${fmt(r.aed, 0)}` : '<span class="ent-off">—</span>') },
+    { label: '', key: 'key',
+      render: (r) => `<a class="dim" title="only this person’s journeys" href="${
+        esc(href('segments', kind, value, { tier, who: r.key }))}">⌕</a>` },
+  ], { compact: true, sortable: true, sortId: 'segwho',
+    defaultSort: { key: 'named', dir: 'desc' } });
+  foldRows(p.body, t, { shown: 10, total: people.length, noun: 'person', key: 'segwho' });
+  p.body.append(el('p', 'cap',
+    '<b>Named beside</b> counts the journeys where the evidence reached this person and nobody '
+    + 'else — their own Uber trips bracket it in time, or they are the only person the trip '
+    + 'record shows holding the car that day. <b>One of several</b> counts the journeys where '
+    + 'they are one of two or more candidates and nothing separates them; it is not an '
+    + 'accusation and it must not be added to the column beside it. Folded on the person, so a '
+    + 'driver with an Uber and a Yango account is one row rather than two.'));
+}
+
 /* The list. `kind` is one of verdict|plate|day|driver, so every facet chip is
    a real destination rather than an in-page filter that dies on reload. */
 export async function renderSegments(root, kind, value) {
   root.innerHTML = '';
   loading(root);
-  const extra = {};
-  if (kind && value) extra[kind] = value;
-  const d = await q('/api/segments', extra);
+  /* THE BARE ADDRESS NOW MEANS THE UNEXPLAINED ONES.
+     ───────────────────────────────────────────────────────────────────────
+     "Another tab of all unauthorized trips" had no address. #segments was not
+     in the rail at all, #unauthorized has no tab bar and folds its segment
+     list to eight of N, and the only ways to reach the full list were a donut
+     slice and a verdict chip. So this page is the tab, it is registered in the
+     rail, and the address it is registered at has to MEAN what the rail calls
+     it: `#segments` is every unauthorized trip, and `#segments/verdict/all` is
+     every occupancy interval whatever the reconciler decided. Nothing else
+     changes — `verdict=all` is a value /api/segments has always accepted and
+     always turned into no filter at all. */
+  const defaulted = !kind;
+  const k = kind || 'verdict';
+  const v = kind ? value : 'unauthorized';
+  const extra = {}; extra[k] = v;
+  const tier = TIER_ORDER.includes(hashQ('tier')) ? hashQ('tier') : null;
+  const who = hashQ('who') || null;
+  const [d, att] = await Promise.all([
+    q('/api/segments', extra),
+    /* The ladder is only meaningful on an unexplained journey — a matched
+       segment has a booking behind it and the booking names its own driver —
+       so this asks about `unauthorized` whatever the list above is showing.
+
+       qAll, not q: THE TWO ENDPOINTS DISAGREE ABOUT THE FLEET CHIP, and the
+       disagreement renders as a contradiction rather than as a filter.
+       /api/segments binds the window, the verdict, the plate, the day and the
+       driver and NOT the fleet — api/segment_routes.js destructures only
+       [from, to] out of range(req) — while /api/unauthorized/attributed binds
+       it properly. Asked with fleet=egari the attribution comes back empty with
+       a coverage note reading "no seat-occupancy evidence exists for this
+       window at all", printed directly above a table of forty Ecosine
+       segments: two halves of one page contradicting each other, which is
+       worse than either of them being wrong alone. So the attribution is asked
+       the question the list actually answers — every fleet — and the chip is
+       named as governing nothing below. The fix belongs in segment_routes.js.
+
+       Caught rather than awaited bare: this endpoint is newer than the shells
+       that read this page, and a list that dies because an attribution service
+       is not deployed yet is worse than a list with no attribution on it. */
+    qAll('/api/unauthorized/attributed', { verdict: 'unauthorized', limit: 500 })
+      .catch(() => null),
+  ]);
   root.innerHTML = '';
+
+  /* The attribution, merged onto the rows this page already had rather than
+     rendered as a second list beside them. Two pages listing the same journeys
+     differently is worse than one page listing them incompletely. */
+  const attOf = att ? new Map((att.rows || []).map((r) => [segKey(r), r])) : null;
+  d.rows = (d.rows || []).map((r) => {
+    const a = attOf && attOf.get(segKey(r));
+    if (a) return Object.assign({}, r, Object.fromEntries(ATT_FIELDS.map((f) => [f, a[f]])));
+    if (!attOf) return r;
+    /* The TRUE reason this row carries no name and no value, which is a
+       different sentence for each of the two ways it can happen. Without it
+       the money column renders "—" under forgoneCell's default title — "no
+       distance was measured across this interval" — which is a claim about
+       the vehicle rather than about our arithmetic, and it is false. */
+    const absent = r.verdict === 'unauthorized'
+      ? `this journey is past the ${fmt(att.limit)} most recent unexplained journeys the `
+        + 'attribution list returns, so no name and no value were computed for it'
+      : 'the attribution ladder is only run on unexplained journeys — a booking explains this '
+        + 'one, and that booking names its own driver and carries its own fare';
+    return Object.assign({}, r, { attribution_absent: absent, rate_basis: absent });
+  });
+
+  /* ── the band, and it goes above every name on the page ─────────────────
+     Rendered before the segment KPIs rather than after them, because it is the
+     thing that says whether the names below are worth reading. */
+  if (att) attributionBand(root, att);
+
+  /* A control on screen that changes nothing has to say so. See the note on
+     the qAll above: neither this list nor its attribution is narrowed by the
+     fleet chip, and the fleets actually on screen are named rather than
+     asserted, so this sentence stays true if CABMAN is ever pointed at Egari. */
+  if (state.fleet) {
+    const fleets = [...new Set(d.rows.map((r) => r.fleet_id).filter(Boolean))];
+    root.append(note(`The fleet chip above reads ${sourceLabel(state.fleet)}, and nothing on this `
+      + 'page is narrowed by it: the endpoint behind this list binds the window, the verdict, the '
+      + 'vehicle, the day and the driver, and not the fleet. '
+      + (fleets.length
+        ? `Every segment shown belongs to ${fleets.map(sourceLabel).join(' or ')}`
+          + `${fleets.length === 1 && fleets[0] !== state.fleet
+            ? ' — the seat sensor behind these rows collects for that fleet and not for the one '
+              + 'selected, so an empty page here would have meant an absent sensor rather than a '
+              + 'clean fleet' : ''}.`
+        : 'No segment is shown at all in this window.'), 'warn'));
+  }
 
   const vf = d.facets.verdict || [];
   const unauth = vf.find((r) => r.key === 'unauthorized');
@@ -63,7 +465,8 @@ export async function renderSegments(root, kind, value) {
         : (unauth?.n ? 'no distance was measured on these segments' : 'nothing unexplained to measure'),
       tone: unauth?.n ? 'bad' : 'good' },
     { label: 'Matching this filter', value: fmt(d.total),
-      sub: kind ? `${kind} = ${value}` : 'no filter applied' },
+      sub: defaulted ? 'verdict = unauthorized, which is what this page is'
+        : `${kind} = ${value}` },
     { label: 'Assessed blind', value: fmt(d.low_confidence),
       sub: blindSources.length
         ? `${blindSources.map(sourceLabel).join(', ')} could not be read when these were judged`
@@ -107,11 +510,30 @@ export async function renderSegments(root, kind, value) {
       + 'history behind it, so widening the window does not widen this evidence.'));
   }
 
-  if (kind) {
-    const clear = el('div', 'note');
-    clear.innerHTML = `Filtered to <b>${esc(kind)} = ${esc(value)}</b>. `
-      + `<a href="${href('segments')}">Show every segment</a>`;
-    root.append(clear);
+  /* What is currently being shown, and the way back out of it — including out
+     of the DEFAULT, which is itself a filter and would otherwise be the one
+     narrowing nobody could see or undo. */
+  const clear = el('div', 'note');
+  clear.innerHTML = defaulted
+    ? 'Showing <b>every unexplained journey</b> — the ones the seat sensor recorded and no '
+      + `booking explains. <a href="${esc(href('segments', 'verdict', 'all'))}">Show every `
+      + 'occupancy interval instead</a>, matched ones included.'
+    : (k === 'verdict' && v === 'all'
+      ? 'Showing <b>every occupancy interval</b>, whatever the reconciler decided about it. '
+        + `<a href="${esc(href('segments'))}">Back to the unexplained ones</a>.`
+      : `Filtered to <b>${esc(k)} = ${esc(v)}</b>. `
+        + `<a href="${esc(href('segments'))}">Every unexplained journey</a> · `
+        + `<a href="${esc(href('segments', 'verdict', 'all'))}">every segment</a>`);
+  root.append(clear);
+
+  /* ── the ladder, and who it names ───────────────────────────────────────
+     Above the verdict donut and the vehicle bars, because an operator opening
+     this page came for a person and those two answer about a category and a
+     car. */
+  if (att) {
+    tierChips(root, att, { kind, value, tier, who });
+    root.append(note(att.note, 'warn'));
+    whoPanel(root, d.rows, { kind, value, tier, who });
   }
 
   const g = el('div', 'grid g3'); root.append(g);
@@ -211,29 +633,77 @@ export async function renderSegments(root, kind, value) {
   }
 
   // ── the list itself ─────────────────────────────────────────────────────
-  const lp = panel(kind ? `Segments — ${kind} ${value}` : 'Every occupancy segment',
-    `${fmt(d.rows.length)} shown${d.truncated ? ` of ${fmt(d.total)}` : ''} · click a row for the evidence`);
+  /* The two attribution filters are applied HERE rather than at the endpoint.
+     /api/segments knows nothing about tiers — the attribution is computed, not
+     stored, and there is no index from a person to a segment because there
+     cannot be one — so the narrowing happens over the rows on screen and the
+     caption says so whenever the list is capped. A silent client-side filter
+     over a truncated list is the shape of bug that reports a clean fleet. */
+  const whoName = who && d.rows
+    .flatMap((r) => (Array.isArray(r.attribution_candidates) ? r.attribution_candidates : []))
+    .find((c) => c.key === who)?.name;
+  const shown = d.rows.filter((r) => {
+    if (tier && r.attribution_tier !== tier) return false;
+    if (who && !asList(r.attribution_candidate_keys).includes(who)) return false;
+    return true;
+  });
+  const narrowed = tier || who;
+  if (narrowed) {
+    const nb = el('div', 'note');
+    nb.innerHTML = 'Narrowed to '
+      + [tier ? `<b>${esc(TIER_LABEL[tier])}</b>` : null,
+        who ? `journeys <b>${esc(whoName || 'this person')}</b> is a candidate for` : null]
+        .filter(Boolean).join(' and ')
+      + `. <a href="${esc(href('segments', kind, value))}">Show all of them</a>`;
+    root.append(nb);
+  }
+
+  const lp = panel(
+    defaulted ? 'Every unauthorized trip'
+      : (k === 'verdict' && v === 'all' ? 'Every occupancy segment' : `Segments — ${k} ${v}`),
+    `${fmt(shown.length)}${narrowed ? ` of ${fmt(d.rows.length)} narrowed` : ''} shown`
+    + `${d.truncated ? ` of ${fmt(d.total)}` : ''} · click a row for the evidence`);
   root.append(lp.panel);
-  if (!d.rows.length) {
+  if (!shown.length) {
     /* "Nothing matches this filter" for a facet that came from this page's own
        chips is a dead end; naming the facet and offering the way back is not. */
     const box = el('div', 'empty');
-    box.innerHTML = kind
-      ? `<b>No segment with ${esc(kind)} = ${esc(value)}</b>`
-        + `The facet came from this window's own counts, so this usually means the filter has been `
-        + 'narrowed twice — by the chip and by the date range above.'
-      : '<b>No occupancy interval in this window</b>The seat sensor is a realtime poll with no history '
-        + 'behind it; a window that reaches past the few days it has recorded finds nothing in the rest.';
+    box.innerHTML = narrowed
+      ? `<b>No journey on this list is ${esc(tier ? TIER_LABEL[tier].toLowerCase() : 'this person’s')}</b>`
+        + 'The rung counts above are measured over the whole window; this list is capped and, if a '
+        + 'vehicle or a day is also selected, narrowed twice.'
+      : defaulted
+        ? '<b>No unexplained journey in this window</b>Either nothing went unbooked, or the seat '
+          + 'sensor recorded nothing at all here — the coverage line above says which, and the two '
+          + 'are not the same finding.'
+        : `<b>No segment with ${esc(k)} = ${esc(v)}</b>`
+          + `The facet came from this window's own counts, so this usually means the filter has been `
+          + 'narrowed twice — by the chip and by the date range above.';
     const back = el('p', 'cap');
-    back.innerHTML = `<a class="lnk" href="${href('segments')}">Every segment</a>`;
+    back.innerHTML = `<a class="lnk" href="${esc(href('segments'))}">Every unauthorized trip</a>`
+      + ` · <a class="lnk" href="${esc(href('segments', 'verdict', 'all'))}">every segment</a>`;
     box.append(back);
     lp.body.innerHTML = ''; lp.body.append(box);
     return;
   }
-  lp.body.append(segmentTable(d.rows));
+  lp.body.append(segmentTable(shown));
   if (d.truncated) lp.body.append(el('p', 'cap',
     `Showing the ${fmt(d.rows.length)} most recent of ${fmt(d.total)}. Narrow by vehicle or day to see the rest — `
-    + 'this list is capped rather than paged, so the tail is genuinely not on screen.'));
+    + 'this list is capped rather than paged, so the tail is genuinely not on screen.'
+    + (narrowed ? ' The rung and person filters above run over what is on screen, so they narrow '
+      + 'that capped list rather than the whole window.' : '')));
+  if (att?.truncated) lp.body.append(el('p', 'cap',
+    `The attribution list itself is capped at ${fmt(att.limit)} of ${fmt(att.total)} unexplained `
+    + 'journeys, so the oldest rows here keep the day-grain custody this column used to show, '
+    + 'labelled as such. Narrow the date range to attribute them.'));
+  /* The coverage sentence, but only in the one shape the day-strip caption
+     above does not already cover: no seat-sensor evidence AT ALL. An empty
+     list then means an absent sensor rather than a clean fleet, and those two
+     must never read alike — a window that reaches past the few days CABMAN has
+     recorded lands here. */
+  if (att && att.coverage?.days_with_data === 0 && att.coverage?.note) {
+    root.append(note(att.coverage.note, 'warn'));
+  }
 }
 
 /* A table of segments where every cell that names something is a link to it.
@@ -292,6 +762,13 @@ export function segmentTable(rows, opts = {}) {
      column of dashes claiming the data does not exist. */
   const anyPlace = rows.some((r) => r.start_place || r.end_place || r.start_lat != null);
   const anyValue = rows.some((r) => r.forgone_aed != null);
+  /* Conditional for the same reason every other column here is, and the
+     condition is the caller's data rather than a flag: a caller that has not
+     merged /api/unauthorized/attributed onto its rows keeps the day-grain
+     custody column unchanged, which is what api/public/vehicle.js and
+     api/public/day.js pass. The day the ladder reaches them, their tables gain
+     the narrower column without either file being edited. */
+  const anyAtt = rows.some((r) => r.attribution_tier);
   const t = tableFrom(rows, [
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     ...(anyFleet ? [{ label: 'Fleet', key: 'fleet_id',
@@ -302,9 +779,18 @@ export function segmentTable(rows, opts = {}) {
        driver's other flagged segments. A handover day names two people and
        both are openable, which is why the endpoint returns name-and-id pairs
        rather than a comma-joined string it could only print. */
-    { label: 'Driver that day', key: 'drivers',
-      render: (r) => custody(r, { title: 'This driver’s other flagged segments',
-        hrefFor: (d) => href('segments', 'driver', d.name) }) },
+    /* "Driver that day" is honest and is not enough. Day custody names two
+       people on a handover day for one journey that had one driver, and an
+       operator holding two names has an accusation nobody can act on. Where an
+       attribution exists the heading becomes WHO THE EVIDENCE NAMES and the
+       tier rides in front of the name; where none exists the old column stands
+       unchanged, so this table cannot silently upgrade a custody record into a
+       narrowed one. */
+    (anyAtt
+      ? { label: 'Who the evidence names', key: 'attribution_tier', render: attributionCell }
+      : { label: 'Driver that day', key: 'drivers',
+        render: (r) => custody(r, { title: 'This driver’s other flagged segments',
+          hrefFor: (d) => href('segments', 'driver', d.name) }) }),
     { label: 'Started', key: 'started_at',
       render: (r) => `<a href="${href('segment', r.plate, r.started_at)}">${esc(`${dateStr(r.started_at)} ${timeStr(r.started_at)}`)}</a>` },
     { label: 'Duration', key: 'duration_min', num: true, render: (r) => (r.duration_min ?? '—') + ' min' },

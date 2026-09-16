@@ -57,6 +57,20 @@ export const DRIVER_TABS = [
      that describe them and before the raw rows that evidence them. */
   { id: 'record', label: 'Record', ic: '◲' },
   { id: 'trips', label: 'Trips', ic: '▤' },
+  /* LAST, and after Trips deliberately. Every tab before this one is built
+     from records that NAME this person — a booking carries a driver id and the
+     row is a fact. This one is built from journeys no booking explains, so
+     every name on it is an inference drawn from the time and the custody
+     record. It sits at the end because it is read after the record, against
+     the record.
+
+     Labelled "Unexplained trips" and not "Unauthorized": api/public/app.js
+     setHeader() prints `${tab.label} — every platform this person works on,
+     combined` as the page subtitle, and a label of "Unauthorized" makes that
+     sentence read as a verdict on the PERSON rather than on the journeys. The
+     journeys are unexplained; nobody on this page has been found to have done
+     anything. */
+  { id: 'unauthorized', label: 'Unexplained trips', ic: '◌' },
 ];
 
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -1677,21 +1691,79 @@ async function tabQuality(root, id) {
 
 /* ── tab: trips ──────────────────────────────────────────────────────────── */
 async function tabTrips(root, id) {
-  const p = panel('Trip records', 'The underlying rows, newest first — every platform this driver appears on');
+  const p = panel('Trip records',
+    'The underlying rows, newest first — every platform this driver appears on, and the '
+    + 'journeys on their cars that no platform booked');
   root.append(p.panel); loading(p.body);
   /* A page, not a ceiling. The endpoint returns {rows, total, offset,
      truncated}, so "500 newest" can become "500 of 1,247" and the reader can
      ask for the next 500 instead of being told the rest is unreachable. */
   const PAGE = 500;
-  const res0 = await qAll('/api/driver/trips', { id, limit: PAGE });
+  /* THE UNEXPLAINED JOURNEYS ARE FETCHED BESIDE THE BOOKINGS, NOT AFTER THEM.
+     ───────────────────────────────────────────────────────────────────────
+     Asked for in these words: "on driver's trip page we should also keep
+     unauthorized trips". A car's day is one sequence of events and the
+     operator's question is what the car did, so the two lists have to be sorted
+     together — which means the table cannot be drawn once without the journeys
+     and then again with them, or the first paint is an answer that is missing
+     the thing the page was opened for.
+
+     The catch is not laziness. The bookings are the SUBJECT of this tab and the
+     journeys are an addition to it: if the attribution endpoint is down, a
+     driver's trip list must still render, and the toolbar says plainly that the
+     other half could not be loaded rather than showing a number that silently
+     excludes it. */
+  const [res0, un] = await Promise.all([
+    qAll('/api/driver/trips', { id, limit: PAGE }),
+    qAll('/api/driver/unauthorized', { id }).catch(() => null),
+  ]);
   /* Minutes computed onto the row rather than in the renderer, and that is
      not a style choice: tableFrom prunes a column whose declared key is blank
      on every row (api/public/ui.js:186), so a Minutes column keyed on
      duration_s is dropped before its renderer ever runs — which is how the
      column disappeared instead of showing the span both timestamps describe.
      Keyed on a real field, it also sorts by duration rather than by end time. */
-  const rows = (res0.rows || []).map((r) => ({ ...r, minutes: tripMinutes(r) }));
-  let total = res0.total ?? rows.length;
+  const bookings = (res0.rows || []).map((r) => ({ ...r, kind: 'booking', minutes: tripMinutes(r) }));
+  let total = res0.total ?? bookings.length;
+  /* ONLY THE ATTRIBUTED JOURNEYS ARE INTERLEAVED, AND THAT RESTRAINT IS THE
+     WHOLE CARE OF THIS CHANGE.
+     ───────────────────────────────────────────────────────────────────────
+     /api/driver/unauthorized returns two lists. `attributed` holds the journeys
+     the ladder NAMED this person beside — their own Uber trips bracket the
+     window, or they are the only person the record shows holding the car that
+     day. `also_a_candidate` holds journeys where two or more people held the
+     car and nothing separates them.
+
+     The second list must never appear in this person's own trip ledger. A row
+     sitting in somebody's list of trips is read as something they did, and on a
+     page that mixes them a maybe becomes an accusation the moment anybody
+     screenshots it. They are one click away, under their own heading and their
+     own count, on the Unexplained trips tab — and the caption under this table
+     says how many there are so the number is never hidden, only kept out of a
+     list it would change the meaning of.
+
+     Each field below is mapped onto the column a booking already uses, so ONE
+     sort by time interleaves the two. Every mapped field is the same KIND of
+     fact as the one it lands in; the two that are not — a place-cell area name
+     is not a street address, a distance nobody was charged for is not a fare —
+     render through their own branch in the column list and carry the difference
+     in the cell, where the reader is, rather than in the key, where nobody
+     looks. */
+  const unrows = ((un && un.attributed && un.attributed.rows) || []).map((r) => ({
+    ...r,
+    kind: 'unexplained',
+    requested_at: r.started_at,
+    minutes: r.duration_min,
+    pickup_addr: r.start_place?.area || null,
+    dropoff_addr: r.end_place?.area || null,
+    /* Left null on purpose, all five. An unexplained journey has no platform,
+       no product, no payment type, no provider status and no booking id —
+       because no channel booked it, which is the entire definition. Writing a
+       placeholder into any of them would make a journey look like a booking in
+       precisely the column a reader uses to tell the two apart. */
+    platform: null, product: null, payment_type: null, status: null, external_id: null,
+  }));
+  const rows = bookings.concat(unrows);
   /* What an unpriced trip is nevertheless part of — see api/driver_routes.js.
      Keyed the way each row keys itself, so a lookup either hits or misses and
      never half-matches across platforms on the same date. */
@@ -1705,8 +1777,21 @@ async function tabTrips(root, id) {
     .some((d) => d.earnings != null || d.grain_reason);
   p.body.innerHTML = '';
   if (!rows.length) {
+    /* Both absences, because they are different facts and one of them is about
+       us. "No booking" is measured across every channel; "no unexplained
+       journey" is only as good as the seat sensor's coverage, which on this
+       fleet is partial by construction — so an empty table must not be allowed
+       to read as a clean record on a window nothing watched. */
+    const cov = un && un.coverage;
     return empty(p.body, 'No trip on any channel for this driver in this window. Widen the range above '
-      + '— this person may simply not have worked in it.');
+      + '— this person may simply not have worked in it. '
+      + (!un
+        ? 'The unexplained-journey list could not be loaded, so nothing here says whether there '
+        + 'were any.'
+        : cov && cov.days_with_data === 0
+          ? 'No seat-occupancy evidence covers this window either, so this is not a record of no '
+          + 'unexplained journeys — it is an absence of the sensor that would find them.'
+          : 'No journey with no booking against it is attributed to them here either.'));
   }
   const bar = el('div', 'toolbar');
   bar.innerHTML = `<input id="tq" type="search" placeholder="Filter by address, plate, status or product…">
@@ -1714,11 +1799,59 @@ async function tabTrips(root, id) {
   p.body.append(bar);
   const host = el('div'); p.body.append(host);
   const cols = [
-    { label: 'Requested', key: 'requested_at', render: (r) => tripTime(r.plate, r.requested_at) },
-    { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
+    /* THE MARKER, AND WHERE IT ENDED UP IS A MEASUREMENT RATHER THAN A TASTE.
+       ─────────────────────────────────────────────────────────────────────
+       A booking and a journey with no booking against it are different kinds
+       of thing, and once the two are sorted together by time nothing else in
+       the row says which is which: an unexplained journey has a plate, a clock
+       time, a distance and two place names, exactly like a trip. It needs a
+       marker that survives a screenshot, a greyscale print and a colour-blind
+       reader, so it is `.pill.bad` — 600 weight with a "!" glyph in front of
+       the text (api/public/app.css) — and not a tint on the row.
+
+       It went in a column of its own at the left edge first, which is where
+       a marker belongs. Measured at 1,440px on a driver who has one: the
+       scroller is 1,090px and the table became 1,127, so FARE fell off the
+       right edge and drew a sideways-scroll cue — on precisely the drivers
+       with an unexplained journey and on no others, which hides a money column
+       exactly where somebody came to look at it. Moving the pill into Platform
+       cost 39px of that same 37px overflow, for the same reason: both columns
+       were narrower than the pill.
+
+       REQUESTED is already 100px wide because it carries "Aug 24 11:45", and
+       the pill is about 80. So the marker sits above the timestamp in a cell
+       that was already paying for the width, the table is exactly as wide as
+       it was before this change, and the marker is still the leftmost thing in
+       the row. */
+    { label: 'Requested', key: 'requested_at', render: (r) => (r.kind === 'unexplained'
+      ? `<span style="display:block;margin-bottom:3px">${pill('no booking', 'bad',
+        'The seat sensor saw a passenger aboard and no channel booked the journey. The name '
+        + 'beside it is an inference, not a trip record — open the Unexplained trips tab for the '
+        + 'rule that named this person and the measurement behind it.')}</span>`
+        + tripTime(r.plate, r.requested_at)
+      : tripTime(r.plate, r.requested_at)) },
+    /* "none", dim, rather than a dash. A dash in this column on a row that
+       otherwise looks like a trip reads as a channel we failed to record; the
+       absence here IS the finding, and it is measured against every channel
+       the reconciler checks. Kept to one short word because the column is
+       sized by its own heading and anything longer widens the table. */
+    { label: 'Platform', key: 'platform', render: (r) => (r.kind === 'unexplained'
+      ? '<span class="ent-off" title="no channel booked this journey — that is what makes it '
+        + 'unexplained, and it is measured against bolt, hotel, uber and yango alike">none</span>'
+      : sourceLabel(r.platform)) },
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
-    { label: 'From', key: 'pickup_addr' },
-    { label: 'To', key: 'dropoff_addr' },
+    /* A BOOKING'S ADDRESS AND A SEGMENT'S PLACE ARE NOT THE SAME CLAIM.
+       A booking carries the address the channel recorded. An unexplained
+       journey carries only a coordinate, and the name beside it comes from the
+       fleet's own history — `place_cell` folds past trips into ~0.5 km cells
+       holding the modal area name (api/place_sql.js). So the two render
+       differently: segPlace() dims a cell fewer than five trips agree on and
+       puts the vote count in its title, and a cell nothing has ever named
+       falls back to the coordinate rather than to the nearest thing it has. */
+    { label: 'From', key: 'pickup_addr', render: (r) => (r.kind === 'unexplained'
+      ? segPlace(r.start_place, r.start_lat, r.start_lng) : esc(r.pickup_addr ?? '—')) },
+    { label: 'To', key: 'dropoff_addr', render: (r) => (r.kind === 'unexplained'
+      ? segPlace(r.end_place, r.end_lat, r.end_lng) : esc(r.dropoff_addr ?? '—')) },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
     /* Read from the two timestamps the row already carries.
        ─────────────────────────────────────────────────────────────────────
@@ -1737,8 +1870,20 @@ async function tabTrips(root, id) {
        client_did_not_show, driver_did_not_respond and driver_rejected all
        showed as successes. The colour comes from the normalised outcome; the
        text stays the provider's own word. */
-    { label: 'Status', key: 'status', render: (r) => pill(r.status || '—',
-      r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'warn' : null) },
+    { label: 'Status', key: 'status', render: (r) => {
+      /* The reconciler's verdict standing in for a provider's status, because
+         that is the analogous fact: what the record concluded about this
+         journey. The tier that named THIS person rides in the tooltip
+         alongside the evidence sentence — and the caption under the table
+         sends the reader to the tab where that sentence is on the screen
+         rather than under a cursor, which is where an accusation belongs. */
+      if (r.kind === 'unexplained') {
+        return pill(r.verdict || 'unauthorized', 'bad',
+          `${TIER_LABEL[r.attribution_tier] || r.attribution_tier}: ${r.attribution_evidence || ''}`);
+      }
+      return pill(r.status || '—',
+        r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'warn' : null);
+    } },
     /* A trip with no fare is not a trip with no money.
        ──────────────────────────────────────────────────────────────────────
        This cell was an em-dash on four rows in five, because Uber's trip
@@ -1765,8 +1910,52 @@ async function tabTrips(root, id) {
        sort on FARES. Sorting unpriced rows by their day's money would rank a
        trip from a busy day above a priced trip worth less, which is a
        different ordering wearing the same column heading. */
-    { label: 'Fare', key: 'price', num: true, absent: dayMoneyKnown ? undefined : UBER_FARE,
+    /* …and `absent` is withheld for a SECOND reason now.
+       tableFrom prunes a column that declares `absent` and whose declared key
+       is blank on every row, and it tests the RAW key — `price` — not what the
+       renderer produces. An unexplained journey has no price and never will,
+       so on a driver whose bookings are all unpriced Uber the column would be
+       dropped while carrying a real figure: the revenue forgone on the rows
+       this change added, pruned out from under the reader on exactly the page
+       that put them there. */
+    { label: 'Fare', key: 'price', num: true,
+      absent: (dayMoneyKnown || unrows.some((r) => r.forgone_aed != null)) ? undefined : UBER_FARE,
       render: (r) => {
+        /* NOT A FARE, AND THE CELL SAYS SO IN ITS OWN WORDS.
+           ───────────────────────────────────────────────────────────────
+           An unexplained journey earned nothing — that is the point of it —
+           but its distance was worth something, and the whole reason the
+           operator wanted these rows was to see what. Printing that figure
+           plainly under a heading that says Fare would report revenue forgone
+           as revenue taken, which is the exact error api/place_sql.js was
+           written to prevent. So it renders dim, with the word "forgone" on
+           the screen and not in a tooltip, and the rate it was computed at in
+           the title. */
+        if (r.kind === 'unexplained') {
+          if (r.forgone_aed == null) {
+            return `<span class="ent-off" title="${esc(r.rate_basis
+              || 'no distance was measured across this journey')}">earned nothing</span>`;
+          }
+          /* TWO WORDS, AND THEY ARE ALLOWED TO WRAP.
+             ─────────────────────────────────────────────────────────────
+             The column is declared `num`, and api/public/app.css sets
+             `td.num { white-space: nowrap }` — right for a figure, wrong for a
+             figure with a noun after it. Measured at 1,440px: nowrap took this
+             column from 84px to 139px and pushed the table 37px past its
+             scroller, so the money column drew a sideways-scroll cue on
+             exactly the rows this change added. Allowed to wrap it sets its
+             own width from the longest word and the table is as wide as it was
+             before.
+
+             "AED 18 forgone" and not "nothing · AED 18 forgone" for the same
+             reason. The word `forgone` is what stops the figure being read as
+             revenue, so that is the word that stays; the rest of the sentence
+             is in the title. */
+          return `<span class="ent-off" style="white-space:normal;display:inline-block" `
+            + `title="This journey earned nothing: no channel booked it. Its distance would have `
+            + `been worth this much had it been sold — ${esc(r.rate_basis || '')}`
+            + `">${esc(money(r.forgone_aed, 'AED', 0))} forgone</span>`;
+        }
         if (r.price) return money(r.price, r.currency);
         const d = dayMoney.get(r.platform + '|' + r.local_day);
         const own = r.platform === 'uber'
@@ -1812,33 +2001,70 @@ async function tabTrips(root, id) {
     /* A row opens the booking. The endpoint has always returned external_id
        and the table never used it, so the one artefact somebody wants to look
        into — "which trip was that, exactly" — was the one thing here that led
-       nowhere. Clicks on the plate link still go to the vehicle. */
+       nowhere. Clicks on the plate link still go to the vehicle.
+
+       An unexplained journey has no booking to open, so it opens the SEGMENT —
+       api/public/segments.js renderSegment, where the case for and against the
+       verdict is argued in full. A row carrying a name has to lead somewhere a
+       reader can argue with it, and href('trip', null, null) leads nowhere. */
     host.append(tableFrom(list.slice(0, DRAW), cols,
       { sortable: true, sortId: 'dtrips', defaultSort: { key: 'requested_at', dir: 'desc' },
-        onRow: (r) => { location.hash = href('trip', r.platform, r.external_id); } }));
+        onRow: (r) => {
+          location.hash = r.kind === 'unexplained'
+            ? href('segment', r.plate, r.started_at)
+            : href('trip', r.platform, r.external_id);
+        } }));
     if (!list.length) {
       host.innerHTML = '';
       host.append(note(`No trip here matches “${term}”. That is a filter over the `
-        + `${fmt(rows.length)} trips loaded on this page`
-        + (rows.length < total ? `, not over all ${fmt(total)} in the window.` : '.')));
+        + `${fmt(rows.length)} rows loaded on this page`
+        + (bookings.length < total ? `, not over all ${fmt(total)} bookings in the window.` : '.')));
       return;
     }
     const caps = [];
     if (list.length > DRAW) caps.push(`drawing the ${fmt(DRAW)} newest of ${fmt(list.length)} matching`);
     /* Both numbers, always: how many are loaded, and how many exist. "The
-       server sent the 500 newest" is true and unusable — 500 of how many? */
-    if (rows.length < total) {
-      caps.push(`${fmt(rows.length)} of ${fmt(total)} trips in this window are loaded`);
+       server sent the 500 newest" is true and unusable — 500 of how many?
+       Counted over the BOOKINGS, because that is the list the server is paging:
+       the unexplained journeys arrive whole, and folding them into this
+       arithmetic would make "500 of 1,247 loaded" wrong by however many there
+       were. */
+    if (bookings.length < total) {
+      caps.push(`${fmt(bookings.length)} of ${fmt(total)} bookings in this window are loaded`);
     }
     if (caps.length) host.append(el('p', 'cap', `${caps.join('; ')}.`));
 
-    if (rows.length < total) {
-      const more = el('button', 'btn', `Load the next ${fmt(Math.min(PAGE, total - rows.length))}`);
+    /* THE COUNT THAT IS DELIBERATELY NOT IN THE TABLE, STATED UNDER IT.
+       ─────────────────────────────────────────────────────────────────────
+       The journeys this person is merely ONE CANDIDATE for are kept out of
+       this ledger on purpose — a row in somebody's trip list is read as
+       something they did. But keeping them out and saying nothing would hide
+       them, so the number is stated here with the reason and the address of
+       the page that holds them. Printed whether or not there are any: a zero a
+       reader can see is worth something, and a silence is not. */
+    if (un) {
+      const amb = un.also_a_candidate?.total || 0;
+      host.append(el('p', 'cap', amb
+        ? `${fmt(amb)} further ${plural(amb, 'journey', 'journeys')} with no booking happened on a `
+          + 'car this person held that day, alongside somebody else — nothing in the record says '
+          + 'which of them was driving, so they are not in this list. They are on the Unexplained '
+          + 'trips tab, under their own heading.'
+        : 'No journey with no booking against it has this person as one of several candidates in '
+          + 'this window — every one that touches them is in the list above, named.'));
+    } else {
+      host.append(el('p', 'cap', 'The unexplained-journey list could not be loaded, so this table is '
+        + 'bookings only. That is a failure of the request, not a finding about this driver.'));
+    }
+
+    if (bookings.length < total) {
+      const more = el('button', 'btn', `Load the next ${fmt(Math.min(PAGE, total - bookings.length))}`);
       more.onclick = async () => {
         more.disabled = true; more.textContent = 'Loading…';
         try {
-          const next = await qAll('/api/driver/trips', { id, limit: PAGE, offset: rows.length });
-          rows.push(...(next.rows || []).map((r) => ({ ...r, minutes: tripMinutes(r) })));
+          const next = await qAll('/api/driver/trips', { id, limit: PAGE, offset: bookings.length });
+          const more0 = (next.rows || []).map((r) => ({ ...r, kind: 'booking', minutes: tripMinutes(r) }));
+          bookings.push(...more0);
+          rows.push(...more0);
           addDays(next);
           total = next.total ?? total;
           const t = bar.querySelector('#tq').value.trim().toLowerCase();
@@ -1852,10 +2078,24 @@ async function tabTrips(root, id) {
       host.append(more);
     }
   };
+  /* BOTH NUMBERS, ALWAYS.
+     ───────────────────────────────────────────────────────────────────────
+     "47 trips" when three of them are journeys nobody booked is a figure that
+     hides the thing the operator opened this page for — and it is the figure
+     that gets quoted, because it is the one at the top of the tab. So the
+     toolbar states the split rather than the total, and states it when the
+     unexplained count is zero as well: a zero a reader can see is the only
+     zero worth anything on a tab that now claims to carry both. */
   const count = (n) => {
-    bar.querySelector('#tn').textContent = rows.length < total
-      ? `${fmt(n)} of ${fmt(rows.length)} loaded · ${fmt(total)} in this window`
-      : `${fmt(n)} of ${fmt(rows.length)} trips`;
+    const nb = bookings.length, nu = unrows.length;
+    const loaded = nb < total
+      ? `${fmt(nb)} of ${fmt(total)} bookings loaded`
+      : `${fmt(nb)} ${plural(nb, 'booking')}`;
+    const unsaid = !un
+      ? 'unexplained journeys could not be loaded'
+      : `${fmt(nu)} with no booking`;
+    const filtered = n === rows.length ? '' : `${fmt(n)} of ${fmt(rows.length)} shown · `;
+    bar.querySelector('#tn').textContent = `${filtered}${loaded} · ${unsaid}`;
   };
   count(rows.length);
   draw(rows, '');
@@ -1867,8 +2107,304 @@ async function tabTrips(root, id) {
   };
 }
 
+/* ── unexplained journeys: the pieces the two tabs share ──────────────────
+   An unauthorized trip is, BY DEFINITION, a journey with no booking against
+   it. There is therefore no record naming its driver — if there were, the
+   reconciler would have matched it and the verdict would not be
+   `unauthorized`. So every name rendered below is an INFERENCE, and naming
+   the wrong person accuses an innocent employee of theft.
+
+   These helpers exist because the SAME journey is rendered on two tabs — its
+   own tab below, and interleaved with the bookings on Trips — and a journey
+   that reads one way here and another way on the tab beside it is two claims
+   about one fact.
+
+   segPlace and segForgone are lifted from api/public/segments.js rather than
+   imported: both are module-private there and that file is the segments view,
+   which this change does not own. A copy carrying this note is cheaper than
+   widening another view's exports, and both copies render the same jsonb the
+   same SQL builds — api/place_sql.js placeEnds() and forgone(). */
+const segPlace = (place, lat, lng) => {
+  if (place && place.area) {
+    const votes = place.votes == null ? '' : ` · ${fmt(place.votes)} of ${fmt(place.seen ?? place.votes)}`
+      + ' trips here call it that';
+    /* A cell one trip named is not the same claim as a cell four hundred trips
+       agree on, and on this tab it sits beside an accusation. */
+    const thin = place.votes != null && place.votes < 5;
+    const short = place.area.length > 18 ? `${place.area.slice(0, 17)}…` : place.area;
+    return `<span class="${thin ? 'dim' : ''}" title="${esc(place.area
+      + ` — from the fleet’s own trip endpoints${votes}`)}">`
+      + `${esc(short)}${thin ? ' <span class="dim">?</span>' : ''}</span>`;
+  }
+  if (lat == null || lng == null) {
+    return '<span class="ent-off" title="no position was recorded for this end">—</span>';
+  }
+  return '<span class="ent-off" title="the fleet has never driven near enough to this spot '
+    + `to have a name for it">${esc(Number(lat).toFixed(3))}, ${esc(Number(lng).toFixed(3))}</span>`;
+};
+const segPlaces = (r) => '<span style="white-space:nowrap">'
+  + segPlace(r.start_place, r.start_lat, r.start_lng)
+  + '<span class="dim"> → </span>'
+  + segPlace(r.end_place, r.end_lat, r.end_lng) + '</span>';
+
+/* AED, and never under the word cost: it is the revenue those kilometres would
+   have earned had they been sold. The rate is on the row so the tooltip can
+   state it — a money figure whose rate is unstated is what this product spent
+   a month removing from its money pages. */
+const segForgone = (r) => (r.forgone_aed == null
+  ? `<span class="ent-off" title="${esc(r.rate_basis || 'no distance was measured across this interval')}">—</span>`
+  : `<span title="${esc(r.rate_basis || '')}">AED ${fmt(r.forgone_aed, 0)}</span>`);
+
+/* The journey's own clock, and the car's replay of the day behind it. Linked
+   through tripTime() — the same destination a booking's timestamp gives on the
+   Trips tab — because the first thing an operator does with a journey nobody
+   booked is watch the car drive it. */
+const segWhen = (r) => tripTime(r.plate, r.started_at)
+  + `<span class="dim"> → ${esc(timeStr(r.ended_at))}</span>`
+  + (r.duration_min == null ? '' : `<span class="dim"> · ${fmt(r.duration_min)} min</span>`);
+
+/* WHICH RULE NAMED THIS PERSON, IN FOUR WORDS.
+   The tier pill is deliberately UNCOLOURED, and that is not an oversight.
+   Every other pill in this product encodes good or bad; a colour ramp down a
+   column of tiers would rank people by how strongly the product suspects them,
+   which is precisely the choice api/unauthorized_sql.js's ladder refuses to
+   make. The distinction is carried in words, and the working is in the
+   evidence column beside it. */
+const TIER_LABEL = { bracketed: 'named by time', sole_custodian: 'sole custodian',
+  ambiguous: 'one of several', unknown: 'nobody named' };
+const tierPill = (r, means) => pill(TIER_LABEL[r.attribution_tier] || r.attribution_tier || '—',
+  null, means?.[r.attribution_tier] || null);
+
+/* THE EVIDENCE, ON THE SCREEN AND NOT IN A TOOLTIP.
+   ─────────────────────────────────────────────────────────────────────────
+   api/public/ui.js says it about pills — "a fact a reader has to hover to find
+   is a fact most readers never see" — and it matters more here than anywhere
+   else in the product: the sentence IS the claim. api/public/segments.js clips
+   its `Why` column to eighty characters because a reconciler's reason is
+   context; this is the working behind a name beside a theft, and a reader has
+   to be able to check it against the car's own trip list without first
+   discovering that there is something to check.
+
+   Everything the endpoint deliberately keeps OUT of the candidate list is
+   printed here, dimmed and labelled: the clock skew that made time unusable,
+   Uber's status feed (corroboration, never attribution), and the nearest
+   booking — which names a person for free and must never be read as one. */
+/* BOUNDED AT BOTH ENDS, AND THE LOWER BOUND IS THE ONE THAT WAS MEASURED.
+   ─────────────────────────────────────────────────────────────────────────
+   A max-width alone was wrong, and the first render of this tab proved it. On
+   the ambiguous table — which carries a Candidates column holding two full
+   names — the browser gave the evidence column the width left over, which was
+   about four characters: the sentence wrapped to roughly a hundred lines and
+   each row stood 300 pixels tall. A max-width tells a table what a cell may
+   not exceed and says nothing about what it must claim, and the table's own
+   algorithm will always spend the width on the columns that cannot wrap.
+
+   So the span carries a min-width as well. The cell then claims a readable
+   measure, the table gets wider than the panel, and .tscroll scrolls it
+   sideways with the fade cue api/public/ui.js scrollCue() draws — which is the
+   behaviour every wide table in this product already has, and is far better
+   than a legible-in-principle sentence nobody can read. */
+const EV = 'display:block;min-width:30ch;max-width:56ch';
+const segEvidence = (r) => {
+  const lines = [`<span class="wrap" style="${EV}">${esc(r.attribution_evidence
+    || 'No evidence sentence was recorded for this journey, which is itself a fault — a name '
+     + 'with no working behind it is exactly what this tab exists to prevent.')}</span>`];
+  if (r.clock_skew_min != null) {
+    lines.push(`<span class="wrap dim" style="${EV}">This tracker’s clock is ${fmt(r.clock_skew_min)} `
+      + 'minutes behind, so no booking on any channel could honestly be compared against this '
+      + 'window by time. That is why nothing here is named by time.</span>');
+  }
+  if (r.status_note) lines.push(`<span class="wrap dim" style="${EV}">${esc(r.status_note)}</span>`);
+  if (r.nearest_booking && r.nearest_booking.name) {
+    const nb = r.nearest_booking;
+    lines.push(`<span class="wrap dim" style="${EV}">${esc(nb.means || '')} The booking is on `
+      + `${esc(sourceLabel(nb.platform))}, driven by ${esc(nb.name)}.</span>`);
+  }
+  return lines.join('');
+};
+
+/* Every candidate, in the order the server sent them — which is NAME order,
+   never trip count and never is_primary, because any ordering the evidence
+   knows is read as a ranking. Rendered through entity() so each one is
+   openable: a reader who wants to argue with a name has to be able to go and
+   look at that person. */
+const segCandidates = (r) => {
+  const c = r.attribution_candidates || [];
+  if (!c.length) {
+    return '<span class="ent-off" title="no booking on any channel names a driver for this car '
+      + 'on this day, so there is nobody to offer">nobody</span>';
+  }
+  /* ONE PER LINE, not comma-joined, and the reason is measured rather than
+     aesthetic: joined on one line the column claimed ~290px of a 1,440px page
+     and pushed the evidence sentence off the right edge of the table entirely.
+     Stacked, the column is the width of the longest single name and the
+     sentence that says "every candidate is listed; none is chosen" stays on
+     the screen beside the names it is about. It also reads as a LIST, which is
+     what it is — two people the record cannot separate, not a pair. */
+  return c.map((x) => `<span style="display:block">${entity('driver', x.id, x.name)}</span>`).join('');
+};
+
+/* One table shape for both lists, because the difference between them is the
+   HEADING and the sentence above it, never the columns. `candidates` adds the
+   column that names everyone in the frame, which is the whole content of the
+   second list and redundant in the first — there, the person whose page this
+   is IS the candidate. */
+const unexplainedTable = (rows, { means, candidates = false, sortId }) => tableFrom(rows, [
+  { label: 'Journey', key: 'started_at', render: segWhen },
+  { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+  { label: 'From → to', key: 'start_place', render: segPlaces },
+  /* Null is not zero. A journey with no measured distance did not travel
+     nothing — it was not measured, and "0 km" beside an occupancy verdict is a
+     claim that the car did not move. */
+  { label: 'Distance', key: 'distance_km', num: true,
+    render: (r) => (r.distance_km == null
+      ? '<span class="ent-off" title="no distance was measured across this interval">—</span>'
+      : `${fmt(r.distance_km, 1)} km`) },
+  { label: 'Worth', key: 'forgone_aed', num: true, render: segForgone },
+  /* Keyed on the COUNT so the column sorts by how many people are in the
+     frame, but deliberately not `num`: that right-aligns the cell, and a
+     stacked list of names ragged against the right edge reads as a figure
+     rather than as a list of people. */
+  ...(candidates
+    ? [{ label: 'Candidates', key: 'attribution_candidate_count',
+      render: (r) => segCandidates(r) }]
+    : [{ label: 'Named by', key: 'attribution_tier', render: (r) => tierPill(r, means) }]),
+  { label: 'The evidence', key: 'attribution_evidence', render: segEvidence },
+], { sortable: true, sortId, defaultSort: { key: 'started_at', dir: 'desc' },
+  /* The row opens the SEGMENT, which is where the case for and against it is
+     argued in full. A name on this page that leads nowhere is a name nobody
+     can check. */
+  onRow: (r) => { location.hash = href('segment', r.plate, r.started_at); } });
+
+/* ── tab: unexplained trips ───────────────────────────────────────────────
+   Asked for in these words: "we can get the unauthorized trips on the time and
+   date and we can match who drove that car using uber and put it on their
+   profile along with another tab of all unauthorized trips".
+
+   THREE DISCIPLINES, AND THEY ARE THE WHOLE DESIGN OF THIS TAB.
+
+   1. THE TWO LISTS ARE NEVER ONE TABLE. /api/driver/unauthorized returns
+      `attributed` and `also_a_candidate` as separate objects with separate
+      totals and separate sentences precisely so that a page cannot print them
+      under one heading and one count — and the count is what gets quoted. A
+      journey this person is NAMED beside and a journey they are one of three
+      people who held the car on are two different claims about them, and
+      mixing them turns a maybe into an accusation. Two panels, the second
+      below the first, under a heading that says in words that no claim is
+      being made.
+
+   2. AN EMPTY TAB IS NEVER AN EXONERATION. CABMAN is a five-minute realtime
+      poll with no history behind it and it is configured for Ecosine only:
+      measured over 2026-06-01..2026-09-16, 27 of 108 days carry any segment at
+      all. So "nothing found" and "nothing was looked at" are different facts
+      about a person, and coverage.note — which states which one this is — is
+      printed ABOVE the tables rather than under them. The empty state says
+      which of the two it is and never implies a check that did not run.
+
+   3. THE CONTRACT TRAVELS WITH THE NAMES. `note` on the response is the
+      sentence that says every name here is an inference; it is rendered on the
+      page, not left in the JSON. */
+async function tabUnauthorized(root, id) {
+  const p = panel('Journeys with no booking against them',
+    'What the seat sensor saw with a passenger aboard that no channel booked — and the rule '
+    + 'that put this person’s name beside it');
+  root.append(p.panel); loading(p.body);
+
+  let res;
+  try { res = await qAll('/api/driver/unauthorized', { id }); }
+  catch (e) {
+    p.body.innerHTML = '';
+    /* ABSENT WITH A REASON, and the reason is about US. A failed request and a
+       driver with no unexplained journey are different facts, and a blank
+       panel is indistinguishable from the second. */
+    p.body.append(note('The unexplained-journey list could not be loaded just now. This says '
+      + 'nothing about whether this person has any — the request for it failed.', 'warn'));
+    return;
+  }
+
+  const att = res.attributed || { rows: [], total: 0, by_tier: {} };
+  const cand = res.also_a_candidate || { rows: [], total: 0 };
+  const cov = res.coverage || {};
+  p.body.innerHTML = '';
+
+  /* Above everything, because it changes how every count below is read. */
+  if (cov.note) p.body.append(note(cov.note, 'warn'));
+  p.body.append(note(res.note));
+
+  const sum = (rows, k) => rows.reduce((a, r) => a + (r[k] == null ? 0 : Number(r[k])), 0);
+  const km = sum(att.rows, 'distance_km');
+  const aed = sum(att.rows, 'forgone_aed');
+  p.body.append(kpiRow([
+    { label: 'Named beside', value: fmt(att.total), key: 'unauth-attributed',
+      tone: att.total ? 'warn' : null,
+      sub: att.total ? 'journeys no channel booked' : 'no journey in this window names them' },
+    { label: 'Named by time', value: fmt(att.by_tier?.bracketed || 0),
+      sub: 'their own Uber trips bracket the window' },
+    { label: 'Sole custodian', value: fmt(att.by_tier?.sole_custodian || 0),
+      sub: 'only person holding the car that day' },
+    { label: 'One of several', value: fmt(cand.total), key: 'unauth-candidate',
+      sub: cand.total ? 'no claim is made on these' : 'none in this window' },
+    { label: 'Distance', value: km ? `${fmt(km, 1)} km` : '—',
+      sub: 'across the journeys named beside them' },
+    /* Revenue forgone, never "cost": the fuel and wear behind these kilometres
+       is a different, smaller number this product cannot measure. */
+    { label: 'Revenue forgone', value: aed ? money(aed, 'AED', 0) : '—',
+      tone: aed ? 'warn' : null,
+      sub: res.value?.aed_per_km == null ? 'no rate exists for this window'
+        : `at AED ${res.value.aed_per_km}/km, the fleet’s own rate here` },
+  ]));
+
+  /* ── what this person is NAMED beside ─────────────────────────────────── */
+  const a = panel(att.heading, att.means);
+  root.append(a.panel);
+  if (att.rows.length) {
+    a.body.append(unexplainedTable(att.rows, { means: res.tier_means, sortId: 'dunauth' }));
+  } else {
+    /* THREE DIFFERENT ABSENCES, THREE DIFFERENT SENTENCES. A single "none
+       found" here would read as a clean record, and on two of the three it
+       would be a clean record nobody measured. */
+    empty(a.body, cov.days_with_data === 0
+      ? 'No seat-occupancy evidence exists for this window at all, so this is not a record of '
+        + 'nothing found — nothing was looked at. Widen the range, or read the note above.'
+      : cand.total
+        ? 'No journey in this window is attributed to this person. They are one of several '
+          + `candidates on ${fmt(cand.total)} ${plural(cand.total, 'journey', 'journeys')}, listed `
+          + 'separately below — and being a candidate is not being named.'
+        : `No unexplained journey in this window names this person, across the ${fmt(cov.days_with_data || 0)} `
+          + `of ${fmt(cov.days_in_window || 0)} days the seat sensor actually watched. That is what `
+          + 'was measured; it is not a statement about the days it did not cover.');
+  }
+
+  /* ── …and what they are merely one of several candidates for ──────────── */
+  const c = panel(cand.heading, cand.means);
+  root.append(c.panel);
+  if (cand.rows.length) {
+    /* The strongest wording on the page, above the table rather than under it.
+       This list exists to be read as NOT an accusation, and a heading alone
+       has never stopped a table being quoted as one. */
+    c.body.append(note('Nobody is accused here. Each of these journeys has more than one person '
+      + 'who held the car that day and nothing in the record separates them, so every candidate '
+      + 'is listed and none is chosen. These rows must never be counted together with the ones '
+      + 'above.', 'warn'));
+    c.body.append(unexplainedTable(cand.rows, { means: res.tier_means, candidates: true, sortId: 'dunauthc' }));
+  } else {
+    empty(c.body, cov.days_with_data === 0
+      ? 'Nothing was looked at in this window — see the note at the top of the page.'
+      : 'On every unexplained journey in this window where this person held the car, the record '
+        + 'named them alone or named somebody else. There is no journey here they are merely a '
+        + 'candidate for.');
+  }
+
+  if (res.truncated) {
+    c.body.append(el('p', 'cap', 'This person matched the server’s 400-row ceiling for the '
+      + 'window, so these lists are the newest 400 rather than all of them. Narrow the range '
+      + 'above to see a complete picture.'));
+  }
+}
+
 const TABS = { overview: tabOverview, activity: tabActivity, territory: tabTerritory,
-  earnings: tabEarnings, quality: tabQuality, record: renderDriverRecord, trips: tabTrips };
+  earnings: tabEarnings, quality: tabQuality, record: renderDriverRecord, trips: tabTrips,
+  unauthorized: tabUnauthorized };
 
 /* ── page shell ──────────────────────────────────────────────────────────── */
 export async function renderDriver(root, id, tab = 'overview') {
