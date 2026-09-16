@@ -827,6 +827,131 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A `vehicle_driver_day` row can carry an account and an EMPTY name, and
+  `driver_name IS NOT NULL` admits it — so a record gets counted as a human.**
+  `sql/schema_v19.sql` builds a custody row whenever EITHER an id or a name is
+  present, and `max(t.driver_name)` comes back `''` rather than NULL wherever a
+  channel filed a blank. An empty name folds to `person_key` NULL, so
+  `personKeyStored` falls back to the raw `driver_ext_id` and the row becomes a
+  DISTINCT person. Every custody helper in `api/custody_sql.js` filtered
+  `driver_name IS NOT NULL` and none of them excluded `''`, so a plate-day with
+  one real custodian plus one blank-named channel row printed a leading empty
+  name — `/api/unauthorized/list` returned `drivers = ", Kashif Ali Muhammad
+  Ali"` and a `driver_refs` entry with no name and no link, beside an
+  accusation. It is not a cosmetic defect: the custodian COUNT is what
+  separates `sole_custodian` ("there is nobody else it could have been") from
+  `ambiguous` in `api/unauthorized_sql.js`, so the two surfaces counted one
+  plate-day two different ways and the disagreement was invisible. The
+  predicate is `coalesce(btrim(v.driver_name), '') <> ''` everywhere now, in
+  `api/custody_sql.js` and in `api/unauthorized_sql.js` `cust` alike; where
+  such a record exists it is counted separately (`cust_any`) and the row SAYS
+  how many custody records it cannot put a name to, rather than dropping them
+  silently. Pinned by `test/unauthorized_attribution.test.mjs` §20 and §24.
+
+* **A backtick inside a block comment that sits INSIDE a template literal ends
+  the template, and `node --check` reports the error hundreds of lines away.**
+  `api/unauthorized_sql.js` builds its whole lateral as one long template
+  literal, and the house style puts long explanatory comments inside it. A
+  comment that quotes a CTE name the way this codebase quotes identifiers in
+  prose — with backticks — terminates the string mid-file. The module then
+  fails to IMPORT, so every API test dies at load with a `SyntaxError` naming
+  whatever identifier follows the stray backtick, and nothing points at the
+  comment. Quote identifiers with `'single quotes'` inside that file, and after
+  editing it run `node -e "import('./api/unauthorized_sql.js')"` — `node
+  --check` treats a `.js` as CommonJS and is not the check that matters.
+
+* **`test/collector_invariants.test.mjs`'s bare-interval-keyword rule reads
+  ENGLISH PROSE inside `format()` as a column alias.** Any template literal
+  containing `SELECT` is scanned for a token followed by `day|hour|month|year|
+  minute|second|week` and then a comma — which is a real, invisible syntax
+  error when it is a select list, and a false positive when it is a sentence.
+  An evidence sentence reading "a custody record for the journey's own day, and
+  the day record is …" failed the invariant. Reword the sentence rather than
+  exempting the check: it catches a class of error `node --check` cannot see.
+  `nearestJoin()` carries the same note for the same reason.
+
+* **`verdict_reason` NEVER carries "N min behind" on an `unauthorized`
+  segment, so any clock-skew guard that reads it off the row is a no-op on the
+  population that matters.** `src/reconcile.js` writes that sentence only on
+  its `clockSuspect` branch, which sets `verdict='unverifiable'`. An
+  unauthorized segment's reason is always `no completed booking overlaps;
+  nearest is a <p> trip N min away` or `no booking of any kind on this plate in
+  the window, across …`. `api/unauthorized_sql.js` had a guard of exactly this
+  shape and it fired on zero rows; the test that "proved" it seeded a reason
+  string reconcile.js cannot produce for an unauthorized segment, so it proved
+  the regex and not the guard. Worse, `clockSuspect` is computed FLEET-WIDE —
+  `clockSkewMin()` is the median over every fix in the run and the threshold is
+  60 minutes — so one plate whose tracker is hours out never trips it and its
+  segments are issued as accusations with timestamps that are hours wrong. The
+  skew has to be derived PER PLATE, from a neighbouring segment the reconciler
+  *did* mark unverifiable, and/or from the constant-offset signature (three or
+  more unauthorized segments on one plate whose `nearest_gap_min` agree within
+  `RULES.matchToleranceMin` and exceed it).
+
+* **`vehicle_driver_day.driver_ext_id` is NOT NULL but is often the EMPTY
+  STRING, and `driver_name` can be NULL or empty.** `sql/schema_v19.sql` builds
+  a custody row when EITHER the id or the name is non-blank, so a channel that
+  names a driver without numbering them lands as `('', 'Sajid Gul Gul
+  Muhammad')` and one that numbers without naming lands as `('y-7781', NULL)`.
+  Three consequences, all of which changed a verdict rather than a label:
+  filtering `driver_name IS NOT NULL` admits `''`, which folds to its own
+  person key and becomes a DISTINCT custodian; counting custodians AFTER the
+  name filter silently removes an unnamed one from a population a sentence then
+  claims to be exhaustive; and emitting the raw `driver_ext_id` as a
+  candidate's id produces a driver link to nowhere. Use
+  `coalesce(btrim(driver_name),'') <> ''` for the list, count the unnamed rows
+  separately, and synthesise `'name:' || person_key` for the link — which is
+  exactly what `api/driver_routes.js` `resolve()` expects.
+
+* **A segment can cross Dubai midnight, so `(started_at AT TIME ZONE
+  'Asia/Dubai')::date` is not "the day of the journey".** `RULES.maxDurationHr`
+  is 8. A journey opening 23:50 and closing 00:40 is the night-shift handover
+  shape this fleet runs on, and keying custody on the start day alone reports
+  one custodian and prints "there is nobody else it could have been" about a
+  car whose keys changed inside the window. Range over
+  `SEG_DAY(o) .. (coalesce(ended_at, started_at) AT TIME ZONE 'Asia/Dubai')::date`
+  and name both days in the sentence when they differ.
+
+* **`trip` has no `outcome` column — that lives on the `trip_norm` view — and a
+  cancelled ride is a perfectly valid-looking booking if you only test
+  `ended_at IS NOT NULL` on one side.** 3,490 of 25,451 Uber rows (13.7%) carry
+  no `ended_at` and every one is a cancellation, so a predicate on `ended_at`
+  filters them by accident; a predicate on `requested_at` does not. That is how
+  a `rider_cancelled` request became the "after" side of a bracket and was
+  quoted in an accusation as "their next Uber trip began 100 minutes after it
+  ended". `src/reconcile.js` `findMatch` restricts its match set to
+  `outcome === 'completed' || outcome == null`; anything that builds evidence
+  out of trips must use the same set, or the two surfaces disagree about what a
+  trip is.
+
+* **An exclusion clause is only as wide as the CTE it runs over, and the
+  sentence will not tell you it was narrowed.** The bracket's "no other driver
+  has a booking on this car between those two" ran against an Uber-only,
+  id-required set while claiming to be unqualified. The hotel channel names a
+  driver on every booking and does not always carry an id, so a handover inside
+  the gap was invisible twice over and the product printed its strongest claim
+  against the person the car was taken FROM. Exclusions get their own CTE with
+  no platform filter and no id requirement; the bracket SIDES stay on whichever
+  channel the operator asked for.
+
+* **An interval claim needs an interval test.** The same exclusion compared
+  only the intervening booking's `requested_at` against the bracket's two ends,
+  so a trip requested before the bracket's left edge and running through the
+  gap did not break it. `coalesce(x.ended_at, x.requested_at) > b.ended_at AND
+  x.requested_at < r.requested_at`, and widen the scan's lower bound by
+  `RULES.maxDurationHr` so a long intervening trip is in the scanned set at all.
+
+* **A `.catch(() => null)` on a fetch does not defend a page against a 200
+  carrying the wrong body, and `[]` is truthy.** Every guard of the form
+  `res.x || {…}` then converts a failed request into a MEASURED EMPTINESS: on
+  `#segments` the band rendered "Nothing the seat sensor recorded in this
+  window went unexplained" four inches above its own tile reading UNEXPLAINED
+  13, and on the driver tab `cov.days_with_data` came back `undefined`, so the
+  `=== 0` test was false and the page printed "across the 0 of 0 days the seat
+  sensor actually watched. That is what was measured." Validate the SHAPE —
+  `raw && raw.distribution ? raw : null` — and let a wrong body take the same
+  path a thrown request takes.
+
 * **Who was driving an UNAUTHORIZED journey is an inference at four different
   strengths, and only one of them is time.** Measured over
   `from=2026-06-01&to=2026-09-16`, all 120 unauthorized segments, Uber-only
@@ -3043,3 +3168,61 @@ now reports `history_from`, `partial` and `partial_why`, and the strip reads
   whole day.** Any figure derived from a history that starts part-way through
   a period must say what it is measured over, especially when an older,
   longer-running feed is reporting the same quantity on the same screen.
+
+## An empty window is a fact about the work, not a failure of the page
+
+MEASURED on production 2026-09-16, read-only, window pinned
+`from=2026-09-01&to=2026-09-16`, for Muhammad Nadeem Ajmal (Uber
+`e3cd308b2b5f48e19877b924b48bbb9d`):
+
+| endpoint | what it answers |
+|---|---|
+| `/api/driver/profile` | `span` {trips 0, days_worked 0, vehicles 0, first_trip null, last_trip null}; `accounts[0]` uber, trips 1203, first_trip 2025-10-17, last_trip 2026-03-29T16:02:28Z; `platforms` ["uber","yango"] |
+| `/api/driver/kpis` | trips 0, days_worked 0, bookings 0, priced_trips 0, outcome_n 0, revenue null, km null, avg_fare null, completion_pct null, cash_earnings null, day_money 0 over day_money_days 13 |
+| `/api/driver/mix` | `{distance:[], product:[], payment:[], status:[], platform:[]}` — **payment is EMPTY**, not cash-free |
+| `/api/driver/earnings` | components `[{payouts 0.00}, {your_earnings 0.00}]`; 2 Uber periods, `earnings "0.00"`, **`counted` null on both**; statement_days 13 |
+| `/api/driver/daily` | 13 rows, trips 0 on every one, **`first_hour` null on all 13** |
+
+None of that is wrong: the person did not work in September and their last trip
+was in March. Every blank on that page was the read layer behaving correctly.
+
+### Traps this added to the list
+
+- **`Number(null) === 0`, and `0` is finite — so `Number.isFinite(+row.x)` is
+  NOT a null guard.** `api/public/driver.js` `startScatter()` filtered its days
+  that way, so all thirteen days carrying no first trip passed, and the Overview
+  tab drew thirteen dots along the 00:00 line with a quartile band computed from
+  thirteen zeros, captioned "the middle half of start times (00:00–00:00). Each
+  dot is one working day" — under a DAYS WORKED tile reading 0. A fabricated
+  PATTERN, on the landing tab, for a man who did not work. `ui.js:moneyParts`
+  already documents this trap by name; this is that trap landed. **Test
+  `x != null` BEFORE the coercion, every time.**
+- **`+x || 0` and `x ?? 0` destroy an absence the server went to trouble to
+  report.** `charts.js hbars()` does `+d[value] || 0` internally and prints the
+  literal string `0`, so every caller that hands it a money or rate column
+  inherits the collapse: a row the platform NAMED WITHOUT VALUING and a row it
+  valued at nought draw identically — no bar, the text "0". The caller must
+  split the rows before handing them over; `gapBars()` is the chart that already
+  has the right shape (an explicit `gapKey`).
+- **A second `??` hides the absence the first one exposed.** The statement total
+  read `Number(r.counted ?? r.earnings ?? 0)`. `counted` null is the server
+  saying it resolved nothing onto a day in the window; the first fallback
+  silently swapped in a DIFFERENT measurement (the un-clamped period figure the
+  paragraph below it says must not be added down the page), and the second
+  turned that into zero. The caption then asserted the two columns "agree".
+- **A true reason can still be the wrong reason.** "no cash booking in this
+  window" beside the Cash collected tile is true and NARROW when what actually
+  happened is that no booking of any kind was in the window. The sentence has to
+  name the wider fact when the wider fact is what happened, or it implies a
+  measurement (we looked at their bookings; none were cash) that was never taken.
+- **A count of nought is a measurement and must stay a nought.** TRIPS 0, DAYS
+  WORKED 0, HARSH EVENTS 0 for a person who did not work are true counts.
+  Turning counts into dashes alongside the money would be the same defect facing
+  the other way, and harder to see. Only figures that were never MEASURED become
+  absences.
+- **`period=month` is resolved by `api/window.js`, and no driver endpoint returns
+  the resolved dates.** So a client-side sentence cannot say "156 days before
+  this window opens" without a second implementation of the calendar. The
+  empty-window banner states the gap against TODAY, which the browser genuinely
+  knows, and names the window with `windowLabel()`. A true smaller fact beats a
+  fabricated larger one.

@@ -51,7 +51,7 @@ const vTag = (v) => `<span class="tag ${VERDICT_TONE[v] || 'dim'}">${esc(v || '�
    more people than drove, and 33 named nobody while the column simply read
    "unknown" with no reason for it.
 
-   WHAT REPLACES IT. /api/unauthorized/attributed runs a four-rung ladder whose
+   WHAT REPLACES IT. /api/unauthorized/attributed runs a five-rung ladder whose
    SQL and whose measurements live in api/unauthorized_sql.js — nothing is
    decided in this file. Every name it produces is an INFERENCE (an unexplained
    journey is by definition one no booking explains, so no booking names its
@@ -147,8 +147,11 @@ const segKey = (r) => `${r.plate}|${Date.parse(r.started_at)}`;
    own copy overwrite it would make the two disagree about which segments are
    unusable. Everything else here exists only on the attribution response. */
 const ATT_FIELDS = ['attribution_tier', 'attribution_candidates', 'attribution_candidate_count',
-  'attribution_candidate_keys', 'attribution_evidence', 'bracket_before_min', 'bracket_after_min',
-  'custodian_count', 'candidate_statuses', 'nearest_booking', 'status_note',
+  'attribution_candidate_keys', 'attribution_evidence', 'attribution_responsible',
+  'attribution_last_trip_gap_min', 'attribution_last_uber_driver',
+  'bracket_before_min', 'bracket_after_min',
+  'custodian_count', 'unnamed_custodian_count', 'clock_skew_basis',
+  'candidate_statuses', 'nearest_booking', 'status_note',
   'forgone_aed', 'aed_per_km', 'rate_basis'];
 
 /* WHO THE EVIDENCE NAMES, as one table cell.
@@ -225,7 +228,7 @@ const attributionCell = (r) => {
    `distribution`, which the endpoint measures over the WHOLE WINDOW rather
    than over the current filter — a tier count that changes when you pick a
    tier tells a reader nothing about what else is there. */
-function attributionBand(root, att) {
+function attributionBand(root, att, pageRows = []) {
   const dist = att.distribution || {};
   const tiers = dist.by_tier || [];
   const n = dist.segments || 0;
@@ -246,8 +249,12 @@ function attributionBand(root, att) {
   const km = tiers.reduce((a, t) => a + (Number(t.km) || 0), 0);
   const rate = att.value?.aed_per_km;
 
-  const ladder = `${fmt(dist.bracketed || 0)} named by time, ${fmt(dist.sole_custodian || 0)} by `
-    + `day custody alone, ${fmt(dist.ambiguous || 0)} with more than one candidate and `
+  /* All five rungs. This named four and omitted `last_trip` — the operator's
+     own rule, and the rung that carries most of the list — so the sentence
+     under the headline did not add up to the total above it. */
+  const ladder = `${fmt(byTime)} named by time, ${fmt(dist.last_trip || 0)} off the last Uber `
+    + `trip on the car, ${fmt(dist.sole_custodian || 0)} by day custody alone, `
+    + `${fmt(dist.ambiguous || 0)} with more than one candidate and `
     + `${fmt(dist.unknown || 0)} with nobody`;
   verdict(root, {
     claim: n === 0
@@ -264,8 +271,18 @@ function attributionBand(root, att) {
     meta: n ? `${fmt(oneName - byTime)} carry one name off the car’s day instead · `
       + `${fmt(open)} carry no single name at all` : null,
     sub: n === 0
-      ? (att.coverage?.note
-        || 'Nothing the seat sensor recorded in this window went unexplained.')
+      /* "Nothing went unexplained" and "13 unexplained rows below" cannot both
+         be true, and the page used to be able to print both. When the rows on
+         screen contradict this zero, say so rather than leading with an
+         exoneration the list itself disproves. */
+      ? (pageRows.some((r) => r.verdict === 'unauthorized')
+        ? `The attribution came back with nothing in it, and the list below holds ${
+          fmt(pageRows.filter((r) => r.verdict === 'unauthorized').length)} unexplained `
+          + 'journeys in this same window. Those two cannot both be right, so nothing here is '
+          + 'an all-clear — read the list, and treat the missing names as missing rather than '
+          + 'as absent.'
+        : (att.coverage?.note
+          || 'Nothing the seat sensor recorded in this window went unexplained.'))
       : `${ladder}. Every name below is an inference from the booking record, never a trip `
         + 'record of the journey itself — so a tier is printed in front of every one of them, '
         + 'and where the evidence cannot single out one person the page lists every candidate '
@@ -305,7 +322,8 @@ function attributionBand(root, att) {
        apart: more than one candidate is a question, no candidate at all is a
        gap in the trip record. Adding them into one "unattributed" would hide
        which of the two an operator can actually do something about. */
-    { label: 'Cannot be narrowed', value: fmt(open), tone: open > firm ? 'bad' : open ? 'warn' : null,
+    { label: 'Cannot be narrowed', value: fmt(open),
+      tone: open > oneName ? 'bad' : open ? 'warn' : null,
       sub: `${fmt(dist.ambiguous || 0)} have two or more people who held the car that day and `
         + `nothing separates them · ${fmt(dist.unknown || 0)} have no custody record at all` },
   ]));
@@ -323,7 +341,7 @@ function tierChips(root, att, { kind, value, tier, who }) {
   const dist = att.distribution || {};
   const means = att.tier_means || {};
   const p = panel('How firmly each journey is attributed',
-    'Four rungs, strongest first. Click one to see only those.');
+    `${TIER_ORDER.length} rungs, strongest first. Click one to see only those.`);
   root.append(p.panel);
   const chip = (key, label, n, title) => `<a class="chip${tier === key ? ' on' : ''}" `
     + `title="${esc(title)}" href="${esc(href('segments', kind, value,
@@ -370,7 +388,29 @@ function tierChips(root, att, { kind, value, tier, who }) {
    "named beside this journey" and "held this car on a day something
    unexplained happened, along with somebody else" are not the same accusation,
    and a single total is the number that would get quoted. */
-function whoPanel(root, rows, { kind, value, tier, who }) {
+/* NO SINGLE "NAMED BESIDE" COLUMN, AND NO DEFAULT SORT ON A COUNT.
+   ─────────────────────────────────────────────────────────────────────────
+   THE DEFECT THIS ANSWERS. This was a per-person suspicion leaderboard that
+   re-merged what the ladder had just split. One column headed "Named beside"
+   incremented on isFirm(t) — bracketed OR sole_custodian, and now the
+   operator's last-trip rule as well — and the table was default-sorted on it
+   descending, with Distance and Worth summed over the same union. Fleet-wide
+   that added 13 time-grade rows to 48 custody-grade rows in one number, with
+   money attached, and row one of the table read as "the person the product
+   suspects most". Every one of the eight rows behind "Wisal · Named beside 8 ·
+   184.0 km · AED 811" was sole_custodian — the product's own words for that
+   rung are "this is custody, not driving".
+
+   So the three rungs are three columns and they are never summed. The default
+   sort is by NAME: any ordering the evidence knows is read as a ranking, which
+   is the same reasoning api/unauthorized_sql.js gives for ordering an
+   ambiguous candidate list alphabetically rather than by trip count.
+
+   Worth and Distance are attached to the BY-TIME column alone. They are the
+   rows where a measurement of this journey's own clock put one person in the
+   frame; multiplying a day-custody inference by a rate produces a monetary
+   claim against a person nothing placed behind that wheel. */
+function whoPanel(root, rows, { kind, value, tier, who }, truncated) {
   const byKey = new Map();
   rows.forEach((r) => {
     const t = r.attribution_tier;
@@ -379,50 +419,71 @@ function whoPanel(root, rows, { kind, value, tier, who }) {
       const key = c.key || c.id || c.name;
       if (!key) return;
       const cur = byKey.get(key)
-        || { key, id: c.id, name: c.name, named: 0, candidate: 0, km: 0, aed: 0 };
-      if (isFirm(t)) {
-        cur.named += 1;
+        || { key, id: c.id, name: c.name, by_time: 0, last_trip: 0, custodian: 0,
+          candidate: 0, km: 0, aed: 0 };
+      if (isByTime(t)) {
+        cur.by_time += 1;
         cur.km += Number(r.distance_km) || 0;
         cur.aed += Number(r.forgone_aed) || 0;
-      } else cur.candidate += 1;
+      } else if (t === 'last_trip') cur.last_trip += 1;
+      else if (isFirm(t)) cur.custodian += 1;
+      else cur.candidate += 1;
       byKey.set(key, cur);
     });
   });
   const people = [...byKey.values()]
-    .sort((a, b) => b.named - a.named || b.candidate - a.candidate
-      || String(a.name).localeCompare(String(b.name)));
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
   if (!people.length) return;
 
   const p = panel('Who the evidence names',
-    'Two counts per person, and they are never added together');
+    'One column per rung of the ladder, and they are never added together');
   root.append(p.panel);
+  const num = (n, title) => (n
+    ? `<span title="${esc(title)}">${fmt(n)}</span>`
+    : '<span class="ent-off">—</span>');
   const t = tableFrom(people, [
     { label: 'Person', key: 'name', render: (r) => entity('driver', r.id, r.name) },
-    { label: 'Named beside', key: 'named', num: true,
-      render: (r) => (r.named
-        ? `<b>${fmt(r.named)}</b>`
-        : '<span class="ent-off" title="nothing on this list is attributed to this person">—</span>') },
+    { label: 'Named by time', key: 'by_time', num: true,
+      render: (r) => num(r.by_time, TIER_LABEL.bracketed + ' — ' + TIER_SHORT.bracketed) },
+    { label: 'Last trip on the car', key: 'last_trip', num: true,
+      render: (r) => num(r.last_trip, 'the operator’s rule: theirs was the last Uber trip on '
+        + 'that car before the journey. An inference from the car’s Uber record, not a record '
+        + 'of the journey') },
+    { label: 'Sole custodian that day', key: 'custodian', num: true,
+      render: (r) => num(r.custodian, 'they are the only person the trip record shows holding '
+        + 'that car that Dubai day. This is custody, not driving') },
     { label: 'One of several', key: 'candidate', num: true,
-      render: (r) => (r.candidate
-        ? `<span class="tag warn">${fmt(r.candidate)}</span>`
-        : '<span class="ent-off">—</span>') },
-    { label: 'Distance named', key: 'km', num: true,
+      render: (r) => num(r.candidate, 'they are one of two or more people the record cannot '
+        + 'separate. No claim is made') },
+    /* Only on the by-time rows. See the block above. */
+    { label: 'Distance named by time', key: 'km', num: true,
       render: (r) => (r.km ? `${fmt(r.km, 1)} km` : '<span class="ent-off">—</span>') },
-    { label: 'Worth', key: 'aed', num: true,
+    { label: 'Worth of those', key: 'aed', num: true,
       render: (r) => (r.aed ? `AED ${fmt(r.aed, 0)}` : '<span class="ent-off">—</span>') },
     { label: '', key: 'key',
       render: (r) => `<a class="dim" title="only this person’s journeys" href="${
         esc(href('segments', kind, value, { tier, who: r.key }))}">⌕</a>` },
   ], { compact: true, sortable: true, sortId: 'segwho',
-    defaultSort: { key: 'named', dir: 'desc' } });
+    defaultSort: { key: 'name', dir: 'asc' } });
   foldRows(p.body, t, { shown: 10, total: people.length, noun: 'person', key: 'segwho' });
   p.body.append(el('p', 'cap',
-    '<b>Named beside</b> counts the journeys where the evidence reached this person and nobody '
-    + 'else — their own Uber trips bracket it in time, or they are the only person the trip '
-    + 'record shows holding the car that day. <b>One of several</b> counts the journeys where '
-    + 'they are one of two or more candidates and nothing separates them; it is not an '
-    + 'accusation and it must not be added to the column beside it. Folded on the person, so a '
-    + 'driver with an Uber and a Yango account is one row rather than two.'));
+    'Four counts per person and <b>none of them may be added to another</b>. <b>Named by time</b> '
+    + 'is the only one measured against this journey’s own clock: their own Uber trips bracket '
+    + 'it, with no other driver’s booking on the car in between. <b>Last trip on the car</b> is '
+    + 'the operator’s rule — whoever finished the last Uber trip on that car before the journey '
+    + '— which is an inference from the car’s record and not about the journey. <b>Sole '
+    + 'custodian that day</b> is day-grain custody: this is custody, not driving. <b>One of '
+    + 'several</b> is not an accusation at all. The money and the distance are attached to the '
+    + 'by-time column alone, because pricing a custody record produces a debt nobody measured. '
+    + 'Folded on the person, so a driver with an Uber and a Yango account is one row, not two.'
+    /* THE COUNTS ARE OVER WHAT IS ON SCREEN. /api/segments caps at 300 and a
+       plate or day facet narrows it further, while the chips above carry
+       window-wide figures. A per-person count that is silently a floor is the
+       one number on this panel that must not be approximate. */
+    + (truncated
+      ? ' <b>These counts are a floor.</b> The list behind them is capped, so a person whose '
+        + 'other journeys fall past the cap is undercounted here. Narrow by vehicle or day.'
+      : '')));
 }
 
 /* The list. `kind` is one of verdict|plate|day|driver, so every facet chip is
@@ -447,7 +508,7 @@ export async function renderSegments(root, kind, value) {
   const extra = {}; extra[k] = v;
   const tier = TIER_ORDER.includes(hashQ('tier')) ? hashQ('tier') : null;
   const who = hashQ('who') || null;
-  const [d, att] = await Promise.all([
+  const [d, attRaw] = await Promise.all([
     q('/api/segments', extra),
     /* The ladder is only meaningful on an unexplained journey — a matched
        segment has a booking behind it and the booking names its own driver —
@@ -474,6 +535,29 @@ export async function renderSegments(root, kind, value) {
   ]);
   root.innerHTML = '';
 
+  /* A 200 CARRYING THE WRONG BODY IS A FAILURE, NOT AN EMPTY ANSWER.
+     ───────────────────────────────────────────────────────────────────────
+     The catch above stops a THROWN request; it does nothing about a response
+     that arrives with a status of 200 and a shape this page cannot read — a
+     bare `[]` from a mock's catch-all route, a proxy or a cache that rewrote
+     the body, a deploy where the endpoint is not there yet. `[]` is truthy, so
+     it passed the `att ? … : null` test below and was then read as an object:
+     `att.distribution` came back undefined, the band computed n = 0 and
+     rendered its zero branch — the claim "No unexplained journey in this
+     window to attribute" and the sub-line "Nothing the seat sensor recorded in
+     this window went unexplained." — in the page's headline verdict slot,
+     directly above KPI tiles reading UNEXPLAINED 13 and a 13-row table of
+     off-book journeys fetched separately and perfectly fine.
+
+     That is the one failure mode the house principle forbids: a figure that
+     could not be measured rendered as zero, with a reason that is not the true
+     one, and in this case the strongest possible exoneration of the whole
+     fleet. So the body is VALIDATED, and anything that does not carry a
+     distribution takes the same degraded path a thrown request already took —
+     the day-custody column, no band, and the note below saying why. */
+  const att = attRaw && attRaw.distribution ? attRaw : null;
+  const attFailed = !att;
+
   /* The attribution, merged onto the rows this page already had rather than
      rendered as a second list beside them. Two pages listing the same journeys
      differently is worse than one page listing them incompletely. */
@@ -498,7 +582,18 @@ export async function renderSegments(root, kind, value) {
   /* ── the band, and it goes above every name on the page ─────────────────
      Rendered before the segment KPIs rather than after them, because it is the
      thing that says whether the names below are worth reading. */
-  if (att) attributionBand(root, att);
+  if (att) attributionBand(root, att, d.rows);
+  /* ABSENT WITH A REASON, and the reason is about US. An attribution that
+     could not be read is not an attribution that found nothing, and the
+     difference is the whole page. */
+  if (attFailed) {
+    root.append(note('Who the evidence names could not be loaded for this window — the '
+      + 'attribution service did not answer, or answered with something this page cannot read. '
+      + 'The list below is unchanged and complete; what is missing is the NAME beside each '
+      + 'journey and the rung that justifies it. This says nothing about whether these '
+      + 'journeys can be attributed. The column falls back to day-grain custody, labelled as '
+      + 'such.', 'warn'));
+  }
 
   /* A control on screen that changes nothing has to say so. See the note on
      the qAll above: neither this list nor its attribution is narrowed by the
@@ -516,6 +611,25 @@ export async function renderSegments(root, kind, value) {
               + 'selected, so an empty page here would have meant an absent sensor rather than a '
               + 'clean fleet' : ''}.`
         : 'No segment is shown at all in this window.'), 'warn'));
+  }
+
+  /* THE OTHER INERT CONTROL, WHICH HAD NO NOTE AT ALL.
+     ───────────────────────────────────────────────────────────────────────
+     The fleet chip gets four lines above explaining that it governs nothing
+     here. The PLATFORM chip is equally inert — /api/segments binds no platform
+     and /api/unauthorized/attributed deliberately does not either — and said
+     nothing. Selecting Bolt changed not one character of this page, with the
+     control still reading Bolt, while the chip beside it got a paragraph about
+     precisely that situation. A true reason exists and was written in the
+     endpoint's own header; it never reached the screen. */
+  if (state.platform) {
+    root.append(note(`The platform chip above reads ${sourceLabel(state.platform)}, and nothing `
+      + 'on this page is narrowed by it — not the list, not the counts, and not the names. An '
+      + 'occupancy segment is a CAR’s own movement, recorded by a seat sensor and a GPS trace; '
+      + 'it does not belong to a booking channel at all, and the entire meaning of the verdict '
+      + 'below is that no channel explains it. Filtering these journeys by channel would '
+      + 'return an empty page and call it a clean one, so the control is left showing every '
+      + 'one of them instead.', 'warn'));
   }
 
   const vf = d.facets.verdict || [];
@@ -603,7 +717,7 @@ export async function renderSegments(root, kind, value) {
   if (att) {
     tierChips(root, att, { kind, value, tier, who });
     root.append(note(att.note, 'warn'));
-    whoPanel(root, d.rows, { kind, value, tier, who });
+    whoPanel(root, d.rows, { kind, value, tier, who }, !!d.truncated || !!att.truncated);
   }
 
   const g = el('div', 'grid g3'); root.append(g);
@@ -731,7 +845,18 @@ export async function renderSegments(root, kind, value) {
   const lp = panel(
     defaulted ? 'Every unauthorized trip'
       : (k === 'verdict' && v === 'all' ? 'Every occupancy segment' : `Segments — ${k} ${v}`),
-    `${fmt(shown.length)}${narrowed ? ` of ${fmt(d.rows.length)} narrowed` : ''} shown`
+    /* NOT THE WORD "narrowed". This file uses it throughout to mean "attributed
+       to one person" — the band's unit is "of N narrowed to one person", its
+       meta says "not narrowed", and a KPI tile is headed "Cannot be narrowed".
+       Used here for "a chip filter is on", #segments?tier=unknown read
+       "1 of 10 narrowed shown": the page's own word for an attributed journey,
+       describing the one journey that by definition could not be attributed to
+       anybody, directly under a tile reading CANNOT BE NARROWED. */
+    `${fmt(shown.length)}${narrowed
+      ? ` of ${fmt(d.rows.length)} shown, filtered by ${[
+        tier ? TIER_LABEL[tier].toLowerCase() : null,
+        who ? 'person' : null].filter(Boolean).join(' and ')}`
+      : ' shown'}`
     + `${d.truncated ? ` of ${fmt(d.total)}` : ''} · click a row for the evidence`);
   root.append(lp.panel);
   if (!shown.length) {
@@ -984,10 +1109,59 @@ export async function renderSegment(root, plate, at) {
     root.append(where);
   }
 
+  /* ── WHO THE EVIDENCE NAMES, ON THE PAGE THE ROW OPENS ─────────────────
+     THE DEFECT THIS ANSWERS. Every row on both new surfaces opens this page,
+     and the copy in three separate places calls it the one "where the case for
+     and against it is argued in full" and says "a name on this page that leads
+     nowhere is a name nobody can check". This page carried NO attribution at
+     all. Its header printed `held that day by <b>${s.drivers}</b>` — the raw
+     comma-joined day-grain custody string, flatly, with no tier, no evidence
+     sentence and no hedge. So the bracketed row that reads "NAMED BY TIME ·
+     Zain … · −54m/+75m" on the list opened a page whose first line was
+     "L45243 — held that day by Waseem Abbas Ghulam Nabi, Zain Hassan Raja
+     Nasrullah Khan": the narrowing the whole feature exists to perform, undone
+     at the exact moment of verification. In the other direction an ambiguous
+     row whose list cell says "none is chosen" opened a page reading as a joint
+     accusation against both.
+
+     So the attribution is fetched for this one segment and rendered ABOVE the
+     custody line, and the custody line itself now says what grain it is. */
+  let att = null;
+  if (s.verdict === 'unauthorized') {
+    const day = String(s.local_day);
+    const raw = await qAll('/api/unauthorized/attributed',
+      { verdict: 'unauthorized', limit: 500, from: day, to: day }).catch(() => null);
+    const rows = raw && raw.distribution ? (raw.rows || []) : [];
+    att = rows.find((r) => r.plate === plate
+      && Date.parse(r.started_at) === Date.parse(s.started_at)) || null;
+    const box = el('div', 'note' + (att ? '' : ' warn'));
+    box.innerHTML = att
+      ? `<b>Who the evidence names — ${esc(TIER_LABEL[att.attribution_tier]
+        || att.attribution_tier || 'no rung reached')}</b><br>`
+        + ((att.attribution_candidates || []).length
+          ? (att.attribution_candidates || []).map((c) => entity('driver', c.id, c.name))
+            .join(att.attribution_tier === 'ambiguous'
+              ? '<span class="dim"> or </span>' : ', ')
+          : '<span class="ent-off">nobody can be named</span>')
+        + `<br><span class="wrap">${esc(att.attribution_evidence || '')}</span>`
+        + (att.status_note ? `<br><span class="wrap dim">${esc(att.status_note)}</span>` : '')
+        + '<br><span class="dim">Every name here is an INFERENCE. An unexplained journey is by '
+        + 'definition one no booking explains, so no booking names its driver — the rung above '
+        + 'says which rule produced this name and the sentence states the measurement that '
+        + 'rule ran, so it can be checked against this car’s own trip list below.</span>'
+      : 'The attribution for this journey could not be loaded, so this page shows day-grain '
+        + 'custody only. That is a failure of the request, not a finding about anybody.';
+    root.append(box);
+  }
+
   const head = el('div', 'note');
   head.innerHTML = `<b>${esc(plate)}</b> — ${entity('vehicle', plate, 'vehicle page')} · `
+    /* DAY GRAIN, AND IT SAYS SO. This read "held that day by X, Y" with no
+       qualifier, which is a narrowed name's voice describing a custody record.
+       A handover day names two people for one journey that had one driver. */
     + (s.drivers
-      ? `held that day by <b>${esc(s.drivers)}</b>`
+      ? 'custody that day <span class="dim">(day grain — this is who HELD the car, not a '
+        + `narrowed name)</span>: <b>${esc(s.drivers)}</b>`
       : 'no driver could be attributed to this vehicle on this day')
     + ` · <a href="${href('day', s.local_day)}">everything that happened on ${esc(s.local_day)}</a>`
     + ` · <a href="${href('segments', 'plate', plate)}">this vehicle’s other segments</a>`;
@@ -1062,9 +1236,18 @@ export async function renderSegment(root, plate, at) {
       { label: 'Outcome', key: 'outcome', render: (r) => esc(r.outcome || r.status || '—') },
     ], { compact: true }));
     const elsewhere = d.nearby_driver_trips.filter((r) => r.plate && r.plate !== plate);
+    /* PLURAL-SAFE. This said "the person named above was not behind this
+       wheel" in the singular while the line above it names every custodian of
+       a handover day — two people, and the sentence picked one of them by
+       grammar. */
+    const held = String(s.drivers || '').split(',').filter((x) => x.trim()).length;
     if (elsewhere.length) nd.body.append(el('p', 'note err',
       `${fmt(elsewhere.length)} of these bookings were taken in a different vehicle. Either the custody `
-      + 'attribution for this day is wrong, or the person named above was not behind this wheel.'));
+      + 'attribution for this day is wrong, or '
+      + (held > 1
+        ? `at least one of the ${fmt(held)} people named above was not behind this wheel — and `
+          + 'this page does not say which, because nothing in the record does.'
+        : 'the person named above was not behind this wheel.')));
   } else if (!s.drivers) {
     empty(nd.body, 'No driver is attributed to this vehicle on this day, so there is nobody to check');
   } else {

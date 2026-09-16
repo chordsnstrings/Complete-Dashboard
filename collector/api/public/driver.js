@@ -22,7 +22,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   avatar, moneyInTile, cashOnHandTile, bankDepositTile, faresTile,
   alertRateFigure, splitAlerts, standingNote,
   UBER_FARE_WHY, dialable } from './ui.js';
-import { qAll, href, currentGen, alive } from './data.js';
+import { qAll, href, currentGen, alive, windowLabel } from './data.js';
 import { driversVerdict } from './verdicts.js';
 import { renderDriverDay } from './driverday.js';
 /* One driver against their own record, week by week and month by month. Its
@@ -159,8 +159,43 @@ function percentileBars(host, metrics, opts = {}) {
    is a driver on a shift, a scattered column is someone working ad hoc. */
 function startScatter(host, days) {
   host.innerHTML = '';
-  const pts = days.filter((d) => Number.isFinite(+d.first_hour)).map((d) => ({ ...d, first_hour: +d.first_hour }));
-  if (pts.length < 2) return empty(host, 'Not enough working days to show a pattern');
+  /* A PATTERN NOBODY MEASURED, PLOTTED ON THE TAB THE PAGE OPENS ON.
+     ═══════════════════════════════════════════════════════════════════════
+     The filter was `Number.isFinite(+d.first_hour)`. `+null` is 0 and
+     Number.isFinite(0) is true, so every day carrying NO first trip passed it
+     and was plotted at midnight.
+
+     MEASURED on production for e3cd308b2b5f48e19877b924b48bbb9d over
+     2026-09-01..09-16: /api/driver/daily returns 13 rows, trips 0 and
+     first_hour null on all 13. All 13 passed this guard. The Overview tab drew
+     thirteen dots along the 00:00 line, computed a quartile band from thirteen
+     zeros, and captioned it "the middle half of start times (00:00–00:00). Each
+     dot is one working day" — under a DAYS WORKED tile reading 0. Every tooltip
+     read "first trip 00:00 · 0 trips".
+
+     That is worse than a zero in a money column: a zero is one wrong figure,
+     and this is a fabricated shift pattern for a man who did not work. It is
+     the same Number(null) === 0 trap ui.js:moneyParts already documents by
+     name; this is that trap landed.
+
+     Null-tested BEFORE the coercion, and the two absences are told apart
+     underneath: a driver with one working day has too little to show a pattern,
+     and a driver whose days carry no start time at all has nothing measured. */
+  const pts = days.filter((d) => d.first_hour != null && Number.isFinite(+d.first_hour))
+    .map((d) => ({ ...d, first_hour: +d.first_hour }));
+  if (pts.length < 2) {
+    const worked = days.filter((d) => +d.trips > 0).length;
+    return empty(host, !days.length
+      ? 'No day in this window reached this driver, so there is no start time to plot.'
+      : !pts.length
+        ? (worked
+          ? `No day this driver worked in this window records the hour of their first trip, so there `
+            + 'is no pattern to draw. Plotting them would put every day at midnight, which is a shift '
+            + 'nobody observed.'
+          : 'This driver worked no day in this window, so there is no first trip to plot. The days '
+            + 'held here are dates a feed reached with nothing on them.')
+        : 'Only one day in this window records a first trip, which is a point rather than a pattern.');
+  }
   const W = 760, H = 240, P = { l: 46, r: 12, t: 14, b: 26 };
   const xs = pts.map((d) => +new Date(d.day));
   const x0 = Math.min(...xs), x1 = Math.max(...xs);
@@ -474,8 +509,17 @@ function ratingTrend(k) {
     sub: c == null
       ? `${sourceLabel(k.rating_platform)}\u2019s own rating`
         + (k.platform_lifetime_trips ? ` over ${fmt(k.platform_lifetime_trips)} trips` : '')
+      /* The delta is real — it is the difference between two figures the
+         platform published, and on this driver both readings are 4.97 — but
+         "over 7 days" left out the fact that makes it readable: NO TRIP of
+         theirs fell between the two readings, so nothing happened that could
+         have moved it. A change of nought over seven days reads as a person
+         holding steady; over seven days with no work in them it means the
+         platform simply re-filed the same number. over_trips === 0 is a
+         measured nought and is stated; a missing over_trips is not. */
       : `over ${countOf(c.over_days, 'day')}`
-        + (c.over_trips ? ` and ${fmt(c.over_trips)} trips` : '')
+        + (c.over_trips ? ` and ${fmt(c.over_trips)} trips`
+          : c.over_trips === 0 ? ', with no trip of theirs between the two readings' : '')
         + ` \u00b7 ${sourceLabel(k.rating_platform)}\u2019s own`,
     tone: v >= 4.8 ? 'good' : v >= 4.5 ? 'warn' : 'critical',
   };
@@ -607,6 +651,40 @@ function statusStrip(st) {
   return box;
 }
 
+/* THE WHOLE-PERSON FIGURES, DERIVED IN EXACTLY ONE PLACE.
+   ──────────────────────────────────────────────────────────────────────────
+   /api/driver/profile answers with TWO spans — `span` is the window on the
+   toolbar and `accounts[].trips` is everything on record — and three things now
+   read the second one: the identity card, the empty-window banner under the tab
+   bar, and the Earnings tab's coverage fraction. They were about to be three
+   copies of the same four lines.
+
+   That matters here more than it usually would. The banner's whole content is
+   "this person has 1,203 trips and none of them is in this window"; if it
+   derived `lastEver` differently from the card six inches above it, the page
+   would print two different dates for the same person's last trip and the
+   reader would have no way to tell which one to believe. One derivation is the
+   only way the card and the banner cannot disagree.
+
+   `accounts` is deliberately the MAX of three lists, not the length of one: a
+   driver with a Bolt account and no Bolt trip has an entry in `platforms` and
+   none in `accounts`, and the card has printed "ACCOUNTS 0" beside a Bolt pill
+   for exactly that reason before. */
+export function personRecord(p) {
+  const accs = p?.accounts || [];
+  const dates = (k) => accs.map((a) => a[k]).filter(Boolean).sort();
+  return {
+    /* `|| null` rather than `|| 0`: a person whose accounts report no trip at
+       all has no lifetime count to print, and 0 here is the absence, not a
+       measurement of nought. The card renders this only when truthy. */
+    evTrips: accs.reduce((a, x) => a + (+x.trips || 0), 0) || null,
+    firstEver: dates('first_trip')[0] || p?.span?.first_trip || null,
+    lastEver: dates('last_trip').pop() || p?.span?.last_trip || null,
+    accountsWithTrips: accs.length,
+    accounts: Math.max(accs.length, (p?.ids || []).length, (p?.platforms || []).length),
+  };
+}
+
 function identityCard(p) {
   const c = p.compliance?.[0] || {};
   /* The identity documents the API refused to send, and — separately — whether
@@ -658,10 +736,7 @@ function identityCard(p) {
      the ACCOUNT record, which does not move; trips, days worked and cars held
      are the window's, and say so. Every tab below is a slice of this person,
      and none of those slices meant anything without the whole to divide by. */
-  const evTrips = (p.accounts || []).reduce((a, x) => a + (+x.trips || 0), 0) || null;
-  const dates = (k) => (p.accounts || []).map((a) => a[k]).filter(Boolean).sort();
-  const firstEver = dates('first_trip')[0] || p.span?.first_trip;
-  const lastEver = dates('last_trip').pop() || p.span?.last_trip;
+  const { evTrips, firstEver, lastEver } = personRecord(p);
 
   wrap.innerHTML = `
     ${avatar(p.name, c.picture_url, '', c.photo_absent_reason)}
@@ -810,8 +885,18 @@ async function tabOverview(root, id, prof) {
      the bar is real about the fares it measured, and it is the sentence that
      was missing. */
   const moneyBar = (st.metrics || []).some((m) => /revenue|fare|earn/i.test(m.label || ''));
-  percentileBars(stand.body, st.metrics || [], {
-    note: 'Fares only — most of this fleet\'s work carries no fare, so this percentile is not comparable.' });
+  /* THE GENERIC BOX AND THE TRUE SENTENCE WERE BOTH PRINTED, IN THAT ORDER.
+     ─────────────────────────────────────────────────────────────────────────
+     percentileBars falls through to charts.js:empty() on an empty metric list,
+     which draws "NOTHING TO SHOW / No data for this range yet" — and the branch
+     below then appended the real reason underneath it. So the reader met a
+     line that is not a reason first and the reason second, buried. The box is
+     only drawn where there is a chart to be empty; where the reason is known,
+     the reason is the whole of it. */
+  if ((st.metrics || []).length) {
+    percentileBars(stand.body, st.metrics, {
+      note: 'Fares only — most of this fleet\'s work carries no fare, so this percentile is not comparable.' });
+  } else stand.body.innerHTML = '';
   /* THE COUNT IN THE SENTENCE AND THE COUNT THE FLOOR WAS APPLIED TO HAVE TO
      BE THE SAME COUNT.
      ─────────────────────────────────────────────────────────────────────────
@@ -873,9 +958,50 @@ async function tabOverview(root, id, prof) {
       ? ` — showing the ${fmt(Math.min(8, heldRows.length))} most recent of ${fmt(heldRows.length)}` : ''}.`));
 
   startScatter(start.body, daily);
-  heatmap(hm.body, hmap);
+  /* Both of these fell through to charts.js:empty()'s "No data for this range
+     yet", which is not a reason — it is the shape of a sentence where a reason
+     should be. Their siblings on this very tab now say why they are empty, so
+     the generic line reads as a different and worse failure sitting beside
+     them. The heatmap is built from trips; an empty one means no trip, and
+     saying so costs a line. */
+  hm.body.innerHTML = '';
+  if ((hmap || []).length) heatmap(hm.body, hmap);
+  else {
+    hm.body.append(note(+k.trips > 0
+      ? 'No trip of this driver\'s in this window carries a timestamp we could place on a day and an '
+        + 'hour, so there is no pattern to draw. This is a gap in what the feeds reported, not a '
+        + 'driver who worked no hours.'
+      : 'No trip of this driver\'s falls in this window, so there is no day and no hour to place one '
+        + 'in. An empty grid here would read as a week they were never busy; there was no week.'));
+  }
+
+  /* TRIPS PER DAY DREW THIRTEEN BARS OF ZERO HEIGHT AND SAID NOTHING.
+     ═══════════════════════════════════════════════════════════════════════
+     MEASURED on production for e3cd308b2b5f48e19877b924b48bbb9d over
+     2026-09-01..09-16: a 1090x327 SVG holding 13 zero-height rects, two axis
+     lines and nine labels (y 0 and 1, x Sep 1..Sep 13), and no caption at all —
+     on the first tab a reader opens. barChart's own empty() never fires,
+     because the ROWS exist; it is the VALUES that are nought. A full-size axis
+     with nothing under it is the emptiest thing on the page and the only one
+     that does not admit it.
+
+     A day a feed reached with no trip on it IS a measured nought and the chart
+     is the right picture of it — but only where there is something to compare
+     it against. Where every day in the series is nought, the chart is thirteen
+     pictures of nothing and the sentence is the honest rendering. */
   vol.body.innerHTML = '';
-  barChart(vol.body, daily.map((d) => ({ ...d, label: dayStr(d.day) })), { x: 'label', y: 'trips', color: '--b400' });
+  const volDays = (daily || []).filter((d) => +d.trips > 0);
+  if (!daily.length) {
+    vol.body.append(note('No day in this window reached this driver at all — not a day with no trips '
+      + 'on it, but no day on record here. There is nothing to draw a bar for.'));
+  } else if (!volDays.length) {
+    vol.body.append(note(`Not one of the ${countOf(daily.length, 'day')} any feed reached in this window `
+      + 'carries a trip for this driver, so every bar would be nought and the axis would be the only '
+      + 'thing on the chart. The days themselves are in the day-by-day table on Activity, with what '
+      + 'each of them did and did not report.'));
+  } else {
+    barChart(vol.body, daily.map((d) => ({ ...d, label: dayStr(d.day) })), { x: 'label', y: 'trips', color: '--b400' });
+  }
 }
 
 /* ── tab: activity ───────────────────────────────────────────────────────── */
@@ -920,7 +1046,19 @@ async function tabActivity(root, id) {
        Uber's 31 days of availability. */
     qAll('/api/driver/days', { id }).catch(() => null)]);
 
-  shiftBars(sh.body, shift.days, shift, id);
+  /* shiftBars falls through to charts.js:empty() when no day carries a first
+     job, and "No data for this range yet" is not a reason. The panel is drawn
+     from jobs, so an empty one means no job — which is a different fact from
+     the feed not having reached these dates, and both are worth saying. */
+  if ((shift.days || []).some((d) => d.first_min != null)) shiftBars(sh.body, shift.days, shift, id);
+  else {
+    sh.body.innerHTML = '';
+    sh.body.append(note((shift.days || []).length
+      ? `The feed reached ${countOf(shift.days.length, 'day')} in this window and not one of them `
+        + 'carries a job with a start time on it, so there is no shift to lay out. An empty '
+        + '24-hour track would read as a day spent waiting; these are days with nothing on them.'
+      : 'No day in this window carries a job for this driver, so there is no shift to lay out.'));
+  }
   /* Stated under the bars: what is kept, and how far back it goes. A reader
      looking at a chart that is bare on the left should not have to infer
      whether that is a quiet month or a provider that forgets. */
@@ -991,9 +1129,69 @@ async function tabActivity(root, id) {
   }
 
   dist.body.innerHTML = '';
-  barChart(dist.body, daily.map((d) => ({ label: dayStr(d.day), km: +d.km || 0 })), { x: 'label', y: 'km', color: '--b300', valueFmt: (v) => `${fmt(v)} km` });
+  /* A DAY WITH NO DISTANCE REPORTED IS NOT A DAY OF NO DISTANCE.
+     ─────────────────────────────────────────────────────────────────────────
+     This was `km: +d.km || 0` handed to barChart, which then does
+     `+d[y] === 0 ? 0 : …` — and `+null === 0` is true, so a day the driver
+     worked whose trips report no distance drew the identical empty slot as a
+     day of genuinely zero kilometres, with a tooltip reading "0 km". There was
+     no caption under it at all.
+
+     The remedy was already written 400 lines below for the sibling revenue
+     chart, which draws the same three states with a `worked` flag and a
+     three-way colorFor and explains itself underneath. Same three states here,
+     same treatment, and a panel with nothing measured in it says so in words
+     instead of drawing a bare axis. */
+  const kmDays = daily.filter((d) => d.km != null);
+  const workedDays = daily.filter((d) => +d.trips > 0);
+  if (!daily.length) {
+    dist.body.append(note('No day in this window reached this driver at all, so there is no distance '
+      + 'to plot — not a run of zero-kilometre days.'));
+  } else if (!kmDays.length) {
+    dist.body.append(note(
+      workedDays.length
+        ? `No trip on any of the ${fmt(workedDays.length)} days this driver worked in this window `
+          + 'reports a distance, so there is nothing to plot. Drawing them at nought would say they '
+          + 'drove no kilometres, which is not what the record says — it says nobody measured.'
+        : 'This driver worked no day in this window, so there is no distance to plot. The days below '
+          + 'are dates a feed reached with nothing on them, not days of zero kilometres.'));
+  } else {
+    barChart(dist.body, daily.map((d) => ({
+      label: dayStr(d.day), km: d.km == null ? 0 : +d.km,
+      measured: d.km != null, worked: +d.trips > 0,
+    })), { x: 'label', y: 'km', colorFor: (d) => (d.measured ? '--b300' : d.worked ? '--surface-3' : '--surface-2'),
+      valueFmt: (v) => `${fmt(v)} km` });
+    dist.body.append(el('p', 'cap',
+      `${countOf(kmDays.length, 'day')} of ${fmt(daily.length)} in this window carry a measured `
+      + 'distance. The rest are drawn empty rather than left out, so a gap looks like a gap — pale '
+      + 'slots are days this driver worked with no distance reported, and the faintest are days they '
+      + 'did not work. A day nobody measured is not a day of zero kilometres.'));
+  }
 
   tbl.body.innerHTML = '';
+  /* HOW MANY OF THE WINDOW'S DAYS ARE NOT IN THIS TABLE.
+     ─────────────────────────────────────────────────────────────────────────
+     The spine is the union of the days any feed reached, which is the right
+     spine and is what the subtitle promises. But on production for
+     e3cd308b2b5f48e19877b924b48bbb9d over 2026-09-01..09-16 it listed Sep 1 to
+     Sep 13 — thirteen rows under a toolbar and an identity card both reading
+     sixteen days. A reader counting the rows gets thirteen and nothing on the
+     panel accounts for the other three. Stated underneath, from the days the
+     rows actually carry rather than from a second client-side calendar. */
+  const spineCap = (() => {
+    if (!daily.length) return null;
+    const ds = daily.map((d) => String(d.day).slice(0, 10)).sort();
+    const span = Math.round((Date.parse(`${ds[ds.length - 1]}T12:00:00Z`)
+      - Date.parse(`${ds[0]}T12:00:00Z`)) / 864e5) + 1;
+    const missing = span - daily.length;
+    return el('p', 'cap',
+      `${countOf(daily.length, 'day')} listed, ${dayStr(ds[0])} to ${dayStr(ds[ds.length - 1])}`
+      + (missing > 0
+        ? ` — with ${countOf(missing, 'day')} inside that span on which no feed reported anything `
+          + 'at all, not even an empty one, so there is no row to show. A missing row is a day nobody '
+          + 'reached, not a day of no work.'
+        : '. Any day of the window outside those dates was not reached by any feed either.'));
+  })();
   tbl.body.append(tableFrom([...daily].reverse(), [
     // A day is an address, and it was the one cell in the row that was not.
     { label: 'Day', key: 'day',
@@ -1077,6 +1275,7 @@ async function tabActivity(root, id) {
       r.is_ramadan ? 'Ramadan' : null,
     ].filter(Boolean).join(' · ') || '—' },
   ]));
+  if (spineCap) tbl.body.append(spineCap);
   /* Said once under the table rather than left to the tags in the cells: the
      three columns to the right of Trips are measured over three different
      windows, and a reader adding them across a row deserves to know that
@@ -1105,6 +1304,16 @@ async function tabActivity(root, id) {
   const custRows = Array.isArray(custody) ? custody : (custody.rows || []);
   const custTotal = Array.isArray(custody) ? null : custody.total;
   const custShown = custRows.slice(0, 60);
+  /* An empty custody table is the reason half this page is empty — no custody
+     day is why Harsh events on Quality cannot be measured and why the map has
+     no telematics positions — and it said "No data for this range yet". */
+  if (!custShown.length) {
+    cust.body.append(note('No custody record places this driver in a vehicle on any day of this '
+      + 'window. Custody is written from the trips and handovers each day, so a window with no work '
+      + 'in it has none — and anything on this profile that needs a car and a day together, the '
+      + 'harsh-driving attribution on Quality above all, has nothing to join against here.'));
+    return;
+  }
   cust.body.append(tableFrom(custShown, [
     { label: 'Day', key: 'day',
       render: (r) => entity('day', String(r.day).slice(0, 10), dayStr(r.day)) },
@@ -1197,17 +1406,31 @@ async function tabTerritory(root, id) {
   }
 
   areas.body.innerHTML = '';
-  areas.body.append(tableFrom(terr.areas.slice(0, 12), [
-    { label: 'Area', key: 'area' },
-    { label: 'Pickups', key: 'n', num: true },
-    { label: 'Avg trip', key: 'avg_km', num: true, render: (r) => (r.avg_km ? `${fmt(r.avg_km, 1)} km` : '—') },
-    { label: 'Avg fare', key: 'avg_fare', num: true, absent: UBER_FARE,
-      render: (r) => (r.avg_fare ? money(r.avg_fare)
-        : `<span class="ent-off" title="no pickup in this area carries a fare — ${UBER_FARE_WHY}">—</span>`) },
-  ], { compact: true, sortable: true, sortId: 'areas', defaultSort: { key: 'n', dir: 'desc' } }));
-  if ((terr.areas || []).length > 12) {
-    areas.body.append(el('p', 'cap',
-      `The 12 busiest of ${countOf(terr.areas.length, 'area')} this driver picked up in.`));
+  /* "No data for this range yet" under a heading promising the areas this
+     person picks up in. An area list is built from pickup ADDRESSES, so an
+     empty one means either no pickup or no address on the pickups there were,
+     and those are different facts about different feeds. */
+  if (!(terr.areas || []).length) {
+    areas.body.append(note(terr.pickups.length
+      ? `This driver has ${countOf(terr.pickups.length, 'pickup cluster')} in this window and not one `
+        + 'of the pickups behind them carries an address, so there is no area to name. The map beside '
+        + 'this has the positions; only the words are missing.'
+      : 'No pickup of this driver\'s in this window carries an address, so there is no area to name. '
+        + 'Uber records the pickup address; the FMS telematics feed records neither address nor '
+        + 'position, so a window with only telematics journeys in it has nothing here.'));
+  } else {
+    areas.body.append(tableFrom(terr.areas.slice(0, 12), [
+      { label: 'Area', key: 'area' },
+      { label: 'Pickups', key: 'n', num: true },
+      { label: 'Avg trip', key: 'avg_km', num: true, render: (r) => (r.avg_km ? `${fmt(r.avg_km, 1)} km` : '—') },
+      { label: 'Avg fare', key: 'avg_fare', num: true, absent: UBER_FARE,
+        render: (r) => (r.avg_fare ? money(r.avg_fare)
+          : `<span class="ent-off" title="no pickup in this area carries a fare — ${UBER_FARE_WHY}">—</span>`) },
+    ], { compact: true, sortable: true, sortId: 'areas', defaultSort: { key: 'n', dir: 'desc' } }));
+    if ((terr.areas || []).length > 12) {
+      areas.body.append(el('p', 'cap',
+        `The 12 busiest of ${countOf(terr.areas.length, 'area')} this driver picked up in.`));
+    }
   }
 
   dmix.body.innerHTML = '';
@@ -1215,16 +1438,22 @@ async function tabTerritory(root, id) {
      away — "short hops or long runs" is only half the question, and the other
      half is whether the short ones pay. */
   const dist = (mix.distance || []).map((d) => ({ ...d }));
-  hbars(dmix.body, dist, { label: 'label', value: 'n', seq: true, signed: false,
-    valueFmt: (v) => `${fmt(v)} trips` });
-  if (dist.some((d) => d.avg_fare != null)) {
-    dmix.body.append(tableFrom(dist, [
-      { label: 'Trip length', key: 'label' },
-      { label: 'Trips', key: 'n', num: true },
-      { label: 'Avg fare', key: 'avg_fare', num: true, absent: UBER_FARE,
-        render: (r) => (r.avg_fare != null ? money(r.avg_fare, 'AED', 2)
-          : '<span class="ent-off" title="no trip in this bucket reports a fare">—</span>') },
-    ], { compact: true }));
+  if (!dist.length) {
+    dmix.body.append(note('No trip of this driver\'s in this window reports a distance, so there is no '
+      + 'length to sort them by. A bucket chart of nothing is not a driver who only did short hops — '
+      + 'it is a window in which nobody measured how far anything went.'));
+  } else {
+    hbars(dmix.body, dist, { label: 'label', value: 'n', seq: true, signed: false,
+      valueFmt: (v) => `${fmt(v)} trips` });
+    if (dist.some((d) => d.avg_fare != null)) {
+      dmix.body.append(tableFrom(dist, [
+        { label: 'Trip length', key: 'label' },
+        { label: 'Trips', key: 'n', num: true },
+        { label: 'Avg fare', key: 'avg_fare', num: true, absent: UBER_FARE,
+          render: (r) => (r.avg_fare != null ? money(r.avg_fare, 'AED', 2)
+            : '<span class="ent-off" title="no trip in this bucket reports a fare">—</span>') },
+      ], { compact: true }));
+    }
   }
 }
 
@@ -1276,6 +1505,88 @@ async function tabEarnings(root, id, prof) {
   const cashTrips = cashRows.reduce((a, p) => a + (+p.n || 0), 0);
   const cashKnown = cashRows.filter((p) => p.revenue != null);
   const cashValue = cashKnown.length ? cashKnown.reduce((a, p) => a + (+p.revenue || 0), 0) : null;
+  /* A POPULATION IS NOT COVERAGE, AND cashTrips === 0 HAS A THIRD CAUSE.
+     ─────────────────────────────────────────────────────────────────────────
+     The cash tile was repaired by gating on whether the driver WORKED, which
+     separates "nothing was measured" from "nothing was cash". It does not
+     separate a third case, and the repair made the sentence stronger without
+     adding the test that would justify it.
+
+     /api/driver/mix builds the payment breakdown as
+     `coalesce(payment_type,'unknown') label` (api/driver_routes.js), so a
+     booking whose payment_type is NULL still produces a row — it is just
+     labelled `unknown` and never matches CASH_LABEL. A driver with two
+     bookings, both of them unlabelled, therefore has bookings, has no cash
+     row, and was told "none of their 2 bookings in this window was paid in
+     cash": a measurement over rows where none was taken. `unknown` is real on
+     production — over from=2025-09-17&to=2026-09-16, three of six sampled
+     drivers carry `unknown:1` or `unknown:2` payment rows.
+
+     `labelledTrips` is the population the breakdown can actually speak for.
+     Where it is zero and bookings exist, the method was never recorded and the
+     answer is an absence with its own reason; where it is positive, AED 0 is a
+     real measurement and the sentence names the population it was taken over —
+     which is the labelled bookings, not k.trips. */
+  const labelledRows = (mix.payment || []).filter((p) => !/^unknown$/i.test(String(p.label || '')));
+  const labelledTrips = labelledRows.reduce((a, p) => a + (+p.n || 0), 0);
+  /* DID THIS PERSON WORK IN THIS WINDOW AT ALL.
+     ─────────────────────────────────────────────────────────────────────────
+     The one test that separates "measured as nought" from "never measured"
+     everywhere on this tab, and it is a count of ROWS rather than a sum of
+     money, so it is never null-coerced into a false answer. Three fields
+     because the three populations differ: `bookings` excludes the telematics
+     journeys `trips` includes, and `days_worked` survives a window in which a
+     feed reached the day but reported no row on it. Any one of them being
+     positive means there was something here to measure. */
+  const bookingsN = +k.bookings || +k.trips || 0;
+  const worked = bookingsN > 0 || +k.days_worked > 0;
+  const lastWorked = personRecord(prof).lastEver;
+
+  /* THE THIRD CASE, WHICH ONLY THIS TAB CAN SEE.
+     ─────────────────────────────────────────────────────────────────────────
+     emptyWindowNote() in the shell covers the two cases knowable from the
+     profile alone — no trip in this window, and no trip ever. It cannot see the
+     third: a driver who DID work here and none of whose work carries a money
+     figure. That needs /api/driver/kpis and /api/driver/earnings, which only
+     this tab fetches, so the sentence stays here and never fires alongside the
+     banner above (it is gated on `worked`, the banner on its negation).
+
+     Without it, a driver with 84 trips over 19 days reads as five em dashes
+     with no explanation on the one tab that is entirely about money, which is
+     the same defect as the zero: an absence whose reason is not stated. */
+  /* EVERY MONEY FIGURE THIS TAB RENDERS, not the subset the first pass listed.
+     ─────────────────────────────────────────────────────────────────────────
+     This test decides whether the tab may say "none of it carries a money
+     figure", so it has to be over the same figures the tab prints. It read the
+     KPI money, the mix, the tips, the components and the periods' earnings —
+     and never consulted `e.fare`, `e.statement_cash`, `e.statement_gross` or
+     the periods' own `cash_earnings`, ALL FOUR of which this same function
+     renders further down. So one render could carry the banner "none of it
+     carries a money figure ... no statement covering these dates has reached
+     us" and, four lines lower, "The day-level statements covering 7 days of
+     this window report AED 6,000 net, AED 250 already taken in cash." A
+     sentence that denies what the paragraph under it prints is worse than no
+     sentence. Not reachable on the current production window — 0 of 136
+     working drivers have empty `periods` with a non-null `fare` — which is
+     exactly the kind of latency that ships. */
+  const moneyMeasured = k.revenue != null || k.reported_earnings != null
+    || k.statement_fares != null || k.cash_earnings != null || cashValue != null
+    || e.tips != null || e.fare != null || e.statement_cash != null
+    || e.statement_gross != null || (e.components || []).some((c) => c.amount != null)
+    || (e.periods || []).some((r) => r.earnings != null || r.counted != null
+      || r.cash_earnings != null);
+  if (worked && !moneyMeasured) {
+    root.prepend(note(
+      `This driver worked in ${windowLabel()} — ${countOf(k.trips, 'trip')}`
+      + (k.days_worked ? ` over ${countOf(k.days_worked, 'day')}` : '')
+      + ' — and none of it carries a money figure. '
+      + (k.priced_trips ? '' : 'No trip of theirs reports a fare — the Uber trip export has no fare '
+        + 'column at all — and ')
+      + ((e.periods || []).length
+        ? 'the statements that do cover these dates report no amount on any line, so '
+        : 'no statement covering these dates has reached us, so ')
+      + 'every money figure below is absent rather than nought.'));
+  }
   kpiHost.replaceWith(kpiRow([
     /* Every money figure here is over the trips that CARRY a fare, which on a
        driver working mostly Uber is a small fraction of their work — the Uber
@@ -1303,20 +1614,74 @@ async function tabEarnings(root, id, prof) {
             ? `no trip of theirs reports a fare — this is the statement's own fare line, over `
               + `${countOf(k.statement_fare_periods, 'period')}, and the payout below came out of it`
             : 'no trip of theirs reports a fare, and no statement reports one either' }),
+    /* The only tile in this row with no sub-line at all: `sub: … : null`, so a
+       driver with no priced trip got a bare em dash while its five siblings
+       each said why they were absent. An absence with no reason beside five
+       with one reads as the hole in the row rather than as the same answer. */
     { label: 'Average fare', value: money(k.avg_fare, 'AED', 2),
-      sub: k.priced_trips ? `over the ${fmt(k.priced_trips)} priced trips` : null },
+      sub: k.priced_trips
+        ? `over the ${fmt(k.priced_trips)} priced trips`
+        : worked
+          ? `not one of their ${countOf(bookingsN, 'booking')} in this window reports a fare, so there `
+            + 'is nothing to average — the Uber trip export has no fare column at all, and an average '
+            + 'over the statement would be a week divided by trips it does not count'
+          : 'no booking of any kind in this window, so there is no fare to average' },
     { label: 'Platform earnings', value: money(k.reported_earnings), sub: 'as the platform reported it' },
     { label: 'Tips', value: money(e.tips), sub: e.tip_pct != null ? `${pct(e.tip_pct, 1)} of net fare` : 'no tip data yet',
       tone: e.tip_pct == null ? null : e.tip_pct >= 3 ? 'good' : e.tip_pct >= 1 ? 'warn' : null },
+    /* AED 0 AND \u2014 ARE TWO DIFFERENT ANSWERS, AND THIS TILE PRINTED THE
+       FIRST FOR BOTH.
+       ═══════════════════════════════════════════════════════════════════════
+       It read `v ? money(v) : (cashTrips ? 'not reported' : money(0))`. The
+       final branch is reached whenever no cash label appears in /api/driver/mix
+       \u2014 and cashTrips === 0 has TWO causes that the expression cannot tell
+       apart:
+
+         (a) the driver WORKED in this window and none of their bookings was
+             cash. Nothing was collected in cash. AED 0 is a real measurement
+             and is the correct thing to print.
+         (b) the driver did NOT WORK in this window at all. Nothing was
+             measured. AED 0 asserts a measurement that was never taken.
+
+       MEASURED on production for e3cd308b2b5f48e19877b924b48bbb9d over
+       2026-09-01..09-16: /api/driver/mix returns {distance:[], product:[],
+       payment:[], status:[], platform:[]} \u2014 payment is EMPTY, so cashRows is
+       empty, so cashTrips is 0 by case (b). /api/driver/kpis for the same
+       window returns trips 0, bookings 0, days_worked 0. The tile printed
+       `CASH COLLECTED  AED 0` beside five siblings correctly reading \u2014, on a
+       page whose stated principle is that a figure which cannot be measured
+       renders absent with a reason and never as zero.
+
+       The population count is the thing that separates them, and it was already
+       in scope: `k` is /api/driver/kpis, fetched by this same Promise.all. A
+       count of nought is still a true count \u2014 TRIPS 0 stays 0 on the overview
+       \u2014 but a MONEY figure over an empty population is not a figure. */
     { label: 'Cash collected', value: (() => {
       // The clawback line in the payout breakdown is the same money seen from
       // the other side, and is the only figure present when no cash trip
       // carries a fare.
-      const fromComponents = (e.components || [])
-        .filter((c) => /cash/i.test(c.category))
-        .reduce((a, c) => a + Math.abs(+c.amount || 0), 0);
-      const v = k.cash_earnings ?? cashValue ?? (fromComponents || null);
-      return v ? money(v) : (cashTrips ? 'not reported' : money(0));
+      /* A PUBLISHED NOUGHT IS A MEASUREMENT AND THIS DISCARDED IT.
+         ───────────────────────────────────────────────────────────────────
+         The repaired expression opened `if (v) return money(v);` — a
+         TRUTHINESS test on the end of a `??` chain that exists precisely to
+         tell null from zero. `v === 0` fell straight through it, and with cash
+         trips present the tile then printed "not reported": the page asserting
+         that the platform reported nothing about a figure the platform
+         reported. Uber publishes 0.00 lines for this fleet routinely — the
+         very driver in this defect gets `payouts 0.00` and `your_earnings
+         0.00` back from /api/driver/earnings — so this is not a hypothetical.
+         `(fromComponents || null)` collapsed a published 0.00 clawback to null
+         for the same reason, which is why the components are split into valued
+         and unvalued here rather than summed from a zero seed. */
+      const cashComps = (e.components || []).filter((c) => /cash/i.test(c.category));
+      const valuedCash = cashComps.filter((c) => c.amount != null);
+      const fromComponents = valuedCash.length
+        ? valuedCash.reduce((a, c) => a + Math.abs(+c.amount || 0), 0) : null;
+      const v = k.cash_earnings ?? cashValue ?? fromComponents;
+      if (v != null) return money(v);
+      if (cashTrips) return 'not reported';
+      /* Three ways to have no cash row, and only one of them is AED 0. */
+      return worked && labelledTrips ? money(0) : '\u2014';
     })(),
     /* "73 cash trips across cash" — the label list is usually the single word
        "cash", and naming it after "across" made the sentence eat itself. */
@@ -1331,7 +1696,26 @@ async function tabEarnings(root, id, prof) {
           : '';
         return `${countOf(cashTrips, 'cash trip')}${named}${short}`;
       })()
-      : 'no cash booking in this window',
+      /* THE REASON HAS TO BE TRUE FOR THE CASE IT IS PRINTED IN.
+         "no cash booking in this window" was printed for both cases above. In
+         case (a) it is the whole truth. In case (b) it is true and NARROW: no
+         booking of ANY kind was in this window, and a sentence about cash
+         implies the fleet looked through this person's bookings and found none
+         of them cash. It did not; there were none to look through. The wider
+         fact is the one that explains the rest of the page, so it is the one
+         printed. */
+      : worked && labelledTrips
+        ? `none of the ${countOf(labelledTrips, 'booking')} in this window whose payment method was `
+          + 'recorded was paid in cash'
+          + (bookingsN > labelledTrips
+            ? ` \u2014 the other ${fmt(bookingsN - labelledTrips)} record no method at all and are `
+              + 'left out rather than counted as not-cash'
+            : '')
+        : worked
+          ? `not one of their ${countOf(bookingsN, 'booking')} in this window records how it was paid, `
+            + 'so whether any of it was cash is not something anybody measured'
+          : 'no booking of any kind in this window, so no cash was measured either way'
+            + (lastWorked ? ` \u2014 this person\u2019s last trip was ${dateStr(lastWorked)}` : ''),
     tone: cashTrips && cashKnown.length < cashRows.length ? 'warn' : null },
     // Priced fares over the distance of the priced trips. Dividing by the whole
     // distance mixes two populations and understates it by however much of the
@@ -1356,25 +1740,91 @@ async function tabEarnings(root, id, prof) {
        attribute and used for nothing else. */
     const roots = e.components.filter((c) => !c.parent);
     const kids = e.components.filter((c) => c.parent);
-    if (roots.length) {
-      hbars(comp.body, roots.map((c) => ({ label: String(c.category).replace(/_/g, ' '), n: +c.amount || 0 })), {
-        valueFmt: (v) => money(v, roots[0].currency || 'AED'),
+    /* A BAR OF ZERO LENGTH IS A PICTURE OF NOTHING, AND THIS CHART DREW TWO.
+       ═══════════════════════════════════════════════════════════════════════
+       MEASURED on production for e3cd308b2b5f48e19877b924b48bbb9d over
+       2026-09-01..09-16: /api/driver/earnings returns
+         components [{category: 'payouts', amount: '0.00'},
+                     {category: 'your_earnings', amount: '0.00'}]
+       and this panel drew two full-width rows, each with an empty track and the
+       literal text "0", under the caption "2 top-level components netting to
+       AED 0". Components that carry no money were described as having NETTED
+       OUT — an arithmetic claim about figures nobody added.
+
+       TWO DISTINCT FAULTS WERE FOLDED TOGETHER HERE, and they need different
+       answers:
+
+       1. `n: +c.amount || 0` coerced a NULL amount to zero before hbars ever
+          saw it. charts.js hbars() then does `+d[value] || 0` again, so a
+          component the statement NAMED BUT DID NOT VALUE and a component the
+          statement valued at nought render identically: no bar, the string "0".
+          hbars is shared by a dozen callers and is not this fix's to change, so
+          the split is made here, before the rows are handed over: only rows
+          carrying an amount are charted, and the ones that do not are named in
+          a sentence instead of being drawn as nought.
+
+       2. Where every amount IS present and every one of them is 0.00, the
+          figures are REAL — Uber published them — and must not be swept away
+          with the absences. But a chart of noughts is still a chart of nothing,
+          so they are stated as a sentence. This is the one nought on this whole
+          tab that is honest, and the sentence exists to protect it: it says the
+          platform published these, which is exactly what distinguishes it from
+          a figure nobody took. */
+    const priced = roots.filter((c) => c.amount != null);
+    const unpriced = roots.filter((c) => c.amount == null);
+    const cur = roots[0]?.currency || 'AED';
+    const named = (list) => list.map((c) => String(c.category).replace(/_/g, ' ')).join(', ');
+    const platNames = [...new Set((e.periods || []).map((r) => r.platform).filter(Boolean))]
+      .map(sourceLabel).join(', ');
+    const filer = platNames || 'The platform';
+    if (roots.length && !priced.length) {
+      comp.body.append(note(
+        `${filer} named ${countOf(roots.length, 'top-level component')} for this window — `
+        + `${named(roots)} — and put an amount on none of them. Nothing is drawn, because a bar `
+        + 'would be a length nobody measured; these are components the statement listed without '
+        + 'valuing, not components worth nothing.'));
+    } else if (priced.length && priced.every((c) => Number(c.amount) === 0)) {
+      comp.body.append(note(
+        `${filer}\u2019s payout breakdown for this window returns `
+        + `${plural(priced.length, 'its one top-level component', `all ${fmt(priced.length)} of its top-level components`)}`
+        + ` at nought \u2014 ${priced.map((c) => `${String(c.category).replace(/_/g, ' ')} `
+          + `${money(c.amount, cur, 2)}`).join(' and ')}. `
+        + 'That is a figure the platform published about this window, not a figure nobody took, so it '
+        + 'is stated rather than drawn: a bar of zero length is a component that does not exist, and '
+        + 'these were reported.'
+        + (unpriced.length ? ` ${countOf(unpriced.length, 'further component')} \u2014 ${named(unpriced)} `
+          + `\u2014 ${plural(unpriced.length, 'was', 'were')} named with no amount at all.` : '')));
+    } else if (priced.length) {
+      hbars(comp.body, priced.map((c) => ({ label: String(c.category).replace(/_/g, ' '), n: +c.amount })), {
+        valueFmt: (v) => money(v, cur),
         legend: [['--b400', 'added to the payout'], ['--s2', 'deducted (cash already taken, fees)']] });
-      const net = roots.reduce((a, c) => a + (+c.amount || 0), 0);
+      const net = priced.reduce((a, c) => a + Number(c.amount), 0);
       comp.body.append(el('p', 'cap',
-        `${countOf(roots.length, 'top-level component')} netting to ${money(net)}. `
-        + 'Anything listed below is INSIDE one of them and is not added again.'));
+        `${countOf(priced.length, 'top-level component')} netting to ${money(net)}. `
+        + 'Anything listed below is INSIDE one of them and is not added again.'
+        + (unpriced.length
+          ? ` ${countOf(unpriced.length, 'further top-level component')} \u2014 ${named(unpriced)} \u2014 `
+            + `${plural(unpriced.length, 'carries', 'carry')} no amount and ${plural(unpriced.length, 'is', 'are')} `
+            + 'left off the chart rather than drawn at nought, so this net is over the components that '
+            + 'were valued.'
+          : '')));
     }
     if (kids.length) {
+      /* `amount: +c.amount || 0` here was the same collapse as the chart above,
+         one table down: a child the statement named without valuing printed
+         "AED 0.00" in a column of measured amounts. Carried through as null and
+         rendered by money(), which already returns an em dash for it. */
       comp.body.append(tableFrom(kids.map((c) => ({
         within: String(c.parent).replace(/_/g, ' '),
         label: String(c.category).replace(/_/g, ' '),
-        amount: +c.amount || 0, currency: c.currency,
+        amount: c.amount == null ? null : +c.amount, currency: c.currency,
       })), [
         { label: 'Within', key: 'within' },
         { label: 'Component', key: 'label' },
         { label: 'Amount', key: 'amount', num: true,
-          render: (r) => `${r.amount < 0 ? '−' : ''}${money(Math.abs(r.amount), r.currency || 'AED', 2)}` },
+          absent: 'the statement names these components and puts no amount on any of them',
+          render: (r) => (r.amount == null ? '\u2014'
+            : `${r.amount < 0 ? '−' : ''}${money(Math.abs(r.amount), r.currency || 'AED', 2)}`) },
       ], { compact: true, sortable: true, sortId: 'dcomp' }));
     }
     if (!roots.length) {
@@ -1388,7 +1838,20 @@ async function tabEarnings(root, id, prof) {
      the ring. Slicing to six before handing it over defeated that: the centre
      read "218 total" from six slices while the eleven the driver actually has
      sum to 229 — the page's own Trips tile. */
-  donut(pay.body, mix.payment, { max: 6 });
+  /* donut() falls through to empty()'s generic line on an empty mix, on the
+     one tab that is entirely about money. The breakdown is built from bookings,
+     so an empty one means either no booking or no booking whose payment method
+     anybody recorded — and the cash tile above this reads its own absence off
+     the same two facts, so the two must not tell different stories. */
+  if ((mix.payment || []).length) donut(pay.body, mix.payment, { max: 6 });
+  else {
+    pay.body.append(note(worked
+      ? `This driver\'s ${countOf(bookingsN, 'booking')} in this window carry no payment method at `
+        + 'all — no channel here recorded how any of them was settled — so there is nothing to split '
+        + 'card from cash by. That is why the cash tile above is absent rather than nought.'
+      : 'No booking of this driver\'s falls in this window, so there is no payment to break down. An '
+        + 'empty ring here would read as a driver nobody paid.'));
+  }
 
   line.body.innerHTML = '';
   const withRev = daily.filter((d) => d.revenue != null && +d.revenue > 0);
@@ -1431,7 +1894,65 @@ async function tabEarnings(root, id, prof) {
      The column that adds up is Counted, so it is the one totalled and the one
      the note explains. */
   const displaced = e.periods.filter((r) => r.days_used != null && r.days_used < r.period_days);
-  const counted = e.periods.reduce((a, r) => a + Number(r.counted ?? r.earnings ?? 0), 0);
+  /* TWO FALLBACKS, EACH HIDING THE ABSENCE THE ONE BEFORE IT EXPOSED.
+     ═══════════════════════════════════════════════════════════════════════
+     This read `a + Number(r.counted ?? r.earnings ?? 0)`.
+
+     `counted` is the server's answer to "how much of this statement falls on
+     days no finer statement already accounts for". Null means it counted
+     NOTHING — which is a statement about our resolution of overlapping
+     periods, not an invitation to substitute a different measure. The first
+     `??` silently swapped in `earnings`, which is the statement's own
+     un-clamped figure and is exactly the number the paragraph under this table
+     explains must NOT be added down the page. The second `??` then turned that
+     absence into 0.
+
+     MEASURED on production for e3cd308b2b5f48e19877b924b48bbb9d: both periods
+     return counted: null, so the sum was 0 + 0 and the page printed "AED 0
+     counted across 2 statements. None of them overlap, so Statement and
+     Counted agree." They agreed only because both had been coerced to nought.
+
+     Summed over the rows that carry the figure, and null where none does. */
+  const countedRows = e.periods.filter((r) => r.counted != null);
+  const counted = countedRows.length
+    ? countedRows.reduce((a, r) => a + Number(r.counted), 0) : null;
+  /* WHY THERE IS NO COUNTED FIGURE, READ OFF THE PAYLOAD RATHER THAN ASSERTED.
+     ═══════════════════════════════════════════════════════════════════════
+     The first repair of this column gave it a reason, and the reason was not
+     the true one — which is the second half of the house rule and the easier
+     half to miss. Both the column's `absent` string and the caption under the
+     table said "the server resolved no part of these statements onto a day
+     this window covers".
+
+     api/driver_routes.js builds `periods` from driver_payout_day under
+     `WHERE ... day BETWEEN $1::date AND $2::date`, and selects
+     `count(*) AS days_used` and `round(sum(earnings),2) AS counted` over
+     exactly those rows. days_used therefore IS the count of days the statement
+     resolved onto INSIDE this window, and `counted` comes back null only when
+     those in-window days exist and every one of them carries a NULL earnings.
+     The days were resolved. What is missing is money on them.
+
+     MEASURED through bin/live-ui.mjs against production, from=2026-09-01&
+     to=2026-09-16, for e3cd308b2b5f48e19877b924b48bbb9d: two periods, days_used
+     7 and 6, counted null on both. The table printed "7" and "6 of 7" in its
+     Days column while the sentence directly beneath it said none of them had
+     been resolved onto a day inside the window — the panel contradicted itself
+     across six inches. Nor is it confined to the empty-window driver: 8 of the
+     136 drivers WITH trips in that window carry counted null on every period
+     with days_used 13, so a working driver reads the same false sentence.
+
+     Branched on the fact the payload carries. Where any period resolved onto a
+     day here, the days are named and the absence is attributed to the earnings
+     figure; where none did, the original sentence is the true one and stays. */
+  const resolvedDays = e.periods.reduce((a, r) => a + (+r.days_used || 0), 0);
+  const countedWhy = resolvedDays
+    ? `these statements resolve onto ${countOf(resolvedDays, 'day')} inside this window and not one `
+      + 'of those days carries an earnings figure, so there is nothing to count under this heading '
+      + '\u2014 the Statement column beside it is the platform\u2019s own un-clamped total over the '
+      + 'whole period, which is a different measurement'
+    : 'the server resolved no part of these statements onto a day this window covers, so '
+      + 'there is no clamped figure to put under this heading \u2014 the Statement column beside it '
+      + 'is the platform\u2019s own un-clamped total and is a different measurement';
   /* A column that can never carry a value is worse than an absent one: it
      reads as "we looked and this driver has no acceptance rate". Neither
      `acceptance_rate` nor `rating` is in this endpoint's SELECT, so both were
@@ -1457,7 +1978,15 @@ async function tabEarnings(root, id, prof) {
     ...(hasAccept ? [{ label: 'Accept', key: 'acceptance_rate', num: true,
       render: (r) => (r.acceptance_rate != null ? pct(r.acceptance_rate * 100) : '—') }] : []),
     { label: 'Statement', key: 'earnings', num: true, render: (r) => money(r.earnings) },
-    { label: 'Counted', key: 'counted', num: true, render: (r) => money(r.counted ?? r.earnings) },
+    /* `money(r.counted ?? r.earnings)` printed the period's OWN earnings under a
+       heading that promises the window-clamped figure — two different
+       measurements under one label, and on this driver both rendered AED 0.
+       money() already returns an em dash for null; `absent` prunes the whole
+       column, with its reason, when no row carries one, which is what
+       ui.js:tableFrom exists to do rather than drawing a column of dashes. */
+    { label: 'Counted', key: 'counted', num: true,
+      absent: countedWhy,
+      render: (r) => money(r.counted) },
     /* The sentence under this column used to say no statement separates the
        cash a driver already took from the net figure. driver_statement_day.cash
        is sql/schema_v25.sql:41 and this endpoint reads that very table — the
@@ -1497,15 +2026,59 @@ async function tabEarnings(root, id, prof) {
       + 'this fraction grows a week at a time from the day collection started and can never be '
       + 'backfilled.'));
   }
-  per.body.append(el('p', 'cap', `${money(counted)} counted across ${countOf(e.periods.length, 'statement')}`
+  /* THE SENTENCE THAT ASSERTED AN AGREEMENT BETWEEN TWO COERCED ZEROS.
+     ─────────────────────────────────────────────────────────────────────────
+     It opened "AED 0 counted across 2 statements" from the reduce fixed above,
+     and then closed "None of them overlap, so Statement and Counted agree" —
+     affirmatively false as a claim of agreement, because the two agreed only
+     in the sense that both had been turned into nought. And there was no guard
+     on an empty list at all, so a driver with no statement at all read
+     "AED 0 counted across 0 statements".
+
+     Three states now, three sentences: no statement reached us; statements
+     reached us and none of them resolved onto a day in this window; statements
+     reached us and this is what they came to. */
+  /* Why two columns are missing, said in every branch rather than only in the
+     one where a total was printed. It is a fact about the REPORT, so it is as
+     true of a window with no counted figure as of one with one. */
+  const colTail = (hasAccept && hasRating) ? ''
+    : ` Acceptance and rating are ${(!hasAccept && !hasRating) ? 'both ' : ''}absent from this report — `
+      + 'the platform publishes them on a different surface, so no column is drawn for them rather '
+      + 'than a column of dashes that reads as zero.';
+  if (!e.periods.length) {
+    /* "No statement from any platform" was too wide a denial for this panel to
+       make. This table is the PAYOUT-PERIOD feed (driver_payout_day); the
+       day-level statement feed is a different table, and its own total is
+       printed a few lines below this very caption. Narrowed to the feed the
+       panel is about, so the two can both be true on one screen. */
+    per.body.append(el('p', 'cap', 'No payout-period statement from any platform covers a day of this '
+      + 'window, so there is nothing to count and no figure here — not a total of nought.'
+      + (e.statement_days
+        ? ' The day-level statement feed did reach these dates, and what it reports is stated '
+          + 'underneath: it is a different filing at a different grain, not a figure for this table.'
+        : '')
+      + colTail));
+  } else if (counted == null) {
+    /* One sentence per cause, and the cause is read off `days_used` rather than
+       asserted — see the block above `resolvedDays`. "none of them" was also
+       printed over a single statement, so the pronoun is built from the count. */
+    const them = e.periods.length === 1 ? 'it' : 'them';
+    per.body.append(el('p', 'cap',
+      `${countOf(e.periods.length, 'statement')} ${plural(e.periods.length, 'reaches', 'reach')} into `
+      + 'this window and '
+      + (resolvedDays
+        ? `the server resolved ${them} onto ${countOf(resolvedDays, 'day')} inside it, every one of `
+          + 'which carries no earnings figure at all, so nothing could be counted'
+        : `the server resolved no part of ${them} onto a day inside it, so nothing was counted`)
+      + '. That is an absent figure, not a total of nought: the Statement column beside it is '
+      + 'the platform\u2019s figure over its whole period, which is a different measurement and is '
+      + 'not the same money as this window\u2019s.' + colTail));
+  } else per.body.append(el('p', 'cap', `${money(counted)} counted across ${countOf(e.periods.length, 'statement')}`
     + (displaced.length
       ? ` — ${fmt(displaced.length)} of them overlap another statement, and only the days no other `
         + 'statement covers are counted. Adding the Statement column instead would count those days twice.'
       : '. None of them overlap, so Statement and Counted agree.')
-    + ((hasAccept && hasRating) ? ''
-      : ` Acceptance and rating are ${(!hasAccept && !hasRating) ? 'both ' : ''}absent from this report — `
-        + 'the platform publishes them on a different surface, so no column is drawn for them rather '
-        + 'than a column of dashes that reads as zero.')
+    + colTail
     + (Math.abs(counted - Number(k.reported_earnings || 0)) > 1 && k.reported_earnings
       ? ` The Platform-earnings tile above reads ${money(k.reported_earnings)}: that is the sum of the `
         + 'statements as published, and this is the part of them that falls inside the window — a '
@@ -1589,10 +2162,39 @@ async function tabQuality(root, id) {
        kilometre driven while the feed was dark, and putting the window's
        distance under a count of events the feed collected reads as one
        population when it is two. */
-    { label: 'Harsh events', value: fmt(totalAlerts),
-      sub: !harsh.classified && harsh.total
-        ? 'not split from tracker faults — this feed does not mark them'
-        : (qy.alert_km ? `over ${fmt(qy.alert_km)} km the feed covered` : 'no matched distance') },
+    /* A COUNT OF NOUGHT OVER A POPULATION THAT DOES NOT EXIST IS NOT A COUNT.
+       ═══════════════════════════════════════════════════════════════════════
+       This tile read 0 under the sub "no matched distance" while the tile
+       immediately to its right — Per 100 km, the same numerator over a
+       denominator — correctly read "not measured". A numerator printing a
+       confident nought beside a denominator refusing to print at all, on one
+       row.
+
+       Attribution here is a JOIN: alert rows against vehicle_driver_day rows
+       for the same plate and day (api/driver_routes.js). With no custody row in
+       the window there is nothing on the right of that join, so the count comes
+       back 0 for a reason that has nothing to do with how this person drove —
+       the panel below this tile says exactly that ("Attribution needs both a
+       telematics alert and a custody record for the same day"), and the tile
+       above it contradicted it with a digit.
+
+       `telematics_journeys` is the field that separates the two: the endpoint
+       sets it to null when plate_days is 0 — no custody row places this driver
+       in a car at all — and to a number otherwise. MEASURED on production for
+       e3cd308b2b5f48e19877b924b48bbb9d over 2026-09-01..09-16:
+       telematics_journeys null, alerts [], alert_km null. Tested with === so an
+       older API that omits the field leaves the count exactly as it was: a
+       missing field is not a proof of absence. A driver who DID hold a car and
+       triggered nothing still reads 0, because that is a measurement. */
+    (qy.telematics_journeys === null && !totalAlerts
+      ? { label: 'Harsh events', value: '\u2014',
+        sub: 'no custody record places this driver in a car on any day of this window, so there was '
+          + 'nothing for a tracker alert to be attributed to — this is not a clean record, it is an '
+          + 'unmeasured one' }
+      : { label: 'Harsh events', value: fmt(totalAlerts),
+        sub: !harsh.classified && harsh.total
+          ? 'not split from tracker faults — this feed does not mark them'
+          : (qy.alert_km ? `over ${fmt(qy.alert_km)} km the feed covered` : 'no matched distance') }),
     /* Against the FLEET, where the fleet figure exists, rather than against a
        hardcoded 5/15 scale. 29.5 per 100 km was painted critical under a
        sub-label reading "comparable across drivers" with nothing on the page
@@ -1678,8 +2280,49 @@ async function tabQuality(root, id) {
 
   line.body.innerHTML = '';
   const cd = qy.cancel_daily.filter((d) => d.trips > 0);
-  if (!cd.some((d) => d.cancelled > 0)) {
-    line.body.append(note(`No cancellations on any of the ${cd.length} days this driver worked in this window.`));
+  /* THE EMPTY BRANCH ASSERTED A FACT THE REST OF THE PAGE DENIES.
+     ═══════════════════════════════════════════════════════════════════════
+     The first repair replaced "No cancellations on any of the 0 days this
+     driver worked in this window" — awkward, but hedged — with the confident
+     "This driver worked no day in this window". It is confident about the
+     wrong thing.
+
+     `cd` is cancel_daily filtered to `trips > 0`, and cancel_daily.trips is
+     `count(*) FILTER (WHERE outcome IS NOT NULL)` over trip_norm
+     (api/driver_routes.js), whose `outcome` is NULL for every platform='fms'
+     row and for every row with a NULL status (sql/schema_v18.sql). So
+     `cd.length === 0` means NO ROW IN THIS WINDOW CARRIES A NORMALISED
+     OUTCOME. It does not mean nobody worked.
+
+     Driven through this file with kpis {trips:84, days_worked:19,
+     outcome_n:0} and quality {cancel_daily: []}, the Quality tab printed "This
+     driver worked no day in this window ... it is a window with no work in
+     it", while the Overview tab of the same profile printed Days worked 19 and
+     Trips 84 and the Earnings tab printed Booked revenue AED 12,400. An
+     operator screenshotting Quality would circulate a statement that a person
+     did not work in a month they were paid for. Not on screen on the current
+     production window — all 136 working drivers on 2026-09-01..09-16 have
+     cancel_daily rows with trips > 0 — and live the moment a channel files a
+     booking with no status, or an FMS journey is attributed to a driver.
+
+     Two causes, two sentences, and the population test is the same one the
+     Earnings tab already derives from /api/driver/kpis. */
+  const workedQ = (+k.bookings || +k.trips || 0) > 0 || +k.days_worked > 0;
+  if (!cd.length && !workedQ) {
+    line.body.append(note('This driver worked no day in this window, so there is no day on which they '
+      + 'could have cancelled anything. This is not a clean cancellation record — it is a window with '
+      + 'no work in it.'));
+  } else if (!cd.length) {
+    line.body.append(note(
+      `This driver worked in this window — ${countOf(k.trips, 'trip')}`
+      + (k.days_worked ? ` over ${countOf(k.days_worked, 'day')}` : '')
+      + ' — and no day of it carries a trip whose outcome any platform reported, so there is nothing '
+      + 'to chart. The telematics feed publishes no outcome at all, and a booking filed without a '
+      + 'status carries none either; both leave a day in this window with work on it and no way to '
+      + 'say whether anything was cancelled. This is not a clean record — it is an unreported one.'));
+  } else if (!cd.some((d) => d.cancelled > 0)) {
+    line.body.append(note(`No cancellations on any of the ${countOf(cd.length, 'day')} this driver `
+      + 'worked in this window.'));
   } else {
     barChart(line.body, cd.map((d) => ({
       label: `${dayStr(d.day)} · ${d.cancelled} of ${d.trips}`, cancelled: d.cancelled,
@@ -1713,10 +2356,22 @@ async function tabTrips(root, id) {
      driver's trip list must still render, and the toolbar says plainly that the
      other half could not be loaded rather than showing a number that silently
      excludes it. */
-  const [res0, un] = await Promise.all([
+  const [res0, unRaw] = await Promise.all([
     qAll('/api/driver/trips', { id, limit: PAGE }),
     qAll('/api/driver/unauthorized', { id }).catch(() => null),
   ]);
+  /* A 200 CARRYING THE WRONG BODY IS A FAILURE, NOT AN EMPTY ANSWER.
+     ───────────────────────────────────────────────────────────────────────
+     `.catch(() => null)` stops a thrown request and nothing else. A bare `[]`
+     from a mock's catch-all, or from a proxy or cache that rewrote the body,
+     is TRUTHY — so every `!un` branch below went unreached and the page said,
+     in three separate places, things it had never measured: the toolbar read
+     "500 of 640 bookings loaded · 0 with no booking", and the caption read "No
+     journey with no booking against it has this person as one of several
+     candidates in this window — every one that touches them is in the list
+     above, named." The wording written for exactly this failure ("a failure of
+     the request, not a finding about this driver") never fired. */
+  const un = unRaw && unRaw.attributed && unRaw.attributed.rows ? unRaw : null;
   /* Minutes computed onto the row rather than in the renderer, and that is
      not a style choice: tableFrom prunes a column whose declared key is blank
      on every row (api/public/ui.js:186), so a Minutes column keyed on
@@ -1823,12 +2478,35 @@ async function tabTrips(root, id) {
        that was already paying for the width, the table is exactly as wide as
        it was before this change, and the marker is still the leftmost thing in
        the row. */
+    /* …AND THE FORGONE FIGURE RIDES HERE TOO, for a measured reason.
+       ─────────────────────────────────────────────────────────────────────
+       It was rendered only in Fare, which is the LAST column of a table that
+       already overflows its scroller. Measured in Chromium on a driver with
+       one unexplained journey: at 1,440px the table is 1,186px inside a
+       1,090px .tscroll and only about 30px of the 111px "AED 55 forgone" span
+       fell inside it — the reader saw the literal string "AED" and no number,
+       which reads as a figure the page failed to produce rather than as a
+       hidden column. At 1,280px none of it was on screen. The unexplained row
+       also widens the table by a further 45px (Requested 100→117 for the pill,
+       Status 150→170), so the change made the clipping worse on exactly the
+       drivers this feature is about.
+
+       Requested is already paying for the pill's width, so the figure goes
+       under it, where it cannot scroll away. It stays in Fare as well: that is
+       where a reader sorting on money looks, and a duplicated figure on one
+       row is cheaper than a money column that is invisible at every width an
+       operator uses. */
     { label: 'Requested', key: 'requested_at', render: (r) => (r.kind === 'unexplained'
       ? `<span style="display:block;margin-bottom:3px">${pill('no booking', 'bad',
         'The seat sensor saw a passenger aboard and no channel booked the journey. The name '
         + 'beside it is an inference, not a trip record — open the Unexplained trips tab for the '
         + 'rule that named this person and the measurement behind it.')}</span>`
         + tripTime(r.plate, r.requested_at)
+        + (r.forgone_aed == null ? ''
+          : `<span class="ent-off" style="display:block;margin-top:2px;font-size:11px" title="${
+            esc(`This journey earned nothing: no channel booked it. Its distance would have been `
+              + `worth this much had it been sold — ${r.rate_basis || ''}`)}">${
+            esc(money(r.forgone_aed, 'AED', 0))} forgone</span>`)
       : tripTime(r.plate, r.requested_at)) },
     /* "none", dim, rather than a dash. A dash in this column on a row that
        otherwise looks like a trip reads as a channel we failed to record; the
@@ -1877,9 +2555,25 @@ async function tabTrips(root, id) {
          alongside the evidence sentence — and the caption under the table
          sends the reader to the tab where that sentence is on the screen
          rather than under a cursor, which is where an accusation belongs. */
+      /* THE STRENGTH OF THE CLAIM IS ON THE SCREEN, NOT IN A TOOLTIP.
+         ─────────────────────────────────────────────────────────────────
+         This is the one surface where an unexplained journey is sorted into
+         the person's OWN trip ledger by time, so it reads most strongly as
+         something they did — and the tier and the evidence existed only inside
+         the pill's `title`. The row showed "!NO BOOKING" and "!UNAUTHORIZED"
+         and nothing at all about how strong the claim behind them is. This
+         file's own header quotes the house rule against exactly that: a fact a
+         reader has to hover to find is a fact most readers never see. A
+         manager screenshots the tab and circulates a list of somebody's trips
+         with one flagged UNAUTHORIZED in red, and nothing on the image says
+         the flag rests on "they were the only person holding the car that
+         day". The column already carries a pill; the rung goes under it. */
       if (r.kind === 'unexplained') {
         return pill(r.verdict || 'unauthorized', 'bad',
-          `${TIER_LABEL[r.attribution_tier] || r.attribution_tier}: ${r.attribution_evidence || ''}`);
+          `${TIER_LABEL[r.attribution_tier] || r.attribution_tier}: ${r.attribution_evidence || ''}`)
+          + `<span class="dim" style="display:block;margin-top:3px;font-size:11px" title="${
+            esc(r.attribution_evidence || '')}">${esc(TIER_LABEL[r.attribution_tier]
+            || r.attribution_tier || 'no rung reached')}</span>`;
       }
       return pill(r.status || '—',
         r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'warn' : null);
@@ -1996,7 +2690,41 @@ async function tabTrips(root, id) {
      the driver actually has — three different numbers, one of them stated and
      none of them the truth. Every count is over the same list now, and the
      sentence names both ceilings. */
-  const draw = (list, term) => {
+  /* THE CAP IS APPLIED TO A LIST IN TIME ORDER NOW, AND WHAT IT DROPS IS NAMED.
+     ─────────────────────────────────────────────────────────────────────────
+     THE DEFECT, MEASURED IN CHROMIUM. `rows` is `bookings.concat(unrows)` —
+     the server's page of bookings, newest first, with the unexplained
+     journeys appended AFTER all of them — and the draw was
+     `list.slice(0, DRAW)` over that raw concatenation. So on any driver with
+     DRAW or more bookings in the window every unexplained journey sits past
+     index 400 and NONE of them is drawn, while the toolbar three lines above
+     counts them.
+
+     Rendered on the mock at 1,440px: the table drew 400 rows, 0 of them
+     unexplained, under a toolbar reading "500 of 640 bookings loaded · 3 with
+     no booking" and a caption reading "drawing the 400 newest of 503
+     matching". Every one of those three statements is separately defensible
+     and together they are a lie: the drawn set was the 400 newest BOOKINGS,
+     the three journeys were dropped for their position in an array rather than
+     for their age, and the reader is told a count of rows the table does not
+     contain and cannot be made to contain by sorting — the header sort runs
+     over the 400 already drawn.
+
+     This is not a tidy-up. 1,200 trips a quarter is an ordinary driver on this
+     fleet, so DRAW is reached routinely, and the interleave is the whole of
+     the operator's first request ("on driver's trip page we should also keep
+     unauthorized trips"). It failed silently on precisely the busy drivers the
+     feature is about.
+
+     Two changes, and the second is the honesty half. The list is put in time
+     order BEFORE the cap, so "the 400 newest" is true of what is on screen;
+     and where the cap still drops an unexplained journey — an old one, on a
+     driver with 400 newer rows — the caption SAYS SO and points at the tab
+     that holds it, rather than leaving a counted row invisible. A count
+     without its rows is the shape of defect this whole tab exists to refuse. */
+  const byTime = (a, b) => (Date.parse(b.requested_at) || 0) - (Date.parse(a.requested_at) || 0);
+  const draw = (unordered, term) => {
+    const list = [...unordered].sort(byTime);
     host.innerHTML = '';
     /* A row opens the booking. The endpoint has always returned external_id
        and the table never used it, so the one artefact somebody wants to look
@@ -2023,6 +2751,16 @@ async function tabTrips(root, id) {
     }
     const caps = [];
     if (list.length > DRAW) caps.push(`drawing the ${fmt(DRAW)} newest of ${fmt(list.length)} matching`);
+    /* …and if the cap took an unexplained journey with it, name the number.
+       See the block on `draw` above: these rows are the reason this table
+       interleaves anything at all, and one falling off the bottom without a
+       word is the same defect as a count with no rows behind it. */
+    const droppedUn = list.slice(DRAW).filter((r) => r.kind === 'unexplained').length;
+    if (droppedUn) {
+      caps.push(`${fmt(droppedUn)} of the journeys with no booking against them are older than `
+        + `the ${fmt(DRAW)} rows drawn here and are NOT in this table — they are on the `
+        + 'Unexplained trips tab, in full, with the rule that named this person on each');
+    }
     /* Both numbers, always: how many are loaded, and how many exist. "The
        server sent the 500 newest" is true and unusable — 500 of how many?
        Counted over the BOOKINGS, because that is the list the server is paging:
@@ -2170,8 +2908,11 @@ const segWhen = (r) => tripTime(r.plate, r.started_at)
    which is precisely the choice api/unauthorized_sql.js's ladder refuses to
    make. The distinction is carried in words, and the working is in the
    evidence column beside it. */
-const TIER_LABEL = { bracketed: 'named by time', sole_custodian: 'sole custodian',
-  ambiguous: 'one of several', unknown: 'nobody named' };
+/* FIVE RUNGS. `last_trip` — the operator's own rule, and the rung that carries
+   most of this list — was added to the ladder in api/unauthorized_sql.js and
+   this map was not updated with it, so a row on it rendered its raw key. */
+const TIER_LABEL = { bracketed: 'named by time', last_trip: 'last trip on the car',
+  sole_custodian: 'sole custodian', ambiguous: 'one of several', unknown: 'nobody named' };
 const tierPill = (r, means) => pill(TIER_LABEL[r.attribution_tier] || r.attribution_tier || '—',
   null, means?.[r.attribution_tier] || null);
 
@@ -2205,6 +2946,21 @@ const tierPill = (r, means) => pill(TIER_LABEL[r.attribution_tier] || r.attribut
    behaviour every wide table in this product already has, and is far better
    than a legible-in-principle sentence nobody can read. */
 const EV = 'display:block;min-width:30ch;max-width:56ch';
+/* THE ONE SENTENCE THAT MUST NEVER BE A TOOLTIP STAYS IN THE CELL; the rest
+   goes behind a disclosure.
+   ─────────────────────────────────────────────────────────────────────────
+   Measured in Chromium on a driver with one attributed journey: at 1,440px the
+   row stood 284px tall with the evidence column at 377px; at 1,280px the same
+   ONE row was 418px tall with the column squeezed to 271px — more than a third
+   of the viewport for one journey, with every other cell floating in ~200px of
+   vertical whitespace. Four stacked paragraphs in a cell bounded at 30ch set
+   the height of the whole row. The attribution sentence is the claim and stays
+   on the screen; the clock skew, the status feed and the nearest booking are
+   context and open on demand. */
+const segMore = (html, n) => (html
+  ? `<details style="margin-top:4px"><summary class="dim" style="cursor:pointer">`
+    + `${n} more note${n === 1 ? '' : 's'} on this journey</summary>${html}</details>`
+  : '');
 const segEvidence = (r) => {
   const lines = [`<span class="wrap" style="${EV}">${esc(r.attribution_evidence
     || 'No evidence sentence was recorded for this journey, which is itself a fault — a name '
@@ -2214,13 +2970,45 @@ const segEvidence = (r) => {
       + 'minutes behind, so no booking on any channel could honestly be compared against this '
       + 'window by time. That is why nothing here is named by time.</span>');
   }
-  if (r.status_note) lines.push(`<span class="wrap dim" style="${EV}">${esc(r.status_note)}</span>`);
-  if (r.nearest_booking && r.nearest_booking.name) {
-    const nb = r.nearest_booking;
-    lines.push(`<span class="wrap dim" style="${EV}">${esc(nb.means || '')} The booking is on `
-      + `${esc(sourceLabel(nb.platform))}, driven by ${esc(nb.name)}.</span>`);
+  /* Rendered per row ONLY when it differs from the one hoisted to the panel.
+     driver_status_event is append-only from 2026-09-14 with no backfill, so
+     the server returns the identical sentence for essentially every row —
+     "Uber's own driver-status feed holds nothing yet, so nothing here either
+     confirms or contradicts the name above." — and the cell repeated one
+     three-line paragraph down the whole table, in the narrowest column on the
+     page, competing for width with the evidence sentence, which does differ. */
+  if (r.status_note && r.status_note !== r._hoisted_status) {
+    lines.push(`<span class="wrap dim" style="${EV}">${esc(r.status_note)}</span>`);
   }
-  return lines.join('');
+  /* THE NEAREST BOOKING'S DRIVER NAME IS NOT PRINTED HERE, AND THAT IS THE
+     WHOLE POINT OF THE LINE.
+     ─────────────────────────────────────────────────────────────────────
+     This cell used to end `… The booking is on Uber, driven by <name>.` — and
+     the server's own `means` string, immediately before it, ends "…so this
+     name is deliberately absent from the candidate list above". The UI printed
+     the name the sentence had just said was withheld, and it printed it LAST,
+     directly beneath the stacked candidate list, on a panel whose warn box
+     reads "Nobody is accused here … every candidate is listed and none is
+     chosen". The nearest booking is very often one of those candidates, so a
+     reader who read the paragraph to the end was handed the tiebreaker the
+     ladder had refused to make — off a pointer whose median gap over
+     production's 106 populated rows is 97 minutes and whose maximum is 11,309,
+     and which by construction did NOT explain the journey. On production
+     nearest_trip_id is populated on 106 of 120 segments, so it fired on nearly
+     every row.
+
+     api/public/segments.js has never rendered it. Two surfaces, one ladder,
+     one claim: the platform and the gap are context and stay; the name belongs
+     on the segment page behind an explicit disclosure, not in the evidence
+     cell of a row that lists candidates. */
+  if (r.nearest_booking) {
+    const nb = r.nearest_booking;
+    lines.push(`<span class="wrap dim" style="${EV}">${esc(nb.means || '')} It is a `
+      + `${esc(sourceLabel(nb.platform))} booking. Its driver is deliberately not named here: `
+      + 'it did not explain this journey, so naming them would offer a tiebreaker the evidence '
+      + 'does not support.</span>');
+  }
+  return lines[0] + segMore(lines.slice(1).join(''), lines.length - 1);
 };
 
 /* Every candidate, in the order the server sent them — which is NAME order,
@@ -2249,8 +3037,23 @@ const segCandidates = (r) => {
    column that names everyone in the frame, which is the whole content of the
    second list and redundant in the first — there, the person whose page this
    is IS the candidate. */
+/* THE TIER RIDES IN THE FIRST CELL AS WELL AS IN ITS OWN COLUMN.
+   ─────────────────────────────────────────────────────────────────────────
+   Seven columns, with Named-by sixth and The-evidence seventh. At phone width
+   .tscroll keeps the first three, so the two cells that QUALIFY the accusation
+   were the first to disappear behind a sideways scroll: rendered at 430px both
+   tables printed "Scroll the table sideways for 5 more columns: … Named by,
+   The evidence", and what a phone showed was a journey date, a duration and a
+   plate under a heading naming one person. A screenshot taken on a phone was a
+   list of journeys attached to a named person with every qualifier off-screen,
+   which is exactly the artefact the tier-in-front-of-the-name discipline
+   exists to prevent — and the Trips tab already solves it the same way, with
+   its "no booking" pill above the timestamp. */
 const unexplainedTable = (rows, { means, candidates = false, sortId }) => tableFrom(rows, [
-  { label: 'Journey', key: 'started_at', render: segWhen },
+  { label: 'Journey', key: 'started_at',
+    render: (r) => `<span class="dim" style="display:block;font-size:11px" title="${
+      esc(means?.[r.attribution_tier] || '')}">${esc(TIER_LABEL[r.attribution_tier]
+      || r.attribution_tier || 'no rung reached')}</span>${segWhen(r)}` },
   { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
   { label: 'From → to', key: 'start_place', render: segPlaces },
   /* Null is not zero. A journey with no measured distance did not travel
@@ -2322,9 +3125,37 @@ async function tabUnauthorized(root, id) {
     return;
   }
 
-  const att = res.attributed || { rows: [], total: 0, by_tier: {} };
+  /* A 200 CARRYING THE WRONG BODY IS A FAILURE, NOT A MEASURED EMPTINESS.
+     ───────────────────────────────────────────────────────────────────────
+     The try/catch above defends against a THROWN request. It does nothing
+     about a response that arrives 200 with a shape this tab cannot read — a
+     bare `[]` from a mock's catch-all route, a proxy or a cache that rewrote
+     the body, a deploy where the endpoint is not there yet. The three
+     `res.x || {…}` defaults below silently converted that into a clean record:
+     cov.days_with_data came back `undefined`, so the `=== 0` test further down
+     was FALSE and the page took the "we looked and found nothing" branch
+     instead of the "nothing was looked at" branch, and then printed two
+     positive factual claims about data it had never fetched — "No unexplained
+     journey in this window names this person, across the 0 of 0 days the seat
+     sensor actually watched. That is what was measured" and "On every
+     unexplained journey in this window where this person held the car, the
+     record named them alone or named somebody else."
+
+     Every driver in the fleet, exonerated in writing by a request that
+     returned nothing. So the shape is checked, and a body that does not carry
+     it takes the same path a thrown request takes. */
+  if (!res || !res.attributed || !res.attributed.rows || !res.coverage) {
+    p.body.innerHTML = '';
+    p.body.append(note('The unexplained-journey list came back in a form this page cannot read, '
+      + 'so nothing below was loaded. This says NOTHING about whether this person has any '
+      + 'unexplained journeys — it is a failure of the request, not a finding about them. Try '
+      + 'again, or check that the attribution service is deployed.', 'warn'));
+    return;
+  }
+
+  const att = res.attributed;
   const cand = res.also_a_candidate || { rows: [], total: 0 };
-  const cov = res.coverage || {};
+  const cov = res.coverage;
   p.body.innerHTML = '';
 
   /* Above everything, because it changes how every count below is read. */
@@ -2332,27 +3163,67 @@ async function tabUnauthorized(root, id) {
   p.body.append(note(res.note));
 
   const sum = (rows, k) => rows.reduce((a, r) => a + (r[k] == null ? 0 : Number(r[k])), 0);
+  /* THE MONEY IS SPLIT BY RUNG, because the tile is the most quotable object
+     on the tab and it is the one that reads as a debt this person owes.
+     ───────────────────────────────────────────────────────────────────────
+     "Revenue forgone AED 811", in warning colour, summed bracketed +
+     last_trip + sole_custodian with a sub-line naming only the rate. Every one
+     of the eight contributing rows on the measured example was sole_custodian,
+     and the product's own words for that rung are "this is custody, not
+     driving". A manager quoting AED 811 has converted eight custody records
+     into a monetary claim, with the qualifier one tile to the left. */
+  const byTime = att.rows.filter((r) => r.attribution_tier === 'bracketed');
+  const byRule = att.rows.filter((r) => r.attribution_tier !== 'bracketed');
   const km = sum(att.rows, 'distance_km');
   const aed = sum(att.rows, 'forgone_aed');
+  const kmTime = sum(byTime, 'distance_km');
+  const aedTime = sum(byTime, 'forgone_aed');
   p.body.append(kpiRow([
     { label: 'Named beside', value: fmt(att.total), key: 'unauth-attributed',
       tone: att.total ? 'warn' : null,
       sub: att.total ? 'journeys no channel booked' : 'no journey in this window names them' },
     { label: 'Named by time', value: fmt(att.by_tier?.bracketed || 0),
       sub: 'their own Uber trips bracket the window' },
+    { label: 'Last trip on the car', value: fmt(att.by_tier?.last_trip || 0),
+      sub: 'the operator’s rule — theirs was the last Uber trip on that car before the '
+        + 'journey. An inference from the car’s record, not about this journey' },
     { label: 'Sole custodian', value: fmt(att.by_tier?.sole_custodian || 0),
-      sub: 'only person holding the car that day' },
+      sub: 'only person holding the car that day — custody, not driving' },
     { label: 'One of several', value: fmt(cand.total), key: 'unauth-candidate',
       sub: cand.total ? 'no claim is made on these' : 'none in this window' },
     { label: 'Distance', value: km ? `${fmt(km, 1)} km` : '—',
-      sub: 'across the journeys named beside them' },
+      sub: kmTime === km
+        ? 'all of it across journeys narrowed to this person BY TIME'
+        : `${fmt(kmTime, 1)} km across journeys narrowed by time · `
+          + `${fmt(km - kmTime, 1)} km across journeys where the car’s own day, not this `
+          + 'journey, put their name here' },
     /* Revenue forgone, never "cost": the fuel and wear behind these kilometres
-       is a different, smaller number this product cannot measure. */
+       is a different, smaller number this product cannot measure. And never
+       one figure across three rungs — see the block above. */
     { label: 'Revenue forgone', value: aed ? money(aed, 'AED', 0) : '—',
-      tone: aed ? 'warn' : null,
+      /* NO WARNING COLOUR unless the whole of it rests on a time measurement.
+         A tone is read as a verdict, and most of this figure is custody. */
+      tone: aed && aedTime === aed ? 'warn' : null,
       sub: res.value?.aed_per_km == null ? 'no rate exists for this window'
-        : `at AED ${res.value.aed_per_km}/km, the fleet’s own rate here` },
+        : `${money(aedTime, 'AED', 0)} across journeys narrowed to this person BY TIME · `
+          + `${money(aed - aedTime, 'AED', 0)} across journeys named off the car’s own day `
+          + 'instead — custody is not driving, and this second figure is not a debt anybody '
+          + `owes. Both at AED ${res.value.aed_per_km}/km, the fleet’s own rate here. Revenue `
+          + 'forgone, not money paid out.' },
   ]));
+
+  /* THE STATUS-FEED SENTENCE, ONCE, WHEN IT IS THE SAME ON EVERY ROW.
+     driver_status_event is append-only from 2026-09-14 with no backfill, so
+     the server returns one identical sentence for essentially every row. It
+     was rendered per row, three wrapped lines each, in the narrowest column on
+     the page, saying nothing that differed between them. */
+  const allRows = att.rows.concat(cand.rows);
+  const notes = [...new Set(allRows.map((r) => r.status_note).filter(Boolean))];
+  const hoisted = notes.length === 1 && allRows.every((r) => r.status_note) ? notes[0] : null;
+  if (hoisted) {
+    allRows.forEach((r) => { r._hoisted_status = hoisted; });
+    p.body.append(el('p', 'cap', `Uber’s own driver-status feed, on every row below: ${hoisted}`));
+  }
 
   /* ── what this person is NAMED beside ─────────────────────────────────── */
   const a = panel(att.heading, att.means);
@@ -2370,9 +3241,26 @@ async function tabUnauthorized(root, id) {
         ? 'No journey in this window is attributed to this person. They are one of several '
           + `candidates on ${fmt(cand.total)} ${plural(cand.total, 'journey', 'journeys')}, listed `
           + 'separately below — and being a candidate is not being named.'
-        : `No unexplained journey in this window names this person, across the ${fmt(cov.days_with_data || 0)} `
-          + `of ${fmt(cov.days_in_window || 0)} days the seat sensor actually watched. That is what `
-          + 'was measured; it is not a statement about the days it did not cover.');
+        /* THE DAYS ARE NOW COUNTED OVER THE CARS THIS PERSON HELD.
+           ─────────────────────────────────────────────────────────────────
+           This sentence used to print coverageOf()'s FLEET-WIDE day count —
+           days on which ANY car in the fleet produced a segment — as though it
+           were a statement about them. A driver whose cars carry no sensor at
+           all read as "across the 27 of 108 days the seat sensor actually
+           watched": an exoneration nobody measured, which is the mirror of the
+           accusation nobody measured that the rest of this tab exists to
+           avoid. The endpoint now scopes the count to their own plates and
+           says so in `coverage.scope`; this prints what it was actually a
+           count over, and refuses to print a measurement sentence at all when
+           either number is missing. */
+        : (cov.days_with_data == null || cov.days_in_window == null
+          ? 'No unexplained journey in this window names this person. How many days the seat '
+            + 'sensor covered could not be measured here, so this is not a statement about '
+            + 'the days it did not cover.'
+          : `No unexplained journey in this window names this person, across the ${fmt(cov.days_with_data)} `
+            + `of ${fmt(cov.days_in_window)} days the seat sensor watched ${
+              esc(cov.scope || 'the cars this person held')}. That is what `
+            + 'was measured; it is not a statement about the days it did not cover.'));
   }
 
   /* ── …and what they are merely one of several candidates for ──────────── */
@@ -2395,11 +3283,96 @@ async function tabUnauthorized(root, id) {
         + 'candidate for.');
   }
 
-  if (res.truncated) {
-    c.body.append(el('p', 'cap', 'This person matched the server’s 400-row ceiling for the '
-      + 'window, so these lists are the newest 400 rather than all of them. Narrow the range '
-      + 'above to see a complete picture.'));
+  /* The totals above are counted over the window by the endpoint, so they are
+     exact even when the tables are short. The response says which in words. */
+  if (res.total_basis) c.body.append(el('p', 'cap', res.total_basis));
+}
+
+/* ── the window said out loud, once, above every tab ──────────────────────
+   THE DEFECT THIS EXISTS FOR.
+   ═══════════════════════════════════════════════════════════════════════════
+   MEASURED on production for Muhammad Nadeem Ajmal (Uber
+   e3cd308b2b5f48e19877b924b48bbb9d) over 2026-09-01..2026-09-16:
+
+     /api/driver/profile   span.trips 0, span.days_worked 0, span.last_trip null
+                           accounts[0] uber, trips 1203, last_trip 2026-03-29
+     /api/driver/kpis      trips 0, days_worked 0, priced_trips 0, revenue null
+     /api/driver/mix       {distance:[], product:[], payment:[], status:[], platform:[]}
+
+   Nothing there is wrong. The person genuinely did not work in September; their
+   last trip was in March. But the page rendered as a wall of em dashes with one
+   bold "AED 0" in the middle of it, and the operator who opened it asked what
+   had broken — because NINE panels each said a different narrow thing about
+   their own missing figure and not one of them said the single fact that
+   explains all nine.
+
+   So it is said ONCE, here, and the panels underneath are left exactly as they
+   are. Three reasons this is the shell and not the tabs:
+
+     · the fact is already on the wire. renderDriver has awaited
+       /api/driver/profile before it paints anything, and `span` + `accounts`
+       carry the whole sentence — no second request, no waiting on a tab.
+     · `prof` already reaches all eight tabs (`await fn(body, id, prof)`), so a
+       per-tab variant needs no plumbing. Writing it eight times is exactly how
+       the fleet pages and this page came to disagree about money in the first
+       place; the tab only chooses a tail clause.
+     · it is an APPEND into an empty container. Nothing below is deleted, so an
+       operator who widens the range still has their page.
+
+   TWO CASES, TWO SENTENCES, deliberately. "A quiet month" and "no work on
+   record at all" are different facts about a person, and one sentence covering
+   both would be a sentence that is vague about which of them is true — which is
+   the same defect as a zero nobody measured, in prose.
+
+   WHAT IT DOES NOT SAY. It does not compute the window's start date to print
+   "156 days before it opens". The client is not allowed a second implementation
+   of the calendar — `period=month` is resolved by api/window.js and nothing in
+   this payload carries the resolved dates — so the gap is stated against TODAY,
+   which is a date the browser genuinely knows, and the window is named with
+   windowLabel() rather than dated. A true smaller fact beats a fabricated
+   larger one. */
+const EMPTY_WINDOW_TAIL = {
+  earnings: 'No money reached them for these dates either, and the tiles below say which figures '
+    + 'were never measured and which were reported as nought.',
+  activity: 'The day-by-day table below still lists every date any feed reached, with nothing on them.',
+  territory: 'There is nowhere to plot them.',
+  quality: 'There is no trip to have completed or cancelled.',
+  trips: 'There are no rows.',
+};
+
+export function emptyWindowNote(prof, tab) {
+  const span = prof?.span;
+  /* `trips` absent is not `trips` zero. A payload that never carried the count
+     is a thing we do not know, and this banner asserts something about the
+     window; it says nothing where it was told nothing. */
+  if (!span || span.trips == null || +span.trips > 0) return null;
+  const { evTrips, lastEver, accounts, accountsWithTrips } = personRecord(prof);
+  const win = windowLabel();
+  const tail = EMPTY_WINDOW_TAIL[tab] ? ` ${EMPTY_WINDOW_TAIL[tab]}` : '';
+
+  /* CASE 2 — nothing on record, ever. Both tests, because they fail
+     independently: an account row can carry trips 0 with a last_trip, and a
+     channel that has never filed a trip has neither. */
+  if (!evTrips && !lastEver) {
+    return `No channel has ever reported a trip for this driver — not in ${win}, and not in any `
+      + `window before it. They hold ${countOf(accounts, 'platform account')} and `
+      + `${accountsWithTrips ? 'none of them has' : 'not one of them has'} taken a booking we hold, `
+      + 'so the panels below are empty because there is no work on record at all, which is not the '
+      + `same as a period they happened not to work.${tail}`;
   }
+
+  /* CASE 1 — a record, and none of it in this window. */
+  const t = lastEver ? Date.parse(lastEver) : NaN;
+  const ago = Number.isFinite(t) ? Math.floor((Date.now() - t) / 864e5) : null;
+  const when = lastEver
+    ? `Their last was on ${dateStr(lastEver)}`
+      + (ago != null && ago > 0 ? `, ${countOf(ago, 'day')} ago` : '')
+    : 'No trip on their record carries a date';
+  const record = evTrips
+    ? `, and ${countOf(evTrips, 'trip')} ${plural(evTrips, 'sits', 'sit')} on their record`
+    : '';
+  return `No trip of this driver's falls in ${win}. ${when}${record}. Every figure below is `
+    + `measured over those dates, so what is missing here is the work, not the record of it.${tail}`;
 }
 
 const TABS = { overview: tabOverview, activity: tabActivity, territory: tabTerritory,
@@ -2463,6 +3436,18 @@ export async function renderDriver(root, id, tab = 'overview') {
     await renderDriverDay(body, id, on);
     return prof;
   }
+  /* FIRST CHILD OF THE SCROLLING COLUMN, above the KPI row, on every tab.
+     `body` is still empty here, so this lands directly under the tab bar and is
+     the first thing read after the tab that was clicked — and every panel below
+     it renders exactly as it did before. See emptyWindowNote for why the
+     sentence lives in one place rather than in eight tabs.
+
+     NO TONE. `.note.warn` on this page means "we failed" (the live-status catch
+     below) or "nobody is accused here" (the unexplained-journeys panel). A
+     person who took six months off is neither, and painting their page amber
+     would make the honest answer look like an incident. */
+  const ew = emptyWindowNote(prof, tab);
+  if (ew) body.append(note(ew));
   const fn = TABS[tab] || tabOverview;
   await fn(body, id, prof);
   return prof;

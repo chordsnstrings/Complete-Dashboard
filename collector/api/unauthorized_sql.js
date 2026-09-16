@@ -20,25 +20,44 @@
 
    ── THE LADDER, AND THE MEASUREMENT THAT SET IT ────────────────────────────
    Measured against production over from=2026-06-01&to=2026-09-16 — all 120
-   unauthorized segments, not a sub-sample. The first column is the ladder as
-   it shipped in b01bb70; the second is the ladder as it stands now, after the
-   operator's last-trip rule was added between `bracketed` and `sole_custodian`:
+   unauthorized segments, not a sub-sample — for the ladder as it shipped in
+   b01bb70, BEFORE the operator's rule was added:
 
-     bracketed        13 -> 13   named by TIME, on Uber trips either side
-     last_trip         – -> 45   the operator's rule; see the block below
-     sole_custodian   48 -> 24   one custodian that day; custody, not driving
-     ambiguous        26 -> 13   two or more candidates; NO choice is made
-     unknown          33 -> 25   nobody nameable; no name is invented
+     bracketed        13   named by TIME, on Uber trips either side
+     sole_custodian   48   one custodian that day; custody, not driving
+     ambiguous        26   two or more candidates; NO choice is made
+     unknown          33   nobody nameable; no name is invented
 
-   Those second-column figures are the measured effect of the cap applied
-   below: the rule names 90 of 120 journeys where the old ladder named 61 by a
-   single name, and it resolves 13 of the 26 two-name handover rows to one
-   person. They are a projection from the measurement, not a re-run of the
-   endpoint, because /api/unauthorized/attributed is built and committed but
-   not yet deployed — the measurement reproduced the shipped distribution
-   exactly (13/48/26/33, all four to the unit) from /api/unauthorized/list's
-   driver_refs plus /api/vehicle/trips, which is the strongest available check
-   that the reproduction is faithful.
+   WHAT THE OPERATOR'S RULE DOES TO THAT, SEPARATED INTO WHAT WAS MEASURED AND
+   WHAT IS ONLY ARITHMETIC ON IT. The distinction matters because the second
+   set has NOT been re-measured: /api/unauthorized/attributed is built and
+   committed but is not deployed, so there is no endpoint to ask.
+
+     MEASURED, over the same 120:
+       the rule names 90 under the cap applied below (105 uncapped)
+       13 of the 26 `ambiguous` rows resolve to exactly one person
+       20 of the 33 `unknown` rows get a name (33 uncapped)
+       0 rows contradict day-custody under the cap (2 uncapped)
+
+     DERIVED FROM THOSE FIGURES, and therefore an ESTIMATE, not a count:
+       bracketed 13, last_trip 77, sole_custodian 4, ambiguous 13, unknown 13.
+       bracketed is unchanged because a bracket needs a trip within 240 minutes
+       before the journey, which is inside the staleness cap — so every bracket
+       also satisfies the operator's rule and the ordering simply keeps the
+       stronger label. last_trip is then 90 - 13, and the rest follows.
+
+     THE ESTIMATE IS AN UPPER BOUND ON last_trip AND A LOWER BOUND ON THE TWO
+     CUSTODY TIERS, because the 90 was measured WITHOUT the clock-skew gate
+     this module applies: a segment whose tracker reports "(N) min behind"
+     falls through to custody however recent its last trip is, and production
+     carries 37 such segments fleet-wide. Nobody should quote 77 as a count
+     until the endpoint is deployed and asked.
+
+   The old distribution above IS a count: the measurement reproduced it exactly
+   — 13/48/26/33, all four to the unit, including the bracket's
+   no-other-driver-in-between exclusion — from /api/unauthorized/list's
+   driver_refs plus /api/vehicle/trips folded through api/identity_map.js,
+   which is the strongest available check that the reproduction is faithful.
 
    ── THE OPERATOR'S RULE, IN THEIR OWN WORDS ────────────────────────────────
    "usually one person drives per car. so we will take the last trip custodian
@@ -277,7 +296,21 @@ export const FRESH_BAND_MIN = 1494;
    last trip on ANY channel would name 27 of those 28 and is a ONE-LINE change
    to this constant — but it is a different claim about a different channel's
    data quality, so it waits for the operator rather than being taken here. The
-   evidence sentence says which of the two absences it hit. */
+   evidence sentence says which of the two absences it hit.
+
+   ONE THING HAD TO BE REPAIRED BEFORE THAT ONE-LINE CHANGE COULD SAFELY BE
+   MADE, and it was found by audit rather than by a failing test. The last-trip
+   rule's own CTE argued in a comment that it was "completed only, as the
+   bracket is" and did not apply COMPLETED() — it substituted
+   't.ended_at IS NOT NULL', the proxy COMPLETED()'s header records as unsafe.
+   On today's `uber` rows that is latent: every one is either completed with an
+   end or cancelled without one. It is NOT latent next door — L63960 carries a
+   bolt/client_cancelled row WITH an ended_at, L78465 a bolt/client_did_not_show
+   WITH an ended_at, L46706 a hotel/started — so the day this constant grows,
+   the rule would have begun naming people off a ride nobody took while the
+   bracket three CTEs above went on refusing the same row. The guard is applied
+   now, on last_near and on `ever` both, which is what makes widening this list
+   a decision about CHANNELS rather than a silent change to what a trip is. */
 export const BRACKET_PLATFORMS = ['uber'];
 
 /* The clock skew the reconciler wrote into its own reason line, as an int.
@@ -418,31 +451,47 @@ export const attributionJoin = (o = 'o') => {
       ELSE format('%s and %s, the two Dubai days this journey spans',
                   to_char(named.day_open, 'YYYY-MM-DD'), to_char(named.day_close, 'YYYY-MM-DD'))
     END`;
-  /* The one clause that says why the operator's rule named nobody on this row.
-     It is appended to EVERY sentence the rule did not decide, because the
+  /* WHOSE THE LAST UBER TRIP OF RECORD WAS — OR THAT THERE IS NO SINGLE WHOSE.
+     ───────────────────────────────────────────────────────────────────────
+     The ever CTE now keeps everyone who finished at the last instant rather than
+     letting a LIMIT 1 pick one (see the CTE for the probe that proved the old
+     shape prints one of two tied names and hides the other). A tie has no
+     single last driver of record and this fragment says so instead of
+     nominating somebody; where exactly one person survives the sentence is
+     unchanged, which is every row measured on production. */
+  const EVER_WHOSE = `CASE WHEN named.ever_people = 1 THEN format('it was %s’s', named.ever_name)
+      ELSE format('%s drivers’ trips on this car (%s) ended at that very same instant, so '
+        || 'there is no single last Uber driver of record and this product will not nominate '
+        || 'one of them', named.ever_people, named.ever_names) END`;
+  /* WHY THE OPERATOR'S RULE NAMED NOBODY ON THIS ROW, IN WORDS.
+     ───────────────────────────────────────────────────────────────────────
+     Appended to EVERY sentence the rule did not decide, because the
      alternative is a page that silently stops applying the operator's rule on
-     a quarter of its rows. Four different absences, four different sentences,
-     per the house rule — and the order matters: a car with no Uber history at
-     all must not be reported as a car whose Uber history is stale. */
-  const WHY_NO_LAST = `CASE
-      WHEN named.skew IS NOT NULL THEN format(
+     a quarter of its rows. NINE different absences, nine different sentences,
+     per the house rule — and every one of them is selected by the SAME token
+     the responsible-person column switches on (named.no_last_reason, decided
+     once in the named CTE), so the sentence and the column cannot come to state
+     different reasons for one absence. They did: see the block comment beside
+     no_last_reason for the two rows that proved it. */
+  const WHY_NO_LAST = `CASE named.no_last_reason
+      WHEN 'skew' THEN format(
         'The operator’s last-Uber-trip rule is not applied here either, and for the same '
         || 'reason: the rule is one clock comparison — this journey’s start against the end '
         || 'of a trip — and a tracker %s minutes out of true cannot be compared against a '
         || 'booking clock at all.', named.skew)
-      WHEN named.uber_trips = 0 AND named.other_trips = 0 THEN format(
+      WHEN 'no_bookings' THEN format(
         'The operator’s last-Uber-trip rule can name nobody here: the trip record holds no '
         || 'booking of ANY kind on %s that names a driver, so there is no last trip on any '
         || 'channel to read. This is not a car whose Uber history is thin — it is a car with '
         || 'no booking identity at all.', ${o}.plate)
-      WHEN named.uber_trips = 0 THEN format(
+      WHEN 'wrong_channel' THEN format(
         'The operator’s last-Uber-trip rule can name nobody here: %s has no Uber trips at '
         || 'all in the record. Its work is on the %s channel (%s trips, %s different '
         || 'drivers). The rule reads the last UBER trip, and this car has none — this is a '
         || 'car on the wrong channel, not a car with a thin record.',
         ${o}.plate, coalesce(named.other_platform, 'other'), named.other_trips,
         named.other_people)
-      WHEN named.uber_prior > 0 AND named.uber_prior = named.uber_nameless THEN format(
+      WHEN 'nameless' THEN format(
         'The operator’s last-Uber-trip rule can name nobody here: %s HAS %s Uber trip(s) '
         || 'before this journey and every one of them is filed WITHOUT A DRIVER NAME. An '
         || 'account number with no name behind it is not a person this product can accuse, '
@@ -450,21 +499,77 @@ export const attributionJoin = (o = 'o') => {
         || 'which is what this row used to do. The absence is in our record of the trip, not '
         || 'in the car’s history.',
         ${o}.plate, named.uber_prior)
-      WHEN named.uber_prior = 0 THEN format(
+      /* THE COMBINATION CASE, WHICH USED TO BORROW THE CANCELLATION SENTENCE.
+         Neither single-cause sentence is true of a car carrying BOTH anonymous
+         completed trips and named uncompleted ones, so neither is printed:
+         each count is stated as its own clause and only the non-zero ones
+         appear. See hist.uber_uncompleted for the row that proved it. */
+      WHEN 'mixed_unreadable' THEN format(
+        'The operator’s last-Uber-trip rule can name nobody here: %s HAS %s Uber trip(s) '
+        || 'before this journey and not one of them is a NAMED, COMPLETED trip this rule '
+        || 'could read — %s. These are different absences with different causes and the row '
+        || 'states each of them rather than blaming whichever is the commoner: an anonymous '
+        || 'trip is a gap in OUR record of it, while a cancelled one is a ride that did not '
+        || 'happen.',
+        ${o}.plate, named.uber_prior,
+        array_to_string(ARRAY[
+          CASE WHEN named.uber_nameless > 0
+            THEN named.uber_nameless || ' filed without a driver name' END,
+          CASE WHEN named.uber_uncompleted > 0
+            THEN named.uber_uncompleted || ' cancelled, rejected or otherwise not completed' END,
+          CASE WHEN named.uber_noend > 0
+            THEN named.uber_noend || ' completed but carrying no end time to compare against' END,
+          CASE WHEN named.uber_running > 0
+            THEN named.uber_running || ' still running when this journey began, so they end '
+                 || 'AFTER it rather than before it' END
+        ], ', '))
+      WHEN 'no_prior' THEN format(
         'The operator’s last-Uber-trip rule can name nobody here: %s HAS Uber history, but '
         || 'none of it predates this journey — the first Uber trip on this car was %s. '
         || 'Nobody can be named from a trip that had not happened yet.',
         ${o}.plate, to_char(named.uber_first_at AT TIME ZONE 'Asia/Dubai', 'YYYY-MM-DD'))
-      WHEN named.ever_gap IS NULL THEN format(
+      /* A DATE THIS PRODUCT DOES NOT HOLD IS NOT A DATE IT MAY PRINT. The
+         branch above renders uber_first_at through to_char(), and format()
+         prints a NULL argument as an EMPTY STRING rather than failing — so a
+         car whose Uber rows carry neither a request time nor an end time read
+         'the first Uber trip on this car was .' with a bare full stop where the
+         date should be. The same trap ROSTER_CLAUSE records below. */
+      WHEN 'undateable' THEN format(
+        'The operator’s last-Uber-trip rule can name nobody here: we hold %s Uber trip(s) on '
+        || '%s and not one of them carries a usable timestamp — no request time and no end '
+        || 'time — so there is no way to say which came before this journey. The absence is '
+        || 'in our record of the trips, not in the car’s history, and no date is printed here '
+        || 'because this product does not hold one.', named.uber_trips, ${o}.plate)
+      WHEN 'uncompleted' THEN format(
         'The operator’s last-Uber-trip rule can name nobody here: every earlier Uber ride on '
-        || '%s was CANCELLED and carries no end time, so none of them is a completed trip '
-        || 'this rule could read. Completed trips only, which is the conservative direction '
-        || 'for an accusation and is the same predicate the bracket uses. Whether a '
-        || 'cancelled ride should count as "the last trip" is an open question for the '
-        || 'operator and is deliberately not decided here.', ${o}.plate)
+        || '%s that names a driver was CANCELLED, rejected or otherwise not completed, so '
+        || 'none of them is a completed trip this rule could read. Completed trips only, '
+        || 'which is the conservative direction for an accusation and is the same predicate '
+        || 'the bracket uses. Whether a cancelled ride should count as "the last trip" is an '
+        || 'open question for the operator and is deliberately not decided here.', ${o}.plate)
+      /* THE RESIDUAL, AND IT IS NOT STALENESS. last_near is bounded on
+         requested_at as well as on ended_at, because that is the index that
+         exists; a trip inside the cap on its END and outside the floor on its
+         REQUEST is therefore dropped by last_near and found by the ever CTE. Reported
+         as "too old" it produced a sentence contradicting its own two numbers
+         — "21.5 days before this journey. That is beyond the 31631-minute cap
+         (21.97 days)" — and an operator opening the car's trip list to check,
+         which this module's header expressly invites, found a trip the page
+         said was outside a window it is inside. The true reason is an
+         index-shaped lookback floor and the row says so. */
+      WHEN 'lookback_floor' THEN format(
+        'The operator’s last-Uber-trip rule can name nobody here, and the reason is a limit '
+        || 'in this query rather than a fact about the car: the most recent completed Uber '
+        || 'trip on %s ended %s before this journey — INSIDE the %s-minute cap — but it was '
+        || 'REQUESTED more than %s minutes before the journey, which is the lookback floor '
+        || 'the rule scans on. That floor is the cap plus the longest journey the reconciler '
+        || 'will entertain (8 hours), and only a trip running longer than eight hours from '
+        || 'request to end can fall outside it. This is the query’s reach, not the car’s '
+        || 'record, and it is stated as such rather than reported as staleness.',
+        ${o}.plate, ${GAP_SAY('named.ever_gap')}, ${STALE_CAP_MIN}, ${STALE_CAP_MIN} + 480)
       ELSE format(
         'The operator’s last-Uber-trip rule can name nobody here either. The most recent '
-        || 'Uber trip on %s was %s’s and it ended %s before this journey began, on %s; the '
+        || 'Uber trip on %s ended %s before this journey began, on %s — %s; the '
         || 'car has had no Uber work since. The rule rests on the car being in service with '
         || 'one driver, and across a gap that long the car has left the Uber channel — so '
         || 'that trip records who USED TO drive this car, not who drove it that night. The '
@@ -474,8 +579,9 @@ export const attributionJoin = (o = 'o') => {
         || '(21.97 days) — the 99.9th percentile of this fleet’s own gap between '
         || 'consecutive Uber trips, above which the fleet’s own record says the car was not '
         || 'in normal service.',
-        ${o}.plate, named.ever_name, ${GAP_SAY('named.ever_gap')},
-        to_char(named.ever_at AT TIME ZONE 'Asia/Dubai', 'YYYY-MM-DD'), ${STALE_CAP_MIN})
+        ${o}.plate, ${GAP_SAY('named.ever_gap')},
+        to_char(named.ever_at AT TIME ZONE 'Asia/Dubai', 'YYYY-MM-DD'), ${EVER_WHOSE},
+        ${STALE_CAP_MIN})
     END`;
   /* What day-custody says about the person the rule just named. Stated on the
      row in all four of its states, because "the rule and the day rollup agree"
@@ -487,11 +593,46 @@ export const attributionJoin = (o = 'o') => {
         'No custody record exists for %s on %s, so nothing here corroborates or contradicts '
         || 'this name — the rule reached a person the day rollup could not.',
         ${o}.plate, ${DAYS})
+      /* THE CORROBORATING FIGURE ONLY WHERE IT WAS MEASURED.
+         ─────────────────────────────────────────────────────────────────────
+         THE DEFECT. This appended a fixed measurement — "Measured over 120
+         journeys the two disagree on 2, and both were read off a trip more
+         than six months old" — to EVERY disagreement. That measurement was
+         taken WITH the cap applied and reports ZERO in-cap disagreements, so
+         the sentence could only ever be printed on a row that falsifies it.
+         And in-cap disagreements are not exotic: the cust CTE is scoped to the
+         journey's own Dubai day(s) while the rule reaches back 21.97 days, so
+         they are the expected shape of the whole above-p98 band. Reproduced: a
+         name read off a 13-day-old trip, contradicted by the journey-day
+         custodian, printed directly beneath a sentence saying there are only
+         two such rows in the fleet and that both are over six months old — a
+         self-refuting reassurance next to a name.
+
+         So the figure is quoted only inside the band it was measured in, and
+         above the band the row states what is actually true of itself. */
       WHEN named.last_in_cust = 0 THEN format(
         'Day-custody DISAGREES: on %s the custody record names %s for this car. This row '
-        || 'follows the operator’s rule and the contradiction is stated rather than hidden. '
-        || 'Measured over 120 journeys the two disagree on 2, and both were read off a trip '
-        || 'more than six months old.', ${DAYS}, (SELECT string_agg(name, ', ' ORDER BY name) FROM cust))
+        || 'follows the operator’s rule and the contradiction is stated rather than hidden. %s',
+        ${DAYS}, (SELECT string_agg(name, ', ' ORDER BY name) FROM cust),
+        CASE WHEN named.last_gap <= ${FRESH_BAND_MIN} THEN
+          'Measured over 120 journeys the two disagree on 2, and both were read off a trip '
+          || 'more than six months old — this one rests on a trip inside the p98 band, where '
+          || 'that measurement found no disagreement at all.'
+        ELSE format(
+          'The measurement behind the cap does NOT cover this shape and must not be quoted '
+          || 'here: it counted disagreements at 0 of 120 under the cap, and this is one. What '
+          || 'is being compared is a name read off a trip %s old against a custody record for '
+          /* Worded around test/collector_invariants.test.mjs's bare-interval-keyword
+             rule, exactly as nearestJoin() below already is. That rule reads any
+             token followed by a bare unit and a comma, inside a template literal
+             containing SELECT, as a column aliased 'day' — a real syntax error it
+             cannot otherwise see. It cannot tell an English sentence inside
+             format() from a select list, and it is right to be blunt about it, so
+             the sentence carries no bare "day," rather than the check carrying an
+             exception. */
+          || 'the day the journey itself ran — and that custody record is the more recent of '
+          || 'the two.',
+          ${GAP_SAY('named.last_gap')}) END)
       WHEN named.custodians = 1 THEN format(
         'Day-custody agrees: the same person is the only custodian on record for %s on %s.',
         ${o}.plate, ${DAYS})
@@ -872,12 +1013,72 @@ LEFT JOIN LATERAL (
        AND t.platform IN ${PV}
        AND coalesce(btrim(t.driver_ext_id), '') <> ''
        AND coalesce(btrim(t.driver_name), '') <> ''
+       /* COMPLETED, AS AN ACTUAL PREDICATE RATHER THAN AS A COMMENT.
+          ───────────────────────────────────────────────────────────────────
+          THE DEFECT. The nine lines above argue at length that this CTE is
+          "completed only, as the bracket is" and the SQL implemented
+          't.ended_at IS NOT NULL' instead — which is precisely the proxy
+          COMPLETED()'s own header records as unsafe ("the 'arrived' side
+          happened to be safe by accident, because a cancelled ride carries no
+          ended_at"). Proved on PGlite against the shipped schema: one Uber row
+          on a plate with status='driver_rejected', requested 07:00, ended
+          07:30, and a journey at 08:00, came back tier='last_trip',
+          responsible='Recent Rejected', gap 30, and the evidence read "The
+          last Uber trip on P002 before this journey was Recent Rejected's,
+          ending 30 minutes earlier — it finished at 11:30." A ride the driver
+          REJECTED was printed as a trip they finished and the man was named
+          responsible for a journey. status='rider_cancelled' carrying an
+          ended_at behaved identically.
+
+          LATENT ON TODAY'S UBER DATA, LIVE ON THE DATA NEXT DOOR. On six
+          flagged plates every 'uber' row is either completed-with-an-end or
+          cancelled-with-no-end, so nothing fires today. But L63960 carries a
+          bolt/client_cancelled row WITH an ended_at, L78465 a
+          bolt/client_did_not_show row WITH an ended_at, and L46706 a
+          hotel/started row — and BRACKET_PLATFORMS' own header calls widening
+          this list "a ONE-LINE change to this constant", with the channel
+          fallback the first open question with the operator. The moment that
+          answer is yes, the rule starts naming people off a
+          client_did_not_show while the bracket three CTEs above goes on
+          refusing the same row: the two surfaces disagreeing about what a trip
+          is, which is the one thing COMPLETED() exists to prevent.
+
+          The module header's own instruction, now honoured: a cancelled ride
+          "must be timestamped on requested_at and the sentence must say 'a
+          ride that was cancelled, requested 3 minutes before' rather than
+          'their trip ended 3 minutes before' — a different and weaker claim
+          that must not be printed as the stronger one." Until the operator
+          answers, the weaker claim is not printed at all. */
+       AND ${COMPLETED('t')}
        AND t.ended_at IS NOT NULL
        AND t.ended_at <= ${o}.started_at
        AND t.ended_at >= ${o}.started_at - interval '${STALE_CAP_MIN} minutes'
-       AND t.requested_at <= ${o}.started_at
-       AND t.requested_at >= ${o}.started_at
-                             - interval '${STALE_CAP_MIN} minutes' - interval '8 hours'
+       /* THE INDEX BOUND, AND WHY IT NO LONGER DROPS A FRESH TRIP.
+          ───────────────────────────────────────────────────────────────────
+          THE DEFECT, REPRODUCED. trip.requested_at is NULLABLE
+          (sql/schema.sql:55) and src/sources/uber.js:192 writes NULL whenever
+          Uber's CSV omits 'Trip request time'. This clause used to read
+          't.requested_at <= o.started_at AND t.requested_at >= …', and a NULL
+          makes BOTH predicates NULL — so a completed Uber trip that ended 44
+          minutes before the journey was dropped from this CTE while the 'ever'
+          CTE below, which had no requested_at predicate at all, kept the very
+          same row. The two CTEs then disagreed about one trip and every
+          sentence downstream was built on 'ever' having decided the trail was
+          stale: the row came back tier='unknown', responsible="Nobody — the
+          trail is too old.", and last_uber_driver.means said "44 minutes
+          before this journey. That is beyond the 31631-minute cap." 44 is not
+          beyond 31,631. The operator's rule should have returned last_trip,
+          gap 44 — the exact row they asked for.
+
+          The upper bound is deleted outright: it is implied by
+          'ended_at <= o.started_at' on any row whose request precedes its own
+          end. The lower bound stays, because it is what keeps this scan on
+          trip_plate_requested_idx, and it is NULL-tolerant now — a row with no
+          request time costs one extra heap fetch and can no longer cost
+          somebody a name. */
+       AND (t.requested_at IS NULL
+            OR t.requested_at >= ${o}.started_at
+                                 - interval '${STALE_CAP_MIN} minutes' - interval '8 hours')
   ),
   last_at AS (SELECT max(ended_at) AS at FROM last_near),
   last_ppl AS (
@@ -898,16 +1099,35 @@ LEFT JOIN LATERAL (
      WHERE ended_at = (SELECT at FROM last_at)
      ORDER BY pkey, ended_at DESC
   ),
-  ever AS (
-    /* The last completed Uber trip on this car before the journey AT ANY AGE,
-       so that a row the cap refused can say WHOSE trip it refused and how old
-       it was. This is the only lookback in the module with no time bound, and
-       it rides trip_plate_idx exactly as the day_bookings probe below already
-       does — one plate's trips, not a table scan. It is CONTEXT and never a
-       candidate; nothing here reaches 'candidates' or 'candidate_keys'. */
-    SELECT ${personKeyStored('t')} AS pkey, t.driver_name AS name, t.driver_ext_id AS id,
-           t.ended_at,
-           round(extract(epoch FROM (${o}.started_at - t.ended_at)) / 60)::int AS gap_min
+  /* THE LAST COMPLETED UBER TRIP AT ANY AGE — THE INSTANT, THEN THE PEOPLE.
+     ───────────────────────────────────────────────────────────────────────
+     This exists so that a row the cap refused can say WHOSE trip it refused
+     and how old it was. It is CONTEXT and never a candidate; nothing here
+     reaches 'candidates' or 'candidate_keys'.
+
+     IT IS EXACTLY last_near's PREDICATE SET MINUS THE CAP, and that is now a
+     requirement rather than a coincidence. THE DEFECT it closes: the two CTEs
+     used to differ in two further ways — 'ever' had no requested_at bound and
+     no COMPLETED() guard — so a trip could be dropped by last_near, found by
+     'ever', and then reported as "too old" when it was forty-four minutes old.
+     Every sentence that contrasts the two is a statement about AGE, so age has
+     to be the ONLY thing that differs between them.
+
+     THE TIE IS DETECTED RATHER THAN BROKEN BY THE PLANNER. This was
+     'ORDER BY t.ended_at DESC LIMIT 1', which on two different drivers ending
+     at the same instant returns whichever row the scan produced first and can
+     change with a plan change, a VACUUM or parallelism. Proved on PGlite: two
+     Uber trips on one plate both ending 2026-01-01T08:00Z, by 'Aaa Driver' and
+     'Bbb Driver', printed "The most recent Uber trip on P6 was Aaa Driver's"
+     and 'Bbb Driver' appeared nowhere on the row. This module's own header
+     condemns that exact shape for the last-trip tier — "a DISTINCT ON
+     (ended_at) with a LIMIT 1 … would have made the tie a coin flip resolved
+     by the planner's row order, which reads to an operator as a finding" —
+     builds last_ppl to refuse it, and then reintroduced it two CTEs later on a
+     field that also prints a human being's name. So this mirrors last_ppl: the
+     instant first, then everyone who finished at it, folded to a human. */
+  ever_at AS (
+    SELECT max(t.ended_at) AS at
       FROM trip t
      WHERE t.plate = ${o}.plate
        AND t.platform IN ${PV}
@@ -915,9 +1135,60 @@ LEFT JOIN LATERAL (
        /* This row is quoted BY NAME in the sentence that explains a refused
           name. A nameless one would print 'last Uber driver of record: ,'. */
        AND coalesce(btrim(t.driver_name), '') <> ''
+       AND ${COMPLETED('t')}
        AND t.ended_at IS NOT NULL
        AND t.ended_at <= ${o}.started_at
-     ORDER BY t.ended_at DESC
+  ),
+  ever AS (
+    SELECT DISTINCT ON (${personKeyStored('t')})
+           ${personKeyStored('t')} AS pkey, t.driver_name AS name, t.driver_ext_id AS id,
+           t.ended_at,
+           round(extract(epoch FROM (${o}.started_at - t.ended_at)) / 60)::int AS gap_min
+      FROM trip t
+     WHERE t.plate = ${o}.plate
+       AND t.platform IN ${PV}
+       AND coalesce(btrim(t.driver_ext_id), '') <> ''
+       AND coalesce(btrim(t.driver_name), '') <> ''
+       AND ${COMPLETED('t')}
+       AND t.ended_at IS NOT NULL
+       AND t.ended_at = (SELECT at FROM ever_at)
+     ORDER BY ${personKeyStored('t')}, t.driver_name
+  ),
+  /* A BOOKING ON ANOTHER CHANNEL, BY SOMEBODY ELSE, MORE RECENT THAN THE TRIP
+     THE RULE READ — OVER THE WHOLE GAP THE RULE IS ALLOWED TO REACH ACROSS.
+     ───────────────────────────────────────────────────────────────────────
+     THE DEFECT, REPRODUCED WITH A MATCHED PAIR. This probe used to be
+     evaluated over the 'others' CTE, whose lower bound is the bracket's —
+     about twenty hours before the journey. STALE_CAP_MIN lets the rule name
+     somebody off a trip up to 21.97 days old, so the probe was 26x narrower
+     than the claim it qualifies and on the whole above-p98 band a contradicting
+     booking was structurally unreachable. Two identical segments, each named
+     off a 13-day-old Uber trip by 'Old Uber Driver', each with one hotel
+     booking by a DIFFERENT person: the one whose hotel booking was 6 hours
+     before the journey disclosed it; the one whose hotel booking was 5 DAYS
+     before — still eight days more recent than the trip the rule read — was
+     silent and printed the name with no mention that somebody else
+     demonstrably had the car. Identical structure, identical contradiction,
+     disclosed in one case and suppressed in the other purely because of a scan
+     bound. The clause's own comment says withholding it "would be the product
+     choosing which evidence to report"; the query could not see it.
+
+     It needs no lower bound of its own: '> the last Uber trip's instant' IS
+     the bound, and that instant is by construction inside the cap. One plate,
+     one index scan, exactly the reach of the claim it qualifies. */
+  later_other AS (
+    SELECT t.driver_name AS name, t.platform,
+           coalesce(t.ended_at, t.requested_at) AS at,
+           round(extract(epoch FROM (${o}.started_at
+             - coalesce(t.ended_at, t.requested_at))) / 60)::int AS gap_min
+      FROM trip t
+     WHERE t.plate = ${o}.plate
+       AND t.platform NOT IN ${PV}
+       AND coalesce(btrim(t.driver_name), '') <> ''
+       AND coalesce(t.ended_at, t.requested_at) <= ${o}.started_at
+       AND coalesce(t.ended_at, t.requested_at) > (SELECT at FROM last_at)
+       AND ${personKeyStored('t')} NOT IN (SELECT pkey FROM last_ppl)
+     ORDER BY coalesce(t.ended_at, t.requested_at) DESC
      LIMIT 1
   ),
   hist AS (
@@ -932,17 +1203,77 @@ LEFT JOIN LATERAL (
        491 hotel trips in 11.5 months". That is strong enough to act on and it
        is not the same statement, so the sentence says what was checked. */
     SELECT count(*) FILTER (WHERE t.platform IN ${PV})::int AS uber_trips,
-           /* Prior Uber trips this car HAS that the rule cannot read because
-              nobody is named on them. Without this the row fell through to the
-              'every earlier ride was CANCELLED' sentence, which is a different
-              reason and a false one — the house rule is the TRUE reason, never
-              a plausible one. */
+           /* WHY EVERY "PRIOR" TEST HERE IS ON coalesce(requested_at, ended_at).
+              ─────────────────────────────────────────────────────────────────
+              THE DEFECT, REPRODUCED. These read t.requested_at alone, which is
+              NULLABLE (sql/schema.sql:55) and which src/sources/uber.js:192
+              writes as NULL whenever Uber's CSV omits 'Trip request time'. A
+              NULL fails 'requested_at <= started_at', so uber_prior came back
+              0 on a plate whose ONLY Uber trip ended 44 minutes before the
+              journey; uber_first_at was min() over the same NULL and was
+              itself NULL; and WHY_NO_LAST's uber_prior = 0 branch rendered it
+              through to_char() — which Postgres format() prints as an EMPTY
+              STRING rather than failing, a trap this file's own ROSTER_CLAUSE
+              records having been bitten by once. The row read: "P2 HAS Uber
+              history, but none of it predates this journey — the first Uber
+              trip on this car was . Nobody can be named from a trip that had
+              not happened yet." Two falsehoods and a typographical hole in one
+              sentence, about a trip that predated the journey by 44 minutes
+              and that an operator opening the car's trip list would find.
+
+              coalesce(requested_at, ended_at) counts and dates a row that
+              carries only an end, which is exactly the row the rule reads. */
            count(*) FILTER (WHERE t.platform IN ${PV}
-                              AND t.requested_at <= ${o}.started_at
+                              AND coalesce(t.requested_at, t.ended_at) <= ${o}.started_at
                               AND coalesce(btrim(t.driver_name), '') = '')::int AS uber_nameless,
+           /* THE TWO OTHER WAYS A PRIOR UBER TRIP CAN BE UNREADABLE, counted
+              separately rather than inferred from an equality.
+              ─────────────────────────────────────────────────────────────
+              THE DEFECT. WHY_NO_LAST's branch order tested
+              'uber_prior = uber_nameless' (ALL prior trips nameless) before
+              'ever_gap IS NULL' (read as: all prior trips cancelled). A plate
+              carrying BOTH nameless-and-completed trips AND a named-but-
+              cancelled one satisfies neither premise, fell through to the
+              cancellation branch, and asserted a cause the query had never
+              measured. Reproduced: three prior trips on P7, two completed with
+              an id and an empty name, one named 'Cancelled Guy' with status
+              rider_cancelled — the row read "every earlier Uber ride on P7 was
+              CANCELLED and carries no end time" when two of the three
+              completed normally and are merely anonymous in OUR record. It
+              blamed Uber's cancellations for a gap that is in our ingestion,
+              and it raised the operator's open cancellation question about the
+              wrong car. Each cause is counted on its own now, and the
+              single-cause sentences survive only where the other counts are
+              zero — the house rule is the TRUE reason, never a plausible one. */
            count(*) FILTER (WHERE t.platform IN ${PV}
-                              AND t.requested_at <= ${o}.started_at)::int AS uber_prior,
-           min(t.requested_at) FILTER (WHERE t.platform IN ${PV}) AS uber_first_at,
+                              AND coalesce(t.requested_at, t.ended_at) <= ${o}.started_at
+                              AND coalesce(btrim(t.driver_name), '') <> ''
+                              AND NOT ${COMPLETED('t')})::int AS uber_uncompleted,
+           count(*) FILTER (WHERE t.platform IN ${PV}
+                              AND coalesce(t.requested_at, t.ended_at) <= ${o}.started_at
+                              AND coalesce(btrim(t.driver_name), '') <> ''
+                              AND ${COMPLETED('t')}
+                              AND t.ended_at IS NULL)::int AS uber_noend,
+           /* AND THE FOURTH SHAPE, which is the one that makes "every one of
+              them" a claim rather than a summary. A named, completed trip
+              REQUESTED before the journey and still running when it began is
+              counted in uber_prior and is in none of the three sets above — so
+              a sentence that says "P has N Uber trips before this journey and
+              every one of them is filed without a driver name" could be
+              stating N when only some of the N are nameless. The branch
+              conditions below now require a cause to account for ALL of
+              uber_prior before they claim "every one", and this count is what
+              the enumerated sentence uses for the remainder. */
+           count(*) FILTER (WHERE t.platform IN ${PV}
+                              AND coalesce(t.requested_at, t.ended_at) <= ${o}.started_at
+                              AND coalesce(btrim(t.driver_name), '') <> ''
+                              AND ${COMPLETED('t')}
+                              AND t.ended_at > ${o}.started_at)::int AS uber_running,
+           count(*) FILTER (WHERE t.platform IN ${PV}
+                              AND coalesce(t.requested_at, t.ended_at)
+                                    <= ${o}.started_at)::int AS uber_prior,
+           min(coalesce(t.requested_at, t.ended_at))
+             FILTER (WHERE t.platform IN ${PV}) AS uber_first_at,
            count(*) FILTER (WHERE t.platform NOT IN ${PV})::int AS other_trips,
            count(DISTINCT ${personKeyStored('t')})
              FILTER (WHERE t.platform NOT IN ${PV})::int AS other_people
@@ -1037,21 +1368,26 @@ LEFT JOIN LATERAL (
               situation (see 'others'); the rule cannot, without overruling the
               operator. So it is STATED on the row instead of being silently
               absent, which is the same treatment the disagreement with
-              day-custody already gets. */
+              day-custody already gets.
+
+              It is read off its OWN CTE now rather than off the bracket's
+              'others' set, whose twenty-hour floor made it blind across most
+              of the range the rule may reach. See later_other above. */
            (SELECT jsonb_build_object('name', x.name, 'platform', x.platform,
-                     'at', coalesce(x.ended_at, x.requested_at),
-                     'gap_min', round(extract(epoch FROM (${o}.started_at
-                                 - coalesce(x.ended_at, x.requested_at))) / 60)::int)
-              FROM others x
-             WHERE x.platform NOT IN ${PV}
-               AND coalesce(x.ended_at, x.requested_at) <= ${o}.started_at
-               AND coalesce(x.ended_at, x.requested_at) > (SELECT at FROM last_at)
-               AND x.pkey NOT IN (SELECT pkey FROM last_ppl)
-             ORDER BY coalesce(x.ended_at, x.requested_at) DESC LIMIT 1) AS later_other,
-           (SELECT gap_min  FROM ever) AS ever_gap,
-           (SELECT name     FROM ever) AS ever_name,
-           (SELECT ended_at FROM ever) AS ever_at,
+                     'at', x.at, 'gap_min', x.gap_min)
+              FROM later_other x) AS later_other,
+           (SELECT gap_min  FROM ever LIMIT 1) AS ever_gap,
+           /* ONE NAME ONLY WHERE THERE IS ONE. Where two drivers' trips tie at
+              the last instant there is no single "last Uber driver of record",
+              and the sentence must say so rather than print whichever the
+              planner returned first. ever_names carries every tied name in
+              name order for that sentence. */
+           (SELECT CASE WHEN count(*) = 1 THEN min(name) END FROM ever) AS ever_name,
+           (SELECT string_agg(name, ', ' ORDER BY name) FROM ever)      AS ever_names,
+           (SELECT count(*) FROM ever)::int                             AS ever_people,
+           (SELECT at FROM ever_at) AS ever_at,
            hist.uber_trips, hist.uber_prior, hist.uber_first_at, hist.uber_nameless,
+           hist.uber_uncompleted, hist.uber_noend, hist.uber_running,
            hist.other_trips, hist.other_people,
            /* The channel this car actually runs on, for the sentence that has
               to say "this car does not run on Uber" without guessing which
@@ -1149,6 +1485,55 @@ LEFT JOIN LATERAL (
            END AS tier,
            (tally.skew IS NULL AND tally.brackets <> 1
               AND tally.last_people > 1) AS last_tie,
+           /* WHY THE OPERATOR'S RULE NAMED NOBODY — ONE TOKEN, READ TWICE.
+              ─────────────────────────────────────────────────────────────
+              THE DEFECT THIS EXISTS FOR, REPRODUCED TWICE. WHY_NO_LAST has six
+              distinct, correctly-ordered branches for the six ways the rule can
+              reach nobody. 'responsible' — the ONE short string every shell
+              prints in its responsible-person column — had a single branch,
+              gated on 'last_people = 0 AND ever_gap IS NOT NULL', which tests
+              neither the cap nor the skew and therefore asserted AGE as the
+              reason for the absence whenever last_near came back empty for ANY
+              reason. (a) On a plate whose fresh trip carried a NULL
+              requested_at the trail was 44 minutes old and the column said
+              "Nobody — the trail is too old." (b) On a segment whose tracker is
+              2,339 minutes behind, the evidence sentence correctly blamed the
+              clock while the column beside it blamed the age — two different
+              reasons for one absence, on one row, and the one a page prints is
+              not the one the row's own evidence gives. A reader acting on the
+              column concludes the car left the Uber channel when the finding is
+              a broken tracker that needs fixing.
+
+              The cure is structural rather than a second copy of the branch
+              order: the reason is decided ONCE, here, as a token, and both the
+              sentence and the column switch on that token. They can no longer
+              come to state different reasons, and the test asserts they agree
+              on every absence shape in the fixture.
+
+              ORDER MATTERS AND IS THE SAME ORDER AS BEFORE. A car with no Uber
+              history at all must not be reported as a car whose Uber history is
+              stale; a clock nobody can trust must not be reported as either.
+              'stale' now tests the cap it names — it read 'ever_gap IS NOT
+              NULL', which is true of a prior Uber trip at ANY age.
+              'lookback_floor' is the residual the cap sentence used to swallow:
+              a trip inside the cap on ended_at whose requested_at is outside
+              last_near's index floor. That needs an Uber row spanning more than
+              eight hours from request to end — sampled on six flagged plates
+              the longest is 1.88 h, zero over 8 h, so it is latent — and it
+              gets its own sentence naming the floor rather than a cap sentence
+              that would contradict its own two numbers. */
+           CASE
+             WHEN tally.skew IS NOT NULL                       THEN 'skew'
+             WHEN tally.uber_trips = 0 AND tally.other_trips = 0 THEN 'no_bookings'
+             WHEN tally.uber_trips = 0                         THEN 'wrong_channel'
+             WHEN tally.uber_prior = 0 AND tally.uber_first_at IS NOT NULL THEN 'no_prior'
+             WHEN tally.uber_prior = 0                         THEN 'undateable'
+             WHEN tally.ever_gap > ${STALE_CAP_MIN}            THEN 'stale'
+             WHEN tally.ever_gap IS NOT NULL                   THEN 'lookback_floor'
+             WHEN tally.uber_nameless = tally.uber_prior      THEN 'nameless'
+             WHEN tally.uber_uncompleted = tally.uber_prior    THEN 'uncompleted'
+             ELSE 'mixed_unreadable'
+           END AS no_last_reason,
            tally.*
       FROM tally
   )
@@ -1241,22 +1626,39 @@ LEFT JOIN LATERAL (
        operator's own words for its absence. Emitted here rather than left to
        each shell so that two pages cannot word the same absence differently —
        the defect api/status_routes.js was rewritten to stop. It is the name
-       only where the ladder reached exactly one person; where the cap refused
-       a name it is "Nobody — the trail is too old." and the name that was
+       only where the ladder reached exactly one person; where the rule reached
+       nobody it is one short phrase naming THE TRUE CAUSE, and the name the cap
        refused is returned under its own key, never here. NULL everywhere else,
        so a shell falls back to its own rendering of the candidate list rather
-       than to a phrase this file invented for it. */
+       than to a phrase this file invented for it.
+
+       EVERY ABSENCE PHRASE HERE SWITCHES ON THE SAME TOKEN THE EVIDENCE
+       SENTENCE DOES. It used to be one branch gated on
+       'last_people = 0 AND ever_gap IS NOT NULL', which tests neither the cap
+       nor the clock and therefore asserted AGE as the reason whenever the rule
+       came back empty for ANY reason — so a 44-minute-old trail and a tracker
+       2,339 minutes out of true both printed "Nobody — the trail is too old."
+       beside an evidence sentence giving a different reason. See
+       named.no_last_reason for the two rows that proved it. The phrases below
+       are deliberately shorter than the sentences: this is a table column, and
+       a column that cannot fit the reason must still not print the wrong one. */
     CASE
-      WHEN named.tier IN ('bracketed', 'last_trip', 'sole_custodian')
-        AND NOT named.last_tie THEN (
-          SELECT c.name FROM jsonb_to_recordset(
-            CASE named.tier
-              WHEN 'bracketed' THEN (SELECT jsonb_agg(jsonb_build_object('name', name)) FROM bracket)
-              WHEN 'last_trip' THEN (SELECT jsonb_agg(jsonb_build_object('name', name)) FROM last_ppl)
-              ELSE (SELECT jsonb_agg(jsonb_build_object('name', name)) FROM cust)
-            END) AS c(name text) LIMIT 1)
-      WHEN named.tier = 'unknown' AND named.last_people = 0 AND named.ever_gap IS NOT NULL
-        THEN 'Nobody — the trail is too old.'
+      WHEN named.tier = 'bracketed'      THEN (SELECT name FROM bracket LIMIT 1)
+      WHEN named.tier = 'last_trip'      THEN (SELECT name FROM last_ppl LIMIT 1)
+      WHEN named.tier = 'sole_custodian' THEN (SELECT name FROM cust LIMIT 1)
+      WHEN named.tier = 'unknown' AND named.last_people = 0 THEN
+        CASE named.no_last_reason
+          WHEN 'stale'            THEN 'Nobody — the trail is too old.'
+          WHEN 'skew'             THEN 'Nobody — this car’s clock is untrustworthy.'
+          WHEN 'wrong_channel'    THEN 'Nobody — this car does not run on Uber.'
+          WHEN 'no_bookings'      THEN 'Nobody — no booking of any kind names a driver here.'
+          WHEN 'no_prior'         THEN 'Nobody — this car’s Uber history starts after the journey.'
+          WHEN 'undateable'       THEN 'Nobody — this car’s Uber trips carry no usable time.'
+          WHEN 'nameless'         THEN 'Nobody — the earlier Uber trips name no driver.'
+          WHEN 'uncompleted'      THEN 'Nobody — no earlier Uber ride on this car was completed.'
+          WHEN 'mixed_unreadable' THEN 'Nobody — no earlier Uber trip here is both named and completed.'
+          WHEN 'lookback_floor'   THEN 'Nobody — this query’s lookback, not the car’s record.'
+        END
     END AS responsible,
     /* THE NAME THE CAP REFUSED, under its own key and with its own sentence.
        ───────────────────────────────────────────────────────────────────────
@@ -1271,20 +1673,83 @@ LEFT JOIN LATERAL (
        of the 21 people the rule names who is not currently working, and is
        named off a channel that car stopped using a year ago. Three independent
        signals say that name is worthless; it is still returned, because an
-       operator ringing round wants to know it exists. */
+       operator ringing round wants to know it exists.
+
+       TWO THINGS ABOUT THE SENTENCE WERE FALSE ON ROWS IT WAS PRINTED ON.
+
+       (a) IT CLAIMED THE CAP DECIDED, ON ROWS WHERE THE CAP WAS NEVER ASKED.
+           The gate was 'last_people = 0 AND ever_gap IS NOT NULL' — true of a
+           prior Uber trip at ANY age — so a trip 21.5 days old printed "21.5
+           days before this journey. That is beyond the 31631-minute cap (21.97
+           days)", a clause contradicting its own two numbers, and a
+           clock-skewed row asserted the cap while its evidence blamed the
+           tracker. It is gated on no_last_reason = 'stale' now, which is the
+           one state in which the cap is what refused the name.
+
+       (b) IT CLAIMED THE JOURNEY WAS FILED AGAINST NOBODY, WHICH IS A CLAIM
+           ABOUT THE JOURNEY AND NOT ABOUT THIS NAME. The CASE is not gated on
+           the tier, so on a sole_custodian or an ambiguous row — where
+           candidate_keys is non-empty and /api/driver/unauthorized matches on
+           'att.candidate_keys && me' and increments that person's 'Named
+           beside' tile — the response asserted, on the same row, that the
+           journey is attributed to nobody. Reproduced: tier='sole_custodian',
+           responsible='Sole Custodian', candidate_keys=['sole custodian'], and
+           "this journey is filed against nobody's profile anywhere in the
+           product" underneath it. A manager reads a journey the product says is
+           attributed to nobody while the same journey sits in that employee's
+           own count. The first half of the clause is true of this field on
+           every row and stays unconditional; the second half now says what is
+           true of the row it is printed on.
+
+       THE FIELD ITSELF IS STILL EMITTED ON EVERY ROW WHERE A REFUSED NAME
+       EXISTS — including the custody tiers. An over-strong claim is fixed by
+       weakening the sentence, never by hiding the row. */
     CASE WHEN named.last_people = 0 AND named.ever_gap IS NOT NULL THEN
       (SELECT jsonb_build_object(
-         'name', e.name, 'id', e.id, 'key', e.pkey,
+         'name',     CASE WHEN named.ever_people = 1 THEN e.name END,
+         'id',       CASE WHEN named.ever_people = 1 THEN e.id   END,
+         'key',      CASE WHEN named.ever_people = 1 THEN e.pkey END,
+         'names',    named.ever_names,
+         'person_count', named.ever_people,
          'ended_at', e.ended_at, 'gap_min', e.gap_min,
          'means', format(
            'Context, not a candidate — last Uber driver of record: %s, trip ended %s, %s '
-           || 'before this journey. That is beyond the %s-minute cap (21.97 days), which is '
-           || 'the 99.9th percentile of this fleet’s own gap between consecutive Uber trips, '
-           || 'so this name is deliberately absent from the candidate list and this journey '
-           || 'is filed against nobody’s profile anywhere in the product.',
-           e.name, to_char(e.ended_at AT TIME ZONE 'Asia/Dubai', 'YYYY-MM-DD HH24:MI'),
-           ${GAP_SAY('e.gap_min')}, ${STALE_CAP_MIN}))
-         FROM ever e)
+           || 'before this journey. %s This name is deliberately absent from the candidate '
+           || 'list. %s',
+           CASE WHEN named.ever_people = 1 THEN e.name
+                ELSE format('NO SINGLE NAME — %s drivers’ trips on this car (%s) ended at the '
+                            || 'very same instant, so there is no last driver of record and '
+                            || 'this product will not nominate one of them',
+                            named.ever_people, named.ever_names) END,
+           to_char(e.ended_at AT TIME ZONE 'Asia/Dubai', 'YYYY-MM-DD HH24:MI'),
+           ${GAP_SAY('e.gap_min')},
+           /* WHY THIS NAME IS NOT A CANDIDATE — THE REASON THIS ROW ACTUALLY
+              HIT, not the cap on every row. */
+           CASE named.no_last_reason
+             WHEN 'stale' THEN format(
+               'That is beyond the %s-minute cap (21.97 days), which is the 99.9th percentile '
+               || 'of this fleet’s own gap between consecutive Uber trips.', ${STALE_CAP_MIN})
+             WHEN 'skew' THEN format(
+               'The AGE is not what refused it: this trip is inside the %s-minute cap. The '
+               || 'operator’s rule is one clock comparison and this car’s tracker reports a '
+               || 'clock %s minutes behind wall time, so the comparison cannot be made at all.',
+               ${STALE_CAP_MIN}, named.skew)
+             ELSE format(
+               'The AGE is not what refused it: this trip is inside the %s-minute cap. It was '
+               || 'REQUESTED before the lookback floor this rule scans on, which is a limit in '
+               || 'the query rather than a fact about the car.', ${STALE_CAP_MIN})
+           END,
+           /* WHETHER THE JOURNEY IS ATTRIBUTED — A CLAIM ABOUT THE ROW, NOT
+              ABOUT THIS NAME, AND THEREFORE TESTED ON THE ROW. */
+           CASE WHEN named.tier = 'unknown'
+             THEN 'This journey is filed against nobody’s profile anywhere in the product.'
+             ELSE format('This journey is NOT unattributed, though: the ladder reached %s on '
+               || 'other evidence and that is whose profile it is filed against. The name '
+               || 'above played no part in that and is shown only so an operator ringing round '
+               || 'knows it exists.',
+               coalesce((SELECT string_agg(name, ', ' ORDER BY name) FROM cust),
+                        'somebody else')) END))
+         FROM ever e LIMIT 1)
     END AS last_uber_driver,
     /* THE EVIDENCE, AS A SENTENCE SOMEBODY CAN GO AND CHECK.
        "Bracketed" is not checkable; "their trip ended 34 minutes before and
@@ -1309,11 +1774,43 @@ LEFT JOIN LATERAL (
         || 'would otherwise bracket the person who handed it on. The two bracket SIDES are '
         || 'Uber, as the operator asked, and both gaps are within %s minutes. '
         || 'This is stronger evidence than the '
-        || 'operator’s last-trip rule, which reads only the trip BEFORE, so it is reported '
-        || 'as a bracket even though the last-trip rule would name the same person.',
+        || 'operator’s last-trip rule, which reads only the trip BEFORE. %s',
         (SELECT name FROM bracket LIMIT 1), ${o}.plate,
         (SELECT before_min FROM bracket LIMIT 1), (SELECT after_min FROM bracket LIMIT 1),
-        ${BRACKET_CAP_MIN})
+        ${BRACKET_CAP_MIN},
+        /* A COUNTERFACTUAL THE QUERY HAS TO EVALUATE BEFORE IT ASSERTS IT.
+           ─────────────────────────────────────────────────────────────────
+           THE DEFECT. This sentence closed, unconditionally, with "so it is
+           reported as a bracket even though the last-trip rule would name the
+           same person" — a claim about what a DIFFERENT rule would say,
+           asserted as fact in the one sentence a reader is told to go and
+           check. The module header argues it can never be false ("The two can
+           never name different people"), and on a TIE it is: the bracket's
+           exclusion tests coalesce(x.ended_at, x.requested_at) > b.ended_at,
+           STRICTLY greater, so a second driver whose trip ends at the SAME
+           INSTANT as the bracketer's does not break the bracket, while last_ppl
+           keys on equality with the last instant and returns both. Reproduced:
+           Bracketer X ends 11:30 and resumes 12:50, Tie Y also ends 11:30,
+           journey 12:00-12:20 — tier bracketed, brackets 1, last_people 2. The
+           row told the reader the weaker rule agreed while the weaker rule, on
+           that identical before-side data, refused to answer at all (the same
+           three rows minus X's resume come back ambiguous, two candidates,
+           "neither is chosen"). LATENT: 0 ties measured across 21,961 distinct
+           (plate, Uber ended_at) instants. It is fixed anyway, because this
+           file built a whole tie branch and a tie sentence on the principle
+           that a theoretical tie broken at random is still an accusation
+           chosen at random — and then asserted the same case away. */
+        CASE WHEN named.last_people = 1
+          THEN 'It is reported as a bracket even though the operator’s last-trip rule, run '
+               || 'on the same car, names the same person.'
+          WHEN named.last_people > 1
+          THEN format('The operator’s last-trip rule does NOT separate these two on its own: '
+               || '%s drivers’ Uber trips on this car ended at the very same instant (%s), so '
+               || 'run alone that rule would list them and choose neither. It is the trip on '
+               || 'the FAR side of the journey that narrows it to one here.',
+               named.last_people, (SELECT string_agg(name, ', ' ORDER BY name) FROM last_ppl))
+          ELSE 'The operator’s last-trip rule reaches nobody on this row at all, so the '
+               || 'bracket is the only evidence naming anybody here.' END)
       WHEN 'last_trip' THEN
         CASE WHEN named.last_gap <= ${FRESH_BAND_MIN} THEN format(
           'The last Uber trip on %s before this journey was %s’s, ending %s earlier — it '
@@ -1459,9 +1956,30 @@ LEFT JOIN LATERAL (
       SELECT e.status, e.at
         FROM driver_status_event e
        WHERE e.at <= ${o}.started_at
+         /* SARGABLE, so this rides trip_person_key_idx instead of scanning.
+            ──────────────────────────────────────────────────────────────────
+            THE DEFECT. This read
+            'coalesce(nullif(t3.person_key,''), t3.driver_ext_id) = c.key',
+            which is an expression over two columns and therefore matches no
+            index at all: sql/schema_v20.sql's trip_person_key_idx is on
+            trip(person_key) and cannot serve a coalesce() wrapped round it. So
+            it was a sequential scan of trip — 175,000 rows on production — once
+            per named candidate per segment, inside a lateral that already runs
+            once per segment, in a query materialised three times per request.
+            And the operator's rule is expected to raise the number of segments
+            carrying a candidate from roughly 61 to roughly 94, so that cost
+            grows by half at the moment the feature ships.
+
+            Split into its two arms, the first of which is a plain equality on
+            the indexed column. The second is the fallback personKeyStored()
+            exists for — a row the provider named without a usable person_key —
+            and is identical in meaning to the coalesce it replaces: reading
+            them side by side, person_key non-blank selects arm one and
+            person_key blank selects arm two, exactly as the coalesce did. */
          AND e.driver_ext_id IN (
            SELECT DISTINCT t3.driver_ext_id FROM trip t3
-            WHERE ${personKeyStored('t3')} = c.key
+            WHERE (t3.person_key = c.key
+                   OR (coalesce(btrim(t3.person_key), '') = '' AND t3.driver_ext_id = c.key))
               AND coalesce(btrim(t3.driver_ext_id), '') <> '')
        ORDER BY e.at DESC LIMIT 1) s ON true
 ) st ON true`;

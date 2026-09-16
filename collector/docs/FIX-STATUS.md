@@ -614,3 +614,118 @@ before the deploy). The screenshots come from `bin/prod-mirror.mjs` on :8200 —
 Chromium in this sandbox has no route to the internet, so a browser pointed at
 production returns `ERR_CONNECTION_RESET` and the mirror is what makes a real
 screenshot of production possible at all.
+
+## Unauthorized-trip attribution — the three-lens audit — WRITTEN AND TESTED, NOT DEPLOYED
+
+Three independent lenses (accusation safety, SQL correctness, integration and
+rendered pages) audited the attribution feature. What follows is what is now in
+the working tree. **None of it is on production** — the endpoints themselves
+have not been deployed yet — so every claim below is "proven against a real
+Postgres in `test/`" and "rendered in Chromium against `mockapi.mjs`", never
+"verified on production".
+
+**Accusation honesty, in `api/unauthorized_sql.js`.**
+
+* The `sole_custodian` and `ambiguous` evidence sentences no longer assert a
+  measurement the SQL never made. A new `gaps` CTE emits `nearest_before`,
+  `nearest_after`, how many people have each side, and how many have both, and
+  the sentence is built per cause — including the handover branch, where trips
+  sit either side and belong to DIFFERENT people, which is the strongest
+  available evidence that the car changed hands during the journey and which
+  the old fixed string flatly denied.
+* The bracket's exclusion runs over a new `others` CTE — every channel, no
+  driver-id requirement — and tests interval overlap rather than the
+  intervening booking's request instant. The evidence sentence states the scope
+  it actually checked.
+* `near`, `last_near` and `ever` require a non-blank `driver_name`; `near` is
+  completed-only, matching `src/reconcile.js` `findMatch`.
+* The clock-skew gate is derived per PLATE (a neighbouring `unverifiable`
+  segment, or three or more unauthorized segments whose `nearest_gap_min`
+  cluster within `RULES.matchToleranceMin`), because the row's own
+  `verdict_reason` can never carry it. `clock_skew_basis` travels on the row.
+* Custody ranges over both Dubai days a journey touches; unnamed custody
+  records are counted separately and block the `sole_custodian` rung.
+* A candidate the provider never numbered gets `'name:' || person_key` as its
+  id, so the link resolves.
+
+**Both halves of a response now describe one population, in
+`api/unauthorized_routes.js`.** `?fleet=` is bound to the driver endpoint's
+rows as well as to its coverage note and its AED/km; `?verdict=` is validated
+against the reconciler's own vocabulary and an unrecognised value is reported
+rather than served as a clean page; coverage on a driver route is counted over
+the cars that person held, not fleet-wide; the two per-person totals are
+counted over the window rather than measured off a 400-row cap.
+
+**`/api/unauthorized/list` folds on the person** (`custodyRefs`/`custodyNames`),
+so the three shells that read it stop listing one man as two suspects.
+
+**The pages.** `#segments` and both driver tabs treat a 200 carrying the wrong
+body as a failure rather than as a measured emptiness — the three false
+exonerations this produced were reproduced in Chromium and are gone. The tier
+tone ramp is removed; the per-person table is four never-summed columns sorted
+by name with money only on the by-time rung; the segment page carries the tier
+and the evidence sentence above its custody line; the driver page no longer
+prints the nearest booking's driver name beside a candidate list; the rung is
+on screen on both tabs rather than in a tooltip; the revenue tile states its
+split. `mockapi.mjs` has fixtures for both endpoints, one row per rung.
+
+**Proof.** `test/unauthorized_attribution.test.mjs` is 160 assertions; each
+accusation-honesty fix carries the reversion that fails it, and eight of them
+were run. `test/unauthorized_attribution_page.test.mjs` is 26, including the
+tone ramp and the withheld name, both proved by reversion.
+
+---
+
+## A money figure nobody measured, drawn as AED 0 (driver Earnings, Finance)
+
+**Status: WRITTEN and PROVEN in the working tree. NOT deployed, NOT verified on
+production.** The measurements that diagnosed it were taken read-only against
+production; nothing in this fix has been through a deployment.
+
+**What was wrong.** `api/public/driver.js` Cash collected tile read
+`v ? money(v) : (cashTrips ? 'not reported' : money(0))`. `cashTrips === 0` has
+two causes — the driver worked and took no cash (a real AED 0), and the driver
+did not work at all (nothing measured) — and the expression collapsed them. The
+same collapse sat on the Finance page at `api/public/app.js`'s
+"Cash collected — measured portion". Both are guardable on the window's own
+booking count, which each already had in scope.
+
+**What changed.** `api/public/driver.js` and `api/public/app.js` only.
+
+- Cash collected, both shells: absent with the WIDER reason where nothing was
+  measured; still `AED 0` where the population exists and settled no cash.
+- "What made up the pay": components carrying no amount are named in a sentence
+  instead of drawn as zero-length bars; components the platform published AT
+  nought are stated as a sentence that says the platform published them, which
+  is the one honest nought on that tab. The child table renders a null amount as
+  a dash and prunes the column when no child carries one.
+- The statement total: summed over the rows that carry `counted`, null where
+  none does; three branches for no statement / nothing resolved / a real total.
+  The Counted column no longer borrows the Statement column's number.
+- `startScatter()` null-tests before coercion, so thirteen unmeasured days stop
+  being plotted as a midnight shift pattern.
+- The distance-per-day chart gains the three-way treatment its sibling revenue
+  chart already had, and a caption.
+- "No cancellations on any of the 0 days this driver worked" gains a zero branch.
+- A standing sentence under the tab bar, from `emptyWindowNote()` in the shell,
+  with a different sentence for "no trip in this window" and "never had a trip"
+  and a per-tab tail. A third sentence — worked, and none of it carries money —
+  lives on the Earnings tab, which is the only place that can see it.
+- `api/public/app.js`: `componentTree()` tracks whether anything behind a
+  category was valued; the Finance ledger chart charts only valued categories;
+  the funnel's Platform commission tile is absent where no record reports one.
+
+**Proof.** `test/driver_empty_window_page.test.mjs`, 37 assertions in Chromium
+against the shipped modules with the production payloads as fixtures. Thirteen
+reversions were applied one at a time and each failed the assertions written
+beside it: the cash tile value, the cash tile reason, the measured-zero branch,
+the components chart, the counted reduce, the Counted column, the banner, the
+two-case split, the per-tab tail, the banner tone, `startScatter`'s filter, the
+distance chart, and the cancellations sentence — plus four on `app.js`.
+
+**Not done here.** The same defect class was swept and found at 20 further sites
+in files this task was not allowed to touch (`charts.js hbars()`/`barChart()`,
+`m/screens.js`, `vehicle.js`, `performance.js`, `economics.js`, `payouts.js`,
+`playbook.js`, `revenue.js`, `corridors`/`corporate.js`, `receipts.js`,
+`driverrecord.js`). `charts.js hbars()` is the shared root cause under most of
+the chart hits and is the single highest-value one left.

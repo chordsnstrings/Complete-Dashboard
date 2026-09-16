@@ -39,13 +39,42 @@
    test/person_key.test.mjs holds the two forms equal. */
 const PERSON_OF = (a) => `coalesce(nullif(${a}.person_key, ''), ${a}.driver_ext_id)`;
 
+/* A RECORD IS NOT A HUMAN, AND AN EMPTY NAME IS A RECORD.
+   ─────────────────────────────────────────────────────────────────────────
+   THE DEFECT. Every helper below filtered `driver_name IS NOT NULL` and none
+   of them excluded the EMPTY STRING, although sql/schema_v19.sql builds a
+   custody row whenever EITHER an id or a name is present
+   (`coalesce(btrim(driver_ext_id),'') <> '' OR coalesce(btrim(driver_name),'')
+   <> ''`, with `max(t.driver_name)` coming back '' rather than NULL wherever a
+   channel filed a blank). An empty name folds to person_key NULL, PERSON_OF
+   then falls back to the raw driver_ext_id, and the row is a DISTINCT person
+   as far as every expression here is concerned. So a plate-day held by one
+   real person plus one blank-named channel row rendered a leading empty name
+   in the custody cell — "  , Kashif Ali Muhammad Ali" — and counted two
+   custodians where the product can name one.
+
+   It changes a VERDICT next door rather than only a cell. api/unauthorized_sql.js
+   `cust` closed the same hole for the attribution ladder, where the custodian
+   count is what separates `sole_custodian` ("there is nobody else it could have
+   been") from `ambiguous`. Leaving these five on the looser predicate would
+   have left the vehicle page, the segment page and the day page counting a
+   plate-day's custodians one way while the accusation surface counted it
+   another — two numbers for one day, and the disagreement invisible.
+
+   All five helpers, not the two that render a list: the count beside a list has
+   to be a count OF that list, and a name this product cannot read is not a name
+   it can print. Where such a record exists, the honest statement is made where
+   it decides something — attributionJoin()'s `cust_any` counts them and says
+   how many custody records it cannot put a name to. */
+const NAMED = (a) => `coalesce(btrim(${a}.driver_name), '') <> ''`;
+
 /** Names, comma-joined, for the plate and day named by the caller's columns. */
 export const custodyNames = (plate, day) =>
   `(SELECT string_agg(nm, ', ' ORDER BY nm) FROM (
       SELECT DISTINCT ON (${PERSON_OF('v')}) v.driver_name AS nm
         FROM vehicle_driver_day v
        WHERE v.plate = ${plate} AND v.day = ${day}
-         AND v.driver_name IS NOT NULL
+         AND ${NAMED('v')}
        ORDER BY ${PERSON_OF('v')}, v.is_primary DESC, v.trips DESC) s)`;
 
 /** The same people as {name, id} pairs, so every one of them is clickable. */
@@ -54,7 +83,7 @@ export const custodyRefs = (plate, day) =>
       SELECT DISTINCT ON (${PERSON_OF('v')}) v.driver_name AS nm, v.driver_ext_id AS id
         FROM vehicle_driver_day v
        WHERE v.plate = ${plate} AND v.day = ${day}
-         AND v.driver_name IS NOT NULL
+         AND ${NAMED('v')}
        ORDER BY ${PERSON_OF('v')}, v.is_primary DESC, v.trips DESC) s)`;
 
 /* The custodian of a plate as of the most recent day we have custody for, for
@@ -67,7 +96,7 @@ export const custodyLatest = (plate) =>
   `(SELECT jsonb_build_object('name', v.driver_name, 'id', v.driver_ext_id,
                               'day', to_char(v.day, 'YYYY-MM-DD'))
       FROM vehicle_driver_day v
-     WHERE v.plate = ${plate} AND v.driver_name IS NOT NULL
+     WHERE v.plate = ${plate} AND ${NAMED('v')}
      ORDER BY v.day DESC, v.is_primary DESC, v.trips DESC LIMIT 1)`;
 
 /* Who held the vehicle across a WINDOW rather than on one day — for tables
@@ -87,7 +116,7 @@ export const custodyOverWindow = (plate, from = '$1', to = '$2') => `
               'days', count(DISTINCT v.day)::int) AS x
        FROM vehicle_driver_day v
       WHERE v.plate = ${plate} AND v.day BETWEEN ${from}::date AND ${to}::date
-        AND v.driver_name IS NOT NULL
+        AND ${NAMED('v')}
       GROUP BY ${PERSON_OF('v')}
       ORDER BY count(DISTINCT v.day) DESC, min(v.driver_name)
       LIMIT 3) s)`;
@@ -96,7 +125,7 @@ export const custodyCountOverWindow = (plate, from = '$1', to = '$2') => `
   (SELECT count(DISTINCT ${PERSON_OF('v')})::int
      FROM vehicle_driver_day v
     WHERE v.plate = ${plate} AND v.day BETWEEN ${from}::date AND ${to}::date
-      AND v.driver_name IS NOT NULL)`;
+      AND ${NAMED('v')})`;
 
 /* ── the mirror: what did this PERSON drive? ────────────────────────────
    The same dead end in the other direction. A licence expiring in six days is

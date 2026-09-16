@@ -99,4 +99,12 @@ export const SCHEMA_FILES = [
      the provider's own daily statement, which is what makes a transfer
      checkable rather than merely stated. */
   'schema_v71.sql',
+  /* One index. The operator's last-trip rule asks who ENDED the most recent
+     Uber trip on a car, and every index this table carries is keyed on
+     requested_at — so the rule, and the three per-plate history reads that
+     came with it, were scanning a 175,000-row table 360 times per request on a
+     basic-xxs box. See the file for why the alternative (bounding those reads
+     to a hard-coded date) was rejected as trading a performance fix for an
+     honesty one. */
+  'schema_v72.sql',
 ];

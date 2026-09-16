@@ -5509,6 +5509,255 @@ app.get('/api/unauthorized/list', (req, r) => {
   })));
 });
 
+/* ── who the evidence names, and why it is only ever an inference ─────────
+   THE DEFECT THIS FIXTURE ANSWERS. Neither /api/unauthorized/attributed nor
+   /api/driver/unauthorized had one, so both fell through to the catch-all at
+   the bottom of this file, which answers a bare `[]` where both routes answer
+   an OBJECT. `[]` is truthy, so every guard on both pages passed and the page
+   read `att.distribution` off an array: #segments rendered the headline "No
+   unexplained journey in this window to attribute" with the sub-line "Nothing
+   the seat sensor recorded in this window went unexplained", four screen
+   inches above its own tiles reading UNEXPLAINED 13 and a 13-row table of
+   off-book journeys — and the browser smoke run passed on all of it. Anyone
+   driving the mock, which is every rendering pass and every theme audit, saw a
+   fleet given a clean bill of health above a list of off-book journeys.
+
+   The pages now validate the body, so a wrong shape degrades honestly; this
+   fixture is the other half, and it seeds AT LEAST ONE ROW PER RUNG so the
+   ambiguous and unknown branches are exercised rather than only the happy one.
+
+   The tier is assigned by index rather than measured, because a mock is a
+   SHAPE and not a second implementation of the ladder — but the tier, the
+   candidate list, the candidate count and the evidence sentence are kept
+   CONSISTENT with each other, since a fixture whose row says `ambiguous` and
+   carries one candidate would green-light exactly the rendering bug the pages
+   were fixed for. */
+const AT_TIERS = ['bracketed', 'last_trip', 'sole_custodian', 'ambiguous', 'unknown'];
+const AT_MEANS = {
+  bracketed: 'Named by time. The same person’s Uber trip on this car ended shortly before '
+    + 'this journey began and their next began shortly after it ended, with no other driver’s '
+    + 'booking on the car in between. The strongest claim this product makes about an '
+    + 'unexplained journey — and still an inference, not a trip record.',
+  last_trip: 'The operator’s rule: usually one person drives a car, so whoever did the last '
+    + 'Uber trip on it is the one responsible. It is an inference from the car’s Uber record, '
+    + 'NOT a record of this journey — nothing places anyone behind the wheel while it was '
+    + 'happening.',
+  sole_custodian: 'One custodian. Exactly one person holds this car on this Dubai day across '
+    + 'every channel, so there is nobody else it could have been — but this is custody, not '
+    + 'driving: no booking places anyone behind the wheel during the journey itself.',
+  ambiguous: 'More than one candidate, and nothing separates them. Every person the evidence '
+    + 'reaches is listed, equally weighted and in name order. No choice is made and none should '
+    + 'be read into the ordering.',
+  unknown: 'Nobody. No booking on any channel names a driver for this car on this day, so there '
+    + 'is no candidate to offer. The car’s usual driver is NOT shown here: naming them would '
+    + 'be invention.',
+};
+const AT_CONTRACT = 'Every name on these rows is an INFERENCE, never a trip record: an '
+  + 'unexplained journey is by definition one that no booking explains, so no booking names its '
+  + 'driver. attribution_tier says which rule named this person and attribution_evidence states '
+  + 'the measurement that rule ran, so it can be checked against the car’s own trip list. '
+  + 'Where the evidence cannot single out one person the tier is `ambiguous` and EVERY candidate '
+  + 'is listed, equally weighted; where there is no custody record at all the tier is `unknown` '
+  + 'and no name is offered. The car’s usual driver is never used as a fallback.';
+const AT_PERSON = (i) => ({ name: drivers[i % drivers.length], id: `drv-${i % drivers.length}`,
+  key: `drv-${i % drivers.length}` });
+const attributed = (x, i) => {
+  const tier = AT_TIERS[i % AT_TIERS.length];
+  const cands = tier === 'unknown' ? []
+    : tier === 'ambiguous' ? [AT_PERSON(i), AT_PERSON(i + 1)]
+      : [AT_PERSON(i)];
+  const before = 20 + (i % 90), after = 15 + (i % 120);
+  const day = x.local_day;
+  const evidence = tier === 'bracketed'
+    ? `Named by time: ${cands[0].name}. Their Uber trip on ${x.plate} ended ${before} minutes `
+      + `before this journey started, and their next Uber trip on the same car began ${after} `
+      + 'minutes after it ended. No other driver has a booking of ANY kind on this car between '
+      + 'those two — the exclusion is checked across every channel collected. Uber only on '
+      + 'the two bracket sides, both gaps within 240 minutes.'
+    : tier === 'last_trip'
+      ? `The last Uber trip on ${x.plate} before this journey was ${cands[0].name}’s, ending `
+        + `${before} minutes earlier. That is the operator’s rule: usually one person drives `
+        + 'a car, so whoever did the last Uber trip on it is the one responsible. It is an '
+        + 'inference from this car’s Uber record and NOT a record of this journey.'
+      : tier === 'sole_custodian'
+        ? `Not named by time. The nearest Uber trip on ${x.plate} ended ${before} minutes before `
+          + 'this journey started, and no completed Uber trip on this car begins within 240 '
+          + `minutes after it ended. ${cands[0].name} is the only person the trip record shows `
+          + `holding this car on ${day}, so there is nobody else it could have been — but `
+          + 'this is custody, not driving.'
+        : tier === 'ambiguous'
+          ? `2 people held ${x.plate} on ${day} — ${cands.map((c) => c.name).sort().join(', ')} `
+            + '— and the evidence cannot separate them. Uber trips on this car sit on both '
+            + `sides of this journey — the nearest ends ${before} minutes before it started, `
+            + `the nearest begins ${after} minutes after it ended — but they belong to `
+            + 'DIFFERENT people, so nothing brackets it. Every candidate is listed; none is chosen.'
+          : `Nobody can be named. No booking on any channel names a driver for ${x.plate} on `
+            + `${day}. The car has a seat sensor and a GPS trace and no booking identity `
+            + 'whatsoever; the car’s usual driver is deliberately NOT shown, because naming '
+            + 'them would be invention.';
+  return {
+    ...x,
+    attribution_tier: tier,
+    attribution_candidates: cands,
+    attribution_candidate_count: cands.length,
+    attribution_candidate_keys: cands.map((c) => c.key),
+    attribution_evidence: evidence,
+    attribution_responsible: cands.length === 1 ? cands[0].name : null,
+    attribution_last_trip_gap_min: tier === 'last_trip' ? before : null,
+    attribution_last_uber_driver: null,
+    unnamed_custodian_count: 0,
+    clock_skew_basis: null,
+    bracket_before_min: tier === 'bracketed' ? before : null,
+    bracket_after_min: tier === 'bracketed' ? after : null,
+    custodian_count: tier === 'ambiguous' ? 2 : tier === 'unknown' ? 0 : 1,
+    clock_skew_min: null,
+    candidate_statuses: cands.map((c) => ({ ...c, status: null, since: null })),
+    /* Populated on most rows, exactly as production is on 106 of 120 — and the
+       pages must NOT print its driver name beside a candidate list. */
+    nearest_booking: i % 8 === 3 ? null : {
+      platform: 'uber', external_id: `n-${i}`, name: drivers[(i + 2) % drivers.length],
+      id: `drv-${(i + 2) % drivers.length}`, key: `drv-${(i + 2) % drivers.length}`,
+      requested_at: x.started_at, ended_at: x.ended_at, gap_min: 20 + (i % 200),
+      means: 'Context, not a candidate. The nearest booking the reconciler could find is a uber '
+        + `trip ${20 + (i % 200)} minutes from this window, and it did NOT explain the journey `
+        + '— that is why the verdict stands. A booking that far from the window describes '
+        + 'the car’s movements rather than who was in the car, so this name is deliberately '
+        + 'absent from the candidate list above.',
+    },
+    status_note: 'Uber’s own driver-status feed holds nothing yet, so nothing here either '
+      + 'confirms or contradicts the name above.',
+    forgone_aed: x.distance_km == null ? null : +(x.distance_km * UN_RATE).toFixed(2),
+    aed_per_km: UN_RATE,
+    rate_basis: UN_BASIS,
+  };
+};
+const AT_ROWS = ALL_SEGS.filter((x) => x.verdict === 'unauthorized').map(attributed);
+const AT_COVERAGE = {
+  days_with_data: 3, days_in_window: 30, first_day: '2026-08-03', last_day: '2026-08-05',
+  plates_with_sensor: plates.length, plates_held: null, scope: 'every car in the fleet',
+  complete: false,
+  note: 'The seat sensor covers 3 of the 30 days in this window (2026-08-03 to 2026-08-05), '
+    + 'across every car in the fleet. The other 27 days are not quiet days — they are days '
+    + 'with no evidence, because CABMAN is a five-minute realtime poll with no history behind '
+    + 'it. Read every count here as a count over the days that were watched.',
+};
+const AT_BRACKET = {
+  cap_min: 240, platforms: ['uber'],
+  rule: 'The same person’s booking on the same car ends at most 240 minutes before the '
+    + 'journey starts and their next begins at most 240 minutes after it ends, with no other '
+    + 'driver’s booking on that car in between. Both gaps are stated on the row rather than '
+    + 'summarised, because "bracketed" is not checkable and "their trip ended 34 minutes before '
+    + 'and the next began 19 minutes after" is.',
+};
+const AT_LAST_TRIP = {
+  cap_min: 31631, fresh_band_min: 1494, platforms: ['uber'],
+  rule: 'The operator’s rule, in their words: "usually one person drives per car. so we will '
+    + 'take the last trip custodian for that specific vehicle. whoever did the last trip on uber '
+    + 'is the one responsible."',
+  cap_basis: 'The trip may be at most 31631 minutes (21.97 days) old. That is the 99.9th '
+    + 'percentile of this fleet’s own gap between consecutive Uber trips, measured over '
+    + '21,942 consecutive trip pairs on the 20 flagged plates.',
+  band_basis: 'At or under 1494 minutes (p98 of the same gap) the car was in continuous normal '
+    + 'Uber service across the journey and the sentence leads with the name; above it the '
+    + 'sentence leads with the age of the trip. Both bands name the person.',
+  not_a_hit_rate: 'The rule agrees with the independent day-custody source on 70 of the 70 '
+    + 'journeys under the cap where day-custody names anyone. That is CONSISTENCY between two '
+    + 'inferences drawn from the same trip table, never accuracy: an unexplained journey has no '
+    + 'ground truth. It is also thin at the far end — the 7-to-21-day bucket is 9 samples.',
+};
+const AT_STATUS_FEED = {
+  history_from: null,
+  role: 'CORROBORATION, never attribution. Uber’s status feed is per driver and carries no '
+    + 'plate, it is append-only from the day the collector started writing it with no backfill, '
+    + 'and on the segments it can see every candidate was offline for the whole window — '
+    + 'which is what an unexplained journey is, by construction. It promotes nobody to a tier '
+    + 'and names nobody the ladder did not already name.',
+};
+
+app.get('/api/unauthorized/attributed', (req, r) => {
+  const tier = AT_TIERS.includes(String(req.query.tier)) ? String(req.query.tier) : null;
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  const all = tier ? AT_ROWS.filter((x) => x.attribution_tier === tier) : AT_ROWS;
+  const rows = all.slice(offset, offset + limit);
+  /* The distribution is over the WINDOW, never over the current filter — a
+     tier count that changes when you pick a tier tells a reader nothing about
+     what else is there, and the page's headline band reads it. */
+  const count = (k) => AT_ROWS.filter((x) => x.attribution_tier === k).length;
+  const km = (k) => +AT_ROWS.filter((x) => x.attribution_tier === k)
+    .reduce((a, x) => a + (x.distance_km || 0), 0).toFixed(1);
+  r.json({
+    rows, total: all.length, shown: rows.length, offset, limit,
+    truncated: offset + rows.length < all.length,
+    filter: { verdict: 'unauthorized', tier, fleet: null, verdict_rejected: null },
+    distribution: {
+      bracketed: count('bracketed'), last_trip: count('last_trip'),
+      sole_custodian: count('sole_custodian'), ambiguous: count('ambiguous'),
+      unknown: count('unknown'), segments: AT_ROWS.length,
+      by_tier: AT_TIERS.map((k) => ({ key: k, n: count(k), km: km(k) })),
+    },
+    tier_means: AT_MEANS,
+    bracket: AT_BRACKET,
+    last_trip: AT_LAST_TRIP,
+    status_feed: AT_STATUS_FEED,
+    coverage: AT_COVERAGE,
+    value: { aed_per_km: UN_RATE, basis: UN_BASIS },
+    note: AT_CONTRACT,
+  });
+});
+
+app.get('/api/driver/unauthorized', (req, r) => {
+  /* One person's slice of the same rows. Every rung is present here too: the
+     tab's two panels split on whether the row names ONE person or several, and
+     a fixture that carried only the first would never render the second. */
+  const mine = AT_ROWS.filter((x, i) => i % 3 === 0);
+  const att = mine.filter((x) => x.attribution_tier !== 'ambiguous'
+    && x.attribution_tier !== 'unknown');
+  const cand = mine.filter((x) => x.attribution_tier === 'ambiguous');
+  const n = (k) => att.filter((x) => x.attribution_tier === k).length;
+  r.json({
+    driver: { id: req.query.id || 'drv-0', name: drivers[0], ids: ['drv-0'], platforms: ['uber'] },
+    attributed: {
+      rows: att, total: att.length, shown: att.length,
+      by_tier: { bracketed: n('bracketed'), last_trip: n('last_trip'),
+        sole_custodian: n('sole_custodian') },
+      heading: 'Unexplained journeys this person is named beside',
+      means: 'One of three things: their own Uber trips on that car bracket the journey in time; '
+        + 'theirs was the last Uber trip on that car before the journey started, which is the '
+        + 'operator’s rule for who is responsible; or they are the only person the trip '
+        + 'record shows holding the car that day. All three are inferences from the booking '
+        + 'record, not trip records of the journey itself, and none of them says this person '
+        + 'drove.',
+    },
+    also_a_candidate: {
+      rows: cand, total: cand.length, shown: cand.length,
+      heading: 'Cars this person held on a day an unexplained journey happened',
+      means: cand.length
+        ? 'These journeys have more than one candidate and nothing separates them. This person '
+          + 'is one of the people who held the car that day; so is somebody else. No claim is '
+          + 'made about who was driving, and this list must never be counted together with the '
+          + 'one above.'
+        : 'None in this window.',
+    },
+    truncated: false,
+    total_basis: 'Both totals are counted over the whole window, and every one of them is in '
+      + 'the tables below.',
+    coverage: { ...AT_COVERAGE, plates_held: 3, plates_with_sensor: 2,
+      scope: 'the 3 car(s) this person held in this window',
+      note: 'The seat sensor covers 3 of the 30 days in this window (2026-08-03 to 2026-08-05), '
+        + 'across the 3 car(s) this person held. The other 27 days are not quiet days — '
+        + 'they are days with no evidence, because CABMAN is a five-minute realtime poll with '
+        + 'no history behind it. Read every count here as a count over the days that were '
+        + 'watched.' },
+    value: { aed_per_km: UN_RATE, basis: UN_BASIS },
+    tier_means: AT_MEANS,
+    bracket: { cap_min: 240, platforms: ['uber'] },
+    last_trip: { cap_min: 31631, fresh_band_min: 1494, platforms: ['uber'] },
+    status_feed: { history_from: null },
+    note: AT_CONTRACT,
+  });
+});
+
 /* {rows, total, segments, shown, truncated} — the "Vehicles involved" tile
    reads `total`, not the length of the list, which is the worst hundred. */
 app.get('/api/unauthorized/by-vehicle', (_, r) => r.json({

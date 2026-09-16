@@ -469,9 +469,12 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
        which is the count that would get quoted. */
     /* `last_trip` belongs on the ATTRIBUTED side, not the candidate side: it
        names exactly one person, which is the whole distinction this split
-       draws. It is the operator's own rule and it is the tier that will carry
-       most of this list — 45 of 120 journeys on the measured distribution,
-       against 13 brackets and 24 sole custodians. */
+       draws. It is the operator's own rule and it is expected to carry most of
+       this list: measured over production's 120 unexplained journeys the rule
+       names 90 of them under the cap, against 13 that bracket. The per-tier
+       split of that 90 is arithmetic rather than a count until the endpoint is
+       deployed — see the header on api/unauthorized_sql.js, which keeps the
+       measured figures and the derived ones apart. */
     const attributed = dressed.filter(
       (r) => r.attribution_tier === 'bracketed' || r.attribution_tier === 'last_trip'
         || r.attribution_tier === 'sole_custodian');
@@ -489,6 +492,11 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
           last_trip: byTier.last_trip || 0,
           sole_custodian: byTier.sole_custodian || 0,
         },
+        /* WHICH RUNGS THIS LIST HOLDS, AS DATA RATHER THAN AS PROSE A RENDERER
+           CANNOT SWITCH ON. A shell that groups or captions this list has the
+           membership from the response instead of hard-coding it, which is
+           what let the caption and the filter fall out of step below. */
+        tiers: ['bracketed', 'last_trip', 'sole_custodian'],
         heading: 'Unexplained journeys this person is named beside',
         means: 'One of three things: their own Uber trips on that car bracket the journey in '
           + 'time; theirs was the last Uber trip on that car before the journey started, which '
@@ -496,17 +504,103 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
           + 'trip record shows holding the car that day. All three are inferences from the '
           + 'booking record, not trip records of the journey itself, and none of them says '
           + 'this person drove.',
+        /* THREE RUNGS, THREE STRENGTHS, ONE AMBER NUMBER — SAID ON THE RESPONSE.
+           ─────────────────────────────────────────────────────────────────────
+           THE DEFECT. `total` sums bracketed + last_trip + sole_custodian, and
+           api/public/driver.js renders it as the FIRST tile, labelled "Named
+           beside", tone warn, sub-line "journeys no channel booked". The
+           per-tier breakdown sits beside it and by_tier travels here, but the
+           single amber number is the quotable object and it is the one that
+           gets screenshotted. api/public/segments.js states the opposing rule
+           for its own surface in as many words — a firm/soft split "is the
+           WRONG basis for a total, because 13 journeys named by time and 24
+           named by day-custody alone are different claims and a sum of them is
+           the number that gets quoted" — and heads its per-person panel "One
+           column per rung of the ladder, and they are never added together".
+           This endpoint added them together, and the operator's rule made it
+           worse rather than neutral: measured over production the rule names 90
+           of 120 journeys against 13 that bracket, so the same tile jumps for
+           people who did nothing new. The count grew because a new inference was
+           added, not because anything was discovered.
+
+           The aggregate is KEPT — removing it would push every shell into
+           computing its own, and three shells computing one number is three
+           numbers — and it is made unquotable-alone here, where the figure is,
+           rather than in a caption on one page. The same file's money tile is
+           already deliberately denied warn tone "unless the whole of it rests on
+           a time measurement"; this says the count needs the same discipline. */
+        total_basis: 'This total spans THREE RUNGS OF DIFFERENT STRENGTH and must not be '
+          + `quoted on its own. ${byTier.bracketed || 0} named by time (their own Uber trips `
+          + `sit either side of the journey), ${byTier.last_trip || 0} by the operator’s `
+          + 'last-trip rule (the last Uber trip on that car before the journey was theirs, at '
+          + `the stated age), ${byTier.sole_custodian || 0} by day-custody alone (they are the `
+          + 'only person the record shows holding the car that day, which is custody and not '
+          + 'driving). Read by_tier, not this number. A shell that renders the total as a '
+          + 'single figure must not give it a verdict colour: the strengths behind it are not '
+          + 'the same claim, and none of them is a record of this journey.',
+        /* THE ROWS IN THIS LIST ARE NOT THINGS THIS PERSON DID, and a page that
+           mixes them into a trip ledger has to be told so by the response.
+           ─────────────────────────────────────────────────────────────────────
+           THE DEFECT THIS EXISTS FOR. api/public/driver.js interleaves
+           attributed.rows into the person's own Trips tab, sorted in with their
+           real bookings, under a caption reading "every one that touches them is
+           in the list above, named", and the comment justifying that interleave
+           enumerates TWO rungs — "their own Uber trips bracket the window, or
+           they are the only person the record shows holding the car that day" —
+           because it was written before last_trip existed. Adding last_trip to
+           the filter here put a third and differently-evidenced rung into that
+           ledger without the decision being taken: on the derived distribution
+           that is ~77 of 120 journeys against 13, roughly six times as many rows
+           inside people's personal trip histories as before, each an inference
+           from a trip on the car rather than a measurement of the journey, with
+           the strength surviving only in a hover tooltip.
+
+           last_trip STAYS on this side, and that is the operator's own rule
+           doing what it was asked to do: it names exactly one person, which is
+           the distinction this split draws, and demoting it to the candidate
+           side would be watering the rule down. What was not defensible was
+           making that choice in a server-side filter and leaving the page's own
+           caption describing two rungs. So the response says outright what the
+           list is and what a renderer owes it. The caption and the interleave
+           comment in driver.js are a cross-file change the main session must
+           put to whoever owns that file; this string is what they have to
+           match. */
+        rows_are_not_trips: 'Every row here is an unexplained journey with NO booking, placed '
+          + 'beside this person by an inference. A row sitting in somebody’s list of trips is '
+          + 'read as something they did, so a page that interleaves these with real bookings '
+          + 'must show attribution_tier on every one of them and must not caption the mixed '
+          + 'table as a complete record of this person’s journeys. Three strengths are in this '
+          + 'list — named by time, named by the operator’s last-trip rule, named by day-custody '
+          + 'alone — and on this fleet the middle one is the bulk of it.',
       },
       also_a_candidate: {
         rows: candidate,
         total: byTier.ambiguous || 0,
         shown: candidate.length,
-        heading: 'Cars this person held on a day an unexplained journey happened',
+        /* THE AMBIGUOUS TIER HAS TWO ENTRANCES NOW, AND THIS HEADING DESCRIBED
+           ONLY ONE OF THEM.
+           ─────────────────────────────────────────────────────────────────────
+           THE DEFECT. Both strings said day-custody: "Cars this person held on a
+           day an unexplained journey happened", and "This person is one of the
+           people who held the car that day; so is somebody else." A row can now
+           reach `ambiguous` through a TIE on the last Uber trip, where the
+           candidates come from the trip table and not from vehicle_driver_day —
+           so a tied driver need not appear against that car on that day at all,
+           and the row's own evidence sentence says "Day-custody is NOT used to
+           break this tie", directly under a heading asserting custody is why
+           they are listed. TIER_MEANS.ambiguous was reworded for this ("every
+           person the evidence reaches"); these two were missed. LATENT — 0 ties
+           measured across 21,961 instants — and reworded anyway, because a
+           heading that contradicts the sentence beneath it costs nothing to fix
+           and cannot be spotted by the person it names. */
+        heading: 'Unexplained journeys this person is one of several candidates for',
         means: candidate.length
-          ? 'These journeys have more than one candidate and nothing separates them. This '
-            + 'person is one of the people who held the car that day; so is somebody else. '
-            + 'No claim is made about who was driving, and this list must never be counted '
-            + 'together with the one above.'
+          ? 'These journeys have more than one candidate and nothing separates them. The '
+            + 'evidence reaches this person and it reaches somebody else — usually because '
+            + 'both held the car that Dubai day, and sometimes because two drivers’ Uber trips '
+            + 'on the car ended at the very same instant, in which case the operator’s '
+            + 'last-trip rule lists them and chooses neither. No claim is made about who was '
+            + 'driving, and this list must never be counted together with the one above.'
           : 'None in this window.',
       },
       truncated: rows.length >= 400,

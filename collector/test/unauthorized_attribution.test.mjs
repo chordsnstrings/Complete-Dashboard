@@ -475,6 +475,209 @@ await custody({ plate: 'L55505', day: '2026-09-15', id: '', platform: 'hotel',
 await trip({ platform: 'hotel', plate: 'L55505', driver: null, name: 'Sajid Gul Gul Muhammad',
   from: '2026-09-15T04:00:00Z', to: '2026-09-15T04:40:00Z' });
 
+/* ══════════════════════════════════════════════════════════════════════════
+   THE ADVERSARIAL-AUDIT FIXTURES. 25-36.
+
+   Two adversarial lenses read the last-trip rule after it shipped and found
+   twelve places where the SQL and the sentence beside it disagreed — a comment
+   claiming a guard the query did not have, a cap quoted as the reason on a row
+   where the cap was never asked, a measurement quoted on the one kind of row
+   that falsifies it. Every one of them is seeded here as the smallest shape
+   that reproduces it, because the failure mode of this module is a wrong NAME
+   or a wrong REASON, and both are invisible to a green suite that never seeds
+   the shape.
+
+   They are seeded last, after the honesty fixtures, so the fixtures above keep
+   the rows they were written against.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ══ 25. A RIDE THE DRIVER REJECTED IS NOT A TRIP THEY FINISHED ══════════
+   last_near's comment argued for nine lines that it was "completed only, as
+   the bracket is" and the SQL substituted 't.ended_at IS NOT NULL' — the exact
+   proxy COMPLETED()'s own header records as unsafe, safe on the bracket's
+   `arrived` side only by accident. A driver_rejected row carrying an end time
+   therefore named a man responsible for a journey and printed his rejection as
+   a trip he finished. */
+await seg({ plate: 'L33301', from: '2026-09-03T08:00:00Z', to: '2026-09-03T08:30:00Z', min: 30, km: 9 });
+await trip({ plate: 'L33301', driver: 'u-rej', name: 'Rejected The Ride',
+  from: '2026-09-03T07:00:00Z', to: '2026-09-03T07:30:00Z', status: 'driver_rejected' });
+
+/* ══ 26. …AND THE SAME GUARD ON THE CONTEXT NAME ═════════════════════════
+   The `ever` CTE, which supplies the name a refused row still reports, had the
+   same missing guard. A cancelled ride carrying an end time would be printed
+   as "last Uber driver of record" — a name an operator rings round about, read
+   off a ride that never happened. Two trips here: a genuinely completed one
+   ten months back, and a MORE RECENT cancelled one. The context name must be
+   the completed one. */
+await seg({ plate: 'L33302', from: '2026-08-31T04:00:00Z', to: '2026-08-31T04:30:00Z', min: 30, km: 10 });
+await trip({ plate: 'L33302', driver: 'u-realend', name: 'Really Finished It',
+  from: '2025-10-31T00:50:00Z', to: '2025-10-31T01:50:00Z' });
+await trip({ plate: 'L33302', driver: 'u-fakeend', name: 'Cancelled With An End',
+  from: '2026-08-01T09:00:00Z', to: '2026-08-01T09:40:00Z', status: 'client_cancelled' });
+
+/* ══ 27. A FRESH TRIP WITH NO REQUEST TIME IS STILL THE LAST TRIP ════════
+   trip.requested_at is NULLABLE (sql/schema.sql:55) and src/sources/uber.js:192
+   writes NULL whenever Uber's CSV omits 'Trip request time'. last_near bounded
+   BOTH ends on requested_at, so a NULL made both predicates NULL and dropped
+   the row — while `ever`, which had no requested_at predicate, kept it. The
+   two CTEs disagreed about one trip and the product then said the trail was
+   too old about a trip forty-four minutes old. This is the operator's own
+   shape: the exact row they asked the rule to return. */
+await seg({ plate: 'L33303', from: '2026-09-03T08:28:00Z', to: '2026-09-03T09:00:00Z', min: 32, km: 14 });
+await trip({ plate: 'L33303', driver: 'u-noreq', name: 'No Request Time',
+  from: null, to: '2026-09-03T07:44:00Z' });
+await trip({ plate: 'L33303', driver: 'u-noreq', name: 'No Request Time',
+  from: '2026-08-01T05:00:00Z', to: '2026-08-01T05:30:00Z' });
+
+/* ══ 28. …AND hist COUNTS IT, SO NO SENTENCE PRINTS A BARE FULL STOP ════
+   hist.uber_prior tested requested_at alone and hist.uber_first_at was
+   min(requested_at), so a plate whose ONLY Uber row has no request time
+   reported "no prior Uber trips" and rendered a NULL date through to_char() —
+   which format() prints as an EMPTY STRING rather than failing. The row read
+   "the first Uber trip on this car was ." about a trip 44 minutes before the
+   journey. */
+await seg({ plate: 'L33304', from: '2026-09-03T08:28:00Z', to: '2026-09-03T09:00:00Z', min: 32, km: 14 });
+await trip({ plate: 'L33304', driver: 'u-onlynoreq', name: 'Only Trip No Request Time',
+  from: null, to: '2026-09-03T07:44:00Z' });
+
+/* ══ 29. A CONTRADICTING BOOKING FIVE DAYS OUT, NOT SIX HOURS ═══════════
+   The disclosure that somebody ELSE had the car on another channel after the
+   trip the rule read was evaluated over the bracket's exclusion set, whose
+   floor is about twenty hours before the journey. The cap lets the rule reach
+   back 21.97 days, so the probe was 26x narrower than the claim it qualifies
+   and on the whole above-p98 band the contradiction was structurally
+   invisible. The Uber trip here is 13 days old and the hotel booking that
+   contradicts it is 5 days old — well outside the old window, well inside the
+   rule's own reach. */
+await seg({ plate: 'L33305', from: '2026-09-14T08:00:00Z', to: '2026-09-14T08:40:00Z', min: 40, km: 19 });
+await trip({ plate: 'L33305', driver: 'u-oldish', name: 'Thirteen Days Back',
+  from: '2026-09-01T07:00:00Z', to: '2026-09-01T08:00:00Z' });
+await trip({ platform: 'hotel', plate: 'L33305', driver: 'h-fivedays', name: 'Five Days Back Hotel',
+  from: '2026-09-09T07:00:00Z', to: '2026-09-09T08:00:00Z' });
+
+/* ══ 30. A BROKEN CLOCK IS NOT AN OLD TRAIL ═════════════════════════════
+   The responsible-person column had ONE absence phrase, gated on a condition
+   testing neither the cap nor the clock, so a segment whose tracker is 2,339
+   minutes out of true printed "Nobody — the trail is too old." beside an
+   evidence sentence correctly blaming the tracker. Two different reasons for
+   one absence on one row, and the one a page prints is not the one the row's
+   own evidence gives — a reader acting on the column concludes the car left
+   the Uber channel when the finding is a broken tracker that needs fixing. */
+await seg({ plate: 'L33306', from: '2026-09-14T08:00:00Z', to: '2026-09-14T08:40:00Z', min: 40, km: 17,
+  reason: 'no completed booking overlaps; telemetry clock is 2339 min behind wall time' });
+await trip({ plate: 'L33306', driver: 'u-skewold', name: 'Long Before The Skew',
+  from: '2026-01-01T07:00:00Z', to: '2026-01-01T08:00:00Z' });
+
+/* ══ 31. THE CONTEXT NAME TIES TOO, AND A TIE IS NOT A NAME ═════════════
+   `ever` resolved the refused name with ORDER BY ended_at DESC LIMIT 1 — the
+   planner's row order deciding which of two human beings gets printed as "last
+   Uber driver of record". This module builds an entire tie branch for the
+   last-trip tier on the principle that a tie broken at random is an accusation
+   chosen at random, and then reintroduced the trap two CTEs later on a field
+   that also prints a name. */
+await seg({ plate: 'L33307', from: '2026-09-14T08:00:00Z', to: '2026-09-14T08:40:00Z', min: 40, km: 12 });
+await trip({ plate: 'L33307', driver: 'u-ct-a', name: 'Aaron Context Tie',
+  from: '2026-01-01T07:00:00Z', to: '2026-01-01T08:00:00Z' });
+await trip({ plate: 'L33307', driver: 'u-ct-b', name: 'Bashir Context Tie',
+  from: '2026-01-01T07:10:00Z', to: '2026-01-01T08:00:00Z' });
+
+/* ══ 32. A LIMIT IN THE QUERY IS NOT A FACT ABOUT THE CAR ═══════════════
+   last_near is bounded on requested_at as well as on ended_at, because that is
+   the index that exists. A trip INSIDE the cap on its end and outside that
+   floor on its request was dropped by last_near, found by `ever`, and reported
+   as staleness — producing a clause that contradicts its own two numbers,
+   "21.5 days before this journey. That is beyond the 31631-minute cap (21.97
+   days)". Needs an Uber row spanning more than eight hours from request to
+   end: sampled on six flagged plates the longest is 1.88 h and there are none
+   over 8 h, so this is latent on today's data and seeded anyway. */
+await seg({ plate: 'L33308', from: '2026-09-03T08:00:00Z', to: '2026-09-03T08:30:00Z', min: 30, km: 11 });
+await trip({ plate: 'L33308', driver: 'u-longspan', name: 'Thirty Six Hour Span',
+  from: '2026-08-11T08:00:00Z', to: '2026-08-12T20:00:00Z' });
+
+/* ══ 33. TWO CAUSES ARE NOT ONE CAUSE ═══════════════════════════════════
+   WHY_NO_LAST tested 'every prior trip is nameless' before 'every prior trip
+   is cancelled', and a car carrying BOTH satisfies neither premise — it fell
+   through and asserted the cancellation cause, blaming Uber for a gap that is
+   in our own ingestion and raising the operator's open cancellation question
+   about the wrong car. */
+await seg({ plate: 'L33309', from: '2026-09-14T08:00:00Z', to: '2026-09-14T08:40:00Z', min: 40, km: 15 });
+await trip({ plate: 'L33309', driver: 'u-anon1', name: '',
+  from: '2026-09-13T07:00:00Z', to: '2026-09-13T08:00:00Z' });
+await trip({ plate: 'L33309', driver: 'u-anon2', name: '',
+  from: '2026-09-13T09:00:00Z', to: '2026-09-13T10:00:00Z' });
+await trip({ plate: 'L33309', driver: 'u-cancelled-named', name: 'Cancelled And Named',
+  from: '2026-09-13T11:00:00Z', to: null, status: 'rider_cancelled' });
+
+/* ══ 34. "FILED AGAINST NOBODY" IS A CLAIM ABOUT THE JOURNEY ════════════
+   attribution_last_uber_driver's sentence ended "…and this journey is filed
+   against nobody's profile anywhere in the product", and the CASE emitting it
+   was not gated on the tier. On a sole_custodian row candidate_keys is
+   non-empty, /api/driver/unauthorized matches on it and increments that
+   person's "Named beside" tile — so the product asserted the journey was
+   attributed to nobody on the same response that files it against a named
+   employee. */
+await seg({ plate: 'L33310', from: '2026-09-14T08:00:00Z', to: '2026-09-14T08:40:00Z', min: 40, km: 21 });
+await custody({ plate: 'L33310', day: '2026-09-14', id: 'h-onlyone', platform: 'hotel',
+  name: 'Only Custodian Here', trips: 2, primary: true });
+await trip({ platform: 'hotel', plate: 'L33310', driver: 'h-onlyone', name: 'Only Custodian Here',
+  from: '2026-09-14T04:00:00Z', to: '2026-09-14T05:00:00Z' });
+await trip({ plate: 'L33310', driver: 'u-ancient', name: 'Ancient Uber Driver',
+  from: '2026-01-01T07:00:00Z', to: '2026-01-01T08:00:00Z' });
+
+/* ══ 35. A COUNTERFACTUAL THE QUERY NEVER EVALUATED ═════════════════════
+   The bracketed sentence closed, unconditionally, with "so it is reported as a
+   bracket even though the last-trip rule would name the same person". The
+   bracket's exclusion is STRICTLY greater than the bracketer's end instant, so
+   a second driver ending at the SAME instant does not break the bracket while
+   last_ppl returns both — the row told the reader the weaker rule agreed while
+   the weaker rule, on that identical before-side data, refuses to answer. */
+await seg({ plate: 'L33311', from: '2026-09-03T12:00:00Z', to: '2026-09-03T12:20:00Z', min: 20, km: 8 });
+await trip({ plate: 'L33311', driver: 'u-brx', name: 'Bracketer Ecks',
+  from: '2026-09-03T10:30:00Z', to: '2026-09-03T11:30:00Z' });
+await trip({ plate: 'L33311', driver: 'u-brx', name: 'Bracketer Ecks',
+  from: '2026-09-03T12:50:00Z', to: '2026-09-03T13:30:00Z' });
+await trip({ plate: 'L33311', driver: 'u-tiy', name: 'Tied Why',
+  from: '2026-09-03T10:40:00Z', to: '2026-09-03T11:30:00Z' });
+
+/* ══ 36. A MEASUREMENT QUOTED ON THE ONE ROW THAT FALSIFIES IT ══════════
+   The day-custody disagreement clause appended a fixed figure — "Measured over
+   120 journeys the two disagree on 2, and both were read off a trip more than
+   six months old" — to EVERY disagreement. That figure was measured WITH the
+   cap applied and reports ZERO in-cap disagreements, so it could only ever be
+   printed on a row that falsifies it. `cust` is scoped to the journey's own
+   Dubai day while the rule reaches back 21.97 days, so in-cap disagreements
+   are the expected shape of the whole above-p98 band, not an exotic case. */
+await seg({ plate: 'L33312', from: '2026-09-14T08:00:00Z', to: '2026-09-14T08:40:00Z', min: 40, km: 16 });
+await trip({ plate: 'L33312', driver: 'u-thirteen', name: 'Thirteen Days Ago Driver',
+  from: '2026-09-01T07:00:00Z', to: '2026-09-01T08:00:00Z' });
+await custody({ plate: 'L33312', day: '2026-09-14', id: 'u-todaycust', name: 'Today Custodian Only',
+  trips: 5, primary: true });
+
+/* ══ 37. A NULL REQUEST TIME ON A TRIP TOO OLD TO NAME ANYBODY ══════════
+   Fixture 28 proves the rule still ANSWERS a NULL-requested trip, and it does
+   so through last_near — which means it never reaches hist at all, and an
+   assertion that passes there proves nothing about hist. This is the shape
+   that does reach it: the only Uber trip on the car has no request time AND is
+   beyond the cap, so the rule reaches nobody and WHY_NO_LAST has to choose
+   between "no Uber trip predates this journey" and "the trail is too old".
+   With uber_prior counted on requested_at alone the NULL makes it 0, the wrong
+   branch fires, and the date is rendered from a NULL uber_first_at as an empty
+   string — "the first Uber trip on this car was ." — about a trip that
+   predates the journey by ten months. */
+await seg({ plate: 'L33313', from: '2026-08-31T04:00:00Z', to: '2026-08-31T04:30:00Z', min: 30, km: 10 });
+await trip({ plate: 'L33313', driver: 'u-oldnoreq', name: 'Old And No Request Time',
+  from: null, to: '2025-10-31T01:50:00Z' });
+
+/* ══ 38. AN UBER TRIP WITH NO USABLE TIMESTAMP AT ALL ═══════════════════
+   The residual of the same defect, and it needs its own sentence rather than
+   the no-prior one: a row carrying neither a request time nor an end time
+   cannot be placed before or after anything, so uber_first_at is genuinely
+   NULL and there is no date to print. The branch is guarded on that rather
+   than printing the empty string format() would give it. */
+await seg({ plate: 'L33314', from: '2026-08-31T04:00:00Z', to: '2026-08-31T04:30:00Z', min: 30, km: 10 });
+await trip({ plate: 'L33314', driver: 'u-notime', name: 'No Times At All',
+  from: null, to: null });
+
 const { get, server } = await mountAll(db);
 const WIN = 'from=2026-08-01&to=2026-09-30';
 const all = await get(`/api/unauthorized/attributed?${WIN}&limit=500`);
@@ -485,7 +688,7 @@ console.log('the fleet list answers, and every row carries a tier and a reason f
 {
   check('the route answers', all.status === 200, String(all.status));
   check('every segment in the window is attributed to exactly one tier',
-    all.body.rows.length === 23
+    all.body.rows.length === 37
     && all.body.rows.every((r) => TIERS.includes(r.attribution_tier)),
     JSON.stringify(all.body.rows.map((r) => [r.plate, r.attribution_tier])));
   /* A name with no basis beside it is exactly what api/custody_sql.js was
@@ -498,12 +701,12 @@ console.log('the fleet list answers, and every row carries a tier and a reason f
     JSON.stringify(all.body.rows.filter((r) => !r.attribution_evidence).map((r) => r.plate)));
   /* The strip that stops the page being read as a list of thieves. */
   check('the distribution of the evidence rides on the response',
-    all.body.distribution.segments === 23
-    && all.body.distribution.bracketed === 1
-    && all.body.distribution.last_trip === 10
-    && all.body.distribution.sole_custodian === 5
+    all.body.distribution.segments === 37
+    && all.body.distribution.bracketed === 2
+    && all.body.distribution.last_trip === 14
+    && all.body.distribution.sole_custodian === 6
     && all.body.distribution.ambiguous === 4
-    && all.body.distribution.unknown === 3,
+    && all.body.distribution.unknown === 11,
     JSON.stringify(all.body.distribution));
   /* The cap is the whole argument for the operator's rule, exactly as
      BRACKET_CAP_MIN is for the bracket, so it has to travel on the response —
@@ -961,16 +1164,16 @@ console.log('\nthe tier filter selects on the ladder, not on a word in the reaso
     JSON.stringify(r.body.rows.map((x) => [x.plate, x.attribution_tier])));
   const lt = await get(`/api/unauthorized/attributed?${WIN}&tier=last_trip`);
   check('…and the new tier is selectable the same way, on the ladder rather than on a word',
-    lt.body.rows.length === 10
+    lt.body.rows.length === 14
     && lt.body.rows.every((x) => x.attribution_tier === 'last_trip'),
     JSON.stringify(lt.body.rows.map((x) => [x.plate, x.attribution_tier])));
   /* Facets computed over the current filter tell a reader nothing about what
      else is there — the rule /api/segments already applies. */
   check('…while the distribution still describes the whole window',
-    r.body.distribution.segments === 23, JSON.stringify(r.body.distribution));
+    r.body.distribution.segments === 37, JSON.stringify(r.body.distribution));
   const bogus = await get(`/api/unauthorized/attributed?${WIN}&tier=definitely`);
   check('an unknown tier is ignored rather than returning an empty page as a clean one',
-    bogus.body.rows.length === 23 && bogus.body.filter.tier === null,
+    bogus.body.rows.length === 37 && bogus.body.filter.tier === null,
     String(bogus.body.rows.length));
 }
 
@@ -1232,11 +1435,35 @@ console.log('\n10. two different absences, two different sentences');
     r.attribution_evidence);
   /* There is no prior trip at all here, so there is no refused name either —
      and the context key must be absent rather than carrying the trip from
-     AFTER the journey, which is the shape of mistake this branch exists for. */
+     AFTER the journey, which is the shape of mistake this branch exists for.
+
+     THE SECOND HALF OF THIS ASSERTION WAS RETARGETED, AND IT IS STRONGER NOW.
+     It read `attribution_responsible === null`, which was true only because
+     the responsible column had exactly one absence phrase — "Nobody — the
+     trail is too old." — gated on a condition that tests neither the cap nor
+     the clock. That single branch is what let a 44-minute-old trail and a
+     tracker 2,339 minutes out of true both print staleness as the reason. The
+     column now carries a SHORT TRUE reason for each absence, switching on the
+     same token the evidence sentence switches on, so what this assertion has
+     to guard is no longer "the column is empty" but the two things that
+     actually matter on this row: the column names NO PERSON, and it does not
+     blame the age of a trip when the finding is that the car's Uber history
+     had not started yet.
+
+     REVERSION THAT PROVES THIS: in api/unauthorized_sql.js, replace the
+     no_last_reason CASE in `responsible` with the old single branch
+     `WHEN named.last_people = 0 AND named.ever_gap IS NOT NULL THEN 'Nobody —
+     the trail is too old.'`. This row goes null-and-silent again while the
+     skew row two blocks down starts blaming the age; assert both. */
   check('and no context name is offered from a trip that postdates the journey',
-    r.attribution_last_uber_driver == null
-    && r.attribution_responsible === null,
-    JSON.stringify([r.attribution_last_uber_driver, r.attribution_responsible]));
+    r.attribution_last_uber_driver == null,
+    JSON.stringify(r.attribution_last_uber_driver));
+  check('…and the responsible column names nobody and gives the TRUE reason',
+    typeof r.attribution_responsible === 'string'
+    && /^Nobody — /.test(r.attribution_responsible)
+    && /Uber history starts after the journey/.test(r.attribution_responsible)
+    && !/too old/.test(r.attribution_responsible),
+    String(r.attribution_responsible));
 }
 
 console.log('\n11. a tie on the last trip is reported as a tie, never resolved by row order');
@@ -1425,7 +1652,7 @@ console.log('\na verdict nobody wrote is ignored and SAID to be ignored, never s
      All three assertions here fail. */
   const r = await get(`/api/unauthorized/attributed?${WIN}&verdict=unauthorised&limit=500`);
   check('the misspelled verdict does not empty the page',
-    r.body.rows.length === 23 && r.body.distribution.segments === 23,
+    r.body.rows.length === 37 && r.body.distribution.segments === 37,
     `${r.body.rows.length} rows, ${r.body.distribution.segments} in the distribution`);
   check('…it falls back to the unexplained ones, which is what this endpoint is for',
     r.body.filter.verdict === 'unauthorized', r.body.filter.verdict);
@@ -1835,6 +2062,517 @@ console.log('\n22. a duplicated-word name with no account number still reaches i
   check('…and opening it lands on a tab that carries this journey',
     mine.status === 200 && mine.body.attributed.rows.some((x) => x.plate === 'L55505'),
     `${mine.status} ${JSON.stringify((mine.body.attributed || {}).rows?.map((x) => x.plate))}`);
+}
+
+console.log('\n24. the OLDER list folds the same people, and never prints a blank one');
+{
+  /* THE TWO SURFACES HAVE TO COUNT ONE DAY'S CUSTODIANS THE SAME WAY.
+     ───────────────────────────────────────────────────────────────────────
+     /api/unauthorized/list builds its names through api/custody_sql.js
+     custodyNames()/custodyRefs(), and those filtered `driver_name IS NOT NULL`
+     without excluding the EMPTY STRING — while api/unauthorized_sql.js `cust`,
+     the expression the ACCUSATION ladder counts custodians with, closed that
+     hole. sql/schema_v19.sql builds a custody row whenever EITHER an id or a
+     name is present, so a channel that files a blank name still gets one; it
+     folds to person_key NULL, PERSON_OF falls back to the raw account id, and
+     the row becomes a DISTINCT person.
+
+     L44251 on 2026-09-02 is seeded with exactly that shape: Kashif, plus a
+     yango row with a NULL name, plus a yango row with an EMPTY name. On the
+     looser predicate the empty one survived and sorted FIRST, so this
+     journey's `drivers` read ", Kashif Ali Muhammad Ali" and driver_refs
+     carried a nameless, unopenable second entry beside an accusation — while
+     #segments and the driver tab, reading the ladder, showed one custodian and
+     said in words how many records they could not name. Two numbers for one
+     plate-day, and the disagreement invisible.
+
+     REVERSION THAT PROVES THIS: in api/custody_sql.js restore
+     `AND v.driver_name IS NOT NULL` in custodyNames and custodyRefs. `drivers`
+     comes back with a leading ", " and driver_refs gains a blank entry, and
+     the first three assertions here fail. */
+  const list = await get(`/api/unauthorized/list?${WIN}&limit=500`);
+  check('the older list answers as the bare array three shells read it as',
+    list.status === 200 && Array.isArray(list.body), String(list.status));
+  const row = (list.body || []).find((x) => x.plate === 'L44251');
+  check('the blank-named custody record is not printed as a custodian',
+    row && row.drivers === 'Kashif Ali Muhammad Ali', JSON.stringify(row && row.drivers));
+  check('…and no reference on any row of this list carries a blank name',
+    (list.body || []).every((x) => (x.driver_refs || [])
+      .every((c) => c.name && String(c.name).trim())),
+    JSON.stringify((list.body || []).flatMap((x) => (x.driver_refs || [])
+      .filter((c) => !c.name || !String(c.name).trim()).map(() => x.plate))));
+  /* AND THE TWO SURFACES NOW AGREE ABOUT THIS DAY. The list names the one
+     person it can name; the ladder names the same one and states, separately,
+     that two more custody records exist it cannot put a name to. Neither
+     invents a custodian and neither drops one silently. */
+  const att = rowAt('L44251', '2026-09-02T07:00');
+  check('the ladder and the list name the same single person for this journey',
+    row.drivers === (att.attribution_candidates || []).map((c) => c.name).join(', '),
+    `${row.drivers} vs ${JSON.stringify(att.attribution_candidates)}`);
+}
+
+console.log('\n25. a ride the driver REJECTED is not a trip they finished');
+{
+  /* REVERSION THAT PROVES THIS: in api/unauthorized_sql.js, delete
+     `AND ${COMPLETED('t')}` from last_near. L33301 flips from `unknown` back to
+     `last_trip`, attribution_responsible becomes 'Rejected The Ride', the gap
+     comes back as 30, and the evidence reads "ending 30 minutes earlier — it
+     finished at 2026-09-03 11:30" about a ride the man refused. */
+  const r = rowAt('L33301', '2026-09-03T08:00');
+  check('a rejected ride carrying an end time does NOT name anybody',
+    r.attribution_tier !== 'last_trip'
+    && r.attribution_last_trip_gap_min === null
+    && (r.attribution_candidates || []).length === 0,
+    JSON.stringify([r.attribution_tier, r.attribution_last_trip_gap_min]));
+  check('…and no sentence on the row says that ride FINISHED or ENDED before the journey',
+    !/ending 30 minutes earlier/.test(r.attribution_evidence)
+    && !/Rejected The Ride/.test(r.attribution_evidence),
+    r.attribution_evidence);
+  /* The house rule: the TRUE reason, never a plausible one. The cause here is
+     the status, so the row must say the status. */
+  check('the reason given is that no earlier ride was completed, and it names nobody',
+    r.attribution_responsible === 'Nobody — no earlier Uber ride on this car was completed.'
+    && /was CANCELLED, rejected or otherwise not completed/.test(r.attribution_evidence),
+    `${r.attribution_responsible} :: ${r.attribution_evidence}`);
+  /* Proof this is a FILTER and not an absence: the row really is in the table,
+     which is what makes the assertion above non-vacuous. */
+  const [seeded] = await q(
+    `SELECT status, ended_at FROM trip WHERE plate = 'L33301' AND driver_ext_id = 'u-rej'`);
+  check('…and the rejected ride really is in the database, with an end time on it',
+    seeded && seeded.status === 'driver_rejected' && seeded.ended_at !== null,
+    JSON.stringify(seeded));
+}
+
+console.log('\n26. the CONTEXT name is completed-only too');
+{
+  /* REVERSION THAT PROVES THIS: delete `AND ${COMPLETED('t')}` from the ever_at
+     and ever CTEs. attribution_last_uber_driver.name becomes 'Cancelled With
+     An End' — a name an operator would ring round about, read off a ride that
+     never happened — and the evidence dates the trail to 2026-08-01 instead of
+     2025-10-31. */
+  const r = rowAt('L33302', '2026-08-31T04:00');
+  check('the last Uber driver OF RECORD is the one who completed a trip, not the cancellation',
+    r.attribution_last_uber_driver
+    && r.attribution_last_uber_driver.name === 'Really Finished It',
+    JSON.stringify(r.attribution_last_uber_driver));
+  check('…and the more recent CANCELLED ride is nowhere on the row',
+    !/Cancelled With An End/.test(JSON.stringify(r)),
+    r.attribution_evidence);
+}
+
+console.log('\n27. a fresh trip with NO REQUEST TIME is still the last trip');
+{
+  /* This is the operator's own shape and the product was refusing to answer it.
+     REVERSION THAT PROVES THIS: in last_near, restore
+     `AND t.requested_at <= ${o}.started_at` and drop the IS NULL arm from the
+     lower bound. L33303 flips from `last_trip` to `unknown`,
+     attribution_responsible becomes "Nobody — the trail is too old." about a
+     trail 44 minutes old, and last_uber_driver.means says "44 minutes before
+     this journey. That is beyond the 31631-minute cap." */
+  const r = rowAt('L33303', '2026-09-03T08:28');
+  check('a completed Uber trip with a NULL requested_at still names the person',
+    r.attribution_tier === 'last_trip'
+    && r.attribution_responsible === 'No Request Time'
+    && r.attribution_last_trip_gap_min === 44,
+    JSON.stringify([r.attribution_tier, r.attribution_responsible,
+      r.attribution_last_trip_gap_min]));
+  check('…and nothing on the row calls a 44-minute-old trail too old',
+    !/too old/.test(String(r.attribution_responsible))
+    && !/beyond the/.test(JSON.stringify(r.attribution_last_uber_driver || {})),
+    JSON.stringify([r.attribution_responsible, r.attribution_last_uber_driver]));
+  /* Non-vacuous: the seeded row really does carry a NULL request time, which is
+     what src/sources/uber.js:192 writes when Uber's CSV omits the column. */
+  const [seeded] = await q(
+    `SELECT requested_at, ended_at FROM trip WHERE plate = 'L33303' AND ended_at
+       = '2026-09-03T07:44:00Z'::timestamptz`);
+  check('…and the trip really does have no request time in the database',
+    seeded && seeded.requested_at === null && seeded.ended_at !== null,
+    JSON.stringify(seeded));
+}
+
+console.log('\n28. …and no sentence prints a date this product does not hold');
+{
+  /* REVERSION THAT PROVES THIS: in hist, change uber_prior and uber_first_at
+     back to t.requested_at alone. L33304 reports uber_prior = 0, falls into the
+     "history postdates the journey" branch, and prints "the first Uber trip on
+     this car was ." — format() renders the NULL date as an empty string rather
+     than failing, so the sentence loses its date silently and states two
+     falsehoods about a trip 44 minutes before the journey. */
+  const r = rowAt('L33304', '2026-09-03T08:28');
+  check('a plate whose ONLY Uber trip has no request time is still answered by the rule',
+    r.attribution_tier === 'last_trip'
+    && r.attribution_responsible === 'Only Trip No Request Time',
+    JSON.stringify([r.attribution_tier, r.attribution_responsible]));
+  check('…and it is never described as a car whose Uber history postdates the journey',
+    !/none of it predates this journey/.test(r.attribution_evidence),
+    r.attribution_evidence);
+  /* The typographical hole, asserted across the whole response rather than on
+     one row: a sentence that lost its date to a NULL leaves a space before a
+     full stop, and that is cheap to catch everywhere at once. */
+  check('no evidence sentence anywhere on the response has a hole where a date should be',
+    all.body.rows.every((x) => !/ \./.test(String(x.attribution_evidence || ''))
+      && !/was \.|on \.|至/.test(String(x.attribution_evidence || ''))),
+    JSON.stringify(all.body.rows.filter((x) => / \./.test(String(x.attribution_evidence || '')))
+      .map((x) => [x.plate, x.attribution_evidence])));
+}
+
+console.log('\n29. a contradicting booking FIVE DAYS out is disclosed, not just a six-hour one');
+{
+  /* REVERSION THAT PROVES THIS: point the later_other column in `tally` back at
+     the `others` CTE. L33305's hotel booking is five days before the journey
+     and `others` only reaches about twenty hours back, so the clause goes
+     silent and the row prints 'Thirteen Days Back' with no mention that
+     somebody else demonstrably had the car eight days after his last trip. */
+  const r = rowAt('L33305', '2026-09-14T08:00');
+  check('the rule still names the last Uber driver, as the operator asked',
+    r.attribution_tier === 'last_trip'
+    && r.attribution_responsible === 'Thirteen Days Back',
+    JSON.stringify([r.attribution_tier, r.attribution_responsible]));
+  check('…and the more recent booking by somebody ELSE is disclosed at five days out',
+    /One booking this rule does NOT read sits between that trip and the journey/
+      .test(r.attribution_evidence)
+    && /Five Days Back Hotel/.test(r.attribution_evidence)
+    && /5.0 days before the journey began/.test(r.attribution_evidence),
+    r.attribution_evidence);
+  check('…and it is disclosed as context, never as a change of name',
+    /does not change the name above/.test(r.attribution_evidence)
+    && !(r.attribution_candidates || []).some((c) => /Five Days Back/.test(c.name)),
+    JSON.stringify(r.attribution_candidates));
+}
+
+console.log('\n30. a broken clock is reported as a broken clock, in BOTH places');
+{
+  /* REVERSION THAT PROVES THIS: replace the no_last_reason CASE in
+     `responsible` with the old single branch, `WHEN named.last_people = 0 AND
+     named.ever_gap IS NOT NULL THEN 'Nobody — the trail is too old.'`. The
+     column starts blaming the age of a trip on a row whose own evidence blames
+     the tracker, which is the shape a reader acts on and gets wrong. */
+  const r = rowAt('L33306', '2026-09-14T08:00');
+  check('the clock refuses the rule, and the COLUMN says so rather than blaming the age',
+    r.attribution_responsible === 'Nobody — this car’s clock is untrustworthy.',
+    String(r.attribution_responsible));
+  check('…and the evidence sentence blames the same thing',
+    /a tracker 2339 minutes out of true cannot be compared/.test(r.attribution_evidence)
+    && !/the car has left the Uber channel/.test(r.attribution_evidence),
+    r.attribution_evidence);
+  check('…and the context name says the AGE is not what refused it',
+    r.attribution_last_uber_driver
+    && /The AGE is not what refused it/.test(r.attribution_last_uber_driver.means)
+    && /clock 2339 minutes behind wall time/.test(r.attribution_last_uber_driver.means)
+    && !/beyond the 31631-minute cap/.test(r.attribution_last_uber_driver.means),
+    String(r.attribution_last_uber_driver && r.attribution_last_uber_driver.means));
+  /* THE GENERAL FORM, over every row on the response rather than this one: the
+     column and the sentence are switched off ONE token now, so they can never
+     state different reasons. This is the assertion that would catch a seventh
+     absence being added to one and not the other. */
+  const said = (x) => String(x.attribution_responsible || '');
+  check('on EVERY absence on the response, the column and the sentence agree',
+    all.body.rows.filter((x) => /^Nobody — /.test(said(x))).every((x) => {
+      const e = String(x.attribution_evidence || '');
+      if (/clock is untrustworthy/.test(said(x))) return /out of true cannot be compared/.test(e);
+      if (/trail is too old/.test(said(x))) return /the car has left the Uber channel/.test(e);
+      if (/does not run on Uber/.test(said(x))) return /car on the wrong channel/.test(e);
+      if (/no booking of any kind/.test(said(x))) return /no booking identity at all/.test(e);
+      if (/history starts after the journey/.test(said(x))) return /none of it predates this journey/.test(e);
+      if (/no usable time/.test(said(x))) return /not one of them carries a usable timestamp/.test(e);
+      if (/name no driver/.test(said(x))) return /filed WITHOUT A DRIVER NAME/.test(e);
+      if (/was completed/.test(said(x))) return /otherwise not completed/.test(e);
+      if (/named and completed/.test(said(x))) return /not one of them is a NAMED, COMPLETED trip/.test(e);
+      if (/lookback/.test(said(x))) return /the lookback floor the rule scans on/.test(e);
+      return false;
+    }),
+    JSON.stringify(all.body.rows.filter((x) => /^Nobody — /.test(said(x)))
+      .map((x) => [x.plate, said(x)])));
+}
+
+console.log('\n31. the CONTEXT name ties too, and a tie is not a name');
+{
+  /* REVERSION THAT PROVES THIS: collapse ever_at and ever back into one CTE
+     with `ORDER BY t.ended_at DESC LIMIT 1`. The row names whichever of the two
+     the planner returned first as the singular "last Uber driver of record" —
+     which is the one sentence an operator ringing round would act on — and the
+     other human being disappears from the response entirely. */
+  const r = rowAt('L33307', '2026-09-14T08:00');
+  check('two drivers ending at one instant produce NO single last driver of record',
+    r.attribution_last_uber_driver
+    && r.attribution_last_uber_driver.name === null
+    && r.attribution_last_uber_driver.person_count === 2,
+    JSON.stringify(r.attribution_last_uber_driver));
+  check('…and BOTH are named, in name order, rather than one being hidden',
+    r.attribution_last_uber_driver.names === 'Aaron Context Tie, Bashir Context Tie'
+    && /NO SINGLE NAME/.test(r.attribution_last_uber_driver.means),
+    JSON.stringify(r.attribution_last_uber_driver));
+  check('…and the evidence sentence says the tie exists rather than picking one',
+    /ended at that very same instant/.test(r.attribution_evidence)
+    && /will not nominate one of them/.test(r.attribution_evidence),
+    r.attribution_evidence);
+  check('…and neither of them becomes a candidate',
+    (r.attribution_candidates || []).length === 0
+    && !(r.attribution_candidate_keys || []).some((k) => /context tie/.test(String(k))),
+    JSON.stringify([r.attribution_candidates, r.attribution_candidate_keys]));
+}
+
+console.log('\n32. a limit in the query is reported as a limit in the query');
+{
+  /* REVERSION THAT PROVES THIS: change the 'stale' arm of no_last_reason back
+     to `WHEN tally.ever_gap IS NOT NULL THEN 'stale'` and delete the
+     lookback_floor arm. The row then says "21.5 days before this journey. That
+     is beyond the 31631-minute cap (21.97 days)" — a clause contradicting its
+     own two numbers — and adds that the car has left the Uber channel, about a
+     car worked three weeks earlier. */
+  const r = rowAt('L33308', '2026-09-03T08:00');
+  check('a trip INSIDE the cap is never reported as too old',
+    r.attribution_responsible === 'Nobody — this query’s lookback, not the car’s record.'
+    && !/the car has left the Uber channel/.test(r.attribution_evidence),
+    `${r.attribution_responsible} :: ${r.attribution_evidence}`);
+  check('…and the sentence names the floor, and says it is the query’s reach not the car’s',
+    /INSIDE the 31631-minute cap/.test(r.attribution_evidence)
+    && /the lookback floor the rule scans on/.test(r.attribution_evidence)
+    && /This is the query’s reach, not the car’s record/.test(r.attribution_evidence),
+    r.attribution_evidence);
+  check('…and the context name says the same thing rather than blaming the age',
+    /The AGE is not what refused it/.test(r.attribution_last_uber_driver.means)
+    && /a limit in the query rather than a fact about the car/
+       .test(r.attribution_last_uber_driver.means),
+    r.attribution_last_uber_driver.means);
+  /* The gap really is inside the cap, so the old sentence was arithmetically
+     self-contradicting and not merely loose. */
+  check('…and the gap it is talking about really is inside the cap',
+    r.attribution_last_uber_driver.gap_min < STALE_CAP_MIN,
+    `${r.attribution_last_uber_driver.gap_min} vs ${STALE_CAP_MIN}`);
+}
+
+console.log('\n33. two causes are stated as two causes');
+{
+  /* REVERSION THAT PROVES THIS: restore WHY_NO_LAST's old branch order — the
+     `uber_prior = uber_nameless` equality before the cancellation branch. This
+     plate satisfies neither premise, falls through, and asserts "every earlier
+     Uber ride on L33309 was CANCELLED and carries no end time" about two trips
+     that completed normally and are merely anonymous in our record. */
+  const r = rowAt('L33309', '2026-09-14T08:00');
+  check('a car with BOTH anonymous and cancelled prior trips gets neither single-cause sentence',
+    !/every one of them is filed WITHOUT A DRIVER NAME/.test(r.attribution_evidence)
+    && !/every earlier Uber ride on L33309 that names a driver was CANCELLED/
+       .test(r.attribution_evidence),
+    r.attribution_evidence);
+  check('…and each count is stated on its own, with the right number against it',
+    /2 filed without a driver name/.test(r.attribution_evidence)
+    && /1 cancelled, rejected or otherwise not completed/.test(r.attribution_evidence)
+    && /HAS 3 Uber trip\(s\) before this journey/.test(r.attribution_evidence),
+    r.attribution_evidence);
+  check('…and the column says what was actually missing, not one of the two causes',
+    r.attribution_responsible
+      === 'Nobody — no earlier Uber trip here is both named and completed.',
+    String(r.attribution_responsible));
+}
+
+console.log('\n34. "filed against nobody" is a claim about the journey, so it is tested on the row');
+{
+  /* REVERSION THAT PROVES THIS: in last_uber_driver's means, replace the
+     tier-aware branch with the old unconditional clause "…and this journey is
+     filed against nobody's profile anywhere in the product." The response then
+     says a journey is attributed to nobody on the same row that files it
+     against Only Custodian Here and increments her "Named beside" tile. */
+  const r = rowAt('L33310', '2026-09-14T08:00');
+  check('the ladder does reach a person through custody on this row',
+    r.attribution_tier === 'sole_custodian'
+    && r.attribution_responsible === 'Only Custodian Here'
+    && (r.attribution_candidate_keys || []).length === 1,
+    JSON.stringify([r.attribution_tier, r.attribution_responsible,
+      r.attribution_candidate_keys]));
+  check('…so the context name does NOT claim the journey is filed against nobody',
+    r.attribution_last_uber_driver
+    && !/filed against nobody/.test(r.attribution_last_uber_driver.means)
+    && /This journey is NOT unattributed/.test(r.attribution_last_uber_driver.means)
+    && /Only Custodian Here/.test(r.attribution_last_uber_driver.means),
+    String(r.attribution_last_uber_driver && r.attribution_last_uber_driver.means));
+  check('…and the over-cap name is still returned, and still not a candidate',
+    r.attribution_last_uber_driver.name === 'Ancient Uber Driver'
+    && !JSON.stringify(r.attribution_candidates).includes('Ancient')
+    && !(r.attribution_candidate_keys || []).some((k) => /ancient/.test(String(k))),
+    JSON.stringify([r.attribution_last_uber_driver.name, r.attribution_candidates]));
+  /* THE GENERAL FORM. The phrase is a claim about the whole product's filing of
+     this journey, so it may appear only where nothing is filed. */
+  check('no row on the response claims to be filed against nobody while naming a candidate',
+    all.body.rows.every((x) => !(
+      /filed against nobody/.test(JSON.stringify(x.attribution_last_uber_driver || {}))
+      && (x.attribution_candidate_count || 0) > 0)),
+    JSON.stringify(all.body.rows
+      .filter((x) => /filed against nobody/
+        .test(JSON.stringify(x.attribution_last_uber_driver || {})))
+      .map((x) => [x.plate, x.attribution_candidate_count])));
+}
+
+console.log('\n35. a counterfactual is evaluated before it is asserted');
+{
+  /* REVERSION THAT PROVES THIS: restore the unconditional closing clause "so it
+     is reported as a bracket even though the last-trip rule would name the same
+     person". On this row the last-trip rule names TWO people and chooses
+     neither, so the sentence tells a reader the weaker rule agreed when the
+     weaker rule refused to answer. */
+  const r = rowAt('L33311', '2026-09-03T12:00');
+  check('the bracket still fires — a tie on the before side does not break it',
+    r.attribution_tier === 'bracketed'
+    && r.attribution_responsible === 'Bracketer Ecks'
+    && r.bracket_before_min === 30 && r.bracket_after_min === 30,
+    JSON.stringify([r.attribution_tier, r.attribution_responsible,
+      r.bracket_before_min, r.bracket_after_min]));
+  check('…and the row does NOT claim the last-trip rule would name the same person',
+    !/would name the same person/.test(r.attribution_evidence)
+    && !/the operator’s last-trip rule, run on the same car, names the same person/
+       .test(r.attribution_evidence),
+    r.attribution_evidence);
+  check('…it says what is true instead: that rule does not separate these two on its own',
+    /does NOT separate these two on its own/.test(r.attribution_evidence)
+    && /Bracketer Ecks, Tied Why/.test(r.attribution_evidence)
+    && /the trip on the FAR side of the journey that narrows it to one/
+       .test(r.attribution_evidence),
+    r.attribution_evidence);
+  /* …and where the two rules DO agree, the claim is still made, because the
+     fix is a weaker SENTENCE and not a removed one. */
+  const agree = rowAt('L44305', '2026-09-03T08:28') && rowAt('L45243', '2026-08-24T05:33');
+  check('…while a bracket the last-trip rule DOES corroborate still says so',
+    /names the same person/.test(agree.attribution_evidence),
+    agree.attribution_evidence);
+}
+
+console.log('\n36. a measurement is quoted only inside the band it was measured in');
+{
+  /* REVERSION THAT PROVES THIS: make the corroborating figure unconditional
+     again. The row then prints "Measured over 120 journeys the two disagree on
+     2, and both were read off a trip more than six months old" directly beneath
+     a name it read off a 13-day-old trip that day-custody contradicts — a
+     self-refuting reassurance next to an accusation. */
+  const r = rowAt('L33312', '2026-09-14T08:00');
+  check('the disagreement with day-custody is stated outright, not hidden',
+    r.attribution_tier === 'last_trip'
+    && /Day-custody DISAGREES/.test(r.attribution_evidence)
+    && /Today Custodian Only/.test(r.attribution_evidence),
+    r.attribution_evidence);
+  check('…and the 0-of-120 figure is NOT quoted on a row that falsifies it',
+    !/the two disagree on 2/.test(r.attribution_evidence),
+    r.attribution_evidence);
+  check('…the row says the measurement does not cover this shape, and why',
+    /does NOT cover this shape and must not be quoted here/.test(r.attribution_evidence)
+    && /it counted disagreements at 0 of 120 under the cap, and this is one/
+       .test(r.attribution_evidence)
+    && /13.0 days old/.test(r.attribution_evidence),
+    r.attribution_evidence);
+}
+
+console.log('\n37. the response says what its own aggregate spans, and what its rows are');
+{
+  /* Not a sentence on a row: three claims the DRIVER endpoint makes about its
+     own two lists. api/public/segments.js states the rule this endpoint was
+     breaking — "One column per rung of the ladder, and they are never added
+     together" — while `attributed.total` sums three rungs of different strength
+     under one amber tile.
+
+     REVERSION THAT PROVES THIS: delete total_basis, rows_are_not_trips and
+     tiers from api/unauthorized_routes.js, and restore also_a_candidate's
+     heading to 'Cars this person held on a day an unexplained journey
+     happened'. Every assertion in this block fails. */
+  const d = await get(`/api/driver/unauthorized?id=u-sami&${WIN}`);
+  check('the driver endpoint answers', d.status === 200, String(d.status));
+  check('the attributed total says outright that it spans three rungs of different strength',
+    /THREE RUNGS OF DIFFERENT STRENGTH/.test(d.body.attributed.total_basis || '')
+    && /must not be quoted on its own/.test(d.body.attributed.total_basis || '')
+    && /Read by_tier, not this number/.test(d.body.attributed.total_basis || ''),
+    String(d.body.attributed.total_basis));
+  check('…and it names the three counts it is the sum of, so the split is checkable',
+    d.body.attributed.total === (d.body.attributed.by_tier.bracketed
+      + d.body.attributed.by_tier.last_trip + d.body.attributed.by_tier.sole_custodian)
+    && new RegExp(`${d.body.attributed.by_tier.last_trip} by the operator’s`)
+      .test(d.body.attributed.total_basis || ''),
+    JSON.stringify([d.body.attributed.total, d.body.attributed.by_tier]));
+  check('…and it tells a renderer not to give the mixed figure a verdict colour',
+    /must not give it a verdict colour/.test(d.body.attributed.total_basis || ''),
+    String(d.body.attributed.total_basis));
+  /* The interleave: driver.js sorts these rows into the person's own trip
+     ledger, and its comment enumerates the TWO rungs that existed before the
+     operator's rule. The membership is data now, and the obligation is stated. */
+  check('the list declares which rungs it holds, as data rather than as prose',
+    Array.isArray(d.body.attributed.tiers)
+    && d.body.attributed.tiers.join() === 'bracketed,last_trip,sole_custodian',
+    JSON.stringify(d.body.attributed.tiers));
+  check('…and says outright that these rows are not things this person did',
+    /NO booking, placed beside this person by an inference/
+      .test(d.body.attributed.rows_are_not_trips || '')
+    && /must show attribution_tier on every one of them/
+       .test(d.body.attributed.rows_are_not_trips || '')
+    && /must not caption the mixed table as a complete record/
+       .test(d.body.attributed.rows_are_not_trips || ''),
+    String(d.body.attributed.rows_are_not_trips));
+  /* The ambiguous tier has a second entrance — a TIE on the last Uber trip,
+     where the candidates come from the trip table and not from custody — and
+     these two strings described day-custody only, directly contradicting the
+     row's own "Day-custody is NOT used to break this tie". */
+  check('the candidate list no longer claims custody is why somebody is on it',
+    !/Cars this person held on a day an unexplained journey happened/
+      .test(d.body.also_a_candidate.heading)
+    && /one of several candidates for/.test(d.body.also_a_candidate.heading),
+    String(d.body.also_a_candidate.heading));
+  /* Asserted against a person who actually HAS an ambiguous row, so the
+     populated branch of `means` is the one being read. */
+  const amb = await get(`/api/driver/unauthorized?id=u-waseem&${WIN}`);
+  check('…and its meaning covers both entrances to the ambiguous tier',
+    amb.body.also_a_candidate.total > 0
+    && /The evidence reaches this person and it reaches somebody else/
+      .test(amb.body.also_a_candidate.means)
+    && /ended at the very same instant/.test(amb.body.also_a_candidate.means),
+    `${amb.body.also_a_candidate.total} :: ${amb.body.also_a_candidate.means}`);
+  /* The rule string on the fleet response claims COMPLETED, and that claim is
+     only true now that last_near actually applies COMPLETED(). */
+  check('the fleet response’s rule string claims completed-only, and the SQL now honours it',
+    /most recent COMPLETED Uber trip/.test(all.body.last_trip.rule || ''),
+    String(all.body.last_trip.rule));
+}
+
+console.log('\n39. a NULL request time never turns a ten-month-old trail into "no history yet"');
+{
+  /* REVERSION THAT PROVES THIS: in hist, change uber_prior back to
+     `count(*) FILTER (… AND t.requested_at <= ${o}.started_at)` and
+     uber_first_at back to `min(t.requested_at) FILTER (…)`. L33313 reports
+     uber_prior = 0, takes the "history postdates this journey" branch, and
+     prints "the first Uber trip on this car was ." — a false statement about
+     the car with a typographical hole where format() rendered the NULL. */
+  const r = rowAt('L33313', '2026-08-31T04:00');
+  check('the true reason is the AGE of the trip, not an absence of one',
+    r.attribution_responsible === 'Nobody — the trail is too old.'
+    && /ended 304.1 days before this journey began, on 2025-10-31/
+       .test(r.attribution_evidence),
+    `${r.attribution_responsible} :: ${r.attribution_evidence}`);
+  check('…and it is never described as a car whose Uber history postdates the journey',
+    !/none of it predates this journey/.test(r.attribution_evidence)
+    && !/had not happened yet/.test(r.attribution_evidence),
+    r.attribution_evidence);
+  check('…and the refused name is still reported as context',
+    r.attribution_last_uber_driver
+    && r.attribution_last_uber_driver.name === 'Old And No Request Time',
+    JSON.stringify(r.attribution_last_uber_driver));
+}
+
+console.log('\n40. a trip with no usable timestamp gets its own sentence, and no invented date');
+{
+  /* REVERSION THAT PROVES THIS: delete the `AND tally.uber_first_at IS NOT
+     NULL` guard from the no_prior arm of no_last_reason and remove the
+     'undateable' arm. L33314 falls into the no_prior branch and renders a NULL
+     through to_char(), which format() prints as an empty string — the same trap
+     ROSTER_CLAUSE records having been bitten by once, and the reason that
+     guard is on the VALUE rather than on the formatted sentence. */
+  const r = rowAt('L33314', '2026-08-31T04:00');
+  check('a car whose Uber rows carry no times at all says so, and prints no date',
+    r.attribution_responsible === 'Nobody — this car’s Uber trips carry no usable time.'
+    && /not one of them carries a usable timestamp/.test(r.attribution_evidence)
+    && /no date is printed here because this product does not hold one/
+       .test(r.attribution_evidence),
+    `${r.attribution_responsible} :: ${r.attribution_evidence}`);
+  check('…and it is NOT reported as a car whose history postdates the journey',
+    !/none of it predates this journey/.test(r.attribution_evidence),
+    r.attribution_evidence);
+  check('…and no date-shaped hole is left anywhere in the sentence',
+    !/was \./.test(r.attribution_evidence) && !/ \./.test(r.attribution_evidence),
+    r.attribution_evidence);
 }
 
 /* CLOSE THE SERVER AND THE DATABASE, AND EXIT EXPLICITLY.

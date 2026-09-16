@@ -62,6 +62,7 @@ const build = (rows) => page.evaluate(async (rs) => {
       text: td.textContent.replace(/\s+/g, ' ').trim(),
       html: td.innerHTML,
       tag: (td.querySelector('.tag') || {}).textContent || null,
+      tagClass: (td.querySelector('.tag') || {}).className || '',
       links: [...td.querySelectorAll('a.ent')].map((a) => ({ href: a.getAttribute('href'), text: a.textContent })),
       title: (td.querySelector('.tag') || {}).title || '',
     };
@@ -109,6 +110,19 @@ const unknown = base({
   nearest_booking: { platform: 'uber', external_id: 'fa66c89c', name: WASEEM.name,
     id: WASEEM.id, key: WASEEM.key, gap_min: 97 },
 });
+/* The operator's own rule, which is the rung that carries most of this list
+   and which this page had no label for at all — it was added to the ladder in
+   api/unauthorized_sql.js and TIER_LABEL/TIER_SHORT were not updated with it,
+   so a row on it printed its raw key. */
+const lastTrip = base({
+  plate: 'L45235',
+  attribution_tier: 'last_trip', attribution_candidates: [ZAIN],
+  attribution_candidate_count: 1, attribution_candidate_keys: [ZAIN.key],
+  attribution_evidence: 'The last Uber trip on L45235 before this journey was Zain Hassan Raja '
+    + 'Nasrullah Khan’s, ending 44 minutes earlier. That is the operator’s rule, and it is an '
+    + 'inference from this car’s Uber record rather than a record of this journey.',
+  attribution_last_trip_gap_min: 44, custodian_count: 2,
+});
 const sole = base({
   plate: 'L44251',
   attribution_tier: 'sole_custodian', attribution_candidates: [WASEEM],
@@ -133,6 +147,53 @@ check('the four rungs render as four different words',
    title and the sentence that makes a tier checkable disappears silently. */
 check('the tier carries the evidence sentence a reader can check',
   four.cells.every((c) => c.title.length > 40), JSON.stringify(four.cells.map((c) => c.title.length)));
+
+/* ── NO COLOUR RAMP DOWN A COLUMN OF PEOPLE ────────────────────────────────
+   TIER_TONE was { bracketed: 'ok', sole_custodian: null, ambiguous: 'warn',
+   unknown: 'dim' }. In this product a tone IS a verdict: a green tag beside a
+   named person reads as "confirmed" when the green rung is still an inference,
+   and an amber one on `ambiguous` reads as "this one is suspicious" when it
+   actually means "nothing separates these people". Together they ranked four
+   people by how strongly the product suspected them — the one choice the
+   ladder refuses to make. api/public/driver.js renders the same ladder
+   deliberately uncoloured and says why in a block comment; two surfaces, one
+   ladder, one claim.
+
+   REVERSION THAT PROVES THIS: set TIER_TONE.bracketed back to 'ok' and
+   TIER_TONE.ambiguous back to 'warn' in api/public/segments.js. Both
+   assertions below fail. */
+console.log('\nno tone ranks one named person above another');
+check('no tier tag beside a name carries a good or a bad colour',
+  four.cells.every((c) => !/\b(ok|bad|warn)\b/.test(c.tagClass)),
+  JSON.stringify(four.cells.map((c) => [c.tag, c.tagClass])));
+check('…and the distinction is carried in the words instead',
+  new Set(four.cells.map((c) => c.tag)).size === four.cells.length,
+  JSON.stringify(four.cells.map((c) => c.tag)));
+
+/* ── THE UNKNOWN CELL SAID THE SAME WORD TWICE ────────────────────────────
+   The branch read `if (!cands.length)` and printed the tier tag followed by
+   "nobody can be named". TIER_SHORT.unknown is the single word "nobody", so
+   the one row on the page where nobody can be named — the row a reader looks
+   hardest at — rendered "NOBODY nobody can be named".
+
+   REVERSION THAT PROVES THIS: key the branch on `!cands.length` again and
+   return `${tag} …nobody can be named`. This assertion fails. */
+console.log('\nthe row where nobody can be named says it once');
+check('the unknown cell does not print the word "nobody" twice',
+  (four.cells[3].text.match(/nobody/gi) || []).length === 1, four.cells[3].text);
+
+/* ── THE OPERATOR'S OWN RULE HAS A LABEL ──────────────────────────────────
+   REVERSION THAT PROVES THIS: remove `last_trip` from TIER_SHORT in
+   api/public/segments.js. The cell falls back to the raw key. */
+console.log('\nthe operator’s rule is a rung with words, not a raw key');
+const five = await build([lastTrip]);
+check('a last_trip row renders a label rather than its own database key',
+  five.cells[0].tag && five.cells[0].tag !== 'last_trip'
+  && /trip/i.test(five.cells[0].tag), five.cells[0].tag);
+check('…and the name it produced is still printed and still linked',
+  five.cells[0].links.length === 1
+  && five.cells[0].links[0].href.includes('#driver/u-zain'),
+  JSON.stringify(five.cells[0].links));
 
 console.log('\nambiguous: every candidate, joined by "or", and never a likeliest');
 
@@ -215,6 +276,31 @@ check('with no attribution anywhere the heading stays "Driver that day"',
   plain.whoHead === 'Driver that day', plain.whoHead);
 check('and both custodians are still printed and still linked',
   plain.cells[0].links.length === 2, plain.cells[0].text);
+
+/* ── THE OTHER SURFACE'S EVIDENCE CELL MUST NOT NAME THE NEAREST BOOKING ──
+   api/public/driver.js segEvidence() used to end `… The booking is on Uber,
+   driven by <name>.` The server's own `means` string, printed immediately
+   before it, ends "…so this name is deliberately absent from the candidate
+   list above" — so the UI printed the name the sentence had just said was
+   withheld, LAST, directly beneath the stacked candidate list, on a panel
+   whose warn box reads "Nobody is accused here". The nearest booking is very
+   often one of those candidates, so a reader who read the paragraph to the end
+   was handed the tiebreaker the ladder had refused to make. This page has
+   never printed it (rule 3 above); the driver page did.
+
+   Asserted against the shipped module's SOURCE rather than its DOM, because
+   segEvidence is module-private there and exporting it to test it would widen
+   a surface for a test's sake. The two guards below are the two forms the
+   defect can take.
+
+   REVERSION THAT PROVES THIS: restore `driven by ${esc(nb.name)}` in
+   segEvidence(). Both assertions fail. */
+console.log('\nthe driver page’s evidence cell never names the nearest booking’s driver');
+const driverSrc = await (await fetch(`http://127.0.0.1:${port}/driver.js`)).text();
+check('segEvidence does not interpolate the nearest booking’s name',
+  !/nb\.name/.test(driverSrc), 'api/public/driver.js still reads nb.name');
+check('…and no rendered line says "driven by"',
+  !/driven by \$\{/.test(driverSrc), 'api/public/driver.js still prints "driven by"');
 
 await browser.close();
 server.close();

@@ -169,8 +169,15 @@ function componentTree(components) {
     const key = `${c.parent || ''}|${c.category}`;
     const cur = agg.get(key)
       || { label: String(c.category).replace(/_/g, ' '), parent: c.parent || null,
-        amount: 0, currency: c.currency, drivers: null };
-    cur.amount += +c.amount || 0;
+        amount: 0, currency: c.currency, drivers: null, measured: false };
+    /* AGGREGATED FROM A ZERO SEED, SO A CATEGORY NOBODY VALUED CAME OUT AT
+       NOUGHT. Every contributing row carrying a null amount left `cur.amount`
+       at its seed, and the category was then drawn as a zero-length bar and
+       added into the "net to" caption below — a component that does not exist,
+       presented as one that netted out. `measured` records whether ANY row
+       behind this category carried a figure, which is the same shape the
+       `drivers` line two below already uses for the same reason. */
+    if (c.amount != null) { cur.amount += +c.amount || 0; cur.measured = true; }
     /* How many people a component covers. The endpoint aggregates to the fleet
        now, so this is the one thing the fold would otherwise destroy — and it
        is the difference between a deduction everybody carries and one that
@@ -182,24 +189,52 @@ function componentTree(components) {
   const all = [...agg.values()];
   const roots = all.filter((c) => !c.parent).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
   const kids = all.filter((c) => c.parent);
+  /* Only the categories something actually valued reach a bar. An unmeasured
+       category is named in words underneath instead, because a bar of zero
+       length and a bar drawn from nothing are indistinguishable on screen and
+       one of them is a claim. */
+  const say = (list) => list.map((c) => c.label).join(', ');
   if (!roots.length) {
     /* Every row names a parent we were not given: chart them flat rather than
        drawing nothing, and say that the nesting is missing. */
-    hbars(host, kids.map((c) => ({ label: `${c.parent} · ${c.label}`, n: c.amount })),
+    const kmeas = kids.filter((c) => c.measured);
+    if (!kmeas.length) {
+      host.append(note(`No top-level component was returned for this window, and not one of the `
+        + `${countOf(kids.length, 'component')} that were carries an amount. Nothing is drawn: these `
+        + 'are components the statements named without valuing, not components worth nothing.'));
+      return host;
+    }
+    hbars(host, kmeas.map((c) => ({ label: `${c.parent} · ${c.label}`, n: c.amount })),
       { valueFmt: (v) => money(v),
         legend: [['--b400', 'added to the payout'], ['--s2', 'deducted (cash already taken, fees)']] });
     host.append(el('p', 'cap', 'No top-level component was returned for this window, so these are drawn '
-      + 'flat. They are parts of a payout, not the payout.'));
+      + 'flat. They are parts of a payout, not the payout.'
+      + (kmeas.length < kids.length
+        ? ` ${countOf(kids.length - kmeas.length, 'further component')} carries no amount at all and `
+          + `${plural(kids.length - kmeas.length, 'is', 'are')} left off rather than drawn at nought.`
+        : '')));
     return host;
   }
-  hbars(host, roots.map((c) => ({ label: c.label, n: c.amount })), {
+  const rmeas = roots.filter((c) => c.measured);
+  if (!rmeas.length) {
+    host.append(note(`The statements for this window name ${countOf(roots.length, 'top-level component')} `
+      + `— ${say(roots)} — and put an amount on none of them. Nothing is charted, because a bar would `
+      + 'be a length nobody measured, and there is no net to state over figures that were never taken.'));
+    return host;
+  }
+  hbars(host, rmeas.map((c) => ({ label: c.label, n: c.amount })), {
     valueFmt: (v) => money(v),
     legend: [['--b400', 'added to the payout'], ['--s2', 'deducted (cash already taken, fees)']],
   });
-  const net = roots.reduce((a, c) => a + c.amount, 0);
+  const net = rmeas.reduce((a, c) => a + c.amount, 0);
   host.append(el('p', 'cap',
-    `The ${countOf(roots.length, 'top-level component')} above net to ${money(net)}. `
-    + 'Everything below is inside one of them and is not added again.'));
+    `The ${countOf(rmeas.length, 'top-level component')} above net to ${money(net)}. `
+    + 'Everything below is inside one of them and is not added again.'
+    + (rmeas.length < roots.length
+      ? ` ${countOf(roots.length - rmeas.length, 'further top-level component')} — `
+        + `${say(roots.filter((c) => !c.measured))} — ${plural(roots.length - rmeas.length, 'carries', 'carry')} `
+        + 'no amount and is not drawn, so this net is over the components that were valued.'
+      : '')));
   if (kids.length) {
     const byParent = new Map();
     kids.forEach((c) => {
@@ -635,13 +670,30 @@ function setHeader(detail) {
       esc(named ? `${DOW_LONG[dow]} ${hourStr(hour)}` : state.param || '')}</b>`;
     crumb.style.display = 'flex';
   } else if (state.view === 'segments' || state.view === 'segment') {
+    /* THE THREE LABELS FOLLOW WHAT THE ADDRESS NOW MEANS.
+       ─────────────────────────────────────────────────────────────────────
+       This branch was written when #segments meant verdict=all, and it was not
+       updated when the bare address became the fleet-wide unauthorized list.
+       The rail row registered above calls it "All unauthorized trips"; the h1
+       said "Occupancy segments", the sub-line said "Every interval the seat
+       sensor called occupied, and how each one resolved", and the breadcrumb
+       tail said "all segments" — three labels describing a different page from
+       the one on screen, over a body that says "Showing every unexplained
+       journey". The breadcrumb was also the only thing in the product calling
+       a ten-row unauthorized list "all segments". */
     const one = state.view === 'segment';
-    $('#viewTitle').textContent = one ? (state.param || 'Occupancy segment') : 'Occupancy segments';
+    const everything = state.param === 'verdict' && state.sub === 'all';
+    $('#viewTitle').textContent = one ? (state.param || 'Occupancy segment')
+      : everything ? 'Occupancy segments' : 'All unauthorized trips';
     $('#viewSub').textContent = one
       ? 'One interval the seat sensor called occupied, and everything around it'
-      : 'Every interval the seat sensor called occupied, and how each one resolved';
+      : everything
+        ? 'Every interval the seat sensor called occupied, and how each one resolved'
+        : 'Every journey the seat sensor recorded that no booking explains, and who the '
+          + 'evidence names — every name on it an inference, with the rule that produced it';
     crumb.innerHTML = `<a href="${href('unauthorized')}">Unauthorized trips</a><span>/</span>`
-      + `<b>${esc(one ? state.param || '' : [state.param, state.sub].filter(Boolean).join(' ') || 'all segments')}</b>`;
+      + `<b>${esc(one ? state.param || ''
+        : [state.param, state.sub].filter(Boolean).join(' ') || 'unauthorized')}</b>`;
     crumb.style.display = 'flex';
   } else if (state.view === 'property') {
     const tab = PROPERTY_TABS.find((t) => t.id === (state.sub || 'overview')) || PROPERTY_TABS[0];
@@ -2415,8 +2467,24 @@ async function platformFunnel(root) {
     { label: 'Completed', value: fmt(completed), sub: accepted ? pct((completed / accepted) * 100, 1) + ' of accepted' : null },
     { label: 'Lost before it started', value: fmt(offered - accepted),
       sub: 'offered and not accepted', tone: offered - accepted > 0 ? 'warn' : null },
-    { label: 'Platform commission', value: money(sum('commission_cost')),
-      sub: 'what the channel kept' },
+    /* `money(sum('commission_cost'))` over a reduce seeded at 0 with `+r[k] || 0`.
+       The guard above only proves every row reports an OFFER COUNT — Yango and
+       Bolt publish offers and commission on different surfaces, so
+       commission_cost can be null on every row of a `live` list that is not
+       empty, and the tile then read "AED 0" under "what the channel kept". That
+       is a claim that the channel kept nothing, made from rows that say nothing
+       about what it kept. Tested for presence the same way driver.js's
+       statement table drops a structurally empty column. */
+    (() => {
+      const withCost = live.filter((r) => r.commission_cost != null);
+      return { label: 'Platform commission',
+        value: withCost.length ? money(sum('commission_cost')) : '\u2014',
+        sub: withCost.length
+          ? `what the channel kept, over the ${fmt(withCost.length)} of ${fmt(live.length)} records `
+            + 'that report it'
+          : 'no record in this window reports what the channel kept — the offer counts above and the '
+            + 'commission are published on different surfaces, so this is absent rather than nought' };
+    })(),
   ]));
   const fnp = panel(`Jobs offered and completed, per driver — ${countOf(live.length, 'record')}`,
     'One row per driver per reporting period, as the channel published it. Rates within a row are '
@@ -2717,13 +2785,32 @@ V.finance = async (root) => {
        and was read as the cash the fleet is holding — it is the value of 1.1%
        of those bookings. The coverage moved into the label, where it cannot be
        skipped, and the tile links to the page that lists who holds it. */
+    /* THE FLEET-LEVEL TWIN OF api/public/driver.js's cash tile, and the same
+       collapse.
+       ═══════════════════════════════════════════════════════════════════════
+       It read `cash ? … : money(0)`. `cash` is the cash settlement class from
+       /api/settlement, and its absence has TWO causes the expression cannot
+       separate:
+
+         (a) this range HAS bookings and none of them settled in cash. AED 0 is
+             a measurement of the cash taken, and is correct.
+         (b) this range has no booking of any kind. Nothing was measured, and
+             AED 0 asserts a count that was never taken.
+
+       The distinguishing fact was already in scope: `k` is /api/kpis for this
+       same range and carries the range's own booking count. The sub-line has
+       the same fault — "no cash booking in this range" is true in case (b) and
+       narrower than what happened, because no booking of ANY kind was in it. */
     { label: 'Cash collected — measured portion',
-      value: cash ? (cash.revenue == null ? 'not reported' : money(cash.revenue)) : money(0),
+      value: cash ? (cash.revenue == null ? 'not reported' : money(cash.revenue))
+        : (+k.trips > 0 ? money(0) : '\u2014'),
       sub: cash
         ? `the ${fmt(cash.priced_trips)} of ${fmt(cash.trips)} cash bookings that report a fare `
           + `(${pct(cash.trips ? (cash.priced_trips / cash.trips) * 100 : 0, 1)}) — the rest are `
           + 'real money with no figure attached'
-        : 'no cash booking in this range',
+        : +k.trips > 0
+          ? `none of the ${fmt(k.trips)} bookings in this range was paid in cash`
+          : 'no booking of any kind falls in this range, so no cash was measured either way',
       tone: cash && cash.priced_trips < cash.trips ? 'warn' : null },
     { label: 'Tips', value: tipTotal ? money(tipTotal) : '—',
       sub: fareTotal
@@ -3035,18 +3122,45 @@ V.finance = async (root) => {
     /* Signed. Math.abs() made platform fees and VAT — money going out — read
        as credits in the same colour as the bonuses beside them, and dropped
        the net total that says whether the ledger is a cost or an income. */
-    const ledRows = ledger.slice(0, 12);
-    hbars(led.body, ledRows.map((r) => ({ label: String(r.category).replace(/_/g, ' '), n: +r.amount || 0, n_rows: r.n })), {
+    /* `n: +r.amount || 0` drew a ledger category whose amount is NULL as a
+       zero-length bar labelled with the category name and the literal text "0"
+       — reading as a category that netted to nothing, beside categories that
+       genuinely did. charts.js hbars() cannot tell the two apart (it repeats
+       the same coercion), so the split is made here: only categories carrying
+       an amount are charted, and the rest are named underneath. `r.n` is
+       already on the row as the number of ledger lines behind the category, so
+       a category with lines and no amount can be described exactly. */
+    const priced = ledger.filter((r) => r.amount != null);
+    const unpriced = ledger.filter((r) => r.amount == null);
+    if (!priced.length) {
+      /* Rows exist and not one of them carries a figure. hbars() handed an
+         empty list would print the generic "Nothing to show", which is the
+         wrong fact — the ledger is not empty, it is unvalued. */
+      led.body.append(note(`The ledger holds ${countOf(ledger.length, 'category', 'categories')} for `
+        + 'this range and no amount on any line of any of them. Nothing is charted, because a bar '
+        + 'would be a length nobody measured; this is a ledger nobody valued, not a ledger of '
+        + 'noughts.'));
+      return;
+    }
+    const ledRows = priced.slice(0, 12);
+    hbars(led.body, ledRows.map((r) => ({ label: String(r.category).replace(/_/g, ' '), n: +r.amount, n_rows: r.n })), {
       valueFmt: (v) => money(v),
       legend: [['--b400', 'paid to the fleet'], ['--s2', 'taken from the fleet']] });
-    const net = ledger.reduce((a, r) => a + (+r.amount || 0), 0);
+    const net = priced.reduce((a, r) => a + (+r.amount || 0), 0);
     const plats = [...new Set(ledger.map((r) => r.platform).filter(Boolean))];
     led.body.append(el('p', 'cap',
-      `Net across ${countOf(ledger.length, 'category', 'categories')}: `
+      `Net across ${countOf(priced.length, 'category', 'categories')}: `
       + `${net < 0 ? '−' : ''}${money(Math.abs(net))}`
       + (plats.length ? ` · reported by ${plats.map(sourceLabel).join(', ')}` : '')
       + '. Negative rows are deductions — commission, VAT, adjustments — and are drawn as deductions '
-      + 'rather than as magnitudes.'));
+      + 'rather than as magnitudes.'
+      + (unpriced.length
+        ? ` ${countOf(unpriced.length, 'further category', 'further categories')} `
+          + `${plural(unpriced.length, 'appears', 'appear')} in the ledger with no amount on any of `
+          + `${plural(unpriced.length, 'its', 'their')} lines, and ${plural(unpriced.length, 'is', 'are')} `
+          + 'left off this chart rather than drawn at nought — a category nobody valued is not a '
+          + 'category that netted to nothing.'
+        : '')));
   } else empty(led.body, 'Ledger fills once Yango/Bolt credentials are set');
 };
 

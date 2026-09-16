@@ -176,8 +176,24 @@ console.log('\nrule 4: a trip leads to its telemetry');
   for (const f of UI) {
     const src = readFileSync(`api/public/${f}`, 'utf8');
     if (!src.includes("key: 'pickup_addr'")) continue;
-    for (const m of src.matchAll(/label: '(?:Requested|When)', key: 'requested_at', render: \(r\) => ([^,}]+)/g)) {
-      if (!/tripTime/.test(m[1])) offenders.push(`${f}: ${m[1].trim()}`);
+    /* THE WHOLE RENDERER, NOT ITS FIRST FRAGMENT.
+       ─────────────────────────────────────────────────────────────────────
+       This captured `([^,}]+)` — everything up to the first comma or brace —
+       which is fine for a one-expression cell and wrong for a branching one.
+       api/public/driver.js's Requested cell now opens with a marker pill for a
+       journey no channel booked, so the first comma falls inside
+       `pill('no booking', 'bad', …)` and the capture ended before either
+       branch reached tripTime. The guard reported an offender over a cell that
+       calls tripTime in BOTH of its branches: a false failure, which is worse
+       than no guard, because the next person to see it will edit the page to
+       satisfy the regex.
+
+       The window is the rest of the column object, bounded generously. What is
+       being asserted is unchanged — a trips table's timestamp is a door to
+       that car's replay of the day — only the text it is asserted over. */
+    for (const m of src.matchAll(/label: '(?:Requested|When)', key: 'requested_at', render: \(r\) =>/g)) {
+      const body = src.slice(m.index, m.index + 1400);
+      if (!/tripTime/.test(body)) offenders.push(`${f}: ${body.slice(0, 120).trim()}`);
     }
   }
   check('every trips table opens its telemetry on click', offenders.length === 0, offenders.join(' | '));
