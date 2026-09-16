@@ -983,6 +983,19 @@ the driver, vehicle and roster pages — all wide expression-heavy scans, the
 shape that clears `jit_above_cost`. JIT repays its compile over millions of
 rows; the largest table here is 175,000.
 
+**What the global setting is NOT yet proven to have done, stated rather than
+glossed.** Every page measured after it is healthy — `drivers/directory` 3.6 s,
+`platforms` 2.8 s, `reconcile` 2.5 s, `vehicles` 1.8 s, `unauthorized/list`
+0.9 s, `unauthorized/summary` 0.9 s, `finance/payouts` 0.5 s. The one page
+heavy enough for JIT to have been earning its compile is `/api/kpis`, and five
+consecutive samples of `days=30` with JIT off came back **13.3, 16.2, 13.5,
+9.1, 9.6 s**. The single reading taken before the change was 9.4 s, which sits
+inside that spread — so **this does not establish either a regression or its
+absence**, and it is not reported as one. Settling it needs the A/B: set
+`PG_JIT=on` in the app's environment, re-sample the same endpoint, set it back.
+That is what the escape hatch is for, and it is why the setting is an env var
+rather than a constant.
+
 **Proven on production 2026-09-16**, by the same measurement that found it —
 the empty-window curl, which separates fixed cost from per-row cost in one
 request. All three rows above are now `deployed, proven`:
@@ -1014,7 +1027,27 @@ better name.
 
 | # | what | fix | state |
 |---|---|---|---|
-| — | `statusJoin()`'s person→accounts lookup scanned an index end to end, once per candidate per segment | `api/unauthorized_sql.js` — the two arms UNIONed so each gets its own index (`trip_person_key_idx`, `trip_driver_requested_idx`), plus the `person_key <> ''` the PARTIAL index needs to be applicable | written, committed — **deploy and proof pending** |
+| — | `statusJoin()`'s person→accounts lookup scanned an index end to end, once per candidate per segment | `api/unauthorized_sql.js` — the two arms UNIONed so each gets its own index (`trip_person_key_idx`, `trip_driver_requested_idx`), plus the `person_key <> ''` the PARTIAL index needs to be applicable | written, committed, deployed, **proven** |
+
+**Proven on production 2026-09-16.** The same node in the same plan:
+
+```
+before  -> Index Only Scan using trip_econ_day_idx on trip t3
+           (actual time=692.331..1770.390 rows=1842 loops=28)   49.6 s total
+after   -> Index Scan using trip_person_key_idx on trip t3
+           (actual time=0.493..19.352 rows=1897 loops=27)         0.52 s total
+```
+
+End to end, at the page's own `limit=200` — every row the operator actually
+receives, not `limit=1`:
+
+| request | before this session | after |
+|---|---|---|
+| `attributed?days=1` (6 rows) | 98.6 s | **1.34 s** |
+| `attributed?days=16` (71 rows) | HTTP 500 after 121 s | **10.04 s** |
+| `attributed?days=30` (124 rows) | 84.1 s @ limit=1 | **11.82 s** |
+| `attributed?days=30&tier=last_trip` (70 rows) | 37.1 s | **7.15 s** |
+| `driver/unauthorized?days=30` | 99.1 s | **28.3 s** |
 
 **Proof method.** `test/status_join_arms.test.mjs` runs the OLD form and the
 NEW form side by side over a fixture carrying every shape the column can be in
@@ -1027,10 +1060,41 @@ rows, and "the suite still passes" is not that proof. Removing the
 
 See `docs/COVERAGE.md` traps.
 
-**Still open, and now measurable.** The ladder's real cost was never established,
-because a 67-second floor was hiding it. With the floor gone, the per-segment
-cost is whatever the same curls now report; the four unbounded per-plate reads
-(`api/unauthorized_sql.js` `ever_at`, `ever`, `later_other`, `hist`) and the
-three materialisations of `attributionJoin()` are where to look if it is still
-too slow. Do not bound them blindly: `sql/schema_v72.sql`'s header records why a
-hard-coded lookback would trade a performance fix for an honesty one.
+**Still open, and no longer a guess — this is where the remaining 11.8 s is.**
+Re-profiled after all three fixes, `days=30` at `limit=200`, Execution Time
+11,929 ms:
+
+```
+9085 ms  loops=124  -> Aggregate (actual time=73.265..73.266 rows=1 loops=124)
+4357 ms  loops=124     -> Index Scan using trip_plate_idx on trip t
+                          (actual time=0.258..35.140 rows=2210 loops=124)
+ 675 ms  loops=31   -> Index Scan using trip_plate_idx on trip t_7  (rows=0)
+ 420 ms  loops=39   -> Index Scan using trip_plate_idx on trip t_16 (rows=0)
+ 523 ms  loops=27   -> Index Scan using trip_person_key_idx on trip t3   <- the fixed one
+```
+
+**76% of what is left is the `hist` CTE** — the whole plate's history across
+every channel, 2,210 rows fetched and aggregated once per SEGMENT rather than
+once per PLATE, 124 times over perhaps twenty distinct cars. The two `rows=0`
+scans beneath it are `later_other` and the `other_platform` probe, each also
+unbounded on the plate.
+
+Two routes out, neither of them free, both now measurable rather than argued:
+
+1. **Scan each plate once, not each segment.** Most of `hist` is per-plate
+   (`uber_trips`, `other_trips`, `other_people`); the rest is genuinely keyed on
+   `o.started_at` (`uber_prior`, `uber_running`, `uber_first_at`,
+   `uber_nameless`, `uber_uncompleted`, `uber_noend`). Splitting it costs a
+   second scan unless the time-dependent half can be derived from a grouped
+   pre-pass, so this needs designing rather than doing.
+2. **One pass instead of three.** `attributionJoin()` is still materialised
+   three times per request — the rows, the total and the tier distribution —
+   over the same segments. Computing the ladder once into a CTE and deriving all
+   three from it is a 3× cut in database work with an unchanged response shape.
+
+**Do not bound the per-plate reads in time to buy this.**
+`sql/schema_v72.sql`'s header records the measurement that rejects it: "this
+plate has Uber trips but none before the journey" was 1 of 120 under a lookback
+bounded at 2026-06-01 and 0 of 120 once it reached 2025-10-01 — a lookback
+artefact printed as a fact about a car. A date hard-coded in SQL rots into
+exactly that defect.

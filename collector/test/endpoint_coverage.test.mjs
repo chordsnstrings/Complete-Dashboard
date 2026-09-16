@@ -55,6 +55,14 @@ const EXEMPT = {
      entry would now fail the last check in this file — "no endpoint is
      exempted while also being used" — which is the check that stops an
      exemption outliving the reason for it. */
+  '/api/unauthorized/attributed/plan': 'operator tool: EXPLAIN (ANALYZE, BUFFERS) of the exact '
+    + 'statement /api/unauthorized/attributed sends, built from the same attributedStatements() the '
+    + 'route runs so it cannot explain a copy. It exists because the database is not reachable from '
+    + 'a workstation here — the proxy allows HTTPS only — and on 2026-09-16 two diagnoses read out '
+    + 'of the source were plausible, true about the code, and both wrong: the endpoint answered an '
+    + 'EMPTY window in 67-109 s and the plan was the only thing that named the cause (92.55 s of '
+    + 'LLVM JIT for a query that executes in 24.7 ms). Not on a page, deliberately: it is as '
+    + 'expensive as the query it explains.',
   '/api/health': 'liveness probe for the platform, not for people',
   '/api/import/statement-days': 'operator tool: batched import of the daily ledger — driven by '
     + 'bin/import-ledger.mjs, not by a page',
