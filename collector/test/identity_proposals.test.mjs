@@ -328,6 +328,75 @@ check('…and once a name arrives, the same address links them',
     after.byAlias.has('shared-id'), JSON.stringify([...after.byAlias.keys()]));
   check('…and only that one — a verdict is not a verdict on the queue',
     !after.byAlias.has('b-tariq'), JSON.stringify([...after.byAlias.keys()]));
+
+  /* ── A PERSON REACHED THROUGH TWO LINKS IS STILL ONE PERSON ──────────────
+     byAlias mapped an alias straight to its OWN link's canonical key, one hop.
+     A record joined by a chain therefore landed on the middle record's key
+     while the middle went on to the terminal's — one human, two keys, two rows,
+     which is the defect the whole feature exists to remove.
+
+     Measured on production 2026-09-16 over 177 applied links: ten ids are both
+     an alias and a canonical.
+
+       AAMIR KHAN (yango) -> Aamir Khan Amin (uber) -> AAMIR KHAN ROOHUL AMIN AMIN (hotel)
+       HAMZA KHAN (yango) -> Hamza Khan Khan (uber) -> HAMZA KHAN NAEEM KHAN (hotel)
+
+     Of the 111 pairs a human had already decided 'same', 82 were folded onto
+     one directory row and 24 were still two. The chain middles are why.
+
+     REVERSION: restore byAlias to
+       new Map(rows.map((r) => [r.alias_ext_id, r.canonical_key]))
+     and the first of these fails — the far end lands on the middle's key. */
+  await db.query(
+    `INSERT INTO driver_identity_link
+       (alias_ext_id, alias_platform, alias_name, canonical_ext_id, canonical_platform,
+        canonical_name, canonical_key, basis, evidence, confirmed_at, confirmed_by)
+     VALUES
+       ('y-far', 'yango', 'HAMZA KHAN', 'u-mid', 'uber', 'Hamza Khan Khan',
+        'hamza khan khan', 'shared_phone', 'same phone', now(), 'a person'),
+       ('u-mid', 'uber', 'Hamza Khan Khan', 'h-end', 'hotel', 'HAMZA KHAN NAEEM KHAN',
+        'hamza khan naeem khan', 'similar_name', 'name inside name', now(), 'a person')`);
+  clearIdentityLinkCache();
+  const chain = await identityLinks(shim, { now: 0 });
+  check('a record two links from the survivor lands on the SURVIVOR\u2019s key',
+    chain.byAlias.get('y-far') === 'hamza khan naeem khan', chain.byAlias.get('y-far'));
+  check('…the same key the middle record lands on, so they are one row',
+    chain.byAlias.get('y-far') === chain.byAlias.get('u-mid'),
+    `${chain.byAlias.get('y-far')} vs ${chain.byAlias.get('u-mid')}`);
+  check('…and the name shown is the survivor\u2019s, not the middle\u2019s',
+    chain.nameOf.get('y-far') === 'HAMZA KHAN NAEEM KHAN', chain.nameOf.get('y-far'));
+  check('…and every record on the person is reachable from any of them',
+    ['y-far', 'u-mid', 'h-end'].every((id) => {
+      const p2 = chain.partners.get(id);
+      return p2 && ['y-far', 'u-mid', 'h-end'].every((x) => p2.has(x));
+    }), JSON.stringify([...(chain.partners.get('y-far') || [])]));
+
+  /* A CYCLE IS NOT HYPOTHETICAL. Production carries one today — the bolt and
+     hotel records for Md Anwar Hossain each name the other as canonical — so
+     without the seen-set this walk is an infinite loop inside a read that every
+     page makes. The pick must also be STABLE, or one person's key changes with
+     row order and the directory reshuffles between requests. */
+  await db.query(
+    `INSERT INTO driver_identity_link
+       (alias_ext_id, alias_platform, alias_name, canonical_ext_id, canonical_platform,
+        canonical_name, canonical_key, basis, evidence, confirmed_at, confirmed_by)
+     VALUES
+       ('c-a', 'bolt', 'Anwar Hossain Abdul Kader Jelany', 'c-b', 'hotel',
+        'ANWAR HOSSAIN', 'anwar hossain', 'similar_name', 'x', now(), 'a person'),
+       ('c-b', 'hotel', 'ANWAR HOSSAIN', 'c-a', 'bolt',
+        'Anwar Hossain Abdul Kader Jelany', 'anwar hossain abdul kader jelany',
+        'similar_name', 'x', now(), 'a person')`);
+  clearIdentityLinkCache();
+  const cyc = await identityLinks(shim, { now: 0 });
+  check('a cycle resolves instead of hanging, and picks the fuller name',
+    cyc.byAlias.get('c-b') === 'anwar hossain abdul kader jelany'
+    || cyc.byAlias.get('c-a') === 'anwar hossain abdul kader jelany',
+    JSON.stringify([cyc.byAlias.get('c-a'), cyc.byAlias.get('c-b')]));
+  check('…and both ends of the cycle answer the same way',
+    (cyc.byAlias.get('c-a') ?? cyc.byAlias.get('c-b'))
+      === (cyc.byAlias.get('c-b') ?? cyc.byAlias.get('c-a'))
+    || cyc.partners.get('c-a')?.has('c-b'),
+    JSON.stringify([cyc.byAlias.get('c-a'), cyc.byAlias.get('c-b')]));
   clearIdentityLinkCache();
 }
 

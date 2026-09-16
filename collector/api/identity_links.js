@@ -83,22 +83,90 @@ export async function identityLinks(q = null, { now = Date.now() } = {}) {
      asks are different ones and deriving each from the others at the call site
      is how two of them drift apart. `partners` is symmetric — a link is about
      two records and either may be the one in the URL. */
-  const partners = new Map();
-  const add = (a, b) => {
-    if (!partners.has(a)) partners.set(a, new Set([a]));
-    partners.get(a).add(b);
-  };
+  /* ── A PERSON IS A COMPONENT, NOT A PAIR ──────────────────────────────────
+     This was one hop. `partners` added each end of a link to the other's set,
+     and `byAlias` mapped an alias id straight to its own link's canonical key
+     — so a person reached through TWO links landed on two different keys and
+     rendered as two rows, which is the exact defect the whole feature exists
+     to remove.
+
+     Measured on production 2026-09-16, over the 177 applied links: TEN ids are
+     both an alias and a canonical, and those are chains.
+
+       AAMIR KHAN (yango) -> Aamir Khan Amin (uber) -> AAMIR KHAN ROOHUL AMIN AMIN (hotel)
+       HAMZA KHAN (yango) -> Hamza Khan Khan (uber) -> HAMZA KHAN NAEEM KHAN (hotel)
+       Sajid Gul Gul Muhammad (bolt) -> Gul Muhammad Sajid Gul (yango) -> ... (hotel)
+
+     One hop sends the yango record to the uber record's key while the uber
+     record goes on to the hotel record's key. One human, two keys, two rows.
+     Of the 111 pairs a human had already decided 'same', 82 were folded and 24
+     were still two rows on the live directory — and the chain middles are why.
+
+     So the links are walked to a TERMINAL: the record in the component that is
+     nobody's alias, which by survivorOf() is the fullest name — the one an
+     operator ringing this person wants and the one their documents match. A
+     component with no terminal (a cycle, which no rule here can currently
+     produce but which a future basis might) picks the longest name and then
+     the lowest id, so the answer is stable rather than dependent on row order.
+
+     `seen` is not optional. A cycle without it is an infinite loop inside a
+     read that every page makes. */
+  const nextOf = new Map(rows.map((r) => [r.alias_ext_id, r.canonical_ext_id]));
+  const infoOf = new Map();
   for (const r of rows) {
-    add(r.alias_ext_id, r.canonical_ext_id);
-    add(r.canonical_ext_id, r.alias_ext_id);
+    infoOf.set(r.alias_ext_id, { key: null, name: r.alias_name });
+    infoOf.set(r.canonical_ext_id, { key: r.canonical_key, name: r.canonical_name });
   }
+  const terminalOf = (id) => {
+    const seen = new Set([id]);
+    let cur = id;
+    while (nextOf.has(cur)) {
+      const nxt = nextOf.get(cur);
+      if (seen.has(nxt)) {
+        /* A CYCLE. Pick deterministically from everything in it rather than
+           stopping wherever the walk happened to enter. */
+        return [...seen].sort((x, y) => {
+          const nx = (infoOf.get(x)?.name || ''), ny = (infoOf.get(y)?.name || '');
+          return ny.length - nx.length || (x < y ? -1 : x > y ? 1 : 0);
+        })[0];
+      }
+      seen.add(nxt);
+      cur = nxt;
+    }
+    return cur;
+  };
+  /* One representative per id, computed once. */
+  const repOf = new Map();
+  for (const id of new Set([...rows.map((r) => r.alias_ext_id), ...rows.map((r) => r.canonical_ext_id)])) {
+    repOf.set(id, terminalOf(id));
+  }
+  /* …and the component that representative stands for, so linkedIds returns
+     every record on the person rather than the two ends of one link. */
+  const members = new Map();
+  for (const [id, rep] of repOf) {
+    if (!members.has(rep)) members.set(rep, new Set());
+    members.get(rep).add(id);
+    members.get(rep).add(rep);
+  }
+  const partners = new Map();
+  for (const [id, rep] of repOf) partners.set(id, members.get(rep));
+  const keyOfRep = (id) => infoOf.get(id)?.key || null;
+  const nameOfRep = (id) => infoOf.get(id)?.name || null;
+
   cache = {
     rows,
-    byAlias: new Map(rows.map((r) => [r.alias_ext_id, r.canonical_key])),
+    /* EVERY id on the person, not only an alias, maps to the one key — a
+       chain middle is an alias of the terminal and a canonical of somebody
+       else, and leaving it out of this map is what split it off. */
+    byAlias: new Map([...repOf]
+      .filter(([id, rep]) => id !== rep && keyOfRep(rep))
+      .map(([id, rep]) => [id, keyOfRep(rep)])),
     /* The name the PAGE should show for an id: the surviving record's, which
        is the fuller one — the name an operator ringing this person wants, and
        the one their documents match. */
-    nameOf: new Map(rows.map((r) => [r.alias_ext_id, r.canonical_name])),
+    nameOf: new Map([...repOf]
+      .filter(([id, rep]) => id !== rep && nameOfRep(rep))
+      .map(([id, rep]) => [id, nameOfRep(rep)])),
     /* THE THIRD RECORD.
        ─────────────────────────────────────────────────────────────────────
        A link joins two roster records, and a person can have three. Muhammad
@@ -117,7 +185,7 @@ export async function identityLinks(q = null, { now = Date.now() } = {}) {
        record the name fold already grouped with the alias moves with it,
        whichever side turned out to be the survivor. */
     byName: new Map(rows
-      .map((r) => [fold(r.alias_name), r.canonical_key])
+      .map((r) => [fold(r.alias_name), keyOfRep(repOf.get(r.alias_ext_id))])
       .filter(([k, v]) => k && v && k !== v)),
     partners,
   };
