@@ -682,7 +682,24 @@ export async function renderRevenue(root) {
           render: (c) => (c._share == null
             ? '<span class="ent-off" title="the parent component was not returned for this window">—</span>'
             : pct(c._share, 1)) },
-        { label: 'Drivers', key: 'drivers', num: true },
+        /* ACCOUNTS, because that is what the figure is.
+           ──────────────────────────────────────────────────────────────
+           This column read "Drivers" over a count of DISTINCT
+           driver_ext_id from driver_earnings_component — a table with no
+           person_key, so one man holding an Uber, a Bolt and a hotel record
+           was three "drivers". The count cannot be folded without a schema
+           change (api/revenue_routes.js records what that would take), so
+           the honest fix is the label rather than the arithmetic: a figure
+           that genuinely counts platform accounts keeps counting them and
+           says so. */
+        /* Rendered through a span carrying the explanation, because tableFrom
+           has no per-column tooltip and a column whose unit differs from every
+           other "driver" figure on this page has to be able to say so. */
+        { label: 'Accounts', key: 'driver_accounts', num: true,
+          render: (c) => `<span title="platform accounts this component was filed against, `
+            + `not people — driver_earnings_component carries no person key, so one driver `
+            + `with three platform records counts three times here">`
+            + `${fmt(c.driver_accounts ?? c.drivers)}</span>` },
       ], { compact: true, sortable: true, sortId: 'payoutkids' }));
       if (kids.length > 30) {
         cp.body.append(el('p', 'cap',

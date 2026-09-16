@@ -19,7 +19,7 @@ import { win, winDays, dubaiSpanSql, grainOf, previousWindow, foldGrain, GRAINS,
   isPeriod, periodPartial } from './window.js';
 import { rollupGrainSql, rollupState, refreshRollups } from '../src/rollup.js';
 import { responseCache } from './cache.js';
-import { platformFares, platformPayouts, platformStatements, fleetIncome } from './income_sql.js';
+import { platformFares, platformPayouts, platformStatements, payoutPeople, fleetIncome } from './income_sql.js';
 import { resolveOpenFill, applyFillToPlatforms } from './statement_fill_sql.js';
 import { teslaRoutes } from './tesla_routes.js';
 import { cancellationRoutes } from './cancellation_routes.js';
@@ -199,7 +199,7 @@ const q = async (text, params) => {
    with time zone"). The full error is logged; the caller gets a reference to
    quote. The real fix for this class of bug is test/route_smoke.test.mjs,
    which executes every route rather than grepping for it. */
-import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, peopleCountStored, JOIN_TRIP, personFold, custodyRefs, custodyNames } from './custody_sql.js';
+import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, peopleCountStored, personKeyStored, NAMED, JOIN_TRIP, personFold, custodyRefs, custodyNames } from './custody_sql.js';
 import { spanGaps } from './coverage_gaps.js';
 /* The one place the alerts-per-distance rule lives. Every page that prints a
    safety rate reads it from here, so the fleet headline and the per-vehicle
@@ -610,10 +610,14 @@ app.get('/api/kpis', wrap(async (req, res) => {
      api/income_sql.js picks one figure per platform and sums those — the same
      rule, the same code, as the Revenue page, which is the only way the two
      pages can be relied on to agree. */
-  const [fareRows, payRows, stmtRows] = await Promise.all([
+  const [fareRows, payRows, stmtRows, [payPeople]] = await Promise.all([
     q(platformFares(F), p),
     q(platformPayouts(), p),
     q(platformStatements(), p),
+    /* One fleet-wide count, because summing the per-platform ones does not
+       answer the question the tile asks — see payoutPeople() in
+       api/income_sql.js. Same four parameters, same round trip. */
+    q(payoutPeople(), p),
   ]);
   const num = (v) => (v == null ? null : Number(v));
   const byPlat = new Map();
@@ -738,7 +742,23 @@ app.get('/api/kpis', wrap(async (req, res) => {
     ...income,
     payouts: payRows.reduce((acc, r) => acc + Number(r.payouts || 0), 0) || null,
     payout_days: payoutDays,
-    payout_drivers: payRows.reduce((acc, r) => acc + Number(r.drivers || 0), 0) || null,
+    /* PEOPLE PAID, counted once fleet-wide.
+       ─────────────────────────────────────────────────────────────────────
+       THE DEFECT, and it had two halves. platformPayouts() counted platform
+       accounts (fixed there, and both readings now come back), and THIS line
+       then summed the per-platform rows — so a man paid by Uber and by Bolt
+       was counted twice however each row was folded. On production over
+       from=2026-06-01&to=2026-09-16 the result was 247, printed on the Finance
+       tile as "247 drivers" directly beside this same response's `drivers`
+       field reading 151. Two counts of this fleet's people, one tile, and the
+       one under the plainer word was 63% too high.
+
+       payoutPeople() asks it as one fleet question over the same rows.
+       payout_accounts is the accounts reading, kept and named, because a
+       payout really is filed per account and that number is what reconciles
+       against a statement count. */
+    payout_drivers: payPeople?.people ?? null,
+    payout_accounts: payPeople?.accounts ?? null,
     payout_platforms: payRows.map((r) => r.platform).sort(),
     /* How much of the fleet's working days the payout statements actually span.
        Three days of payout on thirty days of work is not a thirty-day figure,
@@ -1627,9 +1647,19 @@ app.get('/api/drivers/performance', wrap(async (req, res) => {
      FROM driver_payout_day WHERE day BETWEEN $1 AND $2
        AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)`, p);
   const periods = await q(
+    /* PEOPLE, the way the header eight lines above already counts them.
+       ────────────────────────────────────────────────────────────────────
+       `totals.people` is peopleCountStored over these very rows and this
+       breakdown was count(DISTINCT driver_ext_id) over them — one handler,
+       one table, two rules, and the per-period figure the larger of the two by
+       the fleet's 1.76 accounts per person. Nothing renders periods[].drivers
+       today, which is the only reason it never showed up as a contradiction on
+       screen; a field that is wrong and unread is a field that is wrong the
+       day somebody reads it. Both readings come back and both are named. */
     `SELECT platform, to_char(period_start,'YYYY-MM-DD') AS period_start,
             to_char(period_end,'YYYY-MM-DD') AS period_end,
-            count(DISTINCT driver_ext_id)::int drivers,
+            ${peopleCountStored('person_key', 'driver_ext_id')}::int drivers,
+            count(DISTINCT driver_ext_id)::int driver_accounts,
             round(sum(earnings)::numeric,2) AS earnings
      FROM driver_payout_day WHERE day BETWEEN $1 AND $2
        AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
@@ -1948,19 +1978,46 @@ app.get('/api/alerts/by-vehicle', wrap(async (req, res) => {
               (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day
        FROM alert WHERE ${DAYWIN('occurred_at')} AND ($3::text IS NULL OR fleet_id = $3)
      ),
+     /* person_key carried down, because the two CTEs below have to group on the
+        PERSON and this one is where it is available. The sibling route
+        /api/alerts/by-driver already selects it here; this one did not, which
+        is the whole of the defect below. */
      custody AS (
-       SELECT DISTINCT ON (plate, day) plate, day, driver_name, driver_ext_id
+       SELECT DISTINCT ON (plate, day) plate, day, driver_name, driver_ext_id, person_key
        FROM vehicle_driver_day
-       WHERE day BETWEEN $1::date AND $2::date AND driver_name IS NOT NULL
+       WHERE day BETWEEN $1::date AND $2::date AND coalesce(btrim(driver_name), '') <> ''
          AND ($3::text IS NULL OR fleet_id = $3)
        ORDER BY plate, day, trips DESC NULLS LAST, driver_name
      ),
      joined AS (
-       SELECT ev.plate, ev.alert_type, c.driver_name, c.driver_ext_id
+       SELECT ev.plate, ev.alert_type, c.driver_name, c.driver_ext_id,
+              coalesce(nullif(c.person_key, ''), c.driver_ext_id) AS person
        FROM ev LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day
      ),
+     /* THE FIX THIS BLOCK ALREADY CLAIMS, ONE LEVEL DOWN.
+        ──────────────────────────────────────────────────────────────────
+        The comment above records that top_driver used to be the first name
+        in the ALPHABET among everyone who held the car, "and somebody reading
+        that column would coach the wrong person". It was ranked by event count
+        instead — but the ranking groups by (plate, driver_name), and this
+        fleet spells one man's name two or three ways across his platform
+        accounts. So his events split across his own spellings and "top" picked
+        the largest SLICE of him: the same wrong-person-coached failure, now
+        arrived at by arithmetic instead of by alphabet.
+
+        drivers had the matching half of it — count(DISTINCT driver_name)
+        counts SPELLINGS under a column headed "Drivers that window", so a car
+        held all month by two men who between them hold five accounts read 5.
+
+        Grouped on the stored person key now, with the name kept being the
+        spelling carrying the most of that person's events, so the column says
+        who to coach and the count beside it counts the same people the column
+        names. driver_accounts rides out beside it: the accounts reading is
+        real and folding must not hide it. */
      per_driver AS (
-       SELECT plate, driver_name, max(driver_ext_id) AS driver_ext_id, count(*)::int n
+       SELECT plate, person,
+              mode() WITHIN GROUP (ORDER BY driver_name) AS driver_name,
+              max(driver_ext_id) AS driver_ext_id, count(*)::int n
        FROM joined WHERE driver_name IS NOT NULL GROUP BY 1, 2
      ),
      top AS (
@@ -1980,7 +2037,8 @@ app.get('/api/alerts/by-vehicle', wrap(async (req, res) => {
                                AND j.alert_type NOT ILIKE '%turn%'
                                AND j.alert_type NOT ILIKE '%speed%')::int other,
             count(*) FILTER (WHERE j.driver_name IS NULL)::int unattributed,
-            count(DISTINCT j.driver_name)::int drivers,
+            count(DISTINCT j.person)::int drivers,
+            count(DISTINCT j.driver_ext_id)::int driver_accounts,
             max(t.driver_name) AS top_driver,
             max(t.driver_ext_id) AS top_driver_id,
             max(t.n)::int AS top_driver_alerts
@@ -2039,19 +2097,56 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
      custody AS (
        SELECT DISTINCT ON (plate, day) plate, day, driver_name, driver_ext_id, person_key
        FROM vehicle_driver_day
-       WHERE day BETWEEN $1::date AND $2::date AND driver_name IS NOT NULL
+       WHERE day BETWEEN $1::date AND $2::date AND coalesce(btrim(driver_name), '') <> ''
          AND ($3::text IS NULL OR fleet_id = $3)
        ORDER BY plate, day, trips DESC NULLS LAST, driver_name
      ),
+     /* ONE ROW PER PERSON, AND — THE POINT — ONE DENOMINATOR PER PERSON.
+        ─────────────────────────────────────────────────────────────────────
+        THE DEFECT, and it is the worst arithmetic in this sweep because it is
+        a RATE. This CTE grouped on the raw custody NAME while the km CTE
+        below groups on t.person_key, so a man spelled three ways got three
+        rows in "people" and ONE row in "km" — and the join handed each of his
+        three slices his WHOLE distance as its denominator.
+
+        Measured on production over from=2026-06-01&to=2026-09-16, Aliyan
+        Khalil (uber 5f16534e…, yango 7fc8da91…, bolt 6598721) came back as
+
+          10,355 alerts over 11,793 km  →  87.8 per 100 km
+             314 alerts over 11,793 km  →   2.66
+             164 alerts over 11,793 km  →   1.39
+
+        where the man is one person with 10,833 alerts over 11,793 km — 91.9.
+        Three rows on a leaderboard whose entire purpose is deciding who to
+        coach, two of them reading as an exemplary driver, and the real figure
+        appearing nowhere. Splitting a person's events across their accounts
+        moves them DOWN the list this page exists to build, which is the
+        failure direction nobody checks.
+
+        The tile above it reads "Drivers named — people custody could attribute
+        an event to": 99 named rows for 90 people over that window, and the
+        word on screen is people.
+
+        Grouped on the stored person key now, which is the SAME key km
+        already uses, so the numerator and the denominator finally describe one
+        human. The name kept is the spelling carrying the most of that person's
+        events (mode()), not the alphabetically first one.
+
+        person is nullif'd rather than raw: a custody row whose person_key is
+        empty must fall back to its own id and stay its own person, and must
+        NOT join km on '' — which would pool every unnamed record onto one very
+        busy driver, the exact failure api/custody_sql.js's coalesce exists to
+        prevent. A null person simply finds no km row and the rate renders
+        absent with its reason, which is the honest answer. */
      people AS (
-       SELECT coalesce(c.driver_name, '(unattributed)') AS driver_name,
+       SELECT coalesce(nullif(c.person_key, ''), c.driver_ext_id, '(unattributed)') AS person_group,
+              coalesce(mode() WITHIN GROUP (ORDER BY c.driver_name), '(unattributed)') AS driver_name,
               max(c.driver_ext_id) AS driver_ext_id,
-              /* Who this row is about, carried down so the distance below can be
-                 asked for them and nobody else. It is a function of the grouping
-                 key — vehicle_driver_day generates person_key out of the same
-                 driver_name — so every row in a group agrees on it and max() is
-                 choosing between identical values. */
-              max(c.person_key) AS person,
+              /* How many platform records that one person holds. Both readings
+                 come back and both are named: folding a count that genuinely
+                 means accounts would be this same defect facing the other way. */
+              count(DISTINCT c.driver_ext_id)::int accounts,
+              max(nullif(c.person_key, '')) AS person,
               count(*)::int alerts,
               /* The two halves, named rather than inferred. The "other"
                  column below is the residual of four ILIKE buckets, and on
@@ -2161,7 +2256,7 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
          AND n.driver_name IS NOT NULL AND btrim(n.driver_name) <> ''
        GROUP BY 1
      )
-     SELECT s.driver_name, s.driver_ext_id, s.alerts,
+     SELECT s.driver_name, s.driver_ext_id, s.accounts, s.alerts,
             s.driving_alerts, s.device_alerts,
             s.harsh_brake, s.harsh_accel, s.sharp_turn, s.overspeed, s.other,
             s.plates, s.plate_list,
@@ -2626,9 +2721,17 @@ app.get('/api/reconcile/periods', wrap(async (req, res) => {
      question "what is this total made of" belongs beside "what did each
      statement say". */
   const currentByGrain = await q(
+    /* PEOPLE, not platform accounts — and this file's own coverage query at
+       /api/reconcile already folds with personKeyStored, so this one statement
+       was the odd one out. Raw, a single 7-day payout grain reported 243
+       "Drivers" over from=2026-06-01&to=2026-09-16, against a 108-day fleet
+       headcount of 151 people: a breakdown of one week claiming 60% more
+       people than the whole quarter had, on the page finance reconciles a bank
+       statement against. Both readings come back and both are named. */
     `SELECT period_days,
             count(*)::int AS driver_days,
-            count(DISTINCT driver_ext_id)::int AS drivers,
+            ${peopleCountStored('person_key', 'driver_ext_id')}::int AS drivers,
+            count(DISTINCT driver_ext_id)::int AS driver_accounts,
             round(sum(earnings)::numeric, 2) AS earnings
        FROM driver_payout_day
       WHERE day BETWEEN $1::date AND $2::date
@@ -2671,7 +2774,8 @@ app.get('/api/reconcile/periods', wrap(async (req, res) => {
        took from each span. The two lists answer different questions: `grains`
        is what the provider filed, this is what the product counted. */
     current_by_grain: currentByGrain.map((r) => ({ period_days: r.period_days,
-      driver_days: r.driver_days, drivers: r.drivers, earnings: n(r.earnings) })),
+      driver_days: r.driver_days, drivers: r.drivers,
+      driver_accounts: r.driver_accounts, earnings: n(r.earnings) })),
     current_total: +currentByGrain.reduce((a, r) => a + n(r.earnings), 0).toFixed(2),
     finest_grain: finest,
     totals: {
@@ -2897,16 +3001,56 @@ app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
               round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,1) unauth_km
        FROM occupancy_segment WHERE ${DAYWIN('started_at')} ${SEG_FLEET}
        GROUP BY plate HAVING count(*) FILTER (WHERE verdict='unauthorized') > 0),
-     who AS (
-       SELECT o.plate, string_agg(DISTINCT v.driver_name, ', ') AS drivers
+     /* ONE ACCUSED NAME PER PERSON, not one per platform account.
+        ─────────────────────────────────────────────────────────────────────
+        THE DEFECT. string_agg(DISTINCT v.driver_name) is a fold on the
+        SPELLING, and this fleet spells one man three ways across his Uber,
+        Bolt, Yango and hotel records. Measured on production over
+        from=2026-06-01&to=2026-09-16: 20 flagged plates carrying 30 raw name
+        mentions against 27 once the spellings alone were folded, and the
+        register folds more than spelling does. Verbatim from the bar labels
+        this feeds:
+
+          L12615  "Fahad Ali Amjad Ali, FAHAD ALI AMJAD ALI"
+          L63027  "Muhammad Ahmad Ghulam Qadir, MUHAMMAD AHMAD GHULAM QADIR,
+                   Muhammad Ahmad khan"
+          L44305  three spellings of Syed Arshad Shah
+
+        The panel this draws says "a flag against a car nobody can name is not
+        something anyone can act on". A car named THREE TIMES OVER against one
+        unexplained journey is worse than one nobody can name: it reads as
+        three suspects, and two of them are innocent of even existing.
+        /api/unauthorized/list next door in this file was fixed to fold on
+        PERSON_OF; this is the same accusation surface and it was missed.
+
+        It also dropped the empty-name guard. sql/schema_v19.sql writes a
+        custody row when EITHER an id or a name is present, and a channel that
+        files a blank name gives driver_name = '' rather than NULL — so
+        IS NOT NULL let it through and the label rendered a leading comma.
+        NAMED() is api/custody_sql.js's guard, exported rather than copied.
+
+        DISTINCT ON the person, ordered the way custodyRefs orders it, so the
+        spelling that survives is the one the primary custody row carries. The
+        pairs ride out beside the string for the same reason every other
+        custody surface returns both: a comma-joined string is a dead end and
+        an accused person has to be openable. */
+     who_person AS (
+       SELECT DISTINCT ON (o.plate, ${personKeyStored('v')})
+              o.plate, v.driver_name AS nm, v.driver_ext_id AS id
        FROM occupancy_segment o
        JOIN vehicle_driver_day v
          ON v.plate = o.plate
         AND v.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
        WHERE ${DAYWIN('o.started_at')} AND o.verdict='unauthorized'
-         AND v.driver_name IS NOT NULL
-       GROUP BY o.plate)
-     SELECT seg.*, who.drivers
+         AND ${NAMED('v')}
+       ORDER BY o.plate, ${personKeyStored('v')}, v.is_primary DESC, v.trips DESC),
+     who AS (
+       SELECT plate,
+              string_agg(nm, ', ' ORDER BY nm) AS drivers,
+              jsonb_agg(jsonb_build_object('name', nm, 'id', id) ORDER BY nm) AS driver_refs,
+              count(*)::int AS driver_n
+       FROM who_person GROUP BY plate)
+     SELECT seg.*, who.drivers, who.driver_refs, who.driver_n
      FROM seg LEFT JOIN who USING (plate)
      ORDER BY seg.unauthorized DESC LIMIT 100`, [from, to, fleet]);
   /* How many vehicles are flagged in total. The page's "Vehicles involved" tile
@@ -5072,8 +5216,50 @@ app.get('/api/earnings/components', wrap(async (req, res) => {
      the span the record holds — either way it is what a reader needs to know
      which range to ask for. */
     const raw = await q(
+    /* THE ONE COUNT IN THIS SWEEP THAT CANNOT BE FOLDED TODAY, said out loud.
+       ─────────────────────────────────────────────────────────────────────
+       This column is the page's way of telling a component everybody carries
+       from one that applies to three people — app.js:298 heads it "Drivers"
+       and annotates it exactly that way — and it is counting PLATFORM
+       ACCOUNTS. Over from=2026-06-01&to=2026-09-16 `your_earnings` reports 235
+       and `fare` 115, on a fleet where 151 people drove: the larger figure
+       exceeds the fleet's own headcount by 55.6%.
+
+       driver_earnings_component has NO person_key. sql/schema_v42.sql added
+       the generated column to money_event, not to this table, and
+       sql/schema_v53.sql rebuilds it on six tables of which this is not one.
+       So folding costs one of two things, and neither is a line of SQL:
+
+         - personKey('driver_ext_id','driver_name') evaluated per row. That is
+           two nested regexp_replace calls over every component row in the
+           window, and sql/schema_v20.sql measured exactly this trade at
+           2,434ms against 129ms. It would also be a WEAKER fold than the
+           stored column: the register (api/identity_map.js) is keyed on the
+           provider id and is applied by identityCase, which personKey() does
+           carry — but the answer would still differ from every other surface
+           the day the two expressions drift.
+
+         - a generated column in a new sql/schema_v72.sql, registered in
+           src/schema_files.js. That is the right fix, and it is NOT a one-line
+           one: sql/schema_v53.sql is GENERATED from api/identity_map.js and
+           rebuilds person_key on a FIXED list of six tables, so a column added
+           outside that list would carry the name fold and NOT the merge
+           register, and would silently stop tracking the register the next
+           time somebody edits it. Doing it properly means adding this table to
+           bin/gen-schema-v53.mjs and regenerating v53 — a schema change with a
+           column drop and an index rebuild on a live table, which is a deploy
+           of its own and not something to smuggle into a counting fix.
+
+       So the count STAYS RAW and is named honestly instead. `driver_accounts`
+       is the same figure under the word it actually means; `drivers` is kept
+       only because api/public/app.js reads that key and this pass may not edit
+       app.js. The label on app.js:298 must become "Accounts" — reported to the
+       main session rather than changed here. api/revenue_routes.js's payout
+       component tree is the same table and the same decision; the two move
+       together. */
     `SELECT category, parent, round(sum(amount)::numeric,2) amount, currency,
             count(DISTINCT driver_ext_id)::int drivers,
+            count(DISTINCT driver_ext_id)::int driver_accounts,
             to_char(min(period_start), 'YYYY-MM-DD') AS _from,
             to_char(max(period_end), 'YYYY-MM-DD') AS _to
      FROM driver_earnings_component
@@ -5222,13 +5408,52 @@ app.get('/api/product/by-vehicle', wrap(async (req, res) => res.json(await q(
          defect as /api/earnings/components, which capped a total at four
          hundred rows and printed it as the fleet's. */
       ORDER BY t.plate, trips DESC),
+   /* ONE ROW PER PERSON, not one per platform account.
+      ─────────────────────────────────────────────────────────────────────
+      THE DEFECT, and it is api/custody_sql.js's opening paragraph reproduced
+      in production. The held CTE grouped by (plate, driver_name, driver_ext_id), so
+      one human with an Uber record, a Bolt record and a hotel record became
+      three rows on one plate with HIS OWN DAYS SPLIT BETWEEN THEM. Measured
+      over from=2026-06-01&to=2026-09-16: 63 of 109 plates printed the same
+      person two or three times in the "Driven by" cell. L27045 read
+
+        Kashif Ali Ayyub khan / 34 days, KASHIF ALI AYYUB KHAN / 12,
+        Kashif Ali Ayyub Khan / 10
+
+      for one man who held the car 56 days, with driver_n = 3.
+
+      Two separate harms, and the second is the one nobody would notice. The
+      cell is capped at rn <= 3, so a duplicate EVICTS the real second driver:
+      a car genuinely shared by three people showed one of them three times
+      and the other two not at all. And driver_n — the "+N more" beside the
+      cell — counted accounts under a column heading that says who drove:
+      sum(driver_n) came to 394 across 109 plates where the same custody rows
+      hold 247 people, so the average an operator reads off this page went
+      from a true 2.27 people per car to a printed 3.61 (+59.5%).
+
+      Folded on the stored person key. The name and id kept are the ones the
+      primary custody row carries, ordered the way custodyOverWindow orders
+      them, so the surviving spelling is the one the fleet's own data prefers
+      rather than whichever the heap returned first. The days column is now
+      count(DISTINCT day) over ALL of that person's accounts, which is what the
+      column claimed to be showing all along.
+
+      BOTH READINGS COME BACK AND BOTH ARE NAMED. driver_n is people;
+      driver_accounts is the platform records behind them. "Driven by 2 people
+      across 5 accounts" is a truer sentence than either number alone, and
+      keeping the accounts figure means folding has not hidden a real
+      distinction — it is the same rule /api/drivers/cross-platform follows. */
    held AS (
-     SELECT v.plate, v.driver_name, v.driver_ext_id, count(DISTINCT v.day)::int days
+     SELECT v.plate, ${personKeyStored('v')} AS person,
+            (array_agg(v.driver_name ORDER BY v.is_primary DESC, v.trips DESC))[1] AS driver_name,
+            (array_agg(v.driver_ext_id ORDER BY v.is_primary DESC, v.trips DESC))[1] AS driver_ext_id,
+            count(DISTINCT v.day)::int days,
+            count(DISTINCT v.driver_ext_id)::int accounts
        FROM vehicle_driver_day v
       WHERE v.plate IN (SELECT plate FROM agg)
         AND v.day BETWEEN $1::date AND $2::date
-        AND v.driver_name IS NOT NULL
-      GROUP BY v.plate, v.driver_name, v.driver_ext_id),
+        AND ${NAMED('v')}
+      GROUP BY v.plate, ${personKeyStored('v')}),
    ranked AS (
      SELECT h.*, row_number() OVER (PARTITION BY h.plate
                                     ORDER BY h.days DESC, h.driver_name) rn
@@ -5239,10 +5464,12 @@ app.get('/api/product/by-vehicle', wrap(async (req, res) => res.json(await q(
                                          'days', r.days)
                       ORDER BY r.days DESC, r.driver_name)
               FILTER (WHERE r.rn <= 3) AS driver_refs,
-            count(DISTINCT r.driver_ext_id)::int AS driver_n
+            count(DISTINCT r.person)::int AS driver_n,
+            sum(r.accounts)::int AS driver_accounts
        FROM ranked r GROUP BY r.plate)
    SELECT a.plate, a.product, a.trips, a.km, a.avg_km,
-          p.driver_refs, coalesce(p.driver_n, 0) AS driver_n
+          p.driver_refs, coalesce(p.driver_n, 0) AS driver_n,
+          coalesce(p.driver_accounts, 0) AS driver_accounts
      FROM agg a LEFT JOIN per_plate p ON p.plate = a.plate
     ORDER BY a.plate, a.trips DESC`, range(req)))));
 

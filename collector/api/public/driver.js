@@ -185,7 +185,12 @@ function startScatter(host, days) {
     .map((d) => ({ ...d, first_hour: +d.first_hour }));
   if (pts.length < 2) {
     const worked = days.filter((d) => +d.trips > 0).length;
-    return empty(host, !days.length
+    /* note(), not empty(). charts.js:empty() prints a bold "NOTHING TO SHOW"
+       above whatever message it is given, and on a tab where every other panel
+       now states its reason as a plain sentence this one read as a different
+       and worse failure — the heading is the generic line the rest of the page
+       has just stopped printing. The reason is the whole answer. */
+    host.append(note(!days.length
       ? 'No day in this window reached this driver, so there is no start time to plot.'
       : !pts.length
         ? (worked
@@ -194,7 +199,8 @@ function startScatter(host, days) {
             + 'nobody observed.'
           : 'This driver worked no day in this window, so there is no first trip to plot. The days '
             + 'held here are dates a feed reached with nothing on them.')
-        : 'Only one day in this window records a first trip, which is a point rather than a pattern.');
+        : 'Only one day in this window records a first trip, which is a point rather than a pattern.'));
+    return;
   }
   const W = 760, H = 240, P = { l: 46, r: 12, t: 14, b: 26 };
   const xs = pts.map((d) => +new Date(d.day));
@@ -510,16 +516,24 @@ function ratingTrend(k) {
       ? `${sourceLabel(k.rating_platform)}\u2019s own rating`
         + (k.platform_lifetime_trips ? ` over ${fmt(k.platform_lifetime_trips)} trips` : '')
       /* The delta is real — it is the difference between two figures the
-         platform published, and on this driver both readings are 4.97 — but
-         "over 7 days" left out the fact that makes it readable: NO TRIP of
-         theirs fell between the two readings, so nothing happened that could
-         have moved it. A change of nought over seven days reads as a person
-         holding steady; over seven days with no work in them it means the
-         platform simply re-filed the same number. over_trips === 0 is a
-         measured nought and is stated; a missing over_trips is not. */
+         platform published, and on the driver in this defect both readings are
+         4.97 — but "over 7 days" left out the fact that makes a nought delta
+         readable: the platform's own rated-trip counter did not move between
+         the two readings, so nothing happened that could have shifted it.
+
+         NOT "no trip of theirs": `over_trips` is the difference between the
+         platform's lifetime trip counts on the two rating rows
+         (api/driver_routes.js), which is the population the RATING is taken
+         over and not this person's work. MEASURED on production for
+         68e368e3ff76a73626e0720e, who did 96 trips in this window: Uber's
+         counter reads 792 on all five readings, so over_trips is 0 while the
+         fleet recorded 96 bookings across three channels. The sentence names
+         the counter, because that is the thing that did not move. A measured 0
+         is stated; a missing over_trips is not. */
       : `over ${countOf(c.over_days, 'day')}`
         + (c.over_trips ? ` and ${fmt(c.over_trips)} trips`
-          : c.over_trips === 0 ? ', with no trip of theirs between the two readings' : '')
+          : c.over_trips === 0
+            ? ', in which the platform added no trip to the count this rating is taken over' : '')
         + ` \u00b7 ${sourceLabel(k.rating_platform)}\u2019s own`,
     tone: v >= 4.8 ? 'good' : v >= 4.5 ? 'warn' : 'critical',
   };
@@ -1652,10 +1666,15 @@ async function tabEarnings(root, id, prof) {
     { label: 'Average fare', value: money(k.avg_fare, 'AED', 2),
       sub: k.priced_trips
         ? `over the ${fmt(k.priced_trips)} priced trips`
+        /* UBER_FARE_WHY, not a sixteenth hand-written copy of it.
+           test/fare_reason_shared.test.mjs exists to catch exactly this: the
+           first draft of this sub-line said "the Uber trip export has no fare
+           column at all" and stopped, which reads as "and therefore never
+           will". The shared sentence names where the fare DOES come from. */
         : worked
           ? `not one of their ${countOf(bookingsN, 'booking')} in this window reports a fare, so there `
-            + 'is nothing to average — the Uber trip export has no fare column at all, and an average '
-            + 'over the statement would be a week divided by trips it does not count'
+            + `is nothing to average — ${UBER_FARE_WHY}, and an average over the statement would be `
+            + 'a week divided by trips it does not count'
           : 'no booking of any kind in this window, so there is no fare to average' },
     { label: 'Platform earnings', value: money(k.reported_earnings), sub: 'as the platform reported it' },
     { label: 'Tips', value: money(e.tips), sub: e.tip_pct != null ? `${pct(e.tip_pct, 1)} of net fare` : 'no tip data yet',

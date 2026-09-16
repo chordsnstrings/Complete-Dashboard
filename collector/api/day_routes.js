@@ -60,7 +60,45 @@ export function dayRoutes(app, { q, wrap }) {
                 sum(price) FILTER (WHERE NOT is_complimentary) revenue,
                 sum(distance_km) FILTER (WHERE has_distance AND is_booking) booked_km,
                 sum(distance_km) FILTER (WHERE has_distance AND NOT is_booking) telematics_km,
-                count(DISTINCT driver_name) FILTER (WHERE driver_name IS NOT NULL)::int drivers,
+                /* PEOPLE OUT, AND THE DIVISOR OF THE ONLY PER-DRIVER AVERAGE
+                   ON THIS PAGE.
+                   ──────────────────────────────────────────────────────────
+                   THE DEFECT, and it is the clearest divisor in the sweep.
+                   api/public/day.js:119 prints this as the "Drivers out" tile
+                   and divides bookings by it for the sub-line "N bookings each
+                   on average"; day.js:329 captions the list below it "Showing
+                   the N busiest of M people who drove on this day". The word
+                   on screen is people and the count was DISTINCT driver_name —
+                   one spelling per platform account.
+
+                   Measured on production:
+
+                     2026-09-15   124 names → 100 people   994/124 = 8.0 each
+                                                           994/100 = 9.9 each
+                     2026-09-10   112 names →  94 people   785/112 = 7.0 each
+                                                           785/ 94 = 8.4 each
+                     2026-08-29   104 names →  87 people   569/104 = 5.5 each
+                                                           569/ 87 = 6.5 each
+
+                   So the count ran up to 24% high and the average it divides
+                   ran up to 19.4% LOW — and an understated average is the
+                   dangerous direction, because nothing on the page looks
+                   wrong. A fleet reading "each driver did 8 bookings" when the
+                   truth is 9.9 concludes its people are under-worked.
+
+                   trip_ext carries trip's generated person_key (created in
+                   sql/schema_v62.sql as SELECT t.* after the column existed),
+                   so this folds with no join and no cost. The coalesce to
+                   driver_ext_id keeps a booking whose name we cannot read as
+                   its own person rather than pooling every unnamed row onto
+                   one very busy driver.
+
+                   driver_accounts rides out beside it and IS the old number,
+                   named: "94 people across 112 platform accounts" is a truer
+                   sentence than either half. */
+                count(DISTINCT coalesce(nullif(person_key, ''), driver_ext_id))
+                  FILTER (WHERE driver_name IS NOT NULL)::int drivers,
+                count(DISTINCT driver_name) FILTER (WHERE driver_name IS NOT NULL)::int driver_accounts,
                 count(DISTINCT plate) FILTER (WHERE nullif(btrim(plate), '') IS NOT NULL)::int vehicles,
                 min(requested_at) first_at, max(requested_at) last_at
          FROM trip_ext WHERE ${D}`, p),
@@ -83,7 +121,26 @@ export function dayRoutes(app, { q, wrap }) {
                 sum(price) FILTER (WHERE NOT is_complimentary) revenue,
                 round(sum(distance_km) FILTER (WHERE has_distance)::numeric, 0) km
          FROM trip_ext WHERE ${D} GROUP BY 1 ORDER BY n DESC`, p),
-      q(`SELECT driver_name, max(driver_ext_id) driver_ext_id, count(*)::int trips,
+      /* ONE ROW PER PERSON, under a caption that says people.
+         ─────────────────────────────────────────────────────────────────
+         GROUP BY driver_name printed the same man twice, side by side, with
+         his day's trips split between the rows — 112 rows for 94 people on
+         2026-09-10 — under a caption reading "Showing the N busiest of M
+         people who drove on this day". That is api/custody_sql.js's opening
+         paragraph, on the day page.
+
+         It also broke the ORDER: a person who did 40 bookings across two
+         accounts appeared twice at 25 and 15 and sorted BELOW somebody who did
+         30 on one, so the list of the day's busiest drivers was not a list of
+         the day's busiest drivers. The platforms and plates arrays are now the
+         person's, which is what a reader opening a row expects to see.
+
+         The name kept is the spelling carrying most of that person's work
+         (mode()), so the row reads the way the fleet mostly writes it. */
+      q(`SELECT coalesce(mode() WITHIN GROUP (ORDER BY driver_name), '(unnamed)') AS driver_name,
+                max(driver_ext_id) driver_ext_id,
+                count(DISTINCT driver_ext_id)::int accounts,
+                count(*)::int trips,
                 count(*) FILTER (WHERE outcome = 'not_completed')::int cancelled,
                 sum(price) FILTER (WHERE NOT is_complimentary) revenue,
                 round(sum(distance_km) FILTER (WHERE has_distance)::numeric, 0) km,
@@ -91,11 +148,21 @@ export function dayRoutes(app, { q, wrap }) {
                 array_remove(array_agg(DISTINCT plate), NULL) plates,
                 min(requested_at) first_trip, max(requested_at) last_trip
          FROM trip_ext WHERE ${D} AND is_booking AND driver_name IS NOT NULL
-         GROUP BY driver_name ORDER BY trips DESC LIMIT 120`, p),
+         GROUP BY coalesce(nullif(person_key, ''), driver_ext_id)
+         ORDER BY trips DESC LIMIT 120`, p),
       q(`SELECT t.plate, count(*) FILTER (WHERE t.is_booking)::int bookings,
                 count(*) FILTER (WHERE NOT t.is_booking)::int telematics,
                 round(sum(t.distance_km) FILTER (WHERE t.has_distance)::numeric, 0) km,
-                count(DISTINCT t.driver_name)::int drivers,
+                /* THE COUNT BESIDE A LIST HAS TO BE A COUNT OF THAT LIST.
+                   custodyRefs on the next line is folded on the person and this
+                   was not, so 16 of 87 vehicle rows on 2026-09-10 carried a
+                   drivers count that disagreed with the length of the folded
+                   driver_refs printed on the same row — the exact rule
+                   api/custody_sql.js's header states. Latent today because
+                   neither shell draws this figure; wrong on the wire either
+                   way. */
+                count(DISTINCT coalesce(nullif(t.person_key, ''), t.driver_ext_id))::int drivers,
+                count(DISTINCT t.driver_ext_id)::int driver_accounts,
                 -- "This car did 1 journey and 0 bookings" is the row on this
                 -- page most likely to start a conversation, and it named no
                 -- one to have it with.

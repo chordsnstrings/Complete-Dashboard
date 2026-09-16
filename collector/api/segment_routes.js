@@ -18,7 +18,7 @@
    every booking on every channel within an hour either side, not just the
    nearest; the driver who actually held the car that day; and the raw fixes. */
 import { placeEnds, RATE_SQL, forgone } from './place_sql.js';
-import { custodyNames, custodyRefs, peopleCount } from './custody_sql.js';
+import { custodyNames, custodyRefs, peopleCount, personKey } from './custody_sql.js';
 import { areaOf } from './analytics_routes.js';
 
 /* THE RECONCILER'S OWN VOCABULARY, in one place.
@@ -370,14 +370,39 @@ export function slotRoutes(app, { q, wrap, range }) {
 
       /* Who actually covers this hour. The point of the page: an hour served by
          two people is an hour that breaks when one of them is off. */
-      q(`SELECT driver_ext_id, max(driver_name) driver_name, count(*)::int trips,
+      /* ONE ROW PER PERSON, on the page whose whole subject is how few people
+         cover an hour.
+         ─────────────────────────────────────────────────────────────────
+         THE DEFECT. GROUP BY driver_ext_id LIMIT 40 gave one human with three
+         platform accounts THREE of the forty rows, with his trips split
+         between them — so a thinly-covered hour looked better staffed than it
+         is, which is the precise opposite of the judgement this table exists
+         to support ("a slot held up by one or two people is a rota risk, not a
+         strength", api/public/slot.js:103). It also mis-ordered the list, for
+         the same reason /api/day's did: a person who worked the hour 30 times
+         across two accounts sorted below one who worked it 20 times on one.
+
+         trip_norm cannot expose person_key — it is a view created in
+         sql/schema_v18.sql, before the column, and a view's star is frozen at
+         creation — so personKey() computes the fold. That is the per-row regex
+         and it is the right trade HERE and not everywhere: this query is one
+         weekday-hour, a few thousand rows at the widest window, not the
+         175,000-row scan that cost /api/alerts/by-driver 93 seconds. The
+         headline beside it already pays exactly this cost with peopleCount().
+
+         accounts comes back on the row so a person holding three can be seen
+         to be holding three, rather than the fold silently hiding it. */
+      q(`SELECT max(driver_ext_id) driver_ext_id,
+                coalesce(mode() WITHIN GROUP (ORDER BY driver_name), '(unnamed)') driver_name,
+                count(DISTINCT driver_ext_id)::int accounts,
+                count(*)::int trips,
                 count(DISTINCT local_day)::int days,
                 string_agg(DISTINCT platform, ', ') platforms,
                 round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
                 round(100.0*count(*) FILTER (WHERE outcome='completed')
                       /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) completion_pct
           FROM trip_norm WHERE ${SLOT} AND driver_ext_id IS NOT NULL
-          GROUP BY 1 ORDER BY trips DESC LIMIT 40`, p),
+          GROUP BY ${personKey()} ORDER BY trips DESC LIMIT 40`, p),
 
       q(`SELECT platform, count(*)::int trips,
                 round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
@@ -442,8 +467,27 @@ export function slotRoutes(app, { q, wrap, range }) {
       `SELECT count(*)::int n FROM trip_norm
        WHERE is_booking AND local_day BETWEEN $1::date AND $2::date`, [from, to]);
 
+    /* ONE PAGE, ONE ANSWER.
+       ──────────────────────────────────────────────────────────────────────
+       THE DEFECT, and it was visible on screen without any measurement: this
+       was count(DISTINCT driver_ext_id) while head.drivers a hundred lines
+       above is peopleCount() — so /api/slot returned TWO totals for one hour,
+       and api/public/slot.js printed them a few centimetres apart, the tile
+       reading "People covering it: 110" and the table cap reading "all 126
+       people who work this hour". Measured on production over
+       from=2026-06-01&to=2026-09-16: dow=4 hour=19 gave 110 against 126
+       (+14.5%); dow=1 hour=8 gave 99 against 109; dow=0 hour=0 gave 70 against
+       81. The raw one was the one rendered under the word people.
+
+       Folded with peopleCount(), the same expression the headline uses, so the
+       two figures on one page are now the same figure. The accounts reading is
+       returned beside it and named, because "110 people across 126 platform
+       accounts" is the honest sentence and the cap on the list below is a cap
+       over PEOPLE now that the list is one row per person. */
     const [drvTot] = await q(
-      `SELECT count(DISTINCT driver_ext_id)::int n FROM trip_norm
+      `SELECT ${peopleCount()}::int n,
+              count(DISTINCT driver_ext_id)::int accounts
+       FROM trip_norm
        WHERE ${SLOT} AND driver_ext_id IS NOT NULL`, p);
 
     res.json({
@@ -463,6 +507,7 @@ export function slotRoutes(app, { q, wrap, range }) {
       /* 40 of a slot's 62 drivers were listed with nothing saying so, on a page
          whose whole subject is how few people cover an hour. */
       drivers_total: drvTot?.n ?? drivers.length,
+      driver_accounts_total: drvTot?.accounts ?? null,
       drivers_shown: drivers.length,
       drivers_truncated: (drvTot?.n ?? 0) > drivers.length,
       platforms, corridors, occurrences, peers, settlement: settle, outcome,

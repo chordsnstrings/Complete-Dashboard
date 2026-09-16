@@ -45,6 +45,8 @@ import { once } from 'node:events';
    a regex over this file asserting the refusal exists, which is a check that
    the words are present, not that the arithmetic is right. It was wrong: see
    the comment on the walk-back below. */
+import { peopleCountStored, JOIN_TRIP } from './custody_sql.js';
+
 const MAX_ROWS = 400000;
 
 /* Declared, not discovered.
@@ -54,8 +56,18 @@ const MAX_ROWS = 400000;
    format, one of which only ran when there was no data to check it against.
    One list, used for the SELECT order, the header and every row. */
 const COLS = {
-  day: ['day', 'fleet', 'channel', 'bookings', 'completed', 'drivers', 'vehicles',
-    'km', 'priced_bookings', 'fares', 'currency'],
+  /* `drivers` and `driver_accounts` are TWO COLUMNS on purpose.
+     ─────────────────────────────────────────────────────────────────────
+     This file leaves the building as a spreadsheet and Finance reconciles it
+     against the pages, so a header that does not say which of the two
+     readings it carries is a number nobody downstream can re-derive. It used
+     to carry one column called `drivers` holding count(DISTINCT
+     driver_ext_id) — platform accounts under a header that says drivers, on a
+     fleet where 151 people hold 265 accounts. Both are now present and each
+     says what it is. Appended after `drivers` rather than in place of it, so
+     an existing consumer's column positions up to that point are unchanged. */
+  day: ['day', 'fleet', 'channel', 'bookings', 'completed', 'drivers', 'driver_accounts',
+    'vehicles', 'km', 'priced_bookings', 'fares', 'currency'],
   trip: ['day', 'fleet', 'channel', 'trip_id', 'requested_at', 'ended_at', 'driver_name',
     'driver_ext_id', 'plate', 'pickup_addr', 'dropoff_addr', 'distance_km',
     'product', 'payment_type', 'status', 'outcome', 'price', 'currency'],
@@ -86,21 +98,38 @@ const WHERE = `local_day BETWEEN $1::date AND $2::date AND is_booking
 /* One row per fleet per channel per day. Every measure is over BOOKINGS: the
    FMS feed is a telematics twin of journeys other channels already reported
    (sql/schema_v7.sql), so counting it would double the fleet. */
+/* Aliased `n`, so the person fold can reach trip through JOIN_TRIP. The shared
+   WHERE above is written unqualified and is also used by the per-trip export,
+   which has no join — so this one query gets its own qualified copy rather than
+   the constant growing an alias parameter for one caller. */
+const DAY_WHERE = `n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
+                     AND ($3::text IS NULL OR n.platform = $3)
+                     AND ($4::text IS NULL OR n.fleet_id = $4)`;
+
 const DAY_SQL = `
-  SELECT local_day::text AS day,
-         coalesce(fleet_id, 'unassigned') AS fleet,
-         platform AS channel,
+  SELECT n.local_day::text AS day,
+         coalesce(n.fleet_id, 'unassigned') AS fleet,
+         n.platform AS channel,
          count(*)::int AS bookings,
-         count(*) FILTER (WHERE outcome = 'completed')::int AS completed,
-         count(DISTINCT driver_ext_id)::int AS drivers,
-         count(DISTINCT plate)::int AS vehicles,
-         round(sum(distance_km) FILTER (WHERE has_distance)::numeric, 1) AS km,
-         count(*) FILTER (WHERE has_fare)::int AS priced_bookings,
-         round(sum(price) FILTER (WHERE has_fare)::numeric, 2) AS fares,
-         currency
-    FROM trip_norm
-   WHERE ${WHERE}
-   GROUP BY 1, 2, 3, currency
+         count(*) FILTER (WHERE n.outcome = 'completed')::int AS completed,
+         /* PEOPLE, folded on the merge register, and the accounts beside them.
+            trip_norm is a view created in sql/schema_v18.sql, BEFORE person_key
+            existed, and a view's SELECT t.* is frozen at creation — so the
+            stored column is reached through JOIN_TRIP, the shared join
+            api/custody_sql.js exports. On a per-day grouped export that is
+            cheap: the join key is trip's primary key so it is 1:1 and cannot
+            multiply a row, and the rows are already being read for every other
+            column here. */
+         ${peopleCountStored('t.person_key', 'n.driver_ext_id')}::int AS drivers,
+         count(DISTINCT n.driver_ext_id)::int AS driver_accounts,
+         count(DISTINCT n.plate)::int AS vehicles,
+         round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric, 1) AS km,
+         count(*) FILTER (WHERE n.has_fare)::int AS priced_bookings,
+         round(sum(n.price) FILTER (WHERE n.has_fare)::numeric, 2) AS fares,
+         n.currency
+    FROM trip_norm n ${JOIN_TRIP}
+   WHERE ${DAY_WHERE}
+   GROUP BY 1, 2, 3, n.currency
    ORDER BY 1, 2, 3`;
 
 /* Bounded to ONE day, because that is the unit this streams in. */

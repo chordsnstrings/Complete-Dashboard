@@ -36,6 +36,13 @@
       overlap constantly. Both days' waiting is summed gap by gap, over the
       positive gaps only, and the overlaps are counted separately. */
 
+/* The shared person fold and the join that makes it reachable from trip_norm.
+   trip_norm is a view frozen before person_key existed (sql/schema_v18.sql), so
+   a query over it that needs the stored key joins the base table — written once
+   in api/custody_sql.js because it has been needed in five places now and each
+   copy is a chance to join on the wrong pair of columns. */
+import { peopleCountStored, JOIN_TRIP } from './custody_sql.js';
+
 export function compareRoutes(app, { q, wrap }) {
   const num = (v) => (v == null ? null : Number(v));
   const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''))
@@ -105,22 +112,60 @@ export function compareRoutes(app, { q, wrap }) {
                 round(sum(n.distance_km) FILTER (WHERE n.has_distance AND n.is_booking)::numeric, 0) km,
                 sum(n.price) FILTER (WHERE n.has_fare) fares,
                 count(*) FILTER (WHERE n.has_fare)::int priced,
-                count(DISTINCT n.driver_ext_id) FILTER (WHERE n.is_booking AND n.driver_ext_id IS NOT NULL)::int drivers,
+                /* PEOPLE OUT, not platform accounts.
+                   ──────────────────────────────────────────────────────────
+                   THE DEFECT. This is the "Drivers out" tile
+                   (api/public/compare.js:197) and it counted driver_ext_id. On
+                   the part-day slice production served — 2026-09-16 cut at
+                   13:15, 282 bookings — raw and folded both came to 90, so the
+                   sample showed no gap; the same population measured whole-day
+                   on /api/day is 112 accounts against 94 people. A tile that
+                   happens to agree on a quiet afternoon is not a tile that is
+                   right.
+
+                   It is also internally inconsistent by construction, which is
+                   the part that does not need a measurement. The driver LIST
+                   on this same response is keyed on coalesce(driver_ext_id,
+                   'name:' || driver_name) — one row per ACCOUNT, deliberately,
+                   and its comment says so — so the page counted accounts in
+                   the tile and listed accounts under it while calling the tile
+                   drivers. Now the tile counts people and driver_accounts
+                   carries the figure the list is one row per.
+
+                   trip_norm is a VIEW created in sql/schema_v18.sql, BEFORE
+                   person_key existed, and a view's SELECT t.* is frozen at
+                   creation — so it cannot expose the column and the fold needs
+                   JOIN_TRIP, the shared join api/custody_sql.js exports for
+                   exactly this. It is cheap here and nowhere near a hot query:
+                   the predicate is local_day IN ($1, $2), two index scans on
+                   trip_local_day_idx, and the join key is trip's primary key so
+                   it is 1:1 and cannot multiply a row. */
+                ${peopleCountStored('t.person_key', 'n.driver_ext_id')}
+                  FILTER (WHERE n.is_booking AND n.driver_ext_id IS NOT NULL)::int drivers,
+                count(DISTINCT n.driver_ext_id) FILTER (WHERE n.is_booking AND n.driver_ext_id IS NOT NULL)::int driver_accounts,
                 count(DISTINCT n.plate) FILTER (WHERE nullif(btrim(n.plate), '') IS NOT NULL)::int vehicles,
                 min(n.requested_at) FILTER (WHERE n.is_booking) first_at,
                 max(n.requested_at) FILTER (WHERE n.is_booking) last_at,
                 round((sum(extract(epoch FROM (n.ended_at - n.requested_at)))
                        FILTER (WHERE n.is_booking AND n.ended_at IS NOT NULL) / 60)::numeric, 0) on_trip_min,
                 count(*) FILTER (WHERE n.is_booking AND n.ended_at IS NOT NULL)::int timed
-           FROM trip_norm n WHERE ${WHERE} GROUP BY 1`, p),
+           FROM trip_norm n ${JOIN_TRIP} WHERE ${WHERE} GROUP BY 1`, p),
       /* The same figures with no cut at all, so the page can say what the
          earlier day FINISHED on beside what it had reached by this hour. */
       q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS day,
                 count(*) FILTER (WHERE n.is_booking)::int bookings,
                 round(sum(n.distance_km) FILTER (WHERE n.has_distance AND n.is_booking)::numeric, 0) km,
                 sum(n.price) FILTER (WHERE n.has_fare) fares,
-                count(DISTINCT n.driver_ext_id) FILTER (WHERE n.is_booking AND n.driver_ext_id IS NOT NULL)::int drivers
-           FROM trip_norm n
+                /* Folded with the cut figure above, and it HAS to be: this pair
+                   exists so a reader can compare what a day had reached by this
+                   hour against what it finished on. Folding one and not the
+                   other would make the two incomparable, which is the entire
+                   purpose of the pair. Same JOIN_TRIP, same two-day predicate,
+                   same cost. */
+                ${peopleCountStored('t.person_key', 'n.driver_ext_id')}
+                  FILTER (WHERE n.is_booking AND n.driver_ext_id IS NOT NULL)::int drivers,
+                count(DISTINCT n.driver_ext_id) FILTER (WHERE n.is_booking AND n.driver_ext_id IS NOT NULL)::int driver_accounts
+           FROM trip_norm n ${JOIN_TRIP}
           WHERE n.local_day IN ($1::date, $2::date)
             AND ($3::text IS NULL OR n.fleet_id = $3)
             AND ($4::text IS NULL OR n.platform = $4)

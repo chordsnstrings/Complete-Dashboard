@@ -37,6 +37,8 @@
    Bolt's is real and this fleet has no surface that reports it — which is
    precisely why the sentence must not claim otherwise. The hotel channel
    bills the property and keeps the invoice. */
+import { peopleCountStored } from './custody_sql.js';
+
 export const COMMISSION_CHANNELS = new Set(['uber', 'bolt', 'yango', 'careem']);
 
 /* "did this ride complete", for a query that reads `trip` rather than the view.
@@ -101,13 +103,60 @@ export const platformPayouts = () => `
          round(sum(earnings)::numeric,2) payouts,
          round(sum(cash_earnings)::numeric,2) cash,
          count(DISTINCT day)::int payout_days,
-         count(DISTINCT driver_ext_id)::int drivers,
+         /* PEOPLE PAID, not statements filed against an account.
+            ──────────────────────────────────────────────────────────────
+            THE DEFECT. This was count(DISTINCT driver_ext_id) and it is
+            printed, in words, as "N drivers paid" on the
+            Revenue page (api/public/revenue.js:439) and as "\${payout_days}
+            days of statements, N drivers" on the Finance
+            tile. Over from=2026-06-01&to=2026-09-16 /api/kpis put 247 of them
+            directly beside its own folded figure of 151 people who drove —
+            two counts of the fleet's people, on one tile, 96 apart, and the
+            larger one under the same word.
+
+            driver_payout_day has carried the stored fold since
+            sql/schema_v51.sql and api/server.js:1624 already uses exactly this
+            helper on exactly this table twenty-five lines from here, so this
+            is the cheap form and not a second rule.
+
+            BOTH READINGS, BOTH NAMED. A payout is filed PER ACCOUNT — that is
+            what a statement is — so how many accounts were paid is a real
+            question and driver_accounts answers it. Folding it away would hide
+            a true distinction; leaving only it called every account a driver. */
+         ${peopleCountStored('person_key', 'driver_ext_id')}::int drivers,
+         count(DISTINCT driver_ext_id)::int driver_accounts,
          count(DISTINCT (period_start, period_end))::int periods
   FROM driver_payout_day
   WHERE day BETWEEN $1::date AND $2::date
     AND ($3::text IS NULL OR platform=$3)
     AND ($4::text IS NULL OR fleet_id=$4)
   GROUP BY 1`;
+
+/* HOW MANY PEOPLE THE FLEET PAID, over every platform at once.
+   ─────────────────────────────────────────────────────────────────────────
+   platformPayouts() answers per PLATFORM, and /api/kpis built its fleet figure
+   by SUMMING those rows. Folding each platform's count fixes half of that and
+   leaves the other half standing: a man paid by Uber and by Bolt is one person
+   and two platform rows, so the sum counts him twice however well each row is
+   folded. On this fleet 56% of the people who held a car hold more than one
+   account, and the accounts are spread across providers by construction —
+   that is what makes them different accounts.
+
+   So the fleet figure is asked as a fleet question. One row, one count over
+   the same rows platformPayouts groups, with the same four parameters in the
+   same order so it drops into the same Promise.all.
+
+   Both readings, both named, for the same reason as every other site in this
+   pass: `people` is humans and `accounts` is the statements-per-account
+   reading, and a page can honestly say "151 people across 265 platform
+   accounts" only if it is handed both. */
+export const payoutPeople = () => `
+  SELECT ${peopleCountStored('person_key', 'driver_ext_id')}::int people,
+         count(DISTINCT driver_ext_id)::int accounts
+  FROM driver_payout_day
+  WHERE day BETWEEN $1::date AND $2::date
+    AND ($3::text IS NULL OR platform=$3)
+    AND ($4::text IS NULL OR fleet_id=$4)`;
 
 /* The coverage a figure was measured over. A fare covers BOOKINGS and a payout
    covers DAYS, and both have to be stated against the window or a number drawn
@@ -151,7 +200,27 @@ export const platformStatements = () => `
          round(sum(cash)::numeric,2) statement_cash,
          round(sum(bank)::numeric,2) statement_bank,
          count(DISTINCT day)::int statement_days,
-         count(DISTINCT name_key) FILTER (WHERE NOT pseudo)::int statement_drivers
+         /* Folded on the PERSON, not on name_key.
+            ──────────────────────────────────────────────────────────────
+            name_key (sql/schema_v25.sql) is lower() plus whitespace collapse
+            and nothing else. It folds CASE — "KASHIF ALI AYYUB KHAN" onto
+            "Kashif Ali Ayyub khan" — and it does not fold the repeated-word
+            collapse, and it cannot fold the verified merge register at all,
+            because the register is keyed on the provider ID and a name rule
+            can never reach it. So it is a strictly weaker fold than the
+            person_key this same table has carried since sql/schema_v51.sql,
+            and it produced 235 "drivers" for Uber over
+            from=2026-06-01&to=2026-09-16 — identical to the raw account count
+            beside it, i.e. it folded nothing measurable at all on this fleet.
+
+            name_key survives as the LAST fallback rather than being deleted:
+            a ledger row with no readable name and no platform id still has to
+            count as itself rather than vanish, and that is the only case it
+            now decides. Both readings come back and both are named. */
+         count(DISTINCT coalesce(nullif(person_key, ''), nullif(driver_ext_id, ''), name_key))
+           FILTER (WHERE NOT pseudo)::int statement_drivers,
+         count(DISTINCT coalesce(nullif(driver_ext_id, ''), name_key))
+           FILTER (WHERE NOT pseudo)::int statement_accounts
   FROM driver_statement_day
   WHERE source <> 'ledger'
     AND day BETWEEN $1::date AND $2::date

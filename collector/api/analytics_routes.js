@@ -20,7 +20,7 @@
       else it is unmeasured, and an unmeasured approach leg is never charted as
       a zero-kilometre one. */
 import { dubaiDay } from './window.js';
-import { custodyOverWindow, custodyCountOverWindow, peopleCount } from './custody_sql.js';
+import { custodyOverWindow, custodyCountOverWindow, peopleCount, personKeyStored, NAMED } from './custody_sql.js';
 import { spanGaps } from './coverage_gaps.js';
 
 /* A number that lives in a JSON blob is a number a provider can change into a
@@ -226,10 +226,50 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                    expression against the same column — and it is the only
                    place it can be folded, because a LATERAL cannot see a
                    sibling's output. */
-                lower(regexp_replace(coalesce(driver_name, '(unnamed)'), '\\s+', ' ', 'g')) AS _nk
+                lower(regexp_replace(coalesce(driver_name, '(unnamed)'), '\\s+', ' ', 'g')) AS _nk,
+                /* The PERSON behind this row, carried up so the tile can count
+                   people while the list goes on showing rows. trip_ext inherits
+                   trip's generated person_key (created in sql/schema_v62.sql as
+                   SELECT t.* after the column existed — test/identity_merge.test.mjs
+                   asserts it), so this is a column read, not a fold. It is a
+                   function of the grouping key, so max() chooses between
+                   identical values. */
+                max(person_key) AS _pk
            FROM trip_ext
           WHERE ${FB} AND driver_holds_cash
           GROUP BY 1, 2),
+       /* HOW MANY PEOPLE, beside how many rows.
+          ──────────────────────────────────────────────────────────────
+          THE DEFECT. The tile above this list reads "Drivers holding cash"
+          and its value was count(*) over holders — one row per
+          (driver_name, driver_ext_id). Over from=2026-06-01&to=2026-09-16
+          that answered 252 on a fleet where /api/kpis counts 151 people who
+          drove, and of the 200 rows this endpoint returns only 126 are
+          distinct people (1.59x). 62 people appear two or three times.
+
+          Keeping both ROWS is deliberate and the block below says why: the
+          statement is filed under the NAME, both spellings match it, and
+          blanking one would hide the money from whichever spelling the reader
+          searched for. What was never defensible is the COUNT over them. The
+          rows stay; the tile now counts people.
+
+          It matters for more than the tile. AED 233,665 of the AED 361,489 of
+          known cash — 64.6% — sits on people split across two or three rows,
+          so no row shows what any of them is actually holding: Kashif Ali
+          Ayyub Khan appears three times at AED 5,016 + 1,685 + 1,163 instead
+          of once at 7,864. statement_name_rows already tells a row it shares
+          its statement; person_rows now tells it how many rows are the same
+          HUMAN, which is the stronger statement and the one the register
+          knows.
+
+          A separate CTE rather than a window function: count(DISTINCT ...)
+          OVER () is not a thing Postgres will do, and the alternative — a
+          second statement — is exactly the extra scan the block above this
+          query spent thirty-five seconds removing. holders is already
+          materialised, so this is a pass over a few hundred rows. */
+       people_tot AS (
+         SELECT count(DISTINCT coalesce(nullif(h._pk, ''), h.driver_ext_id, h.driver_name))::int n
+           FROM holders h),
        joined AS (
          SELECT h.*, s.statement_cash, s.statement_days
          FROM holders h
@@ -285,10 +325,18 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        ranked AS (
          SELECT j.*,
                 count(*)     OVER (PARTITION BY j._nk)::int AS _name_rows,
-                row_number() OVER (PARTITION BY j._nk ORDER BY j.cash_trips DESC) AS _name_rn
+                row_number() OVER (PARTITION BY j._nk ORDER BY j.cash_trips DESC) AS _name_rn,
+                /* How many rows on this list are the same PERSON. _name_rows
+                   above is the same question asked of the normalised NAME, and
+                   the name cannot answer it for the pairs the merge register
+                   holds — "Aliyan khalil" and "Raja Aliyan Khalil Raja Khalil
+                   Ahmed" are one man and no spelling rule reaches them. */
+                count(*) OVER (PARTITION BY coalesce(nullif(j._pk, ''),
+                                                     j.driver_ext_id, j.driver_name))::int AS _person_rows
            FROM joined j
        )
        SELECT *,
+              (SELECT n FROM people_tot) AS _people,
               count(*) OVER ()::int AS _drivers,
               sum(cash_trips) OVER ()::int AS _cash_trips,
               sum(priced_cash_trips) OVER ()::int AS _priced,
@@ -298,15 +346,20 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
          FROM ranked
          ORDER BY cash_trips DESC LIMIT 200`, p);
     const totals = rows.length
-      ? { drivers: rows[0]._drivers, cash_trips: rows[0]._cash_trips,
+      ? { people: rows[0]._people, drivers: rows[0]._drivers, cash_trips: rows[0]._cash_trips,
           priced: rows[0]._priced, value: rows[0]._value,
           stmt_cash: rows[0]._stmt_cash, stmt_drivers: rows[0]._stmt_drivers }
-      : { drivers: 0, cash_trips: 0, priced: 0, value: null, stmt_cash: null, stmt_drivers: 0 };
+      : { people: 0, drivers: 0, cash_trips: 0, priced: 0, value: null, stmt_cash: null, stmt_drivers: 0 };
     for (const r of rows) {
       r.statement_name_rows = r._name_rows || 1;
-      delete r._drivers; delete r._cash_trips; delete r._priced; delete r._value;
+      /* How many rows on this page are this same human. 1 for most people; 2
+         or 3 for the 62 the register folds, and those are the rows whose cash
+         figure is a fraction of what the person is actually holding. */
+      r.person_rows = r._person_rows || 1;
+      delete r._people; delete r._drivers; delete r._cash_trips; delete r._priced;
+      delete r._value;
       delete r._stmt_cash; delete r._stmt_drivers; delete r._name_rows;
-      delete r._name_rn; delete r._nk;
+      delete r._name_rn; delete r._nk; delete r._pk; delete r._person_rows;
     }
     const cashTrips = totals.cash_trips || 0;
     const priced = totals.priced || 0;
@@ -325,7 +378,13 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
         statement_name_rows: r.statement_name_rows || 1,
         value_known_pct: share(r.priced_cash_trips, r.cash_trips),
       })),
-      driver_count: totals.drivers || 0,
+      /* PEOPLE holding cash — what the tile says, folded on the register.
+         driver_rows is the same population counted as rows of this list, which
+         is what `truncated` and the panel heading must compare against: the
+         list is rows, so a cap over rows is a fact about rows. Both come back
+         and both are named. */
+      driver_count: totals.people || 0,
+      driver_rows: totals.drivers || 0,
       shown: rows.length,
       truncated: (totals.drivers || 0) > rows.length,
       total_cash_trips: cashTrips,
@@ -370,7 +429,30 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               (array_agg(driver_ext_id ORDER BY driver_ext_id)
                  FILTER (WHERE driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
               array_remove(array_agg(DISTINCT driver_ext_id), NULL) AS driver_ids,
-              count(DISTINCT driver_ext_id)::int drivers,
+              /* AN ACCOUNTS READING, AND IT IS THE RIGHT ONE — so it is named
+                 that way rather than folded.
+                 ──────────────────────────────────────────────────────────
+                 This was called drivers and it was the one genuinely ambiguous
+                 count in the driver-vs-account sweep. It is the SIZE OF THE
+                 driver_ids ARRAY beside it — the drill-down the comment above
+                 says is deliberate — and api/custody_sql.js's rule is that the
+                 count beside a list has to be a count OF that list. The list
+                 is ids, so the count is ids.
+
+                 It is also not inflated in practice: measured on production
+                 over from=2026-06-01&to=2026-09-16 it comes to 31 across every
+                 counterparty and the register changes none of them, because
+                 the ids on the big rows are hotel ObjectIds the register does
+                 not alias, and the one that IS an alias
+                 (6a423abb13880329d04e1999) survives only because none of its
+                 partners is filed against the same counterparty. The grouping
+                 already puts one counterparty per row, so the person question
+                 is not the one this row asks.
+
+                 Renamed rather than left alone, because nothing renders it
+                 today and a field called drivers that counts accounts is a
+                 trap for whoever renders it first. */
+              count(DISTINCT driver_ext_id)::int driver_accounts,
               count(*)::int trips,
               count(*) FILTER (WHERE price IS NOT NULL)::int priced_trips,
               sum(price) AS amount,
@@ -1033,13 +1115,45 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                    ORDER BY upper(replace(plate, ' ', '')), plate) vp
               ON vp.norm_plate = upper(replace(t.plate, ' ', ''))
        GROUP BY t.plate ORDER BY trips DESC LIMIT 250),
+       /* ONE ROW PER PERSON, not one per platform account.
+          ─────────────────────────────────────────────────────────────────
+          Byte-for-byte the same defect as /api/product/by-vehicle in
+          api/server.js, in a copy of the same CTE, and it must move with it or
+          #vehicles and the tier table will print two different answers to
+          "who drove this car". The long form of the reasoning is at that call
+          site; the measurement for THIS one, over
+          from=2026-06-01&to=2026-09-16, is 63 of 101 vehicles repeating a
+          person in driver_refs and sum(driver_n) = 377:
+
+            L44251  Wisal Muhammad Muhammad / 107 days,
+                    Wisal Muhammad Irshah Muhammad / 9,
+                    WISAL MUHAMMAD IRSHAD MUHAMMAD / 1        → driver_n 3, people 1
+            L36397  "Aliyan khalil" and
+                    "Raja Aliyan Khalil Raja Khalil Ahmed"     → a HAND_MERGES entry
+                                                                 listed as two of the
+                                                                 car's three drivers
+            L36395  Bakht Zada Sharif, Bakht Zada Bakht Sharif,
+                    Bakht Zada Bakht Sharif                    → driver_n 3, people 1
+
+          L36397 is the case a spelling rule can never reach and the reason the
+          fold is on the STORED person key rather than on personFold: the
+          register (api/identity_map.js, via sql/schema_v53.sql) is what knows
+          those two records are one man, and vehicle_driver_day.person_key
+          already carries it.
+
+          Both readings come back and both are named — driver_n is people,
+          driver_accounts is the platform records behind them. */
        held AS (
-         SELECT v.plate, v.driver_name, v.driver_ext_id, count(DISTINCT v.day)::int days
+         SELECT v.plate, ${personKeyStored('v')} AS person,
+                (array_agg(v.driver_name ORDER BY v.is_primary DESC, v.trips DESC))[1] AS driver_name,
+                (array_agg(v.driver_ext_id ORDER BY v.is_primary DESC, v.trips DESC))[1] AS driver_ext_id,
+                count(DISTINCT v.day)::int days,
+                count(DISTINCT v.driver_ext_id)::int accounts
            FROM vehicle_driver_day v
           WHERE v.plate IN (SELECT plate FROM agg)
             AND v.day BETWEEN $1::date AND $2::date
-            AND v.driver_name IS NOT NULL
-          GROUP BY v.plate, v.driver_name, v.driver_ext_id),
+            AND ${NAMED('v')}
+          GROUP BY v.plate, ${personKeyStored('v')}),
        ranked AS (
          SELECT h.*, row_number() OVER (PARTITION BY h.plate
                                         ORDER BY h.days DESC, h.driver_name) rn
@@ -1050,7 +1164,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                                              'days', r.days)
                           ORDER BY r.days DESC, r.driver_name)
                   FILTER (WHERE r.rn <= 3) AS driver_refs,
-                count(DISTINCT r.driver_ext_id)::int AS driver_n
+                count(DISTINCT r.person)::int AS driver_n,
+                sum(r.accounts)::int AS driver_accounts
            FROM ranked r GROUP BY r.plate)
        /* Who ran this car over the window. "L45240 does 4% premium work against
           a fleet median of 31%" is a finding about a person as much as an
@@ -1065,7 +1180,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
           decorate 250 rows. This tab measured 4,794ms cold at a 12-month
           window. /api/product/by-vehicle already makes exactly this trade and
           says why; this is the same shape. */
-       SELECT a.*, p2.driver_refs, coalesce(p2.driver_n, 0) AS driver_n
+       SELECT a.*, p2.driver_refs, coalesce(p2.driver_n, 0) AS driver_n,
+              coalesce(p2.driver_accounts, 0) AS driver_accounts
          FROM agg a LEFT JOIN per_plate p2 ON p2.plate = a.plate
         ORDER BY a.trips DESC`, p);
     const fleetPremium = rows.reduce((a, r) => a + r.premium, 0);

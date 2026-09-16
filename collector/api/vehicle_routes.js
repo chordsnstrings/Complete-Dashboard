@@ -12,7 +12,7 @@
    the fleet portal knows its documents, and only the combination answers
    "is this asset earning, and is it legal to be on the road". */
 
-import { peopleCount, personKey } from './custody_sql.js';
+import { peopleCount, personKey, custodyNames } from './custody_sql.js';
 import { winDays, dubaiSpanSql } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
@@ -937,9 +937,24 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        rider paid for one trip, this is a share of a net weekly payout after
        commission, and adding them would produce a number that is neither. */
     const [att] = await q(
+      /* PEOPLE, so the two shells answer the same question about one car.
+         ──────────────────────────────────────────────────────────────────
+         THE DEFECT. attributed_drivers is drawn on the phone as a tile headed
+         "Drivers", sub "held this car" (api/public/m/screens.js:1232), and it
+         counted DISTINCT driver_ext_id over the attribution rows — while the
+         DESKTOP tile for the same vehicle (api/public/vehicle.js:173, the
+         peopleCount() a hundred lines above this) is folded. One car, two
+         shells, two different driver counts, and nothing on either page to say
+         why.
+
+         api/attribution_sql.js now brings vehicle_driver_day's generated
+         person_key up with the custody row, so this is a column read. The
+         WEIGHTING is untouched and must be: a payout is filed per account, the
+         shares are computed per account, and only the count folds. */
       `SELECT round(sum(attributed)::numeric,2) attributed_earnings,
               count(DISTINCT platform)::int attributed_platforms,
-              count(DISTINCT driver_ext_id)::int attributed_drivers,
+              count(DISTINCT coalesce(nullif(person_key, ''), driver_ext_id))::int attributed_drivers,
+              count(DISTINCT driver_ext_id)::int attributed_accounts,
               bool_or(basis = 'even') AS any_even_split
        FROM (${attributedEarnings({ extra: 'AND vd.plate = $3' })}) att`, p);
     /* And the two of them combined, per platform, which is the number a person
@@ -1075,19 +1090,33 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        FROM telemetry_snapshot WHERE plate = $3 AND ${TS('captured_at')} GROUP BY 1),
      a AS (
        SELECT (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int alerts
-       FROM alert WHERE plate = $3 AND ${TS('occurred_at')} GROUP BY 1),
-     d AS (
-       SELECT day, string_agg(DISTINCT driver_name, ', ') drivers_named
-       FROM vehicle_driver_day WHERE plate = $3 AND day BETWEEN $1::date AND $2::date GROUP BY day)
+       FROM alert WHERE plate = $3 AND ${TS('occurred_at')} GROUP BY 1)
+     /* THE COUNT BESIDE A LIST HAS TO BE A COUNT OF THAT LIST.
+        ──────────────────────────────────────────────────────────────────
+        drivers_named rode out on the same row as the drivers count, which is
+        peopleCount() and folded, and it was string_agg(DISTINCT driver_name)
+        with no person fold and no empty-name guard — so a day held by one man
+        under two spellings printed both names beside a count of one, and a
+        blank-named channel row put a leading comma in front of the list.
+        api/custody_sql.js's header forbids exactly this pairing.
+
+        custodyNames(plate, day) is that helper and this is what it is for: it
+        folds on the stored person key and applies NAMED(). It is a correlated
+        subquery against vehicle_driver_day's (plate, day) index, which is how
+        every other custody cell in this product is built, so the CTE goes
+        away rather than being rewritten.
+
+        Latent today — the desktop vehicle page draws the count, not the string
+        — which is why it survived this long. */
      SELECT coalesce(t.day, g.day, a.day) AS day,
             coalesce(t.trips,0) trips, coalesce(t.cancelled,0) cancelled,
             t.km, t.revenue, coalesce(t.drivers,0) drivers,
             coalesce(g.fixes,0) fixes, g.top_speed, g.fuel_level,
-            coalesce(a.alerts,0) alerts, d.drivers_named,
+            coalesce(a.alerts,0) alerts,
+            ${custodyNames('$3', 'coalesce(t.day, g.day, a.day)')} AS drivers_named,
             w.temp_max, c.is_holiday, c.holiday_name
      FROM t FULL OUTER JOIN g ON g.day = t.day
             FULL OUTER JOIN a ON a.day = coalesce(t.day, g.day)
-            LEFT JOIN d ON d.day = coalesce(t.day, g.day, a.day)
             LEFT JOIN weather_daily w ON w.day = coalesce(t.day, g.day, a.day)
             LEFT JOIN calendar_day c ON c.day = coalesce(t.day, g.day, a.day)
      ORDER BY 1`, p))));

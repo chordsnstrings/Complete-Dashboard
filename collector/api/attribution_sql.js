@@ -32,6 +32,10 @@
       total minus the unattributed remainder. That is an arithmetic identity,
       and test/attribution.test.mjs asserts it rather than trusting it. */
 
+/* The name fold, for the ONE count in this file that cannot read a stored
+   person key — see unattributedEarnings below for why. */
+import { peopleCount } from './custody_sql.js';
+
 /* Trip-weighted shares of each payout period, one row per (plate, day).
 
    `$1..$2` are the window bounds as dates. The window is applied to the
@@ -68,10 +72,33 @@ export const attributedEarnings = ({ platformFilter = '', extra = '' } = {}) => 
   /* Every vehicle-day belonging to a period, including the days outside the
      requested window — they are needed for the denominator, and dropped after
      the weight is known. */
+  /* person_key comes up with the custody row, and it changes NOTHING about the
+     arithmetic.
+     ───────────────────────────────────────────────────────────────────────
+     THE DEFECT it closes is downstream: three call sites counted
+     count(DISTINCT driver_ext_id) over these rows and called the answer
+     drivers — /api/vehicle/kpis (attributed_drivers, rendered on the phone as
+     a tile headed "Drivers · held this car") and /api/economics/assets
+     (payout_drivers). The DESKTOP tile for the same car uses peopleCount() and
+     is folded, so one vehicle answered two different driver counts depending
+     on which shell asked.
+
+     vehicle_driver_day carries the generated person_key (sql/schema_v53.sql)
+     and this CTE already joins that table, so exposing it costs one column on
+     a row set that is already being built.
+
+     THE WEIGHTING MUST STAY ON driver_ext_id AND DOES. A payout is filed per
+     ACCOUNT — driver_payout is grouped on (platform, driver_ext_id, period) —
+     so the share of a period that belongs to a vehicle-day is a question about
+     that account's days and trips, and folding two accounts together here
+     would pool two separate statements into one denominator and silently
+     change every attributed amount. Only the COUNT folds. The WINDOW clause
+     below still partitions on driver_ext_id; nothing in the weight expression
+     mentions person_key. */
   vd AS (
     SELECT p.platform, p.driver_ext_id, p.period_start, p.period_end,
            p.earnings, p.cash_earnings,
-           d.plate, d.day, d.driver_name, d.fleet_id,
+           d.plate, d.day, d.driver_name, d.fleet_id, d.person_key,
            greatest(coalesce(d.trips, 0), 0) AS trips,
            coalesce(d.km, 0) AS km
     FROM pay p
@@ -120,6 +147,7 @@ export const attributedEarnings = ({ platformFilter = '', extra = '' } = {}) => 
                                    vd.period_start, vd.period_end)
   )
   SELECT vd.plate, vd.day, vd.platform, vd.driver_ext_id, vd.driver_name, vd.fleet_id,
+         vd.person_key,
          vd.trips, vd.km,
          vd.period_start, vd.period_end,
          vd.earnings AS period_earnings,
@@ -146,7 +174,38 @@ export const attributedEarnings = ({ platformFilter = '', extra = '' } = {}) => 
 export const unattributedEarnings = ({ platformFilter = '' } = {}) => `
   SELECT p.platform,
          count(*)::int periods,
-         count(DISTINCT p.driver_ext_id)::int drivers,
+         /* PEOPLE, computed rather than read — the one place in this file that
+            has to pay for the fold.
+            ──────────────────────────────────────────────────────────────
+            driver_payout is a VIEW (sql/schema_v23.sql:147) grouped on
+            (platform, fleet_id, driver_ext_id, driver_name, period…), and it
+            does not project person_key: the column is on driver_payout_day
+            underneath, and the view's SELECT list was written without it. So
+            this count cannot read the stored key the way its sibling above now
+            can, and it was count(DISTINCT driver_ext_id) under the name
+            drivers.
+
+            It is not read from driver_payout_day instead, and that is
+            deliberate: this half and attributedEarnings() must PARTITION ONE
+            SET OF PERIODS or their sum is not the payout total, which is the
+            only property that makes either number checkable (see the header
+            above). Changing the source of one half to get a nicer count would
+            break the identity test/attribution.test.mjs asserts.
+
+            So personKey() computes the fold from the name the view does carry.
+            That is the per-row double regexp_replace, and it is affordable
+            here and nowhere else in this file: these are the payout periods
+            whose driver has NO vehicle-day inside them — the remainder, tens
+            of rows on this fleet, not the hundreds of thousands
+            sql/schema_v20.sql measured the regex against. personKey() also
+            carries identityCase, so the verified merge register applies,
+            which is what the stored column would have given.
+
+            Both readings, both named: a payout is filed per account, so
+            driver_accounts is what reconciles against a provider's line count
+            and drivers is how many humans are behind it. */
+         ${peopleCount('p.driver_ext_id', 'p.driver_name')}::int drivers,
+         count(DISTINCT p.driver_ext_id)::int driver_accounts,
          round(sum(p.earnings)::numeric, 2) AS earnings
   FROM driver_payout p
   WHERE p.earnings IS NOT NULL AND p.earnings > 0

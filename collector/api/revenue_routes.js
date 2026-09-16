@@ -160,7 +160,36 @@ export function receiptRoutes(app, { q, wrap, range }) {
               (period_end - period_start + 1)::int AS days,
               (period_start = period_end) AS is_daily,
               count(*)::int rows_seen,
-              count(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id <> '')::int drivers,
+              /* THE STRONGEST LABEL IN THE SWEEP, over a table that can answer it.
+                 ──────────────────────────────────────────────────────────
+                 The column this feeds is headed, literally, "People"
+                 (api/public/receipts.js:207), and its absent-reason reads
+                 "this filing is about the fleet, not about named drivers" —
+                 so the figure is asserted to be a headcount of humans, and it
+                 was count(DISTINCT driver_ext_id). One man with an Uber, a
+                 Bolt and a hotel record was three People.
+
+                 money_event carries a GENERATED person_key
+                 (sql/schema_v42.sql:54, rebuilt by sql/schema_v53.sql from
+                 api/identity_map.js), so this folds with no join, no regex and
+                 no schema change — the column is already on the rows this CTE
+                 selects with w.*.
+
+                 The FILTER is unchanged and stays on driver_ext_id: a filing
+                 with no driver id at all is a fleet-level line, and the empty
+                 string is how sql/schema_v42.sql spells "the provider gave
+                 none" on a column that is part of a primary key. Folding must
+                 not quietly turn those into a person.
+
+                 Both readings, both named. A filing is made against an
+                 ACCOUNT, so driver_accounts is the number that reconciles
+                 against a provider's own line count; drivers is the number of
+                 humans behind it. The two grains of this page (this query and
+                 the by-source summary below) must move together or one table
+                 contradicts the other. */
+              count(DISTINCT coalesce(nullif(person_key, ''), driver_ext_id))
+                FILTER (WHERE driver_ext_id <> '')::int drivers,
+              count(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id <> '')::int driver_accounts,
               count(DISTINCT category) FILTER (WHERE category <> '')::int categories,
               round(sum(amount)::numeric, 2) AS amount,
               round(sum(amount) FILTER (WHERE amount > 0)::numeric, 2) AS credits,
@@ -330,7 +359,14 @@ export function revenueRoutes(app, { q, wrap, range }) {
               round(sum(amount) FILTER (WHERE NOT restated)::numeric, 2) AS amount_not_restated,
               min(period_start) AS first_period, max(period_end) AS last_period,
               max(period_end - period_start + 1)::int AS max_period_days,
-              count(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id <> '')::int drivers,
+              /* Folded, with the by-filing grain above and for the same reason.
+                 Same money_event rows, same generated person_key, same pair of
+                 names — if only one of the two grains folded, the summary and
+                 the detail on one page would disagree about how many People a
+                 source's filings are about. */
+              count(DISTINCT coalesce(nullif(person_key, ''), driver_ext_id))
+                FILTER (WHERE driver_ext_id <> '')::int drivers,
+              count(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id <> '')::int driver_accounts,
               max(ingested_at) AS last_seen
          FROM marked
         GROUP BY source, platform, fleet_id, kind
@@ -451,7 +487,18 @@ export function revenueRoutes(app, { q, wrap, range }) {
                 round(sum(pay.earnings)::numeric,2) payouts,
                 round(sum(pay.cash_earnings)::numeric,2) cash,
                 count(DISTINCT (pay.period_start, pay.period_end))::int periods,
-                count(DISTINCT pay.driver_ext_id)::int drivers,
+                /* PEOPLE PAID. Second copy of the income_sql.js:platformPayouts
+                   defect over the same driver_payout_day rows: this feeds
+                   "${payout_drivers} drivers paid" on api/public/revenue.js:439
+                   and reported 235 for Uber over
+                   from=2026-06-01&to=2026-09-16 against 115 people who drove on
+                   Uber in the same window. The two had to move together or the
+                   Finance tile and the Revenue row would print different
+                   numbers for one fact. driver_payout_day has carried the
+                   stored fold since sql/schema_v51.sql. Both readings, both
+                   named — a payout is filed per account. */
+                ${peopleCountStored('pay.person_key', 'pay.driver_ext_id')}::int drivers,
+                count(DISTINCT pay.driver_ext_id)::int driver_accounts,
                 min(pay.period_start) first_period, max(pay.period_end) last_period,
                 max(covered.days) AS payout_days
            FROM pay LEFT JOIN covered ON covered.platform = pay.platform
@@ -459,9 +506,28 @@ export function revenueRoutes(app, { q, wrap, range }) {
 
       /* The payout tree. `parent IS NULL` are the top-level categories; summing
          every row would count a category and its children twice. */
+      /* THE ONE TABLE IN THIS SWEEP WITH NO person_key, named honestly instead.
+         ──────────────────────────────────────────────────────────────────
+         driver_earnings_component has no person key: sql/schema_v42.sql added
+         the generated column to money_event, not here, and sql/schema_v53.sql
+         rebuilds it on a fixed list of six tables of which this is not one. So
+         this count is ACCOUNTS and cannot cheaply be anything else — the two
+         ways to fold it are a per-row double regexp_replace (measured at
+         2,434ms against 129ms in sql/schema_v20.sql) or a new generated column,
+         which cannot simply be added in a v72 because a column outside v53's
+         list would carry the name fold and NOT the merge register and would
+         silently stop tracking api/identity_map.js. api/server.js's
+         /api/earnings/components sits on the same table and carries the long
+         form of this reasoning; the two are one decision.
+
+         So the figure stays raw and gains the name it has always meant.
+         `driver_accounts` is what api/public/revenue.js now labels "Accounts";
+         `drivers` is kept only because removing a key an existing shell reads
+         is a separate change from getting the arithmetic right. */
       q(`SELECT platform, category, parent,
                 round(sum(amount)::numeric,2) amount,
-                count(DISTINCT driver_ext_id)::int drivers
+                count(DISTINCT driver_ext_id)::int drivers,
+                count(DISTINCT driver_ext_id)::int driver_accounts
          FROM driver_earnings_component
          WHERE period_start >= $1::date AND period_end <= $2::date
            AND ($3::text IS NULL OR platform=$3)
@@ -516,7 +582,8 @@ export function revenueRoutes(app, { q, wrap, range }) {
     });
     for (const y of payouts) Object.assign(row(y.platform), {
       payouts: num(y.payouts), cash: num(y.cash), payout_periods: y.periods,
-      payout_drivers: y.drivers, first_period: y.first_period, last_period: y.last_period,
+      payout_drivers: y.drivers, payout_accounts: y.driver_accounts,
+      first_period: y.first_period, last_period: y.last_period,
       payout_days: y.payout_days ?? 0,
     });
     for (const c of components) {
@@ -545,7 +612,7 @@ export function revenueRoutes(app, { q, wrap, range }) {
       statement_fees: num(t.statement_fees), statement_tips: num(t.statement_tips),
       statement_salik: num(t.statement_salik), statement_cash: num(t.statement_cash),
       statement_bank: num(t.statement_bank), statement_days: t.statement_days,
-      statement_drivers: t.statement_drivers });
+      statement_drivers: t.statement_drivers, statement_accounts: t.statement_accounts });
 
     /* Which figure to believe for each platform, and why. Stated as a basis
        rather than blended, because a fare and a payout are different money and

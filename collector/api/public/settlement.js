@@ -274,8 +274,18 @@ async function settleCash(host) {
        list the endpoint caps at 200 — under a label that reads as a fleet
        fact. It is right until the fleet has more than 200 drivers taking cash,
        and then it is quietly a cap. */
+    /* PEOPLE, and the rows they occupy, said separately.
+       ────────────────────────────────────────────────────────────────────
+       driver_count was a count of ROWS — one per (name, platform id) — under
+       a label that says drivers, and it read 252 on a fleet of 151 people who
+       drove. It is folded on the merge register now (api/analytics_routes.js
+       records the measurement). The list below still shows one row per
+       account on purpose, so the sub-line says how many rows those people
+       occupy rather than pretending the two numbers are the same. */
     { label: 'Drivers holding cash', value: fmt(c.driver_count ?? c.drivers.length),
-      sub: c.truncated ? `${fmt(c.drivers.length)} shown below` : 'every one of them listed below',
+      sub: (c.driver_rows && c.driver_count && c.driver_rows > c.driver_count
+        ? `across ${fmt(c.driver_rows)} platform accounts`
+        : (c.truncated ? `${fmt(c.drivers.length)} shown below` : 'every one of them listed below')),
       cohort: c.drivers.length ? 'settlement-cash' : null },
   ]));
   if (c.caveat) host.append(note(c.caveat));
@@ -284,7 +294,13 @@ async function settleCash(host) {
      The list arrives ordered by cash bookings, so the driver holding the most
      KNOWN money — AED 1,566 — sat 38th behind thirty-seven rows reading "—",
      and there was no way to reach him but to scroll. */
-  const cp = panel(`Who is holding it — ${countOf(c.drivers.length, 'driver')}`,
+  /* ROWS, because that is what the table below contains. One row per platform
+     account is deliberate — the statement is filed under the NAME and both
+     spellings have to be findable — so the heading counts rows and the tile
+     above counts people, and neither pretends to be the other. */
+  const cp = panel(`Who is holding it — ${countOf(c.drivers.length, 'row')}`
+    + (c.driver_count && c.drivers.length > c.driver_count
+      ? ` for ${fmt(c.driver_count)} ${c.driver_count === 1 ? 'person' : 'people'}` : ''),
     'One row per person. Value known is the fares of that driver\u2019s cash bookings that carry one '
     + 'and Coverage is the share of them that do; Statement cash is what the platform\u2019s own '
     + 'weekly statement says they took. Two measurements of the same money from opposite sides — '

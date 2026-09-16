@@ -3226,3 +3226,98 @@ was in March. Every blank on that page was the read layer behaving correctly.
   empty-window banner states the gap against TODAY, which the browser genuinely
   knows, and names the window with `windowLabel()`. A true smaller fact beats a
   fabricated larger one.
+
+### What the second pass over that page found, and the traps it added
+
+Two verifiers re-read the first repair against production through
+`bin/live-ui.mjs`, window pinned `from=2026-09-01&to=2026-09-16`. Seven of their
+findings are traps rather than one-off slips, and they are the ones worth
+looking up later.
+
+- **A reason can be new, confident, and still not the true one — and the
+  second half of the house rule is the half that gets missed.** The first
+  repair gave the `Counted` column and the statement caption the sentence "the
+  server resolved no part of these statements onto a day this window covers".
+  `api/driver_routes.js` builds `periods` from `driver_payout_day` under
+  `WHERE ... day BETWEEN $1::date AND $2::date` and then selects
+  `count(*) AS days_used` **and** `round(sum(earnings),2) AS counted` over
+  exactly those rows. So `days_used` IS the count of days that resolved INSIDE
+  the window, and `counted` is null only when those days exist and every one of
+  them carries a NULL `earnings`. MEASURED: the operator's driver returns
+  days_used 7 and 6, and the table printed "7" and "6 of 7" in its Days column
+  while the sentence beneath it said none of them had resolved. It is not
+  confined to an empty window either — 8 of the 136 drivers WITH trips in that
+  window carry `counted` null on every period. **Branch on the field the
+  payload carries; never assert an outcome the same payload disproves.**
+- **`if (v)` on the end of a `??` chain throws away the distinction the chain
+  exists to preserve.** The repaired Cash tile read
+  `const v = a ?? b ?? c; if (v) return money(v);` — so `v === 0`, a figure the
+  platform PUBLISHED at nought, fell through and printed "not reported". Uber
+  files 0.00 components for this fleet routinely. **`!= null`, not truthiness,
+  at the point where an absence and a nought are being told apart.**
+- **A POPULATION is not COVERAGE, and `cashTrips === 0` has three causes.**
+  `/api/driver/mix` builds the payment breakdown as
+  `coalesce(payment_type,'unknown') label`, so a booking whose method nobody
+  recorded still produces a row — it just never matches `CASH_LABEL`. Gating
+  the tile on whether the driver WORKED separates "nothing measured" from
+  "nothing was cash" and leaves the third case, "nobody recorded how any of it
+  was paid", reading as a measured AED 0 over 84 bookings. `unknown` is real
+  here: over `from=2025-09-17&to=2026-09-16`, three of six sampled drivers
+  carry `unknown:1` or `unknown:2` payment rows. The fleet twin on
+  `#finance` had the same fault and worse — it named `k.trips` as the
+  denominator while the settlement caption four panels lower says 402 of 2,043
+  trips record no payment type at all. **`/api/settlement/mix` returns
+  `unlabelled_trips` beside its classes precisely so a page can subtract it.**
+- **`cancel_daily.trips` is `count(*) FILTER (WHERE outcome IS NOT NULL)`, not
+  a count of work.** `trip_norm.outcome` is NULL for every `platform='fms'`
+  row and for every row with a NULL status (`sql/schema_v18.sql`). So an empty
+  `cancel_daily` means "no row carries a normalised outcome", and the repaired
+  copy read it as "this driver worked no day in this window" — a statement
+  about a person's month, printed on the Quality tab while Overview said Days
+  worked 19. Latent on today's data (all 136 working drivers have rows) and
+  live the moment a channel files a booking with no status.
+- **`telematics_journeys` is the field that says whether a custody population
+  exists at all.** `/api/driver/quality` sets it to null when `plate_days` is
+  0. Harsh-event attribution is a JOIN of `alert` against `vehicle_driver_day`,
+  so with no custody row the count is 0 for a reason that has nothing to do
+  with driving — and the tile printed that 0 beside a Per 100 km tile correctly
+  reading "not measured". A numerator asserting and its denominator refusing,
+  on one row.
+- **A "did we measure any money" test has to be over every money figure the
+  page RENDERS.** `moneyMeasured` on the Earnings tab listed the KPI money, the
+  mix, the tips, the components and the periods' `earnings` — and never
+  `e.fare`, `e.statement_cash`, `e.statement_gross` or the periods' own
+  `cash_earnings`, all four of which the same function prints lower down. The
+  payout-period feed and the day-level statement feed are different tables, so
+  "no statement covers a day of this window" was too wide a denial for a panel
+  drawn from one of them.
+- **`charts.js:empty()` prints "Nothing to show / No data for this range yet",
+  and that is the shape of a sentence where a reason should be.** Every chart
+  and `tableFrom()` falls through to it on an empty input. Where a panel's
+  siblings now state their reasons, the generic line reads as a different and
+  worse failure sitting beside them — and on `percentileBars` the page printed
+  the box AND the true sentence underneath it, so the reader met the false-
+  sounding one first. Worse is the case `empty()` never reaches: `barChart`
+  drew a 1090x327 axis holding 13 zero-height rects for a driver with no trips,
+  because the ROWS existed and it was the VALUES that were nought.
+
+### The noughts on that page that are real, and stay digits
+
+Re-confirmed against production, because over-correcting is the same defect
+facing the other way:
+
+- Statement column `AED 0` on both Uber periods, the day-level `AED 0 net`
+  line, and the two `0.00` components — Uber published every one of them.
+- `day_money` 0 over `day_money_days` 13 behind the Overview **MONEY IN** tile.
+  `moneyParts` returns NaN when `day_money` is null and the tile already
+  renders that as an absence, so a zero there means rows existed and summed to
+  nought. The figure was never the defect; the sentence beside it was, because
+  both halves of its `parts` list test their value for TRUTH and a nought
+  dropped out of both, leaving the tile on a fallback that describes the tile
+  rather than the window.
+- The identity card's "IN THIS WINDOW 0 trips over 0 days", Overview TRIPS and
+  DAYS WORKED, and the day table's TRIPS and CANCELLED columns. True counts.
+- `rating_change.change` 0. Uber published 4.97 on five readings between
+  2026-08-31 and 2026-09-14; the delta between two published figures is a
+  measurement. What was missing was `over_trips === 0` — no trip fell between
+  the readings, which is what makes a nought delta readable.

@@ -306,7 +306,15 @@ export async function renderDay(root, day, onDetail) {
     root.append(ap.panel);
   }
 
-  const dp = panel('Who drove', 'Every driver with a booking on this day, across all channels.');
+  /* One row per PERSON, not per platform account — api/day_routes.js folds on
+     the merge register now, so a man with an Uber and a Bolt record appears
+     once with his whole day rather than twice with it split. The caption says
+     so, because a reader who knows this fleet will notice the list got shorter
+     and is owed the reason. */
+  const dp = panel('Who drove',
+    'Every driver with a booking on this day, across all channels. One row per person: '
+    + 'somebody holding several platform accounts is folded into a single row, with their '
+    + 'whole day on it.');
   dp.body.append(tableFrom(d.drivers, [
     { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Trips', key: 'trips', num: true },

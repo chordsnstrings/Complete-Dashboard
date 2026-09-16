@@ -257,7 +257,33 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
        SELECT extract(dow FROM slot)::int AS dow,
               extract(hour FROM slot)::int AS h,
               round(sum(greatest(0, mins))::numeric / 60, 1) AS online_h,
-              count(DISTINCT driver_ext_id)::int AS drivers
+              /* ACCOUNTS, and named that way, because this is the one site in
+                 the driver-vs-account sweep where folding is not affordable.
+                 ──────────────────────────────────────────────────────────
+                 THE DEFECT was the NAME. This was called drivers and it
+                 counts DISTINCT driver_ext_id over online spans, so one human
+                 with an Uber and a Yango account is two — the same inflation
+                 /api/slot carried, in the grid the Slot page is opened from.
+
+                 WHAT FOLDING WOULD COST. The spans are built from
+                 driver_timeline_event (sql/schema_v37.sql), which has NO
+                 person_key and is not one of the six tables sql/schema_v53.sql
+                 generates it on. Reaching a person key from here means either
+                 a join to driver_platform_state or to trip on driver_ext_id,
+                 inside a query that already expands every online span into
+                 per-hour slices with a LATERAL generate_series — so the join
+                 would be evaluated against the EXPANDED row set, which on a
+                 90-day window is hundreds of thousands of slot rows for a
+                 figure nothing on the page draws. api/public/supply.js renders
+                 online_h, on_job_h, idle_h and jobs; the drivers field is passed
+                 through at supply_routes.js:323 and never drawn.
+
+                 So it stays raw and stops claiming to be people. When somebody
+                 wants the people figure here, the cheap route is to fold in
+                 the spans CTE — before the generate_series, where the row
+                 count is spans and not slot-slices — and that is a change to
+                 api/online_span_sql.js, not to this query. */
+              count(DISTINCT driver_ext_id)::int AS accounts
          FROM slots GROUP BY 1, 2 ORDER BY 1, 2`, p);
 
     /* The same split for time ON a job, so idle is a subtraction over
@@ -320,7 +346,12 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
            but nothing is CHARTED off them. */
         online_h: per(r.dow, on), on_job_h: per(r.dow, busy), idle_h: per(r.dow, idle),
         jobs: per(r.dow, jobs),
-        drivers: r.drivers,
+        /* Platform accounts online in this hour, NOT people — see the query.
+           The old key is kept beside it, holding the same value, because it is
+           on the wire today and removing a field is a separate change from
+           telling the truth about it; `accounts` is the name to read. */
+        accounts: r.accounts,
+        drivers: r.accounts,
         total_online_h: Math.round(on * 10) / 10, total_jobs: jobs,
         /* Jobs per online hour — the slot's own sell-through, and the one
            figure occurrence count cannot distort: it is a ratio of two things

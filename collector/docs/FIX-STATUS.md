@@ -729,3 +729,101 @@ in files this task was not allowed to touch (`charts.js hbars()`/`barChart()`,
 `playbook.js`, `revenue.js`, `corridors`/`corporate.js`, `receipts.js`,
 `driverrecord.js`). `charts.js hbars()` is the shared root cause under most of
 the chart hits and is the single highest-value one left.
+
+### Second pass: what two verifiers found in that repair, and what was done
+
+State: **written, tested, NOT deployed.** Nothing below has been to production.
+Every production read that produced it was a GET through `bin/live-ui.mjs` with
+the window pinned `from=2026-09-01&to=2026-09-16`.
+
+Two over-corrections, in the repair's own edited lines:
+
+- **The Cash tile printed "not reported" for a figure the platform reported.**
+  `if (v) return money(v)` — a truthiness test on the end of a `??` chain — so
+  a published `0.00` fell through. Now `if (v != null)`, and the cash components
+  are split into valued and unvalued rather than summed from a zero seed.
+- **The `Counted` column and the statement caption stated a cause the payload
+  disproves.** `days_used` and `counted` are computed over the SAME
+  `driver_payout_day` rows already restricted to the window, so `counted` null
+  with `days_used` positive means the days resolved and carry no earnings.
+  Both sentences now branch on `days_used`, and the caption's pronoun agrees
+  with the count (it said "none of them" over one statement).
+
+Six reasons that were true but not the whole truth, or true of the wrong
+population:
+
+- Cash collected now requires COVERAGE as well as population: the AED 0 branch
+  is gated on the bookings whose payment method was recorded, and a window whose
+  every booking is `unknown` is a third absence with its own sentence. Same on
+  `#finance`, where the denominator now comes from
+  `settle.total_trips - settle.unlabelled_trips` instead of `k.trips`.
+- The cancellations panel no longer tells a working driver they worked no day;
+  it distinguishes "no work in the window" from "no row carries an outcome".
+- Harsh events is absent with a reason where `telematics_journeys` is null — no
+  custody row, so nothing for an alert to attribute to — and stays a digit
+  wherever the feed did see the driver.
+- `moneyMeasured` now consults `e.fare`, `e.statement_cash`, `e.statement_gross`
+  and the periods' `cash_earnings`; the empty statement caption names the
+  PAYOUT-PERIOD feed rather than denying every feed.
+- The statement total is stated across the statements that contributed, not
+  across every period; the rows that carry no figure are named; and the
+  reconciliation sentence gained its agreement branch, which had silently
+  vanished once the two figures started agreeing.
+- `componentTree()`'s children table in `app.js` carries an unvalued category
+  through as null with an `absent:` reason, which is where the first fix stopped.
+- The Rating sub-line states `over_trips === 0`, which is what makes a delta of
+  nought readable. It names the PLATFORM'S COUNTER, not the driver's work:
+  `over_trips` is the difference between the lifetime trip counts on the two
+  rating rows, and MEASURED on production `68e368e3ff76a73626e0720e` did 96
+  trips in this window while Uber's counter read 792 on all five readings. The
+  first draft said "no trip of theirs between the two readings" and would have
+  told a working driver they did not drive.
+- The Average fare sub-line uses `UBER_FARE_WHY` rather than a sixteenth
+  hand-written copy of it. `test/fare_reason_shared.test.mjs` exists for exactly
+  that and caught the first draft, which said "the Uber trip export has no fare
+  column at all" and stopped — the unqualified form that reads as "and
+  therefore never will".
+
+Seven panels that read as a broken page rather than an answered one:
+
+- Overview "Trips per day" drew a 1090x327 axis holding 13 zero-height rects and
+  no caption. Three states now, and a sentence where every day is nought.
+- "How they rank in the fleet" printed the generic box AND the true sentence
+  under it; the box is gone. `startScatter` uses `note()` rather than
+  `empty()`'s bold "Nothing to show".
+- "Which days and hours they work", "How the day was spent", "Vehicle custody",
+  "Cars they have held", "Busiest pickup areas", "Trip distance mix" and "How
+  riders paid" each state their own reason instead of "No data for this range
+  yet".
+- The **Record** tab rendered four headings over 92/110/92/92px of whitespace
+  when `/api/performance/driver` 404s. Every emptied body now carries the reason,
+  and the shell banner no longer claims the record is intact on the one tab that
+  is not measured over the window at all.
+- The Activity day-by-day table says how many days of the window carry no feed
+  row, so 13 rows in a 16-day window is accounted for.
+- The Money column's `AED 0 · 1/7` tooltip distinguishes a share of a nought
+  period (the platform published it) from an apportioned figure.
+- The ONLINE column's provenance marker reads "· from spans" rather than
+  "· spans", which parsed as a count with its number missing.
+- `.sectabs .tabs a` no longer shrinks (`flex:0 0 auto`), so the strip scrolls
+  instead of clipping "One person, two records" to "One perso", and a 22px mask
+  on the right edge is the affordance that hidden scrollbar removed.
+
+**Proof.** `test/driver_empty_window_page.test.mjs` is now 63 assertions, run in
+Chromium against the shipped modules. Every new one was proved by reversion in
+four batches — the Counted reason, the truthiness guard, the coverage gate, the
+harsh-event branch, the cancellations gate, the trips-per-day branch, the rank
+panel, the Record tab's four bodies, the banner's record clause, `moneyMeasured`,
+the payout-period caption, `componentTree`'s children table, the settlement
+denominator, the statement count, and `moneyInTile`'s nought branch — and each
+reversion failed exactly the assertions written beside it.
+
+**Disputed, and why.** The Rating delta of `– 0` is a real measurement: Uber
+published 4.97 on five readings and the delta between two published figures is
+not a figure nobody took. The Activity Money column's `AED 0 · 1/7` cells are
+the same money the platform filed for that week, and the tag and its tooltip are
+the disclosure — the tooltip now says which kind of nought it is. The
+`Distance per day` panel sitting shorter than its row-mate is `.grid{align-
+items:start}` working as the stylesheet intends; stretching it would produce an
+empty box rather than a short one. The Trips tab's handling of a 404 from
+`/api/driver/unauthorized` was already correct.

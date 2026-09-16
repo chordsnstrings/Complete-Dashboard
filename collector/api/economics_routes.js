@@ -274,7 +274,17 @@ export function economicsRoutes(app, { q, wrap, range }) {
       q(`SELECT att.plate, att.platform,
                 round(sum(att.attributed)::numeric,2) payouts,
                 count(DISTINCT att.day)::int payout_days,
-                count(DISTINCT att.driver_ext_id)::int payout_drivers,
+                /* PEOPLE, from the person key api/attribution_sql.js now brings
+                   up with the custody row. This was raw over driver_ext_id and
+                   named payout_drivers; it is unrendered today (neither
+                   economics.js nor m/screens.js draws it), so the damage was
+                   latent — but it sits in a module that otherwise folds
+                   everywhere, which is how one vehicle page came to state two
+                   different driver counts. The same one-column change fixes
+                   this, /api/vehicle/kpis and unattributedEarnings at once.
+                   The weighting is untouched: a payout is filed per account. */
+                count(DISTINCT coalesce(nullif(att.person_key, ''), att.driver_ext_id))::int payout_drivers,
+                count(DISTINCT att.driver_ext_id)::int payout_accounts,
                 bool_or(att.basis = 'even') any_even_split
          FROM (${attributedEarnings()}) att
          WHERE ($3::text IS NULL OR att.platform = $3)

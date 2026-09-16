@@ -1359,7 +1359,24 @@ export function probeRoutes(app, { wrap }) {
     const { rows } = await pool.query(
       `SELECT platform,
               count(*)::int AS trips,
+              /* BOTH READINGS, because this probe genuinely wants the account
+                 one and a diagnostic that says drivers where it means accounts
+                 is how the whole defect class started.
+                 ──────────────────────────────────────────────────────────
+                 This counts RECORDS with a zero distance and a price — the
+                 question is "how many accounts are filing these", because a
+                 malformed export is a property of an account's feed, not of a
+                 human. So accounts stays raw and keeps the meaning.
+
+                 A people count is added beside it because trip carries the generated
+                 person_key (sql/schema_v53.sql) and the fold is therefore free
+                 here, and because the two together answer the question the
+                 probe exists for: six of these on one account is a note, six
+                 thousand across forty PEOPLE is a page. drivers is kept as an
+                 alias of accounts only so an existing caller does not break. */
+              count(DISTINCT driver_ext_id)::int AS accounts,
               count(DISTINCT driver_ext_id)::int AS drivers,
+              count(DISTINCT coalesce(nullif(person_key, ''), driver_ext_id))::int AS people,
               round(sum(coalesce(price, 0))::numeric, 2) AS money,
               count(*) FILTER (WHERE payment_type = 'cash')::int AS cash_trips,
               /* Under a minute between the two stamps we hold. A real fare

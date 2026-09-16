@@ -66,7 +66,17 @@ const PERSON_OF = (a) => `coalesce(nullif(${a}.person_key, ''), ${a}.driver_ext_
    it can print. Where such a record exists, the honest statement is made where
    it decides something — attributionJoin()'s `cust_any` counts them and says
    how many custody records it cannot put a name to. */
-const NAMED = (a) => `coalesce(btrim(${a}.driver_name), '') <> ''`;
+/* Exported, because the same guard is needed outside this file.
+   ─────────────────────────────────────────────────────────────────────────
+   The person fold and the empty-name guard travel together: folding on
+   PERSON_OF without NAMED pools a blank-named channel row in beside a real
+   custodian, and NAMED without the fold prints one man twice. Every call site
+   swept in the driver-vs-account pass needs both, and a second hand-written
+   copy of `coalesce(btrim(...), '') <> ''` is a second place for somebody to
+   write `IS NOT NULL` again — which is exactly the defect this constant was
+   introduced to close. personKeyStored() below is byte-for-byte PERSON_OF, so
+   the fold half is already exported; this is the other half. */
+export const NAMED = (a) => `coalesce(btrim(${a}.driver_name), '') <> ''`;
 
 /** Names, comma-joined, for the plate and day named by the caller's columns. */
 export const custodyNames = (plate, day) =>

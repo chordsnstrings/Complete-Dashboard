@@ -174,7 +174,30 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
       q(`SELECT count(*)::int trips,
                 count(*) FILTER (WHERE price IS NOT NULL)::int priced,
                 round(sum(price)::numeric,0) AS amount,
-                count(DISTINCT coalesce(driver_ext_id, driver_name))::int drivers
+                /* PEOPLE holding cash, not platform accounts.
+                   ──────────────────────────────────────────────────────────
+                   THE DEFECT. This is the size figure behind the action card
+                   "Reconcile cash held by N drivers across M bookings", and
+                   coalesce(driver_ext_id, driver_name) counts ACCOUNTS: over
+                   from=2026-06-01&to=2026-09-16 production returned exactly
+                   252 — more people holding cash than the 151 the same window
+                   says drove at all, which is a sentence that cannot be true
+                   and was printed on the fleet's to-do list.
+
+                   It has to move with the count on /api/settlement/cash-exposure,
+                   because this card LINKS to that page: the 252 on the card
+                   and the 252 on the tile are the same number and a reader who
+                   found them disagreeing would trust neither.
+
+                   trip_ext carries trip's generated person_key (sql/schema_v62.sql
+                   creates the view as SELECT t.* after the column existed), so
+                   this folds free. The fallback chain keeps a cash booking with
+                   neither key as its own holder rather than pooling them.
+
+                   accounts rides out beside it, named, because a cash float is
+                   reconciled per account as well as per person. */
+                count(DISTINCT coalesce(nullif(person_key, ''), driver_ext_id, driver_name))::int drivers,
+                count(DISTINCT coalesce(driver_ext_id, driver_name))::int driver_accounts
          FROM trip_ext WHERE ${DAYWIN('requested_at')} AND driver_holds_cash ${PF()}`, p),
 
       /* A document expiring is a vehicle that stops being able to work. This
