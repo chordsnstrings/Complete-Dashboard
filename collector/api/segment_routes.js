@@ -21,8 +21,22 @@ import { placeEnds, RATE_SQL, forgone } from './place_sql.js';
 import { custodyNames, custodyRefs, peopleCount } from './custody_sql.js';
 import { areaOf } from './analytics_routes.js';
 
+/* THE RECONCILER'S OWN VOCABULARY, in one place.
+   ─────────────────────────────────────────────────────────────────────────
+   Lifted out of segmentRoutes() so that api/unauthorized_routes.js can
+   validate `?verdict=` against the same list rather than against a second copy
+   of it. Both endpoints there took the parameter unvalidated while validating
+   `tier` one line below, specifically so that "an unknown value is ignored
+   rather than returning an empty page as a clean one" — and the same reasoning
+   had simply not been applied to verdict. A British-spelled `?verdict=
+   unauthorised`, which is what a hand-typed URL or a report script carries,
+   matched no row and produced an all-clear distribution under a coverage note
+   confirming the sensor WAS watching. */
+export const RECONCILER_VERDICTS = ['unauthorized', 'authorized', 'sensor_suspect',
+  'partial', 'stationary', 'unverifiable', 'pending'];
+
 export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
-  const VERDICTS = ['unauthorized', 'authorized', 'sensor_suspect', 'partial', 'stationary', 'unverifiable', 'pending'];
+  const VERDICTS = RECONCILER_VERDICTS;
 
   /* A reason is a SHAPE, not a string.
      ─────────────────────────────────────────────────────────────────────────

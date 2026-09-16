@@ -199,7 +199,7 @@ const q = async (text, params) => {
    with time zone"). The full error is logged; the caller gets a reference to
    quote. The real fix for this class of bug is test/route_smoke.test.mjs,
    which executes every route rather than grepping for it. */
-import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, peopleCountStored, JOIN_TRIP, personFold } from './custody_sql.js';
+import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, peopleCountStored, JOIN_TRIP, personFold, custodyRefs, custodyNames } from './custody_sql.js';
 import { spanGaps } from './coverage_gaps.js';
 /* The one place the alerts-per-distance rule lives. Every page that prints a
    safety rate reads it from here, so the fleet headline and the per-vehicle
@@ -2835,17 +2835,30 @@ app.get('/api/unauthorized/list', wrap(async (req, res) => {
             -- as name-and-id pairs, because a comma-joined string of names is
             -- a dead end by construction and a handover day names two people
             -- who must both be openable.
-            (SELECT jsonb_agg(DISTINCT jsonb_build_object(
-                      'name', v2.driver_name, 'id', v2.driver_ext_id))
-               FROM vehicle_driver_day v2
-              WHERE v2.plate = o.plate
-                AND v2.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
-                AND v2.driver_name IS NOT NULL) AS driver_refs,
-            (SELECT string_agg(DISTINCT v.driver_name, ', ')
-               FROM vehicle_driver_day v
-              WHERE v.plate = o.plate
-                AND v.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
-                AND v.driver_name IS NOT NULL) AS drivers
+            /* FOLDED ON THE PERSON, NOT ON THE SPELLING.
+               ─────────────────────────────────────────────────────────────
+               These were jsonb_agg(DISTINCT (name, id)) and
+               string_agg(DISTINCT driver_name) — DISTINCT over the raw pair,
+               with no person fold — while /api/unauthorized/attributed and
+               /api/driver/unauthorized both fold on person_key. The product
+               then said two different things about the same journey depending
+               on which page was open.
+
+               Measured and recorded in api/unauthorized_sql.js's own header:
+               on 12 of production's 120 unauthorized segments this returned 2+
+               names that are ONE human — "Fahad Ali Amjad Ali" AND "FAHAD ALI
+               AMJAD ALI"; three spellings for one man on L44305 — and these
+               rows feed #unauthorized and both phone shells, which are the
+               surfaces an operator opens first. One man listed twice as two
+               suspects for one journey, while #segments and the driver tab
+               showed him once.
+
+               custodyRefs/custodyNames are the same expressions the vehicle
+               page and the segment page already use, so the response shape (a
+               bare array of {name,id}, and a comma-joined string) is unchanged
+               and the three shells that read it need no edit. */
+            ${custodyRefs('o.plate', "(o.started_at AT TIME ZONE 'Asia/Dubai')::date")} AS driver_refs,
+            ${custodyNames('o.plate', "(o.started_at AT TIME ZONE 'Asia/Dubai')::date")} AS drivers
      FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')} AND ($3='all' OR o.verdict=$3)
        AND ($4::text IS NULL OR o.fleet_id = $4)
      ORDER BY o.started_at DESC LIMIT 300`, [from, to, verdict, fleet]);

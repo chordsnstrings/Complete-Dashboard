@@ -29,7 +29,12 @@
    silent-wrong-window failure this file exists to prevent, arriving by a
    different door. The first value wins, which is what a reader typing a URL
    twice would expect and what every proxy in the chain assumes. */
-const first = (v) => (Array.isArray(v) ? v[0] : v);
+/* A duplicated query parameter arrives as an ARRAY — `?verdict=a&verdict=b`
+   binds an array where a scalar is expected, and a validator that tests the
+   array against a list of strings rejects a value the caller did mean. Every
+   reader of req.query in this codebase should go through it; it is exported so
+   that route files outside this one can, rather than each keeping a copy. */
+export const first = (v) => (Array.isArray(v) ? v[0] : v);
 
 const isDay = (v) => {
   const s = String(first(v) || '');

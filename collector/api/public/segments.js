@@ -74,23 +74,56 @@ const vTag = (v) => `<span class="tag ${VERDICT_TONE[v] || 'dim'}">${esc(v || '�
    them, so this page cannot come to explain a rung differently from the rule
    that fills it. What is local is the short label a chip and a table cell have
    room for, and the colour. */
-const TIER_ORDER = ['bracketed', 'sole_custodian', 'ambiguous', 'unknown'];
+/* FIVE RUNGS, not four. `last_trip` — the operator's own rule — was added to
+   the ladder in api/unauthorized_sql.js and this file was not updated with it,
+   so the chip row omitted the rung that carries most of the list and a row on
+   it rendered its raw key, `last_trip`, as its own label. */
+const TIER_ORDER = ['bracketed', 'last_trip', 'sole_custodian', 'ambiguous', 'unknown'];
 const TIER_LABEL = {
   bracketed: 'Named by time',
+  last_trip: 'Last Uber trip on the car',
   sole_custodian: 'Only custodian that day',
   ambiguous: 'More than one candidate',
   unknown: 'Nobody can be named',
 };
 /* Room for four words in a table cell, and the cell has a name beside it. */
-const TIER_SHORT = { bracketed: 'by time', sole_custodian: 'only custodian',
-  ambiguous: 'one of several', unknown: 'nobody' };
-const TIER_TONE = { bracketed: 'ok', sole_custodian: null, ambiguous: 'warn', unknown: 'dim' };
+const TIER_SHORT = { bracketed: 'by time', last_trip: 'last trip on the car',
+  sole_custodian: 'only custodian', ambiguous: 'one of several', unknown: 'nobody' };
+/* NO COLOUR RAMP DOWN THIS COLUMN, and that is not an oversight.
+   ─────────────────────────────────────────────────────────────────────────
+   This was { bracketed: 'ok', sole_custodian: null, ambiguous: 'warn',
+   unknown: 'dim' } — a green tag beside a named person, an amber one beside
+   another, a grey one beside a third. In this product a tone IS a verdict: a
+   green 'ok' next to a name reads as "confirmed", when the green rung is still
+   explicitly an inference and is the rung whose exclusion clause had to be
+   widened across every channel before it could even claim what it said. The
+   amber on `ambiguous` reads as "this one is suspicious" when it actually
+   means "nothing separates these people". Together they rank four people by
+   how strongly the product suspects them, which is precisely the choice the
+   ladder refuses to make.
+
+   api/public/driver.js renders the SAME ladder deliberately uncoloured and
+   says why in its own block comment. Two surfaces, one ladder, one claim. The
+   distinction is carried in WORDS — TIER_SHORT in the cell, TIER_LABEL on the
+   chip, tier_means in the title — and in the evidence sentence beside it. */
+const TIER_TONE = { bracketed: null, last_trip: null, sole_custodian: null,
+  ambiguous: null, unknown: 'dim' };
 /* Which rungs are a claim about ONE person and which are not. The band, the
    chips, the per-person table and the driver page all have to agree about
    this; four copies of `t === 'bracketed' || t === 'sole_custodian'` is four
-   chances for one surface to count an ambiguous row as an accusation. */
-const FIRM = ['bracketed', 'sole_custodian'];
+   chances for one surface to count an ambiguous row as an accusation.
+
+   THEY ARE NOT ONE NUMBER ANYWHERE THEY ARE SHOWN. isFirm answers "is this a
+   claim about one person", which is the right question for deciding whether a
+   row belongs in a candidate column — and it is the WRONG basis for a total,
+   because 13 journeys named by time and 24 named by day-custody alone are
+   different claims and a sum of them is the number that gets quoted. */
+const FIRM = ['bracketed', 'last_trip', 'sole_custodian'];
 const isFirm = (t) => FIRM.includes(t);
+/* The rung that rests on a measurement of THIS journey's own clock, kept apart
+   from the two that rest on the car's day. Used wherever a figure would
+   otherwise average the three together. */
+const isByTime = (t) => t === 'bracketed';
 
 /* `tier` and `who` ride in the address's QUERY STRING rather than in a path
    slot. The router's KINDS list — verdict|plate|day|driver — lives in
@@ -155,8 +188,22 @@ const attributionCell = (r) => {
   const why = [r.attribution_evidence, r.status_note].filter(Boolean).join(' ');
   const tag = `<span class="tag ${TIER_TONE[tier] || 'dim'}" title="${esc(why)}">${
     esc(TIER_SHORT[tier] || tier)}</span>`;
+  /* KEYED ON THE TIER, NOT ON THE EMPTINESS OF THE LIST.
+     ───────────────────────────────────────────────────────────────────────
+     This branch read `if (!cands.length)` and then printed the tier tag
+     followed by the words "nobody can be named". On the `unknown` rung
+     TIER_SHORT is the single word "nobody", so the one row on the page where
+     nobody can be named — the row a reader looks hardest at — rendered
+     "NOBODY nobody can be named". And on any other rung an empty candidate
+     array would have printed "by time nobody can be named": a tier tag flatly
+     contradicting the text beside it, where the honest answer is that the row
+     is faulty. */
+  if (tier === 'unknown') {
+    return `<span class="tag dim" title="${esc(why)}">nobody can be named</span>`;
+  }
   if (!cands.length) {
-    return `${tag} <span class="ent-off" title="${esc(why)}">nobody can be named</span>`;
+    return `${tag} <span class="ent-off" title="${esc(why)}">a name was expected here and none `
+      + 'arrived — this row is faulty rather than empty</span>';
   }
   const names = cands.map((c) => entity('driver', c.id, c.name))
     .join(tier === 'ambiguous' ? '<span class="dim"> or </span>' : ', ');
@@ -182,7 +229,19 @@ function attributionBand(root, att) {
   const dist = att.distribution || {};
   const tiers = dist.by_tier || [];
   const n = dist.segments || 0;
-  const firm = (dist.bracketed || 0) + (dist.sole_custodian || 0);
+  /* THREE FIGURES, AND THE HEADLINE RESTS ON THE FIRST ALONE.
+     ───────────────────────────────────────────────────────────────────────
+     The headline was `open > firm ? 'Most of this list cannot be narrowed to
+     one person' : 'Most of this list narrows to one person'`, with tone 'ok'
+     on the second branch and firm = bracketed + sole_custodian. Day-grain
+     custody was being counted as "narrowed to one person". On the measured
+     production distribution firm was 61 and open 59, so the page sat one
+     segment away from flipping to a GREEN headline reading "Most of this list
+     narrows to one person" over a list where 48 of those 61 were day custody
+     and only 13 had been narrowed by time. The sub-line stated the full
+     ladder; the headline and its tone are what a reader takes away. */
+  const byTime = dist.bracketed || 0;
+  const oneName = byTime + (dist.last_trip || 0) + (dist.sole_custodian || 0);
   const open = (dist.ambiguous || 0) + (dist.unknown || 0);
   const km = tiers.reduce((a, t) => a + (Number(t.km) || 0), 0);
   const rate = att.value?.aed_per_km;
@@ -193,13 +252,17 @@ function attributionBand(root, att) {
   verdict(root, {
     claim: n === 0
       ? 'No unexplained journey in this window to attribute'
-      : open > firm
-        ? 'Most of this list cannot be narrowed to one person'
-        : 'Most of this list narrows to one person',
-    tone: n === 0 ? null : open > firm ? 'warn' : 'ok',
-    figure: n === 0 ? null : fmt(firm),
-    unit: `of ${fmt(n)} narrowed to one person`,
-    meta: n ? `${fmt(open)} not narrowed` : null,
+      : byTime * 2 >= n
+        ? 'Most of this list is narrowed by time'
+        : `${fmt(oneName)} of ${fmt(n)} carry one name, and ${fmt(byTime)} of those were `
+          + 'narrowed by time',
+    /* NO GREEN. There is no good news on this page: the best rung is still an
+       inference and the tone would be read as the product agreeing. */
+    tone: n === 0 ? null : open > oneName ? 'warn' : null,
+    figure: n === 0 ? null : fmt(byTime),
+    unit: `of ${fmt(n)} narrowed to one person BY TIME`,
+    meta: n ? `${fmt(oneName - byTime)} carry one name off the car’s day instead · `
+      + `${fmt(open)} carry no single name at all` : null,
     sub: n === 0
       ? (att.coverage?.note
         || 'Nothing the seat sensor recorded in this window went unexplained.')
@@ -228,9 +291,16 @@ function attributionBand(root, att) {
            number nothing here measures. */
         : `${fmt(km, 1)} km at the fleet’s own AED ${rate}/km. Revenue forgone — what those `
           + 'kilometres would have earned had they been sold, not money anybody paid out.' },
-    { label: 'Firmly attributed', value: fmt(firm), tone: firm ? 'ok' : null,
-      sub: `${fmt(dist.bracketed || 0)} bracketed by the same person’s own Uber trips either `
-        + `side · ${fmt(dist.sole_custodian || 0)} where one person held the car all day` },
+    /* "Firmly attributed" was the heading over bracketed + sole_custodian.
+       Neither word is right for day custody, and the tile counts what it is
+       now called: how many journeys carry exactly one name, whatever put it
+       there. The three rungs are named in the sub-line so the mixture is
+       visible rather than averaged. */
+    { label: 'Narrowed to one person', value: fmt(oneName), tone: null,
+      sub: `${fmt(byTime)} bracketed by the same person’s own Uber trips either side · `
+        + `${fmt(dist.last_trip || 0)} off the last Uber trip on the car, which is the `
+        + 'operator’s rule and not a measurement of this journey · '
+        + `${fmt(dist.sole_custodian || 0)} where one person held the car all day` },
     /* THE NUMBER THAT SAYS WHETHER TO TRUST THE LIST. Two absences, kept
        apart: more than one candidate is a question, no candidate at all is a
        gap in the trip record. Adding them into one "unattributed" would hide
