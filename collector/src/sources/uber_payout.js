@@ -224,6 +224,51 @@ const DAYS_PER_RUN = Number(process.env.UBER_PAYOUT_DAYS_PER_RUN || 24);
 const THROTTLE_BACKOFF_MS = 45000;
 const THROTTLE_GIVE_UP_AFTER = 3;
 
+/* WHICH WEEK A MONDAY WIRE SETTLES — AND WHY THE ANCHOR IS NOON UTC.
+   ─────────────────────────────────────────────────────────────────────────
+   Uber's Monday wire settles the Mon–Sun week that ended the day before,
+   proven twice over consecutive weeks: wire(N) = closing balance(N-1) =
+   opening balance(N), to the fils. That is worth recording because it is
+   knowable, and only for the weekday it was proven on — a wire on any other
+   day is left with a null period rather than given an invented one.
+
+   THIS WAS WRITTEN WITH A BUG THAT MADE IT DO EXACTLY NOTHING, AND THE BUG IS
+   WORTH KEEPING DESCRIBED BECAUSE IT LOOKS RIGHT. The test was
+
+     new Date(`${day}T00:00:00+04:00`).getUTCDay() === 1
+
+   and `${day}T00:00:00+04:00` IS the correct instant for Dubai midnight. It is
+   also 20:00 on the PREVIOUS UTC day, and getUTCDay() asks UTC what day it is
+   — so it answered the day before. Measured on the very wire this module was
+   built to capture: 2026-09-07 is a Monday and carried Ecosine's AED
+   103,567.54, and getUTCDay() on that parse returns 0.
+
+   So the branch was FALSE on every real wire. Every Monday payout row was
+   written with period_start = period_end = NULL, and api/public/payouts.js
+   then rendered "not stated", with the tooltip "this provider does not say
+   which period a transfer settles" — a sentence that is false for Uber and
+   true for nobody. The mirror was live too: the branch fired only on a Dubai
+   TUESDAY, where it would have stamped a Tue–Mon span, which is precisely the
+   invented period the paragraph above forbids.
+
+   The fix anchors at NOON UTC, the idiom already used at api/public/day.js:176
+   and api/public/performers.js:58: midday is far enough from either midnight
+   that no offset in use can move it across a date boundary, so the weekday it
+   reports is the weekday of the calendar date rather than of an instant.
+
+   It is a named, exported, pure function rather than an inline spread because
+   the inline version could not be asserted: test/payout_register.test.mjs was
+   INSERTing period_start by hand and proving nothing about this code at all.
+   Mutating the old expression (=== 1 to === 9) left the suite green at 44/0. */
+export const settlesWeek = (day) => {
+  const noon = Date.parse(`${String(day).slice(0, 10)}T12:00:00Z`);
+  if (!Number.isFinite(noon) || new Date(noon).getUTCDay() !== 1) return {};
+  return {
+    period_start: dubaiIso(new Date(noon - 7 * 864e5)),
+    period_end: dubaiIso(new Date(noon - 864e5)),
+  };
+};
+
 export async function collect({ from, to, mode, fleet = null }) {
   /* Never on the incremental. One report per day per fleet against a limiter
      this tight, every thirty minutes, would spend the whole allowance on days
@@ -295,16 +340,7 @@ export async function collect({ from, to, mode, fleet = null }) {
             paid_on: day,
             amount: Math.abs(amt),
             currency: 'AED',
-            /* Uber's Monday wire settles the Mon–Sun week that ended the day
-               before, proven twice over consecutive weeks: wire(N) = closing
-               balance(N-1) = opening balance(N). Recorded because it is
-               knowable, and only for the weekday it was proven on — a wire on
-               any other day is left with a null period rather than given an
-               invented one. */
-            ...(new Date(`${day}T00:00:00+04:00`).getUTCDay() === 1
-              ? { period_start: dubaiIso(new Date(new Date(`${day}T00:00:00+04:00`).getTime() - 7 * 864e5)),
-                period_end: dubaiIso(new Date(new Date(`${day}T00:00:00+04:00`).getTime() - 864e5)) }
-              : {}),
+            ...settlesWeek(day),
             method: 'bank',
             source: `${REPORT_TYPE} (one-day window)`,
             raw: null,

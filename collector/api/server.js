@@ -3035,7 +3035,7 @@ app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
         custody surface returns both: a comma-joined string is a dead end and
         an accused person has to be openable. */
      who_person AS (
-       SELECT DISTINCT ON (o.plate, ${personKeyStored('v')})
+       SELECT DISTINCT ON (o.plate, v.driver_ext_id)
               o.plate, v.driver_name AS nm, v.driver_ext_id AS id
        FROM occupancy_segment o
        JOIN vehicle_driver_day v

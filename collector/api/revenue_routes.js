@@ -489,7 +489,7 @@ export function revenueRoutes(app, { q, wrap, range }) {
                 count(DISTINCT (pay.period_start, pay.period_end))::int periods,
                 /* PEOPLE PAID. Second copy of the income_sql.js:platformPayouts
                    defect over the same driver_payout_day rows: this feeds
-                   "${payout_drivers} drivers paid" on api/public/revenue.js:439
+                   the "N drivers paid" line on api/public/revenue.js:439
                    and reported 235 for Uber over
                    from=2026-06-01&to=2026-09-16 against 115 people who drove on
                    Uber in the same window. The two had to move together or the

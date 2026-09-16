@@ -40,6 +40,8 @@ import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
 import { payoutRow } from '../src/sources/bolt.js';
+import { settlesWeek } from '../src/sources/uber_payout.js';
+import { weekdayOf } from '../api/public/payouts.js';
 import { money, pathKey, COLUMNS } from '../src/sources/uber_payout.js';
 
 let pass = 0, fail = 0;
@@ -81,6 +83,53 @@ console.log('\nUber writes the same column path two ways in one header row');
     && pathKey('Start of period balance') === COLUMNS.opening_balance
     && pathKey('End of period balance') === COLUMNS.closing_balance
     && pathKey('Total earnings') === COLUMNS.earnings);
+}
+
+/* ══ 1b. THE DUBAI WEEKDAY, WHICH NOTHING HERE COULD SEE ═══════════════════
+   This file INSERTed period_start by hand and asserted the route echoed it, so
+   it proved the column round-trips and nothing about the code that fills it.
+   Mutating the collector's weekday test from === 1 to === 9 left the suite
+   green at 44 of 44 — a test that cannot see a total mutation of the thing it
+   is meant to guard.
+
+   The defect it could not see: `new Date(day + 'T00:00:00+04:00')` is the right
+   INSTANT for Dubai midnight and is 20:00 on the PREVIOUS UTC day, so
+   getUTCDay() answered the day before. On 2026-09-07 — a Monday, carrying
+   Ecosine's AED 103,567.54 — it returned 0. The branch was false on every real
+   wire, so every Monday payout was stored with a null period and the page said
+   "this provider does not say which period a transfer settles", which is false
+   for Uber and true for nobody. Both halves are asserted here directly. */
+console.log('\nthe weekday of a Dubai date is the weekday of the DATE, not of an instant');
+{
+  /* The exact wire this module was built to capture. */
+  const mon = settlesWeek('2026-09-07');
+  check('a Monday wire names the Mon–Sun week that ended the day before',
+    mon.period_start === '2026-08-31' && mon.period_end === '2026-09-06',
+    JSON.stringify(mon));
+  /* The mirror failure, which was LIVE: the old expression fired on a Dubai
+     Tuesday, where it would have stamped a Tue–Mon span — the invented period
+     the collector's own comment forbids. */
+  check('a Tuesday names no period rather than an invented one',
+    Object.keys(settlesWeek('2026-09-08')).length === 0, JSON.stringify(settlesWeek('2026-09-08')));
+  check('…and so does the Sunday before it',
+    Object.keys(settlesWeek('2026-09-06')).length === 0, JSON.stringify(settlesWeek('2026-09-06')));
+  check('a date that does not parse names no period and does not throw',
+    Object.keys(settlesWeek('not-a-date')).length === 0);
+  /* The page half had the identical defect, and its output was worse because
+     it was in the headline: the tile read "every one of them a Sunday" four
+     rows above a coverage row saying "Uber wires on a Monday". */
+  check('the page names the same weekday the collector does',
+    weekdayOf('2026-09-07') === 'Monday', String(weekdayOf('2026-09-07')));
+  check('…and does not shift any date back one day',
+    weekdayOf('2026-09-08') === 'Tuesday' && weekdayOf('2026-08-31') === 'Monday'
+    && weekdayOf('2026-09-06') === 'Sunday',
+    [weekdayOf('2026-09-08'), weekdayOf('2026-08-31'), weekdayOf('2026-09-06')].join(', '));
+  /* The two must agree by construction, not by coincidence: a page that names
+     Monday over a row the collector left periodless is the contradiction this
+     whole block exists to make impossible. */
+  check('the two agree: every date the page calls Monday, the collector gives a period',
+    ['2026-09-07', '2026-08-31', '2026-08-24', '2026-09-14', '2026-06-01'].every((d) =>
+      (weekdayOf(d) === 'Monday') === (settlesWeek(d).period_start !== undefined)));
 }
 
 /* ══ 2. Bolt's mapper ════════════════════════════════════════════════════ */

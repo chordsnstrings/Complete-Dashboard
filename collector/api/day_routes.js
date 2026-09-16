@@ -12,7 +12,7 @@
    the weather and the calendar — and, critically, WHETHER EVERY SOURCE WAS
    COLLECTING. A quiet Tuesday and a Tuesday nobody fetched produce the same
    chart, and only this page can tell them apart. */
-import { custodyNames, custodyRefs } from './custody_sql.js';
+import { custodyNames, custodyRefs, peopleCount, personKey } from './custody_sql.js';
 import { fleetIncome } from './income_sql.js';
 /* isoDay, for the neighbour days below. Imported rather than copied: it is not
    a cycle (src/sources/ledger.js reaches only src/db.js and src/log.js, and
@@ -86,18 +86,33 @@ export function dayRoutes(app, { q, wrap }) {
                    wrong. A fleet reading "each driver did 8 bookings" when the
                    truth is 9.9 concludes its people are under-worked.
 
-                   trip_ext carries trip's generated person_key (created in
-                   sql/schema_v62.sql as SELECT t.* after the column existed),
-                   so this folds with no join and no cost. The coalesce to
-                   driver_ext_id keeps a booking whose name we cannot read as
-                   its own person rather than pooling every unnamed row onto
-                   one very busy driver.
+                   FOLDED WITH THE COMPUTED KEY, NOT THE STORED ONE, and the
+                   reason is worth writing down because the note that sent me
+                   here said the opposite. trip_ext does NOT carry person_key:
+                   sql/schema_v62.sql builds it as SELECT t.* over TRIP_NORM,
+                   and trip_norm is a view created in sql/schema_v18.sql before
+                   the column existed, with its star frozen at creation. So the
+                   stored column is two views away and unreachable without a
+                   join. Verified against the replayed schema rather than
+                   assumed: information_schema lists person_key on trip,
+                   vehicle_driver_day, money_event, driver_payout_day and
+                   driver_statement_day, and on neither trip_norm nor trip_ext.
+
+                   peopleCount() is the computed form of the same key —
+                   test/person_key.test.mjs holds the two equal row for row,
+                   and it carries identityCase, so the verified merge register
+                   applies exactly as the stored column would. The cost is two
+                   regexp_replace calls per row and this query is ONE DAY, about
+                   a thousand rows: the 2,434ms-against-129ms measurement that
+                   makes the regex unaffordable elsewhere was over the whole
+                   trip table. Its fallback to the id keeps a booking whose name
+                   we cannot read as its own person rather than pooling every
+                   unnamed row onto one very busy driver.
 
                    driver_accounts rides out beside it and IS the old number,
                    named: "94 people across 112 platform accounts" is a truer
                    sentence than either half. */
-                count(DISTINCT coalesce(nullif(person_key, ''), driver_ext_id))
-                  FILTER (WHERE driver_name IS NOT NULL)::int drivers,
+                ${peopleCount()} FILTER (WHERE driver_name IS NOT NULL)::int drivers,
                 count(DISTINCT driver_name) FILTER (WHERE driver_name IS NOT NULL)::int driver_accounts,
                 count(DISTINCT plate) FILTER (WHERE nullif(btrim(plate), '') IS NOT NULL)::int vehicles,
                 min(requested_at) first_at, max(requested_at) last_at
@@ -148,7 +163,7 @@ export function dayRoutes(app, { q, wrap }) {
                 array_remove(array_agg(DISTINCT plate), NULL) plates,
                 min(requested_at) first_trip, max(requested_at) last_trip
          FROM trip_ext WHERE ${D} AND is_booking AND driver_name IS NOT NULL
-         GROUP BY coalesce(nullif(person_key, ''), driver_ext_id)
+         GROUP BY ${personKey()}
          ORDER BY trips DESC LIMIT 120`, p),
       q(`SELECT t.plate, count(*) FILTER (WHERE t.is_booking)::int bookings,
                 count(*) FILTER (WHERE NOT t.is_booking)::int telematics,
@@ -161,7 +176,7 @@ export function dayRoutes(app, { q, wrap }) {
                    api/custody_sql.js's header states. Latent today because
                    neither shell draws this figure; wrong on the wire either
                    way. */
-                count(DISTINCT coalesce(nullif(t.person_key, ''), t.driver_ext_id))::int drivers,
+                ${peopleCount('t.driver_ext_id', 't.driver_name')}::int drivers,
                 count(DISTINCT t.driver_ext_id)::int driver_accounts,
                 -- "This car did 1 journey and 0 bookings" is the row on this
                 -- page most likely to start a conversation, and it named no

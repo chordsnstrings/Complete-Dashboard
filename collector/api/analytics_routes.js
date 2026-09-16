@@ -20,7 +20,7 @@
       else it is unmeasured, and an unmeasured approach leg is never charted as
       a zero-kilometre one. */
 import { dubaiDay } from './window.js';
-import { custodyOverWindow, custodyCountOverWindow, peopleCount, personKeyStored, NAMED } from './custody_sql.js';
+import { custodyOverWindow, custodyCountOverWindow, peopleCount, personKey, personKeyStored, NAMED } from './custody_sql.js';
 import { spanGaps } from './coverage_gaps.js';
 
 /* A number that lives in a JSON blob is a number a provider can change into a
@@ -227,14 +227,24 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                    place it can be folded, because a LATERAL cannot see a
                    sibling's output. */
                 lower(regexp_replace(coalesce(driver_name, '(unnamed)'), '\\s+', ' ', 'g')) AS _nk,
-                /* The PERSON behind this row, carried up so the tile can count
-                   people while the list goes on showing rows. trip_ext inherits
-                   trip's generated person_key (created in sql/schema_v62.sql as
-                   SELECT t.* after the column existed — test/identity_merge.test.mjs
-                   asserts it), so this is a column read, not a fold. It is a
-                   function of the grouping key, so max() chooses between
-                   identical values. */
-                max(person_key) AS _pk
+                /* The PERSON behind this row, folded ONCE per holder, beside
+                   the name fold above and for the same reason it is up here
+                   rather than in the lateral.
+                   ────────────────────────────────────────────────────────
+                   trip_ext does NOT carry person_key: sql/schema_v62.sql builds
+                   it over trip_norm, a view whose star was frozen in
+                   sql/schema_v18.sql before the column existed. So this is
+                   personKey(), the COMPUTED form — the same value the stored
+                   column holds (test/person_key.test.mjs) and carrying
+                   identityCase, so the verified merge register applies and
+                   "Aliyan khalil" and "Raja Aliyan Khalil Raja Khalil Ahmed"
+                   fold together where no spelling rule could.
+
+                   It is a function of the grouping key, so max() is choosing
+                   between identical values, and it is evaluated once per holder
+                   here rather than once per statement-day inside the lateral —
+                   which is the whole point of the paragraph above. */
+                max(${personKey()}) AS _pk
            FROM trip_ext
           WHERE ${FB} AND driver_holds_cash
           GROUP BY 1, 2),

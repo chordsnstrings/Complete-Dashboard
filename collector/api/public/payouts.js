@@ -59,8 +59,25 @@ const amt = (v) => Math.abs(+v || 0);
    fact about Uber's transfers turned out to be that they all land on a Monday,
    and a table of dates does not say so — a column of weekday names does. */
 const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const weekdayOf = (d) => {
-  const t = Date.parse(`${String(d).slice(0, 10)}T00:00:00+04:00`);
+/* ANCHORED AT NOON UTC, and the reason is a bug this page shipped with.
+   ─────────────────────────────────────────────────────────────────────────
+   This parsed `${d}T00:00:00+04:00`, which IS the right instant for Dubai
+   midnight and is also 20:00 on the PREVIOUS UTC day — so getUTCDay() named
+   the day before. On the wire this page exists to show, Mon 2026-09-07 with
+   Ecosine's AED 103,567.54, it returned "Sunday".
+
+   The page therefore contradicted itself in its own headline: the transfer
+   table read "7 Sep 2026 · Sunday" and the at-a-glance tile read "every one of
+   them a Sunday", four rows above a coverage row stating "Uber wires on a
+   Monday" — and the false half was the one in the headline.
+
+   Midday is far enough from either midnight that no offset in use can move it
+   across a date boundary, so the weekday reported is the weekday of the
+   CALENDAR DATE rather than of an instant. Same idiom as api/public/day.js:176
+   and api/public/performers.js:58, and the same fix as settlesWeek() in
+   src/sources/uber_payout.js, which had the identical defect. */
+export const weekdayOf = (d) => {
+  const t = Date.parse(`${String(d).slice(0, 10)}T12:00:00Z`);
   return Number.isFinite(t) ? WEEKDAY[new Date(t).getUTCDay()] : null;
 };
 

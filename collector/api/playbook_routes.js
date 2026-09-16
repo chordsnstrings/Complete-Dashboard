@@ -189,14 +189,23 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
                    and the 252 on the tile are the same number and a reader who
                    found them disagreeing would trust neither.
 
-                   trip_ext carries trip's generated person_key (sql/schema_v62.sql
-                   creates the view as SELECT t.* after the column existed), so
-                   this folds free. The fallback chain keeps a cash booking with
-                   neither key as its own holder rather than pooling them.
+                   trip_ext does NOT carry person_key — sql/schema_v62.sql
+                   builds it over trip_norm, whose star was frozen in
+                   sql/schema_v18.sql before the column existed — so this uses
+                   peopleCount(), the COMPUTED form of the same key.
+                   test/person_key.test.mjs holds the two equal row for row and
+                   the computed form carries identityCase, so the verified merge
+                   register applies. The cost is two regexp_replace calls per
+                   row over the window's CASH bookings only, which is a few
+                   thousand: the measurement that makes the regex unaffordable
+                   (2,434ms against 129ms, sql/schema_v20.sql) was over the
+                   whole trip table. peopleCount's fallback keeps a cash booking
+                   whose name we cannot read as its own holder rather than
+                   pooling them.
 
                    accounts rides out beside it, named, because a cash float is
                    reconciled per account as well as per person. */
-                count(DISTINCT coalesce(nullif(person_key, ''), driver_ext_id, driver_name))::int drivers,
+                ${peopleCount('coalesce(driver_ext_id, driver_name)', 'driver_name')}::int drivers,
                 count(DISTINCT coalesce(driver_ext_id, driver_name))::int driver_accounts
          FROM trip_ext WHERE ${DAYWIN('requested_at')} AND driver_holds_cash ${PF()}`, p),
 
