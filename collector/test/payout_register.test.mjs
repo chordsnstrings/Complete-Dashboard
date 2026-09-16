@@ -171,7 +171,7 @@ await dayRow({ platform: 'uber', fleet: 'ecosine', day: '2026-09-08', basis: 'st
 await dayRow({ platform: 'yango', fleet: 'ecosine', day: '2026-09-07', basis: 'ledger',
   earnings: 184.4, cash: 61, commission: -49.62, tips: 3.5, taxes: -12 });
 
-const { get } = await mountAll(db);
+const { get, server } = await mountAll(db);
 
 console.log('\nthe register answers with transfers, not with derived earnings');
 {
@@ -265,6 +265,55 @@ console.log('\nan empty bank cell and an unpublished one stay different all the 
     wired.commission === null, String(wired.commission));
 }
 
+console.log('\nthe two tables agree about one wire, including its sign');
+{
+  /* THE ROUND TRIP, asserted across both tables rather than in each separately.
+     platform_account_day keeps the PROVIDER's sign — Uber writes a payout
+     negative because it leaves the account — and platform_payout keeps the
+     TABLE's sign, positive, because its claim is "this much reached the bank"
+     and Bolt fills the same column positive. Each table was already checked on
+     its own above, and neither check would notice if one of them flipped: the
+     relationship between them is the thing that has to hold, so it is the
+     thing asserted. */
+  const r = await get('/api/finance/payouts?from=2026-09-01&to=2026-09-30');
+  const wire = r.body.payouts.find((x) => x.platform === 'uber');
+  const day = r.body.days.find((d) => d.platform === 'uber'
+    && String(d.day).slice(0, 10) === String(wire.paid_on).slice(0, 10));
+  check('the transfer is filed on the same day the statement shows it leaving',
+    !!day, String(wire.paid_on));
+  check('the statement keeps Uber’s negative and the register keeps the table’s positive',
+    Number(day.bank_transferred) < 0 && Number(wire.amount) > 0
+    && Math.abs(Number(day.bank_transferred)) === Number(wire.amount),
+    `${day.bank_transferred} vs ${wire.amount}`);
+  /* The other direction, which is the one that would put an imaginary wire on
+     the page: a day whose bank column is a measured ZERO must produce no row
+     in the register at all. Four days in five are that day. */
+  const quiet = r.body.days.find((d) => d.platform === 'uber'
+    && Number(d.bank_transferred) === 0);
+  check('a day Uber did not wire produces no transfer row, not a transfer of zero',
+    !r.body.payouts.some((x) => x.platform === 'uber'
+      && String(x.paid_on).slice(0, 10) === String(quiet.day).slice(0, 10)),
+    String(quiet.day));
+}
+
+console.log('\nno provider both states a total and gives a reason for having none');
+{
+  /* The two halves of `coverage` answer the same question and a provider that
+     filled in both would be saying "here is the figure" and "there is no
+     figure, and here is why" in one object. A page rendering the reason beside
+     a number is exactly the plausible-but-wrong explanation this product
+     forbids, and it is one line to make impossible. */
+  const r = await get('/api/finance/payouts?from=2026-09-01&to=2026-09-30');
+  const both = r.body.coverage.filter((c) => c.absent && c.in_window.length);
+  check('a reason and a total are mutually exclusive', both.length === 0,
+    JSON.stringify(both.map((c) => c.platform)));
+  /* And the complement: every provider in the answer says one or the other.
+     Silence is the third state, and it is the one that renders as a zero. */
+  const silent = r.body.coverage.filter((c) => !c.absent && !c.in_window.length);
+  check('and every provider named says one or the other, never neither',
+    silent.length === 0, JSON.stringify(silent.map((c) => c.platform)));
+}
+
 console.log('\nthe response says outright that this is not reconciliation’s figure');
 {
   const r = await get('/api/finance/payouts?from=2026-09-01&to=2026-09-30');
@@ -274,5 +323,19 @@ console.log('\nthe response says outright that this is not reconciliation’s fi
     /7\.1%/.test(r.body.note || ''), r.body.note);
 }
 
+/* CLOSE THE SERVER AND THE DATABASE, AND EXIT EXPLICITLY.
+   ─────────────────────────────────────────────────────────────────────────
+   Without this the file printed "44 passed, 0 failed" and then NEVER EXITED —
+   confirmed by leaving it running for eleven minutes after its last line.
+   mountAll calls app.listen(0) and deliberately sets keepAliveTimeout = 0 so
+   that idle sockets are never reaped, which is right for a process that is
+   about to end and fatal for one that is waiting to; PGlite holds its own
+   handles besides. test/run-all.mjs SIGKILLs a file at 300 s and reports the
+   kill as `TIMED OUT ... and was killed`, with the tally deliberately thrown
+   away — so this file, with every one of its assertions passing, would have
+   arrived in `npm test` as a FAILING file five minutes later. Every other
+   mounted-route test in this directory ends exactly this way. */
+server.close();
+await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);
-if (fail) process.exit(1);
+process.exit(fail ? 1 : 0);
