@@ -1695,6 +1695,102 @@ settled at **AED 35,965**. A settled day reports **no estimate at all**:
 The estimate rides beside the measurement and never becomes it — `revenue` is
 untouched, and nothing projected is ever added into `accounted`.
 
+## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
+
+The product has never held the amount Uber actually sent to the bank. `bank_payout`
+on #reconcile is `sum(earnings)` over `driver_payout_day` — Uber's weekly
+per-DRIVER earnings spread across the days of the period. That is what Uber says
+each driver earned. It is not a wire, and the page's own identity says so: it
+reconciles to a derived figure "proven to 0.7%", which is a good approximation
+and not the bank statement.
+
+**Uber publishes the wire, at organization grain, and we were not asking for it.**
+`REPORT_TYPE_PAYMENTS_ORGANIZATION` returns ONE row per org per window with 21
+columns. Measured on production via
+`/api/probe/uber/report-columns?type=REPORT_TYPE_PAYMENTS_ORGANIZATION`:
+
+```
+Organization UUID                              58ca3b81-…
+Organisation name                              ECOSINE TRANSPORTS
+Start of period balance                        13,427.95
+Total earnings                                121,212.81
+Total earnings : Net fare                     122,027.57
+Total earnings : Promotions                    (empty)
+Total earnings:Other earnings:Cancellation…        38.00
+Total earnings:Other earnings:Lost item…           59.00
+Total earnings:Tip                              1,158.00
+Total earnings:Taxes                           -2,069.76
+Refunds & Expenses                              7,162.50
+Refunds & Expenses:Refunds:Airport fee             49.50
+Refunds & Expenses:Refunds:Sharjah surcharge      858.00
+Refunds & Expenses:Refunds:Toll                 6,255.00
+Payouts                                      -127,604.20
+Payouts : Cash collected                      -24,036.66
+Payouts : Transferred To Bank Account        -103,567.54   <<< THE WIRE
+End of period balance                          14,199.06
+```
+
+**Every identity closes to the fils**, checked rather than assumed:
+
+| identity | result |
+|---|---|
+| start + earnings + refunds + payouts = end | exact |
+| cash collected + transferred to bank = payouts | exact |
+| net fare + cancellation + lost item + tip + taxes = total earnings | exact |
+| airport + sharjah + toll = refunds & expenses | exact |
+
+### The settlement lag, measured over two consecutive weeks
+
+The wire in a week does NOT pay that week's work. It settles the previous
+week's closing balance:
+
+| week (Mon–Sun) | total earnings | start balance | end balance | transferred to bank |
+|---|---|---|---|---|
+| 31 Aug – 6 Sep | 121,432.39 | — | **103,567.54** | 77,796.52 |
+| 7 Sep – 13 Sep | 125,745.05 | **103,567.54** | 111,279.92 | **103,567.54** |
+
+So: **wire(week N) = end balance(week N−1) = start balance(week N)**, exactly, on
+every week tested. The closing balance is therefore a one-week-ahead forecast of
+the next wire — a figure the fleet could bank on, and one this product does not
+currently hold at all.
+
+### What it is worth against what we show today
+
+On the one fully closed week 7–13 Sep 2026, Ecosine:
+
+| | AED |
+|---|---|
+| `/api/finance/daily` payout (what #reconcile calls the bank payout) | 110,962.09 |
+| Uber's `Transferred To Bank Account` | **103,567.54** |
+| overstatement | **7,394.55 — 7.1%** |
+
+And the two are not even the same event: our figure is that week's driver
+earnings, Uber's is the wire settling the week before. A reconciliation built on
+the first can never close against a bank statement; one built on the second is
+the bank statement.
+
+### Traps this added to the list
+
+- **`/api/probe/uber/report-columns` silently ignores `?fleet=`.** Every report
+  route in `api/probe.js` calls `uberOrg()`, which is hardcoded to
+  `config.uber.orgs[0]`; only one route in the file parses `req.query.fleet`.
+  Asking it for `fleet=egari` returns **ECOSINE TRANSPORTS** with Ecosine's
+  figures and no warning, so a reader gets a confident answer to a question they
+  did not ask — the same failure mode as the report type that fell through to
+  TRIP_ACTIVITY. **Egari's bank wire is therefore still unmeasured.** Nothing
+  here should be read as an Egari figure.
+- **Uber's payout weeks run MONDAY to SUNDAY.** A window of 1–7 Sep straddles
+  two of them. The org report will happily aggregate any window you give it and
+  return a ledger that closes, so a straddling window produces a figure that is
+  internally consistent and is not a week's wire. Align to Mon–Sun, and confirm
+  against `open_statement` on `/api/finance/daily`, which names the open period.
+- **The org report takes longer than 150s to generate.** One probe returned
+  `report did not finish generating within 150s`; the identical request
+  succeeded on retry, because Uber had finished building it in the meantime. A
+  timeout here is *not yet ready*, never *not available* — and the reportId is
+  still discarded into an error string, so the built report cannot be re-fetched
+  and the next attempt pays for a fresh generation.
+
 ### Traps this added to the list
 
 * **A guard regex over a source file cannot tell a comment from rendered copy.**
