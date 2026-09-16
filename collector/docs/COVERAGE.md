@@ -827,6 +827,69 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **Who was driving an UNAUTHORIZED journey is an inference at four different
+  strengths, and only one of them is time.** Measured over
+  `from=2026-06-01&to=2026-09-16`, all 120 unauthorized segments, Uber-only
+  bracketing at a 240-minute cap: **bracketed 13, sole custodian 48, ambiguous
+  26, unknown 33.** Two thirds of the feature is day-custody and absence. The
+  cap is the whole argument and the distribution moves violently with it —
+  uncapped 31 / 480min 18 / **240min 13** / 120min 8 / 60min 2 — because an
+  uncapped bracket spans a day and a half of an idle car (L45235 on 2026-09-09
+  has no trip on the day at all and still "brackets" off the 8th and the
+  10th). Allowing Bolt and the hotel channel to bracket as well as Uber gives
+  50 / 30 / 22 / 13 / 5 at those same caps. The ladder and its cap live in
+  `api/unauthorized_sql.js`; `test/unauthorized_attribution.test.mjs` asserts
+  each tier and proves each by reversion.
+
+* **`driver_status_event` cannot name who drove an unauthorized journey, and
+  waiting will not change that.** It looked like the strongest evidence
+  available — the provider's own timestamp on ONLINE/ONTRIP/OFFLINE, every two
+  minutes. Measured: the table begins **2026-09-14T12:53:35Z**, it is
+  append-only with no backfill, and only 7 of the 120 unauthorized segments
+  fall after that instant. On all 7, **every candidate was OFFLINE for 100% of
+  the window or had no event that day at all** — it named a driver on 0 of 7.
+  That is structural rather than a small sample: an unexplained journey is by
+  definition one no channel booked, which for an Uber-fleet driver means the
+  app was off, so "exactly one person ONLINE across the window" is close to
+  unfalsifiable-in-the-positive on exactly the population it would be applied
+  to. It also carries **no plate column** (`sql/schema_v70.sql`; only
+  `driver_status_now` has one), so there is no path from a plate and a time to
+  a person through it at all — every status query must start from a candidate
+  set you already have. Kept as CORROBORATION only, never as a tier.
+
+* **`/api/unauthorized/list` aggregates raw `driver_ext_id`, so 12 of 120
+  segments carry a second accused name that is the same human.** It hand-rolls
+  `jsonb_agg(DISTINCT jsonb_build_object('name', v2.driver_name, 'id',
+  v2.driver_ext_id))` instead of using `custodyRefs()` from
+  `api/custody_sql.js`, which is `DISTINCT ON (PERSON_OF(v))` and exists three
+  files away for exactly this reason. Verbatim from production: L12615
+  2026-08-29 returns `Fahad Ali Amjad Ali` AND `FAHAD ALI AMJAD ALI`; L63027
+  2026-09-10 returns `Muhammad Ahmad khan` and `Muhammad Ahmad Ghulam Qadir`
+  (one register entry in `api/identity_map.js`); L44305 2026-09-07 returns
+  THREE names for one man. Raw ref counts across the 120 are 0:33 / 1:46 /
+  2:32 / 3:8 / 4:1; folded on `personOf()` they are 0:33 / 1:58 / 2:28 / 3:1.
+  `/api/segments` over the same table folds correctly, so the two pages
+  disagree about how many people an accusation names. **Still unfixed in
+  `api/server.js`** — `/api/unauthorized/attributed` does it correctly, and the
+  old route should be switched to `custodyRefs`/`custodyNames` next time it is
+  touched.
+
+* **Postgres refuses a bind that supplies more parameters than the statement
+  names.** `bind message supplies 5 parameters, but prepared statement requires
+  4`. Four sibling queries in one route were being handed the same parameter
+  array, and the one that did not reference the last placeholder failed at
+  bind — not at parse, so it looks like a data error rather than a wiring one.
+  Pass each query exactly the parameters it names.
+
+* **`win()` widens the window's upper bound and `winDays()` does not, so
+  `` `${to}T00:00:00Z` `` parses to NaN on half the routes.** `win()` returns
+  `2026-09-16 23:59:59.999` (so a bare date does not drop the last day) and
+  `withDriver()` passes that form; `range()`/`winDays()` return a bare
+  `2026-09-16`. SQL's `::date` truncates either, which is why this never
+  surfaces in a query — but any JS day arithmetic over the window (a coverage
+  note saying "27 of 108 days") silently becomes NaN on the driver-scoped half
+  of the product. Slice to ten characters before parsing.
+
 * **The response cache keys on the whole URL, so a page whose picker is
   thirteen addresses over ONE query pays for the query thirteen times.**
   `/api/performance/fleet` runs the same scan whatever period is asked for —

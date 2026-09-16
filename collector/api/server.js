@@ -39,6 +39,7 @@ import { analyticsRoutes, analystRoutes } from './analytics_routes.js';
 import { rosterRoutes } from './roster_routes.js';
 import { dayRoutes } from './day_routes.js';
 import { segmentRoutes, slotRoutes } from './segment_routes.js';
+import { unauthorizedRoutes } from './unauthorized_routes.js';
 import { forecastRoutes } from './forecast_routes.js';
 import { playbookRoutes } from './playbook_routes.js';
 import { retentionRoutes } from './retention_routes.js';
@@ -5607,6 +5608,18 @@ app.use((req, res, next) => {
 /* Occupancy segments as pages rather than a modal: the list with its own
    facets, and one interval with every booking that stood near it. */
 segmentRoutes(app, { q, wrap, range, DAYWIN });
+
+/* WHO WAS DRIVING WHEN NOTHING BOOKED THE JOURNEY — one person's, and the
+   fleet's. The verdict above says a car carried a passenger with nothing
+   paying for it; this says who, WITH THE RULE THAT NAMED THEM beside the name,
+   and says "two candidates" or "nobody" where that is the honest answer.
+   Mounted after segmentRoutes because it is the same table read one question
+   further on, and deliberately NOT inside /api/unauthorized/list: that route
+   answers with a bare array which three shells already read that way, so it
+   cannot gain a wrapper, and "another tab of ALL unauthorized trips" needs an
+   offset and a total. See api/unauthorized_sql.js for the ladder and the
+   measurement that set it. */
+unauthorizedRoutes(app, { q, wrap, range, DAYWIN });
 
 /* One weekday-hour cell of the demand heatmap, as a rostering question rather
    than a colour: who covers it, on what, from where, and how reliably. */

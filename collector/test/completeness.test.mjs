@@ -67,7 +67,16 @@ const ARGS = {
    a row that carries exactly what is being asked for reads as missing it, and
    the test then trains people to add a redundant flat column to silence it. */
 const PLATE_KEY = /^(plate|vehicle_plate|plates|plate_list|main_plate|on_plates|vehicle|vehicles_refs)$/;
-const DRIVER_KEY = /^(driver_name|driver_names|driver_ext_id|driver_refs|drivers|held_by|full_name|driver|primary_driver|current_driver|top_driver)$/;
+/* `attribution_candidates` is the newest way a row names a person, and it is
+   deliberately NOT called `drivers`. /api/unauthorized/attributed answers about
+   a journey nothing booked, where the name is an INFERENCE rather than a trip
+   record — so the key says candidates, the tier beside it says which rule
+   produced them, and where the evidence cannot single anybody out the list
+   holds every candidate or is empty. Renaming it `drivers` to satisfy this
+   regex would have made an accusation read like a fact, which is the opposite
+   of what this file is for. The shape is the same {name, id} pairs, so
+   identity() reads it unchanged. */
+const DRIVER_KEY = /^(driver_name|driver_names|driver_ext_id|driver_refs|drivers|held_by|full_name|driver|primary_driver|current_driver|top_driver|attribution_candidates)$/;
 
 /* Does this value NAME something, as opposed to counting it?
    `drivers: 4` and `drivers: [{name, id}]` sit under the same key and mean

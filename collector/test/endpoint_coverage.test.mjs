@@ -39,6 +39,28 @@ const usedInUi = (route) => new RegExp(
 /* Endpoints that legitimately have no UI consumer. Each needs a reason, so
    adding one is a decision rather than a shrug. */
 const EXEMPT = {
+  /* THE TWO ATTRIBUTION ENDPOINTS, EXEMPT ONLY UNTIL THE PAGES LAND.
+     ───────────────────────────────────────────────────────────────────────
+     This is the exemption shape this file's header warns about — "built,
+     tested, deployed, and nothing in the UI ever called them" — so it is
+     written with its own expiry condition rather than as a shrug. The data
+     layer and the pages were split into two phases deliberately: every name
+     these endpoints put beside an unexplained journey is an inference, and the
+     rule that decides it had to be measured, reverted and asserted before any
+     of it reached a screen where an operator would read it as a fact.
+
+     REMOVE BOTH ENTRIES when the driver Unauthorized tab (api/public/driver.js
+     DRIVER_TABS) and the fleet-wide list call them. If the pages do not land,
+     the endpoints should be deleted, not left exempt: an attribution nobody can
+     see is an accusation nobody can check. */
+  '/api/unauthorized/attributed': 'built ahead of its page: every unexplained journey in the '
+    + 'fleet with the tier that named a driver, the candidates and the evidence sentence. The '
+    + 'UI phase that adds the fleet-wide tab owns api/public/*; until it lands nothing calls '
+    + 'this. Delete this entry then, or delete the endpoint',
+  '/api/driver/unauthorized': 'built ahead of its page: one person\u2019s attributed '
+    + 'unexplained journeys, kept strictly apart from the ones they are merely one of several '
+    + 'candidates for. Called by the new Unauthorized tab on the driver page once the UI phase '
+    + 'adds it to DRIVER_TABS. Delete this entry then, or delete the endpoint',
   '/api/health': 'liveness probe for the platform, not for people',
   '/api/import/statement-days': 'operator tool: batched import of the daily ledger — driven by '
     + 'bin/import-ledger.mjs, not by a page',

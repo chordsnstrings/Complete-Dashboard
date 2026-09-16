@@ -111,7 +111,25 @@ const canonSql = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase(
 const nameKey = (s) => `name:${canonSql(s)}`;
 const isNameKey = (id) => String(id || '').startsWith('name:');
 
-export function driverRoutes(app, { q, wrap, endOfDay }) {
+/* THE IDENTITY FOLD, AS A THING A SECOND ROUTE FILE CAN USE.
+   ─────────────────────────────────────────────────────────────────────────
+   resolve() and withDriver() used to be closed over inside driverRoutes(),
+   which was right while this file was the only per-person surface. It is not
+   any more: api/unauthorized_routes.js serves /api/driver/unauthorized, and a
+   page that names a person beside an unexplained journey has to fold their
+   records exactly the way every other tab on that page folds them — opening
+   either half of a merged pair must land on the same answer, or the
+   Unauthorized tab shows a different person from the Trips tab beside it.
+
+   The alternative was a second copy of the register fold, and api/custody_sql.js
+   already records what a second copy of this rule costs: it is the reason
+   person_key is generated from one module rather than recomputed per surface.
+
+   So the resolver is lifted out UNCHANGED — nothing about how it resolves has
+   moved, only where it is defined — and exported as a factory. test/mount.mjs
+   calls every export whose name matches /Routes$/; this name deliberately does
+   not match, so it is importable without being mounted. */
+export function driverScope({ q, wrap }) {
 
   /* Resolve `?id=` (a platform driver id, or a synthesised name: key) or
      `?name=` into every record for that person. Returns null when nothing
@@ -245,6 +263,21 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       platforms: [...new Set([...alias.map((a) => a.platform), ...ids.flatMap(mergedPlatforms)])] };
   }
 
+  // Wrap a handler so it resolves the driver first and 404s cleanly when unknown.
+  const withDriver = (fn) => wrap(async (req, res) => {
+    const d = await resolve(req);
+    if (!d) return res.status(404).json({ error: 'driver not found' });
+    // The MATCH set, not the account list — see resolve() above.
+    return fn(req, res, d, [...win(req), d.keys]);
+  });
+
+  return { resolve, withDriver };
+}
+
+export function driverRoutes(app, { q, wrap, endOfDay }) {
+
+  const { resolve, withDriver } = driverScope({ q, wrap });
+
   /* The person key: a provider id where there is one, the synthesised name: key
      where there is not. Every query over trip/trip_norm keys on this, never on
      the raw column — keyed raw, a driver the provider names without an id has
@@ -281,13 +314,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
   // `$1..$2` window, `$3` key array — keep this argument order in every query.
   const TW = `${PKEY} = ANY($3) AND ${DAYWIN('requested_at')}`;
 
-  // Wrap a handler so it resolves the driver first and 404s cleanly when unknown.
-  const withDriver = (fn) => wrap(async (req, res) => {
-    const d = await resolve(req);
-    if (!d) return res.status(404).json({ error: 'driver not found' });
-    // The MATCH set, not the account list — see resolve() above.
-    return fn(req, res, d, [...win(req), d.keys]);
-  });
+  // resolve() and withDriver() come from driverScope() above: one fold, two route files.
 
   /* ── directory: every driver we know of, one row each ─────────────────
      Four things were wrong here and all four made the page describe the fleet
