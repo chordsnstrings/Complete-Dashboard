@@ -72,11 +72,47 @@ check('two accounts on the SAME channel are not proposed',
     { platform: 'bolt', driver_ext_id: 'b-4', full_name: 'Ali Hassan' },
     { platform: 'bolt', driver_ext_id: 'b-5', full_name: 'Ali Hassan Mehmood' },
   ]).candidates.length === 0);
-/* ALREADY ONE PERSON. The name fold joined these before anybody was asked. */
-check('a pair the name fold already joined is not proposed again',
+/* THE FOLD DOES NOT JOIN ANYBODY, AND THIS ASSERTED THAT IT DID.
+   ─────────────────────────────────────────────────────────────────────────
+   This read "a pair the name fold already joined is not proposed again", over
+   a comment saying "the name fold joined these before anybody was asked". It
+   did not. foldName() lowercases, collapses whitespace and drops ADJACENT
+   repeats; nothing downstream merges two records because their folded names
+   match. person_key is built from the register in api/identity_map.js and from
+   the conclusive phone/email links, neither of which reads a spelling.
+
+   Measured on the live directory 2026-09-16: "Arthur Moses" on Uber and
+   "Arthur Moses" on Bolt are TWO ROWS. So are "M MAEN M ALAA SHEKFA" twice and
+   "MUHAMMAD SHAFIQ" against "Muhammad Shafiq". The pairs whose names matched
+   EXACTLY were the one kind this queue could never propose, and this assertion
+   is why — it protected the behaviour instead of catching it.
+
+   So it now asserts the guard that is real: a pair already in
+   driver_identity_link is not proposed again, which is decided by what is
+   actually linked rather than by what two strings look like. */
+check('an identical name on two channels IS proposed — the fold joins nobody',
   nameCandidates([
     { platform: 'uber', driver_ext_id: 'u-6', full_name: 'Ali  Hassan' },
     { platform: 'bolt', driver_ext_id: 'b-6', full_name: 'ALI HASSAN' },
+  ]).candidates.length === 1);
+check('…and a pair that really IS linked is not proposed again',
+  nameCandidates([
+    { platform: 'uber', driver_ext_id: 'u-6', full_name: 'Ali  Hassan' },
+    { platform: 'bolt', driver_ext_id: 'b-6', full_name: 'ALI HASSAN' },
+  ], { skipPairs: new Set(['u-6|b-6', 'b-6|u-6']) }).candidates.length === 0);
+/* The same parts in a different order, which is how two channels compose one
+   name differently — see src/sources/yango.js and test/yango_one_name.test.mjs.
+   Nine of the fifteen pairs standing unproposed on production were this shape. */
+check('the same parts in a different order are proposed',
+  nameCandidates([
+    { platform: 'uber', driver_ext_id: 'u-7', full_name: 'Ansar Hussain Khalid' },
+    { platform: 'yango', driver_ext_id: 'y-7', full_name: 'Khalid Ansar Hussain' },
+  ]).candidates.length === 1);
+/* …and the widening must not reach a pair that merely SHARES parts. */
+check('a different name is still not proposed',
+  nameCandidates([
+    { platform: 'uber', driver_ext_id: 'u-8', full_name: 'Muhammad Khalid' },
+    { platform: 'bolt', driver_ext_id: 'b-8', full_name: 'Muhammad Khalifa' },
   ]).candidates.length === 0);
 /* THE AMBIGUOUS ONE, and the reason the dedup exists at all. "Muhammad Shafiq"
    sits inside two different fuller names. Proposing either is picking a person

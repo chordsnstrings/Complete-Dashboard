@@ -243,6 +243,30 @@ export function linksFrom(rows) {
    them. */
 const tokensOf = (name) => foldName(name).split(' ').filter((t) => t.length >= 2);
 const subsetOf = (a, b) => a.length < b.length && a.every((t) => b.includes(t));
+/* ── AND THE SAME PARTS IN A DIFFERENT ORDER, WHICH subsetOf CANNOT SEE ───
+   subsetOf requires a.length < b.length — a STRICT subset — so two names built
+   from the same parts never reach it, however obviously they are one person.
+   Measured against the live directory on 2026-09-16: of fifteen pairs standing
+   as separate rows with identical word sets, the strict rule proposed six and
+   structurally could not propose nine.
+
+     Abas Osman Abyan                        Abyan Abas Osman
+     Ansar Hussain Khalid                    Khalid Ansar Hussain
+     Najeeb Ullah Khan Sabeel Khan           Sabeel Khan Najeeb Ullah Khan
+     Amir Muhammad Khan Muhammad Naeem Khan  Muhammad Naeem Khan Amir Muhammad Khan
+
+   That is not an exotic case on this roster, it is the documented one: the head
+   of src/sources/yango.js records that each channel composes a name its own
+   way, and test/yango_one_name.test.mjs exists because one driver arrives as
+   "Khalil Aliyan" from orders/list and "Aliyan Khalil" from summary/drivers.
+   The COLLECTOR learned that; the PROPOSER never did.
+
+   A reordering is not stronger evidence than a subset and is not treated as
+   any — it is a proposal like every other, and identical parts in a different
+   order is exactly what two brothers look like too. It is only that a human
+   was never given the chance to say so. */
+const sameSet = (a, b) => a.length === b.length
+  && a.every((t) => b.includes(t)) && b.every((t) => a.includes(t));
 
 export function nameCandidates(rows, { skipPairs = new Set() } = {}) {
   const people = rows
@@ -258,10 +282,27 @@ export function nameCandidates(rows, { skipPairs = new Set() } = {}) {
          after a gap — but they are also what a fleet of forty Muhammads looks
          like, and proposing those would bury the pairs worth looking at. */
       if (a.platform === b.platform) continue;
-      /* The name fold already joined them: there is nothing to propose. */
-      if (a.key === b.key) continue;
+      /* THE FOLD DOES NOT JOIN THEM, AND THIS SKIPPED THEM BELIEVING IT DID.
+         This was `if (a.key === b.key) continue;` under "the name fold already
+         joined them: there is nothing to propose". foldName only lowercases,
+         collapses whitespace and drops ADJACENT repeats — it is not a person
+         key, and nothing downstream merges two records because their folded
+         names match. person_key comes from the register in api/identity_map.js
+         and from the conclusive links above it, neither of which knows about a
+         spelling coincidence.
+
+         So the assumption was false and the cost was total: a pair whose names
+         match EXACTLY was the one kind this queue could never propose. On the
+         live directory, "Arthur Moses" (uber) and "Arthur Moses" (bolt) are two
+         rows, as are "M MAEN M ALAA SHEKFA" twice and "MUHAMMAD SHAFIQ" against
+         "Muhammad Shafiq".
+
+         A pair that IS already linked is still skipped — by skipPairs below,
+         which is built from driver_identity_link and therefore from what is
+         actually joined rather than from what a string comparison suggests. */
       const [long, short] = a.tokens.length > b.tokens.length ? [a, b] : [b, a];
-      if (!subsetOf(short.tokens, long.tokens)) continue;
+      const reordered = sameSet(a.tokens, b.tokens);
+      if (!reordered && !subsetOf(short.tokens, long.tokens)) continue;
       const shared = short.tokens.length;
       const pair = `${a.driver_ext_id}|${b.driver_ext_id}`;
       if (refusedPairs.has(pair)) { skipped.push({ pair, why: 'ruled on in the register' }); continue; }
@@ -279,11 +320,23 @@ export function nameCandidates(rows, { skipPairs = new Set() } = {}) {
         canonical_name: keep.full_name,
         canonical_key: foldName(keep.full_name),
         basis: 'similar_name',
-        evidence: `${keep.platform} filed “${keep.full_name}” and ${alias.platform} filed `
-          + `“${alias.full_name}”. Every part of the shorter name appears in the longer one `
-          + `(${shared} of ${long.tokens.length}), which is what one person filed twice usually `
-          + 'looks like — and is also what two relatives look like. Nothing here proves it '
-          + 'either way, which is why it is being asked rather than applied.',
+        /* The sentence says WHICH of the two shapes was seen, because they are
+           different evidence and a reader deciding is entitled to know which
+           one they are looking at. Neither is proof. */
+        evidence: reordered
+          ? `${keep.platform} filed “${keep.full_name}” and ${alias.platform} filed `
+            + `“${alias.full_name}”. Both names are built from the same `
+            + `${shared} parts in a different order`
+            + (foldName(keep.full_name) === foldName(alias.full_name)
+              ? ' — in fact they are the same name, filed on two channels' : '')
+            + '. Each channel composes a name its own way, so this is what one person on two '
+            + 'channels usually looks like — and is also what two brothers look like. Nothing '
+            + 'here proves it either way, which is why it is being asked rather than applied.'
+          : `${keep.platform} filed “${keep.full_name}” and ${alias.platform} filed `
+            + `“${alias.full_name}”. Every part of the shorter name appears in the longer one `
+            + `(${shared} of ${long.tokens.length}), which is what one person filed twice usually `
+            + 'looks like — and is also what two relatives look like. Nothing here proves it '
+            + 'either way, which is why it is being asked rather than applied.',
         phone_tail: null,
         shared_tokens: shared,
       });
