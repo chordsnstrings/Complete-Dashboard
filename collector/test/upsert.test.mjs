@@ -134,5 +134,78 @@ check('and every row still lands', cnt3 === 400, String(cnt3));
 console.log('\nnothing to write is not an error');
 check('an empty list writes nothing and says so', (await upsert('thing', [], ['k1', 'k2'])) === 0);
 
+console.log('\nan update that changes nothing does not rewrite the row');
+
+/* WHY THIS IS TESTED ON xmin AND NOT ON THE VALUES.
+   ─────────────────────────────────────────────────────────────────────────
+   The defect is invisible in the data: before the fix and after it, the table
+   holds exactly the same rows with exactly the same values. What differed was
+   the COST — Postgres has no in-place update, so an UPDATE that sets every
+   column to the value already stored still writes a new row version and leaves
+   the old one as a dead tuple for every sequential scan to read past.
+
+   src/sources/uber.js:1919 re-upserts every status entry of every driver into
+   driver_status_event on every live tick (default 120 s), and the call site
+   calls that write "idempotent by construction". It was idempotent in its
+   result and not in its cost: `SELECT min(at) FROM driver_status_event`, over
+   a table two days old, took 67 to 109 seconds on production on 2026-09-16,
+   which is what /api/unauthorized/attributed was waiting on even for a window
+   holding zero segments.
+
+   xmin is the transaction that wrote the live version of a row, so it is the
+   one observable that distinguishes "not rewritten" from "rewritten with the
+   same bytes". Revert the WHERE clause in src/db.js and these four checks go
+   red while every value assertion in this file stays green — which is exactly
+   the shape of defect that needs a test that is not about values. */
+await db.exec(`INSERT INTO thing (k1, k2, a, b) VALUES ('x', '1', 'same', 5)`);
+const xminOf = async () => (await db.query(
+  `SELECT xmin::text AS x FROM thing WHERE k1='x' AND k2='1'`)).rows[0].x;
+const before = await xminOf();
+
+await upsert('thing', [{ k1: 'x', k2: '1', a: 'same', b: 5 }], ['k1', 'k2']);
+check('an identical row is not rewritten', (await xminOf()) === before,
+  `xmin ${before} -> ${await xminOf()}`);
+
+await upsert('thing', [{ k1: 'x', k2: '1', a: 'different', b: 5 }], ['k1', 'k2']);
+const afterReal = await xminOf();
+const [realRow] = (await db.query(`SELECT a, b FROM thing WHERE k1='x' AND k2='1'`)).rows;
+check('a row that really changed still is', afterReal !== before && realRow.a === 'different',
+  `${afterReal} vs ${before}, a=${realRow.a}`);
+
+/* NULL IS WHERE '<>' WOULD HAVE BEEN WRONG. `a <> EXCLUDED.a` is NULL — not
+   true — whenever either side is NULL, so a guard written with <> would refuse
+   to write a value over a NULL and refuse to clear a value back to NULL, and
+   both are real corrections a provider can send. IS DISTINCT FROM is the form
+   that treats NULL as a value, and these two checks are the reason it is. */
+await upsert('thing', [{ k1: 'x', k2: '1', a: null, b: 5 }], ['k1', 'k2']);
+const [cleared] = (await db.query(`SELECT a FROM thing WHERE k1='x' AND k2='1'`)).rows;
+check('a value cleared to NULL is still written', cleared.a === null, JSON.stringify(cleared));
+
+await upsert('thing', [{ k1: 'x', k2: '1', a: 'filled', b: 5 }], ['k1', 'k2']);
+const [filled] = (await db.query(`SELECT a FROM thing WHERE k1='x' AND k2='1'`)).rows;
+check('and a NULL filled in is written too', filled.a === 'filled', JSON.stringify(filled));
+
+/* THE SINGLE-ROW WRITER CARRIES THE SAME GUARD, and is tested here rather
+   than trusted: two writers with one rule between them is a rule a caller has
+   to know which function it picked to rely on. Extracted from the shipped
+   source for the same reason upsertMany is — a copy of the logic would drift
+   from it and quietly stop testing anything. */
+const oneBody = src.slice(src.indexOf('export async function upsert('))
+  .replace('export async function upsert(', 'async function upsertOne(');
+const oneEnd = oneBody.indexOf('\n}\n') + 2;
+// eslint-disable-next-line no-new-func
+const upsertOne = new Function('pool', `${oneBody.slice(0, oneEnd)}; return upsertOne;`)(fakePool);
+
+await db.exec(`INSERT INTO thing (k1, k2, a, b) VALUES ('y', '1', 'same', 9)`);
+const yminOf = async () => (await db.query(
+  `SELECT xmin::text AS x FROM thing WHERE k1='y' AND k2='1'`)).rows[0].x;
+const yBefore = await yminOf();
+await upsertOne('thing', { k1: 'y', k2: '1', a: 'same', b: 9 }, ['k1', 'k2']);
+check('upsert() does not rewrite an identical row either', (await yminOf()) === yBefore,
+  `xmin ${yBefore} -> ${await yminOf()}`);
+await upsertOne('thing', { k1: 'y', k2: '1', a: 'moved', b: 9 }, ['k1', 'k2']);
+const [yRow] = (await db.query(`SELECT a FROM thing WHERE k1='y' AND k2='1'`)).rows;
+check('and still writes one that changed', yRow.a === 'moved', JSON.stringify(yRow));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

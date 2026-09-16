@@ -899,3 +899,65 @@ records with no name at all. **18 reversions were run, one per expression, and
 every one broke an assertion**; the list is in the test's header beside the
 block it proves.
 
+
+---
+
+## The attribution endpoints were unusable on production, and it was not the ladder
+
+Found by the post-deploy verification of the last deployment rather than by a
+report — the endpoints answered correctly and took 78–99 s doing it, and one
+16-day window returned HTTP 500 after 121 s. `/api/unauthorized/list`, over the
+same table, answered in 1.2 s throughout.
+
+**The wrong suspect, named honestly.** The first diagnosis in this session was
+the attribution ladder: `api/unauthorized_sql.js` issues ten correlated
+per-plate reads on `trip` per segment, four of them unbounded in time, and
+`attributionJoin()` is materialised three times in one `Promise.all` (the rows,
+the total, the tier distribution). That is all true and it was **not the cause**.
+Four curls settled it:
+
+| window | segments | response |
+|---|---|---|
+| `days=1` | 5 | 98.6 s |
+| `days=3` | 16 | 78.2 s |
+| `days=30` | 123 | 84.1 s |
+| `from=2020-01-01&to=2020-01-02` | **0** | **67.0 s** |
+| `from=2019-01-01&to=2019-01-02` | **0** | **109.1 s** |
+
+Flat against segment count, and 67 s on a window where the ladder never runs at
+all. The one query in the route that does not read `$1`/`$2` is
+`statusHistoryFrom()` — `SELECT min(at) FROM driver_status_event`, no `WHERE` —
+called by these two endpoints and by nothing else in the codebase.
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | `min(at)` over `driver_status_event` was a sequential scan: the table's only index mentioning `at` (`dse_driver_idx`) has it in **second** position, which a whole-table `min()` cannot use | `sql/schema_v73.sql` — plain ascending `(at)` | written, committed — **deploy and proof pending** |
+| — | the heap it scanned was mostly dead tuples: `src/sources/uber.js:1919` re-upserts every status entry of every driver every `LIVE_STATUS_SECONDS` (120 s), and `upsertMany` rewrote each row whether or not a byte had changed | `src/db.js` — both writers guard `DO UPDATE` with `WHERE (tbl.cols) IS DISTINCT FROM (EXCLUDED.cols)` | written, committed — **deploy and proof pending** |
+
+**Proof method.** Two reversions, both run:
+
+* Comment `schema_v73.sql` out of `src/schema_files.js` →
+  `test/status_event_index.test.mjs` goes red with the production plan verbatim,
+  `Seq Scan on driver_status_event`. The test asserts the **plan**, not the
+  index's existence: an index the planner declines has fixed nothing.
+* Drop the `WHERE` from either writer in `src/db.js` →
+  `test/upsert.test.mjs` goes red on two `xmin` assertions. It has to be `xmin`:
+  the defect is invisible in the data, since the rows and their bytes are
+  identical before and after. Every value assertion in that file stays green
+  across the reversion, which is the point.
+
+**Not yet proven.** The two reversions above are what the SUITE can show, and
+this file's own header is that the suite agreeing with the code is not the code
+agreeing with the fleet. The proof is the empty-window curl re-run against
+production after the deploy — the same measurement that found it, which is the
+one that separates fixed cost from per-row cost in a single request. **These two
+rows move to `proven` only when that curl comes back, and this paragraph is
+replaced by its number.** See `docs/COVERAGE.md` traps.
+
+**Still open, and now measurable.** The ladder's real cost was never established,
+because a 67-second floor was hiding it. With the floor gone, the per-segment
+cost is whatever the same curls now report; the four unbounded per-plate reads
+(`api/unauthorized_sql.js` `ever_at`, `ever`, `later_other`, `hist`) and the
+three materialisations of `attributionJoin()` are where to look if it is still
+too slow. Do not bound them blindly: `sql/schema_v72.sql`'s header records why a
+hard-coded lookback would trade a performance fix for an honesty one.

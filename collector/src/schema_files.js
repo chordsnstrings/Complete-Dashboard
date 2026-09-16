@@ -107,4 +107,12 @@ export const SCHEMA_FILES = [
      to a hard-coded date) was rejected as trading a performance fix for an
      honesty one. */
   'schema_v72.sql',
+  /* One more index, and it is the one the last deployment's own verification
+     found. An unfiltered min(at) over driver_status_event — the only query
+     behind /api/unauthorized/attributed that does not look at the window —
+     was a sequential scan of a heap the live tick rewrites every two minutes,
+     and it cost 67 to 109 seconds on a window holding ZERO segments. See the
+     file for the five timings that name the cause, and src/db.js for the
+     other half of the fix. */
+  'schema_v73.sql',
 ];

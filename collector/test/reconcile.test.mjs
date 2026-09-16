@@ -771,12 +771,36 @@ console.log('\na month outside the statement window says so');
   };
   /* Two days inside the edge's own month and two before it, so that month
      straddles; and a month a good way behind it, which cannot. */
-  await stmt(at(2), 400, 0, 0, 0, 'uber_rest');
-  await pay(at(2), 420);
-  await stmt(at(-3), 100, 0, 0, 0, 'uber_rest');
-  await pay(at(-3), 380);
-  await stmt(at(-70), 90, 0, 0, 0, 'uber_rest');
-  await pay(at(-70), 350);
+  /* ON ITS OWN DRIVER, AND THAT IS THE FIX FOR A CALENDAR LANDMINE.
+     ───────────────────────────────────────────────────────────────────────
+     THE DEFECT, WHICH FIRED ON 2026-09-16 AND ON NO DAY BEFORE IT. These six
+     seeds are keyed relative to the statement horizon — today minus 192 days —
+     while every other fixture in this file is keyed to a FIXED date. Those two
+     grids drift past each other one day at a time, and
+     driver_statement_day's primary key is (platform, driver_ext_id, day), so
+     the moment a relative day lands on a fixed one, two inserts of 'u-amina'
+     collide and the whole FILE dies before its first assertion — reported by
+     test/run-all.mjs as `0 passed, NO TALLY REPORTED`, which reads like a
+     harness problem rather than a fixture one.
+
+     It fired here: on 2026-09-16 the horizon opens on 2026-03-08, so at(2) is
+     2026-03-10, and the spread-report block above seeds 'u-amina' on every day
+     of 2026-03-09..15. One day earlier or five days later the same file is
+     green, which is the worst property a test can have — it passes on the day
+     you write it and fails on a day nobody is looking at the calendar.
+
+     The cure is not to move a date; any date chosen today is a date the edge
+     reaches eventually. It is to take these rows OFF the shared driver, so the
+     primary key cannot collide with any fixed fixture whatever the calendar
+     does. Nothing in this block reads a person: every check below is about
+     which MONTHS the response carries and how each one is flagged against the
+     edge, and that is unchanged by whose statement the month is built from. */
+  await stmtFor('Edge Straddler', 'u-edge', at(2), 400, 0, 0, 0);
+  await payFor('Edge Straddler', 'u-edge', at(2), 420);
+  await stmtFor('Edge Straddler', 'u-edge', at(-3), 100, 0, 0, 0);
+  await payFor('Edge Straddler', 'u-edge', at(-3), 380);
+  await stmtFor('Edge Straddler', 'u-edge', at(-70), 90, 0, 0, 0);
+  await payFor('Edge Straddler', 'u-edge', at(-70), 350);
 
   const all = (await get('/api/reconcile')).body;
   const straddleMonth = horizon.from.slice(0, 7);

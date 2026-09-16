@@ -219,8 +219,17 @@ export async function upsert(table, row, conflict) {
   const cols = Object.keys(row);
   const vals = cols.map((c) => row[c]);
   const ph = cols.map((_, i) => `$${i + 1}`);
-  const updates = cols.filter((c) => !conflict.includes(c)).map((c) => `${c}=EXCLUDED.${c}`);
-  const doUpdate = updates.length ? `DO UPDATE SET ${updates.join(', ')}` : 'DO NOTHING';
+  const changing = cols.filter((c) => !conflict.includes(c));
+  const updates = changing.map((c) => `${c}=EXCLUDED.${c}`);
+  /* The same guard upsertMany() carries, and for the same reason — the whole
+     argument, with the production timings that produced it, is at its call
+     site below. Both writers, or the rule is one a caller has to know which
+     function it picked to rely on. */
+  const changed = `(${changing.map((c) => `${table}.${c}`).join(', ')})`
+    + ` IS DISTINCT FROM (${changing.map((c) => `EXCLUDED.${c}`).join(', ')})`;
+  const doUpdate = updates.length
+    ? `DO UPDATE SET ${updates.join(', ')} WHERE ${changed}`
+    : 'DO NOTHING';
   const text = `INSERT INTO ${table} (${cols.join(',')}) VALUES (${ph.join(',')})
                 ON CONFLICT (${conflict.join(',')}) ${doUpdate}`;
   await pool.query(text, vals);
@@ -271,8 +280,59 @@ export async function upsertMany(table, rows, conflict, chunk = 200) {
 
   let n = 0;
   for (const { cols, rows: groupRows } of groups.values()) {
-    const updates = cols.filter((c) => !conflict.includes(c)).map((c) => `${c}=EXCLUDED.${c}`);
-    const doUpdate = updates.length ? `DO UPDATE SET ${updates.join(', ')}` : 'DO NOTHING';
+    const changing = cols.filter((c) => !conflict.includes(c));
+    const updates = changing.map((c) => `${c}=EXCLUDED.${c}`);
+    /* AN UPDATE THAT CHANGES NOTHING IS NOT FREE, AND THIS ONE WAS RUNNING
+       EVERY TWO MINUTES.
+       ───────────────────────────────────────────────────────────────────────
+       THE DEFECT, MEASURED. Postgres has no in-place update: an UPDATE that
+       sets every column to the value already stored still writes a new row
+       version and leaves the old one as a dead tuple, which every sequential
+       scan of that table has to read past until autovacuum gets to it.
+
+       src/sources/uber.js:1919 upserts EVERY status entry the provider carries
+       for EVERY driver on every live tick — LIVE_STATUS_SECONDS, default 120 —
+       into driver_status_event, a table whose own COMMENT calls it append-only
+       and whose call site calls the write "idempotent by construction". It is
+       idempotent in its RESULT. It was not idempotent in its COST: the same
+       few thousand rows were rewritten 720 times a day, so the heap grew by a
+       tick's worth of dead tuples every two minutes while the live row count
+       stood still.
+
+       What that bought, timed against production on 2026-09-16:
+       `SELECT min(at) FROM driver_status_event` — one unfiltered min() over a
+       table two days old — took 67 to 109 seconds, and it is called once per
+       request by /api/unauthorized/attributed and /api/driver/unauthorized.
+       A window containing ZERO segments cost 67 seconds on that query alone.
+       sql/schema_v73.sql adds the index that makes the read cheap; this stops
+       the heap it reads from growing for no reason.
+
+       WHY A GUARD RATHER THAN 'DO NOTHING' FOR THAT ONE TABLE. DO NOTHING
+       would also stop the rewrite, and it would silently stop a CORRECTION
+       too: a row first written with a null fleet_id, or a provider that
+       restates a value, would keep the older answer forever. The guard is
+       exactly the write that would have changed something, so every caller
+       keeps the last-write-wins semantics it has always had, and only the
+       writes that were never going to change a byte are skipped. Nothing
+       observable differs — same rows, same values, same conflict key.
+
+       SAFE ON EVERY COLUMN THIS SCHEMA HOLDS. IS DISTINCT FROM needs an
+       equality operator; every column type in sql/ is text, int, bigint,
+       numeric, double, real, boolean, date, timestamp(tz), jsonb, text[] or
+       bytea, all of which have one. (jsonb compares by value with normalised
+       key order, which is the comparison wanted here; bare `json`, which has
+       no equality operator at all, appears nowhere in this schema — if it ever
+       does, this line is where it will fail loudly rather than quietly.)
+       Generated columns never appear in `cols`, because no caller writes one.
+
+       A single-column list is not a row constructor — `(a) IS DISTINCT FROM
+       (b)` is the ordinary scalar form and means the same thing, so the same
+       expression serves one column and twenty. */
+    const changed = `(${changing.map((c) => `${table}.${c}`).join(', ')})`
+      + ` IS DISTINCT FROM (${changing.map((c) => `EXCLUDED.${c}`).join(', ')})`;
+    const doUpdate = updates.length
+      ? `DO UPDATE SET ${updates.join(', ')} WHERE ${changed}`
+      : 'DO NOTHING';
     const perBatch = Math.max(1, Math.min(chunk, Math.floor(MAX_PARAMS / cols.length)));
 
     for (let i = 0; i < groupRows.length; i += perBatch) {

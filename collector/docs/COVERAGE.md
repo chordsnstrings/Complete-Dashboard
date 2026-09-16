@@ -827,6 +827,71 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A fixture keyed to `now()` and a fixture keyed to a fixed date drift past
+  each other, and the collision is a landmine with a date on it.**
+  `test/reconcile.test.mjs` seeds six statement/payout rows relative to the
+  rolling statement horizon (today − 192 days) because the edge it tests moves;
+  every other fixture in the file is on a hard-coded date. `driver_statement_day`
+  is keyed `(platform, driver_ext_id, day)`, so on **2026-09-16** — and on no
+  day before it — the relative `at(2)` landed on `2026-03-10`, a day the
+  spread-report block already held for the same driver, and the duplicate key
+  killed the FILE before its first assertion. `test/run-all.mjs` reports that as
+  `0 passed, NO TALLY REPORTED`, which reads like a harness fault rather than a
+  fixture one. **Moving the date does not fix it** — any date chosen today is a
+  date the edge reaches eventually. Put relative-dated rows on **their own
+  key** (here, their own driver) so no calendar alignment can collide.
+  `git log` will show this file green the day before and red the day of.
+
+* **A page that is slow on an EMPTY window is not slow because of its data —
+  find the query that does not read `$1`/`$2`.** `/api/unauthorized/attributed`
+  shipped on 2026-09-16 taking 78–99 s. The obvious suspect was the attribution
+  ladder: ten correlated per-plate reads on `trip`, materialised three times in
+  one `Promise.all` (the rows, the total and the tier distribution), over 175k
+  trip rows on a `basic-xxs` box. It was the wrong suspect, and the measurement
+  that said so took four curls:
+
+  | window | segments | response |
+  |---|---|---|
+  | `days=1` | 5 | 98.6 s |
+  | `days=3` | 16 | 78.2 s |
+  | `days=30` | 123 | 84.1 s |
+  | `from=2020-01-01&to=2020-01-02` | **0** | **67.0 s** |
+
+  Cost flat against segment count, and 67 s on a window where the ladder never
+  runs at all. That leaves exactly one query in the route: the one with no
+  `WHERE` — `SELECT min(at) FROM driver_status_event`, called once per request
+  by `/api/unauthorized/attributed` and `/api/driver/unauthorized` and by
+  nothing else. **Before blaming the expensive-looking query, ask an empty
+  window what the floor is.** It is one curl and it separates per-row cost from
+  fixed cost outright.
+
+* **An unfiltered `min(col)` needs `col` to LEAD an index; second position
+  buys nothing.** `driver_status_event` carried `(local_day, status)` and
+  `(driver_ext_id, at DESC)` — `at` appears, so it looks covered — and
+  `min(at)` over the whole table was still a sequential scan.
+  `sql/schema_v73.sql` adds the plain ascending `(at)`.
+  `api/status_routes.js:147` runs the SAME `min(at)` **filtered** by
+  `driver_ext_id = ANY(...)`, rides `dse_driver_idx` and is fast, so the two
+  sat side by side in one codebase with a 60-second difference between them.
+  `test/status_event_index.test.mjs` asserts the plan, not just the index:
+  an index the planner declines has fixed nothing.
+
+* **`upsertMany` rewriting a row that did not change is not free, and the
+  collectors do it every tick.** Postgres has no in-place update: `ON CONFLICT
+  DO UPDATE SET every_column = EXCLUDED.every_column` writes a new row version
+  and leaves a dead tuple even when not one byte differs, and every sequential
+  scan reads past all of them until autovacuum catches up.
+  `src/sources/uber.js:1919` re-upserts **every status entry of every driver**
+  into `driver_status_event` on every live tick (`LIVE_STATUS_SECONDS`, default
+  120 s) — its comment calls that "idempotent by construction", which it is in
+  its RESULT and was not in its COST. A table two days old was answering
+  `min(at)` in 67–109 s. `src/db.js` now guards both writers with
+  `WHERE (tbl.cols) IS DISTINCT FROM (EXCLUDED.cols)`. **Not `<>`:** that is
+  NULL whenever either side is, so it would refuse both to fill a NULL and to
+  clear a value back to NULL, and a provider sends both.
+  `test/upsert.test.mjs` proves it on `xmin`, because the defect is invisible
+  in the values — same rows, same bytes, before and after.
+
 * **`trip_ext` and `trip_norm` DO NOT carry `person_key`, whatever a note
   telling you to fold on it may say.** `sql/schema_v18.sql` creates `trip_norm`
   as `SELECT t.* … FROM trip t` — BEFORE `sql/schema_v20.sql` adds the column —
