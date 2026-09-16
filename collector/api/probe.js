@@ -2598,12 +2598,93 @@ export function probeRoutes(app, { wrap }) {
     const v2 = tried.find((t) => t.path === '/v2/parks/transactions/list');
     const v1 = tried.find((t) => t.path === '/v1/parks/transactions/list');
 
+    /* WHAT THE LEDGER IS MADE OF, which decides what can be collected from it.
+       ──────────────────────────────────────────────────────────────────────
+       Knowing the endpoint answers is half the finding. The other half is
+       which of Yango's categories actually carry money for this park — 89
+       categories are published and a park uses a handful. src/sources/yango.js
+       says today that "an order carries no commission field, and Yango's
+       commission is about 24% of the gross", and that sentence is the reason
+       driver_performance.earnings holds the GROSS for this provider while the
+       column is described to a reader as "the money that arrived". If a
+       commission category is in here with a sum against it, that absence has a
+       source and can stop being an absence.
+
+       A category id, a name and a total are not a record: no driver, no order
+       and no timestamp goes into this aggregate, and it is the smallest thing
+       that can answer "is the commission in here". Pages the whole window
+       rather than sampling it, because a category that appears twice in fifty
+       rows and four hundred times in the month is exactly the one worth
+       knowing about. */
+    let byCategory = null;
+    let ledgerSpan = null;
+    if (v2?.status === 200) {
+      const totals = new Map();
+      let cursor = null, pages = 0, rows = 0, earliest = null, latest = null;
+      /* Capped at forty pages of a thousand. A park that moves more than forty
+         thousand ledger rows in the asked window returns what was counted and
+         says the count is partial — a silent truncation would read as "this is
+         all there is", which is the one thing a probe must never imply. */
+      while (pages < 40) {
+        const body = { ...ledgerBody(1000), ...(cursor ? { cursor } : {}) };
+        const { status, data } = await http(`${HOST}/v2/parks/transactions/list`, {
+          method: 'POST', timeoutMs: 45000, retries: 0, headers: hdrs, body: JSON.stringify(body),
+        });
+        if (status !== 200 || !Array.isArray(data?.transactions)) break;
+        for (const t of data.transactions) {
+          const k = `${t.category_id}\u0000${t.category_name || ''}\u0000${t.group_id || ''}`;
+          const amt = Number(t.amount);
+          const cur = totals.get(k) || { rows: 0, sum: 0, negative: 0, positive: 0 };
+          cur.rows += 1;
+          if (Number.isFinite(amt)) { cur.sum += amt; if (amt < 0) cur.negative += 1; else cur.positive += 1; }
+          totals.set(k, cur);
+          const day = String(t.event_at || '').slice(0, 10);
+          if (day) {
+            if (!earliest || day < earliest) earliest = day;
+            if (!latest || day > latest) latest = day;
+          }
+        }
+        rows += data.transactions.length;
+        pages += 1;
+        cursor = data.cursor || null;
+        if (!cursor || !data.transactions.length) break;
+      }
+      byCategory = [...totals.entries()]
+        .map(([k, v]) => {
+          const [category_id, category_name, group_id] = k.split('\u0000');
+          return { category_id, category_name, group_id, rows: v.rows,
+            sum: Number(v.sum.toFixed(2)), rows_negative: v.negative, rows_positive: v.positive };
+        })
+        .sort((x, y) => Math.abs(y.sum) - Math.abs(x.sum));
+      ledgerSpan = { rows, pages, earliest, latest, complete: pages < 40 || !cursor };
+    }
+
+    /* The whole published vocabulary, so a category that appears in NO row
+       this window is still visible to whoever writes the collector. is_
+       affecting_driver_balance is the field that separates the park's own
+       money from a driver's. */
+    const catList = tried.find((t) => t.path === '/v2/parks/transactions/categories/list');
+    let categories = null;
+    if (catList?.status === 200) {
+      const { data } = await http(`${HOST}/v2/parks/transactions/categories/list`, {
+        method: 'POST', timeoutMs: 30000, retries: 0, headers: hdrs,
+        body: JSON.stringify({ query: { park: { id: park } } }),
+      });
+      categories = Array.isArray(data?.categories)
+        ? data.categories.map((c) => ({ id: c.id, name: c.name, group_id: c.group_id,
+          group_name: c.group_name, affects_driver_balance: c.is_affecting_driver_balance }))
+        : null;
+    }
+
     res.json({
       host: HOST,
       park_id: { len: park.length, head: park.slice(0, 4), tail: park.slice(-4) },
       client_id_shape: clientId.startsWith('taxi/park/') ? 'taxi/park/<park id>' : 'the stored YANGO_CLIENT_ID',
       window: [from, to],
       tried,
+      ledger_span: ledgerSpan,
+      by_category: byCategory,
+      categories,
       reading: v2?.status === 200 && v1?.status === 404
         ? 'the ledger exists and is v2. The 404 recorded in src/sources/yango.js is a 404 on a '
           + 'path that has never existed — Yango publishes no v1 under Transactions — and the '
