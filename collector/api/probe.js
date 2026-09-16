@@ -23,6 +23,11 @@ import { pool } from '../src/db.js';
 import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST } from '../src/auth/uber.js';
 import { probeEarnerWindow, auditTripWindow, uberOrgs } from '../src/sources/uber.js';
 import { loadSettings, get } from '../src/settings.js';
+/* The portal token exchange, borrowed rather than re-implemented. A probe that
+   mints its own credential tests its own minting: the Yango check made exactly
+   that mistake once (see YANGO_SURFACES in src/sources/yango.js) and reported a
+   dead cookie the collector was using successfully at that moment. */
+import { portalToken as boltPortalToken } from '../src/sources/bolt.js';
 /* The fleet's clock, for the two default windows below. src/util.js owns the
    +04:00 arithmetic and every other server-side day key already goes through
    it or through Postgres's AT TIME ZONE 'Asia/Dubai'; a fourth private copy of
@@ -35,6 +40,43 @@ import { log } from '../src/log.js';
    that holds only one org's cookie the pair must come from ONE entry — the
    Ecosine uuid with the Egari cookie is a 401 wearing a confusing hat. */
 const uberOrg = () => config.uber.orgs?.[0] || config.uber;
+
+/* ?fleet= WAS PARSED IN ONE ROUTE AND IGNORED BY EVERY OTHER.
+   ─────────────────────────────────────────────────────────────────────────
+   uberOrg() above returns the FIRST configured org, and the first configured
+   org is Ecosine — config.js builds the list ecosine-then-egari. Every report
+   route called it with no argument, so `?fleet=egari` selected nothing and the
+   route answered about Ecosine under a query string that said Egari.
+
+   That is the failure mode this file elsewhere calls the worst kind: not an
+   error, a confident wrong answer. It cost a measurement directly — the bank
+   wire probed on 2026-09-16 (docs/COVERAGE.md, "The exact bank wire EXISTS")
+   was asked twice, once with ?fleet=egari, and both answers were Ecosine's,
+   so Egari's payout stood unmeasured while looking measured. Only
+   /api/probe/uber/audit at :1635 read the parameter at all, which is why the
+   bug survived: the one route that honoured it worked.
+
+   orgFor(req) is the fix and it fails LOUDLY: a fleet that is named but not
+   configured returns null rather than falling back to the other one, so the
+   route refuses by name instead of answering about somebody else. */
+const fleetOf = (req) => (['ecosine', 'egari'].includes(String(req?.query?.fleet))
+  ? String(req.query.fleet) : null);
+const orgFor = (req) => {
+  const want = fleetOf(req);
+  if (!want) return uberOrg();
+  return uberOrgs(want)[0] || null;
+};
+/* The refusal that goes with it, so each route says the same thing. */
+const noOrg = (req, res) => {
+  const want = fleetOf(req);
+  return res.status(400).json({
+    error: want
+      ? `no Uber org configured for fleet "${want}" — it has no UBER_ORG_UUID/`
+        + 'UBER_WEB_COOKIE pair, and this route will not answer about the other fleet'
+      : 'no Uber org configured',
+    fleets_configured: uberOrgs().map((o) => o.fleet),
+  });
+};
 
 /* The API component had its OWN three copies of the host, and fixes 39 and 40
    moved only the collector's. So every live Uber diagnostic on production went
@@ -700,7 +742,8 @@ export function probeRoutes(app, { wrap }) {
   /* Which report types this org can actually generate. */
   app.get('/api/probe/uber/report-types', wrap(async (req, res) => {
     await loadSettings();
-    if (!uberOrg().orgUuid) return res.status(400).json({ error: 'no Uber org configured' });
+    const org = orgFor(req);
+    if (!org?.orgUuid) return noOrg(req, res);
     /* The last three days on the fleet's calendar, not on UTC's.
        ────────────────────────────────────────────────────────────────────
        These defaults were `new Date().toISOString().slice(0, 10)`, which is
@@ -732,11 +775,11 @@ export function probeRoutes(app, { wrap }) {
     for (const reportType of list) {
       try {
         const { data } = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`, {
-          method: 'POST', timeoutMs: 30000, retries: 0, headers: uberWebHeaders(uberOrg()),
+          method: 'POST', timeoutMs: 30000, retries: 0, headers: uberWebHeaders(org),
           body: JSON.stringify({
-            orgId: { uuid: { value: uberOrg().orgUuid } }, reportType,
+            orgId: { uuid: { value: org.orgUuid } }, reportType,
             startDate: { value: from }, endDate: { value: to },
-            childOrgUuids: [{ uuid: { value: uberOrg().orgUuid } }],
+            childOrgUuids: [{ uuid: { value: org.orgUuid } }],
           }),
         });
         const ok = data?.status === 'success';
@@ -776,6 +819,10 @@ export function probeRoutes(app, { wrap }) {
     }
     const throttled = out.filter((t) => t.throttled).length;
     res.json({
+      /* Named, not assumed. This route answered about Ecosine under
+         ?fleet=egari for as long as it existed; printing the org it actually
+         asked is what makes that impossible to repeat silently. */
+      fleet: org.fleet,
       window: [from, to],
       types: out,
       /* Said in the response rather than left for the reader to infer from
@@ -792,6 +839,8 @@ export function probeRoutes(app, { wrap }) {
   /* The shape of one generated report's CSV header — column names only. */
   app.get('/api/probe/uber/report-columns', wrap(async (req, res) => {
     await loadSettings();
+    const org = orgFor(req);
+    if (!org?.orgUuid) return noOrg(req, res);
     /* An unrecognised type used to fall through to REPORT_TYPE_TRIP_ACTIVITY,
        which meant a caller asking about a report that does not exist got a
        confident, detailed and completely wrong answer about a different one —
@@ -814,27 +863,36 @@ export function probeRoutes(app, { wrap }) {
     const to = req.query.to || dubaiIso();
     const from = req.query.from || dubaiIso(new Date(Date.now() - 3 * 864e5));
     const { data: gen } = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`, {
-      method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(uberOrg()),
+      method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(org),
       body: JSON.stringify({
-        orgId: { uuid: { value: uberOrg().orgUuid } }, reportType,
+        orgId: { uuid: { value: org.orgUuid } }, reportType,
         startDate: { value: from }, endDate: { value: to },
-        childOrgUuids: [{ uuid: { value: uberOrg().orgUuid } }],
+        childOrgUuids: [{ uuid: { value: org.orgUuid } }],
       }),
     });
     if (gen?.status !== 'success') {
-      return res.json({ reportType, error: String(JSON.stringify(gen?.data?.meta?.details || gen)).slice(0, 300) });
+      return res.json({ fleet: org.fleet, reportType, error: String(JSON.stringify(gen?.data?.meta?.details || gen)).slice(0, 300) });
     }
     const id = gen.data.reportId.uuid.value;
     let url = null;
     for (let i = 0; i < 30 && !url; i++) {
       const { data } = await http(`${REPORTS}/DownloadReport?localeCode=en-GB`, {
-        method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(uberOrg()),
-        body: JSON.stringify({ orgId: { uuid: { value: uberOrg().orgUuid } }, reportId: { uuid: { value: id } } }),
+        method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(org),
+        body: JSON.stringify({ orgId: { uuid: { value: org.orgUuid } }, reportId: { uuid: { value: id } } }),
       });
       url = data?.data?.signedUrl?.value;
       if (!url) await new Promise((r2) => setTimeout(r2, 5000));
     }
-    if (!url) return res.json({ reportType, error: 'report did not finish generating within 150s' });
+    if (!url) {
+      /* NOT "not available". Uber generates these asynchronously and a wide
+         window over a busy org routinely needs longer than the 150 s this
+         loop waits; the same report asked again with a narrower window comes
+         back. Saying "unavailable" here would be a reason that is not the
+         true one. */
+      return res.json({ fleet: org.fleet, reportType, window: [from, to],
+        error: 'report did not finish generating within 150s — this is a timeout, '
+          + 'not a refusal: ask again, or narrow the window' });
+    }
     const { data: csv } = await http(url, { expect: 'text', timeoutMs: 120000 });
     const lines = String(csv).split(/\r?\n/).filter(Boolean);
     const header = (lines[0] || '').split(',').map((h) => h.replace(/^"|"$/g, ''));
@@ -885,6 +943,7 @@ export function probeRoutes(app, { wrap }) {
     }
 
     res.json({
+      fleet: org.fleet,
       reportType, window: [from, to], rows_sampled: cells.length,
       ...(sample ? { sample } : {}),
       columns: header.map((h, i) => {
@@ -915,7 +974,8 @@ export function probeRoutes(app, { wrap }) {
      the roster knows, which is enough to answer whether the surface works. */
   app.get('/api/probe/uber/driver', wrap(async (req, res) => {
     await loadSettings();
-    const org = uberOrg();
+    const org = orgFor(req);
+    if (!org?.orgUuid) return noOrg(req, res);
     let uuid = String(req.query.uuid || '').trim();
     if (!uuid) {
       const { rows } = await pool.query(
@@ -928,7 +988,7 @@ export function probeRoutes(app, { wrap }) {
         `SELECT driver_ext_id FROM driver_platform_state
           WHERE platform = 'uber' AND fleet_id = $1
             AND coalesce(btrim(driver_ext_id), '') <> ''
-          ORDER BY observed_at DESC NULLS LAST LIMIT 1`, [uberOrg().fleet]);
+          ORDER BY observed_at DESC NULLS LAST LIMIT 1`, [org.fleet]);
       uuid = rows[0]?.driver_ext_id || '';
     }
     if (!uuid) return res.json({ error: 'no uber driver uuid to ask about' });
@@ -1661,8 +1721,8 @@ export function probeRoutes(app, { wrap }) {
 
   app.get('/api/probe/uber/tier', wrap(async (req, res) => {
     await loadSettings();
-    const org = uberOrg();
-    if (!org.orgUuid) return res.status(400).json({ error: 'no Uber org configured' });
+    const org = orgFor(req);
+    if (!org?.orgUuid) return noOrg(req, res);
 
     let uuid = String(req.query.uuid || '').trim();
     if (!uuid) {
@@ -2312,6 +2372,248 @@ export function probeRoutes(app, { wrap }) {
       note: 'Read-only. One list call per written-down path, one park, four written-down client id '
         + 'shapes. Nothing the caller sends becomes part of any request, and only the first 240 '
         + 'characters of each answer are returned.',
+    });
+  }));
+
+  /* ── WHAT EACH PLATFORM ACTUALLY PAYS THE COMPANY, AND ON WHICH DATE ─────
+     The dashboard's "bank payout" has never been a payout. api/reconcile_
+     routes.js:303 sums driver_payout_day.earnings by month and calls the total
+     bank_payout — that is Uber's weekly PER-DRIVER earnings spread over the
+     days they were earned, which is a different event from a transfer landing
+     in the company's account. Measured on the closed week Mon 7 – Sun 13 Sep
+     2026 (Ecosine): the dashboard says 110,962.09 and Uber's own books say the
+     wire was 103,567.54. 7.1% apart, and not the same quantity.
+
+     Uber's side of that is settled: REPORT_TYPE_PAYMENTS_ORGANIZATION carries
+     `Payouts : Transferred To Bank Account` and the four balance identities
+     close to the fils (docs/COVERAGE.md). These two probes ask the same
+     question of the other two platforms that move money for this operator.
+
+     Both are READ-ONLY and return SHAPE, never rows: a count, the field names,
+     the earliest and latest date seen, and a total. No driver, no order, no
+     account number and no token leaves here. */
+
+  /* Bolt. The Fleet Owner Portal serves the fleet's own finances on three
+     paths that the collector has never called — found by reading the portal's
+     published bundle (fleets.bolt.eu, apiProvider chunk, version 3.2295.0):
+
+       getPayouts             GET,  no arguments. {list:[{id,sum,currency,finished}]}
+       getFleetBalanceSummary POST, no arguments.
+       getFleetBalanceDetails POST, takes a window.
+
+     `finished` is a unix SECOND, which is the whole point: Bolt dates each
+     payout individually, so unlike Uber this is exact per date with nothing to
+     divide. Asked per fleet, because the two fleets are two portal owners with
+     two refresh tokens and one of them has historically been missing. */
+  app.get('/api/probe/bolt/payouts', wrap(async (req, res) => {
+    await loadSettings();
+    const companies = config.bolt.companies || [];
+    if (!companies.length) return res.status(400).json({ error: 'no Bolt companies configured' });
+    const want = ['ecosine', 'egari'].includes(String(req.query.fleet)) ? String(req.query.fleet) : null;
+    const asked = want ? companies.filter((c) => c.fleet === want) : companies;
+    if (!asked.length) {
+      return res.status(400).json({ error: `no Bolt company configured for fleet "${want}"`,
+        fleets_configured: companies.map((c) => c.fleet) });
+    }
+
+    /* The field names, the count, and the span — never the rows. Same rule as
+       shapeOf() in the Yango probe below and for the same reason: a collector
+       is written against field names, and a 240-character slice of one record
+       is not enough to read them off. */
+    const shapeOf = (rows) => {
+      const seen = new Map();
+      for (const r of rows.slice(0, 50)) {
+        if (!r || typeof r !== 'object') continue;
+        for (const [k, v] of Object.entries(r)) {
+          const t = v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
+          const had = seen.get(k);
+          if (!had) seen.set(k, { key: k, types: [t], nonNull: t !== 'null' ? 1 : 0 });
+          else { if (!had.types.includes(t)) had.types.push(t); if (t !== 'null') had.nonNull += 1; }
+        }
+      }
+      return [...seen.values()].map((f) => ({ key: f.key, type: f.types.join('|'),
+        non_null_of_sampled: f.nonNull }));
+    };
+
+    const to = req.query.to || dubaiIso();
+    const from = req.query.from || dubaiIso(new Date(Date.now() - 90 * 864e5));
+
+    const out = [];
+    for (const c of asked) {
+      const { at, err } = await boltPortalToken(c);
+      if (!at) { out.push({ fleet: c.fleet, error: err }); continue; }
+      const hdr = { authorization: `Bearer ${at}`, 'content-type': 'application/json' };
+      const q = `?language=en-us&version=FO.3.856&company_id=${c.companyId}&user_id=${c.userId}&brand=bolt`;
+      const call = async (path, method, body) => {
+        try {
+          const { status, data } = await http(`${config.bolt.portalBase}/${path}${q}`, {
+            method, timeoutMs: 30000, retries: 0, headers: hdr,
+            ...(body ? { body: JSON.stringify(body) } : {}),
+          });
+          /* Bolt answers HTTP 200 on a refusal and puts the truth in its own
+             `code` field — the trap src/sources/bolt.js:AUTH_CODES exists for.
+             Both numbers are returned so a reader cannot mistake one for the
+             other. */
+          return { http: status, code: data?.code ?? null, message: data?.message ?? null,
+            error_hint: data?.error_hint ?? null, data: data?.data ?? null };
+        } catch (e) { return { http: null, error: String(e.message || e).slice(0, 160) }; }
+      };
+
+      const payouts = await call('getPayouts', 'GET', null);
+      const list = Array.isArray(payouts.data?.list) ? payouts.data.list : null;
+      /* The span and the total, which is what makes this worth collecting. A
+         payout list with one row a week for ninety days is a settlement
+         schedule; a list with one row is a coincidence. */
+      const stamps = list ? list.map((r) => Number(r.finished)).filter(Number.isFinite) : [];
+      const sums = list ? list.map((r) => Number(r.sum)).filter(Number.isFinite) : [];
+      /* THE FLEET'S DAY, NOT UTC'S — and on this route that is not pedantry.
+         Dubai is UTC+4 all year, so a payout Bolt finishes at 02:00 local is
+         22:00 the previous day in UTC, and a toISOString().slice(0,10) here
+         would file it on the wrong date. The whole point of this probe is that
+         Bolt dates each payout exactly; getting the date wrong in the act of
+         proving the date is exact is the worst available outcome.
+         test/probe_window_dubai.test.mjs forbids the UTC spelling outright,
+         and it caught this line. */
+      const dayOf = (sec) => dubaiIso(new Date(sec * 1000));
+
+      out.push({
+        fleet: c.fleet,
+        getPayouts: {
+          http: payouts.http, code: payouts.code, message: payouts.message,
+          rows: list ? list.length : null,
+          fields: list && list.length ? shapeOf(list) : null,
+          earliest: stamps.length ? dayOf(Math.min(...stamps)) : null,
+          latest: stamps.length ? dayOf(Math.max(...stamps)) : null,
+          distinct_days: stamps.length ? new Set(stamps.map(dayOf)).size : null,
+          currencies: list ? [...new Set(list.map((r) => r.currency).filter(Boolean))] : null,
+          total: sums.length ? Number(sums.reduce((a2, b2) => a2 + b2, 0).toFixed(2)) : null,
+        },
+        getFleetBalanceSummary: await (async () => {
+          const r = await call('getFleetBalanceSummary', 'POST', {});
+          return { http: r.http, code: r.code, message: r.message,
+            top_level_keys: r.data && typeof r.data === 'object' ? Object.keys(r.data).slice(0, 25) : null };
+        })(),
+        getFleetBalanceDetails: await (async () => {
+          const r = await call('getFleetBalanceDetails', 'POST',
+            { start_date: from, end_date: to, offset: 0, limit: 25 });
+          const rows = Array.isArray(r.data?.list) ? r.data.list
+            : Array.isArray(r.data?.rows) ? r.data.rows : null;
+          return { http: r.http, code: r.code, message: r.message,
+            top_level_keys: r.data && typeof r.data === 'object' ? Object.keys(r.data).slice(0, 25) : null,
+            rows: rows ? rows.length : null,
+            fields: rows && rows.length ? shapeOf(rows) : null };
+        })(),
+      });
+    }
+
+    res.json({
+      window: [from, to],
+      host: config.bolt.portalBase,
+      fleets: out,
+      note: 'Read-only. Shape, counts and totals only — no payout row, no driver and no '
+        + 'account number leaves this route. Bolt answers HTTP 200 on a refusal and puts the '
+        + 'refusal in its own `code` field, so both are printed.',
+    });
+  }));
+
+  /* Yango. THE LEDGER IS NOT MISSING — WE WERE ASKING v1.
+     ──────────────────────────────────────────────────────────────────────
+     src/sources/yango.js says, in a comment that has stood since the key host
+     was adopted: "/v1/parks/transactions/list and /v1/parks/summary/drivers/
+     list both answer 404 path_not_found, so the ledger and the weekly
+     per-driver aggregate stay on the console host and stay refused". The 404
+     is real. The conclusion drawn from it is not: Yango's own published Fleet
+     API index (fleet.yango.com/docs/api/en) lists SEVEN transaction paths and
+     every one of them is v2 or v3. There is no v1 under Transactions at all.
+
+       POST /v2/parks/transactions/list             park ledger, event_at window,
+                                                    cursor, limit up to 1000
+       POST /v2/parks/transactions/categories/list  what each row means
+       POST /v2/parks/driver-profiles/transactions/list
+       POST /v2/parks/orders/transactions/list
+
+     So this asks BOTH versions of both paths, side by side, in one answer.
+     Two 404s and two 200s is the finding; four 404s would mean the docs
+     describe a product this key is not entitled to, which is a different
+     finding and needs a different fix. Neither is worth guessing at. */
+  app.get('/api/probe/yango/ledger', wrap(async (req, res) => {
+    await loadSettings();
+    const park = config.yango.parkId || '';
+    const key = config.yango.apiKey || '';
+    const clientId = get('YANGO_CLIENT_ID') || (park ? `taxi/park/${park}` : '');
+    if (!park || !key) {
+      return res.status(400).json({ error: 'YANGO_PARK_ID and YANGO_API_KEY must both be set' });
+    }
+    const HOST = 'https://fleet-api.yango.tech';
+    const hdrs = { 'X-API-Key': key, 'X-Client-ID': clientId,
+      'content-type': 'application/json', 'Accept-Language': 'en' };
+
+    const to = req.query.to || dubaiIso();
+    const from = req.query.from || dubaiIso(new Date(Date.now() - 30 * 864e5));
+    const at = (d, end) => `${d}T${end ? '23:59:59' : '00:00:00'}+04:00`;
+
+    const shapeOf = (rows) => {
+      const seen = new Map();
+      for (const r of rows.slice(0, 50)) {
+        if (!r || typeof r !== 'object') continue;
+        for (const [k, v] of Object.entries(r)) {
+          const t = v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
+          const had = seen.get(k);
+          if (!had) seen.set(k, { key: k, types: [t], nonNull: t !== 'null' ? 1 : 0 });
+          else { if (!had.types.includes(t)) had.types.push(t); if (t !== 'null') had.nonNull += 1; }
+        }
+      }
+      return [...seen.values()].map((f) => ({ key: f.key, type: f.types.join('|'),
+        non_null_of_sampled: f.nonNull }));
+    };
+
+    const call = async (path, body, recordKey) => {
+      try {
+        const { status, data } = await http(`${HOST}${path}`, {
+          method: 'POST', timeoutMs: 30000, retries: 0, headers: hdrs, body: JSON.stringify(body),
+        });
+        const isJson = typeof data === 'object' && data !== null;
+        const rows = isJson && recordKey && Array.isArray(data[recordKey]) ? data[recordKey] : null;
+        return { path, status,
+          top_level_keys: isJson && !Array.isArray(data) ? Object.keys(data).slice(0, 20) : null,
+          rows: rows ? rows.length : null,
+          fields: rows && rows.length ? shapeOf(rows) : null,
+          /* 240 characters of the provider's own words. On a 404 that is the
+             whole of the answer; on a 200 it is a header and a first row, and
+             the field list above is what a mapper is written from. */
+          body_starts: (typeof data === 'string' ? data : JSON.stringify(data ?? null)).slice(0, 240) };
+      } catch (e) { return { path, status: null, error: String(e.message || e).slice(0, 160) }; }
+    };
+
+    const ledgerBody = (limit) => ({
+      query: { park: { id: park, transaction: { event_at: { from: at(from), to: at(to, true) } } } },
+      limit,
+    });
+    const tried = [
+      await call('/v1/parks/transactions/list', ledgerBody(5), 'transactions'),
+      await call('/v2/parks/transactions/list', ledgerBody(50), 'transactions'),
+      await call('/v1/parks/transactions/categories/list', { query: { park: { id: park } } }, 'categories'),
+      await call('/v2/parks/transactions/categories/list', { query: { park: { id: park } } }, 'categories'),
+    ];
+    const v2 = tried.find((t) => t.path === '/v2/parks/transactions/list');
+    const v1 = tried.find((t) => t.path === '/v1/parks/transactions/list');
+
+    res.json({
+      host: HOST,
+      park_id: { len: park.length, head: park.slice(0, 4), tail: park.slice(-4) },
+      client_id_shape: clientId.startsWith('taxi/park/') ? 'taxi/park/<park id>' : 'the stored YANGO_CLIENT_ID',
+      window: [from, to],
+      tried,
+      reading: v2?.status === 200 && v1?.status === 404
+        ? 'the ledger exists and is v2. The 404 recorded in src/sources/yango.js is a 404 on a '
+          + 'path that has never existed — Yango publishes no v1 under Transactions — and the '
+          + 'conclusion drawn from it, that the ledger is only on the refused console host, is '
+          + 'wrong. It can be collected off the API key, with no cookie.'
+        : v2?.status === 200
+          ? 'the v2 ledger answers'
+          : 'the v2 ledger does not answer here — read the bodies above, they carry the '
+            + 'provider’s own words, and a 401/403 is a different problem from a 404',
+      note: 'Read-only. Shape and counts only; no transaction row leaves this route.',
     });
   }));
 

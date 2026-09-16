@@ -104,6 +104,16 @@ const EXEMPT = {
     + 'Trip UUIDs against ours, by hand and for a week at a time. The PAGE reads /api/coverage/verified, '
     + 'which is where the nightly audit job stores the same comparison for whole months — a report costs '
     + 'minutes at the provider and cannot be produced inside a page load',
+  '/api/probe/bolt/payouts': 'operator tool: asks Bolt\u2019s Fleet Owner Portal what it has paid '
+    + 'this company and on which date \u2014 getPayouts, getFleetBalanceSummary, '
+    + 'getFleetBalanceDetails, three paths the collector has never called. It settles whether '
+    + 'Bolt dates a payout individually (it does: `finished` is a unix second) before a collector '
+    + 'is written against it. Not a page: it returns shape and totals, never a payout row.',
+  '/api/probe/yango/ledger': 'operator tool: asks BOTH v1 and v2 of Yango\u2019s transactions '
+    + 'paths side by side, because src/sources/yango.js records a v1 404 and concludes the ledger '
+    + 'is unreachable \u2014 while Yango publishes no v1 under Transactions at all. Two 404s and '
+    + 'two 200s means the ledger is collectable off the API key; four 404s means something else '
+    + 'entirely, and the two are not worth guessing between. Not a page: shape and counts only.',
   '/api/probe/yango/keyapi': 'operator tool: asks whether Yango\u2019s key-based Fleet API — '
     + 'fleet-api.yango.tech, X-API-Key and X-Client-ID, no cookie — will answer this park, and '
     + 'which of four written-down client id shapes it accepts. It exists because the cookie route '

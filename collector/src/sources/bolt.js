@@ -289,7 +289,7 @@ const fleetOfOwner = (id) =>
 
 /* Exchange, and keep the successor. Returns { at, err } — never throws, because
    one fleet's dead token must not cost us the other fleet's trips. */
-async function portalToken(company) {
+export async function portalToken(company) {
   const { fleet, companyId, userId } = company;
   const rt = refreshTokenFor(fleet);
   if (!rt) return { at: null, err: 'no refresh token configured' };
