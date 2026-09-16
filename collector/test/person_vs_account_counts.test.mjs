@@ -75,6 +75,12 @@ const AL = [
   { id: M0.merge.id, name: M0.merge.name, platform: 'yango' },
   { id: 'bolt-aliyan-3', name: M0.keep.name.toUpperCase(), platform: 'bolt' },
 ];
+/* A FOURTH record, and deliberately a second UBER one. Every per-platform
+   count in the money layer — platformPayouts(), /api/revenue's payout row — is
+   grouped by platform, so a man holding one account per platform folds to the
+   same number either way and such a fixture proves nothing about them. Two
+   accounts on ONE platform is what makes the per-platform fold measurable. */
+AL.push({ id: 'uber-aliyan-4', name: 'Aliyan Khalil', platform: 'uber' });
 const NM = { id: 'u-nouman', name: 'Raja Nouman Ahmed', platform: 'uber' };
 /* Two records with NO readable name at all. They must stay TWO people: an
    empty name folds to an empty person_key, and if the fallback to the id were
@@ -92,6 +98,7 @@ const trip = (o) => q(
   [o.platform, o.ext || `t${++tripN}`, o.plate, o.id, o.name,
     o.at, o.end || o.at, 'completed', o.km ?? 10, o.price ?? 100, o.pay || 'card',
     o.product || 'UberX']);
+
 
 const custody = (o) => q(
   `INSERT INTO vehicle_driver_day (plate, day, driver_ext_id, platform, driver_name,
@@ -113,13 +120,16 @@ await custody({ plate: 'L36397', day: DAY, id: NM.id, platform: NM.platform, nam
 await custody({ plate: 'L36397', day: DAY, id: NULLS[0].id, platform: 'uber', name: '', trips: 1 });
 
 /* ── the day's bookings: 12 for AL across his three accounts, 3 for NM ── */
+/* All twelve in the SAME Dubai hour — 01:xx UTC is 05:xx Dubai — because the
+   slot page's whole question is how many PEOPLE cover one hour, and three
+   accounts spread across three hours would make the fold invisible there. */
 for (const [i, a] of AL.entries()) {
   for (let k = 0; k < 4; k++) {
-    await trip({ ...a, plate: 'L36397', at: `${DAY}T0${i + 1}:${10 + k}:00Z` });
+    await trip({ ...a, plate: 'L36397', at: `${DAY}T01:${10 + i * 4 + k}:00Z` });
   }
 }
 for (let k = 0; k < 3; k++) {
-  await trip({ ...NM, plate: 'L36397', at: `${DAY}T09:${10 + k}:00Z` });
+  await trip({ ...NM, plate: 'L36397', at: `${DAY}T01:${40 + k}:00Z` });
 }
 /* The two unnamed records each take one cash booking, on their own plates, so
    the null-fold assertion has somewhere to be measured that is not custody. */
@@ -219,7 +229,7 @@ console.log('\n2. "Driven by" lists people, and the +N beside it counts people')
   check('the route answers with the plate', !!row, JSON.stringify(r.body).slice(0, 200));
   check('driver_n counts PEOPLE, not accounts', row.driver_n === 2, String(row.driver_n));
   check('…and the accounts reading comes back beside it, named',
-    row.driver_accounts === 4, String(row.driver_accounts));
+    row.driver_accounts === 5, String(row.driver_accounts));
   check('the cell names each person once', new Set(names).size === names.length
     && names.filter((n) => /aliyan/i.test(n)).length === 1, JSON.stringify(names));
   check('the real second driver is not evicted by a duplicate',
@@ -230,16 +240,12 @@ console.log('\n2. "Driven by" lists people, and the +N beside it counts people')
 }
 {
   const r = await get(`/api/tiers/by-vehicle?${WIN}`);
-  const row = (r.body.rows || r.body).find?.((x) => x.plate === 'L36397')
-    || (r.body.rows || []).find((x) => x.plate === 'L36397');
-  if (row) {
-    check('the tier table answers the same way — it is the same CTE',
-      row.driver_n === 2 && row.driver_accounts === 4,
-      `${row.driver_n} / ${row.driver_accounts}`);
-  } else {
-    check('the tier table answers the same way — it is the same CTE',
-      true, 'no uber-tier row in this fixture; shape shared with by-vehicle');
-  }
+  const rows = Array.isArray(r.body) ? r.body : (r.body.rows || r.body.vehicles || []);
+  const row = rows.find((x) => x.plate === 'L36397');
+  if (!row) console.log('DEBUG tiers', r.status, JSON.stringify(r.body).slice(0, 300));
+  check('the tier table answers the same way — it is a copy of the same CTE',
+    !!row && row.driver_n === 2 && row.driver_accounts === 5,
+    `${row?.driver_n} / ${row?.driver_accounts}`);
 }
 
 /* ══ 3. THE SAFETY LEADERBOARD, AND THE RATE UNDER IT ════════════════════
@@ -292,9 +298,9 @@ console.log('\n4. the per-driver average divides by PEOPLE');
      are two people and stay two; see block 9. */
   check('"Drivers out" counts people', h.drivers === 4, String(h.drivers));
   check('…and the accounts reading comes back beside it, named',
-    h.driver_accounts === 5, String(h.driver_accounts));
-  check('bookings ÷ drivers is the FOLDED average — 17/4 = 4.25, not 17/5 = 3.4',
-    +(h.bookings / h.drivers).toFixed(3) === +(17 / 4).toFixed(3),
+    h.driver_accounts === 6, String(h.driver_accounts));
+  check('bookings ÷ drivers is the FOLDED average — 21/4 = 5.25, not 21/6 = 3.5',
+    +(h.bookings / h.drivers).toFixed(3) === +(21 / 4).toFixed(3),
     `${h.bookings}/${h.drivers}`);
   check('the "Who drove" list is one row per person',
     named.filter((x) => /aliyan/i.test(x.driver_name)).length === 1,
@@ -304,10 +310,11 @@ console.log('\n4. the per-driver average divides by PEOPLE');
      Dubai and belong to the next day — the other rule this product is built
      on, and the reason the figure is not simply "all his rows". */
   check('…and that row holds the person’s whole day, not a slice of it',
-    named.find((x) => /aliyan/i.test(x.driver_name)).trips === 12,
+    named.find((x) => /aliyan/i.test(x.driver_name)).trips === 16,
     JSON.stringify(named.map((x) => [x.driver_name, x.trips])));
   check('…with the accounts behind it on the row',
-    named.find((x) => /aliyan/i.test(x.driver_name)).accounts === 3, '');
+    named.find((x) => /aliyan/i.test(x.driver_name)).accounts === 4,
+    String(named.find((x) => /aliyan/i.test(x.driver_name)).accounts));
   /* The caption reads "Showing the N busiest of M people who drove on this
      day" — N the list length, M the headline. They have to be one population:
      a list of people under a count of accounts is a caption that lies about
@@ -327,7 +334,7 @@ console.log('\n4. the per-driver average divides by PEOPLE');
    prints a few centimetres apart with the raw one under the word "people". */
 console.log('\n5. one page, one answer about how many people cover an hour');
 {
-  const r = await get(`/api/slot?dow=4&hour=1&${WIN}`);
+  const r = await get(`/api/slot?dow=4&hour=5&${WIN}`);
   check('the route answers', r.status === 200, String(r.status));
   check('the tile and the table cap agree — both are people',
     r.body.headline.drivers === r.body.drivers_total,
@@ -355,7 +362,7 @@ console.log('\n6. money pages count people paid, and accounts filed, separately'
   check('…and does not double-count a man paid on three platforms',
     r.body.payout_drivers < 4, String(r.body.payout_drivers));
   check('the accounts reading comes back beside it, named',
-    r.body.payout_accounts === 4, String(r.body.payout_accounts));
+    r.body.payout_accounts === 5, String(r.body.payout_accounts));
 }
 console.log('\n6b. the "People" column on Finance receipts counts people');
 {
@@ -368,6 +375,34 @@ console.log('\n6b. the "People" column on Finance receipts counts people');
     tot <= acc && acc >= 1, `people ${tot} / accounts ${acc}`);
   check('both readings are present and named',
     rows.every((x) => 'drivers' in x && 'driver_accounts' in x), '');
+}
+
+/* REVERSION FOR THE PER-PLATFORM FORM, which is a SEPARATE expression from the
+   fleet-wide one above and lives in two files that must move together:
+   api/income_sql.js platformPayouts() feeds the Finance tile, and
+   api/revenue_routes.js's own payout query feeds the Revenue row. Put either
+   back to count(DISTINCT driver_ext_id) and uber reads 3 "drivers paid" for the
+   two people it paid — which is why AL holds TWO uber accounts in this fixture:
+   a man with one account per platform folds to the same number either way and
+   would prove nothing here. */
+console.log('\n6c. a per-platform payout row counts people paid on that platform');
+{
+  const r = await get(`/api/revenue?${WIN}`);
+  const uber = (r.body.platforms || r.body.rows || []).find((x) => x.platform === 'uber');
+  check('the route answers with an uber row', !!uber, JSON.stringify(Object.keys(r.body)));
+  check('uber paid TWO people across THREE accounts',
+    uber.payout_drivers === 2, String(uber?.payout_drivers));
+  check('…and the accounts reading is on the same row, named',
+    uber.payout_accounts === 3, String(uber?.payout_accounts));
+}
+console.log('\n6d. the Finance tile per-platform row folds the same way');
+{
+  const r = await get(`/api/kpis?${WIN}`);
+  const plats = Array.isArray(r.body.platforms) ? r.body.platforms
+    : Array.isArray(r.body.by_platform) ? r.body.by_platform : [];
+  const uber = plats.find((x) => x.platform === 'uber');
+  check('the per-platform payout count on /api/kpis is people too',
+    !uber || uber.payout_drivers === 2, JSON.stringify(uber && uber.payout_drivers));
 }
 
 /* ══ 7. CASH, AND THE CARD THAT LINKS TO IT ══════════════════════════════
@@ -413,7 +448,7 @@ console.log('\n8. a figure that genuinely counts accounts is left alone');
   const al = rows.find((x) => /aliyan/i.test(x.driver_name || x.name || ''));
   check('the route answers', r.status === 200, String(r.status));
   check('the "Accounts" column still counts a person’s platform records',
-    al && al.accounts === 3, JSON.stringify(al));
+    al && al.accounts === 4, JSON.stringify(al && al.accounts));
   check('…while the people figure beside it counts humans',
     (r.body.people ?? rows.length) === 2, String(r.body.people ?? rows.length));
 }
