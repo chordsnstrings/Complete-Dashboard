@@ -1229,3 +1229,51 @@ signs in both directions.
 document and no test could have found it: it is a property of the platform, not
 of the code, and it only appears on a request that actually walks a slow
 provider. It is now a trap in `docs/COVERAGE.md`.
+
+
+---
+
+## Both fleets, and a backfill that runs without somebody driving it
+
+The operator's follow-up, verbatim: "the numbers match the actual amount but
+ecosine and egari both should be fetched. not just ecosine. And backfill as
+much as possible."
+
+**Both fleets, done and measured.** Ten Uber wires now carry the full
+comparison, against one before this work — and they settle the "7.1%" question
+in both directions and on both fleets:
+
+| Monday | fleet | wire | ours | difference | |
+|---|---|---|---|---|---|
+| 2026-09-14 | Ecosine | 111,179.66 | 110,962.09 | +217.57 | +0.20% |
+| 2026-09-14 | Egari | 50,614.03 | 50,717.08 | −103.05 | −0.20% |
+| 2026-09-07 | Ecosine | 103,567.54 | 103,768.44 | −200.90 | −0.19% |
+| 2026-09-07 | Egari | 50,769.48 | 50,681.39 | +88.09 | +0.17% |
+| 2026-08-31 | Ecosine | 77,796.52 | 78,057.58 | −261.06 | −0.34% |
+| 2026-08-24 | Ecosine | 66,863.51 | 66,544.64 | +318.87 | +0.48% |
+| 2026-08-24 | Egari | 29,856.60 | 29,681.86 | +174.74 | +0.59% |
+| 2026-08-17 | Ecosine | 57,810.41 | 57,977.77 | −167.36 | −0.29% |
+| 2026-08-17 | Egari | 23,873.79 | 23,701.73 | +172.06 | +0.72% |
+| 2026-08-03 | Ecosine | 50,213.19 | 50,306.45 | −93.26 | −0.19% |
+
+**The backfill could not be driven through the page, and that is the finding.**
+A three-day ask was cut at 300 s by the platform, on top of the five-day ask
+cut earlier. Uber's report takes 10–40 s and the limiter adds minutes, so
+synchronous HTTP is the wrong mechanism for hundreds of days however the button
+is bounded. The live ask stays for checking ONE day, which is what it is good
+at; the backfill belongs in the collector.
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | `missingDays()` re-asked every day the provider has no statement for, for ever — invisible at 30 days, fatal at 390 | `sql/schema_v75.sql` `payout_ask`: stored / empty / refused, and only refused is retried | written, committed — **deploy and proof pending** |
+| — | the walk inherited the nightly catch-up's 30-day window, so the record could never grow backwards | it reads its own floor — the fleet's first Uber trip, from `trip`, rather than a date that rots | written, committed — **deploy and proof pending** |
+| — | it ran once a night at 24 days per fleet: sixteen perfect nights to reach the history | its own cadence, `20 */2 * * *`, off the single-collection queue and between the incrementals | written, committed — **deploy and proof pending** |
+| — | the page could only say "either nobody asked, or the ask was refused" about every absent day | `unchecked` splits: outstanding days, and days Uber has answered it holds nothing for, counted and named separately | written, committed — **deploy and proof pending** |
+
+**Proof owed.** The four rows above are asserted by
+`test/uber_payout_history.test.mjs` — including that an `empty` day is never
+asked again and a `refused` day always is, which is the pair that decides
+whether a backfill converges or stalls. None of it is proven until the walk has
+run on production under the new cadence and the unasked counts have come down.
+The first run is within two hours of the deploy; the counts to beat are
+**ecosine 390** and **egari 378**.

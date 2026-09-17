@@ -827,6 +827,35 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **"Which days am I missing?" answered from the STATEMENT table re-asks every
+  dead day for ever — and the bug only appears when the window widens.**
+  `missingDays()` returned the days with no row in `platform_account_day`. A
+  day Uber has no statement for stores nothing, so it comes back in the next
+  run's list, and the next. Invisible while the walk only worked inside the
+  month Uber does hold; fatal the moment the window reaches back to the fleet's
+  first Uber trip, which is what a backfill needs — 390 unasked days on
+  uber/ecosine and 378 on uber/egari on 2026-09-17, any of which may predate
+  the org. One report costs 10–40 s against a limiter that shuts after three,
+  so a handful of dead days eats a night's budget while the live days wait.
+  `sql/schema_v75.sql` (`payout_ask`) records what came back, and the three
+  outcomes are not one outcome: **stored** and **empty** settle a day, only
+  **refused** is retried. Getting that wrong in the other direction would be
+  worse — a table that also swallowed refusals would turn a limiter outage into
+  a permanent hole in the record. **Any walk that asks a provider day by day
+  needs a ledger of what it asked, not just of what it stored.**
+
+* **A collector that only runs on the nightly catch-up inherits the catch-up's
+  window, and a 30-day window can never grow a record backwards.** The payout
+  walk is deliberately skipped on the half-hourly incremental — one report per
+  day per fleet against this limiter, every thirty minutes, would starve the
+  trip and earnings walks that share the session — and that left it running
+  once a night inside 30 days. Sixteen perfect nights to reach the history, and
+  the night of 2026-09-16 managed four of the eight days it asked for. The fix
+  is not to move it onto the incremental but to give it **its own window** (the
+  fleet's first Uber trip, read from `trip`, not a hard-coded date that rots)
+  and **its own cadence** (`20 */2 * * *`, between the incrementals rather than
+  on top of one). It is self-limiting: three throttles and it stops.
+
 * **A request that takes longer than 300 seconds does not fail — it disappears,
   and the work keeps going.** The first real use of
   `POST /api/finance/payouts/verify` asked Uber for five Ecosine days. curl

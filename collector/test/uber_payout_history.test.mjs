@@ -41,7 +41,7 @@
 import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema, SCHEMA_FILES } from './schema.mjs';
-import { settlesWeek, MISSING_DAYS_ORDER, oneDay } from '../src/sources/uber_payout.js';
+import { settlesWeek, MISSING_DAYS_ORDER, oneDay, MISSING_DAYS_SQL } from '../src/sources/uber_payout.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -341,6 +341,58 @@ console.log('\nthe live route and the nightly walk share one implementation');
 /* CLOSE THE DATABASE AND EXIT EXPLICITLY. PGlite holds handles of its own and
    test/run-all.mjs SIGKILLs a file at 300 s, throwing the tally away and
    reporting it as a failure with every assertion passing. */
+console.log('\na day the provider has nothing for is asked once, not every run for ever');
+
+/* THE DEFECT THIS CLOSES, AND IT ONLY APPEARS AT SCALE.
+   missingDays() returns the days with no row in platform_account_day. That is
+   the right question while every day asked produces a statement and the wrong
+   one the moment a day does not: Uber stores nothing for a date it has no
+   statement for, so the day returns in the next run's list, and the next, for
+   ever. Invisible while the walk only worked inside the month Uber does hold;
+   fatal now the window reaches back to the fleet's first Uber trip, because on
+   2026-09-17 that is 390 unasked days for ecosine and 378 for egari, and any
+   of them may predate the org. A handful of dead days is enough to eat a
+   night's budget at ten to forty seconds a report.
+
+   sql/schema_v75.sql records what came back. Only 'stored' and 'empty' settle
+   a day; 'refused' learned nothing and must come back. Both halves are
+   asserted, because a table that also swallowed the refusals would convert a
+   limiter outage into a permanent hole in the record. */
+{
+  const org = { fleet: 'ecosine' };
+  const ask = (day, outcome) => db.query(
+    `INSERT INTO payout_ask (platform, fleet_id, day, outcome) VALUES ('uber', 'ecosine', $1, $2)`,
+    [day, outcome]);
+
+  await ask('2026-06-02', 'empty');     // Uber answered: it holds nothing
+  await ask('2026-06-03', 'refused');   // the limiter shut: nothing was learned
+  await ask('2026-06-04', 'stored');    // settled, and its statement row exists below
+  await db.query(
+    `INSERT INTO platform_account_day (platform, fleet_id, day, basis, currency)
+     VALUES ('uber', 'ecosine', '2026-06-04', 'statement', 'AED')`);
+
+  /* THE SHIPPED QUERY, run against PGlite. missingDays() issues it through
+     src/db.js's pool, which this test has no way to reach, so the module
+     exports the SQL and both use the same string. */
+  const days = (await db.query(MISSING_DAYS_SQL, [org.fleet, '2026-06-01', '2026-06-06', 50]))
+    /* PGlite hands back a Date for a date column; noon UTC keeps the calendar
+       day whatever the host offset is, the same anchor settlesWeek() uses. */
+    .rows.map((r) => (r.d instanceof Date
+      ? new Date(Date.UTC(r.d.getFullYear(), r.d.getMonth(), r.d.getDate(), 12))
+        .toISOString().slice(0, 10)
+      : String(r.d).slice(0, 10)));
+  check('a day Uber answered as empty is never asked again', !days.includes('2026-06-02'),
+    JSON.stringify(days));
+  check('a day that was REFUSED is asked again — a limiter outage is not a hole',
+    days.includes('2026-06-03'), JSON.stringify(days));
+  check('a day already stored is not asked again', !days.includes('2026-06-04'),
+    JSON.stringify(days));
+  check('a day never asked about is still asked', days.includes('2026-06-01'),
+    JSON.stringify(days));
+  /* REVERSION: drop the payout_ask LEFT JOIN from missingDays() and the first
+     check goes red — the dead day comes straight back into the list. */
+}
+
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

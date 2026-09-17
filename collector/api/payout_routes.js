@@ -575,24 +575,60 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
                   LEAST($2::date, (now() AT TIME ZONE 'Asia/Dubai')::date - 1),
                   interval '1 day')::date AS d
        )
-       SELECT pr.platform, pr.fleet_id, to_char(a.d, 'YYYY-MM-DD') AS day
+       /* AND WHICH KIND OF ABSENCE EACH ONE IS.
+          ────────────────────────────────────────────────────────────────────
+          Until sql/schema_v75.sql there was no way to tell a day nobody had
+          asked about from a day Uber had been asked about and has nothing for,
+          so this panel had to say "either nobody asked, or the ask was
+          refused" about every one of them. True, and blunt: an operator
+          looking at 390 days cannot act on it, because most of them may be
+          days before the fleet existed.
+
+          payout_ask records what came back. 'empty' means Uber answered and
+          holds no statement for that date — settled, and STILL not a day with
+          no transfer. 'refused' means nothing was learned and the day is
+          genuinely outstanding. A day with no ask row at all has never been
+          put to Uber. */
+       SELECT pr.platform, pr.fleet_id, to_char(a.d, 'YYYY-MM-DD') AS day,
+              k.outcome AS ask_outcome
          FROM pairs pr
         CROSS JOIN asked a
          LEFT JOIN platform_account_day s
            ON s.platform = pr.platform AND s.fleet_id = pr.fleet_id
           AND s.day = a.d AND s.basis = 'statement'
+         LEFT JOIN payout_ask k
+           ON k.platform = pr.platform AND k.fleet_id = pr.fleet_id AND k.day = a.d
         WHERE s.day IS NULL
         ORDER BY pr.platform, pr.fleet_id, a.d`, p);
 
     const byPair = new Map();
     for (const g of gaps) {
       const k = `${g.platform}:${g.fleet_id}`;
-      if (!byPair.has(k)) byPair.set(k, { platform: g.platform, fleet_id: g.fleet_id, days: [] });
-      byPair.get(k).days.push(g.day);
+      if (!byPair.has(k)) {
+        byPair.set(k, { platform: g.platform, fleet_id: g.fleet_id, days: [], empty_days: [] });
+      }
+      /* A day Uber has answered about and has nothing for is NOT outstanding
+         work. It is kept, separately and counted, because it is still a day
+         with no statement and must never be read as a day with no transfer —
+         but it does not belong in the list an operator is asked to act on. */
+      if (g.ask_outcome === 'empty') byPair.get(k).empty_days.push(g.day);
+      else byPair.get(k).days.push(g.day);
     }
     const unchecked = [...byPair.values()].map((u) => ({
       ...u,
       count: u.days.length,
+      /* Counted and named, not silently folded into the number above. A fleet
+         whose 390 "unasked" days turn out to be 12 outstanding and 378 that
+         Uber has already said it holds nothing for is a fleet in a completely
+         different state, and the operator cannot see that from one total. */
+      empty_count: u.empty_days.length,
+      empty_why: u.empty_days.length
+        ? `Uber has been asked about ${u.empty_days.length} further days in this window and `
+          + 'answered that it holds no statement for them — days before this fleet was earning '
+          + 'on Uber, or gaps in the provider\u2019s own record. They are settled and are not '
+          + 'asked again. They are still days with no statement, so they are still not days '
+          + 'with no transfer.'
+        : null,
       /* "NOBODY HAS ASKED" WAS NOT THE TRUE REASON, AND THIS CHANGE'S OWN
          MEASUREMENT DISPROVES IT.
          ──────────────────────────────────────────────────────────────────────

@@ -135,4 +135,11 @@ export const SCHEMA_FILES = [
      ago. NULLABLE and no default: NULL means nobody has asked, which is the
      absent-with-a-reason the page must print rather than a date. */
   'schema_v74.sql',
+  /* What we asked Uber for and what came back, so a day the provider has
+     nothing for is asked once instead of every run for ever. Invisible while
+     the walk only works inside the month Uber does hold; fatal the moment the
+     window widens to backfill 390 unasked days per fleet, which is what the
+     payout work needs. Three outcomes, not a done flag: stored, empty and
+     refused are different facts and only refused is retried. */
+  'schema_v75.sql',
 ];

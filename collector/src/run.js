@@ -399,6 +399,23 @@ export const incremental = (onProgress, fleet = null, jobId = null) =>
 export const catchUp = (days = 30, onProgress, fleet = null, jobId = null) =>
   runWindow('catchup', daysAgo(days), new Date(), onProgress, fleet, jobId);
 
+/* THE PAYOUT WALK ALONE, WITHOUT THE EIGHT SOURCES AROUND IT.
+   ─────────────────────────────────────────────────────────────────────────
+   runWindow() is the right shape for a collection pass and the wrong shape for
+   this one: it takes the single-collection queue, so a payout walk scheduled
+   every two hours would sit behind — or block — the trip and earnings walks it
+   was deliberately kept away from. uberPayout.collect() reaches back to the
+   fleet's first Uber trip on its own (see its comment), bounds itself at
+   DAYS_PER_RUN, and gives up after three throttles, so it needs neither the
+   queue nor a window from the caller.
+
+   The window passed is therefore a formality it will widen for itself; `to` is
+   what matters, and missingDays() excludes today in any case because a
+   statement for a day still in progress would be stored as final and never
+   asked again. */
+export const payoutWalk = (fleet = null) =>
+  uberPayout.collect({ from: daysAgo(30), to: new Date(), mode: 'payout-walk', fleet });
+
 // CABMAN realtime GPS — fixed 5-minute refresh, persisted to telemetry_snapshot (via cabman.collect,
 // which upserts snapshots and writes a collection_run row). This is the owner of CABMAN data.
 export async function cabmanTick() {

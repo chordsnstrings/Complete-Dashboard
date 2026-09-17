@@ -166,6 +166,35 @@ const RATE_LIMITED = /rate-limited|generation limit|too many ongoing|in progress
    difference is checked_at (sql/schema_v74.sql): the walk omits the column
    from its upsert entirely, so a day a human verified keeps its verification
    even if a later backfill re-stores the row. */
+/* EVERY ASK LEAVES A ROW, WHATEVER CAME BACK.
+   ─────────────────────────────────────────────────────────────────────────
+   sql/schema_v75.sql has the argument in full. The short version: a day Uber
+   has nothing for stores no statement, so without this it returns to
+   missingDays() next run and every run after, and a widened backfill window
+   spends its whole budget re-asking dead days while the live ones wait.
+
+   'empty' and 'refused' are the two that matter and they are not the same
+   fact. Empty means the provider answered and has nothing — settled, never ask
+   again, and never render as a day with no transfer. Refused means nothing was
+   learned — the limiter shut, the report timed out, the shape was not the one
+   this module reads — so it must be asked again.
+
+   NEVER FATAL. A bookkeeping write that takes the collection down with it
+   would be a worse bug than the one it prevents: if this fails the day is
+   simply asked again, which is the behaviour that existed before the table. */
+const recordAsk = async (org, day, outcome, detail, live) => {
+  try {
+    await upsertMany('payout_ask', [{
+      platform: SRC, fleet_id: org.fleet, day, outcome,
+      detail: detail ? String(detail).slice(0, 300) : null,
+      live: !!live, asked_at: new Date().toISOString(),
+    }], ['platform', 'fleet_id', 'day']);
+  } catch (e) {
+    log.warn(SRC, 'payout statement: could not record the ask',
+      { fleet: org.fleet, day, err: String(e?.message || e).slice(0, 140) });
+  }
+};
+
 export async function oneDay(org, day, { live = false } = {}) {
   const gen = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`, {
     method: 'POST', timeoutMs: 30000, retries: 0, headers: uberWebHeaders(org),
@@ -177,6 +206,7 @@ export async function oneDay(org, day, { live = false } = {}) {
   });
   if (gen.data?.status !== 'success') {
     const detail = JSON.stringify(gen.data?.data?.meta?.details || gen.data).slice(0, 240);
+    await recordAsk(org, day, 'refused', detail, live);
     return { throttled: RATE_LIMITED.test(detail), why: detail };
   }
   const id = gen.data.data.reportId.uuid.value;
@@ -197,17 +227,31 @@ export async function oneDay(org, day, { live = false } = {}) {
     url = data?.data?.signedUrl?.value;
     if (!url) { await sleep(wait); wait = Math.min(wait * 1.4, 15000); }
   }
-  if (!url) return { why: `report did not finish generating within 180s (a timeout, not a refusal)` };
+  if (!url) {
+    const why = 'report did not finish generating within 180s (a timeout, not a refusal)';
+    await recordAsk(org, day, 'refused', why, live);
+    return { why };
+  }
 
   const { data: csv } = await http(url, { expect: 'text', timeoutMs: 120000 });
   const recs = parse(String(csv), { columns: true, skip_empty_lines: true, bom: true });
-  if (!recs.length) return { why: 'the report generated and contains no rows' };
+  if (!recs.length) {
+    /* THE ONE THAT SETTLES A DAY WITHOUT STORING ANYTHING. The report ran and
+       carried nothing, so Uber has no statement for this date — the org did
+       not exist yet, or it is a gap in the provider's own record. Settled, and
+       emphatically NOT a day with no transfer. */
+    const why = 'the report generated and contains no rows';
+    await recordAsk(org, day, 'empty', why, live);
+    return { why, empty: true };
+  }
 
   /* ONE ROW PER ORG, and childOrgUuids names exactly one, so more than one row
      means the request meant something other than what this module thinks it
      means. Refused rather than summed: silently adding two orgs' balances
      together would produce a plausible number nobody could trace. */
   if (recs.length > 1) {
+    await recordAsk(org, day, 'refused',
+      `expected one organisation row and the report has ${recs.length}`, live);
     return { why: `expected one organisation row and the report has ${recs.length} — `
       + 'childOrgUuids named one org, so this is a shape change, not a busy day' };
   }
@@ -218,6 +262,8 @@ export async function oneDay(org, day, { live = false } = {}) {
   /* The bank column is the whole point, so its absence is fatal to the row
      rather than a null in it. The rest are reported and mapped to null. */
   if (!byKey.has(COLUMNS.bank_transferred)) {
+    await recordAsk(org, day, 'refused',
+      `the report has no "${COLUMNS.bank_transferred}" column`, live);
     return { why: `the report has no "${COLUMNS.bank_transferred}" column — `
       + `has Uber renamed it? Columns: ${[...byKey.keys()].slice(0, 24).join(' | ')}` };
   }
@@ -329,6 +375,7 @@ export async function oneDay(org, day, { live = false } = {}) {
      the route must not render as a transfer of zero. `stored` is how many
      statement rows reached the table, so a caller can tell a successful parse
      from a successful write. */
+  await recordAsk(org, day, writeWhy ? 'refused' : 'stored', writeWhy, live);
   return { missing, row, payout, stored: stored > 0 && !writeWhy, checked_at, writeWhy };
 }
 
@@ -379,9 +426,16 @@ export async function oneDay(org, day, { live = false } = {}) {
    instead of a copy of it that could drift from it silently. */
 export const MISSING_DAYS_ORDER = '(EXTRACT(dow FROM a.d) = 1) DESC, a.d';
 
-async function missingDays(org, from, to, limit) {
-  const { rows } = await pool.query(
-    `WITH asked AS (
+/* Exported for test/uber_payout_history.test.mjs, which pins the two things
+   that decide whether a backfill converges: that the Mondays come first, and
+   that a day already settled is never asked again. A copy of this query in a
+   test would drift from it and stop testing anything. */
+/* THE QUERY ITSELF, exported so a test can run it against PGlite.
+   missingDays() below issues it through src/db.js's pool, which a PGlite test
+   has no way to reach — so the function is not testable and the SQL is. Both
+   use this one string, which is the point: a copy of it in a test would drift
+   from the shipped query and quietly stop testing anything. */
+export const MISSING_DAYS_SQL = `WITH asked AS (
        SELECT generate_series($2::date, LEAST($3::date, (now() AT TIME ZONE 'Asia/Dubai')::date - 1),
                               interval '1 day')::date AS d
      )
@@ -389,10 +443,28 @@ async function missingDays(org, from, to, limit) {
        FROM asked a
        LEFT JOIN platform_account_day p
          ON p.platform = 'uber' AND p.fleet_id = $1 AND p.day = a.d AND p.basis = 'statement'
-      WHERE p.day IS NULL
+       /* AND THE DAYS ALREADY SETTLED WITHOUT A STATEMENT.
+          ────────────────────────────────────────────────────────────────────
+          A day Uber has nothing for stores no statement row, so the LEFT JOIN
+          above leaves it missing and it comes back in every run's list for
+          ever. Invisible while this walk only worked inside the month Uber
+          does hold; fatal the moment the window widens to backfill, which is
+          what it now does — 390 unasked days on ecosine and 378 on egari, any
+          of which may predate the org.
+
+          Only 'stored' and 'empty' settle a day. 'refused' — the limiter shut,
+          the report timed out, the shape was not the one this module reads —
+          learned nothing, so it stays in the list and is asked again. See
+          sql/schema_v75.sql. */
+       LEFT JOIN payout_ask k
+         ON k.platform = 'uber' AND k.fleet_id = $1 AND k.day = a.d
+        AND k.outcome IN ('stored', 'empty')
+      WHERE p.day IS NULL AND k.day IS NULL
       ORDER BY ${MISSING_DAYS_ORDER}
-      LIMIT $4`,
-    [org.fleet, from, to, limit]);
+      LIMIT $4`;
+
+async function missingDays(org, from, to, limit) {
+  const { rows } = await pool.query(MISSING_DAYS_SQL, [org.fleet, from, to, limit]);
   return rows.map((r) => dubaiIso(r.d));
 }
 
@@ -495,7 +567,34 @@ export async function collect({ from, to, mode, fleet = null }) {
     let asked = 0;
     let remaining = null;
     try {
-      const days = await missingDays(org, from, to, DAYS_PER_RUN + 1);
+      /* THE WALK REACHES BACK AS FAR AS THE FLEET HAS WORKED, NOT AS FAR AS
+         THE RUN WINDOW.
+         ─────────────────────────────────────────────────────────────────────
+         THE DEFECT. This asked missingDays() over the caller's window, and the
+         only caller that reaches here is the nightly catch-up, whose window is
+         thirty days. So the record could never grow backwards: anything older
+         than a month was reachable only by the Sunday backfill, and on
+         2026-09-17 that left uber/ecosine with 390 unasked days and uber/egari
+         with 378 while the page's whole purpose was to show past payments.
+
+         The floor is the earliest day this fleet has an Uber TRIP for, which
+         is the honest bound: a statement for a day before the fleet was
+         earning is a day Uber has nothing for, and asking for it is a report
+         slot spent to learn nothing. Where there are no trips at all the
+         caller's window stands, so a fleet with no Uber history behaves
+         exactly as it did.
+
+         It costs nothing per run. DAYS_PER_RUN still caps the work; widening
+         the window changes WHICH days are eligible, not how many are asked.
+         And sql/schema_v75.sql is what makes it safe to widen at all — without
+         payout_ask, every dead day in a year of history would be re-asked on
+         every run for ever. */
+      const [floor] = (await pool.query(
+        `SELECT min((requested_at AT TIME ZONE 'Asia/Dubai')::date)::text AS d
+           FROM trip WHERE platform = 'uber' AND fleet_id = $1`, [org.fleet])).rows;
+      const walkFrom = floor?.d && floor.d < String(from).slice(0, 10)
+        ? floor.d : from;
+      const days = await missingDays(org, walkFrom, to, DAYS_PER_RUN + 1);
       remaining = Math.max(0, days.length - DAYS_PER_RUN);
       const todo = days.slice(0, DAYS_PER_RUN);
       let throttles = 0;

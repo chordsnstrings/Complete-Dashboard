@@ -908,6 +908,13 @@ function drawUnchecked(hostEl, rec, run) {
       `<b>${esc(sourceLabel(u.platform))} · ${esc(sourceLabel(u.fleet_id) || u.fleet_id)}</b> — `
       + `${esc(countOf(n, 'day'))} nobody has asked about.`));
     if (u.why) box.append(el('p', 'cap', esc(u.why)));
+    /* THE SETTLED ABSENCES, BESIDE THE OUTSTANDING ONES AND NOT INSIDE THEM.
+       A fleet with 390 days of "nobody has asked" and a fleet with 12
+       outstanding days plus 378 Uber has already said it holds nothing for are
+       in completely different states, and one total cannot show that. Still
+       days with no statement, so still not days with no transfer — which is
+       why they are named rather than dropped. */
+    if (u.empty_count) box.append(el('p', 'cap dim', esc(u.empty_why)));
     box.append(askControl(u, run));
     p.body.append(box);
   }

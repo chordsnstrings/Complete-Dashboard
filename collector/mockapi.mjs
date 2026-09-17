@@ -5336,6 +5336,16 @@ app.get('/api/finance/payouts/reconcile', (_, r) => {
     unchecked: [
       { platform: 'uber', fleet_id: 'ecosine', count: 27,
         days: ['2026-09-16', '2026-09-15', '2026-09-13', '2026-09-12', '2026-09-11'],
+        /* The days Uber has ANSWERED about and holds no statement for — settled,
+           never asked again, and still not days with no transfer. Carried in the
+           fixture because a panel whose absent-with-a-reason branch nobody has
+           rendered is a branch nobody has seen. */
+        empty_days: ['2025-11-03', '2025-11-04'],
+        empty_count: 2,
+        empty_why: 'Uber has been asked about 2 further days in this window and answered that '
+          + 'it holds no statement for them — days before this fleet was earning on Uber, or '
+          + 'gaps in the provider’s own record. They are settled and are not asked again. They '
+          + 'are still days with no statement, so they are still not days with no transfer.',
         why: 'Uber publishes a one-day organisation statement for ecosine and we hold no '
           + 'statement for these 27 days — either nobody asked, or the ask was refused. Either '
           + 'way it is a day with no measurement, and a day with no measurement cannot be '

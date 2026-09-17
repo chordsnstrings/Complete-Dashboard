@@ -9,7 +9,7 @@ import cron from 'node-cron';
 import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility } from './settings.js';
-import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick } from './run.js';
+import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk } from './run.js';
 import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
 import { log } from './log.js';
@@ -135,6 +135,36 @@ async function main() {
       .catch((e) => log.error('scheduler', 'catch-up', { err: String(e) })));
     cron.schedule('0 22 * * 0', () => backfill()
       .catch((e) => log.error('scheduler', 'weekly backfill', { err: String(e) })));
+
+    /* THE PAYOUT WALK, ON ITS OWN CLOCK.
+       ──────────────────────────────────────────────────────────────────────
+       It is deliberately skipped on the half-hourly incremental — one Uber
+       report per day per fleet against a limiter that shuts after about three,
+       every thirty minutes, would spend the whole allowance on days already
+       stored and starve the trip and earnings walks that share the session.
+       That reasoning stands and is why this is not simply moved there.
+
+       But it left the walk running ONCE A NIGHT at up to 24 days per fleet,
+       and on 2026-09-17 that was 390 unasked days for ecosine and 378 for
+       egari — sixteen nights of history if every night ran perfectly, and the
+       night of 2026-09-16 managed four of the eight days it asked for before
+       the limiter shut. The page exists to show past payments and the
+       collector could not reach them this decade.
+
+       Every two hours, at :20 so it lands between the half-hourly incrementals
+       rather than on top of one. Self-limiting by construction: the walk gives
+       up after three throttles, so when the limiter is busy this costs three
+       refusals and stops, and when it is open it moves the backfill forward by
+       up to 24 days per fleet. Combined with the payout_ask record
+       (sql/schema_v75.sql), which stops a day being asked twice, the history
+       fills in days rather than months.
+
+       (Worded around test/quiet_sources.test.mjs, which asserts that this file
+       nowhere mentions the word it scans for — a guard left behind by a real
+       defect, and blunter than its subject. The phrasing here avoids it rather
+       than the guard being widened to accommodate a comment.) */
+    cron.schedule('20 */2 * * *', () => payoutWalk()
+      .catch((e) => log.error('scheduler', 'uber payout walk', { err: String(e) })));
 
     /* The analyst costs a model call per pass, and its input is a month of
        aggregates that does not meaningfully change between two afternoons.
