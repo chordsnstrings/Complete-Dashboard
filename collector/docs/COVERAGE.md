@@ -827,6 +827,52 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A PERIOD'S DERIVED FIGURE COMPARED AGAINST A TRANSFER THAT SETTLES A
+  DIFFERENT PERIOD PRODUCES A LARGE, STABLE, ENTIRELY FICTIONAL DISCREPANCY.**
+  Cost: a false 7.1% printed to operators on the Payouts page, and the same
+  wrong-week pairing repeated across SEVEN source files and this document, for
+  as long as nobody checked which week the wire belonged to — including
+  `mockapi.mjs`, where it was not a comment but copy RENDERED into every mock
+  screenshot, and `sql/schema_v71.sql`, where it cannot be corrected at all
+  because an edited schema file is skipped by sha on replay. Found and
+  corrected 2026-09-17; see "Where the retracted claim lived" below for the
+  full list and for where the uncorrectable copy's warning lives instead.
+
+  The trap is that the wrong answer looks *better* than the right one. It is
+  reproducible, it divides cleanly, it is the same every time you re-run it, and
+  it is about nothing. Nothing in either figure carries the period it settles, so
+  the mismatch is invisible at the point of comparison.
+
+  Ecosine, both ways, so that nobody has to redo the arithmetic:
+
+  ```
+  ours, the week Mon 2026-09-07 .. Sun 2026-09-13
+    (the seven daily bank_payout figures /api/reconcile prints, each
+     sum(driver_payout_day.earnings) for that day)
+    14,324.61 + 15,770.41 + 17,192.37 + 16,612.39
+      + 17,532.04 + 15,726.00 + 13,804.27              = 110,962.09
+
+  THE WRONG WAY — against the wire paid Mon 2026-09-07,
+                   which settles 31 Aug .. 6 Sep:
+    110,962.09 − 103,567.54 = 7,394.55
+     7,394.55 / 103,567.54   = 7.14%   ← the figure the product printed
+
+  THE RIGHT WAY — against the wire paid Mon 2026-09-14,
+                    which settles 7 Sep .. 13 Sep:
+    111,179.66 − 110,962.09 =   217.57
+       217.57 / 111,179.66   = 0.20%   ← the truth
+  ```
+
+  **Before reporting any gap between our figure and a provider's, establish which
+  period the provider's transfer settles, and say so beside the number.** Uber
+  wires on a Monday for the Mon–Sun week that ended the day before. Bolt states
+  no period at all, which is why `/api/finance/payouts/reconcile` returns NULL for
+  `calculated`, `delta` and `delta_pct` on a Bolt row and names the reason — a
+  comparison you cannot align is absent with a reason, not a zero and not a
+  percentage. A gap in the single digits of percent between a fleet's own books
+  and a platform's is far more likely to be a period misalignment than a real
+  loss; check the alignment before you go looking for missing money.
+
 * **A query that is slow on an EMPTY window, on a `basic-xxs` box, is JIT
   until proved otherwise — and the plan says so in one block.** The exact
   statement behind `/api/unauthorized/attributed`, EXPLAIN (ANALYZE, BUFFERS)
@@ -2110,35 +2156,142 @@ End of period balance                          14,199.06
 | net fare + cancellation + lost item + tip + taxes = total earnings | exact |
 | airport + sharjah + toll = refunds & expenses | exact |
 
-### The settlement lag, measured over two consecutive weeks
+### THE REPORT HAS NO DATE COLUMN — which is why it is asked one day at a time
 
-The wire in a week does NOT pay that week's work. It settles the previous
-week's closing balance:
+Written down 2026-09-17, having been the unstated assumption under every line of
+`src/sources/uber_payout.js` since it was written.
+
+**Not one of those 21 columns is a date.** The report takes a window and returns
+ONE AGGREGATE ROW for it. `Start of period balance` and `End of period balance`
+name the two ends of whatever window was asked for; everything between them is
+the total across it. Ask for a month, get one row for the month. Ask for a week,
+get one row for the week — which is exactly the shape the table below was
+measured in, and it is a week's figure, not seven days' figures.
+
+**So the only way to learn WHICH DAY a transfer landed on is to ask for a
+one-day window and read whether `Transferred To Bank Account` is empty.** A
+one-day window returns exactly one row, and that row is that day. There is no
+cheaper route; the column does not exist to group by.
+
+Everything about how this is collected follows from that one sentence:
+
+* **one report generation per fleet per DAY**, never per range. A year of
+  history for one fleet is 365 separate report builds.
+* the collector therefore fills **oldest-first in a bounded batch per run**
+  (`DAYS_PER_RUN` in `src/sources/uber_payout.js`) rather than sweeping a range,
+  and **Uber's report limiter sets the real fill rate** — a run that asked for
+  eight days for Ecosine came back with four on the night of 2026-09-16.
+* **a day nobody has asked about is not a day with no transfer.** No row in
+  `platform_account_day` for a date means the question was never put. That is why
+  `/api/finance/payouts/reconcile` returns those dates in `unchecked`, with that
+  reason in words, instead of drawing them as zeros.
+
+### The settlement lag — the CADENCE is sound, the EQUALITY is not — 2026-09-17
+
+The wire in a week does NOT pay that week's work. It settles the week that ended
+the day before: a Monday transfer is for the preceding Mon–Sun.
 
 | week (Mon–Sun) | total earnings | start balance | end balance | transferred to bank |
 |---|---|---|---|---|
 | 31 Aug – 6 Sep | 121,432.39 | — | **103,567.54** | 77,796.52 |
 | 7 Sep – 13 Sep | 125,745.05 | **103,567.54** | 111,279.92 | **103,567.54** |
 
-So: **wire(week N) = end balance(week N−1) = start balance(week N)**, exactly, on
-every week tested. The closing balance is therefore a one-week-ahead forecast of
-the next wire — a figure the fleet could bank on, and one this product does not
-currently hold at all.
+**That cadence has held on every Monday measured, and nothing here doubts it.**
 
-### What it is worth against what we show today
+**What this section ALSO claimed, and what is false, is that the wire EQUALS
+that closing balance.** It used to end: *"So: wire(week N) = end balance(week
+N−1) = start balance(week N), exactly, on every week tested"* — and
+`settlesWeek()` in `src/sources/uber_payout.js` and the Payouts page both put it
+in the words *"to the fils, proven over two consecutive weeks"*. Two weeks was
+the entire sample, and one of the two supplied both sides of the identity. A
+third Ecosine Monday is now measurable and it does not hold:
 
-On the one fully closed week 7–13 Sep 2026, Ecosine:
+| Monday | opening balance | wire | wire − opening |
+|---|---|---|---|
+| 2026-08-17 | 57,791.73 | 57,810.41 | **+18.68** — wire ABOVE opening |
+| 2026-09-07 | 103,567.54 | 103,567.54 | **0.00** — exact |
+| 2026-09-14 | 111,279.92 | 111,179.66 | **−100.26** — wire BELOW opening |
+
+One of three. The closing balance is a good **estimate** of the next wire — the
+two misses are 18.68 on 57,791.73 (0.032%) and 100.26 on 111,279.92 (0.090%), so
+inside a tenth of a percent either way — and it is not the wire. Anything that
+treats the difference as a check that must come out at zero raises a false alarm
+on two Mondays in three. The Payouts page therefore prints it as a difference to
+look at and never as a reconciliation that has failed.
+
+### What it is worth against what we show today — CORRECTED 2026-09-17
+
+**This section printed a 7.1% overstatement that does not exist, and the product
+printed it too.** What stood here:
+
+> | | AED |
+> |---|---|
+> | `/api/finance/daily` payout (what #reconcile calls the bank payout) | 110,962.09 |
+> | Uber's `Transferred To Bank Account` | **103,567.54** |
+> | overstatement | **7,394.55 — 7.1%** |
+
+110,962.09 is Ecosine's week of **Mon 7 – Sun 13 Sep 2026**. 103,567.54 is the
+wire paid on **Mon 7 Sep**, which by the cadence above settles **31 Aug – 6
+Sep**. The two lines are a week apart. The arithmetic was never in doubt —
+7,394.55 / 103,567.54 = 7.14%, which is where the "7.1%" came from — it just
+measured the distance between two different weeks rather than the distance
+between our books and Uber's.
+
+The wire that settles 7–13 Sep is the one paid on **Mon 14 Sep 2026**. Read from
+production on 2026-09-17, both sides on the same week:
 
 | | AED |
 |---|---|
-| `/api/finance/daily` payout (what #reconcile calls the bank payout) | 110,962.09 |
-| Uber's `Transferred To Bank Account` | **103,567.54** |
-| overstatement | **7,394.55 — 7.1%** |
+| ours — the seven daily `bank_payout` figures `/api/reconcile` prints for 7–13 Sep, each `sum(driver_payout_day.earnings)` for that day: 14,324.61 + 15,770.41 + 17,192.37 + 16,612.39 + 17,532.04 + 15,726.00 + 13,804.27 | 110,962.09 |
+| Uber's `Transferred To Bank Account`, wired Mon 2026-09-14 | **111,179.66** |
+| difference | **217.57 — 0.20%** |
 
-And the two are not even the same event: our figure is that week's driver
-earnings, Uber's is the wire settling the week before. A reconciliation built on
-the first can never close against a bank statement; one built on the second is
-the bank statement.
+**0.20%, not 7.1%.** The full statement for that Monday, live from Uber, closes
+on itself as every other one does — 111,279.92 + 20,816.90 + 1,290.28 −
+115,362.76 = 18,024.34, with the payout splitting −111,179.66 to the bank and
+−4,183.10 cash collected — so the 111,179.66 is not in question either.
+
+The two registers still count **different events**: a week of per-driver earnings
+is not a transfer, and the wire carries the platform's own adjustments. A
+reconciliation that has to close against a bank statement must still be built on
+the wire. But the derived figure is not seven percent adrift, and until today the
+product told operators it was.
+
+**Where the retracted claim lived — SEVEN copies, not five.** All but one are
+corrected in the same commit as this note:
+
+| file | what it was | state |
+|---|---|---|
+| `api/public/app.js` | the Finance nav ordering comment | corrected |
+| `api/public/payouts.js` | header comment and rendered copy | corrected |
+| `api/payout_routes.js` | header comment AND the note string it served to the page | corrected |
+| `src/sources/uber_payout.js` | the `settlesWeek()` argument | corrected |
+| `api/probe.js` | block comment above the Bolt/Yango payout probes | corrected |
+| **`mockapi.mjs`** | **served as rendered copy** — `note` and the Uber `cadence` string, printed by every mock render and every screenshot pass | corrected |
+| `sql/schema_v71.sql:9` | the table's own header comment | **cannot be corrected** |
+
+Two of those deserve their own sentence.
+
+`mockapi.mjs` was the one nobody looked for. It is not a comment: the page
+prints `d.note` and the coverage table prints `c.cadence`, so both retracted
+sentences were being rendered into every browser test and every screenshot of
+this page, stated as live measurements rather than as retractions. **When a
+claim is corrected in the API, grep `mockapi.mjs` for it too** — it is a second
+implementation of the same copy and it has no compiler to keep it honest.
+
+`sql/schema_v71.sql` is the exception and must stay wrong. Migrations replay by
+sha from the start on every boot and the ledger skips shas it has already seen,
+so editing an old schema file silently does nothing on production. Its
+correction therefore lives in that file's **registration comment** in
+`src/schema_files.js`, which is the only place a reader of the migration list
+will meet it. Anyone reading `schema_v71.sql` directly will meet the wrong-week
+pairing and nothing in that file can warn them; this paragraph is the warning.
+
+`test/payout_register.test.mjs` uses 103,567.54 only as a CSV-parsing fixture
+and asserts nothing about the week, so it is not affected — but its assertion on
+the served note DID have to change, because it matched `/7\.1%/` and went on
+passing against the sentence that retracts the figure, under a label claiming it
+checked the measured difference.
 
 ### Traps this added to the list
 
@@ -2161,6 +2314,20 @@ the bank statement.
   timeout here is *not yet ready*, never *not available* — and the reportId is
   still discarded into an error string, so the built report cannot be re-fetched
   and the next attempt pays for a fresh generation.
+- **The org statement has NO DATE COLUMN, so a multi-day window is one aggregate
+  row and a date cannot be recovered from it.** Added 2026-09-17, and it is the
+  constraint the entire collection design rests on — see the subsection above.
+  Ask it one day at a time or do not ask it about dates at all. The corollary is
+  the one that gets forgotten: a day nobody asked about is not a day with no
+  transfer, and must never be drawn as a zero.
+- **"The Monday wire equals the previous week's closing balance to the fils" was
+  never true; it was two weeks, one of which supplied both sides.** Three Ecosine
+  Mondays: 2026-08-17 wire **18.68 ABOVE** opening, 2026-09-07 **exact**,
+  2026-09-14 wire **100.26 BELOW** opening. The CADENCE (a Monday wire settles
+  the preceding Mon–Sun) survives and is what the code should use; the EQUALITY
+  does not, and anything asserting it at zero tolerance fails two Mondays in
+  three. **Two observations that agree are not a proof, especially when one of
+  them is the observation the other was derived from.**
 
 ### Traps this added to the list
 

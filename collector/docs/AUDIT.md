@@ -1137,3 +1137,26 @@ earner-payments surface serves only the CURRENT payment period, so
 reconciliation's statement side is August alone; and Bolt is configured on both
 fleets and refused at the door, which was invisible on the money page and now
 has a panel carrying the collector's own error text.
+
+## 2026-09-17 — the two new Finance panels, at both widths
+
+Payouts (`#payouts`) gained two panels: **Uber's wire against our own figure**
+and **What we have not asked Uber about**. Rendered against `mockapi.mjs`
+through Chromium at 1440 and 390, the widths this file has used since the
+three-width sweep.
+
+**What the pass found, and what was done.**
+
+| finding | width | what was done |
+|---|---|---|
+| The difference is the column the panel exists for and it sat at the right-hand edge behind three columns nobody came for | 390 | `Asked live` and `Against the opening balance` are declared `absent`, so `tableFrom` drops a column that is empty in every row and prints its sentence under the table instead. On today's data every row's `checked_at` is null, so the column removes itself and Difference stays on screen. |
+| `Against the opening balance` was computed by the route and rendered nowhere | both | Added as a column. It is deliberately NOT given the good/bad colouring Difference carries — a non-zero gap there is not known to be a fault, which is the whole point of the retraction it descends from. |
+| Bolt's row states its absence twice, once in Our figure and once in Difference | 1440 | Left as it is. Each cell answering for itself is the rule the rest of this product follows, and a reader scanning the Difference column alone must not find a blank. |
+| The unasked-days band asserted "Nobody has asked Uber about N days" | both | Corrected. A day the limiter refused also leaves no row, so the page now says it holds no statement and names both ways that happens. See COVERAGE traps. |
+
+**Not re-shot after the last two changes.** The screenshots behind this entry
+predate the `Against the opening balance` column and the corrected unasked-days
+sentence. Both are asserted by `test/payout_page_reconcile.test.mjs` — including
+against the RENDERED text, not just the source — but neither has been looked at
+by eye at 390. That is owed on the production pass after the deploy, and it is
+recorded here rather than left as a gap somebody else would have to find.

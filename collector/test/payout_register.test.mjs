@@ -368,8 +368,26 @@ console.log('\nthe response says outright that this is not reconciliation’s fi
   const r = await get('/api/finance/payouts?from=2026-09-01&to=2026-09-30');
   check('the note names the page it would otherwise be read as contradicting',
     /Bank reconciliation/i.test(r.body.note || ''), r.body.note);
+  /* THIS ASSERTION USED TO READ /7\.1%/ AND IT HAD STOPPED CHECKING ANYTHING.
+     ─────────────────────────────────────────────────────────────────────────
+     THE DEFECT. The note's measured difference is now 0.20%: the old 7.1%
+     compared the week of 7-13 Sep against the wire paid on 7 Sep, which by the
+     Monday cadence settles 31 Aug - 6 Sep. When the note was corrected it kept
+     the string "7.1%" inside the sentence that RETRACTS it — so this assertion
+     went on passing, under a label saying it checks the measured size of the
+     difference, while matching a figure the same sentence calls wrong. It
+     would still have passed if 0.20% had been dropped entirely. CLAUDE.md's
+     rule is that prose nobody checks is prose that lies; this was a check that
+     had quietly stopped checking.
+
+     Two assertions now, because one of them alone has a hole: the first pins
+     the figure that is true, and the second allows the retraction to keep
+     naming the old number ONLY while it is marked as retracted. */
   check('…and gives the measured size of the difference',
-    /7\.1%/.test(r.body.note || ''), r.body.note);
+    /0\.20%/.test(r.body.note || ''), r.body.note);
+  check('…and any mention of the old 7.1% is marked as the retracted figure',
+    !/7\.1%/.test(r.body.note || '')
+    || /used to|retract|mistake|previous|before it/i.test(r.body.note || ''), r.body.note);
 }
 
 /* CLOSE THE SERVER AND THE DATABASE, AND EXIT EXPLICITLY.

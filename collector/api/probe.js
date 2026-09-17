@@ -2397,9 +2397,27 @@ export function probeRoutes(app, { wrap }) {
      routes.js:303 sums driver_payout_day.earnings by month and calls the total
      bank_payout — that is Uber's weekly PER-DRIVER earnings spread over the
      days they were earned, which is a different event from a transfer landing
-     in the company's account. Measured on the closed week Mon 7 – Sun 13 Sep
-     2026 (Ecosine): the dashboard says 110,962.09 and Uber's own books say the
-     wire was 103,567.54. 7.1% apart, and not the same quantity.
+     in the company's account.
+
+     THE "7.1% APART" THIS COMMENT CARRIED WAS A WRONG-WEEK COMPARISON AND IS
+     RETRACTED. It read: "Measured on the closed week Mon 7 – Sun 13 Sep 2026
+     (Ecosine): the dashboard says 110,962.09 and Uber's own books say the wire
+     was 103,567.54. 7.1% apart, and not the same quantity." The arithmetic is
+     sound — 7,394.55 / 103,567.54 = 7.14% — and the two figures are not the
+     same week, which is the whole reason they disagreed by that much.
+     103,567.54 was wired on MONDAY 2026-09-07 and, by the cadence in
+     src/sources/uber_payout.js, a Monday wire settles the Mon–Sun week that
+     ended the day before — so it settles 31 Aug – 6 Sep. The wire settling
+     7–13 Sep is the one paid Monday 2026-09-14, and it is 111,179.66. Asked of
+     Uber live on 2026-09-17 and put beside our own 110,962.09, the difference
+     is AED 217.57: 0.20%, not 7.1%.
+
+     The DISTINCTION the paragraph above draws survives intact and is the
+     reason these probes exist — a week of per-driver earnings is not a wire,
+     and the two answer different questions. What does not survive is the idea
+     that they are seven percent apart. They agree to a fifth of one percent,
+     and that is a stronger argument for keeping both registers than the wrong
+     number ever was.
 
      Uber's side of that is settled: REPORT_TYPE_PAYMENTS_ORGANIZATION carries
      `Payouts : Transferred To Bank Account` and the four balance identities

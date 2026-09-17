@@ -5244,8 +5244,10 @@ app.get('/api/finance/payouts', (_, r) => {
         how: 'Uber’s organisation payment statement, asked one day at a time. The transfer '
           + 'column is empty on a day with no transfer, so the date is the provider’s and not ours.',
         cadence: 'Uber wires on a Monday, settling the Monday-to-Sunday week that ended the day '
-          + 'before — proven over two consecutive weeks: the transfer equals the previous week’s '
-          + 'closing balance to the fils.',
+          + 'before. The weekday is established over five consecutive one-day reports whose bank '
+          + 'column was populated on the Monday and empty on every other day. The transfer does '
+          + 'NOT reliably equal that week’s closing balance: measured on three Ecosine Mondays '
+          + 'it was 18.68 above the opening balance, exact, and 100.26 below it.',
         in_window: totals.filter((t) => t.platform === 'uber'),
         record_span: [{ platform: 'uber', fleet_id: 'ecosine', earliest: '2026-08-31',
           latest: '2026-09-07', transfers: 2 }],
@@ -5271,8 +5273,76 @@ app.get('/api/finance/payouts', (_, r) => {
     ],
     note: 'A row here is a transfer that reached the company’s bank on the date beside it, taken '
       + 'from the provider’s own books. It is NOT the same figure as the "bank payout" on Bank '
-      + 'reconciliation, which is the sum of what drivers earned in a month — measured 7.1% '
-      + 'higher on the one week both were checked, because it counts a different event.',
+      + 'reconciliation, which is the sum of what drivers earned over a period — a different '
+      + 'event, counted a different way. On the one week where both sides are known, 7–13 Sep '
+      + '2026 for Ecosine, ours is AED 110,962.09 and the wire settling it is AED 111,179.66: a '
+      + 'difference of AED 217.57, or 0.20%.',
+  });
+});
+
+/* THE RECONCILE PANEL'S OWN FIXTURE.
+   ─────────────────────────────────────────────────────────────────────────
+   Without it the catch-all answered, api/public/payouts.js rendered the
+   panel's empty state, and every mock render of this page showed "no day here
+   that nobody asked about" — which is the one sentence the panel exists to
+   avoid printing falsely. test/route_smoke.test.mjs caught it as an unfixtured
+   route, which is what that test is for.
+
+   The numbers are the measured ones, so a screenshot of the mock and a
+   screenshot of production say the same thing: Ecosine's wire of 111,179.66
+   paid Mon 14 Sep settles 7-13 Sep, our own figure for that week is
+   110,962.09, and the difference is 217.57 (0.20%). The Bolt row carries a
+   NULL comparison with its reason, because a panel that only ever renders the
+   happy path is a panel whose absent-with-a-reason branch nobody has seen. */
+app.get('/api/finance/payouts/reconcile', (_, r) => {
+  r.json({
+    window: ['2026-08-18', '2026-09-17'],
+    filters: { platform: null, fleet: null },
+    rows: [
+      { platform: 'uber', fleet_id: 'ecosine', paid_on: '2026-09-14',
+        wire: 111179.66, period_start: '2026-09-07', period_end: '2026-09-13',
+        calculated: 110962.09, delta: 217.57, delta_pct: 0.2,
+        calculated_basis: 'sum of driver_payout_day.earnings for uber/ecosine over 2026-09-07 '
+          + 'to 2026-09-13 — 7 of 7 days carrying rows, 7 driver-days. This is the same '
+          + 'quantity Bank reconciliation calls "bank payout"; it is what the drivers earned, '
+          + 'not a transfer.',
+        opening_balance: 111279.92, balance_delta: -100.26,
+        checked_at: '2026-09-17T06:40:00.000Z',
+        source: 'REPORT_TYPE_PAYMENTS_ORGANIZATION (one-day window)' },
+      { platform: 'uber', fleet_id: 'ecosine', paid_on: '2026-09-07',
+        wire: 103567.54, period_start: '2026-08-31', period_end: '2026-09-06',
+        calculated: null, delta: null, delta_pct: null,
+        calculated_basis: 'no driver_payout_day rows are stored for uber/ecosine between '
+          + '2026-08-31 and 2026-09-06, so our own figure for the week this transfer settles '
+          + 'has not been collected. The transfer is real; the thing to compare it against is '
+          + 'missing.',
+        opening_balance: 103567.54, balance_delta: 0,
+        checked_at: null,
+        source: 'REPORT_TYPE_PAYMENTS_ORGANIZATION (one-day window)' },
+      { platform: 'bolt', fleet_id: 'ecosine', paid_on: '2026-09-07',
+        wire: 2130.56, period_start: null, period_end: null,
+        calculated: null, delta: null, delta_pct: null,
+        calculated_basis: 'bolt does not state which period a transfer settles, so there is no '
+          + 'window to sum our own figure over. Nothing is compared here, and that is not a '
+          + 'difference of zero.',
+        opening_balance: null, balance_delta: null,
+        checked_at: null, source: 'fleetOwnerPortal/getPayouts' },
+    ],
+    totals: { wire: 216877.76, wire_comparable: 111179.66, calculated: 110962.09,
+      delta: 217.57, rows: 3, comparable_rows: 1,
+      basis: 'wire totals every transfer in the window; calculated and delta cover only the '
+        + 'rows that name a period AND have driver-day rows stored for it; wire_comparable is '
+        + 'the wire over those same rows, and it is the figure to read delta against.' },
+    unchecked: [
+      { platform: 'uber', fleet_id: 'ecosine', count: 27,
+        days: ['2026-09-16', '2026-09-15', '2026-09-13', '2026-09-12', '2026-09-11'],
+        why: 'Uber publishes a one-day organisation statement for ecosine and we hold no '
+          + 'statement for these 27 days — either nobody asked, or the ask was refused. Either '
+          + 'way it is a day with no measurement, and a day with no measurement cannot be '
+          + 'reported as a day with no transfer.' },
+    ],
+    note: 'Each row is one transfer that reached the bank, beside our own figure for the week '
+      + 'that transfer settles. delta is the wire MINUS our figure.',
   });
 });
 

@@ -93,11 +93,21 @@ export const SCHEMA_FILES = [
   'schema_v70.sql',
   /* What each platform actually transferred to the company's bank, and on
      which date. The figure #reconcile has been calling "bank payout" is the
-     per-driver earnings of a week, not a wire, and the two are 7.1% apart on
-     the one week both were measured. Two tables: the transfers themselves
-     (Uber and Bolt publish them; Yango publishes no such category at all), and
-     the provider's own daily statement, which is what makes a transfer
-     checkable rather than merely stated. */
+     per-driver earnings of a week, not a wire.
+
+     THE "7.1% APART" THIS ENTRY USED TO CITE IS RETRACTED. It compared the
+     week 7–13 Sep against the wire paid on Monday 7 Sep, and by the settlement
+     cadence that wire settles 31 Aug – 6 Sep — the week before. Re-measured
+     2026-09-17 against the right wire, the one paid Monday 14 Sep: ours
+     110,962.09, Uber's 111,179.66, a difference of 217.57, or 0.20%. The two
+     still describe different events and the small difference is the
+     interesting part; 7.1% was a wrong-week comparison, not a measurement of
+     it. See src/sources/uber_payout.js for the full arithmetic.
+
+     Two tables: the transfers themselves (Uber and Bolt publish them; Yango
+     publishes no such category at all), and the provider's own daily
+     statement, which is what makes a transfer checkable rather than merely
+     stated. */
   'schema_v71.sql',
   /* One index. The operator's last-trip rule asks who ENDED the most recent
      Uber trip on a car, and every index this table carries is keyed on
@@ -115,4 +125,14 @@ export const SCHEMA_FILES = [
      file for the five timings that name the cause, and src/db.js for the
      other half of the fix. */
   'schema_v73.sql',
+  /* platform_account_day.checked_at — when a HUMAN last asked Uber live about
+     this day, which collected_at cannot answer. collected_at is DEFAULT now()
+     on the insert and the nightly walk asks each day exactly once, so it is
+     frozen at "when the backfill got here" for ever. Measured 2026-09-17: all
+     23 statement rows on production (4 ecosine, 19 egari) were written by that
+     walk and not one has been put to Uber by a person, yet under the old
+     schema they are indistinguishable from a row somebody checked five minutes
+     ago. NULLABLE and no default: NULL means nobody has asked, which is the
+     absent-with-a-reason the page must print rather than a date. */
+  'schema_v74.sql',
 ];

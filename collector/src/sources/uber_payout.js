@@ -4,17 +4,46 @@
    was built and it has never been one. api/reconcile_routes.js sums
    driver_payout_day.earnings by month and names the total bank_payout: that is
    Uber's weekly PER-DRIVER earnings spread over the days they were earned. A
-   real quantity, and not a transfer. Measured on the closed week Mon 7 – Sun
-   13 Sep 2026 for Ecosine, the dashboard says 110,962.09 and Uber's own books
-   say the wire was 103,567.54 — 7.1% apart, describing different events.
+   real quantity, and not a transfer.
+
+   ── THE "7.1% APART" THIS COMMENT USED TO CARRY WAS A WRONG-WEEK COMPARISON,
+      AND IT IS RETRACTED HERE ────────────────────────────────────────────
+   The retracted sentence read: "Measured on the closed week Mon 7 – Sun 13 Sep
+   2026 for Ecosine, the dashboard says 110,962.09 and Uber's own books say the
+   wire was 103,567.54 — 7.1% apart, describing different events." Its
+   arithmetic is sound — 7,394.55 / 103,567.54 = 7.14% — and its two figures
+   are not the same week, which is the only reason they disagreed by that much.
+
+   103,567.54 was wired on MONDAY 2026-09-07. By the cadence established below,
+   a Monday wire settles the Mon–Sun week that ended the day before, so that
+   wire settles 31 Aug – 6 Sep. The wire that settles 7–13 Sep is the one paid
+   on Monday 2026-09-14, and it is 111,179.66. Put beside the right wire, and
+   measured on production 2026-09-17:
+
+     ours, the seven daily bank_payout figures /api/reconcile prints for
+     7–13 Sep, which are sum(driver_payout_day.earnings) per day:
+       14,324.61 + 15,770.41 + 17,192.37 + 16,612.39
+       + 17,532.04 + 15,726.00 + 13,804.27               = 110,962.09
+     Uber's wire, Mon 2026-09-14                          = 111,179.66
+     difference                                                217.57  (0.20%)
+
+   So the two registers agree to a fifth of one percent. The seven percent was
+   this file comparing a week's earnings against the wire for the week BEFORE
+   it, and a page that repeated the figure inherited the error. They still
+   describe different events — a week of per-driver earnings is not a transfer,
+   and the 217.57 is the interesting number precisely because it is small —
+   but "7.1% apart" was not a measurement of that difference.
 
    REPORT_TYPE_PAYMENTS_ORGANIZATION is the statement. One row per org per
-   window, twenty-one columns, including `Payouts : Transferred To Bank
-   Account`, which is the literal wire. Asked for the whole week it closes to
-   the fils:
+   window, twenty-one columns, including "Payouts : Transferred To Bank
+   Account", which is the literal wire. It closes to the fils on a one-day
+   window as well as a weekly one — Ecosine, Mon 2026-09-14, live from Uber:
 
-     start 103,567.54 + earnings 125,745.05 + refunds 6,985.26
-           - cash 21,450.39 - bank 103,567.54 = end 111,279.92
+     opening 111,279.92 + earnings 20,816.90 + refunds & expenses 1,290.28
+             - payouts 115,362.76 = closing 18,024.34
+
+   where payouts 115,362.76 is cash collected 4,183.10 plus the wire
+   111,179.66, and the identity holds exactly.
 
    THE FINDING THAT MADE THIS COLLECTOR POSSIBLE is that a ONE-DAY window
    works, and that is not obvious from a report whose own vocabulary is
@@ -31,10 +60,13 @@
    and the daily balances chain across all five without a gap:
      103,567.54 -> 14,199.06 -> 30,531.51 -> 47,693.72 -> 64,029.20 -> 82,086.09
 
-   So Uber wires on MONDAY, and it wires the closing balance of the week that
-   ended the day before — 103,567.54 was both the Monday transfer and the
-   Sunday closing balance of 31 Aug – 6 Sep. A week's report gives the amount.
-   Only a day's report gives the date, and the date is the question.
+   So Uber wires on MONDAY, and the Monday wire settles the Mon–Sun week that
+   ended the day before. On this particular Monday the wire and that week's
+   closing balance were the same figure to the fils — 103,567.54 is both — and
+   that turned out to be a property of this Monday rather than of Mondays; see
+   settlesWeek() below for the three measured Mondays and which of them agree.
+   A week's report gives the amount. Only a day's report gives the date, and
+   the date is the question.
 
    ── WHY THIS IS A SEPARATE MODULE AND A SEPARATE, SLOW WALK ──────────────
    Payment reports have a generation cap of their OWN, distinct from the
@@ -101,11 +133,40 @@ export const money = (v) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RATE_LIMITED = /rate-limited|generation limit|too many ongoing|in progress/i;
 
-/* One report, one day, one org. Returns the mapped row, or a reason.
-   Never throws for a provider refusal: a limiter that is shut is a fact about
-   this minute, not about the day being asked, and a throw here would abandon
-   the other twenty days of the walk. */
-async function oneDay(org, day) {
+/* ONE REPORT, ONE DAY, ONE ORG — ASKED, PARSED AND STORED, IN ONE PLACE.
+   ─────────────────────────────────────────────────────────────────────────
+   Returns the mapped row, what it stored, and any transfer it found — or a
+   reason. Never throws for a provider refusal: a limiter that is shut is a
+   fact about this minute, not about the day being asked, and a throw here
+   would abandon the other twenty days of the walk.
+
+   WHY THIS IS EXPORTED AND WHY THE STORE MOVED INSIDE IT.
+   POST /api/finance/payouts/verify (api/payout_routes.js) asks Uber for a
+   named day on an operator's behalf, from the API process rather than the
+   collector — the same thing api/probe.js already does, importing
+   uberWebHeaders and uberOrgs and calling Uber directly. It needs exactly
+   this: generate the report, poll for the signed url, parse it, keep Uber's
+   own words, and write both the statement day and any transfer it names.
+
+   A SECOND IMPLEMENTATION OF THAT IS FORBIDDEN, and the reason is specific
+   rather than tidiness. The mapper's whole claim is that an EMPTY bank cell
+   and an ABSENT bank column are different facts (see money() above): a copy
+   that got that one line wrong would write a wire of zero on four days in
+   five, and the two copies would then disagree about the same day depending
+   on which process happened to ask. The column names, the one-row assertion,
+   the sign convention and the payout threshold are all decisions that have to
+   be made identically or not at all, so they are made once, here.
+
+   The store used to sit in collect()'s loop. It is inline here now — not
+   factored out into a writer of its own — because the only caller that wants
+   the parse without the write does not exist, and the two callers that do want
+   it want it identically.
+
+   live=false is the nightly walk; live=true is a person asking. The only
+   difference is checked_at (sql/schema_v74.sql): the walk omits the column
+   from its upsert entirely, so a day a human verified keeps its verification
+   even if a later backfill re-stores the row. */
+export async function oneDay(org, day, { live = false } = {}) {
   const gen = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`, {
     method: 'POST', timeoutMs: 30000, retries: 0, headers: uberWebHeaders(org),
     body: JSON.stringify({
@@ -162,37 +223,162 @@ async function oneDay(org, day) {
   }
   const pick = (path) => (byKey.has(path) ? money(r[byKey.get(path)]) : null);
 
-  return {
-    missing,
-    row: {
-      platform: SRC, fleet_id: org.fleet, day, currency: 'AED', basis: 'statement',
-      opening_balance: pick(COLUMNS.opening_balance),
-      closing_balance: pick(COLUMNS.closing_balance),
-      earnings: pick(COLUMNS.earnings),
-      refunds_expenses: pick(COLUMNS.refunds_expenses),
-      cash_collected: pick(COLUMNS.cash_collected),
-      bank_transferred: pick(COLUMNS.bank_transferred),
-      /* Yango's ledger fills this and Uber's statement has no equivalent
-         column: Uber's service fee is netted off before a payment reaches the
-         organisation account, so there is nothing here to read. NULL, not 0. */
-      commission: null,
-      tips: pick(COLUMNS.tips),
-      taxes: pick(COLUMNS.taxes),
-      components: null,
-      raw: r,
-    },
+  /* checked_at ONLY on a live ask, and by omission rather than by null.
+     sql/schema_v74.sql adds the column meaning "the last time a human asked
+     Uber live for this day". upsertMany builds its column list from the keys
+     of the row it is given, so leaving the key OFF on the nightly walk means
+     the ON CONFLICT DO UPDATE never names the column and whatever a previous
+     human check wrote survives. Setting it to null instead would erase that
+     check the next time a backfill happened to re-store the row. */
+  const checked_at = live ? new Date().toISOString() : null;
+  const row = {
+    platform: SRC, fleet_id: org.fleet, day, currency: 'AED', basis: 'statement',
+    opening_balance: pick(COLUMNS.opening_balance),
+    closing_balance: pick(COLUMNS.closing_balance),
+    earnings: pick(COLUMNS.earnings),
+    refunds_expenses: pick(COLUMNS.refunds_expenses),
+    cash_collected: pick(COLUMNS.cash_collected),
+    bank_transferred: pick(COLUMNS.bank_transferred),
+    /* Yango's ledger fills this and Uber's statement has no equivalent
+       column: Uber's service fee is netted off before a payment reaches the
+       organisation account, so there is nothing here to read. NULL, not 0. */
+    commission: null,
+    tips: pick(COLUMNS.tips),
+    taxes: pick(COLUMNS.taxes),
+    components: null,
+    raw: r,
+    ...(live ? { checked_at } : {}),
   };
+
+  /* A WRITE THAT FAILS IS NOT AN ASK THAT FAILED, AND THE DIFFERENCE IS THE
+     WHOLE ANSWER TO "DID WE SPEND THE LIMITER?".
+     ─────────────────────────────────────────────────────────────────────────
+     THE DEFECT. Both upserts used to throw straight out of this function, and
+     the only caller that wraps them — POST /api/finance/payouts/verify — has a
+     single catch that reports `the ask failed before Uber answered`. So a
+     Postgres error here told the operator the opposite of what happened: Uber
+     DID answer, one of its three report slots WAS spent, and the figure is sat
+     in `row` ready to be read. The most likely trigger is the ordinary deploy
+     order — the API restarts with code that writes `checked_at` a moment before
+     sql/schema_v74.sql has replayed — which is exactly when somebody presses
+     the button to see whether the deploy worked.
+
+     Caught and RETURNED instead, so the shape stays honest: the parsed row
+     travels with stored:false and a why that names the write. The route's
+     stored===false branch, which could not fire while this threw, now can. */
+  let stored = 0;
+  let writeWhy = null;
+  try {
+    stored = await upsertMany('platform_account_day', [row],
+      ['platform', 'fleet_id', 'day']);
+  } catch (e) {
+    writeWhy = `Uber answered and the register write failed: ${String(e?.message || e).slice(0, 180)}`;
+    log.error(SRC, 'payout statement: write failed', { fleet: org.fleet, day, err: writeWhy });
+  }
+
+  /* A TRANSFER, not a day with a transfer column. Only a day whose bank
+     column carries a non-zero figure becomes a payout row; a day with a
+     blank column is a day Uber did not wire, and writing a zero payout for
+     it would put 300 imaginary transfers a year in a table whose whole claim
+     is that every row in it is a wire that happened. 0.005 rather than 0
+     because the column is money to two decimals and a float comparison
+     against exact zero is a coin toss on a value that arrived as text. */
+  const amt = row.bank_transferred;
+  let payout = null;
+  if (amt != null && Math.abs(amt) > 0.005) {
+    payout = {
+      platform: SRC, fleet_id: org.fleet,
+      /* No provider id on this surface — the statement names a period, not a
+         transfer — so the key is the thing that identifies it: this platform,
+         this fleet, this date. Stable across re-runs and across backfill
+         order, which a row number would not be. */
+      payout_ext_id: `${org.fleet}:${day}`,
+      paid_on: day,
+      /* Uber signs a payout negative — money leaving the account. Stored
+         POSITIVE here, because platform_payout's claim is "this much reached
+         the bank" and Bolt's rows are positive; a table whose sign depended on
+         which provider filled the row would be summed wrongly by the first
+         query that touched both. The provider's own sign is kept unflipped one
+         table over, in platform_account_day. */
+      amount: Math.abs(amt),
+      currency: 'AED',
+      ...settlesWeek(day),
+      method: 'bank',
+      source: `${REPORT_TYPE} (one-day window)`,
+      raw: null,
+    };
+    try {
+      await upsertMany('platform_payout', [payout],
+        ['platform', 'fleet_id', 'payout_ext_id']);
+      log.info(SRC, 'payout statement: a transfer',
+        { fleet: org.fleet, day, amount: payout.amount, live });
+    } catch (e) {
+      /* Same rule as the statement write above: the wire was READ, so it is
+         returned. What failed is the register, and the caller is told which. */
+      writeWhy = writeWhy
+        || `Uber answered and the payout register write failed: ${String(e?.message || e).slice(0, 180)}`;
+      log.error(SRC, 'payout statement: payout write failed',
+        { fleet: org.fleet, day, err: writeWhy });
+    }
+  }
+
+  /* What the caller gets. `row` is Uber's own statement, signs unflipped, and
+     carries every column POST /api/finance/payouts/verify reports under its
+     "uber" key. `payout` is the register row if this day was a wire and null
+     if it was not — null here is "Uber did not transfer on this day", which
+     the route must not render as a transfer of zero. `stored` is how many
+     statement rows reached the table, so a caller can tell a successful parse
+     from a successful write. */
+  return { missing, row, payout, stored: stored > 0 && !writeWhy, checked_at, writeWhy };
 }
 
-/* Which Dubai days this fleet has no statement for yet, oldest first.
+/* MONDAYS FIRST, THEN OLDEST FIRST — the order the missing days are asked in.
    ─────────────────────────────────────────────────────────────────────────
+   THE ORIGINAL ARGUMENT, WHICH STILL HOLDS AND IS NOT BEING DISCARDED.
    Oldest first and not newest first, deliberately. A backfill that starts at
-   today walks backwards into history and an operator watching it sees the
-   most recent week fill and then stall; starting at the oldest missing day
-   means the record grows forwards and the newest day is always the one just
-   added by the incremental. Today itself is excluded: a statement for a day
-   still in progress would be stored as though it were final and then never
-   asked again. */
+   today walks backwards into history and an operator watching it sees the most
+   recent week fill and then stall; starting at the oldest missing day means the
+   record grows forwards and the newest day is always the one just added by the
+   incremental. Today itself is excluded: a statement for a day still in
+   progress would be stored as though it were final and then never asked again.
+
+   WHAT THAT ORDER COST, MEASURED ON PRODUCTION 2026-09-17.
+   The walk is bounded — DAYS_PER_RUN, 24 days per fleet per run — because a
+   report takes 10–40 s and the payment limiter shuts for minutes. Strictly
+   oldest-first spends that budget on whichever days happen to be oldest, and
+   the days that carry a WIRE are one in seven. The count on the day this was
+   written: uber/ecosine held 4 statement days (2026-08-17 .. 08-20) and one
+   payout; uber/egari held 19 (08-17 .. 09-09) and two. Monday 2026-09-14 — the
+   wire of 111,179.66 that settles the week the Payouts page is asked about
+   most — was the TWENTY-FIFTH missing day for ecosine, one past the budget,
+   so last night's run could not have reached it and neither could tonight's.
+   It was worse than that in practice: Uber's report limiter cut last night's
+   run to 4 of the 8 days it asked for, so the queue was moving at four days a
+   night with the wires at the back of it.
+
+   THE CHANGE, AND ITS EXACT SCOPE. Uber wires on Monday and only on Monday
+   (see the five consecutive one-day reports at the top of this file), so
+   ordering the missing set by "is this a Monday" before the date discovers
+   every wire in the first few nights and then fills the ordinary days behind
+   them, oldest first, exactly as before.
+
+   THIS CHANGES WHICH DAYS ARE ASKED FIRST. IT DOES NOT CHANGE WHETHER ANY DAY
+   IS ASKED. The WHERE clause is untouched: the set is still every day in the
+   window with no statement row, the LIMIT still bounds one run and not the
+   backfill, and a day pushed behind the Mondays is asked on a later night
+   rather than dropped. Nothing is ever recorded as absent because the walk had
+   not got to it — that is what collect()'s days_still_missing is for.
+
+   EXTRACT(dow) IS 0=SUNDAY, 1=MONDAY IN POSTGRES, which is a convention worth
+   getting wrong: ISODOW is 1=Monday..7=Sunday and DOW is 0=Sunday..6=Saturday,
+   so the two agree on Monday and on nothing else. test/uber_payout_history.test.mjs
+   asserts Postgres's own answer for a known Monday rather than trusting this
+   sentence.
+
+   The ORDER BY is a named constant so the test can assert the SHIPPED text
+   instead of a copy of it that could drift from it silently. */
+export const MISSING_DAYS_ORDER = '(EXTRACT(dow FROM a.d) = 1) DESC, a.d';
+
 async function missingDays(org, from, to, limit) {
   const { rows } = await pool.query(
     `WITH asked AS (
@@ -204,7 +390,7 @@ async function missingDays(org, from, to, limit) {
        LEFT JOIN platform_account_day p
          ON p.platform = 'uber' AND p.fleet_id = $1 AND p.day = a.d AND p.basis = 'statement'
       WHERE p.day IS NULL
-      ORDER BY a.d
+      ORDER BY ${MISSING_DAYS_ORDER}
       LIMIT $4`,
     [org.fleet, from, to, limit]);
   return rows.map((r) => dubaiIso(r.d));
@@ -226,11 +412,38 @@ const THROTTLE_GIVE_UP_AFTER = 3;
 
 /* WHICH WEEK A MONDAY WIRE SETTLES — AND WHY THE ANCHOR IS NOON UTC.
    ─────────────────────────────────────────────────────────────────────────
-   Uber's Monday wire settles the Mon–Sun week that ended the day before,
-   proven twice over consecutive weeks: wire(N) = closing balance(N-1) =
-   opening balance(N), to the fils. That is worth recording because it is
-   knowable, and only for the weekday it was proven on — a wire on any other
-   day is left with a null period rather than given an invented one.
+   Uber's Monday wire settles the Mon–Sun week that ended the day before. That
+   is worth recording because it is knowable, and only for the weekday it was
+   proven on — a wire on any other day is left with a null period rather than
+   given an invented one.
+
+   ── THE "TO THE FILS" CLAIM THIS COMMENT USED TO MAKE IS WITHDRAWN ───────
+   It read: "proven twice over consecutive weeks: wire(N) = closing balance(N-1)
+   = opening balance(N), to the fils." Two Mondays were measured when that was
+   written. A third is now measurable, and it disagrees. Every Ecosine Monday
+   this collector can currently see, live from Uber:
+
+     Monday        opening balance      wire           difference
+     2026-08-17      57,791.73        57,810.41    wire  18.68 ABOVE opening
+     2026-09-07     103,567.54       103,567.54    exact
+     2026-09-14     111,279.92       111,179.66    wire 100.26 BELOW opening
+
+   One of three is exact, and the other two miss in opposite directions, which
+   rules out a fee or a rounding rule and points at movements Uber books after
+   the Sunday close — an adjustment, a refund, a late trip — landing on either
+   side of the transfer. Two consecutive agreements were a sample, not a proof;
+   the third Monday is what a sample of two is for.
+
+   WHAT SURVIVES AND WHAT DOES NOT. The CADENCE survives and is what this
+   function stamps: the Monday wire settles the preceding Mon–Sun week, on all
+   three. The EQUALITY does not, and must stop being stated as proven anywhere
+   it is stated — this comment and api/public/payouts.js were both saying it.
+   A page that tells an operator the wire equals the previous week's closing
+   balance to the fils is telling them a difference of 100.26 is an error in
+   our books, when on this evidence it is a normal Monday.
+
+   Note what this does NOT touch: period_start and period_end are the week the
+   wire settles, and they are right on all three. Nothing below changes.
 
    THIS WAS WRITTEN WITH A BUG THAT MADE IT DO EXACTLY NOTHING, AND THE BUG IS
    WORTH KEEPING DESCRIBED BECAUSE IT LOOKS RIGHT. The test was
@@ -314,39 +527,15 @@ export async function collect({ from, to, mode, fleet = null }) {
           log.warn(SRC, 'payout statement: columns absent from the report',
             { fleet: org.fleet, day, missing: res.missing.join(', ') });
         }
-        written += await upsertMany('platform_account_day', [res.row],
-          ['platform', 'fleet_id', 'day']);
-
-        /* A TRANSFER, not a day with a transfer column. Only a day whose bank
-           column carries a non-zero figure becomes a payout row; a day with a
-           blank column is a day Uber did not wire, and writing a zero payout
-           for it would put 300 imaginary transfers a year in a table whose
-           whole claim is that every row in it is a wire that happened. */
-        const amt = res.row.bank_transferred;
-        if (amt != null && Math.abs(amt) > 0.005) {
-          /* Uber signs a payout negative — money leaving the account. Stored
-             POSITIVE here, because platform_payout's claim is "this much
-             reached the bank" and Bolt's rows are positive; a table whose sign
-             depended on which provider filled the row would be summed wrongly
-             by the first query that touched both. The provider's own sign is
-             kept unflipped one table over, in platform_account_day. */
-          await upsertMany('platform_payout', [{
-            platform: SRC, fleet_id: org.fleet,
-            /* No provider id on this surface — the statement names a period,
-               not a transfer — so the key is the thing that identifies it:
-               this platform, this fleet, this date. Stable across re-runs and
-               across backfill order, which a row number would not be. */
-            payout_ext_id: `${org.fleet}:${day}`,
-            paid_on: day,
-            amount: Math.abs(amt),
-            currency: 'AED',
-            ...settlesWeek(day),
-            method: 'bank',
-            source: `${REPORT_TYPE} (one-day window)`,
-            raw: null,
-          }], ['platform', 'fleet_id', 'payout_ext_id']);
-          log.info(SRC, 'payout statement: a transfer', { fleet: org.fleet, day, amount: Math.abs(amt) });
-        }
+        /* THE WRITE MOVED INTO oneDay() AND IS NOT REPEATED HERE.
+           It used to be these thirty lines: upsert the statement day, then
+           decide whether the bank column names a transfer and upsert the
+           register row if it does. POST /api/finance/payouts/verify needs the
+           identical behaviour from the API process, and the only way two
+           processes can be relied on to write the same day the same way is for
+           there to be one copy of the rule. oneDay() has it; this loop now
+           counts what it did and reports the run. */
+        written += res.stored ? 1 : 0;
       }
 
       await logRun({ source: SRC, fleet_id: org.fleet, mode: `${mode}:payout`,

@@ -375,11 +375,43 @@ const VIEWS = [
   { id: 'receipts', label: 'What landed, and when', ic: '⑉', sec: 'Finance', sub: 'Every figure a provider filed — the dates it covers, what it was for, and when it reached us' },
   /* ABOVE Bank reconciliation, deliberately, and this is not a cosmetic
      ordering. Reconciliation's "bank payout" is the sum of what drivers earned
-     in a month — a real quantity, and not a transfer. This page holds the
-     transfers themselves, and a reader who meets the derived figure first will
-     read the measured one as contradicting it. Measured on Ecosine's closed
-     week of 7–13 Sep 2026: reconciliation says AED 110,962.09 and Uber's own
-     books say the wire was AED 103,567.54. */
+     over a period — a month on that page, built from the same daily figures
+     used below — which is a real quantity and is not a transfer. This page
+     holds the transfers themselves, and a reader who meets the derived figure
+     first will read the measured one as contradicting it. THAT ARGUMENT IS
+     UNCHANGED, and it is the whole of why this row sits where it sits.
+
+     ── THE NUMBER THIS COMMENT USED TO CITE WAS THE WRONG WEEK ────────────
+     It read: "Measured on Ecosine's closed week of 7–13 Sep 2026:
+     reconciliation says AED 110,962.09 and Uber's own books say the wire was
+     AED 103,567.54." That is a gap of AED 7,394.55, and 7,394.55 / 103,567.54
+     = 7.14% — which is where the "7.1% apart" the product printed came from.
+     The division was right. The pairing was not.
+
+     AED 103,567.54 was wired on MONDAY 2026-09-07, and a Monday wire settles
+     the Mon–Sun week that ENDED THE DAY BEFORE — 31 Aug – 6 Sep. So the
+     sentence set one week's driver earnings beside the wire for the week
+     BEFORE it. The 7.1% was an artefact of the mismatch: large, stable,
+     reproducible and about nothing.
+
+     The wire that settles 7–13 Sep is the one paid on Monday 2026-09-14.
+     Beside the right wire, read from production on 2026-09-17:
+
+       ours — the seven daily bank_payout figures /api/reconcile prints for
+       7–13 Sep, each sum(driver_payout_day.earnings) for that day:
+         14,324.61 + 15,770.41 + 17,192.37 + 16,612.39
+         + 17,532.04 + 15,726.00 + 13,804.27              = 110,962.09
+       Uber's wire, Mon 2026-09-14                        = 111,179.66
+       difference                                              217.57  (0.20%)
+
+     The two registers agree to a fifth of one percent. They still count
+     different events — a week of per-driver earnings is not a transfer — and
+     that difference in KIND, not a seven-percent disagreement in SIZE, is the
+     reason the measured page is read first. The ordering survives its evidence
+     being corrected; the operator no longer gets told their books are out by
+     seven percent. See api/public/payouts.js for the per-transfer comparison
+     that now does this arithmetic against the week each wire names, rather
+     than by hand in a comment against whichever wire was nearest. */
   { id: 'payouts', label: 'Payouts to the bank', ic: '⇛', sec: 'Finance', sub: 'Every transfer a platform actually made to the company account, on the date it arrived' },
   { id: 'reconcile', label: 'Bank reconciliation', ic: '⇌', sec: 'Finance', sub: 'For each month, what the platforms paid us against what their statements say they owed' },
   { id: 'settlement', label: 'Cash and unpaid', ic: '◫', sec: 'Finance', sub: 'Who pays for the ride, how much cash drivers hold, and what is still unpaid' },

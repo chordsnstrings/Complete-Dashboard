@@ -931,8 +931,8 @@ called by these two endpoints and by nothing else in the codebase.
 
 | # | what | fix | state |
 |---|---|---|---|
-| — | `min(at)` over `driver_status_event` was a sequential scan: the table's only index mentioning `at` (`dse_driver_idx`) has it in **second** position, which a whole-table `min()` cannot use | `sql/schema_v73.sql` — plain ascending `(at)` | written, committed — **deploy and proof pending** |
-| — | the heap it scanned was mostly dead tuples: `src/sources/uber.js:1919` re-upserts every status entry of every driver every `LIVE_STATUS_SECONDS` (120 s), and `upsertMany` rewrote each row whether or not a byte had changed | `src/db.js` — both writers guard `DO UPDATE` with `WHERE (tbl.cols) IS DISTINCT FROM (EXCLUDED.cols)` | written, committed — **deploy and proof pending** |
+| — | `min(at)` over `driver_status_event` was a sequential scan: the table's only index mentioning `at` (`dse_driver_idx`) has it in **second** position, which a whole-table `min()` cannot use | `sql/schema_v73.sql` — plain ascending `(at)` | written, committed, deployed, **proven** |
+| — | the heap it scanned was mostly dead tuples: `src/sources/uber.js:1919` re-upserts every status entry of every driver every `LIVE_STATUS_SECONDS` (120 s), and `upsertMany` rewrote each row whether or not a byte had changed | `src/db.js` — both writers guard `DO UPDATE` with `WHERE (tbl.cols) IS DISTINCT FROM (EXCLUDED.cols)` | written, committed, deployed, **proven** |
 
 **Proof method.** Two reversions, both run:
 
@@ -975,7 +975,7 @@ not care whether a single row qualifies. On `basic-xxs`, one vCPU.
 
 | # | what | fix | state |
 |---|---|---|---|
-| — | JIT compiled every wide statement on a one-vCPU box and charged more for the compile than the query | `src/db.js` sets `jit = off` on every pooled connection, `PG_JIT=on` restores the default | written, committed — **deploy and proof pending** |
+| — | JIT compiled every wide statement on a one-vCPU box and charged more for the compile than the query | `src/db.js` sets `jit = off` on every pooled connection, `PG_JIT=on` restores the default | written, committed, deployed, **proven** |
 
 Off for the whole pool rather than for one route, because the same boot's
 slow-query log carries statements at 18.7 s, 17.4 s, 12.9 s and 11.1 s across
@@ -1098,3 +1098,94 @@ plate has Uber trips but none before the journey" was 1 of 120 under a lookback
 bounded at 2026-06-01 and 0 of 120 once it reached 2025-10-01 — a lookback
 artefact printed as a fact about a car. A date hard-coded in SQL rots into
 exactly that defect.
+
+---
+
+## Payouts to the bank — the live per-day ask, and two false claims retracted — WRITTEN AND TESTED, DEPLOY AND PROOF PENDING — 2026-09-17
+
+**Nothing in this section is proven.** Every line below is at *written* and
+*committed*. The word **proven** is reserved, as this file's header says, for a
+re-measurement on production *after* the deploy — and the header's own sentence
+is the reason it matters here: the suite passing tells you the tests agree with
+the code, not that the code agrees with the fleet. The two headline figures in
+this work were read live from Uber, but the routes and the page that print them
+have never served a request on production.
+
+### What was wrong — three things, and the second was the expensive one
+
+**1. The Payouts page could show almost no Uber history, and could not say why.**
+`platform_account_day` held 4 statement days for `uber/ecosine` (2026-08-17 ..
+08-20) and 1 payout; 19 days for `uber/egari` (08-17 .. 09-09) and 2 payouts;
+Bolt held 175 payouts over 2024-12-23 .. 2026-09-07; Yango publishes no transfer
+at all. The cause was not a broken collector. `collect()` in
+`src/sources/uber_payout.js` opens `if (mode === 'incremental') return;`, so it
+runs only on the 21:00 UTC catch-up and the Sunday backfill; `missingDays()`
+filled strictly **oldest first**, 24 days per fleet per run, and Uber's report
+limiter cut the night of 2026-09-16 to 4 of the 8 days asked for Ecosine.
+**Monday 2026-09-14 — the wire that settles the only fully closed week the
+product can talk about — was the 25th missing day for Ecosine, one past the
+budget.** The most valuable day in the backlog was last in the queue.
+
+**2. The page printed a 7.1% discrepancy that does not exist.** It said this
+register and Bank reconciliation were "7.1% apart", citing AED 110,962.09 against
+AED 103,567.54. 110,962.09 is Ecosine's week of Mon 7 – Sun 13 Sep 2026;
+103,567.54 is the wire paid on **Mon 7 Sep**, which settles **31 Aug – 6 Sep**.
+It compared a week against the previous week's wire. 7,394.55 / 103,567.54 =
+7.14%, which is where the printed 7.1% came from. The wire that settles 7–13 Sep
+is **111,179.66**, paid Mon 14 Sep, and against that one the difference is **AED
+217.57 — 0.20%**. An operator was being told their books were out by seven
+percent when they agree to a fifth of one percent.
+
+**3. "The Monday transfer equals the previous week's closing balance, to the
+fils, proven over two consecutive weeks" was not proven.** It was stated in
+`settlesWeek()`'s comment in `src/sources/uber_payout.js`, on the page, and in
+`docs/COVERAGE.md`. Three Ecosine Mondays are now measurable:
+
+| Monday | opening balance | wire | wire − opening |
+|---|---|---|---|
+| 2026-08-17 | 57,791.73 | 57,810.41 | **+18.68** |
+| 2026-09-07 | 103,567.54 | 103,567.54 | **0.00** |
+| 2026-09-14 | 111,279.92 | 111,179.66 | **−100.26** |
+
+The **cadence** — a Monday wire settling the preceding Mon–Sun week — holds on
+all three and is what the code now relies on. The **equality** holds on one of
+three and has stopped being asserted anywhere.
+
+### What was built, and the state of each
+
+| what | where | state |
+|---|---|---|
+| `POST /api/finance/payouts/verify` — asks Uber LIVE, one day at a time, 1–5 days per call, stores what Uber said, answers with the wire, the week it settles, our own figure and the difference | `api/payout_routes.js` | **written, in the working tree — not yet committed, deployed or proven** |
+| `GET /api/finance/payouts/reconcile` — read-only, no live ask; wire against `sum(driver_payout_day.earnings)` over the period each transfer names, plus `unchecked` for the days nobody has asked about | `api/payout_routes.js` | **written, in the working tree — not yet committed, deployed or proven** |
+| `checked_at` on `platform_account_day` — when a HUMAN last put this day to Uber, nullable, written only by the live path; `collected_at` cannot answer it because a day is asked once and never rewritten | `sql/schema_v74.sql`, registered in `src/schema_files.js` | **written, in the working tree — not yet committed, and not yet replayed on production** |
+| Mondays-first collection ordering, so the wires are discovered before the rest of the backlog rather than after it | `src/sources/uber_payout.js` | **written, in the working tree — not yet committed, deployed or proven** |
+| The page panel: the difference first, the week each wire settles beside it, the balance difference shown as a difference and never as a check that should come out at zero, and the unasked days named as unasked | `api/public/payouts.js` | **written, in the working tree — not yet committed, deployed or proven** |
+| The wrong-week comparison retracted, the ordering argument kept | `api/public/app.js` (Finance nav), `api/public/payouts.js`, `api/payout_routes.js` (comment and the note string it serves), `src/sources/uber_payout.js`, `docs/COVERAGE.md`, `api/probe.js` (corrected during integration), `mockapi.mjs` (corrected during integration — it SERVES both retracted sentences as rendered copy, so every mock render and screenshot pass printed them), and `src/schema_files.js`. `sql/schema_v71.sql:9` carries a seventh copy which **must not be edited** — an old schema file is replayed by sha and editing it silently does nothing on production — so its correction lives in that file's registration comment in `src/schema_files.js` | **written, in the working tree — not yet committed, deployed or proven** |
+| The no-date-column constraint and the wrong-period trap written down | `docs/COVERAGE.md` — Uber section and the standing traps list | **written, in the working tree** |
+
+### The one fact under all of it, now written down
+
+Uber's `REPORT_TYPE_PAYMENTS_ORGANIZATION` **has no date column.** A multi-day
+window returns one aggregate row for the window, so the only way to learn which
+day a transfer landed on is to ask for a one-day window. That is why the report
+is asked one day at a time, why a year of history is 365 report builds per fleet,
+why the limiter sets the fill rate, and why a day with no row is a day nobody
+asked about rather than a day with no transfer. It was the unstated assumption
+under the whole collector and it was nowhere in the documentation until today.
+
+### What still has to happen before any of this is "proven"
+
+1. Deploy both services and let `sql/schema_v74.sql` replay.
+2. `POST /api/finance/payouts/verify` on production for `ecosine`,
+   `2026-09-14` — the wire must come back **111,179.66**, `settles` must read
+   **2026-09-07 .. 2026-09-13**, and the delta against our 110,962.09 must be
+   **217.57 / 0.20%**.
+3. `GET /api/finance/payouts/reconcile` on production, cache-busted, and read
+   the Bolt rows: `calculated`, `delta` and `delta_pct` must be **null** with
+   `calculated_basis` naming the reason, because Bolt states no period. A zero
+   there is the defect this whole batch exists to stop.
+4. Screenshot the page with the panel filled, and confirm the Finance nav no
+   longer carries a seven-percent claim anywhere.
+
+Until all four are done, every row in the table above stays at **written,
+committed**.
