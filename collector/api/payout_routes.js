@@ -385,6 +385,8 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
               p.source,
               a.opening_balance,
               a.checked_at,
+              p.audit_amount,
+              p.audited_at,
               c.calculated,
               c.driver_days,
               c.days_with_rows,
@@ -650,6 +652,44 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
         + 'now. Today is excluded because the Dubai day is still in progress.',
     }));
 
+    /* WHAT THE TRANSACTION REPORT HAS CHECKED, AND OVER WHICH MONTHS.
+       ────────────────────────────────────────────────────────────────────
+       The register is built by asking Mondays first, so it cannot prove a wire
+       never landed on a Thursday — every one of the twenty payout dates found
+       across seventeen months IS a Monday, which makes the cadence very likely
+       and not checked. sql/schema_v76.sql records which windows
+       REPORT_TYPE_PAYMENTS_ORDER has been read over; that report is per
+       transaction and dated row by row, so a window it has read is a window
+       where no wire can have been missed whatever weekday it fell on.
+
+       A period with no audit row is NOT a period with no missed wires, and the
+       page must be able to say which of the two it is looking at. */
+    const audit = await q(
+      `SELECT platform, fleet_id,
+              to_char(period_start, 'YYYY-MM-DD') AS period_start,
+              to_char(period_end, 'YYYY-MM-DD')   AS period_end,
+              wires_found, wires_new, detail, audited_at
+         FROM payout_audit
+        WHERE outcome = 'audited'
+          AND period_end >= $1::date AND period_start <= $2::date
+          AND ($3::text IS NULL OR $3 = 'uber')
+          AND ($4::text IS NULL OR fleet_id = $4)
+        ORDER BY period_start DESC`, p);
+
+    /* The wires the two Uber reports disagree about — the one thing here
+       nobody should have to go looking for. NOT resolved: the row carries both
+       figures, because deciding by writing order would destroy the only
+       evidence that they differ. */
+    const disagree = out.filter((r) => r.audit_amount != null
+      && Math.abs(Number(r.audit_amount) - Number(r.wire)) >= 0.01)
+      .map((r) => ({ platform: r.platform, fleet_id: r.fleet_id, paid_on: r.paid_on,
+        register: r.wire, transaction_report: Number(r.audit_amount),
+        difference: Math.round((Number(r.audit_amount) - Number(r.wire)) * 100) / 100 }));
+
+    const auditedDays = audit.reduce((a, w) => a
+      + Math.round((Date.parse(`${w.period_end}T12:00:00Z`)
+        - Date.parse(`${w.period_start}T12:00:00Z`)) / 864e5) + 1, 0);
+
     res.json({
       window: [from, to],
       /* THE APPLIED FILTER TRAVELS WITH THE ANSWER, AND IT IS NOT DECORATION.
@@ -667,6 +707,22 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
       rows: out,
       totals,
       unchecked,
+      audit: {
+        windows: audit,
+        audited_days: auditedDays,
+        wires_the_audit_added: audit.reduce((a, w) => a + (w.wires_new || 0), 0),
+        disagreements: disagree,
+        means: audit.length
+          ? 'Each window here has been read from Uber’s per-transaction payments report, '
+            + 'where every row carries its own date — so within these dates no transfer can '
+            + 'have been missed, on any weekday. Outside them the register was built by '
+            + 'asking the days most likely to carry a wire, and that is a strong expectation '
+            + 'rather than a check.'
+          : 'No window has been checked against the per-transaction report yet, so every '
+            + 'transfer here rests on the register having asked the right days. Every payout '
+            + 'date found so far is a Monday, which is why the walk asks Mondays first — and '
+            + 'why the walk cannot itself be the thing that proves a Thursday was clear.',
+      },
       note: 'Each row is one transfer that reached the bank, beside our own figure for the '
         + 'week that transfer settles — sum(driver_payout_day.earnings), which is what Bank '
         + 'reconciliation calls "bank payout". delta is the wire MINUS our figure, so a '

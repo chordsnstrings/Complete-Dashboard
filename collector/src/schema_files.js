@@ -142,4 +142,13 @@ export const SCHEMA_FILES = [
      payout work needs. Three outcomes, not a done flag: stored, empty and
      refused are different facts and only refused is retried. */
   'schema_v75.sql',
+  /* The transaction ledger's verdict on the wire register. The register is
+     built from a report that carries one aggregate row and no date, so it is
+     asked a day at a time and the walk asks Mondays first — and every one of
+     the twenty payout dates found across seventeen months IS a Monday, which
+     makes the cadence very likely and not checked. REPORT_TYPE_PAYMENTS_ORDER
+     is per transaction and dated, so one report over a window names every wire
+     in it whatever weekday it fell on. See the file for the probe that
+     established that and for why the audit never overwrites a stored amount. */
+  'schema_v76.sql',
 ];

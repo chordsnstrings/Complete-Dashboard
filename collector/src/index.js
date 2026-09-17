@@ -9,7 +9,7 @@ import cron from 'node-cron';
 import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility } from './settings.js';
-import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk } from './run.js';
+import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit } from './run.js';
 import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
 import { log } from './log.js';
@@ -163,6 +163,18 @@ async function main() {
        nowhere mentions the word it scans for — a guard left behind by a real
        defect, and blunter than its subject. The phrasing here avoids it rather
        than the guard being widened to accommodate a comment.) */
+    /* THE AUDIT, ONCE A DAY AND NOWHERE NEAR THE WALK.
+       ──────────────────────────────────────────────────────────────────────
+       It reads a MONTH of Uber's per-transaction payments report to check that
+       the register missed no wire — see src/sources/uber_payout_orders.js for
+       the probe that established that report is dated row by row. One report of
+       that size is minutes of generation and holds the single payment-report
+       slot while it runs, so it goes at 23:40 UTC: after the 22:40 probe, and
+       twenty minutes clear of the 00:20 walk in either direction. One window
+       per fleet per run, newest un-audited first, because what wants checking
+       is what is being shown. */
+    cron.schedule('40 23 * * *', () => payoutAudit()
+      .catch((e) => log.error('scheduler', 'uber payout audit', { err: String(e) })));
     cron.schedule('20 */2 * * *', () => payoutWalk()
       .catch((e) => log.error('scheduler', 'uber payout walk', { err: String(e) })));
 

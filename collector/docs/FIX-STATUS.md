@@ -1277,3 +1277,49 @@ whether a backfill converges or stalls. None of it is proven until the walk has
 run on production under the new cadence and the unasked counts have come down.
 The first run is within two hours of the deploy; the counts to beat are
 **ecosine 390** and **egari 378**.
+
+
+---
+
+## Option C: the Mondays-first register, checked by the dated report
+
+The operator picked C after the probe. A is the register, B is the audit, and
+they are different questions asked of different reports.
+
+**A is deployed and PROVEN.** The Mondays-first ordering and the history floor
+(the fleet's first Uber trip, rather than the catch-up's 30 days) took the wire
+register from **1 transfer** to **30**, spanning **2025-04-07 to 2026-09-14** —
+seventeen months — in about three hours of two-hourly walking. The walk log
+shows it reaching 2025: ecosine 2025-06-16 (49,500.96), 06-23 (57,333.98),
+06-30 (49,922.20), 07-07 (49,283.65), 07-14 (45,362.26); egari 2025-04-28
+(42,476.60), 05-05 (45,542.30), 05-12 (36,676.26). **All twenty payout dates
+are Mondays.**
+
+**B is what makes that a check rather than an expectation.** The probe
+established, on production, that `REPORT_TYPE_PAYMENTS_ORDER` is per
+transaction (399+ rows for one day), that the wire is a row of it
+(`Description` = `so.payout`, holding exactly −111,179.66 on 2026-09-14), and
+that every row is dated by `vs reporting` (399/399 date-like; range = the
+window's day). So one report over a month names every wire in it, on any
+weekday.
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | the register could not show past payments at all | Mondays-first ordering + the fleet's-first-trip floor | deployed, **proven**: 1 → 30 wires, 17 months |
+| — | "every wire is a Monday" was an expectation the walk could not check | `src/sources/uber_payout_orders.js` reads the dated report; `payout_audit` (sql/schema_v76.sql) records which windows were read | written, committed — **deploy and proof pending** |
+| — | two Uber reports could disagree about one transfer and the later write would win | `platform_payout.audit_amount` beside `amount`, never over it; the page prints both | written, committed — **deploy and proof pending** |
+| — | the page could not distinguish "checked" from "expected" | a band naming the audited windows, and saying plainly that an unaudited period is not a clean one | written, committed — **deploy and proof pending** |
+
+**Why B is not used for the backfill.** Generation cost scales with the
+transactions in the window, not the number of requests: an eight-day ORDER
+report took ~13 minutes (~1.6 min per day of data) against ~1.7–2.4 min per day
+for a one-day ORGANIZATION ask. A year of ORDER means generating a year of
+transaction rows however it is chunked; a year of Mondays asks for 56 days of
+data. **Asking less beats asking less often** — which is why A is the collector
+and B runs once a day, off the hot path, at 23:40 UTC.
+
+**Proof owed.** The audit's first run is 23:40 UTC tonight. What would prove it:
+a `payout_audit` row with `outcome = 'audited'`, and either `wires_new = 0`
+across the audited window — the Monday cadence confirmed by a report that could
+have contradicted it — or a wire it found that the register did not hold, which
+is the audit earning its keep on the first night.

@@ -556,8 +556,17 @@ console.log('\nthe retracted 7.1% comparison survives only as a retraction');
      assertion is about ASSERTING the equality rather than mentioning it — so
      a denial is allowed and a claim is not. */
   const flat = code.replace(/'\s*\+\s*'/g, '').replace(/\s+/g, ' ');
-  const fils = [...flat.matchAll(/.{0,90}to the fils.{0,60}/g)].map((m) => m[0]);
-  check('no rendered string asserts the balance equality, however it wraps',
+  /* SCOPED TO THE CLAIM, NOT TO THE PHRASE. The retracted sentence is "the
+     transfer equals the previous week's CLOSING BALANCE to the fils". "To the
+     fils" on its own is this product's idiom for exactness and appears in
+     honest sentences about other quantities — the audit band says Uber's two
+     REPORTS agree to the fils, which is a measured finding and not the claim
+     this guard exists to stop. Requiring the word "balance" nearby is what
+     makes the difference; without it the guard fails correct copy, and a check
+     that flags correct code is one people learn to ignore. */
+  const fils = [...flat.matchAll(/.{0,120}to the fils.{0,80}/g)].map((m) => m[0])
+    .filter((h) => /balance/i.test(h));
+  check('no rendered string asserts the wire equals the balance, however it wraps',
     fils.every((h) => /not expected|does not|never|retract|used to|not reliably/i.test(h)),
     JSON.stringify(fils));
 
@@ -570,10 +579,11 @@ console.log('\nthe retracted 7.1% comparison survives only as a retraction');
   const shown = await rendered.evaluate(() => document.body.innerText);
   check('and the rendered page says "7.1%" nowhere', !/7\.1\s*%/.test(shown),
     (shown.match(/.{0,80}7\.1\s*%.{0,80}/) || [''])[0]);
-  check('and the rendered page does not assert the balance equality',
-    [...shown.matchAll(/.{0,90}to the fils.{0,60}/g)]
+  check('and the rendered page does not assert the wire equals the balance',
+    [...shown.matchAll(/.{0,120}to the fils.{0,80}/g)]
+      .filter((m) => /balance/i.test(m[0]))
       .every((m) => /not expected|does not|never|retract|used to|not reliably/i.test(m[0])),
-    (shown.match(/.{0,120}to the fils.{0,60}/) || [''])[0]);
+    (shown.match(/.{0,140}balance.{0,60}to the fils/) || [''])[0]);
 }
 
 await browser.close();

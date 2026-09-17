@@ -5351,6 +5351,22 @@ app.get('/api/finance/payouts/reconcile', (_, r) => {
           + 'way it is a day with no measurement, and a day with no measurement cannot be '
           + 'reported as a day with no transfer.' },
     ],
+    /* The audit band: one window checked, and one transfer where Uber's two
+       reports disagree — because a panel that only ever renders agreement is a
+       panel whose disagreement branch nobody has seen. */
+    audit: {
+      windows: [{ platform: 'uber', fleet_id: 'ecosine',
+        period_start: '2026-08-18', period_end: '2026-09-17',
+        wires_found: 5, wires_new: 1, detail: null,
+        audited_at: '2026-09-17T23:40:00.000Z' }],
+      audited_days: 31,
+      wires_the_audit_added: 1,
+      disagreements: [{ platform: 'uber', fleet_id: 'ecosine', paid_on: '2026-08-31',
+        register: 77796.52, transaction_report: 77796.02, difference: -0.5 }],
+      means: 'Each window here has been read from Uber’s per-transaction payments report, '
+        + 'where every row carries its own date — so within these dates no transfer can have '
+        + 'been missed, on any weekday.',
+    },
     note: 'Each row is one transfer that reached the bank, beside our own figure for the week '
       + 'that transfer settles. delta is the wire MINUS our figure.',
   });

@@ -827,6 +827,47 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **Uber has TWO payments reports and they answer different questions — asking
+  the wrong one costs either the date or the day.**
+
+  | | `PAYMENTS_ORGANIZATION` | `PAYMENTS_ORDER` |
+  |---|---|---|
+  | shape | **one aggregate row per request** | **one row per transaction** (~400/day) |
+  | date column | **none** | `vs reporting`, on every row |
+  | the wire | `Payouts : Transferred To Bank Account` | a row with `Description` = `so.payout` |
+  | multi-day window | returns ONE row covering the whole span | returns every day's rows, each dated |
+  | cost | ~1.7–2.4 min per day of data | ~1.6 min per day of data (8-day report ≈ 13 min) |
+
+  **The trap in each direction.** Ask ORGANIZATION over two days to "halve the
+  work" and you get one aggregate presented as a day — a wrong number that
+  looks right. Reach for ORDER to backfill a year and you pay to generate a
+  year of transaction rows, because generation cost scales with the data in the
+  window and not with the number of requests. **Asking less beats asking less
+  often:** a year of Mondays is 56 days of data; a year of ORDER is 365.
+
+  So the register is built from ORGANIZATION, Mondays first, and ORDER is the
+  AUDIT — one report over a month names every wire in it whatever weekday it
+  fell on. Measured 2026-09-17: twenty payout dates across seventeen months
+  (2025-04-07 to 2026-09-14), every single one a Monday.
+
+* **"Every wire we found is a Monday" is not "no wire lands on a Thursday", and
+  the walk that found them cannot tell you which.** It asks Mondays first
+  *because* that is where wires are, so a non-Monday wire is the last day it
+  reaches — or, in any period it has not finished, one it never reaches. A
+  register built that way looks complete at exactly the moment it is least able
+  to prove it is. This is the general shape: **a search ordered by where you
+  expect the answer can never be the evidence that the answer is not
+  elsewhere.** `payout_audit` (sql/schema_v76.sql) records which windows the
+  dated report has been read over, and the page says so rather than letting the
+  absence of an audit read as the absence of a problem.
+
+* **When two provider reports disagree about one figure, store both.** The
+  audit writes what `PAYMENTS_ORDER` says into `platform_payout.audit_amount`
+  and NEVER into `amount`. Resolving the difference by writing order would
+  destroy the only evidence that there is a difference — and on a money page a
+  silent choice between two of the provider's own numbers is the worst kind of
+  invisible decision. The page prints both.
+
 * **"Which days am I missing?" answered from the STATEMENT table re-asks every
   dead day for ever — and the bug only appears when the window widens.**
   `missingDays()` returned the days with no row in `platform_account_day`. A

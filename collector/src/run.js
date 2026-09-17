@@ -11,6 +11,7 @@ import * as uberProfile from './sources/uber_profile.js';
    reports asked at once shut it for minutes. So it walks one day at a time,
    bounded per run, and skips a day it has already stored. */
 import * as uberPayout from './sources/uber_payout.js';
+import * as uberPayoutOrders from './sources/uber_payout_orders.js';
 import * as yango from './sources/yango.js';
 import * as bolt from './sources/bolt.js';
 import * as cabman from './sources/cabman.js';
@@ -415,6 +416,19 @@ export const catchUp = (days = 30, onProgress, fleet = null, jobId = null) =>
    asked again. */
 export const payoutWalk = (fleet = null) =>
   uberPayout.collect({ from: daysAgo(30), to: new Date(), mode: 'payout-walk', fleet });
+
+/* THE AUDIT, WHICH IS A DIFFERENT QUESTION FROM THE WALK.
+   ─────────────────────────────────────────────────────────────────────────
+   payoutWalk() BUILDS the register, a day at a time, Mondays first — and
+   because it asks Mondays first it can never be the thing that proves no wire
+   landed on a Thursday. src/sources/uber_payout_orders.js reads the
+   transaction ledger instead, where every row is dated, so one report over a
+   window names every wire in it whatever weekday it fell on.
+
+   Rarely and off the hot path: the report is per-transaction and its
+   generation cost scales with the month's trips, so this is an audit rather
+   than a collection route. One window per fleet per run. */
+export const payoutAudit = (fleet = null) => uberPayoutOrders.collect({ fleet });
 
 // CABMAN realtime GPS — fixed 5-minute refresh, persisted to telemetry_snapshot (via cabman.collect,
 // which upserts snapshots and writes a collection_run row). This is the owner of CABMAN data.

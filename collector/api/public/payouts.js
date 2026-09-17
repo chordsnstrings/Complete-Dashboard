@@ -676,6 +676,7 @@ function drawReconcile(hostEl, rec, run) {
     p.body.append(note('No transfer reached the bank inside this window, so there is nothing '
       + 'to compare. That is a fact about the window and not about the providers — widen it, '
       + 'or read the band below for the days nobody has asked Uber about.'));
+    drawAudit(hostEl, rec);
     drawUnchecked(hostEl, rec, run);
     return;
   }
@@ -834,6 +835,63 @@ function drawReconcile(hostEl, rec, run) {
 
    So the count is stated, per fleet, in plain English, and the button is
    right there. */
+/* ── what has actually been CHECKED, as opposed to expected ───────────────
+   The register is built by asking Uber the days most likely to carry a wire,
+   and every payout date found so far is a Monday — so it is a strong
+   expectation and not a check. Uber's per-transaction report dates every row,
+   so a window read from it is a window where no transfer can have been missed
+   on any weekday. This band says which months those are, and never lets the
+   absence of an audit read as the absence of a problem. */
+function drawAudit(hostEl, rec) {
+  const a = rec.audit;
+  if (!a) return;
+  const p = panel('What has been checked against Uber’s transaction report',
+    'The register asks the days a wire is likely to fall on. This is the separate read that '
+    + 'can say nothing was missed on the other days.', 'payout-audit');
+  hostEl.append(p.panel);
+
+  if (!a.windows || !a.windows.length) {
+    p.body.append(note(a.means, 'warn'));
+    return;
+  }
+  p.body.append(note(`${countOf(a.audited_days, 'day')} checked across `
+    + `${countOf(a.windows.length, 'window')}. ${a.means}`));
+
+  if (a.wires_the_audit_added) {
+    /* The audit earning its keep, and the sentence an operator must not miss:
+       a transfer the register did not hold until the transaction report named
+       it. */
+    p.body.append(note(`The check found ${countOf(a.wires_the_audit_added, 'transfer')} the `
+      + 'register did not hold — they are in the table above now, with their source naming '
+      + 'the transaction report rather than the daily statement.', 'warn'));
+  }
+
+  if (a.disagreements && a.disagreements.length) {
+    /* TWO UBER REPORTS DISAGREEING ABOUT ONE TRANSFER. Neither is overwritten
+       and neither is preferred here: both figures are printed, because a
+       product that silently picked one would be deciding a money question by
+       writing order. */
+    p.body.append(note(`${countOf(a.disagreements.length, 'transfer')} where Uber’s two `
+      + 'reports do not agree. Neither figure has been overwritten — both are shown, because '
+      + 'choosing one would be deciding a money question by which report was read last.',
+    'warn'));
+    p.body.append(tableFrom(a.disagreements, [
+      { label: 'Arrived', key: 'paid_on', render: (r) => esc(dayStr(r.paid_on)) },
+      { label: 'Fleet', key: 'fleet_id', render: (r) => esc(sourceLabel(r.fleet_id) || r.fleet_id) },
+      { label: 'Daily statement', key: 'register', num: true,
+        render: (r) => esc(money(r.register, 'AED', 2)) },
+      { label: 'Transaction report', key: 'transaction_report', num: true,
+        render: (r) => esc(money(r.transaction_report, 'AED', 2)) },
+      { label: 'Difference', key: 'difference', num: true,
+        cellCls: () => 'bad',
+        render: (r) => `<b class="dl">${esc(signedMoney(r.difference))}</b>` },
+    ], { sortId: 'payout-audit-disagree' }));
+  } else {
+    p.body.append(note('Every transfer inside the checked windows matches between Uber’s '
+      + 'daily statement and its per-transaction report, to the fils.'));
+  }
+}
+
 function drawUnchecked(hostEl, rec, run) {
   const unchecked = Array.isArray(rec.unchecked) ? rec.unchecked : [];
   const p = panel('What we have not asked Uber about',
