@@ -1189,3 +1189,43 @@ under the whole collector and it was nowhere in the documentation until today.
 
 Until all four are done, every row in the table above stays at **written,
 committed**.
+
+
+---
+
+## The payout register verified against Uber, and past payments filled
+
+Deployed 2026-09-17. **Proven on production**, by asking Uber through the new
+route and reading the answer back out of the register.
+
+`POST /api/finance/payouts/verify` for `ecosine 2026-09-14`, live, 2.3 s:
+
+```
+wire        111179.66
+settles     2026-09-07 .. 2026-09-13
+before      {wire: null, had_statement: false}     <- we held nothing for that day
+our figure  110962.09   (1,148 driver-days)
+DIFFERENCE  {value: 217.57, pct: 0.2}
+balance     opening 111279.92, wire 111179.66, difference -100.26
+uber row    opening 111279.92 | earnings 20816.90 | cash -4183.10
+            | bank -111179.66 | closing 18024.34
+```
+
+`GET /api/finance/payouts/reconcile` answers in **0.80 s** over 112 transfers,
+Bolt rows carrying a stated absence rather than a zero.
+
+Past payments: seven Uber wires now carry the full comparison, against one
+before this change. The table is in `docs/COVERAGE.md` — largest gap 0.72%,
+signs in both directions.
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | the page could show no Uber payout history and could not ask for any | `POST /api/finance/payouts/verify`, `GET /api/finance/payouts/reconcile`, the page panel | written, committed, deployed, **proven** |
+| — | the collector reached a wire 25th of 27 missing days, outside its nightly budget | Mondays-first ordering in `missingDays()` | written, committed, deployed — **not yet proven**: the first nightly walk under it runs at 21:00 UTC tonight |
+| — | "7.1% apart" and "equals the previous week's closing balance to the fils" | retracted in seven files; see COVERAGE | written, committed, deployed, **proven** |
+| — | a five-day ask was cut by the platform at 300 s with no response, after storing three days | `PAYOUT_VERIFY_BUDGET_MS`, checked before each day, un-reached days reported as refused with the true reason | written, committed — **deploy and proof pending** |
+
+**Found by using it, not by reviewing it.** The 300-second ceiling is not in any
+document and no test could have found it: it is a property of the platform, not
+of the code, and it only appears on a request that actually walks a slow
+provider. It is now a trap in `docs/COVERAGE.md`.

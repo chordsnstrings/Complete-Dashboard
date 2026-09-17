@@ -111,6 +111,28 @@ const weekDays = (w) => {
 
 const FLEETS = ['ecosine', 'egari'];
 const MAX_DAYS = 5;
+/* THE PLATFORM CLOSES A REQUEST BEFORE FIVE DAYS CAN FINISH, SO THE LOOP STOPS
+   ITSELF FIRST.
+   ─────────────────────────────────────────────────────────────────────────
+   MEASURED ON PRODUCTION 2026-09-17, on the first real use of this route: a
+   five-day ask for ecosine was cut by DigitalOcean's load balancer at
+   300.46 s with no response at all — curl reported http=000. The work had NOT
+   failed. Three of the five days were asked, answered and STORED; the operator
+   simply received nothing, and had no way to know which three. That is the
+   worst shape a money page can take: the register moved and the page said
+   nothing moved.
+
+   MAX_DAYS is a bound on the ASK. This is a bound on the REQUEST, and the two
+   are different limits: one Uber report takes between ten and forty seconds
+   and the limiter can add minutes, so five days fits inside 300 s on a good
+   run and does not on an ordinary one. The loop now checks the clock before
+   each day and stops while there is still time to answer, reporting every day
+   it did not reach as refused WITH THE TRUE REASON — not as a failure, and not
+   as a day with no transfer.
+
+   240 s leaves a minute for the response to be assembled and sent, which is
+   generous on a route whose remaining work after the loop is arithmetic. */
+const requestBudgetMs = () => Number(process.env.PAYOUT_VERIFY_BUDGET_MS || 240000);
 
 /* THE LIVE ASK, AND WHY IT IS AN INJECTION POINT.
    ─────────────────────────────────────────────────────────────────────────
@@ -772,7 +794,32 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
          Promise.all: three of these fired together is the exact shape that
          came back "Payment report generation limit reached" and then refused
          even a single request for several minutes. */
+      const startedAt = Date.now();
       for (const day of todo) {
+        /* THE CLOCK, CHECKED BEFORE THE ASK AND NOT AFTER IT. Asking and then
+           discovering there is no time to answer spends a report slot for
+           nothing; the days not reached are reported as not reached. */
+        /* >= AND NOT >, WHICH IS THE DIFFERENCE BETWEEN A RULE AND A RULE
+           WITH ONE EXCEPTION. With `>` the first day is always asked before
+           the clock is ever consulted, because elapsed is 0 at that point —
+           harmless in production, where the budget is 240 s and the first day
+           obviously fits, and fatal to the only test that can drive this
+           without waiting four minutes: a zero budget still spent a report
+           slot. `>=` makes the sentence "if the time spent has reached the
+           budget, stop" true without an exception, and production behaviour is
+           unchanged: 0 >= 240000 is false, so the first day is still asked. */
+        if (Date.now() - startedAt >= requestBudgetMs()) {
+          const left = todo.slice(todo.indexOf(day));
+          for (const d of left) {
+            refused.push({ day: d,
+              why: `not asked — this request had used ${Math.round((Date.now() - startedAt) / 1000)}s `
+                + `of its ${Math.round(requestBudgetMs() / 1000)}s budget and the platform closes `
+                + 'a request at 300s. Nothing was asked of Uber for this day and nothing was '
+                + 'stored for it, so it is still an unasked day. Ask again and it will be '
+                + 'picked up; the days above this one are already stored.' });
+          }
+          break;
+        }
         /* Read BEFORE the ask. stored_before is what the register held at the
            moment the operator pressed the button, and it is the only way the
            answer can say "this day was already stored and Uber now says

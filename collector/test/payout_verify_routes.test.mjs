@@ -690,6 +690,56 @@ console.log('\na second live ask is refused honestly rather than raced into the 
       { fleet: 'ecosine', days: ['2026-09-13'] })).status === 200);
 }
 
+console.log('\nthe request budget, which the platform enforces whether we do or not');
+
+/* MEASURED ON PRODUCTION 2026-09-17, the first real use of this route: a
+   five-day ask was cut by DigitalOcean's load balancer at 300.46 s with NO
+   response at all. The work had not failed — three of the five days were
+   asked, answered and stored — but the operator received nothing and could not
+   know which three. A money page whose register moves while the page says
+   nothing moved is the worst shape this product can take, so the loop now
+   stops itself before the platform does.
+
+   Driven through PAYOUT_VERIFY_BUDGET_MS rather than by waiting four minutes:
+   a test slower than the thing it tests is a test nobody runs. At 0 the budget
+   is spent before the first day, so every day lands in refused and NOTHING is
+   asked of the provider — which is the assertion that matters, because a day
+   reported as refused whose report slot had quietly been spent would be the
+   same lie facing the other way. */
+{
+  const prev = process.env.PAYOUT_VERIFY_BUDGET_MS;
+  process.env.PAYOUT_VERIFY_BUDGET_MS = '0';
+  let asked = 0;
+  const budgetApp = express();
+  budgetApp.use(express.json());
+  payoutRoutes(budgetApp, { ...m.deps,
+    uber: { orgFor: stub.orgFor,
+      oneDay: async () => { asked += 1; return { why: 'should never be reached' }; } } });
+  const bSrv = budgetApp.listen(0);
+  bSrv.keepAliveTimeout = 0;
+  const bPort = bSrv.address().port;
+
+  const r = await post(bPort, '/api/finance/payouts/verify',
+    { fleet: 'ecosine', days: ['2026-09-14', '2026-09-07'] });
+
+  check('the response arrives rather than being cut by the platform', r.status === 200,
+    String(r.status));
+  check('every day it could not reach is refused, not silently dropped',
+    (r.body.refused || []).length === 2, JSON.stringify(r.body.refused));
+  check('…and the reason is the budget, named with both numbers',
+    /budget/.test((r.body.refused || [])[0]?.why || '')
+    && /300s/.test((r.body.refused || [])[0]?.why || ''),
+    (r.body.refused || [])[0]?.why);
+  check('…and says the day is still unasked rather than a day with no transfer',
+    /still an unasked day/.test((r.body.refused || [])[0]?.why || ''),
+    (r.body.refused || [])[0]?.why);
+  check('and NOT ONE report slot was spent on a day it refused', asked === 0, String(asked));
+
+  bSrv.close();
+  if (prev === undefined) delete process.env.PAYOUT_VERIFY_BUDGET_MS;
+  else process.env.PAYOUT_VERIFY_BUDGET_MS = prev;
+}
+
 /* CLOSE BOTH SERVERS AND THE DATABASE, AND EXIT EXPLICITLY.
    ─────────────────────────────────────────────────────────────────────────
    mountAll calls app.listen(0) and deliberately sets keepAliveTimeout = 0 so

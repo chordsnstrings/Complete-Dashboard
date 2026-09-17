@@ -827,6 +827,46 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A request that takes longer than 300 seconds does not fail — it disappears,
+  and the work keeps going.** The first real use of
+  `POST /api/finance/payouts/verify` asked Uber for five Ecosine days. curl
+  reported `http=000` after **300.46 s**: DigitalOcean's load balancer closed
+  the connection. Nothing had gone wrong — **three of the five days were asked,
+  answered and stored** — but the caller received nothing and had no way to
+  know which three. On a money page that is the worst available outcome: the
+  register moved and the page said nothing moved. Any route that walks a slow
+  provider needs its OWN wall-clock budget, comfortably under 300 s, and must
+  report the items it did not reach with the true reason rather than letting
+  the platform truncate it. `PAYOUT_VERIFY_BUDGET_MS` (default 240,000) is that
+  budget; `MAX_DAYS` bounds the ASK and is a different limit from the one that
+  bounds the REQUEST. One Uber report takes 10–40 s and the limiter can add
+  minutes, so five days fits inside 300 s on a good run and not on an ordinary
+  one.
+
+* **Uber's wire and our own per-driver figure agree to well under one percent —
+  every week, in both directions.** Measured 2026-09-17 by asking Uber for each
+  Monday through `/api/finance/payouts/verify` and comparing against
+  `sum(driver_payout_day.earnings)` over the week each wire settles:
+
+  | Monday | fleet | wire | ours | difference | |
+  |---|---|---|---|---|---|
+  | 2026-09-14 | Ecosine | 111,179.66 | 110,962.09 | **+217.57** | +0.20% |
+  | 2026-09-07 | Ecosine | 103,567.54 | 103,768.44 | −200.90 | −0.19% |
+  | 2026-08-31 | Ecosine | 77,796.52 | 78,057.58 | −261.06 | −0.34% |
+  | 2026-08-24 | Ecosine | 66,863.51 | 66,544.64 | +318.87 | +0.48% |
+  | 2026-08-17 | Ecosine | 57,810.41 | 57,977.77 | −167.36 | −0.29% |
+  | 2026-08-24 | Egari | 29,856.60 | 29,681.86 | +174.74 | +0.59% |
+  | 2026-08-17 | Egari | 23,873.79 | 23,701.73 | +172.06 | +0.72% |
+
+  Seven weeks, largest gap 0.72%, sign in both directions — which is what a
+  rounding or timing residue looks like and is not what a systematic error
+  looks like. **This is the measurement that kills the "7.1% apart" story for
+  good**: that figure was never a property of the two registers, it was the
+  product comparing a week against the previous week's wire. Anyone tempted to
+  report a provider gap should produce a table like this one first — several
+  periods, signs in both directions — because a single period can disagree for
+  a reason that has nothing to do with either side being wrong.
+
 * **A PERIOD'S DERIVED FIGURE COMPARED AGAINST A TRANSFER THAT SETTLES A
   DIFFERENT PERIOD PRODUCES A LARGE, STABLE, ENTIRELY FICTIONAL DISCREPANCY.**
   Cost: a false 7.1% printed to operators on the Payouts page, and the same
