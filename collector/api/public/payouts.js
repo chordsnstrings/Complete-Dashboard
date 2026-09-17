@@ -844,19 +844,57 @@ function drawReconcile(hostEl, rec, run) {
   }
 
   /* ── every reason a row has no comparison, in full, under the table ───────
-     Grouped by the SENTENCE and not by the row, the way tableFrom groups its
-     own absent-column notes: Bolt files 175 transfers and every one of them
-     carries the identical reason, and printing it 175 times would bury the
-     one row that has a different one. */
+     GROUPED BY THE KIND OF ABSENCE, NOT BY THE SENTENCE THAT DESCRIBES IT.
+     ─────────────────────────────────────────────────────────────────────────
+     THE DEFECT, and it only became visible when this page started answering
+     over the whole register. The grouping key was `calculated_basis`, the
+     reason in full — which works perfectly for Bolt, whose 175 transfers carry
+     one identical sentence, and fails completely for Uber, whose sentence
+     NAMES THE WEEK: "no driver_payout_day rows are stored for uber/ecosine
+     between 2025-12-15 and 2025-12-21". One group per row.
+
+     MEASURED ON PRODUCTION 2026-09-17, the first whole-record render: 51
+     groups over 225 rows, 50 of them a single row, printing fifty notes each
+     reading "No comparison is made for 1 transfer (Uber), and that is not a
+     difference of zero" stacked down the middle of the money page. The one
+     note that said something different was buried under forty-nine that did
+     not — the exact outcome the grouping was written to prevent, produced by
+     the grouping itself.
+
+     So the key is the kind: platform, fleet, and `calculated_absent` from the
+     route. The SPAN replaces the single week, because fifty weeks is the
+     finding and one of them is an anecdote. Falls back to the old key when a
+     row carries no code, so a page loaded against an older API degrades to the
+     previous behaviour rather than losing the reasons altogether. */
   const byReason = new Map();
   for (const r of rows) {
     if (r.calculated != null) continue;
-    const k = r.calculated_basis || 'no reason was given for this, which is itself a defect';
+    const reason = r.calculated_basis || 'no reason was given for this, which is itself a defect';
+    const k = r.calculated_absent
+      ? `${r.platform}|${r.fleet_id}|${r.calculated_absent}`
+      : reason;
     if (!byReason.has(k)) byReason.set(k, []);
     byReason.get(k).push(r);
   }
-  for (const [reason, rs] of byReason) {
+  for (const rs of byReason.values()) {
     const who = [...new Set(rs.map((x) => sourceLabel(x.platform)))].join(', ');
+    const kind = rs[0].calculated_absent;
+    /* THE WEEKS THEY SETTLE, AS A SPAN, COUNTED FROM THE ROWS RATHER THAN
+       TAKEN FROM THE FIRST ONE. A note that names one week over fifty rows is
+       a note whose specificity is a lie about its scope. */
+    const starts = rs.map((x) => x.period_start).filter(Boolean).sort();
+    const ends = rs.map((x) => x.period_end).filter(Boolean).sort();
+    const span = starts.length && ends.length
+      ? `${dateStr(starts[0])} to ${dateStr(ends[ends.length - 1])}`
+      : null;
+    const reason = kind === 'no_driver_day_rows' && span
+      /* note() escapes what it is handed (api/public/ui.js), so this is plain
+         text and esc() here would print the entities. */
+      ? `We hold no driver_payout_day rows for the weeks ${who} says they settle — `
+        + `${countOf(rs.length, 'week')} spanning ${span}. The transfers are real and the `
+        + 'figure to compare them against has not been collected; that is a gap in what we '
+        + 'hold, and it is not a difference of zero.'
+      : rs[0].calculated_basis;
     p.body.append(note(`No comparison is made for ${countOf(rs.length, 'transfer')} (${who}), `
       + `and that is not a difference of zero. ${reason}`, 'warn'));
   }

@@ -5317,6 +5317,9 @@ app.get('/api/finance/payouts/reconcile', (_, r) => {
       { platform: 'uber', fleet_id: 'ecosine', paid_on: '2026-09-14',
         wire: 111179.66, period_start: '2026-09-07', period_end: '2026-09-13',
         calculated: 110962.09, delta: 217.57, delta_pct: 0.2,
+        /* null on the row that WAS compared — a code here would put a compared
+           row into the "no comparison is made" band under the table. */
+        calculated_absent: null,
         calculated_basis: 'sum of driver_payout_day.earnings for uber/ecosine over 2026-09-07 '
           + 'to 2026-09-13 — 7 of 7 days carrying rows, 7 driver-days. This is the same '
           + 'quantity Bank reconciliation calls "bank payout"; it is what the drivers earned, '
@@ -5327,6 +5330,7 @@ app.get('/api/finance/payouts/reconcile', (_, r) => {
       { platform: 'uber', fleet_id: 'ecosine', paid_on: '2026-09-07',
         wire: 103567.54, period_start: '2026-08-31', period_end: '2026-09-06',
         calculated: null, delta: null, delta_pct: null,
+        calculated_absent: 'no_driver_day_rows',
         calculated_basis: 'no driver_payout_day rows are stored for uber/ecosine between '
           + '2026-08-31 and 2026-09-06, so our own figure for the week this transfer settles '
           + 'has not been collected. The transfer is real; the thing to compare it against is '
@@ -5337,6 +5341,7 @@ app.get('/api/finance/payouts/reconcile', (_, r) => {
       { platform: 'bolt', fleet_id: 'ecosine', paid_on: '2026-09-07',
         wire: 2130.56, period_start: null, period_end: null,
         calculated: null, delta: null, delta_pct: null,
+        calculated_absent: 'provider_states_no_period',
         calculated_basis: 'bolt does not state which period a transfer settles, so there is no '
           + 'window to sum our own figure over. Nothing is compared here, and that is not a '
           + 'difference of zero.',

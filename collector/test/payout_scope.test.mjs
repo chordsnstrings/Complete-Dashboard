@@ -287,6 +287,59 @@ console.log('\nBolt’s cadence row states a count rather than a guessed rule');
     /does not say which period/.test(bolt?.cadence || ''), bolt?.cadence);
 }
 
+/* ══ 8. THE REASONS UNDER THE TABLE GROUP BY KIND, NOT BY SENTENCE ═══════
+   Also a whole-record defect: the page groups rows with no comparison by their
+   REASON before printing it, so Bolt's 175 identical sentences become one
+   note. The "no driver-day rows" sentence NAMES THE WEEK, so each Uber row was
+   its own group. Measured on the first whole-record production render: 51
+   groups over 225 rows, 50 of them a single row, fifty notes reading "No
+   comparison is made for 1 transfer (Uber)" stacked down the money page.
+
+   The route half is asserted here; the page half — grouping on the code — is
+   asserted by reading the source, the way §5 does, because it is a browser
+   function this harness does not run. */
+console.log('\nthe route names WHICH absence a row has, so the page can group by kind');
+{
+  /* Two Uber wires with a stated period and no driver-day rows behind it: the
+     rows whose sentences differ only in the dates they name. */
+  await payout({ platform: 'uber', fleet: 'ecosine', id: 'g1', day: '2025-12-22',
+    amount: 5000, from: '2025-12-15', to: '2025-12-21' });
+  await payout({ platform: 'uber', fleet: 'ecosine', id: 'g2', day: '2025-12-15',
+    amount: 6000, from: '2025-12-08', to: '2025-12-14' });
+  const r = await get('/api/finance/payouts/reconcile');
+  const g = r.rows.filter((x) => x.payout_ext_id || true)
+    .filter((x) => ['2025-12-22', '2025-12-15'].includes(x.paid_on));
+  check('both rows come back with no comparison', g.length === 2
+    && g.every((x) => x.calculated == null), JSON.stringify(g.map((x) => x.calculated)));
+  check('…their sentences differ, because each names its own week',
+    g[0].calculated_basis !== g[1].calculated_basis,
+    'the two reasons are identical, so this fixture proves nothing');
+  check('…and their absence CODE is the same, which is the groupable key',
+    g[0].calculated_absent === 'no_driver_day_rows'
+      && g[1].calculated_absent === g[0].calculated_absent,
+    `${g[0].calculated_absent} / ${g[1].calculated_absent}`);
+  const bolt = r.rows.find((x) => x.platform === 'bolt');
+  check('a provider that states no period is a different kind of absence',
+    bolt?.calculated_absent === 'provider_states_no_period', String(bolt?.calculated_absent));
+  /* The comparison being MADE must carry no code at all — a code there would
+     put a compared row into the "no comparison is made" band. */
+  const done = r.rows.find((x) => x.calculated != null);
+  check('a row that WAS compared carries no absence code',
+    !done || done.calculated_absent === null,
+    `${done?.paid_on} -> ${done?.calculated_absent}`);
+
+  const page = readFileSync(new URL('../api/public/payouts.js', import.meta.url), 'utf8');
+  check('the page groups on the code and the pair, not on the reason string',
+    /\$\{r\.platform\}\|\$\{r\.fleet_id\}\|\$\{r\.calculated_absent\}/.test(page),
+    'the grouping key is not built from calculated_absent');
+  check('…and it still falls back to the sentence when no code is sent',
+    /r\.calculated_absent\s*\n?\s*\?[\s\S]{0,120}:\s*\n?\s*reason;/.test(page),
+    'no fallback for a row without a code');
+  /* One week named over fifty is a specificity that lies about its scope. */
+  check('…and names the SPAN of the weeks rather than the first row’s week',
+    /spanning \$\{span\}/.test(page), 'the note does not state a span');
+}
+
 m.server.close();
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);

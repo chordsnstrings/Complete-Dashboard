@@ -569,8 +569,26 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
          house rule is that a figure which cannot be measured renders absent
          WITH A REASON, and "no period" and "a period with nothing in it" are
          not the same reason. */
+      /* THE KIND OF ABSENCE, BESIDE THE SENTENCE THAT DESCRIBES IT.
+         ──────────────────────────────────────────────────────────────────
+         THE DEFECT, caught on the first whole-record production render. The
+         page groups these rows by their REASON before printing it, precisely
+         so that Bolt's 175 identical reasons become one note instead of 175 —
+         and the 'no driver-day rows' sentence NAMES THE WEEK, so every Uber
+         row produced a group of one. Measured: 51 groups over 225 rows, of
+         which 50 were one row each, printing fifty notes reading "No
+         comparison is made for 1 transfer (Uber)" one under another, down the
+         money page, burying the one that was different — the exact outcome the
+         grouping was written to prevent.
+
+         A reason is not a grouping key. The KIND of absence is, and it is the
+         server's to name, because the server is where the three cases are
+         distinguished: the page would otherwise have to re-derive them by
+         matching the prose it is handed. */
       let basis;
+      let code;
       if (!stated && row.platform !== 'uber') {
+        code = 'provider_states_no_period';
         basis = `${row.platform} does not state which period a transfer settles, so there is `
           + 'no window to sum our own figure over. Nothing is compared here, and that is not '
           + 'a difference of zero.';
@@ -591,16 +609,19 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
            Printing Bolt's sentence over them would reproduce, word for word,
            the defect that comment calls "a sentence that is false for Uber and
            true for nobody". */
+        code = 'uber_period_not_derived';
         basis = 'this Uber transfer carries no settled period. Uber does not publish one — it '
           + 'is derived from the Monday cadence — so either the transfer was not on a Monday, '
           + 'or the row predates the fix to that derivation and was stored without one. '
           + 'Nothing is compared here, and that is not a difference of zero.';
       } else if (calculated == null) {
+        code = 'no_driver_day_rows';
         basis = `no driver_payout_day rows are stored for ${row.platform}/${row.fleet_id} `
           + `between ${row.period_start} and ${row.period_end}, so our own figure for the week `
           + 'this transfer settles has not been collected. The transfer is real; the thing to '
           + 'compare it against is missing.';
       } else {
+        code = null;
         basis = `sum of driver_payout_day.earnings for ${row.platform}/${row.fleet_id} over `
           + `${row.period_start} to ${row.period_end} — ${row.days_with_rows} of `
           + `${row.period_days} days `
@@ -622,6 +643,10 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
         period_end: row.period_end,
         calculated,
         calculated_basis: basis,
+        /* null when the comparison WAS made. Non-null names which of the three
+           absences this is, so the page can group by kind rather than by the
+           sentence — see the block above the if-chain. */
+        calculated_absent: code ?? null,
         delta,
         delta_pct: (delta == null || !wire) ? null : r2((delta / wire) * 100),
         opening_balance: openingBalance,
