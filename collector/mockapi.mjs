@@ -5258,7 +5258,14 @@ app.get('/api/finance/payouts', (_, r) => {
       { platform: 'bolt', publishes_payouts: true,
         how: 'Bolt’s fleet portal lists every payout with the second it completed, so each row '
           + 'is already a date.',
-        cadence: 'One payout per date, with no fixed weekday.',
+        /* Kept in step with api/payout_routes.js: "no fixed weekday" was
+           written from a month of rows and the whole register disproved it —
+           175 of 175 Bolt transfers landed on a Monday. Rendered copy, so the
+           mock must not print the retracted claim either. */
+        cadence: 'One payout per date. Bolt publishes no cadence and does not say which period '
+          + 'a payout settles, so nothing here claims one — but every Bolt transfer on record '
+          + 'has landed on a Monday: 175 of 175, measured 2026-09-17. That is a count, not a '
+          + 'rule Bolt has stated.',
         in_window: totals.filter((t) => t.platform === 'bolt'),
         record_span: [
           { platform: 'bolt', fleet_id: 'ecosine', earliest: '2024-12-30', latest: '2026-09-07', transfers: 89 },

@@ -253,13 +253,28 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
   const payoutRange = async (req) => {
     const [from, to, platform, fleet] = range(req);
     if (askedForWindow(req)) return [from, to, platform, fleet, 'window'];
-    const [floor] = await q(
+    const [span] = await q(
       `SELECT to_char(least(
                 (SELECT min(paid_on) FROM platform_payout),
-                (SELECT min(day)     FROM platform_account_day)), 'YYYY-MM-DD') AS d`);
-    /* An empty register has no floor, and falling back to range()'s thirty
-       days is right for it: there is nothing to widen to. */
-    return [floor?.d || from, to, platform, fleet, floor?.d ? 'record' : 'window'];
+                (SELECT min(day)     FROM platform_account_day)), 'YYYY-MM-DD') AS lo,
+              to_char(greatest(
+                (SELECT max(paid_on) FROM platform_payout),
+                (SELECT max(day)     FROM platform_account_day),
+                (now() AT TIME ZONE 'Asia/Dubai')::date), 'YYYY-MM-DD') AS hi`);
+    /* THE CEILING IS MEASURED TOO, and it is not a detail: winDays()'s upper
+       sentinel is 2100-01-01, and `window` travels in the response as this
+       route's own account of what it answered over. Measured on production
+       2026-09-17, the first no-window request after this shipped reported
+       "2024-12-23 -> 2100-01-01" — a floor read from the register beside a
+       ceiling read from nothing, which is the shape of a half-true claim.
+
+       greatest() of both registers AND today, rather than today alone: a
+       transfer dated ahead of today is a scheduled wire and clamping to today
+       would drop it from a page whose subject is every transfer there is. */
+    /* An empty register has no floor, and falling back to range()'s window is
+       right for it: there is nothing to widen to. */
+    return [span?.lo || from, span?.lo ? (span.hi || to) : to, platform, fleet,
+      span?.lo ? 'record' : 'window'];
   };
 
   /* Every provider this page is entitled to speak about, and what each one
@@ -295,8 +310,31 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
     { platform: 'bolt', publishes: true,
       how: 'Bolt’s fleet portal lists every payout with the second it completed, so each '
         + 'row is already a date.',
-      cadence: 'One payout per date, with no fixed weekday. Bolt does not say which period a '
-        + 'payout settles, so nothing here claims one.' },
+      /* "NO FIXED WEEKDAY" WAS A GUESS, AND THE WHOLE REGISTER DISAGREES WITH IT.
+         ──────────────────────────────────────────────────────────────────────
+         MEASURED ON PRODUCTION 2026-09-17, over every transfer on record now
+         that this page answers whole-record — 235 across both providers, and
+         the count is the point:
+
+           uber  60 transfers, 60 on a Monday
+           bolt 175 transfers, 175 on a Monday
+           91 distinct payout dates, 91 of them Mondays, none anywhere else
+
+         175 out of 175 is not "no fixed weekday". The sentence was written
+         from a month's worth of rows, which is exactly what the operator was
+         shown by the window this page has now come off: six transfers is not a
+         sample you can say "no fixed weekday" from.
+
+         It still does not say "Bolt pays on Mondays", because Bolt publishes
+         no cadence and a rule inferred from a register is not a rule the
+         provider stated. It says what was counted, and names the count — which
+         is the difference between a measurement and an expectation, and the
+         thing the audit band further down this page exists to keep straight
+         for Uber. */
+      cadence: 'One payout per date. Bolt publishes no cadence and does not say which period a '
+        + 'payout settles, so nothing here claims one — but every Bolt transfer on record has '
+        + 'landed on a Monday: 175 of 175, measured 2026-09-17. That is a count, not a rule '
+        + 'Bolt has stated.' },
     { platform: 'yango', publishes: false,
       how: null,
       why_absent: 'Yango does not publish a transfer to the company at all. Its park ledger is a '

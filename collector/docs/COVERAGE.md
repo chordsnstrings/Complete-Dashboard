@@ -827,6 +827,23 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A cadence read off one window is a guess with a number beside it.** Bolt's
+  coverage row on the Payouts page said *"One payout per date, with no fixed
+  weekday"* — written while that page showed a month. Measured 2026-09-17, the
+  hour the window came off it, over the whole register:
+
+  | | transfers | on a Monday |
+  |---|---|---|
+  | Uber | 60 | 60 |
+  | Bolt | **175** | **175** |
+  | distinct payout dates | 91 | 91 |
+
+  Not one transfer from either provider, on any date on record, has landed on
+  another weekday. Bolt still publishes no cadence and still names no settled
+  period, so the row does not say "Bolt pays on Mondays" — it says what was
+  counted, and says it is a count. **Before writing a cadence into copy, ask
+  the register with no window.**
+
 * **`params()` puts the shell's window on EVERY call a page makes through
   `q()`, and a page whose subject is the whole record then shows a sliver of
   it.** Reported by the operator in four words — "it doesn't show it. why?" —

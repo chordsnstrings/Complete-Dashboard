@@ -1361,6 +1361,26 @@ Both halves are needed and each was reverted on its own to check it: the server
 change alone leaves the page still sending `period=month`, and the client
 change alone produces the 9,721-day backlog above.
 
-**Proof owed.** A production render of `#payouts` showing the whole register
-and a `reconcile` response whose `unchecked` counts are bounded by the
-register's own floor.
+**PROVEN ON PRODUCTION 2026-09-17, 15:18 UTC**, deployment
+`31251292`, `GET /api/finance/payouts?_=$RANDOM` with no window at all:
+
+```
+scope record | window 2024-12-23 -> ...
+transfers 235 | dates 91 | total AED 5,285,461.64
+uber/ecosine 40 · uber/egari 20 · bolt/ecosine 89 · bolt/egari 86
+
+reconcile, same request:  119,328 bytes in 0.89 s   (was 359,254)
+  unchecked uber/ecosine  count 590, listed 90      (was 9,721 / 9,721)
+  unchecked uber/egari    count 596, listed 90      (was 9,729 / 9,729)
+  totals.basis  "wire totals all 235 transfers on record…"
+```
+
+**One defect that first production reading caught**, and it is the reason to
+read the whole response rather than the number you went looking for: the window
+came back `2024-12-23 -> 2100-01-01`. The floor was measured and the ceiling
+was still `winDays()`'s upper sentinel — a field that is the route's own
+account of what it answered over, half read from the register and half from
+nothing. Now `greatest(max(paid_on), max(day), today)`; `greatest` and not
+`today` so a wire dated ahead of today is not clamped out of a page whose
+subject is every transfer there is. Asserted, and the assertion watched go red
+with the ceiling reverted.

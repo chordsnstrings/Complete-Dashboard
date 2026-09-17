@@ -118,6 +118,14 @@ console.log('\na request that names no window gets every transfer on record');
     d.window?.[0] === '2024-12-23', JSON.stringify(d.window));
   check('…and not at winDays()’s 2000-01-01 sentinel, which is not a record',
     d.window?.[0] !== '2000-01-01', JSON.stringify(d.window));
+  /* BOTH ENDS MEASURED. The first production build of this shipped with a
+     measured floor beside winDays()'s 2100-01-01 ceiling and reported
+     "2024-12-23 -> 2100-01-01" — a window half read from the register and half
+     from a sentinel, in the field that is this route's own account of what it
+     answered over. Today, not the newest row: a register whose last transfer
+     was a week ago has still been answered over up to today. */
+  check('…and it ends at a measured date rather than the 2100-01-01 sentinel',
+    d.window?.[1] === TODAY, JSON.stringify(d.window));
   /* The page's sentences bind on this rather than guessing from the dates:
      "the whole record" and "a window that happens to be wide" read identically
      in a pair of dates and say different things to a reader. */
@@ -256,6 +264,27 @@ console.log('\nthe per-pair heading no longer claims nobody asked');
     'the heading still asserts it');
   check('…it says what the page actually knows: no statement is stored',
     /with no statement stored/.test(page), 'the corrected heading is missing');
+}
+
+/* ══ 7. AND THE CLAIM THE WHOLE RECORD DISPROVED ═════════════════════════
+   Not a scope assertion, and it belongs to this change because the window is
+   what hid it. Bolt's coverage row said "One payout per date, with NO FIXED
+   WEEKDAY" — written from the month the page used to show. Measured on
+   production the day the window came off, over every transfer on record:
+   uber 60/60 on a Monday, bolt 175/175, 91 distinct dates and all of them
+   Mondays. 175 out of 175 is not "no fixed weekday". */
+console.log('\nBolt’s cadence row states a count rather than a guessed rule');
+{
+  const d = await get('/api/finance/payouts');
+  const bolt = (d.coverage || []).find((c) => c.platform === 'bolt');
+  check('it no longer claims Bolt has no fixed weekday',
+    !/no fixed weekday/i.test(bolt?.cadence || ''), bolt?.cadence);
+  check('…it names what was counted, and says it is a count and not a rule',
+    /175 of 175/.test(bolt?.cadence || '') && /not a rule/.test(bolt?.cadence || ''),
+    bolt?.cadence);
+  /* And it still refuses the thing Bolt genuinely does not publish. */
+  check('…and still says Bolt states no settled period',
+    /does not say which period/.test(bolt?.cadence || ''), bolt?.cadence);
 }
 
 m.server.close();
