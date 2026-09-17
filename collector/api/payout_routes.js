@@ -111,6 +111,9 @@ const weekDays = (w) => {
 
 const FLEETS = ['ecosine', 'egari'];
 const MAX_DAYS = 5;
+/* How many unchecked dates the reconcile response enumerates per fleet. The
+   count beside it is never cut — see the block where it is applied. */
+const UNCHECKED_LIST = 90;
 /* THE PLATFORM CLOSES A REQUEST BEFORE FIVE DAYS CAN FINISH, SO THE LOOP STOPS
    ITSELF FIRST.
    ─────────────────────────────────────────────────────────────────────────
@@ -185,6 +188,80 @@ const LIVE_UBER = {
 let inFlight = null;
 
 export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
+  /* A REQUEST THAT NAMES NO WINDOW MEANS THE WHOLE REGISTER — AND "THE WHOLE
+     REGISTER" HAS TO BE THE REGISTER, NOT A SENTINEL SPAN.
+     ═════════════════════════════════════════════════════════════════════════
+     THE DEFECT, reported by the operator in four words — "it doesn't show
+     it. why?" — over a screenshot of this page reading:
+
+       TRANSFERRED TO THE BANK   AED 319,015
+       6 transfers on 2 dates in this window
+       THE RECORD STARTS         23 Dec 2024
+
+     Both numbers were correct and the page was unreadable. The CAUSE WAS NOT
+     HERE: api/public/data.js params() puts `period=month` on every call a page
+     makes through q(), the page used q(), and this route honoured the month it
+     was sent. 2026-09-01 to 2026-09-17 really does hold six transfers.
+
+     MEASURED ON PRODUCTION 2026-09-17, the same route three ways:
+       ?period=month     6 transfers,   2 dates, AED   319,015.37
+       ?from=2024-01-01&to=2026-12-31   216 transfers, AED 3,460,166.93
+       (no window at all)               217 transfers
+
+     So the server ALREADY answered the whole record when asked with no window:
+     api/window.js winDays() falls back to ['2000-01-01', '2100-01-01']. The
+     client-side half of this fix — qChan instead of q, and #payouts on
+     NO_RANGE — is therefore the whole of what the operator will see change.
+
+     WHAT IS FIXED HERE IS WHAT THAT FALLBACK DOES TO THE REST OF THE ANSWER,
+     which the same production request exposed the moment it was made:
+
+       GET /api/finance/payouts/reconcile   (no window)
+         window   ["2000-01-01", "2100-01-01"]
+         unchecked  uber/ecosine 9,721 days · uber/egari 9,729 days
+         response   359,254 bytes
+
+     The unchecked band walks generate_series(from, yesterday), so a sentinel
+     floor of 2000-01-01 counts a backlog from the year 2000 and the page was
+     one client change away from telling an operator we hold no Uber statement
+     for 9,721 days — of which some 9,100 are days before either fleet existed.
+     That is not a wrong number in a corner; it is the panel whose entire job
+     is stopping this register from being read as exhaustive, stating a figure
+     nobody could act on and nothing measured.
+
+     So a no-window request now resolves to the register's OWN floor. Measured,
+     never written down: a constant would be a second copy of a date the
+     database already holds, and would go stale the first time an older
+     statement is backfilled — which is exactly what the Mondays-first walk in
+     src/sources/uber_payout.js does every two hours. least() across both
+     registers because the account-day table can reach back further than any
+     transfer, and a day with a statement and no wire is still a day this page
+     reports on.
+
+     An EXPLICIT window is untouched, so every existing caller — the audit
+     tooling, the tests, anybody reading the API directly — behaves exactly as
+     before. */
+  const WINDOW_KEYS = ['from', 'to', 'period', 'days'];
+  const askedForWindow = (req) => WINDOW_KEYS.some(
+    (k) => req.query[k] != null && String(req.query[k]) !== '');
+
+  /* Returns range()'s four values plus a fifth: which of the two questions was
+     asked. The scope travels into the response so the PAGE's sentences can be
+     true in both cases — "6 transfers in this window" and "216 transfers on
+     record" are different claims and a page that prints the first over the
+     second is the defect above, in words instead of numbers. */
+  const payoutRange = async (req) => {
+    const [from, to, platform, fleet] = range(req);
+    if (askedForWindow(req)) return [from, to, platform, fleet, 'window'];
+    const [floor] = await q(
+      `SELECT to_char(least(
+                (SELECT min(paid_on) FROM platform_payout),
+                (SELECT min(day)     FROM platform_account_day)), 'YYYY-MM-DD') AS d`);
+    /* An empty register has no floor, and falling back to range()'s thirty
+       days is right for it: there is nothing to widen to. */
+    return [floor?.d || from, to, platform, fleet, floor?.d ? 'record' : 'window'];
+  };
+
   /* Every provider this page is entitled to speak about, and what each one
      publishes. Written down rather than derived from the rows, because "we
      have no Yango payouts" and "Yango does not publish payouts" are different
@@ -232,7 +309,7 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
 
   /* ── every transfer, one row each ──────────────────────────────────────── */
   app.get('/api/finance/payouts', wrap(async (req, res) => {
-    const [from, to, platform, fleet] = range(req);
+    const [from, to, platform, fleet, scope] = await payoutRange(req);
     const p = [from, to, platform, fleet];
 
     const payouts = await q(
@@ -323,6 +400,12 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
 
     res.json({
       window: [from, to],
+      /* 'record' means no window was asked for and this answer covers the
+         whole register; 'window' means the caller named one and got it. The
+         page's sentences bind on this rather than guessing from the dates,
+         because "the whole record" and "a window that happens to be wide" read
+         identically in a pair of dates and say different things to a reader. */
+      scope,
       filters: { platform, fleet },
       payouts,
       totals,
@@ -373,7 +456,7 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
      That is absent with a reason. A zero there would read as "Bolt's drivers
      earned nothing that week", which is false, and it would then be summed. */
   app.get('/api/finance/payouts/reconcile', wrap(async (req, res) => {
-    const [from, to, platform, fleet] = range(req);
+    const [from, to, platform, fleet, scope] = await payoutRange(req);
     const p = [from, to, platform, fleet];
 
     const rows = await q(
@@ -525,6 +608,11 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
        alone and the wire for THOSE rows is carried beside them — otherwise a
        reader subtracts calculated from the wire total and gets the Bolt
        transfers as a phantom discrepancy. */
+    /* The same sentence has to be true whether the caller named a window or
+       got the whole register, and "in this window" over the whole register is
+       exactly the kind of untrue reason this page exists to refuse. One noun
+       phrase, derived from scope, rather than two copies of every sentence. */
+    const WHERE = scope === 'record' ? 'on record' : 'in this window';
     const comparable = out.filter((x) => x.calculated != null);
     const sum = (xs, k) => r2(xs.reduce((a, x) => a + Number(x[k] || 0), 0));
     const totals = {
@@ -535,9 +623,9 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
       rows: out.length,
       comparable_rows: comparable.length,
       basis: comparable.length === out.length
-        ? 'Every transfer in this window names the period it settles, so the wire total and '
+        ? `Every transfer ${WHERE} names the period it settles, so the wire total and `
           + 'the calculated total cover the same rows.'
-        : `wire totals all ${out.length} transfers in this window. calculated and delta cover `
+        : `wire totals all ${out.length} transfers ${WHERE}. calculated and delta cover `
           + `only the ${comparable.length} that name a period AND have driver-day rows stored `
           + 'for it; wire_comparable is the wire over those same rows, and it is the figure to '
           + 'subtract calculated from. Subtracting calculated from wire would compare two '
@@ -618,6 +706,33 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
     }
     const unchecked = [...byPair.values()].map((u) => ({
       ...u,
+      /* THE COUNT IS COMPLETE; THE LIST IS CUT, AND THE RESPONSE SAYS SO.
+         ──────────────────────────────────────────────────────────────────
+         The page stopped sending a window (api/public/payouts.js), which
+         turned this array from a month's worth of dates into the whole
+         backlog. MEASURED ON PRODUCTION 2026-09-17, the no-window request as
+         it stood BEFORE the floor above was applied: 9,721 days for
+         uber/ecosine and 9,729 for uber/egari, 19,450 date strings in a
+         359,254-byte response — counted from the year 2000, on a `basic-xxs`
+         instance, to render a list no operator reads past the first screen of.
+         The floor fixes the count; this fixes the enumeration.
+
+         So the ARRAY is bounded and the COUNT is not. `count` and
+         `empty_count` stay the true totals, because they are the figures the
+         panel's sentence is built from and a cut total would be this file
+         telling the operator a smaller backlog than it holds. What is cut is
+         only the enumeration, most recent first, and `days_shown` beside
+         `count` says how much of it arrived — a cap that does not announce
+         itself reads as "this is all of them". */
+      days: u.days.slice(-UNCHECKED_LIST).reverse(),
+      empty_days: u.empty_days.slice(-UNCHECKED_LIST).reverse(),
+      days_shown: Math.min(u.days.length, UNCHECKED_LIST),
+      empty_shown: Math.min(u.empty_days.length, UNCHECKED_LIST),
+      listed_why: (u.days.length > UNCHECKED_LIST || u.empty_days.length > UNCHECKED_LIST)
+        ? `The counts above are complete. The dates listed are the ${UNCHECKED_LIST} most `
+          + 'recent of each kind — the rest are older and are filled by the same nightly walk, '
+          + 'which needs no list from a reader to find them.'
+        : null,
       count: u.days.length,
       /* Counted and named, not silently folded into the number above. A fleet
          whose 390 "unasked" days turn out to be 12 outstanding and 378 that
@@ -625,7 +740,7 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
          different state, and the operator cannot see that from one total. */
       empty_count: u.empty_days.length,
       empty_why: u.empty_days.length
-        ? `Uber has been asked about ${u.empty_days.length} further days in this window and `
+        ? `Uber has been asked about ${u.empty_days.length} further days ${WHERE} and `
           + 'answered that it holds no statement for them — days before this fleet was earning '
           + 'on Uber, or gaps in the provider\u2019s own record. They are settled and are not '
           + 'asked again. They are still days with no statement, so they are still not days '
@@ -692,6 +807,12 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
 
     res.json({
       window: [from, to],
+      /* 'record' means no window was asked for and this answer covers the
+         whole register; 'window' means the caller named one and got it. The
+         page's sentences bind on this rather than guessing from the dates,
+         because "the whole record" and "a window that happens to be wide" read
+         identically in a pair of dates and say different things to a reader. */
+      scope,
       /* THE APPLIED FILTER TRAVELS WITH THE ANSWER, AND IT IS NOT DECORATION.
          ────────────────────────────────────────────────────────────────────
          THE DEFECT. `unchecked` is Uber-only by construction — Uber is the one

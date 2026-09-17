@@ -1323,3 +1323,44 @@ a `payout_audit` row with `outcome = 'audited'`, and either `wires_new = 0`
 across the audited window — the Monday cadence confirmed by a report that could
 have contradicted it — or a wire it found that the register did not hold, which
 is the audit earning its keep on the first night.
+
+---
+
+## The page showed 6 transfers over a register of 217 — 2026-09-17
+
+Reported in four words, over a screenshot: **"it doesn't show it. why?"** The
+live Payouts page read
+
+```
+TRANSFERRED TO THE BANK   AED 319,015
+6 transfers on 2 dates in this window
+THE RECORD STARTS         23 Dec 2024
+```
+
+and every number on it was correct. The shell's window selector was on "This
+month", `api/public/data.js` `params()` puts `period=month` on every call a
+page makes through `q()`, and `api/payout_routes.js` honoured the month it was
+sent. **The route was never the problem** — the first diagnosis written into
+the code said it was, and the production measurement retired that before it
+was committed:
+
+| request, production 2026-09-17 | transfers | total |
+|---|---|---|
+| `?period=month` — what the page sent | 6 | AED 319,015.37 |
+| `?from=2024-01-01&to=2026-12-31` | 216 | AED 3,460,166.93 |
+| no window at all | 217 | — |
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | the page scoped a register of sparse weekly events to a rolling window | `qChan()` not `q()`, and `payouts` on `NO_RANGE` so the selector comes off the page rather than being ignored | written, **proven by revert** (`test/payout_scope.test.mjs` §5 goes red) |
+| — | asked with no window the routes fell to `winDays()`'s `2000-01-01` sentinel, so the unchecked band counted 9,721 days from the year 2000 in a 359 KB response | floor measured from the register itself (`least(min(paid_on), min(day))`), never a constant | written, **proven by revert** (the count comes back 9,756 in PGlite) |
+| — | whole-record turned the unchecked list into 19,450 date strings | list capped at 90 per fleet, newest first, **count left complete**, and the cut named in the response and on the page | written, **proven by revert** |
+| — | the per-pair heading still said "N days nobody has asked about" — the claim the lead sentence above it was corrected for | "N days with no statement stored" | written, **proven by revert** |
+
+Both halves are needed and each was reverted on its own to check it: the server
+change alone leaves the page still sending `period=month`, and the client
+change alone produces the 9,721-day backlog above.
+
+**Proof owed.** A production render of `#payouts` showing the whole register
+and a `reconcile` response whose `unchecked` counts are bounded by the
+register's own floor.

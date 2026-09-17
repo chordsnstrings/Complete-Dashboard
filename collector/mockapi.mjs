@@ -5237,6 +5237,9 @@ app.get('/api/finance/payouts', (_, r) => {
   ];
   r.json({
     window: ['2026-08-18', '2026-09-16'],
+    /* 'record' | 'window' — see the reconcile fixture below for why the mock
+       holds the branch the live page does not take. */
+    scope: 'window',
     filters: { platform: null, fleet: null },
     payouts, totals, days,
     coverage: [
@@ -5297,6 +5300,11 @@ app.get('/api/finance/payouts', (_, r) => {
 app.get('/api/finance/payouts/reconcile', (_, r) => {
   r.json({
     window: ['2026-08-18', '2026-09-17'],
+    /* 'record' | 'window'. The live page never sends a window (qChan), so the
+       real answer is almost always 'record'; the fixture holds 'window' on
+       purpose, because the page's other branch — "in this window" — is the one
+       no mock would otherwise ever render. */
+    scope: 'window',
     filters: { platform: null, fleet: null },
     rows: [
       { platform: 'uber', fleet_id: 'ecosine', paid_on: '2026-09-14',
@@ -5336,6 +5344,19 @@ app.get('/api/finance/payouts/reconcile', (_, r) => {
     unchecked: [
       { platform: 'uber', fleet_id: 'ecosine', count: 27,
         days: ['2026-09-16', '2026-09-15', '2026-09-13', '2026-09-12', '2026-09-11'],
+        /* The count is the whole backlog and the list is the recent slice of
+           it. Cut here too, and named — on production, whole-record, this is 90
+           of several hundred, and a fixture that never exercises the
+           announcement is a fixture that cannot catch it going missing. */
+        days_shown: 5,
+        empty_shown: 2,
+        /* The number is the fixture's own — five listed of twenty-seven — and not
+           production's ninety. A fixture that renders a branch by printing a
+           figure untrue of itself is the defect this whole panel exists to
+           refuse, one layer down. */
+        listed_why: 'The counts above are complete. The dates listed are the 5 most recent of '
+          + 'each kind — the rest are older and are filled by the same nightly walk, which '
+          + 'needs no list from a reader to find them.',
         /* The days Uber has ANSWERED about and holds no statement for — settled,
            never asked again, and still not days with no transfer. Carried in the
            fixture because a panel whose absent-with-a-reason branch nobody has

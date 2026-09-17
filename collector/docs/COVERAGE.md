@@ -827,6 +827,59 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **`params()` puts the shell's window on EVERY call a page makes through
+  `q()`, and a page whose subject is the whole record then shows a sliver of
+  it.** Reported by the operator in four words — "it doesn't show it. why?" —
+  over a Payouts page reading `AED 319,015 · 6 transfers on 2 dates in this
+  window`, sitting directly under its own tile reading `THE RECORD STARTS
+  23 Dec 2024`. Both figures were correct. Measured on production 2026-09-17:
+
+  | request | transfers | total |
+  |---|---|---|
+  | `?period=month` (what the page sent) | 6 | AED 319,015.37 |
+  | `?from=2024-01-01&to=2026-12-31` | 216 | AED 3,460,166.93 |
+  | no window at all | 217 | — |
+
+  **The route was never the problem.** `api/window.js` `winDays()` already
+  falls back to a whole-record span when nothing is named; it was the client
+  putting `period=month` on a page of sparse, weekly events. The fix is
+  `qChan()` instead of `q()`, plus the view id on `NO_RANGE` in
+  `api/public/data.js` so the selector comes OFF the page rather than being
+  ignored — an ignored control still rides along into every link leaving it.
+  **Before assuming a route is narrowing an answer, ask it with no parameters
+  at all.**
+
+* **`winDays()`'s no-window fallback is `['2000-01-01','2100-01-01']`, a
+  SENTINEL and not a record — anything that walks days over it walks
+  twenty-six years.** The same production request, before the payout routes
+  learned to measure their own floor:
+
+  ```
+  GET /api/finance/payouts/reconcile      (no window)
+    unchecked  uber/ecosine 9,721 days · uber/egari 9,729 days
+    response   359,254 bytes
+  ```
+
+  9,721 "days with no Uber statement", most of them before either fleet
+  existed, printed by the one panel whose whole job is to be actionable. Any
+  route that answers whole-record and then does `generate_series(from, …)`
+  needs its floor MEASURED from the data (`min(paid_on)`, `min(day)`, least of
+  both) — never the sentinel, and never a constant, which goes stale the first
+  time a backfill reaches further back. And bound the enumerated list while
+  leaving the COUNT complete: a cap that does not announce itself reads as
+  "this is all of them".
+
+* **`pkill -f <something>.mjs` kills this session's own shell.** The pattern
+  matches the agent's command line as well as the server's. Start the second
+  server on a second port, or rewrite the response in the browser with
+  Playwright's `page.route()`, and never reach for `pkill`.
+
+* **`route.fulfill({ response, json })` in Playwright serves the ORIGINAL
+  body — the `json` is ignored when `response` is passed.** Cost half an hour
+  chasing a page that "ignored" a field the intercept had plainly rewritten;
+  the intercept log said `->scope record` and the page rendered `window`. Use
+  `fulfill({ status, contentType, body: JSON.stringify(j) })` instead.
+
 * **Uber has TWO payments reports and they answer different questions — asking
   the wrong one costs either the date or the day.**
 

@@ -314,9 +314,23 @@ console.log('\nunchecked names the days nobody has asked Uber about, and nothing
   check('both fleets are reported, and only Uber',
     narrow.unchecked.length === 2 && narrow.unchecked.every((u) => u.platform === 'uber'),
     JSON.stringify(narrow.unchecked.map((u) => `${u.platform}/${u.fleet_id}`)));
+  /* THE SET, sorted here rather than compared in the order it arrives.
+     The route now returns this list NEWEST FIRST and bounded, because whole
+     record is the page's default and the backlog behind it runs to hundreds of
+     days per fleet — see UNCHECKED_LIST in api/payout_routes.js. The set is
+     what this assertion was ever about; the order is asserted separately below
+     so a change to either one is named for what it is. */
   check('Ecosine’s list is exactly the days with no statement row',
-    (eco?.days || []).join(',') === ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04',
-      '2026-09-06', '2026-09-08', '2026-09-09', '2026-09-10'].join(','), (eco?.days || []).join(','));
+    [...(eco?.days || [])].sort().join(',') === ['2026-09-01', '2026-09-02', '2026-09-03',
+      '2026-09-04', '2026-09-06', '2026-09-08', '2026-09-09', '2026-09-10'].join(','),
+    (eco?.days || []).join(','));
+  /* Newest first, and it is not cosmetic: the list is cut from the OLD end
+     when it is longer than the cap, so an ascending list would hand a reader
+     the days furthest from the one they came to check. */
+  check('…newest first, because the list is cut from the old end',
+    (eco?.days || [])[0] === '2026-09-10'
+      && (eco?.days || [])[(eco?.days || []).length - 1] === '2026-09-01',
+    (eco?.days || []).join(','));
   /* The half that would be a lie: a day we DID ask about appearing as a day
      nobody asked about. */
   check('…and never a day that has one', !eco.days.includes('2026-09-05')

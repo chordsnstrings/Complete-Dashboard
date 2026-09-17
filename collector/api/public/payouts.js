@@ -88,7 +88,7 @@
 import { el, esc, panel, loading, tableFrom, kpiRow, note, sourceLabel, money,
   countOf, dateStr, dayStr, pill, pct, signed, foldChildren } from './ui.js';
 import { fmt, empty, barChart } from './charts.js';
-import { q, currentGen, alive } from './data.js';
+import { q, qChan, currentGen, alive } from './data.js';
 
 /* A transfer is money ARRIVING, so it is shown positive whatever sign the
    provider files it under. Uber signs a payout negative because from the
@@ -147,9 +147,33 @@ export async function renderPayouts(root) {
      still true. The reason is carried rather than swallowed, because "the
      comparison could not be read" is itself a thing this page has to say out
      loud instead of quietly omitting a panel. */
+  /* qChan, NOT q: the channel chips travel and the WINDOW DOES NOT.
+     ─────────────────────────────────────────────────────────────────────
+     THE DEFECT, as the operator saw it: this page, under the shell's default
+     "This month", rendered "AED 319,015 · 6 transfers on 2 dates" over a
+     register holding 217 transfers totalling AED 3.46m — and did it directly
+     beneath its own tile reading "The record starts 23 Dec 2024". Every number
+     was right. The page was still unreadable, because the one figure an
+     operator opens it for was scoped by a control they had no reason to touch,
+     on a page asked for as "clear visibility including past payments".
+
+     AND THE CAUSE WAS ENTIRELY ON THIS SIDE. q() puts `period=month` on every
+     call (api/public/data.js params()); api/payout_routes.js honoured the
+     month it was sent, and answered the whole register the moment it was asked
+     without one — measured on production the same day, 217 transfers against
+     6. So this line is the fix. The measured floor that landed in the route
+     beside it is what makes the REST of that answer usable: asked with no
+     window the route fell back to api/window.js's ['2000-01-01','2100-01-01'],
+     and the unchecked band then counted a backlog from the year 2000 —
+     9,721 days for Ecosine in a 359 KB response, measured.
+
+     qChan sends the platform and fleet chips and no window at all. #payouts is
+     on NO_RANGE beside #causes for the same reason, so the selector is not
+     merely ignored: it is off the page, and does not ride along into every
+     link leaving it. */
   const [d, rec] = await Promise.all([
-    q('/api/finance/payouts').catch(() => null),
-    q('/api/finance/payouts/reconcile').catch((e) => ({ __error: String(e && e.message ? e.message : e) })),
+    qChan('/api/finance/payouts').catch(() => null),
+    qChan('/api/finance/payouts/reconcile').catch((e) => ({ __error: String(e && e.message ? e.message : e) })),
   ]);
   if (!alive(gen)) return;
   root.innerHTML = '';
@@ -166,6 +190,19 @@ export async function renderPayouts(root) {
   const total = payouts.reduce((a, r) => a + amt(r.amount), 0);
   const dates = new Set(payouts.map((r) => String(r.paid_on).slice(0, 10)));
   const weekdays = new Set([...dates].map(weekdayOf).filter(Boolean));
+  /* WHAT THE FIGURES ON THIS PAGE COVER, IN WORDS, FROM THE SERVER'S OWN
+     ACCOUNT OF WHAT IT ANSWERED.
+     ─────────────────────────────────────────────────────────────────────
+     Not inferred from the dates. api/payout_routes.js answers the whole
+     register when no window is named and honours one when it is, and it says
+     which it did in `scope` — so this page prints "on record" or "in this
+     window" because the server reported it, not because a pair of dates looked
+     wide. The previous copy said "in this window" unconditionally, which was
+     true of the request and became false of the answer the moment the default
+     changed; a sentence that is true only until the caller changes is the same
+     class of defect as a reason that is not the true one. */
+  const whole = d.scope === 'record';
+  const WHERE = whole ? 'on record' : 'in this window';
   const spans = (d.coverage || []).flatMap((c) => c.record_span || []);
   const earliest = spans.map((s) => String(s.earliest).slice(0, 10)).filter(Boolean).sort()[0] || null;
 
@@ -173,8 +210,8 @@ export async function renderPayouts(root) {
   root.append(kpiRow([
     { label: 'Transferred to the bank', value: money(total),
       sub: payouts.length
-        ? `${countOf(payouts.length, 'transfer')} on ${countOf(dates.size, 'date')} in this window`
-        : 'nothing in this window' },
+        ? `${countOf(payouts.length, 'transfer')} on ${countOf(dates.size, 'date')} ${WHERE}`
+        : `nothing ${WHERE}` },
     /* The count of DATES rather than of transfers, because the request was for
        an exact date basis and this is the figure that says whether the page
        delivers one. */
@@ -183,7 +220,7 @@ export async function renderPayouts(root) {
         ? `every one of them a ${[...weekdays][0]}`
         : weekdays.size
           ? `across ${countOf(weekdays.size, 'weekday')}: ${[...weekdays].join(', ')}`
-          : 'no transfer has a date in this window' },
+          : `no transfer has a date ${WHERE}` },
     { label: 'Platforms that publish a transfer', value: `${publishing.length} of ${coverage.length}`,
       sub: silent.length
         ? `${silent.map((c) => sourceLabel(c.platform)).join(', ')} `
@@ -192,7 +229,9 @@ export async function renderPayouts(root) {
       tone: silent.length ? 'warn' : null },
     earliest
       ? { label: 'The record starts', value: dateStr(earliest),
-        sub: 'the earliest transfer held for any platform, regardless of the window above' }
+        sub: whole
+          ? 'the earliest transfer held for any platform — and this page covers all of it'
+          : 'the earliest transfer held for any platform, regardless of the window above' }
       : null,
   ]));
 
@@ -274,9 +313,13 @@ export async function renderPayouts(root) {
        table and nothing else. */
     const host = el('div');
     root.append(host);
-    empty(host, 'No transfer reached the bank in this window — which is a fact about the '
-      + 'window, not about the platforms. The band below says what each one publishes and '
-      + 'what is on record for it.');
+    empty(host, whole
+      ? 'No transfer has been collected from any platform yet. That is a fact about '
+        + 'collection and not about the platforms — the band below says what each one '
+        + 'publishes and what is on record for it.'
+      : 'No transfer reached the bank in this window — which is a fact about the '
+        + 'window, not about the platforms. The band below says what each one publishes and '
+        + 'what is on record for it.');
   }
 
   /* ── WHAT EACH PLATFORM PUBLISHES, AND WHY A FIGURE IS MISSING ────────── */
@@ -291,7 +334,7 @@ export async function renderPayouts(root) {
         render: (c) => (c.publishes_payouts
           ? pill('yes', 'ok', c.how || '')
           : pill('no', 'warn', 'this platform publishes no transfer to the company')) },
-      { label: 'In this window', key: 'in_window',
+      { label: whole ? 'On record' : 'In this window', key: 'in_window',
         num: true,
         render: (c) => {
           const rows = c.in_window || [];
@@ -519,7 +562,10 @@ function reconcileSection(host, rec, gen) {
      Uber changed nothing. The extra parameter is ignored by the route and
      makes the key new. */
   async function refresh() {
-    const fresh = await q('/api/finance/payouts/reconcile', { _: Date.now() })
+    /* qChan here too, and not q(): a refresh that came back on a different
+       scope from the paint it replaces would redraw the panel over a different
+       population of transfers than the reader was just looking at. */
+    const fresh = await qChan('/api/finance/payouts/reconcile', { _: Date.now() })
       .catch((e) => ({ __error: String(e && e.message ? e.message : e) }));
     if (!alive(gen) || !host.isConnected) return;
     current = fresh;
@@ -673,9 +719,13 @@ function drawReconcile(hostEl, rec, run) {
 
   const rows = Array.isArray(rec.rows) ? rec.rows : [];
   if (!rows.length) {
-    p.body.append(note('No transfer reached the bank inside this window, so there is nothing '
-      + 'to compare. That is a fact about the window and not about the providers — widen it, '
-      + 'or read the band below for the days nobody has asked Uber about.'));
+    p.body.append(note(rec.scope === 'record'
+      ? 'No transfer has been collected from any provider, so there is nothing to compare. '
+        + 'That is a fact about collection and not about the providers — read the band below '
+        + 'for the days nobody has asked Uber about.'
+      : 'No transfer reached the bank inside this window, so there is nothing '
+        + 'to compare. That is a fact about the window and not about the providers — widen it, '
+        + 'or read the band below for the days nobody has asked Uber about.'));
     drawAudit(hostEl, rec);
     drawUnchecked(hostEl, rec, run);
     return;
@@ -781,7 +831,7 @@ function drawReconcile(hostEl, rec, run) {
     const sameRows = t.comparable_rows != null && t.rows != null && t.comparable_rows === t.rows;
     p.body.append(note(
       `${countOf(t.rows ?? rows.length, 'transfer')} totalling ${money(t.wire, 'AED', 2)} `
-      + 'reached the bank in this window. '
+      + `reached the bank ${rec.scope === 'record' ? 'on record' : 'in this window'}. `
       + (t.calculated == null
         ? 'None of them can be compared against our own figure, so no total difference is '
           + 'stated — and none is stated as zero.'
@@ -920,7 +970,8 @@ function drawUnchecked(hostEl, rec, run) {
         + 'to see the days we hold no statement for.'));
       return;
     }
-    p.body.append(note('Every day in this window has an Uber statement stored against it, so '
+    p.body.append(note(`Every day ${rec.scope === 'record' ? 'on record' : 'in this window'} `
+      + 'has an Uber statement stored against it, so '
       + 'there is no day here that we hold no measurement for. Where a day shows no transfer, '
       + 'that is a measurement: Uber published the transfer column and left it empty.'));
     return;
@@ -949,7 +1000,8 @@ function drawUnchecked(hostEl, rec, run) {
      the true one, so the sentence now names both ways a day lands here and
      asserts neither. Everything downstream — the count, the chips, the button
      — is unchanged by saying it correctly. */
-  p.body.append(note(`We hold no Uber statement for ${countOf(total, 'day')} in this window — `
+  p.body.append(note('We hold no Uber statement for '
+    + `${countOf(total, 'day')} ${rec.scope === 'record' ? 'on record' : 'in this window'} — `
     + 'either nobody asked, or the ask was refused: Uber’s report limiter shuts for minutes '
     + 'at a time and cut the walk of 16 Sep to four of the eight days it asked for. Either '
     + 'way it is a day with no measurement, a day with no measurement cannot be reported as a '
@@ -962,10 +1014,24 @@ function drawUnchecked(hostEl, rec, run) {
     const n = countOfPair(u);
     const box = el('div');
     box.style.marginTop = '14px';
+    /* "WITH NO STATEMENT", NOT "NOBODY HAS ASKED ABOUT".
+       ──────────────────────────────────────────────────────────────────
+       The panel's lead sentence was corrected for exactly this and THIS LINE
+       WAS MISSED, so the page went on asserting the disproved claim one
+       heading further down: a day asked and refused leaves no row either, and
+       the walk of 2026-09-16 was cut to four of the eight days it asked for.
+       The count is the same number; only the claim about how it got there
+       changes, and that claim is the one the page could not support. */
     box.append(el('p', 'cap',
       `<b>${esc(sourceLabel(u.platform))} · ${esc(sourceLabel(u.fleet_id) || u.fleet_id)}</b> — `
-      + `${esc(countOf(n, 'day'))} nobody has asked about.`));
+      + `${esc(countOf(n, 'day'))} with no statement stored.`));
     if (u.why) box.append(el('p', 'cap', esc(u.why)));
+    /* THE CAP ON THE LIST, PRINTED WHERE THE LIST IS.
+       The count above is the whole backlog; the chips below are the most
+       recent slice of it, because the whole register carries 956 unchecked
+       days for one fleet and 1,919 across both. A picker that silently shows
+       ninety of nine hundred and fifty-six reads as ninety. */
+    if (u.listed_why) box.append(el('p', 'cap dim', esc(u.listed_why)));
     /* THE SETTLED ABSENCES, BESIDE THE OUTSTANDING ONES AND NOT INSIDE THEM.
        A fleet with 390 days of "nobody has asked" and a fleet with 12
        outstanding days plus 378 Uber has already said it holds nothing for are

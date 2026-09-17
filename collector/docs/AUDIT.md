@@ -1160,3 +1160,27 @@ sentence. Both are asserted by `test/payout_page_reconcile.test.mjs` — includi
 against the RENDERED text, not just the source — but neither has been looked at
 by eye at 390. That is owed on the production pass after the deploy, and it is
 recorded here rather than left as a gap somebody else would have to find.
+
+## Payouts, whole-record — 2026-09-17
+
+**Reproduce:** `PORT=8099 node mockapi.mjs`, then Chromium at
+`http://localhost:8099/#payouts` with `executablePath: '/opt/pw-browsers/chromium'`.
+The mock's fixture declares `scope: 'window'` on purpose; to see the other
+branch, rewrite the field in flight with `page.route()` —
+`fulfill({ status, contentType, body: JSON.stringify(j) })`, **not**
+`fulfill({ response, json })`, which serves the original body.
+
+1440 × full page, both branches, no JS errors either way.
+
+| what | before | after |
+|---|---|---|
+| range selector above the page | "This month" | **gone** — `payouts` on `NO_RANGE` |
+| platform / fleet chips | present | present, unchanged |
+| headline tile | `6 transfers on 2 dates in this window` | `… on record` |
+| "the record starts" subtitle | `regardless of the window above` | `and this page covers all of it` |
+| coverage table column | `In this window` | `On record` |
+| unchecked heading | `N days nobody has asked about` | `N days with no statement stored` |
+| unchecked list | every day in the window | 90 newest, **count unchanged**, cut named under the chips |
+
+Owed on the next production pass: the same two shots at phone width, which the
+previous payout pass also left outstanding.

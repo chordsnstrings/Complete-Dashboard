@@ -356,7 +356,26 @@ export const NO_RANGE = ['reconcile', 'compare',
      page and named in its caption. A range chip above them changes nothing and
      reads as though it does — and worse, rides along into every link leaving
      the page. */
-  'top-performers', 'low-performers', 'performer'];
+  'top-performers', 'low-performers', 'performer',
+  /* #payouts is the register of every transfer that ever reached the bank, and
+     a transfer is a SPARSE event — 91 dates across twenty-one months. Under
+     the shell's default window the page rendered "AED 319,015 · 6 transfers on
+     2 dates" over a register holding 217 transfers and AED 3.46m, next to its
+     own tile reading "The record starts 23 Dec 2024". Both figures were
+     correct; together they were unreadable, and the operator's report of it
+     was four words long: "it doesn't show it. why?"
+
+     The route was never the problem — asked with no window it already answered
+     all 217, measured on production the same day. It was params() below,
+     putting `period=month` on a page whose subject is every payment ever made.
+     So the window comes off here, which is both halves of the fix: q() can no
+     longer send one, and the selector can no longer ride along into a link
+     leaving the page.
+
+     The channel chips stay and mean more here than almost anywhere: Ecosine
+     and Egari bank separately, and "which of my two companies was this wire
+     for" is the second question anybody asks of a transfer. */
+  'payouts'];
 export const NO_PLATFORM_FLEET = ['driver', 'vehicle', 'property', 'coverage'];
 /* #map is a live position feed with its own plate-and-day picker, and #segment
    is one occupancy segment addressed by plate and instant. /api/live takes no
