@@ -942,10 +942,59 @@ export function probeRoutes(app, { wrap }) {
       }
     }
 
+    /* WHAT SHAPE IS THIS COLUMN, WITHOUT ECHOING A SINGLE VALUE OF IT.
+       ────────────────────────────────────────────────────────────────────
+       THE DEFECT THIS CLOSES, MET ON 2026-09-17. REPORT_TYPE_PAYMENTS_ORDER
+       carries a column called "vs reporting" with one distinct value per row,
+       and whether it is a TIMESTAMP or a UUID decides whether a year of payout
+       history is one report or fifty-six: if the payout rows can be dated, a
+       single wide report carries every wire; if they cannot, each week needs
+       its own window. `samples` above cannot answer it — an ISO timestamp is a
+       run of digits, dashes and spaces, so IDENTITY_VALUE's phone-shaped arm
+       refuses it, correctly and unhelpfully.
+
+       So this reports the SHAPE: how many values fall into each class, and —
+       only where the column is predominantly date-like — the earliest and
+       latest DATE PART. A date range is a statement about the report's window,
+       which the caller supplied, and not about any person in it. Nothing else
+       leaves: no value, no fragment, no count small enough to single a row out
+       by. The module's rule that full records never leave here is unchanged. */
+    let shape = null;
+    if (req.query.shape) {
+      const want = String(req.query.shape);
+      const i = header.findIndex((h) => h.toLowerCase() === want.toLowerCase());
+      if (i < 0) {
+        shape = { column: want, refused: 'no column of that name in this report' };
+      } else {
+        const vals = cells.map((c) => (c[i] || '').replace(/^"|"$/g, '')).filter(Boolean);
+        const classOf = (v) => (
+          /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2})?/.test(v) ? 'date_like'
+            : /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/i.test(v) ? 'uuid_like'
+              : /^\d{10,13}$/.test(v) ? 'epoch_like'
+                : /^-?[\d,]*\.?\d+$/.test(v) ? 'numeric'
+                  : 'other');
+        const counts = {};
+        for (const v of vals) { const k = classOf(v); counts[k] = (counts[k] || 0) + 1; }
+        const dates = vals.filter((v) => classOf(v) === 'date_like').map((v) => v.slice(0, 10));
+        shape = {
+          column: header[i],
+          values_seen: vals.length,
+          classes: counts,
+          ...(dates.length
+            ? { date_range: [dates.slice().sort()[0], dates.slice().sort().pop()] }
+            : {}),
+          means: 'Counts per shape, and for a date-like column the earliest and latest DATE '
+            + 'only. No value of this column is returned: the question is what KIND of thing '
+            + 'it holds, and that is answerable without echoing one.',
+        };
+      }
+    }
+
     res.json({
       fleet: org.fleet,
       reportType, window: [from, to], rows_sampled: cells.length,
       ...(sample ? { sample } : {}),
+      ...(shape ? { shape } : {}),
       columns: header.map((h, i) => {
         const vals = new Set(cells.map((c) => (c[i] || '').replace(/^"|"$/g, '')).filter(Boolean));
         return { column: h, distinct_seen: vals.size, values: vals.size <= 12 ? [...vals] : null };
