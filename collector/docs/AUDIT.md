@@ -1184,3 +1184,19 @@ branch, rewrite the field in flight with `page.route()` —
 
 Owed on the next production pass: the same two shots at phone width, which the
 previous payout pass also left outstanding.
+
+### Same page, on production — 2026-09-17, deployment `9013a361`
+
+`node bin/prod-mirror.mjs`, Chromium at `http://localhost:8200/#payouts`,
+1440 px and 430 px, full page.
+
+| | before the window came off | after |
+|---|---|---|
+| headline | `AED 319,015 · 6 transfers on 2 dates` | `AED 5,285,462 · 235 transfers on 91 dates on record` |
+| notes under the reconcile table | 58, **50 of them identical** | 11, none repeated |
+| page height | 10,125 px | 6,819 px |
+| `"in this window"` on screen | — | **0**, against `"on record"` 7 (wide) / 9 (phone) |
+| JS errors | — | none, either width |
+
+Phone width shot at the same time, which the previous payout pass owed and did
+not take.

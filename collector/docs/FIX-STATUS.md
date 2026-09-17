@@ -1384,3 +1384,33 @@ nothing. Now `greatest(max(paid_on), max(day), today)`; `greatest` and not
 `today` so a wire dated ahead of today is not clamped out of a page whose
 subject is every transfer there is. Asserted, and the assertion watched go red
 with the ceiling reverted.
+
+### And what the whole-record render then exposed — same day
+
+Read off the first production page after the window came off, not off the
+response field I went looking for:
+
+| what | measured | after |
+|---|---|---|
+| `window` in the response | `2024-12-23 -> 2100-01-01` — floor measured, ceiling still `winDays()`'s sentinel | `greatest(max(paid_on), max(day), today)` |
+| Bolt's coverage row | *"One payout per date, with no fixed weekday"* — written from a month | 175 of 175 Bolt transfers are Mondays, 60 of 60 Uber, 91 of 91 dates; the row now states the **count** and says it is a count |
+| "no comparison is made" notes | **58 notes, 50 of them identical** ("1 transfer (Uber)"), page 10,125 px tall | **11 notes, none repeated**, page 6,819 px |
+
+The third was the grouping key being the reason *sentence*, which names the
+week — so Bolt's 175 identical reasons collapsed to one note as designed and
+Uber's 50 each became a group of one. Rows now carry `calculated_absent`
+(`provider_states_no_period` / `uber_period_not_derived` / `no_driver_day_rows`
+/ null) and the page groups on the kind, naming the **span** of the weeks
+rather than the first row's week.
+
+**Proven on production 2026-09-17, deployment `9013a361`**, `#payouts` at
+1440 px and 430 px through `bin/prod-mirror.mjs`: no range selector, no JS
+errors at either width, `"in this window"` x0 against `"on record"` x7 / x9,
+`AED 5,285,462 · 235 transfers on 91 dates on record`, `unchecked` 590 / 596
+with 90 listed each, reconcile 119 KB in 0.89 s.
+
+**Still owed on this page, unchanged by any of the above:** only 10 of 235
+transfers can be compared against our own figure at all — the other 225 are 175
+Bolt rows that state no period and 50 Uber weeks with no `driver_payout_day`
+rows stored. The page now says so in three notes instead of fifty; collecting
+those weeks is its own piece of work.
