@@ -1445,4 +1445,22 @@ render caught the third.
 that was the card cells. Measured with the line removed, the document is 390px
 either way; it is kept as a guard and now says that it is one.
 
-**Proof owed.** The same two widths on production once deployed.
+**PROVEN ON PRODUCTION 2026-09-18, deployment `22ee6ad8`:**
+
+```
+phone  390px: doc=390/390   height=21,008  49 cards  row display block
+wide  1440px: doc=1440/1440 height= 7,270  49 rows   row display table-row
+five fold buttons, no JS errors at either width
+```
+
+**And the first deploy of it was wrong in a way only production showed.** The
+stacked layout went out clean — no overflow, 22 assertions green against the
+mock — and measured **26,559px at 390px**, two and a half times the 10,611px it
+replaced. The mock holds four payouts; production holds 303, and a layout whose
+cost is per field per card cannot be judged on four. The `.cardval` span
+replaced it the same hour.
+
+Also corrected in that round: `td.v-good` carries its verdict as `inset 2px 0 0`
+— a rule on the column edge, which is right in a table and reads as a rendering
+artifact in a card, where it lands flush against the label's first letter. Given
+a gutter.

@@ -2554,6 +2554,15 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
   .tcards .cardval{
     flex:1 1 auto;min-width:0;text-align:right;overflow-wrap:anywhere;
   }
+  /* A VERDICT CELL'S LEFT RULE NEEDS ROOM TO READ AS A MARK.
+     td.v-good and friends carry `inset 2px 0 0` — a thin rule on the column
+     edge, which is right in a table where every cell in that column shares the
+     edge. In a card there is one marked field among eight, the rule lands
+     flush against the label's first letter, and it reads as a rendering
+     artifact rather than as the verdict it is. Measured on production: a 2px
+     bar hard against "DIFFERENCE" on the one row of the card that carries the
+     finding. Same rule, given a gutter. */
+  .tcards td[class*="v-"]{padding-left:9px}
   /* .num right-aligns against a column edge that no longer exists — inside a
      card the value is already on the right of its own label. */
   .tcards td.num{text-align:left}

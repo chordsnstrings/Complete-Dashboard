@@ -1243,3 +1243,23 @@ beside it, a long one pushes it to the next line.
 Desktop is unchanged and asserted to be: at 1280px the rows are `table-row`
 again, the headings are back, the chart fills the panel and the
 narrow-screen caption is not printed.
+
+**PROVEN ON PRODUCTION 2026-09-18, deployment `22ee6ad8`**, through
+`bin/prod-mirror.mjs`:
+
+```
+phone  390px: doc=390/390   height=21,008  visible rows 49  row display block
+wide  1440px: doc=1440/1440 height= 7,270  visible rows 49  row display table-row
+five fold buttons, no JS errors at either width
+```
+
+Two rounds were needed and the first one is the reason this table exists: the
+stacked layout deployed clean at 390px and measured **26,559px**, worse than
+the 10,611px it replaced. Only a render against production said so — the mock's
+four payouts cannot show what 303 does.
+
+One more thing that only a card could show: `td.v-good` and its siblings carry
+their verdict as `inset 2px 0 0`, a rule on the column edge. In a table every
+cell in the column shares that edge; in a card it is one marked field among
+eight and the rule lands flush against the label's first letter, reading as a
+rendering artifact rather than as the finding. Given a 9px gutter in card mode.
