@@ -1293,3 +1293,21 @@ what we say was earned. The screen is built from those:
 Asserted in `test/payout_mobile.test.mjs` §4, including that the shell under
 test really is the phone — without that check the section would silently
 re-measure the desktop bundle, which is the mistake it exists to stop.
+
+### And what the first deployed build of that screen showed — same day
+
+Three sentences that were simply untrue, all read off the production phone and
+none of them reachable from the mock, which holds four payouts against 303:
+
+| printed | why it was wrong |
+|---|---|
+| `The 25 busiest of 303 transfers` | `cut()` says "busiest" unconditionally. The list is newest-first; nothing had ranked anything. It takes an order word now, defaulted so no existing caller changes. |
+| `every one a Mon` | `D3M`'s three letters. The finding is that every transfer on record landed on a **Monday**. |
+| `Uber · wire AED 111,179.66 · ours AED 110…` | `.m-row .k span` is `nowrap` + ellipsis. The sub ran **1,875px** past its line, and the half that got cut was the figure the row exists to compare. |
+
+The third also applied to the coverage rows, which had a provider's whole
+cadence sentence in a sub — cut mid-clause, with nothing on screen saying so.
+Cadences moved under the rows as paragraphs, where they may wrap.
+
+All three are asserted now, and the ellipsis one is measured
+(`scrollWidth - clientWidth` on every row sub) rather than eyeballed.

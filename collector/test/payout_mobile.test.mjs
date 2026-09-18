@@ -263,6 +263,18 @@ console.log('\nthe PWA has a payouts screen of its own, not the fallback');
     rows: document.querySelectorAll('.m-row').length,
     doc: document.documentElement.scrollWidth,
     vw: document.documentElement.clientWidth,
+    /* Measured, not eyeballed: scrollWidth past clientWidth on a nowrap span
+       IS the ellipsis. On production the comparison rows read "ours AED 110…"
+       and the figure the row exists to compare was the half that was cut. */
+    ...(() => {
+      const subs = [...document.querySelectorAll('.m-row .k span')];
+      const over = subs.map((x) => x.scrollWidth - x.clientWidth);
+      const worst = Math.max(0, ...over);
+      return { subsFit: worst <= 1,
+        longestSub: subs[over.indexOf(worst)]
+          ? `+${worst}px "${subs[over.indexOf(worst)].textContent.slice(0, 50)}"`
+          : 'none' };
+    })(),
   }));
   await ctx.close();
 
@@ -293,6 +305,34 @@ console.log('\nthe PWA has a payouts screen of its own, not the fallback');
     /cannot be compared, and that is not a difference of zero/.test(m.text),
     'the absence sentence is missing');
   check('no JS errors', errs.length === 0, errs.join(' ; '));
+
+  /* ── three things production showed that the mock could not ──────────
+     All three shipped, were read off the deployed screen, and are guarded
+     here because each of them is a sentence that was simply untrue. */
+  /* cut() says "The N busiest of M" — right for every list it was written
+     for, and a claim about a RANKING that nothing had ranked when the list is
+     newest-first. */
+  /* The mock holds four payouts, so cut() does not fire against it — the
+     RUNTIME half of this can only assert the wrong word is absent, and the
+     source half asserts the right one is passed. Said out loud rather than
+     asserting `/most recent of/` on a page that will never print it. */
+  check('nothing on the screen claims a ranking that nothing ranked',
+    !/busiest of/.test(m.text),
+    (m.text.match(/The \d+ \w+ of [\d,]+ transfers/) || ['(no cut line)'])[0]);
+  {
+    const src = readFileSync(new URL('../api/public/m/screens.js', import.meta.url), 'utf8');
+    check('…and the register passes cut() the order it really used',
+      /'transfers', 'most recent'/.test(src), 'cut() is left on its default');
+  }
+  /* "every one a Mon" is a shorthand of the finding; the finding is that every
+     transfer on record landed on a Monday. */
+  check('the weekday is a weekday and not three letters of one',
+    !/every one a (Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b(?!day)/.test(m.text),
+    (m.text.match(/every one a \w+/) || ['(no weekday line)'])[0]);
+  /* .m-row .k span is nowrap with an ellipsis, so a sub line that runs long
+     loses its tail — and the tail here was the figure being compared. */
+  check('no comparison row loses a figure to the ellipsis',
+    m.subsFit, JSON.stringify(m.longestSub));
 }
 
 await browser.close();

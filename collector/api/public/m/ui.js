@@ -56,11 +56,21 @@ export const unwrap = (d) => {
 /* The line under a cut list. Never omitted: a phone shows ten rows of
    seventy-four and the reader cannot see the scrollbar that would have
    hinted at it. */
-export const cut = (host, { rows, total, truncated }, noun) => {
+/* WHICH N OF THE M, and the word has to be true of the ORDER the caller used.
+   ─────────────────────────────────────────────────────────────────────────
+   This said "busiest" unconditionally, which is right for every list it was
+   written for and false for the first one that is date-ordered: the payouts
+   screen showed twenty-five transfers newest first under "The 25 busiest of
+   303 transfers", measured on production 2026-09-18. Busiest is a claim about
+   ranking, and nothing had ranked these.
+
+   `pick` names the order. Defaulted to 'busiest' so every existing call site
+   is unchanged, and a list that is not ranked passes its own word. */
+export const cut = (host, { rows, total, truncated }, noun, pick = 'busiest') => {
   if (!truncated && rows.length >= total) return null;
   const p = el('p', 'm-cap');
   p.style.cssText = 'margin:8px 2px 0;text-align:center';
-  p.textContent = `The ${rows.length} busiest of ${fmt(total)} ${noun}.`;
+  p.textContent = `The ${rows.length} ${pick} of ${fmt(total)} ${noun}.`;
   host.append(p);
   return p;
 };

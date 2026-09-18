@@ -1047,7 +1047,11 @@ async function payouts(deck, ctx) {
   const list = (d.payouts || []).slice();
   const total = list.reduce((a, r) => a + (n(r.amount) || 0), 0);
   const dates = new Set(list.map((r) => String(r.paid_on).slice(0, 10)));
-  const weekdays = new Set([...dates].map((x) => D3M[new Date(`${x}T12:00:00Z`).getUTCDay()]));
+  /* FULL weekday names, not D3M's three letters. "every one a Mon" is a
+     shorthand of a finding, and the finding is that 303 transfers across
+     twenty-one months have every one of them landed on a Monday. */
+  const DFULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const weekdays = new Set([...dates].map((x) => DFULL[new Date(`${x}T12:00:00Z`).getUTCDay()]));
   const spans = (d.coverage || []).flatMap((c) => c.record_span || []);
   const earliest = spans.map((x) => String(x.earliest).slice(0, 10)).filter(Boolean).sort()[0] || null;
 
@@ -1117,7 +1121,7 @@ async function payouts(deck, ctx) {
       value: money(n(r.amount)),
     })));
     cut(c.body, { rows: list.slice(0, SHOWN), total: list.length, truncated: list.length > SHOWN },
-      'transfers');
+      'transfers', 'most recent');
     deck.append(c.card);
   }
 
@@ -1136,10 +1140,16 @@ async function payouts(deck, ctx) {
       rows(c.body, comparable.slice(0, 12).map((r) => {
         const dl = n(r.delta);
         const pc = n(r.delta_pct);
+        /* THE SUB LINE IS ONE LINE WITH NO WRAP (m.css: .m-row .k span is
+           white-space:nowrap with an ellipsis), and "Uber · wire AED
+           111,179.66 · ours AED 110,962.09" measured past it on production —
+           the reader got "ours AED 110…" and the figure the row exists to
+           compare was the half that got cut. The channel moves into the title,
+           where there is room, and the two figures get the line to
+           themselves. */
         return row({
-          title: dayStr(r.paid_on),
-          sub: `${sourceLabel(r.platform)} · wire ${money(n(r.wire), 'AED', 2)} `
-            + `· ours ${money(n(r.calculated), 'AED', 2)}`,
+          title: `${dayStr(r.paid_on)} · ${sourceLabel(r.platform)}`,
+          sub: `wire ${money(n(r.wire), 'AED', 2)} · ours ${money(n(r.calculated), 'AED', 2)}`,
           value: `${dl >= 0 ? '+' : '−'}${money(Math.abs(dl), 'AED', 2)}`,
           note: pc == null ? null : `${pc >= 0 ? '+' : '−'}${Math.abs(pc)}%`,
           tone: Math.abs(pc || 0) >= 2 ? 'warn' : 'good',
@@ -1200,25 +1210,34 @@ async function payouts(deck, ctx) {
   /* ── what each platform publishes, and the one that publishes nothing ─── */
   {
     const c = card('What each platform publishes', null);
+    /* A ROW'S SUB IS ONE NOWRAP LINE, so only a label goes in it.
+       ──────────────────────────────────────────────────────────────────
+       m.css has `.m-row .k span { white-space:nowrap; text-overflow:ellipsis }`,
+       and the first build of this put `cv.cadence` there — Uber's is a whole
+       sentence about the Monday-to-Sunday week and what the wire is measured
+       against. Measured on production: it ran 1,875px past its line and the
+       reader got "Uber wires on a Monday, settling the Monday-to-Sun…". An
+       explanation cut mid-clause is worse than no explanation, because nothing
+       on screen says it was cut. */
     rows(c.body, (d.coverage || []).map((cv) => {
       const mine = (cv.record_span || []).reduce((a, x) => a + (n(x.transfers) || 0), 0);
       return row({
         title: sourceLabel(cv.platform),
-        sub: cv.publishes_payouts
-          ? (cv.cadence || cv.how || 'dates its own transfers')
-          : 'publishes no transfer to the company',
+        sub: cv.publishes_payouts ? 'dates its own transfers' : 'publishes none',
         value: cv.publishes_payouts ? fmt(mine) : '—',
         note: cv.publishes_payouts ? (mine === 1 ? 'transfer' : 'transfers') : null,
         tone: cv.publishes_payouts ? null : 'warn',
       });
     }));
-    /* The absence sentence in full, because "—" in the column above is a
-       shape and the reason is the content. */
+    /* The sentence in full, under the rows, where a paragraph may wrap. Both
+       kinds: a provider's cadence, and — for the one that publishes nothing —
+       why there is no figure rather than a zero. */
     for (const cv of (d.coverage || [])) {
-      if (!cv.absent) continue;
+      const said = cv.absent || cv.cadence || null;
+      if (!said) continue;
       const p4 = el('p', 'm-cap');
       p4.style.cssText = 'margin:10px 2px 0';
-      p4.textContent = `${sourceLabel(cv.platform)}: ${cv.absent}`;
+      p4.textContent = `${sourceLabel(cv.platform)}: ${said}`;
       c.body.append(p4);
     }
     deck.append(c.card);
