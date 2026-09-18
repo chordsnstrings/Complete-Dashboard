@@ -827,6 +827,22 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A FIXTURE WITH NARROW DIGITS CANNOT CATCH A LAYOUT THAT OVERFLOWS ON WIDE
+  ONES.** The phone's payout comparison row reads
+  `wire AED 111,179.66 · ours AED 110,962.09` against the mock and fits 390px
+  by a hair, because a proportional `1` is narrow. Production's
+  `wire AED 103,567.54 · ours AED 103,768.44` ran **9px** over and the
+  ellipsis ate the second figure — the one the row exists to compare the first
+  against. The guard against it **passed with the fix reverted**, twice, until
+  the fixture gained a row whose amounts have no leading 1s (288,456.78 /
+  288,900.33, which reproduces at +18px).
+
+  Same lesson as the 26,559px card page: **a mock with four rows cannot
+  falsify a layout that fails on three hundred**, and where it cannot, either
+  give the fixture the shape that fails or say in the test that this one is
+  production-only. A green assertion over an unreachable branch is worse than
+  no assertion.
+
 * **THIS PRODUCT HAS TWO FRONT ENDS, AND A NARROW VIEWPORT LOADS THE WRONG
   ONE.** `api/public/index.html` picks the phone bundle (`/m/app.js` +
   `/m/m.css`, screens in `api/public/m/screens.js`) on

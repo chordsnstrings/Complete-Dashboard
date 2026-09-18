@@ -1495,4 +1495,26 @@ the lede rounded. It now reads the lede's own text.
 fallback button opens. Both are asserted, in the same file, and the file now
 says which is which.
 
-**Proof owed.** The phone shell on production once deployed.
+**PROVEN ON PRODUCTION 2026-09-18, deployment `144b0dd7`**, through
+`bin/prod-mirror.mjs` with `devices['iPhone 13']`:
+
+```
+shell phone · refused false · sideways false · no JS errors
+lede     "AED 111,179.66 on Sep 14"
+cut      "The 25 most recent of 303 transfers"
+weekday  "every one a Monday"
+```
+
+**Three sentences shipped untrue in the first build of it**, all read off the
+deployed phone and none of them reachable from the mock: `The 25 busiest of 303
+transfers` (`cut()` claims a ranking that nothing ranked), `every one a Mon`
+(three letters of a weekday), and a comparison sub cut to `ours AED 110…` by
+`.m-row .k span`'s nowrap ellipsis — losing the figure the row exists to
+compare. The coverage rows had the same clip on a provider's whole cadence
+sentence.
+
+**And the guard against the last one passed with its own fix reverted, twice**,
+because the fixture's `111,179.66` fits 390px by a hair where production's
+`103,567.54` does not — a proportional `1` is narrow. The mock now carries a
+row whose amounts have no leading 1s, which reproduces at +18px and turns the
+assertion red when the rule is removed.

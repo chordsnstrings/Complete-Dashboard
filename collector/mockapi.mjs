@@ -5338,6 +5338,30 @@ app.get('/api/finance/payouts/reconcile', (_, r) => {
         opening_balance: 103567.54, balance_delta: 0,
         checked_at: null,
         source: 'REPORT_TYPE_PAYMENTS_ORGANIZATION (one-day window)' },
+      /* A SECOND COMPARABLE ROW, AND ITS DIGITS ARE THE POINT.
+         ──────────────────────────────────────────────────────────────────
+         The row above carries 111,179.66 against 110,962.09 — the measured
+         week, which stays exactly as it is. Its sub line fits 390px BY A
+         HAIR, because a proportional 1 is narrow: production's
+         "wire AED 103,567.54 · ours AED 103,768.44" ran 9px over and the
+         ellipsis ate the second figure, the one the row exists to compare the
+         first against. The fixture could not reproduce it, so the guard
+         against it passed with the fix reverted.
+
+         This row's amounts have no 1s in the leading digits, so it renders at
+         production's width and the .wrapsub rule is actually exercised.
+         delta is wire - calculated to the fils, like every other row here. */
+      { platform: 'uber', fleet_id: 'egari', paid_on: '2026-08-31',
+        wire: 288456.78, period_start: '2026-08-24', period_end: '2026-08-30',
+        calculated: 288900.33, delta: -443.55, delta_pct: -0.15,
+        calculated_absent: null,
+        calculated_basis: 'sum of driver_payout_day.earnings for uber/egari over 2026-08-24 to '
+          + '2026-08-30 — 7 of 7 days carrying rows, 21 driver-days. This is the same quantity '
+          + 'Bank reconciliation calls "bank payout"; it is what the drivers earned, not a '
+          + 'transfer.',
+        opening_balance: 289004.11, balance_delta: -547.33,
+        checked_at: null,
+        source: 'REPORT_TYPE_PAYMENTS_ORGANIZATION (one-day window)' },
       { platform: 'bolt', fleet_id: 'ecosine', paid_on: '2026-09-07',
         wire: 2130.56, period_start: null, period_end: null,
         calculated: null, delta: null, delta_pct: null,

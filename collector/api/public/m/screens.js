@@ -1147,13 +1147,19 @@ async function payouts(deck, ctx) {
            compare was the half that got cut. The channel moves into the title,
            where there is room, and the two figures get the line to
            themselves. */
-        return row({
+        const el2 = row({
           title: `${dayStr(r.paid_on)} · ${sourceLabel(r.platform)}`,
           sub: `wire ${money(n(r.wire), 'AED', 2)} · ours ${money(n(r.calculated), 'AED', 2)}`,
           value: `${dl >= 0 ? '+' : '−'}${money(Math.abs(dl), 'AED', 2)}`,
           note: pc == null ? null : `${pc >= 0 ? '+' : '−'}${Math.abs(pc)}%`,
           tone: Math.abs(pc || 0) >= 2 ? 'warn' : 'good',
         });
+        /* This row's sub is two six-figure amounts, which do not fit 390px —
+           measured on production at 9px over, with the ellipsis eating the
+           second one, the figure the row exists to compare the first against.
+           .wrapsub lets it take a second line rather than lose a number. */
+        el2.classList.add('wrapsub');
+        return el2;
       }));
     }
     const byKind = new Map();

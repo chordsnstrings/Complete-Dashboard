@@ -198,6 +198,18 @@ a.m-stat:active{ transform:scale(.985) }
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 .m-row .k span{ display:block; font-size:var(--t4); color:var(--ink-3); margin-top:1px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+/* A SUB THAT MAY WRAP, for the rows whose sub is the CONTENT rather than a
+   caption for it.
+   ─────────────────────────────────────────────────────────────────────────
+   One line with an ellipsis is right for almost every row here: a sub is
+   usually a channel and a plate, and a wrapped one would make a list of rows
+   ragged. It is wrong where the sub carries figures. The payout screen's
+   comparison rows read "wire AED 103,567.54 · ours AED 103,768.44" — two
+   six-figure amounts that do not fit 390px, measured on production at 9px
+   over — and the ellipsis ate the second one, which is the figure the row
+   exists to compare against the first. Dropping a figure to fit would be the
+   same loss with less warning. */
+.m-row.wrapsub .k span{ white-space:normal; overflow:visible; text-overflow:clip }
 .m-row .v{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap }
 .m-row .v b{ display:block; font-size:var(--t8); font-weight:600 }
 .m-row .v span{ display:block; font-size:var(--t4); color:var(--ink-3) }
