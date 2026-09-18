@@ -86,7 +86,7 @@
    rows, which cannot. Presenting them identically would be lying by
    omission. */
 import { el, esc, panel, loading, tableFrom, kpiRow, note, sourceLabel, money,
-  countOf, dateStr, dayStr, pill, pct, signed, foldChildren } from './ui.js';
+  countOf, dateStr, dayStr, pill, pct, signed, foldChildren, foldRows } from './ui.js';
 import { fmt, empty, barChart } from './charts.js';
 import { q, qChan, currentGen, alive } from './data.js';
 
@@ -257,7 +257,7 @@ export async function renderPayouts(root) {
       'One row per payment that reached the bank, taken from the provider’s own books. '
       + 'Nothing here is divided out of a weekly figure — a row exists because a provider '
       + 'named this date.');
-    p.body.append(tableFrom(payouts, [
+    const table = tableFrom(payouts, [
       { label: 'Date', key: 'paid_on',
         render: (r) => `<b>${esc(dateStr(r.paid_on))}</b>`
           + `<span class="dim"> · ${esc(weekdayOf(r.paid_on) || '')}</span>` },
@@ -275,7 +275,26 @@ export async function renderPayouts(root) {
          stored cannot be re-derived when a provider changes shape. */
       { label: 'From', key: 'source',
         render: (r) => `<span class="dim">${esc(r.source || '—')}</span>` },
-    ], { sortable: true, sortId: 'payout-rows' }));
+    ], { sortable: true, sortId: 'payout-rows',
+      /* CARDS ON A PHONE. Six columns, 668px wide, in a 312px window at 390px
+         — measured on production 2026-09-18. The date leads, because a
+         transfer is a thing that happened on a day and every other field on
+         the card is about that day's money. */
+      cards: true, cardLead: 'paid_on' });
+    /* FOLDED, NEVER TRUNCATED — the product's own control, the one the drivers
+       page uses for the same reason.
+       ───────────────────────────────────────────────────────────────────────
+       235 rows is 235 cards on a phone, and a card is taller than a row: the
+       page measured 10,611px at 390px with the tables still squeezed, and
+       cards alone would have made it longer. The register's subject is "every
+       transfer", so nothing may be dropped — but the newest twenty are what
+       anybody opens it for, and the other 215 are one button away with the
+       button naming exactly how many it is holding back.
+
+       The same fold at both widths, because it is the same argument at both:
+       a 235-row table is a wall on a desktop too, and a reader who opens it
+       once is remembered. */
+    foldRows(p.body, table, { shown: 20, noun: 'transfer', key: 'payout-rows' });
     root.append(p.panel);
 
     /* The shape of it. Oldest first, because a series read left to right is a
@@ -291,9 +310,23 @@ export async function renderPayouts(root) {
       const cp = panel('The same transfers, in order',
         'Gaps between the bars are days no transfer arrived — they are not zeroes and are '
         + 'not drawn as any.');
+      /* THE CHART KEEPS A BAR WIDTH ON A PHONE AND SCROLLS INSTEAD.
+         ─────────────────────────────────────────────────────────────────
+         91 bars — twenty-one months of Mondays — in the 312px a panel leaves
+         at 390px is 3.4px per bar, which is a texture and not a series. The
+         SVG scales to its box, so nothing looked broken; it was simply
+         unreadable, which is the harder kind of defect to notice in a
+         screenshot. .chartscroll (app.css) holds a floor width below 560px
+         and lets the panel scroll it sideways. Above that it does nothing and
+         the chart fills the panel exactly as before. */
       const host = el('div');
-      cp.body.append(host);
+      const scroller = el('div', 'chartscroll');
+      scroller.append(host);
+      cp.body.append(scroller);
       barChart(host, series, { x: 'day', y: 'v', valueFmt: (v) => money(v), axisFmt: (v) => money(v) });
+      cp.body.append(el('p', 'cap phone-only',
+        `All ${fmt(series.length)} payout dates are drawn. On a narrow screen the chart keeps `
+        + 'its bar width and scrolls sideways rather than shrinking every bar past reading.'));
       root.append(cp.panel);
     }
   } else {
@@ -351,7 +384,7 @@ export async function renderPayouts(root) {
         } },
       { label: 'When it pays', key: 'cadence',
         render: (c) => (c.cadence ? esc(c.cadence) : '<span class="ent-off">—</span>') },
-    ], { sortId: 'payout-coverage' }));
+    ], { sortId: 'payout-coverage', cards: true, cardLead: 'platform' }));
 
     /* THE ABSENCE BAND. Each missing figure gets the reason it is missing, in
        plain English, in the provider's own terms — never a zero and never a
@@ -373,7 +406,7 @@ export async function renderPayouts(root) {
       + 'an opening and a closing balance, this is that statement; where it publishes only dated '
       + 'transactions, this is those transactions summed per day, and the Basis column says '
       + 'which — only the first can be checked against itself.');
-    p.body.append(tableFrom(days, [
+    const dayTable = tableFrom(days, [
       { label: 'Date', key: 'day', render: (r) => `<b>${esc(dateStr(r.day))}</b>` },
       { label: 'Platform', key: 'platform', render: (r) => esc(sourceLabel(r.platform)) },
       { label: 'Fleet', key: 'fleet_id', render: (r) => esc(r.fleet_id || '—') },
@@ -410,7 +443,15 @@ export async function renderPayouts(root) {
       { label: 'Closed at', key: 'closing_balance', num: true,
         render: (r) => (r.closing_balance == null
           ? '<span class="ent-off">—</span>' : money(r.closing_balance)) },
-    ], { sortable: true, sortId: 'payout-days' }));
+    ], { sortable: true, sortId: 'payout-days',
+      /* Ten columns, 1,007px wide. The widest table on the page and the one a
+         sideways scroll destroyed most completely: a row of balances with no
+         date against any of them. */
+      cards: true, cardLead: 'day' });
+    /* 184 days of balances, folded to a fortnight. The panel's job is to make
+       a transfer CHECKABLE against the day it left on, and the days worth
+       checking are the recent ones; the rest stay one named button away. */
+    foldRows(p.body, dayTable, { shown: 14, noun: 'day', key: 'payout-days' });
     p.body.append(note(`${countOf(statements.length, 'day')} come from a provider statement `
       + `and ${countOf(ledgers.length, 'day')} are summed from dated transactions. `
       + 'A blank in a money column means the provider publishes no such figure, and it is never '
@@ -731,7 +772,7 @@ function drawReconcile(hostEl, rec, run) {
     return;
   }
 
-  p.body.append(tableFrom(rows, [
+  const recTable = tableFrom(rows, [
     { label: 'Arrived', key: 'paid_on',
       render: (r) => `<b>${esc(dateStr(r.paid_on))}</b>`
         + `<span class="dim"> · ${esc(weekdayOf(r.paid_on) || '')}</span>` },
@@ -823,7 +864,15 @@ function drawReconcile(hostEl, rec, run) {
         ? `<span class="dim" title="somebody asked Uber about this day directly">${esc(dateStr(r.checked_at))}</span>`
         : '<span class="ent-off" title="nobody has asked Uber live about this day — this row is '
           + 'the nightly walk’s reading of the provider">—</span>') },
-  ], { sortable: true, sortId: 'payout-reconcile' }));
+  ], { sortable: true, sortId: 'payout-reconcile',
+    /* Nine columns, 1,172px — the worst of the four, and the one holding the
+       number an operator opens this page for. The date it arrived leads. */
+    cards: true, cardLead: 'paid_on' });
+  /* The newest twelve transfers, with the rest one button away. This is the
+     panel the page leads with and a reader is here for the most recent wire;
+     235 rows between them and the totals underneath is the shape that made
+     this page 10,611px tall on a phone. */
+  foldRows(p.body, recTable, { shown: 12, noun: 'transfer', key: 'payout-reconcile' });
 
   /* ── the totals, over two populations, said apart ──────────────────────── */
   const t = rec.totals || {};

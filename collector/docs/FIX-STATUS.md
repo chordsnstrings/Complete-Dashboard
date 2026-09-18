@@ -1414,3 +1414,30 @@ transfers can be compared against our own figure at all — the other 225 are 17
 Bolt rows that state no period and 50 Uber weeks with no `driver_payout_day`
 rows stored. The page now says so in three notes instead of fifty; collecting
 those weeks is its own piece of work.
+
+## The Payouts page had no mobile view — 2026-09-18
+
+Asked for in eight words: **"that specific page should have a mobile view."**
+It had a desktop layout shrunk to fit — and the whole-record change the day
+before is what made that unmissable, since the tables went from a month of rows
+to the register.
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | four tables 637–1,172px wide inside a 312px window, read by scrolling sideways through 239 rows | `cards` opt-in on `tableFrom`: each cell carries its own column heading in `data-label`, and under 560px the rows become cards | written, **proven by revert** (`test/payout_mobile.test.mjs`) |
+| — | the document scrolled sideways: scrollWidth 413 against a 390 viewport | the cells stopped spilling; measured 390 at 390 | written, **proven by revert** |
+| — | 724 rows rendered on a phone, page 10,611px | `foldRows` on the three long tables — 12, 20 and 14 shown, the rest behind a button that names how many | written, **proven by revert** |
+| — | 91 bars in 312px, 3.4px each | a floor bar width below 560px, scrolling inside the panel, with a caption that only prints where it is true | written, **proven by revert** |
+| — | every even card shaded, because the zebra override lost on specificity | selector matched to the rule it overrides | written, **proven by revert** |
+
+**Two wrong layouts before the right one, and the file says so.** Flex (an
+anonymous flex item cannot take `min-width:0` — 419px) and a two-track grid
+(the label track takes its max-content — 448px) both looked correct in source
+and failed only in a browser. Label-above-value has no track to get wrong.
+
+**One claim retracted before it was committed:** the comment on
+`.chartscroll{min-width:0}` said that line fixed the 419px scroll. It did not —
+that was the card cells. Measured with the line removed, the document is 390px
+either way; it is kept as a guard and now says that it is one.
+
+**Proof owed.** The same two widths on production once deployed.

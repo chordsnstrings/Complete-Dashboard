@@ -179,8 +179,39 @@ function plainCell(c, r) {
     ? fmt(n) : esc(v ?? '—');
 }
 
+/* ── A TABLE THAT BECOMES CARDS ON A PHONE ────────────────────────────────
+   ═════════════════════════════════════════════════════════════════════════
+   THE DEFECT, reported in eight words about the Payouts page — "that specific
+   page should have a mobile view". It had a desktop layout shrunk to fit.
+   MEASURED at 390px on production 2026-09-18:
+
+     table                              columns   table width   window
+     Uber's wire against our own figure      9        1,172px     312px
+     the provider's own books, day by day   10        1,007px     312px
+     every transfer, by the date it arrived  6          668px     312px
+
+   `.tscroll` already scrolls a wide table sideways and pins the first column,
+   which is the right answer for a table that is a LITTLE too wide. A 1,172px
+   table in a 312px window is not a little too wide: a reader sees a quarter of
+   one column set at a time and has to scroll sideways through every one of 239
+   rows to read a row. The smallest type on the page measured 10.1px.
+
+   So a caller may ask for `cards`. Nothing changes at desktop width — the same
+   table, the same sort, the same scroller. Under the breakpoint in app.css the
+   rows become one card each, and each cell prints its own column heading
+   beside its value, because a value with no label is the thing the sideways
+   scroll was already destroying.
+
+   THE LABEL IS THE COLUMN'S OWN, carried on the cell in `data-label` and drawn
+   by CSS, so a card cannot drift out of step with the heading it came from —
+   a second list of labels in the stylesheet is a second thing to keep true.
+
+   `cardLead` names the column that becomes the card's heading: the field the
+   rest of the card is ABOUT, which is the same thing .tscroll pins on the
+   left at desktop width. Without one the first column is used. */
 export function tableFrom(rows, cols, { compact = false, sortable = false,
-  sortId = 't', defaultSort = null, capped = null, onRow = null } = {}) {
+  sortId = 't', defaultSort = null, capped = null, onRow = null,
+  cards = false, cardLead = null } = {}) {
   if (!rows.length) { const d = el('div'); empty(d); return d; }
   const wrap = el('div', 'tscroll');
   const t = el('table', compact ? 'compact' : null);
@@ -288,11 +319,24 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
       : `<th class="${cls}"${dk} aria-sort="none">${esc(c.label)}</th>`;
   }).join('')}</tr></thead>`;
 
+  /* Which column heads the card. Resolved once, against the columns that
+     SURVIVED the empty/sparse pruning above — a lead naming a column that was
+     dropped would leave every card headless, and the pruning is data-dependent
+     so it cannot be checked by reading the call site. */
+  const lead = cards
+    ? (cols.find((c) => c.key === cardLead) || cols[0] || null)
+    : null;
   const body = (list) => `<tbody>${list.map((r) => `<tr>${cols.map((c) =>
     /* `cellCls` lets a column give ONE cell a verdict — a completion rate below
        the threshold reads as bad in the cell rather than only in a tile far
        above the table. Returns a class name or nothing. */
-    `<td class="${[c.num ? 'num' : '', (c.cellCls && c.cellCls(r)) || ''].filter(Boolean).join(' ')}">${c.render ? c.render(r) : plainCell(c, r)}</td>`)
+    `<td class="${[c.num ? 'num' : '', (c.cellCls && c.cellCls(r)) || '',
+      cards && c === lead ? 'cardlead' : ''].filter(Boolean).join(' ')}"${
+      /* The heading travels WITH the cell rather than being restated in CSS,
+         so a renamed column renames its own card label. Empty for the lead:
+         it is the card's title and does not caption itself. */
+      cards && c !== lead ? ` data-label="${esc(c.label)}"` : ''
+    }>${c.render ? c.render(r) : plainCell(c, r)}</td>`)
     .join('')}</tr>`).join('')}</tbody>`;
 
   /* The caller's row-level handlers index into the array it passed, so the
@@ -384,7 +428,7 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
      when it is needed. */
   const box = el('div', 'tsbox');
   box.append(wrap);
-  const block = el('div', 'tblock');
+  const block = el('div', cards ? 'tblock tcards' : 'tblock');
   block.append(box, ...notes);
   scrollCue(box, wrap);
   return block;

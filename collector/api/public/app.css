@@ -2456,3 +2456,134 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
   color:var(--ink-2);
 }
 .authbanner.degraded .ab-dot{background:var(--ink-3)}
+
+/* ── A TABLE THAT BECOMES CARDS ON A PHONE ────────────────────────────────
+   ═════════════════════════════════════════════════════════════════════════
+   Opt-in: ui.js puts .tcards on the block when a caller asks for it, and
+   writes each cell's own column heading into data-label. Above the breakpoint
+   this whole block is inert and the table is exactly what it was.
+
+   THE DEFECT it answers, reported in eight words about the Payouts page —
+   "that specific page should have a mobile view". Measured at 390px:
+   a nine-column table 1,172px wide inside a 312px window, 239 rows of it, and
+   the reader scrolling sideways through a quarter of a row at a time.
+   .tscroll pinning the first column is the right answer for a table that is a
+   little too wide; 1,172 into 312 is not a little.
+
+   560px and not 820px: the sidebar collapses at 820 and tables are still fine
+   in the width that frees. This is the width at which a row stops fitting. */
+@media (max-width:560px){
+  /* The scroller stops being one: there is nothing left to scroll sideways,
+     so the border and shadow move to the cards and the box gets out of the
+     way. visible, not auto — `auto` on one axis resolves the other to auto
+     too, which would leave a stray vertical scrollport around the stack. */
+  .tcards .tsbox{overflow:visible}
+  .tcards .tscroll{
+    overflow:visible;border:0;background:none;box-shadow:none;max-height:none;
+  }
+  /* The edge fades are about a sideways scroll that no longer happens. */
+  .tcards .tsbox::before,.tcards .tsbox::after{display:none}
+  .tcards table{display:block;width:100%;min-width:0;border-collapse:separate}
+  /* The headings are on the cells now. Kept in the DOM rather than removed, so
+     sorting, aria-sort and the column keys are all still there for a screen
+     reader and for the tooling that reads data-key. */
+  .tcards thead{
+    position:absolute;width:1px;height:1px;overflow:hidden;
+    clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;
+  }
+  .tcards tbody{display:block}
+  .tcards tbody tr{
+    display:block;margin:0 0 10px;padding:11px 13px 9px;
+    background:var(--surface);border:1px solid var(--rule);
+    border-radius:var(--r);box-shadow:var(--shadow-1);
+  }
+  /* The zebra striping and the pinned first column are both about reading
+     ACROSS a row, which is not what a card is — a shaded every-other card
+     reads as a card that means something different.
+
+     Selector matched to the one it is overriding, `.tscroll table tbody
+     tr:nth-child(even) td`, rather than written as short as it could be: the
+     short form lost on specificity (four type selectors to three) and every
+     even card came out shaded. Later in the file is not later in the cascade
+     when the other rule is more specific. */
+  .tcards .tscroll table tbody tr:nth-child(even) td{background:none}
+  .tcards .tscroll table td:first-child,
+  .tcards .tscroll table th:first-child{
+    position:static;background:none;box-shadow:none;z-index:auto;
+  }
+  /* The field the card is ABOUT — the same column .tscroll pins on the left at
+     desktop width. Its own line, above the rule, no caption: a title does not
+     caption itself. */
+  .tcards td.cardlead{
+    display:block;padding:0 0 8px;margin-bottom:8px;text-align:left;
+    border-bottom:1px solid var(--rule);font-size:var(--t7);
+  }
+  /* Every other cell: its heading above its value, in the small uppercase the
+     tiles at the top of these pages already use.
+
+     LABEL ABOVE AND NOT BESIDE, after measuring both. A cell's content is
+     whatever the column's render() produced — "AED 199,772 over 2 dates" here,
+     a whole sentence there, two spans around a <br> somewhere else — and a
+     side-by-side layout has to give that content a track it can shrink inside.
+     In a flex row it is an ANONYMOUS flex item, which cannot be given
+     min-width:0: measured at 390px, ten cells stuck out of their card by up to
+     76px and put the document on a 419px sideways scroll. A two-track grid
+     moved the problem rather than fixing it — the label track takes its
+     max-content and "AGAINST THE OPENING BALANCE" is most of a phone — and
+     measured 448px, worse than the flex it replaced.
+
+     Stacking has no track to get wrong. It costs a line per field and it is
+     the layout every card in this product already uses, so it is also the one
+     a reader has seen before. */
+  .tcards td{
+    display:block;padding:5px 0 3px;border:0;text-align:left;
+    overflow-wrap:anywhere;
+  }
+  .tcards td::before{
+    content:attr(data-label);display:block;
+    font-family:"IBM Plex Mono",monospace;font-size:var(--t2);letter-spacing:.07em;
+    text-transform:uppercase;color:var(--ink-2);font-weight:600;
+    margin-bottom:1px;
+  }
+  /* .num right-aligns against a column edge that no longer exists — inside a
+     card the value is already on the right of its own label. */
+  .tcards td.num{text-align:left}
+
+  .tcards tbody tr[data-click]{cursor:pointer}
+}
+
+/* The live bar's figures are ONE nowrap span each — "≈ AED 2,130" plus its
+   label — and at 390px the longest measured 396px, which put the whole
+   DOCUMENT on a 413px sideways scroll. On EVERY page, not only this one: the
+   same span overflows #overview identically. A figure and its label want to
+   stay together; the span is free to wrap between words when it must. */
+@media (max-width:430px){
+  .todaynow .tn-f{white-space:normal}
+}
+
+/* A bar chart is a series, and a series needs room per bar. The payout chart
+   draws 91 bars — twenty-one months of Mondays — and at 312px that is 3.4px
+   each, which is a texture rather than a chart. Below the breakpoint it keeps
+   a readable bar width and the panel scrolls it, with the same fade and
+   caption every wide table here gets. */
+@media (max-width:560px){
+  /* min-width:0 is a GUARD and not a repair, said plainly because the first
+     version of this comment claimed it fixed the 419px sideways scroll this
+     page had. It did not — that was the card cells, and the note above them
+     records it. Measured with this line removed: the document is 390px either
+     way today.
+
+     It is here because a scroller with a content floor inside a grid or flex
+     parent is the trap app.css already records twice, in the sidebar and in
+     the toolbar: a grid item's `min-width` defaults to `auto`, "never narrower
+     than my content", and a 560px floor would then push the ITEM rather than
+     scroll inside it. This panel's body is not a grid today. The day one of
+     them is, this is the line that keeps the page from sliding. */
+  .chartscroll{overflow-x:auto;min-width:0;max-width:100%}
+  .chartscroll > *{min-width:560px}
+}
+/* A line that is only true on a narrow screen — the chart's "it scrolls
+   sideways here" caption. Hidden where it is false rather than written in a
+   way that is vague enough to be true at both widths. */
+.phone-only{display:none}
+@media (max-width:560px){ .phone-only{display:block} }

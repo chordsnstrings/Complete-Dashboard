@@ -1200,3 +1200,41 @@ previous payout pass also left outstanding.
 
 Phone width shot at the same time, which the previous payout pass owed and did
 not take.
+
+## Payouts on a phone — 2026-09-18
+
+**Reproduce:** `PORT=8099 node mockapi.mjs`, Chromium at 390×844 on
+`http://localhost:8099/#payouts`. `test/payout_mobile.test.mjs` runs the same
+pass with assertions instead of eyes, at 390px and again at 1280px.
+
+Asked for in eight words — *"that specific page should have a mobile view"* —
+and it did not have one. Measured at 390px before:
+
+| | columns | table width | the window it sat in |
+|---|---|---|---|
+| Uber's wire against our own figure | 9 | 1,172px | 312px |
+| the provider's own books, day by day | 10 | 1,007px | 312px |
+| every transfer, by the date it arrived | 6 | 668px | 312px |
+| what each platform publishes | 5 | 637px | 312px |
+
+plus **document scrollWidth 413 against a 390 viewport** (the whole page slid
+sideways), 724 table rows, and 10.1px as the smallest type on screen.
+
+| | before | after |
+|---|---|---|
+| document scrollWidth at 390px | **413** | **390** — no sideways scroll |
+| the four tables | squeezed, scrolled sideways | one card per row, each field under its own heading |
+| rows rendered | 724 | 46, with three named fold buttons holding the rest |
+| the 91-bar chart | 312px wide, 3.4px a bar | keeps its bar width, scrolls inside the panel, and says so |
+| cells spilling out of their box | — | 0, asserted |
+
+**Three layouts, two of them wrong, and only the browser could tell.** Flex:
+a cell's content is an anonymous flex item, which cannot be given
+`min-width:0`, so ten cells stuck out by up to 76px and the document went to
+419px. A two-track grid: the label track takes its max-content and "AGAINST THE
+OPENING BALANCE" is most of a phone — 448px, worse. Label above value has no
+track to get wrong.
+
+Desktop is unchanged and asserted to be: at 1280px the rows are `table-row`
+again, the headings are back, the chart fills the panel and the
+narrow-screen caption is not printed.

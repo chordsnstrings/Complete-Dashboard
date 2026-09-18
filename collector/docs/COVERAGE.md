@@ -827,6 +827,30 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A cell's content in a flex row is an ANONYMOUS flex item, and an anonymous
+  item cannot be given `min-width:0`** — so it refuses to shrink below its
+  longest line and sticks out of whatever contains it. Hit while turning the
+  Payouts tables into cards at 390px: ten cells over by up to 76px and the
+  document on a 419px sideways scroll. The two-track grid that replaced it was
+  worse (448px): a `minmax(0,auto)` label track takes its max-content, and
+  "AGAINST THE OPENING BALANCE" is most of a phone. **Label above value** has
+  no track to get wrong, and is what shipped. If a card layout must be
+  side-by-side, the value needs a real element to hang `min-width:0` on.
+
+* **Later in the stylesheet is not later in the cascade.**
+  `.tcards tbody tr:nth-child(even) td{background:none}` lost to
+  `.tscroll table tbody tr:nth-child(even) td` — four type selectors to three —
+  and every even card came out shaded, in a rule that reads as though it works.
+  Match the selector you are overriding rather than writing the short form.
+
+* **A layout defect cannot be caught by reading the source.** `cards: true` was
+  passed correctly in all three attempts above; only a browser at 390px told
+  them apart. `test/payout_mobile.test.mjs` is the pattern: start `mockapi`'s
+  exported `app` on port 0, drive Chromium at
+  `executablePath: '/opt/pw-browsers/chromium'`, assert
+  `documentElement.scrollWidth <= clientWidth` and `scrollWidth - clientWidth`
+  per cell — then assert the desktop width is unchanged in the same file.
+
 * **A cadence read off one window is a guess with a number beside it.** Bolt's
   coverage row on the Payouts page said *"One payout per date, with no fixed
   weekday"* — written while that page showed a month. Measured 2026-09-17, the
