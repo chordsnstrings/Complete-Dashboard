@@ -336,7 +336,22 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
          so a renamed column renames its own card label. Empty for the lead:
          it is the card's title and does not caption itself. */
       cards && c !== lead ? ` data-label="${esc(c.label)}"` : ''
-    }>${c.render ? c.render(r) : plainCell(c, r)}</td>`)
+    }>${cards && c !== lead
+      /* THE VALUE GETS A REAL ELEMENT, and this one span is what lets a card
+         put a label and its value on ONE LINE.
+         ──────────────────────────────────────────────────────────────────
+         A cell's content is whatever render() produced, and left bare in a
+         flex row it is an ANONYMOUS flex item — which cannot be given
+         min-width:0 and so refuses to shrink below its longest line. Measured
+         at 390px: ten cells stuck out of their cards by up to 76px and the
+         document went to a 419px sideways scroll. Stacking the label above the
+         value avoided that and cost a line per field: cards came out 298–470px
+         each and the page 26,559px on a phone, measured on production.
+
+         A named span is a flex item like any other. It shrinks, it wraps
+         inside its own track, and the field fits on one line. */
+      ? `<span class="cardval">${c.render ? c.render(r) : plainCell(c, r)}</span>`
+      : (c.render ? c.render(r) : plainCell(c, r))}</td>`)
     .join('')}</tr>`).join('')}</tbody>`;
 
   /* The caller's row-level handlers index into the array it passed, so the

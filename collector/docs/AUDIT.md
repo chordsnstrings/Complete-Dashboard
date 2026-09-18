@@ -1225,15 +1225,20 @@ sideways), 724 table rows, and 10.1px as the smallest type on screen.
 | document scrollWidth at 390px | **413** | **390** — no sideways scroll |
 | the four tables | squeezed, scrolled sideways | one card per row, each field under its own heading |
 | rows rendered | 724 | 46, with three named fold buttons holding the rest |
+| card height | — | one line per field; measured 298–470px under the stacked layout that preceded it |
 | the 91-bar chart | 312px wide, 3.4px a bar | keeps its bar width, scrolls inside the panel, and says so |
 | cells spilling out of their box | — | 0, asserted |
 
-**Three layouts, two of them wrong, and only the browser could tell.** Flex:
-a cell's content is an anonymous flex item, which cannot be given
-`min-width:0`, so ten cells stuck out by up to 76px and the document went to
-419px. A two-track grid: the label track takes its max-content and "AGAINST THE
-OPENING BALANCE" is most of a phone — 448px, worse. Label above value has no
-track to get wrong.
+**Four layouts, three of them wrong, and only the browser could tell.** Flex
+with bare content: a cell's content is an anonymous flex item, which cannot be
+given `min-width:0`, so ten cells stuck out by up to 76px and the document went
+to 419px. A two-track grid: the label track takes its max-content and "AGAINST
+THE OPENING BALANCE" is most of a phone — 448px, worse. Label above value:
+no overflow, and a line per field — cards 298–470px each and the page
+**26,559px measured on production**, which is the version that shipped for
+about an hour. What works is flex with the value in its own `<span>`: a real
+flex item shrinks and wraps inside its own side, a short label keeps its value
+beside it, a long one pushes it to the next line.
 
 Desktop is unchanged and asserted to be: at 1280px the rows are `table-row`
 again, the headings are back, the chart fills the panel and the

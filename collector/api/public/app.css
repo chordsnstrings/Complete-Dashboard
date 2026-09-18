@@ -2518,32 +2518,41 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
     display:block;padding:0 0 8px;margin-bottom:8px;text-align:left;
     border-bottom:1px solid var(--rule);font-size:var(--t7);
   }
-  /* Every other cell: its heading above its value, in the small uppercase the
-     tiles at the top of these pages already use.
+  /* Every other cell: its heading on the left in small uppercase, its value on
+     the right, wrapping inside its own side.
 
-     LABEL ABOVE AND NOT BESIDE, after measuring both. A cell's content is
-     whatever the column's render() produced — "AED 199,772 over 2 dates" here,
-     a whole sentence there, two spans around a <br> somewhere else — and a
-     side-by-side layout has to give that content a track it can shrink inside.
-     In a flex row it is an ANONYMOUS flex item, which cannot be given
-     min-width:0: measured at 390px, ten cells stuck out of their card by up to
-     76px and put the document on a 419px sideways scroll. A two-track grid
-     moved the problem rather than fixing it — the label track takes its
-     max-content and "AGAINST THE OPENING BALANCE" is most of a phone — and
-     measured 448px, worse than the flex it replaced.
+     THE VALUE IS A REAL ELEMENT — ui.js wraps it in .cardval — and that is the
+     whole reason this works. Left bare it is an ANONYMOUS flex item, which
+     cannot be given min-width:0: measured at 390px, ten cells stuck out of
+     their cards by up to 76px and the document went to a 419px sideways
+     scroll. A two-track grid moved the problem rather than fixing it, since a
+     minmax(0,auto) label track takes its max-content and "AGAINST THE OPENING
+     BALANCE" is most of a phone — 448px, worse. Stacking the label above the
+     value fixed the overflow and cost a line per field: cards came out
+     298–470px each and the page 26,559px, measured on production.
 
-     Stacking has no track to get wrong. It costs a line per field and it is
-     the layout every card in this product already uses, so it is also the one
-     a reader has seen before. */
+     One named span solves both. It shrinks like any flex item and wraps inside
+     its own side, and the field fits on one line. */
   .tcards td{
-    display:block;padding:5px 0 3px;border:0;text-align:left;
-    overflow-wrap:anywhere;
+    display:flex;flex-wrap:wrap;gap:2px 12px;align-items:baseline;
+    padding:4px 0 3px;border:0;text-align:left;
   }
+  /* No max-width on the label, and that is the mechanism rather than an
+     omission: `flex:0 0 auto` lets it take exactly its own width, so a SHORT
+     label ("Fleet") leaves room for the value beside it and a LONG one
+     ("Against the opening balance") fills the line and pushes the value onto
+     the next one, where it gets the whole width. The layout picks per field,
+     which is what a fixed label column cannot do. */
   .tcards td::before{
-    content:attr(data-label);display:block;
+    content:attr(data-label);
     font-family:"IBM Plex Mono",monospace;font-size:var(--t2);letter-spacing:.07em;
     text-transform:uppercase;color:var(--ink-2);font-weight:600;
-    margin-bottom:1px;
+    flex:0 0 auto;
+  }
+  /* min-width:0 is the point of the element existing; overflow-wrap catches a
+     value with no space in it to break at, which a source string or an id is. */
+  .tcards .cardval{
+    flex:1 1 auto;min-width:0;text-align:right;overflow-wrap:anywhere;
   }
   /* .num right-aligns against a column edge that no longer exists — inside a
      card the value is already on the right of its own label. */

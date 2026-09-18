@@ -107,7 +107,23 @@ const look = async (width, height) => {
       const heads = [...b.querySelectorAll('thead th')].map((th) => th.textContent.replace(/[↑↓]/g, '').trim());
       const labels = tds.filter((td) => td.hasAttribute('data-label'))
         .map((td) => td.getAttribute('data-label'));
-      return { cells: tds.length, lead, withLabel,
+      /* The value's own element. Without it the content is an anonymous flex
+         item, which cannot be given min-width:0 — see the block comment in
+         ui.js. Counted rather than assumed, because "the span is there" and
+         "the span is on every cell" are different claims. */
+      const vals = tds.filter((td) => td.querySelector(':scope > .cardval')).length;
+      /* A SHORT field must put its label and its value on ONE line. Stacking
+         them was the layout before this: correct, and 298–470px per card,
+         which made the page 26,559px on production. Measured by baseline, not
+         by height: same line means same offsetTop. */
+      const shortField = tds.find((td) => /^(fleet|platform)$/i.test(td.getAttribute('data-label') || ''));
+      let sameLine = null;
+      if (shortField) {
+        const v = shortField.querySelector(':scope > .cardval');
+        sameLine = v ? Math.abs(v.getBoundingClientRect().top
+          - shortField.getBoundingClientRect().top) < 6 : false;
+      }
+      return { cells: tds.length, lead, withLabel, vals, sameLine,
         /* Every label is one of the table's own column headings — the guard
            against a second list of labels drifting out of step. */
         allFromHeads: labels.every((l) => heads.includes(l)),
@@ -160,6 +176,12 @@ check('…and every label is one of that table’s own headings',
 check('the heading row is hidden but still in the DOM for a screen reader',
   ph.labelled.every((b) => b.theadInDom && !b.theadVisible),
   JSON.stringify(ph.labelled.map((b) => `${b.theadInDom}/${b.theadVisible}`)));
+check('every labelled cell wraps its value in an element that can shrink',
+  ph.labelled.every((b) => b.vals === b.cells - 1),
+  JSON.stringify(ph.labelled.map((b) => `${b.vals} of ${b.cells - 1}`)));
+check('a short field puts its label and value on one line, not two',
+  ph.labelled.every((b) => b.sameLine !== false),
+  JSON.stringify(ph.labelled.map((b) => b.sameLine)));
 check('the chart keeps a bar width and scrolls inside the panel',
   ph.chart && ph.chart.w <= ph.vw && ph.chart.scrollW > ph.chart.w,
   JSON.stringify(ph.chart));

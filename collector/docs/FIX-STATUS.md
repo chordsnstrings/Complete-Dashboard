@@ -1430,10 +1430,15 @@ to the register.
 | — | 91 bars in 312px, 3.4px each | a floor bar width below 560px, scrolling inside the panel, with a caption that only prints where it is true | written, **proven by revert** |
 | — | every even card shaded, because the zebra override lost on specificity | selector matched to the rule it overrides | written, **proven by revert** |
 
-**Two wrong layouts before the right one, and the file says so.** Flex (an
-anonymous flex item cannot take `min-width:0` — 419px) and a two-track grid
-(the label track takes its max-content — 448px) both looked correct in source
-and failed only in a browser. Label-above-value has no track to get wrong.
+**Three wrong layouts before the right one, and the files say so.** Flex with
+bare content (an anonymous flex item cannot take `min-width:0` — 419px), a
+two-track grid (the label track takes its max-content — 448px), then
+label-above-value, which fixed the overflow and cost a line per field: cards
+298–470px and the page **26,559px, measured on production after deploying it**.
+The fourth is what shipped — flex with the value in its own `<span>`, a real
+flex item that shrinks and wraps inside its own side. All four passed a
+source-reading test; only a browser told them apart, and only a production
+render caught the third.
 
 **One claim retracted before it was committed:** the comment on
 `.chartscroll{min-width:0}` said that line fixed the 419px scroll. It did not —

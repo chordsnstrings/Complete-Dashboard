@@ -830,12 +830,21 @@ driver's 222 tracker fixes.
 * **A cell's content in a flex row is an ANONYMOUS flex item, and an anonymous
   item cannot be given `min-width:0`** — so it refuses to shrink below its
   longest line and sticks out of whatever contains it. Hit while turning the
-  Payouts tables into cards at 390px: ten cells over by up to 76px and the
-  document on a 419px sideways scroll. The two-track grid that replaced it was
-  worse (448px): a `minmax(0,auto)` label track takes its max-content, and
-  "AGAINST THE OPENING BALANCE" is most of a phone. **Label above value** has
-  no track to get wrong, and is what shipped. If a card layout must be
-  side-by-side, the value needs a real element to hang `min-width:0` on.
+  Payouts tables into cards at 390px, and it took four layouts to land:
+
+  | attempt | result |
+  |---|---|
+  | flex, bare content | ten cells over by up to 76px, document **419px** |
+  | two-track grid | a `minmax(0,auto)` label track takes its max-content and "AGAINST THE OPENING BALANCE" is most of a phone — **448px**, worse |
+  | label ABOVE value | no overflow, and a line per field: cards 298–470px each, page **26,559px** on production |
+  | flex, value wrapped in its own `<span>` | **what shipped** — shrinks, wraps inside its own side, one line per field |
+
+  **The fix is to give the value a real element**, which is a flex item like
+  any other and takes `min-width:0`. Then a short label leaves room for its
+  value beside it and a long one fills the line and pushes the value onto the
+  next — the layout choosing per field, which is what a fixed label column
+  cannot do. Beware measuring only the overflow: attempt three fixed it and
+  made the page two and a half times longer.
 
 * **Later in the stylesheet is not later in the cascade.**
   `.tcards tbody tr:nth-child(even) td{background:none}` lost to
