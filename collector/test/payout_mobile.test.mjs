@@ -29,8 +29,23 @@
 
    It serves the MOCK, not production: the fixtures are stable, the assertions
    are about layout rather than figures, and a test that needs the network is a
-   test that is red whenever the network is. */
-import { chromium } from 'playwright';
+   test that is red whenever the network is.
+
+   ── AND THE 390px SHELL IS NOT THE PHONE, WHICH THIS FILE FIRST ASSUMED ──
+   api/public/index.html picks the phone bundle on
+   `max-width:760px` AND `pointer:coarse`, and a Playwright page with a
+   viewport and no `hasTouch` fails the second half — so everything §2 measures
+   is the DESKTOP shell at 390px. That is a real surface (a narrow window, a
+   tablet, and the `?ui=desktop` build the phone's own fallback button opens),
+   and it is not what a phone gets.
+
+   What a phone gets is `api/public/m/` — a separate bundle with its own
+   screens — and `#payouts` had no screen in it. Verified on production
+   2026-09-18 with `devices['iPhone 13']`: the register rendered as
+   "Built for a bigger screen. This view is a wide table, and squeezing it onto
+   a phone would lose the row you are reading," over a button to the desktop
+   build. §4 is that half, and it is the half the request was about. */
+import { chromium, devices } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { app } from '../mockapi.mjs';
 
@@ -205,6 +220,80 @@ check('…and the narrow-screen caption is not printed', !dk.captionShown, 'it i
 check('the page does not scroll sideways there either', dk.docScroll <= dk.vw,
   `${dk.docScroll} against ${dk.vw}`);
 check('no JS errors', dk.errs.length === 0, dk.errs.join(' ; '));
+
+/* ══ 4. THE PHONE BUNDLE — the surface a real phone actually loads ═══════
+   Not a narrow desktop window. `devices['iPhone 13']` carries hasTouch, which
+   is what makes index.html choose /m/app.js, and without it this whole section
+   would silently assert the same thing §2 does. */
+console.log('\nthe PWA has a payouts screen of its own, not the fallback');
+{
+  const { SCREENS, TABS, titleFor } = await import('../api/public/m/screens.js');
+  check('the phone bundle registers a payouts screen',
+    typeof SCREENS.payouts === 'function', String(typeof SCREENS.payouts));
+  /* Without this it renders and is unreachable — the router would find it only
+     from a typed address. */
+  check('…and the Money tab owns the route, so the tab bar lights up on it',
+    (TABS.find((t) => t.id === 'money')?.owns || []).includes('payouts'),
+    JSON.stringify(TABS.find((t) => t.id === 'money')?.owns));
+  /* A header reading "payouts" is the router's word for the page. And not
+     "Payouts": everywhere else in this product a payout is a DRIVER's payout,
+     and this screen is the wire that reached the company's bank. */
+  const t = titleFor('payouts');
+  check('…and it is named for the reader, not for the router',
+    t.title === 'To the bank' && !/bigger screen/.test(t.sub), JSON.stringify(t));
+
+  const ctx = await browser.newContext({ ...devices['iPhone 13'] });
+  const p = await ctx.newPage();
+  const errs = [];
+  p.on('pageerror', (e) => errs.push(e.message));
+  await p.goto(`${base}/#payouts`, { waitUntil: 'domcontentloaded' });
+  await p.waitForTimeout(2200);
+  const m = await p.evaluate(() => ({
+    shell: document.documentElement.dataset.ui,
+    coarse: matchMedia('(pointer: coarse)').matches,
+    text: document.body.innerText,
+    /* The LEDE'S OWN text. Asserting the fils against the whole page passed
+       with a rounded lede, because the comparison rows further down print the
+       same figures — a test that claimed more than it proved, caught by
+       reverting the thing it was supposed to be guarding. */
+    lede: (document.querySelector('.m-lede') || {}).innerText || '',
+    cards: document.querySelectorAll('.m-card').length,
+    ledes: document.querySelectorAll('.m-lede').length,
+    stats: document.querySelectorAll('.m-stat').length,
+    rows: document.querySelectorAll('.m-row').length,
+    doc: document.documentElement.scrollWidth,
+    vw: document.documentElement.clientWidth,
+  }));
+  await ctx.close();
+
+  /* If this is false the rest of the section is measuring the desktop shell,
+     which is exactly the mistake this section exists to stop repeating. */
+  check('the phone shell is the one under test', m.shell === 'phone' && m.coarse,
+    `${m.shell} / coarse=${m.coarse}`);
+  check('it no longer refuses the screen', !/Built for a bigger screen/.test(m.text),
+    'the fallback is still rendering');
+  check('…it leads with the last wire and what it was compared against',
+    /Our own figure for the week it settles/.test(m.text), m.text.slice(0, 120));
+  /* THE FILS. The claim is a difference of 217.57 against 111,179.66, and
+     money() rounds to whole dirhams unless asked not to — rounded, the
+     difference survives and the check a reader could do by hand does not. */
+  check('…to the fils, because the difference is the point',
+    /AED 111,179\.66/.test(m.lede) && /AED 217\.57/.test(m.lede)
+      && /AED 110,962\.09/.test(m.lede),
+    (m.lede.match(/AED [\d,]+\.?\d*/g) || []).join(' '));
+  check('…and it renders the phone’s own components, not a desktop table',
+    m.cards >= 2 && m.ledes === 1 && m.stats >= 2 && m.rows >= 2,
+    `cards=${m.cards} ledes=${m.ledes} stats=${m.stats} rows=${m.rows}`);
+  check('the phone screen does not scroll sideways either', m.doc <= m.vw,
+    `${m.doc} against ${m.vw}`);
+  /* A transfer that cannot be compared gets a REASON, and one per kind rather
+     than one per row — the desktop printed fifty identical notes before the
+     route learned to name the kind. */
+  check('…and says why a transfer could not be compared, without a zero',
+    /cannot be compared, and that is not a difference of zero/.test(m.text),
+    'the absence sentence is missing');
+  check('no JS errors', errs.length === 0, errs.join(' ; '));
+}
 
 await browser.close();
 srv.close();

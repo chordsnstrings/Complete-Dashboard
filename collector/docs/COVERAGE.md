@@ -827,6 +827,29 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **THIS PRODUCT HAS TWO FRONT ENDS, AND A NARROW VIEWPORT LOADS THE WRONG
+  ONE.** `api/public/index.html` picks the phone bundle (`/m/app.js` +
+  `/m/m.css`, screens in `api/public/m/screens.js`) on
+  `max-width:760px` **AND** `pointer:coarse`. A Playwright page with only a
+  viewport fails the second test, so it gets the DESKTOP bundle squeezed — and
+  an afternoon of responsive work on `api/public/payouts.js` was measured
+  against an app no phone ever loads.
+
+  ```js
+  const ctx = await b.newContext({ ...devices['iPhone 13'] });   // hasTouch
+  ```
+
+  is the difference. Check `document.documentElement.dataset.ui` — `phone` or
+  `desktop` — before believing any narrow-width measurement.
+
+  **And a view with no entry in `SCREENS` is not broken-looking, it is
+  refused:** `fallback()` renders *"Built for a bigger screen — this view is a
+  wide table, and squeezing it onto a phone would lose the row you are
+  reading"* plus a button to the desktop build. That is what `#payouts` did on
+  every phone until 2026-09-18. Adding a screen means three things, not one:
+  the function, an entry in `SCREENS`, and the route in a tab's `owns` — plus a
+  `titleFor` entry, or the header prints the router's word for the page.
+
 * **A cell's content in a flex row is an ANONYMOUS flex item, and an anonymous
   item cannot be given `min-width:0`** — so it refuses to shrink below its
   longest line and sticks out of whatever contains it. Hit while turning the

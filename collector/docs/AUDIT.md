@@ -1263,3 +1263,33 @@ their verdict as `inset 2px 0 0`, a rule on the column edge. In a table every
 cell in the column shares that edge; in a card it is one marked field among
 eight and the rule lands flush against the label's first letter, reading as a
 rendering artifact rather than as the finding. Given a 9px gutter in card mode.
+
+
+## Payouts in the PWA — 2026-09-18
+
+**Reproduce:** `PORT=8099 node mockapi.mjs`, then Playwright with
+`newContext({ ...devices['iPhone 13'] })` — the `hasTouch` is what makes
+`index.html` load `/m/app.js`. A viewport alone gets the desktop bundle, and
+`document.documentElement.dataset.ui` says which you have.
+
+**What a phone got before:** `SCREENS` had no `payouts`, so `fallback()`
+rendered *"Built for a bigger screen. This view is a wide table, and squeezing
+it onto a phone would lose the row you are reading"* over a button to the
+desktop build. Verified on production the same day.
+
+The fallback's sentence is true of a nine-column table and untrue of the
+subject: a transfer is a date, a platform, an amount, and whether it matched
+what we say was earned. The screen is built from those:
+
+| | |
+|---|---|
+| lede | the last wire, its date and channel, and the difference against our own figure — **to the fils**, because 217.57 against 111,179.66 is the claim |
+| tiles | to the bank on record · dates money arrived · the record starts |
+| rows | every transfer newest first, 25 with `cut()` naming the rest |
+| comparison | the rows that can be checked, then **one sentence per kind of absence** — never one per row, and never a zero |
+| unchecked | the count of days with no Uber statement and the true reason; no live-ask control, because that walk takes up to four minutes and a phone should not be held for it |
+| coverage | what each platform publishes, and Yango's reason for publishing none |
+
+Asserted in `test/payout_mobile.test.mjs` §4, including that the shell under
+test really is the phone — without that check the section would silently
+re-measure the desktop bundle, which is the mistake it exists to stop.

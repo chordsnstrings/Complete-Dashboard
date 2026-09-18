@@ -1464,3 +1464,35 @@ Also corrected in that round: `td.v-good` carries its verdict as `inset 2px 0 0`
 — a rule on the column edge, which is right in a table and reads as a rendering
 artifact in a card, where it lands flush against the label's first letter. Given
 a gutter.
+
+
+## The phone had no payouts screen at all — 2026-09-18
+
+Three words: **"we have a pwa."** And the register's mobile view had been built
+in the wrong app.
+
+`api/public/index.html` loads a separate phone bundle on `max-width:760px` AND
+`pointer:coarse`. Playwright with a 390px viewport and no `hasTouch` fails the
+second test and gets the desktop bundle, so the card layout, the folds and the
+chart scroller of the pass before this were all measured against an app no
+phone loads. On a real phone `#payouts` had no entry in `SCREENS` and rendered
+`fallback()`: *"Built for a bigger screen."*
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | a phone opening the payout register was refused it | a `payouts` screen in `api/public/m/screens.js`, built from the phone's own components | written, **proven by revert** (`test/payout_mobile.test.mjs` §4 — six assertions go red) |
+| — | the route was unreachable from the tab bar | `payouts` added to the Money tab's `owns`, and a row under More | written, **proven by revert** |
+| — | a header would have read "payouts", the router's word | `titleFor` entry: **To the bank** — not "Payouts", since a payout is a *driver's* payout everywhere else here | written, asserted |
+| — | the comparison rounded to whole dirhams | two decimals through the lede, as the desktop panel does: 217.57 against 111,179.66 | written, **proven by revert** |
+
+**A test that claimed more than it proved, caught by reverting the thing it
+guarded.** The fils assertion matched against the whole page, and the
+comparison rows further down print the same figures — so it stayed green with
+the lede rounded. It now reads the lede's own text.
+
+**The earlier pass is not wasted and is not the phone.** The desktop bundle at
+390px is a narrow window, a tablet, and the `?ui=desktop` build the phone's own
+fallback button opens. Both are asserted, in the same file, and the file now
+says which is which.
+
+**Proof owed.** The phone shell on production once deployed.

@@ -10,7 +10,7 @@
    connection a reader taps twice, and the second screen must not be painted
    over by the first one's response arriving late.
 */
-import { state, q, qAll, api, href, windowLabel } from '../data.js';
+import { state, q, qAll, qChan, api, href, windowLabel } from '../data.js';
 import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
   skeleton, empty, failed, spark, bars, unwrap, cut, splitToday } from './ui.js';
 /* The one place a channel key becomes a word a person reads — and the one
@@ -29,7 +29,8 @@ import { GREY } from '../onlinetime.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
-  { id: 'money', route: 'money', label: 'Money', ic: '◈', owns: ['money', 'finance', 'receipts', 'platforms'] },
+  { id: 'money', route: 'money', label: 'Money', ic: '◈',
+    owns: ['money', 'finance', 'receipts', 'platforms', 'payouts'] },
   /* 'online-time' is a People page and has a phone screen of its own — the
      one screen here whose rows dial rather than drill, because chasing a
      driver who has not come online is done from the phone in your hand. */
@@ -83,6 +84,10 @@ export function titleFor(view, param) {
        people and asks somebody to ring them. */
     action: ['Finding', 'One flag, and who it is about'],
     receipts: ['What landed', 'Every figure a provider filed'],
+    /* Not "Payouts" — the word means a driver's payout everywhere else in this
+       product, and this screen is about the wire that reached the COMPANY's
+       bank. The subtitle says whose money it is. */
+    payouts: ['To the bank', 'Every transfer a platform made to the company'],
     identity: ['One person, two records', 'Records the roster proves are one driver'],
     compliance: ['Compliance', 'Built for a bigger screen'],
     demand: ['Demand', 'Built for a bigger screen'],
@@ -967,6 +972,9 @@ async function more(deck) {
   rows(deck, [
     row({ title: 'Optimise', sub: 'where the next trip is', value: '›', to: href('optimise') }),
     row({ title: 'Corporate', sub: 'the hotel channel', value: '›', to: href('corporate') }),
+    /* Under Analyse and not under "On the desktop", which is where a view with
+       no phone screen goes. It has one now. */
+    row({ title: 'To the bank', sub: 'every transfer a platform made', value: '›', to: href('payouts') }),
     row({ title: 'Analyst', sub: 'claims the data was asked to settle', value: '›', to: href('analyst') }),
   ]);
   deck.append(el('p', 'm-sec', 'Operate'));
@@ -997,6 +1005,224 @@ async function more(deck) {
   b.onclick = () => { location.href = `/?ui=desktop${location.hash}`; };
   c.body.append(b);
   deck.append(c.card);
+}
+
+/* ── to the bank ────────────────────────────────────────────────────────
+   ═══════════════════════════════════════════════════════════════════════════
+   THE SCREEN THAT WAS NOT HERE. #payouts had no entry in SCREENS, so a phone
+   asking for it got fallback() — "Built for a bigger screen. This view is a
+   wide table, and squeezing it onto a phone would lose the row you are
+   reading," and a button to the desktop build. Verified on production
+   2026-09-18 with a coarse pointer at 390px, which is the only way to see it:
+   without `hasTouch` the shell picker in index.html falls through to the
+   DESKTOP bundle, and a whole afternoon of responsive work was measured
+   against the wrong app because of it.
+
+   The fallback's sentence is true of a nine-column table and it is not true of
+   the subject. A transfer is four facts — a date, a platform, an amount, and
+   whether it matches what we say was earned — and four facts are a phone
+   screen. So this is not the desktop page narrowed; it is the same register
+   asked the questions a phone is opened for, in the order they are asked:
+
+     what arrived last, and did it match  →  the lede
+     how much has ever arrived            →  the tiles
+     every transfer, newest first         →  rows
+     the ones we cannot check, and WHY    →  a sentence per reason, not per row
+     the days nobody has asked Uber about →  a count with its true reason
+
+   qChan and not q: this register's subject is the whole record, and the window
+   selector came off the desktop page for the same reason — a page of sparse
+   weekly events showed 6 of 303 transfers under the shell's default month.
+   See the block comment in api/public/payouts.js. */
+async function payouts(deck, ctx) {
+  skeleton(deck, 4);
+  const [d, rec] = await Promise.all([
+    qChan('/api/finance/payouts').catch(() => null),
+    qChan('/api/finance/payouts/reconcile').catch(() => null),
+  ]);
+  if (!ctx.alive()) return;
+  deck.innerHTML = '';
+  if (!d) { failed(deck, new Error('The payout register could not be fetched.')); return; }
+
+  const list = (d.payouts || []).slice();
+  const total = list.reduce((a, r) => a + (n(r.amount) || 0), 0);
+  const dates = new Set(list.map((r) => String(r.paid_on).slice(0, 10)));
+  const weekdays = new Set([...dates].map((x) => D3M[new Date(`${x}T12:00:00Z`).getUTCDay()]));
+  const spans = (d.coverage || []).flatMap((c) => c.record_span || []);
+  const earliest = spans.map((x) => String(x.earliest).slice(0, 10)).filter(Boolean).sort()[0] || null;
+
+  if (!list.length) {
+    empty(deck, 'No transfer has been collected yet',
+      'That is a fact about collection rather than about the platforms — the band below says '
+      + 'what each one publishes.');
+  }
+
+  /* ── the lede: the last wire, and whether it matched ──────────────────
+     The most recent transfer is what a phone is opened for, and the second
+     thing asked is always whether it agreed with our own figure. Both in one
+     sentence, or the honest reason there is no second half. */
+  const recRows = (rec && Array.isArray(rec.rows)) ? rec.rows : [];
+  const last = recRows[0] || null;
+  if (last) {
+    const delta = n(last.delta);
+    const matched = delta != null;
+    /* TWO DECIMALS ON EVERY FIGURE IN THIS COMPARISON, exactly as the desktop
+       panel does and for the same reason: the claim is a difference of 217.57
+       against a wire of 111,179.66, and rounded to the dirham the difference
+       survives while the check a reader could do by hand does not. money()
+       rounds to whole dirhams by default, which is right for a tile and wrong
+       for this sentence. */
+    lede(deck, {
+      claim: `${money(n(last.wire), 'AED', 2)} on ${dayStr(last.paid_on)}`,
+      sub: `${sourceLabel(last.platform)} · ${sourceLabel(last.fleet_id) || last.fleet_id}. `
+        + (matched
+          ? `Our own figure for the week it settles is ${money(n(last.calculated), 'AED', 2)}, `
+            + `a difference of ${delta >= 0 ? '+' : '−'}${money(Math.abs(delta), 'AED', 2)}`
+            + (last.delta_pct != null ? ` (${last.delta_pct >= 0 ? '+' : '−'}${Math.abs(last.delta_pct)}%)` : '')
+            + '. The two count different events and are not expected to match to the fils.'
+          /* NEVER "no difference" and never a zero: the reason travels from the
+             route, which is the one place the three absences are told apart. */
+          : `There is nothing to compare it against yet — ${last.calculated_basis || 'no reason was given, which is itself a defect'}`),
+      tone: matched && Math.abs(last.delta_pct || 0) >= 2 ? 'warn' : null,
+    });
+  }
+
+  stats(deck, [
+    { label: 'To the bank', value: money(total), long: true,
+      sub: list.length
+        ? `${fmt(list.length)} transfers on ${fmt(dates.size)} dates`
+        : 'nothing on record' },
+    { label: 'Dates money arrived', value: fmt(dates.size),
+      sub: weekdays.size === 1 ? `every one a ${[...weekdays][0]}`
+        : (weekdays.size ? `across ${fmt(weekdays.size)} weekdays` : 'no dated transfer') },
+    earliest ? { label: 'The record starts', value: dayStr(earliest), long: true,
+      sub: 'the earliest transfer held for any platform' } : null,
+  ]);
+
+  /* ── every transfer, newest first ──────────────────────────────────────
+     Rows and not a table: a transfer is a date, a channel and an amount, and
+     those are exactly the three slots a row already has. cut() names what is
+     being held back, because a list that stops at twenty-five without saying
+     so reads as a register that stops at twenty-five. */
+  {
+    const c = card('Every transfer, newest first',
+      'One row per payment that reached the bank, on the date the provider says it did.');
+    const SHOWN = 25;
+    rows(c.body, list.slice(0, SHOWN).map((r) => row({
+      title: dayStr(r.paid_on),
+      sub: `${sourceLabel(r.platform)} · ${sourceLabel(r.fleet_id) || r.fleet_id}`
+        + (r.period_start && r.period_end
+          ? ` · settles ${dayStr(r.period_start)}–${dayStr(r.period_end)}`
+          : ' · no period stated'),
+      value: money(n(r.amount)),
+    })));
+    cut(c.body, { rows: list.slice(0, SHOWN), total: list.length, truncated: list.length > SHOWN },
+      'transfers');
+    deck.append(c.card);
+  }
+
+  /* ── what could be checked, and what could not ─────────────────────────
+     GROUPED BY THE KIND OF ABSENCE and never by the row. The desktop page
+     printed one note per reason string, and the Uber reason names the week it
+     settles, so fifty transfers produced fifty identical-looking notes.
+     `calculated_absent` is the route's own name for which of the three
+     absences a row has; api/payout_routes.js carries the measurement. */
+  if (rec) {
+    const comparable = recRows.filter((r) => r.calculated != null);
+    const c = card('Against our own figure',
+      'The wire beside what the drivers earned over the week it settles. Two different '
+      + 'events, so the size of the gap is the finding rather than a zero.');
+    if (comparable.length) {
+      rows(c.body, comparable.slice(0, 12).map((r) => {
+        const dl = n(r.delta);
+        const pc = n(r.delta_pct);
+        return row({
+          title: dayStr(r.paid_on),
+          sub: `${sourceLabel(r.platform)} · wire ${money(n(r.wire), 'AED', 2)} `
+            + `· ours ${money(n(r.calculated), 'AED', 2)}`,
+          value: `${dl >= 0 ? '+' : '−'}${money(Math.abs(dl), 'AED', 2)}`,
+          note: pc == null ? null : `${pc >= 0 ? '+' : '−'}${Math.abs(pc)}%`,
+          tone: Math.abs(pc || 0) >= 2 ? 'warn' : 'good',
+        });
+      }));
+    }
+    const byKind = new Map();
+    for (const r of recRows) {
+      if (r.calculated != null) continue;
+      const k = r.calculated_absent
+        ? `${r.platform}|${r.fleet_id}|${r.calculated_absent}`
+        : (r.calculated_basis || 'unstated');
+      if (!byKind.has(k)) byKind.set(k, []);
+      byKind.get(k).push(r);
+    }
+    for (const rs of byKind.values()) {
+      const who = [...new Set(rs.map((x) => sourceLabel(x.platform)))].join(', ');
+      const starts = rs.map((x) => x.period_start).filter(Boolean).sort();
+      const ends = rs.map((x) => x.period_end).filter(Boolean).sort();
+      const span = starts.length && ends.length
+        ? `${dayStr(starts[0])} to ${dayStr(ends[ends.length - 1])}` : null;
+      const why = rs[0].calculated_absent === 'no_driver_day_rows' && span
+        ? `We hold no driver-day rows for the weeks they settle — ${fmt(rs.length)} weeks `
+          + `spanning ${span}. The transfers are real; the figure to compare them against has `
+          + 'not been collected.'
+        : (rs[0].calculated_basis || '');
+      const p2 = el('p', 'm-cap');
+      p2.style.cssText = 'margin:10px 2px 0';
+      p2.textContent = `${fmt(rs.length)} ${rs.length === 1 ? 'transfer' : 'transfers'} `
+        + `(${who}) cannot be compared, and that is not a difference of zero. ${why}`;
+      c.body.append(p2);
+    }
+    deck.append(c.card);
+
+    /* ── the days nobody has asked Uber about ───────────────────────────
+       The count and the TRUE reason, with no ask control: POST
+       /api/finance/payouts/verify walks Uber's report limiter for up to four
+       minutes, and a screen that holds a phone for four minutes to ask about
+       five days is a worse offer than no offer. The count is what a phone
+       reader needs — it is the one thing that stops the register above being
+       read as exhaustive. */
+    const un = (rec.unchecked || []).filter((u) => u.count);
+    if (un.length) {
+      const total2 = un.reduce((a, u) => a + u.count, 0);
+      const u2 = card('What we have not asked Uber about', null);
+      const p3 = el('p', 'm-cap');
+      p3.style.margin = '0';
+      p3.textContent = `We hold no Uber statement for ${fmt(total2)} days `
+        + `(${un.map((u) => `${sourceLabel(u.fleet_id) || u.fleet_id} ${fmt(u.count)}`).join(', ')}) `
+        + '— either nobody asked, or the ask was refused: Uber’s report limiter shuts '
+        + 'for minutes at a time. Either way it is a day with no measurement, and a day with no '
+        + 'measurement is not a day with no transfer. The nightly walk fills them Mondays first.';
+      u2.body.append(p3);
+      deck.append(u2.card);
+    }
+  }
+
+  /* ── what each platform publishes, and the one that publishes nothing ─── */
+  {
+    const c = card('What each platform publishes', null);
+    rows(c.body, (d.coverage || []).map((cv) => {
+      const mine = (cv.record_span || []).reduce((a, x) => a + (n(x.transfers) || 0), 0);
+      return row({
+        title: sourceLabel(cv.platform),
+        sub: cv.publishes_payouts
+          ? (cv.cadence || cv.how || 'dates its own transfers')
+          : 'publishes no transfer to the company',
+        value: cv.publishes_payouts ? fmt(mine) : '—',
+        note: cv.publishes_payouts ? (mine === 1 ? 'transfer' : 'transfers') : null,
+        tone: cv.publishes_payouts ? null : 'warn',
+      });
+    }));
+    /* The absence sentence in full, because "—" in the column above is a
+       shape and the reason is the content. */
+    for (const cv of (d.coverage || [])) {
+      if (!cv.absent) continue;
+      const p4 = el('p', 'm-cap');
+      p4.style.cssText = 'margin:10px 2px 0';
+      p4.textContent = `${sourceLabel(cv.platform)}: ${cv.absent}`;
+      c.body.append(p4);
+    }
+    deck.append(c.card);
+  }
 }
 
 /* ── driver ─────────────────────────────────────────────────────────────
@@ -1860,7 +2086,7 @@ async function fallback(deck, ctx) {
 export const SCREENS = {
   today, money: moneyScreen, people, fleet, live, safety, unauthorized, sources, more,
   corporate, analyst, credentials, optimise, trips: tripsScreen, fallback,
-  'online-time': onlineTime,
+  'online-time': onlineTime, payouts,
   /* A driver or vehicle with no sub-page gets the phone screen; a sub-page
      (`#driver/x/earnings`) is a desktop tab and goes to the fallback, which
      renders the real module. Decided in render() rather than here, because a
