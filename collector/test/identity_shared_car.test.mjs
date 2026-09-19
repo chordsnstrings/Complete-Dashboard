@@ -39,7 +39,7 @@ console.log('\nthe name shapes it proposes, and the ones it refuses to');
     acc('E', 'Muhammad Nazir Khan'), acc('F', 'Muhammad Ahmad khan'),
     acc('G', 'Bakht Zada Sharif'),  acc('H', 'Bakht Zada Bakht Sharif'),
   ];
-  const shapes = sharedCarShapes(roster);
+  const { shapes } = sharedCarShapes(roster);
   const has = (x, y) => shapes.some((s) =>
     (s.a.driver_ext_id === x && s.b.driver_ext_id === y)
     || (s.a.driver_ext_id === y && s.b.driver_ext_id === x));
@@ -54,7 +54,7 @@ console.log('\nthe name shapes it proposes, and the ones it refuses to');
   check('two men sharing a first and last name are NOT a shape',
     !has('E', 'F'), 'Muhammad Nazir Khan was paired with Muhammad Ahmad khan');
   check('an already-linked pair is skipped',
-    !sharedCarShapes(roster, { skipPairs: new Set(['A|B']) })
+    !sharedCarShapes(roster, { skipPairs: new Set(['A|B']) }).shapes
       .some((s) => [s.a.driver_ext_id, s.b.driver_ext_id].sort().join('') === 'AB'));
 }
 

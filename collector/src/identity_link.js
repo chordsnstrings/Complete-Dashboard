@@ -340,6 +340,7 @@ export function spellingFolder(names) {
    evidence on its own, which is the whole reason the cross-channel rule
    refused this case. */
 export function sharedCarShapes(rows, { skipPairs = new Set() } = {}) {
+  const skipped = [];
   const fold = spellingFolder(rows.map((r) => r.full_name));
   const people = rows
     .map((r) => ({ ...r, tokens: tokensOf(r.full_name), folded: fold(r.full_name) }))
@@ -351,7 +352,14 @@ export function sharedCarShapes(rows, { skipPairs = new Set() } = {}) {
       if (a.driver_ext_id === b.driver_ext_id) continue;
       const pair = `${a.driver_ext_id}|${b.driver_ext_id}`;
       if (refusedPairs.has(pair)) continue;
-      if (skipPairs.has(pair) || skipPairs.has(`${b.driver_ext_id}|${a.driver_ext_id}`)) continue;
+      /* Reported rather than dropped: a pair already in the table is still a
+         pair this rule supports, and the withdrawal at the end of
+         refreshIdentityLinks() needs to know that or it deletes the proposal
+         it made last run. See `stillSupported` there. */
+      if (skipPairs.has(pair) || skipPairs.has(`${b.driver_ext_id}|${a.driver_ext_id}`)) {
+        skipped.push({ pair, why: 'already linked or already decided' });
+        continue;
+      }
       const [long, short] = a.folded.length >= b.folded.length ? [a, b] : [b, a];
       const same = sameSet(a.folded, b.folded);
       if (!same && !subsetOf(short.folded, long.folded)) continue;
@@ -362,7 +370,7 @@ export function sharedCarShapes(rows, { skipPairs = new Set() } = {}) {
       out.push({ a, b, same, spelled: !rawSame });
     }
   }
-  return out;
+  return { shapes: out, skipped };
 }
 
 /* The custody half. `trips` is [{driver_ext_id, plate, started, ended}] for the
@@ -716,7 +724,7 @@ export async function refreshIdentityLinks(db = pool) {
      WHERE coalesce(btrim(driver_ext_id), '') <> ''
        AND coalesce(btrim(full_name), '') <> ''`);
   const decided = await db.query(
-    `SELECT alias_ext_id, canonical_ext_id FROM driver_identity_link`);
+    `SELECT alias_ext_id, canonical_ext_id, basis FROM driver_identity_link`);
   const skipPairs = new Set(decided.rows.flatMap((r) => [
     `${r.alias_ext_id}|${r.canonical_ext_id}`, `${r.canonical_ext_id}|${r.alias_ext_id}`]));
   /* An alias a conclusive key already merged is dropped here rather than in
@@ -724,7 +732,7 @@ export async function refreshIdentityLinks(db = pool) {
      the alias alone — whoever it turned out to be, it is spoken for, and a
      name proposal against some third record would be a second answer to a
      question the phone or the email has already settled. */
-  const { candidates } = nameCandidates(everyone, { skipPairs });
+  const { candidates, skipped: nameSkipped } = nameCandidates(everyone, { skipPairs });
   const fresh = candidates.filter((c) => !claimed.has(c.alias_ext_id));
   const clash = await clashingPairs(db, fresh.map(
     (c) => [c.alias_ext_id, c.alias_platform, c.canonical_ext_id, c.canonical_platform]));
@@ -747,7 +755,8 @@ export async function refreshIdentityLinks(db = pool) {
      which have driven the same car. See sharedCarShapes() for why the car is
      what makes it safe to ask. Trips are fetched only for the accounts a name
      shape actually paired — never for the whole roster. */
-  const shapes = sharedCarShapes(everyone, { skipPairs })
+  const { shapes: carShapes, skipped: carSkipped } = sharedCarShapes(everyone, { skipPairs });
+  const shapes = carShapes
     .filter((sh) => !claimed.has(sh.a.driver_ext_id) && !claimed.has(sh.b.driver_ext_id))
     .filter((sh) => !fresh.some((c) =>
       c.alias_ext_id === sh.a.driver_ext_id || c.alias_ext_id === sh.b.driver_ext_id));
@@ -806,8 +815,46 @@ export async function refreshIdentityLinks(db = pool) {
   /* Only the CONCLUSIVE links are subject to the withdrawal below. A proposal
      nobody has answered yet is not a link the rule stopped supporting; deleting
      it every run would empty the review queue between passes. */
+  /* A PROPOSAL THE RULE STILL SUPPORTS IS NOT A WITHDRAWN ONE, AND THIS LIST
+     USED TO SAY IT WAS.
+     ─────────────────────────────────────────────────────────────────────────
+     THE DEFECT, measured by running refreshIdentityLinks three times against
+     one fixture: run 1 proposed 1 and the queue held 1; run 2 proposed 0,
+     withdrew 1, and the queue was EMPTY; run 3 proposed it again. The review
+     queue oscillated — a reviewer opening it saw 123 pairs or none depending
+     on which side of a collector cycle they arrived, and first_seen_at reset
+     every other pass.
+
+     The cause is that `skipPairs` is built from every row in
+     driver_identity_link INCLUDING the pending ones, so the rules correctly
+     decline to re-propose what they proposed last time, `fresh` comes back
+     empty for those pairs, and this list — which is what the DELETE below
+     spares — never mentioned them. The comment above the DELETE has always
+     said "a proposal nobody has answered yet is not a link the rule stopped
+     supporting; deleting it every run would empty the review queue between
+     passes". That was the intent. This is the line that makes it true.
+
+     Both rules report their skips now, so a pair skipped BECAUSE IT IS ALREADY
+     PROPOSED is kept, while a pair the rule genuinely stopped making is still
+     withdrawn.
+
+     SCOPED TO THE PROPOSAL BASES, and the first version of this was not. A
+     name rule skips a pair for being "already linked" whatever linked it — so
+     sparing every such pair also spared a CONCLUSIVE link the phone rule had
+     stopped making, and test/identity_link.test.mjs caught it by name: "the
+     rule stops linking a number that now sits on three records … and the link
+     it used to make is withdrawn, not merely left unrefreshed". A phone link
+     that lost its evidence must still go. Only a row that IS a proposal, and
+     whose pair a proposal rule would still make, is kept. */
+  const proposalBasis = new Set(['similar_name', 'shared_car_name']);
+  const proposals = new Set(decided.rows
+    .filter((r) => proposalBasis.has(r.basis)).map((r) => r.alias_ext_id));
+  const stillSupported = [...nameSkipped, ...carSkipped]
+    .filter((sk) => sk.why === 'already linked or already decided')
+    .flatMap((sk) => sk.pair.split('|'))
+    .filter((id) => proposals.has(id));
   const keep = [...links.map((l) => l.alias_ext_id), ...emailNew.map((l) => l.alias_ext_id),
-    ...fresh.map((c) => c.alias_ext_id), ...carAliases];
+    ...fresh.map((c) => c.alias_ext_id), ...carAliases, ...stillSupported];
   /* RETURNING, not rowCount. node-postgres names it rowCount and PGlite names
      it affectedRows, so a count read off one of those two is zero under the
      other — and the tests run on PGlite while production runs on the pool,

@@ -1541,5 +1541,16 @@ untouched — it stays a hand-reviewed list, per the hard rule.
 short-word assertion used "ali"/"alam" — two edits apart, so it stayed green
 with the length guard removed. It uses "ali"/"ala" now and goes red.
 
+### And the queue was emptying itself, which the deploy exposed
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | every refresh after the one that proposed a pair **withdrew it** — 123 pending before the deploy, 0 after | `keep` now spares pending proposals the rules still support | written, **proven by revert** (`test/identity_queue_persists.test.mjs`) |
+| — | the first version of that spared a `shared_phone` link that had genuinely lost its evidence | exemption scoped to the proposal bases only | written, caught by `test/identity_link.test.mjs` |
+
+Pre-existing, not introduced here — reproduced by calling `refreshIdentityLinks`
+three times against a fixture, which oscillates 1 → 0 → 1. The restart that
+followed this deploy is what made it visible.
+
 **Proof owed.** The queue's `shared_car_name` count on production after the
-collector's next identity refresh.
+collector's next identity refresh, and a second refresh that leaves it standing.

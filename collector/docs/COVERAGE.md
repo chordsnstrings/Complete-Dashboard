@@ -827,6 +827,33 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **THE SAME-PERSON REVIEW QUEUE EMPTIED ITSELF EVERY OTHER RUN.** Measured by
+  calling `refreshIdentityLinks` three times against one fixture:
+
+  ```
+  run 1   proposed 1, withdrawn 0   queue holds 1
+  run 2   proposed 0, withdrawn 1   queue EMPTY
+  run 3   proposed 1, withdrawn 0   queue holds 1
+  ```
+
+  Seen live on 2026-09-19: **123 pending before a deploy, 0 after the restart
+  that followed it.** `skipPairs` is built from every row in
+  `driver_identity_link`, pending ones included — correctly, since a pair
+  already proposed must not be proposed twice — so the rules return nothing for
+  those pairs, `fresh` is empty, and the `keep` list the withdrawal `DELETE`
+  spares never mentioned them. The comment above that DELETE has always said a
+  pending proposal "is not a link the rule stopped supporting"; the code did
+  the opposite on alternate passes.
+
+  **The fix has to be scoped to the proposal bases.** Sparing every pair a rule
+  skipped as "already linked" also spares a CONCLUSIVE `shared_phone` link that
+  lost its evidence — `test/identity_link.test.mjs` catches that by name. Only
+  a row whose basis is `similar_name` or `shared_car_name` is exempt.
+
+  **A review queue is state a human is part-way through.** Anything that
+  rebuilds one from a rule needs this test: propose, refresh, refresh again,
+  and assert the proposal is still there.
+
 * **THE SAME-PERSON QUEUE WAS CROSS-CHANNEL ONLY, AND MOST OF THIS FLEET'S
   DUPLICATION IS NOT.** `nameCandidates()` in `src/identity_link.js` skips two
   accounts on the same platform, and its comment says why — "what a fleet of
