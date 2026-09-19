@@ -827,6 +827,40 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **THE SAME-PERSON QUEUE WAS CROSS-CHANNEL ONLY, AND MOST OF THIS FLEET'S
+  DUPLICATION IS NOT.** `nameCandidates()` in `src/identity_link.js` skips two
+  accounts on the same platform, and its comment says why — "what a fleet of
+  forty Muhammads looks like". Correct, and it left the bigger half unproposed.
+  Measured on the per-trip export for 1 Jul – 19 Sep 2026:
+
+  | | |
+  |---|---|
+  | platform accounts | 260 |
+  | resolved by `api/identity_map.js` | **86** |
+  | proposals in the live queue (all cross-channel) | 247 |
+  | people the operator says the fleet has | **~90** |
+
+  One driver holds two accounts on ONE channel with the name spelled as each
+  clerk heard it: *Hammad Ahmad Ahmad* / *Hammad Ahmad Aftab Ahmad*, *Ali
+  Rahman Karim* / *ALI REHMAN RIAZ KARIM*. **A shared car is the evidence that
+  makes those proposable** where a bare name is not — the register's own custody
+  sweep is 45 of its 130 entries. `sharedCarShapes()` + `carVerdict()` propose
+  them under basis `shared_car_name`; nothing auto-merges.
+
+  **And the refusal nothing in that file had: two accounts whose trips overlap
+  IN DIFFERENT CARS are two people.** It separates two men both filed as *Nizam
+  Wazir Zada*, and a *Muhammad Khalid* from a *MUHAMMAD KHALID YOUNAS GUL* in
+  L90721 and L94178 at 08:49 on 30 Aug. Reach for that test before any future
+  identity rule — it is cheap and it is the only one that can say **no**.
+
+* **`personOf()` resolves an account only if the register already merged it.**
+  It returned a key for 86 of 256 accounts and `null` for the rest, so
+  `personOf(id) || id` reads as "every unmerged account is its own person" —
+  which is true of the register and false of the fleet. A driver report built
+  on it counted **238 people against a roster of about 90**. Any per-driver
+  *rate* built that way is wrong: the fleet's median trips-per-working-day read
+  3.8 unmerged and **7.2** merged, on identical trip data.
+
 * **A FIXTURE WITH NARROW DIGITS CANNOT CATCH A LAYOUT THAT OVERFLOWS ON WIDE
   ONES.** The phone's payout comparison row reads
   `wire AED 111,179.66 · ours AED 110,962.09` against the mock and fits 390px

@@ -268,6 +268,156 @@ const subsetOf = (a, b) => a.length < b.length && a.every((t) => b.includes(t));
 const sameSet = (a, b) => a.length === b.length
   && a.every((t) => b.includes(t)) && b.every((t) => a.includes(t));
 
+/* ── TWO ACCOUNTS ON ONE CHANNEL, AND THE CAR THAT SAYS THEY ARE ONE MAN ──
+   ═══════════════════════════════════════════════════════════════════════════
+   nameCandidates() above is CROSS-CHANNEL ONLY, and says why: two accounts on
+   one channel with similar names "are also what a fleet of forty Muhammads
+   looks like, and proposing those would bury the pairs worth looking at".
+   That reasoning is sound and it left the larger half of the problem unproposed.
+
+   MEASURED on the per-trip export for 1 Jul – 19 Sep 2026: 260 platform
+   accounts, of which the register resolves 86 and this queue's cross-channel
+   rule proposes 247 more — and the fleet's own operator puts the roster at
+   about ninety people. The gap is same-channel: one driver holding two Uber
+   accounts with the name spelled as each clerk heard it. "Hammad Ahmad Ahmad"
+   and "Hammad Ahmad Aftab Ahmad"; "Ali Rahman Karim" and "ALI REHMAN RIAZ
+   KARIM"; "Wisal Muhammad Muhammad" and "WISAL MUHAMMAD IRSHAD MUHAMMAD".
+
+   What makes those safe to propose where a bare name is not, is the evidence
+   the forty-Muhammads argument is missing: THEY DROVE THE SAME CAR. A shared
+   plate is the fleet's own custody record, and the register already treats
+   shared custody as a basis — 45 of its 130 entries came from a custody sweep.
+
+   And the refusal, which nothing in this file had before: two accounts whose
+   trips OVERLAP IN TIME IN DIFFERENT CARS are two people, whatever their names
+   say. One man cannot drive two cars at once. On the same export that guard
+   separates two different men both filed as "Nizam Wazir Zada", and a
+   "Muhammad Khalid" from a "MUHAMMAD KHALID YOUNAS GUL" who were in L90721
+   and L94178 at 08:49 on 30 August.
+
+   Split in two on purpose: shapesOf() is pure name work over the roster, and
+   carVerdict() is the custody test over trip rows. The caller fetches trips
+   only for the accounts a shape actually paired, rather than every driver. */
+
+/* One spelling, written two ways. Rehman/Rahman, Ahmed/Ahmad, Touseef/Toussef:
+   a transliterated name reaches each platform however the clerk heard it.
+   Tokens within one edit of each other fold to a single form, and only then
+   are the name shapes compared — so this is the same subset-and-reorder test
+   as above over spelling-insensitive words, never a "looks similar overall"
+   match, which would join half a fleet of Muhammads to the other half. */
+const editDistance = (a, b) => {
+  if (Math.abs(a.length - b.length) > 1) return 9;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1,
+        d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+  }
+  return d[a.length][b.length];
+};
+export function spellingFolder(names) {
+  const vocab = [...new Set(names.flatMap((n) => tokensOf(n)))];
+  const canon = new Map(vocab.map((w) => [w, w]));
+  for (let i = 0; i < vocab.length; i++) {
+    for (let j = i + 1; j < vocab.length; j++) {
+      const x = vocab[i], y = vocab[j];
+      /* Four characters and up. Below that a single edit is most of the word:
+         "ali" and "alam" are not a spelling of each other. */
+      if (x.length < 4 || y.length < 4 || editDistance(x, y) > 1) continue;
+      const a = canon.get(x), b = canon.get(y);
+      if (a === b) continue;
+      const keep = a < b ? a : b, drop = a < b ? b : a;
+      for (const [k, v] of canon) if (v === drop) canon.set(k, keep);
+    }
+  }
+  return (name) => [...new Set(tokensOf(name).map((w) => canon.get(w) || w))].sort();
+}
+
+/* The name half: every pair whose words match once spelling is folded. Returns
+   shapes to be tested against the cars, NOT proposals — nothing here is
+   evidence on its own, which is the whole reason the cross-channel rule
+   refused this case. */
+export function sharedCarShapes(rows, { skipPairs = new Set() } = {}) {
+  const fold = spellingFolder(rows.map((r) => r.full_name));
+  const people = rows
+    .map((r) => ({ ...r, tokens: tokensOf(r.full_name), folded: fold(r.full_name) }))
+    .filter((r) => r.driver_ext_id && r.folded.length >= 2);
+  const out = [];
+  for (let i = 0; i < people.length; i++) {
+    for (let j = i + 1; j < people.length; j++) {
+      const a = people[i], b = people[j];
+      if (a.driver_ext_id === b.driver_ext_id) continue;
+      const pair = `${a.driver_ext_id}|${b.driver_ext_id}`;
+      if (refusedPairs.has(pair)) continue;
+      if (skipPairs.has(pair) || skipPairs.has(`${b.driver_ext_id}|${a.driver_ext_id}`)) continue;
+      const [long, short] = a.folded.length >= b.folded.length ? [a, b] : [b, a];
+      const same = sameSet(a.folded, b.folded);
+      if (!same && !subsetOf(short.folded, long.folded)) continue;
+      /* Was the match only possible because spelling was folded? The reader is
+         entitled to know which of the two they are looking at. */
+      const rawSame = sameSet(a.tokens, b.tokens)
+        || subsetOf(a.tokens, b.tokens) || subsetOf(b.tokens, a.tokens);
+      out.push({ a, b, same, spelled: !rawSame });
+    }
+  }
+  return out;
+}
+
+/* The custody half. `trips` is [{driver_ext_id, plate, started, ended}] for the
+   accounts a shape paired. Returns a proposal, or the reason there is none. */
+export function carVerdict({ a, b, same, spelled }, trips) {
+  const of = (id) => trips.filter((t) => t.driver_ext_id === id && t.plate);
+  const ta = of(a.driver_ext_id), tb = of(b.driver_ext_id);
+  const plates = (t) => new Set(t.map((x) => x.plate));
+  const shared = [...plates(ta)].filter((p) => plates(tb).has(p));
+  if (!shared.length) return { skip: 'no car in common' };
+
+  /* ONE MAN, TWO CARS, ONE MOMENT — the refusal. Both lists are walked in time
+     order rather than compared pairwise: these are per-driver trip histories
+     and a quadratic scan over a year of them is the kind of thing that turns a
+     collector cycle into a timeout. */
+  const A = ta.slice().sort((x, y) => x.started - y.started);
+  const B = tb.slice().sort((x, y) => x.started - y.started);
+  let i = 0, j = 0;
+  while (i < A.length && j < B.length) {
+    const x = A[i], y = B[j];
+    if (x.ended <= y.started) { i++; continue; }
+    if (y.ended <= x.started) { j++; continue; }
+    if (x.plate !== y.plate) {
+      return { refused: true,
+        at: new Date(Math.max(x.started, y.started)).toISOString().slice(0, 16).replace('T', ' '),
+        cars: [x.plate, y.plate] };
+    }
+    (x.ended < y.ended) ? i++ : j++;
+  }
+
+  const [keep, alias] = survivorOf(a, b);
+  const shape = same
+    ? 'the same words in a different order'
+    : 'one name is every word of the other plus more';
+  return {
+    alias_ext_id: alias.driver_ext_id,
+    alias_platform: alias.platform,
+    alias_name: alias.full_name,
+    canonical_ext_id: keep.driver_ext_id,
+    canonical_platform: keep.platform,
+    canonical_name: keep.full_name,
+    canonical_key: foldName(keep.full_name),
+    basis: 'shared_car_name',
+    evidence: `${keep.platform} filed “${keep.full_name}” and ${alias.platform} filed `
+      + `“${alias.full_name}” — ${shape}`
+      + (spelled ? ', once a spelling difference is allowed for' : '')
+      + `. Both accounts have driven ${shared.length === 1 ? 'the same car' : 'the same cars'}: `
+      + `${shared.slice(0, 3).join(', ')}${shared.length > 3 ? ` and ${shared.length - 3} more` : ''}. `
+      + 'Neither the name nor the car is proof on its own; together they are why this pair is '
+      + 'here rather than in the fleet’s long tail of shared first names. The two accounts '
+      + 'never carried trips at the same time in different cars, which is the one thing that '
+      + 'would rule them out.',
+  };
+}
+
 export function nameCandidates(rows, { skipPairs = new Set() } = {}) {
   const people = rows
     .map((r) => ({ ...r, tokens: tokensOf(r.full_name), key: foldName(r.full_name) }))
@@ -591,14 +741,73 @@ export async function refreshIdentityLinks(db = pool) {
         c.canonical_name, c.canonical_key, c.basis, c.evidence]);
     proposed++;
   }
+  /* ── AND THE SAME-CHANNEL PAIRS, WHICH NEED A CAR TO BE PROPOSABLE ──────
+     nameCandidates() above is cross-channel by design. This is the other half:
+     two accounts on ONE channel whose names match once spelling is folded, and
+     which have driven the same car. See sharedCarShapes() for why the car is
+     what makes it safe to ask. Trips are fetched only for the accounts a name
+     shape actually paired — never for the whole roster. */
+  const shapes = sharedCarShapes(everyone, { skipPairs })
+    .filter((sh) => !claimed.has(sh.a.driver_ext_id) && !claimed.has(sh.b.driver_ext_id))
+    .filter((sh) => !fresh.some((c) =>
+      c.alias_ext_id === sh.a.driver_ext_id || c.alias_ext_id === sh.b.driver_ext_id));
+  let carProposed = 0, carRefused = 0, carNoCar = 0;
+  const carAliases = [];
+  if (shapes.length) {
+    const ids = [...new Set(shapes.flatMap((sh) => [sh.a.driver_ext_id, sh.b.driver_ext_id]))];
+    /* Bounded to a year and to trips that name a car and close: an open-ended
+       trip has no interval to overlap, and the custody question is about the
+       fleet as it is rather than as it was three years ago. */
+    const { rows: tripRows } = await db.query(
+      `SELECT driver_ext_id, plate,
+              extract(epoch FROM requested_at) * 1000 AS started,
+              extract(epoch FROM ended_at) * 1000     AS ended
+         FROM trip
+        WHERE driver_ext_id = ANY($1::text[])
+          AND platform <> 'fms'
+          AND coalesce(btrim(plate), '') <> ''
+          AND requested_at IS NOT NULL AND ended_at IS NOT NULL
+          AND ended_at > requested_at
+          AND requested_at > now() - interval '365 days'`, [ids]);
+    const trips = tripRows.map((t) => ({ driver_ext_id: t.driver_ext_id, plate: t.plate,
+      started: Number(t.started), ended: Number(t.ended) }));
+    const seen = new Set();
+    for (const sh of shapes) {
+      const v = carVerdict(sh, trips);
+      if (v.skip) { carNoCar++; continue; }
+      if (v.refused) {
+        carRefused++;
+        log.info('identity', 'two people, not one', { a: sh.a.full_name, b: sh.b.full_name,
+          at: v.at, cars: v.cars.join(' / ') });
+        continue;
+      }
+      /* One alias may be paired with several survivors by name; the table's
+         primary key allows it one, and the first is the one with the most
+         trips because survivorOf ranked them. */
+      if (seen.has(v.alias_ext_id) || claimed.has(v.alias_ext_id)) continue;
+      seen.add(v.alias_ext_id);
+      await db.query(
+        `INSERT INTO driver_identity_link
+           (alias_ext_id, alias_platform, alias_name, canonical_ext_id, canonical_platform,
+            canonical_name, canonical_key, basis, evidence, last_seen_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
+         ON CONFLICT (alias_ext_id) DO NOTHING`,
+        [v.alias_ext_id, v.alias_platform, v.alias_name, v.canonical_ext_id, v.canonical_platform,
+          v.canonical_name, v.canonical_key, v.basis, v.evidence]);
+      carAliases.push(v.alias_ext_id);
+      carProposed++;
+    }
+  }
   log.info('identity', 'proposals', { proposed, refuted_by_simultaneous_trips: refutedByTrips,
-    merged_on_email: emailNew.length });
+    merged_on_email: emailNew.length,
+    shared_car_shapes: shapes.length, shared_car_proposed: carProposed,
+    shared_car_no_common_car: carNoCar, shared_car_refused_two_cars_at_once: carRefused });
 
   /* Only the CONCLUSIVE links are subject to the withdrawal below. A proposal
      nobody has answered yet is not a link the rule stopped supporting; deleting
      it every run would empty the review queue between passes. */
   const keep = [...links.map((l) => l.alias_ext_id), ...emailNew.map((l) => l.alias_ext_id),
-    ...fresh.map((c) => c.alias_ext_id)];
+    ...fresh.map((c) => c.alias_ext_id), ...carAliases];
   /* RETURNING, not rowCount. node-postgres names it rowCount and PGlite names
      it affectedRows, so a count read off one of those two is zero under the
      other — and the tests run on PGlite while production runs on the pool,
@@ -617,5 +826,7 @@ export async function refreshIdentityLinks(db = pool) {
     not_linked: skipped.length,
     withdrawn,
   });
-  return { rows: rows.length, links, live, skipped, withdrawn };
+  return { rows: rows.length, links, live, skipped, withdrawn,
+    sharedCar: { shapes: shapes.length, proposed: carProposed,
+      refused: carRefused, noCommonCar: carNoCar } };
 }

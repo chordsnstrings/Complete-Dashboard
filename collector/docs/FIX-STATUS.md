@@ -1518,3 +1518,28 @@ because the fixture's `111,179.66` fits 390px by a hair where production's
 `103,567.54` does not — a proportional `1` is narrow. The mock now carries a
 row whose amounts have no leading 1s, which reproduces at +18px and turns the
 assertion red when the rule is removed.
+
+
+## The same-person queue could not see same-channel duplicates — 2026-09-19
+
+Asked for as "merge the duplicate drivers … we had about 90 active drivers".
+A driver report built on `personOf()` counted **238 people over 260 accounts**;
+the operator's roster is about ninety.
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | `nameCandidates()` skips same-platform pairs, so one driver's two Uber accounts were never proposed | `sharedCarShapes()` proposes them when the two accounts **drove the same car** — the evidence the forty-Muhammads argument is missing | written, **proven by revert** (`test/identity_shared_car.test.mjs`) |
+| — | transliteration variants (Rehman/Rahman, Ahmed/Ahmad) matched nothing | `spellingFolder()` folds tokens one edit apart, 4+ characters only, before the existing subset/reorder test | written, **proven by revert** |
+| — | nothing in the file could say *no* | trips overlapping **in different cars** refuse the pair outright, with the moment and both plates logged | written, **proven by revert** |
+
+**Nothing merges anybody.** Every row lands in `driver_identity_link`
+unconfirmed under basis `shared_car_name`, which is not in `CONCLUSIVE`, so it
+appears on **#same-person** for a human to rule on. `api/identity_map.js` is
+untouched — it stays a hand-reviewed list, per the hard rule.
+
+**A test that proved nothing, caught by reverting the guard it named.** The
+short-word assertion used "ali"/"alam" — two edits apart, so it stayed green
+with the length guard removed. It uses "ali"/"ala" now and goes red.
+
+**Proof owed.** The queue's `shared_car_name` count on production after the
+collector's next identity refresh.
