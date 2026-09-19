@@ -1552,5 +1552,20 @@ Pre-existing, not introduced here — reproduced by calling `refreshIdentityLink
 three times against a fixture, which oscillates 1 → 0 → 1. The restart that
 followed this deploy is what made it visible.
 
-**Proof owed.** The queue's `shared_car_name` count on production after the
-collector's next identity refresh, and a second refresh that leaves it standing.
+**PROVEN ON PRODUCTION 2026-09-19, deployment `8879f5ad`.** `GET /api/same-person`
+polled once a minute across several collector cycles:
+
+```
+06:46  pending  20 | shared_car 17 | decided 124
+06:48  pending  20 | shared_car 17 | decided 124
+06:49  pending 148 | shared_car 25 | decided 124   <- a fuller refresh
+06:50 … 06:55   pending 148 | shared_car 25 | decided 124   (stable, 7 reads)
+```
+
+Both halves are in that trace. **25 `shared_car_name` proposals** the queue could
+not previously make — among them `ALI REHMAN RIAZ KARIM` ⇐ `Ali Rahman Karim`,
+`Arslan Arif Muhammad Arif` ⇐ `Arslan Arif Arif`, `Abdul Hannan Momin Humayun
+Habib Momin` ⇐ `Abdul Hannan Momin` on plate L78475. And **the count stops
+falling**: 148 held across seven consecutive reads and several refreshes, where
+before the fix the next pass took it to 0. The 124 decided rows were never
+touched.
