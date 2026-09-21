@@ -47,6 +47,20 @@ export async function identityLinks(q = null, { now = Date.now() } = {}) {
   if (cache && now - at < TTL_MS) return cache;
   const run = q || ((t) => pool.query(t).then((r) => r.rows));
   let rows = [];
+  /* WHETHER THE ROWS WERE READ AT ALL, which the catch below erases.
+     ─────────────────────────────────────────────────────────────────────
+     An empty map and a map that could not be built are the same object to
+     every existing caller, and for a directory that is the right trade: a
+     failed link read renders the page the way it rendered before links
+     existed. For MONEY it is not. api/ledger_person.js resolves a human being
+     once, at write time, and if it cannot tell "this person has no linked
+     accounts" from "the link table did not answer" it mints a SECOND person
+     for somebody who already has one — splitting a balance in two, with
+     neither half right and nothing on any screen looking wrong.
+
+     So the flag is carried on the result. Every existing caller ignores it and
+     keeps the behaviour it had; a caller that must not guess can refuse. */
+  let ok = true;
   try {
     rows = await run(
       `SELECT alias_ext_id, alias_platform, alias_name,
@@ -76,8 +90,10 @@ export async function identityLinks(q = null, { now = Date.now() } = {}) {
     /* A database that has not run the migration yet answers with an error, and
        the honest response to that is an empty map rather than a failed page:
        every caller's fallback is the behaviour that shipped before this
-       existed. */
+       existed. What is NOT honest is letting that be indistinguishable from a
+       clean read, so `ok` records it. */
     rows = [];
+    ok = false;
   }
   /* Three indexes over the same rows, because the three questions a caller
      asks are different ones and deriving each from the others at the call site
@@ -153,7 +169,11 @@ export async function identityLinks(q = null, { now = Date.now() } = {}) {
   const keyOfRep = (id) => infoOf.get(id)?.key || null;
   const nameOfRep = (id) => infoOf.get(id)?.name || null;
 
-  cache = {
+  const built = {
+    /* True when the SELECT above answered. See the comment on the declaration:
+       every existing caller ignores this, and a caller that must not guess —
+       api/ledger_person.js — refuses when it is false. */
+    ok,
     rows,
     /* EVERY id on the person, not only an alias, maps to the one key — a
        chain middle is an alias of the terminal and a canonical of somebody
@@ -189,8 +209,13 @@ export async function identityLinks(q = null, { now = Date.now() } = {}) {
       .filter(([k, v]) => k && v && k !== v)),
     partners,
   };
-  at = now;
-  return cache;
+  /* A FAILURE IS NEVER CACHED. Caching one would hold thirty seconds of
+     "nobody is linked to anybody" over every money surface after a single
+     statement timeout, and the next caller would have no way to know the read
+     had even been attempted. An empty map from a clean read is cached like any
+     other answer. */
+  if (ok) { cache = built; at = now; }
+  return built;
 }
 
 /* The one thing the fold needs. Returns null for an id nobody linked, which is
