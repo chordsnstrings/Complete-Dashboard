@@ -144,6 +144,44 @@ check('the basis names the fold this ledger uses, because it is not person_key',
   /name/i.test(body.basis || '') && /not reconciled|different person fold/i.test(body.basis || ''),
   body.basis);
 
+/* ── THE WINDOW, which is the shape the operator actually asked for ──────
+   "how much the driver earned for the duration and how much the guy has daily
+   will give us the accumulated figure and we can see for any duration of our
+   choosing." Summing a FLOW over a window is what a flow is for; the earlier
+   mistake was calling the same column a balance and reporting one day of it.
+
+   Balance Holder: 1200 + 500 + (none) + 900 = 2600 over the four days, and
+   1400 over the three from the 2nd. Gross 500/day and net 450/day by fixture. */
+const w = (await get('/api/ledger/cash-position?as_of=2026-09-21')).body;
+const wby = Object.fromEntries((w.people || []).map((p) => [p.driver_name, p]));
+check('the accumulated figure is every daily amount in the window, added up',
+  wby['Balance Holder']?.cash_held_accumulated === 2600,
+  String(wby['Balance Holder']?.cash_held_accumulated));
+check('earnings over the same window come back beside it, gross and net apart',
+  wby['Balance Holder']?.earned_gross === 2000 && wby['Balance Holder']?.earned_net === 1800,
+  JSON.stringify([wby['Balance Holder']?.earned_gross, wby['Balance Holder']?.earned_net]));
+check('with the days actually worked, so a rate can be read without inventing one',
+  wby['Balance Holder']?.days_worked === 4, String(wby['Balance Holder']?.days_worked));
+
+const n = (await get('/api/ledger/cash-position?from=2026-09-02&as_of=2026-09-21')).body;
+const nby = Object.fromEntries((n.people || []).map((p) => [p.driver_name, p]));
+check('a narrower duration accumulates only that duration',
+  nby['Balance Holder']?.cash_held_accumulated === 1400,
+  String(nby['Balance Holder']?.cash_held_accumulated));
+check('and narrows the earnings with it, not just the cash',
+  nby['Balance Holder']?.earned_gross === 1500 && nby['Balance Holder']?.earned_net === 1350,
+  JSON.stringify([nby['Balance Holder']?.earned_gross, nby['Balance Holder']?.earned_net]));
+check('the window it answered for is echoed back, so a reader cannot mistake it',
+  n.from === '2026-09-02' && w.from === null, JSON.stringify([n.from, w.from]));
+/* An unasked window accumulates the WHOLE record. The payouts page shipped
+   reading 6 of 217 transfers because a route defaulted to a sliver and said
+   nothing; this one defaults wide and says which. */
+check('an unasked duration reaches back to the oldest row, not a silent slice',
+  !!wby['Stale Figure'] && wby['Stale Figure'].unremitted === 7000,
+  JSON.stringify(Object.keys(wby)));
+check('and a narrow one drops a person whose only rows fall outside it, correctly',
+  !nby['Stale Figure'] && Object.keys(nby).length === 2, JSON.stringify(Object.keys(nby)));
+
 /* ── the per-person series, which is what settles balance-vs-daily-flow ──
    The aggregate cannot distinguish a balance that climbs and drops from a
    quantity that stands alone each day; only consecutive days can. */

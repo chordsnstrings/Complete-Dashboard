@@ -90,6 +90,17 @@ export function ledgerRoutes(app, { q, wrap }) {
   app.get('/api/ledger/cash-position', wrap(async (req, res) => {
     const asked = String(req.query.as_of || '').trim();
     const asOf = /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : null;
+    /* THE WINDOW. The operator's model, stated 2026-09-21: "how much the driver
+       earned for the duration and how much the guy has daily will give us the
+       accumulated figure and we can see for any duration of our choosing."
+       That is the right shape once this column is understood as a FLOW rather
+       than a balance — summing a flow over a window is what a flow is for.
+       `from` defaults to the first ledger day, so an unasked request
+       accumulates the whole record rather than a silent 30 days. */
+    const dstr = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim())
+      ? String(v).trim() : null);
+    const from = dstr(req.query.from);
+    const to = dstr(req.query.to) || asOf;
 
     /* What the table holds per source, before any per-person question. This is
        the half that says whether the ledger is being maintained at all: a
@@ -121,6 +132,7 @@ export function ledgerRoutes(app, { q, wrap }) {
       `WITH live AS (
          SELECT * FROM driver_statement_day
           WHERE NOT pseudo
+            AND day >= coalesce($2::date, '1900-01-01'::date)
             AND day <= coalesce($1::date, (now() AT TIME ZONE 'Asia/Dubai')::date)
        ),
        agg AS (
@@ -138,6 +150,13 @@ export function ledgerRoutes(app, { q, wrap }) {
                 count(*) FILTER (WHERE cash IS NOT NULL)::int      AS cash_days,
                 sum(bank)                                          AS bank_sum,
                 sum(network_cash)                                  AS network_cash_sum,
+                /* WHAT THE DRIVER EARNED over the same window, both sides of
+                   the commission, because they are different questions and this
+                   product has printed one under the other's caption before.
+                   net = gross - fees (sql/schema_v25.sql). */
+                sum(gross)                                         AS gross_sum,
+                sum(net)                                           AS net_sum,
+                count(DISTINCT day)::int                           AS days_worked,
                 array_agg(DISTINCT source)                         AS sources
            FROM live GROUP BY name_key, fleet_id
        ),
@@ -159,7 +178,7 @@ export function ledgerRoutes(app, { q, wrap }) {
                 AS unremitted_age_days
          FROM agg a LEFT JOIN latest l USING (name_key, fleet_id)
         ORDER BY (l.unremitted IS NULL), l.unremitted DESC NULLS LAST, a.driver_name`,
-      [asOf]);
+      [asOf, from]);
 
     /* ?person=<name_key> — the day-by-day series for one person, which is the
        only thing that settles what this column IS.
@@ -226,6 +245,17 @@ export function ledgerRoutes(app, { q, wrap }) {
       unremitted_max: round2(p.unremitted_max),
       unremitted_sum: round2(p.unremitted_sum),
       /* The flows beside it, for comparison and never as a substitute. */
+      /* THE ACCUMULATED FIGURE the operator asked for: every daily unremitted
+         amount added across the window. It is cash COLLECTED AND NOT HANDED IN
+         THE SAME DAY over this period — a flow, correctly summed. It becomes
+         "what they are holding" only once the other leg exists: nothing in this
+         database records a remittance, so nothing here deducts cash handed back
+         later. sql/schema_v78.sql's cash_deposit entries are that leg, and with
+         them the position is opening + this - deposits. */
+      cash_held_accumulated: round2(p.unremitted_sum),
+      earned_gross: round2(p.gross_sum),
+      earned_net: round2(p.net_sum),
+      days_worked: p.days_worked,
       cash_sum: round2(p.cash_sum),
       cash_days: p.cash_days,
       bank_sum: round2(p.bank_sum),
@@ -241,6 +271,8 @@ export function ledgerRoutes(app, { q, wrap }) {
 
     res.json({
       as_of: asOf,
+      from,
+      to,
       /* Said in words at the top, because this is the number the advance
          ledger will lean on and the first question about it is always "for how
          many of our people?". */
