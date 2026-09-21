@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { pool, migrate } from '../src/db.js';
 import { config } from '../src/config.js';
 import { pgTx } from './tx.js';
+import { importRoutes } from './import_routes.js';
 import { describeSettings, setSetting, deleteSetting, loadSettings, recordCredentialVisibility } from '../src/settings.js';
 import { recognise, unrecognised } from '../src/credkit.js';
 import { checkAll } from '../src/credcheck.js';
@@ -5795,6 +5796,11 @@ ledgerWriteRoutes(app, { wrap, tx: pgTx(pool) });
 ledgerReceiptRoutes(app, { q, wrap });
 ledgerExposureRoutes(app, { q, wrap });
 ledgerRegisterRoutes(app, { q, wrap });
+/* The spreadsheet import. Two routes whose SPLIT is the design: preview takes
+   names and writes nothing, commit takes person ids and never a name — which
+   makes auto-applying a fuzzy match impossible at the boundary rather than
+   merely discouraged by a comment. */
+importRoutes(app, { q, wrap, tx: pgTx(pool) });
 
 /* ───────────────── one day ─────────────────
    Every source that saw a given Dubai-local day, including whether each one

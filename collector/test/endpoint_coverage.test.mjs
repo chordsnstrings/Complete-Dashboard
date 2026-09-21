@@ -82,6 +82,15 @@ const EXEMPT = {
     + 'authentication (api/redact.js:1-8), so a 64-character sha that appears only on the entry '
     + 'it belongs to is the whole control — weaker than a bank slip deserves, written down '
     + 'rather than glossed, and to be given a real check when ULM lands.',
+  /* DELETE BOTH WHEN THE IMPORT SCREEN LANDS. */
+  '/api/ledger/import/preview': 'matches a parsed spreadsheet against the roster and writes '
+    + 'NOTHING. Locally: posting several hundred real people\'s names, with the amounts they '
+    + 'owe beside them, to a model in another jurisdiction contradicts the rule src/analyst.js '
+    + 'and src/credmodel.js both state. Built before the screen that will call it.',
+  '/api/ledger/import/commit': 'writes a confirmed import. It takes PERSON IDS and never a '
+    + 'name, which is what makes auto-applying a fuzzy match impossible at the boundary rather '
+    + 'than merely discouraged — a row can only be written against somebody a human chose from '
+    + 'the proposals, because there is no other way to address one.',
   '/api/health': 'liveness probe for the platform, not for people',
   '/api/import/statement-days': 'operator tool: batched import of the daily ledger — driven by '
     + 'bin/import-ledger.mjs, not by a page',
