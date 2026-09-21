@@ -758,7 +758,24 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          SELECT m2.reason FROM driver_photo_miss m2
           WHERE m2.driver_ext_id = who.driver_ext_id LIMIT 1) pm ON true
        LEFT JOIN driver_platform_state dps ON dps.driver_ext_id = who.driver_ext_id
-       ORDER BY coalesce(w.trips, 0) DESC, who.driver_name LIMIT 800`, [...P, placeholderDate]);
+       /* THE CAP THAT STARTED BITING THIS MONTH.
+          ─────────────────────────────────────────────────────────────
+          It was 800, and on 2026-09-21 the roster reached 810 accounts. So
+          this page — headed "All drivers · Everyone on the books, even people
+          with no trip in this window" — silently dropped the ten accounts
+          with the fewest trips and the latest names, which was three whole
+          people: two Zubairs and a Zeeshan. The claim in the heading stopped
+          being true and nothing said so.
+
+          It is the same defect #payouts shipped as "6 transfers on 2 dates"
+          over a register of 217. A bound that a growing roster walks into is
+          worse than no bound, because it looks like an answer.
+
+          4000 is five times the current account count, and the page reports
+          its own row count against the person spine (see the drivers view),
+          so if this ever bites again the page says so rather than quietly
+          showing fewer people than the fleet has. */
+       ORDER BY coalesce(w.trips, 0) DESC, who.driver_name LIMIT 4000`, [...P, placeholderDate]);
 
     /* Fold per-platform rows into one row per person, so the directory lists
        humans rather than accounts. Counts are carried through and the ratios

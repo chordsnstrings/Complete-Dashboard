@@ -3674,9 +3674,23 @@ export async function renderDriverDirectory(root) {
      now awaiting an answer are named next to it: the backlog is the reason
      the count is what it is, and saying so is what makes it get worked. */
   let pendingPairs = null;
+  let spinePeople = null;
   const summary = (n) => `${fmt(n)} of ${fmt(rows.length)} drivers`
     + (n === rows.length
-      ? (pendingPairs ? ` · ${fmt(pendingPairs)} pairs awaiting review` : '')
+      /* THE PAGE CHECKS ITSELF AGAINST THE SPINE.
+         ───────────────────────────────────────────────────────────────
+         This query was capped at 800 accounts for months. On 2026-09-21 the
+         roster reached 810, and the page — headed "Everyone on the books" —
+         quietly stopped showing three people. Nothing said so, because a
+         count of the rows it fetched agrees with itself whatever the cap
+         dropped.
+         So it compares its own row count with the number of people the spine
+         holds, and says when they differ. A cap that bites is then visible
+         the day it does rather than the month somebody notices. */
+      ? (spinePeople != null && spinePeople !== rows.length
+        ? ` · showing ${fmt(rows.length)} of ${fmt(spinePeople)} people on the books`
+        : '')
+        + (pendingPairs ? ` · ${fmt(pendingPairs)} pairs awaiting review` : '')
         + ` · ${fmt(active.length)} drove in this window`
         + (idle.length ? ` · ${fmt(idle.length)} did not` : '')
         + (never.length ? ` · ${fmt(never.length)} never have` : '')
@@ -3689,8 +3703,10 @@ export async function renderDriverDirectory(root) {
      everybody to tell them something only sometimes true. */
   qAll('/api/same-person', { counts: 1 })
     .then((c) => {
-      if (!alive(gen) || !c || !c.pending) return;
-      pendingPairs = c.pending;
+      if (!alive(gen) || !c) return;
+      pendingPairs = c.pending || null;
+      spinePeople = c.people ?? null;
+      if (!pendingPairs && spinePeople === rows.length) return;
       const host = bar.querySelector('#dn');
       if (host) host.textContent = summary(rows.length);
     })

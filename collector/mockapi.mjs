@@ -1502,6 +1502,10 @@ app.get('/api/same-person', (_req, r) => {
      page in the product. */
   if (_req.query.counts) {
     return r.json({ pending: 7, confirmed: 272, rejected: 3,
+      /* The spine's size travels with the backlog so a page can check its own
+         row count against it — #drivers capped its query at 800 for months
+         and quietly dropped three people the month the roster passed it. */
+      people: 5, accounts: 7,
       by_basis: { same_name: 5, similar_name: 2 },
       note: 'Pairs a rule proposed and nobody has answered. They fold nobody until somebody '
         + 'does — api/identity_links.js applies a link only where the basis is conclusive or '

@@ -82,6 +82,21 @@ const EXEMPT = {
     + 'authentication (api/redact.js:1-8), so a 64-character sha that appears only on the entry '
     + 'it belongs to is the whole control — weaker than a bank slip deserves, written down '
     + 'rather than glossed, and to be given a real check when ULM lands.',
+  /* BUILD THE SCREEN THE FIRST TIME src/persons.js REPORTS needs_merge > 0.
+     Until then this route has no work: the spine folds two person rows by
+     itself while NEITHER carries a ledger entry, and it only stops — leaving
+     the pair for this — once money is on one of them. The money ledger holds
+     no entries at all today, so that has never happened.
+
+     When it does, the screen belongs on #same-person: confirming a pair whose
+     two people both carry a balance is exactly the moment somebody needs to
+     say "yes, and move the money", with the preview this route already
+     returns shown beside the two balances before they commit. */
+  '/api/person/merge': 'folds two person records into one and re-points the ledger rows, '
+    + 'with a permanent audit row naming every entry that moved so it can be undone by '
+    + 'reading it. Built before the screen because src/persons.js needs somewhere to send '
+    + 'the pairs it refuses to fold — see the note above for the condition that makes the '
+    + 'screen due.',
   '/api/health': 'liveness probe for the platform, not for people',
   '/api/import/statement-days': 'operator tool: batched import of the daily ledger — driven by '
     + 'bin/import-ledger.mjs, not by a page',

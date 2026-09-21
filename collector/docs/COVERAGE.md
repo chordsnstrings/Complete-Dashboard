@@ -827,6 +827,29 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **THE DRIVERS DIRECTORY WAS CAPPED AT `LIMIT 800` ACCOUNTS, AND THE ROSTER
+  REACHED 810 THIS MONTH.** The page is headed "All drivers · Everyone on the
+  books, even people with no trip in this window". It sorts by trips DESC then
+  name, so what fell off were the ten accounts with the fewest trips and the
+  latest names — three whole people, two Zubairs and a Zeeshan. Nothing said
+  so, because a count of the rows it fetched agrees with itself whatever the
+  cap dropped. Found only by comparing the directory against the person spine:
+  439 rows over 800 accounts, against 442 people over 810.
+
+  Raised to 4000, and **the page now compares its own row count against the
+  spine and says when they differ** — a cap that bites is visible the day it
+  does rather than the month somebody notices. It is the same defect #payouts
+  shipped as "AED 319,015 · 6 transfers" over a register of 217: a bound a
+  growing fleet walks into is worse than no bound, because it looks like an
+  answer.
+
+* **`test/mount.mjs` ONLY AUTO-DISCOVERS `api/*_routes.js`.** A route module
+  named anything else is never mounted by the harness, so every request to it
+  in a test 404s and the assertions read `undefined` off the error body rather
+  than failing with something that names the cause. `api/person_merge.js` cost
+  a debugging pass before being renamed `api/person_merge_routes.js`. If a new
+  route file's tests all fail on undefined fields, check the filename first.
+
 * **EVERY HEADLINE NUMBER COUNTS UP OVER 620ms, SO EVERY BROWSER ASSERTION ON
   ONE IS A RACE.** `countUp` in `api/public/app.js` animates `.kpi .n` from
   zero and lands on the exact value at the end. A test reading the tile before

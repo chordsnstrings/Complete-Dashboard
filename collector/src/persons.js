@@ -47,7 +47,7 @@
    driver_ledger row already keys on person_id and re-pointing money is an
    operation somebody has to authorise, not a side effect of a sweep. Undoing a
    wrong merge is driver_platform_id.detached_at plus a recorded move of the
-   money — see api/person_merge.js. */
+   money — see api/person_merge_routes.js. */
 import { pool } from './db.js';
 import { log } from './log.js';
 import { mergedIds, canonicalName } from '../api/identity_map.js';
@@ -150,7 +150,7 @@ export async function refreshPersons(db = pool, { dryRun = false } = {}) {
        nothing to get wrong: the link was confirmed by a human, which is the
        review, and the spine folds them. Where EITHER carries one, it stops
        and leaves it — re-pointing a balance is an operation somebody
-       authorises and records, which is api/person_merge.js, not a side
+       authorises and records, which is api/person_merge_routes.js, not a side
        effect of a sweep that runs every half hour. */
     let personId = persons[0] || null;
     if (persons.length > 1) {

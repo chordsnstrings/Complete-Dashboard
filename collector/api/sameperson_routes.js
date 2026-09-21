@@ -62,7 +62,17 @@ export function samePersonRoutes(app, { q, wrap }) {
         `SELECT basis, count(*)::int AS n FROM driver_identity_link
           WHERE NOT rejected AND confirmed_at IS NULL AND basis <> ALL($1::text[])
           GROUP BY basis ORDER BY 2 DESC`, [CONCLUSIVE]);
+      /* The spine's own size travels with the backlog, because the two are one
+         question: how many people this fleet has, and how many pairs are
+         waiting to change that. It also lets a page check its OWN row count
+         against the truth — #drivers capped its query at 800 for months and
+         quietly dropped three people the month the roster passed it. */
+      const [spine] = await q(
+        `SELECT (SELECT count(*)::int FROM driver) AS people,
+                (SELECT count(*)::int FROM driver_platform_id WHERE detached_at IS NULL)
+                  AS accounts`);
       return res.json({ pending: c.pending, confirmed: c.confirmed, rejected: c.rejected,
+        people: spine.people, accounts: spine.accounts,
         by_basis: Object.fromEntries(byBasis.map((r) => [r.basis, r.n])),
         note: 'Pairs a rule proposed and nobody has answered. They fold nobody until somebody '
           + 'does — api/identity_links.js applies a link only where the basis is conclusive or '

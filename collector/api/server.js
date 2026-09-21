@@ -64,6 +64,9 @@ import { compareRoutes } from './compare_routes.js';
 import { performanceRoutes } from './performance_routes.js';
 import { statusRoutes } from './status_routes.js';
 import { samePersonRoutes } from './sameperson_routes.js';
+/* Folding two people into one, and moving the money with them — the operation
+   src/persons.js refuses to do by itself the moment either carries an entry. */
+import { personMergeRoutes } from './person_merge_routes.js';
 import { ledgerRoutes, ledgerWriteRoutes, ledgerReceiptRoutes,
   ledgerExposureRoutes, ledgerRegisterRoutes, ledgerPeopleRoutes,
   ledgerPolicyRoutes } from './ledger_routes.js';
@@ -5799,6 +5802,7 @@ ledgerExposureRoutes(app, { q, wrap });
 ledgerRegisterRoutes(app, { q, wrap });
 ledgerPeopleRoutes(app, { q, wrap });
 ledgerPolicyRoutes(app, { q, wrap, tx: pgTx(pool) });
+personMergeRoutes(app, { q, wrap, tx: pgTx(pool) });
 /* The spreadsheet import. Two routes whose SPLIT is the design: preview takes
    names and writes nothing, commit takes person ids and never a name — which
    makes auto-applying a fuzzy match impossible at the boundary rather than
