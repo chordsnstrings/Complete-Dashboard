@@ -376,7 +376,13 @@ export const NO_RANGE = ['reconcile', 'compare',
      and Egari bank separately, and "which of my two companies was this wire
      for" is the second question anybody asks of a transfer. */
   'payouts'];
-export const NO_PLATFORM_FLEET = ['driver', 'vehicle', 'property', 'coverage'];
+/* #charging keeps its RANGE and loses the channel chips. Unlike a balance,
+   "what has this fleet advanced for charging" is genuinely a question about a
+   span of dates, so the window governs the page and the page says so. But
+   /api/ledger/entries takes no platform and no fleet — an advance is recorded
+   against a person, not against a channel — so those two chips would govern
+   nothing above it and would ride along into every driver link leaving it. */
+export const NO_PLATFORM_FLEET = ['driver', 'vehicle', 'property', 'coverage', 'charging'];
 /* #map is a live position feed with its own plate-and-day picker, and #segment
    is one occupancy segment addressed by plate and instant. /api/live takes no
    parameters at all, /api/map/days takes a plate, /api/segment takes a plate

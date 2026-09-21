@@ -487,6 +487,22 @@ export function ledgerRegisterRoutes(app, { q, wrap }) {
     const personId = who.person_id;
     const book = ['advance', 'cash', 'deduction', 'pay'].includes(String(req.query.book))
       ? String(req.query.book) : null;
+    /* ONE TYPE, AND WHY IT IS ITS OWN FILTER RATHER THAN A CLIENT-SIDE SLICE.
+       ───────────────────────────────────────────────────────────────────
+       #charging asks about charging advances alone. A page that pulled
+       book=advance and filtered the ARRAY would be computing its totals from
+       the 200-row cap this route returns, which is precisely the defect
+       test/ledger_register.test.mjs exists to prevent: #payouts shipped
+       reading "AED 319,015 · 6 transfers" over a register of 217 transfers and
+       AED 3.46m, because the route returned a slice and the page added up what
+       it was given.
+
+       Validated against the registry rather than a hardcoded list, so a type
+       added to ledger_type is filterable the day it is seeded and a typo is
+       refused instead of silently matching nothing — an unknown code in a
+       plain `= $5` would return an empty register that looks exactly like a
+       type nobody has used. */
+    const typeCode = String(req.query.type_code || '').trim() || null;
 
     /* An account that resolves to nobody must not fall through to the
        UNFILTERED register. `$3::bigint IS NULL OR e.person_id = $3` treats a
@@ -495,19 +511,33 @@ export function ledgerRegisterRoutes(app, { q, wrap }) {
        name, on their page. Answered as empty, with the reason. */
     if (who.absent_reason) {
       return res.json({
-        from, to, person_id: null, book,
+        from, to, person_id: null, book, type_code: null,
         totals: { rows: 0, verification_rows: 0, advance: null, cash: null,
           deduction: null, pay: null, excludes_verification: true },
-        shown: 0, listed_why: null, entries: [],
+        shown: 0, listed_why: null, entries: [], by_person: [],
         absent_reason: who.absent_reason,
       });
+    }
+
+    if (typeCode) {
+      const [known] = await q(`SELECT code FROM ledger_type WHERE code = $1`, [typeCode]);
+      if (!known) {
+        const all = (await q(`SELECT code FROM ledger_type ORDER BY sort, code`)).map((r) => r.code);
+        return res.status(400).json({
+          error: `"${typeCode}" is not a type this ledger holds`,
+          detail: 'Refused rather than answered with an empty register, which would look '
+            + 'exactly like a type nobody has used yet.',
+          types: all,
+        });
+      }
     }
 
     const W = `($1::date IS NULL OR e.effective_on >= $1::date)
            AND ($2::date IS NULL OR e.effective_on <= $2::date)
            AND ($3::bigint IS NULL OR e.person_id = $3::bigint)
-           AND ($4::text IS NULL OR e.book = $4::text)`;
-    const p = [from, to, personId, book];
+           AND ($4::text IS NULL OR e.book = $4::text)
+           AND ($5::text IS NULL OR e.type_code = $5::text)`;
+    const p = [from, to, personId, book, typeCode];
 
     const [tot] = await q(
       `SELECT count(*)::int AS rows,
@@ -551,10 +581,45 @@ export function ledgerRegisterRoutes(app, { q, wrap }) {
         ORDER BY e.effective_on DESC, e.id DESC
         LIMIT ${LIMIT}`, p);
 
+    /* WHO, OVER THE WHOLE WINDOW — not over the 200 rows above.
+       ───────────────────────────────────────────────────────────────────
+       #charging needs "what has each driver been advanced for charging",
+       and deriving that from `entries` would be the capped-list defect
+       again: correct until the 201st entry, then quietly wrong, and wrong in
+       the direction that understates what somebody owes. GROUP BY in SQL over
+       the same WHERE the totals use, so the two cannot disagree.
+
+       Verification rows are excluded here exactly as they are from the totals.
+       They exist so this repo's production ritual can fill a modal without
+       recording a real debt, and a person whose only row is a verification row
+       has been advanced nothing. */
+    const byPerson = await q(
+      `SELECT e.person_id, max(e.person_name) AS person_name,
+              max(e.acct_ext_id) AS ext_id,
+              count(*)::int AS entries,
+              round(sum(e.amount)::numeric, 2) AS net,
+              round(sum(e.amount) FILTER (WHERE e.direction > 0)::numeric, 2) AS out,
+              round(sum(-e.amount) FILTER (WHERE e.direction < 0)::numeric, 2) AS back,
+              to_char(max(e.effective_on),'YYYY-MM-DD') AS last_on
+         FROM driver_ledger e
+        WHERE ${W} AND e.entry_source <> 'verification'
+        GROUP BY e.person_id
+        ORDER BY sum(e.amount) DESC NULLS LAST`, p);
+
     res.json({
-      from, to, person_id: personId, book,
+      from, to, person_id: personId, book, type_code: typeCode,
       resolved_from: who.from,
       absent_reason: null,
+      by_person: byPerson.map((r) => ({
+        person_id: Number(r.person_id),
+        person_name: r.person_name,
+        ext_id: r.ext_id,
+        entries: r.entries,
+        net: r.net == null ? null : Number(r.net),
+        out: r.out == null ? null : Number(r.out),
+        back: r.back == null ? null : Number(r.back),
+        last_on: r.last_on,
+      })),
       totals: {
         rows: tot.rows,
         verification_rows: tot.verification_rows,

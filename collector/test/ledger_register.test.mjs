@@ -99,5 +99,75 @@ check('and says how many of how many, with the totals over all of them',
 check('the totals are over the whole window, not over the page',
   big.totals.deduction === 505, String(big.totals.deduction));
 
+/* ── ONE TYPE, WITH ITS TOTALS STILL COMPUTED IN SQL ─────────────────────
+   #charging asks about charging advances alone, and the tempting shape is for
+   the page to pull book=advance and filter the ARRAY. That recomputes the
+   headline from the 200-row cap this route returns — the exact defect the top
+   of this file describes, where #payouts read "AED 319,015 · 6 transfers" over
+   a register of 217 and AED 3.46m.
+
+   So the filter is the route's, and these assertions are what hold it there:
+   the totals and the per-person rollup must both move when the type is named,
+   and both must be computed over the whole window rather than over the list. */
+await add('charging_advance', 1, 'advance', 2400, { sha: 'c'.repeat(64), on: '2026-09-04' });
+await q(`INSERT INTO driver (id, full_name) VALUES (8,'Second Subject')`);
+await q(`INSERT INTO driver_ledger
+     (person_id, person_name, resolved_from, type_code, direction, book, amount,
+      effective_on, entered_by, note, entry_source, receipt_sha)
+   VALUES (8,'Second Subject','human:ahsan','charging_advance',1,'advance',600,
+           '2026-09-06','haseeb','n','manual',$1),
+          (8,'Second Subject','human:ahsan','repayment',-1,'advance',-100,
+           '2026-09-07','haseeb','n','manual',$1),
+          (8,'Second Subject','human:ahsan','charging_advance',1,'advance',99999,
+           '2026-09-08','haseeb','n','verification',$1)`, ['d'.repeat(64)]);
+
+const chg = (await get('/api/ledger/entries?type_code=charging_advance')).body;
+check('naming a type filters the register to it',
+  chg.entries.every((e) => e.type_code === 'charging_advance'),
+  JSON.stringify(chg.entries.map((e) => e.type_code)));
+check('and echoes which type it answered about',
+  chg.type_code === 'charging_advance', String(chg.type_code));
+check('the advance total is that TYPE\'s, not the whole book\'s',
+  chg.totals.advance === 3000, `${chg.totals.advance} (2400 + 600, and NOT the 5000 cash advance `
+  + 'or the -1500 repayment that share the advance book)');
+check('and the verification row is still excluded from it',
+  chg.totals.verification_rows === 1 && chg.totals.advance === 3000,
+  JSON.stringify(chg.totals));
+
+/* ── THE PER-PERSON ROLLUP ─────────────────────────────────────────────── */
+check('the register carries a per-person rollup',
+  Array.isArray(chg.by_person) && chg.by_person.length === 2,
+  JSON.stringify(chg.by_person));
+const sub2 = chg.by_person.find((r) => r.person_id === 8);
+check('each person\'s net is their own, in SQL rather than from the list',
+  sub2 && sub2.net === 600 && sub2.out === 600, JSON.stringify(sub2));
+check('and a verification row advances nobody anything',
+  sub2.entries === 1, `${sub2 && sub2.entries} entries — the 99999 verification row must not count`);
+check('the rollup is ordered by what is owed, largest first',
+  chg.by_person[0].net >= chg.by_person[chg.by_person.length - 1].net,
+  JSON.stringify(chg.by_person.map((r) => r.net)));
+check('it carries an account id so a name on the page can open the person',
+  chg.by_person.every((r) => 'ext_id' in r), JSON.stringify(chg.by_person[0]));
+
+/* MONEY OUT AND MONEY BACK ARE SEPARATE COLUMNS, never one net figure alone:
+   a driver advanced 600 and repaid 100 is a different conversation from one
+   advanced 500 and repaid nothing, and a single net of 500 makes them look
+   identical. */
+const book = (await get('/api/ledger/entries?book=advance')).body;
+const sub2b = book.by_person.find((r) => r.person_id === 8);
+check('out and back are reported apart, not collapsed into the net',
+  sub2b.out === 600 && sub2b.back === 100 && sub2b.net === 500, JSON.stringify(sub2b));
+
+/* ── AN UNKNOWN TYPE IS REFUSED, NOT ANSWERED EMPTY ────────────────────── */
+const bogus = await get('/api/ledger/entries?type_code=charging_advnace');
+check('a misspelled type is REFUSED rather than answered with an empty register',
+  bogus.status === 400, String(bogus.status));
+check('because an empty register looks exactly like a type nobody has used',
+  /look exactly like a type nobody has used/.test(JSON.stringify(bogus.body)),
+  JSON.stringify(bogus.body).slice(0, 160));
+check('and the refusal lists the types that DO exist',
+  Array.isArray(bogus.body.types) && bogus.body.types.includes('charging_advance'),
+  JSON.stringify(bogus.body.types || []).slice(0, 120));
+
 console.log(`\n${fail ? '✗' : '✓'} ledger_register: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

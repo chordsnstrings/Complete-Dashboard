@@ -36,7 +36,13 @@ import { GREY } from '../onlinetime.js';
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
   { id: 'money', route: 'money', label: 'Money', ic: '◈',
-    owns: ['money', 'finance', 'receipts', 'platforms', 'payouts', 'deposits'] },
+    owns: ['money', 'finance', 'receipts', 'platforms', 'payouts', 'deposits',
+      /* The Money-section pages that have no phone screen of their own still
+         belong to this tab. Left out, opening one from a desktop link on a
+         phone shows the fallback under NO tab marked — which reads as having
+         navigated out of the product rather than into a page that is simply
+         wide. */
+      'charging', 'advances', 'salary', 'opening', 'import-sheet', 'policy'] },
   /* 'online-time' is a People page and has a phone screen of its own — the
      one screen here whose rows dial rather than drill, because chasing a
      driver who has not come online is done from the phone in your hand. */
@@ -100,6 +106,17 @@ export function titleFor(view, param) {
     demand: ['Demand', 'Built for a bigger screen'],
     map: ['Map & replay', 'Built for a bigger screen'],
     settings: ['Settings', 'Built for a bigger screen'],
+    /* NAMED, even though each of these renders the fallback. This file says it
+       three times already — "a header reading 'insights' is the router's word
+       for the page and not the product's" — and a phone opening #charging from
+       a desktop link showed a header reading "charging" over a message about
+       wide tables, which names nothing and helps nobody. */
+    charging: ['Charging', 'What the company paid for on a driver\u2019s behalf'],
+    advances: ['Advances', 'What each driver owes'],
+    salary: ['Salary', 'One entry per driver per month'],
+    opening: ['Starting balances', 'What each driver was holding when counted'],
+    'import-sheet': ['Bring a sheet in', 'History from a spreadsheet'],
+    policy: ['The lending line', 'The percentage obligations are kept within'],
   }[view];
   return { title: t ? t[0] : (view || 'Fleet'), sub: t ? t[1] : 'Built for a bigger screen' };
 }

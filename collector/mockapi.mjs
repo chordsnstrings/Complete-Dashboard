@@ -6901,6 +6901,22 @@ app.get('/api/ledger/entries', (req, r) => {
       receipt: { sha256: null, held: false, expired: false, expires_on: null,
         absent_reason: 'this type carries no photograph — it records a decision or a period '
           + 'figure, which has none to take' } },
+    { id: 5, person_id: 2, person_name: 'Mohammed Selim Shafiqur Rahman', type_code: 'charging_advance',
+      ext_id: 'U-SELIM', label: 'Charging advance', book: 'advance', amount: 180, settles_via: 'charging',
+      effective_on: '2026-09-17', entered_by: 'hossam', note: 'charged at the depot, slip attached',
+      entry_source: 'manual',
+      receipt: { sha256: 'e'.repeat(64), held: true, expired: false,
+        expires_on: '2027-09-17', absent_reason: null } },
+    { id: 4, person_id: 1, person_name: 'Tariq Afzal Said Afzal', type_code: 'charging_advance',
+      ext_id: 'U-TARIQ', label: 'Charging advance', book: 'advance', amount: 240, settles_via: 'charging',
+      effective_on: '2026-09-14', entered_by: 'ahsan', note: 'charging credit topped up',
+      entry_source: 'manual',
+      /* An EXPIRED photograph, so the three proof states are all present on
+         this page too — a page that only ever sees "held" cannot prove it
+         distinguishes the other two. */
+      receipt: { sha256: 'f'.repeat(64), held: false, expired: true, expires_on: '2026-01-01',
+        absent_reason: 'the photograph has passed its twelve-month retention and been removed. '
+          + 'The entry is permanent and still records that one was held.' } },
     { id: 1, person_id: 1, person_name: 'Tariq Afzal Said Afzal', type_code: 'repayment', ext_id: 'U-TARIQ',
       label: 'Repayment', book: 'advance', amount: -1000, settles_via: 'cash',
       effective_on: '2026-09-02', entered_by: 'ahsan', note: 'paid back',
@@ -6909,16 +6925,47 @@ app.get('/api/ledger/entries', (req, r) => {
         absent_reason: 'the photograph has passed its twelve-month retention and been removed. '
           + 'The entry is permanent and still records that one was held.' } },
   ];
+  const type = String(req.query.type_code || '');
+  /* An unknown type is REFUSED, not answered empty — the real route validates
+     against ledger_type for the reason test/ledger_register.test.mjs gives:
+     an empty register looks exactly like a type nobody has used. */
+  const KNOWN = ['cash_advance', 'salary_advance', 'charging_advance', 'opening_balance',
+    'repayment', 'writeoff', 'cash_opening', 'cash_deposit', 'salik', 'traffic_fine',
+    'damage', 'refund', 'salary'];
+  if (type && !KNOWN.includes(type)) {
+    return r.status(400).json({ error: `"${type}" is not a type this ledger holds`,
+      detail: 'Refused rather than answered with an empty register, which would look exactly '
+        + 'like a type nobody has used yet.', types: KNOWN });
+  }
   const byBook = book ? all.filter((e) => e.book === book) : all;
-  const rows = ext ? byBook.filter((e) => e.person_id === LEDGER_ACCOUNTS[ext]) : byBook;
+  const byType = type ? byBook.filter((e) => e.type_code === type) : byBook;
+  const rows = ext ? byType.filter((e) => e.person_id === LEDGER_ACCOUNTS[ext]) : byType;
   const sum = (b) => {
     const m = rows.filter((e) => e.book === b);
     return m.length ? Math.round(m.reduce((a, e) => a + e.amount, 0) * 100) / 100 : null;
   };
+  /* THE ROLLUP THE REAL ROUTE COMPUTES IN SQL over the whole window. Derived
+     here from the same filtered rows the fixture returns, which is only sound
+     because the fixture is smaller than the cap — the real one must never do
+     this, and test/ledger_register.test.mjs is what holds it to SQL. */
+  const by = new Map();
+  for (const e of rows.filter((x) => x.entry_source !== 'verification')) {
+    const k = e.person_id;
+    const v = by.get(k) || { person_id: k, person_name: e.person_name, ext_id: e.ext_id,
+      entries: 0, net: 0, out: null, back: null, last_on: null };
+    v.entries += 1;
+    v.net = Math.round((v.net + e.amount) * 100) / 100;
+    if (e.amount > 0) v.out = Math.round(((v.out || 0) + e.amount) * 100) / 100;
+    else v.back = Math.round(((v.back || 0) - e.amount) * 100) / 100;
+    if (!v.last_on || e.effective_on > v.last_on) v.last_on = e.effective_on;
+    by.set(k, v);
+  }
   return r.json({
     from: null, to: null, person_id: ext ? LEDGER_ACCOUNTS[ext] : null, book: book || null,
+    type_code: type || null,
     resolved_from: ext ? `account:uber:${ext}` : null,
     absent_reason: null,
+    by_person: [...by.values()].sort((a, b) => b.net - a.net),
     totals: { rows: rows.length, verification_rows: 0,
       advance: sum('advance'), cash: sum('cash'), deduction: sum('deduction'), pay: sum('pay'),
       excludes_verification: true },

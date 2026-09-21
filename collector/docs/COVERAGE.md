@@ -827,6 +827,77 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **THE REGISTER AND THE LINK TABLE CAN AGREE WHO SOMEBODY IS AND DISAGREE
+  WHAT TO CALL THEM — and resolving that per id splits the person.** The
+  directory folded on
+  `ALIAS_KEY.get(id) || linkedKey(links, id) || linkedByName(links, own) || own`,
+  first-wins, one id at a time. The register keys a person on whichever record
+  the entry was written against; the link chain keys them on its TERMINAL. When
+  the register names only some of a person's ids — which is the normal case,
+  because an entry names the pair a human reviewed and the sweep later finds the
+  rest — the named ids stop at the register's key and the others fall through to
+  the chain's. Two keys, two rows, one human. **Measured on production
+  2026-09-21 against the live link table: 37 people**, every one the same shape,
+  a short filed name against a long one ('asad khan' vs 'asad khan hakim khan').
+  `api/fold_key.js` resolves at the KEY level over the whole component, and the
+  precedence is unchanged — the register still outranks the sweep, now over the
+  person rather than over the one id it happened to name.
+
+  Two things that made this hard to see. The `person_key` in the response is the
+  SEEDING row's stored column, not the fold key, so both rows reported the same
+  `person_key` and read as already merged. And `/api/driver/profile` resolves
+  all of a person's ids correctly, so the profile page was right while the
+  directory was wrong.
+
+  **A FIXTURE MUST USE A REAL REGISTER ID TO REPRODUCE IT.**
+  `api/identity_map.js` is a fixed list a test must not edit, so invented ids
+  reproduce nothing: the register knows none of them, every id falls through to
+  the chain, they agree, and the fixture passes against the unfixed code. The
+  first version of the test in `test/directory_identity.test.mjs` did exactly
+  that and proved nothing.
+
+* **`linkedByName` FOLDS AN UNLINKED RECORD ON ITS NAME ALONE.** Deliberate and
+  documented in `api/identity_links.js` — it is how the third record reaches a
+  person when Bolt files no phone and no link names it. But it means a record
+  nobody has linked and no human has reviewed joins a person whenever its folded
+  name equals an alias's. Measured 2026-09-21: an account sharing the exact
+  folded name is folded in, with or without the fold-key fix — it is the
+  `byName` map, not the precedence. Worth knowing before trusting a directory
+  row as a reviewed decision, and worth revisiting given that this roster
+  deliberately holds apart pairs that are two different men.
+
+* **THE IDLE HOURS AT CHARGING SITES ARE NOT A CHARGING RECORD, AND THEY LOOK
+  LIKE ONE.** `chargingSiteOf()` in `api/supply_routes.js` matches the AREA
+  NAME a car was left in against the `CHARGING_SITES` setting. That is the
+  whole mechanism. It can support "this car was left somewhere that has a
+  charger" and nothing else — not that it charged, not how much, and not who
+  was in it. `test/charging.test.mjs` pins how narrow it is and why: left
+  unsaid, the optimiser ranks a charging session as downtime and recommends
+  moving cars away from the only place they can refuel. `#charging` names it
+  explicitly as NOT evidence, because it sits one inference away from a money
+  figure and that is exactly where a caveat turns into a claim.
+
+* **NOTHING INGESTS A CHARGING SESSION.** There is no charging table and no
+  collector: `#charging` is a ledger of what somebody typed, checked against no
+  meter. What it would take, in order, measured rather than assumed:
+  1. Tesla serves it — `/api/1/dx/charging/history` for past sessions and
+     `/api/1/dx/charging/sessions` for energy WITH pricing, the latter to
+     business fleet owners only, which this fleet is. The gap is access, not
+     availability.
+  2. The stored token expired 2026-09-10 and **cannot be renewed from this
+     server** — Tesla's auth edge answers DigitalOcean egress with an HTML 403
+     before OAuth sees the request. `bin/tesla-token.mjs`, from a machine Tesla
+     answers, is the path.
+  3. Billing gates it before either: the default spend limit is **$0**, raised
+     only after a payment method, and the **UAE is not on Tesla's
+     payment-supported country list**. Every response below a 500 is billable,
+     refusals included.
+  4. Even ingested it is PARTIAL — the operator's own words: "drivers charge
+     outside of our network as well".
+  5. Even complete it does not settle who owes it: a charger meters a VEHICLE
+     and an advance is owed by a PERSON. Custody is the only bridge and it is
+     an inference, not ground truth.
+
 * **THE BOTTOM OF `api/server.js` IS EXECUTED BY NO TEST, AND THE HARNESS
   SUPPLIES WHAT IT GETS WRONG.** `test/mount.mjs` evaluates only the region
   between its START and END markers (lines ~394–5746) and mounts the route

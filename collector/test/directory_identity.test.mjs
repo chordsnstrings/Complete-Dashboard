@@ -20,6 +20,7 @@ import { applySchema } from './schema.mjs';
 import express from 'express';
 import { refreshLifetime } from '../src/rollup.js';
 import { driverRoutes } from '../api/driver_routes.js';
+import { clearIdentityLinkCache } from '../api/identity_links.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -122,6 +123,76 @@ check('their work columns stay zero and their channels stay empty',
 const still = books.find((r) => r.driver_ext_id === 'd-now');
 check('a measured fleet still beats a compliance record',
   still.fleet_id === 'ecosine', String(still.fleet_id));
+
+/* ── ONE PERSON, ONE ROW, WHEN THE TWO LAYERS NAME HIM DIFFERENTLY ──────
+   The operator's report: "we fixed double entries but it still showing double
+   names." From #drivers, both Ecosine, both on plate L44251:
+
+     WISAL MUHAMMAD IRSHAD MUHAMMAD   uber + hotel
+     Wisal Muhammad Irshah Muhammad   bolt
+
+   Both layers already agreed he was one man. api/identity_map.js holds the
+   pair in MERGES with contradictions: [], and the live sweep proposed it twice
+   and both are confirmed. What they disagreed about was the KEY: the register
+   keys him on the UBER record's short filed name, the link chain terminates on
+   the HOTEL record and keys him on its long one. driver_routes.js resolved
+   that per id, first-wins — so the single id the register named stopped there
+   and the other three fell through to the chain.
+
+   Measured against production's own link table: 37 people, every one the same
+   shape, a short filed name against a long one.
+
+   The fixture below is that shape exactly, built out of a live link rather
+   than the register — the register is a fixed list this test must not edit,
+   and the defect is about the two layers disagreeing, not about which one. */
+/* THE FIXTURE USES A REAL REGISTER ID, and it has to.
+   ───────────────────────────────────────────────────────────────────────
+   The defect needs the register to name SOME of a person's ids and not
+   others. api/identity_map.js is a fixed, hand-reviewed list that a test
+   must never edit, so invented ids reproduce nothing — the register knows
+   none of them, every id falls through to the link chain, they agree, and
+   the fixture passes against the unfixed code. That is exactly what the
+   first version of this block did.
+
+   So the Uber leg below IS a register id — 7fc8da91… keyed 'aliyan khalil'
+   — and the link chain around it terminates on a record filed under a
+   LONGER name. The register says 'aliyan khalil'; the chain says 'aliyan
+   khalil rafiq khalil'; and the shipped first-wins-per-id resolution put
+   them in two rows. */
+const REG_ID = '7fc8da91fc4a44c185e8d6d918db3e6b';   // ALIAS_KEY -> 'aliyan khalil'
+await trip(REG_ID, 'Aliyan khalil', 'ecosine', 'yango', 'L99001', '2026-08-21T09:00:00+04');
+await trip('sp-bolt', 'Aliyan Khalil Rafiq Khalil', 'ecosine', 'bolt', 'L99001', '2026-08-22T09:00:00+04');
+await trip('sp-hotel', 'Aliyan Khalil Rafiq Khalil', 'ecosine', 'hotel', 'L99001', '2026-08-23T09:00:00+04');
+/* REG_ID → sp-bolt → sp-hotel. The chain terminates on the hotel record and
+   keys the person on ITS longer name, while the register names only REG_ID
+   and keys him on his short one. */
+await q(`INSERT INTO driver_identity_link
+   (alias_ext_id, alias_platform, alias_name, canonical_ext_id, canonical_platform,
+    canonical_name, canonical_key, basis, evidence, confirmed_at, confirmed_by)
+   VALUES ($1,'yango','Aliyan khalil','sp-bolt','bolt','Aliyan Khalil Rafiq Khalil',
+           'aliyan khalil rafiq khalil','shared_car_name','same car, spelling apart',
+           now(),'ahsan'),
+          ('sp-bolt','bolt','Aliyan Khalil Rafiq Khalil','sp-hotel','hotel',
+           'Aliyan Khalil Rafiq Khalil','aliyan khalil rafiq khalil','shared_car_name',
+           'same car, same name', now(),'ahsan')`, [REG_ID]);
+clearIdentityLinkCache();
+
+const folded = await get('/api/drivers/directory?from=2026-08-20&to=2026-08-26');
+const one = folded.filter((r) => (r.ids || []).some(
+  (i2) => i2 === REG_ID || String(i2).startsWith('sp-')));
+check('a person the register and the link chain key DIFFERENTLY is one row',
+  one.length === 1,
+  `${one.length} rows: ${JSON.stringify(one.map((r) => [r.driver_name, r.ids]))}`);
+check('and that row holds every one of his accounts',
+  one.length === 1 && [REG_ID, 'sp-bolt', 'sp-hotel'].every((i2) => (one[0].ids || []).includes(i2)),
+  JSON.stringify(one[0] && one[0].ids));
+check('his trips are summed across them rather than split in two',
+  one.length === 1 && one[0].trips === 3, String(one[0] && one[0].trips));
+/* THE KEY KEPT IS THE REGISTER'S — the person who looked decides the label,
+   over the whole person rather than over the one id they happened to name. */
+check('folded under the key a human chose, not the chain\'s terminal',
+  one.length === 1 && /aliyan khalil/i.test(one[0].driver_name || ''),
+  JSON.stringify(one[0] && one[0].driver_name));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 server.close();

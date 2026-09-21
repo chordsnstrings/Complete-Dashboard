@@ -149,9 +149,16 @@ console.log('\na driver who has a record');
   /* ONE PERSON'S ENTRIES, NOT THE FLEET'S. */
   const names = await page.$$eval('[data-panel="driver-money-register"] tbody tr',
     (rows) => rows.map((r) => r.textContent));
-  check('the register carries only this driver\'s entries',
-    names.length === 2 && !names.some((t) => /Selim/.test(t)),
+  /* THE CLAIM IS "NOBODY ELSE'S", NOT "EXACTLY TWO". The first version
+     asserted a row count, which is a fact about the fixture rather than about
+     the page — adding a charging advance to the mock turned it red while the
+     page was still perfectly correct. What must hold is that no row belongs to
+     another person, and that every row belongs to this one. */
+  check('the register carries only this driver\'s entries, and nobody else\'s',
+    names.length > 0 && !names.some((t) => /Selim|Siyad|Nadia|Rashid/.test(t)),
     `${names.length}: ${JSON.stringify(names.map((t) => t.slice(0, 40)))}`);
+  check('and every one of them is an entry, not an empty row',
+    names.every((t) => /AED/.test(t)), JSON.stringify(names.map((t) => t.slice(0, 30))));
   check('a repayment reads as money coming back, by its sign',
     /-1,000\.00|−1,000\.00/.test(names.join(' ')), names.join(' ').slice(0, 200));
 

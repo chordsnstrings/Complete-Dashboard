@@ -50,6 +50,11 @@ import { IDENTITY_DOCS, stripIdentity, withheldNote, withPhotos, photoHref } fro
    where a record with no work in the window has no stored key to fold on. */
 import { canonicalName, mergedIds, mergedNames, mergedPlatforms, ALIAS_KEY,
   personOf } from './identity_map.js';
+/* The one place the register and the live link table are reconciled into a
+   single key per person. See the head of that file: the two layers agreed who
+   somebody was and disagreed what to call them, and 38 people rendered twice
+   because the disagreement was resolved one id at a time. */
+import { keyResolver } from './fold_key.js';
 /* The links a roster proved rather than a person checked: two records, two
    channels, one phone number. Consulted AFTER the register, so a human's
    decision always wins — see api/identity_links.js. */
@@ -782,6 +787,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        thirty-second cache, and a per-row await would make the directory's cost
        depend on how many people the fleet has. */
     const links = await identityLinks(q);
+    /* Built once for the whole directory rather than per row: it walks each
+       component once, and there are 201 of them against 384 rows. */
+    const resolveKey = keyResolver(links, linkedKey);
     const byName = new Map();
     for (const r of rows) {
       /* The register first, then the stored fold, then the name.
@@ -807,13 +815,31 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          "Muhammad Khalid" on Uber, one phone number, 4,461 Uber trips reported
          under a row that showed 822. */
       const own = r.person_key || canonName(r.driver_name);
-      const k = ALIAS_KEY.get(r.driver_ext_id)
+      /* OVER THE WHOLE COMPONENT, not one id at a time.
+         ─────────────────────────────────────────────────────────────────
+         This was `ALIAS_KEY.get(id) || linkedKey(links, id) || …`, resolved
+         per id and first-wins. The argument above for that ORDER is right and
+         is unchanged; what was wrong was the SCOPE. The register names some of
+         a person's ids and the link chain names the rest, and the two key the
+         same person differently — the register on whichever record it was
+         written against, the chain on its terminal. So the ids the register
+         named folded one way, the ids it did not folded another, and one human
+         rendered as two rows.
+
+         Measured on production 2026-09-21: 38 people, every one the same shape
+         — a short filed name against a long one. api/fold_key.js carries the
+         reasoning and the property that makes it safe: it merges nobody new,
+         because the component is built only from edges a human-reviewed
+         decision already asserts. */
+      const k = resolveKey(
+        ALIAS_KEY.get(r.driver_ext_id)
         || linkedKey(links, r.driver_ext_id)
         /* …and the third record, which no link names because Bolt files no
            phone. It reaches the person through the name it shares with the
            alias — see byName in api/identity_links.js. */
         || linkedByName(links, own)
-        || own;
+        || own,
+      );
       const cur = byName.get(k);
       if (!cur) {
         byName.set(k, { ...r, ids: [r.driver_ext_id], platforms: [...(r.platforms || [])],
