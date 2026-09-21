@@ -443,8 +443,166 @@ app.get('/api/compliance/vehicles', (_, r) => {
     fleet: null,
     shown: rows.length, truncated: true });
 });
+/* THE ROSTER'S PLATFORM ACCOUNTS — one entry per driver_compliance record.
+   ─────────────────────────────────────────────────────────────────────────
+   Lifted out of the route body so the PERSON rows below can be built from the
+   very same objects. /api/compliance/drivers returns both populations now —
+   `drivers` is accounts, `people` is humans — and a fixture that wrote the two
+   out by hand would be free to disagree with itself about which record belongs
+   to whom, which is precisely the class of defect the endpoint was changed to
+   fix. Here the accounts ARE the accounts inside the people. */
+const COMPLIANCE_ACCOUNTS = [
+  // Six rows carrying the identical placeholder the source writes when the
+  // field was never filled in, plus two real dates.
+  ...Array.from({ length: 6 }, (_, i) => ({ platform: 'hotel', driver_ext_id: `d${10 + i}`,
+    full_name: drivers[i], phone: '+9715000000', licence_no: '123456', fleet_id: 'ecosine',
+    /* The number is a default too, and on production every one of the 94
+       licence numbers on this roster is this identical string. The date was
+       marked and the number was printed as though somebody could check it. */
+    licence_no_placeholder: true,
+    /* Contact details, which only the Uber supplier portal and the hotel
+       channel carry. Two of the six have no picture and one no email, so the
+       absent case renders as well as the present one. */
+    email: i === 4 ? null : `${String(drivers[i]).toLowerCase().replace(/[^a-z]+/g, '.')}@example.com`,
+    picture_url: i > 3 ? null : `https://d1w2poirtb3as9.cloudfront.net/mock-${i}.jpg`,
+    /* The one government identity number this fleet holds. Only the hotel
+       channel reports it, so the bolt row below has none and one hotel row
+       is left blank too — a channel that answers for most of its people can
+       still miss one, and the column must render both. */
+    emirates_id: i === 3 ? null : `784-198${i}-${1000000 + i * 137}-${i % 10}`,
+    licence_expires: '2026-01-01', days_left: -232, state: 'active',
+    /* Not expired — never entered. The directory counted all 77 of these into
+       "77 with an expired licence" and painted red pills, while this endpoint
+       reported expired: 0 about the same people. */
+    licence_placeholder: true,
+    suspension_reason: null, rating: 4.8 - i * 0.05,
+    /* Whether the expiry matters. Three shapes, because the column renders
+       three: somebody who drove this week, somebody idle for months, and
+       somebody who has never driven at all. The middle one is matched by
+       NAME rather than by platform id, which is how most of these rows
+       resolve on production. */
+    last_ever: i === 5 ? null : new Date(Date.now() - (i === 0 ? 2 : 40 + i * 30) * 864e5).toISOString(),
+    lifetime_trips: i === 5 ? 0 : 1400 - i * 120,
+    days_since_last_trip: i === 5 ? null : (i === 0 ? 2 : 40 + i * 30),
+    activity_by_name: i === 1 || i === 2,
+    /* WHICH documents this row's record holds — never what they are. The
+       real endpoint counts this before redaction drops the values, so the
+       page can print "withheld" only about a document that exists; without
+       it the roster said "withheld" in every cell, including for the people
+       no channel has ever filed a number for. One of these six has no
+       Emirates ID, so both branches render. */
+    identity_held: i === 3 ? ['licence_no'] : ['licence_no', 'emirates_id'],
+    // A licence expiring is a CAR that stops earning. The row names it.
+    vehicle: { plate: plates[i % plates.length], day: '2026-08-21' } })),
+  { platform: 'bolt', driver_ext_id: 'd2', full_name: 'Abdelmohsen Said', phone: '+9715000001',
+    email: null, picture_url: null,
+    /* Bolt files no compliance record at all upstream, so this is null and
+       the dash must read as a fact about the channel. */
+    emirates_id: null,
+    /* Bolt files no identity number, so this row holds only the licence. */
+    identity_held: ['licence_no'],
+    licence_no: 'AE1802580', licence_no_placeholder: false,
+    licence_expires: '2026-09-20', days_left: 30, state: 'suspended',
+    fleet_id: 'egari', licence_placeholder: false,
+    suspension_reason: 'documents under review', rating: 4.71,
+    vehicle: { plate: plates[2], day: '2026-08-19' } },
+  { platform: 'hotel', driver_ext_id: 'd3', full_name: 'Aliyan Khalil', phone: null,
+    email: null, picture_url: null,
+    emirates_id: '784-1990-7766554-2',
+    licence_no: 'AE9911', licence_no_placeholder: false,
+    licence_expires: '2026-08-01', days_left: -20, state: 'active',
+    fleet_id: 'ecosine', licence_placeholder: false,
+    suspension_reason: null, rating: null,
+    // Nobody has held this person's car in the window we have custody for.
+    vehicle: null },
+];
+/* ── and the same records grouped into PEOPLE ───────────────────────────
+   Measured on production 2026-09-21: 810 platform accounts belong to ~349
+   people, and this endpoint was answering 437 rows under a banner reading
+   "140 drivers cannot legally work". The page counts people now, so the
+   fixture has to carry them — and has to carry the cases the page renders
+   differently, which a roster of one-account people would not:
+
+     · six people whose only record carries the source's default date, so the
+       person is "cannot be checked" and NOT expired — the distinction the
+       whole page rests on;
+     · one person holding TWO records, filed under different names on
+       different channels, which is the normal shape of a merge here; and
+     · that person's two records DISAGREEING about the licence number and the
+       expiry date, which is either a filing error or evidence the merge is
+       wrong. The real route compares those values server-side and reports
+       only that they differ, so the fixture carries no values either. */
+const acct = (id) => COMPLIANCE_ACCOUNTS.find((a) => a.driver_ext_id === id);
+const soloPerson = (id, personId) => {
+  const a = acct(id);
+  return {
+    person_id: personId, name: a.full_name, driver_ext_id: a.driver_ext_id,
+    platform: a.platform, person_placed: true,
+    accounts: [a], account_count: 1, platforms: [a.platform], fleets: [a.fleet_id],
+    phone: a.phone, email: a.email, picture_url: a.picture_url,
+    /* A placeholder date is not an expiry, so the person it belongs to is
+       unanswerable rather than 232 days lapsed. The reason is the true one and
+       the page prints it on the row. */
+    licence_status: a.licence_placeholder ? 'unknown' : (a.days_left < 0 ? 'expired'
+      : a.days_left <= 45 ? 'expiring' : 'valid'),
+    days_left: a.licence_placeholder ? null : a.days_left,
+    licence_expires: a.licence_placeholder ? null : String(a.licence_expires).slice(0, 10),
+    soonest_account: a.licence_placeholder ? null
+      : { platform: a.platform, driver_ext_id: a.driver_ext_id },
+    licence_unknown_reason: a.licence_placeholder
+      ? 'every licence date on this person\u2019s records is the value this source writes when '
+        + 'the field was never filled in, so none of them is an expiry'
+      : null,
+    placeholder_accounts: a.licence_placeholder ? 1 : 0,
+    no_date_accounts: a.licence_expires == null ? 1 : 0,
+    dated_accounts: a.licence_placeholder || a.licence_expires == null ? 0 : 1,
+    conflicts: [], conflict_fields: [],
+    vehicle: a.vehicle, state: a.state, suspension_reason: a.suspension_reason,
+    last_ever: a.last_ever, lifetime_trips: a.lifetime_trips,
+    days_since_last_trip: a.days_since_last_trip, activity_by_name: a.activity_by_name,
+  };
+};
+const COMPLIANCE_PEOPLE = [
+  /* The person whose two records disagree. d3 expired twenty days ago and d2
+     has thirty days left, so the PERSON row is headed by d3 — one lapsed
+     licence stands a person down whichever record carries it. The two records
+     are filed under different names on different channels, which is what a
+     real merge on this fleet looks like. */
+  {
+    person_id: 41, name: 'Abdelmohsen Said', driver_ext_id: 'd2', platform: 'bolt',
+    person_placed: true,
+    accounts: [acct('d2'), acct('d3')], account_count: 2, platforms: ['bolt', 'hotel'],
+    fleets: ['ecosine', 'egari'],
+    phone: acct('d2').phone, email: acct('d2').email, picture_url: null,
+    licence_status: 'expired', days_left: -20, licence_expires: '2026-08-01',
+    soonest_account: { platform: 'hotel', driver_ext_id: 'd3' },
+    licence_unknown_reason: null,
+    placeholder_accounts: 0, no_date_accounts: 0, dated_accounts: 2,
+    /* NAMED, NEVER QUOTED. The real route compares the withheld values on the
+       server and emits the count of distinct ones and which records carry
+       them; the numbers themselves never leave, for an administrator either. */
+    conflicts: [
+      { field: 'licence_no', distinct: 2, not_compared: 0,
+        accounts: [{ platform: 'bolt', driver_ext_id: 'd2' },
+          { platform: 'hotel', driver_ext_id: 'd3' }] },
+      { field: 'licence_expires', distinct: 2, not_compared: 0,
+        accounts: [{ platform: 'bolt', driver_ext_id: 'd2' },
+          { platform: 'hotel', driver_ext_id: 'd3' }] },
+    ],
+    conflict_fields: ['licence_no', 'licence_expires'],
+    vehicle: acct('d2').vehicle, state: 'suspended',
+    suspension_reason: 'documents under review',
+    last_ever: null, lifetime_trips: null, days_since_last_trip: null, activity_by_name: false,
+  },
+  ...Array.from({ length: 6 }, (_, i) => soloPerson(`d${10 + i}`, 50 + i)),
+];
 app.get('/api/compliance/drivers', (_, r) => r.json({
-  totals: { total: 148, with_date: 96, expired: 2, within_45: 5, no_date_at_all: 52,
+  /* RECORDS. Deliberately NOT equal to the person counts below: three expired
+     licence RECORDS over two people is the whole shape of the defect this
+     endpoint was changed for, and a fixture where the two numbers happen to
+     match would let a page that had gone back to counting rows render
+     correctly against it. */
+  totals: { total: 148, with_date: 96, expired: 3, within_45: 5, no_date_at_all: 52,
     with_emirates_id: 6, with_number: 8, placeholder_numbers: 6, real_numbers: 2 },
   /* Empty ON PURPOSE, and the rows below therefore keep their numbers. The
      mock is what the browser smoke test renders, and the interesting cases in
@@ -459,71 +617,25 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
   identity_withheld: [],
   identity_withheld_reason: null,
   shown: 8, truncated: false,
-  drivers: [
-    // Six rows carrying the identical placeholder the source writes when the
-    // field was never filled in, plus two real dates.
-    ...Array.from({ length: 6 }, (_, i) => ({ platform: 'hotel', driver_ext_id: `d${10 + i}`,
-      full_name: drivers[i], phone: '+9715000000', licence_no: '123456', fleet_id: 'ecosine',
-      /* The number is a default too, and on production every one of the 94
-         licence numbers on this roster is this identical string. The date was
-         marked and the number was printed as though somebody could check it. */
-      licence_no_placeholder: true,
-      /* Contact details, which only the Uber supplier portal and the hotel
-         channel carry. Two of the six have no picture and one no email, so the
-         absent case renders as well as the present one. */
-      email: i === 4 ? null : `${String(drivers[i]).toLowerCase().replace(/[^a-z]+/g, '.')}@example.com`,
-      picture_url: i > 3 ? null : `https://d1w2poirtb3as9.cloudfront.net/mock-${i}.jpg`,
-      /* The one government identity number this fleet holds. Only the hotel
-         channel reports it, so the bolt row below has none and one hotel row
-         is left blank too — a channel that answers for most of its people can
-         still miss one, and the column must render both. */
-      emirates_id: i === 3 ? null : `784-198${i}-${1000000 + i * 137}-${i % 10}`,
-      licence_expires: '2026-01-01', days_left: -232, state: 'active',
-      /* Not expired — never entered. The directory counted all 77 of these into
-         "77 with an expired licence" and painted red pills, while this endpoint
-         reported expired: 0 about the same people. */
-      licence_placeholder: true,
-      suspension_reason: null, rating: 4.8 - i * 0.05,
-      /* Whether the expiry matters. Three shapes, because the column renders
-         three: somebody who drove this week, somebody idle for months, and
-         somebody who has never driven at all. The middle one is matched by
-         NAME rather than by platform id, which is how most of these rows
-         resolve on production. */
-      last_ever: i === 5 ? null : new Date(Date.now() - (i === 0 ? 2 : 40 + i * 30) * 864e5).toISOString(),
-      lifetime_trips: i === 5 ? 0 : 1400 - i * 120,
-      days_since_last_trip: i === 5 ? null : (i === 0 ? 2 : 40 + i * 30),
-      activity_by_name: i === 1 || i === 2,
-      /* WHICH documents this row's record holds — never what they are. The
-         real endpoint counts this before redaction drops the values, so the
-         page can print "withheld" only about a document that exists; without
-         it the roster said "withheld" in every cell, including for the people
-         no channel has ever filed a number for. One of these six has no
-         Emirates ID, so both branches render. */
-      identity_held: i === 3 ? ['licence_no'] : ['licence_no', 'emirates_id'],
-      // A licence expiring is a CAR that stops earning. The row names it.
-      vehicle: { plate: plates[i % plates.length], day: '2026-08-21' } })),
-    { platform: 'bolt', driver_ext_id: 'd2', full_name: 'Abdelmohsen Said', phone: '+9715000001',
-      email: null, picture_url: null,
-      /* Bolt files no compliance record at all upstream, so this is null and
-         the dash must read as a fact about the channel. */
-      emirates_id: null,
-      /* Bolt files no identity number, so this row holds only the licence. */
-      identity_held: ['licence_no'],
-      licence_no: 'AE1802580', licence_no_placeholder: false,
-      licence_expires: '2026-09-20', days_left: 30, state: 'suspended',
-      fleet_id: 'egari', licence_placeholder: false,
-      suspension_reason: 'documents under review', rating: 4.71,
-      vehicle: { plate: plates[2], day: '2026-08-19' } },
-    { platform: 'hotel', driver_ext_id: 'd3', full_name: 'Aliyan Khalil', phone: null,
-      email: null, picture_url: null,
-      emirates_id: '784-1990-7766554-2',
-      licence_no: 'AE9911', licence_no_placeholder: false,
-      licence_expires: '2026-08-01', days_left: -20, state: 'active',
-      fleet_id: 'ecosine', licence_placeholder: false,
-      suspension_reason: null, rating: null,
-      // Nobody has held this person's car in the window we have custody for.
-      vehicle: null },
-  ],
+  drivers: COMPLIANCE_ACCOUNTS,
+  /* ONE ROW PER HUMAN, each carrying its records’ documents within it. */
+  people: COMPLIANCE_PEOPLE,
+  /* Counted over the whole roster, not over the seven rows above — the same
+     relationship `totals` has to `drivers`, and the page says so under the table. */
+  people_totals: { total: 129, placed: 129, unplaced_accounts: 0,
+    expired: 2, expiring_45: 5, valid: 70, unknown: 52,
+    placeholder_only: 6, no_date_at_all: 46,
+    with_conflicts: 3, multi_account: 14, accounts: 148 },
+  person_basis: 'spine',
+  person_basis_note: 'One row per person, from the reviewed person spine — the same table the '
+    + 'driver directory, the money ledger and every other surface in this product count.',
+  /* The spine’s own totals, measured on production 2026-09-21. The roster is
+     smaller than the fleet: not every account has a compliance record. */
+  spine_counts: { people: 349, accounts: 810 },
+  counts: { people: 129, accounts_on_this_roster: 148, accounts_on_the_spine: 810,
+    note: 'people counts human beings from the reviewed person spine; '
+      + 'accounts_on_this_roster counts driver_compliance records, which is what this page '
+      + 'used to report as a driver count.' },
   fleet: null, placeholder_date: '2026-01-01', placeholder_rows: 6, rows_with_a_date: 8,
   placeholder_licence_no: '123456', placeholder_number_rows: 6, distinct_licence_numbers: 3,
   licence_no_caveat: 'Every one of the 6 licence numbers on this roster is the identical string '
@@ -562,6 +674,48 @@ const dubaiClockOf = (d) => d.toLocaleTimeString('en-GB',
   { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit', hour12: false });
 const driverIds = drivers.map((_, i) => `drv-${i}`);
 const idIndex = (id) => Math.max(0, driverIds.indexOf(id));
+
+/* ── THE PERSON SPINE, AS A FIXTURE ──────────────────────────────────────
+   src/persons.js materialises one `driver` row per human and one
+   `driver_platform_id` row per account they hold, and api/person_map.js reads
+   it. /api/driver/profile answers by PERSON id as well as by account id, and
+   #driver/p401 is the address the product now hands a reader.
+
+   Three states are reachable from here on purpose, because the page renders a
+   different sentence for each and a fixture that only carried the happy one
+   would let two of the three rot:
+
+     drv-0 … drv-7   placed, and drv-0/3/6 hold a second account on Yango, so
+                     the header has more than one account to list with the
+                     platform each is on.
+     drv-idle        placed, and the account is the only one the person holds.
+     drv-new         NOT placed. The spine joins accounts from reviewed
+                     decisions only, so an account nobody has reviewed keeps
+                     its provider address — and the card has to say so rather
+                     than leaving the line blank. */
+const PERSON_OF = new Map(driverIds.map((id, i) => [id, 401 + i]));
+PERSON_OF.set('drv-idle', 409);
+const EXT_OF_PERSON = new Map([...PERSON_OF].map(([ext, pid]) => [pid, ext]));
+/* Every account one person holds, with the platform each is on and the basis
+   that joined it — the four fields api/person_map.js puts on `accounts`. */
+const personAccountsOf = (ext) => {
+  const i = idIndex(ext);
+  const first = { platform: 'uber', ext_id: ext, basis: 'account', display_name: drivers[i] };
+  return driverIds.includes(ext) && i % 3 === 0
+    ? [first, { platform: 'yango', ext_id: `y-${i}`, basis: 'link:shared_phone',
+      display_name: drivers[i] }]
+    : [first];
+};
+/* The words the real route uses for an account the register has not placed.
+   Kept verbatim rather than paraphrased: test/person_address.test.mjs reads
+   the rendered page for the distinction between "not reviewed yet" and "could
+   not be read", and a fixture that invented a milder sentence would certify a
+   page that never says which state it is in. */
+const NOT_PLACED = 'The person register has not placed this account on anybody yet. Accounts are '
+  + 'joined to a person from reviewed decisions only — a name that looks like another '
+  + 'name joins nothing — so an account nobody has reviewed keeps its provider '
+  + 'address. Everything below is this account and whatever the name fold already '
+  + 'joins to it, which is what this page has always shown.';
 
 const dailyFor = (id) => {
   const seed = idIndex(id);
@@ -906,13 +1060,34 @@ app.get('/api/drivers/directory', (_, r) => r.json([
 ]));
 
 app.get('/api/driver/profile', (req, r) => {
-  const i = idIndex(req.query.id);
-  r.json({
-    id: req.query.id, name: drivers[i], ids: [req.query.id],
+  /* BY PERSON OR BY ACCOUNT, and the response says which. `?person=` takes the
+     bare id and tolerates the `p` the address spells it with; `?id=` is a
+     provider account, exactly as before. Resolving the person to their
+     canonical account and then answering over that account is what makes the
+     two addresses the same page — see api/driver_routes.js. */
+  const askedPerson = String(req.query.person ?? '').trim();
+  const byPerson = askedPerson ? Number(askedPerson.replace(/^p/i, '')) : null;
+  if (byPerson != null && !EXT_OF_PERSON.has(byPerson)) {
+    return r.status(404).json({ error: 'driver not found' });
+  }
+  const ext = byPerson != null ? EXT_OF_PERSON.get(byPerson) : req.query.id;
+  const i = idIndex(ext);
+  const pid = PERSON_OF.get(ext) ?? null;
+  return r.json({
+    id: ext, name: drivers[i], ids: [ext],
+    /* Which parameter answered, so a reader — or a test — can tell a page
+       reached by its stable address from one reached by an account that
+       happens to represent the person today. */
+    resolved_by: byPerson != null ? 'person_id' : 'ext_id',
+    person_id: pid,
+    person_name: pid != null ? drivers[i] : null,
+    person_accounts: pid != null
+      ? personAccountsOf(ext).map((a) => ({ ...a, asked: a.ext_id === ext })) : [],
+    person_absent_reason: pid != null ? null : NOT_PLACED,
     /* `ids` is the ACCOUNTS this person holds — what a reader is shown. `keys`
        is the superset their rows can be matched by, which includes the
        synthesised name key for the channels that name them without an id. */
-    keys: [req.query.id, `name:${drivers[i].toLowerCase()}`],
+    keys: [ext, `name:${drivers[i].toLowerCase()}`],
     /* The admin shape, for the same reason /api/compliance/drivers serves it:
        the smoke run needs a card that renders a licence number and an Emirates
        ID. Nothing withheld, so `compliance` below keeps both — the pair has to
@@ -924,7 +1099,7 @@ app.get('/api/driver/profile', (req, r) => {
     platforms: i % 3 === 0 ? ['uber', 'yango'] : ['uber'],
     span: { first_trip: dayISO(DAYS), last_trip: new Date().toISOString(), trips: 420 - i * 37,
       days_worked: 26 - i, vehicles: 2, fleet_id: i % 3 ? 'ecosine' : 'egari' },
-    compliance: [{ platform: 'hotel', driver_ext_id: req.query.id, full_name: drivers[i],
+    compliance: [{ platform: 'hotel', driver_ext_id: ext, full_name: drivers[i],
       phone: '+9715012345' + i, emirates_id: '784-1990-000000' + i, licence_no: 'AE18025' + i,
       /* From the Uber supplier portal. There is no postal address on that
          surface — every spelling is named absent — so the panel has a phone,
@@ -942,7 +1117,7 @@ app.get('/api/driver/profile', (req, r) => {
       { plate: plates[(i + 3) % plates.length], days: 5, trips: 42, km: 610, revenue: 1800,
         first_day: dayISO(18), last_day: dayISO(12), ever_primary: false },
     ],
-    accounts: [{ platform: 'uber', driver_ext_id: req.query.id, trips: 380, first_trip: dayISO(DAYS), last_trip: dayISO(0) },
+    accounts: [{ platform: 'uber', driver_ext_id: ext, trips: 380, first_trip: dayISO(DAYS), last_trip: dayISO(0) },
       ...(i % 3 === 0 ? [{ platform: 'yango', driver_ext_id: `y-${i}`, trips: 40, first_trip: dayISO(20), last_trip: dayISO(1) }] : [])],
     /* What each platform says about this person's standing. The route never
        touched driver_platform_state, so a suspended driver's own page could

@@ -140,7 +140,22 @@ check('breadcrumb element exists', /id="crumb"/.test(htmlTxt));
   check('no view calls a shared helper it has shadowed with a local of the same name',
     misuse.length === 0, `shadowed: ${shadowed.join(', ')} | called anyway: ${misuse.join(', ')}`);
 }
-check('every driver tab is a real route', /href\('driver', id, t === 'overview' \? null : t\)/.test(driverJs));
+/* THE TAB BAR'S ADDRESS, PINNED ON THE CALL AND NOT ON A VARIABLE NAME.
+   ─────────────────────────────────────────────────────────────────────────
+   This read `href('driver', id, …)` literally, and went red the day the driver
+   page stopped being addressed by a provider account: renderDriver now keeps
+   two ids apart on purpose — `id` is the account every tab ENDPOINT is asked
+   about, `canon` is what the page LINKS by (`#driver/p412` where the spine has
+   placed the account, the account id where it has not). The rule this
+   assertion exists for is unchanged — every tab is a real, linkable address —
+   so it is written against the shape of the call. The second check is the new
+   fact, and it is the one worth holding: a reader who arrives on an old
+   account link and clicks a tab must leave with the stable address.
+   test/person_address.test.mjs proves it end to end. */
+check('every driver tab is a real route',
+  /href\('driver', \w+, t === 'overview' \? null : t\)/.test(driverJs));
+check('\u2026and the tab bar links by the page\u2019s canonical address, not the account id',
+  /tabBar\(DRIVER_TABS, tab, \(t\) => href\('driver', canon,/.test(driverJs));
 check('all six driver tabs registered', ['overview', 'activity', 'territory', 'earnings', 'quality', 'trips']
   .every((t) => new RegExp(`id: '${t}'`).test(driverJs)), 'DRIVER_TABS');
 // Detail pages must ignore the platform/fleet filter: showing "everything about

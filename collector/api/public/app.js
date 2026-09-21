@@ -4515,10 +4515,40 @@ V.compliance = async (root) => {
   const withheldWhy = drvPage.identity_withheld_reason
     || 'withheld from an unauthenticated response';
   const dt = drvPage.totals || {};
-  const dExpired = dt.expired ?? drv.filter((r) => r.licence_expires
-    && String(r.licence_expires).slice(0, 10) !== placeholder && dl(r) < 0).length;
+  /* ── PEOPLE, NOT RECORDS ────────────────────────────────────────────────
+     ═════════════════════════════════════════════════════════════════════
+     THE DEFECT. Every driver figure on this page was a count of
+     driver_compliance ROWS. Measured on production 2026-09-21,
+     /api/compliance/drivers returned 437 of them over 810 platform accounts
+     belonging to ~349 people, and this page put "140 drivers cannot legally
+     work — the licence has expired" above them. A man with a hotel record and
+     an Uber record was two of that 140; every other surface in this product
+     had by then moved onto the person spine, so this page — the one printing
+     the most consequential sentence the product has — was the last one
+     disagreeing with all of them.
+
+     `people` is one row per human, carrying each of their accounts' documents
+     within it, and `people_totals` counts humans. The account-level `totals`
+     are still read, but only where the subject really is a RECORD: how many
+     records carry a date at all, how many carry the source's default. The two
+     are never mixed in one sentence, and every tile built from `people_totals`
+     says "people" in as many words. */
+  const ppl = drvPage.people || [];
+  const pt = drvPage.people_totals || {};
+  /* WHAT THE COUNT IS A COUNT OF. The API answers this in four states and the
+     page must not paper over three of them — an empty spine would otherwise
+     put one row per ACCOUNT under a heading saying "people", which is the
+     exact defect being fixed, wearing the new label. */
+  const basis = drvPage.person_basis || null;
+  const byPerson = basis === 'spine' || basis === 'spine-partial';
+  const dExpired = pt.expired ?? 0;
+  /* Records, not people: these two describe the state of the PAPERWORK, and
+     the roster has more records than it has drivers. */
   const dPlaceholder = drvPage.placeholder_rows || 0;
   const dNoDate = dt.no_date_at_all || 0;
+  /* The people the paperwork cannot answer for, as against the records. */
+  const pUnknown = pt.unknown ?? 0;
+  const pConflict = pt.with_conflicts ?? 0;
 
   /* Compliance is the one page where the data is unambiguous — a date, and a
      vehicle either legal or not — and it opened on eight tiles with no ranking
@@ -4530,12 +4560,23 @@ V.compliance = async (root) => {
     let claim, figure, unit, tone = null, recommend = null;
     if (vExpired || dExpired) {
       tone = 'bad';
+      /* "N driver licences have expired" counted RECORDS and read as people.
+         It is a count of human beings now, and the noun says so — a driver
+         holding a hotel record and an Uber record is one person to stand
+         down, not two. */
       const bits = [vExpired ? `${countOf(vExpired, 'vehicle document')}` : '',
-        dExpired ? `${countOf(dExpired, 'driver licence')}` : ''].filter(Boolean).join(' and ');
+        dExpired ? `${countOf(dExpired, 'driver')} ${dExpired === 1 ? 'has' : 'have'} `
+          + 'a licence that' : ''].filter(Boolean).join(' and ');
       claim = `${bits} ${vExpired + dExpired === 1 ? 'has' : 'have'} already expired`;
       figure = fmt(vExpired + dExpired); unit = 'expired';
       recommend = 'Those cars and those people cannot legally work today. Both tables below are '
-        + 'sorted soonest-first, so they are the rows at the top.';
+        + 'sorted soonest-first, so they are the rows at the top.'
+        /* The distinction the whole change is about, stated where the reader
+           already is: the driver figure is people and the licence figures
+           below it are records, and the two are different numbers. */
+        + (byPerson ? ` The driver figure counts ${countOf(pt.total || 0, 'person')}, not `
+          + `${fmt(drvPage.counts?.accounts_on_this_roster ?? drv.length)} platform records — `
+          + 'one person can hold several.' : '');
     } else if (soon) {
       tone = 'warn';
       claim = `${fmt(soon)} ${plural(soon, 'document')} ${soon === 1 ? 'expires' : 'expire'} within a week`;
@@ -4550,9 +4591,15 @@ V.compliance = async (root) => {
     verdict(vHost, {
       claim, figure, unit, tone, recommend,
       sub: blind
-        ? `${fmt(blind)} ${plural(blind, 'licence')} cannot be checked at all — `
+        ? `${fmt(blind)} ${plural(blind, 'licence record')} cannot be checked at all — `
           + `${fmt(dPlaceholder)} carry the source's default date and ${fmt(dNoDate)} carry no date. `
           + 'They are not counted as expired, because an absent date is not an expiry.'
+          /* And what that is in PEOPLE, which is the unit the claim above is
+             in. A person is only unanswerable when EVERY record they hold is,
+             so the two numbers differ and a reader comparing them needs both. */
+          + (byPerson && pUnknown ? ` ${countOf(pUnknown, 'person')} `
+            + `${pUnknown === 1 ? 'has' : 'have'} no checkable licence date on any record they `
+            + 'hold, so whether they can legally drive cannot be answered from what we have.' : '')
           /* The number, not only the date. A roster where every licence number
              is the same string cannot be checked against anything, and the
              verdict is where a reader looks before the table. */
@@ -4566,21 +4613,58 @@ V.compliance = async (root) => {
     ['Vehicle docs expired', fmt(vExpired), 'cannot legally work', vExpired ? 'err' : 'ok'],
     ['Expiring in 7 days', fmt(vWeek), 'renew now', vWeek ? 'err' : 'ok'],
     ['Expiring in 45 days', fmt(vMonth), 'start the paperwork', vMonth ? 'warn' : 'ok'],
-    ['Driver licences expired', fmt(dExpired),
-      placeholder ? 'excluding the placeholder date' : 'stand down until renewed', dExpired ? 'err' : 'ok'],
+    /* PEOPLE, AND THE LABEL SAYS SO. This tile read "Driver licences expired /
+       stand down until renewed" over a count of driver_compliance rows — 140
+       of them on production 2026-09-21, over ~349 people. A reader took it for
+       a headcount because every word on it invited them to. Both the label and
+       the sub-line now name the unit, and the sub-line carries the record
+       count beside it so the two can never again be read as the same number.
+
+       When the spine could not be read, or has not placed these accounts yet,
+       the figure is NOT a headcount and the tile must not claim to be one —
+       it renders the true unit instead of a number under a false noun. */
+    byPerson
+      ? ['Drivers who cannot legally work', fmt(dExpired),
+        `people — ${countOf(dt.expired ?? 0, 'expired licence record')}`
+          + `${placeholder ? ', excluding the default date' : ''}`,
+        dExpired ? 'err' : 'ok', 'compliance-expired-people']
+      : ['Expired licence records', fmt(dt.expired ?? 0),
+        'records, not people — see the note below', (dt.expired ?? 0) ? 'err' : 'ok',
+        'compliance-expired-records'],
     /* Vehicles get three horizon tiles and drivers got one. A licence expiring
        in six weeks is a car that stops earning in six weeks, and the number
        was in `totals` and shown nowhere. */
-    ...(dt.within_45 != null ? [['Licences expiring in 45 days', fmt(dt.within_45),
-      'start the paperwork', dt.within_45 ? 'warn' : 'ok']] : []),
+    ...(byPerson && pt.expiring_45 != null
+      ? [['Drivers expiring in 45 days', fmt(pt.expiring_45),
+        `people — ${countOf(dt.within_45 ?? 0, 'record')}`, pt.expiring_45 ? 'warn' : 'ok']]
+      : dt.within_45 != null ? [['Licences expiring in 45 days', fmt(dt.within_45),
+        'records, not people', dt.within_45 ? 'warn' : 'ok']] : []),
+    /* TWO ACCOUNTS OF ONE PERSON THAT DISAGREE ABOUT A DOCUMENT. Either the
+       filing is wrong or the merge is, and both are things this page should
+       raise rather than resolve by taking whichever record sorted first. */
+    ...(byPerson && pConflict ? [['Drivers whose records disagree', fmt(pConflict),
+      'a filing error, or a wrong merge', 'warn']] : []),
     ...(dPlaceholder ? [['Licence dates that are a default', fmt(dPlaceholder),
-      'a data problem, not an expiry', 'warn']] : []),
+      'records — a data problem, not an expiry', 'warn']] : []),
     /* The people we hold no expiry date for at all. They were invisible: not
        expired, not expiring, not a placeholder — simply absent from every tile
        on a page whose subject is whether the roster can legally drive. */
     ...(dNoDate ? [['No licence date on file', fmt(dNoDate),
-      'we cannot say whether these are valid', 'warn']] : []),
-  ].map(([l, n, d, cls]) => kpiTile({ label: l, html: n, sub: d, tone: cls || null })).join('');
+      'records we cannot say are valid', 'warn']] : []),
+    /* The fifth element is a handle a test can read the figure off without
+       matching the label, which is prose and has to stay improvable. */
+  ].map(([l, n, d, cls, k]) => kpiTile({ label: l, html: n, sub: d, tone: cls || null, key: k || null })).join('');
+
+  /* WHAT THE HEADCOUNT IS A COUNT OF — printed, always, not only when it is
+     bad news. `person_basis_note` is the API's own sentence and it has four
+     states: a clean spine, a spine that has placed only some of these
+     accounts, a spine holding none of them, and a spine that could not be
+     read at all. The last two mean the figures above are records rather than
+     people, and a page that renders them silently under the new label would
+     ship the same defect wearing a better noun. */
+  if (drvPage.person_basis_note) {
+    root.append(note(drvPage.person_basis_note, byPerson ? null : 'warn'));
+  }
 
   if (drvPage.caveat) root.append(note(drvPage.caveat));
   /* Said once, above the table, so the Emirates ID column's dashes read as a
@@ -4636,170 +4720,240 @@ V.compliance = async (root) => {
     + 'The counts above are over all of them, not over this list. "Last held by" is the most recent '
     + 'custody record we hold, which is not necessarily today — the date beside the name says which.'));
 
-  const dp = panel('Driver licences', placeholder
-    ? `From the platforms that publish an expiry date. Rows carrying ${placeholder} are the source's `
-      + 'default and are marked as such rather than counted as expired.'
-    : 'from the platforms that publish an expiry date');
+  /* ── ONE ROW PER PERSON, THEIR RECORDS' DOCUMENTS WITHIN IT ─────────────
+     ═════════════════════════════════════════════════════════════════════
+     This table was one row per driver_compliance RECORD, and a person holding
+     a hotel record and an Uber record was two rows of it — under tiles that
+     called the row count a count of drivers. It is now one row per human,
+     headed by the SOONEST expiry across everything they hold, because one
+     lapsed licence stands a person down whichever of their records carries
+     it; the records themselves are listed inside the row, each with its own
+     documents, so a reader can still see which record carries which paper.
+
+     The per-record document cells below are the SAME renderers the old
+     per-record table used, moved rather than rewritten: each of them carries
+     a finding about telling "never sent" from "not shown" apart, and a
+     re-implementation would have been a second place for that to go wrong. */
+
+  /* Two absences, and the second one used to print as a licence.
+     ─────────────────────────────────────────────────────────────────────
+     An em-dash with nothing behind it read as a licence nobody had filed; the
+     number comes from the same record as the expiry, so a blank is the fact
+     the Expires cell is already stating. And on production every one of the 94
+     numbers on this roster is the identical string "123456" — one distinct
+     value across all of them, the same 94 records whose expiry is this
+     source's 2026-01-01 default. The date was marked and the number was
+     printed as though somebody could check it.
+
+     Withheld before absent, because a withheld column is empty for EVERYBODY
+     and would otherwise read as a roster with no licences filed — the
+     strongest possible version of the wrong story. BUT ONLY FOR A RECORD THAT
+     HAS ONE: identity_withheld names the COLUMN and the column is removed for
+     every row, so this branch once printed "withheld" in all 289 cells,
+     telling a reader that this product is holding back a licence number for
+     the 195 people no channel has ever filed one for. identity_held is
+     counted per record on the server before the values are dropped, so it says
+     what the record holds and never what it is. */
+  const licenceCell = (a) => {
+    const held = new Set(a.identity_held || []);
+    const notFilled = '<span class="tag dim" title="every licence number on this roster is this '
+      + 'same string — the source’s own default, written when the field was never filled '
+      + 'in">not filled in</span>';
+    if (withheld.has('licence_no') && held.has('licence_no')) {
+      return a.licence_no_placeholder ? notFilled
+        : `<span class="tag dim" title="${esc(withheldWhy)}">withheld</span>`;
+    }
+    if (!a.licence_no) {
+      return '<span class="ent-off" title="this channel publishes no licence number">—</span>';
+    }
+    return a.licence_no_placeholder ? notFilled : `<span class="plate">${esc(a.licence_no)}</span>`;
+  };
+  /* The one government identity number this fleet holds. A blank is a fact
+     about the CHANNEL, not the person: the hotel channel is the only one that
+     reports an identity number at all. Uber names emiratesId, nationalId,
+     passportNumber and licenseNumber absent on every type it exposes — probed
+     2026-09-04 — and Bolt files no compliance record. Withheld only for a
+     record that HAS one, for the same reason as the licence cell above. */
+  const emiratesCell = (a) => {
+    if (withheld.has('emirates_id') && new Set(a.identity_held || []).has('emirates_id')) {
+      return `<span class="tag dim" title="${esc(withheldWhy)}">withheld</span>`;
+    }
+    return (a.emirates_id
+      ? `<span class="plate">${esc(a.emirates_id)}</span>`
+      : `<span class="ent-off" title="${esc(sourceLabel(a.platform))} reports no identity number `
+        + '— only the hotel channel does, so this is about which channel onboarded this person '
+        + 'and not about their documents">—</span>');
+  };
+  /* One record's expiry, as it renders INSIDE a person's row. The person's own
+     Due cell carries the soonest of these; this is the per-record detail that
+     says which one it came from. */
+  const acctExpiry = (a) => {
+    const d = String(a.licence_expires || '').slice(0, 10);
+    if (!d) return '<span class="ent-off" title="this platform publishes no expiry date for the licence">—</span>';
+    if (placeholder && d === placeholder) {
+      return `<span class="tag dim" title="the source’s own default date, written when the `
+        + 'field was never filled in — not an expiry">not filled in</span>';
+    }
+    const n = dl(a);
+    return `${esc(dateStr(a.licence_expires))} <span class="tag ${n < 0 ? 'err' : n <= 45 ? 'warn' : 'ok'}">`
+      + `${n < 0 ? Math.abs(n) + 'd ago' : n + 'd'}</span>`;
+  };
+
+  const dp = panel(byPerson ? 'Driver licences, by person' : 'Driver licences, by record',
+    (byPerson
+      ? 'One row per person, with every platform record they hold listed inside it. The Due '
+        + 'column is the soonest expiry across all of their records. '
+      : 'One row per platform record — the person spine could not group these. ')
+    + (placeholder
+      ? `From the platforms that publish an expiry date. Records carrying ${placeholder} are the `
+        + 'source’s default and are marked as such rather than counted as expired.'
+      : 'From the platforms that publish an expiry date.'),
+  /* A handle a test can find that is not the heading. Four browser tests once
+     located their panel by matching prose against the <h3>, and a pass over
+     the copy broke all four at once — see panel() in api/public/ui.js. */
+  'compliance-people');
   root.append(dp.panel);
-  if (!drv.length) empty(dp.body, 'No driver licence dates collected yet — Hotel publishes these, Uber does not expose them to this role');
-  else foldRows(dp.body, tableFrom(drv.slice(0, 120), [
+  if (!ppl.length) empty(dp.body, 'No driver licence dates collected yet — Hotel publishes these, Uber does not expose them to this role');
+  else foldRows(dp.body, tableFrom(ppl.slice(0, 120), [
     { label: 'Due', key: 'days_left', num: true,
-      /* Placeholder dates sort to the BOTTOM whichever way you order. They are
-         not an expiry, so ranking them among real ones puts 77 rows that mean
-         "this field was never filled in" above every licence that genuinely
-         runs out next week. */
-      sortValue: (r) => {
-        if (!r.licence_expires) return null;
-        if (placeholder && String(r.licence_expires).slice(0, 10) === placeholder) return null;
-        return dl(r);
-      },
-      render: (r) => {
-        if (!r.licence_expires) return '<span class="ent-off" title="no expiry date published for this licence">—</span>';
-        if (placeholder && String(r.licence_expires).slice(0, 10) === placeholder) {
-          return '<span class="tag dim" title="the source’s own default date, written when the field was never filled in — not an expiry">not filled in</span>';
+      /* A person with no checkable date sorts to the BOTTOM whichever way you
+         order, exactly as a placeholder record did before: they are not an
+         expiry, and ranking them among real ones puts rows that mean "this
+         field was never filled in" above the person who genuinely stops
+         working next week. */
+      sortValue: (p) => (p.licence_status === 'unknown' ? null : p.days_left),
+      render: (p) => {
+        if (p.licence_status === 'unknown') {
+          /* ABSENT WITH A REASON, AND THE REASON IS THE TRUE ONE — never a
+             zero, never "valid". The API computes which of the three it is
+             from the records themselves. */
+          return `<span class="ent-off" title="${esc(p.licence_unknown_reason
+            || 'no licence expiry date on any record this person holds')}">cannot be checked</span>`;
         }
-        return `<span class="tag ${dl(r) < 0 ? 'err' : dl(r) <= 45 ? 'warn' : 'ok'}">${dl(r) < 0 ? Math.abs(dl(r)) + 'd ago' : dl(r) + 'd'}</span>`;
+        const n = Number(p.days_left);
+        return `<span class="tag ${n < 0 ? 'err' : n <= 45 ? 'warn' : 'ok'}">`
+          + `${n < 0 ? Math.abs(n) + 'd ago' : n + 'd'}</span>`;
       } },
-    { label: 'Driver', key: 'full_name',
-      render: (r) => entity('driver', r.driver_ext_id, r.full_name) },
-    /* The vehicle. api/server.js selects it with a comment saying a licence
-       expiring in six days is a CAR that stops earning in six days, and this
-       table never drew the column it was selected for. */
-    { label: 'Vehicle', key: 'vehicle',
-      // {plate, day} — the plate they held and the day we last saw them hold it.
-      sortValue: (r) => r.vehicle?.plate || null,
-      render: (r) => (r.vehicle?.plate
-        ? entity('vehicle', r.vehicle.plate, r.vehicle.plate)
-          + (r.vehicle.day ? `<span class="dim" title="last custody record"> ${esc(dayStr(`${String(r.vehicle.day).slice(0, 10)}T12:00:00`))}</span>` : '')
-        : '<span class="ent-off" title="no custody record attaches a vehicle to this driver">none attached</span>') },
-    { label: 'Phone', key: 'phone',
-      render: (r) => (r.phone ? `<span class="plate">${esc(r.phone)}</span>`
-        : '<span class="ent-off" title="this platform publishes no phone number">—</span>') },
-    { label: 'Platform', key: 'platform', render: (r) => esc(sourceLabel(r.platform)) },
-    { label: 'Licence', key: 'licence_no',
-      /* Two absences, and the second one used to print as a licence.
-         ─────────────────────────────────────────────────────────────────
-         An em-dash with nothing behind it read as a licence nobody had filed;
-         the number comes from the same record as the expiry, so a blank is
-         the fact the Expires column is already stating. And on production
-         every one of the 94 numbers on this roster is the identical string
-         "123456" — one distinct value across all of them, the same 94 rows
-         whose expiry is this source's 2026-01-01 default. The date was marked
-         and the number was printed as though somebody could check it. */
-      render: (r) => {
-        /* Withheld before absent, because a withheld column is empty for
-           EVERYBODY and would otherwise read as a roster with no licences
-           filed — the strongest possible version of the wrong story.
-
-           BUT ONLY FOR A ROW THAT HAS ONE. identity_withheld names the COLUMN,
-           and the column is removed for every row, so this branch printed
-           "withheld" in all 289 cells — telling a reader that this product is
-           holding back a licence number for the 195 people no channel has ever
-           filed one for. That is the same confusion between "never sent" and
-           "not shown" that the withheld caption was written to fix, pointing
-           the other way. identity_held is counted per row on the server before
-           the values are dropped, so it says what the record holds and never
-           what it is.
-
-           The placeholder check comes first for a row we DO hold, because
-           "not filled in" is the more useful of the two true things: 94 of
-           these numbers are the identical string 123456, and calling that
-           withheld hides the one fact that makes the roster uncheckable. */
-        const held = new Set(r.identity_held || []);
-        if (withheld.has('licence_no') && held.has('licence_no')) {
-          if (r.licence_no_placeholder) {
-            return `<span class="tag dim" title="every licence number on this roster is this same `
-              + 'string — the source\u2019s own default, written when the field was never filled '
-              + 'in">not filled in</span>';
-          }
-          return `<span class="tag dim" title="${esc(withheldWhy)}">withheld</span>`;
-        }
-        if (!r.licence_no) {
-          return '<span class="ent-off" title="this channel publishes no licence number">—</span>';
-        }
-        if (r.licence_no_placeholder) {
-          return `<span class="tag dim" title="every licence number on this roster is this same `
-            + 'string — the source\u2019s own default, written when the field was never filled '
-            + 'in">not filled in</span>';
-        }
-        return `<span class="plate">${esc(r.licence_no)}</span>`;
-      } },
-    /* The one government identity number this fleet holds.
+    { label: 'Driver', key: 'name',
+      render: (p) => entity('driver', p.driver_ext_id, p.name)
+        /* HOW MANY RECORDS ARE FOLDED INTO THIS ROW, said on the row itself.
+           Without it a reader cannot tell a person from a record and the page
+           is back where it started — and an account the spine has not placed
+           is not a headcount of one, so it says that instead. */
+        + (!p.person_placed
+          ? '<div class="dim" title="the person spine has not attached this platform account to '
+            + 'anybody yet, so this row is one ACCOUNT and not a confirmed person">unplaced account</div>'
+          : p.account_count > 1
+            ? `<div class="dim">${countOf(p.account_count, 'record')} · ${esc(p.platforms.map(sourceLabel).join(', '))}</div>`
+            : '') },
+    /* WHICH RECORD CARRIES WHICH PAPER. The whole reason the grouping is safe
+       to do: folding the rows would otherwise hide the evidence it was folded
+       from. Each record names its channel, its own expiry, and the two
+       identity documents in the same three states the per-record table drew
+       them in. */
+    { label: 'Records and their documents', key: 'accounts',
+      render: (p) => (p.accounts || []).map((a) => `<div class="idsub">`
+        + `<span class="tag">${esc(sourceLabel(a.platform))}</span>`
+        + entity('driver', a.driver_ext_id, a.full_name || a.driver_ext_id)
+        + `${a.fleet_id ? `<span class="tag dim">${esc(a.fleet_id)}</span>` : ''}`
+        + '</div>'
+        + '<div class="idfacts">'
+        + `<span><b>Expires</b>${acctExpiry(a)}</span>`
+        + `<span><b>Licence</b>${licenceCell(a)}</span>`
+        + `<span><b>Emirates ID</b>${emiratesCell(a)}</span>`
+        + '</div>').join('') },
+    /* TWO RECORDS OF ONE PERSON THAT DISAGREE ABOUT A DOCUMENT.
        ─────────────────────────────────────────────────────────────────────
-       132 of the roster carry a real Emirates ID and this page — whose whole
-       subject is driver documents — never showed one, because the endpoint
-       did not select the column. The only place it had ever appeared was the
-       desktop driver profile, one person at a time.
-
-       A blank is a fact about the CHANNEL, not the person: the hotel channel
-       is the only one that reports an identity number at all. Uber names
-       emiratesId, nationalId, passportNumber and licenseNumber absent on
-       every type it exposes — probed 2026-09-04 — and the ComplianceInfo it
-       does answer with carries a document's status and expiry and no number
-       of any kind. Bolt and Yango file no compliance record. So the title
-       says which channel would have had to supply it rather than leaving the
-       dash to imply missing paperwork. */
-    { label: 'Emirates ID', key: 'emirates_id',
-      render: (r) => {
-        /* Withheld only for a row that HAS one — see the Licence cell above.
-           123 of 289 carry an Emirates ID; the other 166 were being told their
-           number was being held back by a product that has never had it. */
-        if (withheld.has('emirates_id') && new Set(r.identity_held || []).has('emirates_id')) {
-          return `<span class="tag dim" title="${esc(withheldWhy)}">withheld</span>`;
+       Either the filing is wrong or the merge is, and both are things this
+       page should raise rather than resolve by taking whichever record sorted
+       first. The API compares the withheld values SERVER-SIDE and reports only
+       that they differ, so this cell can say so without any number reaching
+       the browser — which is what lets the check exist at all on a response
+       that withholds licence numbers and Emirates IDs. */
+    { label: 'Records agree?', key: 'conflict_fields',
+      absent: 'no person on this roster holds two records that disagree about a licence number, '
+        + 'an identity number or an expiry date — so either the filing is consistent or nobody '
+        + 'here holds two records carrying the same document',
+      sortValue: (p) => (p.conflicts || []).length,
+      render: (p) => {
+        const c = p.conflicts || [];
+        if (!c.length) {
+          return p.account_count > 1
+            ? '<span class="ent-off" title="every record this person holds carries the same documents, where they carry them at all">agree</span>'
+            : '<span class="ent-off" title="this person holds one record, so there is nothing to compare it against">—</span>';
         }
-        return (r.emirates_id
-          ? `<span class="plate">${esc(r.emirates_id)}</span>`
-          : `<span class="ent-off" title="${esc(sourceLabel(r.platform))} reports no identity `
-            + 'number — only the hotel channel does, so this is about which channel onboarded '
-            + 'this person and not about their documents">—</span>');
+        const WORD = { licence_no: 'licence number', emirates_id: 'identity number',
+          licence_expires: 'expiry date' };
+        return c.map((x) => pill(`${WORD[x.field] || x.field} differs`, 'warn',
+          `${x.distinct} different values across ${x.accounts.length} of this person’s `
+          + `records — a filing error, or evidence the merge is wrong. The values themselves are `
+          + 'compared on the server and never sent.')).join(' ');
       } },
-    { label: 'Expires', key: 'licence_expires', render: (r) => {
-      const d = String(r.licence_expires || '').slice(0, 10);
-      if (!d) return '<span class="ent-off" title="this platform publishes no expiry date for the licence">—</span>';
-      return d === placeholder ? `${esc(d)} ${pill('a default, not a date', 'warn')}` : esc(dateStr(r.licence_expires));
-    } },
-    { label: 'State', key: 'state', render: (r) => `<span class="tag ${/suspend|deact/i.test(r.state || '') ? 'warn' : 'ok'}">${esc(r.state || '—')}</span>`
-      + (r.suspension_reason ? `<div class="dim">${esc(String(r.suspension_reason).slice(0, 90))}</div>` : '') },
+    /* The vehicle. A licence expiring in six days is a CAR that stops earning
+       in six days, and the row names it rather than leaving it to be worked
+       out by hand. */
+    { label: 'Vehicle', key: 'vehicle',
+      sortValue: (p) => p.vehicle?.plate || null,
+      render: (p) => (p.vehicle?.plate
+        ? entity('vehicle', p.vehicle.plate, p.vehicle.plate)
+          + (p.vehicle.day ? `<span class="dim" title="last custody record"> ${esc(dayStr(`${String(p.vehicle.day).slice(0, 10)}T12:00:00`))}</span>` : '')
+        : '<span class="ent-off" title="no custody record attaches a vehicle to any of this person’s records">none attached</span>') },
+    { label: 'Phone', key: 'phone',
+      render: (p) => (p.phone ? `<span class="plate">${esc(p.phone)}</span>`
+        : '<span class="ent-off" title="no record this person holds carries a phone number">—</span>') },
+    { label: 'State', key: 'state', render: (p) => `<span class="tag ${/suspend|deact/i.test(p.state || '') ? 'warn' : 'ok'}">${esc(p.state || '—')}</span>`
+      + (p.suspension_reason ? `<div class="dim">${esc(String(p.suspension_reason).slice(0, 90))}</div>` : '') },
     /* WHETHER THE EXPIRY MATTERS.
        ─────────────────────────────────────────────────────────────────────
        "Licence expired — stand down until renewed" is the most consequential
        sentence this product prints, and this list gave no way to tell an
-       expiry that matters from one that does not. All 132 production rows read
-       State "offline" — the hotel channel's own word for every account it
+       expiry that matters from one that does not. All 132 production records
+       read State "offline" — the hotel channel's own word for every account it
        holds, whether the person drove last night or has never driven — so 243
        days past expiry read identically for a filing job and for a car that
        has to come off the road this morning.
 
-       The count is over the whole record, not the window: a lapsed licence is
-       not a question about the last thirty days. */
+       Across ALL of the person's records, because a man whose hotel account
+       is idle and whose Uber account worked last night is a man who drove
+       last night. The count is over the whole record, not the window: a
+       lapsed licence is not a question about the last thirty days. */
     { label: 'Still driving?', key: 'last_ever',
-      sortValue: (r) => (r.last_ever ? Date.parse(r.last_ever) : null),
-      absent: 'no driving is recorded for anybody on this list under either their platform id '
+      sortValue: (p) => (p.last_ever ? Date.parse(p.last_ever) : null),
+      absent: 'no driving is recorded for anybody on this list under any of their platform ids '
         + 'or their name, so none of these expiries can be read as urgent or not',
-      render: (r) => {
-        if (!r.last_ever) {
-          return r.lifetime_trips === 0
+      render: (p) => {
+        if (!p.last_ever) {
+          return p.lifetime_trips === 0
             ? '<span class="ent-off" title="this person has never taken a booking on any channel we collect">never has</span>'
             : '<span class="ent-off" title="we hold no trip history matching this person by id or by name">not observed</span>';
         }
-        const d = r.days_since_last_trip;
+        const d = p.days_since_last_trip;
         const tone = d != null && d <= 7 ? 'warn' : null;
-        return `${dateStr(r.last_ever)}<span class="dim">`
+        return `${dateStr(p.last_ever)}<span class="dim">`
           + `${d != null ? ` · ${fmt(d)}d ago` : ''}`
-          + `${r.lifetime_trips != null ? ` · ${fmt(r.lifetime_trips)} trips` : ''}`
+          + `${p.lifetime_trips != null ? ` · ${fmt(p.lifetime_trips)} trips` : ''}`
           /* Matched on the name rather than on the platform id, which is how
-             most of these rows resolve — and how two people sharing one name
-             would merge. Marked, so a reader can weigh it. */
-          + `${r.activity_by_name ? '<span title="matched to this person by name, not by platform id — two people sharing a name would merge here">†</span>' : ''}`
+             most of these records resolve — and how two people sharing one
+             name would merge. Marked, so a reader can weigh it. */
+          + `${p.activity_by_name ? '<span title="matched to this person by name, not by platform id — two people sharing a name would merge here">†</span>' : ''}`
           + '</span>'
           + (tone ? ` ${pill('drove this week', 'warn')}` : '');
       } },
   ], { sortable: true, sortId: 'licences', defaultSort: { key: 'days_left', dir: 'asc' } }),
-    { shown: 12, total: Math.min(120, drv.length), noun: 'licence', key: 'compl-drv' });
-  if (drv.length) dp.body.append(el('p', 'cap',
-    `Showing ${fmt(Math.min(120, drv.length))} of ${fmt(dt.total ?? drv.length)} driver records, `
-    + `${fmt(dt.with_date ?? 0)} of which carry an expiry date at all`
+    { shown: 12, total: Math.min(120, ppl.length),
+      noun: byPerson ? 'person' : 'record', key: 'compl-drv' });
+  /* THE SENTENCE UNDER THE TABLE, IN BOTH UNITS AT ONCE. It read "N driver
+     records" while the tiles above it said "drivers", which is how the two
+     came to be read as the same number. Now it names the people, the records
+     behind them, and what the records alone can answer. */
+  if (ppl.length) dp.body.append(el('p', 'cap',
+    `Showing ${fmt(Math.min(120, ppl.length))} of ${countOf(pt.total ?? ppl.length, byPerson ? 'person' : 'record')}`
+    + (byPerson ? `, holding ${countOf(pt.accounts ?? dt.total ?? drv.length, 'platform record')} between them` : '')
+    + `. ${fmt(dt.with_date ?? 0)} of those records carry an expiry date at all`
     + (dPlaceholder ? `, and ${fmt(dPlaceholder)} of THOSE carry the source's default date rather than a real one` : '')
+    + (byPerson && (pt.multi_account || 0)
+      ? `. ${countOf(pt.multi_account, 'person')} here ${pt.multi_account === 1 ? 'holds' : 'hold'} more than one record`
+      : '')
     + '. The counts above are over all of them, not over this list. Every column here can be sorted.'));
 };
 

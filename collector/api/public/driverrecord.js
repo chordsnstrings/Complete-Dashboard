@@ -35,7 +35,7 @@
 import { gapBars, dec } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, verdict, empty,
   money, fmt, dateStr, plural, countOf, tabBar, sourceLabel } from './ui.js';
-import { api, state, href, currentGen, alive } from './data.js';
+import { api, state, href, currentGen, alive, personAddr } from './data.js';
 
 /* Ordinals, because "12th of 118" is the sentence an operator reads and "the
    90th percentile" is the one they check it against. Both are printed: the
@@ -287,7 +287,12 @@ export async function renderDriverRecord(root, id, prof) {
   head.append(tabBar(
     [{ id: 'week', label: 'Week by week', ic: '▤' },
       { id: 'month', label: 'Month by month', ic: '▦' }],
-    grain, (g) => href('driver', id, 'record', { grain: g }),
+    /* By the PERSON, not by the account that opened the page. `prof` carries
+       the person id, so the grain switch hands the reader the address that
+       does not move when a merge changes which account represents them; an
+       account that the spine has not placed keeps its provider address. */
+    grain, (g) => href('driver', prof?.person_id != null ? personAddr(prof.person_id) : id,
+      'record', { grain: g }),
   ));
   if (asked === 'day') {
     head.append(note(`A record is read over periods long enough to have a usual, so the day grain `

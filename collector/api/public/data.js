@@ -578,6 +578,76 @@ export function navigate(view, param, sub) {
   if (location.hash === next) return false;
   location.hash = next; return true;
 }
+
+/* THE PERSON IS THE ADDRESS, AND THE ACCOUNT IS ONLY A WAY IN.
+   ═════════════════════════════════════════════════════════════════════════
+   Every driver page in this product was addressed by a PROVIDER ACCOUNT id —
+   `#driver/64686123-8389-4a9e-82f1-0287e936239b`, an Uber UUID. The page it
+   opens is a PERSON: src/persons.js folds the accounts of one human onto one
+   driver row, and api/driver_routes.js answers every panel over all of them.
+   So the identity a reader saw, bookmarked and pasted into a message was an
+   account that happens to fold the others in.
+
+   Measured on production 2026-09-21: 810 platform accounts over ~349 people.
+   Which of a person's accounts is the one in the URL is decided by whichever
+   record the reader happened to click — and when a merge is reviewed, undone
+   or re-keyed, the account that represents them changes. The person id never
+   does; driver_ledger.person_id already keys money on it.
+
+   So `#driver/p412` is the canonical address and `#driver/<ext_id>` is a way
+   in that still works: the page resolves the account to its person, renders
+   the same page, and rewrites the address to the canonical form so what the
+   reader copies is the stable one.
+
+   `p` is a prefix rather than a second path slot because the router's three
+   slots are already view/param/sub and the sub is the tab (see renderDriver's
+   note on `day` carrying its date in the query string for the same reason).
+   A provider id cannot collide with it: Uber issues UUIDs, Yango and Bolt
+   issue digits-only ids, the hotel channel issues 24-character ObjectIds, and
+   the synthesised keys this codebase mints are spelled `name:<fold>`. `p412`
+   is none of those shapes. */
+const PERSON_ADDR = /^p(\d+)$/;
+/** The canonical address slot for a person id: 412 -> 'p412'. */
+export const personAddr = (personId) => `p${personId}`;
+/** The person id an address slot names, or null when it names an account. */
+export const personIdOf = (param) => {
+  const m = PERSON_ADDR.exec(String(param ?? ''));
+  return m ? Number(m[1]) : null;
+};
+
+/* Swap the ENTITY out of the current address and leave everything else exactly
+   as it is — the tab in the third slot, and the whole query string.
+   ─────────────────────────────────────────────────────────────────────────
+   Rebuilding the address through href() would have dropped `?on=2026-08-25`,
+   which is how #driver/<id>/day carries the day it is replaying: filterQuery()
+   writes the window and the channel chips and knows nothing about the extra
+   keys a view puts there. A rewrite that silently changed which day is on
+   screen would be a worse defect than the one this fixes.
+
+   history.replaceState rather than `location.hash =`, deliberately. Assigning
+   the hash fires `hashchange`, which re-runs applyRoute() and re-renders the
+   page the caller is in the middle of drawing — a second full round of
+   requests for a page that is already correct — and pushes a history entry, so
+   the back button would step through the account address the reader was never
+   meant to keep. replaceState does neither. Some shells (a file:// document,
+   a sandboxed frame) throw on it; there the hash assignment is the honest
+   fallback, and a redundant render is better than an address that lies. */
+export function rewriteParam(param) {
+  const h = location.hash.slice(1);
+  const qi = h.indexOf('?');
+  const path = qi >= 0 ? h.slice(0, qi) : h;
+  const search = qi >= 0 ? h.slice(qi) : '';
+  const parts = path.split('/');
+  // Nothing in the second slot is nothing to rewrite — a bare `#driver`.
+  if (parts.length < 2 || !parts[1]) return false;
+  if (parts[1] === encodeURIComponent(param) || parts[1] === param) return false;
+  parts[1] = encodeURIComponent(param);
+  const next = `#${parts.join('/')}${search}`;
+  state.param = param;
+  try { history.replaceState(null, '', next); }
+  catch { location.hash = next; }
+  return true;
+}
 /* Change a filter without leaving the page — and write it into the address, so
    the back button undoes it and the URL still describes what is on screen. */
 export function setFilter(patch) {

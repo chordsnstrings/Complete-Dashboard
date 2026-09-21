@@ -22,7 +22,13 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   avatar, moneyInTile, cashOnHandTile, bankDepositTile, faresTile,
   alertRateFigure, splitAlerts, standingNote,
   UBER_FARE_WHY, dialable } from './ui.js';
-import { qAll, href, currentGen, alive, windowLabel } from './data.js';
+/* personAddr/personIdOf/rewriteParam: the person id as an address, and the
+   in-place rewrite that leaves the reader holding the canonical one. See the
+   block above rewriteParam in data.js — the rewrite must not be a navigation,
+   and it must not rebuild the query string, because #driver/<id>/day carries
+   the replayed day in it. */
+import { qAll, href, currentGen, alive, windowLabel,
+  personAddr, personIdOf, rewriteParam } from './data.js';
 import { driversVerdict } from './verdicts.js';
 import { renderDriverDay } from './driverday.js';
 /* One driver against their own record, week by week and month by month. Its
@@ -694,6 +700,13 @@ function statusStrip(st) {
    driver with a Bolt account and no Bolt trip has an entry in `platforms` and
    none in `accounts`, and the card has printed "ACCOUNTS 0" beside a Bolt pill
    for exactly that reason before. */
+/** The address this page should LINK by: the person id where the spine has
+ *  placed the account, the provider account id where it has not. Never the
+ *  thing to ASK an endpoint about — see renderDriver's header for why the two
+ *  are kept apart. */
+export const addressOf = (prof, accountId) =>
+  (prof?.person_id != null ? personAddr(prof.person_id) : accountId);
+
 export function personRecord(p) {
   const accs = p?.accounts || [];
   const dates = (k) => accs.map((a) => a[k]).filter(Boolean).sort();
@@ -762,6 +775,44 @@ function identityCard(p) {
      and none of those slices meant anything without the whole to divide by. */
   const { evTrips, firstEver, lastEver } = personRecord(p);
 
+  /* WHO THIS PAGE IS, AND WHICH RECORDS IT FOLDS.
+     ═══════════════════════════════════════════════════════════════════════
+     Until now this card named a person and listed the CHANNELS they work on,
+     and the page itself was addressed by one of their provider account ids —
+     `#driver/64686123-8389-4a9e-82f1-0287e936239b`. So the one identity that
+     does not move (the person id, which driver_ledger already keys money on)
+     appeared nowhere on the page about that person, and the one that does
+     move was the address in the reader's bookmark.
+
+     Measured on production 2026-09-21: 810 platform accounts over ~349
+     people. Which account represents somebody is decided by the spine and
+     changes when a merge is reviewed or undone; a reader looking at this card
+     had no way to see that the page they were on folds three records, which
+     three, or under which id to file the person in a message to somebody
+     else. Both facts go here, in the card that already exists, rather than in
+     a second card beside it saying a different half of the same thing.
+
+     THE ABSENCE IS A SENTENCE, NOT A BLANK. An account the spine has not
+     placed renders exactly the page it always did — it has trips, money and a
+     licence that expires — and says which of the three not-placed states it
+     is in, in the server's own words (see api/driver_routes.js, which is
+     where the distinction is known). A card that simply omitted the line
+     would leave a reader unable to tell an unreviewed account from a failed
+     read from a register that has never been built. */
+  const pid = p.person_id ?? null;
+  const pAccounts = p.person_accounts || [];
+  /* A UUID is 36 characters and three of them would wrap the header onto four
+     lines. The whole id is on the pill's title, and the pill is a label rather
+     than a thing to copy — the address bar carries the id worth copying. */
+  const shortId = (x) => (String(x || '').length > 14 ? `${String(x).slice(0, 8)}…` : String(x || ''));
+  const accountPills = pAccounts.map((a) => pill(
+    `${sourceLabel(a.platform)} ${shortId(a.ext_id)}`,
+    a.asked ? 'plat' : null,
+    `${sourceLabel(a.platform)} account ${a.ext_id}`
+    + (a.display_name ? ` — filed as ${a.display_name}` : '')
+    + (a.basis ? ` · joined to this person by ${a.basis}` : '')
+    + (a.asked ? ' · this is the account the address named' : ''))).join('');
+
   wrap.innerHTML = `
     ${avatar(p.name, c.picture_url, '', c.photo_absent_reason)}
     <div class="idmeta">
@@ -788,12 +839,23 @@ function identityCard(p) {
   p.span.vehicles ? ` in ${fmt(p.span.vehicles)} car${p.span.vehicles === 1 ? '' : 's'}` : ''}</span>` : ''}
         <span><b>Accounts</b> ${fmt(accounts)}${accN !== accounts
     ? `<span class="dim" title="${accN} of them have taken a trip we hold"> · ${accN} with trips</span>` : ''}</span>
+        ${pid != null
+    ? `<span><b>Person</b> <span class="mono">p${esc(String(pid))}</span><span class="dim" title="The id this page is addressed by. It is the person, not one of their provider accounts, so it does not change when a merge changes which account represents them — and it is the id the money ledger keys on."> the stable address</span></span>`
+    : '<span><b>Person</b> <span class="dim">not placed</span></span>'}
         ${p.rating != null ? `<span><b>Rating</b> ${fmt(p.rating, 2)}<span class="dim" title="${
   esc(sourceLabel(p.rating_platform))}'s own rating, read ${p.rating_at ? dateStr(p.rating_at) : 'daily'}"> ${
   esc(sourceLabel(p.rating_platform))}</span></span>` : ''}
         ${p.platform_lifetime_trips ? `<span><b>${esc(sourceLabel(p.rating_platform || 'uber'))} count</b> ${
   fmt(p.platform_lifetime_trips)}<span class="dim" title="trips the platform has ever recorded for this driver. Ours covers what we collected; theirs covers the whole relationship, so the two are shown side by side rather than merged."> ever</span></span>` : ''}
       </div>
+      ${accountPills ? `<div class="idsub">${accountPills}</div>` : ''}
+      ${pid != null && !pAccounts.length
+    ? '<p class="cap">This person holds no live platform account. They exist in the register — '
+      + 'money can be owed by somebody before any provider record is linked to them, and '
+      + 'detaching a wrongly merged account leaves the person behind — so there is a page, and '
+      + 'nothing on a provider’s side to measure them by.</p>' : ''}
+      ${pid == null && p.person_absent_reason
+    ? `<p class="cap">${esc(p.person_absent_reason)}</p>` : ''}
       ${(p.banned_on || []).length || (p.platform_compliance || []).length ? `<div class="idsub">${
   (p.banned_on || []).map((x) => `<span class="pill bad" title="${esc(sourceLabel(x))} has barred this driver from taking work">${esc(sourceLabel(x))}: barred</span>`).join('')
 }${(p.platform_compliance || []).map((c2) => {
@@ -1085,7 +1147,14 @@ async function tabActivity(root, id) {
      job, and "No data for this range yet" is not a reason. The panel is drawn
      from jobs, so an empty one means no job — which is a different fact from
      the feed not having reached these dates, and both are worth saying. */
-  if ((shift.days || []).some((d) => d.first_min != null)) shiftBars(sh.body, shift.days, shift, id);
+  /* The day rows link by the PERSON where the spine has placed them. This tab
+     already holds the person id (it is on `prof`), and requirement is that a
+     page holding one links by it rather than by the account it was opened
+     with — an account link still resolves, but it hands the next reader an
+     address that moves when a merge does. */
+  if ((shift.days || []).some((d) => d.first_min != null)) {
+    shiftBars(sh.body, shift.days, shift, addressOf(prof, id));
+  }
   else {
     sh.body.innerHTML = '';
     sh.body.append(note((shift.days || []).length
@@ -3507,24 +3576,80 @@ const TABS = { overview: tabOverview, activity: tabActivity, territory: tabTerri
   unauthorized: tabUnauthorized };
 
 /* ── page shell ──────────────────────────────────────────────────────────── */
-export async function renderDriver(root, id, tab = 'overview') {
+/* THE ADDRESS IS THE PERSON; THE ACCOUNT IS A DOOR INTO IT.
+   ═══════════════════════════════════════════════════════════════════════════
+   `addr` is the second slot of the hash and it is now one of two things:
+
+     #driver/p412          a PERSON id — the canonical address.
+     #driver/<ext_id>      a PROVIDER ACCOUNT id — every link ever made.
+
+   The second still works and always will: there are links to it in this
+   product, in bookmarks, and in messages sent to people who are not reading
+   this. It resolves to the person and renders the identical page, then the
+   address in the bar is rewritten to the canonical form (in place — see
+   rewriteParam in api/public/data.js for why it is not a navigation), so what
+   the reader copies from here is the id that does not move.
+
+   TWO IDS ARE IN PLAY AFTER THE PROFILE LANDS, and conflating them would have
+   been the easy mistake:
+
+     `id`   the provider account every OTHER endpoint on this page keys on.
+            /api/driver/kpis, /daily, /territory and the rest take ?id= and
+            mean an account; that is unchanged and deliberately so, because a
+            person id and a Yango account id are both bare digits and a route
+            that guessed between them would one day answer the wrong person.
+     `addr` what the page LINKS by — the tab bar, the day rows, the record
+            tab's grain switch. Canonical where the spine has placed the
+            account, the account id where it has not.
+
+   An account the spine has not placed is NOT an error and does not lose its
+   page: it keeps its provider address, renders exactly as it did before, and
+   the identity card states which of the three not-placed states it is in. */
+export async function renderDriver(root, addr, tab = 'overview') {
   /* Addressed with no id — a typed URL, a stale bookmark, a link whose id
      never got filled in. It went to the endpoint and printed the API's own
      complaint. #day has always answered this properly; these four did not. */
-  if (!id) return noneChosen(root, 'driver', 'drivers', 'Every driver');
+  if (!addr) return noneChosen(root, 'driver', 'drivers', 'Every driver');
+  const askedPerson = personIdOf(addr);
   const gen = currentGen();
   const head = el('div'); root.append(head); loading(head);
   const body = el('div', 'stack'); root.append(body);
 
   let prof;
-  try { prof = await qAll('/api/driver/profile', { id }); }
+  try {
+    prof = await qAll('/api/driver/profile',
+      askedPerson != null ? { person: askedPerson } : { id: addr });
+  }
   catch (e) {
-    head.innerHTML = `<div class="empty"><b>No such driver</b>Nothing in the record matches this id.
+    /* Two different misses, two different sentences. "Nothing matches this id"
+       under a person address sends the reader looking for a provider record
+       that was never what they asked for. */
+    head.innerHTML = askedPerson != null
+      ? `<div class="empty"><b>No such person</b>The person register holds no p${esc(String(askedPerson))}.
+        A person id is not a provider account id — if this link came from somewhere else it may be
+        naming an account, which goes in the address without the p.
+        <a class="lnk" href="${href('drivers')}">Back to all drivers</a></div>`
+      : `<div class="empty"><b>No such driver</b>Nothing in the record matches this id.
       <a class="lnk" href="${href('drivers')}">Back to all drivers</a></div>`;
     return;
   }
+  /* The account the tab endpoints are asked about. `prof.id` is the account
+     the server resolved — the canonical one when the address named a person,
+     the one in the address when it named an account — so both addresses ask
+     every panel below the identical question. */
+  const id = prof.id || (askedPerson != null ? null : addr);
+  /* And the address the reader should end up with. */
+  const canon = prof.person_id != null ? personAddr(prof.person_id) : (prof.id || addr);
+  if (canon !== addr) rewriteParam(canon);
   head.innerHTML = '';
   head.append(identityCard(prof));
+  /* A PERSON WITH NO LIVE PLATFORM ACCOUNT stops here, and the card has
+     already said why. Every endpoint below keys on a provider account id;
+     there is none, so asking them would put nine "could not load this panel"
+     strips under a card that has just explained, correctly, that there is
+     nothing on a provider's side to load. The register is the only thing that
+     knows this person, and it is in the card. */
+  if (!id) return prof;
   /* The live strip, fetched separately and never blocking the page.
      /api/status/driver is on api/cache.js's NEVER list — a cached live status
      is a wrong live status — so it is its own request rather than a field on
@@ -3538,7 +3663,11 @@ export async function renderDriver(root, id, tab = 'overview') {
     .catch(() => { if (alive(gen)) { live.innerHTML = ''; live.append(statusStrip(
       { absent: 'The live status could not be loaded just now. This says nothing about '
         + 'whether the driver is online — the request for it failed.' })); } });
-  head.append(tabBar(DRIVER_TABS, tab, (t) => href('driver', id, t === 'overview' ? null : t)));
+  /* The tab bar links by the CANONICAL address, not by the account that
+     happened to open the page. This is the one place in the product that
+     always knows the person id, so a reader who arrives on an account link
+     and clicks a tab leaves with the stable address in their bar. */
+  head.append(tabBar(DRIVER_TABS, tab, (t) => href('driver', canon, t === 'overview' ? null : t)));
   /* The SPLIT between accounts, which the identity card cannot show.
      ─────────────────────────────────────────────────────────────────────────
      The card now carries the whole-person figures — trips ever, first trip,

@@ -83,6 +83,24 @@ import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldN
 /* Who a finding is about, resolved from the ids the rule engine already
    stored. api/insight_people.js carries the reasoning and the query. */
 import { refIds, peopleFor, attachPeople } from './insight_people.js';
+/* WHO A DRIVER IS, ASKED ONCE — the read side of the person spine that
+   src/persons.js materialises into driver + driver_platform_id.
+   ─────────────────────────────────────────────────────────────────────────
+   Imported here for /api/compliance/drivers, which counted ACCOUNT ROWS and
+   called them drivers: measured on production 2026-09-21, 437 rows over 810
+   accounts belonging to ~349 people, under a banner reading "140 drivers
+   cannot legally work". Every other surface in this product now reports
+   people, so this page disagreed with all of them.
+
+   NOTE FOR ANYONE ADDING AN IMPORT TO THIS FILE: test/mount.mjs slices the
+   route region out of here and evaluates it as a function body with its
+   helpers injected BY NAME, so an identifier the slice references and that
+   file does not inject is a ReferenceError before the first assertion of
+   every API test — reported as an empty response body, which points at the
+   query rather than at the import. `personMap` is in that list, and in
+   test/server_redaction.test.mjs's own smaller injection set for the same
+   reason. */
+import { personMap } from './person_map.js';
 import { BOOKING_CHANNELS, channelHealthSql, channelHealth, healthFor } from './channels_sql.js';
 import { RAW_ALIASES } from '../src/probe.js';
 
@@ -5071,6 +5089,322 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
     IDENTITY_DOCS.filter((c) => String(r[c] ?? '').trim() !== '')]));
   const drivers = withPhotos(stripIdentity(rows, admin), heldPhotos, missedPhotos)
     .map((d, i) => ({ ...d, identity_held: admin ? null : heldDocs.get(rows[i]) }));
+
+  /* ── ONE ROW PER HUMAN, AND THE DOCUMENTS OF EACH OF THEIR RECORDS ──────
+     ═══════════════════════════════════════════════════════════════════════
+     THE DEFECT. This route returns one row per driver_compliance record —
+     an ACCOUNT — and the page above it counted those rows and called them
+     drivers. Measured on production 2026-09-21: 810 platform accounts belong
+     to ~349 people, this route answered 437 rows, and the banner read "140
+     drivers cannot legally work — the licence has expired". Every other
+     surface in the product had by then moved onto the person spine, so this
+     page was the last one still disagreeing with all of them — and it is the
+     page whose sentence is the most consequential one this product prints.
+
+     A man with a hotel record and an Uber record was two of that 140. If his
+     hotel licence has lapsed and his Uber one has not, he is ONE person who
+     cannot legally work, and which of his two records carries the lapsed
+     paper is a filing question, not a second human being.
+
+     ── WHY `drivers` IS STILL HERE, UNCHANGED ─────────────────────────────
+     `people` is added beside it rather than replacing it. The account rows
+     are the EVIDENCE the person rows are built from — "which record carries
+     which paper" is the whole point of the grouping, and it cannot be
+     answered from a list that has already been folded. They are also read by
+     test/server_redaction.test.mjs, test/driver_photo.test.mjs and
+     test/held_fields.test.mjs, each pinning a different property of the
+     account row. Renaming the key would have moved those three assertions
+     onto a shape they were not written about.
+
+     `counts` below names each population in words, so no reader of this
+     response can mistake one for the other again.
+
+     ── THE ACCOUNT OBJECTS ARE SHARED, NOT PROJECTED ──────────────────────
+     `accounts` holds the SAME objects `drivers` does — the ones that have
+     already been through stripIdentity() and withPhotos(). A projection here
+     would be a second place where a withheld column could be re-introduced by
+     somebody adding a field, which is exactly the two-definitions failure
+     api/redact.js's header records: /api/driver/profile went on serving
+     784-1977-5137316-4 to an anonymous GET for as long as the identity-doc
+     list lived in two files. One redaction boundary, referenced twice.
+
+     ── COUNTED IN JS, WHICH IS SAFE *HERE* AND NOWHERE NEAR A CAP ─────────
+     The tiles on this page were once a .filter().length over a capped list
+     and the comment above `t` says never to do it again. This is allowed to,
+     for one reason that must stay true: the row query asks for
+     COMPLIANCE_LIMIT + 1 and THROWS when it gets it, so `rows` is either the
+     entire roster or a 500 nobody can mistake for an answer. A person-level
+     count cannot be done in SQL anyway — the spine lives in a Map this
+     process just read — so the alternative is not a better count, it is no
+     count at all. If the cap ever gains a paging shape, these totals have to
+     move with it. */
+  const spine = await personMap(q);
+  /* A DATE COMES BACK AS A JS Date, AND String(thatDate).slice(0, 10) IS
+     "Thu Jan 01". The mode query above uses to_char for exactly this and its
+     comment calls it the third place in this codebase the same slice has been
+     wrong; this would have been the fourth. Read off the LOCAL components,
+     because node-postgres parses a DATE to local midnight — toISOString()
+     under TZ=Asia/Dubai turns 2026-01-01 into 2025-12-31, which is the
+     off-by-one test/hotel_licence_date.test.mjs exists to catch. */
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const dayOf = (v) => (v == null ? null
+    : (v instanceof Date
+      ? `${v.getFullYear()}-${pad2(v.getMonth() + 1)}-${pad2(v.getDate())}`
+      : String(v).slice(0, 10)));
+  /* A REAL expiry: one this product would be willing to act on. Not null, and
+     not the source's own never-filled-in default — the 94 rows carrying
+     2026-01-01 are a data-quality problem and counting them as expiries is
+     how this page once told 77 people to stand down while the insight engine,
+     running the same check, refused to accuse any of them. */
+  const realDate = (r) => r.licence_expires != null && !r.licence_placeholder;
+  const daysLeftOf = (r) => {
+    const n = Number(r.days_left);
+    return Number.isFinite(n) ? n : null;
+  };
+  const groups = new Map();
+  rows.forEach((raw, i) => {
+    const pid = spine.byAccount.get(raw.driver_ext_id) ?? null;
+    /* An account the spine has not placed stands ALONE, under its own key, and
+       says so. It must not be silently folded onto a name — that is the rule
+       CLAUDE.md states and the one `byName` broke for 92 of the directory's
+       347 rows, nine of them contradicted by different phone numbers. And it
+       must not be dropped either: a licence nobody has attached to a person is
+       still a licence that expires. */
+    const key = pid == null ? `account:${raw.platform}\u0000${raw.driver_ext_id}` : `person:${pid}`;
+    if (!groups.has(key)) {
+      const p = pid == null ? null : spine.person.get(pid);
+      groups.set(key, {
+        person_id: pid,
+        /* The spine's name when it has one, because it is the name every
+           other surface prints for this human; the record's own filed name
+           otherwise. The two differ constantly — "MUHAMMAD KHALIFA AFZAL
+           KHALID" on the hotel roster against "Muhammad Khalid" on Uber. */
+        name: p?.name || raw.full_name || null,
+        /* The account this person OPENS at. personMap picks one per person by
+           the same rule /api/ledger/exposure uses — lowest platform, then
+           lowest id — so a person opens the same page from every surface in
+           the product. It may be an account with no compliance record, which
+           is correct: /api/driver/profile resolves all of a person's ids. */
+        driver_ext_id: p?.ext_id || raw.driver_ext_id,
+        platform: p?.platform || raw.platform,
+        person_placed: pid != null,
+        accounts: [],
+        raws: [],
+      });
+    }
+    const g = groups.get(key);
+    g.accounts.push(drivers[i]);
+    /* The UNREDACTED row, kept only inside this function and never put on a
+       person object: the conflict check below compares withheld values and
+       reports only that they differ. The emitted row is built field by field
+       out of `out` further down, so `raws` has no route to the response —
+       and test/compliance_person.test.mjs sweeps the serialised body for the
+       withheld values rather than trusting that. */
+    g.raws.push(raw);
+  });
+
+  /* Two accounts of one person disagreeing about a document is either a filing
+     error or evidence the merge was wrong, and this page is where it should
+     surface rather than being silently resolved by whichever row sorted first.
+
+     COMPARED SERVER-SIDE, REPORTED AS A DIFFERENCE, NEVER AS VALUES. Licence
+     numbers and Emirates IDs are withheld from an anonymous caller by
+     stripIdentity(), and "they differ" is a fact about the records that needs
+     none of the digits to state. The conflict entry names the accounts and
+     the count of distinct values; the values themselves never leave, for an
+     administrator either, because the account rows already carry them where
+     an administrator is entitled to see them.
+
+     THE PLACEHOLDERS ARE NOT COMPARED. Every licence number the hotel channel
+     files is the identical string and every date it files is 2026-01-01, so
+     comparing a real number against the channel's default would raise a
+     conflict on very nearly every person holding one hotel account and one
+     of anything else — 94 accusations of a wrong merge, none of them evidence
+     of anything but an unfilled field. They are excluded and COUNTED, so the
+     page can say a comparison was not possible rather than implying it passed:
+     that distinction is the whole house rule. */
+  const conflictsOf = (raws) => {
+    const out = [];
+    const cmp = (field, value, placeholder) => {
+      const usable = raws.filter((r) => !placeholder(r) && String(value(r) ?? '').trim() !== '');
+      const skipped = raws.length - usable.length;
+      const distinct = new Set(usable.map((r) => String(value(r)).trim()));
+      if (distinct.size > 1) {
+        out.push({
+          field,
+          distinct: distinct.size,
+          /* WHICH records disagree, so an operator has somewhere to go. */
+          accounts: usable.map((r) => ({ platform: r.platform, driver_ext_id: r.driver_ext_id })),
+          not_compared: skipped,
+        });
+      }
+    };
+    cmp('licence_no', (r) => r.licence_no, (r) => Boolean(r.licence_no_placeholder));
+    cmp('emirates_id', (r) => r.emirates_id, () => false);
+    /* The expiry is compared on days_left rather than on the date, because
+       days_left is one subtraction from the same date on the same day: two
+       records differ in expiry exactly when they differ here, and no date
+       parsing — the thing that has been wrong three times in this file — is
+       needed to find out. The DATES are not withheld, so the page can read
+       them straight off the accounts this entry names. */
+    cmp('licence_expires', (r) => daysLeftOf(r), (r) => !realDate(r));
+    return out;
+  };
+
+  const people = [...groups.values()].map((g) => {
+    const dated = g.raws.filter((r) => realDate(r) && daysLeftOf(r) != null);
+    /* The SOONEST real expiry across every record this person holds — which
+       is what "this person cannot legally work" means for a human being, as
+       against for a filing cabinet. One lapsed licence stands the person down
+       whichever of their records carries it. */
+    const worst = dated.reduce(
+      (best, r) => (best == null || daysLeftOf(r) < daysLeftOf(best) ? r : best), null);
+    const daysLeft = worst ? daysLeftOf(worst) : null;
+    /* ABSENT WITH A REASON, AND THE REASON IS THE TRUE ONE. A person with no
+       checkable date is not valid, is not expired, and is certainly not zero
+       days from expiry. The three ways they can get here are different facts
+       about different things and the page renders them differently, so they
+       are distinguished here rather than collapsed into "unknown". */
+    const phAcc = g.raws.filter((r) => r.licence_placeholder).length;
+    const noDateAcc = g.raws.filter((r) => r.licence_expires == null).length;
+    const status = daysLeft == null ? 'unknown'
+      : daysLeft < 0 ? 'expired'
+        : daysLeft <= 45 ? 'expiring' : 'valid';
+    /* Three ways to be unanswerable, and they are three different sentences.
+       A person holding one defaulted record and one blank one is described by
+       neither single-cause wording, and this roster has both kinds on the same
+       people: 94 accounts carry the default date and 195 carry none at all. */
+    const unknownReason = daysLeft != null ? null
+      : phAcc && noDateAcc
+        ? `of this person’s ${g.raws.length} records, ${phAcc} carry the value this source `
+          + `writes when the field was never filled in and ${noDateAcc} carry no date at all, `
+          + 'so not one of them is an expiry'
+        : phAcc
+          ? 'every licence date on this person’s records is the value this source writes '
+            + 'when the field was never filled in, so none of them is an expiry'
+          : 'no channel that onboarded this person publishes a licence expiry date, so whether '
+            + 'their licence is valid cannot be answered from what we hold';
+    const conflicts = conflictsOf(g.raws);
+    /* Is this person still driving? The most recent trip across ALL of their
+       records, because "idle since spring" and "drove last night" is the
+       difference between a filing job and a car to take off the road this
+       morning — and the answer is a property of the human, not of whichever
+       account the trips happened to be filed under. */
+    const lastEver = g.raws.map((r) => r.last_ever).filter(Boolean)
+      .sort((a, b) => Date.parse(b) - Date.parse(a))[0] || null;
+    const trips = g.raws.reduce((n, r) => n + (Number(r.lifetime_trips) || 0), 0);
+    const sinceLast = g.raws.map((r) => Number(r.days_since_last_trip))
+      .filter((n) => Number.isFinite(n)).sort((a, b) => a - b)[0] ?? null;
+    const out = {
+      person_id: g.person_id,
+      name: g.name,
+      driver_ext_id: g.driver_ext_id,
+      platform: g.platform,
+      /* False means "the spine has not placed this account on anybody yet",
+         which is a different row from a person of one account — and the page
+         must not present it as a headcount of one. */
+      person_placed: g.person_placed,
+      accounts: g.accounts,
+      account_count: g.accounts.length,
+      platforms: [...new Set(g.accounts.map((a) => a.platform).filter(Boolean))].sort(),
+      fleets: [...new Set(g.accounts.map((a) => a.fleet_id).filter(Boolean))].sort(),
+      /* Contact details, from whichever of the person's records carries them.
+         Not redacted, here as everywhere — see "what stays, and why" in
+         api/redact.js. */
+      phone: g.accounts.map((a) => a.phone).find(Boolean) || null,
+      email: g.accounts.map((a) => a.email).find(Boolean) || null,
+      picture_url: g.accounts.map((a) => a.picture_url).find(Boolean) || null,
+      licence_status: status,
+      days_left: daysLeft,
+      licence_expires: worst ? dayOf(worst.licence_expires) : null,
+      /* WHICH record carries the expiry this row is headed by. A person row
+         that says "expired 247 days ago" and does not say which of three
+         records says so gives an operator nothing to act on. */
+      soonest_account: worst
+        ? { platform: worst.platform, driver_ext_id: worst.driver_ext_id } : null,
+      licence_unknown_reason: unknownReason,
+      /* Records carrying the source's default date, counted per person: the
+         page states this rather than counting them as expiries. */
+      placeholder_accounts: phAcc,
+      no_date_accounts: noDateAcc,
+      dated_accounts: dated.length,
+      conflicts,
+      conflict_fields: conflicts.map((c) => c.field),
+      vehicle: g.accounts.map((a) => a.vehicle).find((v) => v && v.plate) || null,
+      state: g.accounts.map((a) => a.state).find((s) => /suspend|deact/i.test(s || ''))
+        || g.accounts.map((a) => a.state).find(Boolean) || null,
+      suspension_reason: g.accounts.map((a) => a.suspension_reason).find(Boolean) || null,
+      last_ever: lastEver,
+      lifetime_trips: g.raws.some((r) => r.lifetime_trips != null) ? trips : null,
+      days_since_last_trip: sinceLast,
+      activity_by_name: g.raws.some((r) => r.activity_by_name),
+    };
+    return out;
+  });
+  /* Soonest first, and the people nobody can check at the END — the same
+     ordering rule the account list above follows and for the same reason: a
+     page whose job is "whose licence lapses next" must not open on rows that
+     mean "this field was never filled in". */
+  const RANK = { expired: 0, expiring: 1, valid: 2, unknown: 3 };
+  people.sort((a, b) => (RANK[a.licence_status] - RANK[b.licence_status])
+    || ((a.days_left ?? Infinity) - (b.days_left ?? Infinity))
+    || String(a.name || '').localeCompare(String(b.name || '')));
+
+  const placed = people.filter((p) => p.person_placed).length;
+  const unplaced = people.length - placed;
+  /* WHAT THIS COUNT IS A COUNT OF, said in the response rather than left for a
+     page to assume. Four states, because they are four different answers:
+
+       spine        every account on this roster belongs to a reviewed person
+       spine-partial some do and some do not; the total is people plus the
+                    accounts nobody has placed yet, and the page says so
+       unplaced     the spine read fine and has placed NONE of these accounts,
+                    which is what a roster looks like before src/persons.js has
+                    run once — the count is a count of accounts and claiming
+                    otherwise would re-ship the exact defect this change fixes
+       unreadable   the query threw. personMap's own contract is that `ok` is
+                    false ONLY then, and that it must never be read as "nobody
+                    is anybody" — so the page renders the headcount ABSENT WITH
+                    A REASON rather than falling back to counting rows. */
+  const personBasis = !spine.ok ? 'unreadable'
+    : placed === 0 && people.length > 0 ? 'unplaced'
+      : unplaced > 0 ? 'spine-partial' : 'spine';
+  const personBasisNote = {
+    spine: 'One row per person, from the reviewed person spine — the same table the driver '
+      + 'directory, the money ledger and every other surface in this product count.',
+    'spine-partial': `${placed} of these rows are people the spine has placed; the other `
+      + `${unplaced} are platform accounts it has not attached to anybody yet, shown one per row `
+      + 'and marked. Until they are reviewed the total is people plus unplaced accounts, not a '
+      + 'clean headcount.',
+    unplaced: 'The person spine holds none of these accounts yet, so this list is one row per '
+      + 'ACCOUNT and the count below is a count of records rather than of people. It becomes a '
+      + 'headcount once the collector has run src/persons.js over this roster.',
+    unreadable: 'The person spine could not be read on this request, so these rows could not be '
+      + 'grouped into people at all: every row below is one platform account. This is a failure '
+      + 'to measure, not a fleet of one-account drivers.',
+  }[personBasis];
+  /* The person-level totals the page's headline is drawn from. Named `people`
+     so a tile built from them cannot be mistaken for one built from `totals`,
+     which counts driver_compliance ROWS and always did. */
+  const pt = {
+    total: people.length,
+    placed,
+    unplaced_accounts: unplaced,
+    expired: people.filter((p) => p.licence_status === 'expired').length,
+    expiring_45: people.filter((p) => p.licence_status === 'expiring').length,
+    valid: people.filter((p) => p.licence_status === 'valid').length,
+    /* Not "valid" and not "expired": the people no date on file can answer
+       for. Split, because "the source wrote its default" and "no channel
+       publishes one at all" are facts about different things. */
+    unknown: people.filter((p) => p.licence_status === 'unknown').length,
+    placeholder_only: people.filter((p) => p.licence_status === 'unknown'
+      && p.placeholder_accounts > 0).length,
+    no_date_at_all: people.filter((p) => p.licence_status === 'unknown'
+      && p.placeholder_accounts === 0).length,
+    with_conflicts: people.filter((p) => p.conflicts.length > 0).length,
+    multi_account: people.filter((p) => p.account_count > 1).length,
+    accounts: people.reduce((n, p) => n + p.account_count, 0),
+  };
   /* SAID, not merely absent. api/public/app.js rendered a missing licence
      number as an em-dash captioned "this channel publishes no licence number",
      which for a WITHHELD one is a false statement about the provider — exactly
@@ -5128,7 +5462,30 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
     : 'No channel on this fleet reports an Emirates ID, so this column is empty for '
       + 'everyone — an absence about the sources, not about the drivers.';
   res.json({
+    /* ACCOUNTS. One row per driver_compliance record, which is what this key
+       has always held — see the grouping block above for why it stays. */
     drivers,
+    /* PEOPLE. One row per human, each carrying its accounts' documents. */
+    people,
+    people_totals: pt,
+    person_basis: personBasis,
+    person_basis_note: personBasisNote,
+    /* The spine's own view of the fleet, so a page can say when this roster
+       covers only part of it — 437 of 810 accounts have a compliance record at
+       all, and "349 people" is not "349 people with papers on file". */
+    spine_counts: spine.ok ? spine.counts : null,
+    /* WHAT EACH NUMBER ON THIS RESPONSE COUNTS, in words, at the top level.
+       "How many drivers" had four answers on 2026-09-21 and none of them was
+       a count of human beings; a response that carries two populations owes
+       the reader a sentence saying which is which. */
+    counts: {
+      people: pt.total,
+      accounts_on_this_roster: rows.length,
+      accounts_on_the_spine: spine.ok ? spine.counts.accounts : null,
+      note: 'people counts human beings from the reviewed person spine; '
+        + 'accounts_on_this_roster counts driver_compliance records, which is what this page '
+        + 'used to report as a driver count.',
+    },
     /* Which columns were removed, named, so a page can caption the gap instead
        of implying the provider sent nothing. Empty for an administrator. */
     identity_withheld: admin ? [] : IDENTITY_DOCS,

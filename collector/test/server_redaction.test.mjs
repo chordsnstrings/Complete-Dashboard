@@ -250,8 +250,31 @@ function complianceApp() {
     if (/FROM driver_photo/.test(sql)) return [{ platform: 'uber', driver_ext_id: 'u-2' }];
     throw new Error(`unexpected SQL in the compliance route: ${sql.slice(0, 80)}`);
   };
+  /* THE PERSON SPINE, STUBBED TO PLACE BOTH ACCOUNTS ON ONE HUMAN.
+     ───────────────────────────────────────────────────────────────────────
+     /api/compliance/drivers groups its roster by person now, so the route
+     reaches for personMap and an injection set that omits it is a
+     ReferenceError this harness reports as an empty body.
+
+     It is stubbed rather than imported because the real one would be handed
+     the fake `q` above, throw on the unrecognised SQL, and come back ok:false
+     — which is the "could not read the spine" branch, in which nothing is
+     grouped. This file's subject is what the BOUNDARY does with rows it has
+     been handed, and the sharper question for it is whether a person row
+     built out of two accounts leaks either account's documents: h-1 carries
+     the Emirates ID 784-1977-5137316-4 and licence 123456, u-2 carries
+     neither, and the sweep below reads the WHOLE serialised body. Grouping
+     them makes that sweep cover the person rows too. */
+  const personMap = async () => ({
+    ok: true,
+    byAccount: new Map([['h-1', 1], ['u-2', 1]]),
+    person: new Map([[1, { person_id: 1, name: 'Sayed Kamal', cash_rule: null,
+      accounts: [{ platform: 'hotel', ext_id: 'h-1' }, { platform: 'uber', ext_id: 'u-2' }],
+      platforms: ['hotel', 'uber'], ext_id: 'h-1', platform: 'hotel' }]]),
+    counts: { people: 1, accounts: 2 },
+  });
   return (app) => mount(app, F_COMPLIANCE, { q, wrap, isAdmin, vehicleLatest,
-    IDENTITY_DOCS, stripIdentity, withheldNote, withPhotos });
+    IDENTITY_DOCS, stripIdentity, withheldNote, withPhotos, personMap });
 }
 
 console.log('\n/api/compliance/drivers — 123 Emirates IDs to anyone who knew the URL');

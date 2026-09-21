@@ -135,14 +135,73 @@ const isNameKey = (id) => String(id || '').startsWith('name:');
    moved, only where it is defined — and exported as a factory. test/mount.mjs
    calls every export whose name matches /Routes$/; this name deliberately does
    not match, so it is importable without being mounted. */
+/* THE PERSON ID AS A REQUEST PARAMETER, AND WHY IT IS ITS OWN PARAMETER.
+   ═════════════════════════════════════════════════════════════════════════
+   `?id=` has always meant "a provider account id, or a synthesised name: key".
+   A person id is a third thing — a bigint out of the `driver` table, which is
+   what driver_ledger.person_id keys money on — and folding it into `?id=`
+   would mean guessing from the shape of the value which namespace the caller
+   meant. Yango and Bolt both issue digits-only account ids, so `?id=412` is
+   genuinely ambiguous: it is a plausible Yango account AND a plausible person.
+   A route that guesses would, on the day those two collide, answer one
+   person's page under another person's address.
+
+   So the person travels in `?person=`, and the response says which parameter
+   resolved it. A leading `p` is accepted because that is how the address
+   spells it (`#driver/p412`, see api/public/data.js) and a caller that passes
+   the address slot through unchanged should not get a 404 for a prefix. */
+export function personParam(req) {
+  const raw = req?.query?.person ?? req?.query?.person_id ?? null;
+  if (raw == null || raw === '') return null;
+  const m = /^p?(\d+)$/i.exec(String(raw).trim());
+  return m ? Number(m[1]) : NaN;         // NaN = asked for, but not a person id
+}
+
 export function driverScope({ q, wrap }) {
 
-  /* Resolve `?id=` (a platform driver id, or a synthesised name: key) or
-     `?name=` into every record for that person. Returns null when nothing
-     matches, so callers can 404 honestly. */
+  /* Resolve `?person=` (a person id out of the spine), `?id=` (a platform
+     driver id, or a synthesised name: key) or `?name=` into every record for
+     that person. Returns null when nothing matches, so callers can 404
+     honestly — except for the one case that is not a 404, below. */
   async function resolve(req) {
-    const id = req.query.id || null;
+    let id = req.query.id || null;
     const nameQ = req.query.name || null;
+    /* ── ADDRESSED BY PERSON ────────────────────────────────────────────
+       The spine names the accounts; the fold below resolves one of them the
+       way it always has. Seeding it with the person's CANONICAL account —
+       api/person_map.js picks it deterministically, lowest platform then
+       lowest id — is what makes the two addresses answer identically rather
+       than approximately: `#driver/p412` and `#driver/<any of their accounts>`
+       both run the same resolution from the same seed, so no panel on the page
+       can differ between them. Asserted in test/person_address.test.mjs.
+
+       A read failure is NOT a 404. api/person_map.js returns ok:false when the
+       query threw, and answering "no such person" to a question we failed to
+       ask is the house rule's exact prohibition: never a reason that is not
+       the true one. It comes back as a refusal the caller can print. */
+    let resolvedBy = id ? 'ext_id' : (nameQ ? 'name' : null);
+    let personId = null;
+    const asked = personParam(req);
+    if (asked != null) {
+      if (!Number.isFinite(asked)) return { unresolvable: 'not-a-person-id' };
+      const spine = await personMap(q);
+      if (!spine.ok) return { unresolvable: 'spine-unreadable' };
+      const p = spine.person.get(asked);
+      if (!p) return null;
+      personId = asked;
+      resolvedBy = 'person_id';
+      /* A person with no live platform account at all is a real row — the
+         ledger mints one for somebody paid before any account was linked, and
+         a merge that was undone leaves one behind. There is no account to
+         seed the fold with, so the page answers over their name and nothing
+         else rather than over everybody. `keys` is the name key alone: it
+         matches the rows a channel filed under that name and no others. */
+      if (!p.ext_id) {
+        return { id: null, name: p.name || null, ids: [], keys: [nameKey(p.name)],
+          platforms: [], person_id: personId, resolved_by: resolvedBy };
+      }
+      id = p.ext_id;
+    }
     let seed = null;
     /* A name: key is not a provider id and will never be found in a
        driver_ext_id column — looking it up there 404s a person the directory
@@ -199,7 +258,8 @@ export function driverScope({ q, wrap }) {
     const links = await identityLinks(q);
     const name = canonicalName(id) || (id && linkedName(links, id)) || seed?.driver_name || nameQ;
     if (!name) return id
-      ? { id, name: null, ids: [id], keys: [id], platforms: seed ? [seed.platform] : [] }
+      ? { id, name: null, ids: [id], keys: [id], platforms: seed ? [seed.platform] : [],
+        person_id: personId, resolved_by: resolvedBy }
       : null;
 
     /* Every id sharing the canonical name, across all sources that carry names.
@@ -266,13 +326,43 @@ export function driverScope({ q, wrap }) {
          one merged pair files no trips at all, so a list built from work alone
          would omit the channel carrying the fact the operator needs — that the
          fleet deactivated that account. */
-      platforms: [...new Set([...alias.map((a) => a.platform), ...ids.flatMap(mergedPlatforms)])] };
+      platforms: [...new Set([...alias.map((a) => a.platform), ...ids.flatMap(mergedPlatforms)])],
+      /* Which parameter answered, carried on the resolution rather than
+         re-derived by each caller. /api/driver/profile spreads this straight
+         into its response so a reader — or a script — can tell a page reached
+         by its stable address from one reached by an account that happens to
+         represent it today. */
+      person_id: personId, resolved_by: resolvedBy };
   }
 
   // Wrap a handler so it resolves the driver first and 404s cleanly when unknown.
   const withDriver = (fn) => wrap(async (req, res) => {
     const d = await resolve(req);
     if (!d) return res.status(404).json({ error: 'driver not found' });
+    /* A FAILED READ IS NOT A 404, AND A MALFORMED PARAMETER IS NOT ONE EITHER.
+       ─────────────────────────────────────────────────────────────────────
+       "driver not found" is an assertion about the fleet. When the person
+       register could not be read, the true statement is that we could not
+       look — and a reader told "no such driver" about somebody who exists
+       goes looking for the deletion that never happened. api/person_map.js
+       makes the distinction available (`ok`) precisely so the surfaces above
+       it stop flattening the two. */
+    if (d.unresolvable === 'spine-unreadable') {
+      return res.status(503).json({
+        error: 'the person register could not be read',
+        detail: 'This page is addressed by a person id, and the query that resolves a person id '
+          + 'to their platform accounts failed. It says nothing about whether this person '
+          + 'exists — try the address of one of their provider accounts, or this one again.',
+      });
+    }
+    if (d.unresolvable === 'not-a-person-id') {
+      return res.status(400).json({
+        error: 'person must be a person id',
+        detail: 'A person id is the numeric id of a row in the driver table, spelled p412 in an '
+          + 'address and 412 here. A provider account id goes in ?id= instead — the two are '
+          + 'different namespaces and this route will not guess which one was meant.',
+      });
+    }
     // The MATCH set, not the account list — see resolve() above.
     return fn(req, res, d, [...win(req), d.keys]);
   });
@@ -1202,7 +1292,64 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const rated = standing.filter((r) => r.rating != null)
       .sort((a, b) => (b.lifetime_trips || 0) - (a.lifetime_trips || 0));
     const banned = standing.filter((r) => r.is_banned === true);
+    /* WHO THIS PAGE IS, AS OPPOSED TO WHICH ACCOUNT OPENED IT.
+       ═════════════════════════════════════════════════════════════════════
+       The page's stable address is the person id, so the profile has to carry
+       it — and it has to carry the accounts the person holds, because that is
+       the fact the header exists to state: this page folds these three
+       provider records, on these channels, into one human.
+
+       THREE ABSENCES, THREE SENTENCES, and they are not the same fact.
+
+         · the register could not be read (personMap ok:false). We failed;
+           this says nothing about the person.
+         · the register is empty. src/persons.js has not run on this database
+           yet, so NOBODY is placed — not a judgement about this account.
+         · the register is built and this account is not in it. src/persons.js
+           places an account from reviewed decisions only, so an account
+           nobody has reviewed stays addressed by its provider id.
+
+       A single "no person" would be the same defect as a zero nobody
+       measured, in prose: three different states flattened into one word, and
+       the reader with no way to tell which of them they are looking at. The
+       page renders exactly as it did before in all three — this is an
+       ADDRESS, and a person who has not been placed still has trips, money
+       and a licence that expires. */
+    const spine = await personMap(q);
+    const placedId = d.person_id ?? (spine.ok
+      ? (d.ids.map((i) => spine.byAccount.get(i)).find((x) => x != null) ?? null) : null);
+    const person = placedId != null ? (spine.person.get(placedId) || null) : null;
+    const personAccounts = (person?.accounts || []).map((a) => ({
+      platform: a.platform, ext_id: a.ext_id, basis: a.basis, display_name: a.display_name,
+      /* Which of this person's accounts is the one in the URL, when the URL
+         named an account. The header marks it, so a reader who followed an
+         old link can see which record they came in on. */
+      asked: a.ext_id === d.id,
+    }));
+    const personAbsent = person ? null
+      : !spine.ok
+        ? 'The person register could not be read just now, so this page is addressed by the '
+          + 'provider account in the link. That is a failure of the query, not a statement '
+          + 'about this driver: whether their accounts have been folded onto one person is '
+          + 'not known from here.'
+        : spine.counts.people === 0
+          ? 'No person register has been built on this database yet. src/persons.js writes one '
+            + 'row per human on each collector pass, and it has not run, so no account has been '
+            + 'placed — including this one. The page is addressed by its provider account until '
+            + 'it has.'
+          : 'The person register has not placed this account on anybody yet. Accounts are '
+            + 'joined to a person from reviewed decisions only — a name that looks like another '
+            + 'name joins nothing — so an account nobody has reviewed keeps its provider '
+            + 'address. Everything below is this account and whatever the name fold already '
+            + 'joins to it, which is what this page has always shown.';
     res.json({ ...d,
+      /* The canonical identity of the page, beside the account that opened it.
+         `resolved_by` comes off the resolution and says which parameter
+         answered: 'person_id', 'ext_id' or 'name'. */
+      person_id: placedId,
+      person_name: person?.name ?? null,
+      person_accounts: personAccounts,
+      person_absent_reason: personAbsent,
       span, compliance, standing, vehicles, accounts,
       /* Named, so the page captions the gap instead of implying the provider
          sent nothing. Empty for an administrator. */
