@@ -6695,8 +6695,48 @@ app.get('/api/economics/drivers', (_, r) => {
        NOT a number — the case that must render a dash with a reason and never
        a confident low percentage
 */
-app.get('/api/ledger/exposure', (_, r) => r.json({
+/* ONE DRIVER, ADDRESSED BY ACCOUNT. The driver pages carry a provider id and
+   the ledger keys on a person, so both read endpoints take ext_id — and an
+   account that resolves to nobody must answer EMPTY WITH A REASON rather than
+   falling through to the whole fleet, which is what a `$3 IS NULL OR` filter
+   does with a null person. A fixture that only ever asks about the fleet
+   cannot tell those two apart. */
+const LEDGER_ACCOUNTS = { 'U-TARIQ': 1, 'U-SELIM': 2 };
+const ledgerAbsent = 'nothing has ever been recorded against this driver on the money ledger, '
+  + 'so they have no record here. A record is created by the first entry made against them — '
+  + 'an advance, a deposit, a salary or a starting balance — and not by opening this page.';
+
+app.get('/api/ledger/exposure', (req, r) => {
+  const ext = String(req.query.ext_id || '');
+  if (ext && !LEDGER_ACCOUNTS[ext]) {
+    return r.json({ from: null, to: null, person_id: null, people: [],
+      policy: null, policy_absent_reason: null,
+      summary: { people: 0, measurable: 0, not_measurable: 0, over_policy: 0,
+        fleet_ratio: null, fleet_ratio_reason: 'exposure is a per-person measure by instruction.' },
+      absent_reason: ledgerAbsent });
+  }
+  const full = LEDGER_FLEET_EXPOSURE;
+  if (!ext) return r.json(full);
+  const one = full.people.filter((p) => p.person_id === LEDGER_ACCOUNTS[ext]);
+  return r.json({ ...full, person_id: LEDGER_ACCOUNTS[ext],
+    resolved_from: `account:uber:${ext}`, absent_reason: null,
+    people: one,
+    summary: { ...full.summary, people: one.length,
+      measurable: one.filter((p) => p.exposure_pct != null).length,
+      not_measurable: one.filter((p) => p.exposure_pct == null).length } });
+});
+
+const LEDGER_FLEET_EXPOSURE = ({
   from: null, to: null,
+  /* THE SAME KEYS THE REAL ROUTE ANSWERS, INCLUDING THE NULL ONES.
+     test/mockapi.test.mjs compares the fixture's shape against the live API and
+     caught these three missing — which is the whole reason it exists: a fixture
+     that answers a narrower shape than production lets a page ship reading a
+     field the mock never had, and the browser tests pass all the way to a
+     deploy. `person_id` and `resolved_from` are null on a fleet-wide read and
+     filled when one is asked about by account; `absent_reason` is null unless
+     an account resolved to nobody. */
+  person_id: null, resolved_from: null, absent_reason: null,
   policy: { pct: 35, effective_from: '2026-01-01', set_by: 'ahsan', note: 'opening policy' },
   policy_absent_reason: null,
   summary: { people: 3, measurable: 2, not_measurable: 1, over_policy: 1,
@@ -6708,6 +6748,18 @@ app.get('/api/ledger/exposure', (_, r) => r.json({
       ext_id: 'U-TARIQ', link_platform: 'uber',
       accounts: 2, accounts_with_revenue: 2,
       owes: { advance: 2500, deduction: 0, cash: 1000, cash_absent_reason: null,
+        /* EVERY TERM, because the cash figure is the one number on the money
+           pages that is DERIVED rather than recorded, and the derivation is
+           where it goes wrong. A fixture carrying only the total cannot tell a
+           page that shows the terms from one that asks a reader to trust a
+           number it will not explain. */
+        cash_basis: { opening: 400, opening_on: '2026-01-01',
+          collected_since: 2100, collected_trips: 31, collected_unpriced_trips: 0,
+          handed_in_since: 1500, handed_in_entries: 4, is_a_floor: false,
+          floor_reason: null,
+          from: 'an opening position stated by the accounts team, plus fares on cash-marked '
+            + 'trips since that date over this person\'s accounts, minus deposits recorded '
+            + 'since.' },
         total: 3500, total_absent_reason: null },
       pay_book: -3500, earned: 10000, earned_absent_reason: null, earning_days: 21,
       exposure_pct: 35, exposure_absent_reason: null, policy_pct: 35, over_policy: false,
@@ -6738,7 +6790,7 @@ app.get('/api/ledger/exposure', (_, r) => r.json({
         + 'understate exposure, which is the dangerous direction.',
       policy_pct: 35, over_policy: null, verdict: 'not measurable', last_entry: '2026-09-12' },
   ],
-}));
+});
 
 /* WHO A PICKER MAY OFFER — three people who exist plus two roster accounts
    nobody has claimed. The second half is the whole reason this endpoint is
@@ -6823,6 +6875,18 @@ app.get('/api/ledger/people', (_, r) => r.json({
 
 app.get('/api/ledger/entries', (req, r) => {
   const book = String(req.query.book || '');
+  const ext = String(req.query.ext_id || '');
+  /* An account nobody has recorded against answers EMPTY WITH A REASON. It must
+     not fall through to the unfiltered register — the real route's filter is
+     `$3::bigint IS NULL OR e.person_id = $3`, which reads a null person as "no
+     filter", so a driver with no ledger record would have been shown every
+     entry in the fleet under their own name, on their own page. */
+  if (ext && !LEDGER_ACCOUNTS[ext]) {
+    return r.json({ from: null, to: null, person_id: null, book: book || null,
+      totals: { rows: 0, verification_rows: 0, advance: null, cash: null,
+        deduction: null, pay: null, excludes_verification: true },
+      shown: 0, listed_why: null, entries: [], absent_reason: ledgerAbsent });
+  }
   const all = [
     { id: 3, person_id: 1, person_name: 'Tariq Afzal Said Afzal', type_code: 'cash_advance', ext_id: 'U-TARIQ',
       label: 'Cash advance', book: 'advance', amount: 2500, settles_via: 'cash',
@@ -6845,11 +6909,19 @@ app.get('/api/ledger/entries', (req, r) => {
         absent_reason: 'the photograph has passed its twelve-month retention and been removed. '
           + 'The entry is permanent and still records that one was held.' } },
   ];
-  const rows = book ? all.filter((e) => e.book === book) : all;
+  const byBook = book ? all.filter((e) => e.book === book) : all;
+  const rows = ext ? byBook.filter((e) => e.person_id === LEDGER_ACCOUNTS[ext]) : byBook;
+  const sum = (b) => {
+    const m = rows.filter((e) => e.book === b);
+    return m.length ? Math.round(m.reduce((a, e) => a + e.amount, 0) * 100) / 100 : null;
+  };
   return r.json({
-    from: null, to: null, person_id: null, book: book || null,
-    totals: { rows: rows.length, verification_rows: 0, advance: 1500, cash: null,
-      deduction: 300, pay: null, excludes_verification: true },
+    from: null, to: null, person_id: ext ? LEDGER_ACCOUNTS[ext] : null, book: book || null,
+    resolved_from: ext ? `account:uber:${ext}` : null,
+    absent_reason: null,
+    totals: { rows: rows.length, verification_rows: 0,
+      advance: sum('advance'), cash: sum('cash'), deduction: sum('deduction'), pay: sum('pay'),
+      excludes_verification: true },
     shown: rows.length, listed_why: null, entries: rows,
   });
 });

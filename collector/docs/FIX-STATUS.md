@@ -1569,3 +1569,45 @@ Habib Momin` ⇐ `Abdul Hannan Momin` on plate L78475. And **the count stops
 falling**: 148 held across seven consecutive reads and several refreshes, where
 before the fix the next pass took it to 0. The 124 decided rows were never
 touched.
+
+---
+
+## Batch — the money ledger could not be started, and the line could not be set
+
+2026-09-21. Three defects that only existed together, and none of which any of
+the 270 test files could see, because every ledger fixture seeds a person before
+it asks anything. **A fixture that begins by creating the thing under test
+cannot detect that nothing in the product creates it.** That is the general
+lesson and it is now a trap in `docs/COVERAGE.md`.
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | **the closed loop.** People are minted by the first entry; every picker listed drivers from `/api/ledger/exposure`, which reads `driver`; `driver` is empty until an entry exists. Live on production as five zeroes | `GET /api/ledger/people` — the minted people UNION the unclaimed platform roster. Every picker reads it through `loadPeople()` | written, **proven by two reverts** (`test/ledger_people.test.mjs`) |
+| — | **`api/ledger_person.js` selected `driver_name` from `driver_platform_state`,** a column that table has never had. The statement threw, the transaction rolled back, and the FIRST entry against anybody the merge register knows wrote nothing — 130 entries over 124 people | `full_name`, in both roster tables | written, **proven by revert** (4 assertions red) |
+| — | **no write route for `ledger_policy`.** Every exposure figure in the product read "no threshold has been stored, so no exposure can be judged" | `GET`/`POST /api/ledger/policy` and `#policy` | written, **proven by revert** (dry-run rollback: 5 red; in-force: 2 red; invented placeholder: 1 red) |
+| — | `/api/ledger/import/commit` took person ids only, so a historical sheet could not be imported into the ledger an import exists to OPEN | an account is also an address; a NAME is still refused at the boundary, held by 3 assertions | written, proven |
+| — | the import preview matched against `driver` alone — four hundred rows of "not on the roster" on the first sheet anybody loads | matches the union | written |
+| — | **`$N::bigint IS NULL OR person_id = $N` on the driver Money tab.** An account nobody has recorded against resolves to null, which the filter reads as NO FILTER — the whole fleet's entries, summed, under one driver's name on their page | empty with a reason, before the query | written, **proven by revert** (register returned 2 people, `advance: 14999`) |
+
+### What was removed rather than kept
+
+One clause in the `in_force` computation read as a guard and was dead — the
+subquery already restricts to rows in force, so a future-dated row fails the id
+comparison by construction. Reverting it left the suite green, which is how it
+was found. Removed, for the reason `api/import_routes.js` gives about its own
+dead 2000-row cap: **a check that cannot fire is worse than none, because it
+reads as a considered one.**
+
+### And a fixture caught by the fixture-checker
+
+`test/mockapi.test.mjs` compares the mock's shape against the live API across
+124 routes and failed on `/api/ledger/exposure: fixture lacks person_id,
+resolved_from, absent_reason`. That is the failure mode it exists for — a mock
+answering a narrower shape than production lets a page ship reading a field the
+mock never had, and the browser tests stay green all the way to a deploy.
+
+**NOT YET PROVEN.** Everything above is `written` and `committed`. Nothing here
+is proven until it has been re-measured on production after the deploy — in
+particular the thing that started it: `/api/ledger/people` returning a non-empty
+roster on the live database, and a policy row actually stored so exposure stops
+refusing for want of one.

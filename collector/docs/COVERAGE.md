@@ -827,6 +827,41 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **`$N::bigint IS NULL OR col = $N` TREATS AN UNRESOLVED KEY AS "NO FILTER".**
+  It is the right idiom for an optional filter and a loaded gun everywhere a
+  page supplies the key from something that can fail to resolve. The driver
+  Money tab is addressed by a PROVIDER account and the ledger keys on a person;
+  an account nobody has recorded against resolves to null, and both
+  `/api/ledger/exposure` and `/api/ledger/entries` would then have answered
+  with the WHOLE FLEET — every entry in the ledger, summed, under one driver's
+  name on their own page. Proved by reverting the guards: the register came
+  back with two people's entries and `advance: 14999`. Wherever a null key
+  means "this thing does not exist" rather than "the caller did not ask",
+  return empty with a reason BEFORE the query. `test/driver_money_tab.test.mjs`.
+
+* **A READ MUST NEVER MINT.** `resolvePerson` creates a person when it cannot
+  find one, which is correct at write time. Reusing it to resolve a page's
+  account would mean opening somebody's profile creates their ledger record —
+  a fleet browsed end to end mints four hundred people who have never had a
+  dirham recorded against them, and every figure on every money page is then
+  counted over a population the act of looking created. `personFor()` in
+  `api/ledger_routes.js` is the read-only half and exists only for this.
+
+* **BACKTICKS INSIDE A JS TEMPLATE LITERAL.** Writing a prose comment inside a
+  SQL template literal and quoting an identifier or an error message in
+  backticks terminates the string. `node --check` catches it, but only if it is
+  run — this has now broken `api/ledger_routes.js` and `api/ledger_person.js`
+  once each, both times in a long explanatory comment. After any edit that
+  inserts text inside a template literal, `node --check` the file before
+  running anything else.
+
+* **`npm test | tail` REPORTS *TAIL'S* EXIT CODE, AND TRUNCATES THE FAILURE.**
+  Already recorded for the exit code; the second half cost time again on
+  2026-09-21. The runner prints failing files as it goes and the summary line
+  LAST, so `| tail -30` shows "1 file(s) failing" with the name of the file
+  scrolled off the top. Redirect to a file and grep it: `npm test > log 2>&1`
+  then `grep -v '^✓' log`.
+
 * **`driver_platform_state` AND `driver_compliance` NAME THEIR PEOPLE IN
   `full_name`. `driver_name` IS THE OTHER HALF OF THE SCHEMA.** `driver_name`
   is the trip- and rollup-side spelling — `trip`, `money_event`,

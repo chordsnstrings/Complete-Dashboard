@@ -430,15 +430,78 @@ export function ledgerPeopleRoutes(app, { q, wrap }) {
   }));
 }
 
+
+/* ADDRESSING A PERSON FROM A PAGE THAT DOES NOT KNOW THEIR PERSON ID.
+   ═════════════════════════════════════════════════════════════════════════
+   Every driver page in this product is addressed by a PROVIDER account —
+   #driver/U-TARIQ — because that is what a link from a trip, a payout or a
+   roster carries. This ledger keys on a person. So a read from a driver page
+   arrives holding the one thing the ledger does not use.
+
+   READ-ONLY, AND NEVER A MINT. api/ledger_person.js creates a person when it
+   cannot find one, which is right at write time and wrong here: opening
+   somebody's page would silently create their ledger record, and a fleet
+   browsed end to end would mint four hundred people who have never had a
+   dirham recorded against them. Every figure on every money page would then be
+   counted over a population the act of looking created.
+
+   So this looks the account up and, finding nothing, says so. "Nothing has
+   been recorded against this driver" is the true answer and the useful one.
+
+   NO NAME MATCHING, for the reason api/ledger_person.js gives at length. */
+async function personFor(q, req) {
+  const explicit = Number(req.query.person_id) || null;
+  if (explicit) return { person_id: explicit, from: 'person_id', absent_reason: null };
+
+  const extId = String(req.query.ext_id || '').trim();
+  if (!extId) return { person_id: null, from: null, absent_reason: null };
+  const platform = String(req.query.platform || '').trim().toLowerCase() || null;
+
+  const [row] = await q(
+    `SELECT driver_id, platform, basis FROM driver_platform_id
+      WHERE external_id = $1 AND ($2::text IS NULL OR platform = $2::text)
+        AND detached_at IS NULL
+      ORDER BY driver_id LIMIT 1`, [extId, platform]);
+
+  if (row) {
+    return { person_id: Number(row.driver_id),
+      from: `account:${row.platform}:${extId}`, absent_reason: null };
+  }
+  return { person_id: null, from: null,
+    /* The distinction a reader needs: this account exists and has no ledger
+       record, which is not the same as the ledger failing to answer. */
+    absent_reason: 'nothing has ever been recorded against this driver on the money ledger, so '
+      + 'they have no record here. A record is created by the first entry made against them — '
+      + 'an advance, a deposit, a salary or a starting balance — and not by opening this page.' };
+}
+
 export function ledgerRegisterRoutes(app, { q, wrap }) {
   const LIMIT = 200;
   app.get('/api/ledger/entries', wrap(async (req, res) => {
     const d = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim()) ? String(v).trim() : null);
     const from = d(req.query.from);
     const to = d(req.query.to);
-    const personId = Number(req.query.person_id) || null;
+    /* person_id OR ext_id — the driver pages carry the second. Resolved
+       read-only; opening a page never creates a ledger record. */
+    const who = await personFor(q, req);
+    const personId = who.person_id;
     const book = ['advance', 'cash', 'deduction', 'pay'].includes(String(req.query.book))
       ? String(req.query.book) : null;
+
+    /* An account that resolves to nobody must not fall through to the
+       UNFILTERED register. `$3::bigint IS NULL OR e.person_id = $3` treats a
+       null person as "no filter", so asking about a driver with no ledger
+       record would have answered with EVERY entry in the fleet, under their
+       name, on their page. Answered as empty, with the reason. */
+    if (who.absent_reason) {
+      return res.json({
+        from, to, person_id: null, book,
+        totals: { rows: 0, verification_rows: 0, advance: null, cash: null,
+          deduction: null, pay: null, excludes_verification: true },
+        shown: 0, listed_why: null, entries: [],
+        absent_reason: who.absent_reason,
+      });
+    }
 
     const W = `($1::date IS NULL OR e.effective_on >= $1::date)
            AND ($2::date IS NULL OR e.effective_on <= $2::date)
@@ -490,6 +553,8 @@ export function ledgerRegisterRoutes(app, { q, wrap }) {
 
     res.json({
       from, to, person_id: personId, book,
+      resolved_from: who.from,
+      absent_reason: null,
       totals: {
         rows: tot.rows,
         verification_rows: tot.verification_rows,
@@ -933,7 +998,25 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
     const d = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim()) ? String(v).trim() : null);
     const from = d(req.query.from);
     const to = d(req.query.to);
-    const onePerson = Number(req.query.person_id) || null;
+    /* person_id OR ext_id, the second resolved READ-ONLY — see personFor().
+       Opening a driver page must never mint that driver a ledger record. */
+    const who = await personFor(q, req);
+    const onePerson = who.person_id;
+    if (who.absent_reason) {
+      /* AN ACCOUNT THAT RESOLVES TO NOBODY MUST NOT FALL THROUGH TO THE WHOLE
+         FLEET. The filter is `$3::bigint IS NULL OR dr.id = $3`, which reads a
+         null person as "no filter" — so a question about one driver with no
+         ledger record would have been answered with every person on the
+         ledger, summed, on that driver's page. */
+      return res.json({
+        from, to, person_id: null, people: [],
+        policy: null, policy_absent_reason: null,
+        summary: { people: 0, measurable: 0, not_measurable: 0, over_policy: 0,
+          fleet_ratio: null,
+          fleet_ratio_reason: 'exposure is a per-person measure by instruction.' },
+        absent_reason: who.absent_reason,
+      });
+    }
 
     /* The threshold in force. Effective-dated and append-only, so a decision
        taken in September can be explained against September's policy rather
@@ -1207,6 +1290,9 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
     const measured = people.filter((p) => p.exposure_pct != null);
     res.json({
       from, to,
+      person_id: onePerson,
+      resolved_from: who.from,
+      absent_reason: null,
       policy: policy
         ? { pct, effective_from: policy.effective_from, set_by: policy.set_by, note: policy.note }
         : null,

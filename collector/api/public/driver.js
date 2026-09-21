@@ -29,6 +29,11 @@ import { renderDriverDay } from './driverday.js';
    own module for the same reason driverday.js is: this file is already the
    longest view in the product. */
 import { renderDriverRecord } from './driverrecord.js';
+/* The operator's sixth requirement: "All advance repayment will be logged into
+   the system in the drivers page preferrably in a new tab within the driver
+   profile page". Its own module, like record and day, because this file is
+   already the longest view in the product. */
+import { renderDriverLedger } from './driverledger.js';
 
 /* Why a whole column is empty, in the words the page prints under it.
    ─────────────────────────────────────────────────────────────────────────
@@ -56,6 +61,11 @@ export const DRIVER_TABS = [
      person over time rather than a new subject, so it sits after the panels
      that describe them and before the raw rows that evidence them. */
   { id: 'record', label: 'Record', ic: '◲' },
+  /* AFTER RECORD AND BEFORE TRIPS. Money is a reading of this person, like
+     Record, rather than a new subject — and it is read against what the tabs
+     before it say they earned. It sits ahead of Trips for the same reason
+     Record does: the raw rows evidence the readings, they are not one. */
+  { id: 'money', label: 'Money', ic: '⊛' },
   { id: 'trips', label: 'Trips', ic: '▤' },
   /* LAST, and after Trips deliberately. Every tab before this one is built
      from records that NAME this person — a booking carries a driver id and the
@@ -3420,6 +3430,11 @@ const EMPTY_WINDOW_TAIL = {
   territory: 'There is nowhere to plot them.',
   quality: 'There is no trip to have completed or cancelled.',
   trips: 'There are no rows.',
+  /* No tail. Every other entry here explains what the ABSENCE OF WORK means
+     for that tab, and on Money it means nothing at all: the ledger is not
+     built from trips, so a window with no trips in it says nothing about what
+     this driver owes. A sentence would have to invent a connection that is not
+     there. */
 };
 
 export function emptyWindowNote(prof, tab) {
@@ -3463,17 +3478,32 @@ export function emptyWindowNote(prof, tab) {
      directly above a warn strip saying the record could not be read. Two
      sentences contradicting each other in adjacent paragraphs is worse than
      either of them alone. */
+  /* AND IT IS WRONG ON MONEY FOR A DIFFERENT REASON AGAIN. A balance is a
+     POSITION, not a measurement over a span: what this driver owes today is
+     what they owe today whether or not they drove in the window on the
+     toolbar. Saying "every figure below is measured over those dates" above a
+     tab carrying a cash position and an advance balance would tell a reader
+     the figures are windowed when they are not — and the reader who believes
+     it concludes the driver owes nothing because they did not work in
+     September. */
   const closing = tab === 'record'
     ? 'Nothing below is measured over those dates: a record is read over whole weeks and months of '
       + 'this person’s work, so what this tab shows is governed by what has been built for them '
       + 'and not by the window on the toolbar.'
+    : tab === 'money'
+      ? 'Only the register of entries below is measured over those dates. What somebody owes is '
+        + 'a POSITION and not a figure over a span — an advance taken in June is still '
+        + 'outstanding in a window they did not work, and a balance that went quiet is not a '
+        + 'balance that went away — so the figures above the register stand as they are now, '
+        + 'whatever window is chosen.'
     : 'Every figure below is measured over those dates, so what is missing here is the work, not '
       + 'the record of it.';
   return `No trip of this driver's falls in ${win}. ${when}${record}. ${closing}${tail}`;
 }
 
 const TABS = { overview: tabOverview, activity: tabActivity, territory: tabTerritory,
-  earnings: tabEarnings, quality: tabQuality, record: renderDriverRecord, trips: tabTrips,
+  earnings: tabEarnings, quality: tabQuality, record: renderDriverRecord,
+  money: renderDriverLedger, trips: tabTrips,
   unauthorized: tabUnauthorized };
 
 /* ── page shell ──────────────────────────────────────────────────────────── */
