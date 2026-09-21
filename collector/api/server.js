@@ -63,7 +63,8 @@ import { compareRoutes } from './compare_routes.js';
 import { performanceRoutes } from './performance_routes.js';
 import { statusRoutes } from './status_routes.js';
 import { samePersonRoutes } from './sameperson_routes.js';
-import { ledgerRoutes, ledgerWriteRoutes, ledgerReceiptRoutes } from './ledger_routes.js';
+import { ledgerRoutes, ledgerWriteRoutes, ledgerReceiptRoutes,
+  ledgerExposureRoutes } from './ledger_routes.js';
 import { probeRoutes } from './probe.js';
 import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
 /* The one place that decides what a reader with no credential may see of a
@@ -5792,6 +5793,7 @@ ledgerWriteRoutes(app, { wrap, tx: pgTx(pool) });
    512MB and also serves every page here, so decoding a twelve-megapixel image
    on it to resize is how the container dies. */
 ledgerReceiptRoutes(app, { q, wrap });
+ledgerExposureRoutes(app, { q, wrap });
 
 /* ───────────────── one day ─────────────────
    Every source that saw a given Dubai-local day, including whether each one

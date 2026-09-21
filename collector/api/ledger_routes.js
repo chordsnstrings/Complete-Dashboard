@@ -697,3 +697,213 @@ export function ledgerReceiptRoutes(app, { q, wrap }) {
     return res.end(row.bytes);
   }));
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   EXPOSURE: what a person is holding or owes, against what they generate.
+   ───────────────────────────────────────────────────────────────────────── */
+export function ledgerExposureRoutes(app, { q, wrap }) {
+  /* GET /api/ledger/exposure?from=&to=&person_id=
+     ─────────────────────────────────────────────────────────────────────
+     THE POLICY. The operator keeps a driver's total within a percentage of the
+     revenue they generate — 35% at the time of writing, stored and
+     effective-dated in ledger_policy rather than compiled in, because it
+     changes and will later belong to a user group. Over the line the answer
+     says so and blocks nothing: the approval flow waits for ULM.
+
+     ── BOTH HALVES FOLD ON ONE KEY, WHICH IS THE POINT ──────────────────
+     docs/COVERAGE.md records the defect this is written to avoid, from
+     /api/alerts/by-driver: "worse than a plain divisor is a numerator and
+     denominator folded on DIFFERENT keys". It was unavoidable before —
+     advances would have resolved through the boundary precedence while revenue
+     came off tables keyed on the stored person_key, which never carries the
+     link table (COVERAGE.md:480-484), so for every link-folded-but-unpromoted
+     person the numerator would be the whole human and the denominator one
+     account, and the ratio would read high on the one figure the policy is
+     enforced with.
+
+     driver_platform_id ends that. A person's accounts are a stored list, and
+     BOTH sides are summed over exactly that list.
+
+     ── WHAT IS IN THE NUMERATOR, by the operator's instruction ──────────
+     "overall 35% can be with the driver — including cash advance and cash
+     trips." So: advances outstanding, deductions outstanding, AND the cash
+     they are holding. Pay is NOT in it — money going to a driver is not money
+     they owe, and keeping those apart is what `book` is for.
+
+     ── AND THE CASH HALF IS THE WEAK ONE, SO IT IS REPORTED SEPARATELY ──
+     Measured on production 2026-09-21: driver_statement_day.unremitted is a
+     DAILY figure, not a balance, and nothing in this database records a
+     remittance — so accumulating it gives cash collected and not handed in the
+     same day, which overstates by every dirham ever returned. Until deposits
+     are being recorded, the honest cash figure is an opening position stated
+     by the accounts team plus deposits since. Where neither exists this route
+     returns the cash component as null WITH A REASON and marks the whole ratio
+     unmeasured, rather than quietly computing an exposure that is missing its
+     largest term. */
+  app.get('/api/ledger/exposure', wrap(async (req, res) => {
+    const d = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim()) ? String(v).trim() : null);
+    const from = d(req.query.from);
+    const to = d(req.query.to);
+    const onePerson = Number(req.query.person_id) || null;
+
+    /* The threshold in force. Effective-dated and append-only, so a decision
+       taken in September can be explained against September's policy rather
+       than today's. */
+    const [policy] = await q(
+      `SELECT pct, to_char(effective_from,'YYYY-MM-DD') AS effective_from, set_by, note
+         FROM ledger_policy
+        WHERE scope = 'global'
+          AND effective_from <= coalesce($1::date, (now() AT TIME ZONE 'Asia/Dubai')::date)
+        ORDER BY effective_from DESC, id DESC LIMIT 1`, [to]);
+
+    const rows = await q(
+      `WITH acct AS (
+         SELECT driver_id, platform, external_id
+           FROM driver_platform_id WHERE detached_at IS NULL
+       ),
+       /* The numerator, per book, over the person. entry_source 'verification'
+          is excluded by construction — see sql/schema_v78.sql. */
+       book AS (
+         SELECT person_id,
+                sum(amount) FILTER (WHERE book = 'advance')   AS advance,
+                sum(amount) FILTER (WHERE book = 'deduction') AS deduction,
+                sum(amount) FILTER (WHERE book = 'cash')      AS cash_entries,
+                sum(amount) FILTER (WHERE book = 'pay')       AS pay,
+                count(*) FILTER (WHERE book = 'cash')::int    AS cash_rows,
+                max(effective_on)                             AS last_entry
+           FROM driver_ledger
+          WHERE entry_source <> 'verification'
+            AND ($1::date IS NULL OR effective_on >= $1::date)
+            AND ($2::date IS NULL OR effective_on <= $2::date)
+          GROUP BY person_id
+       ),
+       /* The denominator, summed over THE SAME account list. */
+       rev AS (
+         SELECT a.driver_id AS person_id,
+                sum(p.earnings)      AS earned,
+                sum(p.cash_earnings) AS cash_earned,
+                count(DISTINCT p.day)::int AS days,
+                count(DISTINCT a.external_id)::int AS accounts_with_revenue
+           FROM acct a
+           JOIN driver_payout_day p ON p.driver_ext_id = a.external_id
+          WHERE ($1::date IS NULL OR p.day >= $1::date)
+            AND ($2::date IS NULL OR p.day <= $2::date)
+          GROUP BY a.driver_id
+       ),
+       n AS (SELECT driver_id, count(*)::int AS accounts FROM acct GROUP BY driver_id)
+       SELECT dr.id AS person_id, dr.full_name, dr.cash_rule,
+              coalesce(n.accounts, 0)                    AS accounts,
+              coalesce(rev.accounts_with_revenue, 0)     AS accounts_with_revenue,
+              b.advance, b.deduction, b.cash_entries, b.pay, b.cash_rows,
+              to_char(b.last_entry,'YYYY-MM-DD')         AS last_entry,
+              rev.earned, rev.cash_earned, rev.days
+         FROM driver dr
+         LEFT JOIN n   ON n.driver_id = dr.id
+         LEFT JOIN book b ON b.person_id = dr.id
+         LEFT JOIN rev ON rev.person_id = dr.id
+        WHERE ($3::bigint IS NULL OR dr.id = $3::bigint)
+        ORDER BY dr.full_name NULLS LAST`, [from, to, onePerson]);
+
+    const pct = policy ? Number(policy.pct) : null;
+    const people = rows.map((r) => {
+      const advance = r.advance == null ? 0 : Number(r.advance);
+      const deduction = r.deduction == null ? 0 : Number(r.deduction);
+      const cashEntries = r.cash_entries == null ? null : Number(r.cash_entries);
+      const earned = r.earned == null ? null : Number(r.earned);
+
+      /* THE CASH TERM, and the reason when it is absent. A person with no cash
+         entry at all has no stated position — not a position of zero. */
+      const cashKnown = r.cash_rows > 0;
+      const cashReason = cashKnown ? null
+        : 'no opening cash position has been stated for this person and no deposit has been '
+          + 'recorded, so how much fare cash they are holding is unknown. It is not zero: '
+          + 'driver_statement_day.unremitted is a daily figure and nothing in this database '
+          + 'records a remittance, so it cannot be accumulated into a position.';
+
+      const owed = cashKnown ? round2(advance + deduction + cashEntries) : null;
+      const owedReason = cashKnown ? null
+        : 'the cash component is unknown, and the operator\'s policy counts cash the driver '
+          + 'holds inside the 35%. A figure without it would understate exposure, which is '
+          + 'the dangerous direction.';
+
+      /* THE DENOMINATOR, and why it may be missing. */
+      const revReason = earned != null ? null
+        : (r.accounts === 0
+          ? 'this person has no platform account linked, so no revenue can be attributed to '
+            + 'them. A new hire, or somebody paid only a salary.'
+          : 'none of this person\'s linked accounts reported earnings in this window.');
+
+      const measurable = owed != null && earned != null && earned > 0 && pct != null;
+      const ratio = measurable ? round2((owed / earned) * 100) : null;
+
+      return {
+        person_id: r.person_id,
+        name: r.full_name,
+        cash_rule: r.cash_rule,
+        accounts: r.accounts,
+        accounts_with_revenue: r.accounts_with_revenue,
+        /* Every term shown, so a reader can see which one is doing the work
+           and which one is missing. */
+        owes: {
+          advance: round2(advance), deduction: round2(deduction),
+          cash: cashEntries == null ? null : round2(cashEntries),
+          cash_absent_reason: cashReason,
+          total: owed, total_absent_reason: owedReason,
+        },
+        pay_book: r.pay == null ? null : round2(Number(r.pay)),
+        earned: earned == null ? null : round2(earned),
+        earned_absent_reason: revReason,
+        earning_days: r.days ?? null,
+        exposure_pct: ratio,
+        exposure_absent_reason: measurable ? null
+          : (owed == null ? owedReason
+            : earned == null ? revReason
+              : earned === 0 ? 'this person generated no revenue in this window, so an exposure '
+                + 'ratio has no denominator. That is not a ratio of zero.'
+                : 'no policy threshold is on file, so nothing can be judged against one.'),
+        policy_pct: pct,
+        over_policy: measurable ? ratio > pct : null,
+        /* Said in words rather than left to a colour, because the action this
+           implies is a person deciding to lend or not. */
+        verdict: !measurable ? 'not measurable'
+          : ratio > pct
+            ? `over the ${pct}% line — an override is needed. Nothing is blocked: the approval `
+              + 'flow arrives with user management.'
+            : `within the ${pct}% line`,
+        last_entry: r.last_entry,
+      };
+    });
+
+    const measured = people.filter((p) => p.exposure_pct != null);
+    res.json({
+      from, to,
+      policy: policy
+        ? { pct, effective_from: policy.effective_from, set_by: policy.set_by, note: policy.note }
+        : null,
+      policy_absent_reason: policy ? null
+        : 'no threshold has been stored, so no exposure can be judged. One is set through '
+          + 'ledger_policy, effective-dated, so a decision taken in September can be explained '
+          + 'against September\'s policy rather than today\'s.',
+      summary: {
+        people: people.length,
+        measurable: measured.length,
+        not_measurable: people.length - measured.length,
+        over_policy: measured.filter((p) => p.over_policy).length,
+        /* NOT a fleet ratio. The operator's instruction is that percentages are
+           always personal; a ratio of summed balances over summed revenue would
+           be the same numerator/denominator-key defect at fleet scale. A COUNT
+           of people over the line is the honest fleet-level figure. */
+        fleet_ratio: null,
+        fleet_ratio_reason: 'exposure is a per-person measure by instruction. A fleet figure '
+          + 'would divide a sum of balances by a sum of revenue, which folds two different '
+          + 'populations — the people who owe and the people who earn are not the same set — '
+          + 'so the fleet number here is a COUNT of people over the line, not a percentage.',
+      },
+      basis: 'Numerator: the advance, deduction and cash books of driver_ledger, excluding '
+        + 'verification rows. Pay is deliberately not in it — money going to a driver is not '
+        + 'money they owe. Denominator: driver_payout_day.earnings summed over THE SAME list of '
+        + 'accounts from driver_platform_id, so both halves fold on one key.',
+      people,
+    });
+  }));
+}

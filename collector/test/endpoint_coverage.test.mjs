@@ -95,6 +95,13 @@ const EXEMPT = {
     + 'authentication (api/redact.js:1-8), so a 64-character sha that appears only on the entry '
     + 'it belongs to is the whole control — weaker than a bank slip deserves, written down '
     + 'rather than glossed, and to be given a real check when ULM lands.',
+  /* DELETE WHEN THE EXPOSURE TILE LANDS. */
+  '/api/ledger/exposure': 'the 35% policy figure, built before the screens that will show it. '
+    + 'Both halves fold on ONE key — the stored account list in driver_platform_id — which is '
+    + 'what docs/COVERAGE.md records as the defect to avoid: "worse than a plain divisor is a '
+    + 'numerator and denominator folded on DIFFERENT keys". Measured against the fixture, '
+    + 'folding the denominator on one account instead of the person gives 58.33% where the '
+    + 'truth is 35%, which would refuse somebody an advance they are entitled to.',
   '/api/health': 'liveness probe for the platform, not for people',
   '/api/import/statement-days': 'operator tool: batched import of the daily ledger — driven by '
     + 'bin/import-ledger.mjs, not by a page',
