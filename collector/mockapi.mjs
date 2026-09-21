@@ -6705,6 +6705,7 @@ app.get('/api/ledger/exposure', (_, r) => r.json({
   basis: 'both halves fold on one key',
   people: [
     { person_id: 1, name: 'Tariq Afzal Said Afzal', cash_rule: 'deposit_all',
+      ext_id: 'U-TARIQ', link_platform: 'uber',
       accounts: 2, accounts_with_revenue: 2,
       owes: { advance: 2500, deduction: 0, cash: 1000, cash_absent_reason: null,
         total: 3500, total_absent_reason: null },
@@ -6712,6 +6713,7 @@ app.get('/api/ledger/exposure', (_, r) => r.json({
       exposure_pct: 35, exposure_absent_reason: null, policy_pct: 35, over_policy: false,
       verdict: 'within the 35% line', last_entry: '2026-09-15' },
     { person_id: 2, name: 'Mohammed Selim Shafiqur Rahman', cash_rule: 'net_against_pay',
+      ext_id: 'U-SELIM', link_platform: 'uber',
       accounts: 1, accounts_with_revenue: 1,
       owes: { advance: 2000, deduction: 300, cash: 500, cash_absent_reason: null,
         total: 2800, total_absent_reason: null },
@@ -6720,6 +6722,9 @@ app.get('/api/ledger/exposure', (_, r) => r.json({
       verdict: 'over the 35% line — an override is needed. Nothing is blocked: the approval '
         + 'flow arrives with user management.', last_entry: '2026-09-18' },
     { person_id: 3, name: 'Siyad Kallyanathoppil Paramba', cash_rule: null,
+      /* No account at all — the first-week salary advance case. entity() must
+         degrade to plain text rather than emit a broken link. */
+      ext_id: null, link_platform: null,
       accounts: 1, accounts_with_revenue: 1,
       owes: { advance: 2000, deduction: 0, cash: null,
         cash_absent_reason: 'no opening cash position has been stated for this person and no '
@@ -6738,20 +6743,20 @@ app.get('/api/ledger/exposure', (_, r) => r.json({
 app.get('/api/ledger/entries', (req, r) => {
   const book = String(req.query.book || '');
   const all = [
-    { id: 3, person_id: 1, person_name: 'Tariq Afzal Said Afzal', type_code: 'cash_advance',
+    { id: 3, person_id: 1, person_name: 'Tariq Afzal Said Afzal', type_code: 'cash_advance', ext_id: 'U-TARIQ',
       label: 'Cash advance', book: 'advance', amount: 2500, settles_via: 'cash',
       effective_on: '2026-09-15', entered_by: 'ahsan', note: 'monthly advance',
       entry_source: 'manual',
       receipt: { sha256: 'a'.repeat(64), held: true, expired: false,
         expires_on: '2027-09-15', absent_reason: null } },
-    { id: 2, person_id: 2, person_name: 'Mohammed Selim Shafiqur Rahman', type_code: 'salik',
+    { id: 2, person_id: 2, person_name: 'Mohammed Selim Shafiqur Rahman', type_code: 'salik', ext_id: 'U-SELIM',
       label: 'Salik / tolls', book: 'deduction', amount: 300, settles_via: null,
       effective_on: '2026-09-12', entered_by: 'haseeb', note: 'September tolls',
       entry_source: 'manual',
       receipt: { sha256: null, held: false, expired: false, expires_on: null,
         absent_reason: 'this type carries no photograph — it records a decision or a period '
           + 'figure, which has none to take' } },
-    { id: 1, person_id: 1, person_name: 'Tariq Afzal Said Afzal', type_code: 'repayment',
+    { id: 1, person_id: 1, person_name: 'Tariq Afzal Said Afzal', type_code: 'repayment', ext_id: 'U-TARIQ',
       label: 'Repayment', book: 'advance', amount: -1000, settles_via: 'cash',
       effective_on: '2026-09-02', entered_by: 'ahsan', note: 'paid back',
       entry_source: 'manual',

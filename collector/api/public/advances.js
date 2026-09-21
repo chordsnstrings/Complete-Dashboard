@@ -22,7 +22,7 @@
    exposure is refused rather than shown low. Those people are the first thing
    on this page, because a screen that quietly dropped them would look complete
    while the drivers most likely to be over the line were the ones missing. */
-import { el, esc, panel, note, loading, tableFrom } from './ui.js';
+import { el, esc, panel, note, loading, tableFrom, entity } from './ui.js';
 import { api } from './data.js';
 import { entryForm } from './entry_form.js';
 import { aed } from './deposit_core.js';
@@ -106,7 +106,13 @@ export async function renderAdvances(root) {
       if ((a.exposure_pct == null) !== (b.exposure_pct == null)) return a.exposure_pct == null ? -1 : 1;
       return (b.exposure_pct ?? 0) - (a.exposure_pct ?? 0);
     }), [
-      { label: 'Driver', key: 'name', render: (p) => `<b>${esc(p.name)}</b>` },
+      { label: 'Driver', key: 'name',
+        /* entity(), not a bare name: test/interlinking.test.mjs is the standing
+           check that a column naming a thing can OPEN it — "a cell that prints
+           a name and links nowhere is a dead end, and every dead end silently
+           turns an investigation into a search". A person with no account
+           degrades to plain text rather than to a broken link. */
+        render: (p) => entity('driver', p.ext_id, p.name) },
       { label: 'Advances', key: 'advance', num: true,
         render: (p) => esc(aed(p.owes?.advance) || '—') },
       { label: 'Deductions', key: 'deduction', num: true,
@@ -140,7 +146,8 @@ export async function renderAdvances(root) {
     }
     listPanel.body.append(tableFrom(reg.entries, [
       { label: 'Day', key: 'effective_on', render: (e) => esc(e.effective_on) },
-      { label: 'Driver', key: 'person_name', render: (e) => esc(e.person_name) },
+      { label: 'Driver', key: 'person_name',
+        render: (e) => entity('driver', e.ext_id, e.person_name) },
       { label: 'What', key: 'label',
         render: (e) => esc(e.label || e.type_code)
           + (e.entry_source === 'verification'

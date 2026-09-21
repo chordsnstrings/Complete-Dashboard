@@ -22,7 +22,7 @@
    is a worklist: who is carrying the most, what has already been recorded
    today, and a form that stays open so the next receipt in the pile does not
    cost a page load. Same core, different question. */
-import { el, esc, panel, note, loading, tableFrom } from './ui.js';
+import { el, esc, panel, note, loading, tableFrom, entity } from './ui.js';
 import { api } from './data.js';
 import { entryForm } from './entry_form.js';
 import { aed } from './deposit_core.js';
@@ -75,7 +75,10 @@ export async function renderDeposits(root) {
     }
     listPanel.body.append(tableFrom(people.slice()
       .sort((a, b) => (b.owes?.cash ?? -1) - (a.owes?.cash ?? -1)), [
-      { label: 'Driver', key: 'name', render: (p) => `<b>${esc(p.name)}</b>` },
+      { label: 'Driver', key: 'name',
+        /* Openable — see the same column on #advances and
+           test/interlinking.test.mjs for why. */
+        render: (p) => entity('driver', p.ext_id, p.name) },
       { label: 'Cash position', key: 'cash', num: true,
         render: (p) => (p.owes?.cash != null ? esc(aed(p.owes.cash))
           : `<span class="dash" title="${esc(p.owes?.cash_absent_reason

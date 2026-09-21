@@ -382,6 +382,12 @@ export function ledgerRegisterRoutes(app, { q, wrap }) {
 
     const rows = await q(
       `SELECT e.id, e.person_id, e.person_name, e.type_code, t.label, e.book, e.amount,
+              /* The account the entry was made THROUGH, so a driver name in the
+                 register opens the person it is about. acct_ext_id is evidence
+                 on the row and not the key, which is why it may be null — a
+                 person minted by a salary advance has no account yet, and
+                 entity() degrades to plain text for them. */
+              e.acct_ext_id AS ext_id,
               e.settles_via, to_char(e.effective_on,'YYYY-MM-DD') AS effective_on,
               to_char(e.period_start,'YYYY-MM-DD') AS period_start,
               to_char(e.period_end,'YYYY-MM-DD') AS period_end,
@@ -894,17 +900,36 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
             AND ($2::date IS NULL OR p.day <= $2::date)
           GROUP BY a.driver_id
        ),
-       n AS (SELECT driver_id, count(*)::int AS accounts FROM acct GROUP BY driver_id)
+       n AS (SELECT driver_id, count(*)::int AS accounts FROM acct GROUP BY driver_id),
+       /* ONE ACCOUNT ID PER PERSON, so a name on a screen can be opened.
+          test/interlinking.test.mjs: "a column whose LABEL names an entity must
+          RENDER a link to it", and four of the eight dead ends it once found by
+          hand were dead because the SQL never selected an id — the render could
+          not have linked even if it wanted to.
+
+          The driver pages are addressed by a PROVIDER account, not by the
+          person id this ledger keys on, so the link needs one of the person's
+          accounts. Deterministic rather than arbitrary: lowest platform then
+          lowest id, so the same person opens the same page every time. A person
+          with no account returns null and entity() degrades to plain text
+          rather than to a broken link — the first-week salary advance case,
+          and exactly why it must not become a dead anchor. */
+       link AS (
+         SELECT DISTINCT ON (driver_id) driver_id, external_id, platform
+           FROM acct ORDER BY driver_id, platform, external_id
+       )
        SELECT dr.id AS person_id, dr.full_name, dr.cash_rule,
               coalesce(n.accounts, 0)                    AS accounts,
               coalesce(rev.accounts_with_revenue, 0)     AS accounts_with_revenue,
               b.advance, b.deduction, b.cash_entries, b.pay, b.cash_rows,
               to_char(b.last_entry,'YYYY-MM-DD')         AS last_entry,
-              rev.earned, rev.cash_earned, rev.days
+              rev.earned, rev.cash_earned, rev.days,
+              link.external_id AS link_ext_id, link.platform AS link_platform
          FROM driver dr
          LEFT JOIN n   ON n.driver_id = dr.id
          LEFT JOIN book b ON b.person_id = dr.id
          LEFT JOIN rev ON rev.person_id = dr.id
+         LEFT JOIN link ON link.driver_id = dr.id
         WHERE ($3::bigint IS NULL OR dr.id = $3::bigint)
         ORDER BY dr.full_name NULLS LAST`, [from, to, onePerson]);
 
@@ -943,6 +968,10 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
       return {
         person_id: r.person_id,
         name: r.full_name,
+        /* The account a screen opens this person by, or null — never a broken
+           link. */
+        ext_id: r.link_ext_id || null,
+        link_platform: r.link_platform || null,
         cash_rule: r.cash_rule,
         accounts: r.accounts,
         accounts_with_revenue: r.accounts_with_revenue,

@@ -30,7 +30,7 @@
    happen, including the refusals. Only then does "Record the month" commit.
    The alternative, saving as you tab out of each field, means discovering on
    row ninety that the supervisor was never picked. */
-import { el, esc, panel, note, loading, tableFrom } from './ui.js';
+import { el, esc, panel, note, loading, tableFrom, entity } from './ui.js';
 import { api } from './data.js';
 import { submitEntry, SUPERVISORS, aed, parseAmount } from './deposit_core.js';
 import { dubaiDay } from './tz.js';
@@ -135,7 +135,8 @@ export async function renderSalary(root) {
 
     inputs.clear();
     gridPanel.body.append(tableFrom(people, [
-      { label: 'Driver', key: 'name', render: (p) => `<b>${esc(p.name)}</b>` },
+      { label: 'Driver', key: 'name',
+        render: (p) => entity('driver', p.ext_id, p.name) },
       { label: 'Generated', key: 'earned', num: true,
         render: (p) => (p.earned != null ? esc(aed(p.earned))
           : `<span class="dash" title="${esc(p.earned_absent_reason || '')}">—</span>`) },

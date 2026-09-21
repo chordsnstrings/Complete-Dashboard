@@ -70,8 +70,11 @@ console.log('\nthe advances register');
   check('and that over it nothing is blocked', /nothing is blocked/i.test(body));
 
   /* The unmeasurable, first and by name. */
-  const firstRow = await page.$eval('[data-panel="advances"] tbody tr b',
-    (e) => e.textContent);
+  /* The FIRST CELL of the first row, not the first <b> in it: the driver name
+     is an <a class="ent"> now that it links, and the first <b> in the row is
+     the exposure figure. */
+  const firstRow = await page.$eval('[data-panel="advances"] tbody tr td:first-child',
+    (e) => e.textContent.trim());
   check('the person whose exposure cannot be measured sorts FIRST, not last',
     /Siyad/.test(firstRow), firstRow);
   check('and the page says how many of how many that is',
@@ -94,6 +97,21 @@ console.log('\nthe advances register');
   check('and a type that never has one says THAT instead',
     proofs.some((p) => /records a decision or a period figure/.test(p.title || '')),
     JSON.stringify(proofs.map((p) => p.title)));
+
+  /* EVERY NAME OPENS THE PERSON. test/interlinking.test.mjs is the standing
+     check that a column naming a thing can be got to — "a cell that prints a
+     name and links nowhere is a dead end, and every dead end silently turns an
+     investigation into a search". These four columns were dead ends until the
+     endpoints started returning an account id to link by. */
+  const links = await page.$$eval('[data-panel="advances"] tbody tr td:first-child a.ent',
+    (as) => as.map((a) => a.getAttribute('href')));
+  check('a driver with an account is a link to their page',
+    links.some((h) => /#driver\/U-TARIQ/.test(h)), JSON.stringify(links));
+  /* And the one with no account must NOT be a link — a broken anchor is worse
+     than plain text, because it looks like it would work. */
+  const off = await page.$$eval('[data-panel="advances"] .ent-off', (e) => e.length);
+  check('a person with no platform account degrades to plain text, not a dead link',
+    off >= 1, String(off));
 
   const doc = await page.evaluate(() => document.documentElement.scrollWidth);
   check('the page does not slide sideways', doc <= 1280, String(doc));
