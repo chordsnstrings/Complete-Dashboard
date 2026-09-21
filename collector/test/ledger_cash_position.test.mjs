@@ -100,8 +100,8 @@ check('a person WITH a balance carries no absent reason',
 /* ── 3. staleness is a number the page can print ───────────────────────── */
 check('a months-old balance reports its age in days',
   by['Stale Figure']?.unremitted_age_days === 134, String(by['Stale Figure']?.unremitted_age_days));
-check('the summary names the stalest position on file',
-  body.summary?.stalest_position_days === 134, String(body.summary?.stalest_position_days));
+check('the summary names the stalest figure on file',
+  body.summary?.stalest_figure_days === 134, String(body.summary?.stalest_figure_days));
 
 /* ── 4. pseudo rows: counted, never attributed ─────────────────────────── */
 check('a pseudo statement line is not a person',
@@ -116,12 +116,30 @@ check('and how many PEOPLE do', led?.people_unremitted === 2, String(led?.people
 /* ── the summary, which is the first thing anybody reads ───────────────── */
 check('the summary counts people on the ledger, excluding pseudo',
   body.summary?.people_on_the_ledger === 3, String(body.summary?.people_on_the_ledger));
-check('and how many of them have a position', body.summary?.people_with_a_position === 2,
-  String(body.summary?.people_with_a_position));
+check('and how many of them carry a daily figure', body.summary?.people_with_a_daily_figure === 2,
+  String(body.summary?.people_with_a_daily_figure));
 check('and names the gap rather than leaving it to subtraction',
-  body.summary?.people_without_a_position === 1, String(body.summary?.people_without_a_position));
-check('the total is the sum of POSITIONS, one per person',
-  body.summary?.total_unremitted === 7900, String(body.summary?.total_unremitted));
+  body.summary?.people_without_any_figure === 1, String(body.summary?.people_without_any_figure));
+check('the total is the sum of each person\'s latest DAILY figure',
+  body.summary?.total_of_latest_daily_figures === 7900,
+  String(body.summary?.total_of_latest_daily_figures));
+
+/* THE ASSERTION THAT MATTERS MOST IN THIS FILE.
+   Measured on production 2026-09-21: unremitted records, per day, the cash a
+   driver had not handed in when that row was written, and NOTHING reduces it
+   when they hand it in later, because no remittance event is recorded anywhere
+   in this database. So the sum overstates by every dirham ever returned and
+   the latest figure is one day's leftovers. Neither is a position, and the
+   route must not let a reader believe otherwise — the field name alone was
+   enough to mislead its own author. */
+check('the route refuses to call any of this a cash position',
+  body.summary?.is_a_cash_position === false, JSON.stringify(body.summary?.is_a_cash_position));
+check('and says why, naming the missing remittance event',
+  /remittance event/i.test(body.summary?.why_not || ''), body.summary?.why_not);
+check('no field in the summary is called a position or a balance',
+  !Object.keys(body.summary || {}).some((k) => /position|balance/.test(k)
+    && k !== 'is_a_cash_position'),
+  Object.keys(body.summary || {}).join(','));
 check('the basis names the fold this ledger uses, because it is not person_key',
   /name/i.test(body.basis || '') && /not reconciled|different person fold/i.test(body.basis || ''),
   body.basis);
@@ -149,7 +167,7 @@ const { get: get2 } = await mountAll(db2);
 const e = await get2('/api/ledger/cash-position?as_of=2026-09-21');
 const eb = e.body ?? e;
 check('with no ledger at all the total is null, not AED 0',
-  eb.summary?.total_unremitted === null, JSON.stringify(eb.summary));
+  eb.summary?.total_of_latest_daily_figures === null, JSON.stringify(eb.summary));
 check('and the reason says the column may simply never have been filled',
   /never have been filled|no cash position/i.test(eb.summary?.total_unremitted_reason || ''),
   eb.summary?.total_unremitted_reason);

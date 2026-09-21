@@ -41,14 +41,37 @@
    wrong human, and that is a decision for the write path with a person_id, not
    for a read that exists to show what is there.
 
-   ── A BALANCE IS NOT A SUM, AND THIS ROUTE DOES NOT ASSUME WHICH IT IS ────
-   The schema's own words make unremitted a balance, so the headline figure is
-   the LATEST non-null value on or before the as-of date, never a sum. But the
-   only evidence for that is a sentence in a comment, so the row also carries
-   the count of days that hold a figure, the min, the max and the sum. If it is
-   a balance those will drift smoothly around the latest; if it is really a
-   daily delta the sum is the meaningful number and the shape of these columns
-   will say so. Measuring beats believing a comment.
+   ── IT IS NOT A BALANCE. MEASURED 2026-09-21, THE FIRST TIME ANYTHING READ IT.
+   sql/schema_v25.sql:14 calls the column a "still-unremitted balance" and this
+   route's first version took it at its word, reporting the latest filed value
+   as the position. The aggregate columns it returned beside that figure — min,
+   max, sum and day-count — contradicted it, which is why they were built:
+
+     sum of every daily figure          AED 1,935,693.47
+     sum of each person's LATEST        AED     6,243.06
+     people whose latest is 0.00        146 of 217
+     every person's minimum             0.00
+     negative figures                   none
+
+   A running balance does not behave like that. One person carries 444 days of
+   figures oscillating between 0 and 546.61.
+
+   WHAT IT ACTUALLY IS, from the day-by-day series: of the cash a driver
+   collected ON THAT DAY, the part still with them when the ledger row was
+   written. It is not a duplicate of `cash` — 133 of 217 people differ, and
+   across the ledger cash totals AED 2,284,860 against unremitted's
+   AED 1,935,693, the AED 349,167 gap being cash handed in the same day.
+
+   AND IT CANNOT BE ACCUMULATED INTO A POSITION. A row is written once for its
+   day and nothing reduces it when the driver hands that cash in later, because
+   NOTHING IN THIS DATABASE RECORDS A REMITTANCE EVENT AT ALL. So the sum
+   overstates by every dirham ever handed back, the latest figure is one day's
+   leftovers, and neither is what a person is holding today.
+
+   The headline is therefore reported as what it is — the last daily figure —
+   and the summary refuses to call any of it a position. A cash position has to
+   be stated by the accounts team per driver, and kept current by the deposit
+   entries in sql/schema_v78.sql. This route's job was to find that out.
 
    ── ABSENT WITH A REASON ─────────────────────────────────────────────────
    No coalesce to zero anywhere in this file. A person with no figure on file
@@ -223,15 +246,24 @@ export function ledgerRoutes(app, { q, wrap }) {
          many of our people?". */
       summary: {
         people_on_the_ledger: people.length,
-        people_with_a_position: held.length,
-        total_unremitted: totalUnremitted,
+        people_with_a_daily_figure: held.length,
+        /* Deliberately NOT called a position or a balance. It is the sum of
+           each person's most recent DAILY unremitted figure, which is a
+           quantity nobody should act on — see the header. */
+        total_of_latest_daily_figures: totalUnremitted,
+        is_a_cash_position: false,
+        why_not: 'unremitted records, per day, the cash a driver had not handed in when that '
+          + 'row was written, and nothing reduces it when they hand it in later because no '
+          + 'remittance event is recorded anywhere in this database. The sum overstates by '
+          + 'every dirham ever returned; the latest figure is one day\'s leftovers. A cash '
+          + 'position must be stated per driver and kept current by deposit entries.',
         total_unremitted_reason: held.length ? null
           : 'no person on the statement ledger carries an unremitted balance, so there is '
             + 'no cash position to total. The column is written by /api/import/statement-days '
             + 'and may simply never have been filled.',
         /* The gap, named rather than implied. */
-        people_without_a_position: people.length - held.length,
-        stalest_position_days: held.length
+        people_without_any_figure: people.length - held.length,
+        stalest_figure_days: held.length
           ? Math.max(...held.map((p) => p.unremitted_age_days)) : null,
       },
       /* What the whole table looks like, including the pseudo rows the

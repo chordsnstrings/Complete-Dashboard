@@ -827,6 +827,46 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **`driver_statement_day.unremitted` IS NOT A BALANCE, AND THERE IS NO CASH
+  POSITION IN THIS DATABASE FOR ANYBODY.** `sql/schema_v25.sql:14` calls it a
+  "still-unremitted balance". Measured on production 2026-09-21, the first time
+  anything had ever read the column:
+
+  | | |
+  |---|---|
+  | sum of every daily figure | AED 1,935,693.47 |
+  | sum of each person's LATEST figure | AED 6,243.06 |
+  | people whose latest is exactly 0.00 | 146 of 217 |
+  | every person's minimum | 0.00 |
+  | negative figures | none |
+
+  One person carries 444 days of figures oscillating between 0 and 546.61. A
+  running balance does not behave like that.
+
+  **What it actually is**, from the day-by-day series: of the cash a driver
+  collected ON THAT DAY, the part still with them when the ledger row was
+  written. Not a duplicate of `cash` either — 133 of 217 people differ, and
+  across the ledger `cash` totals AED 2,284,860 against unremitted's
+  AED 1,935,693, the AED 349,167 gap being cash handed in the same day.
+
+  **And it cannot be accumulated into a position.** A row is written once for
+  its day and nothing reduces it when the driver hands that cash in later,
+  because **no remittance event is recorded anywhere in this database**. The
+  sum overstates by every dirham ever returned; the latest figure is one day's
+  leftovers. A cash position has to be stated per driver and kept current by
+  deposit entries.
+
+  **Coverage, separately:** the `ledger` source holds 39,797 rows over 222
+  people and stops at **2026-08-21**. `uber_rest` runs to today across 236
+  people and has never carried an unremitted figure at all. Median figure age
+  83 days, stalest 385.
+
+  The general lesson is the one the route was built around: the only evidence
+  for "balance" was a sentence in a comment, and the min/max/sum/day-count
+  columns returned BESIDE the headline are what falsified it. **When a column's
+  meaning rests on prose, serve the shape of the data next to the figure so a
+  reader can check the prose.**
+
 * **"THE BOLT AND YANGO CREDENTIALS DO NOT SURVIVE A DEPLOY" IS NOT WHAT IS
   HAPPENING.** Reported 2026-09-21 and measured the same day through
   `GET /api/settings`, which answers a non-administrator with values blanked
