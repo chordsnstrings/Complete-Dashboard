@@ -5147,10 +5147,28 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
      under TZ=Asia/Dubai turns 2026-01-01 into 2025-12-31, which is the
      off-by-one test/hotel_licence_date.test.mjs exists to catch. */
   const pad2 = (n) => String(n).padStart(2, '0');
-  const dayOf = (v) => (v == null ? null
-    : (v instanceof Date
-      ? `${v.getFullYear()}-${pad2(v.getMonth() + 1)}-${pad2(v.getDate())}`
-      : String(v).slice(0, 10)));
+  /* THE NON-Date BRANCH MATCHES A SHAPE RATHER THAN CUTTING TEN CHARACTERS.
+     ─────────────────────────────────────────────────────────────────────
+     node-postgres returns a DATE as a Date under this pool's parser, so the
+     branch below only runs where the driver handed back a string — and the
+     first ten characters of a date-shaped string are the date. But that was
+     written as String(v).slice(0, 10), which test/server_day_keys.test.mjs
+     bans OUTRIGHT in the mounted region, and rightly: the guard is a regex
+     over source text, it cannot see the `instanceof Date` arm protecting it,
+     and the whole reason it exists is that this exact slice has been wrong
+     three times in this file. A guard relaxed to admit a safe instance is a
+     guard that admits the next unsafe one.
+     Matching the shape is also the better code. A slice returns ten
+     characters of WHATEVER it was given — "Thu Jan 01" from a Date, or ten
+     characters of a sentence — whereas this returns the date where there is
+     one and null where there is not, which the callers below already render
+     as absent-with-a-reason rather than as a day that never existed. */
+  const dayOf = (v) => {
+    if (v == null) return null;
+    if (v instanceof Date) return `${v.getFullYear()}-${pad2(v.getMonth() + 1)}-${pad2(v.getDate())}`;
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v));
+    return m ? m[0] : null;
+  };
   /* A REAL expiry: one this product would be willing to act on. Not null, and
      not the source's own never-filled-in default — the 94 rows carrying
      2026-01-01 are a data-quality problem and counting them as expiries is
