@@ -104,6 +104,26 @@ app.use(compression({
      minutes. */
   filter: (req, res) => req.get('x-warm') !== '1' && compression.filter(req, res),
 }));
+/* THE CLIENT'S ADDRESS, WHICH THIS APP HAS NEVER SEEN.
+   ─────────────────────────────────────────────────────────────────────────
+   Express reports the address of whatever connected to it, and on DigitalOcean
+   App Platform that is always the platform's load balancer — so `req.ip` has
+   been one constant, useless address for every request this application has
+   ever served. Nothing read it, so nothing noticed.
+
+   The driver ledger changes that. Until ULM exists, a money entry is attributed
+   by a typed supervisor name plus an IP and a timestamp, and an IP that is the
+   same on every row carries no information at all: the audit column would look
+   populated and prove nothing, which is worse than leaving it null.
+
+   `1` and not `true`: `true` trusts the WHOLE X-Forwarded-For chain, so a
+   client that sends its own header prepends any address it likes and Express
+   believes it. One hop is the platform's own proxy and nothing beyond it is
+   trusted. If a CDN is ever put in front of this app the number goes to 2 —
+   and it must be counted, never guessed, because too high is a forgeable
+   address recorded as fact. */
+app.set('trust proxy', 1);
+
 app.use(express.json({ limit: '256kb' }));
 
 /* Not ready is a state, not a failure — and it must not look like either a
@@ -5937,6 +5957,44 @@ probeRoutes(app, { wrap });
 
    Before the static handler, so it cannot be shadowed by a file that happens to
    sit at the same path. */
+/* A REFUSAL THAT SAYS WHAT IT IS, RATHER THAN AN HTML PAGE THE CLIENT RENDERS
+   AS A TIMEOUT.
+   ─────────────────────────────────────────────────────────────────────────
+   There has never been an error-handling middleware in this application, so
+   anything body-parser rejected fell through to Express's default handler —
+   which emits an HTML error page. api/public/data.js:176-186 rewrites ANY html
+   body to "the server took too long to answer. It is usually still computing
+   this; try again in a moment." and invites a retry.
+
+   For the receipt uploads the ledger needs, that is the worst possible answer:
+   a supervisor photographs a cash handover, the image is larger than the route
+   accepts, and the screen tells them to try again — which fails identically,
+   forever, while naming a cause that is not the true one.
+
+   JSON, the real status, and the real limit in the body. Placed before the
+   /api 404 so it sees errors from the routes above it, and it re-raises
+   anything already sent so it cannot corrupt a streamed response. */
+app.use('/api', (err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const tooBig = err?.type === 'entity.too.large' || err?.status === 413;
+  if (tooBig) {
+    return res.status(413).json({
+      error: 'that file is larger than this route accepts',
+      limit: err.limit ?? null,
+      received: err.length ?? null,
+      detail: 'Compress the image before sending it — the phone does this before upload. '
+        + 'This is a size refusal, not a timeout: sending the same bytes again will be '
+        + 'refused the same way.',
+    });
+  }
+  if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+    return res.status(400).json({ error: 'the request body was not valid JSON',
+      detail: String(err.message || '').slice(0, 200) });
+  }
+  log.error('api', 'unhandled route error', { path: req.path, err: String(err).slice(0, 300) });
+  return res.status(500).json({ error: 'internal', detail: String(err).slice(0, 300) });
+});
+
 app.use('/api', (req, res) => res.status(404).json({
   error: 'no such endpoint',
   path: req.originalUrl.split('?')[0],

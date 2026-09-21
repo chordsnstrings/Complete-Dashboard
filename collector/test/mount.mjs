@@ -197,6 +197,33 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
      every one of them into a 404. Which is the same shadowing bug the guard was
      written to fix, introduced at the other end. */
   if (serverRoutes) {
+    /* The error handler the real server registers immediately before the 404,
+       mounted here for the same reason the 404 is: it lives outside the
+       START/END slice, and a behaviour no test can reach is a behaviour that
+       drifts. Without it body-parser's refusals fall through to Express's HTML
+       default, which api/public/data.js rewrites into "the server took too
+       long" — a size refusal rendered to the operator as a timeout, with an
+       invitation to retry that can only fail the same way. Four arguments, so
+       Express recognises it as an error handler rather than a route. */
+    app.use('/api', (err, req, res, next) => {
+      if (res.headersSent) return next(err);
+      const tooBig = err?.type === 'entity.too.large' || err?.status === 413;
+      if (tooBig) {
+        return res.status(413).json({
+          error: 'that file is larger than this route accepts',
+          limit: err.limit ?? null,
+          received: err.length ?? null,
+          detail: 'Compress the image before sending it — the phone does this before upload. '
+            + 'This is a size refusal, not a timeout: sending the same bytes again will be '
+            + 'refused the same way.',
+        });
+      }
+      if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+        return res.status(400).json({ error: 'the request body was not valid JSON',
+          detail: String(err.message || '').slice(0, 200) });
+      }
+      return res.status(500).json({ error: 'internal', detail: String(err).slice(0, 300) });
+    });
     app.use('/api', (req, res) => res.status(404).json({
       error: 'no such endpoint', path: req.originalUrl.split('?')[0],
     }));
