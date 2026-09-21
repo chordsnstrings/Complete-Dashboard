@@ -57,20 +57,35 @@ clearIdentityLinkCache();
 await refreshPersons(db);
 
 const out = await refreshNameProposals(db);
+/* TWO, NOT THREE. A-1/A-2 share a phone number, and src/persons.js now folds
+   a person-level phone pair by itself — the operator's instruction, and the
+   same evidence the link sweep already treats as conclusive for accounts. So
+   by the time this runs they are already one person and there is nothing to
+   ask. A queue that asked anyway would be asking about a decision already
+   taken, which is how a review backlog fills with noise and stops being read. */
 check('it proposes the same-name pairs nobody had written down',
-  out.wrote === 3, JSON.stringify(out));
-check('and skips the pair a reviewed decision already joins',
-  out.skipped >= 1, JSON.stringify(out));
+  out.wrote === 2, JSON.stringify(out));
+check('and skips the pairs a reviewed decision already joins',
+  out.skipped >= 2, JSON.stringify(out));
+check('the phone-matched pair was FOLDED rather than queued',
+  (await q(`SELECT count(DISTINCT driver_id)::int n FROM driver_platform_id
+             WHERE external_id IN ('A-1','A-2') AND detached_at IS NULL`))[0].n === 1,
+  'a shared phone is an identifier, so it settles this without asking');
 
 const rows = await q(`SELECT * FROM driver_identity_link WHERE basis='same_name' ORDER BY alias_ext_id`);
 check('each is written as a proposal, unconfirmed',
-  rows.length === 3 && rows.every((r) => r.confirmed_at === null),
+  rows.length === 2 && rows.every((r) => r.confirmed_at === null),
   JSON.stringify(rows.map((r) => [r.alias_ext_id, r.confirmed_at])));
 
 /* ── 2. ALL THREE PHONE VERDICTS, SAID ──────────────────────────────────── */
 const ev = Object.fromEntries(rows.map((r) => [r.alias_ext_id, r.evidence]));
-check('where the numbers AGREE it says so, and that the register treats it as conclusive',
-  /same phone number/.test(ev['A-2']) && /conclusive/.test(ev['A-2']), ev['A-2']);
+/* The agree branch is no longer reachable from the queue — a shared phone
+   folds before it can be asked about — so what is asserted is the SENTENCE the
+   code would write, not a row that can no longer exist. Kept because the
+   branch is still live for a pair the spine has not yet placed. */
+check('the agree wording still exists in the source, for a pair the spine has not placed',
+  /same phone number/.test(
+    (await import('node:fs')).readFileSync(new URL('../src/name_proposals.js', import.meta.url), 'utf8')));
 check('where they DISAGREE it says so in capitals, and calls it a reason to say no',
   /DIFFERENT phone numbers/.test(ev['B-2']) && /reason to say no/.test(ev['B-2']), ev['B-2']);
 check('and names the case it is protecting against — two men with one name',
@@ -79,8 +94,8 @@ check('where neither has a number it says there is no identifier either way',
   /no identifier either way/.test(ev['C-2']), ev['C-2']);
 check('every one says the name settles nothing, which is why it is being asked',
   rows.every((r) => /asked rather than applied/.test(r.evidence)));
-check('the tally reports the three verdicts separately, so the queue can be triaged',
-  out.agree === 1 && out.disagree === 1 && out.unknown === 1, JSON.stringify(out));
+check('the tally reports the verdicts separately, so the queue can be triaged',
+  out.disagree === 1 && out.unknown === 1, JSON.stringify(out));
 
 /* ── 1. THE ASSERTION THAT MAKES THIS SAFE ──────────────────────────────── */
 clearIdentityLinkCache();

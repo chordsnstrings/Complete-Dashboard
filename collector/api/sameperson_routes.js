@@ -38,6 +38,11 @@
    this, promoting a pair meant editing api/identity_map.js, regenerating
    sql/schema_v53.sql and deploying. */
 import { identityLinks, clearIdentityLinkCache } from './identity_links.js';
+/* The spine, folded in the same request as the confirmation that earns it —
+   see the block in the decide route for the half-hour of invisibility this
+   removes. */
+import { foldComponent } from '../src/persons.js';
+import { clearPersonMapCache } from './person_map.js';
 
 /* The bases that merge on their own. Anything else is a proposal, and this
    list is the single definition of that split — api/identity_links.js applies
@@ -194,16 +199,54 @@ export function samePersonRoutes(app, { q, wrap }) {
        than half a minute later on a page they have left. */
     clearIdentityLinkCache();
     const links = await identityLinks(q);
+
+    /* AND THE SPINE, NOW — not in up to half an hour.
+       ─────────────────────────────────────────────────────────────────
+       THE DEFECT, 2026-09-21. An operator answered 93 pairs here, went back
+       to the drivers page, and still saw one man as two rows. Nothing was
+       broken: every confirmation was in, the link layer had all four of his
+       accounts in one component, and src/persons.js — which turns components
+       into person rows — rebuilds on the collector's THIRTY-MINUTE cycle.
+       Measured at that moment: 407 people on the spine, 349 once it next ran.
+       Fifty-eight folds already earned and invisible.
+
+       So the merge worked and the page said it had not, which is worse than a
+       broken merge: the operator's next move is to do it again.
+
+       The half-hourly pass still runs and still catches everything. This makes
+       the answer visible before the reviewer looks away. */
+    let spine = null;
+    if (verdict === 'same') {
+      try { spine = await foldComponent(q, alias); }
+      catch (e) {
+        /* A fold that fails is a delay, not a lost decision — the
+           confirmation is already stored and the collector will apply it. Said
+           rather than swallowed, because "it did nothing" is exactly the
+           impression this whole change exists to remove. */
+        spine = { refused: true, why: `the fold could not be applied just now (${String(e).slice(0, 80)}). `
+          + 'The confirmation is stored and the collector\'s next pass will apply it.' };
+      }
+      clearPersonMapCache();
+    }
+
     res.json({ ok: true, alias_ext_id: alias, verdict,
       applied_now: links.byAlias.has(alias),
+      /* What the spine did about it, in the same breath. */
+      spine,
       /* What the verdict actually did, in words. "Confirmed" is not
          self-explanatory: it folds the two records on every page from the next
          request, and it does NOT move the stored person_key that the rollups
          group by — the same distinction api/identity_links.js documents. */
       effect: verdict === 'same'
-        ? 'The two records now read as one person on the driver pages and the directory. The '
-          + 'stored key the monthly rollups group by is unchanged until the pair is promoted '
-          + 'into api/identity_map.js.'
+        ? 'The two records now read as one person on the driver pages and the directory'
+          + (spine && spine.folded
+            ? `, and the person spine folded ${spine.folded + 1} records into one immediately`
+            : spine && spine.needs_merge
+              ? ', but one of them already carries money — folding them moves a balance, which '
+                + 'is an authorised operation and is recorded. Nothing was moved here.'
+              : '')
+          + '. The stored key the monthly rollups group by is unchanged until the pair is '
+          + 'promoted into api/identity_map.js.'
         : verdict === 'different'
           ? 'They stay apart, and the collector will not propose this pair again.'
           : 'Back in the queue, unanswered.' });

@@ -56,6 +56,32 @@ import { identityLinks, linkedIds, clearIdentityLinkCache } from '../api/identit
 /* Every account this fleet knows of, from the three tables that file one.
    trip is included because 302 accounts appear ONLY there — a driver who took
    bookings and was never filed on a roster still has to be somebody. */
+/* A PHONE NUMBER HELD BY EXACTLY TWO ACCOUNTS.
+   ─────────────────────────────────────────────────────────────────────────
+   The link sweep already treats a shared phone as CONCLUSIVE — it is an
+   IDENTIFIER, not a resemblance, and api/identity_map.js took 82 of its 130
+   entries on that basis. But it only links accounts it can see in
+   driver_compliance, so measured on production 2026-09-21 nineteen numbers
+   were still held by two DIFFERENT persons on the spine: the same evidence,
+   the same conclusion, not applied.
+
+   Applied here too, on the operator's instruction, with the threshold the
+   existing rule already uses. A number on THREE OR MORE records identifies a
+   shared handset or an office line rather than a person — src/identity_link.js
+   refuses those at `group.length > 2` and this refuses them at the same place,
+   so the two rules cannot disagree about what a phone proves. */
+const PHONE_PAIRS_SQL = `
+  WITH nums AS (
+    SELECT driver_ext_id AS ext_id,
+           right(regexp_replace(phone, '[^0-9]', '', 'g'), 9) AS tail
+      FROM driver_compliance
+     WHERE coalesce(btrim(phone), '') <> ''
+       AND length(regexp_replace(phone, '[^0-9]', '', 'g')) >= 7
+     GROUP BY 1, 2
+  )
+  SELECT tail, array_agg(ext_id ORDER BY ext_id) AS ids
+    FROM nums GROUP BY tail HAVING count(*) = 2`;
+
 const ACCOUNTS_SQL = `
   SELECT platform, driver_ext_id AS ext_id, max(name) AS name, max(seen) AS seen
     FROM (
@@ -71,6 +97,79 @@ const ACCOUNTS_SQL = `
        GROUP BY platform, driver_ext_id, driver_name
     ) x
    GROUP BY platform, driver_ext_id`;
+
+/* FOLDING ONE COMPONENT, NOW.
+   ═════════════════════════════════════════════════════════════════════════
+   THE DEFECT THE OPERATOR FOUND, 2026-09-21. They answered 93 pairs on
+   #same-person, went back to the drivers page, and still saw one man as two
+   rows. Nothing was broken: the confirmations were all in, the link layer put
+   all four of his accounts in one component, and the spine rebuilds on the
+   collector's THIRTY-MINUTE cycle. Measured at that moment: 407 people on the
+   spine, 349 once it next ran — fifty-eight folds already earned and invisible.
+
+   So the merge worked and the page said it had not. That is worse than a
+   broken merge, because the operator's next move is to do it again.
+
+   This is the same fold refreshPersons does, scoped to one account's component
+   and called from the decide route, so the answer is on screen before the
+   reviewer looks away. The half-hour pass still runs and still catches
+   everything: this makes the common case immediate, it does not replace it. */
+export async function foldComponent(db, extId, { dryRun = false } = {}) {
+  const q = (t, p = []) => (db.query ? db.query(t, p).then((r) => r.rows) : db(t, p));
+  const links = await identityLinks(q);
+  if (!links || links.ok === false) {
+    return { refused: true,
+      why: 'the identity link table could not be read, so the fold this confirmation implies '
+        + 'was not applied. The collector\'s next pass will apply it.' };
+  }
+
+  /* The component, over the same two layers refreshPersons uses. */
+  const comp = new Set([extId]);
+  const stack = [extId];
+  while (stack.length) {
+    const cur = stack.pop();
+    for (const p of linkedIds(links, cur) || []) if (p && !comp.has(p)) { comp.add(p); stack.push(p); }
+    for (const p of mergedIds(cur) || []) if (p && !comp.has(p)) { comp.add(p); stack.push(p); }
+  }
+
+  const mapped = await q(
+    `SELECT driver_id, external_id FROM driver_platform_id
+      WHERE external_id = ANY($1::text[]) AND detached_at IS NULL
+      ORDER BY driver_id`, [[...comp]]);
+  const persons = [...new Set(mapped.map((m) => Number(m.driver_id)))].sort((a, b) => a - b);
+  if (persons.length < 2) {
+    return { folded: 0, persons: persons.length,
+      why: persons.length === 1
+        ? 'every account in this component was already on one person'
+        : 'the spine has not placed these accounts yet; the collector\'s next pass will' };
+  }
+
+  /* MONEY IS THE TEST, exactly as in refreshPersons: an empty person is safe
+     to fold, one carrying an entry is not, and that one waits for an
+     authorised merge that moves the rows and records it. */
+  const [{ n: withMoney }] = await q(
+    `SELECT count(*)::int AS n FROM (
+       SELECT person_id FROM driver_ledger WHERE person_id = ANY($1::bigint[])
+       UNION
+       SELECT person_id FROM driver_ledger_audit WHERE person_id = ANY($1::bigint[])
+     ) x`, [persons]);
+  if (withMoney > 0) {
+    return { folded: 0, persons: persons.length, needs_merge: true,
+      why: `these records are now one person, but ${withMoney} of them already carries money. `
+        + 'Folding them moves a balance, which is an operation somebody authorises and which '
+        + 'is recorded — see /api/person/merge. Nothing was changed here.' };
+  }
+  if (dryRun) return { folded: persons.length - 1, persons: persons.length, dry_run: true };
+
+  const survivor = persons[0];
+  const gone = persons.slice(1);
+  await q(
+    `UPDATE driver_platform_id SET driver_id = $1
+      WHERE driver_id = ANY($2::bigint[]) AND detached_at IS NULL`, [survivor, gone]);
+  await q(`DELETE FROM driver WHERE id = ANY($1::bigint[])`, [gone]);
+  return { folded: gone.length, persons: persons.length, survivor,
+    accounts: mapped.length };
+}
 
 /** Rebuild the person spine from reviewed decisions. Idempotent.
  *  Returns a tally; writes nothing when `dryRun`. */
@@ -106,6 +205,9 @@ export async function refreshPersons(db = pool, { dryRun = false } = {}) {
     for (const s of mergedIds(a.ext_id) || []) edge(a.ext_id, s);
     for (const s of linkedIds(links, a.ext_id) || []) edge(a.ext_id, s);
   }
+  /* …and the identifier both rules agree on. */
+  const phonePairs = await q(PHONE_PAIRS_SQL);
+  for (const p2 of phonePairs) edge(p2.ids[0], p2.ids[1]);
 
   const seen = new Set();
   const components = [];
@@ -122,11 +224,21 @@ export async function refreshPersons(db = pool, { dryRun = false } = {}) {
   }
 
   const tally = { accounts: accounts.length, components: components.length,
-    minted: 0, attached: 0, already: 0, folded: 0, needs_merge: 0, dry_run: dryRun };
+    phone_pairs_seen: phonePairs.length,
+    minted: 0, attached: 0, already: 0, folded: 0, needs_merge: 0,
+    phone_pairs: 0, failed: 0, dry_run: dryRun };
   if (dryRun) return tally;
 
-  /* ── apply, one component at a time ───────────────────────────────────── */
+  /* ── apply, one component at a time ─────────────────────────────────────
+     EACH ONE IN ITS OWN TRY. A component that cannot be applied — a person
+     still referenced by a table this sweep does not know about, a constraint
+     added later — used to throw out of the loop and abort the whole rebuild,
+     leaving every component after it unprocessed and the count stale until
+     somebody noticed. run.js catches it, logs it and carries on, so the
+     failure was invisible and the symptom was "the spine stopped updating".
+     One component is now one component's problem. */
   for (const comp of components) {
+    try {
     /* Already mapped? Use that person. A component whose accounts sit on two
        DIFFERENT persons is the shape a merge would fix, and this sweep does
        not do merges — it takes the lowest id, attaches the unmapped accounts
@@ -154,9 +266,18 @@ export async function refreshPersons(db = pool, { dryRun = false } = {}) {
        effect of a sweep that runs every half hour. */
     let personId = persons[0] || null;
     if (persons.length > 1) {
+      /* EVERY TABLE THAT POINTS AT A PERSON, not only the ledger.
+         driver_ledger_audit.person_id is a foreign key too, and a person
+         referenced by one cannot be deleted — the DELETE raises and, before
+         the per-component guard below, took the whole rebuild with it.
+         Proved by removing this check and watching the fold fail with
+         "update or delete on table driver violates foreign key constraint". */
       const [{ n: withMoney }] = await q(
-        `SELECT count(DISTINCT person_id)::int AS n FROM driver_ledger
-          WHERE person_id = ANY($1::bigint[])`, [persons]);
+        `SELECT count(*)::int AS n FROM (
+           SELECT person_id FROM driver_ledger WHERE person_id = ANY($1::bigint[])
+           UNION
+           SELECT person_id FROM driver_ledger_audit WHERE person_id = ANY($1::bigint[])
+         ) x`, [persons]);
       if (withMoney === 0) {
         const survivor = persons[0];
         const gone = persons.slice(1);
@@ -210,6 +331,12 @@ export async function refreshPersons(db = pool, { dryRun = false } = {}) {
         [acct.platform, id, personId, acct.name || null,
           comp.length === 1 ? 'account' : (inRegister ? 'register' : 'link')]);
       tally.attached += 1;
+    }
+    } catch (e) {
+      tally.failed += 1;
+      log.warn('persons', 'component could not be applied', {
+        accounts: comp.length, err: String(e).slice(0, 160),
+        note: 'the rest of the rebuild continued' });
     }
   }
 

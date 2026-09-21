@@ -827,6 +827,27 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A CONFIRMED MERGE WAS INVISIBLE FOR UP TO HALF AN HOUR, AND LOOKED LIKE A
+  BROKEN MERGE.** The operator answered 93 pairs on `#same-person`, went back
+  to `#drivers`, and still saw one man as two rows. Nothing was broken: every
+  confirmation was stored, the link layer had all four of his accounts in one
+  component, and `src/persons.js` — which turns components into person rows —
+  runs on the collector's thirty-minute cycle. Measured at that moment: **407
+  people on the spine, 349 once it next ran. Fifty-eight folds already earned
+  and invisible.** A decision whose effect is not visible where it was taken
+  reads as a decision that failed, and the operator's next move is to take it
+  again. `foldComponent` now applies it in the same request as the
+  confirmation; the half-hourly pass still catches everything.
+
+* **ONE BAD COMPONENT ABORTED THE WHOLE SPINE REBUILD.** `refreshPersons`
+  looped over components with no per-component guard, so a single failure threw
+  out of the loop and left every component after it unprocessed. `run.js`
+  catches, logs and carries on — so the symptom was not an error, it was "the
+  count stopped updating". The commonest cause is the `DELETE FROM driver`
+  hitting a foreign key: **`driver_ledger_audit.person_id` references `driver`
+  too**, and the money guard only checked `driver_ledger`. Both are checked
+  now, and each component runs in its own try.
+
 * **THE DRIVERS DIRECTORY WAS CAPPED AT `LIMIT 800` ACCOUNTS, AND THE ROSTER
   REACHED 810 THIS MONTH.** The page is headed "All drivers · Everyone on the
   books, even people with no trip in this window". It sorts by trips DESC then
