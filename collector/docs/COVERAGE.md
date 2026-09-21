@@ -827,6 +827,22 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A SEEDED LOOKUP TABLE WITH `ON CONFLICT DO NOTHING` NEVER RECEIVES A
+  CORRECTION.** `src/db.js` replays a schema file whose sha has changed, so an
+  edited seed row *does* re-run — and then does nothing, because the row
+  already exists. A corrected label or a clarified note reaches only databases
+  that have never run the file, which in practice means the developer's and not
+  production. `sql/schema_v78.sql` seeds `ledger_type` with
+  `ON CONFLICT (code) DO UPDATE` for the descriptive fields for that reason.
+
+  It deliberately does **not** update `book` or `direction`. Both are copied
+  onto every entry at write time — that is what makes the composite key
+  `(type_code, direction)` able to refuse a row entered the wrong way round —
+  so changing a type's direction later would not restate the rows already
+  written. It would leave the register holding two meanings for one code, which
+  is the silent version of the defect the key exists to prevent. **Changing
+  what a type means is a new code, not an edit.**
+
 * **THE SAME-PERSON REVIEW QUEUE EMPTIED ITSELF EVERY OTHER RUN.** Measured by
   calling `refreshIdentityLinks` three times against one fixture:
 

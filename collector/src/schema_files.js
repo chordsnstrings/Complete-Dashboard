@@ -166,4 +166,18 @@ export const SCHEMA_FILES = [
      which is documentation and explicitly not a formula. Changes nothing about
      how any existing page resolves a driver. */
   'schema_v77.sql',
+  /* The driver's current account: advances, repayments, cash deposits,
+     deductions and RECORDED pay, one signed row per event, append-only. One
+     sign convention throughout — positive increases what the driver owes this
+     company — and the sign cannot be wrong, because direction is tied to the
+     type by a COMPOSITE foreign key (type_code, direction) and the amount's
+     sign is tied to direction by a CHECK. A type registry makes new advance
+     formats a row rather than a migration. `book` keeps a cash deposit from
+     reducing an advance balance. `entry_source = 'verification'` exists so this
+     repo's own "every modal filled" ritual cannot leave permanent debt against
+     a real person. Receipts are BYTEA with a twelve-month expiry, the shape
+     driver_photo already proved on this deployment's ephemeral disk. The 35%
+     policy is stored and effective-dated with its own history, NOT in
+     app_setting, which is the credential store and deletes without one. */
+  'schema_v78.sql',
 ];
