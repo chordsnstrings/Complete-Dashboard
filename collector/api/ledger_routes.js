@@ -873,6 +873,18 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
        ),
        /* The numerator, per book, over the person. entry_source 'verification'
           is excluded by construction — see sql/schema_v78.sql. */
+       /* THE NUMERATOR IS A POSITION, AND POSITIONS ARE NOT WINDOWED.
+          ─────────────────────────────────────────────────────────────────
+          from governs the DENOMINATOR only. What a driver owes today is
+          everything ever recorded against them up to the as-of date — bounding
+          it below would answer "what did they take during September", which is
+          a different question and a smaller number, and the policy would then
+          be enforced against a fraction of the real balance.
+
+          The ratio is deliberately a stock over a flow: what they are holding
+          now, against what they generate in a period. That is the shape the
+          operator described and it is the only one that makes the 35% mean
+          anything. */
        book AS (
          SELECT person_id,
                 sum(amount) FILTER (WHERE book = 'advance')   AS advance,
@@ -883,9 +895,67 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
                 max(effective_on)                             AS last_entry
            FROM driver_ledger
           WHERE entry_source <> 'verification'
-            AND ($1::date IS NULL OR effective_on >= $1::date)
             AND ($2::date IS NULL OR effective_on <= $2::date)
           GROUP BY person_id
+       ),
+       /* ── THE CASH TERM, AS THE OPERATOR DESCRIBED IT ──────────────────
+          "We will ask the accountant team to update each driver's cash
+          position as of the date that they will input. The new ones will take
+          into account since that day."
+
+          So a person's cash is a POSITION stated by a human, plus what they
+          have collected since that date, minus what they have handed in since
+          that date. Three terms, one stated and two measured, and the stated
+          one is what makes the other two mean anything: without it, collected
+          cash accumulates from the beginning of the record against no starting
+          balance at all.
+
+          WHY THE COLLECTED HALF COMES FROM TRIPS AND NOT FROM THE STATEMENT
+          LEDGER. driver_statement_day.unremitted is the obvious source and it
+          cannot be joined to a person: it is keyed on a normalised NAME, and
+          measured on production 2026-09-21, only 236 of 405 people on it carry
+          a driver_ext_id at all — AED 315,771 of AED 1,935,693, or 16.3% of
+          the total, is reachable by id. A cash figure that silently omitted
+          five-sixths of the collections would UNDERSTATE exposure, which is
+          the direction that gets somebody lent more than they should be.
+
+          trip_ext keys on driver_ext_id, which driver_platform_id maps
+          cleanly, so every person with an account is covered. One basis, named
+          on the response — docs/COVERAGE.md is explicit that the three cash
+          figures never agree and must never be summed. */
+       opening AS (
+         SELECT DISTINCT ON (person_id) person_id, amount, effective_on
+           FROM driver_ledger
+          WHERE type_code = 'cash_opening' AND entry_source <> 'verification'
+          ORDER BY person_id, effective_on DESC, id DESC
+       ),
+       collected AS (
+         SELECT a.driver_id AS person_id,
+                sum(t.price)                                        AS value,
+                count(*)::int                                       AS trips,
+                count(*) FILTER (WHERE t.price IS NOT NULL)::int     AS priced
+           FROM acct a
+           JOIN opening o ON o.person_id = a.driver_id
+           JOIN trip_ext t ON t.driver_ext_id = a.external_id
+          WHERE t.driver_holds_cash
+            AND (t.requested_at AT TIME ZONE 'Asia/Dubai')::date > o.effective_on
+            /* Bounded ABOVE only, by the as-of. The lower bound is the day the
+               accounts team stated the position — that is the whole point of
+               their date — and from has no business here: a position asked
+               for on the 30th includes what was collected on the 6th. */
+            AND ($2::date IS NULL OR (t.requested_at AT TIME ZONE 'Asia/Dubai')::date <= $2::date)
+          GROUP BY a.driver_id
+       ),
+       /* Everything in the cash book that is NOT the opening — deposits, and
+          anything else that settles cash — on or after the day it was stated. */
+       handed AS (
+         SELECT e.person_id, sum(e.amount) AS amount, count(*)::int AS n
+           FROM driver_ledger e JOIN opening o ON o.person_id = e.person_id
+          WHERE e.book = 'cash' AND e.type_code <> 'cash_opening'
+            AND e.entry_source <> 'verification'
+            AND e.effective_on > o.effective_on
+            AND ($2::date IS NULL OR e.effective_on <= $2::date)
+          GROUP BY e.person_id
        ),
        /* The denominator, summed over THE SAME account list. */
        rev AS (
@@ -924,12 +994,20 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
               b.advance, b.deduction, b.cash_entries, b.pay, b.cash_rows,
               to_char(b.last_entry,'YYYY-MM-DD')         AS last_entry,
               rev.earned, rev.cash_earned, rev.days,
-              link.external_id AS link_ext_id, link.platform AS link_platform
+              link.external_id AS link_ext_id, link.platform AS link_platform,
+              o.amount AS opening_amount,
+              to_char(o.effective_on,'YYYY-MM-DD') AS opening_on,
+              c.value AS collected_value, c.trips AS collected_trips,
+              c.priced AS collected_priced,
+              h.amount AS handed_amount, h.n AS handed_n
          FROM driver dr
          LEFT JOIN n   ON n.driver_id = dr.id
          LEFT JOIN book b ON b.person_id = dr.id
          LEFT JOIN rev ON rev.person_id = dr.id
          LEFT JOIN link ON link.driver_id = dr.id
+         LEFT JOIN opening o ON o.person_id = dr.id
+         LEFT JOIN collected c ON c.person_id = dr.id
+         LEFT JOIN handed h ON h.person_id = dr.id
         WHERE ($3::bigint IS NULL OR dr.id = $3::bigint)
         ORDER BY dr.full_name NULLS LAST`, [from, to, onePerson]);
 
@@ -940,16 +1018,36 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
       const cashEntries = r.cash_entries == null ? null : Number(r.cash_entries);
       const earned = r.earned == null ? null : Number(r.earned);
 
-      /* THE CASH TERM, and the reason when it is absent. A person with no cash
-         entry at all has no stated position — not a position of zero. */
-      const cashKnown = r.cash_rows > 0;
-      const cashReason = cashKnown ? null
-        : 'no opening cash position has been stated for this person and no deposit has been '
-          + 'recorded, so how much fare cash they are holding is unknown. It is not zero: '
-          + 'driver_statement_day.unremitted is a daily figure and nothing in this database '
-          + 'records a remittance, so it cannot be accumulated into a position.';
+      /* THE CASH TERM: a position somebody stated, plus what has been
+         collected since, minus what has come back since.
 
-      const owed = cashKnown ? round2(advance + deduction + cashEntries) : null;
+         THE OPENING IS WHAT MAKES THE OTHER TWO MEAN ANYTHING. Without a
+         stated starting balance there is nothing for collections to accumulate
+         ONTO — they would run from the beginning of the record, which for a
+         driver of two years is a number nobody should act on. So a person with
+         no opening has an unknown cash position, and unknown is not zero. */
+      const cashKnown = r.opening_on != null;
+      const opening = cashKnown ? Number(r.opening_amount) : null;
+      const collected = r.collected_value == null ? 0 : Number(r.collected_value);
+      const handed = r.handed_amount == null ? 0 : Number(r.handed_amount);
+      const cash = cashKnown ? round2(opening + collected + handed) : null;
+      const cashReason = cashKnown ? null
+        : 'no opening cash position has been stated for this person, so how much fare cash '
+          + 'they are holding is unknown. It is not zero, and it cannot be derived: '
+          + 'driver_statement_day.unremitted is a daily figure, nothing in this database '
+          + 'records a remittance, and only 16.3% of that ledger can be joined to a person by '
+          + 'id at all (measured 2026-09-21). The accounts team states the position and the '
+          + 'date it is as of; everything after that date is counted from here.';
+
+      /* THE FLOOR, stated rather than implied. Not every cash trip carries a
+         price — 74.9% did over seven weeks measured on production — so the
+         collected half is what we can PROVE was taken, and the true figure is
+         at least this. A ratio built on it errs low, and the row says by how
+         many trips. */
+      const unpriced = cashKnown && r.collected_trips
+        ? r.collected_trips - r.collected_priced : 0;
+
+      const owed = cashKnown ? round2(advance + deduction + cash) : null;
       const owedReason = cashKnown ? null
         : 'the cash component is unknown, and the operator\'s policy counts cash the driver '
           + 'holds inside the 35%. A figure without it would understate exposure, which is '
@@ -979,8 +1077,28 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
            and which one is missing. */
         owes: {
           advance: round2(advance), deduction: round2(deduction),
-          cash: cashEntries == null ? null : round2(cashEntries),
+          cash: cash,
           cash_absent_reason: cashReason,
+          /* Every term, so a reader can see which one is doing the work. */
+          cash_basis: cashKnown ? {
+            opening: round2(opening),
+            opening_on: r.opening_on,
+            collected_since: round2(collected),
+            collected_trips: r.collected_trips || 0,
+            collected_unpriced_trips: unpriced,
+            handed_in_since: round2(handed),
+            handed_in_entries: r.handed_n || 0,
+            is_a_floor: unpriced > 0,
+            floor_reason: unpriced > 0
+              ? `${unpriced} of ${r.collected_trips} cash trips since ${r.opening_on} carry no `
+                + 'price, so the collected half is what can be proved and the true figure is at '
+                + 'least this. The exposure below therefore errs LOW.'
+              : null,
+            from: 'an opening position stated by the accounts team, plus fares on cash-marked '
+              + 'trips since that date over this person\'s accounts, minus deposits recorded '
+              + 'since. Trips and not driver_statement_day.unremitted, which is keyed on a name '
+              + 'and joinable to a person for only 16.3% of its value.',
+          } : null,
           total: owed, total_absent_reason: owedReason,
         },
         pay_book: r.pay == null ? null : round2(Number(r.pay)),

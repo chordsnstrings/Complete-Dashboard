@@ -125,6 +125,116 @@ check('and the reason names the direction the error would have run in',
 check('the verdict is "not measurable", never a number',
   noCash?.verdict === 'not measurable', noCash?.verdict);
 
+/* ── THE CASH POSITION: STATED, THEN ACCUMULATED FROM THAT DATE ─────────
+   The operator: "we will ask the accountant team to update each driver's cash
+   position as of the date that they will input. The new ones will take into
+   account since that day."
+
+   Three terms. The opening is the one a human states, and it is what makes the
+   other two mean anything — without a starting balance there is nothing for
+   collections to accumulate ONTO, and they would run from the beginning of the
+   record, which for a driver of two years is a number nobody should act on.
+
+   The collected half comes from TRIPS and not from driver_statement_day.
+   unremitted, which is the obvious source and cannot be joined to a person:
+   it is keyed on a normalised name, and measured on production 2026-09-21 only
+   AED 315,771 of AED 1,935,693 — 16.3% — is reachable by id. A cash figure
+   silently missing five-sixths of the collections would UNDERSTATE exposure,
+   which is the direction that gets somebody lent more than they should be. */
+/* $5 carries the id suffix separately from $3, the price. Sharing one
+   parameter between a text concatenation and a numeric column makes Postgres
+   infer it as text and refuse the INSERT — "you will need to rewrite or cast
+   the expression", which is the error this fixture hit first. */
+let tripN = 0;
+const trip = async (ext, day, price, cash = true) => q(
+  `INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, requested_at,
+                     status, payment_type, price)
+   VALUES ('uber', $5, 'ecosine', $1, ($2 || ' 12:00+04')::timestamptz,
+           'completed', $4, $3::numeric)`,
+  [ext, day, price, cash ? 'cash' : 'card', `t${(tripN += 1)}`]);
+
+await person(10, 'Stated And Since');
+await acct(10, 'uber', 'U-10');
+await earn('U-10', '2026-09-05', 10000, 0);
+/* Stated on the 5th: AED 800 in hand. */
+await entry(10, 'Stated And Since', 'cash_opening', 1, 'cash', 800, { on: '2026-09-05' });
+/* A cash trip BEFORE the statement — already inside the 800, and must not be
+   counted twice. */
+await trip('U-10', '2026-09-03', 120);
+/* Two after it, one of them unpriced. */
+await trip('U-10', '2026-09-08', 200);
+await trip('U-10', '2026-09-09', null);
+/* And a card trip after it, which is not cash at all. */
+await trip('U-10', '2026-09-10', 500, false);
+/* AED 300 handed back on the 11th. */
+await entry(10, 'Stated And Since', 'cash_deposit', -1, 'cash', -300, { on: '2026-09-11' });
+
+const rc = (await get('/api/ledger/exposure?from=2026-09-01&to=2026-09-30')).body;
+const st = Object.fromEntries(rc.people.map((p) => [p.name, p]))['Stated And Since'];
+check('the cash position is the stated opening plus what came in, minus what went back',
+  st?.owes.cash === 700, JSON.stringify(st?.owes.cash_basis));
+check('the opening and its date are reported, not just folded into a total',
+  st?.owes.cash_basis.opening === 800 && st?.owes.cash_basis.opening_on === '2026-09-05',
+  JSON.stringify(st?.owes.cash_basis));
+check('a cash trip BEFORE the stated date is not counted again',
+  st?.owes.cash_basis.collected_since === 200, String(st?.owes.cash_basis.collected_since));
+check('a card trip after it is not cash',
+  st?.owes.cash_basis.collected_trips === 2, String(st?.owes.cash_basis.collected_trips));
+check('and the deposit since is subtracted',
+  st?.owes.cash_basis.handed_in_since === -300, String(st?.owes.cash_basis.handed_in_since));
+
+/* THE FLOOR. Not every cash trip carries a price — 74.9% did over seven weeks
+   on production — so the collected half is what can be PROVED, and a ratio
+   built on it errs low. The row says so and by how many trips, rather than
+   presenting a floor as a measurement. */
+check('an unpriced cash trip makes the figure a stated floor',
+  st?.owes.cash_basis.is_a_floor === true, JSON.stringify(st?.owes.cash_basis.is_a_floor));
+check('naming how many trips carry no price, and that the exposure errs LOW',
+  /1 of 2 cash trips since 2026-09-05 carry no price/.test(st?.owes.cash_basis.floor_reason || '')
+  && /errs LOW/.test(st?.owes.cash_basis.floor_reason || ''), st?.owes.cash_basis.floor_reason);
+check('the whole exposure is still measurable — a floor is a number, not an absence',
+  st?.exposure_pct != null, String(st?.exposure_pct));
+
+/* ── A BALANCE IS A POSITION, AND POSITIONS ARE NOT WINDOWED ────────────
+   `from` governs the DENOMINATOR only. What somebody owes today is everything
+   ever recorded against them up to the as-of date; bounding it below would
+   answer "what did they take during September", which is a different question
+   and a smaller number — and the 35% would then be enforced against a fraction
+   of the real balance, which is the understating direction again.
+
+   The ratio is deliberately a STOCK over a FLOW: what they hold now, against
+   what they generate in a period. */
+await person(12, 'Owed From Before');
+await acct(12, 'uber', 'U-12');
+await earn('U-12', '2026-09-05', 10000, 0);
+/* Taken in JULY, long before the window asked about. */
+await entry(12, 'Owed From Before', 'cash_advance', 1, 'advance', 3000, { on: '2026-07-02' });
+await entry(12, 'Owed From Before', 'cash_opening', 1, 'cash', 500, { on: '2026-07-02' });
+const rw = (await get('/api/ledger/exposure?from=2026-09-01&to=2026-09-30')).body;
+const ow = Object.fromEntries(rw.people.map((p) => [p.name, p]))['Owed From Before'];
+check('an advance taken before the window still counts against them',
+  ow?.owes.advance === 3000, JSON.stringify(ow?.owes));
+check('and so does a cash position stated before it',
+  ow?.owes.cash === 500, String(ow?.owes.cash));
+check('so the ratio is a stock over a flow — 3500 held against 10000 generated',
+  ow?.exposure_pct === 35, String(ow?.exposure_pct));
+
+/* ── AND WITHOUT AN OPENING, NOTHING ACCUMULATES ────────────────────────── */
+await person(11, 'Never Stated');
+await acct(11, 'uber', 'U-11');
+await earn('U-11', '2026-09-05', 9000, 0);
+await trip('U-11', '2026-09-08', 400);
+const rn = (await get('/api/ledger/exposure?from=2026-09-01&to=2026-09-30')).body;
+const ns = Object.fromEntries(rn.people.map((p) => [p.name, p]))['Never Stated'];
+check('cash trips alone do NOT make a position', ns?.owes.cash === null,
+  JSON.stringify(ns?.owes.cash));
+check('the basis is absent rather than half-built', ns?.owes.cash_basis === null);
+check('and the reason says the accounts team states it and from when',
+  /accounts team states the position and the date it is as of/i.test(
+    ns?.owes.cash_absent_reason || ''), ns?.owes.cash_absent_reason);
+check('naming why the statement ledger cannot supply it either',
+  /16\.3%/.test(ns?.owes.cash_absent_reason || ''), ns?.owes.cash_absent_reason);
+
 /* ── 3. NO REVENUE IS NOT A ZERO RATIO ───────────────────────────────────── */
 await person(4, 'No Revenue');
 await acct(4, 'uber', 'U-4');

@@ -827,6 +827,37 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **`driver_statement_day` CANNOT BE JOINED TO A PERSON FOR MOST OF ITS
+  VALUE.** It is keyed on a normalised driver NAME plus fleet, and
+  `sql/schema_v25.sql:28` says why — the operator's ledger predates our ids and
+  "its people must not vanish for want of a match". `driver_ext_id` is filled
+  only "where a platform id can be matched". Measured on production
+  2026-09-21:
+
+  | | |
+  |---|---|
+  | people on the statement ledger | 405 |
+  | of whom carry a `driver_ext_id` | 236 |
+  | unremitted total | AED 1,935,693 |
+  | of that, reachable by id | **AED 315,771 — 16.3%** |
+
+  So anything that needs per-PERSON cash must come off **trips**, which key on
+  `driver_ext_id` and map cleanly through `driver_platform_id`. A cash figure
+  built on the statement ledger would silently omit five-sixths of the
+  collections, and a missing collection **understates** exposure — the
+  direction that gets somebody lent more than they should be.
+
+* **A BALANCE IS A POSITION, AND POSITIONS MUST NOT BE WINDOWED.** The exposure
+  ratio is a STOCK over a FLOW: what a driver holds now, against what they
+  generate in a period. `from` governs the denominator only. Bounding the
+  numerator below answers "what did they take during September", which is a
+  different question and a smaller number.
+
+  Measured against the fixture: a driver owing AED 3,500 taken in July, asked
+  about over September, reads **5% instead of 35%** when the numerator is
+  windowed. The 35% line would then be enforced against a fraction of the real
+  balance, and nothing on the page would look wrong.
+
 * **A WINDOW PARAMETER THAT IS PARSED AND ECHOED BUT NEVER BOUND.** Shipped
   2026-09-21 in `/api/ledger/cash-position` and caught by the first production
   measurement of it, minutes later. `to` was read from the query, returned in
