@@ -55,6 +55,7 @@ import { canonicalName, mergedIds, mergedNames, mergedPlatforms, ALIAS_KEY,
    somebody was and disagreed what to call them, and 38 people rendered twice
    because the disagreement was resolved one id at a time. */
 import { keyResolver } from './fold_key.js';
+import { personMap } from './person_map.js';
 /* The links a roster proved rather than a person checked: two records, two
    channels, one phone number. Consulted AFTER the register, so a human's
    decision always wins — see api/identity_links.js. */
@@ -787,8 +788,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        thirty-second cache, and a per-row await would make the directory's cost
        depend on how many people the fleet has. */
     const links = await identityLinks(q);
-    /* Built once for the whole directory rather than per row: it walks each
-       component once, and there are 201 of them against 384 rows. */
+    /* One answer to "who is this", read from the table src/persons.js builds
+       on every collector pass. */
+    const spine = await personMap(q);
+    /* Still built, for the accounts the spine has not placed yet. */
     const resolveKey = keyResolver(links, linkedKey);
     const byName = new Map();
     for (const r of rows) {
@@ -831,15 +834,40 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          reasoning and the property that makes it safe: it merges nobody new,
          because the component is built only from edges a human-reviewed
          decision already asserts. */
-      const k = resolveKey(
-        ALIAS_KEY.get(r.driver_ext_id)
-        || linkedKey(links, r.driver_ext_id)
-        /* …and the third record, which no link names because Bolt files no
-           phone. It reaches the person through the name it shares with the
-           alias — see byName in api/identity_links.js. */
-        || linkedByName(links, own)
-        || own,
-      );
+      /* THE SPINE FIRST, AND THE NAME FOLD IS GONE.
+         ─────────────────────────────────────────────────────────────────
+         src/persons.js materialises one row per human into driver +
+         driver_platform_id, from reviewed decisions only, and this asks it.
+         Every other surface asks the same table, so "how many drivers" has
+         one answer instead of the four it had on 2026-09-21 — 347 here, 437
+         on #compliance, 508 in the money picker, 0 on exposure, over the
+         same 800 accounts.
+
+         `linkedByName` is deliberately no longer consulted. It let an
+         account in NO link inherit a person because its folded name matched
+         some linked alias's, and that rule alone made 92 of the 347 rows:
+         44 supported by a matching phone, 37 with no evidence either way,
+         and NINE CONTRADICTED by different phone numbers on the records it
+         joined — the worst carrying seven accounts and three numbers, filed
+         variously as 'ZAHID KHAN ISMAIL ISMAIL' and 'Zahid Khan Mohabbat
+         Khan'. CLAUDE.md forbids it in as many words: never a name rule.
+         Those pairs are now PROPOSALS on #same-person, where a person
+         answers them.
+
+         The count goes UP as a result, and that is the honest direction:
+         what it goes up to is what the evidence supports.
+
+         The register/link fallback stays for accounts the spine has not
+         placed yet — every account until it has run once against a
+         database, and after that only arrivals since the last pass. */
+      const fromSpine = spine.byAccount.get(r.driver_ext_id);
+      const k = fromSpine != null
+        ? `person:${fromSpine}`
+        : resolveKey(
+          ALIAS_KEY.get(r.driver_ext_id)
+          || linkedKey(links, r.driver_ext_id)
+          || own,
+        );
       const cur = byName.get(k);
       if (!cur) {
         byName.set(k, { ...r, ids: [r.driver_ext_id], platforms: [...(r.platforms || [])],

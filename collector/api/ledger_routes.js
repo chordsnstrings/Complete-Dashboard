@@ -82,6 +82,8 @@
 import express from 'express';
 import { createHash } from 'node:crypto';
 import { resolvePerson, personKey } from './ledger_person.js';
+/* One answer to "who is this", read from the table src/persons.js builds. */
+import { personMap } from './person_map.js';
 
 const round2 = (v) => (v == null ? null : Math.round(Number(v) * 100) / 100);
 
@@ -377,55 +379,86 @@ export function ledgerRoutes(app, { q, wrap, tx }) {
    where they meant a person. */
 export function ledgerPeopleRoutes(app, { q, wrap }) {
   app.get('/api/ledger/people', wrap(async (req, res) => {
-    const known = await q(
-      `SELECT dr.id AS person_id, dr.full_name AS name, dr.cash_rule,
-              count(a.external_id)::int AS accounts,
-              min(a.external_id) AS ext_id, min(a.platform) AS platform
-         FROM driver dr
-         LEFT JOIN driver_platform_id a
-           ON a.driver_id = dr.id AND a.detached_at IS NULL
-        GROUP BY dr.id, dr.full_name, dr.cash_rule`);
+    /* ONE ROW PER PERSON, FROM THE SPINE.
+       ───────────────────────────────────────────────────────────────────
+       This listed ACCOUNTS. On production it offered 508 of them while
+       #drivers showed 347 people over the same roster — so a supervisor
+       could record a charging advance against 'Tariq Afzal Afzal' today and
+       'Tariq Afzal Said Afzal' tomorrow, and that is one man with two
+       balances, each looking perfectly reasonable and nothing on screen
+       showing the error.
 
-    const unmapped = await q(
-      `SELECT r.platform, r.driver_ext_id AS ext_id, max(r.name) AS name
-         FROM (SELECT platform, driver_ext_id, full_name AS name
-                 FROM driver_platform_state WHERE driver_ext_id IS NOT NULL
-               UNION ALL
-               SELECT platform, driver_ext_id, full_name FROM driver_compliance
-                WHERE driver_ext_id IS NOT NULL) r
-        WHERE NOT EXISTS (
-          SELECT 1 FROM driver_platform_id m
-           WHERE m.platform = r.platform AND m.external_id = r.driver_ext_id
-             AND m.detached_at IS NULL)
-        GROUP BY r.platform, r.driver_ext_id
-        HAVING max(r.name) IS NOT NULL
-        ORDER BY 3`);
+       src/persons.js materialises one row per human into driver +
+       driver_platform_id, built from reviewed decisions only. This reads it.
+       The picker therefore offers PEOPLE, and the count here is the same
+       count #drivers shows, because both now come from the same table. */
+    const map = await personMap(q);
+    if (!map.ok) {
+      /* A DEGRADED READ IS NOT AN EMPTY ROSTER. Answering [] would put an
+         operator in front of a picker with nobody in it and no way to tell
+         that from a fleet nobody has hired. */
+      return res.status(503).json({
+        people: [], known: 0, unmapped: 0,
+        error: 'the person spine could not be read, so there is nobody to offer. This says '
+          + 'nothing about who is on the roster — the query for it failed.',
+      });
+    }
+
+    const people = [...map.person.values()]
+      .filter((p) => p.name)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+      .map((p) => ({
+        person_id: p.person_id,
+        name: p.name,
+        accounts: p.accounts.length,
+        /* Every account, not just the one the row opens by — the picker uses
+           them to tell two people with one name apart, and a write can be
+           addressed through any of them. */
+        account_ids: p.accounts.map((a) => a.ext_id),
+        platforms: p.platforms,
+        ext_id: p.ext_id,
+        platform: p.platform,
+        cash_rule: p.cash_rule,
+        /* Everyone on the spine is addressable by id, so there is no longer a
+           second class of row addressed by account. Kept on the response
+           because the write path, the import commit and the phone screen all
+           read it, and a person with no account at all is still true. */
+        on_the_ledger: true,
+        key: personKey({ person_id: p.person_id }),
+      }));
+
+    /* Accounts the spine has NOT placed — every account until src/persons.js
+       has run once against this database, and after that only ones that
+       arrived since the last pass. Said rather than hidden: a picker quietly
+       missing yesterday's new hire is worse than one that says so. */
+    const [{ n: unplaced }] = await q(
+      `SELECT count(*)::int AS n FROM (
+         SELECT platform, driver_ext_id FROM driver_platform_state WHERE driver_ext_id IS NOT NULL
+         UNION
+         SELECT platform, driver_ext_id FROM driver_compliance WHERE driver_ext_id IS NOT NULL
+       ) r
+       WHERE NOT EXISTS (
+         SELECT 1 FROM driver_platform_id m
+          WHERE m.platform = r.platform AND m.external_id = r.driver_ext_id
+            AND m.detached_at IS NULL)`);
 
     res.json({
-      people: [
-        ...known.map((p) => ({
-          person_id: Number(p.person_id), name: p.name, accounts: p.accounts,
-          ext_id: p.ext_id, platform: p.platform, cash_rule: p.cash_rule,
-          on_the_ledger: true,
-          key: personKey({ person_id: Number(p.person_id) }),
-        })),
-        ...unmapped.map((r) => ({
-          /* No person id, and that is the point: an entry against this row
-             sends the ACCOUNT, and the write path mints the person. */
-          person_id: null, name: r.name, accounts: 0,
-          ext_id: r.ext_id, platform: r.platform, cash_rule: null,
-          on_the_ledger: false,
-          /* The same key /api/ledger/import/preview puts on its candidates,
-             from the same function — see personKey in api/ledger_person.js for
-             why that matters. */
-          key: personKey({ person_id: null, platform: r.platform, ext_id: r.ext_id }),
-        })),
-      ],
-      known: known.length,
-      unmapped: unmapped.length,
-      note: 'People are minted by the first entry recorded against them, so a fresh ledger has '
-        + 'none. The second list is the roster — choosing somebody from it sends the account, '
-        + 'and the write path creates the person inside the same transaction as the entry.',
+      people,
+      known: people.length,
+      unmapped: 0,
+      accounts: map.counts.accounts,
+      unplaced_accounts: unplaced,
+      unplaced_reason: unplaced
+        ? `${unplaced} roster account(s) have not been placed on a person yet. The spine runs `
+          + 'on every collector pass; until it next does, those drivers cannot be recorded '
+          + 'against. Nobody is hidden on purpose.'
+        : null,
+      note: people.length
+        ? `${people.length} people across ${map.counts.accounts} platform accounts. This is the `
+          + 'same count the drivers directory shows, because both read one table — see '
+          + 'src/persons.js.'
+        : 'The person spine is empty. It is built by the collector on every pass from the '
+          + 'register and the confirmed links; until it has run once there is nobody to offer.',
     });
   }));
 }

@@ -47,6 +47,27 @@ export const CONCLUSIVE = ['shared_phone', 'shared_email'];
 export function samePersonRoutes(app, { q, wrap }) {
   /* ── the queue ─────────────────────────────────────────────────────────── */
   app.get('/api/same-person', wrap(async (req, res) => {
+    /* COUNTS ONLY, for a page that wants to name the backlog without carrying
+       it. #drivers prints "N people · K pairs awaiting review" beside its
+       count, and pulling the full queue — every pair with its evidence
+       sentence — to render one number would be several hundred kilobytes on a
+       page that is already the heaviest in the product. */
+    if (req.query.counts) {
+      const [c] = await q(
+        `SELECT count(*) FILTER (WHERE NOT rejected AND confirmed_at IS NULL)::int AS pending,
+                count(*) FILTER (WHERE confirmed_at IS NOT NULL)::int AS confirmed,
+                count(*) FILTER (WHERE rejected)::int AS rejected
+           FROM driver_identity_link WHERE basis <> ALL($1::text[])`, [CONCLUSIVE]);
+      const byBasis = await q(
+        `SELECT basis, count(*)::int AS n FROM driver_identity_link
+          WHERE NOT rejected AND confirmed_at IS NULL AND basis <> ALL($1::text[])
+          GROUP BY basis ORDER BY 2 DESC`, [CONCLUSIVE]);
+      return res.json({ pending: c.pending, confirmed: c.confirmed, rejected: c.rejected,
+        by_basis: Object.fromEntries(byBasis.map((r) => [r.basis, r.n])),
+        note: 'Pairs a rule proposed and nobody has answered. They fold nobody until somebody '
+          + 'does — api/identity_links.js applies a link only where the basis is conclusive or '
+          + 'a person confirmed it.' });
+    }
     const rows = await q(
       `SELECT l.alias_ext_id, l.alias_platform, l.alias_name,
               l.canonical_ext_id, l.canonical_platform, l.canonical_name, l.canonical_key,

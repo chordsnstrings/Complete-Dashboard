@@ -827,6 +827,74 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **EVERY HEADLINE NUMBER COUNTS UP OVER 620ms, SO EVERY BROWSER ASSERTION ON
+  ONE IS A RACE.** `countUp` in `api/public/app.js` animates `.kpi .n` from
+  zero and lands on the exact value at the end. A test reading the tile before
+  the last frame sees a number that was never in the data. Measured across six
+  runs of one assertion the API answered `420` for: **419.72, 419.77, 419.83,
+  419.85, 419.95, 419.99** — and it passed on the seventh, which is how it got
+  written in the first place.
+
+  The fix is not a `waitForTimeout`. `countUp` is skipped under
+  `prefers-reduced-motion`, and Playwright sets that media query directly:
+
+      browser.newContext({ viewport: {...}, reducedMotion: 'reduce' })
+
+  The tiles then carry their real value from the first paint, the assertion is
+  deterministic, and it is a state a real reader can be in. **Any browser test
+  that reads a figure out of a `.kpi` tile needs this**, and several that pass
+  today are passing on timing rather than on correctness.
+
+* **"HOW MANY DRIVERS" HAD FOUR ANSWERS, AND NONE OF THEM WAS A COUNT OF
+  PEOPLE.** Measured on production 2026-09-21 over the same 800 accounts:
+  `/api/drivers/directory` 347, `/api/compliance/drivers` 437,
+  `/api/ledger/people` 508, `/api/ledger/exposure` 0. Five things decided who a
+  person is — the register, `driver_identity_link`, the generated `person_key`
+  column, the directory's runtime fold, and the money ledger's own `driver`
+  table — and no two surfaces consulted the same combination.
+
+  This is not a cosmetic disagreement. `driver_ledger` keys on `person_id`
+  while the picker offered ACCOUNTS, so a supervisor could record a charging
+  advance against 'Tariq Afzal Afzal' today and 'Tariq Afzal Said Afzal'
+  tomorrow: one man, two balances, each looking perfectly reasonable, nothing
+  on screen showing it. The fix is `src/persons.js` — one row per human
+  materialised into `driver` + `driver_platform_id`, which every surface reads.
+  **If you add a surface that counts drivers, read the spine. Do not fold.**
+
+* **THE DIRECTORY FOLDED ON A NAME, FOR 92 OF ITS 347 ROWS.** `linkedByName` in
+  `api/identity_links.js` maps a linked ALIAS's folded name to its person, so
+  any account whose own folded name matched inherited that person **with nobody
+  having reviewed it**. Measured: of the 90 rows doing this, 44 were supported
+  by a matching phone, 37 had no evidence either way, and **9 were contradicted
+  by different phone numbers** on the records they joined — the worst carrying
+  seven accounts and three numbers, filed variously as `ZAHID KHAN ISMAIL
+  ISMAIL` and `Zahid Khan Mohabbat Khan`. CLAUDE.md forbids exactly this. The
+  fold is gone from the read path and the count went UP to what the evidence
+  supports, which is the honest direction.
+
+* **REMOVING A BAD FOLD IS HALF A FIX — THE PAIRS HAVE TO GO SOMEWHERE.** Of
+  the 121 accounts that name rule placed, exactly ONE appeared anywhere in
+  `driver_identity_link`. Dropping the fold alone would have split 120 people
+  apart with nothing for anybody to review: a defensible count over a quietly
+  wrong roster, with no question being asked. `src/name_proposals.js` writes
+  them as `same_name` proposals carrying the phone verdict in their evidence.
+
+* **`refreshIdentityLinks` DELETES EVERY UNCONFIRMED LINK IT DID NOT JUST
+  WRITE.** That is how a link whose evidence has gone stops being made — and it
+  reaches rows written by any other module. `src/name_proposals.js` would have
+  had its whole queue deleted every pass and rewritten, churning `first_seen_at`
+  under an operator mid-review. The DELETE is now scoped to the bases that
+  function owns. **Any new module writing to `driver_identity_link` must be
+  added to that list.** It is the same defect that file already records
+  shipping ("run 2 proposed 0, withdrew 1, and the queue was EMPTY"), arriving
+  by a different door.
+
+* **A PROPOSAL THE PHONE RULE LATER CLAIMS IS UPGRADED, NOT LOST.** `same_name`
+  becomes `shared_phone` through the `ON CONFLICT DO UPDATE SET basis` —
+  stronger evidence, better outcome. A test counting rows *by basis* reads that
+  as a loss and fails against a sweep behaving correctly. Count by
+  `alias_ext_id`.
+
 * **THE REGISTER AND THE LINK TABLE CAN AGREE WHO SOMEBODY IS AND DISAGREE
   WHAT TO CALL THEM — and resolving that per id splits the person.** The
   directory folded on

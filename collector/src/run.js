@@ -24,6 +24,8 @@ import { runAnalyst } from './analyst.js';
 import { probeAll } from './probe.js';
 import { rebuildCustody } from './custody.js';
 import { refreshIdentityLinks } from './identity_link.js';
+import { refreshPersons } from './persons.js';
+import { refreshNameProposals } from './name_proposals.js';
 import { refreshPlaceCells } from './places.js';
 import { refreshRollups } from './rollup.js';
 import { config, loadSettings } from './config.js';
@@ -256,6 +258,30 @@ async function runWindowInner(mode, from, to, onProgress, fleet = null, jobId = 
   try {
     await refreshIdentityLinks();
   } catch (e) { log.error('run', 'identity links', { err: String(e) }); }
+  /* THE PERSON SPINE, immediately after the links that feed it.
+     ─────────────────────────────────────────────────────────────────────
+     One row per human, built from reviewed decisions only, and the single
+     thing every surface keys on. It runs here rather than in a migration
+     because the fold lives in JavaScript — api/identity_map.js and the link
+     table — and because a link confirmed on #same-person this morning should
+     be a folded person by this afternoon without anybody running a script.
+
+     Idempotent and it never detaches, so a failed pass costs a delay and not
+     a person. Its own try/catch like every step: a spine that does not
+     rebuild is a count that is stale, which is a smaller problem than a run
+     that stops. */
+  try {
+    await refreshPersons();
+  } catch (e) { log.error('run', 'person spine', { err: String(e) }); }
+  /* And the pairs the directory used to fold on a NAME, written down so
+     somebody can answer them. AFTER the spine, because it asks the spine which
+     pairs are already one person and therefore not a question. Measured on
+     production 2026-09-21: of the 121 accounts that rule placed, exactly ONE
+     appeared anywhere in the link table — so removing the fold without this
+     would split 120 people apart and leave nobody anything to review. */
+  try {
+    await refreshNameProposals();
+  } catch (e) { log.error('run', 'name proposals', { err: String(e) }); }
   /* What each patch of ground is called, learned from the trips that landed
      above. After the pulls, because the gazetteer is built FROM trip endpoints
      and a cell the fleet drove for the first time today should be nameable

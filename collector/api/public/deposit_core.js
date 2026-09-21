@@ -255,7 +255,22 @@ export async function loadPeople({ from = null, to = null } = {}) {
          deposit screen asks of a driver. */
       cash_rule: p.cash_rule ?? null,
       accounts: p.accounts,
-      on_the_ledger: p.on_the_ledger,
+      /* WHAT "ON THE LEDGER" MEANS NOW.
+         ───────────────────────────────────────────────────────────────
+         It used to mean "the picker minted this person", because the picker
+         offered raw platform ACCOUNTS beside minted people — two classes of
+         row, and choosing the wrong class for the same man gave him two
+         balances. src/persons.js ended that: every row the picker offers is a
+         person on the spine, so the old distinction is gone and the field
+         would now be true for everybody.
+
+         The question a page still needs answered is a different one: has
+         anything been RECORDED against them. That is what decides whether
+         they have a balance to show, whether they belong in the register on
+         #advances, and whether the entry form should warn that this is their
+         first. It is exactly "does exposure have a row for them", so it is
+         computed from that rather than taken from the offer list. */
+      on_the_ledger: f.owes != null || f.exposure_pct != null,
       person_id: p.person_id,
       name: p.name,
       platform: p.platform,

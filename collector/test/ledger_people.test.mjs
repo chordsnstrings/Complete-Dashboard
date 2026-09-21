@@ -1,29 +1,36 @@
-/* THE CLOSED LOOP, AND THE LIST THAT OPENS IT.
-   ──────────────────────────────────────────────────────────────────────────
-   People are minted lazily, by the first entry recorded against them. That is
-   the right design — sql/schema_v77.sql argues it — but it left the system
-   unable to start. Every entry screen listed drivers from /api/ledger/exposure,
-   which reads `driver`; `driver` is empty until somebody records an entry; and
-   an entry cannot be recorded against somebody the picker will not offer. The
-   first live read of production said so in five zeroes:
+/* WHO THE MONEY PICKER MAY OFFER — people, not accounts.
+   ══════════════════════════════════════════════════════════════════════════
+   THE DEFECT, measured on production 2026-09-21. This endpoint listed
+   ACCOUNTS: 508 of them, while #drivers showed 347 people over the same
+   roster. So a supervisor could record a charging advance against 'Tariq Afzal
+   Afzal' today and 'Tariq Afzal Said Afzal' tomorrow — one man, two balances,
+   each looking perfectly reasonable, and nothing on screen showing the error.
+   The same defect in the other direction pools two men's debts into one.
 
-       people on the ledger      : 0
-       measurable exposure       : 0
-       ...
+   Four surfaces answered "how many drivers" four ways — 347, 437, 508, 0 —
+   because five different things decided who a person is and no two surfaces
+   consulted the same combination.
 
-   None of the 270 test files could see it, because every one of them seeds a
-   person before asking anything. So this file asserts the thing they all
-   assumed: that the list a picker reads is NOT the list of people who already
-   have a balance, and that somebody with no ledger history at all is offerable.
+   src/persons.js now materialises one row per human into driver +
+   driver_platform_id, built from REVIEWED DECISIONS ONLY, and this endpoint
+   reads it. What this file holds down:
 
-   THE SECOND LIST CARRIES NO PERSON ID, DELIBERATELY. A roster account has no
-   person yet; handing the page a fabricated id would mean the page choosing
-   who somebody is. It sends the ACCOUNT, and api/ledger_person.js resolves and
-   mints inside the same transaction as the entry — so the identity decision is
-   taken once, by the resolver, with the merge register in hand. */
+   1. ONE ROW PER PERSON, carrying every account they hold — so the same human
+      cannot be picked twice under two spellings.
+   2. THE COUNT IS THE SPINE'S. Not a count of accounts, and not a second fold
+      computed here that could drift from the directory's.
+   3. AN EMPTY SPINE SAYS SO. Before the collector has built it there is nobody
+      to offer, and that must read as "not built yet", never as "this fleet has
+      no drivers".
+   4. A DEGRADED READ IS NOT AN EMPTY ROSTER. 503 with a reason, because a
+      picker with nobody in it looks identical to a fleet that has hired
+      nobody. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
+import { refreshPersons } from '../src/persons.js';
+import { clearIdentityLinkCache } from '../api/identity_links.js';
+import { clearPersonMapCache } from '../api/person_map.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -32,98 +39,124 @@ const db = new PGlite();
 await applySchema(db);
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 const { get } = await mountAll(db);
+const people = async () => { clearPersonMapCache(); return (await get('/api/ledger/people')).body; };
 
-/* ── AN EMPTY LEDGER STILL OFFERS THE ROSTER ─────────────────────────────
-   The assertion the live read needed and no fixture made. */
+/* ── 3. AN EMPTY SPINE SAYS SO ───────────────────────────────────────────
+   The assertion the live read needed and no fixture made: before the spine is
+   built there is nobody to offer, and the reason must distinguish "not built"
+   from "nobody works here". */
 await q(`INSERT INTO driver_platform_state (platform, driver_ext_id, full_name, state)
          VALUES ('uber','U-100','Rashid Malik','active'),
-                ('bolt','B-200','Nadia Omar','active')`);
+                ('bolt','B-100','Rashid Malik Iqbal','active'),
+                ('yango','Y-300','Samir Haq','active')`);
 await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, phone)
-         VALUES ('yango','Y-300','Samir Haq','+9715550300')`);
+         VALUES ('uber','U-100','Rashid Malik','+9715550100'),
+                ('bolt','B-100','Rashid Malik Iqbal','+9715550100')`);
 
-const cold = (await get('/api/ledger/people')).body;
-check('with nobody on the ledger, the roster is still offerable',
-  cold.people.length === 3, JSON.stringify({ n: cold.people.length, known: cold.known, unmapped: cold.unmapped }));
-check('and all three are marked as not yet on the ledger',
-  cold.people.every((p) => p.on_the_ledger === false && p.person_id === null),
-  JSON.stringify(cold.people));
-check('each one carries the account a write would resolve through',
-  cold.people.every((p) => p.platform && p.ext_id), JSON.stringify(cold.people));
-check('the counts are stated rather than left to be derived from the array',
-  cold.known === 0 && cold.unmapped === 3, JSON.stringify({ known: cold.known, unmapped: cold.unmapped }));
-check('and the response says WHY the first list is empty, in plain English',
-  /minted by the first entry/i.test(cold.note || ''), cold.note);
+const cold = await people();
+check('before the spine is built the picker offers nobody',
+  cold.people.length === 0, JSON.stringify(cold.people));
+check('and says it has not been built, never that the fleet has no drivers',
+  /spine is empty/i.test(cold.note || '') && /until it has run once/i.test(cold.note || ''),
+  cold.note);
+check('the roster accounts waiting to be placed are COUNTED, not hidden',
+  cold.unplaced_accounts === 3, String(cold.unplaced_accounts));
+check('with a reason saying nobody is left out on purpose',
+  /Nobody is hidden on purpose/.test(cold.unplaced_reason || ''), cold.unplaced_reason);
 
-/* ── A PERSON WHO EXISTS APPEARS ONCE, ON THE KNOWN SIDE ONLY ──────────── */
-const [p1] = await q(`INSERT INTO driver (full_name, created_by, cash_rule)
-                      VALUES ('Rashid Malik','ahsan','deposit_all') RETURNING id`);
-await q(`INSERT INTO driver_platform_id (platform, external_id, driver_id, display_name, basis)
-         VALUES ('uber','U-100',$1,'Rashid Malik','account')`, [p1.id]);
+/* ── build it ────────────────────────────────────────────────────────────
+   U-100 and B-100 are one man — a CONFIRMED shared_phone link, which is a
+   reviewed decision. Y-300 is somebody else. */
+await q(`INSERT INTO driver_identity_link
+   (alias_ext_id, alias_platform, alias_name, canonical_ext_id, canonical_platform,
+    canonical_name, canonical_key, basis, evidence, confirmed_at, confirmed_by)
+   VALUES ('U-100','uber','Rashid Malik','B-100','bolt','Rashid Malik Iqbal',
+           'rashid malik iqbal','shared_phone','the same number on both records',
+           now(),'ahsan')`);
+clearIdentityLinkCache();
+await refreshPersons(db);
 
-const warm = (await get('/api/ledger/people')).body;
-check('mapping an account moves that person across, it does not duplicate them',
-  warm.people.length === 3 && warm.known === 1 && warm.unmapped === 2,
-  JSON.stringify({ n: warm.people.length, known: warm.known, unmapped: warm.unmapped }));
-check('the mapped account no longer appears as an unclaimed roster row',
-  warm.people.filter((p) => p.ext_id === 'U-100').length === 1,
-  JSON.stringify(warm.people.filter((p) => p.ext_id === 'U-100')));
-const rashid = warm.people.find((p) => p.name === 'Rashid Malik');
-check('and comes back with a real person id a write can address directly',
-  rashid && rashid.person_id === Number(p1.id) && rashid.on_the_ledger === true,
-  JSON.stringify(rashid));
-check('carrying the cash rule, which decides what the deposit screen asks of them',
-  rashid.cash_rule === 'deposit_all', String(rashid?.cash_rule));
-check('and how many accounts fold onto them, so one person is visibly one person',
-  rashid.accounts === 1, String(rashid?.accounts));
+const warm = await people();
+check('the picker now offers people', warm.people.length === 2,
+  JSON.stringify(warm.people.map((p) => p.name)));
 
-/* ── A PERSON WITH NO ACCOUNT AT ALL IS STILL OFFERABLE ──────────────────
-   Requirement 7: advances are given to the PERSON. A first-week hire paid a
-   salary advance exists in no provider's records — api/driver_routes.js:176
-   answers null for them — and must still be pickable, or the screen cannot do
-   the thing it was built for. */
-const [solo] = await q(`INSERT INTO driver (full_name, created_by, created_note)
-                        VALUES ('Brand New Hire','ahsan','first week') RETURNING id`);
-const withSolo = (await get('/api/ledger/people')).body;
+/* ── 1. ONE ROW PER PERSON ───────────────────────────────────────────────
+   THE ASSERTION THIS FILE EXISTS FOR. Two accounts, two spellings, one man —
+   and he must be offerable exactly once, or he gets two balances. */
+const rashid = warm.people.filter((p) => /Rashid/i.test(p.name || ''));
+check('a man holding two accounts under two spellings is offered ONCE',
+  rashid.length === 1, `${rashid.length}: ${JSON.stringify(rashid.map((p) => p.name))}`);
+check('and the row carries both of his accounts',
+  rashid[0].accounts === 2 && rashid[0].account_ids.length === 2,
+  JSON.stringify(rashid[0].account_ids));
+check('so a write can be addressed through either of them',
+  rashid[0].account_ids.includes('U-100') && rashid[0].account_ids.includes('B-100'),
+  JSON.stringify(rashid[0].account_ids));
+check('the platforms he works are listed, which is what tells two namesakes apart',
+  rashid[0].platforms.includes('uber') && rashid[0].platforms.includes('bolt'),
+  JSON.stringify(rashid[0].platforms));
+check('every row is addressable by a person id — there is no second class',
+  warm.people.every((p) => p.person_id != null && p.on_the_ledger === true),
+  JSON.stringify(warm.people.map((p) => [p.name, p.person_id])));
+
+/* ── 2. THE COUNT IS THE SPINE'S ─────────────────────────────────────────
+   Not a count of accounts, and not a second fold computed in this route that
+   could drift from the directory's. */
+const [{ n: spine }] = await q(`SELECT count(*)::int n FROM driver`);
+check('the count is exactly the number of rows in the spine',
+  warm.known === spine && warm.people.length === spine, `${warm.known} vs ${spine}`);
+check('and the account total is stated beside it, so the two cannot be confused',
+  warm.accounts === 3, String(warm.accounts));
+check('the note says both numbers, and that one table produces them',
+  /2 people across 3 platform accounts/.test(warm.note || '')
+  && /one table/.test(warm.note || ''), warm.note);
+check('nothing is left waiting once the spine has run',
+  warm.unplaced_accounts === 0 && warm.unplaced_reason === null,
+  JSON.stringify({ u: warm.unplaced_accounts, r: warm.unplaced_reason }));
+
+/* ── a person with no platform account at all ────────────────────────────
+   Requirement 7: advances are given to the PERSON. A first-week hire exists in
+   no provider's records and must still be pickable. */
+await q(`INSERT INTO driver (full_name, created_by, created_note)
+         VALUES ('Brand New Hire','ahsan','first week, no platform account')`);
+const withSolo = await people();
 const hire = withSolo.people.find((p) => p.name === 'Brand New Hire');
-check('somebody with no platform account at all is offered',
-  hire != null, JSON.stringify(withSolo.people.map((p) => p.name)));
-check('with a person id, because they already exist',
-  hire && hire.person_id === Number(solo.id) && hire.on_the_ledger === true, JSON.stringify(hire));
-check('and no account, stated as zero rather than hidden',
+check('somebody with no platform account at all is offered', hire != null,
+  JSON.stringify(withSolo.people.map((p) => p.name)));
+check('with no account, stated as zero rather than hidden',
   hire.accounts === 0 && hire.ext_id === null, JSON.stringify(hire));
 
-/* ── A DETACHED MAPPING RELEASES THE ACCOUNT BACK TO THE ROSTER ──────────
-   driver_platform_id carries detached_at precisely so a wrong merge can be
-   undone. If this list ignored it, the account would be invisible on both
-   sides — claimed by a person who no longer holds it, and filtered out of the
-   roster by the same row. */
+/* ── a detached account leaves the person ────────────────────────────────
+   driver_platform_id carries detached_at so a wrong merge can be undone. */
 await q(`UPDATE driver_platform_id SET detached_at = now(), detached_reason = 'wrong person'
-          WHERE external_id = 'U-100'`);
-const detached = (await get('/api/ledger/people')).body;
-check('a detached account returns to the unclaimed side rather than vanishing',
-  detached.people.filter((p) => p.ext_id === 'U-100' && p.on_the_ledger === false).length === 1,
-  JSON.stringify(detached.people.filter((p) => p.ext_id === 'U-100')));
-check('and the person they were detached from is still listed, now with no accounts',
-  detached.people.find((p) => p.person_id === Number(p1.id))?.accounts === 0,
-  JSON.stringify(detached.people.find((p) => p.person_id === Number(p1.id))));
+          WHERE external_id = 'B-100'`);
+const detached = await people();
+const r2 = detached.people.find((p) => /Rashid/i.test(p.name || ''));
+check('a detached account stops counting against the person it was on',
+  r2.accounts === 1 && !r2.account_ids.includes('B-100'), JSON.stringify(r2.account_ids));
+check('and is reported as waiting to be placed again',
+  detached.unplaced_accounts === 1, String(detached.unplaced_accounts));
 
-/* ── A ROSTER ROW WITH NO NAME IS NOT OFFERED ────────────────────────────
-   A picker entry reading "(null)" is a row an operator cannot identify, and
-   choosing it would record real money against an account nobody recognised. */
-await q(`INSERT INTO driver_platform_state (platform, driver_ext_id, full_name, state)
-         VALUES ('uber','U-NONAME',NULL,'active')`);
-const nameless = (await get('/api/ledger/people')).body;
-check('a roster row with no name is left out rather than offered unidentifiable',
-  !nameless.people.some((p) => p.ext_id === 'U-NONAME'),
-  JSON.stringify(nameless.people.filter((p) => p.ext_id === 'U-NONAME')));
-
-/* ── THE SAME ACCOUNT IN BOTH ROSTER TABLES IS ONE ROW ─────────────────── */
-await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, phone)
-         VALUES ('bolt','B-200','Nadia Omar','+9715550200')`);
-const dupe = (await get('/api/ledger/people')).body;
-check('an account filed in both roster tables is offered once, not twice',
-  dupe.people.filter((p) => p.ext_id === 'B-200').length === 1,
-  JSON.stringify(dupe.people.filter((p) => p.ext_id === 'B-200')));
+/* ── 4. A DEGRADED READ IS NOT AN EMPTY ROSTER ───────────────────────────── */
+clearPersonMapCache();
+const broken = await mountAll(await (async () => {
+  const d2 = new PGlite(); await applySchema(d2); return d2;
+})());
+/* The spine table is absent from nothing here, so the failure is forced at the
+   query itself — the same way test/ledger_resolve_person.test.mjs forces a
+   degraded identity read rather than trusting a shape check. */
+const { personMap } = await import('../api/person_map.js');
+clearPersonMapCache();
+const degraded = await personMap((t) => (/FROM driver\b/.test(t)
+  ? Promise.reject(new Error('statement timeout')) : q(t)));
+check('a failed spine read is MARKED, not passed off as an empty roster',
+  degraded.ok === false, JSON.stringify({ ok: degraded.ok, n: degraded.person.size }));
+clearPersonMapCache();
+const after = await personMap(q);
+check('and the next read rebuilds rather than serving the failure from cache',
+  after.ok === true && after.person.size > 0,
+  JSON.stringify({ ok: after.ok, n: after.person.size }));
+void broken;
 
 console.log(`\n${fail ? '✗' : '✓'} ledger_people: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

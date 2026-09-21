@@ -1496,7 +1496,18 @@ const spPlateNote = (p) => (p.shared_plates.length
 const spOut = (p) => ({ ...p, evidence: spEvidence(p), plate_note: spPlateNote(p),
   phone_tail: null, proposed_at: '2026-09-14T06:00:00.000Z' });
 
-app.get('/api/same-person', (_req, r) => r.json({
+app.get('/api/same-person', (_req, r) => {
+  /* COUNTS ONLY — what #drivers asks for to name the backlog beside its count,
+     without pulling every pair and its evidence sentence onto the heaviest
+     page in the product. */
+  if (_req.query.counts) {
+    return r.json({ pending: 7, confirmed: 272, rejected: 3,
+      by_basis: { same_name: 5, similar_name: 2 },
+      note: 'Pairs a rule proposed and nobody has answered. They fold nobody until somebody '
+        + 'does — api/identity_links.js applies a link only where the basis is conclusive or '
+        + 'a person confirmed it.' });
+  }
+  return r.json({
   pending: SP.filter((p) => !p.verdict).map(spOut),
   decided: SP.filter((p) => p.verdict).map(spOut),
   conclusive_bases: ['shared_phone', 'shared_email'],
@@ -1507,7 +1518,8 @@ app.get('/api/same-person', (_req, r) => r.json({
   refuted_note: 'A pair where both records carry a trip at the same moment in two different '
     + 'cars is two people, and never reaches this queue \u2014 it is ruled out before the '
     + 'proposal is written.',
-}));
+  });
+});
 
 app.post('/api/same-person/decide', (req, r) => {
   const p = SP.find((x) => x.alias_ext_id === req.body?.alias_ext_id);
@@ -6854,23 +6866,37 @@ app.post('/api/ledger/policy', (req, r) => {
 });
 
 app.get('/api/ledger/people', (_, r) => r.json({
+  /* ONE ROW PER PERSON, from the spine — not per account. The real endpoint
+     listed accounts and offered 508 of them while #drivers showed 347 people
+     over the same roster, which is one man with two balances. The fixture
+     mirrors the new shape, including the two counts that must never be
+     confused again: people, and the accounts they hold between them. */
   people: [
-    { person_id: 1, name: 'Tariq Afzal Said Afzal', accounts: 2, ext_id: 'U-TARIQ',
-      platform: 'uber', cash_rule: 'deposit_all', on_the_ledger: true, key: 'p:1' },
-    { person_id: 2, name: 'Mohammed Selim Shafiqur Rahman', accounts: 1, ext_id: 'U-SELIM',
-      platform: 'uber', cash_rule: 'net_against_pay', on_the_ledger: true, key: 'p:2' },
+    { person_id: 1, name: 'Tariq Afzal Said Afzal', accounts: 3,
+      account_ids: ['U-TARIQ', 'B-TARIQ', 'H-TARIQ'], platforms: ['uber', 'bolt', 'hotel'],
+      ext_id: 'U-TARIQ', platform: 'uber', cash_rule: 'deposit_all',
+      on_the_ledger: true, key: 'p:1' },
+    { person_id: 2, name: 'Mohammed Selim Shafiqur Rahman', accounts: 2,
+      account_ids: ['U-SELIM', 'B-SELIM'], platforms: ['uber', 'bolt'],
+      ext_id: 'U-SELIM', platform: 'uber', cash_rule: 'net_against_pay',
+      on_the_ledger: true, key: 'p:2' },
     /* No account at all — the first-week salary case. */
-    { person_id: 3, name: 'Siyad Kallyanathoppil Paramba', accounts: 0, ext_id: null,
-      platform: null, cash_rule: null, on_the_ledger: true, key: 'p:3' },
-    { person_id: null, name: 'Nadia Omar Hassan', accounts: 0, ext_id: 'B-NADIA',
-      platform: 'bolt', cash_rule: null, on_the_ledger: false, key: 'a:bolt:B-NADIA' },
-    { person_id: null, name: 'Rashid Malik Iqbal', accounts: 0, ext_id: 'Y-RASHID',
-      platform: 'yango', cash_rule: null, on_the_ledger: false, key: 'a:yango:Y-RASHID' },
+    { person_id: 3, name: 'Siyad Kallyanathoppil Paramba', accounts: 0, account_ids: [],
+      platforms: [], ext_id: null, platform: null, cash_rule: null,
+      on_the_ledger: true, key: 'p:3' },
+    { person_id: 4, name: 'Nadia Omar Hassan', accounts: 1, account_ids: ['B-NADIA'],
+      platforms: ['bolt'], ext_id: 'B-NADIA', platform: 'bolt', cash_rule: null,
+      on_the_ledger: true, key: 'p:4' },
+    { person_id: 5, name: 'Rashid Malik Iqbal', accounts: 1, account_ids: ['Y-RASHID'],
+      platforms: ['yango'], ext_id: 'Y-RASHID', platform: 'yango', cash_rule: null,
+      on_the_ledger: true, key: 'p:5' },
   ],
-  known: 3, unmapped: 2,
-  note: 'People are minted by the first entry recorded against them, so a fresh ledger has '
-    + 'none. The second list is the roster — choosing somebody from it sends the account, '
-    + 'and the write path creates the person inside the same transaction as the entry.',
+  known: 5, unmapped: 0,
+  accounts: 7,
+  unplaced_accounts: 0,
+  unplaced_reason: null,
+  note: '5 people across 7 platform accounts. This is the same count the drivers directory '
+    + 'shows, because both read one table — see src/persons.js.',
 }));
 
 app.get('/api/ledger/entries', (req, r) => {

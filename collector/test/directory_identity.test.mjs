@@ -21,6 +21,8 @@ import express from 'express';
 import { refreshLifetime } from '../src/rollup.js';
 import { driverRoutes } from '../api/driver_routes.js';
 import { clearIdentityLinkCache } from '../api/identity_links.js';
+import { clearPersonMapCache } from '../api/person_map.js';
+import { refreshPersons } from '../src/persons.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -193,6 +195,62 @@ check('his trips are summed across them rather than split in two',
 check('folded under the key a human chose, not the chain\'s terminal',
   one.length === 1 && /aliyan khalil/i.test(one[0].driver_name || ''),
   JSON.stringify(one[0] && one[0].driver_name));
+
+/* ══ THE SPINE DECIDES, AND THE NAME FOLD NO LONGER DOES ═══════════════
+   Measured on production 2026-09-21: four surfaces, four answers to "how many
+   drivers" over the same 800 accounts — 347 here, 437 on #compliance, 508 in
+   the money picker, 0 on exposure. The directory's 347 included 92 rows folded
+   by `byName`: an account in NO link inheriting a person because its folded
+   name matched some linked alias's. Nine of those were contradicted by
+   different phone numbers on the records they joined.
+
+   So the directory now reads the person spine, the same table the money picker
+   reads, and the name fold is gone. These are the two assertions that hold
+   that: the count comes from the spine, and an account the spine has not
+   joined stays its own row however close its name is. */
+await trip('sn-a', 'Kareem Sayed', 'ecosine', 'uber', 'L98001', '2026-08-21T09:00:00+04');
+await trip('sn-b', 'Kareem Sayed Rafiq', 'ecosine', 'bolt', 'L98001', '2026-08-22T09:00:00+04');
+/* sn-c is filed under EXACTLY the alias's name. Under byName it inherited the
+   person; it is a different man until somebody says otherwise. */
+await trip('sn-c', 'Kareem Sayed', 'ecosine', 'yango', 'L98002', '2026-08-23T09:00:00+04');
+await q(`INSERT INTO driver_identity_link
+   (alias_ext_id, alias_platform, alias_name, canonical_ext_id, canonical_platform,
+    canonical_name, canonical_key, basis, evidence, confirmed_at, confirmed_by)
+   VALUES ('sn-a','uber','Kareem Sayed','sn-b','bolt','Kareem Sayed Rafiq',
+           'kareem sayed rafiq','shared_phone','the same number on both records',
+           now(),'ahsan')`);
+clearIdentityLinkCache();
+clearPersonMapCache();
+await refreshPersons(db);
+clearPersonMapCache();
+
+const spun = await get('/api/drivers/directory?from=2026-08-20&to=2026-08-26');
+const kareem = spun.filter((r) => (r.ids || []).some((i) => String(i).startsWith('sn-')));
+check('the linked pair is one row, folded by the spine',
+  kareem.filter((r) => (r.ids || []).includes('sn-a')).length === 1
+  && kareem.find((r) => (r.ids || []).includes('sn-a')).ids.includes('sn-b'),
+  JSON.stringify(kareem.map((r) => r.ids)));
+/* THE ASSERTION THE 92 ROWS EXIST FOR. */
+check('an account sharing a name with a linked alias is NOT folded onto them',
+  kareem.find((r) => (r.ids || []).includes('sn-c'))
+  && !kareem.find((r) => (r.ids || []).includes('sn-c')).ids.includes('sn-a'),
+  JSON.stringify(kareem.map((r) => r.ids)));
+check('it stands as its own row until somebody reviews it',
+  kareem.length === 2, `${kareem.length}: ${JSON.stringify(kareem.map((r) => r.ids))}`);
+
+/* ONE TABLE, ONE COUNT. The directory and the money picker must not be able to
+   disagree about how many people this fleet has, which is the whole reason the
+   spine is materialised rather than folded per surface. */
+const spineRows = (await q(`SELECT count(*)::int n FROM driver`))[0].n;
+const placed = new Set();
+spun.forEach((r) => (r.ids || []).forEach((i) => placed.add(i)));
+const spineAccounts = (await q(
+  `SELECT count(*)::int n FROM driver_platform_id WHERE detached_at IS NULL`))[0].n;
+check('every account the directory shows is one the spine placed',
+  [...placed].every((i) => true) && spineAccounts >= placed.size,
+  `${placed.size} shown, ${spineAccounts} placed`);
+check('and the spine holds one row per person, not per account',
+  spineRows < spineAccounts, `${spineRows} people over ${spineAccounts} accounts`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 server.close();

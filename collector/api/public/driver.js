@@ -3582,6 +3582,10 @@ export async function renderDriver(root, id, tab = 'overview') {
 
 /* ── the directory that links into the pages above ───────────────────────── */
 export async function renderDriverDirectory(root) {
+  /* The generation this render belongs to, so a late answer from a background
+     fetch cannot write into a page the reader has already navigated away
+     from — the same guard every other late fetch in this file uses. */
+  const gen = currentGen();
   /* The verdict goes above the search box. This page was 44,399 pixels tall —
      forty-four laptop screens — and opened on a search field and a 361-row
      table, so the first thing a reader saw was an instruction to go looking
@@ -3657,15 +3661,40 @@ export async function renderDriverDirectory(root) {
   };
   const notFilled = rows.filter(placeholderRow);
   const expired = rows.filter((r) => r.licence_days_left != null && r.licence_days_left < 0 && !placeholderRow(r));
+  /* THE SUPPORTED NUMBER, AND THE BACKLOG BESIDE IT.
+     ─────────────────────────────────────────────────────────────────────
+     This count is now one row per person from the spine (src/persons.js),
+     built from reviewed decisions only. Before that it folded on a NAME as
+     well, which made 92 of its 347 rows — 44 backed by a matching phone, 37
+     on no evidence, and nine CONTRADICTED by different phone numbers on the
+     records they joined.
+
+     Removing that rule pushes the count UP, to what the evidence supports.
+     Printing the higher number alone would read as a regression, so the pairs
+     now awaiting an answer are named next to it: the backlog is the reason
+     the count is what it is, and saying so is what makes it get worked. */
+  let pendingPairs = null;
   const summary = (n) => `${fmt(n)} of ${fmt(rows.length)} drivers`
     + (n === rows.length
-      ? ` · ${fmt(active.length)} drove in this window`
+      ? (pendingPairs ? ` · ${fmt(pendingPairs)} pairs awaiting review` : '')
+        + ` · ${fmt(active.length)} drove in this window`
         + (idle.length ? ` · ${fmt(idle.length)} did not` : '')
         + (never.length ? ` · ${fmt(never.length)} never have` : '')
         + (expired.length ? ` · ${countOf(expired.length, 'expired licence')}` : '')
         + (notFilled.length ? ` · ${fmt(notFilled.length)} with no real licence date on file` : '')
       : '');
   bar.querySelector('#dn').textContent = summary(rows.length);
+  /* Fetched after the count is on screen and never blocking it: a backlog
+     figure is context, and a directory that waited for it would be slower for
+     everybody to tell them something only sometimes true. */
+  qAll('/api/same-person', { counts: 1 })
+    .then((c) => {
+      if (!alive(gen) || !c || !c.pending) return;
+      pendingPairs = c.pending;
+      const host = bar.querySelector('#dn');
+      if (host) host.textContent = summary(rows.length);
+    })
+    .catch(() => { /* the count is context; its absence is not worth a banner */ });
 
   // the top few as cards, because a leaderboard is read as a ranking
   grid.innerHTML = '';

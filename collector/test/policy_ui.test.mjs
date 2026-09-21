@@ -33,7 +33,14 @@ const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromi
 
 /* ══ THE PAGE ════════════════════════════════════════════════════════════ */
 {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  /* reducedMotion: THE HEADLINE NUMBERS COUNT UP, over 620ms
+   (api/public/app.js countUp), and an assertion made mid-animation reads
+   'AED 419.77' where the API returned exactly 420. Measured across six runs:
+   419.72, 419.77, 419.83, 419.85, 419.95, 419.99 — a test that passes only
+   when it happens to read after the last frame. Playwright can set the media
+   query the product already honours, so the tiles carry their real value from
+   the first paint. Deterministic, and it is a state a real reader can be in. */
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
   const page = await ctx.newPage();
   await page.goto(`${base}/#policy`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-panel="policy-history"] table', { timeout: 15000 });

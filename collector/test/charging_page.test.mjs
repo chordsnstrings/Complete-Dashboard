@@ -48,7 +48,14 @@ const base = `http://127.0.0.1:${srv.address().port}`;
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 
 console.log('\nwhat it shows');
-const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+/* reducedMotion: THE HEADLINE NUMBERS COUNT UP, over 620ms
+   (api/public/app.js countUp), and an assertion made mid-animation reads
+   'AED 419.77' where the API returned exactly 420. Measured across six runs:
+   419.72, 419.77, 419.83, 419.85, 419.95, 419.99 — a test that passes only
+   when it happens to read after the last frame. Playwright can set the media
+   query the product already honours, so the tiles carry their real value from
+   the first paint. Deterministic, and it is a state a real reader can be in. */
+const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
 const page = await ctx.newPage();
 const errs = []; page.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
 await page.goto(`${base}/#charging`, { waitUntil: 'networkidle' });

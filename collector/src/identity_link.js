@@ -859,11 +859,27 @@ export async function refreshIdentityLinks(db = pool) {
      it affectedRows, so a count read off one of those two is zero under the
      other — and the tests run on PGlite while production runs on the pool,
      which is the shape where a guard passes locally and reports nothing live. */
+  /* AND ONLY THE BASES THIS FUNCTION WRITES.
+     ─────────────────────────────────────────────────────────────────────
+     The withdrawal above exists so a link whose evidence has gone stops being
+     made. It must not reach a proposal some OTHER module wrote, because this
+     function knows nothing about whether that evidence still holds — it would
+     simply find the row unaccounted for in `keep` and delete it.
+
+     src/name_proposals.js writes `same_name`, and run.js calls it after this.
+     Without this clause the two would fight every pass: this deletes the
+     queue, that rewrites it, and a row an operator was halfway through
+     reviewing loses its first_seen_at each time. It is the same defect the
+     block above records shipping — "run 1 proposed 1 and the queue held 1;
+     run 2 proposed 0, withdrew 1, and the queue was EMPTY" — arriving by a
+     different door. */
+  const MINE = ['shared_phone', 'shared_email', 'similar_name', 'shared_car_name'];
   const gone = await db.query(
     `DELETE FROM driver_identity_link
       WHERE NOT rejected AND confirmed_at IS NULL
+        AND basis = ANY($2::text[])
         AND alias_ext_id <> ALL($1::text[])
-      RETURNING alias_ext_id`, [keep]);
+      RETURNING alias_ext_id`, [keep, MINE]);
   const withdrawn = (gone.rows || []).length;
   /* Said out loud on every run, because a rule that quietly starts linking
      nothing looks exactly like a fleet whose roster is clean. */
