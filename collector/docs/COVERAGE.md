@@ -827,6 +827,59 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **"THE BOLT AND YANGO CREDENTIALS DO NOT SURVIVE A DEPLOY" IS NOT WHAT IS
+  HAPPENING.** Reported 2026-09-21 and measured the same day through
+  `GET /api/settings`, which answers a non-administrator with values blanked
+  and sources intact:
+
+  | key | stored | collector reads from | state |
+  |---|---|---|---|
+  | `YANGO_COOKIE` | 2026-09-21 05:22 | **settings** (seen 07:05) | present |
+  | `BOLT_REFRESH_TOKEN_ECOSINE` | 2026-09-21 05:20 | **settings** | valid, 5 days left |
+  | `BOLT_REFRESH_TOKEN_EGARI` | 2026-09-21 05:22 | **settings** | valid, 6.9 days left |
+
+  Credentials live in `app_setting` (Postgres, AES-256-GCM), never on disk — a
+  grep of the auth paths for `writeFileSync` and friends finds nothing — and
+  `src/settings.js:343` resolves `cache[key] ?? process.env[key]`, so the
+  database beats the app-spec environment variable. **A deploy cannot lose
+  them.**
+
+  The hypothesis worth ruling out first, because it would look identical: a
+  `SETTINGS_KEY` that differs between the api and collector components. `dec()`
+  returns **null** on a failed decrypt and `null ?? process.env[key]` falls
+  through, so the collector would silently use the stale env value while the
+  Settings page showed a freshly pasted one. `credential_visibility` is what
+  settles it — `fromDb = cache[key] != null`, so a failed decrypt records as
+  source `environment`. Both components report `settings`. Not this.
+
+  **What is actually happening, per provider:**
+
+  *Bolt* — a hard **7-day** token life. Both tokens were pasted two minutes
+  apart on the morning of the 21st and expire on the 26th and 28th, so Bolt
+  dies roughly weekly until somebody re-captures from the portal. If deploys
+  are also roughly weekly the two correlate and read as causal.
+
+  **An unresolved contradiction sits in the repo about this and it changes the
+  fix.** `src/sources/bolt.js:216` says the refresh token "is single-use… rotates
+  the refresh token and invalidates the one presented", with code at `:327`
+  persisting the successor. The `SETTING_DEFS` hint says "Hard 7-day life and it
+  does **NOT** rotate". Production favours the hint: if it rotated, `updated_at`
+  would move on every collector run, and instead both moved once, two minutes
+  apart, which is a human pasting. If it does not rotate there is no software
+  fix — only a weekly re-capture or a longer-lived credential.
+
+  *Yango* — not persistence, **origin**. Measured 2026-09-07 minutes apart: the
+  same URL, method, headers, body, park id and session answered **HTTP 200 from
+  one host and 403 from the deployed app**. Both get 401 with the cookie
+  removed, so the session authenticates from both, and the API key is inert on
+  that host. The 403 arrives as **HTML from a CDN edge** while every genuine
+  Yango API refusal is JSON — something in front of the API is refusing by
+  origin. A freshly pasted cookie fails identically, which is why re-pasting
+  never helps. Four of the five Yango surfaces have already moved to the keyed
+  `fleet-api.yango.tech` host and need no cookie at all; only
+  `/api/reports-api/v2/summary/drivers/list`, the weekly per-driver aggregate,
+  still wants the console session.
+
 * **A SEEDED LOOKUP TABLE WITH `ON CONFLICT DO NOTHING` NEVER RECEIVES A
   CORRECTION.** `src/db.js` replays a schema file whose sha has changed, so an
   edited seed row *does* re-run — and then does nothing, because the row

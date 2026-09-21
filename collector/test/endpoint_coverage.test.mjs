@@ -63,6 +63,20 @@ const EXEMPT = {
     + 'EMPTY window in 67-109 s and the plan was the only thing that named the cause (92.55 s of '
     + 'LLVM JIT for a query that executes in 24.7 ms). Not on a page, deliberately: it is as '
     + 'expensive as the query it explains.',
+  /* DELETE THIS ENTRY WHEN THE CASH SURFACE LANDS. The last check in this
+     file — "no endpoint is exempted while also being used" — is what stops
+     that from being forgotten: the moment a page calls this route, leaving the
+     exemption here turns the suite red. */
+  '/api/ledger/cash-position': 'measurement, not a feature: it surfaces '
+    + 'driver_statement_day.unremitted — the operator\'s own "still-unremitted balance" '
+    + '(sql/schema_v25.sql:14), written on every statement import since that file shipped and '
+    + 'read by NOTHING. A grep for the column across api/ and src/ returned three hits, all '
+    + 'inside the INSERT in /api/import/statement-days, so nobody — including the accounts team '
+    + 'maintaining it — could see what it holds, for whom, or how current it is. The advance '
+    + 'ledger\'s exposure ratio needs a cash POSITION and this is the only source that holds '
+    + 'one; whether it is populated decides the whole cash design, and that question has to be '
+    + 'answered on production before a page is built against the answer. Deliberately not wired '
+    + 'to a view yet for that reason.',
   '/api/health': 'liveness probe for the platform, not for people',
   '/api/import/statement-days': 'operator tool: batched import of the daily ledger — driven by '
     + 'bin/import-ledger.mjs, not by a page',
