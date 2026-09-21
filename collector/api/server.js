@@ -65,7 +65,8 @@ import { performanceRoutes } from './performance_routes.js';
 import { statusRoutes } from './status_routes.js';
 import { samePersonRoutes } from './sameperson_routes.js';
 import { ledgerRoutes, ledgerWriteRoutes, ledgerReceiptRoutes,
-  ledgerExposureRoutes, ledgerRegisterRoutes, ledgerPeopleRoutes } from './ledger_routes.js';
+  ledgerExposureRoutes, ledgerRegisterRoutes, ledgerPeopleRoutes,
+  ledgerPolicyRoutes } from './ledger_routes.js';
 import { probeRoutes } from './probe.js';
 import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
 /* The one place that decides what a reader with no credential may see of a
@@ -5797,6 +5798,7 @@ ledgerReceiptRoutes(app, { q, wrap });
 ledgerExposureRoutes(app, { q, wrap });
 ledgerRegisterRoutes(app, { q, wrap });
 ledgerPeopleRoutes(app, { q, wrap });
+ledgerPolicyRoutes(app, { q, wrap, tx });
 /* The spreadsheet import. Two routes whose SPLIT is the design: preview takes
    names and writes nothing, commit takes person ids and never a name — which
    makes auto-applying a fuzzy match impossible at the boundary rather than

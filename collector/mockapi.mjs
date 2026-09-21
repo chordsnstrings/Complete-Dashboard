@@ -6747,6 +6747,60 @@ app.get('/api/ledger/exposure', (_, r) => r.json({
    no first entry could ever be made. The fixture carries both kinds because a
    browser test that sees only the first kind proves nothing about the case
    this endpoint was added for. */
+/* THE LENDING LINE AND ITS HISTORY. Three rows on purpose, one of each
+   standing: the one in force, one it superseded, and one filed ahead of its
+   start date — because "the newest row" and "the row in force" are different
+   things the moment a planned change is recorded, and a fixture with only
+   superseded-then-current cannot tell a page that conflates them. */
+app.get('/api/ledger/policy', (_, r) => r.json({
+  scope: 'global',
+  current: { id: 2, scope: 'global', pct: 30, effective_from: '2026-06-01',
+    set_by: 'Management', set_at: '2026-06-01T09:14:02+04', in_force: true,
+    starts_later: false, note: 'tightened after the June review' },
+  absent_reason: null,
+  history: [
+    { id: 3, scope: 'global', pct: 20, effective_from: '2099-01-01', set_by: 'Management',
+      set_at: '2026-09-01T11:00:00+04', in_force: false, starts_later: true,
+      note: 'planned, starts much later' },
+    { id: 2, scope: 'global', pct: 30, effective_from: '2026-06-01', set_by: 'Management',
+      set_at: '2026-06-01T09:14:02+04', in_force: true, starts_later: false,
+      note: 'tightened after the June review' },
+    { id: 1, scope: 'global', pct: 35, effective_from: '2026-01-01',
+      set_by: 'Operational Head', set_at: '2026-01-01T08:00:00+04', in_force: false,
+      starts_later: false, note: 'opening policy at 35% of revenue to the bank' },
+  ],
+  attribution_only: 'anybody who can reach this URL can move this line. The name, address '
+    + 'and timestamp on each row are what make the change traceable afterwards — they are '
+    + 'not authentication, and will not be until user management lands.',
+}));
+
+app.post('/api/ledger/policy', (req, r) => {
+  const b = req.body || {};
+  const dry = b.dry_run !== false;
+  if (!(Number(b.pct) > 0)) {
+    return r.status(400).json({ ok: false, dry_run: dry,
+      refused: ['pct must be a number — the percentage itself, so 35 and not 0.35'] });
+  }
+  return r.json({
+    ok: true, dry_run: dry,
+    policy: { id: dry ? null : 4, scope: 'global', pct: Number(b.pct),
+      effective_from: b.effective_from, set_by: b.set_by, set_at: dry ? null : '2026-09-21T12:00:00+04',
+      note: b.note },
+    prior: { pct: 30, effective_from: '2026-06-01', set_by: 'Management' },
+    not_measurable: 1,
+    sentence: `${dry ? 'Would set' : 'Set'} the line to ${Number(b.pct)}% of what a driver `
+      + `generates, from ${b.effective_from}, recorded against ${b.set_by}. The line in force `
+      + 'on that date was 30%, set by Management effective 2026-06-01. Of 2 people whose '
+      + `exposure can be measured, 1 is over ${Number(b.pct)}% — against 1 over the 30% it `
+      + 'replaces. Nothing is blocked either way: the approval step arrives with user management.',
+    append_only: 'this is a new row and nothing was edited. The line that applied in an '
+      + 'earlier month still reads as it did, so a decision taken then can be explained '
+      + 'against the policy it was taken under.',
+    note: dry ? 'Nothing was written. This ran against the real constraints inside a '
+      + 'transaction that was rolled back — send dry_run: false to store it.' : null,
+  });
+});
+
 app.get('/api/ledger/people', (_, r) => r.json({
   people: [
     { person_id: 1, name: 'Tariq Afzal Said Afzal', accounts: 2, ext_id: 'U-TARIQ',

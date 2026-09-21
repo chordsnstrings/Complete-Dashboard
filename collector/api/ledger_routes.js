@@ -1237,3 +1237,242 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
     });
   }));
 }
+
+/* THE LINE ITSELF — reading it, and moving it.
+   ═════════════════════════════════════════════════════════════════════════
+   The operator: "that percentage will change based on admin / operational head
+   / management - so don't hardcode it keep it as a variable in settings which
+   will be allocated to the usergroup later."
+
+   So it is a stored, effective-dated row and not a constant — and until this
+   was written there was no way to store one. Every exposure figure on
+   production rendered absent with the reason "no threshold has been stored, so
+   no exposure can be judged", which was true, honest, and useless: the whole
+   ledger was measuring against a line nobody could draw.
+
+   ── APPEND-ONLY, AND EFFECTIVE-DATED, AND THOSE ARE TWO DIFFERENT THINGS ──
+   APPEND-ONLY means a policy is never edited. A decision taken in September
+   was taken against September's line, and an UPDATE would rewrite the reason
+   somebody was told they were over it. sql/schema_v78.sql gives this table no
+   update path at all; this route adds none.
+
+   EFFECTIVE-DATED means the row carries the day it starts applying, which is
+   not the day it was typed. Management deciding on the 20th that the line has
+   been 30% since the 1st is a real thing that happens, and the alternative —
+   backdating by lying about when it was recorded — is how an audit trail stops
+   being one. Both dates are kept: `effective_from` is the policy's, `set_at`
+   is the typing's.
+
+   ── WHO MAY MOVE IT, AND WHY THAT IS NOT THE SUPERVISOR LIST ─────────────
+   Deliberately NOT checked against SUPERVISORS. Those four are the people who
+   record money at a car; moving the lending line is a management decision and
+   pretending the two lists are one would write a false attribution into the
+   permanent record. Until ULM there is no list to check against and no way to
+   check it — so this asks for a name and a reason, records the IP and the
+   timestamp, and says in the response, in words, that what it has is
+   attribution and not authentication. A guard that cannot enforce anything is
+   worse than none, because it reads as one that can. */
+export function ledgerPolicyRoutes(app, { q, wrap, tx }) {
+  app.get('/api/ledger/policy', wrap(async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const scope = String(req.query.scope || 'global');
+    const rows = await q(
+      `SELECT id, scope, pct, to_char(effective_from,'YYYY-MM-DD') AS effective_from,
+              set_by, to_char(set_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS set_at, note,
+              /* Whether this row is the one in force TODAY. Computed here
+                 rather than left to a page to work out from the list, because
+                 "the newest row" and "the row in force" are different whenever
+                 one has been filed ahead of its start date — which is the
+                 normal way a planned change is recorded.
+
+                 THE SUBQUERY ALONE DECIDES IT. The first draft also tested
+                 "effective_from <= today" on the outer row, which reads as the
+                 guard doing the work and is dead: the subquery can only ever
+                 return the id of a row that already passed that test, so a
+                 future-dated row fails the id comparison by construction.
+                 Reverting the outer clause left the suite green, which is how
+                 it was found. Removed rather than kept, for the reason
+                 api/import_routes.js gives about its own dead cap — a check
+                 that cannot fire is worse than none, because it reads as a
+                 considered one.
+
+                 coalesce, because with nothing yet in force the subquery is
+                 NULL and "id = NULL" is NULL, not false — and a boolean field
+                 that answers null is one a caller writing "=== false" gets
+                 wrong. */
+              coalesce(id = (SELECT id FROM ledger_policy p2
+                              WHERE p2.scope = ledger_policy.scope
+                                AND p2.effective_from <= (now() AT TIME ZONE 'Asia/Dubai')::date
+                              ORDER BY p2.effective_from DESC, p2.id DESC LIMIT 1),
+                       false) AS in_force,
+              (effective_from > (now() AT TIME ZONE 'Asia/Dubai')::date) AS starts_later
+         FROM ledger_policy WHERE scope = $1
+        ORDER BY effective_from DESC, id DESC`, [scope]);
+
+    const current = rows.find((r) => r.in_force) || null;
+    res.json({
+      scope,
+      current: current ? { ...current, pct: Number(current.pct) } : null,
+      absent_reason: current ? null
+        : (rows.length
+          ? 'every policy on file starts in the future, so none is in force today. Exposure is '
+            + 'refused rather than judged against a line that has not begun.'
+          : 'no threshold has ever been stored, so no exposure can be judged. Until one is, '
+            + 'every driver\'s exposure reads as not measurable — which is the honest answer '
+            + 'and not a useful one.'),
+      history: rows.map((r) => ({ ...r, pct: Number(r.pct) })),
+      /* Said plainly rather than left for somebody to infer from the absence
+         of a login. */
+      attribution_only: 'anybody who can reach this URL can move this line. The name, address '
+        + 'and timestamp on each row are what make the change traceable afterwards — they are '
+        + 'not authentication, and will not be until user management lands.',
+    });
+  }));
+
+  app.post('/api/ledger/policy', wrap(async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const b = (req.body && typeof req.body === 'object') ? req.body : {};
+    const dryRun = b.dry_run !== false;
+    const refused = [];
+
+    const by = String(b.set_by || '').trim();
+    if (by.length < 2) {
+      refused.push('say who is setting this, by name. It is attribution and not authentication '
+        + '— until user management lands anybody who can reach this URL can move the line, and '
+        + 'the name, address and timestamp are the whole of what makes the change traceable.');
+    }
+
+    const pct = Number(b.pct);
+    if (!Number.isFinite(pct)) refused.push('pct must be a number — the percentage itself, so 35 and not 0.35');
+    else if (pct <= 0 || pct > 1000) {
+      refused.push(`pct is ${pct}, and the stored range is above 0 and at most 1000. A figure `
+        + 'below 1 is almost always a fraction sent where a percentage was meant: 0.35 would '
+        + 'store a line of a third of one percent, under which every driver in the fleet is '
+        + 'over it.');
+    } else if (pct < 1) {
+      refused.push(`pct is ${pct}. That is a valid percentage but an implausible lending line, `
+        + 'and it is the exact shape of 0.35 sent where 35 was meant — under it every driver in '
+        + 'the fleet reads as over the line. If it is genuinely intended, send it as '
+        + `${pct} with allow_implausible: true.`);
+    }
+
+    const from = String(b.effective_from || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) {
+      refused.push('effective_from must be a YYYY-MM-DD date — the day this line starts '
+        + 'applying, which is not necessarily the day it is being typed. A line decided on the '
+        + '20th that has applied since the 1st is a real thing; backdating it by misreporting '
+        + 'when it was recorded is not.');
+    } else {
+      const d = new Date(`${from}T00:00:00Z`);
+      if (!Number.isFinite(d.getTime()) || d.toISOString().slice(0, 10) !== from) {
+        refused.push(`"${from}" is not a real date. A shape check passes "2026-13-99" — `
+          + 'thirteen is two digits and so is ninety-nine.');
+      }
+    }
+
+    const note = String(b.note || '').trim();
+    if (note.length < 3) {
+      refused.push('a note is required, and it is the sentence somebody reads a year from now '
+        + 'when they ask why the line moved. "changed" is not that sentence.');
+    }
+
+    const scope = String(b.scope || 'global').trim() || 'global';
+    if (scope !== 'global') {
+      refused.push(`scope "${scope}" cannot be stored yet. The column exists and is reserved `
+        + 'for the user group that will own this line, but nothing reads a non-global scope — '
+        + 'so a row written under one would be a policy in force over nobody, silently. '
+        + 'Refused rather than accepted and ignored.');
+    }
+
+    if (pct < 1 && b.allow_implausible === true && Number.isFinite(pct) && pct > 0) {
+      /* The operator has said they meant it. Drop only THAT refusal. */
+      const i = refused.findIndex((x) => /implausible lending line/.test(x));
+      if (i >= 0) refused.splice(i, 1);
+    }
+
+    if (refused.length) return res.status(400).json({ ok: false, dry_run: dryRun, refused });
+
+    /* THE DRY RUN IS A REAL TRANSACTION, ROLLED BACK — the same posture as
+       /api/ledger/entry, and for the same reason: a preview computed by
+       different code from the write is a preview of something else. */
+    const out = await tx(async (tq) => {
+      const [prior] = await tq(
+        `SELECT pct, to_char(effective_from,'YYYY-MM-DD') AS effective_from, set_by
+           FROM ledger_policy
+          WHERE scope = $1 AND effective_from <= $2::date
+          ORDER BY effective_from DESC, id DESC LIMIT 1`, [scope, from]);
+
+      const [row] = await tq(
+        `INSERT INTO ledger_policy (scope, pct, effective_from, set_by, set_ip, note)
+         VALUES ($1,$2,$3::date,$4,$5,$6)
+         RETURNING id, to_char(set_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS set_at`,
+        [scope, pct, from, by, req.ip || null, note]);
+
+      /* HOW MANY PEOPLE THIS MOVES ACROSS THE LINE, counted against the row
+         just written, inside the transaction that wrote it. The operator
+         asked for a line that management can change; what they need to see
+         before changing it is who that change is about. */
+      const [moved] = await tq(
+        `WITH acct AS (SELECT driver_id, external_id FROM driver_platform_id
+                        WHERE detached_at IS NULL),
+             book AS (SELECT person_id, sum(amount) AS owed FROM driver_ledger
+                       WHERE entry_source <> 'verification' AND book IN ('advance','deduction')
+                       GROUP BY person_id),
+             rev AS (SELECT a.driver_id AS person_id, sum(p.earnings) AS earned
+                       FROM acct a JOIN driver_payout_day p ON p.driver_ext_id = a.external_id
+                      GROUP BY a.driver_id)
+         SELECT count(*) FILTER (WHERE r.earned > 0
+                  AND (b.owed / r.earned) * 100 > $1::numeric)::int AS over_new,
+                count(*) FILTER (WHERE r.earned > 0
+                  AND $2::numeric IS NOT NULL
+                  AND (b.owed / r.earned) * 100 > $2::numeric)::int AS over_old,
+                count(*) FILTER (WHERE r.earned IS NULL OR r.earned = 0 OR b.owed IS NULL)::int
+                  AS not_measurable,
+                count(*)::int AS people
+           FROM driver dr
+           LEFT JOIN book b ON b.person_id = dr.id
+           LEFT JOIN rev r ON r.person_id = dr.id`,
+        [pct, prior ? Number(prior.pct) : null]);
+
+      return { row, prior, moved };
+    }, { rollback: dryRun });
+
+    const { row, prior, moved } = out;
+    const priorLine = prior
+      ? `The line in force on ${from} was ${Number(prior.pct)}%, set by ${prior.set_by} `
+        + `effective ${prior.effective_from}.`
+      : `No line was in force on ${from}; this is the first.`;
+
+    /* THE SENTENCE, ASSEMBLED SERVER-SIDE. Same rule as /api/ledger/entry: two
+       shells must not be able to describe one change differently. */
+    const measured = moved.people - moved.not_measurable;
+    const effect = measured === 0
+      ? 'Nobody\'s exposure can be measured yet, so this line changes what nothing is judged '
+        + 'against — which is still worth storing, because it is what every figure recorded '
+        + 'from here will be read against.'
+      : `Of ${measured} people whose exposure can be measured, ${moved.over_new} are over `
+        + `${pct}%` + (prior ? ` — against ${moved.over_old} over the ${Number(prior.pct)}% it `
+          + 'replaces.' : '.')
+        + ' Nothing is blocked either way: the approval step arrives with user management.';
+
+    res.json({
+      ok: true,
+      dry_run: dryRun,
+      policy: { id: dryRun ? null : Number(row.id), scope, pct, effective_from: from,
+        set_by: by, set_at: dryRun ? null : row.set_at, note },
+      prior: prior ? { pct: Number(prior.pct), effective_from: prior.effective_from,
+        set_by: prior.set_by } : null,
+      not_measurable: moved.not_measurable,
+      sentence: `${dryRun ? 'Would set' : 'Set'} the line to ${pct}% of what a driver generates, `
+        + `from ${from}, recorded against ${by}. ${priorLine} ${effect}`,
+      /* Said on every write, not only the first. */
+      append_only: 'this is a new row and nothing was edited. The line that applied in an '
+        + 'earlier month still reads as it did, so a decision taken then can be explained '
+        + 'against the policy it was taken under.',
+      note: dryRun
+        ? 'Nothing was written. This ran against the real constraints inside a transaction that '
+          + 'was rolled back — send dry_run: false to store it.'
+        : null,
+    });
+  }));
+}

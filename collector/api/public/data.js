@@ -424,6 +424,11 @@ export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'ac
   'opening',
   /* #import-sheet is a file and a review queue; no window governs either. */
   'import-sheet',
+  /* #policy is a stored, effective-dated figure and the history of it. A
+     window above it would govern nothing — a line is in force from its own
+     date, not over the toolbar's — and worse, would ride along into every link
+     leaving the page. */
+  'policy',
   /* #trip is ONE booking addressed by the provider's own id. /api/trip takes a
      platform and an id and nothing else — a range, a channel or a fleet
      control above it would govern nothing, and would ride along into every
