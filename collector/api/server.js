@@ -5791,8 +5791,7 @@ ledgerWriteRoutes(app, { wrap, tx: pgTx(pool) });
    phone compresses with a canvas before the POST: a basic-xxs instance is
    512MB and also serves every page here, so decoding a twelve-megapixel image
    on it to resize is how the container dies. */
-ledgerReceiptRoutes(app, { q, wrap,
-  raw: express.raw({ type: ['image/jpeg', 'image/webp', 'image/png'], limit: '1mb' }) });
+ledgerReceiptRoutes(app, { q, wrap });
 
 /* ───────────────── one day ─────────────────
    Every source that saw a given Dubai-local day, including whether each one

@@ -180,4 +180,13 @@ export const SCHEMA_FILES = [
      policy is stored and effective-dated with its own history, NOT in
      app_setting, which is the credential store and deletes without one. */
   'schema_v78.sql',
+  /* cash_opening was seeded -1 and an opening cash position is cash the driver
+     IS HOLDING — a positive obligation. At -1 it would have subtracted the
+     whole opening position from the very exposure figure the 35% policy is
+     enforced with. Corrected under a guard that only fires while the type is
+     unused, because v78 rightly says changing what a type MEANS is a new code
+     once entries exist. Adds a boot-time assertion over every type's direction,
+     since the composite key guarantees an ENTRY agrees with its TYPE and can
+     say nothing about whether the type itself is right. */
+  'schema_v79.sql',
 ];

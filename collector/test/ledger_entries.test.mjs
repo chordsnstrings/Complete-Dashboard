@@ -85,6 +85,37 @@ check('only the types that CANNOT have a receipt are exempt from one',
   noProof.join(',') === 'cash_opening,commission,deduction_waived,incentive,opening_balance,salary,salik,writeoff',
   noProof.join(','));
 
+/* ── THE SIGN CONVENTION, ASSERTED OVER THE WHOLE REGISTRY ───────────────
+   sql/schema_v78.sql states one rule — POSITIVE increases what the driver owes
+   this company — and applies it eighteen times by hand. It got one wrong:
+   cash_opening was seeded -1, and an opening cash position is cash the driver
+   IS HOLDING, so they owe it. At -1 the whole opening position would have been
+   SUBTRACTED from the exposure figure the 35% policy is enforced with, and
+   every driver would have started the ledger looking safer than they are by
+   twice whatever they were carrying.
+
+   The composite key (type_code, direction) could not catch it: it guarantees
+   an ENTRY agrees with its TYPE and says nothing about whether the type is
+   right. So the rule is asserted here, by name, and in sql/schema_v79.sql at
+   boot. A rule stated in prose and applied by hand eighteen times is a rule
+   that will be wrong once. */
+const owed = ['cash_advance', 'salary_advance', 'charging_advance', 'opening_balance',
+  'cash_opening', 'salik', 'traffic_fine', 'damage', 'pay_out'];
+const owing = ['repayment', 'writeoff', 'refund', 'cash_deposit', 'deduction_waived',
+  'salary', 'commission', 'incentive', 'reimbursement'];
+const dir = Object.fromEntries((await db.query(
+  `SELECT code, direction FROM ledger_type`)).rows.map((r) => [r.code, r.direction]));
+check('every type that INCREASES what the driver owes is +1',
+  owed.every((c) => dir[c] === 1), owed.filter((c) => dir[c] !== 1).join(','));
+check('every type that DECREASES it is -1',
+  owing.every((c) => dir[c] === -1), owing.filter((c) => dir[c] !== -1).join(','));
+check('an opening cash position is a POSITIVE obligation — they are holding our money',
+  dir.cash_opening === 1, String(dir.cash_opening));
+check('and handing it in is the negative of that', dir.cash_deposit === -1, String(dir.cash_deposit));
+check('the two lists name every type in the registry, so a new one cannot slip past',
+  owed.length + owing.length === Object.keys(dir).length,
+  `${owed.length + owing.length} named vs ${Object.keys(dir).length} in the registry`);
+
 /* ── a correct row ───────────────────────────────────────────────────────── */
 check('a cash advance inserts, positive, in the advance book',
   await accepts(...ins({ type_code: 'cash_advance', direction: 1, book: 'advance',

@@ -56,6 +56,27 @@ const up = async (body, { by = 'ahsan', type = 'image/jpeg' } = {}) => {
   return { status: r.status, body: await r.json() };
 };
 
+/* ── THE MOUNT ITSELF, because getting this wrong kills the whole API ────
+   The body parser was a DEPENDENCY, and a mount that did not supply it threw
+   `Route.post() requires a callback function but got a [object Undefined]` at
+   registration — which does not fail one route, it fails the app and the API
+   never binds a port. It surfaced while the harness and the server were
+   momentarily out of step, which is exactly the shape the real accident takes:
+   a route file and its mount edited in different commits.
+
+   So the parser is built beside the route and the mount takes no middleware at
+   all. This asserts the signature, because the failure is at REGISTRATION and
+   no request-level test can reach it. */
+const routeSrc = (await import('node:fs'))
+  .readFileSync(new URL('../api/ledger_routes.js', import.meta.url), 'utf8');
+check('the receipt mount takes no injected middleware',
+  /export function ledgerReceiptRoutes\(app, \{ q, wrap \}\)/.test(routeSrc));
+check('and builds its own parser, at its own limit, beside the route',
+  /const receiptBody = express\.raw\(\{ type: RECEIPT_TYPES, limit: '1mb' \}\)/.test(routeSrc));
+check('the process-wide JSON limit is untouched at 256kb',
+  /express\.json\(\{ limit: '256kb' \}\)/.test((await import('node:fs'))
+    .readFileSync(new URL('../api/server.js', import.meta.url), 'utf8')));
+
 /* ── the upload ──────────────────────────────────────────────────────────── */
 const first = await up(jpeg);
 check('an image uploads and comes back keyed by its digest',

@@ -79,6 +79,7 @@
    filed a position for this person" and "this person is holding nothing" are
    different facts and only one of them is safe to lend against. */
 
+import express from 'express';
 import { createHash } from 'node:crypto';
 import { resolvePerson } from './ledger_person.js';
 
@@ -552,7 +553,24 @@ export function ledgerWriteRoutes(app, { wrap, tx }) {
 /* ─────────────────────────────────────────────────────────────────────────
    THE PROOF: uploading a receipt, and serving one back.
    ───────────────────────────────────────────────────────────────────────── */
-export function ledgerReceiptRoutes(app, { q, wrap, raw }) {
+/* THE BODY PARSER IS BUILT HERE, NOT INJECTED.
+   ─────────────────────────────────────────────────────────────────────────
+   It was a dependency, and a mount that did not supply it threw
+   `Route.post() requires a callback function but got a [object Undefined]` —
+   which does not fail one route, it fails the whole app at registration and
+   the API never binds a port. Caught by the suite while the harness and the
+   server were momentarily out of step, which is exactly the shape the real
+   accident would take: a route file and a mount edited in different commits.
+
+   There is no reason for a caller to supply this. The limit and the accepted
+   types are facts about what this route stores, and they belong beside it. */
+const RECEIPT_TYPES = ['image/jpeg', 'image/webp', 'image/png'];
+/* 1MB is the route's own limit and NOT the process-wide JSON limit, which
+   stays at 256kb (api/server.js). Raising the shared one to fit a photograph
+   would raise the DoS budget for every other route in the API. */
+const receiptBody = express.raw({ type: RECEIPT_TYPES, limit: '1mb' });
+
+export function ledgerReceiptRoutes(app, { q, wrap }) {
   /* POST /api/ledger/receipt — the image bytes, raw.
      ─────────────────────────────────────────────────────────────────────
      NOT JSON. api/server.js:106 sets a 256kb JSON limit for every route in the
@@ -574,7 +592,7 @@ export function ledgerReceiptRoutes(app, { q, wrap, raw }) {
      silent one turns "every entry carries proof" into a claim about BYTES
      rather than about events: the same photograph attached to five handovers
      is a thing a reviewer must be able to see. */
-  app.post('/api/ledger/receipt', raw, wrap(async (req, res) => {
+  app.post('/api/ledger/receipt', receiptBody, wrap(async (req, res) => {
     res.set('Cache-Control', 'no-store');
     const by = String(req.query.by || '').trim().toLowerCase();
     if (!SUPERVISORS.includes(by)) {
@@ -582,7 +600,7 @@ export function ledgerReceiptRoutes(app, { q, wrap, raw }) {
         + `people who may record money. They are ${SUPERVISORS.join(', ')}.` });
     }
     const type = String(req.get('content-type') || '').split(';')[0].trim().toLowerCase();
-    if (!['image/jpeg', 'image/webp', 'image/png'].includes(type)) {
+    if (!RECEIPT_TYPES.includes(type)) {
       return res.status(415).json({ error: `${type || 'no content-type'} is not an image type `
         + 'this route stores. It takes image/jpeg, image/webp or image/png — the three a phone '
         + 'camera and a canvas re-encode produce.' });
