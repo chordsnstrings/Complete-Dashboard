@@ -58,6 +58,8 @@ import { renderPerformance } from './performance.js';
 /* The pairs no rule can settle, and a person's verdict on them. */
 import { renderSamePerson } from './sameperson.js';
 import { renderDeposits } from './deposits.js';
+import { renderAdvances } from './advances.js';
+import { renderSalary } from './salary.js';
 import { renderCompare } from './compare.js';
 import { renderSupply } from './supply.js';
 import { renderOptimise } from './optimise.js';
@@ -448,6 +450,8 @@ const VIEWS = [
   { id: 'identity', label: 'One person, two records', ic: '⧉', sec: 'People', sub: 'Records the roster proves belong to the same driver, and the evidence for each' },
   /* Beside it, because it is the other half of the same subject: that page
      shows what a rule PROVED, this one asks about what it cannot. */
+  { id: 'salary', label: 'Salary', ic: '⊞', sec: 'Money', sub: 'One entry per driver per month, all in — what payroll decided, recorded here rather than derived' },
+  { id: 'advances', label: 'Advances', ic: '⊕', sec: 'Money', sub: 'What each driver owes against what they generate, the line they are kept within, and the form that records a new advance, a repayment or a deduction' },
   { id: 'deposits', label: 'Cash handed in', ic: '⇩', sec: 'Money', sub: 'Record a driver handing cash back, and see who is carrying the most — the leg that turns cash in hand from a guess into a balance' },
   { id: 'same-person', label: 'Same person?', ic: '⩸', sec: 'People', sub: 'Pairs whose names look like one driver, waiting for somebody to confirm or deny it — a phone or an email merges on its own and never appears here' },
   { id: 'vehicles', label: 'Vehicles', ic: '▤', sec: 'Fleet', sub: 'How much each car is used, and how much money it brings in' },
@@ -2037,6 +2041,8 @@ V['low-performers'] = async (root) => renderPerformers(root, 'low');
 V.performance = async (root) => renderPerformance(root, state.param);
 V['same-person'] = async (root) => renderSamePerson(root);
 V.deposits = async (root) => renderDeposits(root);
+V.advances = async (root) => renderAdvances(root);
+V.salary = async (root) => renderSalary(root);
 /* `#performer/<id>/<monday>` — the week the reader was ranking when they
    clicked, so the drill-down shows the week they came from. */
 V.performer = async (root) => renderPerformer(root, state.param, state.sub);

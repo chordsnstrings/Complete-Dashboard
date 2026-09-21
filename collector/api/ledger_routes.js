@@ -336,6 +336,110 @@ export function ledgerRoutes(app, { q, wrap, tx }) {
 /* ─────────────────────────────────────────────────────────────────────────
    THE WRITE PATH.
    ───────────────────────────────────────────────────────────────────────── */
+/* GET /api/ledger/entries — the register itself.
+   ─────────────────────────────────────────────────────────────────────────
+   Every entry, newest first, with the person it is against and whether its
+   receipt is still held. Windowed, filterable by person, book and type.
+
+   THE LIST IS CAPPED AND THE COUNTS ARE NOT. #payouts shipped reading
+   "AED 319,015 · 6 transfers on 2 dates" over a register of 217 transfers and
+   AED 3.46m, because a route returned a slice and the page totalled what it
+   was given. So the totals here are computed over the WHOLE window in SQL and
+   the row list says how many it is showing of how many there are.
+
+   VERIFICATION ROWS ARE INCLUDED AND FLAGGED, not hidden. They exist so this
+   repo's production ritual can fill a modal without recording a real debt, and
+   a reviewer looking at the register needs to see that one was written — a row
+   excluded everywhere is a row nobody can audit. Every TOTAL excludes them. */
+export function ledgerRegisterRoutes(app, { q, wrap }) {
+  const LIMIT = 200;
+  app.get('/api/ledger/entries', wrap(async (req, res) => {
+    const d = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim()) ? String(v).trim() : null);
+    const from = d(req.query.from);
+    const to = d(req.query.to);
+    const personId = Number(req.query.person_id) || null;
+    const book = ['advance', 'cash', 'deduction', 'pay'].includes(String(req.query.book))
+      ? String(req.query.book) : null;
+
+    const W = `($1::date IS NULL OR e.effective_on >= $1::date)
+           AND ($2::date IS NULL OR e.effective_on <= $2::date)
+           AND ($3::bigint IS NULL OR e.person_id = $3::bigint)
+           AND ($4::text IS NULL OR e.book = $4::text)`;
+    const p = [from, to, personId, book];
+
+    const [tot] = await q(
+      `SELECT count(*)::int AS rows,
+              count(*) FILTER (WHERE e.entry_source = 'verification')::int AS verification_rows,
+              round(sum(e.amount) FILTER (WHERE e.entry_source <> 'verification'
+                AND e.book = 'advance')::numeric, 2) AS advance,
+              round(sum(e.amount) FILTER (WHERE e.entry_source <> 'verification'
+                AND e.book = 'cash')::numeric, 2) AS cash,
+              round(sum(e.amount) FILTER (WHERE e.entry_source <> 'verification'
+                AND e.book = 'deduction')::numeric, 2) AS deduction,
+              round(sum(e.amount) FILTER (WHERE e.entry_source <> 'verification'
+                AND e.book = 'pay')::numeric, 2) AS pay
+         FROM driver_ledger e WHERE ${W}`, p);
+
+    const rows = await q(
+      `SELECT e.id, e.person_id, e.person_name, e.type_code, t.label, e.book, e.amount,
+              e.settles_via, to_char(e.effective_on,'YYYY-MM-DD') AS effective_on,
+              to_char(e.period_start,'YYYY-MM-DD') AS period_start,
+              to_char(e.period_end,'YYYY-MM-DD') AS period_end,
+              e.entered_by, to_char(e.entered_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS entered_at,
+              e.note, e.source_ref, e.entry_source, e.reverses_id, e.receipt_sha,
+              /* Whether the PROOF is still there. The entry is permanent and
+                 the image is not — twelve months — so a reader must be able to
+                 tell "no photograph was ever taken" from "it was held until a
+                 date and has since gone". */
+              (r.sha256 IS NOT NULL) AS receipt_held,
+              to_char(r.expires_on,'YYYY-MM-DD') AS receipt_expires_on,
+              (r.sha256 IS NOT NULL AND r.expires_on < (now() AT TIME ZONE 'Asia/Dubai')::date)
+                AS receipt_expired,
+              t.needs_proof
+         FROM driver_ledger e
+         LEFT JOIN ledger_type t ON t.code = e.type_code
+         LEFT JOIN driver_ledger_receipt r ON r.sha256 = e.receipt_sha
+        WHERE ${W}
+        ORDER BY e.effective_on DESC, e.id DESC
+        LIMIT ${LIMIT}`, p);
+
+    res.json({
+      from, to, person_id: personId, book,
+      totals: {
+        rows: tot.rows,
+        verification_rows: tot.verification_rows,
+        advance: tot.advance == null ? null : Number(tot.advance),
+        cash: tot.cash == null ? null : Number(tot.cash),
+        deduction: tot.deduction == null ? null : Number(tot.deduction),
+        pay: tot.pay == null ? null : Number(tot.pay),
+        excludes_verification: true,
+      },
+      shown: rows.length,
+      /* Said whenever it is true, and never implied by a count that happens to
+         equal the cap. */
+      listed_why: rows.length < tot.rows
+        ? `showing the ${rows.length} most recent of ${tot.rows} entries in this window. `
+          + 'The totals above are over all of them, not over this list.'
+        : null,
+      entries: rows.map((r) => ({
+        ...r,
+        amount: Number(r.amount),
+        receipt: r.receipt_sha
+          ? { sha256: r.receipt_sha, held: r.receipt_held, expired: r.receipt_expired,
+            expires_on: r.receipt_expires_on,
+            absent_reason: r.receipt_held ? null
+              : 'the photograph has passed its twelve-month retention and been removed. The '
+                + 'entry is permanent and still records that one was held.' }
+          : { sha256: null, held: false, expired: false, expires_on: null,
+            absent_reason: r.needs_proof === false
+              ? 'this type carries no photograph — it records a decision or a period figure, '
+                + 'which has none to take'
+              : 'no photograph is attached to this entry' },
+      })),
+    });
+  }));
+}
+
 export function ledgerWriteRoutes(app, { wrap, tx }) {
   /* POST /api/ledger/entry
      ─────────────────────────────────────────────────────────────────────

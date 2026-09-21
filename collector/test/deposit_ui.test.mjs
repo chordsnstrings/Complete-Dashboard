@@ -32,32 +32,49 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
 console.log('\nthe two shells share their rules');
 {
   const core = readFileSync(new URL('../api/public/deposit_core.js', import.meta.url), 'utf8');
-  const desk = readFileSync(new URL('../api/public/deposits.js', import.meta.url), 'utf8');
+  const form = readFileSync(new URL('../api/public/entry_form.js', import.meta.url), 'utf8');
   const phone = readFileSync(new URL('../api/public/m/screens.js', import.meta.url), 'utf8');
-  check('both shells import the shared core',
-    /from '\.\/deposit_core\.js'/.test(desk) && /from '\.\.\/deposit_core\.js'/.test(phone));
+  const views = ['deposits.js', 'advances.js'].map((f) =>
+    [f, readFileSync(new URL(`../api/public/${f}`, import.meta.url), 'utf8')]);
+
+  /* THE INVARIANT: every rule about recording money lives in deposit_core.js.
+     The desktop and phone have different LAYOUTS on purpose — a worklist with a
+     form beside it, against one handover thumb-first — and identical RULES,
+     because a validation copied into two bundles is how the phone comes to
+     refuse what the desktop accepts. */
   for (const fn of ['compress', 'putReceipt', 'submitEntry', 'parseAmount']) {
     check(`${fn} is defined once, in the core`,
-      core.includes(`export async function ${fn}`) || core.includes(`export const ${fn}`)
-      || core.includes(`export function ${fn}`));
+      new RegExp(`export (async function|function|const) ${fn}\\b`).test(core));
   }
-  /* The confirming sentence comes from the SERVER. Assembling one in either
-     bundle would let the two describe a single entry differently, which is the
-     defect api/ledger_routes.js builds it server-side to prevent. */
-  /* The server's sentence is distinctive — it names the BOOK and both
-     balances. Matching on "is recording" alone was too loose: both shells
-     legitimately contain "Say who is recording this", which is a missing-field
-     message and not a confirmation. */
-  check('neither shell composes its own confirmation sentence',
-    !/book moves from/.test(desk) && !/book moves from/.test(phone));
-  check('both quote the server\'s sentence instead',
-    /out\.sentence/.test(desk) && /out\.sentence/.test(phone));
-  /* A magnitude is sent, never a sign — the server applies the type's
+  check('the desktop form takes its rules from the core',
+    /from '\.\/deposit_core\.js'/.test(form));
+  check('and so does the phone screen',
+    /from '\.\.\/deposit_core\.js'/.test(phone));
+
+  /* The two desktop VIEWS are layout. They must not talk to the API directly
+     or they become a third place a rule can differ. */
+  for (const [name, src] of views) {
+    check(`${name} delegates the form rather than carrying one`,
+      /entryForm\(/.test(src) && !/fetch\(/.test(src), name);
+  }
+
+  /* The confirming sentence comes from the SERVER — assembled there so the two
+     shells cannot describe one entry differently. "book moves from" is its
+     distinctive phrase; matching "is recording" alone was too loose, because
+     both shells legitimately say "Say who is recording this", which is a
+     missing-field message and not a confirmation. */
+  check('nothing in the client composes its own confirmation sentence',
+    !/book moves from/.test(form) && !/book moves from/.test(phone)
+    && views.every(([, src]) => !/book moves from/.test(src)));
+  check('both shells quote the server\'s sentence instead',
+    /out\.sentence/.test(form) && /out\.sentence/.test(phone));
+
+  /* A magnitude is sent, never a sign: the server applies the type's
      direction, which is what makes a wrong-way-round row impossible. */
   check('neither shell sends a negative amount',
-    !/amount:\s*-/.test(desk) && !/amount:\s*-/.test(phone));
+    !/amount:\s*-/.test(form) && !/amount:\s*-/.test(phone));
   check('the dry run is the default and the save is explicit',
-    /commit:\s*true/.test(desk) && /commit:\s*true/.test(phone)
+    /commit:\s*true/.test(form) && /commit:\s*true/.test(phone)
     && /dry_run:\s*!commit/.test(core));
 }
 

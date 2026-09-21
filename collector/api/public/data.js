@@ -414,6 +414,12 @@ export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'ac
      register is the precedent and the measurement: it read "6 transfers on 2
      dates" over a record of 217 under the shell's default month. */
   'deposits',
+  /* #advances is the same argument as #deposits: an exposure figure is a
+     POSITION against a person, and the form beside the list writes against a
+     person regardless of any chip above it. */
+  'advances',
+  /* #salary is a month, chosen on the page itself. */
+  'salary',
   /* #trip is ONE booking addressed by the provider's own id. /api/trip takes a
      platform and an id and nothing else — a range, a channel or a fleet
      control above it would govern nothing, and would ride along into every

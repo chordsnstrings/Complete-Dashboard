@@ -6735,6 +6735,39 @@ app.get('/api/ledger/exposure', (_, r) => r.json({
   ],
 }));
 
+app.get('/api/ledger/entries', (req, r) => {
+  const book = String(req.query.book || '');
+  const all = [
+    { id: 3, person_id: 1, person_name: 'Tariq Afzal Said Afzal', type_code: 'cash_advance',
+      label: 'Cash advance', book: 'advance', amount: 2500, settles_via: 'cash',
+      effective_on: '2026-09-15', entered_by: 'ahsan', note: 'monthly advance',
+      entry_source: 'manual',
+      receipt: { sha256: 'a'.repeat(64), held: true, expired: false,
+        expires_on: '2027-09-15', absent_reason: null } },
+    { id: 2, person_id: 2, person_name: 'Mohammed Selim Shafiqur Rahman', type_code: 'salik',
+      label: 'Salik / tolls', book: 'deduction', amount: 300, settles_via: null,
+      effective_on: '2026-09-12', entered_by: 'haseeb', note: 'September tolls',
+      entry_source: 'manual',
+      receipt: { sha256: null, held: false, expired: false, expires_on: null,
+        absent_reason: 'this type carries no photograph — it records a decision or a period '
+          + 'figure, which has none to take' } },
+    { id: 1, person_id: 1, person_name: 'Tariq Afzal Said Afzal', type_code: 'repayment',
+      label: 'Repayment', book: 'advance', amount: -1000, settles_via: 'cash',
+      effective_on: '2026-09-02', entered_by: 'ahsan', note: 'paid back',
+      entry_source: 'manual',
+      receipt: { sha256: 'b'.repeat(64), held: false, expired: true, expires_on: '2026-01-01',
+        absent_reason: 'the photograph has passed its twelve-month retention and been removed. '
+          + 'The entry is permanent and still records that one was held.' } },
+  ];
+  const rows = book ? all.filter((e) => e.book === book) : all;
+  return r.json({
+    from: null, to: null, person_id: null, book: book || null,
+    totals: { rows: rows.length, verification_rows: 0, advance: 1500, cash: null,
+      deduction: 300, pay: null, excludes_verification: true },
+    shown: rows.length, listed_why: null, entries: rows,
+  });
+});
+
 app.post('/api/ledger/receipt', (_, r) => r.json({
   sha256: 'c'.repeat(64), byte_len: 84210, content_type: 'image/jpeg',
   expires_on: '2027-09-21', already_held: false, used_by_entries: 0,
