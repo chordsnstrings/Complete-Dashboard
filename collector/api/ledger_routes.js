@@ -79,6 +79,7 @@
    filed a position for this person" and "this person is holding nothing" are
    different facts and only one of them is safe to lend against. */
 
+import { createHash } from 'node:crypto';
 import { resolvePerson } from './ledger_person.js';
 
 const round2 = (v) => (v == null ? null : Math.round(Number(v) * 100) / 100);
@@ -545,5 +546,136 @@ export function ledgerWriteRoutes(app, { wrap, tx }) {
           : msg],
       });
     }
+  }));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   THE PROOF: uploading a receipt, and serving one back.
+   ───────────────────────────────────────────────────────────────────────── */
+export function ledgerReceiptRoutes(app, { q, wrap, raw }) {
+  /* POST /api/ledger/receipt — the image bytes, raw.
+     ─────────────────────────────────────────────────────────────────────
+     NOT JSON. api/server.js:106 sets a 256kb JSON limit for every route in the
+     process, and base64 inflates by a third — so the largest photograph that
+     could arrive inside the shared body parser is about 190KB, while a phone
+     camera produces two to five megabytes. Raising the shared limit would
+     raise it for every other route too, which is the DoS budget for the whole
+     API; a per-route raw parser raises it for exactly this one.
+
+     COMPRESSION HAPPENS IN THE BROWSER. A basic-xxs instance is 512MB and also
+     serves every page in this product; decoding a twelve-megapixel image there
+     to resize it is how that container dies. The phone does it with a canvas
+     before the POST, which also means the work happens on the device that took
+     the picture rather than over a car-park connection.
+
+     THE DIGEST IS THE KEY, and a repeat upload of the same bytes returns the
+     row that already exists rather than writing a second copy. That dedupe is
+     reported — `already_held`, and how many entries point at it — because a
+     silent one turns "every entry carries proof" into a claim about BYTES
+     rather than about events: the same photograph attached to five handovers
+     is a thing a reviewer must be able to see. */
+  app.post('/api/ledger/receipt', raw, wrap(async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const by = String(req.query.by || '').trim().toLowerCase();
+    if (!SUPERVISORS.includes(by)) {
+      return res.status(400).json({ error: `"${req.query.by || '(none)'}" is not one of the `
+        + `people who may record money. They are ${SUPERVISORS.join(', ')}.` });
+    }
+    const type = String(req.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!['image/jpeg', 'image/webp', 'image/png'].includes(type)) {
+      return res.status(415).json({ error: `${type || 'no content-type'} is not an image type `
+        + 'this route stores. It takes image/jpeg, image/webp or image/png — the three a phone '
+        + 'camera and a canvas re-encode produce.' });
+    }
+    const bytes = Buffer.isBuffer(req.body) ? req.body : null;
+    if (!bytes || !bytes.length) {
+      return res.status(400).json({ error: 'no image arrived in the body' });
+    }
+    const sha = createHash('sha256').update(bytes).digest('hex');
+
+    const [held] = await q(
+      `SELECT sha256, byte_len, to_char(expires_on,'YYYY-MM-DD') AS expires_on
+         FROM driver_ledger_receipt WHERE sha256 = $1`, [sha]);
+    if (held) {
+      const [{ n }] = await q(
+        `SELECT count(*)::int n FROM driver_ledger WHERE receipt_sha = $1`, [sha]);
+      return res.json({
+        sha256: sha, byte_len: held.byte_len, expires_on: held.expires_on,
+        already_held: true, used_by_entries: n,
+        note: n > 0
+          ? `these exact bytes are already attached to ${n} entr${n === 1 ? 'y' : 'ies'}. `
+            + 'That is not refused — a receipt can legitimately cover more than one line — but '
+            + 'it is said out loud, because a silent dedupe turns "every entry carries proof" '
+            + 'into a claim about bytes rather than about events.'
+          : 'these exact bytes were already uploaded and are not stored twice.',
+      });
+    }
+
+    /* Twelve months, by the operator's instruction. THE ENTRY OUTLIVES ITS
+       PROOF: the ledger row is permanent and this is not, so an expired
+       receipt must render "held until <date>, since expired" rather than
+       looking like an entry that never had one. */
+    const [row] = await q(
+      `INSERT INTO driver_ledger_receipt
+         (sha256, bytes, content_type, byte_len, uploaded_by, uploaded_ip, expires_on)
+       VALUES ($1,$2,$3,$4,$5,$6,
+               ((now() AT TIME ZONE 'Asia/Dubai')::date + interval '12 months')::date)
+       RETURNING to_char(expires_on,'YYYY-MM-DD') AS expires_on`,
+      [sha, bytes, type, bytes.length, by, req.ip || null]);
+    return res.json({
+      sha256: sha, byte_len: bytes.length, content_type: type,
+      expires_on: row.expires_on, already_held: false, used_by_entries: 0,
+      note: `stored. Attach it to an entry with receipt_sha. Held until ${row.expires_on} — `
+        + 'the entry it belongs to is permanent and this image is not.',
+    });
+  }));
+
+  /* GET /api/ledger/receipt/:sha — the bytes back.
+     ─────────────────────────────────────────────────────────────────────
+     ACCESS IS THE DIGEST. There is no user authentication in this product
+     (api/redact.js:1-8 states the posture), so there is no session to check a
+     receipt against. The address is a 64-character SHA-256 that appears only
+     on the entry it belongs to, which is itself only reachable from the ledger
+     — an unguessable capability rather than an ACL.
+
+     That is weaker than a receipt of a cash handover deserves, and it is
+     written down here rather than glossed: these images are bank slips and
+     photographs of named people holding money. When ULM lands this route takes
+     a real check. Until then the digest is the whole of it.
+
+     ETag on the digest, and immutable: unlike driver_photo, whose address is
+     stable while its content changes, this address IS the content — so a
+     promise of immutability is true here. */
+  app.get('/api/ledger/receipt/:sha', wrap(async (req, res) => {
+    const sha = String(req.params.sha || '').toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(sha)) {
+      return res.status(400).json({ error: 'not a sha-256 digest' });
+    }
+    const [row] = await q(
+      `SELECT bytes, content_type, byte_len, to_char(expires_on,'YYYY-MM-DD') AS expires_on,
+              expires_on < (now() AT TIME ZONE 'Asia/Dubai')::date AS expired
+         FROM driver_ledger_receipt WHERE sha256 = $1`, [sha]);
+    if (!row) {
+      /* An <img> cannot read a body, so the reason goes in a header where
+         somebody debugging can still find it — the same thing
+         api/driver_routes.js:1009 does for a driver photograph. */
+      res.set('x-receipt', 'no receipt on file for this digest');
+      return res.status(404).json({ error: 'no receipt on file for this digest',
+        detail: 'Either it was never uploaded, or it has passed its twelve-month retention and '
+          + 'been removed. The entry it belonged to is permanent and says which.' });
+    }
+    if (row.expired) {
+      res.set('x-receipt', `expired ${row.expires_on}`);
+      return res.status(410).json({ error: 'this receipt has passed its retention',
+        expires_on: row.expires_on,
+        detail: 'The entry it belongs to is permanent and still carries the fact that a '
+          + 'photograph was held until this date. It is not an entry that never had one.' });
+    }
+    res.set('Content-Type', row.content_type);
+    res.set('Content-Length', String(row.byte_len));
+    res.set('ETag', `"${sha}"`);
+    res.set('Cache-Control', 'private, max-age=31536000, immutable');
+    if (req.get('if-none-match') === `"${sha}"`) return res.status(304).end();
+    return res.end(row.bytes);
   }));
 }

@@ -181,7 +181,12 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
      stub — which matters because the dry run IS a rollback, and a stubbed one
      would prove nothing about whether the constraints fire. */
   const tx = pgliteTx(db);
-  const deps = { q, wrap, range, endOfDay, F, FB, W, DAYWIN, CANON, win, winDays, rollupGrainSql, tx };
+  /* The per-route raw parser the receipt upload takes. Built here with the
+     same types and limit server.js uses, so a test exercises the real refusal
+     rather than a permissive stub — the 413 path is the one that used to be
+     rendered to the operator as a timeout. */
+  const raw = express.raw({ type: ['image/jpeg', 'image/webp', 'image/png'], limit: '1mb' });
+  const deps = { q, wrap, range, endOfDay, F, FB, W, DAYWIN, CANON, win, winDays, rollupGrainSql, tx, raw };
   const mounted = [];
   for (const f of readdirSync('api').filter((x) => x.endsWith('_routes.js'))) {
     const mod = await import(`../api/${f}`);

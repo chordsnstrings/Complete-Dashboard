@@ -63,7 +63,7 @@ import { compareRoutes } from './compare_routes.js';
 import { performanceRoutes } from './performance_routes.js';
 import { statusRoutes } from './status_routes.js';
 import { samePersonRoutes } from './sameperson_routes.js';
-import { ledgerRoutes, ledgerWriteRoutes } from './ledger_routes.js';
+import { ledgerRoutes, ledgerWriteRoutes, ledgerReceiptRoutes } from './ledger_routes.js';
 import { probeRoutes } from './probe.js';
 import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
 /* The one place that decides what a reader with no credential may see of a
@@ -5786,6 +5786,13 @@ ledgerRoutes(app, { q, wrap });
    inserting the audit row are three statements that must land together or not
    at all, and the dry run is that same transaction rolled back. */
 ledgerWriteRoutes(app, { wrap, tx: pgTx(pool) });
+/* The receipt bytes. A PER-ROUTE raw parser at 1MB — never a raised global
+   limit, which is the DoS budget for every other route in this process. The
+   phone compresses with a canvas before the POST: a basic-xxs instance is
+   512MB and also serves every page here, so decoding a twelve-megapixel image
+   on it to resize is how the container dies. */
+ledgerReceiptRoutes(app, { q, wrap,
+  raw: express.raw({ type: ['image/jpeg', 'image/webp', 'image/png'], limit: '1mb' }) });
 
 /* ───────────────── one day ─────────────────
    Every source that saw a given Dubai-local day, including whether each one
