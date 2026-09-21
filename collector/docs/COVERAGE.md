@@ -889,6 +889,30 @@ driver's 222 tracker fixes.
   that reads a figure out of a `.kpi` tile needs this**, and several that pass
   today are passing on timing rather than on correctness.
 
+* **`.tabs` IS TWO DIFFERENT BARS, AND ONE OF THEM IS ON SCREEN BEFORE THE PAGE
+  HAS FETCHED ANYTHING.** The shell's section navigation (`renderSectionTabs`)
+  and every in-page tab bar (`tabBar` in `api/public/ui.js`) both render
+  `<div class="tabs">`. So `page.waitForSelector('.tabs')` in a browser test
+  resolves on the FIRST paint, against the shell, and every assertion after it
+  races the page it was meant to wait for — which reads as a flaky assertion
+  about the page's content rather than as a wait that never waited. Scope it:
+  `#view .tabs` is the page's own bar. Same shape of mistake as the `countUp`
+  race above, and it bit `test/person_address.test.mjs` first time out:
+  the tab-href assertion came back
+  `["#drivers?period=month","#online-time","#cancellations?period=month"]`,
+  which is the sidebar.
+
+* **A DRIVER PAGE IS ADDRESSED BY THE PERSON, NOT BY A PROVIDER ACCOUNT.**
+  `#driver/p412` is canonical; `#driver/<ext_id>` still resolves and is
+  rewritten in place to the canonical form. Two ids are live on that page at
+  once and they are not interchangeable: `?person=` on `/api/driver/profile`
+  takes a `driver.id`, every OTHER driver endpoint's `?id=` takes a provider
+  account id, and the two namespaces are never guessed between — **Yango and
+  Bolt both issue digits-only account ids**, so `?id=412` is a plausible Yango
+  account and a plausible person at the same time. If you add a driver
+  endpoint, take the account id; if you add a link to a driver page from a
+  surface that already knows the person, link by `p<person_id>`.
+
 * **"HOW MANY DRIVERS" HAD FOUR ANSWERS, AND NONE OF THEM WAS A COUNT OF
   PEOPLE.** Measured on production 2026-09-21 over the same 800 accounts:
   `/api/drivers/directory` 347, `/api/compliance/drivers` 437,

@@ -1611,3 +1611,48 @@ is proven until it has been re-measured on production after the deploy — in
 particular the thing that started it: `/api/ledger/people` returning a non-empty
 roster on the live database, and a policy row actually stored so exposure stops
 refusing for want of one.
+
+---
+
+## Batch — a driver page was addressed by an account that only represents them
+
+2026-09-21. One defect, and it was the address rather than anything on the page.
+Every driver page in this product was `#driver/<provider account id>` — an Uber
+UUID, a Yango number, a hotel ObjectId — while the page itself is a PERSON:
+`src/persons.js` folds a human's accounts onto one `driver` row and
+`api/driver_routes.js` answers every panel over all of them. So the identity a
+reader bookmarked and pasted was one of the folded records, chosen by whichever
+row they happened to click, and **which account represents somebody moves** —
+a merge reviewed, a wrongly merged account detached. Measured on production
+2026-09-21: **810 platform accounts over ~349 people.** The person id never
+moves; `driver_ledger.person_id` already keys money on it.
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | the canonical address is the person | `#driver/p412`, parsed by `personIdOf` in `api/public/data.js` | written, **proven by revert** (8 assertions red) |
+| — | every `#driver/<ext_id>` link ever made must keep working | resolved to its person, renders the identical page, then `rewriteParam` puts the canonical address in the bar **in place** — `history.replaceState`, so no second render and no history entry | written, **proven by revert** (3 assertions red) |
+| — | the profile is resolvable by person id | `?person=` on `/api/driver/profile`, its own parameter; the response's `resolved_by` says which one answered | written |
+| — | an account the spine has not placed | renders exactly as before and states WHICH not-placed state it is in — register unreadable / register never built / this account unreviewed | written |
+| — | the header never said who the page is | `identityCard` now carries the person id and every account with its platform, its join basis, and a mark on the one the address named | written |
+
+### The two ids that are live on that page at once
+
+`renderDriver` keeps them apart deliberately and the block comment above it says
+so: **`id` is the provider account every tab ENDPOINT is asked about; `canon` is
+what the page LINKS by.** They are not interchangeable and the route will not
+guess between them — Yango and Bolt both issue digits-only account ids, so
+`?id=412` is a plausible Yango account and a plausible person at the same time.
+A route that guessed would, the day those collide, answer one person's page
+under another person's address.
+
+### What was deliberately NOT changed
+
+`/api/drivers/directory` still answers a **bare array**. Several consumers read
+it that way, wrapping it to carry a person id would break every one of them
+silently, and the redirect makes it unnecessary — a directory row links by its
+account and the page rewrites the address on arrival. Held by an assertion in
+`test/person_address.test.mjs`.
+
+**NOT YET PROVEN.** Everything above is `written`. Nothing is proven until
+`#driver/p<id>` has been opened on production, an account link watched to
+rewrite itself, and an unplaced account's page screenshotted with its reason.

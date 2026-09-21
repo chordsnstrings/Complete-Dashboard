@@ -3598,9 +3598,10 @@ const TABS = { overview: tabOverview, activity: tabActivity, territory: tabTerri
             mean an account; that is unchanged and deliberately so, because a
             person id and a Yango account id are both bare digits and a route
             that guessed between them would one day answer the wrong person.
-     `addr` what the page LINKS by — the tab bar, the day rows, the record
-            tab's grain switch. Canonical where the spine has placed the
-            account, the account id where it has not.
+     `canon` what the page LINKS by — the tab bar, the day rows, the record
+            tab's grain switch. The person address where the spine has placed
+            the account, the account id where it has not, and what `addr` is
+            rewritten to once the profile has landed.
 
    An account the spine has not placed is NOT an error and does not lose its
    page: it keeps its provider address, renders exactly as it did before, and
