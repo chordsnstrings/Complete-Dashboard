@@ -33,7 +33,7 @@ collector/
   api/           server.js (read API) + public/ (the front end, plain ESM)
   api/public/    one file per view; ui.js = shared components; charts.js = SVG
   sql/           schema_vNN.sql, replayed in order on every boot
-  test/          274 .test.mjs files, run with `npm test`
+  test/          275 .test.mjs files, run with `npm test`
   bin/           audit + local-serving tools
   docs/          the standing notes above
 ```
@@ -83,7 +83,7 @@ modal filled. The production API caches — always append `&_=$RANDOM`.
 
 ```bash
 cd collector
-npm test                        # all 274 suites; ONE run at a time (see traps)
+npm test                        # all 275 suites; ONE run at a time (see traps)
 node bin/live-ui.mjs            # :8100 — working-tree UI against production data
 node bin/prod-mirror.mjs        # :8200 — production bytes, exactly as deployed
 npm run audit:pages             # every endpoint behind every view, five windows

@@ -5798,7 +5798,7 @@ ledgerReceiptRoutes(app, { q, wrap });
 ledgerExposureRoutes(app, { q, wrap });
 ledgerRegisterRoutes(app, { q, wrap });
 ledgerPeopleRoutes(app, { q, wrap });
-ledgerPolicyRoutes(app, { q, wrap, tx });
+ledgerPolicyRoutes(app, { q, wrap, tx: pgTx(pool) });
 /* The spreadsheet import. Two routes whose SPLIT is the design: preview takes
    names and writes nothing, commit takes person ids and never a name — which
    makes auto-applying a fuzzy match impossible at the boundary rather than

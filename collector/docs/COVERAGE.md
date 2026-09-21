@@ -827,6 +827,34 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **THE BOTTOM OF `api/server.js` IS EXECUTED BY NO TEST, AND THE HARNESS
+  SUPPLIES WHAT IT GETS WRONG.** `test/mount.mjs` evaluates only the region
+  between its START and END markers (lines ~394–5746) and mounts the route
+  MODULES itself, by directory discovery, with its own `deps`. Every
+  `xxxRoutes(app, { … })` line in server.js is therefore never run. Worse, the
+  harness declares `const tx = pgliteTx(db)` and injects it by name, while
+  server.js has no `tx` at all — it builds `pgTx(pool)` at each call site. So
+  `ledgerPolicyRoutes(app, { q, wrap, tx })` passed `node --check`, passed 274
+  files and 8601 assertions, and killed the API at boot on production with
+  `ReferenceError: tx is not defined`. `test/server_wiring.test.mjs` is the
+  check that a green suite could not give; it also catches a route module
+  imported but never mounted, which would 404 in production with its whole test
+  file passing.
+
+* **APP PLATFORM ROLLS BACK AUTOMATICALLY, SO THE APP READS `ACTIVE` WHILE
+  RUNNING THE PREVIOUS BUILD.** A failed deploy is followed by a new deployment
+  whose cause is "automated rollback after failed deployment of <id>", and it
+  reaches ACTIVE within a minute. Polling
+  `GET /v2/apps/$APP/deployments` and reading `deployments[0].phase` — the
+  LATEST deployment — therefore reports ACTIVE for a deploy that failed, and
+  every subsequent claim about production is about the old code. **Poll the
+  deployment id the POST returned**, at
+  `/v2/apps/$APP/deployments/$ID`, and check that id's own phase; then confirm
+  the live commit. A container that exits non-zero shows as
+  `DeployContainerExitNonZero`, and the reason is in
+  `/deployments/$ID/components/api/logs?type=DEPLOY` — whose body is gzipped,
+  so fetch it with `curl --compressed` or it prints as binary.
+
 * **`$N::bigint IS NULL OR col = $N` TREATS AN UNRESOLVED KEY AS "NO FILTER".**
   It is the right idiom for an optional filter and a loaded gun everywhere a
   page supplies the key from something that can fail to resolve. The driver
