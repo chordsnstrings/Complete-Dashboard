@@ -77,31 +77,11 @@ const EXEMPT = {
     + 'one; whether it is populated decides the whole cash design, and that question has to be '
     + 'answered on production before a page is built against the answer. Deliberately not wired '
     + 'to a view yet for that reason.',
-  /* DELETE WHEN THE ENTRY SCREENS LAND — the last check in this file turns the
-     suite red the moment a page calls it, so this cannot outlive its reason. */
-  '/api/ledger/entry': 'the ledger write path, built before the screens that will call it so '
-    + 'they have something proved to build against. It defaults to a DRY RUN: the real '
-    + 'statements execute against the real constraints inside a transaction that is then '
-    + 'rolled back, which is what lets CLAUDE.md\'s "every modal filled" verification run on '
-    + 'production without leaving permanent debt against a real named person.',
-  /* DELETE BOTH WHEN THE ENTRY SCREENS LAND. */
-  '/api/ledger/receipt': 'the receipt upload. Takes raw image bytes through a PER-ROUTE parser '
-    + 'at 1MB, because api/server.js sets 256kb for every JSON route in the process and base64 '
-    + 'inflates by a third — about 190KB of photograph against a phone camera\'s two to five '
-    + 'megabytes — and raising the shared limit would raise the DoS budget for the whole API. '
-    + 'Built before the screens that will call it.',
   '/api/ledger/receipt/:sha': 'serves a stored receipt by digest, for an <img> on the entry '
     + 'screens that are not built yet. Access IS the digest: this product has no user '
     + 'authentication (api/redact.js:1-8), so a 64-character sha that appears only on the entry '
     + 'it belongs to is the whole control — weaker than a bank slip deserves, written down '
     + 'rather than glossed, and to be given a real check when ULM lands.',
-  /* DELETE WHEN THE EXPOSURE TILE LANDS. */
-  '/api/ledger/exposure': 'the 35% policy figure, built before the screens that will show it. '
-    + 'Both halves fold on ONE key — the stored account list in driver_platform_id — which is '
-    + 'what docs/COVERAGE.md records as the defect to avoid: "worse than a plain divisor is a '
-    + 'numerator and denominator folded on DIFFERENT keys". Measured against the fixture, '
-    + 'folding the denominator on one account instead of the person gives 58.33% where the '
-    + 'truth is 35%, which would refuse somebody an advance they are entitled to.',
   '/api/health': 'liveness probe for the platform, not for people',
   '/api/import/statement-days': 'operator tool: batched import of the daily ledger — driven by '
     + 'bin/import-ledger.mjs, not by a page',

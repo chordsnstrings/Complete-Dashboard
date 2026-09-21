@@ -405,6 +405,15 @@ export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'ac
      who clicked a name into a driver page narrowed to a month that has
      nothing to do with why they clicked. */
   'same-person',
+  /* #deposits records one handover at a time and lists who is carrying cash.
+     Neither is a windowed question: a cash position is a POSITION, and a fleet
+     or channel chip would narrow the worklist while the form beside it wrote
+     against a person regardless — the two halves of one screen governed by
+     different scopes. The controls come OFF rather than being ignored, because
+     an ignored chip still rides into every link leaving the page. The payouts
+     register is the precedent and the measurement: it read "6 transfers on 2
+     dates" over a record of 217 under the shell's default month. */
+  'deposits',
   /* #trip is ONE booking addressed by the provider's own id. /api/trip takes a
      platform and an id and nothing else — a range, a channel or a fleet
      control above it would govern nothing, and would ride along into every

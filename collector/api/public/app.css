@@ -2605,3 +2605,56 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
    way that is vague enough to be true at both widths. */
 .phone-only{display:none}
 @media (max-width:560px){ .phone-only{display:block} }
+
+/* ── Cash handed in: the deposit form ───────────────────────────────────────
+   A form in a product that had none. Every control here is sized for a THUMB
+   as well as a mouse: this same desktop bundle is what a tablet in an office
+   loads, and the phone bundle's own screen shares its rules with this one
+   through deposit_core.js rather than through a second copy of them.
+
+   44px is the minimum touch target, not a round number — it is the size below
+   which a person recording a handover beside a car misses and re-taps, and a
+   mis-tap on a money form is worse than on any other. */
+.depform { display: flex; flex-direction: column; gap: 14px; max-width: 520px; }
+.depfield { display: flex; flex-direction: column; gap: 6px; }
+.deplabel { font-size: var(--t3); font-weight: 600; letter-spacing: .02em;
+  text-transform: uppercase; color: var(--muted); }
+.depinput { min-height: 44px; padding: 10px 12px; font: inherit; font-size: var(--t8);
+  color: var(--fg); background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; width: 100%; box-sizing: border-box; }
+.depinput:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The amount is the one field somebody re-reads before pressing save, so it is
+   the one field set in a size you cannot misread, with tabular figures so 1000
+   and 1888 are the same width and a transposition is visible. */
+.depamount { font-size: var(--d3); font-weight: 600; letter-spacing: .01em;
+  font-variant-numeric: tabular-nums; min-height: 56px; }
+.depchips { display: flex; flex-wrap: wrap; gap: 8px; }
+.depchip { min-height: 44px; padding: 0 16px; font: inherit; font-size: var(--t6);
+  color: var(--fg); background: var(--card); border: 1px solid var(--line);
+  border-radius: 999px; cursor: pointer; }
+.depchip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.depnote { font-size: var(--t5); color: var(--muted); line-height: 1.45; }
+/* A refusal is not decoration: it is the sentence that stops somebody
+   recording the wrong thing, so it takes the same weight as the figure. */
+.depnote.bad { color: var(--bad, #b3261e); font-weight: 500; }
+.deppreview { max-width: 100%; max-height: 220px; border-radius: 8px;
+  border: 1px solid var(--line); object-fit: contain; align-self: flex-start; }
+.depverdict { display: flex; flex-direction: column; gap: 8px; }
+/* The server's own sentence about the entry, given the prominence of a
+   quotation because that is what it is — the product stating what it is about
+   to do, in the words it will use afterwards. */
+.depsentence { padding: 12px 14px; border-left: 3px solid var(--accent);
+  background: var(--sunken, rgba(127,127,127,.06)); border-radius: 0 8px 8px 0;
+  font-size: var(--t8); line-height: 1.5; }
+.depactions { display: flex; flex-wrap: wrap; gap: 10px; }
+.depactions .btn { min-height: 44px; padding: 0 18px; }
+
+@media (max-width: 560px) {
+  /* The form fills the column and the actions become full-width, because a
+     button beside another button at 390px is two half-width targets and the
+     save is the one that must not be missed. */
+  .depform { max-width: none; }
+  .depactions { flex-direction: column; align-items: stretch; }
+  .depactions .btn { width: 100%; }
+  .depamount { font-size: var(--d4); min-height: 60px; }
+}

@@ -385,3 +385,50 @@ a.m-stat:active{ transform:scale(.985) }
 
 .m-lede-head{ display:flex; gap:12px; align-items:flex-start }
 .m-lede-text{ min-width:0; flex:1 }
+
+/* ── Cash handed in: the one screen in this app that writes ────────────────
+   Every control is sized for a thumb in a basement car park, one-handed, with
+   the cash already counted. 44px is the floor for a touch target and 56px is
+   what the amount gets, because it is the field somebody re-reads before
+   pressing save and a mis-tap on a money form costs more than on any other. */
+.m-amount { width: 100%; box-sizing: border-box; min-height: 56px; padding: 10px 14px;
+  font: inherit; font-size: var(--d4); font-weight: 600; font-variant-numeric: tabular-nums;
+  color: var(--fg); background: var(--card); border: 1px solid var(--line);
+  border-radius: 12px; }
+.m-noteinput, .m-file { width: 100%; box-sizing: border-box; min-height: 44px;
+  padding: 10px 12px; font: inherit; font-size: var(--t8); color: var(--fg);
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.m-fieldnote { margin-top: 6px; font-size: var(--t5); line-height: 1.45; color: var(--muted); }
+.m-fieldnote.bad { color: var(--bad, #ff6b5e); font-weight: 500; }
+/* The search result list: full-width rows, because a name in a list of eight
+   is a target and not a link. */
+.m-picklist { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.m-pick { min-height: 44px; padding: 0 14px; text-align: left; font: inherit; font-size: var(--t8);
+  color: var(--fg); background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px; }
+.m-picked { display: flex; flex-direction: column; gap: 3px; margin-top: 8px;
+  padding: 10px 12px; border-radius: 10px; background: var(--sunken, rgba(127,127,127,.08)); }
+.m-picked span { font-size: var(--t5); color: var(--muted); line-height: 1.45; }
+.m-shot { display: block; margin-top: 10px; width: 100%; max-height: 200px;
+  object-fit: contain; border-radius: 10px; border: 1px solid var(--line); }
+/* The server's own sentence about the entry, quoted. */
+.m-sentence { margin: 10px 0; padding: 11px 13px; border-left: 3px solid var(--accent);
+  background: var(--sunken, rgba(127,127,127,.08)); border-radius: 0 10px 10px 0;
+  font-size: var(--t7); line-height: 1.5; }
+/* Full width and stacked: two buttons side by side at 390px are two half
+   targets, and the save is the one that must not be missed. */
+.m-btn { display: block; width: 100%; min-height: 48px; margin-top: 10px;
+  font: inherit; font-size: var(--t9); font-weight: 600; color: var(--fg);
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+.m-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.m-btn[disabled] { opacity: .45; }
+
+/* The supervisor picker on the deposit screen is a CONTROL, not a filter.
+   .m-chip is 30px tall, which is right for the channel chips it was written
+   for — a row of filters you brush past — and wrong for the one field that
+   attributes money to a person. Scoped to this screen rather than raised
+   globally, because making every chip in the app 44px would push the filter
+   rows down the fold on screens that are already tight. */
+.m-chips.m-supervisors { flex-wrap: wrap; overflow: visible; gap: 8px; }
+.m-chips.m-supervisors .m-chip { min-height: 44px; padding: 0 16px;
+  display: inline-flex; align-items: center; font-size: var(--t7); }

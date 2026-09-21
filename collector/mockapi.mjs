@@ -6684,6 +6684,81 @@ app.get('/api/economics/drivers', (_, r) => {
 
 // Anything not fixtured above answers with an empty list rather than a 404,
 // so a new page renders its own empty state instead of the view error box.
+/* ── the driver ledger ─────────────────────────────────────────────────────
+   Enough of it to render #deposits in a browser at both widths. The figures
+   are chosen to exercise the three states the page must tell apart, because a
+   fixture where everything is measurable proves only the easy half:
+
+     a person with a cash position and an exposure under the line
+     a person over the line
+     a person whose cash has never been stated, whose exposure is therefore
+       NOT a number — the case that must render a dash with a reason and never
+       a confident low percentage
+*/
+app.get('/api/ledger/exposure', (_, r) => r.json({
+  from: null, to: null,
+  policy: { pct: 35, effective_from: '2026-01-01', set_by: 'ahsan', note: 'opening policy' },
+  policy_absent_reason: null,
+  summary: { people: 3, measurable: 2, not_measurable: 1, over_policy: 1,
+    fleet_ratio: null,
+    fleet_ratio_reason: 'exposure is a per-person measure by instruction.' },
+  basis: 'both halves fold on one key',
+  people: [
+    { person_id: 1, name: 'Tariq Afzal Said Afzal', cash_rule: 'deposit_all',
+      accounts: 2, accounts_with_revenue: 2,
+      owes: { advance: 2500, deduction: 0, cash: 1000, cash_absent_reason: null,
+        total: 3500, total_absent_reason: null },
+      pay_book: -3500, earned: 10000, earned_absent_reason: null, earning_days: 21,
+      exposure_pct: 35, exposure_absent_reason: null, policy_pct: 35, over_policy: false,
+      verdict: 'within the 35% line', last_entry: '2026-09-15' },
+    { person_id: 2, name: 'Mohammed Selim Shafiqur Rahman', cash_rule: 'net_against_pay',
+      accounts: 1, accounts_with_revenue: 1,
+      owes: { advance: 2000, deduction: 300, cash: 500, cash_absent_reason: null,
+        total: 2800, total_absent_reason: null },
+      pay_book: 0, earned: 5000, earned_absent_reason: null, earning_days: 19,
+      exposure_pct: 56, exposure_absent_reason: null, policy_pct: 35, over_policy: true,
+      verdict: 'over the 35% line — an override is needed. Nothing is blocked: the approval '
+        + 'flow arrives with user management.', last_entry: '2026-09-18' },
+    { person_id: 3, name: 'Siyad Kallyanathoppil Paramba', cash_rule: null,
+      accounts: 1, accounts_with_revenue: 1,
+      owes: { advance: 2000, deduction: 0, cash: null,
+        cash_absent_reason: 'no opening cash position has been stated for this person and no '
+          + 'deposit has been recorded. It is not zero.',
+        total: null,
+        total_absent_reason: 'the cash component is unknown, and the policy counts cash the '
+          + 'driver holds inside the 35%.' },
+      pay_book: 0, earned: 8000, earned_absent_reason: null, earning_days: 20,
+      exposure_pct: null,
+      exposure_absent_reason: 'the cash component is unknown, and a figure without it would '
+        + 'understate exposure, which is the dangerous direction.',
+      policy_pct: 35, over_policy: null, verdict: 'not measurable', last_entry: '2026-09-12' },
+  ],
+}));
+
+app.post('/api/ledger/receipt', (_, r) => r.json({
+  sha256: 'c'.repeat(64), byte_len: 84210, content_type: 'image/jpeg',
+  expires_on: '2027-09-21', already_held: false, used_by_entries: 0,
+  note: 'stored. Attach it to an entry with receipt_sha.',
+}));
+
+app.post('/api/ledger/entry', (req, r) => {
+  const b = req.body || {};
+  const dry = b.dry_run !== false;
+  const amt = Number(b.amount) || 0;
+  return r.json({
+    ok: true, dry_run: dry, wrote: !dry,
+    note: dry ? 'Nothing was written.' : null,
+    entry: { id: dry ? null : 91, person_id: b.person_id, person_name: b.person_name,
+      type: b.type_code, label: 'Cash handed in', book: 'cash', amount: -amt,
+      magnitude: amt, direction: -1, settles_via: b.settles_via,
+      effective_on: b.effective_on, entered_by: b.entered_by, note: b.note },
+    balances: { before: { cash: 1000 }, after: { cash: 1000 - amt } },
+    sentence: `${b.entered_by} is recording cash handed in of AED ${amt.toFixed(2)} from `
+      + `${b.person_name}, effective ${b.effective_on}, cash. Their cash book moves from `
+      + `AED 1000.00 to AED ${(1000 - amt).toFixed(2)}.`,
+  });
+});
+
 app.get(/^\/api\//, (_, r) => r.json([]));
 app.use(express.static(join(__dir, 'api', 'public')));
 app.get('*', (_, r) => r.sendFile(join(__dir, 'api', 'public', 'index.html')));

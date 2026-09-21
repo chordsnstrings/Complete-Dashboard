@@ -11,8 +11,14 @@
    over by the first one's response arriving late.
 */
 import { state, q, qAll, qChan, api, href, windowLabel } from '../data.js';
-import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
+import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search, chips,
   skeleton, empty, failed, spark, bars, unwrap, cut, splitToday } from './ui.js';
+/* The deposit rules, shared with the desktop form rather than copied. A
+   validation living in two bundles is how the phone comes to refuse what the
+   desktop accepts — and the person standing next to the car with the cash in
+   their hand is the one who finds out. */
+import { compress, putReceipt, submitEntry, SUPERVISORS, aed, parseAmount }
+  from '../deposit_core.js';
 /* The one place a channel key becomes a word a person reads — and the one
    place an instant becomes a clock. Both shared with the desktop rather than
    copied, so 'fms' is "FMS telematics" on both screens and 13:00Z is 17:00 on
@@ -30,7 +36,7 @@ import { GREY } from '../onlinetime.js';
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
   { id: 'money', route: 'money', label: 'Money', ic: '◈',
-    owns: ['money', 'finance', 'receipts', 'platforms', 'payouts'] },
+    owns: ['money', 'finance', 'receipts', 'platforms', 'payouts', 'deposits'] },
   /* 'online-time' is a People page and has a phone screen of its own — the
      one screen here whose rows dial rather than drill, because chasing a
      driver who has not come online is done from the phone in your hand. */
@@ -88,6 +94,7 @@ export function titleFor(view, param) {
        product, and this screen is about the wire that reached the COMPANY's
        bank. The subtitle says whose money it is. */
     payouts: ['To the bank', 'Every transfer a platform made to the company'],
+    deposits: ['Cash handed in', 'Record a driver handing cash back'],
     identity: ['One person, two records', 'Records the roster proves are one driver'],
     compliance: ['Compliance', 'Built for a bigger screen'],
     demand: ['Demand', 'Built for a bigger screen'],
@@ -2112,6 +2119,8 @@ export const SCREENS = {
   today, money: moneyScreen, people, fleet, live, safety, unauthorized, sources, more,
   corporate, analyst, credentials, optimise, trips: tripsScreen, fallback,
   'online-time': onlineTime, payouts,
+  /* The one screen here that WRITES. See its own block comment. */
+  deposits,
   /* A driver or vehicle with no sub-page gets the phone screen; a sub-page
      (`#driver/x/earnings`) is a desktop tab and goes to the fallback, which
      renders the real module. Decided in render() rather than here, because a
@@ -2122,3 +2131,192 @@ export const SCREENS = {
   overview: today, drivers: people, vehicles: fleet, finance: moneyScreen,
   unit: moneyScreen, settlement: moneyScreen, revenue: moneyScreen,
 };
+
+/* ── cash handed in ─────────────────────────────────────────────────────
+   ═══════════════════════════════════════════════════════════════════════════
+   THE ONE SCREEN IN THIS APP THAT WRITES. Everything else here answers a
+   question; this records an event, and it is on the phone because that is
+   where the event happens — a supervisor takes notes from a driver at the car,
+   in a basement car park, one-handed.
+
+   So the order is the order of the handover and not the order of the data
+   model: who it came from, how much, a photograph, save. The supervisor names
+   themselves once and it sticks, because somebody working through five drivers
+   should not re-pick it five times — and re-picking per entry is how an audit
+   column fills with whoever was last in the list.
+
+   ── WHY IT IS NOT THE DESKTOP FORM NARROWED ──────────────────────────────
+   The desktop screen is a worklist with a form beside it: who is carrying the
+   most, what is already recorded, and the next receipt off the pile. Here
+   there is no pile. There is one driver in front of you, and the only list
+   that matters is the one you are searching to find them. Same rules, from
+   ../deposit_core.js; different question.
+
+   ── AND THE CAMERA IS IN THE FLOW, NOT BESIDE IT ─────────────────────────
+   `capture="environment"` opens the rear camera directly rather than a file
+   picker. The compressor then runs on this device: api/server.js is a 512MB
+   instance serving every page in the product, and decoding a twelve-megapixel
+   image there to resize it is how it dies. It also means the bytes crossing a
+   car-park connection are the compressed ones, which is the difference between
+   a save that completes and one that times out with the cash already handed
+   over. */
+let PHONE_SUP = null;
+
+async function deposits(deck, ctx) {
+  skeleton(deck, 3);
+  const d = await qAll('/api/ledger/exposure').catch(() => null);
+  if (!ctx.alive()) return;
+  deck.innerHTML = '';
+  if (!d) { failed(deck, new Error('The ledger could not be read.')); return; }
+
+  const people = (d.people || []).filter((p) => p.name);
+
+  /* ── who is recording, once ─────────────────────────────────────────── */
+  const whoCard = card('Recorded by', 'until user accounts exist this name, an address and a '
+    + 'timestamp are what make an entry traceable');
+  const supChips = chips(whoCard.body,
+    SUPERVISORS.map((x) => ({ id: x, label: x[0].toUpperCase() + x.slice(1) })),
+    PHONE_SUP, (id) => {
+      PHONE_SUP = id;
+      [...whoCard.body.querySelectorAll('.m-chip')].forEach((c) => c.classList.toggle('on',
+        c.textContent.toLowerCase() === id));
+      state1.textContent = '';
+    });
+  /* Marks these as controls rather than filters — see m.css. */
+  supChips.classList.add('m-supervisors');
+  deck.append(whoCard.card);
+
+  /* ── who it came from ───────────────────────────────────────────────── */
+  const fromCard = card('From', 'a driver, picked — never a typed name');
+  let chosen = null;
+  const hits = el('div', 'm-picklist');
+  const chosenLine = el('div', 'm-picked');
+  chosenLine.style.display = 'none';
+  const input = search(fromCard.body, 'Search a driver…', (term) => {
+    hits.innerHTML = '';
+    if (!term || term.length < 2) return;
+    const t = term.toLowerCase();
+    people.filter((p) => p.name.toLowerCase().includes(t)).slice(0, 8).forEach((p) => {
+      const b = el('button', 'm-pick', esc(p.name));
+      b.type = 'button';
+      b.onclick = () => {
+        chosen = p;
+        hits.innerHTML = ''; input.value = '';
+        chosenLine.style.display = '';
+        chosenLine.innerHTML = `<strong>${esc(p.name)}</strong><span>${p.accounts} account`
+          + `${p.accounts === 1 ? '' : 's'} · a deposit reduces what they hold whichever one it `
+          + 'is entered against</span>';
+        say('');
+      };
+      hits.append(b);
+    });
+  });
+  fromCard.body.append(hits, chosenLine);
+  deck.append(fromCard.card);
+
+  /* ── how much ───────────────────────────────────────────────────────── */
+  const amtCard = card('Amount handed in', null);
+  const amt = el('input', 'm-amount');
+  amt.type = 'text'; amt.inputMode = 'decimal'; amt.placeholder = '0.00';
+  const amtEcho = el('div', 'm-fieldnote');
+  amt.oninput = () => {
+    const v = parseAmount(amt.value);
+    amtEcho.textContent = v == null
+      ? (amt.value.trim() ? 'digits, and at most two decimals' : '')
+      : aed(v);
+    amtEcho.classList.toggle('bad', v == null && !!amt.value.trim());
+    say('');
+  };
+  amtCard.body.append(amt, amtEcho);
+  deck.append(amtCard.card);
+
+  /* ── the proof ──────────────────────────────────────────────────────── */
+  const picCard = card('Photograph of the receipt', 'compressed on this phone before it is sent');
+  const pic = el('input', 'm-file');
+  pic.type = 'file'; pic.accept = 'image/*'; pic.setAttribute('capture', 'environment');
+  const picNote = el('div', 'm-fieldnote');
+  const prev = el('img', 'm-shot'); prev.style.display = 'none';
+  let shot = null; let sha = null;
+  pic.onchange = async () => {
+    shot = null; sha = null; prev.style.display = 'none'; say('');
+    const f = pic.files && pic.files[0];
+    if (!f) { picNote.textContent = ''; return; }
+    picNote.textContent = 'Compressing…'; picNote.classList.remove('bad');
+    const out = await compress(f);
+    if (out.error) { picNote.textContent = out.error; picNote.classList.add('bad'); return; }
+    shot = out;
+    const kb = (v) => `${Math.round(v / 1024)}KB`;
+    picNote.textContent = `${kb(out.from)} → ${kb(out.bytes)}`;
+    prev.src = URL.createObjectURL(out.blob); prev.style.display = '';
+  };
+  picCard.body.append(pic, picNote, prev);
+  deck.append(picCard.card);
+
+  /* ── the note, and the save ─────────────────────────────────────────── */
+  const endCard = card('Note', null);
+  const noteIn = el('input', 'm-noteinput');
+  noteIn.type = 'text'; noteIn.placeholder = 'What a reader a year from now would need';
+  noteIn.oninput = () => say('');
+  const state1 = el('div', 'm-fieldnote');
+  const sentence = el('div', 'm-sentence'); sentence.style.display = 'none';
+  const check = el('button', 'm-btn', 'Check it');
+  const save = el('button', 'm-btn primary', 'Record the deposit');
+  check.type = 'button'; save.type = 'button'; save.disabled = true;
+  endCard.body.append(noteIn, state1, sentence, check, save);
+  deck.append(endCard.card);
+
+  function say(text, bad = false) {
+    state1.textContent = text;
+    state1.classList.toggle('bad', bad);
+    if (!text) { sentence.style.display = 'none'; save.disabled = true; }
+  }
+  const missing = () => {
+    if (!PHONE_SUP) return 'Say who is recording this.';
+    if (!chosen) return 'Pick the driver it came from.';
+    if (parseAmount(amt.value) == null) return 'Enter the amount handed in.';
+    if (!shot) return 'Take a photograph of the receipt.';
+    if (noteIn.value.trim().length < 3) return 'Write a note.';
+    return null;
+  };
+  const payload = () => ({
+    person_id: chosen.person_id, person_name: chosen.name,
+    type_code: 'cash_deposit', amount: parseAmount(amt.value), settles_via: 'cash',
+    effective_on: dubaiDay(), entered_by: PHONE_SUP,
+    note: noteIn.value.trim(), receipt_sha: sha,
+  });
+
+  check.onclick = async () => {
+    const bad = missing();
+    if (bad) { say(bad, true); return; }
+    say('Checking…');
+    if (!sha) {
+      const up = await putReceipt(shot.blob, PHONE_SUP);
+      if (up.error) { say(up.error, true); return; }
+      sha = up.sha256;
+    }
+    const out = await submitEntry(payload());
+    if (out.error) { say(out.error, true); return; }
+    /* THE SERVER'S SENTENCE, verbatim. api/ledger_routes.js assembles it so
+       this screen and the desktop form cannot describe one entry differently;
+       composing a second one here would put that back. */
+    sentence.textContent = out.sentence;
+    sentence.style.display = '';
+    state1.textContent = 'Nothing is recorded yet.';
+    state1.classList.remove('bad');
+    save.disabled = false;
+  };
+
+  save.onclick = async () => {
+    save.disabled = true;
+    const out = await submitEntry(payload(), { commit: true });
+    if (out.error) { say(out.error, true); save.disabled = false; return; }
+    sentence.textContent = out.sentence;
+    sentence.style.display = '';
+    state1.textContent = 'Recorded.';
+    state1.classList.remove('bad');
+    amt.value = ''; amtEcho.textContent = ''; noteIn.value = '';
+    pic.value = ''; picNote.textContent = ''; prev.style.display = 'none';
+    shot = null; sha = null; chosen = null;
+    chosenLine.style.display = 'none';
+  };
+}
