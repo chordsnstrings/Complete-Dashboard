@@ -182,6 +182,42 @@ check('an unasked duration reaches back to the oldest row, not a silent slice',
 check('and a narrow one drops a person whose only rows fall outside it, correctly',
   !nby['Stale Figure'] && Object.keys(nby).length === 2, JSON.stringify(Object.keys(nby)));
 
+/* ── THE BOUND THAT WAS STATED AND NOT APPLIED ──────────────────────────
+   Shipped wrong on 2026-09-21: `to` was parsed, echoed back in the response,
+   and never bound into a query — every statement still read asOf. A request
+   for 2026-08-01..2026-08-21 answered "to": "2026-08-21" over data running to
+   today, and the only visible symptom was a driver reporting 51 days_worked
+   inside a 21-day window.
+
+   The earlier assertions could not catch it because they all left the upper
+   bound open. These close it, and the days_worked check is the one that bites:
+   an ignored bound shows up as more days than the window contains, which is
+   the same tell that exposed it on production. */
+const cap = (await get('/api/ledger/cash-position?from=2026-09-01&to=2026-09-02')).body;
+const cby = Object.fromEntries((cap.people || []).map((p) => [p.driver_name, p]));
+check('an upper bound is APPLIED, not merely echoed',
+  cby['Balance Holder']?.days_worked === 2, String(cby['Balance Holder']?.days_worked));
+check('and the accumulation stops at it — 1200 + 500, not the later 900',
+  cby['Balance Holder']?.cash_held_accumulated === 1700,
+  String(cby['Balance Holder']?.cash_held_accumulated));
+check('the latest daily figure inside the window is the one in the window',
+  cby['Balance Holder']?.unremitted === 500 && cby['Balance Holder']?.unremitted_on === '2026-09-02',
+  JSON.stringify([cby['Balance Holder']?.unremitted, cby['Balance Holder']?.unremitted_on]));
+check('a person whose only rows fall after the bound is absent from it',
+  !cby['Stale Figure'], Object.keys(cby).join(','));
+check('the response echoes the bound it actually used',
+  cap.to === '2026-09-02', String(cap.to));
+/* as_of shipped first and must keep working as an alias for the same bound. */
+const al = (await get('/api/ledger/cash-position?from=2026-09-01&as_of=2026-09-02')).body;
+check('as_of still names the same bound as to',
+  Object.fromEntries((al.people || []).map((p) => [p.driver_name, p]))['Balance Holder']
+    ?.days_worked === 2);
+/* And the per-person series must honour it too — it took the same parameter. */
+const cs = (await get('/api/ledger/cash-position?person=balance%20holder&to=2026-09-02')).body;
+check('the day-by-day series honours the bound as well',
+  (cs.days || []).length === 2 && cs.days[0].day === '2026-09-02',
+  JSON.stringify((cs.days || []).map((d) => d.day)));
+
 /* ── the per-person series, which is what settles balance-vs-daily-flow ──
    The aggregate cannot distinguish a balance that climbs and drops from a
    quantity that stands alone each day; only consecutive days can. */

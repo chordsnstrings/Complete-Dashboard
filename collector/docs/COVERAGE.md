@@ -827,6 +827,25 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A WINDOW PARAMETER THAT IS PARSED AND ECHOED BUT NEVER BOUND.** Shipped
+  2026-09-21 in `/api/ledger/cash-position` and caught by the first production
+  measurement of it, minutes later. `to` was read from the query, returned in
+  the response body, and never passed to a single statement — every query still
+  bound `asOf`. A request for `from=2026-08-01&to=2026-08-21` answered
+  `"to": "2026-08-21"` over data running to **today**.
+
+  Nothing in the numbers looked wrong. The only tell was a driver reporting
+  **51 `days_worked` inside a 21-day window** — and that column existed only
+  because the operator had asked for a rate denominator, not as a guard.
+
+  This is worse than a wrong figure: it is a wrong figure under a caption
+  asserting it is right, which is the one thing `CLAUDE.md` says the product
+  exists to prevent. **Echoing a parameter back is not evidence it was used** —
+  the echo is exactly what made it look correct. Any route taking a window
+  needs an assertion that the window NARROWS something, not merely that it is
+  reflected: the four assertions that now cover it all left the upper bound
+  open before, which is why none of them saw it.
+
 * **`driver_statement_day.unremitted` IS NOT A BALANCE, AND THERE IS NO CASH
   POSITION IN THIS DATABASE FOR ANYBODY.** `sql/schema_v25.sql:14` calls it a
   "still-unremitted balance". Measured on production 2026-09-21, the first time

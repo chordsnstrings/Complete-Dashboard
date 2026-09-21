@@ -100,6 +100,18 @@ export function ledgerRoutes(app, { q, wrap }) {
     const dstr = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim())
       ? String(v).trim() : null);
     const from = dstr(req.query.from);
+    /* THE UPPER BOUND, and it is `to` — not `asOf`.
+       SHIPPED WRONG ON 2026-09-21 AND CAUGHT BY THE FIRST PRODUCTION
+       MEASUREMENT. `to` was parsed, echoed back in the response, and never
+       bound into a query: every statement still read `coalesce($1::date, …)`
+       with asOf. A request for 2026-08-01..2026-08-21 answered
+       `"to": "2026-08-21"` over data running to TODAY, and the giveaway was a
+       driver reporting 51 days_worked inside a 21-day window.
+
+       A window that is stated and not applied is the defect this product
+       exists to prevent: the figure is not merely wrong, it is wrong under a
+       caption asserting it is right. `as_of` is kept as an alias so the
+       parameter that shipped first keeps working. */
     const to = dstr(req.query.to) || asOf;
 
     /* What the table holds per source, before any per-person question. This is
@@ -126,7 +138,7 @@ export function ledgerRoutes(app, { q, wrap }) {
          FROM driver_statement_day
         WHERE day <= coalesce($1::date, (now() AT TIME ZONE 'Asia/Dubai')::date)
         GROUP BY source
-        ORDER BY source`, [asOf]);
+        ORDER BY source`, [to]);
 
     const people = await q(
       `WITH live AS (
@@ -178,7 +190,7 @@ export function ledgerRoutes(app, { q, wrap }) {
                 AS unremitted_age_days
          FROM agg a LEFT JOIN latest l USING (name_key, fleet_id)
         ORDER BY (l.unremitted IS NULL), l.unremitted DESC NULLS LAST, a.driver_name`,
-      [asOf, from]);
+      [to, from]);
 
     /* ?person=<name_key> — the day-by-day series for one person, which is the
        only thing that settles what this column IS.
@@ -204,7 +216,7 @@ export function ledgerRoutes(app, { q, wrap }) {
            FROM driver_statement_day
           WHERE NOT pseudo AND name_key = $1
             AND day <= coalesce($2::date, (now() AT TIME ZONE 'Asia/Dubai')::date)
-          ORDER BY day DESC LIMIT 60`, [who, asOf]);
+          ORDER BY day DESC LIMIT 60`, [who, to]);
       return res.json({
         person: who,
         as_of: asOf,
@@ -272,6 +284,7 @@ export function ledgerRoutes(app, { q, wrap }) {
     res.json({
       as_of: asOf,
       from,
+      /* The bound the queries were actually given. */
       to,
       /* Said in words at the top, because this is the number the advance
          ledger will lean on and the first question about it is always "for how
