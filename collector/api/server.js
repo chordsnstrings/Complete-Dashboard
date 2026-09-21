@@ -62,6 +62,7 @@ import { compareRoutes } from './compare_routes.js';
 import { performanceRoutes } from './performance_routes.js';
 import { statusRoutes } from './status_routes.js';
 import { samePersonRoutes } from './sameperson_routes.js';
+import { ledgerRoutes } from './ledger_routes.js';
 import { probeRoutes } from './probe.js';
 import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
 /* The one place that decides what a reader with no credential may see of a
@@ -5755,6 +5756,10 @@ analystRoutes(app, { q, wrap, range });
    Four providers' idea of a driver's standing, held together and joined
    against what that person actually drove. */
 rosterRoutes(app, { q, wrap, range });
+/* The operator's own cash ledger, which nothing has ever read: unremitted is
+   written on every statement import and served to no page. The advance ledger
+   needs a cash POSITION and this is the only source that holds one. */
+ledgerRoutes(app, { q, wrap });
 
 /* ───────────────── one day ─────────────────
    Every source that saw a given Dubai-local day, including whether each one
