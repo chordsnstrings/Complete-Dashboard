@@ -1704,3 +1704,38 @@ If that cap ever gains a paging shape, these totals move with it.
 Nothing is proven until `#compliance` has been opened on production with
 `&_=$RANDOM`, the headline read as a count of people, and a conflicting pair
 screenshotted.
+
+---
+
+## PROVEN ON PRODUCTION — 21 September 2026, deployment `b35b76ab`, commit `f9bdd18`
+
+Everything in the two batches above was `written`. This is the production pass
+that moves them, taken after the deployment's OWN id polled to `ACTIVE` — not
+`deployments[0]`, which reads `ACTIVE` for an auto-rollback and has produced a
+false "deployed" claim in this repo before. Both services report `f9bdd18`.
+
+| claim | how it was checked | result |
+|---|---|---|
+| compliance counts people, not records | `GET /api/compliance/drivers` | `people` 267 over `drivers` 437; `person_basis: spine`; `unplaced_accounts: 0` |
+| …and says so on the page | `#compliance` screenshotted at 1440 | "The driver figure counts 267 people, not 437 platform records — one person can hold several." |
+| a person address resolves | `GET /api/driver/profile?person=202` | `resolved_by: person_id`, six accounts over bolt ×2 / hotel / uber / yango ×2 |
+| an account address reaches the same page | `?id=6616272` | `resolved_by: ext_id` → person 202 |
+| a bad person address refuses correctly | `?person=not-a-person` | **HTTP 400**, not 404 |
+| the address rewrites in the bar | `#driver/6616272` in Chromium | → `#driver/p202`, card shows `PERSON p202 the stable address` |
+| **the Activity tab renders** | `#driver/p202/activity` | renders; `0610eac` fixed the `prof` ReferenceError `4325c67` introduced |
+| the spine folds on confirm | `/api/same-person?counts=1` | 407 → 349 → **347** across two collector passes; `pending: 0` |
+| the identity surfaces agree | directory / ledger / same-person | **347 / 347 / 347** |
+
+**A METHOD NOTE, because it nearly produced a false pass.** The first browser
+check asserted `!/Could not load this view/` and slept 9s. It went green on a
+page still showing "Loading…" — an assertion that cannot fail on a blank page is
+not evidence. Re-run waiting on the content selector (`.idfacts`, `#view .tabs`,
+`[data-panel]`) and asserting the text the page exists to show. Prefer a
+`waitForSelector` on real content over any fixed sleep; the first paint after a
+deployment is a cold container and is slower than any timeout you will guess.
+
+**STILL NOT PROVEN:** a conflicting pair has not been screenshotted on the
+person it belongs to — only the count (2) has been read, from the tile and from
+`people_totals.with_conflicts`. And `with_conflicts` is a floor, not a total:
+`licence_no` and `emirates_id` are withheld from an anonymous GET, so a
+number-level conflict cannot be seen from outside and the real figure is ≥ 2.
