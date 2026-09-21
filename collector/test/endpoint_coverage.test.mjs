@@ -77,6 +77,13 @@ const EXEMPT = {
     + 'one; whether it is populated decides the whole cash design, and that question has to be '
     + 'answered on production before a page is built against the answer. Deliberately not wired '
     + 'to a view yet for that reason.',
+  /* DELETE WHEN THE ENTRY SCREENS LAND — the last check in this file turns the
+     suite red the moment a page calls it, so this cannot outlive its reason. */
+  '/api/ledger/entry': 'the ledger write path, built before the screens that will call it so '
+    + 'they have something proved to build against. It defaults to a DRY RUN: the real '
+    + 'statements execute against the real constraints inside a transaction that is then '
+    + 'rolled back, which is what lets CLAUDE.md\'s "every modal filled" verification run on '
+    + 'production without leaving permanent debt against a real named person.',
   '/api/health': 'liveness probe for the platform, not for people',
   '/api/import/statement-days': 'operator tool: batched import of the daily ledger — driven by '
     + 'bin/import-ledger.mjs, not by a page',

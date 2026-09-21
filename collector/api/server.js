@@ -7,6 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { pool, migrate } from '../src/db.js';
 import { config } from '../src/config.js';
+import { pgTx } from './tx.js';
 import { describeSettings, setSetting, deleteSetting, loadSettings, recordCredentialVisibility } from '../src/settings.js';
 import { recognise, unrecognised } from '../src/credkit.js';
 import { checkAll } from '../src/credcheck.js';
@@ -62,7 +63,7 @@ import { compareRoutes } from './compare_routes.js';
 import { performanceRoutes } from './performance_routes.js';
 import { statusRoutes } from './status_routes.js';
 import { samePersonRoutes } from './sameperson_routes.js';
-import { ledgerRoutes } from './ledger_routes.js';
+import { ledgerRoutes, ledgerWriteRoutes } from './ledger_routes.js';
 import { probeRoutes } from './probe.js';
 import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
 /* The one place that decides what a reader with no credential may see of a
@@ -5780,6 +5781,11 @@ rosterRoutes(app, { q, wrap, range });
    written on every statement import and served to no page. The advance ledger
    needs a cash POSITION and this is the only source that holds one. */
 ledgerRoutes(app, { q, wrap });
+/* The write path. Its own mount because it takes a transaction runner nothing
+   else in this API has needed: resolving a person, inserting the entry and
+   inserting the audit row are three statements that must land together or not
+   at all, and the dry run is that same transaction rolled back. */
+ledgerWriteRoutes(app, { wrap, tx: pgTx(pool) });
 
 /* ───────────────── one day ─────────────────
    Every source that saw a given Dubai-local day, including whether each one

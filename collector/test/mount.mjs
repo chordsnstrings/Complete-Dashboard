@@ -14,6 +14,7 @@
    route modules ARE importable, so they are discovered and mounted rather than
    listed; a module nobody adds to a list is a module nothing executes. */
 import express from 'express';
+import { pgliteTx } from '../api/tx.js';
 import { readFileSync, readdirSync } from 'node:fs';
 /* dubaiSpanSql is in this list because the mounted slice now uses it: the map
    and track endpoints bind a raw timestamptz, and an identifier the slice
@@ -174,7 +175,13 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
     mountSource(src.slice(a, b));
   }
 
-  const deps = { q, wrap, range, endOfDay, F, FB, W, DAYWIN, CANON, win, winDays, rollupGrainSql };
+  /* The transaction runner the write routes take. PGlite has real
+     transactions and rolls back when the callback throws, so the harness
+     exercises the SAME contract the pool-backed one implements rather than a
+     stub — which matters because the dry run IS a rollback, and a stubbed one
+     would prove nothing about whether the constraints fire. */
+  const tx = pgliteTx(db);
+  const deps = { q, wrap, range, endOfDay, F, FB, W, DAYWIN, CANON, win, winDays, rollupGrainSql, tx };
   const mounted = [];
   for (const f of readdirSync('api').filter((x) => x.endsWith('_routes.js'))) {
     const mod = await import(`../api/${f}`);

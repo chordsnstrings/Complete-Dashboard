@@ -79,9 +79,18 @@
    filed a position for this person" and "this person is holding nothing" are
    different facts and only one of them is safe to lend against. */
 
+import { resolvePerson } from './ledger_person.js';
+
 const round2 = (v) => (v == null ? null : Math.round(Number(v) * 100) / 100);
 
-export function ledgerRoutes(app, { q, wrap }) {
+/* WHO MAY RECORD MONEY, until ULM exists.
+   A fixed list and not free text, because `requested_by` elsewhere in this
+   codebase already proved what free text does to an audit column: one person
+   becomes three spellings and the column stops answering "who". Stored as a
+   code so the ULM actor id can point at it later without rewriting history. */
+export const SUPERVISORS = Object.freeze(['ahsan', 'haseeb', 'hossam', 'shohaib']);
+
+export function ledgerRoutes(app, { q, wrap, tx }) {
   /* GET /api/ledger/cash-position?as_of=YYYY-MM-DD
      The as-of day defaults to today in Dubai, this fleet's calendar
      everywhere. A position has an "as at" and nothing else — a from/to window
@@ -319,5 +328,222 @@ export function ledgerRoutes(app, { q, wrap }) {
         + 'a normalised driver NAME plus fleet, which is a different person fold from the one '
         + 'the driver pages use. Reported under the ledger\'s key and not reconciled here.',
     });
+  }));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   THE WRITE PATH.
+   ───────────────────────────────────────────────────────────────────────── */
+export function ledgerWriteRoutes(app, { wrap, tx }) {
+  /* POST /api/ledger/entry
+     ─────────────────────────────────────────────────────────────────────
+     DRY RUN IS THE DEFAULT. A caller must send `dry_run: false` to write. The
+     credential paste at /api/settings/paste takes the same posture and for the
+     same reason: the expensive mistake here is writing something nobody meant
+     to write, and a mis-wired client that forgets the flag previews instead of
+     recording a debt against a real person.
+
+     THE CALLER SENDS A MAGNITUDE, NEVER A SIGN. sql/schema_v78.sql ties the
+     sign of `amount` to the type's own direction through a composite foreign
+     key, so a row entered the wrong way round is impossible — but only if the
+     sign is decided by the type. Letting a client send one would reintroduce
+     the whole class of error at the boundary: a repayment sent as +3000 would
+     be refused with a constraint violation rather than simply recorded
+     correctly. The server multiplies by the registry's direction, and a
+     negative amount in the request is refused by name rather than negated,
+     because somebody sending one has misunderstood something. */
+  app.post('/api/ledger/entry', wrap(async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const b = (req.body && typeof req.body === 'object') ? req.body : {};
+    const dryRun = b.dry_run !== false;
+    const refusals = [];
+    const refuse = (why) => refusals.push(why);
+
+    const by = String(b.entered_by || '').trim().toLowerCase();
+    if (!SUPERVISORS.includes(by)) {
+      refuse(`"${b.entered_by || '(none)'}" is not one of the people who may record money. `
+        + `They are ${SUPERVISORS.join(', ')}. This is attribution and not authentication — `
+        + 'until ULM exists, anybody who can reach this URL can write here, and the name, IP '
+        + 'and timestamp are what make an entry traceable afterwards.');
+    }
+
+    const typeCode = String(b.type_code || '').trim();
+    const amount = Number(b.amount);
+    if (!Number.isFinite(amount)) refuse('amount must be a number');
+    else if (amount <= 0) {
+      refuse(`amount is ${amount} and must be a positive magnitude. The direction comes from `
+        + 'the type, not from the sign you send — a repayment is entered as a positive number '
+        + 'of a repayment type, and the server applies the sign. A negative amount here means '
+        + 'something has been misunderstood, so it is refused rather than quietly negated.');
+    }
+
+    const day = String(b.effective_on || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      refuse('effective_on must be a YYYY-MM-DD date — the day the money moved, in Dubai, '
+        + 'which is not necessarily the day this is being typed');
+    }
+    const ps = b.period_start ? String(b.period_start).trim() : null;
+    const pe = b.period_end ? String(b.period_end).trim() : null;
+    if ((ps && !pe) || (pe && !ps)) refuse('a period needs both a start and an end, or neither');
+    if (ps && pe && ps > pe) refuse(`the period ends (${pe}) before it starts (${ps})`);
+
+    const note = String(b.note || '').trim();
+    if (note.length < 3) {
+      refuse('a note is required, and it is the sentence a page prints beside this entry. '
+        + 'It is what makes the row arguable by somebody who was not here when it was made.');
+    }
+
+    if (refusals.length) {
+      return res.status(400).json({ ok: false, dry_run: dryRun, refused: refusals });
+    }
+
+    try {
+      const out = await tx(async (tq) => {
+        const [type] = await tq(
+          `SELECT code, book, label, direction, needs_proof, active
+             FROM ledger_type WHERE code = $1`, [typeCode]);
+        if (!type) {
+          const all = await tq(`SELECT code FROM ledger_type WHERE active ORDER BY sort`);
+          return { refused: [`"${typeCode || '(none)'}" is not a type this ledger holds. `
+            + `The active ones are ${all.map((t) => t.code).join(', ')}.`] };
+        }
+        if (!type.active) {
+          return { refused: [`"${typeCode}" is no longer in use. It is kept so the entries `
+            + 'already made against it still read, but new ones are not accepted.'] };
+        }
+        if (type.needs_proof && !b.receipt_sha && b.entry_source !== 'import') {
+          return { refused: [`${type.label} requires a photograph of the proof. Types exempt `
+            + 'from one are the ones that cannot have it — an opening balance carried in from a '
+            + 'spreadsheet, a period figure read off a statement, a decision such as a write-off '
+            + 'or a waiver. Money or goods changing hands is not one of those.'] };
+        }
+
+        /* THE PERSON, resolved once and recorded with the evidence. Inside the
+           transaction, so a dry run's minted person is rolled back with
+           everything else and a real refusal leaves nobody behind. */
+        let personId = Number(b.person_id) || null;
+        let resolvedFrom = 'person_id';
+        let personName = String(b.person_name || '').trim() || null;
+        if (!personId) {
+          const r = await resolvePerson(tq, {
+            platform: b.platform, extId: b.ext_id, name: b.person_name, by,
+          });
+          if (r.refused) return { refused: [r.why] };
+          personId = r.person_id; resolvedFrom = r.resolved_from;
+        }
+        const [person] = await tq(`SELECT id, full_name FROM driver WHERE id = $1`, [personId]);
+        if (!person) return { refused: [`no person with id ${personId}`] };
+        personName = personName || person.full_name;
+        if (!personName) {
+          return { refused: ['this entry has no name for the person it is against, and a row '
+            + 'that cannot be read back to a human being is not an audit trail'] };
+        }
+
+        /* Balances BEFORE, per book, excluding verification rows by
+           construction rather than by a WHERE somebody has to remember. */
+        const bookRows = await tq(
+          `SELECT book, round(sum(amount)::numeric, 2) AS bal
+             FROM driver_ledger
+            WHERE person_id = $1 AND entry_source <> 'verification'
+            GROUP BY book`, [personId]);
+        const before = Object.fromEntries(bookRows.map((r) => [r.book, Number(r.bal)]));
+
+        /* A DUPLICATE IS WARNED ABOUT, NOT REFUSED. Two supervisors logging one
+           handover is the commonest real error, and refusing outright would
+           also refuse the genuine case of a driver taking the same amount twice
+           in a day. */
+        const [dupe] = await tq(
+          `SELECT id, entered_by, to_char(entered_at, 'YYYY-MM-DD HH24:MI') AS at
+             FROM driver_ledger
+            WHERE person_id = $1 AND type_code = $2 AND abs(amount) = $3
+              AND effective_on = $4::date AND entry_source <> 'verification'
+            ORDER BY id DESC LIMIT 1`, [personId, type.code, amount, day]);
+        if (dupe && b.allow_duplicate !== true) {
+          return { refused: [`${personName} already has a ${type.label} of ${amount} on ${day}, `
+            + `entered by ${dupe.entered_by} at ${dupe.at} (entry ${dupe.id}). If this is a `
+            + 'second, genuine one, send allow_duplicate: true. Two people logging one handover '
+            + 'is the commonest way this ledger goes wrong.'] };
+        }
+
+        const signed = amount * type.direction;
+        const [row] = await tq(
+          `INSERT INTO driver_ledger
+             (person_id, person_name, resolved_from, acct_platform, acct_ext_id,
+              type_code, direction, book, amount, settles_via, effective_on,
+              period_start, period_end, entered_by, entered_ip, note, source_ref,
+              entry_source, reverses_id, receipt_sha)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::date,$12::date,$13::date,
+                   $14,$15,$16,$17,$18,$19,$20)
+           RETURNING id, to_char(entered_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS entered_at`,
+          [personId, personName, resolvedFrom, b.platform || null, b.ext_id || null,
+            type.code, type.direction, type.book, signed, b.settles_via || null, day,
+            ps, pe, by, req.ip || null, note, b.source_ref || null,
+            b.entry_source || 'manual', b.reverses_id || null, b.receipt_sha || null]);
+
+        const afterRows = await tq(
+          `SELECT book, round(sum(amount)::numeric, 2) AS bal
+             FROM driver_ledger
+            WHERE person_id = $1 AND entry_source <> 'verification'
+            GROUP BY book`, [personId]);
+        const after = Object.fromEntries(afterRows.map((r) => [r.book, Number(r.bal)]));
+
+        await tq(
+          `INSERT INTO driver_ledger_audit (actor, ip, action, outcome, why, entry_id, person_id, payload)
+           VALUES ($1,$2,$3,'accepted',$4,$5,$6,$7::jsonb)`,
+          [by, req.ip || null, dryRun ? 'dry_run' : 'insert',
+            dryRun ? 'previewed and rolled back' : null,
+            dryRun ? null : row.id, personId, JSON.stringify({
+              type: type.code, amount, effective_on: day, settles_via: b.settles_via || null })]);
+
+        return {
+          entry: {
+            id: dryRun ? null : row.id,
+            person_id: personId, person_name: personName, resolved_from: resolvedFrom,
+            type: type.code, label: type.label, book: type.book,
+            amount: round2(signed), magnitude: amount, direction: type.direction,
+            settles_via: b.settles_via || null, effective_on: day,
+            period_start: ps, period_end: pe,
+            entered_by: by, entered_at: dryRun ? null : row.entered_at, note,
+            entry_source: b.entry_source || 'manual',
+          },
+          balances: { before, after },
+          /* THE SENTENCE A SCREEN PRINTS BEFORE SAVING, assembled here rather
+             than in the front end so the desktop and the phone cannot say two
+             different things about the same entry. */
+          sentence: `${by} is recording ${type.label.toLowerCase()} of AED ${amount.toFixed(2)} `
+            + `${type.direction > 0 ? 'to' : 'from'} ${personName}, effective ${day}`
+            + `${b.settles_via ? `, ${String(b.settles_via).replace(/_/g, ' ')}` : ''}. `
+            + `Their ${type.book} book moves from AED ${(before[type.book] || 0).toFixed(2)} to `
+            + `AED ${(after[type.book] || 0).toFixed(2)}.`,
+        };
+      }, { rollback: dryRun });
+
+      if (out?.refused) return res.status(400).json({ ok: false, dry_run: dryRun, refused: out.refused });
+      return res.json({
+        ok: true,
+        dry_run: dryRun,
+        /* Said out loud on every preview, because a screen that does not
+           distinguish the two will eventually let somebody believe they saved
+           something they did not. */
+        wrote: dryRun ? false : true,
+        note: dryRun
+          ? 'Nothing was written. Every statement below ran against the real constraints inside '
+            + 'a transaction that was then rolled back, so this is what WOULD have happened — '
+            + 'send dry_run: false to record it.'
+          : null,
+        ...out,
+      });
+    } catch (e) {
+      /* A constraint refusal is not an internal error: it is the database
+         telling the operator the row is wrong, and it must reach them. */
+      const msg = String(e?.message || e);
+      const constraint = e?.constraint || null;
+      return res.status(400).json({
+        ok: false, dry_run: dryRun,
+        refused: [constraint
+          ? `the database refused this row on ${constraint}. ${msg}`
+          : msg],
+      });
+    }
   }));
 }
