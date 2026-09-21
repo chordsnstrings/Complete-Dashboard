@@ -1656,3 +1656,51 @@ account and the page rewrites the address on arrival. Held by an assertion in
 **NOT YET PROVEN.** Everything above is `written`. Nothing is proven until
 `#driver/p<id>` has been opened on production, an account link watched to
 rewrite itself, and an unplaced account's page screenshotted with its reason.
+
+---
+
+## Batch — #compliance counted accounts and called them drivers
+
+2026-09-21. The last surface still answering "how many drivers" with a count of
+`driver_compliance` ROWS. Measured on production the same day: **437 rows over
+810 accounts belonging to ~349 people**, under the banner *"140 drivers cannot
+legally work — the licence has expired"* — which is the single most
+consequential sentence this product prints. A man with a hotel record and an
+Uber record was two of that 140.
+
+| # | what | fix | state |
+|---|---|---|---|
+| — | the response is grouped by person | `/api/compliance/drivers` returns `people`, one row per human carrying every account's documents within it, beside the unchanged `drivers` (accounts) | written, **proven by revert** (15 assertions red) |
+| — | a person is headed by their SOONEST expiry | `soonest_account` names the record it came from, so "expired 247 days ago" has somewhere to act on | written |
+| — | two accounts of one person that disagree | `conflicts[]` names the field, the count of distinct values and the accounts — **never the values**; compared server-side on the unredacted rows | written, **proven by revert** (3 assertions red) |
+| — | a person whose licence cannot be checked | `licence_status: 'unknown'` with one of three true reasons — all defaulted, none filed, or one of each with the counts — never zero and never "valid" | written |
+| — | an account the spine has not placed | its own row, `person_placed: false`, and `person_basis` says the total is people *plus* unplaced accounts | written |
+| — | a spine that could not be READ | `person_basis: 'unreadable'` and a sentence naming it a failure to measure; the page must not fall back to counting rows | written |
+| — | the page | tiles say "people" in as many words and carry the record count beside them; the table is one row per person with each record's documents inside | written |
+
+### What was deliberately NOT changed
+
+**`drivers` still holds the ACCOUNT rows**, unrenamed. They are the evidence the
+person rows were folded from — "which record carries which paper" cannot be
+answered from a list that has already been folded — and three suites pin
+different properties of them (`test/server_redaction.test.mjs`,
+`test/driver_photo.test.mjs`, `test/held_fields.test.mjs`). `totals` likewise
+still counts records, and the page reads it only where the subject really is a
+record. `counts` names each population in words so the two can never be read as
+the same number again.
+
+**The person totals are counted in JS, not in SQL**, which the comment above
+`totals` in that route otherwise forbids. It is safe here for one reason that
+must stay true: the row query asks for `COMPLIANCE_LIMIT + 1` and **throws**
+rather than serving part of a roster, so `rows` is either all of it or a 500.
+If that cap ever gains a paging shape, these totals move with it.
+
+**NOT YET PROVEN.** Everything above is `written`: 50 assertions in
+`test/compliance_person.test.mjs` (two proved by revert), plus
+`mockapi`, `endpoint_coverage`, `redact`, `server_redaction`, `nav_sections`,
+`interlinking`, `type_scale`, `routes`, `held_fields`, `driver_photo`,
+`server_audit`, `hotel_licence_date`, `driver_identity`, `assets`,
+`persons_spine`, `route_smoke` and the 124-view `smoke_views` pass, all green.
+Nothing is proven until `#compliance` has been opened on production with
+`&_=$RANDOM`, the headline read as a count of people, and a conflicting pair
+screenshotted.

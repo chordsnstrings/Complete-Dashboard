@@ -929,6 +929,54 @@ driver's 222 tracker fixes.
   materialised into `driver` + `driver_platform_id`, which every surface reads.
   **If you add a surface that counts drivers, read the spine. Do not fold.**
 
+* **A ROUTE INSIDE `api/server.js`'s SLICED REGION HAS *TWO* INJECTION SETS TO
+  FEED, NOT ONE.** The rule everyone knows is `test/mount.mjs` — an identifier
+  the slice references and that file does not inject is a ReferenceError the
+  harness reports as an empty response body. `test/server_redaction.test.mjs`
+  slices the SAME region independently, by its own markers, with its own much
+  smaller `{ q, wrap, isAdmin, … }` list. Adding `personMap` to
+  /api/compliance/drivers therefore needed the import in three places:
+  `api/server.js`, `test/mount.mjs`'s import list *and* its `injected` object,
+  and that file's `complianceApp()`. Miss the third and 56 redaction
+  assertions fail at once with a message about the route rather than about the
+  injection. Grep for `mount(app, F_` before assuming mount.mjs is the only
+  harness that evaluates the code you just changed.
+
+* **A CONFLICT CHECK OVER A WITHHELD COLUMN MUST REPORT *THAT* THE VALUES
+  DIFFER, NEVER *WHAT* THEY ARE.** #compliance now flags two accounts of one
+  person carrying different licence numbers — which is either a filing error
+  or evidence the merge was wrong, and is exactly what the page should
+  surface. But `licence_no` and `emirates_id` are removed from every row by
+  `stripIdentity()` before the response leaves, because this API answers every
+  request without a credential. The comparison happens server-side on the
+  unredacted rows and emits a COUNT of distinct values plus the account ids;
+  putting `values: [...]` on the conflict entry hands the withheld documents
+  straight back through a field nobody was watching. Proved by doing it:
+  `test/compliance_person.test.mjs` fails three assertions with
+  `"values":["DL-77-A","DL-77-B"]` in the body. Same shape as the finding in
+  `api/redact.js`'s header — a second place a document can escape from is the
+  whole defect, whatever the first place does.
+
+* **`#compliance` WAS THE LAST SURFACE COUNTING ACCOUNTS.** The "four answers"
+  trap above is now three: `/api/compliance/drivers` returns `people` (one row
+  per human, each carrying its accounts' documents) beside `drivers` (the
+  account rows, which several tests pin and which are the evidence the fold
+  was made from), and `counts` names each population in words. `totals` still
+  counts driver_compliance ROWS and always did — the page reads it only where
+  the subject really is a record, and never puts it under the word "drivers".
+  **A count of people cannot be done in SQL here**, because the spine is a Map
+  the process has just read; it is counted in JS over `rows`, which is safe on
+  this route *only* because the query asks for `COMPLIANCE_LIMIT + 1` and
+  throws rather than serving a truncated roster. If that cap ever gains a
+  paging shape the person totals have to move with it.
+
+* **`panel()`'s OWN `.cap` AND A `.cap` APPENDED TO `.pbody` BOTH MATCH
+  `[data-panel="x"] .cap`.** The panel's caption is a child of `.panel`; the
+  sentence under a table is a child of `.pbody`. A browser assertion written as
+  `.cap:last-of-type` reads the heading's caption — which is a different
+  sentence that happens to contain plausible words — and asserts nothing about
+  the one under the table. Scope it: `[data-panel="x"] .pbody > .cap`.
+
 * **THE DIRECTORY FOLDED ON A NAME, FOR 92 OF ITS 347 ROWS.** `linkedByName` in
   `api/identity_links.js` maps a linked ALIAS's folded name to its person, so
   any account whose own folded name matched inherited that person **with nobody

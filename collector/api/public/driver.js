@@ -1102,7 +1102,20 @@ async function tabOverview(root, id, prof) {
 }
 
 /* ── tab: activity ───────────────────────────────────────────────────────── */
-async function tabActivity(root, id) {
+/* `prof` IS A PARAMETER, and the day rows below are why.
+   ─────────────────────────────────────────────────────────────────────────
+   THE DEFECT. This tab links its day rows by the person where the spine has
+   placed them — addressOf(prof, id) — but the signature read (root, id) and
+   `prof` was a free variable. There is no module-scope `prof`, so the tab
+   threw ReferenceError on every render and the whole view came up as "Could
+   not load this view — prof is not defined". It was not caught by the
+   route-level or the per-panel suites, because nothing there evaluates a tab
+   body; bin/smoke_views.mjs renders all 124 and reported 123.
+
+   The dispatcher has always passed it — `await fn(body, id, prof)` at the
+   TABS call site — and tabOverview and tabEarnings already declare it. This
+   tab simply never took delivery. */
+async function tabActivity(root, id, prof) {
   /* Full width. Twenty-eight days of a 24-hour axis in half a page gives each
      hour about eight pixels, so a thirty-minute job is four pixels wide and
      the panel that exists to show WHEN somebody worked shows a smear. */
