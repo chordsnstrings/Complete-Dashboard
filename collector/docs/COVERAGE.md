@@ -888,6 +888,77 @@ driver's 222 tracker fixes.
   *rate* built that way is wrong: the fleet's median trips-per-working-day read
   3.8 unmerged and **7.2** merged, on identical trip data.
 
+* **A TEST THAT SKIPS WITHOUT PRINTING A TALLY IS COUNTED AS A FAILING FILE,
+  AND THE SUITE BLAMES WHATEVER CHANGE IS IN FLIGHT.** `test/run-all.mjs:213`
+  treats `failed === null` — no `"N passed, M failed"` line — as broken, and
+  says why at `:162-163`: "the absence of that line is itself a failure rather
+  than a pass." `test/events.test.mjs` skipped by printing one sentence and
+  exiting 0, because it needs the real Uber year at **`/tmp/yearpull`**
+  (160,915 trips) and **nothing in this repository generates that directory** —
+  a grep for `yearpull` finds only that file and a comment in
+  `test/break_month_grain.test.mjs:12`. `/tmp` does not survive a container
+  being recycled, so **every fresh checkout reported `1 file(s) failing`**,
+  naming a file unrelated to whatever was being worked on. Fixed by making the
+  skip print `0 passed, 0 failed` plus a banner naming the missing fixture —
+  absent with a reason, not silently.
+
+  Two further things this cost: `npm test | tail` reports **`tail`'s** exit
+  code, not the suite's, so a red run reads as green — check the
+  `N file(s) failing` line, never `$?` through a pipe. And the background
+  capture keeps only the last ~25 lines of a 256-file run, so redirect to a
+  file when the failing name matters.
+
+* **`r2(null)` IS `0`, NOT NULL — AND THAT IS HOW "WE DO NOT KNOW" BECOMES
+  "AED 0.00".** The rounding helper this API copies from file to file is
+  `const r2 = (v) => Math.round(v * 100) / 100`, and `Math.round(null * 100)`
+  is `0`. Two live copies carry no null guard — `api/reconcile_routes.js:61`
+  and `api/revenue_routes.js:644` — while five others do
+  (`analytics_routes.js:33-34`, `day_routes.js:29`, `economics_routes.js:68`,
+  `payout_routes.js:70`, `performer_routes.js:38`). **Which behaviour a new
+  route inherits depends on which file its author copied**, and `ui.js money()`
+  prints `0` as a measured figure because 0 is finite. On the advance ledger
+  this is the whole ballgame: a person whose entries have been orphaned reads
+  identically to a person who has never borrowed, and gets lent more. The same
+  applies to the `coalesce(sum(…), 0)` habit in SQL and `|| 0` in JS.
+
+* **`POST /api/same-person/decide` IS UNAUTHENTICATED.** `api/sameperson_routes.js:128`
+  is wrapped in `wrap()` and nothing else, while `app.put('/api/settings', …)`
+  at `api/server.js:3564` carries `requireAdmin`. Anybody who can reach the URL
+  can fold two people's records into one, or split them, by posting an alias id
+  and a verdict with a free-text name. `api/redact.js:1-8` states the posture:
+  "This product has no user authentication … every /api route answers a request
+  with no cookie, no header and no token." **Harmless while every surface is a
+  read; not harmless the moment a balance folds on the same layer** — which is
+  why `sql/schema_v77.sql` resolves a person at WRITE time and stores the id
+  rather than recomputing it per request.
+
+* **THE READ-TIME IDENTITY FOLD IS MORE VOLATILE THAN `person_key`, NOT LESS.**
+  The intuitive ordering is backwards. Moving `person_key` takes an edit to
+  `api/identity_map.js`, a `bin/gen-schema-v53.mjs` run, a passing test and a
+  deploy. The boundary layer needs none of that: `src/identity_link.js:605-610`
+  DELETEs every unconfirmed, unrejected link whose evidence no longer holds on
+  **every collector run**, and `api/identity_links.js:73` lets `shared_phone`
+  and `shared_email` apply with no human at all. `api/identity_links.js:74-83`
+  then catches its own query failure and returns an **empty map** — correct for
+  a directory, a silent un-merge for money, cached 30s by `TTL_MS`.
+
+* **FOR THE HOTEL CHANNEL THERE IS NO ACCOUNT ID — THE KEY IS A LOWERCASED
+  NAME.** `api/driver_routes.js:286` builds the page key as
+  `coalesce(nullif(btrim(driver_ext_id),''), 'name:' || CANON(driver_name))`
+  because that channel files trips with a blank `driver_ext_id`. The file's own
+  comment at :102-108 names the hazard it lives with — "a feed that starts
+  spelling somebody 'Khan Khan' silently renames their id." A directory row
+  survives being renamed and re-found. **A balance does not.**
+
+* **`money_event` IS DELETED AND REBUILT WHOLE ON EVERY ROLLUP.** It looks
+  exactly like the right home for "every figure, one shape, provenance
+  attached" and is the first place an implementer reaches for. `src/rollup.js:491`
+  replaces it entirely on every pass — quarter-hourly — from the five
+  collector-derived `MONEY_SOURCES` at :338-425. **A human-entered row placed
+  there survives until the next pass and then vanishes**, with the page still
+  serving a cached balance that includes it. Human-entered money lives in its
+  own table and joins at read time.
+
 * **A FIXTURE WITH NARROW DIGITS CANNOT CATCH A LAYOUT THAT OVERFLOWS ON WIDE
   ONES.** The phone's payout comparison row reads
   `wire AED 111,179.66 · ours AED 110,962.09` against the mock and fits 390px

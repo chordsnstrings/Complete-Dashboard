@@ -151,4 +151,19 @@ export const SCHEMA_FILES = [
      in it whatever weekday it fell on. See the file for the probe that
      established that and for why the audit never overwrites a stored amount. */
   'schema_v76.sql',
+  /* The person a debt belongs to, as a row with an id of its own. Adopts the
+     `driver` / `driver_platform_id` pair declared at sql/schema.sql:28-43 and
+     never wired up — a grep finds zero readers and zero writers — because the
+     advance ledger cannot key money on a provider's idea of who somebody is.
+     For the hotel channel there IS no account id: api/driver_routes.js:286
+     synthesises 'name:' || CANON(driver_name), and a re-spelling upstream would
+     orphan a balance. The read-time fold is worse still: src/identity_link.js
+     withdraws unconfirmed links on every collector run and
+     /api/same-person/decide is UNAUTHENTICATED, so a debt could be moved
+     between two humans by an anonymous POST. The person is therefore resolved
+     once, at write time, and the row records which resolver decided it. Adds
+     the per-person cash rule (the operator states it varies) and the pay basis,
+     which is documentation and explicitly not a formula. Changes nothing about
+     how any existing page resolves a driver. */
+  'schema_v77.sql',
 ];
