@@ -25,7 +25,7 @@
 import { el, esc, panel, note, loading, tableFrom, entity } from './ui.js';
 import { api } from './data.js';
 import { entryForm } from './entry_form.js';
-import { aed } from './deposit_core.js';
+import { aed, loadPeople } from './deposit_core.js';
 
 /* One type, and it needs a photograph: money physically changed hands. The
    form itself is ./entry_form.js, shared with #advances and the driver tab —
@@ -48,9 +48,14 @@ export async function renderDeposits(root) {
   loading(listPanel.body);
 
   async function refresh() {
-    const d = await api('/api/ledger/exposure').catch(() => null);
+    /* THE OFFER AND THE FIGURES ARE DIFFERENT QUESTIONS. This read used to be
+       /api/ledger/exposure alone, which lists people who already have a
+       ledger row — and on a ledger nobody has written to that is nobody, so
+       the form offered no one and no first entry could ever be made. See
+       loadPeople() in ./deposit_core.js. */
+    const d = await loadPeople();
     listPanel.body.innerHTML = '';
-    if (!d) { listPanel.body.append(note('The ledger could not be read.', 'bad')); return; }
+    if (!d.ok) { listPanel.body.append(note(esc(d.error), 'bad')); return; }
     const people = (d.people || []).filter((p) => p.name);
 
     if (!head.body.querySelector('.depform')) {
@@ -58,17 +63,28 @@ export async function renderDeposits(root) {
     }
 
     if (!people.length) {
-      listPanel.body.append(note('Nobody is on the ledger yet.', 'warn'));
+      listPanel.body.append(note('There is nobody to record against — neither this ledger nor '
+        + 'the platform rosters hold a driver. Nothing is wrong with this screen; there is no '
+        + 'one to show.', 'warn'));
       return;
     }
+    if (!d.exposure_ok) listPanel.body.append(note(esc(d.exposure_absent_reason), 'warn'));
     /* EVERYONE, not only the people whose cash is known. The first version
        filtered to `owes.cash != null` and so hid exactly the people this screen
        exists for: somebody with no stated position is who finance needs to
        find, and dropping them would have made the page look complete while the
        drivers most needing a deposit were the ones missing from it. */
-    const unknown = people.filter((p) => p.owes?.cash == null).length;
+    const fresh = people.filter((p) => !p.on_the_ledger).length;
+    if (fresh) {
+      listPanel.body.append(note(`${fresh} of ${people.length} are on a platform roster but have `
+        + 'never been recorded against here. They are offered anyway — the first entry made '
+        + 'against one creates their record, and until then they have no balance of any kind '
+        + 'rather than a balance of zero.', 'warn'));
+    }
+    const unknown = people.filter((p) => p.on_the_ledger && p.owes?.cash == null).length;
     if (unknown) {
-      listPanel.body.append(note(`${unknown} of ${people.length} people have no stated cash `
+      listPanel.body.append(note(`${unknown} of the people already on this ledger have no `
+        + 'stated cash '
         + 'position. Their cash reads as unknown rather than zero, and their exposure is '
         + 'refused rather than shown low — recording a deposit, or an opening position, is '
         + 'what turns it into a number.', 'warn'));

@@ -141,5 +141,73 @@ const [solo] = await q(
 check('a person can exist with no account, for a first-week salary advance',
   (await q(`SELECT count(*)::int n FROM driver_platform_id WHERE driver_id=$1`, [solo.id]))[0].n === 0);
 
+/* ── MINTING SOMEBODY THE REGISTER ALREADY KNOWS ─────────────────────────
+   The path nothing reached until the first live read of the empty ledger, and
+   the one a large slice of the fleet takes on its FIRST entry.
+
+   Step 3 does not only mint a person: it attaches, in the same breath, every
+   sibling account the identity layer already names, so that a second entry
+   made against the sibling an hour later cannot mint a second person for the
+   same human. Those sibling rows are pulled out of the roster tables — and the
+   statement doing the pulling selected `driver_name` from
+   driver_platform_state, a column that table has never had. It is `full_name`
+   there and `full_name` in driver_compliance; `driver_name` belongs to trip,
+   money_event and the day rollups.
+
+   So the whole of step 3 threw `column "driver_name" does not exist`, the
+   transaction rolled back, and the entry was never written — for exactly the
+   people the merge register was built to hold together. api/identity_map.js
+   applies 130 entries over 124 people, every one of which reaches this branch
+   the first time money is recorded against them while their sibling is still
+   unmapped.
+
+   Every earlier case in this file walks past it: an account with no siblings
+   at all skips the loop, and an account whose sibling IS mapped returns at
+   step 2 before ever reaching the mint. It needed a third shape — siblings
+   named, none of them mapped — and that shape is the common one on a ledger
+   with nobody on it yet.
+
+   Proved by reverting `full_name` to `driver_name` in api/ledger_person.js and
+   watching these four go red. */
+clearIdentityLinkCache();
+await q(`INSERT INTO driver_platform_state (platform, driver_ext_id, full_name, state)
+         VALUES ('bolt','B-77','Kareem S','active')`);
+await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, phone)
+         VALUES ('yango','Y-77','Kareem Sayed','+9715550077')`);
+await q(`INSERT INTO driver_identity_link
+   (alias_ext_id, alias_platform, alias_name, canonical_ext_id, canonical_platform,
+    canonical_name, canonical_key, basis, evidence, confirmed_at, confirmed_by)
+   VALUES ('B-77','bolt','Kareem S','U-77','uber','Kareem Sayed','kareem sayed',
+           'shared_phone','same phone on both roster rows', now(), 'ahsan'),
+          ('Y-77','yango','Kareem Sayed','U-77','uber','Kareem Sayed','kareem sayed',
+           'shared_phone','same phone on both roster rows', now(), 'ahsan')`);
+clearIdentityLinkCache();
+
+const twoSibs = await resolvePerson(
+  q, { platform: 'uber', extId: 'U-77', name: 'Kareem Sayed', by: 'ahsan' });
+check('minting somebody whose siblings are named but unmapped does not throw',
+  twoSibs.refused !== true && twoSibs.created === true, JSON.stringify(twoSibs));
+check('and the note counts the siblings the identity layer named',
+  /2 sibling account\(s\)/.test((await q(
+    `SELECT created_note FROM driver WHERE id=$1`, [twoSibs.person_id]))[0]?.created_note || ''),
+  (await q(`SELECT created_note FROM driver WHERE id=$1`, [twoSibs.person_id]))[0]?.created_note);
+check('all three accounts land on the one person, in the same breath as the mint',
+  (await q(`SELECT count(*)::int n FROM driver_platform_id WHERE driver_id=$1`,
+    [twoSibs.person_id]))[0].n === 3,
+  JSON.stringify(await q(
+    `SELECT platform, external_id, basis FROM driver_platform_id WHERE driver_id=$1
+      ORDER BY external_id`, [twoSibs.person_id])));
+check('each attached sibling carries the roster name and says what attached it',
+  (await q(`SELECT external_id, display_name, basis FROM driver_platform_id
+             WHERE driver_id=$1 AND basis LIKE 'sibling-of:%' ORDER BY external_id`,
+  [twoSibs.person_id])).every((r) => r.display_name && r.basis === 'sibling-of:U-77'),
+  JSON.stringify(await q(`SELECT external_id, display_name, basis FROM driver_platform_id
+                           WHERE driver_id=$1 AND basis LIKE 'sibling-of:%'`, [twoSibs.person_id])));
+/* And the point of doing it in the same breath: the sibling resolves to the
+   person who already exists, rather than minting a second one. */
+const later = await resolvePerson(q, { platform: 'bolt', extId: 'B-77', name: 'Kareem S', by: 'haseeb' });
+check('an entry against the sibling an hour later finds the same person',
+  later.person_id === twoSibs.person_id && later.created === false, JSON.stringify(later));
+
 console.log(`\n${fail ? '✗' : '✓'} ledger_resolve_person: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

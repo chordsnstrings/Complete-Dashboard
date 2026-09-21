@@ -17,8 +17,8 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
    validation living in two bundles is how the phone comes to refuse what the
    desktop accepts — and the person standing next to the car with the cash in
    their hand is the one who finds out. */
-import { compress, putReceipt, submitEntry, SUPERVISORS, aed, parseAmount }
-  from '../deposit_core.js';
+import { compress, putReceipt, submitEntry, SUPERVISORS, aed, parseAmount,
+  loadPeople, personRef } from '../deposit_core.js';
 /* The one place a channel key becomes a word a person reads — and the one
    place an instant becomes a clock. Both shared with the desktop rather than
    copied, so 'fms' is "FMS telematics" on both screens and 13:00Z is 17:00 on
@@ -2164,10 +2164,16 @@ let PHONE_SUP = null;
 
 async function deposits(deck, ctx) {
   skeleton(deck, 3);
-  const d = await qAll('/api/ledger/exposure').catch(() => null);
+  /* THE ROSTER, not the people who already carry a balance. Exposure reads
+     `driver`, which is empty until somebody records an entry — so this search
+     found nobody on a fresh ledger and the supervisor standing at the car
+     could not record the handover that would have created the first person.
+     loadPeople() is the desktop's read too, for the reason the header of
+     ../deposit_core.js gives: one rule, not two. */
+  const d = await loadPeople();
   if (!ctx.alive()) return;
   deck.innerHTML = '';
-  if (!d) { failed(deck, new Error('The ledger could not be read.')); return; }
+  if (!d.ok) { failed(deck, new Error(d.error)); return; }
 
   const people = (d.people || []).filter((p) => p.name);
 
@@ -2196,16 +2202,25 @@ async function deposits(deck, ctx) {
     hits.innerHTML = '';
     if (!term || term.length < 2) return;
     const t = term.toLowerCase();
+    /* SEARCHED BY NAME, CHOSEN BY ROW. Two people can share a name — that is
+       exactly the case api/identity_map.js refuses to fold — so the button
+       carries the candidate object rather than looking one up by its text
+       afterwards, and the hit line says which account it is so a supervisor
+       looking at two identical names can tell them apart. */
     people.filter((p) => p.name.toLowerCase().includes(t)).slice(0, 8).forEach((p) => {
-      const b = el('button', 'm-pick', esc(p.name));
+      const b = el('button', 'm-pick', esc(p.name)
+        + (p.on_the_ledger ? '' : ' <span class="m-pickhint">new</span>')
+        + (p.ext_id ? ` <span class="m-pickhint">${esc(p.platform || '')} ${esc(p.ext_id)}</span>` : ''));
       b.type = 'button';
       b.onclick = () => {
         chosen = p;
         hits.innerHTML = ''; input.value = '';
         chosenLine.style.display = '';
-        chosenLine.innerHTML = `<strong>${esc(p.name)}</strong><span>${p.accounts} account`
-          + `${p.accounts === 1 ? '' : 's'} · a deposit reduces what they hold whichever one it `
-          + 'is entered against</span>';
+        chosenLine.innerHTML = `<strong>${esc(p.name)}</strong><span>${p.on_the_ledger
+          ? `${p.accounts} account${p.accounts === 1 ? '' : 's'} · a deposit reduces what they `
+            + 'hold whichever one it is entered against'
+          : `on the ${esc(p.platform || 'platform')} roster as ${esc(p.ext_id)} · nothing has `
+            + 'been recorded against them yet, so this opens their record'}</span>`;
         say('');
       };
       hits.append(b);
@@ -2279,7 +2294,9 @@ async function deposits(deck, ctx) {
     return null;
   };
   const payload = () => ({
-    person_id: chosen.person_id, person_name: chosen.name,
+    /* By id where there is one, by account where there is not — the server
+       resolves the second inside the same transaction as the entry. */
+    ...personRef(chosen), person_name: chosen.name,
     type_code: 'cash_deposit', amount: parseAmount(amt.value), settles_via: 'cash',
     effective_on: dubaiDay(), entered_by: PHONE_SUP,
     note: noteIn.value.trim(), receipt_sha: sha,

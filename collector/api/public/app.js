@@ -60,6 +60,8 @@ import { renderSamePerson } from './sameperson.js';
 import { renderDeposits } from './deposits.js';
 import { renderAdvances } from './advances.js';
 import { renderSalary } from './salary.js';
+import { renderOpening } from './opening.js';
+import { renderImport } from './importsheet.js';
 import { renderCompare } from './compare.js';
 import { renderSupply } from './supply.js';
 import { renderOptimise } from './optimise.js';
@@ -450,6 +452,8 @@ const VIEWS = [
   { id: 'identity', label: 'One person, two records', ic: '⧉', sec: 'People', sub: 'Records the roster proves belong to the same driver, and the evidence for each' },
   /* Beside it, because it is the other half of the same subject: that page
      shows what a rule PROVED, this one asks about what it cannot. */
+  { id: 'import-sheet', label: 'Bring a sheet in', ic: '⇪', sec: 'Money', sub: 'History from a spreadsheet — read on this machine, matched against the roster locally, and written only against people a person chose' },
+  { id: 'opening', label: 'Starting balances', ic: '⊙', sec: 'Money', sub: 'What each driver was holding on the day it was counted — the one figure this ledger cannot derive, and the one that turns an exposure from not-measurable into a number' },
   { id: 'salary', label: 'Salary', ic: '⊞', sec: 'Money', sub: 'One entry per driver per month, all in — what payroll decided, recorded here rather than derived' },
   { id: 'advances', label: 'Advances', ic: '⊕', sec: 'Money', sub: 'What each driver owes against what they generate, the line they are kept within, and the form that records a new advance, a repayment or a deduction' },
   { id: 'deposits', label: 'Cash handed in', ic: '⇩', sec: 'Money', sub: 'Record a driver handing cash back, and see who is carrying the most — the leg that turns cash in hand from a guess into a balance' },
@@ -2043,6 +2047,8 @@ V['same-person'] = async (root) => renderSamePerson(root);
 V.deposits = async (root) => renderDeposits(root);
 V.advances = async (root) => renderAdvances(root);
 V.salary = async (root) => renderSalary(root);
+V.opening = async (root) => renderOpening(root);
+V['import-sheet'] = async (root) => renderImport(root);
 /* `#performer/<id>/<monday>` — the week the reader was ranking when they
    clicked, so the drill-down shows the week they came from. */
 V.performer = async (root) => renderPerformer(root, state.param, state.sub);

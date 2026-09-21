@@ -25,7 +25,7 @@
 import { el, esc, panel, note, loading, tableFrom, entity } from './ui.js';
 import { api } from './data.js';
 import { entryForm } from './entry_form.js';
-import { aed } from './deposit_core.js';
+import { aed, loadPeople } from './deposit_core.js';
 
 /* What this screen offers. `needs_proof: false` mirrors the registry
    (sql/schema_v78.sql) — proof is required where money or goods physically
@@ -69,14 +69,19 @@ export async function renderAdvances(root) {
   root.append(formPanel.panel, listPanel.panel);
 
   async function refresh() {
+    /* THE OFFER AND THE FIGURES ARE DIFFERENT QUESTIONS — loadPeople() folds
+       exposure onto a list that also holds the roster accounts nobody has
+       recorded against yet. Reading exposure alone offered nobody on a fresh
+       ledger, so no first advance could ever be entered. */
     const [ex, reg] = await Promise.all([
-      api('/api/ledger/exposure').catch(() => null),
+      loadPeople(),
       api('/api/ledger/entries').catch(() => null),
     ]);
     head.body.innerHTML = '';
     listPanel.body.innerHTML = '';
 
-    if (!ex) { head.body.append(note('The ledger could not be read.', 'bad')); return; }
+    if (!ex.ok) { head.body.append(note(esc(ex.error), 'bad')); return; }
+    if (!ex.exposure_ok) head.body.append(note(esc(ex.exposure_absent_reason), 'warn'));
 
     const people = (ex.people || []).filter((p) => p.name);
     const pol = ex.policy;
@@ -87,20 +92,45 @@ export async function renderAdvances(root) {
       : esc(ex.policy_absent_reason || 'No policy threshold is stored.')));
 
     /* The unmeasurable, first and by name. */
-    const blind = people.filter((p) => p.exposure_pct == null);
+    /* TWO POPULATIONS, AND THEY MUST NOT BE ONE COUNT.
+       ───────────────────────────────────────────────────────────────────
+       Since the form began offering the platform roster as well as the
+       people this ledger holds, "N of M have no exposure figure" would fold
+       together two entirely different facts: somebody on the ledger whose
+       cash position has never been stated — a gap worth closing, and the
+       whole reason this warning exists — and somebody who has simply never
+       been recorded against, for whom the absence is not a gap at all.
+
+       Reported separately, each with its own reason. A single number over
+       both would read as "most of the fleet is unmeasurable" on a ledger
+       that is merely new, and that is a false alarm rather than a true
+       absence. */
+    const onLedger = people.filter((p) => p.on_the_ledger !== false);
+    const blind = onLedger.filter((p) => p.exposure_pct == null);
     if (blind.length) {
-      head.body.append(note(`${blind.length} of ${people.length} people have no exposure figure `
-        + 'at all, and they are listed below with the reason. Most often it is that no cash '
-        + 'position has been stated for them — the policy counts cash the driver holds inside '
-        + 'the line, so a figure without it would understate exposure, which is the direction '
-        + 'that gets somebody lent more than they should be.', 'warn'));
+      head.body.append(note(`${blind.length} of ${onLedger.length} people have no exposure `
+        + 'figure at all, and they are listed below with the reason. Most often it is that no '
+        + 'cash position has been stated for them — the policy counts cash the driver holds '
+        + 'inside the line, so a figure without it would understate exposure, which is the '
+        + 'direction that gets somebody lent more than they should be.', 'warn'));
     }
-    const over = people.filter((p) => p.over_policy);
+    const fresh = people.length - onLedger.length;
+    if (fresh) {
+      head.body.append(note(`${fresh} more are on a platform roster with nothing ever recorded `
+        + 'against them. They are offered in the form above — an entry creates their record — '
+        + 'and they carry no balance of any kind rather than a balance of zero, so they are '
+        + 'not counted in the figures on this page.', 'ok'));
+    }
+    const over = onLedger.filter((p) => p.over_policy);
     if (over.length) {
       head.body.append(note(`${over.length} over the line.`, 'warn'));
     }
 
-    head.body.append(tableFrom(people.slice().sort((a, b) => {
+    /* The TABLE is the ledger's population. Somebody with no record has no row
+       to show — every cell would be a dash, and a page of dashes is how a
+       reader stops reading dashes. They are offered in the form, which is
+       where they are needed. */
+    head.body.append(tableFrom(onLedger.slice().sort((a, b) => {
       /* Unmeasurable first, then the highest exposure. A dash sorted to the
          bottom is a dash nobody reads. */
       if ((a.exposure_pct == null) !== (b.exposure_pct == null)) return a.exposure_pct == null ? -1 : 1;

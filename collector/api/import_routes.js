@@ -4,13 +4,22 @@
    Two endpoints, and the split between them is the whole design:
 
      POST /api/ledger/import/preview   takes NAMES, writes nothing
-     POST /api/ledger/import/commit    takes PERSON IDS, writes
+     POST /api/ledger/import/commit    takes IDENTIFIERS, writes
 
    THE COMMIT ENDPOINT DOES NOT ACCEPT A NAME. That is not an oversight and it
    is not a convenience — it is what makes auto-applying a match impossible at
    the boundary rather than merely discouraged by a comment. A row can only be
    written against a person somebody chose from the proposals, because there is
    no other way to address one.
+
+   An identifier is a person id, OR a (platform, account id) pair. The second
+   was added because `driver` is empty until somebody records an entry, so a
+   commit that accepted person ids alone could not import into the very ledger
+   an import exists to open — every row would name a person nobody had minted.
+   It does not weaken the rule by a hair: a provider's account id is a stable
+   key a human picked off a dropdown, not a string the matcher produced, and
+   api/ledger_person.js resolves it through the merge register inside this
+   transaction. What the boundary refuses is a NAME, and it still does.
 
    api/identity_map.js is a hand-reviewed LIST and argues at length that it must
    never learn to generalise; the five pairs it holds back carry simultaneous
@@ -31,6 +40,8 @@
    preview refuses them here rather than letting somebody discover it on row
    ninety. */
 import { matchName } from './name_match.js';
+import { resolvePerson, personKey } from './ledger_person.js';
+import { identityLinks } from './identity_links.js';
 
 const TYPES_ALLOWED = ['opening_balance', 'cash_opening', 'cash_advance', 'salary_advance',
   'charging_advance', 'repayment', 'salik', 'traffic_fine', 'damage', 'salary'];
@@ -53,20 +64,62 @@ const isDay = (v) => {
 };
 
 export function importRoutes(app, { q, wrap, tx }) {
-  /* Everybody a row could be about: the people this ledger already knows, with
-     the accounts they hold. A person with no account is included — a salary
-     advance to a new hire is exactly the kind of row a historical sheet
-     carries. */
-  const roster = async (tq) => (await tq(
-    `SELECT dr.id AS person_id, dr.full_name AS name,
-            count(a.external_id)::int AS accounts,
-            min(a.external_id) AS ext_id
-       FROM driver dr
-       LEFT JOIN driver_platform_id a
-         ON a.driver_id = dr.id AND a.detached_at IS NULL
-      WHERE dr.full_name IS NOT NULL
-      GROUP BY dr.id, dr.full_name
-      ORDER BY dr.full_name`)).map((r) => ({ ...r, person_id: Number(r.person_id) }));
+  /* EVERYBODY A ROW COULD BE ABOUT, which is not the same as everybody this
+     ledger already knows.
+     ───────────────────────────────────────────────────────────────────────
+     This matched against `driver` alone, and `driver` is empty until somebody
+     records an entry — people are minted lazily (api/ledger_person.js). So on
+     the ledger an import is meant to OPEN, every row of a four-hundred-row
+     historical sheet matched against nobody and the preview answered "not on
+     the roster" four hundred times. The one screen built to load history could
+     not load any.
+
+     So the candidates are the union: the people who exist, plus the platform
+     roster accounts nobody has claimed yet. A candidate carries a `key`, and
+     the key is what a screen sends back — `p:<id>` for somebody who exists,
+     `a:<platform>:<ext_id>` for an account. Still never a name: see the commit
+     route below for why that distinction is the whole design.
+
+     A person with no account at all is included — a salary advance to a new
+     hire is exactly the kind of row a historical sheet carries. */
+  const roster = async (tq) => {
+    const known = (await tq(
+      `SELECT dr.id AS person_id, dr.full_name AS name,
+              count(a.external_id)::int AS accounts,
+              min(a.external_id) AS ext_id, min(a.platform) AS platform
+         FROM driver dr
+         LEFT JOIN driver_platform_id a
+           ON a.driver_id = dr.id AND a.detached_at IS NULL
+        WHERE dr.full_name IS NOT NULL
+        GROUP BY dr.id, dr.full_name
+        ORDER BY dr.full_name`)).map((r) => ({
+      ...r, person_id: Number(r.person_id), key: personKey({ person_id: Number(r.person_id) }),
+      on_the_ledger: true }));
+
+    const unclaimed = (await tq(
+      `SELECT r.platform, r.driver_ext_id AS ext_id, max(r.name) AS name
+         FROM (SELECT platform, driver_ext_id, full_name AS name FROM driver_platform_state
+               UNION ALL
+               SELECT platform, driver_ext_id, full_name FROM driver_compliance) r
+        WHERE NOT EXISTS (
+          SELECT 1 FROM driver_platform_id m
+           WHERE m.platform = r.platform AND m.external_id = r.driver_ext_id
+             AND m.detached_at IS NULL)
+        GROUP BY r.platform, r.driver_ext_id
+        HAVING max(r.name) IS NOT NULL
+        ORDER BY 3`)).map((r) => ({
+      person_id: null, name: r.name, accounts: 0, ext_id: r.ext_id, platform: r.platform,
+      key: personKey({ person_id: null, platform: r.platform, ext_id: r.ext_id }),
+      on_the_ledger: false }));
+
+    return [...known, ...unclaimed];
+  };
+
+  /* A candidate, as a screen sees it. `key` is the handle; person_id may be
+     null and the account is then what addresses them. */
+  const cand = (p) => (p ? { key: p.key, person_id: p.person_id, name: p.name,
+    accounts: p.accounts, platform: p.platform || null, ext_id: p.ext_id || null,
+    on_the_ledger: p.on_the_ledger } : null);
 
   app.post('/api/ledger/import/preview', wrap(async (req, res) => {
     res.set('Cache-Control', 'no-store');
@@ -133,10 +186,8 @@ export function importRoutes(app, { q, wrap, tx }) {
           verdict: m.verdict,
           why: m.why,
           confidence: m.confidence,
-          person: m.best ? { person_id: m.best.person_id, name: m.best.name,
-            accounts: m.best.accounts } : null,
-          alternatives: (m.alternatives || []).map((a) => ({
-            person_id: a.person.person_id, name: a.person.name, score: a.score })),
+          person: cand(m.best),
+          alternatives: (m.alternatives || []).map((a) => ({ ...cand(a.person), score: a.score })),
         },
         problems,
         /* What a screen may offer as pre-selected. An ambiguous match is NOT
@@ -161,6 +212,11 @@ export function importRoutes(app, { q, wrap, tx }) {
         + 'route does not accept a name at all, which is what makes auto-applying a match '
         + 'impossible rather than merely discouraged.',
       matched_against: people.length,
+      /* Said, because "matched against 412" means something different when 400
+         of them are roster accounts with no ledger record: importing against
+         one OPENS that record rather than adding to it. */
+      matched_against_on_the_ledger: people.filter((p) => p.on_the_ledger).length,
+      matched_against_roster_only: people.filter((p) => !p.on_the_ledger).length,
       entries: out,
     });
   }));
@@ -185,12 +241,33 @@ export function importRoutes(app, { q, wrap, tx }) {
       const wrote = await tx(async (tq) => {
         const ids = new Set((await tq(`SELECT id FROM driver`)).map((r) => Number(r.id)));
         const made = [];
+        /* One identity map for the whole import, so a degraded read cannot be
+           half-applied across a sheet — some rows resolved against the merge
+           register and some minted fresh duplicates for the same people. */
+        const links = await identityLinks(tq);
         for (const [i, r] of rows.entries()) {
-          const pid = Number(r.person_id);
-          if (!pid || !ids.has(pid)) {
-            throw new Error(`row ${i + 1}: person_id ${r.person_id ?? '(none)'} is not a person `
-              + 'this ledger holds. This route takes person ids and never names — a row can only '
-              + 'be written against somebody a human chose from the proposals.');
+          let pid = Number(r.person_id) || null;
+          if (pid && !ids.has(pid)) {
+            throw new Error(`row ${i + 1}: person_id ${r.person_id} is not a person this ledger `
+              + 'holds.');
+          }
+          if (!pid) {
+            /* NOT A NAME — an account. The screen sent what a human picked off
+               a dropdown, and the resolver decides who it belongs to, with the
+               merge register in hand, inside this transaction. If it refuses,
+               the whole import refuses: minting a duplicate person mid-sheet
+               splits a balance in two with neither half right. */
+            if (!r.platform || !r.ext_id) {
+              throw new Error(`row ${i + 1}: no person and no account. A row is addressed by a `
+                + 'person id or by a (platform, account id) pair — never by a name, which is what '
+                + 'makes auto-applying a fuzzy match impossible here rather than merely '
+                + 'discouraged. Choose somebody for this row.');
+            }
+            const got = await resolvePerson(tq, {
+              platform: r.platform, extId: r.ext_id, name: r.person_name || null, by, links });
+            if (got.refused) throw new Error(`row ${i + 1}: ${got.why}`);
+            pid = got.person_id;
+            ids.add(pid);
           }
           const amount = parseAmount(r.amount);
           if (amount == null || amount <= 0) throw new Error(`row ${i + 1}: "${r.amount}" is not an amount`);

@@ -81,7 +81,7 @@
 
 import express from 'express';
 import { createHash } from 'node:crypto';
-import { resolvePerson } from './ledger_person.js';
+import { resolvePerson, personKey } from './ledger_person.js';
 
 const round2 = (v) => (v == null ? null : Math.round(Number(v) * 100) / 100);
 
@@ -351,6 +351,85 @@ export function ledgerRoutes(app, { q, wrap, tx }) {
    repo's production ritual can fill a modal without recording a real debt, and
    a reviewer looking at the register needs to see that one was written — a row
    excluded everywhere is a row nobody can audit. Every TOTAL excludes them. */
+/* GET /api/ledger/people — everybody an entry could be made against.
+   ─────────────────────────────────────────────────────────────────────────
+   WHY THIS EXISTS, and it is a defect found by deploying: people are minted
+   LAZILY, by the first entry recorded against them (api/ledger_person.js). On
+   a fresh database the `driver` table is therefore empty — which is correct,
+   and left the whole feature unusable, because every entry screen listed its
+   drivers from /api/ledger/exposure, which reads that table. Nobody to pick,
+   so no entry, so nobody ever minted. A closed loop, and none of the 270 test
+   files could see it: every one of them seeds a person first.
+
+   So the picker's source is the union of two things:
+
+     people this ledger already knows      driver + driver_platform_id
+     accounts it does not                  the roster, unmapped
+
+   Choosing an unmapped account sends platform + ext_id to /api/ledger/entry,
+   which resolves and mints inside the same transaction as the entry — so a
+   person comes into existence exactly when money is first recorded against
+   them, and never on a dry run.
+
+   The roster half is deliberately the same two tables api/ledger_person.js
+   consults for siblings, rather than the driver directory: the directory folds
+   names, and a picker that offered a FOLD would let somebody choose a group
+   where they meant a person. */
+export function ledgerPeopleRoutes(app, { q, wrap }) {
+  app.get('/api/ledger/people', wrap(async (req, res) => {
+    const known = await q(
+      `SELECT dr.id AS person_id, dr.full_name AS name, dr.cash_rule,
+              count(a.external_id)::int AS accounts,
+              min(a.external_id) AS ext_id, min(a.platform) AS platform
+         FROM driver dr
+         LEFT JOIN driver_platform_id a
+           ON a.driver_id = dr.id AND a.detached_at IS NULL
+        GROUP BY dr.id, dr.full_name, dr.cash_rule`);
+
+    const unmapped = await q(
+      `SELECT r.platform, r.driver_ext_id AS ext_id, max(r.name) AS name
+         FROM (SELECT platform, driver_ext_id, full_name AS name
+                 FROM driver_platform_state WHERE driver_ext_id IS NOT NULL
+               UNION ALL
+               SELECT platform, driver_ext_id, full_name FROM driver_compliance
+                WHERE driver_ext_id IS NOT NULL) r
+        WHERE NOT EXISTS (
+          SELECT 1 FROM driver_platform_id m
+           WHERE m.platform = r.platform AND m.external_id = r.driver_ext_id
+             AND m.detached_at IS NULL)
+        GROUP BY r.platform, r.driver_ext_id
+        HAVING max(r.name) IS NOT NULL
+        ORDER BY 3`);
+
+    res.json({
+      people: [
+        ...known.map((p) => ({
+          person_id: Number(p.person_id), name: p.name, accounts: p.accounts,
+          ext_id: p.ext_id, platform: p.platform, cash_rule: p.cash_rule,
+          on_the_ledger: true,
+          key: personKey({ person_id: Number(p.person_id) }),
+        })),
+        ...unmapped.map((r) => ({
+          /* No person id, and that is the point: an entry against this row
+             sends the ACCOUNT, and the write path mints the person. */
+          person_id: null, name: r.name, accounts: 0,
+          ext_id: r.ext_id, platform: r.platform, cash_rule: null,
+          on_the_ledger: false,
+          /* The same key /api/ledger/import/preview puts on its candidates,
+             from the same function — see personKey in api/ledger_person.js for
+             why that matters. */
+          key: personKey({ person_id: null, platform: r.platform, ext_id: r.ext_id }),
+        })),
+      ],
+      known: known.length,
+      unmapped: unmapped.length,
+      note: 'People are minted by the first entry recorded against them, so a fresh ledger has '
+        + 'none. The second list is the roster — choosing somebody from it sends the account, '
+        + 'and the write path creates the person inside the same transaction as the entry.',
+    });
+  }));
+}
+
 export function ledgerRegisterRoutes(app, { q, wrap }) {
   const LIMIT = 200;
   app.get('/api/ledger/entries', wrap(async (req, res) => {

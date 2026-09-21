@@ -32,28 +32,11 @@
    row ninety that the supervisor was never picked. */
 import { el, esc, panel, note, loading, tableFrom, entity } from './ui.js';
 import { api } from './data.js';
-import { submitEntry, SUPERVISORS, aed, parseAmount } from './deposit_core.js';
+import { submitEntry, SUPERVISORS, aed, parseAmount, pooled, loadPeople,
+  personRef } from './deposit_core.js';
 import { dubaiDay } from './tz.js';
 
 let SUP = null;
-
-/* Six at a time. A hundred and twenty parallel requests against a one-vCPU
-   database is a self-inflicted outage; one at a time is four minutes of
-   somebody watching a spinner. */
-const LANES = 6;
-async function pooled(items, fn) {
-  const out = new Array(items.length);
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.min(LANES, items.length) }, async () => {
-    for (;;) {
-      const k = i; i += 1;
-      if (k >= items.length) return;
-      // eslint-disable-next-line no-await-in-loop
-      out[k] = await fn(items[k], k);
-    }
-  }));
-  return out;
-}
 
 const monthOf = (d) => String(d).slice(0, 7);
 const lastDay = (ym) => {
@@ -71,10 +54,15 @@ export async function renderSalary(root) {
   const gridPanel = panel('The month', null, 'salary-grid');
   root.append(gridPanel.panel);
 
-  const ex = await api('/api/ledger/exposure').catch(() => null);
+  /* EVERYONE ON THE PAYROLL, which is the roster and not the set of people who
+     already carry a ledger balance. Salary is very often the FIRST thing ever
+     recorded against a new hire — they may have no platform account at all —
+     so a list drawn from existing ledger rows would omit exactly them. */
+  const d = await loadPeople();
   head.body.innerHTML = '';
-  if (!ex) { head.body.append(note('The ledger could not be read.', 'bad')); return; }
-  const people = (ex.people || []).filter((p) => p.name);
+  if (!d.ok) { head.body.append(note(esc(d.error), 'bad')); return; }
+  const people = (d.people || []).filter((p) => p.name);
+  if (!d.exposure_ok) head.body.append(note(esc(d.exposure_absent_reason), 'warn'));
 
   /* ── the month, and who is recording ──────────────────────────────────── */
   const bar = el('div', 'depform');
@@ -140,29 +128,39 @@ export async function renderSalary(root) {
       { label: 'Generated', key: 'earned', num: true,
         render: (p) => (p.earned != null ? esc(aed(p.earned))
           : `<span class="dash" title="${esc(p.earned_absent_reason || '')}">—</span>`) },
+      /* `already` and `before` are keyed on person_id and come from the
+         register, so they can only ever describe somebody who HAS entries.
+         A roster row's person_id is null, which no register row carries — the
+         lookups simply miss, which is the right answer: nobody has recorded a
+         salary for a person who does not exist yet.
+
+         The CELL, though, is keyed on the row index and not on person_id, for
+         the same reason as #opening: data-person="null" would collide every
+         unrecorded driver onto one cell. */
       { label: 'Last month', key: 'prev', num: true,
-        render: (p) => (before.has(p.person_id)
+        render: (p) => (p.person_id != null && before.has(p.person_id)
           ? `<span class="dim">${esc(aed(before.get(p.person_id)))}</span>` : '—') },
       { label: `Salary for ${ym}`, key: 'pay', num: true,
-        render: (p) => (already.has(p.person_id)
+        render: (p) => (p.person_id != null && already.has(p.person_id)
           ? `${esc(aed(Math.abs(already.get(p.person_id).amount)))} <span class="pill ok">recorded</span>`
-          : `<input class="depinput salcell" inputmode="decimal" data-person="${p.person_id}" `
-            + `placeholder="${before.has(p.person_id) ? esc(String(before.get(p.person_id))) : '0.00'}">`) },
+          : `<input class="depinput salcell" inputmode="decimal" data-row="${people.indexOf(p)}" `
+            + `placeholder="${p.person_id != null && before.has(p.person_id)
+              ? esc(String(before.get(p.person_id))) : '0.00'}">`) },
     ], { cards: true, cardLead: 'name' }));
 
     gridPanel.body.querySelectorAll('.salcell').forEach((i) => {
-      inputs.set(Number(i.dataset.person), i);
+      inputs.set(Number(i.dataset.row), i);
       i.oninput = () => { verdict.innerHTML = ''; saveBtn.disabled = true; };
     });
   }
 
   const filled = () => [...inputs.entries()]
-    .map(([id, i]) => ({ id, v: parseAmount(i.value), raw: i.value.trim() }))
-    .filter((r) => r.raw);
+    .map(([row, i]) => ({ row, p: people[row], v: parseAmount(i.value), raw: i.value.trim() }))
+    .filter((r) => r.raw && r.p);
 
   const entryFor = (r, ym) => ({
-    person_id: r.id,
-    person_name: people.find((p) => p.person_id === r.id)?.name,
+    ...personRef(r.p),
+    person_name: r.p.name,
     type_code: 'salary', amount: r.v, settles_via: 'bank',
     effective_on: lastDay(ym), period_start: `${ym}-01`, period_end: lastDay(ym),
     entered_by: SUP, note: `${ym} salary, all in`,
@@ -189,8 +187,7 @@ export async function renderSalary(root) {
       `${esc(String(rows.length - refused.length))} of ${esc(String(rows.length))} rows would be `
       + `recorded for ${esc(ym)}, totalling ${esc(aed(total))}. Nothing has been written — every `
       + 'one of those ran against the real constraints inside a transaction that was rolled back.'));
-    refused.forEach((r) => verdict.append(note(
-      `${people.find((p) => p.person_id === r.row.id)?.name}: ${r.why}`, 'bad')));
+    refused.forEach((r) => verdict.append(note(`${r.row.p.name}: ${r.why}`, 'bad')));
     saveBtn.disabled = refused.length === rows.length;
   };
 
@@ -204,8 +201,7 @@ export async function renderSalary(root) {
     const failed = out.map((o, k) => (o.error ? { row: rows[k], why: o.error } : null)).filter(Boolean);
     verdict.append(note(`${rows.length - failed.length} recorded for ${ym}.`,
       failed.length ? 'warn' : 'ok'));
-    failed.forEach((r) => verdict.append(note(
-      `${people.find((p) => p.person_id === r.row.id)?.name}: ${r.why}`, 'bad')));
+    failed.forEach((r) => verdict.append(note(`${r.row.p.name}: ${r.why}`, 'bad')));
     await drawGrid();
   };
 

@@ -420,6 +420,10 @@ export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'ac
   'advances',
   /* #salary is a month, chosen on the page itself. */
   'salary',
+  /* #opening states a POSITION as of a date on the page itself. */
+  'opening',
+  /* #import-sheet is a file and a review queue; no window governs either. */
+  'import-sheet',
   /* #trip is ONE booking addressed by the provider's own id. /api/trip takes a
      platform and an id and nothing else — a range, a channel or a fleet
      control above it would govern nothing, and would ride along into every

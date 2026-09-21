@@ -6740,6 +6740,33 @@ app.get('/api/ledger/exposure', (_, r) => r.json({
   ],
 }));
 
+/* WHO A PICKER MAY OFFER — three people who exist plus two roster accounts
+   nobody has claimed. The second half is the whole reason this endpoint is
+   separate from the one above: a picker reading exposure alone offers only
+   people who already have ledger rows, which on a fresh ledger is nobody, so
+   no first entry could ever be made. The fixture carries both kinds because a
+   browser test that sees only the first kind proves nothing about the case
+   this endpoint was added for. */
+app.get('/api/ledger/people', (_, r) => r.json({
+  people: [
+    { person_id: 1, name: 'Tariq Afzal Said Afzal', accounts: 2, ext_id: 'U-TARIQ',
+      platform: 'uber', cash_rule: 'deposit_all', on_the_ledger: true, key: 'p:1' },
+    { person_id: 2, name: 'Mohammed Selim Shafiqur Rahman', accounts: 1, ext_id: 'U-SELIM',
+      platform: 'uber', cash_rule: 'net_against_pay', on_the_ledger: true, key: 'p:2' },
+    /* No account at all — the first-week salary case. */
+    { person_id: 3, name: 'Siyad Kallyanathoppil Paramba', accounts: 0, ext_id: null,
+      platform: null, cash_rule: null, on_the_ledger: true, key: 'p:3' },
+    { person_id: null, name: 'Nadia Omar Hassan', accounts: 0, ext_id: 'B-NADIA',
+      platform: 'bolt', cash_rule: null, on_the_ledger: false, key: 'a:bolt:B-NADIA' },
+    { person_id: null, name: 'Rashid Malik Iqbal', accounts: 0, ext_id: 'Y-RASHID',
+      platform: 'yango', cash_rule: null, on_the_ledger: false, key: 'a:yango:Y-RASHID' },
+  ],
+  known: 3, unmapped: 2,
+  note: 'People are minted by the first entry recorded against them, so a fresh ledger has '
+    + 'none. The second list is the roster — choosing somebody from it sends the account, '
+    + 'and the write path creates the person inside the same transaction as the entry.',
+}));
+
 app.get('/api/ledger/entries', (req, r) => {
   const book = String(req.query.book || '');
   const all = [

@@ -827,6 +827,55 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **`driver_platform_state` AND `driver_compliance` NAME THEIR PEOPLE IN
+  `full_name`. `driver_name` IS THE OTHER HALF OF THE SCHEMA.** `driver_name`
+  is the trip- and rollup-side spelling — `trip`, `money_event`,
+  `vehicle_driver_day`, `driver_statement_day`, `driver_payout_day` all use it,
+  and `sql/schema_v53.sql` lists exactly those five. The two ROSTER tables do
+  not. Naming the wrong one costs a runtime `column "driver_name" does not
+  exist`, and if it sits inside a transaction the whole transaction rolls back:
+  `api/ledger_person.js` carried this for its entire life in the branch that
+  attaches sibling accounts while minting a person, so the FIRST entry recorded
+  against anybody the merge register knows wrote nothing at all — 130 entries
+  over 124 people, silently. Caught 2026-09-21. Every test walked past it
+  because the two easy shapes (no siblings at all; a sibling already mapped)
+  both return before that statement runs; it takes siblings NAMED but NONE
+  MAPPED, which is the common shape on a ledger with nobody on it yet. The
+  assertion is in `test/ledger_resolve_person.test.mjs`.
+
+* **A LAZILY-MINTED TABLE CANNOT SEED ITSELF, AND NO FIXTURE WILL EVER SHOW
+  YOU THAT.** People on the money ledger are minted by the first entry recorded
+  against them (`api/ledger_person.js`), which is right — but every entry screen
+  listed drivers from `/api/ledger/exposure`, which reads `driver`. Empty table
+  → picker offers nobody → no entry can be made → nobody is ever minted. A
+  closed loop, live on production and reported as five zeroes, that **none of
+  the 270 test files could see**, because every one of them seeds a person
+  before it asks anything. The fix is `/api/ledger/people`, which unions the
+  minted people with the unclaimed platform roster; the general lesson is that
+  a fixture which starts by creating the thing under test cannot detect that
+  nothing in the product creates it. Where a table is populated lazily, assert
+  the EMPTY case explicitly — `test/ledger_people.test.mjs` does.
+
+* **SEEDING EXPLICIT IDS DOES NOT ADVANCE A BIGSERIAL.** `INSERT INTO driver
+  (id, full_name) VALUES (1,…)` leaves the sequence at 1, so the first row the
+  code under test MINTS collides on `driver_pkey`. The error says "duplicate
+  key value violates unique constraint" and names nothing about the fixture
+  four hundred lines earlier. Every ledger fixture in this repo seeds explicit
+  ids; only the ones that go on to mint are affected. Fix in the fixture with
+  `SELECT setval(pg_get_serial_sequence('driver','id'), (SELECT max(id) FROM
+  driver))`, not in the code. Production never hits it — `ledger_person.js` is
+  the only writer and always uses the sequence.
+
+* **A DATALIST IS MATCHED ON ITS OPTION VALUE, SO TWO PEOPLE WITH ONE NAME ARE
+  ONE OPTION.** `people.find(p => p.name === input.value)` silently returns
+  whichever of them is first in the array, and this roster deliberately holds
+  pairs that are two different men — `api/identity_map.js` keeps back five who
+  carry simultaneous trips in two cars. Any picker over this data must
+  disambiguate the OPTION TEXT (by account) and look up by that text, never by
+  the bare name. Same for a grid keyed on `data-person="${p.person_id}"` when
+  half the rows legitimately carry a null id: every one of them collides on
+  `data-person="null"`. Key on the row index.
+
 * **`driver_statement_day` CANNOT BE JOINED TO A PERSON FOR MOST OF ITS
   VALUE.** It is keyed on a normalised driver NAME plus fleet, and
   `sql/schema_v25.sql:28` says why — the operator's ledger predates our ids and

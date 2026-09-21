@@ -77,8 +77,17 @@ console.log('\nthe advances register');
     (e) => e.textContent.trim());
   check('the person whose exposure cannot be measured sorts FIRST, not last',
     /Siyad/.test(firstRow), firstRow);
+  /* OF THE PEOPLE ON THE LEDGER — three of them — and not of everybody the
+     form can offer, which since /api/ledger/people landed also includes the
+     platform roster. Folding the two into one count would read as "most of
+     the fleet is unmeasurable" on a ledger that is merely new. */
   check('and the page says how many of how many that is',
     /1 of 3 people have no exposure figure/.test(body), body.slice(0, 400));
+  check('the roster accounts are counted separately, with their own reason',
+    /2 more are on a platform roster with nothing ever recorded/.test(body), body.slice(0, 600));
+  check('and the register itself lists only the people who have a record',
+    (await page.$$('[data-panel="advances"] tbody tr')).length === 3,
+    String((await page.$$('[data-panel="advances"] tbody tr')).length));
   check('naming the direction the error would run in',
     /understate exposure/.test(body));
 
@@ -126,8 +135,13 @@ console.log('\nthe salary grid');
   await page.goto(`${base}/#salary`, { waitUntil: 'networkidle' });
   await page.waitForSelector('.salcell', { timeout: 15000 });
 
+  /* FIVE, NOT THREE. The grid is payroll, and payroll covers everybody on the
+     roster — including the two who have never been recorded against here. A
+     grid drawn from the ledger's own population would omit exactly the new
+     hires whose first salary this screen exists to record. */
   const cells = await page.$$('.salcell');
-  check('every driver gets a cell in the column', cells.length === 3, String(cells.length));
+  check('every driver on the roster gets a cell, not only those with a record',
+    cells.length === 5, String(cells.length));
   const h = await page.$eval('.salcell', (e) => Math.round(e.getBoundingClientRect().height));
   check('and each is a touch target', h >= 44, String(h));
 

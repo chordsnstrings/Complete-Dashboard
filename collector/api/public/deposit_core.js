@@ -26,6 +26,8 @@
    second one with a 413 at the end of the flow, after the cash had already
    changed hands. */
 
+import { api } from './data.js';
+
 /* The route's limit is 1MB (api/ledger_routes.js). Aim under it with room for
    the multipart-free raw body to be exactly what we measured. */
 export const MAX_BYTES = 900 * 1024;
@@ -107,3 +109,189 @@ export const parseAmount = (s) => {
   const v = Number(t);
   return Number.isFinite(v) && v > 0 ? v : null;
 };
+
+/* SIX AT A TIME.
+   A hundred and twenty parallel requests against a one-vCPU database is a
+   self-inflicted outage; one at a time is four minutes of somebody watching a
+   spinner. Shared by every grid on these screens rather than copied into each,
+   because the number is a fact about the database and not about the page. */
+export const LANES = 6;
+export async function pooled(items, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(LANES, items.length) }, async () => {
+    for (;;) {
+      const k = i; i += 1;
+      if (k >= items.length) return;
+      // eslint-disable-next-line no-await-in-loop
+      out[k] = await fn(items[k], k);
+    }
+  }));
+  return out;
+}
+
+/* A CSV a person exported from a spreadsheet, parsed where it was chosen.
+   ─────────────────────────────────────────────────────────────────────────
+   In the browser, deliberately: the file never leaves the machine it was
+   picked on until a human has looked at what it matched, and the import
+   preview then receives ROWS rather than a file it has to guess the shape of.
+
+   Quoted fields, embedded commas, doubled quotes and CRLF are all things a
+   real export contains — a split(',') parser turns "Khan, Muhammad" into two
+   columns and every row after it is off by one, silently. */
+export function parseCsv(text) {
+  const rows = [];
+  let row = []; let field = ''; let quoted = false; let i = 0;
+  const s = String(text ?? '').replace(/^\uFEFF/, '');
+  while (i < s.length) {
+    const c = s[i];
+    if (quoted) {
+      if (c === '"') {
+        if (s[i + 1] === '"') { field += '"'; i += 2; continue; }
+        quoted = false; i += 1; continue;
+      }
+      field += c; i += 1; continue;
+    }
+    if (c === '"') { quoted = true; i += 1; continue; }
+    if (c === ',') { row.push(field); field = ''; i += 1; continue; }
+    if (c === '\r') { i += 1; continue; }
+    if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; i += 1; continue; }
+    field += c; i += 1;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows.filter((r) => r.some((v) => String(v).trim() !== ''));
+}
+
+/** Header row plus data rows, as objects keyed by a folded header name. */
+export function csvObjects(text) {
+  const rows = parseCsv(text);
+  if (rows.length < 2) return { headers: rows[0] || [], objects: [] };
+  const headers = rows[0].map((h) => String(h).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_'));
+  return {
+    headers,
+    objects: rows.slice(1).map((r) => Object.fromEntries(headers.map((h, k) => [h, r[k] ?? '']))),
+  };
+}
+
+/* WHO A PICKER MAY OFFER — and why it is not the list of people who owe money.
+   ─────────────────────────────────────────────────────────────────────────
+   THE CLOSED LOOP THIS EXISTS TO BREAK. People on this ledger are minted
+   lazily, by the first entry recorded against them (api/ledger_person.js), and
+   every one of these screens originally listed drivers from
+   /api/ledger/exposure — which reads `driver`. On a ledger nobody has written
+   to, `driver` is empty, so the picker offered nobody, so no entry could be
+   made, so nobody was ever minted. The first live read of production returned
+   five zeroes and a policy that could not be judged, and none of the test
+   files caught it because every one of them seeds a person before it asks.
+
+   So the OFFER comes from /api/ledger/people, which unions the minted people
+   with the roster accounts nobody has claimed yet, and the FIGURES come from
+   /api/ledger/exposure, folded on afterwards. The two are different questions
+   and were being answered by one endpoint that could only ever answer the
+   second.
+
+   A roster row carries person_id: null, and that is load-bearing. The write
+   path takes the ACCOUNT for those and resolves it inside the same transaction
+   as the entry, so the identity decision is taken once, by the resolver, with
+   the merge register in hand — rather than by a page that fabricated an id.
+
+   EXPOSURE FAILING IS NOT PEOPLE FAILING. If the figures cannot be read the
+   list is still returned, with `exposure_absent_reason` set and every row's
+   figures null — an operator can still record a handover, which is the whole
+   point of the screen, and every number renders absent with the true reason
+   rather than as a zero. */
+export async function loadPeople({ from = null, to = null } = {}) {
+  const qs = [from && `from=${from}`, to && `to=${to}`].filter(Boolean).join('&');
+  const [dir, ex] = await Promise.all([
+    api('/api/ledger/people').catch(() => null),
+    api(`/api/ledger/exposure${qs ? `?${qs}` : ''}`).catch(() => null),
+  ]);
+  if (!dir) {
+    return { ok: false, people: [], known: 0, unmapped: 0,
+      error: 'the list of drivers could not be read, so there is nobody to record against' };
+  }
+
+  const fig = new Map();
+  for (const p of ex?.people || []) if (p.person_id != null) fig.set(Number(p.person_id), p);
+
+  const exposureAbsentReason = ex ? null
+    : 'the exposure figures could not be read. Recording is unaffected — what is missing is '
+      + 'the balance beside each name, not the ability to enter one.';
+
+  /* THE EXPOSURE ROW SUPPLIES THE FIGURES; THE OFFER ROW SUPPLIES THE IDENTITY.
+     Spread in that order, deliberately. Exposure computes a dozen fields — the
+     earned denominator and why it is missing, the cash basis, the verdict in
+     words — and naming them one at a time here is a list that silently goes
+     stale the next time one is added, which is how #salary came to render a
+     blank Generated column. So exposure goes in wholesale and the offer row
+     overwrites the four fields that decide WHO this is; those must come from
+     the list that also holds people exposure has never heard of. */
+  const people = (dir.people || []).map((p) => {
+    const f = (p.person_id != null ? fig.get(Number(p.person_id)) : null) || {};
+    return {
+      ...f,
+      ...p,
+      /* ext_id: exposure picks the account it could link; the offer row's is
+         the account it was listed under. Either opens the right driver, and
+         exposure's is the one already proven against test/interlinking. */
+      ext_id: f.ext_id || p.ext_id || null,
+      exposure_pct: f.exposure_pct ?? null,
+      exposure_absent_reason: f.exposure_absent_reason || exposureAbsentReason
+        || (p.person_id == null
+          ? 'nothing has ever been recorded against this driver, so there is no balance to '
+            + 'show. They are listed because they are on the roster and can be recorded against.'
+          : null),
+      /* A roster row genuinely has no figures. Null rather than absent, so a
+         render that reaches for one gets the dash and its reason rather than
+         undefined. */
+      owes: f.owes || null,
+      earned: f.earned ?? null,
+      earned_absent_reason: f.earned_absent_reason
+        || (p.person_id == null
+          ? 'this driver has no ledger record yet, so nothing has been attributed to them'
+          : null),
+      /* From the offer list, always: exposure cannot know the cash rule of
+         somebody it has never seen, and a stale one here decides what the
+         deposit screen asks of a driver. */
+      cash_rule: p.cash_rule ?? null,
+      accounts: p.accounts,
+      on_the_ledger: p.on_the_ledger,
+      person_id: p.person_id,
+      name: p.name,
+      platform: p.platform,
+    };
+  });
+
+  return {
+    ok: true, people,
+    known: dir.known, unmapped: dir.unmapped, note: dir.note,
+    policy: ex?.policy || null,
+    policy_absent_reason: ex?.policy_absent_reason || null,
+    exposure_ok: ex != null,
+    exposure_absent_reason: exposureAbsentReason,
+  };
+}
+
+/** The fields a write must send to address this person. A minted person is
+ *  addressed by id; an unclaimed roster row by the ACCOUNT, which the server
+ *  resolves. Never both, and never a name — api/import_routes.js refuses a
+ *  name at the boundary for the same reason.
+ *
+ *  THE SAME RULE AS `personRef` IN api/ledger_person.js, and deliberately a
+ *  copy: this file ships to a browser and that one imports the merge register,
+ *  which must not. test/ledger_ui.test.mjs asserts the two agree, because a
+ *  rule that exists twice is a rule that drifts. */
+export function personRef(p) {
+  if (!p) return null;
+  return p.person_id != null
+    ? { person_id: p.person_id }
+    : { platform: p.platform, ext_id: p.ext_id };
+}
+
+/** How a picker labels somebody, including whether they are new to the ledger.
+ *  Said rather than implied: an operator choosing a name that has never been
+ *  recorded against should know that before the money moves, not after. */
+export function personLabel(p) {
+  if (!p) return '';
+  return p.on_the_ledger ? p.name : `${p.name} — new to the ledger`;
+}

@@ -57,6 +57,33 @@ export function siblingIds(id, links) {
   return [...out];
 }
 
+/* HOW A SCREEN NAMES SOMEBODY IT HAS NOT YET DECIDED ABOUT.
+   ─────────────────────────────────────────────────────────────────────────
+   Two shapes, because there are genuinely two kinds of candidate: a person
+   this ledger already holds, and a platform account nobody has claimed. A
+   picker has to offer both — on a ledger nobody has written to, the second
+   list is the only one with anybody in it — and it has to send back something
+   the server can act on without re-deciding who somebody is.
+
+     p:<person id>              somebody who exists
+     a:<platform>:<account id>  an account, which resolvePerson resolves
+
+   Defined once, here, because two routes emit these keys and one screen sends
+   them back: /api/ledger/people and /api/ledger/import/preview. Two spellings
+   of the same key is a picker whose options silently stop matching what the
+   commit route can address, with no error anywhere — the row simply never
+   gets a person. */
+export const personKey = (p) => (p && p.person_id != null
+  ? `p:${Number(p.person_id)}`
+  : `a:${p?.platform}:${p?.ext_id}`);
+
+/** The identifier a write must carry to address this candidate. A person id,
+ *  or the account — never a name, which is what api/import_routes.js refuses
+ *  at its boundary rather than merely discouraging. */
+export const personRef = (p) => (p && p.person_id != null
+  ? { person_id: Number(p.person_id) }
+  : { platform: p?.platform || null, ext_id: p?.ext_id || null });
+
 /** Resolve (platform, ext_id) to a person id, creating one if nobody knows them.
  *
  *  Returns { person_id, resolved_from, created, attached } — or
@@ -151,8 +178,14 @@ export async function resolvePerson(q, { platform, extId, name, by = null, links
     await q(
       `INSERT INTO driver_platform_id
          (platform, external_id, driver_id, display_name, basis, linked_by)
-       SELECT platform, driver_ext_id, $2, driver_name, $3, $4
-         FROM (SELECT DISTINCT platform, driver_ext_id, driver_name
+       SELECT platform, driver_ext_id, $2, full_name, $3, $4
+         /* full_name in BOTH roster tables. driver_name is the trip- and
+            rollup-side spelling (trip, money_event, driver_statement_day) and
+            naming it here threw "column driver_name does not exist", which
+            rolled back the whole mint — so the first entry recorded against
+            anybody the merge register knows wrote nothing at all. See the
+            block in test/ledger_resolve_person.test.mjs. */
+         FROM (SELECT DISTINCT platform, driver_ext_id, full_name
                  FROM driver_platform_state WHERE driver_ext_id = $1
                UNION
                SELECT DISTINCT platform, driver_ext_id, full_name

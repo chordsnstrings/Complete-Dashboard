@@ -23,7 +23,8 @@
    first — the button is disabled until the server has said what would happen. */
 import { el, esc, note, loading } from './ui.js';
 import { dubaiDay } from './tz.js';
-import { compress, putReceipt, submitEntry, SUPERVISORS, aed, parseAmount } from './deposit_core.js';
+import { compress, putReceipt, submitEntry, SUPERVISORS, aed, parseAmount,
+  personRef } from './deposit_core.js';
 
 /* The supervisor sticks for the session, across every screen that uses this
    form. Somebody working through a pile should name themselves once — and
@@ -36,7 +37,9 @@ export const currentSupervisor = () => SUP;
  * @param host      where to render
  * @param types     [{ code, label, needs_proof, hint }] — what this screen offers
  * @param onSaved   called after a successful commit
- * @param people    [{ person_id, name, accounts }]
+ * @param people    [{ person_id, name, accounts, platform, ext_id, on_the_ledger }]
+ *                  person_id is null for somebody on a platform roster who has no
+ *                  ledger record yet — see loadPeople() in ./deposit_core.js.
  */
 export function entryForm(host, { types, people, onSaved, settlesVia = null }) {
   const form = el('div', 'depform');
@@ -90,10 +93,30 @@ export function entryForm(host, { types, people, onSaved, settlesVia = null }) {
   pick.type = 'search'; pick.placeholder = 'Type a driver’s name…';
   pick.setAttribute('list', 'entry-people');
   const dl = el('datalist'); dl.id = 'entry-people';
-  dl.innerHTML = people.map((p) => `<option value="${esc(p.name)}"></option>`).join('');
+
+  /* A DATALIST IS MATCHED ON ITS VALUE, so two people sharing a name would be
+     one indistinguishable option and whichever came first in the array would
+     silently take the money. The roster half of this list makes that likely
+     rather than theoretical: api/identity_map.js exists because the same human
+     appears under several accounts, and two different humans sharing a name is
+     the case it deliberately refuses to fold. So a name that is not unique
+     carries the account that tells the two apart, and the option VALUE is what
+     is matched — never the bare name. */
+  const seen = new Map();
+  people.forEach((p) => seen.set(p.name, (seen.get(p.name) || 0) + 1));
+  const labelOf = (p) => {
+    let t = p.name;
+    if (seen.get(p.name) > 1) {
+      t += p.ext_id ? ` (${p.platform || 'account'} ${p.ext_id})` : ` (person ${p.person_id})`;
+    }
+    if (!p.on_the_ledger) t += ' — new to the ledger';
+    return t;
+  };
+  const byLabel = new Map(people.map((p) => [labelOf(p), p]));
+  dl.innerHTML = [...byLabel.keys()].map((t) => `<option value="${esc(t)}"></option>`).join('');
   const whoseNote = el('div', 'depnote');
   whoseW.append(pick, dl, whoseNote);
-  const chosen = () => people.find((p) => p.name === pick.value) || null;
+  const chosen = () => byLabel.get(pick.value) || null;
 
   /* ── how much ────────────────────────────────────────────────────────── */
   const amtW = field('Amount');
@@ -147,11 +170,23 @@ export function entryForm(host, { types, people, onSaved, settlesVia = null }) {
   };
   pick.oninput = () => {
     const p = chosen();
-    whoseNote.textContent = p
-      ? `${p.accounts} account${p.accounts === 1 ? '' : 's'} on this person — an entry counts `
-        + 'against them whichever account it is made through.'
-      : (pick.value.trim() ? 'Pick a name from the list. This form never takes a typed one, '
-        + 'because a name cannot settle who somebody is.' : '');
+    let msg = '';
+    if (p && p.on_the_ledger) {
+      msg = `${p.accounts} account${p.accounts === 1 ? '' : 's'} on this person — an entry counts `
+        + 'against them whichever account it is made through.';
+    } else if (p) {
+      /* SAID BEFORE THE MONEY MOVES, not discovered afterwards. Recording
+         against a roster account creates the person, and the resolver folds in
+         every sibling the merge register already names — so the operator
+         should know they are opening a record, not adding to one. */
+      msg = `On the ${p.platform || 'platform'} roster as ${p.ext_id}, with nothing recorded `
+        + 'against them yet. Recording this opens their record and pulls in any other account '
+        + 'the merge register already says is the same person.';
+    } else if (pick.value.trim()) {
+      msg = 'Pick a name from the list. This form never takes a typed one, because a name '
+        + 'cannot settle who somebody is.';
+    }
+    whoseNote.textContent = msg;
     whoseNote.className = `depnote${p || !pick.value.trim() ? '' : ' bad'}`;
     reset();
   };
@@ -182,7 +217,13 @@ export function entryForm(host, { types, people, onSaved, settlesVia = null }) {
   const payload = () => {
     const p = chosen();
     return {
-      person_id: p.person_id, person_name: p.name, type_code: kind.code,
+      /* A MINTED PERSON BY ID, AN UNCLAIMED ROSTER ROW BY ACCOUNT — never a
+         fabricated id and never a name. api/ledger_person.js resolves the
+         account inside the same transaction as the entry, so the identity
+         decision is taken once, by the resolver, with the merge register in
+         hand rather than by this form. */
+      ...personRef(p),
+      person_name: p.name, type_code: kind.code,
       amount: parseAmount(amt.value), settles_via: settlesVia,
       effective_on: day.value, entered_by: SUP,
       note: noteIn.value.trim(), receipt_sha: sha,

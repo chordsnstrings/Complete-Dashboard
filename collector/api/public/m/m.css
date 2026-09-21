@@ -406,6 +406,13 @@ a.m-stat:active{ transform:scale(.985) }
 .m-pick { min-height: 44px; padding: 0 14px; text-align: left; font: inherit; font-size: var(--t8);
   color: var(--fg); background: var(--card); border: 1px solid var(--line);
   border-radius: 10px; }
+/* WHICH ACCOUNT, beside the name. Two drivers sharing a name is the case
+   api/identity_map.js deliberately refuses to fold, and a search result list
+   that shows only the name makes the two indistinguishable at exactly the
+   moment somebody is choosing which one the cash came from. Dimmed and
+   smaller: it is the disambiguator, not the label. */
+.m-pickhint { font-size: var(--t4); color: var(--muted); font-weight: 400;
+  margin-left: 6px; white-space: nowrap; }
 .m-picked { display: flex; flex-direction: column; gap: 3px; margin-top: 8px;
   padding: 10px 12px; border-radius: 10px; background: var(--sunken, rgba(127,127,127,.08)); }
 .m-picked span { font-size: var(--t5); color: var(--muted); line-height: 1.45; }
