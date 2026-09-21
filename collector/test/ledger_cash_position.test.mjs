@@ -126,6 +126,22 @@ check('the basis names the fold this ledger uses, because it is not person_key',
   /name/i.test(body.basis || '') && /not reconciled|different person fold/i.test(body.basis || ''),
   body.basis);
 
+/* ── the per-person series, which is what settles balance-vs-daily-flow ──
+   The aggregate cannot distinguish a balance that climbs and drops from a
+   quantity that stands alone each day; only consecutive days can. */
+const ser = await get('/api/ledger/cash-position?person=balance%20holder&as_of=2026-09-21');
+const sb = ser.body ?? ser;
+check('a person series comes back newest first',
+  (sb.days || []).map((d) => d.day).join(',') === '2026-09-04,2026-09-03,2026-09-02,2026-09-01',
+  JSON.stringify((sb.days || []).map((d) => d.day)));
+check('and carries the daily figure, nulls included rather than zeroed',
+  sb.days?.[1]?.unremitted === null && sb.days?.[0]?.unremitted === 900,
+  JSON.stringify(sb.days?.slice(0, 2)));
+check('with the cash flow beside it for comparison',
+  sb.days?.[0]?.cash === 250, String(sb.days?.[0]?.cash));
+check('a name the ledger does not hold says so rather than returning an empty list silently',
+  /no statement day on file/i.test((await get('/api/ledger/cash-position?person=nobody')).body?.note || ''));
+
 /* ── an empty ledger says so instead of totalling nothing to zero ──────── */
 const db2 = new PGlite();
 await applySchema(db2);

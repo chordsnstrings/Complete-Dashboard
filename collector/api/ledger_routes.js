@@ -138,6 +138,50 @@ export function ledgerRoutes(app, { q, wrap }) {
         ORDER BY (l.unremitted IS NULL), l.unremitted DESC NULLS LAST, a.driver_name`,
       [asOf]);
 
+    /* ?person=<name_key> — the day-by-day series for one person, which is the
+       only thing that settles what this column IS.
+
+       MEASURED on production 2026-09-21, before this parameter existed: every
+       person's minimum unremitted figure is 0.00, the sum of all daily figures
+       is AED 1,935,693 against AED 6,243 for the latest-per-person, and 146 of
+       217 people carry a latest of exactly zero. One person has 444 days of
+       figures oscillating between 0 and 546.61 and summing to 19,306.40. A
+       running balance does not behave like that; a daily quantity does.
+
+       What that leaves open is whether it ACCUMULATES BETWEEN REMITTANCES — a
+       balance that climbs for a few days and drops to zero when the driver
+       hands the cash in — or whether each day stands alone. The two have
+       different right answers for a cash position: the first makes the latest
+       figure the position, the second makes the sum since the last zero the
+       position. Only consecutive days can tell them apart. */
+    const who = String(req.query.person || '').trim();
+    if (who) {
+      const days = await q(
+        `SELECT to_char(day, 'YYYY-MM-DD') AS day, unremitted, cash, bank, network_cash,
+                net, trips, source
+           FROM driver_statement_day
+          WHERE NOT pseudo AND name_key = $1
+            AND day <= coalesce($2::date, (now() AT TIME ZONE 'Asia/Dubai')::date)
+          ORDER BY day DESC LIMIT 60`, [who, asOf]);
+      return res.json({
+        person: who,
+        as_of: asOf,
+        days: days.map((r) => ({
+          day: r.day,
+          unremitted: round2(r.unremitted),
+          cash: round2(r.cash),
+          bank: round2(r.bank),
+          network_cash: round2(r.network_cash),
+          net: round2(r.net),
+          trips: r.trips,
+          source: r.source,
+        })),
+        note: days.length ? null
+          : `no statement day on file under the ledger name key "${who}". This route keys on `
+            + 'name_key, the normalised driver name the operator ledger uses, not on a platform id.',
+      });
+    }
+
     const held = people.filter((p) => p.unremitted_latest != null);
     const rows = people.map((p) => ({
       driver_name: p.driver_name,
