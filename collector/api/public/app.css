@@ -971,6 +971,22 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 .setrow .lab .labhint{display:block;margin-top:3px;font-size:var(--t7,.72rem);line-height:1.4;color:var(--ink-3,var(--ink-2))}
 .setrow{display:grid;grid-template-columns:minmax(190px,290px) 1fr auto;gap:11px;align-items:center;padding:8px 0;border-bottom:1px solid var(--rule)}
 .setrow:last-child{border-bottom:none}
+/* A HINTED ROW IS TALL, AND align-items:center FLOATED ITS INPUT AWAY FROM ITS
+   OWN LABEL. Measured on production 2026-09-22: 21 of the 47 credential rows
+   carry a hint, and the input sat 23-102px BELOW the label naming it, while
+   the 26 rows without one sat at 2px. At 102px the input's midline is level
+   with the fourth line of somebody else's sentence, which is what reading a
+   tall row feels like — you lose which box the label belongs to.
+
+   Only the hinted rows change. A short row centred is right, and :has() is the
+   only way to say "a row that contains a hint" without marking it up twice;
+   it is already used once in this file, and Chromium here supports it. Where
+   it is not supported the rule is simply dropped and the row stays centred,
+   which is today's behaviour — so this degrades to the status quo, never to a
+   broken layout. The 2px matches what a plain row measures, so hinted and
+   unhinted rows line their inputs up with each other. */
+.setrow:has(.labhint){align-items:start}
+.setrow:has(.labhint)>div:not(.lab){padding-top:2px}
 .setrow input{
   background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-sm);
   padding:7px 10px;font:inherit;font-size:var(--t6);color:var(--ink);width:100%;

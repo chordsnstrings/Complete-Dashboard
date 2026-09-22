@@ -30,6 +30,15 @@
         figure that cannot be measured renders absent with a reason, and a
         reason that is not the true one is worse than none.
 
+     4. AN INPUT FLOATED AWAY FROM ITS OWN LABEL. Found after the three above
+        were live, by measuring the deployed page rather than looking at it:
+        `.setrow` is `align-items:center`, and a row made three or four lines
+        tall by its hint pushed the input 23-102px BELOW the label naming it.
+        21 of the 47 rows on production carry a hint; the 26 without one sat
+        at 2px. At 102px the input's midline is level with the fourth line of
+        a different credential's sentence, and you lose which box the label
+        belongs to. Only hinted rows change - a short row centred is right.
+
    Driven against mockapi.mjs, whose /api/settings fixture carries several
    providers so the grouping has something to group, and whose /api/admin-mode
    fixture answers `open: true` because that is the deployment this page is
@@ -37,32 +46,49 @@
    fixture is synthetic and the assertions below read structure, not values.
 
    ── PROVED BY REVERT, 2026-09-22 ────────────────────────────────
-   Full green is 16/16 against the mock, whose /api/settings fixture carries
-   five groups and five rows (production carries forty). Each fix backed out
-   on its own and the suite re-run; measured, not asserted:
+   Full green is 20/20 against the mock, whose /api/settings fixture carries
+   five groups and five rows (production carries forty-seven). Each fix backed
+   out on its own and the suite re-run; every count below was MEASURED after
+   the alignment block was added, not carried forward:
 
-     · `(groupEl || wrap).append(row)` → `wrap.append(row)` — 14 passed, 2
+     · `(groupEl || wrap).append(row)` → `wrap.append(row)` — 18 passed, 2
        FAILED: {"groups":5,"rows":5,"inside":0,"loose":5,"empty":["Uber",
        "Yango","CABMAN","Hotel","Collection"]}. Every group an empty card,
        every row loose. That is the production screenshot exactly.
-     · the `.setrow .lab small{display:block…}` rule deleted — 14 passed, 2
+     · the `.setrow .lab small{display:block…}` rule deleted — 17 passed, 3
        FAILED: the key's computed display reads `inline` and its font is not
-       monospaced, which is the "usernameFMS_ECOSINE_USER" defect. Note the
-       geometry check alone does NOT catch it — a long label wraps and pushes
-       the inline <small> down a line anyway — so the computed `display` is
-       the load-bearing half of that assertion.
-     · the hint welded back into <small> as `' · ' + esc(d.hint)` — 12
-       passed, 4 FAILED: no `.labhint` exists at all, and the key now reads
-       "UBER_WEB_COOKIE · Paste from a logged-in supplier.uber.com session",
-       which is a sentence set in a monospace identifier's typeface.
+       monospaced — the "usernameFMS_ECOSINE_USER" defect — and the alignment
+       check goes with it, because an inline key changes the geometry it is
+       measured against ({"base":-9,"hinted":[2,2,2]}). Note the geometry
+       check alone does NOT catch the key defect: a long label wraps and
+       pushes an inline <small> down a line anyway, so the computed `display`
+       is the load-bearing half of that assertion.
+     · the hint welded back into <small> as `' · ' + esc(d.hint)` — 15
+       passed, 5 FAILED: no `.labhint` exists at all, the key reads
+       "UBER_WEB_COOKIE · Paste from a logged-in supplier.uber.com session" —
+       a sentence in an identifier's typeface — and the alignment block's own
+       guard fires, "there are hinted rows to measure: 0". That guard is why
+       the alignment assertion cannot pass vacuously.
      · the subtitle hardcoded back to 'Changes require the admin token
-       configured on the server' — 14 passed, 2 FAILED: with the fixture open,
+       configured on the server' — 18 passed, 2 FAILED: with the fixture open,
        the panel both fails to name the open state and asserts a gate this
        server is not running.
+     · the two `:has(.labhint)` rules deleted — 19 passed, 1 FAILED:
+       {"base":2,"hinted":[23,23,13]}. Small numbers on the mock because its
+       hints are short; on production the same revert is the 23-102px spread
+       above. The assertion is ± 2px of an unhinted row, not "near" — a
+       threshold wide enough to be comfortable is wide enough to absorb the
+       regression it exists to catch.
+
+   Two of those five counts were first written down by arithmetic — 16 green
+   minus 2 — and re-running them gave 3 and 5, because the alignment block
+   couples to the other fixes in ways subtraction cannot see. They are all
+   measured now. This is the same failure the file is about: a number nobody
+   re-took is a number that has quietly stopped being true.
 
    And one proof the other way, that the sentence is READ rather than printed:
    flipping the fixture to `open: false` with the fix in place turns the panel
-   to "Writes require the admin token…" and the suite stays 16/16. So the two
+   to "Writes require the admin token…" and the suite stays 20/20. So the two
    admin assertions bite on `open === true` only — they track what the server
    says, which is the entire point of the route.
 */
@@ -148,6 +174,37 @@ console.log('\nlabel, key and hint are three things, not one string');
     m.hasHint && m.hintMono === false && !m.bodyMono, JSON.stringify(m));
   check('the hint is on its own line too',
     m.hintDisplay === 'block' && m.hintInSmall === false, JSON.stringify(m));
+}
+
+console.log('\nan input stays level with the label that names it');
+{
+  /* MEASURED ON PRODUCTION, 2026-09-22: 21 of the 47 credential rows carry a
+     hint, and `align-items:center` on a row made three lines tall by that hint
+     pushed the input 23-102px BELOW the label naming it, while the 26 rows
+     without a hint sat at 2px. At 102px the input's midline is level with the
+     fourth line of a different credential's sentence. The assertion is that a
+     hinted row's input starts where an unhinted row's does, within a couple of
+     pixels — not that it is "near", which is the kind of threshold that
+     absorbs a regression silently. */
+  const m = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('[data-panel="credentials"] .setrow')];
+    const drift = (r) => {
+      const lab = r.querySelector('.lab'), inp = r.querySelector('input');
+      return (lab && inp) ? Math.round(inp.getBoundingClientRect().top - lab.getBoundingClientRect().top) : null;
+    };
+    const has = (r) => !!r.querySelector('.labhint');
+    return {
+      hasSupported: CSS.supports('selector(.a:has(.b))'),
+      hinted: rows.filter(has).map(drift).filter((x) => x !== null),
+      plain: rows.filter((r) => !has(r)).map(drift).filter((x) => x !== null),
+    };
+  });
+  check('the browser under test supports :has(), or this proves nothing', m.hasSupported);
+  check('there are hinted rows to measure', m.hinted.length > 0, JSON.stringify(m.hinted.length));
+  check('there are unhinted rows to measure against', m.plain.length > 0, JSON.stringify(m.plain.length));
+  const base = Math.max(...m.plain);
+  check('a hinted row lines its input up with an unhinted one',
+    m.hinted.every((d) => Math.abs(d - base) <= 2), JSON.stringify({ base, hinted: m.hinted }));
 }
 
 console.log('\nthe admin panel says what the SERVER does, not what it wishes');
