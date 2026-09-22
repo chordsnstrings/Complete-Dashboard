@@ -3573,11 +3573,13 @@ export function emptyWindowNote(prof, tab) {
       + 'this person’s work, so what this tab shows is governed by what has been built for them '
       + 'and not by the window on the toolbar.'
     : tab === 'money'
-      ? 'Only the register of entries below is measured over those dates. What somebody owes is '
+      ? 'The windowed panel and the register of entries below are measured over those dates; '
+        + 'the tiles under "Where they stand" are not. What somebody owes is '
         + 'a POSITION and not a figure over a span — an advance taken in June is still '
         + 'outstanding in a window they did not work, and a balance that went quiet is not a '
-        + 'balance that went away — so the figures above the register stand as they are now, '
-        + 'whatever window is chosen.'
+        + 'balance that went away — so the figures under "Where they stand" stand as they are '
+        + 'now, whatever window is chosen, while what a driver earned and the cash that moved '
+        + 'are flows and belong to the dates that name them.'
     : 'Every figure below is measured over those dates, so what is missing here is the work, not '
       + 'the record of it.';
   return `No trip of this driver's falls in ${win}. ${when}${record}. ${closing}${tail}`;

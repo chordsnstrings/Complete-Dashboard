@@ -5266,3 +5266,58 @@ and **`scripts/ark.py` has no `chat` subcommand**, so the call is plain HTTP.
 GLM 5.2 reasons by default and bills it. MiniMax's `minimax.py code --extract`
 writes **an empty file** when the reply contains no fenced code block, with a
 success message; ask for a fenced block explicitly or omit `--extract`.
+
+* **A CUMULATIVE FIGURE UNDER A HEADING THAT NAMED NO WINDOW.** The driver
+  statement's "Cash taken" tile read AED 47,526.31 "over 831 cash trips since
+  2025-01-11" while the toolbar said September. Measured on production
+  2026-09-22 for person 114: the cash for 1–22 September is **AED 1,082.10**
+  — the tile was **44× larger** and moved for no window the operator chose.
+  Two separate causes, and only the second is a bug:
+    1. `api/public/driverledger.js` reads `/api/ledger/exposure` through a
+       **bare `api()`**, deliberately unwindowed, so no `from`/`to` ever
+       reaches it. That is correct for the POSITION tiles beside it.
+    2. even windowed, it would not have helped: `$1` (`from`) binds **exactly
+       one CTE** in that route, `rev` — the revenue denominator. `book`,
+       `taken`, `collected` and `handed` bind only `$2` (`to`). Proved on
+       production: `from=2025-06-01&to=2025-12-31` and `to=2025-12-31` with no
+       `from` at all return the identical `cash_taken 27876.89 / 535 trips`.
+       And `cash_taken_from` is the person's FIRST CASH TRIP EVER, never the
+       window's start — which is where the misleading "since 2025-01-11" came
+       from.
+  The fix does not window the positions — the ratio against the policy line
+  would move with them. Flows moved to their own panel, fed by
+  `/api/driver/register`, which resolves the window through `winDays()` and so
+  honours `period=month` (this product's DEFAULT state) where exposure
+  silently ignores it and answers all-time. **Before sending a window to
+  `/api/ledger/exposure`, note it accepts only `from`/`to` as `YYYY-MM-DD` and
+  ignores `period=` without saying so.**
+
+* **A DEPOSIT IS ALREADY NEGATIVE, SO "LESS DEPOSITS" IS AN ADDITION.**
+  `driver_ledger`'s sign convention (`sql/schema_v78.sql:30-41`) is that a
+  row's `direction` IS its sign, and `cash_deposit` is `direction -1`. The
+  operator's formula "cash trip amount + cash advance − cash deposited" is
+  therefore written `fares + advance + deposit` in SQL and in JS. Writing the
+  minus literally adds the deposits back and **overstates what the driver is
+  holding**, which is the dangerous direction, and it looks entirely plausible
+  — 767.13 where the answer is 467.13. Pinned by revert in
+  `test/driver_register.test.mjs`.
+
+* **`book = 'advance'` IS NOT "ADVANCES GIVEN".** It is a NET over seven type
+  codes — `cash_advance`, `salary_advance`, `charging_advance`,
+  `opening_balance`, `repayment`, `writeoff`, `refund` — the last three of
+  which are `direction -1`. A "cash advance" is `type_code = 'cash_advance'`.
+  Summing the book folds a charging advance and a debt write-off into a cash
+  figure. A fixture needs a NON-cash advance inside the window or the two
+  readings give the same answer and a wrong implementation passes: that is
+  exactly what happened here on the first attempt.
+
+* **`/api/ledger/people`'s `on_the_ledger: true` DOES NOT MEAN "HAS LEDGER
+  ROWS".** It means the person is on the spine. Measured 2026-09-22:
+  347 of 347 people carry it, and `driver_ledger` holds **zero rows
+  fleet-wide** — 0 advance, 0 deduction, 0 cash, 0 `cash_opening`, 0 pay.
+  Anything reading that flag as "has a ledger" is wrong for every person on
+  production.
+
+* **`/api/ledger/exposure` WITHOUT `person_id` TAKES ~60 SECONDS** and returns
+  ~700 KB for 347 people. With `person_id` it answers in a few seconds at
+  ~3 KB. Never call the fleet-wide form from a per-driver surface.

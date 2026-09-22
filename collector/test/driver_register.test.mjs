@@ -79,6 +79,55 @@ await led('cash_advance', 1, 'advance', 99999, '2026-09-10', { src: 'verificatio
 r = (await get('/api/driver/register?person=42&from=2026-09-01&to=2026-09-30')).body;
 const byRef = Object.fromEntries(r.lines.map((l) => [`${l.kind}:${l.ref}`, l]));
 
+/* ── THE WINDOWED HALF: income, and cash taken as its three terms ───────────
+   The operator, 2026-09-22: "this should show the amount that has come in for
+   the date range selected as well, income. Cash taken doesn't show the range
+   selected rather complete cash trip amount. cash taken should be cash trip
+   amount + cash advance - cash deposited for the duration."
+
+   running_taken above is CUMULATIVE — carry plus the window — which is the
+   right answer to "how much has this driver ever taken" and the wrong one to
+   "how much did they take in September". Measured on production for person
+   114: those two are AED 47,526.31 and AED 1,082.10, forty-four times apart.
+   So the flow is reported separately, bounded by the same window as every
+   other total on this route.
+
+   THE ARITHMETIC IS ASSERTED ON ITS SIGN, not just its total. driver_ledger
+   stores a deposit NEGATIVE (direction -1), so "less what they handed back"
+   is an ADDITION. Writing the operator's minus literally would add the
+   deposits back and overstate what the driver holds — the dangerous
+   direction — and it would still look plausible, which is why the terms and
+   the total are pinned separately. */
+{
+  const ow = r.over_window;
+  const t = ow.cash_taken_terms;
+  check('the window reports cash fares over the window alone',
+    t.cash_fares === 117.13, JSON.stringify(t.cash_fares));
+  check('…the CASH advance only, not the whole advance book',
+    t.cash_advance === 500 && t.cash_advance_rows === 1, JSON.stringify(t));
+  check('…and the deposit, stored negative as the ledger stores it',
+    t.cash_deposit === -150 && t.cash_deposit_rows === 1, JSON.stringify(t));
+  check('so cash taken is fares plus advances LESS deposits — 117.13 + 500 - 150',
+    ow.cash_taken === 467.13, JSON.stringify(ow.cash_taken));
+  check('and the sign convention is stated rather than left to be rediscovered',
+    t.deposit_is_already_negative === true);
+  /* The verification row is 99999 and would dwarf every figure here. */
+  check('a verification entry is not in any windowed term',
+    t.cash_advance !== 100499 && ow.cash_taken < 1000, JSON.stringify(ow.cash_taken));
+  check('the window it was measured over is named on the figure itself',
+    ow.from === '2026-09-01' && ow.to === '2026-09-30', JSON.stringify([ow.from, ow.to]));
+  /* INCOME. Nothing seeds driver_payout_day here, so this is the ABSENT case
+     — and it must say the platforms published nothing for the window, never
+     nought earned. */
+  check('income is absent rather than nought when no statement was published',
+    ow.earned === null, JSON.stringify(ow.earned));
+  check('…with the true reason, which is a gap in what was published',
+    /not a statement that they earned nothing/.test(ow.earned_absent_reason || ''),
+    ow.earned_absent_reason);
+}
+
+
+
 check('a cash fare RAISES what the driver holds, at the trip',
   byRef['trip:t1'].cash_in === 67.13, JSON.stringify(byRef['trip:t1']));
 check('and it is the platform\'s payments figure, not the rider\'s fare',
@@ -220,6 +269,42 @@ check('with both balances absent and their own reasons, rather than zeros',
 const viaAcct = (await get('/api/driver/register?ext_id=b-1&from=2026-09-01&to=2026-09-30')).body;
 check('either account of the person opens the same register',
   viaAcct.person_id === 42 && viaAcct.of === r.of, `${viaAcct.person_id} / ${viaAcct.of}`);
+
+/* A NON-CASH ADVANCE INSIDE THE WINDOW, which is what tells the two possible
+   readings of "cash advance" apart. `book = 'advance'` is a NET over seven
+   type codes — salary_advance, charging_advance, opening_balance, repayment,
+   writeoff, refund — and the operator asked for the CASH one. Without a
+   second kind of advance in range, summing the book and summing the type give
+   the same answer and a wrong implementation passes. */
+await led('salary_advance', 1, 'advance', 250, '2026-09-12');
+{
+  const w = (await get('/api/driver/register?person=42&from=2026-09-01&to=2026-09-30')).body;
+  check('a salary advance moves the advance BOOK', w.totals.ledger_advance === 750,
+    JSON.stringify(w.totals.ledger_advance));
+  check('…but not the CASH advance term, which is the one the operator named',
+    w.over_window.cash_taken_terms.cash_advance === 500,
+    JSON.stringify(w.over_window.cash_taken_terms.cash_advance));
+  check('…so cash taken does not move either',
+    w.over_window.cash_taken === 467.13, JSON.stringify(w.over_window.cash_taken));
+}
+
+/* And once a statement IS published, income is the sum over the window. */
+await q(`INSERT INTO driver_payout_day
+           (platform, driver_ext_id, day, period_start, period_end, earnings)
+         VALUES ('uber','u-1','2026-09-05','2026-09-01','2026-09-07',400.25),
+                ('uber','u-1','2026-09-20','2026-09-15','2026-09-21',300.30),
+                ('uber','u-1','2026-10-15','2026-10-12','2026-10-18',9999.99)`);
+{
+  const w = (await get('/api/driver/register?person=42&from=2026-09-01&to=2026-09-30')).body
+    .over_window;
+  check('income is the earnings the platforms published inside the window',
+    w.earned === 700.55, JSON.stringify(w.earned));
+  check('…and a day outside it is not swept in',
+    w.earned !== 10700.54, JSON.stringify(w.earned));
+  check('…counted over the days that carried one',
+    w.earning_days === 2, JSON.stringify(w.earning_days));
+  check('…and no longer absent', w.earned_absent_reason === null, w.earned_absent_reason);
+}
 
 console.log(`\n${fail ? '✗' : '✓'} driver_register: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

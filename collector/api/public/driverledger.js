@@ -63,13 +63,32 @@ function proofCell(e) {
 export async function renderDriverLedger(root, id, prof) {
   root.innerHTML = '';
   const head = panel('Where they stand', null, 'driver-money');
+  /* THREE PANELS, AND THE HEADING IS WHAT SAYS WHICH ONE THE TOOLBAR MOVES.
+     ─────────────────────────────────────────────────────────────────────
+     This tab mixes two kinds of figure and the operator hit the seam:
+     "Cash taken doesn't show the range selected rather complete cash trip
+     amount". It did not, and it was not supposed to — every tile in "Where
+     they stand" is a POSITION as of today, read from an unwindowed
+     /api/ledger/exposure, while the statement below is a FLOW over the dates
+     on the toolbar. Measured on production 2026-09-22 for person 114: the
+     cash figure for 1–22 September is AED 1,082.10 and the tile read AED
+     47,526.31, the lifetime total — 44 times larger, under a heading that
+     named no window at all.
+
+     The answer is not to window the positions. What a driver owes today does
+     not change because somebody moved the dates, and the ratio against the
+     policy line would silently move with them if it did. The answer is that
+     a flow belongs in a panel that NAMES its window, so the two can never be
+     read as one number disagreeing with itself. */
+  const winP = panel(`Over ${windowLabel()}`, null, 'driver-money-window');
   /* The heading says the window, because this list is the one thing on the tab
      the toolbar governs and the tiles above it are not. A reader who cannot
      tell which half moved when they changed the window has two figures that
      appear to contradict each other. */
   const regPanel = panel(`Statement for ${windowLabel()}`, null, 'driver-money-register');
-  root.append(head.panel, regPanel.panel);
+  root.append(head.panel, winP.panel, regPanel.panel);
   loading(head.body);
+  loading(winP.body);
   loading(regPanel.body);
 
   /* The account this page is addressed by, and the platform if the profile
@@ -112,6 +131,10 @@ export async function renderDriverLedger(root, id, prof) {
   if (!ex || !reg) {
     head.body.append(note('The money ledger could not be read just now. This says nothing '
       + 'about what this driver owes — the request for it failed.', 'bad'));
+    /* The exposure read is not the windowed read. One failing says nothing
+       about the other, and leaving the window panel spinning would claim it
+       did. */
+    renderWindow();
     return;
   }
 
@@ -130,6 +153,7 @@ export async function renderDriverLedger(root, id, prof) {
        and this early return showed them none of it. */
     regPanel.body.append(note('No entry has ever been made against this driver, so the register '
       + 'below carries their work and no recorded money.'));
+    renderWindow();
     renderStatement();
     return;
   }
@@ -138,6 +162,8 @@ export async function renderDriverLedger(root, id, prof) {
   if (!p) {
     head.body.append(note('This driver resolves to a person on the money ledger, but no figures '
       + 'came back for them. That is a fault in this page rather than an answer about them.', 'bad'));
+    renderWindow();
+    renderStatement();
     return;
   }
 
@@ -149,18 +175,12 @@ export async function renderDriverLedger(root, id, prof) {
           + 'not over the window' },
     { label: 'Advances outstanding', value: aed(p.owes?.advance) || '—',
       sub: 'what has been advanced, less what has come back' },
-    /* TWO CASH TILES, because they are two questions and one of them is
-       answerable today. This was a single "Cash in hand" tile reading an em
-       dash for everybody — true, since no opening has been stated — while the
-       trips underneath it said person 202 had taken AED 18,636.69. A reader
-       who meets a dash and then a large number twenty lines below reasonably
-       asks which one is real. Both are: one is what went into the hand, the
-       other is what is still in it. */
-    { label: 'Cash taken', value: p.owes?.cash_taken == null ? '—' : aed(p.owes.cash_taken),
-      sub: p.owes?.cash_taken == null ? p.owes?.cash_taken_means
-        : `over ${countOf(p.owes.cash_taken_trips, 'cash trip')}`
-          + (p.owes.cash_taken_from ? ` since ${esc(p.owes.cash_taken_from)}` : '')
-          + ' — a ceiling on what they hold, not a balance' },
+    /* CASH TAKEN USED TO SIT HERE, and it was the one tile in this row that
+       was not a position — it was a lifetime running total, which is neither.
+       It has moved to the windowed panel below, where its dates are named.
+       What stays here is what is STILL IN the hand, which genuinely is a
+       position: "one is what went into the hand, the other is what is still
+       in it", and only the second of those answers to "where they stand". */
     { label: 'Still held', value: p.owes?.cash == null ? '—' : aed(p.owes.cash),
       sub: p.owes?.cash == null ? p.owes?.cash_absent_reason
         : (p.owes?.cash_basis?.is_a_floor ? 'at least this — see below' : 'counted from a stated '
@@ -194,6 +214,68 @@ export async function renderDriverLedger(root, id, prof) {
       + 'needed and nothing is blocked — the approval step arrives with user management.'));
   } else if (ex.policy_absent_reason) {
     head.body.append(note(ex.policy_absent_reason, 'warn'));
+  }
+
+  renderWindow();
+
+  /* ── what moved over the selected window ──────────────────────────────── */
+  /* The operator asked for two things here: "this should show the amount that
+     has come in for the date range selected as well, income", and "cash taken
+     should be cash trip amount + cash advance - cash deposited for the
+     duration". Both are FLOWS, both come from /api/driver/register, which is
+     the read on this page the toolbar already governs — it resolves the window
+     through winDays(), so `period=month` (this product's default) works here
+     where /api/ledger/exposure would silently ignore it and answer all-time.
+
+     A DECLARATION, for the same reason renderStatement below is one: three of
+     the four call sites are the early returns ABOVE, where a const arrow would
+     still be in its temporal dead zone. A driver whose exposure read failed
+     still drove, and this panel still has an answer for them. */
+  function renderWindow() {
+  winP.body.innerHTML = '';
+  const ow = st?.over_window;
+  if (!ow) {
+    winP.body.append(note('The windowed figures could not be read just now, so this panel cannot '
+      + 'say what moved over these dates. The position tiles above are unaffected — they come '
+      + 'from a different read.', 'warn'));
+  } else {
+    const t = ow.cash_taken_terms || {};
+    winP.body.append(kpiRow([
+      { label: 'Income', value: ow.earned == null ? '—' : aed(ow.earned),
+        sub: ow.earned == null ? ow.earned_absent_reason
+          : `what the platforms say this driver generated over ${esc(windowLabel())}, across `
+            + `${countOf(ow.earning_days, 'day')} of statements` },
+      { label: 'Cash taken', value: ow.cash_taken == null ? '—' : aed(ow.cash_taken),
+        sub: ow.cash_taken_means },
+      { label: 'Cash fares', value: aed(t.cash_fares) || '—',
+        sub: `over ${countOf(t.cash_fare_trips, 'cash trip')} in this window` },
+      { label: 'Cash advanced', value: t.cash_advance_rows ? aed(t.cash_advance) : '—',
+        sub: t.cash_advance_rows
+          ? `over ${countOf(t.cash_advance_rows, 'entry')}`
+          : 'no cash advance is recorded between these dates. Not nought advanced — nothing '
+            + 'written down.' },
+      { label: 'Cash handed back', value: t.cash_deposit_rows ? aed(t.cash_deposit) : '—',
+        sub: t.cash_deposit_rows
+          ? `over ${countOf(t.cash_deposit_rows, 'deposit')}`
+          : 'no deposit is recorded between these dates, so nothing comes off. Not nought '
+            + 'handed back — nothing written down.' },
+    ]));
+    /* THE DERIVATION, SPELLED OUT, for the same reason the cash-in-hand term
+       above is shown as its parts: this is the other figure on this page that
+       is computed rather than recorded, and a reader who cannot see the terms
+       can only trust the total. */
+    winP.body.append(el('p', 'cap', `Cash taken is ${esc(aed(t.cash_fares))} of cash fares`
+      + (t.cash_advance_rows ? `, plus ${esc(aed(t.cash_advance))} advanced` : '')
+      + (t.cash_deposit_rows ? `, less ${esc(aed(Math.abs(Number(t.cash_deposit))))} handed back` : '')
+      + `, over ${esc(windowLabel())}. It is what moved between these dates — not a balance, and `
+      + 'not what they are holding now, which is the Still held tile above.'));
+    if (!t.cash_advance_rows && !t.cash_deposit_rows) {
+      winP.body.append(note('Two of the three terms are absent: nothing is recorded in the cash '
+        + 'book for these dates, so this figure is cash fares alone. It is therefore a CEILING '
+        + 'on what they took, not a net — an advance nobody entered would raise it and a '
+        + 'deposit nobody entered would lower it.', 'warn'));
+    }
+  }
   }
 
   /* ── the register ─────────────────────────────────────────────────────── */

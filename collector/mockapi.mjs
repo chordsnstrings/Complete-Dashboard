@@ -7293,6 +7293,26 @@ app.get('/api/driver/register', (req, r) => {
         owed: null, owed_on: null,
         owed_absent_reason: 'no opening balance has been carried in for this person.' },
       carried_in: { cash: null, owed: null, why: 'no opening, so nothing to carry.' },
+      /* THE WINDOWED HALF, with TWO OF THE THREE CASH TERMS ABSENT — which is
+         the production shape: driver_ledger holds zero rows fleet-wide
+         (measured 2026-09-22, all 347 people), so a composed cash figure is
+         cash fares alone and has to say so rather than print the other two as
+         nought. */
+      over_window: {
+        from: '2026-08-01', to: '2026-08-31',
+        earned: null, cash_earned: null, earning_days: 0, earning_accounts: 1,
+        earned_absent_reason: 'none of this person\'s linked accounts reported earnings '
+          + 'between these dates. That is a gap in what the platforms published for this '
+          + 'window, not a statement that they earned nothing.',
+        cash_taken: 67.13,
+        cash_taken_terms: { cash_fares: 67.13, cash_fare_trips: 1,
+          cash_advance: 0, cash_advance_rows: 0,
+          cash_deposit: 0, cash_deposit_rows: 0, deposit_is_already_negative: true },
+        cash_taken_means: 'cash fares over this window. No cash advance and no deposit is '
+          + 'recorded between these dates, so there is nothing to add or take off — this is '
+          + 'what the trips put in their hand, not a balance net of hand-ins nobody has '
+          + 'entered.',
+      },
       totals: { fares: 130.36, cash_in: 67.13, fees: 7.46, ledger_advance: 0,
         ledger_deduction: 0, ledger_cash: 0, ledger_pay: 0, over_the_window: true,
         excludes_verification: true,
@@ -7310,6 +7330,22 @@ app.get('/api/driver/register', (req, r) => {
       owed: 1000, owed_on: '2026-07-31', owed_absent_reason: null },
     carried_in: { cash: 200, owed: 1000,
       why: 'what each balance stood at the day before this window opened.' },
+    /* ALL THREE TERMS PRESENT, so the composed figure and its caption are
+       exercised: 67.13 of cash fares, plus 500 advanced, less 150 handed back
+       = 417.13. The deposit is stored NEGATIVE, as driver_ledger stores it, so
+       the sum adds it — a fixture that carried +150 here would let a sign
+       error through the browser test. */
+    over_window: {
+      from: '2026-08-01', to: '2026-08-31',
+      earned: 1204.55, cash_earned: null, earning_days: 12, earning_accounts: 1,
+      earned_absent_reason: null,
+      cash_taken: 417.13,
+      cash_taken_terms: { cash_fares: 67.13, cash_fare_trips: 1,
+        cash_advance: 500, cash_advance_rows: 1,
+        cash_deposit: -150, cash_deposit_rows: 1, deposit_is_already_negative: true },
+      cash_taken_means: 'cash fares over this window, plus cash advanced to them, less what '
+        + 'they handed back. A flow over these dates — not what they are holding today.',
+    },
     totals: { fares: 130.36, cash_in: 67.13, fees: 7.46, ledger_advance: -500,
       ledger_deduction: 0, ledger_cash: -150, ledger_pay: 0,
       over_the_window: true, excludes_verification: true,

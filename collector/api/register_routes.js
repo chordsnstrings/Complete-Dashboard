@@ -225,6 +225,33 @@ export function registerRoutes(app, { q, wrap, winDays }) {
               (SELECT amt FROM cash_in)                                   AS cash_trips_before`,
       [pid, from, ids]);
 
+    /* WHAT CAME IN OVER THE WINDOW — the income half of the statement.
+       ─────────────────────────────────────────────────────────────────────
+       The operator asked for "the amount that has come in for the date range
+       selected". Everything else on this route is a trip or a ledger line;
+       none of them is earnings. `totals.fares` is what RIDERS WERE CHARGED
+       and this route already says in words that it is not what the driver
+       earned — so answering "income" with it would be the third wrong figure
+       under the same word.
+
+       driver_payout_day is the same table /api/ledger/exposure's `rev` CTE
+       uses for its denominator, summed over the same account list and bounded
+       by the same window, so the two surfaces cannot disagree about what a
+       person generated. One definition, two surfaces.
+
+       NOT coalesced to zero. A person with no payout row earned nothing that
+       anybody RECORDED, which is not the same as having earned nought, and
+       the row count below is what lets the response tell them apart. */
+    const [income] = await q(
+      `SELECT sum(earnings)              AS earned,
+              sum(cash_earnings)         AS cash_earned,
+              count(*)::int              AS rows,
+              count(DISTINCT day)::int   AS days,
+              count(DISTINCT driver_ext_id)::int AS accounts
+         FROM driver_payout_day
+        WHERE driver_ext_id = ANY($1::text[])
+          AND day BETWEEN $2::date AND $3::date`, [ids, from, to]);
+
     /* ── THE THREE KINDS OF LINE ─────────────────────────────────────────
        Ordered by the day the money moved, then by a rank that puts a trip
        before the fee taken out of it and a ledger entry last, so a reader
@@ -406,6 +433,45 @@ export function registerRoutes(app, { q, wrap, winDays }) {
        because a page added up what it was given. */
     const sum = (f) => round2(shaped.filter((l) => !l.verification)
       .reduce((a, l) => a + (Number(f(l)) || 0), 0));
+    /* Counted as well as summed, for the reason the exposure route counts its
+       advance and deduction rows: nothing recorded and a balance that nets to
+       zero are different facts, and a bare sum reports both as 0. */
+    const count = (f) => shaped.filter((l) => !l.verification && f(l)).length;
+
+    /* ── CASH TAKEN, OVER THIS WINDOW, AS THE OPERATOR DEFINED IT ────────
+       "cash taken should be cash trip amount + cash advance - cash deposited
+       for the duration."
+
+       Three measured terms, all bounded by the same window as every other
+       total here:
+
+         cash fares      what the trips put in their hand    (positive)
+         cash advances   cash the company handed them        (positive)
+         cash deposited  what they handed back               (ALREADY NEGATIVE)
+
+       THE MINUS SIGN IS NOT WRITTEN, AND THAT IS THE POINT. driver_ledger's
+       sign convention (sql/schema_v78.sql:30-41) is that a row's `direction`
+       IS its sign, and cash_deposit is direction -1 — so its `amount` is
+       stored negative and the subtraction is already in the data. Writing a
+       literal minus here would ADD the deposits back and overstate what the
+       driver is holding, which is the dangerous direction. api/ledger_routes.js
+       does the same addition at its own cash term for the same reason.
+
+       WHY type_code AND NOT book. `book = 'advance'` is a NET over seven
+       types — salary_advance, charging_advance, opening_balance, repayment,
+       writeoff, refund — and the operator asked for the CASH one. Summing the
+       book would fold a charging advance and a debt write-off into a cash
+       figure. The deposit half takes the whole cash book EXCEPT the opening,
+       matching the exposure route's `handed` CTE, so a future settling type
+       is picked up without another edit. */
+    const cashFares = sum((l) => l.cash_in);
+    const cashAdvance = sum((l) => (l.type_code === 'cash_advance' ? l.amount : 0));
+    const cashDeposit = sum((l) => (l.book === 'cash' && l.type_code !== 'cash_opening'
+      ? l.amount : 0));
+    const cashAdvanceRows = count((l) => l.type_code === 'cash_advance');
+    const cashDepositRows = count((l) => l.book === 'cash' && l.type_code !== 'cash_opening');
+    const cashTripRows = count((l) => l.kind === 'trip' && l.cash_in != null);
+    const takenWindow = round2(cashFares + cashAdvance + cashDeposit);
 
     return res.json({
       from, to,
@@ -438,9 +504,51 @@ export function registerRoutes(app, { q, wrap, winDays }) {
           + 'onto a continuing account; summing only its own lines would restart both balances '
           + 'every time somebody changed the dates.',
       },
+      /* WHAT THE WINDOW ITSELF SAYS — a FLOW, next to the positions the
+         exposure route answers with. The two are different questions and the
+         page must not print them under one heading: what a driver is holding
+         today does not change because somebody moved the dates, and what they
+         took during September does not change because today arrived. */
+      over_window: {
+        from, to,
+        earned: income?.earned == null ? null : round2(Number(income.earned)),
+        cash_earned: income?.cash_earned == null ? null : round2(Number(income.cash_earned)),
+        earning_days: Number(income?.days) || 0,
+        earning_accounts: Number(income?.accounts) || 0,
+        earned_absent_reason: income?.earned != null ? null
+          : (ids.length === 0
+            ? 'this person has no platform account linked, so no statement of theirs can be '
+              + 'found to add up. It is not nought earned: it is nobody to ask.'
+            : 'none of this person\'s linked accounts reported earnings between these dates. '
+              + 'That is a gap in what the platforms published for this window, not a '
+              + 'statement that they earned nothing.'),
+        /* Always a number: the trips measured it and nobody had to type
+           anything. Its TERMS ride beside it because it is derived, and a
+           derived figure that arrives without its parts is one a reader has
+           to trust rather than check. */
+        cash_taken: takenWindow,
+        cash_taken_terms: {
+          cash_fares: cashFares,
+          cash_fare_trips: cashTripRows,
+          cash_advance: cashAdvance,
+          cash_advance_rows: cashAdvanceRows,
+          cash_deposit: cashDeposit,
+          cash_deposit_rows: cashDepositRows,
+          /* The sign, said out loud, because the one way to get this
+             arithmetic wrong is to subtract a number that is already
+             negative. */
+          deposit_is_already_negative: true,
+        },
+        cash_taken_means: cashAdvanceRows === 0 && cashDepositRows === 0
+          ? 'cash fares over this window. No cash advance and no deposit is recorded between '
+            + 'these dates, so there is nothing to add or take off — this is what the trips '
+            + 'put in their hand, not a balance net of hand-ins nobody has entered.'
+          : 'cash fares over this window, plus cash advanced to them, less what they handed '
+            + 'back. A flow over these dates — not what they are holding today.',
+      },
       totals: {
         fares: sum((l) => l.fare),
-        cash_in: sum((l) => l.cash_in),
+        cash_in: cashFares,
         fees: sum((l) => (l.book === 'fee' ? l.amount : 0)),
         ledger_advance: sum((l) => (l.book === 'advance' ? l.amount : 0)),
         ledger_deduction: sum((l) => (l.book === 'deduction' ? l.amount : 0)),

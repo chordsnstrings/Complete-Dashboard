@@ -144,12 +144,56 @@ console.log('\na driver who has a record');
      driver." */
   const tiles = await page.$$eval('[data-panel="driver-money"] .kpi',
     (ks) => ks.map((k) => k.innerText.replace(/\n/g, ' ')));
-  check('the tile row names what was TAKEN as well as what is still held',
-    tiles.some((t) => /Cash taken/i.test(t)) && tiles.some((t) => /Still held/i.test(t)),
+  /* CASH TAKEN MOVED, and the move is the fix.
+     ─────────────────────────────────────────────────────────────────────
+     It used to sit in this row, which is a row of POSITIONS, and it was the
+     one tile in it that was not one — a lifetime running total under a
+     heading that named no window. Measured on production 2026-09-22 for
+     person 114: the cash for 1-22 September is AED 1,082.10 and this tile
+     read AED 47,526.31, the lifetime figure, 44x larger. The operator: "Cash
+     taken doesn't show the range selected rather complete cash trip amount."
+
+     So the positions row must NOT carry it any more, and the windowed panel
+     must. Asserting both halves, because moving it out of one place without
+     putting it in the other is the way this fix fails quietly. */
+  const winTiles = await page.$$eval('[data-panel="driver-money-window"] .kpi',
+    (ks) => ks.map((k) => k.innerText.replace(/\n/g, ' ')));
+  const winTile = (re) => winTiles.find((t) => re.test(t)) || '';
+  check('the positions row no longer carries a lifetime cash figure',
+    !tiles.some((t) => /Cash taken/i.test(t)),
     JSON.stringify(tiles.map((t) => t.slice(0, 26))));
+  check('and still names what is STILL HELD, which is a position',
+    tiles.some((t) => /Still held/i.test(t)),
+    JSON.stringify(tiles.map((t) => t.slice(0, 26))));
+  check('the windowed panel names what was TAKEN over the dates',
+    /Cash taken/i.test(winTile(/Cash taken/i)), JSON.stringify(winTiles.map((t) => t.slice(0, 26))));
   check('and cash taken carries a figure, not a dash — the trips measure it',
-    /Cash taken[^A-Za-z]*AED/i.test(tiles.find((t) => /Cash taken/i.test(t)) || ''),
-    tiles.find((t) => /Cash taken/i.test(t)));
+    /Cash taken[^A-Za-z]*AED/i.test(winTile(/Cash taken/i)), winTile(/Cash taken/i));
+  /* THE OPERATOR'S SECOND REQUEST, in their words: "this should show the
+     amount that has come in for the date range selected as well, income". */
+  check('the windowed panel carries an INCOME figure for the selected dates',
+    /Income/i.test(winTile(/Income/i)), JSON.stringify(winTiles.map((t) => t.slice(0, 26))));
+  check('…as a figure, not a dash, when the platforms published one',
+    /Income[^A-Za-z]*AED/i.test(winTile(/Income/i)), winTile(/Income/i));
+  /* THE COMPOSITION, term by term. "cash taken should be cash trip amount +
+     cash advance - cash deposited for the duration" — a total whose parts are
+     not on screen is a total a reader can only trust. */
+  check('the three terms are each their own tile',
+    /Cash fares/i.test(winTile(/Cash fares/i)) && /Cash advanced/i.test(winTile(/Cash advanced/i))
+    && /Cash handed back/i.test(winTile(/Cash handed back/i)),
+    JSON.stringify(winTiles.map((t) => t.slice(0, 26))));
+  const winTxt = await page.$eval('[data-panel="driver-money-window"]', (e) => e.innerText);
+  /* 67.13 of cash fares + 500 advanced - 150 handed back = 417.13, and the
+     deposit is stored NEGATIVE, so the arithmetic ADDS it. A sign error here
+     is the one way to overstate what a driver is holding. */
+  check('and the composed figure is fares plus advances less deposits',
+    /417\.13/.test(winTxt), winTxt.slice(0, 400));
+  check('with the derivation spelled out rather than asserted',
+    /67\.13 of cash fares/.test(winTxt) && /plus .*500/.test(winTxt)
+    && /less .*150/.test(winTxt), winTxt.slice(0, 500));
+  check('the panel heading names the window it is measured over',
+    /Over /i.test(await page.$eval('[data-panel="driver-money-window"] h3', (e) => e.innerText)),
+    await page.$eval('[data-panel="driver-money-window"] h3', (e) => e.innerText));
   /* THIS FIXTURE'S DRIVER HAS AN OPENING, so Still held is a real figure and
      says where it came from. The ABSENT half is asserted on U-NOBODY below,
      who has none — the two cases need two subjects, because a tile that can
@@ -159,12 +203,9 @@ console.log('\na driver who has a record');
     && /stated opening position/.test(tiles.find((t) => /Still held/i.test(t)) || ''),
     tiles.find((t) => /Still held/i.test(t)));
   check('and the two are not the same number — they answer different questions',
-    (tiles.find((t) => /Cash taken/i.test(t)) || '').replace(/[^0-9.]/g, '')
+    winTile(/Cash taken/i).replace(/[^0-9.]/g, '')
       !== (tiles.find((t) => /Still held/i.test(t)) || '').replace(/[^0-9.]/g, ''),
     'cash taken and still held printed the same figure');
-  check('and the taken tile says it is a ceiling rather than a balance',
-    /ceiling/i.test(tiles.find((t) => /Cash taken/i.test(t)) || ''),
-    tiles.find((t) => /Cash taken/i.test(t)));
 
   const stand = await page.$eval('[data-panel="driver-money"]', (e) => e.innerText);
   check('what they owe is the headline', /OWED IN TOTAL/i.test(stand), stand.slice(0, 200));
@@ -291,8 +332,18 @@ console.log('\nthe empty-window banner');
     /What somebody owes is \s*'?\s*\+?\s*'?a POSITION/.test(src.replace(/\s+/g, ' '))
     || /a POSITION and not a figure over a span/.test(src.replace(/'\s*\+\s*'/g, '').replace(/\s+/g, ' ')),
     'the money branch does not say a balance is a position');
-  check('while still crediting the window with the one thing it does govern',
-    /Only the register of entries below is measured over those dates/.test(src));
+  /* IT GOVERNS TWO THINGS NOW, not one. The windowed panel joined the
+     register when "Cash taken" moved into it, and a banner that still said
+     "only the register" would be telling a reader that the Income and Cash
+     taken tiles they can see changing are not governed by the dates that
+     changed them. */
+  check('while still crediting the window with what it does govern',
+    /The windowed panel and the register of entries below are measured over those dates/
+      .test(src.replace(/'\s*\+\s*'/g, '').replace(/\s+/g, ' ')), 'the money branch does not '
+      + 'name both windowed surfaces');
+  check('and still says which half the window does NOT move',
+    /the tiles under "Where they stand" are not/
+      .test(src.replace(/'\s*\+\s*'/g, '').replace(/\s+/g, ' ')));
   /* The specific wrong reading it exists to prevent, named. */
   check('naming what a reader would otherwise conclude',
     /an advance taken in June is still/.test(src));
