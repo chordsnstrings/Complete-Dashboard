@@ -1311,3 +1311,33 @@ Cadences moved under the rows as paragraphs, where they may wrap.
 
 All three are asserted now, and the ellipsis one is measured
 (`scrollWidth - clientWidth` on every row sub) rather than eyeballed.
+
+## Settings, desktop, 1440×1400 — 2026-09-22
+
+Reported as *"the page is broken padding and in general the structure"*. It
+was not padding. Screenshotting the production bytes on `f8eef55` found three
+defects, each a different kind of mistake.
+
+**Reproduce:** `node bin/prod-mirror.mjs` (:8200) or the mock, `#settings`,
+Playwright with `executablePath: '/opt/pw-browsers/chromium'`. Everything
+below is now asserted in `test/settings_page_layout.test.mjs`, whose header
+carries the per-fix revert measurements.
+
+| printed | why it was wrong |
+|---|---|
+| a bordered empty box reading `Uber`, then a run of loose full-bleed rows | `V.settings` appended `el('div','setgroup', grp)` to `wrap` and then appended the rows to `wrap` **as well**. `app.css:957` styles `.setgroup` as a card — surface, border, radius, padding, shadow — so the provider name got a card to itself and the rows it names sat outside it. Forty credentials rendered as forty loose rows punctuated by empty cards. The CSS had always described the intent; the DOM never matched it. |
+| `usernameFMS_ECOSINE_USER` | `.lab` and `.lab small` had **no rule anywhere in app.css**, and `<small>` is inline by default, so label and key concatenated into one word. The key is the string an operator matches against a provider's own docs, so it has to be separable by eye — and monospaced, because it is an identifier. |
+| `UBER_WEB_COOKIE · Paste from a logged-in supplier.uber.com session` | key and hint were joined with `' · '` inside one `<small>`, which set a sentence in a monospace identifier's typeface and wrapped it to three cramped lines in a 220px column. They are different kinds of thing and no longer share a line or a face. |
+| **Admin access — Changes require the admin token configured on the server** | flatly false here. `api/admin_gate.js:63` runs the write gate **OPEN** when `ADMIN_TOKEN` is unset — it warns once and calls `next()` — which is this deployment's deliberate state. An operator who believed that sentence and saw a paste fail would hunt for a token problem that does not exist. |
+
+The fourth is the one that matters beyond this page. A figure that cannot be
+measured renders absent with a reason, and a **reason that is not the true one
+is worse than no reason at all** — the page was asserting a server behaviour
+instead of asking about it. It asks now: `GET /api/admin-mode` reports the
+mode (never the value), and deliberately does not sit behind the gate, because
+a page that cannot say whether writes are open until it is authorised to write
+cannot tell an operator why their write was refused.
+
+The two panels also took `data-panel` keys (`adminmode`, `credentials`) for
+the reason `ui.js:27` gives: a panel a test must find should not be found by
+matching prose against its `<h3>`.

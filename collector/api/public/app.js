@@ -5971,7 +5971,25 @@ function pastePanel(root) {
 
 V.settings = async (root) => {
   pastePanel(root);
-  const auth = panel('Admin access', 'Changes require the admin token configured on the server'); root.append(auth.panel);
+  /* THE SUBTITLE WAS TELLING A TRUE-SOUNDING LIE. api/admin_gate.js:63 runs the
+     write gate OPEN when ADMIN_TOKEN is unset — it warns once and calls next()
+     — which is the state this deployment is deliberately in. So "changes
+     require the admin token" is false here, and an operator who believed it
+     would think a paste had been rejected for want of a token when it had in
+     fact been applied. The panel now says which state the server is actually
+     in, and the API is the one that knows. */
+  const auth = panel('Admin access', null, 'adminmode'); root.append(auth.panel);
+  api('/api/admin-mode').then((m) => {
+    auth.body.prepend(el('p', 'cap', m?.open
+      ? 'This server has no admin token configured, so write endpoints are OPEN — a paste or a '
+        + 'save applies without one. Setting ADMIN_TOKEN closes them; the box below is then '
+        + 'what unlocks writing from this browser.'
+      : 'Writes require the admin token configured on the server. Enter it here and it is kept '
+        + 'in this browser only.'));
+  }).catch(() => {
+    auth.body.prepend(el('p', 'cap', 'Whether this server requires an admin token could not be '
+      + 'read just now, so this page cannot say which state it is in.'));
+  });
   const tokRow = el('div', 'btnrow');
   tokRow.innerHTML = `<input id="admTok" type="password" placeholder="admin token" style="flex:1;min-width:220px;background:var(--paper);border:1px solid var(--rule-strong);border-radius:3px;padding:8px 10px;font-family:'IBM Plex Mono';font-size:.8rem" value="${esc(state.admin)}">
     <button class="btn sec" id="saveTok">Remember</button><span class="note" id="tokNote"></span>`;
@@ -5983,7 +6001,7 @@ V.settings = async (root) => {
     tokRow.querySelector('#tokNote').textContent = 'saved in this browser';
   };
 
-  const credP = panel('Credentials', 'Stored encrypted in the database. Leave blank to keep the current value; the collector picks changes up within 30 seconds.');
+  const credP = panel('Credentials', 'Stored encrypted in the database. Leave blank to keep the current value; the collector picks changes up within 30 seconds.', 'credentials');
   root.append(credP.panel); loading(credP.body);
   /* Credentials that expire on a schedule nobody watches fail silently — the
      source writes zero rows while the page still shows a healthy "settings"
@@ -6047,9 +6065,26 @@ V.settings = async (root) => {
       sub: 'neither here nor on the collector', tone: unset ? 'warn' : 'good' },
   ]));
   const wrap = el('div', 'setgrid'); credP.body.append(wrap);
+  /* A GROUP IS A CARD THAT CONTAINS ITS ROWS, not a heading beside them.
+     ─────────────────────────────────────────────────────────────────────
+     THE DEFECT. This appended `el('div','setgroup', grp)` as a SIBLING of the
+     rows and then appended the rows to `wrap`. But app.css:957 styles
+     .setgroup as a card — surface, border, radius, padding, shadow — so every
+     provider name got a bordered box of its own with nothing in it, and the
+     rows it names sat outside and below, unboxed, running edge to edge. Forty
+     credentials rendered as forty loose rows punctuated by empty cards, which
+     is what the operator saw and called the structure being broken.
+
+     The CSS was always right about the intent; the DOM never matched it. */
   let grp = null;
+  let groupEl = null;
   defs.forEach((d) => {
-    if (d.group !== grp) { grp = d.group; wrap.append(el('div', 'setgroup', grp)); }
+    if (d.group !== grp) {
+      grp = d.group;
+      groupEl = el('div', 'setgroup');
+      groupEl.append(el('h4', 'setgroup-h', grp));
+      wrap.append(groupEl);
+    }
     const row = el('div', 'setrow');
     /* `data-orig` is what the box was PRE-FILLED with, so the collector below
        can tell an edit from a value it wrote there itself. Eleven non-secret
@@ -6059,10 +6094,18 @@ V.settings = async (root) => {
        shadow the environment permanently. The proof was that Save on an
        untouched page answered "enter the admin token first" rather than
        "nothing changed": the payload was non-empty after zero edits. */
-    row.innerHTML = `<div class="lab">${esc(d.label)}<small>${esc(d.key)}${d.hint ? ' · ' + esc(d.hint) : ''}</small></div>
+    /* THREE THINGS, THREE LINES. The key and the hint were joined with ' · '
+       inside one <small>, which monospaced the hint — it is prose, not an
+       identifier — and made the pair wrap to three cramped lines in a 220px
+       column beside a full-width input. The key is what an operator matches
+       against a provider's own documentation and wants to copy; the hint is a
+       sentence telling them where to get it. They are not the same kind of
+       thing and they no longer share a line or a typeface. */
+    row.innerHTML = `<div class="lab">${esc(d.label)}<small>${esc(d.key)}</small>${
+      d.hint ? `<span class="labhint">${esc(d.hint)}</span>` : ''}</div>
       <div><input data-k="${esc(d.key)}" data-orig="${d.secret ? '' : esc(d.value)}" type="${d.secret ? 'password' : 'text'}" placeholder="${d.configured ? esc(d.value) : 'not set'}" ${d.secret ? '' : `value="${esc(d.value)}"`}></div>
       <div>${sourceTag(d)}${expiryTag(d)}</div>`;
-    wrap.append(row);
+    (groupEl || wrap).append(row);
   });
   /* What a backfill would actually be for. The Data sources page lists the
      windows that failed and tells the reader to "Re-run a backfill from

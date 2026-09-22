@@ -955,7 +955,21 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 /* settings */
 .setgrid{display:flex;flex-direction:column;gap:20px}
 .setgroup{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);padding:17px 19px;box-shadow:var(--shadow-1)}
-.setrow{display:grid;grid-template-columns:minmax(150px,220px) 1fr auto;gap:11px;align-items:center;padding:8px 0;border-bottom:1px solid var(--rule)}
+/* The provider name at the head of its own card. It used to be the card's only
+   content — the rows it names were appended as siblings, outside it — so every
+   group rendered as an empty bordered box above a run of loose rows. */
+.setgroup-h{margin:0 0 10px;font-size:var(--t5);font-weight:600;letter-spacing:.01em;color:var(--ink)}
+/* THE LABEL AND THE KEY ARE TWO LINES, NOT ONE STRING.
+   .lab had no rule at all and <small> is inline by default, so the two ran
+   together and the page read "usernameFMS_ECOSINE_USER". The key is what an
+   operator matches against a provider's own docs, so it has to be separable by
+   eye — and monospaced, because it is an identifier rather than prose. */
+.setrow .lab{min-width:0;line-height:1.35}
+.setrow .lab small{display:block;margin-top:2px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--t7,.72rem);color:var(--ink-3,var(--ink-2));word-break:break-word}
+/* The hint is a SENTENCE — where to get this credential — so it is set in the
+   body face, not the monospace the key needs, and it is allowed to wrap. */
+.setrow .lab .labhint{display:block;margin-top:3px;font-size:var(--t7,.72rem);line-height:1.4;color:var(--ink-3,var(--ink-2))}
+.setrow{display:grid;grid-template-columns:minmax(190px,290px) 1fr auto;gap:11px;align-items:center;padding:8px 0;border-bottom:1px solid var(--rule)}
 .setrow:last-child{border-bottom:none}
 .setrow input{
   background:var(--paper);border:1px solid var(--rule);border-radius:var(--r-sm);

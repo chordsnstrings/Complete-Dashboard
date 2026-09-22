@@ -6324,6 +6324,15 @@ app.get('/api/schema/raw-values', (req, r) => {
   ]);
 });
 
+/* The write gate's MODE. The real route is api/server.js's /api/admin-mode;
+   this fixture answers `open` because that is the state of the deployment the
+   page is written against, and the page must render the open sentence. */
+app.get('/api/admin-mode', (req, r) => r.json({
+  open: true, you_are_admin: false,
+  detail: 'ADMIN_TOKEN is not set on this service, so write endpoints accept a request without '
+    + 'one. Reads stay redacted either way.',
+}));
+
 app.get('/api/settings', (_, r) => r.json([
   /* Unset in the API's own environment but held by the collector — the case
      that made this page tell an operator to re-capture a working session. */

@@ -3612,6 +3612,32 @@ app.get('/api/coverage', wrap(async (req, res) => {
    days a session cookie has left — a diagnostic an operator needs when they
    have, by definition, just lost their token. So the shape stays and the
    values go: see redactSettings in api/admin_gate.js. */
+/* WHETHER WRITES ARE GATED, which the Settings page had been asserting wrongly.
+   ─────────────────────────────────────────────────────────────────────────
+   api/admin_gate.js runs the write gate OPEN when ADMIN_TOKEN is unset — a
+   deliberate state on this deployment, argued at length there — and the
+   Settings panel's subtitle said "Changes require the admin token configured
+   on the server" regardless. An operator reading that and watching a paste
+   succeed has been told something the server does not do, and one who saw a
+   paste FAIL would look for a token problem that is not there.
+
+   It reports the MODE, never the token. `open` is a fact about this server's
+   configuration and is already observable by anyone who tries a write; the
+   value itself stays where it is. This deliberately does not sit behind the
+   gate: a page that cannot say whether writes are open until it is authorised
+   to write cannot tell an operator why their write was refused. */
+app.get('/api/admin-mode', wrap(async (req, res) => {
+  const open = !process.env.ADMIN_TOKEN;
+  res.json({
+    open,
+    you_are_admin: isAdmin(req),
+    detail: open
+      ? 'ADMIN_TOKEN is not set on this service, so write endpoints accept a request without '
+        + 'one. Reads stay redacted either way.'
+      : 'ADMIN_TOKEN is set, so a write must present it in the x-admin-token header.',
+  });
+}));
+
 app.get('/api/settings', wrap(async (req, res) => {
   const rows = await describeSettings();
   res.json(isAdmin(req) ? rows : redactSettings(rows));
