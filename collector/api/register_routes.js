@@ -228,29 +228,98 @@ export function registerRoutes(app, { q, wrap, winDays }) {
     /* WHAT CAME IN OVER THE WINDOW — the income half of the statement.
        ─────────────────────────────────────────────────────────────────────
        The operator asked for "the amount that has come in for the date range
-       selected". Everything else on this route is a trip or a ledger line;
-       none of them is earnings. `totals.fares` is what RIDERS WERE CHARGED
-       and this route already says in words that it is not what the driver
-       earned — so answering "income" with it would be the third wrong figure
-       under the same word.
+       selected", then said the figure "seems less compared to what the driver
+       actually earned". It was. This read driver_payout_day.earnings, and
+       that is the wrong column for this question in two separate ways —
+       measured fleet-wide over 2026-09-01..09-22, it is AED 130,121.19 below
+       /api/revenue's `accounted` for the identical window, 19.9% low:
 
-       driver_payout_day is the same table /api/ledger/exposure's `rev` CTE
-       uses for its denominator, summed over the same account list and bounded
-       by the same window, so the two surfaces cannot disagree about what a
-       person generated. One definition, two surfaces.
+         uber statement_net - uber payout    51,827.78
+         bolt fares   (NO payout feed EVER)  21,829.40
+         hotel fares  (NO payout feed EVER)  56,464.01
+                                            ----------
+                                            130,121.19
 
-       NOT coalesced to zero. A person with no payout row earned nothing that
-       anybody RECORDED, which is not the same as having earned nought, and
-       the row count below is what lets the response tell them apart. */
+       (1) IT IS THE BANK SIDE, NOT THE EARNED SIDE. driver_payout_day.earnings
+           is Uber's `netOutstanding` — src/sources/uber.js describes it as the
+           amount Uber WIRES TO THE BANK, net of commission AND of the cash the
+           driver already pocketed. api/income_sql.js:333 demoted it product-
+           wide for exactly this reason: "Leading `accounted` with it made
+           every money headline in this product answer 'what reached the bank'
+           under the words 'money in', and the two differ by the cash the
+           drivers already hold — 16.9% to 18.8% of the money across three
+           measured windows." Every other money surface was moved off it. This
+           one was written afterwards and reintroduced it.
+
+       (2) TWO CHANNELS FILE NO PAYOUT AT ALL. /api/coverage, measured: only
+           uber and yango have ever produced a driver_payout_day row. bolt has
+           48,832 bookings and hotel 2,220, and ZERO payout rows between them
+           — so a driver's Bolt and Hotel work contributed nothing whatever to
+           this figure while the tile said "what the platforms say this driver
+           generated".
+
+       So it reads driver_day.money, which sql/schema_v41.sql calls "the column
+       to sum at any grain": the statement net where a channel filed one, the
+       summed per-trip fares where it did not. That is the basis chooseBasis()
+       settled on for the whole product, so this surface now agrees with
+       /api/revenue, the leaderboard and the driver profile instead of
+       disagreeing with all three.
+
+       money_source rides along because the same file requires it: "A page that
+       shows money must show this too, or it is guessing on the reader's
+       behalf." And the bank figure is kept beside it rather than dropped — it
+       is a real number that answers a different question, and an operator
+       reconciling against the bank needs it. */
     const [income] = await q(
-      `SELECT sum(earnings)              AS earned,
-              sum(cash_earnings)         AS cash_earned,
-              count(*)::int              AS rows,
-              count(DISTINCT day)::int   AS days,
-              count(DISTINCT driver_ext_id)::int AS accounts
-         FROM driver_payout_day
+      `SELECT sum(money)                            AS money,
+              sum(stmt_gross)                       AS gross,
+              sum(stmt_fees)                        AS fees,
+              sum(stmt_cash)                        AS stmt_cash,
+              sum(payout)                           AS payout,
+              count(*) FILTER (WHERE money IS NOT NULL)::int           AS money_days,
+              count(*) FILTER (WHERE money_source = 'statement')::int  AS days_statement,
+              count(*) FILTER (WHERE money_source = 'fares')::int      AS days_fares,
+              count(*) FILTER (WHERE money_source = 'none')::int       AS days_unreported,
+              count(*)::int                                            AS rows,
+              count(DISTINCT driver_ext_id) FILTER (WHERE money IS NOT NULL)::int
+                                                                       AS accounts_with_money,
+              max(money_period_days)                AS coarsest_period_days
+         FROM driver_day
         WHERE driver_ext_id = ANY($1::text[])
           AND day BETWEEN $2::date AND $3::date`, [ids, from, to]);
+
+    /* WHICH OF THIS PERSON'S CHANNELS ACTUALLY PUT MONEY IN THE FIGURE.
+       ─────────────────────────────────────────────────────────────────────
+       Measured on production 2026-09-22: a driver with four accounts had ONE
+       of them reporting, and every surface said `earned_absent_reason: null`.
+       A search of every *reason*, *why*, *detail* and *note* field across the
+       register, /api/ledger/exposure and /api/driver/earnings for the words
+       "bolt", "yango", "collector" or "stale" returned ZERO hits on any
+       payload. So a driver who worked Bolt saw their Bolt TRIPS listed, saw a
+       smaller income, and was told nothing.
+
+       That is the house rule broken in its second clause — not absent
+       rendered as zero, but present under a reason that is not the true one.
+       85 of 85 drivers with Bolt trips in the last thirty days carry a null
+       payout, because Bolt has never filed a per-driver payout row and
+       neither has the hotel channel; Yango's stopped on 2026-09-06.
+
+       Reading driver_day.money instead of the payout column already fixes the
+       ARITHMETIC for those two — a channel with no statement falls back to its
+       fares. This says so out loud as well, per account, so a channel that
+       contributed nothing is NAMED rather than left to be inferred from a
+       small number. */
+    const perAccount = ids.length ? await q(
+      `SELECT driver_ext_id,
+              sum(money)                                       AS money,
+              count(*) FILTER (WHERE money IS NOT NULL)::int    AS money_days,
+              count(*) FILTER (WHERE money_source = 'fares')::int AS fare_days,
+              count(*)::int                                    AS days
+         FROM driver_day
+        WHERE driver_ext_id = ANY($1::text[])
+          AND day BETWEEN $2::date AND $3::date
+        GROUP BY driver_ext_id`, [ids, from, to]) : [];
+    const moneyByAcct = Object.fromEntries(perAccount.map((r) => [r.driver_ext_id, r]));
 
     /* ── THE THREE KINDS OF LINE ─────────────────────────────────────────
        Ordered by the day the money moved, then by a rank that puts a trip
@@ -511,17 +580,59 @@ export function registerRoutes(app, { q, wrap, winDays }) {
          took during September does not change because today arrived. */
       over_window: {
         from, to,
-        earned: income?.earned == null ? null : round2(Number(income.earned)),
-        cash_earned: income?.cash_earned == null ? null : round2(Number(income.cash_earned)),
-        earning_days: Number(income?.days) || 0,
-        earning_accounts: Number(income?.accounts) || 0,
-        earned_absent_reason: income?.earned != null ? null
+        earned: income?.money == null ? null : round2(Number(income.money)),
+        earned_basis: 'the platform\'s own statement net where a channel filed one, and the '
+          + 'summed per-trip fares where it did not — what the work earned, before it is split '
+          + 'into cash in hand and a bank transfer',
+        earning_days: Number(income?.money_days) || 0,
+        earning_accounts: Number(income?.accounts_with_money) || 0,
+        /* HOW THE FIGURE WAS ARRIVED AT, per sql/schema_v41.sql: "A page that
+           shows money must show this too, or it is guessing on the reader's
+           behalf." */
+        earned_days_from_statement: Number(income?.days_statement) || 0,
+        earned_days_from_fares: Number(income?.days_fares) || 0,
+        earned_days_unreported: Number(income?.days_unreported) || 0,
+        /* The grain the coarsest contributing report was filed at. 1 means
+           every channel reported these as days; more means part of the figure
+           is a longer period divided across its days, which is an allocation
+           and not something a platform stated about a day. */
+        earned_period_days: income?.coarsest_period_days == null ? null
+          : Number(income.coarsest_period_days),
+        /* THE BANK SIDE, kept and NAMED rather than dropped. It is what the
+           platforms wired, net of commission and of the cash the driver
+           already holds, so it is legitimately smaller — and an operator
+           reconciling against a bank statement needs exactly this one. */
+        /* Every account this person holds, and what it put in — including the
+           ones that put in nothing, which are the whole point. */
+        by_account: (w.accounts || []).map((a) => {
+          const m = moneyByAcct[a.external_id];
+          const money = m?.money == null ? null : round2(Number(m.money));
+          return {
+            platform: a.platform,
+            ext_id: a.external_id,
+            money,
+            money_days: Number(m?.money_days) || 0,
+            from_fares: Number(m?.fare_days) || 0,
+            silent_reason: money != null ? null
+              : `nothing this channel reported reached these dates for this account. Their `
+                + `${a.platform} work is not inside the income figure above — it is missing `
+                + 'from it, which is not the same as their having earned nothing on it.',
+          };
+        }),
+        accounts_silent: (w.accounts || [])
+          .filter((a) => moneyByAcct[a.external_id]?.money == null)
+          .map((a) => a.platform),
+        bank_payout: income?.payout == null ? null : round2(Number(income.payout)),
+        statement_gross: income?.gross == null ? null : round2(Number(income.gross)),
+        statement_fees: income?.fees == null ? null : round2(Number(income.fees)),
+        statement_cash: income?.stmt_cash == null ? null : round2(Number(income.stmt_cash)),
+        earned_absent_reason: income?.money != null ? null
           : (ids.length === 0
             ? 'this person has no platform account linked, so no statement of theirs can be '
               + 'found to add up. It is not nought earned: it is nobody to ask.'
-            : 'none of this person\'s linked accounts reported earnings between these dates. '
-              + 'That is a gap in what the platforms published for this window, not a '
-              + 'statement that they earned nothing.'),
+            : 'no channel of this person\'s reported money between these dates — neither a '
+              + 'platform statement nor a priced booking. That is a gap in what reached us for '
+              + 'this window, not a statement that they earned nothing.'),
         /* Always a number: the trips measured it and nobody had to type
            anything. Its TERMS ride beside it because it is derived, and a
            derived figure that arrives without its parts is one a reader has

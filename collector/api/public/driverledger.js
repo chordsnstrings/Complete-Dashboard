@@ -249,10 +249,27 @@ export async function renderDriverLedger(root, id, prof) {
   } else {
     const t = ow.cash_taken_terms || {};
     winP.body.append(kpiRow([
-      { label: 'Income', value: ow.earned == null ? '—' : aed(ow.earned),
+      /* THE SUB-LINE SAID "what the platforms say this driver generated",
+         PLURAL, WHENEVER THERE WAS A FIGURE AT ALL — and measured on
+         production a driver with four accounts had ONE reporting. Nothing on
+         the page named the other three. So the caption now says which
+         channels are in it and which are missing from it, and the value
+         carries "at least" when any channel is silent, because a figure that
+         omits a channel the driver worked is a floor and not a total. */
+      { label: 'Income',
+        value: ow.earned == null ? '—'
+          : ((ow.accounts_silent || []).length ? 'at least ' : '') + aed(ow.earned),
         sub: ow.earned == null ? ow.earned_absent_reason
-          : `what the platforms say this driver generated over ${esc(midSentence(windowLabel()))}, across `
-            + `${countOf(ow.earning_days, 'day')} of statements` },
+          : `${esc(ow.earned_basis)}, over ${esc(midSentence(windowLabel()))} — `
+            + `${countOf(ow.earning_days, 'day')} carried money`
+            + (ow.earned_days_from_fares
+              ? `, ${ow.earned_days_from_fares} of them priced from the bookings because the `
+                + 'channel filed no statement' : '')
+            + ((ow.accounts_silent || []).length
+              ? `. ${esc([...new Set(ow.accounts_silent)].join(' and '))} reported nothing for `
+                + 'these dates, so their work on it is MISSING from this figure rather than '
+                + 'nought — which is why this reads "at least".'
+              : '.') },
       { label: 'Cash taken', value: ow.cash_taken == null ? '—' : aed(ow.cash_taken),
         sub: ow.cash_taken_means },
       { label: 'Cash fares', value: aed(t.cash_fares) || '—',

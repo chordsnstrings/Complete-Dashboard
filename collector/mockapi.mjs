@@ -7300,10 +7300,16 @@ app.get('/api/driver/register', (req, r) => {
          nought. */
       over_window: {
         from: '2026-08-01', to: '2026-08-31',
-        earned: null, cash_earned: null, earning_days: 0, earning_accounts: 1,
-        earned_absent_reason: 'none of this person\'s linked accounts reported earnings '
-          + 'between these dates. That is a gap in what the platforms published for this '
-          + 'window, not a statement that they earned nothing.',
+        earned: null, earning_days: 0, earning_accounts: 0,
+        earned_basis: 'the platform\'s own statement net where a channel filed one, and the '
+          + 'summed per-trip fares where it did not',
+        earned_days_from_statement: 0, earned_days_from_fares: 0, earned_days_unreported: 0,
+        earned_period_days: null, bank_payout: null,
+        statement_gross: null, statement_fees: null, statement_cash: null,
+        by_account: [], accounts_silent: [],
+        earned_absent_reason: 'no channel of this person\'s reported money between these '
+          + 'dates — neither a platform statement nor a priced booking. That is a gap in what '
+          + 'reached us for this window, not a statement that they earned nothing.',
         cash_taken: 67.13,
         cash_taken_terms: { cash_fares: 67.13, cash_fare_trips: 1,
           cash_advance: 0, cash_advance_rows: 0,
@@ -7337,7 +7343,29 @@ app.get('/api/driver/register', (req, r) => {
        error through the browser test. */
     over_window: {
       from: '2026-08-01', to: '2026-08-31',
-      earned: 1204.55, cash_earned: null, earning_days: 12, earning_accounts: 1,
+      earned: 1204.55, earning_days: 12, earning_accounts: 1,
+      earned_basis: 'the platform\'s own statement net where a channel filed one, and the '
+        + 'summed per-trip fares where it did not — what the work earned, before it is split '
+        + 'into cash in hand and a bank transfer',
+      earned_days_from_statement: 9, earned_days_from_fares: 3, earned_days_unreported: 0,
+      earned_period_days: 1,
+      /* The bank side, SMALLER, as it really is — net of commission and of the
+         cash the driver already holds. A fixture where the two matched would
+         let a regression onto the payout column pass unseen. */
+      bank_payout: 980.10, statement_gross: 1560.00, statement_fees: 355.45,
+      statement_cash: 120.00,
+      /* Four accounts, TWO of them silent — the production shape: Bolt has
+         never filed a per-driver payout row and neither has the hotel
+         channel. */
+      by_account: [
+        { platform: 'uber', ext_id: 'U-TARIQ', money: 1204.55, money_days: 12, from_fares: 3,
+          silent_reason: null },
+        { platform: 'bolt', ext_id: 'B-TARIQ', money: null, money_days: 0, from_fares: 0,
+          silent_reason: 'nothing this channel reported reached these dates for this account. '
+            + 'Their bolt work is not inside the income figure above — it is missing from it, '
+            + 'which is not the same as their having earned nothing on it.' },
+      ],
+      accounts_silent: ['bolt'],
       earned_absent_reason: null,
       cash_taken: 417.13,
       cash_taken_terms: { cash_fares: 67.13, cash_fare_trips: 1,

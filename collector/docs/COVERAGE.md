@@ -5321,3 +5321,63 @@ success message; ask for a fenced block explicitly or omit `--extract`.
 * **`/api/ledger/exposure` WITHOUT `person_id` TAKES ~60 SECONDS** and returns
   ~700 KB for 347 people. With `person_id` it answers in a few seconds at
   ~3 KB. Never call the fleet-wide form from a per-driver surface.
+
+* **`driver_payout_day.earnings` IS THE BANK SIDE, NOT WHAT THE WORK EARNED.**
+  It is Uber's `netOutstanding` — the amount Uber **wires to the bank**, net of
+  commission *and* of the cash the driver already pocketed. `api/income_sql.js`
+  demoted it product-wide for exactly this reason ("the two differ by the cash
+  the drivers already hold — 16.9% to 18.8% of the money across three measured
+  windows"), and every money surface was moved onto `driver_day.money` —
+  statement net where a channel filed one, summed per-trip fares where it did
+  not. The driver statement's INCOME tile was written afterwards and
+  reintroduced the demoted column. Measured fleet-wide 2026-09-01..09-22 it ran
+  **AED 130,121.19 (19.9%) under `/api/revenue`'s own `accounted`** for the
+  identical window, decomposing to the fil:
+
+  ```
+  uber statement_net − uber payout    51,827.78
+  bolt fares   (no payout feed EVER)  21,829.40
+  hotel fares  (no payout feed EVER)  56,464.01
+                                     ──────────
+                                     130,121.19
+  ```
+  **Sum `driver_day.money`. `sql/schema_v41.sql` calls it "the column to sum at
+  any grain" and requires `money_source` be shown beside it — "a page that
+  shows money must show this too, or it is guessing on the reader's behalf."**
+
+* **ONLY UBER AND YANGO HAVE EVER FILED A PER-DRIVER PAYOUT ROW.** Measured
+  2026-09-22 from `/api/coverage`: `driver_payout_day` holds uber (15,647 rows,
+  from 2026-02-06) and yango (855 rows, 2026-05-11 to **2026-09-06**, frozen
+  when `YANGO_CONSOLE` was blocked). **bolt and hotel have zero rows, ever** —
+  against 48,832 bolt bookings and 2,220 hotel bookings. All **85 of 85**
+  drivers with Bolt trips in the last thirty days carry `payout: null`. Bolt
+  and hotel money exists only as fleet-level `statement_import` rows with
+  `drivers: 0` — no per-driver attribution at all. A per-driver figure built on
+  the payout table therefore counts a driver's entire Bolt and Hotel work as
+  nothing.
+
+* **TRIPS AND MONEY FAIL SEPARATELY, AND THE TRIP SIDE WAS FINE.** The obvious
+  theory — the broken Bolt/Yango credentials are eating the trips — was tested
+  and **refuted**: Bolt logged 858 trips in the last 30 days, Yango 101. Person
+  114's zero Bolt in September is genuine; they stopped driving Bolt on
+  2026-08-20, 32 days before their own fleet's last Bolt trip. **Check the
+  money feed and the trip feed separately before blaming a credential.**
+
+* **A SMALLER NUMBER AND SILENCE IS THE FAILURE MODE.** Before this fix, a
+  search of every `*reason*`, `*why*`, `*note*`, `*detail*`, `*means*` and
+  `*basis*` field across `/api/driver/register`, `/api/ledger/exposure` and
+  `/api/driver/earnings` for the words "bolt", "yango", "collector", "stale" or
+  "credential" returned **zero hits on every payload**, while the tile said
+  "what the platforms say this driver generated" — plural — for a person whose
+  `earning_accounts` was 1 of 4. The house rule broken in its SECOND clause:
+  not absent-rendered-as-zero, but **present under a reason that is not the
+  true one**. `/api/day` already carries the right sentence
+  (`collection.{silent,thin,warning}`) and it exists only on the fleet day view.
+
+* **`/api/driver/earnings` CAPS ITS PERIODS AT `LIMIT 120`** (`api/driver_routes.js:3199`),
+  so `counted_total` silently answers about the most recent 120 periods
+  whatever window is asked. Measured: `?id=6610938` with no window, with
+  `from=2026-05-26`, and with `from=2026-02-01` all return **43,541.93 over
+  120 periods spanning 2026-05-26..09-22** — AED 36,224.05 (45%) short of the
+  same person's real window figure. The INCOME tile is NOT affected (it sums in
+  SQL, unlimited). Two different defects — do not conflate them.

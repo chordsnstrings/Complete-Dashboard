@@ -288,22 +288,73 @@ await led('salary_advance', 1, 'advance', 250, '2026-09-12');
     w.over_window.cash_taken === 467.13, JSON.stringify(w.over_window.cash_taken));
 }
 
-/* And once a statement IS published, income is the sum over the window. */
-await q(`INSERT INTO driver_payout_day
-           (platform, driver_ext_id, day, period_start, period_end, earnings)
-         VALUES ('uber','u-1','2026-09-05','2026-09-01','2026-09-07',400.25),
-                ('uber','u-1','2026-09-20','2026-09-15','2026-09-21',300.30),
-                ('uber','u-1','2026-10-15','2026-10-12','2026-10-18',9999.99)`);
+/* INCOME IS THE EARNED SIDE, NOT THE BANK SIDE — and the two are seeded here
+   deliberately different.
+   ─────────────────────────────────────────────────────────────────────────
+   This used to sum driver_payout_day.earnings. That column is Uber's
+   `netOutstanding`, which src/sources/uber.js records as the amount Uber WIRES
+   TO THE BANK — net of commission AND of the cash the driver already pocketed.
+   api/income_sql.js:333 demoted it across the whole product for that reason,
+   and this route was written afterwards and reintroduced it. Measured
+   fleet-wide over 2026-09-01..09-22 it was AED 130,121.19 below /api/revenue's
+   own figure for the same window, 19.9% low, of which AED 78,293.41 is Bolt
+   and Hotel — two channels that have NEVER filed a per-driver payout row, so
+   every dirham a driver earned on them counted as nothing.
+
+   So income now reads driver_day.money: the statement net where a channel
+   filed one, the summed per-trip fares where it did not. The fixture seeds a
+   `fares` day and a `statement` day precisely so a regression back to the
+   payout column fails — the payout figures below are SMALLER, as the real
+   ones are. */
+await q(`INSERT INTO driver_day
+           (driver_ext_id, day, trips, money, money_source, stmt_gross, stmt_fees,
+            stmt_cash, payout, money_period_days)
+         VALUES ('u-1','2026-09-05',4, 400.25,'statement', 520.00, 119.75, 30.00, 310.00, 1),
+                ('u-1','2026-09-20',3, 300.30,'fares',     NULL,   NULL,   NULL,  NULL,   1),
+                ('u-1','2026-10-15',5, 9999.99,'statement',NULL,   NULL,   NULL,  9000.00,1)`);
 {
   const w = (await get('/api/driver/register?person=42&from=2026-09-01&to=2026-09-30')).body
     .over_window;
-  check('income is the earnings the platforms published inside the window',
+  check('income is what the WORK earned, over the window',
     w.earned === 700.55, JSON.stringify(w.earned));
   check('…and a day outside it is not swept in',
     w.earned !== 10700.54, JSON.stringify(w.earned));
-  check('…counted over the days that carried one',
+  check('…counted over the days that carried money',
     w.earning_days === 2, JSON.stringify(w.earning_days));
   check('…and no longer absent', w.earned_absent_reason === null, w.earned_absent_reason);
+  /* THE REGRESSION GUARD. Summing the payout column instead would give 310.00
+     — the bank side, 56% smaller. These two must never be the same field. */
+  check('the BANK figure is reported separately, not as income',
+    w.bank_payout === 310 && w.earned !== w.bank_payout,
+    JSON.stringify({ earned: w.earned, bank_payout: w.bank_payout }));
+  check('and the basis is named rather than left to be inferred',
+    /statement net/.test(w.earned_basis || '') && /fares/.test(w.earned_basis || ''),
+    w.earned_basis);
+  /* sql/schema_v41.sql: "A page that shows money must show this too, or it is
+     guessing on the reader's behalf." */
+  check('the composition says how many days came from a statement and how many from fares',
+    w.earned_days_from_statement === 1 && w.earned_days_from_fares === 1,
+    JSON.stringify([w.earned_days_from_statement, w.earned_days_from_fares]));
+  check('the statement gross and its fees ride alongside',
+    w.statement_gross === 520 && w.statement_fees === 119.75,
+    JSON.stringify([w.statement_gross, w.statement_fees]));
+  /* A CHANNEL THAT CONTRIBUTED NOTHING IS NAMED.
+     ─────────────────────────────────────────────────────────────────────
+     This person holds a bolt account with no driver_day money, exactly as 85
+     of 85 real drivers with Bolt trips do — Bolt has never filed a per-driver
+     payout row. Measured on production before this fix: every one of them had
+     earned_absent_reason null and no field anywhere on any payload contained
+     the word "bolt". A smaller number and silence is the failure this
+     asserts against. */
+  check('a channel that put nothing in is NAMED, not left to be inferred',
+    (w.accounts_silent || []).includes('bolt'), JSON.stringify(w.accounts_silent));
+  check('…with the reason saying it is missing rather than nought earned',
+    /missing from it, which is not the same as their having earned nothing/
+      .test((w.by_account || []).find((x) => x.platform === 'bolt')?.silent_reason || ''),
+    JSON.stringify((w.by_account || []).map((x) => [x.platform, x.money])));
+  check('…while the channel that DID report carries its figure',
+    (w.by_account || []).find((x) => x.platform === 'uber')?.money === 700.55,
+    JSON.stringify((w.by_account || []).map((x) => [x.platform, x.money])));
 }
 
 console.log(`\n${fail ? '✗' : '✓'} driver_register: ${pass} passed, ${fail} failed`);

@@ -174,7 +174,28 @@ console.log('\na driver who has a record');
   check('the windowed panel carries an INCOME figure for the selected dates',
     /Income/i.test(winTile(/Income/i)), JSON.stringify(winTiles.map((t) => t.slice(0, 26))));
   check('…as a figure, not a dash, when the platforms published one',
-    /Income[^A-Za-z]*AED/i.test(winTile(/Income/i)), winTile(/Income/i));
+    /Income[^A-Za-z]*(at least )?AED/i.test(winTile(/Income/i)), winTile(/Income/i));
+  /* INCOME IS THE EARNED SIDE AND SAYS WHAT IS MISSING FROM IT.
+     ─────────────────────────────────────────────────────────────────────
+     The tile used to sum driver_payout_day.earnings — Uber's netOutstanding,
+     the amount wired to the BANK, net of commission and of the cash the driver
+     already holds. Measured fleet-wide that basis ran AED 130,121.19 (19.9%)
+     under /api/revenue for the same window, AED 78,293.41 of it Bolt and Hotel
+     income, two channels that have never filed a per-driver payout row.
+
+     And the sub-line said "what the platforms say this driver generated",
+     plural, while one of four accounts reported. A driver who worked Bolt saw
+     their Bolt trips listed, a smaller number, and no explanation. */
+  check('the income tile names its basis rather than asserting a bare figure',
+    /statement net/i.test(winTile(/Income/i)) && /fares/i.test(winTile(/Income/i)),
+    winTile(/Income/i));
+  check('a channel that reported nothing is NAMED on the tile',
+    /bolt/i.test(winTile(/Income/i)), winTile(/Income/i));
+  check('…and the figure reads as a floor, because a channel is missing from it',
+    /at least/i.test(winTile(/Income/i)), winTile(/Income/i));
+  check('…saying MISSING rather than letting a small number speak for itself',
+    /missing from this figure rather than nought/i.test(winTile(/Income/i)),
+    winTile(/Income/i));
   /* THE COMPOSITION, term by term. "cash taken should be cash trip amount +
      cash advance - cash deposited for the duration" — a total whose parts are
      not on screen is a total a reader can only trust. */
