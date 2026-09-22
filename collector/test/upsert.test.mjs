@@ -47,11 +47,27 @@ const fakePool = {
    from it and quietly stop testing anything. */
 import { readFileSync } from 'node:fs';
 const src = readFileSync('src/db.js', 'utf8');
+/* THE HELPERS COME WITH THE FUNCTION, or the extraction compiles a body whose
+   free variables are not defined.
+   ─────────────────────────────────────────────────────────────────────────
+   This file re-creates upsertMany and upsert FROM THE SHIPPED SOURCE, by
+   slicing from `export async function …`. That works only while everything
+   those functions reference is either a parameter or declared inside them.
+   src/db.js grew `JSONB_MERGE` and `nextValue` ABOVE both of them — the rule
+   that makes trip.raw merge rather than clobber — and the next run died with
+   `ReferenceError: nextValue is not defined` before a single assertion ran.
+
+   Same shape as test/mount.mjs slicing api/server.js, and the same lesson:
+   a harness that cuts a file at a marker owns every symbol above that marker
+   the cut code uses. PRELUDE is that ownership, made explicit — it is sliced
+   from the source too, so it cannot drift from what ships. */
+const PRELUDE = src.slice(src.indexOf('const JSONB_MERGE'),
+  src.indexOf('// Upsert one row into'));
 const body = src.slice(src.indexOf('export async function upsertMany'))
   .replace('export async function upsertMany', 'async function upsertMany');
 const end = body.indexOf('\n}\n', body.indexOf('return n;')) + 2;
 // eslint-disable-next-line no-new-func
-const makeUpsert = new Function('pool', `${body.slice(0, end)}; return upsertMany;`);
+const makeUpsert = new Function('pool', `${PRELUDE}\n${body.slice(0, end)}; return upsertMany;`);
 const upsert = makeUpsert(fakePool);
 
 console.log('\nit writes what it was given');
@@ -194,7 +210,7 @@ const oneBody = src.slice(src.indexOf('export async function upsert('))
   .replace('export async function upsert(', 'async function upsertOne(');
 const oneEnd = oneBody.indexOf('\n}\n') + 2;
 // eslint-disable-next-line no-new-func
-const upsertOne = new Function('pool', `${oneBody.slice(0, oneEnd)}; return upsertOne;`)(fakePool);
+const upsertOne = new Function('pool', `${PRELUDE}\n${oneBody.slice(0, oneEnd)}; return upsertOne;`)(fakePool);
 
 await db.exec(`INSERT INTO thing (k1, k2, a, b) VALUES ('y', '1', 'same', 9)`);
 const yminOf = async () => (await db.query(

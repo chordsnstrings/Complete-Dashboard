@@ -4581,3 +4581,39 @@ facing the other way:
   2026-08-31 and 2026-09-14; the delta between two published figures is a
   measurement. What was missing was `over_trips === 0` — no trip fell between
   the readings, which is what makes a nought delta readable.
+
+### Trap: `trip.raw` is written by TWO passes, and the second used to destroy the first
+
+Measured on production 2026-09-22. The Uber trip export writes `raw: r`
+(`src/sources/uber.js:202`) — the ride. The payments walk then MERGES the money
+into the same column (`uber.js:641-644`, `raw = coalesce(raw,'{}'::jsonb) ||
+$4::jsonb`), adding `uber_payments` with per-trip `earnings`, `service_fee`,
+`cash_collected`, `tip` and `commission_pct`.
+
+`upsertMany` built `raw=EXCLUDED.raw`, so the next export replaced the merged
+blob wholesale and the money was gone. The symptom: person 202's two cash trips
+on 2026-09-18 returned `trip_money: null` through `/api/trip` while every
+sampled trip to 2026-09-16 returned a full blob. **The gap sat on the most
+recent days and MOVED rather than healed** — the next walk restored the figures
+and the next export destroyed them again, so anyone checking a week later found
+different days empty and concluded it was flaky ingestion.
+
+Fixed by `JSONB_MERGE = { trip: ['raw'] }` in `src/db.js`, applied by BOTH
+`upsert()` and `upsertMany()` so all five trip writers get it (uber, bolt,
+yango, hotel, fms). `EXCLUDED` still wins on a key it carries, so a restated
+ride value corrects as before; only keys the incoming blob never mentions
+survive.
+
+**The half a naive fix gets wrong:** the dead-tuple guard must compare the
+MERGED expression, not `EXCLUDED`. Comparing against `EXCLUDED` is true on
+every re-export of an enriched row — the stored blob legitimately holds a key
+the incoming one lacks — so a no-op UPDATE fires on every tick, which is the
+exact cost the guard exists to prevent. `test/trip_raw_merge.test.mjs` pins it.
+
+**And a harness trap it exposed:** `test/upsert.test.mjs` re-creates
+`upsertMany` from the shipped source by slicing at `export async function
+upsertMany`. The new helpers sit ABOVE that marker, so the first run died with
+`ReferenceError: nextValue is not defined` before any assertion. Same shape as
+`test/mount.mjs` slicing `api/server.js`: **a harness that cuts a file at a
+marker owns every symbol above the cut that the cut code uses.** Both test
+files now slice a `PRELUDE` from the source as well.

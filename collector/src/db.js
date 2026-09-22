@@ -280,19 +280,62 @@ async function runMigrations(client) {
   log.info('db', 'migrations complete', { ran, skipped, of: SCHEMA_FILES.length });
 }
 
+/* COLUMNS THAT MERGE INSTEAD OF REPLACING, PER TABLE.
+   ─────────────────────────────────────────────────────────────────────────
+   THE DEFECT, MEASURED ON PRODUCTION 2026-09-22. `trip.raw` is written by two
+   different passes that know different things. The trip export (src/sources/
+   uber.js:202, `raw: r`) carries the ride; the payments walk merges the money
+   into the SAME column afterwards — src/sources/uber.js:641-644 does
+   `raw = coalesce(raw,'{}'::jsonb) || $4::jsonb`, adding a `uber_payments`
+   key holding per-trip earnings, service_fee, cash_collected and tip.
+
+   Then the next trip export runs, upsertMany builds `raw=EXCLUDED.raw`, and
+   the merged money is GONE — replaced wholesale by a blob that never had it.
+
+   What that costs, measured: person 202's two cash trips on 2026-09-18 both
+   return `trip_money: null` through /api/trip, while every sampled trip up to
+   2026-09-16 returns a full blob with `commission_pct: 25`. The most recent
+   days — exactly the days an operator looks at — are the ones with no per-trip
+   cash and no per-trip fee, and nothing anywhere said so. The figures come
+   back on the next payments walk and are destroyed again on the next export,
+   so the gap moves rather than heals.
+
+   WHY TABLE-DRIVEN AND NOT AT THE CALL SITE. Five collectors write trips —
+   uber.js:820, bolt.js:830, yango.js:548, hotel.js:313, fms.js:230 — and any
+   of them clobbers the money the Uber walk merged. A fix at one call site
+   fixes one of five and reads as if the whole class were handled.
+
+   EXCLUDED STILL WINS on a key present in both, so a restated ride value
+   corrects as it always did; only keys the incoming blob does not mention
+   survive. That is exactly `uber_payments`, and exactly nothing else.
+
+   THE GUARD BELOW COMPARES THE MERGED RESULT, not EXCLUDED — the subtle half.
+   `(trip.raw) IS DISTINCT FROM (EXCLUDED.raw)` is true on every re-export of
+   an enriched row, because the stored blob legitimately has a key the incoming
+   one lacks. It would fire an UPDATE that changes nothing on every tick, which
+   is the dead-tuple cost the guard exists to prevent. */
+const JSONB_MERGE = Object.freeze({ trip: ['raw'] });
+
+/* The value a column WOULD hold after this upsert — `EXCLUDED.c` normally, and
+   the merge expression for a merging column. Used for the SET and for the
+   changed-guard, so the two can never disagree about what is being written. */
+const nextValue = (table, c) => (JSONB_MERGE[table]?.includes(c)
+  ? `coalesce(${table}.${c}, '{}'::jsonb) || EXCLUDED.${c}`
+  : `EXCLUDED.${c}`);
+
 // Upsert one row into `table`, conflict on `conflict` columns, updating the rest.
 export async function upsert(table, row, conflict) {
   const cols = Object.keys(row);
   const vals = cols.map((c) => row[c]);
   const ph = cols.map((_, i) => `$${i + 1}`);
   const changing = cols.filter((c) => !conflict.includes(c));
-  const updates = changing.map((c) => `${c}=EXCLUDED.${c}`);
+  const updates = changing.map((c) => `${c}=${nextValue(table, c)}`);
   /* The same guard upsertMany() carries, and for the same reason — the whole
      argument, with the production timings that produced it, is at its call
      site below. Both writers, or the rule is one a caller has to know which
      function it picked to rely on. */
   const changed = `(${changing.map((c) => `${table}.${c}`).join(', ')})`
-    + ` IS DISTINCT FROM (${changing.map((c) => `EXCLUDED.${c}`).join(', ')})`;
+    + ` IS DISTINCT FROM (${changing.map((c) => nextValue(table, c)).join(', ')})`;
   const doUpdate = updates.length
     ? `DO UPDATE SET ${updates.join(', ')} WHERE ${changed}`
     : 'DO NOTHING';
@@ -347,7 +390,7 @@ export async function upsertMany(table, rows, conflict, chunk = 200) {
   let n = 0;
   for (const { cols, rows: groupRows } of groups.values()) {
     const changing = cols.filter((c) => !conflict.includes(c));
-    const updates = changing.map((c) => `${c}=EXCLUDED.${c}`);
+    const updates = changing.map((c) => `${c}=${nextValue(table, c)}`);
     /* AN UPDATE THAT CHANGES NOTHING IS NOT FREE, AND THIS ONE WAS RUNNING
        EVERY TWO MINUTES.
        ───────────────────────────────────────────────────────────────────────
@@ -395,7 +438,7 @@ export async function upsertMany(table, rows, conflict, chunk = 200) {
        (b)` is the ordinary scalar form and means the same thing, so the same
        expression serves one column and twenty. */
     const changed = `(${changing.map((c) => `${table}.${c}`).join(', ')})`
-      + ` IS DISTINCT FROM (${changing.map((c) => `EXCLUDED.${c}`).join(', ')})`;
+      + ` IS DISTINCT FROM (${changing.map((c) => nextValue(table, c)).join(', ')})`;
     const doUpdate = updates.length
       ? `DO UPDATE SET ${updates.join(', ')} WHERE ${changed}`
       : 'DO NOTHING';
