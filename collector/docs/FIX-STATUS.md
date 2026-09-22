@@ -1975,3 +1975,35 @@ The one thing that cannot be tested anywhere here is the live provider check
 itself — `src/credcheck.js`'s Bolt path mints an access token against the
 portal, and this sandbox has no route to the internet. It is stubbed in both
 suites, and stubbed to the contract `checkCandidate` already implements.
+
+---
+
+## Batch — the Settings page's structure
+
+Commit `a1ef14c`. The operator's request, verbatim: *"https://fleet-dashboard-wpeqb.ondigitalocean.app/#settings
+the page is broken padding and in general the structure"*.
+
+It was not padding. Three defects, found by screenshotting the production bytes
+on `f8eef55` — which is the point worth keeping: the suite was green at 294
+files with all three of these shipped, because nothing had ever looked at the
+page.
+
+| # | what | state | proof |
+|---|---|---|---|
+| S1 | every `.setgroup` rendered as an **empty bordered card** with the rows it named loose underneath it — `el('div','setgroup', grp)` was appended to `wrap` as a *sibling* of the rows, and `app.css:957` styles `.setgroup` as a card | written, committed | `test/settings_page_layout.test.mjs`; the revert measures `{"groups":5,"rows":5,"inside":0,"loose":5,"empty":["Uber","Yango","CABMAN","Hotel","Collection"]}` |
+| S2 | label and key concatenated into one word — `usernameFMS_ECOSINE_USER`. `.lab` and `.lab small` had **no rule anywhere in app.css** and `<small>` is inline | written, committed | the revert measures the key's computed `display` as `inline`; note the geometry check alone does *not* catch it, since a long label wraps and pushes an inline `<small>` down a line anyway |
+| S3 | the hint — a sentence — was welded to the key inside the same `<small>` with `' · '`, so prose rendered in the monospace an identifier needs, wrapped to three lines in a 220px column | written, committed | the revert fails 4: no `.labhint` exists and the key reads `UBER_WEB_COOKIE · Paste from a logged-in supplier.uber.com session` |
+| S4 | **"Admin access — Changes require the admin token configured on the server" is false on this deployment.** `api/admin_gate.js:63` runs the write gate OPEN when `ADMIN_TOKEN` is unset: it warns once and calls `next()` | written, committed | `GET /api/admin-mode` + the panel that reads it; the revert fails 2 |
+
+S4 is the one that generalises. The page was **asserting** a server behaviour
+instead of **asking** about it, and it asserted the wrong one — which is the
+house rule inverted: a figure that cannot be measured renders absent with a
+reason, and a reason that is not the true one is worse than no reason at all.
+The new route reports the *mode*, never the value, and deliberately does not
+sit behind the gate: a page that cannot say whether writes are open until it is
+authorised to write cannot tell an operator why their write was refused.
+
+Proved by revert, per fix, with the measured counts in the test header — plus
+one proof the other way: flipping the fixture to `open: false` turns the panel
+to the other sentence and the suite stays 16/16, so the page reads the server
+rather than printing a constant.
