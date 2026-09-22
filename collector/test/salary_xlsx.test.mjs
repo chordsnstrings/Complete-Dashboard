@@ -261,6 +261,34 @@ console.log('\nthe tab is found through r:id, not by the name of its part');
     wb.sheets[1].state === 'hidden' && wb.sheets[0].state === 'visible');
 }
 
+/* ══ 8. namespace-prefixed elements ════════════════════════════════════
+   One workbook in the corpus is written by a PDF-to-Excel converter and
+   prefixes every element: <x:workbook><x:sheets><x:sheet .../>. Patterns
+   matching <sheet\b find nothing in it, and the reader returned a workbook
+   with ZERO SHEETS and no error — which is indistinguishable from an empty
+   workbook. Found by the differential run against openpyxl, never by looking
+   at the output. */
+console.log('\na workbook that prefixes its XML elements is still a workbook');
+{
+  const ns = (x) => x.replace(/<(\/?)(workbook|sheets|sheet|worksheet|sheetData|row|c|v|is|t|si|sst)\b/g, '<$1x:$2');
+  const wb = readWorkbook(zip({
+    'xl/workbook.xml': ns('<?xml version="1.0"?><workbook xmlns:x="n"><sheets>'
+      + '<sheet name="Converted Data" sheetId="1" r:id="rId1"/></sheets></workbook>'),
+    'xl/_rels/workbook.xml.rels': RELS,
+    'xl/sharedStrings.xml': ns('<?xml version="1.0"?><sst count="1" uniqueCount="1"><si><t>Plate Code</t></si></sst>'),
+    'xl/styles.xml': '<?xml version="1.0"?><styleSheet><cellXfs count="1"><xf numFmtId="0"/></cellXfs></styleSheet>',
+    'xl/worksheets/sheet2.xml': ns('<?xml version="1.0"?><worksheet><sheetData>'
+      + '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" s="0"/><c r="C1"><v>7</v></c></row>'
+      + '</sheetData></worksheet>'),
+  }));
+  check('the prefixed workbook reports its sheet rather than none',
+    wb.sheetNames.length === 1 && wb.sheetNames[0] === 'Converted Data', JSON.stringify(wb.sheetNames));
+  check('…and its cells are read, shared strings included',
+    wb.sheets[0].rows[0][0] === 'Plate Code', JSON.stringify(wb.sheets[0].rows[0][0]));
+  check('…and the blank-cell rule still holds under a prefix',
+    wb.sheets[0].rows[0][2] === 7, JSON.stringify(wb.sheets[0].rows[0][2]));
+}
+
 check('A1 references decode past Z', A1('A1').col === 0 && A1('Z1').col === 25
   && A1('AA1').col === 26 && A1('BE152').col === 56 && A1('BE152').row === 151);
 

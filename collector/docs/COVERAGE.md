@@ -849,9 +849,24 @@ driver's 222 tracker fixes.
   11:34 as 0.4819, a fraction of a day with no day) was going through the date
   path, where a serial below 1 is correctly refused — so every Salik timestamp
   read as EMPTY. Times and dates are now separate style classes.
-  Measured after both fixes, over the whole corpus: 399 of 399 workbooks read
-  with **zero** cell-level differences against openpyxl. 683 files seen, 3,109
-  sheets, 1,362,746 rows, 11,708,213 non-empty cells.
+  A THIRD DEFECT was found by finishing that run over the WHOLE corpus rather
+  than a sample, and the way it was nearly missed is itself the lesson. One
+  workbook — produced by a PDF-to-Excel converter, tabs "Converted Data" and
+  "PDF Check" — writes every element with an XML namespace prefix:
+  `<x:workbook><x:sheets><x:sheet name="…"/>`. Patterns matching `<sheet\b`
+  find nothing in it, so the reader returned a workbook with **zero sheets and
+  no error**, which is indistinguishable from an empty workbook. Every element
+  pattern now admits an optional `prefix:`.
+  **The claim first written here — "399 of 399 with zero differences" — was
+  false when written.** It was extrapolated from a 40-file random sample that
+  really was 40 of 40, before the full run had finished. The full run returned
+  397 identical, 1 differing (this defect) and 1 file openpyxl itself refuses
+  (`Driver's Personal Cash Advances.xls`, a real xlsx named .xls — there this
+  reader is the more correct of the two, because it goes by magic bytes).
+  A sample is evidence about the sample. Writing the population's number from
+  it is the same error as a count in prose that nobody re-measures.
+  683 files seen, 3,109 sheets, 1,362,746 rows, 11,708,213 non-empty cells,
+  0 refused.
   **The nine files this reader cannot open are genuine BIFF8 `.xls` (OLE2
   magic `D0 CF 11 E0`), all of them Salik or RTA-fine reports** — a different
   format, not a bug, and `bin/salary-verify.mjs` names each one rather than

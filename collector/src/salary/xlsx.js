@@ -41,6 +41,15 @@
         empty: a row can jump A→C→Q. Reading cells in document order and
         assuming they are consecutive shifts every column after the first gap,
         which lands a deduction under the wrong heading.
+     8. NOT EVERY WORKBOOK USES THE DEFAULT XML NAMESPACE. One file in the
+        corpus — produced by a PDF-to-Excel converter, tabs "Converted Data"
+        and "PDF Check" — writes every element with a prefix:
+        `<x:workbook><x:sheets><x:sheet name="..."/>`. Patterns matching
+        `<sheet\b` find nothing in it, and the reader returned a workbook with
+        ZERO sheets and no error at all. Every element pattern below therefore
+        admits an optional `prefix:`. Found by the differential run, not by
+        reading output: a workbook with no sheets looks like an empty
+        workbook.
      7. A SELF-CLOSING TAG EATS THE NEXT ONE IF THE ATTRIBUTES ARE GREEDY.
         This cost an afternoon and is the reason every tag pattern below uses
         a LAZY attribute run. Written `<c\b([^>]*)(?:\/>|>...<\/c>)`, the
@@ -157,12 +166,12 @@ export const decodeXml = (s) => String(s).replace(/\r\n?/g, '\n').replace(
 export function sharedStrings(xml) {
   if (!xml) return [];
   const out = [];
-  const si = /<si\b[^>]*?(?:\/>|>([\s\S]*?)<\/si>)/g;
+  const si = /<(?:[A-Za-z_][\w.-]*:)?si\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?si>)/g;
   let m;
   while ((m = si.exec(xml)) !== null) {
     const inner = m[1] || '';
     let s = '';
-    const t = /<t\b[^>]*?(?:\/>|>([\s\S]*?)<\/t>)/g;
+    const t = /<(?:[A-Za-z_][\w.-]*:)?t\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?t>)/g;
     let tm;
     while ((tm = t.exec(inner)) !== null) s += decodeXml(tm[1] || '');
     out.push(s);
@@ -196,7 +205,7 @@ export function dateStyles(xml) {
      month, but the m in a literal like "Amount" is not. Bracketed sections
      ([$-409], [Red]) are stripped for the same reason. */
   const custom = new Map();
-  const nf = /<numFmt\b[^>]*numFmtId="(\d+)"[^>]*formatCode="([^"]*)"/g;
+  const nf = /<(?:[A-Za-z_][\w.-]*:)?numFmt\b[^>]*numFmtId="(\d+)"[^>]*formatCode="([^"]*)"/g;
   let m;
   while ((m = nf.exec(xml)) !== null) {
     const code = decodeXml(m[2]).replace(/"[^"]*"/g, '').replace(/\[[^\]]*\]/g, '');
@@ -210,9 +219,9 @@ export function dateStyles(xml) {
   /* cellXfs is the one xf list cells point at. styles.xml also holds
      cellStyleXfs with the same element name, so the block is isolated first —
      indexing into the wrong list marks the wrong columns as dates. */
-  const block = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(xml);
+  const block = /<(?:[A-Za-z_][\w.-]*:)?cellXfs\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?cellXfs>/.exec(xml);
   if (!block) return isDate;
-  const xf = /<xf\b[^>]*>|<xf\b[^>]*\/>/g;
+  const xf = /<(?:[A-Za-z_][\w.-]*:)?xf\b[^>]*>|<(?:[A-Za-z_][\w.-]*:)?xf\b[^>]*\/>/g;
   let i = 0;
   let x;
   while ((x = xf.exec(block[1])) !== null) {
@@ -275,7 +284,7 @@ function readSheet(xml, strings, isDateStyle) {
     while (row.length <= c) row.push(null);
     row[c] = v;
   };
-  const cell = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+  const cell = /<(?:[A-Za-z_][\w.-]*:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?c>)/g;
   let m;
   while ((m = cell.exec(xml)) !== null) {
     const attrs = m[1] || '';
@@ -288,7 +297,7 @@ function readSheet(xml, strings, isDateStyle) {
 
     if (t === 'inlineStr') {
       let s = '';
-      const tt = /<t\b[^>]*?(?:\/>|>([\s\S]*?)<\/t>)/g;
+      const tt = /<(?:[A-Za-z_][\w.-]*:)?t\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?t>)/g;
       let tm;
       while ((tm = tt.exec(inner)) !== null) s += decodeXml(tm[1] || '');
       put(at.row, at.col, s === '' ? null : s);
@@ -296,7 +305,7 @@ function readSheet(xml, strings, isDateStyle) {
     }
     /* <v> only — never <f>. Trap 6: the cached value is the answer, and a
        cell with a formula and no cached value is reported as absent. */
-    const v = /<v\b[^>]*?>([\s\S]*?)<\/v>/.exec(inner);
+    const v = /<(?:[A-Za-z_][\w.-]*:)?v\b[^>]*?>([\s\S]*?)<\/(?:[A-Za-z_][\w.-]*:)?v>/.exec(inner);
     if (!v) { put(at.row, at.col, null); continue; }
     const raw = decodeXml(v[1]);
     if (t === 's') {
@@ -347,7 +356,7 @@ export function readWorkbook(bufOrPath) {
   const relsXml = text('xl/_rels/workbook.xml.rels') || '';
 
   const rels = new Map();
-  const rel = /<Relationship\b[^>]*>/g;
+  const rel = /<(?:[A-Za-z_][\w.-]*:)?Relationship\b[^>]*>/g;
   let rm;
   while ((rm = rel.exec(relsXml)) !== null) {
     const id = (/\bId="([^"]*)"/.exec(rm[0]) || [])[1];
@@ -361,7 +370,7 @@ export function readWorkbook(bufOrPath) {
   const isDateStyle = dateStyles(text('xl/styles.xml'));
 
   const sheets = [];
-  const sh = /<sheet\b[^>]*>/g;
+  const sh = /<(?:[A-Za-z_][\w.-]*:)?sheet\b[^>]*>/g;
   let sm;
   while ((sm = sh.exec(wbXml)) !== null) {
     const name = decodeXml((/\bname="([^"]*)"/.exec(sm[0]) || [])[1] || '');
