@@ -238,7 +238,7 @@ export function decompose(row) {
    Every part of that is a measured quantity with a scatter, and the scatter is
    what the interval is made of. */
 export function seasonalForecast(months, {
-  horizon = 12, k = 3, byPlatform = null, anchor = null,
+  horizon = 12, k = 3, byPlatform = null, anchor = null, regimeFrom = null,
 } = {}) {
   const pairs = yearOnYear(months, { byPlatform });
   const usable = pairs.filter((p) => !p.partial && p.comparable !== 'no'
@@ -332,11 +332,25 @@ export function seasonalForecast(months, {
       low: lo == null ? null : Math.round(lo / 100) * 100,
       high: hi == null ? null : Math.round(hi / 100) * 100,
       /* A base month that is itself inside the current regime is a different
-         object from one before the break: the ratio was measured as
-         post-break-over-pre-break, and applying it to a post-break base
-         compounds the recovery on to itself. Flagged, not silently dropped —
-         the months are wanted for the shape of a year. */
-      base_regime: window.some((p) => p.ly_m >= base.m) ? 'within the current regime' : 'before the break',
+         object from one before the break, and the difference changes what the
+         number means. Every ratio in the window was measured as a post-break
+         month over a PRE-break month, so it carries the whole size of the
+         collapse inside it. Applied to a base that is itself post-break, it
+         subtracts the collapse a second time from a month that already has it:
+         2027-03 comes back at 6,900 against a 2026-03 of 6,987, implying the
+         fleet ends next March no better off than it was in the worst month it
+         has ever had, which nothing supports.
+
+         Flagged rather than dropped, because a plan wants a shape for the
+         year — and flagged rather than silently corrected, because the
+         correction would be a second model nobody asked for. The first version
+         of this test asked whether any pair's year-ago month was at or after
+         the base, which is a different question and answered "before the
+         break" for every month of 2027. */
+      base_regime: regimeFrom && base.m >= regimeFrom ? 'within the current regime' : 'before the break',
+      /* Restated as a boolean because the front end branches on it and a
+         string comparison in a template is how that goes wrong quietly. */
+      base_post_break: !!(regimeFrom && base.m >= regimeFrom),
     });
   }
 
