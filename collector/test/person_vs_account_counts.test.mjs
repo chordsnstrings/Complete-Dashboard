@@ -33,8 +33,8 @@
      4. a row whose person_key is null stays ITS OWN PERSON and does not pool
         with every other null into one very busy driver
 
-   THE POPULATION BELOW IS THE REGISTER'S OWN. api/identity_map.js MERGES[0] is
-   the Aliyan Khalil pair — uber 5f16534e-68be-451b-b057-3e3d948e868b "Aliyan
+   THE POPULATION BELOW IS THE REGISTER'S OWN, selected BY KEY rather than by
+   position. api/identity_map.js 'aliyan khalil' is uber 5f16534e-68be-451b-b057-3e3d948e868b "Aliyan
    khalil" and yango 7fc8da91fc4a44c185e8d6d918db3e6b "Khalil Aliyan", verified
    2026-09-03 on plate L36397. Those two names are the SAME WORDS IN THE
    OPPOSITE ORDER, so no spelling rule reaches them and only the register does:
@@ -72,10 +72,18 @@ await q(`INSERT INTO fleet (id, name) VALUES ('ecosine','Ecosine'),('egari','Ega
 
 /* ── the cast ──────────────────────────────────────────────────────────────
    AL is one man under three ids. The first two are the register's own verified
-   pair (api/identity_map.js MERGES[0]); the third is a case variant of the
-   same name, folded by personFold rather than by the register. NM is a second
-   human, so a count of 1 is never trivially right. */
-const M0 = MERGES[0];
+   pair; the third is a case variant of the same name, folded by personFold
+   rather than by the register. NM is a second human, so a count of 1 is never
+   trivially right.
+
+   BY KEY, NOT BY INDEX. This was `MERGES[0]`, and MERGES[0] is whatever entry
+   happens to sit first in HAND_MERGES. When a hand merge was added at the
+   front of that list the whole cast below silently became a DIFFERENT pair,
+   and all nineteen assertions in this file failed as if the vehicle, alert
+   and finance pages had started counting accounts again. They had not; the
+   fixture had moved. A key cannot move. */
+const M0 = MERGES.find((m) => m.key === 'aliyan khalil' && m.keep.channel === 'uber');
+if (!M0) throw new Error('the register no longer holds the aliyan khalil pair this file is built on');
 const AL = [
   { id: M0.keep.id, name: M0.keep.name, platform: 'uber' },
   { id: M0.merge.id, name: M0.merge.name, platform: 'yango' },

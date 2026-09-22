@@ -827,6 +827,37 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A TEST FIXTURE BOUND TO `MERGES[0]` CHANGES SUBJECT WHEN THE REGISTER IS
+  REORDERED, AND REPORTS IT AS NINETEEN COUNTING BUGS.**
+  On 2026-09-22 the operator's ruling on the Sana pair was added to
+  `api/identity_map.js` as `HAND_MERGES[0]` — at the FRONT of the list. The
+  full suite came back with three files failing and 35 assertions red, and
+  almost none of them mentioned Sana. `person_vs_account_counts.test.mjs`
+  alone reported nineteen, reading as though the vehicle, alert and finance
+  pages had all started counting platform accounts instead of people:
+  *"driver_n counts PEOPLE, not accounts — 3"*, *"bookings ÷ drivers is the
+  FOLDED average — 21/5"*. Nothing was wrong with any of those pages. Three
+  test files build their entire fixture population out of `MERGES[0]`,
+  documented in their headers as "the Aliyan Khalil pair", and
+  `MERGES = [...HAND_MERGES, ...CANDIDATES, ...FROM_ROSTER]` — so prepending
+  one hand merge silently re-pointed all three casts at a different pair whose
+  hard-coded expected names, keys and custody strings no longer matched.
+  `identity_merge.test.mjs` had the same bug twice more, in the v53 migration
+  block and the custody block, plus a `JSON.stringify(got) === JSON.stringify(BY_DATE)`
+  that compared **insertion order** as well as contents.
+  Fixed on both sides: those files now select their pair with
+  `MERGES.find((m) => m.key === 'aliyan khalil')` and throw a named error if
+  the register stops holding it, the sweep-date check compares sorted entries,
+  and `HAND_MERGES` carries a note saying to APPEND. Proved by putting the
+  entry back at the front and watching all four identity files stay green.
+  Only the genuine count drift then remained: MERGES 130 → 131, keys 124 →
+  125, alias ids 167 → 168, REFUSED 3 → 2, the roster fold 395 → 321 → 320.
+  **Reordering the register is a legal, evidence-preserving edit. If it turns
+  a suite red anywhere outside the identity counts, the test is binding on
+  position and the product is fine.** Also: `sql/schema_v53.sql` is generated,
+  so a reorder changes its WHEN order too — rerun `bin/gen-schema-v53.mjs`.
+
+
 * **A LIVE SESSION READ AS UNRECOGNISED BECAUSE IT WAS COPIED ON WINDOWS.**
   On 2026-09-22 an Egari Uber session captured on Windows — Chrome's "Copy as
   cURL (cmd)" of the fleethub `getDrivers` request — replayed **200 with real

@@ -86,15 +86,26 @@ const ID_SHAPE = /^[0-9]{4,12}$|^[0-9a-f]{24}$|^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a
 /* The sizes, pinned. A register that grows is the normal case and these
    numbers are MEANT to be edited when it does — deliberately, by the person
    who grew it, and never silently by the sweep that produced the new rows. */
-const EXPECT = { merges: 130, pending: 5, refused: 3, people: 124, aliasIds: 167 };
+const EXPECT = { merges: 131, pending: 5, refused: 2, people: 125, aliasIds: 168,
+  joined: 74, foldsTo: 320 };
 /* And by the date each sweep ran, so a batch arriving without the evidence
    shape its method produces shows up as a moved number rather than as
    nothing at all. */
 /* The phone sweep re-runs on every roster pull, so its count grows whenever a
    channel starts filing compliance rows: 45 to 82 when the Yango collector
    moved to fleet-api.yango.tech and gave 145 drivers a phone for the first
-   time. The other two are closed sets. */
-const BY_DATE = { '2026-09-03': 3, '2026-09-05': 45, '2026-09-07': 82 };
+   time. The other two are closed sets.
+
+   2026-09-22 is the operator's ruling on the Sana pair — a hand merge, so it
+   carries its own date rather than joining the 2026-09-03 hand sweep.
+
+   COMPARED AS A SORTED SET, NOT AS JSON. This was
+   `JSON.stringify(got) === JSON.stringify(BY_DATE)`, which compares INSERTION
+   ORDER as well as contents: adding a hand merge at the front of HAND_MERGES
+   put its date first in `got` and failed an assertion whose subject is how
+   many entries each sweep contributed, not what order they iterate in. */
+const BY_DATE = { '2026-09-03': 3, '2026-09-05': 45, '2026-09-07': 82, '2026-09-22': 1 };
+const sortedEntries = (o) => JSON.stringify(Object.entries(o).sort((a, b) => a[0].localeCompare(b[0])));
 
 /* The control: a production record the register has never been told about.
    Whatever it does to the ninety, this man's key is his own folded name and
@@ -119,8 +130,8 @@ check(`…and the ${EXPECT.pending} with a contradiction are held back, not appl
 {
   const got = {};
   for (const m of MERGES) got[m.verified] = (got[m.verified] || 0) + 1;
-  check('the three sweeps are still distinguishable by the date each was verified',
-    JSON.stringify(got) === JSON.stringify(BY_DATE), JSON.stringify(got));
+  check('the four sweeps are still distinguishable by the date each was verified',
+    sortedEntries(got) === sortedEntries(BY_DATE), JSON.stringify(got));
 }
 check('every entry names the record that survives and the record(s) folded into it',
   MERGES.every((m) => m.keep.id && mergeIds(m).length && !mergeIds(m).includes(m.keep.id)));
@@ -366,10 +377,11 @@ if (!same) {
 check(`over all 395 real names it joins EXACTLY the ${wantJoined.length} groups the register names, and no more`,
   same, 'listed above');
 check(`…which is ${wantJoined.length} of the ${EXPECT.people} people on it — the rest have a second record that never filed a trip`,
-  byKey.size === EXPECT.people && wantJoined.length === 73,
+  byKey.size === EXPECT.people && wantJoined.length === EXPECT.joined,
   `${wantJoined.length} of ${byKey.size}`);
-check('the number of distinct people it reports falls by exactly 74: 395 → 321',
-  before.size === 395 && after.size === 321 && before.size - after.size === 74,
+check(`the number of distinct people it reports falls by exactly ${395 - EXPECT.foldsTo}: 395 → ${EXPECT.foldsTo}`,
+  before.size === 395 && after.size === EXPECT.foldsTo
+  && before.size - after.size === 395 - EXPECT.foldsTo,
   `${before.size} → ${after.size}`);
 
 console.log('\nand what it must never join');
@@ -472,7 +484,12 @@ console.log('\nthe migration, run against rows that already carry the old key');
   const FILES = SCHEMA_FILES.filter((f) => f !== 'schema_v53.sql');
   for (const f of FILES) await old.exec(readFileSync(new URL(`../sql/${f}`, import.meta.url), 'utf8'));
   await qo(`INSERT INTO fleet (id,name) VALUES ('ecosine','E') ON CONFLICT DO NOTHING`);
-  const P = MERGES[0];
+  /* BY KEY, NOT BY INDEX — see the note over HAND_MERGES in api/identity_map.js.
+     The two literal keys asserted below ('aliyan khalil' / 'khalil aliyan')
+     only describe this pair, so a MERGES[0] that quietly became a different
+     pair turned a passing migration proof into three failures about spelling. */
+  const P = MERGES.find((m) => m.key === 'aliyan khalil' && m.keep.channel === 'uber');
+  if (!P) throw new Error('the register no longer holds the aliyan khalil pair this block is built on');
   await qo(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, requested_at, status)
             VALUES ('uber','o1','ecosine',$1,$2, now(),'completed'),
                    ('yango','o2','ecosine',$3,$4, now(),'completed'),
@@ -706,10 +723,10 @@ const WIN = 'from=2025-04-01&to=2026-09-03';
 const dir = await get(`/api/drivers/directory?${WIN}`);
 const row = (id) => dir.find((r) => (r.ids || []).includes(id));
 
-console.log('\nthe row count: twelve records, nine people');
+console.log('\nthe row count: twelve records, eight people');
 check('twelve platform records went in', REC.length === 12);
-check('and the directory lists nine people — three fewer, one per verified pair',
-  dir.length === 9, `${dir.length} rows: ${dir.map((r) => r.driver_name).join(' | ')}`);
+check('and the directory lists eight people — four fewer, one per verified pair',
+  dir.length === 8, `${dir.length} rows: ${dir.map((r) => r.driver_name).join(' | ')}`);
 /* The same subtraction, on the whole real roster rather than on twelve rows:
    the fixture at the top of this file is all 395 of production's directory
    rows, and folding it with the register gives 322. Seventy-three rows the
@@ -719,8 +736,8 @@ check('and the directory lists nine people — three fewer, one per verified pai
 {
   const key = (r, reg) => (reg ? ALIAS_KEY.get(r.id) : null) || r.person_key || foldName(r.name);
   const count = (reg) => new Set(FX.rows.map((r) => key(r, reg))).size;
-  check('over the real 395-row roster the directory goes from 395 rows to 321',
-    count(false) === 395 && count(true) === 321, `${count(false)} → ${count(true)}`);
+  check(`over the real 395-row roster the directory goes from 395 rows to ${EXPECT.foldsTo}`,
+    count(false) === 395 && count(true) === EXPECT.foldsTo, `${count(false)} → ${count(true)}`);
 }
 
 console.log('\nnothing was lost: the surviving row carries both records');
@@ -802,12 +819,12 @@ for (const r of REFUSED) {
 }
 
 console.log('\nopening either record opens the same person');
-/* The three pairs this fixture actually holds rows for. The other ninety are
+/* The four pairs this fixture actually holds rows for. The rest are
    asserted against the real roster above; here there are twelve records and a
    profile route, and asking it about an id with no rows would test the empty
    case rather than the merge. */
 const INFIX = MERGES.filter((m) => bothSides(m).every((id) => REC.some((r) => r.id === id)));
-check('the fixture holds both records of three register pairs', INFIX.length === 3,
+check('the fixture holds both records of four register pairs', INFIX.length === 4,
   INFIX.map((m) => m.key).join(', '));
 for (const m of INFIX) {
   const alias = mergeIds(m).find((id) => REC.some((r) => r.id === id));
@@ -839,7 +856,11 @@ for (const r of REFUSED) {
    the person too, and this is what says so. */
 console.log('\nthe vehicle page counts people, not platform accounts');
 {
-  const M0 = MERGES[0];
+  /* BY KEY, NOT BY INDEX — the expected custody string below names this pair
+     ("Aliyan khalil, Raja Nouman Ahmed"), so binding on position made the
+     assertion silently change subject when HAND_MERGES gained a front entry. */
+  const M0 = MERGES.find((m) => m.key === 'aliyan khalil' && m.keep.channel === 'uber');
+  if (!M0) throw new Error('the register no longer holds the aliyan khalil pair this block is built on');
   await q2(`INSERT INTO vehicle_driver_day (plate, day, platform, driver_ext_id, driver_name,
               fleet_id, trips, is_primary)
             VALUES ('L36397', DATE '2026-08-20','uber', $1,$2,'ecosine',9,true),

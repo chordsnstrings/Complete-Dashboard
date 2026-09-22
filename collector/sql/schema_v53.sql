@@ -37,9 +37,6 @@
 --
 -- The register, as it stands:
 --
--- 67483c64055e070d79100114 (hotel "Sana Ullah Sher Zamin")
---   -> b7511fa7-cbdf-4373-8539-c7ae020c31e2 (uber "Sanaullah Sher Zamin") = 'sanaullah sher zamin'
---   verified 2026-09-22 on plate L20048
 -- 7fc8da91fc4a44c185e8d6d918db3e6b (yango "Khalil Aliyan")
 --   -> 5f16534e-68be-451b-b057-3e3d948e868b (uber "Aliyan khalil") = 'aliyan khalil'
 --   verified 2026-09-03 on plate L36397
@@ -49,6 +46,9 @@
 -- 67483c64055e070d7910010a (hotel "Shehzad Ahmed Ghulam Muhammad")
 --   -> f6253b6e-fca4-41cf-99c1-6c2f3e2e67b2 (uber "Shehzad Ahmad Ghulam Muhammad") = 'shehzad ahmad ghulam muhammad'
 --   verified 2026-09-03 on plate L46208
+-- 67483c64055e070d79100114 (hotel "Sana Ullah Sher Zamin")
+--   -> b7511fa7-cbdf-4373-8539-c7ae020c31e2 (uber "Sanaullah Sher Zamin") = 'sanaullah sher zamin'
+--   verified 2026-09-22 on plate L20048
 -- 6612891 (bolt "Shehzad Ahmed Ghulam Muhammad")
 --   -> f6253b6e-fca4-41cf-99c1-6c2f3e2e67b2 (uber,hotel "Shehzad Ahmad Ghulam Muhammad") = 'shehzad ahmad ghulam muhammad'
 --   verified 2026-09-05 on 7 shared plates
@@ -480,10 +480,10 @@ DECLARE
   t   record;
   v   record;
   tpl text := $tpl$CASE driver_ext_id
-         WHEN '67483c64055e070d79100114' THEN 'sanaullah sher zamin'
          WHEN '7fc8da91fc4a44c185e8d6d918db3e6b' THEN 'aliyan khalil'
          WHEN 'ab2aec60-56ff-48e2-85c0-3591f6f29aa3' THEN 'moses arthur'
          WHEN '67483c64055e070d7910010a' THEN 'shehzad ahmad ghulam muhammad'
+         WHEN '67483c64055e070d79100114' THEN 'sanaullah sher zamin'
          WHEN '6612891' THEN 'shehzad ahmad ghulam muhammad'
          WHEN '6598721' THEN 'aliyan khalil'
          WHEN '67483c64055e070d791000d2' THEN 'aliyan khalil'

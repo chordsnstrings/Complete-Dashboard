@@ -107,38 +107,24 @@ export const foldName = (s) => String(s == null ? '' : s)
    `keep` is the record that survives; `merge` is the record folded into it.
    `key` is the folded name of `keep` and is asserted below to be exactly that,
    so an entry cannot invent a key that belongs to neither record. */
-/* The three a person checked one at a time, id to id, before any rule existed.
-   They are the oldest and best-evidenced entries here and they keep their own
-   name so a reader can see which merges predate the roster rule. */
+/* The four a person checked one at a time, id to id, rather than by any rule.
+   Three of them are the oldest entries here and predate the roster rule; the
+   fourth is the operator's ruling on 2026-09-22. They keep their own name so a
+   reader can see which merges were decided by a human looking at a pair.
+
+   ── ORDER IS LOAD-BEARING; APPEND, NEVER PREPEND ────────────────────────
+   Held oldest-first by `verified`, and a new entry goes on the END. That is
+   not tidiness. MERGES is [...HAND_MERGES, ...CANDIDATES, ...FROM_ROSTER],
+   so prepending here shifts MERGES[0] — and three test files bind their
+   whole fixture population to MERGES[0] as "the Aliyan Khalil pair". Adding
+   the Sana entry at the front of this list moved it to the Sana pair and
+   broke 35 assertions across identity_map, identity_merge and
+   person_vs_account_counts, none of which was about Sana: they read as
+   nineteen counting bugs on the vehicle and finance pages. Those files now
+   select their pair by KEY, so the trap is closed on both sides — but the
+   chronological order is what a reader of this file should be able to rely
+   on, so keep appending. */
 const HAND_MERGES = Object.freeze([
-  {
-    key: 'sanaullah sher zamin',
-    keep:  { id: 'b7511fa7-cbdf-4373-8539-c7ae020c31e2', name: 'Sanaullah Sher Zamin',  channel: 'uber' },
-    merge: { id: '67483c64055e070d79100114',            name: 'Sana Ullah Sher Zamin', channel: 'hotel' },
-    plate: 'L20048',
-    verified: '2026-09-22',
-    evidence:
-      'RULED BY THE OPERATOR, which is what its own refusal asked for. This pair '
-      + 'sat in REFUSED with the verdict "UNDECIDABLE, which is not a merge… '
-      + 'Settled by a phone call, not by this file" — the hotel record carries 0 '
-      + 'trips, 0 custody rows and 0 money, so neither a shared vehicle-day nor a '
-      + 'simultaneity could be measured in either direction, and "Sher Zamin" is a '
-      + 'patronymic two brothers would file identically. Nothing in the data could '
-      + 'decide it. On 2026-09-22 the operator did: "sana is active and all the '
-      + 'accounts are sana." '
-      + 'What it unblocks, measured on production the same day: the uber account '
-      + 'holds 240.5 online hours over 19 days and 190 trips in the trailing 31 '
-      + 'days, and every one of them was absent from person 51\'s page — which '
-      + 'rendered an em dash under the sentence "no channel this driver works '
-      + 'publishes availability", while listing the uber account two lines below. '
-      + 'The spine had already joined the pair through the shared-phone rule in '
-      + 'src/persons.js (both records file +971569637741); this entry makes the '
-      + 'register agree with the spine rather than contradict it.',
-    caveat:
-      'The evidence is a human ruling, not a measurement, and it is recorded as '
-      + 'such. If the hotel record ever starts carrying trips, a simultaneity '
-      + 'check becomes possible for the first time and should be run.',
-  },
   {
     key: 'aliyan khalil',
     keep:  { id: '5f16534e-68be-451b-b057-3e3d948e868b', name: 'Aliyan khalil', channel: 'uber' },
@@ -220,6 +206,34 @@ const HAND_MERGES = Object.freeze([
       + 'arithmetic on hotel ended_at "finds" 5 overlaps and all are artefacts '
       + '— ended_at is a booking close (7.18 km in 49 seconds on 2026-08-06) '
       + 'and duration_s is null on all 8 rows.',
+  },
+  {
+    key: 'sanaullah sher zamin',
+    keep:  { id: 'b7511fa7-cbdf-4373-8539-c7ae020c31e2', name: 'Sanaullah Sher Zamin',  channel: 'uber' },
+    merge: { id: '67483c64055e070d79100114',            name: 'Sana Ullah Sher Zamin', channel: 'hotel' },
+    plate: 'L20048',
+    verified: '2026-09-22',
+    evidence:
+      'RULED BY THE OPERATOR, which is what its own refusal asked for. This pair '
+      + 'sat in REFUSED with the verdict "UNDECIDABLE, which is not a merge… '
+      + 'Settled by a phone call, not by this file" — the hotel record carries 0 '
+      + 'trips, 0 custody rows and 0 money, so neither a shared vehicle-day nor a '
+      + 'simultaneity could be measured in either direction, and "Sher Zamin" is a '
+      + 'patronymic two brothers would file identically. Nothing in the data could '
+      + 'decide it. On 2026-09-22 the operator did: "sana is active and all the '
+      + 'accounts are sana." '
+      + 'What it unblocks, measured on production the same day: the uber account '
+      + 'holds 240.5 online hours over 19 days and 190 trips in the trailing 31 '
+      + 'days, and every one of them was absent from person 51\'s page — which '
+      + 'rendered an em dash under the sentence "no channel this driver works '
+      + 'publishes availability", while listing the uber account two lines below. '
+      + 'The spine had already joined the pair through the shared-phone rule in '
+      + 'src/persons.js (both records file +971569637741); this entry makes the '
+      + 'register agree with the spine rather than contradict it.',
+    caveat:
+      'The evidence is a human ruling, not a measurement, and it is recorded as '
+      + 'such. If the hotel record ever starts carrying trips, a simultaneity '
+      + 'check becomes possible for the first time and should be run.',
   },
 ]);
 

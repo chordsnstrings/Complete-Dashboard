@@ -87,7 +87,7 @@ const OLD_ID = /^[0-9a-f]{24}$|^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{
 check('…and not one of them is a shape the register used to accept',
   numeral.every((i) => !OLD_ID.test(i)));
 check('the module imports anyway — the guard runs at import, so this is the assertion',
-  MERGES.length === 130 && PENDING.length === 5, `${MERGES.length} applied, ${PENDING.length} pending`);
+  MERGES.length === 131 && PENDING.length === 5, `${MERGES.length} applied, ${PENDING.length} pending`);
 /* The phone sweep is the one that grows: it re-runs on every roster pull, and
    the roster grows when a channel starts filing compliance rows. It went 45 to
    82 on 2026-09-07, when the Yango collector moved to fleet-api.yango.tech and
@@ -240,7 +240,7 @@ check('…and an entry that would join a refused pair does not load',
    name the same surviving record, or the key has quietly merged two men whose
    folded names happen to match. */
 check('a key may carry more than one entry, and six of them do',
-  new Set(MERGES.map((m) => m.key)).size === 124,
+  new Set(MERGES.map((m) => m.key)).size === 125,
   `${new Set(MERGES.map((m) => m.key)).size} keys over ${MERGES.length} entries`);
 check('…but two entries claiming one key for two different survivors do not load',
   (await loadsWith("  {\n    key: 'abidullah safi',\n    keep:  { id: 'dae09063-88a3-432e-b39f-969d8de7992b'",
