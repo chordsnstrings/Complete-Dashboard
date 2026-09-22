@@ -75,6 +75,17 @@ const SAYS_SO = /^(total|totals|people|shown|truncated|population|history|fleet_
 const NOT_A_TRUNCATION = new Set([
   // The twelve days either side of the one being viewed. A window, not a page.
   '/api/day.versus_neighbours.series',
+  /* The twelve months AHEAD, hand-written in src/dubai_tourism.js as a Map
+     literal — 2026-10 through 2027-09. Nothing queried it and nothing cut it
+     off; twelve is the span the calendar covers, and it collides with this
+     guard only because some unrelated query in api/ carries LIMIT 12.
+
+     EXEMPTED WITH A GUARD OF ITS OWN, below, rather than on trust. An
+     exemption that merely names a path keeps excusing it after somebody
+     rewrites the source as a query with a LIMIT — at which point a real
+     truncation would be silently tolerated by the entry that was added when
+     it was not one. */
+  '/api/forecast.calendar.months',
 ]);
 
 const silent = [];
@@ -104,6 +115,29 @@ for (const route of declaredRoutes()) {
   };
   walk(body);
 }
+/* THE EXEMPTION'S OWN GUARD. An entry in NOT_A_TRUNCATION is a claim that a
+   list is a fixed span rather than a page, and a claim needs something holding
+   it true. This reads the source: CALENDAR must still be a literal Map whose
+   size is the number of rows the route returns, so the day it becomes a query
+   with a LIMIT, this fails and the exemption is reconsidered rather than
+   quietly covering a real truncation. */
+{
+  const tour = readFileSync('src/dubai_tourism.js', 'utf8');
+  check('the tourism calendar is still a hand-written span, not a query',
+    /export const CALENDAR = new Map\(Object\.entries\(\{/.test(tour)
+    && !/\bLIMIT\b/i.test(tour),
+    'CALENDAR is no longer a literal — its NOT_A_TRUNCATION exemption must be re-argued');
+  /* Counted from the MODULE, not by regex over its text: the route must return
+     every entry the source declares and no fewer, which is the actual claim
+     the exemption rests on. A regex over the literal would also pass if the
+     route sliced it. */
+  const { CALENDAR } = await import('../src/dubai_tourism.js');
+  const { body } = await get('/api/forecast');
+  const n = (body?.calendar?.months || []).length;
+  check('and the route returns every month the source declares, not a page of them',
+    n === CALENDAR.size, `route returned ${n} of ${CALENDAR.size}`);
+}
+
 check('no list comes back at its cap without saying how many there really are',
   silent.length === 0, silent.length ? `\n      ${silent.join('\n      ')}` : '');
 
