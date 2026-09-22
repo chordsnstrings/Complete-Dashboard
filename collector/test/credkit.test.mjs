@@ -192,6 +192,62 @@ check('two curls in one paste land on two different keys',
 check('…mixing the two curl dialects freely',
   both.map((f) => f.key).sort().join(',') === 'UBER_WEB_COOKIE,UBER_WEB_COOKIE_EGARI');
 
+/* A cmd curl whose jar rides in a `-H "Cookie:" ` HEADER, not a `-b` flag,
+   and whose jar holds a cookie whose VALUE is JSON.
+   ─────────────────────────────────────────────────────────────────────────
+   This is the form a real Windows capture used on 2026-09-22 — Chrome's
+   getDrivers request copies as `curl.exe "url"` with the jar in a Cookie
+   header — and it defeated the recogniser two ways at once, both measured on
+   the live Egari session before this was written:
+
+     · Uber's `smeta` cookie is `{"expiresAt":N}`. cmd writes an interior quote
+       as `\^"` (a shell backslash-escape, then a caret-escape), which deCmd
+       leaves as `\"`. The header capture used `[^"\n]+`, which stopped dead on
+       that quote — truncating the jar BEFORE `sp-jwt-session`, the one cookie
+       the Uber recogniser reads. A live session read as unrecognised.
+     · the command is `curl.exe`, not `curl`, and carries no `--url` flag, so
+       the url reader — which only knew the word `curl` — returned null.
+
+   Both halves are asserted here on a SYNTHETIC jar, escaped exactly as cmd
+   does, so reverting either fix fails a case rather than passing quietly. */
+{
+  const cmdHdrEsc = (v) => String(v)
+    .replace(/\^/g, '^^')          // a data caret doubles first
+    .replace(/"/g, '\\^"')         // an interior quote: backslash THEN caret
+    .replace(/[{}$!]/g, (c) => `^${c}`)
+    .replace(/%/g, '^%^');
+  /* A jar with the JSON cookie that carries the interior quotes, and the
+     session JWT after it — the order that matters, since truncation at smeta
+     is what used to lose the JWT. */
+  const jsonJar = [
+    'marketing_vistor_id=00000000-0000-0000-0000-000000000000',
+    'smeta={"expiresAt":1803109130920}',
+    `sp-jwt-session=${jwt({ data: { supplierOrgUUID: EGA_ORG, tenancy: 'uber/production' }, iat: 1, exp: EXP })}`,
+    'sid=QA.PLACEHOLDER.value',
+  ].join('; ');
+  const cap = `curl.exe ^"https://fleethub.uber.com/api/getDrivers?localeCode=en^" ^
+  --compressed ^
+  -X POST ^
+  -H ^"Cookie: ${cmdHdrEsc(jsonJar)}^" ^
+  -H ^"TE: trailers^"`;
+
+  const jar = cookieText(cap);
+  check('a cmd Cookie header is read PAST an interior-quote cookie',
+    cookieMap(jar)['sp-jwt-session'] !== undefined, jar.slice(0, 50));
+  check('…and the JSON cookie keeps its own quotes',
+    cookieMap(jar).smeta === '{"expiresAt":1803109130920}', cookieMap(jar).smeta);
+  check('…with no caret or escaped quote left in the jar',
+    !jar.includes('^') && !jar.includes('\\"'), jar.slice(-60));
+
+  const f = recognise(cap);
+  check('so the live Windows session is named, as its egari org',
+    f.length === 1 && f[0].key === 'UBER_WEB_COOKIE_EGARI' && f[0].fleet === 'egari',
+    JSON.stringify(f.map((x) => `${x.key}/${x.fleet}`)));
+
+  check('curl.exe with no --url flag still yields its url',
+    curlUrl(cap) === 'https://fleethub.uber.com/api/getDrivers?localeCode=en', String(curlUrl(cap)));
+}
+
 /* ── an OAuth application: two strings that mean nothing apart ─────────── */
 /* The one credential here that carries no identity of its own.
    ─────────────────────────────────────────────────────────────────────────

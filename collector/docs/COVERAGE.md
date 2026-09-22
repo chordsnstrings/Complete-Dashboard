@@ -827,6 +827,31 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A LIVE SESSION READ AS UNRECOGNISED BECAUSE IT WAS COPIED ON WINDOWS.**
+  On 2026-09-22 an Egari Uber session captured on Windows — Chrome's "Copy as
+  cURL (cmd)" of the fleethub `getDrivers` request — replayed **200 with real
+  drivers**, and `recognise()` returned NOTHING. Two cmd-dialect facts, both in
+  `src/credkit.js`, each enough on its own:
+    1. the jar rode in a `-H "Cookie: …"` HEADER, and Uber's `smeta` cookie is
+       JSON — `{"expiresAt":N}`. cmd writes an interior quote as `\^"` (shell
+       backslash-escape, then caret-escape), which `deCmd` leaves as `\"`. The
+       header extractor used `[^"\n]+`, which stopped on that quote and
+       **truncated the jar before `sp-jwt-session`** — the one cookie the Uber
+       recogniser reads. Nine of twenty-two cookies survived; the session
+       looked like it had none.
+    2. the command is `curl.exe` with no `--url` flag, and `curlUrl` only knew
+       the word `curl`, so it returned null.
+  The general shape: **a wrong-dialect paste is indistinguishable from a dead
+  credential** unless the reader handles every dialect a browser emits. The
+  bash `-b '…'` form hid both bugs for months because single quotes need no
+  interior escaping and the flag is preferred over the header. The recogniser
+  now consumes an escaped `\.` pair in a cookie header and undoes it for cmd
+  input only (a POSIX single-quoted jar keeps its backslashes), and `curlUrl`
+  matches `curl.exe`. Asserted in `test/credkit.test.mjs` on a synthetic jar
+  escaped exactly as cmd does, proved by reverting each fix.
+  **When a capture that works in a terminal is not recognised, suspect the
+  copy dialect before the credential.**
+
 * **"THE BROWSER SENDS THIRTEEN HEADERS AND WE SEND ONE" IS NOT A DIAGNOSIS.**
   Bolt's portal was bisected on 2026-09-22 because our request looked nothing
   like the working browser capture — a different `version=` string, twelve

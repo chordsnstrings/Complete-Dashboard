@@ -87,22 +87,45 @@ export function deCmd(text) {
    preferred over a `cookie:` header because a curl carrying both puts the
    real jar in the flag. */
 export function cookieText(text) {
+  const cmd = String(text || '').includes('^"');
   const s = deCmd(text);
   const m = s.match(/(?:^|\s)(?:-b|--cookie)\s+'([^']+)'/)
     || s.match(/(?:^|\s)(?:-b|--cookie)\s+"((?:[^"\\]|\\.)+)"/)
     || s.match(/(?:^|\s)(?:-b|--cookie)\s+([^\s'"][^\s]*)/)
-    || s.match(/["\s]cookie:\s*([^"\n]+)/i)
+    /* A `cookie:` HEADER, whose value may itself contain a double quote.
+       ─────────────────────────────────────────────────────────────────────
+       Chrome's "Copy as cURL (cmd)" writes the jar as `-H ^"Cookie: …^"`, and
+       a cookie whose VALUE is JSON — Uber's `smeta={"expiresAt":…}` is the one
+       that costs the time — arrives with its interior quotes as `\"`. deCmd
+       has already turned `^"` into `"`, so at this point the header value runs
+       from `Cookie:` to the FIRST BARE `"`, and `[^"\n]+` stopped at the
+       escaped quote inside `smeta` — truncating the jar before it reached
+       `sp-jwt-session`, which is the exact cookie the Uber recogniser keys on.
+       A live Egari session, captured on Windows, read as unrecognised.
+
+       So the value now consumes an escaped `\.` pair and only a BARE quote
+       ends it. The `\"` are undone below. */
+    || s.match(/["\s]cookie:\s*((?:[^"\n\\]|\\.)+)/i)
     || s.match(/cookie:\s*([^\n]+)/i);
-  return (m ? m[1] : s).trim();
+  let v = (m ? m[1] : s).trim();
+  /* Undo the cmd body-escaping — `\"` for a quote, `\\` for a backslash — but
+     ONLY for a cmd paste. A POSIX `-b '…'` jar is single-quoted, where a
+     backslash is a literal character of the cookie and must be left alone. */
+  if (cmd) v = v.replace(/\\(["\\])/g, '$1');
+  return v;
 }
 
 /* What a pasted curl was calling, which is how a credential that carries no
    org of its own can still be attributed to a provider. */
 export function curlUrl(text) {
   const s = deCmd(text);
-  const m = s.match(/(?:--url|curl)\s+"(https?:\/\/[^"\s]+)"/)
-    || s.match(/(?:--url|curl)\s+'(https?:\/\/[^'\s]+)'/)
-    || s.match(/(?:--url|curl)\s+(https?:\/\/\S+)/);
+  /* `curl.exe`, not just `curl`: Chrome's cmd export invokes the binary by its
+     full name — `curl.exe "https://…"` with no `--url` flag — so a rule that
+     only knew the word `curl` returned null for the very captures that need
+     attributing by their URL. */
+  const m = s.match(/(?:--url|curl(?:\.exe)?)\s+"(https?:\/\/[^"\s]+)"/)
+    || s.match(/(?:--url|curl(?:\.exe)?)\s+'(https?:\/\/[^'\s]+)'/)
+    || s.match(/(?:--url|curl(?:\.exe)?)\s+(https?:\/\/\S+)/);
   return m ? m[1] : null;
 }
 
