@@ -40,6 +40,14 @@ import { aed } from './deposit_core.js';
 
 const BOOK_LABEL = { advance: 'Advances', cash: 'Cash', deduction: 'Deductions', pay: 'Pay' };
 
+/* windowLabel() is written to be a HEADING, and it has five shapes: "This
+   month", "Last 30 days", "September 2026", "Q3 2026" and "3 Aug 2026 – 19 Aug
+   2026". Two of those read wrong in the middle of a sentence — production
+   printed "over This month" — and the other three must keep the case they
+   have: lowercasing a month name or a quarter would be a new defect in place
+   of the old one. So only the two deictic prefixes are touched. */
+const midSentence = (s) => (/^(This|Last) /.test(String(s)) ? s[0].toLowerCase() + s.slice(1) : s);
+
 /* FOUR proof states, in one cell, said in words on hover rather than encoded
    in a colour — and the cell links only where the product will actually serve
    the file.
@@ -80,7 +88,7 @@ export async function renderDriverLedger(root, id, prof) {
      policy line would silently move with them if it did. The answer is that
      a flow belongs in a panel that NAMES its window, so the two can never be
      read as one number disagreeing with itself. */
-  const winP = panel(`Over ${windowLabel()}`, null, 'driver-money-window');
+  const winP = panel(`Over ${midSentence(windowLabel())}`, null, 'driver-money-window');
   /* The heading says the window, because this list is the one thing on the tab
      the toolbar governs and the tiles above it are not. A reader who cannot
      tell which half moved when they changed the window has two figures that
@@ -243,7 +251,7 @@ export async function renderDriverLedger(root, id, prof) {
     winP.body.append(kpiRow([
       { label: 'Income', value: ow.earned == null ? '—' : aed(ow.earned),
         sub: ow.earned == null ? ow.earned_absent_reason
-          : `what the platforms say this driver generated over ${esc(windowLabel())}, across `
+          : `what the platforms say this driver generated over ${esc(midSentence(windowLabel()))}, across `
             + `${countOf(ow.earning_days, 'day')} of statements` },
       { label: 'Cash taken', value: ow.cash_taken == null ? '—' : aed(ow.cash_taken),
         sub: ow.cash_taken_means },
@@ -267,7 +275,7 @@ export async function renderDriverLedger(root, id, prof) {
     winP.body.append(el('p', 'cap', `Cash taken is ${esc(aed(t.cash_fares))} of cash fares`
       + (t.cash_advance_rows ? `, plus ${esc(aed(t.cash_advance))} advanced` : '')
       + (t.cash_deposit_rows ? `, less ${esc(aed(Math.abs(Number(t.cash_deposit))))} handed back` : '')
-      + `, over ${esc(windowLabel())}. It is what moved between these dates — not a balance, and `
+      + `, over ${esc(midSentence(windowLabel()))}. It is what moved between these dates — not a balance, and `
       + 'not what they are holding now, which is the Still held tile above.'));
     if (!t.cash_advance_rows && !t.cash_deposit_rows) {
       winP.body.append(note('Two of the three terms are absent: nothing is recorded in the cash '

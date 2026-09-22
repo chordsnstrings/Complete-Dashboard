@@ -191,6 +191,14 @@ console.log('\na driver who has a record');
   check('with the derivation spelled out rather than asserted',
     /67\.13 of cash fares/.test(winTxt) && /plus .*500/.test(winTxt)
     && /less .*150/.test(winTxt), winTxt.slice(0, 500));
+  /* PRODUCTION PRINTED "over This month" — windowLabel() is built to be a
+     heading and reads wrong mid-sentence. Only the deictic forms are
+     lowercased; a month name, a quarter and a date range keep their case, so
+     this asserts the capital is gone from the SENTENCE and not that the whole
+     label was flattened. */
+  check('the window reads as prose in the middle of a sentence',
+    !/over This |over Last /.test(winTxt) && /over this month|over \d|over [A-Z]/i.test(winTxt),
+    (winTxt.match(/over [^,.]{0,24}/g) || []).join(' | '));
   check('the panel heading names the window it is measured over',
     /Over /i.test(await page.$eval('[data-panel="driver-money-window"] h3', (e) => e.innerText)),
     await page.$eval('[data-panel="driver-money-window"] h3', (e) => e.innerText));
