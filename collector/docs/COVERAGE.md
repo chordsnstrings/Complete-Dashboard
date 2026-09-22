@@ -3077,6 +3077,97 @@ settled at **AED 35,965**. A settled day reports **no estimate at all**:
 The estimate rides beside the measurement and never becomes it — `revenue` is
 untouched, and nothing projected is ever added into `accounted`.
 
+* **A MONTH-ON-MONTH COMPARISON CANNOT TELL A SEASON FROM A TREND, AND THIS
+  FLEET'S SEASON IS ENORMOUS.** `#forecast` fitted one straight line to the
+  months since the March 2026 break and published, on 2026-09-22:
+
+  | | |
+  |---|---|
+  | September 2026, forecast by the line | 14,700 (11,100–18,300) |
+  | September 2026, first 21 whole days | 16,095 |
+  | the same 21 days of September 2025 | 19,867 |
+  | September 2026 completing on last year's shape | ~23,975 |
+
+  The line was **39% low on the month it was predicting**, and the month was
+  already outside the 95% interval published for it — `in_progress.
+  within_interval` had said `false` for as long as anybody had looked. It is
+  not scatter. August→September is the sharpest seasonal step in Dubai's year
+  (14,234 bookings in August 2025 against **29,594** in September 2025) and a
+  line fitted to March..August has no term that can express it. The regime is
+  six months old and has never contained an October. **Any model fitted only
+  inside the current regime is blind to seasonality by construction**, and on
+  this fleet that is worth a factor of two.
+
+* **A YEAR-AGO MONTH IS NOT AUTOMATICALLY COMPARABLE, BECAUSE THIS RECORD
+  STARTS AT A DIFFERENT DATE PER CHANNEL.** Measured on production 2026-09-22,
+  first month carrying a booking: **Uber 2025-04, Yango 2025-09, the hotel
+  channel 2026-07, Bolt 2024-12**. So:
+
+  | | |
+  |---|---|
+  | 2026-01 | 37,100 bookings — uber + bolt + yango |
+  | 2025-01 | 6,384 bookings — **BOLT ONLY** |
+
+  which is **+481%**, and is a fact about the month we started collecting Uber.
+  `src/seasonal.js` decides comparability from the measured channel mix of both
+  months rather than from a cutoff date, and the refusal names the channel and
+  its share ("uber, yango carried 84.5% of this month and carried nothing in
+  2025-01"). Jan/Feb/Mar 2026 are refused on the live data; Apr–Sep 2026 are
+  allowed. **Do not hard-code a start date for this**: the verdict is
+  recomputed on every load, so a refusal caused by a collection gap lifts by
+  itself the day the gap closes.
+
+* **`scatter()` AND `barChart()` OPEN WITH `host.innerHTML = ''`.** Right for a
+  chart that redraws, and silently destructive to anything appended to the same
+  node before it. The tourism panel on `#forecast` built four KPI tiles,
+  appended them, and the next line wiped them: nothing thrown, nothing in the
+  console, no failing assertion — the tiles were simply not on the page, and
+  the only way to notice was to read the rendered text and find them missing.
+  **A chart that is not the first thing in its panel needs its own container.**
+
+* **`tableFrom`'s DEAD-COLUMN PRUNE READS THE RAW VALUE, NOT THE RENDERER.**
+  `api/public/ui.js:238` counts `isBlank(r[c.key])`, and says why it must — a
+  prune that ran renderers would silently drop columns across the product. So a
+  column with a SYNTHETIC key (`key: '_base'`, value composed in `render`) that
+  also declares `absent` is pruned on **every** render, including the ones
+  where it is full, because no row has that key. Either give the column a real
+  key or leave `absent` off. The sparse-column note below it is the opposite —
+  that one *does* run the renderer — so the two disagree by design.
+
+* **A REFUSED COMPARISON STILL CARRIES THE NUMBER IT REFUSED.** `/api/forecast`
+  computes a year-on-year ratio before deciding the pair is not a comparison,
+  and serves it so the refusal can quote what it declined to publish. A
+  renderer filtering on `ratio != null` therefore put January and February 2026
+  back into the comparable table at +601% and +559%, **directly underneath the
+  note explaining that those months cannot be compared**. Filter on the
+  verdict, never on the presence of the figure. Every other assertion on that
+  panel was green with both months in it; only the one asking what is NOT there
+  could see it.
+
+* **WAIT FOR SOMETHING THAT IS ALWAYS THERE, THEN ASSERT THE THING UNDER
+  TEST.** A browser test that waits on the selector it exists to check does not
+  fail when that selector goes — it times out after 30s and dies on a
+  Playwright stack trace with **no "N passed, M failed" line**, which
+  `test/run-all.mjs:213` counts as a broken file with nothing naming the cause.
+  Same shape as the `test/events.test.mjs` skip already recorded above. Cost two
+  revert cycles on `test/forecast_page.test.mjs`: first the wait, then a
+  `ts[0].querySelectorAll` on an empty list doing it again. **Null-safe every
+  assertion downstream of the one that can fail first.**
+
+* **THE RUN RATE OF A MONTH IN PROGRESS WAS DIVIDING BY A DAY STILL BEING
+  COLLECTED.** `/api/forecast` took `days_so_far` from `spanTo`, the latest day
+  carrying ANY booking. On 2026-09-22 that was the 22nd, which held **71
+  bookings** because the collector had run once that morning, against a trailing
+  norm near 766. Numerator three quarters of a day short, denominator a day too
+  long: production published **734.8/day** where the whole days give **766.4**,
+  and "on track for 22,045" where they give 22,992. That figure is the only
+  score the page keeps of its own forecast, so understating it **flatters a
+  forecast that is too low**. The last whole day is the last day that is not
+  today in Dubai — today is the only day collection can still be part-way
+  through, since the incremental pass runs every 30 minutes over a 3-day
+  window. Anywhere a partial period is divided by its elapsed days, check what
+  the last bucket actually holds.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
@@ -4898,3 +4989,108 @@ request shape from it.**
   walks in this file do `Number(data.total)` for paging. That would be
   `NaN` here.
 
+## Dubai's visitor numbers — the only regressor here that we cannot collect
+
+Added 2026-09-22 for `#forecast`, which the operator asked to take account of
+"total tourist coming in dubai, how that changed the number of trips last
+year". Lives in `src/dubai_tourism.js`.
+
+**There is no feed and no credential.** Nothing in this system can reach
+Dubai's Department of Economy and Tourism; DET publishes to its newsroom and
+its Tourism Performance Reports, and `dubaidet.gov.ae` answers this
+platform's egress with **HTTP 403**. So the series is hand-transcribed, and
+what makes a hand-transcribed table usable is that it reconciles to totals the
+same authority published separately:
+
+| check | from the months | published | delta |
+|---|---|---|---|
+| H1 2025 | 9,880,000 | 9.88m | **0** |
+| Jan–Nov 2025 | 17,548,000 | ~17.5m | −2,000 |
+| Full year 2025 | 19,588,000 | 19.59m | −2,000 |
+
+`reconcile()` recomputes these on every request and `test/seasonal.test.mjs`
+fails if they stop agreeing. A table that hits all three on the nose is DET's
+series or an extraordinary coincidence.
+
+**February to July 2026 are deliberately absent.** DET published the year to
+date and August by itself; those six months were released only inside that
+total. They are kept as ONE aggregate — 4.106m, being the published 6.97m
+January–August less January's 1.995m and August's 869k — and each month renders
+absent with that reason. **Dividing a total by six would be the
+"reason that is not the true one" `CLAUDE.md` forbids**, and the assertion that
+stops a future hand tidying the gap away is in `test/seasonal.test.mjs`.
+
+**What it explains, measured over the 11 months carrying both a published
+visitor figure and a booking count on the channels the fleet runs now:**
+
+| | r² |
+|---|---|
+| visitors → bookings per active vehicle | **0.668** |
+| visitors → bookings | 0.641 |
+| visitors → number of active vehicles | **0.281** |
+
+The third is the one that matters and it is published precisely because it is
+supposed to be weak: **tourism explains most of what each car does and little
+of how many cars there are**, which is right — fleet size is an operator's
+decision, not the city's. If it ever fits as well as the first, something is
+wrong with the first.
+
+**The fit is destroyed by the months that are a different business.** Including
+2025-01..03 — a Bolt-only fleet — against a full year of Dubai's visitors takes
+r² from **0.668 to 0.135**, and the page would then have reported "tourism
+explains 14% of the movement": wrong about the relationship as well as about the
+number. Proved by reverting the filter.
+
+**The March 2026 break has a cause, and it is not a fleet event.** Regional
+conflict from late February 2026 closed airspace across the Gulf.
+
+| | |
+|---|---|
+| Dubai hotel occupancy, March 2025 | over 71% |
+| Dubai hotel occupancy, March 2026 | about 36% |
+| Dubai hotel occupancy, August 2026 | 66% — DET put it at 89% of August 2025 |
+| Dubai airport passengers, Q1 2025 | 23.4m |
+| Dubai airport passengers, Q1 2026 | 18.6m |
+
+This fleet lost 77% of its bookings in the same month. **The recovery the
+forecast is fitting is therefore a recovery to a level the city sets**, not
+open-ended growth — which is the single most useful thing to know before
+rostering to it.
+
+## A language model may name an event and may not move a number
+
+`#forecast` carries a demand calendar — Ramadan, the Eids, DSF, GITEX, ATM,
+Gulfood, the Dubai World Cup, the summer exodus — for the twelve months it
+forecasts. It is there because a regression over six post-break months
+genuinely cannot know that **Ramadan moves about eleven days earlier each
+Gregorian year**, so the month that held it last year will not hold it next
+year. That is knowledge, not scatter, and it is the one thing on this page
+worth paying a model for.
+
+**It annotates months. It never multiplies a number**, and `test/seasonal.
+test.mjs` asserts that no calendar entry carries a numeric field at all, so
+a later hand looking for an uplift factor cannot find one.
+
+**The reason the label is not boilerplate, measured 2026-09-22.** The same
+calendar was generated on two providers:
+
+| | Ramadan 1448 begins | Eid al-Fitr 1448 |
+|---|---|---|
+| MiniMax M3 | "~Feb 17 2027" | "~Mar 19 2027" |
+| GLM 5.2 (`glm-5-2-260617`, ModelArk) | "~8 Feb 2027" | "~9–11 Mar 2027" |
+| UAE press, Sept 2026, from the astronomical calculation | **8 February 2027** | **9 or 10 March 2027** |
+
+MiniMax returned **1447's dates** — a year stale, nine days out, and delivered
+with exactly the same confidence as everything else in the reply. Two models,
+one of them wrong, and **nothing in the output to say which**. GLM 5.2 is used
+and the dates were checked against a published source before the calendar was
+allowed on the page.
+
+Two practical notes for the next person reaching for either. ModelArk's text
+surface is real and the skill's own `SKILL.md` does not mention it — it is
+`POST https://ark.ap-southeast.bytepluses.com/api/v3/chat/completions` with
+`model: "glm-5-2-260617"`, documented in that skill's `references/models.md`,
+and **`scripts/ark.py` has no `chat` subcommand**, so the call is plain HTTP.
+GLM 5.2 reasons by default and bills it. MiniMax's `minimax.py code --extract`
+writes **an empty file** when the reply contains no fenced code block, with a
+success message; ask for a fenced block explicitly or omit `--extract`.

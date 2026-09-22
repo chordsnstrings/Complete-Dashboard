@@ -1805,3 +1805,138 @@ rule wrong renders visibly wrong against it.
 - **Step 7, the issued document**, is not started. It is last on purpose: it is
   the only permanent piece, and it should not be written until the fee model and
   the cash amount have stopped moving.
+
+---
+
+## Batch — #forecast compares with the same month a year earlier
+
+Commits `371a7f8` (model + Dubai tourism table), `d0dd4f1` (route + two
+suites), `09cd228` (page + browser suite). The operator's words: *"ensure that
+it does forecast properly, by incorporating total tourist coming in dubai, how
+that changed the number of trips last year … It should always compare month
+with the previous year month, active vehicle that month, with active vehicle
+this month, and then average trip number per vehicle etc."*
+
+### THE DEFECT, measured on production 2026-09-22 before any change
+
+`/api/forecast` fitted one straight line to the months since the March 2026
+break. That refusal is correct and is untouched. What the line cannot do is
+know that October is Dubai's high season, because the regime it is fitted to is
+six months old and has never contained an October.
+
+| | |
+|---|---|
+| September 2026, forecast by the line | **14,700** (11,100–18,300) |
+| September 2026, first 21 whole days | 16,095 |
+| the same 21 days of September 2025 | 19,867 |
+| September 2026 completing on last year's shape | **~23,975** |
+
+39% low, and the month sat outside the interval the page published for it —
+`in_progress.within_interval` had been answering `false` and nothing read it.
+
+### A SECOND DEFECT, found while fixing the first
+
+`days_so_far` came from `spanTo`, the latest day carrying **any** booking. On
+2026-09-22 that was the 22nd, which held **71** bookings because the collector
+had run once that morning against a trailing norm near 766. Production
+published **734.8/day** where the whole days give **766.4**, and "on track for
+22,045" where they give 22,992. That figure is the page's only score of its own
+forecast, so understating it flatters a forecast that is too low.
+
+### Status
+
+| # | what | state | proof |
+|---|---|---|---|
+| F1 | year-on-year per month: bookings, **active vehicles**, **bookings per active vehicle**, both sides | **proven** | production `/api/forecast` 2026-09-22 after deploy: 2026-08 vs 2025-08 = 14,021/14,234, vehicles 98/114 (−14.0%), per-vehicle 143.1/124.9 (**+14.6%**) |
+| F2 | a pair that is not a comparison is refused, with the channel named | **proven** | 2026-01/02/03 come back `comparable:"no"`, *"uber, yango carried 84.5% of this month and carried nothing in 2025-01"* |
+| F3 | year-on-year projection with its interval | **proven** | 2026-10 = **31,900** [25,100–38,600] on a 2025-10 base of 35,703, ratio 0.8707, t = 4.30 on 2 df |
+| F4 | Dubai visitors as a regressor with r² stated | **proven** | per-vehicle r² **0.668**, bookings 0.641, active vehicles **0.281**, n = 11 |
+| F5 | the hand-transcribed visitor table reconciles to DET's own totals | **proven** | H1 2025 delta **0**, Jan–Nov −2,000, FY2025 −2,000, recomputed per request |
+| F6 | run rate over whole days only | **proven** | `days_so_far` 21, `per_day` **767.0**, `basis` names the rule, `trips_including_today` 16,231 kept beside 16,108 |
+| F7 | month in progress scored against the same days a year earlier | **proven** | `same_days_year_ago` = 16,108 vs 19,867, ratio 0.811, projected **23,995** |
+| F8 | every method scored one step ahead, published whichever way it falls | **proven** | `model_scores.mean_abs_pct` = line 12.2%, **seasonal 30.5%**, flat 18.4% |
+| F9 | the page renders all of it | **written, committed** | `test/forecast_page.test.mjs` 36 assertions against the mock, 5 reverts |
+
+**F1–F8 are proven on production** because `d0dd4f1` was an ancestor of the
+deploy that went out on 2026-09-22 and the figures above were re-measured from
+the live endpoint afterwards. **F9 is not**: the page ships in `09cd228`, which
+is not deployed at the time of writing. Verify it with the modals filled before
+claiming it.
+
+### THE SCOREBOARD DOES NOT FLATTER THE NEW MODEL, and the page says so
+
+One step ahead, using only the months before each target:
+
+| month | actual | line | year on year | flat |
+|---|---|---|---|---|
+| 2026-07 | 10,883 | **+14.6%** | −40.3% | −13.0% |
+| 2026-08 | 14,021 | **−9.8%** | −20.8% | −23.8% |
+| mean \|err\| | | **12.2%** | 30.5% | 18.4% |
+
+The straight line wins both, and it wins for a reason: both months sit inside
+the recovery, where a year-on-year ratio taken from earlier months is biased
+low by construction because the ratio was still climbing. September is the
+opposite case and the line is the one that misses by 39%. **Two scored months
+cannot settle that**, so both models are served, the page prints all three
+errors, and it ends *"this page does not tell you which to believe, because it
+cannot demonstrate it."* The assertion that the losing number stays on the page
+is in `test/forecast_page.test.mjs`.
+
+### Proved by revert — eight of them
+
+| revert | result |
+|---|---|
+| channel-mix comparability test removed | 56 passed, **5 failed** |
+| `sqrt(1 + 1/n)` dropped from the interval | 59 passed, **2 failed** |
+| `base_regime` back to the original test | 60 passed, **1 failed** |
+| tourism mix filter removed | 58 passed, **3 failed** — r² 0.668 → **0.135** |
+| `lastWholeDay` ignored | 57 passed, **4 failed** |
+| the route stops fetching the per-platform grain | 32 passed, **6 failed** |
+| the run rate goes back to `spanTo` | 34 passed, **4 failed** |
+| the same-days-a-year-ago query dropped | 34 passed, **4 failed** |
+
+Plus five on the page: the year-on-year panel (22/13), the comparable-table
+filter (34/1), the scoreboard's losing error (32/3), the calendar warning
+(32/3), the whiskers (34/1).
+
+Two of the eight behaved differently from the prediction and **both are
+recorded as they happened** in the test headers rather than as intended. One of
+those is worth carrying forward: removing the channel-mix test left *"the
+refusal names the channel and its share"* PASSING, because the softer verdict
+names the same channel and the same 84.5%. Only the assertion on the **verdict**
+caught it. A guard whose failure mode is invisible to the assertion aimed at it
+is not guarded.
+
+### What the test found that the code review did not
+
+The comparable table filtered on `r.ratio != null`. A refused pair still
+**carries** its ratio — the route computes it before deciding the pair is not a
+comparison, and serves it so the refusal can quote the number it declined to
+publish. So January and February 2026 rendered at +601% and +559% directly
+above the note explaining that those months cannot be compared. Every other
+assertion on that panel was green with both months in it.
+
+### NOT DONE, and named rather than implied
+
+- **`sql/schema_v81.sql` was not written.** Dubai's visitor figures live in
+  `src/dubai_tourism.js`, a reviewed list, not a table. Nothing collects them —
+  there is no feed and `dubaidet.gov.ae` answers this platform's egress with
+  403 — and this file already records two traps that a table would walk into: a
+  seeded lookup with `ON CONFLICT DO NOTHING` never receives a correction, and
+  a lazily-minted table cannot seed itself. A reviewed list is the shape
+  `api/identity_map.js` already uses for hand-checked facts, and the
+  reconciliation test is what keeps it honest.
+- **February–July 2026 have no monthly visitor figure.** DET published the year
+  to date and August alone. They are kept as one aggregate and render absent
+  with that reason. **They are not interpolated**, so the tourism fit runs on
+  11 months rather than 17.
+- **The 2027-03 onward projections are built on post-break base months** and
+  are flagged `base_post_break` on the row and in the table. The ratio was
+  measured as post-break over PRE-break, so applying it to a base that already
+  carries the collapse subtracts it twice. Those rows are almost certainly too
+  low, are shown because a plan wants a shape for the year, and are labelled.
+  Correcting them needs a second ratio nobody has the months to measure yet.
+- **The daily rota still spreads the STRAIGHT LINE's total**, not the
+  year-on-year one, and the caption says so and gives the scale factor. Moving
+  it would pick a winner between the two models, which the scoreboard does not
+  support.
