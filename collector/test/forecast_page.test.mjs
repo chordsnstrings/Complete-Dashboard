@@ -183,6 +183,22 @@ check('a pair that is not a comparison is refused, with the reason',
   || /cannot be compared with its year-ago month/.test(body), body.slice(0, 200));
 check('and the refusal names the channel that differs',
   /uber carried 86\.1% of this month and carried nothing in 2025-01/.test(body), '');
+/* The refusals panel is built inside renderForecast's own body, so an early
+   `return` there — which is what the first version of the "say the
+   start-of-record fact once" change used — abandons every panel below it. This
+   asserts the page did not stop. It cannot catch the conditional form of that
+   bug, because this fixture always has a substantive refusal; it catches the
+   unconditional one, and it names the hazard for whoever edits that block
+   next. */
+{
+  const panels = await page.$$eval('#view [data-panel]', (e) => e.map((x) => x.dataset.panel));
+  check('the panels below the year-on-year one still render',
+    ['fc-tourism', 'fc-months', 'fc-scores', 'fc-calendar'].every((k) => panels.includes(k)),
+    JSON.stringify(panels));
+}
+check('and the start-of-record refusals are stated once, not as a row each',
+  /are at the start of the record, where the year before them was never collected at all/.test(body),
+  '');
 check('the page says what the number it refused to print would have been',
   /481% rise that is a fact about the month we started collecting Uber/.test(body), '');
 /* The refusal must not read as permanent. A channel missing from the earlier

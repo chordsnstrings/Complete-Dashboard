@@ -6415,6 +6415,17 @@ app.get('/api/forecast', (req, r) => {
       ly_same_days: 6902, ly_whole_month: 10740, ratio: 0.859,
       share_of_month_by_now: 0.6426, projected: 9224 },
     yoy: [
+      /* The start of the record, where the year before was never collected at
+         all. Two of them, because the page states that fact ONCE with the range
+         it covers rather than as a row each — on the live data it is twelve
+         identical rows, which buried the four refusals that say something
+         about the fleet. */
+      { m: '2025-08', ly_m: '2024-08', partial: true, trips: 5801, ly_trips: null,
+        vehicles: 68, ly_vehicles: null, comparable: 'no', ratio: null,
+        reason: 'No booking was collected for 2024-08; the record begins after it.' },
+      { m: '2025-09', ly_m: '2024-09', partial: false, trips: 22902, ly_trips: null,
+        vehicles: 79, ly_vehicles: null, comparable: 'no', ratio: null,
+        reason: 'No booking was collected for 2024-09; the record begins after it.' },
       { m: '2026-01', ly_m: '2025-01', partial: false, trips: 21890, ly_trips: 3120,
         vehicles: 77, ly_vehicles: 41, comparable: 'no', ratio: 7.016,
         reason: 'These are not two readings of the same business: uber carried 86.1% of this month '

@@ -55,6 +55,11 @@ const MONTH = (m) => {
   return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+mm - 1]} ${y.slice(2)}`;
 };
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+/* The month's full name, for prose. The abbreviation is right in a table and
+   wrong in a sentence: "the regime has never contained a Oct" is what the
+   three-letter form produces, article and all. */
+const MONTH_NAME = (m) => ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'][+String(m).slice(5, 7) - 1];
 /* A ratio reads better as the percentage move it is. 0.985 is "down 1.5%",
    and a reader asked to do that arithmetic twelve times will do one of them
    wrong. */
@@ -133,8 +138,8 @@ export async function renderForecast(root) {
         sub: `The straight line through the ${d.n} months since the break says ${fmt(next.point)}. `
           + `The same month a year earlier, scaled by how this fleet has been running against its own `
           + `year-ago months, says ${fmt(sNext.point)}. They disagree because the line has no seasonal `
-          + 'term and the regime it is fitted to has never contained a '
-          + `${MONTH(next.m).split(' ')[0]}. `
+          + 'term and the regime it is fitted to has never contained '
+          + `${/^[AO]/.test(MONTH_NAME(next.m)) ? 'an' : 'a'} ${MONTH_NAME(next.m)}. `
           + (sdy
             ? `The month in progress is the only evidence between them: it is running at `
               + `${moveStr(sdy.ratio)} against the same days last year, which is `
@@ -295,12 +300,17 @@ export async function renderForecast(root) {
 
     if (usable.length) {
       yb.append(tableFrom(usable, [
+        /* The year-ago month lives in the Month cell rather than in a column
+           of its own. It is always the same month a year earlier, so a whole
+           column repeats what the panel title already says — and at 1,440px
+           twelve columns pushed "Each car" and "What moved it" off the edge,
+           which are the two the panel exists for. */
         { label: 'Month', key: 'm', render: (r) => MONTH(r.m)
+          + ` <span class="dim">vs ${esc(MONTH(r.ly_m))}</span>`
           + (r.partial ? ' <span class="tag dim" title="the record stops inside this month">part month</span>' : '')
           + (r.comparable === 'partly'
             ? ' <span class="tag warn" title="a channel runs in one of these months and not the other">mixed channels</span>'
             : '') },
-        { label: 'vs', key: 'ly_m', render: (r) => MONTH(r.ly_m) },
         { label: 'Bookings', key: 'trips', num: true, render: (r) => fmt(r.trips) },
         { label: 'Then', key: 'ly_trips', num: true, render: (r) => fmt(r.ly_trips) },
         { label: 'Change', key: '_ch', num: true,
@@ -334,15 +344,36 @@ export async function renderForecast(root) {
         + 'halving and a doubling are the same size of move.'));
     }
 
-    /* THE REFUSALS, IN FULL, because a missing row with no explanation reads
-       as a page that lost some data. */
+    /* THE REFUSALS, because a missing row with no explanation reads as a page
+       that lost some data — but not all of them as rows.
+
+       At the start of any record every month's year-ago month is simply not
+       there, and on the live data that is TWELVE identical rows saying "no
+       booking was collected for 2024-xx", which buried the four refusals that
+       actually say something about the fleet. One fact stated once, with the
+       range it covers, and the substantive refusals get the table. */
+    const early = refused.filter((r) => /record begins after it/.test(r.reason));
+    const substantive = refused.filter((r) => !early.includes(r));
     if (refused.length) {
       const rb = el('div', 'note');
       rb.innerHTML = `<b>${countOf(refused.length, 'month')} cannot be compared with `
         + `${plural(refused.length, 'its', 'their')} year-ago month, and ${plural(refused.length, 'is', 'are')} `
-        + 'left out rather than shown as growth:</b>';
+        + 'left out rather than shown as growth.</b>'
+        + (early.length
+          ? ` ${fmt(early.length)} of ${plural(early.length, 'it', 'them')} — ${MONTH(early[0].m)} to `
+            + `${MONTH(early[early.length - 1].m)} — are at the start of the record, where the year `
+            + 'before them was never collected at all. That is the one fact, said once, rather than '
+            + `${fmt(early.length)} rows of it.`
+          : '');
       yb.append(rb);
-      yb.append(tableFrom(refused, [
+    }
+    /* A guard, NOT an early `return`. This block sits directly in
+       renderForecast's body rather than in a nested function, so a bare return
+       here would abandon the tourism panel, both forecasts, the scoreboard and
+       the calendar — the whole page below this point — on the entirely normal
+       day when every refusal is a start-of-record one. */
+    if (substantive.length) {
+      yb.append(tableFrom(substantive, [
         { label: 'Month', key: 'm', render: (r) => MONTH(r.m) },
         { label: 'vs', key: 'ly_m', render: (r) => MONTH(r.ly_m) },
         { label: 'Bookings', key: 'trips', num: true, render: (r) => fmt(r.trips) },
@@ -378,14 +409,22 @@ export async function renderForecast(root) {
     root.append(tp);
 
     if (t.ok) {
+    /* NO TONE ON THE r² TILES, deliberately.
+       `.kpi.t-good .n::before` puts a ▲ in front of the figure (app.css:1350).
+       On a page where every other percentage is a year-on-year MOVE, "▲67%"
+       reads as "up 67%" rather than as "explains 67% of the variance" — and it
+       is the one tile whose whole job is to say how much of a relationship is
+       really there. The assessment moves into the sub-line, in words, where it
+       cannot be mistaken for a direction. */
       tb.append(kpiRow([
         { label: 'Visitors explain, of work per vehicle',
           value: `${Math.round(t.per_vehicle.r2 * 100)}%`,
-          sub: `r² ${t.per_vehicle.r2} over ${countOf(t.n, 'month')}`,
-          tone: t.per_vehicle.r2 >= 0.6 ? 'good' : t.per_vehicle.r2 >= 0.3 ? 'warn' : 'critical' },
+          sub: `r² ${t.per_vehicle.r2} over ${countOf(t.n, 'month')} — `
+            + (t.per_vehicle.r2 >= 0.6 ? 'a relationship the data supports'
+              : t.per_vehicle.r2 >= 0.3 ? 'weak; read it as a hint, not a driver'
+                : 'too weak to build on') },
         { label: 'of total bookings', value: `${Math.round(t.bookings.r2 * 100)}%`,
-          sub: `r² ${t.bookings.r2}`,
-          tone: t.bookings.r2 >= 0.6 ? 'good' : 'warn' },
+          sub: `r² ${t.bookings.r2}` },
         /* The one that is supposed to be low. */
         { label: 'and of how many vehicles are active',
           value: `${Math.round(t.vehicles.r2 * 100)}%`,
