@@ -487,6 +487,33 @@ async function personFor(q, req) {
   if (explicit) return { person_id: explicit, from: 'person_id', absent_reason: null };
 
   const extId = String(req.query.ext_id || '').trim();
+  /* ASKING THE WRONG QUESTION IS NOT THE SAME AS ASKING ABOUT NOBODY.
+     ─────────────────────────────────────────────────────────────────────
+     THE DEFECT, MEASURED ON PRODUCTION 2026-09-22. The parameters here are
+     `person_id` and `ext_id`. The driver pages carry a provider account id and
+     the obvious spelling for it is `?id=`, which this function does not read —
+     so `GET /api/ledger/exposure?id=6616272` fell through to "no person asked
+     about", the caller took that as an unfiltered request, and the response
+     came back with **people: 347 — the entire fleet** under a URL naming one
+     man. `?ext_id=6616272` returns person 202 and one row.
+
+     Both callers guard the resolved-to-NOBODY case (:1102, :545) and neither
+     guards the never-asked case, because from here they look identical. A
+     supervisor who mistyped the parameter got every driver's balance on a page
+     they opened about one driver, with nothing anywhere saying so.
+
+     So an unrecognised identifying parameter is now an ERROR the caller can
+     turn into a refusal, not a silent widening. `id` is named explicitly
+     because it is the spelling every other route in this product uses. */
+  const strays = ['id', 'person', 'driver', 'driver_id', 'ext', 'external_id', 'account']
+    .filter((k) => String(req.query[k] ?? '').trim() !== '');
+  if (!extId && strays.length) {
+    return { person_id: null, from: null, bad_param: strays[0],
+      absent_reason: `this request identified a driver with ?${strays[0]}=, which this endpoint `
+        + 'does not read — it takes ?person_id= for a person or ?ext_id= for one of their '
+        + 'platform accounts. Nothing is reported rather than reporting the whole fleet under '
+        + 'a URL that names one person.' };
+  }
   if (!extId) return { person_id: null, from: null, absent_reason: null };
   const platform = String(req.query.platform || '').trim().toLowerCase() || null;
 
@@ -602,7 +629,9 @@ export function ledgerRegisterRoutes(app, { q, wrap }) {
                  the image is not — twelve months — so a reader must be able to
                  tell "no photograph was ever taken" from "it was held until a
                  date and has since gone". */
-              (r.sha256 IS NOT NULL) AS receipt_held,
+              /* THE ROW EXISTS is a different fact from IT IS STILL SERVED, and
+                 conflating them is what put a live link on an expired receipt. */
+              (r.sha256 IS NOT NULL) AS receipt_row,
               to_char(r.expires_on,'YYYY-MM-DD') AS receipt_expires_on,
               (r.sha256 IS NOT NULL AND r.expires_on < (now() AT TIME ZONE 'Asia/Dubai')::date)
                 AS receipt_expired,
@@ -672,12 +701,43 @@ export function ledgerRegisterRoutes(app, { q, wrap }) {
       entries: rows.map((r) => ({
         ...r,
         amount: Number(r.amount),
+        /* FOUR STATES, NOT THREE, AND EACH REASON IS THE TRUE ONE.
+           ───────────────────────────────────────────────────────────────
+           This block shipped with two working states and two wrong reasons.
+
+           (1) `held` WAS `(r.sha256 IS NOT NULL)`, so a receipt PAST ITS
+               RETENTION came back held:true with absent_reason:null, and
+               api/public/driverledger.js:45 rendered a live "photograph"
+               link for it — which GET /api/ledger/receipt/:sha answers 410
+               (see :1037). A link the product refuses to follow.
+
+           (2) A digest with no receipt row was described as having "passed
+               its twelve-month retention and been removed". Measured
+               2026-09-22: `grep -rn "DELETE FROM driver_ledger_receipt"`
+               over src/, api/ and bin/ returns NOTHING. No sweep exists, so
+               no receipt has ever been removed. A digest with no row is one
+               whose bytes were NEVER STORED — an upload that failed, or an
+               entry written by a path that did not carry one. Telling an
+               operator it expired sends them looking for a retention policy
+               to argue with instead of a photograph to re-take.
+
+           `held` now means what a reader takes it to mean: the photograph is
+           there AND this system will serve it. */
         receipt: r.receipt_sha
-          ? { sha256: r.receipt_sha, held: r.receipt_held, expired: r.receipt_expired,
-            expires_on: r.receipt_expires_on,
-            absent_reason: r.receipt_held ? null
-              : 'the photograph has passed its twelve-month retention and been removed. The '
-                + 'entry is permanent and still records that one was held.' }
+          ? (r.receipt_row
+            ? (r.receipt_expired
+              ? { sha256: r.receipt_sha, held: false, expired: true,
+                expires_on: r.receipt_expires_on,
+                absent_reason: `a photograph was held until ${r.receipt_expires_on}, which is `
+                  + 'past its twelve-month retention, so this system no longer serves it. The '
+                  + 'entry is permanent and still records that one was taken.' }
+              : { sha256: r.receipt_sha, held: true, expired: false,
+                expires_on: r.receipt_expires_on, absent_reason: null })
+            : { sha256: r.receipt_sha, held: false, expired: false,
+              expires_on: null,
+              absent_reason: 'this entry records a photograph by digest and no photograph is '
+                + 'stored under it. Nothing in this system deletes a receipt, so it was never '
+                + 'saved rather than removed.' })
           : { sha256: null, held: false, expired: false, expires_on: null,
             absent_reason: r.needs_proof === false
               ? 'this type carries no photograph — it records a decision or a period figure, '
@@ -1149,6 +1209,13 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
          SELECT person_id,
                 sum(amount) FILTER (WHERE book = 'advance')   AS advance,
                 sum(amount) FILTER (WHERE book = 'deduction') AS deduction,
+                /* NOTHING RECORDED IS NOT A BALANCE OF NOUGHT, and the sum
+                   alone cannot tell them apart: a person with no rows and a
+                   person whose advances net to zero both sum to NULL and 0
+                   respectively only by accident of the FILTER. These counts
+                   are how the response says which it is. */
+                count(*) FILTER (WHERE book = 'advance')::int   AS advance_rows,
+                count(*) FILTER (WHERE book = 'deduction')::int AS deduction_rows,
                 sum(amount) FILTER (WHERE book = 'cash')      AS cash_entries,
                 sum(amount) FILTER (WHERE book = 'pay')       AS pay,
                 count(*) FILTER (WHERE book = 'cash')::int    AS cash_rows,
@@ -1252,6 +1319,7 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
               coalesce(n.accounts, 0)                    AS accounts,
               coalesce(rev.accounts_with_revenue, 0)     AS accounts_with_revenue,
               b.advance, b.deduction, b.cash_entries, b.pay, b.cash_rows,
+              b.advance_rows, b.deduction_rows,
               to_char(b.last_entry,'YYYY-MM-DD')         AS last_entry,
               rev.earned, rev.cash_earned, rev.days,
               link.external_id AS link_ext_id, link.platform AS link_platform,
@@ -1273,8 +1341,22 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
 
     const pct = policy ? Number(policy.pct) : null;
     const people = rows.map((r) => {
+      /* THE ARITHMETIC still needs a number, and the RESPONSE still needs the
+         absence. Measured on production 2026-09-22: person 202 has literally
+         zero ledger rows and this route reported `owes.advance: 0` — a claim
+         that they owe nothing, where the truth is that nobody has recorded
+         anything. A supervisor refusing an advance on that reading is
+         refusing it on a figure this database never held. */
+      const advanceRows = Number(r.advance_rows) || 0;
+      const deductionRows = Number(r.deduction_rows) || 0;
+      const booksRecorded = advanceRows > 0 || deductionRows > 0;
       const advance = r.advance == null ? 0 : Number(r.advance);
       const deduction = r.deduction == null ? 0 : Number(r.deduction);
+      const booksReason = booksRecorded ? null
+        : 'nothing has ever been recorded against this person on the advance or deduction '
+          + 'books, so what they owe is not a balance of nought — it is a balance nobody has '
+          + 'written down. The two are different facts and a driver can be refused an advance '
+          + 'over the difference.';
       const cashEntries = r.cash_entries == null ? null : Number(r.cash_entries);
       const earned = r.earned == null ? null : Number(r.earned);
 
@@ -1336,7 +1418,12 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
         /* Every term shown, so a reader can see which one is doing the work
            and which one is missing. */
         owes: {
-          advance: round2(advance), deduction: round2(deduction),
+          advance: booksRecorded ? round2(advance) : null,
+          deduction: booksRecorded ? round2(deduction) : null,
+          books_recorded: booksRecorded,
+          books_absent_reason: booksReason,
+          advance_rows: advanceRows,
+          deduction_rows: deductionRows,
           cash: cash,
           cash_absent_reason: cashReason,
           /* Every term, so a reader can see which one is doing the work. */

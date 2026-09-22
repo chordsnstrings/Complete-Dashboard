@@ -4617,3 +4617,49 @@ upsertMany`. The new helpers sit ABOVE that marker, so the first run died with
 `test/mount.mjs` slicing `api/server.js`: **a harness that cuts a file at a
 marker owns every symbol above the cut that the cut code uses.** Both test
 files now slice a `PRELUDE` from the source as well.
+
+### Trap: nothing is deleting receipts, so "it expired" was never the true reason
+
+Measured 2026-09-22. `grep -rn "DELETE FROM driver_ledger_receipt"` over `src/`,
+`api/` and `bin/` returns **nothing**. Retention is declared on the column
+(`expires_on`, twelve months) and enforced at READ — `GET
+/api/ledger/receipt/:sha` answers 410 past the date — but no sweep ever removes
+the bytes. Two consequences, both of which had shipped:
+
+1. **An entry whose `receipt_sha` has no receipt row was described as having
+   "passed its twelve-month retention and been removed."** It cannot have been
+   removed; nothing removes anything. Such a digest is one whose bytes were
+   **never stored**. The distinction matters operationally: "it expired" sends
+   somebody looking for a retention policy to argue with, "it was never saved"
+   sends them to re-take the photograph.
+
+2. **`receipt_held` was `(r.sha256 IS NOT NULL)`,** so a receipt past its
+   retention came back `held: true, absent_reason: null` and
+   `api/public/driverledger.js` rendered a live "photograph" link for a file
+   the API refuses with 410. `held` now means *there and servable*, which gives
+   **four** states, not the three the file's header claimed: served; held until
+   a date and now refused; recorded by digest but never stored; never attached.
+
+`test/ledger_register.test.mjs` pinned the false sentence and had no case at
+all for a genuinely expired receipt — which is how it shipped. It now carries
+both.
+
+### Trap: `/api/ledger/*` reads `?ext_id=`, and `?id=` used to mean the whole fleet
+
+Measured on production 2026-09-22:
+
+```
+GET /api/ledger/exposure?id=6616272      -> people: 347   (every driver)
+GET /api/ledger/exposure?ext_id=6616272  -> people: 1, person 202
+```
+
+`personFor()` reads `person_id` or `ext_id`. **Every other route in this product
+spells an account id `?id=`.** Both call sites guarded the resolved-to-NOBODY
+case and neither guarded the never-asked case, because from inside the helper
+they look identical — no person id, therefore no filter. So a mistyped
+parameter answered with every driver's balance under a URL naming one driver.
+
+An unrecognised identifying parameter (`id`, `person`, `driver`, `driver_id`,
+`ext`, `external_id`, `account`) is now an absence-with-a-reason naming both the
+parameter it could not use and the two it can. A call naming nobody **at all**
+is still the fleet-wide register — `#advances` depends on it.

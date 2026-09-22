@@ -40,8 +40,17 @@ import { aed } from './deposit_core.js';
 
 const BOOK_LABEL = { advance: 'Advances', cash: 'Cash', deduction: 'Deductions', pay: 'Pay' };
 
-/* The three proof states, in one cell, said in words on hover rather than
-   encoded in a colour. */
+/* FOUR proof states, in one cell, said in words on hover rather than encoded
+   in a colour — and the cell links only where the product will actually serve
+   the file.
+   ─────────────────────────────────────────────────────────────────────────
+   `held` used to mean "a receipt row exists", which is true of one PAST ITS
+   RETENTION, so this cell rendered a live "photograph" link that
+   GET /api/ledger/receipt/:sha answers 410 (api/ledger_routes.js:1037). It now
+   means "the photograph is there AND this system will serve it", so the four
+   states fall out of it: served, held-until-a-date-and-now-refused, recorded
+   by digest but never stored, and never attached at all. Each carries its own
+   sentence from the route; this cell invents none of them. */
 function proofCell(e) {
   if (e.receipt?.held) {
     return `<a class="lnk" href="/api/ledger/receipt/${esc(e.receipt.sha256)}" target="_blank" `

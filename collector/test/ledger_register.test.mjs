@@ -44,32 +44,65 @@ await add('repayment', -1, 'advance', -1500, { sha: 'b'.repeat(64) });
 await add('salik', 1, 'deduction', 300);
 await add('salary', -1, 'pay', -3500);
 await add('cash_advance', 1, 'advance', 99999, { src: 'verification' });
-/* One receipt still held, one already expired. */
+await add('damage', 1, 'deduction', 750, { sha: 'c'.repeat(64) });
+/* THREE RECEIPT SHAPES, because the route has to tell them apart:
+   'a' — a row, in date: served.
+   'c' — a row whose retention has PASSED. The bytes are still in the table
+         (nothing deletes them) but GET /api/ledger/receipt/:sha answers 410,
+         so the register must not offer a link.
+   'b' — a digest on the entry with NO row at all. Measured 2026-09-22,
+         `grep -rn "DELETE FROM driver_ledger_receipt"` over src/, api/ and
+         bin/ returns nothing, so this is NOT an expired receipt: it is one
+         whose bytes were never stored. This file used to assert the opposite
+         and pinned a sentence that was not true. */
 await q(`INSERT INTO driver_ledger_receipt (sha256, bytes, content_type, byte_len, expires_on)
          VALUES ($1,'\\x00','image/jpeg',1,'2027-09-21')`, ['a'.repeat(64)]);
+await q(`INSERT INTO driver_ledger_receipt (sha256, bytes, content_type, byte_len, expires_on)
+         VALUES ($1,'\\x00','image/jpeg',1,'2025-01-31')`, ['c'.repeat(64)]);
 
 const r = (await get('/api/ledger/entries')).body;
 
-check('every entry is listed, verification included', r.entries.length === 5, String(r.entries.length));
+check('every entry is listed, verification included', r.entries.length === 6, String(r.entries.length));
 check('and the verification row is flagged rather than hidden',
   r.entries.filter((e) => e.entry_source === 'verification').length === 1);
 check('the totals EXCLUDE it', r.totals.advance === 3500, String(r.totals.advance));
 check('and say so, rather than leaving a reader to assume either way',
   r.totals.excludes_verification === true && r.totals.verification_rows === 1);
 check('each book totals separately — a deduction is not an advance',
-  r.totals.deduction === 300 && r.totals.pay === -3500, JSON.stringify(r.totals));
-check('the row count is of everything in the window', r.totals.rows === 5, String(r.totals.rows));
+  r.totals.deduction === 1050 && r.totals.pay === -3500, JSON.stringify(r.totals));
+check('the row count is of everything in the window', r.totals.rows === 6, String(r.totals.rows));
 check('nothing claims to be capped when it is not', r.listed_why === null, String(r.listed_why));
 
-/* ── the three receipt states ────────────────────────────────────────────── */
+/* ── THE FOUR RECEIPT STATES, each with the TRUE reason ──────────────────
+   This block asserted three and one of the three was a lie: an entry whose
+   digest has no receipt row was described as having "passed its twelve-month
+   retention and been removed", when nothing in this system deletes a receipt.
+   And the genuinely expired case was not covered at all, which is how it came
+   to ship reporting held:true and rendering a link that answers 410. */
 const byType = Object.fromEntries(r.entries.map((e) => [`${e.type_code}:${e.amount}`, e]));
-check('a held receipt says it is held',
+check('a receipt in date is held, and carries its digest',
   byType['cash_advance:5000'].receipt.held === true
+  && byType['cash_advance:5000'].receipt.expired === false
   && byType['cash_advance:5000'].receipt.sha256 === 'a'.repeat(64));
-check('a receipt whose bytes are gone is NOT reported as never taken',
-  byType['repayment:-1500'].receipt.held === false
-  && /passed its twelve-month retention/i.test(byType['repayment:-1500'].receipt.absent_reason),
-  byType['repayment:-1500'].receipt.absent_reason);
+
+/* THE ONE THAT MATTERS MOST. held:true on an expired receipt put a live
+   "photograph" link on the page for a file the API refuses with 410. */
+const exp = byType['damage:750'].receipt;
+check('a receipt PAST its retention is NOT held, so nothing links to it',
+  exp.held === false && exp.expired === true, JSON.stringify(exp));
+check('and it says it was held until a date rather than never taken',
+  /held until 2025-01-31/.test(exp.absent_reason)
+  && /no longer serves it/.test(exp.absent_reason), exp.absent_reason);
+
+/* THE CORRECTED ONE. */
+const never = byType['repayment:-1500'].receipt;
+check('a digest with no stored bytes says it was NEVER SAVED, not removed',
+  never.held === false && never.expired === false
+  && /never\s+saved rather than removed/.test(never.absent_reason.replace(/\s+/g, ' ')),
+  never.absent_reason);
+check('and it does not claim a retention that nothing in this system enforces',
+  !/passed its twelve-month retention/i.test(never.absent_reason), never.absent_reason);
+
 check('and a type that never has one says THAT instead',
   /records a decision or a period figure/i.test(byType['salik:300'].receipt.absent_reason),
   byType['salik:300'].receipt.absent_reason);
@@ -95,9 +128,9 @@ for (let i = 0; i < 205; i += 1) {
 const big = (await get('/api/ledger/entries')).body;
 check('a long register is capped', big.entries.length === 200, String(big.entries.length));
 check('and says how many of how many, with the totals over all of them',
-  /showing the 200 most recent of 210/.test(big.listed_why || ''), big.listed_why);
+  /showing the 200 most recent of 211/.test(big.listed_why || ''), big.listed_why);
 check('the totals are over the whole window, not over the page',
-  big.totals.deduction === 505, String(big.totals.deduction));
+  big.totals.deduction === 1255, String(big.totals.deduction));
 
 /* ── ONE TYPE, WITH ITS TOTALS STILL COMPUTED IN SQL ─────────────────────
    #charging asks about charging advances alone, and the tempting shape is for
