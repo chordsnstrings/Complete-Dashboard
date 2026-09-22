@@ -116,3 +116,11 @@ written to local disk and expected to survive.
   real money. Do not fan out to look thorough. The standing instruction from
   the operator is "only use the agents that are necessary", said three times
   before it was written down here.
+- **Ultracode does not suspend the rule above.** Being told that cost is not a
+  constraint is not being told to spend it: it raises the ceiling on what the
+  work may cost, it does not lower the bar for what the work needs. So the
+  question stays the same one — is there a question here that a grep or a curl
+  cannot answer, and is it independent of the others? Where the honest answer
+  is no, the honest number of agents is none, whatever mode is on. The
+  operator said this in as many words: "even with ultracode make sure you only
+  use agents wherever necessary."
