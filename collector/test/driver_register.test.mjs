@@ -137,13 +137,39 @@ check('and a platform that files no per-trip fee gets no invented one',
 check('and it is not summed into a book', r.totals.fees === 32.59, String(r.totals.fees));
 
 console.log('\nand it is about one person, or nobody');
-const none = (await get('/api/driver/register')).body;
-check('a register with no driver named refuses rather than answering for the fleet',
-  none.lines.length === 0 && /no fleet-wide version/.test(none.absent_reason || ''),
-  none.absent_reason);
-const bad = (await get('/api/driver/register?person=not-a-person')).body;
-check('and a person id that is not one is refused too',
-  bad.lines.length === 0 && /not a person id/.test(bad.absent_reason || ''), bad.absent_reason);
+/* THREE DIFFERENT NOs, AND THE STATUS IS PART OF THE ANSWER.
+   test/reachability.test.mjs enforces across every driver page that an id
+   nobody has is a 404. A 200 carrying an absent_reason says "here is the
+   answer about that driver" when there is no such driver — and a caller
+   cannot then tell it from a real person with an empty register, which is the
+   distinction the rest of this product spends its refusals maintaining. */
+const none = await get('/api/driver/register');
+check('a register with no driver named is REFUSED, not answered for the fleet',
+  none.status === 400 && /no fleet-wide version/.test(none.body.absent_reason || ''),
+  `${none.status} ${none.body.absent_reason}`);
+const bad = await get('/api/driver/register?person=not-a-person');
+check('a person id that is not one is a 400 — the question cannot be taken',
+  bad.status === 400 && /not a person id/.test(bad.body.absent_reason || ''),
+  `${bad.status} ${bad.body.absent_reason}`);
+const gone = await get('/api/driver/register?id=no-such-person');
+check('and an id NOBODY HAS is a 404 — there is no driver to answer about',
+  gone.status === 404 && /no such driver/.test(gone.body.error || ''),
+  `${gone.status} ${JSON.stringify(gone.body.error)}`);
+
+/* THE ONE THAT MUST NOT BECOME A REFUSAL. A real person whose register is
+   empty is a 200: "nothing has been recorded against them" is an answer about
+   somebody, and it comes back with their accounts and the reasons. */
+await q(`INSERT INTO driver (id, full_name) VALUES (43,'Never Recorded')`);
+await q(`INSERT INTO driver_platform_id (platform, external_id, driver_id)
+         VALUES ('uber','u-2',43)`);
+const emptyReg = await get('/api/driver/register?person=43&from=2026-09-01&to=2026-09-30');
+check('but a REAL person with an empty register is answered, not refused',
+  emptyReg.status === 200 && emptyReg.body.person_id === 43,
+  `${emptyReg.status} ${emptyReg.body.person_id}`);
+check('with both balances absent and their own reasons, rather than zeros',
+  emptyReg.body.opening.cash === null && emptyReg.body.opening.owed === null
+  && !!emptyReg.body.opening.cash_absent_reason,
+  JSON.stringify(emptyReg.body.opening));
 const viaAcct = (await get('/api/driver/register?ext_id=b-1&from=2026-09-01&to=2026-09-30')).body;
 check('either account of the person opens the same register',
   viaAcct.person_id === 42 && viaAcct.of === r.of, `${viaAcct.person_id} / ${viaAcct.of}`);

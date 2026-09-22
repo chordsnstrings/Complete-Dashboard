@@ -6978,18 +6978,22 @@ const REGISTER_LINES = [
 app.get('/api/driver/register', (req, r) => {
   const ext = String(req.query.ext_id || req.query.id || '');
   const person = String(req.query.person || '');
+  /* THE STATUSES ARE THE REAL ROUTE'S, because test/reachability.test.mjs
+     enforces one rule over every driver page — an id nobody has is a 404 — and
+     a fixture that answered 200 would let a page ship that cannot tell "no
+     such driver" from "a driver with an empty register". */
   if (!ext && !person) {
-    return r.json({ from: null, to: null, person_id: null, name: null, accounts: [],
-      opening: null, carried_in: null, lines: [], totals: null, shown: 0, of: 0,
-      truncated: false,
+    return r.status(400).json({ from: null, to: null, person_id: null, name: null,
+      accounts: [], opening: null, carried_in: null, lines: [], totals: null, shown: 0,
+      of: 0, truncated: false, error: 'this register needs one driver',
       absent_reason: 'no driver was named. A register is about one person; there is no '
         + 'fleet-wide version of it, because a running balance over everybody is not a '
         + 'balance of anything.' });
   }
   if (ext && !LEDGER_ACCOUNTS[ext]) {
-    return r.json({ from: null, to: null, person_id: null, name: null, accounts: [],
-      opening: null, carried_in: null, lines: [], totals: null, shown: 0, of: 0,
-      truncated: false, absent_reason: ledgerAbsent });
+    return r.status(404).json({ from: null, to: null, person_id: null, name: null,
+      accounts: [], opening: null, carried_in: null, lines: [], totals: null, shown: 0,
+      of: 0, truncated: false, error: 'no such driver', absent_reason: ledgerAbsent });
   }
   return r.json({
     from: '2026-08-01', to: '2026-08-31',

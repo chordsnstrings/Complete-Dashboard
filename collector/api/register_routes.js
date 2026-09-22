@@ -52,6 +52,19 @@
 import { personParam } from './driver_routes.js';
 
 const LIMIT_MAX = 1000;
+
+/* THE KEY A TRIP IS MATCHED BY, and it is not always an account id.
+   ─────────────────────────────────────────────────────────────────────────
+   The hotel channel names a driver without numbering them, so this product
+   synthesises `name:<canonical name>` as their id — api/driver_routes.js:117,
+   and the same expression at :283. A register that matched only on
+   driver_ext_id 404'd every one of those drivers while every other driver page
+   opened for them; test/reachability.test.mjs caught exactly that.
+
+   CANON here must be character-for-character the one in api/driver_routes.js,
+   or a key built by one file will not match a key built by the other. */
+const CANON = (col) => `lower(regexp_replace(btrim(${col}), '\\s+', ' ', 'g'))`;
+const PKEY = `coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || ${CANON('driver_name')})`;
 const round2 = (n) => (n == null ? null : Math.round(Number(n) * 100) / 100);
 
 /* THE PERSON, AND THE ACCOUNTS THEY WERE FOLDED FROM.
@@ -60,16 +73,36 @@ const round2 = (n) => (n == null ? null : Math.round(Number(n) * 100) / 100);
    to end would create four hundred people who have never had a dirham
    recorded, and every money figure would then be counted over a population
    that looking created. */
+/* THREE DIFFERENT NOs, AND THEY ARE NOT THE SAME STATUS.
+   ─────────────────────────────────────────────────────────────────────────
+   test/reachability.test.mjs enforces one rule across every driver page in
+   this product: an id nobody has is a 404. This route shipped answering 200
+   with an absent_reason for it, and the suite caught it — rightly, because a
+   200 says "here is the answer about that driver" and there is no such driver
+   to answer about. A caller cannot tell it from a real driver with an empty
+   register, which is exactly the distinction the rest of the product spends
+   its refusals maintaining.
+
+   So:
+     404  no such driver — the id resolves to nobody at all
+     400  a question this route cannot take — no driver named, or a ?person=
+          that is not a person id
+     200  a real person, whatever their register holds. "Nothing has been
+          recorded against them" IS an answer about somebody, and it comes
+          back with the lines, the accounts and the reasons.
+
+   `status` travels with the refusal so the caller sets it; returning the
+   sentence without the code is how the two collapse back into one. */
 async function who(q, req) {
   const asked = personParam(req);
   if (Number.isNaN(asked)) {
-    return { person_id: null, accounts: [],
+    return { person_id: null, accounts: [], status: 400,
       absent_reason: 'the person asked for is not a person id. This register takes ?person=p412 '
         + 'or ?person=412 for a person, or ?ext_id= for one of their platform accounts.' };
   }
   const extId = String(req.query.ext_id || req.query.id || '').trim();
   if (asked == null && !extId) {
-    return { person_id: null, accounts: [],
+    return { person_id: null, accounts: [], status: 400,
       absent_reason: 'no driver was named. A register is about one person; there is no '
         + 'fleet-wide version of it, because a running balance over everybody is not a balance '
         + 'of anything.' };
@@ -81,10 +114,40 @@ async function who(q, req) {
       `SELECT driver_id FROM driver_platform_id
         WHERE external_id = $1 AND detached_at IS NULL ORDER BY driver_id LIMIT 1`, [extId]);
     if (!row) {
-      return { person_id: null, accounts: [],
-        absent_reason: 'no person on the register holds that platform account. The account may '
-          + 'exist and simply not have been reviewed onto a person yet — the same-person queue '
-          + 'is where that happens.' };
+      /* AN ACCOUNT THE SPINE HAS NOT PLACED STILL HAS A REGISTER.
+         ─────────────────────────────────────────────────────────────────
+         This returned 404 for any id without a driver_platform_id row, and
+         test/reachability.test.mjs caught it: every other driver page in this
+         product opens for a driver the directory names, and five of them —
+         u-nauman, y-tariq, u-kashif, b-kashif, y-khalid — have trips and no
+         spine row. A page that 404s where the rest of the product renders
+         makes the register look broken for a driver who is merely unreviewed.
+
+         It is the same principle the person-address work settled: an account
+         the spine has not placed is NOT an error and does not lose its page.
+         It keeps its provider address, its own trips are its register, and the
+         page says why there is no person behind it — rather than implying the
+         driver does not exist, which is what a 404 says.
+
+         A 404 is still right for an id NOBODY has, which is why the existence
+         probe is against work actually seen rather than against the spine. */
+      const [seen] = await q(
+        `SELECT 1 AS ok FROM trip WHERE ${PKEY} = $1 LIMIT 1`, [extId]);
+      if (!seen) {
+        return { person_id: null, accounts: [], status: 404,
+          absent_reason: 'no driver in this fleet holds that platform account.' };
+      }
+      return {
+        person_id: null, name: null, unplaced_ext_id: extId,
+        accounts: [{ platform: null, external_id: extId, display_name: null,
+          basis: 'account' }],
+        absent_reason: null,
+        person_absent_reason: 'this account has not been reviewed onto a person yet, so the '
+          + 'register below is this ACCOUNT\'s work alone and not the whole human\'s. If they '
+          + 'drive on another platform too, those trips are on another register until the '
+          + 'same-person queue joins them. Ledger entries are recorded against a person, so '
+          + 'there are none to show here.',
+      };
     }
     personId = Number(row.driver_id);
   }
@@ -95,7 +158,7 @@ async function who(q, req) {
       ORDER BY platform, external_id`, [personId]);
   const [person] = await q(`SELECT id, full_name FROM driver WHERE id = $1`, [personId]);
   if (!person) {
-    return { person_id: null, accounts: [],
+    return { person_id: null, accounts: [], status: 404,
       absent_reason: 'no person on the register carries that id.' };
   }
   return { person_id: personId, name: person.full_name, accounts, absent_reason: null };
@@ -107,14 +170,20 @@ export function registerRoutes(app, { q, wrap, winDays }) {
     const w = await who(q, req);
 
     if (w.absent_reason) {
-      return res.json({
+      return res.status(w.status || 400).json({
         from, to, person_id: null, name: null, accounts: [],
         opening: null, carried_in: null, lines: [], totals: null,
-        shown: 0, of: 0, truncated: false, absent_reason: w.absent_reason,
+        shown: 0, of: 0, truncated: false,
+        error: w.status === 404 ? 'no such driver' : 'this register needs one driver',
+        absent_reason: w.absent_reason,
       });
     }
 
     const ids = w.accounts.map((a) => a.external_id);
+    /* An unplaced account has no person, so no ledger row can exist against it
+       — driver_ledger is keyed on person_id at WRITE time. The trip half of
+       the register is still real and is what this page shows. */
+    const pid = w.person_id;
     const limit = Math.min(Number(req.query.limit) || 400, LIMIT_MAX);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
 
@@ -126,7 +195,7 @@ export function registerRoutes(app, { q, wrap, winDays }) {
               max(effective_on) FILTER (WHERE type_code = 'opening_balance') AS owed_on,
               sum(amount)       FILTER (WHERE type_code = 'opening_balance') AS owed_amount
          FROM driver_ledger
-        WHERE person_id = $1 AND entry_source <> 'verification'`, [w.person_id]);
+        WHERE person_id = $1 AND entry_source <> 'verification'`, [pid]);
 
     const cashOpen = opening?.cash_on != null;
     const owedOpen = opening?.owed_on != null;
@@ -154,7 +223,7 @@ export function registerRoutes(app, { q, wrap, winDays }) {
             + coalesce((SELECT amt FROM led WHERE book = 'deduction'), 0) AS owed_before,
               coalesce((SELECT amt FROM led WHERE book = 'cash'), 0)      AS cash_led_before,
               (SELECT amt FROM cash_in)                                   AS cash_trips_before`,
-      [w.person_id, from, ids]);
+      [pid, from, ids]);
 
     /* ── THE THREE KINDS OF LINE ─────────────────────────────────────────
        Ordered by the day the money moved, then by a rank that puts a trip
@@ -170,7 +239,8 @@ export function registerRoutes(app, { q, wrap, winDays }) {
            FROM trip_ext te
            LEFT JOIN trip_cash tc ON tc.platform = te.platform
                                  AND tc.external_id = te.external_id
-          WHERE te.driver_ext_id = ANY($3::text[])
+          WHERE coalesce(nullif(btrim(te.driver_ext_id), ''),
+                         'name:' || ${CANON('te.driver_name')}) = ANY($3::text[])
             AND (te.requested_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
        )
        SELECT 'trip' AS kind, 0 AS rank,
@@ -221,7 +291,7 @@ export function registerRoutes(app, { q, wrap, winDays }) {
         WHERE e.person_id = $4
           AND e.effective_on BETWEEN $1::date AND $2::date
         ORDER BY on_day, rank, at`,
-      [from, to, ids, w.person_id]);
+      [from, to, ids, pid]);
 
     /* THE RUNNING BALANCES, carried in rather than restarted.
        Computed here and not in SQL because the carry is a separate read and
@@ -309,6 +379,7 @@ export function registerRoutes(app, { q, wrap, winDays }) {
     return res.json({
       from, to,
       person_id: w.person_id, name: w.name, accounts: w.accounts,
+      person_absent_reason: w.person_absent_reason || null,
       opening: {
         cash: cashOpen ? round2(opening.cash_amount) : null,
         cash_on: opening?.cash_on || null,
