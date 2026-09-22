@@ -108,3 +108,11 @@ written to local disk and expected to survive.
   against the unchanged file has proved nothing — this has produced a false
   "fixed" claim more than once.
 - Before believing a green suite, `grep` the source to confirm the edit landed.
+- **Only spawn the agents the work actually needs.** One per genuinely
+  independent question, and only where the question cannot be answered inline
+  — a grep, a curl against production, or reading the file yourself is the
+  first choice, not the fallback. Parallel agents are for questions that do not
+  share an answer; running several over the same files buys nothing and costs
+  real money. Do not fan out to look thorough. The standing instruction from
+  the operator is "only use the agents that are necessary", said three times
+  before it was written down here.
