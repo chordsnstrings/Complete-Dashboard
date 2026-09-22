@@ -913,6 +913,10 @@ driver's 222 tracker fixes.
   it is the same error as a count in prose that nobody re-measures.
   683 files seen, 3,109 sheets, 1,362,746 rows, 11,708,213 non-empty cells,
   0 refused.
+  **Re-measured over the whole corpus after all three fixes: 398 identical,
+  0 differing, and 1 file openpyxl itself will not open** (that same real xlsx
+  named .xls, where this reader is the more correct of the two). This figure
+  is a completed run, not a sample extrapolated to one.
   **The nine files this reader cannot open are genuine BIFF8 `.xls` (OLE2
   magic `D0 CF 11 E0`), all of them Salik or RTA-fine reports** — a different
   format, not a bug, and `bin/salary-verify.mjs` names each one rather than
