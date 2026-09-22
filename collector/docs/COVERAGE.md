@@ -827,6 +827,52 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A GATEWAY THAT REJECTS THE REQUEST IN A 200, WITH AN ARRAY THAT LOOKS LIKE
+  DATA.** Bolt's fleet-integration `getFleetOrders` has been answering
+  `200 {code, message, validation_errors:[{property:"company_ids",
+  error:"Is not array"}]}` on every probe since the surface was added, for
+  both fleets. The probe recorded it as **`ok: true, record_count: 1`** —
+  because `firstList()` found `validation_errors`, decided that array WAS the
+  payload, and counted the rejection as one row of data. `payloadError()`
+  could not save it either: it only fires when EVERY key is an error key, and
+  `code` is not one. So the surface that was supposed to answer "what else
+  could we be collecting?" reported a refusal as a success, and the product
+  went on telling readers Bolt "has never delivered" its trips.
+  The request was simply wrong: `src/probe.js` sent the shared `company_id`
+  where this route wants `company_ids` as an **array**. `getDrivers` takes the
+  scalar and works, which is why the difference was never visible.
+  Both fixed and revert-proved in `test/probe.test.mjs`. **The general shape:
+  a 200 is not an answer, and neither is an array — check what the array IS.**
+
+* **BOLT IS TWO CREDENTIALS, AND ONLY ONE OF THEM CAN EVER BE LONG-LIVED.**
+  Measured 2026-09-22. The **fleet-integration OAuth client**
+  (`BOLT_CLIENT_ID` + `BOLT_CLIENT_SECRET`, `src/config.js:170-171`) has **no
+  expiry**, mints a 600 s access token per call in `fiToken()`
+  (`src/sources/bolt.js:22-30`), and already refreshes itself — which is why
+  the Egari roster is the one Bolt surface that has never needed an operator.
+  The **portal refresh token** (`BOLT_REFRESH_TOKEN_ECOSINE`/`_EGARI`) is a
+  signed-in human session: both token files decode to HS256 JWTs whose
+  `exp - iat` is **exactly 7.00 days**, and a newer portal sign-in
+  **supersedes** an existing token (measured: one token exchanged 15× with no
+  `refresh_token` in any response, still live afterwards — it does not
+  rotate). **There is no Bolt setting, scope or plan that makes a portal
+  refresh token long-lived**, so any design that keeps trips on it keeps a
+  scheduled outage. The only route to a long-lived Bolt for trips is moving
+  them onto the client-credentials gateway — which is what the
+  `getFleetOrders` fix above exists to settle.
+  **Ecosine's FI failure is a PERMISSION, not a secret**: the same bearer read
+  142897 (Egari) and was refused 142868 (Ecosine) 200 ms apart. Re-issuing the
+  secret cannot help — the allowed-companies list belongs to the app. Once
+  Bolt adds 142868 to that existing app the code recovers on its own within
+  the 30-minute incremental, with no paste and no redeploy, because
+  `pullFiRoster()` asks for every company every run and writes the green row
+  itself (`src/sources/bolt.js:209-212`).
+  **When re-pasting a portal token, do ONE fleet and then immediately check
+  the other** — if supersession is per Bolt account rather than per fleet
+  owner, doing both in one sitting kills the first. That question is still
+  open and this is the cheapest way to answer it.
+
+
 * **A GREEDY ATTRIBUTE RUN MAKES A BLANK SPREADSHEET CELL EAT THE NEXT ONE.**
   `src/salary/xlsx.js` is hand-rolled on `node:zlib` (the operator chose that
   on 2026-09-22 over exceljs at 21.8 MB and SheetJS 0.18.5, which carries

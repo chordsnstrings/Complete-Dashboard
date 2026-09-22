@@ -154,6 +154,24 @@ export function payloadError(data) {
   return said ? said.slice(0, 300) : null;
 }
 
+/* A gateway that rejects the REQUEST, in a 200, with an array that looks like
+   data. Bolt's fleet-integration gateway answers a malformed call with
+   `{code, message, validation_errors:[{property:"company_ids", error:"Is not
+   array"}]}`; every other refusal shape in this file is caught by
+   payloadError or by the HTTP status, and this one is caught by neither. It is
+   named explicitly rather than generalised, because "an array whose objects
+   carry an `error` key" would also swallow a genuine payload that happens to
+   report per-row errors. */
+export function validationRefusal(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  const v = data.validation_errors ?? data.validationErrors;
+  if (!Array.isArray(v) || !v.length) return null;
+  const said = v.map((e) => (e && typeof e === 'object'
+    ? `${e.property ?? e.field ?? '?'}: ${e.error ?? e.message ?? '?'}`
+    : String(e))).join('; ');
+  return `the request was rejected before it was run — ${said}`.slice(0, 300);
+}
+
 /* Find the first array of objects in a response — providers wrap their lists
    under whatever key they like, and the shape is what matters. */
 export function firstList(data) {
@@ -503,8 +521,21 @@ export function surfaces({ from, to }) {
     for (const company of (config.bolt.companies || [])) {
       add('bolt', `${company.fleet}:getDrivers`, DRIVER_COLS, 'driver roster and state',
         boltCall('getDrivers', company, { offset: 0, limit: 50 }), BOLT_DRIVER_ALIASES);
+      /* company_ids, PLURAL AND AN ARRAY — which is not what the shared body
+         sends. getDrivers takes `company_id` and works; getFleetOrders takes
+         `company_ids: [...]` and has been answering
+             200 {code, message, validation_errors:[
+                    {property:"company_ids", error:"Is not array"}]}
+         on every probe since this surface was added. The route EXISTS, is
+         routed, and is reachable on the FI CLIENT SECRET rather than on the
+         seven-day portal refresh token — so if it returns orders it takes
+         Bolt's trips off the only Bolt credential that cannot be made
+         long-lived, and per FIXLIST H11 those orders carry per-ride
+         commission and net_earnings as well. It has never been called
+         correctly. The `...body` spread in boltCall runs last, so this
+         overrides the shared field. */
       add('bolt', `${company.fleet}:getFleetOrders`, TRIP_COLS, 'the trips this channel has never delivered',
-        boltCall('getFleetOrders', company, { offset: 0, limit: 50 }));
+        boltCall('getFleetOrders', company, { company_ids: [company?.companyId], offset: 0, limit: 50 }));
       add('bolt', `${company.fleet}:getCompanyEarnings`,
         ['platform', 'driver_ext_id', 'period_start', 'period_end', 'earnings', 'cash_earnings'],
         'the money this channel has never delivered',
@@ -539,7 +570,16 @@ export async function probeAll({ days = 3 } = {}) {
     let row;
     try {
       const { data, status } = await s.run();
-      const arr = firstList(data);
+      /* A VALIDATION ERROR IS NOT A ROW OF DATA, and it took months to notice
+         because it looks exactly like one. Bolt's getFleetOrders answers
+         200 {code, message, validation_errors:[{property, error}]}. firstList
+         finds that array, calls it the payload, and the surface records
+         `ok: true, record_count: 1` — a refusal counted as a successful call
+         returning one record. payloadError could not save it either: it only
+         fires when EVERY key is an error key, and `code` is not one.
+         So it is checked first and by name. */
+      const invalid = validationRefusal(data);
+      const arr = invalid ? null : firstList(data);
       const fields = describe(arr || data || {});
       /* ok meant "the call returned without throwing", which is not the same
          as "the provider answered". Yango's orders/list, summary/drivers/list
@@ -549,7 +589,7 @@ export async function probeAll({ days = 3 } = {}) {
          the single most actionable thing a probe can find and it was being
          reported as a success. */
       const good = status == null || (status >= 200 && status < 300);
-      const refusal = arr ? null : payloadError(data);
+      const refusal = invalid || (arr ? null : payloadError(data));
       row = {
         provider: s.provider, surface: s.surface,
         ok: good && !refusal,

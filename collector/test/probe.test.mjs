@@ -18,7 +18,7 @@
 
    3. A SHAPE REPORT THAT IS ACTUALLY A DATA EXPORT. The whole justification for
       running this on a schedule is that it records shape, never records. */
-import { describe, firstList, unmappedAgainst, surfaces, norm, payloadError } from '../src/probe.js';
+import { describe, firstList, unmappedAgainst, surfaces, norm, payloadError, validationRefusal } from '../src/probe.js';
 import { readFileSync } from 'node:fs';
 
 let pass = 0, fail = 0;
@@ -169,6 +169,46 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
     && payloadError([{ a: 1 }]) === null && payloadError(null) === null);
   check('an empty object is not a refusal either — it is an empty answer',
     payloadError({}) === null);
+
+  /* ── A VALIDATION ERROR IS NOT A ROW OF DATA ─────────────────────────────
+     Bolt's fleet-integration gateway rejects a malformed request with a 200
+     and `{code, message, validation_errors:[{property, error}]}`. Both of the
+     guards above miss it: payloadError only fires when EVERY key is an error
+     key and `code` is not one, and firstList finds validation_errors, decides
+     that array IS the payload, and the surface records ok:true with
+     record_count:1 — a refusal counted as a successful call returning one
+     record. Measured on production 2026-09-22: ecosine:getFleetOrders and
+     egari:getFleetOrders both recorded exactly that, for months, while the
+     product told readers Bolt "has never delivered" its trips. The request
+     was simply being sent with `company_id` where the gateway wants
+     `company_ids` as an array. */
+  const BOLT_REJECTION = {
+    code: 503, message: 'Validation failed',
+    validation_errors: [{ property: 'company_ids', error: 'Is not array' }],
+  };
+  check('a 200 carrying validation_errors is a refusal, not a payload',
+    typeof validationRefusal(BOLT_REJECTION) === 'string',
+    JSON.stringify(validationRefusal(BOLT_REJECTION)));
+  check('…and it names the property the gateway rejected, so the fix is readable',
+    /company_ids/.test(validationRefusal(BOLT_REJECTION) || '')
+    && /Is not array/.test(validationRefusal(BOLT_REJECTION) || ''),
+    validationRefusal(BOLT_REJECTION));
+  check('…and payloadError alone would NOT have caught it — this is why it hid',
+    payloadError(BOLT_REJECTION) === null);
+  check('…nor would firstList, which calls the error array the payload',
+    Array.isArray(firstList(BOLT_REJECTION)) && firstList(BOLT_REJECTION).length === 1,
+    JSON.stringify(firstList(BOLT_REJECTION)));
+  check('the surface loop checks the validation refusal BEFORE it looks for a list',
+    /const invalid = validationRefusal\(data\);[\s\S]{0,80}firstList/.test(src));
+  check('…and folds it into the refusal that decides ok',
+    /const refusal = invalid \|\|/.test(src));
+  check('a genuine payload with no validation_errors is untouched',
+    validationRefusal({ code: 0, data: [{ id: 1 }] }) === null
+    && validationRefusal({ validation_errors: [] }) === null
+    && validationRefusal(null) === null && validationRefusal([{ a: 1 }]) === null);
+  check('getFleetOrders is called with company_ids as an ARRAY, which is what the gateway asks for',
+    /boltCall\('getFleetOrders', company, \{ company_ids: \[company\?\.companyId\]/.test(src),
+    'src/probe.js still sends the scalar company_id for this surface');
 
   /* distinct_seen saturated at exactly 14 for every wide field in the corpus:
      the cap on the sample set was also the counter, so a trip uuid, a plate, a
