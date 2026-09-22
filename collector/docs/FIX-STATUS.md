@@ -1940,3 +1940,38 @@ assertion on that panel was green with both months in it.
   year-on-year one, and the caption says so and gives the scale factor. Moving
   it would pick a winner between the two models, which the scoreboard does not
   support.
+
+---
+
+## The credential paste flow takes several files, each keeping its own name — 2026-09-22
+
+The operator's request, verbatim: *"run an agent and update the settings page
+where we paste tokens and curls data to ensure we get updated. Also, allow
+multiple text files upload just like I did here for ease of usage."* Five .txt
+files had been dropped into that conversation minutes earlier.
+
+| # | what | state | proof |
+|---|---|---|---|
+| P1 | the file picker took **one** file of a multi-selection and dropped the rest silently | written, committed | `file.multiple = true`; `test/paste_files_page.test.mjs` asserts `input.multiple`, and removing it makes Playwright refuse the set outright |
+| P2 | a drop zone, so the gesture is the one the operator already makes | written, committed | staged chips assert by name in the browser test |
+| P3 | files go up **as files**, with their names, never concatenated | written, committed | `test/paste_multifile.test.mjs`; reverting to the concatenating form fails 16 of 43 |
+| P4 | every verdict says which file it came out of | written, committed | the `From` column; removing it fails 2 browser assertions |
+| P5 | the same credential in two files is one candidate, one write, both names | written, committed | 4 assertions; the revert writes the same key twice |
+| P6 | a filename claiming a fleet its contents cannot serve is named, with the owner id a real one would need | written, committed | 4 assertions route-side, 3 page-side |
+| P7 | a Bolt paste says **check the other fleet**, never "capture a fresh one" | written, committed | 4 assertions incl. the negative one |
+| P8 | a file nothing was read from is reported absent **with a reason**, never as a zero | written, committed | `nothing_read` finding + the `ent-off` cell |
+| P9 | the paste table's verdict pills had no tone at all (`good`/`critical` are kpiRow's words, not `.pill` classes) | written, committed | `.pill.ok/.warn/.bad` are the four app.css defines |
+| P10 | `/api/settings/paste` was never reachable from any test — five identifiers missing from `test/mount.mjs`'s injection set | written, committed | the route is now driven end to end against PGlite |
+
+**Not deployed and not proven, by instruction and by access.** The work was
+asked for without a deploy, and `/api/settings/paste` is `requireAdmin` — no
+agent on this branch holds an admin token, so **no part of this has been
+exercised against production**. What is proven is: 43 assertions through
+`test/mount.mjs` against PGlite, 19 in Chromium against `mockapi.mjs` running
+the real recogniser and the real cross-file rules, and eight surgical reverts
+whose measured failures are recorded in the two test headers.
+
+The one thing that cannot be tested anywhere here is the live provider check
+itself — `src/credcheck.js`'s Bolt path mints an access token against the
+portal, and this sandbox has no route to the internet. It is stubbed in both
+suites, and stubbed to the contract `checkCandidate` already implements.

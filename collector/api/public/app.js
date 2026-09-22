@@ -5653,10 +5653,13 @@ const PASTE_MIN_CHARS = 20;
    So each file is sent with its name, the name rides all the way to the
    verdict, and this panel prints what happened PER FILE as well as per key. */
 function pastePanel(root) {
+  /* The panel KEY, so a browser test can wait for this panel rather than for
+     the first `table` on the page — the shell paints one before the settings
+     view has fetched anything, and an unscoped wait resolves on it. */
   const p = panel('Paste a credential, or drop the files',
     'A cookie jar, a token, the whole curl command — or several .txt files at once, each one '
     + 'keeping its own name. Nothing is stored until it has been tried against the provider it '
-    + 'claims to be from.');
+    + 'claims to be from.', 'paste');
   root.append(p.panel);
 
   const ta = el('textarea');

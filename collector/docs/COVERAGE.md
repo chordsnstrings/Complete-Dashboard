@@ -3179,6 +3179,59 @@ untouched, and nothing projected is ever added into `accounted`.
   window. Anywhere a partial period is divided by its elapsed days, check what
   the last bucket actually holds.
 
+* **JOINING SEVERAL CREDENTIAL FILES INTO ONE PASTE DESTROYS THE ONLY EVIDENCE
+  THAT CATCHES A WRONG-PORTAL CAPTURE.** `src/credkit.js` already reads a paste
+  holding several credentials, so the obvious way to accept a multi-file upload
+  is to join the files with blank lines and call `recognise()` on the result.
+  It is four lines and it is wrong. Measured 2026-09-22 (recorded under "Bolt:
+  the portal does not rotate"): the two files supplied were `ECOSINE_BOLT.txt`
+  and `EGARI_BOLT.txt` and they held **the same token** — identical sha256,
+  identical `jti`, `fleet_owner_id: 174036`, which is Egari's owner. The
+  filename was the only thing that differed and the only thing that revealed
+  it. Concatenated, that upload is one credential, filed correctly against
+  Egari, **reported clean**, while Ecosine goes on holding a token the portal
+  refuses at mint time with `900101`. Proved by reverting to the concatenating
+  form: `test/paste_multifile.test.mjs` fails 16 of 43, and — worse —
+  `recognise()`'s own same-key rule then refuses BOTH copies, so the upload
+  stores nothing at all and says "two credentials claim
+  BOLT_REFRESH_TOKEN_EGARI" about one credential pasted twice. **A filename is
+  evidence. Carry it from the browser to the verdict.**
+
+* **`\b` TREATS `_` AS A WORD CHARACTER, SO `/\byango\b/` DOES NOT MATCH
+  `ECOSINE_YANGO.txt`.** Which is the exact shape the operator's own credential
+  files arrive in. The provider-from-filename reader in `src/credfiles.js`
+  silently matched nothing on every real filename and the assertion that caught
+  it was the one reading the sentence back, not the one calling the function.
+  Replace every non-alphanumeric with a space before a `\b` test over a
+  filename.
+
+* **A PILL TONE THAT IS NOT A PILL CLASS RENDERS AS NO TONE AT ALL.**
+  `pill()` in `api/public/ui.js` writes its tone straight into the class
+  attribute, and `api/public/app.css` defines exactly four: `.pill.ok`,
+  `.pill.warn`, `.pill.bad`, `.pill.dim`. The credential paste table mapped its
+  three verdicts to `good`/`critical`/`warn` — `good` and `critical` are
+  **kpiRow's** tone words, from a different helper with a different stylesheet
+  rule (`.card.t-good`, `.kpi.t-critical`) — so "accepted", "refused" and
+  "could not ask" have rendered as the same untoned grey since the panel
+  shipped, in the one column an operator scans. This is the "inventing a class
+  has shipped here before" trap wearing a costume: the class name came from
+  somewhere real, just not from this component. **Grep `app.css` for the exact
+  compound selector — `.pill.<tone>` — not for the tone word.**
+
+* **A ROUTE IN `api/server.js`'s SLICED REGION WHOSE DEPENDENCIES ARE MISSING
+  FROM `test/mount.mjs` MOUNTS FINE AND THROWS ONLY WHEN CALLED.** The
+  ReferenceError happens when the handler BODY runs, not when the slice is
+  evaluated, so the route registers, `declaredRoutes()` lists it, and nothing
+  fails until something POSTs to it. `/api/settings/paste` was in that state
+  for its whole life: five of its identifiers — `recognise`, `unrecognised`,
+  `checkAll`, `proposeKeys`, `SETTING_DEFS` — were never injected, so no test
+  had ever reached the route and the only assertions over it were regexes
+  against its source text. **A route with no injected dependencies is not a
+  route that is safe; it is a route nothing has called.** `mountAll` now takes
+  an `inject` override so the two dependencies that reach the network can be
+  stubbed per-test rather than a fourth copy of the injection set being written
+  by hand.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
@@ -4986,6 +5039,41 @@ Nothing in `src/http.js` or the request shape needed changing for either fleet.
 The Bolt problem was never the request.
 
 ---
+
+### What the paste flow now carries, so the day is not repeated — 2026-09-22
+
+`/api/settings/paste` takes `{ files: [{ name, text }], apply }` as well as
+`{ text, apply }`. It is the **same queue**: one `recognise()` pass per file
+rather than per blob, one `proposeKeys()` over the combined leftovers, one
+`checkAll()`, one apply gate, unchanged. What the file boundary adds is three
+things nothing else could see, all of them measured above:
+
+| the set says | what the page does | why |
+|---|---|---|
+| two files hold the same bytes | folded to **one** candidate and **one** write, with both names on it, and an error-toned finding saying *"that is one capture, not two"* | two identical candidates would be two live Bolt exchanges of one token seconds apart; and the operator believed they had captured two credentials |
+| a file's name declares a fleet its contents cannot serve | error-toned finding naming **both** owner ids — the one the token carries and the one the claimed fleet needs — and stating outright that the claimed fleet **has been given nothing** | this is the whole of what went wrong on 2026-09-22 |
+| anything Bolt was pasted | warn-toned finding: **check the other fleet now**, the open question is open, and *never* "capture a fresh one" | a capture IS a sign-in, which is the suspected cause; the follow-up costs nothing and would settle per-owner vs per-account |
+
+The credential is still filed under the fleet **it** names, never the fleet the
+filename claims — a token names its owner and a filename is a human's memory.
+Refusing a good token to punish a wrong filename would throw away the one
+working credential in the upload. The claim is what gets refused, loudly.
+
+Two files claiming one key with **different** values still refuse each other,
+in `recognise()`'s own words ("neither is applied"), because nothing here can
+tell which of the two is the stale one.
+
+Bounds, because `api/server.js` parses a 256kb body and a 413 arrives at the
+page as "the server took too long": 12 files, 64k characters each, 180k over
+the upload, 20 characters minimum — enforced in `src/credfiles.js` and again in
+the browser so the refusal can name the file instead of dying in body-parser.
+
+**Not verifiable from here.** `/api/settings/paste` is `requireAdmin` and no
+agent on this work holds an admin token, so none of the above has been
+exercised against production. It is proven against PGlite through
+`test/mount.mjs` (`test/paste_multifile.test.mjs`, 43 assertions) and against
+the real recogniser in a browser (`test/paste_files_page.test.mjs`, 19), with
+the revert results recorded in both file headers.
 
 ## Yango: the console 403 is the caller's address — settled 2026-09-22 with the same cookie bytes
 

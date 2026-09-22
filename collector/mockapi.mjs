@@ -6341,6 +6341,73 @@ app.get('/api/settings', (_, r) => r.json([
     secret: false, source: 'environment', configured: true, value: '12', updated_at: null },
 ]));
 
+/* POST /api/settings/paste — the multi-file credential upload.
+   ─────────────────────────────────────────────────────────────────────────
+   Built on the REAL recogniser and the REAL cross-file rules, not a
+   hand-written response shape. This file's own header says why: a fixture
+   that invents its own shape drifts from the product the moment either
+   changes, and the browser test that reads it then certifies a page nothing
+   ships. Everything here except the provider is the code api/server.js runs.
+
+   The provider is the one thing stubbed, and it has to be: src/credcheck.js
+   mints a live Bolt access token, and this sandbox has no route to the
+   internet. It accepts whatever the queue did not already refuse, which is
+   exactly the contract checkCandidate implements for a candidate whose `ok`
+   is false.
+
+   Nothing is stored — this is a fixture — so `apply` reports what WOULD be
+   written rather than pretending a write happened. */
+app.post('/api/settings/paste', async (req, r) => {
+  const { recognise, unrecognised } = await import('./src/credkit.js');
+  const { normaliseFiles, crossFile, silentFiles, fileReport, boltFollowUp } =
+    await import('./src/credfiles.js');
+  const text = typeof req.body?.text === 'string' ? req.body.text : '';
+  const apply = req.body?.apply === true;
+  const { sources, refused: refusedFiles } = normaliseFiles(
+    Array.isArray(req.body?.files) && req.body.files.length ? req.body.files : [{ name: null, text }]);
+  if (!sources.length) {
+    return r.status(400).json({ error: 'nothing to read',
+      detail: refusedFiles.map((f) => `${f.name || 'the paste box'}: ${f.reason}`).join('; ')
+        || 'paste the credential, or upload the file you copied it into',
+      files: refusedFiles });
+  }
+  const found = [];
+  const leftovers = [];
+  for (const s of sources) {
+    for (const f of recognise(s.text)) found.push({ ...f, source: 'recognised', file: s.name });
+    for (const b of unrecognised(s.text)) leftovers.push({ text: b, file: s.name });
+  }
+  const { candidates, findings } = crossFile(found);
+  findings.push(...silentFiles(sources, candidates, leftovers));
+  const tested = candidates.map((c) => (c.ok !== false && c.key
+    ? { ...c, verdict: 'pass', detail: `the fixture provider accepted this for ${c.fleet}` }
+    : { ...c, verdict: 'fail', detail: c.why || 'this credential could not be named' }));
+  if (tested.some((t) => t.provider === 'Bolt')) {
+    findings.push(boltFollowUp(tested.filter((t) => t.provider === 'Bolt').map((t) => t.fleet)));
+  }
+  const applied = apply ? tested.filter((t) => t.verdict === 'pass' && t.key).map((t) => t.key) : [];
+  r.json({
+    ok: true, applied, dry_run: !apply,
+    unread: leftovers.length,
+    files: fileReport(sources, tested, applied),
+    files_refused: refusedFiles,
+    findings: findings.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'err' ? -1 : 1)),
+    proposals: tested.map((t) => ({
+      provider: t.provider, key: t.key, fleet: t.fleet || null,
+      keys: t.keys ? Object.keys(t.keys) : null,
+      file: t.file || null,
+      files: (t.files && t.files.length) ? t.files : (t.file ? [t.file] : []),
+      source: t.source, confidence: t.confidence || null,
+      verdict: t.verdict, detail: t.detail, why: t.why,
+      expires_at: t.expires_at || null,
+      account: t.account || null, org_uuid: t.org_uuid || null,
+      chars: t.value ? String(t.value).length : 0,
+      applied: applied.includes(t.key),
+      saved_untested: false,
+    })),
+  });
+});
+
 
 /* ── forecast and playbook ───────────────────────────────────────────────
    Built from the live shape: bookings collapsed from ~24,000/month to 4,203 in
