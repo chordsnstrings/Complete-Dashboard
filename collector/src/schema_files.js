@@ -189,4 +189,12 @@ export const SCHEMA_FILES = [
      since the composite key guarantees an ENTRY agrees with its TYPE and can
      say nothing about whether the type itself is right. */
   'schema_v79.sql',
+  /* v80 — trip_cash, the ONE definition of what a cash fare is worth.
+     The operator's rule is that a cash fare is the driver's money from the
+     moment they take it and only a hand-in reduces it, so the increase is a
+     measured term from trips rather than a ledger type. Two surfaces need that
+     measurement (exposure's `collected` CTE and the per-person register) and
+     api/public/settlement.js:203-210 records what happened last time two
+     surfaces each carried their own. */
+  'schema_v80.sql',
 ];

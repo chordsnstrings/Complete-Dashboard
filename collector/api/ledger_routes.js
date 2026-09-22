@@ -1256,16 +1256,39 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
           WHERE type_code = 'cash_opening' AND entry_source <> 'verification'
           ORDER BY person_id, effective_on DESC, id DESC
        ),
+       /* ONE DEFINITION OF A CASH FARE, AND IT IS NOT THIS QUERY'S.
+          ─────────────────────────────────────────────────────────────────
+          This CTE used to carry its own: trip_ext WHERE driver_holds_cash,
+          summing t.price. Two things were wrong with it and both are fixed by
+          reading sql/schema_v80.sql's trip_cash view instead.
+
+          (1) NO OUTCOME FILTER. A cash-marked trip that was CANCELLED counted
+              as an unpriced cash collection and inflated this route's own
+              floor claim. Measured: person 202's 2026-09-20 cash trip is
+              not_completed with a null price — no fare was ever charged and no
+              cash ever changed hands.
+
+          (2) price IS NOT WHAT THE DRIVER TOOK. It is what the rider was
+              charged. Uber's payments report says the driver walked away with
+              more — measured on the same person, fare 29.83 against
+              cash_collected 67.13, and +5.00 on 32 of 51 sampled cash trips.
+              Under the operator's rule the question is what they are HOLDING,
+              so the view answers with the payments figure where it survives
+              and says, per row, when it had to fall back to the fare.
+
+          The register prints these same lines. Two surfaces, one definition —
+          api/public/settlement.js:203-210 records what it cost the last time
+          each carried its own idea of a cash figure. */
        collected AS (
          SELECT a.driver_id AS person_id,
-                sum(t.price)                                        AS value,
+                sum(t.cash_amount)                                  AS value,
                 count(*)::int                                       AS trips,
-                count(*) FILTER (WHERE t.price IS NOT NULL)::int     AS priced
+                count(*) FILTER (WHERE t.cash_amount IS NOT NULL)::int AS priced,
+                count(*) FILTER (WHERE t.cash_basis = 'fare_only')::int AS fare_only
            FROM acct a
            JOIN opening o ON o.person_id = a.driver_id
-           JOIN trip_ext t ON t.driver_ext_id = a.external_id
-          WHERE t.driver_holds_cash
-            AND (t.requested_at AT TIME ZONE 'Asia/Dubai')::date > o.effective_on
+           JOIN trip_cash t ON t.driver_ext_id = a.external_id
+          WHERE (t.requested_at AT TIME ZONE 'Asia/Dubai')::date > o.effective_on
             /* Bounded ABOVE only, by the as-of. The lower bound is the day the
                accounts team stated the position — that is the whole point of
                their date — and from has no business here: a position asked
@@ -1326,7 +1349,7 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
               o.amount AS opening_amount,
               to_char(o.effective_on,'YYYY-MM-DD') AS opening_on,
               c.value AS collected_value, c.trips AS collected_trips,
-              c.priced AS collected_priced,
+              c.priced AS collected_priced, c.fare_only AS collected_fare_only,
               h.amount AS handed_amount, h.n AS handed_n
          FROM driver dr
          LEFT JOIN n   ON n.driver_id = dr.id
@@ -1388,6 +1411,7 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
          many trips. */
       const unpriced = cashKnown && r.collected_trips
         ? r.collected_trips - r.collected_priced : 0;
+      const fareOnly = cashKnown ? (Number(r.collected_fare_only) || 0) : 0;
 
       const owed = cashKnown ? round2(advance + deduction + cash) : null;
       const owedReason = cashKnown ? null
@@ -1433,18 +1457,40 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
             collected_since: round2(collected),
             collected_trips: r.collected_trips || 0,
             collected_unpriced_trips: unpriced,
+            /* A SECOND REASON THIS CAN BE A FLOOR, and it is not the same one.
+               An UNPRICED trip contributes nothing. A FARE-ONLY trip
+               contributes the rider's charge where the driver actually took
+               more — measured on person 202, fare 29.83 against 67.13
+               collected, and +5.00 on 32 of 51 sampled cash trips, which is a
+               Salik gate the rider paid in cash at the window. Both understate;
+               they understate differently, and a reader deciding whether to act
+               on the figure needs to know which is in play. */
+            collected_fare_only_trips: fareOnly,
             handed_in_since: round2(handed),
             handed_in_entries: r.handed_n || 0,
-            is_a_floor: unpriced > 0,
-            floor_reason: unpriced > 0
-              ? `${unpriced} of ${r.collected_trips} cash trips since ${r.opening_on} carry no `
-                + 'price, so the collected half is what can be proved and the true figure is at '
-                + 'least this. The exposure below therefore errs LOW.'
+            is_a_floor: unpriced > 0 || fareOnly > 0,
+            floor_reason: (unpriced > 0 || fareOnly > 0)
+              ? [
+                unpriced > 0
+                  ? `${unpriced} of ${r.collected_trips} cash trips since ${r.opening_on} carry `
+                    + 'no price at all, so they contribute nothing'
+                  : null,
+                fareOnly > 0
+                  ? `${fareOnly} carry a fare but no platform payments figure, so they `
+                    + 'contribute what the rider was charged where the driver may have taken '
+                    + 'more — tolls paid in cash at the window do not appear in the fare'
+                  : null,
+              ].filter(Boolean).join('; ')
+                + '. The collected half is therefore what can be proved and the true figure is '
+                + 'at least this, so the exposure below errs LOW.'
               : null,
-            from: 'an opening position stated by the accounts team, plus fares on cash-marked '
-              + 'trips since that date over this person\'s accounts, minus deposits recorded '
-              + 'since. Trips and not driver_statement_day.unremitted, which is keyed on a name '
-              + 'and joinable to a person for only 16.3% of its value.',
+            from: 'an opening position stated by the accounts team, plus what cash-marked trips '
+              + 'since that date put in this person\'s hands over their accounts, minus deposits '
+              + 'recorded since. The per-trip amount is the platform\'s own payments figure where '
+              + 'it survives and the fare otherwise — sql/schema_v80.sql\'s trip_cash view owns '
+              + 'that choice and the register prints the same lines. Trips and not '
+              + 'driver_statement_day.unremitted, which is keyed on a name and joinable to a '
+              + 'person for only 16.3% of its value.',
           } : null,
           total: owed, total_absent_reason: owedReason,
         },
