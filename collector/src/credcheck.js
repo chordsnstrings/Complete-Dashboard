@@ -146,9 +146,19 @@ async function checkBolt({ value, fleet }) {
   const carry = (successor) => (key && successor ? { keys: { [key]: successor } } : {});
   const prior = spent.get(value);
   if (prior && prior.fleet === fleet && Date.now() - prior.at < BOLT_SPENT_TTL_MS) {
-    return { ...verdict(true, `already exchanged a moment ago for company ${company.companyId} — `
-      + 'the portal rotates this token on use, so what will be stored is the one it handed back, '
-      + 'not the value pasted'), ...carry(prior.successor) };
+    /* ── "the portal rotates this token on use" WAS FALSE ─────────────────
+       Measured 2026-09-22 against the live portal: one refresh token exchanged
+       fifteen times in a row, code 0 / OK every time, and no `refresh_token`
+       field in any response at any depth. Nothing is handed back and nothing
+       is spent — src/settings.js said as much in its own hint while this line
+       said the opposite, and an operator reading either would act differently.
+
+       The memo above is still worth keeping. It is not about rotation: it is
+       about not spending a SECOND exchange on the Verify→Apply double-click,
+       which is a request against a live portal for no new information. */
+    return { ...verdict(true, `already verified a moment ago for company ${company.companyId} — `
+      + 'the portal minted an access token for it then, and the value pasted is what gets stored; '
+      + 'this portal does not hand back a successor'), ...carry(prior.successor) };
   }
   try {
     const { data } = await http(`${config.bolt.portalBase}/getAccessToken?language=en-us&version=FO.3.856&brand=bolt`, {
@@ -164,7 +174,13 @@ async function checkBolt({ value, fleet }) {
       const successor = next && next !== value ? next : value;
       rememberRotation(value, successor, fleet);
       return { ...verdict(true, `the portal minted an access token for company ${company.companyId}`
-        + (successor !== value ? ' and rotated the refresh token — the successor is what gets stored' : '')),
+        + (successor !== value
+          ? ' and handed back a SUCCESSOR refresh token — it has never done that before;'
+            + ' the successor is what gets stored'
+          /* Said out loud, because "verified" with no further word is what an
+             operator reads as "and the dashboard will keep it topped up", and
+             it will not: this token has a hard seven-day life and no renewal. */
+          : ' — it returns no successor, so this exact value is stored and it dies with its own exp')),
       ...carry(successor) };
     }
     /* BOTH the message and the hint, because the message is the same word for
@@ -181,9 +197,17 @@ async function checkBolt({ value, fleet }) {
       String(data?.message || JSON.stringify(data)).slice(0, 120),
       hint && `hint=${String(hint).slice(0, 60)}`,
       data?.code != null && `code=${data.code}`,
+      /* NOT "this paste has already been exchanged somewhere". Measured
+         2026-09-22: exchanging a token does not invalidate it (fifteen times,
+         still live). Signing the fleet owner into the portal again does, and
+         that is what the uuid names — the token the newest session holds. The
+         difference is the whole errand: "capture a fresh one" is what an
+         operator does by signing in again, which kills the one they just
+         pasted, which is the loop this credential has been stuck in. */
       spentAlready
-        ? '— the portal is naming the token that replaced this one, so this paste has already '
-          + 'been exchanged somewhere; capture a fresh one from the portal'
+        ? '— the portal is naming the token that is live for this fleet owner now, so a newer '
+          + 'portal sign-in superseded this paste. Capture the token from the session that is '
+          + 'signed in at this moment, paste it, and do not sign that owner in again afterwards'
         : null,
     ].filter(Boolean).join(' ').slice(0, 300));
   } catch (e) {

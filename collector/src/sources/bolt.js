@@ -213,23 +213,66 @@ async function pullFiRoster(from, to, fails, rowsByFleet = new Map()) {
   return total;
 }
 
-/* ── the refresh token is single-use, and we were throwing away its successor ──
-   The portal's getAccessToken does not merely mint an access token: it rotates
-   the refresh token and invalidates the one presented. We read
-   `data.data.access_token` and discarded the rest, so a freshly captured token
-   worked for the first company in the loop, was spent, and every later call —
-   the second fleet in the same run, and every run after it — got
-   REFRESH_TOKEN_INVALID. The dashboard read that as "the supervisor pasted a
-   stale token" and asked for another, which was then spent the same way.
+/* ── THE PORTAL DOES NOT ROTATE. IT SUPERSEDES. ───────────────────────────
+   This block used to open "the refresh token is single-use … getAccessToken
+   rotates the refresh token and invalidates the one presented", and that is
+   measured false. It matters because it is the sentence that decided what the
+   whole credential panel says to an operator, and the errand it sends them on
+   does not fix the thing that is actually broken.
 
-   Two responses tell the two failures apart, and only a side-by-side probe
-   makes it visible:
+   MEASURED 2026-09-22, live, against fleetOwnerPortal/getAccessToken with a
+   real Egari refresh token (owner 174036):
 
-     signature broken  → error_hint "Invalid refresh token"
-     already rotated   → error_hint "<a uuid that is not this token's jti>"
+     the SAME refresh token was exchanged 15 times in a row
+     every one answered code 0 / OK with an access token
+     not one response carried a `refresh_token` field at any depth —
+       data's keys are exactly: access_token, expires_timestamp,
+       expires_in_seconds, next_update_in_seconds,
+       next_update_give_up_timestamp
+     the token was still good after all fifteen
 
-   The second is the portal naming the token that superseded ours. That is why
-   the hint is logged verbatim now rather than being flattened to "invalid". */
+   So nothing is spent by using it, there is no successor to keep, and a token
+   that stops working did not stop because we exchanged it.
+
+   WHAT ACTUALLY KILLS ONE. The portal keeps ONE live refresh token per fleet
+   owner. Signing that owner into the portal again mints a new one and
+   invalidates every older one at once — including the one an operator pasted
+   here ten minutes earlier, while it is still days from its own `exp`.
+
+   That was measured end to end on 2026-09-22. The Ecosine token the operator
+   captured at 13:13 on the 21st answered code 0 on its first exchange and,
+   minutes later, code 210 REFRESH_TOKEN_INVALID with
+   error_hint 5099637b-…. At the same moment
+   production's /api/auth was refusing a DIFFERENT Ecosine token — a different
+   capture, a different exp (2026-09-26T08:40:27Z) — with the SAME hint,
+   character for character. One surviving token, named identically to two
+   different callers holding two different dead ones. A per-request trace id
+   could not do that, and neither could rotation-on-use: rotation would name a
+   successor we had just been handed, and we were handed nothing.
+
+   Confirmed stable, not incidental: three consecutive calls with the dead
+   token returned that same uuid three times.
+
+   So the two refusals still tell apart, and the reading of the second changes:
+
+     signature broken   → error_hint "Invalid refresh token"   (measured: a
+                          token with its signature reversed answers exactly this)
+     superseded         → error_hint "<a stable uuid that is not this token's
+                          jti>" — the portal naming the token that is still
+                          alive for this owner, i.e. the one the newest portal
+                          session holds
+
+   The remedy is therefore NOT "capture a fresh one" on its own, which is what
+   the panel has been saying: capturing a fresh one by signing in again is the
+   very act that kills whatever is already pasted for that owner. It is
+   "capture it from the session that is signed in NOW, paste it, and do not
+   sign that owner into the portal again afterwards" — and, for two fleets with
+   two owners, do one owner completely before starting the other.
+
+   The write-back below is kept even so. It costs one comparison, it is correct
+   if Bolt ever does start returning a successor, and `next` is null on every
+   response measured — so today it simply never fires. What is NOT kept is any
+   message claiming it rotates. */
 
 // A portal refresh token is issued to one fleet owner, and the two fleets have
 // different owners (userId 174036 / 173999), so each fleet gets its own key and
@@ -248,6 +291,17 @@ export function readRefreshToken(tok) {
     fleet_owner_id: p.data?.fleet_owner_id ?? null,
     jti: p.data?.jti ?? null,
   };
+}
+
+/* The truth about this token's expiry, in a clause — never the word "expired"
+   about an instant that has not happened. See the call site for the production
+   line that made this necessary. */
+export function expiryNote(meta) {
+  if (!meta?.expires_at) return '';
+  if (meta.expired) return ` (expired ${meta.expires_at})`;
+  const d = meta.days_left;
+  return ` (NOT an expiry — this token is good until ${meta.expires_at}`
+    + `${Number.isFinite(d) ? `, ${d.toFixed(1)} days away` : ''})`;
 }
 
 // Which fleet a portal owner id belongs to, by the same table the collector
@@ -287,6 +341,109 @@ const fleetOfOwner = (id) =>
    and Ecosine's live credential spent to fill the wrong slot. Not making the
    call removes the question.) */
 
+/* ── WHAT THE MINT REQUEST ACTUALLY NEEDS, MEASURED ONE FIELD AT A TIME ───
+   The operator supplied the browser request that works, and it differs from
+   ours in three visible ways. Two of them were the standing suspects for why
+   Bolt collection kept dying. Both are wrong, and they are written down here
+   because the next person will suspect them again.
+
+   Bisected live on 2026-09-22, one change at a time, same token, same minute,
+   nine variants. EVERY ONE answered code 0 / OK with an access token:
+
+     ours exactly as sent below (FO.3.856, language=en-us, one header)   OK
+     ours + version=FO.3.2312 (the browser's)                            OK
+     ours + language=en (the browser's)                                  OK
+     ours + all thirteen browser headers                                 OK
+     the browser request exactly                                         OK
+     the browser request with version rolled back to FO.3.856            OK
+     version=FO.3.2312 with content-type as the only header              OK
+
+   So the VERSION STRING IS NOT LOAD-BEARING and the TWELVE MISSING BROWSER
+   HEADERS ARE NOT LOAD-BEARING — not origin, not referer, not sec-ch-ua, not
+   the user-agent. A second control settles the headers beyond argument: the
+   operator sent two working captures, one from Chrome and one from Firefox,
+   and they disagree with each other on sec-ch-ua*, priority, accept-encoding
+   and the user-agent. Both work. A header the two working requests do not
+   agree on cannot be one the server requires.
+
+   WHAT IS LOAD-BEARING IS THE ONE THING THE BROWSER DOES NOT SEND: the
+   `company` object in the body below. This is the trap, because the obvious
+   "fix" on reading the operator's curl is to make our body match it, and that
+   body is `{"refresh_token": …}` and nothing else.
+
+   Measured the same day, same token:
+
+     mint with {refresh_token} only          → code 0, OK, access_token issued
+       …then orderHistory/getTable with it   → code 503 NOT_AUTHORIZED, no rows
+     mint with {refresh_token, company}      → code 0, OK, access_token issued
+       …then orderHistory/getTable with it   → code 0, OK, 70 orders
+
+   The mint call reports success either way. The access token it hands back is
+   scoped to the company named AT MINT TIME, and an unscoped one reads nothing.
+   The browser gets away with the bare body because the console picks its
+   company up in a later call; we have no later call, so the company goes here.
+
+   AND THE COMPANY_ID IN THE getTable URL IS DECORATIVE. Same measurement:
+   one access token minted for company 142897, then getTable asked with
+   `company_id=142897` and with `company_id=142868` — byte-identical responses,
+   70 rows both times, Egari's rows both times. The URL parameter selects
+   nothing. Whoever is tempted to mint one access token and reuse it across
+   both fleets would therefore write EGARI'S TRIPS INTO ECOSINE'S FLEET, with
+   no refusal anywhere to say so. url(c) and portalToken(c) must stay paired on
+   the same company, which is what the harvest loop below does.
+
+   The portal does refuse a company the owner does not hold, at mint time, with
+   its own code — see PORTAL_NOT_ENTITLED_CODE. */
+
+/* The portal's own numbers on the MINT path. Named because a bare 210 in a log
+   is unreadable, and because these two need opposite errands. */
+const REFRESH_TOKEN_INVALID_CODE = 210;
+/* 900101 FLEET_OWNER_NOT_AUTHORIZED_COMPANY. Measured 2026-09-22 by minting
+   with Egari's owner-174036 token against Ecosine's company 142868: the portal
+   answers `{"code":900101,"message":"FLEET_OWNER_NOT_AUTHORIZED_COMPANY"}`.
+   This is the portal agreeing with the owner guard above — a token really
+   cannot be lent between the fleets — and it is NOT a broken credential, so it
+   must never be filed as one. */
+const PORTAL_NOT_ENTITLED_CODE = 900101;
+/* A superseding token's id, as opposed to the words "Invalid refresh token".
+   The portal writes a bare uuid here when the token presented is a real one it
+   has issued and then replaced. */
+const SUPERSEDED_HINT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/* One refusal from the mint path, read. Exported so the reading can be checked
+   against the portal's real payloads without standing up the portal. */
+export function portalRefusal(data, company) {
+  const code = Number(data?.code);
+  const hint = data?.error_hint || null;
+  const why = [data?.message, hint && `hint=${hint}`, Number.isFinite(code) && `code=${code}`]
+    .filter(Boolean).join(' ') || 'no access_token in response';
+  if (code === PORTAL_NOT_ENTITLED_CODE) {
+    return { state: 'unentitled', err: why,
+      detail: `this refresh token's owner does not hold company_id ${company.companyId}`
+        + ` (${company.fleet}) — the portal refused the mint with ${data?.message}.`
+        + ` A different token for the same owner cannot change that;`
+        + ` ${RT_KEY(company.fleet)} has to come from a portal session signed in as ${company.userId}.` };
+  }
+  if (code === REFRESH_TOKEN_INVALID_CODE && hint && SUPERSEDED_HINT.test(String(hint))) {
+    /* NOT "somebody already spent this one". Nothing spends it — see the block
+       at the top of this section. A newer portal sign-in for this owner
+       replaced it, and the uuid is the replacement. */
+    return { state: 'invalid', err: why,
+      detail: `superseded — signing owner ${company.userId} into the Bolt portal again`
+        + ` invalidated this token while it was still inside its own life.`
+        + ` The portal names the token that is live now (${String(hint).slice(0, 8)}…).`
+        + ` Capture ${RT_KEY(company.fleet)} from the session that is signed in NOW`
+        + ' and do not sign that owner in again afterwards.' };
+  }
+  if (code === REFRESH_TOKEN_INVALID_CODE) {
+    return { state: 'invalid', err: why,
+      detail: `the portal does not recognise this value as a token it issued (${why}).`
+        + ` Capture ${RT_KEY(company.fleet)} again, whole — a truncated or re-wrapped`
+        + ' paste reads exactly like this.' };
+  }
+  return { state: 'invalid', err: why, detail: null };
+}
+
 /* Exchange, and keep the successor. Returns { at, err } — never throws, because
    one fleet's dead token must not cost us the other fleet's trips. */
 export async function portalToken(company) {
@@ -317,32 +474,35 @@ export async function portalToken(company) {
 
   const at = data?.data?.access_token || data?.access_token || null;
 
-  /* Persist the successor before returning the access token. Written even when
-     the exchange failed, in case the portal hands back a usable token alongside
-     an error — and written per fleet, so one fleet's rotation cannot overwrite
-     the other's credential. */
+  /* Kept for the day the portal starts handing one back. Measured 2026-09-22
+     over fifteen consecutive exchanges of one live token, `next` was null every
+     single time — the portal does not rotate, it supersedes (see the block
+     above). So this never fires today. It stays because it costs one
+     comparison, it is right if that ever changes, and it is written per fleet
+     so one fleet could not overwrite the other's credential if it did. */
   const next = data?.data?.refresh_token || data?.refresh_token || null;
   if (next && next !== rt) {
     try {
       await setSetting(RT_KEY(fleet), next);
       const m = readRefreshToken(next);
-      log.info(SRC, `portal refresh token rotated for ${fleet}`,
-        { expires_at: m?.expires_at || 'unknown', days_left: m?.days_left ?? null });
+      log.info(SRC, `the Bolt portal returned a SUCCESSOR refresh token for ${fleet}`
+        + ' — it has never done this before; the collector\'s reading that it does not rotate'
+        + ' is now out of date and src/sources/bolt.js should be re-measured',
+      { expires_at: m?.expires_at || 'unknown', days_left: m?.days_left ?? null });
     } catch (e) {
       // Losing the successor means the next run fails, so say so loudly rather
       // than letting it surface a week later as "the supervisor pasted a stale token".
-      log.error(SRC, `could not store rotated refresh token for ${fleet} — next run will fail`,
+      log.error(SRC, `could not store the successor refresh token for ${fleet} — next run will fail`,
         { err: String(e).slice(0, 200) });
     }
   }
 
   if (at) return { at, err: null };
-  return {
-    at: null,
-    err: [data?.message, data?.error_hint && `hint=${data.error_hint}`, data?.code != null && `code=${data.code}`]
-      .filter(Boolean).join(' ') || 'no access_token in response',
-    meta,
-  };
+  /* Read, not flattened. `210 REFRESH_TOKEN_INVALID` is one message for three
+     different situations and only the hint tells them apart — and the errand
+     each one needs is different. See portalRefusal above for the measurements. */
+  const r = portalRefusal(data, company);
+  return { at: null, err: r.err, detail: r.detail, state: r.state, meta };
 }
 
 // Portal trips (orderHistory) — the only Bolt surface carrying trips and fares;
@@ -733,7 +893,7 @@ async function oneFleet(c, from, to, fails, allChunks, plates) {
       return total;
     }
 
-    const { at, err, meta, wrongOwner } = await portalToken(c);
+    const { at, err, meta, wrongOwner, detail: refusalDetail, state: refusalState } = await portalToken(c);
     if (!at) {
       const m = meta || readRefreshToken(rt);
       /* The owner the token was issued to, next to the fleet it is being used
@@ -759,7 +919,11 @@ async function oneFleet(c, from, to, fails, allChunks, plates) {
          stopped carrying trips. The owner mismatch is recorded separately
          because re-pasting cannot fix a token minted for the other fleet. */
       await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: credKey,
-        state: 'invalid', surface: 'orderHistory',
+        /* 'unentitled', not 'invalid', when the portal itself says the owner
+           does not hold the company — the same distinction fiRefusal() above
+           makes for the FI gateway, for the same reason: re-pasting produces a
+           credential with identical entitlement. */
+        state: refusalState === 'unentitled' ? 'unentitled' : 'invalid', surface: 'orderHistory',
         /* The remedy is part of the sentence now. "It is the wrong fleet's
            token" told an operator what NOT to do and left them without
            anything to do instead — and the thing to do is not guessable: it is
@@ -768,7 +932,20 @@ async function oneFleet(c, from, to, fails, allChunks, plates) {
           ? `the token belongs to owner ${m.fleet_owner_id}${fleetOfOwner(m.fleet_owner_id) ? ` (${fleetOfOwner(m.fleet_owner_id)})` : ''},`
             + ` not ${c.userId} — it is the wrong fleet's token, not an expired one.`
             + ` Capture ${RT_KEY(c.fleet)} from a Bolt portal session signed in as owner ${c.userId}.`
-          : `${String(err).slice(0, 150)}${m?.expires_at ? ` (expired ${m.expires_at})` : ''}` });
+          /* ── "(expired 2026-09-26T08:40:27.000Z)" ON 2026-09-22 ────────────
+             This appended `(expired <exp>)` whenever the JWT carried an exp at
+             all, whatever that exp said. Production printed exactly the line
+             above on 2026-09-22 — calling a token expired four days before its
+             own expiry, about a token whose real problem was that a newer
+             portal sign-in had superseded it. A wrong reason is worse than no
+             reason: it sends the operator to wait for a re-capture window that
+             is not the thing standing in the way, and the house rule is that a
+             figure that cannot be measured is absent WITH THE TRUE REASON.
+
+             So the expiry is only mentioned when it has actually passed, and
+             when it has not it is stated as the exclusion it is. `refusalDetail`
+             comes first because the portal's own reading beats ours. */
+          : refusalDetail || `${String(err).slice(0, 150)}${expiryNote(m)}` });
       return total;
     }
     /* The token was good; the request never was.

@@ -827,6 +827,58 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **"THE BROWSER SENDS THIRTEEN HEADERS AND WE SEND ONE" IS NOT A DIAGNOSIS.**
+  Bolt's portal was bisected on 2026-09-22 because our request looked nothing
+  like the working browser capture — a different `version=` string, twelve
+  missing headers. **Nine variants, every one OK.** Neither mattered. The one
+  difference that did was a field the browser does **not** send (`company` in
+  the mint body). The general shape of the trap: a browser capture is full of
+  things that differ and mostly do not matter, and the eye goes to what is
+  missing rather than to what is extra. **Bisect one field at a time against a
+  live control before changing anything.** The cheapest tell that a header is
+  not required is two working captures that disagree about it — here, Chrome
+  and Firefox disagreed on four of them.
+
+* **A REFUSAL THAT NAMES A CREDENTIAL THE HOST IGNORES.** Yango's console was
+  sent `X-API-Key` and its 403 advice told operators to check `YANGO_API_KEY`.
+  Measured 2026-09-22: real key, junk key and **no key header at all** return
+  byte-identical 200s. The host never read it. This is the third time in this
+  file that a message has sent somebody to re-paste a credential that could not
+  be the cause. **Before naming a credential in a refusal, delete it from the
+  request and check that the answer changes.**
+
+* **A TOKEN CALLED "EXPIRED" FOUR DAYS BEFORE ITS EXPIRY.**
+  `src/sources/bolt.js` appended `(expired <exp>)` whenever the JWT carried an
+  `exp` at all, whatever that `exp` said. On 2026-09-22 production printed
+  `(expired 2026-09-26T08:40:27.000Z)` about a token whose real problem was that
+  a newer portal sign-in had superseded it. A wrong reason is worse than none —
+  it sends the operator to wait out a window that is not what is in the way.
+  Now `expiryNote()` says "expired" only when it has, and otherwise states the
+  exclusion outright.
+
+* **CAPTURING A FRESH BOLT TOKEN IS WHAT KILLS THE ONE YOU JUST PASTED.** The
+  portal keeps one live refresh token per fleet owner. The panel's advice was
+  "capture a fresh one from the portal", which an operator does by signing in
+  again — invalidating whatever they pasted ten minutes earlier, still days from
+  its `exp`. **Two fleets, two owners: finish one owner completely — capture,
+  paste, verify — before signing the other one in.**
+
+* **A PROBE THAT ASKS A PATH THE COLLECTOR DOES NOT READ.** `/api/probe/yango`
+  promised "one endpoint, the collector's own" and asked
+  `/api/reports-api/v1/orders/list`, while the collector's only console surface
+  is `/api/reports-api/v2/summary/drivers/list`. Measured from a network the
+  edge does not refuse, the v1 path answers **400 REQUEST_VALIDATION_ERROR** —
+  so on the day the block lifts, the probe would still have reported failure and
+  been read as "still broken". `YANGO_SURFACES` exists to stop exactly this and
+  the probe was not using it. It does now.
+
+* **AN ACCESS TOKEN'S SCOPE IS SET AT MINT TIME; THE `company_id` IN BOLT'S
+  `getTable` URL IS DECORATIVE.** One token minted for company 142897, asked
+  with `company_id=142897` and `company_id=142868`: byte-identical, 70 rows
+  both times, Egari's rows both times. Minting once and reusing across fleets
+  would file **Egari's trips as Ecosine's** with no refusal anywhere. Keep
+  `portalToken(c)` and `url(c)` on the same `c`.
+
 * **A CONFIRMED MERGE WAS INVISIBLE FOR UP TO HALF AN HOUR, AND LOOKED LIKE A
   BROKEN MERGE.** The operator answered 93 pairs on `#same-person`, went back
   to `#drivers`, and still saw one man as two rows. Nothing was broken: every
@@ -1316,14 +1368,17 @@ driver's 222 tracker fixes.
   dies roughly weekly until somebody re-captures from the portal. If deploys
   are also roughly weekly the two correlate and read as causal.
 
-  **An unresolved contradiction sits in the repo about this and it changes the
-  fix.** `src/sources/bolt.js:216` says the refresh token "is single-use… rotates
-  the refresh token and invalidates the one presented", with code at `:327`
-  persisting the successor. The `SETTING_DEFS` hint says "Hard 7-day life and it
-  does **NOT** rotate". Production favours the hint: if it rotated, `updated_at`
-  would move on every collector run, and instead both moved once, two minutes
-  apart, which is a human pasting. If it does not rotate there is no software
-  fix — only a weekly re-capture or a longer-lived credential.
+  ~~**An unresolved contradiction sits in the repo about this and it changes the
+  fix.**~~ **SETTLED 2026-09-22 — the hint was right, the code comments were
+  wrong, and both have been corrected. The portal does not rotate. See
+  "Bolt: the portal supersedes, it does not rotate" below.** The contradiction
+  was: `src/sources/bolt.js` said the refresh token "is single-use… rotates the
+  refresh token and invalidates the one presented", `src/credcheck.js:150` said
+  "the portal rotates this token on use", and the `SETTING_DEFS` hint said
+  "Hard 7-day life and it does **NOT** rotate" — with `src/settings.js` managing
+  to say both, six lines apart. Production's reasoning here (if it rotated,
+  `updated_at` would move every run, and instead it moved once, which is a
+  human pasting) was correct and is now confirmed directly against the portal.
 
   *Yango* — not persistence, **origin**. Measured 2026-09-07 minutes apart: the
   same URL, method, headers, body, park id and session answered **HTTP 200 from
@@ -4663,3 +4718,183 @@ An unrecognised identifying parameter (`id`, `person`, `driver`, `driver_id`,
 `ext`, `external_id`, `account`) is now an absence-with-a-reason naming both the
 parameter it could not use and the two it can. A call naming nobody **at all**
 is still the fleet-wide register — `#advances` depends on it.
+
+---
+
+## Bolt: the portal supersedes, it does not rotate — measured 2026-09-22
+
+The operator supplied two working browser captures and two raw refresh tokens,
+and the standing suspicion was that our request differed from the browser's in
+a way that mattered. **It does not. Our request was already correct.** What was
+wrong was every sentence the product said about *why* a token dies.
+
+### The mint request: what is load-bearing and what is not
+
+Bisected live, one change at a time, same token, same minute. **Nine variants,
+all `code: 0 / OK` with an access token:**
+
+| variant | result |
+|---|---|
+| ours exactly as shipped — `version=FO.3.856`, `language=en-us`, one header | **OK** |
+| ours + `version=FO.3.2312` (the browser's) | OK |
+| ours + `language=en` (the browser's) | OK |
+| ours + all thirteen browser headers | OK |
+| the browser request verbatim | OK |
+| the browser request with the version rolled back to `FO.3.856` | OK |
+| `version=FO.3.2312` with `content-type` as the only header | OK |
+
+So **the version string is not load-bearing** and **the twelve missing browser
+headers are not load-bearing** — not `origin`, not `referer`, not `sec-ch-ua*`,
+not the user-agent. A second control settles the headers beyond argument: the
+two working captures are one Chrome and one Firefox, and they **disagree with
+each other** on `sec-ch-ua*`, `priority`, `accept-encoding` and the user-agent.
+A header two working requests disagree on cannot be one the server requires.
+
+### What IS load-bearing: the `company` object the browser does not send
+
+This is the trap, because the obvious move on reading the operator's curl is to
+make our body match it — and that body is `{"refresh_token": …}` and nothing
+else. Same token, same day:
+
+```
+mint {refresh_token} only        -> code 0, OK, access_token issued
+  then orderHistory/getTable     -> code 503 NOT_AUTHORIZED, no rows
+mint {refresh_token, company}    -> code 0, OK, access_token issued
+  then orderHistory/getTable     -> code 0, OK, 70 orders
+```
+
+**The mint call reports success either way.** The access token is scoped to the
+company named *at mint time*; an unscoped one reads nothing. The browser gets
+away with the bare body because the console picks its company up in a later
+call. We have no later call.
+
+### `company_id` in the `getTable` URL is decorative
+
+One access token minted for company 142897, then `getTable` asked with
+`company_id=142897` and with `company_id=142868`: **byte-identical responses,
+70 rows both times, Egari's rows both times.** The URL parameter selects
+nothing. Anyone who mints one access token and reuses it across both fleets
+writes **Egari's trips into Ecosine's fleet with no refusal anywhere to say
+so.** `url(c)` and `portalToken(c)` must stay paired on the same company.
+
+### Rotation: fifteen exchanges, no successor, ever
+
+The same Egari refresh token was exchanged **fifteen times in a row**. Every one
+answered `code 0 / OK`. **No response carried a `refresh_token` field at any
+depth** — `data`'s keys are exactly `access_token`, `expires_timestamp`,
+`expires_in_seconds`, `next_update_in_seconds`, `next_update_give_up_timestamp`.
+The token was still good after all fifteen. **Nothing is spent by using it.**
+
+### What actually kills a token: a newer sign-in for the same fleet owner
+
+The portal keeps **one live refresh token per fleet owner.** Signing that owner
+in again mints a new one and invalidates every older one at once — while they
+are still days from their own `exp`.
+
+Measured end to end. The Ecosine token captured 2026-09-21T13:13Z answered
+`code 0` on its first exchange and, minutes later, `code 210
+REFRESH_TOKEN_INVALID` with `error_hint 5099637b-…`.
+At that same moment production's `/api/auth` was refusing a **different**
+Ecosine token — different capture, different exp (2026-09-26T08:40:27Z) — with
+**the same hint, character for character.** One surviving token, named
+identically to two callers holding two different dead ones. A per-request trace
+id cannot do that; neither can rotation-on-use, which would name a successor we
+had just been handed, and we were handed nothing. Three consecutive calls with
+the dead token returned that uuid three times, so it is stable.
+
+**The two refusals, and the errand each needs:**
+
+| `error_hint` | means | errand |
+|---|---|---|
+| `Invalid refresh token` | signature broken / truncated paste (confirmed by reversing a real token's signature) | paste it again, whole |
+| a stable uuid ≠ this token's `jti` | **superseded** — the uuid is the token the newest portal session holds | capture from the session signed in **now**, paste, then **leave the portal alone** |
+
+So "capture a fresh one" — what the panel said — is the *act that kills* what is
+already pasted for that owner. For two fleets with two owners: **finish one
+owner completely before starting the other.**
+
+### Two more portal codes, now named
+
+* **`900101 FLEET_OWNER_NOT_AUTHORIZED_COMPANY`** — the portal's own refusal at
+  mint time when the token's owner does not hold the company. Measured by
+  minting Egari's owner-174036 token against Ecosine's company 142868. It is an
+  entitlement verdict, not a broken credential, and is now filed `unentitled`.
+  It also means the portal **agrees with** the owner guard: a token really
+  cannot be lent between the fleets, and the cross-fleet case fails at the mint
+  rather than silently serving the wrong fleet's rows.
+* **`503 NOT_AUTHORIZED` on the read path** is not only access-token age. An
+  access token minted without a `company` returns it too.
+
+### The Ecosine credential is an operator errand, not a bug
+
+`ECOSINE_BOLT.txt` and `EGARI_BOLT.txt` are **the same token** — identical
+sha256, same `jti`, `fleet_owner_id: 174036`, which is **Egari's** owner. So the
+Ecosine raw file holds Egari's token and no code change can make it read company
+142868. **But the operator did supply a real Ecosine token** — it is inside
+`BOLT_ECOSINE_CURL.txt`, `fleet_owner_id: 173999`, and it worked on its first
+exchange before being superseded. The errand is one careful capture per owner,
+in the order above.
+
+---
+
+## Yango: the console 403 is the caller's address — settled 2026-09-22 with the same cookie bytes
+
+The standing note said the 403 was "entitlement, or origin — the same call has
+been measured returning 200 from a different network". That is now proven with
+the strongest control available: **the identical cookie.**
+
+`/api/probe/yango` on production reports its stored cookie as `len 1605, head
+"pi=O", tail "dd=0"`, park `a23a…478b`. The cookie the operator supplied is
+`len 1605`, starts `pi=O`, ends `dd=0`, same park. **Production already holds
+this exact session.** Same minute, same path, same method, same body:
+
+| caller | `/api/reports-api/v2/summary/drivers/list` |
+|---|---|
+| the deployed app | **HTTP 403**, HTML page from a Yandex CDN edge |
+| another network | **HTTP 200**, the fleet's real driver rows |
+
+Nothing about the credential differs. **No re-paste changes a caller's
+address.** The remedy is egress, not a credential.
+
+### Our four headers were never the problem
+
+Bisected against the collector's own endpoint with the fresh cookie. **Every
+variant 200:** all seventeen browser headers; our four; ours + `origin` +
+`referer`; ours + `x-client-version`; ours + the browser user-agent. Removing
+the **cookie** is the only change that breaks it (401). So `x-client-version`,
+`origin` and `referer` are **not** load-bearing on this host — the Bolt-shaped
+hypothesis does not transfer.
+
+### `X-API-Key` is inert on the console, and naming it was misdirection
+
+Three requests, a second apart: real key → 200; `junk-not-a-real-key` → 200,
+**byte-identical body**; no `X-API-Key` header at all → 200, byte-identical.
+The console does not read it. It has been removed from the console request, from
+the cookie-free comparison probe, and from the advice — a credential a host
+ignores cannot be why it refused, and naming it sent operators on an errand that
+could never work. `YANGO_API_KEY` keeps its own host, `fleet-api.yango.tech`,
+where it is load-bearing and proven every run.
+
+### The operator's curl does not contain the orders request
+
+Worth stating because it looks like it does. The only request in `YANGO_CURL.txt`
+is `POST /api/fleet/fleet-tutorials/v1/scenarios/list`. The
+`/reports/orders?date_from=…&plain_date_from=…&time_from=…&date_type=booked_at`
+URL that appears alongside it is the **`referer`** — the SPA route the operator
+was on. It is a browser history entry, not an API contract, and the four ways it
+spells a window are the front end's URL state. **Do not derive the orders
+request shape from it.**
+
+### Two shapes on the console summary that will mislead a reader
+
+* **The response's `date_from`/`date_to` are NOT the window you asked for.**
+  Asking `2026-09-14..09-20` and `2026-08-03..08-10` returns **different items**
+  — the body window *is* honoured — while both echo
+  `date_from 2026-06-13T03:00:00+03:00`, `date_to 2026-09-21T17:00:00+03:00`.
+  That echo looks like the park's data-availability range. `pullDrivers` keys on
+  the window it asked for, which is correct; anything that starts trusting the
+  echo will smear.
+* **`total` is an OBJECT of fleet aggregates, not a row count.** Both sibling
+  walks in this file do `Number(data.total)` for paging. That would be
+  `NaN` here.
+

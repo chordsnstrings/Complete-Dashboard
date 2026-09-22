@@ -5,11 +5,14 @@
 
    The Settings paste is two steps by design — read the credential, show what
    it is and whether it works, then apply. Every check in src/credcheck.js is a
-   READ, which is what makes running one twice harmless. Bolt's was not. The
-   portal's getAccessToken ROTATES the refresh token and invalidates the one
-   presented (src/sources/bolt.js:201-217 says so, and persists the successor
-   for exactly this reason); checkBolt called the same endpoint and kept only
-   `access_token`. So:
+   READ, which is what makes running one twice harmless. Bolt's was not.
+
+   THE STORY BELOW IS THE ONE THE REPO BELIEVED WHEN THIS FILE WAS WRITTEN, and
+   half of it turned out to be false — see the note at the end of this comment.
+   It is left standing because the code path it guards is still the right one
+   and these tests are still the reason it exists. The belief was: the portal's
+   getAccessToken rotates the refresh token and invalidates the one presented,
+   and checkBolt called the same endpoint and kept only `access_token`. So:
 
      press Read   → "pass", and the pasted token is now spent
      press Apply  → the same value goes back to the portal, which answers with
@@ -19,8 +22,25 @@
    The operator sees a credential that verified a second ago refuse to save,
    and the advice on screen is to capture another one — which is spent the same
    way, forever. Two properties close it, and both are asserted here against a
-   portal that behaves the way the real one does: single-use tokens, a
-   successor in the response, and the superseded token's jti in the error.
+   stub portal that rotates: a successor in the response, and the superseded
+   token's jti in the error.
+
+   ── WHAT WAS RE-MEASURED 2026-09-22 ──────────────────────────────────────
+   The live portal does NOT rotate. One refresh token, fifteen consecutive
+   exchanges, `code 0` every time, and no `refresh_token` field in any response.
+   Nothing is spent by using it. What invalidates a token is signing its fleet
+   owner into the portal again, which mints a new one and kills every older one
+   — so the uuid in the hint is the SURVIVOR, not a successor we were handed
+   and dropped. docs/COVERAGE.md carries the full measurement.
+
+   So the stub below models a portal Bolt is not today. That is deliberate and
+   these tests are kept: the double-click memo they pin is load-bearing either
+   way (it stops a second pointless exchange against a live portal), and if
+   Bolt ever does start rotating, this is the only thing standing between that
+   change and a credential spent on the Verify click. What has changed is the
+   WORDING the code produces, so the assertions below test the behaviour rather
+   than the noun "rotation" — which is what made them fail when the false
+   sentence was corrected.
 
    No real credential is used. The tokens below are unsigned JWTs built here. */
 import express from 'express';
@@ -91,8 +111,8 @@ check('…and what it offers to store is the ROTATED token, not the spent paste'
 check('…under the key that fleet’s collector reads',
   Object.keys(read.keys || {}).join() === 'BOLT_REFRESH_TOKEN_ECOSINE',
   JSON.stringify(read.keys && Object.keys(read.keys)));
-check('…and it says the rotation happened rather than reporting a plain pass',
-  /rotat/i.test(read.detail || ''), read.detail);
+check('…and it says a successor arrived rather than reporting a plain pass',
+  /successor/i.test(read.detail || ''), read.detail);
 
 /* CLICK TWO — Apply, seconds later, presenting the same value. This is the
    click that used to fail. */
@@ -108,11 +128,14 @@ check('…and still names the successor, so the write lands on a live token',
 check('…without spending another token to find out',
   exchanges === before, `${exchanges - before} extra exchanges`);
 check('…and says why it did not ask again',
-  /already exchanged/i.test(applyStep.detail || ''), applyStep.detail);
+  /already verified a moment ago/i.test(applyStep.detail || ''), applyStep.detail);
 
 console.log('\nand a token that is genuinely dead still reads as dead');
 
-/* A token this portal has never issued: a broken signature, not a rotation. */
+/* A token this portal has never issued: a broken signature, not a supersession.
+   Measured on the live portal 2026-09-22 — reversing a real token's signature
+   answers `code 210` with `error_hint "Invalid refresh token"`, in words,
+   whereas a real-but-superseded token answers 210 with a bare uuid. */
 const junk = await checkCandidate(paste(token('99999999-9999-4999-8999-999999999999')));
 check('an unknown token fails', junk.verdict === 'fail', JSON.stringify([junk.verdict, junk.detail]));
 check('…and nothing is offered for storage', !junk.keys, JSON.stringify(junk.keys));

@@ -167,9 +167,13 @@ export const SETTING_DEFS = [
   { key: 'BOLT_CLIENT_ID', group: 'Bolt', label: 'OAuth client id', secret: false },
   { key: 'BOLT_CLIENT_SECRET', group: 'Bolt', label: 'OAuth client secret', secret: true },
   { key: 'BOLT_REFRESH_TOKEN', group: 'Bolt', label: 'Fleet-portal refresh token', secret: true, hint: '~7 day lifetime — refresh to unlock Bolt trips & earnings' },
-  // Single-use: the portal rotates it on every exchange and invalidates the one
-  // presented, so the collector writes the successor back here. Per fleet,
-  // because a token is issued to one fleet owner and the two fleets have two.
+  // Per fleet, because a token is issued to one fleet owner and the two fleets
+  // have two. This comment used to say "single-use: the portal rotates it on
+  // every exchange", contradicting the two hints three lines below it. The
+  // hints were right — measured again 2026-09-22, fifteen consecutive
+  // exchanges of one live token, code 0 every time, no successor in any
+  // response. Nothing writes back here; a human re-captures when the exp runs
+  // out, or sooner if somebody signs that owner into the portal again.
   /* "Rotates on use; the collector keeps it current" was the hint on both of
      these, and it is measured false. Spending a token against
      fleetOwnerPortal/getAccessToken on 2026-09-10 returned an access token and
@@ -181,8 +185,8 @@ export const SETTING_DEFS = [
      The difference is a week of collection. A hint saying the collector
      maintains it tells an operator there is nothing to diarise, and the first
      they would learn otherwise is Bolt going quiet. */
-  { key: 'BOLT_REFRESH_TOKEN_ECOSINE', group: 'Bolt', label: 'Portal refresh token — Ecosine', secret: true, hint: 'Hard 7-day life and it does NOT rotate — re-capture from the Bolt portal when it expires. The JWT carries its own exp; the Sources page counts it down.' },
-  { key: 'BOLT_REFRESH_TOKEN_EGARI', group: 'Bolt', label: 'Portal refresh token — Egari', secret: true, hint: 'Hard 7-day life and it does NOT rotate — re-capture from the Bolt portal when it expires. The JWT carries its own exp; the Sources page counts it down.' },
+  { key: 'BOLT_REFRESH_TOKEN_ECOSINE', group: 'Bolt', label: 'Portal refresh token — Ecosine', secret: true, hint: 'Hard 7-day life and it does NOT rotate — re-capture from the Bolt portal when it expires. The JWT carries its own exp; the Sources page counts it down. It can also die EARLY: the portal keeps one live token per fleet owner, so signing that owner in again kills whatever is pasted here. Capture from the session signed in now, paste it, then leave the portal alone — and finish one fleet before starting the other.' },
+  { key: 'BOLT_REFRESH_TOKEN_EGARI', group: 'Bolt', label: 'Portal refresh token — Egari', secret: true, hint: 'Hard 7-day life and it does NOT rotate — re-capture from the Bolt portal when it expires. The JWT carries its own exp; the Sources page counts it down. It can also die EARLY: the portal keeps one live token per fleet owner, so signing that owner in again kills whatever is pasted here. Capture from the session signed in now, paste it, then leave the portal alone — and finish one fleet before starting the other.' },
 
   { key: 'HOTEL_TOKEN', group: 'Hotel (ecosine.ae)', label: 'Operations manager bearer token', secret: true },
   { key: 'HOTEL_DOMAIN', group: 'Hotel (ecosine.ae)', label: 'x-domain header', secret: false },

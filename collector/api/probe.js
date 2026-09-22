@@ -28,6 +28,9 @@ import { loadSettings, get } from '../src/settings.js';
    that mistake once (see YANGO_SURFACES in src/sources/yango.js) and reported a
    dead cookie the collector was using successfully at that moment. */
 import { portalToken as boltPortalToken } from '../src/sources/bolt.js';
+/* And the same borrowing for Yango, for the same reason the comment above
+   gives — see the drift this closed, at the /api/probe/yango route below. */
+import { YANGO_SURFACES } from '../src/sources/yango.js';
 /* The fleet's clock, for the two default windows below. src/util.js owns the
    +04:00 arithmetic and every other server-side day key already goes through
    it or through Postgres's AT TIME ZONE 'Asia/Dubai'; a fourth private copy of
@@ -2166,18 +2169,38 @@ export function probeRoutes(app, { wrap }) {
       ? { len: v.length, head: v.slice(0, 4), tail: v.slice(-4) }
       : { len: 0, head: null, tail: null });
 
+    /* ── THIS PROBE WAS ASKING A PATH THE COLLECTOR DOES NOT READ ─────────
+       The comment above promises "one endpoint, the collector's own, with the
+       collector's own headers", and it was neither. It asked
+       /api/reports-api/v1/orders/list; the collector's only remaining console
+       surface is YANGO_SURFACES.console.summary, /api/reports-api/v2/summary/
+       drivers/list. That is the drift YANGO_SURFACES exists to stop, and
+       src/sources/yango.js already records what it cost the LAST time a check
+       picked its own path — it reported a dead cookie over an endpoint the
+       collector was using successfully at that moment.
+
+       It is not academic here. Measured 2026-09-22 from a network Yango's edge
+       does not refuse, with a live session: the v1 path this probe asked
+       answers HTTP 400 REQUEST_VALIDATION_ERROR — so on the day the edge block
+       lifts, this probe would still report a failure and be read as "the
+       console is still broken". The v2 path the collector actually reads
+       answered 200 with the fleet's real driver rows in the same pass.
+
+       The headers come from the same place for the same reason: X-API-Key is
+       gone from the console request because the console ignores it, and a
+       probe that still sent it would go on implying the key is in play. */
     const day = (n) => dubaiIso(new Date(Date.now() - n * 864e5));
-    const url = `${config.yango.base}/api/reports-api/v1/orders/list`;
+    const url = `${config.yango.base}${YANGO_SURFACES.console.summary}`;
     const body = JSON.stringify({
-      date_type: 'booked_at',
-      date_from: `${day(1)}T00:00:00+04:00`, date_to: `${day(0)}T23:59:59+04:00`,
+      date_from: day(7), date_to: day(1),
+      sort: { field: 'driver_id', direction: 'asc' },
     });
     const ask = async (withCookie) => {
       try {
         const { status, data } = await http(url, {
           method: 'POST', timeoutMs: 30000, retries: 0,
           headers: {
-            'X-Park-Id': park, 'X-API-Key': key,
+            'X-Park-Id': park,
             'content-type': 'application/json', 'Accept-Language': 'en',
             ...(withCookie && cookie ? { cookie } : {}),
           },
@@ -2214,7 +2237,12 @@ export function probeRoutes(app, { wrap }) {
       park_id_matches_the_cookie: parkInCookie ? (parkInCookie === park) : null,
       park_id_in_cookie: shape(parkInCookie || ''),
       cookie: { ...shape(cookie), account },
-      api_key: shape(key),
+      /* Reported, but explicitly NOT sent: measured 2026-09-22, this host
+         returns a byte-identical body with the real key, with a junk key and
+         with no key header at all. It is shown so an operator can see it is
+         set, and labelled so nobody reads its presence here as evidence that
+         it is in play on this host. */
+      api_key_not_sent_to_this_host: shape(key),
       with_cookie: withCookie,
       without_cookie: bare,
       /* The reading, spelled out, because the pair of status codes is the
@@ -2223,12 +2251,14 @@ export function probeRoutes(app, { wrap }) {
       reading: withCookie.status === 200
         ? 'this host is accepted — Yango is collecting'
         : withCookie.status === 403 && bare.status === 401
-          ? 'the park id clears the pre-auth gate and the session authenticates; a 403 after '
-            + 'that is entitlement or origin, not the cookie. Re-pasting the same account\u2019s '
-            + 'session cannot change it'
+          ? 'the park id clears the pre-auth gate and the session authenticates, so the 403 is '
+            + 'not about the cookie. Settled 2026-09-22 with the same cookie bytes: this '
+            + 'deployment gets 403 with an HTML page from a Yandex CDN edge while the identical '
+            + 'request from another network answers 200 with the fleet\u2019s driver rows. It is '
+            + 'this caller\u2019s address, and no re-paste changes an address'
           : withCookie.status === bare.status
             ? 'the same refusal arrives with no cookie at all, so the session is not what is '
-              + 'being rejected — check the park id and the API key'
+              + 'being rejected — check the park id. Not the API key: this host ignores it'
             : 'an unfamiliar pair; read the two bodies above',
       note: 'Shapes only. The park id is not a secret — the settings catalogue marks it so, and '
         + 'the collector prints it in full in its own refusal hint — and no value here can be '

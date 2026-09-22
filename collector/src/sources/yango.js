@@ -96,8 +96,28 @@ export const YANGO_SURFACES = Object.freeze({
     summary: '/api/reports-api/v2/summary/drivers/list',
   }),
 });
+/* ── THE CONSOLE IGNORES X-API-Key, AND SENDING IT MADE THE REFUSAL LIE ──
+   This used to carry `'X-API-Key': config.yango.apiKey` alongside the session
+   cookie, and the refusal branch below then named YANGO_API_KEY as one of the
+   things an operator should go and check. It cannot be: the console does not
+   read the header.
+
+   Measured 2026-09-22 against /api/reports-api/v2/summary/drivers/list with a
+   live session, three requests a second apart:
+
+     with the real key   → HTTP 200
+     with 'junk-not-a-real-key' → HTTP 200, byte-identical body (sha equal)
+     with no X-API-Key header at all → HTTP 200, byte-identical body (sha equal)
+
+   A credential a host ignores is a credential that cannot be the reason it
+   refused, and this file has already written two essays about what naming the
+   wrong credential costs — an operator spends the afternoon on an errand that
+   could never work while the real cause goes unnamed. So the console request
+   now carries only what the console actually reads: the park id, the session,
+   and the content negotiation. YANGO_API_KEY keeps its own host below, where
+   it is load-bearing and proven every run. */
 const headers = () => ({
-  'X-Park-Id': config.yango.parkId, 'X-API-Key': config.yango.apiKey,
+  'X-Park-Id': config.yango.parkId,
   'content-type': 'application/json', 'Accept-Language': 'en', cookie: config.yango.cookie,
 });
 /* The keyed host. No cookie, and deliberately no X-Park-Id: the park is named
@@ -153,9 +173,13 @@ const post = async (path, body) => {
 
          One extra request settles it, and it is worth one request: this
          path is only reached when the run is already lost. */
+      /* The SAME request minus the cookie — that is the whole experiment, and
+         it is only a clean one if the cookie is the only thing that differs.
+         The X-API-Key that used to be on both sides has gone from both, since
+         the host ignores it either way (measurement above headers()). */
       const bare = await http(`${config.yango.base}${path}`, {
         method: 'POST', body: JSON.stringify(body),
-        headers: { 'X-Park-Id': config.yango.parkId, 'X-API-Key': config.yango.apiKey,
+        headers: { 'X-Park-Id': config.yango.parkId,
           'content-type': 'application/json', 'Accept-Language': 'en' },
       }).catch(() => null);
       const cookieIsNotIt = bare && bare.status === r.status;
@@ -167,7 +191,11 @@ const post = async (path, body) => {
       const bareSays = bare ? `without a cookie: HTTP ${bare.status}` : 'the cookie-free probe did not complete';
       hint = cookieIsNotIt
         ? ` — the same refusal arrives with no cookie at all, so the session is not what is being rejected;`
-          + ` check YANGO_PARK_ID (${config.yango.parkId}) and YANGO_API_KEY`
+          /* YANGO_API_KEY is deliberately NOT named here any more: this host
+             ignores the header entirely (measured, see above headers()), so
+             sending somebody to re-paste it is the exact mistake the rest of
+             this block exists to stop making. */
+          + ` check YANGO_PARK_ID (${config.yango.parkId}) — this host does not read YANGO_API_KEY`
         : bare
           /* The sibling branch's advice was the very mistake this block was
              written to end, one line further down.
@@ -209,12 +237,15 @@ const post = async (path, body) => {
              fix, and they would have spent the afternoon fixing them. */
           ? ` — with no cookie this call answers HTTP ${bare.status} instead, so the session IS`
             + ` being read and authenticates${yangoAccount() ? ` as ${yangoAccount()}` : ''};`
-            + ` a 403 after that is about entitlement, not the session — either this account is`
-            + ` not on park ${config.yango.parkId}, or YANGO_PARK_ID or YANGO_API_KEY names a`
-            + ' park it cannot see, or the refusal is of this HOST rather than of any credential:'
-            + ' the same call with the same three credentials has been measured returning 200'
-            + ' from a different network on the same day. Re-pasting the same account\u2019s'
-            + ' cookie will not change any of the four'
+            + ' and a 403 after that is NOT about any credential. This was settled on'
+            + ' 2026-09-22 with the strongest control there is — the SAME COOKIE BYTES.'
+            + ' This deployment holds the session captured that morning and gets 403 with an'
+            + ' HTML page from a Yandex CDN edge; the identical cookie, park id, path, method'
+            + ' and body sent from another network the same minute answers HTTP 200 with the'
+            + ' fleet\u2019s real driver rows. Nothing about the credential differs between'
+            + ' those two calls — only where the call comes from, and no paste changes a'
+            + ' caller\u2019s address. Re-capturing this cookie cannot help; what can is'
+            + ' egressing this app from an address Yango\u2019s edge does not refuse'
           : ' — and the cookie-free comparison did not complete, so which credential is being'
             + ' refused is not yet established';
       /* The cookie is recorded as WORKING when it demonstrably worked.
@@ -286,9 +317,16 @@ const post = async (path, body) => {
             ? ' The same refusal arrives with no session at all, so nothing here says what is'
               + ' being rejected — and it is not the park id, which fleet-api.yango.tech accepts'
               + ' on every run with this same value.'
-            : ' The park id and API key are proven every run by fleet-api.yango.tech,'
-              + ' which serves trips, the roster and the cars; only the weekly driver'
-              + ' aggregate and the payment ledger are behind this host.'),
+            /* The ledger came off this host on 2026-09-16 — it is
+               /v2/parks/transactions/list on the key host and has been
+               collecting since. Saying it is still blocked here overstates
+               what is missing, and an overstated gap is the same lie as an
+               understated one. YANGO_SURFACES.console is now one path. */
+            : ' The park id is proven every run by fleet-api.yango.tech, which serves trips,'
+              + ' the roster, the cars and the payment ledger; the weekly per-driver aggregate'
+              + ' is the only thing left behind this host, and it is refused by an edge in'
+              + ' front of the API rather than by any credential — the same request from'
+              + ' another network, with this same cookie, has been measured answering 200.'),
       });
     }
     throw new Error(`yango ${path} refused: HTTP ${r.status}${hint}`);
