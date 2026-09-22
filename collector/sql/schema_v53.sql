@@ -1,4 +1,4 @@
--- ── 130 people who were on the roster more than once, folded onto one key each ──
+-- ── 131 people who were on the roster more than once, folded onto one key each ──
 -- ---------------------------------------------------------------------------
 -- person_key is what every surface in this product groups people by, and it
 -- was the folded NAME and nothing else: lowercase, collapse runs of
@@ -37,6 +37,9 @@
 --
 -- The register, as it stands:
 --
+-- 67483c64055e070d79100114 (hotel "Sana Ullah Sher Zamin")
+--   -> b7511fa7-cbdf-4373-8539-c7ae020c31e2 (uber "Sanaullah Sher Zamin") = 'sanaullah sher zamin'
+--   verified 2026-09-22 on plate L20048
 -- 7fc8da91fc4a44c185e8d6d918db3e6b (yango "Khalil Aliyan")
 --   -> 5f16534e-68be-451b-b057-3e3d948e868b (uber "Aliyan khalil") = 'aliyan khalil'
 --   verified 2026-09-03 on plate L36397
@@ -477,6 +480,7 @@ DECLARE
   t   record;
   v   record;
   tpl text := $tpl$CASE driver_ext_id
+         WHEN '67483c64055e070d79100114' THEN 'sanaullah sher zamin'
          WHEN '7fc8da91fc4a44c185e8d6d918db3e6b' THEN 'aliyan khalil'
          WHEN 'ab2aec60-56ff-48e2-85c0-3591f6f29aa3' THEN 'moses arthur'
          WHEN '67483c64055e070d7910010a' THEN 'shehzad ahmad ghulam muhammad'
@@ -675,7 +679,7 @@ BEGIN
          -- …and carries as many merges as this register has, so a column built
          -- from a SUPERSET that happens to end on the same pair still rebuilds.
          AND (length(c.generation_expression)
-              - length(replace(c.generation_expression, 'WHEN ', ''))) / 5 = 167);
+              - length(replace(c.generation_expression, 'WHEN ', ''))) / 5 = 168);
     need := true;
   END LOOP;
   IF NOT need THEN RETURN; END IF;

@@ -5381,3 +5381,48 @@ success message; ask for a fenced block explicitly or omit `--extract`.
   120 periods spanning 2026-05-26..09-22** — AED 36,224.05 (45%) short of the
   same person's real window figure. The INCOME tile is NOT affected (it sums in
   SQL, unlimited). Two different defects — do not conflate them.
+
+* **THE ACCOUNT FOLD DEPENDED ON WHICH ACCOUNT YOU ENTERED BY.**
+  `resolve()` (`api/driver_routes.js`) ran `mergedIds` over the seeds and THEN
+  `linkedIds` over the result — one pass of each — so an id the LINK table
+  introduces was never offered back to the REGISTER. The two sources chain, and
+  a single pass only reads them in one order.
+  Measured 2026-09-22, person 249: the register pairs hotel `67483c64…012f`
+  with uber `ba5e864f…`, and the link table holds `{hotel, bolt}` separately.
+  `?id=<uber>` returned four accounts; **`?person=249` — the canonical address,
+  which seeds on the lowest-platform account — returned two**, hiding 198.4
+  online hours and 140 trips from that person's own page.
+  **The broken direction is entering from the ALIAS side.** Seeded on uber the
+  old code works (register first, then link). Seeded on bolt it returns
+  `[bolt, hotel]` and stops. A test that only enters by the register side
+  **passes against the unfixed code** — measured, that exact mistake was made
+  here first. A fixture must use the link-alias account as its door, and that
+  account needs a `driver_compliance` row or `resolve()` 404s it for want of a
+  name.
+
+* **`api/identity_links.js` CACHES THE LINK TABLE FOR 30 SECONDS** (`TTL_MS`).
+  A link row written after a suite's first request is invisible to every
+  request inside that window. Seed link fixtures BEFORE the first HTTP call, or
+  the assertion fails for a reason unrelated to what it tests.
+
+* **REFUSED HAS TWO KINDS OF ENTRY AND THEY ARE NOT INTERCHANGEABLE.** Two are
+  refused on MEASUREMENT — 241 and 77 simultaneous trips in two different cars
+  — and no ruling should move them, because the data says they are two men. The
+  third (Sana Ullah Sher Zamin) was refused on the ABSENCE of measurement: the
+  hotel record carried 0 trips, 0 custody rows and 0 money, so no simultaneity
+  could be computed in either direction, and its own entry said "Settled by a
+  phone call, not by this file." The operator ruled on 2026-09-22 and it became
+  `HAND_MERGES[0]`. **When reading REFUSED, check which kind an entry is before
+  proposing anything about it.**
+
+* **THE SPINE'S PHONE RULE IS A THIRD, UNGUARDED COPY.** `src/persons.js`
+  (`PHONE_PAIRS_SQL`) merges any two `driver_compliance` rows sharing a 9-digit
+  phone tail, with no `REFUSED`/`PENDING` guard and no cross-platform check,
+  while `src/identity_link.js` has both. Its own comment claims "the two rules
+  cannot disagree about what a phone proves"; that sentence is false. It merged
+  Sana's refused pair (now moot — the pair is a merge) and still merges p181
+  Tariq Afzal, a PENDING pair held back for a contradiction on 2026-06-10.
+  **Unresolved. There is also no detach path shipped at all:** `detached_at` is
+  read in four places and written by nothing in `api/`, `src/` or `bin/`, and
+  the comment at `src/persons.js:49` points at an `api/person_merge_routes.js`
+  route that does not exist.

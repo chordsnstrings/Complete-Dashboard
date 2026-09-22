@@ -47,14 +47,14 @@ const roster = keysIn('FROM_ROSTER');
 const people = new Set(MERGES.map((m) => m.key)).size;
 
 console.log('\nthe register is the size both documents say it is');
-check('MERGES is 130 entries', MERGES.length === 130, String(MERGES.length));
-check('…over 124 people', people === 124, String(people));
+check('MERGES is 131 entries', MERGES.length === 131, String(MERGES.length));
+check('…over 125 people', people === 125, String(people));
 check('…and 5 are deliberately held back', PENDING.length === 5, String(PENDING.length));
 check('the three sweeps add up to the applied total',
   hand.length + (cand.length - PENDING.length) + roster.length === MERGES.length,
   `${hand.length} + ${cand.length - PENDING.length} + ${roster.length}`);
 check('and each sweep is the size the header states',
-  hand.length === 3 && cand.length === 50 && roster.length === 82,
+  hand.length === 4 && cand.length === 50 && roster.length === 82,
   `${hand.length} / ${cand.length} / ${roster.length}`);
 check('six keys carry more than one entry, which mergedIds() unions',
   MERGES.length - people === 6, String(MERGES.length - people));
@@ -64,9 +64,10 @@ check('the register header states the applied total',
   /a hundred and thirty\s+entries\s+over a hundred and twenty-four people/.test(src)
   || /hundred and thirty[\s\S]{0,80}hundred and twenty-four/.test(src), 'api/identity_map.js');
 check('…and the roster sweep size', /·\s*82 in FROM_ROSTER/.test(src));
+check('…and the hand-merge size', /·\s*4 in HAND_MERGES/.test(src));
 check('CLAUDE.md states the same pair',
-  /applies 130 entries over 124 people/.test(claude), 'CLAUDE.md');
-check('…the same sweep split', /3 hand-checked, 45 from a shared-custody sweep, 82 on a phone/.test(claude));
+  /applies 131 entries over 125 people/.test(claude), 'CLAUDE.md');
+check('…the same sweep split', /4 hand-checked, 45 from a shared-custody sweep, 82 on a phone/.test(claude));
 check('…the same held-back count', /holds back 5 that carry a\s*\n?simultaneous trip/.test(claude));
 check('…and the same duplicate count', /six people are\s*\n?on the list twice/.test(claude));
 

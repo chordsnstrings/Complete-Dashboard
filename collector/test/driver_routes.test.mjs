@@ -63,6 +63,44 @@ for (let i = 0; i < 12; i++)
 
 await q(`INSERT INTO driver_compliance (platform,driver_ext_id,fleet_id,full_name,phone,licence_no,licence_expires,state)
          VALUES ('yango',$1,'ecosine','Amina Rashid Rashid','+9715000','DL-77','2026-11-30','active')`, [YANGO]);
+
+/* SEEDED HERE, NOT BESIDE ITS ASSERTIONS, because api/identity_links.js caches
+   the link table for 30 seconds (TTL_MS) and this suite makes many requests
+   before reaching the fold test. A link written later is invisible to every
+   request inside that window, and the assertion would fail for a reason that
+   has nothing to do with what it is testing. See "the account fold closes"
+   below for what these three ids are and why they are REAL register ids. */
+const HOTEL = '67483c64055e070d7910012f';   // register: keep  (hotel)
+const UBERX = 'ba5e864f-6035-469c-97a1-db3e4a087385'; // register: merge (uber)
+const BOLTX = 'b-chain';                    // link table only, -> HOTEL
+
+/* ONE driver_compliance row, for the LINK-ALIAS account only.
+   ─────────────────────────────────────────────────────────────────────────
+   It has to exist because resolve() builds a profile from a name it finds in
+   trip / driver_compliance / driver_performance, and a link-only id has none,
+   so it answers 404 and cannot be used as a door. And it has to be THIS id,
+   because the broken direction is entering from the alias side: the old code
+   ran mergedIds over the seeds and THEN linkedIds over the result, so seeded
+   on bolt it returned [bolt] from the register, added hotel from the link, and
+   never offered hotel back to the register — uber was unreachable. Seeded on
+   uber it worked, which is why a fixture that only tests that door proves
+   nothing (measured: the revert passes).
+
+   HOTEL and UBERX deliberately get NO compliance row, so the name search
+   cannot join them and the closure is the only thing that can. This adds
+   exactly one person to the directory; the count below moves 2 -> 3. */
+await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, state)
+         VALUES ('bolt',$1,'Chain Alias Person','active')`, [BOLTX]);
+/* The link that chains: bolt folds INTO hotel, and the register then pairs
+   hotel with uber. Two hops from bolt to uber. */
+await q(`INSERT INTO driver_identity_link
+           (alias_ext_id, alias_platform, alias_name, canonical_ext_id,
+            canonical_platform, canonical_name, canonical_key, basis, evidence)
+         VALUES ($1,'bolt','Mohammed Alsous',$2,'hotel','MOHAMMED A A ALSOOS',
+                 'mohammed alsoos','shared_phone','synthetic fixture for the fold closure')
+         ON CONFLICT DO NOTHING`, [BOLTX, HOTEL]);
+
+
 await q(`INSERT INTO driver_performance (platform,fleet_id,driver_ext_id,driver_name,plate,period_start,period_end,
            trips,hours_online,hours_on_trip,acceptance_rate,cancellation_rate,earnings,cash_earnings,rating)
          VALUES ('uber','ecosine',$1,'Amina Rashid','L46174','2026-08-13','2026-08-13',8,9.5,6.4,0.91,0.04,410,0,4.87)`,
@@ -245,7 +283,9 @@ check('and says how many there are, so a 400-row cap cannot read as the record',
 
 /* ── directory ──────────────────────────────────────────────────────────── */
 const dir = (await get(`/api/drivers/directory?${W}`)).body;
-check('directory lists people, not accounts', dir.length === 2, String(dir.length));
+/* 3, not 2: the fold fixture above adds one compliance-only person (the
+   link-alias account that the closure test needs as a door). */
+check('directory lists people, not accounts', dir.length === 3, String(dir.length));
 const amina = dir.find((r) => /Amina/.test(r.driver_name));
 check('directory folds cross-platform trips', amina.trips === 47, String(amina?.trips));
 check('directory carries every id for the person', amina.ids.length === 2, String(amina?.ids?.length));
@@ -432,6 +472,61 @@ console.log('\npayout coverage is measured over the days the channel worked');
   mixServer.close(); await mix.close();
 }
 
+/* ── THE FOLD MUST NOT DEPEND ON WHICH ACCOUNT YOU ENTER BY ────────────────
+   resolve() ran mergedIds over the seeds and THEN linkedIds over the result,
+   one pass of each. An id the LINK table introduces was therefore never
+   offered back to the REGISTER, so a person whose two sources chain — link
+   reaches an id, and the register pairs THAT id with a third — was only whole
+   from one direction.
+
+   Measured on production 2026-09-22, person 249 (Mohammed A A Alsoos): the
+   register pairs hotel 67483c64…012f with uber ba5e864f…, and the link table
+   holds {hotel, bolt} separately. Entered on bolt — the canonical account,
+   which is exactly what `?person=` uses — mergedIds(bolt) returns [bolt],
+   linkedIds adds hotel, and hotel is the id the register pairs with uber. It
+   arrived one step after the register pass had ended. So ?id=<uber> returned
+   four accounts and ?person=249 returned two, with 198.4 online hours and 140
+   trips missing from that person's own page.
+
+   REAL REGISTER IDS, deliberately. docs/COVERAGE.md records the trap: "A
+   FIXTURE MUST USE A REAL REGISTER ID TO REPRODUCE IT" — invented ids are not
+   in api/identity_map.js, mergedIds returns them unchanged, and the chain this
+   is about never forms. */
+console.log('\nthe account fold closes, whichever door it is entered by');
+{
+  const HOTEL = '67483c64055e070d7910012f';
+  const UBERX = 'ba5e864f-6035-469c-97a1-db3e4a087385';
+  const BOLTX = 'b-chain';
+  const seen = {};
+  /* Only the two doors that HAVE a record. `b-chain` exists in the link table
+     and nowhere else, and resolve() builds a profile from a name it finds in
+     trip / driver_compliance / driver_performance — a link-only id has none,
+     so it answers 404. That is pre-existing and correct; it is not what this
+     block is about. */
+  for (const [door, ext] of [['bolt', BOLTX], ['hotel', HOTEL], ['uber', UBERX]]) {
+    const r = await get(`/api/driver/profile?id=${encodeURIComponent(ext)}`);
+    seen[door] = ((r.body && r.body.ids) || []).slice().sort();
+  }
+  /* THE TWO-HOP CHAIN, which is the whole defect: uber pairs with hotel in the
+     REGISTER, and hotel pairs with bolt in the LINK table. One pass of each,
+     register first, never offered hotel back to the link table when entered
+     from uber — nor bolt back to the register when entered from hotel. */
+  /* THE DIRECTION THAT WAS BROKEN. Seeded on the link alias, the register
+     partner is two hops away — link to hotel, register to uber — and one pass
+     of each never made the second hop. */
+  check('entering by the LINK ALIAS reaches the register partner, two hops away',
+    seen.bolt.includes(UBERX), JSON.stringify(seen.bolt));
+  check('entering by the link canonical reaches the register partner',
+    seen.hotel.includes(UBERX), JSON.stringify(seen.hotel));
+  check('all three doors return the SAME account set',
+    JSON.stringify(seen.bolt) === JSON.stringify(seen.hotel)
+    && JSON.stringify(seen.hotel) === JSON.stringify(seen.uber), JSON.stringify(seen));
+  check('…and that set is all three accounts, not two',
+    seen.bolt.length === 3, JSON.stringify(seen.bolt));
+}
+
+
 server.close();
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

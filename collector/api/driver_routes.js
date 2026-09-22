@@ -296,10 +296,42 @@ export function driverScope({ q, wrap }) {
        partner id is what carries a record the name search above cannot reach:
        the whole point is that the two channels file different names, so
        matching on the canonical name finds one side and not the other. */
-    const ids = [...new Set([...alias.map((a) => a.driver_ext_id), ...(id ? [id] : [])]
-      .filter(Boolean)
-      .flatMap(mergedIds)
-      .flatMap((x) => linkedIds(links, x)))];
+    /* A CLOSURE, NOT ONE PASS OF EACH — because the two sources feed each
+       other and a single pass only ever reads them in one order.
+       ─────────────────────────────────────────────────────────────────────
+       This ran `mergedIds` over the seeds and then `linkedIds` over that
+       result, so an id the LINK table introduces was never offered back to
+       the REGISTER. Whether a person's accounts were all reachable therefore
+       depended on which one you happened to enter by.
+
+       Measured on production 2026-09-22, person 249 (Mohammed A A Alsoos):
+       the register pairs uber with hotel, and the link table holds two
+       separate components, {hotel, bolt} and {uber, yango}. Seeded on bolt —
+       which is the canonical account, lowest platform then lowest id, so it
+       is exactly what `?person=` uses — `mergedIds(bolt)` returns [bolt],
+       `linkedIds(bolt)` adds hotel, and hotel is the id the register pairs
+       with uber. It arrived one step after the register pass had finished.
+       So `?id=<uber>` and `?id=<hotel>` returned all four accounts while
+       `?person=249`, the canonical address, returned two — and 198.4 online
+       hours and 140 trips were missing from that person's own page.
+
+       Iterating to a fixed point costs one extra pass in the common case
+       (nothing new is found, the loop ends) and makes the answer independent
+       of the entry door, which is the only defensible behaviour: a person is
+       the same person whichever of their accounts you name. src/persons.js
+       already folds its components this way; this is the read side catching
+       up with the write side. */
+    const seeds = [...alias.map((a) => a.driver_ext_id), ...(id ? [id] : [])].filter(Boolean);
+    const fold = new Set(seeds);
+    for (let pass = 0; pass < 8; pass += 1) {
+      const before = fold.size;
+      for (const x of [...fold]) {
+        for (const y of mergedIds(x)) fold.add(y);
+        for (const y of linkedIds(links, x)) fold.add(y);
+      }
+      if (fold.size === before) break;
+    }
+    const ids = [...fold];
     if (!ids.length) return null;
 
     /* Two different lists, and conflating them was a bug in both directions.

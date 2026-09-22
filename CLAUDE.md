@@ -54,8 +54,8 @@ register rebuilds instead of being skipped. Edit the register, run
 `node bin/gen-schema-v53.mjs`, and never hand-edit the .sql.
 
 **Who is one person lives in `api/identity_map.js`,** a hand-reviewed LIST of
-verified pairs — never a name rule. It applies 130 entries over 124 people
-(3 hand-checked, 45 from a shared-custody sweep, 82 on a phone number the
+verified pairs — never a name rule. It applies 131 entries over 125 people
+(4 hand-checked, 45 from a shared-custody sweep, 82 on a phone number the
 roster filed against both records) and deliberately holds back 5 that carry a
 simultaneous trip in two cars. `docs/COVERAGE.md` carries the measurements.
 `mergedIds`/`canonicalName` union across every entry on a key: six people are

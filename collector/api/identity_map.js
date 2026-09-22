@@ -15,7 +15,9 @@
    for long enough that CLAUDE.md copied the wrong pair, and a register whose
    own header misdescribes it is a register nobody trusts to re-read:
 
-     ·  3 in HAND_MERGES, checked one pair at a time against production.
+     ·  4 in HAND_MERGES, checked one pair at a time against production. The
+       fourth is a pair this file once REFUSED as undecidable and the operator
+       ruled on, 2026-09-22.
      · 50 in CANDIDATES, from the shared-history sweep — same cars, same days,
        trips interleaving inside the day rather than following one another.
        Forty-five are clean and applied; the five with a contradiction are
@@ -109,6 +111,34 @@ export const foldName = (s) => String(s == null ? '' : s)
    They are the oldest and best-evidenced entries here and they keep their own
    name so a reader can see which merges predate the roster rule. */
 const HAND_MERGES = Object.freeze([
+  {
+    key: 'sanaullah sher zamin',
+    keep:  { id: 'b7511fa7-cbdf-4373-8539-c7ae020c31e2', name: 'Sanaullah Sher Zamin',  channel: 'uber' },
+    merge: { id: '67483c64055e070d79100114',            name: 'Sana Ullah Sher Zamin', channel: 'hotel' },
+    plate: 'L20048',
+    verified: '2026-09-22',
+    evidence:
+      'RULED BY THE OPERATOR, which is what its own refusal asked for. This pair '
+      + 'sat in REFUSED with the verdict "UNDECIDABLE, which is not a merge… '
+      + 'Settled by a phone call, not by this file" — the hotel record carries 0 '
+      + 'trips, 0 custody rows and 0 money, so neither a shared vehicle-day nor a '
+      + 'simultaneity could be measured in either direction, and "Sher Zamin" is a '
+      + 'patronymic two brothers would file identically. Nothing in the data could '
+      + 'decide it. On 2026-09-22 the operator did: "sana is active and all the '
+      + 'accounts are sana." '
+      + 'What it unblocks, measured on production the same day: the uber account '
+      + 'holds 240.5 online hours over 19 days and 190 trips in the trailing 31 '
+      + 'days, and every one of them was absent from person 51\'s page — which '
+      + 'rendered an em dash under the sentence "no channel this driver works '
+      + 'publishes availability", while listing the uber account two lines below. '
+      + 'The spine had already joined the pair through the shared-phone rule in '
+      + 'src/persons.js (both records file +971569637741); this entry makes the '
+      + 'register agree with the spine rather than contradict it.',
+    caveat:
+      'The evidence is a human ruling, not a measurement, and it is recorded as '
+      + 'such. If the hotel record ever starts carrying trips, a simultaneity '
+      + 'check becomes possible for the first time and should be run.',
+  },
   {
     key: 'aliyan khalil',
     keep:  { id: '5f16534e-68be-451b-b057-3e3d948e868b', name: 'Aliyan khalil', channel: 'uber' },
@@ -212,17 +242,21 @@ export const REFUSED = Object.freeze([
     why: '77 simultaneous trips on two plates; both Uber, both active since '
        + '2025-04-05. Pinned at the UI rule by test/roster_twin.test.mjs too.',
   },
-  {
-    a: { id: 'b7511fa7-cbdf-4373-8539-c7ae020c31e2', name: 'Sanaullah Sher Zamin',  plate: 'L20048' },
-    b: { id: '67483c64055e070d79100114',            name: 'Sana Ullah Sher Zamin', plate: null },
-    why: 'UNDECIDABLE, which is not a merge. The hotel record has 0 trips, 0 '
-       + 'custody rows and 0 money, so no shared vehicle-day and no simultaneity '
-       + 'can be measured either way; the only identifier on it (Emirates ID '
-       + '784-2000-3168092-7) has no counterpart to compare. "Sher Zamin" is a '
-       + 'patronymic and two brothers would file identically. Settled by a phone '
-       + 'call, not by this file.',
-  },
 ]);
+
+/* SANA ULLAH SHER ZAMIN WAS HERE, AND IS NOW A MERGE.
+   ─────────────────────────────────────────────────────────────────────────
+   Its entry read "UNDECIDABLE, which is not a merge… Settled by a phone call,
+   not by this file." That is exactly what happened: on 2026-09-22 the operator
+   ruled — "sana is active and all the accounts are sana". The pair moved to
+   HAND_MERGES with that ruling as its evidence.
+
+   Worth keeping in view, because it is the shape this list is FOR: the two
+   entries left above are refused on MEASUREMENT — 241 and 77 simultaneous
+   trips in two cars — and no ruling should move them, because the data says
+   they are two men. This one was refused on the ABSENCE of measurement, which
+   only a human could settle. The difference between those two kinds of refusal
+   is the whole reason this file is a list and not a rule. */
 
 /* ── fifty more pairs: one man filed twice, verified and NOT YET APPLIED ─────
    ──────────────────────────────────────────────────────────────────────────
