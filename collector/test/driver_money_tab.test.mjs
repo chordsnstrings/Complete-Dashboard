@@ -213,8 +213,41 @@ console.log('\na driver who has no record — which is most of them');
   check('no figure is printed for them at all',
     !(await page.$('[data-panel="driver-money"] .kpis')),
     'a KPI row was rendered for a driver with no record');
-  check('and no register table is drawn to look like an empty one',
-    !(await page.$('[data-panel="driver-money-register"] table')));
+
+  /* AND THE STATEMENT STILL RENDERS. This is the case the whole panel exists
+     for and it had no test, which is how it shipped broken: the page took an
+     early `return` on an empty LEDGER, and a statement is mostly TRIPS.
+     Measured on production 2026-09-22 — person 202 has zero ledger rows and
+     241 statement lines (134 trips, 107 commissions, AED 11,461.61 of fares)
+     and the page showed them none of it, saying "Nothing was recorded against
+     this driver", which is true of the ledger and false of the page. Every
+     browser test passed, because this fixture gated the register on having a
+     ledger record, exactly as the page did. Both are fixed. */
+  await page.waitForSelector('[data-panel="driver-money-register"] table', { timeout: 20000 })
+    .catch(() => null);
+  const stTable = await page.$('[data-panel="driver-money-register"] table');
+  check('a driver with NO ledger record still gets their statement',
+    !!stTable, 'the statement was swallowed by the empty-ledger branch');
+  const stRows = stTable
+    ? await page.$$eval('[data-panel="driver-money-register"] tbody tr', (r) => r.length) : 0;
+  check('with their trips in it, not an empty table', stRows > 0, `${stRows} rows`);
+  check('and the panel says the register carries work and no recorded money',
+    /carries their work and no recorded money/.test(
+      await page.$eval('[data-panel="driver-money-register"]', (e) => e.innerText)),
+    (await page.$eval('[data-panel="driver-money-register"]', (e) => e.innerText)).slice(0, 200));
+  check('both running balances read absent, never zero',
+    !/AED 0\.00/.test(await page.$eval('[data-panel="driver-money-register"]',
+      (e) => e.innerText)),
+    'a balance printed as AED 0.00 for a driver whose position nobody has counted');
+  /* THIS ASSERTION USED TO READ "no register table is drawn to look like an
+     empty one", and it was right while the panel listed only ledger entries:
+     an empty table then meant nothing to show. It is wrong now. The panel is a
+     STATEMENT, its rows are mostly trips, and a driver with no ledger record
+     has plenty to show — so the table must be drawn, and what must NOT be
+     drawn is a ledger figure for somebody who has no ledger. */
+  const regTxt = await page.$eval('[data-panel="driver-money-register"]', (e) => e.innerText);
+  check('and no ledger BOOK total is printed for a driver with no ledger',
+    !/Advances AED|Deductions AED|Pay AED/.test(regTxt), regTxt.slice(0, 220));
   await ctx.close();
 }
 

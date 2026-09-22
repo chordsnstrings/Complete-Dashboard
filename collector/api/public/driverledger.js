@@ -122,7 +122,15 @@ export async function renderDriverLedger(root, id, prof) {
       + 'a driver with nothing recorded has had no advance this system knows of, which is not '
       + 'the same as one whose advances have all been repaid. Recording anything against them '
       + '— on Advances, Cash handed in, Salary or Starting balances — opens their record.'));
-    regPanel.body.append(empty(el('div'), 'No entry has ever been made against this driver.'));
+    /* AND THE STATEMENT STILL RENDERS BELOW. This used to `return` here, which
+       was right when the panel held only ledger entries and wrong the moment it
+       became a statement: the statement is mostly TRIPS, and a driver with no
+       ledger record still drove. Measured on production 2026-09-22 — person 202
+       has zero ledger rows and 241 statement lines (134 trips, 107 commission),
+       and this early return showed them none of it. */
+    regPanel.body.append(note('No entry has ever been made against this driver, so the register '
+      + 'below carries their work and no recorded money.'));
+    renderStatement();
     return;
   }
 
@@ -182,93 +190,156 @@ export async function renderDriverLedger(root, id, prof) {
        outstanding balance and no entry in the chosen window lands here, and an
        empty list under a tile reading AED 3,500 is a contradiction unless the
        page says which of the two the window moved. */
-    regPanel.body.append(note(`Nothing was recorded against this driver in ${windowLabel()}. `
+    regPanel.body.append(note(`Nothing was RECORDED against this driver in ${windowLabel()}. `
       + 'The figures above are unaffected — they are a position as it stands now, not a total '
       + 'over these dates, so a balance with no movement in this window is a balance that did '
-      + 'not move, not one that is not there.', 'warn'));
+      + 'not move, not one that is not there. Their work over these dates is below.', 'warn'));
+    renderStatement();
     return;
   }
 
-  /* THE STATEMENT, and the two things about it that are not a table.
-     ─────────────────────────────────────────────────────────────────────
-     TWO RUNNING BALANCES, NOT ONE. A bank statement has a single balance
-     because a bank account is a single relationship. This one is two: what
-     the driver is HOLDING (cash fares up, hand-ins down — the operator's rule
-     of 2026-09-22, "cash trips are cash to the driver unless they give it to
-     the company") and what they OWE (advances and deductions up, repayments
-     down). Netting them would read an honest driver carrying AED 400 of fares
-     as someone in debt for it, and the four books exist precisely so that
-     cannot happen.
+  /* THE STATEMENT IS A FUNCTION, because three paths reach it.
+     ─────────────────────────────────────────────────────────────────
+     It used to be inline at the bottom, after two early returns that fire
+     when the LEDGER is empty — no record at all, or no entry in this
+     window. That was right while this panel held only ledger entries and
+     wrong the moment it became a statement, because a statement is mostly
+     TRIPS and a driver with no ledger record still drove.
 
-     AND A COLUMN THAT IS NOT A BALANCE AT ALL. The fare is what the RIDER was
-     charged. It is shown because it happened, never summed into either
-     balance, and the caption says so — three different figures on this product
-     answer to the word "earned" and none of them is a column of fares. */
-  const t = reg.totals;
-  if (!st || st.absent_reason) {
-    regPanel.body.append(note(st?.absent_reason
-      || 'the statement could not be read for this driver.', 'warn'));
-  } else {
-    const o = st.opening || {};
-    /* THE OPENING IS WHAT MAKES A BALANCE A BALANCE, and it is stated before
-       the lines rather than discovered at the bottom of them. Without one the
-       running column is a running CHANGE wearing a balance's name, so it is
-       rendered absent with the reason rather than started from an assumed
-       nought. */
-    const openBits = [];
-    if (o.cash != null) openBits.push(`Cash in hand ${aed(o.cash)} as of ${esc(o.cash_on)}`);
-    else openBits.push('Cash in hand — not counted');
-    if (o.owed != null) openBits.push(`Owed ${aed(o.owed)} as of ${esc(o.owed_on)}`);
-    else openBits.push('Owed — nothing carried in');
-    regPanel.body.append(el('p', 'cap', `Opening: ${openBits.join(' · ')}.`));
-    if (o.cash_absent_reason) regPanel.body.append(note(o.cash_absent_reason));
-    if (o.owed_absent_reason) regPanel.body.append(note(o.owed_absent_reason));
+     MEASURED ON PRODUCTION 2026-09-22, which is the only reason this was
+     found: person 202 has ZERO ledger rows and 241 statement lines — 134
+     trips and 107 per-trip commissions, over AED 11,461.61 of fares. The
+     page rendered none of it and said "Nothing was recorded against this
+     driver", which is true of the ledger and false of the page. Every
+     browser test passed, because the mock fixture has ledger entries and
+     never took either early path. */
+  /* A DECLARATION, NOT A const ARROW, and deliberately. Two of the three call
+     sites are ABOVE this point — the early returns for an empty ledger — and a
+     const arrow is in its temporal dead zone there: the page would have thrown
+     "Cannot access 'renderStatement' before initialization" on exactly the
+     drivers this refactor exists to serve. A function declaration hoists to the
+     top of renderDriverLedger, so all three sites reach it. */
+  function renderStatement() {
+    /* THE STATEMENT, and the two things about it that are not a table.
+       ─────────────────────────────────────────────────────────────────────
+       TWO RUNNING BALANCES, NOT ONE. A bank statement has a single balance
+       because a bank account is a single relationship. This one is two: what
+       the driver is HOLDING (cash fares up, hand-ins down — the operator's rule
+       of 2026-09-22, "cash trips are cash to the driver unless they give it to
+       the company") and what they OWE (advances and deductions up, repayments
+       down). Netting them would read an honest driver carrying AED 400 of fares
+       as someone in debt for it, and the four books exist precisely so that
+       cannot happen.
 
-    if (st.truncated) {
-      regPanel.body.append(note(`Showing ${st.shown} of ${st.of} lines. The totals below are `
-        + 'over all of them, not over this page.', 'warn'));
+       AND A COLUMN THAT IS NOT A BALANCE AT ALL. The fare is what the RIDER was
+       charged. It is shown because it happened, never summed into either
+       balance, and the caption says so — three different figures on this product
+       answer to the word "earned" and none of them is a column of fares. */
+    if (!st || st.absent_reason) {
+      regPanel.body.append(note(st?.absent_reason
+        || 'the statement could not be read for this driver.', 'warn'));
+    } else {
+      const o = st.opening || {};
+      /* THE OPENING IS WHAT MAKES A BALANCE A BALANCE, and it is stated before
+         the lines rather than discovered at the bottom of them. Without one the
+         running column is a running CHANGE wearing a balance's name, so it is
+         rendered absent with the reason rather than started from an assumed
+         nought. */
+      const openBits = [];
+      if (o.cash != null) openBits.push(`Cash in hand ${aed(o.cash)} as of ${esc(o.cash_on)}`);
+      else openBits.push('Cash in hand — never counted, so only what they TOOK is shown');
+      if (o.owed != null) openBits.push(`Owed ${aed(o.owed)} as of ${esc(o.owed_on)}`);
+      else openBits.push('Owed — nothing carried in');
+      regPanel.body.append(el('p', 'cap', `Opening: ${openBits.join(' · ')}.`));
+      if (o.cash_absent_reason) {
+        regPanel.body.append(note(`${o.cash_absent_reason} What IS measured is the Cash taken `
+          + 'column: every cash fare on record went into this driver\'s hand, so that running '
+          + 'figure is a ceiling on what they could still be holding. It comes down only when a '
+          + 'hand-in is recorded against them.'));
+      }
+      if (o.owed_absent_reason) regPanel.body.append(note(o.owed_absent_reason));
+
+      if (st.truncated) {
+        regPanel.body.append(note(`Showing ${st.shown} of ${st.of} lines. The totals below are `
+          + 'over all of them, not over this page.', 'warn'));
+      }
+
+      regPanel.body.append(tableFrom(st.lines, [
+        { label: 'When', key: 'on', render: (l) => esc(String(l.on || '').slice(0, 10)) },
+        { label: 'What', key: 'detail',
+          render: (l) => (l.kind === 'trip'
+            ? `<span class="pill plat">${esc(l.platform || '')}</span> ${esc(l.plate || '')}`
+              + ` <span class="dim">${esc(l.detail || '')}</span>`
+            : esc(l.detail || ''))
+            + (l.verification ? ' <span class="pill warn">verification</span>' : '') },
+        { label: 'Fare', key: 'fare', num: true,
+          render: (l) => (l.fare == null ? '<span class="dim">—</span>' : esc(aed(l.fare))) },
+        { label: 'Cash in', key: 'cash_in', num: true,
+          render: (l) => (l.cash_in != null
+            ? `<b>${esc(aed(l.cash_in))}</b>`
+            : `<span class="dash" title="${esc(l.no_movement_reason || '')}">—</span>`) },
+        { label: 'Entry', key: 'amount', num: true,
+          render: (l) => (l.amount == null ? '<span class="dim">—</span>'
+            : `<b class="${l.amount < 0 ? 'good' : ''}">${esc(aed(l.amount))}</b>`) },
+        /* CASH TAKEN IS ALWAYS A NUMBER, and it was hidden behind a column
+           that needed an opening balance nobody had typed. The trips
+           themselves say what went into the driver's hand — measured, not
+           estimated. Measured on production 2026-09-22: person 202 has 120
+           cash trips totalling AED 7,427.40 and this column rendered an em
+           dash for every one of them. What needs the opening is what they
+           STILL hold, which is this figure less hand-ins. Two quantities, two
+           columns, and only the second can be absent. */
+        { label: 'Cash taken', key: 'running_taken', num: true,
+          render: (l) => (l.running_taken == null ? '<span class="dim">—</span>'
+            : esc(aed(l.running_taken))) },
+        { label: 'Still held', key: 'running_cash', num: true,
+          render: (l) => (l.running_cash == null
+            ? `<span class="dash" title="${esc(o.cash_absent_reason || '')}">—</span>`
+            : esc(aed(l.running_cash))) },
+        { label: 'Owed', key: 'running_owed', num: true,
+          render: (l) => (l.running_owed == null
+            ? `<span class="dash" title="${esc(o.owed_absent_reason || '')}">—</span>`
+            : esc(aed(l.running_owed))) },
+        { label: 'Proof', key: 'proof',
+          render: (l) => (l.ledger ? proofCell(l) : '<span class="dim"></span>') },
+      ], { cards: true, cardLead: 'detail' }));
+
+      /* A BOOK THAT HAS NO LINES IS NOT A BOOK THAT SUMS TO NOUGHT.
+         ─────────────────────────────────────────────────────────────────
+         This printed every total unconditionally, so a driver with no ledger
+         record read "advances AED 0.00" — which says they have taken none,
+         where the truth is that nobody has recorded any. A supervisor can
+         refuse an advance over that difference, and it is the same defect this
+         session already fixed in /api/ledger/exposure (which reported
+         owes.advance: 0 for a person with literally zero rows). A sum over an
+         empty set is arithmetic; printing it beside measured figures is a
+         claim. So a book with no lines in this window is simply not listed,
+         and the sentence below says which ones those were. */
+      const bookBits = [
+        ['advances', st.totals.ledger_advance], ['deductions', st.totals.ledger_deduction],
+        ['cash handed in', st.totals.ledger_cash], ['paid to them', st.totals.ledger_pay],
+      ].filter(([, v]) => Number(v) !== 0).map(([n, v]) => `${n} ${aed(v)}`);
+      const silent = st.lines.some((l) => l.ledger)
+        ? '' : ' Nothing was recorded against them on any book over these dates, which is not a '
+          + 'balance of nought — it is a balance nobody has written down.';
+      regPanel.body.append(el('p', 'cap',
+        `Over ${windowLabel()}: fares ${aed(st.totals.fares)} · cash taken `
+        + `${aed(st.totals.cash_in)} · commission ${aed(st.totals.fees)}`
+        + (bookBits.length ? ` · ${bookBits.join(' · ')}` : '')
+        + `.${silent} ${st.totals.fares_are_not_earnings}`));
     }
 
-    regPanel.body.append(tableFrom(st.lines, [
-      { label: 'When', key: 'on', render: (l) => esc(String(l.on || '').slice(0, 10)) },
-      { label: 'What', key: 'detail',
-        render: (l) => (l.kind === 'trip'
-          ? `<span class="pill plat">${esc(l.platform || '')}</span> ${esc(l.plate || '')}`
-            + ` <span class="dim">${esc(l.detail || '')}</span>`
-          : esc(l.detail || ''))
-          + (l.verification ? ' <span class="pill warn">verification</span>' : '') },
-      { label: 'Fare', key: 'fare', num: true,
-        render: (l) => (l.fare == null ? '<span class="dim">—</span>' : esc(aed(l.fare))) },
-      { label: 'Cash in', key: 'cash_in', num: true,
-        render: (l) => (l.cash_in != null
-          ? `<b>${esc(aed(l.cash_in))}</b>`
-          : `<span class="dash" title="${esc(l.no_movement_reason || '')}">—</span>`) },
-      { label: 'Entry', key: 'amount', num: true,
-        render: (l) => (l.amount == null ? '<span class="dim">—</span>'
-          : `<b class="${l.amount < 0 ? 'good' : ''}">${esc(aed(l.amount))}</b>`) },
-      { label: 'Cash in hand', key: 'running_cash', num: true,
-        render: (l) => (l.running_cash == null
-          ? `<span class="dash" title="${esc(o.cash_absent_reason || '')}">—</span>`
-          : esc(aed(l.running_cash))) },
-      { label: 'Owed', key: 'running_owed', num: true,
-        render: (l) => (l.running_owed == null
-          ? `<span class="dash" title="${esc(o.owed_absent_reason || '')}">—</span>`
-          : esc(aed(l.running_owed))) },
-      { label: 'Proof', key: 'proof',
-        render: (l) => (l.ledger ? proofCell(l) : '<span class="dim"></span>') },
-    ], { cards: true, cardLead: 'detail' }));
-
-    regPanel.body.append(el('p', 'cap',
-      `Over ${windowLabel()}: fares ${aed(st.totals.fares)} · cash taken `
-      + `${aed(st.totals.cash_in)} · commission ${aed(st.totals.fees)} · advances `
-      + `${aed(st.totals.ledger_advance)} · deductions ${aed(st.totals.ledger_deduction)} · `
-      + `cash handed in ${aed(st.totals.ledger_cash)}. ${st.totals.fares_are_not_earnings}`));
   }
+
+  /* THE NORMAL PATH — a driver who has both. The two early returns above cover
+     an empty ledger; this is the call for everybody else. */
+  renderStatement();
 
   /* The hand-recorded half, kept as a caption rather than a second table: the
      lines are already in the statement above, and two tables of the same money
      on one tab is how a reader ends up with two figures that appear to
      contradict each other. */
+  const t = reg.totals;
   regPanel.body.append(el('p', 'cap', ['advance', 'cash', 'deduction', 'pay']
     .filter((b) => t[b] != null)
     .map((b) => `${BOOK_LABEL[b]} ${aed(t[b])}`).join(' · ')

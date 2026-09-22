@@ -297,6 +297,30 @@ export function registerRoutes(app, { q, wrap, winDays }) {
        Computed here and not in SQL because the carry is a separate read and
        the two must agree; a window function over the page alone would silently
        restart at the top of every page. */
+    /* TWO CASH QUANTITIES, AND ONLY ONE OF THEM NEEDS AN OPENING.
+       ─────────────────────────────────────────────────────────────────────
+       This file shipped with one column, `running_cash`, which was null for
+       everybody because it tried to answer "how much is in their pocket now" —
+       and that needs a stated opening and recorded hand-ins, neither of which
+       exists yet. The operator pointed out what that hid: the cash TAKEN is
+       not an estimate, it is a measured fact on every cash trip we hold.
+
+       Measured on production 2026-09-22 for person 202: 120 cash trips,
+       AED 7,427.40 taken, from 2024-12-28 onward. A column rendering that as
+       "—" because nobody has typed an opening balance is withholding a number
+       the database is certain of.
+
+       So they are separated:
+
+         running_taken  what has gone INTO their hand, cumulative. Needs
+                        nothing but the trips. Always a real number. It is also
+                        the ceiling on what they could still be holding.
+         running_cash   what they are STILL holding = opening + taken since
+                        that opening - hand-ins recorded since. Absent with a
+                        reason until an opening exists, which is honest,
+                        because without it the figure would silently mean the
+                        first thing while being labelled the second. */
+    let taken = Number(carry.cash_trips_before);
     let cash = Number(carry.cash_trips_before) + Number(carry.cash_led_before);
     let owed = Number(carry.owed_before);
     const shaped = lines.map((r) => {
@@ -305,7 +329,10 @@ export function registerRoutes(app, { q, wrap, winDays }) {
       /* A verification row is shown and moves nothing — driver_ledger's own
          rule (sql/schema_v78.sql:245). */
       if (!verification) {
-        if (r.kind === 'trip' && r.cash_amount != null) cash += Number(r.cash_amount);
+        if (r.kind === 'trip' && r.cash_amount != null) {
+          taken += Number(r.cash_amount);
+          cash += Number(r.cash_amount);
+        }
         if (isLedger && r.book === 'cash') cash += Number(r.amount);
         if (isLedger && (r.book === 'advance' || r.book === 'deduction')) owed += Number(r.amount);
       }
@@ -363,6 +390,10 @@ export function registerRoutes(app, { q, wrap, winDays }) {
             : 'the rider paid the platform, so nothing changed hands with the driver on this '
               + 'trip. The fare is shown because it happened, not because it moved a balance.')
           : null,
+        /* ALWAYS A NUMBER. Nothing about it is conditional on a human having
+           typed anything — it is the sum of what the trips say was handed
+           over. */
+        running_taken: round2(taken),
         running_cash: cashOpen ? round2(cash) : null,
         running_owed: owedOpen ? round2(owed) : null,
       };
@@ -389,6 +420,10 @@ export function registerRoutes(app, { q, wrap, winDays }) {
             + 'counted. The accounts team states it and the date it is as of, and everything '
             + 'after that date is counted from here.',
         owed: owedOpen ? round2(opening.owed_amount) : null,
+        taken_needs_no_opening: 'cash taken is measured on the trips themselves and is always a '
+          + 'real figure. What it is NOT is what the driver still holds: that is this number '
+          + 'less whatever they have handed back, and no hand-in is recorded until somebody '
+          + 'records one. So it reads as a ceiling, not a balance.',
         owed_on: opening?.owed_on || null,
         owed_absent_reason: owedOpen ? null
           : 'no opening balance has been carried in for this person, so what they owed before '
@@ -396,6 +431,7 @@ export function registerRoutes(app, { q, wrap, winDays }) {
             + 'rather than from nought owed.',
       },
       carried_in: {
+        taken: round2(Number(carry.cash_trips_before)),
         cash: cashOpen ? round2(Number(carry.cash_trips_before) + Number(carry.cash_led_before)) : null,
         owed: owedOpen ? round2(Number(carry.owed_before)) : null,
         why: 'what each balance stood at the day before this window opened. A window is a view '

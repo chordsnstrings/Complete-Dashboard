@@ -6390,11 +6390,200 @@ app.get('/api/forecast', (req, r) => {
     forecast: fc, observed,
     in_progress: { m: '2026-08', days_so_far: 21, days_total: 31, trips_so_far: 5927,
       per_day: 282.2, projected: 8748, forecast: next.point, low: next.low, high: next.high,
-      within_interval: 8748 >= next.low && 8748 <= next.high },
+      within_interval: 8748 >= next.low && 8748 <= next.high,
+      /* The run rate divided by the last day carrying ANY booking, which on
+         production was a day the collector had run once that morning: 71
+         bookings against a trailing norm near 766. Whole days only now, and
+         the basis is said in words. */
+      trips_including_today: 6069, last_whole_day: '2026-08-21',
+      basis: 'whole days only \u2014 today is still being collected and is excluded' },
     weekday_shares: shares, next_month: next.m, daily,
     year_ahead: { total: fc.slice(0, 12).reduce((a, x) => a + x.point, 0),
       low: fc.slice(0, 12).reduce((a, x) => a + x.low, 0),
       high: fc.slice(0, 12).reduce((a, x) => a + x.high, 0), forecast_months: 3 },
+    /* ── the year-on-year half of the page ────────────────────────────────
+       Added rather than computed, so this stays a FIXTURE: a mock that ran
+       src/seasonal.js would agree with the route by construction and could not
+       catch a renderer reading a field the route does not serve.
+
+       The shape mirrors production's: two months refused because their
+       year-ago month is a different business (Uber's record starts after
+       them), months that ARE comparable carrying both sides of bookings,
+       active vehicles and per-vehicle work, and a forecast month whose base is
+       partial and therefore renders absent with a reason. */
+    same_days_year_ago: { ly_m: '2025-08', through_day: 21, trips_so_far: 5927,
+      ly_same_days: 6902, ly_whole_month: 10740, ratio: 0.859,
+      share_of_month_by_now: 0.6426, projected: 9224 },
+    yoy: [
+      { m: '2026-01', ly_m: '2025-01', partial: false, trips: 21890, ly_trips: 3120,
+        vehicles: 77, ly_vehicles: 41, comparable: 'no', ratio: 7.016,
+        reason: 'These are not two readings of the same business: uber carried 86.1% of this month '
+          + 'and carried nothing in 2025-01. A percentage change across that is a fact about when '
+          + 'collection started, not about the fleet.' },
+      { m: '2026-02', ly_m: '2025-02', partial: false, trips: 19511, ly_trips: 2960,
+        vehicles: 76, ly_vehicles: 40, comparable: 'no', ratio: 6.592,
+        reason: 'These are not two readings of the same business: uber carried 85.4% of this month '
+          + 'and carried nothing in 2025-02.' },
+      { m: '2026-05', ly_m: '2025-05', partial: false, trips: 10042, ly_trips: 12980,
+        vehicles: 61, ly_vehicles: 74, drivers: 57, ly_drivers: 70,
+        ratio: 0.7736, vehicle_ratio: 0.8243, intensity_ratio: 0.9385,
+        per_vehicle: 164.6, ly_per_vehicle: 175.4,
+        comparable: 'yes', like_platforms: ['bolt', 'uber'], like_ratio: 0.7736,
+        split: { vehicle_pct: -17.6, intensity_pct: -6.2, total_pct: -22.6, led_by: 'fleet size' } },
+      { m: '2026-06', ly_m: '2025-06', partial: false, trips: 14033, ly_trips: 13400,
+        vehicles: 63, ly_vehicles: 76, drivers: 50, ly_drivers: 72,
+        ratio: 1.0472, vehicle_ratio: 0.8289, intensity_ratio: 1.2633,
+        per_vehicle: 222.7, ly_per_vehicle: 176.3,
+        comparable: 'yes', like_platforms: ['bolt', 'uber'], like_ratio: 1.0472,
+        split: { vehicle_pct: -17.1, intensity_pct: 26.3, total_pct: 4.7,
+          led_by: 'work per vehicle' } },
+      { m: '2026-07', ly_m: '2025-07', partial: false, trips: 13537, ly_trips: 13010,
+        vehicles: 74, ly_vehicles: 75, drivers: 86, ly_drivers: 71,
+        ratio: 1.0405, vehicle_ratio: 0.9867, intensity_ratio: 1.0546,
+        per_vehicle: 182.9, ly_per_vehicle: 173.5,
+        comparable: 'partly', like_platforms: ['bolt', 'uber'], like_ratio: 0.9903,
+        new_channels: [{ platform: 'hotel', trips: 653 }],
+        reason: 'hotel runs in one of these months and not the other, which is 4.8% of the larger '
+          + 'side. The ratio below is taken over the channels both months carry (bolt, uber); the '
+          + 'rest is reported separately.',
+        split: { vehicle_pct: -1.3, intensity_pct: 5.5, total_pct: 4.1,
+          led_by: 'work per vehicle' } },
+      { m: '2026-08', ly_m: '2025-08', partial: true, trips: 11278, ly_trips: 10740,
+        vehicles: 76, ly_vehicles: 68, drivers: 88, ly_drivers: 80,
+        ratio: 1.0501, vehicle_ratio: 1.1176, intensity_ratio: 0.9396,
+        per_vehicle: 148.4, ly_per_vehicle: 157.9,
+        comparable: 'partly', like_platforms: ['bolt', 'uber'], like_ratio: 0.9648,
+        new_channels: [{ platform: 'hotel', trips: 916 }],
+        reason: 'hotel runs in one of these months and not the other, which is 8.1% of the larger side.',
+        split: { vehicle_pct: 11.8, intensity_pct: -6, total_pct: 5,
+          led_by: 'fleet size' } },
+    ],
+    seasonal: {
+      ok: true, method: 'year-on-year ratio',
+      months_used: ['2026-05', '2026-06', '2026-07'],
+      pairs_used: [{ m: '2026-05', ly_m: '2025-05', ratio: 0.774, like_for_like: true },
+        { m: '2026-06', ly_m: '2025-06', ratio: 1.047, like_for_like: true },
+        { m: '2026-07', ly_m: '2025-07', ratio: 0.99, like_for_like: true }],
+      k: 3, ratio: 0.9370, ratio_sd: 0.1454, ratio_low: 0.2148, ratio_high: 1.6592,
+      t_multiplier: 4.30, vehicle_ratio: 0.8800, intensity_ratio: 1.0855, intensity_sd: 0.1625,
+      months_rejected: [
+        { m: '2026-01', ly_m: '2025-01', reason: 'These are not two readings of the same business: '
+          + 'uber carried 86.1% of this month and carried nothing in 2025-01.' },
+        { m: '2026-02', ly_m: '2025-02', reason: 'These are not two readings of the same business: '
+          + 'uber carried 85.4% of this month and carried nothing in 2025-02.' },
+      ],
+      forecast: [
+        { m: '2026-09', base_m: '2025-09', base: 22902, base_like: 22902, base_vehicles: 79,
+          days: 30, kind: 'forecast', point: 22300, low: 5800, high: 38800,
+          carry: [{ platform: 'hotel', trips: 785, months: 2 }],
+          base_regime: 'before the break', base_post_break: false },
+        { m: '2026-10', base_m: '2025-10', base: 23898, base_like: 23898, base_vehicles: 80,
+          days: 31, kind: 'forecast', point: 23200, low: 5900, high: 40500,
+          carry: [{ platform: 'hotel', trips: 785, months: 2 }],
+          base_regime: 'before the break', base_post_break: false },
+        { m: '2026-11', base_m: '2025-11', base: 24943, base_like: 24943, base_vehicles: 84,
+          days: 30, kind: 'forecast', point: 24200, low: 6100, high: 42200,
+          carry: [{ platform: 'hotel', trips: 785, months: 2 }],
+          base_regime: 'before the break', base_post_break: false },
+        { m: '2026-12', base_m: '2025-12', base: 19229, base_like: 19229, base_vehicles: 81,
+          days: 31, kind: 'extrapolation', point: 18800, low: 4900, high: 32700,
+          carry: [{ platform: 'hotel', trips: 785, months: 2 }],
+          base_regime: 'before the break', base_post_break: false },
+        { m: '2027-03', base_m: '2026-03', base: 8641, base_like: 8641, base_vehicles: 68,
+          days: 31, kind: 'extrapolation', point: 8900, low: 2700, high: 15100,
+          base_regime: 'within the current regime', base_post_break: true },
+        { m: '2027-08', base_m: '2026-08', base: null, base_like: null, days: 31,
+          kind: 'extrapolation', point: null, low: null, high: null,
+          reason: '2026-08 is a partial month — the record starts or stops inside it — so it is short '
+            + 'by construction and would understate this month by however many days it is missing.' },
+      ],
+    },
+    model_scores: {
+      n: 2,
+      rows: [
+        { m: '2026-07', actual: 13537, seasonal: 11400, seasonal_err_pct: -15.8,
+          line: 12100, line_err_pct: -10.6, flat: 11559, flat_err_pct: -14.6 },
+        { m: '2026-08', actual: 11278, seasonal: 12600, seasonal_err_pct: 11.7,
+          line: 12933, line_err_pct: 14.7, flat: 12537, flat_err_pct: 11.2 },
+      ],
+      unscorable: [{ m: '2026-06',
+        reason: 'only 2 comparable year-on-year pair(s) existed before 2026-06; 3 are needed' }],
+      mean_abs_pct: { seasonal: 13.8, line: 12.7, flat: 12.9 },
+    },
+    tourism: {
+      ok: true, n: 5,
+      months: ['2025-09', '2025-10', '2025-11', '2025-12', '2026-01'],
+      excluded: [
+        { m: '2025-08', reason: 'This month carried uber where the fleet now runs bolt, hotel, uber; '
+          + 'the channels that differ are 61.2% of the larger month.' },
+        { m: '2026-03', reason: 'Dubai\u2019s tourism authority has not published a visitor figure for '
+          + 'this month.' },
+        { m: '2026-04', reason: 'Dubai\u2019s tourism authority has not published a visitor figure for '
+          + 'this month.' },
+      ],
+      per_vehicle: { slope: 0.186, intercept: -70.2, r2: 0.668, typical_error: 50.8,
+        unit: 'bookings per active vehicle, per million visitors' },
+      bookings: { slope: 23.079, intercept: -11231.5, r2: 0.641, typical_error: 6706.6,
+        unit: 'bookings per million visitors' },
+      vehicles: { slope: 0.012, intercept: 91.5, r2: 0.281, typical_error: 7.8,
+        unit: 'active vehicles per million visitors' },
+      series: MONTH_KEYS.map((m, i) => ({
+        m,
+        visitors: ({ '2025-08': 1370000, '2025-09': 1410000, '2025-10': 1750000,
+          '2025-11': 1848000, '2025-12': 2040000, '2026-01': 1995000 })[m] ?? null,
+        source: 'Dubai DET',
+        basis: ({ '2025-08': 'published_monthly', '2025-09': 'published_monthly',
+          '2025-10': 'published_monthly', '2025-11': 'published_monthly',
+          '2025-12': 'published_monthly', '2026-01': 'published_monthly' })[m] ?? null,
+        reason: ['2025-08', '2025-09', '2025-10', '2025-11', '2025-12', '2026-01'].includes(m)
+          ? null
+          : 'Dubai\u2019s tourism authority has not published monthly for this month. It published the '
+            + 'year to date and August by itself; the six months between them were released only as '
+            + 'part of that total, and dividing a total by six would be an invention, not a '
+            + 'measurement.',
+        trips: TREND[i].trips,
+        vehicles: TREND[i].earning_vehicles,
+        per_vehicle: +(TREND[i].trips / TREND[i].earning_vehicles).toFixed(1),
+        partial_month: m === '2025-08' || m === '2026-08',
+      })),
+      aggregates: [{ from: '2026-02', to: '2026-07', visitors: 4106000, derived: true,
+        label: 'February to July 2026, together',
+        note: 'Not published as such. It is the published January-to-August total of 6.97 million '
+          + 'less the two months inside it that were published individually (January 1.995m, August '
+          + '869k). It is therefore a measured aggregate of six months and says nothing about any '
+          + 'one of them.' }],
+      reconciliation: [
+        { label: 'H1 2025', got: 9880000, expect: 9880000, delta: 0, ok: true },
+        { label: 'January to November 2025', got: 17548000, expect: 17550000, delta: -2000, ok: true },
+        { label: 'Full year 2025', got: 19588000, expect: 19590000, delta: -2000, ok: true },
+      ],
+      context: [
+        { m: '2026-03', kind: 'shock', headline: 'Dubai tourism collapsed, and the fleet went with it',
+          detail: 'Dubai hotel occupancy fell to about 36% in March 2026 against over 71% in March '
+            + '2025, and Dubai airport handled 18.6 million passengers in Q1 2026 against 23.4 '
+            + 'million a year earlier. This fleet\u2019s bookings fell 77% in the same month.' },
+      ],
+      note: 'International overnight visitors, published by Dubai\u2019s Department of Economy and '
+        + 'Tourism. Months it has not published individually are absent with that as the reason, '
+        + 'never estimated.',
+    },
+    calendar: {
+      model: 'GLM 5.2 (glm-5-2-260617) on BytePlus ModelArk', generated: '2026-09-22',
+      checked: 'The Islamic dates were checked against UAE press reporting of the expected 2027 '
+        + 'dates. An earlier run on a different model returned dates a year stale.',
+      warning: 'Named by a language model, not measured. No figure on this page is adjusted by it.',
+      months: [
+        { m: '2026-09', direction: 'up', events: ['GITEX Global (expected ~12-16 Oct 2026)'],
+          note: 'Cooler weather and returning tourists lift airport and evening trips.',
+          disagrees_with_measurement: false },
+        { m: '2026-10', direction: 'up', events: ['Peak winter tourism season begins'],
+          note: 'Mild weather and rising tourist arrivals sustain demand.',
+          disagrees_with_measurement: false },
+        { m: '2026-11', direction: 'mixed', events: ['UAE National Day (2-3 Dec 2026)'],
+          note: 'Festive demand builds while school terms continue.',
+          disagrees_with_measurement: true },
+      ],
+    },
     revenue_note: 'The Uber trip export carries no fare column at all, so every AED figure in this product '
       + 'describes the hotel, Bolt and Yango rows only. A booking forecast is in bookings.',
   });
@@ -6919,12 +7108,12 @@ const REGISTER_LINES = [
     cash_in: 67.13, cash_basis: 'payments_report', payment_type: 'cash',
     outcome: 'completed', amount: null, type_code: null, book: 'earning',
     ledger: false, verification: false, no_movement_reason: null,
-    running_cash: 267.13, running_owed: 1000 },
+    running_taken: 117, running_cash: 267.13, running_owed: 1000 },
   { kind: 'fee', on: '2026-08-25', at: '2026-08-25T09:12:00Z', platform: 'uber',
     ref: 'trip-a', plate: 'L45227', detail: 'commission on the fare above',
     fare: null, cash_in: null, amount: 7.46, type_code: 'service_fee', book: 'fee',
     ledger: false, verification: false, no_movement_reason: null,
-    running_cash: 267.13, running_owed: 1000 },
+    running_taken: 167, running_cash: 267.13, running_owed: 1000 },
   { kind: 'trip', on: '2026-08-26', at: '2026-08-26T10:30:00Z', platform: 'uber',
     ref: 'trip-b', plate: 'L45227', detail: 'Marina → JLT', fare: 100.53,
     cash_in: null, cash_basis: null, payment_type: 'braintree', outcome: 'completed',
@@ -6932,14 +7121,14 @@ const REGISTER_LINES = [
     no_movement_reason: 'the rider paid the platform, so nothing changed hands with the '
       + 'driver on this trip. The fare is shown because it happened, not because it moved '
       + 'a balance.',
-    running_cash: 267.13, running_owed: 1000 },
+    running_taken: 217, running_cash: 267.13, running_owed: 1000 },
   { kind: 'trip', on: '2026-08-27', at: '2026-08-27T08:00:00Z', platform: 'uber',
     ref: 'trip-c', plate: 'L45227', detail: 'Deira → Airport', fare: null,
     cash_in: null, cash_basis: null, payment_type: 'cash', outcome: 'not_completed',
     amount: null, type_code: null, book: 'earning', ledger: false, verification: false,
     no_movement_reason: 'this booking did not complete, so no fare was charged and nothing '
       + 'changed hands',
-    running_cash: 267.13, running_owed: 1000 },
+    running_taken: 267, running_cash: 267.13, running_owed: 1000 },
   { kind: 'ledger', on: '2026-08-28', at: '2026-08-28T00:00:00Z', platform: 'uber',
     ref: '9001', plate: null, detail: 'Cash handed in', fare: null, cash_in: null,
     amount: -150, type_code: 'cash_deposit', book: 'cash', ledger: true,
@@ -6947,7 +7136,7 @@ const REGISTER_LINES = [
     receipt: { sha256: 'd'.repeat(64), held: true, expired: false,
       expires_on: '2027-08-28', absent_reason: null },
     entry_source: 'manual', verification: false, no_movement_reason: null,
-    running_cash: 117.13, running_owed: 1000 },
+    running_taken: 317, running_cash: 117.13, running_owed: 1000 },
   { kind: 'ledger', on: '2026-08-29', at: '2026-08-29T00:00:00Z', platform: 'uber',
     ref: '9002', plate: null, detail: 'Cash advance', fare: null, cash_in: null,
     amount: 500, type_code: 'cash_advance', book: 'advance', ledger: true,
@@ -6960,7 +7149,7 @@ const REGISTER_LINES = [
         + 'retention, so this system no longer serves it. The entry is permanent and still '
         + 'records that one was taken.' },
     entry_source: 'manual', verification: false, no_movement_reason: null,
-    running_cash: 117.13, running_owed: 1500 },
+    running_taken: 367, running_cash: 117.13, running_owed: 1500 },
   /* A REPAYMENT, so the sign column has something to prove. Money coming back
      moves the owed balance the other way and must be distinguishable at a
      glance from an advance — a column of magnitudes would make the two read
@@ -6972,7 +7161,7 @@ const REGISTER_LINES = [
     receipt: { sha256: null, held: false, expired: false, expires_on: null,
       absent_reason: 'no photograph is attached to this entry' },
     entry_source: 'manual', verification: false, no_movement_reason: null,
-    running_cash: 117.13, running_owed: 500 },
+    running_taken: 417, running_cash: 117.13, running_owed: 500 },
 ];
 
 app.get('/api/driver/register', (req, r) => {
@@ -6990,10 +7179,40 @@ app.get('/api/driver/register', (req, r) => {
         + 'fleet-wide version of it, because a running balance over everybody is not a '
         + 'balance of anything.' });
   }
-  if (ext && !LEDGER_ACCOUNTS[ext]) {
+  /* THE REGISTER IS NOT GATED ON THE LEDGER, and this fixture used to gate it
+     on LEDGER_ACCOUNTS — which is how the page shipped with an early return
+     that showed a driver with no ledger record NONE of their statement.
+     Measured on production 2026-09-22: person 202 has zero ledger rows and 241
+     statement lines. The real route 404s only for an id NOBODY has, and
+     answers for any driver with work. So does this now: U-NOBODY is a driver
+     the directory knows, so it gets a statement with no ledger lines in it. */
+  if (ext && ext === 'U-VOID') {
     return r.status(404).json({ from: null, to: null, person_id: null, name: null,
       accounts: [], opening: null, carried_in: null, lines: [], totals: null, shown: 0,
       of: 0, truncated: false, error: 'no such driver', absent_reason: ledgerAbsent });
+  }
+  if (ext && !LEDGER_ACCOUNTS[ext]) {
+    /* A real driver with no ledger record: trips and commission only, both
+       balances absent with their own reasons. This is the production shape. */
+    const trips = REGISTER_LINES.filter((l) => !l.ledger)
+      .map((l) => ({ ...l, running_cash: null, running_owed: null }));
+    return r.json({
+      from: '2026-08-01', to: '2026-08-31', person_id: null, name: null,
+      accounts: [{ platform: 'uber', external_id: ext, display_name: null, basis: 'account' }],
+      opening: { cash: null, cash_on: null,
+        cash_absent_reason: 'no opening cash position has been stated for this person, so the '
+          + 'cash column is a running change and not a balance. It is not zero: it is a figure '
+          + 'nobody has counted.',
+        owed: null, owed_on: null,
+        owed_absent_reason: 'no opening balance has been carried in for this person.' },
+      carried_in: { cash: null, owed: null, why: 'no opening, so nothing to carry.' },
+      totals: { fares: 130.36, cash_in: 67.13, fees: 7.46, ledger_advance: 0,
+        ledger_deduction: 0, ledger_cash: 0, ledger_pay: 0, over_the_window: true,
+        excludes_verification: true,
+        fares_are_not_earnings: 'fares is what riders were charged on these trips.' },
+      shown: trips.length, of: trips.length, truncated: false, lines: trips,
+      absent_reason: null,
+    });
   }
   return r.json({
     from: '2026-08-01', to: '2026-08-31',

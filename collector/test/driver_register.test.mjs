@@ -97,6 +97,53 @@ check('a cancelled booking says its own different reason',
   /did not complete/.test(byRef['trip:t4'].no_movement_reason || ''),
   byRef['trip:t4'].no_movement_reason);
 
+/* THE OPERATOR'S CORRECTION, 2026-09-22, and it changed the design.
+   ─────────────────────────────────────────────────────────────────────────
+   This route shipped with ONE cash column, `running_cash`, which was null for
+   every driver because it answered "how much is in their pocket now" — and
+   that needs a stated opening and recorded hand-ins. The operator pointed out
+   what that was hiding: "I'm not talking about cash deposit. I'm talking about
+   cash trip which is with the driver."
+
+   They were right. The cash TAKEN is measured on every cash trip we hold and
+   needs nothing typed by anybody. Measured on production for person 202: 120
+   cash trips, AED 7,427.40, and the column rendered an em dash for all of
+   them. So there are two quantities now and only one of them can be absent. */
+console.log('\ncash taken is measured, and never waits on an opening');
+{
+  /* Their own subject, created here: the people above have openings by this
+     point in the file, and person 43 is not created until the refusals block
+     at the bottom. A test that borrows a fixture from another section is a
+     test that breaks when that section moves. */
+  await q(`INSERT INTO driver (id, full_name) VALUES (44,'No Opening Stated')`);
+  await q(`INSERT INTO driver_platform_id (platform, external_id, driver_id)
+           VALUES ('uber','u-44',44)`);
+  await trip('n1', 'u-44', { at: '2026-09-04T09:00:00Z', pay: 'cash', price: 40.00,
+    raw: { uber_payments: { cash_collected: -45.00 } } });
+  await trip('n2', 'u-44', { at: '2026-09-06T09:00:00Z', pay: 'cash', price: 60.00 });
+  const noOpen = (await get('/api/driver/register?person=44&from=2026-09-01&to=2026-09-30')).body;
+  check('and its cash-taken runs on the trips alone',
+    noOpen.lines.filter((l) => l.cash_in).length === 2, String(noOpen.of));
+  check('a person with NO opening still gets a cash-taken column',
+    noOpen.lines.every((l) => l.running_taken != null),
+    JSON.stringify(noOpen.lines.slice(0, 2).map((l) => l.running_taken)));
+  check('while what they STILL hold stays absent, with its reason',
+    noOpen.lines.every((l) => l.running_cash === null)
+    && /figure nobody has counted/.test(noOpen.opening.cash_absent_reason || ''),
+    noOpen.opening.cash_absent_reason);
+  check('and the response says why one needs an opening and the other does not',
+    /ceiling, not a balance/.test(noOpen.opening.taken_needs_no_opening || ''),
+    noOpen.opening.taken_needs_no_opening);
+}
+
+check('cash taken runs cumulatively across the window',
+  byRef['trip:t3'].running_taken > byRef['trip:t1'].running_taken,
+  `${byRef['trip:t1'].running_taken} -> ${byRef['trip:t3'].running_taken}`);
+check('and a hand-in does NOT reduce it — that money was still taken',
+  r.lines.find((l) => l.type_code === 'cash_deposit').running_taken
+    === byRef['trip:t3'].running_taken,
+  'a deposit moved the taken column, which records what went into a hand');
+
 console.log('\nonly a hand-in brings it down');
 const dep = r.lines.find((l) => l.type_code === 'cash_deposit');
 check('a deposit is a ledger line in the cash book', dep && dep.book === 'cash' && dep.ledger === true);
