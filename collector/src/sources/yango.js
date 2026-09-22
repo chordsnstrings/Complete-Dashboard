@@ -237,14 +237,18 @@ const post = async (path, body) => {
              fix, and they would have spent the afternoon fixing them. */
           ? ` — with no cookie this call answers HTTP ${bare.status} instead, so the session IS`
             + ` being read and authenticates${yangoAccount() ? ` as ${yangoAccount()}` : ''};`
-            + ' and a 403 after that is NOT about any credential. This was settled on'
-            + ' 2026-09-22 with the strongest control there is — the SAME COOKIE BYTES.'
-            + ' This deployment holds the session captured that morning and gets 403 with an'
-            + ' HTML page from a Yandex CDN edge; the identical cookie, park id, path, method'
-            + ' and body sent from another network the same minute answers HTTP 200 with the'
-            + ' fleet\u2019s real driver rows. Nothing about the credential differs between'
-            + ' those two calls — only where the call comes from, and no paste changes a'
-            + ' caller\u2019s address. Re-capturing this cookie cannot help; what can is'
+            + ' a 403 after that is about entitlement or origin rather than the session. That'
+            + ' used to be a list of four suspects, three of them credentials an operator'
+            + ' could go and re-paste. IT IS NOW SETTLED, with the strongest control there'
+            + ' is — the SAME COOKIE BYTES. Measured 2026-09-22: this deployment holds the'
+            + ` session captured that morning and, on park ${config.yango.parkId}, gets 403`
+            + ' with an HTML page from a Yandex CDN edge, while the identical cookie, park id,'
+            + ' path, method and body sent from another network the same minute answers HTTP'
+            + ' 200 with the fleet\u2019s real driver rows. So the entitlement question is'
+            + ' closed — the account, the park and the key are all fine — and the'
+            + ' refusal is of this HOST, or rather of this caller\u2019s address.'
+            + ' Re-capturing this cookie cannot help, and re-pasting the park id or the'
+            + ' API key will not change it either. What can is'
             + ' egressing this app from an address Yango\u2019s edge does not refuse'
           : ' — and the cookie-free comparison did not complete, so which credential is being'
             + ' refused is not yet established';

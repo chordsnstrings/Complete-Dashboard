@@ -197,17 +197,23 @@ async function checkBolt({ value, fleet }) {
       String(data?.message || JSON.stringify(data)).slice(0, 120),
       hint && `hint=${String(hint).slice(0, 60)}`,
       data?.code != null && `code=${data.code}`,
-      /* NOT "this paste has already been exchanged somewhere". Measured
-         2026-09-22: exchanging a token does not invalidate it (fifteen times,
-         still live). Signing the fleet owner into the portal again does, and
-         that is what the uuid names — the token the newest session holds. The
-         difference is the whole errand: "capture a fresh one" is what an
-         operator does by signing in again, which kills the one they just
-         pasted, which is the loop this credential has been stuck in. */
+      /* NOT "this paste has already been exchanged somewhere", and NOT "the
+         portal is naming its replacement". Measured 2026-09-22: exchanging a
+         token does not invalidate it (fifteen consecutive exchanges, still
+         live afterwards), and the uuid is a CONSTANT — byte-identical for
+         both fleet owners' dead tokens — so it identifies nothing. What a uuid
+         hint does mean, against words, is that the portal recognises the value
+         as one it issued and is refusing it anyway.
+
+         The errand is the whole point: "capture a fresh one" is performed by
+         signing into the portal, which is the likeliest cause of the
+         invalidation, which is the loop this credential has been stuck in. */
       spentAlready
-        ? '— the portal is naming the token that is live for this fleet owner now, so a newer '
-          + 'portal sign-in superseded this paste. Capture the token from the session that is '
-          + 'signed in at this moment, paste it, and do not sign that owner in again afterwards'
+        ? '— the portal issued this token and has since invalidated it. That is not expiry and '
+          + 'it is not this app: exchanging a Bolt refresh token does not consume it. The '
+          + 'likeliest cause is a newer portal sign-in, so capture from the session signed in '
+          + 'at this moment, paste it, then stop — and check the other fleet straight after, '
+          + 'because a capture may invalidate its token too'
         : null,
     ].filter(Boolean).join(' ').slice(0, 300));
   } catch (e) {

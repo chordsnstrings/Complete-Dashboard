@@ -239,35 +239,66 @@ async function pullFiRoster(from, to, fails, rowsByFleet = new Map()) {
    invalidates every older one at once — including the one an operator pasted
    here ten minutes earlier, while it is still days from its own `exp`.
 
-   That was measured end to end on 2026-09-22. The Ecosine token the operator
-   captured at 13:13 on the 21st answered code 0 on its first exchange and,
-   minutes later, code 210 REFRESH_TOKEN_INVALID with
-   error_hint 5099637b-…. At the same moment
-   production's /api/auth was refusing a DIFFERENT Ecosine token — a different
-   capture, a different exp (2026-09-26T08:40:27Z) — with the SAME hint,
-   character for character. One surviving token, named identically to two
-   different callers holding two different dead ones. A per-request trace id
-   could not do that, and neither could rotation-on-use: rotation would name a
-   successor we had just been handed, and we were handed nothing.
+   Measured end to end on 2026-09-22, three times over:
 
-   Confirmed stable, not incidental: three consecutive calls with the dead
-   token returned that same uuid three times.
+     an Ecosine token captured 13:13 on the 21st answered code 0 on its first
+       exchange and, minutes later, code 210 REFRESH_TOKEN_INVALID
+     production's /api/auth was at that moment refusing a DIFFERENT Ecosine
+       token — another capture, another exp — with the same code
+     an EGARI token captured 04:59 answered code 0 about twenty times over
+       thirty-five minutes and then, with nothing in this deployment touching
+       it, was refused too — while its own exp was seven days away
 
-   So the two refusals still tell apart, and the reading of the second changes:
+   Three tokens, two owners, none of them spent by us, all dead early.
 
-     signature broken   → error_hint "Invalid refresh token"   (measured: a
-                          token with its signature reversed answers exactly this)
-     superseded         → error_hint "<a stable uuid that is not this token's
-                          jti>" — the portal naming the token that is still
-                          alive for this owner, i.e. the one the newest portal
-                          session holds
+   ── WHAT THE error_hint UUID IS NOT ──────────────────────────────────────
+   This file used to say — and an earlier draft of THIS comment said — that the
+   uuid in the hint is "the portal naming the token that superseded ours". That
+   is wrong, and it is worth the paragraph because it is a very inviting
+   reading. Measured:
 
-   The remedy is therefore NOT "capture a fresh one" on its own, which is what
-   the panel has been saying: capturing a fresh one by signing in again is the
-   very act that kills whatever is already pasted for that owner. It is
-   "capture it from the session that is signed in NOW, paste it, and do not
-   sign that owner into the portal again afterwards" — and, for two fleets with
-   two owners, do one owner completely before starting the other.
+     dead Ecosine token (owner 173999) → hint 5099637b-cfb0-48da-…
+     dead Egari   token (owner 174036) → hint 5099637b-cfb0-48da-…  ← SAME
+
+   The same uuid for two different owners' dead tokens cannot be either one's
+   successor. It is a CONSTANT — stable across repeated calls, across hours,
+   across both fleets. Treat it as a fixed marker meaning "a token we issued,
+   which is no longer valid", not as an identifier of anything.
+
+   So the two refusals still tell apart, and that distinction is real and
+   useful — it is only the uuid's meaning that changes:
+
+     never issued here  → error_hint "Invalid refresh token", in words.
+                          Measured three ways: a real token with its signature
+                          reversed, and forged JWTs for each owner, all answer
+                          exactly this.
+     issued, then killed → error_hint is the constant uuid above. The portal
+                          recognises the token and is refusing it anyway.
+
+   WHAT KILLS THEM IS NOT ESTABLISHED, AND THIS COMMENT WILL NOT PRETEND IT IS.
+   What IS established is the half that decides the errand: it is not us, and
+   it is not expiry. Nothing this deployment does spends a token, and the
+   expiry is days away when they die.
+
+   The available explanation is a portal sign-in: the portal appears to keep
+   one live refresh token and to invalidate the older one when a new session
+   mints another. Every capture is a sign-in, so an operator re-capturing is
+   doing the thing that kills what they last pasted. That fits every
+   observation above and nothing contradicts it.
+
+   ONE THING IS OPEN AND MATTERS A LOT. The Egari token died in the window in
+   which a new ECOSINE token was captured — a different fleet owner. If the
+   invalidation is per ACCOUNT rather than per OWNER, then capturing one
+   fleet's token kills the other's and the two fleets can never both be live,
+   which would explain an operator re-pasting several times a day and never
+   getting both. That is a prediction, not a finding: capture Egari's token and
+   see whether Ecosine's dies at that instant. docs/COVERAGE.md carries it as
+   the open question it is.
+
+   Either way the remedy is NOT "capture a fresh one" on its own, which is what
+   the panel has been saying — that instruction is performed by signing in,
+   which is the suspected cause. It is "capture from the session signed in NOW,
+   paste it, and stop", and check the other fleet afterwards.
 
    The write-back below is kept even so. It costs one comparison, it is correct
    if Bolt ever does start returning a successor, and `next` is null on every
@@ -405,10 +436,16 @@ const REFRESH_TOKEN_INVALID_CODE = 210;
    cannot be lent between the fleets — and it is NOT a broken credential, so it
    must never be filed as one. */
 const PORTAL_NOT_ENTITLED_CODE = 900101;
-/* A superseding token's id, as opposed to the words "Invalid refresh token".
-   The portal writes a bare uuid here when the token presented is a real one it
-   has issued and then replaced. */
-const SUPERSEDED_HINT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/* A uuid, as opposed to the words "Invalid refresh token". The portal writes a
+   bare uuid here when the token presented is one it DID issue and has since
+   invalidated, and words when it does not recognise the value at all.
+
+   Matched on SHAPE rather than on the uuid's value, deliberately. The value
+   measured on 2026-09-22 is a constant — the same one for both fleet owners'
+   dead tokens — but it is the portal's constant, not ours, and pinning it
+   would turn the day Bolt changes it into a silent misreading rather than a
+   test failure. The shape is the signal. */
+const KILLED_HINT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /* One refusal from the mint path, read. Exported so the reading can be checked
    against the portal's real payloads without standing up the portal. */
@@ -424,16 +461,22 @@ export function portalRefusal(data, company) {
         + ` A different token for the same owner cannot change that;`
         + ` ${RT_KEY(company.fleet)} has to come from a portal session signed in as ${company.userId}.` };
   }
-  if (code === REFRESH_TOKEN_INVALID_CODE && hint && SUPERSEDED_HINT.test(String(hint))) {
-    /* NOT "somebody already spent this one". Nothing spends it — see the block
-       at the top of this section. A newer portal sign-in for this owner
-       replaced it, and the uuid is the replacement. */
+  if (code === REFRESH_TOKEN_INVALID_CODE && hint && KILLED_HINT.test(String(hint))) {
+    /* NOT "somebody already spent this one", and NOT "here is the token that
+       replaced it". Nothing spends a Bolt refresh token — fifteen consecutive
+       exchanges proved that — and the uuid is a constant, identical for both
+       fleet owners' dead tokens, so it names nothing. See the block at the top
+       of this section for both measurements.
+
+       What the product can say honestly is: the portal issued this token and
+       has since invalidated it, it was not expiry, and it was not us. */
     return { state: 'invalid', err: why,
-      detail: `superseded — signing owner ${company.userId} into the Bolt portal again`
-        + ` invalidated this token while it was still inside its own life.`
-        + ` The portal names the token that is live now (${String(hint).slice(0, 8)}…).`
-        + ` Capture ${RT_KEY(company.fleet)} from the session that is signed in NOW`
-        + ' and do not sign that owner in again afterwards.' };
+      detail: 'the portal issued this token and has since invalidated it — this is not expiry'
+        + ' (the exp is separate and is checked before the call) and nothing here spent it:'
+        + ' exchanging a Bolt refresh token does not consume it. The likeliest cause is a'
+        + ` newer Bolt portal sign-in. Capture ${RT_KEY(company.fleet)} from the session`
+        + ' signed in NOW, paste it, and then stop — and check the OTHER fleet straight'
+        + ' afterwards, because a capture may invalidate its token too.' };
   }
   if (code === REFRESH_TOKEN_INVALID_CODE) {
     return { state: 'invalid', err: why,

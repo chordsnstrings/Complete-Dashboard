@@ -856,12 +856,23 @@ driver's 222 tracker fixes.
   Now `expiryNote()` says "expired" only when it has, and otherwise states the
   exclusion outright.
 
-* **CAPTURING A FRESH BOLT TOKEN IS WHAT KILLS THE ONE YOU JUST PASTED.** The
-  portal keeps one live refresh token per fleet owner. The panel's advice was
-  "capture a fresh one from the portal", which an operator does by signing in
-  again — invalidating whatever they pasted ten minutes earlier, still days from
-  its `exp`. **Two fleets, two owners: finish one owner completely — capture,
-  paste, verify — before signing the other one in.**
+* **CAPTURING A FRESH BOLT TOKEN IS THE LIKELIEST THING THAT KILLS THE ONE YOU
+  JUST PASTED.** The panel's advice was "capture a fresh one from the portal",
+  which an operator performs by signing in — and a sign-in is the best
+  explanation for tokens dying unchanged, days from their `exp`, without this
+  deployment touching them. **Capture one fleet, paste it, stop, then check the
+  other fleet straight away** — whether one fleet's capture kills the other's
+  token is the open question recorded above, and it decides whether both fleets
+  can be live at once at all.
+
+* **A UUID IN AN ERROR FIELD IS NOT AUTOMATICALLY AN ID OF SOMETHING.** Bolt's
+  `error_hint` returns a uuid for a token it issued and later invalidated, and
+  the repo read that as "the portal naming the token that superseded ours" —
+  a reading so natural that the first version of the test suite written to
+  correct the *previous* wrong claim asserted it too. It is a **constant**:
+  byte-identical for owner 173999's dead token and owner 174036's. **Before
+  believing an opaque value identifies something, get a second one from a
+  different subject and check that it differs.** Two calls settled this.
 
 * **A PROBE THAT ASKS A PATH THE COLLECTOR DOES NOT READ.** `/api/probe/yango`
   promised "one endpoint, the collector's own" and asked
@@ -4812,7 +4823,7 @@ is still the fleet-wide register — `#advances` depends on it.
 
 ---
 
-## Bolt: the portal supersedes, it does not rotate — measured 2026-09-22
+## Bolt: the portal does not rotate, and nothing we do spends a token — measured 2026-09-22
 
 The operator supplied two working browser captures and two raw refresh tokens,
 and the standing suspicion was that our request differed from the browser's in
@@ -4876,33 +4887,72 @@ depth** — `data`'s keys are exactly `access_token`, `expires_timestamp`,
 `expires_in_seconds`, `next_update_in_seconds`, `next_update_give_up_timestamp`.
 The token was still good after all fifteen. **Nothing is spent by using it.**
 
-### What actually kills a token: a newer sign-in for the same fleet owner
+### Tokens die early, unchanged, and not because of anything we do
 
-The portal keeps **one live refresh token per fleet owner.** Signing that owner
-in again mints a new one and invalidates every older one at once — while they
-are still days from their own `exp`.
+Three tokens died on 2026-09-22 across both fleet owners, every one of them
+days from its own `exp`, none of them touched by this deployment between
+working and not:
 
-Measured end to end. The Ecosine token captured 2026-09-21T13:13Z answered
-`code 0` on its first exchange and, minutes later, `code 210
-REFRESH_TOKEN_INVALID` with `error_hint 5099637b-…`.
-At that same moment production's `/api/auth` was refusing a **different**
-Ecosine token — different capture, different exp (2026-09-26T08:40:27Z) — with
-**the same hint, character for character.** One surviving token, named
-identically to two callers holding two different dead ones. A per-request trace
-id cannot do that; neither can rotation-on-use, which would name a successor we
-had just been handed, and we were handed nothing. Three consecutive calls with
-the dead token returned that uuid three times, so it is stable.
+* the Ecosine token captured 09-21T13:13Z — `code 0` on its first exchange,
+  `code 210 REFRESH_TOKEN_INVALID` minutes later;
+* a **different** Ecosine token that production held at that moment — another
+  capture, another exp (2026-09-26T08:40:27Z) — refused identically;
+* the Egari token captured 09-22T04:59Z — `code 0` about **twenty times over
+  thirty-five minutes**, then refused, with nothing here touching it in between.
 
-**The two refusals, and the errand each needs:**
+So: **using a token does not kill it, and expiry is not what kills it.** That
+is the half that decides the errand, and it is settled.
+
+### The `error_hint` uuid is a CONSTANT — it names nothing
+
+This is the finding that cost a draft, because the reading it replaces is so
+inviting that both the old repo comment and the first version of the new test
+suite asserted it. The old claim was that the uuid is "the portal naming the
+token that superseded ours". Measured:
+
+```
+dead Ecosine token (owner 173999) -> error_hint 5099637b-cfb0-48da-…
+dead Egari   token (owner 174036) -> error_hint 5099637b-cfb0-48da-…   SAME
+```
+
+**One uuid cannot be two different owners' successors.** It is a fixed marker
+meaning "a token we issued, no longer valid" — stable across repeated calls,
+across hours, and across both fleets.
+
+The words-vs-uuid distinction is still real and still worth making. Only the
+uuid's *meaning* was invented:
 
 | `error_hint` | means | errand |
 |---|---|---|
-| `Invalid refresh token` | signature broken / truncated paste (confirmed by reversing a real token's signature) | paste it again, whole |
-| a stable uuid ≠ this token's `jti` | **superseded** — the uuid is the token the newest portal session holds | capture from the session signed in **now**, paste, then **leave the portal alone** |
+| `Invalid refresh token`, in words | the portal does not recognise the value at all. Confirmed three ways: a real token with its signature reversed, and forged JWTs for each owner | paste it again, **whole** — this is what a truncated paste looks like |
+| a uuid (shape, not value) | the portal **issued** this token and has since **invalidated** it | capture from the session signed in **now**, paste, then **stop** |
 
-So "capture a fresh one" — what the panel said — is the *act that kills* what is
-already pasted for that owner. For two fleets with two owners: **finish one
-owner completely before starting the other.**
+Match the uuid on **shape**, never on its value — the constant is Bolt's to
+change, and pinning it would turn that day into a silent misreading.
+
+### What kills them: the likeliest cause, and the open question
+
+**Not established, and the product does not pretend it is.** The available
+explanation is a portal sign-in: the portal appears to keep one live refresh
+token and to invalidate the older one when a new session mints another. Every
+capture *is* a sign-in, so an operator re-capturing is performing the suspected
+cause. That fits every observation and nothing contradicts it — and it is why
+"capture a fresh one from the portal", which is what the panel said, is exactly
+the wrong instruction on its own.
+
+> **OPEN — and it matters more than anything else here.** The Egari token died
+> in the window in which a new **Ecosine** token was captured — *a different
+> fleet owner*. If the invalidation is per **account** rather than per **owner**,
+> then capturing one fleet's token kills the other's, **the two fleets can never
+> both be live**, and that alone explains an operator re-pasting several times a
+> day and never getting both.
+>
+> **One action settles it:** capture Egari's token, then immediately try
+> Ecosine's stored one. If Ecosine's is dead at that instant, the invalidation
+> is account-wide.
+
+Until that is answered, the working procedure is: capture one fleet, paste it,
+**then check the other fleet straight away.**
 
 ### Two more portal codes, now named
 
@@ -4916,15 +4966,24 @@ owner completely before starting the other.**
 * **`503 NOT_AUTHORIZED` on the read path** is not only access-token age. An
   access token minted without a `company` returns it too.
 
-### The Ecosine credential is an operator errand, not a bug
+### Ecosine: proved end to end, with no code change to the request
 
-`ECOSINE_BOLT.txt` and `EGARI_BOLT.txt` are **the same token** — identical
-sha256, same `jti`, `fleet_owner_id: 174036`, which is **Egari's** owner. So the
-Ecosine raw file holds Egari's token and no code change can make it read company
-142868. **But the operator did supply a real Ecosine token** — it is inside
-`BOLT_ECOSINE_CURL.txt`, `fleet_owner_id: 173999`, and it worked on its first
-exchange before being superseded. The errand is one careful capture per owner,
-in the order above.
+The first pair of credential files supplied were **the same token** — identical
+sha256, same `jti`, `fleet_owner_id: 174036`, which is **Egari's** owner. So
+Ecosine's slot held Egari's token, and no code change could make it read company
+142868; the mint refuses it at the portal with `900101`.
+
+A correctly-owned Ecosine token (`fleet_owner_id: 173999`) was then supplied and
+**the collector's request works against it unmodified** — `version=FO.3.856`,
+`language=en-us`, `content-type` plus our own user-agent, `company` in the body:
+
+```
+mint  -> code 0 OK, access_token issued, no successor returned
+read  -> orderHistory/getTable company_id 142868 -> code 0 OK, 146 orders
+```
+
+Nothing in `src/http.js` or the request shape needed changing for either fleet.
+The Bolt problem was never the request.
 
 ---
 

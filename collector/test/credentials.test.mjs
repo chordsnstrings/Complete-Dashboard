@@ -9,19 +9,20 @@
      a token with a broken signature → error_hint "Invalid refresh token"
      the supervisor's real token     → error_hint "<uuid>"   (not its own jti)
 
-   The second is the portal naming a token that is alive for this owner and is
-   not ours.
+   The second means the portal recognises the value as one it issued and is
+   refusing it anyway.
 
-   THE READING OF THAT CHANGED ON 2026-09-22, and the old reading is left here
-   because it is the one a reader arrives with. This file used to say "Bolt
-   rotates the refresh token on every exchange and invalidates the one
-   presented, and getAccessToken returns the successor in the same response".
-   Measured against the live portal: one token exchanged fifteen times in a
-   row, code 0 every time, and NO refresh_token field in any response. Nothing
-   is spent by using it. What invalidates a token is signing its fleet owner
-   into the portal again, which mints a new one and kills every older one — so
-   the uuid in the hint is the SURVIVOR, not a successor we were handed and
-   dropped. src/sources/bolt.js carries the full measurement.
+   THE READING OF THAT CHANGED TWICE ON 2026-09-22, and both old readings are
+   recorded because both are inviting. This file used to say "Bolt rotates the
+   refresh token on every exchange and invalidates the one presented, and
+   getAccessToken returns the successor in the same response" — measured false:
+   one token exchanged fifteen times in a row, code 0 every time, and no
+   refresh_token field in any response. Nothing is spent by using it.
+
+   The replacement reading, that the uuid names the token that superseded ours,
+   is ALSO false: the same uuid comes back for owner 173999's dead token and
+   owner 174036's, so it cannot be either one's successor. It is a constant.
+   src/sources/bolt.js carries both measurements.
 
    These tests pin the things that made a one-line bug cost a week: a successor
    would be kept if one ever arrived, the portal's own words survive into the
