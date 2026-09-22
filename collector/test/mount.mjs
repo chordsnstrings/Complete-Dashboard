@@ -75,11 +75,24 @@ import { spanGaps } from '../api/coverage_gaps.js';
    here reaches for the production pool. */
 import { recordImport, spanOf, tallyBatch, takeTally,
   CADENCE as LEDGER_CADENCE, silence as ledgerSilence } from '../src/sources/ledger.js';
+/* The credential paste queue. /api/settings/paste is inside the slice, so
+   every name it reaches for has to be here — and until this line existed it
+   reached for five that were not, which is a ReferenceError the moment the
+   route is called rather than when it is mounted, so nothing noticed.
+   `recognise`, `unrecognised` and the file helpers are pure and are the real
+   ones; `checkAll` and `proposeKeys` reach the network and a test overrides
+   them through `inject` below. */
+import { recognise, unrecognised } from '../src/credkit.js';
+import { checkAll } from '../src/credcheck.js';
+import { proposeKeys } from '../src/credmodel.js';
+import { normaliseFiles, crossFile, silentFiles, fileReport,
+  boltFollowUp } from '../src/credfiles.js';
+import { SETTING_DEFS } from '../src/settings.js';
 
 export const START = "/* ───────────────────────── overview ───────────────────────── */";
 export const END = '/* ───────────────── per-driver detail pages ───────────────── */';
 
-export async function mountAll(db, { serverRoutes = true } = {}) {
+export async function mountAll(db, { serverRoutes = true, inject = {} } = {}) {
   const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
   const app = express();
   app.use(express.json());
@@ -160,6 +173,21 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
     ...Object.assign({}, ...await Promise.all(
       readdirSync('api').filter((f) => f.endsWith('_sql.js'))
         .map((f) => import(`../api/${f}`)))),
+    /* The credential paste queue, real. A route that is mounted but throws
+       ReferenceError the first time it is called is a route no test can
+       reach, and /api/settings/paste was in exactly that state. */
+    recognise, unrecognised, checkAll, proposeKeys, SETTING_DEFS,
+    normaliseFiles, crossFile, silentFiles, fileReport, boltFollowUp,
+    /* LAST, so a test can replace any of the above.
+       ─────────────────────────────────────────────────────────────────────
+       Two of the paste route's dependencies call a provider over the
+       network — checkAll mints a live Bolt access token — and a test that
+       drives the route has to decide what the provider says. That seam has
+       to exist somewhere; here it is one option on the shared harness rather
+       than a fourth hand-written copy of the injection set, which is the
+       drift this file's own header is about. Everything not named stays
+       exactly as it is for every other suite. */
+    ...inject,
   };
   /* Evaluate an arbitrary fragment of server.js against the same helpers. Tests
      that want ONE route rather than the whole file slice it out and mount it

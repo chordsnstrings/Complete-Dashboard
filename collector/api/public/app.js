@@ -5610,7 +5610,22 @@ V.sources = async (root) => {
   rawBar.querySelector('#rawWin').onchange = () => drawRaw(rawBar.querySelector('#rawSrc').value, rawWin());
 };
 
-/* Paste whatever the provider gave you.
+/* The per-file upload, and the browser's half of the bound the route enforces.
+   ─────────────────────────────────────────────────────────────────────────
+   These four numbers are src/credfiles.js's MAX_FILES, MAX_CHARS,
+   MAX_TOTAL_CHARS and MIN_CHARS. They are written twice because the browser
+   cannot import from src/, and the copy here exists for one reason: the API
+   parses a 256kb body, and an upload over that is refused by body-parser with
+   a 413 that data.js renders as "the server took too long" — an invitation to
+   retry that can only fail the same way. Refusing here instead names the file
+   and says what to do. The server still enforces its own, so a stale copy of
+   these numbers is a worse message, never a hole. */
+const PASTE_MAX_FILES = 12;
+const PASTE_MAX_CHARS = 64000;
+const PASTE_MAX_TOTAL = 180000;
+const PASTE_MIN_CHARS = 20;
+
+/* Paste whatever the provider gave you — or drop the files you copied it into.
    ─────────────────────────────────────────────────────────────────────────
    The thirty-four boxes below this panel are the right thing to HAVE and the
    wrong thing to use: the operator arrives holding a cookie jar copied out of
@@ -5622,15 +5637,30 @@ V.sources = async (root) => {
    answered when it was tried against its own provider, and applies only what
    passed. The dry run is not an extra click for its own sake: it is the
    difference between an operator seeing "this cookie is for the Egari org"
-   before it lands and finding out from a dashboard that stopped updating. */
+   before it lands and finding out from a dashboard that stopped updating.
+
+   ── AND WHY THE FILES GO UP AS FILES ────────────────────────────────────
+   The operator captures one provider at a time into one .txt each and hands
+   the set over together — five at once on 2026-09-22. Reading them here and
+   joining them into the textarea would be four lines of code and would throw
+   away the only evidence that mattered that day: two of those files held the
+   SAME Bolt token, and the single thing that revealed it was that one of them
+   was called ECOSINE_BOLT.txt while the token inside carried Egari's
+   fleet_owner_id. Concatenated, that is one credential, filed correctly,
+   reported clean — with Ecosine still holding a token the portal refuses at
+   mint time. docs/COVERAGE.md records the measurement.
+
+   So each file is sent with its name, the name rides all the way to the
+   verdict, and this panel prints what happened PER FILE as well as per key. */
 function pastePanel(root) {
-  const p = panel('Paste a credential',
-    'A cookie jar, a token, or the whole curl command — for one provider or several at once. '
-    + 'Nothing is stored until it has been tried against the provider it claims to be from.');
+  const p = panel('Paste a credential, or drop the files',
+    'A cookie jar, a token, the whole curl command — or several .txt files at once, each one '
+    + 'keeping its own name. Nothing is stored until it has been tried against the provider it '
+    + 'claims to be from.');
   root.append(p.panel);
 
   const ta = el('textarea');
-  ta.placeholder = 'Paste here. A browser\u2019s "Copy as cURL" works as-is, Windows form included — '
+  ta.placeholder = 'Paste here. A browser’s "Copy as cURL" works as-is, Windows form included — '
     + 'the command is read and only the credential inside it is kept. Several at once is fine; '
     + 'separate them with a blank line.\n\n'
     /* Named because it is the one credential that is not a session and does
@@ -5645,21 +5675,111 @@ function pastePanel(root) {
     + 'font-size:.78rem;line-height:1.5;resize:vertical;color:var(--ink)';
   p.body.append(ta);
 
+  /* ── the drop zone ────────────────────────────────────────────────────
+     `.empty` is the dashed-border box this stylesheet already defines for "a
+     place where something should be". No new class is invented here: one was
+     invented on this page once before and shipped as an unstyled div. */
+  const staged = [];
+  const drop = el('div', 'empty');
+  drop.style.marginTop = '10px';
+  drop.style.cursor = 'pointer';
+  const DROP_IDLE = '<b>Drop credential files here</b>'
+    + 'Several at once — one per provider is how they are captured, and each keeps its own '
+    + 'name. The name is read: a file called ECOSINE_BOLT.txt holding Egari’s token is the '
+    + 'mistake this page exists to catch, and it cannot be caught without it.';
+  drop.innerHTML = DROP_IDLE;
+  p.body.append(drop);
+
+  const chips = el('div', 'chips');
+  chips.style.marginTop = '10px';
+  p.body.append(chips);
+
+  const status = el('span', 'note');
+  const drawChips = () => {
+    chips.innerHTML = '';
+    if (!staged.length) return;
+    staged.forEach((f, i) => {
+      const c = el('span', 'chip');
+      /* The size is on the chip because a 0-byte file and a 40kb one look
+         identical as a name, and "nothing was read from it" is a sentence the
+         operator should be able to predict before pressing anything. */
+      c.innerHTML = `${esc(f.name)} <span class="dim">${fmt(f.text.length)} ch</span> ✕`;
+      c.style.cursor = 'pointer';
+      c.title = 'remove this file';
+      c.onclick = () => { staged.splice(i, 1); drawChips(); };
+      chips.append(c);
+    });
+    const clear = el('span', 'chip', 'clear all');
+    clear.style.cursor = 'pointer';
+    clear.onclick = () => { staged.length = 0; drawChips(); };
+    chips.append(clear);
+  };
+
+  /* Read the files the operator handed over, and refuse the ones that cannot
+     be sent — by name, with the true reason, before anything leaves the
+     browser. A file silently dropped here is indistinguishable from a file
+     the server read and understood, which is the whole failure this feature
+     is about. */
+  const take = async (list) => {
+    const refused = [];
+    for (const f of [...list]) {
+      if (staged.length >= PASTE_MAX_FILES) {
+        refused.push(`${f.name}: more than ${PASTE_MAX_FILES} files — not sent`);
+        continue;
+      }
+      if (staged.some((s) => s.name === f.name && s.size === f.size)) continue;
+      let text = '';
+      try { text = await f.text(); } catch (e) { refused.push(`${f.name}: could not be read (${e.message})`); continue; }
+      if (text.trim().length < PASTE_MIN_CHARS) {
+        refused.push(`${f.name}: under ${PASTE_MIN_CHARS} characters — there is nothing in it to read`);
+        continue;
+      }
+      if (text.length > PASTE_MAX_CHARS) {
+        refused.push(`${f.name}: ${fmt(text.length)} characters, and this route reads at most `
+          + `${fmt(PASTE_MAX_CHARS)} in one file`);
+        continue;
+      }
+      const total = staged.reduce((a, s) => a + s.text.length, 0);
+      if (total + text.length > PASTE_MAX_TOTAL) {
+        refused.push(`${f.name}: the files already staged come to ${fmt(total)} characters and `
+          + `this route reads at most ${fmt(PASTE_MAX_TOTAL)} in one upload — send it in a second batch`);
+        continue;
+      }
+      staged.push({ name: f.name, size: f.size, text });
+    }
+    drawChips();
+    status.className = refused.length ? 'note err' : 'note';
+    status.textContent = refused.length ? refused.join(' · ')
+      : `${staged.length} file${staged.length === 1 ? '' : 's'} ready.`;
+  };
+
+  drop.ondragover = (e) => { e.preventDefault(); drop.style.borderColor = 'var(--accent)'; };
+  drop.ondragleave = () => { drop.style.borderColor = ''; };
+  drop.ondrop = (e) => {
+    e.preventDefault();
+    drop.style.borderColor = '';
+    if (e.dataTransfer?.files?.length) take(e.dataTransfer.files);
+  };
+
   const bar = el('div', 'btnrow');
   bar.style.marginTop = '10px';
   const fileBtn = el('label', 'btn sec');
-  fileBtn.textContent = 'Upload a .txt';
+  fileBtn.textContent = 'Choose .txt files';
   fileBtn.style.cursor = 'pointer';
   const file = el('input');
   file.type = 'file';
-  file.accept = '.txt,.json,.log,text/plain';
+  /* MULTIPLE. This was a single-file picker that overwrote the textarea, so
+     the operator's actual gesture — select all five, open — silently kept one
+     of them and dropped four with nothing on screen to say so. */
+  file.multiple = true;
+  file.accept = '.txt,.json,.log,.curl,text/plain';
   file.style.display = 'none';
   file.onchange = async () => {
-    const f = file.files?.[0];
-    if (f) ta.value = await f.text();
+    if (file.files?.length) await take(file.files);
     file.value = '';
   };
   fileBtn.append(file);
+  drop.onclick = () => file.click();
   const readBtn = el('button', 'btn');
   readBtn.textContent = 'Read and test';
   /* `status`, not `note`.
@@ -5671,7 +5791,6 @@ function pastePanel(root) {
      credential. An operator pasting a working session saw the row go green,
      clicked Apply, and got a blank panel and a console error over a write that
      had actually succeeded. */
-  const status = el('span', 'note');
   bar.append(fileBtn, readBtn, status);
   p.body.append(bar);
 
@@ -5679,11 +5798,31 @@ function pastePanel(root) {
   out.style.marginTop = '14px';
   p.body.append(out);
 
-  const TONE = { pass: 'good', fail: 'critical', unknown: 'warn' };
+  /* `ok`/`bad`, not `good`/`critical`.
+     ─────────────────────────────────────────────────────────────────────
+     pill() writes its tone straight into the class attribute, and the only
+     pill tones app.css defines are .pill.ok, .pill.warn, .pill.bad and
+     .pill.dim. This map named `good` and `critical` — which are kpiRow's
+     tone words, not a pill's — so every verdict in this table has rendered
+     as the same untoned grey since the panel shipped: "accepted", "refused"
+     and "could not ask" indistinguishable at a glance, in the one column an
+     operator scans. Checked against app.css rather than assumed, which is
+     the rule that was broken when it was written. */
+  const TONE = { pass: 'ok', fail: 'bad', unknown: 'warn' };
   const post = async (apply) => {
     const text = ta.value.trim();
-    if (text.length < 20) { status.textContent = 'Nothing to read yet.'; return; }
+    /* Files win where there are files, and the textarea is sent on its own
+       otherwise — never both concatenated, which is how a name gets lost. */
+    const sending = staged.length
+      ? { files: staged.map((f) => ({ name: f.name, text: f.text })), apply }
+      : { text, apply };
+    if (!staged.length && text.length < PASTE_MIN_CHARS) {
+      status.className = 'note';
+      status.textContent = 'Nothing to read yet.';
+      return;
+    }
     readBtn.disabled = true;
+    status.className = 'note';
     status.textContent = apply ? 'Applying…' : 'Reading, and asking each provider…';
     out.innerHTML = '';
     let d;
@@ -5691,7 +5830,7 @@ function pastePanel(root) {
       d = await api('/api/settings/paste', {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(state.admin ? { 'x-admin-token': state.admin } : {}) },
-        body: JSON.stringify({ text, apply }),
+        body: JSON.stringify(sending),
       });
     } catch (e) {
       status.textContent = '';
@@ -5703,12 +5842,69 @@ function pastePanel(root) {
     status.textContent = '';
     out.innerHTML = '';
 
+    /* ── what the SET said, first and loudest ──────────────────────────────
+       Ahead of the table, because the two findings that cost this fleet real
+       time are both about the upload as a whole rather than about any one
+       row: the same token in two files, and a file whose name claims a fleet
+       its contents cannot serve. A reader who only looks at the verdict
+       column sees "accepted" for both of those and learns nothing. The
+       server orders them worst-first; this prints them in that order. */
+    for (const f of d.findings || []) {
+      out.append(note(f.text, f.tone === 'err' ? 'err' : f.tone === 'warn' ? 'warn' : 'ok'));
+    }
+    for (const f of d.files_refused || []) {
+      out.append(note(`${f.name}: ${f.reason}`, 'warn'));
+    }
+
+    /* ── per file, because "3 stored" over five files is not checkable ──── */
+    const named = (d.files || []).filter((f) => f.name);
+    if (named.length) {
+      out.append(el('p', 'sec', 'What each file did'));
+      out.append(tableFrom(named, [
+        { label: 'File', key: 'name', render: (r) => `<code>${esc(r.name)}</code>` },
+        { label: 'Size', key: 'chars', num: true, render: (r) => `${fmt(r.chars)} ch` },
+        { label: 'Name says', key: 'declares_provider',
+          render: (r) => (r.declares_provider || r.declares_fleet
+            ? esc([r.declares_provider, r.declares_fleet].filter(Boolean).join(' · '))
+            : '<span class="dim">nothing</span>') },
+        { label: 'Read from it', key: 'read', num: true,
+          render: (r) => (r.read
+            ? `${fmt(r.read)}`
+            /* ABSENT WITH A REASON, not a zero. A file that yielded nothing
+               has a finding above saying so in words; this cell must not read
+               as a measured quantity of zero credentials. */
+            : '<span class="ent-off">nothing recognised</span>') },
+        { label: 'Stored', key: '_s',
+          render: (r) => (r.stored.length
+            ? r.stored.map((k) => `<code>${esc(k)}</code>`).join('<br>')
+            : '<span class="dim">—</span>') },
+        { label: 'Refused, and why', key: '_r',
+          render: (r) => (r.refused.length
+            ? r.refused.map((x) => `${x.key ? `<code>${esc(x.key)}</code> — ` : ''}${esc(x.reason || '')}`).join('<br>')
+            : r.untested.length
+              ? r.untested.map((x) => `${x.key ? `<code>${esc(x.key)}</code> — ` : ''}${esc(x.reason || '')}`).join('<br>')
+              : '<span class="dim">—</span>') },
+        { label: 'Same bytes as', key: '_a',
+          render: (r) => (r.also_in.length
+            ? `<span class="pill bad">${esc(r.also_in.join(', '))}</span>`
+            : '<span class="dim">—</span>') },
+      ]));
+    }
+
     if (!d.proposals.length) {
-      out.append(note('Nothing in that paste looked like a credential this dashboard stores.', 'warn'));
+      out.append(note('Nothing in that upload looked like a credential this dashboard stores.', 'warn'));
       return;
     }
+    out.append(el('p', 'sec', 'What each credential was, and what its provider said'));
     out.append(tableFrom(d.proposals, [
       { label: 'Provider', key: 'provider' },
+      /* Which file it came out of — plural, because two files holding
+         identical bytes are folded into one row and both names belong on it.
+         Absent rather than blank for the textarea, which has no name. */
+      { label: 'From', key: 'file',
+        render: (r) => (r.files?.length
+          ? r.files.map((f) => `<code>${esc(f)}</code>`).join('<br>')
+          : '<span class="dim">the paste box</span>') },
       /* One credential usually means one key. An Uber OAuth application means
          three — the client id, its secret, and the organisation the grant
          revealed it is registered under — and showing only the first would
@@ -5741,6 +5937,15 @@ function pastePanel(root) {
     if (d.applied?.length) {
       out.append(note(`Stored ${d.applied.join(', ')}. The collector picks these up on its next tick — `
         + 'no redeploy.', 'ok'));
+      /* Saved on the operator's word with nothing confirming it works. Said
+         here as well as in the row, because the green confirmation above is
+         what a reader stops at. */
+      const untested = d.proposals.filter((r) => r.saved_untested).map((r) => r.key);
+      if (untested.length) {
+        out.append(note(`${untested.join(', ')} ${untested.length === 1 ? 'was' : 'were'} saved `
+          + 'because you named the key, not because a provider confirmed it — there is no live '
+          + 'check for it here. It will be tested by the next collector run.', 'warn'));
+      }
     } else if (good.length) {
       const go = el('button', 'btn');
       go.textContent = `Apply the ${good.length} the provider accepted`;

@@ -47,8 +47,26 @@ check('a key the catalogue does not declare is dropped',
   /known\.has\(p\.key\) \? p\.key : null/.test(src));
 check('…and a proposal with no surviving key is discarded',
   /\.filter\(\(p\) => p\.key\)/.test(src));
-check('the model is only asked about what was NOT recognised',
-  /proposeKeys\(leftovers\)/.test(readFileSync('api/server.js', 'utf8')));
+/* `proposeKeys(leftovers` rather than `proposeKeys(leftovers)`.
+   ─────────────────────────────────────────────────────────────────────────
+   The exact call became `proposeKeys(leftovers.map((l) => l.text))` when the
+   paste route learned to read several files at once: a leftover is now a
+   block AND the name of the file it came out of, and the model is still only
+   ever handed the block. Pinning the closing bracket asserted the punctuation
+   rather than the property — the same failure the note below this one is
+   about — and it broke on a change that did not touch what the model is
+   shown. What must stay true is that the argument is derived from
+   `leftovers` and from nothing else, which is what this now says. */
+{
+  /* Comments stripped, because the route's own header explains the queue in
+     prose that says `proposeKeys()` — and a sweep for "every call that is not
+     over leftovers" would find the explanation and fail on it. */
+  const server = readFileSync('api/server.js', 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  check('the model is only asked about what was NOT recognised',
+    /proposeKeys\(leftovers\b[^)]*\)/.test(server)
+      && !/proposeKeys\((?!leftovers\b)/.test(server));
+}
 check('a model proposal is still tested against the provider before it is stored',
   /const tested = await checkAll\(candidates\)/.test(readFileSync('api/server.js', 'utf8')));
 /* The gate, asserted on ORDER rather than on one line of source.

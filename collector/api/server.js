@@ -13,6 +13,15 @@ import { describeSettings, setSetting, deleteSetting, loadSettings, recordCreden
 import { recognise, unrecognised } from '../src/credkit.js';
 import { checkAll } from '../src/credcheck.js';
 import { proposeKeys } from '../src/credmodel.js';
+/* Several credential files at once, each keeping its own name. The filename is
+   evidence — two files held the same Bolt token on 2026-09-22 and only their
+   names showed it — so it travels with the value all the way to the verdict.
+   NOTE FOR ANY EDIT HERE: /api/settings/paste is inside the region
+   test/mount.mjs evaluates as a function body, so every name this line
+   introduces must also appear in that file's injection set or the whole API
+   suite dies with a ReferenceError before its first assertion. */
+import { normaliseFiles, crossFile, silentFiles, fileReport,
+  boltFollowUp } from '../src/credfiles.js';
 import { SETTING_DEFS } from '../src/settings.js';
 /* The one definition of a cancellation and of who caused it — see
    api/cancellation_sql.js, which carries the measurements. */
@@ -3649,29 +3658,80 @@ app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
 app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
   const text = typeof req.body?.text === 'string' ? req.body.text : '';
   const apply = req.body?.apply === true;
-  if (text.trim().length < 20) {
-    return res.status(400).json({ error: 'nothing to read', detail: 'paste the credential, or upload the file you copied it into' });
+  /* SEVERAL FILES AT ONCE, EACH KEEPING ITS OWN NAME.
+     ─────────────────────────────────────────────────────────────────────
+     The operator hands over one .txt per provider and drops the set in
+     together — five at once on 2026-09-22. The obvious implementation joins
+     them with blank lines and calls the recogniser on the result, because
+     splitBlocks() already reads a paste holding several credentials.
+
+     It must not, and src/credfiles.js records why: two of that day's files
+     held the SAME token, and the only thing that revealed it was that one was
+     called ECOSINE_BOLT.txt and carried Egari's fleet_owner_id. Concatenated,
+     that is one credential, correctly filed, reported clean — with the fleet
+     the operator was actually trying to fix still holding a dead token. The
+     filename is evidence, so it travels with the value from the browser to
+     the verdict.
+
+     The textarea is the same path with one unnamed source, not a second one:
+     everything below runs over `sources`, and a paste is a list of length
+     one. */
+  const { sources, refused: refusedFiles } = normaliseFiles(
+    Array.isArray(req.body?.files) && req.body.files.length
+      ? req.body.files
+      : [{ name: null, text }]);
+  if (!sources.length) {
+    return res.status(400).json({ error: 'nothing to read',
+      /* The true reason, per file. "Nothing to read" about a five-file upload
+         is a refusal an operator cannot act on; "three were empty and two were
+         larger than this route accepts" is. */
+      detail: refusedFiles.length
+        ? refusedFiles.map((f) => `${f.name || 'the paste box'}: ${f.reason}`).join('; ')
+        : 'paste the credential, or upload the file you copied it into',
+      files: refusedFiles });
   }
   await loadSettings();
 
-  const found = recognise(text);
+  /* ONE QUEUE, NOT ONE PER FILE. Each source is read on its own so the
+     recogniser sees the blocks the operator actually captured — and so a
+     credential that ends one file and a curl that begins the next can never
+     be read as one block — but everything after this point is a single list,
+     tested by one checkAll and admitted by one gate. */
+  const found = [];
+  const leftovers = [];
+  for (const s of sources) {
+    for (const f of recognise(s.text)) found.push({ ...f, source: 'recognised', file: s.name });
+    for (const b of unrecognised(s.text)) leftovers.push({ text: b, file: s.name });
+  }
   /* The model is asked about the leftovers only, and its proposals join the
      same queue — same live check, same right to be refused. */
-  const leftovers = unrecognised(text);
   let guessed = [];
   try {
-    guessed = (await proposeKeys(leftovers)).map((g) => {
+    guessed = (await proposeKeys(leftovers.map((l) => l.text))).map((g) => {
       const def = SETTING_DEFS.find((d) => d.key === g.key);
       const fleet = /_EGARI$/.test(g.key) ? 'egari' : /_ECOSINE$/.test(g.key) ? 'ecosine' : null;
       return {
         provider: def?.group || 'unknown', key: g.key, fleet, ok: true,
-        value: leftovers[g.index], source: 'model', confidence: g.confidence,
+        value: leftovers[g.index].text, source: 'model', confidence: g.confidence,
+        /* The file a model proposal came out of, carried for the same reason a
+           recognised credential's is: a guess the operator has to adjudicate is
+           one they can only adjudicate if they know which file it was made
+           about. */
+        file: leftovers[g.index].file,
         why: `${g.why} (proposed by the model, not read from the credential)`,
       };
     });
   } catch { /* an absent model is one less step, not an error */ }
 
-  const candidates = [...found.map((f) => ({ ...f, source: 'recognised' })), ...guessed];
+  /* What the SET says, which no single file can. Three questions: did one
+     credential arrive under two names, does a name claim a fleet its contents
+     cannot serve, and did two files claim one key with different values. The
+     last of those refuses both candidates — the same rule recognise() already
+     applies within one paste, in the same words. */
+  const { candidates: folded, findings } = crossFile(
+    [...found.map((f) => ({ ...f, source: 'recognised' })), ...guessed]);
+  findings.push(...silentFiles(sources, folded, leftovers));
+  const candidates = folded;
   const tested = await checkAll(candidates);
 
   const applied = [];
@@ -3723,15 +3783,47 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
     if (applied.length) await loadSettings(true);
   }
 
+  /* The standing Bolt warning, and only when Bolt is in the upload.
+     ─────────────────────────────────────────────────────────────────────
+     docs/COVERAGE.md, measured 2026-09-22: a portal capture IS a sign-in, and
+     a sign-in is the only available explanation for Bolt refresh tokens dying
+     unchanged, days from their own expiry, with nothing here touching them.
+     Whether that invalidation is per fleet owner or per Bolt ACCOUNT is open,
+     and if it is per account the two fleets can never both be live. So the
+     page must not answer a Bolt paste with "capture a fresh one" — that is
+     the errand that performs the suspected cause — and must instead send the
+     operator to look at the other fleet while the answer is still cheap. */
+  if (tested.some((t) => t.provider === 'Bolt')) {
+    findings.push(boltFollowUp(tested.filter((t) => t.provider === 'Bolt').map((t) => t.fleet)));
+  }
+
   /* The value never comes back out. A page that echoes a credential is a page
-     that puts it in a browser cache, a screenshot and a support ticket. */
+     that puts it in a browser cache, a screenshot and a support ticket.
+     Filenames are not values and do come back: they are the evidence this
+     route exists to preserve, and the page cannot say which file a verdict is
+     about without them. */
   res.json({
     ok: true,
     applied,
     dry_run: !apply,
     unread: leftovers.length - guessed.length,
+    /* What each file contributed, plus the files that were not read at all
+       and the reason each one was refused — never a silent omission. */
+    files: fileReport(sources, tested, applied),
+    files_refused: refusedFiles,
+    /* What the SET said: a credential that arrived twice, a name claiming a
+       fleet its contents cannot serve, two values on one key, a file nothing
+       was read from, and the Bolt follow-up. Ordered worst-first so the page
+       can print them in the order they need acting on. */
+    findings: findings.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'err' ? -1 : 1)),
     proposals: tested.map((t) => ({
       provider: t.provider, key: t.key, fleet: t.fleet || null,
+      /* WHICH FILE THIS CAME OUT OF — plural, because folding two files that
+         held identical bytes into one candidate is what makes that duplicate
+         visible at all. `file` stays for the single-paste case and is null
+         for the textarea, which has no name and must not be given one. */
+      file: t.file || null,
+      files: (t.files && t.files.length) ? t.files : (t.file ? [t.file] : []),
       /* The keys a candidate resolved to, where it resolved to more than one.
          The page lists them; the value of none of them comes back. */
       keys: t.keys ? Object.keys(t.keys) : null,
