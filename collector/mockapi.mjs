@@ -7276,7 +7276,13 @@ const LEDGER_FLEET_EXPOSURE = ({
     { person_id: 1, name: 'Tariq Afzal Said Afzal', cash_rule: 'deposit_all',
       ext_id: 'U-TARIQ', link_platform: 'uber',
       accounts: 2, accounts_with_revenue: 2,
-      owes: { advance: 2500, deduction: 0, cash: 1000, cash_absent_reason: null,
+      owes: {
+        /* ALWAYS PRESENT, even where cash-in-hand is not: the trips measure it
+           and nobody has to type anything. */
+        cash_taken: 18636.69, cash_taken_trips: 120,
+        cash_taken_from: '2024-12-28', cash_taken_to: '2026-09-22',
+        cash_taken_means: 'every cash fare on record went into this driver\'s hand. It is a '
+          + 'CEILING on what they could still be holding, not a balance.', advance: 2500, deduction: 0, cash: 1000, cash_absent_reason: null,
         /* EVERY TERM, because the cash figure is the one number on the money
            pages that is DERIVED rather than recorded, and the derivation is
            where it goes wrong. A fixture carrying only the total cannot tell a

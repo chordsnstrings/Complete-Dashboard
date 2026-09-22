@@ -34,7 +34,7 @@
    that never has one because it records a decision or a period figure.
    Retention is twelve months and the entry is permanent, so collapsing those
    makes an expired photograph read as an entry nobody ever documented. */
-import { el, esc, panel, note, loading, tableFrom, kpiRow, empty } from './ui.js';
+import { el, esc, panel, note, loading, tableFrom, kpiRow, empty, countOf } from './ui.js';
 import { api, qAll, windowLabel } from './data.js';
 import { aed } from './deposit_core.js';
 
@@ -149,7 +149,19 @@ export async function renderDriverLedger(root, id, prof) {
           + 'not over the window' },
     { label: 'Advances outstanding', value: aed(p.owes?.advance) || '—',
       sub: 'what has been advanced, less what has come back' },
-    { label: 'Cash in hand', value: p.owes?.cash == null ? '—' : aed(p.owes.cash),
+    /* TWO CASH TILES, because they are two questions and one of them is
+       answerable today. This was a single "Cash in hand" tile reading an em
+       dash for everybody — true, since no opening has been stated — while the
+       trips underneath it said person 202 had taken AED 18,636.69. A reader
+       who meets a dash and then a large number twenty lines below reasonably
+       asks which one is real. Both are: one is what went into the hand, the
+       other is what is still in it. */
+    { label: 'Cash taken', value: p.owes?.cash_taken == null ? '—' : aed(p.owes.cash_taken),
+      sub: p.owes?.cash_taken == null ? p.owes?.cash_taken_means
+        : `over ${countOf(p.owes.cash_taken_trips, 'cash trip')}`
+          + (p.owes.cash_taken_from ? ` since ${esc(p.owes.cash_taken_from)}` : '')
+          + ' — a ceiling on what they hold, not a balance' },
+    { label: 'Still held', value: p.owes?.cash == null ? '—' : aed(p.owes.cash),
       sub: p.owes?.cash == null ? p.owes?.cash_absent_reason
         : (p.owes?.cash_basis?.is_a_floor ? 'at least this — see below' : 'counted from a stated '
           + 'opening position') },

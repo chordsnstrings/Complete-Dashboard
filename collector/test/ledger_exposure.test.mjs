@@ -277,5 +277,54 @@ check('a verification entry does not move anybody\'s exposure',
 check('the threshold is reported with the date it took effect',
   r7.policy.pct === 35 && r7.policy.effective_from === '2026-01-01', JSON.stringify(r7.policy));
 
+/* ── CASH TAKEN IS MEASURED; ONLY WHAT IS STILL HELD NEEDS AN OPENING ──────
+   The operator drew this line on 2026-09-22: "I'm not talking about cash
+   deposit. I'm talking about cash trip which is with the driver."
+
+   This route reported ONE cash figure, which answered "how much are they
+   holding now" — opening plus collections since, less hand-ins. That is
+   unanswerable without a stated opening, and driver_ledger holds ZERO rows on
+   production, so every one of 347 people read as an em dash while the trips
+   said person 202 alone had taken AED 18,636.69.
+
+   Two quantities, and only the second can be absent:
+     cash_taken  what went INTO the hand. Measured on the trips. No opening.
+     cash        what is STILL in it. Opening + taken since - handed in since.
+
+   THE SUBJECT HERE HAS NO OPENING ON PURPOSE. A fixture whose driver has one
+   cannot fail when cash_taken is made conditional again — measured: making it
+   `cashKnown && …` left both this suite and driver_money_tab green, because
+   every other subject in both has an opening. A test that cannot fail for the
+   reason it names has proved nothing. */
+console.log('\ncash taken, with no opening anywhere');
+await person(40, 'Took Cash Never Counted');
+await acct(40, 'uber', 'U-40');
+await earn('U-40', '2026-09-05', 5000, 0);
+await trip('U-40', '2026-09-06', 120);
+await trip('U-40', '2026-09-08', 80);
+await trip('U-40', '2026-09-09', 300, false);   // card — must not count
+
+{
+  const body = (await get('/api/ledger/exposure')).body;
+  const p = body.people.find((x) => x.name === 'Took Cash Never Counted');
+  check('a person with NO opening still reports what they took',
+    p.owes.cash_taken === 200, JSON.stringify(p.owes.cash_taken));
+  check('counting only the cash trips — a card fare went to the platform',
+    p.owes.cash_taken_trips === 2, String(p.owes.cash_taken_trips));
+  check('and dating it, so a reader knows how far back the figure reaches',
+    p.owes.cash_taken_from === '2026-09-06' && p.owes.cash_taken_to === '2026-09-08',
+    `${p.owes.cash_taken_from} .. ${p.owes.cash_taken_to}`);
+  check('while what they STILL hold stays absent, with its own reason',
+    p.owes.cash === null && /no opening cash position/.test(p.owes.cash_absent_reason || ''),
+    JSON.stringify({ cash: p.owes.cash, why: (p.owes.cash_absent_reason || '').slice(0, 60) }));
+  check('and the response calls the taken figure a ceiling, not a balance',
+    /CEILING on what they could still be holding/.test(p.owes.cash_taken_means || ''),
+    p.owes.cash_taken_means);
+  check('a person with no cash trip at all says THAT, rather than nought',
+    (() => { const z = body.people.find((x) => x.owes.cash_taken == null);
+      return !z || /nothing has gone into their hand/.test(z.owes.cash_taken_means || ''); })(),
+    'a person with no cash trips reported a taken figure of zero');
+}
+
 console.log(`\n${fail ? '✗' : '✓'} ledger_exposure: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

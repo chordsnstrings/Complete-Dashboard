@@ -136,6 +136,36 @@ console.log('\na driver who has a record');
       (e) => e.innerText)),
     (await page.$eval('[data-panel="driver-money-register"]', (e) => e.innerText)).slice(0, 80));
 
+  /* THE TWO CASH TILES. This was one tile, "Cash in hand", reading an em dash
+     for every driver — correct, since no opening has been stated anywhere on
+     production — while the statement below it showed AED 18,636.69 taken. Two
+     questions were wearing one label. The operator drew the line: "I'm not
+     talking about cash deposit. I'm talking about cash trip which is with the
+     driver." */
+  const tiles = await page.$$eval('[data-panel="driver-money"] .kpi',
+    (ks) => ks.map((k) => k.innerText.replace(/\n/g, ' ')));
+  check('the tile row names what was TAKEN as well as what is still held',
+    tiles.some((t) => /Cash taken/i.test(t)) && tiles.some((t) => /Still held/i.test(t)),
+    JSON.stringify(tiles.map((t) => t.slice(0, 26))));
+  check('and cash taken carries a figure, not a dash — the trips measure it',
+    /Cash taken[^A-Za-z]*AED/i.test(tiles.find((t) => /Cash taken/i.test(t)) || ''),
+    tiles.find((t) => /Cash taken/i.test(t)));
+  /* THIS FIXTURE'S DRIVER HAS AN OPENING, so Still held is a real figure and
+     says where it came from. The ABSENT half is asserted on U-NOBODY below,
+     who has none — the two cases need two subjects, because a tile that can
+     only ever be tested in one state is a tile whose other state rots. */
+  check('while still held is a different figure, sourced from the stated opening',
+    /Still held/i.test(tiles.find((t) => /Still held/i.test(t)) || '')
+    && /stated opening position/.test(tiles.find((t) => /Still held/i.test(t)) || ''),
+    tiles.find((t) => /Still held/i.test(t)));
+  check('and the two are not the same number — they answer different questions',
+    (tiles.find((t) => /Cash taken/i.test(t)) || '').replace(/[^0-9.]/g, '')
+      !== (tiles.find((t) => /Still held/i.test(t)) || '').replace(/[^0-9.]/g, ''),
+    'cash taken and still held printed the same figure');
+  check('and the taken tile says it is a ceiling rather than a balance',
+    /ceiling/i.test(tiles.find((t) => /Cash taken/i.test(t)) || ''),
+    tiles.find((t) => /Cash taken/i.test(t)));
+
   const stand = await page.$eval('[data-panel="driver-money"]', (e) => e.innerText);
   check('what they owe is the headline', /OWED IN TOTAL/i.test(stand), stand.slice(0, 200));
   check('with the advance balance beside it', /ADVANCES OUTSTANDING/i.test(stand));

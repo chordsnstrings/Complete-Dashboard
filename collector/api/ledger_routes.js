@@ -1279,6 +1279,35 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
           The register prints these same lines. Two surfaces, one definition —
           api/public/settlement.js:203-210 records what it cost the last time
           each carried its own idea of a cash figure. */
+       /* WHAT WENT INTO THEIR HAND, WHICH NEEDS NO OPENING AT ALL.
+          ─────────────────────────────────────────────────────────────────
+          The collected CTE below JOINs opening, so with no stated opening it
+          returns nothing and every cash figure on this route reads absent.
+          That is right for "how much are they HOLDING" — that genuinely
+          cannot be answered without a starting point and a record of hand-ins.
+
+          It is wrong for "how much did they TAKE". The operator made the
+          distinction: "I'm not talking about cash deposit. I'm talking about
+          cash trip which is with the driver." Every cash trip in trip_cash is
+          a measured fact, and summing them needs nobody to have typed
+          anything. Measured 2026-09-22: driver_ledger holds ZERO rows on
+          production, so this route reported a dash for cash on all 347 people
+          while the trips said person 202 alone had taken AED 18,636.69.
+
+          So this CTE is the same sum WITHOUT the opening join — reported
+          always, as a ceiling on what could still be held, beside the
+          absent-with-a-reason figure for what actually is. */
+       taken AS (
+         SELECT a.driver_id AS person_id,
+                sum(t.cash_amount)  AS value,
+                count(*)::int       AS trips,
+                min((t.requested_at AT TIME ZONE 'Asia/Dubai')::date) AS first_on,
+                max((t.requested_at AT TIME ZONE 'Asia/Dubai')::date) AS last_on
+           FROM acct a
+           JOIN trip_cash t ON t.driver_ext_id = a.external_id
+          WHERE ($2::date IS NULL OR (t.requested_at AT TIME ZONE 'Asia/Dubai')::date <= $2::date)
+          GROUP BY a.driver_id
+       ),
        collected AS (
          SELECT a.driver_id AS person_id,
                 sum(t.cash_amount)                                  AS value,
@@ -1348,6 +1377,9 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
               link.external_id AS link_ext_id, link.platform AS link_platform,
               o.amount AS opening_amount,
               to_char(o.effective_on,'YYYY-MM-DD') AS opening_on,
+              tk.value AS taken_value, tk.trips AS taken_trips,
+              to_char(tk.first_on,'YYYY-MM-DD') AS taken_first_on,
+              to_char(tk.last_on,'YYYY-MM-DD')  AS taken_last_on,
               c.value AS collected_value, c.trips AS collected_trips,
               c.priced AS collected_priced, c.fare_only AS collected_fare_only,
               h.amount AS handed_amount, h.n AS handed_n
@@ -1357,6 +1389,7 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
          LEFT JOIN rev ON rev.person_id = dr.id
          LEFT JOIN link ON link.driver_id = dr.id
          LEFT JOIN opening o ON o.person_id = dr.id
+         LEFT JOIN taken tk ON tk.person_id = dr.id
          LEFT JOIN collected c ON c.person_id = dr.id
          LEFT JOIN handed h ON h.person_id = dr.id
         WHERE ($3::bigint IS NULL OR dr.id = $3::bigint)
@@ -1450,6 +1483,17 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
           deduction_rows: deductionRows,
           cash: cash,
           cash_absent_reason: cashReason,
+          /* ALWAYS REPORTED. The trips said so; nobody had to type it. */
+          cash_taken: r.taken_value == null ? null : round2(Number(r.taken_value)),
+          cash_taken_trips: Number(r.taken_trips) || 0,
+          cash_taken_from: r.taken_first_on || null,
+          cash_taken_to: r.taken_last_on || null,
+          cash_taken_means: r.taken_value == null
+            ? 'no cash-marked trip is on record for this person, so nothing has gone into their '
+              + 'hand that this database can see.'
+            : 'every cash fare on record went into this driver\'s hand. It is a CEILING on what '
+              + 'they could still be holding, not a balance — it comes down only when a hand-in '
+              + 'is recorded, and none is until somebody records one.',
           /* Every term, so a reader can see which one is doing the work. */
           cash_basis: cashKnown ? {
             opening: round2(opening),
