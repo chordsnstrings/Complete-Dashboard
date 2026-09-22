@@ -1739,3 +1739,69 @@ person it belongs to — only the count (2) has been read, from the tile and fro
 `people_totals.with_conflicts`. And `with_conflicts` is a floor, not a total:
 `licence_no` and `emirates_id` are withheld from an anonymous GET, so a
 number-level conflict cannot be seen from outside and the real figure is ≥ 2.
+
+---
+
+## THE PER-PERSON REGISTER — written 2026-09-22, NOT YET ON PRODUCTION
+
+The operator's ask: "everything that a person earns and spends in a ledger that
+looks similar to a bank statement which has specific transaction history",
+later exportable as a payslip. Their rule for the cash column, same day: **"Cash
+trips are cash to the driver unless they give it to the company."**
+
+| claim | state |
+|---|---|
+| `trip.raw` survives the next export, so per-trip cash and fee exist at all | **proven by revert** (3 red), `44ac23b` |
+| one definition of what a cash fare is worth, read by exposure AND the register | **proven by revert** (3 red), `3106041` |
+| nothing-recorded renders absent, not 0 | **proven by revert** (9 red), `53e592f` |
+| a stray `?id=` refuses instead of returning 347 people | **proven by revert**, same |
+| four receipt states, each with the true reason | **proven by revert** (4 red), same |
+| `GET /api/driver/register` — three kinds of line, two running balances | written, 25 assertions, carry-in **proven by revert** (2 red) |
+| the statement renders on `#driver/p<id>/money` | written, `driver_money_tab` 34/34 |
+
+### What is deliberately NOT in it
+
+**No aggregate is ever a dated line.** `driver_payout_day` is a weekly statement
+divided across days, so the money did not move on those dates;
+`driver_statement_day` is daily totals; `money_event` is period figures;
+`platform_payout` is a real wire but to the **company**. Only `trip` and
+`driver_ledger` hold events, and only they become lines.
+
+**The commission is per trip, not per period.** An early draft of the plan
+asserted "no per-trip fee exists anywhere in this database" and built a
+period-grain architecture on that. It is false: `src/sources/uber.js:649` files
+a `service_fee` on every Uber trip whose payments week has been walked,
+measured at exactly 25%. A platform that files none — Bolt, Yango, the hotel
+channel — gets **no invented fee**, because allocating a period figure across
+trips would state a number the platform never filed.
+
+**`earned` is not a book and not a balance.** `driver_ledger` has four books and
+they are never netted. The register adds `earning` and `fee` for things that are
+not ledger entries, flagged `ledger: false` so nothing sums them into a book. An
+earlier draft admitted only `service_fee` rows into a book called `earned`,
+which would have printed a column headed *earned to date* reading **-1,878.39**.
+
+### NOT PROVEN
+
+Nothing above has been seen on production. `driver_ledger` and `ledger_policy`
+both hold **zero rows** there, so every running balance renders absent-with-a-
+reason and the cash rule cannot be demonstrated on real data until the accounts
+team files the first `cash_opening`. The browser assertions run against
+`mockapi.mjs`, whose fixture is deliberately shaped so a page that got the cash
+rule wrong renders visibly wrong against it.
+
+### Still open, and named rather than implied
+
+- **The toll question.** A cash trip's `cash_collected` exceeds its fare — +5.00
+  on 32 of 51 sampled trips (a Salik gate the rider paid in cash at the window)
+  and +37.30 on one measured trip. The register credits the driver with what
+  they took. Whether they then owe the toll back belongs to the `salik`
+  deduction type, against the person, on a date — it is deliberately not netted
+  per trip. **The operator has not yet answered this.**
+- **Which gross a payslip uses.** 11,461.61 (fares) / 10,353.98 (statement
+  gross) / 7,614.21 (statement periods) — and whether that figure is already net
+  of the driver's cash, since Uber deducts `cash_collected` from what it wires
+  the fleet. Get it wrong and a driver is charged twice for one sum.
+- **Step 7, the issued document**, is not started. It is last on purpose: it is
+  the only permanent piece, and it should not be written until the fee model and
+  the cash amount have stopped moving.

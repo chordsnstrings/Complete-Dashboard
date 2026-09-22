@@ -6897,6 +6897,121 @@ const ledgerAbsent = 'nothing has ever been recorded against this driver on the 
   + 'so they have no record here. A record is created by the first entry made against them — '
   + 'an advance, a deposit, a salary or a starting balance — and not by opening this page.';
 
+/* THE STATEMENT — GET /api/driver/register.
+   ─────────────────────────────────────────────────────────────────────────
+   Deliberately shaped so a page that got the CASH RULE wrong renders visibly
+   wrong against it. The operator's rule, 2026-09-22: a cash fare is the
+   driver's money from the moment they take it, and only a hand-in reduces it.
+
+   So the fixture carries one cash trip whose PAYMENTS figure exceeds its fare
+   (67.13 taken on a 29.83 ride — the shape measured on production, where a
+   Salik gate the rider paid in cash at the window is inside the cash and
+   outside the fare), one card trip that moves NOTHING and must render its
+   reason rather than a blank, one cancelled booking with a different reason
+   again, and a hand-in that brings the running cash down.
+
+   The opening is STATED here, because the absent case is covered by
+   LEDGER_ACCOUNTS: an account with no ledger record gets the empty answer and
+   a page must not start a balance at nought for it. */
+const REGISTER_LINES = [
+  { kind: 'trip', on: '2026-08-25', at: '2026-08-25T09:12:00Z', platform: 'uber',
+    ref: 'trip-a', plate: 'L45227', detail: 'Al Barsha → DIFC', fare: 29.83,
+    cash_in: 67.13, cash_basis: 'payments_report', payment_type: 'cash',
+    outcome: 'completed', amount: null, type_code: null, book: 'earning',
+    ledger: false, verification: false, no_movement_reason: null,
+    running_cash: 267.13, running_owed: 1000 },
+  { kind: 'fee', on: '2026-08-25', at: '2026-08-25T09:12:00Z', platform: 'uber',
+    ref: 'trip-a', plate: 'L45227', detail: 'commission on the fare above',
+    fare: null, cash_in: null, amount: 7.46, type_code: 'service_fee', book: 'fee',
+    ledger: false, verification: false, no_movement_reason: null,
+    running_cash: 267.13, running_owed: 1000 },
+  { kind: 'trip', on: '2026-08-26', at: '2026-08-26T10:30:00Z', platform: 'uber',
+    ref: 'trip-b', plate: 'L45227', detail: 'Marina → JLT', fare: 100.53,
+    cash_in: null, cash_basis: null, payment_type: 'braintree', outcome: 'completed',
+    amount: null, type_code: null, book: 'earning', ledger: false, verification: false,
+    no_movement_reason: 'the rider paid the platform, so nothing changed hands with the '
+      + 'driver on this trip. The fare is shown because it happened, not because it moved '
+      + 'a balance.',
+    running_cash: 267.13, running_owed: 1000 },
+  { kind: 'trip', on: '2026-08-27', at: '2026-08-27T08:00:00Z', platform: 'uber',
+    ref: 'trip-c', plate: 'L45227', detail: 'Deira → Airport', fare: null,
+    cash_in: null, cash_basis: null, payment_type: 'cash', outcome: 'not_completed',
+    amount: null, type_code: null, book: 'earning', ledger: false, verification: false,
+    no_movement_reason: 'this booking did not complete, so no fare was charged and nothing '
+      + 'changed hands',
+    running_cash: 267.13, running_owed: 1000 },
+  { kind: 'ledger', on: '2026-08-28', at: '2026-08-28T00:00:00Z', platform: 'uber',
+    ref: '9001', plate: null, detail: 'Cash handed in', fare: null, cash_in: null,
+    amount: -150, type_code: 'cash_deposit', book: 'cash', ledger: true,
+    note: 'handed to the office', entered_by: 'ahsan', receipt_sha: 'd'.repeat(64),
+    receipt: { sha256: 'd'.repeat(64), held: true, expired: false,
+      expires_on: '2027-08-28', absent_reason: null },
+    entry_source: 'manual', verification: false, no_movement_reason: null,
+    running_cash: 117.13, running_owed: 1000 },
+  { kind: 'ledger', on: '2026-08-29', at: '2026-08-29T00:00:00Z', platform: 'uber',
+    ref: '9002', plate: null, detail: 'Cash advance', fare: null, cash_in: null,
+    amount: 500, type_code: 'cash_advance', book: 'advance', ledger: true,
+    note: 'requested for rent', entered_by: 'ahsan', receipt_sha: 'e'.repeat(64),
+    /* PAST ITS RETENTION. Held until a date and no longer served — the state
+       that used to render a live link to a file the API answers 410 for. */
+    receipt: { sha256: 'e'.repeat(64), held: false, expired: true,
+      expires_on: '2025-01-31',
+      absent_reason: 'a photograph was held until 2025-01-31, which is past its twelve-month '
+        + 'retention, so this system no longer serves it. The entry is permanent and still '
+        + 'records that one was taken.' },
+    entry_source: 'manual', verification: false, no_movement_reason: null,
+    running_cash: 117.13, running_owed: 1500 },
+  /* A REPAYMENT, so the sign column has something to prove. Money coming back
+     moves the owed balance the other way and must be distinguishable at a
+     glance from an advance — a column of magnitudes would make the two read
+     the same, which is the one thing a reader of this table is doing. */
+  { kind: 'ledger', on: '2026-08-30', at: '2026-08-30T00:00:00Z', platform: 'uber',
+    ref: '9003', plate: null, detail: 'Repayment', fare: null, cash_in: null,
+    amount: -1000, type_code: 'repayment', book: 'advance', ledger: true,
+    note: 'paid back by transfer', entered_by: 'ahsan', receipt_sha: null,
+    receipt: { sha256: null, held: false, expired: false, expires_on: null,
+      absent_reason: 'no photograph is attached to this entry' },
+    entry_source: 'manual', verification: false, no_movement_reason: null,
+    running_cash: 117.13, running_owed: 500 },
+];
+
+app.get('/api/driver/register', (req, r) => {
+  const ext = String(req.query.ext_id || req.query.id || '');
+  const person = String(req.query.person || '');
+  if (!ext && !person) {
+    return r.json({ from: null, to: null, person_id: null, name: null, accounts: [],
+      opening: null, carried_in: null, lines: [], totals: null, shown: 0, of: 0,
+      truncated: false,
+      absent_reason: 'no driver was named. A register is about one person; there is no '
+        + 'fleet-wide version of it, because a running balance over everybody is not a '
+        + 'balance of anything.' });
+  }
+  if (ext && !LEDGER_ACCOUNTS[ext]) {
+    return r.json({ from: null, to: null, person_id: null, name: null, accounts: [],
+      opening: null, carried_in: null, lines: [], totals: null, shown: 0, of: 0,
+      truncated: false, absent_reason: ledgerAbsent });
+  }
+  return r.json({
+    from: '2026-08-01', to: '2026-08-31',
+    person_id: LEDGER_ACCOUNTS[ext] || 1, name: 'Tariq Mahmood',
+    accounts: [{ platform: 'uber', external_id: ext || 'U-TARIQ',
+      display_name: 'Tariq Mahmood', basis: 'register' }],
+    opening: { cash: 200, cash_on: '2026-07-31', cash_absent_reason: null,
+      owed: 1000, owed_on: '2026-07-31', owed_absent_reason: null },
+    carried_in: { cash: 200, owed: 1000,
+      why: 'what each balance stood at the day before this window opened.' },
+    totals: { fares: 130.36, cash_in: 67.13, fees: 7.46, ledger_advance: -500,
+      ledger_deduction: 0, ledger_cash: -150, ledger_pay: 0,
+      over_the_window: true, excludes_verification: true,
+      fares_are_not_earnings: 'fares is what riders were charged on these trips. What the '
+        + 'driver earned is the fare less the platform\'s commission, and what the platform '
+        + 'reports on its statement is a third figure again. The three never agree and are '
+        + 'never summed.' },
+    shown: REGISTER_LINES.length, of: REGISTER_LINES.length, truncated: false,
+    lines: REGISTER_LINES, absent_reason: null,
+  });
+});
+
 app.get('/api/ledger/exposure', (req, r) => {
   const ext = String(req.query.ext_id || '');
   if (ext && !LEDGER_ACCOUNTS[ext]) {

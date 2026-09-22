@@ -67,8 +67,7 @@ export async function renderDriverLedger(root, id, prof) {
      the toolbar governs and the tiles above it are not. A reader who cannot
      tell which half moved when they changed the window has two figures that
      appear to contradict each other. */
-  const regPanel = panel(`Entries in ${windowLabel()}, most recent first`, null,
-    'driver-money-register');
+  const regPanel = panel(`Statement for ${windowLabel()}`, null, 'driver-money-register');
   root.append(head.panel, regPanel.panel);
   loading(head.body);
   loading(regPanel.body);
@@ -96,9 +95,15 @@ export async function renderDriverLedger(root, id, prof) {
      the selector above this tab would be a control that changes nothing — the
      defect api/public/data.js spends four paragraphs on NO_RANGE avoiding, and
      which also rides that dead parameter into every link leaving the page. */
-  const [ex, reg] = await Promise.all([
+  /* THREE READS NOW. The statement is the third, and it is the one the
+     operator asked for: "everything that a person earns and spends in a ledger
+     that looks similar to a bank statement which has specific transaction
+     history". It is windowed like the entries read, because "what moved in
+     September" is exactly the question the toolbar above asks. */
+  const [ex, reg, st] = await Promise.all([
     api(`/api/ledger/exposure?${qs}`).catch(() => null),
     qAll('/api/ledger/entries', Object.fromEntries(new URLSearchParams(qs))).catch(() => null),
+    qAll('/api/driver/register', Object.fromEntries(new URLSearchParams(qs))).catch(() => null),
   ]);
 
   head.body.innerHTML = '';
@@ -184,39 +189,96 @@ export async function renderDriverLedger(root, id, prof) {
     return;
   }
 
+  /* THE STATEMENT, and the two things about it that are not a table.
+     ─────────────────────────────────────────────────────────────────────
+     TWO RUNNING BALANCES, NOT ONE. A bank statement has a single balance
+     because a bank account is a single relationship. This one is two: what
+     the driver is HOLDING (cash fares up, hand-ins down — the operator's rule
+     of 2026-09-22, "cash trips are cash to the driver unless they give it to
+     the company") and what they OWE (advances and deductions up, repayments
+     down). Netting them would read an honest driver carrying AED 400 of fares
+     as someone in debt for it, and the four books exist precisely so that
+     cannot happen.
+
+     AND A COLUMN THAT IS NOT A BALANCE AT ALL. The fare is what the RIDER was
+     charged. It is shown because it happened, never summed into either
+     balance, and the caption says so — three different figures on this product
+     answer to the word "earned" and none of them is a column of fares. */
   const t = reg.totals;
+  if (!st || st.absent_reason) {
+    regPanel.body.append(note(st?.absent_reason
+      || 'the statement could not be read for this driver.', 'warn'));
+  } else {
+    const o = st.opening || {};
+    /* THE OPENING IS WHAT MAKES A BALANCE A BALANCE, and it is stated before
+       the lines rather than discovered at the bottom of them. Without one the
+       running column is a running CHANGE wearing a balance's name, so it is
+       rendered absent with the reason rather than started from an assumed
+       nought. */
+    const openBits = [];
+    if (o.cash != null) openBits.push(`Cash in hand ${aed(o.cash)} as of ${esc(o.cash_on)}`);
+    else openBits.push('Cash in hand — not counted');
+    if (o.owed != null) openBits.push(`Owed ${aed(o.owed)} as of ${esc(o.owed_on)}`);
+    else openBits.push('Owed — nothing carried in');
+    regPanel.body.append(el('p', 'cap', `Opening: ${openBits.join(' · ')}.`));
+    if (o.cash_absent_reason) regPanel.body.append(note(o.cash_absent_reason));
+    if (o.owed_absent_reason) regPanel.body.append(note(o.owed_absent_reason));
+
+    if (st.truncated) {
+      regPanel.body.append(note(`Showing ${st.shown} of ${st.of} lines. The totals below are `
+        + 'over all of them, not over this page.', 'warn'));
+    }
+
+    regPanel.body.append(tableFrom(st.lines, [
+      { label: 'When', key: 'on', render: (l) => esc(String(l.on || '').slice(0, 10)) },
+      { label: 'What', key: 'detail',
+        render: (l) => (l.kind === 'trip'
+          ? `<span class="pill plat">${esc(l.platform || '')}</span> ${esc(l.plate || '')}`
+            + ` <span class="dim">${esc(l.detail || '')}</span>`
+          : esc(l.detail || ''))
+          + (l.verification ? ' <span class="pill warn">verification</span>' : '') },
+      { label: 'Fare', key: 'fare', num: true,
+        render: (l) => (l.fare == null ? '<span class="dim">—</span>' : esc(aed(l.fare))) },
+      { label: 'Cash in', key: 'cash_in', num: true,
+        render: (l) => (l.cash_in != null
+          ? `<b>${esc(aed(l.cash_in))}</b>`
+          : `<span class="dash" title="${esc(l.no_movement_reason || '')}">—</span>`) },
+      { label: 'Entry', key: 'amount', num: true,
+        render: (l) => (l.amount == null ? '<span class="dim">—</span>'
+          : `<b class="${l.amount < 0 ? 'good' : ''}">${esc(aed(l.amount))}</b>`) },
+      { label: 'Cash in hand', key: 'running_cash', num: true,
+        render: (l) => (l.running_cash == null
+          ? `<span class="dash" title="${esc(o.cash_absent_reason || '')}">—</span>`
+          : esc(aed(l.running_cash))) },
+      { label: 'Owed', key: 'running_owed', num: true,
+        render: (l) => (l.running_owed == null
+          ? `<span class="dash" title="${esc(o.owed_absent_reason || '')}">—</span>`
+          : esc(aed(l.running_owed))) },
+      { label: 'Proof', key: 'proof',
+        render: (l) => (l.ledger ? proofCell(l) : '<span class="dim"></span>') },
+    ], { cards: true, cardLead: 'detail' }));
+
+    regPanel.body.append(el('p', 'cap',
+      `Over ${windowLabel()}: fares ${aed(st.totals.fares)} · cash taken `
+      + `${aed(st.totals.cash_in)} · commission ${aed(st.totals.fees)} · advances `
+      + `${aed(st.totals.ledger_advance)} · deductions ${aed(st.totals.ledger_deduction)} · `
+      + `cash handed in ${aed(st.totals.ledger_cash)}. ${st.totals.fares_are_not_earnings}`));
+  }
+
+  /* The hand-recorded half, kept as a caption rather than a second table: the
+     lines are already in the statement above, and two tables of the same money
+     on one tab is how a reader ends up with two figures that appear to
+     contradict each other. */
   regPanel.body.append(el('p', 'cap', ['advance', 'cash', 'deduction', 'pay']
     .filter((b) => t[b] != null)
     .map((b) => `${BOOK_LABEL[b]} ${aed(t[b])}`).join(' · ')
-    + `. ${t.rows} ${t.rows === 1 ? 'entry' : 'entries'}`
+    + `. ${t.rows} recorded ${t.rows === 1 ? 'entry' : 'entries'}`
     + (t.verification_rows
       ? `, of which ${t.verification_rows} ${t.verification_rows === 1 ? 'is' : 'are'} a `
-        + 'verification row — listed and flagged below, and in none of these totals.'
-      : '.')));
-  if (reg.listed_why) regPanel.body.append(note(reg.listed_why, 'warn'));
-
-  regPanel.body.append(tableFrom(reg.entries, [
-    { label: 'When', key: 'effective_on', render: (e) => esc(e.effective_on) },
-    { label: 'What', key: 'label',
-      render: (e) => esc(e.label || e.type_code)
-        + (e.entry_source === 'verification'
-          ? ' <span class="pill warn">verification</span>' : '')
-        + (e.entry_source === 'import' ? ' <span class="dim">imported</span>' : '') },
-    { label: 'Amount', key: 'amount', num: true,
-      /* SIGNED, and the sign is the server's. A repayment and an advance move
-         a balance in opposite directions and a column of magnitudes would make
-         the two indistinguishable at a glance — which is the one thing a
-         reader of this table is doing. */
-      render: (e) => `<b class="${e.amount < 0 ? 'good' : ''}">${esc(aed(e.amount))}</b>` },
-    { label: 'Proof', key: 'proof', render: proofCell },
-    { label: 'Recorded by', key: 'entered_by',
-      render: (e) => `${esc(e.entered_by)} <span class="dim">`
-        + `${esc(String(e.entered_at || '').slice(0, 10))}</span>` },
-    { label: 'Note', key: 'note', render: (e) => esc(e.note || '—') },
-  ], { cards: true, cardLead: 'label' }));
-
-  regPanel.body.append(el('p', 'cap', 'Entries are permanent and are never edited — a correction '
-    + 'is a reversing entry, which is why a mistake stays visible above the thing that fixed it. '
-    + 'Photographs are held for twelve months; an entry whose proof has passed that says so '
-    + 'rather than reading as one nobody ever documented.'));
+        + 'verification row — listed and flagged, and in none of these totals.'
+      : '.')
+    + ' Entries are permanent and are never edited — a correction is a reversing entry, which '
+    + 'is why a mistake stays visible above the thing that fixed it. Photographs are held for '
+    + 'twelve months; one past that says it was held until a date rather than reading as an '
+    + 'entry nobody documented.'));
 }

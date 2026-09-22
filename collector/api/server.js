@@ -64,6 +64,7 @@ import { compareRoutes } from './compare_routes.js';
 import { performanceRoutes } from './performance_routes.js';
 import { statusRoutes } from './status_routes.js';
 import { samePersonRoutes } from './sameperson_routes.js';
+import { registerRoutes } from './register_routes.js';
 /* Folding two people into one, and moving the money with them — the operation
    src/persons.js refuses to do by itself the moment either carries an entry. */
 import { personMergeRoutes } from './person_merge_routes.js';
@@ -6343,6 +6344,11 @@ statusRoutes(app, { q, wrap });
    an email merges on its own; a name that sits inside another name is a
    proposal and folds nothing until somebody answers it. */
 samePersonRoutes(app, { q, wrap });
+/* The per-person transaction register — GET /api/driver/register. winDays and
+   not win: every line in it is dated on a Dubai CALENDAR DAY (a trip's local
+   day, a ledger entry's effective_on), so an endOfDay timestamp would compare
+   a date against an instant. */
+registerRoutes(app, { q, wrap, winDays });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this

@@ -132,7 +132,7 @@ console.log('\na driver who has a record');
      be readable on that point or the two halves look like a contradiction:
      an empty list under a tile reading AED 3,500. */
   check('the register heading names the window it is over',
-    /Entries in /.test(await page.$eval('[data-panel="driver-money-register"]',
+    /Statement for /.test(await page.$eval('[data-panel="driver-money-register"]',
       (e) => e.innerText)),
     (await page.$eval('[data-panel="driver-money-register"]', (e) => e.innerText)).slice(0, 80));
 
@@ -163,15 +163,30 @@ console.log('\na driver who has a record');
     /-1,000\.00|−1,000\.00/.test(names.join(' ')), names.join(' ').slice(0, 200));
 
   /* THREE PROOF STATES. */
-  const proof = await page.$$eval('[data-panel="driver-money-register"] tbody tr',
-    (rows) => rows.map((r) => {
-      const c = [...r.querySelectorAll('td')][3];
-      return { link: !!c?.querySelector('a'), title: c?.querySelector('.dash')?.getAttribute('title') || null };
-    }));
+  /* BY HEADER, NOT BY INDEX. This read `td[3]` and broke silently the moment
+     the register grew a Fare and a Cash-in column in front of it — returning
+     six perfectly valid cells that simply were not the proof column, and
+     failing with a message that looked like a receipt bug. A column position
+     is not a stable identifier for a table this page is still growing. */
+  const proof = await page.$$eval('[data-panel="driver-money-register"] table',
+    (tbls) => {
+      const tbl = tbls[0];
+      const heads = [...tbl.querySelectorAll('thead th')].map((h) => h.textContent.trim());
+      const i = heads.findIndex((h) => /proof/i.test(h));
+      return [...tbl.querySelectorAll('tbody tr')].map((r) => {
+        const c = [...r.querySelectorAll('td')][i];
+        return { link: !!c?.querySelector('a'),
+          title: c?.querySelector('.dash')?.getAttribute('title') || null };
+      });
+    });
   check('a held receipt is a link to the photograph', proof.some((p) => p.link),
     JSON.stringify(proof));
-  check('and an expired one says it was held and has since gone',
-    proof.some((p) => /passed its twelve-month retention/.test(p.title || '')),
+  /* AND THE CORRECTED WORDING. "Removed" was never true — nothing in this
+     system deletes a receipt — so an expired one now says it was held until a
+     date and is no longer served, and a digest with no bytes says it was never
+     saved. See docs/COVERAGE.md. */
+  check('and an expired one says it was held until a date and is no longer served',
+    proof.some((p) => /held until .* no longer serves it/s.test(p.title || '')),
     JSON.stringify(proof.map((p) => p.title)));
   check('the page says entries are never edited, and what a correction is instead',
     /a correction is a reversing entry/.test(body), body.slice(-400));
