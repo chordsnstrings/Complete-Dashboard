@@ -827,6 +827,39 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A GREEDY ATTRIBUTE RUN MAKES A BLANK SPREADSHEET CELL EAT THE NEXT ONE.**
+  `src/salary/xlsx.js` is hand-rolled on `node:zlib` (the operator chose that
+  on 2026-09-22 over exceljs at 21.8 MB and SheetJS 0.18.5, which carries
+  prototype-pollution and ReDoS advisories). Written
+  `/<c\b([^>]*)(?:\/>|>([\s\S]*?)<\/c>)/`, the greedy `[^>]*` swallows the
+  `/` of a self-closing `<c r="B5" s="59"/>`; the `\/>` branch can then never
+  match, the bare `>` branch matches instead, and the lazy body runs forward
+  to the NEXT `</c>` — consuming every cell in between. These payslips are
+  mostly blank cells in exactly that form. The reader returned 5,604 cells for
+  one sheet and silently dropped the cell after each blank: column A of the
+  header row and the period line ("For the Month of August, 2024") were simply
+  absent, **with no error anywhere**. The fix is a LAZY `([^>]*?)`, which
+  stops before the slash. The same shape was present in the `<si>` and `<t>`
+  patterns.
+  It was found only by reading the same file with a second implementation
+  (openpyxl) and diffing every cell — never by looking at the output, which
+  was entirely plausible. **A hand-rolled parser needs a differential check
+  against a second implementation, not a plausible-looking result.**
+  The same run found a second silent loss: a TIME-ONLY cell (Excel stores
+  11:34 as 0.4819, a fraction of a day with no day) was going through the date
+  path, where a serial below 1 is correctly refused — so every Salik timestamp
+  read as EMPTY. Times and dates are now separate style classes.
+  Measured after both fixes, over the whole corpus: 399 of 399 workbooks read
+  with **zero** cell-level differences against openpyxl. 683 files seen, 3,109
+  sheets, 1,362,746 rows, 11,708,213 non-empty cells.
+  **The nine files this reader cannot open are genuine BIFF8 `.xls` (OLE2
+  magic `D0 CF 11 E0`), all of them Salik or RTA-fine reports** — a different
+  format, not a bug, and `bin/salary-verify.mjs` names each one rather than
+  skipping it. They are an input gap for the fine/toll allocation work.
+  Note also that the extension lies in both directions: `Driver's Personal
+  Cash Advances.xls` is a real xlsx, so the magic bytes decide, never the name.
+
+
 * **A TEST FIXTURE BOUND TO `MERGES[0]` CHANGES SUBJECT WHEN THE REGISTER IS
   REORDERED, AND REPORTS IT AS NINETEEN COUNTING BUGS.**
   On 2026-09-22 the operator's ruling on the Sana pair was added to
