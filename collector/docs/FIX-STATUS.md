@@ -2071,6 +2071,29 @@ failing its test; the first 10 re-run against the new code, all failing too).
 | S13 | CABMAN rows said `CABMAN_PASSWORD`, which is no Settings key (it is `CABMAN_ECOSINE_PASS`); a save could never reach them | **written** | named by the real key; `schema_v82` drops the old rows; §12 checks every banner credential name against the Settings catalogue. The revert fails 1 |
 | S14 | the paste box could file a refused duplicate's verdict; a cleared key was tested against the API's own environment and called "nothing configured" | **written** | verdicts from admitted candidates only; a cleared key is recorded, not tested. Reverts fail 1 and 3 |
 
+### On production — deployment `1c20e231` (commit `13731f6`), ACTIVE 09:42:03Z
+
+Re-measured after the deploy, by the same reads that found the fault:
+
+- **S1/S7 proven on real Postgres.** The collector's first observations after
+  the restart landed at 09:42:32Z (`UBER_WEB_COOKIE`) and 09:42:34Z
+  (`UBER_WEB_COOKIE_EGARI`). Both keys are stored on the Settings page, so the
+  version guard compared a loaded version with the stored one and accepted
+  them. A precision or type mismatch would have frozen those rows instead.
+- **S12 proven.** `/api/auth` answered `pending: 0` with `superseded: false` on
+  all 26 rows, so the deploy made no week-long pending lines.
+- **S13 proven.** A `CABMAN_ECOSINE_PASS` row was written at 09:41:11Z, and
+  `CABMAN_PASSWORD` is gone, so schema_v82 ran.
+- **S5 proven.** Two identical GETs of `/api/auth` carried no `x-cache`, so the
+  cache skips it.
+- The banner rendered through bin/prod-mirror.mjs at 1440 and 390 wide showed
+  the three standing rows (Bolt Ecosine FI entitlement, Bolt Ecosine token,
+  Yango console) and not the Egari cookie.
+- **S2, S3, S6, S8, S10, S11, S14 are deployed, not yet proven.** They act on a
+  Settings save, and nobody here saves a credential on the operator's behalf.
+  The first real save proves them: its banner rows should read "accepted when
+  saved" (or "refused when saved") within the save's own response.
+
 Not done, and named: inside the collector, a value saved while a source is
 running is used from that source's next pass. The pin is retaken between
 sources, so a save made mid-run now reaches the later sources in the same run,
