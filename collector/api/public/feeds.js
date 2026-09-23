@@ -14,16 +14,21 @@
    app.css, on --good and --critical), and each carries its word — "receiving"
    or "not receiving" — because a verdict must never be colour alone. A red
    cell also says WHY in the route's own sentence, and that sentence is true:
-   a car whose fleet has no seat-sensor account says exactly that, and nothing
+   a car whose fleet has no CABMAN account says exactly that, and nothing
    that reads as a fault in the car. */
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill, countOf,
   dtStr, dayStr, dialable, sourceLabel, andList } from './ui.js';
 import { fmt } from './charts.js';
 import { api } from './data.js';
 
+/* Two seat-sensor providers and one telematics feed. FMS and CABMAN are
+   separate providers and each is meant to send seat data (the operator,
+   2026-09-23), so the seat sensor is shown per provider, and every cell names
+   the provider its reading came from. */
 const FEEDS = {
-  seat: { label: 'Seat sensor', noun: 'seat-sensor' },
-  fms: { label: 'FMS', noun: 'FMS' },
+  seat: { label: 'Seat sensor — CABMAN', noun: 'CABMAN seat-sensor', from: 'CABMAN DT' },
+  fms_seat: { label: 'Seat sensor — FMS', noun: 'FMS seat-count', from: 'FMS (InfoTrack), seat count per trip' },
+  fms: { label: 'FMS data', noun: 'FMS', from: 'FMS (InfoTrack), live' },
 };
 
 /* One feed on one car: the chip, then when it was last heard from, then why
@@ -37,9 +42,10 @@ function feedCell(r, feed) {
   const state = r[`${feed}_state`];
   const reason = r[`${feed}_reason`];
   const chip = ok ? pill('receiving', 'ok') : pill('not receiving', 'bad', reason);
+  const from = `<div class="dim">from ${esc(FEEDS[feed].from)}</div>`;
   const when = at ? `<div class="dim">last reading ${esc(dtStr(at))}</div>` : '';
   const why = !ok && reason && state !== 'silent' ? `<div class="dim">${esc(reason)}</div>` : '';
-  return `${chip}${when}${why}`;
+  return `${chip}${from}${when}${why}`;
 }
 
 /* `link` is handed in by the column rather than defined here, so the column
@@ -89,12 +95,16 @@ export async function renderFeeds(root) {
 
   /* The count at the top: receiving and not, for each feed. */
   root.append(kpiRow([
-    { label: 'Seat sensor receiving', value: fmt(t.seat?.receiving ?? 0), tone: 'good', key: 'seat-yes',
+    { label: 'Seat sensor (CABMAN) receiving', value: fmt(t.seat?.receiving ?? 0), tone: 'good', key: 'seat-yes',
       sub: `of ${countOf(t.vehicles ?? 0, 'car')} active on Uber` },
-    { label: 'Seat sensor not receiving', value: fmt(t.seat?.not_receiving ?? 0), tone: 'critical', key: 'seat-no',
+    { label: 'Seat sensor (CABMAN) not receiving', value: fmt(t.seat?.not_receiving ?? 0), tone: 'critical', key: 'seat-no',
       sub: noAccount.length
-        ? `${fmt(noAccount.length)} of them on ${andList(noAccountFleets)}, which has no seat-sensor account`
+        ? `${fmt(noAccount.length)} of them on ${andList(noAccountFleets)}, which has no CABMAN account`
         : `no reading in the last ${hours} hours` },
+    { label: 'Seat sensor (FMS) receiving', value: fmt(t.fms_seat?.receiving ?? 0), tone: 'good', key: 'fms-seat-yes',
+      sub: `of ${countOf(t.vehicles ?? 0, 'car')} active on Uber` },
+    { label: 'Seat sensor (FMS) not receiving', value: fmt(t.fms_seat?.not_receiving ?? 0), tone: 'critical', key: 'fms-seat-no',
+      sub: `no FMS trip with a seat count in the last ${hours} hours` },
     { label: 'FMS receiving', value: fmt(t.fms?.receiving ?? 0), tone: 'good', key: 'fms-yes',
       sub: `of ${countOf(t.vehicles ?? 0, 'car')} active on Uber` },
     { label: 'FMS not receiving', value: fmt(t.fms?.not_receiving ?? 0), tone: 'critical', key: 'fms-no',
@@ -116,6 +126,7 @@ export async function renderFeeds(root) {
       { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.vehicle_page ? r.plate : null, r.plate) },
       { label: 'Fleet', key: 'fleet_id', render: (r) => esc(sourceLabel(r.fleet_id)) },
       { label: FEEDS.seat.label, key: 'seat_receiving', sortValue: on('seat'), render: (r) => feedCell(r, 'seat') },
+      { label: FEEDS.fms_seat.label, key: 'fms_seat_receiving', sortValue: on('fms_seat'), render: (r) => feedCell(r, 'fms_seat') },
       { label: FEEDS.fms.label, key: 'fms_receiving', sortValue: on('fms'), render: (r) => feedCell(r, 'fms') },
       /* A driver page is addressed by the PERSON where the spine has placed
          the account, and by the account otherwise — see "A DRIVER PAGE IS
@@ -140,8 +151,9 @@ export async function renderFeeds(root) {
   const names = (list) => andList((list || []).map((f) => sourceLabel(f)));
   const rules = [
     ['Active on Uber', 'Uber’s own vehicle list marks the car ACTIVE. It is read every 30 minutes, for both fleets.'],
-    ['Seat sensor', `CABMAN, the only feed with a seat sensor. It holds an account for ${names(d.accounts?.seat) || 'no fleet'} only.`],
-    ['FMS', `InfoTrack telematics, with an account for ${names(d.accounts?.fms) || 'no fleet'}.`],
+    ['Seat sensor — CABMAN', `CABMAN DT's seat sensor, sampled every 5 minutes. It holds an account for ${names(d.accounts?.seat) || 'no fleet'} only.`],
+    ['Seat sensor — FMS', `the seat count FMS records on each trip, collected every 30 minutes, for ${names(d.accounts?.fms_seat) || 'no fleet'}. A car that makes no trip sends no seat count. FMS's live feed, as read here, carries no seat field.`],
+    ['FMS data', `InfoTrack's live telematics, with an account for ${names(d.accounts?.fms) || 'no fleet'}.`],
     ['Receiving', `a reading in the last ${hours} hours. Trackers report every few minutes while driving but go quiet for hours when parked, so a shorter window would turn parked cars red.`],
     ['Matched by', 'the plate, as every feed stores it: upper case, no spaces or dashes.'],
     ['Driver', 'whoever Uber assigns to the car in that list, or where it assigns nobody, whoever drove it most on the latest day with a trip. The phone is from their roster record.'],

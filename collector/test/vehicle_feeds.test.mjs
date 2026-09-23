@@ -9,7 +9,7 @@
      - a car receiving both feeds is green on both;
      - a car receiving neither is red on both, and says "in the last 24 hours"
        where readings exist and "on record" where none ever did;
-     - a car whose fleet has no seat-sensor account is red with THAT reason,
+     - a car whose fleet has no CABMAN account is red with THAT reason,
        not a sentence that suggests its device is broken;
      - a car Uber does not list as ACTIVE is not listed, and neither is a car
        only another channel or only a tracker knows;
@@ -77,6 +77,20 @@ await fix('cabman', 'Q10009', 'ecosine', '5 minutes', null);
 await fix('cabman', 'Q10010', 'ecosine', '3 days', false);
 await fix('cabman', 'Q10010', 'ecosine', '-1 day', true);      // a tracker clock running a day ahead
 
+/* ── FMS's seat sensor: the seat count on FMS's own trip record ─────────────
+   FMS and CABMAN are two separate seat-sensor providers (the operator,
+   2026-09-23). FMS sends its seat data as the Seat Count on each journey in
+   GetTripPassenger, collected into trip.seat_count for platform 'fms'. */
+const fmsTrip = (plate, fleet, endedAgo, seat, platform = 'fms') => q(
+  `INSERT INTO trip (platform, external_id, fleet_id, plate, requested_at, ended_at, seat_count, status)
+   VALUES ($1, $2, $3, $4, now() - $5::interval - interval '20 minutes', now() - $5::interval, $6, 'completed')`,
+  [platform, `${plate}|${endedAgo}|${platform}`, fleet, plate, endedAgo, seat]);
+await fmsTrip('Q10001', 'ecosine', '90 minutes', 0);             // a trip with nobody on the seat is still a reading
+await fmsTrip('Q10002', 'ecosine', '3 days', 2);
+await fmsTrip('Q20001', 'egari', '2 hours', 1);                  // Egari: no CABMAN, but FMS sends seat counts
+await fmsTrip('Q10007', 'ecosine', '1 hour', null);              // an FMS trip with no seat count is not seat data
+await fmsTrip('Q10008', 'ecosine', '1 hour', 1, 'uber');         // another channel's seat_count is not FMS's
+
 /* ── who drives them ─────────────────────────────────────────────────────── */
 const person = async (platform, id, fleet, name, phone) => q(
   `INSERT INTO driver_compliance (platform, driver_ext_id, fleet_id, full_name, phone)
@@ -140,7 +154,7 @@ console.log('\nreceiving both, neither');
   check('a car receiving neither is red on both',
     r?.seat_receiving === false && r?.fms_receiving === false, JSON.stringify(r));
   check('…and says the readings stopped, rather than that there were none',
-    r?.seat_state === 'silent' && /no seat-sensor reading in the last 24 hours/.test(r.seat_reason)
+    r?.seat_state === 'silent' && /no CABMAN seat-sensor reading in the last 24 hours/.test(r.seat_reason)
     && r?.fms_state === 'silent' && /no FMS reading in the last 24 hours/.test(r.fms_reason),
     `${r?.seat_reason} | ${r?.fms_reason}`);
   check('…and still carries when each was last heard from',
@@ -155,15 +169,17 @@ console.log('\nreceiving both, neither');
   check('…with no last-received time to show', r?.seat_at == null && r?.fms_at == null);
 }
 
-console.log('\na fleet with no seat-sensor account');
+console.log('\na fleet with no CABMAN account');
 {
   const r = row('Q20001');
   check('an Egari car is red on the seat sensor', r?.seat_receiving === false, JSON.stringify(r));
   check('…and the reason is the account, in those words',
-    r?.seat_state === 'no_account' && r?.seat_reason === 'no seat-sensor account for Egari',
+    r?.seat_state === 'no_account' && r?.seat_reason === 'no CABMAN account for Egari',
     String(r?.seat_reason));
   check('…which says nothing about its device', !/device|broken|fault|tracker/i.test(r?.seat_reason || ''));
   check('…while its FMS, which Egari does have, is judged on its readings', r?.fms_receiving === true);
+  check('…and so is its FMS seat sensor: Egari has seat data, just not from CABMAN',
+    r?.fms_seat_receiving === true && r?.fms_seat_state === 'receiving' && !!r?.fms_seat_at, JSON.stringify(r));
   check('the response names which fleets hold which accounts',
     JSON.stringify(d.accounts?.seat) === '["ecosine"]'
     && JSON.stringify([...(d.accounts?.fms || [])].sort()) === '["ecosine","egari"]',
@@ -219,11 +235,32 @@ console.log('\nthe driver and the phone');
     r?.vehicle_page === false && row('Q10001')?.vehicle_page === true);
 }
 
+console.log('\nFMS, the second seat-sensor provider');
+{
+  check('a car with an FMS trip carrying a seat count in the window is receiving',
+    row('Q10001')?.fms_seat_receiving === true, JSON.stringify(row('Q10001')));
+  check('…even when the count is 0: an empty seat is still a reading', row('Q10001')?.fms_seat_state === 'receiving');
+  check('a car whose last FMS seat count is three days old is not, and says when it was',
+    row('Q10002')?.fms_seat_receiving === false && row('Q10002')?.fms_seat_state === 'silent'
+    && !!row('Q10002')?.fms_seat_at && /no FMS seat-count reading in the last 24 hours/.test(row('Q10002')?.fms_seat_reason || ''),
+    JSON.stringify(row('Q10002')));
+  check('an FMS trip with no seat count is not seat-sensor data',
+    row('Q10007')?.fms_seat_receiving === false && row('Q10007')?.fms_seat_at == null, JSON.stringify(row('Q10007')));
+  check('another channel\u2019s seat count is not FMS\u2019s', row('Q10008')?.fms_seat_receiving === false
+    && row('Q10008')?.fms_seat_at == null, JSON.stringify(row('Q10008')));
+  check('a car FMS has never sent a seat count for says so, "on record"',
+    row('Q10003')?.fms_seat_state === 'never'
+    && row('Q10003')?.fms_seat_reason === 'no FMS seat-count reading on record for this car', row('Q10003')?.fms_seat_reason);
+  check('the response names FMS as a seat-sensor provider for both fleets',
+    JSON.stringify([...(d.accounts?.fms_seat || [])].sort()) === '["ecosine","egari"]', JSON.stringify(d.accounts));
+}
+
 console.log('\nthe count at the top');
 check('receiving and not receiving are counted per feed over every listed car',
   d.totals?.vehicles === 8
   && d.totals.seat.receiving === 2 && d.totals.seat.not_receiving === 6
-  && d.totals.fms.receiving === 2 && d.totals.fms.not_receiving === 6,
+  && d.totals.fms.receiving === 2 && d.totals.fms.not_receiving === 6
+  && d.totals.fms_seat?.receiving === 2 && d.totals.fms_seat?.not_receiving === 6,
   JSON.stringify(d.totals));
 check('…and per fleet', d.totals?.fleets?.ecosine === 7 && d.totals?.fleets?.egari === 1,
   JSON.stringify(d.totals?.fleets));

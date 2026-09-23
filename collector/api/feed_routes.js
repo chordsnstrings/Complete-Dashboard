@@ -145,13 +145,28 @@ export const FEEDS_SQL = `
              (SELECT max(t.captured_at) FROM telemetry_snapshot t
                WHERE t.source = 'fms' AND t.plate = a.plate AND t.captured_at <= now()),
              (SELECT max(t.captured_at) FROM telemetry_snapshot t
-               WHERE t.source = 'fms' AND t.plate = a.plate)) AS fms_at
+               WHERE t.source = 'fms' AND t.plate = a.plate)) AS fms_at,
+           /* FMS's seat sensor. FMS and CABMAN are two separate providers and
+              each is meant to send seat data. FMS sends it as the 'Seat Count'
+              on each journey in GetTripPassenger (src/sources/fms.js), which is
+              collected into trip.seat_count on every incremental. The live call
+              this product polls, GetVehicleStatus, carries no seat field. So the
+              newest FMS journey that has a seat count is FMS's newest seat
+              reading, dated when that journey ended. */
+           coalesce(
+             (SELECT max(coalesce(t.ended_at, t.requested_at)) FROM trip t
+               WHERE t.platform = 'fms' AND t.plate = a.plate AND t.seat_count IS NOT NULL
+                 AND coalesce(t.ended_at, t.requested_at) <= now()),
+             (SELECT max(coalesce(t.ended_at, t.requested_at)) FROM trip t
+               WHERE t.platform = 'fms' AND t.plate = a.plate AND t.seat_count IS NOT NULL)) AS fms_seat_at
       FROM active a
   )
   SELECT a.plate, a.fleet_id, a.assigned,
          h.seat_at, h.fms_at,
          (h.seat_at > now() - make_interval(hours => $1::int)) IS TRUE AS seat_receiving,
          (h.fms_at  > now() - make_interval(hours => $1::int)) IS TRUE AS fms_receiving,
+         h.fms_seat_at,
+         (h.fms_seat_at > now() - make_interval(hours => $1::int)) IS TRUE AS fms_seat_receiving,
          nullif(btrim(cd.driver_ext_id), '') AS custody_id,
          nullif(btrim(cd.driver_name), '') AS custody_name,
          /* Text, not a DATE: node-postgres hands a DATE back as a Date at the
@@ -170,6 +185,7 @@ export const FEEDS_SQL = `
     JOIN heard h ON h.plate = a.plate
     LEFT JOIN vehicle_current_driver cd ON cd.plate = a.plate
    ORDER BY ((h.seat_at > now() - make_interval(hours => $1::int)) IS TRUE)::int
+          + ((h.fms_seat_at > now() - make_interval(hours => $1::int)) IS TRUE)::int
           + ((h.fms_at  > now() - make_interval(hours => $1::int)) IS TRUE)::int,
             a.fleet_id, a.plate`;
 
@@ -222,12 +238,18 @@ export const DRIVERS_SQL = `
    credentials can be added here once provided"); FMS lists both. */
 export const feedAccounts = () => ({
   seat: config.cabman.fleets.map((f) => f.fleet),
+  fms_seat: config.fms.fleets.map((f) => f.fleet),
   fms: config.fms.fleets.map((f) => f.fleet),
 });
 
+/* `seat` is CABMAN's seat sensor and `fms_seat` is FMS's: two providers, each
+   of which is meant to send seat data (the operator, 2026-09-23). So a fleet
+   with no CABMAN account is "no CABMAN account", never "no seat-sensor account",
+   which would be false of Egari, whose FMS sends seat counts. */
 const FEED_WORDS = {
-  seat: { what: 'seat-sensor', provider: 'CABMAN' },
-  fms: { what: 'FMS', provider: 'FMS' },
+  seat: { what: 'CABMAN seat-sensor', provider: 'CABMAN', account: 'CABMAN' },
+  fms_seat: { what: 'FMS seat-count', provider: 'FMS', account: 'FMS' },
+  fms: { what: 'FMS', provider: 'FMS', account: 'FMS' },
 };
 
 /* The state of one feed on one car, and the sentence that is TRUE of it.
@@ -259,7 +281,7 @@ function judge(feed, r, ctx) {
   if (at == null) {
     return account
       ? { state: 'never', reason: `no ${w.what} reading on record for this car` }
-      : { state: 'no_account', reason: `no ${w.what} account for ${FLEET_NAME(r.fleet_id)}` };
+      : { state: 'no_account', reason: `no ${w.account} account for ${FLEET_NAME(r.fleet_id)}` };
   }
   if (account && !ctx.anyReceiving[feed].has(r.fleet_id)) {
     return { state: 'feed_dark',
@@ -292,12 +314,14 @@ export function feedRoutes(app, { q, wrap }) {
 
     const anyReceiving = {
       seat: new Set(rows.filter((r) => r.seat_receiving).map((r) => r.fleet_id)),
+      fms_seat: new Set(rows.filter((r) => r.fms_seat_receiving).map((r) => r.fleet_id)),
       fms: new Set(rows.filter((r) => r.fms_receiving).map((r) => r.fleet_id)),
     };
     const ctx = { accounts, anyReceiving, hours: FEED_WINDOW_H };
 
     const out = rows.map((r) => {
       const seat = judge('seat', r, ctx);
+      const fmsSeat = judge('fms_seat', r, ctx);
       const fms = judge('fms', r, ctx);
       const assigned = r.assigned && r.assigned.length ? r.assigned : null;
       const refs = assigned
@@ -310,6 +334,8 @@ export function feedRoutes(app, { q, wrap }) {
         vehicle_page: !!r.vehicle_page,
         seat_receiving: !!r.seat_receiving, seat_at: r.seat_at, seat_state: seat.state,
         seat_reason: seat.reason,
+        fms_seat_receiving: !!r.fms_seat_receiving, fms_seat_at: r.fms_seat_at,
+        fms_seat_state: fmsSeat.state, fms_seat_reason: fmsSeat.reason,
         fms_receiving: !!r.fms_receiving, fms_at: r.fms_at, fms_state: fms.state,
         fms_reason: fms.reason,
         driver_refs: refs,
@@ -333,6 +359,7 @@ export function feedRoutes(app, { q, wrap }) {
         vehicles: out.length,
         fleets,
         seat: { receiving: count('seat', true), not_receiving: count('seat', false) },
+        fms_seat: { receiving: count('fms_seat', true), not_receiving: count('fms_seat', false) },
         fms: { receiving: count('fms', true), not_receiving: count('fms', false) },
       },
       rows: out,

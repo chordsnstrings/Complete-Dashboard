@@ -183,7 +183,7 @@ hours early.
 | Bolt | yes — 99.7% of chargeable Aug | **yes, per Monday** — `getPayouts` (lags days) and the balance ledger `getFleetBalanceDetails` (same day); see the trap below | figure is GROSS; the ledger does publish commission per day (`commissions_in_app`, `commissions_cash`) |
 | Yango | yes — 100% | yes | earnings are NET: cash + cashless + commission (commission is negative) |
 | FMS | journeys, not bookings | n/a | watches cars, does not sell rides |
-| CABMAN | realtime GPS, 5-min poll | n/a | the only feed with a seat sensor |
+| CABMAN | realtime GPS, 5-min poll | n/a | a live seat sensor (FMS is the second seat-sensor provider: a Seat Count on each trip — see the Seat sensor and FMS section) |
 
 `COMMISSION_CHANNELS = {uber, bolt, yango, careem}` — the channels whose fares
 are a gross the platform takes a cut of. `fleetIncome()` / `chooseBasis()` pick
@@ -5819,6 +5819,31 @@ itself and 120 once the person's other accounts are read (counted through
   the practical effect is small — a pair merged BY a shared phone yields that
   same phone — but a register-merged pair lends its sibling's number, which is
   right only while the merge is.
+
+
+### FMS is a second seat-sensor provider — 2026-09-23
+
+The operator: "FMS and CABMAN is two separate providers each should provide
+seat sensor data." So the tab now shows the seat sensor per provider, and each
+feed cell names where its reading came from ("from CABMAN DT", "from FMS
+(InfoTrack), seat count per trip", "from FMS (InfoTrack), live").
+
+- **What FMS sends on seats.** A `Seat Count` (1–4) on every journey in
+  `GetTripPassenger`, which is already collected into `trip.seat_count` for
+  platform `fms`. The live call the collector polls, `GetVehicleStatus`, has no
+  seat field. `GetVehicleCurrentDetails` does carry a live `Seatcount`, but
+  nothing calls it.
+- **"Receiving from FMS"** means an FMS trip whose seat count is not null and
+  which ended in the window. A count of 0 is a reading. A car that makes no trip
+  sends no seat count, and the page says so.
+- **TRAP — a wrong reason.** "No seat-sensor account for Egari" was the red
+  reason on every Egari car. It became false the moment FMS counts, because
+  Egari's FMS sends seat counts. The true reason is "no CABMAN account for
+  Egari". The same applied to the line "CABMAN, the only feed with a seat
+  sensor", which the page and this file both carried.
+- **Not changed here.** The rest of the system still treats CABMAN as the only
+  seat sensor, for example unauthorized-trip detection in src/reconcile.js. An
+  analysis of what changes system-wide was requested separately.
 
 ## The operator's HR roster export — what it gives, measured 2026-09-23
 

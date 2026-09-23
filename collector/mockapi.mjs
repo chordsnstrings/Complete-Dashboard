@@ -2256,49 +2256,55 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
    Shaped like api/feed_routes.js and SYNTHETIC throughout: Q-prefixed plates,
    test names and +999 numbers, none of them anybody's. One car for each state
    the page draws differently — both feeds current, both silent, never
-   reported, an Egari car with no seat-sensor account, two drivers assigned
+   reported, an Egari car with no CABMAN account (but FMS seat counts), two drivers assigned
    in Uber, a custody driver, a driver with no phone, and a car nobody is
    known to drive — so every branch of the cell renderers is on screen. */
 app.get('/api/vehicles/feeds', (_, r) => {
   const now = Date.now();
   const ago = (min) => new Date(now - min * 60e3).toISOString();
   const ref = (name, id, phone, personId = null) => ({ name, id, person_id: personId, phone });
-  const row = (plate, fleet, seat, fms, drv) => ({
+  /* Two seat-sensor providers, CABMAN and FMS, and FMS's live data. */
+  const cell = (feed, v) => ({ [`${feed}_receiving`]: v.state === 'receiving', [`${feed}_at`]: v.at ?? null,
+    [`${feed}_state`]: v.state, [`${feed}_reason`]: v.reason ?? null });
+  const row = (plate, fleet, seat, fmsSeat, fms, drv) => ({
     plate, fleet_id: fleet, vehicle_page: true,
-    seat_receiving: seat.state === 'receiving', seat_at: seat.at ?? null, seat_state: seat.state,
-    seat_reason: seat.reason ?? null,
-    fms_receiving: fms.state === 'receiving', fms_at: fms.at ?? null, fms_state: fms.state,
-    fms_reason: fms.reason ?? null,
+    ...cell('seat', seat), ...cell('fms_seat', fmsSeat), ...cell('fms', fms),
     driver_refs: drv.refs || [], driver_basis: drv.basis || null, driver_as_of: drv.as_of || null,
     driver_absent: (drv.refs || []).length ? null
       : 'no driver known — Uber assigns nobody to this car and no trip on record names one',
   });
   const SILENT = (w) => ({ state: 'silent', reason: `no ${w} reading in the last 24 hours` });
+  const NO_CABMAN = { state: 'no_account', reason: 'no CABMAN account for Egari' };
   const rows = [
     row('Q10003', 'ecosine',
-      { state: 'never', reason: 'no seat-sensor reading on record for this car' },
+      { state: 'never', reason: 'no CABMAN seat-sensor reading on record for this car' },
+      { state: 'never', reason: 'no FMS seat-count reading on record for this car' },
       { state: 'never', reason: 'no FMS reading on record for this car' }, {}),
-    row('Q10002', 'ecosine', { ...SILENT('seat-sensor'), at: ago(4320) }, { ...SILENT('FMS'), at: ago(4400) },
+    row('Q10002', 'ecosine', { ...SILENT('CABMAN seat-sensor'), at: ago(4320) },
+      { ...SILENT('FMS seat-count'), at: ago(4500) }, { ...SILENT('FMS'), at: ago(4400) },
       { refs: [ref('Test Driver Charlie', 'drv-2', '+999 555 0301')], basis: 'custody', as_of: '2026-09-19' }),
-    row('Q20002', 'egari', { state: 'no_account', reason: 'no seat-sensor account for Egari' },
+    row('Q20002', 'egari', NO_CABMAN, { state: 'receiving', at: ago(200) },
       { ...SILENT('FMS'), at: ago(3100) },
       { refs: [ref('Test Driver Golf', 'drv-0', null)], basis: 'uber_assignment' }),
-    row('Q20001', 'egari', { state: 'no_account', reason: 'no seat-sensor account for Egari' },
+    row('Q20001', 'egari', NO_CABMAN, { state: 'receiving', at: ago(60) },
       { state: 'receiving', at: ago(30) },
       { refs: [ref('Test Driver Echo', 'drv-1', '+999 555 0201'), ref('Test Driver Foxtrot', 'drv-3', null)],
         basis: 'uber_assignment' }),
-    row('Q10004', 'ecosine', { state: 'receiving', at: ago(12) }, { state: 'never', reason: 'no FMS reading on record for this car' },
+    row('Q10004', 'ecosine', { state: 'receiving', at: ago(12) },
+      { state: 'never', reason: 'no FMS seat-count reading on record for this car' },
+      { state: 'never', reason: 'no FMS reading on record for this car' },
       { refs: [ref('Test Driver Delta', 'drv-4', '+999 555 0401')], basis: 'uber_assignment' }),
-    row('Q10001', 'ecosine', { state: 'receiving', at: ago(10) }, { state: 'receiving', at: ago(5) },
+    row('Q10001', 'ecosine', { state: 'receiving', at: ago(10) }, { state: 'receiving', at: ago(90) },
+      { state: 'receiving', at: ago(5) },
       { refs: [ref('Test Driver Alpha', 'drv-5', '+999 555 0101')], basis: 'uber_assignment' }),
   ];
   const count = (f, yes) => rows.filter((x) => x[`${f}_receiving`] === yes).length;
+  const tally = (f) => ({ receiving: count(f, true), not_receiving: count(f, false) });
   r.json({
     as_of: new Date(now).toISOString(), window_hours: 24,
-    accounts: { seat: ['ecosine'], fms: ['ecosine', 'egari'] },
+    accounts: { seat: ['ecosine'], fms_seat: ['ecosine', 'egari'], fms: ['ecosine', 'egari'] },
     totals: { vehicles: rows.length, fleets: { ecosine: 4, egari: 2 },
-      seat: { receiving: count('seat', true), not_receiving: count('seat', false) },
-      fms: { receiving: count('fms', true), not_receiving: count('fms', false) } },
+      seat: tally('seat'), fms_seat: tally('fms_seat'), fms: tally('fms') },
     rows,
   });
 });

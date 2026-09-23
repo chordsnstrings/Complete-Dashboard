@@ -53,11 +53,13 @@ console.log('\nthe count at the top');
 const tile = (k) => page.$eval(`[data-kpi="${k}"] .n`, (e) => e.textContent.trim()).catch(() => null);
 check('seat sensor: 2 receiving, 4 not', (await tile('seat-yes')) === '2' && (await tile('seat-no')) === '4',
   `${await tile('seat-yes')} / ${await tile('seat-no')}`);
-check('FMS: 2 receiving, 4 not', (await tile('fms-yes')) === '2' && (await tile('fms-no')) === '4',
+check('FMS seat sensor: 3 receiving, 3 not', (await tile('fms-seat-yes')) === '3' && (await tile('fms-seat-no')) === '3',
+  `${await tile('fms-seat-yes')} / ${await tile('fms-seat-no')}`);
+check('FMS data: 2 receiving, 4 not', (await tile('fms-yes')) === '2' && (await tile('fms-no')) === '4',
   `${await tile('fms-yes')} / ${await tile('fms-no')}`);
 const seatNoSub = await page.$eval('[data-kpi="seat-no"] .s', (e) => e.textContent).catch(() => '');
-check('the seat count says how many of its reds are the missing account',
-  /2 of them on Egari, which has no seat-sensor account/.test(seatNoSub), seatNoSub);
+check('the CABMAN count says how many of its reds are the missing CABMAN account',
+  /2 of them on Egari, which has no CABMAN account/.test(seatNoSub), seatNoSub);
 
 console.log('\nthe table');
 const rows = await page.$$eval('[data-panel="feeds"] tbody tr', (trs) => trs.map((tr) => {
@@ -66,52 +68,65 @@ const rows = await page.$$eval('[data-panel="feeds"] tbody tr', (trs) => trs.map
     text: td.map((c) => c.innerText.replace(/\s+/g, ' ').trim()),
     plateHref: td[0]?.querySelector('a')?.getAttribute('href') || null,
     seat: td[2]?.querySelector('.pill')?.className || '',
-    fms: td[3]?.querySelector('.pill')?.className || '',
-    drivers: [...(td[4]?.querySelectorAll('a') || [])].map((a) => a.getAttribute('href')),
-    tel: [...(td[5]?.querySelectorAll('a[href^="tel:"]') || [])].map((a) => a.getAttribute('href')),
+    fmsSeat: td[3]?.querySelector('.pill')?.className || '',
+    fms: td[4]?.querySelector('.pill')?.className || '',
+    drivers: [...(td[5]?.querySelectorAll('a') || [])].map((a) => a.getAttribute('href')),
+    tel: [...(td[6]?.querySelectorAll('a[href^="tel:"]') || [])].map((a) => a.getAttribute('href')),
   };
 }));
 const by = (plate) => rows.find((r) => r.text[0] === plate);
 check('one row per car, every car the route returned', rows.length === 6, String(rows.length));
 check('the columns are the ones asked for',
   JSON.stringify(await page.$$eval('[data-panel="feeds"] thead th', (th) => th.map((t) => t.textContent.replace(/[↑↓]/g, '').trim())))
-  === '["Vehicle","Fleet","Seat sensor","FMS","Driver","Phone"]');
+  === '["Vehicle","Fleet","Seat sensor — CABMAN","Seat sensor — FMS","FMS data","Driver","Phone"]');
+/* FMS and CABMAN are two separate seat-sensor providers (the operator,
+   2026-09-23): each gets its own column, and every feed cell names where its
+   reading came from. */
+check('every seat-sensor and FMS cell names its provider',
+  rows.every((r) => /from CABMAN DT/.test(r.text[2]) && /from FMS \(InfoTrack\), seat count per trip/.test(r.text[3])
+    && /from FMS \(InfoTrack\), live/.test(r.text[4])), JSON.stringify(rows.map((r) => r.text.slice(2, 5))));
 {
   const r = by('Q10001');
   check('receiving is green AND says "receiving"',
-    /\bok\b/.test(r?.seat) && /\bok\b/.test(r?.fms) && /^receiving/i.test(r.text[2]) && /^receiving/i.test(r.text[3]),
+    /\bok\b/.test(r?.seat) && /\bok\b/.test(r?.fmsSeat) && /\bok\b/.test(r?.fms)
+    && /^receiving/i.test(r.text[2]) && /^receiving/i.test(r.text[3]) && /^receiving/i.test(r.text[4]),
     JSON.stringify(r));
-  check('…with when it was last received', /last reading/.test(r?.text[2]) && /last reading/.test(r?.text[3]));
+  check('…with when it was last received',
+    /last reading/.test(r?.text[2]) && /last reading/.test(r?.text[3]) && /last reading/.test(r?.text[4]));
   check('the plate opens the vehicle page', /^#vehicle\/Q10001(\?|$)/.test(r?.plateHref || ''), String(r?.plateHref));
   check('the driver opens the driver page', /^#driver\/drv-5(\?|$)/.test(r?.drivers?.[0] || ''), JSON.stringify(r?.drivers));
   check('the phone is a number a handset will dial', r?.tel?.[0] === 'tel:+9995550101', JSON.stringify(r?.tel));
   check('…and the driver cell says the name came from Uber’s assignment',
-    /Test Driver Alpha/.test(r?.text[4]) && /assigned to this car in Uber/.test(r?.text[4]), r?.text[4]);
+    /Test Driver Alpha/.test(r?.text[5]) && /assigned to this car in Uber/.test(r?.text[5]), r?.text[5]);
 }
 {
   const r = by('Q10003');
   check('not receiving is red AND says "not receiving"',
-    /\bbad\b/.test(r?.seat) && /\bbad\b/.test(r?.fms)
-    && /not receiving/i.test(r.text[2]) && /not receiving/i.test(r.text[3]), JSON.stringify(r));
-  check('…and why, where the time cannot say it', /no seat-sensor reading on record for this car/.test(r?.text[2]),
-    r?.text[2]);
+    /\bbad\b/.test(r?.seat) && /\bbad\b/.test(r?.fmsSeat) && /\bbad\b/.test(r?.fms)
+    && /not receiving/i.test(r.text[2]) && /not receiving/i.test(r.text[3]) && /not receiving/i.test(r.text[4]),
+    JSON.stringify(r));
+  check('…and why, where the time cannot say it', /no CABMAN seat-sensor reading on record for this car/.test(r?.text[2])
+    && /no FMS seat-count reading on record for this car/.test(r?.text[3]), JSON.stringify(r?.text.slice(2, 4)));
   check('a car nobody is known to drive says so in both driver columns',
-    /no driver known/.test(r?.text[4]) && /no driver known/.test(r?.text[5]), JSON.stringify(r?.text));
+    /no driver known/.test(r?.text[5]) && /no driver known/.test(r?.text[6]), JSON.stringify(r?.text));
 }
 {
   const r = by('Q20001');
-  check('an Egari car is red on the seat sensor with the true reason',
-    /\bbad\b/.test(r?.seat) && /no seat-sensor account for Egari/.test(r?.text[2]), r?.text[2]);
+  check('an Egari car is red on CABMAN with the true reason: CABMAN, not the seat sensor',
+    /\bbad\b/.test(r?.seat) && /no CABMAN account for Egari/.test(r?.text[2])
+    && !/no seat-sensor account/.test(r?.text[2]), r?.text[2]);
+  check('…while its FMS seat sensor, which Egari does have, is green on its own readings',
+    /\bok\b/.test(r?.fmsSeat) && /^receiving/i.test(r?.text[3]), r?.text[3]);
   check('…and nothing in that cell reads as a fault in the car', !/device|broken|fault/i.test(r?.text[2] || ''));
   check('two assigned drivers are both named and both openable', r?.drivers?.length === 2, JSON.stringify(r?.drivers));
   check('…each phone told apart by its owner\u2019s name, and the missing one said to be missing',
-    /Test Driver Echo: \+9995550201/.test(r?.text[5])
-    && /Test Driver Foxtrot: no phone on file/.test(r?.text[5]), r?.text[5]);
+    /Test Driver Echo: \+9995550201/.test(r?.text[6])
+    && /Test Driver Foxtrot: no phone on file/.test(r?.text[6]), r?.text[6]);
 }
 {
   const r = by('Q10002');
   check('a silent feed shows when it was last heard from', /last reading/.test(r?.text[2]), r?.text[2]);
-  check('a custody driver says which day they drove it', /drove it most on/.test(r?.text[4]), r?.text[4]);
+  check('a custody driver says which day they drove it', /drove it most on/.test(r?.text[5]), r?.text[5]);
 }
 check('the cars missing a feed come first, as the route ordered them',
   rows[0]?.text[0] === 'Q10003' && rows[rows.length - 1]?.text[0] === 'Q10001',
@@ -137,8 +152,9 @@ console.log('\nthe rules, one line each');
 const body = await page.evaluate(() => document.getElementById('view').innerText);
 for (const [k, re] of [
   ['active on Uber', /Active on Uber: Uber’s own vehicle list marks the car ACTIVE/],
-  ['the seat-sensor source', /Seat sensor: CABMAN, the only feed with a seat sensor\. It holds an account for Ecosine only\./],
-  ['FMS', /FMS: InfoTrack telematics, with an account for Ecosine and Egari\./],
+  ['the CABMAN seat-sensor source', /Seat sensor — CABMAN: CABMAN DT's seat sensor, sampled every 5 minutes\. It holds an account for Ecosine only\./],
+  ['the FMS seat-sensor source', /Seat sensor — FMS: the seat count FMS records on each trip, collected every 30 minutes, for Ecosine and Egari\. A car that makes no trip sends no seat count\./],
+  ['FMS', /FMS data: InfoTrack's live telematics, with an account for Ecosine and Egari\./],
   ['the window', /Receiving: a reading in the last 24 hours\./],
   ['the matching', /Matched by: the plate/],
   ['the driver and phone', /Driver: whoever Uber assigns to the car/],
