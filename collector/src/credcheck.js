@@ -27,7 +27,7 @@
 import { config } from './config.js';
 import { http } from './http.js';
 import { get, SETTING_DEFAULTS } from './settings.js';
-import { keyFor } from './credkit.js';
+import { keyFor, recognise } from './credkit.js';
 import { UBER_WEB_HOST } from './auth/uber.js';
 import { dubaiIso } from './util.js';
 /* The paths the COLLECTOR reads, so this file cannot test an endpoint the
@@ -580,7 +580,11 @@ export async function checkCandidate(cand) {
      them should stop an operator from saving it. */
   const fn = BY_KEY[cand.key] || (cand.labelled ? null : CHECKS[cand.provider]);
   if (!fn) {
-    return { ...cand, verdict: 'unknown',
+    /* `untested` beside the verdict, because 'unknown' also means "the
+       provider could not be reached", and the banner says different things
+       for the two: a credential nothing can test is waiting for the collector,
+       one whose provider was down is a check that failed to happen. */
+    return { ...cand, verdict: 'unknown', untested: true,
       detail: cand.key && !BY_KEY[cand.key]
         ? `no live check exists for ${cand.key} — it will be saved as given and tested by the next run`
         : `no live check exists for ${cand.provider}` };
@@ -591,5 +595,77 @@ export async function checkCandidate(cand) {
 
 /** Test every candidate, in parallel — they are separate providers. */
 export const checkAll = (cands) => Promise.all(cands.map(checkCandidate));
+
+/* ── the value that is STORED, tested the way the collector will use it ────
+   The paste box tests a candidate before it is written. The per-key field on
+   the Settings page writes first and tests nothing, and until the collector's
+   next run nobody learns whether the value works. On 2026-09-23 the banner
+   went on showing an Egari cookie as stopped after a working one was saved,
+   because the only verdict on record was about the value it replaced.
+
+   So the Settings save tests what it just stored, with the same checks as the
+   paste box and the same inputs the collector sends: the stored value, and the
+   organisation or company configured for that key's fleet. api/save_check.js
+   writes the verdict onto the banner rows.
+
+   One check per save, never on a page view. The Uber check generates a report,
+   and Uber allows three in flight per org: a check on every page load would
+   compete with the collector's own reports. */
+const fleetOfKey = (key) => (/_EGARI$/.test(key) ? 'egari'
+  : /_ECOSINE$/.test(key) ? 'ecosine'
+  /* The unsuffixed Uber cookie is Ecosine's: src/config.js gives Egari its own
+     key and Ecosine the plain one. */
+    : key === 'UBER_WEB_COOKIE' ? 'ecosine' : null);
+const PROVIDER_OF_KEY = (key) => (key.startsWith('UBER') ? 'Uber'
+  : key.startsWith('BOLT') ? 'Bolt' : key.startsWith('YANGO') ? 'Yango' : null);
+
+/** The fleet a check of `key` depends on: the Uber org and the Bolt company
+    are per fleet, a Yango session and an untestable key are not. Lets a
+    caller test once per fleet that matters rather than once per banner row. */
+export const checkFleet = (key, fleet = null) => {
+  const fn = BY_KEY[key];
+  if (fn !== checkUber && fn !== checkBolt) return null;
+  return fleetOfKey(key) || (fleet && fleet !== '*' ? fleet : null);
+};
+
+/** Test the value stored under `key` for `fleet` (taken from the key's own
+    name when it has one). Never writes. The verdict is one of pass, fail,
+    unknown (the provider could not be reached), untested (no check exists for
+    this key, or its fleet is not known) and missing (nothing is configured). */
+export async function checkStored(key, { fleet = null, value = get(key),
+  /* The provider call, replaceable so a test can hold down what is SENT —
+     the fleet, the org, the key — without contacting anyone. */
+  checkWith = checkCandidate } = {}) {
+  const f = fleetOfKey(key) || (fleet && fleet !== '*' ? fleet : null);
+  const base = { key, fleet: f };
+  if (!value) return { ...base, verdict: 'missing', detail: 'nothing is configured for it now' };
+  const fn = BY_KEY[key];
+  if (!fn) return { ...base, verdict: 'untested', detail: `no live check exists for ${key}` };
+  if (fn === checkBolt && !f) {
+    return { ...base, verdict: 'untested',
+      detail: `which Bolt company ${key} is for is not known, so it cannot be tested here` };
+  }
+  const org_uuid = fn === checkUber
+    ? get(f === 'egari' ? 'UBER_ORG_UUID_EGARI' : 'UBER_ORG_UUID') : undefined;
+  const r = await checkWith({ ok: true, key, provider: PROVIDER_OF_KEY(key), value,
+    fleet: f, org_uuid, labelled: true });
+  const out = { ...base, verdict: r.verdict, detail: r.detail, ...(r.keys ? { keys: r.keys } : {}) };
+  /* A whole curl command or cookie jar typed into a single-key field.
+     ─────────────────────────────────────────────────────────────────────
+     The per-key field stores exactly what was typed and the collector sends
+     it as-is, so a pasted curl becomes a cookie header that begins "curl.exe".
+     Uber answers that like a signed-out session. The paste box would have
+     extracted the credential, so say that rather than "expired". */
+  if (r.verdict === 'fail') {
+    let inner = null;
+    try { inner = recognise(value).find((c) => c.key === key && c.value && c.value !== value); }
+    catch { inner = null; }
+    if (inner) {
+      out.detail = 'what is stored is a whole request or cookie jar, not the credential inside it — '
+        + `paste it into the paste box, which extracts it; ${out.detail || 'refused'}`;
+    }
+  }
+  return out;
+}
 
 export const PROVIDERS_CHECKED = Object.keys(CHECKS);

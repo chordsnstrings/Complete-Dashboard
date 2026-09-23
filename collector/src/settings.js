@@ -330,21 +330,48 @@ export const SETTING_DEFS = [
 const DEF_BY_KEY = Object.fromEntries(SETTING_DEFS.map((d) => [d.key, d]));
 
 let cache = {}; let loadedAt = 0;
+/* WHICH saved value each key holds in this process, beside the value itself.
+   ─────────────────────────────────────────────────────────────────────────
+   The collector loads its settings at the start of a run and uses that copy
+   until the next load. On 2026-09-23 the operator saved UBER_WEB_COOKIE_EGARI
+   22 seconds after a run began. The run asked Uber with the cookie it had
+   loaded, the old one, and recorded that refusal a minute after the save. The
+   banner showed the new, working cookie as stopped.
+
+   A credential observation therefore has to say which value it was made
+   with, and only this process knows that. The version is the stored row's
+   updated_at in whole microseconds, as text, because a JS Date keeps only
+   milliseconds and would never equal the column again. */
+let versions = {};
 const TTL_MS = 30000;   // collector picks up Settings changes within 30s — no redeploy needed
+
+/** The SQL for a stored setting's version, over a row of app_setting. One
+    expression, so the value a process loads and the value a query compares
+    against are computed the same way. */
+export const SETTING_VERSION_SQL = '(extract(epoch FROM updated_at) * 1000000)::bigint';
 
 export async function loadSettings(force = false) {
   if (!force && Date.now() - loadedAt < TTL_MS) return cache;
   try {
-    const { rows } = await pool.query('SELECT key, value, is_secret FROM app_setting');
-    const next = {};
-    for (const r of rows) next[r.key] = r.is_secret ? dec(r.value) : r.value;
-    cache = next; loadedAt = Date.now();
+    const { rows } = await pool.query(
+      `SELECT key, value, is_secret, (${SETTING_VERSION_SQL})::text AS version FROM app_setting`);
+    const next = {}; const ver = {};
+    for (const r of rows) {
+      next[r.key] = r.is_secret ? dec(r.value) : r.value;
+      ver[r.key] = r.version == null ? null : String(r.version);
+    }
+    cache = next; versions = ver; loadedAt = Date.now();
   } catch (e) { log.warn('settings', 'load failed, using env only', { err: String(e).slice(0, 120) }); }
   return cache;
 }
 
 // Synchronous read of the last loaded snapshot, falling back to env.
 export const get = (key, dflt) => (cache[key] ?? process.env[key] ?? dflt);
+
+/** The version of the value get(key) returns in this process: the stored
+    row's updated_at in whole microseconds, or null when the value is not from
+    the Settings page (environment, default, or unset). */
+export const settingVersion = (key) => (cache[key] != null ? versions[key] ?? null : null);
 export const getInt = (key, dflt) => { const v = parseInt(get(key, ''), 10); return Number.isFinite(v) ? v : dflt; };
 
 export async function setSetting(key, value) {

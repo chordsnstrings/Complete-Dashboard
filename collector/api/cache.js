@@ -67,7 +67,17 @@ const NEVER = ['/api/live', '/api/track', '/api/settings', '/api/rollups',
      nothing, and the obvious response to that is to click it again. The
      identity-links page reads the same verdict and would be stale in the same
      way. Both are small reads over one table; neither is worth a cache. */
-  '/api/same-person', '/api/drivers/identity-links'];
+  '/api/same-person', '/api/drivers/identity-links',
+  /* THE CREDENTIAL BANNER, which a Settings save changes.
+     ───────────────────────────────────────────────────────────────────────
+     A save tests the value it stored and rewrites the banner rows
+     (api/save_check.js), and the page redraws the banner straight after. The
+     version above advances on a collection run or a rollup, and a save is
+     neither, so the redraw was answered with the banner from before the save:
+     the red row the operator had just fixed. Uncached it costs about 0.1-0.2s
+     over /api/health (0.77s against 0.55-0.71s from outside, measured
+     2026-09-23), one ~30-row read and the latest run per source. */
+  '/api/auth'];
 
 export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
   maxBytes = MAX_BYTES } = {}) {

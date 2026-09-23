@@ -2486,6 +2486,14 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
   color:var(--ink-2);
 }
 .authbanner.degraded .ab-dot{background:var(--ink-3)}
+/* Saved and not yet tested: quiet for the same reason as degraded. Nothing
+   has refused it, and a red or amber banner for a credential somebody has
+   just replaced teaches them to ignore the colour. */
+.authbanner.pending{
+  background:var(--surface-2); border-color:var(--rule);
+  color:var(--ink-2);
+}
+.authbanner.pending .ab-dot{background:var(--ink-3)}
 
 /* ── A TABLE THAT BECOMES CARDS ON A PHONE ────────────────────────────────
    ═════════════════════════════════════════════════════════════════════════

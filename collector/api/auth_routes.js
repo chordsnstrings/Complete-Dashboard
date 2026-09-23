@@ -32,6 +32,8 @@
    nobody reads. So the amber here is earned by an observed stall, not by a
    date that turned out to describe something else. */
 
+import { SETTING_VERSION_SQL } from '../src/settings.js';
+
 /** How long a source may go without finishing before it counts as stalled.
     Generous against each source's real cadence — the half-hourly incremental,
     CABMAN's five minutes — because one missed tick is a restart and six is a
@@ -133,6 +135,12 @@ const SEVERITY_OF = {
   blocked: 'stopped',
   /* The states above are re-scored per row when the channel is still
      collecting; see SURFACE_STATES where the rows are built. */
+  /* SAVED AND NOT YET TESTED. api/save_check.js writes this when a credential
+     is saved on the Settings page and nothing can test it there (an FMS
+     password, a CABMAN login). Not red, because nothing has refused it; not
+     ok, because nothing has accepted it. The collector's next run replaces it
+     with a real verdict. */
+  saved: 'pending',
   /* A check that could not run is not a check that passed — the Yango
      cookie-free comparison records this when it cannot complete. */
   unknown: 'at-risk',
@@ -180,9 +188,17 @@ const SURFACE_STATES = new Set(['unentitled', 'blocked']);
 export function authRoutes(app, { q, wrap }) {
   app.get('/api/auth', wrap(async (_req, res) => {
     const [creds, runs] = await Promise.all([
-      q(`SELECT provider, fleet_id, credential, state, detail, surface,
-                last_ok_at, checked_at
-           FROM credential_state ORDER BY provider, fleet_id, credential`).catch(() => []),
+      /* With the version each row was observed with and the version stored
+         now, so a row about a value that has since been replaced can be read
+         as exactly that (schema_v82). Correlated subqueries rather than a
+         join: ~30 rows, and the version expression is the one settings.js
+         loads with, so the two cannot drift apart. */
+      q(`SELECT c.provider, c.fleet_id, c.credential, c.state, c.detail, c.surface,
+                c.last_ok_at, c.checked_at, c.value_version::text AS value_version,
+                (SELECT updated_at FROM app_setting WHERE key = c.credential) AS saved_at,
+                (SELECT (${SETTING_VERSION_SQL})::text FROM app_setting
+                  WHERE key = c.credential) AS stored_version
+           FROM credential_state c ORDER BY c.provider, c.fleet_id, c.credential`).catch(() => []),
       /* The freshest finish per source and fleet, so a stall is measured
          against the thing that actually runs rather than against a source
          name that covers two fleets with different credentials. */
@@ -204,19 +220,57 @@ export function authRoutes(app, { q, wrap }) {
       lastOk.set(`${r.source}|${r.fleet_id}`, r.finished_at);
     }
 
-    const rows = creds.map((c) => {
+    const rows = creds.map(({ stored_version: stored, value_version: seen, ...c }) => {
       const runAge = ageH(lastOk.get(`${c.provider}|${c.fleet_id}`)
         ?? lastOk.get(`${c.provider}|*`));
+      /* ABOUT A VALUE THAT HAS SINCE BEEN REPLACED.
+         ─────────────────────────────────────────────────────────────────
+         A row observed with one stored value says nothing about the next. On
+         2026-09-23 the banner showed a working Egari cookie as stopped for up
+         to half an hour, because its only row was about the cookie it had
+         replaced. A save now re-tests and re-stamps the rows
+         (api/save_check.js), so this catches what that did not reach: a
+         save made before schema_v82, or one whose re-test failed to run.
+
+         With a version on both sides the comparison is exact. A row from
+         before schema_v82 has none, and only its time can be compared — a
+         check made before the save is certainly about an earlier value; one
+         made after may or may not be, and is left as it was. */
+      const superseded = c.saved_at != null && (seen != null
+        ? seen !== stored
+        : Date.parse(c.checked_at) < Date.parse(c.saved_at));
       const limit = STALL_HOURS[c.provider] ?? DEFAULT_STALL_H;
       /* A stall only means something while the credential still works: once it
          is refused, the stall is a consequence and saying both would report
          one fault twice. */
       const stalled = c.state === 'ok' && runAge != null && runAge > limit;
-      return {
-        ...c,
+      const common = {
         last_ok_age_h: ageH(c.last_ok_at),
         run_age_h: runAge == null ? null : Math.round(runAge * 10) / 10,
         stall_limit_h: limit,
+        /* Whether the CHANNEL is still delivering, whatever this one
+           credential's surface is doing. runAge comes from lastOk, which
+           counts a run only if it finished and wrote rows — so this is
+           evidence, not optimism. */
+        still_collecting: runAge != null && runAge <= limit,
+      };
+      /* Pending, whatever it said: its state and detail were about the value
+         before, and are kept under their own names for anyone who needs them
+         rather than presented as the current one. */
+      if (superseded) {
+        return {
+          ...c, ...common,
+          observed_state: c.state,
+          observed_detail: c.detail,
+          detail: 'replaced since this was last checked — the value saved then has not been tested '
+            + 'by this surface yet',
+          superseded: true,
+          severity: 'pending',
+        };
+      }
+      return {
+        ...c, ...common,
+        superseded: false,
         /* Exhaustive, and its default is NOT 'ok'.
            ─────────────────────────────────────────────────────────────────
            This tested only for 'expired' and 'missing', so every other state
@@ -230,11 +284,6 @@ export function authRoutes(app, { q, wrap }) {
            A state this does not know is at-risk rather than fine, because
            that is the failure that just happened: a state added by one change
            and silently rendered healthy by another. */
-        /* Whether the CHANNEL is still delivering, whatever this one
-           credential's surface is doing. runAge comes from lastOk, which
-           counts a run only if it finished and wrote rows — so this is
-           evidence, not optimism. */
-        still_collecting: runAge != null && runAge <= limit,
         severity: c.state === 'ok'
           ? (stalled ? 'at-risk' : 'ok')
           /* A surface-level refusal on a channel that is still collecting is
@@ -250,10 +299,15 @@ export function authRoutes(app, { q, wrap }) {
     const bad = rows.filter((r) => r.severity === 'stopped');
     const degraded = rows.filter((r) => r.severity === 'degraded');
     const warn = rows.filter((r) => r.severity === 'at-risk');
+    const pending = rows.filter((r) => r.severity === 'pending');
     res.json({
       rows,
       stopped: bad.length,
       at_risk: warn.length,
+      /* Saved and not yet tested by the surface, or tested by nothing. Its own
+         count, because it is neither a fault nor a clean bill: the banner
+         says it quietly and never turns red for it. */
+      pending: pending.length,
       /* One surface refused, the channel still delivering. Counted separately
          because it is neither an emergency nor nothing: there IS a feed that
          is not arriving, and there is no data loss to chase. */

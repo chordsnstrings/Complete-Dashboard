@@ -5938,8 +5938,12 @@ function pastePanel(root) {
 
     const good = d.proposals.filter((r) => r.verdict === 'pass');
     if (d.applied?.length) {
-      out.append(note(`Stored ${d.applied.join(', ')}. The collector picks these up on its next tick — `
-        + 'no redeploy.', 'ok'));
+      out.append(note(`Stored ${d.applied.join(', ')}. The banner above now shows what each provider `
+        + 'said when they were saved, and the collector uses them from its next run — no redeploy.', 'ok'));
+      /* Redrawn now, from the verdicts the save just recorded. Nothing else on
+         this page re-reads the banner after an Apply, so without this it went
+         on showing the credential the paste had just replaced as stopped. */
+      authBanner();
       /* Saved on the operator's word with nothing confirming it works. Said
          here as well as in the row, because the green confirmation above is
          what a reader stops at. */
@@ -6734,12 +6738,24 @@ async function authBanner() {
      genuinely not arriving should not go quiet — but below the fold, in their
      own sentence, and never colouring the banner red. */
   const degraded = (d?.rows || []).filter((r) => r.severity === 'degraded');
+  /* SAVED, NOT YET TESTED — said quietly, and never as the fault it replaced.
+     ─────────────────────────────────────────────────────────────────────────
+     On 2026-09-23 a working Egari Uber cookie was saved and this banner went
+     on showing it stopped for up to half an hour: the only verdict on record
+     was about the cookie it replaced. A save now tests the value and rewrites
+     the rows (api/save_check.js). What that cannot settle comes back as
+     'pending': a key nothing can test until the collector runs, or a row
+     about a value that has since been replaced. Neither is a fault and
+     neither is a clean bill, so it is listed below the fold like degraded
+     and never colours the banner. */
+  const pending = (d?.rows || []).filter((r) => r.severity === 'pending');
   const show = stopped.length ? stopped : risk;
-  if (!show.length && !degraded.length) { host.innerHTML = ''; return; }
+  if (!show.length && !degraded.length && !pending.length) { host.innerHTML = ''; return; }
 
   /* Degraded alone never turns the banner red or amber: nothing is being lost
      and an operator who is shown red for it learns to ignore red. */
-  const tone = stopped.length ? 'stopped' : risk.length ? 'at-risk' : 'degraded';
+  const tone = stopped.length ? 'stopped' : risk.length ? 'at-risk'
+    : degraded.length ? 'degraded' : 'pending';
   const fleetOf = (r) => (r.fleet_id && r.fleet_id !== '*'
     ? ` · ${sourceLabel(r.fleet_id)}` : '');
   /* "last worked 2h ago" is the half that makes the other half actionable:
@@ -6813,18 +6829,27 @@ async function authBanner() {
       /* Degraded only. The sentence leads with what is NOT wrong, because the
          thing this row is most likely to cause is a hunt for missing data
          that is already in the table. */
-      : `${countOf(degraded.length, 'feed')} ${degraded.length === 1 ? 'is' : 'are'} refused, and `
-        + `the ${degraded.length === 1 ? 'channel behind it is' : 'channels behind them are'} `
-        + 'still collecting — no bookings are missing';
+      : degraded.length
+        ? `${countOf(degraded.length, 'feed')} ${degraded.length === 1 ? 'is' : 'are'} refused, and `
+          + `the ${degraded.length === 1 ? 'channel behind it is' : 'channels behind them are'} `
+          + 'still collecting — no bookings are missing'
+        /* Pending only: counted by CREDENTIAL, because one saved cookie has a
+           row per surface it feeds and "4 credentials" for one paste is a
+           count the operator cannot reconcile with what they did. */
+        : (() => {
+          const n = new Set(pending.map((r) => r.credential)).size;
+          return `${countOf(n, 'saved credential')} ${n === 1 ? 'has' : 'have'} not been tested yet — `
+            + 'the collector\u2019s next run is the first test';
+        })();
 
   host.className = `authbanner ${tone}`;
   host.innerHTML = `<span class="ab-dot"></span><div class="ab-body">`
     + `<div class="ab-head">${esc(head)}</div>`
     + `<ul class="ab-list ab-detail">`
-    + show.concat(degraded).map((r) => `<li><strong>${esc(sourceLabel(r.provider))}${esc(fleetOf(r))}</strong> `
+    + show.concat(degraded, pending).map((r) => `<li><strong>${esc(sourceLabel(r.provider))}${esc(fleetOf(r))}</strong> `
       + `<code>${esc(r.credential)}</code> — `
-      + esc(r.severity === 'stopped'
-        ? (r.detail || 'the credential was refused')
+      + esc(r.severity === 'stopped' || r.severity === 'pending'
+        ? (r.detail || (r.severity === 'pending' ? 'saved, not tested yet' : 'the credential was refused'))
         /* A degraded row is COLLECTING. The at-risk sentence — "no completed
            run in Xh" — would be false on it, and the stall clock it quotes is
            the very clock that proved the channel alive. So it says what is
@@ -6839,7 +6864,11 @@ async function authBanner() {
       + ` <span class="ab-when">· ${esc(r.severity === 'degraded'
         ? (r.run_age_h != null ? `channel last collected ${Math.round(r.run_age_h)}h ago`
           : 'the channel is collecting')
-        : since(r))}</span></li>`).join('')
+        /* When it was SAVED, which is what the operator did and can check.
+           "last worked 2h ago" would be about the value it replaced. */
+        : r.severity === 'pending'
+          ? (r.saved_at ? `saved ${dubaiClock(new Date(r.saved_at)).hhmm}` : 'waiting for the collector')
+          : since(r))}</span></li>`).join('')
     + `</ul></div>`;
 }
 

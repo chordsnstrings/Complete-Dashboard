@@ -2032,3 +2032,27 @@ B4 is the one to remember: the whole suite was green over a write production
 could not do, because every test runs on PGlite. COVERAGE.md carries it as a
 trap. Not done here: the Ecosine FI roster entitlement (`142868`
 COMPANIES_NOT_ALLOWED) is unchanged and is Bolt's to grant, not ours to fix.
+
+## The credential banner after a Settings save — 2026-09-23
+
+The operator saved a new `UBER_WEB_COOKIE_EGARI` at 08:30:22Z and asked why the
+banner still showed it as stopped. The saved cookie worked: production's paste
+check passed the same capture at 08:40:51Z, and a report request made with the
+stored value answered "accepted" at 08:41:07Z. The red row came from a collector
+run that had loaded its settings at 08:30:00Z. It asked Uber with the old cookie
+and recorded the refusal at 08:31:28Z, a minute after the save. The operator's
+ruling on the fix: re-check "when settings refresh only", never on a page view.
+
+| # | what | state | proof |
+|---|---|---|---|
+| S1 | an observation about a replaced value was written as the current state | **written** | `noteCredential` writes only when the version the process holds is the one stored now (`schema_v82` `value_version`). The replay of the day's sequence in `test/credential_save_check.test.mjs` §2 fails 3 when the guard is reverted |
+| S2 | nothing tested a value saved through the per-key field until the next run | **written** | `PUT /api/settings` → `recordSaved` → `checkStored`, once per fleet the check depends on. The revert fails 3 |
+| S3 | the paste box's Apply did not touch the banner rows | **written** | Apply records the verdicts it already had, with no second Uber report. The revert fails 3 |
+| S4 | a row about a replaced value, from before S1 or a save S2 did not reach, was shown as current | **written** | `/api/auth` scores it `pending` with `superseded: true` and keeps the old words under `observed_*`. The revert fails 6 |
+| S5 | the banner redraw after a save was served from a cache (server: version keys on runs and rollups only; browser: SWR) | **written** | `/api/auth` is on both never-cache lists. Reverts fail 1 each (`cache.test`, `credential_save_check` §8) |
+| S6 | Apply did not redraw the banner; nothing drew "saved, not tested" | **written** | `test/auth_banner_pending_ui.test.mjs` in Chromium: quiet tone, counted per credential, "saved 12:30", red kept for a real refusal. Reverts fail 3 and a timeout |
+
+Not done, and named: the collector still uses the value it loaded until it
+reloads (at the start of a run, or through the 30-second TTL on its other
+ticks). A save made mid-run is used from the next load, and the rows say so
+until then.

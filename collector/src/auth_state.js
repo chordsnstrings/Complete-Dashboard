@@ -33,7 +33,7 @@
    is for. */
 
 import { http } from './http.js';
-import { get, SETTING_DEFAULTS } from './settings.js';
+import { get, SETTING_DEFAULTS, settingVersion, SETTING_VERSION_SQL } from './settings.js';
 
 /** Hosts a provider redirects to when it wants a human to log in again. */
 const LOGIN_HOST = /(^|\.)(auth|login|accounts|signin|sso)\./i;
@@ -160,21 +160,48 @@ export function saysAuth(message) {
 export const credentialState = (bad) => (!bad ? 'ok' : bad.kind === 'moved' ? 'moved' : 'expired');
 
 /** Record what was observed. Never throws — a banner is not worth a run. */
+/* ONLY ABOUT THE VALUE THAT IS STORED NOW.
+   ─────────────────────────────────────────────────────────────────────────
+   A process uses the settings it loaded, and it may have loaded them before
+   somebody saved a replacement. Measured on production 2026-09-23: the Egari
+   Uber cookie was saved at 08:30:22Z, the run that had loaded settings at
+   08:30:00Z asked Uber with the previous cookie, and at 08:31:28Z it recorded
+   "redirected to auth.uber.com — the session is no longer signed in". The
+   banner showed the new cookie as stopped until the next run. The new cookie
+   was fine: production's paste check passed it at 08:40:51Z, and a report
+   request made with the stored value came back "accepted" at 08:41:07Z.
+
+   So the row is written only when the version this process holds is the
+   version stored now (schema_v82 explains the version). An observation about
+   a replaced value says nothing about the value in use and is dropped, which
+   leaves the verdict api/save_check.js recorded when the new value was saved.
+   The next observation made with the new value writes normally.
+
+   `version` defaults to what this process loaded for the key. The one gap it
+   leaves: if the settings cache is refreshed between the request and this
+   call, an answer about the old value is filed under the new one. That is a
+   refresh landing inside one request, at most every 30 seconds, and the next
+   observation corrects it. The case above was a whole minute after the save. */
 export async function noteCredential(db, { provider, fleet = '*', credential,
-  state, detail = null, surface = null }) {
+  state, detail = null, surface = null, version = settingVersion(credential) }) {
   try {
     await db.query(
       `INSERT INTO credential_state
-         (provider, fleet_id, credential, state, detail, surface, last_ok_at, checked_at)
-       VALUES ($1,$2,$3,$4,$5,$6, CASE WHEN $4 = 'ok' THEN now() ELSE NULL END, now())
+         (provider, fleet_id, credential, state, detail, surface, last_ok_at, checked_at, value_version)
+       SELECT $1::text, $2::text, $3::text, $4::text, $5::text, $6::text,
+              CASE WHEN $4::text = 'ok' THEN now() ELSE NULL END, now(), $7::bigint
+        WHERE $7::bigint IS NOT DISTINCT FROM
+              (SELECT ${SETTING_VERSION_SQL} FROM app_setting WHERE key = $3::text)
        ON CONFLICT (provider, fleet_id, credential) DO UPDATE SET
          state = EXCLUDED.state, detail = EXCLUDED.detail, surface = EXCLUDED.surface,
          /* last_ok_at is never cleared by a failure: it is the half of the
             message that makes the other half actionable. */
          last_ok_at = CASE WHEN EXCLUDED.state = 'ok' THEN now()
                            ELSE credential_state.last_ok_at END,
-         checked_at = now()`,
-      [provider, fleet, credential, state, detail && String(detail).slice(0, 240), surface]);
+         checked_at = now(),
+         value_version = EXCLUDED.value_version`,
+      [provider, fleet, credential, state, detail && String(detail).slice(0, 240), surface,
+        version == null ? null : String(version)]);
   } catch { /* the table may not exist yet on a database mid-migration */ }
 }
 

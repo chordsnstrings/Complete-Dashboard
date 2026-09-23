@@ -3058,9 +3058,34 @@ driver's 222 tracker fixes.
   which uses the stored value, answered `accepted`.
 
   So a red Uber row right after a save is not evidence that the paste failed.
-  Before re-capturing, check the row's `checked_at` against the key's
-  `updated_at` in `/api/settings`. If the check is older than the save, test
-  the stored value with that probe, or wait for the next `:00`/`:30` run.
+  Note what "older" means here: the failing row was written a minute AFTER the
+  save and was still about the previous cookie. Only the process that made a
+  check knows which value it held.
+
+  **Fixed the same day, on save only, never on a page view.** A save through
+  either route tests the stored value once per fleet its check depends on
+  (`checkStored`, `src/credcheck.js`). It writes the verdict onto that key's
+  existing banner rows (`api/save_check.js`): pass → ok, fail → invalid (red),
+  provider unreachable → unknown (amber), no live check → `saved`, drawn as a
+  quiet "saved HH:MM, not tested yet" line.
+
+  Each row now carries the version of the value it was observed with
+  (`credential_state.value_version`, `sql/schema_v82.sql`: the setting's
+  `updated_at` in whole microseconds). `noteCredential` writes only when the
+  version the process holds is the one stored now, so a run still holding the
+  old cookie can no longer paint over the new one. `/api/auth` reads a row
+  whose version is not the stored one as pending, never as the current state.
+  `/api/auth` is also out of both caches: the server cache keys on collection
+  runs and rollups, and a save is neither.
+
+  The one gap left open: if a settings reload lands inside a single request,
+  that answer about the old value is filed under the new one. Reloads happen
+  at most every 30 seconds, and the next observation corrects it.
+
+  Why never on a page view: the Uber check generates a report, and Uber allows
+  three in flight per org. A check per page load would compete with the
+  collector's own reports. (Bolt's check does NOT spend the token: fifteen
+  exchanges in a row were measured on 2026-09-22, as `src/credcheck.js` records.)
   (The capture was Firefox's Windows "Copy as cURL" — `curl.exe ^"…^"`. The
   paste reader strips those carets (`src/credkit.js:82`). The per-key field
   (`PUT /api/settings`) stores text verbatim and checks nothing. A whole curl

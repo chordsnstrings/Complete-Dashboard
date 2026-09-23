@@ -4686,6 +4686,22 @@ app.get('/api/auth', (_, r) => {
     surface: '/api/reports-api/v2/summary/drivers/list', last_ok_at: dayISO(1),
     checked_at: dayISO(0), last_ok_age_h: 21.4, run_age_h: 21.4, stall_limit_h: 12,
     still_collecting: false, severity: 'stopped' });
+  /* SAVED, NOT YET TESTED — api/save_check.js writes this when a credential is
+     saved on the Settings page and nothing there can test it. An FMS password
+     is the plainest case: there is no live check for it, so the collector's
+     next run is its first test. Quiet on the banner, never red. */
+  rows.push({ provider: 'fms', fleet_id: 'egari', credential: 'FMS_PASSWORD', state: 'saved',
+    detail: 'saved, not tested yet — no live check exists for FMS_PASSWORD; the collector\u2019s '
+      + 'next run is its first test',
+    surface: 'reports login', last_ok_at: dayISO(1), checked_at: dayISO(0),
+    saved_at: dayISO(0), superseded: false,
+    last_ok_age_h: 6.4, run_age_h: 0.3, stall_limit_h: 6, still_collecting: true, severity: 'pending' });
+  /* Every row says when its credential was last saved on the Settings page
+     and whether the row is about that value (api/auth_routes.js). */
+  for (const x of rows) {
+    if (!('saved_at' in x)) x.saved_at = null;
+    if (!('superseded' in x)) x.superseded = false;
+  }
   const bad = rows.filter((x) => x.severity === 'stopped');
   /* DERIVED, not written down. These counts were literals — `stopped: 1,
      unentitled: 1` — and a literal is a second opinion that cannot be wrong
@@ -4695,6 +4711,7 @@ app.get('/api/auth', (_, r) => {
   const degradedRows = rows.filter((x) => x.severity === 'degraded');
   const label = (x) => `${x.provider}${x.fleet_id && x.fleet_id !== '*' ? ` · ${x.fleet_id}` : ''} (${x.credential})`;
   r.json({ rows, stopped: bad.length, at_risk: 1, missing: 0,
+    pending: rows.filter((x) => x.severity === 'pending').length,
     degraded: degradedRows.length,
     degraded_rows: degradedRows.map((x) => ({ label: label(x), provider: x.provider,
       fleet_id: x.fleet_id, state: x.state, surface: x.surface, detail: x.detail })),

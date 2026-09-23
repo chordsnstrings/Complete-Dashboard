@@ -33,6 +33,8 @@ app.get('/api/live/now', (_q, res) => { calls++; res.json({ n: calls }); });
 /* The two a reviewer's own click changes, rather than a collection run. */
 app.get('/api/same-person', (_q, res) => { calls++; res.json({ n: calls }); });
 app.get('/api/drivers/identity-links', (_q, res) => { calls++; res.json({ n: calls }); });
+/* The credential banner, which a Settings save rewrites (api/save_check.js). */
+app.get('/api/auth', (_q, res) => { calls++; res.json({ n: calls }); });
 app.post('/api/thing', (_q, res) => { calls++; res.json({ n: calls }); });
 const server = app.listen(0);
 const port = server.address().port;
@@ -98,6 +100,18 @@ for (const path of ['/api/same-person', '/api/drivers/identity-links']) {
   const b = await get(path);
   check(`${path} is never cached — a verdict must show on the next read`,
     a.body.n !== b.body.n, `${a.body.n} then ${b.body.n}`);
+}
+/* The same shape of failure, from the credential banner. A Settings save
+   tests what it stored and rewrites the banner rows, and the page redraws the
+   banner straight after — but a save is neither a collection run nor a
+   rollup, so the version this cache keys on does not move, and the redraw
+   was answered with the banner from before the save: the red row the
+   operator had just fixed (2026-09-23, the Egari Uber cookie). */
+{
+  const a = await get('/api/auth');
+  const b = await get('/api/auth');
+  check('/api/auth is never cached — a save must show on the banner\u2019s next read',
+    a.body.n !== b.body.n && a.cache !== 'hit' && b.cache !== 'hit', `${a.body.n}/${a.cache} then ${b.body.n}/${b.cache}`);
 }
 
 const before = calls;

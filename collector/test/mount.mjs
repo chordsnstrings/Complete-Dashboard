@@ -85,6 +85,10 @@ import { recordImport, spanOf, tallyBatch, takeTally,
 import { recognise, unrecognised } from '../src/credkit.js';
 import { checkAll } from '../src/credcheck.js';
 import { proposeKeys } from '../src/credmodel.js';
+/* The save-time check. Both settings write routes call it; real here, because
+   with no banner rows for a key it touches nothing, and a test that drives a
+   save over existing rows injects one whose check it controls. */
+import { recordSaved } from '../api/save_check.js';
 import { normaliseFiles, crossFile, silentFiles, fileReport,
   boltFollowUp } from '../src/credfiles.js';
 import { SETTING_DEFS } from '../src/settings.js';
@@ -176,7 +180,7 @@ export async function mountAll(db, { serverRoutes = true, inject = {} } = {}) {
     /* The credential paste queue, real. A route that is mounted but throws
        ReferenceError the first time it is called is a route no test can
        reach, and /api/settings/paste was in exactly that state. */
-    recognise, unrecognised, checkAll, proposeKeys, SETTING_DEFS,
+    recognise, unrecognised, checkAll, proposeKeys, SETTING_DEFS, recordSaved,
     normaliseFiles, crossFile, silentFiles, fileReport, boltFollowUp,
     /* LAST, so a test can replace any of the above.
        ─────────────────────────────────────────────────────────────────────

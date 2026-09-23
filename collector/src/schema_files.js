@@ -204,4 +204,10 @@ export const SCHEMA_FILES = [
      separate table and not platform_payout, so a payout is never counted twice
      when the lagging register catches up. */
   'schema_v81.sql',
+  /* Which saved value a credential observation was about. The collector held
+     the old Uber cookie for a minute after the operator saved a new one, and
+     its refusal of the OLD value was painted over the new one as "stopped".
+     A row now carries the version it was observed with, and one about a
+     replaced value is dropped or read as describing that earlier value. */
+  'schema_v82.sql',
 ];

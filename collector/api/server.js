@@ -12,6 +12,7 @@ import { importRoutes } from './import_routes.js';
 import { describeSettings, setSetting, deleteSetting, loadSettings, recordCredentialVisibility } from '../src/settings.js';
 import { recognise, unrecognised } from '../src/credkit.js';
 import { checkAll } from '../src/credcheck.js';
+import { recordSaved } from './save_check.js';
 import { proposeKeys } from '../src/credmodel.js';
 /* Several credential files at once, each keeping its own name. The filename is
    evidence — two files held the same Bolt token on 2026-09-22 and only their
@@ -3651,7 +3652,12 @@ app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
     else { await setSetting(k, v); done.push(`${k}:set`); }
   }
   await loadSettings(true);
-  res.json({ ok: true, updated: done });
+  /* Tested now, and the banner told, rather than left showing the verdict on
+     the value this save replaced until the collector's next run. See
+     api/save_check.js for the measurement and for why only on save. */
+  const checked = await recordSaved(pool, Object.keys(updates),
+    { store: setSetting, reload: loadSettings });
+  res.json({ ok: true, updated: done, checked });
 }));
 
 /* Paste whatever the provider gave you.
@@ -3808,6 +3814,18 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
     }
     if (applied.length) await loadSettings(true);
   }
+  /* The banner rows for what was just stored, from the verdicts already in
+     hand. Testing again would generate a second Uber report for nothing, and
+     only what passed (or was labelled and has no check) was written. */
+  const checked = applied.length
+    ? await recordSaved(pool, applied, {
+      store: setSetting, reload: loadSettings,
+      known: new Map(tested.flatMap((t) => (t.keys && typeof t.keys === 'object'
+        ? Object.keys(t.keys) : t.key ? [t.key] : [])
+        .filter((k) => applied.includes(k))
+        .map((k) => [k, { verdict: t.verdict, detail: t.detail, untested: t.untested === true }]))),
+    })
+    : [];
 
   /* The standing Bolt warning, and only when Bolt is in the upload.
      ─────────────────────────────────────────────────────────────────────
@@ -3831,6 +3849,8 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
   res.json({
     ok: true,
     applied,
+    /* What the banner now says about each stored key — api/save_check.js. */
+    checked,
     dry_run: !apply,
     unread: leftovers.length - guessed.length,
     /* What each file contributed, plus the files that were not read at all
