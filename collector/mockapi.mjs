@@ -5394,6 +5394,13 @@ app.get('/api/finance/payouts', (_, r) => {
     { platform: 'uber', fleet_id: 'ecosine', paid_on: '2026-09-07', amount: 103567.54,
       currency: 'AED', period_start: '2026-08-31', period_end: '2026-09-06', method: 'bank',
       source: 'REPORT_TYPE_PAYMENTS_ORGANIZATION (one-day window)', payout_ext_id: 'ecosine:2026-09-07' },
+    /* A Bolt payout read off the balance ledger before getPayouts lists it —
+       the 2026-09-21 case. listed_by_provider false is what the page marks
+       "ledger"; api/payout_routes.js ALL_PAYOUTS is the real shape. */
+    { platform: 'bolt', fleet_id: 'ecosine', paid_on: '2026-09-14', amount: 2490.95,
+      currency: 'AED', period_start: null, period_end: null, method: 'bank',
+      source: 'fleetOwnerPortal/getFleetBalanceDetails', payout_ext_id: 'ledger:ecosine:2026-09-14',
+      listed_by_provider: false, basis: 'balance-ledger', collected_at: '2026-09-14T06:01:12.000Z' },
     { platform: 'bolt', fleet_id: 'ecosine', paid_on: '2026-09-07', amount: 3184.22,
       currency: 'AED', period_start: null, period_end: null, method: 'bank',
       source: 'fleetOwnerPortal/getPayouts', payout_ext_id: '2210441' },
@@ -5403,14 +5410,17 @@ app.get('/api/finance/payouts', (_, r) => {
     { platform: 'uber', fleet_id: 'ecosine', paid_on: '2026-08-31', amount: 96204.11,
       currency: 'AED', period_start: '2026-08-24', period_end: '2026-08-30', method: 'bank',
       source: 'REPORT_TYPE_PAYMENTS_ORGANIZATION (one-day window)', payout_ext_id: 'ecosine:2026-08-31' },
-  ];
+  ].map((p) => ({ listed_by_provider: true, basis: 'register', collected_at: `${p.paid_on}T09:30:00.000Z`, ...p }));
   const totals = [
-    { platform: 'bolt', fleet_id: 'ecosine', currency: 'AED', transfers: 1, dates: 1,
-      total: 3184.22, earliest: '2026-09-07', latest: '2026-09-07' },
+    { platform: 'bolt', fleet_id: 'ecosine', currency: 'AED', transfers: 2, dates: 2,
+      total: 5675.17, earliest: '2026-09-07', latest: '2026-09-14',
+      unlisted_transfers: 1, unlisted_total: 2490.95 },
     { platform: 'bolt', fleet_id: 'egari', currency: 'AED', transfers: 1, dates: 1,
-      total: 1290.15, earliest: '2026-09-07', latest: '2026-09-07' },
+      total: 1290.15, earliest: '2026-09-07', latest: '2026-09-07',
+      unlisted_transfers: 0, unlisted_total: 0 },
     { platform: 'uber', fleet_id: 'ecosine', currency: 'AED', transfers: 2, dates: 2,
-      total: 199771.65, earliest: '2026-08-31', latest: '2026-09-07' },
+      total: 199771.65, earliest: '2026-08-31', latest: '2026-09-07',
+      unlisted_transfers: 0, unlisted_total: 0 },
   ];
   const days = [
     { platform: 'uber', fleet_id: 'ecosine', day: '2026-09-11', basis: 'statement', currency: 'AED',
@@ -5447,19 +5457,35 @@ app.get('/api/finance/payouts', (_, r) => {
           latest: '2026-09-07', transfers: 2 }],
         absent: null },
       { platform: 'bolt', publishes_payouts: true,
-        how: 'Bolt’s fleet portal lists every payout with the second it completed, so each row '
-          + 'is already a date.',
-        /* Kept in step with api/payout_routes.js: "no fixed weekday" was
-           written from a month of rows and the whole register disproved it —
-           175 of 175 Bolt transfers landed on a Monday. Rendered copy, so the
-           mock must not print the retracted claim either. */
-        cadence: 'One payout per date. Bolt publishes no cadence and does not say which period '
-          + 'a payout settles, so nothing here claims one — but every Bolt transfer on record '
-          + 'has landed on a Monday: 175 of 175, measured 2026-09-17. That is a count, not a '
-          + 'rule Bolt has stated.',
+        how: 'Bolt’s fleet portal lists every payout with the second it completed, so each '
+          + 'row is already a date. That list runs days behind the money, so each payout is '
+          + 'also read off Bolt’s balance ledger on the day it leaves, and shown from there '
+          + '— marked as such — until the list catches up.',
+        /* Kept in step with api/payout_routes.js, which now COUNTS the
+           Mondays over both books on every request. The literal "175 of 175"
+           this fixture used to carry is the stale copy that fix retired, so
+           the mock must not print it either. */
+        cadence: 'One payout per date, and Bolt does not say which period a payout settles, so '
+          + 'nothing here claims one. Every Bolt transfer on record has landed on a Monday: '
+          + '176 of 176. That is a count, not a rule Bolt has stated — Bolt states only its '
+          + 'next payout date, which is shown beside it.',
+        balance: [
+          { fleet_id: 'ecosine', currency: 'AED', current_balance: 1019.4,
+            next_payout_on: '2026-09-21', checked_at: '2026-09-16T08:30:00.000Z' },
+          { fleet_id: 'egari', currency: 'AED', current_balance: -34.16,
+            next_payout_on: '2026-09-21', checked_at: '2026-09-16T08:30:00.000Z' },
+        ],
+        expected_missing: [
+          { fleet_id: 'egari', expected_on: '2026-09-14', checked_at: '2026-09-16T08:30:00.000Z',
+            ledger_read: true,
+            says: 'Bolt’s balance ledger for egari on Monday 2026-09-14 was read and carries no '
+              + 'bank transfer, and Bolt’s payout list does not show one either. Bolt now names its '
+              + 'next payout as 2026-09-21, so 2026-09-14 is behind it. Bolt has skipped this fleet '
+              + 'on a Monday before; check the bank statement for a Bolt credit.' },
+        ],
         in_window: totals.filter((t) => t.platform === 'bolt'),
         record_span: [
-          { platform: 'bolt', fleet_id: 'ecosine', earliest: '2024-12-30', latest: '2026-09-07', transfers: 89 },
+          { platform: 'bolt', fleet_id: 'ecosine', earliest: '2024-12-30', latest: '2026-09-14', transfers: 90 },
           { platform: 'bolt', fleet_id: 'egari', earliest: '2024-12-23', latest: '2026-09-07', transfers: 86 },
         ],
         absent: null },
