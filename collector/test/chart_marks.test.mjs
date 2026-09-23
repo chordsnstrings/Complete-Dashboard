@@ -287,6 +287,53 @@ console.log('\n2 · gapBars: not measured is an outline, unfinished is a hatch')
   check(`no caption names a chart treatment in a literal (${OLD.length} phrases, 6 files)`, back.length === 0, back.join(' · '));
 }
 
+/* ── 1c · drawn at the size it is seen at, and ticks that fit ─────────────
+   #payouts builds its panel, draws the chart, and only then appends the
+   panel, so the host measured 0 and the chart was drawn at the 720-unit
+   fallback and stretched: ticks at 1.5×, and twelve "23 Dec 2024" labels
+   running into each other. Under Arkiv the chart redraws once the host has a
+   width, and the tick count follows the width of the labels. */
+console.log('\n1c · a chart drawn before its panel is on the page, and ticks that fit');
+const DETACHED = async ([fn, width, data, opts]) => {
+  const c = await import('/charts.js');
+  document.querySelector('#dhost')?.remove();
+  const host = document.createElement('div'); host.id = 'dhost';
+  c[fn](host, data, opts);                          // drawn while detached
+  host.style.cssText = `width:${width}px;position:absolute;left:0;top:0`;
+  document.body.append(host);                       // …then put on the page
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))));
+  const svg = host.querySelector('svg');
+  const boxes = [...svg.querySelectorAll('text.axis')].filter((t) => t.getAttribute('text-anchor') === 'middle')
+    .map((t) => t.getBoundingClientRect()).map((b) => [b.left, b.right]).sort((a, b) => a[0] - b[0]);
+  const overlaps = boxes.slice(1).filter((b, i) => b[0] < boxes[i][1] - 0.5).length;
+  return { vb: svg.getAttribute('viewBox'), labels: boxes.length, overlaps };
+};
+const payDays = Array.from({ length: 91 }, (_, i) => {
+  const t = new Date(Date.UTC(2024, 11, 23) + i * 7 * 864e5);
+  return { day: t.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }), v: 1000 + (i % 9) * 900 };
+});
+for (const skin of ['classic', 'arkiv']) {
+  const { ctx, page } = await open(skin);
+  const r = await page.evaluate(DETACHED, ['barChart', 1090, payDays, { x: 'day', y: 'v' }]);
+  const g = await page.evaluate(DETACHED, ['gapBars', 1090, payDays, { x: 'day', y: 'v', inProgress: false }]);
+  const narrow = await page.evaluate(DETACHED, ['barChart', 515, payDays, { x: 'day', y: 'v' }]);
+  if (skin === 'classic') {
+    check('old skin: a chart drawn detached keeps the 720 fallback it has on production',
+      r.vb.startsWith('0 0 720 ') && g.vb === '0 0 720 240', JSON.stringify([r.vb, g.vb]));
+  } else {
+    check('Arkiv: barChart drawn detached is drawn again at the host’s 1,090px once it is on the page',
+      r.vb.startsWith('0 0 1090 '), r.vb);
+    check('Arkiv: …and so is gapBars', g.vb.startsWith('0 0 1090 '), g.vb);
+    check('Arkiv: 91 "23 Dec 2024"-long labels print as many as fit, and none overlaps',
+      r.labels >= 6 && r.overlaps === 0 && g.overlaps === 0, JSON.stringify([r, g]));
+    /* Twelve fit at 1,090px; at a two-up panel's 515px they do not, and the
+       old fixed twelve ran together there. */
+    check('Arkiv: …and at a two-up panel’s 515px, fewer labels and still none overlapping',
+      narrow.labels < 12 && narrow.labels >= 3 && narrow.overlaps === 0, JSON.stringify(narrow));
+  }
+  await ctx.close();
+}
+
 /* #forecast itself: the caption names the treatment the chart draws. */
 console.log('\n1b · #forecast says what it draws');
 for (const skin of ['classic', 'arkiv']) {

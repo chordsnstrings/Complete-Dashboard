@@ -1047,6 +1047,13 @@ driver's 222 tracker fixes.
      WASH there (`--mk-behind`), and the driver Record's captions ("the
      outline behind each bar") ask `drawnNoun('behind')`. A new mark drawn
      as an outline under Arkiv is a claim that the thing is not measured.
+  6. **A chart drawn before its panel is on the page is drawn at 720 units.**
+     `chartBox()` measures the host; a host not yet appended (or inside a
+     `display:none` tab) measures 0 and gets the fallback, which CSS then
+     stretches — #payouts' ticks painted at 1.5× and ran together. Under
+     Arkiv (`--mk-fit:1`) barChart and gapBars redraw once the host has a
+     width; in the old skin the fix is to append the panel before drawing,
+     which is a page change for the page phase.
 
 * **A PROPOSAL FROM ANYWHERE BUT THE RULE CANNOT LIVE IN `driver_identity_link`.**
   `src/identity_link.js` DELETEs every unconfirmed, unrejected row in that table

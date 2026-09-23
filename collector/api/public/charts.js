@@ -329,6 +329,37 @@ export function yAxis(svg, { hi, pl, pr, pt, ih, W, fmt: f = fmt,
    the forced-last-label exception, and the two print on top of each other as
    "22:0023:00". barChart carried the guard; gapBars, which draws the busiest
    charts in the product, did not. */
+/* How many time labels fit, under a form that fits.
+   ─────────────────────────────────────────────────────────────────────────
+   Twelve was one target for every width, so #payouts' 91 bars under a
+   full-width panel printed twelve "23 Dec 2024"-long labels into a space
+   that held nine, and they ran together ("17 Feb 2025Apr 2025…") in both
+   themes of the skin. Under --mk-fit:1 the count is worked out from the
+   widest label and the plot width: a --t1 tick with the skin's .04em
+   tracking advances 9.44 × 0.64 ≈ 6.04px a character, within a percent of
+   the AXIS_EM × AXIS_PX this file already measures the gutter with, so the
+   one constant serves both. The old skin keeps its twelve. */
+const tickTarget = (labels, iw, form) => (!form.fit ? 12
+  : Math.max(2, Math.min(12, Math.floor(iw / (Math.max(1, ...labels.map((t) => String(t).length))
+    * AXIS_EM * AXIS_PX + 12)))));
+
+/* A chart drawn into a host that is not in the page yet measures 0 and is
+   drawn at chartBox's fallback, 720 units, then stretched by CSS: #payouts
+   builds its panel, draws, and only then appends the panel, so its ticks and
+   gutter painted at 1.5× on a 1,090px page. Under a form that fits, the
+   chart is drawn again once the host has a width. The stamp drops an
+   observer whose host has since been redrawn by its page. */
+function whenLaidOut(host, form, redraw) {
+  if (!form.fit || typeof ResizeObserver === 'undefined') return;
+  if ((host?.getBoundingClientRect?.().width || 0) > 240) return;
+  const stamp = (host.__mkFit = (host.__mkFit || 0) + 1);
+  const ro = new ResizeObserver((entries) => {
+    if (host.__mkFit !== stamp) { ro.disconnect(); return; }
+    if ((entries[0]?.contentRect?.width || 0) > 240) { ro.disconnect(); redraw(); }
+  });
+  ro.observe(host);
+}
+
 export function xTickIndices(n, target = 12) {
   const every = Math.max(1, Math.ceil(n / target));
   const lastThinned = Math.floor((n - 1) / every) * every;
@@ -368,9 +399,10 @@ export function xTickIndices(n, target = 12) {
    1px edge in that colour, so the bar's height still reads), and the caption
    asks drawnAs('projected') which word to print. The old skin's form keeps
    them solid, as production draws them. */
-export function barChart(host, data, { x, y, label, color = '--b400', colorFor, onClick,
-  valueFmt = (v) => fmt(v), axisFmt = null, lo = null, hi = null, projected = null,
-  max: fixedMax = null, aria = null } = {}) {
+export function barChart(host, data, opts = {}) {
+  let { x, y, label, color = '--b400', colorFor, onClick,
+    valueFmt = (v) => fmt(v), axisFmt = null, lo = null, hi = null, projected = null,
+    max: fixedMax = null, aria = null } = opts;
   /* THE AXIS AND THE TOOLTIP ARE NOT THE SAME FORMATTER, and treating them as
      one is what put "10 bookings / 20 bookings / 30 bookings" up the side of
      the day page. A tooltip names a single value and wants its unit; an axis
@@ -381,6 +413,8 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
   axisFmt = axisFmt || ((v) => fmt(v));
   host.innerHTML = '';
   if (!data.length) return empty(host);
+  const form = markForm();
+  whenLaidOut(host, form, () => barChart(host, data, opts));
   const { W, H } = chartBox(host);
   const raw = Math.max(...data.map((d) => Math.max(+d[y] || 0, hi ? +d[hi] || 0 : 0))) || 1;
   /* The ticks are worked out BEFORE the gutter, because the gutter is however
@@ -394,11 +428,10 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
      ninety-bar chart drawing 4.6px bars with a 3px corner radius, which is an
      ellipse rather than a bar. */
   const pad = data.length <= 12 ? 0.28 : data.length <= 40 ? 0.18 : 0.10;
-  const form = markForm();
   const bw = barWidth(step, pad, form);
   const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
   const { max } = yAxis(svg, { hi: raw, pl, pr, pt, ih, W, fmt: axisFmt, fixedMax });
-  const xAt = new Set(xTickIndices(data.length));
+  const xAt = new Set(xTickIndices(data.length, tickTarget(data.map((d) => shortLabel(d[x])), iw, form)));
   const hatchOf = hatches(svg, form);
   data.forEach((d, i) => {
     const h = ih * (+d[y]) / max, bx = pl + step * i + (step - bw) / 2, by = pt + ih - h;
@@ -512,6 +545,9 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
   if (!data.length) return empty(host);
   const axisF = axisFmt || valueFmt;
   const form = markForm();
+  // The options as passed, for the redraw once the host has a width.
+  const opts = arguments[2];
+  whenLaidOut(host, form, () => gapBars(host, data, opts));
   const vals = data.filter((d) => !d[gapKey]).map((d) => +d[y] || 0);
   const raw = Math.max(...vals, secondary ? Math.max(...data.map((d) => +d[secondary] || 0)) : 0) || 1;
   /* Drawn at the size it is seen at, under a form that fits (Arkiv), as
@@ -557,7 +593,7 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
   }
 
   const { max } = yAxis(svg, { hi: raw, pl, pr, pt, ih, W, fmt: axisF, fixedMax });
-  const xAt = new Set(xTickIndices(data.length));
+  const xAt = new Set(xTickIndices(data.length, tickTarget(data.map((d) => shortLabel(d[x])), iw, form)));
 
   data.forEach((d, i) => {
     const bx = pl + step * i;
