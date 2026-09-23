@@ -279,9 +279,21 @@ console.log('\nBolt’s cadence row states a count rather than a guessed rule');
   const bolt = (d.coverage || []).find((c) => c.platform === 'bolt');
   check('it no longer claims Bolt has no fixed weekday',
     !/no fixed weekday/i.test(bolt?.cadence || ''), bolt?.cadence);
-  check('…it names what was counted, and says it is a count and not a rule',
-    /175 of 175/.test(bolt?.cadence || '') && /not a rule/.test(bolt?.cadence || ''),
-    bolt?.cadence);
+  /* THIS ASSERTION USED TO PIN THE LITERAL "175 of 175" — which is to say it
+     asserted the stale number. The cadence line hard-coded a count measured on
+     2026-09-17 and kept printing it after the register reached 177; this test
+     was the thing holding that in place. It now checks the line COUNTS: the
+     second number is this fixture's Bolt transfers and the first is how many
+     of them fall on a Monday, both computed here from the fixture's own dates
+     (one of which is "nine days ago", a Monday only on some days — so the
+     expected figure cannot be written down either). */
+  const boltRows = await q(`SELECT paid_on FROM platform_payout WHERE platform = 'bolt'`);
+  const mondays = boltRows.filter((r) => new Date(r.paid_on).getUTCDay() === 1).length;
+  const m = (bolt?.cadence || '').match(/(\d+) of (\d+)/);
+  check('…it names what was counted — the live count, not a number written down',
+    !!m && Number(m[2]) === boltRows.length && Number(m[1]) === mondays
+    && /not a rule/.test(bolt?.cadence || ''),
+    `${bolt?.cadence} | fixture: ${mondays} of ${boltRows.length}`);
   /* And it still refuses the thing Bolt genuinely does not publish. */
   check('…and still says Bolt states no settled period',
     /does not say which period/.test(bolt?.cadence || ''), bolt?.cadence);

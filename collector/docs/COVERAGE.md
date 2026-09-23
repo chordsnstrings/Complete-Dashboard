@@ -180,7 +180,7 @@ hours early.
 | channel | fares on the trip row? | payout? | notes |
 |---|---|---|---|
 | Hotel (corporate) | yes, same day — 98.8% of Aug | none published | nothing takes a commission between booking and bank |
-| Bolt | yes — 99.7% of chargeable Aug | none published | figure is GROSS; the commission is not published to us |
+| Bolt | yes — 99.7% of chargeable Aug | **yes, per Monday** — `getPayouts` (lags days) and the balance ledger `getFleetBalanceDetails` (same day); see the trap below | figure is GROSS; the ledger does publish commission per day (`commissions_in_app`, `commissions_cash`) |
 | Yango | yes — 100% | yes | earnings are NET: cash + cashless + commission (commission is negative) |
 | FMS | journeys, not bookings | n/a | watches cars, does not sell rides |
 | CABMAN | realtime GPS, 5-min poll | n/a | the only feed with a seat sensor |
@@ -826,6 +826,49 @@ Measured on production 2026-09-07, the first build under the v67 rule:
 driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
+
+* **BOLT'S PAYOUT LIST IS DAYS LATE. ITS BALANCE LEDGER IS NOT — AND WE NEVER
+  READ THE LEDGER, BECAUSE THE PROBE ASKED IT FOR NINETY DAYS.**
+  On 2026-09-23 the operator reported Bolt paid both fleets on **Monday
+  21 September**. The Finance page's newest Bolt row was the 14th. Two
+  diagnoses were wrong before the right one: a sub-agent concluded "Bolt has
+  not published it yet" — true of `getPayouts`, false of the money — and the
+  obvious suspect, `payoutRow()` dropping an in-flight row with no `finished`,
+  was ruled out by measurement: the probe's raw `list.length` equalled its
+  count of valid `finished` stamps (Egari 87 of 87). **Bolt's own list did not
+  contain the 21st.**
+  - `getPayouts` **lags**: the 14 Sep payout was absent from it on Wed the 16th
+    and present by Mon the 21st. A payout that has reached the bank is
+    invisible there for most of a week.
+  - `getFleetBalanceDetails` asked about **one day** returns that day's
+    statement. Measured the same morning:
+    `2026-09-14` → Ecosine 2,490.95 / Egari 832.25 (**equal to getPayouts, to
+    the fil**); `09-20` → none; **`09-21` → 1,275.14 / 619.18**; `09-22` → none.
+    It balances: starting + earnings − expenses = ending, to the fil, on both
+    fleets. Cash handed to drivers is NOT a term in that sum.
+  - It **refuses a 90-day window** (code `25810 DATE_RANGE_TOO_BIG`) and answers
+    over nine days and over one. `/api/probe/bolt/payouts` defaulted to ninety
+    for its whole life **and returned key names only**, so every probe run
+    reported the ledger as refused and nobody learned it held the payout.
+  - `getFleetBalanceSummary` states `next_payout_date` (a unix second —
+    1790539200 is **Mon 28 Sep in Dubai**, the 27th in plain UTC) and
+    `current_balance`. The Finance page had said "Bolt publishes no cadence".
+  - Bank payouts are the ledger lines titled **"Weekly payout"** and **"Instant
+    cashout"** — NOT **"Tax authority payout"**, which leaves the balance for a
+    tax office and never reaches the fleet.
+  **Now:** the collector reads the ledger one Dubai day at a time over the last
+  8 days on every run into `platform_balance_day` (sql/schema_v81.sql), and the
+  summary into `platform_balance_now`. The Finance page shows a ledger payout
+  **only for a date the register does not yet hold** — same day, or ±2 days for
+  the same amount to the fil — so when `getPayouts` catches up the same money is
+  never summed twice; the row is marked `ledger`, and the page carries Bolt's own
+  next payout date and says so when a Monday behind it has no payout seen.
+  **A probe that proves a path answers without saying what it answered is how a
+  source of truth sits unread. Return values — safely — not key names.**
+  Also caught before shipping: a phone-number redaction rule that counted
+  CHARACTERS matched `2026-09-21` and would have wiped every date from the
+  ledger. It counts digits now; an ISO date is exempt.
+
 
 * **A GATEWAY THAT REJECTS THE REQUEST IN A 200, WITH AN ARRAY THAT LOOKS LIKE
   DATA.** Bolt's fleet-integration `getFleetOrders` has been answering

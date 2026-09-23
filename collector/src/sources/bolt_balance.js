@@ -97,3 +97,102 @@ export function balanceSummary(data) {
    inside what has been measured to work and covers one full payout week,
    which is the question this ledger exists to answer. */
 export const BALANCE_WINDOW_DAYS = 7;
+
+/* ── one day of the ledger, as the columns platform_balance_day stores ──────
+   Measured shape, 2026-09-23 (both fleets identical in shape):
+     { currency:'AED',
+       starting_balance_item:{title:'Starting balance', value},
+       ending_balance_item:  {title:'Final balance',    value},
+       earnings_items:{ earning_in_app, tips, cancellation_fees, rider_cash_discount, … }
+       expenses_items:{ payouts:{title:'Weekly payout', value}, commissions_in_app,
+                        commissions_cash, booking_fees, … }
+       cash_in_hand_item:{title:'Cash payments to drivers', value},
+       glossary_items:[…] }
+   Each item is {title, value}. The earnings and expenses are OBJECTS keyed by
+   a code, not arrays, and a key is present only on a day that line moved. */
+
+/* WHAT REACHES THE FLEET'S OWN BANK. Matched on Bolt's TITLE, because the
+   title is what the glossary defines and the key is not documented anywhere:
+     "Weekly payout"        — "Regular weekly payouts to the fleet's bank account"
+     "Instant cashout"      — "On-demand payouts to the fleet's bank account"
+   and deliberately NOT
+     "Tax authority payout" — "Payments made to tax authorities to settle debt
+                               or negative balance"
+   which leaves the balance without ever reaching the fleet. Counting it would
+   report a transfer to the operator's bank that went to the tax office. */
+export const BANK_PAYOUT_TITLES = ['weekly payout', 'instant cashout'];
+
+const num = (x) => {
+  if (x === null || x === undefined || x === '') return null;
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
+};
+const itemsOf = (group) => {
+  if (!group) return [];
+  if (Array.isArray(group)) return group.map((it) => [it?.key ?? null, it]);
+  if (typeof group === 'object') return Object.entries(group);
+  return [];
+};
+const r2 = (n) => Math.round(n * 100) / 100;
+
+export function ledgerDay(data) {
+  if (!data || typeof data !== 'object') return null;
+  const earnings = {};
+  let earned = 0;
+  for (const [k, it] of itemsOf(data.earnings_items)) {
+    const v = num(it?.value);
+    if (v === null) continue;
+    earnings[k || it?.title || 'unnamed'] = { title: it?.title ?? null, value: v };
+    earned += v;
+  }
+  const expenses = {};
+  let spent = 0;
+  const payoutLines = [];
+  for (const [k, it] of itemsOf(data.expenses_items)) {
+    const v = num(it?.value);
+    if (v === null) continue;
+    expenses[k || it?.title || 'unnamed'] = { title: it?.title ?? null, value: v };
+    spent += v;
+    const t = String(it?.title || '').trim().toLowerCase();
+    if (BANK_PAYOUT_TITLES.includes(t) && v !== 0) {
+      payoutLines.push({ key: k, title: it.title, value: v });
+    }
+  }
+  const starting = num(data.starting_balance_item?.value);
+  const ending = num(data.ending_balance_item?.value);
+  /* The statement's own arithmetic, measured on real days to hold to the fil:
+     cash_in_hand is NOT a term — it is cash drivers collected, which never
+     passed through the balance. A ledger that does not balance is stored and
+     flagged, never silently corrected. */
+  const balances = starting === null || ending === null
+    ? null
+    : Math.abs(r2(starting + earned - spent) - r2(ending)) <= 0.01;
+  return {
+    currency: String(data.currency || 'AED').toUpperCase(),
+    /* Bolt reports a payout as a POSITIVE expense. Stored positive, as
+       platform_payout stores every transfer: "this much reached the bank". */
+    payout: payoutLines.length ? r2(Math.abs(payoutLines.reduce((a, l) => a + l.value, 0))) : null,
+    payout_lines: payoutLines.length ? payoutLines : null,
+    starting_balance: starting,
+    ending_balance: ending,
+    cash_in_hand: num(data.cash_in_hand_item?.value),
+    earnings,
+    expenses,
+    balances,
+  };
+}
+
+/* Bolt's next_payout_date is a unix SECOND. Its Dubai calendar day — Dubai is
+   UTC+4 all year, and 1790539200 is 2026-09-27T20:00Z, which is MONDAY 28
+   September in Dubai and Sunday the 27th in a plain toISOString(). */
+export function nextPayoutOn(sec) {
+  const s = num(sec);
+  if (s === null || s < 1262304000) return null;
+  return new Date((s + 4 * 3600) * 1000).toISOString().slice(0, 10);
+}
+
+/* How many days back the collector re-reads the ledger each run. Eight covers
+   a whole payout week plus a day, so a Monday payout is read on the day it
+   leaves and re-read until it is well settled, while the call count stays
+   bounded: eight small requests per fleet per run. */
+export const LEDGER_DAYS = 8;

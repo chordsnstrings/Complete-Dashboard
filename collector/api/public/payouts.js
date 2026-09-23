@@ -86,7 +86,7 @@
    rows, which cannot. Presenting them identically would be lying by
    omission. */
 import { el, esc, panel, loading, tableFrom, kpiRow, note, sourceLabel, money,
-  countOf, dateStr, dayStr, pill, pct, signed, foldChildren, foldRows } from './ui.js';
+  countOf, dateStr, dayStr, dtStr, pill, pct, signed, foldChildren, foldRows } from './ui.js';
 import { fmt, empty, barChart } from './charts.js';
 import { q, qChan, currentGen, alive } from './data.js';
 
@@ -273,8 +273,23 @@ export async function renderPayouts(root) {
       /* The provenance column, not decoration: #provenance is a whole page in
          this product built on the principle that a figure whose source is not
          stored cannot be re-derived when a provider changes shape. */
+      /* WHICH BOOK, AND WHEN IT REACHED US. A Bolt payout can come from its
+         balance ledger before its payout list catches up — the 21 September
+         2026 payout did, by days — and those are different claims: the ledger
+         shows the money leaving, the list is Bolt naming it a payout. The
+         marker says which, and "first seen" is the time this register first
+         held the row, which is how the list's lag gets measured at all. */
       { label: 'From', key: 'source',
-        render: (r) => `<span class="dim">${esc(r.source || '—')}</span>` },
+        render: (r) => {
+          const book = r.listed_by_provider === false
+            ? `${pill('ledger', 'warn', 'Bolt’s balance ledger shows this payout leaving the fleet’s '
+                + 'balance on this date. Bolt’s payout list has not listed it yet; when it does, '
+                + 'that row replaces this one and nothing is counted twice.')} `
+            : '';
+          const seen = r.collected_at
+            ? `<br><span class="dim">first seen ${esc(dtStr(r.collected_at))}</span>` : '';
+          return `${book}<span class="dim">${esc(r.source || '—')}</span>${seen}`;
+        } },
     ], { sortable: true, sortId: 'payout-rows',
       /* CARDS ON A PHONE. Six columns, 668px wide, in a 312px window at 390px
          — measured on production 2026-09-18. The date leads, because a
@@ -392,6 +407,30 @@ export async function renderPayouts(root) {
     for (const c of coverage.filter((x) => x.absent)) {
       p.body.append(note(`${sourceLabel(c.platform)}: ${c.absent}`,
         c.publishes_payouts ? 'warn' : null));
+    }
+    /* BOLT'S OWN WORDS on its balance and its next payout, per fleet. This
+       page used to say "Bolt publishes no cadence"; Bolt publishes a date. */
+    for (const c of coverage.filter((x) => Array.isArray(x.balance) && x.balance.length)) {
+      const lines = c.balance.map((b) => {
+        const nxt = b.next_payout_on
+          ? `next payout <b>${esc(dateStr(b.next_payout_on))}</b>`
+          : '<span class="ent-off">next payout date not stated</span>';
+        const bal = b.current_balance == null
+          ? '<span class="ent-off">balance not stated</span>'
+          : `balance <b>${money(b.current_balance)}</b>`;
+        return `${esc(b.fleet_id)}: ${bal} · ${nxt}`
+          + `<span class="dim"> — as Bolt stated it at ${esc(dtStr(b.checked_at))}</span>`;
+      });
+      const box = el('div', 'note');
+      box.innerHTML = `<b>${esc(sourceLabel(c.platform))} says:</b> ${lines.join('<br>')}`;
+      p.body.append(box);
+    }
+    /* A MONDAY THAT IS BEHIND BOLT'S NEXT PAYOUT DATE WITH NO PAYOUT SEEN.
+       The absence line above only ever fired for a provider with no rows at
+       all, so a single missing Monday — the operator's exact case — was
+       silent. */
+    for (const c of coverage) {
+      for (const m of (c.expected_missing || [])) p.body.append(note(m.says, 'warn'));
     }
     root.append(p.panel);
   }

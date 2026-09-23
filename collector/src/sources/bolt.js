@@ -14,6 +14,7 @@ import { log } from '../log.js';
 import { stateRow } from '../roster.js';
 import { get, setSetting } from '../settings.js';
 import { noteCredential, saysAuth } from '../auth_state.js';
+import { ledgerDay, nextPayoutOn, LEDGER_DAYS } from './bolt_balance.js';
 
 const SRC = 'bolt';
 
@@ -1107,7 +1108,15 @@ async function oneFleet(c, from, to, fails, allChunks, plates) {
     // An authenticated call that comes back with nothing is worth a line: it
     // separates "the token works and the window is empty" from "the token works
     // and we are reading the wrong field", which otherwise both read as zero.
-    if (answered && !rows.length && !refusals.length) {
+    /* COUNT WHAT WAS COLLECTED, NOT WHAT IS LEFT IN THE ARRAY. harvestPortal
+       hands each window's rows to the sink with rows.splice() as it goes, so
+       by here `rows` is EMPTY on every run that wrote anything — and this line
+       reported "no orders in window" on runs that had just written 103 trips
+       (measured in the collector log, 2026-09-23 04:31Z). A reader of the log
+       would conclude Bolt had no business. Each chunk records how many rows it
+       collected before handing them over; that is the true count. */
+    const collectedTotal = (chunks || []).reduce((a, ch) => a + (Number(ch?.rows) || 0), 0);
+    if (answered && !collectedTotal && !refusals.length) {
       log.info(SRC, `portal ${c.fleet}: authenticated, no orders in window`,
         { from: iso(from), to: iso(to) });
     }
@@ -1259,6 +1268,11 @@ async function pullPayouts(fails, rowsByFleet) {
         latest: rows.length ? [...days].sort().at(-1) : null });
       await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: credKey,
         state: 'ok', surface: 'getPayouts', detail: null });
+
+      /* THE LEDGER, BECAUSE getPayouts IS LATE. Its own try: the payout
+         register above has already been written, and a refused ledger must
+         not turn a successful payout run into a failed one. */
+      await pullBalance(c, at, fails);
     } catch (e) {
       const why = String(e && e.message ? e.message : e).slice(0, 200);
       log.error(SRC, `payouts ${c.fleet} failed`, { err: why });
@@ -1266,6 +1280,80 @@ async function pullPayouts(fails, rowsByFleet) {
     }
   }
   return total;
+}
+
+/* Bolt's balance ledger, one Dubai day at a time, and its summary.
+   ─────────────────────────────────────────────────────────────────────────
+   THE DEFECT THIS EXISTS FOR. On 2026-09-23 the operator reported a Bolt payout
+   on Monday 21 September. getPayouts did not list it: that register LAGS — the
+   14 September payout was absent from it on the 16th and present by the 21st.
+   getFleetBalanceDetails over the single day 2026-09-21 answered "Weekly
+   payout" 1,275.14 for Ecosine and 619.18 for Egari; over 2026-09-14 it
+   answered 2,490.95 and 832.25, EXACTLY what getPayouts later recorded for
+   that date. So the ledger is the same money, reported on time.
+
+   ONE DAY PER CALL, NOT A WINDOW. Over a window the ledger sums every payout
+   in it into one line with no date. Per day it is dated by construction —
+   the day asked about — which is the only way to know WHICH Monday a payout
+   belongs to without inferring it from Bolt's habit. Ninety days is refused
+   outright (25810 DATE_RANGE_TOO_BIG); one day is always answered.
+
+   LEDGER_DAYS back, every run: bounded at eight small requests per fleet, and
+   a day is re-read until it drops out of that range, so a line Bolt posts late
+   is still caught. collected_at is not in the row, so upsertMany never touches
+   it and it keeps the FIRST time a day was stored. */
+async function pullBalance(c, at, fails) {
+  const q = `?language=en-us&version=FO.3.856&company_id=${c.companyId}&user_id=${c.userId}&brand=bolt`;
+  const headers = { authorization: `Bearer ${at}`, 'content-type': 'application/json' };
+  const post = (path, body) => http(`${config.bolt.portalBase}/${path}${q}`,
+    { method: 'POST', headers, body: JSON.stringify(body) });
+
+  try {
+    const { data } = await post('getFleetBalanceSummary', {});
+    if (Number(data?.code) === 0 && data?.data) {
+      const d = data.data;
+      await upsertMany('platform_balance_now', [{
+        platform: SRC, fleet_id: c.fleet,
+        currency: String(d.currency || 'AED').toUpperCase(),
+        current_balance: Number.isFinite(Number(d.current_balance)) ? Number(d.current_balance) : null,
+        next_payout_on: nextPayoutOn(d.next_payout_date),
+        checked_at: new Date(),
+      }], ['platform', 'fleet_id']);
+    } else {
+      fails.push({ fleet: c.fleet, text: `balance summary ${c.fleet}: `
+        + `${data?.message || 'no message'} code=${data?.code ?? 'none'}` });
+    }
+  } catch (e) {
+    fails.push({ fleet: c.fleet, text: `balance summary ${c.fleet}: ${String(e?.message || e).slice(0, 160)}` });
+  }
+
+  const rows = [];
+  let refused = 0;
+  for (let back = LEDGER_DAYS - 1; back >= 0; back -= 1) {
+    const day = dubaiIso(new Date(Date.now() - back * 864e5));
+    try {
+      const { data } = await post('getFleetBalanceDetails',
+        { start_date: day, end_date: day, offset: 0, limit: 25 });
+      /* HTTP 200 IS NOT SUCCESS ON THIS HOST — the code field is. */
+      if (Number(data?.code) !== 0 || !data?.data) { refused += 1; continue; }
+      const L = ledgerDay(data.data);
+      if (!L) { refused += 1; continue; }
+      rows.push({ platform: SRC, fleet_id: c.fleet, day, currency: L.currency,
+        payout: L.payout, payout_lines: L.payout_lines,
+        starting_balance: L.starting_balance, ending_balance: L.ending_balance,
+        cash_in_hand: L.cash_in_hand, earnings: L.earnings, expenses: L.expenses,
+        balances: L.balances });
+    } catch (e) {
+      refused += 1;
+      log.warn(SRC, `balance ${c.fleet} ${day} failed`, { err: String(e?.message || e).slice(0, 160) });
+    }
+  }
+  if (rows.length) await upsertMany('platform_balance_day', rows, ['platform', 'fleet_id', 'day']);
+  const paid = rows.filter((r) => r.payout !== null);
+  log.info(SRC, `balance ${c.fleet}`, { days: rows.length, refused,
+    payouts: paid.map((r) => `${r.day}=${r.payout}`).join(' ') || 'none',
+    unbalanced: rows.filter((r) => r.balances === false).map((r) => r.day).join(' ') || 'none' });
+  if (refused) fails.push({ fleet: c.fleet, text: `balance ${c.fleet}: ${refused} of ${LEDGER_DAYS} days not answered` });
 }
 
 export async function collect({ from, to, mode }) {

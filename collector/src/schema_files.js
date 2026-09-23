@@ -197,4 +197,11 @@ export const SCHEMA_FILES = [
      api/public/settlement.js:203-210 records what happened last time two
      surfaces each carried their own. */
   'schema_v80.sql',
+  /* Bolt's balance ledger, one row per fleet per day, and Bolt's own statement
+     of its next payout date. getPayouts lists a Monday payout days late — the
+     21 September 2026 payout reached both fleets' banks and was absent from it
+     two days later — while getFleetBalanceDetails shows it the same day. A
+     separate table and not platform_payout, so a payout is never counted twice
+     when the lagging register catches up. */
+  'schema_v81.sql',
 ];

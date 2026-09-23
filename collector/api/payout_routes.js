@@ -187,6 +187,52 @@ const LIVE_UBER = {
    recovers it but a restart. */
 let inFlight = null;
 
+/* EVERY TRANSFER, FROM BOTH OF BOLT'S BOOKS, COUNTED ONCE.
+   ─────────────────────────────────────────────────────────────────────────
+   THE DEFECT. The operator reported a Bolt payout to both fleets on Monday
+   21 September 2026, and this page did not show it. platform_payout's Bolt rows
+   come from getPayouts, which LAGS: the 14 September payout was absent from it
+   on the 16th and present by the 21st. getFleetBalanceDetails, asked one day at
+   a time, shows the same money on the day it leaves — measured, its "Weekly
+   payout" for 14 September was 2,490.95 / 832.25, EXACTLY what getPayouts later
+   recorded, and for 21 September it was 1,275.14 / 619.18 while getPayouts
+   still had nothing.
+
+   So a transfer is the register's row where the register has one, and the
+   ledger's where it does not yet. A ledger payout is SUPPRESSED when the
+   register already holds that fleet's payout on the SAME day, or on a day
+   within two either side for the SAME amount to the fil — the second arm so a
+   payout that Bolt's `finished` stamp files on a neighbouring day is still
+   recognised as the same money, and never summed twice. Every row says which
+   book it came from (`basis`, `listed_by_provider`), because "Bolt's ledger
+   shows it leaving" and "Bolt has listed it as a payout" are different claims
+   and the page must not merge them. */
+const ALL_PAYOUTS = `
+  reg AS (
+    SELECT platform, fleet_id, paid_on, amount, currency, period_start, period_end,
+           method, source, payout_ext_id, collected_at, audit_amount, audited_at,
+           true AS listed_by_provider, 'register'::text AS basis
+      FROM platform_payout
+  ),
+  led AS (
+    SELECT b.platform, b.fleet_id, b.day AS paid_on, b.payout AS amount, b.currency,
+           NULL::date AS period_start, NULL::date AS period_end, 'bank'::text AS method,
+           'fleetOwnerPortal/getFleetBalanceDetails'::text AS source,
+           ('ledger:' || b.fleet_id || ':' || b.day::text) AS payout_ext_id,
+           b.collected_at,
+           /* Nobody has audited a payout Bolt has not even listed. */
+           NULL::numeric AS audit_amount, NULL::timestamptz AS audited_at,
+           false AS listed_by_provider, 'balance-ledger'::text AS basis
+      FROM platform_balance_day b
+     WHERE b.payout IS NOT NULL AND b.payout > 0
+       AND NOT EXISTS (
+             SELECT 1 FROM platform_payout pp
+              WHERE pp.platform = b.platform AND pp.fleet_id = b.fleet_id
+                AND (pp.paid_on = b.day
+                     OR (abs(pp.paid_on - b.day) <= 2 AND abs(pp.amount - b.payout) < 0.01)))
+  ),
+  allp AS (SELECT * FROM reg UNION ALL SELECT * FROM led)`;
+
 export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
   /* A REQUEST THAT NAMES NO WINDOW MEANS THE WHOLE REGISTER — AND "THE WHOLE
      REGISTER" HAS TO BE THE REGISTER, NOT A SENTINEL SPAN.
@@ -309,7 +355,9 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
         + 'above the opening balance, exactly equal to it, and 100.26 below it.' },
     { platform: 'bolt', publishes: true,
       how: 'Bolt’s fleet portal lists every payout with the second it completed, so each '
-        + 'row is already a date.',
+        + 'row is already a date. That list runs days behind the money, so each payout is '
+        + 'also read off Bolt’s balance ledger on the day it leaves, and shown from there '
+        + '— marked as such — until the list catches up.',
       /* "NO FIXED WEEKDAY" WAS A GUESS, AND THE WHOLE REGISTER DISAGREES WITH IT.
          ──────────────────────────────────────────────────────────────────────
          MEASURED ON PRODUCTION 2026-09-17, over every transfer on record now
@@ -331,10 +379,12 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
          is the difference between a measurement and an expectation, and the
          thing the audit band further down this page exists to keep straight
          for Uber. */
-      cadence: 'One payout per date. Bolt publishes no cadence and does not say which period a '
-        + 'payout settles, so nothing here claims one — but every Bolt transfer on record has '
-        + 'landed on a Monday: 175 of 175, measured 2026-09-17. That is a count, not a rule '
-        + 'Bolt has stated.' },
+      /* THE COUNT IS MEASURED ON EVERY REQUEST NOW — see boltCadence() in the
+         handler. This line said "175 of 175, measured 2026-09-17" and was still
+         saying it with 177 on record: a number in prose is a measurement that
+         stops being re-taken. And "Bolt publishes no cadence" was simply wrong:
+         getFleetBalanceSummary states the next payout date, and it is shown. */
+      cadence: null },
     { platform: 'yango', publishes: false,
       how: null,
       why_absent: 'Yango does not publish a transfer to the company at all. Its park ledger is a '
@@ -351,9 +401,11 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
     const p = [from, to, platform, fleet];
 
     const payouts = await q(
-      `SELECT platform, fleet_id, paid_on, amount, currency,
-              period_start, period_end, method, source, payout_ext_id
-         FROM platform_payout
+      `WITH ${ALL_PAYOUTS}
+       SELECT platform, fleet_id, paid_on, amount, currency,
+              period_start, period_end, method, source, payout_ext_id,
+              collected_at, listed_by_provider, basis
+         FROM allp
         WHERE paid_on BETWEEN $1::date AND $2::date
           AND ($3::text IS NULL OR platform = $3)
           AND ($4::text IS NULL OR fleet_id = $4)
@@ -363,13 +415,20 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
        on these dates" without summing across two businesses that keep separate
        bank accounts. */
     const totals = await q(
-      `SELECT platform, fleet_id, currency,
+      `WITH ${ALL_PAYOUTS}
+       SELECT platform, fleet_id, currency,
               count(*)::int AS transfers,
               count(DISTINCT paid_on)::int AS dates,
               round(sum(amount)::numeric, 2) AS total,
               min(paid_on) AS earliest,
-              max(paid_on) AS latest
-         FROM platform_payout
+              max(paid_on) AS latest,
+              /* How much of the total rests on the balance ledger alone —
+                 a transfer Bolt shows leaving but has not yet listed. Said
+                 per row AND summed, so the page can name it. */
+              count(*) FILTER (WHERE NOT listed_by_provider)::int AS unlisted_transfers,
+              round(coalesce(sum(amount) FILTER (WHERE NOT listed_by_provider), 0)::numeric, 2)
+                AS unlisted_total
+         FROM allp
         WHERE paid_on BETWEEN $1::date AND $2::date
           AND ($3::text IS NULL OR platform = $3)
           AND ($4::text IS NULL OR fleet_id = $4)
@@ -382,9 +441,10 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
        covers travels beside it, and the page can say "the record runs from
        2024-12-23" instead of implying the provider started last month. */
     const span = await q(
-      `SELECT platform, fleet_id, min(paid_on) AS earliest, max(paid_on) AS latest,
+      `WITH ${ALL_PAYOUTS}
+       SELECT platform, fleet_id, min(paid_on) AS earliest, max(paid_on) AS latest,
               count(*)::int AS transfers
-         FROM platform_payout
+         FROM allp
         WHERE ($1::text IS NULL OR platform = $1)
           AND ($2::text IS NULL OR fleet_id = $2)
         GROUP BY 1, 2`, [platform, fleet]);
@@ -415,13 +475,78 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
        would start lying. Each gets its own sentence below. */
     const anyFor = (plat) => totals.some((t) => t.platform === plat)
       || span.some((s) => s.platform === plat);
+
+    /* BOLT'S CADENCE, COUNTED — never written down. Over the WHOLE record,
+       both books, whatever window was asked: a cadence is a fact about the
+       provider, not about the window. */
+    const [bc] = await q(
+      `WITH ${ALL_PAYOUTS}
+       SELECT count(*)::int AS n,
+              count(*) FILTER (WHERE extract(isodow FROM paid_on) = 1)::int AS mondays
+         FROM allp WHERE platform = 'bolt'`);
+    const boltCadence = bc && bc.n
+      ? `One payout per date, and Bolt does not say which period a payout settles, so `
+        + `nothing here claims one. Every Bolt transfer on record has landed on a Monday: `
+        + `${bc.mondays} of ${bc.n}. That is a count, not a rule Bolt has stated — Bolt `
+        + `states only its next payout date, which is shown beside it.`
+      : null;
+
+    /* BOLT'S OWN STATEMENT of where each fleet's balance stands and when it
+       pays next, from getFleetBalanceSummary, with the time it was read. */
+    const boltBalance = await q(
+      `SELECT fleet_id, currency, current_balance, next_payout_on, checked_at
+         FROM platform_balance_now WHERE platform = 'bolt'
+          AND ($1::text IS NULL OR fleet_id = $1)
+        ORDER BY fleet_id`, [fleet]);
+
+    /* AN EXPECTED PAYOUT THAT HAS NOT BEEN SEEN, said out loud.
+       ─────────────────────────────────────────────────────────────────────
+       The page's only absence sentence fired when a provider had NO rows at
+       all, so a missing Monday — the exact case the operator hit on
+       2026-09-23 — said nothing. The test is Bolt's own: once Bolt names a next
+       payout date, the Monday before it is behind us, and if neither of Bolt's
+       books holds a payout for that fleet on that Monday, the page says so.
+       Bolt has genuinely skipped Egari on 4 of 91 Mondays, so this is a
+       question to ask, not a verdict. */
+    const prevMonday = (iso) => {
+      const d = new Date(`${String(iso).slice(0, 10)}T00:00:00Z`);
+      if (Number.isNaN(d.getTime())) return null;
+      const dow = d.getUTCDay();                 // Mon = 1
+      const back = dow === 1 ? 7 : (dow + 6) % 7;
+      return new Date(d.getTime() - back * 864e5).toISOString().slice(0, 10);
+    };
+    const expectedMissing = [];
+    for (const b of boltBalance) {
+      if (!b.next_payout_on) continue;
+      const due = prevMonday(b.next_payout_on instanceof Date
+        ? b.next_payout_on.toISOString() : b.next_payout_on);
+      if (!due) continue;
+      const [seen] = await q(
+        `WITH ${ALL_PAYOUTS}
+         SELECT count(*)::int AS n FROM allp
+          WHERE platform = 'bolt' AND fleet_id = $1 AND paid_on = $2::date`, [b.fleet_id, due]);
+      if (!seen?.n) {
+        expectedMissing.push({ fleet_id: b.fleet_id, expected_on: due,
+          checked_at: b.checked_at,
+          says: `No Bolt payout to ${b.fleet_id} has been seen for Monday ${due}, in either of `
+            + `Bolt's books. Bolt now names its next payout as ${String(b.next_payout_on).slice(0, 10)}, `
+            + `so ${due} is behind it. Bolt has skipped this fleet on a Monday before; check the `
+            + `bank statement for a Bolt credit before treating this as a collection fault.` });
+      }
+    }
     const coverage = PROVIDERS
       .filter((prov) => !platform || prov.platform === platform)
       .map((prov) => ({
         platform: prov.platform,
         publishes_payouts: prov.publishes,
         how: prov.how,
-        cadence: prov.cadence || null,
+        cadence: prov.platform === 'bolt' ? boltCadence : (prov.cadence || null),
+        /* Bolt only: its own balance statement per fleet, and any Monday that
+           is behind Bolt's next payout date with no payout seen for it. */
+        ...(prov.platform === 'bolt' ? {
+          balance: boltBalance,
+          expected_missing: expectedMissing,
+        } : {}),
         in_window: totals.filter((t) => t.platform === prov.platform),
         record_span: span.filter((s) => s.platform === prov.platform),
         /* The sentence the page prints where a figure would go. Never "0" and
@@ -497,10 +622,16 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
     const [from, to, platform, fleet, scope] = await payoutRange(req);
     const p = [from, to, platform, fleet];
 
+    /* THE SAME COMBINED SET AS THE REGISTER ABOVE. This page renders both
+       tables; reading the register here and both books there put the 21
+       September 2026 Bolt payout in one table and out of the other, on the
+       same screen. */
     const rows = await q(
-      `SELECT p.platform, p.fleet_id,
+      `WITH ${ALL_PAYOUTS}
+       SELECT p.platform, p.fleet_id,
               to_char(p.paid_on, 'YYYY-MM-DD')      AS paid_on,
               p.amount                              AS wire,
+              p.listed_by_provider, p.basis,
               to_char(p.period_start, 'YYYY-MM-DD') AS period_start,
               to_char(p.period_end, 'YYYY-MM-DD')   AS period_end,
               p.source,
@@ -519,7 +650,7 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
                  settles over a fortnight would make the sentence state a false
                  denominator while every number beside it stayed correct. */
               (p.period_end - p.period_start + 1)     AS period_days
-         FROM platform_payout p
+         FROM allp p
          /* The provider's own statement for the day the money left, where we
             hold one. LEFT, not INNER: a transfer we have and a statement we
             have not asked for is the ordinary state of the backfill — 4
