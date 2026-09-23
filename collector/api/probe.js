@@ -28,6 +28,7 @@ import { loadSettings, get } from '../src/settings.js';
    that mistake once (see YANGO_SURFACES in src/sources/yango.js) and reported a
    dead cookie the collector was using successfully at that moment. */
 import { portalToken as boltPortalToken } from '../src/sources/bolt.js';
+import { balanceValues, balanceSummary, BALANCE_WINDOW_DAYS } from '../src/sources/bolt_balance.js';
 /* And the same borrowing for Yango, for the same reason the comment above
    gives — see the drift this closed, at the /api/probe/yango route below. */
 import { YANGO_SURFACES } from '../src/sources/yango.js';
@@ -2549,8 +2550,13 @@ export function probeRoutes(app, { wrap }) {
         non_null_of_sampled: f.nonNull }));
     };
 
+    /* SEVEN DAYS, NOT NINETY. getFleetBalanceDetails refuses a 90-day window
+       with code 25810 DATE_RANGE_TOO_BIG and answers over nine days and over
+       one (measured 2026-09-23). This default was ninety for the probe's whole
+       life, so every run reported the balance ledger as refused and nobody
+       learned it held the week's payout. See src/sources/bolt_balance.js. */
     const to = req.query.to || dubaiIso();
-    const from = req.query.from || dubaiIso(new Date(Date.now() - 90 * 864e5));
+    const from = req.query.from || dubaiIso(new Date(Date.now() - BALANCE_WINDOW_DAYS * 864e5));
 
     const out = [];
     for (const c of asked) {
@@ -2602,20 +2608,29 @@ export function probeRoutes(app, { wrap }) {
           currencies: list ? [...new Set(list.map((r) => r.currency).filter(Boolean))] : null,
           total: sums.length ? Number(sums.reduce((a2, b2) => a2 + b2, 0).toFixed(2)) : null,
         },
+        /* VALUES, NOT KEY NAMES, for the two balance paths. Key names were all
+           this ever returned, which is how a ledger holding the week's payout
+           sat unread: the probe proved the path answered and never said what
+           it answered. These are the FLEET's balance lines — its own money,
+           the same kind of figure the Finance page already shows — and
+           balanceValues() drops any key naming a person or an account and
+           redacts any value shaped like one, so the route's promise below
+           still holds. */
         getFleetBalanceSummary: await (async () => {
           const r = await call('getFleetBalanceSummary', 'POST', {});
           return { http: r.http, code: r.code, message: r.message,
-            top_level_keys: r.data && typeof r.data === 'object' ? Object.keys(r.data).slice(0, 25) : null };
+            top_level_keys: r.data && typeof r.data === 'object' ? Object.keys(r.data).slice(0, 25) : null,
+            values: Number(r.code) === 0 ? balanceSummary(r.data) : null };
         })(),
         getFleetBalanceDetails: await (async () => {
           const r = await call('getFleetBalanceDetails', 'POST',
             { start_date: from, end_date: to, offset: 0, limit: 25 });
-          const rows = Array.isArray(r.data?.list) ? r.data.list
-            : Array.isArray(r.data?.rows) ? r.data.rows : null;
-          return { http: r.http, code: r.code, message: r.message,
+          const stats = { dropped_keys: 0, redacted_values: 0 };
+          const values = Number(r.code) === 0 && r.data && typeof r.data === 'object'
+            ? balanceValues(r.data, 0, stats) : null;
+          return { http: r.http, code: r.code, message: r.message, window: [from, to],
             top_level_keys: r.data && typeof r.data === 'object' ? Object.keys(r.data).slice(0, 25) : null,
-            rows: rows ? rows.length : null,
-            fields: rows && rows.length ? shapeOf(rows) : null };
+            values, withheld: values ? stats : null };
         })(),
       });
     }
@@ -2624,8 +2639,10 @@ export function probeRoutes(app, { wrap }) {
       window: [from, to],
       host: config.bolt.portalBase,
       fleets: out,
-      note: 'Read-only. Shape, counts and totals only — no payout row, no driver and no '
-        + 'account number leaves this route. Bolt answers HTTP 200 on a refusal and puts the '
+      note: 'Read-only. getPayouts is summarised as counts and totals; the two balance paths '
+        + 'return the fleet\u2019s own balance lines as values. No driver and no account number '
+        + 'leaves this route: keys naming either are dropped and values shaped like either are '
+        + 'redacted, and `withheld` counts both. Bolt answers HTTP 200 on a refusal and puts the '
         + 'refusal in its own `code` field, so both are printed.',
     });
   }));
