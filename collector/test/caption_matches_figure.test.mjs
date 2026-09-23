@@ -124,7 +124,9 @@ const PROD_PAYOUTS = {
   payout_platforms: ['uber', 'yango'],
   payout_coverage_pct: 100,
 };
-const EXCLUDED = Math.round(PROD_PAYOUTS.payouts - PROD_PAYOUTS.accounted_payouts);  // 89
+/* To the fils since the money ruling of 2026-09-23 — was Math.round(), 89. The
+   fixture's own uncounted_payouts is 88.86, and that is what the page prints. */
+const EXCLUDED = (PROD_PAYOUTS.payouts - PROD_PAYOUTS.accounted_payouts).toFixed(2);  // 88.86
 
 /* ── the fixture server ─────────────────────────────────────────────────── */
 const { app: mockApp } = await import('../mockapi.mjs');
@@ -243,7 +245,8 @@ check('the tile is on the page', !!payTile, finTiles.map((k) => k.label).join(' 
    defends is unchanged: every name and number in the caption must describe the
    figure above it. */
 check('the figure is what the platforms wired, across every channel that wired',
-  payTile?.value === 'AED 38,195', `reads "${payTile?.value}"`);
+  // Was 'AED 38,195'; every money figure now carries its fils (ruling of 2026-09-23).
+  payTile?.value === 'AED 38,194.57', `reads "${payTile?.value}"`);
 check('…so naming both platforms over it is correct rather than misleading',
   /Uber, Yango/.test(payTile?.sub || ''), `sub "${payTile?.sub}"`);
 check('…and the caption says what that figure is',

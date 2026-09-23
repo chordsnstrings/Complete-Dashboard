@@ -84,6 +84,7 @@ import { createHash } from 'node:crypto';
 import { resolvePerson, personKey } from './ledger_person.js';
 /* One answer to "who is this", read from the table src/persons.js builds. */
 import { personMap } from './person_map.js';
+import { aedText } from '../src/util.js';
 
 const round2 = (v) => (v == null ? null : Math.round(Number(v) * 100) / 100);
 
@@ -924,11 +925,16 @@ export function ledgerWriteRoutes(app, { wrap, tx }) {
           /* THE SENTENCE A SCREEN PRINTS BEFORE SAVING, assembled here rather
              than in the front end so the desktop and the phone cannot say two
              different things about the same entry. */
-          sentence: `${by} is recording ${type.label.toLowerCase()} of AED ${amount.toFixed(2)} `
+          /* Money as every page prints it (the ruling of 2026-09-23): two
+             decimals AND a separator, and a negative book with the minus in
+             front of the currency. toFixed(2) gave "AED 4500.00" here beside
+             "AED 4,500.00" on the balance the same screen shows, and a book in
+             debt read "AED -600.00". */
+          sentence: `${by} is recording ${type.label.toLowerCase()} of ${aedText(amount)} `
             + `${type.direction > 0 ? 'to' : 'from'} ${personName}, effective ${day}`
             + `${b.settles_via ? `, ${String(b.settles_via).replace(/_/g, ' ')}` : ''}. `
-            + `Their ${type.book} book moves from AED ${(before[type.book] || 0).toFixed(2)} to `
-            + `AED ${(after[type.book] || 0).toFixed(2)}.`,
+            + `Their ${type.book} book moves from ${aedText(before[type.book] || 0)} to `
+            + `${aedText(after[type.book] || 0)}.`,
         };
       }, { rollback: dryRun });
 

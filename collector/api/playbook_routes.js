@@ -21,6 +21,7 @@
 
    4. AN ACTION WITH NOTHING BEHIND IT IS NOT SHOWN. A zero is not a to-do. */
 import { custodyLatest, custodyOverWindow, custodyCountOverWindow, peopleCount, peopleCountStored, JOIN_TRIP } from './custody_sql.js';
+import { aedText } from '../src/util.js';
 
 export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
   app.get('/api/playbook', wrap(async (req, res) => {
@@ -159,7 +160,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
       // Money already earned and not collected. Measured — these channels price.
       q(`SELECT count(*)::int trips,
                 count(*) FILTER (WHERE price IS NOT NULL)::int priced,
-                round(sum(price)::numeric,0) AS amount,
+                round(sum(price)::numeric, 2) AS amount,
                 /* Attributed the way #settlement/receivables attributes it — the page this
                    action links to. Coalescing partner-first folded every driver's salary
                    deduction into their employer, so the card said 6 counterparties and the
@@ -173,7 +174,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
       // Cash a driver is personally holding at the end of a shift.
       q(`SELECT count(*)::int trips,
                 count(*) FILTER (WHERE price IS NOT NULL)::int priced,
-                round(sum(price)::numeric,0) AS amount,
+                round(sum(price)::numeric, 2) AS amount,
                 /* PEOPLE holding cash, not platform accounts.
                    ──────────────────────────────────────────────────────────
                    THE DEFECT. This is the size figure behind the action card
@@ -268,7 +269,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
                 max(settlement_class) AS settlement_class,
                 count(*)::int trips,
                 count(*) FILTER (WHERE price IS NOT NULL)::int priced,
-                round(sum(price)::numeric,0) AS amount,
+                round(sum(price)::numeric, 2) AS amount,
                 max((now()::date - local_day))::int AS oldest_days
          FROM trip_ext WHERE ${DAYWIN('requested_at')} AND is_receivable ${PF()}
          GROUP BY 1 ORDER BY sum(price) DESC NULLS LAST LIMIT 12`, p),
@@ -281,7 +282,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
                 array_remove(array_agg(DISTINCT plate), NULL) AS plates,
                 count(*)::int trips,
                 count(*) FILTER (WHERE price IS NOT NULL)::int priced,
-                round(sum(price)::numeric,0) AS amount,
+                round(sum(price)::numeric, 2) AS amount,
                 /* True when this driver's cash bookings come from a channel
                    that reports no fare — the AED beside them is then a floor
                    over the priced minority, not their takings. */
@@ -396,16 +397,22 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
         detail_of: null,
         ...a,
         ceiling,
-        aed_measured: a.aed_measured == null ? null : Math.round(a.aed_measured),
-        aed_modelled: rate && modelable && ceiling > 0 ? Math.round(ceiling * rate) : null,
+        /* To the fils, not the dirham — the operator's money ruling of
+           2026-09-23. The modelled figure is still the rate times THE NUMBER
+           ON SCREEN (the rounded ceiling); only its own rounding moved. */
+        aed_measured: a.aed_measured == null ? null : Math.round(a.aed_measured * 100) / 100,
+        aed_modelled: rate && modelable && ceiling > 0 ? Math.round(ceiling * rate * 100) / 100 : null,
       });
     };
 
     /* ── COLLECT: money already earned ─────────────────────────────────── */
     if (Number(recv?.amount) > 0) {
+      /* The title's figure is to the fils (src/util.js aedText). It read
+         "Chase AED 58,721 owed" from Math.round(), on a page whose tiles print
+         the same receivable with its fils — two figures for one sum. */
       act({
         id: 'collect_receivables', group: 'Collect', horizon: 'this week',
-        title: `Chase AED ${Math.round(recv.amount).toLocaleString()} owed across ${recv.counterparties} `
+        title: `Chase ${aedText(recv.amount)} owed across ${recv.counterparties} `
           + s(recv.counterparties, 'counterparty', 'counterparties'),
         why: `${n(recv.trips)} ${s(recv.trips, 'booking')} in this window settle on account or against salary `
           + `rather than at the kerb. The oldest is ${recv.oldest_days} days old.`,

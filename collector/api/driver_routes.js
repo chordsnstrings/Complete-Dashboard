@@ -668,7 +668,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                 count(*) FILTER (WHERE n.outcome IS NOT NULL)::int bookable,
                 count(DISTINCT n.local_day)::int days,
                 round(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance)::numeric,0) km,
-                round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
+                round(sum(n.price) FILTER (WHERE n.has_fare)::numeric, 2) revenue,
                 count(*) FILTER (WHERE n.has_fare)::int priced_trips,
                 max(n.requested_at) last_trip, min(n.requested_at) first_trip,
                 array_agg(DISTINCT n.platform) platforms,
@@ -734,7 +734,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
           (sql/schema_v23.sql). */
        pay AS (
          SELECT driver_ext_id,
-                round(sum(earnings)::numeric, 0) AS payout,
+                round(sum(earnings)::numeric, 2) AS payout,
                 count(DISTINCT day)::int AS payout_days
            FROM driver_payout_day
           WHERE day BETWEEN $1::date AND $2::date
@@ -763,7 +763,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
           holding two accounts is added, not doubled. */
        dmoney AS (
          SELECT driver_ext_id,
-                round(sum(money)::numeric, 0) AS money,
+                round(sum(money)::numeric, 2) AS money,
                 count(*) FILTER (WHERE money IS NOT NULL)::int AS money_days,
                 CASE WHEN bool_or(money IS NOT NULL AND money_period_days IS NULL) THEN NULL
                      ELSE max(money_period_days) END AS money_period_days,
@@ -1291,7 +1291,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       (c) => complianceRows.some((r) => String(r[c] ?? '').trim() !== ''));
     const vehicles = await q(
       `SELECT plate, count(*)::int days, sum(trips)::int trips, round(sum(km)::numeric,0) km,
-              round(sum(revenue)::numeric,0) revenue, min(day) first_day, max(day) last_day,
+              round(sum(revenue)::numeric, 2) revenue, min(day) first_day, max(day) last_day,
               bool_or(is_primary) ever_primary
        FROM vehicle_driver_day WHERE driver_ext_id = ANY($1)
        GROUP BY plate ORDER BY days DESC LIMIT 40`, [d.keys]);
@@ -2928,7 +2928,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
   app.get('/api/driver/heatmap', withDriver(async (req, res, d, p) => res.json(await q(
     `SELECT extract(dow from requested_at AT TIME ZONE 'Asia/Dubai')::int dow,
             extract(hour from requested_at AT TIME ZONE 'Asia/Dubai')::int h,
-            count(*)::int trips, round(sum(price)::numeric,0) revenue
+            count(*)::int trips, round(sum(price)::numeric, 2) revenue
      FROM trip WHERE ${TW} GROUP BY 1,2 ORDER BY 1,2`, p))));
 
   /* ── standing against the fleet, as percentiles ────────────────────── */
@@ -3221,11 +3221,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                    ELSE '60 km+' END label,
               CASE WHEN distance_km < 3 THEN 1 WHEN distance_km < 7 THEN 2 WHEN distance_km < 15 THEN 3
                    WHEN distance_km < 30 THEN 4 WHEN distance_km < 60 THEN 5 ELSE 6 END ord,
-              count(*)::int n, round(sum(price)::numeric,0) revenue,
+              count(*)::int n, round(sum(price)::numeric, 2) revenue,
               round(avg(price)::numeric,2) avg_fare
        FROM trip WHERE ${TW} AND distance_km IS NOT NULL GROUP BY 1,2 ORDER BY ord`, p);
     const one = (col) => q(
-      `SELECT coalesce(${col},'unknown') label, count(*)::int n, round(sum(price)::numeric,0) revenue
+      `SELECT coalesce(${col},'unknown') label, count(*)::int n, round(sum(price)::numeric, 2) revenue
        FROM trip WHERE ${TW} GROUP BY 1 ORDER BY n DESC LIMIT 20`, p);
     const [product, payment, status, platform] = await Promise.all(
       [one('product'), one('payment_type'), one('status'), one('platform')]);
@@ -3647,7 +3647,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     return next();
   }, withDriver(async (req, res, d, p) => res.json(await q(
     `SELECT plate, count(DISTINCT day)::int days, sum(trips)::int trips,
-            round(sum(km)::numeric,0) km, round(sum(revenue)::numeric,0) revenue,
+            round(sum(km)::numeric,0) km, round(sum(revenue)::numeric, 2) revenue,
             min(day) first_day, max(day) last_day,
             count(DISTINCT day) FILTER (WHERE is_primary)::int primary_days,
             array_agg(DISTINCT platform) AS platforms

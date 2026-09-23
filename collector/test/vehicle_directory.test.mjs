@@ -47,7 +47,10 @@ const OLD = `WITH plates AS (
                 count(DISTINCT n.local_day)::int days_moved,
                 round(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance)::numeric,0) km,
                 round(sum(n.distance_km) FILTER (WHERE NOT n.is_booking AND n.has_distance)::numeric,0) telematics_km,
-                round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
+                -- ::numeric,0 when this was frozen; the route now keeps the fils
+                -- (the money ruling of 2026-09-23), so the oracle does too. The
+                -- rows must still match the rewrite in every other column.
+                round(sum(n.price) FILTER (WHERE n.has_fare)::numeric, 2) revenue,
                 count(*) FILTER (WHERE n.has_fare)::int priced_trips,
                 ${peopleCountStored()}::int drivers,
                 count(DISTINCT n.platform)::int platforms,

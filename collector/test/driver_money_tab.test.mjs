@@ -259,8 +259,11 @@ console.log('\na driver who has a record');
     `${names.length}: ${JSON.stringify(names.map((t) => t.slice(0, 40)))}`);
   check('and every one of them is an entry, not an empty row',
     names.every((t) => /AED/.test(t)), JSON.stringify(names.map((t) => t.slice(0, 30))));
+  /* Changed deliberately on 2026-09-23: deposit_core's aed() is now money(),
+     which puts the true minus BEFORE the currency ("−AED 1,000.00") where the
+     old formatter put an ASCII hyphen after it ("AED -1,000.00"). */
   check('a repayment reads as money coming back, by its sign',
-    /-1,000\.00|−1,000\.00/.test(names.join(' ')), names.join(' ').slice(0, 200));
+    /\u2212AED 1,000\.00/.test(names.join(' ')), names.join(' ').slice(0, 200));
 
   /* THREE PROOF STATES. */
   /* BY HEADER, NOT BY INDEX. This read `td[3]` and broke silently the moment

@@ -13,7 +13,7 @@
    The fare column is mostly empty and that is the provider, not a gap: Uber's
    trip export has no price in it. The page says so once, under the table,
    rather than leaving twelve thousand dashes to be interpreted. */
-import { el, esc, panel, loading, tableFrom, kpiRow, sourceLabel, tripTime } from './ui.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, sourceLabel, tripTime, money } from './ui.js';
 import { fmt, empty } from './charts.js';
 import { q, href, state } from './data.js';
 
@@ -151,7 +151,7 @@ export async function renderTrips(root) {
           + `${esc(r.status || r.outcome || '—')}</span>` },
       { label: 'Fare', key: 'price', num: true,
         absent: 'no booking in this window reports a fare',
-        render: (r) => (r.has_fare ? `AED ${fmt(r.price)}` : '<span class="dim">—</span>') },
+        render: (r) => (r.has_fare ? money(r.price) : '<span class="dim">—</span>') },
     ], { compact: true }));
 
     /* Paging, stated in rows rather than page numbers: a reader wants to know

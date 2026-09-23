@@ -125,6 +125,25 @@ export function* dubaiDayChunks(from, to) {
   }
 }
 
+/* Money in a sentence the SERVER writes, printed the way api/public/ui.js
+   money() prints it on every page: "AED 1,275.14" — two decimals, a separator,
+   and a minus (U+2212) in front of the currency. The operator ruled on
+   2026-09-23 that every money figure is precise to the fils, and three
+   sentences are assembled here rather than in a page (the ledger's "book moves
+   from … to …", the playbook's "Chase AED … owed", an insight's detail), so
+   they need the same rule on this side of the wire. Pinned alongside the
+   page's formatter in test/money_precise.test.mjs.
+
+   Absent is null, never "AED 0.00": a caller that has no figure must say so in
+   words of its own, not print a nought for it. */
+export const aedText = (v) => {
+  const n = Number(v);
+  if (v == null || v === '' || !Number.isFinite(n)) return null;
+  const body = Math.abs(n).toLocaleString('en-US',
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${n < 0 && /[1-9]/.test(body) ? '\u2212' : ''}AED ${body}`;
+};
+
 export const monthsAgo = (n) => { const d = new Date(); d.setUTCMonth(d.getUTCMonth() - n); return d; };
 export const daysAgo = (n) => { const d = new Date(); d.setUTCDate(d.getUTCDate() - n); return d; };
 

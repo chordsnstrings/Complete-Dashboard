@@ -1241,14 +1241,47 @@ export const NO_DURATION = 'no source fills trip.duration_s, so this is the requ
   + 'instead \u2014 which contains the drive to the rider, because neither Uber\u2019s export nor the '
   + 'hotel channel reports a pickup time. A dash means that trip carries no dropoff time either';
 
-// `d` is decimals: whole dirhams for totals, two for rates like revenue-per-km
-// where rounding to the nearest dirham destroys the number.
-export const money = (v, cur = 'AED', d = 0) => {
+/* EVERY MONEY FIGURE IS PRECISE TO THE FILS — the operator's ruling of
+   2026-09-23 (docs/UI-REDESIGN-PLAN.md §1, ruling 2), in both skins.
+   ─────────────────────────────────────────────────────────────────────────
+   This took a third argument, `d`, defaulting to 0: whole dirhams for totals,
+   two decimals only where a caller asked. So one page carried three
+   precisions at once — "AED 17,870" on a tile, "AED 38.40" on the rate beside
+   it, and a hand-built `'AED ' + fmt(x)` that dropped the fils its own way —
+   and 16 call sites passed 0 on purpose. A figure rounded to the dirham is a
+   different figure: 17,869.68 printed as 17,870 is not what the platform paid.
+
+   So the third argument is GONE, not defaulted. A caller that still passes
+   `'AED', 0` (or any other count) gets two decimals regardless, because a
+   whole-dirham money figure is exactly what the ruling forbids and an
+   argument that can re-open it is an argument somebody will pass.
+   test/money_precise.test.mjs pins money(1234, 'AED', 0) === 'AED 1,234.00'.
+
+   Every inline money render — `'AED ' + fmt(x)`, `AED ${fmt(x, 0)}`, a chart
+   whose tooltip or axis was a bare fmt() of a money series — now comes here.
+   Counts, percentages and kilometres are not money and keep their own
+   formatters. An absent figure is still '—', never "AED 0.00": the guard
+   below is unchanged, and it is the whole reason money() is a function
+   rather than a template string. */
+export const fils = (v) => {
   const n = Number(v);
   if (v == null || v === '' || !Number.isFinite(n)) return '—';
-  // A rate needs a FIXED number of decimals: `maximumFractionDigits` alone
-  // rendered 2.70 as "AED 2.7", and rounding to whole dirhams rendered it
-  // "AED 3" — which is a different number.
+  // A FIXED number of decimals: `maximumFractionDigits` alone rendered 2.70
+  // as "AED 2.7", and rounding to whole dirhams rendered it "AED 3" — which
+  // is a different number.
+  const body = Math.abs(n).toLocaleString(undefined,
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  /* −0.004 rounds to "0.00", and a minus in front of a nought is a sign on
+     nothing. The sign follows the PRINTED figure, not the raw one. */
+  return `${n < 0 && /[1-9]/.test(body) ? '\u2212' : ''}${body}`;
+};
+/* `fils` is the figure alone, for the one place a money figure is printed
+   without its currency: a sub-line naming the halves of a total whose value
+   line already says "AED" (today.js moneyHalves). money() is fils() with the
+   currency put in front of the number and behind the sign. */
+export const money = (v, cur = 'AED') => {
+  const f = fils(v);
+  if (f === '—') return f;
   /* And the minus goes BEFORE the currency, in U+2212.
      ─────────────────────────────────────────────────────────────────────
      toLocaleString put an ASCII hyphen after the currency — "AED -600.59" —
@@ -1257,9 +1290,7 @@ export const money = (v, cur = 'AED', d = 0) => {
      negative money figure in the product carried the hyphen, next to
      percentages that carry a true minus. A sign belongs to the number, and
      the number reads left to right: −AED 600.59. */
-  const body = Math.abs(n).toLocaleString(undefined,
-    { minimumFractionDigits: d, maximumFractionDigits: d });
-  return `${n < 0 ? '\u2212' : ''}${cur} ${body}`;
+  return f[0] === '\u2212' ? `\u2212${cur} ${f.slice(1)}` : `${cur} ${f}`;
 };
 /* A percentage, with the same minus sign as every other number on the page.
    ─────────────────────────────────────────────────────────────────────────

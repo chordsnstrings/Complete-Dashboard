@@ -308,7 +308,11 @@ const tile = (r, label) => r.tiles.find((t) => t.label === label);
    lookahead has to allow a SENTENCE-ENDING full stop ("…net to AED 0.") while
    still rejecting a decimal one ("AED 0.00"), which is why it tests for a digit
    after the separator rather than for the separator itself. */
-const MONEY_ZERO = /AED\s0(?![.,]?\d)/;
+/* Widened on 2026-09-23. money() now prints every figure to the fils, so the
+   nought this hunts for is "AED 0.00" as well as "AED 0" — the old pattern
+   let the new money(0) straight through, and a reversion of any fix below
+   would have passed. Still not "AED 0.001" or "AED 0.50". */
+const MONEY_ZERO = /AED\s0(?:[.,]00)?(?![.,]?\d)/;
 
 console.log('\nthe reported defect: a money figure over an empty population');
 
@@ -359,8 +363,9 @@ check('…and the sentence says the platform published them',
 /* REVERSION: restore the caption `${countOf(roots.length,…)} netting to
    ${money(net)}` built from `+c.amount || 0`. "netting to AED 0" returns. */
 check('nothing on the page claims these components netted to anything',
-  !/netting to AED 0(?![.,]?\d)/.test(quiet.all)
-  && !/net to AED 0(?![.,]?\d)/.test(quiet.all),
+  // "AED 0.00" too, since money(0) prints the fils (ruling of 2026-09-23).
+  !/netting to AED 0(?:[.,]00)?(?![.,]?\d)/.test(quiet.all)
+  && !/net to AED 0(?:[.,]00)?(?![.,]?\d)/.test(quiet.all),
   (quiet.all.match(/net[a-z]* to AED[^.]*\./g) || []).join(' | '));
 
 console.log('\nthe statement total: counted null is not counted nought');
@@ -374,7 +379,8 @@ console.log('\nthe statement total: counted null is not counted nought');
    across 2 statements. None of them overlap, so Statement and Counted agree."
    comes back and both assertions below fail. */
 check('no line claims a nought was counted across the statements',
-  !/AED 0(?![.,]?\d) counted across/.test(quiet.all),
+  // "AED 0.00" too, since money(0) prints the fils (ruling of 2026-09-23).
+  !/AED 0(?:[.,]00)? counted across/.test(quiet.all),
   (quiet.all.match(/AED[^.]{0,10} counted across[^.]*\./g) || []).join(' | '));
 check('…and nothing asserts Statement and Counted agree over two coerced zeros',
   !/Statement and Counted agree/.test(quiet.all),
@@ -401,8 +407,9 @@ const cc = tile(card, 'Cash collected');
 
    REVERSION: change the fix's `worked ? money(0) : '—'` to a bare `'—'` and
    this driver's genuine nought disappears. */
-check('a driver who worked and took no cash still reads AED 0',
-  cc && cc.value === 'AED 0', JSON.stringify(cc));
+// Was 'AED 0': a measured nought now carries its fils like every money figure.
+check('a driver who worked and took no cash still reads AED 0.00',
+  cc && cc.value === 'AED 0.00', JSON.stringify(cc));
 /* THE SENTENCE IS NARROWER THAN THIS ASSERTION FIRST DEMANDED, AND THE NARROWER
    ONE IS RIGHT. This checked for "none of their 84 bookings in this window was
    paid in cash", and driver.js prints "none of the 84 bookings in this window
@@ -432,8 +439,9 @@ console.log('\na nought the PLATFORM published is not a figure nobody reported')
    assertions below fail. */
 const zc = await render('zerocash', 'earnings');
 const zt = tile(zc, 'Cash collected');
-check('a cash figure the platform published AT nought still reads AED 0',
-  zt && zt.value === 'AED 0', JSON.stringify(zt));
+// Was 'AED 0': a published nought now carries its fils like every money figure.
+check('a cash figure the platform published AT nought still reads AED 0.00',
+  zt && zt.value === 'AED 0.00', JSON.stringify(zt));
 check('…and is never described as not reported',
   zt && zt.value !== 'not reported', zt && zt.value);
 
@@ -576,8 +584,9 @@ console.log('\nthe one money tile that still drew a nought, and why it stays one
    moneyInTile in api/public/ui.js. The value is unchanged and the second
    assertion fails, which is the point: the number was never the bug. */
 const mi = tile(ov, 'Money in');
+// Was 'AED 0': a published nought now carries its fils like every money figure.
 check('a nought the platforms published is still a number',
-  mi && mi.value === 'AED 0', JSON.stringify(mi));
+  mi && mi.value === 'AED 0.00', JSON.stringify(mi));
 check('\u2026and the reason beside it names the days it was measured over',
   mi && /13 days in this window/.test(mi.sub) && /published about this window/.test(mi.sub),
   mi && mi.sub);

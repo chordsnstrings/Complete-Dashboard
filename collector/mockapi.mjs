@@ -404,7 +404,7 @@ app.get('/api/insights/summary', (_, r) => r.json({
   // produced a headline of AED 1,424,592.
   total: { n: insights.length, measured_impact: null, modelled_impact: '5040', idle_vehicles: 3 },
   modelled: { idle_vehicles: 3, aed: '5040',
-    assumption: '120 AED per vehicle per day of holding cost, over a 14-day lookback' },
+    assumption: 'AED 120.00 per vehicle per day of holding cost, over a 14-day lookback' },
   stored_rows: insights.length, duplicates_suppressed: 0,
   by_severity: [{ severity: 'critical', n: 4 }, { severity: 'warning', n: 2 }, { severity: 'info', n: 1 }],
   by_category: [{ category: 'utilisation', n: 2 }, { category: 'compliance', n: 1 },

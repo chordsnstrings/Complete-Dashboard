@@ -994,16 +994,16 @@ V.overview = async (root) => {
        585,058 of money in — the difference is the platforms' commission and the
        bookings nobody priced. The two tiles are not two opinions about one
        number, and the sub-lines say which is which. */
-    ['Trip value', k.revenue != null ? 'AED ' + fmt(k.revenue) : '—',
+    ['Trip value', money(k.revenue),
       k.priced_trips
         ? `what riders paid · ${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings`
           + ` carry a price (${pct(k.priced_pct, 1)})`
         : 'no booking in this range carries a price'],
-    ['Money in', k.accounted ? 'AED ' + fmt(k.accounted) : '—',
+    ['Money in', k.accounted ? money(k.accounted) : '—',
       k.accounted
-        ? [k.accounted_statements ? `AED ${fmt(k.accounted_statements)} in statement net` : null,
-          k.accounted_fares ? `AED ${fmt(k.accounted_fares)} in fares` : null,
-          k.accounted_payouts ? `AED ${fmt(k.accounted_payouts)} in platform payouts` : null,
+        ? [k.accounted_statements ? `${money(k.accounted_statements)} in statement net` : null,
+          k.accounted_fares ? `${money(k.accounted_fares)} in fares` : null,
+          k.accounted_payouts ? `${money(k.accounted_payouts)} in platform payouts` : null,
         ].filter(Boolean).join(' · ')
           + ` · ${(k.accounted_platforms || []).map(sourceLabel).join(', ') || 'no platform'}`
         : 'no fare and no payout statement in this range'],
@@ -1054,7 +1054,7 @@ V.overview = async (root) => {
      spike, and a page that always says the same thing is a caption. */
   {
     const v = fleetVerdict({ kpis: k, daily, byPlatform: byPlat });
-    const money = k.accounted || 0;
+    const moneyIn = k.accounted || 0;
     let claim, figure, unit, recommend = null, meta = null;
     if (v.branch === 'gap') {
       claim = `${v.uncollected} of these ${v.days} days were never collected`;
@@ -1096,7 +1096,7 @@ V.overview = async (root) => {
       : '';
     const sub = [
       `${fmt(k.trips)} bookings over ${v.days} ${plural(v.days, 'day')}, `
-      + `${money ? `AED ${fmt(money)} accounted for` : 'no money accounted for in this window'}.`,
+      + `${moneyIn ? `${money(moneyIn)} accounted for` : 'no money accounted for in this window'}.`,
       v.partial ? `${v.partial} more ${plural(v.partial, 'day')} had at least one source silent, so those bars are understated.` : '',
       k.telematics_journeys
         ? `The trackers saw ${fmt(k.telematics_journeys)} journeys behind these bookings — the same cars, counted by a different feed.`
@@ -2817,8 +2817,10 @@ V.finance = async (root) => {
     (() => {
       const wired = k.reported_payouts == null ? null : +k.reported_payouts;
       const counted = k.accounted_payouts == null ? 0 : +k.accounted_payouts;
-      const elsewhere = k.uncounted_payouts != null ? Math.round(k.uncounted_payouts)
-        : (wired != null && wired - counted >= 1 ? Math.round(wired - counted) : 0);
+      /* Not Math.round()ed: money() prints the fils, and a whole-dirham
+         figure printed with ".00" after it claims a precision it threw away. */
+      const elsewhere = k.uncounted_payouts != null ? +k.uncounted_payouts
+        : (wired != null && wired - counted >= 1 ? wired - counted : 0);
       /* Named from the server's own answer, not inferred. The page cannot work
          out which channel the excluded payout belongs to from the totals — a
          fleet with uber on its statement and yango on its fares has two kinds
@@ -3678,7 +3680,7 @@ V.unauthorized = async (root) => {
        were not. The fuel and wear behind them is a different, smaller number
        nothing here measures, and calling this a cost would be the kind of
        reason-that-is-not-the-true-one the house rule forbids. */
-    ['Revenue forgone', sum.value?.forgone_aed == null ? '—' : 'AED ' + fmt(sum.value.forgone_aed, 0),
+    ['Revenue forgone', sum.value?.forgone_aed == null ? '—' : money(sum.value.forgone_aed),
       sum.value?.basis || 'no rate to value the unexplained distance at'],
     ['Matched to a booking', fmt(t.authorized || 0), 'legitimate, reconciled'],
     ['Occupied but stationary', fmt(t.stationary || 0), 'seat occupied, the vehicle never really moved'],
@@ -4292,9 +4294,9 @@ V.insights = async (root) => {
       ].filter(Boolean).join(' · ') || 'across every source'],
     ['Critical', fmt(bySev.critical || 0), 'act today', bySev.critical ? 'err' : 'ok', '#insights/severity/critical'],
     ['Warnings', fmt(bySev.warning || 0), 'act this week', bySev.warning ? 'warn' : 'ok', '#insights/severity/warning'],
-    ['Measured cost', measured ? 'AED ' + fmt(Math.round(measured)) : '—',
+    ['Measured cost', measured ? money(measured) : '—',
       'only findings that carry a real figure'],
-    ['Idle capital, modelled', modelled.aed ? 'AED ' + fmt(Math.round(modelled.aed)) : '—',
+    ['Idle capital, modelled', modelled.aed ? money(modelled.aed) : '—',
       modelled.assumption || 'an assumption, not a measurement', 'warn'],
   ].map(([l, n, d, cls, link]) =>
     kpiTile({ label: l, html: n, sub: d, tone: cls || null, to: link || null, who: false })).join('');
@@ -4415,7 +4417,7 @@ V.insights = async (root) => {
           ${r.impact_aed
     ? `<span class="num" style="color:var(${modelled ? '--warn' : '--critical'});font-weight:600" `
               + `title="${modelled ? 'a modelled figure, not a measurement' : 'measured'}">`
-              + `AED ${fmt(Math.round(r.impact_aed))}${modelled ? ' *' : ''}</span>`
+              + `${money(r.impact_aed)}${modelled ? ' *' : ''}</span>`
     : ''}
         </div>`;
       list.append(item);
@@ -7028,7 +7030,7 @@ async function todayNow() {
          of leaving a reader to wonder why one figure disagrees with the one
          next to it. Measured 5 September: AED 24,118 in, AED 6,110 of fares. */
       if (t.money != null) {
-        fact('money in', money(t.money), moneyHalves(t, fmt) || null);
+        fact('money in', money(t.money), moneyHalves(t) || null);
       }
       /* Why that ratio is low at breakfast and high by lunch — a schedule, not
          a hole. See FARES_LAG. */
@@ -7057,7 +7059,7 @@ async function todayNow() {
       + 'since midnight, not a share of a weekly statement.'
       + (lag ? `\n\n${FARES_LAG}` : '')
       + (t.projectionBasis ? `\n\nTrip value is ${t.projectionBasis}.` : '')
-      + (wiredNote(t, fmt, sourceLabel) ? `\n\n${wiredNote(t, fmt, sourceLabel)}` : '');
+      + (wiredNote(t, sourceLabel) ? `\n\n${wiredNote(t, sourceLabel)}` : '');
     host.hidden = false;
   } catch {
     /* A band that cannot be built is removed, not left saying something

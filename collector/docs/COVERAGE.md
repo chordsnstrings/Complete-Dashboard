@@ -827,6 +827,34 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **EVERY MONEY FIGURE IS PRINTED TO THE FILS, AND THE API HAS TO SEND THE
+  FILS.** The operator ruled on 2026-09-23 that money is precise everywhere
+  (AED 1,275.14), in both skins. Five things follow, and each has already
+  caught somebody:
+  1. `money(x, 'AED', 0)` no longer means whole dirhams. The third argument
+     is ignored, on purpose. Do not build `'AED ' + fmt(x)` or
+     `` `AED ${fmt(x)}` ``: `fmt()` drops decimals. Use `money()`, or `fils()`
+     for a figure whose currency is already printed beside it.
+     `test/money_precise.test.mjs` scans every page for the hand-built form.
+  2. A `round(sum(price)::numeric, 0)` in SQL, or `round(v, 0)` in a route,
+     throws the fils away before any page can print them. The page then
+     prints ".00" on a figure that had fils, which claims a precision that
+     was thrown away. The same test scans `api/*.js` for money columns
+     rounded to the dirham.
+  3. **`money(0)` is now "AED 0.00".** A guard that hunts for a bare
+     "AED 0" (`/AED\s0(?![.,]?\d)/`) no longer sees it. The
+     `driver_empty_window_page` guards were widened. Any new "no nought
+     here" guard has to match "AED 0.00" as well.
+  4. Money in a sentence the SERVER writes goes through `src/util.js`
+     `aedText`. It prints exactly what `money()` prints, and absent is
+     `null`. `api/server.js` imports it, so `test/mount.mjs` injects it.
+  5. Width. "AED 257,122.00" is 14 characters, which is over `KPI_ONE_LINE`
+     (12), so most money tiles take `.long`. That lets the value wrap and
+     drops it one font step, and it is deliberate. On the phone, `m/ui.js`
+     `row()` lets a row's sub-line wrap when its figure is over 11
+     characters. Without that, #payouts lost the end of "settles Aug 31–Sep 6"
+     by 5px at 390px.
+
 * **`--ink-2` MEANS TWO THINGS, AND ONLY ONE OF THEM IS STILL IN THE
   CODE.** The old skin's `--ink-2` (#5b6165) was SECONDARY TEXT. Arkiv's
   (#2E2E31) is near-black EMPHASIS. STEP 0 of the reskin (2026-09-23) renamed

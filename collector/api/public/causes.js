@@ -19,7 +19,7 @@
 
 import { empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, pill, note, dayStr, dateStr, fmt, pct,
-  sourceLabel, countOf, plural, signed, verdict } from './ui.js';
+  sourceLabel, countOf, plural, signed, verdict, money } from './ui.js';
 import { api, qChan, href, hrefFilter } from './data.js';
 
 /* How much of a partial month is actually in the record.
@@ -450,7 +450,7 @@ export async function renderCauses(root) {
       + (row.drivers_known
         ? `, <a class="lnk" href="${href('drivers')}">${fmt(row.drivers)} drivers</a>`
         : ', no driver attribution')
-      + (row.accounted ? `, AED ${fmt(row.accounted)} in` : '')
+      + (row.accounted ? `, ${money(row.accounted)} in` : '')
       /* Uber's earnings API serves roughly the last six months, so a month
          older than that has bookings, distance and drivers and no money that
          can ever be collected for it. Without saying so the reader sees a

@@ -2263,3 +2263,66 @@ full suite was not run: this step's instructions say not to.
   `--accent*`, `--s1..--s8`, `--b100..--b700`, the severity set, and so on)
   are STEP 1's job, in arkiv.css. The generated block re-points only
   `--grey-strong`.
+
+## Money precise to the fils — ruling 2, both skins — 2026-09-23, NOT ON PRODUCTION
+
+Branch `reskin-foundation`. The operator ruled that every money figure is
+printed to the fils (AED 1,275.14) on every page, tile, table and chart label,
+in both skins (`docs/UI-REDESIGN-PLAN.md` §1, ruling 2). This is the one change
+on the branch that is not behind the skin switch. Not deployed, not pushed.
+
+| # | what | state | proof |
+|---|---|---|---|
+| P1 | `ui.js` `money()`: always two decimals, separators, U+2212 before the currency, and '—' for absent. The third argument (`d`, default 0) is gone. A caller that still passes `'AED', 0` gets the fils anyway. `fils()` is the same figure without the currency | **written** | `test/money_precise.test.mjs` §1. Putting back 0 decimals fails 4 checks ("AED 1,234"). Honouring a third argument again fails 1 |
+| P2 | Hand-built renders routed through `money()`: `'AED ' + fmt(x)`, `AED ${fmt(x, 0)}` and `AED ${fmt(Math.round(x))}`, in app.js (overview tiles and verdict, #finance's excluded payout, #insights' tiles and impact, #unauthorized's forgone), causes, optimise, provenance (4), reconcile, trips, segments (7), driver (3), playbook (2) and today.js. `today.js` halves print through `fils()`, and the wired note through `money()`. Money charts that printed a bare `fmt()` now print `money()`: #vehicle/earnings (2) and #unit's scatter | **written** | §3 scans every page. Restoring `'AED ' + fmt(k.revenue)` fails 1 and names the line. §3's chart scan: dropping `valueFmt` from vehicle.js's fares chart fails 1, and dropping `yFmt` from economics' scatter fails 1 |
+| P3 | `deposit_core.js` `aed()` is `money()`. It had its own locale ('en-AE') and its own minus ("AED -600.00"). Absent is still `null` | **written** | §2 parity. The old formatter fails 2. `driver_money_tab`'s repayment check now reads "−AED 1,000.00" |
+| P4 | **The API sent whole dirhams.** 34 SQL roundings to 0 on revenue, payout, money, amount, earnings and impact now round to 2: server.js 13, driver_routes 8, segment_routes (/api/slot) 5, playbook_routes 4, vehicle_routes 3 and forecast_routes 1. So do the JS `round(v, 0)` calls on money: analytics 27, day 8, roster 2 and economics 1. The playbook's `aed_measured` and `aed_modelled` were `Math.round`ed, and are now rounded to the fils. Without this, a page could only print ".00" behind a figure whose fils had been thrown away | **written** | §4 scans `api/*.js`. Restoring `::numeric,0) revenue` in /api/kpis fails 1. Route tests (analytics_routes 164, aggregates 89, day_routes, route_smoke 59, …) are green |
+| P5 | Server sentences go through `src/util.js` `aedText`. They are the ledger's "book moves from … to …" (was `toFixed(2)`, no separator), the playbook's "Chase AED … owed" (was `Math.round`), the idle-cost assumption, and two insight details. One of those had printed "At an average fare of 45.23" with no currency. `server.js` imports it, and `test/mount.mjs` injects it | **written** | §2 parity: `toFixed(2)` fails 1. `ledger_write` pins "AED 4,500.00", and the old sentence fails it. §4 pins the playbook title |
+| P6 | **#charging** fell back to the literal `'AED 0.00'` when no charging row existed in the window. It now shows '—', with "no record, not a measured nought" | **written** | `charging_page` renders that window (route-stubbed). Putting the fallback back fails 1 |
+| P7 | **#settlement/receivables** answered `total: 0` when receivable bookings existed and none was priced, so the page printed "Outstanding AED 0.00". It is now `null`. A nought stays only when there is no receivable booking at all | **written** | `receivables_ageing` gained 2 checks. `: 0` put back fails 1 |
+| P8 | Phone: `m/ui.js` `row()` lets a sub-line wrap when the row's figure is over 11 characters. The longer figures had taken 5px from "settles Aug 31–Sep 6" on #payouts at 390px | **written** | `payout_mobile` failed 1 on the fils change and passes with the fix. Removing the line fails 1 again |
+
+**Tests changed deliberately, each with a one-line why in the file:**
+formatters (1), caption_matches_figure (2), driver_empty_window_page (3 values,
+and the `MONEY_ZERO` guard plus 2 more nought guards WIDENED so they still see
+money(0) = "AED 0.00". Reverting the cash tile to `money(0)` fails 3 again),
+driver_money_tab (1), driver_money_tiles (8), ledger_write (1),
+money_contradictions (8, plus its local `aed` helper), reconcile_headline (1),
+today_band (1: `moneyHalves(t)`, no fmt), and vehicle_directory (its frozen
+"before" query is the oracle for a rewrite, so its revenue column now keeps the
+fils too, and every other column must still match). segment_routes pins the
+forgone tile's source shape, so that expression kept its shape. insight_dates
+pins `import { dubaiIso } from './util.js'` exactly, so `aedText` has its own
+import line in src/insights.js.
+
+**Suites run.** All 311 test files ran one at a time, in two sequential
+batches. The runner was not concurrent, and the browser suites used a private
+mock on :18099. 13 files failed during the run. One of them, charging_page, failed on the new check's own fixture shape. The other 12 are listed above.
+Every one passes now, re-run after its edit. No other file failed. The step's
+instruction was to run what the change touches, and a formatter that every
+page calls touches nearly everything.
+
+**Screenshots at 1440** (live-ui against production, working tree): #finance,
+#payouts, #revenue, and a driver's Money tab. They are in the scratchpad at
+`reskin/money/shots/`. There are no clipped tiles and no "AED n" without fils
+on any of the four. Production still rounds in the API until this deploys, so
+figures it rounded show ".00" (#finance "AED 135,718.00 was collected in
+cash", the revenue-per-km sub "AED 923,165.00 over 204,024 km"). After deploy
+they carry their real fils.
+
+### Open, and named
+
+- **For the operator: the ≈ estimate.** The Today strip's estimated trip
+  value is rounded to the nearest 100 on purpose (today.js `roughly()`: "an
+  estimate printed to the dirham claims a precision it does not have"), and it
+  now prints as "≈ AED 36,500.00". Kept as it is. Either the estimate keeps
+  its rounding and its ".00", or it prints the model's own fils beside the ≈.
+  That is the operator's call.
+- **Left for the unauthorized-trips branch, to merge cleanly:** four server
+  basis sentences print `AED ${rate}/km` from `Number(rate)`, so a 3.10 rate
+  reads "AED 3.1/km". They are in server.js (2, in the unauthorized block),
+  unauthorized_routes.js:193 and segment_routes.js:307. And driver.js (5 call
+  sites) and m/screens.js:572 still pass an inert `'AED', 0` to `money()`. It
+  prints the fils regardless. Tidy both after the merge.
+- Insight rows already stored keep the detail text they were written with
+  until the rule next rewrites them.

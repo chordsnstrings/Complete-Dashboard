@@ -44,6 +44,7 @@
    than printing a row of noughts that reads as a dead fleet. */
 import { api } from './data.js';
 import { dubaiDay, dubaiClock } from './tz.js';
+import { money, fils } from './ui.js';
 
 const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 
@@ -185,7 +186,14 @@ export const todayLede = (t) => (t.started
 /* An estimate printed to the dirham claims a precision it does not have, and a
    reader who sees AED 35,593 will reconcile against it. Rounded to the nearest
    hundred above ten thousand, the nearest ten below, so the figure reads as
-   what it is. */
+   what it is.
+
+   Since the money ruling of 2026-09-23 both shells print it through money(),
+   so it reads "≈ AED 35,600.00". That is kept on purpose and is an open
+   question for the operator (docs/FIX-STATUS.md, "Money precise to the
+   fils"): the ruling asks for every money figure to the fils, and this is
+   the one figure whose fils nobody measured. The ≈ and the word "estimated"
+   still say so, and the rounding still stops anybody reconciling against it. */
 export const roughly = (v) => (v == null ? null
   : (Math.abs(v) >= 10000 ? Math.round(v / 100) * 100 : Math.round(v / 10) * 10));
 
@@ -246,20 +254,30 @@ export const tripValue = (t, fmt, label = (x) => x) => {
 
 /* The halves of Money in, and only the halves that are IN it. See the model
    above: naming what a platform wired beside a total that excludes it is the
-   defect this replaces. */
-export const moneyHalves = (t, fmt) => [
-  t.moneyStatements ? `${fmt(t.moneyStatements)} statement` : null,
-  t.moneyFares ? `${fmt(t.moneyFares)} fares` : null,
-  t.moneyPayouts ? `${fmt(t.moneyPayouts)} payouts` : null,
+   defect this replaces.
+
+   To the fils, and without the currency. The halves were printed through the
+   caller's fmt(), which drops decimals, so "24,118 statement · 6,110 fares"
+   sat under a value line that — since the money ruling of 2026-09-23 — reads
+   AED 30,228.73: three figures on one tile that did not add up to the one
+   they explain. fils() is money() without "AED", which the value line above
+   already carries; repeating it twice more wraps this sub onto a second line.
+   The caller's number formatter is no longer asked for, because nothing it
+   could pass would be right here. */
+export const moneyHalves = (t) => [
+  t.moneyStatements ? `${fils(t.moneyStatements)} statement` : null,
+  t.moneyFares ? `${fils(t.moneyFares)} fares` : null,
+  t.moneyPayouts ? `${fils(t.moneyPayouts)} payouts` : null,
 ].filter(Boolean).join(' \u00b7 ');
 
 /* And the figure that was wired and deliberately not counted, said out loud
    rather than left for a reader to find on the day page. Six figures of Uber
    payout sitting invisibly beside a five-figure total is the kind of gap that
-   gets a dashboard disbelieved. */
-export const wiredNote = (t, fmt, label = (x) => x) => (t.moneyWired && t.moneyStatements
+   gets a dashboard disbelieved. Printed through money(), to the fils, like
+   every money figure on both shells. */
+export const wiredNote = (t, label = (x) => x) => (t.moneyWired && t.moneyStatements
   ? `${(t.moneyWiredPlatforms || []).map(label).join(', ') || 'The platform'} also wired `
-    + `AED ${fmt(t.moneyWired)} against the week this day falls in. It is not added above: `
+    + `${money(t.moneyWired)} against the week this day falls in. It is not added above: `
     + 'the statement net already counts the same trips, and adding both would count the '
     + 'week twice.'
   : null);

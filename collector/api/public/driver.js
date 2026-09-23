@@ -151,9 +151,11 @@ function percentileBars(host, metrics, opts = {}) {
     /* Assembled as sentences and joined, not concatenated with leading full
        stops: three optional clauses each carrying its own '.' produced
        "Bottom 8%.. Lower is better here" on the cancellation row. */
+    /* A money metric through money(), to the fils (ruling of 2026-09-23):
+       fmt(v, 1) printed "1,234.5 AED" — one decimal, currency behind. */
+    const fig = (v) => (u === 'AED' ? money(v) : `${fmt(v, 1)}${u ? ' ' + u : ''}`);
     row.title = [
-      `${m.label}: ${fmt(m.value, 1)}${u ? ' ' + u : ''} — fleet median `
-        + `${fmt(m.median, 1)}${u ? ' ' + u : ''}.`,
+      `${m.label}: ${fig(m.value)} — fleet median ${fig(m.median)}.`,
       sn.tied
         ? `${fmt(m.tied)} of the ${fmt(m.population)} compared hold this same value, so the `
           + 'percentile is a tie rather than a rank.'
@@ -3079,7 +3081,7 @@ const segPlaces = (r) => '<span style="white-space:nowrap">'
    a month removing from its money pages. */
 const segForgone = (r) => (r.forgone_aed == null
   ? `<span class="ent-off" title="${esc(r.rate_basis || 'no distance was measured across this interval')}">—</span>`
-  : `<span title="${esc(r.rate_basis || '')}">AED ${fmt(r.forgone_aed, 0)}</span>`);
+  : `<span title="${esc(r.rate_basis || '')}">${money(r.forgone_aed)}</span>`);
 
 /* The journey's own clock, and the car's replay of the day behind it. Linked
    through tripTime() — the same destination a booking's timestamp gives on the
@@ -3396,7 +3398,7 @@ async function tabUnauthorized(root, id) {
         : `${money(aedTime, 'AED', 0)} across journeys narrowed to this person BY TIME · `
           + `${money(aed - aedTime, 'AED', 0)} across journeys named off the car’s own day `
           + 'instead — custody is not driving, and this second figure is not a debt anybody '
-          + `owes. Both at AED ${res.value.aed_per_km}/km, the fleet’s own rate here. Revenue `
+          + `owes. Both at ${money(res.value.aed_per_km)}/km, the fleet’s own rate here. Revenue `
           + 'forgone, not money paid out.' },
   ]));
 

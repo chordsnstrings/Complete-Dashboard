@@ -143,7 +143,7 @@ export async function renderPlaybook(root) {
       : null,
     t.aed_modelled != null
       ? { label: 'Modelled upside', value: money(t.aed_modelled),
-        sub: `at AED ${d.assumption.aed_per_trip}/booking — an assumption`, tone: 'warn' }
+        sub: `at ${money(d.assumption.aed_per_trip)}/booking — an assumption`, tone: 'warn' }
       : null,
   ]));
 
@@ -210,7 +210,7 @@ function actionCard(a, d) {
   if (a.aed_measured) figs.push([money(a.aed_measured), 'measured, already earned']);
   if (a.ceiling) figs.push([`${fmt(a.ceiling)}`, a.ceiling_unit || 'ceiling']);
   if (a.aed_modelled != null) {
-    figs.push([money(a.aed_modelled), `modelled at AED ${d.assumption.aed_per_trip}/booking`]);
+    figs.push([money(a.aed_modelled), `modelled at ${money(d.assumption.aed_per_trip)}/booking`]);
   }
   if (a.size) figs.push([fmt(a.size), a.size_unit]);
   if (figs.length) {
@@ -252,7 +252,7 @@ function actionCard(a, d) {
       held_by: (r) => custodyAsOf(r.held_by),
       driver_refs: (r) => custody(r) + (r.driver_n > (r.driver_refs || []).length
         ? ` <span class="dim">+${fmt(r.driver_n - (r.driver_refs || []).length)} more</span>` : ''),
-      amount: (r) => money(r.amount, 'AED', 0),
+      amount: (r) => money(r.amount),
       pct: (r) => (r.pct == null ? '\u2014' : `${dec(r.pct, 1)}%`),
       avg_return_km: (r) => (r.avg_return_km == null ? '\u2014' : `${dec(r.avg_return_km, 1)} km`),
       expires_at: (r) => dateStr(r.expires_at),

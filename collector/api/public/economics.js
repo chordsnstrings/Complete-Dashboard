@@ -356,7 +356,7 @@ async function moneyTab(root) {
               : '')
           : '') },
     { key: 'unit-aed-per-earning-day',
-      label: 'Money per car per earning day', value: money(t.aed_per_earning_day, 'AED', 0),
+      label: 'Money per car per earning day', value: money(t.aed_per_earning_day),
       sub: `over ${fmt(t.earning_vehicle_days)} days a car actually earned` },
     { label: 'Per km', value: money(t.aed_per_km, 'AED', 2),
       sub: `over ${fmt(t.km)} booked km` },
@@ -501,7 +501,7 @@ async function moneyTab(root) {
     { label: 'Money in', key: 'money', num: true, render: (r) => money(r.money) },
     { label: 'Days', key: 'days_earning', num: true, render: (r) => fmt(r.days_earning) },
     { label: 'Per day', key: 'aed_per_earning_day', num: true,
-      render: (r) => money(r.aed_per_earning_day, 'AED', 0) },
+      render: (r) => money(r.aed_per_earning_day) },
     { label: 'Per km', key: 'aed_per_km', num: true,
       render: (r) => (r.aed_per_km == null ? absent('no booking on this vehicle carries a distance')
         : money(r.aed_per_km, 'AED', 2)) },
@@ -622,7 +622,7 @@ async function moneyTab(root) {
     { label: 'Money in', key: 'money', num: true, render: (r) => money(r.money) },
     { label: 'Days', key: 'days_worked', num: true, render: (r) => fmt(r.days_worked) },
     { label: 'Per day', key: 'aed_per_day_worked', num: true,
-      render: (r) => money(r.aed_per_day_worked, 'AED', 0) },
+      render: (r) => money(r.aed_per_day_worked) },
     /* Per hour ONLINE, beside per day worked rather than instead of it: the
        two disagree for a reason worth seeing. Somebody earning well per day
        may be logged in fourteen hours to do it. `absent` prunes the column
@@ -633,7 +633,7 @@ async function moneyTab(root) {
         + 'last 31 days and nothing older, so this fills in going forward',
       render: (r) => (r.aed_per_measured_hour == null
         ? '<span class="ent-off" title="no availability collected for this driver in this window">—</span>'
-        : `${money(r.aed_per_measured_hour, 'AED', 0)}`
+        : `${money(r.aed_per_measured_hour)}`
           + (r.measured_hours_online
             ? `<span class="dim" title="hours online"> · ${fmt(r.measured_hours_online, 0)}h</span>` : '')) },
     { label: 'Bookings/day', key: 'bookings_per_day', num: true,
@@ -737,7 +737,7 @@ async function assetsTab(root) {
 
   root.insertBefore(kpiRow([
     { label: 'Money in', value: money(t.money), sub: `over ${fmt(A.window_days)} days` },
-    { label: 'Per earning vehicle-day', value: money(t.aed_per_earning_day, 'AED', 0),
+    { label: 'Per earning vehicle-day', value: money(t.aed_per_earning_day),
       sub: `${fmt(t.earning_vehicle_days)} earned · ${fmt(t.idle_vehicle_days)} idle` },
     { label: 'Earning', value: fmt(t.earning), tone: 'good', sub: `of ${fmt(t.vehicles)} vehicles` },
     { label: 'Moved, no money', value: fmt(t.moved_unpaid),
@@ -754,7 +754,7 @@ async function assetsTab(root) {
   if (!withKm.length) empty(sc.body, 'No vehicle has both distance and money in this range');
   else {
     scatter(sc.body, withKm, { x: 'km', y: 'money', label: 'plate',
-      xLabel: 'booked km', yLabel: 'money in (AED)',
+      xLabel: 'booked km', yLabel: 'money in (AED)', yFmt: (v) => money(v),
       onClick: (r) => { location.hash = href('vehicle', r.plate); } });
     sc.body.append(el('p', 'cap',
       `${fmt(withKm.length)} of ${fmt(A.rows.length)} vehicles have both. The fleet averages `
@@ -779,7 +779,7 @@ async function assetsTab(root) {
     { label: 'Per day', key: 'aed_per_earning_day', num: true,
       render: (r) => (r.aed_per_earning_day == null
         ? absent('this vehicle earned on no day in this range')
-        : money(r.aed_per_earning_day, 'AED', 0)) },
+        : money(r.aed_per_earning_day)) },
     { label: 'Per km', key: 'aed_per_km', num: true,
       render: (r) => (r.aed_per_km == null
         ? absent('no money, or no booking carrying a distance') : money(r.aed_per_km, 'AED', 2)) },
@@ -869,7 +869,7 @@ async function driversTab(root) {
        fleet and window. */
     { label: 'Money to drivers', value: money(t.money),
       sub: `${money(t.payouts || 0)} in payouts · ${money(t.fares || 0)} in fares they collected` },
-    { label: 'Per day worked', value: money(t.aed_per_day_worked, 'AED', 0),
+    { label: 'Per day worked', value: money(t.aed_per_day_worked),
       sub: `${fmt(t.worked_days)} person-days` },
     { label: 'Per booking', value: money(t.aed_per_booking, 'AED', 2),
       sub: `over ${fmt(t.bookings)} bookings` },
@@ -917,7 +917,7 @@ async function driversTab(root) {
     { label: 'Per day worked', key: 'aed_per_day_worked', num: true,
       render: (r) => (r.aed_per_day_worked == null
         ? absent('no money, or no day driven in this range')
-        : money(r.aed_per_day_worked, 'AED', 0)) },
+        : money(r.aed_per_day_worked)) },
     { label: 'Per booking', key: 'aed_per_booking', num: true,
       render: (r) => (r.aed_per_booking == null ? absent('no booking in this range')
         : money(r.aed_per_booking, 'AED', 2)) },

@@ -36,7 +36,9 @@ check('a near-hour rounds into the next hour', hourStr(6.999) === '07:00', hourS
 check('an out-of-range hour is not rendered negative', !/-/.test(hourStr(-0.5)), hourStr(-0.5));
 check('Infinity is not a clock time', hourStr(Infinity) === '—', hourStr(Infinity));
 
-check('money formats with its currency', money(1234, 'AED') === 'AED 1,234', money(1234, 'AED'));
+// Was 'AED 1,234'. Changed deliberately: the operator ruled on 2026-09-23 that
+// every money figure is printed to the fils, so a whole amount carries ".00".
+check('money formats with its currency, to the fils', money(1234, 'AED') === 'AED 1,234.00', money(1234, 'AED'));
 // A rate rounded to whole dirhams destroys the number: 2.70 became "AED 3".
 check('a rate keeps its decimals', money(2.7, 'AED', 2) === 'AED 2.70', money(2.7, 'AED', 2));
 check('missing money is not zero', money(null) === '—', money(null));

@@ -108,7 +108,7 @@ export const deltaPill = (r) => {
   if (r.delta == null) return '<span class="dim">—</span>';
   const off = r.delta_pct == null ? null : Math.abs(r.delta_pct);
   const sign = r.delta > 0 ? '+' : r.delta < 0 ? '−' : '±';
-  const body = `${sign}AED ${fmt(Math.abs(r.delta))}${off == null ? '' : ` · ${pct(off, 1)}`}`;
+  const body = `${sign}${money(Math.abs(r.delta))}${off == null ? '' : ` · ${pct(off, 1)}`}`;
   /* A row Uber will no longer answer about in full is not a row with a
      discrepancy — it is a row with half a measurement, and colouring it red
      tells an operator to go and investigate a month that was fine.

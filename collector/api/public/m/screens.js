@@ -206,10 +206,10 @@ async function today(deck, ctx) {
             ? (now.moneyAnswered
               ? 'no channel has been credited yet today'
               : 'this figure did not load — reload the page')
-            /* fmt, not money: the currency is already on the value above, and
+            /* fils, not money: the currency is already on the value above, and
                repeating it twice more wrapped the sub onto a second line and
                made this tile taller than the one beside it. */
-            : moneyHalves(now, fmt) || 'basis on the day page',
+            : moneyHalves(now) || 'basis on the day page',
           href: href('day', now.day) },
         { label: 'Distance', value: now.km != null ? `${fmt(now.km)} km` : '\u2014',
           sub: now.drivers != null ? `${fmt(now.drivers)} out in ${fmt(now.vehicles)} cars` : null },
@@ -233,7 +233,7 @@ async function today(deck, ctx) {
           + `${(now.unratedPlatforms || []).map(sourceLabel).join(', ') || 'an unmeasured channel'} `
           + 'are not in the estimate at all: there is no settled day behind them to value them from.'));
       }
-      const wired = wiredNote(now, fmt, sourceLabel);
+      const wired = wiredNote(now, sourceLabel);
       if (wired) t.body.append(el('p', 'm-cap', wired));
     } else {
       /* Not a grid of noughts. The cars are still worth stating: a fleet with

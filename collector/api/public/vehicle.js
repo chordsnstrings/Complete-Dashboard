@@ -654,8 +654,8 @@ async function tabEarnings(root, plate) {
     const a = el('div'); const b = el('div');
     dayP.body.append(el('p', 'cap', 'Attributed pay — a share of driver payouts, by day'), a,
       el('p', 'cap', 'Measured fares — what riders paid on this vehicle’s own trips'), b);
-    areaChart(a, e.daily, { x: 'day', y: 'attributed' });
-    barChart(b, e.daily, { x: 'day', y: 'fares', label: 'Measured fares' });
+    areaChart(a, e.daily, { x: 'day', y: 'attributed', valueFmt: (v) => money(v) });
+    barChart(b, e.daily, { x: 'day', y: 'fares', label: 'Measured fares', valueFmt: (v) => money(v) });
   }
 }
 

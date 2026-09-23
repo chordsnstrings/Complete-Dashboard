@@ -188,6 +188,16 @@ export const row = ({ title, sub, value, note, to, tone, name, photo }) => {
   /* A person's row leads with their face, at the row's own size. Rows that are
      not about a person pass no `name` and keep exactly the shape they had. */
   if (name !== undefined) r.append(avatar(name, photo, 'sm'));
+  /* A FIGURE TO THE FILS IS THREE CHARACTERS WIDER, AND THE SUB LINE PAID FOR
+     IT. The value column is sized to its content and the sub line
+     (.m-row .k span) is nowrap with an ellipsis, so when every money figure
+     gained its ".00" on 2026-09-23 (the operator's money ruling), #payouts'
+     "Every transfer" rows lost the end of "Uber · Ecosine · settles Aug 31–
+     Sep 6" by 5px at 390px — measured by test/payout_mobile.test.mjs. A row
+     whose figure is longer than a whole-dirham one lets its sub take a second
+     line instead (the .wrapsub rule the comparison rows already use); a
+     short figure keeps the one-line row it had. */
+  if (sub && String(value ?? '').length > 11) r.classList.add('wrapsub');
   const k = el('div', 'k');
   k.append(el('b', null, esc(title)));
   if (sub) k.append(el('span', null, esc(sub)));

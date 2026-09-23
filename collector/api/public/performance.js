@@ -212,7 +212,7 @@ function rankTable(host, rows, basis, d) {
        they sit against the same driver's other weeks and mean something. */
     onValue
       ? { label: 'Average fare', key: 'value_per_job', num: true,
-        render: (r) => (r.value_per_job == null ? '—' : money(r.value_per_job, 'AED', 0)) }
+        render: (r) => (r.value_per_job == null ? '—' : money(r.value_per_job)) }
       : { label: 'Jobs a day', key: 'intensity', num: true,
         render: (r) => (r.intensity == null ? '—' : dec(r.intensity, 1)) },
     /* The OTHER position, on every row of both tables. The disagreement is the

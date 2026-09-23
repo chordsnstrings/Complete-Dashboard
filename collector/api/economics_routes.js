@@ -658,7 +658,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
            from this car's own performance rather than from a fleet average
            that a poor performer would never have reached. */
         forgone_at_own_rate: r.days_earning && money
-          ? round((money / r.days_earning) * idleDays, 0) : null,
+          ? round((money / r.days_earning) * idleDays, 2) : null,
         alerts: r.alerts ?? 0,
         /* Over the days the ALERT FEED covered, not over the window.
            ─────────────────────────────────────────────────────────────────

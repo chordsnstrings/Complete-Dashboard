@@ -66,9 +66,12 @@ check('it applied the sign from the TYPE, not from the caller',
   JSON.stringify([dry.body.entry.amount, dry.body.entry.direction]));
 check('it reports the balance the entry would produce',
   dry.body.balances.after.advance === 4500, JSON.stringify(dry.body.balances));
+/* "AED 4500.00" became "AED 4,500.00" on 2026-09-23, deliberately: the sentence
+   is now printed through src/util.js aedText, which prints money the way every
+   page does — two decimals AND a separator. */
 check('and assembles the sentence the screen prints before saving',
-  /ahsan is recording cash advance of AED 4500\.00 to Tariq Afzal/i.test(dry.body.sentence)
-  && /advance book moves from AED 0\.00 to AED 4500\.00/i.test(dry.body.sentence),
+  /ahsan is recording cash advance of AED 4,500\.00 to Tariq Afzal/i.test(dry.body.sentence)
+  && /advance book moves from AED 0\.00 to AED 4,500\.00/i.test(dry.body.sentence),
   dry.body.sentence);
 
 /* ── the real write ──────────────────────────────────────────────────────── */

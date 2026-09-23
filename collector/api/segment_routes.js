@@ -362,7 +362,7 @@ export function slotRoutes(app, { q, wrap, range }) {
                 count(DISTINCT plate)::int vehicles,
                 count(DISTINCT platform)::int platforms,
                 round(avg(distance_km) FILTER (WHERE has_distance)::numeric,1) avg_km,
-                round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+                round(sum(price) FILTER (WHERE has_fare)::numeric, 2) revenue,
                 count(*) FILTER (WHERE has_fare)::int priced_n,
                 round(100.0*count(*) FILTER (WHERE outcome='completed')
                       /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) completion_pct
@@ -398,14 +398,14 @@ export function slotRoutes(app, { q, wrap, range }) {
                 count(*)::int trips,
                 count(DISTINCT local_day)::int days,
                 string_agg(DISTINCT platform, ', ') platforms,
-                round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+                round(sum(price) FILTER (WHERE has_fare)::numeric, 2) revenue,
                 round(100.0*count(*) FILTER (WHERE outcome='completed')
                       /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) completion_pct
           FROM trip_norm WHERE ${SLOT} AND driver_ext_id IS NOT NULL
           GROUP BY ${personKey()} ORDER BY trips DESC LIMIT 40`, p),
 
       q(`SELECT platform, count(*)::int trips,
-                round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+                round(sum(price) FILTER (WHERE has_fare)::numeric, 2) revenue,
                 count(*) FILTER (WHERE has_fare)::int priced_n
           FROM trip_norm WHERE ${SLOT} GROUP BY 1 ORDER BY trips DESC`, p),
 
@@ -430,7 +430,7 @@ export function slotRoutes(app, { q, wrap, range }) {
          spread behind it. One Friday with 40 trips and eleven with 2 is a
          different business from twelve Fridays with 5. */
       q(`SELECT to_char(local_day,'YYYY-MM-DD') AS day, count(*)::int trips,
-                round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue
+                round(sum(price) FILTER (WHERE has_fare)::numeric, 2) revenue
           FROM trip_norm WHERE ${SLOT} GROUP BY 1 ORDER BY 1`, p),
 
       /* The same hour on every other weekday, so "busy" has something to be
@@ -443,7 +443,7 @@ export function slotRoutes(app, { q, wrap, range }) {
           GROUP BY 1 ORDER BY 1`, [from, to, hour]),
 
       q(`SELECT settlement_class, count(*)::int trips,
-                round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue
+                round(sum(price) FILTER (WHERE has_fare)::numeric, 2) revenue
           FROM trip_ext WHERE ${SLOT} GROUP BY 1 ORDER BY trips DESC`, p),
 
       q(`SELECT coalesce(outcome,'(not reported)') AS outcome, count(*)::int trips

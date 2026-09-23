@@ -28,6 +28,8 @@ import { CANCEL_CASE, DROPPED_SQL, DECLINED_SQL } from '../api/cancellation_sql.
 import { win, winDays, dubaiSpanSql, grainOf, previousWindow, foldGrain, GRAINS, PERIODS,
   isPeriod, periodPartial } from '../api/window.js';
 import { rollupGrainSql } from '../src/rollup.js';
+/* server.js prints the idle-cost assumption through aedText, to the fils. */
+import { aedText } from '../src/util.js';
 /* The real redaction, not a stub: GET /api/settings now answers a
    non-administrator a shape with every credential value blanked, and a stub
    here would let a regression that leaks them again pass. requireAdmin stays
@@ -152,7 +154,7 @@ export async function mountAll(db, { serverRoutes = true, inject = {} } = {}) {
     hrForCompliance,
     refIds, peopleFor, attachPeople, log,
     recordImport, spanOf, tallyBatch, takeTally,
-    LEDGER_CADENCE, ledgerSilence,
+    LEDGER_CADENCE, ledgerSilence, aedText,
     FIX_FRESH: "interval '30 minutes'",
     rollupGrainSql, rollupState: async () => [],
     /* The response cache object server.js closes over. The harness mounts a

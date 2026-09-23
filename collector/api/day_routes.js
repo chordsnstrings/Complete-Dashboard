@@ -525,7 +525,7 @@ export function dayRoutes(app, { q, wrap }) {
            so the row explains itself rather than asserting a total. */
         pending, completed: done, pending_pct: round((pending / done) * 100, 1),
         per_booking: round(at.per_booking, 2), days: at.days,
-        measured: round(measured, 0), value: round(whole - measured, 0) });
+        measured: round(measured, 2), value: round(whole - measured, 2) });
     }
     const projectedValue = projected.reduce((a, r) => a + r.value, 0);
     const projectedBookings = projected.reduce((a, r) => a + r.bookings, 0);
@@ -549,15 +549,15 @@ export function dayRoutes(app, { q, wrap }) {
         payout_basis: income.accounted_payouts
           ? 'a share of each weekly platform statement, spread evenly across the days it covers'
           : null,
-        revenue: h.priced ? round(h.revenue, 0) : null,
+        revenue: h.priced ? round(h.revenue, 2) : null,
         avg_fare: h.priced ? round(Number(h.revenue) / h.priced, 2) : null,
         /* NULL when there is nothing left to project — a settled day reports
            its measured trip value and no estimate at all, so a reader never
            sees an "expected" figure sitting beside a day that is already
            known. */
         expected_revenue: projectedBookings
-          ? round(measuredRevenue + projectedValue, 0) : null,
-        projected_revenue: projectedBookings ? round(projectedValue, 0) : null,
+          ? round(measuredRevenue + projectedValue, 2) : null,
+        projected_revenue: projectedBookings ? round(projectedValue, 2) : null,
         projected_bookings: projectedBookings || null,
         projected_platforms: projected.map((r) => r.platform),
         /* The whole working, so a caption can name the rate it was given
@@ -583,12 +583,12 @@ export function dayRoutes(app, { q, wrap }) {
         series: near,
       },
       hours,
-      platforms: platforms.map((r) => ({ ...r, revenue: round(r.revenue, 0),
+      platforms: platforms.map((r) => ({ ...r, revenue: round(r.revenue, 2),
         completion_pct: r.bookable ? round((r.completed / r.bookable) * 100, 1) : null })),
-      drivers: drivers.map((r) => ({ ...r, revenue: round(r.revenue, 0) })),
-      vehicles: vehicles.map((r) => ({ ...r, revenue: round(r.revenue, 0) })),
+      drivers: drivers.map((r) => ({ ...r, revenue: round(r.revenue, 2) })),
+      vehicles: vehicles.map((r) => ({ ...r, revenue: round(r.revenue, 2) })),
       tiers,
-      settlement: settlement.map((r) => ({ ...r, revenue: round(r.revenue, 0) })),
+      settlement: settlement.map((r) => ({ ...r, revenue: round(r.revenue, 2) })),
       alerts,
       alertsByVehicle,
       segments,

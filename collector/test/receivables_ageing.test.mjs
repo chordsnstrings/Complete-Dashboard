@@ -151,6 +151,27 @@ check('and the blank is not one of them',
 check('the truncation flag agrees with the counted total',
   g.rooms_truncated === false, String(g.rooms_truncated));
 
+/* ── an outstanding total nobody priced is not a nought ─────────────────────
+   Found on 2026-09-23 while every money figure moved to the fils: with
+   receivable bookings on record and none of them priced, `total` answered 0,
+   and the page printed "Outstanding AED 0.00 across 1 bookings, 1 of which
+   carry no fare". The nought stays for the one case it is true — no
+   receivable booking at all.
+   REVERSION: restore `: 0` as the unpriced branch of `total` in
+   api/analytics_routes.js; the first check fails on 0. */
+console.log('\nan unpriced receivable is not an outstanding nought');
+await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+   requested_at, distance_km, status, payment_type, price, partner_id, partner_name, raw)
+   VALUES ('hotel','hx1','egari','L200','hdx','Driver hdx','2026-08-12T10:00:00+04:00',12,
+     'completed','room-charge',NULL,'h9','Synthetic Hotel','{}')`);
+const unpriced = await (await get('/api/settlement/receivables?from=2026-08-01&to=2026-08-31&fleet=egari')).body;
+check('receivables on record and none priced: the total is null, not 0',
+  unpriced.total === null && unpriced.total_trips === 1 && unpriced.priced_trips === 0,
+  JSON.stringify({ total: unpriced.total, trips: unpriced.total_trips, priced: unpriced.priced_trips }));
+const none = await (await get('/api/settlement/receivables?from=2026-08-01&to=2026-08-31&platform=bolt')).body;
+check('…and no receivable at all is still a measured nought',
+  none.total === 0 && none.total_trips === 0, JSON.stringify({ total: none.total, trips: none.total_trips }));
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

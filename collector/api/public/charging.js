@@ -76,9 +76,18 @@ export async function renderCharging(root) {
     const t = reg.totals;
     const people = reg.by_person || [];
     head.body.append(kpiRow([
-      { label: `Advanced in ${windowLabel()}`, value: aed(t.advance) || 'AED 0.00',
+      /* ABSENT, NOT NOUGHT. This fell back to the literal 'AED 0.00' when
+         totals.advance came back null — and null is what /api/ledger/entries
+         sends when no charging row exists in the window at all (a sum over
+         no rows), not a sum of rows that came to nought. The register is
+         written by hand and checked against no meter, so an empty window
+         means nobody recorded a charging advance in these dates. It does not
+         mean the fleet advanced nothing, and a bold "AED 0.00" said it did.
+         The value is now a dash and the sub-line says why. */
+      { label: `Advanced in ${windowLabel()}`, value: aed(t.advance) || '—',
         sub: t.advance == null
-          ? 'nothing has been recorded for charging in these dates'
+          ? 'nothing has been recorded for charging in these dates — the register is kept by '
+            + 'hand, so this is no record, not a measured nought'
           : 'recorded by hand, and checked against no meter — see the last panel' },
       { label: 'Drivers', value: String(people.length),
         sub: people.length ? 'who have had a charging advance in this window'

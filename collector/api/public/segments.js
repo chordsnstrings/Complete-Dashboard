@@ -296,7 +296,7 @@ function attributionBand(root, att, pageRows = []) {
     /* Revenue forgone, never "cost", and never without its rate — the same
        convention forgoneCell below and the segment page already use. */
     { label: 'Worth of the distance',
-      value: rate == null || !km ? '—' : `AED ${fmt(km * rate, 0)}`,
+      value: rate == null || !km ? '—' : money(km * rate),
       sub: rate == null
         ? (att.value?.basis || 'no booking in this window carries both a fare and a distance, '
           + 'so there is no rate to value this at')
@@ -306,7 +306,7 @@ function attributionBand(root, att, pageRows = []) {
            distance is what those kilometres would have earned, not a bill
            anybody paid; the fuel and wear behind them is a different, smaller
            number nothing here measures. */
-        : `${fmt(km, 1)} km at the fleet’s own AED ${rate}/km. Revenue forgone — what those `
+        : `${fmt(km, 1)} km at the fleet’s own ${money(rate)}/km. Revenue forgone — what those `
           + 'kilometres would have earned had they been sold, not money anybody paid out.' },
     /* "Firmly attributed" was the heading over bracketed + sole_custodian.
        Neither word is right for day custody, and the tile counts what it is
@@ -459,7 +459,7 @@ function whoPanel(root, rows, { kind, value, tier, who }, truncated) {
     { label: 'Distance named by time', key: 'km', num: true,
       render: (r) => (r.km ? `${fmt(r.km, 1)} km` : '<span class="ent-off">—</span>') },
     { label: 'Worth of those', key: 'aed', num: true,
-      render: (r) => (r.aed ? `AED ${fmt(r.aed, 0)}` : '<span class="ent-off">—</span>') },
+      render: (r) => (r.aed ? money(r.aed) : '<span class="ent-off">—</span>') },
     { label: '', key: 'key',
       render: (r) => `<a class="dim" title="only this person’s journeys" href="${
         esc(href('segments', kind, value, { tier, who: r.key }))}">⌕</a>` },
@@ -945,7 +945,7 @@ const placeCell = (place, lat, lng) => {
    this product spent a month removing from its money pages. */
 const forgoneCell = (r) => (r.forgone_aed == null
   ? `<span class="ent-off" title="${esc(r.rate_basis || 'no distance was measured across this interval')}">—</span>`
-  : `<span title="${esc(r.rate_basis || '')}">AED ${fmt(r.forgone_aed, 0)}</span>`);
+  : `<span title="${esc(r.rate_basis || '')}">${money(r.forgone_aed)}</span>`);
 
 export function segmentTable(rows, opts = {}) {
   if (!rows.length) { const d = el('div'); empty(d, opts.emptyMsg || 'Nothing flagged here'); return d; }
@@ -1079,7 +1079,7 @@ export async function renderSegment(root, plate, at) {
        cost is not right for it, so the tile says forgone and the sub-line
        names the rate and the population behind it. */
     { label: 'Revenue forgone', tone: d.value?.forgone_aed ? 'bad' : null,
-      value: d.value?.forgone_aed == null ? '—' : `AED ${fmt(d.value.forgone_aed, 0)}`,
+      value: d.value?.forgone_aed == null ? '—' : money(d.value.forgone_aed),
       sub: d.value?.basis || 'not valued' },
     { label: 'Observed', value: d.profile.observed === null ? '—' : d.profile.observed ? 'fully' : 'with a gap',
       sub: s.max_gap_min != null ? `largest gap ${s.max_gap_min} min` : 'gap not recorded',
@@ -1102,8 +1102,8 @@ export async function renderSegment(root, plate, at) {
       + ` and ended in ${end(s.end_place, s.end_lat, s.end_lng)}.`
       + (s.distance_km != null && d.value?.aed_per_km
         ? ` The ${fmt(s.distance_km, 1)} km between them would have earned `
-          + `<b>AED ${fmt(d.value.forgone_aed, 0)}</b> at the fleet\u2019s own `
-          + `AED ${d.value.aed_per_km}/km. Revenue forgone, not a cash cost \u2014 `
+          + `<b>${money(d.value.forgone_aed)}</b> at the fleet\u2019s own `
+          + `${money(d.value.aed_per_km)}/km. Revenue forgone, not a cash cost \u2014 `
           + 'the fuel and wear behind those kilometres is a different, smaller number.'
         : '');
     root.append(where);

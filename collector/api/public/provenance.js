@@ -21,7 +21,7 @@
    weekly statement is ONE measurement of seven days. Shown as seven daily
    figures it would be indistinguishable from seven measurements, and a number
    nobody took would be sitting in a table beside numbers somebody did. */
-import { el, esc, panel, loading, tableFrom, kpiRow, note, sourceLabel } from './ui.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, note, sourceLabel, money } from './ui.js';
 import { fmt, empty } from './charts.js';
 import { q, state } from './data.js';
 
@@ -112,7 +112,7 @@ export async function renderProvenance(root) {
         + `${fmt(d.rows.reduce((a, r) => a + r.period_rows, 0))} for a span of days`
         + (restated ? ` · ${fmt(restated)} restating days another figure already covers` : '') },
     headline != null
-      ? { label: 'What Finance counts', value: `AED ${fmt(headline)}`,
+      ? { label: 'What Finance counts', value: money(headline),
         sub: knowsBasis
           ? `one figure per channel — ${counted.map((r) => sourceLabel(r.platform))
             .filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'none'} — chosen from the calls below`
@@ -140,7 +140,7 @@ export async function renderProvenance(root) {
     { label: 'Drivers', key: 'drivers', num: true,
       render: (r) => (r.drivers ? fmt(r.drivers) : '<span class="dim">—</span>') },
     { label: 'Returned', key: 'amount', num: true,
-      render: (r) => `AED ${fmt(r.amount)}` },
+      render: (r) => money(r.amount) },
     /* A verdict, not a second number. The obvious column here — "of that, the
        part said once" — is a subset sum, and the components carry negative
        lines, so on the live data that subset came out LARGER than the total it
@@ -195,7 +195,7 @@ export async function renderProvenance(root) {
     root.append(p2.panel);
     p2.body.append(tableFrom(held.map((r) => ({ ...r, _why: why(r) })), [
       cols[0], cols[1],
-      { label: 'Returned', key: 'amount', num: true, render: (r) => `AED ${fmt(r.amount)}` },
+      { label: 'Returned', key: 'amount', num: true, render: (r) => money(r.amount) },
       { label: 'Why it is not in the headline', key: '_why',
         render: (r) => `<span class="wrap">${esc(r._why)}</span>` },
     ], { compact: true }));
@@ -215,7 +215,7 @@ export async function renderProvenance(root) {
       { label: 'From', key: 'source',
         render: (r) => `${esc(words(r.source))}<span class="dim"> · ${esc(sourceLabel(r.platform))}</span>` },
       { label: 'Lines', key: 'rows_seen', num: true, render: (r) => fmt(r.rows_seen) },
-      { label: 'Amount', key: 'amount', num: true, render: (r) => `AED ${fmt(r.amount)}` },
+      { label: 'Amount', key: 'amount', num: true, render: (r) => money(r.amount) },
     ], { compact: true }));
   }
 

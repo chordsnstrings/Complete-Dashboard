@@ -25,7 +25,7 @@
    this page is generated — the sentences are composed from the same figures
    the tables show, so a reader can check any claim against the row under it. */
 import { el, esc, panel, loading, tableFrom, kpiRow, note, verdict, pill, plural, countOf,
-  sourceLine } from './ui.js';
+  sourceLine, money } from './ui.js';
 import { fmt, empty, heatmap } from './charts.js';
 import { q, href } from './data.js';
 
@@ -253,7 +253,7 @@ export async function renderOptimise(root) {
         absent: 'no booking in any of these areas reports a fare',
         render: (r) => (r.avg_fare == null
           ? '<span class="dim">no price reported</span>'
-          : `AED ${fmt(r.avg_fare)}`
+          : money(r.avg_fare)
             + (Number.isFinite(+r.priced_pickups)
               ? `<span class="dim"> · ${fmt(r.priced_pickups)} of ${fmt(r.pickups)}</span>` : '')) },
     ], { compact: true }));

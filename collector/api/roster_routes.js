@@ -366,12 +366,12 @@ export function rosterRoutes(app, { q, wrap, range }) {
                   : 'idle_this_window';
       return {
         ...r,
-        revenue: r.revenue == null ? null : round(r.revenue, 0),
+        revenue: r.revenue == null ? null : round(r.revenue, 2),
         /* Beside `revenue`, never merged into it: one is what the trips say
            and the other is what the statement says, on different populations
            and different bases. The page chooses which to show and says which
            it showed. */
-        statement_fares: r.statement_fares == null ? null : round(r.statement_fares, 0),
+        statement_fares: r.statement_fares == null ? null : round(r.statement_fares, 2),
         statement_fare_periods: r.statement_fare_periods ?? 0,
         /* ZERO WHERE WE LOOKED, NULL WHERE WE COULD NOT.
            ─────────────────────────────────────────────────────────────

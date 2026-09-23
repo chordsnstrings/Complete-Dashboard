@@ -150,6 +150,37 @@ check('the page does not slide sideways', w <= 1440, String(w));
 check('and it threw nothing', errs.length === 0, JSON.stringify(errs));
 await ctx.close();
 
+/* ── a window nobody recorded a charging advance in ────────────────────────
+   /api/ledger/entries sums over no rows and answers totals.advance: null. The
+   tile fell back to the literal 'AED 0.00' — a bold measured nought — for a
+   register that is typed by hand and simply holds no row for these dates.
+   Absent with its reason, never a zero (CLAUDE.md), and never AED 0.00 now
+   that every money figure carries its fils (the ruling of 2026-09-23).
+   REVERSION THAT PROVES THIS: restore `aed(t.advance) || 'AED 0.00'` in
+   api/public/charging.js; the first check fails on "AED 0.00". */
+console.log('\na window with no charging row');
+{
+  const c3 = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  const pg = await c3.newPage();
+  await pg.route('**/api/ledger/entries*', (route) => route.fulfill({
+    contentType: 'application/json',
+    /* The route's own shape for a window with no row (api/ledger_routes.js,
+       and mockapi.mjs's empty branch): a sum over nothing is null. */
+    body: JSON.stringify({ from: null, to: null, person_id: null, book: 'advance',
+      totals: { rows: 0, verification_rows: 0, advance: null, cash: null },
+      by_person: [], shown: 0, listed_why: null, entries: [], absent_reason: null }),
+  }));
+  await pg.goto(`${base}/#charging`, { waitUntil: 'networkidle' });
+  await pg.waitForSelector('[data-panel="charging"] .kpi', { timeout: 20000 });
+  const tile = await pg.$eval('[data-panel="charging"] .kpi', (e) => e.innerText);
+  check('the headline is a dash, not "AED 0.00"',
+    !/AED\s*0\.00/.test(tile) && /^\s*—\s*$/m.test(tile), JSON.stringify(tile));
+  check('and the sub-line says it is no record rather than a measured nought',
+    /nothing has been recorded for charging in these dates/.test(tile)
+    && /not a measured nought/.test(tile), JSON.stringify(tile));
+  await c3.close();
+}
+
 /* ── on a phone ────────────────────────────────────────────────────────── */
 console.log('\non a phone');
 {

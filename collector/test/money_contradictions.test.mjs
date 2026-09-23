@@ -393,15 +393,19 @@ check('the accounted tile no longer says "across 234,499 of 234,499 bookings"',
    priced bookings are counted on Yango's payout now, so naming them under a
    fares figure they contribute nothing to would describe a different
    measurement from the one above them. */
+/* Whole dirhams until the operator's money ruling of 2026-09-23 (every money
+   figure to the fils); the fixture's own cents are what the page prints now. */
 check('…it names the fare base and its own denominator',
-  /AED 130,219 in fares over 1,616 priced bookings/.test(accTile.sub), `sub was "${accTile.sub}"`);
+  /AED 130,218\.92 in fares over 1,616 priced bookings/.test(accTile.sub), `sub was "${accTile.sub}"`);
 /* Three halves now, and the largest of them is the statement. The payout half
    is Yango alone — the only channel left that is counted on what it wired
    rather than on what it reported earning. */
 check('…and the statement base, which is where most of the money now is',
-  /AED 2,279,335 in statement net from Uber/.test(accTile.sub), `sub was "${accTile.sub}"`);
+  // was 2,279,335 (fils ruling)
+  /AED 2,279,334\.52 in statement net from Uber/.test(accTile.sub), `sub was "${accTile.sub}"`);
 check('…and the payout base and ITS denominator, which is days',
-  /AED 17,611 in net payout over 14 of the 14 days Yango worked/.test(accTile.sub),
+  // was 17,611 (fils ruling)
+  /AED 17,611\.22 in net payout over 14 of the 14 days Yango worked/.test(accTile.sub),
   `sub was "${accTile.sub}"`);
 check('…and stays amber while 99.3% of the work sits on a part-window payout',
   accTile.tone === 't-warn', `tone ${accTile.tone}`);
@@ -415,10 +419,12 @@ check('it no longer claims a 0.7% agreement between two columns 29% apart',
   !/0\.7%/.test(recon), recon);
 /* uber is the only channel with both sides: 2,279,334.52 + 25,057.87 + 1,837.65
    − 450,325.88 = 1,855,904.16 expected against 2,401,822.21 wired. */
+/* Whole dirhams until the operator's money ruling of 2026-09-23 (every money
+   figure to the fils); the fixture's own cents are what the page prints now. */
 check('…it prints the gap these two columns actually leave',
-  /AED 1,855,904 expected against AED 2,401,822 wired/.test(recon), recon);
+  /AED 1,855,904\.16 expected against AED 2,401,822\.21 wired/.test(recon), recon);
 check('…with the size of it, and which side is ahead',
-  /AED 545,918 apart \(29\.4%, the bank ahead\)/.test(recon), recon);
+  /AED 545,918\.05 apart \(29\.4%, the bank ahead\)/.test(recon), recon);
 check('…and the two denominators, which are not the same days',
   /206 statement days and 209 payout days on Uber/.test(recon), recon);
 
@@ -494,7 +500,9 @@ check('…and the table row below it reports the same pricing, to its own roundi
    sentence. They are set aside now, and the tile says so. */
 console.log('\n…and money beside a zero payout is set aside in words, not dropped');
 const income300 = fleetIncome(platformRows300(), 300);
-const aed = (v) => `AED ${Math.round(v).toLocaleString('en-US')}`;
+/* To the fils, as the page prints it since the money ruling of 2026-09-23 —
+   this was Math.round() to the dirham. */
+const aed = (v) => `AED ${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const accTile300 = tiles300.find((k) => k.label === 'Accounted for');
 const boltRow = rows300.find((r) => r.platform === 'bolt');
 check('the accounted figure is the one fleetIncome computes, without those fares',
@@ -528,7 +536,8 @@ check('the tile is there and counts every idle day', idleTile?.value === '289',
 check('…and does not pair that count with a bare figure',
   !/^AED [\d,]+ at each asset’s own daily rate/.test(idleTile.sub), `sub was "${idleTile.sub}"`);
 check('…it says the money was measured over 7 of the 289',
-  /AED 2,056 over the 7 of them held by a car that has earned/.test(idleTile.sub),
+  // Was "AED 2,056" — to the fils since the money ruling of 2026-09-23.
+  /AED 2,056\.00 over the 7 of them held by a car that has earned/.test(idleTile.sub),
   `sub was "${idleTile.sub}"`);
 check('…and why the other 282 carry nothing',
   /the other 282 belong to cars that have never earned/.test(idleTile.sub),
@@ -536,8 +545,9 @@ check('…and why the other 282 carry nothing',
 /* The reading the old tile invited: 2056 / 289 = AED 7.11 a day, against the
    per-earning-day tile three places above it. The sub-line has to make the
    division impossible to make by accident. */
-check('…so the tile cannot be read as AED 7 a day beside a AED 294 one',
-  /over the 7 of them/.test(idleTile.sub) && perDay?.value === 'AED 294',
+// Was 'AED 294': this tile passed `'AED', 0` until the money ruling of 2026-09-23.
+check('…so the tile cannot be read as AED 7 a day beside a AED 293.71 one',
+  /over the 7 of them/.test(idleTile.sub) && perDay?.value === 'AED 293.71',
   `per-day tile "${perDay?.value}", idle sub "${idleTile.sub}"`);
 
 console.log(`\n${pass} passed, ${fail} failed`);

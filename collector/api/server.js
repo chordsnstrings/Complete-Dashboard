@@ -44,6 +44,9 @@ import { teslaRoutes } from './tesla_routes.js';
 import { cancellationRoutes } from './cancellation_routes.js';
 import { startWarmer } from './warm.js';
 import { log } from '../src/log.js';
+/* Money in a sentence the server writes, to the fils like every page (the
+   ruling of 2026-09-23). test/mount.mjs injects it into the mounted slice. */
+import { aedText } from '../src/util.js';
 /* The operator ledger's own module. The import route below is the only thing
    that writes this source, and until now it recorded the run inline — a
    count(*) over the whole table under a hard-coded fleet. src/sources/ledger.js
@@ -558,7 +561,7 @@ app.get('/api/kpis', wrap(async (req, res) => {
           n.is_booking as well as n.has_fare: a telematics row is the same physical
           journey a ride n.platform already reported, and if one ever arrives
           carrying a n.price it would be counted a second time. */
-       round(sum(n.price) FILTER (WHERE n.is_booking AND n.has_fare)::numeric,0) revenue,
+       round(sum(n.price) FILTER (WHERE n.is_booking AND n.has_fare)::numeric, 2) revenue,
        count(*) FILTER (WHERE n.is_booking AND n.has_fare)::int priced_trips,
        round(avg(n.price) FILTER (WHERE n.is_booking AND n.has_fare)::numeric,2) avg_fare,
        round(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance)::numeric,0) priced_km,
@@ -568,7 +571,7 @@ app.get('/api/kpis', wrap(async (req, res) => {
           a ratio between two populations: live it came out 3.93 where
           revenue/priced_km is 5.28, and neither figure was derivable from the
           two printed beside it. */
-       round(sum(n.price) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance)::numeric,0) priced_measured_revenue,
+       round(sum(n.price) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance)::numeric, 2) priced_measured_revenue,
        count(*) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance)::int priced_measured_trips,
        round((sum(n.price) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance)
               / nullif(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance),0))::numeric,2) revenue_per_km,
@@ -1297,7 +1300,7 @@ app.get('/api/mix', wrap(async (req, res) => {
 
   const rows = await q(
     `SELECT platform, ${dim.col} AS label, count(*)::int n,
-            round(sum(price)::numeric,0) revenue,
+            round(sum(price)::numeric, 2) revenue,
             count(*) FILTER (WHERE price IS NOT NULL)::int priced_n,
             round(sum(distance_km) FILTER (WHERE price IS NOT NULL)::numeric,0) priced_km,
             -- FILTER (WHERE has_distance), like every other average of this
@@ -1375,7 +1378,7 @@ app.get('/api/mix/detail', wrap(async (req, res) => {
   const p = range(req);
   const rows = await q(
     `SELECT platform, ${dim.col} AS label, count(*)::int n,
-            round(sum(price)::numeric,0) revenue,
+            round(sum(price)::numeric, 2) revenue,
             count(*) FILTER (WHERE price IS NOT NULL)::int priced_n,
             round(sum(distance_km) FILTER (WHERE price IS NOT NULL)::numeric,0) priced_km
      FROM trip_norm WHERE ${dim.col === 'platform' ? F : FB} GROUP BY platform, ${dim.col} ORDER BY n DESC`, p);
@@ -1451,7 +1454,7 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
             count(*) FILTER (WHERE n.outcome='completed')::int completed_trips,
             round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric,0) km,
             round(avg(n.distance_km) FILTER (WHERE n.has_distance)::numeric,1) avg_km,
-            round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
+            round(sum(n.price) FILTER (WHERE n.has_fare)::numeric, 2) revenue,
             -- Testing status = 'completed' scored every completed Bolt trip as a
             -- failure (Bolt says 'finished'), and FMS telematics rows, which
             -- hardcode 'completed' and cannot be cancelled at all, padded the
@@ -1486,7 +1489,7 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
         take. money_source travels with the figure for that reason. */
      pay AS (
        SELECT person_key AS person,
-              round(sum(earnings)::numeric, 0) AS payout,
+              round(sum(earnings)::numeric, 2) AS payout,
               count(DISTINCT day)::int AS payout_days
          FROM driver_payout_day
         WHERE day BETWEEN $1::date AND $2::date
@@ -1504,7 +1507,7 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
         a week's figure over a day. */
      dmoney AS (
        SELECT person_key AS person,
-              round(sum(money)::numeric, 0) AS money,
+              round(sum(money)::numeric, 2) AS money,
               count(*) FILTER (WHERE money IS NOT NULL)::int AS money_days,
               CASE WHEN bool_or(money IS NOT NULL AND money_period_days IS NULL) THEN NULL
                    ELSE max(money_period_days) END AS money_period_days,
@@ -1615,7 +1618,7 @@ app.get('/api/drivers/cross-platform', wrap(async (req, res) => {
             -- a link; without it the row named somebody you could not open.
             (array_agg(DISTINCT n.driver_ext_id) FILTER (WHERE n.driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
             round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric,0) km,
-            round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
+            round(sum(n.price) FILTER (WHERE n.has_fare)::numeric, 2) revenue,
             count(*) FILTER (WHERE n.has_fare)::int priced_trips,
             /* What they drove. A person working three platforms is usually
                working them from ONE car, and that was the fact this table
@@ -1759,7 +1762,7 @@ app.get('/api/vehicles', wrap(async (req, res) => {
           count(*) FILTER (WHERE NOT n.is_booking)::int telematics_journeys,
           round(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance)::numeric,0) km,
           round(sum(n.distance_km) FILTER (WHERE NOT n.is_booking AND n.has_distance)::numeric,0) telematics_km,
-          round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
+          round(sum(n.price) FILTER (WHERE n.has_fare)::numeric, 2) revenue,
           count(*) FILTER (WHERE n.has_fare)::int priced_trips,
           ${peopleCountStored()}::int drivers,
           count(distinct n.platform)::int platforms,
@@ -3419,7 +3422,7 @@ app.get('/api/coverage', wrap(async (req, res) => {
                 AS days,
               count(DISTINCT day) FILTER (WHERE day > (now() AT TIME ZONE 'Asia/Dubai')::date)::int
                 AS accrual_days,
-              round(sum(earnings)::numeric, 0) earnings
+              round(sum(earnings)::numeric, 2) earnings
        FROM driver_payout_day
        WHERE earnings IS NOT NULL
          AND ($1::text IS NULL OR platform=$1) AND ($2::text IS NULL OR fleet_id=$2)
@@ -4361,8 +4364,8 @@ app.get('/api/insights/summary', wrap(async (req, res) => {
     q(`${base} SELECT category, count(*)::int n FROM latest GROUP BY 1 ORDER BY 2 DESC`, P),
     q(`${base}
      SELECT count(*)::int n,
-            round(sum(impact_aed) FILTER (WHERE code <> 'idle_vehicle')::numeric, 0) AS measured_impact,
-            round(sum(impact_aed) FILTER (WHERE code = 'idle_vehicle')::numeric, 0) AS modelled_impact,
+            round(sum(impact_aed) FILTER (WHERE code <> 'idle_vehicle')::numeric, 2) AS measured_impact,
+            round(sum(impact_aed) FILTER (WHERE code = 'idle_vehicle')::numeric, 2) AS modelled_impact,
             count(*) FILTER (WHERE code = 'idle_vehicle')::int AS idle_vehicles
      FROM latest`, P),
     q(`SELECT count(*)::int n FROM insight WHERE ($1::text IS NULL OR fleet_id = $1)`, P),
@@ -4382,7 +4385,7 @@ app.get('/api/insights/summary', wrap(async (req, res) => {
     modelled: {
       idle_vehicles: tot?.idle_vehicles ?? 0,
       aed: tot?.modelled_impact ?? null,
-      assumption: `${IDLE_DAY_COST} AED per vehicle per day of holding cost, over a 14-day lookback`,
+      assumption: `${aedText(IDLE_DAY_COST)} per vehicle per day of holding cost, over a 14-day lookback`,
     },
     // Visible so a duplicate explosion cannot be silent again.
     stored_rows: raw?.n ?? 0,
@@ -4445,7 +4448,7 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
   const SHAPE = `month AS m, bookings AS trips, telematics AS telematics_journeys,
             drivers, attributed_trips, vehicles, earning_vehicles,
             round(km, 0) AS km, measured_trips,
-            round(revenue, 0) AS revenue, priced_trips,
+            round(revenue, 2) AS revenue, priced_trips,
             round(100.0 * not_completed / nullif(outcome_n, 0), 1) AS cancel_pct`;
   let observed = await q(
     `SELECT ${SHAPE}, platforms, booking_platforms

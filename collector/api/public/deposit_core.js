@@ -27,6 +27,7 @@
    changed hands. */
 
 import { api } from './data.js';
+import { money } from './ui.js';
 
 /* The route's limit is 1MB (api/ledger_routes.js). Aim under it with room for
    the multipart-free raw body to be exactly what we measured. */
@@ -97,9 +98,17 @@ export async function submitEntry(body, { commit = false } = {}) {
    the server wins and says so in words. */
 export const SUPERVISORS = ['ahsan', 'haseeb', 'hossam', 'shohaib'];
 
-/** AED with two decimals, always — a handover is counted in fils at the car. */
-export const aed = (v) => (v == null || !Number.isFinite(Number(v)) ? null
-  : `AED ${Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+/** AED with two decimals, always — a handover is counted in fils at the car.
+ *  Since the money ruling of 2026-09-23 that is true of every page, so this is
+ *  money() from ui.js rather than a second formatter with its own locale
+ *  ('en-AE' here, the browser's everywhere else) and its own minus (an ASCII
+ *  hyphen after the currency, "AED -600.00", where money() prints −AED 600.00).
+ *  It keeps its one difference: absent is null, not '—', because every caller
+ *  here supplies its own reason with `aed(x) || …`. */
+export const aed = (v) => {
+  const s = money(v);
+  return s === '\u2014' ? null : s;
+};
 
 /** What the operator typed, as a number, or null. Accepts a comma grouping
  *  because a person entering 1,250.00 has not made a mistake. */

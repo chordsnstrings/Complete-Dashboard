@@ -6,6 +6,8 @@ import { pool } from './db.js';
 import { log } from './log.js';
 import { dubaiIso } from './util.js';
 import { isoDay } from './sources/ledger.js';
+/* Money in a sentence, to the fils like every page (the ruling of 2026-09-23). */
+import { aedText } from './util.js';
 
 const SRC = 'insights';
 const q = (t, p) => pool.query(t, p).then((r) => r.rows);
@@ -828,7 +830,7 @@ async function cancellations(from, to) {
         + (r.avg_price == null
           ? `${LABEL(r.platform)} reports no fare per trip, so the cash value of these `
             + `${r.cancels} is not something this product can size — the count is the finding.`
-          : `At an average fare of ${money(Number(r.avg_price)) || 'AED 0'}, this is real money `
+          : `At an average fare of ${aedText(r.avg_price)}, this is real money `
             + 'leaving before the meter starts.'),
       action: `Split rider- vs driver-initiated cancels. Driver-side is a coaching problem; rider-side is usually ETA or vehicle-match.`,
       impact_aed: r.avg_price == null ? null : money((r.cancels || 0) * Number(r.avg_price) * 0.3),
@@ -1100,7 +1102,7 @@ async function tipSignal() {
       code: 'low_tip_rate', severity: 'info', category: 'safety',
       entity_type: 'driver', entity_id: r.driver_ext_id,
       title: `${r.driver_name || r.driver_ext_id} earns tips at ${(rate * 100).toFixed(1)}% of fare`,
-      detail: `AED ${Number(r.tips || 0).toFixed(0)} tipped on AED ${Number(r.fare).toFixed(0)} of fares, against a fleet median of ${(median * 100).toFixed(1)}%. Tipping is a rider-satisfaction signal that arrives before ratings do, and it is money the fleet never has to share.`,
+      detail: `${aedText(Number(r.tips || 0))} tipped on ${aedText(r.fare)} of fares, against a fleet median of ${(median * 100).toFixed(1)}%. Tipping is a rider-satisfaction signal that arrives before ratings do, and it is money the fleet never has to share.`,
       action: `Worth a look at vehicle cleanliness and rider interaction before it turns into a ratings problem.`,
       impact_aed: null, metric: rate,
       window_start: r.period_start, window_end: r.period_end,

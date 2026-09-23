@@ -121,8 +121,11 @@ check('code revalidates before use, so the module graph cannot run mixed version
 check('both shells print money in, from the one module',
   /label: 'Money in'/.test(phone) && /fact\('money in'/.test(app),
   'the phone and the desktop disagreeing about today is what this module exists to prevent');
+/* The builder no longer takes the caller's fmt (2026-09-23): the halves are
+   money, printed to the fils through ui.js fils(), and fmt() drops decimals. */
 check('and both name the halves rather than printing a bare total',
-  /moneyHalves\(now, fmt\)/.test(phone) && /moneyHalves\(t, fmt\)/.test(app),
+  /moneyHalves\(now\)/.test(phone) && /moneyHalves\(t\)/.test(app)
+  && /export const moneyHalves = \(t\) =>/.test(mod) && /\$\{fils\(t\.moneyStatements\)\}/.test(mod),
   'one builder, so the two shells cannot compose the caption differently');
 /* Absent, never zero — the same rule the rest of this card is built on. Before
    any channel has been credited today the tile is a sentence, not AED 0. */

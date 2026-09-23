@@ -88,8 +88,9 @@ console.log('\nMoney in is the gross, and it says what it is made of');
     /3,246|3,245/.test(t.value), t.value);
   check('…not the AED 2,947 the payout basis used to show',
     !/2,947/.test(t.value), t.value);
-  check('both halves are named', /2,743 from the platform statements/.test(t.sub)
-    && /503 priced on the bookings themselves/.test(t.sub), t.sub);
+  // Whole dirhams until the money ruling of 2026-09-23; every figure now carries its fils.
+  check('both halves are named', /AED 2,742\.50 from the platform statements/.test(t.sub)
+    && /AED 503\.00 priced on the bookings themselves/.test(t.sub), t.sub);
   /* AND WHICH SIDE OF THE COMMISSION EACH HALF IS ON. The operator calls this
      figure the gross and it is not one: the statement half is Uber's NET —
      measured over the aligned week the Uber term is AED 3,139.11, a gross of
@@ -184,7 +185,8 @@ console.log('\ncash on hand: what the driver already has');
      the cash on AED 503" became "the AED 503 … files no cash figure", which is
      the same claim about the same money and leaves room for the ride count. */
   check('it does not claim the priced part carried no cash',
-    /the AED 503 priced from the bookings files no cash figure/.test(c.sub), c.sub);
+    // Was "AED 503" — to the fils since the money ruling of 2026-09-23.
+    /the AED 503\.00 priced from the bookings files no cash figure/.test(c.sub), c.sub);
   check('…and stays quiet where there is no priced part',
     !/nothing reports the cash/.test(cashOnHandTile({ ...WEEK, day_stmt_net: 3245.50 }).sub));
   /* THREE different absences, three different sentences — and the middle one
@@ -198,7 +200,8 @@ console.log('\ncash on hand: what the driver already has');
   check('a dash never denies cash the trip feed marked',
     rides.value === '—' && /9 bookings here were paid in cash/.test(rides.sub), rides.sub);
   check('…with what those rides were priced at',
-    /AED 310 of them priced/.test(rides.sub), rides.sub);
+    // Was "AED 310" — to the fils since the money ruling of 2026-09-23.
+    /AED 310\.00 of them priced/.test(rides.sub), rides.sub);
   check('…and the true reason the amount is missing',
     /no channel this driver works files a cash figure/.test(rides.sub), rides.sub);
   const none = cashOnHandTile({ day_money: 1200, day_stmt_net: 1200, cash_bookings: 0 });
@@ -221,7 +224,8 @@ console.log('\ncash on hand: what the driver already has');
      can check, so the card names it. */
   const two = cashOnHandTile({ ...WEEK, cash_earnings: 24 });
   check('the payout surface\u2019s cash is named, not absorbed',
-    /a further AED 24 of cash is reported on the payout surface/.test(two.sub), two.sub);
+    // Was "AED 24" — to the fils since the money ruling of 2026-09-23.
+    /a further AED 24\.00 of cash is reported on the payout surface/.test(two.sub), two.sub);
   check('…and the value is still the statement line alone',
     /464/.test(two.value) && !/488/.test(two.value), two.value);
   check('…and it is silent where there is no second figure',
@@ -235,8 +239,9 @@ console.log('\nbank deposit: the remainder, and it says it is one');
   const b = bankDepositTile(WEEK);
   check('the value is money in less the cash', /2,781/.test(b.value), b.value);
   check('…and the subtraction is shown, not asserted',
-    /AED 3,246 less the AED 464 taken in cash/.test(b.sub)
-      || /AED 3,245 less the AED 464 taken in cash/.test(b.sub), b.sub);
+    // Was "AED 3,246 less the AED 464" — to the fils since the money ruling of
+    // 2026-09-23, which also retires the either-way rounding this allowed.
+    /AED 3,245\.50 less the AED 464\.09 taken in cash/.test(b.sub), b.sub);
   /* No feed this fleet reads reports a bank transfer per driver. Printing this
      as "paid" would be the exact defect the Money in tile carried for a year
      under a field called accounted_payouts. */
@@ -253,7 +258,8 @@ console.log('\nbank deposit: the remainder, and it says it is one');
      way to show both true things at once. */
   const withPaid = bankDepositTile({ ...WEEK, accounted_payouts: 2635.62 });
   check('the platform\u2019s own payout figure is named where it differs',
-    /The payout report for this window says AED 2,636/.test(withPaid.sub), withPaid.sub);
+    // Was "AED 2,636" — to the fils since the money ruling of 2026-09-23.
+    /The payout report for this window says AED 2,635\.62/.test(withPaid.sub), withPaid.sub);
   check('…with why it is a different number',
     /over its own reporting periods/.test(withPaid.sub), withPaid.sub);
   check('…and it is not named where the two agree',
@@ -322,14 +328,16 @@ console.log('\nFares: the trip-side view of the same money, said so');
   check('it says most of this is the same money',
     /the same money, before the platform took its commission/.test(f.sub), f.sub);
   check('…and names the part that IS money in',
-    /AED 503 of it is money no statement covered and is inside Money in/.test(f.sub), f.sub);
+    // Was "AED 503" — to the fils since the money ruling of 2026-09-23.
+    /AED 503\.00 of it is money no statement covered and is inside Money in/.test(f.sub), f.sub);
   check('…with the denominator it was priced over',
     /priced on 86 of 95 bookings/.test(f.sub), f.sub);
   /* Uber's trip export carries no fare column, so revenue is null for most of
      this fleet however much they billed. */
   const stmt = faresTile({ statement_fares: 12638.71, statement_fare_periods: 7 });
   check('the statement fare line still leads where the trip feed prices nothing',
-    /12,639/.test(stmt.value) && /weekly statement/.test(stmt.sub), stmt.sub);
+    // Was /12,639/ — the fixture's 12,638.71 is printed as it is since 2026-09-23.
+    /AED 12,638\.71/.test(stmt.value) && /weekly statement/.test(stmt.sub), stmt.value);
   check('…and is named as the gross before commission',
     /before the commission that makes it the Money in beside it/.test(stmt.sub), stmt.sub);
   check('neither present, and it is a dash with a reason',

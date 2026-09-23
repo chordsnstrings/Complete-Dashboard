@@ -131,7 +131,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
         priced_trips: c.priced_trips,
         // A revenue figure over a class where nothing is priced is not zero —
         // it is unknown, and saying zero would understate the class.
-        revenue: c.priced_trips ? round(c.revenue, 0) : null,
+        revenue: c.priced_trips ? round(c.revenue, 2) : null,
         avg_fare: c.priced_trips ? round(c.revenue / c.priced_trips, 2) : null,
         km: c.km ? round(c.km, 0) : null,
         foc_trips: c.foc_trips,
@@ -375,12 +375,12 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     const priced = totals.priced || 0;
     res.json({
       drivers: rows.map((r) => ({
-        ...r, cash_value: r.priced_cash_trips ? round(r.cash_value, 0) : null,
+        ...r, cash_value: r.priced_cash_trips ? round(r.cash_value, 2) : null,
         /* Beside the booking figure, never merged with it: one is the fares of
            the cash bookings that carry one, the other is what the platform's
            statement says the person took. They measure the same cash from two
            sides and adding them counts it twice. */
-        statement_cash: r.statement_cash == null ? null : round(r.statement_cash, 0),
+        statement_cash: r.statement_cash == null ? null : round(r.statement_cash, 2),
         statement_days: r.statement_days ?? 0,
         /* How many rows on this list the statement behind that figure is
            shared with. 1 for almost everybody; 2 where one man's name is
@@ -398,10 +398,10 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       shown: rows.length,
       truncated: (totals.drivers || 0) > rows.length,
       total_cash_trips: cashTrips,
-      total_cash_value_known: priced ? round(NUM(totals.value) || 0, 0) : null,
+      total_cash_value_known: priced ? round(NUM(totals.value) || 0, 2) : null,
       /* Over one row per NAME, not per row: see the ranked CTE. Summing the
          column double-counts every man this fleet spells two ways. */
-      total_statement_cash: totals.stmt_cash == null ? null : round(NUM(totals.stmt_cash), 0),
+      total_statement_cash: totals.stmt_cash == null ? null : round(NUM(totals.stmt_cash), 2),
       statement_cash_drivers: totals.stmt_drivers || 0,
       value_known_pct: share(priced, cashTrips),
       caveat: priced < cashTrips
@@ -531,11 +531,17 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        FROM trip_ext WHERE ${RECV_TO_DATE}`, [p[1], p[2], p[3]]);
     res.json({
       rows: rows.map((r) => ({
-        ...r, amount: r.priced_trips ? round(r.amount, 0) : null,
+        ...r, amount: r.priced_trips ? round(r.amount, 2) : null,
         label: LABEL[r.settlement_class] || r.settlement_class,
         age_days: r.oldest ? Math.floor((Date.now() - Date.parse(r.oldest)) / 864e5) : null,
       })),
-      total: t?.priced_trips ? round(NUM(t.amount) || 0, 0) : 0,
+      /* Unknown is null, not 0. With receivable bookings on record and not one
+         of them priced, this answered 0 and #settlement/receivables printed
+         "Outstanding AED 0.00 across N bookings, N of which carry no fare" —
+         a measured nought over bookings nobody valued. A nought stays for the
+         one case it is true: no receivable booking at all. The page's sub-line
+         already names the unpriced count, which is the reason. */
+      total: t?.priced_trips ? round(NUM(t.amount) || 0, 2) : (t?.trips ? null : 0),
       total_trips: t?.trips || 0,
       counterparties: t?.counterparties || 0,
       priced_trips: t?.priced_trips || 0,
@@ -555,13 +561,13 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
         total_trips: age?.trips || 0,
         buckets: [
           { label: '0-30 days', trips: age?.n_0_30 || 0, counterparties: age?.c_0_30 || 0,
-            amount: round(NUM(age?.a_0_30) || 0, 0) },
+            amount: round(NUM(age?.a_0_30) || 0, 2) },
           { label: '31-60 days', trips: age?.n_31_60 || 0, counterparties: age?.c_31_60 || 0,
-            amount: round(NUM(age?.a_31_60) || 0, 0) },
+            amount: round(NUM(age?.a_31_60) || 0, 2) },
           { label: '61-90 days', trips: age?.n_61_90 || 0, counterparties: age?.c_61_90 || 0,
-            amount: round(NUM(age?.a_61_90) || 0, 0) },
+            amount: round(NUM(age?.a_61_90) || 0, 2) },
           { label: 'over 90 days', trips: age?.n_90_plus || 0, counterparties: age?.c_90_plus || 0,
-            amount: round(NUM(age?.a_90_plus) || 0, 0) },
+            amount: round(NUM(age?.a_90_plus) || 0, 2) },
         ],
       },
       shown: rows.length,
@@ -611,11 +617,11 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
 
     res.json({
       ...s,
-      revenue: s.priced ? round(s.revenue, 0) : null,
+      revenue: s.priced ? round(s.revenue, 2) : null,
       // A cost figure only means something if it is a DIFFERENT number from the
       // fare. The hotel report returns one money value per booking; recording
       // it twice produced a gross margin of exactly zero on every property.
-      cost: s.cost != null ? round(s.cost, 0) : null,
+      cost: s.cost != null ? round(s.cost, 2) : null,
       has_cost: s.cost != null && s.priced > 0 && round(s.cost, 0) !== round(s.revenue, 0),
       avg_fare: s.priced ? round(NUM(s.revenue) / s.priced, 2) : null,
       km: round(s.km, 0),
@@ -704,8 +710,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        FROM trip_ext WHERE ${F} AND platform = 'hotel'
        GROUP BY 1, 2 ORDER BY bookings DESC`, p)).map((r) => ({
       ...r,
-      revenue: r.priced ? round(r.revenue, 0) : null,
-      cost: r.cost != null ? round(r.cost, 0) : null,
+      revenue: r.priced ? round(r.revenue, 2) : null,
+      cost: r.cost != null ? round(r.cost, 2) : null,
       avg_fare: r.priced ? round(NUM(r.revenue) / r.priced, 2) : null,
       km: round(r.km, 0),
       revenue_per_km: r.priced && NUM(r.km) > 0 ? round(NUM(r.revenue) / NUM(r.km), 2) : null,
@@ -755,18 +761,18 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       q(`SELECT daypart AS label, count(*)::int n FROM trip_ext WHERE ${W} GROUP BY 1`, p),
     ]);
     res.json({
-      profile: { ...profile, revenue: profile.priced ? round(profile.revenue, 0) : null,
+      profile: { ...profile, revenue: profile.priced ? round(profile.revenue, 2) : null,
         avg_fare: profile.priced ? round(NUM(profile.revenue) / profile.priced, 2) : null },
-      daily: daily.map((d) => ({ ...d, revenue: round(d.revenue, 0) })),
-      types: types.map((t) => ({ ...t, revenue: round(t.revenue, 0), avg_km: round(t.avg_km, 1) })),
-      payments: payments.map((x) => ({ ...x, revenue: round(x.revenue, 0), label_class: LABEL[x.settlement_class] || null })),
-      guests: guests.map((g) => ({ ...g, revenue: round(g.revenue, 0) })),
+      daily: daily.map((d) => ({ ...d, revenue: round(d.revenue, 2) })),
+      types: types.map((t) => ({ ...t, revenue: round(t.revenue, 2), avg_km: round(t.avg_km, 1) })),
+      payments: payments.map((x) => ({ ...x, revenue: round(x.revenue, 2), label_class: LABEL[x.settlement_class] || null })),
+      guests: guests.map((g) => ({ ...g, revenue: round(g.revenue, 2) })),
       /* 40 of a property's 478 passengers were listed with nothing saying so.
          profile.guests is the count over the whole window, so the cap is
          checkable against it rather than against the list's own length. */
       guests_shown: guests.length,
       guests_truncated: (profile?.guests ?? 0) > guests.length,
-      drivers: drivers.map((d) => ({ ...d, revenue: round(d.revenue, 0), avg_deadhead_km: round(d.avg_deadhead_km, 2) })),
+      drivers: drivers.map((d) => ({ ...d, revenue: round(d.revenue, 2), avg_deadhead_km: round(d.avg_deadhead_km, 2) })),
       drivers_shown: drivers.length,
       drivers_truncated: (profile?.drivers ?? 0) > drivers.length,
       dayparts,
@@ -847,7 +853,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
 
     res.json({
       guests: rows.map((r) => ({
-        ...r, revenue: r.priced ? round(r.revenue, 0) : null, km: round(r.km, 0),
+        ...r, revenue: r.priced ? round(r.revenue, 2) : null, km: round(r.km, 0),
         span_days: r.first_at && r.last_at
           ? Math.round((Date.parse(r.last_at) - Date.parse(r.first_at)) / 864e5) : null,
       })),
@@ -871,7 +877,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
           + `${all.bookings} bookings, none of them repeated. Repeat travel cannot be measured from it, `
           + 'and a repeat rate of 0% here is a fact about the identifier, not about the customers.'
         : null,
-      rooms: byRoom.map((r) => ({ ...r, revenue: round(r.revenue, 0) })),
+      rooms: byRoom.map((r) => ({ ...r, revenue: round(r.revenue, 2) })),
       repeat_rooms: roomTot?.repeat_rooms || 0,
       repeat_bookings: roomTot?.repeat_bookings || 0,
       rooms_truncated: (roomTot?.repeat_rooms || 0) > byRoom.length,
@@ -948,11 +954,11 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       })),
       summary: {
         total: counts[0]?.total ?? 0,
-        overrun_value: round(counts[0]?.overrun_value, 0),
+        overrun_value: round(counts[0]?.overrun_value, 2),
         // Complimentary rides carry no cost figure on this channel, so what was
         // given away is measured in the things that ARE recorded: distance and
         // the driver's time.
-        foc_cost: round(counts[0]?.foc_cost, 0),
+        foc_cost: round(counts[0]?.foc_cost, 2),
         foc_km: round(counts[0]?.foc_km, 1),
         foc_hours: counts[0]?.foc_seconds ? round(counts[0].foc_seconds / 3600, 1) : null,
         wasted_km: round(counts[0]?.wasted_km, 1),
@@ -2041,9 +2047,9 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       // The commission arrives negative — it is money leaving. Reported as a
       // positive cost with an explicit label rather than a signed number that
       // sums to something meaningless.
-      commission_cost: r.commission != null ? round(Math.abs(r.commission), 0) : null,
+      commission_cost: r.commission != null ? round(Math.abs(r.commission), 2) : null,
       gross: r.price_cash != null || r.price_cashless != null
-        ? round((NUM(r.price_cash) || 0) + (NUM(r.price_cashless) || 0), 0) : null,
+        ? round((NUM(r.price_cash) || 0) + (NUM(r.price_cashless) || 0), 2) : null,
       hours: r.work_time_seconds != null ? round(r.work_time_seconds / 3600, 1) : null,
       cash_pct: (NUM(r.price_cash) || 0) + (NUM(r.price_cashless) || 0) > 0
         ? round(((NUM(r.price_cash) || 0) / ((NUM(r.price_cash) || 0) + (NUM(r.price_cashless) || 0))) * 100, 1)

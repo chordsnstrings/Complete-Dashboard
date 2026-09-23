@@ -188,7 +188,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
                 count(DISTINCT a.local_day)::int days_moved,
                 round(sum(a.km)::numeric,0) km,
                 round(sum(a.telematics_km)::numeric,0) telematics_km,
-                round(sum(a.revenue)::numeric,0) revenue,
+                round(sum(a.revenue)::numeric, 2) revenue,
                 sum(a.priced_trips)::int priced_trips,
                 count(DISTINCT ${personKey('a.driver_ext_id', 'a.driver_name')})::int drivers,
                 count(DISTINCT a.platform)::int platforms,
@@ -1152,7 +1152,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               array_agg(DISTINCT driver_ext_id) AS driver_ids,
               count(DISTINCT day)::int days,
               sum(trips)::int trips, round(sum(km)::numeric,0) km,
-              round(sum(revenue)::numeric,0) revenue,
+              round(sum(revenue)::numeric, 2) revenue,
               min(day) first_day, max(day) last_day,
               count(DISTINCT day) FILTER (WHERE is_primary)::int primary_days,
               array_agg(DISTINCT platform) AS platforms
@@ -1420,7 +1420,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
     const one = (col) => q(
       `SELECT coalesce(${col},'unknown') label, count(*)::int n,
               count(*) FILTER (WHERE is_booking)::int bookings,
-              round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+              round(sum(price) FILTER (WHERE has_fare)::numeric, 2) revenue,
               round(avg(distance_km) FILTER (WHERE has_distance)::numeric,1) avg_km,
               count(*) FILTER (WHERE has_distance)::int measured
        FROM trip_norm WHERE ${TW} GROUP BY 1 ORDER BY n DESC LIMIT 20`, p);

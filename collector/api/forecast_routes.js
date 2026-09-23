@@ -50,7 +50,7 @@ export function forecastRoutes(app, { q, wrap, DAYWIN }) {
        from, so a fresh database or a failed rollup is slow rather than empty,
        and the fast path and the slow path cannot become different answers. */
     const monthShape = `to_char(month,'YYYY-MM') AS m, bookings AS trips, drivers,
-              earning_vehicles AS vehicles, round(revenue,0) AS revenue, priced_trips`;
+              earning_vehicles AS vehicles, round(revenue,2) AS revenue, priced_trips`;
     let months = await q(
       `SELECT ${monthShape}, first_day, last_day FROM rollup_month
        WHERE platform = coalesce($1,'*') AND fleet_id = coalesce($2,'*') ORDER BY month`,

@@ -133,9 +133,14 @@ console.log('\nthe banner is the endpoint’s arithmetic, not its own');
 
   check('the headline gap is totals.delta exactly',
     v.gap === TOTALS.delta, `${v.gap} vs ${TOTALS.delta}`);
+  /* To the fils since the operator's money ruling of 2026-09-23 — this compared
+     against Math.round(TOTALS.delta), the whole-dirham figure money() used to
+     print. The comparison is the same one: the endpoint's number, not the
+     re-derived one. */
+  const cents = (x) => Number(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   check('…and the printed figure carries that number, not the re-derived one',
-    digits(v.figure) === digits(Math.round(TOTALS.delta).toLocaleString('en-US'))
-    && digits(v.figure) !== digits(Math.round(reDerived).toLocaleString('en-US')),
+    digits(v.figure) === digits(cents(TOTALS.delta))
+    && digits(v.figure) !== digits(cents(reDerived)),
     `${v.figure} · re-derived ${Math.round(reDerived)}`);
   check('the month count is totals.reconciled_rows, not the count of rows with both halves',
     v.comparable === TOTALS.reconciled_rows
