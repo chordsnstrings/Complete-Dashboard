@@ -2202,8 +2202,9 @@ figures are in COVERAGE.
 
 - **On production, 2026-09-23.** Deployment `89154e9` (commit `008f48e`) went
   ACTIVE at 15:13:59Z. Before any FMS row existed, the migration had tagged every
-  old segment `cabman`: 30 days, 2,928 → 2,929 segments, 136 unauthorized,
-  2,936 km, the same as the pre-deploy baseline. The FMS providers showed ABSENT
+  old segment `cabman`. At 15:14Z the 30-day figures were 2,928 segments, 136
+  unauthorized and 2,936 km, exactly the pre-deploy baseline. The boot pass then
+  added one new CABMAN ride, making 2,929. The FMS providers showed ABSENT
   with their reason, not 0. The boot pass wrote the first FMS segments by
   15:18Z. For 2026-09-20..23:
   - CABMAN DT: 383 segments, 13 unauthorized
