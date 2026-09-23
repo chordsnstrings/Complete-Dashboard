@@ -50,6 +50,20 @@
     var zen = localStorage.getItem('fleet.zen');
     if (zen === '1') document.documentElement.dataset.zen = '1';
   } catch (e) { /* private mode: the choice just does not stick */ }
+  /* The skin, stamped here for the same reason as the full page: a reader
+     who chose the new one must not watch the old one paint first. ?skin=arkiv
+     or ?skin=classic is remembered, ?skin=auto forgets it, and no choice at
+     all is the old skin until the operator flips the default
+     (docs/UI-REDESIGN-PLAN.md §3, STEP 5). The URL's own word wins even
+     where storage is refused, so a private window can still be shown it. The
+     stylesheet is written in by the second script below, after app.css. */
+  var sk = new URLSearchParams(location.search).get('skin');
+  try {
+    if (sk === 'arkiv' || sk === 'classic') localStorage.setItem('fleet.skin', sk);
+    else if (sk === 'auto') localStorage.removeItem('fleet.skin');
+    if (sk !== 'arkiv' && sk !== 'classic') sk = localStorage.getItem('fleet.skin');
+  } catch (e) { /* private mode: the choice just does not stick */ }
+  if (sk === 'arkiv') document.documentElement.dataset.skin = 'arkiv';
   var pick = q || saved;
   var phone = pick ? pick === 'phone'
     : matchMedia('(max-width: 760px)').matches && matchMedia('(pointer: coarse)').matches;
@@ -80,6 +94,18 @@
 <link rel="preload" href="/fonts/karla-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="/app.css">
+<!-- The Arkiv skin, AFTER app.css and only when the script above stamped it.
+     document.write, not appendChild, and on purpose: a stylesheet the PARSER
+     inserts blocks the first paint, and one a script appends does not — the
+     old skin would flash first on every load. It is written at this exact
+     point in the document, so it lands after app.css and wins ties there;
+     m.css, which the phone build appends earlier, stays underneath both.
+     A page on the old skin never requests the file; only the phone's
+     service worker precaches it, with the rest of the shell (sw.js). -->
+<script>
+if (document.documentElement.dataset.skin === 'arkiv')
+  document.write('<link rel="stylesheet" href="/arkiv.css">');
+</script>
 </head>
 <body>
 <div id="app">

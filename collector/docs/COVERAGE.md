@@ -892,6 +892,76 @@ driver's 222 tracker fixes.
   static imports from `/m/app.js`, so adding an import to a phone module
   means adding its file to the list.
 
+* **THE ARKIV SKIN IS A SECOND STYLESHEET, AND FOUR THINGS ABOUT IT BITE.**
+  STEP 1 of the reskin (2026-09-23) put the new look in `api/public/arkiv.css`,
+  loaded only under `?skin=arkiv` (remembered as `fleet.skin`). Each of these
+  was found by measuring, and `test/arkiv_skin.test.mjs` now holds it:
+  1. **It must load AFTER app.css, and the parser must insert it.** The old
+     dark blocks and the skin's re-pointing are all `(0,2,0)`, so ORDER is
+     what decides. With the `<link>` before app.css, the OS-dark reader got
+     the old dark `--surface` (#1c2024) under the new skin. A `<link>` that a
+     script APPENDS does not block the first paint, so the old skin flashes
+     first. `index.html` therefore `document.write`s it straight after
+     app.css. The test reads `renderBlockingStatus`, which says `blocking`.
+  2. **Every old colour name needs a new value, or its old DARK value shows
+     through.** The generated block only covers the names Arkiv shares with
+     the old skin. arkiv.css re-points the rest (`--surface*`, `--rule*`,
+     `--accent*`, severity, `--s1..--s8`, `--b100..--b700`). The test finds
+     every name the old skin paints with a hex. It fails on any that is
+     neither generated nor re-pointed, and it resolves all 41 in three theme
+     states.
+  3. **The prefix makes a rule `(0,2,0)` heavier, which is a weight, not a
+     guarantee.** A rule elsewhere that is heavier still wins. Examples:
+     app.css's dark-theme `.domb-seg.ch-uber` at `(0,4,0)` put ink on Uber
+     blue until it was named per class. `.tcards … tr:nth-child(even) td
+     {background:none}` at `(0,3,4)` is a SHORTHAND, and it wiped a
+     background-image dot off every other phone card. Zen's `.topbar h1`
+     is the same weight as the skin's, so the skin's rule came later and
+     undid the smaller zen title. Write the heavier selector, check it in a
+     browser, and never solve it with `!important`, except against an INLINE
+     style, which no selector can beat. The skin has two such cases:
+     #freshness's `color:var(--warn)` and #unit's map bleed
+     `margin:0 -18px`. The bleed was written for a panel with 20px of
+     padding. A ruled panel has none, so render-audit reported `panel
+     mapwrap +18px`.
+  4. **Class names collide with the mockups' AND with each other.** Never
+     paste b.css or viz.css: their `.cap` is 9.5px mono capitals, and here it
+     is the caption sentence on 332 call sites. Inside the live code too,
+     `class="btn sec"` (the "secondary" button on #settings) also matches
+     `.sec`, the mono section label, whose `margin:6px 0 -6px` drops the
+     button 6px below its neighbour. The old skin has always drawn it that
+     way. The skin resets it.
+
+* **A TEST THAT BOOTS index.html AND RENDERS A PAGE INTO A PROBE RACES THE
+  SHELL.** index.html starts the whole app. app.js's `render()` begins with
+  data.js `newRender()`, and a page module drops any answer that arrives after
+  the generation it captured has moved on (`alive(gen)`, the stale-render
+  guard). If the shell's first render lands after the probe has painted, the
+  probe's later fetches are treated as abandoned. `payout_page_reconcile` §3
+  sat on "Asking Uber…" and timed out on every run from the reskin's STEP 0
+  (25734ca) on. That commit made ui.js import tokens.js, one more module on
+  the shell's path, so the shell started later. The same file passed at
+  e98d5f4. The product was never affected. Wait for `#nav a`, which renders
+  in the same tick as `newRender()`, before rendering a probe. Found and fixed
+  2026-09-23 in STEP 1's full-suite run.
+
+* **A STICKY FIRST COLUMN HIDES ROW RULES IN THE COLLAPSED-BORDER MODEL.** With
+  `border-collapse:collapse`, a row rule belongs to the table, and a
+  `position:sticky` cell with an opaque ground paints over it. On #hr-roster
+  at 1440, where rows are 122.95px tall, every other row lost its rule under
+  the pinned column. The old skin's zebra stripes had always hidden this.
+  The Arkiv skin draws no stripes, so it uses `border-collapse:separate;
+  border-spacing:0`, where each cell paints its own bottom border. Nothing in
+  either stylesheet borders a `<tr>`, and that is the one thing the separate
+  model drops.
+
+* **CHROMIUM FLOORS A BORDER ABOVE 1px TO WHOLE CSS PIXELS.** The mockups'
+  section rule is `1.5px solid ink`. In Chromium it computes and draws as
+  1px at a device scale of 1 and also of 2 (measured). The rule stays at
+  1.5px because that is the design, and Safari and Firefox on a retina screen
+  draw it. A test that asserts `1.5px` from `getComputedStyle` will fail in
+  Chromium for this reason alone. Assert the declaration and accept 1px.
+
 * **A FULL-PAGE SCREENSHOT IS NOT DETERMINISTIC UNDER A STICKY HEADER.** When
   STEP 0 had to show "pixel-identical", two captures of the UNCHANGED tree
   differed by up to 7,325 pixels. Most of that was the sticky topbar, which

@@ -48,6 +48,11 @@ const DATA = `${VERSION}-data`;
 const SHELL_FILES = [
   '/', '/index.html',
   '/app.css', '/m/m.css',
+  /* The Arkiv skin. index.html writes its <link> only for a reader who chose
+     it (?skin=arkiv), but a reader who did must get it on a cold offline open
+     too — or the page paints half in one skin: app.css's tokens under the
+     skin attribute, with none of the component rules that go with them. */
+  '/arkiv.css',
   '/m/app.js', '/m/ui.js', '/m/screens.js',
   /* Every module the phone's three files reach, followed by hand rather than
      assumed: m/app.js imports ../daterange.js, and daterange.js imports

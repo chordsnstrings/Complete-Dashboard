@@ -40,6 +40,11 @@
   --t1:.59rem;  --t2:.631rem; --t3:.675rem; --t4:.723rem; --t5:.773rem;
   --t6:.828rem; --t7:.885rem; --t8:.947rem; --t9:1.014rem;
   --d1:1.14rem; --d2:1.28rem; --d3:1.42rem; --d4:1.65rem; --d5:2.45rem;
+  /* The one step the Arkiv skin adds (docs/UI-REDESIGN-PLAN.md §3,
+     Typography): the hero tile's value, 50px in the design, which no step
+     above reaches. Declared here, with the others, because this is the one
+     scale; only arkiv.css uses it, so the old skin does not move. */
+  --d6:3.15rem;
 
   --paper-2:#efece5;
   --surface:#fbfaf7;

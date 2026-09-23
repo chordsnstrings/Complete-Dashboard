@@ -2326,3 +2326,110 @@ they carry their real fils.
   prints the fils regardless. Tidy both after the merge.
 - Insight rows already stored keep the detail text they were written with
   until the rule next rewrites them.
+
+## Arkiv reskin, STEP 1 — the skin switch and the component restyle — 2026-09-23, NOT ON PRODUCTION
+
+Branch `reskin-foundation`. The plan is `docs/UI-REDESIGN-PLAN.md` §3 (Order of
+work STEP 1, Typography, Components, "Review corrections" and "Also required")
+and the operator's rulings in §1. Not deployed, not pushed. The default skin is
+not flipped, so production keeps its look. A reader sees Arkiv only after
+opening `?skin=arkiv`.
+
+| # | what | state | proof |
+|---|---|---|---|
+| K1 | **The switch.** `?skin=arkiv` / `?skin=classic` / `?skin=auto`, stored as `fleet.skin`. index.html's pre-paint script stamps `<html data-skin="arkiv">`, and the URL's word wins even where storage is refused. A second inline script `document.write`s `<link href="/arkiv.css">` directly after app.css, so the parser inserts it: it blocks the first paint and wins ties by order. A page on the old skin never requests the file | **written** | `test/arkiv_skin.test.mjs` §3. With the write removed, 46 checks fail. With the link placed before app.css, 7 fail, including the old DARK `--surface` (#1c2024) showing through under OS dark. With `appendChild` instead of `document.write`, 4 fail, including `renderBlockingStatus` = `non-blocking` |
+| K2 | `sw.js` `SHELL_FILES` gains `/arkiv.css`, so a phone switched to the skin still has it on a cold offline open | **written** | §3. With it removed, 1 fails |
+| K3 | **The token values.** arkiv.css's `:root[data-skin="arkiv"]` re-points every old-skin colour name onto an Arkiv token with `var()`: surfaces → paper/paper-2/faint, rules → hair/grey-2, the accent → ink, severity → the two semantics (no amber: `--warn`/`--serious` → `--sem-neg`), `--b100..--b700` → the steps `sequentialOf(i/6)` picks, `--s1..--s8` → distinct neutral steps (the review's correction, not ink), radii → 0, shadows → none, and `color-scheme:light` | **written** | §2 finds all 49 names the old skin paints with a hex. It fails on any that is not generated or re-pointed, and it resolves 41 in a browser in three theme states (OS light, OS dark, theme dark), each to an Arkiv token value. With `--warn` not re-pointed, 5 fail: old amber #7d5b05 in light and #d0a553 in dark. With `color-scheme:light` dropped, 3 fail |
+| K4 | **No hex, and every rule scoped.** arkiv.css has no hex, no `rgb()` and no named colour, and all 391 selectors start with `:root[data-skin="arkiv"]` | **written** | §1. A hex added fails 1. One rule unscoped fails 1. tokens.test §6 now resolves arkiv.css's `var()`s too: `var(--ink-3)` put in fails 1 there |
+| K5 | **Typography.** Plex Mono for labels, controls, table figures and headings of sections; Karla for prose, titles, names and tile values (proportional figures); Fraunces on the wordmark only. Body `--t7` → `--t6` (desktop only; the phone keeps m.css's size). Every size is a scale step; the one new step `--d6` (3.15rem, the hero tile) is declared in app.css's scale and used by `.kpi.is-hero .n`, which STEP 3's `glanceTile()` will emit | **written** | type_scale now scans arkiv.css: taking it out of the scan fails 1 ("--d6 unused"). §1 checks no literal size. §5 checks the faces in a browser |
+| K6 | **Every component, restyled in place (no DOM change):** panel (a ruled section, 1.5px ink rule, mono title numbered by a CSS counter), g2/g3/g23 hairline column rules, kpi tiles (hairline rules, clipped first column, ink digits), tables (mono heading over an ink rule, no zebra, mono figures, separate borders), pills/tags/chips (3px, wash + dot + ink text, absence outline for `.dim`), notes, verdict band, tabs and the section strip, buttons and inputs, the credential banner, the today strip, the range panel, the rail and title block, plus links, fold, export line, skeleton, empty, modal, tooltip, identity card and avatar, rows that were cards, settings groups, the deposit form | **written** | §4: no module reads the skin (a module reading `dataset.skin` fails 1), and panel, tiles, notes, pills, verdict, table, tabs, buttons and the dominance bar render byte-identical markup under both skins. §5 measures each component in a browser |
+| K7 | **Ruling 1, one rule everywhere:** a HOLLOW negative dot is a warning, a SOLID one critical, a solid green one good. Each dot has a screen-reader word (`content:"" / "warning: "`). Used by tiles, pills, tags, chips, notes, verdict band, banner, table verdict cells and #freshness | **written** | §5. The warning dot drawn solid fails 6. The toned digits left coloured fail 1. The banner, from the real `authBanner()` with a stubbed `/api/auth`: stopped (wash, 3px rule, solid dot), at-risk (paper, 3px rule, hollow), pending (sunken, grey, never red) |
+| K8 | **The review's correction:** err and warn notes keep INK text as well as the dot | **written** | §5. Put back to grey, it fails 1 |
+| K9 | **Namespace, don't paste.** b.css and viz.css are not imported, and `.cap` stays a grey Karla sentence | **written** | §1 and §5. A `.cap` in mono capitals fails 2 |
+| K10 | Collapsed borders + a sticky first column lost every other row rule on #hr-roster at 1440 (122.95px rows); the old skin's zebra stripes had hidden it. Under the skin tables use `border-collapse:separate; border-spacing:0` | **written** | §5. Collapsed again, it fails 1 |
+| K11 | The dominance bar keeps its labels INSIDE the segments (rule 1: the leader's share is printed nowhere else), in paper or ink per fill, named per class because the old dark rules name them at (0,4,0). This deviates from the plan's "labels move into .domb-keys" | **written** | §5 measures all 12 fills (six channels, six neutral slots) at ≥ 4.5:1. Bolt, Hotel and FMS given paper text fail 1 (3.38–3.42:1) |
+| K12 | A verdict cell's dot is a background layer, so it moves no digit and takes no pseudo-element (phone cards use `::before` for the label). The first cut lost it on every EVEN card at 390px: app.css clears those with a `background:none` shorthand at (0,3,4) | **written** | §6 renders a 4-row card table at 390px. Without the row-path selector, it fails 1 |
+| K13 | #freshness writes "N sources need attention" with an INLINE `color:var(--warn)`, which is red words and no glyph under the skin. arkiv.css outranks it (one of the file's two `!important`s — only that beats an inline style) and gives it a hollow dot | **written** | §5 with a stubbed `/api/status`. Removed, it fails 1 |
+| K13b | #unit's car map bleeds into the card padding with an INLINE `margin:0 -18px` (economics.js). A ruled panel has no padding, so under the skin the map stuck out 18px on each side: render-audit reported `panel mapwrap +18px` at 1500, 1180 and 820, under the skin only. The other `!important` cancels that one declaration | **written** | §6 runs render-audit's overflow check on #unit (mock). Removed, it fails 1. render-audit `SKIN=arkiv ONLY=unit` against production data: 0 findings |
+| K14 | `class="btn sec"` on #settings also matches `.sec`, the mono section label, whose `margin:6px 0 -6px` drops the button 6px. The old skin keeps that. Under the skin a button is a button | **written** | screenshot `settings-1440-arkiv.png` |
+| K15 | **Both skins, a caption that named a colour.** #sources said a dead source wore "the same amber" as a working one. The Status column draws every non-ok run as `tag bad`: crimson in the old skin, a solid negative dot in Arkiv, and never amber. It now says "the same "partial"", which is true in both | **written** | visible text change on #sources, both skins |
+| K16 | `bin/render-audit.mjs` takes `SKIN=arkiv` | **written** | used below |
+| K17 | **Found wrong in STEP 0:** `test/payout_page_reconcile.test.mjs` §3 had timed out on every run since 25734ca (a probe racing the shell's first render; see Tests below). The test now waits for the shell's render to begin | **written** | unchanged test: fails at 25734ca ×2 and at HEAD; passes at e98d5f4 ×2. Fixed test: 55/55, three runs |
+
+**Measurements.**
+
+- *The old skin did not move.* #overview, #drivers, #settings and #payouts,
+  at 1440 and 390, light and dark, on the desktop and the phone builds: 24
+  shots from HEAD (`d00202f`, `git archive`, :8101) and 24 from the working
+  tree (live-ui :8100). The data came from STEP 0's recorded fixture, with the
+  clock frozen, sticky elements pinned and the caret hidden. 22 of 24 are
+  byte-identical. `payouts-desk-1440-light` is identical to a second HEAD run.
+  `drivers-phone-390` differs from HEAD by 15 pixels of at most one level in
+  one text row, the phone header. The same row differs by the same amount
+  between two runs of the working tree in light, so this is the noise STEP 0
+  recorded there. Harness in scratchpad `reskin/step1/pixel/`.
+- *Screenshots*, on live-ui against production data, `?ui=desktop`, with a
+  fresh profile per skin: #overview, #drivers, #payouts, #settings, #feeds and
+  #hr-roster at 1440 and 390, with and without `?skin=arkiv` (24, in scratchpad
+  `reskin/step1/shots/final/`). Under the skin no page scrolls sideways at
+  either width. The old skin's #settings is 2px wider than a 390 window, and
+  that was already so. Also shot under the skin: the range panel open, a
+  driver page (identity card, tabs, live status), #sources, and the phone
+  build (`states1/`).
+- *render-audit* (`SKIN=arkiv`, and without, on 12 routes at 1500/1180/820,
+  production data). Under the skin the only new finding was the #unit map
+  bleed (K13b), and it is fixed. The old skin has three findings the skin
+  does not: #drivers' body is 83px wider than a 1180 window (also on
+  production bytes, where it is 94px at 820), #overview has a panel +7px at
+  1180, and #finance clips "AED 4,832.05" at 820. Those three are outside
+  STEP 1, which moves no pixel of the old skin.
+
+**Tests.** New: `test/arkiv_skin.test.mjs`, 86 checks (static, and browser on
+the mock). Extended: `type_scale` scans arkiv.css (11). `tokens` lets
+arkiv.css use `--ink-2` and resolves its `var()`s (83). Green file by file:
+tokens, type_scale, arkiv_skin, today_band 38, routes 65, nav_sections 17,
+phone 141, assets 40, query_params 12, calendar_window 82,
+auth_banner_pending_ui 18, credential_errand 23, settings_page_layout 20.
+Full suite, run once with `npm test` (browser suites on a private mock at :18199): 312 files, 10,034 assertions, 311 green. The one failure was `payout_page_reconcile`, §3, which timed out waiting for the live-ask panel. **It was broken by STEP 0, not by this step.** It passed at e98d5f4 twice, timed out at 25734ca twice, and timed out at HEAD d00202f. The cause is a test race: the shell's first `render()` now lands after the probe paints, the probe's generation goes stale, and payouts.js's `alive(gen)` drops the answer. See COVERAGE.md traps. The test now waits for `#nav a` before rendering its probe, and has passed 55/55 three runs out of three. The product was never affected.
+
+**Revert proofs** (each mutation applied, the test run, the file restored from
+a copy, and the md5 checked): no `document.write` → 46 fail · the link
+before app.css → 7 (the old dark `--surface` shows through) · `appendChild` →
+4 (`non-blocking`) · a hex → 1 · an unscoped rule → 1 · `--warn` not
+re-pointed → 5 (amber #7d5b05 / #d0a553) · no `color-scheme:light` → 3 ·
+the warning dot solid → 6 · toned digits left coloured → 1 · warn/err notes
+grey → 1 · `.cap` in mono capitals → 2 · the `.pill.bad` dot not drawn → 1 ·
+collapsed borders → 1 · paper text on Bolt/Hotel/FMS → 1 · the verdict dot
+without the row path → 1 (phone cards) · #freshness not outranked → 1 · the
+#unit bleed not cancelled → 1 · a module reading `dataset.skin` → 1 ·
+`#fRangeLabel` dropped → 1 · `/arkiv.css` off `SHELL_FILES` → 1 · arkiv.css
+out of type_scale's token use → 1 (`--d6`) · a literal font-size in
+arkiv.css → 1 (type_scale) · `var(--ink-3)` in arkiv.css → 1 (tokens). Two
+mutations proved nothing, and are recorded as such. Removing `.pill.bad::after`
+from the solid group only left the base rule painting it solid. Removing
+arkiv.css from type_scale's literal-size scan with no literal present changes
+nothing. Each was replaced by the one above that does fail.
+
+### NOT DONE in STEP 1, and named
+
+- **No dark Arkiv values** (ruling 3). Under the skin the page is light in
+  every theme state (`color-scheme:light`, every old dark value outranked). The
+  theme button still cycles and still changes the old skin; under Arkiv it
+  changes nothing visible. The dark set — neutrals, channels, washes, ramps,
+  semantics, hatch — and its contrast and CVD runs are their own step, before
+  the flip.
+- **The shell's structure** (masthead, section row, view row, sticky control
+  bar with the `.applies` sentence, livebar grid with its scope caption and
+  note row, authbar grid with swatch/surface/as-of) is STEP 4. STEP 1 only
+  restyles the existing rail, topbar, banner and strip.
+- **Charts** (colour by name, marks, the outline/hatch swap with its captions,
+  donut as bars, graphite heatmap, the hbars track) are STEP 2. Until then
+  the charts repaint only through the re-pointed tokens: `--b400` bars are
+  graphite, and the categorical `--s*` series are neutral steps. So under the
+  skin an 8-slice donut has two identical slices (s2/s5), and the live map's
+  pins are shades of grey. Both are replaced caller by caller in STEP 2.
+- `.pill.plat` is neutral: `chanChip(key)` needs the channel key (page work).
+- The Fraunces → Plex Mono preload swap and the theme-color metas and
+  manifest are both-skin changes, so they wait for the flip.
+- The phone repaints through the tokens only. Its figures are still Fraunces
+  (m.css `.m-stat`/`.m-lede`), and its m.css pass is STEP 5.

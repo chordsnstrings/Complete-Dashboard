@@ -124,7 +124,10 @@ const oldNames = (s) => [...stripComments(s).matchAll(/[\w$-]*\bink-3\b|var\(\s*
 /* Where --ink-2 may legitimately appear: the generated block (Arkiv's
    emphasis) and tokens.js. A module or stylesheet that MEANS Arkiv emphasis
    belongs to the skin; add it here, with a reason, when one exists. */
-const INK2_ALLOWED = new Set(['tokens.js']);
+/* arkiv.css is the skin itself: every rule in it sits under
+   :root[data-skin="arkiv"], where --ink-2 IS Arkiv's near-black emphasis, and
+   test/arkiv_skin.test.mjs fails any rule of it that is not so scoped. */
+const INK2_ALLOWED = new Set(['tokens.js', 'arkiv.css']);
 const offenders = [];
 for (const [f, s] of SRC) {
   if (INK2_ALLOWED.has(f)) continue;
@@ -161,13 +164,17 @@ for (const cls of ['domb-seg', 'sw'])
     check(`.${cls}.ch-${k} fills with var(--c-${k})`, app.includes(`.${cls}.ch-${k}{background:var(--c-${k})}`));
 
 console.log('\n6 · no custom property is asked for and declared nowhere');
-const cssAll = stripComments(app) + '\n' + stripComments(mcss);
+/* arkiv.css too, since STEP 1: it declares names of its own (--gut, --sans,
+   --disp) and asks for dozens, and a name it asks for that nobody declares
+   fails silently exactly as the money form's did. */
+const acss = read('arkiv.css');
+const cssAll = stripComments(app) + '\n' + stripComments(mcss) + '\n' + stripComments(acss);
 const jsAll = [...SRC].filter(([f]) => !f.endsWith('.css')).map(([, s]) => s).join('\n');
 const declared = new Set([...(cssAll + '\n' + jsAll).matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((m) => m[1]));
 for (const m of jsAll.matchAll(/setProperty\(\s*['"](--[a-z0-9-]+)/gi)) declared.add(m[1]);
 const asked = new Map();
 const note = (name, where) => { if (!asked.has(name)) asked.set(name, new Set()); asked.get(name).add(where); };
-for (const [f, s] of [['app.css', stripComments(app)], ['m/m.css', stripComments(mcss)]])
+for (const [f, s] of [['app.css', stripComments(app)], ['m/m.css', stripComments(mcss)], ['arkiv.css', stripComments(acss)]])
   for (const m of s.matchAll(/var\(\s*(--[a-z0-9-]+)(?!\$\{)/gi)) note(m[1], f);
 for (const [f, s] of SRC) {
   if (f.endsWith('.css')) continue;

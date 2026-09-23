@@ -1,0 +1,803 @@
+/* ============================================================================
+   Arkiv — the new skin, behind a switch
+   ----------------------------------------------------------------------------
+   STEP 1 of docs/UI-REDESIGN-PLAN.md §3. Loaded AFTER app.css, and only when
+   the reader has asked for it: ?skin=arkiv stores the choice in localStorage
+   ('fleet.skin') and the pre-paint script in index.html stamps
+   <html data-skin="arkiv"> and writes this <link> directly after app.css,
+   before the first paint. ?skin=classic stores the old skin explicitly and
+   ?skin=auto forgets the choice. Production's default is the old skin until
+   the operator flips it (STEP 5); a page on the old skin never requests this
+   file (the phone's service worker precaches it once, with the rest of the
+   shell, so a phone that is switched over still has it offline).
+
+   WHAT IS HERE, AND WHAT IS NOT
+     · the token values: every name the old skin paints with (--surface*,
+       --rule*, --accent*, the severity set, --s1..--s8, --b100..--b700, the
+       radii and the shadows) re-pointed onto the Arkiv tokens that
+       bin/gen-tokens-css.mjs already writes into app.css under the same
+       attribute. The Arkiv VALUES live in api/public/tokens.js and nowhere
+       else (SPEC L5.1), so THIS FILE CARRIES NO HEX, NO rgb()/rgba() AND NO
+       NAMED COLOUR — test/arkiv_skin.test.mjs fails on one;
+     · the typography: IBM Plex Mono for labels, controls and table figures,
+       Karla for prose, names, titles and tile values, Fraunces on the
+       wordmark and nowhere else. Every size is a step of the one scale in
+       app.css, including the one new display step, --d6, for the hero tile;
+     · a restyle of every shared component, IN PLACE: no DOM changes, no class
+       added by script, no module reads the skin. The same markup renders
+       under both skins, which is what lets the operator compare them on
+       production and what lets every test that finds a class keep finding it.
+
+   NAMESPACE, DON'T PASTE. The mockups' b.css and viz.css were NOT imported.
+   Their class names collide with live ones — .cap (332 caption paragraphs
+   here, 9.5px mono caps there), .num, .lab, .sub, .sec, .tag, .chip, .sw,
+   .dl, .ledger, .wrap, .band, .basis, .table — and a verbatim import would
+   have set hundreds of sentences in tracked mono capitals. So the live
+   classes are restyled here, by hand, to the mockups' measurements; the new
+   Arkiv-only components (glance, absence band, livebar grid, authbar grid)
+   arrive with their own names in later steps.
+
+   EVERY RULE IS SCOPED to :root[data-skin="arkiv"]. That prefix is (0,2,0),
+   the same weight as the old dark-theme blocks, so a rule here beats the
+   app.css rule it restyles without a single !important, and it is inert if
+   this file were ever loaded without the attribute.
+
+   ONE WARNING RULE (the operator's ruling 1, 2026-09-23). There is no amber.
+   Negative red with a HOLLOW dot is a warning; a SOLID dot is critical; a
+   solid green dot is good. Text stays ink — a bare coloured word gives a
+   deuteranope nothing, and the dot is the glyph that carries the tone. The
+   dots below are the one implementation of that rule, used by tiles, pills,
+   tags, chips, notes, the verdict band, the banner and table verdict cells.
+
+   DARK MODE is not in this step. There is no validated Arkiv-dark set yet
+   (ruling 3 asks for one, with the contrast and CVD runs PALETTE-EVIDENCE.md
+   did for light), and two colour laws must never mix on one page. So under
+   this skin the page is light in every theme state, and says so to the
+   browser with color-scheme:light, until the dark set lands.
+   ========================================================================== */
+
+/* ── 1 · the tokens ─────────────────────────────────────────────────────────
+   The old skin's names, each pointed at the Arkiv token that does the same
+   job. The old DARK blocks declare most of these names too, at the same
+   specificity; this block comes later in the cascade, so the old dark values
+   cannot show through the new skin in any theme. */
+:root[data-skin="arkiv"]{
+  color-scheme:light;
+
+  /* Panels stop being cards: the surface IS the paper. */
+  --surface:var(--paper);
+  --surface-2:var(--paper-2);      /* hover row, skeleton, sunken ground */
+  --surface-3:var(--faint);
+  --rule:var(--hair);              /* row separators and column rules */
+  --rule-strong:var(--grey-2);     /* rules and outlines ONLY — 2.90:1, never text */
+
+  /* THE ACCENT IS RETIRED. #2f6f9f sat beside Uber's #2362D3, and under L1
+     every non-semantic hue names a channel, so a blue link would read as
+     "Uber". Links, the focus ring, the current tab and the primary button all
+     move to ink. */
+  --accent:var(--ink);
+  --accent-ink:var(--ink-2);
+  --accent-soft:var(--faint);      /* a selected or hovered ground */
+  --accent-line:var(--grey-2);     /* a link's underline */
+  --on-accent:var(--paper);
+  --ink-inv:var(--ink);
+  --ink-1:var(--ink);
+  --fg:var(--ink);
+
+  /* Severity. Four steps become the two semantics; how bad is carried by
+     FORM (a hollow or a solid dot, a weight), not by a third hue. */
+  --good:var(--sem-pos);
+  --warn:var(--sem-neg);
+  --serious:var(--sem-neg);
+  --critical:var(--sem-neg);
+  --good-bg:var(--w-pos);
+  --warn-bg:var(--w-ink);          /* a warning's ground is neutral; its dot is red */
+  --serious-bg:var(--w-neg);
+  --critical-bg:var(--w-neg);
+
+  /* THE CATEGORICAL PALETTE, UNTIL STEP 2 CONVERTS ITS CALLERS. L1 forbids
+     cycling hues by index: a hue names a channel. The plan first said CAT
+     resolves to ink; the review showed that paints every segment of a donut
+     or a stacked bar the same ink, and the adopted correction is DISTINCT
+     NEUTRAL STEPS until each caller asks channelOf(name) instead.
+
+     Chosen against the pairs the callers actually put side by side, in
+     OKLab lightness ×100 as tokens.js oklch() measures it: s1..s8 are
+     20 / 76 / 64 / 32 / 76 / 43 / 68 / 54, so every adjacent CAT slot is at
+     least 12 apart; the map's passenger-aboard (s3, 64) sits far from
+     running-empty (s1, 20) and apart from --b300 (54) and parked (s5, 76); a
+     driver's online (s1) against on-a-job (s3); forecast's s3 and s5 against
+     its fitted --b500 (43); the payout bars' "added" (--b400, 43) against
+     "deducted" (s2, 76); retention's s1 / s4 / s2. Eight slots on one
+     achromatic axis cannot all differ, so s2 and s5 share a step — three
+     slots apart, never adjacent. */
+  --s1:var(--seq-5);
+  --s2:var(--seq-0);
+  --s3:var(--seq-1);
+  --s4:var(--seq-4);
+  --s5:var(--seq-0);
+  --s6:var(--seq-3);
+  --s7:var(--grey-2);
+  --s8:var(--grey);
+
+  /* The blue single-hue ramp becomes graphite, step for step as tokens.js
+     sequentialOf(i/6) picks it (so --b400, the default bar, is --seq-3, and
+     --b400/--b500 share a step, as sequentialOf says they do). */
+  --b100:var(--seq-0);
+  --b200:var(--seq-1);
+  --b300:var(--seq-2);
+  --b400:var(--seq-3);
+  --b500:var(--seq-3);
+  --b600:var(--seq-4);
+  --b700:var(--seq-5);
+
+  /* Geometry. No panel, no shadow, no rounded corner on the sheet. Marks keep
+     their own 4px data-end, chips 3px and swatches 2px — set where they are. */
+  --r:0px;
+  --r-sm:0px;
+  --r-lg:0px;
+  --shadow-1:none;
+  --shadow-2:none;
+
+  /* The two faces b.css names, and the distance from every column rule to its
+     text. 20px rather than the mockups' 24: the rail is still here until
+     STEP 4 moves it into the section row, so the sheet is 236px narrower. */
+  --sans:"Karla","Helvetica Neue",system-ui,sans-serif;
+  --disp:"Fraunces","Iowan Old Style",Georgia,serif;
+  --gut:20px;
+
+  /* The 390px overflow fix NEW-PAGES §6 says belongs in the shell. */
+  -webkit-text-size-adjust:100%;
+  text-size-adjust:100%;
+}
+
+/* ── 2 · type ───────────────────────────────────────────────────────────────
+   Karla for prose, names and the page title; Plex Mono for every label and
+   control; Fraunces only on the wordmark. The body steps down from --t7 to
+   --t6, Arkiv's 13px sheet. Desktop only: the phone sets its own body size
+   in m.css (--t8), and its pass is STEP 5. */
+:root[data-skin="arkiv"][data-ui="desktop"] body{font-size:var(--t6);line-height:1.54}
+:root[data-skin="arkiv"] body{font-family:var(--sans)}
+:root[data-skin="arkiv"] h1,:root[data-skin="arkiv"] h2,
+:root[data-skin="arkiv"] h3,:root[data-skin="arkiv"] h4{font-family:var(--sans);letter-spacing:-.01em}
+:root[data-skin="arkiv"] .mono,:root[data-skin="arkiv"] code{font-family:var(--mono)}
+
+/* ── 3 · the shell: rail, title, controls ───────────────────────────────────
+   Restyled where it stands. STEP 4 moves the rail into a section row and the
+   controls into a sticky bar; this step only gives the existing pieces the
+   Arkiv form, so every id and every position the tests know is unchanged. */
+:root[data-skin="arkiv"] .side{background:var(--paper);border-right:1px solid var(--hair)}
+/* The wordmark. "Fleet" in Fraunces — the only serif on the page — and the
+   rest of the brand line as the masthead's tracked mono label. The pulsing
+   dot was decoration in the accent; the live dot belongs to the today strip. */
+:root[data-skin="arkiv"] .brand{font-family:var(--mono);font-size:var(--t1);font-weight:500;
+  letter-spacing:.2em;text-transform:uppercase;color:var(--grey);align-items:baseline;gap:10px;flex-wrap:wrap}
+:root[data-skin="arkiv"] .brand b{font-family:var(--disp);font-size:var(--d2);font-weight:600;
+  letter-spacing:-.014em;text-transform:none;color:var(--ink);line-height:1}
+:root[data-skin="arkiv"] .brand .dot{display:none}
+
+/* The sections. Mono capitals, grey; the current one in ink and weight with a
+   2px ink rule at its edge. The icons are HIDDEN, not removed — renderNav
+   still emits them and routes.test pins the rule that styles them. */
+:root[data-skin="arkiv"] #nav a{font-family:var(--mono);font-size:var(--t3);letter-spacing:.14em;
+  text-transform:uppercase;color:var(--grey);border-radius:0;transition:none}
+:root[data-skin="arkiv"] #nav a .ic{display:none}
+:root[data-skin="arkiv"] #nav a:hover{background:none;color:var(--ink);transform:none}
+:root[data-skin="arkiv"] #nav a.on{background:none;box-shadow:none;color:var(--ink);font-weight:600}
+:root[data-skin="arkiv"] #nav a.on::before{top:0;left:-4px;width:2px;height:100%;transform:none;
+  border-radius:0;background:var(--ink);animation:none}
+:root[data-skin="arkiv"] .side-foot{border-top-color:var(--hair)}
+:root[data-skin="arkiv"] #themeBtn{font-family:var(--mono);font-size:var(--t3);letter-spacing:.06em;
+  background:var(--paper);border:1px solid var(--grey-2);border-radius:0;color:var(--ink)}
+:root[data-skin="arkiv"] #themeBtn:hover{background:var(--paper);border-color:var(--ink)}
+:root[data-skin="arkiv"] #themeBtn:active{transform:none}
+:root[data-skin="arkiv"] a.fresh:hover{background:none;color:var(--ink)}
+/* freshness() writes "N sources need attention" with an INLINE colour of
+   --warn, so under this skin it would print red words with no glyph (L3). The
+   plan's answer is a negative dot and ink text (STEP 4 rewrites the markup);
+   until then the inline colour is outranked here, and the dot is hollow
+   because "needs attention" is a warning, not a stop. */
+:root[data-skin="arkiv"] #freshness span[style*="--warn"]{color:var(--ink) !important}
+
+/* The title block (#crumb, #viewTitle, #viewSub) is kept: setHeader, the
+   crumb's drill-back path and render-audit's wrong-title check need it. */
+:root[data-skin="arkiv"] .topbar{background:var(--paper);border-bottom:1px solid var(--ink)}
+:root[data-skin="arkiv"] .topbar h1{font-family:var(--sans);font-size:var(--d3);font-weight:600;
+  letter-spacing:-.015em;animation:none}
+:root[data-skin="arkiv"] .topbar .sub{font-size:var(--t6);color:var(--grey);animation:none}
+:root[data-skin="arkiv"] .crumb{font-size:var(--t2);letter-spacing:.14em}
+:root[data-skin="arkiv"] .crumb a{color:var(--grey)}
+:root[data-skin="arkiv"] .crumb a:hover{color:var(--ink)}
+/* The separator was --rule-strong, which is grey-2 here: 2.90:1 as text. */
+:root[data-skin="arkiv"] .crumb span{color:var(--grey)}
+:root[data-skin="arkiv"] .crumb b{color:var(--ink-2);font-weight:600;font-size:var(--t3)}
+
+/* The controls: square, mono, a grey-2 outline that firms to ink, and a 2px
+   ink focus ring. The same rule serves the page-level .filters rows
+   (#hr-roster builds one). */
+:root[data-skin="arkiv"] .filters select,:root[data-skin="arkiv"] .filters button{
+  font-family:var(--mono);font-size:var(--t4);letter-spacing:.04em;line-height:1.5;
+  color:var(--ink);background:var(--paper);border:1px solid var(--grey-2);border-radius:0;
+  padding:5px 10px;transition:none}
+:root[data-skin="arkiv"] .filters select:hover,:root[data-skin="arkiv"] .filters button:hover{
+  border-color:var(--ink);background:var(--paper)}
+:root[data-skin="arkiv"] .filters select:focus-visible,:root[data-skin="arkiv"] .filters button:focus-visible{
+  outline:2px solid var(--ink);outline-offset:1px;border-color:var(--ink);box-shadow:none}
+:root[data-skin="arkiv"] #fRange .caret{color:var(--grey)}
+:root[data-skin="arkiv"] #fRange[aria-expanded="true"]{border-color:var(--ink);background:var(--paper-2)}
+/* A pressed control is an ink fill, the one "selected" form this skin has. */
+:root[data-skin="arkiv"] #zenBtn[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+:root[data-skin="arkiv"] .tz-note{font-family:var(--mono);font-size:var(--t2);letter-spacing:.12em;
+  text-transform:uppercase;color:var(--grey)}
+
+/* ── the range panel ──────────────────────────────────────────────────────
+   daterange.js's DOM is unchanged; this is b.css's .rp drawn on it: square,
+   an ink border, a flat offset shadow, mono chips that fill with ink when
+   chosen. Colours, borders and faces only — the phone opens the same panel as
+   a bottom sheet and m.css sizes its tap targets, which this must not undo. */
+:root[data-skin="arkiv"] .rangepanel{background:var(--paper);border:1px solid var(--ink);border-radius:0;
+  box-shadow:6px 6px 0 var(--faint);animation:none}
+:root[data-skin="arkiv"] .rp-sec{font-family:var(--mono);font-weight:500;letter-spacing:.16em;color:var(--grey)}
+:root[data-skin="arkiv"] .rangepanel button{font-family:var(--mono);color:var(--ink);background:var(--paper);
+  border:1px solid var(--grey-2);border-radius:0;transition:none}
+:root[data-skin="arkiv"] .rangepanel button:hover:not(:disabled){border-color:var(--ink);background:var(--paper)}
+:root[data-skin="arkiv"] .rangepanel button:focus-visible{outline:2px solid var(--ink);outline-offset:1px;box-shadow:none}
+/* Shown and visibly not a choice. Faded by opacity, it fell to about 1.9:1;
+   grey text on the sunken ground stays readable and still reads as off. */
+:root[data-skin="arkiv"] .rangepanel button:disabled{opacity:1;color:var(--grey);background:var(--paper-2);
+  border-color:var(--faint)}
+:root[data-skin="arkiv"] .rp-chip.on,:root[data-skin="arkiv"] .rp-m.on{background:var(--ink);
+  border-color:var(--ink);color:var(--paper)}
+/* A month before the fleet's first row: offered, and marked as empty. */
+:root[data-skin="arkiv"] .rp-m.empty:not(.on){color:var(--grey);border-style:solid;border-color:var(--hair)}
+:root[data-skin="arkiv"] .rp-year b{font-family:var(--mono);letter-spacing:.06em}
+:root[data-skin="arkiv"] .rp-dates input{font-family:var(--mono);background:var(--paper);
+  border:1px solid var(--grey-2);border-radius:0}
+:root[data-skin="arkiv"] .rp-dates input:focus-visible{outline:2px solid var(--ink);outline-offset:1px;
+  border-color:var(--ink);box-shadow:none}
+:root[data-skin="arkiv"] .rangepanel .rp-apply{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+:root[data-skin="arkiv"] .rangepanel .rp-apply:hover:not(:disabled){background:var(--ink-2);border-color:var(--ink-2)}
+:root[data-skin="arkiv"] .rp-err{color:var(--ink)}
+:root[data-skin="arkiv"] .rp-now{border-top-color:var(--hair);color:var(--grey)}
+
+/* ── the two tab bars ─────────────────────────────────────────────────────
+   The folder tabs become the mockups' view row: text links, the current one
+   in ink and weight over a 1px ink underline. The routes, hrefs and the
+   lit-tab logic are app.js's and untouched; the icons are hidden. */
+:root[data-skin="arkiv"] .tabs{border-bottom:1px solid var(--hair);gap:0 22px}
+:root[data-skin="arkiv"] .tabs a{padding:8px 0 7px;top:0;font-family:var(--sans);font-size:var(--t5);
+  font-weight:400;color:var(--grey);background:none;border:0;border-radius:0;transition:none}
+:root[data-skin="arkiv"] .tabs a .ic{display:none}
+:root[data-skin="arkiv"] .tabs a:hover{color:var(--ink);background:none}
+:root[data-skin="arkiv"] .tabs a:active{transform:none}
+:root[data-skin="arkiv"] .tabs a.on{color:var(--ink);font-weight:600;background:none;border:0}
+:root[data-skin="arkiv"] .tabs a.on::after{inset:auto 0 -1px 0;height:1px;border-radius:0;
+  background:var(--ink);animation:none}
+:root[data-skin="arkiv"] .sectabs{background:var(--paper);border-bottom:1px solid var(--hair)}
+:root[data-skin="arkiv"] .sectabs .tabs{gap:0 22px}
+:root[data-skin="arkiv"] .sectabs .tabs a{padding:9px 0 8px;font-size:var(--t5)}
+:root[data-skin="arkiv"] .sectabs .tabs a.on::after{inset:auto 0 0 0;height:1px}
+
+/* ── the credential banner ────────────────────────────────────────────────
+   authbar.css's forms on the live banner's DOM (the four-column row, the
+   channel swatch, the surface and the as-of line are STEP 4). The severity
+   model, the errand sentences and the classes are app.js's and unchanged.
+     stopped    the negative wash, a 3px negative rule, a SOLID dot
+     at-risk    paper, a 3px negative rule, a HOLLOW dot (ruling 1)
+     degraded / pending   the sunken ground, a grey-2 rule, a grey dot —
+                never red: nothing is being lost
+   Every word is ink: 15.27:1 on the negative wash. */
+:root[data-skin="arkiv"] .authbanner{margin:0;padding:11px clamp(18px,3vw,36px) 12px;gap:12px;
+  border:0;border-top:3px solid var(--sem-neg);border-bottom:1px solid var(--ink);border-radius:0;
+  background:var(--paper);color:var(--ink);font-size:var(--t5);line-height:1.45;animation:none}
+:root[data-skin="arkiv"] .authbanner.stopped{background:var(--w-neg);border-color:var(--sem-neg);
+  border-bottom-color:var(--ink);color:var(--ink)}
+:root[data-skin="arkiv"] .authbanner.at-risk{background:var(--paper);border-color:var(--sem-neg);
+  border-bottom-color:var(--ink);color:var(--ink)}
+:root[data-skin="arkiv"] .authbanner.degraded,:root[data-skin="arkiv"] .authbanner.pending{
+  background:var(--paper-2);border-color:var(--grey-2);border-bottom-color:var(--ink);color:var(--ink)}
+:root[data-skin="arkiv"] .authbanner .ab-dot{width:9px;height:9px;margin-top:5px;box-sizing:border-box}
+:root[data-skin="arkiv"] .authbanner.stopped .ab-dot{background:var(--sem-neg);border:0}
+:root[data-skin="arkiv"] .authbanner.at-risk .ab-dot{background:none;border:1.5px solid var(--sem-neg)}
+:root[data-skin="arkiv"] .authbanner.degraded .ab-dot,
+:root[data-skin="arkiv"] .authbanner.pending .ab-dot{background:var(--grey);border:0}
+:root[data-skin="arkiv"] .authbanner .ab-head{font-size:var(--t6);font-weight:600;letter-spacing:0;color:var(--ink)}
+:root[data-skin="arkiv"] .authbanner .ab-detail{color:var(--ink-2);opacity:1}
+:root[data-skin="arkiv"] .authbanner .ab-list li strong{color:var(--ink);font-weight:600}
+:root[data-skin="arkiv"] .authbanner code{font-family:var(--mono);font-size:var(--t4);letter-spacing:.02em;
+  padding:0;background:none;color:var(--ink)}
+:root[data-skin="arkiv"] .authbanner .ab-when{font-family:var(--mono);font-size:var(--t3);color:var(--ink-2);opacity:1}
+
+/* ── the today strip ──────────────────────────────────────────────────────
+   Chrome, not a card: a strip under the controls with an ink rule beneath it.
+   Each figure is a cell — the value in Karla, its label in mono capitals, a
+   hairline between cells. The dot is ink and pulses on opacity only: under
+   L3 a green "live" dot would mean better. The data, the host element and
+   the .tn-now / .tn-dot / .tn-f classes today_band pins are unchanged; the
+   scope caption and the note row are STEP 4. */
+:root[data-skin="arkiv"] .todaynow{margin:0;padding:9px clamp(18px,3vw,36px) 10px;gap:6px 0;
+  background:var(--paper);border:0;border-bottom:1px solid var(--ink);border-radius:0;font-size:var(--t5)}
+:root[data-skin="arkiv"] .todaynow .tn-now{font-size:var(--t5);margin-right:14px}
+:root[data-skin="arkiv"] .todaynow .tn-dot{background:var(--ink)}
+:root[data-skin="arkiv"] .todaynow .tn-f{font-family:var(--mono);font-size:var(--t2);font-weight:600;
+  letter-spacing:.07em;text-transform:uppercase;color:var(--grey);padding:0 10px;border-left:1px solid var(--faint)}
+:root[data-skin="arkiv"] .todaynow .tn-f b{font-family:var(--sans);font-size:var(--t8);font-weight:600;
+  letter-spacing:-.012em;text-transform:none;color:var(--ink);margin-right:6px;font-variant-numeric:proportional-nums}
+:root[data-skin="arkiv"] .todaynow .tn-sub{font-family:var(--sans);font-size:var(--t3);font-weight:400;
+  letter-spacing:0;text-transform:none;color:var(--grey)}
+:root[data-skin="arkiv"] .todaynow .tn-quiet{color:var(--ink-2)}
+:root[data-skin="arkiv"] .todaynow .tn-links a{font-family:var(--mono);font-size:var(--t3);font-weight:400;
+  letter-spacing:.06em;color:var(--ink-2);text-decoration:none;border-bottom:1px solid var(--grey-2)}
+:root[data-skin="arkiv"] .todaynow .tn-links a:hover{border-bottom-color:var(--ink);text-decoration:none}
+
+/* ── 4 · panels and grids ───────────────────────────────────────────────────
+   panel() is unchanged — the .pbody body and the data-panel keys. The card
+   (surface, border, radius, shadow) becomes a RULED SECTION: no box, a 1.5px
+   ink rule across the top, and the title set as the mockups' section name,
+   mono capitals with a number printed by a CSS counter. The number is
+   generated content, so `.panel h3` textContent — which a dozen tests read —
+   is exactly the title it always was. Direct children only: a heading INSIDE
+   a panel body (the cohort cards' names) is a name, not a section. */
+:root[data-skin="arkiv"] body,:root[data-skin="arkiv"] #view,
+:root[data-skin="arkiv"] .modal-body{counter-reset:arkiv-sec}
+:root[data-skin="arkiv"] .panel{background:none;border:0;border-top:1.5px solid var(--ink);border-radius:0;
+  box-shadow:none;padding:8px 0 0;transition:none}
+:root[data-skin="arkiv"] .panel:hover{box-shadow:none;border-top-color:var(--ink)}
+:root[data-skin="arkiv"] .panel>h3{font-family:var(--mono);font-size:var(--t3);font-weight:600;
+  letter-spacing:.22em;text-transform:uppercase;color:var(--ink);line-height:1.5}
+:root[data-skin="arkiv"] .panel>h3::before{counter-increment:arkiv-sec;
+  content:counter(arkiv-sec,decimal-leading-zero);font-weight:500;letter-spacing:.1em;
+  color:var(--grey);margin-right:12px}
+/* The caption stays a grey SENTENCE at reading size — never mono caps. Its
+   colour needs no rule: --grey-strong is folded onto --grey by the bridge. */
+:root[data-skin="arkiv"] .panel>.cap{margin:4px 0 14px}
+:root[data-skin="arkiv"] .panel>h3+.pbody{margin-top:14px}
+:root[data-skin="arkiv"] .cohort-head h3{font-family:var(--sans);letter-spacing:-.005em}
+
+/* The side-by-side grids trade their 18px gutters for hairline column rules,
+   the mockups' four-column measure. The row gap stays, and below 1080px,
+   where the grids go to one column, so do the rules. */
+:root[data-skin="arkiv"] .grid.g2,:root[data-skin="arkiv"] .grid.g3,
+:root[data-skin="arkiv"] .grid.g23{column-gap:0}
+:root[data-skin="arkiv"] .grid.g2>*,:root[data-skin="arkiv"] .grid.g23>*{padding-right:var(--gut)}
+:root[data-skin="arkiv"] .grid.g2>:nth-child(2n),:root[data-skin="arkiv"] .grid.g23>:nth-child(2n){
+  padding-right:0;padding-left:var(--gut);border-left:1px solid var(--hair)}
+:root[data-skin="arkiv"] .grid.g3>*{padding-left:var(--gut);padding-right:var(--gut);border-left:1px solid var(--hair)}
+:root[data-skin="arkiv"] .grid.g3>:nth-child(3n+1){padding-left:0;border-left:0}
+:root[data-skin="arkiv"] .grid.g3>:nth-child(3n){padding-right:0}
+@media(max-width:1080px){
+  :root[data-skin="arkiv"] .grid.g2>*,:root[data-skin="arkiv"] .grid.g23>*,
+  :root[data-skin="arkiv"] .grid.g3>*,:root[data-skin="arkiv"] .grid.g2>:nth-child(2n),
+  :root[data-skin="arkiv"] .grid.g23>:nth-child(2n){padding-left:0;padding-right:0;border-left:0}
+}
+
+/* ── 5 · KPI tiles ──────────────────────────────────────────────────────────
+   kpiRow / kpiTile are unchanged: the classes (.kpi .l .n .s, data-kpi, the
+   t-* and ok/warn/err tones), the cohort links, .long, --kpi-n. The cards
+   become the mockups' tiles: an ink rule over the row, hairline column rules
+   between tiles, a mono label, and the value in Karla with proportional
+   figures.
+
+   THE COLUMN RULES WITHOUT KNOWING WHERE A ROW STARTS. auto-fit decides the
+   column count at run time, so no nth-child can find the first tile of a
+   wrapped row. Every tile carries its left rule; the row is pulled one
+   gutter (plus the rule) to the left and clipped there, so the first column's
+   rule and padding fall outside and its text sits on the page edge. The clip
+   is open on the other three sides for focus rings and hovers.
+
+   TONES STOP COLOURING THE DIGITS (L4: digits stay ink), and the ▲/▼ that
+   .kpi.t-good printed on a LEVEL is gone — arrows are for signed deltas. The
+   tone becomes the dot in the label row, and the side rail is removed. */
+:root[data-skin="arkiv"] .kpis{--kpi-gut:var(--gut);gap:0;
+  grid-template-columns:repeat(auto-fit,minmax(max(172px,(100% - 1px) / var(--kpi-n)),1fr));
+  margin-left:calc(-1 * var(--kpi-gut) - 1px);
+  clip-path:inset(-12px -12px -12px calc(var(--kpi-gut) + 1px));
+  border-top:1px solid var(--ink);border-bottom:1px solid var(--hair)}
+:root[data-skin="arkiv"] .kpi{background:none;border:0;border-left:1px solid var(--hair);
+  border-bottom:1px solid var(--hair);margin-bottom:-1px;border-radius:0;box-shadow:none;
+  padding:12px var(--gut) 14px;transition:none}
+:root[data-skin="arkiv"] .kpi:hover{transform:none;box-shadow:none}
+:root[data-skin="arkiv"] .kpi::after{display:none}
+:root[data-skin="arkiv"] a.kpi:hover,:root[data-skin="arkiv"] a.kpi:focus-visible{background:var(--paper-2)}
+:root[data-skin="arkiv"] a.kpi:focus-visible{outline-offset:-2px}
+:root[data-skin="arkiv"] .kpi .l{font-family:var(--mono);font-size:var(--t1);font-weight:600;
+  letter-spacing:.16em;color:var(--grey);display:flex;align-items:flex-start;gap:7px}
+/* On the first line of a label that wraps, not halfway down it. */
+:root[data-skin="arkiv"] .kpi .l::before{margin-top:.35em}
+:root[data-skin="arkiv"] .kpi .n{font-family:var(--sans);font-weight:600;color:var(--ink);
+  font-size:clamp(var(--d1),14cqi,var(--d4));line-height:1.05;letter-spacing:-.018em;margin-top:9px;
+  font-variant-numeric:proportional-nums}
+:root[data-skin="arkiv"] .kpi .n.long{font-size:clamp(var(--t8),9cqi,var(--d1));line-height:1.2}
+:root[data-skin="arkiv"] .kpi .n::before{content:none}
+:root[data-skin="arkiv"] .kpi .n .pill{border-radius:3px}
+:root[data-skin="arkiv"] .kpi .s,:root[data-skin="arkiv"] .kpi .d{font-size:var(--t4);color:var(--grey);
+  line-height:1.45;margin-top:7px}
+:root[data-skin="arkiv"] .kpi .d b{color:var(--ink-2)}
+:root[data-skin="arkiv"] .kpi-who{font-size:var(--t1);letter-spacing:.14em;color:var(--ink-2);opacity:1;
+  margin-top:9px;text-decoration:underline;text-decoration-color:var(--grey-2);text-underline-offset:3px}
+:root[data-skin="arkiv"] a.kpi:hover .kpi-who,:root[data-skin="arkiv"] a.kpi:focus-visible .kpi-who{
+  transform:none;text-decoration-color:var(--ink)}
+/* THE HERO TILE, and the one new display step. SPEC's hero value is 50px;
+   the scale's top step is --d5 (39.2px), so --d6 is added to app.css's scale
+   for exactly this. STEP 3's glanceTile() emits the class; no page sets it
+   before then. */
+:root[data-skin="arkiv"] .kpi.is-hero{grid-column:span 2}
+:root[data-skin="arkiv"] .kpi.is-hero .n{font-size:var(--d6);letter-spacing:-.026em;line-height:1}
+
+/* ── 6 · tables ─────────────────────────────────────────────────────────────
+   tableFrom is unchanged — the sort buttons, the sort in the URL, the sticky
+   heading, the pinned first column, the fold, the scroll cues and the phone
+   cards. The frame itself restyles through the tokens above (--surface,
+   --rule, --r and --shadow-1 are paper, hair, 0 and none). What is left: the
+   heading in mono capitals over a 1px ink rule; no zebra stripe (the pinned
+   cell stays opaque paper, so the page cannot show through it as the table
+   scrolls under); figures in Plex Mono, tabular, so a column lines up. */
+/* SEPARATE borders, spaced at 0. In the collapsed model a row rule belongs to
+   the table and is painted beneath positioned cells, so the pinned first cell
+   (position:sticky, an opaque paper ground) covered it wherever a row's height
+   fell on a fractional pixel: on #hr-roster at 1440 every other row lost its
+   rule under the first column. The old skin's zebra stripes hid the same gap.
+   Separate, each cell owns its bottom border and paints it — the sticky
+   heading keeps its ink rule while stuck, too. No rule in either stylesheet
+   borders a <tr>, which is the one thing the separate model would drop. */
+:root[data-skin="arkiv"] table{border-collapse:separate;border-spacing:0}
+:root[data-skin="arkiv"] thead th{font-size:var(--t1);letter-spacing:.14em;color:var(--grey);
+  background:var(--paper);border-bottom:1px solid var(--ink)}
+:root[data-skin="arkiv"] thead th.sorted{color:var(--ink)}
+:root[data-skin="arkiv"] td.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+:root[data-skin="arkiv"] .tscroll table tbody tr:nth-child(even) td,
+:root[data-skin="arkiv"] .tscroll table tbody tr:nth-child(even) td:first-child{background-color:var(--paper)}
+:root[data-skin="arkiv"] .tscroll table tbody tr:hover td,
+:root[data-skin="arkiv"] .tscroll table tbody tr:hover td:first-child{background-color:var(--paper-2)}
+:root[data-skin="arkiv"] .plate{color:var(--ink-2);letter-spacing:.06em}
+/* A verdict in a table cell. It was a coloured number with a 2px rule; the
+   number is ink now and the verdict is the dot at the cell's left edge —
+   hollow for a warning, solid for critical — drawn as a background layer, so
+   it takes no pseudo-element (the phone cards spend ::before on the label)
+   and moves no digit out of its column. */
+:root[data-skin="arkiv"] td.v-good,:root[data-skin="arkiv"] td.v-warn,
+:root[data-skin="arkiv"] td.v-serious,:root[data-skin="arkiv"] td.v-critical{color:var(--ink);box-shadow:none;
+  background-repeat:no-repeat;background-position:3px 50%;background-size:9px 9px}
+/* The image rules carry the full row path: app.css clears the even rows of a
+   phone card with `.tcards .tscroll table tbody tr:nth-child(even) td
+   {background:none}`, a shorthand at (0,3,4) that would take the dot off every
+   other card — measured on #payouts at 390px before this selector grew. */
+:root[data-skin="arkiv"] td.v-good,:root[data-skin="arkiv"] .tscroll table tbody tr td.v-good{
+  background-image:radial-gradient(circle,var(--sem-pos) 0 3.6px,transparent 4.1px)}
+:root[data-skin="arkiv"] td.v-serious,:root[data-skin="arkiv"] td.v-critical,
+:root[data-skin="arkiv"] .tscroll table tbody tr td.v-serious,
+:root[data-skin="arkiv"] .tscroll table tbody tr td.v-critical{
+  background-image:radial-gradient(circle,var(--sem-neg) 0 3.6px,transparent 4.1px)}
+:root[data-skin="arkiv"] td.v-warn,:root[data-skin="arkiv"] .tscroll table tbody tr td.v-warn{
+  background-image:radial-gradient(circle,transparent 0 2.2px,var(--sem-neg) 2.6px 3.7px,transparent 4.2px)}
+:root[data-skin="arkiv"] td.v-critical{font-weight:600}
+:root[data-skin="arkiv"] .tsbox::before,:root[data-skin="arkiv"] .tsbox::after{border-radius:0}
+
+/* ── 7 · pills, tags and chips ──────────────────────────────────────────────
+   The 99px pill becomes a 3px chip in mono capitals. A tone is a wash under
+   INK text plus the dot — no semantic-coloured words (L5.6). A fact this
+   window did not measure (.dim) is drawn as the absence OUTLINE, never as a
+   pale fill, which would read as a small value. .pill.plat has no channel key
+   to paint (chanChip() arrives with the page work), so it is neutral rather
+   than wearing a hue it cannot name. */
+:root[data-skin="arkiv"] .pill,:root[data-skin="arkiv"] .tag{border-radius:3px;font-family:var(--mono);
+  font-size:var(--t2);font-weight:600;letter-spacing:.11em;text-transform:uppercase;padding:3px 7px;
+  gap:6px;line-height:1.35;background:var(--paper-2);color:var(--ink-2)}
+:root[data-skin="arkiv"] .pill.plat,:root[data-skin="arkiv"] .tag.info{background:var(--paper-2);color:var(--ink-2)}
+:root[data-skin="arkiv"] .pill.ok,:root[data-skin="arkiv"] .tag.ok{background:var(--w-pos);color:var(--ink)}
+:root[data-skin="arkiv"] .pill.warn,:root[data-skin="arkiv"] .tag.warn{background:var(--w-ink);color:var(--ink)}
+:root[data-skin="arkiv"] .pill.bad,:root[data-skin="arkiv"] .tag.err,
+:root[data-skin="arkiv"] .tag.bad{background:var(--w-neg);color:var(--ink)}
+:root[data-skin="arkiv"] .pill.dim,:root[data-skin="arkiv"] .tag.dim{background:none;opacity:1;
+  color:var(--grey);box-shadow:inset 0 0 0 1px var(--abs-outline)}
+/* .pill.bad keeps its "!" in ::before; its dot is ::after moved to the front
+   (a pill is a flex box, so `order` places a pseudo-element like any item). */
+:root[data-skin="arkiv"] .pill.bad::before{content:"!";letter-spacing:0;font-weight:600;order:0}
+:root[data-skin="arkiv"] .chip{font-family:var(--mono);border-radius:3px;border:1px solid var(--hair);
+  background:var(--paper);color:var(--ink-2)}
+:root[data-skin="arkiv"] a.chip:hover{border-color:var(--grey-2);color:var(--ink)}
+:root[data-skin="arkiv"] .chip.on{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+:root[data-skin="arkiv"] .chip.warn{background:var(--w-ink);border-color:var(--hair);color:var(--ink)}
+:root[data-skin="arkiv"] .chips-l{font-family:var(--mono);letter-spacing:.14em}
+:root[data-skin="arkiv"] .sw,:root[data-skin="arkiv"] .legend i{border-radius:2px}
+:root[data-skin="arkiv"] .rt-chip{border-radius:3px}
+
+/* ── 8 · THE DOT — ruling 1, the one implementation ─────────────────────────
+   Solid green: good. Solid red: critical (and serious, which differs by
+   weight). HOLLOW red: a warning. The same 8px dot everywhere, and each
+   carries its word for a screen reader in the pseudo-element's alternative
+   text — declared twice, so a browser that cannot parse the "/ alt" form
+   keeps the plain one and still draws the dot. */
+:root[data-skin="arkiv"] .kpi.t-good .l::before,:root[data-skin="arkiv"] .kpi.ok .l::before,
+:root[data-skin="arkiv"] .kpi.t-warn .l::before,:root[data-skin="arkiv"] .kpi.warn .l::before,
+:root[data-skin="arkiv"] .kpi.t-serious .l::before,:root[data-skin="arkiv"] .kpi.t-critical .l::before,
+:root[data-skin="arkiv"] .kpi.err .l::before,
+:root[data-skin="arkiv"] .pill.ok::before,:root[data-skin="arkiv"] .pill.warn::before,
+:root[data-skin="arkiv"] .pill.bad::after,
+:root[data-skin="arkiv"] .tag.ok::before,:root[data-skin="arkiv"] .tag.warn::before,
+:root[data-skin="arkiv"] .tag.err::before,:root[data-skin="arkiv"] .tag.bad::before,
+:root[data-skin="arkiv"] .chip.warn::before,
+:root[data-skin="arkiv"] .note.ok::before,:root[data-skin="arkiv"] .note.warn::before,
+:root[data-skin="arkiv"] .note.err::before,
+:root[data-skin="arkiv"] .vdct.good .vdct-claim::before,:root[data-skin="arkiv"] .vdct.warn .vdct-claim::before,
+:root[data-skin="arkiv"] .vdct.bad .vdct-claim::before,
+:root[data-skin="arkiv"] .card.t-good .card-h b::before,:root[data-skin="arkiv"] .card.t-warn .card-h b::before,
+:root[data-skin="arkiv"] .card.t-critical .card-h b::before,
+:root[data-skin="arkiv"] .finding.t-ok .fh b::before,:root[data-skin="arkiv"] .finding.t-warn .fh b::before,
+:root[data-skin="arkiv"] .finding.t-err .fh b::before,
+:root[data-skin="arkiv"] .rp-err:not(:empty)::before,:root[data-skin="arkiv"] .depnote.bad::before,
+:root[data-skin="arkiv"] #freshness span[style*="--warn"]::before{
+  content:"";display:inline-block;flex:none;box-sizing:border-box;width:8px;height:8px;border-radius:50%;
+  vertical-align:.05em;background:var(--sem-neg);border:0;order:-1}
+/* Inside a flex row (a tile label, a pill, a tag) the row's gap spaces the
+   dot; in running text it needs a margin of its own. */
+:root[data-skin="arkiv"] .chip.warn::before,:root[data-skin="arkiv"] .note::before,
+:root[data-skin="arkiv"] .vdct-claim::before,:root[data-skin="arkiv"] .card-h b::before,
+:root[data-skin="arkiv"] .fh b::before,:root[data-skin="arkiv"] .rp-err::before,
+:root[data-skin="arkiv"] .depnote.bad::before,:root[data-skin="arkiv"] #freshness span::before{margin-right:7px}
+/* good */
+:root[data-skin="arkiv"] .kpi.t-good .l::before,:root[data-skin="arkiv"] .kpi.ok .l::before,
+:root[data-skin="arkiv"] .pill.ok::before,:root[data-skin="arkiv"] .tag.ok::before,
+:root[data-skin="arkiv"] .note.ok::before,:root[data-skin="arkiv"] .vdct.good .vdct-claim::before,
+:root[data-skin="arkiv"] .card.t-good .card-h b::before,:root[data-skin="arkiv"] .finding.t-ok .fh b::before{
+  background:var(--sem-pos);content:"";content:"" / "good: "}
+/* warning — HOLLOW */
+:root[data-skin="arkiv"] .kpi.t-warn .l::before,:root[data-skin="arkiv"] .kpi.warn .l::before,
+:root[data-skin="arkiv"] .pill.warn::before,:root[data-skin="arkiv"] .tag.warn::before,
+:root[data-skin="arkiv"] .chip.warn::before,:root[data-skin="arkiv"] .note.warn::before,
+:root[data-skin="arkiv"] .vdct.warn .vdct-claim::before,:root[data-skin="arkiv"] .card.t-warn .card-h b::before,
+:root[data-skin="arkiv"] .finding.t-warn .fh b::before,
+:root[data-skin="arkiv"] #freshness span[style*="--warn"]::before{
+  background:none;border:1.5px solid var(--sem-neg);content:"";content:"" / "warning: "}
+/* critical — SOLID */
+:root[data-skin="arkiv"] .kpi.t-critical .l::before,:root[data-skin="arkiv"] .kpi.err .l::before,
+:root[data-skin="arkiv"] .pill.bad::after,:root[data-skin="arkiv"] .tag.err::before,
+:root[data-skin="arkiv"] .tag.bad::before,:root[data-skin="arkiv"] .note.err::before,
+:root[data-skin="arkiv"] .vdct.bad .vdct-claim::before,:root[data-skin="arkiv"] .card.t-critical .card-h b::before,
+:root[data-skin="arkiv"] .finding.t-err .fh b::before,:root[data-skin="arkiv"] .rp-err:not(:empty)::before,
+:root[data-skin="arkiv"] .depnote.bad::before{
+  background:var(--sem-neg);border:0;content:"";content:"" / "critical: "}
+:root[data-skin="arkiv"] .kpi.t-serious .l::before{background:var(--sem-neg);border:0;content:"";content:"" / "serious: "}
+/* A critical tile's label also steps up from grey to ink; serious keeps the
+   grey, so the two share a dot and differ by that one step. */
+:root[data-skin="arkiv"] .kpi.t-critical .l,:root[data-skin="arkiv"] .kpi.err .l{color:var(--ink)}
+
+/* ── 9 · notes ──────────────────────────────────────────────────────────────
+   note(), 320 calls. The accent bar on a tinted box becomes a caption under a
+   hairline, in grey. The review's correction, adopted: err and warn notes
+   keep INK text as well as the dot — the #trips unpriced-but-charged warning,
+   the #insights truncation note and #notfound must not go quiet. The
+   .note.err / .note.warn classes are unchanged (payout_page_reconcile reads
+   them). */
+:root[data-skin="arkiv"] .note{background:none;border:0;border-top:1px solid var(--hair);border-radius:0;
+  padding:8px 0 0;color:var(--grey);font-size:var(--t5);line-height:1.5}
+:root[data-skin="arkiv"] .note.ok{background:none;color:var(--ink-2)}
+:root[data-skin="arkiv"] .note.warn,:root[data-skin="arkiv"] .note.err{background:none;color:var(--ink)}
+/* In a table cell the row rule is already there; a second hairline above
+   the note would stripe every cell of a Detail column (#sources). */
+:root[data-skin="arkiv"] td .note{border-top:0;padding-top:0}
+
+/* ── 10 · the verdict band ──────────────────────────────────────────────────
+   verdict() is unchanged (.vdct-claim, -sub, -rec, -fig, -meta, -who). The
+   card with a coloured left rule becomes the mockups' STATEMENT BAND: an ink
+   rule over it, the claim as a sentence in Karla, the deciding figure large
+   in Karla. The figure's digits stay INK; the tone moves to a 3px semantic
+   rule on the band's top edge and to the dot before the claim. It stays the
+   page's statement under "At a glance" and its figure is not repeated as a
+   tile (ruling 7). */
+:root[data-skin="arkiv"] .vdct{background:none;border:0;border-top:1px solid var(--ink);border-radius:0;
+  padding:14px 0 2px;gap:16px 48px}
+:root[data-skin="arkiv"] .vdct.warn,:root[data-skin="arkiv"] .vdct.bad{border-top:3px solid var(--sem-neg)}
+:root[data-skin="arkiv"] .vdct.good{border-top:3px solid var(--sem-pos)}
+:root[data-skin="arkiv"] .vdct-claim{font-size:var(--t8);font-weight:600;line-height:1.45;
+  letter-spacing:-.005em;max-width:62ch}
+:root[data-skin="arkiv"] .vdct-sub,:root[data-skin="arkiv"] .vdct-rec{font-size:var(--t5);color:var(--grey);
+  line-height:1.55;max-width:66ch}
+:root[data-skin="arkiv"] .vdct-rec b{color:var(--ink);font-weight:600}
+:root[data-skin="arkiv"] .vdct-fig>b,:root[data-skin="arkiv"] .vdct.warn .vdct-fig>b,
+:root[data-skin="arkiv"] .vdct.bad .vdct-fig>b{font-family:var(--sans);font-size:var(--d5);font-weight:600;
+  letter-spacing:-.02em;color:var(--ink);font-variant-numeric:proportional-nums}
+:root[data-skin="arkiv"] .vdct-fig>i{font-family:var(--mono);font-size:var(--t1);letter-spacing:.16em;color:var(--grey)}
+:root[data-skin="arkiv"] .vdct-meta{color:var(--grey)}
+:root[data-skin="arkiv"] .vdct-who{font-size:var(--t2);letter-spacing:.14em;color:var(--ink);
+  border-bottom-color:var(--grey-2)}
+:root[data-skin="arkiv"] .vdct-who:hover,:root[data-skin="arkiv"] .vdct-who:focus-visible{border-bottom-color:var(--ink)}
+
+/* ── 11 · the dominant bar (#platforms) ─────────────────────────────────────
+   Same classes and the same clickable segments. The 44px rounded bar becomes
+   a flat 24px one with a 2px paper gap between segments. The labels stay
+   INSIDE the segments that have room for them (rule 1: the leader's share is
+   printed nowhere else), in the one ink each fill carries at 4.5:1 or better,
+   measured against tokens.js: paper on Uber 5.59, Yango 5.50, CABMAN 8.79;
+   ink on Bolt 5.86, Hotel 5.80, FMS 5.83. The neutral c1..c6 slots follow
+   the steps --s1..--s6 point at: paper on --seq-5 17.95, --seq-4 12.89 and
+   --seq-3 8.24; ink on --seq-0 9.09 and --seq-1 6.00.
+   test/arkiv_skin.test.mjs measures every pairing in a browser. Explicit per class, because the old dark-theme
+   rules name them at (0,4,0) and would otherwise put ink on Uber blue. */
+:root[data-skin="arkiv"] .domb-bar{height:24px;border-radius:0;background:none;gap:2px}
+:root[data-skin="arkiv"] .domb-seg{padding:0 10px;gap:7px}
+:root[data-skin="arkiv"] .domb-seg>span{font-size:var(--t5)}
+:root[data-skin="arkiv"] .domb-seg>b{font-size:var(--t6)}
+:root[data-skin="arkiv"] .domb-seg>i{font-size:var(--t4);opacity:1}
+:root[data-skin="arkiv"] .domb-seg,
+:root[data-skin="arkiv"] .domb-seg.ch-uber,:root[data-skin="arkiv"] .domb-seg.ch-yango,
+:root[data-skin="arkiv"] .domb-seg.ch-cabman,:root[data-skin="arkiv"] .domb-seg.c1,
+:root[data-skin="arkiv"] .domb-seg.c4,:root[data-skin="arkiv"] .domb-seg.c6{--on-seg:var(--paper)}
+:root[data-skin="arkiv"] .domb-seg.ch-bolt,:root[data-skin="arkiv"] .domb-seg.ch-hotel,
+:root[data-skin="arkiv"] .domb-seg.ch-fms,:root[data-skin="arkiv"] .domb-seg.c2,
+:root[data-skin="arkiv"] .domb-seg.c3,:root[data-skin="arkiv"] .domb-seg.c5{--on-seg:var(--ink)}
+:root[data-skin="arkiv"] .domb-seg.dead{background:var(--faint);color:var(--grey)}
+:root[data-skin="arkiv"] button.domb-seg:hover{filter:none;opacity:.86}
+:root[data-skin="arkiv"] button.domb-key{border-radius:0}
+
+/* ── 12 · buttons and inputs ────────────────────────────────────────────────
+   Square, a grey-2 outline, ink on focus. The primary action is an ink fill
+   with paper text. The deposit form keeps its 44px targets. */
+:root[data-skin="arkiv"] :focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+:root[data-skin="arkiv"] .btn{font-family:var(--mono);font-size:var(--t4);letter-spacing:.04em;
+  background:var(--paper);border:1px solid var(--grey-2);border-radius:0;color:var(--ink);transition:none}
+:root[data-skin="arkiv"] .btn:hover{background:var(--paper-2);border-color:var(--ink)}
+:root[data-skin="arkiv"] .btn:active{transform:none}
+:root[data-skin="arkiv"] .btn.primary{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+/* `btn sec` — a secondary button, in the markup's intent — also matches .sec,
+   the tracked mono section LABEL, whose margin of 6px 0 -6px drops the button
+   6px below its neighbour. In the old skin that is how #settings has always
+   drawn "Choose .txt files" and "Remember"; here a button is a button. */
+:root[data-skin="arkiv"] .btn.sec{margin:0;text-transform:none;letter-spacing:.04em}
+:root[data-skin="arkiv"] .btn.primary:hover{background:var(--ink-2);border-color:var(--ink-2);filter:none}
+:root[data-skin="arkiv"] .setrow input,:root[data-skin="arkiv"] .toolbar input[type=search],
+:root[data-skin="arkiv"] .pick input[type=date],:root[data-skin="arkiv"] .depinput{
+  background:var(--paper);border:1px solid var(--grey-2);border-radius:0;color:var(--ink);box-shadow:none}
+:root[data-skin="arkiv"] .setrow input:focus,:root[data-skin="arkiv"] .toolbar input[type=search]:focus,
+:root[data-skin="arkiv"] .pick input[type=date]:focus,:root[data-skin="arkiv"] .depinput:focus-visible{
+  outline:2px solid var(--ink);outline-offset:1px;border-color:var(--ink);box-shadow:none}
+
+/* ── 13 · the rest, restyled in place ───────────────────────────────────────
+   Links: ink-2 with a grey-2 underline that firms to ink. */
+:root[data-skin="arkiv"] .lnk{color:var(--ink-2);border-bottom-color:var(--grey-2)}
+:root[data-skin="arkiv"] .lnk:hover{color:var(--ink);border-bottom-color:var(--ink)}
+:root[data-skin="arkiv"] .ent{border-bottom-color:var(--grey-2)}
+:root[data-skin="arkiv"] .ent:hover{color:var(--ink);border-bottom-color:var(--ink)}
+:root[data-skin="arkiv"] .dday-open{color:var(--ink-2)}
+
+/* The download line: a caption with two links in it. */
+:root[data-skin="arkiv"] .getout{border-top-color:var(--hair)}
+:root[data-skin="arkiv"] .getout-lab{font-family:var(--mono);font-size:var(--t2);letter-spacing:.14em;
+  text-transform:uppercase}
+:root[data-skin="arkiv"] .getout-a{color:var(--ink-2);border-bottom-color:var(--grey-2)}
+:root[data-skin="arkiv"] .getout-a:hover{color:var(--ink);border-bottom-color:var(--ink)}
+/* Was --rule-strong: grey-2 as text, 2.90:1. */
+:root[data-skin="arkiv"] .getout-sep{color:var(--grey)}
+:root[data-skin="arkiv"] .getout-tz{font-family:var(--mono)}
+
+/* The fold: the dashed accent button becomes a mono "SHOW ALL n" on a rule. */
+:root[data-skin="arkiv"] .foldbtn{background:none;border:0;border-top:1px solid var(--hair);border-radius:0;
+  padding:9px 0;text-align:left;color:var(--ink);font-family:var(--mono);font-size:var(--t2);
+  font-weight:600;letter-spacing:.14em;text-transform:uppercase;transition:none}
+:root[data-skin="arkiv"] .foldbtn:hover{background:none;border-top-color:var(--ink)}
+
+/* Loading, empty, the modal and the tooltip. */
+:root[data-skin="arkiv"] .skel{border-radius:0}
+:root[data-skin="arkiv"] .empty{background:none;border:1px solid var(--hair);border-radius:0}
+:root[data-skin="arkiv"] .modal-back{background:color-mix(in srgb,var(--ink) 28%,transparent);
+  backdrop-filter:none;animation:none}
+:root[data-skin="arkiv"] .modal{background:var(--paper);border:1px solid var(--ink);border-radius:0;
+  box-shadow:6px 6px 0 var(--faint);animation:none}
+:root[data-skin="arkiv"] #tt{border-radius:0;box-shadow:none}
+
+/* Who a page is about: a ruled identity block and a square hairline plate
+   instead of the rounded gradient tile. The photograph keeps its colour —
+   the mockups' greyscale filter is rejected: colour identifies a driver
+   better (rule 1). A photograph on file that could not be fetched keeps a
+   visibly different mark: a grey-2 outline, never amber. */
+:root[data-skin="arkiv"] .idcard{background:none;border:0;border-top:1.5px solid var(--ink);border-radius:0;
+  box-shadow:none;padding:14px 0 0}
+:root[data-skin="arkiv"] .av{border-radius:0;background:var(--paper-2);border:1px solid var(--hair);
+  color:var(--ink-2);font-family:var(--mono);font-weight:500;letter-spacing:.04em}
+:root[data-skin="arkiv"] .av-lost{box-shadow:inset 0 0 0 1.5px var(--grey-2)}
+:root[data-skin="arkiv"] .av-lost::after{background:var(--grey)}
+:root[data-skin="arkiv"] .idmeta h2{font-family:var(--sans);font-weight:600}
+:root[data-skin="arkiv"] .idfacts b{font-size:var(--t1);letter-spacing:.14em}
+:root[data-skin="arkiv"] .platetag{background:var(--paper);border:1px solid var(--ink);border-radius:0;box-shadow:none}
+
+/* #unit's car map bleeds into the card's side padding with an INLINE
+   `margin:0 -18px` (economics.js assetMap), which was right while a panel had
+   20px of padding. A ruled panel has none, so the map stuck out 18px on each
+   side: render-audit's overflow check, `panel mapwrap +18px`, at all three of
+   its widths, under this skin only. Only !important outranks an inline
+   style, and the selector names that one declaration. */
+:root[data-skin="arkiv"] .panel.mapwrap div[style*="margin: 0px -18px"]{margin:0 !important}
+
+/* Rows that were cards: ruled, no box, no lift. */
+:root[data-skin="arkiv"] .insight-row,:root[data-skin="arkiv"] .dircard{background:none;border:0;
+  border-top:1px solid var(--hair);border-radius:0;box-shadow:none;transition:none}
+:root[data-skin="arkiv"] .insight-row{padding:12px 0}
+:root[data-skin="arkiv"] .insight-row:hover,:root[data-skin="arkiv"] a.insight-row:hover,
+:root[data-skin="arkiv"] .dircard:hover{background:var(--paper-2);border-top-color:var(--hair);
+  box-shadow:none;transform:none}
+:root[data-skin="arkiv"] .breakcard,:root[data-skin="arkiv"] .card,:root[data-skin="arkiv"] .finding,
+:root[data-skin="arkiv"] .whocard{background:none;border:0;border-top:1px solid var(--ink);border-radius:0;
+  box-shadow:none;padding:12px 0 4px;transition:none}
+:root[data-skin="arkiv"] .breakcard:hover{box-shadow:none;border-top-color:var(--ink)}
+:root[data-skin="arkiv"] a.card-link:hover{transform:none;background:var(--paper-2);border-top-color:var(--ink)}
+:root[data-skin="arkiv"] a.card-link .cap{color:var(--ink-2)}
+:root[data-skin="arkiv"] .bk-half{border-radius:0}
+:root[data-skin="arkiv"] .bk-v,:root[data-skin="arkiv"] .card-n,:root[data-skin="arkiv"] .fnums b,
+:root[data-skin="arkiv"] .leak b{font-family:var(--sans);font-weight:600;font-variant-numeric:proportional-nums}
+:root[data-skin="arkiv"] .fnums span{font-family:var(--mono);font-size:var(--t1);letter-spacing:.14em}
+:root[data-skin="arkiv"] .whohead{border-bottom-color:var(--hair)}
+:root[data-skin="arkiv"] .sp-pair{border-radius:0}
+:root[data-skin="arkiv"] .leak{background:none;border-color:var(--hair);border-radius:0;transition:none}
+:root[data-skin="arkiv"] .leak:hover{transform:none;border-color:var(--ink)}
+:root[data-skin="arkiv"] .leak.on{border-color:var(--ink);background:var(--paper-2)}
+/* A category that CANNOT fire is absent, not faint: the absence outline, at
+   full contrast. */
+:root[data-skin="arkiv"] .leak.off{opacity:1;border-style:solid;border-color:var(--abs-outline);color:var(--grey)}
+
+/* Settings: each provider a ruled section named like a panel. The setgroup /
+   setrow DOM is untouched (settings_page_layout). */
+:root[data-skin="arkiv"] .setgroup{background:none;border:0;border-top:1.5px solid var(--ink);
+  border-radius:0;box-shadow:none;padding:8px 0 0}
+:root[data-skin="arkiv"] .setgroup-h{font-family:var(--mono);font-size:var(--t3);font-weight:600;
+  letter-spacing:.22em;text-transform:uppercase;margin:0 0 6px}
+
+/* The deposit form (and #hr-roster's upload, which borrows it). */
+:root[data-skin="arkiv"] .deplabel{font-family:var(--mono);letter-spacing:.14em;color:var(--grey)}
+:root[data-skin="arkiv"] .depchip{border-radius:3px;border-color:var(--grey-2)}
+:root[data-skin="arkiv"] .depsentence{border-left:3px solid var(--ink);background:var(--paper-2);border-radius:0}
+:root[data-skin="arkiv"] .deppreview{border-radius:0}
+/* A refusal takes the weight of the figure it refuses, in ink, with the dot. */
+:root[data-skin="arkiv"] .depnote.bad{color:var(--ink);font-weight:600}
+:root[data-skin="arkiv"] .depactions .btn{padding:0 18px}
+
+/* The live status line on a driver page is Uber's word for what the driver
+   is doing, so its dot is a step of Uber's own ramp (L2) — engaged deep,
+   available lighter — rather than green for "online", which under L3 would
+   mean better. Off and stale stay grey: a feed that stopped answering is not
+   a driver behaving badly. */
+:root[data-skin="arkiv"] .lstat{border-radius:0;border-color:var(--hair);background:var(--paper-2)}
+:root[data-skin="arkiv"] .lstat.on,:root[data-skin="arkiv"] .lstat.ontrip{border-color:var(--hair);
+  background:var(--paper-2)}
+:root[data-skin="arkiv"] .lstat.on .lstat-dot{background:var(--c-uber-available)}
+:root[data-skin="arkiv"] .lstat.ontrip .lstat-dot{background:var(--c-uber-engaged)}
+
+/* A shift's WAITING band was amber, "a finding, not a background". There is
+   no amber, and red would call waiting worse inside a plot (L3). It becomes
+   the lightest of the three neutral layers — waiting, online, on a job — and
+   its legend swatch and its column follow it, so a colour cannot change in
+   one place and be explained in another. */
+:root[data-skin="arkiv"] .sh-track>i.w,:root[data-skin="arkiv"] .lgnd .sw.w{background:var(--hair);opacity:1}
+:root[data-skin="arkiv"] .sh-w{color:var(--ink-2)}
+
+/* A day nothing was collected on is ABSENT, and absence is an outline in
+   grey-2, never a hatch in a semantic hue (SPEC §5, L5.9). The tooltip on the
+   cell ("nothing collected") and the gaps table under it are unchanged. */
+:root[data-skin="arkiv"] .cal .c.gap{background:none;box-shadow:inset 0 0 0 1px var(--abs-outline)}
+
+/* ── 14 · motion ────────────────────────────────────────────────────────────
+   The hover lifts and the entrance choreography go: a ruled sheet does not
+   slide in. Marks that grow to their length (the charts) are STEP 2's. */
+:root[data-skin="arkiv"] .stagger>*,:root[data-skin="arkiv"] .settle{animation:none}
+
+/* ── 15 · narrow windows ────────────────────────────────────────────────────
+   Below 820px the rail is a scrolling strip: square, no pill ground, the
+   current section underlined in ink. Below 560px a table becomes cards, and
+   each card is a ruled block rather than a box. */
+@media(max-width:820px){
+  :root[data-skin="arkiv"] #nav a{background:none;border-radius:0;padding:7px 10px}
+  :root[data-skin="arkiv"] #nav a.on{background:none;box-shadow:inset 0 -2px 0 var(--ink)}
+  :root[data-skin="arkiv"] #nav a.on::before{display:none}
+}
+@media(max-width:560px){
+  :root[data-skin="arkiv"] .tcards tbody tr{background:var(--paper);border:0;border-top:1px solid var(--ink);
+    border-radius:0;box-shadow:none;padding:10px 0 8px}
+  :root[data-skin="arkiv"] .tcards td.cardlead{border-bottom-color:var(--hair)}
+  :root[data-skin="arkiv"] .tcards .tscroll table td:first-child,
+  :root[data-skin="arkiv"] .tcards .tscroll table th:first-child{box-shadow:none}
+  :root[data-skin="arkiv"] .tcards td[class*="v-"]{padding-left:16px}
+}
+
+/* ── 16 · the full page (zen) ───────────────────────────────────────────────
+   The title rule above sets the h1 at the same weight zen's own rule does, so
+   the smaller zen title is restated here, where it is later and heavier. */
+:root[data-skin="arkiv"][data-zen="1"] .topbar h1{font-size:var(--t9)}

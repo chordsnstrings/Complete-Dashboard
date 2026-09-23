@@ -32,6 +32,11 @@ const BASE = process.env.BASE || 'http://localhost:8100';
 const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null;
 const SETTLE = Number(process.env.SETTLE || 4500);
 const WIDTHS = (process.env.WIDTHS || '1500,1180,820').split(',').map(Number);
+/* SKIN=arkiv audits the reskin (docs/UI-REDESIGN-PLAN.md §3, STEP 1) the way a
+   reader who chose it meets it: the page is opened with ?skin=<name>, which
+   index.html stamps before the first paint. Unset, the address carries no
+   parameter and the page is whatever the product's default skin is. */
+const SKIN_QS = process.env.SKIN ? `?skin=${encodeURIComponent(process.env.SKIN)}` : '';
 
 const api = async (p) => {
   try { const r = await fetch(`${BASE}${p}`); return r.ok ? await r.json() : null; }
@@ -399,7 +404,7 @@ for (const width of WIDTHS) {
     process.stderr.write(`\r[${width}px ${++n}/${routes.length}] ${route.slice(0, 46).padEnd(46)}`);
     let probe;
     try {
-      await page.goto(`${BASE}/#${route}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.goto(`${BASE}/${SKIN_QS}#${route}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForTimeout(SETTLE);
       /* A skeleton is a page that has not answered YET, and one settle is not
          evidence that it never will. #sources asks /api/coverage, which its own

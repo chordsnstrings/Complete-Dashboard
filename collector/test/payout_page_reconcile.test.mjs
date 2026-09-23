@@ -181,6 +181,25 @@ const browser = await launchChromium();
 async function render(fixtures) {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: 'domcontentloaded' });
+  /* WAIT FOR THE SHELL'S OWN FIRST RENDER BEFORE RENDERING THE PROBE.
+     ─────────────────────────────────────────────────────────────────────────
+     index.html boots the whole app, and app.js's render() starts with
+     data.js newRender(). payouts.js takes currentGen() when it paints, and
+     after the live ask's fetch it drops the answer unless alive(gen) — the
+     stale-render guard that stops an abandoned page writing into a new one.
+     If the shell's first render lands AFTER the probe has painted, it bumps
+     the generation, the probe's ask is treated as abandoned, and the panel
+     sits on "Asking Uber…" until §3 times out.
+
+     That is what happened from the reskin's STEP 0 on (25734ca): ui.js began
+     importing tokens.js, one more module on the shell's path, and the shell's
+     render started later than the probe's. Measured: at e98d5f4, 55 passed
+     twice; at 25734ca and after, §3 timed out every run. The product was
+     never affected, because on a real page the shell IS the render.
+     renderNav() runs in the same tick as newRender(), so a link in #nav means
+     the shell's render has begun, and every generation the probe takes is
+     later than it. */
+  await page.waitForFunction(() => document.querySelectorAll('#nav a').length > 0, null, { timeout: 15000 });
   await page.evaluate(async (fx) => {
     try { localStorage.clear(); } catch { /* nothing cached, nothing to clear */ }
     const orig = window.fetch.bind(window);

@@ -5150,12 +5150,19 @@ V.sources = async (root) => {
      chunks failed, 74 of those 88 windows saying the web session is no longer
      signed in. A caption that guarantees rows painted the total death of the
      supplier session as a run that mostly worked. Say what the status
-     actually means, and count the blank ones separately. */
+     actually means, and count the blank ones separately.
+
+     And name the status, not a colour. This (and the verdict below) said a
+     dead source wore "the same amber" as a working one. The Status column
+     draws every non-ok run as the same `tag bad`, which was crimson in the
+     old skin and is a solid negative dot in the Arkiv one, where no amber
+     exists at all (UI-REDESIGN-PLAN §1, ruling 1). The word "partial" is
+     what the two rows share under either skin. */
   const st = panel('Collector health',
     'Last run per source. "partial" means the run left windows unfetched — usually beside rows it did '
     + 'write, which is how a 299-day hole in the Uber trip history survived for months behind a run '
     + 'that said ok. It does not promise rows were written: read the Rows column, because a partial '
-    + 'that wrote none is a dead source wearing the same amber as a run that mostly worked.');
+    + 'that wrote none is a dead source wearing the same "partial" as a run that mostly worked.');
   root.append(st.panel);
   const cv = panel('Data coverage',
     'What has actually landed — and, for each dated source, how many days of the window it covered. '
@@ -5230,7 +5237,7 @@ V.sources = async (root) => {
         + '299-day hole in the Uber trip history survived for months behind a run that said ok — but '
         + (blank.length
           ? `${fmt(blank.length)} of these wrote nothing whatever: every window refused, which is a dead `
-            + 'source wearing the same amber as a run that mostly worked.'
+            + 'source wearing the same "partial" as a run that mostly worked.'
           : 'a partial that wrote nothing whatever is a dead source, not a run that mostly worked.')
         + (unscheduled.length
           ? ` ${unscheduled.map((r) => `${sourceLabel(r.source)}: ${r.silence?.sentence || 'nothing schedules it'}`).join(' ')}`

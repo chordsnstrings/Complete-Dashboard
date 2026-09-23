@@ -23,12 +23,17 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
 
 const app = readFileSync(new URL('../api/public/app.css', import.meta.url), 'utf8');
 const m = readFileSync(new URL('../api/public/m/m.css', import.meta.url), 'utf8');
+/* The Arkiv skin (docs/UI-REDESIGN-PLAN.md §3, STEP 1) is a third stylesheet
+   on the same scale, and the only one that uses --d6, the hero step. Left out
+   of this scan it could grow sizes of its own unseen, and --d6 would read as
+   a step nobody uses. */
+const arkiv = readFileSync(new URL('../api/public/arkiv.css', import.meta.url), 'utf8');
 
 const sizes = (css) => [...css.matchAll(/font-size:\s*([^;}]+)/g)].map((x) => x[1].trim());
 
 console.log('\nevery size on the page comes from the scale');
 
-for (const [name, css] of [['app.css', app], ['m.css', m]]) {
+for (const [name, css] of [['app.css', app], ['m.css', m], ['arkiv.css', arkiv]]) {
   const all = sizes(css);
   /* clamp() and em are deliberate exceptions and are named as such: a clamp is
      a size that RESPONDS — to the container, to the viewport — and an em is a
@@ -40,7 +45,7 @@ for (const [name, css] of [['app.css', app], ['m.css', m]]) {
   check(`${name}: no rule sets a size of its own`, literal.length === 0,
     `${literal.length}: ${[...new Set(literal)].join(', ')}`);
   check(`${name}: and it does set sizes, so this is measuring something`,
-    all.length > (name === 'app.css' ? 100 : 20), String(all.length));
+    all.length > ({ 'app.css': 100, 'm.css': 20 }[name] ?? 30), String(all.length));
 }
 
 console.log('\nthe scale is a scale');
@@ -53,7 +58,7 @@ check('it is declared once, in app.css', tokens.length >= 12, String(tokens.leng
    in m.css and defined only in app.css is correct, and a token used in m.css
    and defined NOWHERE renders at the browser default with no error at all. */
 const defined = new Set(tokens.map((t) => t.name));
-const used = new Set([...sizes(app), ...sizes(m)]
+const used = new Set([...sizes(app), ...sizes(m), ...sizes(arkiv)]
   .filter((v) => v.startsWith('var('))
   .map((v) => v.slice(4, -1).split(',')[0].trim()));
 const undef = [...used].filter((t) => !defined.has(t));
@@ -76,6 +81,6 @@ check('and no two steps are closer than six per cent',
   asc.length >= 12 && tooClose.length === 0,
   `${asc.length} steps · ${tooClose.map(([a, b]) => `${a.name}/${b.name}`).join(', ')}`);
 
-console.log(`\n  ${new Set([...sizes(app), ...sizes(m)]).size} distinct declarations, ${defined.size} steps`);
+console.log(`\n  ${new Set([...sizes(app), ...sizes(m), ...sizes(arkiv)]).size} distinct declarations, ${defined.size} steps`);
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
