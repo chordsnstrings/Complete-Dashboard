@@ -1013,6 +1013,31 @@ driver's 222 tracker fixes.
      first paint. `test/arkiv_skin.test.mjs` refuses `/app.js` and checks the
      attribute is still there.
 
+* **A CHART'S FORM IS A TOKEN — READ IT, NEVER THE SKIN, AND NEVER NAME A
+  TREATMENT IN A LITERAL.** (Reskin STEP 2, 2026-09-23.) One `charts.js` draws
+  both skins until the flip. Colour follows the skin through `var()`; FORM
+  (which element a mark is, its thickness, whether a missing day is a hatch or
+  an outline) is chosen by `markForm()`, which reads the `--mk-*` tokens: the
+  old skin's in app.css's `:root`, SPEC's in the generated Arkiv block
+  (tokens.js `MARK`). What cost time, or would have:
+  1. **A caption that names a treatment must ask `drawnAs(kind)`.** #forecast
+     printed "Hatched bars are forecast" over solid bars for as long as the
+     page has existed; nothing checked the sentence against the drawing. Under
+     two skins the same sentence is true in one and false in the other, so a
+     literal "hatched" / "hollow" / "outlined" in a caption is a bug.
+  2. **Change the old skin's `--mk-*` and production moves.** They are today's
+     forms, value for value (`fit 0, max 96, end 3, base 3, gap 0, steps 7,
+     hatch / hollow / solid`), and `test/chart_marks.test.mjs` pins them.
+     With no stylesheet at all `markForm()` falls back to the same values.
+  3. **`var()` works in an SVG presentation attribute, fallback included**
+     (`fill="var(--a, var(--b))"`, `stroke-opacity="var(--hatch-a)"`),
+     measured in this Chromium. The hatch pattern relies on it for its theme
+     opacity, so the dark hatch follows the theme toggle without a redraw.
+  4. **A panel screenshot taken with the page scrolled has the sticky title
+     bar painted over it.** It hid the lower 70px of #forecast's chart and
+     read as missing bars. Pin sticky elements in flow before an element
+     capture (the pixel harness already did; the one-off shot script did not).
+
 * **A PROPOSAL FROM ANYWHERE BUT THE RULE CANNOT LIVE IN `driver_identity_link`.**
   `src/identity_link.js` DELETEs every unconfirmed, unrejected row in that table
   whose evidence its own rules did not produce on the current run — correct

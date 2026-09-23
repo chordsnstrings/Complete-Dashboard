@@ -197,6 +197,43 @@ export const FORM = Object.freeze({
   markRow:  '3px'       // the 3px table row marker, in the gutter
 });
 
+/* ── ADDED: THE MARK FORM (SPEC §4 and §5) ───────────────────────────────
+   STEP 2 of docs/UI-REDESIGN-PLAN.md §3. The design's mark specs, as the
+   numbers and words charts.js draws with. The generator writes them into the
+   Arkiv block as --mk-*; the old skin declares its own --mk-* in app.css
+   (today's forms: rx 3 on all four corners, a 96px ceiling, the hatched void,
+   the hollow bar), and charts.js markForm() reads whichever is in force. So
+   one piece of chart code draws both skins, and the old one does not move.
+
+   These are FORMS, not colours: they do not change with the theme and are
+   written once, in the light block.
+
+     fit        1 = draw at the measured box, so a --t1 tick is 9.4px and a
+                24px bar is 24px wherever the chart lands (SPEC §4 is in px).
+     max        a bar is at most 24px thick.
+     end, base  4px rounded at the DATA end, square at the baseline.
+     gap        a 2px surface gap between touching marks, never a stroke.
+     steps      the graphite ramp has six steps (SEQUENTIAL above).
+     absent     not measured is an OUTLINE: 1px grey-2, no fill, same end.
+     unfinished a part-period (today, a clipped week) is a HATCH in the
+                series' own colour — it is being measured, it is not absent.
+     projected  a projection is a HATCH too (SPEC §5).
+   The hatch itself is 45°, a 4px pitch, 1px lines at --hatch-a (HATCH above)
+   over the paper; charts.js draws it from these. */
+export const MARK = Object.freeze({
+  fit: '1',
+  max: '24',
+  end: '4',
+  base: '0',
+  gap: '2',
+  steps: String(SEQUENTIAL.length),
+  absent: 'outline',
+  unfinished: 'hatch',
+  projected: 'hatch',
+  hatchPitch: '4',
+  hatchAngle: '45'
+});
+
 /* ── ADDED: THE BRIDGE FROM THE OLD SKIN ─────────────────────────────────
    Transitional, and deleted with the old stylesheet one release after the
    flip (plan §3, STEP 5).
@@ -388,7 +425,12 @@ const ALIAS = Object.freeze({
   yango:'yango',
   hotel:'hotel', 'hotel corporate':'hotel', corporate:'hotel',
   cabman:'cabman',
-  fms:'fms', infotrack:'fms', 'fms/infotrack':'fms', 'fms / infotrack':'fms'
+  fms:'fms', infotrack:'fms', 'fms/infotrack':'fms', 'fms / infotrack':'fms',
+  /* ADDED (STEP 2): the names ui.js SOURCE_LABEL prints and SOURCE_TOKEN
+     keys, so a chart coloured BY NAME from a label a reader sees finds its
+     channel. 'FMS telematics' is the label every FMS series carries, and
+     uber_fleet is Uber's fleet feed (SOURCE_TOKEN maps it to --c-uber). */
+  'fms telematics':'fms', 'uber fleet':'uber', uber_fleet:'uber'
 });
 
 /** Normalise a feed name to a channel key, or null if it is not one of the six. */
@@ -454,9 +496,18 @@ export function semanticOf(delta, { invert = false } = {}) {
    the absence outline (§5), because a pale fill reads as a small value and
    "not measured" is not a small value. */
 export function sequentialOf(t, theme = 'light') {
+  const i = sequentialIndex(t);
+  return i == null ? null : T_(theme).SEQUENTIAL[i];
+}
+
+/* ADDED (STEP 2): the STEP sequentialOf picks, as an index, so charts.js can
+   paint the cell with the matching --seq-N property — a var() follows the theme
+   toggle live, a hex would not — and still be the same pick as the accessor.
+   Absence is null here too. */
+export function sequentialIndex(t, steps = SEQUENTIAL.length) {
   if (t == null || Number.isNaN(t)) return null;      // absence, not step 0
-  const f = Math.max(0, Math.min(1, t)), S = T_(theme).SEQUENTIAL;
-  return S[Math.round(f * (S.length - 1))];
+  const f = Math.max(0, Math.min(1, t));
+  return Math.round(f * (steps - 1));
 }
 
 /** Every hex this file governs. The page-level L1 grep checks against this.
@@ -506,6 +557,14 @@ export function cssDeclarations(theme = 'light') {
     `--mark-row:${FORM.markRow}`
   );
   return p;
+}
+
+/* ADDED (STEP 2): the mark form, as declarations (see MARK). */
+export function markDeclarations() {
+  const name = { fit: 'fit', max: 'max', end: 'end', base: 'base', gap: 'gap', steps: 'steps',
+    absent: 'absent', unfinished: 'unfinished', projected: 'projected',
+    hatchPitch: 'hatch-pitch', hatchAngle: 'hatch-angle' };
+  return Object.entries(MARK).map(([k, v]) => `--mk-${name[k]}:${v}`);
 }
 
 /* ADDED: the old-skin names Arkiv repaints, as declarations (see BRIDGE). */
@@ -879,10 +938,10 @@ export function lintTokens() {
 
 export default {
   CHANNEL, CHANNEL_ORDER, RAMP, RAMP_STATES, WASH, SEMANTIC, SEQUENTIAL,
-  NEUTRAL, FORM, RESERVED_HUE, BRIDGE,
+  NEUTRAL, FORM, MARK, RESERVED_HUE, BRIDGE,
   NEUTRAL_DARK, CHANNEL_DARK, RAMP_DARK, WASH_DARK, WASH_ALPHA, SEMANTIC_DARK, SEQUENTIAL_DARK,
   HATCH, ON_CHANNEL, THEMES, CVD_GATE, BAND,
-  channelOf, channelKey, stateOf, washOf, semanticOf, sequentialOf,
-  allTokenHexes, cssDeclarations, bridgeDeclarations, themeDeclarations, cssTokens,
+  channelOf, channelKey, stateOf, washOf, semanticOf, sequentialOf, sequentialIndex,
+  allTokenHexes, cssDeclarations, bridgeDeclarations, themeDeclarations, markDeclarations, cssTokens,
   oklch, contrast, isReservedHue, deltaE, cvdSeparation, mixHex, lintMeasures, lintTokens
 };

@@ -62,6 +62,91 @@ function interactive(el, label, onClick) {
   if (onClick) el.addEventListener('click', (e) => { hideTip(); onClick(e); });
 }
 
+/* ── THE MARK FORM, read from the tokens ──────────────────────────────────
+   STEP 2 of docs/UI-REDESIGN-PLAN.md §3. One piece of chart code has to draw
+   two skins until the operator flips the default: the old one exactly as it
+   is on production, and Arkiv to SPEC §4-§5. Colour already worked that way
+   (every fill is a var(), and the skin re-points the token). FORM could not:
+   whether a bar has its data end rounded, how thick it may be, whether an
+   uncollected day is a hatch or an outline, are decisions about WHICH
+   ELEMENT to draw, and a stylesheet cannot turn a hatched band into an
+   outlined bar or rewrite the sentence under the chart that names it.
+
+   So the form is a token too. app.css declares the old skin's --mk-* (today's
+   forms, value for value) and the Arkiv block declares SPEC's, generated from
+   tokens.js MARK; this reads whichever is in force. It reads a TOKEN, never
+   the skin attribute (test/arkiv_skin.test.mjs holds every module to that),
+   and a page that has no stylesheet at all — a test harness, a detached
+   document — gets the old skin's forms, which is what production draws.
+
+   The same tokens write the captions: drawnAs() is the word for the
+   treatment the chart just drew, so "hatched" can never be printed under an
+   outline, which is the defect the plan's hatch/outline swap exists to
+   prevent (a reason that is not the true one). */
+const CLASSIC_FORM = Object.freeze({ fit: false, max: 96, end: 3, base: 3, gap: 0, steps: 7,
+  absent: 'hatch', unfinished: 'hollow', projected: 'solid', pitch: 4, angle: 45 });
+export function markForm() {
+  let cs = null;
+  try { cs = getComputedStyle(document.documentElement); } catch { return CLASSIC_FORM; }
+  const raw = (k) => String(cs.getPropertyValue(k) || '').trim();
+  const num = (k, d) => { const v = parseFloat(raw(k)); return Number.isFinite(v) ? v : d; };
+  const one = (k, d, ok) => (ok.includes(raw(k)) ? raw(k) : d);
+  return Object.freeze({
+    fit: num('--mk-fit', 0) === 1,
+    max: num('--mk-max', CLASSIC_FORM.max),
+    end: num('--mk-end', CLASSIC_FORM.end),
+    base: num('--mk-base', CLASSIC_FORM.base),
+    gap: num('--mk-gap', CLASSIC_FORM.gap),
+    steps: num('--mk-steps', CLASSIC_FORM.steps),
+    absent: one('--mk-absent', CLASSIC_FORM.absent, ['hatch', 'outline']),
+    unfinished: one('--mk-unfinished', CLASSIC_FORM.unfinished, ['hollow', 'hatch']),
+    projected: one('--mk-projected', CLASSIC_FORM.projected, ['solid', 'hatch']),
+    pitch: num('--mk-hatch-pitch', CLASSIC_FORM.pitch),
+    angle: num('--mk-hatch-angle', CLASSIC_FORM.angle),
+  });
+}
+/* The word for a treatment, as the tokens in force draw it: 'hatched',
+   'outlined', 'hollow' or 'solid'. Exported for every page caption that
+   names how a chart drew something. */
+const DRAWN = Object.freeze({ hatch: 'hatched', outline: 'outlined', hollow: 'hollow', solid: 'solid' });
+export const drawnAs = (kind, form = markForm()) => DRAWN[form[kind]];
+
+/* A bar whose DATA end is rounded and whose baseline is square (SPEC §4),
+   as a path: a rect's rx rounds all four corners. `r` is clamped to half the
+   width and to the height, so a short bar is a rounded stub rather than an
+   ellipse. Upward bars only — every vertical bar here grows from zero. */
+const n2 = (v) => +(+v).toFixed(2);
+function endedBar(x, y, w, h, r) {
+  const k = Math.max(0, Math.min(r, w / 2, h)), b = y + h;
+  return `M${n2(x)} ${n2(b)} V${n2(y + k)} Q${n2(x)} ${n2(y)} ${n2(x + k)} ${n2(y)} `
+    + `H${n2(x + w - k)} Q${n2(x + w)} ${n2(y)} ${n2(x + w)} ${n2(y + k)} V${n2(b)} Z`;
+}
+/* Does this form round only the data end? The old skin rounds all four
+   corners with rx and is drawn as the <rect> it always was. */
+const endsOnly = (form) => form.base < form.end;
+
+/* SPEC §5 HATCH: the mark's OWN colour at --hatch-a (0.45 light, 0.53 dark),
+   45°, a 1px line every 4px, over the paper. One pattern per chart and per
+   colour, created on first use; the id carries a random stem for the reason
+   gapBars' comment gives (two charts on one page, one DOM id). */
+function hatches(svg, form) {
+  const stem = 'ht' + Math.random().toString(36).slice(2, 7);
+  let defs = null; const made = new Map();
+  return (token) => {
+    if (!made.has(token)) {
+      if (!defs) { defs = mk('defs'); svg.prepend(defs); }
+      const id = `${stem}${made.size}`, p = form.pitch;
+      const pat = mk('pattern', { id, width: p, height: p, patternUnits: 'userSpaceOnUse',
+        patternTransform: `rotate(${form.angle})` });
+      pat.append(mk('rect', { width: p, height: p, fill: 'var(--paper)' }),
+        mk('line', { x1: 0, y1: 0, x2: 0, y2: p, stroke: `var(${token})`,
+          'stroke-opacity': 'var(--hatch-a)', 'stroke-width': 1 }));
+      defs.append(pat); made.set(token, `url(#${id})`);
+    }
+    return made.get(token);
+  };
+}
+
 /* ── the shared axis ───────────────────────────────────────────────────────
    Four charts drew the same gridline loop — barChart, gapBars, areaChart and,
    in a variant, scatter — three of them character for character. The x-label
@@ -188,9 +273,14 @@ export const axisGutter = (labels, { minimum = 30 } = {}) => Math.ceil(Math.max(
    everywhere and made a ninety-bar chart and a nine-bar chart the same
    density. The 1.5px floor is unchanged — it is what keeps a ninety-bar chart
    from drawing bars thinner than their own corner radius. */
+/* Under Arkiv the ceiling is SPEC §4's 24px and every pair of touching bars
+   keeps a 2px surface gap, both read from the mark form (--mk-max, --mk-gap).
+   With no form given this is the old skin's rule, exactly, which is what
+   test/chart_fit.test.mjs measures. */
 const BAR_MAX_PX = 96;
-export const barWidth = (step, pad) =>
-  Math.max(Math.min(step * (1 - pad), BAR_MAX_PX), 1.5);
+export const barWidth = (step, pad, form = null) =>
+  Math.max(Math.min(step * (1 - pad), form ? form.max : BAR_MAX_PX,
+    form && form.gap > 0 ? step - form.gap : Infinity), 1.5);
 
 export function yTicks({ hi, fixedMax = null, target = 4 }) {
   if (fixedMax != null && fixedMax > 0) {
@@ -252,8 +342,17 @@ export function xTickIndices(n, target = 12) {
    identical to the shorter one. #compare draws exactly that pair, so it passes
    the larger of the two maxima to both. Everywhere else the default — scale to
    this series — is still what a single chart wants. */
+/* `projected` names the bars that are a PROJECTION rather than a measurement.
+   ─────────────────────────────────────────────────────────────────────────
+   #forecast's caption has said "Hatched bars are forecast" over bars drawn
+   solid in a colour of their own — a treatment named that the chart did not
+   draw. SPEC §5 draws a projection as a HATCH in the series' own colour, so
+   under a form whose --mk-projected is `hatch` these bars are hatched (with a
+   1px edge in that colour, so the bar's height still reads), and the caption
+   asks drawnAs('projected') which word to print. The old skin's form keeps
+   them solid, as production draws them. */
 export function barChart(host, data, { x, y, label, color = '--b400', colorFor, onClick,
-  valueFmt = (v) => fmt(v), axisFmt = null, lo = null, hi = null,
+  valueFmt = (v) => fmt(v), axisFmt = null, lo = null, hi = null, projected = null,
   max: fixedMax = null, aria = null } = {}) {
   /* THE AXIS AND THE TOOLTIP ARE NOT THE SAME FORMATTER, and treating them as
      one is what put "10 bookings / 20 bookings / 30 bookings" up the side of
@@ -278,10 +377,12 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
      ninety-bar chart drawing 4.6px bars with a 3px corner radius, which is an
      ellipse rather than a bar. */
   const pad = data.length <= 12 ? 0.28 : data.length <= 40 ? 0.18 : 0.10;
-  const bw = barWidth(step, pad);
+  const form = markForm();
+  const bw = barWidth(step, pad, form);
   const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
   const { max } = yAxis(svg, { hi: raw, pl, pr, pt, ih, W, fmt: axisFmt, fixedMax });
   const xAt = new Set(xTickIndices(data.length));
+  const hatchOf = hatches(svg, form);
   data.forEach((d, i) => {
     const h = ih * (+d[y]) / max, bx = pl + step * i + (step - bw) / 2, by = pt + ih - h;
     const fill = (colorFor && colorFor(d, i)) || color;
@@ -289,9 +390,15 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
        every zero a 1px stub indistinguishable from a value too small to see —
        and the same stub to a day nobody measured, which is a different fact. */
     const bh = +d[y] === 0 ? 0 : Math.max(h, 1);
-    const r = mk('rect', { x: bx, y: by, width: bw, height: bh,
-      // A radius wider than half the bar rounds it into a lozenge.
-      rx: Math.min(3, bw / 2, bh / 2), fill: `var(${fill})`, 'data-rise': '' });
+    const proj = form.projected === 'hatch' && projected && projected(d, i);
+    const paint = proj
+      ? { fill: hatchOf(fill), stroke: `var(${fill})`, 'stroke-width': 1 }
+      : { fill: `var(${fill})` };
+    const r = endsOnly(form)
+      ? mk('path', { d: endedBar(bx, pt + ih - bh, bw, bh, form.end), ...paint, 'data-rise': '' })
+      : mk('rect', { x: bx, y: by, width: bw, height: bh,
+        // A radius wider than half the bar rounds it into a lozenge.
+        rx: Math.min(3, bw / 2, bh / 2), ...paint, 'data-rise': '' });
     const hasRange = lo && hi && d[lo] != null && d[hi] != null;
     interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}`
       + (hasRange ? `<br>somewhere between ${valueFmt(d[lo])} and ${valueFmt(d[hi])}` : ''),

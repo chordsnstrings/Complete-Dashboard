@@ -37,12 +37,13 @@
    rule in arkiv.css, so they win in either theme state that asks for dark
    and are inert without the skin. They carry color-scheme:dark, so native
    controls and scrollbars follow; arkiv.css's color-scheme:light (0,2,0)
-   stands everywhere else. The form tokens (--hl-*, --mark-row) are not
-   colours and are declared once, in the light block. */
+   stands everywhere else. The form tokens (--hl-*, --mark-row, and the
+   chart mark form --mk-* that STEP 2 added) are not colours and are
+   declared once, in the light block. */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { cssDeclarations, bridgeDeclarations, themeDeclarations } from '../api/public/tokens.js';
+import { cssDeclarations, bridgeDeclarations, themeDeclarations, markDeclarations } from '../api/public/tokens.js';
 
 export const CSS = join(dirname(fileURLToPath(import.meta.url)), '..', 'api', 'public', 'app.css');
 export const BEGIN = '/* ═══ BEGIN GENERATED TOKENS ═══ */';
@@ -75,6 +76,8 @@ ${cssDeclarations().map(decl).join('\n')}
 ${themeDeclarations('light').map(decl).join('\n')}
   /* the old skin's names, folded onto Arkiv tokens (tokens.js BRIDGE) */
 ${bridgeDeclarations().map(decl).join('\n')}
+  /* the mark form, SPEC §4-§5, read by charts.js markForm() (tokens.js MARK) */
+${markDeclarations().map(decl).join('\n')}
 }
 /* The dark set (the operator's ruling 3; evidence in docs/ARKIV-DARK.md),
    twice: for a dark OS when the reader chose nothing, and for a reader who
@@ -107,6 +110,6 @@ if (process.argv[1] && process.argv[1].endsWith('gen-tokens-css.mjs')) {
     console.log('app.css tokens match api/public/tokens.js');
   } else {
     writeFileSync(CSS, want);
-    console.log(`wrote ${cssDeclarations().length + themeDeclarations('light').length + bridgeDeclarations().length} light and 2 × ${darkDeclarations().length} dark declarations into ${CSS}`);
+    console.log(`wrote ${cssDeclarations().length + themeDeclarations('light').length + bridgeDeclarations().length + markDeclarations().length} light and 2 × ${darkDeclarations().length} dark declarations into ${CSS}`);
   }
 }

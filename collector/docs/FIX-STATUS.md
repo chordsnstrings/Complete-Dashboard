@@ -2513,3 +2513,25 @@ and generator under the new tests) → tokens fails and throws on the missing
   collide at 1440 in both themes of the skin ("23 Dec 2024Feb 2025…"); the
   chart is STEP 2's. `.sh-track>i.o` in app.css paints a literal
   `rgba(74,124,166,.42)` blue under the skin; it is a chart colour for STEP 2.
+
+## Arkiv reskin, STEP 2 — the charts — 2026-09-23, NOT ON PRODUCTION
+
+Branch `reskin-foundation`. docs/UI-REDESIGN-PLAN.md §3 "Charts", SPEC §4-§5,
+the review's corrections, and the operator's rulings in §1. Not deployed, not
+pushed, default skin not flipped. One commit per chart function. The old skin
+must draw what production draws; everything below shows only under
+`?skin=arkiv`, except where a row says "both skins".
+
+**How one charts.js draws two skins.** Colour already followed the skin
+(every fill is a `var()`). FORM could not: which element a mark is, how thick
+it may be, whether an uncollected day is a hatch or an outline, and the
+caption that names it. So the form is a token too: app.css declares the old
+skin's `--mk-*` (today's forms, value for value), the Arkiv block declares
+SPEC's (generated from tokens.js `MARK`), and `charts.js markForm()` reads
+whichever is in force — a token, never the skin attribute. `drawnAs(kind)`
+gives the caption the word for the treatment actually drawn.
+
+| # | what | state | proof |
+|---|---|---|---|
+| CH1 | **The mark form as tokens, and barChart to SPEC §4.** tokens.js `MARK` + `markDeclarations()` (fit, 24px ceiling, 4px data end, square base, 2px gap, 6 steps, absent = outline, unfinished = hatch, projected = hatch, 4px/45° hatch); the generator writes them into the Arkiv light block; app.css's old `:root` declares today's forms. `markForm()`, `drawnAs()`, `hatches()` (SPEC §5: the series' own colour at `--hatch-a`, 45°, 1px every 4px, over the paper). barChart: under Arkiv a bar is a path with its data end rounded and its baseline square, ≤ 24px, 2px apart; a new `projected` option hatches a projection. `sequentialIndex()` is the step `sequentialOf()` picks. `channelKey()` learns the labels readers see (`FMS telematics`, `Uber fleet`, `uber_fleet`). arkiv.css §17: the grid in `--faint`, the baseline in `--hair`, ticks mono `--t1` grey, a hatched key swatch (`sw-proj`) | **written** | chart_marks §0-§1 (48). Old skin in a browser: nine bars 1,090px wide are `<rect>` rx ≤ 3 and > 60px; forecast bars solid |
+| CH1b | **Both skins — a caption that named a treatment the chart did not draw.** #forecast said "Hatched bars are forecast" over bars drawn SOLID in a colour of their own. The caption now asks `drawnAs('projected')`: Arkiv hatches them and says so; the old skin keeps them solid and says "the bars after the last observed month are forecast, in the colours the key names". A text change on production's skin, made because the old sentence was untrue (CLAUDE.md: never a reason that is not the true one) | **written** | chart_marks §1b renders #forecast in both skins on the mock |

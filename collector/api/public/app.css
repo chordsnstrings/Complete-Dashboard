@@ -148,6 +148,17 @@
   --b100:#dce8f1; --b200:#bcd3e5; --b300:#93b8d3;
   --b400:#6699bd; --b500:#2f6f9f; --b600:#245a80; --b700:#1a4360;
 
+  /* ── the chart form, as THIS skin draws it (plan §3, STEP 2) ─────────────
+     charts.js markForm() reads these, and the Arkiv block below redeclares
+     them from tokens.js MARK (SPEC §4-§5). One piece of chart code draws both
+     skins; these values are today's forms exactly, so the old skin does not
+     move: a chart drawn in a fixed 720-unit box and stretched (fit 0), bars
+     up to 96px with rx 3 on all four corners, no minimum gap, the 7-step blue
+     ramp, an uncollected day HATCHED, today's bar HOLLOW, and a forecast bar
+     SOLID. Deleted with this skin. test/chart_marks.test.mjs pins them. */
+  --mk-fit:0; --mk-max:96; --mk-end:3; --mk-base:3; --mk-gap:0; --mk-steps:7;
+  --mk-absent:hatch; --mk-unfinished:hollow; --mk-projected:solid;
+
   /* ── semantic state ───────────────────────────────────────────────────────
      THE ROLE RULE, and it is absolute, because no choice of hex can replace it:
      under deuteranopia an amber --warn and a red --ch-yango are ΔE 2.4 apart —
@@ -400,6 +411,18 @@
   --on-c-fms:var(--ink);
   /* the old skin's names, folded onto Arkiv tokens (tokens.js BRIDGE) */
   --grey-strong:var(--grey);
+  /* the mark form, SPEC §4-§5, read by charts.js markForm() (tokens.js MARK) */
+  --mk-fit:1;
+  --mk-max:24;
+  --mk-end:4;
+  --mk-base:0;
+  --mk-gap:2;
+  --mk-steps:6;
+  --mk-absent:outline;
+  --mk-unfinished:hatch;
+  --mk-projected:hatch;
+  --mk-hatch-pitch:4;
+  --mk-hatch-angle:45;
 }
 /* The dark set (the operator's ruling 3; evidence in docs/ARKIV-DARK.md),
    twice: for a dark OS when the reader chose nothing, and for a reader who

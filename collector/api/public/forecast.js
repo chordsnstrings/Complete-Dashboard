@@ -45,7 +45,7 @@
    the total reports "flat" about that. Every year-on-year row carries both
    halves and says which one moved the number. */
 
-import { empty, fmt, barChart, scatter } from './charts.js';
+import { empty, fmt, barChart, scatter, drawnAs } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, dayStr, dateStr,
   countOf, plural, sourceLabel, signed, verdict } from './ui.js';
 import { q, href, hrefFilter, state } from './data.js';
@@ -517,8 +517,17 @@ export async function renderForecast(root) {
   /* ── observed and forecast on one axis ────────────────────────────────── */
   const used = new Set(d.months_used);
   const hist = d.observed.filter((m) => !m.no_data);
+  /* The caption names the treatment the chart DRAWS. It said "Hatched bars
+     are forecast" for as long as the bars were solid in a colour of their
+     own — nothing on the chart was hatched. Under a form that hatches a
+     projection (SPEC §5, the Arkiv skin) that sentence is now true; under the
+     old skin's form the forecast bars are solid, and the caption says what
+     marks them instead: their own colour, named in the key, and a whisker. */
+  const projWord = drawnAs('projected');
   const { panel: tp, body: tb } = panel('Bookings by month, observed and forecast',
-    'Hatched bars are forecast. The months the fit refused to use are drawn in full, because hiding them '
+    (projWord === 'hatched' ? 'Hatched bars are forecast. '
+      : 'The bars after the last observed month are forecast, in the colours the key names. ')
+    + 'The months the fit refused to use are drawn in full, because hiding them '
     + 'would hide the reason the forecast starts where it does.');
   root.append(tp);
   /* The forecast drawn is the YEAR-ON-YEAR one where it exists, because that
@@ -535,15 +544,19 @@ export async function renderForecast(root) {
        says it exists to avoid. */
     ...drawn.map((f) => ({ label: MONTH(f.m), n: f.point, kind: f.kind, lo: f.low, hi: f.high })),
   ];
+  const PROJECTED = new Set(['forecast', 'extrapolation']);
   barChart(tb, series, { x: 'label', y: 'n', label: 'bookings', lo: 'lo', hi: 'hi',
+    projected: (r) => PROJECTED.has(r.kind),
     colorFor: (r) => ({ fitted: '--b500', excluded: '--grey', partial: '--grey',
       forecast: '--s3', extrapolation: '--s5' }[r.kind] || '--b400') });
+  /* `sw-proj`: the key's swatch for a projected series, which arkiv.css
+     draws as the same hatch the bar gets; the old skin has no rule for it. */
   tb.append(el('div', 'legend', [
     ['--b500', `fitted (${d.n} months)`],
     ['--grey', 'not used — before the break, or a partial month'],
-    ['--s3', 'forecast (3 months)'],
-    ['--s5', 'extrapolation — a line, not a forecast'],
-  ].map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('')
+    ['--s3', 'forecast (3 months)', true],
+    ['--s5', 'extrapolation — a line, not a forecast', true],
+  ].map(([c, t, p]) => `<span><i class="sw${p ? ' sw-proj' : ''}" style="background:var(${c})"></i>${t}</span>`).join('')
     + '<span class="dim">The whisker on a forecast bar is its 95% interval. A month with no whisker is '
     + 'observed, not predicted.</span>'));
   if (seas) {

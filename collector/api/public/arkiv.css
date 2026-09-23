@@ -820,3 +820,27 @@
    The title rule above sets the h1 at the same weight zen's own rule does, so
    the smaller zen title is restated here, where it is later and heavier. */
 :root[data-skin="arkiv"][data-zen="1"] .topbar h1{font-size:var(--t9)}
+
+/* ── 17 · charts (STEP 2) ───────────────────────────────────────────────────
+   The paint half of SPEC §4-§5. The FORM half — which element a mark is, how
+   thick, whether a missing day is an outline — is in charts.js, chosen by the
+   --mk-* tokens the generated block declares (tokens.js MARK), because a
+   stylesheet cannot turn one element into another or rewrite the caption that
+   names it. What is here only paints what charts.js drew.
+
+   The grid is one step off the paper and solid; the baseline one step more.
+   Ticks are mono at --t1 in grey (5.15:1), never grey-2, which is a rule. */
+:root[data-skin="arkiv"] .gl{stroke:var(--faint)}
+:root[data-skin="arkiv"] .gl-base{stroke:var(--hair)}
+:root[data-skin="arkiv"] .axis{font-size:var(--t1);letter-spacing:.04em;fill:var(--grey)}
+:root[data-skin="arkiv"] .vlab{fill:var(--grey)}
+/* A key's swatch for a PROJECTED series, drawn as the bar is: the series'
+   own colour in 1px lines at --hatch-a over the paper, inside a 1px edge in
+   the full colour. The swatch's inline background is the colour; the paper
+   stripes over it leave the lines, and the last pixel of each stripe is
+   paper at the hatch's opacity, so a line reads at 45% (53% dark) as the
+   chart's pattern does. */
+:root[data-skin="arkiv"] .sw-proj{position:relative;overflow:hidden}
+:root[data-skin="arkiv"] .sw-proj::after{content:"";position:absolute;inset:1px;
+  background:repeating-linear-gradient(-45deg,var(--paper) 0 3px,
+    color-mix(in srgb,var(--paper) calc((1 - var(--hatch-a)) * 100%),transparent) 3px 4px)}

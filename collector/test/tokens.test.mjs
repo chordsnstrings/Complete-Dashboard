@@ -109,7 +109,10 @@ const parse = (css) => {
 const rules = parse(stripComments(block));
 check('the block is three rules: light, OS-dark (in its media query), chosen dark', rules.length === 3,
   rules.map((r) => r.sel).join(' | '));
-const want = [...T.cssDeclarations(), ...T.themeDeclarations('light'), ...T.bridgeDeclarations()];
+/* STEP 2 appended the chart mark form (tokens.js MARK, --mk-*): a form, not a
+   colour, declared once in the light block like --hl-* and --mark-row. */
+const want = [...T.cssDeclarations(), ...T.themeDeclarations('light'), ...T.bridgeDeclarations(),
+  ...T.markDeclarations()];
 const got = rules[0]?.decls || [];
 const sameList = (g, w) => g.length === w.length && g.every((d, i) => d === w[i]);
 const diffList = (g, w) => g.filter((d) => !w.includes(d)).concat(w.filter((d) => !g.includes(d))).join(' ');
@@ -126,7 +129,7 @@ check('the chosen-dark rule declares the same, in order', sameList(chosen?.decls
 /* No light value may survive into dark: every COLOUR the light rule sets
    (everything but the form tokens and the bridge), the dark rules set again. */
 const nameOf = (d) => d.slice(0, d.indexOf(':'));
-const lightColours = got.map(nameOf).filter((n) => !/^--(hl-|mark-row|grey-strong)/.test(n));
+const lightColours = got.map(nameOf).filter((n) => !/^--(hl-|mark-row|grey-strong|mk-)/.test(n));
 const darkNames = new Set((chosen?.decls || []).map(nameOf));
 const leaks = lightColours.filter((n) => !darkNames.has(n));
 check(`every one of the light rule's ${lightColours.length} colour names is redeclared in dark`,
