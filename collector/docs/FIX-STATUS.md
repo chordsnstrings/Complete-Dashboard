@@ -2007,3 +2007,28 @@ Proved by revert, per fix, with the measured counts in the test header — plus
 one proof the other way: flipping the fixture to `open: false` turns the panel
 to the other sentence and the suite stays 16/16, so the page reads the server
 rather than printing a constant.
+
+## Bolt's Monday 21 Sep payout, and everything that hid it — 2026-09-23
+
+The operator: "monday 21st had bolt payout as well." It had — Ecosine AED
+1,275.14, Egari AED 619.18 — and the Payouts page showed nothing for that
+Monday. `getPayouts` runs days late (on 23 Sep it still ended at 14 Sep);
+Bolt's balance ledger (`getFleetBalanceDetails`, one day per call) carries the
+"Weekly payout" line the day the money leaves. Measured on production before
+any fix, by deploy `86d2e21`'s probe.
+
+| # | what | state | proof |
+|---|---|---|---|
+| B1 | the page read Bolt's payouts from `getPayouts` only | **proven** — `942f255` + `8f390b5`, deployment `1276e564` | on production, `/api/finance/payouts`: 2026-09-21 ecosine 1275.14 / egari 619.18, `basis: balance-ledger`; totals 5,896.65 / 2,205.53 = the three Mondays summed; 179 rows over the whole record, zero (fleet, day) pairs twice |
+| B2 | cadence printed the literal "175 of 175" | **proven** — `942f255` | production prints "179 of 179", counted from both books on every request |
+| B3 | no word when a Monday behind Bolt's next payout date had no payout | **proven** — `942f255`, `8f390b5` | Bolt's balance and next payout (2026-09-28) shown per fleet; with the 21st stored the warning list is empty |
+| B4 | **every ledger write failed on production**: a JS array bound to JSONB (`payout_lines`), which PGlite accepted and node-postgres sends as an array literal | **proven** — `8f390b5` | first run at `942f255` logged "invalid input syntax for type json" for both fleets; at `d8b77f3` the rows landed at 06:10 UTC. Test runs the row through `pg`'s own `prepareValue`; the revert fails it |
+| B5 | that failure was reported as "payouts ecosine" and the page told the operator no payout was "in either of Bolt's books … check the bank statement" — a reason that was not the true one | **proven** — `8f390b5` | the store failure is now named "balance … read but not stored"; the warning consults the stored ledger day and names a collection gap as one. Reverts fail 1 each |
+| B6 | the next payout date printed "Mon Sep 28" (raw DATE through `String()`) | **proven** — `8f390b5` | production returns `2026-09-28` |
+| B7 | "first seen" must keep the first insert while each run re-reads the day | **proven** | run at 06:27 UTC: `checked_at` moved 06:10 → 06:27, `collected_at` of both 21 Sep rows held at 06:10 |
+| B8 | reconcile panel titled "Uber's wire" over Bolt rows; its no-comparison notes printed "(Bolt)" twice with no fleet | **proven** — `cc34a21`, deployment `667a1604` | production renders "Each wire against our own figure" and "(Bolt · Ecosine)" 91 / "(Bolt · Egari)" 88 / "(Uber · Egari)" 45 / "(Uber · Ecosine)" 44 |
+
+B4 is the one to remember: the whole suite was green over a write production
+could not do, because every test runs on PGlite. COVERAGE.md carries it as a
+trap. Not done here: the Ecosine FI roster entitlement (`142868`
+COMPANIES_NOT_ALLOWED) is unchanged and is Bolt's to grant, not ours to fix.
