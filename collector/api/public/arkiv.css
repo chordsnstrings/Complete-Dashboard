@@ -184,6 +184,26 @@
   --chan-cabman:var(--c-cabman);
   --chan-fms:var(--c-fms);
   --chan-none:var(--grey);
+  /* The ink a share is printed in on each slot (a stacked bar's segment
+     label), measured with tokens.js contrast(): paper on the four steps far
+     from the paper (17.95 / 8.24 / 5.14 / 12.89:1), ink on the two near it
+     (6.00 / 9.09:1); in dark 14.91 / 7.61 / 5.16 / 10.77 and 4.85 / 7.46.
+     Paper and ink swap with the theme and so does the ramp, so one name per
+     slot reads in both. A channel's segment takes its own --on-c-<key>. */
+  --on-cat-1:var(--paper);
+  --on-cat-2:var(--ink);
+  --on-cat-3:var(--paper);
+  --on-cat-4:var(--ink);
+  --on-cat-5:var(--paper);
+  --on-cat-6:var(--paper);
+  --on-cat-7:var(--ink);
+  --on-cat-8:var(--paper);
+  --on-chan-uber:var(--on-c-uber);
+  --on-chan-bolt:var(--on-c-bolt);
+  --on-chan-yango:var(--on-c-yango);
+  --on-chan-hotel:var(--on-c-hotel);
+  --on-chan-cabman:var(--on-c-cabman);
+  --on-chan-fms:var(--on-c-fms);
 
   /* Geometry. No panel, no shadow, no rounded corner on the sheet. Marks keep
      their own 4px data-end, chips 3px and swatches 2px — set where they are. */

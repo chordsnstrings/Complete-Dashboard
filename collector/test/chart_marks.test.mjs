@@ -652,6 +652,63 @@ check('#unit/assets names no line its scatter does not draw',
   !/below that line/.test(read('economics.js').replace(/\/\*[\s\S]*?\*\//g, ' '))
   || /refLine/.test(read('economics.js').replace(/\/\*[\s\S]*?\*\//g, ' ')));
 
+/* ── 8 · stackedBar ────────────────────────────────────────────────────── */
+console.log('\n8 · stackedBar: 2px gaps, the data end, colour by name, a label that reads');
+const SB = async ([data, w]) => {
+  const c = await import('/charts.js');
+  document.querySelector('#bhost')?.remove();
+  const host = document.createElement('div'); host.id = 'bhost'; host.className = 'panel';
+  host.style.cssText = `width:${w}px;position:absolute;left:0;top:0`;
+  document.body.append(host);
+  c.stackedBar(host, data);
+  const svg = host.querySelector('svg'), cs = (e) => getComputedStyle(e);
+  const segs = [...svg.querySelectorAll('g > rect')].map((r) => ({ x: +r.getAttribute('x'), w: +r.getAttribute('width'),
+    fill: cs(r).fill, stroke: r.getAttribute('stroke') }));
+  const labels = [...svg.querySelectorAll('g > text')].map((t) => ({ x: +t.getAttribute('x'), fill: cs(t).fill, size: cs(t).fontSize }));
+  const clip = svg.querySelector('clipPath > *');
+  return { vb: svg.getAttribute('viewBox'), segs, labels, clip: { tag: clip.tagName, d: clip.getAttribute('d'), rx: clip.getAttribute('rx') },
+    keys: [...host.querySelectorAll('.legend .sw')].map((e) => cs(e).backgroundColor) };
+};
+const toHex = (c) => '#' + c.match(/\d+/g).slice(0, 3).map((x) => (+x).toString(16).padStart(2, '0')).join('');
+const outcome = [{ label: 'Completed', n: 700 }, { label: 'Did not complete', n: 220 }, { label: 'Other / not reported', n: 80 }];
+const byChan = [{ label: 'Uber', n: 800 }, { label: 'Bolt', n: 150 }, { label: 'Hotel', n: 50 }];
+const SBR = {};
+for (const [skin, scheme] of [['classic', 'light'], ['arkiv', 'light'], ['arkiv', 'dark']]) {
+  const { ctx, page } = await open(skin, { scheme });
+  SBR[`${skin}-${scheme}`] = { out: await page.evaluate(SB, [outcome, 640]), ch: await page.evaluate(SB, [byChan, 640]) };
+  await ctx.close();
+}
+{
+  const c = SBR['classic-light'], a = SBR['arkiv-light'], d = SBR['arkiv-dark'];
+  check('old skin: the 400 × 30 box, hairline strokes, the rx-5 clip, the --s slots, 14px paper labels',
+    c.out.vb === '0 0 400 30' && c.out.segs.every((x) => x.stroke === 'var(--surface)') && c.out.clip.rx === '5'
+    && JSON.stringify(c.out.segs.map((x) => x.fill)) === JSON.stringify(['#2f6f9f', '#c2683a', '#2f8f6f'].map(rgb))
+    && c.out.labels.every((l) => l.size === '14px' && l.fill === rgb('#fbfaf7')), JSON.stringify(c.out));
+  check('Arkiv: drawn 24px tall at the host’s width', a.out.vb === '0 0 640 24', a.out.vb);
+  const gapsA = a.out.segs.slice(1).map((x, i) => +(x.x - (a.out.segs[i].x + a.out.segs[i].w)).toFixed(3));
+  check('Arkiv: a 2px surface gap between segments, and no stroke around any',
+    gapsA.every((g) => g === 2) && a.out.segs.every((x) => !x.stroke), JSON.stringify(gapsA));
+  check('Arkiv: …the segments still add up to the whole width',
+    Math.abs(a.out.segs.reduce((t, x) => t + x.w, 0) + 2 * (a.out.segs.length - 1) - 640) < 0.01);
+  check('Arkiv: square at the baseline, 4px round at the data end',
+    a.out.clip.tag === 'path' && /^M0 0 H636 Q640 0 640 4 V20 Q640 24 636 24 H0 Z$/.test(a.out.clip.d), a.out.clip.d);
+  check('Arkiv: three outcomes are three distinct slots; three channels are their identities',
+    new Set(a.out.segs.map((x) => x.fill)).size === 3
+    && JSON.stringify(a.ch.segs.map((x) => x.fill)) === JSON.stringify(['uber', 'bolt', 'hotel'].map((k) => rgb(T.CHANNEL[k]))),
+    JSON.stringify([a.out.segs.map((x) => x.fill), a.ch.segs.map((x) => x.fill)]));
+  for (const [nm, r] of [['light', a], ['dark', d]]) {
+    const pairs = [r.out, r.ch].flatMap((x) => x.labels.map((l) => {
+      const seg = x.segs.find((sg) => l.x >= sg.x && l.x <= sg.x + sg.w);
+      return T.contrast(toHex(l.fill), toHex(seg.fill));
+    }));
+    check(`Arkiv ${nm}: every share printed on a segment reads at 4.5:1 or more, at --t4`,
+      pairs.length >= 4 && pairs.every((q) => q >= 4.5) && [r.out, r.ch].every((x) => x.labels.every((l) => l.size !== '14px')),
+      JSON.stringify(pairs.map((q) => q.toFixed(2))));
+  }
+  check('both skins: every key swatch is the colour of its segment',
+    [c, a, d].every((r) => [r.out, r.ch].every((x) => x.keys.every((k, i) => k === x.segs[i].fill))));
+}
+
 /* #forecast itself: the caption names the treatment the chart draws. */
 console.log('\n1b · #forecast says what it draws');
 for (const skin of ['classic', 'arkiv']) {

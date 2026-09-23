@@ -1318,10 +1318,21 @@ export function scatter(host, data, opts = {}) {
    a hairline nobody can point at while still taking a full legend entry with a
    real number beside it; those fold into a trailing Other, as donut folds its
    tail, and the fold is neutral because it is not a category. */
-export function stackedBar(host, data, { label = 'label', value = 'n', onClick,
-  clickable = null, valueFmt = (v) => fmt(v), colorFor = null, aria = null } = {}) {
+/* Arkiv (STEP 2, SPEC §4): drawn at the measured width and 24px tall (the
+   bar ceiling); a 2px SURFACE GAP between segments, never a stroke drawn
+   around one; square at the baseline and 4px round at the data end; every
+   segment coloured BY NAME (a channel is its identity, anything else a
+   distinct slot — byName), the fold grey; a share printed on a segment in
+   the ink that reads on its fill (--on-cat-N / --on-chan-*, per theme), at
+   the page's --t4. The old skin keeps its 400 × 30 box, its hairline
+   strokes, its clip with rx 5 and its paper labels, exactly. */
+export function stackedBar(host, data, opts = {}) {
+  const { label = 'label', value = 'n', onClick,
+    clickable = null, valueFmt = (v) => fmt(v), colorFor = null, aria = null } = opts;
   host.innerHTML = '';
   if (!data.length) return empty(host);
+  const form = markForm();
+  whenLaidOut(host, form, () => stackedBar(host, data, opts));
   const num = (d) => (Number.isFinite(+d[value]) ? +d[value] : 0);
   const tot0 = data.reduce((a, d) => a + num(d), 0) || 1;
   const big = data.filter((d) => num(d) / tot0 >= 0.015);
@@ -1331,18 +1342,36 @@ export function stackedBar(host, data, { label = 'label', value = 'n', onClick,
       _tail: small.map((d) => `${d[label]} ${fmt(num(d))}`) }]
     : big;
   const tot = rows.reduce((a, d) => a + num(d), 0) || 1;
-  const W = 400, H = 30, R = 5; let x = 0;
+  const fit = form.fit;
+  const W = fit ? chartBox(host).W : 400, H = fit ? Math.min(24, form.max) : 30, R = 5;
+  /* The width the segments share once the gaps are taken out of it. */
+  const gap = fit ? form.gap : 0, span = W - gap * Math.max(0, rows.length - 1);
+  let x = 0;
   const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
   const cid = 'sb' + Math.random().toString(36).slice(2, 7);
   const defs = mk('defs'), cp = mk('clipPath', { id: cid });
-  cp.append(mk('rect', { x: 0, y: 0, width: W, height: H, rx: R }));
+  if (fit) {
+    const e = Math.min(form.end, H / 2);
+    cp.append(mk('path', { d: `M0 0 H${n2(W - e)} Q${n2(W)} 0 ${n2(W)} ${n2(e)} V${n2(H - e)} `
+      + `Q${n2(W)} ${n2(H)} ${n2(W - e)} ${n2(H)} H0 Z` }));
+  } else cp.append(mk('rect', { x: 0, y: 0, width: W, height: H, rx: R }));
   defs.append(cp); svg.append(defs);
   const g = mk('g', { 'clip-path': `url(#${cid})` });
-  const swatchOf = (d, i) => (d._tail ? '--grey' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length]);
+  const swatchOf = (d, i) => (d._tail ? '--grey' : byName(d, i, label, colorFor));
+  /* The label's ink, named for the fill it sits on: a slot's own --on-cat-N,
+     a channel's --on-chan-<key> (declared under Arkiv only, falling back to
+     the slot's), and the fold's --surface. The old skin declares every
+     --on-cat-N as --surface, the paper label it always printed. */
+  const onOf = (d, i) => {
+    if (d._tail) return '--surface';
+    const slot = `--on-cat-${(i % CAT.length) + 1}`;
+    const k = channelOfToken(swatchOf(d, i));
+    return k ? `--on-chan-${k}, var(${slot})` : slot;
+  };
   rows.forEach((d, i) => {
-    const w = num(d) / tot * W, pct = num(d) / tot * 100;
+    const w = num(d) / tot * span, pct = num(d) / tot * 100;
     const r = mk('rect', { x, y: 0, width: w, height: H, fill: `var(${swatchOf(d, i)})`,
-      stroke: 'var(--surface)', 'stroke-width': 1.5, 'data-fade': '' });
+      ...(fit ? {} : { stroke: 'var(--surface)', 'stroke-width': 1.5 }), 'data-fade': '' });
     interactive(r, `${esc(d[label])} — <b>${valueFmt(num(d))}</b> (${pct.toFixed(1)}%)`
       + (d._tail ? `<br><span style="opacity:.8">${esc(d._tail.slice(0, 10).join(' · '))}</span>` : ''),
     onClick && !d._tail && (!clickable || clickable(d)) && (() => onClick(d)));
@@ -1351,12 +1380,13 @@ export function stackedBar(host, data, { label = 'label', value = 'n', onClick,
        Sized in VIEWBOX units against the panel it will be scaled into: this is
        a 400-unit box drawn at about 310px, so `vlab`'s 10px arrives as 7.75px
        — smaller than any other text on the page and not worth printing. 14
-       lands at about 11px. */
+       lands at about 11px. Drawn at its own size (Arkiv), it is --t4. */
     if (pct >= 12) {
-      g.append(txt(x + w / 2, H / 2 + 5, `${pct.toFixed(0)}%`, 'vlab', 'middle',
-        'fill:var(--surface);font-weight:600;font-size:14px'));
+      g.append(txt(x + w / 2, H / 2 + (fit ? 4 : 5), `${pct.toFixed(0)}%`, 'vlab', 'middle',
+        fit ? `fill:var(${onOf(d, i)});font-weight:600;font-size:var(--t4)`
+          : `fill:var(${onOf(d, i)});font-weight:600;font-size:14px`));
     }
-    x += w;
+    x += w + gap;
   });
   svg.append(g);
   host.append(svg);
