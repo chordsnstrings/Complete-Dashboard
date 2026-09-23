@@ -2183,3 +2183,11 @@ figures are in COVERAGE.
   holds the accounts each row matched. The `hr_employee_account` view explodes
   it for the latest export as (fleet, employee_id) ↔ (platform, ext_id). The
   salary import that would join on it is not built.
+
+## FMS seat data — 2026-09-23
+
+| # | what | state | proof |
+|---|---|---|---|
+| F1 | FMS's live `Seatcount` collected (GetVehicleCurrentDetails, vehicleno=ALL) into `telemetry_snapshot.seat_count`, schema_v84 | **written** | test/fms_seat_count.test.mjs (16). Reverts fail: "0 is a reading" 2, "refusal off the banner" 1, "vehicleno=ALL" 1, "rows carry the count" 1, "probe params" 1. Proven only when the first real poll after the deploy stores a count |
+| F2 | The Fleet tab's FMS seat column reads the live count as well as the per-journey count | **written** | test/vehicle_feeds.test.mjs (51); reverting the live half fails 2 |
+| F3 | The nightly probe called GetVehicleCurrentDetails without vehicleno and reported "Authentication failed" | **written** | test/fms_seat_count.test.mjs; proven when the next probe run shows fields rather than an error |

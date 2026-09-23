@@ -27,7 +27,7 @@ import { api } from './data.js';
    the provider its reading came from. */
 const FEEDS = {
   seat: { label: 'Seat sensor — CABMAN', noun: 'CABMAN seat-sensor', from: 'CABMAN DT' },
-  fms_seat: { label: 'Seat sensor — FMS', noun: 'FMS seat-count', from: 'FMS (InfoTrack), seat count per trip' },
+  fms_seat: { label: 'Seat sensor — FMS', noun: 'FMS seat-count', from: 'FMS (InfoTrack), seat count' },
   fms: { label: 'FMS data', noun: 'FMS', from: 'FMS (InfoTrack), live' },
 };
 
@@ -104,7 +104,7 @@ export async function renderFeeds(root) {
     { label: 'Seat sensor (FMS) receiving', value: fmt(t.fms_seat?.receiving ?? 0), tone: 'good', key: 'fms-seat-yes',
       sub: `of ${countOf(t.vehicles ?? 0, 'car')} active on Uber` },
     { label: 'Seat sensor (FMS) not receiving', value: fmt(t.fms_seat?.not_receiving ?? 0), tone: 'critical', key: 'fms-seat-no',
-      sub: `no FMS trip with a seat count in the last ${hours} hours` },
+      sub: `no FMS seat count in the last ${hours} hours` },
     { label: 'FMS receiving', value: fmt(t.fms?.receiving ?? 0), tone: 'good', key: 'fms-yes',
       sub: `of ${countOf(t.vehicles ?? 0, 'car')} active on Uber` },
     { label: 'FMS not receiving', value: fmt(t.fms?.not_receiving ?? 0), tone: 'critical', key: 'fms-no',
@@ -152,7 +152,7 @@ export async function renderFeeds(root) {
   const rules = [
     ['Active on Uber', 'Uber’s own vehicle list marks the car ACTIVE. It is read every 30 minutes, for both fleets.'],
     ['Seat sensor — CABMAN', `CABMAN DT's seat sensor, sampled every 5 minutes. It holds an account for ${names(d.accounts?.seat) || 'no fleet'} only.`],
-    ['Seat sensor — FMS', `the seat count FMS records on each trip, collected every 30 minutes, for ${names(d.accounts?.fms_seat) || 'no fleet'}. A car that makes no trip sends no seat count. FMS's live feed, as read here, carries no seat field.`],
+    ['Seat sensor — FMS', `the seat count FMS reports live (every 2 minutes) or on each trip (every 30 minutes), whichever is newer, for ${names(d.accounts?.fms_seat) || 'no fleet'}.`],
     ['FMS data', `InfoTrack's live telematics, with an account for ${names(d.accounts?.fms) || 'no fleet'}.`],
     ['Receiving', `a reading in the last ${hours} hours. Trackers report every few minutes while driving but go quiet for hours when parked, so a shorter window would turn parked cars red.`],
     ['Matched by', 'the plate, as every feed stores it: upper case, no spaces or dashes.'],

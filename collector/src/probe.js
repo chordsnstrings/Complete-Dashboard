@@ -427,9 +427,15 @@ export function surfaces({ from, to }) {
       call('GetAlertData', { vehicleno: 'ALL', fromdate: dotDate(new Date(from)), todate: dotDate(new Date(to)) }),
       { 'Plate No': 'plate', 'Alert Name': 'alert_type', 'Alert Date Time': 'occurred_at',
         'Start Location': 'pickup_addr', Slno: 'external_id' });
+    /* vehicleno=ALL, as GetTripPassenger sends it. Without it FMS answered
+       "Authentication failed" every night on both fleets, so this surface
+       read as a dead login while the same login served every other call.
+       seat_count is FMS's live seat count, now collected by src/sources/fms.js. */
     add('fms', `${fleet.fleet}:GetVehicleCurrentDetails`,
-      ['plate', 'captured_at', 'lat', 'lng', 'speed', 'status', 'ignition', 'odometer'],
-      'live position', () => call('GetVehicleCurrentDetails', {}));
+      ['plate', 'captured_at', 'lat', 'lng', 'speed', 'status', 'ignition', 'odometer', 'seat_count'],
+      'live position and seat count', () => call('GetVehicleCurrentDetails', { vehicleno: 'ALL' }),
+      { 'Plate No': 'plate', TrackTime: 'captured_at', Lat: 'lat', Lon: 'lng', Seatcount: 'seat_count',
+        Ignition: 'ignition', Odometer: 'odometer' });
   }
 
   /* CABMAN DT — the realtime tracking feed. One interface account per fleet,

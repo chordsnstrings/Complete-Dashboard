@@ -507,14 +507,83 @@ export async function pullLive(fleet) {
     state: 'ok', surface: 'Login', detail: null,
   });
   const { data } = await call('GetVehicleStatus', { UserId: userid });
-  const rows = (data?.data || []).map((v) => ({
-    source: SRC, fleet_id: fleet.fleet, plate: normPlate(v.vehicleno),
-    captured_at: parseFmsTime(v.tracktime) || new Date().toISOString(),
-    lat: v.lat, lng: v.lon, speed: parseFloat(v.speed) || null,
-    ignition: /on/i.test(v.ignition || ''), status: (v.vehiclestatus || '').split(' - ')[0],
-    fuel_level: v.fuellevel, ac_on: /on/i.test(v.acstatus || ''), raw: v,
-  }));
+  const seats = await liveSeatCounts(fleet);
+  const rows = (data?.data || []).map((v) => {
+    const plate = normPlate(v.vehicleno);
+    return {
+      source: SRC, fleet_id: fleet.fleet, plate,
+      captured_at: parseFmsTime(v.tracktime) || new Date().toISOString(),
+      lat: v.lat, lng: v.lon, speed: parseFloat(v.speed) || null,
+      ignition: /on/i.test(v.ignition || ''), status: (v.vehiclestatus || '').split(' - ')[0],
+      fuel_level: v.fuellevel, ac_on: /on/i.test(v.acstatus || ''),
+      /* On every row, null where FMS gave none: upsertMany groups rows by
+         their key set, and a column present on some rows only would split one
+         poll into two statements for no reason. */
+      seat_count: seats.get(plate) ?? null,
+      raw: v,
+    };
+  });
   return rows.length ? upsertMany('telemetry_snapshot', rows, ['source', 'plate', 'captured_at']) : 0;
+}
+
+/* ── FMS's live seat count ─────────────────────────────────────────────────
+   FMS and CABMAN are two separate seat-sensor providers (the operator,
+   2026-09-23), and FMS reports a live `Seatcount` on GetVehicleCurrentDetails.
+   GetVehicleStatus, which this poller reads for position, carries no seat
+   field, so the count is asked for in the same poll and attached to that
+   poll's row for the plate.
+
+   GetVehicleCurrentDetails takes the login itself (username, Password) and
+   vehicleno=ALL, like GetTripPassenger. The nightly probe called it with no
+   vehicleno and was answered "Authentication failed" on both fleets every
+   night; that is fixed in src/probe.js as well.
+
+   A REFUSAL HERE IS NOT A REFUSAL OF THE LOGIN. Login has just succeeded and
+   GetVehicleStatus answered, so a refusal from this one operation is logged
+   and leaves the seat count empty. It does NOT call noteFmsRefusal: that would
+   paint a working password red on the credential banner, for a reason that is
+   not the true one. */
+async function liveSeatCounts(fleet) {
+  try {
+    const r = await call('GetVehicleCurrentDetails',
+      { username: fleet.username, Password: fleet.password, vehicleno: 'ALL' });
+    const got = detailsSeatCounts(r);
+    if (got.refused) log.warn(SRC, `live seat count refused for ${fleet.fleet}`, { said: got.refused });
+    else if (!r.ok) log.warn(SRC, `live seat count unavailable for ${fleet.fleet}`, { status: r.status });
+    return got.counts;
+  } catch (e) {
+    log.warn(SRC, `live seat count unavailable for ${fleet.fleet}`, { err: String(e).slice(0, 160) });
+    return new Map();
+  }
+}
+
+/* A field by name, whatever its case or spacing: the docs spell the plate
+   `Plate No` and the count `Seatcount`, and this service is not consistent
+   between operations (GetVehicleStatus says `vehicleno`, `tracktime`). */
+const field = (o, ...names) => {
+  const want = names.map((n) => n.toLowerCase().replace(/[\s_]/g, ''));
+  const k = Object.keys(o || {}).find((x) => want.includes(x.toLowerCase().replace(/[\s_]/g, '')));
+  return k === undefined ? undefined : o[k];
+};
+
+/** Plate → live seat count, from one GetVehicleCurrentDetails answer. Pure,
+    so the reading of FMS's shape is testable without FMS. A count must be a
+    whole number from 0 up; 0 is an empty seat, which IS a reading. */
+export function detailsSeatCounts(r) {
+  const refused = fmsAuthRefusal(r);
+  const counts = new Map();
+  if (refused) return { refused, counts };
+  const d = r?.data;
+  const list = Array.isArray(d) ? d : Array.isArray(d?.Data) ? d.Data : Array.isArray(d?.data) ? d.data : [];
+  for (const v of list) {
+    const plate = normPlate(field(v, 'Plate No', 'vehicleno', 'plate'));
+    const raw = field(v, 'Seatcount', 'Seat Count');
+    if (!plate || raw == null || String(raw).trim() === '') continue;
+    const n = Number(String(raw).trim());
+    if (!Number.isInteger(n) || n < 0) continue;
+    counts.set(plate, n);
+  }
+  return { refused: null, counts };
 }
 
 // backfill/incremental entry point

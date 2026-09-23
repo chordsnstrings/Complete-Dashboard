@@ -90,6 +90,13 @@ await fmsTrip('Q10002', 'ecosine', '3 days', 2);
 await fmsTrip('Q20001', 'egari', '2 hours', 1);                  // Egari: no CABMAN, but FMS sends seat counts
 await fmsTrip('Q10007', 'ecosine', '1 hour', null);              // an FMS trip with no seat count is not seat data
 await fmsTrip('Q10008', 'ecosine', '1 hour', 1, 'uber');         // another channel's seat_count is not FMS's
+/* FMS's LIVE seat count (GetVehicleCurrentDetails, schema_v84): a car with no
+   FMS trip at all can still be sending seat data. */
+const fmsLive = (plate, fleet, ago, seatCount) => q(
+  `INSERT INTO telemetry_snapshot (source, fleet_id, plate, captured_at, seat_count, polled_at)
+   VALUES ('fms', $1, $2, now() - $3::interval, $4, now())`, [fleet, plate, ago, seatCount]);
+await fmsLive('Q10010', 'ecosine', '15 minutes', 1);             // live count, and no FMS trip at all
+await fmsLive('Q10009', 'ecosine', '10 minutes', null);          // an FMS fix with no seat count is not seat data
 
 /* ── who drives them ─────────────────────────────────────────────────────── */
 const person = async (platform, id, fleet, name, phone) => q(
@@ -251,6 +258,10 @@ console.log('\nFMS, the second seat-sensor provider');
   check('a car FMS has never sent a seat count for says so, "on record"',
     row('Q10003')?.fms_seat_state === 'never'
     && row('Q10003')?.fms_seat_reason === 'no FMS seat-count reading on record for this car', row('Q10003')?.fms_seat_reason);
+  check('FMS\u2019s LIVE seat count makes a car receiving even with no FMS trip',
+    row('Q10010')?.fms_seat_receiving === true && !!row('Q10010')?.fms_seat_at, JSON.stringify(row('Q10010')));
+  check('…but an FMS fix with no seat count is not seat data',
+    row('Q10009')?.fms_seat_receiving === false && row('Q10009')?.fms_seat_at == null, JSON.stringify(row('Q10009')));
   check('the response names FMS as a seat-sensor provider for both fleets',
     JSON.stringify([...(d.accounts?.fms_seat || [])].sort()) === '["ecosine","egari"]', JSON.stringify(d.accounts));
 }
@@ -259,8 +270,8 @@ console.log('\nthe count at the top');
 check('receiving and not receiving are counted per feed over every listed car',
   d.totals?.vehicles === 8
   && d.totals.seat.receiving === 2 && d.totals.seat.not_receiving === 6
-  && d.totals.fms.receiving === 2 && d.totals.fms.not_receiving === 6
-  && d.totals.fms_seat?.receiving === 2 && d.totals.fms_seat?.not_receiving === 6,
+  && d.totals.fms.receiving === 4 && d.totals.fms.not_receiving === 4
+  && d.totals.fms_seat?.receiving === 3 && d.totals.fms_seat?.not_receiving === 5,
   JSON.stringify(d.totals));
 check('…and per fleet', d.totals?.fleets?.ecosine === 7 && d.totals?.fleets?.egari === 1,
   JSON.stringify(d.totals?.fleets));

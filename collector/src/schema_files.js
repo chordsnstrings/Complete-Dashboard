@@ -217,4 +217,9 @@ export const SCHEMA_FILES = [
      one person live in their own table, never in driver_identity_link, whose
      rule sweep deletes every unconfirmed row it did not write this run. */
   'schema_v83.sql',
+  /* FMS's live seat count (GetVehicleCurrentDetails `Seatcount`) on
+     telemetry_snapshot. FMS and CABMAN are two separate seat-sensor providers;
+     until now only CABMAN's live seat reading and FMS's per-trip count were
+     kept. */
+  'schema_v84.sql',
 ];

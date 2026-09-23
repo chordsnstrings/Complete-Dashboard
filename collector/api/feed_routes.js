@@ -147,18 +147,29 @@ export const FEEDS_SQL = `
              (SELECT max(t.captured_at) FROM telemetry_snapshot t
                WHERE t.source = 'fms' AND t.plate = a.plate)) AS fms_at,
            /* FMS's seat sensor. FMS and CABMAN are two separate providers and
-              each is meant to send seat data. FMS sends it as the 'Seat Count'
-              on each journey in GetTripPassenger (src/sources/fms.js), which is
-              collected into trip.seat_count on every incremental. The live call
-              this product polls, GetVehicleStatus, carries no seat field. So the
-              newest FMS journey that has a seat count is FMS's newest seat
-              reading, dated when that journey ended. */
-           coalesce(
-             (SELECT max(coalesce(t.ended_at, t.requested_at)) FROM trip t
-               WHERE t.platform = 'fms' AND t.plate = a.plate AND t.seat_count IS NOT NULL
-                 AND coalesce(t.ended_at, t.requested_at) <= now()),
-             (SELECT max(coalesce(t.ended_at, t.requested_at)) FROM trip t
-               WHERE t.platform = 'fms' AND t.plate = a.plate AND t.seat_count IS NOT NULL)) AS fms_seat_at
+              each is meant to send seat data. FMS sends it two ways, and the
+              newer of the two is FMS's newest seat reading:
+                - live, as 'Seatcount' on GetVehicleCurrentDetails, which the
+                  live poller now collects into telemetry_snapshot.seat_count
+                  every 2 minutes (schema_v84, src/sources/fms.js);
+                - per journey, as the 'Seat Count' in GetTripPassenger,
+                  collected into trip.seat_count on every incremental and dated
+                  when the journey ended.
+              GREATEST ignores a NULL, so a car with only one of the two is
+              judged on that one. */
+           GREATEST(
+             coalesce(
+               (SELECT max(t.captured_at) FROM telemetry_snapshot t
+                 WHERE t.source = 'fms' AND t.plate = a.plate AND t.seat_count IS NOT NULL
+                   AND t.captured_at <= now()),
+               (SELECT max(t.captured_at) FROM telemetry_snapshot t
+                 WHERE t.source = 'fms' AND t.plate = a.plate AND t.seat_count IS NOT NULL)),
+             coalesce(
+               (SELECT max(coalesce(t.ended_at, t.requested_at)) FROM trip t
+                 WHERE t.platform = 'fms' AND t.plate = a.plate AND t.seat_count IS NOT NULL
+                   AND coalesce(t.ended_at, t.requested_at) <= now()),
+               (SELECT max(coalesce(t.ended_at, t.requested_at)) FROM trip t
+                 WHERE t.platform = 'fms' AND t.plate = a.plate AND t.seat_count IS NOT NULL))) AS fms_seat_at
       FROM active a
   )
   SELECT a.plate, a.fleet_id, a.assigned,

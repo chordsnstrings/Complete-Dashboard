@@ -83,7 +83,7 @@ check('the columns are the ones asked for',
    2026-09-23): each gets its own column, and every feed cell names where its
    reading came from. */
 check('every seat-sensor and FMS cell names its provider',
-  rows.every((r) => /from CABMAN DT/.test(r.text[2]) && /from FMS \(InfoTrack\), seat count per trip/.test(r.text[3])
+  rows.every((r) => /from CABMAN DT/.test(r.text[2]) && /from FMS \(InfoTrack\), seat count/.test(r.text[3])
     && /from FMS \(InfoTrack\), live/.test(r.text[4])), JSON.stringify(rows.map((r) => r.text.slice(2, 5))));
 {
   const r = by('Q10001');
@@ -153,7 +153,7 @@ const body = await page.evaluate(() => document.getElementById('view').innerText
 for (const [k, re] of [
   ['active on Uber', /Active on Uber: Uber’s own vehicle list marks the car ACTIVE/],
   ['the CABMAN seat-sensor source', /Seat sensor — CABMAN: CABMAN DT's seat sensor, sampled every 5 minutes\. It holds an account for Ecosine only\./],
-  ['the FMS seat-sensor source', /Seat sensor — FMS: the seat count FMS records on each trip, collected every 30 minutes, for Ecosine and Egari\. A car that makes no trip sends no seat count\./],
+  ['the FMS seat-sensor source', /Seat sensor — FMS: the seat count FMS reports live \(every 2 minutes\) or on each trip \(every 30 minutes\), whichever is newer, for Ecosine and Egari\./],
   ['FMS', /FMS data: InfoTrack's live telematics, with an account for Ecosine and Egari\./],
   ['the window', /Receiving: a reading in the last 24 hours\./],
   ['the matching', /Matched by: the plate/],

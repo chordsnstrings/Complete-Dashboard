@@ -5845,6 +5845,69 @@ feed cell names where its reading came from ("from CABMAN DT", "from FMS
   seat sensor, for example unauthorized-trip detection in src/reconcile.js. An
   analysis of what changes system-wide was requested separately.
 
+### FMS's live seat count, collected — 2026-09-23
+
+The operator: "we should collect seat count too."
+
+- **What changed.** `fms.pullLive` (every 120 s) now also calls
+  `GetVehicleCurrentDetails` with `username`, `Password` and `vehicleno=ALL`, and
+  stores `Seatcount` in `telemetry_snapshot.seat_count` (schema_v84) on that
+  poll's row for the plate. The Fleet tab's "Seat sensor — FMS" column takes
+  whichever is newer: this live count or the per-journey count.
+- **Kept as it was.** CABMAN's boolean `seat_occupied` is not set from FMS's
+  count. The reconciler reads CABMAN only, and that is a separate decision.
+- **TRAP: the probe was calling this operation wrong.** It sent no `vehicleno`
+  (src/probe.js), so FMS answered `{"error":"Authentication failed"}` every
+  night on both fleets. The surface read as a dead login while the same login
+  served `GetTripPassenger`. Fixed. Whether `vehicleno=ALL` was the whole cause
+  is proven only by the first real poll after the deploy (FIX-STATUS F1).
+- **TRAP: a refusal of this one operation must not reach the banner.** Login
+  and `GetVehicleStatus` have already succeeded by the time the seat count is
+  asked for. So a refusal here is logged, and `noteFmsRefusal` is not called.
+  Calling it would paint a working `FMS_<FLEET>_PASS` red.
+
+### What treating FMS as a seat sensor would change elsewhere — measured 2026-09-23
+
+An analysis only, requested by the operator; nothing below is implemented.
+Production GETs, about 12:10Z.
+
+- **FMS's per-journey `Seat Count` is never 0.** It is filled on 234,824 of
+  234,824 FMS journeys: 1 on 158,109, 2 on 57,973, 3 on 14,047, 4 on 4,637,
+  5 on 57, 6 on 1. The API doc says 1–4. The distribution is the same inside a
+  booking, outside one and next to one (a 70-journey sample per group). So the
+  count alone does not show a passenger was aboard. Whether it counts the
+  driver, or leaves out empty journeys, is a question for InfoTrack.
+- **CABMAN's `SeatSensorValue` is a count too (0–5).** It is flattened to
+  occupied/empty when stored: 0 on 70,352 readings, 1 on 21,757, 2 on 4,355,
+  3 on 546, 4 on 36, 5 on 26.
+- **TRAP: on the only two cars with both trackers (L44251, L45243), the two
+  devices are in different places.** At the same minute (±2 min), CABMAN and
+  FMS put them a median 12.7 km and 25.6 km apart. Only 22 of 3,019 paired
+  fixes are within 0.5 km, and shifting the clocks by 1–4 h does not help.
+  FMS's own journeys agree with FMS's own live fixes. So a CABMAN device may be
+  filed under the wrong plate, and some CABMAN unauthorized-trip verdicts may be
+  about another car. Check the plates with both providers before combining
+  them.
+- **FMS is not a booking source.** docs/unauthorized-trips.md still lists
+  "hotel → uber → yango → bolt → fms". The reconciler loads bookings through
+  `is_booking`, which is false for FMS (sql/schema_v18.sql), and
+  `blockingChannels` excludes it. If FMS counts as a seat sensor, it is only
+  ever what is judged.
+- **Coverage.** Of the 130 Uber-active cars, 66 had FMS seat data in the last
+  24 h and no CABMAN reading. 27 had neither an FMS journey in 30 days nor a
+  CABMAN reading in 24 h.
+- **Leakage, as an upper bound.** FMS journeys of at least 1 km and 5 minutes
+  with no booking in 30 days: 723 (9,848 km) on Ecosine and 700 (6,364 km) on
+  Egari. Today's CABMAN figure is 132 (2,737 km), Ecosine only. The FMS
+  numbers skip the reconciler's pending, unverifiable and channel checks.
+- **Where CABMAN-only is assumed.** The reconciler (src/reconcile.js reads
+  `source='cabman'`); `occupancy_segment`, which has no source column, so two
+  providers on one plate would delete each other's rows; sensor health
+  (server.js); the coverage and absence wording on #unauthorized, #segments,
+  #live, #map, the driver and vehicle pages and the phone screens; the probe;
+  the docs; and the tests that seed only CABMAN seat fixtures. The full table
+  is in the analysis handed to the operator.
+
 ## The operator's HR roster export — what it gives, measured 2026-09-23
 
 The HR system exports `active-drivers-YYYY-MM-DD.xlsx`: one sheet, `Drivers`,
