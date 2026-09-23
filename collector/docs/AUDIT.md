@@ -1364,3 +1364,37 @@ COVERAGE.md traps). A reason that was not the true one. The sentence now
 consults the stored ledger day and names a collection gap as one.
 `test/payout_page_reconcile.test.mjs` §5 and `test/bolt_ledger_payout.test.mjs`
 carry the checks; each was run against the unfixed file and failed first.
+
+## Reskin STEP 3 — the colour law in render-audit, and #overview under the contract — 2026-09-23
+
+Branch `reskin-foundation`, not deployed. `bin/render-audit.mjs` gained the
+four checks the plan names (docs/UI-REDESIGN-PLAN.md §3, "Tests that pin what
+changes"), each SPEC §3A clause read from the COMPUTED style of what the
+reader sees:
+
+| code | SPEC | what it reports |
+|---|---|---|
+| `highlight-budget` | L4 | more than 3 `.hl` on a page or 1 in a band; a highlight inside an `<svg>`, a `<tbody>` or on an absent figure |
+| `grey2-text` | L5.7 | text (HTML, SVG `<text>`, or a pseudo-element's text) painted in `--grey-2` (2.90:1) |
+| `off-token-colour` | L1 | a painted colour (text, background, border, SVG fill/stroke, `::before`/`::after`) that no custom property on `:root` resolves to; a token at reduced alpha counts as the token |
+| `semantic-no-glyph` | L3, L5.5 | text in `--sem-pos`/`--sem-neg` with no ▲/▼ and no sign on it or its `.dlt` chip; a semantic dot with no word (the `content: "" / "…"` alternative, a `.sr` child or an `aria-label`) |
+
+The three colour checks run only where `--pg-contract` is 1 (the Arkiv skin);
+the old skin predates the law. To reproduce:
+
+    node bin/live-ui.mjs &
+    SKIN=arkiv ONLY=overview WIDTHS=1440,390 node bin/render-audit.mjs
+
+**The pass, production data through live-ui, under the skin.** #overview at
+1440 and 390: 0 findings, 3 highlights (the hero, the busiest day, the
+absence band's sized figure). #sources, #payouts, #unit, #safety, #drivers at
+1440: none of the four. #insights: `semantic-no-glyph 14` — "AED 389.01",
+"AED 1,680.00 *" and the other impact figures in the ranked list are painted
+in the negative red (the old `--critical`/`--warn`, re-pointed) with no ▼ and
+no sign. That is the #insights plan entry's "Row AED loses its
+--critical/--warn colour", left for its page. `test/audit_tools_detect.test.mjs`
+drives each check against a stub carrying the fault, a stub carrying the legal
+form, and the faulty stub under `--pg-contract:0`.
+
+Screenshots of #overview, both skins, at 1440 and 390, light (and dark under
+the skin): scratchpad `reskin/step3/shots/`.

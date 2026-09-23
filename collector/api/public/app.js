@@ -3,17 +3,19 @@
 // everything shared between them (panels, tables, modals, routing, fetching)
 // lives in ui.js and data.js so the two cannot drift apart.
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip,
-  drawnAs } from './charts.js';
+  drawnAs, isToday } from './charts.js';
+import { channelKey } from './tokens.js';
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, sourceToken, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
-  markTallTables, kpiTile, fitKpis, UBER_FARE_WHY } from './ui.js';
+  markTallTables, kpiTile, fitKpis, UBER_FARE_WHY,
+  contract, glance, secHead, absenceBand, pageFoot, clearPageFoot, highlight, swatch } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
-  applyWindow, MONTH_SHORT } from './data.js';
+  applyWindow, MONTH_SHORT, dayLabel } from './data.js';
 import { volatilePath } from './swr.js';
 import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
@@ -98,7 +100,10 @@ function missingTarget(r) {
    so the old donut was 80% "unknown" — and once that bucket was removed the
    chart became honest about the categories but silent about the coverage. This
    draws the labelled rows and states what is missing underneath. */
-function paymentDonut(host, detail) {
+/* `as` passes straight to donut() (ruling 6: each donut is replaced on its
+   own page, as its plan entry says). The old skin's #overview and #finance
+   call this with no option and draw the ring as they always have. */
+function paymentDonut(host, detail, { as = 'ring' } = {}) {
   host.innerHTML = '';
   const groups = (detail && detail.groups) || [];
   if (!groups.length) { empty(host, 'No trip in this range records how it was paid'); return; }
@@ -140,6 +145,7 @@ function paymentDonut(host, detail) {
     Wallet: ['settlement'], Complimentary: ['corporate', 'leakage'],
   };
   donut(host, rows, {
+    as,
     clickable: (d) => !!CLASS_TAB[d.label],
     onClick: (d) => { const t = CLASS_TAB[d.label]; if (t) location.hash = href(...t); },
   });
@@ -900,7 +906,19 @@ V.notfound = async (root) => {
    nav: it is a drill-down, and it only means anything with a key. */
 V.cohort = (root) => renderCohort(root, state.param);
 
-V.overview = async (root) => {
+/* Two orders of one page, until the operator flips the default skin.
+   ─────────────────────────────────────────────────────────────────────────
+   Reskin STEP 3 pilots the page contract here (docs/UI-REDESIGN-PLAN.md §4,
+   #overview, with the review's corrections and the operator's rulings): 00 at
+   a glance, the hero chart, the supporting marks, the † band, the footer.
+   Production keeps today's page until the flip, so which one is built is
+   asked of the TOKEN each skin declares (ui.js contract()), the way the
+   charts ask their form — never of the skin attribute. The figures come from
+   the same helpers in both: the tiles (overviewTiles), the verdict
+   (overviewVerdict) and the Top drivers table (topDrivers). */
+V.overview = async (root) => (contract() ? overviewContract(root) : overviewClassic(root));
+
+async function overviewClassic(root) {
   /* The verdict goes in FIRST, before anything it summarises, and is filled
      once the figures land. This page opened with six unlabelled tiles and
      three charts and never said what it found — a reader did the interpreting
@@ -950,6 +968,381 @@ V.overview = async (root) => {
     state.period ? q('/api/compare/period').catch(() => null) : Promise.resolve(null),
   ]);
 
+  kpiHost.innerHTML = overviewTiles(k).map(kpiTile).join('');
+
+  verdict(vHost, overviewVerdict(k, daily, byPlat, cmp));
+
+  /* What the response actually IS, which on `auto` the client did not choose.
+     A bucketed row carries its own grain; a daily one does not. */
+  per = GRAIN_WORD[daily[0]?.grain] || per;
+  trend.panel.querySelector('h3').textContent = `Trips per ${per}`;
+  gapBars(trend.body, daily, { x: 'd', y: 'trips', label: 'bookings', secondary: 'telematics_journeys',
+    gapLabel: `nothing was collected in this ${per}`,
+    /* A day is an address; a week is not — #day takes one date, and handing it
+       the Monday of a bucket would open one seventh of what the bar showed.
+       So the drill-through is offered only at the grain it is true at. */
+    onClick: per === 'day' ? (d) => { location.hash = href('day', dayKey(d.d)); } : null });
+  /* The slice carries which platform it is, and the click threw it away —
+     every slice opened the same unfiltered #platforms. */
+  /* Both of these charted the endpoint's raw label — a donut legend reading
+     "uber · hotel · yango" and bars reading "uber: Electric", "uber: UberX" —
+     which are the only places on this page a channel is not written the way
+     the product writes it everywhere else. The raw value is kept on the row so
+     the click still filters by it. */
+  /* Each slice in its channel's own colour — Uber's near-black, Bolt's green,
+     Yango's red — so the ring is read before its legend is. `key` holds the
+     raw platform, which is what the token map is keyed on; a channel with no
+     colour of its own falls through to the categorical palette. */
+  donut(mix.body, byPlat.map((r) => ({ ...r, key: r.label, label: sourceLabel(r.label) })),
+    { colorFor: (d) => sourceToken(d.key),
+      aria: 'Bookings by channel',
+      onClick: (d) => setFilter({ platform: d.key ?? d.label, view: 'platforms', param: null, sub: null }) });
+  mix.body.append(el('p', 'cap', 'Click a slice to filter the dashboard to that channel and open it.'));
+  hbars(prod.body, byProd.slice(0, 6).map((r) => {
+    const [plat, tier] = String(r.label || '').split(/:\s*/);
+    return { ...r, plat, label: tier ? `${sourceLabel(plat)} · ${tierLabel(tier)}` : sourceLabel(r.label) };
+  }), { signed: false, colorFor: (d) => sourceToken(d.plat) });
+  paymentDonut(pay.body, payDetail);
+  /* Folded to OUTCOMES before charting. Charted raw, `completed` and
+     `complete` were two slices of the same thing and three spellings of
+     cancelled were three more — then `.slice(0, 5)` dropped whatever fell off
+     the end and stackedBar renormalised the rest to 100%, so the shares were
+     over a subset while reading as the whole. */
+  const OUTCOME = [
+    [/^(completed?|finished|complete|delivered|dropped_?off)$/i, 'Completed'],
+    [/cancel|no_?show|did_?not_show|reject|no_?response|expired|declin/i, 'Did not complete'],
+  ];
+  const outcomeOf = (s) => (OUTCOME.find(([re]) => re.test(String(s || '')))?.[1]) || 'Other / not reported';
+  const folded = new Map();
+  byStatus.forEach((r) => {
+    const k = outcomeOf(r.label);
+    const cur = folded.get(k) || { label: k, n: 0, raw: [] };
+    cur.n += r.n; cur.raw.push(`${r.label} ${fmt(r.n)}`); folded.set(k, cur);
+  });
+  const outRows = [...folded.values()].sort((a, b) => b.n - a.n);
+  stackedBar(out.body, outRows);
+  out.body.append(el('p', 'cap', outRows.map((r) => `${esc(r.label)}: ${esc(r.raw.join(', '))}`).join(' · ')
+    || 'No platform in this window reports how a trip ended.'));
+  topDrivers(lead.body, drivers);
+}
+
+/* ── #overview under the page contract (reskin STEP 3, the pilot) ─────────
+   docs/UI-REDESIGN-PLAN.md §4 "overview", with the review's corrections and
+   the operator's rulings (§1). In SPEC §1's order:
+
+     00  AT A GLANCE — the verdict as the page's statement (ruling 7: its
+         figure is not repeated as a tile), then all seven tiles with Trips
+         as the hero, each with a delta and a sparkline where the data has
+         one, and the one caption that says what the deltas are measured on.
+     01  Bookings per day/week — the hero chart, in INK: the bookings span
+         every channel, and Uber's blue on them would claim the rest are
+         Uber's. Telematics journeys are an FMS-identity step line with a
+         direct label. The caption carries the day count, the total, the mean
+         per complete day, today so far and the busiest day (the one label
+         on the hero chart that takes the highlight).
+     02  Cancellations a day — complete days only: a part-day is not a day.
+     03  Which channel the work came through — ranked bars in each channel's
+         identity (ruling 6: this page's donut becomes bars), click-to-filter
+         kept.
+     04  How every booking ended — the /api/kpis buckets the Completion tile
+         and #cancellations use, in ink (outcomes are not channels), with
+         every provider's raw status word kept under it.
+     05  What the fleet drove — every tier, not six of eighteen, the tail
+         folded into a sentence that counts it.
+     06  How fares settle — ranked ink bars, the same routes and links.
+     07  Top drivers — the same table, a swatch beside each channel's name.
+     †   What this page does not know — four cells, live figures, true reasons.
+
+   NOT BUILT, by ruling 5: "AED per km per tier" (the plan's §06). Uber's
+   fares arrive from a weekly walk of its payments report and cover some weeks
+   of some tiers; a per-tier rate cannot say "priced n of N" yet.
+
+   Everything a figure is computed from is the same fetch the old skin makes,
+   and the tiles, the verdict and the table come from the same helpers, so
+   the two orders of this page cannot disagree about a number. */
+/* Short enough to stand beside a bar at 390px; "unsaid" is the Completion
+   tile's own word for a cancellation nobody attributed. */
+const OUT_BUCKETS = [
+  ['Completed', 'completed_trips'], ['Rider cancelled', 'cancelled_by_rider'],
+  ['Driver cancelled', 'cancelled_by_driver'], ['Offer not taken', 'declined_offers'],
+  ['Cancelled, unsaid', 'cancelled_unsaid'], ['Other outcome', 'other_outcome'],
+  ['No outcome filed', 'no_outcome'],
+];
+/* "9–31 Aug", "25 Aug – 23 Sep", or both years when they differ: the span a
+   delta is measured against, short enough to sit in the delta slot. */
+const spanLabel = (a, b) => {
+  const A = dayLabel(a).split(' '), B = dayLabel(b).split(' ');
+  if (A.length < 3 || B.length < 3) return `${dayLabel(a)} – ${dayLabel(b)}`;
+  if (A[2] !== B[2]) return `${A.join(' ')} – ${B.join(' ')}`;
+  return A[1] === B[1] ? `${A[0]}–${B[0]} ${B[1]}` : `${A[0]} ${A[1]} – ${B[0]} ${B[1]}`;
+};
+async function overviewContract(root) {
+  const GRAIN_WORD = { day: 'day', week: 'week', month: 'month' };
+  let per = GRAIN_WORD[state.grain] || 'day';
+  /* One channel chosen: its marks may wear its identity. Otherwise every
+     series here spans channels and is drawn in ink (plan §3 "Charts"). */
+  const ch = state.platform ? channelKey(state.platform) : null;
+  const ink = ch ? `--c-${ch}` : '--ink';
+
+  const band = el('section', 'cband');
+  const head = secHead('00', 'At a glance', windowLabel());
+  const vHost = el('div');
+  const tiles = el('div');
+  const gcap = el('p', 'cap');
+  band.append(head, vHost, tiles, gcap);
+  root.append(band);
+  const trend = panel(`Bookings per ${per}`, null, 'ov-trend'); root.append(trend.panel);
+  const canc = panel(`Cancellations a ${per}`, null, 'ov-cancel'); root.append(canc.panel);
+  const g1 = el('div', 'grid g2'); root.append(g1);
+  const mix = panel('Which channel the work came through',
+    'Bookings by channel. Telematics journeys are not bookings — they are the same trips seen by the '
+    + 'trackers — so they are not counted here. Click a bar to filter the dashboard to that channel and open it.',
+    'ov-channel');
+  const out = panel('How every booking ended',
+    'The same buckets the Completion tile and Cancellations count, from one set of expressions, so '
+    + 'none of them can disagree.', 'ov-outcome');
+  g1.append(mix.panel, out.panel);
+  const g2 = el('div', 'grid g2'); root.append(g2);
+  const prod = panel('What the fleet drove', 'Bookings by service tier, every tier the channels filed.',
+    'ov-tiers');
+  const pay = panel('How fares settle',
+    'Grouped by settlement route rather than by the processor\'s name — click for the detail.', 'ov-settle');
+  g2.append(prod.panel, pay.panel);
+  const lead = panel('Top drivers', 'Click for detail', 'ov-drivers'); root.append(lead.panel);
+  const absHost = el('div'); root.append(absHost);
+  [tiles, trend.body, canc.body, mix.body, out.body, prod.body, pay.body, lead.body].forEach((b) => loading(b));
+
+  /* The comparison, where the page makes one: a calendar period, and no
+     channel filter — /api/compare/period sums driver_day, one row per PERSON
+     per day across every channel, and answers a channel filter with a 400
+     that says so (api/server.js). Asked only where it can answer. */
+  const wantCmp = !!state.period && !state.platform;
+  const [k, daily, byPlat, byProd, payDetail, byStatus, drivers, cmp] = await Promise.all([
+    q('/api/kpis'), q('/api/trips/daily'), q('/api/mix', { by: 'platform' }), q('/api/mix'),
+    q('/api/mix/detail', { by: 'payment' }), q('/api/mix', { by: 'status' }), q('/api/drivers/leaderboard'),
+    wantCmp ? q('/api/compare/period').catch(() => ({ failed: true })) : Promise.resolve(null),
+  ]);
+
+  per = GRAIN_WORD[daily[0]?.grain] || per;
+  const pers = per === 'day' ? 'days' : `${per}s`;
+  const last = daily[daily.length - 1];
+  const live = last && !last.uncollected && isToday(last.d);
+  if (live) head.querySelector('.sechd-note').textContent = `${windowLabel()} · today still filling`;
+  /* Complete buckets: not today (still filling), not a bucket the window
+     clips (a part-week), and an uncollected one is a GAP (null), never 0. */
+  const complete = daily.filter((d, i) => !(i === daily.length - 1 && live)
+    && !(d.partial === true && +d.days > 0 && +d.days < +d.of_days));
+  const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  const series = (key) => complete.map((d) => (d.uncollected ? null : num(d[key])));
+
+  /* ── the deltas, and the true reason when there is none ──────────────── */
+  const why = !state.period
+    ? 'not compared: this page sets a calendar period against the same span before it, and this window is not one'
+    : state.platform
+      ? 'not compared: the comparison is counted per driver-day, and a driver-day spans every channel — clear the channel filter'
+      : !cmp || cmp.failed ? 'not compared: the comparison did not load' : null;
+  const of = cmp?.previous ? `against ${spanLabel(cmp.previous.from, cmp.previous.to)}` : '';
+  const dl = (key, extra = {}) => {
+    if (why) return { value: null, na: why };
+    const v = cmp.change_pct?.[key];
+    return v == null
+      ? { value: null, na: `not compared: ${spanLabel(cmp.previous.from, cmp.previous.to)} holds nothing to compare against` }
+      : { value: v, unit: '%', of, ...extra };
+  };
+  const rate = (s) => (num(s?.trips) ? (num(s.completed) / num(s.trips)) * 100 : null);
+  const completionDelta = why ? { value: null, na: why }
+    : rate(cmp.now) == null || rate(cmp.before) == null
+      ? { value: null, na: `not compared: ${spanLabel(cmp.previous.from, cmp.previous.to)} holds no bookings to compare against` }
+      : { value: rate(cmp.now) - rate(cmp.before), unit: 'points', of, d: 2 };
+
+  /* ── 00 · the statement, then the tiles ──────────────────────────────── */
+  verdict(vHost, overviewVerdict(k, daily, byPlat, cmp));
+  const base = Object.fromEntries(overviewTiles(k).map((t) => [t.label, t]));
+  const trips = { ...base.Trips, hero: true, channel: ch, hl: ch || 'ink', spark: series('trips'), delta: dl('trips') };
+  /* Telematics journeys are the trackers', not a channel's: under a channel
+     filter the endpoint answers 0, which is a filter, not a count. */
+  if (state.platform && ch !== 'fms') {
+    trips.sub = `${fmt(k.drivers)} drivers · telematics journeys are not a channel's, so the channel filter leaves them out`;
+  } else if (k.telematics_journeys == null) {
+    trips.sub = `${fmt(k.drivers)} drivers · the trackers reported no journey count`;
+  }
+  const distance = k.km == null
+    ? { ...base.Distance, na: 'no booking in this range carries a distance', sub: null }
+    : { ...base.Distance, spark: series('km'), delta: dl('km') };
+  const value = k.revenue == null || !k.priced_trips
+    ? { ...base['Trip value'], na: 'no booking in this range carries a price', sub: null }
+    : { ...base['Trip value'], spark: series('revenue'), delta: dl('fares') };
+  const moneyIn = !k.accounted
+    ? { ...base['Money in'], na: 'no fare and no payout statement in this range', sub: null }
+    : { ...base['Money in'], delta: dl('money'),
+      spark: 'No daily line: most of this is weekly payout statements, which have no day-by-day figure.' };
+  const completion = k.completed_trips == null
+    ? { ...base.Completion, na: 'no channel in this range reports how its bookings ended', sub: null }
+    : { ...base.Completion, spark: series('completed'), delta: completionDelta };
+  /* A channel's swatch on every tile the channel filter narrows; not on
+     Safety alerts, which come from the tracker and no filter touches. */
+  glance(tiles, [trips, distance, value, moneyIn, completion, base.Vehicles,
+    { ...base['Safety alerts'], channel: null }]
+    .map((t) => ({ ...t, channel: 'channel' in t ? t.channel : ch })));
+  gcap.innerHTML = [
+    why ? '' : `Each change sets ${esc(windowLabel().toLowerCase())} against ${esc(spanLabel(cmp.previous.from, cmp.previous.to))}, `
+      + 'the same number of days immediately before, summed from the per-driver day table (driver_day) — '
+      + `<b>${fmt(cmp.now?.trips)}</b> bookings there against the <b>${fmt(k.trips)}</b> the tiles count from the booking table, `
+      + 'so read a change as a direction and a size, not as the difference between two tiles.',
+    complete.length
+      ? `Each line is ${complete.length} complete ${complete.length === 1 ? per : pers}${live ? '; today is left out, still filling' : ''}.`
+      : '',
+  ].filter(Boolean).join(' ');
+
+  /* ── 01 · the hero chart ─────────────────────────────────────────────── */
+  trend.panel.querySelector('h3').textContent = `Bookings per ${per}`;
+  const journeys = !(state.platform && ch !== 'fms');
+  gapBars(trend.body, daily, { x: 'd', y: 'trips', label: 'bookings', color: ink,
+    ...(journeys ? { secondary: 'telematics_journeys', secondaryLabel: 'telematics journeys (FMS)',
+      secondaryLine: { color: '--c-fms', label: 'FMS journeys' } } : {}),
+    gapLabel: `nothing was collected in this ${per}`,
+    aria: `Bookings per ${per}`,
+    onClick: per === 'day' ? (d) => { location.hash = href('day', dayKey(d.d)); } : null });
+  const tcap = el('p', 'cap');
+  tcap.textContent = [
+    `Bookings in ${ch ? `${sourceLabel(ch)}'s colour` : 'ink'}, every channel${ch ? '' : ' together'}.`,
+    journeys ? 'The line is the trackers\' telematics journeys (FMS), the same trips seen from the car.' : '',
+    `A ${per} nobody collected is ${drawnAs('absent')}, not zero.`,
+    per === 'day' ? 'Click a bar to open that day.' : '',
+  ].filter(Boolean).join(' ');
+  trend.panel.insertBefore(tcap, trend.body);
+  const measured = complete.filter((d) => !d.uncollected && num(d.trips) != null);
+  if (measured.length) {
+    const top = measured.reduce((a, d) => (num(d.trips) > num(a.trips) ? d : a));
+    const mean = measured.reduce((a, d) => a + num(d.trips), 0) / measured.length;
+    const stats = el('p', 'cap ov-stats');
+    stats.innerHTML = [
+      `${fmt(daily.length)} ${daily.length === 1 ? per : pers}`,
+      `<b>${fmt(k.trips)}</b> bookings`,
+      `mean <b>${fmt(mean, 1)}</b> per complete ${per}`,
+      live ? `today so far <b>${fmt(last.trips)}</b>` : '',
+      `busiest ${per} <b class="ov-top">${fmt(top.trips)}</b> on ${esc(dayLabel(dayKey(top.d)))}`,
+    ].filter(Boolean).join(' · ');
+    trend.body.append(stats);
+    highlight(stats.querySelector('.ov-top'), ch || 'ink');
+  }
+
+  /* ── 02 · cancellations, complete days only ──────────────────────────── */
+  canc.panel.querySelector('h3').textContent = `Cancellations a ${per}`;
+  const cRows = complete.map((d) => ({ d: d.d, cancelled: d.uncollected ? null : num(d.cancelled) }));
+  if (cRows.filter((r) => r.cancelled != null).length < 2) {
+    empty(canc.body, `Fewer than two complete ${pers} in this window${live ? ' — today is still filling, and a part-day is not a day' : ''}.`);
+  } else {
+    areaChart(canc.body, cRows, { x: 'd', y: 'cancelled', color: ink, aria: `Cancellations a ${per}` });
+    const cN = complete.reduce((a, d) => a + (d.uncollected ? 0 : num(d.cancelled) || 0), 0);
+    const tN = complete.reduce((a, d) => a + (d.uncollected ? 0 : num(d.trips) || 0), 0);
+    canc.body.append(el('p', 'cap', esc(`${fmt(cN)} cancelled of ${fmt(tN)} bookings over ${fmt(cRows.length)} complete `
+      + `${cRows.length === 1 ? per : pers}${tN ? ` (${(cN / tN * 100).toFixed(1)}%)` : ''}.`
+      + (live ? ' Today is left out: a part-day rate is not a day rate.' : ''))));
+  }
+
+  /* ── 03 · which channel ──────────────────────────────────────────────── */
+  donut(mix.body, byPlat.map((r) => ({ ...r, key: r.label, label: sourceLabel(r.label) })),
+    { as: 'bars', colorFor: (d) => sourceToken(d.key), aria: 'Bookings by channel',
+      onClick: (d) => setFilter({ platform: d.key ?? d.label, view: 'platforms', param: null, sub: null }) });
+
+  /* ── 04 · how every booking ended ────────────────────────────────────── */
+  const buckets = OUT_BUCKETS.map(([label, key]) => ({ label, key, n: num(k[key]) }));
+  const filed = buckets.filter((b) => b.n != null && b.n > 0);
+  const none = buckets.filter((b) => b.n === 0).map((b) => b.label.toLowerCase());
+  const unsplit = buckets.filter((b) => b.n == null).map((b) => b.label.toLowerCase());
+  const counted = filed.reduce((a, b) => a + b.n, 0);
+  if (!filed.length) empty(out.body, 'No channel in this range reports how its bookings ended.');
+  else {
+    hbars(out.body, filed, { signed: false, shareOf: (d) => (k.trips ? `${(d.n / k.trips * 100).toFixed(1)}%` : null) });
+    out.body.append(el('p', 'cap', esc([
+      counted === num(k.trips) ? `All ${fmt(k.trips)} bookings accounted for.`
+        : `${fmt(counted)} of ${fmt(k.trips)} bookings fall in these buckets.`,
+      none.length ? `None filed as ${andList(none)}.` : '',
+      unsplit.length ? `Not reported: ${andList(unsplit)}.` : '',
+    ].filter(Boolean).join(' '))));
+  }
+  const RAW = [
+    [/^(completed?|finished|complete|delivered|dropped_?off)$/i, 'Completed'],
+    [/cancel|no_?show|did_?not_show|reject|no_?response|expired|declin/i, 'Did not complete'],
+  ];
+  const rawOf = (s) => (RAW.find(([re]) => re.test(String(s || '')))?.[1]) || 'Other / not reported';
+  const rawBy = new Map();
+  (byStatus || []).forEach((r) => {
+    const b = rawOf(r.label);
+    if (!rawBy.has(b)) rawBy.set(b, []);
+    rawBy.get(b).push(`${r.label} ${fmt(r.n)}`);
+  });
+  out.body.append(el('p', 'cap', rawBy.size
+    ? `Every provider's own word: ${[...rawBy.entries()].map(([b, w]) => `${esc(b)}: ${esc(w.join(', '))}`).join(' · ')}`
+    : 'No platform in this window reports how a trip ended.'));
+
+  /* ── 05 · what the fleet drove: every tier ───────────────────────────── */
+  const SHOW = 12;
+  const tierRows = byProd.map((r) => {
+    const [plat, tier] = String(r.label || '').split(/:\s*/);
+    return { ...r, plat, label: tier ? `${sourceLabel(plat)} · ${tierLabel(tier)}` : sourceLabel(r.label) };
+  });
+  hbars(prod.body, tierRows.slice(0, SHOW), { signed: false, colorFor: (d) => sourceToken(d.plat) });
+  const rest = tierRows.slice(SHOW);
+  prod.body.append(el('p', 'cap', esc(`${fmt(tierRows.reduce((a, r) => a + (num(r.n) || 0), 0))} bookings over `
+    + `${fmt(tierRows.length)} ${tierRows.length === 1 ? 'tier' : 'tiers'}`
+    + (rest.length ? `; ${fmt(rest.length)} more ${rest.length === 1 ? 'tier' : 'tiers'}, `
+      + `${fmt(rest.reduce((a, r) => a + (num(r.n) || 0), 0))} bookings, are not drawn: `
+      + `${rest.map((r) => `${r.label} ${fmt(r.n)}`).join(', ')}.` : '.'))));
+
+  /* ── 06 · how fares settle ───────────────────────────────────────────── */
+  paymentDonut(pay.body, payDetail, { as: 'bars' });
+
+  /* ── 07 · top drivers ────────────────────────────────────────────────── */
+  topDrivers(lead.body, drivers, { swatches: true });
+
+  /* ── † what this page does not know ──────────────────────────────────── */
+  const v = fleetVerdict({ kpis: k, daily, byPlatform: byPlat });
+  const noKm = num(k.trips) != null && num(k.trips_with_distance) != null ? num(k.trips) - num(k.trips_with_distance) : null;
+  const unpriced = num(k.trips) != null && num(k.priced_trips) != null ? num(k.trips) - num(k.priced_trips) : null;
+  absenceBand(absHost, [
+    { label: 'Bookings not yet priced', fig: unpriced == null ? null : fmt(unpriced), hl: true,
+      none: 'Not counted',
+      why: unpriced == null ? 'The kpis answer carries no priced count for this window.'
+        : `${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings carry a price, and Trip value is over those alone. `
+          + `${UBER_FARE_WHY}, so the newest Uber bookings are priced only after it; a booking cancelled `
+          + 'without a fee has no price to carry.' },
+    { label: 'Bookings carrying no distance', fig: noKm == null ? null : fmt(noKm), none: 'Not counted',
+      why: noKm == null ? 'The kpis answer carries no count of bookings with a distance.'
+        : `The channel filed these bookings with no distance on them. The Distance tile's mean is over the `
+          + `${fmt(k.trips_with_distance)} that carry one, never over all ${fmt(k.trips)}.`
+          + (num(k.trips_without_vehicle) ? ` A further ${fmt(k.trips_without_vehicle)} name no plate, so they `
+            + 'can appear on no per-car page.' : '') },
+    { label: `${pers[0].toUpperCase()}${pers.slice(1)} with a silent source`,
+      fig: `${fmt(v.uncollected + v.partial)} of ${fmt(v.days)}`,
+      why: v.uncollected + v.partial
+        ? [v.uncollected ? `${fmt(v.uncollected)} had nothing collected at all, drawn ${drawnAs('absent')}.` : '',
+          v.partial ? `${fmt(v.partial)} had at least one source silent, so their bars are understated.` : '',
+          'Collection gaps names which source and when.'].filter(Boolean).join(' ')
+        : 'Every source filed on every day in this window.' },
+    { label: 'Money in, day by day', fig: null, none: 'No series',
+      why: k.accounted_statements
+        ? `${money(k.accounted_statements)} of the ${money(k.accounted)} is payout statements, which a platform `
+          + 'files a week at a time, so Money in has no day-by-day figure. Trip value is the daily money line: '
+          + 'what riders paid, booking by booking.'
+        : 'Money in has no day-by-day series on this page; Trip value, what riders paid per booking, is the daily money line.' },
+  ]);
+
+  /* ── the footer's colophon (the basis is the provenance line, which the
+     shell's stampSource writes under the contract) ──────────────────────── */
+  pageFoot({ colophon: [
+    `${windowLabel()} · Dubai time`,
+    `${fmt(k.trips)} bookings counted`,
+    [k.revenue != null ? money(k.revenue) : null, k.km != null ? `${fmt(k.km)} km` : null,
+      k.completion_pct != null ? `${k.completion_pct}% completed` : null].filter(Boolean).join(' · '),
+  ] }, root);
+}
+
+/* #overview's seven tiles, as data: the old skin draws them with kpiTile in a
+   kpiRow, the page contract (reskin STEP 3) with glance(). One list, so the two
+   skins cannot disagree about a figure, a sub-line or an address. */
+function overviewTiles(k) {
   /* The tiles are addresses. "Money in" is the most misread number in this
      product and #revenue exists to explain it, and until now the two were
      joined by nothing at all — a reader who doubted the figure had to find the
@@ -959,7 +1352,7 @@ V.overview = async (root) => {
     'Trip value': href('revenue'),
     Completion: href('platforms'), Vehicles: href('vehicles'), 'Safety alerts': href('safety'),
   };
-  kpiHost.innerHTML = [
+  return [
     ['Trips', fmt(k.trips),
       `${fmt(k.drivers)} drivers · ${fmt(k.telematics_journeys || 0)} telematics journeys`],
     /* avg_km divides by the trips that REPORT a distance, not by every trip,
@@ -1044,121 +1437,75 @@ V.overview = async (root) => {
       state.platform
         ? `harsh-driving events · not filtered by ${esc(state.platform)} — these come from the tracker, not a channel`
         : `harsh-driving events${k.tracked_vehicles ? ` across ${fmt(k.tracked_vehicles)} tracked vehicles` : ''}`],
-  ].map(([l, n, d]) => ({ label: l, html: n, sub: d, to: GO[l] || null, who: false }))
-    .map(kpiTile).join('');
+  ].map(([l, n, d]) => ({ label: l, html: n, sub: d, to: GO[l] || null, who: false }));
 
-  /* ── the verdict ────────────────────────────────────────────────────────
-     Written from the figures already fetched, so it cannot disagree with the
-     tiles beneath it. It states the ONE thing this window is about, chosen by
-     what is furthest out of line rather than by a fixed sentence: a fleet with
-     a collection hole has a different headline from one with a cancellation
-     spike, and a page that always says the same thing is a caption. */
-  {
-    const v = fleetVerdict({ kpis: k, daily, byPlatform: byPlat });
-    const moneyIn = k.accounted || 0;
-    let claim, figure, unit, recommend = null, meta = null;
-    if (v.branch === 'gap') {
-      claim = `${v.uncollected} of these ${v.days} days were never collected`;
-      figure = fmt(v.uncollected); unit = plural(v.uncollected, 'day missing', 'days missing');
-      recommend = 'Read every rate on this page as an average over the days that WERE collected — '
-        + `the missing ones are drawn ${drawnAs('absent')} rather than as zero, and Collection gaps names which source failed.`;
-    } else if (v.branch === 'cancellations') {
-      claim = `${k.cancel_pct}% of bookings did not complete`;
-      figure = `${k.completion_pct}%`; unit = 'completed';
-      recommend = 'Open Platforms for the acceptance funnel — an offer refused and a rider cancelling '
-        + 'are different failures and only one of them is the fleet’s.';
-    } else {
-      claim = v.branch === 'single-channel'
-        ? `This is a single-channel fleet — ${sourceLabel(v.lead.label)} is ${v.leadPct}% of the work`
-        : v.branch === 'multi-channel'
-          ? `${fmt(k.trips)} bookings across ${v.others + 1} channels that matter`
-          : `${fmt(k.trips)} bookings across ${fmt(k.vehicles)} vehicles`;
-      figure = fmt(v.perDay); unit = 'bookings a day';
-      meta = `${fmt(k.drivers)} drivers · ${fmt(k.vehicles)} vehicles`;
-      if (v.branch === 'single-channel') {
-        recommend = `Every rate on this page is ${sourceLabel(v.lead.label)}'s rate wearing the fleet's `
-          + 'name. Money by platform shows what each one actually reports.';
-      }
+}
+
+/* ── the verdict ────────────────────────────────────────────────────────
+   Written from the figures already fetched, so it cannot disagree with the
+   tiles beneath it. It states the ONE thing this window is about, chosen by
+   what is furthest out of line rather than by a fixed sentence: a fleet with
+   a collection hole has a different headline from one with a cancellation
+   spike, and a page that always says the same thing is a caption. */
+function overviewVerdict(k, daily, byPlat, cmp) {
+  const v = fleetVerdict({ kpis: k, daily, byPlatform: byPlat });
+  const moneyIn = k.accounted || 0;
+  let claim, figure, unit, recommend = null, meta = null;
+  if (v.branch === 'gap') {
+    claim = `${v.uncollected} of these ${v.days} days were never collected`;
+    figure = fmt(v.uncollected); unit = plural(v.uncollected, 'day missing', 'days missing');
+    recommend = 'Read every rate on this page as an average over the days that WERE collected — '
+      + `the missing ones are drawn ${drawnAs('absent')} rather than as zero, and Collection gaps names which source failed.`;
+  } else if (v.branch === 'cancellations') {
+    claim = `${k.cancel_pct}% of bookings did not complete`;
+    figure = `${k.completion_pct}%`; unit = 'completed';
+    recommend = 'Open Platforms for the acceptance funnel — an offer refused and a rider cancelling '
+      + 'are different failures and only one of them is the fleet’s.';
+  } else {
+    claim = v.branch === 'single-channel'
+      ? `This is a single-channel fleet — ${sourceLabel(v.lead.label)} is ${v.leadPct}% of the work`
+      : v.branch === 'multi-channel'
+        ? `${fmt(k.trips)} bookings across ${v.others + 1} channels that matter`
+        : `${fmt(k.trips)} bookings across ${fmt(k.vehicles)} vehicles`;
+    figure = fmt(v.perDay); unit = 'bookings a day';
+    meta = `${fmt(k.drivers)} drivers · ${fmt(k.vehicles)} vehicles`;
+    if (v.branch === 'single-channel') {
+      recommend = `Every rate on this page is ${sourceLabel(v.lead.label)}'s rate wearing the fleet's `
+        + 'name. Money by platform shows what each one actually reports.';
     }
-    /* What changed, when there is a like-for-like span to compare against.
-       The server picks the same NUMBER of days immediately before the window,
-       so a month-to-date is measured against the same slice of the month
-       before rather than against a whole one. */
-    const move = (key, noun) => {
-      const d = cmp?.change_pct?.[key];
-      if (d == null || !Number.isFinite(+d)) return '';
-      const dir = +d >= 0 ? 'up' : 'down';
-      return `${noun} ${dir} ${Math.abs(+d).toFixed(1)}%`;
-    };
-    const shifts = [move('trips', 'bookings'), move('money', 'money')].filter(Boolean);
-    const compareLine = shifts.length && cmp?.previous
-      ? `Against ${cmp.previous.from} – ${cmp.previous.to}, the same span before this one: `
-        + `${shifts.join(', ')}.`
-      : '';
-    const sub = [
-      `${fmt(k.trips)} bookings over ${v.days} ${plural(v.days, 'day')}, `
-      + `${moneyIn ? `${money(moneyIn)} accounted for` : 'no money accounted for in this window'}.`,
-      v.partial ? `${v.partial} more ${plural(v.partial, 'day')} had at least one source silent, so those bars are understated.` : '',
-      k.telematics_journeys
-        ? `The trackers saw ${fmt(k.telematics_journeys)} journeys behind these bookings — the same cars, counted by a different feed.`
-        : '',
-      compareLine,
-    ].filter(Boolean).join(' ');
-    verdict(vHost, { claim, figure, unit, sub, tone: v.tone, recommend, meta });
   }
+  /* What changed, when there is a like-for-like span to compare against.
+     The server picks the same NUMBER of days immediately before the window,
+     so a month-to-date is measured against the same slice of the month
+     before rather than against a whole one. */
+  const move = (key, noun) => {
+    const d = cmp?.change_pct?.[key];
+    if (d == null || !Number.isFinite(+d)) return '';
+    const dir = +d >= 0 ? 'up' : 'down';
+    return `${noun} ${dir} ${Math.abs(+d).toFixed(1)}%`;
+  };
+  const shifts = [move('trips', 'bookings'), move('money', 'money')].filter(Boolean);
+  const compareLine = shifts.length && cmp?.previous
+    ? `Against ${cmp.previous.from} – ${cmp.previous.to}, the same span before this one: `
+      + `${shifts.join(', ')}.`
+    : '';
+  const sub = [
+    `${fmt(k.trips)} bookings over ${v.days} ${plural(v.days, 'day')}, `
+    + `${moneyIn ? `${money(moneyIn)} accounted for` : 'no money accounted for in this window'}.`,
+    v.partial ? `${v.partial} more ${plural(v.partial, 'day')} had at least one source silent, so those bars are understated.` : '',
+    k.telematics_journeys
+      ? `The trackers saw ${fmt(k.telematics_journeys)} journeys behind these bookings — the same cars, counted by a different feed.`
+      : '',
+    compareLine,
+  ].filter(Boolean).join(' ');
+  return { claim, figure, unit, sub, tone: v.tone, recommend, meta };
+}
 
-  /* What the response actually IS, which on `auto` the client did not choose.
-     A bucketed row carries its own grain; a daily one does not. */
-  per = GRAIN_WORD[daily[0]?.grain] || per;
-  trend.panel.querySelector('h3').textContent = `Trips per ${per}`;
-  gapBars(trend.body, daily, { x: 'd', y: 'trips', label: 'bookings', secondary: 'telematics_journeys',
-    gapLabel: `nothing was collected in this ${per}`,
-    /* A day is an address; a week is not — #day takes one date, and handing it
-       the Monday of a bucket would open one seventh of what the bar showed.
-       So the drill-through is offered only at the grain it is true at. */
-    onClick: per === 'day' ? (d) => { location.hash = href('day', dayKey(d.d)); } : null });
-  /* The slice carries which platform it is, and the click threw it away —
-     every slice opened the same unfiltered #platforms. */
-  /* Both of these charted the endpoint's raw label — a donut legend reading
-     "uber · hotel · yango" and bars reading "uber: Electric", "uber: UberX" —
-     which are the only places on this page a channel is not written the way
-     the product writes it everywhere else. The raw value is kept on the row so
-     the click still filters by it. */
-  /* Each slice in its channel's own colour — Uber's near-black, Bolt's green,
-     Yango's red — so the ring is read before its legend is. `key` holds the
-     raw platform, which is what the token map is keyed on; a channel with no
-     colour of its own falls through to the categorical palette. */
-  donut(mix.body, byPlat.map((r) => ({ ...r, key: r.label, label: sourceLabel(r.label) })),
-    { colorFor: (d) => sourceToken(d.key),
-      aria: 'Bookings by channel',
-      onClick: (d) => setFilter({ platform: d.key ?? d.label, view: 'platforms', param: null, sub: null }) });
-  mix.body.append(el('p', 'cap', 'Click a slice to filter the dashboard to that channel and open it.'));
-  hbars(prod.body, byProd.slice(0, 6).map((r) => {
-    const [plat, tier] = String(r.label || '').split(/:\s*/);
-    return { ...r, plat, label: tier ? `${sourceLabel(plat)} · ${tierLabel(tier)}` : sourceLabel(r.label) };
-  }), { signed: false, colorFor: (d) => sourceToken(d.plat) });
-  paymentDonut(pay.body, payDetail);
-  /* Folded to OUTCOMES before charting. Charted raw, `completed` and
-     `complete` were two slices of the same thing and three spellings of
-     cancelled were three more — then `.slice(0, 5)` dropped whatever fell off
-     the end and stackedBar renormalised the rest to 100%, so the shares were
-     over a subset while reading as the whole. */
-  const OUTCOME = [
-    [/^(completed?|finished|complete|delivered|dropped_?off)$/i, 'Completed'],
-    [/cancel|no_?show|did_?not_show|reject|no_?response|expired|declin/i, 'Did not complete'],
-  ];
-  const outcomeOf = (s) => (OUTCOME.find(([re]) => re.test(String(s || '')))?.[1]) || 'Other / not reported';
-  const folded = new Map();
-  byStatus.forEach((r) => {
-    const k = outcomeOf(r.label);
-    const cur = folded.get(k) || { label: k, n: 0, raw: [] };
-    cur.n += r.n; cur.raw.push(`${r.label} ${fmt(r.n)}`); folded.set(k, cur);
-  });
-  const outRows = [...folded.values()].sort((a, b) => b.n - a.n);
-  stackedBar(out.body, outRows);
-  out.body.append(el('p', 'cap', outRows.map((r) => `${esc(r.label)}: ${esc(r.raw.join(', '))}`).join(' · ')
-    || 'No platform in this window reports how a trip ended.'));
-  lead.body.innerHTML = '';
+/* #overview's Top drivers table, shared by both skins (reskin STEP 3).
+   `swatches`: each channel named with its swatch beside it (the page
+   contract; SPEC L5.6, identity beside the word, never on it). */
+function topDrivers(host, drivers, { swatches = false } = {}) {
+  host.innerHTML = '';
   /* One row per person now, not per platform account — a person working two
      apps used to appear twice with half their work on each row, and therefore
      rank below somebody who did less. Tolerant of the old bare-array shape so
@@ -1173,7 +1520,7 @@ V.overview = async (root) => {
      ordering by it (the fix is on the server list) this says so instead of
      going on claiming something that had not been true. */
   const ranksByCompleted = top.some((r) => r.completed_trips != null);
-  lead.body.append(tableFrom(top, [
+  host.append(tableFrom(top, [
     /* Name first, rank inside it. The first column is the one that stays put
        when a wide table scrolls sideways, and a frozen column of 1, 2, 3 names
        nobody — the reader ends up with every number on screen and no idea
@@ -1183,7 +1530,10 @@ V.overview = async (root) => {
       render: (r) => `<span class="rk">${r._rank}</span>`
         + entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Channels', key: 'platforms',
-      render: (r) => esc((r.platforms || (r.platform ? [r.platform] : [])).map(sourceLabel).join(', ')) },
+      render: (r) => (swatches
+        ? (r.platforms || (r.platform ? [r.platform] : []))
+          .map((p) => `<span class="chn">${swatch(p)}${esc(sourceLabel(p))}</span>`).join(', ')
+        : esc((r.platforms || (r.platform ? [r.platform] : [])).map(sourceLabel).join(', '))) },
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Trips', key: 'trips', num: true },
     ...(ranksByCompleted
@@ -1192,7 +1542,7 @@ V.overview = async (root) => {
     { label: 'Km', key: 'km', num: true },
     { label: 'Completion', key: 'completion_pct', num: true, render: (r) => r.completion_pct != null ? r.completion_pct + '%' : '—' },
   ], { sortable: true, sortId: 'lead' }));
-  lead.body.append(el('p', 'cap',
+  host.append(el('p', 'cap',
     (ranksByCompleted
       ? 'Ranked by completed trips. '
       : 'Ranked by bookings taken, not by bookings completed — the two orders differ where a '
@@ -1200,7 +1550,7 @@ V.overview = async (root) => {
     + (drivers.truncated
       ? `The 12 busiest of ${fmt(drivers.people)} people who drove in this window.`
       : '')));
-};
+}
 
 V.supply = async (root) => renderSupply(root);
 
@@ -6555,10 +6905,42 @@ function animateView(root) {
    awaits without importing the shell. See the comment there for what it is
    for: a superseded render does nothing at all, including reporting its own
    failure — its errors belong to a page the reader has already left. */
+/* A FRESH #view FOR EVERY RENDER — the stale-render guard, in one place.
+   ─────────────────────────────────────────────────────────────────────────
+   This emptied the ONE #view element and handed it to the next page, so a
+   render the reader had already left still held a live reference to the page
+   they had moved to. Every module that awaits and then appends to `root`
+   wrote into the NEW page. The generation token below (data.js) lets a module
+   refuse to, and six did (app, corridors, coverage, driver, driverrecord,
+   payouts); supply, causes, forecast, optimise, capacity, day, slot, trip and
+   trips never checked, and coverage.js awaited /api/coverage with no check at
+   all (the plan review, docs/UI-REDESIGN-PLAN.md §3 "Also required").
+   Measured on the mock: #supply held on /api/supply/balance, the reader moves
+   to #settings, the answer lands — and #settings grows #supply's closing
+   "Demand shows when the work arrives…" paragraph at its foot.
+
+   Each render now gets its own element: the old #view is REPLACED by an
+   empty copy of itself (same id, same classes, so every #view rule and every
+   test that queries it still finds it), and an abandoned render keeps writing
+   into the element it was given, which is no longer on the page. That covers
+   every view without asking each one to remember, which is the only kind of
+   guard that stays true as views are added and reordered (the page phase
+   reorders nearly all of them). The token is still the right tool for a
+   module that reaches OUTSIDE its root — the shell, a scroll, a hash. */
+function freshView() {
+  const old = $('#view');
+  const root = old.cloneNode(false);
+  old.replaceWith(root);
+  return root;
+}
+
 async function render() {
   const gen = newRender();
   renderNav(); renderSectionTabs(); setHeader(); tzNote();
-  const root = $('#view'); root.innerHTML = '';
+  const root = freshView();
+  /* The shell footer's basis and colophon belong to the page that wrote them
+     (ui.js pageFoot); the principle line is the shell's and stays. */
+  clearPageFoot();
   root.scrollIntoView?.({ block: 'start' });
   try {
     const detail = await (V[state.view] || V.unit)(root);
@@ -6653,7 +7035,15 @@ async function stampSource(root, gen) {
       only: !hidesChannel(state.view) && state.platform ? [state.platform] : null,
       fleet: !hidesChannel(state.view) && state.fleet ? state.fleet : null,
     });
-    if (line) root.append(line);
+    /* Under the page contract (the Arkiv skin, read as a TOKEN, ui.js
+       contract()) the provenance line is the footer's BASIS paragraph, above
+       the principle line, on every page (plan §3 "Page contract": "sourceLine()
+       output moves into the basis and keeps .srcline"). The old skin keeps it
+       at the foot of #view, where production prints it. */
+    if (line) {
+      if (contract()) pageFoot({ basis: line });
+      else root.append(line);
+    }
   } catch { /* provenance is an addition to the page, never a reason it fails */ }
 }
 

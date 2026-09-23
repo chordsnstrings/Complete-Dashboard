@@ -318,6 +318,154 @@ const PROBE = () => {
     if (body && !body.children.length && !txt(body)) push('e', 'silent-panel', head(p).slice(0, 50));
   });
 
+  /* 11–14. THE COLOUR LAW AND THE HIGHLIGHT BUDGET (reskin STEP 3).
+         ────────────────────────────────────────────────────────────────────
+         SPEC §3A writes each clause of the colour law as a check a script can
+         run, and says of one of them "this is the one rule whose breach is
+         invisible in a screenshot". None of the harnesses above can see any
+         of them: a page can render, add up and fit its panels while its axis
+         labels are 2.90:1 grey-2, a figure wears a hex no token names, a red
+         number carries no arrow, and four figures wear the highlight. The
+         four the plan names (docs/UI-REDESIGN-PLAN.md §3, "Tests that pin
+         what changes"), read from the COMPUTED style of what the reader
+         sees, so they catch a breach whichever file wrote it:
+
+           highlight-budget   L4: at most 3 .hl on a page and 1 per band;
+                              never inside an <svg> or a <tbody>; never on
+                              an absent figure.
+           grey2-text         L5.7: grey-2 (2.90:1) painting text.
+           off-token-colour   L1: a colour no token resolves to.
+           semantic-no-glyph  L3/L5.5: text in the positive or negative
+                              colour with no ▲/▼ and no sign beside it, or a
+                              semantic dot with no screen-reader word.
+
+         The three colour checks apply where the Arkiv tokens are in force —
+         the page's --pg-contract token is 1, the same token the pages ask
+         (ui.js contract()). The old skin predates the law and is not held
+         to it. The budget applies wherever a highlight exists. */
+  const HL_BAND = '[data-band], .panel, .vdct, .absband, .pagefoot';
+  const HL_ABSENT = '.t-na, .absb-none, .dlt-na, [data-absent]';
+  const scopes = [root, document.querySelector('#pageFoot')].filter(Boolean);
+  const hls = scopes.flatMap((s) => [...s.querySelectorAll('.hl')]);
+  const where = (n) => `${n.tagName.toLowerCase()}${n.className && typeof n.className === 'string'
+    ? '.' + n.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}`;
+  const hlProblems = [];
+  if (hls.length > 3) hlProblems.push(`${hls.length} highlights on one page (at most 3)`);
+  const perBand = new Map();
+  hls.forEach((h) => {
+    const band = h.parentElement?.closest(HL_BAND) || null;
+    if (band) perBand.set(band, (perBand.get(band) || 0) + 1);
+    if (h.closest('svg')) hlProblems.push(`a highlight inside a plot (${where(h.parentElement)})`);
+    if (h.closest('tbody')) hlProblems.push('a highlight in a table body');
+    if (h.closest(HL_ABSENT) || h.querySelector(HL_ABSENT)) hlProblems.push(`a highlight on an absent figure: "${txt(h).slice(0, 40)}"`);
+  });
+  perBand.forEach((n, band) => {
+    if (n > 1) hlProblems.push(`${n} highlights in one band (${where(band)})`);
+  });
+  out.stats.highlights = hls.length;
+  if (hlProblems.length) push('e', 'highlight-budget', hlProblems.slice(0, 4).join(' · '));
+
+  const rootCs = getComputedStyle(document.documentElement);
+  if (rootCs.getPropertyValue('--pg-contract').trim() === '1') {
+    /* Every colour string, however Chromium serialises it (rgb(), color(srgb
+       …), oklab() from a color-mix), rasterised to one sRGB pixel so all of
+       them compare on one scale. */
+    const cv = document.createElement('canvas'); cv.width = cv.height = 1;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    const seen = new Map();
+    const rgba = (c) => {
+      if (!c || c === 'none' || /^url\(/.test(c) || c === 'transparent') return null;
+      if (seen.has(c)) return seen.get(c);
+      cx.clearRect(0, 0, 1, 1); cx.fillStyle = '#000'; cx.fillStyle = c; cx.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = cx.getImageData(0, 0, 1, 1).data;
+      const v = a === 0 ? null : [r, g, b, a / 255];
+      seen.set(c, v); return v;
+    };
+    const near = (x, y) => x && y && Math.abs(x[0] - y[0]) <= 2 && Math.abs(x[1] - y[1]) <= 2
+      && Math.abs(x[2] - y[2]) <= 2;
+    const tokenOf = (n) => rgba(rootCs.getPropertyValue(n).trim());
+    const TOKENS = [];
+    for (let i = 0; i < rootCs.length; i++) {
+      const n = rootCs[i];
+      if (!n.startsWith('--')) continue;
+      const v = tokenOf(n);
+      if (v) TOKENS.push(v);
+    }
+    /* A token at reduced alpha is still that token (a wash made with
+       opacity, a color-mix toward transparent): the hue is inherited. */
+    const isToken = (v) => TOKENS.some((t) => near(t, v));
+    const GREY2 = tokenOf('--grey-2');
+    const POS = tokenOf('--sem-pos'), NEG = tokenOf('--sem-neg');
+    const ownText = (n) => [...n.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim());
+    const pseudoText = (cs) => { const c = cs.content; return c && c !== 'none' && c !== 'normal'
+      && c.replace(/\s*\/.*$/, '').replace(/^"|"$/g, '').trim() !== ''; };
+    const offToken = new Map(), grey2 = [], unglyphed = [];
+    const note = (v, n, prop) => {
+      if (!v || isToken(v)) return;
+      const k = `rgb(${v.slice(0, 3).join(',')})`;
+      if (!offToken.has(k)) offToken.set(k, `${k} ${prop} on ${where(n)}`);
+    };
+    const SKIP = 'img, canvas, video, iframe, .leaflet-container, .leaflet-container *';
+    const SHAPES = new Set(['rect', 'path', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'tspan']);
+    const els = scopes.flatMap((s) => [...s.querySelectorAll('*')]).filter((n) => !n.matches(SKIP));
+    const BORDERS = ['Top', 'Right', 'Bottom', 'Left'];
+    els.forEach((n) => {
+      const cs = getComputedStyle(n);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return;
+      const isSvg = n instanceof SVGElement;
+      if (isSvg) {
+        const tag = n.tagName.toLowerCase();
+        if (!SHAPES.has(tag)) return;
+        const f = rgba(cs.fill), s = cs.stroke !== 'none' && parseFloat(cs.strokeWidth) > 0 ? rgba(cs.stroke) : null;
+        note(f, n, 'fill'); note(s, n, 'stroke');
+        if ((tag === 'text' || tag === 'tspan') && ownText(n) && near(f, GREY2)) grey2.push(txt(n).slice(0, 24));
+        return;
+      }
+      const paintsText = ownText(n);
+      const col = rgba(cs.color);
+      if (paintsText) {
+        note(col, n, 'color');
+        if (near(col, GREY2)) grey2.push(txt(n).slice(0, 24));
+        if (near(col, POS) || near(col, NEG)) {
+          /* The glyph and the sign may sit on the element or on the delta
+             chip around it (.dlt: ▲ in .dlt-g, the signed figure in .dlt-v). */
+          const ctx = n.closest('.dlt') || n;
+          const t = `${txt(ctx)} ${getComputedStyle(ctx, '::before').content} ${getComputedStyle(ctx, '::after').content}`;
+          if (!/[▲▼]/.test(t) || !/[+−-]\s*\d|[+−-]\d/.test(t)) unglyphed.push(`"${txt(n).slice(0, 30)}" (${where(n)})`);
+        }
+      }
+      note(rgba(cs.backgroundColor), n, 'background');
+      BORDERS.forEach((b) => {
+        if (parseFloat(cs[`border${b}Width`]) > 0 && cs[`border${b}Style`] !== 'none') note(rgba(cs[`border${b}Color`]), n, 'border');
+      });
+      ['::before', '::after'].forEach((ps) => {
+        const p = getComputedStyle(n, ps);
+        if (!p.content || p.content === 'none' || p.content === 'normal' || p.display === 'none') return;
+        const bg = rgba(p.backgroundColor);
+        note(bg, n, `${ps} background`);
+        BORDERS.forEach((b) => {
+          if (parseFloat(p[`border${b}Width`]) > 0 && p[`border${b}Style`] !== 'none') note(rgba(p[`border${b}Color`]), n, `${ps} border`);
+        });
+        if (pseudoText(p)) {
+          const pc = rgba(p.color);
+          note(pc, n, `${ps} color`);
+          if (near(pc, GREY2)) grey2.push(`${ps} of ${where(n)}`);
+        }
+        /* A semantic DOT (ruling 1: the dot is the glyph for a tone) says in
+           words what it means — the alternative text after the "/" in its
+           content, a .sr word, or an aria-label — because a coloured dot
+           gives a deuteranope nothing. */
+        const dot = [bg, rgba(p.borderTopColor)].some((c) => near(c, POS) || near(c, NEG));
+        if (dot && !/\/\s*"[^"]+"/.test(p.content) && !n.querySelector('.sr') && !n.getAttribute('aria-label')) {
+          unglyphed.push(`a ${ps} dot on ${where(n)} with no word for it`);
+        }
+      });
+    });
+    if (grey2.length) push('e', 'grey2-text', `${grey2.length} in grey-2 (2.90:1): ${grey2.slice(0, 4).join(' | ')}`);
+    if (offToken.size) push('e', 'off-token-colour', `${offToken.size}: ${[...offToken.values()].slice(0, 4).join(' · ')}`);
+    if (unglyphed.length) push('e', 'semantic-no-glyph', `${unglyphed.length}: ${unglyphed.slice(0, 4).join(' · ')}`);
+  }
+
   /* 10. The page's own headline. A view whose title is another view's name is
          the router failing, and it looks like a working page. */
   /* Did the page SAY something, even if it drew nothing? An empty state, a

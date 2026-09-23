@@ -2623,3 +2623,108 @@ this step's instructions.
   the state colours an operator reads the live map by.
 - **The phone's own m.css pass** is STEP 5; its screens reach charts.js only
   through the desktop driver and vehicle tabs, which follow the tokens.
+
+## Arkiv reskin, STEP 3 — the page contract and the stale-render guard — 2026-09-23, NOT ON PRODUCTION
+
+Branch `reskin-foundation`. docs/UI-REDESIGN-PLAN.md §3 ("Page contract",
+"Components" item 12, "Review corrections", "Also required"), SPEC §1 and §3A,
+the operator's rulings (§1). Not deployed, not pushed, default skin not
+flipped. Everything visual is under `?skin=arkiv`; the stale-render guard is
+in both skins (it changes no pixel, measured below).
+
+| # | what | state | proof |
+|---|---|---|---|
+| C1 | **The stale-render guard, central.** `render()` replaced the ONE #view's contents and handed it to the next page, so a render the reader had left wrote into the page they were on. Measured on the mock: #supply held on `/api/supply/balance`, the reader moves to #settings, the answer lands, and #settings grows #supply's closing paragraph. `freshView()` now REPLACES #view with an empty copy of itself (same id and classes) on every render; an abandoned render writes into its own detached element. Covers supply, causes, forecast, optimise, capacity, day, slot, trip, trips and every other view without a per-page edit (none of the concurrent branch's files is touched for it) | **written** | page_contract §4 (the leaked paragraph, the old element detached and holding it, one #view). Reverted to `root.innerHTML = ''`: 3 fail |
+| C2 | coverage.js:289 awaited `/api/coverage` with no `alive(gen)` check; it has one (the anchor scroll after it reads `location.hash`, which by then is the next page's) | **written** | page_contract §4. Removed: 1 fails |
+| C3 | **Which DOM a page builds is a token.** `--pg-contract` (app.css `:root` 0, arkiv.css 1), read by `ui.js contract()` — markForm()'s pattern; no module reads the skin | **written** | page_contract §0; arkiv_skin §4 still scans every module (103 green) |
+| C4 | `delta(value, {invert, unit, of, kind, d, na})`: colour and screen-reader word from `semanticOf()`, arrow and sign from the arithmetic (a fall in cancellations is a green ▼ −, SPEC L3; semanticOf's own glyph is ▲ for every "better"); a change that rounds to nothing is grey "no change"; ruling 4 — `kind: 'level' \| 'gap'` without `of` throws; `na` printed verbatim | **written** | page_contract §1. Arrow from semanticOf: 2 fail. Level allowed without a reference: 1 fails |
+| C5 | `highlight(node, token)`: wraps the figure in `span.hl` (wash `--w-*`, a 3px rule under the figure, weight 600, digits ink); refuses an absent figure, an `<svg>`, a `<tbody>`, a 2nd in a band and a 4th on a page, and says which rule | **written** | page_contract §5. No band check: 2 fail · no page cap: 1 · svg/tbody allowed: 1 · absent allowed: 2 |
+| C6 | `glance(host, tiles)`, built ON `kpiTile` (a `glance` flag adds `tile`/`t-l`/`t-v`, `is-hero`, a channel swatch, `na` — the reason in the value slot —, `unit`, `delta`, `spark` or the reason there is none). A kpiRow tile is byte-identical to the pre-STEP-3 function (frozen in the test as the oracle). arkiv.css: six columns, the hero two at `--d6`, 6 → 2 → 1 at 820/480 | **written** | page_contract §2, §5, §5b; kpi_one_tile 20. Extras on every tile: kpi_one_tile 9 fail · six columns removed: 1 · hero spanning two at 390: 1 |
+| C7 | `secHead(idx, name, note)`: `idx` null takes the next number from the counter the panel titles use; the index in `--grey`, not b.css's grey-2 | **written** | page_contract §5 (computed `::before`) |
+| C8 | `absenceBand(host, cells)`: up to four cells a row, the size in Karla 600 `--d5` ink-2, the reason at reading size, `none` for a gap no figure sizes, one ink highlight on the `hl` cell with a figure | **written** | page_contract §5 |
+| C9 | **The shell footer.** `<footer id="pageFoot">` after #view, inside #app, carrying the principle line verbatim ("A figure that cannot be measured is shown absent, with the reason — never as zero.", the mockups' `.principle`); `pageFoot({basis, colophon}, host)` fills basis and colophon, `clearPageFoot()` runs on every render, and under the contract `stampSource` puts `.srcline` in the basis. The old skin: `display:none`, `.srcline` stays in #view. **The phone** (review finding): a host outside #view — m/screens.js fallback()'s `.m-fallback` — gets its own `.pf-inline` footer, principle included | **written** | page_contract §5, §5b. No inline footer: 2 fail · not cleared: 2 · srcline left in #view: 1 · footer shown in the old skin: 1 |
+| C10 | `spark()` moved from m/ui.js to charts.js (m/ui.js re-exports it); a null is a GAP (it was `Number(null)` = 0 — the `\|\| 0` lie — and an undefined was dropped, sliding later days left). Every series the phone passes is byte-identical to the old function (all finite: each caller `\|\| 0`s first) | **written** | page_contract §3 (the old function frozen as the oracle, seven series); phone 142 (its spark checks now read charts.js, changed deliberately, with the re-export pinned). Old filter restored: 2 fail |
+| C11 | `tableFrom(…, {pairs: [[a, b], …]})`: two columns in one cell, both labels in the heading and both sort buttons with their own keys (sort in the address), `data-key`/`data-key2`, phone card label "A · B"; a pruned half falls back to the other. Opt-in | **written** | page_contract §6. Second label not a button: 2 fail |
+| C12 | **render-audit: the four checks** — `highlight-budget`, `grey2-text`, `off-token-colour`, `semantic-no-glyph` — from computed style; the colour three only where `--pg-contract` is 1 | **written** | audit_tools_detect (33): a faulty stub, a legal stub, the faulty stub at `--pg-contract:0`. Each check removed: 2 / 1 / 1 / 1 fail; law applied to the old skin: 1 |
+| C13 | gapBars `secondaryLine: {color, label}`: the second measure as a step line with a direct label, placed above every mark under it. Opt-in; no existing caller passes it | **written** | page_contract §7 (`.gb-step`, "FMS journeys") |
+| C14 | **#overview, the pilot, under the skin** (plan §4 with the review's correction and rulings 5-7): 00 (the verdict as the statement, then seven tiles, Trips the hero), 01 Bookings per day in ink with the FMS journeys step line and the stats caption (busiest day highlighted), 02 Cancellations a day (complete days), 03 channel bars (click-to-filter), 04 the /api/kpis outcome buckets in ink plus every raw status word, 05 every tier (12 drawn, the rest counted), 06 settle bars, 07 Top drivers with channel swatches, † four live cells, the colophon. Deltas on Trips, Distance, Trip value, Money in (%) and Completion (points) from `/api/compare/period`, ABSENT with the true reason on a rolling window or a channel filter (where the endpoint answers 400, so it is not asked); sparklines on four tiles, Money in says why it has none. No §06 AED/km per tier (ruling 5). The old skin's page is unchanged: `overviewClassic`, sharing `overviewTiles`, `overviewVerdict` and `topDrivers` | **written** | page_contract §7 (order, 7 tiles, 5 deltas, 4 sparks, no bare —/0, 3 highlights, 4 cells, no ring, step line, swatches, no per-tier rate; rolling window; channel filter, and no refused request; old skin: six panels, kpiRow, two rings). All of it on the old page under the skin: 14 fail · comparison asked under a channel filter: 1 |
+
+**Measurement: the old skin did not move.** STEP 2's pixel harness (every
+`/api/` answer recorded, clock frozen at 2026-09-23T08:00Z, sticky pinned,
+caret hidden), HEAD `c0b6238` (`git archive`, :8101) against the working tree
+(:8102): #overview, #supply, #settings, #coverage, #drivers, #finance at 1440
+light, 1440 dark and 390 light, plus the phone build's #overview and #today —
+20 shots and 20 `#view` DOM dumps a tree, and a second HEAD run for the noise.
+**Every DOM dump is identical** (random chart ids normalised) except #drivers
+1440 light ("0d ago" / "-1d ago"), where the second HEAD run equals the
+working tree. 18 of 20 shots are byte-identical; #coverage 1440 light equals
+the second HEAD run; #settings 390 light equals a third HEAD run (the 646-pixel
+band the dark step recorded as run-to-run noise). Harness in scratchpad
+`reskin/step3/pixel/`.
+
+**render-audit under the skin.** Production data (live-ui): #overview at 1440
+and 390, 0 findings, 3 highlights. On the mock, all 125 routes at 1440: no
+js-error; the new checks found #compare's ▲/▼ with no sign (11), #coverage's
+red counts (5), #receipts' "−AED 1,500.00" with no glyph (2), #insights'
+impact figures (1 on the mock, 14 on production), unstyled form controls in
+the browser's own grey (#online-time, #trips, #playbook) and #retention's
+table-cell backgrounds (6 non-token colours) — all page-phase work, listed in
+AUDIT.md.
+
+**Screenshots** (live-ui :8100, production data): #overview under the skin at
+1440 and 390, light and dark, and in the old skin at 1440 and 390, full page;
+plus a 1440×900 fold. Scratchpad `reskin/step3/shots/final/`.
+
+**Tests.** New: `test/page_contract.test.mjs`, 81 checks (static and browser
+on the mock). Extended: `audit_tools_detect` (6 new, 33). Changed
+deliberately: `phone` (spark checks read charts.js; the re-export pinned),
+`chart_marks` (#overview's hero chart is "Bookings per day" under the skin).
+Green file by file: page_contract 81, audit_tools_detect 33, kpi_one_tile 20,
+phone 142, arkiv_skin 103, type_scale 11, tokens 144, chart_marks 137,
+chart_fit 27, chart_geometry 17, platform_share_once 8, routes 65,
+nav_sections 17, today_band 38, page_numbers 11, caption_matches_figure 32,
+calendar_window 82, auth_banner_pending_ui 18, imports_resolve 4, verdicts
+24, assets 40, sticky_header 9, pinned_identity 72, fold_rows 8,
+absent_columns 25, payout_mobile 39, scroll_cue 6, money_precise 21,
+phone_render 8, phone_today_only 19, payout_page_reconcile 55,
+driver_empty_window_page 63, insight_named 35, kpi_pill 10, query_params 12,
+source_line 19, settings_page_layout 20, credential_errand 23, trend_gaps 50,
+live_day 20, capacity_headline 22, formatters 34, signed 14, interlinking 11,
+consistency 67, spacing 2 (125 routes), smoke_views 125/125. Browser suites on
+a private mock (:18399). The full suite was not run, per this step's
+instructions.
+
+**Revert proofs** (`scratchpad reskin/step3/reverts.py`: each mutation
+applied, the test run, the file restored and md5-checked; all 24 fail as
+listed in the rows above). Four first proved nothing and the test was
+strengthened until they did: the absent-figure refusal (no case reached it
+before the budget did — now asked first, and a hero that cannot be measured is
+checked), the six-column rule (at 1,100px auto-fit also gives six — the test
+host is now 900px, where it gives five), the pair's second sort button (the
+test crashed instead of failing — now fails cleanly), and the channel-filter
+comparison (the mock does not answer 400 — the test now asserts no request is
+made).
+
+### NOT DONE in STEP 3, and named
+
+- **The fold at 1440×900.** With today's shell (the rail, the three-row
+  credential banner production carries now, the topbar and the today strip)
+  the 00 head starts above the fold and the first row of tiles at ~720px, so
+  the hero runs past 900. STEP 4's shell restructure is the plan's answer (§3
+  Risks, "THE FOLD"); nothing in the page can fix it.
+- **No page but #overview adopts the contract.** driver.js and vehicle.js
+  (the phone's fallback tabs) will call `pageFoot(…, host)` in the page
+  phase; both are on the concurrent unauthorized-trips branch and were not
+  touched.
+- `rowMark` / `chanChip` (plan §3 Components 12) are not built; #overview
+  needed only `swatch()`.
+- **Both skins, found and not fixed:** the old skin's Trips tile prints
+  "0 telematics journeys" under a channel filter (`/api/kpis` answers 0 there
+  because journeys are not a channel's; `|| 0` also turns a null into 0). The
+  contract version says why instead; the old skin keeps production's text
+  until the flip. The phone's money spark passes `n(d.revenue) || 0`, so a
+  day with no revenue figure draws as a day of none. #drivers is 67px wider
+  than a 1440 window on the mock in BOTH skins (its table), as STEP 1
+  recorded at 1180.
+- The render-audit findings above (#compare, #coverage, #receipts, #insights,
+  the unstyled inputs, #retention) are each page's own plan entry.

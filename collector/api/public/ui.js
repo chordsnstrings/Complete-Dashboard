@@ -2,10 +2,10 @@
    These used to live inside app.js. They moved out when the dashboard grew
    detail pages of its own: a per-driver page needs the same panels, tables and
    modals as the overview, and copying them would have let the two drift. */
-import { fmt, empty } from './charts.js';
+import { fmt, empty, spark } from './charts.js';
 import { href, params } from './data.js';
 import { TZ, TZ_LABEL, dubaiDay } from './tz.js';
-import { CHANNEL_ORDER } from './tokens.js';
+import { CHANNEL_ORDER, channelKey, semanticOf } from './tokens.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const el = (tag, cls, html) => {
@@ -210,9 +210,21 @@ function plainCell(c, r) {
    `cardLead` names the column that becomes the card's heading: the field the
    rest of the card is ABOUT, which is the same thing .tscroll pins on the
    left at desktop width. Without one the first column is used. */
+/* PAIRED HEADERS (reskin STEP 3; the plan review: "People A needs a
+   paired-header option in tableFrom").
+   ─────────────────────────────────────────────────────────────────────────
+   `pairs: [['trips', 'trips_ever'], …]` sets two columns in ONE cell, the
+   second value on a line under the first, so a wide roster can fit a
+   window without dropping a column. Nothing is lost: each pair's heading
+   keeps BOTH labels, and on a sortable table BOTH are sort buttons with
+   their own keys, so the sort in the address, nulls-last and the arrow all
+   work per key exactly as for a single column. The cell carries both keys
+   (data-key, data-key2), and a phone card labels it "A · B". A pair whose
+   half was pruned as empty (`absent`) falls back to the half that is left.
+   Opt-in: without `pairs` every table renders as it always did. */
 export function tableFrom(rows, cols, { compact = false, sortable = false,
   sortId = 't', defaultSort = null, capped = null, onRow = null,
-  cards = false, cardLead = null } = {}) {
+  cards = false, cardLead = null, pairs = null } = {}) {
   if (!rows.length) { const d = el('div'); empty(d); return d; }
   const wrap = el('div', 'tscroll');
   const t = el('table', compact ? 'compact' : null);
@@ -302,7 +314,29 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
     });
   };
 
-  const head = () => `<thead><tr>${cols.map((c) => {
+  /* The display units: a column on its own, or a pair sharing a cell. */
+  const pairOf = new Map(), second = new Set();
+  (pairs || []).forEach(([a, b]) => {
+    const A = byKey(a), B = byKey(b);
+    if (!A || !B || A === B || [A, B].some((c) => pairOf.has(c) || second.has(c))) return;
+    pairOf.set(A, B); second.add(B);
+  });
+  const units = cols.filter((c) => !second.has(c)).map((c) => (pairOf.has(c) ? [c, pairOf.get(c)] : [c]));
+  const pairHead = ([A, B]) => {
+    const on = (c) => active && active.key === c.key;
+    const lit = on(A) || on(B);
+    const aria = lit ? (active.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+    const cls = `thpair${A.num ? ' num' : ''}${sortable ? ' sortable' : ''}${lit ? ' sorted' : ''}`;
+    const lab = (c) => (sortable && c.key
+      ? `<button type="button" data-sk="${esc(c.key)}">${esc(c.label)}${on(c)
+        ? `<i class="sarr">${active.dir === 'asc' ? '↑' : '↓'}</i>` : ''}</button>`
+      : `<span>${esc(c.label)}</span>`);
+    return `<th class="${cls}" data-key="${esc(A.key)}" data-key2="${esc(B.key)}" aria-sort="${aria}">`
+      + `${lab(A)}${lab(B)}</th>`;
+  };
+
+  const head = () => `<thead><tr>${units.map((u) => (u.length === 2 ? pairHead(u) : u[0])).map((c) => {
+    if (typeof c === 'string') return c;
     const on = active && active.key === c.key;
     const aria = on ? (active.dir === 'asc' ? 'ascending' : 'descending') : 'none';
     const cls = `${c.num ? 'num' : ''}${sortable && c.key ? ' sortable' : ''}${on ? ' sorted' : ''}`.trim();
@@ -327,7 +361,17 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
   const lead = cards
     ? (cols.find((c) => c.key === cardLead) || cols[0] || null)
     : null;
-  const body = (list) => `<tbody>${list.map((r) => `<tr>${cols.map((c) =>
+  const cellOf = (c, r) => (c.render ? c.render(r) : plainCell(c, r));
+  const pairCell = ([A, B], r) => {
+    const isLead = cards && (A === lead || B === lead);
+    const inner = `<span class="tdp-a">${cellOf(A, r)}</span><span class="tdp-b">${cellOf(B, r)}</span>`;
+    return `<td class="${['tdpair', A.num ? 'num' : '', (A.cellCls && A.cellCls(r)) || '',
+      isLead ? 'cardlead' : ''].filter(Boolean).join(' ')}"${
+      cards && !isLead ? ` data-label="${esc(`${A.label} · ${B.label}`)}"` : ''
+    }>${cards && !isLead ? `<span class="cardval">${inner}</span>` : inner}</td>`;
+  };
+  const body = (list) => `<tbody>${list.map((r) => `<tr>${units.map((u) => (u.length === 2
+    ? pairCell(u, r) : u[0])).map((c) => (typeof c === 'string' ? c :
     /* `cellCls` lets a column give ONE cell a verdict — a completion rate below
        the threshold reads as bad in the cell rather than only in a tile far
        above the table. Returns a class name or nothing. */
@@ -352,7 +396,7 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
          A named span is a flex item like any other. It shrinks, it wraps
          inside its own track, and the field fits on one line. */
       ? `<span class="cardval">${c.render ? c.render(r) : plainCell(c, r)}</span>`
-      : (c.render ? c.render(r) : plainCell(c, r))}</td>`)
+      : (c.render ? c.render(r) : plainCell(c, r))}</td>`))
     .join('')}</tr>`).join('')}</tbody>`;
 
   /* The caller's row-level handlers index into the array it passed, so the
@@ -601,9 +645,20 @@ const TONES = { ok: 'good', err: 'critical', good: 'good', warn: 'warn',
   serious: 'serious', critical: 'critical' };
 export function kpiTile(k) {
   if (!k) return '';
+  /* A GLANCE TILE IS THIS TILE (reskin STEP 3). glance() below sets `glance`
+     on each item and this one function renders it, so the page contract's
+     00 band cannot grow a second tile builder (test/kpi_one_tile.test.mjs).
+     Everything it adds — the tile/t-* classes, a channel swatch, the reason
+     in the value slot, a delta, a sparkline — is gated on that flag and
+     sits on lines that already existed, so a tile built by kpiRow() renders
+     byte for byte what it always did. */
+  const g = k.glance === true;
+  /* A figure that cannot be measured prints its REASON where the number was
+     (plan §3 "Page contract": via na:'…', never a bare '—', never 0). */
+  const na = g && k.na ? String(k.na) : null;
   /* Measured on the TEXT, so a value carrying markup is judged by what the
      reader actually sees rather than by the length of its span tags. */
-  const plain = String(k.html ? k.html.replace(/<[^>]*>/g, '') : (k.value ?? '—'));
+  const plain = na ?? String(k.html ? k.html.replace(/<[^>]*>/g, '') : (k.value ?? '—'));
   const long = plain.trim().length > KPI_ONE_LINE ? ' long' : '';
   const to = k.to || (k.cohort ? href('cohort', k.cohort) : null);
   const tag = to ? 'a' : 'div';
@@ -612,13 +667,38 @@ export function kpiTile(k) {
   /* See panel()'s `key`: a tile a test has to find needs a handle that is not
      its label, or the label can never be improved. */
   const kk = k.key ? ` data-kpi="${esc(k.key)}"` : '';
+  const tile = g ? ` tile${k.hero ? ' is-hero' : ''}` : '';
+  const sw = g && k.channel ? swatch(k.channel) : '';
+  const value = na ? esc(na)
+    : `${k.html || esc(k.value ?? '—')}${g && k.unit ? `<span class="t-u">${esc(k.unit)}</span>` : ''}`;
   return `
-    <${tag} class="kpi${tone}${to ? ' clickable kpi-open' : ''}"${attr}${kk}>
-      <div class="l">${esc(k.label)}</div>
-      <div class="n num${long}">${k.html || esc(k.value ?? '—')}</div>
-      ${k.sub ? `<div class="s">${esc(k.sub)}</div>` : ''}
+    <${tag} class="kpi${tile}${tone}${to ? ' clickable kpi-open' : ''}"${attr}${kk}>
+      <div class="l${g ? ' t-l' : ''}">${sw}${esc(k.label)}</div>
+      <div class="n${na ? '' : ' num'}${g ? ' t-v' : ''}${na ? ' t-na' : ''}${long}">${value}</div>${g ? glanceExtras(k) : ''}
+      ${k.sub ? `<div class="s${g ? ' t-sub' : ''}">${esc(k.sub)}</div>` : ''}
       ${to && k.who !== false ? '<div class="kpi-who">Who exactly? →</div>' : ''}
     </${tag}>`;
+}
+
+/* The two slots a glance tile has and a kpiRow tile does not, in SPEC §1's
+   order: label / value / DELTA / SPARKLINE / sub.
+     delta  { value, invert, unit, of, kind, d, na } → delta() below, or a
+            string of markup a caller already built with it.
+     spark  an array of numbers (null = a GAP, SPEC §5) drawn by charts.js
+            spark(); or a STRING, the reason there is no series — "Money in
+            gets none, and its tile says why" (plan §4, #overview). */
+function glanceExtras(k) {
+  const d = k.delta == null ? ''
+    : `<div class="t-d">${typeof k.delta === 'string' ? k.delta : delta(k.delta.value, k.delta)}</div>`;
+  let sp = '';
+  if (Array.isArray(k.spark)) {
+    const ch = k.channel ? channelKey(k.channel) : null;
+    sp = `<div class="t-s">${spark(k.spark, { h: 30, fill: false, cls: 'tspark',
+      tone: ch ? `var(--c-${ch})` : 'var(--ink)' }).outerHTML}</div>`;
+  } else if (typeof k.spark === 'string' && k.spark) {
+    sp = `<div class="t-s t-s-na">${esc(k.spark)}</div>`;
+  }
+  return d + sp;
 }
 
 /** The tiles of a row as one HTML string, for a caller that owns the host. */
@@ -2356,4 +2436,270 @@ export function splitAlerts(rows, { count = 'n' } = {}) {
   const sum = (a) => a.reduce((x, r) => x + (Number(r[count]) || 0), 0);
   return { classified, driving, device,
     drivingN: sum(driving), deviceN: sum(device), total: sum(list) };
+}
+
+/* ══ THE PAGE CONTRACT ═════════════════════════════════════════════════════
+   Reskin STEP 3 (docs/UI-REDESIGN-PLAN.md §3 "Page contract", SPEC §1): every
+   page is 00 AT A GLANCE → 01 the hero chart → 02..n supporting marks → †
+   what this page does not know → the footer with the principle line. These
+   are the pieces a page is built from; each is opt-in, and a page that has
+   not been converted keeps kpiRow and its own order.
+
+   WHICH SKIN IS IN FORCE IS A TOKEN, NEVER THE ATTRIBUTE. STEP 2 set the
+   rule for the charts (charts.js markForm(): the form is a custom property
+   each skin declares) and test/arkiv_skin.test.mjs holds every module to it.
+   The contract is the same kind of decision — which DOM a page builds — so
+   it is asked the same way: app.css declares --pg-contract:0 for the old
+   skin, arkiv.css declares 1, and a page asks contract(). No stylesheet (a
+   test harness, a detached document) answers the old skin, which is what
+   production draws. */
+export function contract() {
+  try {
+    return String(getComputedStyle(document.documentElement).getPropertyValue('--pg-contract')).trim() === '1';
+  } catch { return false; }
+}
+
+/* A channel's swatch, for a word that names it. SPEC L5.6: text never wears a
+   channel colour; the identity sits BESIDE the word. The .sw.ch-* rules are
+   app.css's, painted from --c-* in both skins. An unknown name gets no
+   swatch rather than a borrowed one (L1: a mislabelled feed must look
+   unidentified). */
+export const swatch = (name) => {
+  const k = channelKey(String(name ?? ''));
+  return k ? `<i class="sw ch-${k}" aria-hidden="true"></i>` : '';
+};
+
+/* ── the delta ─────────────────────────────────────────────────────────────
+   delta(value, { invert, unit, of, kind, d, na }) → markup.
+
+   The COLOUR and the WORD follow the meaning (tokens.js semanticOf: better
+   is --sem-pos, worse --sem-neg, no change --sem-neu); the GLYPH and the
+   SIGN follow the arithmetic. So a fall in cancellations, where down is good
+   (`invert`), is a GREEN ▼ −1.06 "better" — SPEC L3: "a measure where down
+   is good gets a green down-arrow. The colour follows the meaning, never the
+   arithmetic sign" — which is what the mockups draw. semanticOf's own glyph
+   (▲ for every "better") is the design helper's shorthand and is not used
+   for the arrow here.
+
+   Ruling 4 (the operator, 2026-09-23): a LEVEL or a GAP may sit in the delta
+   slot, always worded ("+24 against the fleet median"), never a bare arrow.
+   So `kind: 'level'` or `'gap'` without `of` is a caller's mistake and
+   throws where it is written, instead of printing an arrow that compares
+   against nothing. A change over time says what it is against too, whenever
+   the caller knows.
+
+   Every semantic colour carries its glyph, its sign AND a screen-reader word
+   (SPEC L3 "the one rule whose breach is invisible in a screenshot"). A
+   value that could not be measured prints "not measured", or the caller's
+   `na` — the true reason, in full ("not compared: …") — never an arrow,
+   never a zero. `d` is the decimals printed, and a change
+   that rounds to nothing at that precision is "no change", not a green +0.0. */
+export function delta(value, { invert = false, unit = '', of = '', kind = 'change', d = 1,
+  na = null } = {}) {
+  if (kind !== 'change' && !of) {
+    throw new TypeError(`delta(): a ${kind} in the delta slot must name what it is measured against `
+      + '(ruling 4: always worded, never a bare arrow)');
+  }
+  const n = value == null || value === '' ? NaN : Number(value);
+  if (!Number.isFinite(n)) {
+    return `<span class="dlt dlt-na">${esc(na || 'not measured')}</span>`;
+  }
+  const r = Number(n.toFixed(d));
+  const sem = semanticOf(r === 0 ? 0 : r, { invert });
+  const cls = sem.word === 'better' ? 'positive' : sem.word === 'worse' ? 'negative' : 'neutral';
+  const glyph = r > 0 ? '▲' : r < 0 ? '▼' : '–';
+  const sign = r > 0 ? '+' : r < 0 ? '−' : '';
+  const num = Math.abs(r).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const pc = unit === '%';
+  return `<span class="dlt dlt-${cls}" title="${esc(sem.word)}">`
+    + `<span class="dlt-g" aria-hidden="true">${glyph}</span>`
+    + `<span class="dlt-v">${sign}${num}${pc ? '%' : ''}</span>`
+    + (unit && !pc ? `<span class="dlt-u">${esc(unit)}</span>` : '')
+    + (of ? `<span class="dlt-of">${esc(of)}</span>` : '')
+    + `<span class="sr">${esc(sem.word)}</span></span>`;
+}
+
+/* ── the highlight, and its budget ─────────────────────────────────────────
+   SPEC L4: emphasis is a FORM — a wash, a 3px rule inset to the figure's
+   width, one weight step — never a louder colour, and the digits stay ink.
+   MAY, one per band and at most three per page: the hero tile's value; one
+   label on the hero chart (the endpoint or the extreme); the one figure in
+   the absence band that sizes what is missing. MAY NOT: two in one band, an
+   axis tick, inside a plot area, in a table body, on a figure that is absent.
+   "A page carrying four highlights carries none."
+
+   Enforced HERE, at run time, rather than trusted to each page: the 4th on a
+   page, the 2nd in a band, anything inside an <svg> or a <tbody>, and any
+   absent figure are refused, and the refusal says which rule (bin/
+   render-audit.mjs checks the rendered page the same way, after the fact).
+   `token` is the governing token: 'ink' (the default), 'pos' or 'neg' for a
+   figure with a direction, or a channel's name for a figure that belongs to
+   one channel. The figure's contents are wrapped in one inline-block
+   span.hl, so the wash and the rule are the width of the figure, not of its
+   tile. Returns { applied, why }. */
+export const HL_BUDGET = Object.freeze({ page: 3, band: 1 });
+const HL_BAND = '[data-band], .panel, .vdct, .absband, .pagefoot';
+const HL_ABSENT = '.t-na, .absb-none, .dlt-na, [data-absent]';
+const hlTokens = (t) => {
+  if (t === 'pos') return ['--w-pos', '--sem-pos'];
+  if (t === 'neg') return ['--w-neg', '--sem-neg'];
+  const k = t && t !== 'ink' ? channelKey(String(t)) : null;
+  return k ? [`--w-${k}`, `--c-${k}`] : ['--w-ink', '--ink'];
+};
+export function highlight(node, token = 'ink') {
+  const no = (why) => ({ applied: false, why });
+  if (!node || node.nodeType !== 1) return no('nothing to highlight');
+  if (node.closest('svg')) return no('inside a plot area (SPEC L4)');
+  if (node.closest('tbody')) return no('inside a table body (SPEC L4)');
+  if (node.closest(HL_ABSENT) || node.querySelector(HL_ABSENT)) {
+    return no('an absent figure is explained, never emphasised (SPEC L4, L5.8)');
+  }
+  const band = node.closest(HL_BAND);
+  if (band && band.querySelector('.hl')) return no(`this band already carries its ${HL_BUDGET.band}`);
+  let page = node.closest('#view, .m-fallback');
+  if (!page) { page = node; while (page.parentElement) page = page.parentElement; }
+  if (page.querySelectorAll('.hl').length >= HL_BUDGET.page) {
+    return no(`this page already carries ${HL_BUDGET.page} — a page carrying four carries none`);
+  }
+  const [wash, rule] = hlTokens(token);
+  const w = document.createElement('span');
+  w.className = 'hl';
+  w.style.setProperty('--hl-wash', `var(${wash})`);
+  w.style.setProperty('--hl-rule', `var(${rule})`);
+  while (node.firstChild) w.append(node.firstChild);
+  node.append(w);
+  return { applied: true, why: null };
+}
+
+/* ── 00 · AT A GLANCE ──────────────────────────────────────────────────────
+   glance(host, tiles): the page's important numbers, never below the fold.
+   Built ON kpiTile (see glanceExtras above), so .kpi, .kpi .l, .kpi .n and
+   data-kpi — which a dozen tests find — are all still there, and each tile
+   also carries SPEC's tile/t-l/t-v names. A six-column grid (arkiv.css), so
+   4, 5 or 6 tiles share one rhythm and the HERO spans two at --d6. Exactly
+   one hero: the first tile marked `hero`, or the first tile. The hero's
+   value carries the page's one counted highlight in this band, in its
+   channel's tokens when it belongs to one channel, else ink — unless it is
+   absent, which is explained and never emphasised. */
+export function glance(host, tiles) {
+  const list = (tiles || []).filter(Boolean);
+  let hero = list.findIndex((t) => t.hero);
+  if (hero < 0) hero = 0;
+  const items = list.map((t, i) => ({ ...t, glance: true, hero: i === hero }));
+  host.classList.add('kpis', 'glance');
+  host.dataset.band = 'glance';
+  host.innerHTML = kpiTiles(items);
+  const h = items[hero];
+  const node = host.children[hero]?.querySelector('.n');
+  if (h && node) highlight(node, h.hl || (h.channel ? h.channel : 'ink'));
+  return host;
+}
+
+/* ── a numbered section head ───────────────────────────────────────────────
+   For a band a page builds by hand — 00 AT A GLANCE and the † absence band.
+   An ordinary panel() is already numbered: arkiv.css prints 01, 02… before
+   its <h3> from a CSS counter. `idx` null takes the NEXT number from that
+   same counter, so an absence band after seven panels reads 08 without the
+   page counting its own panels; a string ('00') is printed as it is. Named
+   .sechd, not b.css's .sec-*: the live .sec is a button class (namespace,
+   don't paste). */
+export function secHead(idx, name, note = null) {
+  const h = el('div', 'sechd');
+  const t = el('div', 'sechd-t');
+  const i = el('span', idx == null ? 'sechd-idx sechd-auto' : 'sechd-idx', idx == null ? '' : esc(idx));
+  i.setAttribute('aria-hidden', 'true');
+  t.append(i, el('h2', 'sechd-name', esc(name)));
+  h.append(t);
+  if (note != null && note !== '') {
+    const n = el('div', 'sechd-note');
+    if (note instanceof Node) n.append(note); else n.textContent = String(note);
+    h.append(n);
+  }
+  return h;
+}
+
+/* ── † WHAT THIS PAGE DOES NOT KNOW ────────────────────────────────────────
+   absenceBand(host, [{ label, fig | none, why, hl, html }]). A band of up to
+   four cells (more wrap to a second row): the size of what is missing in
+   Karla 600 --d5 ink-2, and the TRUE reason under it at reading size. `none`
+   is the word printed where there is no figure to size the gap ("None", "Not
+   recorded"). At most one highlight, on the figure that sizes the gap (`hl`),
+   in ink: never a semantic hue — a missing number is not bad news, it is
+   missing (SPEC L5.9). `why` is text; `html: true` lets a caller that owns
+   the escaping pass markup (a link to the page that explains more). */
+export function absenceBand(host, cells, { idx = null, name = '† What this page does not know',
+  note = 'The true reason for each' } = {}) {
+  const wrap = el('section', 'absence');
+  wrap.append(secHead(idx, name, note));
+  const band = el('div', 'absband');
+  band.dataset.band = 'absence';
+  let sized = null;
+  (cells || []).filter(Boolean).forEach((c) => {
+    const cell = el('div', 'absb-cell');
+    cell.append(el('span', 'absb-lab', esc(c.label)));
+    const hasFig = c.fig != null && c.fig !== '';
+    const fig = el('div', hasFig ? 'absb-fig' : 'absb-fig absb-none',
+      esc(hasFig ? c.fig : (c.none || 'None')));
+    cell.append(fig);
+    if (c.why) cell.append(el('p', 'absb-why', c.html ? c.why : esc(c.why)));
+    band.append(cell);
+    if (c.hl && hasFig && !sized) sized = fig;
+  });
+  wrap.append(band);
+  host.append(wrap);
+  if (sized) highlight(sized, 'ink');
+  return wrap;
+}
+
+/* ── the footer: basis, the principle, the colophon ────────────────────────
+   The principle line is the SHELL's, printed on every page with no per-page
+   work: index.html carries it in <footer id="pageFoot">, after #view, inside
+   #app. A view fills the two parts that are its own — the BASIS paragraph
+   (what the page was built from; stampSource puts sourceLine()'s .srcline
+   here under the contract) and the right-hand mono COLOPHON — and render()
+   clears both on every navigation, so a page never wears the last one's.
+   Passing a key as `undefined` leaves that part alone, so the view and the
+   shell can each fill theirs.
+
+   ON THE PHONE the shell footer is hidden with the rest of #app, and
+   m/screens.js fallback() renders the desktop driver and vehicle tabs inside
+   #m (the plan review). Called with the view's `host`, pageFoot() writes into
+   the shell only when that host is inside #view; anywhere else it appends
+   its own footer — the same three parts, principle included — to the end of
+   the host, so the basis and the principle reach the phone too. */
+export const PRINCIPLE = 'A figure that cannot be measured is shown absent, with the reason — never as zero.';
+function footShape(foot) {
+  const text = el('div', 'pf-text');
+  text.append(el('div', 'pf-basis'), el('p', 'pf-principle', esc(PRINCIPLE)));
+  foot.append(text, el('div', 'pf-colophon'));
+  return foot;
+}
+export function pageFoot({ basis, colophon } = {}, host = null) {
+  if (typeof document === 'undefined') return null;
+  const shell = document.getElementById('pageFoot');
+  let foot = null;
+  if (shell && (!host || host.closest?.('#view'))) foot = shell;
+  else if (host) {
+    foot = [...host.children].find((c) => c.classList.contains('pf-inline')) || null;
+    if (!foot) {
+      foot = footShape(el('footer', 'pagefoot pf-inline'));
+      host.append(foot);
+    }
+  }
+  if (!foot) return null;
+  if (basis !== undefined) {
+    const b = foot.querySelector('.pf-basis');
+    b.innerHTML = '';
+    if (basis != null) b.append(basis instanceof Node ? basis : el('p', 'pf-p', esc(basis)));
+  }
+  if (colophon !== undefined) {
+    foot.querySelector('.pf-colophon').innerHTML = (colophon == null ? [] : [].concat(colophon))
+      .filter((x) => x != null && x !== '').map((x) => `<span>${esc(x)}</span>`).join('');
+  }
+  return foot;
+}
+export function clearPageFoot() {
+  const f = typeof document !== 'undefined' ? document.getElementById('pageFoot') : null;
+  if (!f) return;
+  f.querySelectorAll('.pf-basis, .pf-colophon').forEach((n) => { n.innerHTML = ''; });
 }

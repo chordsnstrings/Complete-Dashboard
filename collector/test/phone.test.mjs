@@ -420,17 +420,28 @@ check('the Money screen drops today from its fares spark too',
    which has a meaningful zero. The RATING trend is a different renderer in
    api/public/ui.js and is correctly min-scaled — test/uber_profile.test.mjs
    guards that — which is the case `zeroBased: false` exists for. */
+/* spark() moved to charts.js in reskin STEP 3 (docs/UI-REDESIGN-PLAN.md §3:
+   "spark(values): moved from m/ui.js into charts.js so both shells share
+   it"), and m/ui.js re-exports it, so the phone's four callers import what
+   they always did. These checks read it where it now lives, and the first
+   one also holds the re-export — a phone screen importing `spark` from
+   './ui.js' must still find it. Changed deliberately; the review named this
+   test as the one the move would break. */
+const sparkSrc = readFileSync(`${PUB}/charts.js`, 'utf8');
+check('m/ui.js re-exports the one sparkline from charts.js',
+  /import \{[^}]*\bspark\b[^}]*\} from '\.\.\/charts\.js'/.test(mui)
+  && /export \{[^}]*\bspark\b[^}]*\}/.test(mui) && !/export const spark/.test(mui));
 check('the count sparkline puts its floor at zero, not at the smallest day',
-  /const lo = zeroBased \? Math\.min\(0, \.\.\.v\) : Math\.min\(\.\.\.v\);/.test(mui),
+  /const lo = zeroBased \? Math\.min\(0, \.\.\.v\) : Math\.min\(\.\.\.v\);/.test(sparkSrc),
   'the smallest day sat on the baseline, so 9 bookings and 0 rendered the same');
 check('…and a negative value still keeps the true minimum, with zero on the chart',
-  /Math\.min\(0, \.\.\.v\)/.test(mui),
+  /Math\.min\(0, \.\.\.v\)/.test(sparkSrc),
   'Math.min(0, …) is the min for a series that goes negative and 0 for one that does not');
 check('…while a caller whose zero is meaningless can still ask for the old scale',
-  /zeroBased = true \} = \{\}\) =>/.test(mui),
+  /zeroBased = true(, cls = null)? \} = \{\}\) =>/.test(sparkSrc),
   'a rating between 4.9 and 5.0 is a flat line on a zero-based axis');
 check('the measurement that reported it is written down',
-  /one day's data is missing/.test(mui) && /Shahab/.test(mui));
+  /one day's data is missing/.test(sparkSrc) && /Shahab/.test(sparkSrc));
 
 /* splitToday keyed on `d` alone. /api/driver/daily's rows carry `day`, so the
    driver and vehicle charts got today: null every time and drew the part-day

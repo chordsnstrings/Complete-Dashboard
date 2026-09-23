@@ -158,6 +158,12 @@
      SOLID, and a second measure behind a bar OUTLINED. Deleted with this
      skin. test/chart_marks.test.mjs pins them. */
   --mk-fit:0; --mk-max:96; --mk-end:3; --mk-base:3; --mk-gap:0; --mk-steps:7;
+  /* ── the page contract (plan §3, STEP 3) ─────────────────────────────────
+     ui.js contract() reads this, as markForm() reads the --mk-* above: which
+     DOM a page builds is a TOKEN each skin declares, never the skin
+     attribute. 0 here: the old skin keeps every page's order, kpiRow and
+     the provenance line at the foot of #view. arkiv.css declares 1. */
+  --pg-contract:0;
   --mk-absent:hatch; --mk-unfinished:hollow; --mk-projected:solid; --mk-behind:outline;
   /* …and the paints a chart asks for by JOB rather than by colour, which the
      Arkiv skin re-points in arkiv.css: the default hbars fill and a
@@ -3002,3 +3008,24 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
   .depactions .btn { width: 100%; }
   .depamount { font-size: var(--d4); min-height: 60px; }
 }
+
+
+/* ── the page contract's shell pieces, in the old skin (reskin STEP 3) ─────
+   The footer after #view prints the principle line under the Arkiv skin
+   (arkiv.css §18). The old skin keeps today's look until the operator flips
+   it, so here it takes no space at all — on the phone as well, where a
+   driver or vehicle tab rendered inside #m gets its own copy (ui.js
+   pageFoot). */
+.pagefoot{display:none}
+/* A word for a screen reader only — the "better"/"worse" every semantic
+   colour carries (SPEC L3). Never display:none: that removes it from the
+   accessibility tree, which is the opposite of the point. */
+.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
+  clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
+/* Paired headers (ui.js tableFrom `pairs`): two labels in one heading, each
+   its own sort button, and two values in one cell, the second under the
+   first. Opt-in; no table on the old skin asks for it today. */
+.thpair>button,.thpair>span{display:block}
+.thpair>button+button,.thpair>span+span{margin-top:2px}
+.tdpair .tdp-a,.tdpair .tdp-b{display:block}
+.tdpair .tdp-b{color:var(--grey-strong)}

@@ -346,6 +346,77 @@ fetch('/api/drivers/directory?from=2026-01-01&to=2026-01-31').then((r) => r.json
     'V.platforms is five lines dispatching to platformShare and two siblings');
 }
 
+/* ── render-audit: the colour law and the highlight budget (reskin STEP 3) ──
+   Four checks the plan names (docs/UI-REDESIGN-PLAN.md §3, "Tests that pin
+   what changes": the highlight budget, grey-2 used as text, a colour outside
+   the tokens, a semantic with no glyph). Each needs "a stub the tool catches
+   and one it passes": one page carrying all four faults, one carrying the
+   legal form of each, and the faulty page again under a skin that declares
+   --pg-contract:0, which the colour law does not govern. Synthetic tokens,
+   the design's own values. */
+{
+  const TOKENS = ':root{--pg-contract:1;--paper:#FFFFFF;--ink:#0A0A0B;--grey:#6D6D72;--grey-2:#97979D;'
+    + '--sem-pos:#007E44;--sem-neg:#961111;--w-ink:#DDDDDD;--hair:#D6D6D9}'
+    + 'body{background:var(--paper);color:var(--ink);font:14px sans-serif}'
+    + '.panel{border-top:1px solid var(--ink)}'
+    + '.hl{background:var(--w-ink)}';
+  const page = (css, body) => `<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head>`
+    + `<body><h1 id="viewTitle">Stub</h1><div id="view">${body}</div></body></html>`;
+  const FAULTY = page(TOKENS + '.bad::before{content:"";display:inline-block;width:8px;height:8px;'
+      + 'background:var(--sem-neg)}',
+    '<div class="kpis glance" data-band="glance"><div class="kpi"><div class="n"><span class="hl">1,204</span></div></div>'
+    + '<div class="kpi"><div class="n"><span class="hl">88</span></div></div></div>'
+    + '<div class="panel"><h3>One</h3><div>A caption with <b><span class="hl">994</span></b> in it.</div></div>'
+    + '<div class="absband" data-band="absence"><div class="absb-fig absb-none"><span class="hl">None</span></div></div>'
+    + '<div class="panel"><h3>Two</h3><table><tbody><tr><td><span class="hl">12</span></td><td>a</td></tr></tbody></table></div>'
+    + '<p style="color:var(--grey-2)">An axis label in grey-two</p>'
+    + '<p style="color:#123456">A figure in a hex no token names</p>'
+    + '<p style="color:var(--sem-neg)">AED 12.00</p>'
+    + '<p class="bad">A critical row</p>');
+  const CLEAN = page(TOKENS + '.ok::before{content:"" / "good: ";display:inline-block;width:8px;height:8px;'
+      + 'background:var(--sem-pos)}',
+    '<div class="kpis glance" data-band="glance"><div class="kpi"><div class="n"><span class="hl">1,204</span></div></div>'
+    + '<div class="kpi"><div class="n">88</div></div></div>'
+    + '<div class="panel"><h3>One</h3><div>A caption with <b><span class="hl">994</span></b> in it.</div></div>'
+    + '<div class="absband" data-band="absence"><div class="absb-fig">2,399</div><div class="absb-fig absb-none">None</div></div>'
+    + '<p style="color:var(--grey)">An axis label in grey</p>'
+    + '<span class="dlt" style="color:var(--sem-pos)"><span class="dlt-g">▲</span><span class="dlt-v">+5.0%</span></span>'
+    + '<p class="ok">A good row</p>');
+  const OLD = FAULTY.replace('--pg-contract:1', '--pg-contract:0');
+  const audit = async (html) => {
+    const server = createServer((req, res) => {
+      if (req.url.startsWith('/api/')) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('[]'); }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end(html);
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const r = await run('render-audit.mjs', { BASE: `http://127.0.0.1:${server.address().port}`,
+      ONLY: 'stub', WIDTHS: '1180', SETTLE: '300' });
+    server.close();
+    return r.out;
+  };
+  const bad = await audit(FAULTY);
+  const line = (code) => (bad.split('\n').find((l) => l.includes(code)) || '').trim();
+  check('render-audit: four highlights, two in one band, one in a table body and one on an absent figure are reported',
+    /highlight-budget/.test(bad) && /5 highlights on one page/.test(line('highlight-budget'))
+      && /2 highlights in one band/.test(line('highlight-budget')) && /table body/.test(line('highlight-budget'))
+      && /absent figure/.test(line('highlight-budget')), line('highlight-budget') || bad.slice(-300));
+  check('render-audit: text painted in grey-2 (2.90:1) is reported',
+    /grey2-text\s+1 in grey-2/.test(bad), line('grey2-text') || bad.slice(-300));
+  check('render-audit: a colour no token resolves to is reported, and named',
+    /off-token-colour/.test(bad) && /rgb\(18,52,86\) color/.test(line('off-token-colour')), line('off-token-colour') || bad.slice(-300));
+  check('render-audit: a red figure with no ▼ and no sign, and a red dot with no word, are reported',
+    /semantic-no-glyph\s+2:/.test(bad) && /AED 12\.00/.test(line('semantic-no-glyph'))
+      && /dot on p\.bad with no word/.test(line('semantic-no-glyph')), line('semantic-no-glyph') || bad.slice(-300));
+  const good = await audit(CLEAN);
+  check('render-audit: the legal form of each — one highlight per band, grey text, a ▲ + delta, a dot with its word — passes',
+    !/highlight-budget|grey2-text|off-token-colour|semantic-no-glyph/.test(good),
+    good.split('\n').filter((l) => /highlight-budget|grey2-text|off-token-colour|semantic-no-glyph/.test(l)).join(' | '));
+  const old = await audit(OLD);
+  check('render-audit: under --pg-contract:0 (the old skin) the colour law is not applied, the budget still is',
+    !/grey2-text|off-token-colour|semantic-no-glyph/.test(old) && /highlight-budget/.test(old),
+    old.split('\n').filter((l) => /✗/.test(l)).join(' | '));
+}
+
 /* ── an audit that could not REACH the site reports nothing ───────────────
    Measured on 2026-09-02: four Chromium sweeps and a fleet of agents pulling on
    production through one egress proxy at once, and the proxy began resetting

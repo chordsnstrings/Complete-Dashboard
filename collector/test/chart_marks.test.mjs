@@ -764,7 +764,10 @@ for (const skin of ['classic', 'arkiv']) {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`${skin} pages: ${String(e.message).slice(0, 160)}`));
   const word = skin === 'classic' ? 'hatched' : 'outlined';
-  const ov = await capOf(page, `skin=${skin}#overview`, /^Trips per/);
+  /* Under the skin #overview is built to the page contract (reskin STEP 3):
+     its hero chart is "Bookings per day", whose caption names the same
+     treatment. Changed deliberately; the old skin keeps "Trips per day". */
+  const ov = await capOf(page, `skin=${skin}#overview`, skin === 'classic' ? /^Trips per/ : /^Bookings per/);
   check(`${skin}: #overview says a day nobody collected is ${word}`,
     new RegExp(`nobody collected is ${word}, not zero`).test(ov || ''), ov);
   const dm = await capOf(page, `skin=${skin}#demand`, /^Daily volume/);

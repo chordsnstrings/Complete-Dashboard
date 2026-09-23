@@ -287,6 +287,12 @@ export async function renderCoverage(root) {
      it is said out loud. It belongs here because this is the page about the
      difference between the two. */
   const cov = await q('/api/coverage').catch(() => ({}));
+  /* The one await on this page that never asked whether the reader was still
+     here (the plan review found it, docs/UI-REDESIGN-PLAN.md §3). render()
+     now hands every render its own #view, so the panels below land in a
+     page that is gone; this stops the rest — the anchor scroll at the end
+     reads location.hash, which by then is the NEXT page's. */
+  if (!alive(gen)) return;
   const moneyGaps = cov.earnings_gaps || [];
   if (moneyGaps.length) {
     const { panel: mp, body: mb } = panel('Trips with no earnings data',

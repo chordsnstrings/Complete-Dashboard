@@ -1072,6 +1072,52 @@ driver's 222 tracker fixes.
      `?? 0` and `Number(null)` turned the first into the second on #capacity
      and #optimise. Pass null, and `gapLabel` with the true reason.
 
+* **#view IS A NEW ELEMENT ON EVERY RENDER, AND WHICH PAGE IS BUILT IS A
+  TOKEN.** (Reskin STEP 3, 2026-09-23.) What cost time, or would have:
+  1. **Never cache `$('#view')`.** `render()` used to empty the one #view and
+     hand it to the next page, so a page the reader had left, still awaiting a
+     fetch, appended into the page they moved to (measured on the mock:
+     #supply held on `/api/supply/balance`, the reader goes to #settings, and
+     #settings grows #supply's closing paragraph). Only six modules checked
+     `alive(gen)`. `render()` now REPLACES #view with an empty copy of itself
+     (`freshView()`), so a stale render writes into a detached node. That
+     covers what a view does to its own `root`; anything a module does
+     OUTSIDE its root after an await — `location.hash`, a scroll,
+     `document.getElementById`, the shell — still needs `alive(gen)`.
+     `test/page_contract.test.mjs` §4.
+  2. **Under the Arkiv skin the provenance line is in `#pageFoot`, not in
+     #view.** `stampSource()` hands `.srcline` to `pageFoot()` when
+     `contract()` is true (the footer's basis paragraph, above the principle
+     line). A test or tool that looks for `#view .srcline` under the skin
+     finds nothing; `document.querySelector('.srcline')` still does. The
+     footer's basis and colophon are cleared on every render.
+  3. **Which DOM a page builds is `contract()`, which reads `--pg-contract`**
+     (app.css 0, arkiv.css 1) — the chart form's pattern. Never branch on
+     `dataset.skin` (`test/arkiv_skin.test.mjs` fails on it).
+  4. **`highlight()` wraps the figure's children in one `span.hl`.** Setting
+     `textContent` on the figure afterwards removes the highlight, and
+     app.js `countUp()` leaves a composed value alone, so a highlighted hero
+     does not count up. The budget (3 a page, 1 a band, never in an svg,
+     a tbody or an absent figure) is enforced by `highlight()` and checked
+     after the fact by render-audit's `highlight-budget`.
+  5. **tokens.js `semanticOf()` returns ▲ for every "better"** — including a
+     FALL in cancellations. SPEC L3 wants a green ▼ there: the colour follows
+     the meaning, the arrow the arithmetic. `ui.js delta()` takes only the
+     colour and the word from `semanticOf()`; never print its `glyph`.
+  6. **`/api/compare/period` answers a channel filter with a 400** (driver_day
+     has no platform column). #overview used to swallow it into `null` and
+     print no change; under the contract every delta says why instead. Ask
+     for it only on a calendar period with no channel filter.
+  7. **`grid-column: span 2` reads back as `gridColumnStart: "span 2"`,
+     `gridColumnEnd: "auto"`.** A test that checks the end sees "auto" and
+     calls the hero one column wide.
+  8. **render-audit's colour checks run only where `--pg-contract` is 1.**
+     `highlight-budget`, `grey2-text`, `off-token-colour` and
+     `semantic-no-glyph` are SPEC §3A's scripted checks; the old skin predates
+     the law. Run them with `SKIN=arkiv`. Their first finding on production
+     data was #insights' impact figures in the negative red with no ▼ and no
+     sign (14 of them), which the page phase converts.
+
 * **A PROPOSAL FROM ANYWHERE BUT THE RULE CANNOT LIVE IN `driver_identity_link`.**
   `src/identity_link.js` DELETEs every unconfirmed, unrejected row in that table
   whose evidence its own rules did not produce on the current run — correct

@@ -209,6 +209,18 @@ if (document.documentElement.dataset.skin === 'arkiv')
          todayNow() in app.js; hidden until there is something true to say. -->
     <div id="todayNow" class="todaynow" hidden></div>
     <section id="view"></section>
+    <!-- The page's footer (reskin STEP 3, docs/UI-REDESIGN-PLAN.md §3 "Page
+         contract"). The principle line is the house principle, printed here
+         once so every page carries it with no per-page work; ui.js pageFoot()
+         fills the basis (the provenance line) and the colophon, and render()
+         clears both on every navigation. After #view, not in it, because
+         every view gets a fresh #view; inside #app, so the phone hides it with
+         the rest of the desktop shell. The old skin does not show it
+         (app.css), until the operator flips the default. -->
+    <footer id="pageFoot" class="pagefoot">
+      <div class="pf-text"><div class="pf-basis"></div><p class="pf-principle">A figure that cannot be measured is shown absent, with the reason — never as zero.</p></div>
+      <div class="pf-colophon"></div>
+    </footer>
   </main>
 </div>
 <div id="tt"></div>

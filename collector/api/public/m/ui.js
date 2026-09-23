@@ -9,9 +9,9 @@
    row instead of a table, a sheet instead of a dropdown, a segmented control
    instead of a select, and a sparkline small enough to sit inside a stat. */
 import { el, esc, money, pct, dayStr } from '../ui.js';
-import { fmt, isToday } from '../charts.js';
+import { fmt, isToday, spark } from '../charts.js';
 
-export { el, esc, money, pct, dayStr, fmt, isToday };
+export { el, esc, money, pct, dayStr, fmt, isToday, spark };
 
 /* Today is not a day yet.
    ─────────────────────────────────────────────────────────────────────────
@@ -289,70 +289,9 @@ export const failed = (host, e) => {
   return d;
 };
 
-/* A sparkline, sized in the box it is given rather than in pixels, so it works
-   in a stat card and across a full-width card without two versions. */
-/* THE FLOOR OF A COUNT CHART IS ZERO, AND IT WAS THE SERIES' OWN MINIMUM.
-   ──────────────────────────────────────────────────────────────────────────
-   `lo` was Math.min(...v), so the smallest day in the window was always drawn
-   ON the baseline — which means a day with work and a day with none render
-   identically, and the reader has no axis, no label and no caption to tell
-   them apart.
-
-   Reported from the phone as "I think one day's data is missing", on Shahab
-   Ali Shaukat Hayat over 2026-09-01..09-08. Nothing was missing: the eight
-   days are 12, 11, 11, 12, 12, 9, 14 and 9, and /api/driver/daily returns all
-   eight. 9 was the minimum, so both 9s sat on the floor and the last one — the
-   one with the end-dot on it — read as zero. The operator was right that the
-   chart was wrong and reasonable about which way.
-
-   Every caller of this function plots a count or an amount per day: bookings,
-   fares, bookings, bookings. All four have a meaningful zero, and suppressing
-   it is what made a busy day look like a blank one. `lo` is now Math.min(0, …)
-   — zero for any non-negative series, and the true minimum where a value is
-   negative so a real deficit is still visible with zero on the chart as the
-   line it crosses.
-
-   `zeroBased: false` is there for a series where the zero is not meaningful —
-   a rating between 4.9 and 5.0 would be a flat line at the top of a zero-based
-   axis. Nothing passes it today; a caller that needs it has to ask. */
-export const spark = (values, { h = 34, tone = 'var(--accent)', fill = true,
-  zeroBased = true } = {}) => {
-  const v = values.map(Number).filter((n) => Number.isFinite(n));
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', `0 0 100 ${h}`);
-  svg.setAttribute('preserveAspectRatio', 'none');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.style.cssText = `display:block;width:100%;height:${h}px;overflow:visible`;
-  if (v.length < 2) return svg;
-  const lo = zeroBased ? Math.min(0, ...v) : Math.min(...v);
-  const hi = Math.max(...v), span = hi - lo || 1;
-  const pad = 2.5;
-  const pt = (n, i) => [
-    (i / (v.length - 1)) * 100,
-    h - pad - ((n - lo) / span) * (h - pad * 2),
-  ];
-  const d = v.map((n, i) => `${i ? 'L' : 'M'}${pt(n, i).map((x) => x.toFixed(2)).join(' ')}`).join('');
-  if (fill) {
-    const a = document.createElementNS(ns, 'path');
-    a.setAttribute('d', `${d}L100 ${h}L0 ${h}Z`);
-    a.setAttribute('fill', tone); a.setAttribute('opacity', '.12');
-    svg.append(a);
-  }
-  const p = document.createElementNS(ns, 'path');
-  p.setAttribute('d', d); p.setAttribute('fill', 'none');
-  p.setAttribute('stroke', tone); p.setAttribute('stroke-width', '1.6');
-  p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round');
-  p.setAttribute('vector-effect', 'non-scaling-stroke');
-  svg.append(p);
-  const [cx, cy] = pt(v[v.length - 1], v.length - 1);
-  const dot = document.createElementNS(ns, 'circle');
-  dot.setAttribute('cx', cx); dot.setAttribute('cy', cy); dot.setAttribute('r', '2');
-  dot.setAttribute('fill', tone);
-  dot.setAttribute('vector-effect', 'non-scaling-stroke');
-  svg.append(dot);
-  return svg;
-};
+/* spark() lives in ../charts.js now (reskin STEP 3), so the desktop glance
+   tiles and this shell draw one sparkline; it is re-exported above, and its
+   floor-at-zero history moved with it. */
 
 /* Proportion as a stack of bars rather than a donut: a donut at 120px wide is
    a coloured ring with the labels somewhere else. */

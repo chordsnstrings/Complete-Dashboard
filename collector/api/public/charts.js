@@ -585,7 +585,17 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
      drew before and only a caller that asks gets a different one: the money
      charts here read better with "AED 2,000" up the side, and a percentile
      chart reads "0th, 33rd, 67th, 100th" if it is given the same treatment. */
-  axisFmt = null, aria = null } = {}) {
+  axisFmt = null, aria = null,
+  /* The second measure as a STEP LINE in its own identity, with a direct
+     label, instead of a shape behind each bar (reskin STEP 3, #overview's
+     plan entry: "telematics journeys behind the bars become an FMS-identity
+     step line with a direct label 'FMS journeys'"). { color, label }. A
+     line is not a bar, so it cannot be read as a bar's outline (which
+     under SPEC §5 means "not measured") or as a paler bar; and SPEC §4
+     makes a direct label mandatory on any FMS mark. The line breaks at an
+     uncollected day (a GAP, §5) and where the measure is missing. Opt-in:
+     no existing caller passes it, so no chart drawn today changes. */
+  secondaryLine = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const axisF = axisFmt || valueFmt;
@@ -664,7 +674,7 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
       svg.append(band);
       return;
     }
-    if (secondary && +d[secondary] > 0) {
+    if (secondary && !secondaryLine && +d[secondary] > 0) {
       const sh = ih * (+d[secondary]) / max;
       if (form.behind === 'wash') {
         /* Under Arkiv an outline MEANS "not measured" (SPEC §5), and this is a
@@ -723,6 +733,38 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
        drew 23:00, and the two printed on top of each other. */
     if (xAt.has(i)) svg.append(txt(bx + step / 2, H - 10, shortLabel(d[x]), 'axis', 'middle'));
   });
+  if (secondary && secondaryLine) {
+    const col = secondaryLine.color || color;
+    let dPath = '', prevY = null, endX = null, endY = null;
+    data.forEach((d, i) => {
+      const v = d[gapKey] || d[secondary] == null || d[secondary] === '' ? NaN : Number(d[secondary]);
+      if (!Number.isFinite(v)) { prevY = null; return; }
+      const y = pt + ih - ih * v / max, x0 = pl + step * i, x1 = x0 + step;
+      dPath += prevY == null ? `M${x0.toFixed(1)} ${y.toFixed(1)}` : `L${x0.toFixed(1)} ${y.toFixed(1)}`;
+      dPath += `L${x1.toFixed(1)} ${y.toFixed(1)}`;
+      prevY = y; endX = x1; endY = y;
+    });
+    if (dPath) {
+      svg.append(mk('path', { d: dPath, fill: 'none', stroke: `var(${col})`, 'stroke-width': 2,
+        'stroke-linejoin': 'round', 'stroke-linecap': 'round', class: 'gb-step', 'data-secondary': '' }));
+      if (secondaryLine.label) {
+        /* Above every mark under it — the bars and the line across the
+           label's own width — so the label is never printed over a bar. */
+        const lw = secondaryLine.label.length * 6.4 + 14;
+        let top = endY;
+        data.forEach((d, i) => {
+          const x0 = pl + step * i;
+          if (x0 + step < endX - lw || x0 > endX || d[gapKey]) return;
+          top = Math.min(top, pt + ih - ih * (+d[y] || 0) / max);
+          if (Number.isFinite(+d[secondary])) top = Math.min(top, pt + ih - ih * (+d[secondary]) / max);
+        });
+        const ly = Math.max(pt + 9, top - 6);
+        svg.append(mk('rect', { x: endX - 8, y: ly - 8, width: 8, height: 8, rx: 2, fill: `var(${col})`,
+          class: 'gb-step-sw' }));
+        svg.append(txt(endX - 12, ly, secondaryLine.label, 'gb-step-lab', 'end'));
+      }
+    }
+  }
   host.append(svg);
 
   /* Every sentence below names the treatment the chart just drew, from the
@@ -1394,6 +1436,102 @@ export function stackedBar(host, data, opts = {}) {
   leg.innerHTML = rows.map((d, i) => `<span><i class="sw" style="background:var(${swatchOf(d, i)})"></i>${esc(d[label])} · <b class="num">${(num(d) / tot * 100).toFixed(1)}%</b></span>`).join('');
   host.append(leg);
 }
+
+/* ── A sparkline ───────────────────────────────────────────────────────────
+   Sized in the box it is given rather than in pixels, so it works in a stat
+   card and across a full-width card without two versions. Moved here from
+   m/ui.js in reskin STEP 3 (docs/UI-REDESIGN-PLAN.md §3, "spark(values):
+   moved from m/ui.js into charts.js so both shells share it"): the desktop
+   glance tiles draw it, and m/ui.js re-exports it, so the phone's four
+   callers import the same function they always did. */
+/* THE FLOOR OF A COUNT CHART IS ZERO, AND IT WAS THE SERIES' OWN MINIMUM.
+   ──────────────────────────────────────────────────────────────────────────
+   `lo` was Math.min(...v), so the smallest day in the window was always drawn
+   ON the baseline — which means a day with work and a day with none render
+   identically, and the reader has no axis, no label and no caption to tell
+   them apart.
+
+   Reported from the phone as "I think one day's data is missing", on Shahab
+   Ali Shaukat Hayat over 2026-09-01..09-08. Nothing was missing: the eight
+   days are 12, 11, 11, 12, 12, 9, 14 and 9, and /api/driver/daily returns all
+   eight. 9 was the minimum, so both 9s sat on the floor and the last one — the
+   one with the end-dot on it — read as zero. The operator was right that the
+   chart was wrong and reasonable about which way.
+
+   Every caller of this function plots a count or an amount per day: bookings,
+   fares, bookings, bookings. All four have a meaningful zero, and suppressing
+   it is what made a busy day look like a blank one. `lo` is now Math.min(0, …)
+   — zero for any non-negative series, and the true minimum where a value is
+   negative so a real deficit is still visible with zero on the chart as the
+   line it crosses.
+
+   `zeroBased: false` is there for a series where the zero is not meaningful —
+   a rating between 4.9 and 5.0 would be a flat line at the top of a zero-based
+   axis. Nothing passes it today; a caller that needs it has to ask. */
+export const spark = (values, { h = 34, tone = 'var(--accent)', fill = true,
+  zeroBased = true, cls = null } = {}) => {
+  /* A HOLE IS A GAP, NOT A ZERO, AND NOT A DAY THAT NEVER HAPPENED (STEP 3).
+     ────────────────────────────────────────────────────────────────────────
+     This read `values.map(Number).filter(Number.isFinite)`. Number(null) is
+     0, so a day nothing was collected on was drawn as a day of no work —
+     the `|| 0` lie SPEC §5 names — and an undefined was dropped, which
+     closed the hole and slid every later day one place to the left. Every
+     phone caller passes finite numbers (they `|| 0` before calling, each
+     with its own reason), so for them nothing below changes by one byte of
+     path; the glance tiles pass null for an uncollected day, and it breaks
+     the line where it is, as SPEC §5's GAP: "the line ends and a new one
+     starts". */
+  const at = values.map((x) => (x == null || x === '' || !Number.isFinite(Number(x)) ? null : Number(x)));
+  const v = at.filter((n) => n != null);
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', `0 0 100 ${h}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  if (cls) svg.setAttribute('class', cls);
+  svg.style.cssText = `display:block;width:100%;height:${h}px;overflow:visible`;
+  if (v.length < 2) return svg;
+  const lo = zeroBased ? Math.min(0, ...v) : Math.min(...v);
+  const hi = Math.max(...v), span = hi - lo || 1;
+  const pad = 2.5;
+  const pt = (n, i) => [
+    (i / (at.length - 1)) * 100,
+    h - pad - ((n - lo) / span) * (h - pad * 2),
+  ];
+  /* One run per stretch of readings; a run of one point draws nothing. */
+  const runs = [];
+  at.forEach((n, i) => {
+    if (n == null) { runs.push([]); return; }
+    if (!runs.length) runs.push([]);
+    runs[runs.length - 1].push([n, i]);
+  });
+  const lines = runs.filter((r) => r.length > 1);
+  const pathOf = (r) => r.map(([n, i], j) => `${j ? 'L' : 'M'}${pt(n, i).map((x) => x.toFixed(2)).join(' ')}`).join('');
+  const d = lines.map(pathOf).join('');
+  if (fill) {
+    const a = document.createElementNS(ns, 'path');
+    a.setAttribute('d', lines.map((r) => {
+      const x0 = pt(r[0][0], r[0][1])[0].toFixed(2), x1 = pt(r[r.length - 1][0], r[r.length - 1][1])[0].toFixed(2);
+      return `${pathOf(r)}L${x1 === '100.00' ? '100' : x1} ${h}L${x0 === '0.00' ? '0' : x0} ${h}Z`;
+    }).join(''));
+    a.setAttribute('fill', tone); a.setAttribute('opacity', '.12');
+    svg.append(a);
+  }
+  const p = document.createElementNS(ns, 'path');
+  p.setAttribute('d', d); p.setAttribute('fill', 'none');
+  p.setAttribute('stroke', tone); p.setAttribute('stroke-width', '1.6');
+  p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round');
+  p.setAttribute('vector-effect', 'non-scaling-stroke');
+  svg.append(p);
+  const lastI = at.map((n, i) => (n == null ? -1 : i)).filter((i) => i >= 0).pop();
+  const [cx, cy] = pt(at[lastI], lastI);
+  const dot = document.createElementNS(ns, 'circle');
+  dot.setAttribute('cx', cx); dot.setAttribute('cy', cy); dot.setAttribute('r', '2');
+  dot.setAttribute('fill', tone);
+  dot.setAttribute('vector-effect', 'non-scaling-stroke');
+  svg.append(dot);
+  return svg;
+};
 
 /* helpers */
 function mk(tag, attrs = {}) {

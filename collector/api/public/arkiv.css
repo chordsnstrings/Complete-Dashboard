@@ -962,3 +962,155 @@
    reference line. */
 :root[data-skin="arkiv"] .sc-dot{fill-opacity:1;stroke-width:2}
 :root[data-skin="arkiv"] .sc-ref{stroke-dasharray:none}
+
+/* ── 18 · the page contract (STEP 3) ────────────────────────────────────────
+   SPEC §1: 00 AT A GLANCE → 01 the hero chart → supporting marks → † what
+   this page does not know → the footer. The components are ui.js's
+   (contract, glance, delta, highlight, secHead, absenceBand, pageFoot); the
+   token below is how a page asks which DOM to build (the old skin declares
+   0 in app.css), so no module reads the skin. Namespaced, not pasted: the
+   mockups' .sec-*, .band, .lab, .basis collide with live classes, so these
+   are .sechd, .absband/.absb-*, .pagefoot/.pf-*. None of these rules is
+   scoped to #app or #view: m/screens.js fallback() renders the desktop driver
+   and vehicle tabs inside #m on the phone (the plan review), and whatever a
+   converted tab draws there must look the same. */
+:root[data-skin="arkiv"]{--pg-contract:1}
+
+/* A numbered section head for a band a page builds by hand. An index left
+   to the page (secHead(null, …)) takes the next number from the counter the
+   panel titles use (§4), so an absence band after seven panels is 08. The
+   index is --grey, not b.css's grey-2: 2.90:1 is not text (NEW-PAGES §4). */
+:root[data-skin="arkiv"] .sechd{display:flex;align-items:baseline;justify-content:space-between;
+  gap:8px 24px;flex-wrap:wrap;border-top:1.5px solid var(--ink);padding-top:8px}
+:root[data-skin="arkiv"] .sechd-t{display:flex;align-items:baseline;gap:12px;min-width:0}
+:root[data-skin="arkiv"] .sechd-idx{font-family:var(--mono);font-size:var(--t3);font-weight:500;
+  letter-spacing:.1em;color:var(--grey)}
+:root[data-skin="arkiv"] .sechd-auto::before{counter-increment:arkiv-sec;
+  content:counter(arkiv-sec,decimal-leading-zero)}
+:root[data-skin="arkiv"] .sechd-name{font-family:var(--mono);font-size:var(--t3);font-weight:600;
+  letter-spacing:.22em;text-transform:uppercase;color:var(--ink);line-height:1.5;margin:0}
+:root[data-skin="arkiv"] .sechd-note{font-family:var(--mono);font-size:var(--t1);letter-spacing:.13em;
+  text-transform:uppercase;color:var(--grey);text-align:right}
+/* The 00 band: its head, the verdict (the page's statement, ruling 7), the
+   tiles and their one caption, spaced as one band rather than as three
+   stacked blocks. */
+:root[data-skin="arkiv"] .cband{display:flex;flex-direction:column;gap:14px}
+:root[data-skin="arkiv"] .cband>.vdct{margin:0}
+:root[data-skin="arkiv"] .cband>.cap{margin:0}
+
+/* 00 · AT A GLANCE. Six columns, so 4, 5 or 6 tiles share one rhythm and the
+   hero spans two (§5 draws .kpi.is-hero at --d6). The column rules and the
+   clipped first gutter are §5's .kpis rules; only the count is fixed here.
+   Six → two → one as the window narrows (plan §3 "Phone shell"). */
+:root[data-skin="arkiv"] .kpis.glance{grid-template-columns:repeat(6,minmax(0,1fr))}
+:root[data-skin="arkiv"] .kpi.tile .l .sw{margin-top:.2em}
+:root[data-skin="arkiv"] .kpi .t-u{font-family:var(--mono);font-size:var(--t5);font-weight:500;
+  letter-spacing:.04em;color:var(--grey);margin-left:5px}
+:root[data-skin="arkiv"] .kpi.is-hero .t-u{font-size:var(--t9)}
+/* The REASON in the value slot: Karla at reading weight, ink-2, allowed to
+   wrap — never a semantic hue, never a highlight (L4, L5.9). */
+:root[data-skin="arkiv"] .kpi .n.t-na{font-size:var(--t6);font-weight:600;line-height:1.4;
+  color:var(--ink-2);white-space:normal;letter-spacing:0}
+:root[data-skin="arkiv"] .kpi .t-d{margin-top:7px}
+:root[data-skin="arkiv"] .kpi .t-s{margin-top:8px;height:30px}
+:root[data-skin="arkiv"] .kpi .t-s-na{height:auto;font-size:var(--t4);line-height:1.45;color:var(--grey)}
+:root[data-skin="arkiv"] .tspark path{stroke-width:2}
+@media(max-width:820px){
+  :root[data-skin="arkiv"] .kpis.glance{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:480px){
+  :root[data-skin="arkiv"] .kpis.glance{grid-template-columns:minmax(0,1fr)}
+  :root[data-skin="arkiv"] .kpis.glance .kpi.is-hero{grid-column:auto}
+}
+
+/* THE DELTA (SPEC L3). The colour follows the meaning, the glyph and sign
+   the arithmetic, and every one carries a screen-reader word (.sr, app.css).
+   The unit and the "against …" words stay grey: only the arrow and the
+   figure wear the semantic, which clears 4.5:1 on paper in both themes. */
+:root[data-skin="arkiv"] .dlt{font-family:var(--mono);font-size:var(--t4);font-weight:600;
+  letter-spacing:.055em;display:inline-flex;align-items:baseline;flex-wrap:wrap;gap:2px 5px}
+:root[data-skin="arkiv"] .dlt-g{font-size:var(--t1);line-height:1}
+:root[data-skin="arkiv"] .dlt-v{font-variant-numeric:tabular-nums;white-space:nowrap}
+:root[data-skin="arkiv"] .dlt-u{font-weight:500;letter-spacing:.04em;color:var(--grey)}
+:root[data-skin="arkiv"] .dlt-of{font-family:var(--sans);font-weight:400;letter-spacing:0;color:var(--grey)}
+:root[data-skin="arkiv"] .dlt-positive{color:var(--sem-pos)}
+:root[data-skin="arkiv"] .dlt-negative{color:var(--sem-neg)}
+:root[data-skin="arkiv"] .dlt-neutral{color:var(--sem-neu)}
+/* Not measured is not "no change", and it is certainly not zero. */
+:root[data-skin="arkiv"] .dlt-na{font-family:var(--sans);font-weight:600;letter-spacing:0;
+  color:var(--ink-2);display:inline}
+:root[data-skin="arkiv"] .kpi.is-hero .dlt{font-size:var(--t5)}
+
+/* THE HIGHLIGHT (SPEC L4): the wash, a 3px rule under the FIGURE (not the
+   plate — drawn as a second background inset by the padding), one weight
+   step; the digits stay ink, which reads at 15.27:1 on the worst wash.
+   ui.js highlight() sets --hl-wash and --hl-rule from the governing token
+   and refuses a 4th on a page or a 2nd in a band. */
+:root[data-skin="arkiv"] .hl{display:inline-block;color:var(--ink);font-weight:var(--hl-weight);
+  padding:2px var(--hl-pad-x) calc(var(--hl-rule-w) + 3px);margin-left:calc(-1 * var(--hl-pad-x));
+  border-radius:var(--hl-radius);
+  background:linear-gradient(var(--hl-rule),var(--hl-rule)) center bottom 2px
+    / calc(100% - 2 * var(--hl-pad-x)) var(--hl-rule-w) no-repeat,var(--hl-wash)}
+:root[data-skin="arkiv"] .cap .hl{padding-top:0;margin-left:0}
+
+/* † WHAT THIS PAGE DOES NOT KNOW. Four cells between hairlines: the size of
+   what is missing in Karla 600 --d5 ink-2, the true reason under it at
+   reading size. Never a semantic hue (L5.9). */
+:root[data-skin="arkiv"] .absence{display:flex;flex-direction:column;gap:16px}
+:root[data-skin="arkiv"] .absband{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));row-gap:22px}
+:root[data-skin="arkiv"] .absb-cell{padding:0 var(--gut);border-left:1px solid var(--hair);min-width:0}
+:root[data-skin="arkiv"] .absb-cell:nth-child(4n+1){padding-left:0;border-left:0}
+:root[data-skin="arkiv"] .absb-lab{display:block;font-family:var(--mono);font-size:var(--t1);
+  font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--grey);margin-bottom:11px}
+:root[data-skin="arkiv"] .absb-fig{font-family:var(--sans);font-weight:600;font-size:var(--d5);
+  line-height:1;letter-spacing:-.02em;color:var(--ink-2);font-variant-numeric:proportional-nums}
+:root[data-skin="arkiv"] .absb-why{font-family:var(--sans);font-size:var(--t5);line-height:1.55;
+  color:var(--grey);margin:10px 0 0}
+:root[data-skin="arkiv"] .absb-why b{color:var(--ink-2);font-weight:600}
+@media(max-width:1080px){
+  :root[data-skin="arkiv"] .absband{grid-template-columns:repeat(2,minmax(0,1fr))}
+  :root[data-skin="arkiv"] .absb-cell:nth-child(4n+1){padding-left:var(--gut);border-left:1px solid var(--hair)}
+  :root[data-skin="arkiv"] .absb-cell:nth-child(2n+1){padding-left:0;border-left:0}
+}
+@media(max-width:560px){
+  :root[data-skin="arkiv"] .absband{grid-template-columns:minmax(0,1fr)}
+  :root[data-skin="arkiv"] .absb-cell,:root[data-skin="arkiv"] .absb-cell:nth-child(4n+1){
+    padding:0;border-left:0}
+  :root[data-skin="arkiv"] .absb-cell+.absb-cell{border-top:1px solid var(--hair);padding-top:14px}
+}
+
+/* THE FOOTER. The basis paragraph (the page's own, or its provenance line),
+   the principle line in ink, and the colophon in mono on the right. The
+   shell's sits after #view at #view's own side padding; a copy inside a
+   phone screen (.pf-inline) spans its host. */
+:root[data-skin="arkiv"] #view{padding-bottom:28px}
+:root[data-skin="arkiv"] .pagefoot{display:flex;align-items:flex-start;justify-content:space-between;
+  gap:12px 64px;border-top:1.5px solid var(--ink);padding:12px 0 0}
+:root[data-skin="arkiv"] #pageFoot{margin:0 clamp(18px,3vw,36px) 56px}
+:root[data-skin="arkiv"] .pf-inline{margin-top:22px}
+:root[data-skin="arkiv"] .pf-text{max-width:660px;min-width:0}
+:root[data-skin="arkiv"] .pf-basis .srcline,:root[data-skin="arkiv"] .pf-p{margin:0;padding:0;border:0;
+  font-family:var(--sans);font-size:var(--t5);line-height:1.6;color:var(--grey)}
+:root[data-skin="arkiv"] .pf-principle{font-family:var(--sans);font-size:var(--t6);font-weight:700;
+  line-height:1.5;color:var(--ink);margin:6px 0 0}
+:root[data-skin="arkiv"] .pf-colophon{font-family:var(--mono);font-size:var(--t1);letter-spacing:.15em;
+  text-transform:uppercase;color:var(--grey);text-align:right;line-height:1.95;
+  font-variant-numeric:tabular-nums}
+:root[data-skin="arkiv"] .pf-colophon span{display:block}
+@media(max-width:820px){
+  :root[data-skin="arkiv"] .pagefoot{flex-direction:column}
+  :root[data-skin="arkiv"] .pf-colophon{text-align:left}
+}
+
+/* Paired headers (ui.js tableFrom `pairs`): the two labels stacked, each its
+   own sort button in the heading's mono; the second value in grey under the
+   first. */
+:root[data-skin="arkiv"] .tdpair .tdp-b{color:var(--grey);margin-top:2px}
+/* gapBars' second measure as a step line (#overview's FMS journeys), with
+   its direct label in ink beside a swatch of the line's identity — text
+   never wears the data colour (SPEC L5.6). */
+:root[data-skin="arkiv"] .gb-step-lab{font-family:var(--mono);font-size:var(--t2);font-weight:600;
+  letter-spacing:.06em;fill:var(--ink);paint-order:stroke;stroke:var(--paper);stroke-width:3px}
+/* A channel named in a table cell, with its swatch beside the word. */
+:root[data-skin="arkiv"] .chn{white-space:nowrap}
+:root[data-skin="arkiv"] .chn .sw{margin-right:5px;vertical-align:-1px}
