@@ -516,7 +516,7 @@ function ratingTrend(k) {
   const chip = c == null
     ? `<span class="rt-chip rt-first">first reading</span>`
     : `<span class="rt-chip rt-${dir}" title="${esc(`${(+c.from).toFixed(2)} on the previous reading, `
-      + `${(+c.to).toFixed(2)} now`)}">${arrow} ${signed(c.change, { d: 2 })}</span>`;
+      + `${(+c.to).toFixed(2)} now`)}"><span class="rt-g">${arrow}</span> ${signed(c.change, { d: 2 })}</span>`;
 
   return {
     label: 'Rating',
@@ -1521,7 +1521,7 @@ async function tabTerritory(root, id) {
     });
     terr.pickups.forEach((p) => {
       L.circleMarker([p.lat, p.lng], {
-        radius: 4 + 11 * Math.sqrt(p.n / max), color: css('--paper'), weight: 1.2,
+        radius: 4 + 11 * Math.sqrt(p.n / max), color: css('--pin-ring'), weight: 1.2,
         fillColor: css('--s1'), fillOpacity: .8,
       }).addTo(map).bindTooltip(
         `<b>${esc(p.addr || 'pickup')}</b><br>${p.n} pickup${p.n > 1 ? 's' : ''}` +

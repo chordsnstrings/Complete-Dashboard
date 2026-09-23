@@ -7,7 +7,7 @@ const tt = () => document.getElementById('tt');
    and a bar coloured `--s8` disappeared entirely. Both are now defined; this
    list and the palette must stay in step. */
 import { TZ, dubaiDay } from './tz.js';
-import { WASH_ALPHA, CHANNEL_ORDER, channelKey, sequentialIndex } from './tokens.js';
+import { WASH_ALPHA, CHANNEL_ORDER, channelKey, sequentialIndex, deltaE } from './tokens.js';
 /* The eight categorical SLOTS, asked for by position (STEP 2).
    ─────────────────────────────────────────────────────────────────────────
    L1: a hue names a channel and is never cycled by index. This was the list
@@ -95,7 +95,8 @@ function interactive(el, label, onClick) {
    outline, which is the defect the plan's hatch/outline swap exists to
    prevent (a reason that is not the true one). */
 const CLASSIC_FORM = Object.freeze({ fit: false, max: 96, end: 3, base: 3, gap: 0, steps: 7,
-  absent: 'hatch', unfinished: 'hollow', projected: 'solid', behind: 'outline', pitch: 4, angle: 45 });
+  absent: 'hatch', unfinished: 'hollow', projected: 'solid', behind: 'outline', pitch: 4, angle: 45,
+  ring: 'always', stale: 'fade' });
 export function markForm() {
   let cs = null;
   try { cs = getComputedStyle(document.documentElement); } catch { return CLASSIC_FORM; }
@@ -115,7 +116,48 @@ export function markForm() {
     behind: one('--mk-behind', CLASSIC_FORM.behind, ['outline', 'wash']),
     pitch: num('--mk-hatch-pitch', CLASSIC_FORM.pitch),
     angle: num('--mk-hatch-angle', CLASSIC_FORM.angle),
+    ring: one('--mk-ring', CLASSIC_FORM.ring, ['always', 'distinct']),
+    stale: one('--mk-stale', CLASSIC_FORM.stale, ['fade', 'hollow']),
   });
+}
+
+/* ── Can a ring's slices be told apart? (--mk-ring: distinct) ─────────────
+   A ring is read by colour: the reader matches a slice to its legend entry.
+   Under the Arkiv skin the categorical slots are graphite steps, and some
+   pairs are the same paint or nearly — slot 7 is slot 4, slot 8 is slot 3,
+   slot 5 is 1.28 ΔE from the folded Other, and every label a channel-aware
+   caller cannot map falls to --chan-none grey (the reskin review, finding 2).
+   So before a ring is drawn under that form, each slice's paint is RESOLVED
+   in the document it will be drawn in and every pair is measured in OKLab
+   (tokens.js deltaE, ×100). Under RING_MIN_DE the ring would name nothing,
+   and donut() draws labelled bars instead: each row carries its own name, so
+   no colour has to be matched. WHY 5, measured 2026-09-23 over every pair of
+   graphite steps and the fold grey: the collisions are 0 (a repeated slot),
+   1.3 (seq-2 against grey, light) and 2.8 (the same, dark); the closest pair
+   the design places together ON PURPOSE is 7.6 (seq-3 against grey, dark),
+   and adjacent steps are 9.9-11.2. A threshold of 10 would have sent a
+   six-category ring to bars in dark but not in light. A document that cannot
+   resolve a paint (a test harness, a detached host) keeps the ring. */
+const RING_MIN_DE = 5;
+const hexOfRgb = (s) => {
+  const m = String(s).match(/rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)/);
+  return m ? `#${[m[1], m[2], m[3]].map((x) => (+x).toString(16).padStart(2, '0')).join('')}` : null;
+};
+export function ringDistinct(host, paints) {
+  if (typeof document === 'undefined' || !host?.isConnected || paints.length < 2) return true;
+  const probes = paints.map((p) => {
+    const s = document.createElement('span');
+    s.style.cssText = `position:absolute;visibility:hidden;color:var(${p})`;
+    host.append(s);
+    return s;
+  });
+  const hex = probes.map((s) => hexOfRgb(getComputedStyle(s).color));
+  probes.forEach((s) => s.remove());
+  if (hex.some((h) => !h)) return true;
+  for (let i = 0; i < hex.length; i++) {
+    for (let j = i + 1; j < hex.length; j++) if (deltaE(hex[i], hex[j]) < RING_MIN_DE) return false;
+  }
+  return true;
 }
 /* The word for a treatment, as the tokens in force draw it: 'hatched',
    'outlined', 'hollow', 'solid' or 'pale'. Exported for every page caption
@@ -987,18 +1029,24 @@ export function donut(host, data, { label = 'label', value = 'n', onClick,
      above, and "<0.1%" rather than a zero it is not. */
   const pcOf = (n) => { const sh = (+n / tot) * 100; return sh < 0.05 ? '<0.1%' : `${sh.toFixed(sh < 10 ? 1 : 0)}%`; };
   const go = onClick && ((d) => !d._tail && (!clickable || clickable(d)));
+  /* Under --mk-ring: distinct, a ring whose slices cannot be told apart is
+     drawn as labelled bars (see ringDistinct above). The old skin declares
+     'always' and never reaches the measurement. donut() RETURNS the form it
+     drew, so a caption that says "click a slice" can say "click a row". */
+  if (as === 'ring' && markForm().ring === 'distinct'
+    && !ringDistinct(host, shown.map((d, i) => (d._tail ? '--grey' : byName(d, i, label, colorFor))))) as = 'bars';
   if (as === 'bars') {
     hbars(host, shown, { label, value, signed: false, valueFmt: (v) => fmt(v),
       shareOf: (d) => pcOf(d[value]),
       colorFor: (d, i) => (d._tail ? '--grey'
         : (colorFor && colorFor(d, i)) || (channelKey(String(d[label] ?? '')) ? `--c-${channelKey(String(d[label]))}` : null)),
       onClick, clickable: onClick ? go : null });
-    return;
+    return 'bars';
   }
   if (as === 'bar100') {
     stackedBar(host, shown, { label, value, aria, onClick, clickable: onClick ? go : null,
       colorFor: (d, i) => (d._tail ? '--grey' : byName(d, i, label, colorFor)) });
-    return;
+    return 'bar100';
   }
   const S = 190, r = 74, ir = 47, cx = S / 2, cy = S / 2;
   const svg = name(mk('svg', { viewBox: `0 0 ${S} ${S}`, class: 'donut', style: 'margin:0 auto;display:block' }), aria);
@@ -1065,6 +1113,7 @@ export function donut(host, data, { label = 'label', value = 'n', onClick,
   }).join('');
   wrap.append(leg);
   host.append(wrap);
+  return 'ring';
 }
 
 /* ── horizontal bars (ranking) ── */

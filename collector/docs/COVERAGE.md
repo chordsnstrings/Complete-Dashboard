@@ -3277,6 +3277,17 @@ driver's 222 tracker fixes.
   pulse; `run-all.mjs` now asks `/api/trips/daily` about today and, if the
   answer is empty, leaves the squatter alone and starts its own mockapi on a
   kernel-assigned port.
+* **Two suites fail every evening from 20:00 UTC, on the main branch as well.**
+  Between 20:00 and 24:00 UTC, Dubai is already on the next day.
+  `payout_scope.test.mjs` fails 2 checks: the scope ends on the Dubai date
+  where the check expects another, and the backlog counts 640 days against a
+  floor of 639. `phone_today_only.test.mjs` fails 3: mockapi.mjs reports
+  `null` bookings for the Dubai today, so the phone's claim and the endpoint
+  cannot agree. Measured 2026-09-23 at 21:35 UTC on the main branch
+  (`d68e648`), with nothing from the reskin in it, and at 21:16 UTC on the
+  reskin branch: the same failures both times. So a red suite in that window
+  says nothing about the change under test. Run the suite outside it, or make
+  the fixture's days and the assertions' "today" both Dubai days (not done).
 * **A test written only as a negative passes against the unfixed file.**
   `!/pg_try_advisory_lock/.test(src)` was meant to prove the migration lock
   blocks rather than gives up. A `db.js` with no lock at all also contains no

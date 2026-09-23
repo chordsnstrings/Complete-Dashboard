@@ -7,6 +7,7 @@
    gap is long enough that a straight line would be a lie (handled server-side in
    /api/map/journey), so the map never invents a road the car may not have taken. */
 import { timeStr } from './ui.js';
+import { markForm } from './charts.js';
 
 const OSM = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
@@ -133,6 +134,7 @@ export function fitTo(map, points, { maxZoom = 15, padding = [28, 28] } = {}) {
 /* Live fleet: one dot per vehicle, coloured by what it is doing. */
 export function renderLive(map, rows, onPick) {
   const layer = L.layerGroup().addTo(map);
+  const staleForm = markForm().stale;
   const pts = [];
   /* Two vehicles at the same rank round to the same pixel, and the one
      underneath cannot be clicked at all — a click on the fourth marker timed
@@ -170,9 +172,15 @@ export function renderLive(map, rows, onPick) {
         : moving ? (seatUnknown ? css('--b300') : css('--s1'))
           : css('--s5');
     const at = nudge(r.lat, r.lng);
+    /* A stale fix, under --mk-stale: hollow (the Arkiv skin), is a ring in
+       the stale grey with no fill: the graphite ramp puts it at the same
+       lightness as "moving, no seat reading" (--b300), so a faded fill could
+       not tell the two apart (reskin review, finding 2). The old skin keeps
+       its faded fill. */
+    const hollow = r.stale && staleForm === 'hollow';
     const m = L.circleMarker(at, {
-      radius: engaged ? 7 : 6, color: css('--paper'), weight: 1.5,
-      fillColor: colour, fillOpacity: r.stale ? 0.45 : 0.95,
+      radius: engaged ? 7 : 6, color: hollow ? colour : css('--pin-ring'), weight: hollow ? 2.5 : 1.5,
+      fillColor: colour, fillOpacity: hollow ? 0 : r.stale ? 0.45 : 0.95,
     }).addTo(layer);
     m.bindTooltip(
       `<b>${r.plate}</b>${r.current_driver ? '<br>' + r.current_driver : ''}` +

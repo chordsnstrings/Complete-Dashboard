@@ -2933,3 +2933,30 @@ one line at 1440. Scratchpad `reskin/step4/shots/`.
   `/api/same-person/decide`, `/api/hr-roster/preview|commit`,
   `/api/ledger/import/preview|commit`) and `/api/corporate/property` without an
   id. API-level and unchanged by a shell step; the audit tool's own noise.
+
+## Arkiv reskin — the review's six findings, fixed — 2026-09-23, NOT ON PRODUCTION
+
+The workflow's adversarial review of `reskin-foundation` (e98d5f4..3e2f21c)
+found six real defects. After merging the FMS work in (`8555139`), each is fixed
+and proven by revert: the fix is undone, the test fails, and the file is
+restored with its md5 checked.
+
+| # | what | state | proof |
+|---|---|---|---|
+| R1 | A stale #overview render wrote its colophon into the shell's #pageFoot under the next page. `freshView()` leaves the old node with id="view", so `host.closest('#view')` matched the detached node itself. Fixed twice: `pageFoot()` refuses a host that is not connected, and `overviewContract` checks `alive(gen)` after its eight fetches | **written** | `page_contract` §4b, run in a browser: the leaderboard fetch is held, the reader moves to #settings, then the fetch is released. Reverts: pageFoot guard alone fails 1; `alive(gen)` alone fails 1 (the source check, tightened so its lazy match cannot reach a later function's guard); both together fail the browser check, `{"colophon":"…bookings counted…"}` |
+| R2 | Marks that come out the same colour under Arkiv. (a) A donut whose graphite slots repeat or fall within 5 ΔE of the fold draws as labelled bars (`--mk-ring: distinct`, `charts.js ringDistinct`, and `donut()` returns the form it drew). The two "click a slice" captions follow the form. (b) On #live, a stale fix is a hollow ring, not a faded fill (`--mk-stale: hollow`); the legend swatch matches. The old skin declares `always` / `fade` | **written** | `chart_marks` §5 and §5b. Threshold measured over every graphite pair: collisions 0 / 1.3 / 2.8, the closest pair used on purpose 7.6, adjacent steps 9.9–11.2 in dark. So the threshold is 5, not 10. Reverts: Arkiv `always` fails 3; threshold 10 fails the dark six-slice ring; map ignoring the form fails the hollow-pin check |
+| R3 | The driver rating chip's text was 4.24 / 3.94 / 3.99 : 1 under Arkiv. The figure is ink now, and only the arrow (its own `.rt-g` span) is toned | **written** | `arkiv_skin` §7b, light and both dark modes: 16.26 / 15.27 light, 14.41 / 14.47 dark. The old skin still draws the whole chip toned. Revert fails 6 and reproduces the review's exact ratios |
+| R4 | Merge conflicts with the FMS branch: main's wording kept, with `--grey` for the retired `--ink-3` | **done** in `8555139` | tokens, occupancy_sources and money_precise green on the merged tree |
+| R5 | STEP 0 changed production's look unasked: in old dark mode, the chosen deposit chip, the phone's primary button and the map/driver pin ring went from white to near-black. Two role tokens, `--on-fill` and `--pin-ring`, are `#ffffff` in every old theme and point at `--on-accent` / `--paper` under the skin | **written** | `tokens` §7. Reverts: chip back on `--on-accent` fails 1; an old dark block moving `--on-fill` fails 1 |
+| R6 | `/api/compare/period` answered −100% when the window's own sum was NULL, because `Number(null)` is 0. The Arkiv #overview's delta reason also always blamed the span before | **written** | new `compare_period_absent` (9): window with no fares against a span that has them gives `null`, not −100; the mirror case gives `null`; the page words the reason by the empty side. Revert fails 2, printing `-100` |
+
+### Not done, and named
+
+- **White on the old dark accent stays 2.94:1.** That is production's look (R5),
+  and it changes at the flip, not before, unless the operator asks.
+- **CABMAN's dark channel colour is 2.84:1 on `--paper-2`.** This is hover only
+  (a hovered row or tile), under 3:1 for a mark. The review called it minor, and
+  it is left for the channel-colour pass.
+- **The evening test failures** (docs/COVERAGE.md traps): `payout_scope` and
+  `phone_today_only` fail from 20:00 UTC on main as well.
+

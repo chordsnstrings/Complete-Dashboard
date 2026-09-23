@@ -768,8 +768,14 @@ export async function renderSegments(root, kind, value) {
   const vp = panel('What we decided', 'Every occupancy interval gets one. Click a slice to filter.');
   g.append(vp.panel);
   if (vf.length) {
-    donut(vp.body, vf.map((r) => ({ label: r.key, n: r.n })), {
+    const form = donut(vp.body, vf.map((r) => ({ label: r.key, n: r.n })), {
       onClick: (s) => { location.hash = href('segments', 'verdict', s.label); } });
+    /* Under the Arkiv skin a ring whose slices cannot be told apart is drawn
+       as bars (charts.js ringDistinct); the caption follows the form drawn. */
+    if (form !== 'ring') {
+      const cap = vp.panel.querySelector(':scope > .cap');
+      if (cap) cap.textContent = 'Every occupancy interval gets one. Click a row to filter.';
+    }
     vp.body.append(el('div', 'chips', vf.map((r) =>
       `<a class="chip${kind === 'verdict' && value === r.key ? ' on' : ''}" href="${href('segments', 'verdict', r.key)}">`
       + `${esc(r.key)} <b>${fmt(r.n)}</b></a>`).join('')));

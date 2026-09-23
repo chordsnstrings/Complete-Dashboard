@@ -3,7 +3,7 @@
 // everything shared between them (panels, tables, modals, routing, fetching)
 // lives in ui.js and data.js so the two cannot drift apart.
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip,
-  drawnAs, isToday } from './charts.js';
+  drawnAs, isToday, markForm } from './charts.js';
 import { channelKey } from './tokens.js';
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
@@ -995,11 +995,14 @@ async function overviewClassic(root) {
      Yango's red — so the ring is read before its legend is. `key` holds the
      raw platform, which is what the token map is keyed on; a channel with no
      colour of its own falls through to the categorical palette. */
-  donut(mix.body, byPlat.map((r) => ({ ...r, key: r.label, label: sourceLabel(r.label) })),
+  const mixForm = donut(mix.body, byPlat.map((r) => ({ ...r, key: r.label, label: sourceLabel(r.label) })),
     { colorFor: (d) => sourceToken(d.key),
       aria: 'Bookings by channel',
       onClick: (d) => setFilter({ platform: d.key ?? d.label, view: 'platforms', param: null, sub: null }) });
-  mix.body.append(el('p', 'cap', 'Click a slice to filter the dashboard to that channel and open it.'));
+  /* donut() says which form it drew: under the Arkiv skin a ring whose
+     slices could not be told apart is drawn as bars (charts.js ringDistinct),
+     and "click a slice" under bars is an instruction nobody can follow. */
+  mix.body.append(el('p', 'cap', `Click a ${mixForm === 'ring' ? 'slice' : 'row'} to filter the dashboard to that channel and open it.`));
   hbars(prod.body, byProd.slice(0, 6).map((r) => {
     const [plat, tier] = String(r.label || '').split(/:\s*/);
     return { ...r, plat, label: tier ? `${sourceLabel(plat)} · ${tierLabel(tier)}` : sourceLabel(r.label) };
@@ -1079,6 +1082,7 @@ const spanLabel = (a, b) => {
   return A[1] === B[1] ? `${A[0]}–${B[0]} ${B[1]}` : `${A[0]} ${A[1]} – ${B[0]} ${B[1]}`;
 };
 async function overviewContract(root) {
+  const gen = currentGen();
   const GRAIN_WORD = { day: 'day', week: 'week', month: 'month' };
   let per = GRAIN_WORD[state.grain] || 'day';
   /* One channel chosen: its marks may wear its identity. Otherwise every
@@ -1124,6 +1128,12 @@ async function overviewContract(root) {
     q('/api/mix/detail', { by: 'payment' }), q('/api/mix', { by: 'status' }), q('/api/drivers/leaderboard'),
     wantCmp ? q('/api/compare/period').catch(() => ({ failed: true })) : Promise.resolve(null),
   ]);
+  /* The reader may have left while the eight answers were in flight. Every
+     write below targets nodes of THIS render — and the colophon at the end
+     targets the shell's #pageFoot, which the next page owns — so nothing is
+     drawn for a render that is no longer current (the reskin review's
+     finding 1; pageFoot() refuses a detached host as a second guard). */
+  if (!alive(gen)) return;
 
   per = GRAIN_WORD[daily[0]?.grain] || per;
   const pers = per === 'day' ? 'days' : `${per}s`;
@@ -1144,17 +1154,27 @@ async function overviewContract(root) {
       ? 'not compared: the comparison is counted per driver-day, and a driver-day spans every channel — clear the channel filter'
       : !cmp || cmp.failed ? 'not compared: the comparison did not load' : null;
   const of = cmp?.previous ? `against ${spanLabel(cmp.previous.from, cmp.previous.to)}` : '';
+  /* Which side is empty decides the reason. The endpoint answers null when
+     EITHER side carries no figure (api/server.js /api/compare/period), and
+     this used to blame the previous span every time — so a window whose own
+     figure was missing read "‹previous span› holds nothing to compare
+     against", a reason that is not the true one (reskin review, finding 6). */
+  const prevLabel = cmp?.previous ? spanLabel(cmp.previous.from, cmp.previous.to) : 'the span before';
+  const emptySide = (a, b, noun) => (a == null
+    ? `not compared: this window holds no ${noun} to compare`
+    : b == null ? `not compared: ${prevLabel} holds no ${noun} to compare against`
+      : 'not compared: the span before holds zero, and a change against zero is not a percentage');
   const dl = (key, extra = {}) => {
     if (why) return { value: null, na: why };
     const v = cmp.change_pct?.[key];
     return v == null
-      ? { value: null, na: `not compared: ${spanLabel(cmp.previous.from, cmp.previous.to)} holds nothing to compare against` }
+      ? { value: null, na: emptySide(num(cmp.now?.[key]), num(cmp.before?.[key]), 'figure') }
       : { value: v, unit: '%', of, ...extra };
   };
   const rate = (s) => (num(s?.trips) ? (num(s.completed) / num(s.trips)) * 100 : null);
   const completionDelta = why ? { value: null, na: why }
     : rate(cmp.now) == null || rate(cmp.before) == null
-      ? { value: null, na: `not compared: ${spanLabel(cmp.previous.from, cmp.previous.to)} holds no bookings to compare against` }
+      ? { value: null, na: emptySide(rate(cmp.now), rate(cmp.before), 'bookings') }
       : { value: rate(cmp.now) - rate(cmp.before), unit: 'points', of, d: 2 };
 
   /* ── 00 · the statement, then the tiles ──────────────────────────────── */
@@ -4578,9 +4598,15 @@ V.map = async (root) => {
        vehicles whose feed carried no seat reading at all. renderJourney has
        been tri-state for a while; renderLive and this legend had not caught
        up. A seat reading is CABMAN DT's pad or FMS's live seat count. */
+    /* The stale swatch is drawn as the map draws the pin: a hollow ring
+       under --mk-stale: hollow (the Arkiv skin), where the stale grey and
+       --b300 are the same lightness (map.js renderLive, reskin review
+       finding 2); a fill everywhere else. */
+    const hollowStale = markForm().stale === 'hollow';
     legend.innerHTML = [['--s3', 'Passenger aboard'], ['--s1', 'Moving — seat reading says empty'],
-      ['--s5', 'Stopped'], ['--b300', 'Moving — no seat reading on this fix'], ['--grey', 'Stale fix']]
-      .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('');
+      ['--s5', 'Stopped'], ['--b300', 'Moving — no seat reading on this fix'], ['--grey', 'Stale fix', hollowStale]]
+      .map(([c, t, ring]) => `<span><i class="sw" style="${ring
+        ? `background:transparent;box-shadow:inset 0 0 0 2px var(${c})` : `background:var(${c})`}"></i>${t}</span>`).join('');
     if (noLock) {
       legend.innerHTML += `<span class="dim">${countOf(noLock, 'tracker')} `
         + `${plural(noLock, 'is', 'are')} reporting 0,0 — no satellite lock — and ${

@@ -427,9 +427,10 @@ a.m-stat:active{ transform:scale(.985) }
 .m-btn { display: block; width: 100%; min-height: 48px; margin-top: 10px;
   font: inherit; font-size: var(--t9); font-weight: 600; color: var(--fg);
   background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
-/* --on-accent, not #fff: white is 2.94:1 on the dark theme's accent, and this
-   is the save button on the money form (see --on-accent in app.css). */
-.m-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+/* --on-fill: production's white under the old skin, --on-accent under the
+   Arkiv skin (see --on-fill in app.css). The white is 2.94:1 on the old dark
+   accent; that is fixed at the flip, not changed under the old skin unasked. */
+.m-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-fill); }
 .m-btn[disabled] { opacity: .45; }
 
 /* The supervisor picker on the deposit screen is a CONTROL, not a filter.

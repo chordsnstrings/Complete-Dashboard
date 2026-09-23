@@ -507,6 +507,51 @@ for (const [label, scheme, theme] of [['OS dark', 'dark', null], ['chosen dark',
   await ctx.close();
 }
 
+/* The driver rating chip (driver.js): text on a semantic wash. app.css draws
+   it in --good / --critical on the matching wash, which under the Arkiv
+   tokens measured 4.24:1 (up, light), 3.94:1 (up, dark) and 3.99:1 (down,
+   dark) — 11-16px at weight 600, below 4.5:1 with no large-text exemption
+   (reskin review, 2026-09-23). Under the skin the figure is ink and only the
+   arrow is toned; the old skin draws exactly what it did. */
+console.log('\n7b · the rating chip reads at 4.5:1, light and dark');
+{
+  const CHIPS = () => {
+    document.querySelector('#rtchips')?.remove();
+    const p = document.createElement('p'); p.id = 'rtchips';
+    p.innerHTML = '<span class="rt-chip rt-up"><span class="rt-g">▲</span> +0.12</span>'
+      + '<span class="rt-chip rt-down"><span class="rt-g">▼</span> −0.08</span>';
+    document.querySelector('#view').append(p);
+    const at = (sel) => { const c = getComputedStyle(document.querySelector(sel));
+      return { fg: c.color, bg: c.backgroundColor }; };
+    return { up: at('#rtchips .rt-up'), down: at('#rtchips .rt-down'),
+      upG: getComputedStyle(document.querySelector('#rtchips .rt-up .rt-g')).color,
+      downG: getComputedStyle(document.querySelector('#rtchips .rt-down .rt-g')).color };
+  };
+  for (const [label, scheme, theme, skin] of [['arkiv light', 'light', null, 'arkiv'], ['arkiv OS dark', 'dark', null, 'arkiv'],
+    ['arkiv chosen dark', 'light', 'dark', 'arkiv'], ['old skin light', 'light', null, 'classic']]) {
+    const ctx = await fresh({ colorScheme: scheme });
+    const page = await ctx.newPage();
+    if (theme) await page.addInitScript((t) => { try { localStorage.setItem('theme', t); } catch (e) {} }, theme);
+    await page.goto(`${base}/?ui=desktop&skin=${skin}#settings`, { waitUntil: 'load' });
+    await page.waitForSelector('#view');
+    await page.waitForFunction((t) => !t || document.documentElement.getAttribute('data-theme') === t, theme);
+    const r = await page.evaluate(CHIPS);
+    const ratio = (x) => T.contrast(hexOf(x.fg), hexOf(x.bg));
+    if (skin === 'arkiv') {
+      check(`${label}: the chip's figure clears 4.5:1 on its wash (up ${ratio(r.up).toFixed(2)}, down ${ratio(r.down).toFixed(2)})`,
+        ratio(r.up) >= 4.5 && ratio(r.down) >= 4.5, JSON.stringify(r));
+      check(`${label}: …the arrow keeps the direction's colour`, r.upG !== r.up.fg && r.downG !== r.down.fg
+        && r.upG !== r.downG, JSON.stringify(r));
+    } else {
+      check('the old skin: the whole chip, arrow included, is still drawn in the semantic colour',
+        r.upG === r.up.fg && r.downG === r.down.fg && r.up.fg !== r.down.fg, JSON.stringify(r));
+    }
+    await ctx.close();
+  }
+  check('driver.js puts the arrow in its own span, so a skin can colour it apart from the figure',
+    /<span class="rt-g">\$\{arrow\}<\/span> \$\{signed\(c\.change/.test(readFileSync(new URL('../api/public/driver.js', import.meta.url), 'utf8')));
+}
+
 /* The stored theme is stamped BEFORE the first paint on the desktop build as
    well as the phone. It used to wait for app.js's applyTheme(), and app.js is
    a module the pre-paint script appends, so it runs after the first paint: a

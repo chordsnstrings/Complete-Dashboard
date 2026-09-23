@@ -234,6 +234,46 @@ console.log('\n4 · a render the reader has left cannot write into the page they
   await ctx.close();
 }
 
+/* ── 4b · …nor into the page's FOOTER, which the shell owns ─────────────────
+   The reskin review (2026-09-23), reproduced in a browser: #overview under
+   the page contract ends by writing its colophon with pageFoot(…, root). A
+   stale render's `root` is the detached old #view, which still carries
+   id="view", so `host.closest('#view')` matched it and the old page's
+   colophon — "This month · Dubai time · N bookings counted · AED …" — was
+   written into the shell's #pageFoot under #settings. The #view guard above
+   could not see it: the footer is outside #view. */
+console.log('\n4b · a render the reader has left cannot write into the shell’s footer');
+{
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const { ctx, page } = await open('arkiv', { hash: 'overview', hold: { url: '**/api/drivers/leaderboard**', gate } });
+  await page.waitForTimeout(800);
+  const ovTitle = await page.evaluate(() => document.querySelector('#viewTitle').textContent);
+  await page.evaluate(() => { location.hash = '#settings'; });
+  await page.waitForFunction((t) => (document.querySelector('#viewTitle')?.textContent || t) !== t, ovTitle);
+  await settle(page);
+  release();
+  await page.waitForTimeout(2000);
+  const r = await page.evaluate(() => ({
+    view: location.hash,
+    colophon: document.querySelector('#pageFoot .pf-colophon')?.textContent || '',
+  }));
+  check('#overview, answered after the reader moved to #settings, writes no colophon into the footer',
+    r.view === '#settings' && !/bookings counted/.test(r.colophon), JSON.stringify(r));
+  const d = await page.evaluate(async () => {
+    const { pageFoot } = await import('/ui.js');
+    const gone = document.createElement('div'); gone.id = 'view';
+    return { detached: pageFoot({ colophon: ['stale'] }, gone),
+      footer: document.querySelector('#pageFoot .pf-colophon')?.textContent || '' };
+  });
+  check('pageFoot() refuses a host that is no longer in the document, even one with id="view"',
+    d.detached === null && !/stale/.test(d.footer), JSON.stringify(d));
+  check('overviewContract asks whether the reader is still there before it draws',
+    /async function overviewContract\(root\) \{\s*const gen = currentGen\(\);/.test(appJs)
+      && /q\('\/api\/compare\/period'\)[\s\S]{0,120}\]\);\s*\/\*(?:(?!\*\/)[\s\S]){0,800}\*\/\s*if \(!alive\(gen\)\) return;/.test(appJs));
+  await ctx.close();
+}
+
 /* ── 5 · the components, in a browser ────────────────────────────────────── */
 console.log('\n5 · glance, highlight, secHead, absenceBand, pageFoot');
 const BUILD = async () => {

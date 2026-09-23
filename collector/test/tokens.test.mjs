@@ -260,10 +260,25 @@ for (const [f, s] of SRC) {
   if (hit.length) whites.push(`${f} ×${hit.length}`);
 }
 check('no rule or module paints a literal #fff', whites.length === 0, whites.join(' '));
-check('the chosen chip is --on-accent on the accent', /\.depchip\.on\s*\{[^}]*color:\s*var\(--on-accent\)/.test(app));
-check('the phone’s primary button is --on-accent', /\.m-btn\.primary\s*\{[^}]*color:\s*var\(--on-accent\)/.test(mcss));
-check('map and driver pins ring in --paper',
-  /color: css\('--paper'\)/.test(read('map.js')) && /color: css\('--paper'\)/.test(read('driver.js')));
+/* The three marks production painted #fff keep production's white under the
+   old skin, in all three of its theme states, and move to the Arkiv values
+   only under the skin. STEP 0 had put them straight onto --on-accent and
+   --paper, which are near-black in the old dark theme: a change to
+   production's look before the operator had ruled on the flip (reskin
+   review, finding 5). */
+check('the chosen chip is --on-fill on the accent', /\.depchip\.on\s*\{[^}]*color:\s*var\(--on-fill\)/.test(app));
+check('the phone’s primary button is --on-fill', /\.m-btn\.primary\s*\{[^}]*color:\s*var\(--on-fill\)/.test(mcss));
+check('map and driver pins ring in --pin-ring',
+  /color: (?:hollow \? colour : )?css\('--pin-ring'\)/.test(read('map.js')) && /color: css\('--pin-ring'\)/.test(read('driver.js')));
+for (const t of ['--on-fill', '--pin-ring']) {
+  check(`old skin: ${t} is production's white in the light :root`, valueIn(lightRoot, t) === '#ffffff', valueIn(lightRoot, t));
+  check(`old skin: …and no dark block moves ${t} off it`, valueIn(mediaDark, t) == null && valueIn(explicitDark, t) == null,
+    `${valueIn(mediaDark, t)} ${valueIn(explicitDark, t)}`);
+}
+const arkCss = read('arkiv.css');
+check('the skin points --on-fill at --on-accent and --pin-ring at --paper',
+  valueIn(arkCss, '--on-fill') === 'var(--on-accent)' && valueIn(arkCss, '--pin-ring') === 'var(--paper)',
+  `${valueIn(arkCss, '--on-fill')} ${valueIn(arkCss, '--pin-ring')}`);
 
 console.log('\n8 · the service worker precaches every module the phone imports');
 const sw = read('sw.js');

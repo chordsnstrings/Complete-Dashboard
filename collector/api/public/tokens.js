@@ -236,7 +236,23 @@ export const MARK = Object.freeze({
   projected: 'hatch',
   behind: 'wash',
   hatchPitch: '4',
-  hatchAngle: '45'
+  hatchAngle: '45',
+  /* ADDED (reskin review, finding 2). The categorical slots are graphite
+     steps, and eight steps on one achromatic axis cannot all differ: slot 7
+     repeats slot 4, slot 8 repeats slot 3, slot 5 sits 1.28 ΔE from the
+     folded Other, and a channel-aware caller's unmapped labels all fall to
+     --chan-none grey. A ring is read BY COLOUR — the slice to its legend —
+     so a ring whose slices cannot be told apart names nothing. 'distinct':
+     charts.js donut() measures the slices it is about to paint and draws
+     labelled bars instead when any two are under RING_MIN_DE apart.
+     The old skin declares 'always' (its slots are eight distinct hues). */
+  ring: 'distinct',
+  /* A stale fix on the live map. The graphite ramp puts "moving, no seat
+     reading" (--b300) and "stale" (--grey) at the same lightness (ΔE 1.28
+     light, 2.76 dark), so under the skin a stale fix is a HOLLOW ring — a
+     different mark, not a different grey. The old skin keeps its faded
+     fill ('fade'). */
+  stale: 'hollow'
 });
 
 /* ── ADDED: THE BRIDGE FROM THE OLD SKIN ─────────────────────────────────
@@ -568,7 +584,7 @@ export function cssDeclarations(theme = 'light') {
 export function markDeclarations() {
   const name = { fit: 'fit', max: 'max', end: 'end', base: 'base', gap: 'gap', steps: 'steps',
     absent: 'absent', unfinished: 'unfinished', projected: 'projected', behind: 'behind',
-    hatchPitch: 'hatch-pitch', hatchAngle: 'hatch-angle' };
+    hatchPitch: 'hatch-pitch', hatchAngle: 'hatch-angle', ring: 'ring', stale: 'stale' };
   return Object.entries(MARK).map(([k, v]) => `--mk-${name[k]}:${v}`);
 }
 

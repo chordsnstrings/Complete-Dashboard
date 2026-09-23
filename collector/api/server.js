@@ -939,7 +939,12 @@ app.get('/api/compare/period', wrap(async (req, res) => {
      against", and printing infinity as a percentage is how a page claims a
      collector outage was growth. */
   const delta = (k) => {
-    const a = Number(now?.[k]), b = Number(before?.[k]);
+    /* A null side is checked BEFORE Number(): Number(null) is 0, so a window
+       whose sum(fares|km|money) was null — no row carried the measure — came
+       back as −100%, a collapse nobody measured (reskin review, finding 6;
+       the Arkiv #overview prints these as tile deltas). */
+    if (now?.[k] == null || before?.[k] == null) return null;
+    const a = Number(now[k]), b = Number(before[k]);
     if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
     return Math.round(((a - b) / b) * 1000) / 10;
   };

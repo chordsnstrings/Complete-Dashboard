@@ -2707,6 +2707,16 @@ function footShape(foot) {
 }
 export function pageFoot({ basis, colophon } = {}, host = null) {
   if (typeof document === 'undefined') return null;
+  /* A DETACHED host is a render the reader has already left. render() gives
+     every page a fresh #view (freshView() in app.js replaces the node), and
+     the node it replaced keeps id="view", so `host.closest('#view')` below
+     matched the stale node itself and wrote the old page's colophon into
+     the shell's #pageFoot, under the page the reader had moved to. Reproduced
+     (reskin review, 2026-09-23): hold /api/drivers/leaderboard back on
+     #overview under the Arkiv skin, open #settings, and the Settings footer
+     read "This month · Dubai time · 2,043 bookings counted · AED …". A host
+     that is no longer in the document has no footer to write. */
+  if (host && !host.isConnected) return null;
   const shell = document.getElementById('pageFoot');
   let foot = null;
   if (shell && (!host || host.closest?.('#view'))) foot = shell;

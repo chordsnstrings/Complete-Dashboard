@@ -462,7 +462,7 @@ const DN = async ([data, opts]) => {
   const o = { ...opts };
   if (o.clickAll) { delete o.clickAll; o.onClick = (d) => clicked.push(d.label); }
   if (o.nullColor) { delete o.nullColor; o.colorFor = () => null; }
-  c.donut(host, data, o);
+  const form = c.donut(host, data, o);
   const cs = (e) => getComputedStyle(e);
   const arcs = [...host.querySelectorAll('svg.donut path')].map((p) => ({ attr: p.getAttribute('fill'), fill: cs(p).fill }));
   const keys = [...host.querySelectorAll('.dnut-keys .dk')].map((k) => ({
@@ -472,7 +472,7 @@ const DN = async ([data, opts]) => {
     mark: !!r.querySelector('.hb-mk') && cs(r.querySelector('.hb-mk')).display !== 'none' }));
   for (const r of host.querySelectorAll('.hbars .hb[data-click]')) r.click();
   const segs = [...host.querySelectorAll('svg:not(.donut) rect[data-fade]')].length;
-  return { arcs, keys, rows, clicked, segs, ring: !!host.querySelector('svg.donut') };
+  return { arcs, keys, rows, clicked, segs, ring: !!host.querySelector('svg.donut'), form };
 };
 const chans = [{ label: 'FMS telematics', n: 611 }, { label: 'Uber', n: 487 }, { label: 'Bolt', n: 21 },
   { label: 'Hotel', n: 20 }, { label: 'Yango', n: 1 }];
@@ -510,9 +510,21 @@ for (const skin of ['classic', 'arkiv']) {
   check('Arkiv: …neighbours on the ring at least 20 apart in lightness, and the ring closes at least 10 apart',
     kl.every((l, i) => Math.abs(l - kl[(i + 1) % kl.length]) >= 10) && kl.slice(1).every((l, i) => Math.abs(l - kl[i]) >= 20),
     JSON.stringify(kl.map((x) => x.toFixed(0))));
-  check('both skins: nine categories fold the tail into a grey "Other", never a slot colour',
-    [c, a].every((x) => x.nine.arcs.length === 8 && x.nine.arcs[7].attr === 'var(--grey)'
-      && x.nine.keys[7].label === 'Other (2)'), JSON.stringify(a.nine.keys));
+  check('old skin: nine categories fold the tail into a grey "Other", never a slot colour',
+    c.nine.arcs.length === 8 && c.nine.arcs[7].attr === 'var(--grey)' && c.nine.keys[7].label === 'Other (2)'
+      && c.nine.form === 'ring', JSON.stringify(c.nine.keys));
+  /* The reskin review's finding 2: under Arkiv, eight graphite slots on one
+     axis repeat (slot 7 is slot 4) and slot 5 is 1.3 ΔE from the fold, so a
+     nine-category ring would name nothing. It is drawn as labelled bars, the
+     tail still folded into a grey "Other", and donut() says so. */
+  check('Arkiv: nine categories, whose slots would repeat, are drawn as bars — and donut() returns "bars"',
+    !a.nine.ring && a.nine.form === 'bars' && a.nine.rows.length === 8 && a.nine.rows[7].label === 'Other (2)',
+    JSON.stringify({ form: a.nine.form, rows: a.nine.rows.map((r) => r.label) }));
+  check('Arkiv: six distinct categories stay a ring, and so do the channels and the unmapped pair',
+    a.kinds.form === 'ring' && a.chans.form === 'ring' && a.unmapped.form === 'ring',
+    JSON.stringify([a.kinds.form, a.chans.form, a.unmapped.form]));
+  check('the old skin never measures: every donut it draws is a ring',
+    [c.chans, c.kinds, c.nine, c.unmapped].every((x) => x.form === 'ring'));
   check('Arkiv: a channel the caller could not map is unidentified grey; the old skin keeps its slot',
     a.unmapped.arcs.find((x, i) => a.unmapped.keys[i].label === 'Careem').fill === rgb(T.NEUTRAL.grey)
     && c.unmapped.arcs.find((x, i) => c.unmapped.keys[i].label === 'Careem').fill === rgb('#c2683a'),
@@ -532,6 +544,62 @@ for (const skin of ['classic', 'arkiv']) {
     JSON.stringify(b.rows.map((r) => r.mark)));
   check('as:"bar100" draws one 100% bar with its key, and no ring', !a.bar100.ring && a.bar100.segs === 6
     && !c.bar100.ring && c.bar100.segs === 6, JSON.stringify([a.bar100.segs, c.bar100.segs]));
+}
+
+/* ── 5b · the ring in the dark, and the live map's stale pin ───────────────
+   The reskin review's finding 2. The ring threshold is measured, not chosen
+   (charts.js RING_MIN_DE): in dark, adjacent graphite steps are 9.9-10.2 ΔE
+   apart, so a threshold of 10 would have drawn the same six categories as a
+   ring on white and as bars on black. And on the live map "moving, no seat
+   reading" (--b300) and "stale" (--grey) are the same lightness under the
+   skin, so a stale fix there is a hollow ring, not a fainter fill. */
+console.log('\n5b · the ring holds in the dark; a stale pin is hollow under the skin');
+{
+  const { ctx, page } = await open('arkiv', { scheme: 'dark' });
+  const k = await page.evaluate(DN, [kinds, {}]);
+  const n = await page.evaluate(DN, [nineKinds, {}]);
+  check('Arkiv dark: six distinct categories are still a ring', k.form === 'ring' && k.arcs.length === 6,
+    JSON.stringify({ form: k.form, arcs: k.arcs.length }));
+  check('Arkiv dark: …and nine, whose slots repeat, are still bars', n.form === 'bars' && !n.ring, n.form);
+  await ctx.close();
+}
+const PINS = async () => {
+  const m = await import('/map.js');
+  document.querySelector('#mhost')?.remove();
+  const host = document.createElement('div'); host.id = 'mhost';
+  host.style.cssText = 'width:400px;height:300px;position:absolute;left:0;top:0';
+  document.body.append(host);
+  const map = await m.makeMap(host);
+  m.renderLive(map, [
+    { plate: 'SYN1', lat: 25.2, lng: 55.3, stale: true, speed: 0, seat_occupied: null },
+    { plate: 'SYN2', lat: 25.25, lng: 55.35, stale: false, speed: 30, seat_occupied: null },
+  ]);
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim().toLowerCase();
+  const p = [...host.querySelectorAll('path.leaflet-interactive')].map((x) => ({
+    stroke: String(x.getAttribute('stroke')).toLowerCase(), fillOpacity: x.getAttribute('fill-opacity'),
+    fill: String(x.getAttribute('fill')).toLowerCase() }));
+  return { p, grey: css('--grey'), ring: css('--pin-ring'), b300: css('--b300') };
+};
+for (const skin of ['classic', 'arkiv']) {
+  const { ctx, page } = await open(skin);
+  const r = await page.evaluate(PINS);
+  const [stale, moving] = r.p;
+  if (skin === 'arkiv') {
+    check('Arkiv: a stale pin is a hollow ring in the stale grey',
+      stale && stale.fillOpacity === '0' && stale.stroke === r.grey, JSON.stringify(r));
+    check('Arkiv: …while "moving, no seat reading" stays a filled pin', moving && moving.fillOpacity === '0.95'
+      && moving.fill === r.b300, JSON.stringify(moving));
+  } else {
+    check('old skin: a stale pin keeps its faded fill and its white ring, as production draws it',
+      stale && stale.fillOpacity === '0.45' && stale.stroke === r.ring && r.ring === '#ffffff', JSON.stringify(r));
+  }
+  await ctx.close();
+}
+{
+  const appSrc = readFileSync(new URL('../api/public/app.js', import.meta.url), 'utf8');
+  check('the #live legend draws the stale swatch the way the map draws the pin',
+    /const hollowStale = markForm\(\)\.stale === 'hollow';/.test(appSrc)
+      && /\['--grey', 'Stale fix', hollowStale\]/.test(appSrc));
 }
 
 /* ── 6 · heatmap ───────────────────────────────────────────────────────── */

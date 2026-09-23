@@ -63,6 +63,18 @@
      5.39:1 on the light accent and 2.94:1 on the dark one — so every primary
      button and every selected range chip was illegible in dark mode. */
   --on-accent:#ffffff;
+  /* WHITE THAT PRODUCTION DRAWS, KEPT UNTIL THE FLIP. Three marks painted a
+     literal #fff before the reskin: the chosen deposit chip, the phone's
+     primary button, and the ring of every map and driver pin. STEP 0 moved
+     them onto --on-accent and --paper, which are near-black in the old dark
+     theme, so the old skin's look changed before the operator had ruled on
+     the flip (reskin review, finding 5). These two tokens hold the
+     production white in BOTH old themes — no old dark block redefines them —
+     and arkiv.css points them at --on-accent and --paper. The chip's white
+     is 2.94:1 on the old dark accent; that is production's look, recorded in
+     FIX-STATUS, and it changes at the flip, not before. */
+  --on-fill:#ffffff;
+  --pin-ring:#ffffff;
   /* Text printed on a LIGHT fill. Near-black in both themes: it is a property
      of the fill under it, not of the page around it. */
   --ink-inv:#14171a;
@@ -170,6 +182,10 @@
      the same nodes into the masthead, the two rows and the control bar. */
   --pg-shell:0;
   --mk-absent:hatch; --mk-unfinished:hollow; --mk-projected:solid; --mk-behind:outline;
+  /* A donut is always a ring here (eight distinct hues), and a stale fix on
+     the live map a faded fill — today's forms. The Arkiv block declares
+     'distinct' and 'hollow' (tokens.js MARK, the reskin review's finding 2). */
+  --mk-ring:always; --mk-stale:fade;
   /* …and the paints a chart asks for by JOB rather than by colour, which the
      Arkiv skin re-points in arkiv.css: the default hbars fill and a
      deduction, painted here exactly as before (--b400, --s2). */
@@ -448,6 +464,8 @@
   --mk-behind:wash;
   --mk-hatch-pitch:4;
   --mk-hatch-angle:45;
+  --mk-ring:distinct;
+  --mk-stale:hollow;
 }
 /* The dark set (the operator's ruling 3; evidence in docs/ARKIV-DARK.md),
    twice: for a dark OS when the reader chose nothing, and for a reader who
@@ -2984,10 +3002,11 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
 .depchip { min-height: 44px; padding: 0 16px; font: inherit; font-size: var(--t6);
   color: var(--fg); background: var(--card); border: 1px solid var(--line);
   border-radius: 999px; cursor: pointer; }
-/* Text ON the accent takes --on-accent, the token the top of this sheet
-   declares for exactly this: #fff here was 2.94:1 on the dark theme's accent,
-   so the one chip a person had just picked was the one they could not read. */
-.depchip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+/* Text ON the accent. --on-fill is production's white in both old themes
+   and --on-accent under the Arkiv skin (see --on-fill at the top of this
+   sheet): the white is 2.94:1 on the old dark accent, and that is fixed at
+   the flip rather than changed under the old skin unasked. */
+.depchip.on { background: var(--accent); border-color: var(--accent); color: var(--on-fill); font-weight: 600; }
 .depnote { font-size: var(--t5); color: var(--muted); line-height: 1.45; }
 /* A refusal is not decoration: it is the sentence that stops somebody
    recording the wrong thing, so it takes the same weight as the figure. */

@@ -90,6 +90,8 @@
   --accent-soft:var(--faint);      /* a selected or hovered ground */
   --accent-line:var(--grey-2);     /* a link's underline */
   --on-accent:var(--paper);
+  --on-fill:var(--on-accent);      /* the old skin keeps production's white */
+  --pin-ring:var(--paper);         /* …and so does its map pin ring */
   --ink-inv:var(--ink);
   --ink-1:var(--ink);
   --fg:var(--ink);
@@ -727,6 +729,17 @@
 :root[data-skin="arkiv"] .chips-l{font-family:var(--mono);letter-spacing:.14em}
 :root[data-skin="arkiv"] .sw,:root[data-skin="arkiv"] .legend i{border-radius:2px}
 :root[data-skin="arkiv"] .rt-chip{border-radius:3px}
+/* The rating chip's FIGURE is ink; only its arrow wears the semantic colour.
+   app.css draws the whole chip in --good / --critical on the matching wash,
+   and under the Arkiv tokens that text measured 4.24:1 (up, light), 3.94:1
+   (up, dark) and 3.99:1 (down, dark) — under 4.5:1 for 11-16px text at 600,
+   where the large-text exemption does not reach (reskin review, 2026-09-23).
+   Direction is carried three ways without the text colour: the arrow, the
+   sign on the figure, and the wash. SPEC's rule for toned figures, "digits
+   stay ink", is the one the kpi tiles already follow. */
+:root[data-skin="arkiv"] .rt-up,:root[data-skin="arkiv"] .rt-down{color:var(--ink)}
+:root[data-skin="arkiv"] .rt-up .rt-g{color:var(--good)}
+:root[data-skin="arkiv"] .rt-down .rt-g{color:var(--critical)}
 
 /* ── 8 · THE DOT — ruling 1, the one implementation ─────────────────────────
    Solid green: good. Solid red: critical (and serious, which differs by
