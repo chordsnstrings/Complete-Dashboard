@@ -141,6 +141,13 @@
   --b600:var(--seq-4);
   --b700:var(--seq-5);
 
+  /* The paints a chart asks for by JOB (STEP 2; the old skin declares the
+     same names with its old colours in app.css). A ranking that names no
+     channel is INK; a deduction is GREY with its − sign, because a
+     deduction is not "worse" (plan §1: ink for added, grey for deducted). */
+  --mk-fill:var(--ink);
+  --mk-neg:var(--grey);
+
   /* Geometry. No panel, no shadow, no rounded corner on the sheet. Marks keep
      their own 4px data-end, chips 3px and swatches 2px — set where they are. */
   --r:0px;
@@ -856,3 +863,26 @@
 :root[data-skin="arkiv"] .ar-end{display:inline;font-family:var(--mono);font-size:var(--t2);
   font-weight:600;fill:var(--ink)}
 :root[data-skin="arkiv"] .rt-spark .rt-line{stroke-width:2;vector-effect:non-scaling-stroke}
+/* hbars (plan §3 "hbars", SPEC §4). No track ground: the midpoint rule stays
+   as the ruler it is. The bar is 12px (≤ 14) with a 4px DATA end — the right
+   end, or the left for a deduction, which runs the other way — and a channel
+   row carries its 3px marker in the gutter, beside a label that stays ink.
+   The two job paints: a ranking in ink, a deduction in grey (with its −).
+   The press/hover ring on the old track goes with the track. */
+/* ONE set of columns for every row (subgrid). Each row was its own grid with
+   an `auto` value column, so a row printing "−AED 136,901.32" had a shorter
+   track than one printing "AED 70.00": the bar lengths were percentages of
+   different widths, and the midpoint rule sat at a different x on every row
+   (measured on #revenue: 728 to 746px). With the columns shared, every track
+   is one width and the ruler is one line. */
+:root[data-skin="arkiv"] .hbars{display:grid;grid-template-columns:minmax(84px,38%) 1fr auto;
+  column-gap:11px;row-gap:9px}
+:root[data-skin="arkiv"] .hb{position:relative;grid-column:1 / -1;grid-template-columns:subgrid}
+:root[data-skin="arkiv"] .hb .track{background-color:transparent;border-radius:0;height:12px}
+:root[data-skin="arkiv"] .hb .fill{border-radius:0 4px 4px 0}
+:root[data-skin="arkiv"] .hb .fill.neg{border-radius:4px 0 0 4px}
+:root[data-skin="arkiv"] .hb .k{color:var(--ink)}
+:root[data-skin="arkiv"] .hb[data-click]:hover .track{box-shadow:none}
+:root[data-skin="arkiv"] .hb-mk{display:block;position:absolute;left:0;top:50%;margin-top:-7px;
+  width:var(--mark-row);height:14px;border-radius:1px}
+:root[data-skin="arkiv"] .hb:has(> .hb-mk) > .k{padding-left:10px}

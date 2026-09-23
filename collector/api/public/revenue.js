@@ -634,7 +634,7 @@ export async function renderRevenue(root) {
       hbars(cp.body, top.map((c) => ({ label: `${sourceLabel(c.platform)}: ${String(c.category).replace(/_/g, ' ')}`,
         n: Number(c.amount) })), {
         valueFmt: (v) => money(v),
-        legend: [['--b400', 'paid to the fleet'], ['--s2', 'taken back — cash already collected, fees']] });
+        legend: [['--mk-fill', 'paid to the fleet'], ['--mk-neg', 'taken back — cash already collected, fees']] });
       const net = top.reduce((a, c) => a + (Number(c.amount) || 0), 0);
       cp.body.append(el('p', 'cap',
         `${countOf(top.length, 'top-level component')} netting to ${money(net)}. `

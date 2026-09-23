@@ -7,7 +7,7 @@ const tt = () => document.getElementById('tt');
    and a bar coloured `--s8` disappeared entirely. Both are now defined; this
    list and the palette must stay in step. */
 import { TZ, dubaiDay } from './tz.js';
-import { WASH_ALPHA } from './tokens.js';
+import { WASH_ALPHA, CHANNEL_ORDER, channelKey } from './tokens.js';
 export const CAT = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8'];
 export const SEQ = ['--b100', '--b200', '--b300', '--b400', '--b500', '--b600', '--b700'];
 
@@ -127,6 +127,15 @@ export const drawnNoun = (kind, form = markForm(), { article = true } = {}) => {
   const s = NOUN[kind][form[kind]];
   return article ? s : s.replace(/^an? /, '');
 };
+
+/* Which channel a colour token names, or null: '--c-uber', '--ch-uber'
+   (a caller written before STEP 0) and the by-name --chan- token with its
+   fallback (a colour asked for by name) all name Uber. */
+const CHAN_TOKEN = new RegExp(`^--(?:c|ch|chan)-(${CHANNEL_ORDER.join('|')})(?![\\w-])`);
+function channelOfToken(tok) {
+  const m = typeof tok === 'string' ? tok.match(CHAN_TOKEN) : null;
+  return m ? m[1] : null;
+}
 
 /* A bar whose DATA end is rounded and whose baseline is square (SPEC §4),
    as a path: a rect's rx rounds all four corners. `r` is clamped to half the
@@ -969,8 +978,17 @@ export function donut(host, data, { label = 'label', value = 'n', onClick,
    magnitude, and a second channel that says nothing reads as a grouping that
    is not there. `categorical: true` is the opt-in for the rare series whose
    rows genuinely are unordered kinds. */
+/* Arkiv (STEP 2, plan §3 "hbars"): no track ground (the midpoint rule stays
+   as a ruler), a bar at most 14px with a 4px data end, the value in mono on
+   the right, a channel row carrying SPEC §4's 3px marker in the gutter, and
+   the default fill INK — a ranking that names no channel is not a channel's
+   colour. A deduction is GREY with its − sign, not red: a deduction is not
+   "worse" (plan §1, "payout components: ink for added, grey for deducted,
+   with signs"). Both defaults are tokens asked for by JOB, --mk-fill and
+   --mk-neg, which the old skin paints --b400 and --s2 as it always did. The
+   rest is arkiv.css on the markup below. */
 export function hbars(host, data, { label = 'label', value = 'n', color, seq = false, onClick,
-  valueFmt = (v) => fmt(v), signed = true, negColor = '--s2', legend = null,
+  valueFmt = (v) => fmt(v), signed = true, negColor = '--mk-neg', legend = null,
   categorical = false,
   /* Per-row colour, for the one case where hue carries a fact rather than
      decoration: a row that IS a channel is drawn in that channel's colour.
@@ -999,11 +1017,17 @@ export function hbars(host, data, { label = 'label', value = 'n', color, seq = f
       : own ? `var(${own})`
         : color ? `var(${color})`
           : seq ? `var(${ramp})`
-            : categorical ? `var(${CAT[i % CAT.length]})` : 'var(--b400)';
+            : categorical ? `var(${CAT[i % CAT.length]})` : 'var(--mk-fill)';
+    /* A row that IS a channel — its colour is a channel token, or its label
+       names one — carries the channel's 3px marker in the gutter (SPEC §4:
+       identity is a row marker, never a tinted row, and text never wears the
+       colour). The old skin has no rule for it and hides it. */
+    const chan = channelOfToken(own) || channelKey(String(d[label] ?? ''));
+    const mark = chan ? `<i class="hb-mk" style="background:var(--c-${chan})"></i>` : '';
     /* A true zero draws no bar. `min-width:2px` in the stylesheet gave zero the
        same stub as a value too small to see. */
     const w = v === 0 ? 0 : Math.max(Math.min(100, Math.abs(v) / max * 100), 0.6);
-    row.innerHTML = `<div class="k" title="${esc(d[label])}">${esc(d[label])}</div>
+    row.innerHTML = `${mark}<div class="k" title="${esc(d[label])}">${esc(d[label])}</div>
       <div class="track"><div class="fill${neg ? ' neg' : ''}" style="width:${w.toFixed(1)}%;background:${c}"></div></div>
       <div class="v num">${v === 0 ? '0' : `${neg ? '−' : ''}${valueFmt(Math.abs(v))}`}</div>`;
     const go = onClick && (!clickable || clickable(d)) ? () => onClick(d) : null;
@@ -1018,7 +1042,7 @@ export function hbars(host, data, { label = 'label', value = 'n', color, seq = f
   host.append(wrap);
   if (anyNeg || legend) {
     const leg = document.createElement('div'); leg.className = 'legend';
-    leg.innerHTML = (legend || [['--b400', 'added'], [negColor, 'deducted']])
+    leg.innerHTML = (legend || [['--mk-fill', 'added'], [negColor, 'deducted']])
       .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${esc(t)}</span>`).join('');
     host.append(leg);
   }

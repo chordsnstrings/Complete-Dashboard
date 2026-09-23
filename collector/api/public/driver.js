@@ -1955,7 +1955,7 @@ async function tabEarnings(root, id, prof) {
     } else if (priced.length) {
       hbars(comp.body, priced.map((c) => ({ label: String(c.category).replace(/_/g, ' '), n: +c.amount })), {
         valueFmt: (v) => money(v, cur),
-        legend: [['--b400', 'added to the payout'], ['--s2', 'deducted (cash already taken, fees)']] });
+        legend: [['--mk-fill', 'added to the payout'], ['--mk-neg', 'deducted (cash already taken, fees)']] });
       const net = priced.reduce((a, c) => a + Number(c.amount), 0);
       comp.body.append(el('p', 'cap',
         `${countOf(priced.length, 'top-level component')} netting to ${money(net)}. `

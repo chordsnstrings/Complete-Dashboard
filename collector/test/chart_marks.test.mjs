@@ -378,6 +378,78 @@ for (const skin of ['classic', 'arkiv']) {
   await ctx.close();
 }
 
+/* ── 4 · hbars ─────────────────────────────────────────────────────────── */
+console.log('\n4 · hbars: ink, grey deductions, no track ground, a channel row’s gutter marker');
+const HB = async ([rows, withColor]) => {
+  const c = await import('/charts.js');
+  document.querySelector('#hhost')?.remove();
+  const host = document.createElement('div'); host.id = 'hhost'; host.className = 'panel';
+  host.style.cssText = 'width:700px;position:absolute;left:0;top:0';
+  document.body.append(host);
+  c.hbars(host, rows, withColor ? { colorFor: (d) => (d.plat ? `--c-${d.plat}` : null) } : {});
+  const cs = (e) => getComputedStyle(e);
+  return {
+    rows: [...host.querySelectorAll('.hb')].map((r) => {
+      const f = r.querySelector('.fill'), t = r.querySelector('.track'), m = r.querySelector('.hb-mk'), k = r.querySelector('.k');
+      return { label: k.textContent, fill: cs(f).backgroundColor, radius: cs(f).borderRadius,
+        track: cs(t).backgroundColor, trackH: t.getBoundingClientRect().height, v: r.querySelector('.v').textContent,
+        trackBox: [Math.round(t.getBoundingClientRect().left), Math.round(t.getBoundingClientRect().width)],
+        mark: m ? { shown: cs(m).display !== 'none', bg: cs(m).backgroundColor, w: m.getBoundingClientRect().width } : null,
+        kColor: cs(k).color, kLeft: (() => { const g = document.createRange(); g.selectNodeContents(k);
+          return Math.round(g.getBoundingClientRect().left - r.getBoundingClientRect().left); })() };
+    }),
+    legend: [...host.querySelectorAll('.legend .sw')].map((e) => cs(e).backgroundColor),
+  };
+};
+const hbRows = [{ label: 'Uber', n: 50 }, { label: 'Earnings', n: 30 }, { label: 'Cash already taken', n: -20 },
+  { label: 'A long value', n: 123456789.5 }];
+const hbPlat = [{ label: 'Bolt · Comfort', plat: 'bolt', n: 9 }, { label: 'Something else', n: 4 }];
+const rgb = (h) => `rgb(${[1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)).join(', ')})`;
+for (const skin of ['classic', 'arkiv']) {
+  const { ctx, page } = await open(skin);
+  const r = await page.evaluate(HB, [hbRows, false]);
+  const p = await page.evaluate(HB, [hbPlat, true]);
+  const [uber, earn, cash] = r.rows;
+  if (skin === 'classic') {
+    check('old skin: the default fill is --b400 and a deduction --s2, on the old track, as before',
+      earn.fill === rgb('#6699bd') && cash.fill === rgb('#c2683a') && earn.track !== 'rgba(0, 0, 0, 0)'
+      && Math.round(earn.trackH) === 15, JSON.stringify([earn, cash]));
+    check('old skin: no gutter marker is shown', [...r.rows, ...p.rows].every((x) => !x.mark || !x.mark.shown),
+      JSON.stringify(r.rows.map((x) => x.mark)));
+    check('old skin: the default legend still matches its bars', r.legend[0] === earn.fill && r.legend[1] === cash.fill,
+      JSON.stringify(r.legend));
+  } else {
+    check('Arkiv: the default fill is INK', earn.fill === rgb(T.NEUTRAL.ink), earn.fill);
+    check('Arkiv: a deduction is GREY, with its − sign', cash.fill === rgb(T.NEUTRAL.grey) && /^−/.test(cash.v),
+      JSON.stringify(cash));
+    check('Arkiv: no track ground, a bar at most 14px', earn.track === 'rgba(0, 0, 0, 0)' && earn.trackH <= 14,
+      JSON.stringify([earn.track, earn.trackH]));
+    check('Arkiv: the data end is rounded 4px — the right end, or the left for a deduction',
+      earn.radius === '0px 4px 4px 0px' && cash.radius === '4px 0px 0px 4px', JSON.stringify([earn.radius, cash.radius]));
+    check('Arkiv: a row labelled with a channel carries that channel’s 3px gutter marker',
+      uber.mark && uber.mark.shown && uber.mark.bg === rgb(T.CHANNEL.uber) && uber.mark.w === 3 && uber.kLeft >= 10,
+      JSON.stringify(uber));
+    check('Arkiv: …so does a row coloured by channel, and a row that is no channel has none',
+      p.rows[0].mark?.shown && p.rows[0].mark.bg === rgb(T.CHANNEL.bolt) && !p.rows[1].mark && !earn.mark,
+      JSON.stringify(p.rows));
+    check('Arkiv: the label stays ink — text never wears the channel', uber.kColor === rgb(T.NEUTRAL.ink), uber.kColor);
+    check('Arkiv: every row’s track is one width, however wide its value, so bar lengths compare',
+      new Set(r.rows.map((x) => x.trackBox.join())).size === 1, JSON.stringify(r.rows.map((x) => x.trackBox)));
+    check('Arkiv: the default legend matches its bars (ink added, grey deducted)',
+      r.legend[0] === earn.fill && r.legend[1] === cash.fill, JSON.stringify(r.legend));
+  }
+  await ctx.close();
+}
+/* Every caller that drew the default bars under its own key named --b400
+   and --s2, which the skin now paints differently from the bars: the key
+   must name the job tokens the bars are drawn with. */
+{
+  const keys = ['app.js', 'driver.js', 'revenue.js'].flatMap((f) =>
+    [...read(f).matchAll(/legend: \[\['(--[a-z0-9-]+)', '[^']*'\], \['(--[a-z0-9-]+)'/g)].map((m) => `${f} ${m[1]} ${m[2]}`));
+  check(`every hbars key over default bars names --mk-fill and --mk-neg (${keys.length})`,
+    keys.length === 5 && keys.every((k) => / --mk-fill --mk-neg$/.test(k)), keys.join(' · '));
+}
+
 /* #forecast itself: the caption names the treatment the chart draws. */
 console.log('\n1b · #forecast says what it draws');
 for (const skin of ['classic', 'arkiv']) {

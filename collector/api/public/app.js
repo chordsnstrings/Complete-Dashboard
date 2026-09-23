@@ -216,7 +216,7 @@ function componentTree(components) {
     }
     hbars(host, kmeas.map((c) => ({ label: `${c.parent} · ${c.label}`, n: c.amount })),
       { valueFmt: (v) => money(v),
-        legend: [['--b400', 'added to the payout'], ['--s2', 'deducted (cash already taken, fees)']] });
+        legend: [['--mk-fill', 'added to the payout'], ['--mk-neg', 'deducted (cash already taken, fees)']] });
     host.append(el('p', 'cap', 'No top-level component was returned for this window, so these are drawn '
       + 'flat. They are parts of a payout, not the payout.'
       + (kmeas.length < kids.length
@@ -234,7 +234,7 @@ function componentTree(components) {
   }
   hbars(host, rmeas.map((c) => ({ label: c.label, n: c.amount })), {
     valueFmt: (v) => money(v),
-    legend: [['--b400', 'added to the payout'], ['--s2', 'deducted (cash already taken, fees)']],
+    legend: [['--mk-fill', 'added to the payout'], ['--mk-neg', 'deducted (cash already taken, fees)']],
   });
   const net = rmeas.reduce((a, c) => a + c.amount, 0);
   host.append(el('p', 'cap',
@@ -3260,7 +3260,7 @@ V.finance = async (root) => {
     const ledRows = priced.slice(0, 12);
     hbars(led.body, ledRows.map((r) => ({ label: String(r.category).replace(/_/g, ' '), n: +r.amount, n_rows: r.n })), {
       valueFmt: (v) => money(v),
-      legend: [['--b400', 'paid to the fleet'], ['--s2', 'taken from the fleet']] });
+      legend: [['--mk-fill', 'paid to the fleet'], ['--mk-neg', 'taken from the fleet']] });
     const net = priced.reduce((a, r) => a + (+r.amount || 0), 0);
     const plats = [...new Set(ledger.map((r) => r.platform).filter(Boolean))];
     led.body.append(el('p', 'cap',

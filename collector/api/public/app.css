@@ -159,6 +159,10 @@
      skin. test/chart_marks.test.mjs pins them. */
   --mk-fit:0; --mk-max:96; --mk-end:3; --mk-base:3; --mk-gap:0; --mk-steps:7;
   --mk-absent:hatch; --mk-unfinished:hollow; --mk-projected:solid; --mk-behind:outline;
+  /* …and the paints a chart asks for by JOB rather than by colour, which the
+     Arkiv skin re-points in arkiv.css: the default hbars fill and a
+     deduction, painted here exactly as before (--b400, --s2). */
+  --mk-fill:var(--b400); --mk-neg:var(--s2);
 
   /* ── semantic state ───────────────────────────────────────────────────────
      THE ROLE RULE, and it is absolute, because no choice of hex can replace it:
@@ -1051,6 +1055,9 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 .hb[data-click]:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-sm)}
 .hb .v{font-family:"IBM Plex Mono",monospace;font-size:var(--t5);font-weight:500;min-width:58px;text-align:right}
 .hb[data-click]{cursor:pointer}
+/* A channel row's gutter marker (plan §3 STEP 2, SPEC §4). charts.js draws
+   it in both skins; this skin has never shown one, and arkiv.css does. */
+.hb-mk{display:none}
 .hb[data-click]:hover .k{color:var(--ink)}
 .hb[data-click]:hover .track{box-shadow:0 0 0 2px var(--accent-soft)}
 @keyframes growX{from{transform:scaleX(0)}to{transform:scaleX(1)}}

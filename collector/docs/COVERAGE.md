@@ -1054,6 +1054,13 @@ driver's 222 tracker fixes.
      Arkiv (`--mk-fit:1`) barChart and gapBars redraw once the host has a
      width; in the old skin the fix is to append the panel before drawing,
      which is a page change for the page phase.
+  7. **A key must name the token its bars are drawn with, and a chart's
+     default is now a JOB token.** hbars draws unnamed bars in `--mk-fill`
+     and deductions in `--mk-neg` (the old skin: `--b400` / `--s2`; Arkiv:
+     ink / grey). Five callers wrote their own key over the default bars as
+     `['--b400', 'added'], ['--s2', 'deducted']` — identical in the old skin,
+     and graphite beside ink bars under Arkiv. A new key over default bars
+     names the job tokens; `test/chart_marks.test.mjs` scans for it.
 
 * **A PROPOSAL FROM ANYWHERE BUT THE RULE CANNOT LIVE IN `driver_identity_link`.**
   `src/identity_link.js` DELETEs every unconfirmed, unrejected row in that table
