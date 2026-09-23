@@ -1341,3 +1341,26 @@ cannot tell an operator why their write was refused.
 The two panels also took `data-panel` keys (`adminmode`, `credentials`) for
 the reason `ui.js:27` gives: a panel a test must find should not be found by
 matching prose against its `<h3>`.
+
+## Payouts, the morning Bolt's 21 Sep payout arrived — 2026-09-23
+
+Production at `d8b77f3` (deployment `1276e564`), through `bin/prod-mirror.mjs`,
+`node bin/prod-shot.mjs payouts` at 1440. The payout itself is right: Bolt ·
+Ecosine AED 1,275.14 and Bolt · Egari AED 619.18 on Monday 21 Sep, marked
+`ledger` and "first seen Sep 23 10:10" (Dubai), Bolt's own balance and next
+payout (Mon 28 Sep) in the "Bolt says" box, no missing-Monday warning, the
+cadence counted live at 179 of 179. Two things around it were wrong:
+
+| printed | why it was wrong |
+|---|---|
+| first row of **Uber's wire against our own figure** = `Sep 21, 2026 · Bolt · Ecosine · AED 1,275.14` | the panel was named when only Uber rows reached it and kept the name after Bolt's did. Now **Each wire against our own figure** — the route's own name for itself. |
+| `No comparison is made for 91 transfers (Bolt)` beside `…88 transfers (Bolt)` (and `45`/`44` for Uber) | the notes are grouped by platform **and fleet** and printed with the platform only, so two notes differed by a number nobody could attribute. Now `(Bolt · Ecosine)`, `(Bolt · Egari)`. |
+
+Before either, the same morning's first deploy (`942f255`) had printed, for
+both fleets: *"No Bolt payout … has been seen for Monday 2026-09-21, in either
+of Bolt's books … check the bank statement"* — while Bolt's ledger held the
+payout and the collector had failed to store it (a JS array bound to JSONB;
+COVERAGE.md traps). A reason that was not the true one. The sentence now
+consults the stored ledger day and names a collection gap as one.
+`test/payout_page_reconcile.test.mjs` §5 and `test/bolt_ledger_payout.test.mjs`
+carry the checks; each was run against the unfixed file and failed first.

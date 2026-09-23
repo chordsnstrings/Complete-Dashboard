@@ -586,6 +586,46 @@ console.log('\nthe retracted 7.1% comparison survives only as a retraction');
     (shown.match(/.{0,140}balance.{0,60}to the fils/) || [''])[0]);
 }
 
+/* ══ 5. THE PANEL AND ITS NOTES NAME WHAT THEY HOLD ══════════════════════
+   Measured on production 2026-09-23, the morning Bolt's 21 Sep payout first
+   reached this page: the first row of a panel titled "Uber’s wire against our
+   own figure" was Bolt · Ecosine AED 1,275.14. Bolt rows had sat under that
+   Uber title since the register began holding them. And the two notes under
+   it read "No comparison is made for 91 transfers (Bolt)" and "…88 transfers
+   (Bolt)" — split by fleet, as the grouping key is, and printed without the
+   fleet, so nobody could tell which number was Ecosine's. The rows here carry
+   calculated_absent, as production's do, so the notes split the same way. */
+console.log('\nthe panel and its notes name what they hold');
+{
+  const noPeriod = { calculated_absent: 'provider_states_no_period' };
+  const REC2 = { ...REC, rows: [
+    ...REC.rows.map((r) => (r.platform === 'bolt' ? { ...r, ...noPeriod } : r)),
+    { platform: 'bolt', fleet_id: 'egari', paid_on: '2026-09-07',
+      wire: 1290.15, period_start: null, period_end: null,
+      calculated: null, calculated_basis: BOLT_WHY, ...noPeriod,
+      delta: null, delta_pct: null, opening_balance: null, balance_delta: null,
+      checked_at: null, source: 'bolt_payouts' },
+  ] };
+  const page = await render({ ...BASE, '/api/finance/payouts/reconcile': { body: REC2 } });
+  const r = await page.evaluate(() => {
+    const p = document.querySelector('[data-panel="payout-reconcile"]');
+    if (!p) return { missing: true };
+    return {
+      title: (p.querySelector('h3')?.textContent || '').replace(/\s+/g, ' ').trim(),
+      notes: [...p.querySelectorAll('.note')].map((n) => n.textContent.replace(/\s+/g, ' ').trim())
+        .filter((t) => t.startsWith('No comparison is made')),
+    };
+  });
+  /* REVERSION: restore the title 'Uber’s wire against our own figure'. */
+  check('the panel holds Bolt transfers too, so its title names no one provider',
+    !r.missing && !!r.title && !/^Uber/.test(r.title), r.title);
+  /* REVERSION: print `(${who})` again. Both notes read "(Bolt)". */
+  check('one note per fleet, and each names its fleet',
+    (r.notes || []).length === 2 && r.notes.some((t) => /\(Bolt · Ecosine\)/.test(t))
+    && r.notes.some((t) => /\(Bolt · Egari\)/.test(t)), JSON.stringify(r.notes));
+  await page.close();
+}
+
 await browser.close();
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

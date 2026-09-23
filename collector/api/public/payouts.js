@@ -779,7 +779,12 @@ function reconcileSection(host, rec, gen) {
 function drawReconcile(hostEl, rec, run) {
   hostEl.innerHTML = '';
 
-  const p = panel('Uber’s wire against our own figure',
+  /* NAMED FOR WHAT IT HOLDS. It was "Uber’s wire against our own figure"
+     from when only Uber rows reached it, and it kept the name after Bolt's
+     did: on 2026-09-23 its first row, under Uber's name, was Bolt · Ecosine
+     AED 1,275.14. The route calls itself "each wire against our own figure";
+     so does the panel. test/payout_page_reconcile.test.mjs §5. */
+  const p = panel('Each wire against our own figure',
     'One row per transfer that reached the bank: the exact amount, the week it settles, and '
     + 'our own figure for that same week — sum of what the drivers earned on those days, '
     + 'which is what Bank reconciliation calls "bank payout". The difference is the column '
@@ -983,7 +988,13 @@ function drawReconcile(hostEl, rec, run) {
         + 'figure to compare them against has not been collected; that is a gap in what we '
         + 'hold, and it is not a difference of zero.'
       : rs[0].calculated_basis;
-    p.body.append(note(`No comparison is made for ${countOf(rs.length, 'transfer')} (${who}), `
+    /* The fleet, because the grouping key above carries it: without it two
+       notes read "91 transfers (Bolt)" and "88 transfers (Bolt)" and nobody
+       could say which was Ecosine's. */
+    const whom = [...new Set(rs.map((x) => (x.fleet_id
+      ? `${sourceLabel(x.platform)} · ${sourceLabel(x.fleet_id) || x.fleet_id}`
+      : sourceLabel(x.platform))))].join(', ');
+    p.body.append(note(`No comparison is made for ${countOf(rs.length, 'transfer')} (${whom}), `
       + `and that is not a difference of zero. ${reason}`, 'warn'));
   }
 
