@@ -90,7 +90,7 @@
   --accent-soft:var(--faint);      /* a selected or hovered ground */
   --accent-line:var(--grey-2);     /* a link's underline */
   --on-accent:var(--paper);
-  --on-fill:var(--on-accent);      /* the old skin keeps production's white */
+  --on-fill:var(--paper);          /* = --on-accent here; the old skin keeps production's white */
   --pin-ring:var(--paper);         /* …and so does its map pin ring */
   --ink-inv:var(--ink);
   --ink-1:var(--ink);

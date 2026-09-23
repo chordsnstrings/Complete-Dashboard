@@ -276,8 +276,9 @@ for (const t of ['--on-fill', '--pin-ring']) {
     `${valueIn(mediaDark, t)} ${valueIn(explicitDark, t)}`);
 }
 const arkCss = read('arkiv.css');
-check('the skin points --on-fill at --on-accent and --pin-ring at --paper',
-  valueIn(arkCss, '--on-fill') === 'var(--on-accent)' && valueIn(arkCss, '--pin-ring') === 'var(--paper)',
+check('the skin points --on-fill and --pin-ring at --paper (what --on-accent is under the skin)',
+  valueIn(arkCss, '--on-fill') === 'var(--paper)' && valueIn(arkCss, '--pin-ring') === 'var(--paper)'
+    && valueIn(arkCss, '--on-accent') === 'var(--paper)',
   `${valueIn(arkCss, '--on-fill')} ${valueIn(arkCss, '--pin-ring')}`);
 
 console.log('\n8 · the service worker precaches every module the phone imports');

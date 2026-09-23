@@ -70,7 +70,7 @@
      theme, so the old skin's look changed before the operator had ruled on
      the flip (reskin review, finding 5). These two tokens hold the
      production white in BOTH old themes — no old dark block redefines them —
-     and arkiv.css points them at --on-accent and --paper. The chip's white
+     and arkiv.css points both at --paper (what --on-accent is there). The chip's white
      is 2.94:1 on the old dark accent; that is production's look, recorded in
      FIX-STATUS, and it changes at the flip, not before. */
   --on-fill:#ffffff;
@@ -3003,7 +3003,7 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
   color: var(--fg); background: var(--card); border: 1px solid var(--line);
   border-radius: 999px; cursor: pointer; }
 /* Text ON the accent. --on-fill is production's white in both old themes
-   and --on-accent under the Arkiv skin (see --on-fill at the top of this
+   and --paper (= --on-accent) under the Arkiv skin (see --on-fill at the top of this
    sheet): the white is 2.94:1 on the old dark accent, and that is fixed at
    the flip rather than changed under the old skin unasked. */
 .depchip.on { background: var(--accent); border-color: var(--accent); color: var(--on-fill); font-weight: 600; }
