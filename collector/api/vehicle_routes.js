@@ -16,6 +16,7 @@ import { peopleCount, personKey, custodyNames } from './custody_sql.js';
 import { winDays, dubaiSpanSql } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
+import { occCountsOnce, occSourceLabel, OCC_DEDUPE_RULE } from './occupancy_sql.js';
 /* The alerts-per-distance rule, shared with the fleet headline, both economics
    ledgers and the driver page. See api/alert_coverage_sql.js. */
 import { alertCoverage, alertRate, alertRateReason, drivingCount,
@@ -1259,16 +1260,29 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          table did not, so the same rows were strictly poorer here than on
          #segments. "Assessed blind" means nothing without naming which channel
          could not be checked. */
-      `SELECT started_at, ended_at, duration_min, distance_km, top_speed, fixes,
+      /* `source`: which provider saw each one — CABMAN DT, FMS's live seat
+         count or an FMS journey — so a ride two providers saw reads as two
+         readings of one trip, each with its own times, not as two trips. */
+      `SELECT source, ${occSourceLabel('source')} AS source_label, passengers,
+              started_at, ended_at, duration_min, distance_km, top_speed, fixes,
               verdict, verdict_reason, unavailable_sources, matched_platform,
               low_confidence, max_gap_min, ignition_ratio,
               start_lat, start_lng, end_lat, end_lng
        FROM occupancy_segment WHERE plate = $3 AND ${TS('started_at')}
-       ORDER BY started_at DESC LIMIT 200`, p);
+       ORDER BY started_at DESC, source LIMIT 200`, p);
+    /* A TOTAL, so a ride once (occCountsOnce), with each provider's own
+       segment count beside it and the rule on the response. */
     const byVerdict = await q(
-      `SELECT coalesce(verdict,'unknown') verdict, count(*)::int n,
-              round(sum(distance_km)::numeric,0) km, round(sum(duration_min)::numeric,0) AS minutes
-       FROM occupancy_segment WHERE plate = $3 AND ${TS('started_at')}
+      `SELECT coalesce(verdict,'unknown') verdict, count(*) FILTER (WHERE once)::int n,
+              round(sum(distance_km) FILTER (WHERE once)::numeric,0) km,
+              round(sum(duration_min) FILTER (WHERE once)::numeric,0) AS minutes,
+              count(*)::int AS segments,
+              jsonb_build_object(
+                'cabman', count(*) FILTER (WHERE source='cabman'),
+                'fms_live', count(*) FILTER (WHERE source='fms_live'),
+                'fms_trip', count(*) FILTER (WHERE source='fms_trip')) AS by_source
+       FROM (SELECT o.*, ${occCountsOnce('o')} AS once FROM occupancy_segment o
+              WHERE o.plate = $3 AND ${TS('o.started_at')}) s
        GROUP BY 1 ORDER BY n DESC`, p);
     /* Only fixes that can be drawn. The replay picker offered "Aug 25 · 119
        fixes" and /api/map/journey then returned 108 for the same day, because
@@ -1286,7 +1300,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        FROM telemetry_snapshot
        WHERE plate = $3 AND ${TS('captured_at')} AND coalesce(speed,0) < 2 AND lat IS NOT NULL
        GROUP BY 1,2 HAVING count(*) >= 3 ORDER BY fixes DESC LIMIT 60`, p);
-    res.json({ segments, by_verdict: byVerdict, days, parked });
+    res.json({ segments, by_verdict: byVerdict, days, parked, dedupe_rule: OCC_DEDUPE_RULE });
   }));
 
   /* ── safety ───────────────────────────────────────────────────────────── */

@@ -18,7 +18,8 @@ import { empty, fmt, areaChart, hbars, donut } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
          dtStr, timeStr, dayStr, dateStr, money, custody, verdict, foldRows,
          sourceLabel, countOf, plural, asList, noneChosen,
-         trackerState, trackerSpeed, stillNote, UBER_FARE_WHY } from './ui.js';
+         trackerState, trackerSpeed, stillNote, UBER_FARE_WHY,
+         segSourceLabel, bySourceLine } from './ui.js';
 import { q, qAll, api, href, state, unfiltered } from './data.js';
 
 const VERDICT_TONE = { unauthorized: 'bad', authorized: 'ok', sensor_suspect: 'warn',
@@ -138,7 +139,15 @@ const hashQ = (k) => new URLSearchParams(location.hash.split('?')[1] || '').get(
    that round-trips as `2026-08-24T05:33:00.000Z` on one and `...+00:00` on the
    other would silently match nothing — every row would fall back to day
    custody and the feature would look like an empty deployment. */
-const segKey = (r) => `${r.plate}|${Date.parse(r.started_at)}`;
+/* And on the PROVIDER. A segment is (source, plate, started_at) since
+   sql/schema_v85.sql: an FMS journey and an FMS live segment can start at the
+   same second on one car, and keyed on plate and time alone one would take
+   the other's attribution. A row with no source is CABMAN's — the shape
+   before FMS was a seat sensor — on both responses alike. */
+const segKey = (r) => `${r.source || 'cabman'}|${r.plate}|${Date.parse(r.started_at)}`;
+/* A segment's address carries its provider, so two providers' segments that
+   start at the same instant on one car open as themselves. */
+const segHref = (r) => href('segment', r.plate, r.started_at, r.source ? { source: r.source } : null);
 
 /* The attribution fields, named rather than spread wholesale.
    `clock_skew_min` is DELIBERATELY not in this list: /api/segments computes it
@@ -415,6 +424,11 @@ function whoPanel(root, rows, { kind, value, tier, who }, truncated) {
   rows.forEach((r) => {
     const t = r.attribution_tier;
     if (!t || t === 'unknown') return;
+    /* A ride once. From 2026-09-23 one ride on an FMS car is normally two rows
+       here — FMS's live count and FMS's journey — both naming the same person;
+       the server marks the one that represents the ride (counts_once), and a
+       per-person count counts only that one. */
+    if (r.counts_once === false) return;
     (Array.isArray(r.attribution_candidates) ? r.attribution_candidates : []).forEach((c) => {
       const key = c.key || c.id || c.name;
       if (!key) return;
@@ -475,7 +489,8 @@ function whoPanel(root, rows, { kind, value, tier, who }, truncated) {
     + 'custodian that day</b> is day-grain custody: this is custody, not driving. <b>One of '
     + 'several</b> is not an accusation at all. The money and the distance are attached to the '
     + 'by-time column alone, because pricing a custody record produces a debt nobody measured. '
-    + 'Folded on the person, so a driver with an Uber and a Yango account is one row, not two.'
+    + 'Folded on the person, so a driver with an Uber and a Yango account is one row, not two — '
+    + 'and a ride two seat-sensor providers both saw is counted once.'
     /* THE COUNTS ARE OVER WHAT IS ON SCREEN. /api/segments caps at 300 and a
        plate or day facet narrows it further, while the chips above carry
        window-wide figures. A per-person count that is silently a floor is the
@@ -598,7 +613,10 @@ export async function renderSegments(root, kind, value) {
   /* A control on screen that changes nothing has to say so. See the note on
      the qAll above: neither this list nor its attribution is narrowed by the
      fleet chip, and the fleets actually on screen are named rather than
-     asserted, so this sentence stays true if CABMAN is ever pointed at Egari. */
+     asserted. Since 2026-09-23 both fleets have a seat-sensor provider —
+     CABMAN DT and FMS on Ecosine, FMS on Egari — so a list holding one fleet
+     only is a window where the other's providers produced nothing, and the
+     sentence says that rather than blaming an absent sensor. */
   if (state.fleet) {
     const fleets = [...new Set(d.rows.map((r) => r.fleet_id).filter(Boolean))];
     root.append(note(`The fleet chip above reads ${sourceLabel(state.fleet)}, and nothing on this `
@@ -607,9 +625,9 @@ export async function renderSegments(root, kind, value) {
       + (fleets.length
         ? `Every segment shown belongs to ${fleets.map(sourceLabel).join(' or ')}`
           + `${fleets.length === 1 && fleets[0] !== state.fleet
-            ? ' — the seat sensor behind these rows collects for that fleet and not for the one '
-              + 'selected, so an empty page here would have meant an absent sensor rather than a '
-              + 'clean fleet' : ''}.`
+            ? ' — no seat-sensor provider produced a segment for the fleet selected in this '
+              + 'window, so an empty page here would have meant no evidence rather than a clean '
+              + 'fleet' : ''}.`
         : 'No segment is shown at all in this window.'), 'warn'));
   }
 
@@ -641,8 +659,16 @@ export async function renderSegments(root, kind, value) {
   const blindSources = [...new Set((d.rows || [])
     .filter((r) => r.low_confidence)
     .flatMap((r) => asList(r.unavailable_sources)))];
+  /* The two headline tiles are TOTALS, so they count a ride once across the
+     providers (the facets are counted that way on the server); the rows below
+     are every provider's segment, and `Matching this filter` is their count.
+     Each provider's own figures and the rule relating them follow the tiles. */
+  const rawAll = vf.reduce((a, r) => a + (r.segments ?? r.n), 0);
   root.append(kpiRow([
-    { label: 'Segments in window', value: fmt(totalAll), sub: 'every occupancy interval the seat sensor saw' },
+    { label: 'Segments in window', value: fmt(totalAll),
+      sub: rawAll > totalAll
+        ? `every occupancy interval seen, a ride counted once — ${fmt(rawAll)} segments across providers`
+        : 'every occupancy interval seen, a ride counted once across providers' },
     { label: 'Unexplained', value: fmt(unauth?.n || 0),
       /* Null distance is not zero km. */
       sub: unauth?.km != null ? `${fmt(unauth.km)} km carried off-book`
@@ -681,17 +707,33 @@ export async function renderSegments(root, kind, value) {
       + 'than counted as clean.', 'warn'));
   }
 
-  /* The range selector implies a history the seat sensor does not have.
-     CABMAN is a five-minute poll with nothing behind it, so however wide the
-     window, these segments are the few days it has ever recorded — and a
-     "0 unexplained over 30 days" reads as thirty days of clean driving. */
+  /* EACH PROVIDER'S OWN FIGURES, and the rule that relates them to the tiles.
+     A provider with nothing in the window reads "no evidence" with its true
+     reason as the title — CABMAN DT over a window before it was collected is
+     not a clean fleet. */
+  const src = d.facets.source || [];
+  if (src.length) {
+    const byS = Object.fromEntries(src.map((x) => [x.key, x]));
+    const c = el('p', 'cap');
+    c.innerHTML = `Unexplained segments by provider: ${bySourceLine(byS, 'unauthorized')}. `
+      + `Segments by provider: ${bySourceLine(byS, 'segments')}. ${esc(d.dedupe_rule || '')}`;
+    root.append(c);
+  }
+
+  /* The range selector implies a history the seat sensors do not all have.
+     When CABMAN was the only one, a five-minute poll with nothing behind it,
+     "0 unexplained over 30 days" read as thirty days of clean driving over the
+     few days it had ever recorded. Three sources now reach back three
+     different distances, and the sentence says so instead of claiming the
+     window's edge is the evidence's. */
   const days = d.facets.day || [];
   if (days.length) {
     root.append(el('p', 'cap',
-      `Seat-occupancy evidence exists for ${countOf(days.length, 'day')} — `
-      + `${dateStr(days[0].key)} to ${dateStr(days[days.length - 1].key)} — and that is everything the `
-      + 'sensor has ever recorded, whatever range is selected above. It is a realtime poll with no '
-      + 'history behind it, so widening the window does not widen this evidence.'));
+      `Seat-occupancy evidence exists for ${countOf(days.length, 'day')} in this window — `
+      + `${dateStr(days[0].key)} to ${dateStr(days[days.length - 1].key)}. CABMAN DT’s pad and FMS’s `
+      + 'live seat count are polls with no history behind them; FMS journeys reach back about two years '
+      + 'but are judged only over the windows the reconciler has run. A day with no segment is a day no '
+      + 'provider watched, not a quiet one.'));
   }
 
   /* What is currently being shown, and the way back out of it — including out
@@ -892,10 +934,11 @@ export async function renderSegments(root, kind, value) {
     + 'journeys, so the oldest rows here keep the day-grain custody this column used to show, '
     + 'labelled as such. Narrow the date range to attribute them.'));
   /* The coverage sentence, but only in the one shape the day-strip caption
-     above does not already cover: no seat-sensor evidence AT ALL. An empty
-     list then means an absent sensor rather than a clean fleet, and those two
-     must never read alike — a window that reaches past the few days CABMAN has
-     recorded lands here. */
+     above does not already cover: no seat-sensor evidence AT ALL, from any of
+     the three sources. An empty list then means absent evidence rather than a
+     clean fleet, and those two must never read alike — a window no provider
+     watched (before CABMAN DT and FMS's live count were collected, and not yet
+     judged from FMS journeys) lands here. */
   if (att && att.coverage?.days_with_data === 0 && att.coverage?.note) {
     root.append(note(att.coverage.note, 'warn'));
   }
@@ -966,6 +1009,14 @@ export function segmentTable(rows, opts = {}) {
   const anyAtt = rows.some((r) => r.attribution_tier);
   const t = tableFrom(rows, [
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+    /* WHICH PROVIDER SAW IT. CABMAN DT, FMS's live seat count or an FMS
+       journey — and from 2026-09-23 one ride on an FMS car is normally two
+       rows here, its live-count segment and its journey, each with its own
+       times. The passenger count rides along where the provider reported one
+       (an FMS journey's Seat Count). */
+    { label: 'Provider', key: 'source',
+      render: (r) => `${esc(segSourceLabel(r))}${r.passengers != null
+        ? `<span class="dim" title="the passenger count the provider reported"> · ${fmt(r.passengers)} aboard</span>` : ''}` },
     ...(anyFleet ? [{ label: 'Fleet', key: 'fleet_id',
       render: (r) => (r.fleet_id ? pill(sourceLabel(r.fleet_id), 'plat') : '—') }] : []),
     /* Both destinations, because they answer different questions and the row
@@ -986,8 +1037,12 @@ export function segmentTable(rows, opts = {}) {
       : { label: 'Driver that day', key: 'drivers',
         render: (r) => custody(r, { title: 'This driver’s other flagged segments',
           hrefFor: (d) => href('segments', 'driver', d.name) }) }),
+    /* The provider's own timestamps, start and end: two providers' readings
+       of one ride start and end at different moments, and the reader has to
+       see both to see they are one ride. */
     { label: 'Started', key: 'started_at',
-      render: (r) => `<a href="${href('segment', r.plate, r.started_at)}">${esc(`${dateStr(r.started_at)} ${timeStr(r.started_at)}`)}</a>` },
+      render: (r) => `<a href="${segHref(r)}">${esc(`${dateStr(r.started_at)} ${timeStr(r.started_at)}`)}</a>`
+        + (r.ended_at ? `<span class="dim"> → ${esc(timeStr(r.ended_at))}</span>` : '') },
     { label: 'Duration', key: 'duration_min', num: true, render: (r) => (r.duration_min ?? '—') + ' min' },
     /* Null is not zero. A segment with no measured distance printed "0 km",
        which is a claim that the vehicle did not move — the opposite of what an
@@ -1009,14 +1064,26 @@ export function segmentTable(rows, opts = {}) {
        dirhams is a conversation, which is the whole reason this column was
        asked for. */
     ...(anyValue ? [{ label: 'Forgone', key: 'forgone_aed', num: true, render: forgoneCell }] : []),
+    /* An FMS journey carries its distance and duration and nothing sampled —
+       no top speed, no fixes, no ignition ratio — and says so rather than
+       leaving a bare dash. */
     { label: 'Top speed', key: 'top_speed', num: true,
-      render: (r) => (r.top_speed == null ? '<span class="ent-off">—</span>' : `${fmt(r.top_speed)} km/h`) },
+      render: (r) => (r.top_speed == null
+        ? `<span class="ent-off" title="${r.source === 'fms_trip'
+          ? 'an FMS journey carries no top speed — only its distance and duration'
+          : 'no speed was recorded across this interval'}">—</span>`
+        : `${fmt(r.top_speed)} km/h`) },
     ...(anyFix ? [{ label: 'Fixes', key: 'fixes', num: true,
-      render: (r) => (r.fixes == null ? '—'
+      render: (r) => (r.fixes == null
+        ? (r.source === 'fms_trip'
+          ? '<span class="ent-off" title="an FMS journey is the provider’s own record of the trip, not built from fixes">—</span>'
+          : '—')
         : `${fmt(r.fixes)}${r.max_gap_min ? `<span class="dim" title="largest gap between consecutive fixes"> · gap ${fmt(r.max_gap_min)}m</span>` : ''}`) },
     { label: 'Ignition on', key: 'ignition_ratio', num: true,
       render: (r) => (r.ignition_ratio == null
-        ? '<span class="ent-off" title="this feed does not report ignition">—</span>'
+        ? `<span class="ent-off" title="${r.source === 'fms_trip'
+          ? 'an FMS journey carries no ignition samples to take a ratio of'
+          : 'this feed does not report ignition'}">—</span>`
         : `${fmt(r.ignition_ratio * 100, 0)}%`) }] : []),
     { label: 'Verdict', key: 'verdict', render: (r) => vTag(r.verdict) },
     /* The reason the reconciler recorded. It is the field that makes a verdict
@@ -1039,7 +1106,7 @@ export function segmentTable(rows, opts = {}) {
   ], { sortable: true, sortId: opts.sortId || 'segs', defaultSort: { key: 'started_at', dir: 'desc' },
     // The row is a link too, bound through onRow so re-sorting cannot open the
     // wrong segment; a click on a cell link is left to that link.
-    onRow: (r) => { location.hash = href('segment', r.plate, r.started_at); } });
+    onRow: (r) => { location.hash = segHref(r); } });
   return t;
 }
 
@@ -1051,9 +1118,15 @@ export async function renderSegment(root, plate, at) {
      complaint. #day has always answered this properly; these four did not. */
   if (!plate || !at) return noneChosen(root, 'segment', 'segments', 'Every occupancy segment');
   loading(root);
+  /* The provider rides in the address (?source=), because a segment is
+     (source, plate, started_at) now. An address from before carries none and
+     still opens: the server answers with the first provider holding a segment
+     at that instant and names any other in other_sources. */
+  const askSource = hashQ('source');
   let d;
   try {
-    d = await api(`/api/segment?plate=${encodeURIComponent(plate)}&at=${encodeURIComponent(at)}`);
+    d = await api(`/api/segment?plate=${encodeURIComponent(plate)}&at=${encodeURIComponent(at)}`
+      + (askSource ? `&source=${encodeURIComponent(askSource)}` : ''));
   } catch (e) {
     root.innerHTML = '';
     return empty(root, `No segment starts at that instant for ${esc(plate)}. `
@@ -1061,6 +1134,25 @@ export async function renderSegment(root, plate, at) {
   }
   root.innerHTML = '';
   const s = d.segment;
+
+  /* WHICH PROVIDER THIS IS, AND ITS OWN TIMES — before any verdict is read.
+     From 2026-09-23 one ride on an FMS car is normally two segments, FMS's
+     live count and FMS's journey, and on the two cars with both trackers a
+     CABMAN one too; each is a separate reading with its own start and end.
+     The others on this car that day are in the table at the foot of the page. */
+  const prov = el('p', 'note');
+  prov.innerHTML = `Seen by <b>${esc(segSourceLabel(s))}</b>, from `
+    + `${esc(`${dateStr(s.started_at)} ${timeStr(s.started_at)}`)} to `
+    + `${s.ended_at ? esc(`${dateStr(s.ended_at)} ${timeStr(s.ended_at)}`) : '<span class="dim">no recorded end</span>'}`
+    + (s.passengers != null ? ` · ${fmt(s.passengers)} ${plural(s.passengers, 'passenger')} by the provider’s count` : '')
+    + '.'
+    + ((d.other_sources || []).length
+      ? ` ${esc((d.other_sources || []).map((o) => o.source_label || o.source).join(' and '))} also `
+        + 'recorded a segment starting at this same instant on this car — '
+        + (d.other_sources || []).map((o) => `<a href="${href('segment', plate, s.started_at, { source: o.source })}">`
+          + `open ${esc(o.source_label || o.source)}’s</a>`).join(' · ') + '.'
+      : '');
+  root.append(prov);
 
   root.append(kpiRow([
     { label: 'Verdict', value: s.verdict || '—', tone: VERDICT_TONE[s.verdict] || null,
@@ -1081,9 +1173,12 @@ export async function renderSegment(root, plate, at) {
     { label: 'Revenue forgone', tone: d.value?.forgone_aed ? 'bad' : null,
       value: d.value?.forgone_aed == null ? '—' : money(d.value.forgone_aed),
       sub: d.value?.basis || 'not valued' },
-    { label: 'Observed', value: d.profile.observed === null ? '—' : d.profile.observed ? 'fully' : 'with a gap',
-      sub: s.max_gap_min != null ? `largest gap ${s.max_gap_min} min` : 'gap not recorded',
-      tone: d.profile.observed === false ? 'warn' : null },
+    { label: 'Observed', value: s.source === 'fms_trip' ? 'whole journey'
+      : d.profile.observed === null ? '—' : d.profile.observed ? 'fully' : 'with a gap',
+      sub: s.source === 'fms_trip'
+        ? 'an FMS journey is the provider’s own record of the trip, start to end — it has no sampling gap'
+        : s.max_gap_min != null ? `largest gap ${s.max_gap_min} min` : 'gap not recorded',
+      tone: d.profile.observed === false && s.source !== 'fms_trip' ? 'warn' : null },
   ]));
 
   /* WHERE IT WENT, stated before the evidence rather than left on a map the
@@ -1132,7 +1227,7 @@ export async function renderSegment(root, plate, at) {
     const raw = await qAll('/api/unauthorized/attributed',
       { verdict: 'unauthorized', limit: 500, from: day, to: day }).catch(() => null);
     const rows = raw && raw.distribution ? (raw.rows || []) : [];
-    att = rows.find((r) => r.plate === plate
+    att = rows.find((r) => r.plate === plate && (r.source || 'cabman') === (s.source || 'cabman')
       && Date.parse(r.started_at) === Date.parse(s.started_at)) || null;
     const box = el('div', 'note' + (att ? '' : ' warn'));
     box.innerHTML = att
@@ -1255,8 +1350,14 @@ export async function renderSegment(root, plate, at) {
   }
 
   /* ── the fixes ────────────────────────────────────────────────────────── */
+  /* This provider's own fixes: CABMAN DT's for a CABMAN segment, FMS's for
+     either FMS source. On the two cars with both trackers the devices report
+     different positions, so the track never mixes them. */
   const tp = panel('Telemetry through the window',
-    `${fmt(d.track.length)} CABMAN fixes at 5-minute resolution, five minutes either side of the boundary`);
+    s.source === 'cabman' || !s.source
+      ? `${fmt(d.track.length)} CABMAN DT fixes at 5-minute resolution, five minutes either side of the boundary`
+      : `${fmt(d.track.length)} FMS fixes, about six minutes apart, five minutes either side of the boundary`
+        + (s.source === 'fms_trip' ? ' — the journey itself is FMS’s record; these are the positions around it' : ''));
   root.append(tp.panel);
   if (d.track.length) {
     areaChart(tp.body, d.track.map((r) => ({ t: timeStr(r.captured_at), speed: +r.speed || 0 })),
@@ -1264,9 +1365,20 @@ export async function renderSegment(root, plate, at) {
     tp.body.append(tableFrom(d.track.slice(0, 60), [
       { label: 'Time', key: 'captured_at', render: (r) => timeStr(r.captured_at) },
       trackerState, trackerSpeed,
-      { label: 'Seat', key: 'seat_occupied', render: (r) => (r.seat_occupied == null
-        ? '<span class="tag dim">not reported</span>'
-        : r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag">empty</span>') },
+      /* CABMAN DT's pad reading, or FMS's live seat count (occupied at 1 or
+         more, the count itself beside it). An FMS fix from before the live
+         count was collected (2026-09-23) carries none. */
+      { label: 'Seat', key: 'seat_occupied', render: (r) => {
+        if (r.source === 'fms') {
+          return r.seat_count == null
+            ? '<span class="tag dim" title="FMS’s live seat count was not reported on this fix">not reported</span>'
+            : Number(r.seat_count) >= 1 ? `<span class="tag ok">occupied · ${fmt(r.seat_count)}</span>`
+              : '<span class="tag">empty · 0</span>';
+        }
+        return r.seat_occupied == null
+          ? '<span class="tag dim">not reported</span>'
+          : r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag">empty</span>';
+      } },
       { label: 'Ignition', key: 'ignition', render: (r) => (r.ignition == null ? '—' : r.ignition ? 'on' : 'off') },
       { label: 'Lat', key: 'lat', num: true }, { label: 'Lng', key: 'lng', num: true },
     ], { compact: true }));
@@ -1280,7 +1392,8 @@ export async function renderSegment(root, plate, at) {
   /* ── the day around it ────────────────────────────────────────────────── */
   if (d.same_day_segments.length > 1) {
     const sd = panel(`Everything this vehicle did on ${s.local_day}`,
-      `${fmt(d.same_day_segments.length)} occupancy intervals — one flag in a normal day reads differently from one in a day of flags`);
+      `${fmt(d.same_day_segments.length)} occupancy intervals, every provider’s — one flag in a normal day `
+      + 'reads differently from one in a day of flags, and two providers’ readings of one ride sit side by side');
     root.append(sd.panel);
     sd.body.append(segmentTable(d.same_day_segments.map((r) => ({ ...r, drivers: s.drivers }))));
   }

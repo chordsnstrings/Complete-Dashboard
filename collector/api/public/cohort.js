@@ -15,7 +15,7 @@
    fleet portal. That join used to be a page load per person. */
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
   dayStr, dtStr, money, fmt, pct, plural, countOf, andList, verdict, foldRows, foldChildren,
-  sourceLabel, custody } from './ui.js';
+  sourceLabel, custody, SEG_SOURCE_LABEL } from './ui.js';
 import { q, qAll, api, href, params, unfiltered } from './data.js';
 import { empty } from './charts.js';
 import { COHORTS, membersOf, idOf, accountsOf } from './cohorts.js';
@@ -105,11 +105,23 @@ function memberCard(host, kind, row, detail) {
       facts.push({ label: 'Harsh events', value: fmt(sumOf(d.alerts, (r) => r.n)),
         sub: `worst: ${d.alerts[0].alert_type}`, tone: 'warn' });
     }
-    const unauth = (d.segments || []).find((x) => x.verdict === 'unauthorized');
-    if (unauth) {
+    /* ONE FIGURE, A RIDE ONCE, AND EACH PROVIDER BESIDE IT. The segment rows
+       are per car, provider and verdict since FMS became a second seat-sensor
+       provider (2026-09-23), and one ride on an FMS car is normally two of
+       them — FMS's live count and FMS's journey. Summing the rows would count
+       it twice, so the tile reads the server's combined figure (a ride once)
+       and the sub-line names each provider's own segment count and the span
+       of its timestamps. */
+    const unRows = (d.segments || []).filter((x) => x.verdict === 'unauthorized');
+    if (unRows.length) {
       said.push('seat sensor');
-      facts.push({ label: 'Unauthorized', value: fmt(unauth.n),
-        sub: `${fmt(unauth.km)} km carried with no booking open`, tone: 'critical' });
+      const one = d.unauthorized;
+      const per = unRows.map((x) => `${x.source_label || SEG_SOURCE_LABEL[x.source] || 'CABMAN DT'} ${fmt(x.n)}`
+        + (x.first_at ? ` (${dtStr(x.first_at)}${x.last_at && x.last_at !== x.first_at ? ` – ${dtStr(x.last_at)}` : ''})` : ''))
+        .join(' · ');
+      facts.push({ label: 'Unauthorized', value: fmt(one ? one.n : unRows[0].n),
+        sub: `${fmt(one ? one.km : unRows[0].km)} km carried with no booking open, a ride counted once. `
+          + `By provider: ${per}`, tone: 'critical' });
     }
     if ((d.utilisation || []).length) {
       said.push('platform utilisation');

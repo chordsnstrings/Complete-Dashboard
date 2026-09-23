@@ -182,8 +182,8 @@ hours early.
 | Hotel (corporate) | yes, same day — 98.8% of Aug | none published | nothing takes a commission between booking and bank |
 | Bolt | yes — 99.7% of chargeable Aug | **yes, per Monday** — `getPayouts` (lags days) and the balance ledger `getFleetBalanceDetails` (same day); see the trap below | figure is GROSS; the ledger does publish commission per day (`commissions_in_app`, `commissions_cash`) |
 | Yango | yes — 100% | yes | earnings are NET: cash + cashless + commission (commission is negative) |
-| FMS | journeys, not bookings | n/a | watches cars, does not sell rides |
-| CABMAN | realtime GPS, 5-min poll | n/a | a live seat sensor (FMS is the second seat-sensor provider: a Seat Count on each trip — see the Seat sensor and FMS section) |
+| FMS | journeys, not bookings | n/a | watches cars, does not sell rides; the second seat-sensor provider (a live seat count and a Seat Count on each journey) — judged for unauthorized trips, never a booking source |
+| CABMAN | realtime GPS, 5-min poll | n/a | a live seat pad, Ecosine only (FMS is the second seat-sensor provider — see "FMS in unauthorized-trip detection") |
 
 `COMMISSION_CHANNELS = {uber, bolt, yango, careem}` — the channels whose fares
 are a gross the platform takes a cut of. `fleetIncome()` / `chooseBasis()` pick
@@ -1171,6 +1171,41 @@ driver's 222 tracker fixes.
      back 2s.
   `test/arkiv_shell.test.mjs` holds items 1-6, `test/boot_order.test.mjs`
   item 7.
+
+* **FMS FILES EACH JOURNEY TWICE, AND BOTH ROWS STAY.** `GetTripPassenger`
+  serves a PROVISIONAL record of a ride within minutes of it — a whole-number
+  distance and a start a few minutes late — and hours later the FINAL record:
+  the true start and a decimal distance. The collector keys a journey on
+  `plate|start` (src/sources/fms.js `fmsTripRows`), so the two are two rows and
+  nothing removes the first. Measured on production 2026-09-23: **0 overlapping
+  journeys on any day up to 2026-08-20; from 2026-08-21 — the day live
+  collection began — about a third of each day's records overlap another on the
+  same car** (151 of 457 that day, 365 of 955 on 2026-09-22), tracking the
+  day's whole-km records almost exactly; 8,207 of the 22,874 records since
+  2026-08-21. Of 2,058 overlapping pairs, 2,032 are one whole-km against one
+  decimal record, 26 two whole-km, **none two decimal**. Of 79 pairs checked row
+  by row, the record first stored later is the decimal one in 74 (whole-km in
+  0), first seen a median 13.6 h after the provisional one. `Slno` is a row
+  number within one answer, not an id. **Anything that counts FMS journeys
+  counts about a third of recent rides twice** — including the "723 + 700
+  unbooked FMS journeys in 30 days" upper bound above. The reconciler treats
+  journeys that overlap on one car as one ride built from the record first
+  stored last (`journeySegments()`); `trip` itself is untouched. Whether FMS
+  still serves the provisional record after the final exists is not known from
+  here — the collector keeps both either way.
+
+* **A 2-MINUTE POLL IS NOT A 2-MINUTE SERIES.** FMS live rows are keyed on
+  FMS's own tracktime, which advances about every 6 minutes, so the stored
+  series is ~6-minutely and each row carries the seat count of the LAST poll
+  that saw that tracktime. Reason about thresholds from the stored gaps, not
+  from the cron.
+
+* **A TOTAL OVER SEGMENTS COUNTS ONE RIDE TWO OR THREE TIMES.** Since FMS
+  became a seat-sensor provider, one ride on an FMS car is normally two
+  segments (live count and journey), three on the two cars with both trackers.
+  `count(*)` over `occupancy_segment` is a count of READINGS. Any new total
+  must go through `occCountsOnce()` (api/occupancy_sql.js) or sum only rows
+  with `counts_once`, and must show the per-provider figures beside it.
 
 * **A PROPOSAL FROM ANYWHERE BUT THE RULE CANNOT LIVE IN `driver_identity_link`.**
   `src/identity_link.js` DELETEs every unconfirmed, unrejected row in that table
@@ -6186,9 +6221,8 @@ feed cell names where its reading came from ("from CABMAN DT", "from FMS
   Egari's FMS sends seat counts. The true reason is "no CABMAN account for
   Egari". The same applied to the line "CABMAN, the only feed with a seat
   sensor", which the page and this file both carried.
-- **Not changed here.** The rest of the system still treats CABMAN as the only
-  seat sensor, for example unauthorized-trip detection in src/reconcile.js. An
-  analysis of what changes system-wide was requested separately.
+- **Not changed here** — since done, the same day: unauthorized-trip
+  detection reads FMS too. See "FMS in unauthorized-trip detection" below.
 
 ### FMS's live seat count, collected — 2026-09-23
 
@@ -6200,7 +6234,9 @@ The operator: "we should collect seat count too."
   poll's row for the plate. The Fleet tab's "Seat sensor — FMS" column takes
   whichever is newer: this live count or the per-journey count.
 - **Kept as it was.** CABMAN's boolean `seat_occupied` is not set from FMS's
-  count. The reconciler reads CABMAN only, and that is a separate decision.
+  count. The reconciler now reads FMS's count as well, but in memory (1 or
+  more is occupied) — `seat_occupied` on an FMS row stays NULL. See "FMS in
+  unauthorized-trip detection" below.
 - **TRAP: the probe was calling this operation wrong.** It sent no `vehicleno`
   (src/probe.js), so FMS answered `{"error":"Authentication failed"}` every
   night on both fleets. The surface read as a dead login while the same login
@@ -6245,13 +6281,103 @@ Production GETs, about 12:10Z.
   with no booking in 30 days: 723 (9,848 km) on Ecosine and 700 (6,364 km) on
   Egari. Today's CABMAN figure is 132 (2,737 km), Ecosine only. The FMS
   numbers skip the reconciler's pending, unverifiable and channel checks.
-- **Where CABMAN-only is assumed.** The reconciler (src/reconcile.js reads
+- **Where CABMAN-only is assumed** (as measured; all of it since changed —
+  see "FMS in unauthorized-trip detection" below). The reconciler (src/reconcile.js reads
   `source='cabman'`); `occupancy_segment`, which has no source column, so two
   providers on one plate would delete each other's rows; sensor health
   (server.js); the coverage and absence wording on #unauthorized, #segments,
   #live, #map, the driver and vehicle pages and the phone screens; the probe;
   the docs; and the tests that seed only CABMAN seat fixtures. The full table
   is in the analysis handed to the operator.
+
+### FMS in unauthorized-trip detection — built 2026-09-23, NOT ON PRODUCTION
+
+The operator's rulings (final, 2026-09-23): FMS and CABMAN are two separate
+seat-sensor providers and both are used for unauthorized-trip detection; FMS's
+Seat Count counts **passengers** (1 or more is aboard); FMS is used twice over —
+its live seat count and its per-journey Seat Count; and on the two cars with
+both trackers (L44251, L45243) both providers' segments are kept, each with its
+own source and timestamps, nothing merged or dropped. The earlier measurement
+above ("the count alone does not show a passenger was aboard") stands as a
+measurement; the ruling settles how it is read.
+
+**Three sources of segment**, `occupancy_segment.source` (sql/schema_v85.sql,
+now part of the primary key):
+
+| source | built from | rules |
+|---|---|---|
+| `cabman` — "CABMAN DT" | CABMAN's seat pad, 5-min fixes | unchanged |
+| `fms_live` — "FMS live seat count" | `telemetry_snapshot.seat_count` on FMS fixes, occupied at 1+ **in memory only** | the same `buildSegments`/`classifySegment`; no threshold changed (below) |
+| `fms_trip` — "FMS trip seat count" | each FMS journey with `trip.seat_count >= 1` | `classifyJourney`: stationary under 5 min / 1 km / an average of 5 km/h; sensor_suspect over 8 h; **never partial**; unverifiable only with no end or no usable distance |
+
+- **FMS is only ever judged, never authorizes.** Bookings are read through
+  `trip_norm.is_booking` (false for FMS, sql/schema_v18.sql); `blockingChannels`
+  and `channels_checked` exclude it. All three sources are matched by one
+  function, `judgeSegment()`.
+- **Writes are per (source, plate).** `writeWindow()` deletes and sweeps only
+  the provider it is writing; the containment sweep is off for FMS journeys.
+- **Clock skew is measured per provider** (CABMAN from its fixes, FMS from its
+  live fixes, which also stamp its journeys), and the attribution ladder's
+  "unverifiable neighbour" and "constant offset" evidence is read per provider.
+- **Combined totals count a ride once** (`occCountsOnce`, api/occupancy_sql.js):
+  segments from different providers on the same car that overlap in time and
+  reached the same verdict are one ride, counted by the first of FMS trip → CABMAN
+  → FMS live, with that segment's distance. Each provider's own figures count
+  every segment. Every page that shows a combined total shows the per-provider
+  figures and the rule. Rows carry `counts_once` so a page that sums rows itself
+  (per person, per car) sums only those.
+- **Sensor health per provider** (`/api/sensor-health`): CABMAN dead = at least
+  20 fixes and none occupied (unchanged). FMS never reads 0 on a journey, so
+  FMS trip dead = live FMS fixes and bookings but no journey with a seat count;
+  FMS live dead = fixes with a count and bookings but never 1. No bookings →
+  not judged, and the row says so.
+
+**Measured on production 2026-09-23 (GETs, counts only):**
+
+- *FMS's stored live fixes are a ~6-minute series, not a 2-minute one.* Over ten
+  FMS plates and three days: 4,422 gaps between stored fixes, median 6.2 min;
+  884 while moving, median 6.1, p90 6.6, 22 over 10 min, 11 over 15. The poll
+  asks every 2 min but the row is keyed on FMS's tracktime, which advances about
+  every 6 minutes. So no threshold was changed for FMS (the reasoning is in
+  src/reconcile.js above `fmsLiveFixes`): bridgeGapMin 10 means one dropped FMS
+  fix splits a ride rather than bridging it (11 of 884 moving gaps fall in
+  10–15 min), and both halves are still judged. The live seat count itself has
+  been collected for less than a day.
+- *FMS journeys:* 0 of 3,000 sampled lack an end time, 0 lack a distance, 0 are
+  500 km or more; 4 are longer than 8 h; 91 average under 5 km/h (84 of them
+  over 1 km and 5 min).
+- *How many FMS journey records each existing schedule will judge* (from
+  `/api/trips/list?kind=telematics`), and the rides once FMS's provisional
+  duplicates (next trap) are resolved:
+
+  | pass | window | FMS journey records | ≈ rides |
+  |---|---|---|---|
+  | incremental, every 30 min | 3 days | 2,655 (Ecosine 1,633, Egari 1,022) | ≈ 1,730 |
+  | catch-up, 21:00 daily | 30 days | 21,549 (12,850 / 8,699) | ≈ 13,800 |
+  | backfill, 22:00 Sundays | `BACKFILL_MONTHS`, default 12 | 130,722 (81,631 / 49,091) | ≈ 122,500 |
+  | (if 24 months) | | 234,834 (151,046 / 83,788) | ≈ 226,600 |
+
+  The production value of `BACKFILL_MONTHS` is stored in Settings and is blanked
+  to a non-admin read, so 12 is the code default, not a confirmed setting.
+- *The weekly backfill's reconcile, measured locally* (PGlite, synthetic plates,
+  production volume: 130,722 journeys, 261,384 bookings — the 365-day booking
+  count `/api/platforms` reports — over 130 cars): **17–19 s end to end**
+  (journeys read 2.3 s, bookings 4.6 s, matching ~0.7 s, writing 130,722 rows
+  9.4 s). The matching loop alone was ~320–340 s of synchronous work with
+  `findMatch()` as it was, 100 s with booking windows computed once, and about
+  0.5 s with the per-plate time index (`findMatchIndexed`, identical answers —
+  FIX-STATUS F9). A combined-total read over those rows costs 17 / 108 /
+  650 ms over 3 / 30 / 365 days.
+- *Bounded queries.* Every read the reconciler added is bounded by the pass's
+  window (FMS live fixes by `captured_at`, journeys by `requested_at` with one
+  day of margin before `from`). The one unbounded read is the pre-existing
+  "which channels have EVER produced a booking" count, unchanged and asked once
+  per pass.
+
+**Not proven:** nothing here is on production. The first incremental after a
+deploy will write FMS segments for three days; the first weekly backfill writes
+~122,500 `fms_trip` rows. Whether FMS still serves a provisional journey record
+once it has filed the final one is not known from here (next trap).
 
 ## The operator's HR roster export — what it gives, measured 2026-09-23
 

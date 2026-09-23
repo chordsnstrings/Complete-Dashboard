@@ -20,6 +20,7 @@
 import { placeEnds, RATE_SQL, forgone } from './place_sql.js';
 import { custodyNames, custodyRefs, peopleCount, personKey } from './custody_sql.js';
 import { areaOf } from './analytics_routes.js';
+import { occCountsOnce, occSourceLabel, occBySource, OCC_DEDUPE_RULE, OCC_SOURCES } from './occupancy_sql.js';
 
 /* THE RECONCILER'S OWN VOCABULARY, in one place.
    ─────────────────────────────────────────────────────────────────────────
@@ -67,7 +68,16 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
     '[0-9]+', 'N', 'g')`;
   const SKEW = (col) => `(regexp_match(${col}, '([0-9]+) min behind'))[1]::int`;
 
-  const SEG_COLS = `o.plate, o.fleet_id, o.started_at, o.ended_at, o.duration_min, o.distance_km,
+  /* `source` and its words on every segment: which provider produced it —
+     CABMAN DT, FMS live seat count or FMS trip seat count — beside its own
+     timestamps. A segment is addressed by (source, plate, started_at) now
+     (sql/schema_v85.sql). */
+  /* `counts_once` says whether this row represents its ride in a combined
+     figure (occCountsOnce): a page that sums rows itself — per person, per
+     day — sums only these, so one ride two providers saw is counted once. */
+  const SEG_COLS = `o.source, ${occSourceLabel('o.source')} AS source_label, o.passengers,
+     ${occCountsOnce('o')} AS counts_once,
+     o.plate, o.fleet_id, o.started_at, o.ended_at, o.duration_min, o.distance_km,
      o.top_speed, o.fixes, o.max_gap_min, o.ignition_ratio, o.verdict,
      o.matched_platform, o.matched_trip_id, o.low_confidence, o.unavailable_sources,
      o.verdict_reason, o.nearest_platform, o.nearest_trip_id, o.nearest_gap_min,
@@ -106,28 +116,46 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
        AND ($5::text IS NULL OR (o.started_at AT TIME ZONE 'Asia/Dubai')::date = $5::date)
        AND ($6::text IS NULL OR ${CUSTODY} ILIKE '%' || $6 || '%')`;
 
-    const [rows, byVerdict, byPlate, byDay, byReason, [tot], [facetN]] = await Promise.all([
+    /* THE FACETS ARE TOTALS, SO THEY COUNT A RIDE ONCE.
+       ─────────────────────────────────────────────────────────────────────
+       The list above shows every segment of every provider, each with its own
+       source and timestamps (ruling 4, 2026-09-23). The facets are counts a
+       page puts in tiles and a donut, and one ride an FMS car made is two
+       segments from that day on — FMS's live count and FMS's journey — so a
+       facet that counted rows would count it twice. `n` and `km` are counted
+       through occCountsOnce(); `segments` is every row behind them, and the
+       `source` facet is each provider's own count. The list's own `total` is
+       a count of ROWS, because it is the size of the list. */
+    const ONCE_WIN = `(SELECT o.*, ${occCountsOnce('o')} AS once FROM occupancy_segment o
+       WHERE ${DAYWIN('o.started_at')}) o`;
+    const [rows, byVerdict, byPlate, byDay, byReason, [tot], [facetN], bySource] = await Promise.all([
       q(`SELECT ${SEG_COLS}, ${CUSTODY} AS drivers, ${CUSTODY_IDS} AS driver_refs
           FROM occupancy_segment o WHERE ${WHERE}
-          ORDER BY o.started_at DESC LIMIT ${limit}`, p),
+          ORDER BY o.started_at DESC, o.source LIMIT ${limit}`, p),
       // Facets are computed over the WINDOW, not over the current filter —
       // a verdict count that changes when you pick a verdict tells you nothing
       // about what else is there.
-      q(`SELECT o.verdict AS key, count(*)::int n,
-                round(sum(o.distance_km)::numeric,1) km
-          FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')}
+      q(`SELECT o.verdict AS key, count(*) FILTER (WHERE o.once)::int n,
+                round(sum(o.distance_km) FILTER (WHERE o.once)::numeric,1) km,
+                count(*)::int segments,
+                jsonb_build_object(
+                  'cabman', count(*) FILTER (WHERE o.source='cabman'),
+                  'fms_live', count(*) FILTER (WHERE o.source='fms_live'),
+                  'fms_trip', count(*) FILTER (WHERE o.source='fms_trip')) AS by_source
+          FROM ${ONCE_WIN}
           GROUP BY 1 ORDER BY n DESC`, [from, to]),
       // Plate-level, so the per-segment custody subquery cannot ride along —
       // grouping by it would return one row per segment wearing a plate label.
-      q(`SELECT plate AS key, count(*)::int n,
-                count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
-                round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,1) unauth_km
-          FROM occupancy_segment o WHERE ${DAYWIN('started_at')}
+      q(`SELECT plate AS key, count(*) FILTER (WHERE once)::int n,
+                count(*) FILTER (WHERE verdict='unauthorized' AND once)::int unauthorized,
+                round(sum(distance_km) FILTER (WHERE verdict='unauthorized' AND once)::numeric,1) unauth_km,
+                count(*)::int segments
+          FROM ${ONCE_WIN}
           GROUP BY 1 ORDER BY unauthorized DESC, n DESC LIMIT 40`, [from, to]),
       q(`SELECT to_char((o.started_at AT TIME ZONE 'Asia/Dubai')::date,'YYYY-MM-DD') AS key,
-                count(*)::int n,
-                count(*) FILTER (WHERE o.verdict='unauthorized')::int unauthorized
-          FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')}
+                count(*) FILTER (WHERE o.once)::int n,
+                count(*) FILTER (WHERE o.verdict='unauthorized' AND o.once)::int unauthorized
+          FROM ${ONCE_WIN}
           GROUP BY 1 ORDER BY 1`, [from, to]),
       // What the reconciler actually said. This is the honest version of the
       // hardcoded sentence: a reason with no rows is a reason we never give.
@@ -145,6 +173,12 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
       q(`SELECT count(DISTINCT o.plate)::int plates,
                 count(DISTINCT ${REASON_SHAPE('o.verdict_reason')})::int reasons
           FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')}`, [from, to]),
+      // Each provider's own figures over the window: every segment it produced.
+      q(`SELECT source, count(*)::int segments,
+                count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
+                round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,1) unauth_km
+          FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')}
+          GROUP BY source`, [from, to]),
     ]);
 
     res.json({
@@ -154,7 +188,12 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
       low_confidence: tot?.low_confidence ?? 0,
       unreasoned: tot?.unreasoned ?? 0,
       filter: { verdict, plate, day, driver },
-      facets: { verdict: byVerdict, plate: byPlate, day: byDay, reason: byReason },
+      facets: { verdict: byVerdict, plate: byPlate, day: byDay, reason: byReason,
+        /* Every provider, whether or not it produced anything, with the true
+           reason where it did not — see occBySource(). */
+        source: OCC_SOURCES.map((s) => ({ key: s, ...occBySource(bySource, { from, to })[s] })) },
+      /* How the facet counts relate to the rows and to each other. */
+      dedupe_rule: OCC_DEDUPE_RULE,
       /* A facet list is a set of filters somebody can choose. Two of these are
          capped — the 40 busiest plates and the 20 commonest reasons — and a
          truncated facet list is not a shorter menu, it is a filter that cannot
@@ -189,19 +228,41 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
     const t = Date.parse(at);
     if (!Number.isFinite(t)) return res.status(400).json({ error: 'at must be a timestamp' });
 
-    const [seg] = await q(
+    /* A segment is (source, plate, started_at) now. `source` is optional so
+       every address written before it existed still opens: without it the
+       first provider in OCC_SOURCES order that has a segment at that instant
+       answers, and `other_sources` names any other provider holding one at
+       the same instant, so the ambiguity is visible rather than resolved in
+       silence. An unknown source is refused rather than ignored. */
+    const source = req.query.source ? String(req.query.source) : null;
+    if (source && !OCC_SOURCES.includes(source)) {
+      return res.status(400).json({ error: `source must be one of ${OCC_SOURCES.join(', ')}` });
+    }
+    const found = await q(
       `SELECT ${SEG_COLS}, ${CUSTODY} AS drivers, ${CUSTODY_IDS} AS driver_refs
-       FROM occupancy_segment o WHERE o.plate = $1 AND o.started_at = $2::timestamptz`, [plate, at]);
+       FROM occupancy_segment o
+       WHERE o.plate = $1 AND o.started_at = $2::timestamptz AND ($3::text IS NULL OR o.source = $3)
+       ORDER BY array_position(ARRAY['cabman','fms_live','fms_trip']::text[], o.source)`,
+      [plate, at, source]);
+    const seg = found[0];
     if (!seg) return res.status(404).json({ error: 'no segment starts at that instant for that plate' });
 
     const [track, nearby, driverTrips, sameDay, custody, neighbours] = await Promise.all([
-      // The fixes themselves. Capped, because a stuck sensor can produce a
-      // segment hours long and nobody reads 400 rows of GPS.
-      q(`SELECT captured_at, lat, lng, speed, seat_occupied, ignition, status
+      /* The fixes themselves — THIS PROVIDER'S fixes. Capped, because a stuck
+         sensor can produce a segment hours long and nobody reads 400 rows of
+         GPS. A CABMAN segment is shown CABMAN's fixes; an FMS segment, live or
+         journey, FMS's live fixes with their seat count. On the two cars with
+         both trackers the devices report different positions, so a track that
+         mixed them would zig-zag between two places and be read as a route.
+         An FMS journey from before 2026-09-23 has FMS position fixes and no
+         seat count on them; the journey itself is the seat evidence. */
+      q(`SELECT captured_at, lat, lng, speed, seat_occupied, seat_count, ignition, status, source
           FROM telemetry_snapshot
-          WHERE plate = $1 AND captured_at BETWEEN $2::timestamptz - interval '5 minutes'
-                                              AND coalesce($3::timestamptz, $2::timestamptz + interval '4 hours') + interval '5 minutes'
-          ORDER BY captured_at LIMIT 400`, [plate, seg.started_at, seg.ended_at]),
+          WHERE plate = $1 AND source = $4
+            AND captured_at BETWEEN $2::timestamptz - interval '5 minutes'
+                                AND coalesce($3::timestamptz, $2::timestamptz + interval '4 hours') + interval '5 minutes'
+          ORDER BY captured_at LIMIT 400`,
+        [plate, seg.started_at, seg.ended_at, seg.source === 'cabman' ? 'cabman' : 'fms']),
 
       /* Every booking on every channel within an hour either side — for THIS
          VEHICLE. The reconciler keeps only the nearest; that is enough to
@@ -238,11 +299,14 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
           ORDER BY t.requested_at LIMIT 40`, [plate, seg.started_at, seg.ended_at]),
 
       // What else this vehicle did on the same day — the flag in context.
+      /* Every provider's segments on this car that day, each with its own
+         source — so a ride two providers saw sits beside itself, visibly two
+         readings of one trip rather than silently merged. */
       q(`SELECT ${SEG_COLS}
           FROM occupancy_segment o
           WHERE o.plate = $1
             AND (o.started_at AT TIME ZONE 'Asia/Dubai')::date = ($2::timestamptz AT TIME ZONE 'Asia/Dubai')::date
-          ORDER BY o.started_at`, [plate, seg.started_at]),
+          ORDER BY o.started_at, o.source`, [plate, seg.started_at]),
 
       q(`SELECT day, driver_name, driver_ext_id, platform, trips
           FROM vehicle_driver_day
@@ -294,6 +358,7 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
 
     res.json({
       segment: seg,
+      other_sources: found.slice(1).map((r) => ({ source: r.source, source_label: r.source_label })),
       /* Beside the segment rather than inside it, because it is not something
          the reconciler recorded about the journey — it is this endpoint
          valuing the journey's distance, and the two must not be confused. */

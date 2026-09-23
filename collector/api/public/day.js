@@ -13,7 +13,7 @@ import { TZ } from './tz.js';
 import { barChart, donut, hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
   dayStr, dtStr, timeStr, money, pct, custody, sourceLabel, tierLabel, payRoute, signed,
-  UBER_FARE } from './ui.js';
+  UBER_FARE, segSourceLabel } from './ui.js';
 import { api, href, state } from './data.js';
 
 /* Why a fare column on this page can be almost entirely empty. Shared between
@@ -260,6 +260,10 @@ export async function renderDay(root, day, onDetail) {
           hrefFor: (dr) => href('segments', 'driver', dr.name) }) },
       { label: 'From', key: 'started_at', render: (r) => timeStr(r.started_at) },
       { label: 'To', key: 'ended_at', render: (r) => timeStr(r.ended_at) },
+      /* Which provider saw it — CABMAN DT, FMS's live seat count or an FMS
+         journey. From 2026-09-23 one ride on an FMS car is normally two rows
+         here, each with its own From and To. */
+      { label: 'Provider', key: 'source', render: (r) => esc(segSourceLabel(r)) },
       { label: 'Minutes', key: 'duration_min', num: true },
       { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
       { label: 'Verdict', key: 'verdict',
@@ -276,6 +280,14 @@ export async function renderDay(root, day, onDetail) {
       sp.body.append(el('p', 'cap', esc(
         `Showing ${fmt(d.segments.length)} of ${fmt(segTotal)} occupancy intervals on this day, `
         + 'unauthorized and unverifiable ones first.')));
+    }
+    /* What the list is made of, per provider: every provider's segments are
+       rows, so a ride two providers saw appears twice, once per reading. */
+    const bs = d.capped?.segments_by_source;
+    if (bs) {
+      sp.body.append(el('p', 'cap', esc(`Every provider’s segments are listed: CABMAN DT ${fmt(bs.cabman || 0)}, `
+        + `FMS live seat count ${fmt(bs.fms_live || 0)}, FMS trip seat count ${fmt(bs.fms_trip || 0)}. `
+        + 'A ride two providers both saw is two rows, one per reading.')));
     }
     root.append(sp.panel);
   }

@@ -18,7 +18,8 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, money, pct, fmt, tripTime,
   custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, UBER_FARE_WHY,
   noneChosen, verdict, foldRows,
-  trackerState, trackerSpeed, stillNote, alertRateFigure, splitAlerts } from './ui.js';
+  trackerState, trackerSpeed, stillNote, alertRateFigure, splitAlerts,
+  segSourceLabel } from './ui.js';
 import { qAll, href, parseHash, currentGen, alive } from './data.js';
 import { membersOf } from './cohorts.js';
 import { dubaiDay } from './tz.js';
@@ -430,16 +431,25 @@ async function tabMovement(root, plate) {
         sub: 'five-minute samples that carry coordinates — the picker above counts stored rows, '
           + 'including any with no satellite lock' },
       { label: 'Distance', value: `${fmt(j.distance_km)} km`, sub: 'between consecutive fixes' },
-      /* Null, not zero, where the feed carries no seat sensor. An FMS-tracked
-         plate showed "0 km · 0% of the day" — a positive claim that it drove
-         empty — on days it ran fifteen bookings. */
-      j.occupancy_reported
+      /* Null, not zero, where no fix carried a seat reading. When FMS had no
+         seat reading, an FMS-tracked plate showed "0 km · 0% of the day" — a
+         positive claim that it drove empty — on days it ran fifteen bookings.
+         Since 2026-09-23 FMS's live seat count is a reading, so the figure
+         names the provider that measured it; on the two cars with both
+         trackers each provider's figure is shown under its own name and the
+         two are not added, for the reason the response states. */
+      j.occupancy_reported && j.occupied_km != null
         ? { label: 'With passenger', value: `${fmt(j.occupied_km)} km`,
-          sub: j.occupancy_measured_km
+          sub: (j.occupancy_measured_km
             ? `${Math.round((j.occupied_km / j.occupancy_measured_km) * 100)}% of the distance where occupancy was measured`
-            : null }
-        : { label: 'With passenger', value: '—',
-          sub: 'this vehicle’s feed carries no seat sensor, so occupancy was never measured' },
+            : 'measured')
+            + (j.occupancy_source ? ` · by ${j.occupancy_source}` : '') }
+        : j.occupancy_reported
+          ? { label: 'With passenger', value: 'per provider',
+            sub: `${(j.occupancy_by_source || []).map((o) => `${o.label} ${fmt(o.occupied_km)} km`).join(' · ')}. `
+              + (j.occupancy_note || '') }
+          : { label: 'With passenger', value: '—',
+            sub: 'no fix this day carried a seat reading from CABMAN DT or FMS, so occupancy was never measured' },
       { label: 'Driver', html: j.driver ? entity('driver', j.driver_id, j.driver) : '—',
         sub: j.driver_trips != null ? `${fmt(j.driver_trips)} trips that day` : 'from the trip record' },
     ]));
@@ -455,15 +465,21 @@ async function tabMovement(root, plate) {
   if (mv.days.length) await showDay(sel.value); else showParking();
 
   verd.body.innerHTML = '';
-  if (!mv.by_verdict.length) verd.body.append(note('No movement periods derived yet. These come from the occupancy analysis, which needs seat-sensor telemetry alongside the trip feed.'));
+  if (!mv.by_verdict.length) verd.body.append(note('No movement periods derived yet. These come from the occupancy analysis, which needs a seat reading — CABMAN DT’s pad, FMS’s live seat count or FMS’s journeys — alongside the trip feed.'));
   else {
+    /* Each bar counts a ride once across providers (the server's rule, stated
+       under the bars); each provider's own segment count follows. */
     hbars(verd.body, mv.by_verdict.map((v) => ({ label: v.verdict.replace(/_/g, ' '), n: v.n })), { label: 'label', value: 'n', seq: true });
     const un = mv.by_verdict.find((v) => v.verdict === 'unauthorized');
     if (un) {
+      const bs = un.by_source || {};
       verd.body.append(el('p', 'cap',
         `${countOf(un.n, 'period')} covering ${fmt(un.km)} km had the seat occupied and the `
-        + 'vehicle moving with no booking on any channel.'));
+        + 'vehicle moving with no booking on any channel, a ride counted once across providers. '
+        + `Segments by provider: CABMAN DT ${fmt(bs.cabman || 0)}, FMS live seat count `
+        + `${fmt(bs.fms_live || 0)}, FMS trip seat count ${fmt(bs.fms_trip || 0)}.`));
     }
+    if (mv.dedupe_rule) verd.body.append(el('p', 'cap', mv.dedupe_rule));
   }
 
   park.body.innerHTML = '';
@@ -503,13 +519,20 @@ async function tabMovement(root, plate) {
         + `${countOf(mv.days.length, 'day')} of fixes ${plural(mv.days.length, 'is', 'are')} stored and `
         + `${countOf(mv.parked.length, 'stationary period')} `
         + `${plural(mv.parked.length, 'was', 'were')} found — the tracker was reporting; `
-        + 'it never saw a run of fixes with the seat occupied.'
-      : `No telemetry at all is stored for ${plate} in this window, so nothing could be built `
-        + 'from it. Collection gaps says whether CABMAN was running.');
+        + 'it never saw a run of fixes with the seat occupied, and FMS filed no journey with a '
+        + 'seat count here that the reconciler has judged.'
+      : `No telemetry at all is stored for ${plate} in this window, and no FMS journey here has `
+        + 'been judged, so nothing could be built. Collection gaps says whether CABMAN DT and FMS '
+        + 'were running.');
   } else seg.body.append(tableFrom(segShown, [
     { label: 'Started', key: 'started_at',
-      render: (r) => `<a href="${href('segment', plate, r.started_at)}">${esc(`${dateStr(r.started_at)} ${timeStr(r.started_at)}`)}</a>` },
+      render: (r) => `<a href="${href('segment', plate, r.started_at, r.source ? { source: r.source } : null)}">${esc(`${dateStr(r.started_at)} ${timeStr(r.started_at)}`)}</a>` },
     { label: 'Ended', key: 'ended_at', render: (r) => timeStr(r.ended_at) },
+    /* Which provider saw it. From 2026-09-23 one ride on an FMS car is
+       normally two rows — FMS's live count and FMS's journey — each with its
+       own start and end. */
+    { label: 'Provider', key: 'source', render: (r) => esc(segSourceLabel(r))
+      + (r.passengers != null ? `<span class="dim"> · ${fmt(r.passengers)} aboard</span>` : '') },
     { label: 'Minutes', key: 'duration_min', num: true },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
     { label: 'Top speed', key: 'top_speed', num: true, render: (r) => (r.top_speed ? `${fmt(r.top_speed)} km/h` : '—') },

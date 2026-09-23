@@ -14,6 +14,7 @@
    chart, and only this page can tell them apart. */
 import { custodyNames, custodyRefs, peopleCount, personKey } from './custody_sql.js';
 import { fleetIncome } from './income_sql.js';
+import { occSourceLabel } from './occupancy_sql.js';
 /* isoDay, for the neighbour days below. Imported rather than copied: it is not
    a cycle (src/sources/ledger.js reaches only src/db.js and src/log.js, and
    nothing under src/ imports this file), and a second local copy of a rule this
@@ -209,14 +210,19 @@ export function dayRoutes(app, { q, wrap }) {
          FROM alert a WHERE occurred_at >= ${T0} AND occurred_at < ${T1}
            AND plate IS NOT NULL
          GROUP BY 1 ORDER BY n DESC LIMIT 40`, p),
-      q(`SELECT plate, started_at, ended_at, duration_min, distance_km, verdict,
+      /* Each segment names its provider — CABMAN DT, FMS live seat count or
+         FMS trip seat count — beside its own timestamps. From 2026-09-23 one
+         FMS ride is normally two rows here (the live count and the journey),
+         each a reading of the same trip by a different source. */
+      q(`SELECT source, ${occSourceLabel('source')} AS source_label, passengers,
+                plate, started_at, ended_at, duration_min, distance_km, verdict,
                 verdict_reason, nearest_platform, nearest_gap_min,
                 ${custodyNames('o.plate', SEG_DAY)} AS drivers,
                 ${custodyRefs('o.plate', SEG_DAY)} AS driver_refs
          FROM occupancy_segment o
          WHERE started_at >= ${T0} AND started_at < ${T1}
          ORDER BY CASE verdict WHEN 'unauthorized' THEN 0 WHEN 'unverifiable' THEN 1 ELSE 2 END,
-                  started_at LIMIT 60`, p),
+                  started_at, source LIMIT 60`, p),
       // Did every source that normally reports actually report on this day?
       q(`WITH normal AS (
            SELECT source, percentile_cont(0.5) WITHIN GROUP (ORDER BY rows) AS median_rows,
@@ -256,10 +262,18 @@ export function dayRoutes(app, { q, wrap }) {
          GROUP BY 1, 2 ORDER BY trips DESC LIMIT 20`, p),
       /* The real sizes of the two capped lists above. Counted rather than
          inferred from the returned arrays, which are exactly the caps. */
+      /* `segments` is the size of the list above — every provider's rows —
+         and the per-provider split says what it is made of. */
       q(`SELECT (SELECT count(DISTINCT plate)::int FROM alert
                   WHERE occurred_at >= ${T0} AND occurred_at < ${T1} AND plate IS NOT NULL) AS alert_plates,
                 (SELECT count(*)::int FROM occupancy_segment
-                  WHERE started_at >= ${T0} AND started_at < ${T1}) AS segments`, p),
+                  WHERE started_at >= ${T0} AND started_at < ${T1}) AS segments,
+                (SELECT jsonb_build_object(
+                   'cabman', count(*) FILTER (WHERE source='cabman'),
+                   'fms_live', count(*) FILTER (WHERE source='fms_live'),
+                   'fms_trip', count(*) FILTER (WHERE source='fms_trip'))
+                   FROM occupancy_segment
+                  WHERE started_at >= ${T0} AND started_at < ${T1}) AS segments_by_source`, p),
     ]);
     const totals = totalsRow[0] || {};
 
@@ -602,6 +616,7 @@ export function dayRoutes(app, { q, wrap }) {
       capped: {
         alerts_by_vehicle: Number(totals?.alert_plates ?? alertsByVehicle.length),
         segments: Number(totals?.segments ?? segments.length),
+        segments_by_source: totals?.segments_by_source ?? null,
       },
       corridors: corridors.filter((c) => c.from_area !== '(unrecorded)' || c.to_area !== '(unrecorded)'),
       coverage,

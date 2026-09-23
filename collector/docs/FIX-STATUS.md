@@ -2188,9 +2188,64 @@ figures are in COVERAGE.
 
 | # | what | state | proof |
 |---|---|---|---|
-| F1 | FMS's live `Seatcount` collected (GetVehicleCurrentDetails, vehicleno=ALL) into `telemetry_snapshot.seat_count`, schema_v84 | **written** | test/fms_seat_count.test.mjs (16). Reverts fail: "0 is a reading" 2, "refusal off the banner" 1, "vehicleno=ALL" 1, "rows carry the count" 1, "probe params" 1. Proven only when the first real poll after the deploy stores a count |
-| F2 | The Fleet tab's FMS seat column reads the live count as well as the per-journey count | **written** | test/vehicle_feeds.test.mjs (51); reverting the live half fails 2 |
+| F1 | FMS's live `Seatcount` collected (GetVehicleCurrentDetails, vehicleno=ALL) into `telemetry_snapshot.seat_count`, schema_v84 | **proven** — `e98d5f4`, deployment `9f6ec597` (ACTIVE 12:32Z) | at 12:37Z, 66 Uber-active cars (Ecosine 42, Egari 24) had an FMS seat reading ≤10 min old, the same 66 that had a live FMS fix ≤10 min old; per-trip counts lag ≥27 min, so these can only be the live count. The FMS seat column rose from 68 to 75 receiving, equal to FMS data. | test/fms_seat_count.test.mjs (16). Reverts fail: "0 is a reading" 2, "refusal off the banner" 1, "vehicleno=ALL" 1, "rows carry the count" 1, "probe params" 1. Proven only when the first real poll after the deploy stores a count |
+| F2 | The Fleet tab's FMS seat column reads the live count as well as the per-journey count | **proven** — same deployment | test/vehicle_feeds.test.mjs (51); reverting the live half fails 2 |
 | F3 | The nightly probe called GetVehicleCurrentDetails without vehicleno and reported "Authentication failed" | **written** | test/fms_seat_count.test.mjs; proven when the next probe run shows fields rather than an error |
+| F4 | FMS is a second seat-sensor provider in unauthorized-trip detection: `occupancy_segment.source` (`cabman` / `fms_live` / `fms_trip`) in the key, schema_v85; FMS live segments through the same classifier (1+ occupied, in memory); each FMS journey with a Seat Count is a segment (`classifyJourney`: stationary / sensor_suspect over 8 h / never partial); writes per (source, plate); clock skew per provider; FMS never authorizes | **proven** — `008f48e`, deployment `89154e9` (ACTIVE 15:13:59Z) | test/occupancy_sources.test.mjs (95). Reverts fail, one per guard: migration key 3, 1+ occupied 3, journey average speed 2, eight hours 2, overlapping journeys one ride 4, FMS never authorizes 3, delete per source 3, sweep per source 2, skew per provider 1 |
+| F5 | FMS journeys: overlapping records on one car (FMS's provisional + final record of one ride, measured — docs/COVERAGE.md trap) are one segment, built from the record first stored last | **proven** — `008f48e`, deployment `89154e9` (ACTIVE 15:13:59Z) | same file; the grouping revert fails 4. On production: 0 overlapping FMS-trip pairs on one plate among the 500 newest segments |
+| F6 | Combined totals count a ride once across providers (`occCountsOnce`, same verdict, order FMS trip → CABMAN → FMS live), with per-provider figures and the rule on #unauthorized, #segments, the driver tab, the vehicle page, the day and cohort readers and the phone; rows carry `counts_once` | **proven** — `008f48e`, deployment `89154e9` (ACTIVE 15:13:59Z) | same file. Reverts fail: rule off 10, same-verdict 6, stuck-pad bound 1, rows without counts_once 1 |
+| F7 | Sensor health per provider: CABMAN unchanged; FMS live dead = count on fixes + bookings + never 1; FMS trip dead = live fixes + bookings + no journey with a seat count; each row states its reason | **on production, not separately checked** — same deployment | same file. Reverts fail: live needs bookings 1, trip needs bookings 1, CABMAN suspect is CABMAN only 1 |
+| F8 | Wording: every "only CABMAN carries a seat sensor" / "no seat sensor for Egari" sentence replaced on the routes, #unauthorized, #segments, #segment, #live, #map, driver, vehicle, day, cohort, trip, phone screens, insights and docs; /api/live and /api/map/journey read FMS's live count and name the provider | **proven** — `008f48e`, deployment `89154e9` (ACTIVE 15:13:59Z) | same file (wording 3 blocks). Reverts fail: coverage wording 2, page wording 1, live seat reading 1, passenger km not added 1, CABMAN over Egari 1, segment by provider 1 |
+| F9 | Booking matching through a per-plate time index (`findMatchIndexed`) — identical answers to `findMatch`, ~0.5 s instead of 100–340 s of synchronous work for a twelve-month pass at production volume | **on production** — same deployment; its time not measured on production | same file: 2,100 random segments, 0 differ. Reverts fail: tie order 1, overlap order 1, scan bound 1. Local PGlite, synthetic, production volume: the whole twelve-month reconcile 17–19 s (journeys read 2.3 s, bookings 4.6 s, match ~0.7 s, write 130,722 rows 9.4 s) |
+
+### NOT PROVEN, and named
+
+- **On production, 2026-09-23.** Deployment `89154e9` (commit `008f48e`) went
+  ACTIVE at 15:13:59Z. Before any FMS row existed, the migration had tagged every
+  old segment `cabman`. At 15:14Z the 30-day figures were 2,928 segments, 136
+  unauthorized and 2,936 km, exactly the pre-deploy baseline. The boot pass then
+  added one new CABMAN ride, making 2,929. The FMS providers showed ABSENT
+  with their reason, not 0. The boot pass wrote the first FMS segments by
+  15:18Z. For 2026-09-20..23:
+  - CABMAN DT: 383 segments, 13 unauthorized
+  - FMS live: 103 segments, 1 unauthorized
+  - FMS trip: 1,490 segments, 104 unauthorized
+  - combined: 1,924 segments, 117 unauthorized. 52 rides were seen by two
+    providers and are counted once.
+  - Egari: 65 unauthorized, all from FMS. Before this it had no seat evidence.
+  - `matched_platform = 'fms'`: 0, so FMS never matches itself.
+  - Rows missing a source or a start: 0.
+  - Both dual-tracker cars keep every provider's segments with their own
+    times. On L44251 at 14:13, the FMS live segment folds into the FMS trip
+    segment of the same ride.
+  - The 104 FMS-trip flags are not near-misses. 2 have a booking within 15 min;
+    most are hours from any booking. Median 6.4 km and 16.5 min, over 28
+    plates. L64172 has 16 and L65945 has 11.
+  - Screens through bin/prod-mirror.mjs (assets byte-identical), at 1440 and
+    390 wide. #unauthorized is ready in 2.1 s and shows the "By seat-sensor
+    provider" table and the count-once rule. #segments is ready in 5.2 s and
+    names the provider and fleet on each row.
+  - Still to come: the nightly 21:00Z catch-up fills 30 days, and Sunday's
+    22:00Z backfill fills `BACKFILL_MONTHS`. Until then, an FMS-trip figure
+    covers only the days it names.
+- **The reconcile time on production** is estimated from PGlite, not measured:
+  17–19 s locally for the twelve-month pass. Production's `basic-xxs` and
+  managed Postgres may differ either way.
+- **Page cost.** Locally, at ~1,400 unexplained segments in 30 days (the FMS
+  scale) against ~130 (CABMAN today): `/api/unauthorized/attributed` 0.57 →
+  0.95 s, `/api/driver/unauthorized` 0.58 → 2.1 s. Summary and segments stay
+  under 0.1 s. Re-measure on production after the first backfill.
+- **FMS live thresholds** were not changed; the live seat count has less than a
+  day of history. Re-read the stored gaps once it has a week.
+- **The CABMAN device on L44251 and L45243** may be filed under the wrong plate
+  (docs/COVERAGE.md); both providers' segments are kept as ruled, and their
+  overlapping segments count once in combined totals.
+
+### HR roster — on production 2026-09-23
+
+- **Deployed and committed.** Deployment `77abc6b4` (commit `9717fd7`, ACTIVE at 12:16Z). The production preview of the operator's file matched the local dry run exactly: 143 rows, 112 matched by platform id, 22 by phone, 9 unmatched, 20 proposals, 1 contradiction, and no document number in the response. Committed at 12:24Z as upload 1.
+- **Compliance.** `/api/compliance/drivers` now counts 50 expired licences, down from 88. 152 people are valid on HR's date, and 41 show a disagreement with the platform's date.
+- **Same-person queue.** `/api/same-person` carries the HR proposals and 1 contradiction.
 
 ## Arkiv reskin, STEP 0 — one colour source, no visual change — 2026-09-23, NOT ON PRODUCTION
 

@@ -222,4 +222,10 @@ export const SCHEMA_FILES = [
      until now only CABMAN's live seat reading and FMS's per-trip count were
      kept. */
   'schema_v84.sql',
+  /* occupancy_segment gains `source` ('cabman' | 'fms_live' | 'fms_trip') and
+     a primary key that includes it, plus the FMS journey's passenger count.
+     The reconciler now judges FMS as a second seat-sensor provider, and a key
+     without the source would let one provider's pass delete or overwrite the
+     other's segments on the two cars that carry both trackers. */
+  'schema_v85.sql',
 ];

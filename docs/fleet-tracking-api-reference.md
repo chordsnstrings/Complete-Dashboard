@@ -10,7 +10,12 @@
 | System | Ecosine | Egari | Auth style | Status | Best for |
 |---|---|---|---|---|---|
 | **CABMAN DT** (IVD) | ✅ 48 cars live | ❌ (no creds given) | Custom header creds | **Live** | Real-time raw GPS + seat occupancy |
-| **FMS / InfoTrack** (`ItlService.svc`) | ✅ uid 1158, 49 cars | ✅ uid 1383, 38 cars | username/password | **Live** | Live telemetry, trips, activity, driver-behaviour alerts, dashcam |
+| **FMS / InfoTrack** (`ItlService.svc`) | ✅ uid 1158, 49 cars | ✅ uid 1383, 38 cars | username/password | **Live** | Live telemetry, **live seat count**, trips **with a seat count**, activity, driver-behaviour alerts, dashcam |
+
+**Two seat-sensor providers** (the operator's ruling, 2026-09-23): CABMAN DT's seat pad (Ecosine only)
+and FMS's seat count (both fleets) — the live `Seatcount` on `GetVehicleCurrentDetails` and the per-journey
+`Seat Count` on `GetTripPassenger`. Both are used for unauthorized-trip detection; see
+docs/unauthorized-trips.md. Egari's seat evidence comes from FMS.
 | **Bolt — Fleet Integration API** | ❌ `COMPANIES_NOT_ALLOWED` | ✅ 67 drivers / 52 cars | OAuth client_credentials | **Live** | Driver + vehicle roster/compliance |
 | **Bolt — Fleet Owner Portal** | ⛔ token expired | ⛔ token expired | Rotating refresh token | **Blocked** | Trips, earnings, payouts, invoices, engagement |
 | **Uber — Vehicle Suppliers API** | ✅ 113 drivers / 98 cars | ❌ (this client = Ecosine) | OAuth client_credentials | **Live** | Roster, live online/on-trip status, payments, transactions, analytics |
@@ -54,8 +59,10 @@ Per-vehicle fields (`IVDDataResult[]`):
 | `Status` | `Active` (idle/available) or `Engaged` (on a trip) |
 | `SeatSensorStatus` / `SeatSensorValue` | Passenger seat occupancy — `Active`/`Not Active`, `1`/`0` |
 
-**Unique value:** the **seat-occupancy sensor** and a clean `Engaged` flag — you can tell whether a
-car physically has a passenger, independent of any ride-hailing app. Snapshot only (no history via this method).
+**Unique value:** a **seat-occupancy pad** and a clean `Engaged` flag — you can tell whether a car
+physically has a passenger, independent of any ride-hailing app. Snapshot only (no history via this
+method). FMS is the other seat-sensor provider: it reports a passenger **count** rather than a pad state
+(section 2).
 
 ---
 
@@ -108,7 +115,13 @@ _Snapshot: Ecosine 49 (idle 10 / stopped 16 / moving 9 / inactive 14); Egari 38 
 
 **`GetTripPassenger`** (history) — `Slno`, `Plate No`, `Start Time`, `End Time`, `Start Location`,
 `End Location`, `StartLat/StartLon`, `EndLat/EndLon`, `Trip Duration`, `Total Travel Distance` (km),
-`Seat Count` (1–4). _Aug 1–20: **Ecosine 3,108 trips / 33 cars**, **Egari 2,195 trips / 29 cars**._
+`Seat Count` (1–4 per the doc; 1–6 measured, never 0 — 234,824 of 234,824 journeys on 2026-09-23).
+_Aug 1–20: **Ecosine 3,108 trips / 33 cars**, **Egari 2,195 trips / 29 cars**._ The operator ruled on
+2026-09-23 that the Seat Count counts **passengers**; each journey with 1 or more is an occupancy segment.
+**It files a journey twice**: a provisional record within minutes of the ride (whole-number distance,
+start a few minutes late) and the final record hours later (true start, decimal distance), with a
+different `Start Time` — so anything keyed on plate + start holds both. `Slno` is a row number within
+one answer, not an id. Measured in docs/COVERAGE.md ("FMS files each journey twice").
 
 **`GetVehicleActivity`** — per segment: `Vehicle No`, `Driver Name`, `StartTime`/`EndTime`, `Duration`,
 `StartLocation`/`EndLocation` + lat/lon, **`acttype`** (`IDLE`/`STOP`/`TRAVEL`), `distancetravelled`.
@@ -271,7 +284,7 @@ driver status. No raw GPS-coordinate endpoint in the provided collection.
 |---|---|---|
 | **Bolt Fleet Owner Portal** (trips, earnings, payouts, invoices, engagement — both fleets) | Refresh token expired 2026-08-20 | Log into Bolt fleet owner portal, capture a fresh refresh token |
 | **Bolt official API for Ecosine** | Client `142897` not authorised for `142868` | Register/authorise Ecosine's company on that Bolt integration client |
-| **CABMAN for Egari** | Only Ecosine creds provided | Provide Egari's CABMAN `InterfaceUserName`/`Password` |
+| **CABMAN for Egari** | Only Ecosine creds provided | Provide Egari's CABMAN `InterfaceUserName`/`Password`. Not needed for seat evidence: Egari's comes from FMS's seat count |
 | **Uber web GraphQL / Yango** longevity | Cookie sessions | Will need periodic re-login for a persistent dashboard |
 | **FMS geofence / canbus / status-list variants** | auth/param specifics | Confirm `GetGeofenceInfo` auth + `GetVehicleStatusList.listtype` enum with the vendor |
 

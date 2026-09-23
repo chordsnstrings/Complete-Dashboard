@@ -18,6 +18,7 @@
    this fleet does, so the payout day is here beside the fare and the page says
    which one is a measurement of THIS trip and which is not. */
 import { redactRaw } from './redact.js';
+import { occSourceLabel } from './occupancy_sql.js';
 
 /* The fold driver_statement_day's stored name_key uses: whitespace runs
    collapsed and lowercased (sql/schema_v25.sql:33), plus the trim the generated
@@ -114,7 +115,7 @@ export function tripRoutes(app, { q, wrap }) {
       /* What the trackers saw while it was running. Bounded by the trip's own
          span, widened a little at each end because a fix lands when it lands. */
       t.plate && t.requested_at ? q(
-        `SELECT captured_at, lat, lng, speed, status, seat_occupied, ignition, source
+        `SELECT captured_at, lat, lng, speed, status, seat_occupied, seat_count, ignition, source
          FROM telemetry_snapshot
          WHERE plate = $1
            AND captured_at BETWEEN $2::timestamptz - interval '10 minutes'
@@ -125,8 +126,12 @@ export function tripRoutes(app, { q, wrap }) {
       /* Did the occupancy analysis see this trip? A booking the seat sensor
          never noticed and a journey with no booking are the two halves of the
          same question, and #segments answers it from the other side. */
+      /* Each with its provider: CABMAN DT, FMS's live seat count or an FMS
+         journey can each have seen this trip, and they are different
+         readings of it rather than different trips. */
       t.plate ? q(
-        `SELECT plate, started_at, ended_at, duration_min, distance_km, verdict,
+        `SELECT source, ${occSourceLabel('source')} AS source_label,
+                plate, started_at, ended_at, duration_min, distance_km, verdict,
                 verdict_reason, matched_platform, matched_trip_id
          FROM occupancy_segment
          WHERE plate = $1
