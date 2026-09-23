@@ -345,7 +345,13 @@ const PROBE = () => {
          to it. The budget applies wherever a highlight exists. */
   const HL_BAND = '[data-band], .panel, .vdct, .absband, .pagefoot';
   const HL_ABSENT = '.t-na, .absb-none, .dlt-na, [data-absent]';
-  const scopes = [root, document.querySelector('#pageFoot')].filter(Boolean);
+  /* …and the shell's chrome, where the Arkiv shell is built (reskin STEP 4,
+     shell.js stamps #app.ak-shell): the masthead, the two rows, the banner,
+     the control bar, the strip and the title block are under the same law as
+     the page, and were outside every scope this audit had. The old skin's
+     rail and topbar predate the law, as its pages do. */
+  const chrome = [...document.querySelectorAll('#app.ak-shell > .main > :not(#view):not(#pageFoot)')];
+  const scopes = [root, document.querySelector('#pageFoot'), ...chrome].filter(Boolean);
   const hls = scopes.flatMap((s) => [...s.querySelectorAll('.hl')]);
   const where = (n) => `${n.tagName.toLowerCase()}${n.className && typeof n.className === 'string'
     ? '.' + n.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}`;

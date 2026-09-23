@@ -27,6 +27,11 @@
        added by script, no module reads the skin. The same markup renders
        under both skins, which is what lets the operator compare them on
        production and what lets every test that finds a class keep finding it.
+       Two later steps DO change the DOM under this skin, and each is asked of
+       a TOKEN this file declares, never of the attribute: --pg-contract
+       (STEP 3, the page order — ui.js contract()) and --pg-shell (STEP 4, the
+       shell — shell.js, which moves the existing nodes and stamps
+       #app.ak-shell; §3 below).
 
    NAMESPACE, DON'T PASTE. The mockups' b.css and viz.css were NOT imported.
    Their class names collide with live ones — .cap (332 caption paragraphs
@@ -236,55 +241,148 @@
 :root[data-skin="arkiv"] h3,:root[data-skin="arkiv"] h4{font-family:var(--sans);letter-spacing:-.01em}
 :root[data-skin="arkiv"] .mono,:root[data-skin="arkiv"] code{font-family:var(--mono)}
 
-/* ── 3 · the shell: rail, title, controls ───────────────────────────────────
-   Restyled where it stands. STEP 4 moves the rail into a section row and the
-   controls into a sticky bar; this step only gives the existing pieces the
-   Arkiv form, so every id and every position the tests know is unchanged. */
-:root[data-skin="arkiv"] .side{background:var(--paper);border-right:1px solid var(--hair)}
-/* The wordmark. "Fleet" in Fraunces — the only serif on the page — and the
-   rest of the brand line as the masthead's tracked mono label. The pulsing
-   dot was decoration in the accent; the live dot belongs to the today strip. */
-:root[data-skin="arkiv"] .brand{font-family:var(--mono);font-size:var(--t1);font-weight:500;
-  letter-spacing:.2em;text-transform:uppercase;color:var(--grey);align-items:baseline;gap:10px;flex-wrap:wrap}
-:root[data-skin="arkiv"] .brand b{font-family:var(--disp);font-size:var(--d2);font-weight:600;
-  letter-spacing:-.014em;text-transform:none;color:var(--ink);line-height:1}
-:root[data-skin="arkiv"] .brand .dot{display:none}
+/* ── 3 · the shell (STEP 4) ─────────────────────────────────────────────────
+   The rail, the sticky topbar and the band become a SHEET, top to bottom:
+   masthead → section row → view row → credential banner → control bar
+   (sticky) → today strip → title block → #view → footer. shell.js moves the
+   nodes — every id stays, nothing is re-created — when --pg-shell (declared
+   1 below, 0 in app.css) asks it to, and stamps #app.ak-shell when it has.
+   These rules name that class wherever the old DOM and the new one would
+   disagree, so a frame drawn before the module has run can never show the
+   old rail laid out by the new rules; and until it has run, #app is not
+   shown at all (the stylesheet can arrive a frame before the module does:
+   one blank frame, rather than the rail restyled and then torn down).
 
-/* The sections. Mono capitals, grey; the current one in ink and weight with a
-   2px ink rule at its edge. The icons are HIDDEN, not removed — renderNav
-   still emits them and routes.test pins the rule that styles them. */
-:root[data-skin="arkiv"] #nav a{font-family:var(--mono);font-size:var(--t3);letter-spacing:.14em;
-  text-transform:uppercase;color:var(--grey);border-radius:0;transition:none}
-:root[data-skin="arkiv"] #nav a .ic{display:none}
-:root[data-skin="arkiv"] #nav a:hover{background:none;color:var(--ink);transform:none}
-:root[data-skin="arkiv"] #nav a.on{background:none;box-shadow:none;color:var(--ink);font-weight:600}
-:root[data-skin="arkiv"] #nav a.on::before{top:0;left:-4px;width:2px;height:100%;transform:none;
-  border-radius:0;background:var(--ink);animation:none}
-:root[data-skin="arkiv"] .side-foot{border-top-color:var(--hair)}
-:root[data-skin="arkiv"] #themeBtn{font-family:var(--mono);font-size:var(--t3);letter-spacing:.06em;
-  background:var(--paper);border:1px solid var(--grey-2);border-radius:0;color:var(--ink)}
-:root[data-skin="arkiv"] #themeBtn:hover{background:var(--paper);border-color:var(--ink)}
-:root[data-skin="arkiv"] #themeBtn:active{transform:none}
-:root[data-skin="arkiv"] a.fresh:hover{background:none;color:var(--ink)}
+   ONE GUTTER. Every row of chrome indents by the same --shell-x that #view
+   and the footer already use, so the wordmark, the section names, the
+   banner's dot, the first control, the strip's lede, the title and the first
+   panel stand on one vertical line. */
+:root[data-skin="arkiv"]{--pg-shell:1;--side-w:0px;--shell-x:clamp(18px,3vw,36px)}
+/* One track, and the DISPLAY left alone: app.css's #app is a two-track grid
+   (the rail, then the page), and the rail is gone, so the page takes the
+   only track — a 0px first track would hold .main one word wide (app.css's
+   zen comment records that very failure). Not display:block: at (1,2,0)
+   that outranks m.css's html[data-ui=phone] #app{display:none} (1,1,1) and
+   drew the whole desktop shell above the phone app (page_contract §5b). */
+:root[data-skin="arkiv"] #app{grid-template-columns:minmax(0,1fr)}
+:root[data-skin="arkiv"] #app:not(.ak-shell){visibility:hidden}
+:root[data-skin="arkiv"] .ak-shell .side{display:none}
+:root[data-skin="arkiv"] .ak-shell .main{min-width:0}
+/* The narrow window's box-model fix (NEW-PAGES §6) belongs to the shell, not
+   to each page: a phone that inflates text sets a row wider than its box. */
+:root[data-skin="arkiv"]{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+
+/* THE MASTHEAD. "Fleet" in Fraunces — the only serif on the page — and the
+   fleets and city as a tracked mono label behind a hairline. On the right,
+   the WINDOW the page is read over and, where the client computed it, its
+   two Dubai days (shell.js windowWords says which windows those are). The
+   dates are --grey, not b.css's --grey-2: 2.90:1 is not text. */
+:root[data-skin="arkiv"] .mast{display:flex;align-items:flex-end;justify-content:space-between;
+  flex-wrap:wrap;gap:8px 24px;padding:22px var(--shell-x) 12px;background:var(--paper)}
+:root[data-skin="arkiv"] .mast-l{display:flex;align-items:baseline;gap:16px;min-width:0}
+:root[data-skin="arkiv"] .mast-word{font-family:var(--disp);font-size:var(--d4);font-weight:600;
+  line-height:1;letter-spacing:-.014em;color:var(--ink)}
+:root[data-skin="arkiv"] .mast-org{font-family:var(--mono);font-size:var(--t1);font-weight:500;
+  letter-spacing:.2em;text-transform:uppercase;color:var(--grey);border-left:1px solid var(--hair);
+  padding-left:16px;white-space:nowrap}
+:root[data-skin="arkiv"] .mast-r{text-align:right;min-width:0}
+:root[data-skin="arkiv"] .mast-win{font-family:var(--mono);font-size:var(--t3);font-weight:600;
+  letter-spacing:.19em;text-transform:uppercase;color:var(--ink)}
+:root[data-skin="arkiv"] .mast-win-sub{font-family:var(--mono);font-size:var(--t1);letter-spacing:.14em;
+  text-transform:uppercase;color:var(--grey);margin-top:4px}
+
+/* THE SECTION ROW. The seven sections and Set up in mono capitals, grey; the
+   current one in ink and weight on a 2px ink rule that sits ON the row's
+   bottom edge. The icons are HIDDEN, not removed: renderNav still emits
+   them and routes.test pins the rule that styles them. The links scroll as
+   one row when the window is too narrow for them, with a fade at the edge
+   that only ever falls on a link when there is one past it. Freshness takes
+   the right-hand slot, one line where the rail gave it three. */
+:root[data-skin="arkiv"] .secrow{display:flex;align-items:stretch;flex-wrap:wrap;gap:0 24px;
+  padding:0 var(--shell-x);border-top:1.5px solid var(--ink);border-bottom:1px solid var(--hair);
+  background:var(--paper)}
+:root[data-skin="arkiv"] .secrow-links{display:flex;align-items:stretch;flex:1 1 auto;min-width:0;
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(to right,var(--ink) calc(100% - 22px),transparent);
+  mask-image:linear-gradient(to right,var(--ink) calc(100% - 22px),transparent)}
+:root[data-skin="arkiv"] .secrow-links::-webkit-scrollbar{height:0}
+/* order:0 and the rest stated outright: app.css's 820px rule gives the
+   rail's #nav order:3 (to sit under the brand), which in this row put Set up
+   BEFORE Today at 390px — measured, and the reason for the test at 390. */
+:root[data-skin="arkiv"] .ak-shell #nav{display:flex;flex-direction:row;flex:0 0 auto;order:0;gap:0;margin:0;
+  overflow:visible;min-width:0;max-width:none;padding:0}
+:root[data-skin="arkiv"] .ak-shell #nav a,:root[data-skin="arkiv"] .ak-shell #settingsLink{
+  display:block;flex:0 0 auto;margin:0 0 -1px;padding:11px 18px 10px;white-space:nowrap;
+  font-family:var(--mono);font-size:var(--t3);font-weight:400;line-height:1.3;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--grey);text-decoration:none;background:none;border:0;
+  border-bottom:2px solid transparent;border-radius:0;box-shadow:none;transform:none;transition:none}
+:root[data-skin="arkiv"] .ak-shell #nav a:first-child{padding-left:0}
+:root[data-skin="arkiv"] .ak-shell #nav a .ic{display:none}
+:root[data-skin="arkiv"] .ak-shell #nav a:hover,:root[data-skin="arkiv"] .ak-shell #settingsLink:hover{
+  color:var(--ink);background:none;transform:none}
+:root[data-skin="arkiv"] .ak-shell #nav a.on,:root[data-skin="arkiv"] .ak-shell #settingsLink.on{
+  color:var(--ink);font-weight:600;border-bottom-color:var(--ink);background:none;box-shadow:none}
+:root[data-skin="arkiv"] .ak-shell #nav a.on::before{display:none}
+:root[data-skin="arkiv"] .ak-shell #nav a:focus-visible,:root[data-skin="arkiv"] .ak-shell #settingsLink:focus-visible{
+  outline:2px solid var(--ink);outline-offset:-2px}
+:root[data-skin="arkiv"] .ak-shell #freshness{display:block;align-self:center;flex:0 1 auto;min-width:0;
+  padding:9px 0;font-family:var(--mono);font-size:var(--t2);letter-spacing:.06em;line-height:1.5;
+  color:var(--grey);text-align:right;border-radius:0}
+:root[data-skin="arkiv"] .ak-shell #freshness:hover{color:var(--ink);background:none}
+:root[data-skin="arkiv"] .ak-shell #freshness .dim{color:var(--grey)}
+:root[data-skin="arkiv"] .ak-shell #freshness .fr-sep{color:var(--grey)}
 /* freshness() writes "N sources need attention" with an INLINE colour of
-   --warn, so under this skin it would print red words with no glyph (L3). The
-   plan's answer is a negative dot and ink text (STEP 4 rewrites the markup);
-   until then the inline colour is outranked here, and the dot is hollow
-   because "needs attention" is a warning, not a stop. */
-:root[data-skin="arkiv"] #freshness span[style*="--warn"]{color:var(--ink) !important}
+   --warn, which under this skin is red words with no glyph (L3). The inline
+   colour is outranked here, and §8 gives the words their dot: hollow,
+   because "needs attention" is a warning, not a stop (ruling 1). */
+:root[data-skin="arkiv"] #freshness span[style*="--warn"]{color:var(--ink) !important;white-space:nowrap}
 
-/* The title block (#crumb, #viewTitle, #viewSub) is kept: setHeader, the
-   crumb's drill-back path and render-audit's wrong-title check need it. */
+/* THE VIEW ROW (#sectabs): the pages inside the section, sans, grey; the
+   current one in ink and weight on a 1px ink underline (the §"two tab bars"
+   rules below). No longer sticky: the control bar is the one thing that
+   stays with the reader. */
+:root[data-skin="arkiv"] .ak-shell .sectabs{position:static;padding:0 var(--shell-x)}
+
+/* THE CONTROL BAR. The same six controls, and the theme cycle beside them;
+   sticky at the top of the window, so the window and the filters stay in
+   reach down a long page — the one piece of chrome that does (the old
+   topbar held the title too and stood 148px tall). */
+:root[data-skin="arkiv"] .ak-shell .ctl{display:flex;align-items:center;flex-wrap:wrap;gap:8px;
+  padding:10px var(--shell-x);background:var(--paper);border-bottom:1px solid var(--ink);
+  position:sticky;top:0;z-index:20}
+:root[data-skin="arkiv"] .ak-shell .ctl select{appearance:none;-webkit-appearance:none;padding-right:26px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--grey) 50%),
+    linear-gradient(135deg,var(--grey) 50%,transparent 50%);
+  background-position:calc(100% - 13px) 55%,calc(100% - 9px) 55%;background-size:4px 4px;
+  background-repeat:no-repeat}
+:root[data-skin="arkiv"] .ak-shell .ctl #refreshBtn,:root[data-skin="arkiv"] .ak-shell .ctl #zenBtn{
+  min-width:28px;padding-left:7px;padding-right:7px}
+:root[data-skin="arkiv"] .ak-shell .ctl #themeBtn{padding:5px 9px;font-size:var(--t3);color:var(--ink)}
+/* Which controls are not on this page, and why — a sentence, in grey, where
+   the missing controls would have been. */
+:root[data-skin="arkiv"] .ak-shell .applies{flex:1 1 280px;min-width:0;font-family:var(--sans);
+  font-size:var(--t4);line-height:1.4;color:var(--grey)}
+:root[data-skin="arkiv"] .ak-shell .applies[hidden]{display:none}
+:root[data-skin="arkiv"] .ak-shell .ctl .tz-note{margin-left:auto}
+
+/* THE TITLE BLOCK (#crumb, #viewTitle, #viewSub) is KEPT (plan §3: the
+   mockups drop it; setHeader, the crumb's drill-back path and render-audit's
+   wrong-title check need it). It is the head of the page now, under the
+   strip and over 00, and it no longer sticks. */
 :root[data-skin="arkiv"] .topbar{background:var(--paper);border-bottom:1px solid var(--ink)}
+:root[data-skin="arkiv"] .ak-shell .topbar{position:static;display:block;border-bottom:0;
+  padding:18px var(--shell-x) 2px}
 :root[data-skin="arkiv"] .topbar h1{font-family:var(--sans);font-size:var(--d3);font-weight:600;
   letter-spacing:-.015em;animation:none}
 :root[data-skin="arkiv"] .topbar .sub{font-size:var(--t6);color:var(--grey);animation:none}
+:root[data-skin="arkiv"] .ak-shell .topbar .sub{max-width:none;margin-top:4px}
 :root[data-skin="arkiv"] .crumb{font-size:var(--t2);letter-spacing:.14em}
 :root[data-skin="arkiv"] .crumb a{color:var(--grey)}
 :root[data-skin="arkiv"] .crumb a:hover{color:var(--ink)}
 /* The separator was --rule-strong, which is grey-2 here: 2.90:1 as text. */
 :root[data-skin="arkiv"] .crumb span{color:var(--grey)}
 :root[data-skin="arkiv"] .crumb b{color:var(--ink-2);font-weight:600;font-size:var(--t3)}
+:root[data-skin="arkiv"] .ak-shell #view{padding-top:14px}
 
 /* The controls: square, mono, a grey-2 outline that firms to ink, and a 2px
    ink focus ring. The same rule serves the page-level .filters rows
@@ -353,17 +451,25 @@
 :root[data-skin="arkiv"] .sectabs .tabs a.on::after{inset:auto 0 0 0;height:1px}
 
 /* ── the credential banner ────────────────────────────────────────────────
-   authbar.css's forms on the live banner's DOM (the four-column row, the
-   channel swatch, the surface and the as-of line are STEP 4). The severity
-   model, the errand sentences and the classes are app.js's and unchanged.
+   authbar.css's forms on the live banner (plan §3 CREDENTIAL BANNER). The
+   severity model, the errand sentences and the classes are app.js's and
+   unchanged.
      stopped    the negative wash, a 3px negative rule, a SOLID dot
      at-risk    paper, a 3px negative rule, a HOLLOW dot (ruling 1)
      degraded / pending   the sunken ground, a grey-2 rule, a grey dot —
                 never red: nothing is being lost
-   Every word is ink: 15.27:1 on the negative wash. */
-:root[data-skin="arkiv"] .authbanner{margin:0;padding:11px clamp(18px,3vw,36px) 12px;gap:12px;
+   Every word is ink: 15.27:1 on the negative wash. Under the shell each row
+   is a four-cell grid — who (with the channel's swatch), the key with the
+   surface it feeds under it, what was said, and when — and a meta cell on
+   the right says when these verdicts were recorded and links to where they
+   are fixed. The grid's columns are fixed, so the four cells of every row
+   stand in the same four columns. */
+:root[data-skin="arkiv"] .authbanner{margin:0;padding:11px var(--shell-x) 12px;gap:0 12px;
   border:0;border-top:3px solid var(--sem-neg);border-bottom:1px solid var(--ink);border-radius:0;
   background:var(--paper);color:var(--ink);font-size:var(--t5);line-height:1.45;animation:none}
+:root[data-skin="arkiv"] .authbanner:empty{display:none}
+:root[data-skin="arkiv"] .ak-shell .authbanner{display:grid;grid-template-columns:9px minmax(0,1fr) auto;
+  align-items:start}
 :root[data-skin="arkiv"] .authbanner.stopped{background:var(--w-neg);border-color:var(--sem-neg);
   border-bottom-color:var(--ink);color:var(--ink)}
 :root[data-skin="arkiv"] .authbanner.at-risk{background:var(--paper);border-color:var(--sem-neg);
@@ -381,28 +487,74 @@
 :root[data-skin="arkiv"] .authbanner code{font-family:var(--mono);font-size:var(--t4);letter-spacing:.02em;
   padding:0;background:none;color:var(--ink)}
 :root[data-skin="arkiv"] .authbanner .ab-when{font-family:var(--mono);font-size:var(--t3);color:var(--ink-2);opacity:1}
+:root[data-skin="arkiv"] .ak-shell .authbanner .ab-list{margin:9px 0 0;display:grid;gap:6px}
+:root[data-skin="arkiv"] .ak-shell .authbanner .ab-list li{margin:0;display:grid;
+  grid-template-columns:150px 200px minmax(0,1fr) 190px;gap:0 16px;align-items:baseline}
+:root[data-skin="arkiv"] .authbanner .ab-who{display:flex;align-items:center;gap:7px;min-width:0;
+  font-weight:600;color:var(--ink)}
+:root[data-skin="arkiv"] .authbanner .ab-who .sw{width:9px;height:9px}
+:root[data-skin="arkiv"] .authbanner .ab-key{min-width:0;overflow-wrap:anywhere}
+:root[data-skin="arkiv"] .authbanner .ab-key small{display:block;font-family:var(--mono);font-size:var(--t1);
+  letter-spacing:.08em;text-transform:uppercase;color:var(--grey);margin-top:1px}
+:root[data-skin="arkiv"] .authbanner .ab-what{min-width:0;overflow-wrap:anywhere}
+:root[data-skin="arkiv"] .ak-shell .authbanner .ab-when{text-align:right}
+:root[data-skin="arkiv"] .authbanner .ab-meta{font-family:var(--mono);font-size:var(--t2);letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-2);text-align:right;white-space:nowrap;line-height:1.7;
+  display:flex;flex-direction:column;align-items:flex-end}
+:root[data-skin="arkiv"] .authbanner .ab-meta a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--ink)}
+:root[data-skin="arkiv"] .authbanner .ab-meta a:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 
-/* ── the today strip ──────────────────────────────────────────────────────
-   Chrome, not a card: a strip under the controls with an ink rule beneath it.
-   Each figure is a cell — the value in Karla, its label in mono capitals, a
-   hairline between cells. The dot is ink and pulses on opacity only: under
-   L3 a green "live" dot would mean better. The data, the host element and
-   the .tn-now / .tn-dot / .tn-f classes today_band pins are unchanged; the
-   scope caption and the note row are STEP 4. */
-:root[data-skin="arkiv"] .todaynow{margin:0;padding:9px clamp(18px,3vw,36px) 10px;gap:6px 0;
+/* ── the today strip: the livebar ─────────────────────────────────────────
+   Chrome, not a card (viz.css .livebar): three lines under the control bar —
+   the lede with its dot, the scope caption and the links; the run of
+   figures, each a cell of value and mono label with its sub-line beneath,
+   hairlines between cells; and the notes, closed. The dot is ink and pulses
+   on opacity only: under L3 a green "live" dot would mean better. Trip value
+   carries the chrome-scope emphasis — a rule under the figure and a weight
+   and size step, NO wash — so it does not read as a counted highlight next
+   to the page's hero 150px below it. The data, the host element and the
+   .tn-now / .tn-dot / .tn-f classes today_band pins are unchanged. */
+:root[data-skin="arkiv"] .todaynow{margin:0;padding:9px var(--shell-x) 10px;gap:6px 0;
   background:var(--paper);border:0;border-bottom:1px solid var(--ink);border-radius:0;font-size:var(--t5)}
 :root[data-skin="arkiv"] .todaynow .tn-now{font-size:var(--t5);margin-right:14px}
 :root[data-skin="arkiv"] .todaynow .tn-dot{background:var(--ink)}
-:root[data-skin="arkiv"] .todaynow .tn-f{font-family:var(--mono);font-size:var(--t2);font-weight:600;
-  letter-spacing:.07em;text-transform:uppercase;color:var(--grey);padding:0 10px;border-left:1px solid var(--faint)}
+:root[data-skin="arkiv"] .todaynow .tn-f{color:var(--grey);border-left:1px solid var(--faint)}
 :root[data-skin="arkiv"] .todaynow .tn-f b{font-family:var(--sans);font-size:var(--t8);font-weight:600;
-  letter-spacing:-.012em;text-transform:none;color:var(--ink);margin-right:6px;font-variant-numeric:proportional-nums}
-:root[data-skin="arkiv"] .todaynow .tn-sub{font-family:var(--sans);font-size:var(--t3);font-weight:400;
-  letter-spacing:0;text-transform:none;color:var(--grey)}
+  letter-spacing:-.012em;color:var(--ink);font-variant-numeric:proportional-nums}
+:root[data-skin="arkiv"] .todaynow .tn-sub{font-family:var(--sans);font-size:var(--t3);font-weight:400;color:var(--grey)}
 :root[data-skin="arkiv"] .todaynow .tn-quiet{color:var(--ink-2)}
 :root[data-skin="arkiv"] .todaynow .tn-links a{font-family:var(--mono);font-size:var(--t3);font-weight:400;
   letter-spacing:.06em;color:var(--ink-2);text-decoration:none;border-bottom:1px solid var(--grey-2)}
 :root[data-skin="arkiv"] .todaynow .tn-links a:hover{border-bottom-color:var(--ink);text-decoration:none}
+/* the livebar's three lines */
+:root[data-skin="arkiv"] .ak-shell .todaynow:not([hidden]){display:block}
+:root[data-skin="arkiv"] .todaynow .lb-top{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 16px;
+  margin-bottom:8px}
+:root[data-skin="arkiv"] .todaynow .lb-top .tn-now{margin-right:0}
+:root[data-skin="arkiv"] .todaynow .lb-scope{font-family:var(--sans);font-size:var(--t4);font-style:italic;
+  color:var(--grey);border-left:1px solid var(--hair);padding-left:16px}
+:root[data-skin="arkiv"] .todaynow .lb-top .tn-links{margin-left:auto;gap:16px}
+:root[data-skin="arkiv"] .todaynow .lb-figs{display:flex;align-items:flex-start;flex-wrap:wrap;gap:10px 0}
+:root[data-skin="arkiv"] .todaynow .lb-figs .tn-f{flex:0 0 auto;padding:0 8px;white-space:nowrap}
+:root[data-skin="arkiv"] .todaynow .lb-figs .tn-f:first-child{padding-left:0;border-left:0}
+/* The space between a value and its label is the row's gap, not the label's
+   margin, so a label that wraps under its value at 390px starts flush. */
+:root[data-skin="arkiv"] .todaynow .lb-line{display:flex;align-items:baseline;column-gap:6px;min-height:24px}
+:root[data-skin="arkiv"] .todaynow .lb-figs .tn-f b{line-height:1.2}
+:root[data-skin="arkiv"] .todaynow .lb-l{font-family:var(--mono);font-size:var(--t3);font-weight:600;
+  letter-spacing:.07em;text-transform:uppercase;color:var(--grey);white-space:nowrap}
+:root[data-skin="arkiv"] .todaynow .lb-figs .tn-sub{display:block;font-size:var(--t3);line-height:1.3;margin-top:2px}
+:root[data-skin="arkiv"] .todaynow .lb-ts b{font-size:var(--t6);color:var(--ink-2)}
+:root[data-skin="arkiv"] .todaynow .lb-hl b{font-size:var(--d1);font-weight:var(--hl-weight);
+  border-bottom:var(--hl-rule-w) solid var(--ink);padding-bottom:2px}
+:root[data-skin="arkiv"] .todaynow .lb-figs .tn-quiet{font-size:var(--t5);line-height:24px}
+:root[data-skin="arkiv"] .todaynow .lb-notes{margin-top:9px;padding-top:7px;border-top:1px solid var(--faint)}
+:root[data-skin="arkiv"] .todaynow .lb-notes summary{cursor:pointer;width:max-content;max-width:100%;
+  font-family:var(--mono);font-size:var(--t2);letter-spacing:.1em;text-transform:uppercase;color:var(--grey)}
+:root[data-skin="arkiv"] .todaynow .lb-notes summary:hover{color:var(--ink)}
+:root[data-skin="arkiv"] .todaynow .lb-notes summary:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+:root[data-skin="arkiv"] .todaynow .lb-note{margin:4px 0 0;max-width:var(--measure,72ch);font-family:var(--sans);
+  font-size:var(--t4);line-height:1.5;color:var(--grey)}
 
 /* ── 4 · panels and grids ───────────────────────────────────────────────────
    panel() is unchanged — the .pbody body and the data-panel keys. The card
@@ -869,13 +1021,33 @@
 :root[data-skin="arkiv"] .stagger>*,:root[data-skin="arkiv"] .settle{animation:none}
 
 /* ── 15 · narrow windows ────────────────────────────────────────────────────
-   Below 820px the rail is a scrolling strip: square, no pill ground, the
-   current section underlined in ink. Below 560px a table becomes cards, and
-   each card is a ruled block rather than a box. */
+   The desktop build in a narrow window (plan §3 Phone shell). Below 900px
+   the section row keeps its links on one scrolling line and freshness takes
+   a line of its own under them; the window wraps under the wordmark. Below
+   820px the banner's four columns stack inside each row and its meta drops
+   under the rows. Below 560px a table becomes cards, and each card is a
+   ruled block rather than a box. */
+@media(max-width:900px){
+  :root[data-skin="arkiv"] .ak-shell .secrow-links{flex:1 1 100%}
+  :root[data-skin="arkiv"] .ak-shell #freshness{flex:1 1 100%;text-align:left;padding:0 0 8px}
+}
 @media(max-width:820px){
-  :root[data-skin="arkiv"] #nav a{background:none;border-radius:0;padding:7px 10px}
-  :root[data-skin="arkiv"] #nav a.on{background:none;box-shadow:inset 0 -2px 0 var(--ink)}
-  :root[data-skin="arkiv"] #nav a.on::before{display:none}
+  :root[data-skin="arkiv"] .mast{align-items:flex-start;flex-direction:column}
+  :root[data-skin="arkiv"] .mast-r{text-align:left}
+  :root[data-skin="arkiv"] .ak-shell .authbanner{grid-template-columns:9px minmax(0,1fr)}
+  :root[data-skin="arkiv"] .ak-shell .authbanner .ab-list li{grid-template-columns:minmax(0,1fr);gap:1px 0}
+  :root[data-skin="arkiv"] .ak-shell .authbanner .ab-list li + li{border-top:1px solid var(--hair);padding-top:6px}
+  :root[data-skin="arkiv"] .ak-shell .authbanner .ab-when{text-align:left}
+  :root[data-skin="arkiv"] .authbanner .ab-meta{grid-column:2;align-items:flex-start;text-align:left;
+    white-space:normal;margin-top:8px}
+  :root[data-skin="arkiv"] .todaynow .lb-top .tn-links{margin-left:0;width:100%}
+  :root[data-skin="arkiv"] .todaynow .lb-scope{border-left:0;padding-left:0}
+  /* Two columns of cells rather than a wrapped run: a wrapped run starts
+     each new line on a hairline with nothing before it. */
+  :root[data-skin="arkiv"] .todaynow .lb-figs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px}
+  :root[data-skin="arkiv"] .todaynow .lb-figs .tn-f{white-space:normal;min-width:0;padding:0;border-left:0}
+  :root[data-skin="arkiv"] .todaynow .lb-line{flex-wrap:wrap}
+  :root[data-skin="arkiv"] .todaynow .lb-l{white-space:normal}
 }
 @media(max-width:560px){
   :root[data-skin="arkiv"] .tcards tbody tr{background:var(--paper);border:0;border-top:1px solid var(--ink);
@@ -886,10 +1058,32 @@
   :root[data-skin="arkiv"] .tcards td[class*="v-"]{padding-left:16px}
 }
 
-/* ── 16 · the full page (zen) ───────────────────────────────────────────────
-   The title rule above sets the h1 at the same weight zen's own rule does, so
-   the smaller zen title is restated here, where it is later and heavier. */
+/* ── 16 · the full page (zen) and print ─────────────────────────────────────
+   Zen keeps what app.css's own zen rule keeps and for the same reason — the
+   credential banner (a stopped credential makes every figure stale, full
+   page or not) and the control bar (it carries the way out, #zenBtn) — and
+   hides the masthead, both rows, the strip and the sub-line. Print drops the
+   rows, the controls and the strip, as the old skin does, and keeps the
+   masthead: on paper it is the only place the window is named. */
+/* The strip is named with :not([hidden]) because the livebar's own
+   display:block is; at equal weight the later rule, this one, wins. */
+:root[data-skin="arkiv"][data-zen="1"] .mast,:root[data-skin="arkiv"][data-zen="1"] .secrow,
+:root[data-skin="arkiv"][data-zen="1"] .ak-shell .sectabs,
+:root[data-skin="arkiv"][data-zen="1"] .ak-shell .todaynow:not([hidden]){display:none}
+:root[data-skin="arkiv"][data-zen="1"] .ak-shell .topbar{padding-top:10px}
 :root[data-skin="arkiv"][data-zen="1"] .topbar h1{font-size:var(--t9)}
+/* Named at the shell's own weight: app.css's print rule (.filters,
+   .todaynow, .sectabs) is (0,1,0), and the livebar's display rule here
+   outranks it — measured: the strip printed. The control bar needs
+   !important: setHeader() writes display:flex INLINE on #filters on every
+   render, which beats any stylesheet rule without it — so the old skin's
+   own print rule has never hidden its controls either (found, left; it is
+   production's look until the flip). */
+@media print{
+  :root[data-skin="arkiv"] .secrow,:root[data-skin="arkiv"] .ak-shell .sectabs,
+  :root[data-skin="arkiv"] .ak-shell .todaynow:not([hidden]){display:none}
+  :root[data-skin="arkiv"] .ak-shell .ctl{display:none !important}
+}
 
 /* ── 17 · charts (STEP 2) ───────────────────────────────────────────────────
    The paint half of SPEC §4-§5. The FORM half — which element a mark is, how

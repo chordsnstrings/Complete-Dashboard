@@ -72,8 +72,8 @@
   /* The theme, before the stylesheet, for BOTH builds — the key the desktop
      button writes, so a reader who set light on their laptop gets light on the
      phone too. This used to run for the phone only: the desktop build waited
-     for app.js's applyTheme(), and app.js is a module appended by this very
-     script, so it runs after the first paint. A reader who had chosen dark on
+     for app.js's applyTheme(), and app.js is a module this very script writes
+     in, so it runs after the first paint. A reader who had chosen dark on
      a light OS (or light on a dark one) got one frame of the other theme on
      every load. The Arkiv dark set (ruling 3) made that frame a full white
      sheet before a near-black one. Only 'light' and 'dark' are stamped, as
@@ -87,9 +87,19 @@
     css.rel = 'stylesheet'; css.href = '/m/m.css';
     document.head.appendChild(css);
   }
-  var js = document.createElement('script');
-  js.type = 'module'; js.src = phone ? '/m/app.js' : '/app.js';
-  document.head.appendChild(js);
+  /* The application, written in by the PARSER, not appended. A module the
+     parser inserts runs once the document has been parsed (a module script is
+     deferred), and its download still starts here, at the top of <head>. A
+     module APPENDED from script is async: it runs the moment it has arrived,
+     whether or not <body> exists yet. That was harmless until the Arkiv
+     skin's inline script below the stylesheets (reskin STEP 1): an inline
+     script waits for every stylesheet above it, and the parser waits for the
+     script, so a slow app.css held <body> back while the module ran without
+     it. Measured with app.css held back 2s: the phone build threw at
+     `root.append` (#m did not exist yet) and the desktop at the first
+     `$('#fRange').onclick` — a blank page on both, in both skins; the commit
+     before STEP 1 rendered both. test/boot_order.test.mjs holds it. */
+  document.write('<script type="module" src="' + (phone ? '/m/app.js' : '/app.js') + '"><\/script>');
 }());
 </script>
 <!-- Fonts served from this origin. From fonts.googleapis.com a cold visit paid

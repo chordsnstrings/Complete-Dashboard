@@ -1118,6 +1118,60 @@ driver's 222 tracker fixes.
      data was #insights' impact figures in the negative red with no ▼ and no
      sign (14 of them), which the page phase converts.
 
+* **UNDER THE ARKIV SKIN THE SHELL'S NODES HAVE MOVED, AND A TOKEN READ AT
+  BOOT CAN BE THE OLD SKIN'S.** (Reskin STEP 4, 2026-09-23.) What cost time, or
+  would have:
+  1. **app.js can run before arkiv.css has loaded.** index.html appends app.js
+     as a module FROM A SCRIPT, and a script-inserted module runs when its
+     import graph has arrived — nothing orders it after the parser-inserted
+     `<link>`s below that script. Measured with arkiv.css held back 1.5s: the
+     first render read `--pg-shell` AND STEP 3's `--pg-contract` as 0, built
+     the old shell and the classic #overview under the new stylesheet, and
+     nothing re-rendered when the sheet landed. The boot now waits
+     (`shell.js whenStyled()`); anything else that reads a token at module
+     load, before the first render, must wait the same way.
+     Since item 7's fix the browser orders it first (a deferred module does
+     not run while a parser-inserted stylesheet is loading), and the wait is
+     the second line.
+  2. **Never give `#app` a `display` under the skin.**
+     `:root[data-skin="arkiv"] #app` is (1,2,0) and outranks m.css's
+     `html[data-ui=phone] #app{display:none}` at (1,1,1): one `display:block`
+     drew the whole desktop shell above the phone app (page_contract §5b
+     caught it). Change the grid's tracks, not its display.
+  3. **Select the shell by id, never by where it sits.** #filters is inside
+     `.topbar` only in the old skin; under Arkiv it is the control bar after
+     the banner, #themeBtn is inside it, and #nav / #settingsLink /
+     #freshness are in `#secRow`. `.sectabs` and `.topbar` no longer stick —
+     #filters does. app.css's 820px rail rules (`#nav{order:3}`, pill
+     backgrounds) still match #nav in its new row: `order:3` put Set up
+     before Today at 390px until arkiv.css stated `order:0`.
+  4. **`#app` is invisible under the skin until `buildShell()` has run**
+     (`#app:not(.ak-shell){visibility:hidden}`, so the old rail is never
+     painted restyled and then torn down). A harness that loads arkiv.css
+     without app.js, or a Playwright `waitForSelector` (default: visible) on
+     anything in #app when the shell never built, sees a blank page and
+     times out — that IS the failure, not a flaky wait.
+  5. **`#nav a` textContent includes the hidden icon** ("◉Today"). Read
+     `#nav a .lb`.
+  6. **Two rules at equal weight: the later wins.** The livebar's
+     `.ak-shell .todaynow:not([hidden]){display:block}` beat zen's hide until
+     the zen rule named the same `:not([hidden])` and came after it.
+  7. **An inline `<script>` after a stylesheet holds `<body>` back until
+     the stylesheet has loaded, and a module APPENDED from script does not
+     wait for `<body>`.** STEP 1's `document.write` of arkiv.css is such a
+     script (in both skins: the `if` is inside it), and index.html appended
+     /app.js and /m/app.js — so with app.css slow, both builds ran before
+     #app / #m existed and threw on their first line that touches the DOM:
+     a blank page. It showed up as ONE phone check in `charging_page`
+     failing in a loaded full run and passing alone — a flake is worth
+     reproducing before it is dismissed. index.html now has the parser write
+     the module in (deferred: downloads at once, runs after the parse and
+     after the parser's stylesheets). Never go back to `appendChild` for
+     the module; `test/boot_order.test.mjs` holds it with app.css held
+     back 2s.
+  `test/arkiv_shell.test.mjs` holds items 1-6, `test/boot_order.test.mjs`
+  item 7.
+
 * **A PROPOSAL FROM ANYWHERE BUT THE RULE CANNOT LIVE IN `driver_identity_link`.**
   `src/identity_link.js` DELETEs every unconfirmed, unrejected row in that table
   whose evidence its own rules did not produce on the current run — correct

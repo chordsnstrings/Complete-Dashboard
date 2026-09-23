@@ -24,7 +24,15 @@ await new Promise((r) => srv.once('listening', r));
 const base = `http://127.0.0.1:${srv.address().port}`;
 const browser = await launchChromium();
 
-const SAVED_AT = '2026-09-23T08:30:22.622Z';        // 12:30 in Dubai
+/* 12:30 in Dubai, TODAY in Dubai. This was the literal 2026-09-23T08:30Z,
+   and the page prints a bare "saved 12:30" only for a save made on the
+   reader's own Dubai day (savedWhen), so from 00:00 Dubai on 24 September
+   the check below failed on a correct page — found by the full run of the
+   reskin's STEP 4, twenty minutes after midnight in Dubai. The earlier-day
+   case further down keeps its fixed date on purpose. */
+const DUBAI_TODAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai', year: 'numeric',
+  month: '2-digit', day: '2-digit' }).format(new Date());
+const SAVED_AT = `${DUBAI_TODAY}T08:30:22.622Z`;     // 12:30 in Dubai (UTC+4, no DST)
 const row = (o) => ({ fleet_id: 'egari', surface: 'x', last_ok_at: null, checked_at: SAVED_AT,
   last_ok_age_h: null, run_age_h: 0.2, stall_limit_h: 6, still_collecting: true,
   saved_at: null, superseded: false, ...o });

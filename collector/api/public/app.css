@@ -164,6 +164,11 @@
      attribute. 0 here: the old skin keeps every page's order, kpiRow and
      the provenance line at the foot of #view. arkiv.css declares 1. */
   --pg-contract:0;
+  /* …and which SHELL the page is built in (plan §3, STEP 4): 0 here, the
+     rail, the sticky topbar and the band as index.html writes them. shell.js
+     shellContract() reads it; arkiv.css declares 1, and shell.js then moves
+     the same nodes into the masthead, the two rows and the control bar. */
+  --pg-shell:0;
   --mk-absent:hatch; --mk-unfinished:hollow; --mk-projected:solid; --mk-behind:outline;
   /* …and the paints a chart asks for by JOB rather than by colour, which the
      Arkiv skin re-points in arkiv.css: the default hbars fill and a

@@ -19,6 +19,7 @@ import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, s
 import { volatilePath } from './swr.js';
 import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
+import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
 import { renderCohort } from './cohort.js';
@@ -6936,12 +6937,22 @@ function freshView() {
 
 async function render() {
   const gen = newRender();
-  renderNav(); renderSectionTabs(); setHeader(); tzNote();
+  /* The Arkiv shell (reskin STEP 4, shell.js) is built on the first render
+     its token asks for it, and filled on every one; under the old skin both
+     calls return at once and the DOM is index.html's. */
+  const ruled = buildShell();
+  renderNav(); renderSectionTabs(); setHeader(); tzNote(); shellFrame();
   const root = freshView();
   /* The shell footer's basis and colophon belong to the page that wrote them
      (ui.js pageFoot); the principle line is the shell's and stays. */
   clearPageFoot();
-  root.scrollIntoView?.({ block: 'start' });
+  /* A new page starts at its top. Under the old shell that is #view: the
+     title sits in the sticky topbar above it. Under the new one the title
+     block is ABOVE #view, after the masthead, the rows, the banner and the
+     strip — scrolling #view to the top would hide the page's own name, and
+     at 390px, where that chrome is taller than the screen, it did. */
+  if (ruled) window.scrollTo?.(0, 0);
+  else root.scrollIntoView?.({ block: 'start' });
   try {
     const detail = await (V[state.view] || V.unit)(root);
     if (!alive(gen)) return;
@@ -7327,33 +7338,64 @@ async function authBanner() {
             + 'each surface tests it the next time it runs';
         })();
 
+  const detailOf = (r) => (r.severity === 'stopped' || r.severity === 'pending'
+    ? (r.detail || (r.severity === 'pending' ? 'saved, not tested yet' : 'the credential was refused'))
+    /* A degraded row is COLLECTING. The at-risk sentence — "no completed
+       run in Xh" — would be false on it, and the stall clock it quotes is
+       the very clock that proved the channel alive. So it says what is
+       refused and, in the same breath, that nothing is being lost. */
+    : r.severity === 'degraded'
+      ? `${r.detail || 'this feed is refused'} — the rest of this channel is still `
+        + 'collecting, so no bookings are missing'
+      : `no completed run in ${r.run_age_h}h, against a ${r.stall_limit_h}h expectation`);
+  /* "never authenticated" is true of the CREDENTIAL and false about the
+     channel, which is the whole confusion this row existed to cause. On a
+     degraded row the useful clock is the one that shows it working. */
+  const whenOf = (r) => (r.severity === 'degraded'
+    ? (r.run_age_h != null ? `channel last collected ${Math.round(r.run_age_h)}h ago`
+      : 'the channel is collecting')
+    /* When it was SAVED, which is what the operator did and can check.
+       "last worked 2h ago" would be about the value it replaced. */
+    : r.severity === 'pending'
+      ? (r.saved_at ? `saved ${savedWhen(r.saved_at)}` : 'waiting for the collector')
+      : since(r));
+  const listed = show.concat(degraded, pending);
+
   host.className = `authbanner ${tone}`;
+  /* THE SAME BANNER, ON A GRID, under the Arkiv shell (reskin STEP 4,
+     plan §3 CREDENTIAL BANNER; the mockups' authbar.css). The rows, the
+     severity, the errand sentence and every class above are unchanged; each
+     row becomes four cells — who (with the channel's swatch beside the word,
+     never a tint on it), the key with the SURFACE it feeds under it (on
+     /api/auth all along, e.g. "fleet-integration getDrivers", and printed
+     nowhere), what was said, and when — and a meta cell says when these
+     verdicts were recorded and where they are fixed. "As of" is the latest
+     checked_at among the rows shown, not the page's clock: the banner is
+     about when the credentials were last looked at, and a clock reading the
+     reader's own minute would claim a check nobody made. */
+  if (shellContract()) {
+    const latest = listed.map((r) => r.checked_at).filter(Boolean).sort().pop();
+    host.innerHTML = `<span class="ab-dot"></span><div class="ab-body">`
+      + `<div class="ab-head">${esc(head)}</div>`
+      + `<ul class="ab-list ab-detail">`
+      + listed.map((r) => `<li><span class="ab-who">${swatch(r.provider)}`
+        + `${esc(sourceLabel(r.provider))}${esc(fleetOf(r))}</span>`
+        + `<span class="ab-key"><code>${esc(r.credential)}</code>`
+        + `${r.surface ? `<small>${esc(r.surface)}</small>` : ''}</span>`
+        + `<span class="ab-what">${esc(detailOf(r))}</span>`
+        + `<span class="ab-when">${esc(whenOf(r))}</span></li>`).join('')
+      + `</ul></div>`
+      + `<div class="ab-meta">${latest ? `<span>as of ${esc(savedWhen(latest))} Dubai</span>` : ''}`
+      + `<a href="#settings">Set up \u2192 credentials</a></div>`;
+    return;
+  }
   host.innerHTML = `<span class="ab-dot"></span><div class="ab-body">`
     + `<div class="ab-head">${esc(head)}</div>`
     + `<ul class="ab-list ab-detail">`
-    + show.concat(degraded, pending).map((r) => `<li><strong>${esc(sourceLabel(r.provider))}${esc(fleetOf(r))}</strong> `
+    + listed.map((r) => `<li><strong>${esc(sourceLabel(r.provider))}${esc(fleetOf(r))}</strong> `
       + `<code>${esc(r.credential)}</code> — `
-      + esc(r.severity === 'stopped' || r.severity === 'pending'
-        ? (r.detail || (r.severity === 'pending' ? 'saved, not tested yet' : 'the credential was refused'))
-        /* A degraded row is COLLECTING. The at-risk sentence — "no completed
-           run in Xh" — would be false on it, and the stall clock it quotes is
-           the very clock that proved the channel alive. So it says what is
-           refused and, in the same breath, that nothing is being lost. */
-        : r.severity === 'degraded'
-          ? `${r.detail || 'this feed is refused'} — the rest of this channel is still `
-            + 'collecting, so no bookings are missing'
-          : `no completed run in ${r.run_age_h}h, against a ${r.stall_limit_h}h expectation`)
-      /* "never authenticated" is true of the CREDENTIAL and false about the
-         channel, which is the whole confusion this row existed to cause. On a
-         degraded row the useful clock is the one that shows it working. */
-      + ` <span class="ab-when">· ${esc(r.severity === 'degraded'
-        ? (r.run_age_h != null ? `channel last collected ${Math.round(r.run_age_h)}h ago`
-          : 'the channel is collecting')
-        /* When it was SAVED, which is what the operator did and can check.
-           "last worked 2h ago" would be about the value it replaced. */
-        : r.severity === 'pending'
-          ? (r.saved_at ? `saved ${savedWhen(r.saved_at)}` : 'waiting for the collector')
-          : since(r))}</span></li>`).join('')
+      + esc(detailOf(r))
+      + ` <span class="ab-when">· ${esc(whenOf(r))}</span></li>`).join('')
     + `</ul></div>`;
 }
 
@@ -7390,8 +7432,20 @@ async function todayNow() {
     const t = await todayLive();
     const f = [];
     let lag = false;
-    const fact = (label, value, sub) => {
+    /* The livebar (reskin STEP 4, plan §3 TODAY STRIP): under the Arkiv shell
+       each figure is a cell of TWO lines — the value with its mono label
+       beside it, and the sub-line under — so the label is an element the
+       stylesheet can set in capitals, where the old band printed it as a bare
+       word after the value. Same figures, same order, same .tn-f / .tn-sub. */
+    const lb = shellContract();
+    const fact = (label, value, sub, cls = '') => {
       if (value == null) return;
+      if (lb) {
+        f.push(`<span class="tn-f${cls}"><span class="lb-line"><b>${esc(String(value))}</b>`
+          + `<span class="lb-l">${esc(label)}</span></span>`
+          + (sub ? `<span class="tn-sub">${esc(sub)}</span>` : '') + '</span>');
+        return;
+      }
       f.push(`<span class="tn-f"><b>${esc(String(value))}</b>${esc(label)}`
         + (sub ? ` <span class="tn-sub">${esc(sub)}</span>` : '') + '</span>');
     };
@@ -7413,7 +7467,10 @@ async function todayNow() {
       {
         const tv = tripValue(t, fmt, sourceLabel);
         if (tv.amount != null) {
-          fact('trip value', tv.estimated ? `\u2248 ${money(tv.amount)}` : money(tv.amount), tv.sub);
+          /* ' lb-hl': the strip's one emphasis, drawn locally (a rule and a
+             weight step, no wash), so it does not count against the page's
+             highlight budget (plan §3). The old band ignores the class. */
+          fact('trip value', tv.estimated ? `\u2248 ${money(tv.amount)}` : money(tv.amount), tv.sub, ' lb-hl');
         }
       }
       /* The measured fares kept beside the estimate rather than replaced by
@@ -7438,23 +7495,54 @@ async function todayNow() {
       lag = t.priced != null && t.bookings != null && t.priced < t.bookings;
       fact('km', fmt(t.km));
       if (t.drivers != null) fact('out', fmt(t.drivers), `${fmt(t.vehicles)} cars`);
-      if (t.lastAt) f.push(`<span class="tn-f tn-sub">latest booking ${esc(timeStr(t.lastAt))}</span>`);
+      /* A time, not a measure: no bold value in the old band, and in the
+         livebar a cell whose figure is set a step quieter. */
+      if (t.lastAt) {
+        if (lb) fact('latest booking', timeStr(t.lastAt), null, ' lb-ts');
+        else f.push(`<span class="tn-f tn-sub">latest booking ${esc(timeStr(t.lastAt))}</span>`);
+      }
     } else {
       f.push('<span class="tn-quiet">no booking has landed yet on any channel</span>');
     }
     /* The other half of "live", and true whether or not a booking has landed:
        a fleet with no trips yet at 06:00 still has cars reporting. */
     if (t.fresh != null && t.tracked) {
-      f.push(`<span class="tn-f"><b>${fmt(t.fresh)}</b>reporting now`
-        + ` <span class="tn-sub">of ${fmt(t.tracked)} tracked</span></span>`);
+      if (lb) fact('reporting now', fmt(t.fresh), `of ${fmt(t.tracked)} tracked`);
+      else {
+        f.push(`<span class="tn-f"><b>${fmt(t.fresh)}</b>reporting now`
+          + ` <span class="tn-sub">of ${fmt(t.tracked)} tracked</span></span>`);
+      }
     }
-    host.innerHTML = `<span class="tn-now"><span class="tn-dot" aria-hidden="true"></span>`
-      + `${esc(todayLede(t))}</span>${f.join('')}`
-      + `<span class="tn-links"><a href="${href('day', t.day)}">the whole day \u2192</a>`
+    const links = `<span class="tn-links"><a href="${href('day', t.day)}">the whole day \u2192</a>`
       + `<a href="#compare">against yesterday \u2192</a>`
       + `<a href="#live">live map \u2192</a></span>`;
     /* Whole fleet, both channels: /api/day takes a day and nothing else, so
        this cannot honour the chips above it and must not pretend to. */
+    const fixed = 'Fares are the price on the bookings taken since midnight, not a share of a '
+      + 'weekly statement.';
+    const notes = [fixed, lag ? FARES_LAG : null,
+      t.projectionBasis ? `Trip value is ${t.projectionBasis}.` : null,
+      wiredNote(t, sourceLabel)].filter(Boolean);
+    if (lb) {
+      /* THE LIVEBAR. What the old band keeps in host.title — where a
+         screenshot never shows it and a reader who does not hover never sees
+         it — is set on the face of the strip: the scope caption beside the
+         lede, because it is the one honesty note every other figure on the
+         page does not need (they all follow the controls above; these do
+         not), and the notes in a <details> that starts CLOSED, because four
+         sentences open under the strip push "At a glance" past the fold at
+         1440×900 (plan §3 Risks, THE FOLD). */
+      host.innerHTML = `<div class="lb-top"><span class="tn-now"><span class="tn-dot" aria-hidden="true"></span>`
+        + `${esc(todayLede(t))}</span>`
+        + '<span class="lb-scope">Both fleets, every channel \u2014 this strip does not follow the '
+        + 'filters above.</span>'
+        + `${links}</div><div class="lb-figs">${f.join('')}</div>`
+        + `<details class="lb-notes"><summary>${countOf(notes.length, 'note')} on these figures</summary>`
+        + notes.map((n) => `<p class="lb-note">${esc(n)}</p>`).join('') + '</details>';
+    } else {
+      host.innerHTML = `<span class="tn-now"><span class="tn-dot" aria-hidden="true"></span>`
+        + `${esc(todayLede(t))}</span>${f.join('')}${links}`;
+    }
     host.title = 'Today so far, across both fleets and every channel \u2014 this band '
       + 'does not follow the filters above it. Fares are the price on the bookings taken '
       + 'since midnight, not a share of a weekly statement.'
@@ -7485,17 +7573,26 @@ async function freshness() {
     });
     const oldest = [...perSource.entries()].sort((a, b) => (a[1] < b[1] ? -1 : 1))[0];
     const ageH = oldest ? (Date.now() - Date.parse(oldest[1])) / 3600e3 : null;
-    host.innerHTML = newest
-      ? `updated ${timeStr(newest)}<br>`
-        + (bad.length
-          ? `<span style="color:var(--warn)">${countOf(bad.length, 'source')} need`
-            + `${bad.length === 1 ? 's' : ''} attention</span><br>`
-          : 'all sources healthy<br>')
-        + (oldest
-          ? `<span class="dim">oldest: ${esc(sourceLabel(oldest[0]))}, ${
-            ageH < 1 ? `${Math.round(ageH * 60)} min` : `${Math.round(ageH)}h`} ago</span>`
-          : '')
-      : 'awaiting first collection';
+    /* Three lines in the rail; one line, in three parts, in the Arkiv shell's
+       section row (reskin STEP 4), where a <br> would stack them into a block
+       taller than the row and a bare join would run "23:04all sources
+       healthy" together. Same parts, same words, same order; the old rail's
+       markup is byte-for-byte what it was. */
+    const parts = newest ? [
+      `updated ${timeStr(newest)}`,
+      bad.length
+        ? `<span style="color:var(--warn)">${countOf(bad.length, 'source')} need`
+          + `${bad.length === 1 ? 's' : ''} attention</span>`
+        : 'all sources healthy',
+      oldest
+        ? `<span class="dim">oldest: ${esc(sourceLabel(oldest[0]))}, ${
+          ageH < 1 ? `${Math.round(ageH * 60)} min` : `${Math.round(ageH)}h`} ago</span>`
+        : '',
+    ] : null;
+    host.innerHTML = !parts ? 'awaiting first collection'
+      : shellContract()
+        ? parts.filter(Boolean).join('<span class="fr-sep" aria-hidden="true"> \u00b7 </span>')
+        : `${parts[0]}<br>${parts[1]}<br>${parts[2]}`;
     host.title = bad.length ? `Not ok: ${bad.map(sourceLabel).join(', ')}` : 'Every collector reported ok';
   } catch { host.textContent = 'status unavailable'; }
 }
@@ -7691,5 +7788,11 @@ function applyRoute() {
 }
 applyRoute();
 window.addEventListener('hashchange', () => { applyRoute(); render(); });
-render();
+/* The first render waits for the stylesheets, because the shell and the page
+   contract are both TOKENS in them (shell.js whenStyled: a script-inserted
+   module can run before a parser-inserted <link> has loaded). When every
+   sheet is already in — the old skin, and nearly every load — this is a
+   microtask. A sheet slower than the wait's cap renders the page without it,
+   and again when it lands (the second argument). */
+whenStyled(4000, render).then(render);
 setInterval(() => { if (state.view === 'live') render(); }, 60000);

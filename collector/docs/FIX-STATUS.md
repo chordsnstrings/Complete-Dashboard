@@ -2728,3 +2728,153 @@ made).
   recorded at 1180.
 - The render-audit findings above (#compare, #coverage, #receipts, #insights,
   the unstyled inputs, #retention) are each page's own plan entry.
+
+## Arkiv reskin, STEP 4 — the shell — 2026-09-23, NOT ON PRODUCTION
+
+Branch `reskin-foundation`. docs/UI-REDESIGN-PLAN.md §3 ("Shell: rail, header,
+control bar, credential banner, freshness", "Order of work" STEP 4, "Review
+corrections", "Also required"), the mockups' b.css chrome, viz.css `.livebar`
+and arkiv-new/authbar.css. Not deployed, not pushed, default skin not flipped.
+Everything visual is under `?skin=arkiv`; the old skin's DOM and pixels did not
+move (measured below). The concurrent unauthorized-trips branch's areas were
+not touched: app.js changes are confined to render(), authBanner(),
+todayNow(), freshness() and the boot line, and index.html's change is the
+one line that loads the module (SH16).
+
+| # | what | state | proof |
+|---|---|---|---|
+| SH1 | **Which shell is a token.** `--pg-shell` (app.css `:root` 0, arkiv.css 1), read by `shell.js shellContract()` — the chart form's and the page contract's pattern; no module reads the skin | **written** | arkiv_shell §0; arkiv_skin §4 still scans every module. Token removed from arkiv.css: REV17 |
+| SH2 | **The sheet.** `buildShell()` MOVES the existing nodes, never re-creates them: masthead `#mast` (wordmark in Fraunces, "Ecosine & Egari · Dubai", the window in `#mastWin`/`#mastWinSub`) → `#secRow` (#nav, then #settingsLink relabelled "Set up" with `href="#settings"` intact, then #freshness) → #sectabs → #authBanner → #filters as the control bar `.ctl` (the six controls, #themeBtn joined, the sentence `#fApplies`, #tzNote) → #todayNow → the title block `.topbar` → #view → #pageFoot, and stamps `#app.ak-shell`. Every listener survives (the platform select, the range calendar and the theme cycle drive the page from their new places), every shell id is in the document once (#fRangeLabel, #tt, #m included), the rail is `display:none`, and #app is invisible until the class is on it | **written** | arkiv_shell §3 (order, ids, contents of each row, the moved controls working). Theme left in the rail: REV8 |
+| SH3 | **The control bar is the one thing that sticks** (top 0, ≈50px, in place of the 148px sticky topbar); the view row and the title no longer stick; selects are square mono with a drawn ▾ | **written** | §3. Made static: REV20 |
+| SH4 | **The .applies sentence.** `appliesSentence(view)` names exactly the controls data.js's three lists hide, and why, in the words data.js's own comments give (`APPLIES_WHY`, 32 pages); compliance, insights and retention take the shared "none of them changes what it shows"; "notfound" says the address names no page. A page that hides nothing says nothing. A NO_FILTER page hides the platform and fleet too, so its reason answers for all four where the source says why: #live (its feed takes no parameter), #day (every source for that day), #online-time (the call list was asked for as every driver), #deposits (a position against a person), #salary (the pay book, /api/ledger/entries, takes no platform or fleet), #capacity (demand from every channel) — reworded on resuming after the container restart; copy only, no behaviour, so no revert proof | **written** | §1 (all 35 listed pages; no stale reason; exact controls), §3 (#payouts, #settings, #overview in a browser). Payouts' reason removed: REV11 · platform and fleet named on a NO_RANGE page: REV12 |
+| SH5 | **The masthead window**, only what the client can vouch for: a rolling window's two Dubai days ("25 Aug – 23 Sep 2026", computed by windowDates), a calendar period's name alone (the server's calendar resolves it), two calendar dates as the label, "No window applies here" on a hidesRange() page; always "· Dubai time" | **written** | §2, §3. Period printed with client dates: REV13 · never filled (shellFrame not called): REV10 |
+| SH6 | **The banner as a grid** (authbar.css): four cells — who with the channel's swatch (`swatch(provider)`), the key with `rows[].surface` under it, what, when — and a meta cell "as of HH:MM Dubai" from the LATEST `checked_at` of the rows shown (none printed when no row has one — a page clock would claim a check nobody made) and "Set up → credentials" → #settings. Severity, errands, classes and the pending tone unchanged; the old skin's row markup is byte-identical (`detailOf`/`whenOf` extracted, same output) | **written** | §4; auth_banner_pending_ui 18, credential_errand 23, arkiv_skin §5. First row's time: REV5 · the page clock when none: REV6 · no surface: REV7 |
+| SH7 | **The livebar.** Each figure a cell (value, `.lb-l` mono label, sub-line under), trip value's chrome emphasis (a 3px rule and a size step, no wash, `.lb-hl`), the scope caption on the face of the strip ("Both fleets, every channel — this strip does not follow the filters above."), and the notes that lived only in `host.title` (the fares basis, FARES_LAG, the projection basis, what was wired and not counted) in a `<details>` that starts closed. `host.title` is still built; the old band's markup is byte-identical. Two columns of cells below 820px | **written** | §5; today_band 38. Livebar markup in the old skin: REV15 · notes open: REV16 |
+| SH8 | **Freshness on one line** in the section row's right slot (three parts joined by `.fr-sep`); the rail's three lines byte-identical in the old skin | **written** | §5, §0. `<br>` kept under the shell: REV14 |
+| SH9 | **The first render waits for the stylesheets** (`shell.js whenStyled`, both skins; a microtask when every sheet is in). index.html appends app.js as a module from a script, and nothing orders it after the parser-inserted `<link>`s: with arkiv.css held back 1.5s the first render read `--pg-shell` AND STEP 3's `--pg-contract` as 0 — the old shell and the classic #overview under the new stylesheet — and nothing re-rendered when the sheet landed. **A latent STEP 3 defect** (contract()), fixed here. A sheet slower than the 4s cap renders without it and again when it lands, so a skin page is never left blank. **Since SH16 the browser does this first**: app.js is now a module the parser writes in, so it is deferred, and a deferred script does not run while a parser-inserted stylesheet (arkiv.css included) is loading. The wait is kept as the second line (a stylesheet a script appends never holds a script back); on today's index.html it is a microtask | **written** | §8. Boot without the wait: REV0 (3 fail) · no render when a slow sheet lands: REV1 — both measured with app.js APPENDED, as index.html had it then. With SH16 in place the wait alone is no longer load-bearing (measured: the boot line made a bare `render()`, arkiv_shell 73/73), so §8 now proves the pair; REV22 proves SH16 |
+| SH10 | **A new page starts at the top of the sheet**, not with #view at the top of the window, which under the new shell hid the title block (at 390px the chrome is taller than the screen) | **written** | §3 (390px). `scrollIntoView(#view)` kept: REV9 |
+| SH11 | **Zen and print.** Zen hides the masthead, both rows, the strip and the sub-line, and keeps the banner, the control bar (with its way out) and the title. Print drops the rows, the controls and the strip and keeps the masthead (on paper, the only place the window is named) | **written** | §6. Zen's strip rule without `:not([hidden])`: REV4 · print keeps the control bar: REV18 |
+| SH12 | **Narrow windows.** The section links scroll as one row with an edge fade and freshness takes its own line below 900px; the masthead window wraps under the wordmark, the banner's cells stack and the livebar's cells go two to a row below 820px; the lit section and the lit page are scrolled sideways into their rows (at 390px Set up, lit on #settings, was off the edge); no sideways scroll at 390 | **written** | §7, arkiv_skin §6. app.css's 820px `#nav{order:3}` put Set up before Today: REV2 · lit items not scrolled into view: REV19 |
+| SH13 | **The phone is untouched**: `#app` under the skin gets one grid track, never a display (a `display:block` at (1,2,0) outranked m.css's phone hide at (1,1,1) and drew the desktop shell above the phone app — page_contract §5b caught it in this step) | **written** | arkiv_shell §7 (phone), page_contract §5b. `display:block` restored: REV3 |
+| SH15 | **test/auth_banner_pending_ui's fixture was a date literal** (2026-09-23T08:30Z, "12:30 in Dubai"), and the page prints a bare "saved 12:30" only for a save on the reader's own Dubai day — so from 00:00 Dubai on 24 September the check failed on a correct page. It is today's Dubai date at 08:30Z now; the earlier-day case keeps its fixed date on purpose. No product change | **written** | The full run below (past midnight in Dubai) failed it 1; 18/18 after. The literal is the revert, and it fails every day from 24 Sep |
+| SH16 | **The boot race STEP 1 introduced, found by this step's full run.** index.html APPENDED the application module from a script, which makes it async: it runs when it has arrived, whether or not `<body>` exists. STEP 1 put an inline script after the stylesheets (the `document.write` of arkiv.css), and an inline script waits for every stylesheet above it while the parser waits for the script — so a slow app.css held `<body>` back while the module ran without it. Found when `charging_page`'s phone half failed in the full run under load (`TypeError: Cannot read properties of null (reading 'append')`, body text empty) and passed alone; reproduced with app.css held back 2s: the phone build throws at m/app.js `root.append` (#m not parsed yet) and the desktop at app.js `$('#fRange').onclick` — a blank page on both builds, in both skins, at STEP 1 (0fc5d29) and after; the commit before it (d00202f) renders both. Fixed in index.html: the parser writes the module in (`document.write('<script type="module" …>')`), so it is deferred — the download still starts at the top of `<head>`, and it runs once the document is parsed and the parser's stylesheets have loaded. Both builds, both skins; no visual change | **written** | new `test/boot_order.test.mjs` (5: index.html writes the module and appends none; with app.css held back 2s the desktop in both skins and the phone render with no error). The appended module restored: REV22 (5 fail) |
+| SH14 | **render-audit reads the chrome.** Its colour checks read #view and #pageFoot only, so none of the new shell was checked; the scope now includes every child of `#app.ak-shell > .main` but those two (the old skin's rail predates the law). Clean on production (6 routes × 1440/390) and the mock (125 routes at 1440); AUDIT.md "Reskin STEP 4" | **written** | audit_tools_detect (a masthead date in grey-2 reported, in grey not). Chrome out of the scope: REV21 |
+
+**Measurement: the old skin did not move.** STEP 3's pixel harness (every
+`/api/` answer recorded, clock frozen at 2026-09-23T08:00Z, sticky pinned,
+caret hidden), HEAD `fff8be1` (`git archive`, :8101) against the FINAL working
+tree (:8102): #overview, #supply, #settings, #coverage, #drivers, #finance,
+#compare, #payouts at 1440 light, 1440 dark and 390 light, plus the phone
+build's #overview and #today — 26 shots, and 26 DOM dumps now of the WHOLE
+`#app` (the shell included, not only #view). **Every DOM dump is identical**
+(random chart ids aside). 25 of 26 shots are byte-identical; #drivers at 390
+differs by 6 pixels at the right edge (x 388–390), and a second HEAD run
+differs from the first HEAD run in the same shot — run-to-run noise (an
+earlier working-tree run matched this one exactly). Harness in scratchpad
+`reskin/step4/pixel/` (`shots/before`, `before2`, `after`, `final`).
+**Rerun after SH16** (index.html's module line, `shots/final2`):
+every DOM dump identical to `final` and to `before` but for the random
+chart ids; 25 of 26 shots byte-identical to `final`, #payouts 1440 light
+differing in 13 pixels at x 1438–1440 — the same right-edge noise — and
+#drivers 390 against `before` as above.
+
+**The fold, measured** (production data through live-ui, #overview 1440×900):
+masthead 61px, section row 38, view row 38, the credential banner 252 (the
+three stopped rows production carries today), control bar 56, livebar 119,
+title block 71 — #view starts at 635px and the first tile at 897. Without the
+banner #view would start at ~383, which is the plan's ~380. The old skin, same
+data: first tile at 697 (its band is one 44px line and it has no masthead or
+rows). The banner's grid makes it taller than the old banner (200px): its
+detail column is narrower. See NOT DONE.
+
+**Tests.** New: `test/arkiv_shell.test.mjs`, 73 checks (static, and a browser
+on the mock: the old skin untouched, the sheet, the moved controls working,
+the sentence and the window on four pages, the banner grid and its "as of",
+the livebar and freshness, zen and print, 390px and the phone build, a slow
+stylesheet and one slower than the cap). Changed deliberately:
+`arkiv_skin` §5 measures the wordmark on `.mast-word` (the masthead's; the
+rail's `.brand` is hidden with the rail, so its face proved nothing).
+Green file by file after the last edit: arkiv_shell 73, arkiv_skin 103,
+page_contract 81, audit_tools_detect 35, today_band 38, auth_banner_pending_ui
+18, credential_errand 23, nav_sections 17, routes 65, calendar_window 82,
+type_scale 11, tokens 144, assets 40, imports_resolve 4, phone 142,
+phone_render 8, phone_clock 12 (1 skipped), kpi_pill 10, chart_fit 27,
+chart_geometry 17, platform_share_once 8, sticky_header 9, pinned_identity 73,
+scroll_cue 6, fold_rows 8, payout_mobile 39, settings_page_layout 20,
+driver_money_tab 56, performer_week 26, money_precise 21, page_numbers 11,
+source_line 19, live_day 20, today_live 16, route_smoke 59. After SH16:
+boot_order 5 (new), arkiv_shell 73, and the files that load index.html listed
+under "The full suite" below.
+
+**The full suite** (`npm test`). First run, just after 20:00 UTC — past
+midnight in Dubai, 24 Sep: 315 files, 10,458 assertions, 3 files failing, all three bound to the
+clock and none touched by this step: `auth_banner_pending_ui` 1 (the fixture
+date, SH15, fixed and green after); `payout_scope` 2 ("ends at a measured date
+rather than the 2100-01-01 sentinel ["2024-12-23","2026-09-24"]"; "640 against
+a register floor 639 days back") and `phone_today_only` 3 (the mock reports no
+bookings for Dubai's 2026-09-24 while UTC is still the 23rd). Both fail
+identically on an extract of HEAD `fff8be1` run at 20:31 UTC, so they are the
+hours between 20:00 and 24:00 UTC, not this change — named in NOT DONE.
+Second run, after resuming from a container restart (20:47 UTC, the reasons
+reworded): 315 files, 10,456 assertions, 3 failing — the same two clock-bound
+files, and `charging_page` 3 (its phone half: body empty, "Cannot read
+properties of null (reading 'append')"), which passed alone. That flake was
+the boot race, SH16. Third run, after SH16 (21:04 UTC): **316 files, 10,464
+assertions, 2 failing** — `payout_scope` 2 and `phone_today_only` 3, the same
+words as before, and both fail identically on the HEAD `fff8be1` extract
+rerun at 21:16 UTC (phone_today_only against mockapi on :8099, as run-all
+gives it).
+
+**Revert proofs** (`scratchpad reskin/step4/reverts.py`: each mutation
+applied, the test run, the file restored and md5-checked; 22 mutations, every
+one fails, listed as REV0–REV21 in the rows above; `reverts.log`). Before
+any revert, the new tests, page_contract §5b and the screenshots found five defects in this
+step's own first draft, each now a row above: `#app{display:block}` drawing
+the desktop shell over the phone app (SH13), app.css's `#nav{order:3}` putting
+Set up before Today at 390px (SH12), zen leaving the livebar on (SH11), the
+print rule losing to setHeader()'s inline `display:flex` (SH11), and Set up
+lit off the edge of its row at 390px (SH12). After the resume: REV22, the
+appended module restored in index.html — boot_order 0 passed, 5 failed (the
+static pair, and the three boots blank with the errors quoted in SH16); the
+file restored and md5-checked.
+
+**Screenshots** (live-ui :8100, production data, under the skin): #overview,
+#drivers, a driver's page, #payouts, #settings and #live at 1440×900 and
+390×844, light and dark (24), plus #overview full-page at each width and
+theme. #live retaken after the reasons were reworded, and #online-time and
+a #day added at both widths and themes (12), to show the longest sentence on
+one line at 1440. Scratchpad `reskin/step4/shots/`.
+
+### NOT DONE in STEP 4, and named
+
+- **The fold at 1440×900 is not won while production carries a three-row
+  banner** (#view at 635px, the first tile at 897, measured above). The
+  banner is the one piece of chrome the plan keeps above everything, and its
+  grid rows wrap more than the old prose rows did. Options for the operator:
+  clip each row's detail to two lines with the rest on hover or in a
+  `<details>`, or fold the rows under the head when there are more than two.
+  Neither is done: a credential that has stopped is the most important thing
+  on the page, and hiding its detail is a ruling, not a restyle.
+- **STEP 5's part of the shell**: the Fraunces preload swapped for Plex Mono
+  500, the theme-color metas and the manifest colours, the phone's m.css
+  pass. As STEP 1 recorded.
+- **The theme button keeps its word** ("◐ system", "☀ light", "☾ dark"), not
+  an icon alone: the word says which of three states it is in.
+- **Both skins, found and not fixed:** app.css's print rule has never hidden
+  the old skin's controls (setHeader() writes `display:flex` inline on
+  #filters on every render). #tzNote says nothing to a reader in Dubai, as
+  before; the masthead now says "Dubai time" to everybody under the skin.
+- **Channel names inside the livebar's notes** (FARES_LAG's "Uber") carry no
+  swatch; the mockup gives them one. The notes are the shared sentences from
+  today.js, used by the phone too, and a swatch inside them is the page
+  phase's.
+- `rowMark` / `chanChip` are still not built (STEP 3 named them).
+- **Two suites fail between 20:00 and 24:00 UTC** (Dubai's new day, UTC's old
+  one), at HEAD as on this branch: `payout_scope` (2) and `phone_today_only`
+  (3, the mock's "today" is UTC's). Not this step's; found by its full run.
+- `npm run audit:pages` (production, every window): 64 views and 219 endpoint
+  calls a window; the same 8 views "unreached" in each — POST-only endpoints
+  the audit asks with GET (`/api/ledger/receipt`, `/api/finance/payouts/verify`,
+  `/api/same-person/decide`, `/api/hr-roster/preview|commit`,
+  `/api/ledger/import/preview|commit`) and `/api/corporate/property` without an
+  id. API-level and unchanged by a shell step; the audit tool's own noise.

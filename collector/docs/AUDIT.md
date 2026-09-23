@@ -1398,3 +1398,40 @@ form, and the faulty stub under `--pg-contract:0`.
 
 Screenshots of #overview, both skins, at 1440 and 390, light (and dark under
 the skin): scratchpad `reskin/step3/shots/`.
+
+## Reskin STEP 4 — the shell under the colour law, and a pass under the new shell — 2026-09-24
+
+Branch `reskin-foundation`, not deployed. The Arkiv shell (shell.js,
+docs/UI-REDESIGN-PLAN.md §3 "Shell") put the masthead, the section and view
+rows, the banner, the control bar, the livebar and the title block OUTSIDE
+#view, and render-audit's colour checks read only #view and #pageFoot — so
+none of the new chrome was being checked. The scope now includes every child
+of `#app.ak-shell > .main` except #view and #pageFoot (the class shell.js
+stamps once it has built the shell; the old skin's rail predates the law).
+`test/audit_tools_detect.test.mjs` drives it with a masthead date in grey-2
+(reported) and in grey (not); with the chrome taken out of the scope that
+check fails.
+
+    node bin/live-ui.mjs &
+    SKIN=arkiv ONLY=overview,settings,payouts,drivers,live,unit WIDTHS=1440,390 node bin/render-audit.mjs
+
+**The pass.** Production data through live-ui, six routes at 1440 and 390
+(12 renders): no error, the chrome clean under `grey2-text`,
+`off-token-colour`, `semantic-no-glyph` and the highlight budget; two warnings
+that are page content (#settings' "Restarts" column empty in 39 of 40 rows,
+#live's slow panel). The mock, all 125 routes at 1440 under the skin: no
+js-error, no finding in the chrome; the in-page findings are the ones STEP 3
+recorded (#compare's ▲/▼ with no sign ×5 routes, #coverage's red counts,
+#receipts' "−AED" with no glyph, #insights' impact figure, the browser-grey
+inputs on #online-time/#trips/#playbook, #retention's cell backgrounds) —
+each page's own plan entry.
+
+**Measured with the shell in place** (#overview, production data, 1440×900):
+masthead 61px, section row 38, view row 38, the three-row banner production
+carries 252, control bar 56, livebar 119, title block 71 — #view at 635px and
+the first tile at 897. Without the banner, #view would be at ~383. The fold is
+the banner's (FIX-STATUS "Arkiv reskin, STEP 4", NOT DONE).
+
+Screenshots of #overview, #drivers, a driver's page, #payouts, #settings and
+#live under the skin at 1440 and 390, light and dark: scratchpad
+`reskin/step4/shots/`.

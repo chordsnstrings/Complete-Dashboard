@@ -381,7 +381,9 @@ console.log('\n5 · the restyle, measured');
       segs,
       body: { bg: getComputedStyle(document.body).backgroundColor, color: getComputedStyle(document.body).color,
         font: getComputedStyle(document.body).fontFamily },
-      brand: { b: getComputedStyle(q('.brand b')).fontFamily, h1: getComputedStyle(q('#viewTitle')).fontFamily },
+      /* The wordmark is the masthead's since STEP 4 (shell.js); the rail's
+         .brand is hidden with the rail, so its face proves nothing now. */
+      brand: { b: getComputedStyle(q('.mast-word')).fontFamily, h1: getComputedStyle(q('#viewTitle')).fontFamily },
     };
   });
   const is = (rgb, hex) => hexOf(rgb) === hex;

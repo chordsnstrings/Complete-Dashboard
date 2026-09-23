@@ -415,6 +415,18 @@ fetch('/api/drivers/directory?from=2026-01-01&to=2026-01-31').then((r) => r.json
   check('render-audit: under --pg-contract:0 (the old skin) the colour law is not applied, the budget still is',
     !/grey2-text|off-token-colour|semantic-no-glyph/.test(old) && /highlight-budget/.test(old),
     old.split('\n').filter((l) => /✗/.test(l)).join(' | '));
+  /* The shell's chrome is audited too, once the Arkiv shell is built (reskin
+     STEP 4): a masthead date in grey-2 outside #view, over a clean page. */
+  const chromePage = (dates) => `<!doctype html><html><head><meta charset="utf-8"><style>${TOKENS}</style></head>`
+    + `<body><div id="app" class="ak-shell"><main class="main"><header id="mast">`
+    + `<span style="color:var(${dates})">1 – 23 Sep 2026</span></header>`
+    + '<header class="topbar"><h1 id="viewTitle">Stub</h1></header>'
+    + '<div id="view"><div class="panel"><h3>One</h3><div>A clean page.</div></div></div></main></div></body></html>';
+  const shellBad = await audit(chromePage('--grey-2'));
+  const shellGood = await audit(chromePage('--grey'));
+  check('render-audit: grey-2 text in the shell’s chrome (the masthead) is reported, the same text in grey is not',
+    /grey2-text\s+1 in grey-2/.test(shellBad) && !/grey2-text/.test(shellGood),
+    (shellBad.split('\n').find((l) => /grey2/.test(l)) || shellBad.slice(-200)).trim());
 }
 
 /* ── an audit that could not REACH the site reports nothing ───────────────
