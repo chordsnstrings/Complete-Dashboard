@@ -2960,3 +2960,36 @@ restored with its md5 checked.
 - **The evening test failures** (docs/COVERAGE.md traps): `payout_scope` and
   `phone_today_only` fail from 20:00 UTC on main as well.
 
+### On production — deployment `c9bab16` (commit `dbff5b1`), ACTIVE 22:09:20Z
+
+Behind `?skin=arkiv`: the default look is unchanged apart from what the
+operator ruled (money to the fils) and the fixes named above.
+
+- **Money to the fils, from the API up.** `/api/compare/period` for the month
+  gives fares 981,611.81; `/api/kpis` gives accounted 751,097.75. The current
+  look prints AED 751,097.75 and AED 981,611.81, as does Arkiv, and neither
+  prints a whole-dirham amount on #overview, #live or #segments (light and
+  dark, 1440 and 390).
+- **A one-fils scare, resolved.** A first capture printed 751,097.76 in the
+  current look against .75 under Arkiv, minutes apart. Re-captured with the
+  API at the same moment, both print .75: the data moved between captures. It
+  was not a rounding difference.
+- **Screens** go through bin/prod-mirror.mjs, with assets byte-identical to
+  the origin. `data-skin` is `arkiv` only under the switch. Arkiv draws the
+  masthead, section row, banner grid, sticky control bar, livebar and the
+  #overview contract with its footer colophon. The credential banner shows in
+  both looks within 2 s: 200px in the current look, 252px under Arkiv.
+
+### Open, and named — measured on production after this deploy
+
+- **`/api/unauthorized/attributed` is about three times slower now that FMS is
+  in it.** September holds 13,354 segments, 769 of them unauthorized (673 FMS
+  trip), after the 21:00Z 30-day pass. Uncached, this month's call took 33.8 s,
+  and a two-day window 7.6-17.8 s. On 2026-09-16 (this file, above) the month
+  took 11.8 s for 124 rows. The cost grows with the rows it attributes. #segments'
+  first uncached load took 77 s, and about 2 s from cache after. `/api/kpis`
+  also took 5-10 s uncached at the same time, so part of it is database load.
+  Not fixed here; put to the operator.
+- **The Arkiv banner fills the phone's first screen** while three credentials
+  are stopped. Shortening its detail is the operator's call (STEP 4's note).
+

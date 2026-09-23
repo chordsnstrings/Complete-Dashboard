@@ -3277,6 +3277,13 @@ driver's 222 tracker fixes.
   pulse; `run-all.mjs` now asks `/api/trips/daily` about today and, if the
   answer is empty, leaves the squatter alone and starts its own mockapi on a
   kernel-assigned port.
+* **An orphaned `bin/prod-mirror.mjs` holds :8200 for hours, and screenshots
+  quietly use it.** On 2026-09-23 a mirror left behind about seven hours
+  earlier (parent PID 1) was still serving. A fresh mirror then died with
+  EADDRINUSE while the screenshot script carried on against the old one,
+  unnoticed until its log was read. Before starting a mirror, run
+  `ps -eo pid,ppid,etime,cmd | grep prod-mirror`. After a run, confirm the
+  PID you started is gone, not just that `kill` returned.
 * **Two suites fail every evening from 20:00 UTC, on the main branch as well.**
   Between 20:00 and 24:00 UTC, Dubai is already on the next day.
   `payout_scope.test.mjs` fails 2 checks: the scope ends on the Dubai date
