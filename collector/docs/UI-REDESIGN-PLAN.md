@@ -1,6 +1,6 @@
 # UI redesign plan — every page, before any code changes
 
-Status: **PLAN, awaiting the operator's approval.** Nothing below is implemented. Written 2026-09-23 from a read-only survey: nine agents compared each live page (rendered through `bin/prod-mirror.mjs`, and from source once the mirror was stopped) with its Arkiv mockup in the scratchpad (`arkiv-new/`, `arkiv/arkiv-pages/`), and a critic checked the combined plan against the operator's rules. Its corrections are written into the entries they apply to.
+Status: **PLAN, approved by the operator 2026-09-23 with the rulings in section 1.** Nothing below is implemented. Written 2026-09-23 from a read-only survey: nine agents compared each live page (rendered through `bin/prod-mirror.mjs`, and from source once the mirror was stopped) with its Arkiv mockup in the scratchpad (`arkiv-new/`, `arkiv/arkiv-pages/`), and a critic checked the combined plan against the operator's rules. Its corrections are written into the entries they apply to.
 
 The operator's rules this plan is held to:
 1. Never replace a working solution that gives better data than the redesign. Live content that is richer or more exact stays.
@@ -8,18 +8,18 @@ The operator's rules this plan is held to:
 3. Views that make operations faster (tables with actions, forms, filters, drill-downs, the map, live tracking, the paste box, the deposit form, the review queue) are restyled only, never restructured.
 4. A figure that cannot be measured renders absent with its true reason — never zero.
 
-## 1. Decisions needed from the operator
+## 1. Decisions — ruled by the operator, 2026-09-23
 
-These are conflicts the survey could not settle; each has a recommended default that will be used unless the operator rules otherwise.
+The survey could not settle these conflicts. Each one below has been ruled on by the operator. Where the ruling differs from the recommended default, it is marked **RULED**.
 
-1. **Warnings without amber.** The redesign's colour law has no amber. Live pages use amber for "warning" in 34 tiles, 27 pills and the at-risk banner. *Recommended:* Negative red with a HOLLOW dot for warning, solid dot for critical — one rule used on every page.
-2. **Money precision.** Some page plans switch to cents (AED 1,275.14), others keep whole dirhams; tests pin whole-AED strings. *Recommended:* Keep whole dirhams on tiles and summaries; cents only where a figure is reconciled to a statement (payouts, reconcile, receipts).
-3. **Dark mode.** The live app has light/dark/system; the redesign defines light only, and no colour in it was validated on dark. *Recommended:* Keep dark mode working with the current dark values mapped to the new tokens, and validate them before release; no new dark design.
-4. **A level or gap in the delta slot.** Several pages put "vs fleet median" or "vs 95% target" where the redesign reserves a change-over-time. *Recommended:* Allow it, always worded ("+24 against the fleet median"), never a bare arrow.
-5. **Per-tier revenue (AED/km per tier).** #overview would add it; #platforms/tiers rejects it because Uber fares arrive from a weekly walk and cover some weeks of some tiers. *Recommended:* Do not add it until every bar can say "priced n of N"; revisit after.
-6. **Donuts.** The foundation turns every donut into ranked bars; some pages want a 100% bar instead. *Recommended:* Each donut is replaced explicitly per page, as its entry says; no global switch.
-7. **Verdict sentence vs hero figure.** Pages differ on whether the verdict band keeps its figure or the hero tile takes it; tests read the verdict DOM. *Recommended:* Keep the verdict band as the page's statement under "At a glance" and do not repeat its figure as a tile.
-8. **#receipts "Credited, net of re-filings" tile.** The redesign drops it for a per-kind split. *Recommended:* Keep the tile with a "not a total across kinds" caption, add the per-kind split beside it.
+1. **Warnings without amber.** The redesign's colour law has no amber. Live pages use amber for "warning" in 34 tiles, 27 pills and the at-risk banner. *Ruled — the default:* Negative red with a HOLLOW dot for warning, solid dot for critical — one rule used on every page.
+2. **Money precision.** Some page plans switch to cents (AED 1,275.14), others keep whole dirhams; tests pin whole-AED strings. ~~Recommended: whole dirhams on tiles.~~ **RULED: every money figure is PRECISE, with decimal points (AED 1,275.14), on every page, tile, table and chart label.** Tests that pin whole-AED strings are changed deliberately, and each one says why.
+3. **Dark mode.** The live app has light/dark/system; the redesign defines light only, and no colour in it was validated on dark. **RULED: design a dark mode FOR THE NEW UI.** Dark tokens for every neutral, channel identity, wash, ramp, semantic and hatch. Each is validated the way PALETTE-EVIDENCE.md validated light: contrast against the dark paper, and CVD separation between channel colours. The existing system/light/dark toggle keeps working.
+4. **A level or gap in the delta slot.** Several pages put "vs fleet median" or "vs 95% target" where the redesign reserves a change-over-time. *Ruled — the default:* Allow it, always worded ("+24 against the fleet median"), never a bare arrow.
+5. **Per-tier revenue (AED/km per tier).** #overview would add it; #platforms/tiers rejects it because Uber fares arrive from a weekly walk and cover some weeks of some tiers. *Ruled — the default:* Do not add it until every bar can say "priced n of N"; revisit after.
+6. **Donuts.** The foundation turns every donut into ranked bars; some pages want a 100% bar instead. *Ruled — the default:* Each donut is replaced explicitly per page, as its entry says; no global switch.
+7. **Verdict sentence vs hero figure.** Pages differ on whether the verdict band keeps its figure or the hero tile takes it; tests read the verdict DOM. *Ruled — the default:* Keep the verdict band as the page's statement under "At a glance" and do not repeat its figure as a tile.
+8. **#receipts "Credited, net of re-filings" tile.** The redesign drops it for a per-kind split. *Ruled — the default:* Keep the tile with a "not a total across kinds" caption, add the per-kind split beside it.
 
 Other conflicts the implementation must settle in the foundation, not per page: settlement classes coloured four ways (one mapping, used everywhere); payout components (ink for added, grey for deducted, with signs); the state ramp (engaged / available / idle defined once); build the new glance tile ON the existing `kpiTile`, not beside it; the control bar keeps its six controls and page-specific pickers stay in their pages; `#unit`'s eight tiles fit the six-column glance grid as 6 + 2.
 
