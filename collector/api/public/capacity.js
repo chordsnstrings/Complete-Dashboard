@@ -265,12 +265,19 @@ export async function renderCapacity(root) {
 
   /* ── the whole week ───────────────────────────────────────────────────── */
   const { panel: hp, body: hb } = panel('Every hour of the week',
-    'Darker means more people needed at the current rate. Click an hour to open it.');
+    /* "Darker" was true on a light page only: in dark mode the ramp runs the
+       other way, the busiest cell lightest, in both skins. */
+    'The stronger the shade, the more people needed at the current rate. Click an hour to open it.');
   root.append(hp);
-  const grid = d.cells.map((c) => ({ dow: c.dow, h: c.hour, trips: c.drivers_needed ?? 0 }));
+  /* A cell with no need worked out stays ABSENT. `?? 0` handed it in as a
+     nought, so its tooltip read "0 drivers needed" for an hour whose need was
+     never computed (capacity_routes.js: drivers_needed is null where the cell
+     has no driver count or no projection to scale). */
+  const grid = d.cells.map((c) => ({ dow: c.dow, h: c.hour, trips: c.drivers_needed }));
   /* The unit, in the tooltip. Every cell said "— 28.6 trips" where the value
      is DRIVERS NEEDED, contradicting the caption directly beneath it. */
   heatmap(hb, grid, { unit: 'drivers needed', valueFmt: (v) => fmt(v, 1),
+    gapLabel: 'no need worked out: no driver count or projection for this hour',
     onClick: (c) => { location.hash = href('slot', String(c.dow), String(c.h)); } });
   /* The caption used to promise something this grid does not show: "an hour
      with modest demand and nobody on it matters more to a rota than a busy
@@ -287,7 +294,7 @@ export async function renderCapacity(root) {
     + 'have delivered in it, the demand divides back out: drivers needed comes to the drivers already on '
     + `that hour times ${t.min_need_ratio != null ? `about ${fmt(t.min_need_ratio, 2)}×` : 'one constant'}, `
     + 'the same multiplier everywhere. So this ranks hours by the cover they already carry, and the hours '
-    + 'nobody works are the pale ones. Shading is against this grid\'s own busiest cell — a ranking within '
+    + 'nobody works are the faintest ones. Shading is against this grid\'s own busiest cell — a ranking within '
     + 'the week, not an absolute level.'));
 
   /* ── the arithmetic, in full ──────────────────────────────────────────── */

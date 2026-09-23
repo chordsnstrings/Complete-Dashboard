@@ -156,15 +156,19 @@ export async function renderOptimise(root) {
      online hour, so a cell is a RATE and a thin Tuesday does not out-rank a
      busy one just for being busy. */
   const hm = panel('Best hours to be online',
-    'Jobs won per hour online, by weekday and hour. Darker is a better hour to be working. '
+    'Jobs won per hour online, by weekday and hour. The stronger the shade, the better the hour to be working. '
     + 'A rate, not a count — an hour with two drivers and one job beats an hour with twenty and five.');
   root.append(hm.panel);
   if (cells.length) {
     /* The heatmap keys on `trips`, which is what every other caller feeds it.
        The value here is a RATE, so it carries its own unit and formatter
        rather than being rounded into a count that would read as "0 jobs". */
-    heatmap(hm.body, cells.map((c) => ({ dow: c.dow, h: c.h, trips: Number(c.jobs_per_online_h) })),
-      { unit: 'jobs per online hour',
+    /* A rate with no online hours under it is ABSENT, not nought:
+       Number(null) made it 0, and the tooltip said "0.00 jobs per online hour"
+       for an hour nobody was online (supply_routes.js: null when on = 0). */
+    heatmap(hm.body, cells.map((c) => ({ dow: c.dow, h: c.h,
+      trips: c.jobs_per_online_h == null ? null : Number(c.jobs_per_online_h) })),
+      { unit: 'jobs per online hour', gapLabel: 'nobody was online in this hour, so there is no rate',
         valueFmt: (v) => v.toFixed(2),
         onClick: (c) => { location.hash = href('slot', String(c.dow), String(c.h)); } });
     hm.body.append(el('p', 'cap',

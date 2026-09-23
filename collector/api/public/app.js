@@ -1341,7 +1341,10 @@ V.demand = async (root) => {
   const ctxP = panel('Trips against weather and holidays',
     'Heat, rain and Ramadan all move Dubai demand. This puts trips and weather side by side so a dip has a possible reason.');
   root.append(ctxP.panel);
-  const hm = panel('Busiest hours of the week', 'Darker = busier. Click a cell for that hour'); root.append(hm.panel);
+  /* "Darker = busier" was true on a light page only: in dark mode the ramp
+     runs the other way in both skins, and the busiest cell is the lightest. */
+  const hm = panel('Busiest hours of the week', 'The stronger the shade, the busier the hour. Click a cell for that hour');
+  root.append(hm.panel);
   [hourly.body, daily.body, ctxP.body, hm.body].forEach(loading);
 
   const gen = currentGen();

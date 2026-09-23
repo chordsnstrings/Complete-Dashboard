@@ -534,6 +534,82 @@ for (const skin of ['classic', 'arkiv']) {
     && !c.bar100.ring && c.bar100.segs === 6, JSON.stringify([a.bar100.segs, c.bar100.segs]));
 }
 
+/* ── 6 · heatmap ───────────────────────────────────────────────────────── */
+console.log('\n6 · heatmap: graphite, the outline for no reading, a strip for a key');
+const HM = async ([rows]) => {
+  const c = await import('/charts.js');
+  document.querySelector('#mhost')?.remove();
+  const host = document.createElement('div'); host.id = 'mhost'; host.className = 'panel';
+  host.style.cssText = 'width:1000px;position:absolute;left:0;top:0';
+  document.body.append(host);
+  c.heatmap(host, rows, { unit: 'trips' });
+  const cs = (e) => getComputedStyle(e);
+  const cells = [...host.querySelectorAll('svg rect')].map((r) => ({ fill: r.getAttribute('fill'), stroke: r.getAttribute('stroke'),
+    paint: cs(r).fill }));
+  const key = host.querySelector('.legend');
+  return { vb: host.querySelector('svg').getAttribute('viewBox'), cells, keyClass: key.className,
+    steps: [...key.querySelectorAll('.hm-step')].map((e) => cs(e).backgroundColor),
+    ends: [...key.querySelectorAll('.hm-end')].map((e) => e.textContent),
+    swatches: key.querySelectorAll('.sw').length, text: key.textContent };
+};
+/* Monday at 08:00 is the busiest hour; Tuesday runs a gradient; Wednesday
+   at 03:00 was measured at nought; nothing else was recorded at all. */
+const hmRows = [{ dow: 1, h: 8, trips: 60 }, ...[0, 1, 2, 3, 4, 5].map((k) => ({ dow: 2, h: 10 + k, trips: 1 + k * 10 })),
+  { dow: 3, h: 3, trips: 0 }];
+const at = (d, h) => d * 24 + h;
+const H6 = {};
+for (const [skin, scheme] of [['classic', 'light'], ['arkiv', 'light'], ['arkiv', 'dark']]) {
+  const { ctx, page } = await open(skin, { scheme });
+  H6[`${skin}-${scheme}`] = await page.evaluate(HM, [hmRows]);
+  await ctx.close();
+}
+{
+  const c = H6['classic-light'], a = H6['arkiv-light'], k = H6['arkiv-dark'];
+  check('old skin: the blue ramp, a zero and an unrecorded hour drawn alike, the old key, the 760 box',
+    c.vb === '0 0 760 208' && c.cells[at(1, 8)].fill === 'var(--b700)' && c.cells[at(3, 3)].fill === 'var(--surface-2)'
+    && c.cells[at(0, 0)].fill === 'var(--surface-2)' && c.cells[at(0, 0)].stroke === 'var(--rule)'
+    && c.swatches === 8 && /none/.test(c.text), JSON.stringify([c.vb, c.cells[at(1, 8)], c.cells[at(3, 3)], c.swatches]));
+  check('Arkiv: drawn at the host’s width', a.vb === '0 0 1000 208', a.vb);
+  const tue = [0, 1, 2, 3, 4, 5].map((q) => a.cells[at(2, 10 + q)].fill);
+  check('Arkiv: graphite, --seq-0 … --seq-5 as sequentialIndex picks, the busiest hour the darkest step',
+    a.cells[at(1, 8)].fill === 'var(--seq-5)'
+    && JSON.stringify(tue) === JSON.stringify([1, 11, 21, 31, 41, 51].map((v) => `var(--seq-${T.sequentialIndex(v / 60)})`)),
+    JSON.stringify([a.cells[at(1, 8)].fill, tue]));
+  check('Arkiv: an hour with NO READING is the absence outline, never step 0 and never a fill',
+    a.cells[at(0, 0)].fill === 'none' && a.cells[at(0, 0)].stroke === 'var(--abs-outline)', JSON.stringify(a.cells[at(0, 0)]));
+  check('Arkiv: an hour measured at nought is a third thing: an empty paper-2 cell',
+    a.cells[at(3, 3)].fill === 'var(--paper-2)' && a.cells[at(3, 3)].stroke === 'var(--hair)', JSON.stringify(a.cells[at(3, 3)]));
+  check('Arkiv: the key is one strip of the six steps, labelled 0 and 60 at its ends',
+    /hm-key/.test(a.keyClass) && a.steps.length === 6
+    && JSON.stringify(a.steps) === JSON.stringify(T.SEQUENTIAL.map(rgb)) && a.ends.join() === '0,60', JSON.stringify(a));
+  check('Arkiv: …and names the outline and the empty cell in words, because both are on this grid',
+    /nothing recorded/.test(a.text) && /none, measured/.test(a.text), a.text);
+  check('Arkiv dark: the same steps from the dark graphite ramp',
+    JSON.stringify(k.steps) === JSON.stringify(T.SEQUENTIAL_DARK.map(rgb)), JSON.stringify(k.steps));
+}
+{
+  /* The key names what an absent cell MEANS for the measure, where the
+     caller says (a rate with no hours under it). */
+  const { ctx, page } = await open('arkiv');
+  const g = await page.evaluate(async () => {
+    const c = await import('/charts.js');
+    const host = document.createElement('div'); host.style.width = '900px'; document.body.append(host);
+    c.heatmap(host, [{ dow: 1, h: 8, trips: 2.5 }, { dow: 1, h: 9, trips: null }],
+      { unit: 'jobs per online hour', gapLabel: 'nobody was online in this hour, so there is no rate' });
+    return host.querySelector('.legend').textContent;
+  });
+  check('a caller’s own reason for an absent cell is the one the key prints',
+    /nobody was online in this hour, so there is no rate/.test(g) && !/nothing recorded/.test(g), g);
+  await ctx.close();
+  /* The callers that handed an absent cell in as a nought, and the captions
+     that named a shade that is only darker on a light page. */
+  const code = (f) => read(f).replace(/\/\*[\s\S]*?\*\//g, ' ');
+  check('no heatmap caller turns an unmeasured cell into 0 (capacity ?? 0, optimise Number(null))',
+    !/drivers_needed \?\? 0/.test(code('capacity.js')) && !/trips: Number\(c\.jobs_per_online_h\)/.test(code('optimise.js')));
+  const dark = ['app.js', 'capacity.js', 'optimise.js'].filter((f) => /Darker (=|means|is)/.test(code(f)));
+  check('no heatmap caption says "darker" — in dark mode the busiest cell is the lightest', dark.length === 0, dark.join(' '));
+}
+
 /* #forecast itself: the caption names the treatment the chart draws. */
 console.log('\n1b · #forecast says what it draws');
 for (const skin of ['classic', 'arkiv']) {

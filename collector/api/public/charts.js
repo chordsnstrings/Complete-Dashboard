@@ -7,7 +7,7 @@ const tt = () => document.getElementById('tt');
    and a bar coloured `--s8` disappeared entirely. Both are now defined; this
    list and the palette must stay in step. */
 import { TZ, dubaiDay } from './tz.js';
-import { WASH_ALPHA, CHANNEL_ORDER, channelKey } from './tokens.js';
+import { WASH_ALPHA, CHANNEL_ORDER, channelKey, sequentialIndex } from './tokens.js';
 /* The eight categorical SLOTS, asked for by position (STEP 2).
    ─────────────────────────────────────────────────────────────────────────
    L1: a hue names a channel and is never cycled by index. This was the list
@@ -1128,14 +1128,32 @@ export function hbars(host, data, { label = 'label', value = 'n', color, seq = f
    has no way to know the colours are relative rather than absolute. Zero and
    never-seen were shaded identically; they are now a distinct empty cell and
    a legend entry of their own. */
-export function heatmap(host, rows, { onClick, unit = 'trips',
-  valueFmt = (v) => fmt(v), legend = true, aria = null } = {}) {
+/* Arkiv (STEP 2, plan §3 "heatmap"): the blue ramp becomes GRAPHITE, the six
+   steps of tokens.js SEQUENTIAL picked by sequentialIndex() — the pick
+   sequentialOf() makes — as --seq-<i>, so the theme toggle repaints it; an
+   hour with NO READING is SPEC §5's outline (1px --abs-outline, no fill),
+   never step 0 and never a pale fill, which reads as a small value; an hour
+   measured at nought is an empty paper-2 cell, which is a different fact
+   from both and which the old skin drew identically to "nothing recorded";
+   and the key is a neutral strip with its two ends labelled. Both choices
+   are tokens (--mk-steps, --mk-absent), so the old skin keeps its seven blue
+   steps, its floor buckets, its shared "none" cell and its key, exactly. */
+/* `gapLabel`: what an hour with no reading MEANS for this measure, where
+   "nothing recorded" is not the true reason — a rate with no hours under it,
+   a need with no driver count to scale. The cell is then drawn and keyed as
+   absent, never handed in as a nought (two callers did: `?? 0` and
+   Number(null)), which the old skin printed as "0 drivers needed". */
+export function heatmap(host, rows, opts = {}) {
+  const { onClick, unit = 'trips', valueFmt = (v) => fmt(v), legend = true, aria = null, gapLabel = null } = opts;
   host.innerHTML = '';
   if (!rows.length) return empty(host);
+  const form = markForm();
+  whenLaidOut(host, form, () => heatmap(host, rows, opts));
+  const graphite = form.steps !== SEQ.length, outline = form.absent === 'outline';
   const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const grid = {}; let max = 0;
   rows.forEach((r) => { grid[`${r.dow}-${r.h}`] = r.trips; max = Math.max(max, +r.trips || 0); });
-  const W = 760, cell = 26, lw = 40, H = 7 * cell + 26;
+  const W = form.fit ? chartBox(host).W : 760, cell = 26, lw = 40, H = 7 * cell + 26;
   const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
   for (let d = 0; d < 7; d++) {
     svg.append(txt(lw - 8, d * cell + 17, DOW[d], 'axis', 'end'));
@@ -1143,21 +1161,34 @@ export function heatmap(host, rows, { onClick, unit = 'trips',
       const raw = grid[`${d}-${h}`];
       const seen = raw != null;
       const v = +raw || 0, w = (W - lw - 8) / 24;
-      const idx = v === 0 ? -1 : Math.min(6, Math.floor(v / (max || 1) * 6.99));
-      const rect = mk('rect', {
-        x: lw + h * w, y: d * cell + 3, width: w - 2, height: cell - 4, rx: 2,
-        fill: idx < 0 ? 'var(--surface-2)' : `var(${SEQ[idx]})`,
-        ...(idx < 0 ? { stroke: 'var(--rule)', 'stroke-width': 1 } : {}),
-      });
+      let rect;
+      if (!graphite) {
+        const idx = v === 0 ? -1 : Math.min(6, Math.floor(v / (max || 1) * 6.99));
+        rect = mk('rect', {
+          x: lw + h * w, y: d * cell + 3, width: w - 2, height: cell - 4, rx: 2,
+          fill: idx < 0 ? 'var(--surface-2)' : `var(${SEQ[idx]})`,
+          ...(idx < 0 ? { stroke: 'var(--rule)', 'stroke-width': 1 } : {}),
+        });
+      } else {
+        const box = { x: lw + h * w, y: d * cell + 3, width: w - 2, height: cell - 4, rx: 1 };
+        rect = !seen && outline
+          ? mk('rect', { ...box, x: box.x + 0.5, y: box.y + 0.5, width: box.width - 1, height: box.height - 1,
+            fill: 'none', stroke: 'var(--abs-outline)', 'stroke-width': 1, 'pointer-events': 'all', 'data-absent': '' })
+          : v === 0
+            ? mk('rect', { ...box, x: box.x + 0.5, y: box.y + 0.5, width: box.width - 1, height: box.height - 1,
+              fill: 'var(--paper-2)', stroke: 'var(--hair)', 'stroke-width': 1, 'data-zero': '' })
+            : mk('rect', { ...box, fill: `var(--seq-${sequentialIndex(v / (max || 1), form.steps)})` });
+      }
       interactive(rect, `${DOW[d]} ${String(h).padStart(2, '0')}:00 — `
-        + (seen ? `<b>${valueFmt(v)}</b> ${esc(unit)}` : `<b>nothing recorded</b> in this hour`),
+        + (seen ? `<b>${valueFmt(v)}</b> ${esc(unit)}`
+          : gapLabel ? `<b>${esc(gapLabel)}</b>` : `<b>nothing recorded</b> in this hour`),
         onClick && (() => onClick({ dow: d, h, trips: v })));
       svg.append(rect);
     }
   }
   [0, 4, 8, 12, 16, 20, 23].forEach((h) => svg.append(txt(lw + h * ((W - lw - 8) / 24) + 6, H - 6, String(h).padStart(2, '0'), 'axis', 'middle')));
   host.append(svg);
-  if (legend) {
+  if (legend && !graphite) {
     const buckets = [0, 1, 2, 3, 4, 5, 6].map((i) => {
       const lo = (max * i) / 7, hi = (max * (i + 1)) / 7;
       return `<span title="${valueFmt(lo)} – ${valueFmt(hi)} ${esc(unit)}">`
@@ -1168,6 +1199,29 @@ export function heatmap(host, rows, { onClick, unit = 'trips',
       + `<span class="dim">0</span>${buckets}`
       + `<span class="dim">${esc(unit)} — shaded against this window's own busiest hour `
       + `(${valueFmt(max)}), so the colours are relative and not comparable between ranges.</span>`;
+    host.append(leg);
+  } else if (legend) {
+    /* One strip, the steps abutting, labelled at its two ends; the outline
+       and the empty cell keyed beside it in words. Each step still carries
+       its range in a title. */
+    const steps = Array.from({ length: form.steps }, (_, i) => {
+      const lo = (max * i) / form.steps, hi = (max * (i + 1)) / form.steps;
+      return `<i class="hm-step" style="background:var(--seq-${i})" title="${valueFmt(lo)} – ${valueFmt(hi)} ${esc(unit)}"></i>`;
+    }).join('');
+    /* Each of the other two keys only where the grid has one: a key entry
+       for a mark nobody can find on the chart is a caption about nothing. */
+    let zeros = 0, unseen = 0;
+    for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) {
+      const raw = grid[`${d}-${h}`];
+      if (raw == null) unseen++; else if (!(+raw)) zeros++;
+    }
+    const leg = document.createElement('div'); leg.className = 'legend hm-key';
+    leg.innerHTML = `<span class="hm-strip"><span class="hm-end">0</span>${steps}`
+      + `<span class="hm-end">${esc(valueFmt(max))}</span></span>`
+      + (zeros ? `<span><i class="sw hm-zero"></i>none, measured</span>` : '')
+      + (unseen && outline ? `<span><i class="sw hm-none"></i>${esc(gapLabel || 'nothing recorded')}</span>` : '')
+      + `<span class="dim">${esc(unit)} — shaded against this window's own busiest hour `
+      + `(${esc(valueFmt(max))}), so the shades are relative and not comparable between ranges.</span>`;
     host.append(leg);
   }
 }

@@ -1061,6 +1061,16 @@ driver's 222 tracker fixes.
      `['--b400', 'added'], ['--s2', 'deducted']` — identical in the old skin,
      and graphite beside ink bars under Arkiv. A new key over default bars
      names the job tokens; `test/chart_marks.test.mjs` scans for it.
+  8. **A sentence that names a SHADE is false in one theme.** The sequential
+     ramp keeps its meaning by flipping its anchor with the paper, so in dark
+     mode the busiest cell is the LIGHTEST, in both skins. "Darker = busier"
+     (three captions) was true for light readers only. Say "the stronger the
+     shade"; never "darker", "lighter" or "pale" about a ramp.
+  9. **Never hand the heatmap a nought for an hour nobody measured.** It
+     tells no reading (`trips` null or absent) from a measured zero, and
+     under Arkiv draws them differently (the outline, and an empty cell).
+     `?? 0` and `Number(null)` turned the first into the second on #capacity
+     and #optimise. Pass null, and `gapLabel` with the true reason.
 
 * **A PROPOSAL FROM ANYWHERE BUT THE RULE CANNOT LIVE IN `driver_identity_link`.**
   `src/identity_link.js` DELETEs every unconfirmed, unrejected row in that table
