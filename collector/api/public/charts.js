@@ -734,21 +734,39 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
    cumulative SHARE topped out at 100% drew a gridline labelled 114%, which is
    a value the series cannot take. Given, the headroom is skipped and the axis
    says what the measure's maximum actually is. */
-export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) => fmt(v), onClick, max: fixedMax, aria = null } = {}) {
+/* SPEC §4-§5 under Arkiv (STEP 2): drawn at the measured box; the area a 10%
+   wash rather than a 30% gradient; a gap in the series is a GAP — "the line
+   ends and a new one starts … not a dotted bridge" — so the dashed connector
+   is not shown; markers r 4 with a 2px surface ring; and the ENDPOINT carries
+   its value, the one label SPEC §4 asks a trend for. The paint half of that
+   (wash, bridge, marker, label) is arkiv.css §17 on the classes below, and
+   the old skin draws exactly what it drew: its app.css hides only the new
+   endpoint label. The plan read the bridge at charts.js:581 as a "dashed
+   reference line" to be made solid; it is the gap connector, and SPEC §5
+   forbids a straight segment across a hole, so it goes instead. */
+export function areaChart(host, data, opts = {}) {
+  const { x, y, color = '--b400', valueFmt = (v) => fmt(v), onClick, max: fixedMax, aria = null } = opts;
   host.innerHTML = '';
   if (!data.length) return empty(host);
-  const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 30;
+  const form = markForm();
+  whenLaidOut(host, form, () => areaChart(host, data, opts));
   // The scale is set by what was MEASURED. An unmeasured point is not a zero
   // and must not pull the axis, any more than it may pull the line.
   const vals = data.map((d) => Number(d[y])).filter(Number.isFinite);
   const peak = vals.length ? Math.max(...vals) : 0;
+  let W = 720, H = 240, pl = 46;
+  const pr = 12, pt = 18, pb = 30;
+  if (form.fit) {
+    ({ W, H } = chartBox(host));
+    pl = axisGutter(yTicks({ hi: peak, fixedMax }).map((v) => valueFmt(v)));
+  }
   const iw = W - pl - pr, ih = H - pt - pb;
   const X = (i) => pl + (data.length === 1 ? iw / 2 : iw * i / (data.length - 1));
   const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
   const { max } = yAxis(svg, { hi: peak, pl, pr, pt, ih, W, fmt: valueFmt, fixedMax });
   const Y = (v) => pt + ih - ih * v / max;
   const id = 'g' + Math.random().toString(36).slice(2, 7);
-  const defs = mk('defs'); const lg = mk('linearGradient', { id, x1: 0, x2: 0, y1: 0, y2: 1 });
+  const defs = mk('defs'); const lg = mk('linearGradient', { id, x1: 0, x2: 0, y1: 0, y2: 1, class: 'ar-wash' });
   lg.append(mk('stop', { offset: 0, 'stop-color': `var(${color})`, 'stop-opacity': .30 }),
     mk('stop', { offset: 1, 'stop-color': `var(${color})`, 'stop-opacity': 0 }));
   defs.append(lg); svg.append(defs);
@@ -781,7 +799,7 @@ export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) =
        empty plot. A vehicle with one earning day is reachable from two pages. */
     if (idx.length === 1) {
       const i = idx[0];
-      svg.append(mk('circle', { cx: X(i), cy: Y(+data[i][y]), r: 3.5,
+      svg.append(mk('circle', { cx: X(i), cy: Y(+data[i][y]), r: 3.5, class: 'ar-dot',
         fill: `var(${color})`, stroke: 'var(--surface)', 'stroke-width': 2, 'data-fade': '' }));
       return;
     }
@@ -799,7 +817,7 @@ export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) =
     if (prev) {
       const a = prev[prev.length - 1], b = idx[0];
       svg.append(mk('line', { x1: X(a), y1: Y(+data[a][y]), x2: X(b), y2: Y(+data[b][y]),
-        stroke: 'var(--rule-strong)', 'stroke-width': 1.4, 'stroke-dasharray': '4 3' }));
+        stroke: 'var(--rule-strong)', 'stroke-width': 1.4, 'stroke-dasharray': '4 3', class: 'ar-bridge' }));
     }
   });
   /* Where the series ENDS, marked. A reader scanning a trend is looking for
@@ -807,8 +825,16 @@ export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) =
   const lastSeg = segs[segs.length - 1];
   if (lastSeg && lastSeg.length > 1) {
     const i = lastSeg[lastSeg.length - 1], px = X(i), py = Y(+data[i][y]);
-    svg.append(mk('circle', { cx: px, cy: py, r: 3.5, fill: `var(${color})`,
+    svg.append(mk('circle', { cx: px, cy: py, r: 3.5, class: 'ar-dot', fill: `var(${color})`,
       stroke: 'var(--surface)', 'stroke-width': 2, 'data-fade': '' }));
+  }
+  /* The endpoint's value, as text beside the last measured point: above it,
+     or below where the point sits at the top of the plot, and anchored to
+     the end so it never leaves the drawing. Hidden in the old skin. */
+  if (lastSeg) {
+    const i = lastSeg[lastSeg.length - 1], py = Y(+data[i][y]);
+    svg.append(txt(Math.min(X(i), W - pr), py < pt + 14 ? py + 16 : py - 9,
+      String(valueFmt(data[i][y])), 'ar-end', 'end'));
   }
   data.forEach((d, i) => {
     if (!measured(d[y])) {
@@ -823,7 +849,7 @@ export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) =
   });
   // The same thinning rule the bars use, so two time axes in one panel column
   // do not disagree about how often a date is worth printing.
-  xTickIndices(data.length).forEach((i) =>
+  xTickIndices(data.length, tickTarget(data.map((d) => shortLabel(d[x])), iw, form)).forEach((i) =>
     svg.append(txt(X(i), H - 8, shortLabel(data[i][x]), 'axis', 'middle')));
   host.append(svg);
 }

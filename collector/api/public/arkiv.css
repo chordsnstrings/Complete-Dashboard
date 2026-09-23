@@ -844,3 +844,15 @@
 :root[data-skin="arkiv"] .sw-proj::after{content:"";position:absolute;inset:1px;
   background:repeating-linear-gradient(-45deg,var(--paper) 0 3px,
     color-mix(in srgb,var(--paper) calc((1 - var(--hatch-a)) * 100%),transparent) 3px 4px)}
+/* areaChart (SPEC §4-§5): the area is a flat 10% wash of the line's colour,
+   not a 30% gradient; a hole in the series is a GAP, so the dashed bridge
+   the old skin draws across it is not shown ("not a dotted bridge, not a
+   straight segment across the hole"); markers are r 4 inside their 2px
+   surface ring; and the endpoint carries its value. The rating spark on the
+   driver page is a 2px line at any width. */
+:root[data-skin="arkiv"] .ar-wash stop{stop-opacity:.1}
+:root[data-skin="arkiv"] .ar-bridge{display:none}
+:root[data-skin="arkiv"] .ar-dot{r:4px}
+:root[data-skin="arkiv"] .ar-end{display:inline;font-family:var(--mono);font-size:var(--t2);
+  font-weight:600;fill:var(--ink)}
+:root[data-skin="arkiv"] .rt-spark .rt-line{stroke-width:2;vector-effect:non-scaling-stroke}

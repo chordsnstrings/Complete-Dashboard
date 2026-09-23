@@ -334,6 +334,50 @@ for (const skin of ['classic', 'arkiv']) {
   await ctx.close();
 }
 
+/* ── 3 · areaChart ───────────────────────────────────────────────────── */
+console.log('\n3 · areaChart: a 10% wash, a gap that is a gap, the endpoint labelled');
+const AREA = async ([width, data]) => {
+  const c = await import('/charts.js');
+  document.querySelector('#ahost')?.remove();
+  const host = document.createElement('div'); host.id = 'ahost'; host.className = 'panel';
+  host.style.cssText = `width:${width}px;position:absolute;left:0;top:0`;
+  document.body.append(host);
+  c.areaChart(host, data, { x: 'd', y: 'v', valueFmt: (v) => `${v} trips` });
+  const svg = host.querySelector('svg'), cs = (e) => getComputedStyle(e);
+  const end = svg.querySelector('.ar-end');
+  const vbw = +svg.getAttribute('viewBox').split(' ')[2];
+  return { vb: svg.getAttribute('viewBox'),
+    stops: [...svg.querySelectorAll('.ar-wash stop')].map((e) => +cs(e).stopOpacity),
+    bridge: [...svg.querySelectorAll('.ar-bridge')].map((e) => cs(e).display),
+    dots: [...svg.querySelectorAll('.ar-dot')].map((e) => cs(e).r),
+    end: end && { shown: cs(end).display !== 'none', text: end.textContent,
+      inside: end.getBBox().x >= 0 && end.getBBox().x + end.getBBox().width <= vbw + 0.5 },
+    line: [...svg.querySelectorAll('path[stroke]')].map((p) => [p.getAttribute('stroke-width'), p.getAttribute('stroke-linejoin')]) };
+};
+const series = [{ d: 'a', v: 10 }, { d: 'b', v: 14 }, { d: 'c', v: null }, { d: 'd', v: 12 }, { d: 'e', v: 19 }];
+for (const skin of ['classic', 'arkiv']) {
+  const { ctx, page } = await open(skin);
+  const r = await page.evaluate(AREA, [800, series]);
+  if (skin === 'classic') {
+    check('old skin: the 720 box, the 30% → 0 gradient, the dashed bridge, r 3.5, no endpoint label',
+      r.vb === '0 0 720 240' && Math.abs(r.stops[0] - 0.3) < 1e-6 && r.stops[1] === 0
+      && r.bridge.length === 1 && r.bridge[0] !== 'none' && r.dots.every((x) => x === '3.5px') && r.end && !r.end.shown,
+      JSON.stringify(r));
+  } else {
+    check('Arkiv: drawn at the host’s width', r.vb.startsWith('0 0 800 '), r.vb);
+    check('Arkiv: the area is a flat 10% wash', r.stops.length === 2 && r.stops.every((o) => Math.abs(o - 0.1) < 1e-6),
+      JSON.stringify(r.stops));
+    check('Arkiv: a gap is a gap — no bridge across the hole', r.bridge.length === 1 && r.bridge[0] === 'none',
+      JSON.stringify(r.bridge));
+    check('Arkiv: markers are r 4', r.dots.length >= 1 && r.dots.every((x) => x === '4px'), JSON.stringify(r.dots));
+    check('Arkiv: the endpoint carries its value, inside the drawing', r.end && r.end.shown && r.end.text === '19 trips'
+      && r.end.inside, JSON.stringify(r.end));
+  }
+  check(`${skin}: lines stay 2px with round joins`, r.line.length === 2 && r.line.every(([w, j]) => w === '2' && j === 'round'),
+    JSON.stringify(r.line));
+  await ctx.close();
+}
+
 /* #forecast itself: the caption names the treatment the chart draws. */
 console.log('\n1b · #forecast says what it draws');
 for (const skin of ['classic', 'arkiv']) {
