@@ -9,6 +9,13 @@ import { pool, migrate } from '../src/db.js';
 import { config } from '../src/config.js';
 import { pgTx } from './tx.js';
 import { importRoutes } from './import_routes.js';
+/* The operator's HR roster export: an admin-gated preview and commit, and a
+   read every page may use. hrForCompliance is used INSIDE the region
+   test/mount.mjs slices (/api/compliance/drivers puts HR's licence date
+   first), so it is injected there too — and in test/server_redaction.test.mjs,
+   which slices the same route with its own injection set. */
+import { hrRosterRoutes } from './hr_roster_routes.js';
+import { hrForCompliance } from './hr_roster.js';
 import { describeSettings, setSetting, deleteSetting, loadSettings, recordCredentialVisibility } from '../src/settings.js';
 import { recognise, unrecognised } from '../src/credkit.js';
 import { checkAll } from '../src/credcheck.js';
@@ -5362,6 +5369,8 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
         person_placed: pid != null,
         accounts: [],
         raws: [],
+        hr: [],
+        hr_only: false,
       });
     }
     const g = groups.get(key);
@@ -5374,6 +5383,55 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
        withheld values rather than trusting that. */
     g.raws.push(raw);
   });
+
+  /* ── HR'S DOCUMENTS, ATTACHED TO THE PERSON THEY BELONG TO ──────────────
+     ═══════════════════════════════════════════════════════════════════════
+     The operator's HR roster export is the only source this product has for
+     passport, Emirates ID, visa and RTA-permit expiry, and a second licence
+     expiry beside the platforms'. Measured on the 2026-09-23 export: this
+     route said 88 people could not legally drive, every one of them on
+     Yango's licence date, and for the 32 of them on HR's list HR says the
+     licence is valid — 34 of Yango's 59 dates were about five years older
+     than HR's, renewals Yango never picked up.
+
+     Each HR person on the LATEST export is attached through the accounts
+     their row matched (by platform id, else phone — never by name; see
+     api/hr_roster.js): to the spine person those accounts belong to, or to
+     the unplaced account row. An HR person whose accounts have no compliance
+     record at all still gets a row — they are an employee whose papers
+     expire — and one who matched no account at all is marked hr_only rather
+     than being counted as an unplaced ACCOUNT, which they are not.
+
+     What comes across is expiry dates and whether a number is on file.
+     hrForCompliance() never selects a document number, so none can reach
+     this response by any path. */
+  const hrRoster = await hrForCompliance(q);
+  for (const e of hrRoster.people) {
+    if (fleet && e.fleet_id !== fleet) continue;
+    const keys = [...new Set(e.accounts.map((a) => {
+      const pid = spine.byAccount.get(a.ext_id);
+      return pid != null ? `person:${pid}` : `account:${a.platform}\u0000${a.ext_id}`;
+    }))];
+    let targets = keys.filter((k) => groups.has(k));
+    if (!targets.length) {
+      const k = keys[0] || `hr:${e.fleet_id}\u0000${e.employee_id}`;
+      const pid = k.startsWith('person:') ? Number(k.slice(7)) : null;
+      const p = pid == null ? null : spine.person.get(pid);
+      groups.set(k, {
+        person_id: pid,
+        name: p?.name || e.name || null,
+        driver_ext_id: p?.ext_id || e.accounts[0]?.ext_id || null,
+        platform: p?.platform || e.accounts[0]?.platform || null,
+        person_placed: pid != null,
+        accounts: [],
+        raws: [],
+        hr: [],
+        hr_only: e.accounts.length === 0,
+      });
+      targets = [k];
+    }
+    for (const k of targets) groups.get(k).hr.push(e);
+  }
 
   /* Two accounts of one person disagreeing about a document is either a filing
      error or evidence the merge was wrong, and this page is where it should
@@ -5431,7 +5489,18 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
        whichever of their records carries it. */
     const worst = dated.reduce(
       (best, r) => (best == null || daysLeftOf(r) < daysLeftOf(best) ? r : best), null);
-    const daysLeft = worst ? daysLeftOf(worst) : null;
+    /* HR FIRST. The operator's decision (2026-09-23): where HR's roster
+       carries a licence expiry for this person, that is the date this page and
+       every figure on it use. The platform's date is KEPT, beside it, and a
+       difference is reported as a disagreement — never silently dropped, since
+       a Yango date newer than HR's would be HR's filing falling behind, and
+       that is worth seeing too. The soonest HR date wins when two HR rows
+       attach to one person, for the same reason the soonest platform date
+       does: one lapsed licence stands the person down. */
+    const hrLic = g.hr.filter((e) => e.documents.licence.expires)
+      .sort((a, b) => a.documents.licence.days_left - b.documents.licence.days_left)[0] || null;
+    const platformDays = worst ? daysLeftOf(worst) : null;
+    const daysLeft = hrLic ? hrLic.documents.licence.days_left : platformDays;
     /* ABSENT WITH A REASON, AND THE REASON IS THE TRUE ONE. A person with no
        checkable date is not valid, is not expired, and is certainly not zero
        days from expiry. The three ways they can get here are different facts
@@ -5447,6 +5516,9 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
        neither single-cause wording, and this roster has both kinds on the same
        people: 94 accounts carry the default date and 195 carry none at all. */
     const unknownReason = daysLeft != null ? null
+      : g.hr.length && !g.raws.length
+        ? 'HR’s roster carries no licence expiry for this person and no platform record of '
+          + 'theirs is on file, so whether their licence is valid cannot be answered'
       : phAcc && noDateAcc
         ? `of this person’s ${g.raws.length} records, ${phAcc} carry the value this source `
           + `writes when the field was never filled in and ${noDateAcc} carry no date at all, `
@@ -5488,12 +5560,41 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
       picture_url: g.accounts.map((a) => a.picture_url).find(Boolean) || null,
       licence_status: status,
       days_left: daysLeft,
-      licence_expires: worst ? dayOf(worst.licence_expires) : null,
+      licence_expires: hrLic ? hrLic.documents.licence.expires
+        : worst ? dayOf(worst.licence_expires) : null,
+      /* WHERE the date this row is headed by came from: 'hr' when HR's roster
+         carries one (it wins), 'platform' otherwise, null when nobody does. */
+      licence_source: hrLic ? 'hr' : worst ? 'platform' : null,
       /* WHICH record carries the expiry this row is headed by. A person row
          that says "expired 247 days ago" and does not say which of three
-         records says so gives an operator nothing to act on. */
+         records says so gives an operator nothing to act on. With HR's date
+         leading, the HR row is named in `hr` and this stays the platform's
+         soonest record — the one the disagreement below is with. */
       soonest_account: worst
         ? { platform: worst.platform, driver_ext_id: worst.driver_ext_id } : null,
+      /* The platform's own soonest real date, KEPT whoever leads. */
+      platform_licence_expires: worst ? dayOf(worst.licence_expires) : null,
+      platform_days_left: platformDays,
+      /* HR and the platform on different days. Reported, never resolved here:
+         the page shows both. */
+      licence_disagreement: hrLic && worst
+        && dayOf(worst.licence_expires) !== hrLic.documents.licence.expires
+        ? { hr_expires: hrLic.documents.licence.expires,
+          platform_expires: dayOf(worst.licence_expires),
+          platform: worst.platform, driver_ext_id: worst.driver_ext_id,
+          days_apart: hrLic.documents.licence.days_left - platformDays }
+        : null,
+      /* HR's own record of this person: which employee, HR's compliance label
+         (HR's word, shown as HR's), and every document's expiry with whether a
+         number is on file. Never a number. */
+      hr: g.hr.length ? {
+        fleet_id: g.hr[0].fleet_id, employee_id: g.hr[0].employee_id, name: g.hr[0].name,
+        hr_compliance_status: g.hr[0].hr_compliance_status,
+        export_date: hrRoster.latest?.export_date || null,
+        documents: g.hr[0].documents,
+        employees: g.hr.length,
+      } : null,
+      hr_only: g.hr_only,
       licence_unknown_reason: unknownReason,
       /* Records carrying the source's default date, counted per person: the
          page states this rather than counting them as expiries. */
@@ -5523,7 +5624,11 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
     || String(a.name || '').localeCompare(String(b.name || '')));
 
   const placed = people.filter((p) => p.person_placed).length;
-  const unplaced = people.length - placed;
+  /* An HR row that matched no platform account is a PERSON with no account,
+     not an account with no person — counting it as an "unplaced account"
+     would put a false noun on it. They are counted separately (hr_only). */
+  const hrOnly = people.filter((p) => p.hr_only).length;
+  const unplaced = people.length - placed - hrOnly;
   /* WHAT THIS COUNT IS A COUNT OF, said in the response rather than left for a
      page to assume. Four states, because they are four different answers:
 
@@ -5539,7 +5644,7 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
                     is anybody" — so the page renders the headcount ABSENT WITH
                     A REASON rather than falling back to counting rows. */
   const personBasis = !spine.ok ? 'unreadable'
-    : placed === 0 && people.length > 0 ? 'unplaced'
+    : placed === 0 && people.length - hrOnly > 0 ? 'unplaced'
       : unplaced > 0 ? 'spine-partial' : 'spine';
   const personBasisNote = {
     spine: 'One row per person, from the reviewed person spine — the same table the driver '
@@ -5576,6 +5681,12 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
     with_conflicts: people.filter((p) => p.conflicts.length > 0).length,
     multi_account: people.filter((p) => p.account_count > 1).length,
     accounts: people.reduce((n, p) => n + p.account_count, 0),
+    /* HR's share of the answer, counted so the page can say how much of the
+       headline rests on HR's date rather than a platform's. */
+    hr_matched: people.filter((p) => p.hr).length,
+    hr_only: hrOnly,
+    licence_from_hr: people.filter((p) => p.licence_source === 'hr').length,
+    licence_disagreements: people.filter((p) => p.licence_disagreement).length,
   };
   /* SAID, not merely absent. api/public/app.js rendered a missing licence
      number as an em-dash captioned "this channel publishes no licence number",
@@ -5642,6 +5753,17 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
     people_totals: pt,
     person_basis: personBasis,
     person_basis_note: personBasisNote,
+    /* Which HR export the HR columns come from, or why there are none. Absent
+       with the true reason rather than an empty object: "no HR roster has
+       been uploaded" and "HR lists nobody" are different facts. */
+    hr_roster: hrRoster.latest ? {
+      export_date: hrRoster.latest.export_date, upload_id: hrRoster.latest.upload_id,
+      on_list: hrRoster.people.length, attached: pt.hr_matched, hr_only: pt.hr_only,
+    } : null,
+    hr_absent_reason: hrRoster.latest ? null : hrRoster.absent_reason,
+    licence_precedence: 'Where HR’s roster carries a licence expiry for a person, that date is the '
+      + 'one this page counts. A platform’s date that differs is kept beside it and reported as a '
+      + 'disagreement, never dropped.',
     /* The spine's own view of the fleet, so a page can say when this roster
        covers only part of it — 437 of 810 accounts have a compliance record at
        all, and "349 people" is not "349 people with papers on file". */
@@ -6338,6 +6460,10 @@ personMergeRoutes(app, { q, wrap, tx: pgTx(pool) });
    makes auto-applying a fuzzy match impossible at the boundary rather than
    merely discouraged by a comment. */
 importRoutes(app, { q, wrap, tx: pgTx(pool) });
+/* The HR roster. Same preview/commit split, gated like every other write —
+   and the gate is passed in rather than rebuilt, so it is this process's one
+   warning about an unset ADMIN_TOKEN rather than a second. */
+hrRosterRoutes(app, { q, wrap, tx: pgTx(pool), requireAdmin });
 
 /* ───────────────── one day ─────────────────
    Every source that saw a given Dubai-local day, including whether each one

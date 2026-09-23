@@ -57,6 +57,7 @@ import { renderPerformers, renderPerformer, isWeek } from './performers.js';
 import { renderPerformance } from './performance.js';
 /* The pairs no rule can settle, and a person's verdict on them. */
 import { renderSamePerson } from './sameperson.js';
+import { renderHrRoster } from './hrroster.js';
 import { renderDeposits } from './deposits.js';
 import { renderAdvances } from './advances.js';
 import { renderSalary } from './salary.js';
@@ -449,6 +450,10 @@ const VIEWS = [
   { id: 'performance', label: 'Better or worse', ic: '◲', sec: 'People', sub: 'Every active driver ranked on jobs and on trip value separately, and who is doing something different from what they usually do' },
   { id: 'retention', label: 'Joiners & leavers', ic: '⇅', sec: 'People', sub: 'Whether the driver count fell because people left or because nobody joined' },
   { id: 'compliance', label: 'Compliance', ic: '❑', sec: 'People', sub: 'Driver licences and vehicle papers, and when each one expires' },
+  /* Beside Compliance, because it is where most of that page's documents now
+     come from: the operator's HR export is the only source for passport,
+     Emirates ID, visa and RTA-permit expiry, and HR's licence date leads. */
+  { id: 'hr-roster', label: 'HR roster', ic: '⊟', sec: 'People', sub: 'The HR system’s driver export — every person’s passport, Emirates ID, licence, visa and RTA permit expiry, and the upload that brings a new export in' },
   /* Because the fold is now partly a RULE, and a rule that joins two humans
      has to be readable by the person who knows them. Under People rather than
      under Sources: it is a claim about who somebody is, not about a feed. */
@@ -2055,6 +2060,7 @@ V['low-performers'] = async (root) => renderPerformers(root, 'low');
    they are looking at rather than "the one that was showing". */
 V.performance = async (root) => renderPerformance(root, state.param);
 V['same-person'] = async (root) => renderSamePerson(root);
+V['hr-roster'] = async (root) => renderHrRoster(root);
 V.deposits = async (root) => renderDeposits(root);
 V.advances = async (root) => renderAdvances(root);
 V.salary = async (root) => renderSalary(root);
@@ -4680,6 +4686,21 @@ V.compliance = async (root) => {
   /* The licence NUMBER's default, said beside the date's rather than left for a
      reader to notice that every row shows the same digits. */
   if (drvPage.licence_no_caveat) root.append(note(drvPage.licence_no_caveat, 'warn'));
+  /* HR'S ROSTER, AND THAT ITS LICENCE DATE LEADS. Said above the table, with
+     how many people it reaches and how many disagree with a platform, so a
+     reader comparing this page with yesterday's knows why "cannot legally
+     work" moved. Absent with its reason when nothing has been uploaded. */
+  if (drvPage.hr_roster) {
+    const hrR = drvPage.hr_roster;
+    root.append(note(`HR’s roster (the export of ${dateStr(hrR.export_date)}) is attached to `
+      + `${countOf(hrR.attached, 'person', 'people')} here`
+      + `${hrR.hr_only ? `, ${fmt(hrR.hr_only)} of them on HR’s list with no platform account matched` : ''}. `
+      + `${drvPage.licence_precedence || ''}`
+      + `${pt.licence_disagreements ? ` ${countOf(pt.licence_disagreements, 'person', 'people')} `
+        + `${pt.licence_disagreements === 1 ? 'has' : 'have'} a platform licence date that differs from HR’s.` : ''}`));
+  } else if (drvPage.hr_absent_reason) {
+    root.append(el('p', 'cap', `HR documents: ${drvPage.hr_absent_reason}`));
+  }
 
   // The data holds registration only; naming three document types implied a
   // completeness this page does not have.
@@ -4838,8 +4859,17 @@ V.compliance = async (root) => {
             || 'no licence expiry date on any record this person holds')}">cannot be checked</span>`;
         }
         const n = Number(p.days_left);
+        /* HR's date leads where HR has one; the platform's is kept beside it
+           when the two differ, never dropped. */
+        const src = p.licence_source === 'hr'
+          ? '<div class="dim" title="HR’s roster date — it leads wherever HR has one">HR’s date</div>' : '';
+        const dis = p.licence_disagreement
+          ? `<div>${pill(`${sourceLabel(p.licence_disagreement.platform)} says ${dateStr(p.licence_disagreement.platform_expires)}`,
+            'warn', `HR files ${p.licence_disagreement.hr_expires}; ${sourceLabel(p.licence_disagreement.platform)} files `
+            + `${p.licence_disagreement.platform_expires} — ${fmt(Math.abs(p.licence_disagreement.days_apart))} days apart. `
+            + 'HR’s date is the one counted.')}</div>` : '';
         return `<span class="tag ${n < 0 ? 'err' : n <= 45 ? 'warn' : 'ok'}">`
-          + `${n < 0 ? Math.abs(n) + 'd ago' : n + 'd'}</span>`;
+          + `${n < 0 ? Math.abs(n) + 'd ago' : n + 'd'}</span>${src}${dis}`;
       } },
     { label: 'Driver', key: 'name',
       render: (p) => entity('driver', p.driver_ext_id, p.name)
@@ -4847,7 +4877,9 @@ V.compliance = async (root) => {
            Without it a reader cannot tell a person from a record and the page
            is back where it started — and an account the spine has not placed
            is not a headcount of one, so it says that instead. */
-        + (!p.person_placed
+        + (p.hr_only
+          ? '<div class="dim" title="on HR’s roster, and none of HR’s platform ids or the phone matched an account this product holds">on HR’s list only — no account matched</div>'
+          : !p.person_placed
           ? '<div class="dim" title="the person spine has not attached this platform account to '
             + 'anybody yet, so this row is one ACCOUNT and not a confirmed person">unplaced account</div>'
           : p.account_count > 1
@@ -4869,6 +4901,35 @@ V.compliance = async (root) => {
         + `<span><b>Licence</b>${licenceCell(a)}</span>`
         + `<span><b>Emirates ID</b>${emiratesCell(a)}</span>`
         + '</div>').join('') },
+    /* HR'S DOCUMENTS — the only source this product has for passport,
+       Emirates ID, visa and RTA-permit expiry. Each with its date, how soon,
+       and whether HR filed a number; the number itself never reaches this
+       page (the driver page is where the Emirates ID and licence number are
+       shown). */
+    { label: 'HR documents', key: 'hr',
+      absent: 'nobody on this list is on HR’s roster — either no HR export has been uploaded, or '
+        + 'none of its rows matched these people by platform id or phone',
+      sortValue: (p) => (p.hr ? Math.min(...Object.values(p.hr.documents)
+        .map((d) => (d.days_left == null ? Infinity : d.days_left))) : null),
+      render: (p) => {
+        if (!p.hr) {
+          return '<span class="ent-off" title="no row on HR’s latest roster matched this person by platform id or phone">not on HR’s list</span>';
+        }
+        const W = { expired: ['expired', 'err'], d30: ['≤30d', 'err'], d45: ['≤45d', 'warn'],
+          d90: ['≤90d', 'warn'], ok: ['ok', 'ok'], missing: ['no date', 'dim'] };
+        const L = { passport: 'Passport', emirates_id: 'Emirates ID', licence: 'Licence', visa: 'Visa', rta_permit: 'RTA permit' };
+        return `<div class="dim">${esc(p.hr.fleet_id === 'egari' ? 'Egari' : 'Ecosine')} `
+          + `<span class="mono">${esc(p.hr.employee_id)}</span>`
+          + `${p.hr.hr_compliance_status ? ` · <span title="HR’s own label, not this product’s verdict">HR: ${esc(p.hr.hr_compliance_status)}</span>` : ''}</div>`
+          + '<div class="idfacts">' + Object.entries(L).map(([k, label]) => {
+            const d = p.hr.documents[k] || {};
+            const [w, tone] = W[d.status] || ['—', 'dim'];
+            return `<span><b>${label}</b>${d.expires ? esc(dateStr(d.expires)) : ''} <span class="tag ${tone}"`
+              + `${d.status === 'missing' ? ` title="${esc(d.absent_reason || '')}"` : ''}>${w}</span>`
+              + `${d.number_on_file === true ? '<span class="dim"> · number on file</span>'
+                : d.number_on_file === false ? '<span class="dim"> · no number on file</span>' : ''}</span>`;
+          }).join('') + '</div>';
+      } },
     /* TWO RECORDS OF ONE PERSON THAT DISAGREE ABOUT A DOCUMENT.
        ─────────────────────────────────────────────────────────────────────
        Either the filing is wrong or the merge is, and both are things this

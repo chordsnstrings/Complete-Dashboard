@@ -210,4 +210,11 @@ export const SCHEMA_FILES = [
      A row now carries the version it was observed with, and one about a
      replaced value is dropped or read as describing that earlier value. */
   'schema_v82.sql',
+  /* The operator's HR roster export, one immutable snapshot per upload, keyed
+     (fleet, employee_id) because HR's D-numbers repeat across the two fleets.
+     The only source for passport, Emirates ID, visa and RTA-permit expiry, and
+     a second licence expiry beside Yango's. Proposals HR implies about who is
+     one person live in their own table, never in driver_identity_link, whose
+     rule sweep deletes every unconfirmed row it did not write this run. */
+  'schema_v83.sql',
 ];

@@ -37,6 +37,7 @@ import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldN
   withPhotos } from '../api/redact.js';
 import { vehicleLatest } from '../api/custody_sql.js';
 import { exportRoutes } from '../api/export_routes.js';
+import { hrForCompliance } from '../api/hr_roster.js';
 import { responseCache } from '../api/cache.js';
 
 let pass = 0, fail = 0;
@@ -248,6 +249,11 @@ function complianceApp() {
        tell 'this product holds a photograph of this person' from 'it does
        not' — the distinction the route exists to draw. */
     if (/FROM driver_photo/.test(sql)) return [{ platform: 'uber', driver_ext_id: 'u-2' }];
+    /* The HR roster's tables: no upload on this fixture, which is the
+       "no HR roster has been uploaded yet" branch. The HR half of this
+       route's redaction is swept in test/hr_roster_numbers.test.mjs against
+       a real database holding synthetic documents. */
+    if (/hr_roster_/.test(sql)) return [];
     throw new Error(`unexpected SQL in the compliance route: ${sql.slice(0, 80)}`);
   };
   /* THE PERSON SPINE, STUBBED TO PLACE BOTH ACCOUNTS ON ONE HUMAN.
@@ -274,7 +280,7 @@ function complianceApp() {
     counts: { people: 1, accounts: 2 },
   });
   return (app) => mount(app, F_COMPLIANCE, { q, wrap, isAdmin, vehicleLatest,
-    IDENTITY_DOCS, stripIdentity, withheldNote, withPhotos, personMap });
+    IDENTITY_DOCS, stripIdentity, withheldNote, withPhotos, personMap, hrForCompliance });
 }
 
 console.log('\n/api/compliance/drivers — 123 Emirates IDs to anyone who knew the URL');

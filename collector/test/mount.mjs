@@ -48,6 +48,11 @@ import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldN
    what those tests check, and a stub that placed nobody would let a route
    that had stopped grouping at all come back green. */
 import { personMap } from '../api/person_map.js';
+/* The HR roster's read side. /api/compliance/drivers puts HR's licence date
+   first and attaches HR's document expiries to each person, and that route is
+   inside the slice — so the helper is injected, real rather than stubbed: a
+   stub would let the route stop reading HR with every test still green. */
+import { hrForCompliance } from '../api/hr_roster.js';
 /* The provider alias tables, shared with src/probe.js. /api/schema/raw-fields
    matched raw field names against information_schema alone, so thirteen of
    Uber's fifteen fields read "not promoted to a column" while the collector
@@ -144,6 +149,7 @@ export async function mountAll(db, { serverRoutes = true, inject = {} } = {}) {
     grainOf, previousWindow, foldGrain, GRAINS, PERIODS, isPeriod, periodPartial,
     isAdmin, redactSettings, secretField, redactSampleValue, RAW_ALIASES, spanGaps,
     IDENTITY_DOCS, stripIdentity, withheldNote, photoHref, withPhotos, personMap,
+    hrForCompliance,
     refIds, peopleFor, attachPeople, log,
     recordImport, spanOf, tallyBatch, takeTally,
     LEDGER_CADENCE, ledgerSilence,

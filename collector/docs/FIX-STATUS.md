@@ -2098,3 +2098,88 @@ Not done, and named: inside the collector, a value saved while a source is
 running is used from that source's next pass. The pin is retaken between
 sources, so a save made mid-run now reaches the later sources in the same run,
 which it did not before.
+
+## The HR roster export: import, #hr-roster, HR's licence date first — 2026-09-23, NOT ON PRODUCTION
+
+The operator's HR system exports `active-drivers-YYYY-MM-DD.xlsx`. Nothing
+could read it, and the product held no source at all for passport, Emirates
+ID, visa or RTA-permit expiry. Its only licence expiries came from Yango, and
+`/api/compliance/drivers` said 88 people could not legally drive on Yango's
+dates alone. What the file holds, and the dry run of the real file, are in
+docs/COVERAGE.md ("The operator's HR roster export").
+
+The operator's decisions, each built as stated. The document numbers are
+stored. Passport and RTA-permit numbers are returned by no route. The Emirates
+ID and the UAE licence number are returned only by `/api/driver/profile`, and
+the driver page shows them. The visa number is not stored. Expiry dates are
+visible to everyone. HR's licence date wins, and Yango's is kept beside it as a
+disagreement. Only this exact export is accepted. Import is an admin-gated
+preview, then a commit. Rows match by platform id, then by phone, never by
+name. HR's groupings become proposals on the same-person queue under basis
+`hr_roster`, never merges.
+
+| # | what | state | proof |
+|---|---|---|---|
+| H1 | only this export: sheet `Drivers`, the 44 headings in order; anything else refused with what differs | **written** | `test/hr_roster_format.test.mjs` 63. Reverts: reorder check fails 2, rename sentence fails 1, second-sheet check fails 2 |
+| H2 | preview writes nothing; commit writes one immutable snapshot (sha256, export date from the filename or entered, who); both admin-gated | **written** | `test/hr_roster_import.test.mjs` 88. Removing the gate fails 1; a preview that commits fails 34 |
+| H3 | the same file twice is refused | **written** | without the check the UNIQUE constraint answers a 500: fails 3 |
+| H4 | a newer export: "off the HR list since", a blanked column reported with the earlier value kept, renewals shown, nothing deleted | **written** | reverts fail 1 (off-list) and 1 (carry-forward) |
+| H5 | matched by platform id, then phone, never by name | **written** | a name fallback fails 1 (same name, other phone); phone beside an id match fails 1 |
+| H6 | HR groupings are proposals on #same-person (basis `hr_roster`, their own table), and a verdict folds nothing | **written** | writing them to `driver_identity_link` fails 6; a verdict that writes a link fails 1 |
+| H7 | a contradiction with a link already held surfaces in the preview AND in the queue | **written** | the refused-partner shape: revert fails 5; the real export's shape (a link HR splits, touching a refused pair, stamped with no reviewer): revert fails 1 |
+| H8 | every JSONB value valid on node-postgres's wire, not only PGlite's | **written** | through `pg/lib/utils` `prepareValue`; binding the array unstringified fails 2 |
+| H9 | no route returns a passport or RTA number; the Emirates ID and licence number only on `/api/driver/profile` | **written** | `test/hr_roster_numbers.test.mjs` 19, by value over every declared GET route, the raw-values sampler (10 keys × 5 tables), the CSV export, both write routes and the admin compliance body. A passport number put on the roster row fails 3, an Emirates ID there fails 3, the profile without them fails 2 |
+| H10 | the visa number is not stored; an Emirates ID is its digits however written | **written** | storing it fails 3; keeping the dashes fails 3 |
+| H11 | `/api/compliance/drivers` counts HR's licence date first and keeps Yango's as a disagreement; HR's document expiries on each person; an HR-only person is not an "unplaced account" | **written** | `test/hr_compliance.test.mjs` 19 (expired 1 → 0 on HR's date). Leading with the platform's date fails 3 |
+| H12 | `#hr-roster` (People), and the HR parts of #compliance, #same-person and #driver, render in Chromium | **written** | `test/hr_roster_page.test.mjs` 52 against the mock: the roster, both filters, preview then commit, a refused file, phone width. Unregistering the view fails |
+| H13 | the mock carries every HR shape the real routes return | **written** | `test/mockapi.test.mjs` green; row-level HR parity in `hr_roster_numbers` (a real HR upload there), 4 assertions |
+
+Existing suites touched and green: `server_redaction` 56 (its own slice of the
+compliance route needed `hrForCompliance` injected: see the COVERAGE trap on
+two injection sets), `compliance_person` 50, `route_smoke` 59, `mockapi` 10,
+`nav_sections` 17, the same-person and identity suites.
+
+**The full suite ran once, as instructed:** 306 files, 9,776 assertions,
+1 file failing. That file was `interlinking`: "a hand-rolled entity link guards
+against a missing id", triggered by the account pills in
+`api/public/hrroster.js`. The pill now degrades to text without an id. After
+the fix, that file (11) and `hr_roster_page` (52) were re-run and are green.
+The full suite was not run a second time.
+
+**The dry run of the real file** used a local PGlite seeded from production's
+public reads, and ran through the real routes. 143 rows. Matched by platform id
+112, by phone 22, not matched 9. 20 proposals, 1 contradiction. 39 licence dates
+differ from Yango's, 37 of them older by over a year. People with an expired
+licence went from 88 to 50. Checked by value, no response carried a document
+number, apart from the two numbers the driver page is meant to show. Full
+figures are in COVERAGE.
+
+### NOT PROVEN, and named
+
+- **Not deployed.** `schema_v83` has run on PGlite only. To prove it on
+  production: upload the export on `#hr-roster` with the admin token. Then
+  `/api/hr-roster` should read 143 on the list. `/api/compliance/drivers`
+  `people_totals.expired` should fall from 88 to about 50, with
+  `licence_from_hr` and `licence_disagreements` set. `/api/same-person` should
+  show 20 HR proposals and 1 contradiction. `/api/driver/profile` for a matched
+  driver should carry `hr.emirates_id`. Take screenshots with every modal
+  filled.
+- **The Emirates ID and licence number reach any caller of
+  `/api/driver/profile`.** The operator decided this, and the product has no
+  sign-in. It is a deliberate, narrow exception to Batch 1. Making it
+  admin-only is one `isAdmin(req)` check in the profile route.
+- **A "Yes" on an HR proposal folds nobody.** It is recorded on
+  `hr_roster_proposal`, and nothing promotes it: `bin/promote-links.mjs` reads
+  `driver_identity_link` only. The page and the verdict's effect sentence both
+  say so.
+- **`/api/driver/profile` is response-cached.** Its `hr` block shows a new
+  upload after the next collection run. `/api/hr-roster` and the compliance
+  route are uncached.
+- **One employee can attach to two person rows.** An HR row matched to accounts
+  the spine keeps apart puts HR's documents on both rows (155 rows from 134
+  matched employees on the dry run). It is flagged by `hr.employees` and by
+  the proposal.
+- **The payroll bridge is recorded, not used.** `hr_roster_row.matched_accounts`
+  holds the accounts each row matched. The `hr_employee_account` view explodes
+  it for the latest export as (fleet, employee_id) ↔ (platform, ext_id). The
+  salary import that would join on it is not built.

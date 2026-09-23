@@ -73,6 +73,11 @@ export const SECRET_KEY = new RegExp([
   'password', 'passwd', 'secret', 'token', 'otp', 'pin',
   'emirates', 'national.?id', 'nationality.?id',
   'licen[cs]e.?(no|num|number)', 'passport', 'visa.?(no|num|number)',
+  /* The RTA permit card number, which the HR roster export carries
+     (sql/schema_v83.sql). A government-issued permit number is an identity
+     document by the line drawn below; no provider sends one today, and the
+     day one does it is withheld without anybody re-reading this file. */
+  'permit.?(card.?)?(no|num|number)',
   'iban', 'account.?(no|num|number)', 'card.?(no|num|number)',
   'api.?key', 'auth', 'credential', 'cookie', 'session',
 ].join('|'), 'i');
@@ -187,6 +192,35 @@ export function withPhotos(rows, held, missed = null) {
 }
 
 export const IDENTITY_DOCS = ['licence_no', 'emirates_id'];
+
+/* ── THE HR ROSTER'S DOCUMENT NUMBERS, AND THE ONE PLACE TWO OF THEM LEAVE ──
+   The operator's HR export (sql/schema_v83.sql, hr_roster_row) carries four
+   document numbers and this product stores all four, because the rest of the
+   API withholds them and the operator wants them held. Where they may LEAVE is
+   the operator's decision of 2026-09-23, and it is narrow:
+
+     passport_no     never returned by any route
+     rta_permit_no   never returned by any route
+     emirates_id     returned by /api/driver/profile only, under `hr`
+     licence_no      returned by /api/driver/profile only, under `hr`
+
+   The driver page is where those two are shown. That is a deliberate
+   exception to Batch 1 (docs/FIX-STATUS.md) for HR-sourced numbers on one
+   route, on its own key — the compliance record's emirates_id and licence_no
+   still go through stripIdentity() above, unchanged.
+
+   Enforced by construction rather than by stripping: api/hr_roster.js selects
+   these columns in exactly one read (hrForProfile) and every other read asks
+   `x IS NOT NULL` instead, so the value never becomes a string in the process.
+   test/hr_roster_numbers.test.mjs holds the line by value: it seeds synthetic
+   numbers and sweeps the body of every GET route the application declares,
+   the raw-values sampler, the CSV export and both write routes, and fails if
+   any number appears anywhere this table does not allow. The visa NUMBER is
+   not stored at all. */
+export const HR_NUMBER_COLUMNS = Object.freeze(['passport_no', 'emirates_id', 'licence_no', 'rta_permit_no']);
+export const HR_NUMBERS_SERVED = Object.freeze({
+  '/api/driver/profile': Object.freeze(['emirates_id', 'licence_no']),
+});
 
 /** Drop the identity documents from a row set unless the caller is an admin.
     Non-mutating; the rows keep every other column. */

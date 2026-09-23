@@ -1,7 +1,12 @@
 // Local stand-in API so the UI can be reviewed without the production database.
 // Not shipped — used only to render and screenshot the dashboard during development.
 import express from 'express';
-import { foldGrain, grainOf, previousWindow, PERIODS } from './api/window.js';
+import { foldGrain, grainOf, previousWindow, PERIODS, dubaiDay } from './api/window.js';
+/* The HR roster's own parser and status rule — real, so the page's import
+   panel is refused in the mock for exactly the reasons production refuses it,
+   and a document's status here is the status the API would compute. */
+import { readRoster, exportDateFromName, expirySummary, docStatus } from './src/hr_roster.js';
+import { createHash } from 'node:crypto';
 /* The period arithmetic and the percentile come from the real module, not a
    copy. A fixture that invents its own weeks drifts from the product the
    moment either changes, and the browser tests that read this would then be
@@ -422,6 +427,169 @@ const mkDoc = (plate, make, model, days, drv) => ({
   driver_as_of: drv ? '2026-08-21' : null,
   vin: `VIN${String(1000 + _doc)}`, image_url: null,
 });
+/* ── THE HR ROSTER, AS A FIXTURE ─────────────────────────────────────────
+   Every value invented. Dates are offsets from TODAY in Dubai, so each of the
+   six statuses the page draws — expired, ≤30, ≤45, ≤90, ok, missing — is
+   present on every run rather than drifting into "ok" as the calendar moves.
+   Held in memory, so a commit from the page's import panel really appears in
+   the upload history on the redraw. */
+const HR_TODAY = () => dubaiDay(new Date());
+const hrDay = (n) => new Date(Date.parse(`${HR_TODAY()}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
+const hrDoc = (offset, onFile = true, from = null, label = 'document') => {
+  const expires = offset == null ? null : hrDay(offset);
+  const st = docStatus(expires, HR_TODAY());
+  return { expires, days_left: st.days_left, status: st.status, expires_from_export: from,
+    number_on_file: onFile, number_from_export: null,
+    absent_reason: expires ? null : `no HR export on file carries a ${label} expiry for this person` };
+};
+const hrDocs = ([pp, eid, lic, visa, rta], carried = null) => ({
+  passport: hrDoc(pp, true, carried, 'passport'), emirates_id: hrDoc(eid, true, null, 'emirates id'),
+  licence: hrDoc(lic, true, null, 'driving licence'), visa: hrDoc(visa, null, null, 'visa'),
+  rta_permit: hrDoc(rta, rta != null, null, 'rta permit'),
+});
+const HR_UPLOADS = [
+  { id: 2, sha256: 'b7'.repeat(32), export_date: hrDay(-1), export_date_from: 'filename',
+    filename: `active-drivers-${hrDay(-1)}.xlsx`, byte_len: 255494, rows_read: 7,
+    uploaded_by: 'operations', uploaded_at: new Date(Date.now() - 864e5).toISOString() },
+  { id: 1, sha256: 'a3'.repeat(32), export_date: hrDay(-15), export_date_from: 'entered',
+    filename: 'drivers.xlsx', byte_len: 251002, rows_read: 7,
+    uploaded_by: 'operations', uploaded_at: new Date(Date.now() - 15 * 864e5).toISOString() },
+];
+const hrPerson = (o) => ({ phone: '+971500000000', email: null, hr_compliance_status: 'Compliant',
+  on_list: true, off_list_since: null, last_export_date: HR_UPLOADS[0].export_date,
+  first_export_date: HR_UPLOADS[1].export_date, match_basis: 'platform_id', accounts: [],
+  person_id: null, person_ids: [], unmatched_ids: [], renewals: [], ...o });
+const HR_PEOPLE = [
+  hrPerson({ fleet_id: 'ecosine', employee_id: 'D101', name: drivers[0],
+    accounts: [{ platform: 'uber', ext_id: 'drv-0', via: 'uber_id', fleet_id: 'ecosine', name: drivers[0], person_id: 401 },
+      { platform: 'yango', ext_id: 'y-0', via: 'yango_id', fleet_id: 'ecosine', name: drivers[0], person_id: 401 }],
+    person_id: 401, person_ids: [401], documents: hrDocs([900, 20, -5, null, 40]) }),
+  hrPerson({ fleet_id: 'ecosine', employee_id: 'D102', name: drivers[1],
+    accounts: [{ platform: 'uber', ext_id: 'drv-1', via: 'uber_id', fleet_id: 'ecosine', name: drivers[1], person_id: 402 }],
+    person_id: 402, person_ids: [402], hr_compliance_status: 'Pending',
+    documents: hrDocs([-30, 400, 70, 300, 500], HR_UPLOADS[1].export_date) }),
+  hrPerson({ fleet_id: 'egari', employee_id: 'EG201', name: drivers[2],
+    accounts: [{ platform: 'uber', ext_id: 'drv-2', via: 'uber_id', fleet_id: 'egari', name: drivers[2], person_id: 403 },
+      { platform: 'bolt', ext_id: 'b0b0b0b0-0000-4000-8000-000000000201', via: 'bolt_id', fleet_id: 'egari', name: drivers[2], person_id: null }],
+    person_id: 403, person_ids: [403], documents: hrDocs([1200, 800, 1500, 600, 700]),
+    renewals: [{ document: 'licence', from: hrDay(-200), to: hrDay(1500), seen_in_export: HR_UPLOADS[0].export_date }] }),
+  hrPerson({ fleet_id: 'ecosine', employee_id: 'EMP-1700000000004', name: drivers[3], match_basis: 'phone',
+    accounts: [{ platform: 'hotel', ext_id: 'drv-3', via: 'phone', fleet_id: 'ecosine', name: drivers[3], person_id: 404 }],
+    person_id: 404, person_ids: [404], documents: hrDocs([600, 35, 600, 35, null]) }),
+  hrPerson({ fleet_id: 'ecosine', employee_id: 'D105', name: 'Testperson Unmatched', match_basis: 'none',
+    unmatched_ids: [
+      { platform: 'bolt', ext_id: 'b0b0b0b0-0000-4000-8000-000000000105', column: 'bolt_id',
+        reason: 'no Ecosine Bolt account is held under Bolt’s user UUID — Bolt’s fleet roster, the one source that files it, is refused for this fleet — so this id cannot be matched until it is' },
+      { platform: 'yay', ext_id: 'd0d0000000000000000000105', column: 'yay_id',
+        reason: 'nothing in this product collects YAY, so a YAY id cannot be matched to anything' }],
+    documents: hrDocs([300, 300, 300, null, 80]) }),
+  hrPerson({ fleet_id: 'egari', employee_id: 'EG202', name: drivers[5],
+    accounts: [{ platform: 'uber', ext_id: 'drv-5', via: 'uber_id', fleet_id: 'egari', name: drivers[5], person_id: 406 }],
+    person_id: 406, person_ids: [406], documents: hrDocs([500, 500, 500, 500, 500]) }),
+  hrPerson({ fleet_id: 'egari', employee_id: 'EG199', name: drivers[6], on_list: false,
+    off_list_since: HR_UPLOADS[0].export_date, last_export_date: HR_UPLOADS[1].export_date,
+    accounts: [{ platform: 'uber', ext_id: 'drv-6', via: 'uber_id', fleet_id: 'egari', name: drivers[6], person_id: 407 }],
+    person_id: 407, person_ids: [407], documents: hrDocs([100, 100, 100, 100, 100]) }),
+];
+const HR_LIVE = new Set(['expired', 'd30', 'd45', 'd90']);
+const hrView = () => {
+  const people = HR_PEOPLE.map((p) => ({ ...p,
+    anything_expiring: Object.values(p.documents).some((d) => HR_LIVE.has(d.status)),
+    soonest: Object.entries(p.documents).filter(([, d]) => d.days_left != null)
+      .sort((a, b) => a[1].days_left - b[1].days_left).map(([document, d]) => ({ document,
+        days_left: d.days_left, status: d.status }))[0] || null }));
+  const on = people.filter((p) => p.on_list);
+  const latest = HR_UPLOADS[0];
+  return {
+    latest: { upload_id: latest.id, export_date: latest.export_date, sha256: latest.sha256,
+      rows_read: latest.rows_read, uploaded_by: latest.uploaded_by, uploaded_at: latest.uploaded_at },
+    uploads: HR_UPLOADS, today: HR_TODAY(), people,
+    totals: {
+      on_list: on.length, off_list: people.length - on.length,
+      by_fleet: { ecosine: on.filter((p) => p.fleet_id === 'ecosine').length,
+        egari: on.filter((p) => p.fleet_id === 'egari').length },
+      matched: { platform_id: on.filter((p) => p.match_basis === 'platform_id').length,
+        phone: on.filter((p) => p.match_basis === 'phone').length,
+        none: on.filter((p) => p.match_basis === 'none').length },
+      anything_expiring: on.filter((p) => p.anything_expiring).length,
+      expiring: Object.fromEntries(['passport', 'emirates_id', 'licence', 'visa', 'rta_permit'].map((k) => [k,
+        Object.fromEntries(['expired', 'd30', 'd45', 'd90', 'ok', 'missing'].map((s) => [s,
+          on.filter((p) => p.documents[k].status === s).length]))])),
+    },
+    absent_reason: null,
+  };
+};
+app.get('/api/hr-roster', (_, r) => r.json(hrView()));
+/* The two write routes, over the REAL parser: a wrong file is refused with
+   the real reason, a right one gets a canned summary of its own rows. */
+const hrBody = express.raw({ type: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/octet-stream'], limit: '4mb' });
+const hrPreview = (req) => {
+  const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  const parsed = readRoster(bytes);
+  const refusals = [...parsed.refusals];
+  const fromName = exportDateFromName(req.query.filename);
+  const exportDate = fromName || req.query.export_date || null;
+  if (!exportDate) refusals.push('the filename does not carry the export date (HR names it active-drivers-YYYY-MM-DD.xlsx), so enter the day HR exported it');
+  if (HR_UPLOADS.some((u) => u.sha256 === sha)) refusals.push('this exact file was already imported');
+  const base = { sha256: sha, byte_len: bytes.length, filename: req.query.filename || null,
+    export_date: exportDate, export_date_from: fromName ? 'filename' : exportDate ? 'entered' : null,
+    needs_export_date: !exportDate, today: HR_TODAY(), rows_read: parsed.rows.length, duplicate_of: null };
+  if (refusals.length) return { ok: false, ...base, refusals, written: false, note: 'Nothing was written.' };
+  const fleets = {};
+  for (const x of parsed.rows) fleets[x.fleet_id] = (fleets[x.fleet_id] || 0) + 1;
+  const withId = parsed.rows.filter((x) => x.uber_id || x.bolt_id || x.yango_id).length;
+  return { ok: true, ...base, refusals: [], written: false, fleet_split: fleets,
+    match: { by_platform_id: withId, by_phone: 0, unmatched: parsed.rows.length - withId,
+      fleet_disagreements: 0, ids_not_held: {},
+      how: 'By a platform id HR typed first; by phone (last nine digits) only for a row none of whose ids is held; never by name.' },
+    proposals: { pairs: 1, people: 1, new: 1, already_proposed: 0, already_decided: 0, already_one_person: 0,
+      list: [{ fleet_id: 'ecosine', employee_id: 'D101', name: drivers[0],
+        accounts: [{ platform: 'uber', ext_id: 'drv-0' }, { platform: 'yango', ext_id: 'y-0' }],
+        alias: { platform: 'yango', ext_id: 'y-0' }, canonical: { platform: 'uber', ext_id: 'drv-0' }, status: 'new' }],
+      note: 'Proposals go to the same-person queue under basis hr_roster. None is a merge.' },
+    contradictions: HR_CONTRA,
+    licence_vs_yango: { compared: 1, agree: 0, differ: 1, yango_older: 1, yango_later: 0,
+      yango_older_by_over_a_year: 1, hr_valid_yango_expired: 1,
+      rows: [{ fleet_id: 'ecosine', employee_id: 'D101', name: drivers[0], yango_ext_id: 'y-0',
+        hr_expires: hrDay(1500), yango_expires: hrDay(-300), days_apart: 1800 }] },
+    expiry: expirySummary(parsed.rows, HR_TODAY()),
+    emirates_id_not_15_digits: parsed.notes.eid_not_15_digits || 0,
+    against: { against: { upload_id: HR_UPLOADS[0].id, export_date: HR_UPLOADS[0].export_date },
+      blanked: [], dropped: [], added: parsed.rows.length, note: null },
+    latest_on_file: { upload_id: HR_UPLOADS[0].id, export_date: HR_UPLOADS[0].export_date },
+    older_than_latest: exportDate < HR_UPLOADS[0].export_date,
+    note: 'Nothing was written. Commit sends this same file again and writes exactly this.' };
+};
+app.post('/api/hr-roster/preview', hrBody, (req, r) => {
+  const p = hrPreview(req);
+  r.status(p.ok ? 200 : 400).json(p);
+});
+app.post('/api/hr-roster/commit', hrBody, (req, r) => {
+  const p = hrPreview(req);
+  if (!p.ok) return r.status(400).json({ ...p, note: 'Nothing was written.' });
+  if (!String(req.query.by || '').trim()) {
+    return r.status(400).json({ ok: false, written: false, refusals: ['say who is uploading this'] });
+  }
+  const id = Math.max(...HR_UPLOADS.map((u) => u.id)) + 1;
+  HR_UPLOADS.unshift({ id, sha256: p.sha256, export_date: p.export_date, export_date_from: p.export_date_from,
+    filename: p.filename, byte_len: p.byte_len, rows_read: p.rows_read,
+    uploaded_by: String(req.query.by).trim(), uploaded_at: new Date().toISOString() });
+  HR_UPLOADS.sort((a, b) => (a.export_date < b.export_date ? 1 : a.export_date > b.export_date ? -1 : b.id - a.id));
+  return r.json({ ...p, ok: true, written: true, upload_id: id,
+    wrote: { rows: p.rows_read, proposals: 1, proposals_new: 1 },
+    note: `Written: upload ${id}, ${p.rows_read} rows, the HR export of ${p.export_date}. 1 new proposal on the same-person queue; nothing was merged.` });
+});
+const HR_CONTRA = [{ kind: 'link_to_refused_partner',
+  employees: [{ fleet_id: 'ecosine', employee_id: 'D101', name: drivers[0] }],
+  accounts: [{ platform: 'yango', ext_id: 'y-0' }, { platform: 'uber', ext_id: 'drv-4' }, { platform: 'uber', ext_id: 'drv-0' }],
+  link: { source: 'link', alias_ext_id: 'y-0', canonical_ext_id: 'drv-4', basis: 'same_name', confirmed: false },
+  evidence: 'An existing unconfirmed “same_name” link attaches y-0 to drv-4. HR files y-0 with Uber '
+    + 'account drv-0 under Ecosine employee D101 — and drv-4 and drv-0 are a pair this product has '
+    + 'ruled two people (simultaneous trips in two cars). Both cannot be right: either the link is '
+    + 'wrong or HR’s row is.' }];
+
 app.get('/api/compliance/vehicles', (_, r) => {
   const rows = [
   mkDoc('L40924','Tesla','Model Y',5,'Ahmed Tarig Mohamed'), mkDoc('L37810','Tesla','Model Y',5,'Aliyan Khalil'),
@@ -560,7 +728,30 @@ const soloPerson = (id, personId) => {
     vehicle: a.vehicle, state: a.state, suspension_reason: a.suspension_reason,
     last_ever: a.last_ever, lifetime_trips: a.lifetime_trips,
     days_since_last_trip: a.days_since_last_trip, activity_by_name: a.activity_by_name,
+    /* HR's half: where the date came from, the platform's own date kept, and
+       HR's record of the person. None on most rows — HR attaches below. */
+    licence_source: a.licence_placeholder ? null : 'platform',
+    platform_licence_expires: a.licence_placeholder ? null : String(a.licence_expires).slice(0, 10),
+    platform_days_left: a.licence_placeholder ? null : a.days_left,
+    licence_disagreement: null, hr: null, hr_only: false,
   };
+};
+/* HR's record on a compliance person: the fixture's HR documents, and HR's
+   licence date LEADING — the operator's rule — with the platform's kept. */
+const withHr = (p, hrP) => {
+  const lic = hrP.documents.licence;
+  const plat = p.platform_licence_expires;
+  return { ...p,
+    licence_status: lic.days_left < 0 ? 'expired' : lic.days_left <= 45 ? 'expiring' : 'valid',
+    days_left: lic.days_left, licence_expires: lic.expires, licence_source: 'hr',
+    licence_unknown_reason: null,
+    licence_disagreement: plat && plat !== lic.expires
+      ? { hr_expires: lic.expires, platform_expires: plat, platform: p.soonest_account?.platform || p.platform,
+        driver_ext_id: p.soonest_account?.driver_ext_id || p.driver_ext_id,
+        days_apart: lic.days_left - (p.platform_days_left ?? 0) } : null,
+    hr: { fleet_id: hrP.fleet_id, employee_id: hrP.employee_id, name: hrP.name,
+      hr_compliance_status: hrP.hr_compliance_status, export_date: HR_UPLOADS[0].export_date,
+      documents: hrP.documents, employees: 1 } };
 };
 const COMPLIANCE_PEOPLE = [
   /* The person whose two records disagree. d3 expired twenty days ago and d2
@@ -593,9 +784,26 @@ const COMPLIANCE_PEOPLE = [
     vehicle: acct('d2').vehicle, state: 'suspended',
     suspension_reason: 'documents under review',
     last_ever: null, lifetime_trips: null, days_since_last_trip: null, activity_by_name: false,
+    licence_source: 'platform', platform_licence_expires: '2026-08-01', platform_days_left: -20,
+    licence_disagreement: null, hr: null, hr_only: false,
   },
-  ...Array.from({ length: 6 }, (_, i) => soloPerson(`d${10 + i}`, 50 + i)),
+  /* HR leads here and still says expired — on a different day from the
+     platform, which is the disagreement pill's case. */
+  ...Array.from({ length: 6 }, (_, i) => (i === 0
+    ? withHr(soloPerson(`d${10 + i}`, 50 + i), HR_PEOPLE[1])
+    : soloPerson(`d${10 + i}`, 50 + i))),
+  /* On HR's list with no platform account matched: a PERSON with no
+     account, not an unplaced account. */
+  { ...withHr({ person_id: null, name: HR_PEOPLE[4].name, driver_ext_id: null, platform: null,
+    person_placed: false, accounts: [], account_count: 0, platforms: [], fleets: [],
+    phone: null, email: null, picture_url: null, soonest_account: null,
+    placeholder_accounts: 0, no_date_accounts: 0, dated_accounts: 0, conflicts: [], conflict_fields: [],
+    vehicle: null, state: null, suspension_reason: null, last_ever: null, lifetime_trips: null,
+    days_since_last_trip: null, activity_by_name: false, platform_licence_expires: null,
+    platform_days_left: null, licence_unknown_reason: null }, HR_PEOPLE[4]), hr_only: true },
 ];
+COMPLIANCE_PEOPLE[0] = withHr(COMPLIANCE_PEOPLE[0], { ...HR_PEOPLE[0],
+  documents: { ...HR_PEOPLE[0].documents } });
 app.get('/api/compliance/drivers', (_, r) => r.json({
   /* RECORDS. Deliberately NOT equal to the person counts below: three expired
      licence RECORDS over two people is the whole shape of the defect this
@@ -625,10 +833,17 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
   people_totals: { total: 129, placed: 129, unplaced_accounts: 0,
     expired: 2, expiring_45: 5, valid: 70, unknown: 52,
     placeholder_only: 6, no_date_at_all: 46,
-    with_conflicts: 3, multi_account: 14, accounts: 148 },
+    with_conflicts: 3, multi_account: 14, accounts: 148,
+    hr_matched: 3, hr_only: 1, licence_from_hr: 3, licence_disagreements: 1 },
   person_basis: 'spine',
   person_basis_note: 'One row per person, from the reviewed person spine — the same table the '
     + 'driver directory, the money ledger and every other surface in this product count.',
+  hr_roster: { export_date: HR_UPLOADS[0].export_date, upload_id: HR_UPLOADS[0].id,
+    on_list: 6, attached: 3, hr_only: 1 },
+  hr_absent_reason: null,
+  licence_precedence: 'Where HR’s roster carries a licence expiry for a person, that date is the '
+    + 'one this page counts. A platform’s date that differs is kept beside it and reported as a '
+    + 'disagreement, never dropped.',
   /* The spine’s own totals, measured on production 2026-09-21. The roster is
      smaller than the fleet: not every account has a compliance record. */
   spine_counts: { people: 349, accounts: 810 },
@@ -1073,8 +1288,25 @@ app.get('/api/driver/profile', (req, r) => {
   const ext = byPerson != null ? EXT_OF_PERSON.get(byPerson) : req.query.id;
   const i = idIndex(ext);
   const pid = PERSON_OF.get(ext) ?? null;
+  /* WHAT HR FILES FOR THIS PERSON — the one route that returns the Emirates
+     ID and the licence number (invented here). HR's licence date leads, and
+     the platform's is kept beside it when they differ. */
+  const hrRow = HR_PEOPLE.find((h) => h.on_list && h.accounts.some((a) => a.ext_id === ext));
+  const platDays = i === 1 ? -12 : 40 + i * 9;
+  const hr = hrRow ? { fleet_id: hrRow.fleet_id, employee_id: hrRow.employee_id, name: hrRow.name,
+    hr_compliance_status: hrRow.hr_compliance_status, export_date: HR_UPLOADS[0].export_date,
+    on_list: true, emirates_id: `784-1990-${String(1000000 + i).padStart(7, '0')}-1`,
+    licence_no: `DL55${String(i).padStart(5, '0')}`,
+    licence_expires: hrRow.documents.licence.expires, licence_days_left: hrRow.documents.licence.days_left,
+    licence_status: hrRow.documents.licence.status, other_employees: 0,
+    source: `HR roster, ${hrRow.fleet_id === 'egari' ? 'Egari' : 'Ecosine'} employee ${hrRow.employee_id}, export of ${HR_UPLOADS[0].export_date}` } : null;
+  const licence = hr ? { source: 'hr', expires: hr.licence_expires, days_left: hr.licence_days_left,
+    platform: { platform: 'hotel', expires: '2026-11-30', days_left: platDays },
+    disagree: hr.licence_expires !== '2026-11-30' }
+    : { source: 'platform', expires: '2026-11-30', days_left: platDays, platform: null, disagree: false };
   return r.json({
     id: ext, name: drivers[i], ids: [ext],
+    hr, licence,
     /* Which parameter answered, so a reader — or a test — can tell a page
        reached by its stable address from one reached by an account that
        happens to represent the person today. */
@@ -1669,7 +1901,26 @@ const spPlateNote = (p) => (p.shared_plates.length
   : 'These records have never driven the same car. On a fleet this size that is the ordinary '
     + 'case and is not evidence either way.');
 const spOut = (p) => ({ ...p, evidence: spEvidence(p), plate_note: spPlateNote(p),
-  phone_tail: null, proposed_at: '2026-09-14T06:00:00.000Z' });
+  phone_tail: null, proposed_at: '2026-09-14T06:00:00.000Z',
+  hr_contradiction: p.alias_ext_id === 'drv-4' ? HR_CONTRA[0].evidence : null });
+/* HR's proposals, in the queue's own shape — addressed by proposal_id and
+   deliberately carrying no alias_ext_id, like the real route. */
+const HR_SP = [{ proposal_id: 1, source: 'hr_roster', basis: 'hr_roster', verdict: null,
+  decided_by: null, decided_note: null, phone_tail: null, proposed_at: null,
+  employee: { fleet_id: 'ecosine', employee_id: 'D101', name: drivers[0] },
+  accounts: [{ platform: 'uber', ext_id: 'drv-0' }, { platform: 'yango', ext_id: 'y-0' }],
+  alias: { driver_ext_id: 'y-0', name: drivers[0].toUpperCase(), platform: 'yango', trips: 210,
+    first_trip: '2025-11-02T06:00:00.000Z', last_trip: '2026-09-12T06:00:00.000Z', plates: ['L45235'], fleets: ['ecosine'] },
+  canonical: { driver_ext_id: 'drv-0', name: drivers[0], platform: 'uber', trips: 877,
+    first_trip: '2025-04-05T09:29:06.000Z', last_trip: '2026-09-13T13:45:50.000Z', plates: ['L45235'], fleets: ['ecosine'] },
+  shared_plates: ['L45235'],
+  evidence: `HR's roster (export of ${HR_UPLOADS[0].export_date}) files Uber account drv-0 and Yango `
+    + `account y-0 under one employee, Ecosine employee D101 (${drivers[0]}). Each was matched by the `
+    + 'platform id HR typed, never by a name. An employer\'s roster is strong evidence but it is not '
+    + 'an identifier the platforms share — an id pasted into the wrong row joins two people — so '
+    + 'nothing has been merged. This asks.',
+  plate_note: 'Both records have driven L45235 — the same car.',
+  hr_contradiction: HR_CONTRA[0].evidence }];
 
 app.get('/api/same-person', (_req, r) => {
   /* COUNTS ONLY — what #drivers asks for to name the backlog beside its count,
@@ -1681,14 +1932,21 @@ app.get('/api/same-person', (_req, r) => {
          row count against it — #drivers capped its query at 800 for months
          and quietly dropped three people the month the roster passed it. */
       people: 5, accounts: 7,
-      by_basis: { same_name: 5, similar_name: 2 },
+      by_basis: { same_name: 5, similar_name: 2, hr_roster: 1 },
       note: 'Pairs a rule proposed and nobody has answered. They fold nobody until somebody '
         + 'does — api/identity_links.js applies a link only where the basis is conclusive or '
         + 'a person confirmed it.' });
   }
   return r.json({
-  pending: SP.filter((p) => !p.verdict).map(spOut),
-  decided: SP.filter((p) => p.verdict).map(spOut),
+  pending: [...SP.filter((p) => !p.verdict).map(spOut), ...HR_SP.filter((p) => !p.verdict)],
+  decided: [...SP.filter((p) => p.verdict).map(spOut), ...HR_SP.filter((p) => p.verdict)],
+  hr_contradictions: HR_CONTRA,
+  hr_roster: { upload_id: HR_UPLOADS[0].id, export_date: HR_UPLOADS[0].export_date,
+    withdrawn: 0, already_one_person: 0 },
+  hr_note: `Pairs marked HR come from HR's roster (export of ${HR_UPLOADS[0].export_date}): platform `
+    + 'ids HR filed under one employee. A verdict on one is RECORDED and folds nobody — an HR '
+    + 'proposal is never applied by this product; promoting a pair into the merge register is a '
+    + 'separate, deliberate edit.',
   conclusive_bases: ['shared_phone', 'shared_email'],
   why: 'A phone number or an email address on two records is an identifier, so those merge '
     + 'without asking. These are pairs where the only evidence is that one name sits inside '
@@ -1701,6 +1959,15 @@ app.get('/api/same-person', (_req, r) => {
 });
 
 app.post('/api/same-person/decide', (req, r) => {
+  if (req.body?.proposal_id != null) {
+    const h = HR_SP.find((x) => x.proposal_id === Number(req.body.proposal_id));
+    if (!h) return r.status(404).json({ error: 'no such HR proposal' });
+    const hv = req.body.verdict;
+    h.verdict = hv === 'undecided' ? null : hv;
+    h.decided_by = hv === 'undecided' ? null : 'you';
+    return r.json({ ok: true, proposal_id: h.proposal_id, verdict: hv, source: 'hr_roster',
+      applied_now: false, spine: null, effect: 'Recorded. Nothing was merged.' });
+  }
   const p = SP.find((x) => x.alias_ext_id === req.body?.alias_ext_id);
   if (!p) return r.status(404).json({ error: 'no such proposal' });
   const v = req.body?.verdict;

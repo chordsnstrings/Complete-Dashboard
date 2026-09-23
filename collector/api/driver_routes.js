@@ -41,6 +41,9 @@ import { isoDay } from '../src/sources/ledger.js';
 import { config } from '../src/config.js';
 import { isAdmin } from './admin_gate.js';
 import { IDENTITY_DOCS, stripIdentity, withheldNote, withPhotos, photoHref } from './redact.js';
+/* The one read in the product that selects an HR document number — see the
+   profile route below and api/hr_roster.js. */
+import { hrForProfile } from './hr_roster.js';
 /* The ninety identities the register applies, id to id — see api/identity_map.js
    for the measurement behind each and why this is a LIST and not a rule. The
    stored person_key already carries them (sql/schema_v53.sql generates it from
@@ -1374,7 +1377,53 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
             + 'name joins nothing — so an account nobody has reviewed keeps its provider '
             + 'address. Everything below is this account and whatever the name fold already '
             + 'joins to it, which is what this page has always shown.';
+    /* WHAT HR FILES FOR THIS PERSON — the Emirates ID number, the UAE licence
+       number, and the licence expiry, HR's first.
+       ═════════════════════════════════════════════════════════════════════
+       THE OPERATOR'S DECISION, 2026-09-23: the driver page is where these two
+       numbers are shown, and this is the route that feeds it. It is the only
+       route that returns either — api/hr_roster.js selects them in exactly
+       one read, hrForProfile(), and every other HR read asks whether a number
+       is on file instead. Passport and RTA-permit numbers are returned by
+       nothing. test/hr_roster_numbers.test.mjs sweeps every route's body for
+       the values to hold that line.
+
+       This is a deliberate exception to Batch 1 (docs/FIX-STATUS.md), which
+       withholds the COMPLIANCE record's identity documents from an anonymous
+       caller — those still go through stripIdentity() above, unchanged. The
+       HR numbers travel on their own key, `hr`, so neither rule can be
+       mistaken for the other.
+
+       Matched through the accounts: every id this page resolved, plus every
+       account the spine holds for the person. HR rows were tied to accounts
+       at import by platform id, else phone — never by name. */
+    const hr = await hrForProfile(q, [...new Set([...(d.ids || []),
+      ...personAccounts.map((a) => a.ext_id)])]);
+    /* HR's licence date first; the platform's soonest real date beside it,
+       and a disagreement said rather than resolved. */
+    /* The hotel channel's never-filled-in default — licence number 123456 on
+       2026-01-01 for 94 records — is not a date, and a "disagreement" with it
+       would be a false one. Recognised by the same tell-tale number the driver
+       page's isPlaceholderLicence() uses (api/public/driver.js). */
+    const platLic = complianceRows
+      .filter((r) => r.licence_expires != null && Number.isFinite(Number(r.licence_days_left))
+        && !/^0*123456$/.test(String(r.licence_no || '')))
+      .sort((a, b) => Number(a.licence_days_left) - Number(b.licence_days_left))[0] || null;
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const dayOfDate = (v) => (v instanceof Date
+      ? `${v.getFullYear()}-${pad2(v.getMonth() + 1)}-${pad2(v.getDate())}`
+      : (/^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || '')) || [null])[0]);
+    const licence = hr?.licence_expires
+      ? { source: 'hr', expires: hr.licence_expires, days_left: hr.licence_days_left,
+        platform: platLic ? { platform: platLic.platform, expires: dayOfDate(platLic.licence_expires),
+          days_left: Number(platLic.licence_days_left) } : null,
+        disagree: Boolean(platLic && dayOfDate(platLic.licence_expires) !== hr.licence_expires) }
+      : platLic ? { source: 'platform', expires: dayOfDate(platLic.licence_expires),
+        days_left: Number(platLic.licence_days_left), platform: null, disagree: false }
+        : null;
     res.json({ ...d,
+      hr,
+      licence,
       /* The canonical identity of the page, beside the account that opened it.
          `resolved_by` comes off the resolution and says which parameter
          answered: 'person_id', 'ext_id' or 'name'. */

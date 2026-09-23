@@ -53,7 +53,20 @@ function sideBlock(s, label) {
 }
 
 function pairCard(p, onDecide) {
-  const c = el('div', `sp-pair${p.verdict ? ` done ${p.verdict}` : ''}`);
+  const hr = p.source === 'hr_roster';
+  const c = el('div', `sp-pair${p.verdict ? ` done ${p.verdict}` : ''}${hr ? ' sp-hr' : ''}`);
+  /* WHERE THE PROPOSAL CAME FROM, first. A pair HR's roster groups is a
+     different kind of evidence from two names that look alike — an employer
+     filed these ids under one employee — and the reviewer weighs it
+     differently, so the card says so before anything else. */
+  if (hr) {
+    const src = el('div', 'sp-meta');
+    src.innerHTML = `${pill('HR roster', 'info', 'basis hr_roster — platform ids HR files under one employee')} `
+      + `<span class="dim">${esc(p.employee?.fleet_id === 'egari' ? 'Egari' : 'Ecosine')} employee `
+      + `<span class="mono">${esc(p.employee?.employee_id || '')}</span>${p.employee?.name ? ` · ${esc(p.employee.name)}` : ''}`
+      + ` · ${esc(String((p.accounts || []).length))} ids on HR’s row</span>`;
+    c.append(src);
+  }
   const body = el('div', 'sp-body');
   body.append(sideBlock(p.canonical, 'This record'));
   const mid = el('div', 'sp-mid');
@@ -67,6 +80,9 @@ function pairCard(p, onDecide) {
   if (p.phone_tail) {
     c.append(el('p', 'sp-ev dim', `Both filed a phone ending ${p.phone_tail}.`));
   }
+  /* HR's roster disagrees with this pair, or this HR proposal disagrees with
+     a link already held. Said on the card being answered. */
+  if (p.hr_contradiction) c.append(note(`HR’s roster contradicts this: ${p.hr_contradiction}`, 'warn'));
 
   if (p.verdict) {
     const v = el('div', 'sp-verdict');
@@ -95,9 +111,13 @@ function pairCard(p, onDecide) {
      the monthly rollups keep counting them apart until the pair is promoted
      into the register — and a reviewer who does not know that cannot judge
      whether they are allowed to click it. */
-  row.append(el('span', 'sp-hint',
-    'Yes folds the two records on the driver pages and the directory from the next request. '
-    + 'No keeps them apart for good — the collector will not ask again.'));
+  row.append(el('span', 'sp-hint', hr
+    /* An HR proposal is NEVER applied — the operator's rule — so "Yes" must
+       not promise a fold it will not make. */
+    ? 'Yes records that you agree with HR; it merges nothing — an HR proposal is never applied '
+      + 'automatically. No records that HR’s row carries somebody else’s id.'
+    : 'Yes folds the two records on the driver pages and the directory from the next request. '
+      + 'No keeps them apart for good — the collector will not ask again.'));
   c.append(row);
   return c;
 }
@@ -132,12 +152,27 @@ export async function renderSamePerson(root) {
     ]));
     head.append(note(d.why));
     head.append(el('p', 'cap', d.refuted_note));
+    if (d.hr_note) head.append(el('p', 'cap', d.hr_note));
+    /* Every contradiction HR's latest export makes with what is held — some
+       concern a link that is not in this queue at all (a phone link, the
+       register), so they are listed here as well as on the cards. */
+    if ((d.hr_contradictions || []).length) {
+      const box = panel('Where HR’s roster contradicts a link already held',
+        'Either the link is wrong or HR’s row is — this page cannot say which', 'sp-hr-contra');
+      const ul = el('ul', 'sp-facts');
+      d.hr_contradictions.forEach((x) => ul.append(el('li', null, esc(x.evidence))));
+      box.body.append(ul);
+      head.append(box.panel);
+    }
 
     const onDecide = async (p, verdict) => {
       try {
         await api('/api/same-person/decide', {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ alias_ext_id: p.alias_ext_id, verdict }),
+          /* An HR proposal is addressed by its own id; the link table's key
+             would name a different record. */
+          body: JSON.stringify(p.proposal_id != null
+            ? { proposal_id: p.proposal_id, verdict } : { alias_ext_id: p.alias_ext_id, verdict }),
         });
       } catch (e) {
         head.append(note(`That verdict did not save: ${String(e && e.message ? e.message : e)}`, 'warn'));

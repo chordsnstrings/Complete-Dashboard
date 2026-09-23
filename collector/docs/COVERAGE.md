@@ -827,6 +827,61 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A PROPOSAL FROM ANYWHERE BUT THE RULE CANNOT LIVE IN `driver_identity_link`.**
+  `src/identity_link.js` DELETEs every unconfirmed, unrejected row in that table
+  whose evidence its own rules did not produce on the current run — correct
+  for the rule's proposals, and fatal to anybody else's: an HR-roster proposal
+  written there would be gone within the half hour, silently. HR's proposals
+  live in `hr_roster_proposal` (`sql/schema_v83.sql`) and reach `#same-person`
+  through `hrQueue()`; a verdict on one is recorded there and nowhere else.
+  **Any future non-rule source of "these are one person" needs its own table.**
+
+* **"CONFIRMED" IN `driver_identity_link` DOES NOT MEAN A PERSON LOOKED.** The
+  one link the 2026-09-23 HR export contradicts carries a `confirmed_at` and no
+  `confirmed_by`. Read both before calling a link reviewed; the HR
+  contradiction sentence says "confirmed (no reviewer recorded)" for exactly
+  this.
+
+* **`/api/ledger/people`'s `platforms[]` IS NOT ALIGNED WITH `account_ids[]`.**
+  It is the person's distinct platforms, not one per account: zipping them
+  mislabelled 107 of the 748 accounts whose platform another read names. Take
+  an account's platform from a record that names it — compliance, a link, the
+  queue — or from `/api/driver/profile`'s `person_accounts`.
+
+* **A SWEEP BY VALUE OVER REAL DATA FINDS COINCIDENCES.** A 6-digit licence
+  number is a substring of a 13-character phone number; the dry run of the HR
+  export reported one "hit" in `/api/compliance/drivers` that was exactly that.
+  Locate a hit by key path (exact or substring) before calling it a leak, and
+  in a test use distinctive invented values (`PZ9Q…`, `DL55…`, `RT77…`,
+  `test/hr_workbook.mjs`) so a hit can only be the value.
+
+* **A REVERT THAT CANNOT PRODUCE THE FAILURE PROVES NOTHING — AND LOOKS LIKE A
+  GUARD THAT DOES NOTHING.** The first revert of the HR number sweep added
+  `r.passport_no` to the roster read's SELECT and the sweep stayed green. The
+  guard was fine: `rosterView()` builds each person field by field, so a column
+  in the SELECT never reaches the response. The revert had to put the number ON
+  the person to be a leak, and then the sweep failed 3. When a revert passes,
+  ask whether it could have leaked before concluding the test is blind.
+
+* **`test/route_smoke.test.mjs` READS EVERY `const ARGS = {…}` IN THE SUITE AS A
+  LIST OF ROUTES.** A prefix key such as `'/api/driver/'` fails "no test gives
+  arguments to a route that does not exist". Arguments by route family are a
+  function over the route (`test/hr_roster_numbers.test.mjs` `argsFor`).
+
+* **THE MOCK PARITY TEST CANNOT SEE A TABLE ITS REAL SIDE HAS NO ROWS IN.**
+  `test/mockapi.test.mjs` compares against a fixture database with no HR
+  upload, so every HR list there is empty and "an empty fixture list says
+  nothing". The row-level comparison for HR — roster rows, the compliance
+  person's `hr` block, the profile's `hr`/`licence`, the queue's HR items — is
+  made in `test/hr_roster_numbers.test.mjs`, over a database that has one.
+
+* **AN UPLOAD MOVES NEITHER VERSION THE RESPONSE CACHE KEYS ON.** `api/cache.js`
+  invalidates on a collection run or a rollup. `/api/hr-roster` is on its NEVER
+  list (and the page asks with options, so the browser's SWR copy is not used);
+  `/api/compliance/drivers` was already uncached. `/api/driver/profile` IS
+  cached, so its `hr` block reflects a new upload from the next collection run
+  onward, not the second after the commit.
+
 * **BOLT'S PAYOUT LIST IS DAYS LATE. ITS BALANCE LEDGER IS NOT — AND WE NEVER
   READ THE LEDGER, BECAUSE THE PROBE ASKED IT FOR NINETY DAYS.**
   On 2026-09-23 the operator reported Bolt paid both fleets on **Monday
@@ -5764,3 +5819,129 @@ itself and 120 once the person's other accounts are read (counted through
   the practical effect is small — a pair merged BY a shared phone yields that
   same phone — but a register-merged pair lends its sibling's number, which is
   right only while the merge is.
+
+## The operator's HR roster export — what it gives, measured 2026-09-23
+
+The HR system exports `active-drivers-YYYY-MM-DD.xlsx`: one sheet, `Drivers`,
+44 columns in a fixed order (`HR_HEADERS` in `src/hr_roster.js`). The export of
+2026-09-23 carries **143 rows, Ecosine 100 and Egari 43**. It is the ONLY source
+this product has for passport, Emirates ID, visa and RTA-permit expiry, and a
+second source of licence expiry beside Yango's. Imported by `#hr-roster`
+(People), admin-gated preview then commit; each upload is an immutable snapshot
+(`sql/schema_v83.sql`).
+
+**The house xlsx reader against openpyxl on this file: 4,243 non-empty cells,
+0 differing.** This is the differential check the traps section asks of
+`src/salary/xlsx.js` ("A GREEDY ATTRIBUTE RUN…"), re-run on this file before
+anything was built on it.
+
+### What it carries, and what is kept
+
+| column(s) | on the 2026-09-23 export | kept? |
+|---|---|---|
+| Employee ID | 143 distinct: `D###` 52, `EMP-`+13-digit stamp 51, `EG###` 19, `IND###` 17, `EGIN###` 4 | yes — with the fleet, as the key |
+| Company Name | 2 values; `/ecosine/i` → Ecosine 100, `/egari/i` → Egari 43, none ambiguous | as the fleet |
+| Full Name, Phone, Email | 143 / 143 / 143 filled | yes |
+| Compliance Status | 2 values, HR's own label | yes, shown as HR's |
+| Passport No. / Expiry | 143 / 143 | yes / yes |
+| Emirates ID No. / Expiry | 143 / 143; 142 are fifteen digits starting 784, 1 is not (kept as typed, counted) | yes / yes |
+| Visa No. / Expiry | 108 / 93. The number equals the Emirates ID on 107 of 108 | **number not stored at all** / expiry yes |
+| UAE licence No. / Expiry | 143 / 143 | yes / yes |
+| RTA permit No. / Expiry | 141 / 141 | yes / yes |
+| Uber / Bolt / Yango / YAY / Careem ids | 112 / 106 / 59 / 6 / 0 | yes, all, matched or not |
+| Active, Vehicle Assigned, Violations, Complaints | "Yes", "No", 0, 0 on every row — defaults, not data | no |
+| Gender, Nationality, DOB, Marital, Address, Emergency contact, First/Last name, Bank, IBAN, Notes, Contract dates, Joining Date, Hired At, Scores, Last Test Result | — | no, by the operator's decision |
+
+Phones are written three ways on this one file — `+9715…` (95), `9715…` (47)
+and one 13-digit — so they are compared on the last nine digits
+(`phoneKey()` in `src/identity_link.js`), never as strings.
+
+### Where the numbers may leave — the operator's decision
+
+| number | stored | returned by |
+|---|---|---|
+| passport, RTA permit | yes | **no route** |
+| Emirates ID, UAE licence | yes | **`/api/driver/profile` only**, under `hr` — the driver page shows them |
+| visa | **no** | — |
+
+`api/redact.js` carries the table (`HR_NUMBER_COLUMNS`, `HR_NUMBERS_SERVED`).
+Every other HR read selects `x IS NOT NULL` instead of `x`, and
+`test/hr_roster_numbers.test.mjs` sweeps every declared GET route, the
+raw-values sampler, the CSV export and both write routes for synthetic numbers
+BY VALUE. Note what this is: the Emirates ID and licence number are served to
+any caller who can reach `/api/driver/profile` — this product has no sign-in —
+which is a deliberate exception to Batch 1 for HR-sourced numbers, on its own
+key. The compliance record's `emirates_id`/`licence_no` still go through
+`stripIdentity()` unchanged.
+
+### The dry run — the real file against production's accounts, 2026-09-23
+
+A local PGlite seeded from production's public reads (437 compliance records,
+810 spine accounts over 347 people, 433 links), the real file through the real
+preview and commit routes. Counts only.
+
+| | |
+|---|---|
+| rows accepted | 143, 0 refusals |
+| matched by platform id | **112** |
+| matched by phone (no id held) | **22** |
+| not matched | **9** |
+| fleet disagreements (id filed under the other fleet) | 0 |
+| Uber ids held | 112 of 112 |
+| Yango ids held | 59 of 59 |
+| Bolt ids held | **29 of 106**: Egari 29 of 29, **Ecosine 0 of 77** |
+| YAY ids held | 0 of 6 — nothing collects YAY |
+| same-person proposals | **20 pairs over 20 employees** — 12 Uber+Yango, 8 Uber+Bolt (the pre-build analysis wrote "18", from its own 12 + 8) |
+| pairs HR groups that are already one person | 68 |
+| contradictions with a link already held | **1** (below) |
+| HR licence vs Yango, compared | 63 (59 by Yango id, 4 by phone): agree 24, differ 39 |
+| — Yango's date older by more than a year | **37** (35 by id, 2 by phone); Yango later 2 |
+| — HR says valid, Yango says expired | 37 |
+| `/api/compliance/drivers` people expired, before → after | **88 → 50**: of the 88, 39 are valid on HR's date and 49 are not on HR's list |
+| people with a licence disagreement shown | 41 |
+| person rows carrying HR documents | 155, plus 9 HR-only rows (see below) |
+| anything expiring within 90 days | 60 of 143 |
+
+Document expiry on the file, against 2026-09-23 in Dubai:
+
+| document | expired | ≤30 | 31–45 | 46–90 | over 90 | no date |
+|---|---|---|---|---|---|---|
+| passport | 4 | 1 | 0 | 4 | 134 | 0 |
+| Emirates ID | 2 | 3 | 2 | 2 | 134 | 0 |
+| licence | 1 | 2 | 0 | 3 | 137 | 0 |
+| visa | 2 | 3 | 3 | 2 | 83 | 50 |
+| RTA permit | 6 | 18 | 15 | 13 | 89 | 2 |
+
+**The one contradiction.** A `same_name` link carrying a `confirmed_at` and NO
+`confirmed_by` — stamped, not reviewed by anybody the table names, which is why
+the pre-build analysis called it unconfirmed — joins a Yango account to an Uber
+account that HR lists under two different employees; and HR files that Yango
+account with the other member of a pair this product has REFUSED (simultaneous
+trips in two cars). It surfaces in the preview, in the `#same-person` queue
+beside the link's own card, and in the queue's list of contradictions.
+
+**155 person rows from 134 matched employees** because an employee HR files
+with two accounts the spine keeps apart (the 20 proposals, and one phone match
+spanning two people) attaches HR's documents to BOTH person rows — HR says they
+are one person, and each row then carries HR's licence date. The `hr.employees`
+count on the row says when more than one HR row attached.
+
+**By value over every response of the dry run:** preview, commit, roster and
+same-person carried none of the file's document numbers. The compliance body
+carried ONE apparent hit, and it was a coincidence: a 6-digit HR licence number
+is a substring of a 13-character phone number already on a compliance record.
+The driver page for five matched people showed the Emirates ID and the licence
+number (5 and 5), and never a passport or RTA number.
+
+### What this export does not give
+
+- **No hotel id.** The file has no hotel column, so hotel accounts are reached
+  by phone only.
+- **No Ecosine Bolt match**, and there cannot be one until Bolt grants the
+  Ecosine fleet-integration roster: the only source that files Bolt's user
+  UUID is that roster, which Bolt refuses for 142868 (the Bolt section above).
+  The page says so per id, measured (`unheldReasons()`).
+- **No visa number** worth keeping (it is the Emirates ID), and the operator
+  ruled it is not stored.
+- **Nothing about who is ONE person that this product applies.** Its groupings
+  are proposals; a verdict on one is recorded and folds nobody.

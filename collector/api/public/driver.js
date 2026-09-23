@@ -741,8 +741,18 @@ function identityCard(p) {
       : '')
     : (c[col] ? `<span><b>${label}</b> ${esc(c[col])}</span>` : ''));
   const wrap = el('div', 'idcard');
-  const lic = c.licence_days_left;
-  const placeholder = isPlaceholderLicence(c);
+  /* WHAT HR FILES FOR THIS PERSON — the operator's decision, 2026-09-23: this
+     page shows the Emirates ID number, the UAE driving licence number and the
+     licence expiry, HR's date first. /api/driver/profile is the only route
+     that returns the two numbers (api/redact.js, HR_NUMBERS_SERVED). Where HR
+     supplies a number, the compliance record's "withheld" line for the same
+     document is not printed beside it: two lines about one document, one
+     saying withheld and one showing it, read as a contradiction. */
+  const hr = p.hr || null;
+  const L = p.licence || null;
+  const hrLeads = L && L.source === 'hr';
+  const lic = hrLeads ? L.days_left : c.licence_days_left;
+  const placeholder = !hrLeads && isPlaceholderLicence(c);
   const licTone = placeholder ? null : lic == null ? null : lic < 0 ? 'bad' : lic < 30 ? 'warn' : 'ok';
   /* Accounts, counted from the accounts the profile RETURNS. It was the length
      of `p.accounts`, which is derived from trip rows — so a Bolt driver who
@@ -823,13 +833,17 @@ function identityCard(p) {
         ${c.state ? pill(c.state, c.state === 'active' ? 'ok' : 'warn') : ''}
         ${placeholder
     ? '<span class="pill" title="This source writes 2026-01-01 with licence number 123456 when the field was never filled in. It is a gap in the record, not an expiry.">licence date not filled in</span>'
-    : lic != null ? pill(`licence ${lic < 0 ? `expired ${Math.abs(lic)}d ago` : `${lic}d left`}`, licTone) : ''}
+    : lic != null ? pill(`licence ${lic < 0 ? `expired ${Math.abs(lic)}d ago` : `${lic}d left`}${hrLeads ? ' · HR' : ''}`, licTone,
+      hrLeads ? 'HR’s roster date — it leads wherever HR has one' : null) : ''}
+        ${hrLeads && L.disagree && L.platform ? pill(`${sourceLabel(L.platform.platform)} says ${dateStr(L.platform.expires)}`, 'warn',
+    `HR files ${L.expires}; ${sourceLabel(L.platform.platform)} files ${L.platform.expires}. HR’s date is the one counted — the other is kept here, not dropped.`) : ''}
       </div>
       <div class="idfacts">
         ${c.phone ? `<span><b>Phone</b> <a class="lnk" href="tel:${esc(dialable(c.phone))}">${esc(dialable(c.phone))}</a></span>` : ''}
         ${c.email ? `<span><b>Email</b> <a class="lnk" href="mailto:${esc(c.email)}">${esc(c.email)}</a></span>` : ''}
-        ${idFact('licence_no', 'Licence')}
-        ${idFact('emirates_id', 'Emirates ID')}
+        ${hr?.emirates_id ? `<span data-hr="emirates_id"><b>Emirates ID</b> <span class="mono">${esc(hr.emirates_id)}</span><span class="dim" title="${esc(hr.source)}"> HR</span></span>` : idFact('emirates_id', 'Emirates ID')}
+        ${hr?.licence_no ? `<span data-hr="licence_no"><b>Licence</b> <span class="mono">${esc(hr.licence_no)}</span><span class="dim" title="${esc(hr.source)}"> HR</span></span>` : idFact('licence_no', 'Licence')}
+        ${hr?.licence_expires ? `<span data-hr="licence_expires"><b>Licence expires</b> ${dateStr(hr.licence_expires)}<span class="dim" title="${esc(hr.source)}"> HR</span></span>` : ''}
         ${c.device_brand ? `<span><b>Device</b> ${esc(c.device_brand)} ${esc(c.device_model || '')}</span>` : ''}
         <span><b>First trip</b> ${dateStr(firstEver)}<span class="dim" title="the first trip on record for this person's platform account — it does not move with the range selector"> ever</span></span>
         <span><b>Last trip</b> ${lastEver ? `${dateStr(lastEver)} ${timeStr(lastEver)}` : '—'}</span>

@@ -77,7 +77,14 @@ const NEVER = ['/api/live', '/api/track', '/api/settings', '/api/rollups',
      the red row the operator had just fixed. Uncached it costs about 0.1-0.2s
      over /api/health (0.77s against 0.55-0.71s from outside, measured
      2026-09-23), one ~30-row read and the latest run per source. */
-  '/api/auth'];
+  '/api/auth',
+  /* THE HR ROSTER, which an upload changes. A commit writes hr_roster_upload
+     and moves neither a collection run nor a rollup, so a cached copy would
+     answer the page's own redraw with the roster from before the upload — the
+     import would look as though it had written nothing, and the next move is
+     to upload the same file again (which the duplicate check then refuses,
+     confirming the wrong story). A few hundred rows; nothing worth caching. */
+  '/api/hr-roster'];
 
 export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
   maxBytes = MAX_BYTES } = {}) {
