@@ -279,9 +279,12 @@ async function checkYango({ value }) {
          cookie, the cookie is not what is being refused. */
       const bare = await ask(null).catch(() => null);
       if (bare && bare.status === status) {
-        return verdict(false, `the portal refuses this park with or without a session (${status}), `
+        /* `blames: 'other'` — a refusal, but not of this credential. The paste
+           box refuses to store on it; the Settings save must not paint the
+           cookie red for it either (api/save_check.js). */
+        return { ...verdict(false, `the portal refuses this park with or without a session (${status}), `
           + 'so the cookie is not what it is rejecting — check YANGO_PARK_ID and YANGO_API_KEY, '
-          + `whose park is ${config.yango.parkId}`);
+          + `whose park is ${config.yango.parkId}`), blames: 'other' };
       }
       /* A SESSION THAT AUTHENTICATES IS NOT A FAILED SESSION.
          ─────────────────────────────────────────────────────────────────
@@ -307,7 +310,10 @@ async function checkYango({ value }) {
          The paste box shows what was measured and does not throw the value
          away. */
       if (bare) {
-        return { verdict: 'unknown',
+        /* `authenticates` — the collector records YANGO_COOKIE as ok on
+           exactly this evidence (src/sources/yango.js), so a save that sees it
+           must not show the same cookie amber. */
+        return { verdict: 'unknown', authenticates: true,
           detail: `the session authenticates${yangoAccountOf(value) ? ` as ${yangoAccountOf(value)}` : ''} — `
             + `the portal answers ${bare.status} with no cookie and ${status} with this one, so it is `
             + 'being read — but the request is refused anyway. Since 2026-09-06 that refusal is an '
@@ -649,7 +655,21 @@ export async function checkStored(key, { fleet = null, value = get(key),
     ? get(f === 'egari' ? 'UBER_ORG_UUID_EGARI' : 'UBER_ORG_UUID') : undefined;
   const r = await checkWith({ ok: true, key, provider: PROVIDER_OF_KEY(key), value,
     fleet: f, org_uuid, labelled: true });
-  const out = { ...base, verdict: r.verdict, detail: r.detail, ...(r.keys ? { keys: r.keys } : {}) };
+  const out = { ...base, verdict: r.verdict, detail: r.detail,
+    ...(r.blames ? { blames: r.blames } : {}), ...(r.authenticates ? { authenticates: true } : {}) };
+  /* A SUCCESSOR ONLY WHEN THERE IS ONE, AND ONLY FOR THE KEY TESTED.
+     ─────────────────────────────────────────────────────────────────────
+     checkBolt returns `keys` on every pass, naming the PER-FLEET key
+     (keyFor BOLT_REFRESH_TOKEN_<FLEET>) and, since the portal measured on
+     2026-09-22 hands back no successor, the very value it was given. Passed
+     through as-is, a save of the unsuffixed BOLT_REFRESH_TOKEN would have
+     written that value over BOLT_REFRESH_TOKEN_ECOSINE, the token the
+     collector actually uses (src/sources/bolt.js prefers the per-fleet key).
+     Nobody asked for that write. Found by an independent review before this
+     shipped. So a successor is carried only when the provider handed back a
+     DIFFERENT credential, and it is filed under the key that was tested. */
+  const successor = Object.values(r.keys || {}).find((v) => v && v !== value);
+  if (successor) out.keys = { [key]: successor };
   /* A whole curl command or cookie jar typed into a single-key field.
      ─────────────────────────────────────────────────────────────────────
      The per-key field stores exactly what was typed and the collector sends

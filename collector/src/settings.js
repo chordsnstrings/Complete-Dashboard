@@ -3,6 +3,7 @@
 // Secrets are encrypted with AES-256-GCM using SETTINGS_KEY (falls back to a key derived from
 // DATABASE_URL so the app still works before a key is provisioned).
 import crypto from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { pool } from './db.js';
 import { log } from './log.js';
 import { jwtExpiry } from './util.js';
@@ -350,10 +351,12 @@ const TTL_MS = 30000;   // collector picks up Settings changes within 30s — no
     against are computed the same way. */
 export const SETTING_VERSION_SQL = '(extract(epoch FROM updated_at) * 1000000)::bigint';
 
-export async function loadSettings(force = false) {
+/* `db` is the pool in production. It is a parameter so a test can load
+   settings from PGlite; see test/credential_save_check.test.mjs. */
+export async function loadSettings(force = false, db = pool) {
   if (!force && Date.now() - loadedAt < TTL_MS) return cache;
   try {
-    const { rows } = await pool.query(
+    const { rows } = await db.query(
       `SELECT key, value, is_secret, (${SETTING_VERSION_SQL})::text AS version FROM app_setting`);
     const next = {}; const ver = {};
     for (const r of rows) {
@@ -365,29 +368,80 @@ export async function loadSettings(force = false) {
   return cache;
 }
 
-// Synchronous read of the last loaded snapshot, falling back to env.
-export const get = (key, dflt) => (cache[key] ?? process.env[key] ?? dflt);
+/* ONE SNAPSHOT PER UNIT OF WORK.
+   ─────────────────────────────────────────────────────────────────────────
+   The cache above is shared by everything in the process, and the collector
+   refreshes it from several places at once: liveStatusTick every 120s,
+   cabmanTick every five minutes, the hourly visibility record. A source does
+   not re-read its credentials on every request. uber.collect takes its org
+   objects from config.uber.orgs once, and each carries `webCookie` as a plain
+   value for the whole pass. So one half-hourly run could send the cookie it
+   started with while the cache had already moved on to the one the operator
+   had just saved. noteCredential, reading the version from the shared cache,
+   then filed the old cookie's refusal under the new cookie's version. That
+   is the incident of 2026-09-23 (src/auth_state.js), and a version read at
+   note time only closed it when no tick happened to refresh the cache in the
+   88 seconds between the run's start and the refusal.
 
-/** The version of the value get(key) returns in this process: the stored
-    row's updated_at in whole microseconds, or null when the value is not from
-    the Settings page (environment, default, or unset). */
-export const settingVersion = (key) => (cache[key] != null ? versions[key] ?? null : null);
+   So a unit of work (each source inside a run, each tick) runs against its own
+   copy of the values AND their versions, taken together. Everything it reads
+   through get() and every version noteCredential stamps then come from the
+   same moment, whatever the other ticks do to the shared cache meanwhile.
+   Found by an independent review of the first version of this fix.
+
+   What it costs: a value saved while a source is running is used from that
+   source's next pass instead of mid-pass. Between sources the snapshot is
+   retaken (with the usual 30-second TTL), so a save made during a run now
+   reaches the sources after it in the SAME run, which it did not before.
+   Nested calls share the outer snapshot, because two snapshots inside one
+   unit of work would be the inconsistency this exists to remove. */
+const pinned = new AsyncLocalStorage();
+export async function withPinnedSettings(fn, { force = false, db = pool } = {}) {
+  if (pinned.getStore()) return fn();
+  await loadSettings(force, db);
+  return pinned.run({ cache: { ...cache }, versions: { ...versions } }, fn);
+}
+const current = () => pinned.getStore() || { cache, versions };
+
+// Synchronous read of the last loaded snapshot, falling back to env.
+export const get = (key, dflt) => (current().cache[key] ?? process.env[key] ?? dflt);
+
+/** The version of the value get(key) returns here: the stored row's
+    updated_at in whole microseconds, or null when the value is not from the
+    Settings page (environment, default, or unset). Taken from the same
+    snapshot as get(), so the two always describe the same value. */
+export const settingVersion = (key) => {
+  const c = current();
+  return c.cache[key] != null ? c.versions[key] ?? null : null;
+};
 export const getInt = (key, dflt) => { const v = parseInt(get(key, ''), 10); return Number.isFinite(v) ? v : dflt; };
 
-export async function setSetting(key, value) {
+/* A write made INSIDE a pinned unit of work, such as a source persisting a
+   credential it was handed, is visible to the rest of that unit. The pin
+   exists to keep values consistent, not to hide the unit's own writes. */
+const repin = (key) => {
+  const s = pinned.getStore();
+  if (!s) return;
+  if (cache[key] != null) { s.cache[key] = cache[key]; s.versions[key] = versions[key] ?? null; }
+  else { delete s.cache[key]; delete s.versions[key]; }
+};
+
+export async function setSetting(key, value, db = pool) {
   const def = DEF_BY_KEY[key];
   if (!def) throw new Error(`unknown setting: ${key}`);
   const stored = def.secret ? enc(value) : String(value);
-  await pool.query(
+  await db.query(
     `INSERT INTO app_setting (key, value, is_secret, updated_at) VALUES ($1,$2,$3, now())
      ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, is_secret=EXCLUDED.is_secret, updated_at=now()`,
     [key, stored, !!def.secret]);
-  await loadSettings(true);
+  await loadSettings(true, db);
+  repin(key);
 }
 
-export async function deleteSetting(key) {
-  await pool.query('DELETE FROM app_setting WHERE key=$1', [key]);
-  await loadSettings(true);
+export async function deleteSetting(key, db = pool) {
+  await db.query('DELETE FROM app_setting WHERE key=$1', [key]);
+  await loadSettings(true, db);
+  repin(key);
 }
 
 /* What THIS process can see, recorded for the other one to read.

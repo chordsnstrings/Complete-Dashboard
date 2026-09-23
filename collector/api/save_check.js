@@ -27,22 +27,33 @@
    flight per org, so a check per page view would compete with the
    collector's own reports.
 
-   WHAT EACH VERDICT WRITES. The row's `state` is the banner's vocabulary
-   (api/auth_routes.js), so a verdict is translated rather than stored raw:
+   WHAT EACH VERDICT WRITES. A check answers "should this be stored?", and
+   the banner asks "what is true of this credential now?". They are not the
+   same question, so a verdict is translated into the banner's vocabulary
+   (api/auth_routes.js) by what it ESTABLISHED about the credential:
 
-     pass      ok        the saved value authenticated. The red row goes.
-                         last_ok_at moves, because the credential did just
-                         authenticate.
-     fail      invalid   red, with the provider's own reason and "refused when
-                         saved" in front of it, so nobody takes it for the
-                         previous value's failure.
-     unknown   unknown   amber: the provider could not be reached, which says
-                         nothing about the credential either way.
-     untested  saved     quiet: no check exists for this key (an FMS password,
-                         a CABMAN login), so the collector's next run is its
-                         first test. Neither red nor green, because neither
-                         is known.
-     missing   missing   the key was cleared and nothing else configures it.
+     ok        the credential authenticated: a pass, or a check that saw the
+               session read before something else refused the request (the
+               Yango console's CDN edge; the collector records the same
+               evidence as ok). last_ok_at moves, because it did authenticate.
+     invalid   the provider refused THIS credential. Red, with "refused when
+               saved" in front, so nobody takes it for the previous value's
+               failure.
+     saved     nothing was established: no live check exists for the key (an
+               FMS password), the provider could not be reached, or the
+               refusal was not about this credential (the Yango portal refusing
+               the park with or without a session). Quiet on the banner, and
+               the surface's next run writes over it.
+     cleared   the key was removed from the Settings page. Written as saved,
+               and NOT tested: the value now in force is whatever each process
+               holds in its own environment, and the API's environment is not
+               the collector's (UBER_WEB_COOKIE is set on one component only).
+
+   Two kinds of row are left as they were and only re-stamped: `moved` (the
+   endpoint changed) and `blocked` (something in front of the API refuses the
+   caller). A new credential cannot fix either, and painting them "accepted
+   when saved" would hide a real fault until the surface next ran, up to a
+   week for the weekly profile read. Found by an independent review.
 
    Only rows that already exist are touched. A key the banner has never
    observed has no provider or fleet to file a verdict under, and inventing a
@@ -50,25 +61,35 @@
 import { checkStored, checkFleet } from '../src/credcheck.js';
 import { SETTING_VERSION_SQL, setSetting, loadSettings, get } from '../src/settings.js';
 
-/** The banner state a save-time verdict becomes. See the table above. */
-export const SAVE_STATE = {
-  pass: 'ok', fail: 'invalid', unknown: 'unknown', untested: 'saved', missing: 'missing',
-};
-
-/** The row's detail: the verdict's own words, prefixed so that a reader can
-    tell a verdict made at save time from one the collector made. */
-export function saveDetail(verdict, detail) {
-  const said = detail ? String(detail) : '';
-  const text = {
-    pass: `accepted when saved — ${said || 'the provider authenticated it'}`,
-    fail: `refused when saved — ${said || 'the provider refused it'}`,
-    unknown: `saved, but not tested — ${said || 'the provider could not be reached'}`,
-    untested: `saved, not tested yet — ${said || 'no live check exists for it'}; `
-      + 'the collector’s next run is its first test',
-    missing: `cleared on the Settings page — ${said || 'nothing is configured for it now'}`,
-  }[verdict];
-  return (text || said).slice(0, 240);
+/** The banner state a verdict becomes. See the table above. */
+export function stateOf(v) {
+  if (v.verdict === 'pass' || (v.verdict === 'unknown' && v.authenticates)) return 'ok';
+  if (v.verdict === 'fail' && v.blames !== 'other') return 'invalid';
+  return 'saved';
 }
+
+/** The row's detail: the check's own words, prefixed so that a reader can
+    tell a verdict made at save time from one the collector made. */
+export function saveDetail(v) {
+  const said = v.detail ? String(v.detail) : '';
+  const state = v.verdict === 'cleared' ? 'cleared' : stateOf(v);
+  const text = {
+    ok: `accepted when saved — ${said || 'the provider authenticated it'}`,
+    invalid: `refused when saved — ${said || 'the provider refused it'}`,
+    saved: `saved, not tested — ${said || 'no live check exists for it'}; each surface tests it `
+      + 'the next time it runs',
+    cleared: 'cleared on the Settings page — each process now uses its own environment value if it '
+      + 'has one, and each surface\u2019s next run says whether it does',
+  }[state];
+  return text.slice(0, 240);
+}
+
+/* A row about the ENDPOINT or the CALLER, not the credential. Kept. */
+const KEEP = ['moved', 'blocked'];
+/* Inlined rather than bound: a constant list, and a JS array bound to a
+   Postgres parameter is the one shape docs/COVERAGE.md records passing on
+   PGlite and failing on production. */
+const KEEP_SQL = KEEP.map((k) => `'${k}'`).join(', ');
 
 /**
  * Test each saved key once per fleet its check depends on, and write the
@@ -76,17 +97,19 @@ export function saveDetail(verdict, detail) {
  *
  * @param db     anything with query(text, params)
  * @param keys   the setting keys that were just written or cleared
- * @param opts.known   Map key → { verdict, detail, untested? } the caller has
- *                     already established (the paste box tests before it
- *                     writes, and testing twice would generate a second Uber
- *                     report for nothing)
- * @param opts.check   (key, { fleet }) → verdict; checkStored in production
+ * @param opts.cleared  the keys among them that were REMOVED, which are never
+ *                      tested (see the table above)
+ * @param opts.known    Map key → { verdict, detail, untested?, blames?,
+ *                      authenticates? } the caller has already established
+ *                      (the paste box tests before it writes, and testing
+ *                      twice would generate a second Uber report for nothing)
+ * @param opts.check    (key, { fleet }) → verdict; checkStored in production
  * @param opts.store / opts.reload   setSetting / loadSettings, injected so a
- *                     test harness that stubs them is not bypassed
- * @returns one entry per key and fleet tested: { key, fleet, verdict, detail, rows }
+ *                      test harness that stubs them is not bypassed
+ * @returns one entry per key and fleet: { key, fleet, verdict, state, detail, rows }
  */
 export async function recordSaved(db, keys, {
-  known = new Map(), check = checkStored, store = setSetting, reload = loadSettings,
+  cleared = new Set(), known = new Map(), check = checkStored, store = setSetting, reload = loadSettings,
 } = {}) {
   const tested = await Promise.all([...new Set(keys)].map((key) => one(key).catch((e) => [{
     /* The value is already stored. A failure here must not turn a completed
@@ -109,37 +132,46 @@ export async function recordSaved(db, keys, {
     }
     const out = [];
     for (const [fleet, fleetIds] of groups) {
-      let v = known.get(key);
-      if (v) {
-        v = { verdict: v.untested ? 'untested' : v.verdict, detail: v.detail };
+      let v;
+      if (cleared.has(key)) {
+        v = { verdict: 'cleared' };
+      } else if (known.has(key)) {
+        const k = known.get(key);
+        v = { ...k, verdict: k.untested ? 'untested' : k.verdict };
       } else {
         v = await check(key, { fleet });
-        /* A check that hands back a successor credential has spent the one it
+        /* A check that hands back a different credential has spent the one it
            was given, so the successor is stored before anything is recorded.
-           Bolt's portal was measured on 2026-09-22 NOT to do this (fifteen
-           exchanges of one token, all accepted, no successor), but
-           src/credcheck.js still carries the successor if one ever comes back,
-           and dropping it here would leave a dead token stored. */
+           checkStored only reports one when the provider really returned a
+           new value, and only for the key it tested; Bolt's portal was
+           measured on 2026-09-22 not to rotate at all. */
         let moved = false;
         for (const [k, val] of Object.entries(v.keys || {})) {
-          if (val && val !== get(k)) { await store(k, val); moved = true; }
+          if (k === key && val && val !== get(k)) { await store(k, val); moved = true; }
         }
         if (moved) await reload(true);
       }
-      const state = SAVE_STATE[v.verdict] || 'unknown';
-      const detail = saveDetail(v.verdict, v.detail);
+      const state = v.verdict === 'cleared' ? 'saved' : stateOf(v);
+      const detail = saveDetail(v);
+      const VERSION = `(SELECT ${SETTING_VERSION_SQL} FROM app_setting WHERE key = $1)`;
       let n = 0;
       for (const f of fleetIds) {
         const r = await db.query(
           `UPDATE credential_state
-              SET state = $3, detail = $4, checked_at = now(),
-                  last_ok_at = CASE WHEN $3 = 'ok' THEN now() ELSE last_ok_at END,
-                  value_version = (SELECT ${SETTING_VERSION_SQL} FROM app_setting WHERE key = $1)
-            WHERE credential = $1 AND fleet_id = $2`,
+              SET state = $3::text, detail = $4::text, checked_at = now(),
+                  last_ok_at = CASE WHEN $3::text = 'ok' THEN now() ELSE last_ok_at END,
+                  value_version = ${VERSION}
+            WHERE credential = $1 AND fleet_id = $2 AND state NOT IN (${KEEP_SQL})`,
           [key, f, state, detail]);
         n += r.rowCount ?? r.affectedRows ?? 0;
+        /* A moved endpoint or a blocked caller is as true of the new value as
+           of the old one: re-stamped so it is read as current, not replaced. */
+        await db.query(
+          `UPDATE credential_state SET value_version = ${VERSION}
+            WHERE credential = $1 AND fleet_id = $2 AND state IN (${KEEP_SQL})`,
+          [key, f]);
       }
-      out.push({ key, fleet, verdict: v.verdict, detail, rows: n });
+      out.push({ key, fleet, verdict: v.verdict, state, detail, rows: n });
     }
     return out;
   }

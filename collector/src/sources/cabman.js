@@ -269,12 +269,20 @@ export async function cabmanRoster() {
   return out;
 }
 
+/* The Settings key a person replaces for this fleet's login. These rows said
+   CABMAN_PASSWORD, a key that exists nowhere on the Settings page (the real
+   one is CABMAN_ECOSINE_PASS, src/settings.js), so the banner named a key the
+   operator could not find, and a save of the real one could not reach its row.
+   Found by an independent review of api/save_check.js; schema_v82 removes the
+   old rows. */
+export const passKey = (fleet) => `CABMAN_${String(fleet).toUpperCase()}_PASS`;
+
 export async function pullLive() {
   let total = 0;
   for (const f of config.cabman.fleets) {
     if (!f.pass) {
       log.warn(SRC, `no password for ${f.fleet}, skipping`);
-      await noteCredential(pool, { provider: SRC, fleet: f.fleet, credential: 'CABMAN_PASSWORD',
+      await noteCredential(pool, { provider: SRC, fleet: f.fleet, credential: passKey(f.fleet),
         state: 'missing', surface: 'IVDData',
         detail: 'no password configured, so this fleet has no live tracker feed' });
       continue;
@@ -302,7 +310,7 @@ export async function pullLive() {
          collector. There is no CABMAN_PASSWORD entry in src/credcheck.js
          either, so nothing could turn it green again. */
       if (status === 401 || status === 403 || saysAuth(data?.Message || data?.message || '')) {
-        await noteCredential(pool, { provider: SRC, fleet: f.fleet, credential: 'CABMAN_PASSWORD',
+        await noteCredential(pool, { provider: SRC, fleet: f.fleet, credential: passKey(f.fleet),
           state: 'invalid', surface: 'IVDData', detail: `HTTP ${status}` });
       }
       continue;
@@ -310,7 +318,7 @@ export async function pullLive() {
     /* The feed answered on this password, so say so — the row could only ever
        go red before, and 'invalid' scores as "stopped" on the credential
        panel for ever. */
-    await noteCredential(pool, { provider: SRC, fleet: f.fleet, credential: 'CABMAN_PASSWORD',
+    await noteCredential(pool, { provider: SRC, fleet: f.fleet, credential: passKey(f.fleet),
       state: 'ok', surface: 'IVDData', detail: null });
     const now = new Date().toISOString();
     const rows = (data?.IVDDataResult || []).map((v) => ({

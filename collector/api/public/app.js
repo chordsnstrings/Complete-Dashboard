@@ -12,7 +12,7 @@ import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
-  applyWindow } from './data.js';
+  applyWindow, MONTH_SHORT } from './data.js';
 import { volatilePath } from './swr.js';
 import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
@@ -6715,6 +6715,20 @@ const ERRAND_PART = {
   blocked: 'refused in front of the API, where no credential is being read',
 };
 
+/* "saved 12:30" today, "saved 22 Sep 12:30" on any other day: a bare time
+   under a pending line that has sat there since yesterday reads as this
+   afternoon. Dubai's calendar, like every other time on these pages. */
+/* The house month names (data.js), not the browser's: en-GB prints "Sept",
+   and every other date on these pages says "Sep". */
+const savedWhen = (iso, now = new Date()) => {
+  const at = new Date(iso);
+  const clock = dubaiClock(at).hhmm;
+  const day = dubaiDay(at);
+  if (day === dubaiDay(now)) return clock;
+  const [, m, d] = day.split('-').map(Number);
+  return `${d} ${MONTH_SHORT[m - 1]} ${clock}`;
+};
+
 async function authBanner() {
   const host = $('#authBanner');
   if (!host) return;
@@ -6839,7 +6853,7 @@ async function authBanner() {
         : (() => {
           const n = new Set(pending.map((r) => r.credential)).size;
           return `${countOf(n, 'saved credential')} ${n === 1 ? 'has' : 'have'} not been tested yet — `
-            + 'the collector\u2019s next run is the first test';
+            + 'each surface tests it the next time it runs';
         })();
 
   host.className = `authbanner ${tone}`;
@@ -6867,7 +6881,7 @@ async function authBanner() {
         /* When it was SAVED, which is what the operator did and can check.
            "last worked 2h ago" would be about the value it replaced. */
         : r.severity === 'pending'
-          ? (r.saved_at ? `saved ${dubaiClock(new Date(r.saved_at)).hhmm}` : 'waiting for the collector')
+          ? (r.saved_at ? `saved ${savedWhen(r.saved_at)}` : 'waiting for the collector')
           : since(r))}</span></li>`).join('')
     + `</ul></div>`;
 }

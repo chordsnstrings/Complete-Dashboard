@@ -3655,8 +3655,12 @@ app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
   /* Tested now, and the banner told, rather than left showing the verdict on
      the value this save replaced until the collector's next run. See
      api/save_check.js for the measurement and for why only on save. */
-  const checked = await recordSaved(pool, Object.keys(updates),
-    { store: setSetting, reload: loadSettings });
+  const checked = await recordSaved(pool, Object.keys(updates), {
+    store: setSetting, reload: loadSettings,
+    /* A cleared key is not tested: the value in force is now each process's
+       own environment value, and the API's is not the collector's. */
+    cleared: new Set(Object.entries(updates).filter(([, v]) => v === null || v === '').map(([k]) => k)),
+  });
   res.json({ ok: true, updated: done, checked });
 }));
 
@@ -3767,6 +3771,8 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
   const tested = await checkAll(candidates);
 
   const applied = [];
+  /* The candidates actually written, for the banner rows below. */
+  const admitted = [];
   if (apply) {
     for (const t of tested) {
       /* 'pass' is the ordinary route in. 'unknown' is admitted for exactly one
@@ -3806,11 +3812,13 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
           await setSetting(k, v);
           applied.push(k);
         }
+        admitted.push(t);
         continue;
       }
       if (!t.key) continue;
       await setSetting(t.key, t.value);
       applied.push(t.key);
+      admitted.push(t);
     }
     if (applied.length) await loadSettings(true);
   }
@@ -3820,10 +3828,13 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
   const checked = applied.length
     ? await recordSaved(pool, applied, {
       store: setSetting, reload: loadSettings,
-      known: new Map(tested.flatMap((t) => (t.keys && typeof t.keys === 'object'
-        ? Object.keys(t.keys) : t.key ? [t.key] : [])
-        .filter((k) => applied.includes(k))
-        .map((k) => [k, { verdict: t.verdict, detail: t.detail, untested: t.untested === true }]))),
+      /* From the candidates that were ADMITTED and written, never from the
+         whole tested list: two candidates can name one key, and a Map built
+         from every one keeps the last, which could be the refused one. */
+      known: new Map(admitted.flatMap((t) => (t.keys && typeof t.keys === 'object'
+        ? Object.keys(t.keys) : [t.key])
+        .map((k) => [k, { verdict: t.verdict, detail: t.detail, untested: t.untested === true,
+          blames: t.blames, authenticates: t.authenticates === true }]))),
     })
     : [];
 

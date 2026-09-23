@@ -30,8 +30,8 @@ const row = (o) => ({ fleet_id: 'egari', surface: 'x', last_ok_at: null, checked
   saved_at: null, superseded: false, ...o });
 const PENDING = row({ provider: 'fms', credential: 'FMS_PASSWORD', state: 'saved', severity: 'pending',
   saved_at: SAVED_AT,
-  detail: 'saved, not tested yet — no live check exists for FMS_PASSWORD; the collector’s next run '
-    + 'is its first test' });
+  detail: 'saved, not tested — no live check exists for FMS_PASSWORD; each surface tests it the next '
+    + 'time it runs' });
 const PENDING_2 = { ...PENDING, fleet_id: 'ecosine' };
 const STOPPED = row({ provider: 'uber', credential: 'UBER_WEB_COOKIE_EGARI', state: 'invalid',
   severity: 'stopped', last_ok_age_h: 1.2,
@@ -65,15 +65,26 @@ console.log('\nsaved and not yet tested, on its own');
   check('…and not "last worked", which would be about the value it replaced',
     b.items.every((t) => !/last worked|never authenticated/.test(t)), b.items.join(' | '));
   check('…with the recorded words', b.items.every((t) => /no live check exists for FMS_PASSWORD/.test(t)));
+  check('…and a head that promises no particular run', /each surface tests it the next time it runs$/.test(b.head),
+    b.head);
   const stopBg = await page.evaluate(() => {
     const d = document.createElement('div'); d.className = 'authbanner stopped';
     document.body.append(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c;
   });
   check('…on a ground that is not the stopped one', b.bg !== stopBg, `${b.bg} vs ${stopBg}`);
 
-  /* Nothing to say, nothing drawn. */
-  answer = body([]);
+  /* Saved on an earlier day: a bare "12:30" under a line that has sat there
+     since then reads as this afternoon. */
+  answer = body([{ ...PENDING, saved_at: '2026-09-20T08:30:22Z' }]);
   await page.goto(`${base}/#vehicles`, { waitUntil: 'networkidle' });
+  await page.waitForFunction(() => /saved 20 Sep 12:30/.test(document.querySelector('#authBanner')?.textContent || ''),
+    null, { timeout: 15000 }).catch(() => {});
+  check('a save from an earlier day carries its date', /saved 20 Sep 12:30/.test((await banner(page)).items[0] || ''),
+    (await banner(page)).items[0]);
+
+  /* Nothing to say, nothing drawn. A different view, so the page renders. */
+  answer = body([]);
+  await page.goto(`${base}/#drivers`, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => document.querySelector('#authBanner')?.innerHTML === '', null, { timeout: 15000 })
     .catch(() => {});
   check('with nothing pending or wrong, the banner is empty', (await banner(page)).html === '');

@@ -43,6 +43,7 @@ export const UBER_EARNER_HORIZON_DAYS = 192;
 export const UBER_EARNER_ASK_MARGIN_DAYS = 8;
 import { config } from '../config.js';
 import { http } from '../http.js';
+import { createHash } from 'node:crypto';
 import { log } from '../log.js';
 import { pool } from '../db.js';
 import { noteCredential } from '../auth_state.js';
@@ -70,7 +71,14 @@ export async function uberOAuthToken(o = null) {
      grant that failed for one fleet would show as every fleet's problem. */
   const fleet = o?.oauth?.own ? o.fleet : '*';
 
-  const hit = cache.get(clientId);
+  /* Keyed on the SECRET as well as the id. Keyed on the id alone, a secret
+     replaced on the Settings page went unused for as long as the old grant
+     lived (expires_in, 30 days), and the UBER_CLIENT_SECRET row, which only a
+     fresh grant writes, stayed on whatever the save recorded for that long.
+     Found by an independent review of api/save_check.js. The secret enters
+     the key only as a short digest, and only in memory. */
+  const slot = `${clientId}|${createHash('sha256').update(String(clientSecret || '')).digest('hex').slice(0, 16)}`;
+  const hit = cache.get(slot);
   if (hit && Date.now() < hit.exp - 60000) return hit.token;
 
   if (!clientId || !clientSecret) {
@@ -97,7 +105,7 @@ export async function uberOAuthToken(o = null) {
   await noteCredential(pool, { provider: 'uber', fleet, credential,
     state: 'ok', detail: null, surface: 'oauth token grant' });
   const token = data.access_token;
-  cache.set(clientId, { token, exp: Date.now() + (data.expires_in || 2592000) * 1000 });
+  cache.set(slot, { token, exp: Date.now() + (data.expires_in || 2592000) * 1000 });
   log.info('uber', 'oauth token refreshed', { expires_in: data.expires_in, credential, fleet });
   return token;
 }

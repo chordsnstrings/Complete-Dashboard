@@ -29,6 +29,9 @@ import { refreshNameProposals } from './name_proposals.js';
 import { refreshPlaceCells } from './places.js';
 import { refreshRollups } from './rollup.js';
 import { config, loadSettings } from './config.js';
+/* Each unit of work reads one snapshot of settings, values and versions
+   together; see withPinnedSettings in src/settings.js for why. */
+import { withPinnedSettings } from './settings.js';
 import { monthsAgo, daysAgo, iso, dubaiIso } from './util.js';
 import { setState, pool } from './db.js';
 import { log } from './log.js';
@@ -228,7 +231,7 @@ async function runWindowInner(mode, from, to, onProgress, fleet = null, jobId = 
        narrowed to the fleet whose credential was just replaced instead of
        re-pulling both. A source that serves one fleet ignores the key. */
     let threw = false;
-    try { await mod.collect({ from, to, mode, onStep, fleet, checkpoint }); }
+    try { await withPinnedSettings(() => mod.collect({ from, to, mode, onStep, fleet, checkpoint })); }
     catch (e) { threw = true; log.error('run', `${name} threw`, { err: String(e) }); }
     done++;
     /* Marked only when the source ran to completion. A source that threw may
@@ -390,7 +393,7 @@ export async function analystPass({ days = 30, now = new Date() } = {}) {
    inside runWindow, because a failing probe must never be able to delay or
    fail a collection. */
 export async function probePass() {
-  try { return await probeAll({ days: 3 }); }
+  try { return await withPinnedSettings(() => probeAll({ days: 3 })); }
   catch (e) { log.error('probe', 'pass failed', { err: String(e) }); return null; }
 }
 
@@ -440,8 +443,8 @@ export const catchUp = (days = 30, onProgress, fleet = null, jobId = null) =>
    what matters, and missingDays() excludes today in any case because a
    statement for a day still in progress would be stored as final and never
    asked again. */
-export const payoutWalk = (fleet = null) =>
-  uberPayout.collect({ from: daysAgo(30), to: new Date(), mode: 'payout-walk', fleet });
+export const payoutWalk = (fleet = null) => withPinnedSettings(() =>
+  uberPayout.collect({ from: daysAgo(30), to: new Date(), mode: 'payout-walk', fleet }));
 
 /* THE AUDIT, WHICH IS A DIFFERENT QUESTION FROM THE WALK.
    ─────────────────────────────────────────────────────────────────────────
@@ -454,12 +457,12 @@ export const payoutWalk = (fleet = null) =>
    Rarely and off the hot path: the report is per-transaction and its
    generation cost scales with the month's trips, so this is an audit rather
    than a collection route. One window per fleet per run. */
-export const payoutAudit = (fleet = null) => uberPayoutOrders.collect({ fleet });
+export const payoutAudit = (fleet = null) => withPinnedSettings(() => uberPayoutOrders.collect({ fleet }));
 
 // CABMAN realtime GPS — fixed 5-minute refresh, persisted to telemetry_snapshot (via cabman.collect,
 // which upserts snapshots and writes a collection_run row). This is the owner of CABMAN data.
 export async function cabmanTick() {
-  try { await loadSettings(); await cabman.collect({ mode: 'realtime' }); }
+  try { await withPinnedSettings(() => cabman.collect({ mode: 'realtime' })); }
   catch (e) { log.error('cabman', 'tick failed', { err: String(e) }); }
 }
 
@@ -478,7 +481,8 @@ export async function cabmanTick() {
    The window is deliberately wider than the cadence. A driver's evening
    straddles midnight, a missed tick must cost nothing, and re-asking is
    idempotent — the rows are keyed on (driver, instant, kind, state). */
-export async function uberTimelineTick({ roster = false, days = 2 } = {}) {
+export async function uberTimelineTick(opts) { return withPinnedSettings(() => uberTimelineTickPinned(opts)); }
+async function uberTimelineTickPinned({ roster = false, days = 2 } = {}) {
   await loadSettings();
   try {
     const to = new Date();
@@ -503,7 +507,8 @@ export async function uberTimelineTick({ roster = false, days = 2 } = {}) {
 
    Given a job id it checkpoints per driver, so a container replaced mid-pass
    resumes at the driver it had reached rather than at the top. */
-export async function uberProfileTick({ fleet = null, jobId = null } = {}) {
+export async function uberProfileTick(opts) { return withPinnedSettings(() => uberProfileTickPinned(opts)); }
+async function uberProfileTickPinned({ fleet = null, jobId = null } = {}) {
   await loadSettings();
   try {
     const ckpt = await loadCheckpoint(jobId);
@@ -581,7 +586,8 @@ export function nextAuditWindows(candidates, verifiedAt, limit) {
   return [...fresh, ...stale].slice(0, limit);
 }
 
-export async function uberAuditTick({ fleet = null, jobId = null, limit = 3 } = {}) {
+export async function uberAuditTick(opts) { return withPinnedSettings(() => uberAuditTickPinned(opts)); }
+async function uberAuditTickPinned({ fleet = null, jobId = null, limit = 3 } = {}) {
   await loadSettings();
   const ckpt = await loadCheckpoint(jobId);
   const candidates = auditWindows();
@@ -678,7 +684,8 @@ export async function uberAuditTick({ fleet = null, jobId = null, limit = 3 } = 
 }
 
 // Other live pollers (Uber online/on-trip status, FMS live telemetry).
-export async function liveStatusTick() {
+export async function liveStatusTick() { return withPinnedSettings(liveStatusTickPinned); }
+async function liveStatusTickPinned() {
   await loadSettings();
   const jobs = [uber.pullLive().catch(() => 0), ...config.fms.fleets.map((f) => fms.pullLive(f).catch(() => 0))];
   const res = await Promise.allSettled(jobs);

@@ -233,12 +233,15 @@ export function authRoutes(app, { q, wrap }) {
          save made before schema_v82, or one whose re-test failed to run.
 
          With a version on both sides the comparison is exact. A row from
-         before schema_v82 has none, and only its time can be compared — a
-         check made before the save is certainly about an earlier value; one
-         made after may or may not be, and is left as it was. */
-      const superseded = c.saved_at != null && (seen != null
-        ? seen !== stored
-        : Date.parse(c.checked_at) < Date.parse(c.saved_at));
+         before schema_v82 has none and is taken at its word, as it was before
+         this existed. Comparing its time with the save instead was tried and
+         dropped before it shipped: at deploy it would have turned the weekly
+         profile rows (checked 2026-09-14) and the timeline row (06:18Z, before
+         the 08:30Z save) pending for up to a week, while the same cookie was
+         answering on every other surface. A pending line that stays for a week
+         over a working credential is the noise that teaches a reader to skip
+         the banner. */
+      const superseded = c.saved_at != null && seen != null && seen !== stored;
       const limit = STALL_HOURS[c.provider] ?? DEFAULT_STALL_H;
       /* A stall only means something while the credential still works: once it
          is refused, the stall is a consequence and saying both would report

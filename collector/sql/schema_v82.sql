@@ -35,3 +35,10 @@ COMMENT ON COLUMN credential_state.value_version IS
   'environment or a default, or the row predates schema_v82. A row whose '
   'version is not the stored one describes a value that has since been '
   'replaced.';
+
+-- CABMAN's rows were filed under CABMAN_PASSWORD, which is not a key on the
+-- Settings page (the real one is CABMAN_ECOSINE_PASS), so the banner named a
+-- key nobody could find and a save could never reach the row.
+-- src/sources/cabman.js now uses the real key; the old rows go, and the
+-- five-minute tick writes the new ones.
+DELETE FROM credential_state WHERE credential = 'CABMAN_PASSWORD';

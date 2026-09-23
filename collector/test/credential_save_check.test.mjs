@@ -26,7 +26,7 @@ import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
 import { noteCredential } from '../src/auth_state.js';
 import { SETTING_VERSION_SQL } from '../src/settings.js';
-import { recordSaved, SAVE_STATE, saveDetail } from '../api/save_check.js';
+import { recordSaved, stateOf, saveDetail } from '../api/save_check.js';
 import { checkStored } from '../src/credcheck.js';
 import { authRoutes } from '../api/auth_routes.js';
 
@@ -161,31 +161,44 @@ console.log('\nthe 2026-09-23 sequence: save, stale refusal, next run');
 /* ══ 3. every verdict, and what the banner makes of it ══════════════════ */
 console.log('\neach save verdict becomes the state the banner already understands');
 {
-  check('the table covers every verdict checkStored can return',
-    ['pass', 'fail', 'unknown', 'untested', 'missing'].every((v) => SAVE_STATE[v]),
-    JSON.stringify(SAVE_STATE));
+  /* A check answers "should this be stored?"; the banner asks "what is true of
+     this credential?". The translation is by what the check ESTABLISHED. */
   const cases = [
-    ['fail', 'invalid', 'stopped', /^refused when saved — /],
-    ['unknown', 'unknown', 'at-risk', /^saved, but not tested — /],
-    ['untested', 'saved', 'pending', /^saved, not tested yet — .*next run is its first test$/],
+    ['a pass', { verdict: 'pass', detail: 'stub pass' }, 'ok', 'ok', /^accepted when saved — stub pass$/],
+    ['a refusal of this credential', { verdict: 'fail', detail: 'stub refused' }, 'invalid', 'stopped',
+      /^refused when saved — stub refused$/],
+    /* The Yango portal refusing the park with or without a session: the check
+       itself says the cookie is not what is being refused. */
+    ['a refusal that is not about this credential', { verdict: 'fail', blames: 'other', detail: 'not the cookie' },
+      'saved', 'pending', /^saved, not tested — not the cookie; each surface tests it the next time it runs$/],
+    /* The session was read and something else refused the request; the
+       collector records YANGO_COOKIE ok on the same evidence. */
+    ['a session that authenticates and is refused for something else',
+      { verdict: 'unknown', authenticates: true, detail: 'the session authenticates' }, 'ok', 'ok',
+      /^accepted when saved — the session authenticates$/],
+    ['a provider that could not be reached', { verdict: 'unknown', detail: 'could not be reached' },
+      'saved', 'pending', /^saved, not tested — could not be reached/],
+    ['a key with no live check', { verdict: 'untested', detail: 'no live check exists for FMS_PASSWORD' },
+      'saved', 'pending', /^saved, not tested — no live check exists/],
   ];
-  for (const [verdict, state, severity, words] of cases) {
+  let i = 0;
+  for (const [what, v, state, severity, words] of cases) {
+    check(`${what} → ${state}`, stateOf(v) === state, stateOf(v));
     await q(`DELETE FROM credential_state`);
-    const v = await save('FMS_PASSWORD', `2026-09-23T09:0${cases.findIndex((c) => c[0] === verdict)}:00Z`);
+    const ver = await save('FMS_PASSWORD', `2026-09-23T09:0${i++}:00Z`);
     await noteCredential(db, { provider: 'fms', fleet: 'ecosine', credential: 'FMS_PASSWORD',
-      state: 'expired', detail: 'the old password', version: v });
-    await recordSaved(db, ['FMS_PASSWORD'], {
-      check: async () => ({ verdict, detail: `stub ${verdict}` }), reload: async () => {} });
+      state: 'expired', detail: 'the old password', version: ver });
+    await recordSaved(db, ['FMS_PASSWORD'], { check: async () => v, reload: async () => {} });
     const r = await row('fms', 'ecosine', 'FMS_PASSWORD');
     const a = (await auth()).rows.find((x) => x.credential === 'FMS_PASSWORD');
-    check(`${verdict} → state ${state}`, r?.state === state, r?.state);
+    check(`…written as ${state}`, r?.state === state, r?.state);
     check(`…scored ${severity} by /api/auth`, a?.severity === severity, a?.severity);
     check('…in words that name the save', words.test(r?.detail || ''), r?.detail);
   }
-  check('a saved-and-untested credential is not counted as stopped or at risk',
-    (await auth()).stopped === 0 && (await auth()).at_risk === 0 && (await auth()).pending === 1);
-  check('a detail is kept inside the column’s 240 characters',
-    saveDetail('fail', 'x'.repeat(400)).length === 240);
+  check('nothing a save writes is amber: an untested value is quiet, not "at risk"',
+    cases.every(([, v]) => ['ok', 'invalid', 'saved'].includes(stateOf(v))));
+  check('a detail is kept inside the column\u2019s 240 characters',
+    saveDetail({ verdict: 'fail', detail: 'x'.repeat(400) }).length === 240);
 }
 
 /* ══ 4. what the recorder leaves alone ══════════════════════════════════ */
@@ -277,17 +290,17 @@ console.log('\na row observed with a replaced value reads as pending');
   check('the banner is no longer red for it', d.stopped === 0 && d.pending === 1,
     `stopped ${d.stopped}, pending ${d.pending}`);
 
-  /* A row from before schema_v82 has no version. Only time can be compared,
-     and only one way round is certain. */
+  /* A row from before schema_v82 has no version, and is taken at its word
+     whichever side of the save it was checked on. Reading "checked before
+     the save" as pending was tried: at deploy it would have made the weekly
+     profile rows pending for a week over a cookie that was working. */
   await q(`UPDATE credential_state SET value_version = NULL, checked_at = '2026-09-23T08:00:00Z'`);
-  check('an unversioned row checked BEFORE the save is pending',
-    (await auth()).rows.find((x) => x.credential === KEY)?.severity === 'pending');
+  check('an unversioned row checked before the save is taken at its word',
+    (await auth()).rows.find((x) => x.credential === KEY)?.severity === 'stopped');
   await q(`UPDATE credential_state SET checked_at = '2026-09-23T08:31:28Z'`);
-  check('an unversioned row checked AFTER the save is taken at its word',
-    (await auth()).rows.find((x) => x.credential === KEY)?.severity === 'stopped',
-    'it may be about either value, and claiming it is about the old one would hide a real refusal');
+  check('…and so is one checked after it',
+    (await auth()).rows.find((x) => x.credential === KEY)?.severity === 'stopped');
 }
-authSrv.close();
 
 /* ══ 6. the two save routes call the recorder ═══════════════════════════ */
 console.log('\nboth Settings save routes test what they stored');
@@ -413,6 +426,241 @@ console.log('\nthe page never paints a remembered banner');
     swr.get('/api/auth') === null);
 }
 
+/* ══ 9. what an independent review found in the first version ═══════════ */
+console.log('\nthe rows a save must leave alone, and the writes it must not make');
+{
+  /* A moved endpoint or a blocked caller is as true of the new value as of
+     the old: a passing check must not paint it "accepted when saved". */
+  await q(`DELETE FROM credential_state`);
+  await q(`DELETE FROM app_setting`);
+  const v = await save('UBER_WEB_COOKIE', '2026-09-23T10:00:00Z');
+  /* Observed with the value stored then; a null version would be (rightly)
+     dropped, because a value IS stored. */
+  await noteCredential(db, { provider: 'uber_fleet', fleet: 'ecosine', credential: 'UBER_WEB_COOKIE',
+    state: 'moved', detail: 'redirected to fleethub.uber.com — the endpoint has moved', version: v });
+  await noteCredential(db, { provider: 'uber', fleet: 'ecosine', credential: 'UBER_WEB_COOKIE',
+    state: 'expired', detail: 'the old session', version: v });
+  await save('UBER_WEB_COOKIE', '2026-09-23T10:05:00Z');
+  const stored = (await q(`SELECT (${SETTING_VERSION_SQL})::text AS v FROM app_setting WHERE key = 'UBER_WEB_COOKIE'`))[0].v;
+  const out = await recordSaved(db, ['UBER_WEB_COOKIE'], {
+    check: async () => ({ verdict: 'pass', detail: 'stub' }), reload: async () => {} });
+  const moved = await row('uber_fleet', 'ecosine', 'UBER_WEB_COOKIE');
+  check('a moved endpoint is not repainted by a passing save', moved?.state === 'moved'
+    && /endpoint has moved/.test(moved?.detail || ''), `${moved?.state}: ${moved?.detail}`);
+  check('…but is re-stamped, so it reads as current rather than superseded',
+    moved?.value_version === stored && v !== stored);
+  check('…while the credential row beside it takes the verdict',
+    (await row('uber', 'ecosine', 'UBER_WEB_COOKIE'))?.state === 'ok' && out[0]?.rows === 1,
+    JSON.stringify(out));
+  check('…and /api/auth still shows the moved endpoint as stopped',
+    (await auth()).rows.find((x) => x.provider === 'uber_fleet')?.severity === 'stopped');
+
+  /* Saving the unsuffixed Bolt token must never write the per-fleet one. The
+     check reports the per-fleet key on every pass, carrying the value it was
+     given; stored as-is, that overwrote the token the collector uses. */
+  const writes = [];
+  await q(`DELETE FROM credential_state`);
+  await noteCredential(db, { provider: 'bolt', fleet: 'ecosine', credential: 'BOLT_REFRESH_TOKEN',
+    state: 'expired', version: null });
+  await recordSaved(db, ['BOLT_REFRESH_TOKEN'], {
+    check: async () => ({ verdict: 'pass', keys: { BOLT_REFRESH_TOKEN_ECOSINE: 'the-value-just-saved' } }),
+    store: async (k, val) => { writes.push(`${k}=${val}`); }, reload: async () => {} });
+  check('a check naming ANOTHER key never causes a write to it', writes.length === 0, writes.join(', '));
+  const spy = async () => ({ verdict: 'pass', detail: 'x',
+    keys: { BOLT_REFRESH_TOKEN_ECOSINE: 'the-value-just-saved' } });
+  const same = await checkStored('BOLT_REFRESH_TOKEN', { fleet: 'ecosine', value: 'the-value-just-saved', checkWith: spy });
+  check('checkStored carries no successor when the provider handed back the same value',
+    same.keys === undefined, JSON.stringify(same.keys));
+  const rotated = await checkStored('BOLT_REFRESH_TOKEN', { fleet: 'ecosine', value: 'the-value-just-saved',
+    checkWith: async () => ({ verdict: 'pass', keys: { BOLT_REFRESH_TOKEN_ECOSINE: 'a-new-one' } }) });
+  check('…and a real successor is filed under the key that was TESTED',
+    JSON.stringify(rotated.keys) === JSON.stringify({ BOLT_REFRESH_TOKEN: 'a-new-one' }), JSON.stringify(rotated.keys));
+}
+
+/* ══ 10. both routes: a cleared key, and a refused duplicate ═════════════ */
+console.log('\nthe routes pass the recorder the truth about what they did');
+{
+  await q(`DELETE FROM credential_state`);
+  await q(`DELETE FROM app_setting`);
+  await noteCredential(db, { provider: 'uber', fleet: 'egari', credential: KEY, state: 'ok', version: null });
+  let tested = 0;
+  const stubCheck = async () => { tested++; return { verdict: 'pass', detail: 'stub' }; };
+  const { server, port } = await mountAll(db, {
+    inject: {
+      recordSaved: (d, keys, o) => recordSaved(d, keys, { ...o, check: stubCheck }),
+      /* Two verdicts for one candidate, the second a refusal: a set can hold
+         two candidates for one key, and only the admitted one was written. */
+      checkAll: async (cands) => cands.flatMap((c) => (c.key ? [
+        { ...c, verdict: 'pass', detail: 'the admitted one' },
+        { ...c, verdict: 'fail', detail: 'a refused duplicate' },
+      ] : [{ ...c, verdict: 'fail', detail: 'unnamed' }])),
+      proposeKeys: async () => [],
+    },
+  });
+  const base = `http://127.0.0.1:${port}`;
+  const put = await (await fetch(`${base}/api/settings`, { method: 'PUT',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ [KEY]: '' }) })).json();
+  const r = await row('uber', 'egari');
+  check('a CLEARED key is not tested against the API’s own environment', tested === 0, `tested ${tested}`);
+  check('…and is written as saved, not as "nothing is configured"',
+    r?.state === 'saved' && /^cleared on the Settings page/.test(r?.detail || ''), `${r?.state}: ${r?.detail}`);
+  check('…and says so in the answer', put.checked?.[0]?.verdict === 'cleared', JSON.stringify(put.checked));
+
+  const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const token = [b64u({ alg: 'HS256', typ: 'JWT' }),
+    b64u({ data: { fleet_owner_id: 174036, jti: 'synthetic-2' }, exp: Math.floor(Date.now() / 1000) + 86400 }),
+    'not-a-signature-this-token-is-synthetic'].join('.');
+  await noteCredential(db, { provider: 'bolt', fleet: 'egari', credential: 'BOLT_REFRESH_TOKEN_EGARI',
+    state: 'invalid', detail: 'the old token', version: null });
+  const paste = await (await fetch(`${base}/api/settings/paste`, { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: token, apply: true }) })).json();
+  const b = await row('bolt', 'egari', 'BOLT_REFRESH_TOKEN_EGARI');
+  check('the paste box files the verdict of the candidate it WROTE, not a refused duplicate',
+    paste.applied?.includes('BOLT_REFRESH_TOKEN_EGARI') && b?.state === 'ok' && /the admitted one/.test(b?.detail || ''),
+    `${b?.state}: ${b?.detail}`);
+  server.close();
+}
+
+/* ══ 11. the providers' own answers, from stand-ins ═══════════════════════ */
+console.log('\nwhat each check establishes, against stand-in providers');
+{
+  let bare = 403;          // what the stand-in portal answers with no cookie
+  let grants = 0;
+  const stand = express();
+  stand.use(express.urlencoded({ extended: false }));
+  stand.post('/api/reports-api/v2/summary/drivers/list', (req, res) => {
+    if (req.headers.cookie) return res.status(403).type('html').send('<html>edge</html>');
+    return res.status(bare).type('html').send('<html>edge</html>');
+  });
+  stand.post('/oauth/token', (req, res) => {
+    grants++;
+    res.json({ access_token: `grant-${grants}`, expires_in: 2592000 });
+  });
+  const ss = stand.listen(0);
+  await new Promise((r) => ss.once('listening', r));
+  const at = `http://127.0.0.1:${ss.address().port}`;
+  process.env.YANGO_BASE = at;
+  process.env.YANGO_PARK_ID = 'park-synthetic';
+  process.env.YANGO_API_KEY = 'not-a-key';
+  process.env.UBER_TOKEN_URL = `${at}/oauth/token`;
+
+  const sym = await checkStored('YANGO_COOKIE', { value: 'Session_id=placeholder' });
+  check('Yango refusing the park with or without a session: the check says it is not the cookie',
+    sym.verdict === 'fail' && sym.blames === 'other', JSON.stringify({ v: sym.verdict, b: sym.blames }));
+  check('…so the save writes it as not tested, never red', stateOf(sym) === 'saved');
+  bare = 401;
+  const asym = await checkStored('YANGO_COOKIE', { value: 'Session_id=placeholder' });
+  check('Yango reading the session and refusing anyway: the check says it authenticates',
+    asym.verdict === 'unknown' && asym.authenticates === true, JSON.stringify({ v: asym.verdict, a: asym.authenticates }));
+  check('…so the save writes ok, as the collector does on the same evidence', stateOf(asym) === 'ok');
+
+  /* A replaced OAuth secret is used from the next call, not after the old
+     grant's thirty days. */
+  const { uberOAuthToken } = await import('../src/auth/uber.js');
+  const org = (secret) => ({ fleet: 'egari', oauth: { clientId: 'synthetic-client', clientSecret: secret,
+    secretKey: 'UBER_CLIENT_SECRET_EGARI', own: true } });
+  const t1 = await uberOAuthToken(org('first-secret'));
+  const t2 = await uberOAuthToken(org('first-secret'));
+  check('the same client and secret reuse one grant', t1 === t2 && grants === 1, `${t1} ${t2} grants ${grants}`);
+  const t3 = await uberOAuthToken(org('second-secret'));
+  check('a replaced secret mints a new grant at once', t3 !== t1 && grants === 2, `${t3} grants ${grants}`);
+  ss.close();
+}
+
+/* ══ 12. every row names a key somebody can find ══════════════════════════ */
+console.log('\nthe banner names Settings keys, which a save can reach');
+{
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const { SETTING_DEFS } = await import('../src/settings.js');
+  const { passKey } = await import('../src/sources/cabman.js');
+  const { config } = await import('../src/config.js');
+  const keys = new Set(SETTING_DEFS.map((d) => d.key));
+  /* Surfaces, not credentials, on purpose: the Yango console is refused in
+     front of the API whatever is pasted. */
+  const NOT_SETTINGS = new Set(['YANGO_CONSOLE']);
+  const files = ['src/auth_state.js', 'src/auth/uber.js',
+    ...readdirSync('src/sources').filter((f) => f.endsWith('.js')).map((f) => `src/sources/${f}`)];
+  const named = new Set();
+  for (const f of files) {
+    for (const m of readFileSync(f, 'utf8').matchAll(/credential:\s*'([A-Z0-9_]+)'/g)) named.add(m[1]);
+  }
+  const strays = [...named].filter((k) => !keys.has(k) && !NOT_SETTINGS.has(k));
+  check('every credential a source names in a banner row is a Settings key', strays.length === 0, strays.join(', '));
+  check('…CABMAN’s included, which is built per fleet',
+    config.cabman.fleets.every((f) => keys.has(passKey(f.fleet))), config.cabman.fleets.map((f) => passKey(f.fleet)).join(','));
+}
+
+/* ══ 13. one snapshot per unit of work ═══════════════════════════════════ */
+console.log('\na unit of work reads values and versions from one moment');
+{
+  const { loadSettings, withPinnedSettings, get, settingVersion, setSetting } = await import('../src/settings.js');
+  await q(`DELETE FROM credential_state`);
+  await q(`DELETE FROM app_setting`);
+  /* Stored in the clear (is_secret false): these tests read what they wrote,
+     and nothing here is a credential. */
+  await q(`INSERT INTO app_setting (key, value, is_secret, updated_at)
+           VALUES ($1, 'cookie-one', false, '2026-09-23T08:00:00Z')`, [KEY]);
+  await loadSettings(true, db);
+  await noteCredential(db, { provider: 'uber', fleet: 'egari', credential: KEY, state: 'ok' });
+  check('outside any unit, an observation stamps the loaded version as before',
+    (await row('uber', 'egari'))?.value_version === settingVersion(KEY) && settingVersion(KEY) != null);
+
+  let inside = null;
+  await withPinnedSettings(async () => {
+    const sent = get(KEY);                                     // what uber.collect holds for the pass
+    /* 08:30:22 — the operator saves a new cookie … */
+    await q(`UPDATE app_setting SET value = 'cookie-two', updated_at = '2026-09-23T08:30:22.622Z' WHERE key = $1`, [KEY]);
+    /* … and another tick refreshes the SHARED cache mid-run. */
+    await loadSettings(true, db);
+    /* 08:31:28 — the run reports on the cookie it sent. */
+    await noteCredential(db, { provider: 'uber', fleet: 'egari', credential: KEY, state: 'expired',
+      detail: 'redirected to auth.uber.com — the session is no longer signed in' });
+    inside = { sent, now: get(KEY) };
+  }, { db });
+  check('inside the unit, the value does not change under it', inside?.sent === 'cookie-one' && inside?.now === 'cookie-one',
+    JSON.stringify(inside));
+  check('…so the refusal of the OLD cookie is not filed under the new one, even after a refresh',
+    (await row('uber', 'egari'))?.state === 'ok', (await row('uber', 'egari'))?.state);
+  check('outside it, the process has moved on to the saved value', get(KEY) === 'cookie-two');
+
+  /* A unit's own writes are visible to the rest of the unit. */
+  let seen = null;
+  await withPinnedSettings(async () => {
+    await setSetting('CHARGING_SITES', 'Al Garhoud', db);
+    seen = { value: get('CHARGING_SITES'), version: settingVersion('CHARGING_SITES') };
+  }, { db });
+  const storedV = (await q(`SELECT (${SETTING_VERSION_SQL})::text AS v FROM app_setting WHERE key = 'CHARGING_SITES'`))[0].v;
+  check('a write inside a unit is seen by the rest of that unit, with its version',
+    seen?.value === 'Al Garhoud' && seen?.version === storedV, JSON.stringify(seen));
+}
+
+/* And the collector actually works in units. This one is read from the
+   source, which the house notes warn can be satisfied by a different route:
+   so it names every entry point index.js schedules, and fails on any that
+   reaches a provider without a pin. Driving a real tick here would mean
+   contacting the providers, which a test must not do. */
+{
+  const { readFileSync } = await import('node:fs');
+  const run = readFileSync('src/run.js', 'utf8');
+  const bodyOf = (name) => {
+    const at = run.search(new RegExp(`export (async function ${name}\\b|const ${name} = )`));
+    return at < 0 ? '' : run.slice(at, at + 400);
+  };
+  const units = ['payoutWalk', 'payoutAudit', 'cabmanTick', 'probePass', 'uberTimelineTick',
+    'uberProfileTick', 'uberAuditTick', 'liveStatusTick'];
+  const bare = units.filter((u) => !/withPinnedSettings\(/.test(bodyOf(u)));
+  check('every scheduled unit of work runs inside a pin', bare.length === 0, bare.join(', ') || '');
+  check('…and inside a run, each source does',
+    /withPinnedSettings\(\(\) => mod\.collect\(/.test(run));
+  const index = readFileSync('src/index.js', 'utf8');
+  const imported = (index.match(/import \{([^}]+)\} from '\.\/run\.js'/) || [])[1] || '';
+  const scheduled = imported.split(',').map((x) => x.trim()).filter(Boolean);
+  const unlisted = scheduled.filter((n) => !units.includes(n)
+    && !['backfill', 'incremental', 'catchUp', 'analystPass'].includes(n));
+  check('…and no entry point index.js imports is missing from that list', unlisted.length === 0, unlisted.join(', '));
+}
+
+authSrv.close();
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

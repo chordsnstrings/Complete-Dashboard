@@ -177,11 +177,15 @@ export const credentialState = (bad) => (!bad ? 'ok' : bad.kind === 'moved' ? 'm
    leaves the verdict api/save_check.js recorded when the new value was saved.
    The next observation made with the new value writes normally.
 
-   `version` defaults to what this process loaded for the key. The one gap it
-   leaves: if the settings cache is refreshed between the request and this
-   call, an answer about the old value is filed under the new one. That is a
-   refresh landing inside one request, at most every 30 seconds, and the next
-   observation corrects it. The case above was a whole minute after the save. */
+   `version` defaults to the version of the value get() returns HERE, which
+   inside the collector is the unit of work's pinned snapshot (src/settings.js
+   withPinnedSettings): the same moment the value it sent was read. The first
+   version of this read the shared cache instead, and an independent review
+   showed that did not close the incident: uber.collect holds its cookie for
+   the whole pass while liveStatusTick refreshes the shared cache every 120s,
+   so the old cookie's refusal was still filed under the new version whenever
+   a tick landed in the gap. The API process is not pinned. Its calls are
+   single short requests that load settings first. */
 export async function noteCredential(db, { provider, fleet = '*', credential,
   state, detail = null, surface = null, version = settingVersion(credential) }) {
   try {

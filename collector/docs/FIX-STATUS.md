@@ -2052,7 +2052,26 @@ ruling on the fix: re-check "when settings refresh only", never on a page view.
 | S5 | the banner redraw after a save was served from a cache (server: version keys on runs and rollups only; browser: SWR) | **written** | `/api/auth` is on both never-cache lists. Reverts fail 1 each (`cache.test`, `credential_save_check` §8) |
 | S6 | Apply did not redraw the banner; nothing drew "saved, not tested" | **written** | `test/auth_banner_pending_ui.test.mjs` in Chromium: quiet tone, counted per credential, "saved 12:30", red kept for a real refusal. Reverts fail 3 and a timeout |
 
-Not done, and named: the collector still uses the value it loaded until it
-reloads (at the start of a run, or through the 30-second TTL on its other
-ticks). A save made mid-run is used from the next load, and the rows say so
-until then.
+### What an independent review of the first commit (`a988eb1`) found
+
+The suite was green on `a988eb1`: 301 files, 9,492 assertions. A reviewer then
+read the diff against the collector's real concurrency and found that S1 did
+not close the incident it was written for. All of the following were fixed
+before anything deployed, and each is proved by reverting it (17 reverts, each
+failing its test; the first 10 re-run against the new code, all failing too).
+
+| # | what | state | proof |
+|---|---|---|---|
+| S7 | **S1 read the version at note time from the SHARED cache**, while `uber.collect` holds its cookie for the whole pass and `liveStatusTick` refreshes that cache every 120s. The old cookie's refusal was still filed under the new version whenever a tick landed in the 88s gap | **written** | `withPinnedSettings`: each source in a run, and each tick, reads values and versions from one AsyncLocalStorage snapshot. §13 replays the save plus a mid-run refresh; the reverts of `get`, `settingVersion` and the run-loop pin fail 1 each |
+| S8 | a save of the unsuffixed `BOLT_REFRESH_TOKEN` would have overwritten `BOLT_REFRESH_TOKEN_<FLEET>`, the token the collector uses: `checkBolt` names the per-fleet key on every pass | **written** | a successor is carried only if it differs, and only under the key tested. Reverts fail 2 and 1 |
+| S9 | a passing save repainted `moved`/`blocked` rows as accepted, hiding real faults until the surface next ran | **written** | kept and re-stamped. The revert fails 3 |
+| S10 | a check's verdict answers "should this be stored?", not "is this credential good?": the Yango symmetric refusal (not about the cookie) went red, and the asymmetric one (session read) went amber while the collector says ok | **written** | `stateOf()` by what was established. `checkYango` says `blames` / `authenticates`; the stand-in portal in §11. Reverts fail 5, 5 and 2 |
+| S11 | the Uber OAuth token cache was keyed on the client id alone, so a replaced secret went unused for the old grant's 30 days | **written** | keyed on id plus a secret digest; the stand-in token server in §11. The revert fails 1 |
+| S12 | S4's time comparison for unversioned rows would, at deploy, have made the weekly profile rows pending for a week over a working cookie | **written** | unversioned rows are taken at their word. The revert fails 1 |
+| S13 | CABMAN rows said `CABMAN_PASSWORD`, which is no Settings key (it is `CABMAN_ECOSINE_PASS`); a save could never reach them | **written** | named by the real key; `schema_v82` drops the old rows; §12 checks every banner credential name against the Settings catalogue. The revert fails 1 |
+| S14 | the paste box could file a refused duplicate's verdict; a cleared key was tested against the API's own environment and called "nothing configured" | **written** | verdicts from admitted candidates only; a cleared key is recorded, not tested. Reverts fail 1 and 3 |
+
+Not done, and named: inside the collector, a value saved while a source is
+running is used from that source's next pass. The pin is retaken between
+sources, so a save made mid-run now reaches the later sources in the same run,
+which it did not before.

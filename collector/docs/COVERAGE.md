@@ -3064,23 +3064,45 @@ driver's 222 tracker fixes.
 
   **Fixed the same day, on save only, never on a page view.** A save through
   either route tests the stored value once per fleet its check depends on
-  (`checkStored`, `src/credcheck.js`). It writes the verdict onto that key's
-  existing banner rows (`api/save_check.js`): pass → ok, fail → invalid (red),
-  provider unreachable → unknown (amber), no live check → `saved`, drawn as a
-  quiet "saved HH:MM, not tested yet" line.
+  (`checkStored`, `src/credcheck.js`). It writes onto that key's existing banner
+  rows (`api/save_check.js`), translated by what the check established:
+  - authenticated → ok;
+  - refused *this* credential → invalid (red);
+  - established nothing (no live check, provider unreachable, or a refusal the
+    check itself says is not about this credential) → `saved`, drawn as a
+    quiet "saved HH:MM, not tested" line.
+
+  A cleared key is never tested, because the API's environment is not the
+  collector's. `moved` and `blocked` rows are kept, since a new credential
+  can't fix a moved endpoint or a refused caller.
 
   Each row now carries the version of the value it was observed with
   (`credential_state.value_version`, `sql/schema_v82.sql`: the setting's
   `updated_at` in whole microseconds). `noteCredential` writes only when the
-  version the process holds is the one stored now, so a run still holding the
-  old cookie can no longer paint over the new one. `/api/auth` reads a row
-  whose version is not the stored one as pending, never as the current state.
-  `/api/auth` is also out of both caches: the server cache keys on collection
-  runs and rollups, and a save is neither.
+  version it holds is the one stored now. `/api/auth` reads a versioned row
+  whose version is not the stored one as pending. It takes unversioned rows
+  (from before v82) at their word, because a time comparison would have made
+  the weekly profile rows pending for a week over a working cookie. `/api/auth`
+  is also out of both caches: the server cache keys on collection runs and
+  rollups, and a save is neither.
 
-  The one gap left open: if a settings reload lands inside a single request,
-  that answer about the old value is filed under the new one. Reloads happen
-  at most every 30 seconds, and the next observation corrects it.
+  **The version must be captured WITH the value, not when the row is written.**
+  The first version read it from the shared cache at note time. An independent
+  review showed why that fails: `uber.collect` takes its org objects (holding
+  `webCookie`) once per pass, while `liveStatusTick` refreshes the shared cache
+  every 120 seconds. So the old cookie's refusal would still be filed under the
+  new version, unless no tick happened to land in the 88-second gap. The fix is
+  `withPinnedSettings` (`src/settings.js`): each source inside a run, and each
+  tick, reads values and versions from one AsyncLocalStorage snapshot, taken
+  together. The same review found four more defects, all tested now:
+  - a save of the unsuffixed `BOLT_REFRESH_TOKEN` would have overwritten
+    `BOLT_REFRESH_TOKEN_<FLEET>`, because `checkBolt` names the per-fleet key on
+    every pass;
+  - CABMAN rows were filed under `CABMAN_PASSWORD`, which is no Settings key
+    (the real one is `CABMAN_ECOSINE_PASS`);
+  - the Uber OAuth token cache was keyed on the client id alone, so a replaced
+    secret went unused for the old grant's 30 days;
+  - the paste box could file a refused duplicate's verdict.
 
   Why never on a page view: the Uber check generates a report, and Uber allows
   three in flight per org. A check per page load would compete with the
