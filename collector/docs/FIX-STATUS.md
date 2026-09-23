@@ -2433,3 +2433,83 @@ nothing. Each was replaced by the one above that does fail.
   manifest are both-skin changes, so they wait for the flip.
 - The phone repaints through the tokens only. Its figures are still Fraunces
   (m.css `.m-stat`/`.m-lede`), and its m.css pass is STEP 5.
+
+## Arkiv reskin, dark mode (ruling 3) — 2026-09-23, NOT ON PRODUCTION
+
+Branch `reskin-foundation`. The operator's ruling 3 (docs/UI-REDESIGN-PLAN.md
+§1): a dark mode for the new UI, with dark values for every neutral, channel
+identity, wash, ramp, semantic and hatch, validated as PALETTE-EVIDENCE.md
+validated light, and the system/light/dark toggle kept working. Not deployed,
+not pushed, default skin not flipped. Visible only under `?skin=arkiv` with a
+dark OS or the theme button on dark. The evidence, with every validator run
+verbatim, is `docs/ARKIV-DARK.md`.
+
+| # | what | state | proof |
+|---|---|---|---|
+| DK1 | **The dark set** in tokens.js: `NEUTRAL_DARK` (paper `#111113`, ink `#F0F0F1`, grey `#8D8D92` 5.71:1, grey-2/abs-outline `#68686D` 3.40:1…), `CHANNEL_DARK` (each within 2.3° of its light hue), `RAMP_DARK` (lighter from the identity, dL 0.065), `WASH_DARK` (the same 14% form on the dark paper), `SEMANTIC_DARK` (`#008E60` 4.52:1, `#D65044` 4.57:1), `SEQUENTIAL_DARK` (anchor flipped: 2.22 → 14.91:1), `HATCH` (0.45 light, 0.53 dark), `ON_CHANNEL` (the label ink on each fill, per theme). Accessors take an optional theme; the light defaults are unchanged | **written** | `cssTokens()` still hashes to the mockups' `b46907d2…`. tokens.test §9 |
+| DK2 | **Validated as light was.** Rerun of the dataviz validator, `--mode dark --surface "#111113"`: A1 PASS 12.0 · A2 (all pairs) PASS 8.1, normal 15.4, tritan 10.9 · A3 PASS 8.1 · A4 (collision) **WARN 7.0** (Hotel × negative) · B1–B7 ramps all PASS · C1/C2: ramps toward the paper fail 12 of 36 (Hotel × negative 3.1), ramps running lighter 0 of 36. The light A4 rerun on this validator build reproduces the design's published output | **measured** | docs/ARKIV-DARK.md §A–§C, verbatim |
+| DK3 | **The validator's measures, ported into tokens.js** (`deltaE`, `cvdSeparation`: OKLab ΔE ×100, Machado 2009 at severity 1.0) and `lintTokens()` extended to BOTH themes: text 4.5:1 (and grey on paper-2), marks 3:1, dark grey-2 3 ≤ x < 4.5, ordinal 2:1, band and chroma, wash = 14% of its token, ink on every wash, label on every fill, hatch no fainter than light's, A2/A3/A4/C2 and tritan. `CVD_GATE` holds dark channel × semantic at 7.0, a ratchet on what was measured | **written** | tokens.test §9 calibrates the port against six numbers PALETTE-EVIDENCE.md printed from the validator (A2, A3, E1, E5b, F3): all reproduce to the printed decimal. Thresholds in the test are literals, independent of `CVD_GATE` |
+| DK4 | **Generated under the existing theme mechanism, only under the skin.** `bin/gen-tokens-css.mjs` writes three rules: the light block (unchanged, plus `--hatch-a` and `--on-c-*`), `@media (prefers-color-scheme: dark){:root[data-skin="arkiv"]:not([data-theme="light"]){…}}` and `:root[data-skin="arkiv"][data-theme="dark"]{…}`, both (0,3,0) and both with `color-scheme:dark`. The form tokens are declared once, in light | **written** | tokens.test §2–3 parse the block with nesting, and check every light colour name is redeclared in dark, with dark hexes only. arkiv_skin §2 resolves 41 old names in a browser in four states: OS light, OS dark, dark chosen on a light OS, and light chosen on a dark OS (the `:not()` guard) |
+| DK5 | **arkiv.css stays theme-free.** The dominance bar's channel labels are `var(--on-c-<channel>)` (paper and ink swap lightness in dark, and so must the name); the neutral slots keep paper/ink because graphite flips with the paper. Header and slot comments carry the dark numbers | **written** | arkiv_skin §1 (static) and §7: 12 fills × 2 dark states, every label ≥ 4.5:1, every fill a dark token |
+| DK6 | **Found wrong, both skins:** index.html stamped the stored theme before the first paint for the PHONE only. The desktop waited for app.js's `applyTheme()`, a module appended by the pre-paint script, so it ran after the first paint: a reader who chose dark on a light OS saw a white frame on every load. Both builds now stamp `data-theme` pre-paint (only `light`/`dark`, as `applyTheme()` accepts) | **written** | arkiv_skin §7 refuses `/app.js` and still finds `data-theme="dark"` and the dark paper. With HEAD's index.html, it fails 1 |
+| DK7 | `bin/arkiv-dark-evidence.mjs` reprints every table in ARKIV-DARK.md §D from tokens.js | **written** | exits 1 if the lint is not clean |
+
+**Measurements.**
+
+- *The old skin did not move, nor did light Arkiv.* The STEP 1 pixel harness
+  (data recorded, clock frozen, sticky pinned, caret hidden): HEAD `0fc5d29`
+  on :8101 against the working tree on :8102, #overview, #payouts and
+  #settings, desktop 1440/390 and phone, light and dark. Old skin: 16 of 18
+  byte-identical; the two that differ (10 px at level 1 on #payouts' right
+  edge, 646 px in one band of #settings at 390) differ by the same pixels
+  between two runs of the SAME tree. Arkiv light: 8 of 9 identical; the 9th is
+  13 px at level 1 in the phone header row, the noise STEP 1 recorded there.
+  Arkiv dark: every shot differs, as it should.
+- *Screenshots* (live-ui :8100, production data, `?ui=desktop&skin=arkiv`):
+  #overview, #payouts and #feeds at 1440 and 390, dark by the OS and dark by
+  the toggle, full page and fold. No page scrolls sideways. Scratchpad
+  `reskin/dark/shots/v1/`.
+
+**Tests.** `tokens` 144 (was 83), `arkiv_skin` 103 (was 86). Green file by
+file: type_scale 11, today_band 38, routes 65, platform_share_once 8,
+nav_sections 17, assets 40, phone 141, query_params 12, phone_render 8 and
+phone_today_only 19 (private mock :18199), phone_clock 12, capacity_headline
+22, chart_fit 27, chart_geometry 17, driver_photo 39, kpi_pill 10,
+payout_mobile 39, pinned_identity 72, settings_page_layout 20, sticky_header
+9, uber_profile 41, payout_page_reconcile 55. The full suite was not run.
+
+**Revert proofs** (each mutation applied, the generator rerun, the test run,
+every file restored and md5-checked): dark grey `#6E6E73` (3.72:1) → tokens
+fails 3 · the positive back on the light hue (`#298D54`) → 2 (A3 6.78) ·
+CABMAN at its light identity → 4 (2.15:1, band, A2 5.82, hatch) · a vivid
+Uber `#0957D8` → 4 (Uber × CABMAN 2.37) · Hotel's ramp run toward the paper
+→ 3 (C2 3.13, normal 13.80) · dark hatch 0.45 → 2 · dark grey-2 `#5A5A5F`
+(2.75:1) → 2 · generator without the `:not([data-theme="light"])` guard →
+tokens 1, arkiv_skin 4 (a light choice on a dark OS drew dark) · no
+chosen-dark block → tokens 5, arkiv_skin 8 · dark blocks without the skin
+prefix → tokens 3 · no `color-scheme:dark` → tokens 2, arkiv_skin 5 · Uber's
+label back to `--paper` → arkiv_skin 3 (3.31:1) · HEAD's index.html →
+arkiv_skin 1 · the whole step reverted (HEAD's tokens.js, app.css, arkiv.css
+and generator under the new tests) → tokens fails and throws on the missing
+`THEMES`, arkiv_skin fails at least 4.
+
+### NOT DONE, and named
+
+- **Hotel × negative is CVD 7.0 in dark**, in the validator's WARN band. It
+  is legal because of encodings the law already requires, and STEP 3's
+  render-audit checks (a semantic with no glyph) are what will enforce them
+  page by page. docs/ARKIV-DARK.md §E5 records what was tried.
+- **Semantic text on paper-2 is 4.13/4.17:1 in dark** (light 4.78/8.15). Under
+  the skin that is only text in a hovered table row. Holding 4.5 there drops
+  the collision run to a FAIL (§E3).
+- **The theme-color metas and the manifest** still carry the old skin's
+  colours; they move with the flip (STEP 5), in both themes.
+- **The hatch opacity is emitted (`--hatch-a`) but not yet used**: charts.js
+  adopts SPEC §5's hatch in STEP 2. Today's gapBars pattern draws in paper-2
+  and grey-2, which the dark set already covers.
+- **The phone** repaints through the tokens in dark as in light; its m.css
+  pass is STEP 5.
+- Found, not fixed (not dark, and not this step's): #payouts §04's date ticks
+  collide at 1440 in both themes of the skin ("23 Dec 2024Feb 2025…"); the
+  chart is STEP 2's. `.sh-track>i.o` in app.css paints a literal
+  `rgba(74,124,166,.42)` blue under the skin; it is a chart colour for STEP 2.

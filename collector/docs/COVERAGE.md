@@ -972,6 +972,47 @@ driver's 222 tracker fixes.
   the noise that is left, before blaming a change. The harness is in
   FIX-STATUS ("Arkiv reskin, STEP 0").
 
+* **THE ARKIV DARK SET IS A SOLVE, AND FIVE THINGS ABOUT IT BITE.** Ruling 3
+  (2026-09-23) asked for a dark mode for the new UI. The values are in
+  `api/public/tokens.js` ("THE DARK SET"), the evidence in
+  `docs/ARKIV-DARK.md`, and `test/tokens.test.mjs` §9 fails when a value drops
+  under its gate. What was found by measuring:
+  1. **The light colours cannot be reused on dark.** CABMAN `#6B259F` and the
+     negative `#961111` both measure about 2.15:1 on the dark paper, under the
+     3:1 a mark needs. Every dark value was solved against the dataviz
+     validator's gates, with the hue held within 3° of light so a channel
+     stays the same channel.
+  2. **The semantics colour text, and that costs one pair.** Text needs 4.5:1,
+     which on `#111113` puts both semantics at the top of the dark band. That
+     is where Hotel's gold sits under deuteranopia, so Hotel × negative is CVD
+     7.0 in dark (8.8 in light). It is legal only because every semantic
+     carries its glyph and sign and every Hotel mark is directly labelled.
+     `lintTokens()` holds it at 7.0 as a ratchet. Do not "soften" the red or
+     move the positive back to the light hue: at 154° the pair itself falls
+     to 6.8.
+  3. **Paper and ink swap lightness, so "paper text on this fill" is true in
+     one theme only.** The dominance bar's channel labels are tokens,
+     `--on-c-<channel>`, measured per theme in tokens.js `ON_CHANNEL`. The
+     neutral slots (`--s*`, `--b*`) keep their names because the graphite ramp
+     flips with the paper. A new rule that picks paper or ink for a coloured
+     fill needs the same treatment, or it fails in dark (Uber went to 3.31:1
+     under paper text when this was reverted).
+  4. **Dark values go in tokens.js, never in an arkiv.css dark selector.** The
+     generator writes them under the old skin's own theme mechanism, at
+     (0,3,0): `@media (prefers-color-scheme: dark)` around
+     `:root[data-skin="arkiv"]:not([data-theme="light"])`, and
+     `:root[data-skin="arkiv"][data-theme="dark"]`. arkiv.css names tokens
+     only, so one rule draws both themes. The `:not()` guard is what lets a
+     reader who chose light keep it on a dark OS. `test/arkiv_skin.test.mjs`
+     §2 checks all four states in a browser.
+  5. **The desktop build stamped the stored theme only after app.js ran.**
+     The pre-paint script in index.html stamped `data-theme` for the phone
+     only. app.js is a module that script appends, so it runs after the first
+     paint, and a reader who had chosen dark on a light OS got a white frame
+     first on every load (in either skin). Both builds now stamp it before the
+     first paint. `test/arkiv_skin.test.mjs` refuses `/app.js` and checks the
+     attribute is still there.
+
 * **A PROPOSAL FROM ANYWHERE BUT THE RULE CANNOT LIVE IN `driver_identity_link`.**
   `src/identity_link.js` DELETEs every unconfirmed, unrejected row in that table
   whose evidence its own rules did not produce on the current run — correct

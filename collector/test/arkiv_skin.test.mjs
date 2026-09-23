@@ -25,6 +25,12 @@
       buttons, the banner, the dominance bar's ink on each fill, and a caption
       that is still a sentence, not the mockups' mono capitals.
    6. At 390px the page does not scroll sideways.
+   7. DARK (ruling 3). The skin follows the existing theme mechanism: OS dark
+      with no choice, a chosen dark, and a chosen LIGHT on a dark OS each
+      resolve every old name to a token of the right theme — never an old
+      dark value, never a light value in dark — with color-scheme to match,
+      and the components drawn in dark keep ink digits, the hollow/solid
+      dots and a 4.5:1 label on every dominance-bar fill.
 
    The browser half renders against mockapi.mjs — synthetic fixtures only. */
 import { readFileSync, readdirSync } from 'node:fs';
@@ -120,6 +126,15 @@ const bOff = ['b100', 'b200', 'b300', 'b400', 'b500', 'b600', 'b700']
   .filter((k, i) => repointed.get(`--${k}`) !== seqName(T.sequentialOf(i / 6)));
 check('--b100..--b700 are the steps sequentialOf(i/6) picks', bOff.length === 0, bOff.join(' '));
 check('the page says it is light, so no control draws dark on white paper', /color-scheme\s*:\s*light/.test(skinRoot));
+/* …and the generated dark blocks, which outrank it, say dark: native
+   controls, scrollbars and form fields then draw for a dark ground. */
+const darkBlocks = [...genBlock.matchAll(/:root\[data-skin="arkiv"\](?::not\(\[data-theme="light"\]\)|\[data-theme="dark"\])\s*\{([^{}]*)\}/g)];
+check('both generated dark blocks declare color-scheme:dark', darkBlocks.length === 2
+  && darkBlocks.every((m) => /color-scheme\s*:\s*dark/.test(m[1])), String(darkBlocks.length));
+/* The dominance bar's channel labels are the per-theme tokens, not a fixed
+   paper or ink: paper and ink swap lightness in dark, and so must the name. */
+const onSeg = T.CHANNEL_ORDER.filter((k) => !new RegExp(`\\.domb-seg\\.ch-${k}\\{--on-seg:var\\(--on-c-${k}\\)\\}`).test(ark));
+check('each channel segment takes its label ink from --on-c-<channel>', onSeg.length === 0, onSeg.join(' '));
 
 /* ══ 3. the switch ════════════════════════════════════════════════════════ */
 console.log('\n3 · the switch in index.html and the service worker');
@@ -168,6 +183,7 @@ const hexOf = (rgb) => {
   return m ? `#${m.slice(0, 3).map((x) => Math.round(+x).toString(16).padStart(2, '0')).join('').toUpperCase()}` : null;
 };
 const TOKEN_HEX = new Set([...T.allTokenHexes()].map((h) => h.toUpperCase()));
+const DARK_HEX = new Set([...T.allTokenHexes('dark')].map((h) => h.toUpperCase()));
 const INK = T.NEUTRAL.ink.toUpperCase(), NEG = T.SEMANTIC.negative.toUpperCase(), POS = T.SEMANTIC.positive.toUpperCase();
 
 console.log('\n3 · the switch, in a browser');
@@ -217,8 +233,11 @@ console.log('\n3 · the switch, in a browser');
 }
 
 console.log('\n2 · the old names resolve to Arkiv values in every theme state');
-for (const [label, scheme, theme] of [['OS light, theme system', 'light', null],
-  ['OS dark, theme system', 'dark', null], ['OS light, theme dark', 'light', 'dark']]) {
+/* Four states: the three the old skin's dark blocks answer to, plus the one
+   the :not() guard exists for — a reader who chose LIGHT on a dark OS. */
+for (const [label, scheme, theme, want] of [['OS light, theme system', 'light', null, 'light'],
+  ['OS dark, theme system', 'dark', null, 'dark'], ['OS light, theme dark', 'light', 'dark', 'dark'],
+  ['OS dark, theme light', 'dark', 'light', 'light']]) {
   const ctx = await fresh({ colorScheme: scheme });
   const page = await ctx.newPage();
   await page.goto(`${base}/?ui=desktop&skin=arkiv#settings`, { waitUntil: 'load' });
@@ -235,10 +254,11 @@ for (const [label, scheme, theme] of [['OS light, theme system', 'light', null],
     probe.remove();
     return out;
   }, [[...coloured].filter((n) => !/^--(?:shadow|ch)-/.test(n)), theme]);
-  const off = Object.entries(got).filter(([n, v]) => n !== 'color-scheme' && !TOKEN_HEX.has(hexOf(v)));
-  check(`${label}: every coloured old name is an Arkiv token value (${Object.keys(got).length - 1} names)`,
+  const SET = want === 'dark' ? DARK_HEX : TOKEN_HEX;
+  const off = Object.entries(got).filter(([n, v]) => n !== 'color-scheme' && !SET.has(hexOf(v)));
+  check(`${label}: every coloured old name is an Arkiv ${want.toUpperCase()} token value (${Object.keys(got).length - 1} names)`,
     off.length === 0, off.slice(0, 6).map(([n, v]) => `${n}=${v}`).join(' '));
-  check(`${label}: color-scheme is light`, got['color-scheme'] === 'light', got['color-scheme']);
+  check(`${label}: color-scheme is ${want}`, got['color-scheme'] === want, got['color-scheme']);
   await ctx.close();
 }
 
@@ -434,6 +454,72 @@ console.log('\n5 · the restyle, measured');
     m.segs.length === 12 && weak.length === 0, weak.join(' | '));
   check('…and every fill is a token', m.segs.every((s) => TOKEN_HEX.has(hexOf(s.bg))),
     m.segs.map((s) => hexOf(s.bg)).join(' '));
+  await ctx.close();
+}
+
+console.log('\n7 · the components, drawn dark');
+/* The same RENDER as §5, in the two ways a page becomes dark: the OS says so
+   and the reader chose nothing, or the reader chose dark on a light OS. The
+   rules are the light ones (arkiv.css names tokens, never values), so this
+   checks that the TOKENS carry them: dark paper and ink, digits still ink,
+   the hollow warning dot and the solid critical one in the dark negative, and
+   the label inside every dominance-bar fill at 4.5:1 against the dark fill. */
+for (const [label, scheme, theme] of [['OS dark', 'dark', null], ['chosen dark', 'light', 'dark']]) {
+  const ctx = await fresh({ colorScheme: scheme });
+  const page = await ctx.newPage();
+  if (theme) await page.addInitScript((t) => { try { localStorage.setItem('theme', t); } catch (e) {} }, theme);
+  await page.goto(`${base}/?ui=desktop&skin=arkiv#settings`, { waitUntil: 'load' });
+  await page.waitForFunction((t) => !t || document.documentElement.getAttribute('data-theme') === t, theme);
+  await page.evaluate(RENDER);
+  const d = await page.evaluate(() => {
+    const q = (sel) => document.querySelector(sel);
+    const kpi = (k) => q(`#skinhost [data-kpi="${k}"]`);
+    const dot = (k) => { const x = getComputedStyle(kpi(k).querySelector('.l'), '::before');
+      return { bg: x.backgroundColor, bs: x.borderTopStyle, bc: x.borderTopColor }; };
+    return {
+      bg: getComputedStyle(document.body).backgroundColor, color: getComputedStyle(document.body).color,
+      scheme: getComputedStyle(document.documentElement).colorScheme,
+      digits: ['k-good', 'k-warn', 'k-crit'].map((k) => getComputedStyle(kpi(k).querySelector('.n')).color),
+      warn: dot('k-warn'), crit: dot('k-crit'), good: dot('k-good'),
+      primary: [getComputedStyle(q('#skinhost .btn.primary')).backgroundColor, getComputedStyle(q('#skinhost .btn.primary')).color],
+      segs: [...document.querySelectorAll('#skinhost .domb-seg')].map((x) => {
+        const c = getComputedStyle(x); return { cls: x.className, fg: c.color, bg: c.backgroundColor }; }),
+    };
+  });
+  const DK = T.THEMES.dark;
+  const isD = (rgb, hex) => hexOf(rgb) === hex.toUpperCase();
+  check(`${label}: the sheet is the dark paper and the dark ink, and says color-scheme dark`,
+    isD(d.bg, DK.NEUTRAL.paper) && isD(d.color, DK.NEUTRAL.ink) && d.scheme === 'dark', `${d.bg} ${d.color} ${d.scheme}`);
+  check(`${label}: toned digits stay ink`, d.digits.every((c) => isD(c, DK.NEUTRAL.ink)), d.digits.join(' '));
+  check(`${label}: warning HOLLOW, critical SOLID, both the dark negative; good solid dark positive`,
+    /rgba\(0, 0, 0, 0\)/.test(d.warn.bg) && d.warn.bs === 'solid' && isD(d.warn.bc, DK.SEMANTIC.negative)
+    && isD(d.crit.bg, DK.SEMANTIC.negative) && isD(d.good.bg, DK.SEMANTIC.positive), JSON.stringify([d.warn, d.crit, d.good]));
+  check(`${label}: the primary button is an ink fill with paper text`,
+    isD(d.primary[0], DK.NEUTRAL.ink) && isD(d.primary[1], DK.NEUTRAL.paper), d.primary.join(' '));
+  const weakD = d.segs.filter((x) => T.contrast(hexOf(x.fg), hexOf(x.bg)) < 4.5)
+    .map((x) => `${x.cls} ${hexOf(x.fg)} on ${hexOf(x.bg)} ${T.contrast(hexOf(x.fg), hexOf(x.bg)).toFixed(2)}`);
+  check(`${label}: the dominance bar's label clears 4.5:1 on every dark fill (${d.segs.length} segments)`,
+    d.segs.length === 12 && weakD.length === 0, weakD.join(' | '));
+  check(`${label}: …and every fill is a DARK token`, d.segs.every((x) => DARK_HEX.has(hexOf(x.bg))),
+    d.segs.map((x) => hexOf(x.bg)).join(' '));
+  await ctx.close();
+}
+
+/* The stored theme is stamped BEFORE the first paint on the desktop build as
+   well as the phone. It used to wait for app.js's applyTheme(), and app.js is
+   a module the pre-paint script appends, so it runs after the first paint: a
+   reader who chose dark on a light OS saw a white frame first. With app.js
+   refused outright, only the pre-paint script can have set the attribute. */
+{
+  const ctx = await fresh({ colorScheme: 'light' });
+  await ctx.addInitScript(() => { try { localStorage.setItem('theme', 'dark'); } catch (e) {} });
+  const page = await ctx.newPage();
+  await page.route('**/app.js', (r) => r.abort());
+  await page.goto(`${base}/?ui=desktop&skin=arkiv#overview`, { waitUntil: 'load' });
+  const pre = await page.evaluate(() => ({ theme: document.documentElement.getAttribute('data-theme'),
+    bg: getComputedStyle(document.body).backgroundColor }));
+  check('desktop: a stored dark theme is stamped before app.js runs, so the first paint is already dark',
+    pre.theme === 'dark' && hexOf(pre.bg) === T.THEMES.dark.NEUTRAL.paper.toUpperCase(), JSON.stringify(pre));
   await ctx.close();
 }
 

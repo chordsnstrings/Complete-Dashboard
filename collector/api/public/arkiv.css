@@ -49,11 +49,16 @@
    dots below are the one implementation of that rule, used by tiles, pills,
    tags, chips, notes, the verdict band, the banner and table verdict cells.
 
-   DARK MODE is not in this step. There is no validated Arkiv-dark set yet
-   (ruling 3 asks for one, with the contrast and CVD runs PALETTE-EVIDENCE.md
-   did for light), and two colour laws must never mix on one page. So under
-   this skin the page is light in every theme state, and says so to the
-   browser with color-scheme:light, until the dark set lands.
+   DARK MODE (the operator's ruling 3) lives in the TOKENS, not here. The
+   dark set is solved and validated in api/public/tokens.js (evidence in
+   docs/ARKIV-DARK.md), and bin/gen-tokens-css.mjs writes it into app.css
+   under the old skin's own theme mechanism — the OS-dark media query guarded
+   by :not([data-theme="light"]), and [data-theme="dark"] — scoped to this
+   skin, at (0,3,0). Every rule in this file names tokens, never values, so
+   the same rules draw both themes. The color-scheme:light below is for the
+   light states; the generated dark blocks outrank it with color-scheme:dark.
+   Nothing of the old dark palette can show through: every old name is
+   re-pointed below onto an Arkiv token, and the Arkiv token is dark.
    ========================================================================== */
 
 /* ── 1 · the tokens ─────────────────────────────────────────────────────────
@@ -62,7 +67,7 @@
    specificity; this block comes later in the cascade, so the old dark values
    cannot show through the new skin in any theme. */
 :root[data-skin="arkiv"]{
-  color-scheme:light;
+  color-scheme:light;               /* the dark blocks in app.css, (0,3,0), say dark */
 
   /* Panels stop being cards: the surface IS the paper. */
   --surface:var(--paper);
@@ -110,7 +115,12 @@
      its fitted --b500 (43); the payout bars' "added" (--b400, 43) against
      "deducted" (s2, 76); retention's s1 / s4 / s2. Eight slots on one
      achromatic axis cannot all differ, so s2 and s5 share a step — three
-     slots apart, never adjacent. */
+     slots apart, never adjacent.
+     ON DARK the graphite ramp's anchor flips (step 5 is the farthest from the
+     paper, as on white), so the same pointers keep their order and meaning:
+     s1..s8 are 92 / 42 / 52 / 82 / 42 / 72 / 52 / 64, every adjacent slot at
+     least 10 apart (s2/s3), the map's s3 (52) against s1 (92), --b300 (62)
+     and s5 (42), and "added" --b400 (72) against "deducted" s2 (42). */
   --s1:var(--seq-5);
   --s2:var(--seq-0);
   --s3:var(--seq-1);
@@ -607,25 +617,34 @@
    Same classes and the same clickable segments. The 44px rounded bar becomes
    a flat 24px one with a 2px paper gap between segments. The labels stay
    INSIDE the segments that have room for them (rule 1: the leader's share is
-   printed nowhere else), in the one ink each fill carries at 4.5:1 or better,
-   measured against tokens.js: paper on Uber 5.59, Yango 5.50, CABMAN 8.79;
-   ink on Bolt 5.86, Hotel 5.80, FMS 5.83. The neutral c1..c6 slots follow
-   the steps --s1..--s6 point at: paper on --seq-5 17.95, --seq-4 12.89 and
-   --seq-3 8.24; ink on --seq-0 9.09 and --seq-1 6.00.
-   test/arkiv_skin.test.mjs measures every pairing in a browser. Explicit per class, because the old dark-theme
-   rules name them at (0,4,0) and would otherwise put ink on Uber blue. */
+   printed nowhere else), in the one ink each fill carries at 4.5:1 or better.
+   For a channel that ink is a TOKEN, --on-c-<channel>, which tokens.js
+   ON_CHANNEL measures per theme, because paper and ink swap lightness in
+   dark and the right NAME swaps with them: light — paper on Uber 5.59, Yango
+   5.50, CABMAN 8.79, ink on Bolt 5.86, Hotel 5.80, FMS 5.83; dark — ink on
+   Uber 5.01, Yango 5.04, CABMAN 5.31, paper on Bolt 6.45, Hotel 6.29, FMS
+   5.82. The neutral c1..c6 slots follow the steps --s1..--s6 point at, and
+   those flip WITH the paper (tokens.js SEQUENTIAL_DARK), so one name holds
+   in both themes: paper on --seq-5 17.95 / 14.91, --seq-4 12.89 / 10.77 and
+   --seq-3 8.24 / 7.61; ink on --seq-0 9.09 / 7.46 and --seq-1 6.00 / 4.85.
+   test/arkiv_skin.test.mjs measures every pairing in a browser, in both
+   themes. Explicit per class, because the old dark-theme rules name them at
+   (0,4,0) and would otherwise put ink on Uber blue. */
 :root[data-skin="arkiv"] .domb-bar{height:24px;border-radius:0;background:none;gap:2px}
 :root[data-skin="arkiv"] .domb-seg{padding:0 10px;gap:7px}
 :root[data-skin="arkiv"] .domb-seg>span{font-size:var(--t5)}
 :root[data-skin="arkiv"] .domb-seg>b{font-size:var(--t6)}
 :root[data-skin="arkiv"] .domb-seg>i{font-size:var(--t4);opacity:1}
-:root[data-skin="arkiv"] .domb-seg,
-:root[data-skin="arkiv"] .domb-seg.ch-uber,:root[data-skin="arkiv"] .domb-seg.ch-yango,
-:root[data-skin="arkiv"] .domb-seg.ch-cabman,:root[data-skin="arkiv"] .domb-seg.c1,
+:root[data-skin="arkiv"] .domb-seg,:root[data-skin="arkiv"] .domb-seg.c1,
 :root[data-skin="arkiv"] .domb-seg.c4,:root[data-skin="arkiv"] .domb-seg.c6{--on-seg:var(--paper)}
-:root[data-skin="arkiv"] .domb-seg.ch-bolt,:root[data-skin="arkiv"] .domb-seg.ch-hotel,
-:root[data-skin="arkiv"] .domb-seg.ch-fms,:root[data-skin="arkiv"] .domb-seg.c2,
+:root[data-skin="arkiv"] .domb-seg.c2,
 :root[data-skin="arkiv"] .domb-seg.c3,:root[data-skin="arkiv"] .domb-seg.c5{--on-seg:var(--ink)}
+:root[data-skin="arkiv"] .domb-seg.ch-uber{--on-seg:var(--on-c-uber)}
+:root[data-skin="arkiv"] .domb-seg.ch-bolt{--on-seg:var(--on-c-bolt)}
+:root[data-skin="arkiv"] .domb-seg.ch-yango{--on-seg:var(--on-c-yango)}
+:root[data-skin="arkiv"] .domb-seg.ch-hotel{--on-seg:var(--on-c-hotel)}
+:root[data-skin="arkiv"] .domb-seg.ch-cabman{--on-seg:var(--on-c-cabman)}
+:root[data-skin="arkiv"] .domb-seg.ch-fms{--on-seg:var(--on-c-fms)}
 :root[data-skin="arkiv"] .domb-seg.dead{background:var(--faint);color:var(--grey)}
 :root[data-skin="arkiv"] button.domb-seg:hover{filter:none;opacity:.86}
 :root[data-skin="arkiv"] button.domb-key{border-radius:0}

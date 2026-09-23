@@ -27,7 +27,17 @@
       --card, --line, --sunken, --muted and --bad were asked for by 24 rules
       of the money form and declared nowhere, so its inputs had no border.
    7. No literal white where a token exists for the job.
-   8. sw.js precaches every module the phone statically imports. */
+   8. sw.js precaches every module the phone statically imports.
+   9. THE DARK SET (ruling 3). Every dark value clears the threshold the task
+      and the design's evidence set — text 4.5:1 and marks 3:1 on the dark
+      paper, channels apart under protanopia, deuteranopia and tritanopia,
+      the semantic pair apart — measured here with thresholds written as
+      literals, so loosening a gate in tokens.js does not loosen this file.
+      The ported colour-blindness measure is first calibrated against the
+      numbers PALETTE-EVIDENCE.md published from the validator itself. The
+      generated block carries the dark values under the theme mechanism
+      (OS dark guarded by :not([data-theme="light"]), and [data-theme="dark"]),
+      only under the skin, and redeclares every colour the light block does. */
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
@@ -84,20 +94,64 @@ try { applied = G.apply(app); } catch (err) { applied = String(err); }
 check('re-running bin/gen-tokens-css.mjs would change nothing', applied === app,
   'app.css and tokens.js disagree — run node bin/gen-tokens-css.mjs, never hand-edit the block');
 const block = b > 0 && e > b ? app.slice(b + G.BEGIN.length, e) : '';
-const rules = [...stripComments(block).matchAll(/([^{}]+)\{([^}]*)\}/g)]
-  .map((m) => ({ sel: m[1].trim(), decls: m[2].split(';').map((d) => d.trim()).filter(Boolean) }));
-check('the block is one rule', rules.length === 1, String(rules.length));
-const want = [...T.cssDeclarations(), ...T.bridgeDeclarations()];
+/* A brace-aware reading of the block: top-level rules, and the rules inside
+   an @media. A regex over "{…}" cannot see the nesting. */
+const parse = (css) => {
+  const out = []; let depth = 0, start = 0, sel = '';
+  for (let i = 0; i < css.length; i++) {
+    if (css[i] === '{') { if (depth === 0) { sel = css.slice(start, i).trim(); start = i + 1; } depth++; }
+    else if (css[i] === '}') { depth--; if (depth === 0) { const body = css.slice(start, i);
+      out.push(body.includes('{') ? { sel, children: parse(body) }
+        : { sel, decls: body.split(';').map((d) => d.trim()).filter(Boolean) }); start = i + 1; } }
+  }
+  return out;
+};
+const rules = parse(stripComments(block));
+check('the block is three rules: light, OS-dark (in its media query), chosen dark', rules.length === 3,
+  rules.map((r) => r.sel).join(' | '));
+const want = [...T.cssDeclarations(), ...T.themeDeclarations('light'), ...T.bridgeDeclarations()];
 const got = rules[0]?.decls || [];
-check(`it declares all ${want.length} tokens and nothing else, in order`,
-  got.length === want.length && got.every((d, i) => d === want[i]),
-  got.filter((d) => !want.includes(d)).concat(want.filter((d) => !got.includes(d))).join(' '));
+const sameList = (g, w) => g.length === w.length && g.every((d, i) => d === w[i]);
+const diffList = (g, w) => g.filter((d) => !w.includes(d)).concat(w.filter((d) => !g.includes(d))).join(' ');
+check(`the light rule declares all ${want.length} tokens and nothing else, in order`, sameList(got, want), diffList(got, want));
+/* Built here from tokens.js, not taken from the generator, so a generator
+   that dropped a token would not agree with itself. */
+const wantDark = ['color-scheme:dark', ...T.cssDeclarations('dark'), ...T.themeDeclarations('dark')];
+const media = rules[1], chosen = rules[2];
+const sysDark = media?.children?.[0];
+check('the OS-dark rule declares the dark set, in order', media?.children?.length === 1
+  && sameList(sysDark?.decls || [], wantDark), diffList(sysDark?.decls || [], wantDark));
+check('the chosen-dark rule declares the same, in order', sameList(chosen?.decls || [], wantDark),
+  diffList(chosen?.decls || [], wantDark));
+/* No light value may survive into dark: every COLOUR the light rule sets
+   (everything but the form tokens and the bridge), the dark rules set again. */
+const nameOf = (d) => d.slice(0, d.indexOf(':'));
+const lightColours = got.map(nameOf).filter((n) => !/^--(hl-|mark-row|grey-strong)/.test(n));
+const darkNames = new Set((chosen?.decls || []).map(nameOf));
+const leaks = lightColours.filter((n) => !darkNames.has(n));
+check(`every one of the light rule's ${lightColours.length} colour names is redeclared in dark`,
+  lightColours.length >= 57 && leaks.length === 0, leaks.join(' '));
+const hexIn = (ds) => new Set(ds.flatMap((d) => d.match(/#[0-9A-F]{6}/gi) || []).map((h) => h.toUpperCase()));
+const lightHex = hexIn(got), darkHex = hexIn(chosen?.decls || []);
+check('the dark rules carry only dark-set hexes, and every one of them',
+  [...darkHex].every((h) => T.allTokenHexes('dark').has(h)) && darkHex.size === T.allTokenHexes('dark').size,
+  `${darkHex.size} vs ${T.allTokenHexes('dark').size}`);
 
 console.log('\n3 · it is inert on production and wins under the skin');
 /* The literal, not G.SELECTOR: a generator edited to write a bare :root
    would otherwise agree with itself and pass. */
 check('the selector is :root[data-skin="arkiv"], never a bare :root',
   rules[0]?.sel === ':root[data-skin="arkiv"]', rules[0]?.sel);
+/* The dark rules answer to the SAME three theme states the old skin's dark
+   blocks and #themeBtn do. The :not() guard is what lets a reader who chose
+   light keep it on a dark OS; without the skin prefix the dark set would
+   repaint production. Both are (0,3,0), heavier than every arkiv.css rule. */
+check('OS dark: @media (prefers-color-scheme: dark) around :root[data-skin="arkiv"]:not([data-theme="light"])',
+  rules[1]?.sel === '@media (prefers-color-scheme: dark)'
+  && rules[1]?.children?.[0]?.sel === ':root[data-skin="arkiv"]:not([data-theme="light"])',
+  `${rules[1]?.sel} › ${rules[1]?.children?.[0]?.sel}`);
+check('chosen dark: :root[data-skin="arkiv"][data-theme="dark"]',
+  rules[2]?.sel === ':root[data-skin="arkiv"][data-theme="dark"]', rules[2]?.sel);
 /* Same specificity (0,2,0) as both old dark blocks, so ORDER decides: after
    them, the skin's paper beats the old dark paper, and the old dark palette
    never shows through the new skin. */
@@ -224,6 +278,83 @@ const missing = [...reach].filter((f) => !shell.has(f));
 check(`all ${reach.size} statically reachable phone modules are in SHELL_FILES`, missing.length === 0,
   missing.join(' '));
 check('tokens.js is one of them', reach.has('/tokens.js') && shell.has('/tokens.js'));
+
+console.log('\n9 · the dark set clears its thresholds (ruling 3)');
+/* First, the ported measure is the validator's measure. These are the numbers
+   PALETTE-EVIDENCE.md pasted from validate_palette.js itself (runs A2, A3,
+   E1, E5b, F3); the port must give the same to the printed decimal, or every
+   colour-blindness gate below is measuring something else. */
+const r1 = (x) => Math.round(x * 10) / 10;
+for (const [run, a, b, cvdW, normW] of [
+  ['A2 Yango × Bolt', '#B4358A', '#0398BA', 8.6, null], ['A2 Bolt × Uber (normal)', '#0398BA', '#2362D3', null, 16.1],
+  ['A3 the light pair', '#961111', '#007E44', 8.6, 28.0], ['E1 bronze × negative', '#884800', '#961111', 3.7, 9.8],
+  ['E5b matched pair', '#007E44', '#B5352D', 4.2, 26.5], ['F3 old Bolt green × positive', '#1B7A4F', '#007E44', 1.7, 2.4]]) {
+  const c = r1(T.cvdSeparation(a, b)), n = r1(T.deltaE(a, b));
+  check(`the port reproduces ${run}: CVD ${cvdW ?? '–'} / normal ${normW ?? '–'}`,
+    (cvdW == null || c === cvdW) && (normW == null || n === normW), `got CVD ${c} normal ${n}`);
+}
+/* Then the thresholds, as LITERALS: text 4.5:1 and marks 3:1 on the dark
+   paper (the task's), the validator's 8.0 CVD target and 15.0 normal-vision
+   floor, and 7.0 for a channel against a semantic on dark — the measured
+   ceiling (docs/ARKIV-DARK.md §E), inside the validator's 6–8 band that is
+   legal only because every semantic carries its glyph and sign. */
+const D = T.THEMES.dark, DP = D.NEUTRAL.paper;
+check('the dark paper is #111113, near-black with Arkiv\u2019s cool cast', DP === '#111113' && T.oklch(DP).C < 0.01);
+for (const [name, hex] of [['ink', D.NEUTRAL.ink], ['ink-2', D.NEUTRAL.ink2], ['grey', D.NEUTRAL.grey],
+  ['sem-pos', D.SEMANTIC.positive], ['sem-neg', D.SEMANTIC.negative]])
+  check(`dark --${name} ${hex} is body text on the dark paper (${T.contrast(hex, DP).toFixed(2)}:1 ≥ 4.5)`,
+    T.contrast(hex, DP) >= 4.5);
+check(`dark --grey is also legible on paper-2, the table head (${T.contrast(D.NEUTRAL.grey, D.NEUTRAL.paper2).toFixed(2)}:1 ≥ 4.5)`,
+  T.contrast(D.NEUTRAL.grey, D.NEUTRAL.paper2) >= 4.5);
+for (const k of T.CHANNEL_ORDER)
+  check(`dark --c-${k} ${D.CHANNEL[k]} is a mark on the dark paper (${T.contrast(D.CHANNEL[k], DP).toFixed(2)}:1 ≥ 3)`,
+    T.contrast(D.CHANNEL[k], DP) >= 3);
+const g2 = T.contrast(D.NEUTRAL.grey2, DP);
+check(`dark --grey-2 / --abs-outline reads as a mark and stays rules-only (${g2.toFixed(2)}:1, 3 ≤ x < 4.5)`,
+  g2 >= 3 && g2 < 4.5 && D.NEUTRAL.absOutline === D.NEUTRAL.grey2);
+for (const k of T.CHANNEL_ORDER) {
+  const h = (x) => T.oklch(x).H, gap = Math.min(Math.abs(h(D.CHANNEL[k]) - h(T.CHANNEL[k])), 360 - Math.abs(h(D.CHANNEL[k]) - h(T.CHANNEL[k])));
+  check(`dark --c-${k} is the same channel: ${gap.toFixed(1)}° from its light hue (≤ 3)`, gap <= 3);
+}
+const pairsOf = (xs) => xs.flatMap((a, i) => xs.slice(i + 1).map((b) => [a, b]));
+for (const [theme, collision] of [['light', 8.0], ['dark', 7.0]]) {
+  const t = T.THEMES[theme];
+  const ch = T.CHANNEL_ORDER.map((k) => [k, t.CHANNEL[k]]);
+  const worst = (ps, f) => ps.map(([[a, x], [b, y]]) => [`${a} × ${b}`, f(x, y)]).sort((p, q) => p[1] - q[1])[0];
+  const pc = worst(pairsOf(ch), T.cvdSeparation), pt = worst(pairsOf(ch), (x, y) => T.deltaE(x, y, 'tritan'));
+  check(`${theme}: six channels, all pairs, protan/deutan ΔE ≥ 8.0 (worst ${pc[0]} ${pc[1].toFixed(2)})`, pc[1] >= 8.0);
+  check(`${theme}: six channels, all pairs, tritan ΔE ≥ 8.0 (worst ${pt[0]} ${pt[1].toFixed(2)})`, pt[1] >= 8.0);
+  const sp = T.cvdSeparation(t.SEMANTIC.positive, t.SEMANTIC.negative);
+  check(`${theme}: the semantic pair, CVD ΔE ≥ 8.0 (${sp.toFixed(2)})`, sp >= 8.0);
+  const eight = [...ch, ['positive', t.SEMANTIC.positive], ['negative', t.SEMANTIC.negative]];
+  const pn = worst(pairsOf(eight), (x, y) => T.deltaE(x, y));
+  check(`${theme}: all eight, normal-vision ΔE ≥ 15.0 (worst ${pn[0]} ${pn[1].toFixed(2)})`, pn[1] >= 15.0);
+  const sweep = T.CHANNEL_ORDER.flatMap((k) => T.RAMP_STATES.flatMap((st) => ['positive', 'negative']
+    .map((m) => [`${k}.${st} × ${m}`, T.cvdSeparation(t.RAMP[k][st], t.SEMANTIC[m]), T.deltaE(t.RAMP[k][st], t.SEMANTIC[m])])))
+    .sort((p, q) => p[1] - q[1]);
+  check(`${theme}: every ramp step × each semantic, CVD ΔE ≥ ${collision} (worst ${sweep[0][0]} ${sweep[0][1].toFixed(2)})`,
+    sweep.length === 36 && sweep[0][1] >= collision);
+  check(`${theme}: …and normal-vision ≥ 15.0 (worst ${Math.min(...sweep.map((x) => x[2])).toFixed(2)})`,
+    Math.min(...sweep.map((x) => x[2])) >= 15.0);
+  for (const k of T.CHANNEL_ORDER) {
+    const on = t.NEUTRAL[T.ON_CHANNEL[theme][k]];
+    check(`${theme}: the label on a ${k} fill (${T.ON_CHANNEL[theme][k]}) clears 4.5:1 (${T.contrast(on, t.CHANNEL[k]).toFixed(2)})`,
+      T.contrast(on, t.CHANNEL[k]) >= 4.5);
+  }
+}
+const sq = D.SEQUENTIAL.map((h) => T.contrast(h, DP));
+check(`dark graphite: step 0 clears the 2:1 ordinal floor (${sq[0].toFixed(2)}) and each step is further from the paper`,
+  sq[0] >= 2 && sq.every((c, i) => i === 0 || c > sq[i - 1]), sq.map((c) => c.toFixed(2)).join(' '));
+const hatch = (theme) => Math.min(...T.CHANNEL_ORDER.map((k) => { const t = T.THEMES[theme];
+  return T.contrast(T.mixHex(t.NEUTRAL.paper, t.CHANNEL[k], T.HATCH[theme]), t.NEUTRAL.paper); }));
+check(`dark hatch (${T.HATCH.dark}) is no fainter than light's (${hatch('dark').toFixed(3)} ≥ ${hatch('light').toFixed(3)})`,
+  hatch('dark') >= hatch('light'));
+check('dark washes are 14% of their token on the dark paper, and ink reads on every one (≥ 4.5:1)',
+  Object.entries(D.WASH).every(([k, w]) => T.contrast(D.NEUTRAL.ink, w) >= 4.5)
+  && D.WASH.uber === T.mixHex(DP, D.CHANNEL.uber, 0.14) && D.WASH.negative === T.mixHex(DP, D.SEMANTIC.negative, 0.14));
+check('an unknown feed is the dark grey in dark, not a channel', T.channelOf('no-such-feed', 'dark') === D.NEUTRAL.grey);
+check('the light accessors are unchanged by the theme argument', T.channelOf('Uber') === T.CHANNEL.uber
+  && T.sequentialOf(1) === T.SEQUENTIAL[5] && T.sequentialOf(1, 'dark') === D.SEQUENTIAL[5]);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

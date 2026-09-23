@@ -390,8 +390,145 @@
   --hl-pad-x:8px;
   --hl-radius:3px;
   --mark-row:3px;
+  /* per theme, not in the design's block: hatch opacity, label on a fill */
+  --hatch-a:0.45;
+  --on-c-uber:var(--paper);
+  --on-c-bolt:var(--ink);
+  --on-c-yango:var(--paper);
+  --on-c-hotel:var(--ink);
+  --on-c-cabman:var(--paper);
+  --on-c-fms:var(--ink);
   /* the old skin's names, folded onto Arkiv tokens (tokens.js BRIDGE) */
   --grey-strong:var(--grey);
+}
+/* The dark set (the operator's ruling 3; evidence in docs/ARKIV-DARK.md),
+   twice: for a dark OS when the reader chose nothing, and for a reader who
+   chose dark. Same values in both, from tokens.js THEMES.dark. */
+@media (prefers-color-scheme: dark){
+  :root[data-skin="arkiv"]:not([data-theme="light"]){
+    color-scheme:dark;
+    --paper:#111113;
+    --paper-2:#1B1B1D;
+    --ink:#F0F0F1;
+    --ink-2:#D2D2D5;
+    --grey:#8D8D92;
+    --grey-2:#68686D;
+    --hair:#333336;
+    --faint:#252527;
+    --signal:#F0F0F1;
+    --c-uber:#4366A5;
+    --w-uber:#181D27;
+    --c-uber-engaged:#4366A5;
+    --c-uber-available:#5579BA;
+    --c-uber-idle:#688DCF;
+    --c-bolt:#2EA3C7;
+    --w-bolt:#15252C;
+    --c-bolt-engaged:#2EA3C7;
+    --c-bolt-available:#48B8DC;
+    --c-bolt-idle:#60CDF2;
+    --c-yango:#BE118E;
+    --w-yango:#291124;
+    --c-yango-engaged:#BE118E;
+    --c-yango-available:#D532A2;
+    --c-yango-idle:#EC4BB7;
+    --c-hotel:#B29200;
+    --w-hotel:#282310;
+    --c-hotel-engaged:#B29200;
+    --c-hotel-available:#C7A62C;
+    --c-hotel-idle:#DCBB47;
+    --c-cabman:#8D2CD7;
+    --w-cabman:#22152E;
+    --c-cabman-engaged:#8D2CD7;
+    --c-cabman-available:#A146EE;
+    --c-cabman-idle:#B361FF;
+    --c-fms:#9C78FA;
+    --w-fms:#241F33;
+    --c-fms-engaged:#9C78FA;
+    --c-fms-available:#AE93FF;
+    --c-fms-idle:#C0AFFF;
+    --sem-pos:#008E60;
+    --sem-neg:#D65044;
+    --sem-neu:#8D8D92;
+    --w-pos:#0F231E;
+    --w-neg:#2D1A1A;
+    --w-ink:#303032;
+    --seq-0:#484D56;
+    --seq-1:#646972;
+    --seq-2:#818690;
+    --seq-3:#9FA5AF;
+    --seq-4:#BEC4CF;
+    --seq-5:#DFE5F0;
+    --abs-outline:#68686D;
+    --hatch-a:0.53;
+    --on-c-uber:var(--ink);
+    --on-c-bolt:var(--paper);
+    --on-c-yango:var(--ink);
+    --on-c-hotel:var(--paper);
+    --on-c-cabman:var(--ink);
+    --on-c-fms:var(--paper);
+  }
+}
+:root[data-skin="arkiv"][data-theme="dark"]{
+  color-scheme:dark;
+  --paper:#111113;
+  --paper-2:#1B1B1D;
+  --ink:#F0F0F1;
+  --ink-2:#D2D2D5;
+  --grey:#8D8D92;
+  --grey-2:#68686D;
+  --hair:#333336;
+  --faint:#252527;
+  --signal:#F0F0F1;
+  --c-uber:#4366A5;
+  --w-uber:#181D27;
+  --c-uber-engaged:#4366A5;
+  --c-uber-available:#5579BA;
+  --c-uber-idle:#688DCF;
+  --c-bolt:#2EA3C7;
+  --w-bolt:#15252C;
+  --c-bolt-engaged:#2EA3C7;
+  --c-bolt-available:#48B8DC;
+  --c-bolt-idle:#60CDF2;
+  --c-yango:#BE118E;
+  --w-yango:#291124;
+  --c-yango-engaged:#BE118E;
+  --c-yango-available:#D532A2;
+  --c-yango-idle:#EC4BB7;
+  --c-hotel:#B29200;
+  --w-hotel:#282310;
+  --c-hotel-engaged:#B29200;
+  --c-hotel-available:#C7A62C;
+  --c-hotel-idle:#DCBB47;
+  --c-cabman:#8D2CD7;
+  --w-cabman:#22152E;
+  --c-cabman-engaged:#8D2CD7;
+  --c-cabman-available:#A146EE;
+  --c-cabman-idle:#B361FF;
+  --c-fms:#9C78FA;
+  --w-fms:#241F33;
+  --c-fms-engaged:#9C78FA;
+  --c-fms-available:#AE93FF;
+  --c-fms-idle:#C0AFFF;
+  --sem-pos:#008E60;
+  --sem-neg:#D65044;
+  --sem-neu:#8D8D92;
+  --w-pos:#0F231E;
+  --w-neg:#2D1A1A;
+  --w-ink:#303032;
+  --seq-0:#484D56;
+  --seq-1:#646972;
+  --seq-2:#818690;
+  --seq-3:#9FA5AF;
+  --seq-4:#BEC4CF;
+  --seq-5:#DFE5F0;
+  --abs-outline:#68686D;
+  --hatch-a:0.53;
+  --on-c-uber:var(--ink);
+  --on-c-bolt:var(--paper);
+  --on-c-yango:var(--ink);
+  --on-c-hotel:var(--paper);
+  --on-c-cabman:var(--ink);
+  --on-c-fms:var(--paper);
 }
 /* ═══ END GENERATED TOKENS ═══ */
 
