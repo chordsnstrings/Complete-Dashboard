@@ -100,11 +100,14 @@
   --serious-bg:var(--w-neg);
   --critical-bg:var(--w-neg);
 
-  /* THE CATEGORICAL PALETTE, UNTIL STEP 2 CONVERTS ITS CALLERS. L1 forbids
-     cycling hues by index: a hue names a channel. The plan first said CAT
-     resolves to ink; the review showed that paints every segment of a donut
-     or a stacked bar the same ink, and the adopted correction is DISTINCT
-     NEUTRAL STEPS until each caller asks channelOf(name) instead.
+  /* THE OLD CATEGORICAL NAMES, --s1..--s8, which pages still pass by name
+     ('--s3' for a passenger aboard, '--s2' for an alert…) until the page
+     phase converts each one. charts.js stopped cycling them in STEP 2: its
+     slots are --cat-1..--cat-8, below. L1 forbids cycling hues by index: a
+     hue names a channel. The plan first said CAT resolves to ink; the review
+     showed that paints every segment of a donut or a stacked bar the same
+     ink, and the adopted correction is DISTINCT NEUTRAL STEPS until each
+     caller asks channelOf(name) instead.
 
      Chosen against the pairs the callers actually put side by side, in
      OKLab lightness ×100 as tokens.js oklch() measures it: s1..s8 are
@@ -147,6 +150,40 @@
      deduction is not "worse" (plan §1: ink for added, grey for deducted). */
   --mk-fill:var(--ink);
   --mk-neg:var(--grey);
+
+  /* THE CATEGORICAL SLOTS (charts.js CAT), for a donut, a stacked bar or a
+     categorical ranking whose caller has not been converted to a channel or
+     to ink yet. The review's correction: DISTINCT neutral steps, never one
+     ink. Chosen against how the slots meet: a ring is ranked, so slot i
+     touches i+1 and the last touches the first; a stacked bar touches
+     neighbours only. OKLab lightness ×100 on white: 20 / 64 / 43 / 76 / 54 /
+     32 / 76 / 43 — every neighbour at least 21 apart, the first six all
+     different, every ring of two to seven closing at least 12 apart, and the
+     folded "Other" (--grey, 54) 22 from the seventh and 34 from the first.
+     Eight slots on one achromatic axis cannot all differ; 7 and 8 repeat 4
+     and 3, never beside them. Dark keeps the order, because the ramp's
+     anchor flips with the paper: 92 / 52 / 72 / 42 / 62 / 82 / 42 / 72,
+     neighbours at least 20 apart, rings closing at least 10, the fold 22
+     and 28. (Measured with tokens.js oklch(), test/chart_marks.test.mjs §5.) */
+  --cat-1:var(--seq-5);
+  --cat-2:var(--seq-1);
+  --cat-3:var(--seq-3);
+  --cat-4:var(--seq-0);
+  --cat-5:var(--seq-2);
+  --cat-6:var(--seq-4);
+  --cat-7:var(--seq-0);
+  --cat-8:var(--seq-3);
+  /* COLOUR BY NAME (charts.js byName): a datum whose label names a channel is
+     that channel, whatever its position. Declared here and NOWHERE in the
+     old skin, which falls back through var() to the slot it always painted.
+     A channel nobody mapped is unidentified grey, never a borrowed hue. */
+  --chan-uber:var(--c-uber);
+  --chan-bolt:var(--c-bolt);
+  --chan-yango:var(--c-yango);
+  --chan-hotel:var(--c-hotel);
+  --chan-cabman:var(--c-cabman);
+  --chan-fms:var(--c-fms);
+  --chan-none:var(--grey);
 
   /* Geometry. No panel, no shadow, no rounded corner on the sheet. Marks keep
      their own 4px data-end, chips 3px and swatches 2px — set where they are. */

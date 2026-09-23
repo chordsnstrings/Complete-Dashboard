@@ -8,7 +8,17 @@ const tt = () => document.getElementById('tt');
    list and the palette must stay in step. */
 import { TZ, dubaiDay } from './tz.js';
 import { WASH_ALPHA, CHANNEL_ORDER, channelKey } from './tokens.js';
-export const CAT = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8'];
+/* The eight categorical SLOTS, asked for by position (STEP 2).
+   ─────────────────────────────────────────────────────────────────────────
+   L1: a hue names a channel and is never cycled by index. This was the list
+   --s1..--s8 — eight hues handed out in arrival order, so the same channel
+   was a different colour on two pages. --cat-1..--cat-8 are slots: the old
+   skin paints each with the --s colour it always had (app.css), and Arkiv
+   paints them as DISTINCT graphite steps (arkiv.css) — the review's
+   correction, so that a donut or a stacked bar whose caller has not been
+   converted is never eight segments of one ink. A datum that names a
+   CHANNEL does not take a slot at all under Arkiv: byName() below. */
+export const CAT = ['--cat-1', '--cat-2', '--cat-3', '--cat-4', '--cat-5', '--cat-6', '--cat-7', '--cat-8'];
 export const SEQ = ['--b100', '--b200', '--b300', '--b400', '--b500', '--b600', '--b700'];
 
 /* The class, not an inline opacity.
@@ -135,6 +145,32 @@ const CHAN_TOKEN = new RegExp(`^--(?:c|ch|chan)-(${CHANNEL_ORDER.join('|')})(?![
 function channelOfToken(tok) {
   const m = typeof tok === 'string' ? tok.match(CHAN_TOKEN) : null;
   return m ? m[1] : null;
+}
+
+/* COLOUR BY NAME, never by index (plan §3 "Charts", SPEC L1).
+   ─────────────────────────────────────────────────────────────────────────
+   The colour of one categorical datum, as the name of a custom property
+   (callers write `var(${…})`):
+     · the caller's colorFor answer, when it gives one;
+     · a datum whose label NAMES a channel ('Uber', 'FMS telematics', 'uber')
+       takes that channel's identity — under Arkiv. The name is --chan-<key>,
+       which ONLY arkiv.css declares, with the datum's index slot as the
+       var() fallback, so the old skin, which never declares it, paints the
+       slot it always painted (its donuts coloured channels by position, and
+       production keeps that look until the flip);
+     · a caller that colours by channel (it passed colorFor) and got no answer
+       is looking at a channel nobody mapped: --chan-none, grey under Arkiv —
+       an unlabelled feed must look unidentified, never like a borrowed
+       colour — and the slot in the old skin, as before;
+     · anything else takes its slot. Fleets (Ecosine, Egari) are not channels
+       and get a slot, never a hue. */
+export function byName(d, i, labelKey = 'label', colorFor = null) {
+  const own = colorFor ? colorFor(d, i) : null;
+  if (own) return own;
+  const slot = CAT[i % CAT.length];
+  const k = channelKey(String(d?.[labelKey] ?? ''));
+  if (k) return `--chan-${k}, var(${slot})`;
+  return colorFor ? `--chan-none, var(${slot})` : slot;
 }
 
 /* A bar whose DATA end is rounded and whose baseline is square (SPEC §4),
@@ -877,8 +913,19 @@ export function areaChart(host, data, opts = {}) {
    legend printed the same swatch twice with two different numbers beside it.
    Verified by evaluating the expression. Seven categories plus the fold is
    eight marks, which is what the palette has. */
+/* `as`: the same composition drawn another way (STEP 2, the operator's
+   ruling 6). No mockup draws a ring, and the page plans replace each donut
+   with ranked bars or a 100% bar — EACH ONE EXPLICITLY, on its own page,
+   because there is no global switch. So the ring stays the default and a
+   caller converted in the page phase asks for:
+     'bars'    ranked horizontal bars (hbars): the count and the share
+               printed on every row, a channel row in its identity with its
+               gutter marker, the rest in ink, the fold in grey;
+     'bar100'  one 100% bar (stackedBar) with its key.
+   Same signature, same fold of the tail, same clicks (the fold never
+   navigates, `clickable` still gates each row), same colours by name. */
 export function donut(host, data, { label = 'label', value = 'n', onClick,
-  max = CAT.length - 1, colorFor = null, clickable = null, aria = null } = {}) {
+  max = CAT.length - 1, colorFor = null, clickable = null, aria = null, as = 'ring' } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   /* The tail is FOLDED, never dropped. This used to render the first eight
@@ -894,6 +941,23 @@ export function donut(host, data, { label = 'label', value = 'n', onClick,
       _tail: tail.map((d) => `${d[label]} ${fmt(d[value])}`) });
   }
   const tot = shown.reduce((a, d) => a + +d[value], 0) || 1;
+  /* One share rule for every form: one decimal below ten per cent, none
+     above, and "<0.1%" rather than a zero it is not. */
+  const pcOf = (n) => { const sh = (+n / tot) * 100; return sh < 0.05 ? '<0.1%' : `${sh.toFixed(sh < 10 ? 1 : 0)}%`; };
+  const go = onClick && ((d) => !d._tail && (!clickable || clickable(d)));
+  if (as === 'bars') {
+    hbars(host, shown, { label, value, signed: false, valueFmt: (v) => fmt(v),
+      shareOf: (d) => pcOf(d[value]),
+      colorFor: (d, i) => (d._tail ? '--grey'
+        : (colorFor && colorFor(d, i)) || (channelKey(String(d[label] ?? '')) ? `--c-${channelKey(String(d[label]))}` : null)),
+      onClick, clickable: onClick ? go : null });
+    return;
+  }
+  if (as === 'bar100') {
+    stackedBar(host, shown, { label, value, aria, onClick, clickable: onClick ? go : null,
+      colorFor: (d, i) => (d._tail ? '--grey' : byName(d, i, label, colorFor)) });
+    return;
+  }
   const S = 190, r = 74, ir = 47, cx = S / 2, cy = S / 2;
   const svg = name(mk('svg', { viewBox: `0 0 ${S} ${S}`, class: 'donut', style: 'margin:0 auto;display:block' }), aria);
   let a0 = -Math.PI / 2;
@@ -907,8 +971,10 @@ export function donut(host, data, { label = 'label', value = 'n', onClick,
        legend. A hairline stroke in the panel colour separates the arcs without
        taking any of their sweep. */
     const p = arc(cx, cy, r, ir, a0, a1);
-    /* The fold is not a category and must not take a category's colour. */
-    const fillVar = d._tail ? '--grey' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length];
+    /* The fold is not a category and must not take a category's colour.
+       Everything else by NAME (byName), and a slot only for what names no
+       channel. */
+    const fillVar = d._tail ? '--grey' : byName(d, i, label, colorFor);
     const path = mk('path', { d: p, fill: `var(${fillVar})`,
       stroke: 'var(--surface)', 'stroke-width': 1.5, 'data-fade': '' });
     interactive(path, `${esc(d[label])} — <b>${fmt(d[value])}</b> (${(frac * 100).toFixed(1)}%)${
@@ -937,13 +1003,13 @@ export function donut(host, data, { label = 'label', value = 'n', onClick,
   const leg = document.createElement('div'); leg.className = 'legend dnut-keys';
   // The legend reads the SAME expression the ring did, so a swatch can never
   // name a colour the arc beside it is not drawn in.
-  const swatchOf = (d, i) => (d._tail ? '--grey' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length]);
+  const swatchOf = (d, i) => (d._tail ? '--grey' : byName(d, i, label, colorFor));
   leg.innerHTML = shown.map((d, i) => {
     const share = (+d[value] / tot) * 100;
     /* One decimal below ten per cent, none above: "42.7%" and "3.1%" both read
        at a glance, "42.68%" does not, and a slice under a tenth of a per cent
        reads "<0.1%" rather than rounding to a zero it is not. */
-    const pc = share < 0.05 ? '<0.1%' : `${share.toFixed(share < 10 ? 1 : 0)}%`;
+    const pc = pcOf(d[value]);
     /* The tooltip sits on the LABEL, not on the row: the row is
        `display:contents` so it has no box of its own to hover. */
     const t = d._tail ? ` title="${esc(d._tail.slice(0, 10).join(' · '))}"` : '';
@@ -995,7 +1061,11 @@ export function hbars(host, data, { label = 'label', value = 'n', color, seq = f
      Returns a token name, or nothing to fall through to the rules below. */
   colorFor = null,
   // A row may opt out of navigation individually — see `donut`, same reason.
-  clickable = null } = {}) {
+  clickable = null,
+  /* A share printed beside the value (donut's `as: 'bars'`): the number a
+     ranking of a composition exists to give, and which a ring only ever
+     offered on hover. */
+  shareOf = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const vals = data.map((d) => +d[value] || 0);
@@ -1029,7 +1099,8 @@ export function hbars(host, data, { label = 'label', value = 'n', color, seq = f
     const w = v === 0 ? 0 : Math.max(Math.min(100, Math.abs(v) / max * 100), 0.6);
     row.innerHTML = `${mark}<div class="k" title="${esc(d[label])}">${esc(d[label])}</div>
       <div class="track"><div class="fill${neg ? ' neg' : ''}" style="width:${w.toFixed(1)}%;background:${c}"></div></div>
-      <div class="v num">${v === 0 ? '0' : `${neg ? '−' : ''}${valueFmt(Math.abs(v))}`}</div>`;
+      <div class="v num">${v === 0 ? '0' : `${neg ? '−' : ''}${valueFmt(Math.abs(v))}`}${
+  shareOf ? ` <span class="hb-p">${esc(shareOf(d))}</span>` : ''}</div>`;
     const go = onClick && (!clickable || clickable(d)) ? () => onClick(d) : null;
     /* The stylesheet has styled `.hb[data-click]` — cursor, the hover ring on
        the label and track, the active press — since these rows became

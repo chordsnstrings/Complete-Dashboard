@@ -450,6 +450,90 @@ for (const skin of ['classic', 'arkiv']) {
     keys.length === 5 && keys.every((k) => / --mk-fill --mk-neg$/.test(k)), keys.join(' · '));
 }
 
+/* ── 5 · donut: colour by name, distinct slots, and the `as` option ─────── */
+console.log('\n5 · donut: by name, distinct slots, and ranked bars or a 100% bar on request');
+const DN = async ([data, opts]) => {
+  const c = await import('/charts.js');
+  document.querySelector('#nhost')?.remove();
+  const host = document.createElement('div'); host.id = 'nhost'; host.className = 'panel';
+  host.style.cssText = 'width:900px;position:absolute;left:0;top:0';
+  document.body.append(host);
+  const clicked = [];
+  const o = { ...opts };
+  if (o.clickAll) { delete o.clickAll; o.onClick = (d) => clicked.push(d.label); }
+  if (o.nullColor) { delete o.nullColor; o.colorFor = () => null; }
+  c.donut(host, data, o);
+  const cs = (e) => getComputedStyle(e);
+  const arcs = [...host.querySelectorAll('svg.donut path')].map((p) => ({ attr: p.getAttribute('fill'), fill: cs(p).fill }));
+  const keys = [...host.querySelectorAll('.dnut-keys .dk')].map((k) => ({
+    label: k.querySelector('.dk-l').textContent, sw: cs(k.querySelector('.sw')).backgroundColor }));
+  const rows = [...host.querySelectorAll('.hbars .hb')].map((r) => ({ label: r.querySelector('.k').textContent,
+    v: r.querySelector('.v').textContent, click: r.hasAttribute('data-click'),
+    mark: !!r.querySelector('.hb-mk') && cs(r.querySelector('.hb-mk')).display !== 'none' }));
+  for (const r of host.querySelectorAll('.hbars .hb[data-click]')) r.click();
+  const segs = [...host.querySelectorAll('svg:not(.donut) rect[data-fade]')].length;
+  return { arcs, keys, rows, clicked, segs, ring: !!host.querySelector('svg.donut') };
+};
+const chans = [{ label: 'FMS telematics', n: 611 }, { label: 'Uber', n: 487 }, { label: 'Bolt', n: 21 },
+  { label: 'Hotel', n: 20 }, { label: 'Yango', n: 1 }];
+const kinds = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta'].map((label, i) => ({ label, n: 60 - i * 8 }));
+const nineKinds = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'].map((label, i) => ({ label, n: 90 - i * 9 }));
+const D = {};
+for (const skin of ['classic', 'arkiv']) {
+  const { ctx, page } = await open(skin);
+  D[skin] = {
+    chans: await page.evaluate(DN, [chans, {}]),
+    kinds: await page.evaluate(DN, [kinds, {}]),
+    nine: await page.evaluate(DN, [nineKinds, {}]),
+    unmapped: await page.evaluate(DN, [[{ label: 'Careem', n: 5 }, { label: 'Uber', n: 9 }], { nullColor: true }]),
+    bars: await page.evaluate(DN, [[...chans, { label: 'Careem', n: 3 }], { as: 'bars', clickAll: true, max: 5 }]),
+    bar100: await page.evaluate(DN, [kinds, { as: 'bar100' }]),
+  };
+  await ctx.close();
+}
+{
+  const c = D.classic, a = D.arkiv;
+  const S_OLD = ['#2f6f9f', '#c2683a', '#2f8f6f', '#4a4e8c', '#8a6a12'].map(rgb);
+  check('old skin: a channel donut with no colorFor still paints the five --s slots it painted, by position',
+    JSON.stringify(c.chans.arcs.map((x) => x.fill)) === JSON.stringify(S_OLD), JSON.stringify(c.chans.arcs));
+  check('old skin: …through the new names (a slot, with the channel asked for by name first)',
+    c.chans.arcs[1].attr === 'var(--chan-uber, var(--cat-2))' && c.kinds.arcs[0].attr === 'var(--cat-1)',
+    JSON.stringify([c.chans.arcs[1].attr, c.kinds.arcs[0].attr]));
+  const CH = ['fms', 'uber', 'bolt', 'hotel', 'yango'].map((k) => rgb(T.CHANNEL[k]));
+  check('Arkiv: the same donut paints each channel in its identity, by NAME',
+    JSON.stringify(a.chans.arcs.map((x) => x.fill)) === JSON.stringify(CH), JSON.stringify(a.chans.arcs.map((x) => x.fill)));
+  const kf = a.kinds.arcs.map((x) => x.fill);
+  check('Arkiv: six categories that are not channels are six DISTINCT neutral steps, not one ink',
+    new Set(kf).size === 6 && kf.every((f) => [...T.SEQUENTIAL].map(rgb).includes(f)), JSON.stringify(kf));
+  const lum = (f) => { const [r, g, b] = f.match(/\d+/g).map(Number); return T.oklch('#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')).L * 100; };
+  const kl = kf.map(lum);
+  check('Arkiv: …neighbours on the ring at least 20 apart in lightness, and the ring closes at least 10 apart',
+    kl.every((l, i) => Math.abs(l - kl[(i + 1) % kl.length]) >= 10) && kl.slice(1).every((l, i) => Math.abs(l - kl[i]) >= 20),
+    JSON.stringify(kl.map((x) => x.toFixed(0))));
+  check('both skins: nine categories fold the tail into a grey "Other", never a slot colour',
+    [c, a].every((x) => x.nine.arcs.length === 8 && x.nine.arcs[7].attr === 'var(--grey)'
+      && x.nine.keys[7].label === 'Other (2)'), JSON.stringify(a.nine.keys));
+  check('Arkiv: a channel the caller could not map is unidentified grey; the old skin keeps its slot',
+    a.unmapped.arcs.find((x, i) => a.unmapped.keys[i].label === 'Careem').fill === rgb(T.NEUTRAL.grey)
+    && c.unmapped.arcs.find((x, i) => c.unmapped.keys[i].label === 'Careem').fill === rgb('#c2683a'),
+    JSON.stringify([a.unmapped, c.unmapped].map((x) => x.arcs)));
+  check('both skins: every key swatch is the colour of its arc', [c, a].every((x) =>
+    [x.chans, x.kinds, x.nine].every((d) => d.keys.every((k, i) => k.sw === d.arcs[i].fill))));
+  const b = a.bars;
+  check('as:"bars" draws ranked bars and no ring', !b.ring && b.rows.length === 6
+    && b.rows.map((r) => r.label).join() === 'FMS telematics,Uber,Bolt,Hotel,Careem,Other (1)', JSON.stringify(b.rows));
+  check('as:"bars" prints the count AND the share on every row', b.rows.every((r) => /^[\d,]+ (\d+(\.\d)?%|<0\.1%)$/.test(r.v))
+    && b.rows[0]?.v === '611 53%' && b.rows[5]?.v === '1 0.1%', JSON.stringify(b.rows.map((r) => r.v)));
+  check('as:"bars" keeps the clicks, and the fold never navigates',
+    JSON.stringify(b.clicked) === JSON.stringify(['FMS telematics', 'Uber', 'Bolt', 'Hotel', 'Careem']) && b.rows[5] && !b.rows[5].click,
+    JSON.stringify(b.clicked));
+  check('Arkiv: …a channel row carries its marker, a row that is not a channel has none',
+    b.rows.length === 6 && b.rows.slice(0, 4).every((r) => r.mark) && !b.rows[4].mark && !b.rows[5].mark,
+    JSON.stringify(b.rows.map((r) => r.mark)));
+  check('as:"bar100" draws one 100% bar with its key, and no ring', !a.bar100.ring && a.bar100.segs === 6
+    && !c.bar100.ring && c.bar100.segs === 6, JSON.stringify([a.bar100.segs, c.bar100.segs]));
+}
+
 /* #forecast itself: the caption names the treatment the chart draws. */
 console.log('\n1b · #forecast says what it draws');
 for (const skin of ['classic', 'arkiv']) {
