@@ -7,6 +7,7 @@ const tt = () => document.getElementById('tt');
    and a bar coloured `--s8` disappeared entirely. Both are now defined; this
    list and the palette must stay in step. */
 import { TZ, dubaiDay } from './tz.js';
+import { WASH_ALPHA } from './tokens.js';
 export const CAT = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8'];
 export const SEQ = ['--b100', '--b200', '--b300', '--b400', '--b500', '--b600', '--b700'];
 
@@ -84,7 +85,7 @@ function interactive(el, label, onClick) {
    outline, which is the defect the plan's hatch/outline swap exists to
    prevent (a reason that is not the true one). */
 const CLASSIC_FORM = Object.freeze({ fit: false, max: 96, end: 3, base: 3, gap: 0, steps: 7,
-  absent: 'hatch', unfinished: 'hollow', projected: 'solid', pitch: 4, angle: 45 });
+  absent: 'hatch', unfinished: 'hollow', projected: 'solid', behind: 'outline', pitch: 4, angle: 45 });
 export function markForm() {
   let cs = null;
   try { cs = getComputedStyle(document.documentElement); } catch { return CLASSIC_FORM; }
@@ -101,15 +102,31 @@ export function markForm() {
     absent: one('--mk-absent', CLASSIC_FORM.absent, ['hatch', 'outline']),
     unfinished: one('--mk-unfinished', CLASSIC_FORM.unfinished, ['hollow', 'hatch']),
     projected: one('--mk-projected', CLASSIC_FORM.projected, ['solid', 'hatch']),
+    behind: one('--mk-behind', CLASSIC_FORM.behind, ['outline', 'wash']),
     pitch: num('--mk-hatch-pitch', CLASSIC_FORM.pitch),
     angle: num('--mk-hatch-angle', CLASSIC_FORM.angle),
   });
 }
 /* The word for a treatment, as the tokens in force draw it: 'hatched',
-   'outlined', 'hollow' or 'solid'. Exported for every page caption that
-   names how a chart drew something. */
-const DRAWN = Object.freeze({ hatch: 'hatched', outline: 'outlined', hollow: 'hollow', solid: 'solid' });
+   'outlined', 'hollow', 'solid' or 'pale'. Exported for every page caption
+   that names how a chart drew something. `kind` is one of absent,
+   unfinished, projected and behind (a second measure drawn behind a bar). */
+const DRAWN = Object.freeze({ hatch: 'hatched', outline: 'outlined', hollow: 'hollow', solid: 'solid',
+  wash: 'pale' });
 export const drawnAs = (kind, form = markForm()) => DRAWN[form[kind]];
+/* …and as a noun, for a sentence that names the mark: "drawn as a hatched
+   band" / "drawn as an empty outline", "the outline behind each bar" / "the
+   pale bar behind each bar". `article: false` drops the a/an. */
+const NOUN = Object.freeze({
+  absent: Object.freeze({ hatch: 'a hatched band', outline: 'an empty outline' }),
+  unfinished: Object.freeze({ hollow: 'a hollow bar', hatch: 'a hatched bar' }),
+  projected: Object.freeze({ solid: 'a solid bar', hatch: 'a hatched bar' }),
+  behind: Object.freeze({ outline: 'an outline', wash: 'a pale bar' }),
+});
+export const drawnNoun = (kind, form = markForm(), { article = true } = {}) => {
+  const s = NOUN[kind][form[kind]];
+  return article ? s : s.replace(/^an? /, '');
+};
 
 /* A bar whose DATA end is rounded and whose baseline is square (SPEC §4),
    as a path: a rect's rx rounds all four corners. `r` is clamped to half the
@@ -429,9 +446,11 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
    default 30-day view showed a 10x growth step that was only the Uber export
    resuming after a gap.
 
-   `gapKey` marks a datum as uncollected. Those days are drawn as a hatched
-   void across the full height of the plot — an absence, not a low value — and
-   the caption states how many there were. */
+   `gapKey` marks a datum as uncollected. Those days are drawn across the full
+   height of the plot as the ABSENCE treatment — an absence, not a low value —
+   and the caption states how many there were. The old skin draws it as a
+   hatched void; SPEC §5 (Arkiv) as an empty outline, because there a hatch
+   means a period still being measured. markForm() picks, drawnNoun() words it. */
 /* Is this bucket label the Dubai day it is now? The chart is handed day
    strings ("2026-08-26") and Postgres timestamps ("2026-08-26T00:00:00.000Z")
    by different callers, so both are reduced to ten characters before
@@ -449,8 +468,9 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
   // tooltip, which is true on the one page that first used it and a lie on any
   // other — the unauthorized page draws total occupancy intervals there.
   secondaryLabel = 'telematics journeys',
-  // What a hatched day MEANS. "nothing was collected" is right for a trip
-  // series and wrong for a seat sensor, where the honest statement is narrower.
+  // What an uncollected day MEANS (hatched in the old skin, an empty outline
+  // under Arkiv). "nothing was collected" is right for a trip series and wrong
+  // for a seat sensor, where the honest statement is narrower.
   gapLabel = 'nothing was collected',
   /* A day that has not finished yet.
      ─────────────────────────────────────────────────────────────────────
@@ -463,8 +483,9 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
      The product already knows how to say this everywhere else — #compare cuts
      both days to the same Dubai minute, #causes hatches a partial month and
      names how many of its days are in the record — and the one chart on the
-     landing page did not. Drawn hollow, with the hour in the tooltip and a
-     sentence under the chart.
+     landing page did not. Drawn as unfinished — hollow in the old skin, a
+     hatch in its own colour under Arkiv — with the hour in the tooltip and a
+     sentence under the chart that names whichever it is.
 
      Opt-out rather than opt-in: `inProgress: false` for a series where the
      last bucket is not a day in progress. */
@@ -490,13 +511,26 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const axisF = axisFmt || valueFmt;
-  const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 34;
+  const form = markForm();
   const vals = data.filter((d) => !d[gapKey]).map((d) => +d[y] || 0);
   const raw = Math.max(...vals, secondary ? Math.max(...data.map((d) => +d[secondary] || 0)) : 0) || 1;
+  /* Drawn at the size it is seen at, under a form that fits (Arkiv), as
+     barChart has been since chartBox: SPEC §4's 24px bar and --t1 tick are
+     PIXELS, and this chart's fixed 720-unit box stretched onto a 1,090px
+     panel would draw them 36px and 14px. The old skin keeps its 720 × 240
+     box and its 46-unit gutter, exactly. */
+  let W = 720, H = 240, pl = 46;
+  const pr = 12, pt = 18, pb = 34;
+  if (form.fit) {
+    ({ W, H } = chartBox(host));
+    pl = axisGutter(yTicks({ hi: raw, fixedMax }).map((v) => axisF(v)));
+  }
   const iw = W - pl - pr, ih = H - pt - pb, step = iw / data.length;
   const pad = data.length <= 12 ? 0.28 : data.length <= 40 ? 0.18 : 0.10;
-  const bw = barWidth(step, pad);
+  const bw = barWidth(step, pad, form);
   const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
+  const ended = endsOnly(form);
+  const hatchOf = hatches(svg, form);
 
   /* One hatch pattern per CHART, not per page.
      The id was the fixed string "gapHatch", and two gapBars on one page — the
@@ -507,16 +541,20 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
      the first chart's coordinate space. areaChart has always namespaced its
      gradient id; this never did. */
   const hid = 'gh' + Math.random().toString(36).slice(2, 7);
-  const defs = mk('defs');
-  /* Two crossing lines in a 6×6 tile, and no patternTransform. A rotation on a
-     userSpaceOnUse pattern turns about the origin, so the hatch phase differed
-     with each band's x position and adjacent voids did not line up — which
-     reads as noise rather than as one texture. */
-  const pat = mk('pattern', { id: hid, width: 6, height: 6, patternUnits: 'userSpaceOnUse' });
-  pat.append(mk('rect', { width: 6, height: 6, fill: 'var(--surface-2)' }),
-    mk('line', { x1: 0, y1: 0, x2: 6, y2: 6, stroke: 'var(--rule-strong)', 'stroke-width': 1 }),
-    mk('line', { x1: 6, y1: 0, x2: 0, y2: 6, stroke: 'var(--rule-strong)', 'stroke-width': 1 }));
-  defs.append(pat); svg.append(defs);
+  /* The old skin's void pattern. Under a form that draws absence as an
+     OUTLINE (SPEC §5) nothing uses it, so it is not drawn. */
+  if (form.absent === 'hatch') {
+    const defs = mk('defs');
+    /* Two crossing lines in a 6×6 tile, and no patternTransform. A rotation on a
+       userSpaceOnUse pattern turns about the origin, so the hatch phase differed
+       with each band's x position and adjacent voids did not line up — which
+       reads as noise rather than as one texture. */
+    const pat = mk('pattern', { id: hid, width: 6, height: 6, patternUnits: 'userSpaceOnUse' });
+    pat.append(mk('rect', { width: 6, height: 6, fill: 'var(--surface-2)' }),
+      mk('line', { x1: 0, y1: 0, x2: 6, y2: 6, stroke: 'var(--rule-strong)', 'stroke-width': 1 }),
+      mk('line', { x1: 6, y1: 0, x2: 0, y2: 6, stroke: 'var(--rule-strong)', 'stroke-width': 1 }));
+    defs.append(pat); svg.append(defs);
+  }
 
   const { max } = yAxis(svg, { hi: raw, pl, pr, pt, ih, W, fmt: axisF, fixedMax });
   const xAt = new Set(xTickIndices(data.length));
@@ -524,7 +562,22 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
   data.forEach((d, i) => {
     const bx = pl + step * i;
     if (d[gapKey]) {
-      const band = mk('rect', { x: bx, y: pt, width: Math.max(step, 1), height: ih, fill: `url(#${hid})` });
+      /* NOT MEASURED. The old skin: a hatched band across the step, the full
+         height of the plot. SPEC §5 (Arkiv): an OUTLINE — 1px grey-2, no fill,
+         the same 4px data end as a real bar, the full height, because the
+         value could have been anything. A hatch now means the opposite (a
+         period still being measured), which is why the two had to swap
+         together with every sentence that names them. `pointer-events:all`
+         keeps the empty inside hoverable, so the tooltip still says why. */
+      const band = form.absent === 'hatch'
+        ? mk('rect', { x: bx, y: pt, width: Math.max(step, 1), height: ih, fill: `url(#${hid})` })
+        : ended
+          ? mk('path', { d: endedBar(bx + (step - bw) / 2 + 0.5, pt + 0.5, bw - 1, ih - 0.5, form.end),
+            fill: 'none', stroke: 'var(--abs-outline)', 'stroke-width': 1, 'pointer-events': 'all',
+            'data-absent': '' })
+          : mk('rect', { x: bx + (step - bw) / 2 + 0.5, y: pt + 0.5, width: bw - 1, height: ih - 0.5,
+            rx: form.end, fill: 'none', stroke: 'var(--abs-outline)', 'stroke-width': 1,
+            'pointer-events': 'all', 'data-absent': '' });
       interactive(band, `${esc(d[x])} — <b>${esc(gapLabel)}</b>${
         d.silent_sources ? `<br>silent: ${esc([].concat(d.silent_sources).join(', '))}` : ''}`);
       svg.append(band);
@@ -532,17 +585,27 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
     }
     if (secondary && +d[secondary] > 0) {
       const sh = ih * (+d[secondary]) / max;
-      /* An OUTLINE, not a paler solid. Drawn as a fill it competes with the
-         foreground bar for figure and ground, and on the unauthorised-segments
-         chart the foreground is --s8, which had no dark-mode value at all. An
-         outline loses that contest by construction, in either theme. */
-      svg.append(mk('rect', { x: bx + (step - bw) / 2 - 2, y: pt + ih - sh, width: bw + 4,
-        height: Math.max(sh, 1), rx: 3, fill: 'none',
-        stroke: 'var(--rule-strong)', 'stroke-width': 1 }));
+      if (form.behind === 'wash') {
+        /* Under Arkiv an outline MEANS "not measured" (SPEC §5), and this is a
+           measurement — telematics journeys, occupancy intervals, the fleet
+           median — so it cannot be one. It is a WASH instead: the series'
+           own colour at 14% (the wash form, tokens.js WASH_ALPHA), a column
+           behind the bar and up to 4px wider on each side, so a second
+           measure shorter than the bar still shows beside it. */
+        const ext = Math.max(0, Math.min(4, (step - bw) / 2 - 1)), hh = Math.max(sh, 1);
+        svg.append(mk('path', { d: endedBar(bx + (step - bw) / 2 - ext, pt + ih - hh, bw + 2 * ext, hh, form.end),
+          fill: `var(${color})`, 'fill-opacity': WASH_ALPHA.light, 'data-behind': '' }));
+      } else {
+        /* An OUTLINE, not a paler solid. Drawn as a fill it competes with the
+           foreground bar for figure and ground, and on the unauthorised-segments
+           chart the foreground is --s8, which had no dark-mode value at all. An
+           outline loses that contest by construction, in either theme. */
+        svg.append(mk('rect', { x: bx + (step - bw) / 2 - 2, y: pt + ih - sh, width: bw + 4,
+          height: Math.max(sh, 1), rx: 3, fill: 'none',
+          stroke: 'var(--rule-strong)', 'stroke-width': 1 }));
+      }
     }
     const h = ih * (+d[y]) / max, cx = bx + (step - bw) / 2, by = pt + ih - h;
-    /* Hollow, not hatched: hatching already means "nobody collected this day",
-       and a day in progress is the opposite — it is being collected right now. */
     /* Two different kinds of incomplete bar, drawn the same way because they
        mean the same thing to a reader: this bar covers less time than the ones
        beside it, so its height is not comparable.
@@ -551,13 +614,21 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
          partial  a week or month bucket clipped by the window edge — three
                   days of a week drawn next to whole ones, which reads as a
                   collapse the fleet did not have. The server flags it; before
-                  this the chart drew it at full weight.  */
+                  this the chart drew it at full weight.
+
+       The old skin draws them HOLLOW (a dashed outline over paper-2), because
+       its hatch meant "nobody collected this day". SPEC §5 (Arkiv) draws them
+       as a HATCH in the series' own colour: an unfinished period is being
+       measured, which is the opposite of absent, and absent is the outline. */
     const clipped = d.partial === true && +d.days > 0 && +d.days < +d.of_days;
     const live = (inProgress && i === data.length - 1 && isToday(d[x])) || clipped;
-    const r = mk('rect', { x: cx, y: by, width: bw, height: Math.max(h, 1), rx: 3,
-      fill: live ? 'var(--surface-2)' : `var(${color})`,
-      ...(live ? { stroke: `var(${color})`, 'stroke-width': 1.5, 'stroke-dasharray': '3 2' } : {}),
-      'data-rise': '' });
+    const paint = !live ? { fill: `var(${color})` }
+      : form.unfinished === 'hatch'
+        ? { fill: hatchOf(color), stroke: `var(${color})`, 'stroke-width': 1 }
+        : { fill: 'var(--surface-2)', stroke: `var(${color})`, 'stroke-width': 1.5, 'stroke-dasharray': '3 2' };
+    const r = ended
+      ? mk('path', { d: endedBar(cx, pt + ih - Math.max(h, 1), bw, Math.max(h, 1), form.end), ...paint, 'data-rise': '' })
+      : mk('rect', { x: cx, y: by, width: bw, height: Math.max(h, 1), rx: 3, ...paint, 'data-rise': '' });
     interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}${
       clipped ? ` over <b>${esc(String(d.days))} of ${esc(String(d.of_days))} days</b> — this bucket `
         + 'is cut short by the window, so its height is not comparable'
@@ -573,7 +644,12 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
   });
   host.append(svg);
 
-  /* The sentence for the hollow bar, first, because it is about the bar a
+  /* Every sentence below names the treatment the chart just drew, from the
+     same form that drew it (drawnAs / drawnNoun), so "hatched" is never
+     printed under an outline in either skin. */
+  const unfinishedWord = drawnAs('unfinished', form);
+
+  /* The sentence for the unfinished bar, first, because it is about the bar a
      reader is looking at right now rather than about the window as a whole. */
   const clippedBars = data.filter((d) => d.partial === true && +d.days < +d.of_days);
   if (clippedBars.length) {
@@ -581,7 +657,7 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
     const which = clippedBars.length === 1 ? 'One bucket is' : `${clippedBars.length} buckets are`;
     c.innerHTML = `${which} cut short by the window — `
       + `${clippedBars.map((d) => `<b>${esc(shortLabel(d[x]))}</b> covers ${esc(String(d.days))} of `
-        + `${esc(String(d.of_days))} days`).join(', ')}. Drawn hollow, because a part-week is `
+        + `${esc(String(d.of_days))} days`).join(', ')}. Drawn ${unfinishedWord}, because a part-week is `
       + 'shorter than a whole one for a reason that is the calendar, not the fleet.';
     host.append(c);
   }
@@ -591,7 +667,8 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
     const c = document.createElement('p'); c.className = 'cap';
     c.innerHTML = `The last bar is <b>today, still being collected</b> — ${esc(valueFmt(last[y]))}`
       + `${label ? ` ${esc(label)}` : ''} as of ${esc(nowHHMM())} Dubai, against whole days beside `
-      + 'it. It is drawn hollow rather than filled so it is not read as a fall.';
+      + `it. It is drawn ${unfinishedWord} rather than ${unfinishedWord === 'hollow' ? 'filled' : 'solid'} `
+      + 'so it is not read as a fall.';
     host.append(c);
   }
 
@@ -604,7 +681,8 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
        caption opened with a dangling "45 more had at least one source silent",
        more than what. */
     c.innerHTML = [
-      gaps ? `<b>${fmt(gaps)} of ${fmt(data.length)} days: ${esc(gapLabel)}</b> — drawn as a hatched band, not as zero.` : '',
+      gaps ? `<b>${fmt(gaps)} of ${fmt(data.length)} days: ${esc(gapLabel)}</b> — drawn as `
+        + `${drawnNoun('absent', form)}, not as zero.` : '',
       partial
         ? `${gaps ? `${fmt(partial)} more` : `${fmt(partial)} of ${fmt(data.length)} days`} had at least `
           + 'one source silent, so their bars are understated.'

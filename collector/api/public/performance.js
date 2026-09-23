@@ -394,7 +394,8 @@ export async function renderPerformance(root, periodParam) {
     iso: p.period,
     median: p.jobs_median || 0,
     drivers: p.drivers || 0,
-    /* The period in progress is drawn hollow, the same way it is on a
+    /* The period in progress is drawn as unfinished (hollow in the old skin,
+       a hatch in its own colour under Arkiv), the same way it is on a
        driver's own Record tab and on the landing page. Drawn solid it is a
        short bar at the right-hand end of every chart on this product, which
        reads as the fleet collapsing and is only the calendar. */

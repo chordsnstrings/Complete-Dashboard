@@ -18,8 +18,9 @@
       finding: 12th on jobs and 40th on value is a driver working short hops,
       which is a thing to say to them.
    2. It will not draw an arrow on a period that has not finished. The bar for
-      the week in progress is drawn hollow, by the same chart helper that
-      hollows today's bar on the landing page, and it is given no verdict.
+      the week in progress is drawn as unfinished (hollow in the old skin, a
+      hatch under Arkiv), by the same chart helper that draws today's bar on
+      the landing page, and it is given no verdict.
    3. It will not charge the weather to the driver. Every verdict is against
       their own baseline AFTER the fleet's own movement over the same periods
       is taken out, and the page prints the fleet's movement beside it so the
@@ -32,7 +33,7 @@
 /* `dec` comes from charts.js, which owns the number formatters; ui.js
    re-exports `fmt` and `empty` from the same place, so there is one set of
    them in the product rather than a per-page copy. */
-import { gapBars, dec } from './charts.js';
+import { gapBars, dec, drawnAs, drawnNoun } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, verdict, empty,
   money, fmt, dateStr, plural, countOf, tabBar, sourceLabel } from './ui.js';
 import { api, state, href, currentGen, alive, personAddr } from './data.js';
@@ -302,7 +303,10 @@ export async function renderDriverRecord(root, id, prof) {
   const vHost = el('div'); root.append(vHost); loading(vHost);
   const kHost = el('div'); root.append(kHost);
   const jobs = panel(`Jobs done, ${L} by ${L}`,
-    `Their own bars against the fleet median of the same ${L}, drawn as an outline behind each`);
+    /* The treatment is named by the form that draws it: an outline in the old
+       skin, and under Arkiv a pale bar, because there an outline means "not
+       measured" and the fleet median is measured. */
+    `Their own bars against the fleet median of the same ${L}, drawn as ${drawnNoun('behind')} behind each`);
   root.append(jobs.panel);
   const val = panel(`Trip value, ${L} by ${L}`,
     'Gross — what riders were charged, before any platform commission and before the cash the driver already took');
@@ -379,8 +383,8 @@ export async function renderDriverRecord(root, id, prof) {
     period: periodShort(p.period, grain),
     jobs: p.completed,
     fleet: p.fleet_jobs_median,
-    /* The chart hollows a bucket that covers fewer days than the ones beside
-       it — the same treatment the landing page gives today's bar, and for the
+    /* The chart draws a bucket that covers fewer days than the ones beside
+       it as unfinished — the same treatment the landing page gives today's bar, and for the
        same reason: three days of a week drawn at full weight beside whole
        weeks reads as a collapse that has not happened. */
     partial: !p.complete,
@@ -394,7 +398,8 @@ export async function renderDriverRecord(root, id, prof) {
     aria: `Jobs done each ${L}, with the fleet median behind`,
   });
   jobs.body.append(el('p', 'cap',
-    `The outline behind each bar is what the middle driver of the fleet did in the same ${L}. `
+    `The ${drawnNoun('behind', undefined, { article: false })} behind each bar is what the middle driver `
+    + `of the fleet did in the same ${L}. `
     + `It is a median over people, not a total: the number of active drivers moves `
     + `${L} to ${L}, and a total would move with it.`));
 
@@ -440,10 +445,12 @@ export async function renderDriverRecord(root, id, prof) {
       pctl: p.jobs_position ? p.jobs_position.percentile : 0,
       vpctl: p.value_position ? p.value_position.percentile : 0,
       /* A period they did not work is an ABSENCE, not a percentile of nought.
-         gapBars hatches the whole height of the plot for one of these, which
-         is the distinction: nought means they were placed last, and hatched
-         means they were not placed at all. Drawing the first where the second
-         is true would be the plainest lie this page could tell. */
+         gapBars draws the absence treatment the whole height of the plot for
+         one of these (a hatched band in the old skin, an empty outline under
+         Arkiv), which is the distinction: nought means they were placed last,
+         and the absence mark means they were not placed at all. Drawing the
+         first where the second is true would be the plainest lie this page
+         could tell. */
       unplaced: !p.jobs_position,
       partial: !p.complete,
       days: p.elapsed_days,
@@ -465,13 +472,14 @@ export async function renderDriverRecord(root, id, prof) {
        week in progress has a real percentile — it is placed against the people
        who have worked so far this week — and summarising somebody's standing
        from three days of it is the same mistake as giving that week a verdict.
-       The chart still draws it, hollow; the sentence does not speak for it. */
+       The chart still draws it, as unfinished; the sentence does not speak for it. */
     const last = placed.filter((p) => p.complete).slice(-1)[0] || null;
+    const behind = drawnNoun('behind', undefined, { article: false });
     pos.body.append(el('p', 'cap',
-      `The bar is their position on JOBS DONE and the outline behind it their position on TRIP `
-      + `VALUE, both out of the drivers who were active in the same ${L}. A driver whose outline `
+      `The bar is their position on JOBS DONE and the ${behind} behind it their position on TRIP `
+      + `VALUE, both out of the drivers who were active in the same ${L}. A driver whose ${behind} `
       + 'sits well above their bar is earning more per job than the people around them; one whose '
-      + 'outline sits below is doing more jobs for less. '
+      + `${behind} sits below is doing more jobs for less. `
       + (last
         ? `In ${periodLabel(last.period, grain)} they sat in the `
           + `${ordinal(last.jobs_position.percentile)} percentile on jobs, `
@@ -503,7 +511,7 @@ export async function renderDriverRecord(root, id, prof) {
   li('<b>A difference is only called a change when it is bigger than this driver’s own '
     + 'ordinary variation.</b> Everything smaller is marked <i>within range</i> rather than '
     + 'given an arrow — an arrow every period is an arrow nobody reads.');
-  li(`<b>The ${L} now in progress is drawn hollow and given no verdict.</b> Comparing a `
+  li(`<b>The ${L} now in progress is drawn ${drawnAs('unfinished')} and given no verdict.</b> Comparing a `
     + `part-${L} with whole ones reports a collapse every ${L === 'week' ? 'Tuesday' : 'first'} `
     + 'morning.');
   li('<b>Rates are context, never a rank.</b> Measured on this fleet, a driver’s completion '

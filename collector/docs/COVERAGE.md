@@ -1037,6 +1037,16 @@ driver's 222 tracker fixes.
      bar painted over it.** It hid the lower 70px of #forecast's chart and
      read as missing bars. Pin sticky elements in flow before an element
      capture (the pixel harness already did; the one-off shot script did not).
+  5. **The swap is not two words, it is three marks.** Under SPEC §5 an
+     OUTLINE means "not measured" and a HATCH means "still being measured /
+     projected" — the old skin used them the other way round. So everything
+     the old skin drew as an outline had to be re-examined, not only the two
+     marks the plan named: gapBars' second measure BEHIND a bar (telematics
+     journeys, occupancy intervals, a driver's fleet median) was an outline,
+     which under Arkiv would have said those counts were missing. It is a
+     WASH there (`--mk-behind`), and the driver Record's captions ("the
+     outline behind each bar") ask `drawnNoun('behind')`. A new mark drawn
+     as an outline under Arkiv is a claim that the thing is not measured.
 
 * **A PROPOSAL FROM ANYWHERE BUT THE RULE CANNOT LIVE IN `driver_identity_link`.**
   `src/identity_link.js` DELETEs every unconfirmed, unrejected row in that table

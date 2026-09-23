@@ -154,10 +154,11 @@
      skins; these values are today's forms exactly, so the old skin does not
      move: a chart drawn in a fixed 720-unit box and stretched (fit 0), bars
      up to 96px with rx 3 on all four corners, no minimum gap, the 7-step blue
-     ramp, an uncollected day HATCHED, today's bar HOLLOW, and a forecast bar
-     SOLID. Deleted with this skin. test/chart_marks.test.mjs pins them. */
+     ramp, an uncollected day HATCHED, today's bar HOLLOW, a forecast bar
+     SOLID, and a second measure behind a bar OUTLINED. Deleted with this
+     skin. test/chart_marks.test.mjs pins them. */
   --mk-fit:0; --mk-max:96; --mk-end:3; --mk-base:3; --mk-gap:0; --mk-steps:7;
-  --mk-absent:hatch; --mk-unfinished:hollow; --mk-projected:solid;
+  --mk-absent:hatch; --mk-unfinished:hollow; --mk-projected:solid; --mk-behind:outline;
 
   /* ── semantic state ───────────────────────────────────────────────────────
      THE ROLE RULE, and it is absolute, because no choice of hex can replace it:
@@ -421,6 +422,7 @@
   --mk-absent:outline;
   --mk-unfinished:hatch;
   --mk-projected:hatch;
+  --mk-behind:wash;
   --mk-hatch-pitch:4;
   --mk-hatch-angle:45;
 }

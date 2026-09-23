@@ -218,6 +218,10 @@ export const FORM = Object.freeze({
      unfinished a part-period (today, a clipped week) is a HATCH in the
                 series' own colour — it is being measured, it is not absent.
      projected  a projection is a HATCH too (SPEC §5).
+     behind     a second measure drawn behind a bar (telematics journeys
+                behind bookings, the fleet median behind a driver) is a WASH,
+                the series' colour at 14%. The old skin outlines it; under
+                SPEC §5 an outline means "not measured", which it is not.
    The hatch itself is 45°, a 4px pitch, 1px lines at --hatch-a (HATCH above)
    over the paper; charts.js draws it from these. */
 export const MARK = Object.freeze({
@@ -230,6 +234,7 @@ export const MARK = Object.freeze({
   absent: 'outline',
   unfinished: 'hatch',
   projected: 'hatch',
+  behind: 'wash',
   hatchPitch: '4',
   hatchAngle: '45'
 });
@@ -562,7 +567,7 @@ export function cssDeclarations(theme = 'light') {
 /* ADDED (STEP 2): the mark form, as declarations (see MARK). */
 export function markDeclarations() {
   const name = { fit: 'fit', max: 'max', end: 'end', base: 'base', gap: 'gap', steps: 'steps',
-    absent: 'absent', unfinished: 'unfinished', projected: 'projected',
+    absent: 'absent', unfinished: 'unfinished', projected: 'projected', behind: 'behind',
     hatchPitch: 'hatch-pitch', hatchAngle: 'hatch-angle' };
   return Object.entries(MARK).map(([k, v]) => `--mk-${name[k]}:${v}`);
 }

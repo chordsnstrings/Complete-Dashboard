@@ -2,7 +2,8 @@
 // Views live in this file; the per-driver detail pages live in driver.js, and
 // everything shared between them (panels, tables, modals, routing, fetching)
 // lives in ui.js and data.js so the two cannot drift apart.
-import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
+import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip,
+  drawnAs } from './charts.js';
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, sourceToken, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
@@ -918,7 +919,7 @@ V.overview = async (root) => {
   let per = GRAIN_WORD[state.grain] || 'day';
   const trend = panel(`Trips per ${per}`,
     'Bookings only. Telematics journeys are drawn behind them in grey — the same physical trips, seen '
-    + `by the trackers. A ${per} nobody collected is hatched, not zero.`
+    + `by the trackers. A ${per} nobody collected is ${drawnAs('absent')}, not zero.`
     + (per === 'day' ? ' Click a bar to open that day.' : ''));
   g1.append(trend.panel);
   const mix = panel('Platform share',
@@ -1060,7 +1061,7 @@ V.overview = async (root) => {
       claim = `${v.uncollected} of these ${v.days} days were never collected`;
       figure = fmt(v.uncollected); unit = plural(v.uncollected, 'day missing', 'days missing');
       recommend = 'Read every rate on this page as an average over the days that WERE collected — '
-        + 'the missing ones are drawn hatched rather than as zero, and Collection gaps names which source failed.';
+        + `the missing ones are drawn ${drawnAs('absent')} rather than as zero, and Collection gaps names which source failed.`;
     } else if (v.branch === 'cancellations') {
       claim = `${k.cancel_pct}% of bookings did not complete`;
       figure = `${k.completion_pct}%`; unit = 'completed';
@@ -1219,7 +1220,7 @@ V.supply = async (root) => renderSupply(root);
         Tue 18:00 59 · Tue 16:00 55 · Tue 17:00 50".
      #demand figure    "512 bookings a day · over 2 days" — (662 + 361) / 2, a
         24-hour day averaged with a 17-hour one, 300px above a panel that
-        already drew that bar hollow and wrote "still being collected". (The
+        already drew that bar as unfinished and wrote "still being collected". (The
         audit caught the same figure reading 502 at 15:17, when today was 341.)
      #demand tile      "Temp vs volume −1.00 · hotter days run quieter" —
         Pearson's r over TWO points, one of them the part-day. r over n = 2 is
@@ -1229,7 +1230,7 @@ V.supply = async (root) => renderSupply(root);
      #corridors        fixed server-side; see api/analytics_routes.js.
 
    The knowledge already existed in ONE place — gapBars() in charts.js draws
-   the last bar hollow when `isToday(d[x])` and captions it "still being
+   the last bar as unfinished when `isToday(d[x])` and captions it "still being
    collected … as of HH:MM Dubai". These three figures now read the same rule
    instead of each deciding for themselves, so a sentence and the chart under
    it cannot disagree about which day is finished.
@@ -1335,7 +1336,7 @@ V.demand = async (root) => {
   g.append(hourly.panel);
   const daily = panel('Daily volume',
     'Bookings per Dubai-local day, with telematics journeys behind them. A day nobody collected is '
-    + 'hatched rather than drawn as zero. Click a bar to open that day.');
+    + `${drawnAs('absent')} rather than drawn as zero. Click a bar to open that day.`);
   g.append(daily.panel);
   const ctxP = panel('Trips against weather and holidays',
     'Heat, rain and Ramadan all move Dubai demand. This puts trips and weather side by side so a dip has a possible reason.');
@@ -1406,7 +1407,7 @@ V.demand = async (root) => {
       : w.liveIsToday
         ? `Today is not in it: ${fmt(soFar)} ${plural(soFar, 'booking')} so far, `
           + `as of ${clock.hhmm} Dubai, against whole days. It is still being `
-          + 'collected, and the daily panel below draws its bar hollow for the same reason.'
+          + `collected, and the daily panel below draws its bar ${drawnAs('unfinished')} for the same reason.`
         : `The last ${esc(w.live.grain || 'bucket')} is not in it: the window cuts it to `
           + `${countOf(+w.live.days || 0, 'day')} of ${fmt(w.live.of_days)}, and a part-week beside `
           + 'whole ones is shorter for a reason that is the calendar, not the fleet.';
@@ -1430,7 +1431,7 @@ V.demand = async (root) => {
             : 'no whole day in this window',
       sub: uncollected
         ? 'The hourly curve and the heatmap below are over the days that WERE collected — a missing '
-          + 'day is drawn hatched rather than as zero. ' + todayLine
+          + `day is drawn ${drawnAs('absent')} rather than as zero. ` + todayLine
         : (todayLine ? `${todayLine} ` : '')
           + 'The heatmap below splits this by weekday, which is what a rota is actually built against.',
     });

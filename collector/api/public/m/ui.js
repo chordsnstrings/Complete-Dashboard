@@ -22,10 +22,11 @@ export { el, esc, money, pct, dayStr, fmt, isToday };
    before it" every single morning, and the day it was measuring was the one
    still being collected.
 
-   The desktop already separates them — gapBars draws today hollow and says
-   so. This is the same separation for a screen with no chart to hang it on:
-   the complete days for anything averaged or compared, and today handed back
-   on its own so a screen can mention it as what it is. */
+   The desktop already separates them — gapBars draws today as unfinished
+   (hollow, or a hatch under Arkiv) and says so. This is the same separation
+   for a screen with no chart to hang it on: the complete days for anything
+   averaged or compared, and today handed back on its own so a screen can
+   mention it as what it is. */
 /* `d` or `day`. The Today module's rows carry `d`; /api/driver/daily's carry
    `day`, so a driver chart calling this got `today: null` every time and
    plotted the part-day that is still filling as though it were a whole one. */

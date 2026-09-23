@@ -17,7 +17,7 @@
    3. An overlapping world event is a candidate, not a cause. Nothing here
       claims to have proved anything. */
 
-import { empty } from './charts.js';
+import { empty, markForm } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, pill, note, dayStr, dateStr, fmt, pct,
   sourceLabel, countOf, plural, signed, verdict, money } from './ui.js';
 import { api, qChan, href, hrefFilter } from './data.js';
@@ -126,6 +126,14 @@ function trendChart(host, months, onPick) {
   const iw = W - P.l - P.r, ih = H - P.t - P.b;
   const step = iw / months.length, bw = Math.min(step * 0.66, 46);
   const Y = (v) => P.t + ih - (v / max) * ih;
+  /* A month we hold no data for is an OUTLINE in both skins: dashed over a
+     pale fill in the old one, and SPEC §5's 1px solid grey-2 with no fill
+     under Arkiv (a pale fill reads as a small value). A partial month is a
+     hatch in both. So the caption below can name both without asking the
+     form — it is this function's own drawing, not gapBars'. */
+  const outline = markForm().absent === 'outline';
+  const voidPaint = outline ? 'fill="none" stroke="var(--abs-outline)"'
+    : 'fill="var(--surface-2)" stroke="var(--rule-strong)" stroke-dasharray="3,3"';
   const out = [`<svg viewBox="0 0 ${W} ${H}" role="img">`,
     `<defs><pattern id="partHatch" width="6" height="6" patternUnits="userSpaceOnUse"
       patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--b300)"/>
@@ -138,9 +146,10 @@ function trendChart(host, months, onPick) {
   months.forEach((m, i) => {
     const x = P.l + step * i + (step - bw) / 2;
     if (m.no_data) {
-      // A hatched placeholder, so the eye reads "nothing here" rather than "zero"
+      // An OUTLINED placeholder, so the eye reads "nothing here" rather than
+      // "zero". (This said "hatched"; it has always been drawn as an outline.)
       out.push(`<rect x="${x.toFixed(1)}" y="${P.t}" width="${bw.toFixed(1)}" height="${ih}" rx="3"
-        fill="var(--surface-2)" stroke="var(--rule-strong)" stroke-dasharray="3,3"/>
+        ${voidPaint}/>
         <text x="${(x + bw / 2).toFixed(1)}" y="${P.t + ih / 2}" font-size="9" fill="var(--grey)"
           text-anchor="middle" transform="rotate(-90 ${(x + bw / 2).toFixed(1)} ${P.t + ih / 2})">no data</text>`);
     } else {
@@ -175,7 +184,8 @@ function trendChart(host, months, onPick) {
     <span><i style="background:var(--b500)"></i>trips, drivers named</span>
     <span><i style="background:var(--b300)"></i>trips, no driver attribution</span>
     <span><i style="background:repeating-linear-gradient(45deg,var(--b300),var(--b300)2px,var(--surface)2px,var(--surface)4px)"></i>partial month — fewer days than the bars beside it</span>
-    <span><i style="background:var(--surface-2);border:1px dashed var(--rule-strong)"></i>no data collected</span>`));
+    <span><i style="${outline ? 'background:none;border:1px solid var(--abs-outline)'
+      : 'background:var(--surface-2);border:1px dashed var(--rule-strong)'}"></i>no data collected</span>`));
 }
 
 /* ── one break, decomposed ───────────────────────────────────────────────── */
@@ -227,7 +237,13 @@ function breakCard(b) {
 export async function renderCauses(root) {
   const vcHost = el('div'); root.append(vcHost);
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
-  const trend = panel('Trips per month', 'Click a month to see what was happening. Hatched columns are months we hold no data for.');
+  /* The caption named the wrong mark: it said "Hatched columns are months we
+     hold no data for", and the chart draws those months as OUTLINES and
+     hatches the PARTIAL months — so a reader looking for the hole was sent to
+     the month that is only short. True in both skins now (trendChart draws
+     the same two forms in each). */
+  const trend = panel('Trips per month', 'Click a month to see what was happening. Outlined columns are '
+    + 'months we hold no data for; hatched ones are partial months, with fewer days than the bars beside them.');
   root.append(trend.panel);
   const gapP = panel('Coverage gaps', 'Stretches with no trips from any source. These are collection holes, not quiet months.');
   const g = el('div', 'grid g23'); root.append(g);
