@@ -3041,6 +3041,31 @@ driver's 222 tracker fixes.
   figure, and only re-measuring both against the deployed API showed it — and
   then explained the residual as a real defect rather than leaving a six-person
   gap unexplained in the notes.
+* **A credential saved a few seconds after a run starts is not used by that run,
+  and the banner keeps its old red row until the next one.** The collector
+  reloads settings once, at the start of each run (`runWindowInner`,
+  `src/run.js:166`; the incremental fires on `*/30`). It then sends whatever
+  `get()` held at that point. `/api/auth` does not compare
+  `app_setting.updated_at` with a row's `checked_at`.
+
+  Measured 2026-09-23, Egari. `UBER_WEB_COOKIE_EGARI` was saved at 08:30:22Z.
+  The run that started at 08:30:00Z checked at 08:31:28Z and recorded
+  "redirected to auth.uber.com — the session is no longer signed in". It was
+  still the only row the banner showed ten minutes later. The saved value was
+  fine. At 08:40:51Z a dry run of the same capture through
+  `/api/settings/paste` answered `pass` (expires 2026-10-06). At 08:41:07Z
+  `/api/probe/uber/report-types?fleet=egari&only=REPORT_TYPE_DRIVER_ACTIVITY`,
+  which uses the stored value, answered `accepted`.
+
+  So a red Uber row right after a save is not evidence that the paste failed.
+  Before re-capturing, check the row's `checked_at` against the key's
+  `updated_at` in `/api/settings`. If the check is older than the save, test
+  the stored value with that probe, or wait for the next `:00`/`:30` run.
+  (The capture was Firefox's Windows "Copy as cURL" — `curl.exe ^"…^"`. The
+  paste reader strips those carets (`src/credkit.js:82`). The per-key field
+  (`PUT /api/settings`) stores text verbatim and checks nothing. A whole curl
+  pasted there would be sent as the cookie header and fail exactly like an
+  expired session. That did not happen here, but it reads the same.)
 
 ### The driver money model, measured — 2026-09-08
 
