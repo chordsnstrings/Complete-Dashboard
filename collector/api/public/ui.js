@@ -5,6 +5,7 @@
 import { fmt, empty } from './charts.js';
 import { href, params } from './data.js';
 import { TZ, TZ_LABEL, dubaiDay } from './tz.js';
+import { CHANNEL_ORDER } from './tokens.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const el = (tag, cls, html) => {
@@ -900,17 +901,24 @@ export const completionTone = (v) => (v == null || v === '' || !Number.isFinite(
    ─────────────────────────────────────────────────────────────────────────
    Beside SOURCE_LABEL because they answer the same question about the same
    keys and drifting apart would mean a chart drawing Yango in Bolt's green.
-   The values live in app.css (--ch-*) so all three theme states resolve; this
-   map only says which key takes which token.
+   The values live in app.css so all three theme states resolve; this map only
+   says which key takes which token.
+
+   The token is --c-<channel>, the Arkiv name, built from tokens.js's
+   CHANNEL_ORDER so the six channels are listed in one place (SPEC L5.1).
+   The old skin aliases each --c-* to its own --ch-* (app.css :root), so this
+   paints exactly what --ch-* painted until the skin flips, and the generated
+   :root[data-skin="arkiv"] block repaints it after. Plan §3, STEP 0.
 
    Returns null for anything unmapped, and every caller falls through to the
    categorical palette on null — a channel nobody has assigned a colour is
-   better drawn in a neutral series colour than in a guess at a brand. */
-export const SOURCE_TOKEN = {
-  uber: '--ch-uber', uber_fleet: '--ch-uber',
-  yango: '--ch-yango', bolt: '--ch-bolt', hotel: '--ch-hotel',
-  fms: '--ch-fms', cabman: '--ch-cabman',
-};
+   better drawn in a neutral series colour than in a guess at a brand. (The
+   plan's STEP 2 turns that null into '--grey' together with the chart
+   callers, because today it would change what the old skin draws.) */
+export const SOURCE_TOKEN = Object.freeze(Object.fromEntries([
+  ...CHANNEL_ORDER.map((k) => [k, `--c-${k}`]),
+  ['uber_fleet', '--c-uber'],
+]));
 export const sourceToken = (s) => SOURCE_TOKEN[String(s || '').toLowerCase()] || null;
 
 /* An enum value written for a person. The rule engine stores `critical`,
@@ -1472,7 +1480,11 @@ export function dominantBar(host, parts, { total = null, unitLabel = '', onClick
        mode near-black wins on all six. Only the stylesheet knows which theme
        is showing, so only the stylesheet can answer that; an inline colour
        here would be one guess for both. */
-    const chan = p.token ? ` ch-${p.token.replace(/^--ch-/, '')}` : '';
+    /* The class is the channel KEY, whichever name the token arrives by:
+       --c-uber (SOURCE_TOKEN since STEP 0) or --ch-uber (a caller written
+       before it). Stripping only --ch- turned --c-uber into `ch---c-uber`, a
+       class no rule matches, and the segment lost its fill. */
+    const chan = p.token ? ` ch-${p.token.replace(/^--ch?-/, '')}` : '';
     const style = ` style="width:${pct}%"`;
     const cls = `domb-seg${chan || ` ${esc(p.cls || `c${i + 1}`)}`}`;
     const title = `${p.label} · ${fmt(p.value)} · ${pct.toFixed(1)}%`;
@@ -1486,7 +1498,7 @@ export function dominantBar(host, parts, { total = null, unitLabel = '', onClick
   wrap.append(bar);
   const keys = el('div', 'domb-keys');
   const sw = (p, i) => (p.token
-    ? `<i class="sw ch-${esc(p.token.replace(/^--ch-/, ''))}"></i>`
+    ? `<i class="sw ch-${esc(p.token.replace(/^--ch?-/, ''))}"></i>`
     : `<i class="sw ${esc(p.cls || `c${i + 1}`)}"></i>`);
   /* The key is a control too. It is the only way to reach a channel whose
      segment is a two-pixel sliver — which on this fleet is most of them. */

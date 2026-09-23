@@ -240,7 +240,7 @@ function startScatter(host, days) {
   const svg = ['<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img">'];
   for (let h = Math.ceil(lo); h <= hi; h += step) {
     svg.push(`<line x1="${P.l}" x2="${W - P.r}" y1="${Y(h)}" y2="${Y(h)}" stroke="var(--rule)" stroke-width="1"/>`);
-    svg.push(`<text x="4" y="${Y(h) + 4}" font-size="10" fill="var(--ink-3)">${String(h).padStart(2, '0')}:00</text>`);
+    svg.push(`<text x="4" y="${Y(h) + 4}" font-size="10" fill="var(--grey)">${String(h).padStart(2, '0')}:00</text>`);
   }
   // the band containing the middle half of start times — the "usual" shift start
   const sorted = pts.map((d) => d.first_hour).sort((a, b) => a - b);
@@ -252,8 +252,8 @@ function startScatter(host, days) {
       fill="var(--s1)" fill-opacity=".78" stroke="var(--surface)" stroke-width="1.2" data-rise
       style="animation-delay:${i * 16}ms"><title>${dayStr(d.day)} · first trip ${hourStr(d.first_hour)} · ${d.trips} trips</title></circle>`);
   });
-  svg.push(`<text x="${P.l}" y="${H - 8}" font-size="10" fill="var(--ink-3)">${dayStr(pts[0].day)}</text>`);
-  svg.push(`<text x="${W - P.r}" y="${H - 8}" font-size="10" fill="var(--ink-3)" text-anchor="end">${dayStr(pts[pts.length - 1].day)}</text>`);
+  svg.push(`<text x="${P.l}" y="${H - 8}" font-size="10" fill="var(--grey)">${dayStr(pts[0].day)}</text>`);
+  svg.push(`<text x="${W - P.r}" y="${H - 8}" font-size="10" fill="var(--grey)" text-anchor="end">${dayStr(pts[pts.length - 1].day)}</text>`);
   svg.push('</svg>');
   host.innerHTML = svg.join('');
   host.append(el('p', 'cap', `Shaded band = the middle half of start times (${hourStr(qa)}–${hourStr(qb)}). Each dot is one working day.`));
@@ -573,7 +573,7 @@ function dualSeries(host, days) {
   for (let g = 0; g <= 4; g++) {
     const v = (max / 4) * g;
     svg.push(`<line x1="${P.l}" x2="${W - P.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--rule)" stroke-width="1"/>`);
-    svg.push(`<text x="2" y="${Y(v) + 4}" font-size="10" fill="var(--ink-3)">${v.toFixed(0)}h</text>`);
+    svg.push(`<text x="2" y="${Y(v) + 4}" font-size="10" fill="var(--grey)">${v.toFixed(0)}h</text>`);
   }
   svg.push(`<path d="${area('hours_online')}" fill="var(--s1)" fill-opacity=".16" data-fade/>`);
   svg.push(`<path d="${line('hours_online')}" fill="none" stroke="var(--s1)" stroke-width="2" data-draw/>`);
@@ -1519,7 +1519,7 @@ async function tabTerritory(root, id) {
     });
     terr.pickups.forEach((p) => {
       L.circleMarker([p.lat, p.lng], {
-        radius: 4 + 11 * Math.sqrt(p.n / max), color: '#fff', weight: 1.2,
+        radius: 4 + 11 * Math.sqrt(p.n / max), color: css('--paper'), weight: 1.2,
         fillColor: css('--s1'), fillOpacity: .8,
       }).addTo(map).bindTooltip(
         `<b>${esc(p.addr || 'pickup')}</b><br>${p.n} pickup${p.n > 1 ? 's' : ''}` +

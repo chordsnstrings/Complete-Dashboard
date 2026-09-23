@@ -56,6 +56,15 @@ const SHELL_FILES = [
      only ever in the cache because a previous online visit had put them there
      one request at a time. */
   '/data.js', '/ui.js', '/charts.js', '/daterange.js', '/tz.js', '/swr.js',
+  /* ui.js imports ./tokens.js (the colour contract, since the reskin's STEP 0),
+     and m/screens.js imports ../deposit_core.js, ../today.js and
+     ../onlinetime.js — three modules that were NEVER on this list, found by
+     walking the import graph on 2026-09-23 while adding the first. Any one
+     missing fails screens.js's import on a cold offline open, and with it
+     every screen: the exact failure the comment above records. The list is
+     still written by hand, so test/tokens.test.mjs now walks the phone's
+     static imports from /m/app.js and fails on any module it does not name. */
+  '/tokens.js', '/deposit_core.js', '/today.js', '/onlinetime.js',
   '/icons/icon-192.png', '/icons/apple-touch-icon.png',
   '/manifest.webmanifest',
 ];

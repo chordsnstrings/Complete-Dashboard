@@ -133,7 +133,7 @@ function trendChart(host, months, onPick) {
   for (let g = 0; g <= 3; g++) {
     const v = (max / 3) * g;
     out.push(`<line x1="${P.l}" x2="${W - P.r}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--rule)"/>`);
-    out.push(`<text x="${P.l - 8}" y="${Y(v) + 4}" font-size="10" fill="var(--ink-3)" text-anchor="end">${fmt(Math.round(v))}</text>`);
+    out.push(`<text x="${P.l - 8}" y="${Y(v) + 4}" font-size="10" fill="var(--grey)" text-anchor="end">${fmt(Math.round(v))}</text>`);
   }
   months.forEach((m, i) => {
     const x = P.l + step * i + (step - bw) / 2;
@@ -141,7 +141,7 @@ function trendChart(host, months, onPick) {
       // A hatched placeholder, so the eye reads "nothing here" rather than "zero"
       out.push(`<rect x="${x.toFixed(1)}" y="${P.t}" width="${bw.toFixed(1)}" height="${ih}" rx="3"
         fill="var(--surface-2)" stroke="var(--rule-strong)" stroke-dasharray="3,3"/>
-        <text x="${(x + bw / 2).toFixed(1)}" y="${P.t + ih / 2}" font-size="9" fill="var(--ink-3)"
+        <text x="${(x + bw / 2).toFixed(1)}" y="${P.t + ih / 2}" font-size="9" fill="var(--grey)"
           text-anchor="middle" transform="rotate(-90 ${(x + bw / 2).toFixed(1)} ${P.t + ih / 2})">no data</text>`);
     } else {
       const h = Math.max(1, ih * (m.trips / max));
@@ -163,7 +163,7 @@ function trendChart(host, months, onPick) {
             ? ` — NO BOOKINGS: ${outsideRecordWhy(m)}, so there is no count of days collected for it`
             : ''}</title></rect>`);
     }
-    out.push(`<text x="${(x + bw / 2).toFixed(1)}" y="${H - 24}" font-size="10" fill="var(--ink-3)" text-anchor="middle">${MONTH(m.m)}</text>`);
+    out.push(`<text x="${(x + bw / 2).toFixed(1)}" y="${H - 24}" font-size="10" fill="var(--grey)" text-anchor="middle">${MONTH(m.m)}</text>`);
   });
   out.push('</svg>');
   host.innerHTML = out.join('');

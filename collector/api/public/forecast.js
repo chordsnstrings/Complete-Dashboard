@@ -536,11 +536,11 @@ export async function renderForecast(root) {
     ...drawn.map((f) => ({ label: MONTH(f.m), n: f.point, kind: f.kind, lo: f.low, hi: f.high })),
   ];
   barChart(tb, series, { x: 'label', y: 'n', label: 'bookings', lo: 'lo', hi: 'hi',
-    colorFor: (r) => ({ fitted: '--b500', excluded: '--ink-3', partial: '--ink-3',
+    colorFor: (r) => ({ fitted: '--b500', excluded: '--grey', partial: '--grey',
       forecast: '--s3', extrapolation: '--s5' }[r.kind] || '--b400') });
   tb.append(el('div', 'legend', [
     ['--b500', `fitted (${d.n} months)`],
-    ['--ink-3', 'not used — before the break, or a partial month'],
+    ['--grey', 'not used — before the break, or a partial month'],
     ['--s3', 'forecast (3 months)'],
     ['--s5', 'extrapolation — a line, not a forecast'],
   ].map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('')

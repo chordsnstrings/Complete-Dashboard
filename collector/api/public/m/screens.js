@@ -1633,7 +1633,7 @@ async function analyst(deck, ctx) {
       const tag = el('span', 'm-chip');
       tag.textContent = f.verdict || '';
       tag.style.cssText = 'font-size:.66rem;padding:3px 9px;'
-        + `color:var(--${f.verdict === 'confirmed' ? 'good' : f.verdict === 'refuted' ? 'critical' : 'ink-3'})`;
+        + `color:var(--${f.verdict === 'confirmed' ? 'good' : f.verdict === 'refuted' ? 'critical' : 'grey'})`;
       c.body.append(b, tag);
       deck.append(c.card);
     });

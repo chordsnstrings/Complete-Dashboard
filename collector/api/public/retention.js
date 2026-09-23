@@ -64,7 +64,7 @@ function flowChart(host, flow) {
   const lx = (i) => P.l + step * i + step / 2;
   const ly = (v) => P.t + 4 + (1 - v / maxAct) * (ih - 8);
   out.push(`<path d="${act.map((v, i) => `${i ? 'L' : 'M'} ${lx(i).toFixed(1)} ${ly(v).toFixed(1)}`).join(' ')}"
-    fill="none" stroke="var(--ink-3)" stroke-width="1.5" stroke-dasharray="4,3" data-draw/>`);
+    fill="none" stroke="var(--grey)" stroke-width="1.5" stroke-dasharray="4,3" data-draw/>`);
   act.forEach((v, i) => {
     out.push(`<circle cx="${lx(i).toFixed(1)}" cy="${ly(v).toFixed(1)}" r="7" fill="transparent">`
       + `<title>${esc(MONTH(flow[i].m))} — ${fmt(v)} drivers earning</title></circle>`);
@@ -81,7 +81,7 @@ function flowChart(host, flow) {
     <span><i class="sw" style="background:var(--s1)"></i>genuinely new</span>
     <span><i class="sw" style="background:var(--s4)"></i>returning after a gap</span>
     <span><i class="sw" style="background:var(--s2)"></i>stopped</span>
-    <span><i class="sw" style="background:var(--ink-3)"></i>drivers earning (dashed, its own scale — a
+    <span><i class="sw" style="background:var(--grey)"></i>drivers earning (dashed, its own scale — a
       headcount and a flow are different quantities and do not share an axis)</span>`));
 }
 

@@ -64,7 +64,7 @@ html[data-ui="phone"] body{
 }
 .m-head .m-sub{
   display:block; font-family:"IBM Plex Mono",monospace; font-size:var(--t2);
-  letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3);
+  letter-spacing:.13em; text-transform:uppercase; color:var(--grey);
   font-weight:500; margin-top:1px;
 }
 /* Every header control is a 40px circle: the smallest target a thumb finds
@@ -72,7 +72,7 @@ html[data-ui="phone"] body{
 .m-ico{
   flex:0 0 auto; width:40px; height:40px; border-radius:50%;
   display:grid; place-items:center; font-size:var(--t9);
-  background:var(--surface-2); color:var(--ink-2);
+  background:var(--surface-2); color:var(--grey-strong);
   border:1px solid var(--rule); cursor:pointer; padding:0;
   transition:transform .18s var(--ease), background .18s var(--ease);
 }
@@ -116,7 +116,7 @@ html[data-ui="phone"] body{
   appearance:none; border:0; background:none; cursor:pointer;
   min-height:var(--m-tabs); padding:7px 2px 6px;
   display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
-  color:var(--ink-3); font-size:var(--t2); font-weight:600; letter-spacing:.02em;
+  color:var(--grey); font-size:var(--t2); font-weight:600; letter-spacing:.02em;
   transition:color .18s var(--ease);
 }
 .m-tab i{ font-style:normal; font-size:var(--d1); line-height:1; transition:transform .22s var(--ease-out) }
@@ -136,7 +136,7 @@ html[data-ui="phone"] body{
 .m-card>h2{
   margin:0 0 2px; font-size:var(--t8); font-weight:600; letter-spacing:-.005em;
 }
-.m-card>.m-cap{ margin:0 0 10px; font-size:var(--t5); color:var(--ink-3); line-height:1.45 }
+.m-card>.m-cap{ margin:0 0 10px; font-size:var(--t5); color:var(--grey); line-height:1.45 }
 .m-card.tap{ cursor:pointer; transition:transform .18s var(--ease) }
 .m-card.tap:active{ transform:scale(.985) }
 
@@ -153,7 +153,7 @@ html[data-ui="phone"] body{
   display:block; font-family:"Fraunces",Georgia,serif; font-weight:600;
   font-size:var(--d2); line-height:1.22; letter-spacing:-.012em; color:var(--ink);
 }
-.m-lede p{ margin:7px 0 0; font-size:var(--t6); color:var(--ink-2); line-height:1.55 }
+.m-lede p{ margin:7px 0 0; font-size:var(--t6); color:var(--grey-strong); line-height:1.55 }
 
 /* ── stat grid ──────────────────────────────────────────────────────────── */
 .m-stats{ display:grid; grid-template-columns:1fr 1fr; gap:var(--m-gap) }
@@ -164,7 +164,7 @@ html[data-ui="phone"] body{
 }
 .m-stat .l{
   font-family:"IBM Plex Mono",monospace; font-size:var(--t1); letter-spacing:.13em;
-  text-transform:uppercase; color:var(--ink-3); font-weight:500;
+  text-transform:uppercase; color:var(--grey); font-weight:500;
   display:block; margin-bottom:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .m-stat .n{
@@ -173,7 +173,7 @@ html[data-ui="phone"] body{
   display:block; overflow-wrap:anywhere;
 }
 .m-stat .n.sm{ font-size:var(--d1)}
-.m-stat .s{ display:block; font-size:var(--t4); color:var(--ink-3); margin-top:3px; line-height:1.4 }
+.m-stat .s{ display:block; font-size:var(--t4); color:var(--grey); margin-top:3px; line-height:1.4 }
 .m-stat.good .n{ color:var(--good) } .m-stat.warn .n{ color:var(--warn) }
 .m-stat.bad .n{ color:var(--critical) }
 a.m-stat{ text-decoration:none; color:inherit; display:block }
@@ -196,7 +196,7 @@ a.m-stat:active{ transform:scale(.985) }
 .m-row .k{ min-width:0 }
 .m-row .k b{ display:block; font-weight:600; font-size:var(--t7); letter-spacing:-.004em;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
-.m-row .k span{ display:block; font-size:var(--t4); color:var(--ink-3); margin-top:1px;
+.m-row .k span{ display:block; font-size:var(--t4); color:var(--grey); margin-top:1px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 /* A SUB THAT MAY WRAP, for the rows whose sub is the CONTENT rather than a
    caption for it.
@@ -212,9 +212,9 @@ a.m-stat:active{ transform:scale(.985) }
 .m-row.wrapsub .k span{ white-space:normal; overflow:visible; text-overflow:clip }
 .m-row .v{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap }
 .m-row .v b{ display:block; font-size:var(--t8); font-weight:600 }
-.m-row .v span{ display:block; font-size:var(--t4); color:var(--ink-3) }
+.m-row .v span{ display:block; font-size:var(--t4); color:var(--grey) }
 .m-row.go{ grid-template-columns:1fr auto auto }
-.m-row .chev{ color:var(--ink-3); font-size:var(--d1); line-height:1; margin-left:2px }
+.m-row .chev{ color:var(--grey); font-size:var(--d1); line-height:1; margin-left:2px }
 
 /* ── segmented control, chips, sheet ────────────────────────────────────── */
 .m-seg{
@@ -227,7 +227,7 @@ a.m-stat:active{ transform:scale(.985) }
      there, whatever it looks like. */
   flex:1 1 0; min-width:0; min-height:40px; appearance:none; border:0; background:none; cursor:pointer;
   padding:8px 6px; border-radius:8px; font-size:var(--t5); font-weight:600;
-  color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  color:var(--grey-strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   transition:background .18s var(--ease), color .18s var(--ease);
 }
 .m-seg button.on{ background:var(--surface); color:var(--ink); box-shadow:var(--shadow-1) }
@@ -237,7 +237,7 @@ a.m-stat:active{ transform:scale(.985) }
 .m-chips::-webkit-scrollbar{ display:none }
 .m-chip{
   flex:0 0 auto; padding:7px 13px; border-radius:999px; font-size:var(--t5); font-weight:600;
-  background:var(--surface); border:1px solid var(--rule); color:var(--ink-2);
+  background:var(--surface); border:1px solid var(--rule); color:var(--grey-strong);
   text-decoration:none; cursor:pointer;
 }
 .m-chip.on{ background:var(--accent-soft); border-color:var(--accent-line); color:var(--accent-ink) }
@@ -278,8 +278,8 @@ a.m-stat:active{ transform:scale(.985) }
   flex:1 1 auto; min-width:0; appearance:none; border:0; background:none; outline:none;
   padding:11px 0; font:inherit; font-size:var(--t8); color:var(--ink);
 }
-.m-search input::placeholder{ color:var(--ink-3) }
-.m-search span{ color:var(--ink-3); font-size:var(--t7)}
+.m-search input::placeholder{ color:var(--grey) }
+.m-search span{ color:var(--grey); font-size:var(--t7)}
 
 /* A date or time the reader sets. Native controls, because a phone's own date
    and time pickers are better than anything built here and are the ones the
@@ -295,7 +295,7 @@ a.m-stat:active{ transform:scale(.985) }
 /* ── odds and ends ──────────────────────────────────────────────────────── */
 .m-sec{
   font-family:"IBM Plex Mono",monospace; font-size:var(--t1); letter-spacing:.15em;
-  text-transform:uppercase; color:var(--ink-3); font-weight:500;
+  text-transform:uppercase; color:var(--grey); font-weight:500;
   margin:6px 2px -4px;
 }
 .m-skel{ background:var(--surface); border:1px solid var(--rule); border-radius:var(--m-r);
@@ -307,8 +307,8 @@ a.m-stat:active{ transform:scale(.985) }
 }
 @keyframes m-shim{ to{ transform:translateX(100%) } }
 @media (prefers-reduced-motion:reduce){ .m-skel::after{ animation:none } }
-.m-empty{ padding:26px 14px; text-align:center; color:var(--ink-3); font-size:var(--t6)}
-.m-empty b{ display:block; color:var(--ink-2); font-size:var(--t8); margin-bottom:4px }
+.m-empty{ padding:26px 14px; text-align:center; color:var(--grey); font-size:var(--t6)}
+.m-empty b{ display:block; color:var(--grey-strong); font-size:var(--t8); margin-bottom:4px }
 .m-err{ border-left:3px solid var(--critical); background:var(--critical-bg) }
 
 /* The staleness bar: what the reader is looking at, when the network is gone
@@ -316,7 +316,7 @@ a.m-stat:active{ transform:scale(.985) }
 .m-stale{
   display:flex; align-items:center; gap:8px; padding:9px 12px; font-size:var(--t5);
   background:var(--warn-bg); border:1px solid var(--rule); border-left:3px solid var(--warn);
-  border-radius:var(--m-r); color:var(--ink-2);
+  border-radius:var(--m-r); color:var(--grey-strong);
 }
 
 /* The fallback screen renders a real desktop module. It is given the desktop
@@ -331,7 +331,7 @@ a.m-stat:active{ transform:scale(.985) }
 /* What the screen was built from. The phone has no footer, so it closes the
    scrolling deck — quiet, rule above it, and never competing with the cards. */
 .m-src{ margin:6px 2px 4px; padding-top:12px; border-top:1px solid var(--rule);
-  color:var(--ink-3); font-size:var(--t4); line-height:1.5 }
+  color:var(--grey); font-size:var(--t4); line-height:1.5 }
 
 /* ── the shared range panel, inside the filter sheet ──────────────────────
    The same element the desktop opens in a popover. It is placed here rather
@@ -342,7 +342,7 @@ a.m-stat:active{ transform:scale(.985) }
   background:transparent;border:0;box-shadow:none;padding:0 0 4px;animation:none;
 }
 .m-sheet .rp-sec{margin:14px 0 7px;font-size:var(--t3);letter-spacing:.09em;text-transform:uppercase;
-  color:var(--ink-3);font-weight:600}
+  color:var(--grey);font-weight:600}
 .m-sheet .rp-sec:first-child{margin-top:2px}
 .m-sheet .rp-chips{gap:6px}
 /* Every target at least 40px: a chip that is comfortable with a mouse is a
@@ -365,7 +365,7 @@ a.m-stat:active{ transform:scale(.985) }
   flex:none; width:40px; height:40px; border-radius:12px;
   display:grid; place-items:center; position:relative; overflow:hidden;
   background:var(--surface-2); border:1px solid var(--rule);
-  color:var(--ink-2); font-weight:650; font-size:var(--t6); letter-spacing:.01em;
+  color:var(--grey-strong); font-weight:650; font-size:var(--t6); letter-spacing:.01em;
 }
 .m-av.sm{ width:32px; height:32px; border-radius:9px; font-size:var(--t3)}
 .m-av img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block }
@@ -427,7 +427,9 @@ a.m-stat:active{ transform:scale(.985) }
 .m-btn { display: block; width: 100%; min-height: 48px; margin-top: 10px;
   font: inherit; font-size: var(--t9); font-weight: 600; color: var(--fg);
   background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
-.m-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* --on-accent, not #fff: white is 2.94:1 on the dark theme's accent, and this
+   is the save button on the money form (see --on-accent in app.css). */
+.m-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .m-btn[disabled] { opacity: .45; }
 
 /* The supervisor picker on the deposit screen is a CONTROL, not a filter.

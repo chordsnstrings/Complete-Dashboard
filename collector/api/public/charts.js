@@ -301,9 +301,9 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
       const yl = pt + ih - ih * (+d[lo]) / max, yh = pt + ih - ih * (+d[hi]) / max;
       const cxb = bx + bw / 2, cap = Math.min(bw * 0.45, 9);
       svg.append(
-        mk('line', { x1: cxb, x2: cxb, y1: yh, y2: yl, stroke: 'var(--ink-2)', 'stroke-width': 1.4, opacity: .75 }),
-        mk('line', { x1: cxb - cap, x2: cxb + cap, y1: yh, y2: yh, stroke: 'var(--ink-2)', 'stroke-width': 1.4, opacity: .75 }),
-        mk('line', { x1: cxb - cap, x2: cxb + cap, y1: yl, y2: yl, stroke: 'var(--ink-2)', 'stroke-width': 1.4, opacity: .75 }));
+        mk('line', { x1: cxb, x2: cxb, y1: yh, y2: yl, stroke: 'var(--grey-strong)', 'stroke-width': 1.4, opacity: .75 }),
+        mk('line', { x1: cxb - cap, x2: cxb + cap, y1: yh, y2: yh, stroke: 'var(--grey-strong)', 'stroke-width': 1.4, opacity: .75 }),
+        mk('line', { x1: cxb - cap, x2: cxb + cap, y1: yl, y2: yl, stroke: 'var(--grey-strong)', 'stroke-width': 1.4, opacity: .75 }));
     }
     // Past ~16 bars the labels used to be dropped entirely, so the default
     // 30-day range showed a chart with no dates at all under a caption inviting
@@ -652,7 +652,7 @@ export function donut(host, data, { label = 'label', value = 'n', onClick,
        taking any of their sweep. */
     const p = arc(cx, cy, r, ir, a0, a1);
     /* The fold is not a category and must not take a category's colour. */
-    const fillVar = d._tail ? '--ink-3' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length];
+    const fillVar = d._tail ? '--grey' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length];
     const path = mk('path', { d: p, fill: `var(${fillVar})`,
       stroke: 'var(--surface)', 'stroke-width': 1.5, 'data-fade': '' });
     interactive(path, `${esc(d[label])} — <b>${fmt(d[value])}</b> (${(frac * 100).toFixed(1)}%)${
@@ -681,7 +681,7 @@ export function donut(host, data, { label = 'label', value = 'n', onClick,
   const leg = document.createElement('div'); leg.className = 'legend dnut-keys';
   // The legend reads the SAME expression the ring did, so a swatch can never
   // name a colour the arc beside it is not drawn in.
-  const swatchOf = (d, i) => (d._tail ? '--ink-3' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length]);
+  const swatchOf = (d, i) => (d._tail ? '--grey' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length]);
   leg.innerHTML = shown.map((d, i) => {
     const share = (+d[value] / tot) * 100;
     /* One decimal below ten per cent, none above: "42.7%" and "3.1%" both read
@@ -872,7 +872,7 @@ export function scatter(host, data, { x, y, label, xLabel, yLabel, onClick,
   if (refLine && Number.isFinite(+refLine.slope)) {
     svg.append(mk('line', { x1: pl, y1: pt + ih,
       x2: pl + iw, y2: pt + ih - ih * Math.min(1, (xTop * +refLine.slope) / yTop),
-      stroke: 'var(--ink-3)', 'stroke-width': 1, 'stroke-dasharray': '4 3' }));
+      stroke: 'var(--grey)', 'stroke-width': 1, 'stroke-dasharray': '4 3' }));
   }
   data.forEach((d) => {
     if (!Number.isFinite(+d[x]) || !Number.isFinite(+d[y])) return;
@@ -926,7 +926,7 @@ export function stackedBar(host, data, { label = 'label', value = 'n', onClick,
   cp.append(mk('rect', { x: 0, y: 0, width: W, height: H, rx: R }));
   defs.append(cp); svg.append(defs);
   const g = mk('g', { 'clip-path': `url(#${cid})` });
-  const swatchOf = (d, i) => (d._tail ? '--ink-3' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length]);
+  const swatchOf = (d, i) => (d._tail ? '--grey' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length]);
   rows.forEach((d, i) => {
     const w = num(d) / tot * W, pct = num(d) / tot * 100;
     const r = mk('rect', { x, y: 0, width: w, height: H, fill: `var(${swatchOf(d, i)})`,

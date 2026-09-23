@@ -4103,7 +4103,7 @@ V.map = async (root) => {
        vehicles whose feed carries no seat sensor at all. renderJourney has been
        tri-state for a while; renderLive and this legend had not caught up. */
     legend.innerHTML = [['--s3', 'Passenger aboard'], ['--s1', 'Moving — seat sensor says empty'],
-      ['--s5', 'Stopped'], ['--b300', 'Moving — no seat sensor on this feed'], ['--ink-3', 'Stale fix']]
+      ['--s5', 'Stopped'], ['--b300', 'Moving — no seat sensor on this feed'], ['--grey', 'Stale fix']]
       .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('');
     if (noLock) {
       legend.innerHTML += `<span class="dim">${countOf(noLock, 'tracker')} `
@@ -4172,7 +4172,7 @@ V.map = async (root) => {
     ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
     legend.innerHTML = (j.occupancy_reported
       ? [['--s3', 'Passenger aboard'], ['--s1', 'Running empty (dashed)']]
-      : [['--ink-3', 'Occupancy not reported by this feed']])
+      : [['--grey', 'Occupancy not reported by this feed']])
       .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('')
       + '<span class="dim">Lines join consecutive 5-minute fixes; a gap over 20 minutes breaks the line '
       + 'rather than guessing the route.</span>';

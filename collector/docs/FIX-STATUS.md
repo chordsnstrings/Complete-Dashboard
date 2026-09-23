@@ -2191,3 +2191,75 @@ figures are in COVERAGE.
 | F1 | FMS's live `Seatcount` collected (GetVehicleCurrentDetails, vehicleno=ALL) into `telemetry_snapshot.seat_count`, schema_v84 | **written** | test/fms_seat_count.test.mjs (16). Reverts fail: "0 is a reading" 2, "refusal off the banner" 1, "vehicleno=ALL" 1, "rows carry the count" 1, "probe params" 1. Proven only when the first real poll after the deploy stores a count |
 | F2 | The Fleet tab's FMS seat column reads the live count as well as the per-journey count | **written** | test/vehicle_feeds.test.mjs (51); reverting the live half fails 2 |
 | F3 | The nightly probe called GetVehicleCurrentDetails without vehicleno and reported "Authentication failed" | **written** | test/fms_seat_count.test.mjs; proven when the next probe run shows fields rather than an error |
+
+## Arkiv reskin, STEP 0 — one colour source, no visual change — 2026-09-23, NOT ON PRODUCTION
+
+Branch `reskin-foundation`. The plan is `docs/UI-REDESIGN-PLAN.md` §3 ("Colour
+tokens", "Order of work" STEP 0, and the review's "Also required"). Not
+deployed, not pushed, and the default skin is not flipped, by instruction.
+
+| # | what | state | proof |
+|---|---|---|---|
+| T1 | `api/public/tokens.js`: the design's tokens.mjs ported, values untouched, plus `cssDeclarations()`, `bridgeDeclarations()` and a `BRIDGE` map | **written** | `test/tokens.test.mjs` §1: `lintTokens()` is `[]`, 43 hexes, and `cssTokens()` hashes to `b46907d2…`, the md5 of the one `:root` block all 65 mockups carry. Changing Bolt's hex in tokens.js fails 5 |
+| T2 | `bin/gen-tokens-css.mjs` writes those values into app.css between `BEGIN/END GENERATED TOKENS`, under `:root[data-skin="arkiv"]`, after the old dark blocks | **written** | §2–3: a hand-edited hex in the block fails 2; a generator that writes a bare `:root` fails 1. `--check` mode for CI |
+| T3 | The `--ink-2` collision. Old `--ink-3` → `--grey` (the plan's step 1). Old `--ink-2` → `--grey-strong`, which Arkiv folds onto `--grey` through `BRIDGE`. Then `--ink-2` is declared as Arkiv's `#2E2E31`, under the skin only. Covers 67 + 86 uses in app.css, 7 + 14 in m.css, 4 `var(--ink-2)` and 10 `var(--ink-3)` in JS, 11 bare `'--ink-3'` arguments, and m/screens.js's `'ink-3'` | **written** | §4. The old values are pinned in all three theme states. A `var(--ink-3)` put back in m.css fails 2. A `var(--ink-2)` in driver.js fails 1. Moving the light `--grey` value fails 1. Dropping `--grey-strong` from the dark block fails 1 |
+| T4 | `SOURCE_TOKEN` names `--c-*`, built from `CHANNEL_ORDER`. The old `:root` aliases each `--c-*` to its `--ch-*`. `.sw` and `.domb-seg` fill with `--c-*`. `dominantBar` strips `--c-` as well as `--ch-` | **written** | §5. `SOURCE_TOKEN` back on `--ch-*` fails 6. A missing alias fails 1. The old strip (`/^--ch-/`) fails 1, because it turned `--c-uber` into the class `ch---c-uber`, which no rule matches |
+| T5 | **Live defect:** `--card`, `--line`, `--sunken`, `--muted` and `--bad` were used by 24 rules of the money form (9 in app.css, 15 in m.css) and declared nowhere. The inputs, the amount field and the chips drew with no border and no ground. They are now aliases of the tokens the rest of the sheet uses for the same jobs | **written** | §6 checks that every `var()` and every token string in app.css, m.css and the JS resolves to a declaration (95 names). Deleting the five aliases fails 6. Screenshots of #deposits at 1440, light, `before-dep/` and `after-dep/`: the inputs gain their border |
+| T6 | Literal whites. `.depchip.on` and the phone's `.m-btn.primary` now use `--on-accent`: white measured 2.94:1 on the dark accent. The plan named `--paper`, but that would have turned light-mode white into linen `#f4f2ed`. The map pin ring (map.js) and the pickup ring (driver.js) use `css('--paper')` | **written** | §7. `#fff` put back on the chip fails 2, and on the pin fails 2. **This one is visible in the old skin:** in dark mode the pin ring is now `#14171a`, not white, on the always-light OSM tiles. In light mode it is `#f4f2ed`, not `#fff` |
+| T7 | `sw.js` `SHELL_FILES` gains `/tokens.js`, plus **three modules the phone has imported for a long time and the list never had**: `/deposit_core.js`, `/today.js` and `/onlinetime.js`. Without them a cold offline open fails `m/screens.js`'s import, and with it every screen | **written** | §8 walks the static imports from `/m/app.js` (13 modules). With `/tokens.js` removed, it fails 2. With the three removed (the state before this commit), it fails 1 |
+
+**Pixel identity of the old look.** `#overview`, `#drivers` and `#settings`
+were shot at 1440×900 and 390×844, light and dark, on the desktop build and
+the phone build: 18 shots from the HEAD tree (`git archive` e98d5f4, served on
+:8101) and 18 from the working tree (live-ui on :8100). To make any difference
+a front-end one, every `/api/` response came from one recorded fixture (a miss
+was fetched once from production through live-ui), the clock was frozen at
+2026-09-23T08:00Z, sticky elements were pinned in flow, and the caret was
+hidden. Two runs of the UNCHANGED tree were compared first, to measure the
+noise: 3 files differed. Two were phone shots with a channel difference of at
+most 2, in one text row. One was a 390 dark shot with a difference of at most
+39, at the textarea's resize corner. Result: **every after shot is
+pixel-identical to at least one of the two before runs.** Against the first
+run, 17 of 18 match exactly. The 18th differs by 32 pixels, of at most 2
+levels, in the same noisy row, and is byte-identical to the second run.
+Harness and shots: scratchpad `reskin/step0/` (`shoot.mjs`, `cmp.py`,
+`shots/before|before2|after`).
+
+**Under the attribute** (`skinprobe.mjs`), the resolved values are Arkiv's in
+every theme state. With the OS light or dark, and theme system, light or dark,
+`--paper` is #ffffff, `--grey` and `--grey-strong` are #6d6d72, and `--c-uber`
+is #2362d3. Without the attribute they are the old values in all six states.
+
+Suites run, all green: tokens 83, type_scale 9, today_band 38, routes 65,
+phone 140, nav_sections 17, assets 40, driver_standing 37, formatters 34,
+kpi_one_tile 20, fold_rows 8, phone_clock 12, timezone 19, consistency 67,
+interlinking 11, cohorts 74, export_csv 31, fare_reason_shared 8,
+driver_money_tiles 82, deposit_ui 43, online_time 74, signed 14,
+platform_share_once 8, chart_fit 27, chart_geometry 17, kpi_pill 10,
+pinned_identity 72, sticky_header 9, settings_page_layout 20,
+capacity_headline 22, driver_photo 39, uber_profile 41, payout_mobile 39,
+phone_today_only 19, absent_columns 25, spacing 2 (125 routes), calendar_range
+22, calendar_window 82, charging_page 30, driver_empty_window_page 63,
+driver_money_tab 56, driver_reconcile 35, dubai_day_window 25,
+endpoint_coverage 4, money_contradictions 49, person_address 32,
+today_trip_breakdown 28, unauthorized_attribution 221,
+unauthorized_attribution_page 26, unit_ranking_gate 10, phone_render 8,
+audit_tools_detect 27. The browser suites used a private mock on :8497. The
+full suite was not run: this step's instructions say not to.
+
+### NOT DONE in STEP 0, and named
+
+- **No dark Arkiv values yet** (ruling 3). Under `data-skin="arkiv"` the
+  light values win in dark mode too. That is deliberate: two colour laws must
+  never mix on one page. But the old dark `--surface`, `--rule` and so on still
+  show through wherever arkiv.css has not re-pointed them. The dark set, with
+  its contrast and CVD validation, belongs to its own step, before the flip.
+- **`sourceToken(unknown)` still returns `null`**, not `'--grey'`. Every caller
+  falls back to the categorical palette on null, so changing it now would
+  repaint the old skin. STEP 2 changes it together with the chart callers.
+- **The theme-color metas and the manifest** stay on the old paper and ink
+  until the flip (STEP 5). They set the browser chrome on production.
+- **The old-skin names Arkiv has not yet re-pointed** (`--surface*`, `--rule*`,
+  `--accent*`, `--s1..--s8`, `--b100..--b700`, the severity set, and so on)
+  are STEP 1's job, in arkiv.css. The generated block re-points only
+  `--grey-strong`.

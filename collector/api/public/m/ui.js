@@ -359,7 +359,7 @@ export const bars = (host, list, { max = 6 } = {}) => {
     line.style.cssText = 'display:grid;grid-template-columns:1fr auto;gap:8px;align-items:baseline';
     line.append(el('span', null, esc(r.label)), (() => {
       const s = el('span', 'num');
-      s.style.cssText = 'font-size:.8rem;color:var(--ink-2)';
+      s.style.cssText = 'font-size:.8rem;color:var(--grey-strong)';
       s.textContent = `${fmt(r.n)} · ${Math.round((r.n / total) * 100)}%`;
       return s;
     })());

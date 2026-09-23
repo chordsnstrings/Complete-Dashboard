@@ -827,6 +827,53 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **`--ink-2` MEANS TWO THINGS, AND ONLY ONE OF THEM IS STILL IN THE
+  CODE.** The old skin's `--ink-2` (#5b6165) was SECONDARY TEXT. Arkiv's
+  (#2E2E31) is near-black EMPHASIS. STEP 0 of the reskin (2026-09-23) renamed
+  every old use: old `--ink-3` → `--grey`, old `--ink-2` → `--grey-strong`.
+  Only then was `--ink-2` declared, as Arkiv's value, under
+  `:root[data-skin="arkiv"]`. So a `var(--ink-2)` written from memory, or
+  merged in from a branch cut before the rename, is undefined in the old skin
+  and near-black under the new one. A `var(--ink-3)` is undefined everywhere.
+  `test/tokens.test.mjs` §4 names the file. Secondary text is
+  `--grey-strong`, and dim labels are `--grey`.
+
+* **AN UNDEFINED CUSTOM PROPERTY FAILS SILENTLY, AND IT TAKES THE WHOLE
+  DECLARATION WITH IT.** `border:1px solid var(--line)` with `--line`
+  declared nowhere is invalid at computed-value time. The border becomes
+  `none`, not a default grey, and nothing logs it. The money form ran like
+  that on `--card`, `--line`, `--sunken`, `--muted` and `--bad` (24 rules)
+  until 2026-09-23. `test/tokens.test.mjs` §6 now resolves every `var()` and
+  every quoted `'--token'` in app.css, m.css and the JS against a
+  declaration. A name built at run time (`var(--s${i})`) is skipped: keep
+  those few.
+
+* **ARKIV COLOUR VALUES GO IN `api/public/tokens.js`, NEVER IN app.css BY
+  HAND.** The block between `BEGIN/END GENERATED TOKENS` is written by
+  `node bin/gen-tokens-css.mjs`, and the test fails on a byte of drift. It
+  is scoped to `:root[data-skin="arkiv"]`. Five of its names (`--paper`,
+  `--paper-2`, `--ink`, `--grey` and the six `--c-*`) are also names the old
+  skin paints with its own values. Written under a bare `:root`, they would
+  repaint production on the next deploy.
+
+* **`sw.js` `SHELL_FILES` IS A HAND LIST, AND IT HAD FALLEN THREE MODULES
+  BEHIND.** `m/screens.js` imports `../deposit_core.js`, `../today.js` and
+  `../onlinetime.js`, and none of them was precached. A cold offline open
+  therefore failed the phone's whole screen module. This was found by walking
+  the import graph on 2026-09-23. `test/tokens.test.mjs` §8 now walks the
+  static imports from `/m/app.js`, so adding an import to a phone module
+  means adding its file to the list.
+
+* **A FULL-PAGE SCREENSHOT IS NOT DETERMINISTIC UNDER A STICKY HEADER.** When
+  STEP 0 had to show "pixel-identical", two captures of the UNCHANGED tree
+  differed by up to 7,325 pixels. Most of that was the sticky topbar, which
+  was drawn at varying offsets. A blinking caret added more. Pin every
+  `position:sticky` element to `relative` for the capture, hide the caret,
+  freeze the clock (`ctx.clock.install`), and serve every `/api/` response
+  from one recorded fixture. Then shoot the unchanged tree twice, to measure
+  the noise that is left, before blaming a change. The harness is in
+  FIX-STATUS ("Arkiv reskin, STEP 0").
+
 * **A PROPOSAL FROM ANYWHERE BUT THE RULE CANNOT LIVE IN `driver_identity_link`.**
   `src/identity_link.js` DELETEs every unconfirmed, unrejected row in that table
   whose evidence its own rules did not produce on the current run — correct

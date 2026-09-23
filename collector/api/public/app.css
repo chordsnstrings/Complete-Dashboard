@@ -48,8 +48,8 @@
   --rule:#e2ded4;
   --rule-strong:#cbc6b8;
   --ink:#1f2225;
-  --ink-2:#5b6165;
-  --ink-3:#8b9095;
+  --grey-strong:#5b6165;
+  --grey:#8b9095;
 
   /* ── single accent, used sparingly ────────────────────────────────────── */
   --accent:#2f6f9f;
@@ -127,6 +127,17 @@
   --ch-hotel:#a57db3;
   --ch-fms:#636f75;
   --ch-cabman:#4f453f;
+  /* The Arkiv names for the same six, painted with THIS skin's values.
+     ─────────────────────────────────────────────────────────────────────────
+     ui.js SOURCE_TOKEN, the .sw and .domb-seg channel classes and every chart
+     colorFor now ask for --c-<channel> (the name in api/public/tokens.js),
+     so a caller is written once and paints right under both skins: here the
+     name resolves to the --ch-* above (and to the dark block's --ch-* in
+     dark, because var() resolves on :root where the theme is decided), and
+     under data-skin="arkiv" the generated block below redefines it. Deleted
+     with this skin. test/tokens.test.mjs checks one alias per channel. */
+  --c-uber:var(--ch-uber); --c-bolt:var(--ch-bolt); --c-yango:var(--ch-yango);
+  --c-hotel:var(--ch-hotel); --c-cabman:var(--ch-cabman); --c-fms:var(--ch-fms);
 
   /* ── sequential ramp (single hue, light→dark) ─────────────────────────── */
   --b100:#dce8f1; --b200:#bcd3e5; --b300:#93b8d3;
@@ -180,6 +191,33 @@
   --shadow-2:0 2px 6px rgba(31,34,37,.05), 0 12px 28px rgba(31,34,37,.05);
   --ease:cubic-bezier(.22,.68,.36,1);
   --ease-out:cubic-bezier(.16,1,.3,1);
+
+  /* Five names the deposit form asked for and nothing declared.
+     ─────────────────────────────────────────────────────────────────────────
+     .depinput, .depchip, .deplabel, .depnote, .deppreview and .depsentence
+     here (9 references), and the phone's deposit screen in m/m.css — .m-amount,
+     .m-noteinput, .m-pick, .m-picked, .m-shot, .m-sentence, .m-btn and
+     .m-fieldnote (15) — ask for --card, --line, --muted, --sunken and --bad. No stylesheet declared any of them. An undefined custom
+     property makes its whole declaration invalid at computed-value time, so
+     `border:1px solid var(--line)` became NO border and `background:
+     var(--card)` became transparent: the money form's inputs, its amount
+     field and its channel chips drew as bare text on the panel, with nothing
+     to show where a tap would land. Only --bad and --sunken carried a
+     fallback, and those were hexes outside every palette. Found by the UI
+     redesign survey, 2026-09-23 (docs/UI-REDESIGN-PLAN.md §3).
+
+     Declared as ALIASES of what the rest of this sheet already uses for the
+     same job, not as five more colours: an input's ground and border are
+     .toolbar's and .pick's (--surface, --rule); a quoted sentence's tint is
+     the thead's (--surface-2); a note under a field is a sentence, so it
+     takes the sentence grey .cap takes (--grey-strong, 5.94:1 on the panel,
+     where --grey is 3.29:1); a refusal is --critical. Each resolves per
+     theme because var() resolves on :root, where the theme is decided. */
+  --card:var(--surface);
+  --line:var(--rule);
+  --sunken:var(--surface-2);
+  --muted:var(--grey-strong);
+  --bad:var(--critical);
 }
 
 @media (prefers-color-scheme: dark){
@@ -187,7 +225,7 @@
     color-scheme: dark;
     --paper:#14171a; --paper-2:#171b1e; --surface:#1c2024; --surface-2:#22272c; --surface-3:#2a3036;
     --rule:#2a3036; --rule-strong:#3c444b;
-    --ink:#f0eee9; --ink-2:#a9afb5; --ink-3:#7b8288;
+    --ink:#f0eee9; --grey-strong:#a9afb5; --grey:#7b8288;
     --accent:#5c9dcc; --accent-ink:#8bbde4; --accent-soft:#5c9dcc1c; --accent-line:#5c9dcc3d;
   --on-accent:#14171a;
   --ink-inv:#14171a;
@@ -235,7 +273,7 @@
   color-scheme: dark;
   --paper:#14171a; --paper-2:#171b1e; --surface:#1c2024; --surface-2:#22272c; --surface-3:#2a3036;
   --rule:#2a3036; --rule-strong:#3c444b;
-  --ink:#f0eee9; --ink-2:#a9afb5; --ink-3:#7b8288;
+  --ink:#f0eee9; --grey-strong:#a9afb5; --grey:#7b8288;
   --accent:#5c9dcc; --accent-ink:#8bbde4; --accent-soft:#5c9dcc1c; --accent-line:#5c9dcc3d;
   --on-accent:#14171a;
   --ink-inv:#14171a;
@@ -278,6 +316,79 @@
   --shadow-1:0 1px 2px rgba(0,0,0,.3);
   --shadow-2:0 2px 6px rgba(0,0,0,.35), 0 14px 32px rgba(0,0,0,.4);
 }
+
+/* ═══ BEGIN GENERATED TOKENS ═══ */
+/* Written by bin/gen-tokens-css.mjs from api/public/tokens.js — do not edit
+   here; edit tokens.js and re-run the script. test/tokens.test.mjs fails if
+   this block and tokens.js disagree.
+
+   The Arkiv colour contract (docs/UI-REDESIGN-PLAN.md §3). INERT until
+   <html data-skin="arkiv">: every name below that the old skin also uses
+   (--paper, --paper-2, --ink, --grey, --c-*) keeps the old skin's value on a
+   page without the attribute. --ink-2 here is near-black EMPHASIS, not the
+   old secondary-text grey, which is --grey-strong now. */
+:root[data-skin="arkiv"]{
+  --paper:#FFFFFF;
+  --paper-2:#F6F6F7;
+  --ink:#0A0A0B;
+  --ink-2:#2E2E31;
+  --grey:#6D6D72;
+  --grey-2:#97979D;
+  --hair:#D6D6D9;
+  --faint:#E9E9EB;
+  --signal:#0A0A0B;
+  --c-uber:#2362D3;
+  --w-uber:#E0E9F9;
+  --c-uber-engaged:#2362D3;
+  --c-uber-available:#3777E9;
+  --c-uber-idle:#4B8BFF;
+  --c-bolt:#0398BA;
+  --w-bolt:#DCF1F5;
+  --c-bolt-engaged:#0398BA;
+  --c-bolt-available:#30ACCF;
+  --c-bolt-idle:#4BC1E5;
+  --c-yango:#B4358A;
+  --w-yango:#F5E3EF;
+  --c-yango-engaged:#B4358A;
+  --c-yango-available:#CA4B9E;
+  --c-yango-idle:#E160B2;
+  --c-hotel:#A38902;
+  --w-hotel:#F2EEDC;
+  --c-hotel-engaged:#A38902;
+  --c-hotel-available:#B79D2B;
+  --c-hotel-idle:#CCB244;
+  --c-cabman:#6B259F;
+  --w-cabman:#EAE0F2;
+  --c-cabman-engaged:#6B259F;
+  --c-cabman-available:#7E3BB4;
+  --c-cabman-idle:#9150CA;
+  --c-fms:#9974F5;
+  --w-fms:#F1ECFE;
+  --c-fms-engaged:#9974F5;
+  --c-fms-available:#AB8EFF;
+  --c-fms-idle:#BDA9FF;
+  --sem-pos:#007E44;
+  --sem-neg:#961111;
+  --sem-neu:#6D6D72;
+  --w-pos:#DBEDE5;
+  --w-neg:#F0DEDE;
+  --w-ink:#DDDDDD;
+  --seq-0:#ACB0B7;
+  --seq-1:#878E9A;
+  --seq-2:#676E79;
+  --seq-3:#4A4F57;
+  --seq-4:#2D323A;
+  --seq-5:#13171F;
+  --abs-outline:#97979D;
+  --hl-weight:600;
+  --hl-rule-w:3px;
+  --hl-pad-x:8px;
+  --hl-radius:3px;
+  --mark-row:3px;
+  /* the old skin's names, folded onto Arkiv tokens (tokens.js BRIDGE) */
+  --grey-strong:var(--grey);
+}
+/* ═══ END GENERATED TOKENS ═══ */
 
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -324,7 +435,7 @@ a{color:var(--accent-ink)}
 #nav a{
   display:flex;align-items:center;gap:11px;
   padding:8px 12px;margin:0 4px;border-radius:var(--r-sm);
-  color:var(--ink-2);font-size:var(--t7);line-height:1.3;text-decoration:none;cursor:pointer;
+  color:var(--grey-strong);font-size:var(--t7);line-height:1.3;text-decoration:none;cursor:pointer;
   position:relative;transition:background .16s var(--ease),color .16s var(--ease),transform .16s var(--ease);
 }
 #nav a .ic{
@@ -346,18 +457,18 @@ a{color:var(--accent-ink)}
 
 .side-foot{display:flex;flex-direction:column;gap:9px;padding-top:12px;border-top:1px solid var(--rule)}
 #themeBtn{
-  background:var(--surface);border:1px solid var(--rule);color:var(--ink-2);
+  background:var(--surface);border:1px solid var(--rule);color:var(--grey-strong);
   border-radius:var(--r-sm);padding:7px 10px;font:inherit;font-size:var(--t5);cursor:pointer;
   transition:background .18s var(--ease),border-color .18s var(--ease),transform .12s var(--ease);
 }
 #themeBtn:hover{background:var(--surface-2);border-color:var(--rule-strong)}
 #themeBtn:active{transform:scale(.97)}
 .fresh{
-  font-family:"IBM Plex Mono",monospace;font-size:var(--t3);color:var(--ink-3);padding:2px;
+  font-family:"IBM Plex Mono",monospace;font-size:var(--t3);color:var(--grey);padding:2px;
   line-height:1.5;display:block;text-decoration:none;border-radius:var(--r-sm);
   transition:background .16s var(--ease),color .16s var(--ease);
 }
-a.fresh:hover{background:var(--surface-2);color:var(--ink-2)}
+a.fresh:hover{background:var(--surface-2);color:var(--grey-strong)}
 a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* ── main ──────────────────────────────────────────────────────────────── */
@@ -383,7 +494,7 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   position:sticky;top:0;z-index:20;
 }
 .topbar h1{font-size:clamp(1.35rem,2.4vw,1.85rem);animation:fadeUp .4s var(--ease-out)}
-.sub{color:var(--ink-2);font-size:var(--t7);margin:3px 0 0;max-width:62ch;animation:fadeUp .45s var(--ease-out) .04s backwards}
+.sub{color:var(--grey-strong);font-size:var(--t7);margin:3px 0 0;max-width:62ch;animation:fadeUp .45s var(--ease-out) .04s backwards}
 
 .filters{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
 .filters select,.filters button{
@@ -400,7 +511,7 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
    panel itself is the same element in both, because where a control appears is
    a placement decision and not a different control. */
 #fRange{max-width:26ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#fRange .caret{color:var(--ink-3);margin-left:7px;font-size:.9em}
+#fRange .caret{color:var(--grey);margin-left:7px;font-size:.9em}
 #fRange[aria-expanded="true"]{border-color:var(--accent);background:var(--surface-2)}
 .rp-scrim{position:fixed;inset:0;z-index:60;background:transparent}
 .rangepanel{
@@ -411,7 +522,7 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   animation:fadeUp .16s var(--ease-out);
 }
 .rp-sec{margin:12px 0 6px;font-size:var(--t3);letter-spacing:.1em;text-transform:uppercase;
-  color:var(--ink-3);font-weight:600}
+  color:var(--grey);font-weight:600}
 .rp-sec:first-child{margin-top:0}
 .rp-chips{display:flex;flex-wrap:wrap;gap:5px}
 .rangepanel button{font:inherit;cursor:pointer;border-radius:var(--r-sm);
@@ -429,16 +540,16 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .rp-m{padding:6px 0;font-size:var(--t5);font-variant-numeric:tabular-nums}
 /* A month before the first row this fleet holds is offered and marked, because
    "we have nothing for March" is an answer and hiding the month is not. */
-.rp-m.empty:not(.on){color:var(--ink-3);border-style:dashed}
+.rp-m.empty:not(.on){color:var(--grey);border-style:dashed}
 .rp-dates{display:flex;align-items:center;gap:7px}
 .rp-dates input{flex:1;min-width:0;font:inherit;font-size:var(--t5);padding:6px 8px;
   background:var(--surface-2);border:1px solid var(--rule);border-radius:var(--r-sm);color:var(--ink)}
 .rp-dates input:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-.rp-to{color:var(--ink-3);font-size:var(--t5);flex:none}
+.rp-to{color:var(--grey);font-size:var(--t5);flex:none}
 .rp-apply{width:100%;margin-top:7px;padding:7px 0;font-size:var(--t5)}
 .rp-err{margin:6px 0 0;font-size:var(--t4);color:var(--warn)}
 .rp-now{margin:13px 0 0;padding-top:10px;border-top:1px solid var(--rule);
-  font-size:var(--t5);color:var(--ink-2)}
+  font-size:var(--t5);color:var(--grey-strong)}
 
 #refreshBtn{width:34px;display:grid;place-items:center;font-size:var(--t8)}
 #refreshBtn.spin{animation:spin .7s linear}
@@ -603,7 +714,7 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .kpi.ok::after,.kpi.warn::after,.kpi.err::after{transform:scaleY(1);width:3px}
 .kpi .l{
   font-family:"IBM Plex Mono",monospace;font-size:var(--t2);letter-spacing:.13em;
-  text-transform:uppercase;color:var(--ink-3);
+  text-transform:uppercase;color:var(--grey);
 }
 /* The headline number. It is set at a size that fits "AED 9,907" in a 158px
    column and wraps "AED 19,662" onto two lines — which is not a rounding
@@ -669,7 +780,7 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
    off with nothing to say it was cut is the failure this product spends its
    time removing. The row can be tall. */
 .kpi .d,.kpi .s{
-  font-size:var(--t5);color:var(--ink-2);margin-top:2px;line-height:1.4;
+  font-size:var(--t5);color:var(--grey-strong);margin-top:2px;line-height:1.4;
   overflow-wrap:anywhere;
 }
 .kpi .d b{font-weight:600;color:var(--ink)}
@@ -702,13 +813,13 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .tscroll.tall{max-height:min(72vh,820px)}
 table{border-collapse:collapse;width:100%;min-width:560px}
 th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--rule);font-size:var(--t6)}
-/* A column heading is TEXT, and --ink-3 on --surface-2 measures 3.0:1 — under
+/* A column heading is TEXT, and --grey on --surface-2 measures 3.0:1 — under
    the 4.5:1 that 10px uppercase with .09em tracking needs, which is the
    hardest thing to read in the product and the label every table depends on.
-   --ink-2 at 600 clears it without shouting. */
+   --grey-strong at 600 clears it without shouting. */
 thead th{
   font-family:"IBM Plex Mono",monospace;font-size:var(--t2);letter-spacing:.07em;text-transform:uppercase;
-  color:var(--ink-2);background:var(--surface-2);position:sticky;top:0;z-index:2;font-weight:600;
+  color:var(--grey-strong);background:var(--surface-2);position:sticky;top:0;z-index:2;font-weight:600;
 }
 tbody tr{transition:background .14s var(--ease)}
 tbody tr:hover{background:var(--surface-2)}
@@ -733,13 +844,13 @@ thead th.sorted{color:var(--ink)}
 thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 .tsort-note{padding:8px 14px 10px;margin:0}
 
-.plate{font-family:"IBM Plex Mono",monospace;font-size:var(--t5);color:var(--ink-2);letter-spacing:.02em}
-.dim{color:var(--ink-3)}
+.plate{font-family:"IBM Plex Mono",monospace;font-size:var(--t5);color:var(--grey-strong);letter-spacing:.02em}
+.dim{color:var(--grey)}
 /* What a page was built from. Set apart from the ordinary caption below a
    chart: this one is about the whole page, so it carries a rule above it and
    sits at the foot rather than under any one panel. */
 .srcline{margin:18px 0 0;padding-top:10px;border-top:1px solid var(--rule);
-  color:var(--ink-3);font-size:var(--t5);line-height:1.5}
+  color:var(--grey);font-size:var(--t5);line-height:1.5}
 
 /* ── bars, legends, chips ──────────────────────────────────────────────── */
 /* charts.js emits .k / .track / .fill / .v — these selectors must match that
@@ -758,7 +869,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    still has about 250px, which is more length than a ranking needs to be
    read. */
 .hb{display:grid;grid-template-columns:minmax(84px,38%) 1fr auto;align-items:center;gap:11px;cursor:default}
-.hb .k{font-size:var(--t6);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hb .k{font-size:var(--t6);color:var(--grey-strong);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* A midpoint rule behind the track, so a ranking has a scale rather than only
    a set of lengths — with no axis at all a reader cannot tell whether the
    longest bar is 12 or 12,000 without reading the value column. */
@@ -777,7 +888,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 .hb[data-click]:hover .track{box-shadow:0 0 0 2px var(--accent-soft)}
 @keyframes growX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 
-.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:var(--t5);color:var(--ink-2);margin-top:11px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:var(--t5);color:var(--grey-strong);margin-top:11px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .sw,.legend i{width:10px;height:10px;border-radius:3px;flex:none;display:inline-block}
 
@@ -808,7 +919,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 .dnut-keys{
   flex:1 1 200px;min-width:0;max-width:400px;margin-top:0;
   display:grid;grid-template-columns:10px minmax(0,auto) minmax(40px,1fr) auto auto;
-  align-items:center;gap:7px 9px;font-size:var(--t5);color:var(--ink-2);
+  align-items:center;gap:7px 9px;font-size:var(--t5);color:var(--grey-strong);
 }
 .dnut-keys .dk{display:contents}
 .dnut-keys .dk-l{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
@@ -817,7 +928,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 .dnut-keys .dk-t{height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden}
 .dnut-keys .dk-f{display:block;height:100%;border-radius:3px;opacity:.85}
 .dnut-keys .dk-n{font-variant-numeric:tabular-nums;text-align:right;color:var(--ink);font-weight:600}
-.dnut-keys .dk-p{font-variant-numeric:tabular-nums;text-align:right;color:var(--ink-3);min-width:44px}
+.dnut-keys .dk-p{font-variant-numeric:tabular-nums;text-align:right;color:var(--grey);min-width:44px}
 /* Under about 420px the five columns stop fitting; the share bar is the one
    that carries the least, so it is what goes. */
 @media(max-width:430px){
@@ -828,7 +939,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 .tag{
   display:inline-flex;align-items:center;gap:5px;font-family:"IBM Plex Mono",monospace;
   font-size:var(--t2);font-weight:500;letter-spacing:.05em;text-transform:uppercase;
-  padding:3px 8px;border-radius:99px;background:var(--surface-2);color:var(--ink-2);white-space:nowrap;
+  padding:3px 8px;border-radius:99px;background:var(--surface-2);color:var(--grey-strong);white-space:nowrap;
 }
 .tag.ok{background:var(--good-bg);color:var(--good)}
 .tag.warn{background:var(--warn-bg);color:var(--warn)}
@@ -837,7 +948,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 /* Not a state — the absence of enough evidence to name one. Deliberately the
    quietest tag on the page, because "we cannot tell" must not compete with
    "this is broken". `bad` is an alias several views already pass. */
-.tag.dim{background:var(--surface-2);color:var(--ink-3)}
+.tag.dim{background:var(--surface-2);color:var(--grey)}
 .tag.bad{background:var(--critical-bg);color:var(--critical)}
 
 .btn{
@@ -860,15 +971,15 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 .getout{
   display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;
   margin-top:12px;padding-top:10px;border-top:1px solid var(--rule);
-  font-size:var(--t5);color:var(--ink-3);
+  font-size:var(--t5);color:var(--grey);
 }
-.getout-lab{color:var(--ink-3);letter-spacing:.02em}
+.getout-lab{color:var(--grey);letter-spacing:.02em}
 .getout-a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}
 .getout-a:hover{border-bottom-color:var(--accent)}
 .getout-a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
 .getout-sep{color:var(--rule-strong)}
-.getout-no{color:var(--ink-3);font-style:italic;max-width:60ch}
-.getout-tz{margin-left:auto;color:var(--ink-3);font-size:var(--t3);letter-spacing:.02em}
+.getout-no{color:var(--grey);font-style:italic;max-width:60ch}
+.getout-tz{margin-left:auto;color:var(--grey);font-size:var(--t3);letter-spacing:.02em}
 
 /* ── charts ────────────────────────────────────────────────────────────── */
 /* Charts only — never Leaflet. A blanket `svg{width:100%;height:auto}` collapses
@@ -876,12 +987,12 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    invisibly) and blows up its attribution flag. The map panel opts out by class. */
 .panel:not(.mapwrap) svg,
 #view > svg{display:block;width:100%;height:auto;overflow:visible}
-.axis{font-family:"IBM Plex Mono",monospace;font-size:var(--t2);fill:var(--ink-3)}
+.axis{font-family:"IBM Plex Mono",monospace;font-size:var(--t2);fill:var(--grey)}
 .gl{stroke:var(--rule);stroke-width:1}
 /* Zero, at the weight of a rule rather than of a gridline. Drawn identically
    to the others, the bars appear to float above nothing. */
 .gl-base{stroke:var(--rule-strong)}
-.vlab{font-family:"IBM Plex Mono",monospace;font-size:var(--t2);fill:var(--ink-2);font-weight:500}
+.vlab{font-family:"IBM Plex Mono",monospace;font-size:var(--t2);fill:var(--grey-strong);font-weight:500}
 /* line/area draw-in */
 .draw{stroke-dasharray:var(--len,1200);stroke-dashoffset:var(--len,1200);animation:draw 1.05s var(--ease-out) forwards}
 @keyframes draw{to{stroke-dashoffset:0}}
@@ -934,22 +1045,22 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    shimmer, so it still reads as "working" rather than as "finished, empty". */
 .skel.says{
   height:auto;min-height:38px;display:flex;align-items:center;padding:0 12px;
-  font-size:var(--t5);color:var(--ink-3);line-height:1.5;
+  font-size:var(--t5);color:var(--grey);line-height:1.5;
 }
 @keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
 
 .empty{
-  padding:36px 20px;text-align:center;color:var(--ink-3);font-size:var(--t7);
+  padding:36px 20px;text-align:center;color:var(--grey);font-size:var(--t7);
   border:1px dashed var(--rule-strong);border-radius:var(--r);background:var(--surface);
 }
-.empty b{display:block;color:var(--ink-2);font-weight:600;margin-bottom:3px}
+.empty b{display:block;color:var(--grey-strong);font-weight:600;margin-bottom:3px}
 .note{
-  font-size:var(--t5);color:var(--ink-2);background:var(--surface-2);
+  font-size:var(--t5);color:var(--grey-strong);background:var(--surface-2);
   border-left:2px solid var(--accent);border-radius:0 var(--r-sm) var(--r-sm) 0;padding:9px 13px;
 }
 .sec{
   font-family:"IBM Plex Mono",monospace;font-size:var(--t2);letter-spacing:.15em;text-transform:uppercase;
-  color:var(--ink-3);margin:6px 0 -6px;
+  color:var(--grey);margin:6px 0 -6px;
 }
 
 /* settings */
@@ -965,10 +1076,10 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    operator matches against a provider's own docs, so it has to be separable by
    eye — and monospaced, because it is an identifier rather than prose. */
 .setrow .lab{min-width:0;line-height:1.35}
-.setrow .lab small{display:block;margin-top:2px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--t7,.72rem);color:var(--ink-3,var(--ink-2));word-break:break-word}
+.setrow .lab small{display:block;margin-top:2px;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--t7,.72rem);color:var(--grey,var(--grey-strong));word-break:break-word}
 /* The hint is a SENTENCE — where to get this credential — so it is set in the
    body face, not the monospace the key needs, and it is allowed to wrap. */
-.setrow .lab .labhint{display:block;margin-top:3px;font-size:var(--t7,.72rem);line-height:1.4;color:var(--ink-3,var(--ink-2))}
+.setrow .lab .labhint{display:block;margin-top:3px;font-size:var(--t7,.72rem);line-height:1.4;color:var(--grey,var(--grey-strong))}
 .setrow{display:grid;grid-template-columns:minmax(190px,290px) 1fr auto;gap:11px;align-items:center;padding:8px 0;border-bottom:1px solid var(--rule)}
 .setrow:last-child{border-bottom:none}
 /* A HINTED ROW IS TALL, AND align-items:center FLOATED ITS INPUT AWAY FROM ITS
@@ -997,7 +1108,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 ::-webkit-scrollbar{width:11px;height:11px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--rule-strong);border-radius:99px;border:3px solid var(--paper)}
-::-webkit-scrollbar-thumb:hover{background:var(--ink-3)}
+::-webkit-scrollbar-thumb:hover{background:var(--grey)}
 
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
 
@@ -1017,7 +1128,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    rather than competing with it. A rating line is a few hundredths tall; given
    more height it reads as volatility the fleet does not have. */
 .rt-spark{display:block;width:100%;max-width:180px;height:14px;opacity:.55;
-  color:var(--ink-3)}
+  color:var(--grey)}
 .rt[data-dir="up"] .rt-spark{color:var(--good);opacity:.8}
 .rt[data-dir="down"] .rt-spark{color:var(--critical);opacity:.8}
 /* Drawn left to right. The dash array is a length in user units and the path
@@ -1034,8 +1145,8 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    and the arrow says it anyway. */
 .rt-up{background:var(--good-bg);color:var(--good);--rt-from:6px}
 .rt-down{background:var(--critical-bg);color:var(--critical);--rt-from:-6px}
-.rt-flat{background:var(--rule);color:var(--ink-3);--rt-from:0px}
-.rt-first{background:var(--rule);color:var(--ink-3);font-weight:500;--rt-from:0px}
+.rt-flat{background:var(--rule);color:var(--grey);--rt-from:0px}
+.rt-first{background:var(--rule);color:var(--grey);font-weight:500;--rt-from:0px}
 @keyframes rt-rise{from{opacity:0;transform:translateY(var(--rt-from,4px))}to{opacity:1;transform:none}}
 /* A tile is small; the sparkline goes when there is no room for it rather than
    squeezing the number it exists to annotate. */
@@ -1060,7 +1171,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 }
 .insight-row:hover{border-color:var(--rule-strong);box-shadow:var(--shadow-2);transform:translateX(2px)}
 .insight-title{font-weight:600;font-size:var(--t8);line-height:1.35}
-.insight-action{font-size:var(--t5);color:var(--ink-2);margin-top:3px;line-height:1.4}
+.insight-action{font-size:var(--t5);color:var(--grey-strong);margin-top:3px;line-height:1.4}
 .insight-meta{display:flex;flex-direction:column;align-items:flex-end;gap:5px;white-space:nowrap}
 @media(max-width:760px){
   .insight-row{grid-template-columns:1fr;gap:8px}
@@ -1069,7 +1180,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 
 /* key/value detail grid used in drill-downs */
 .kv{display:grid;grid-template-columns:minmax(110px,160px) 1fr;gap:7px 16px;font-size:var(--t6)}
-.kv-k{font-family:"IBM Plex Mono",monospace;font-size:var(--t3);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);padding-top:2px}
+.kv-k{font-family:"IBM Plex Mono",monospace;font-size:var(--t3);letter-spacing:.07em;text-transform:uppercase;color:var(--grey);padding-top:2px}
 .kv-v{color:var(--ink)}
 
 /* ══ multipage: breadcrumbs, tabs and detail pages ══════════════════════════
@@ -1082,15 +1193,15 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
   display:flex;align-items:center;gap:8px;margin-bottom:5px;
   font-family:"IBM Plex Mono",monospace;font-size:var(--t3);letter-spacing:.09em;text-transform:uppercase;
 }
-.crumb a{color:var(--ink-3);text-decoration:none;transition:color .15s var(--ease)}
+.crumb a{color:var(--grey);text-decoration:none;transition:color .15s var(--ease)}
 .crumb a:hover{color:var(--accent-ink)}
 .crumb span{color:var(--rule-strong)}
-.crumb b{color:var(--ink-2);font-weight:500;text-transform:none;letter-spacing:.02em;font-size:var(--t4)}
+.crumb b{color:var(--grey-strong);font-weight:500;text-transform:none;letter-spacing:.02em;font-size:var(--t4)}
 
 .tabs{display:flex;gap:3px;flex-wrap:wrap;border-bottom:1px solid var(--rule);margin:4px 0 2px}
 .tabs a{
   display:inline-flex;align-items:center;gap:7px;padding:9px 14px;text-decoration:none;
-  font-size:var(--t6);font-weight:500;color:var(--ink-2);border-radius:var(--r-sm) var(--r-sm) 0 0;
+  font-size:var(--t6);font-weight:500;color:var(--grey-strong);border-radius:var(--r-sm) var(--r-sm) 0 0;
   border:1px solid transparent;border-bottom:none;position:relative;top:1px;
   transition:color .16s var(--ease),background .16s var(--ease);
 }
@@ -1245,16 +1356,16 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
   line-height:1.2;margin:0 0 6px;
 }
 .idsub{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
-.idfacts{display:flex;flex-wrap:wrap;gap:5px 22px;font-size:var(--t5);color:var(--ink-2)}
+.idfacts{display:flex;flex-wrap:wrap;gap:5px 22px;font-size:var(--t5);color:var(--grey-strong)}
 .idfacts b{
   font-family:"IBM Plex Mono",monospace;font-size:var(--t2);letter-spacing:.1em;text-transform:uppercase;
-  color:var(--ink-3);font-weight:500;margin-right:5px;
+  color:var(--grey);font-weight:500;margin-right:5px;
 }
 
 .pill{
   display:inline-flex;align-items:center;font-family:"IBM Plex Mono",monospace;
   font-size:var(--t2);font-weight:500;letter-spacing:.06em;text-transform:uppercase;
-  padding:3px 8px;border-radius:99px;background:var(--surface-2);color:var(--ink-2);white-space:nowrap;
+  padding:3px 8px;border-radius:99px;background:var(--surface-2);color:var(--grey-strong);white-space:nowrap;
 }
 .pill.plat{background:var(--accent-soft);color:var(--accent-ink)}
 /* The same rule as the KPI tiles: a verdict carries a shape as well as a hue,
@@ -1304,7 +1415,7 @@ td.v-critical{color:var(--critical);box-shadow:inset 2px 0 0 var(--critical);fon
    whole history when the range on screen holds no work for them — otherwise
    244 of 361 rows carried a name and three blanks. Drawn quieter than a
    measured one so the two are never mistaken for each other. */
-.pill.dim{background:var(--surface-2);color:var(--ink-2);opacity:.72}
+.pill.dim{background:var(--surface-2);color:var(--grey-strong);opacity:.72}
 
 .lnk{color:var(--accent-ink);text-decoration:none;border-bottom:1px solid var(--accent-line)}
 .lnk:hover{border-bottom-color:var(--accent)}
@@ -1314,7 +1425,7 @@ td.v-critical{color:var(--critical);box-shadow:inset 2px 0 0 var(--critical);fon
    no spaces to break at, so they ran 18px past the tile's edge and were clipped
    by its overflow:hidden. Broken anywhere rather than truncated: half an
    endpoint name is not an endpoint name. */
-.kpi .s{font-size:var(--t5);color:var(--ink-2);margin-top:2px;line-height:1.35;overflow-wrap:anywhere}
+.kpi .s{font-size:var(--t5);color:var(--grey-strong);margin-top:2px;line-height:1.35;overflow-wrap:anywhere}
 /* A tile that leads to the set behind its number. The affordance is quiet
    until the tile is hovered or focused: the number is what the reader came
    for, and a permanent call to action on nine tiles is nine calls to action.
@@ -1388,7 +1499,7 @@ a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:translateX
 /* percentile bars ─ standing against the rest of the fleet */
 .pbars{display:flex;flex-direction:column;gap:10px}
 .pbar{display:grid;grid-template-columns:minmax(96px,168px) 1fr 52px;align-items:center;gap:12px}
-.pb-l{font-size:var(--t6);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pb-l{font-size:var(--t6);color:var(--grey-strong);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pb-track{position:relative;height:15px;background:var(--surface-2);border-radius:5px;overflow:hidden}
 .pb-track>i{
   display:block;height:100%;border-radius:5px;transform-origin:left;
@@ -1396,12 +1507,12 @@ a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:translateX
 }
 .pb-mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--rule-strong);opacity:.9}
 .pb-v{font-family:"IBM Plex Mono",monospace;font-size:var(--t6);font-weight:500;text-align:right}
-.pb-v small{font-size:.6em;color:var(--ink-3);margin-left:1px}
+.pb-v small{font-size:.6em;color:var(--grey);margin-left:1px}
 
 /* shift bars ─ first trip to last trip, one row per day */
 .shifts{display:flex;flex-direction:column;gap:5px}
 .shift{display:grid;grid-template-columns:62px 1fr 96px 48px 60px 80px 32px;align-items:center;gap:11px;font-size:var(--t5)}
-.sh-d{color:var(--ink-3);font-family:"IBM Plex Mono",monospace;font-size:var(--t4);white-space:nowrap}
+.sh-d{color:var(--grey);font-family:"IBM Plex Mono",monospace;font-size:var(--t4);white-space:nowrap}
 .sh-track{position:relative;height:13px;background:var(--surface-2);border-radius:4px}
 /* THREE STATES, THREE COLOURS.
    ─────────────────────────────────────────────────────────────────────────
@@ -1435,27 +1546,27 @@ a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:translateX
 }
 .sh-track>i.u{
   background:repeating-linear-gradient(135deg,
-    var(--ink-3) 0 2px, var(--surface) 2px 5px);
-  box-shadow:inset 0 0 0 1px var(--ink-3);
+    var(--grey) 0 2px, var(--surface) 2px 5px);
+  box-shadow:inset 0 0 0 1px var(--grey);
   opacity:.7;
 }
 /* Same classes as the bars, so a colour cannot be changed in one place and
    explained in another. */
-.lgnd{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 10px;font-size:var(--t4);color:var(--ink-2)}
+.lgnd{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 10px;font-size:var(--t4);color:var(--grey-strong)}
 .lgnd span{display:inline-flex;align-items:center;gap:6px}
 .lgnd .sw{width:14px;height:10px;border-radius:3px;display:inline-block}
 .lgnd .sw.w{background:var(--warn);opacity:.30}
 .lgnd .sw.j{background:var(--s1);opacity:.95}
 .lgnd .sw.u{background:repeating-linear-gradient(135deg,
-  var(--ink-3) 0 2px, transparent 2px 5px);opacity:.55}
+  var(--grey) 0 2px, transparent 2px 5px);opacity:.55}
 .sh-j{font-family:"IBM Plex Mono",monospace;font-size:var(--t4);text-align:right;color:var(--s1);white-space:nowrap}
 .sh-w{font-family:"IBM Plex Mono",monospace;font-size:var(--t4);text-align:right;color:var(--warn);white-space:nowrap}
 .sh-o{font-family:"IBM Plex Mono",monospace;font-size:var(--t4);text-align:right;color:var(--s1);opacity:.8;white-space:nowrap}
 /* The header borrows the row grid so the columns cannot drift apart, and drops
    the numeric colours so it reads as a label rather than as another day. */
-.sh-head{color:var(--ink-3);font-size:var(--t3);letter-spacing:.04em;text-transform:uppercase;margin-bottom:2px}
+.sh-head{color:var(--grey);font-size:var(--t3);letter-spacing:.04em;text-transform:uppercase;margin-bottom:2px}
 .sh-head>div{color:inherit;font-family:"IBM Plex Mono",monospace}
-.sh-v{font-family:"IBM Plex Mono",monospace;font-size:var(--t4);color:var(--ink-2);text-align:right}
+.sh-v{font-family:"IBM Plex Mono",monospace;font-size:var(--t4);color:var(--grey-strong);text-align:right}
 .sh-t{font-family:"IBM Plex Mono",monospace;font-size:var(--t5);text-align:right;color:var(--ink)}
 
 /* directory cards ─ the top of the roster, read as a ranking */
@@ -1467,7 +1578,7 @@ a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:translateX
 }
 .dircard:hover{transform:translateY(-2px);box-shadow:var(--shadow-2);border-color:var(--rule-strong)}
 .dircard .rank{
-  font-family:"IBM Plex Mono",monospace;font-size:var(--t3);color:var(--ink-3);
+  font-family:"IBM Plex Mono",monospace;font-size:var(--t3);color:var(--grey);
   width:16px;flex:none;text-align:right;
 }
 .dc-meta{min-width:0;flex:1}
@@ -1475,7 +1586,7 @@ a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:translateX
 .dc-meta .cap{margin:1px 0 0;font-size:var(--t4)}
 .dc-n{text-align:right;flex:none}
 .dc-n .num{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:600;font-size:var(--d1);display:block;line-height:1.15;font-variant-numeric:tabular-nums}
-.dc-n small{font-size:var(--t2);color:var(--ink-3);font-family:"IBM Plex Mono",monospace;letter-spacing:.08em;text-transform:uppercase}
+.dc-n small{font-size:var(--t2);color:var(--grey);font-family:"IBM Plex Mono",monospace;letter-spacing:.08em;text-transform:uppercase}
 
 /* filter/search bar above a long table */
 .toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:2px}
@@ -1548,15 +1659,15 @@ table.compact th,table.compact td{padding:8px 10px;font-size:var(--t5)}
 .bk-half{background:var(--surface-2);border-radius:var(--r-sm);padding:10px 12px}
 .bk-k{
   font-family:"IBM Plex Mono",monospace;font-size:var(--t1);letter-spacing:.12em;
-  text-transform:uppercase;color:var(--ink-3);
+  text-transform:uppercase;color:var(--grey);
 }
 .bk-v{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:600;font-size:var(--d1);margin-top:3px;line-height:1.2;font-variant-numeric:tabular-nums}
-.bk-d{font-size:var(--t4);color:var(--ink-2);margin-top:1px}
+.bk-d{font-size:var(--t4);color:var(--grey-strong);margin-top:1px}
 .bk-why{font-size:var(--t6);color:var(--ink);margin:0 0 6px;line-height:1.5}
-.bk-fix{font-size:var(--t6);color:var(--ink-2);margin:0;line-height:1.5}
+.bk-fix{font-size:var(--t6);color:var(--grey-strong);margin:0;line-height:1.5}
 .bk-fix b{
   font-family:"IBM Plex Mono",monospace;font-size:var(--t1);letter-spacing:.12em;
-  text-transform:uppercase;color:var(--ink-3);margin-right:7px;
+  text-transform:uppercase;color:var(--grey);margin-right:7px;
 }
 .bk-ev{margin-top:13px;padding-top:11px;border-top:1px solid var(--rule)}
 .bk-evrow{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:7px}
@@ -1618,9 +1729,9 @@ td .pill,td .tag{white-space:nowrap}
    already had six different measures written as literals (24ch, 60ch, 62ch,
    68ch, 72ch, 74ch); they now share one token.
 
-   --ink-3 on the panel is 3.29:1, which is fine for a label and thin for a
-   sentence somebody is expected to read. --ink-2 is 5.94:1. */
-.cap{font-size:var(--t5);color:var(--ink-2);line-height:1.5;margin:3px 0 14px;max-width:var(--measure)}
+   --grey on the panel is 3.29:1, which is fine for a label and thin for a
+   sentence somebody is expected to read. --grey-strong is 5.94:1. */
+.cap{font-size:var(--t5);color:var(--grey-strong);line-height:1.5;margin:3px 0 14px;max-width:var(--measure)}
 .panel>.cap{margin:2px 0 14px}
 
 /* An empty status span still painted its padding, background and accent bar —
@@ -1638,9 +1749,9 @@ td .pill,td .tag{white-space:nowrap}
 
 /* The empty state led with the generic word and whispered the useful one. */
 .empty{padding:24px 20px}
-.empty b{display:block;color:var(--ink-3);font-weight:500;font-size:var(--t5);
+.empty b{display:block;color:var(--grey);font-weight:500;font-size:var(--t5);
   letter-spacing:.06em;text-transform:uppercase;margin-bottom:5px}
-.empty{color:var(--ink-2)}
+.empty{color:var(--grey-strong)}
 
 /* A panel in a two-column grid stretched to match its taller neighbour, which
    left ~2,000px of empty card beside the breaks list. */
@@ -1700,8 +1811,8 @@ a.kpi:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .ent{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule-strong)}
 .ent:hover{color:var(--accent-ink);border-bottom-color:currentColor}
 .ent:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
-.ent-off{color:var(--ink-3)}
-small.dim{color:var(--ink-3);font-weight:400;margin-left:.35em}
+.ent-off{color:var(--grey)}
+small.dim{color:var(--grey);font-weight:400;margin-left:.35em}
 b.warn-t{color:var(--warn)}
 
 /* ── leakage strip ───────────────────────────────────────────────────────
@@ -1718,7 +1829,7 @@ b.warn-t{color:var(--warn)}
 .leak.on{border-color:var(--accent);background:var(--accent-soft)}
 .leak.zero{opacity:.45}
 .leak b{font-size:var(--d3);line-height:1.1;font-family:"IBM Plex Mono",ui-monospace,monospace}
-.leak span{font-size:var(--t4);color:var(--ink-2);line-height:1.35}
+.leak span{font-size:var(--t4);color:var(--grey-strong);line-height:1.35}
 
 /* ── explanatory cards ───────────────────────────────────────────────────
    A settlement route needs its own sentence: "braintree" charted beside
@@ -1733,12 +1844,12 @@ b.warn-t{color:var(--warn)}
 .card.t-critical{border-left-color:var(--critical)}
 .card-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
 .card-h b{font-size:var(--t6)}
-.card-h span{color:var(--ink-3);font-size:var(--t5)}
+.card-h span{color:var(--grey);font-size:var(--t5)}
 .card-n{font-size:var(--d4);font-weight:600;letter-spacing:-.02em;margin:2px 0 10px}
-.card p{color:var(--ink-2);font-size:var(--t5);line-height:1.5;margin:0 0 10px}
+.card p{color:var(--grey-strong);font-size:var(--t5);line-height:1.5;margin:0 0 10px}
 .card dl{display:grid;gap:3px;margin:0;font-size:var(--t5)}
 .card dl>div{display:flex;justify-content:space-between;gap:10px}
-.card dt{color:var(--ink-3);margin:0}
+.card dt{color:var(--grey);margin:0}
 .card dd{margin:0;text-align:right}
 /* A card that is a destination. Quiet, like .ent: on a page of eight of them a
    blue underline each would read as navigation rather than as figures. */
@@ -1775,14 +1886,14 @@ a.card-link .cap{margin:8px 0 0;color:var(--accent-ink)}
    they are. */
 .wave{display:flex;flex-direction:column;gap:6px}
 .wv{display:grid;grid-template-columns:minmax(90px,150px) 1fr 92px;align-items:center;gap:10px}
-.wv .k{font-size:var(--t5);color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wv .k{font-size:var(--t5);color:var(--grey-strong);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wv-track{position:relative;height:14px;background:var(--surface-2);border-radius:3px;overflow:hidden}
 .wv-mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--rule-strong)}
 .wv i{position:absolute;top:2px;bottom:2px;border-radius:2px}
 .wv i.am{background:var(--s1)}
 .wv i.pm{background:var(--s2)}
-.wv .v{font-size:var(--t4);text-align:right;color:var(--ink-2)}
-.wv .v .sep{color:var(--ink-3)}
+.wv .v{font-size:var(--t4);text-align:right;color:var(--grey-strong)}
+.wv .v .sep{color:var(--grey)}
 
 /* ── analyst findings ────────────────────────────────────────────────────
    A claim, then immediately the four numbers that decided it. The numbers are
@@ -1797,34 +1908,34 @@ a.card-link .cap{margin:8px 0 0;color:var(--accent-ink)}
 .finding.t-warn{border-left-color:var(--warn)}
 .finding .fh{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .finding .fh b{font-size:var(--t8);line-height:1.4}
-.finding .fw{color:var(--ink-2);font-size:var(--t5);line-height:1.5;margin:8px 0 12px}
+.finding .fw{color:var(--grey-strong);font-size:var(--t5);line-height:1.5;margin:8px 0 12px}
 .fnums{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;
   border-top:1px solid var(--rule);padding-top:10px}
 .fnums > div{display:flex;flex-direction:column;gap:1px}
-.fnums span{font-size:var(--t3);text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3)}
+.fnums span{font-size:var(--t3);text-transform:uppercase;letter-spacing:.08em;color:var(--grey)}
 .fnums b{font-size:var(--t9)}
-.fnums i{font-style:normal;font-size:var(--t4);color:var(--ink-3)}
-.finding .fwhy,.finding .fact{font-size:var(--t5);color:var(--ink-2);margin:10px 0 0;line-height:1.5}
+.fnums i{font-style:normal;font-size:var(--t4);color:var(--grey)}
+.finding .fwhy,.finding .fact{font-size:var(--t5);color:var(--grey-strong);margin:10px 0 0;line-height:1.5}
 .finding .fwhy b,.finding .fact b{color:var(--ink);margin-right:6px}
-.finding .fcap{font-size:var(--t4);color:var(--ink-3);margin:8px 0 0;font-style:italic}
+.finding .fcap{font-size:var(--t4);color:var(--grey);margin:8px 0 0;font-style:italic}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{
   font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:var(--t4);
   padding:3px 9px;border-radius:999px;border:1px solid var(--rule);
-  background:var(--surface-2);color:var(--ink-2);
+  background:var(--surface-2);color:var(--grey-strong);
 }
-.chips-l{font-size:var(--t3);text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);margin-right:6px}
+.chips-l{font-size:var(--t3);text-transform:uppercase;letter-spacing:.08em;color:var(--grey);margin-right:6px}
 .chip.warn{border-color:var(--warn);color:var(--ink);background:var(--warn-bg)}
-span.dim{color:var(--ink-3);font-size:var(--t4)}
+span.dim{color:var(--grey);font-size:var(--t4)}
 /* A leakage category that CANNOT fire — because the field it depends on is not
    in use — must not look like one that fired zero times. */
 .leak.off{opacity:.55;border-style:dashed;cursor:default}
-.leak.off b{color:var(--ink-3)}
+.leak.off b{color:var(--grey)}
 
 /* A day can be walked, not just landed on. */
 .daynav{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin:0 0 16px;flex-wrap:wrap}
 .daynav b{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:var(--d1);font-variant-numeric:tabular-nums}
-.daynav a{color:var(--ink-2);text-decoration:none;font-size:var(--t6);border-bottom:1px solid var(--rule)}
+.daynav a{color:var(--grey-strong);text-decoration:none;font-size:var(--t6);border-bottom:1px solid var(--rule)}
 .daynav a:hover{color:var(--accent-ink);border-bottom-color:currentColor}
 
 /* An action-list row is a link to that finding's own page. */
@@ -1841,24 +1952,24 @@ a.insight-row:hover{border-color:var(--accent)}
 .act-head{display:flex;gap:14px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
 .act-title{font-weight:600;font-size:var(--t8);line-height:1.35;flex:1 1 22rem;color:var(--ink-1)}
 .act-tags{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.act-why{margin:8px 0 0;color:var(--ink-2);font-size:var(--t6);line-height:1.55;max-width:68ch}
+.act-why{margin:8px 0 0;color:var(--grey-strong);font-size:var(--t6);line-height:1.55;max-width:68ch}
 .act-figs{
   display:flex;gap:22px;flex-wrap:wrap;
   margin:14px 0 4px;padding:12px 0 0;border-top:1px solid var(--rule);
 }
 .act-fig{display:flex;flex-direction:column;gap:2px}
 .act-fig b{font-family:var(--mono);font-size:var(--d1);line-height:1.1;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink-1)}
-.act-fig i{font-style:normal;font-size:var(--t4);color:var(--ink-3);letter-spacing:.01em}
+.act-fig i{font-style:normal;font-size:var(--t4);color:var(--grey);letter-spacing:.01em}
 .act-basis{margin:12px 0 0;font-size:var(--t6)}
-.act-basis > summary{cursor:pointer;color:var(--ink-3);font-size:var(--t5);user-select:none}
+.act-basis > summary{cursor:pointer;color:var(--grey);font-size:var(--t5);user-select:none}
 .act-basis > summary:hover{color:var(--ink-1)}
-.act-basis p{margin:8px 0 0;color:var(--ink-2);line-height:1.55;max-width:72ch}
+.act-basis p{margin:8px 0 0;color:var(--grey-strong);line-height:1.55;max-width:72ch}
 .act-foot{margin-top:12px}
 
 /* The timezone hint beside the filters. Deliberately quiet: it matters, but a
    reader in Dubai should not have a badge in their way telling them the time is
    in Dubai, so app.js leaves it empty for them. */
-.tz-note { font-size:var(--t3); color: var(--ink-3); align-self: center; letter-spacing: .02em; }
+.tz-note { font-size:var(--t3); color: var(--grey); align-self: center; letter-spacing: .02em; }
 .tz-note:empty { display: none; }
 
 /* ── #compare: two days beside each other ─────────────────────────────────
@@ -1870,7 +1981,7 @@ a.insight-row:hover{border-color:var(--accent)}
 .dl.dn{color:var(--critical)}
 /* A date picker that reads as a label with a control in it, so the two day
    choices on #compare look like one sentence rather than two form fields. */
-.pick{display:inline-flex;align-items:center;gap:6px;font-size:var(--t5);color:var(--ink-2)}
+.pick{display:inline-flex;align-items:center;gap:6px;font-size:var(--t5);color:var(--grey-strong)}
 .pick input[type=date]{
   font:inherit;font-size:var(--t6);color:var(--ink);background:var(--surface);
   border:1px solid var(--rule);border-radius:7px;padding:5px 8px}
@@ -1884,8 +1995,8 @@ a.insight-row:hover{border-color:var(--accent)}
    dashes take a column's width and tell the reader nothing about whether the
    fleet has no such value or the page is broken. */
 .tabsent{display:flex;flex-direction:column;gap:3px;margin:9px 0 0}
-.tabsent span{color:var(--ink-3)}
-.tabsent b{color:var(--ink-2);font-weight:600}
+.tabsent span{color:var(--grey)}
+.tabsent b{color:var(--grey-strong);font-weight:600}
 
 /* ── the identity column stays put while the numbers scroll ───────────────
    A wide table scrolls sideways inside .tscroll, which is right — but the
@@ -1965,7 +2076,7 @@ a.insight-row:hover{border-color:var(--accent)}
 .tsbox::after{right:1px;background:linear-gradient(to left,var(--surface) 12%,transparent)}
 .tsbox::before{left:1px;background:linear-gradient(to right,var(--surface) 12%,transparent)}
 .tsbox.cue-r::after,.tsbox.cue-l::before{opacity:1}
-.tcue{color:var(--ink-3)}
+.tcue{color:var(--grey)}
 
 /* A row's rank, inside the cell that names the row. Its own column would cost
    the width of the one column that stays pinned when a wide table scrolls —
@@ -1973,7 +2084,7 @@ a.insight-row:hover{border-color:var(--accent)}
    they are looking at. */
 .rk{
   display:inline-block;min-width:1.6em;margin-right:7px;text-align:right;
-  font-family:"IBM Plex Mono",monospace;font-size:var(--t4);color:var(--ink-3);
+  font-family:"IBM Plex Mono",monospace;font-size:var(--t4);color:var(--grey);
   font-variant-numeric:tabular-nums;
 }
 
@@ -2036,8 +2147,8 @@ a.insight-row:hover{border-color:var(--accent)}
 .vdct.good{border-left-color:var(--good)}
 .vdct-main{flex:1 1 34rem;min-width:0}
 .vdct-claim{font-size:var(--d3);line-height:1.24;margin:0;color:var(--ink)}
-.vdct-sub{margin:9px 0 0;color:var(--ink-2);font-size:var(--t7);line-height:1.62;max-width:74ch}
-.vdct-rec{margin:11px 0 0;color:var(--ink-2);font-size:var(--t7);line-height:1.6;max-width:74ch}
+.vdct-sub{margin:9px 0 0;color:var(--grey-strong);font-size:var(--t7);line-height:1.62;max-width:74ch}
+.vdct-rec{margin:11px 0 0;color:var(--grey-strong);font-size:var(--t7);line-height:1.6;max-width:74ch}
 .vdct-rec b{color:var(--ink);font-weight:650}
 /* The deciding figure. Mono and tabular so it lines up with every other number
    in the product, and large enough to be read before the sentence beside it —
@@ -2047,8 +2158,8 @@ a.insight-row:hover{border-color:var(--accent)}
   font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
   font-size:var(--d5);line-height:1;font-weight:600;color:var(--ink);letter-spacing:-.02em;
 }
-.vdct-fig>i{font-style:normal;font-size:var(--t3);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
-.vdct-meta{font-size:var(--t4);color:var(--ink-3);margin-top:4px;text-align:right;max-width:24ch}
+.vdct-fig>i{font-style:normal;font-size:var(--t3);letter-spacing:.14em;text-transform:uppercase;color:var(--grey)}
+.vdct-meta{font-size:var(--t4);color:var(--grey);margin-top:4px;text-align:right;max-width:24ch}
 .vdct.warn .vdct-fig>b{color:var(--warn)}
 .vdct.bad .vdct-fig>b{color:var(--critical)}
 
@@ -2092,10 +2203,14 @@ a.insight-row:hover{border-color:var(--accent)}
    So in light mode white carries Uber, Yango, FMS and CABMAN and near-black
    carries Bolt and the hotel channel; in dark mode the whole palette is light
    enough that near-black wins on all six. Every pairing here clears 4.5:1,
-   which is what 12px semibold on a fill needs. */
-.domb-seg.ch-uber{background:var(--ch-uber)}   .domb-seg.ch-yango{background:var(--ch-yango)}
-.domb-seg.ch-bolt{background:var(--ch-bolt)}   .domb-seg.ch-hotel{background:var(--ch-hotel)}
-.domb-seg.ch-fms{background:var(--ch-fms)}     .domb-seg.ch-cabman{background:var(--ch-cabman)}
+   which is what 12px semibold on a fill needs.
+
+   The fills ask for --c-* (the Arkiv name), which this skin aliases to the
+   --ch-* measured above, so the figures here stand until the skin flips; the
+   CLASS names stay ch-*, because ui.js derives them from the channel key. */
+.domb-seg.ch-uber{background:var(--c-uber)}   .domb-seg.ch-yango{background:var(--c-yango)}
+.domb-seg.ch-bolt{background:var(--c-bolt)}   .domb-seg.ch-hotel{background:var(--c-hotel)}
+.domb-seg.ch-fms{background:var(--c-fms)}     .domb-seg.ch-cabman{background:var(--c-cabman)}
 .domb-seg.ch-bolt,.domb-seg.ch-hotel{--on-seg:var(--ink-inv)}
 :root[data-theme="dark"] .domb-seg.ch-uber,:root[data-theme="dark"] .domb-seg.ch-yango,
 :root[data-theme="dark"] .domb-seg.ch-fms,:root[data-theme="dark"] .domb-seg.ch-cabman{--on-seg:var(--ink-inv)}
@@ -2105,9 +2220,9 @@ a.insight-row:hover{border-color:var(--accent)}
   :root:not([data-theme="light"]) .domb-seg.ch-fms,
   :root:not([data-theme="light"]) .domb-seg.ch-cabman{--on-seg:var(--ink-inv)}
 }
-.sw.ch-uber{background:var(--ch-uber)}   .sw.ch-yango{background:var(--ch-yango)}
-.sw.ch-bolt{background:var(--ch-bolt)}   .sw.ch-hotel{background:var(--ch-hotel)}
-.sw.ch-fms{background:var(--ch-fms)}     .sw.ch-cabman{background:var(--ch-cabman)}
+.sw.ch-uber{background:var(--c-uber)}   .sw.ch-yango{background:var(--c-yango)}
+.sw.ch-bolt{background:var(--c-bolt)}   .sw.ch-hotel{background:var(--c-hotel)}
+.sw.ch-fms{background:var(--c-fms)}     .sw.ch-cabman{background:var(--c-cabman)}
 
 /* A segment that filters the dashboard is a button, so it has to look and
    behave like one — and a <button> brings a browser default border, padding
@@ -2121,12 +2236,12 @@ button.domb-key{all:unset;display:flex;flex-wrap:wrap;align-items:baseline;gap:7
   transition:background .16s var(--ease)}
 button.domb-key:hover{background:var(--surface-2)}
 button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.domb-seg.dead{background:var(--surface-3);color:var(--ink-3)}
+.domb-seg.dead{background:var(--surface-3);color:var(--grey)}
 .domb-keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:8px 26px;margin-top:14px}
 .domb-key{display:flex;flex-wrap:wrap;align-items:baseline;gap:7px;font-size:var(--t6)}
 .domb-key>b{font-weight:600;color:var(--ink)}
-.domb-key>em{font-style:normal;flex:1 1 100%;color:var(--ink-3);font-size:var(--t5);line-height:1.5;padding-left:17px}
-.domb-total{margin:12px 0 0;font-size:var(--t5);color:var(--ink-3)}
+.domb-key>em{font-style:normal;flex:1 1 100%;color:var(--grey);font-size:var(--t5);line-height:1.5;padding-left:17px}
+.domb-total{margin:12px 0 0;font-size:var(--t5);color:var(--grey)}
 .sw.c1{background:var(--s1)} .sw.c2{background:var(--s2)} .sw.c3{background:var(--s3)}
 .sw.c4{background:var(--s4)} .sw.c5{background:var(--s5)} .sw.c6{background:var(--s6)}
 .sw.dead{background:var(--surface-3)}
@@ -2164,13 +2279,13 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .dday-ruler{position:relative;height:16px;margin-top:4px}
 .dday-ruler>span{
   position:absolute;transform:translateX(-50%);font-family:"IBM Plex Mono",monospace;
-  font-size:var(--t2);color:var(--ink-3);
+  font-size:var(--t2);color:var(--grey);
 }
 .dday-ruler>span:first-child{transform:none}
 .dday-ruler>span:last-child{transform:translateX(-100%)}
 .dday-onrow{display:flex;align-items:center;gap:12px;margin-top:10px}
-.dday-onlab{font-size:var(--t4);color:var(--ink-3);flex:0 0 auto;min-width:9rem}
-.dday-ontot{font-family:"IBM Plex Mono",monospace;font-size:var(--t4);color:var(--ink-3);flex:0 0 auto}
+.dday-onlab{font-size:var(--t4);color:var(--grey);flex:0 0 auto;min-width:9rem}
+.dday-ontot{font-family:"IBM Plex Mono",monospace;font-size:var(--t4);color:var(--grey);flex:0 0 auto}
 .dday-online{position:relative;flex:1 1 auto;height:8px;background:var(--surface-2);border-radius:4px}
 .dday-online>i{position:absolute;top:0;height:8px;border-radius:4px;background:var(--s1);opacity:.55}
 /* An OPEN-ENDED online span: the last ONLINE Uber sent, with no closing event
@@ -2182,7 +2297,7 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 /* Where the shift started, under the bar that says when it did. Indented to
    the same column as the bar itself so it reads as a caption on that row and
    not as a new fact about the day. */
-.dday-onwhere{margin-top:8px;padding-left:calc(9rem + 12px);font-size:var(--t4);color:var(--ink-2)}
+.dday-onwhere{margin-top:8px;padding-left:calc(9rem + 12px);font-size:var(--t4);color:var(--grey-strong)}
 .dday-onbasis{margin-top:4px;padding-left:calc(9rem + 12px);font-size:var(--t5);max-width:62ch;line-height:1.5}
 .sw.waitsw{background:var(--surface-3)} .sw.onsw{background:var(--s1);opacity:.55}
 .sw.cx{background:var(--critical)} .sw.j{background:var(--s1)}
@@ -2196,15 +2311,15 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .dday-job.bad{background:linear-gradient(90deg,var(--critical-bg) 0 3px,transparent 3px)}
 .dday-when{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;line-height:1.4}
 .dday-when>b{display:block;font-size:var(--t8);color:var(--ink);font-weight:600}
-.dday-when>span{display:block;font-size:var(--t5);color:var(--ink-3)}
+.dday-when>span{display:block;font-size:var(--t5);color:var(--grey)}
 .dday-leg{display:grid;grid-template-columns:repeat(auto-fit,minmax(19rem,1fr));gap:6px 26px}
 .dday-pt{display:grid;grid-template-columns:14px 1fr;gap:0 8px;align-items:baseline}
 .dday-pt>i{width:9px;height:9px;border-radius:50%;align-self:center}
 .dday-pt>i.o{border:2px solid var(--s1)}
-.dday-pt>i.x{background:var(--ink-3)}
-.dday-lab{grid-column:2;font-size:var(--t1);letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3)}
+.dday-pt>i.x{background:var(--grey)}
+.dday-lab{grid-column:2;font-size:var(--t1);letter-spacing:.13em;text-transform:uppercase;color:var(--grey)}
 .dday-pt>b{grid-column:2;font-weight:500;font-size:var(--t7);line-height:1.45;color:var(--ink)}
-.dday-facts{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:9px;font-size:var(--t5);color:var(--ink-2)}
+.dday-facts{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:9px;font-size:var(--t5);color:var(--grey-strong)}
 .dday-facts b{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--ink);font-weight:600}
 .dday-open{align-self:center;font-size:var(--t4);color:var(--accent);text-decoration:none;white-space:nowrap}
 .dday-open:hover{text-decoration:underline}
@@ -2217,11 +2332,11 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
   padding:9px 14px;margin:0 0 0 0;border-radius:0 6px 6px 0;
 }
 .dday-gap.long{border-left-color:var(--warn);background:var(--warn-bg,var(--surface-2))}
-.dday-gaphead{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;font-size:var(--t6);color:var(--ink-2)}
+.dday-gaphead{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;font-size:var(--t6);color:var(--grey-strong)}
 .dday-gaphead b{color:var(--ink);font-weight:600}
-.dday-where{margin-top:6px;font-size:var(--t5);color:var(--ink-2);display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
+.dday-where{margin-top:6px;font-size:var(--t5);color:var(--grey-strong);display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
 .dday-where b{font-family:"IBM Plex Mono",monospace;color:var(--ink)}
-.dday-where.dim{color:var(--ink-3);font-style:italic}
+.dday-where.dim{color:var(--grey);font-style:italic}
 @media (max-width:760px){
   .dday-job{grid-template-columns:52px 1fr;gap:10px}
   .dday-open{grid-column:2;justify-self:start;margin-top:6px}
@@ -2256,11 +2371,11 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
 .sup-row{display:grid;grid-template-columns:34px repeat(24,1fr);gap:3px;align-items:center}
 .sup-row>i{
   font-style:normal;font-family:"IBM Plex Mono",monospace;font-size:var(--t2);
-  color:var(--ink-3);text-align:right;padding-right:4px;
+  color:var(--grey);text-align:right;padding-right:4px;
 }
 .sup-head>b{
   font-weight:400;font-family:"IBM Plex Mono",monospace;font-size:var(--t1);
-  color:var(--ink-3);text-align:center;
+  color:var(--grey);text-align:center;
 }
 .sup-c{display:block;height:20px;border-radius:3px;background:var(--surface-2)}
 /* A single-hue ramp: this is one quantity getting bigger, not five categories.
@@ -2334,16 +2449,16 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
 }
 @keyframes tn-pulse{0%,100%{opacity:1}50%{opacity:.35}}
 @media (prefers-reduced-motion: reduce){.todaynow .tn-dot{animation:none}}
-.todaynow .tn-f{white-space:nowrap;color:var(--ink-2)}
+.todaynow .tn-f{white-space:nowrap;color:var(--grey-strong)}
 .todaynow .tn-f b{
   font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;
   margin-right:5px;
 }
-.todaynow .tn-sub{color:var(--ink-3)}
+.todaynow .tn-sub{color:var(--grey)}
 .todaynow .tn-links{margin-left:auto;display:flex;gap:14px;white-space:nowrap}
 .todaynow .tn-links a{color:var(--accent-ink);text-decoration:none;font-weight:500}
 .todaynow .tn-links a:hover{text-decoration:underline}
-.todaynow .tn-quiet{color:var(--ink-2)}
+.todaynow .tn-quiet{color:var(--grey-strong)}
 @media (max-width:820px){
   .todaynow{gap:0 14px;font-size:var(--t5)}
   .todaynow .tn-links{margin-left:0;width:100%;padding-top:6px}
@@ -2375,10 +2490,10 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
 }
 .wf-k{
   font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:var(--t2);letter-spacing:.09em;
-  text-transform:uppercase;color:var(--ink-3);white-space:nowrap;padding-top:2px;
+  text-transform:uppercase;color:var(--grey);white-space:nowrap;padding-top:2px;
 }
 .wf-v{min-width:0;color:var(--ink)}
-.wf-absent{color:var(--ink-3);font-style:italic}
+.wf-absent{color:var(--grey);font-style:italic}
 /* One column below the width where a label and a sentence stop fitting side by
    side — at 316px the value column was three words wide and every fact wrapped
    to four lines. */
@@ -2388,7 +2503,7 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
 }
 /* The names on a list row, between the action and the meta column. */
 .insight-who{
-  font-size:var(--t4);color:var(--ink-2);margin-top:4px;
+  font-size:var(--t4);color:var(--grey-strong);margin-top:4px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 
@@ -2400,7 +2515,7 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
    in the order they were applied, and the list is the one piece of prose on
    either page that is allowed to be long. */
 ul.bul{margin:0;padding-left:1.1rem}
-ul.bul li{margin:.55rem 0;line-height:1.55;color:var(--ink-2)}
+ul.bul li{margin:.55rem 0;line-height:1.55;color:var(--grey-strong)}
 ul.bul li b{color:var(--ink)}
 
 /* A chip that is a LINK, and the one of them that is current.
@@ -2419,20 +2534,20 @@ ul.bul li b{color:var(--ink)}
 }
 .sp-pair.done{opacity:.72;background:var(--surface-2)}
 .sp-pair.done.same{border-left:3px solid var(--good)}
-.sp-pair.done.different{border-left:3px solid var(--ink-3)}
+.sp-pair.done.different{border-left:3px solid var(--grey)}
 .sp-body{display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:start}
 .sp-side{min-width:0}
-.sp-cap{font-size:var(--t4);text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3)}
+.sp-cap{font-size:var(--t4);text-transform:uppercase;letter-spacing:.08em;color:var(--grey)}
 .sp-name{font-size:var(--t2);font-weight:600;margin:2px 0 6px}
 .sp-meta{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
-.sp-facts{margin:0;padding-left:1.05rem;color:var(--ink-2);font-size:var(--t3);line-height:1.6}
-.sp-mid{align-self:center;text-align:center;color:var(--ink-3)}
+.sp-facts{margin:0;padding-left:1.05rem;color:var(--grey-strong);font-size:var(--t3);line-height:1.6}
+.sp-mid{align-self:center;text-align:center;color:var(--grey)}
 .sp-q{font-size:var(--t4);text-transform:uppercase;letter-spacing:.08em}
-.sp-ev{font-size:var(--t3);color:var(--ink-2);margin:10px 0 0;line-height:1.55}
+.sp-ev{font-size:var(--t3);color:var(--grey-strong);margin:10px 0 0;line-height:1.55}
 .sp-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
-.sp-hint{font-size:var(--t4);color:var(--ink-3);flex:1 1 260px}
+.sp-hint{font-size:var(--t4);color:var(--grey);flex:1 1 260px}
 .sp-verdict{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;
-  font-size:var(--t3);color:var(--ink-2)}
+  font-size:var(--t3);color:var(--grey-strong)}
 @media (max-width:720px){
   .sp-body{grid-template-columns:1fr;gap:10px}
   .sp-mid{text-align:left}
@@ -2451,18 +2566,18 @@ ul.bul li b{color:var(--ink)}
   display:flex;flex-wrap:wrap;align-items:center;gap:10px;
   margin:10px 0 0;padding:9px 14px;border-radius:10px;
   border:1px solid var(--rule);background:var(--surface-2);
-  font-size:var(--t3);color:var(--ink-2);
+  font-size:var(--t3);color:var(--grey-strong);
 }
 .lstat b{color:var(--ink);font-size:var(--t2)}
-.lstat-dot{width:9px;height:9px;border-radius:50%;background:var(--ink-3);flex:none}
+.lstat-dot{width:9px;height:9px;border-radius:50%;background:var(--grey);flex:none}
 .lstat.on{border-color:var(--good);background:var(--good-bg,var(--surface-2))}
 .lstat.on .lstat-dot{background:var(--good)}
 .lstat.ontrip{border-color:var(--accent);background:var(--accent-soft)}
 .lstat.ontrip .lstat-dot{background:var(--accent)}
-.lstat.off .lstat-dot,.lstat.stale .lstat-dot{background:var(--ink-3)}
-.lstat-since{font-family:"IBM Plex Mono",ui-monospace,monospace;color:var(--ink-2)}
-.lstat-sum{color:var(--ink-2)}
-.lstat-why{color:var(--ink-3);font-size:var(--t4);flex-basis:100%}
+.lstat.off .lstat-dot,.lstat.stale .lstat-dot{background:var(--grey)}
+.lstat-since{font-family:"IBM Plex Mono",ui-monospace,monospace;color:var(--grey-strong)}
+.lstat-sum{color:var(--grey-strong)}
+.lstat-why{color:var(--grey);font-size:var(--t4);flex-basis:100%}
 
 /* A grid item that is allowed to be narrower than the table inside it.
    Without this a .tscroll in a grid cell never scrolls — the cell grows to the
@@ -2483,17 +2598,17 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
    informational state it is. */
 .authbanner.degraded{
   background:var(--surface-2); border-color:var(--rule);
-  color:var(--ink-2);
+  color:var(--grey-strong);
 }
-.authbanner.degraded .ab-dot{background:var(--ink-3)}
+.authbanner.degraded .ab-dot{background:var(--grey)}
 /* Saved and not yet tested: quiet for the same reason as degraded. Nothing
    has refused it, and a red or amber banner for a credential somebody has
    just replaced teaches them to ignore the colour. */
 .authbanner.pending{
   background:var(--surface-2); border-color:var(--rule);
-  color:var(--ink-2);
+  color:var(--grey-strong);
 }
-.authbanner.pending .ab-dot{background:var(--ink-3)}
+.authbanner.pending .ab-dot{background:var(--grey)}
 
 /* ── A TABLE THAT BECOMES CARDS ON A PHONE ────────────────────────────────
    ═════════════════════════════════════════════════════════════════════════
@@ -2584,7 +2699,7 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
   .tcards td::before{
     content:attr(data-label);
     font-family:"IBM Plex Mono",monospace;font-size:var(--t2);letter-spacing:.07em;
-    text-transform:uppercase;color:var(--ink-2);font-weight:600;
+    text-transform:uppercase;color:var(--grey-strong);font-weight:600;
     flex:0 0 auto;
   }
   /* min-width:0 is the point of the element existing; overflow-wrap catches a
@@ -2670,7 +2785,10 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
 .depchip { min-height: 44px; padding: 0 16px; font: inherit; font-size: var(--t6);
   color: var(--fg); background: var(--card); border: 1px solid var(--line);
   border-radius: 999px; cursor: pointer; }
-.depchip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+/* Text ON the accent takes --on-accent, the token the top of this sheet
+   declares for exactly this: #fff here was 2.94:1 on the dark theme's accent,
+   so the one chip a person had just picked was the one they could not read. */
+.depchip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 .depnote { font-size: var(--t5); color: var(--muted); line-height: 1.45; }
 /* A refusal is not decoration: it is the sentence that stops somebody
    recording the wrong thing, so it takes the same weight as the figure. */

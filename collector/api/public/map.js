@@ -162,13 +162,13 @@ export function renderLive(map, rows, onPick) {
        whose feed carries no seat sensor — 82 of 130 — which is a measurement
        claim about hardware that does not exist. renderJourney has drawn the
        unknown case separately for a while; this had not caught up. */
-    const colour = r.stale ? css('--ink-3')
+    const colour = r.stale ? css('--grey')
       : engaged ? css('--s3')
         : moving ? (seatUnknown ? css('--b300') : css('--s1'))
           : css('--s5');
     const at = nudge(r.lat, r.lng);
     const m = L.circleMarker(at, {
-      radius: engaged ? 7 : 6, color: '#fff', weight: 1.5,
+      radius: engaged ? 7 : 6, color: css('--paper'), weight: 1.5,
       fillColor: colour, fillOpacity: r.stale ? 0.45 : 0.95,
     }).addTo(layer);
     m.bindTooltip(
@@ -193,7 +193,7 @@ export function renderJourney(map, journey) {
   (journey.segments || []).forEach((seg) => {
     const pts = seg.points.filter((p) => p.lat != null).map((p) => [p.lat, p.lng]);
     if (pts.length < 2) {
-      if (pts.length === 1) L.circleMarker(pts[0], { radius: 4, color: css('--ink-3'), fillOpacity: .7 }).addTo(layer);
+      if (pts.length === 1) L.circleMarker(pts[0], { radius: 4, color: css('--grey'), fillOpacity: .7 }).addTo(layer);
       all.push(...pts); return;
     }
     // a segment can change occupancy mid-way; split so colour stays truthful
@@ -206,7 +206,7 @@ export function renderJourney(map, journey) {
       const occ = run[0].occupied;
       const occupied = occ === true, unknown = occ === null || occ === undefined;
       L.polyline(run.map((p) => [p.lat, p.lng]), {
-        color: unknown ? css('--ink-3') : occupied ? css('--s3') : css('--s1'),
+        color: unknown ? css('--grey') : occupied ? css('--s3') : css('--s1'),
         weight: occupied ? 4 : 3, opacity: unknown ? .5 : occupied ? .95 : .65,
         dashArray: occupied ? null : unknown ? '2,4' : '5,6',
       }).addTo(layer).bindTooltip(
