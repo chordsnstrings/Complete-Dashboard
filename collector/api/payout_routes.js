@@ -494,7 +494,11 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
     /* BOLT'S OWN STATEMENT of where each fleet's balance stands and when it
        pays next, from getFleetBalanceSummary, with the time it was read. */
     const boltBalance = await q(
-      `SELECT fleet_id, currency, current_balance, next_payout_on, checked_at
+      /* to_char, because a raw DATE from node-postgres is a Date, and the
+         sentence below printed it as "Mon Sep 28" on production — the trap
+         COVERAGE.md already names. */
+      `SELECT fleet_id, currency, current_balance,
+              to_char(next_payout_on, 'YYYY-MM-DD') AS next_payout_on, checked_at
          FROM platform_balance_now WHERE platform = 'bolt'
           AND ($1::text IS NULL OR fleet_id = $1)
         ORDER BY fleet_id`, [fleet]);
@@ -515,24 +519,40 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
       const back = dow === 1 ? 7 : (dow + 6) % 7;
       return new Date(d.getTime() - back * 864e5).toISOString().slice(0, 10);
     };
+    /* TWO DIFFERENT ABSENCES, AND THEY HAVE DIFFERENT REASONS.
+       ─────────────────────────────────────────────────────────────────────
+       On 2026-09-23 this sentence told the operator no payout for 21 Sep was
+       in "either of Bolt's books" and to check the bank statement — while
+       Bolt's ledger DID hold it (1,275.14 / 619.18) and the collector had
+       failed to STORE it. A reason that is not the true one. So the ledger
+       day itself is consulted: a stored day with no bank transfer on it is
+       Bolt saying nothing left that day; no stored day at all is our own
+       collection gap, and says so. */
     const expectedMissing = [];
     for (const b of boltBalance) {
       if (!b.next_payout_on) continue;
-      const due = prevMonday(b.next_payout_on instanceof Date
-        ? b.next_payout_on.toISOString() : b.next_payout_on);
+      const due = prevMonday(b.next_payout_on);
       if (!due) continue;
       const [seen] = await q(
         `WITH ${ALL_PAYOUTS}
          SELECT count(*)::int AS n FROM allp
           WHERE platform = 'bolt' AND fleet_id = $1 AND paid_on = $2::date`, [b.fleet_id, due]);
-      if (!seen?.n) {
-        expectedMissing.push({ fleet_id: b.fleet_id, expected_on: due,
-          checked_at: b.checked_at,
-          says: `No Bolt payout to ${b.fleet_id} has been seen for Monday ${due}, in either of `
-            + `Bolt's books. Bolt now names its next payout as ${String(b.next_payout_on).slice(0, 10)}, `
-            + `so ${due} is behind it. Bolt has skipped this fleet on a Monday before; check the `
-            + `bank statement for a Bolt credit before treating this as a collection fault.` });
-      }
+      if (seen?.n) continue;
+      const [read] = await q(
+        `SELECT updated_at FROM platform_balance_day
+          WHERE platform = 'bolt' AND fleet_id = $1 AND day = $2::date`, [b.fleet_id, due]);
+      const behind = `Bolt now names its next payout as ${b.next_payout_on}, so ${due} is behind it.`;
+      expectedMissing.push({ fleet_id: b.fleet_id, expected_on: due,
+        checked_at: b.checked_at,
+        ledger_read: !!read,
+        says: read
+          ? `Bolt's balance ledger for ${b.fleet_id} on Monday ${due} was read and carries no bank `
+            + `transfer, and Bolt's payout list does not show one either. ${behind} Bolt has skipped `
+            + `this fleet on a Monday before; check the bank statement for a Bolt credit.`
+          : `The payout to ${b.fleet_id} for Monday ${due} is not shown because Bolt's balance ledger `
+            + `for that day has not been stored yet — a gap in our collection, not a sign that Bolt `
+            + `skipped it. Bolt's payout list is days late, so it does not show it either. ${behind} `
+            + `The Bolt run on the status page says why the ledger was not stored.` });
     }
     const coverage = PROVIDERS
       .filter((prov) => !platform || prov.platform === platform)

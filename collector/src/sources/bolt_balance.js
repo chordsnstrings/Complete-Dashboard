@@ -182,6 +182,32 @@ export function ledgerDay(data) {
   };
 }
 
+/* THE DATABASE ROW FOR ONE LEDGER DAY, with every JSONB column as a JSON STRING.
+   ─────────────────────────────────────────────────────────────────────────
+   THE DEFECT, MEASURED ON PRODUCTION 2026-09-23 05:40 UTC. The first run of
+   942f255 wrote the balance summary and then failed every ledger write with
+   "invalid input syntax for type json" — for both fleets, so the 21 Sep
+   payout this table exists to catch never landed. payout_lines is a JS ARRAY,
+   and only on a day that carries a payout. node-postgres binds an array as a
+   Postgres ARRAY LITERAL — pg's own prepareValue turns
+   [{key:'payouts',...}] into {"{\"key\":...}"} — which a JSONB column
+   rejects, and one bad row rolls back the whole eight-day batch. PGlite, which
+   every test here runs on, types the parameter from the column and sends JSON,
+   so the suite was green over a write production could not do. A plain OBJECT
+   is JSON.stringified by node-postgres and was never the problem; all three
+   are stringified here anyway, so no column depends on which driver is below.
+   test/bolt_ledger_payout.test.mjs runs this row through pg's prepareValue. */
+export function ledgerRow(platform, fleet, day, L) {
+  const json = (v) => (v === null || v === undefined ? null : JSON.stringify(v));
+  return {
+    platform, fleet_id: fleet, day, currency: L.currency,
+    payout: L.payout, payout_lines: json(L.payout_lines),
+    starting_balance: L.starting_balance, ending_balance: L.ending_balance,
+    cash_in_hand: L.cash_in_hand, earnings: json(L.earnings), expenses: json(L.expenses),
+    balances: L.balances,
+  };
+}
+
 /* Bolt's next_payout_date is a unix SECOND. Its Dubai calendar day — Dubai is
    UTC+4 all year, and 1790539200 is 2026-09-27T20:00Z, which is MONDAY 28
    September in Dubai and Sunday the 27th in a plain toISOString(). */

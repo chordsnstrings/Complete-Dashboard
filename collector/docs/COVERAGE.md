@@ -2693,6 +2693,18 @@ driver's 222 tracker fixes.
 * **`rowCount` (node-postgres) vs `affectedRows` (PGlite).** A count read off
   one is `undefined` under the other — so a guard passes in the tests and
   reports nothing on production. Use `RETURNING` and count the rows.
+* **A JS ARRAY bound to a JSONB column passes on PGlite and fails on
+  production.** node-postgres encodes an array parameter as a Postgres array
+  literal — `pg/lib/utils` `prepareValue([{a:1}])` is `{"{\"a\":1}"}` — and a
+  JSONB column answers `invalid input syntax for type json`; PGlite types the
+  parameter from the column and sends JSON. A plain object is stringified by
+  both. Measured 2026-09-23: the first run of 942f255 stored Bolt's balance
+  summary and failed every ledger-day write for both fleets, because
+  `payout_lines` is an array only on a day that carries a payout — so the
+  21 Sep payout the table was built to hold was the row that broke it.
+  `JSON.stringify` every JSONB value at the write (`ledgerRow()` in
+  `src/sources/bolt_balance.js`), and test a new JSONB write through
+  `prepareValue`, not only through PGlite.
 * **`JSON.stringify(x).slice(0, N)` into a JSONB column is a time bomb.** A
   sliced JSON string is not JSON: Postgres answers `invalid input syntax for
   type json` and the whole batch rolls back, so one oversized record costs

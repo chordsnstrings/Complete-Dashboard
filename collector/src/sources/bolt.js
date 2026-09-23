@@ -14,7 +14,7 @@ import { log } from '../log.js';
 import { stateRow } from '../roster.js';
 import { get, setSetting } from '../settings.js';
 import { noteCredential, saysAuth } from '../auth_state.js';
-import { ledgerDay, nextPayoutOn, LEDGER_DAYS } from './bolt_balance.js';
+import { ledgerDay, ledgerRow, nextPayoutOn, LEDGER_DAYS } from './bolt_balance.js';
 
 const SRC = 'bolt';
 
@@ -1338,19 +1338,29 @@ async function pullBalance(c, at, fails) {
       if (Number(data?.code) !== 0 || !data?.data) { refused += 1; continue; }
       const L = ledgerDay(data.data);
       if (!L) { refused += 1; continue; }
-      rows.push({ platform: SRC, fleet_id: c.fleet, day, currency: L.currency,
-        payout: L.payout, payout_lines: L.payout_lines,
-        starting_balance: L.starting_balance, ending_balance: L.ending_balance,
-        cash_in_hand: L.cash_in_hand, earnings: L.earnings, expenses: L.expenses,
-        balances: L.balances });
+      rows.push(ledgerRow(SRC, c.fleet, day, L));
     } catch (e) {
       refused += 1;
       log.warn(SRC, `balance ${c.fleet} ${day} failed`, { err: String(e?.message || e).slice(0, 160) });
     }
   }
-  if (rows.length) await upsertMany('platform_balance_day', rows, ['platform', 'fleet_id', 'day']);
+  /* A STORE FAILURE IS NAMED AS ONE, HERE. Unguarded, a throw from this
+     write left pullBalance and was caught by the caller as a failure of the
+     PAYOUT LIST — the run read "payouts ecosine: invalid input syntax for
+     type json" on 2026-09-23 while getPayouts had answered and stored fine.
+     The run must say which book failed and that it was read, not refused. */
+  let stored = rows.length > 0;
+  if (rows.length) {
+    try {
+      await upsertMany('platform_balance_day', rows, ['platform', 'fleet_id', 'day']);
+    } catch (e) {
+      stored = false;
+      fails.push({ fleet: c.fleet, text: `balance ${c.fleet}: ${rows.length} days read from Bolt `
+        + `but not stored: ${String(e?.message || e).slice(0, 160)}` });
+    }
+  }
   const paid = rows.filter((r) => r.payout !== null);
-  log.info(SRC, `balance ${c.fleet}`, { days: rows.length, refused,
+  log.info(SRC, `balance ${c.fleet}`, { days: rows.length, stored, refused,
     payouts: paid.map((r) => `${r.day}=${r.payout}`).join(' ') || 'none',
     unbalanced: rows.filter((r) => r.balances === false).map((r) => r.day).join(' ') || 'none' });
   if (refused) fails.push({ fleet: c.fleet, text: `balance ${c.fleet}: ${refused} of ${LEDGER_DAYS} days not answered` });

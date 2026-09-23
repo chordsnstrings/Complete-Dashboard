@@ -25,7 +25,13 @@ import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
-import { ledgerDay, nextPayoutOn, BANK_PAYOUT_TITLES, LEDGER_DAYS } from '../src/sources/bolt_balance.js';
+import { createRequire } from 'node:module';
+import { ledgerDay, ledgerRow, nextPayoutOn, BANK_PAYOUT_TITLES, LEDGER_DAYS } from '../src/sources/bolt_balance.js';
+
+/* node-postgres's OWN parameter encoder — what production actually sends. The
+   suite runs on PGlite, which encodes a JSONB parameter from the column type
+   and so accepted an array production rejected (2026-09-23). */
+const { prepareValue } = createRequire(import.meta.url)('pg/lib/utils');
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -79,6 +85,28 @@ check('Bolt’s next_payout_date 1790539200 is MONDAY 28 September in Dubai, not
   nextPayoutOn(1790539200) === '2026-09-28', String(nextPayoutOn(1790539200)));
 check('a missing or nonsense date is null', nextPayoutOn(null) === null && nextPayoutOn(0) === null);
 check('the collector re-reads a whole payout week and a day', LEDGER_DAYS === 8);
+
+console.log('\nthe row the collector writes is JSON as node-postgres sends it, not only as PGlite does');
+{
+  const JSONB = ['payout_lines', 'earnings', 'expenses'];
+  for (const [name, day, L] of [['payout day', '2026-09-21', ledgerDay(ECOSINE)],
+    ['no-payout day', '2026-09-22', ledgerDay({ ...EGARI, expenses_items: { booking_fees: { title: 'Booking fees', value: 260 } } })]]) {
+    const row = ledgerRow('bolt', 'ecosine', day, L);
+    const bad = JSONB.filter((k) => {
+      const wire = prepareValue(row[k]);
+      if (wire === null) return false;
+      try { JSON.parse(wire); return false; } catch { return true; }
+    });
+    check(`${name}: every JSONB column is valid JSON on the node-postgres wire`, bad.length === 0,
+      bad.map((k) => `${k}=${String(prepareValue(row[k])).slice(0, 60)}`).join(' '));
+  }
+  const row = ledgerRow('bolt', 'ecosine', '2026-09-21', ledgerDay(ECOSINE));
+  check('…and it still says the same thing once parsed back',
+    JSON.parse(row.payout_lines)[0]?.value === 1275.14 && JSON.parse(row.expenses).payouts?.value === 1275.14
+    && row.payout === 1275.14 && row.day === '2026-09-21' && row.fleet_id === 'ecosine', JSON.stringify(row));
+  check('a day with no payout stores payout_lines as NULL, not the string "null"',
+    ledgerRow('bolt', 'egari', '2026-09-22', ledgerDay({ currency: 'AED' })).payout_lines === null);
+}
 
 /* ══ 2. the page, over a real schema ═══════════════════════════════════════ */
 const db = new PGlite();
@@ -204,10 +232,24 @@ console.log('\na Monday behind Bolt’s next payout date with nothing seen is sa
   const m2 = await mountAll(db2);
   const b2 = ((await m2.get('/api/finance/payouts')).body.coverage || []).find((c) => c.platform === 'bolt');
   const miss = b2?.expected_missing || [];
-  check('a Monday behind Bolt’s next payout date with no payout in either book IS flagged',
+  check('a Monday behind Bolt’s next payout date with no payout seen IS flagged',
     miss.length === 1 && miss[0].expected_on === '2026-09-21', JSON.stringify(miss));
-  check('…and it asks for the bank statement rather than declaring a fault',
-    /bank statement/.test(miss[0]?.says || '') && /skipped/.test(miss[0]?.says || ''), miss[0]?.says);
+  /* What production said on 2026-09-23 while the ledger write was failing:
+     "in either of Bolt's books … check the bank statement". Not the true
+     reason — Bolt's ledger held the payout; WE had not stored it. */
+  check('with the ledger day never stored, it names our collection gap — not Bolt, not the bank',
+    miss[0]?.ledger_read === false && /not been stored/.test(miss[0]?.says || '')
+    && /gap in our collection/.test(miss[0]?.says || '') && !/bank statement/.test(miss[0]?.says || ''),
+    miss[0]?.says);
+  check('the date in the sentence is a date, not "Mon Sep 28"',
+    /next payout as 2026-09-28,/.test(miss[0]?.says || ''), miss[0]?.says);
+  await q2(`INSERT INTO platform_balance_day (platform, fleet_id, day, currency, payout, balances)
+            VALUES ('bolt','egari','2026-09-21','AED',NULL,true)`);
+  const b3 = ((await m2.get('/api/finance/payouts')).body.coverage || []).find((c) => c.platform === 'bolt');
+  const miss3 = b3?.expected_missing || [];
+  check('with the ledger day read and no transfer on it, it asks for the bank statement',
+    miss3.length === 1 && miss3[0].ledger_read === true && /was read and carries no bank transfer/.test(miss3[0].says)
+    && /bank statement/.test(miss3[0].says) && /skipped/.test(miss3[0].says), JSON.stringify(miss3));
 }
 
 console.log('\nthe collector and the log, read from source');
@@ -219,6 +261,11 @@ console.log('\nthe collector and the log, read from source');
     /await pullBalance\(c, at, fails\)/.test(src) && /async function pullBalance/.test(src));
   check('collected_at is never written, so it keeps the first time a day was stored',
     !/platform_balance_day[\s\S]{0,40}collected_at/.test(src.slice(src.indexOf('async function pullBalance'))));
+  const bal = src.slice(src.indexOf('async function pullBalance'), src.indexOf('export async function collect'));
+  check('the ledger row is built by ledgerRow, so its JSONB columns are strings',
+    /rows\.push\(ledgerRow\(SRC, c\.fleet, day, L\)\)/.test(bal) && !/payout_lines: L\.payout_lines/.test(bal));
+  check('a failed ledger store is named as one, inside pullBalance — not left to read as "payouts <fleet>"',
+    /try \{\s*await upsertMany\('platform_balance_day'/.test(bal) && /but not stored: /.test(bal));
   check('"no orders in window" is decided on what was COLLECTED, not on an array the sink emptied',
     /const collectedTotal = \(chunks \|\| \[\]\)\.reduce/.test(src) && /answered && !collectedTotal/.test(src));
 }
