@@ -205,9 +205,13 @@ for (const k of T.CHANNEL_ORDER) {
     check(`…and --ch-${k} is declared in the old ${state} state`, !!valueIn(css, `--ch-${k}`));
 }
 check('uber_fleet is Uber', SOURCE_TOKEN.uber_fleet === '--c-uber');
-/* Unchanged until STEP 2 converts the chart callers: today every caller falls
-   through to the categorical palette on null, and '--grey' would repaint them. */
-check('an unmapped source is still null (STEP 2 makes it --grey)', sourceToken('no-such-feed') === null);
+/* Still null, deliberately (STEP 2): every caller falls through to the
+   categorical slot on null, and '--grey' here would repaint the old skin.
+   The charts turn the null into --chan-none instead, which only arkiv.css
+   declares (grey), falling back to the slot the old skin always painted —
+   test/chart_marks.test.mjs §5 holds both halves. */
+check('an unmapped source is still null (the charts grey it under Arkiv through --chan-none)',
+  sourceToken('no-such-feed') === null);
 /* The dominance bar turns the token into a class. It stripped only --ch-, so
    --c-uber became `ch---c-uber`, which no rule matches: the fill vanished. */
 const ui = read('ui.js');

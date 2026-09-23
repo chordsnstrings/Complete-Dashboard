@@ -850,6 +850,12 @@
    its legend swatch and its column follow it, so a colour cannot change in
    one place and be explained in another. */
 :root[data-skin="arkiv"] .sh-track>i.w,:root[data-skin="arkiv"] .lgnd .sw.w{background:var(--hair);opacity:1}
+/* Online-but-not-dispatched, the middle of the three layers. app.css paints
+   it with a literal rgba() blue where color-mix() is not supported (the dark
+   step found it; FIX-STATUS "found, not fixed", handed to STEP 2). Under the
+   skin it is a graphite step outright, between waiting (--hair) and on a job
+   (--s1, the darkest), so no browser can show the old blue. */
+:root[data-skin="arkiv"] .sh-track>i.o,:root[data-skin="arkiv"] .lgnd .sw.o{background:var(--seq-1)}
 :root[data-skin="arkiv"] .sh-w{color:var(--ink-2)}
 
 /* A day nothing was collected on is ABSENT, and absence is an outline in

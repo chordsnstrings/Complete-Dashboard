@@ -709,6 +709,15 @@ for (const [skin, scheme] of [['classic', 'light'], ['arkiv', 'light'], ['arkiv'
     [c, a, d].every((r) => [r.out, r.ch].every((x) => x.keys.every((k, i) => k === x.segs[i].fill))));
 }
 
+/* The shift track's online layer (#driver/activity): app.css paints the bar
+   with a literal rgba() blue where color-mix() is unsupported, and gives its
+   key swatch no colour at all. Under the skin both are one graphite step. */
+{
+  const ark = read('arkiv.css').replace(/\/\*[\s\S]*?\*\//g, ' ');
+  check('Arkiv paints the shift track’s online layer and its key with one token',
+    /:root\[data-skin="arkiv"\] \.sh-track>i\.o,:root\[data-skin="arkiv"\] \.lgnd \.sw\.o\{background:var\(--seq-1\)\}/.test(ark));
+}
+
 /* #forecast itself: the caption names the treatment the chart draws. */
 console.log('\n1b · #forecast says what it draws');
 for (const skin of ['classic', 'arkiv']) {

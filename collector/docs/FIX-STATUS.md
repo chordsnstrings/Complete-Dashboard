@@ -2549,3 +2549,77 @@ gives the caption the word for the treatment actually drawn.
 | CH8 | **scatter to SPEC §4 under Arkiv.** Drawn at the measured box (redrawn once a detached host has a width), with a gutter measured from its tick labels plus room for the rotated y label; markers SOLID (r 4.5 ≥ 4) inside a 2px surface ring — the old 60% opacity turned two dots on one spot into one darker dot; the reference line SOLID. Paint in arkiv.css on `.sc-dot` / `.sc-ref`. Found in BOTH skins: scatter never got barChart's measured gutter, so #unit/assets' "AED 5,000.00" ticks ran off the drawing's left edge under its rotated y label (measured −11px); fixed under Arkiv, the old skin keeps it | **written** (Arkiv) · **open** (old skin) | chart_marks §7 (computed opacity, ring, dash, every label's client rect inside the drawing) |
 | CH8b | **Both skins — #unit/assets named a line its scatter does not draw.** "…a dot well below that line is doing distance that is not being paid for": economics.js has never passed `refLine`, so there is no line. The sentence names the rate instead ("a car earning well under that for each km"). Drawing the line (`refLine: { slope: aed_per_km }`, which scatter already supports) would change the old skin's look, so it is the page phase's | **written** | chart_marks §7 scan |
 | CH9 | **stackedBar to SPEC §4 under Arkiv.** Drawn at the measured width and 24px tall (redrawn once a detached host has a width); a 2px surface GAP between segments instead of a hairline stroke around each; square at the baseline, 4px round at the data end (a clip path, not rx 5 all round); segments coloured by NAME (`byName`: channels their identity, the rest distinct slots, the fold grey — the review's "stackedBar picks colours by CAT index" correction); the share printed on a segment in the ink that reads on its fill, `--on-cat-N` (paper on the four steps far from the paper, ink on the two near it; ≥ 5.14:1 light, ≥ 4.85:1 dark, measured with tokens.js `contrast()`) or `--on-chan-<key>` → `--on-c-<key>`, at `--t4`. The old skin: its 400 × 30 box, strokes, rx-5 clip, `--s` slots and paper labels (every `--on-cat-N` is `--surface` there) | **written** | chart_marks §8 (both skins, dark included: gaps, clip, slots, identities, label contrast ≥ 4.5 on every segment, keys) |
+| CH10 | **Handed over by the dark step, and the loose ends.** The shift track's online layer (#driver/activity) is `--seq-1` under the skin, bar and key alike: app.css paints the bar with a literal `rgba()` blue where `color-mix()` is unsupported, and gives the key swatch `.lgnd .sw.o` no colour at all (an invisible swatch in the old skin, found and left there). `sourceToken()` stays null for an unknown key (returning `--grey` would repaint the old skin; the charts grey it through `--chan-none`) — ui.js's comment and tokens.test's label say so now. The plan carries an as-built note | **written** | chart_marks (the rule, static); screenshot #driver/…/activity "How the day was spent", both skins |
+
+**Measurement: no mark moved in the old skin.** The dark step's pixel
+harness (every `/api/` response recorded, the clock frozen, sticky elements
+pinned, the caret hidden), old skin only: `8f27809` (before STEP 2) against
+the working tree, #overview, #demand, #forecast, #causes, #unit/assets,
+#revenue, #payouts, #capacity, #optimise, #settlement, #performance and
+#finance, at 1440 light, 1440 dark and 390 light — 36 shots a tree, and a
+second run of `8f27809` for the noise. 14 are byte-identical; 4 more differ
+only as the second run of the same tree does (a clock digit and a tab
+underline in the today strip, one pixel column at #payouts' edge). The other
+18 are the seven intended sentences (#forecast, #causes, #demand, #capacity
+×2, #optimise, #unit/assets) and the page heights they move. To prove that is
+ALL they are, the working tree was shot again with only those seven strings
+put back: 18 shots, every one byte-identical to the first or the second
+`8f27809` run except the today strip, whose recorded answer differed between
+runs (547 against 826 bookings so far). Scratchpad `reskin/step2/pixel/`.
+
+**Screenshots** (live-ui :8100, production data), one set per chart function,
+both skins, light and dark where it matters: `reskin/step2/shots/1-barChart`
+(#forecast), `2-gapBars` (#overview, #causes), `3-fit` (#payouts 1440/390),
+`4-areaChart` (#demand), `5-hbars` (#overview, #revenue), `6-donut`
+(#overview), `7-heatmap` (#demand, #capacity, #optimise), `8-scatter`
+(#unit/assets), `9-stackedBar` (#overview, #settlement), `10-narrow` (390,
+no sideways scroll), `11-shift`.
+
+**Tests.** New: `test/chart_marks.test.mjs`, 137 checks, both skins in a
+browser on the mock (light and dark), each chart function's section proved by
+reverting it (every commit message lists its reverts and the failures they
+produced). Changed deliberately: tokens.test (the mark declarations in the
+generated block; the sourceToken note). Green file by file across the step:
+chart_marks, tokens, arkiv_skin, type_scale, chart_fit, chart_geometry,
+forecast_page, money_precise, routes, live_day, phone, phone_today_only and
+phone_render (private mock), driver_empty_window_page, break_month_grain,
+seasonal, signed, source_line, trend_gaps, capacity_headline, spacing (125
+routes), platform_share_once, optimise, window_honesty, unit_ranking_gate,
+caption_matches_figure, cash_value_caption. The full suite was not run, per
+this step's instructions.
+
+### NOT DONE in STEP 2, and named
+
+- **No donut caller is converted.** Ruling 6: each donut is replaced on its
+  own page, as its plan entry says. `donut(…, { as: 'bars' | 'bar100' })` is
+  ready; the ring stays the default until then.
+- **The ~20 `'--s1'…'--s8'` names pages still pass** (the map pins, the
+  unauthorized series `--s8`, forecast's `--s3`/`--s5`, alerts `--s2`…) keep
+  STEP 1's neutral steps under the skin. Converting each to `channelOf(name)`
+  or ink is the page phase's, page by page, as the plan says.
+- **L3, found and not this step's:** driver.js's standing bars fill with
+  `--good` / `--warn` / `--critical` (a semantic as an area fill in a plot),
+  and economics.js's vehicle states colour with the same three. Both are
+  page components on files the page phase owns (driver.js is also being
+  edited on the concurrent unauthorized-trips branch).
+- **#driver/activity's shift track draws a missing dropoff as a HATCH**
+  (`.sh-track>i.u`) and three captions say so (driver.js 279, 317, 427).
+  Under SPEC §5 that is an outline. The swap needs driver.js caption edits
+  on a file the concurrent branch is editing; left for the page phase.
+- **vehicle.js:215** (on the plan's list) is a comment, not a caption. Left.
+- **#unit/assets' scatter has no reference line**; its caption now names the
+  rate. Drawing it (`refLine: { slope: aed_per_km }`) would change the old
+  skin.
+- **Old-skin defects found and fixed only under Arkiv**, because fixing them
+  there moves production: #payouts draws its chart before its panel is on the
+  page (1.5× ticks); every hbars row has its own track width; scatter's
+  gutter lets "AED" ticks run off the drawing. Each is named in its row above.
+- **`sourceToken()` still returns null** for an unknown key; the charts turn
+  the null into `--chan-none` (grey under Arkiv). `dominantBar()` (a STEP 1
+  component in ui.js) still gives an unknown channel a positional class.
+- **`spark()` stays in m/ui.js** — the review's option; moving it is STEP 3's,
+  with test/phone.test.mjs updated there.
+- **Map pins** are untouched: the plan flags them for the map page, keeping
+  the state colours an operator reads the live map by.
+- **The phone's own m.css pass** is STEP 5; its screens reach charts.js only
+  through the desktop driver and vehicle tabs, which follow the tokens.

@@ -912,9 +912,11 @@ export const completionTone = (v) => (v == null || v === '' || !Number.isFinite(
 
    Returns null for anything unmapped, and every caller falls through to the
    categorical palette on null — a channel nobody has assigned a colour is
-   better drawn in a neutral series colour than in a guess at a brand. (The
-   plan's STEP 2 turns that null into '--grey' together with the chart
-   callers, because today it would change what the old skin draws.) */
+   better drawn in a neutral series colour than in a guess at a brand. The
+   plan had STEP 2 return '--grey' here; that would repaint the old skin, so
+   STEP 2 turned the null into grey where it lands instead: charts.js byName()
+   paints it --chan-none, which only arkiv.css declares (grey), falling back
+   to the slot the old skin always painted. */
 export const SOURCE_TOKEN = Object.freeze(Object.fromEntries([
   ...CHANNEL_ORDER.map((k) => [k, `--c-${k}`]),
   ['uber_fleet', '--c-uber'],
