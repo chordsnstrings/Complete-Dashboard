@@ -747,7 +747,12 @@ async function staleTelemetry() {
       fleet_id: fleetId,
       title: `${plates.length} ${sourceName(source)} trackers stopped reporting within the same hour`,
       detail: `All ${plates.length} last reported around ${dubaiMinute(at)}, ${ageH}h ago — ${plates.slice(0, 8).join(', ')}${plates.length > 8 ? ` and ${plates.length - 8} more` : ''}. Vehicles do not fail together; a feed does.`,
-      action: `Check the ${sourceName(source)} integration — the account, its credential and its vehicle list — before checking any of the vehicles. Each of these cars is invisible to unauthorised-use detection while it is dark.`,
+      /* Both trackers feed unauthorised-use detection since 2026-09-23 (CABMAN
+         DT's seat pad; FMS's live seat count and journeys), and two cars carry
+         both. So the true statement is about THIS provider's reading, not the
+         car: while its feed is dark, nothing it would have reported reaches
+         detection, and a car the other provider also tracks is still watched. */
+      action: `Check the ${sourceName(source)} integration — the account, its credential and its vehicle list — before checking any of the vehicles. While it is dark, nothing ${sourceName(source)} reports about these cars reaches unauthorised-use detection.`,
       impact_aed: null, metric: plates.length, window_start: null, window_end: null,
     });
     n++;
@@ -781,7 +786,7 @@ async function staleTelemetry() {
       title: `${r.plate} has not reported a position for ${Math.round(r.ageH)}h`,
       detail: `Last fix from ${sourceName(r.source)} at ${dubaiMinute(r.captured_at)}. ${feedEvidence(r)}`,
       action: live(r) > 0
-        ? `Check the device. A dead tracker also disables unauthorised-use detection for this vehicle.`
+        ? `Check the device. While it is dead, nothing ${sourceName(r.source)} reports about this vehicle reaches unauthorised-use detection.`
         : `Check the ${sourceName(r.source)} integration first — the account, its credential and its vehicle list. Only if the feed is healthy is this the device.`,
       impact_aed: null, metric: r.ageH, window_start: null, window_end: null,
     });

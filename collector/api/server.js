@@ -78,6 +78,10 @@ import { capacityRoutes } from './capacity_routes.js';
 import { payoutRoutes } from './payout_routes.js';
 import { revenueRoutes, receiptRoutes } from './revenue_routes.js';
 import { placeEnds, RATE_SQL, forgone } from './place_sql.js';
+/* The seat-sensor providers and the rule that counts one ride once across
+   them. An api/*_sql.js module, so test/mount.mjs injects it by discovery. */
+import { occCountsOnce, occSourceLabel, occBySource, occCoverageBySource, OCC_DEDUPE_RULE,
+  OCC_SOURCE_LABEL } from './occupancy_sql.js';
 import { onlineRoutes } from './online_routes.js';
 import { reconcileRoutes } from './reconcile_routes.js';
 import { performerRoutes } from './performer_routes.js';
@@ -1792,7 +1796,26 @@ app.get('/api/vehicles', wrap(async (req, res) => {
 
 app.get('/api/live', wrap(async (_, res) => res.json(await q(
   `SELECT s.plate, s.fleet_id, s.source, s.captured_at, s.polled_at, s.lat, s.lng, s.speed, s.status,
-          s.seat_occupied, s.ac_on, s.odometer,
+          /* TWO SEAT SENSORS, ONE READING PER ROW, EACH NAMED.
+             ─────────────────────────────────────────────────────────────
+             CABMAN DT reports occupied/empty in seat_occupied. FMS reports a
+             passenger COUNT in seat_count (schema_v84), and the operator
+             ruled on 2026-09-23 that 1 or more is passengers aboard and 0 is
+             an empty seat. The page's Seat column, the Engaged tile and the
+             map marker all read seat_occupied, and every FMS row read "not
+             reported" under a caption saying only CABMAN carries a seat
+             sensor — false since FMS's live count began to be collected.
+             So an FMS row's reading is derived HERE, at read time, by the
+             same rule the reconciler applies in memory; nothing is written
+             back to seat_occupied. NULL stays NULL: an FMS fix with no count
+             is not an empty seat. seat_count and seat_source travel beside
+             it so the page can say whose reading it is. */
+          CASE WHEN s.source = 'fms' THEN (s.seat_count >= 1) ELSE s.seat_occupied END AS seat_occupied,
+          s.seat_count,
+          CASE WHEN s.source = 'cabman' AND s.seat_occupied IS NOT NULL THEN 'CABMAN DT'
+               WHEN s.source = 'fms' AND s.seat_count IS NOT NULL THEN 'FMS live seat count'
+          END AS seat_source,
+          s.ac_on, s.odometer,
           /* A zero from FMS is an ABSENT READING, not an empty tank.
              ─────────────────────────────────────────────────────────────
              Measured live: 83 of 130 vehicles carry a fuel_level and every
@@ -1924,12 +1947,19 @@ app.get('/api/map/journey', wrap(async (req, res) => {
      it is, and only the default changes. */
   const day = req.query.day || dubaiIso();
   const fixes = await q(
-    `SELECT captured_at, lat, lng, speed, status, seat_occupied, ignition
+    `SELECT captured_at, lat, lng, speed, status, seat_occupied, seat_count, source, ignition
      FROM telemetry_snapshot
      WHERE plate=$1 AND lat IS NOT NULL
        AND captured_at >= ($2::date)::timestamptz - interval '4 hours'
        AND captured_at <  ($2::date + 1)::timestamptz - interval '4 hours'
      ORDER BY captured_at`, [plate, day]);
+  /* A fix's seat reading, from whichever provider sent it: CABMAN DT's
+     occupied/empty, or FMS's live passenger count read as occupied at 1 or
+     more (the operator's ruling of 2026-09-23). NULL when the fix carries no
+     reading — which is not an empty seat. */
+  const occOf = (f) => (f.source === 'fms'
+    ? (f.seat_count == null ? null : Number(f.seat_count) >= 1)
+    : (f.seat_occupied === null || f.seat_occupied === undefined ? null : !!f.seat_occupied));
 
   // haversine, km
   const R = 6371, rad = (d) => d * Math.PI / 180;
@@ -1941,7 +1971,7 @@ app.get('/api/map/journey', wrap(async (req, res) => {
 
   const GAP_MIN = 20;          // a longer silence than this is not a straight line
   const segments = [];
-  let cur = null, km = 0, movingKm = 0, occupiedKm = 0, measuredKm = 0, occupiedFixes = 0;
+  let cur = null, km = 0, movingKm = 0;
   for (let i = 0; i < fixes.length; i++) {
     const f = fixes[i], prev = fixes[i - 1];
     const gapMin = prev ? (new Date(f.captured_at) - new Date(prev.captured_at)) / 6e4 : 0;
@@ -1949,25 +1979,53 @@ app.get('/api/map/journey', wrap(async (req, res) => {
     if (prev && gapMin <= GAP_MIN && step < 60) {           // 60km in one hop = bad fix
       km += step;
       if ((prev.speed || 0) > 0) movingKm += step;
-      /* A NULL seat sensor is NOT an empty seat. FMS never reports occupancy at
-         all, so treating NULL as false gave every FMS-tracked vehicle a hard
-         "With passenger 0 km · 0% of distance" — including one that ran fifteen
-         bookings and 101.9 km that day — and drew its whole trail dashed in the
-         "Running empty" colour, which is a positive claim rather than an
-         absence. Only fixes that actually reported are measured. */
-      if (prev.seat_occupied !== null && prev.seat_occupied !== undefined) {
-        measuredKm += step;
-        if (prev.seat_occupied) occupiedKm += step;
-      }
     }
-    if (f.seat_occupied !== null && f.seat_occupied !== undefined) occupiedFixes++;
-    // `occupied` is tri-state on the wire: true, false, or null for "this feed
-    // does not report it". The map colours the third case neutrally.
-    const occ = f.seat_occupied === null || f.seat_occupied === undefined ? null : !!f.seat_occupied;
+    // `occupied` is tri-state on the wire: true, false, or null for "this fix
+    // carries no seat reading". The map colours the third case neutrally.
+    const occ = occOf(f);
     if (!cur || gapMin > GAP_MIN) { cur = { points: [], occupied: occ }; segments.push(cur); }
     cur.points.push({ t: f.captured_at, lat: f.lat, lng: f.lng, speed: f.speed,
-                      status: f.status, occupied: occ });
+                      status: f.status, occupied: occ, source: f.source });
   }
+  /* WITH A PASSENGER, PER PROVIDER — measured along each provider's own fixes.
+     ─────────────────────────────────────────────────────────────────────────
+     A NULL seat reading is NOT an empty seat. When FMS carried no seat reading
+     at all, treating NULL as false gave every FMS-tracked vehicle a hard "With
+     passenger 0 km · 0% of distance" — including one that ran fifteen bookings
+     and 101.9 km that day — and drew its whole trail dashed in the "Running
+     empty" colour, which is a positive claim rather than an absence. Only
+     fixes that actually reported are measured, and that is unchanged.
+
+     What changed on 2026-09-23 is that FMS reports a live passenger count, so
+     an FMS car's occupancy IS measured from that day on, and the tile must say
+     by whom. Each provider is walked along its OWN fixes: the two cars that
+     carry both trackers (L44251, L45243) put the two devices a median 12.7 and
+     25.6 km apart at the same minute (docs/COVERAGE.md), so a step from a
+     CABMAN fix to an FMS fix is not a distance the car drove, and adding the
+     two providers' passenger kilometres would count one ride twice. With one
+     provider reporting, its figure is the day's; with two, each is returned
+     under its own name and the combined figure is absent with that reason. */
+  const occupancy = [];
+  for (const src of [...new Set(fixes.map((f) => f.source))]) {
+    const list = fixes.filter((f) => f.source === src);
+    let measured = 0, occupied = 0, reported = 0;
+    for (let i = 0; i < list.length; i++) {
+      const f = list[i], prev = list[i - 1];
+      if (occOf(f) !== null) reported++;
+      if (!prev) continue;
+      const gapMin = (new Date(f.captured_at) - new Date(prev.captured_at)) / 6e4;
+      const step = dist(prev, f);
+      if (gapMin > GAP_MIN || step >= 60 || occOf(prev) === null) continue;
+      measured += step;
+      if (occOf(prev)) occupied += step;
+    }
+    if (!reported) continue;
+    occupancy.push({ source: src, label: src === 'fms' ? 'FMS live seat count' : src === 'cabman' ? 'CABMAN DT' : src,
+      occupied_km: Math.round(occupied * 10) / 10, measured_km: Math.round(measured * 10) / 10,
+      reported_fixes: reported });
+  }
+  const one = occupancy.length === 1 ? occupancy[0] : null;
+  const occupiedFixes = occupancy.reduce((a, o) => a + o.reported_fixes, 0);
   const [drv] = await q(
     // The id too. The map's KPI row printed this person's name and linked
     // nowhere, on the page most likely to raise a question about them.
@@ -1979,11 +2037,19 @@ app.get('/api/map/journey', wrap(async (req, res) => {
     driver_trips: drv?.trips ?? null,
     distance_km: Math.round(km * 10) / 10,
     moving_km: Math.round(movingKm * 10) / 10,
-    // null, not 0, when no fix on this day reported occupancy at all.
-    occupied_km: occupiedFixes ? Math.round(occupiedKm * 10) / 10 : null,
-    occupancy_measured_km: occupiedFixes ? Math.round(measuredKm * 10) / 10 : 0,
+    // null, not 0, when no fix on this day reported occupancy at all — and
+    // null when two providers each measured it, for the reason stated below.
+    occupied_km: one ? one.occupied_km : null,
+    occupancy_measured_km: one ? one.measured_km : 0,
     occupancy_reported_fixes: occupiedFixes,
     occupancy_reported: occupiedFixes > 0,
+    occupancy_source: one ? one.label : null,
+    occupancy_by_source: occupancy,
+    occupancy_note: occupancy.length > 1
+      ? `${occupancy.map((o) => o.label).join(' and ')} each measured this car on this day. Their `
+        + 'devices report different positions for it, so each figure is measured along its own '
+        + 'fixes and the two are not added together — that would count one ride twice.'
+      : null,
     first_fix: fixes[0]?.captured_at || null,
     last_fix: fixes[fixes.length - 1]?.captured_at || null,
   });
@@ -2878,13 +2944,41 @@ app.get('/api/reconcile/periods', wrap(async (req, res) => {
    return an empty page and call it a clean one, so the predicate is left out
    deliberately and the front end says why. */
 const SEG_FLEET = "AND ($3::text IS NULL OR fleet_id = $3)";
+/* TWO SEAT-SENSOR PROVIDERS, THREE SOURCES, AND ONE RIDE COUNTED ONCE.
+   ─────────────────────────────────────────────────────────────────────────
+   Since the operator's rulings of 2026-09-23 a segment comes from CABMAN DT,
+   FMS's live seat count or an FMS journey (occupancy_segment.source,
+   sql/schema_v85.sql). From that day one real ride on an FMS car is normally
+   two segments — the live count saw it and FMS filed it — and on the two cars
+   with both trackers it can be three. Every figure below that is a TOTAL is
+   counted through occCountsOnce() (api/occupancy_sql.js): a ride once, by the
+   segment that represents it, with that segment's distance. `by_source` beside
+   it counts every segment per provider, and `dedupe_rule` says in words how
+   the two relate — a reader who adds the providers up and gets more than the
+   combined figure has to be able to find out why on the same response. */
+const SEG_ONCE = `(SELECT o.*, ${occCountsOnce('o')} AS once FROM occupancy_segment o
+   WHERE ${DAYWIN('o.started_at')} AND ($3::text IS NULL OR o.fleet_id = $3)) s`;
+/* Per provider, over the same window and fleet: every segment it produced. */
+const SEG_BY_SOURCE_SQL = `SELECT source, count(*)::int segments,
+       count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
+       round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,0) unauth_km,
+       count(*) FILTER (WHERE verdict='authorized')::int authorized,
+       count(*) FILTER (WHERE low_confidence)::int needs_a_human,
+       count(DISTINCT (started_at AT TIME ZONE 'Asia/Dubai')::date)::int days_with_data,
+       min((started_at AT TIME ZONE 'Asia/Dubai')::date)::text first_day,
+       max((started_at AT TIME ZONE 'Asia/Dubai')::date)::text last_day,
+       count(DISTINCT plate)::int plates
+  FROM occupancy_segment WHERE ${DAYWIN('started_at')} ${SEG_FLEET} GROUP BY source`;
 app.get('/api/unauthorized/summary', wrap(async (req, res) => {
   const [from, to, , fleet] = range(req);
   const rows = await q(
-    `SELECT verdict, count(*)::int n, round(sum(distance_km)::numeric,0) km,
-            round(sum(duration_min)::numeric,0) minutes
-     FROM occupancy_segment WHERE ${DAYWIN('started_at')} ${SEG_FLEET}
+    `SELECT verdict, count(*) FILTER (WHERE once)::int n,
+            round(sum(distance_km) FILTER (WHERE once)::numeric,0) km,
+            round(sum(duration_min) FILTER (WHERE once)::numeric,0) minutes,
+            count(*)::int segments
+     FROM ${SEG_ONCE}
      GROUP BY verdict ORDER BY n DESC`, [from, to, fleet]);
+  const bySrc = await q(SEG_BY_SOURCE_SQL, [from, to, fleet]);
   /* Built FROM the same rows as the donut, not from a second query with its
      own hand-written verdict list. That list named four of the seven verdicts
      schema_v8 documents, so `unverifiable` and `stationary` were counted
@@ -2893,25 +2987,30 @@ app.get('/api/unauthorized/summary', wrap(async (req, res) => {
      as needing a human. A strip that cannot drift from the chart under it
      cannot disagree with it. */
   const [extra] = await q(
-    `SELECT round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,0) unauth_km,
-            count(*) FILTER (WHERE verdict='unauthorized' AND low_confidence)::int low_confidence,
-            count(*) FILTER (WHERE low_confidence)::int needs_a_human,
+    `SELECT round(sum(distance_km) FILTER (WHERE verdict='unauthorized' AND once)::numeric,0) unauth_km,
+            count(*) FILTER (WHERE verdict='unauthorized' AND low_confidence AND once)::int low_confidence,
+            count(*) FILTER (WHERE low_confidence AND once)::int needs_a_human,
             /* How much of the window this answer actually covers.
                ─────────────────────────────────────────────────────────────
-               Seat occupancy comes from CABMAN, which is a five-minute
-               realtime poll: it stores what it sees from the moment it starts
-               and there is no history behind it. On this fleet that is about
-               three days of evidence, and the page was reporting "0 unexplained
-               trips" over a thirty-day window on the strength of it.
+               When CABMAN was the only seat sensor, this was about three days
+               of evidence under a thirty-day window, and the page reported
+               "0 unexplained trips" over the thirty on the strength of it. The
+               number was never wrong — it was right about three days and
+               presented as an answer about thirty.
 
-               The number was never wrong — it was right about three days and
-               presented as an answer about thirty. Those are different claims
-               and only one of them is true. */
+               Three sources now reach back three different distances: CABMAN
+               DT's pad is a live poll with no history (and Ecosine only), FMS's
+               live seat count exists from 2026-09-23, and FMS journeys reach
+               back about two years but only over windows the reconciler has
+               judged. So the days are counted overall AND per provider
+               (coverage.by_source), and a day any provider watched counts as
+               a day with evidence. */
             count(DISTINCT (started_at AT TIME ZONE 'Asia/Dubai')::date)::int days_with_data
-     FROM occupancy_segment WHERE ${DAYWIN('started_at')} ${SEG_FLEET}`, [from, to, fleet]);
+     FROM ${SEG_ONCE}`, [from, to, fleet]);
   const daysInWindow = Math.max(1, Math.round(
     (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1);
   const byVerdict = Object.fromEntries(rows.map((r) => [r.verdict, r.n]));
+  const srcCtx = { from, to, fleet };
   /* THE WINDOW'S UNEXPLAINED DISTANCE, PRICED.
      ───────────────────────────────────────────────────────────────────────
      `unauth_km` has been on this response since the page was built and a
@@ -2947,10 +3046,12 @@ app.get('/api/unauthorized/summary', wrap(async (req, res) => {
       days_with_data: extra?.days_with_data || 0,
       days_in_window: daysInWindow,
       complete: (extra?.days_with_data || 0) >= daysInWindow,
+      by_source: occCoverageBySource(bySrc, srcCtx),
     },
     totals: {
       // Every verdict the schema defines, whether or not it occurred, so a
-      // category dropping to zero is visible rather than absent.
+      // category dropping to zero is visible rather than absent. Each one
+      // counts a ride once — see SEG_ONCE above.
       unauthorized: byVerdict.unauthorized || 0,
       authorized: byVerdict.authorized || 0,
       unverifiable: byVerdict.unverifiable || 0,
@@ -2963,6 +3064,12 @@ app.get('/api/unauthorized/summary', wrap(async (req, res) => {
       low_confidence: extra?.low_confidence ?? 0,
       needs_a_human: extra?.needs_a_human ?? 0,
     },
+    /* Each provider's own figures, every segment it produced. A provider with
+       nothing in this window carries NULL figures and the true reason, never
+       a zero: CABMAN over Egari is not a clean fleet, it is no account. */
+    by_source: occBySource(bySrc, srcCtx,
+      ['unauthorized', 'unauth_km', 'authorized', 'needs_a_human', 'days_with_data']),
+    dedupe_rule: OCC_DEDUPE_RULE,
   });
 }));
 
@@ -2975,8 +3082,10 @@ app.get('/api/unauthorized/summary', wrap(async (req, res) => {
    The page named one fleet and accused another's cars.
 
    CABMAN DT is configured for Ecosine only (src/config.js says so: Egari's
-   credentials have never been supplied), so the honest Egari answer here is an
-   empty table under that note, not somebody else's vehicles. */
+   credentials have never been supplied). Egari's seat evidence comes from FMS
+   — its live seat count and its journeys — so an Egari-filtered list holds
+   Egari's own FMS segments, each row naming its provider in `source` and
+   `source_label`, and never somebody else's vehicles. */
 app.get('/api/unauthorized/list', wrap(async (req, res) => {
   const [from, to, , fleet] = range(req);
   const verdict = req.query.verdict || 'unauthorized';
@@ -2996,6 +3105,13 @@ app.get('/api/unauthorized/list', wrap(async (req, res) => {
             o.verdict_reason, o.nearest_platform, o.nearest_trip_id, o.nearest_gap_min,
             o.channels_checked, o.boundary_gap_min,
             o.start_lat, o.start_lng, o.end_lat, o.end_lng,
+            /* Which provider this segment came from, in code and in words, and
+               the passenger count where the provider reported one. Every row
+               of every source is listed — ruling 4 of 2026-09-23 — so a ride
+               FMS saw twice appears twice here, each with its own source and
+               its own timestamps; only the TOTALS count it once. */
+            o.source, ${occSourceLabel('o.source')} AS source_label, o.passengers,
+            ${occCountsOnce('o')} AS counts_once,
             /* WHERE it happened, in words. The row already carried both ends
                as decimal pairs and rendered neither, so the most serious claim
                this product makes — a car moved with a passenger and nothing
@@ -3061,14 +3177,22 @@ app.get('/api/unauthorized/list', wrap(async (req, res) => {
 app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
   const [from, to, , fleet] = range(req);
   const rows = await q(
+    /* A ride once per car (occCountsOnce), with each provider's own count of
+       unexplained segments beside it, so a bar reading 3 can be seen to rest
+       on, say, 3 FMS journeys and 2 FMS live segments of the same rides. */
     `WITH seg AS (
        SELECT plate,
-              count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
-              count(*) FILTER (WHERE verdict='authorized')::int authorized,
-              count(*) FILTER (WHERE verdict='sensor_suspect')::int sensor_suspect,
-              round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,1) unauth_km
-       FROM occupancy_segment WHERE ${DAYWIN('started_at')} ${SEG_FLEET}
-       GROUP BY plate HAVING count(*) FILTER (WHERE verdict='unauthorized') > 0),
+              count(*) FILTER (WHERE verdict='unauthorized' AND once)::int unauthorized,
+              count(*) FILTER (WHERE verdict='authorized' AND once)::int authorized,
+              count(*) FILTER (WHERE verdict='sensor_suspect' AND once)::int sensor_suspect,
+              round(sum(distance_km) FILTER (WHERE verdict='unauthorized' AND once)::numeric,1) unauth_km,
+              jsonb_build_object(
+                'cabman', count(*) FILTER (WHERE verdict='unauthorized' AND source='cabman'),
+                'fms_live', count(*) FILTER (WHERE verdict='unauthorized' AND source='fms_live'),
+                'fms_trip', count(*) FILTER (WHERE verdict='unauthorized' AND source='fms_trip'))
+                AS unauthorized_by_source
+       FROM ${SEG_ONCE}
+       GROUP BY plate HAVING count(*) FILTER (WHERE verdict='unauthorized' AND once) > 0),
      /* ONE ACCUSED NAME PER PERSON, not one per platform account.
         ─────────────────────────────────────────────────────────────────────
         THE DEFECT. string_agg(DISTINCT v.driver_name) is a fold on the
@@ -3125,12 +3249,14 @@ app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
      already prefers a measured figure; this is where it comes from, and without
      it the tile falls back to counting the hundred rows it received. */
   const [t] = await q(
-    `SELECT count(DISTINCT plate)::int vehicles,
-            count(*) FILTER (WHERE verdict='unauthorized')::int segments
-     FROM occupancy_segment
-     WHERE ${DAYWIN('started_at')} AND verdict='unauthorized' ${SEG_FLEET}`, [from, to, fleet]);
+    `SELECT count(DISTINCT plate) FILTER (WHERE once)::int vehicles,
+            count(*) FILTER (WHERE once)::int segments
+     FROM ${SEG_ONCE} WHERE verdict='unauthorized'`, [from, to, fleet]);
+  const bySrc = await q(SEG_BY_SOURCE_SQL, [from, to, fleet]);
   res.json({ rows, total: t?.vehicles ?? rows.length, segments: t?.segments ?? null,
-    shown: rows.length, truncated: (t?.vehicles ?? 0) > rows.length });
+    shown: rows.length, truncated: (t?.vehicles ?? 0) > rows.length,
+    by_source: occBySource(bySrc, { from, to, fleet }, ['unauthorized', 'unauth_km']),
+    dedupe_rule: OCC_DEDUPE_RULE });
 }));
 
 // daily trend of unauthorized vs authorized occupancy
@@ -3162,15 +3288,23 @@ app.get('/api/unauthorized/daily', wrap(async (req, res) => {
        SELECT generate_series(
          greatest($1::date, $2::date - 400), $2::date, interval '1 day')::date AS d
      ),
+     /* A ride once per day (occCountsOnce — a ride is counted on the day of
+        the segment that represents it, so the bars sum to the window's own
+        total), and each provider's own unexplained count beside it. */
      agg AS (
        SELECT (started_at AT TIME ZONE 'Asia/Dubai')::date AS d,
-              count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
-              count(*) FILTER (WHERE verdict='authorized')::int authorized,
-              count(*) FILTER (WHERE verdict IN ('unverifiable','pending'))::int needs_a_human,
-              count(*) FILTER (WHERE verdict='partial')::int partial,
-              count(*) FILTER (WHERE verdict='stationary')::int stationary,
-              count(*)::int segments
-       FROM occupancy_segment WHERE ${DAYWIN('started_at')} ${SEG_FLEET} GROUP BY 1
+              count(*) FILTER (WHERE verdict='unauthorized' AND once)::int unauthorized,
+              count(*) FILTER (WHERE verdict='authorized' AND once)::int authorized,
+              count(*) FILTER (WHERE verdict IN ('unverifiable','pending') AND once)::int needs_a_human,
+              count(*) FILTER (WHERE verdict='partial' AND once)::int partial,
+              count(*) FILTER (WHERE verdict='stationary' AND once)::int stationary,
+              count(*) FILTER (WHERE once)::int segments,
+              jsonb_build_object(
+                'cabman', count(*) FILTER (WHERE verdict='unauthorized' AND source='cabman'),
+                'fms_live', count(*) FILTER (WHERE verdict='unauthorized' AND source='fms_live'),
+                'fms_trip', count(*) FILTER (WHERE verdict='unauthorized' AND source='fms_trip'))
+                AS unauthorized_by_source
+       FROM ${SEG_ONCE} GROUP BY 1
      )
      SELECT to_char(cal.d, 'YYYY-MM-DD') AS d,
             coalesce(agg.unauthorized, 0) unauthorized,
@@ -3179,6 +3313,8 @@ app.get('/api/unauthorized/daily', wrap(async (req, res) => {
             coalesce(agg.partial, 0) partial,
             coalesce(agg.stationary, 0) stationary,
             coalesce(agg.segments, 0) segments,
+            -- NULL, not zeros, on a day with no segment from any provider.
+            agg.unauthorized_by_source,
             -- No segment at all is not "nobody sat in a car": it is a day the
             -- reconciler had nothing to judge, and must not be drawn as zero.
             (agg.d IS NULL) AS uncollected
@@ -3210,6 +3346,39 @@ app.get('/api/unauthorized/daily', wrap(async (req, res) => {
    widens the window past the default two days, which is exactly when they are
    looking for the tail. The rows are still capped; what changes is that the
    response says so. */
+/* PER PROVIDER, because "dead" means a different thing on each.
+   ─────────────────────────────────────────────────────────────────────────
+   CABMAN DT's pad reports occupied/empty on every fix, so a dead pad is one
+   that never says occupied: at least SENSOR_FIX_FLOOR fixes and none occupied
+   (api/public/app.js has always drawn it that way; the rule is unchanged and
+   now also travels on the row as `state`).
+
+   FMS's Seat Count never reads 0 on a journey — 234,824 of 234,824 carry 1
+   to 6, measured 2026-09-23 — so "never occupied" cannot be the test for FMS
+   journeys: it would never fire. What a dead FMS seat count looks like is
+   ABSENCE while the car demonstrably carried people:
+     fms_trip  FMS tracked the car (live fixes in the window) and it carried
+               bookings, but FMS filed no journey with a seat count at all.
+     fms_live  FMS reported a live seat count on the car and it carried
+               bookings, but the count never once reached 1.
+   Bookings are the evidence a passenger was aboard; without any, silence
+   proves nothing and the row says so rather than calling it dead.
+
+   The CABMAN suspect-segment count is CABMAN's own segments only: a stuck
+   FMS journey says nothing about a CABMAN pad on the same car. */
+const SENSOR_FIX_FLOOR = 20;
+const cabmanState = (r) => (r.sensor_suspect_segments > 0 ? 'suspect'
+  : r.occupied_fixes > 0 ? 'ok'
+    : r.total_fixes >= SENSOR_FIX_FLOOR ? 'never triggers' : 'too few fixes to judge');
+const CABMAN_REASON = {
+  suspect: (r) => `${r.sensor_suspect_segments} CABMAN DT interval(s) on this car read as physically `
+    + 'implausible — a pad stuck on — and were excluded from every verdict.',
+  ok: (r) => `The CABMAN DT pad reported an occupied seat on ${r.occupied_fixes} of ${r.total_fixes} fixes.`,
+  'never triggers': (r) => `The CABMAN DT pad reported on ${r.total_fixes} fixes and never once said `
+    + 'the seat was occupied — a dead pad produces no interval to judge.',
+  'too few fixes to judge': (r) => `Only ${r.total_fixes} CABMAN DT fix(es) in this window — under `
+    + `${SENSOR_FIX_FLOOR} nothing can be concluded about the pad.`,
+};
 app.get('/api/sensor-health', wrap(async (req, res) => {
   const [from, to, , fleet] = range(req);
   const rows = await q(
@@ -3229,7 +3398,8 @@ app.get('/api/sensor-health', wrap(async (req, res) => {
      FROM telemetry_snapshot t
      LEFT JOIN (SELECT plate, count(*) FILTER (WHERE verdict='sensor_suspect') suspect
                 FROM occupancy_segment
-                WHERE ${DAYWIN('started_at')} ${SEG_FLEET} GROUP BY plate) o ON o.plate = t.plate
+                WHERE source = 'cabman' AND ${DAYWIN('started_at')} ${SEG_FLEET}
+                GROUP BY plate) o ON o.plate = t.plate
      WHERE t.source='cabman' AND ${DAYWIN('t.captured_at')}
        AND ($3::text IS NULL OR t.fleet_id = $3)
      GROUP BY t.plate
@@ -3240,9 +3410,89 @@ app.get('/api/sensor-health', wrap(async (req, res) => {
               total_fixes DESC
      LIMIT 100`, [from, to, fleet]);
   const total = rows.length ? rows[0]._total : 0;
+
+  /* The two FMS rules, one row per plate per FMS source. Every figure the
+     rule reads rides on the row, so the state can be checked rather than
+     trusted. Bounded by the window on all three tables. */
+  const fms = await q(
+    `WITH live AS (
+       SELECT t.plate, max(t.fleet_id) AS fleet_id,
+              count(*)::int live_fixes,
+              count(*) FILTER (WHERE t.seat_count IS NOT NULL)::int counted_fixes,
+              count(*) FILTER (WHERE t.seat_count >= 1)::int occupied_fixes
+         FROM telemetry_snapshot t
+        WHERE t.source = 'fms' AND ${DAYWIN('t.captured_at')}
+          AND ($3::text IS NULL OR t.fleet_id = $3)
+        GROUP BY t.plate),
+     bk AS (
+       SELECT plate, count(*)::int bookings FROM trip_norm
+        WHERE is_booking AND local_day BETWEEN $1::date AND $2::date AND plate IS NOT NULL
+        GROUP BY plate),
+     jr AS (
+       SELECT plate, count(*)::int journeys FROM trip
+        WHERE platform = 'fms' AND seat_count IS NOT NULL AND ${DAYWIN('requested_at')}
+        GROUP BY plate)
+     SELECT live.plate, live.fleet_id, live.live_fixes, live.counted_fixes, live.occupied_fixes,
+            coalesce(bk.bookings, 0) bookings, coalesce(jr.journeys, 0) journeys
+       FROM live LEFT JOIN bk USING (plate) LEFT JOIN jr USING (plate)
+      ORDER BY live.plate`, [from, to, fleet]);
+  const fmsTrip = fms.map((r) => {
+    const state = r.journeys > 0 ? 'ok' : r.bookings > 0 ? 'no journey seat count' : 'no bookings to judge against';
+    return { plate: r.plate, source: 'fms_trip', source_label: OCC_SOURCE_LABEL.fms_trip,
+      live_fixes: r.live_fixes, bookings: r.bookings, journeys: r.journeys,
+      /* Judgeable only against bookings — the evidence a passenger was aboard. */
+      judgeable: state !== 'no bookings to judge against',
+      state, dead: state === 'no journey seat count',
+      reason: state === 'ok'
+        ? `FMS filed ${r.journeys} journey(s) with a seat count on this car in this window.`
+        : state === 'no journey seat count'
+          ? `FMS tracked this car (${r.live_fixes} live fixes) and it carried ${r.bookings} booking(s), `
+            + 'but FMS filed no journey with a seat count for it in this window.'
+          : `FMS tracked this car (${r.live_fixes} live fixes) but no booking was collected for it in `
+            + 'this window, so the absence of a journey seat count proves nothing either way.' };
+  });
+  const fmsLive = fms.filter((r) => r.counted_fixes > 0).map((r) => {
+    const state = r.occupied_fixes > 0 ? 'ok' : r.bookings > 0 ? 'never reports a passenger'
+      : 'no bookings to judge against';
+    return { plate: r.plate, source: 'fms_live', source_label: OCC_SOURCE_LABEL.fms_live,
+      counted_fixes: r.counted_fixes, occupied_fixes: r.occupied_fixes, bookings: r.bookings,
+      judgeable: state !== 'no bookings to judge against',
+      state, dead: state === 'never reports a passenger',
+      reason: state === 'ok'
+        ? `FMS’s live seat count read 1 or more on ${r.occupied_fixes} of ${r.counted_fixes} fixes.`
+        : state === 'never reports a passenger'
+          ? `FMS reported a live seat count on ${r.counted_fixes} fixes and the car carried `
+            + `${r.bookings} booking(s), but the count never once reached 1.`
+          : `FMS reported a live seat count on ${r.counted_fixes} fixes, never 1 or more, and no `
+            + 'booking was collected for this car in this window, so that proves nothing either way.' };
+  });
+  /* Dead first within each FMS source, as the CABMAN list puts its furthest
+     from plausible first. */
+  const deadFirst = (a, b) => Number(b.dead) - Number(a.dead) || a.plate.localeCompare(b.plate);
+  fmsLive.sort(deadFirst); fmsTrip.sort(deadFirst);
+  const cab = rows.map(({ _total, ...r }) => {
+    const state = cabmanState(r);
+    return { ...r, source: 'cabman', source_label: OCC_SOURCE_LABEL.cabman,
+      state, dead: state === 'never triggers', reason: CABMAN_REASON[state](r) };
+  });
+  const FMS_CAP = 100;
+  const all = [...cab, ...fmsLive.slice(0, FMS_CAP), ...fmsTrip.slice(0, FMS_CAP)];
+  const grand = total + fmsLive.length + fmsTrip.length;
+  const per = (list, tot, shown, rule) => ({ total: tot, shown, truncated: tot > shown,
+    dead: list.filter((r) => r.dead).length, rule });
   res.json({
-    rows: rows.map(({ _total, ...r }) => r),
-    total, shown: rows.length, truncated: total > rows.length,
+    rows: all,
+    total: grand, shown: all.length, truncated: grand > all.length,
+    by_source: {
+      cabman: { label: OCC_SOURCE_LABEL.cabman, ...per(cab, total, cab.length,
+        `dead when at least ${SENSOR_FIX_FLOOR} fixes and none of them occupied`) },
+      fms_live: { label: OCC_SOURCE_LABEL.fms_live, ...per(fmsLive, fmsLive.length,
+        Math.min(FMS_CAP, fmsLive.length),
+        'dead when FMS reported a live seat count and the car carried bookings, but the count never reached 1') },
+      fms_trip: { label: OCC_SOURCE_LABEL.fms_trip, ...per(fmsTrip, fmsTrip.length,
+        Math.min(FMS_CAP, fmsTrip.length),
+        'dead when FMS tracked the car and it carried bookings, but FMS filed no journey with a seat count') },
+    },
   });
 }));
 

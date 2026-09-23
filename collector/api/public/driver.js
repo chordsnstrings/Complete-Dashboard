@@ -21,7 +21,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   sourceLabel, completionTone, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows,
   avatar, moneyInTile, cashOnHandTile, bankDepositTile, faresTile,
   alertRateFigure, splitAlerts, standingNote,
-  UBER_FARE_WHY, dialable } from './ui.js';
+  UBER_FARE_WHY, dialable, segSourceLabel } from './ui.js';
 /* personAddr/personIdOf/rewriteParam: the person id as an address, and the
    in-place rewrite that leaves the reader holding the canonical one. See the
    block above rewriteParam in data.js — the rewrite must not be a navigation,
@@ -2632,8 +2632,9 @@ async function tabTrips(root, id) {
         ? 'The unexplained-journey list could not be loaded, so nothing here says whether there '
         + 'were any.'
         : cov && cov.days_with_data === 0
-          ? 'No seat-occupancy evidence covers this window either, so this is not a record of no '
-          + 'unexplained journeys — it is an absence of the sensor that would find them.'
+          ? 'No seat-occupancy evidence from CABMAN DT or FMS covers this window either, so this is '
+          + 'not a record of no unexplained journeys — it is an absence of the sensor that would '
+          + `find them. ${cov.note || ''}`
           : 'No journey with no booking against it is attributed to them here either.'));
   }
   const bar = el('div', 'toolbar');
@@ -2686,10 +2687,14 @@ async function tabTrips(root, id) {
        operator uses. */
     { label: 'Requested', key: 'requested_at', render: (r) => (r.kind === 'unexplained'
       ? `<span style="display:block;margin-bottom:3px">${pill('no booking', 'bad',
-        'The seat sensor saw a passenger aboard and no channel booked the journey. The name '
+        `${segSourceLabel(r)} saw a passenger aboard and no channel booked the journey. The name `
         + 'beside it is an inference, not a trip record — open the Unexplained trips tab for the '
         + 'rule that named this person and the measurement behind it.')}</span>`
         + tripTime(r.plate, r.requested_at)
+        /* Which provider saw it, and when it ended by that provider's clock:
+           a ride two providers saw is two rows here, each its own reading. */
+        + `<span class="dim" style="display:block;font-size:11px">${esc(segSourceLabel(r))}`
+        + `${r.ended_at ? ` · to ${esc(timeStr(r.ended_at))}` : ''}</span>`
         + (r.forgone_aed == null ? ''
           : `<span class="ent-off" style="display:block;margin-top:2px;font-size:11px" title="${
             esc(`This journey earned nothing: no channel booked it. Its distance would have been `
@@ -2927,7 +2932,7 @@ async function tabTrips(root, id) {
       { sortable: true, sortId: 'dtrips', defaultSort: { key: 'requested_at', dir: 'desc' },
         onRow: (r) => {
           location.hash = r.kind === 'unexplained'
-            ? href('segment', r.plate, r.started_at)
+            ? href('segment', r.plate, r.started_at, r.source ? { source: r.source } : null)
             : href('trip', r.platform, r.external_id);
         } }));
     if (!list.length) {
@@ -3085,9 +3090,12 @@ const segForgone = (r) => (r.forgone_aed == null
    through tripTime() — the same destination a booking's timestamp gives on the
    Trips tab — because the first thing an operator does with a journey nobody
    booked is watch the car drive it. */
+/* With its provider: CABMAN DT, FMS's live seat count or an FMS journey. A
+   ride two providers saw is two rows, each with its own times. */
 const segWhen = (r) => tripTime(r.plate, r.started_at)
   + `<span class="dim"> → ${esc(timeStr(r.ended_at))}</span>`
-  + (r.duration_min == null ? '' : `<span class="dim"> · ${fmt(r.duration_min)} min</span>`);
+  + (r.duration_min == null ? '' : `<span class="dim"> · ${fmt(r.duration_min)} min</span>`)
+  + `<span class="dim" style="display:block;font-size:11px">${esc(segSourceLabel(r))}</span>`;
 
 /* WHICH RULE NAMED THIS PERSON, IN FOUR WORDS.
    The tier pill is deliberately UNCOLOURED, and that is not an oversight.
@@ -3265,7 +3273,7 @@ const unexplainedTable = (rows, { means, candidates = false, sortId }) => tableF
   /* The row opens the SEGMENT, which is where the case for and against it is
      argued in full. A name on this page that leads nowhere is a name nobody
      can check. */
-  onRow: (r) => { location.hash = href('segment', r.plate, r.started_at); } });
+  onRow: (r) => { location.hash = href('segment', r.plate, r.started_at, r.source ? { source: r.source } : null); } });
 
 /* ── tab: unexplained trips ───────────────────────────────────────────────
    Asked for in these words: "we can get the unauthorized trips on the time and
@@ -3284,13 +3292,17 @@ const unexplainedTable = (rows, { means, candidates = false, sortId }) => tableF
       below the first, under a heading that says in words that no claim is
       being made.
 
-   2. AN EMPTY TAB IS NEVER AN EXONERATION. CABMAN is a five-minute realtime
-      poll with no history behind it and it is configured for Ecosine only:
-      measured over 2026-06-01..2026-09-16, 27 of 108 days carry any segment at
-      all. So "nothing found" and "nothing was looked at" are different facts
-      about a person, and coverage.note — which states which one this is — is
-      printed ABOVE the tables rather than under them. The empty state says
-      which of the two it is and never implies a check that did not run.
+   2. AN EMPTY TAB IS NEVER AN EXONERATION. When CABMAN was the only seat
+      sensor — a five-minute realtime poll with no history, Ecosine only —
+      27 of 108 days over 2026-06-01..2026-09-16 carried any segment at all.
+      Since 2026-09-23 FMS is a second provider (its live seat count from that
+      day, its journeys about two years deep but judged only over windows the
+      reconciler has run), and Egari is covered by FMS. Coverage is still
+      partial and still uneven, so "nothing found" and "nothing was looked at"
+      are different facts about a person, and coverage.note — which states
+      which one this is, per provider — is printed ABOVE the tables rather than
+      under them. The empty state says which of the two it is and never
+      implies a check that did not run.
 
    3. THE CONTRACT TRAVELS WITH THE NAMES. `note` on the response is the
       sentence that says every name here is an inference; it is rendered on the
@@ -3360,16 +3372,25 @@ async function tabUnauthorized(root, id) {
      and the product's own words for that rung are "this is custody, not
      driving". A manager quoting AED 811 has converted eight custody records
      into a monetary claim, with the qualifier one tile to the left. */
-  const byTime = att.rows.filter((r) => r.attribution_tier === 'bracketed');
-  const byRule = att.rows.filter((r) => r.attribution_tier !== 'bracketed');
-  const km = sum(att.rows, 'distance_km');
-  const aed = sum(att.rows, 'forgone_aed');
+  /* A RIDE ONCE. From 2026-09-23 one ride on an FMS car is normally two rows
+     — FMS's live count and FMS's journey — and summing both would count its
+     kilometres and its worth twice. The server marks the row that represents
+     the ride (counts_once, the same rule as every combined figure), and these
+     sums read only those. */
+  const once = att.rows.filter((r) => r.counts_once !== false);
+  const byTime = once.filter((r) => r.attribution_tier === 'bracketed');
+  const byRule = once.filter((r) => r.attribution_tier !== 'bracketed');
+  const km = sum(once, 'distance_km');
+  const aed = sum(once, 'forgone_aed');
   const kmTime = sum(byTime, 'distance_km');
   const aedTime = sum(byTime, 'forgone_aed');
   p.body.append(kpiRow([
     { label: 'Named beside', value: fmt(att.total), key: 'unauth-attributed',
       tone: att.total ? 'warn' : null,
-      sub: att.total ? 'journeys no channel booked' : 'no journey in this window names them' },
+      sub: att.total ? 'journeys no channel booked, a ride counted once across providers'
+        + (att.by_source ? ` · segments: ${[['cabman', 'CABMAN DT'], ['fms_live', 'FMS live seat count'],
+          ['fms_trip', 'FMS trip seat count']].map(([k, l]) => `${l} ${fmt(att.by_source[k] || 0)}`).join(' · ')}` : '')
+        : 'no journey in this window names them' },
     { label: 'Named by time', value: fmt(att.by_tier?.bracketed || 0),
       sub: 'their own Uber trips bracket the window' },
     { label: 'Last trip on the car', value: fmt(att.by_tier?.last_trip || 0),
@@ -3423,8 +3444,8 @@ async function tabUnauthorized(root, id) {
        found" here would read as a clean record, and on two of the three it
        would be a clean record nobody measured. */
     empty(a.body, cov.days_with_data === 0
-      ? 'No seat-occupancy evidence exists for this window at all, so this is not a record of '
-        + 'nothing found — nothing was looked at. Widen the range, or read the note above.'
+      ? 'No seat-occupancy evidence from CABMAN DT or FMS exists for this window at all, so this is '
+        + 'not a record of nothing found — nothing was looked at. Widen the range, or read the note above.'
       : cand.total
         ? 'No journey in this window is attributed to this person. They are one of several '
           + `candidates on ${fmt(cand.total)} ${plural(cand.total, 'journey', 'journeys')}, listed `
@@ -3443,11 +3464,13 @@ async function tabUnauthorized(root, id) {
            either number is missing. */
         : (cov.days_with_data == null || cov.days_in_window == null
           ? 'No unexplained journey in this window names this person. How many days the seat '
-            + 'sensor covered could not be measured here, so this is not a statement about '
-            + 'the days it did not cover.'
+            + 'sensors covered could not be measured here, so this is not a statement about '
+            + 'the days they did not cover.'
           : `No unexplained journey in this window names this person, across the ${fmt(cov.days_with_data)} `
-            + `of ${fmt(cov.days_in_window)} days the seat sensor watched ${
-              esc(cov.scope || 'the cars this person held')}. That is what `
+            + `of ${fmt(cov.days_in_window)} days a seat-sensor provider watched ${
+              esc(cov.scope || 'the cars this person held')}${cov.by_source
+              ? ` (${['cabman', 'fms_live', 'fms_trip'].map((k) => `${cov.by_source[k]?.label || k} `
+                + `${fmt(cov.by_source[k]?.days_with_data || 0)}`).join(', ')} days)` : ''}. That is what `
             + 'was measured; it is not a statement about the days it did not cover.'));
   }
 

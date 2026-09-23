@@ -15,7 +15,7 @@
 import { empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill, money, pct,
   dayStr, dtStr, timeStr, sourceLabel, tierLabel, countOf, plural, noneChosen,
-  trackerState, trackerSpeed, UBER_FARE_WHY } from './ui.js';
+  trackerState, trackerSpeed, UBER_FARE_WHY, segSourceLabel } from './ui.js';
 import { api, href } from './data.js';
 
 const OUTCOME_TONE = { completed: 'ok', not_completed: 'warn' };
@@ -462,10 +462,19 @@ export async function renderTrip(root, platform, id) {
     tp.body.append(tableFrom(d.telemetry, [
       { label: 'At', key: 'captured_at', render: (r) => timeStr(r.captured_at) },
       trackerState, trackerSpeed,
+      /* CABMAN DT's pad, or FMS's live seat count (occupied at 1 or more,
+         collected since 2026-09-23). A fix carrying neither is not an empty
+         seat. */
       { label: 'Seat', key: 'seat_occupied',
-        absent: 'no tracker on this vehicle reports a seat sensor',
-        render: (r) => (r.seat_occupied == null ? '—' : pill(r.seat_occupied ? 'occupied' : 'empty',
-          r.seat_occupied ? 'ok' : null)) },
+        absent: 'no fix here carries a seat reading from CABMAN DT or FMS',
+        render: (r) => {
+          if (r.source === 'fms' && r.seat_count != null) {
+            return pill(Number(r.seat_count) >= 1 ? `occupied · ${fmt(r.seat_count)}` : 'empty · 0',
+              Number(r.seat_count) >= 1 ? 'ok' : null);
+          }
+          return r.seat_occupied == null ? '—' : pill(r.seat_occupied ? 'occupied' : 'empty',
+            r.seat_occupied ? 'ok' : null);
+        } },
       { label: 'Ignition', key: 'ignition',
         render: (r) => (r.ignition == null ? '—' : (r.ignition ? 'on' : 'off')) },
       { label: 'Position', key: '_p', render: (r) => esc(coord(r.lat, r.lng) || '—') },
@@ -482,10 +491,12 @@ export async function renderTrip(root, platform, id) {
   if (d.segments?.length) {
     const sp = panel(`Occupancy around this booking — ${countOf(d.segments.length, 'interval')}`,
       'The seat-sensor analysis runs independently of the trip feed. An interval matched to this trip '
-      + 'is the two records agreeing; an unmatched one overlapping it is worth a look.');
+      + 'is the two records agreeing; an unmatched one overlapping it is worth a look. Each names its '
+      + 'provider — two providers’ readings of one ride are two rows.');
     root.append(sp.panel);
     sp.body.append(tableFrom(d.segments, [
       { label: 'Started', key: 'started_at', render: (r) => timeStr(r.started_at) },
+      { label: 'Provider', key: 'source', render: (r) => esc(segSourceLabel(r)) },
       { label: 'Minutes', key: 'duration_min', num: true },
       { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
       { label: 'Verdict', key: 'verdict', render: (r) => pill(r.verdict || '—',
@@ -495,7 +506,7 @@ export async function renderTrip(root, platform, id) {
           : (r.matched_trip_id ? `another ${sourceLabel(r.matched_platform)} trip` : 'no')) },
       { label: 'Why', key: 'verdict_reason' },
     ], { compact: true,
-      onRow: (r) => { location.hash = href('segment', r.plate, r.started_at); } }));
+      onRow: (r) => { location.hash = href('segment', r.plate, r.started_at, r.source ? { source: r.source } : null); } }));
   }
 
   /* ── custody ──────────────────────────────────────────────────────────── */

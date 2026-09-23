@@ -7,7 +7,8 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, sourceToken, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
-  markTallTables, kpiTile, fitKpis, UBER_FARE_WHY } from './ui.js';
+  markTallTables, kpiTile, fitKpis, UBER_FARE_WHY,
+  SEG_SOURCES, SEG_SOURCE_LABEL, bySourceLine } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
@@ -3647,20 +3648,36 @@ V.unauthorized = async (root) => {
   /* {rows, total, shown, truncated} — tolerant of the old bare array, the same
      read /api/unauthorized/by-vehicle already gets a few lines above. */
   const sensorRows = sensors.rows || (Array.isArray(sensors) ? sensors : []);
-  const sensorTotal = sensors.total ?? sensorRows.length;
-  const flagged = sensorRows.map((s2) => ({ ...s2,
+  /* PER PROVIDER. /api/sensor-health returns CABMAN DT's pads, FMS's live
+     seat counts and FMS's journey seat counts, each row naming its source; a
+     row with no source is CABMAN's (the shape before FMS was a seat sensor).
+     CABMAN's rule is unchanged and still computed here: at least FIX_FLOOR
+     fixes and none occupied is a dead pad. The two FMS rules are the server's,
+     carried on the row as `state`, `dead` and `reason`, because "dead" means
+     something different for a count that never reads 0 on a journey. */
+  const cabRows = sensorRows.filter((r) => !r.source || r.source === 'cabman');
+  const fmsLiveRows = sensorRows.filter((r) => r.source === 'fms_live');
+  const fmsTripRows = sensorRows.filter((r) => r.source === 'fms_trip');
+  const sensorTotal = sensors.by_source?.cabman?.total ?? (sensors.by_source ? cabRows.length
+    : (sensors.total ?? sensorRows.length));
+  const flagged = cabRows.map((s2) => ({ ...s2,
     ratio: s2.total_fixes ? +(s2.occupied_fixes / s2.total_fixes * 100).toFixed(1) : null,
     verdict: s2.sensor_suspect_segments > 0 ? 'suspect'
       : s2.occupied_fixes > 0 ? 'ok'
         : s2.total_fixes >= FIX_FLOOR ? 'never triggers' : 'too few fixes to judge' }));
   const deadPads = flagged.filter((f) => f.verdict === 'never triggers').length;
+  const deadLive = fmsLiveRows.filter((r) => r.dead).length;
+  const deadTrip = fmsTripRows.filter((r) => r.dead).length;
   /* Five tiles accounted for 299 of 382 segments. `stationary` and
      `unverifiable` were in the donut beside them and had no tile, so the
      numbers on the page did not add up to the page — and `needs_a_human`, a
      field NAMED for an operator action, was displayed nowhere at all. */
   kh.innerHTML = [
+    /* A ride once across providers — see sum.dedupe_rule, printed under the
+       per-provider table below. */
     ['Unexplained trips', fmt(t.unauthorized || 0),
-      segTotal ? `of ${fmt(segTotal)} occupancy intervals — no booking on any channel` : 'no booking on any channel'],
+      segTotal ? `of ${fmt(segTotal)} occupancy intervals, a ride counted once across providers — no booking on any channel`
+        : 'no booking on any channel'],
     /* A null distance is not zero km. The tile printed a confident "0 km" for
        segments whose distance was never measured. */
     ['Unexplained km', t.unauth_km == null ? '—' : fmt(t.unauth_km) + ' km',
@@ -3692,11 +3709,15 @@ V.unauthorized = async (root) => {
        The units differ — segments against trackers — so both are named.
        data-count marks the figure countUp() may animate; see countUp(). */
     ['Seat-pad faults',
-      `<span data-count>${fmt(t.sensor_suspect || 0)}</span> stuck · ${fmt(deadPads)} dead`,
+      `<span data-count>${fmt(t.sensor_suspect || 0)}</span> stuck · ${fmt(deadPads + deadLive + deadTrip)} dead`,
       `${fmt(t.sensor_suspect || 0)} occupancy ${plural(+t.sensor_suspect || 0, 'interval')} read as `
-        + `implausible and excluded; ${fmt(deadPads)} of ${fmt(flagged.length)} `
+        + `implausible and excluded; ${fmt(deadPads)} of ${fmt(flagged.length)} CABMAN DT `
         + `${plural(flagged.length, 'tracker')} below never reported an occupied seat — a dead pad `
-        + 'produces no interval to exclude'],
+        + 'produces no interval to exclude'
+        + (fmsLiveRows.length ? `; ${fmt(deadLive)} of ${fmt(fmsLiveRows.length)} FMS live seat counts `
+          + 'never read 1 on a car that carried bookings' : '')
+        + (fmsTripRows.length ? `; ${fmt(deadTrip)} of ${fmt(fmsTripRows.length)} FMS-tracked cars `
+          + 'carried bookings with no FMS journey seat count' : '')],
     ['Inconclusive', fmt(t.partial || 0), 'telemetry gaps — cannot judge'],
     ['Could not be verified', fmt(t.unverifiable || 0), 'a revenue channel was unreadable at the time'],
     ['Needs a human', fmt(t.needs_a_human ?? ((t.unverifiable || 0) + (t.partial || 0))),
@@ -3707,18 +3728,56 @@ V.unauthorized = async (root) => {
      is overflow:hidden, so a cut figure gets not even an ellipsis. */
   ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
 
+  /* EACH PROVIDER'S OWN FIGURES, BESIDE THE COMBINED ONES ABOVE.
+     ─────────────────────────────────────────────────────────────────────────
+     Two seat-sensor providers and three sources since 2026-09-23: CABMAN DT,
+     FMS's live seat count and FMS's journeys. The tiles above count a ride
+     once across them; this table counts every segment each provider produced,
+     and the sentence under it is the rule that relates the two — without it a
+     reader who adds the providers up gets more than the tile and has no way to
+     find out why. A provider with nothing here reads "no evidence", with its
+     true reason as the title, never 0. */
+  if (sum.by_source) {
+    const bp = panel('By seat-sensor provider',
+      'Each provider’s own figures — every segment it produced, before a ride is counted once');
+    root.insertBefore(bp.panel, g);
+    const srcRows = SEG_SOURCES.map((s) => ({ source: s, ...(sum.by_source[s] || {}) }));
+    const none = (r) => `<span class="ent-off" title="${esc(r.absent || 'no segment from this provider')}">no evidence</span>`;
+    bp.body.append(tableFrom(srcRows, [
+      { label: 'Provider', key: 'source', render: (r) => esc(r.label || SEG_SOURCE_LABEL[r.source]) },
+      { label: 'Segments', key: 'segments', num: true, render: (r) => (r.segments ? fmt(r.segments) : none(r)) },
+      { label: 'Unexplained', key: 'unauthorized', num: true,
+        render: (r) => (r.unauthorized == null ? none(r) : fmt(r.unauthorized)) },
+      { label: 'Unexplained km', key: 'unauth_km', num: true,
+        render: (r) => (r.unauthorized == null ? none(r) : r.unauth_km == null ? '—' : `${fmt(r.unauth_km)} km`) },
+      { label: 'Matched to a booking', key: 'authorized', num: true,
+        render: (r) => (r.authorized == null ? none(r) : fmt(r.authorized)) },
+      { label: 'Days with evidence', key: 'days_with_data', num: true,
+        render: (r) => (r.days_with_data == null ? none(r)
+          : `${fmt(r.days_with_data)}${r.first_day ? ` <span class="dim">${esc(dateStr(r.first_day))} – ${esc(dateStr(r.last_day))}</span>` : ''}`) },
+    ], { compact: true }));
+    if (sum.dedupe_rule) bp.body.append(el('p', 'cap', sum.dedupe_rule));
+  }
+
   /* What the figures above actually cover.
-     Seat occupancy comes from a five-minute realtime poll with no history
-     behind it, so on this fleet the evidence spans about three days. The page
-     was reporting "0 unexplained trips" over a thirty-day window on that basis
-     — right about three days, presented as an answer about thirty. */
+     When CABMAN was the only seat sensor its evidence spanned about three
+     days, and the page reported "0 unexplained trips" over a thirty-day
+     window on that basis — right about three days, presented as an answer
+     about thirty. Three sources now reach back three different distances, so
+     the note names each provider's days. */
   const cov = sum.coverage;
   if (cov && !cov.complete) {
     const w = el('div', 'panel');
+    const per = cov.by_source
+      ? ` By provider: ${SEG_SOURCES.map((s) => `${esc(SEG_SOURCE_LABEL[s])} ${fmt(cov.by_source[s]?.days_with_data || 0)}`
+        + ` ${plural(cov.by_source[s]?.days_with_data || 0, 'day')}`).join(', ')}.`
+      : '';
     w.innerHTML = `<div class="note warn">Seat-occupancy evidence covers `
-      + `<b>${fmt(cov.days_with_data)} of the ${fmt(cov.days_in_window)} days</b> in this window. `
-      + `The other ${fmt(cov.days_in_window - cov.days_with_data)} have no sensor data at all, so nothing `
-      + `on them could be judged either way — the figures below describe the days that do, not the range you picked.</div>`;
+      + `<b>${fmt(cov.days_with_data)} of the ${fmt(cov.days_in_window)} days</b> in this window.${per} `
+      + `The other ${fmt(cov.days_in_window - cov.days_with_data)} have no seat evidence from any provider, so nothing `
+      + `on them could be judged either way — the figures below describe the days that do, not the range you picked. `
+      + 'CABMAN DT’s pad and FMS’s live seat count are polls with no history behind them; FMS journeys '
+      + 'reach back about two years but are judged only over the windows the reconciler has run.</div>';
     root.insertBefore(w, g);
   }
 
@@ -3749,7 +3808,8 @@ V.unauthorized = async (root) => {
     gapLabel: 'no seat-occupancy data',
     onClick: (d) => { location.hash = href('segments', 'day', dayKey(d.d)); } });
   trend.body.append(el('p', 'cap', 'The pale bar is every occupancy interval seen that day; the solid one is the '
-    + 'unexplained share. Click for that day’s segments — the day’s full picture, every source and platform, is on its own page.'));
+    + 'unexplained share. Both count a ride once across providers. Click for that day’s segments — the day’s '
+    + 'full picture, every source and platform, is on its own page.'));
   donut(verdicts.body, (sum.byVerdict || []).map((r) => ({ label: r.verdict, n: r.n })),
     { onClick: (d) => { location.hash = href('segments', 'verdict', d.label); } });
 
@@ -3761,9 +3821,13 @@ V.unauthorized = async (root) => {
       label: r.drivers ? `${r.plate} · ${r.drivers}` : `${r.plate} · driver unknown`,
       plate: r.plate, n: r.unauthorized })), { color: '--s8',
       onClick: (d) => { location.hash = href('segments', 'plate', d.plate || d.label); } });
-    veh.body.append(el('p', 'cap', byVeh.total > 12
+    const vcap = el('p', 'cap');
+    vcap.innerHTML = esc(byVeh.total > 12
       ? `The 12 worst of ${fmt(byVeh.total)} vehicles with an unexplained trip in this range.`
-      : 'Every vehicle with an unexplained trip in this range.'));
+      : 'Every vehicle with an unexplained trip in this range.')
+      + ' Each bar counts a ride once across providers.'
+      + (byVeh.by_source ? ` Unexplained segments by provider: ${bySourceLine(byVeh.by_source, 'unauthorized')}.` : '');
+    veh.body.append(vcap);
   } else empty(veh.body, 'No unexplained trips detected in this range');
 
   /* The evidence table lives in segments.js now. This page and that one were
@@ -3778,6 +3842,11 @@ V.unauthorized = async (root) => {
   foldRows(list.body, segmentTable(rows), { shown: 8, total: rows.length, noun: 'segment', key: 'unauth-seg' });
 
   health.body.innerHTML = '';
+  /* One table per provider, because each provider's "dead" is a different
+     test and a single column of states would read them as one. CABMAN DT's
+     table is the one this panel always had. */
+  health.body.append(el('p', 'cap', 'CABMAN DT — seat pad, dead when it reports at least '
+    + `${FIX_FLOOR} fixes and never an occupied seat.`));
   const TONE = { ok: 'ok', suspect: 'warn', 'never triggers': 'bad', 'too few fixes to judge': 'dim' };
   health.body.append(tableFrom(flagged, [
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
@@ -3802,15 +3871,48 @@ V.unauthorized = async (root) => {
   const unjudged = flagged.filter((r) => r.verdict === 'too few fixes to judge').length;
   health.body.append(el('p', 'cap',
     (sensorTotal > flagged.length
-      ? `Showing ${fmt(flagged.length)} of ${fmt(sensorTotal)} trackers that reported in this window, `
+      ? `Showing ${fmt(flagged.length)} of ${fmt(sensorTotal)} CABMAN DT trackers that reported in this window, `
         + 'the furthest from a plausible occupancy band first'
-      : `${countOf(flagged.length, 'tracker')} reported at all in this window`)
+      : `${countOf(flagged.length, 'CABMAN DT tracker')} reported at all in this window`)
     + (unjudged
       ? `, ${fmt(unjudged)} of them with fewer than ${FIX_FLOOR} fixes — those are shown as unjudged `
         + 'rather than as sensors that never fire.'
       : '.')
     + ' A dead pad and a pad on a car that did not move look identical in a ratio; only the fix count '
     + 'separates them.'));
+
+  /* FMS's two seat sources. FMS never reports 0 on a journey, so "never
+     occupied" cannot find a dead FMS count; the server's rule is ABSENCE on a
+     car that demonstrably carried people (bookings), and each row carries the
+     rule's own figures and its reason in plain words. */
+  const FMS_TONE = { ok: 'ok', 'never reports a passenger': 'bad', 'no journey seat count': 'bad',
+    'no bookings to judge against': 'dim' };
+  const fmsTable = (rows, label, cols, rule, capWord) => {
+    health.body.append(el('p', 'cap', `${label} — ${rule}.`));
+    if (!rows.length) {
+      health.body.append(note(`No FMS-tracked car carried a ${capWord} in this window.`));
+      return;
+    }
+    health.body.append(tableFrom(rows, [
+      { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+      ...cols,
+      { label: 'Bookings', key: 'bookings', num: true },
+      { label: 'Sensor', key: 'state',
+        render: (r) => `<span class="tag ${FMS_TONE[r.state] || 'dim'}" title="${esc(r.reason || '')}">${esc(r.state)}</span>` },
+    ], { sortable: true, sortId: `sensors-${capWord.replace(/\W+/g, '-')}` }));
+  };
+  if (sensors.by_source) {
+    fmsTable(fmsLiveRows, SEG_SOURCE_LABEL.fms_live, [
+      { label: 'Fixes reading 1+', key: 'occupied_fixes', num: true },
+      { label: 'Fixes with a count', key: 'counted_fixes', num: true },
+    ], sensors.by_source.fms_live?.rule || 'dead when the car carried bookings and the count never reached 1',
+    'live seat count');
+    fmsTable(fmsTripRows, SEG_SOURCE_LABEL.fms_trip, [
+      { label: 'Journeys with a seat count', key: 'journeys', num: true },
+      { label: 'Live fixes', key: 'live_fixes', num: true },
+    ], sensors.by_source.fms_trip?.rule || 'dead when the car carried bookings and FMS filed no journey seat count',
+    'live FMS fix');
+  }
 };
 
 /* A tracker reporting 0,0 has no satellite lock; it is not in the Gulf of
@@ -3855,8 +3957,12 @@ V.live = async (root) => {
      `fix_age_min >= 30` agreed on all 130 rows, none excepted. */
   /* Denominators, and the right population.
      "Engaged 4 · passenger on board" mixed a CABMAN status STRING with a seat
-     SENSOR reading and printed the result against nothing — 82 of these
-     vehicles carry no seat sensor at all, so 4 is out of 48 and not out of 130.
+     SENSOR reading and printed the result against nothing — then, 82 of these
+     vehicles carried no seat reading at all, so 4 was out of 48 and not out of
+     130. Since 2026-09-23 FMS's live seat count is a seat reading too (the API
+     sends it as seat_occupied, read as occupied at 1 or more, with
+     seat_source naming whose it is), so `sensed` is every row carrying either
+     provider's reading.
      "Vehicles tracked 130 · with a GPS fix" counted two rows with no
      coordinates and three parked on the null island. */
   const sensed = rows.filter((r) => r.seat_occupied != null);
@@ -3889,16 +3995,19 @@ V.live = async (root) => {
     ['Moving', fmt(moving), 'speed > 3 km/h'],
     ['Engaged', sensed.length ? `${fmt(engaged)} of ${fmt(sensed.length)}` : fmt(engaged),
       sensed.length
-        ? `of the ${fmt(sensed.length)} vehicles whose feed reports a seat sensor`
-        : 'no feed here reports a seat sensor'],
+        ? `of the ${fmt(sensed.length)} vehicles carrying a seat reading — CABMAN DT or FMS`
+        : 'no vehicle here carries a seat reading from CABMAN DT or FMS'],
   ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
   p.body.innerHTML = '';
-  if (!rows.length) { empty(p.body, 'Positions appear once CABMAN credentials are saved in Settings'); return; }
+  if (!rows.length) { empty(p.body, 'Positions appear once a tracker feed — CABMAN or FMS — has credentials saved in Settings'); return; }
   if (feeds.length) {
+    /* Two seat readings now, from two providers: CABMAN DT's pad (every five
+       minutes) and FMS's live seat count (asked every two minutes). Uber's
+       rows report position only. */
     p.body.append(el('p', 'cap',
       `${feeds.map((f) => `${sourceLabel(f)} ${fmt(rows.filter((r) => r.source === f).length)}`).join(' · ')}. `
-      + 'CABMAN polls every five minutes and is the only feed carrying a seat sensor; the others report '
-      + 'position and speed only.'));
+      + 'CABMAN DT reports its seat pad every five minutes and FMS its live seat count every two; '
+      + `${fmt(sensed.length)} of these rows carry a seat reading. Uber reports position and speed only.`));
   }
   const t = tableFrom(rows, [
     // A plate that is only text is a dead end on the one page an operator has
@@ -3934,12 +4043,19 @@ V.live = async (root) => {
       render: (r) => (r.ac_on == null
         ? '<span class="ent-off" title="not reported by this feed">—</span>'
         : r.ac_on ? '<span class="tag">on</span>' : '<span class="tag dim">off</span>') },
-    { label: 'Seat', key: 'seat_occupied', /* Three states, not two. Only the CABMAN feed carries a seat sensor; FMS and
-   Uber carry none, so collapsing NULL into "empty" asserted a measurement that
-   does not exist for 83 of 130 vehicles. */
-      render: (r) => (r.seat_occupied === null || r.seat_occupied === undefined
-        ? '<span class="tag dim">not reported</span>'
-        : r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag">empty</span>') },
+    { label: 'Seat', key: 'seat_occupied', /* Three states, not two. A row carries CABMAN DT's pad reading
+   or FMS's live seat count (seat_source says which), or neither — Uber sends
+   none, and an FMS fix may arrive without a count — so collapsing NULL into
+   "empty" would assert a measurement that does not exist. The title names the
+   provider and, for FMS, the count it read. */
+      render: (r) => {
+        if (r.seat_occupied === null || r.seat_occupied === undefined) {
+          return '<span class="tag dim" title="this fix carries no seat reading from CABMAN DT or FMS">not reported</span>';
+        }
+        const who = esc(`${r.seat_source || 'seat reading'}${r.seat_count != null ? `: ${r.seat_count}` : ''}`);
+        return r.seat_occupied ? `<span class="tag ok" title="${who}">occupied</span>`
+          : `<span class="tag" title="${who}">empty</span>`;
+      } },
     { label: 'Fix age', key: 'fix_age_min', num: true,
       render: (r) => `<span class="tag ${r.stale ? 'warn' : 'ok'}">${
         r.fix_age_min != null ? `${fmt(r.fix_age_min)} min` : (r.stale ? 'stale' : 'live')}</span>` },
@@ -4001,7 +4117,8 @@ V.live = async (root) => {
       meta: `${fmt(rows.length)} reporting`,
       sub: `${feeds.map((f) => `${sourceLabel(f)} ${fmt(rows.filter((r) => r.source === f).length)}`).join(' · ')}`
         + `${noFix ? ` · ${fmt(noFix)} with no usable fix at all` : ''}. `
-        + 'Only CABMAN polls every five minutes and only CABMAN carries a seat sensor.',
+        + 'CABMAN DT reports its seat pad every five minutes and FMS its live seat count every two; '
+        + 'Uber reports position only.',
     });
   }
   foldRows(p.body, t, { shown: 12, total: rows.length, noun: 'vehicle', key: 'live' });
@@ -4095,15 +4212,17 @@ V.map = async (root) => {
       ['Engaged', sensed.length
         ? `${fmt(withGps.filter((r) => r.seat_occupied === true || /engag/i.test(r.status || '')).length)} of ${fmt(sensed.length)}`
         : fmt(withGps.filter((r) => /engag/i.test(r.status || '')).length),
-        sensed.length ? 'of those whose feed reports a seat sensor' : 'no feed here reports a seat sensor'],
+        sensed.length ? 'of those carrying a seat reading — CABMAN DT or FMS'
+          : 'no vehicle here carries a seat reading from CABMAN DT or FMS'],
       ['Moving', fmt(withGps.filter((r) => +r.speed > 3).length), 'above 3 km/h'],
       ['Stale', fmt(withGps.filter((r) => r.stale).length), `no fix in ${FIX_FRESH_MIN} min`],
     ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
     /* A fourth colour, because "Moving, empty" was asserted for the 82
-       vehicles whose feed carries no seat sensor at all. renderJourney has been
-       tri-state for a while; renderLive and this legend had not caught up. */
-    legend.innerHTML = [['--s3', 'Passenger aboard'], ['--s1', 'Moving — seat sensor says empty'],
-      ['--s5', 'Stopped'], ['--b300', 'Moving — no seat sensor on this feed'], ['--ink-3', 'Stale fix']]
+       vehicles whose feed carried no seat reading at all. renderJourney has
+       been tri-state for a while; renderLive and this legend had not caught
+       up. A seat reading is CABMAN DT's pad or FMS's live seat count. */
+    legend.innerHTML = [['--s3', 'Passenger aboard'], ['--s1', 'Moving — seat reading says empty'],
+      ['--s5', 'Stopped'], ['--b300', 'Moving — no seat reading on this fix'], ['--ink-3', 'Stale fix']]
       .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('');
     if (noLock) {
       legend.innerHTML += `<span class="dim">${countOf(noLock, 'tracker')} `
@@ -4156,14 +4275,20 @@ V.map = async (root) => {
     stat.innerHTML = [
       ['Fixes', fmt(j.fixes), `on ${day}`],
       ['Distance', fmt(j.distance_km) + ' km', 'between fixes'],
-      /* Null, not zero, when this vehicle's feed never reports occupancy. FMS
-         carries no seat sensor, so every FMS-tracked plate showed a hard
-         "0 km · 0% of distance" — a positive claim that it drove empty all day,
-         on days it ran fifteen bookings. */
-      j.occupancy_reported
+      /* Null, not zero, when no fix this day carried a seat reading. When FMS
+         had no seat reading, every FMS-tracked plate showed a hard "0 km · 0%
+         of distance" — a positive claim that it drove empty all day, on days
+         it ran fifteen bookings. The figure now names the provider that
+         measured it, and when two did (the two cars with both trackers) each
+         is shown under its own name rather than added. */
+      j.occupancy_reported && j.occupied_km != null
         ? ['With passenger', fmt(j.occupied_km) + ' km',
-          j.occupancy_measured_km ? Math.round(j.occupied_km / j.occupancy_measured_km * 100) + '% of measured distance' : '—']
-        : ['With passenger', 'not measured', 'this vehicle\'s feed carries no seat sensor'],
+          (j.occupancy_measured_km ? Math.round(j.occupied_km / j.occupancy_measured_km * 100) + '% of measured distance' : '—')
+            + (j.occupancy_source ? ` · ${j.occupancy_source}` : '')]
+        : j.occupancy_reported
+          ? ['With passenger', 'per provider',
+            (j.occupancy_by_source || []).map((o) => `${o.label} ${fmt(o.occupied_km)} km`).join(' · ')]
+          : ['With passenger', 'not measured', 'no fix this day carried a seat reading from CABMAN DT or FMS'],
       /* The name is a link. This tile named the person who drove the route on
          screen and led nowhere, on the page most likely to raise a question
          about them. */
@@ -4172,7 +4297,7 @@ V.map = async (root) => {
     ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
     legend.innerHTML = (j.occupancy_reported
       ? [['--s3', 'Passenger aboard'], ['--s1', 'Running empty (dashed)']]
-      : [['--ink-3', 'Occupancy not reported by this feed']])
+      : [['--ink-3', 'No seat reading from CABMAN DT or FMS']])
       .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('')
       + '<span class="dim">Lines join consecutive 5-minute fixes; a gap over 20 minutes breaks the line '
       + 'rather than guessing the route.</span>';

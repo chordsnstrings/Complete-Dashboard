@@ -17,6 +17,7 @@
    a few hundred rows. Every query below is `= ANY($1)` against an indexed
    column over that list, so this costs what one entity page costs, once. */
 import { winDays, dubaiSpanSql } from './window.js';
+import { occSourceLabel, occCountsOnce, OCC_DEDUPE_RULE } from './occupancy_sql.js';
 
 const MAX_IDS = 400;
 
@@ -177,7 +178,7 @@ export function cohortRoutes(app, { q, wrap }) {
     const [from, to] = winDays(req);
     const P = [plates, from, to];
 
-    const [spec, work, custody, docs, tel, alerts, segs, util] = await Promise.all([
+    const [spec, work, custody, docs, tel, alerts, segs, util, unauth] = await Promise.all([
       q(`SELECT p.plate,
                 coalesce(v.make, vp.make) AS make, coalesce(v.model, vp.model) AS model,
                 coalesce(v.year, vp.year) AS year, coalesce(v.color, vp.colour) AS colour,
@@ -229,14 +230,20 @@ export function cohortRoutes(app, { q, wrap }) {
           WHERE plate = ANY($1) AND ${dubaiSpanSql('occurred_at', '$2', '$3')}
           GROUP BY 1, 2
           ORDER BY 3 DESC`, P),
-      /* What the seat sensor saw. "partial" is the largest bucket on this
-         fleet and appears on no page of its own. */
-      q(`SELECT plate, verdict, count(*)::int AS n,
+      /* What the seat sensors saw. "partial" is the largest bucket on this
+         fleet and appears on no page of its own. One row per car, provider
+         and verdict, each naming its provider — CABMAN DT, FMS live seat
+         count or FMS trip seat count — because from 2026-09-23 one FMS ride
+         is normally two segments, and a sum across providers would count it
+         twice. first_at/last_at are that provider's own timestamps. */
+      q(`SELECT plate, source, ${occSourceLabel('source')} AS source_label, verdict,
+                count(*)::int AS n,
                 round(sum(distance_km)::numeric, 0) AS km,
-                round(sum(duration_min)::numeric, 0) AS minutes
+                round(sum(duration_min)::numeric, 0) AS minutes,
+                min(started_at) AS first_at, max(started_at) AS last_at
            FROM occupancy_segment
           WHERE plate = ANY($1) AND ${dubaiSpanSql('started_at', '$2', '$3')}
-          GROUP BY 1, 2`, P),
+          GROUP BY 1, 2, 4`, P),
       q(`SELECT plate, platform,
                 round(sum(hours_online)::numeric, 1) AS hours_online,
                 round(sum(hours_on_trip)::numeric, 1) AS hours_on_trip,
@@ -246,12 +253,22 @@ export function cohortRoutes(app, { q, wrap }) {
           WHERE plate = ANY($1)
             AND period_start >= $2::date AND period_end <= $3::date
           GROUP BY 1, 2`, P),
+      /* The car's unexplained journeys as ONE figure: a ride once across the
+         providers (occCountsOnce), which is what the card's tile states. The
+         per-provider rows above stay as they are, for the sub-line. */
+      q(`SELECT plate, count(*) FILTER (WHERE once)::int AS n,
+                round(sum(distance_km) FILTER (WHERE once)::numeric, 0) AS km
+           FROM (SELECT o.*, ${occCountsOnce('o')} AS once FROM occupancy_segment o
+                  WHERE o.plate = ANY($1) AND o.verdict = 'unauthorized'
+                    AND ${dubaiSpanSql('o.started_at', '$2', '$3')}) s
+          GROUP BY 1`, P),
     ]);
 
     const by = new Map(plates.map((plate) => [plate, {
       plate, spec: null, work: [], custody: [], documents: [], telematics: null,
-      alerts: [], segments: [], utilisation: [],
+      alerts: [], segments: [], utilisation: [], unauthorized: null,
     }]));
+    unauth.forEach((r) => { const e = by.get(r.plate); if (e) e.unauthorized = { n: r.n, km: num(r.km), dedupe_rule: OCC_DEDUPE_RULE }; });
     const put = (r, k) => { const e = by.get(r.plate); if (e) e[k].push(r); };
     work.forEach((r) => put(r, 'work'));
     custody.forEach((r) => put(r, 'custody'));

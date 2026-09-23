@@ -2191,6 +2191,32 @@ figures are in COVERAGE.
 | F1 | FMS's live `Seatcount` collected (GetVehicleCurrentDetails, vehicleno=ALL) into `telemetry_snapshot.seat_count`, schema_v84 | **proven** — `e98d5f4`, deployment `9f6ec597` (ACTIVE 12:32Z) | at 12:37Z, 66 Uber-active cars (Ecosine 42, Egari 24) had an FMS seat reading ≤10 min old, the same 66 that had a live FMS fix ≤10 min old; per-trip counts lag ≥27 min, so these can only be the live count. The FMS seat column rose from 68 to 75 receiving, equal to FMS data. | test/fms_seat_count.test.mjs (16). Reverts fail: "0 is a reading" 2, "refusal off the banner" 1, "vehicleno=ALL" 1, "rows carry the count" 1, "probe params" 1. Proven only when the first real poll after the deploy stores a count |
 | F2 | The Fleet tab's FMS seat column reads the live count as well as the per-journey count | **proven** — same deployment | test/vehicle_feeds.test.mjs (51); reverting the live half fails 2 |
 | F3 | The nightly probe called GetVehicleCurrentDetails without vehicleno and reported "Authentication failed" | **written** | test/fms_seat_count.test.mjs; proven when the next probe run shows fields rather than an error |
+| F4 | FMS is a second seat-sensor provider in unauthorized-trip detection: `occupancy_segment.source` (`cabman` / `fms_live` / `fms_trip`) in the key, schema_v85; FMS live segments through the same classifier (1+ occupied, in memory); each FMS journey with a Seat Count is a segment (`classifyJourney`: stationary / sensor_suspect over 8 h / never partial); writes per (source, plate); clock skew per provider; FMS never authorizes | **written** | test/occupancy_sources.test.mjs (95). Reverts fail, one per guard: migration key 3, 1+ occupied 3, journey average speed 2, eight hours 2, overlapping journeys one ride 4, FMS never authorizes 3, delete per source 3, sweep per source 2, skew per provider 1 |
+| F5 | FMS journeys: overlapping records on one car (FMS's provisional + final record of one ride, measured — docs/COVERAGE.md trap) are one segment, built from the record first stored last | **written** | same file; the grouping revert fails 4. Measured on production, not proven in the product: nothing is deployed |
+| F6 | Combined totals count a ride once across providers (`occCountsOnce`, same verdict, order FMS trip → CABMAN → FMS live), with per-provider figures and the rule on #unauthorized, #segments, the driver tab, the vehicle page, the day and cohort readers and the phone; rows carry `counts_once` | **written** | same file. Reverts fail: rule off 10, same-verdict 6, stuck-pad bound 1, rows without counts_once 1 |
+| F7 | Sensor health per provider: CABMAN unchanged; FMS live dead = count on fixes + bookings + never 1; FMS trip dead = live fixes + bookings + no journey with a seat count; each row states its reason | **written** | same file. Reverts fail: live needs bookings 1, trip needs bookings 1, CABMAN suspect is CABMAN only 1 |
+| F8 | Wording: every "only CABMAN carries a seat sensor" / "no seat sensor for Egari" sentence replaced on the routes, #unauthorized, #segments, #segment, #live, #map, driver, vehicle, day, cohort, trip, phone screens, insights and docs; /api/live and /api/map/journey read FMS's live count and name the provider | **written** | same file (wording 3 blocks). Reverts fail: coverage wording 2, page wording 1, live seat reading 1, passenger km not added 1, CABMAN over Egari 1, segment by provider 1 |
+| F9 | Booking matching through a per-plate time index (`findMatchIndexed`) — identical answers to `findMatch`, ~0.5 s instead of 100–340 s of synchronous work for a twelve-month pass at production volume | **written** | same file: 2,100 random segments, 0 differ. Reverts fail: tie order 1, overlap order 1, scan bound 1. Local PGlite, synthetic, production volume: the whole twelve-month reconcile 17–19 s (journeys read 2.3 s, bookings 4.6 s, match ~0.7 s, write 130,722 rows 9.4 s) |
+
+### NOT PROVEN, and named
+
+- **Nothing here is deployed.** The first incremental after a deploy writes FMS
+  segments over three days (≈2,655 journey records, ≈1,730 rides), the nightly
+  catch-up over thirty (≈21,549 / ≈13,800), the first weekly backfill over
+  `BACKFILL_MONTHS` (default 12: ≈130,722 / ≈122,500). Production's value of
+  that setting is blanked to a non-admin read.
+- **The reconcile time on production** is estimated from PGlite, not measured:
+  17–19 s locally for the twelve-month pass. Production's `basic-xxs` and
+  managed Postgres may differ either way.
+- **Page cost.** Locally, at ~1,400 unexplained segments in 30 days (the FMS
+  scale) against ~130 (CABMAN today): `/api/unauthorized/attributed` 0.57 →
+  0.95 s, `/api/driver/unauthorized` 0.58 → 2.1 s. Summary and segments stay
+  under 0.1 s. Re-measure on production after the first backfill.
+- **FMS live thresholds** were not changed; the live seat count has less than a
+  day of history. Re-read the stored gaps once it has a week.
+- **The CABMAN device on L44251 and L45243** may be filed under the wrong plate
+  (docs/COVERAGE.md); both providers' segments are kept as ruled, and their
+  overlapping segments count once in combined totals.
 
 ### HR roster — on production 2026-09-23
 

@@ -24,7 +24,7 @@ import { compress, putReceipt, submitEntry, SUPERVISORS, aed, parseAmount,
    copied, so 'fms' is "FMS telematics" on both screens and 13:00Z is 17:00 on
    both: timeStr and dtStr pass timeZone: TZ, which is what makes the phone's
    collector-health times equal the ones on the desktop page beside them. */
-import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile, standingNote, dialable,
+import { sourceLabel, segSourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile, standingNote, dialable,
   cashOnHandTile, bankDepositTile, countOf,
   alertRateFigure, splitAlerts, avgKmSub } from '../ui.js';
 import { dubaiClock, dubaiDay } from '../tz.js';
@@ -768,7 +768,9 @@ async function live(deck, ctx) {
   stats(deck, [
     { label: 'Reporting', value: fmt(feed.length) },
     { label: 'Moving', value: fmt(moving), sub: 'above 3 km/h' },
-    { label: 'Occupied', value: fmt(busy), sub: 'seat sensor' },
+    /* A seat reading is CABMAN DT's pad or FMS's live seat count (the API
+       reads 1 or more as occupied); a vehicle with neither is not counted. */
+    { label: 'Occupied', value: fmt(busy), sub: 'CABMAN DT or FMS seat reading' },
     { label: 'Stale fix', value: fmt(stale), sub: 'no recent position', tone: stale ? 'warn' : 'good' },
   ]);
 
@@ -777,7 +779,8 @@ async function live(deck, ctx) {
     .sort((a, b) => (b.speed || 0) - (a.speed || 0))
     .map((v) => row({
       title: v.plate,
-      sub: `${v.source || 'feed'} · ${v.seat_occupied ? 'occupied' : 'empty'}`
+      sub: `${v.source || 'feed'} · ${v.seat_occupied == null ? 'no seat reading'
+        : v.seat_occupied ? 'occupied' : 'empty'}`
         /* The fix time in Dubai. Left on the reader's clock this printed
            L12615's 2026-09-02T13:00:01.603Z fix (production /api/live,
            measured) as 09:00 in New York and 14:00 in London, against 17:00
@@ -841,15 +844,30 @@ async function unauthorized(deck, ctx) {
     sub: `${fmt(v[key].km)} km`,
     tone: key === 'unauthorized' ? 'bad' : key === 'authorized' ? 'good' : null,
   })).filter(Boolean));
-  /* The window asked for is not the window answered: this measurement needs a
-     seat sensor AND a telematics journey, and only the days carrying both can
-     be judged. Saying "21 trips in 30 days" over three days of evidence would
-     be the most misleading sentence on the phone. */
+  /* Each provider's own count beside the combined one, and the rule that
+     relates them: the figures above count a ride once across CABMAN DT, FMS's
+     live seat count and FMS's journeys, and the providers' own counts can add
+     up to more. A provider with nothing reads "no evidence", never 0. */
+  if (sum.by_source) {
+    const per = ['cabman', 'fms_live', 'fms_trip'].map((k) => {
+      const e = sum.by_source[k] || {};
+      return `${e.label || k} ${e.unauthorized == null ? 'no evidence' : fmt(e.unauthorized)}`;
+    }).join(' · ');
+    deck.append(el('p', 'm-cap', `Unexplained by provider: ${per}. ${sum.dedupe_rule || ''}`));
+  }
+  /* The window asked for is not the window answered: only the days a
+     seat-sensor provider watched can be judged. Saying "21 trips in 30 days"
+     over three days of evidence would be the most misleading sentence on the
+     phone. Three sources reach back three different distances, so the
+     sentence names each provider's days. */
   const cov = sum.coverage;
   if (cov && cov.complete === false) {
     const c2 = el('div', 'm-stale');
+    const per = cov.by_source
+      ? ` (${['cabman', 'fms_live', 'fms_trip'].map((k) => `${cov.by_source[k]?.label || k} `
+        + `${cov.by_source[k]?.days_with_data || 0}`).join(', ')})` : '';
     c2.textContent = `Only ${cov.days_with_data} of the ${cov.days_in_window} days in this `
-      + 'window carry both a seat sensor and a journey, so this is over those days.';
+      + `window carry seat evidence from a provider${per}, so this is over those days.`;
     deck.append(c2);
   }
   const items = unwrap(listRaw).rows;
@@ -860,7 +878,8 @@ async function unauthorized(deck, ctx) {
       /* custodyText, not r.driver_name — a field /api/segments has never
          returned, so every row said "no driver" including the ones naming two
          people. See its definition in ../ui.js for what the words mean. */
-      sub: `${custodyText(r)}${r.started_at ? ` · ${dayStr(r.started_at)}` : ''}`,
+      /* With its provider: a ride two providers saw is two rows here. */
+      sub: `${custodyText(r)}${r.started_at ? ` · ${dayStr(r.started_at)}` : ''} · ${segSourceLabel(r)}`,
       value: r.distance_km != null ? `${n(r.distance_km)}` : '',
       note: r.distance_km != null ? 'km' : '',
       to: href('vehicle', r.plate),

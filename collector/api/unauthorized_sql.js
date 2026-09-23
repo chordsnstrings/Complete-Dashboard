@@ -1426,20 +1426,30 @@ LEFT JOIN LATERAL (
                      BETWEEN ${SEG_DAY(o)} AND ${SEG_END_DAY(o)}
                AND coalesce(btrim(t2.driver_ext_id), '') <> '') AS day_bookings
       FROM hist CROSS JOIN gaps
-           /* (1) above: this plate's own unverifiable neighbours. */
+           /* (1) above: this plate's own unverifiable neighbours — from the
+              SAME PROVIDER. A clock is a property of one provider's device:
+              on the two cars that carry both CABMAN and FMS trackers, a
+              CABMAN skew says nothing about FMS's timestamps, and it must not
+              refuse to name anybody for an FMS journey (or the reverse). */
            LEFT JOIN LATERAL (SELECT max(${SKEW('s2.verdict_reason')}) AS min_behind
                       FROM occupancy_segment s2
                      WHERE s2.plate = ${o}.plate
+                       AND s2.source = ${o}.source
                        AND s2.started_at BETWEEN ${o}.started_at - interval '7 days'
                                              AND ${o}.started_at + interval '7 days'
                        AND s2.verdict_reason ~ '[0-9]+ min behind') plate_skew ON true
            /* (2) above: the constant-offset signature. Counted only when THIS
               row is itself part of the cluster, so a plate with one distant
-              booking and two close ones does not refuse the close ones. */
+              booking and two close ones does not refuse the close ones. Same
+              provider only, for the reason in (1) — and because from
+              2026-09-23 one FMS ride is normally two segments (live count and
+              journey) with near-identical gaps, so counting across sources
+              would reach the three-of-a-kind threshold on two rides. */
            LEFT JOIN LATERAL (SELECT count(*)::int AS n,
                            round(avg(abs(s3.nearest_gap_min)))::int AS offset_min
                       FROM occupancy_segment s3
                      WHERE s3.plate = ${o}.plate
+                       AND s3.source = ${o}.source
                        AND s3.verdict = 'unauthorized'
                        AND s3.nearest_gap_min IS NOT NULL
                        AND ${o}.nearest_gap_min IS NOT NULL

@@ -159,9 +159,12 @@ export function renderLive(map, rows, onPick) {
     const engaged = seat === true || /engag/i.test(r.status || '');
     const moving = Number(r.speed) > 3;
     /* Four states, not three. "Moving, empty" was asserted for every vehicle
-       whose feed carries no seat sensor — 82 of 130 — which is a measurement
-       claim about hardware that does not exist. renderJourney has drawn the
-       unknown case separately for a while; this had not caught up. */
+       whose feed carried no seat reading — 82 of 130 at the time — which is a
+       measurement claim about hardware that does not exist. renderJourney has
+       drawn the unknown case separately for a while; this had not caught up.
+       A seat reading is CABMAN DT's pad or, since 2026-09-23, FMS's live seat
+       count (the API reads 1 or more as occupied and names the provider in
+       seat_source); a fix with neither is the unknown case. */
     const colour = r.stale ? css('--ink-3')
       : engaged ? css('--s3')
         : moving ? (seatUnknown ? css('--b300') : css('--s1'))
@@ -174,8 +177,9 @@ export function renderLive(map, rows, onPick) {
     m.bindTooltip(
       `<b>${r.plate}</b>${r.current_driver ? '<br>' + r.current_driver : ''}` +
       `<br>${r.status || '—'} · ${r.speed != null ? r.speed + ' km/h' : 'no speed'}` +
-      `<br>${seatUnknown && !/engag/i.test(r.status || '') ? 'seat sensor not reported by this feed'
-        : engaged ? 'passenger on board' : 'seat sensor reports empty'}`
+      `<br>${seatUnknown && !/engag/i.test(r.status || '') ? 'no seat reading from CABMAN DT or FMS on this fix'
+        : engaged ? `passenger on board${r.seat_source ? ` · ${r.seat_source}${r.seat_count != null ? ` ${r.seat_count}` : ''}` : ''}`
+          : `${r.seat_source || 'seat reading'} reports empty`}`
       + `${r.stale ? `<br><i>last fix ${r.fix_age_min != null ? `${r.fix_age_min} min ago` : 'is stale'}</i>` : ''}`,
       // Sticky, so a marker under the pointer keeps its label while you aim.
       { direction: 'top', sticky: true });

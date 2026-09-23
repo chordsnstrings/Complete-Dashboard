@@ -923,6 +923,37 @@ export const sentence = (v) => {
 
 export const sourceLabel = (s) => SOURCE_LABEL[String(s || '').toLowerCase()] || String(s || '—');
 
+/* ── which seat-sensor provider an occupancy segment came from ─────────────
+   Since the operator's rulings of 2026-09-23 a segment has one of three
+   sources (occupancy_segment.source, sql/schema_v85.sql), and every page that
+   shows one says which, in the operator's words. The API sends `source_label`
+   beside `source`; this map is the fallback for a response cached before it
+   did, and a row carrying neither says so rather than guessing a provider. */
+export const SEG_SOURCES = ['cabman', 'fms_live', 'fms_trip'];
+export const SEG_SOURCE_LABEL = {
+  cabman: 'CABMAN DT', fms_live: 'FMS live seat count', fms_trip: 'FMS trip seat count',
+};
+export const segSourceLabel = (r) => r?.source_label || SEG_SOURCE_LABEL[r?.source]
+  || (r?.source ? String(r.source) : 'provider not recorded');
+
+/* Each provider's own figure on one line, for the place a combined total is
+   shown. `bySource` is the API's {cabman: {...}, fms_live: {...}, fms_trip:
+   {...}}; a provider that produced nothing carries a null figure and an
+   `absent` reason, and prints as "no evidence" with that reason as its title —
+   never as 0. Returns HTML. */
+export const bySourceLine = (bySource, key = 'unauthorized', unit = '') => SEG_SOURCES
+  .filter((s) => bySource && bySource[s])
+  .map((s) => {
+    const e = bySource[s];
+    // A provider that produced nothing has no figure of ANY kind here — its
+    // zero segments are an absence with a reason, not a measured nothing.
+    const v = e.absent ? null : e[key];
+    return v == null
+      ? `<span class="ent-off" title="${esc(e.absent || 'no segment from this provider')}">`
+        + `${esc(e.label || SEG_SOURCE_LABEL[s])} — no evidence</span>`
+      : `${esc(e.label || SEG_SOURCE_LABEL[s])} ${fmt(v)}${unit}`;
+  }).join(' · ');
+
 /* ── what a page was built from ───────────────────────────────────────────
    Audited across production, several pages showed money and counts with
    nothing on them naming which feeds those numbers came from. On a fleet that

@@ -26,15 +26,18 @@
       carries `attributed` and `also_a_candidate` as separate objects with
       separate totals and separate words, never a flag on a shared list.
 
-   2. THE COVERAGE NOTE TRAVELS. Seat occupancy comes from CABMAN, a five-minute
-      realtime poll with no history behind it: measured on production over
-      2026-06-01..2026-09-16, only 27 of 108 days carry any segment at all, and
-      every unauthorized segment in that window falls in 2026-08-21..2026-09-16.
+   2. THE COVERAGE NOTE TRAVELS. When CABMAN was the only seat sensor —
+      a five-minute realtime poll with no history behind it — production over
+      2026-06-01..2026-09-16 carried a segment on only 27 of 108 days, and
+      every unauthorized segment in that window fell in 2026-08-21..2026-09-16.
       A driver tab that omits this reads as a clean record for June and July
       when it is really an absence of sensor data — an exoneration nobody
       measured, which is the same defect as an accusation nobody measured.
-      CABMAN is also Ecosine-only, so Egari has no occupancy evidence at all
-      and its page must say that rather than show an empty table.
+      Since 2026-09-23 there are three sources, reaching back three different
+      distances: CABMAN DT (Ecosine only, no history), FMS's live seat count
+      (from 2026-09-23) and FMS journeys (about two years deep, judged only
+      over windows the reconciler has run). Egari is covered by FMS. The note
+      says, per provider, which days each one watched.
 
    3. THE VALUE OF THE DISTANCE CARRIES ITS RATE. /api/unauthorized/list
       attaches forgone_aed with a rate_basis sentence on every row rather than
@@ -60,12 +63,18 @@ import { driverScope } from './driver_routes.js';
    which is the one shape the house principle forbids. */
 import { RECONCILER_VERDICTS } from './segment_routes.js';
 import { first } from './window.js';
+import { occCountsOnce, occSourceLabel, occCoverageBySource, occCoverageClause,
+  OCC_DEDUPE_RULE, OCC_NO_EVIDENCE_WHY, OCC_SOURCES } from './occupancy_sql.js';
 
 /* The segment's own columns. A deliberate subset of what
    api/segment_routes.js SEG_COLS selects: everything a row needs in order to
    be recognised, be opened at #segment/<plate>/<started_at>, and be argued
-   with — and nothing that would make this a second, competing segment page. */
-const SEG_COLS = `o.plate, o.fleet_id, o.started_at, o.ended_at, o.duration_min,
+   with — and nothing that would make this a second, competing segment page.
+   The provider is part of that: a row says whether CABMAN DT, FMS's live seat
+   count or an FMS journey saw it. */
+const SEG_COLS = `o.source, ${occSourceLabel('o.source')} AS source_label, o.passengers,
+  ${occCountsOnce('o')} AS counts_once,
+  o.plate, o.fleet_id, o.started_at, o.ended_at, o.duration_min,
   o.distance_km, o.top_speed, o.verdict, o.verdict_reason, o.low_confidence,
   o.nearest_platform, o.nearest_trip_id, o.nearest_gap_min, o.channels_checked,
   o.start_lat, o.start_lng, o.end_lat, o.end_lng,
@@ -130,6 +139,20 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
          FROM occupancy_segment
         WHERE ${DAYWIN('started_at')} AND ($3::text IS NULL OR fleet_id = $3)
           AND ($4::text[] IS NULL OR plate = ANY($4))`, [from, to, fleet, plates]);
+    /* The same, per provider — which days each of the three sources watched.
+       A day CABMAN never saw may still be a day FMS journeys cover, and the
+       reverse; the note says which. */
+    const perSource = await q(
+      `SELECT source,
+              count(DISTINCT (started_at AT TIME ZONE 'Asia/Dubai')::date)::int AS days_with_data,
+              min((started_at AT TIME ZONE 'Asia/Dubai')::date)::text AS first_day,
+              max((started_at AT TIME ZONE 'Asia/Dubai')::date)::text AS last_day,
+              count(DISTINCT plate)::int AS plates
+         FROM occupancy_segment
+        WHERE ${DAYWIN('started_at')} AND ($3::text IS NULL OR fleet_id = $3)
+          AND ($4::text[] IS NULL OR plate = ANY($4))
+        GROUP BY source`, [from, to, fleet, plates]);
+    const bySource = occCoverageBySource(perSource, { from, to, fleet });
     const daysInWindow = Math.max(1, Math.round(
       (Date.parse(`${bareDay(to)}T00:00:00Z`) - Date.parse(`${bareDay(from)}T00:00:00Z`)) / 864e5) + 1);
     const days = c?.days_with_data || 0;
@@ -140,6 +163,7 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
       last_day: c?.last_day || null,
       plates_with_sensor: c?.plates_with_sensor ?? null,
       plates_held: plates ? plates.length : null,
+      by_source: bySource,
       /* Whose cars this is a statement about. A page that prints the day count
          has to be able to print what it is a count OVER, because "the sensor
          watched 27 days" and "the sensor watched 27 days on the cars THIS
@@ -153,27 +177,28 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
       complete: days >= daysInWindow,
       /* The true reason, not a plausible one. An empty list here means one of
          two entirely different things and they must not read alike. */
+      /* The true reason, in words, and per provider where it differs: which
+         source watched which days, and — where one watched nothing — why. */
       note: days === 0
         ? (plates && plates.length
           ? 'No car this person held in this window carries any seat-occupancy evidence at '
             + 'all, so this is not a record of no unexplained journeys — it is an absence of '
-            + 'the sensor that would find them. CABMAN is a five-minute realtime poll with no '
-            + 'history behind it, and it is configured for Ecosine only.'
+            + `the sensor that would find them. ${OCC_NO_EVIDENCE_WHY}`
           : plates
             ? 'The trip record shows this person holding no car at all in this window, so '
               + 'there was nothing for the seat sensor to watch on their behalf. This is an '
               + 'absence of work in the record, not a clean record.'
             : 'No seat-occupancy evidence exists for this window at all, so this is not a '
               + 'record of no unexplained journeys — it is an absence of the sensor that would '
-              + 'find them. CABMAN is a five-minute realtime poll with no history behind it, '
-              + 'and it is configured for Ecosine only.')
+              + `find them. ${OCC_NO_EVIDENCE_WHY}`)
         : days >= daysInWindow ? null
-          : `The seat sensor covers ${days} of the ${daysInWindow} days in this window `
+          : `Seat-occupancy evidence covers ${days} of the ${daysInWindow} days in this window `
             + `(${c.first_day} to ${c.last_day}), across ${plates
-              ? `the ${plates.length} car(s) this person held` : 'every car in the fleet'}. `
-            + `The other ${daysInWindow - days} days are `
-            + 'not quiet days — they are days with no evidence, because CABMAN is a '
-            + 'five-minute realtime poll with no history behind it. Read every count here '
+              ? `the ${plates.length} car(s) this person held` : 'every car in the fleet'}: `
+            + `${occCoverageClause(bySource)}. The other ${daysInWindow - days} days are `
+            + 'not quiet days — they are days no provider watched: CABMAN DT’s pad and '
+            + 'FMS’s live seat count are polls with no history behind them, and FMS journeys '
+            + 'are judged only over windows the reconciler has run. Read every count here '
             + 'as a count over the days that were watched.',
     };
   };
@@ -250,6 +275,15 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
   const ATTR_WHERE = `${DAYWIN('o.started_at')}
      AND ($3::text IS NULL OR o.fleet_id = $3)
      AND ($4 = 'all' OR o.verdict = $4)`;
+  /* ROWS ARE SEGMENTS; COUNTS ARE RIDES.
+     ───────────────────────────────────────────────────────────────────────
+     The rows are every segment of every provider (ruling 4, 2026-09-23), each
+     with its source, so a ride an FMS car made is normally two rows from that
+     day on — FMS's live count and FMS's journey. `total` stays the number of
+     ROWS, because it pages the list. The distribution and `rides` are the
+     figures a page quotes, so they count a ride once (occCountsOnce), with
+     `segments` and `by_source` beside them saying what is behind the count. */
+  const ONCE = occCountsOnce('o');
   const attributedStatements = (limit = 200, offset = 0) => ({
     ROWS_SQL: `SELECT ${SEG_COLS}, ${ATTRIBUTION_COLS}, st.statuses AS candidate_statuses,
                 nb.nearest_booking
@@ -258,13 +292,20 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
            ${statusJoin('o')}
            ${nearestJoin('o')}
           WHERE ${ATTR_WHERE} AND ($5::text IS NULL OR att.tier = $5)
-          ORDER BY o.started_at DESC LIMIT ${limit} OFFSET ${offset}`,
-    COUNT_SQL: `SELECT count(*)::int n FROM occupancy_segment o ${attributionJoin('o')}
+          ORDER BY o.started_at DESC, o.source LIMIT ${limit} OFFSET ${offset}`,
+    COUNT_SQL: `SELECT count(*)::int n, count(*) FILTER (WHERE ${ONCE})::int rides
+           FROM occupancy_segment o ${attributionJoin('o')}
           WHERE ${ATTR_WHERE} AND ($5::text IS NULL OR att.tier = $5)`,
     /* Four parameters, not five — see the note at the call site. */
-    DIST_SQL: `SELECT att.tier AS key, count(*)::int n,
-                round(sum(o.distance_km)::numeric, 1) AS km
+    DIST_SQL: `SELECT att.tier AS key, count(*) FILTER (WHERE ${ONCE})::int n,
+                round(sum(o.distance_km) FILTER (WHERE ${ONCE})::numeric, 1) AS km,
+                count(*)::int AS segments
            FROM occupancy_segment o ${attributionJoin('o')}
+          WHERE ${ATTR_WHERE} GROUP BY 1`,
+    /* Each provider's own count of what the list holds, no attribution
+       needed — the provider does not change with the tier. */
+    SRC_SQL: `SELECT o.source, count(*)::int segments
+           FROM occupancy_segment o
           WHERE ${ATTR_WHERE} GROUP BY 1`,
   });
 
@@ -328,7 +369,7 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
     const p = [from, to, fleet, verdict, tier];
     const { ROWS_SQL, COUNT_SQL } = attributedStatements(limit, offset);
 
-    const [rows, [tot], dist, coverage, { rate, basis }, historyFrom] = await Promise.all([
+    const [rows, [tot], dist, coverage, { rate, basis }, historyFrom, srcRows] = await Promise.all([
       q(ROWS_SQL, p),
       q(COUNT_SQL, p),
       /* THE DISTRIBUTION, over the WINDOW rather than over the current filter.
@@ -346,12 +387,19 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
       coverageOf(from, to, fleet),
       rateOf(from, to, fleet),
       statusHistoryFrom(),
+      q(attributedStatements().SRC_SQL, [from, to, fleet, verdict]),
     ]);
 
     const byTier = Object.fromEntries(dist.map((d) => [d.key, d.n]));
+    const srcN = Object.fromEntries(srcRows.map((r) => [r.source, r.segments]));
     res.json({
       rows: rows.map((r) => dress(r, rate, basis, historyFrom)),
       total: tot?.n ?? rows.length,
+      /* The same list counted as rides, a ride once across providers, and the
+         rows each provider contributed. */
+      rides: tot?.rides ?? null,
+      by_source: Object.fromEntries(OCC_SOURCES.map((s) => [s, srcN[s] ?? 0])),
+      dedupe_rule: OCC_DEDUPE_RULE,
       shown: rows.length,
       offset,
       limit,
@@ -473,7 +521,7 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
           AND ($5::text IS NULL OR o.fleet_id = $5)
           AND att.candidate_keys
               && coalesce((SELECT array_agg(pkey) FROM me), ARRAY[]::text[])
-        ORDER BY o.started_at DESC LIMIT 400`, params);
+        ORDER BY o.started_at DESC, o.source LIMIT 400`, params);
 
     /* THE TOTALS ARE COUNTED, NOT MEASURED OFF THE CAPPED ARRAY.
        ─────────────────────────────────────────────────────────────────────
@@ -489,9 +537,17 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
 
        One extra query, over the same WHERE and the same lateral, grouped on
        the tier the ladder assigned. */
+    /* A RIDE ONCE. From 2026-09-23 one ride an FMS car made is normally two
+       segments, FMS's live count and FMS's journey, and both name the same
+       person; a per-person count of accusations must not double because the
+       car carried two readings of one trip. `n` counts through
+       occCountsOnce(); `by_source` counts each provider's segments. */
     const tally = await q(
       `WITH me AS (${personKeysForDriver('$3')})
-       SELECT att.tier AS key, count(*)::int AS n
+       SELECT att.tier AS key, count(*) FILTER (WHERE ${ONCE})::int AS n,
+              count(*) FILTER (WHERE o.source = 'cabman')::int AS cabman,
+              count(*) FILTER (WHERE o.source = 'fms_live')::int AS fms_live,
+              count(*) FILTER (WHERE o.source = 'fms_trip')::int AS fms_trip
          FROM occupancy_segment o
          ${attributionJoin('o')}
         WHERE ${DAYWIN('o.started_at')}
@@ -501,6 +557,9 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
               && coalesce((SELECT array_agg(pkey) FROM me), ARRAY[]::text[])
         GROUP BY 1`, params);
     const byTier = Object.fromEntries(tally.map((t) => [t.key, t.n]));
+    /* Per provider, per side of the split: the segments behind each total. */
+    const sideBySource = (tiers) => Object.fromEntries(OCC_SOURCES.map((s) => [s,
+      tally.filter((t) => tiers.includes(t.key)).reduce((a, t) => a + (t[s] || 0), 0)]));
 
     /* THE CARS THIS PERSON ACTUALLY HELD, so the coverage note below is a
        statement about them rather than about the fleet. See coverageOf(). */
@@ -552,6 +611,7 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
           last_trip: byTier.last_trip || 0,
           sole_custodian: byTier.sole_custodian || 0,
         },
+        by_source: sideBySource(['bracketed', 'last_trip', 'sole_custodian']),
         /* WHICH RUNGS THIS LIST HOLDS, AS DATA RATHER THAN AS PROSE A RENDERER
            CANNOT SWITCH ON. A shell that groups or captions this list has the
            membership from the response instead of hard-coding it, which is
@@ -637,6 +697,7 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
         rows: candidate,
         total: byTier.ambiguous || 0,
         shown: candidate.length,
+        by_source: sideBySource(['ambiguous']),
         /* THE AMBIGUOUS TIER HAS TWO ENTRANCES NOW, AND THIS HEADING DESCRIBED
            ONLY ONE OF THEM.
            ─────────────────────────────────────────────────────────────────────
@@ -667,12 +728,15 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
       /* What the two totals are, in words, so a page cannot print one as a
          complete figure while the caveat sits somewhere else on the response.
          The convention foldGrain() already uses for drivers_basis. */
-      total_basis: rows.length >= 400
+      total_basis: (rows.length >= 400
         ? 'Both totals are counted over the whole window and are exact. The ROWS are the 400 '
-          + 'most recent of them, so the tables below are shorter than the counts above — '
+          + 'most recent segments, so the tables below may be shorter than the counts above — '
           + 'narrow the date range to see the rest.'
-        : 'Both totals are counted over the whole window, and every one of them is in the '
-          + 'tables below.',
+        : 'Both totals are counted over the whole window, and every ride behind them is in the '
+          + 'tables below.')
+        + ' The totals count a ride once; the tables list every provider’s segment, so a ride '
+        + 'two providers saw is two rows, each naming its provider.',
+      dedupe_rule: OCC_DEDUPE_RULE,
       coverage,
       value: { aed_per_km: rate, basis },
       tier_means: TIER_MEANS,

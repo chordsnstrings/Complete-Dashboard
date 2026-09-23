@@ -66,15 +66,27 @@ const TODAY = { bookings: 215, completed: 201, cancelled: 14, telematics: 240,
    irregular — that is the point of them — but they are now a function of the
    day, so two reads of the same day agree, and a run that fails can be
    reproduced instead of merely re-rolled. */
+/* The server's sentence, verbatim from api/occupancy_sql.js OCC_DEDUPE_RULE. */
+const MOCK_DEDUPE_RULE = 'Combined figures count a ride once. Where segments from different '
+  + 'providers on the same car overlap in time and reached the same verdict, they are one ride: it '
+  + 'is counted once, by the first of them in the order FMS trip seat count, CABMAN DT, FMS live '
+  + 'seat count, and its distance is that segment’s distance. Each provider’s own figures count '
+  + 'every segment it produced, so the providers’ figures can add up to more than the combined one.';
 const wob = (b, a, c) => a + (Math.abs(Math.sin((b + 1) * 12.9898) * 43758.5453) % 1) * (c - a);
 
 app.get('/api/live', (_, r) => r.json(plates.map((p, i) => ({
-  plate: p, fleet_id: i % 3 ? 'ecosine' : 'egari', source: 'cabman',
+  /* Egari's rows are FMS: since 2026-09-23 FMS's live seat count is a seat
+     reading too, sent as seat_occupied (1 or more is occupied) with the count
+     and the provider beside it. */
+  plate: p, fleet_id: i % 3 ? 'ecosine' : 'egari', source: i % 3 ? 'cabman' : 'fms',
   captured_at: new Date(Date.now() - i * 6e4).toISOString(), polled_at: new Date().toISOString(),
   lat: rnd(25.05, 25.30), lng: rnd(55.10, 55.42), speed: i % 3 ? Math.round(rnd(0, 70)) : 0,
   status: i % 3 === 0 ? 'Engaged' : 'Active',
-  // Tri-state: only the CABMAN feed carries a seat sensor.
-  seat_occupied: i % 4 === 3 ? null : i % 3 === 0, stale: i === 7,
+  // Tri-state: a fix may carry no seat reading from either provider.
+  seat_occupied: i % 4 === 3 ? null : i % 3 === 0,
+  seat_count: i % 3 === 0 && i % 4 !== 3 ? 1 + (i % 2) : null,
+  seat_source: i % 4 === 3 ? null : i % 3 ? 'CABMAN DT' : 'FMS live seat count',
+  stale: i === 7,
   fix_age_min: i === 7 ? 581000 : i, poll_age_min: 1,
   fuel_level: i % 3 === 2 ? null : 40 + i * 5, ac_on: i % 2 === 0, odometer: 190000 + i * 1400,
   current_driver: drivers[i], driver_as_of: '2026-08-21',
@@ -114,7 +126,12 @@ app.get('/api/map/journey', (req, res) => {
     driver: 'Ahmed Tarig Mohamed', driver_id: 'drv-0', driver_trips: 7,
     // Bounds of the track, so the page can say what window it is showing.
     first_fix: pts[0].t, last_fix: pts[pts.length - 1].t,
-    distance_km: 83.4, moving_km: 78.1, occupied_km: 31.2 });
+    distance_km: 83.4, moving_km: 78.1, occupied_km: 31.2,
+    // Which provider measured the passenger kilometres; one here, so no note.
+    occupancy_source: 'CABMAN DT',
+    occupancy_by_source: [{ source: 'cabman', label: 'CABMAN DT', occupied_km: 31.2, measured_km: 78.4,
+      reported_fixes: 44 }],
+    occupancy_note: null });
 });
 
 /* Deliberately not all-green: one rollup late, so the Sources page's stale
@@ -2430,8 +2447,16 @@ app.get('/api/cohort/vehicles', (req, r) => {
         status: 'Idle', speed: 0, odometer: 91000 + i * 900, ignition: false,
         fix_age_min: i * 90 },
       alerts: i % 2 ? [{ plate, alert_type: 'Overspeed', n: 12 - i, last_at: dayISO(1) }] : [],
-      segments: [{ plate, verdict: 'partial', n: 14, km: 190, minutes: 620 },
-        ...(i % 3 === 0 ? [{ plate, verdict: 'unauthorized', n: 3, km: 41, minutes: 96 }] : [])],
+      /* One row per car, provider and verdict, each with the provider's own
+         first and last timestamps; and the car's combined figure beside them. */
+      segments: [{ plate, source: 'cabman', source_label: 'CABMAN DT', verdict: 'partial', n: 14,
+        km: 190, minutes: 620, first_at: dayISO(9), last_at: dayISO(1) },
+        ...(i % 3 === 0 ? [
+          { plate, source: 'cabman', source_label: 'CABMAN DT', verdict: 'unauthorized', n: 3, km: 41,
+            minutes: 96, first_at: dayISO(6), last_at: dayISO(2) },
+          { plate, source: 'fms_trip', source_label: 'FMS trip seat count', verdict: 'unauthorized', n: 2,
+            km: 30, minutes: 70, first_at: dayISO(6), last_at: dayISO(3) }] : [])],
+      unauthorized: i % 3 === 0 ? { n: 4, km: 52, dedupe_rule: MOCK_DEDUPE_RULE } : null,
       utilisation: [{ plate, platform: 'uber', hours_online: 210 - i * 7, hours_on_trip: 88,
         utilisation: 0.42, earnings: 5400 - i * 110 }],
     })),
@@ -2568,6 +2593,10 @@ app.get('/api/vehicle/movement', (req, r) => {
   const i = pIndex(req.query.plate);
   r.json({
     segments: Array.from({ length: 14 }, (_, n) => ({
+      // Which provider saw it; one FMS journey with its passenger count.
+      source: n % 4 === 1 ? 'fms_trip' : 'cabman',
+      source_label: n % 4 === 1 ? 'FMS trip seat count' : 'CABMAN DT',
+      passengers: n % 4 === 1 ? 2 : null,
       started_at: new Date(Date.now() - n * 79e5).toISOString(),
       ended_at: new Date(Date.now() - n * 79e5 + 24e5).toISOString(),
       duration_min: 20 + Math.round(rnd(5, 50)), distance_km: +rnd(4, 32).toFixed(1),
@@ -2584,9 +2613,13 @@ app.get('/api/vehicle/movement', (req, r) => {
       max_gap_min: 4 + (n % 6), ignition_ratio: +(0.6 + (n % 4) * 0.1).toFixed(2),
       start_lat: 25.2, start_lng: 55.27, end_lat: 25.1, end_lng: 55.19,
     })),
-    by_verdict: [{ verdict: 'authorized', n: 11, km: 214, minutes: 640 },
-      { verdict: 'unauthorized', n: 2, km: 41, minutes: 96 },
-      { verdict: 'sensor_suspect', n: 1, km: 12, minutes: 28 }],
+    by_verdict: [{ verdict: 'authorized', n: 11, km: 214, minutes: 640, segments: 12,
+      by_source: { cabman: 8, fms_live: 0, fms_trip: 4 } },
+      { verdict: 'unauthorized', n: 2, km: 41, minutes: 96, segments: 2,
+        by_source: { cabman: 2, fms_live: 0, fms_trip: 0 } },
+      { verdict: 'sensor_suspect', n: 1, km: 12, minutes: 28, segments: 1,
+        by_source: { cabman: 1, fms_live: 0, fms_trip: 0 } }],
+    dedupe_rule: MOCK_DEDUPE_RULE,
     days: Array.from({ length: 12 }, (_, n) => ({ day: dayISO(n), fixes: 220 - n * 6 })),
     parked: [{ lat: 25.253, lng: 55.365, fixes: 142 }, { lat: 25.078, lng: 55.139, fixes: 71 },
       { lat: 25.196, lng: 55.276, fixes: 44 }, { lat: 25.118, lng: 55.200, fixes: 21 }],
@@ -4653,18 +4686,21 @@ app.get('/api/day', (req, r) => {
     /* Real sizes beside the capped lists, so the "showing 6 of 41" captions on
        #day are reachable from the fixture. A mock that always returns
        everything cannot exercise a truncation notice. */
-    capped: { alerts_by_vehicle: 41, segments: 88 },
+    capped: { alerts_by_vehicle: 41, segments: 88,
+      segments_by_source: { cabman: 52, fms_live: 0, fms_trip: 36 } },
     alertsByVehicle: plates.slice(0, 6).map((p2, i) => ({
       plate: p2, n: 14 - i * 2, harsh_brake: 6 - i, harsh_accel: 4 - i,
       sharp_turn: 3, overspeed: 1 + i,
       drivers: drivers[i % drivers.length],
       driver_refs: [{ name: drivers[i % drivers.length], id: `drv-${i % drivers.length}` }] })),
     segments: [
-      { plate: plates[0], started_at: `${day}T05:38:00Z`, ended_at: `${day}T06:04:00Z`, duration_min: 26,
+      { source: 'cabman', source_label: 'CABMAN DT', passengers: null,
+        plate: plates[0], started_at: `${day}T05:38:00Z`, ended_at: `${day}T06:04:00Z`, duration_min: 26,
         distance_km: 18.4, verdict: 'unauthorized', nearest_platform: 'uber', nearest_gap_min: 96,
         drivers: drivers[0], driver_refs: [{ name: drivers[0], id: 'drv-0' }],
         verdict_reason: 'no completed booking overlaps; nearest is a uber trip 96 min away' },
-      { plate: plates[2], started_at: `${day}T11:02:00Z`, ended_at: `${day}T11:19:00Z`, duration_min: 17,
+      { source: 'fms_trip', source_label: 'FMS trip seat count', passengers: 1,
+        plate: plates[2], started_at: `${day}T11:02:00Z`, ended_at: `${day}T11:19:00Z`, duration_min: 17,
         distance_km: 6.1, verdict: 'unverifiable', nearest_platform: null, nearest_gap_min: null,
         // A handover day: both people must be openable, which is why the pairs
         // form exists at all.
@@ -4849,7 +4885,18 @@ const segAt = (i) => new Date(Date.UTC(2026, 7, 3 + (i % 16), 4 + (i % 14), (i *
 const SEG_AREAS = ['Deira', 'Business Bay', 'Al Barsha First', 'Dubai Marina',
   'Jumeirah Lakes Towers', 'Al Quoz Industrial Area 3', 'Nad Al Sheba', 'Mirdif'];
 
+/* Three sources of segment since FMS became a second seat-sensor provider
+   (2026-09-23): Egari's rows are FMS — live count or journey — and Ecosine's
+   CABMAN DT. An FMS journey carries nothing sampled (no top speed, fixes, gap
+   or ignition ratio) and a passenger count, so the absent-with-a-reason
+   branches render; and some FMS live rows are a ride an FMS journey already
+   represents (counts_once false), so the ride-once sums are exercised. */
+const SEG_SRC = (i) => (i % 3 ? 'cabman' : i % 2 ? 'fms_live' : 'fms_trip');
+const SEG_SRC_LABEL = { cabman: 'CABMAN DT', fms_live: 'FMS live seat count', fms_trip: 'FMS trip seat count' };
 const mkSeg = (i) => ({
+  source: SEG_SRC(i), source_label: SEG_SRC_LABEL[SEG_SRC(i)],
+  passengers: SEG_SRC(i) === 'fms_trip' ? 1 + (i % 3) : null,
+  counts_once: !(SEG_SRC(i) === 'fms_live' && i % 4 === 3),
   plate: plates[i % plates.length], fleet_id: i % 3 ? 'ecosine' : 'egari',
   started_at: segAt(i),
   ended_at: new Date(Date.parse(segAt(i)) + (12 + (i % 40)) * 6e4).toISOString(),
@@ -4889,7 +4936,9 @@ const mkSeg = (i) => ({
         { name: drivers[(i + 1) % drivers.length], id: `drv-${(i + 1) % drivers.length}` }]
       : [{ name: drivers[i % drivers.length], id: `drv-${i % drivers.length}` }],
 });
-const ALL_SEGS = Array.from({ length: 64 }, (_, i) => mkSeg(i));
+const ALL_SEGS = Array.from({ length: 64 }, (_, i) => mkSeg(i)).map((x) => (x.source === 'fms_trip'
+  ? { ...x, top_speed: null, fixes: null, max_gap_min: null, ignition_ratio: null, boundary_gap_min: null }
+  : x));
 
 app.get('/api/segments', (req, r) => {
   let rows = ALL_SEGS;
@@ -4897,16 +4946,28 @@ app.get('/api/segments', (req, r) => {
   if (req.query.plate) rows = rows.filter((x) => x.plate === req.query.plate);
   if (req.query.day) rows = rows.filter((x) => x.local_day === req.query.day);
   if (req.query.driver) rows = rows.filter((x) => (x.drivers || '').includes(req.query.driver));
+  /* A ride once in the counts (counts_once), every row in `segments`, and
+     each provider's own count — the shape the real facets have. */
   const by = (key) => {
     const m = new Map();
     ALL_SEGS.forEach((x) => {
-      const k = x[key]; const c = m.get(k) || { key: k, n: 0, unauthorized: 0, unauth_km: 0, km: 0 };
-      c.n++; c.km += x.distance_km;
-      if (x.verdict === 'unauthorized') { c.unauthorized++; c.unauth_km += x.distance_km; }
+      const k = x[key]; const c = m.get(k) || { key: k, n: 0, unauthorized: 0, unauth_km: 0, km: 0,
+        segments: 0, by_source: { cabman: 0, fms_live: 0, fms_trip: 0 } };
+      c.segments++; c.by_source[x.source]++;
+      if (x.counts_once) {
+        c.n++; c.km += x.distance_km;
+        if (x.verdict === 'unauthorized') { c.unauthorized++; c.unauth_km += x.distance_km; }
+      }
       m.set(k, c);
     });
     return [...m.values()].map((c) => ({ ...c, km: +c.km.toFixed(1), unauth_km: +c.unauth_km.toFixed(1) }));
   };
+  const srcFacet = ['cabman', 'fms_live', 'fms_trip'].map((k) => {
+    const mine = ALL_SEGS.filter((x) => x.source === k);
+    const un = mine.filter((x) => x.verdict === 'unauthorized');
+    return { key: k, label: SEG_SRC_LABEL[k], segments: mine.length, unauthorized: un.length,
+      unauth_km: +un.reduce((a, x) => a + x.distance_km, 0).toFixed(1) };
+  });
   r.json({
     rows, total: rows.length, truncated: false,
     low_confidence: rows.filter((x) => x.low_confidence).length,
@@ -4931,7 +4992,9 @@ app.get('/api/segments', (req, r) => {
           max_skew_min: 2903, skewed: 4 },
         { key: '(no reason recorded)', n: 7, verdict: 'partial', max_skew_min: null, skewed: 0 },
       ],
+      source: srcFacet,
     },
+    dedupe_rule: MOCK_DEDUPE_RULE,
     /* Facet lists are capped at 40 plates and 20 reasons. A truncated facet is
        not a shorter menu — the vehicle you want is simply absent from it — so
        the page needs to know how many there really are. */
@@ -5150,16 +5213,21 @@ app.get('/api/trip', (req, r) => {
 });
 
 app.get('/api/segment', (req, r) => {
-  const seg = ALL_SEGS.find((x) => x.plate === req.query.plate && x.started_at === req.query.at) || ALL_SEGS[0];
+  const seg = ALL_SEGS.find((x) => x.plate === req.query.plate && x.started_at === req.query.at
+    && (!req.query.source || x.source === req.query.source)) || ALL_SEGS[0];
   const t0 = Date.parse(seg.started_at);
+  // The segment's own provider's fixes: CABMAN's for CABMAN, FMS's with a count for FMS.
+  const fms = seg.source !== 'cabman';
   const track = Array.from({ length: 14 }, (_, i) => ({
     captured_at: new Date(t0 + i * 3e5).toISOString(),
     lat: +rnd(25.05, 25.3).toFixed(4), lng: +rnd(55.1, 55.42).toFixed(4),
     speed: i < 2 || i > 11 ? 0 : Math.round(rnd(20, 80)),
-    seat_occupied: i % 5 === 4 ? null : true, ignition: i > 1, status: 'Engaged',
+    seat_occupied: fms ? null : (i % 5 === 4 ? null : true),
+    seat_count: fms ? (i % 5 === 4 ? null : 1) : null,
+    source: fms ? 'fms' : 'cabman', ignition: i > 1, status: 'Engaged',
   }));
   r.json({
-    segment: seg, track,
+    segment: seg, track, other_sources: [],
     /* Beside the segment, not inside it: the reconciler recorded the journey,
        this endpoint values its distance, and the two must not be confused.
        The detail page prices over the segment's own MONTH while the list
@@ -6041,12 +6109,12 @@ app.get('/api/finance/receipts', (_, r) => {
 });
 
 const UN_VERDICTS = [
-  { verdict: 'unauthorized', n: 21, km: 268, minutes: 640 },
-  { verdict: 'authorized', n: 190, km: 2480, minutes: 5120 },
-  { verdict: 'sensor_suspect', n: 12, km: 40, minutes: 1900 },
-  { verdict: 'partial', n: 9, km: 88, minutes: 210 },
-  { verdict: 'unverifiable', n: 6, km: 51, minutes: 130 },
-  { verdict: 'stationary', n: 31, km: 2, minutes: 900 },
+  { verdict: 'unauthorized', n: 21, km: 268, minutes: 640, segments: 23 },
+  { verdict: 'authorized', n: 190, km: 2480, minutes: 5120, segments: 192 },
+  { verdict: 'sensor_suspect', n: 12, km: 40, minutes: 1900, segments: 12 },
+  { verdict: 'partial', n: 9, km: 88, minutes: 210, segments: 9 },
+  { verdict: 'unverifiable', n: 6, km: 51, minutes: 130, segments: 6 },
+  { verdict: 'stationary', n: 31, km: 2, minutes: 900, segments: 33 },
 ];
 /* The rate the real route measures over the window, and the sentence it sends
    with it. Every row carries both, because the route answers with a bare array
@@ -6237,8 +6305,25 @@ app.get('/api/unauthorized/summary', (_, r) => {
   const by = Object.fromEntries(UN_VERDICTS.map((v) => [v.verdict, v.n]));
   r.json({
   // Partial on purpose: the real fleet has three days of sensor data in a
-  // thirty-day window, and the banner that says so must be exercised.
-  coverage: { days_with_data: 3, days_in_window: 30, complete: false },
+  // thirty-day window, and the banner that says so must be exercised. Per
+  // provider too, with FMS live absent so its reason renders.
+  coverage: { days_with_data: 3, days_in_window: 30, complete: false,
+    by_source: {
+      cabman: { label: 'CABMAN DT', days_with_data: 3, first_day: '2026-08-03', last_day: '2026-08-05', plates: 9 },
+      fms_live: { label: 'FMS live seat count', days_with_data: 0, first_day: null, last_day: null, plates: 0,
+        absent: 'FMS’s live seat count has been collected only since 2026-09-23, after this window.' },
+      fms_trip: { label: 'FMS trip seat count', days_with_data: 2, first_day: '2026-08-04', last_day: '2026-08-05', plates: 6 },
+    } },
+    by_source: {
+      cabman: { label: 'CABMAN DT', segments: 180, unauthorized: 14, unauth_km: 170, authorized: 120,
+        needs_a_human: 4, days_with_data: 3, first_day: '2026-08-03', last_day: '2026-08-05', plates: 9 },
+      fms_live: { label: 'FMS live seat count', segments: 0, unauthorized: null, unauth_km: null,
+        authorized: null, needs_a_human: null, days_with_data: null,
+        absent: 'FMS’s live seat count has been collected only since 2026-09-23, after this window.' },
+      fms_trip: { label: 'FMS trip seat count', segments: 95, unauthorized: 9, unauth_km: 112, authorized: 72,
+        needs_a_human: 2, days_with_data: 2, first_day: '2026-08-04', last_day: '2026-08-05', plates: 6 },
+    },
+    dedupe_rule: MOCK_DEDUPE_RULE,
     byVerdict: UN_VERDICTS,
     totals: {
       unauthorized: by.unauthorized, authorized: by.authorized,
@@ -6392,10 +6477,18 @@ const AT_COVERAGE = {
   days_with_data: 3, days_in_window: 30, first_day: '2026-08-03', last_day: '2026-08-05',
   plates_with_sensor: plates.length, plates_held: null, scope: 'every car in the fleet',
   complete: false,
-  note: 'The seat sensor covers 3 of the 30 days in this window (2026-08-03 to 2026-08-05), '
-    + 'across every car in the fleet. The other 27 days are not quiet days — they are days '
-    + 'with no evidence, because CABMAN is a five-minute realtime poll with no history behind '
-    + 'it. Read every count here as a count over the days that were watched.',
+  by_source: {
+    cabman: { label: 'CABMAN DT', days_with_data: 3, first_day: '2026-08-03', last_day: '2026-08-05', plates: 9 },
+    fms_live: { label: 'FMS live seat count', days_with_data: 0, first_day: null, last_day: null, plates: 0,
+      absent: 'FMS’s live seat count has been collected only since 2026-09-23, after this window.' },
+    fms_trip: { label: 'FMS trip seat count', days_with_data: 2, first_day: '2026-08-04', last_day: '2026-08-05', plates: 6 },
+  },
+  note: 'Seat-occupancy evidence covers 3 of the 30 days in this window (2026-08-03 to '
+    + '2026-08-05), across every car in the fleet: CABMAN DT 3 days, FMS live seat count 0 days, '
+    + 'FMS trip seat count 2 days. The other 27 days are not quiet days — they are days no '
+    + 'provider watched: CABMAN DT’s pad and FMS’s live seat count are polls with no history '
+    + 'behind them, and FMS journeys are judged only over windows the reconciler has run. Read '
+    + 'every count here as a count over the days that were watched.',
 };
 const AT_BRACKET = {
   cap_min: 240, platforms: ['uber'],
@@ -6444,6 +6537,10 @@ app.get('/api/unauthorized/attributed', (req, r) => {
     .reduce((a, x) => a + (x.distance_km || 0), 0).toFixed(1);
   r.json({
     rows, total: all.length, shown: rows.length, offset, limit,
+    rides: all.filter((x) => x.counts_once).length,
+    by_source: Object.fromEntries(['cabman', 'fms_live', 'fms_trip']
+      .map((k) => [k, all.filter((x) => x.source === k).length])),
+    dedupe_rule: MOCK_DEDUPE_RULE,
     truncated: offset + rows.length < all.length,
     filter: { verdict: 'unauthorized', tier, fleet: null, verdict_rejected: null },
     distribution: {
@@ -6477,6 +6574,8 @@ app.get('/api/driver/unauthorized', (req, r) => {
       rows: att, total: att.length, shown: att.length,
       by_tier: { bracketed: n('bracketed'), last_trip: n('last_trip'),
         sole_custodian: n('sole_custodian') },
+      by_source: Object.fromEntries(['cabman', 'fms_live', 'fms_trip']
+        .map((k) => [k, att.filter((x) => x.source === k).length])),
       heading: 'Unexplained journeys this person is named beside',
       means: 'One of three things: their own Uber trips on that car bracket the journey in time; '
         + 'theirs was the last Uber trip on that car before the journey started, which is the '
@@ -6487,6 +6586,8 @@ app.get('/api/driver/unauthorized', (req, r) => {
     },
     also_a_candidate: {
       rows: cand, total: cand.length, shown: cand.length,
+      by_source: Object.fromEntries(['cabman', 'fms_live', 'fms_trip']
+        .map((k) => [k, cand.filter((x) => x.source === k).length])),
       heading: 'Cars this person held on a day an unexplained journey happened',
       means: cand.length
         ? 'These journeys have more than one candidate and nothing separates them. This person '
@@ -6496,15 +6597,18 @@ app.get('/api/driver/unauthorized', (req, r) => {
         : 'None in this window.',
     },
     truncated: false,
-    total_basis: 'Both totals are counted over the whole window, and every one of them is in '
-      + 'the tables below.',
+    total_basis: 'Both totals are counted over the whole window, and every ride behind them is in '
+      + 'the tables below. The totals count a ride once; the tables list every provider’s '
+      + 'segment, so a ride two providers saw is two rows, each naming its provider.',
+    dedupe_rule: MOCK_DEDUPE_RULE,
     coverage: { ...AT_COVERAGE, plates_held: 3, plates_with_sensor: 2,
       scope: 'the 3 car(s) this person held in this window',
-      note: 'The seat sensor covers 3 of the 30 days in this window (2026-08-03 to 2026-08-05), '
-        + 'across the 3 car(s) this person held. The other 27 days are not quiet days — '
-        + 'they are days with no evidence, because CABMAN is a five-minute realtime poll with '
-        + 'no history behind it. Read every count here as a count over the days that were '
-        + 'watched.' },
+      note: 'Seat-occupancy evidence covers 3 of the 30 days in this window (2026-08-03 to '
+        + '2026-08-05), across the 3 car(s) this person held: CABMAN DT 3 days, FMS live seat '
+        + 'count 0 days, FMS trip seat count 2 days. The other 27 days are not quiet days — they '
+        + 'are days no provider watched: CABMAN DT’s pad and FMS’s live seat count are polls with '
+        + 'no history behind them, and FMS journeys are judged only over windows the reconciler '
+        + 'has run. Read every count here as a count over the days that were watched.' },
     value: { aed_per_km: UN_RATE, basis: UN_BASIS },
     tier_means: AT_MEANS,
     bracket: { cap_min: 240, platforms: ['uber'] },
@@ -6518,9 +6622,18 @@ app.get('/api/driver/unauthorized', (req, r) => {
    reads `total`, not the length of the list, which is the worst hundred. */
 app.get('/api/unauthorized/by-vehicle', (_, r) => r.json({
   total: 23, segments: 61, shown: plates.length, truncated: true,
+  by_source: {
+    cabman: { label: 'CABMAN DT', segments: 180, unauthorized: 38, unauth_km: 410 },
+    fms_live: { label: 'FMS live seat count', segments: 0, unauthorized: null, unauth_km: null,
+      absent: 'FMS’s live seat count has been collected only since 2026-09-23, after this window.' },
+    fms_trip: { label: 'FMS trip seat count', segments: 95, unauthorized: 25, unauth_km: 260 },
+  },
+  dedupe_rule: MOCK_DEDUPE_RULE,
   rows: plates.map((p, i) => ({
     plate: p, unauthorized: Math.max(0, 6 - i), authorized: 20 + i,
     sensor_suspect: i % 3, unauth_km: Math.max(0, 70 - i * 11),
+    unauthorized_by_source: { cabman: i % 3 ? Math.max(0, 6 - i) : 0, fms_live: 0,
+      fms_trip: i % 3 ? 0 : Math.max(0, 6 - i) },
     /* The accused names, folded to one per PERSON, with the pairs form beside
        the string so every name on an accusation is openable — the same shape
        every other custody surface returns. */
@@ -6546,7 +6659,9 @@ app.get('/api/unauthorized/daily', (_, r) => r.json(
     const partial = Math.max(0, segments - unauthorized - authorized - needs_a_human);
     return { d: `2026-08-${String(i + 1).padStart(2, '0')}`,
       unauthorized, authorized, needs_a_human, partial, stationary: 0,
-      segments, uncollected };
+      segments, uncollected,
+      unauthorized_by_source: uncollected ? null
+        : { cabman: unauthorized, fms_live: 0, fms_trip: i % 2 ? unauthorized : 0 } };
   })));
 
 /* {rows, total, shown, truncated}. The endpoint caps at 100 and used to return
@@ -6555,18 +6670,48 @@ app.get('/api/unauthorized/daily', (_, r) => r.json(
    a truncated total so a screenshot exercises the disclosure rather than only
    the happy path. */
 app.get('/api/sensor-health', (_, r) => {
-  const rows = plates.map((p, i) => ({
-    plate: p, occupied_fixes: i === 2 ? 0 : 400 - i * 40,
-    unreported_fixes: i % 4 === 3 ? 900 : 0,
-    total_fixes: 2400 - i * 90,
-    occupied_pct: i === 2 ? 0 : +(18 - i).toFixed(1),
-    sensor_suspect_segments: i % 5 === 1 ? 4 : 0,
-    // Whether there is enough signal to judge the sensor at all — a car with
-    // forty fixes is not evidence of a broken seat sensor.
-    judgeable: i !== 5,
-  }));
-  const total = rows.length + 118;
-  r.json({ rows, total, shown: rows.length, truncated: total > rows.length });
+  const rows = plates.map((p, i) => {
+    const row = {
+      plate: p, occupied_fixes: i === 2 ? 0 : 400 - i * 40,
+      unreported_fixes: i % 4 === 3 ? 900 : 0,
+      total_fixes: 2400 - i * 90,
+      occupied_pct: i === 2 ? 0 : +(18 - i).toFixed(1),
+      sensor_suspect_segments: i % 5 === 1 ? 4 : 0,
+      // Whether there is enough signal to judge the sensor at all — a car with
+      // forty fixes is not evidence of a broken seat sensor.
+      judgeable: i !== 5,
+    };
+    const state = row.sensor_suspect_segments > 0 ? 'suspect' : row.occupied_fixes > 0 ? 'ok'
+      : row.total_fixes >= 20 ? 'never triggers' : 'too few fixes to judge';
+    return { ...row, source: 'cabman', source_label: 'CABMAN DT', state, dead: state === 'never triggers',
+      reason: `CABMAN DT pad over ${row.total_fixes} fixes.` };
+  });
+  /* FMS's two sources, one dead of each, so both tables and both rules render. */
+  const fmsLive = plates.slice(0, 4).map((p, i) => ({
+    plate: p, source: 'fms_live', source_label: 'FMS live seat count',
+    counted_fixes: 60 + i, occupied_fixes: i === 1 ? 0 : 20 + i, bookings: 8 + i, judgeable: true,
+    state: i === 1 ? 'never reports a passenger' : 'ok', dead: i === 1,
+    reason: i === 1 ? 'FMS reported a live seat count on 61 fixes and the car carried 9 booking(s), '
+      + 'but the count never once reached 1.' : 'FMS’s live seat count read 1 or more.' }));
+  const fmsTrip = plates.slice(0, 5).map((p, i) => ({
+    plate: p, source: 'fms_trip', source_label: 'FMS trip seat count',
+    live_fixes: 300 + i, bookings: i === 4 ? 0 : 10 + i, journeys: i === 2 || i === 4 ? 0 : 12 + i,
+    judgeable: i !== 4,
+    state: i === 2 ? 'no journey seat count' : i === 4 ? 'no bookings to judge against' : 'ok',
+    dead: i === 2,
+    reason: i === 2 ? 'FMS tracked this car (302 live fixes) and it carried 12 booking(s), but FMS '
+      + 'filed no journey with a seat count for it in this window.' : 'FMS filed journeys with a seat count.' }));
+  const total = rows.length + 118 + fmsLive.length + fmsTrip.length;
+  r.json({ rows: [...rows, ...fmsLive, ...fmsTrip], total,
+    shown: rows.length + fmsLive.length + fmsTrip.length, truncated: true,
+    by_source: {
+      cabman: { label: 'CABMAN DT', total: rows.length + 118, shown: rows.length, truncated: true,
+        dead: rows.filter((x) => x.dead).length, rule: 'dead when at least 20 fixes and none of them occupied' },
+      fms_live: { label: 'FMS live seat count', total: fmsLive.length, shown: fmsLive.length, truncated: false,
+        dead: 1, rule: 'dead when FMS reported a live seat count and the car carried bookings, but the count never reached 1' },
+      fms_trip: { label: 'FMS trip seat count', total: fmsTrip.length, shown: fmsTrip.length, truncated: false,
+        dead: 1, rule: 'dead when FMS tracked the car and it carried bookings, but FMS filed no journey with a seat count' },
+    } });
 });
 
 /* Bookings and raw rows are different counts and the coverage table conflated
