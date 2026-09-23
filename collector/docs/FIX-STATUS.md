@@ -2188,6 +2188,12 @@ figures are in COVERAGE.
 
 | # | what | state | proof |
 |---|---|---|---|
-| F1 | FMS's live `Seatcount` collected (GetVehicleCurrentDetails, vehicleno=ALL) into `telemetry_snapshot.seat_count`, schema_v84 | **written** | test/fms_seat_count.test.mjs (16). Reverts fail: "0 is a reading" 2, "refusal off the banner" 1, "vehicleno=ALL" 1, "rows carry the count" 1, "probe params" 1. Proven only when the first real poll after the deploy stores a count |
-| F2 | The Fleet tab's FMS seat column reads the live count as well as the per-journey count | **written** | test/vehicle_feeds.test.mjs (51); reverting the live half fails 2 |
+| F1 | FMS's live `Seatcount` collected (GetVehicleCurrentDetails, vehicleno=ALL) into `telemetry_snapshot.seat_count`, schema_v84 | **proven** — `e98d5f4`, deployment `9f6ec597` (ACTIVE 12:32Z) | at 12:37Z, 66 Uber-active cars (Ecosine 42, Egari 24) had an FMS seat reading ≤10 min old, the same 66 that had a live FMS fix ≤10 min old; per-trip counts lag ≥27 min, so these can only be the live count. The FMS seat column rose from 68 to 75 receiving, equal to FMS data. | test/fms_seat_count.test.mjs (16). Reverts fail: "0 is a reading" 2, "refusal off the banner" 1, "vehicleno=ALL" 1, "rows carry the count" 1, "probe params" 1. Proven only when the first real poll after the deploy stores a count |
+| F2 | The Fleet tab's FMS seat column reads the live count as well as the per-journey count | **proven** — same deployment | test/vehicle_feeds.test.mjs (51); reverting the live half fails 2 |
 | F3 | The nightly probe called GetVehicleCurrentDetails without vehicleno and reported "Authentication failed" | **written** | test/fms_seat_count.test.mjs; proven when the next probe run shows fields rather than an error |
+
+### HR roster — on production 2026-09-23
+
+- **Deployed and committed.** Deployment `77abc6b4` (commit `9717fd7`, ACTIVE at 12:16Z). The production preview of the operator's file matched the local dry run exactly: 143 rows, 112 matched by platform id, 22 by phone, 9 unmatched, 20 proposals, 1 contradiction, and no document number in the response. Committed at 12:24Z as upload 1.
+- **Compliance.** `/api/compliance/drivers` now counts 50 expired licences, down from 88. 152 people are valid on HR's date, and 41 show a disagreement with the platform's date.
+- **Same-person queue.** `/api/same-person` carries the HR proposals and 1 contradiction.
