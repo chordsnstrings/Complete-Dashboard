@@ -5682,3 +5682,85 @@ success message; ask for a fenced block explicitly or omit `--extract`.
   read in four places and written by nothing in `api/`, `src/` or `bin/`, and
   the comment at `src/persons.js:49` points at an `api/person_merge_routes.js`
   route that does not exist.
+
+---
+
+## Seat sensor and FMS, per car active on Uber — measured 2026-09-23
+
+The `#feeds` tab (Fleet section; `api/feed_routes.js`, `GET /api/vehicles/feeds`,
+`api/public/feeds.js`). Measured on production at 10:52Z through GET endpoints
+only — `/api/vehicle/profile` for all 273 plates, `/api/track` for a week of
+every active car, `/api/status/fleet`, `/api/schema/raw-values`,
+`/api/sensor-health` — because the route itself was not yet deployed.
+
+**Active on Uber is Uber's own vehicle list.** `vehicle_profile.compliance_status`
+from `getSupplierVehicles` (`src/sources/uber_fleet.js`), both orgs, every
+30-minute incremental: **ACTIVE 130, INACTIVE 8** of 138 Uber records; 95
+Ecosine, 35 Egari. The other per-car status Uber sends,
+`gigBaseTypeStatuses[].gigUnifiedStatus`, reads `INVALID` on all 138, active or
+not — it separates nothing.
+
+| over the 130 active cars | Ecosine (95) | Egari (35) |
+|---|---|---|
+| seat sensor (CABMAN) receiving, 24 h | 30 | 0 — no CABMAN account |
+| seat sensor not receiving | 65 | 35 |
+| FMS receiving, 24 h | 47 | 28 |
+| FMS not receiving | 48 | 7 |
+| both feeds | 2 | 0 |
+| neither feed | 20 | 7 |
+
+The two trackers are mostly on DIFFERENT cars: only 2 cars carry both.
+CABMAN had a fix in the week for 97 plates, and **65 of them are on no Uber
+list at all** — only 32 are active Uber cars. Plate matching is plain equality
+on the stored plate (`normPlate`, `src/config.js:203`, applied by every
+collector): every Uber, CABMAN and FMS plate seen was the same `L` + five
+digits, and no CABMAN-only plate shares its digits with an Uber plate.
+
+**Reporting cadence is not polling cadence.** CABMAN is polled every 5 min
+and FMS every 2 min, but both trackers file on movement. Over 2026-09-16..23:
+CABMAN reports every 5 min moving and about hourly parked — 90% of gaps
+≤ 60 min, 99.9% ≤ 2 h, longest 3.8 h; healthy trackers' newest fix ≤ 69 min
+old, the two dead ones 58 h and 163 h. FMS reports every ~6 min moving and can
+go quiet most of a night parked — 84 gaps over 6 h and 10 over a day across 78
+cars; 7 cars went more than a day silent and 4 of them came back, so past a
+day a car off the road and a dead unit look the same until it moves, and the
+cell prints the last reading's time for exactly that reason. So "receiving" is
+**a reading in the last 24 h**, the same line
+`stale_tracker` (`src/insights.js`), `DORMANT_MIN` (`src/sources/cabman.js`) and
+the Live page's "Silent over a day" already draw.
+
+**Who drives it.** Uber's vehicle list carries `assignments[]`; 38 of 138
+records assign nobody and at least 8 assign two. Of the 63 assigned records the
+raw-value sample covers (101 of 138), 54 had every assigned driver attached to
+one and the same car in Uber's live roster the same minute, 7 had the driver on
+no car, 2 named drivers in different cars. (The sample carries no plate beside
+the array, so whether that one car was THIS car could not be checked from a GET
+— the route does it by construction, reading the array off the car's own row.) Where Uber assigns nobody the page
+falls back to `vehicle_current_driver` (custody), which agreed with Uber's live
+roster on all 90 cars where both answered. Phones: of the 122 driver accounts
+custody or the live roster put in an active car, 113 carry one on the account
+itself and 120 once the person's other accounts are read (counted through
+`/api/driver/profile`'s fold; the route reads the spine, `driver_platform_id`).
+
+### Traps this added to the list
+
+* **`vehicle_profile` rows are never re-stamped and never deleted.**
+  `upsertMany` updates only the columns it is given and `updated_at` is not one
+  of them, so it is the INSERT time forever — and nothing removes a car Uber
+  stops listing. A car dropped from an org keeps its last `compliance_status`
+  here indefinitely, and there is no column that can say "Uber last listed this
+  at". `#feeds` therefore means "ACTIVE in the last list that included it".
+* **`vehicle_profile.assigned_driver_ext_id` is `assignments[0]` only.** Cars
+  with two assigned drivers lose the second, and which one is "first" is
+  Uber's order. Read `raw -> 'assignments'` when the question is who drives
+  the car.
+* **The shell stamps a BOOKINGS provenance line under every page that writes
+  none** (`stampSource` in `api/public/app.js`: "Built from the whole record —
+  Uber N · Hotel N …"). A page not built from bookings — `#feeds` reads a
+  vehicle list and two tracker feeds — must write its own `.srcline`, or it is
+  captioned with sources it never read.
+* **A phone found through the person spine is only as good as the spine's
+  merge**, and the spine's phone rule is unguarded (see above). For `#feeds`
+  the practical effect is small — a pair merged BY a shared phone yields that
+  same phone — but a register-merged pair lends its sibling's number, which is
+  right only while the merge is.

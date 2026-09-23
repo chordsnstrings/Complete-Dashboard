@@ -46,6 +46,10 @@ import { recordImport, spanOf, tallyBatch, takeTally,
 import { economicsRoutes } from './economics_routes.js';
 import { driverRoutes } from './driver_routes.js';
 import { vehicleRoutes } from './vehicle_routes.js';
+/* #feeds: which cars Uber lists as active are sending seat-sensor and FMS data.
+   A route module like the others, mounted below the per-driver marker — so
+   test/mount.mjs discovers and mounts it itself and its slice needs nothing. */
+import { feedRoutes } from './feed_routes.js';
 import { cohortRoutes } from './cohort_routes.js';
 import { analyticsRoutes, analystRoutes } from './analytics_routes.js';
 import { rosterRoutes } from './roster_routes.js';
@@ -6291,6 +6295,7 @@ economicsRoutes(app, { q, wrap, range });
 
 /* ───────────────── per-vehicle detail pages ───────────────── */
 vehicleRoutes(app, { q, wrap, endOfDay });
+feedRoutes(app, { q, wrap });
 cohortRoutes(app, { q, wrap });
 
 /* ───────────────── commercial analytics ─────────────────

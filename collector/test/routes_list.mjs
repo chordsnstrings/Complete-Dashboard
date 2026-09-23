@@ -64,7 +64,7 @@ export const ROUTES = [
   'segments/nonsense/x',
   'segment/L45235/2026-08-03T04:00:00.000Z', 'segment/L45235/not-a-time',
   'slot/2/19', 'slot/0/3', 'slot/9/99',
-  'safety', 'safety/vehicles', 'safety/events', 'live', 'map', 'sources', 'coverage', 'providers', 'settings',
+  'safety', 'safety/vehicles', 'safety/events', 'live', 'feeds', 'map', 'sources', 'coverage', 'providers', 'settings',
   /* The action list's facets are addresses now, so a filtered list can be sent
      to the person who has to act on it. A category nobody has is included on
      purpose: the empty state must say "nothing has this severity", not "no data

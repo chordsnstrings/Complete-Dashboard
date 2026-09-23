@@ -439,7 +439,13 @@ export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'ac
      platform and an id and nothing else — a range, a channel or a fleet
      control above it would govern nothing, and would ride along into every
      link leaving the page. */
-  'compliance', 'forecast', 'retention', 'capacity', 'map', 'segment', 'trip'];
+  'compliance', 'forecast', 'retention', 'capacity', 'map', 'segment', 'trip',
+  /* #feeds is every car Uber lists as active NOW, judged on readings in the
+     last day. /api/vehicles/feeds takes no window, no platform (it is Uber's
+     list by construction) and no fleet — the table carries the fleet as a
+     column — so all three controls would govern nothing and ride along into
+     every vehicle and driver link leaving the page. */
+  'feeds'];
 
 export const hidesRange = (v) => NO_FILTER.includes(v) || NO_RANGE.includes(v);
 export const hidesChannel = (v) => NO_FILTER.includes(v) || NO_PLATFORM_FLEET.includes(v);

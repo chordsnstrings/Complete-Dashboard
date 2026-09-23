@@ -67,6 +67,7 @@ import { renderCharging } from './charging.js';
 import { renderCompare } from './compare.js';
 import { renderSupply } from './supply.js';
 import { renderOptimise } from './optimise.js';
+import { renderFeeds } from './feeds.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -477,6 +478,11 @@ const VIEWS = [
   { id: 'segments', label: 'All unauthorized trips', ic: '≣', sec: 'Fleet', sub: 'Every unexplained journey in the fleet, with who the evidence can name beside it, how firmly, and how many cannot be narrowed to one person' },
   { id: 'safety', label: 'Safety', ic: '△', sec: 'Fleet', sub: 'Harsh braking, speeding and sharp turns from the car trackers, plus tracker faults' },
   { id: 'live', label: 'Live fleet', ic: '◉', sec: 'Fleet', sub: 'Live vehicle positions, refreshed by CABMAN every 5 minutes' },
+  /* Asked for as "a tab on fleet with the vehicles numbers active on uber but
+     not receiving any seat sensor or FMS data and which one's receiving". One
+     row per car Uber lists as active, green or red per feed, and who to ring.
+     Every rule behind it is in api/feed_routes.js. */
+  { id: 'feeds', label: 'Seat sensor & FMS', ic: '◌', sec: 'Fleet', sub: 'Which cars active on Uber are sending seat-sensor and FMS data, and which are not, with each driver and their phone' },
   { id: 'map', label: 'Map & replay', ic: '◍', sec: 'Fleet', sub: 'Where every vehicle is now, and where it went on any given day' },
   { id: 'causes', label: 'Why trips changed', ic: '◔', sec: 'Work', sub: 'When trips changed sharply, and whether supply or demand moved with it' },
   { id: 'forecast', label: 'Forecast', ic: '◠', sec: 'Work', sub: 'Expected trips for next month, day by day, and how uncertain each day is' },
@@ -2036,6 +2042,7 @@ V.optimise = async (root) => renderOptimise(root);
 V.capacity = async (root) => renderCapacity(root);
 V.trips = async (root) => renderTrips(root);
 V.receipts = async (root) => renderReceipts(root);
+V.feeds = async (root) => renderFeeds(root);
 V.payouts = async (root) => renderPayouts(root);
 V.identity = async (root) => renderIdentity(root);
 V.provenance = async (root) => renderProvenance(root);
