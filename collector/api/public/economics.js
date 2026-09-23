@@ -758,7 +758,11 @@ async function assetsTab(root) {
       onClick: (r) => { location.hash = href('vehicle', r.plate); } });
     sc.body.append(el('p', 'cap',
       `${fmt(withKm.length)} of ${fmt(A.rows.length)} vehicles have both. The fleet averages `
-      + `${money(t.aed_per_km, 'AED', 2)} per km; a dot well below that line is doing distance `
+      /* "a dot well below that line": no line is drawn — this call has never
+         passed scatter() a refLine — so the sentence named a mark the reader
+         could not find. It names the rate instead. Drawing the line is the
+         page phase's (a visible change to the old skin). */
+      + `${money(t.aed_per_km, 'AED', 2)} per km; a car earning well under that for each km is doing distance `
       + 'that is not being paid for, which on this fleet usually means a car working a channel '
       + 'that prices nothing per trip while its driver’s payout goes somewhere else.'));
   }

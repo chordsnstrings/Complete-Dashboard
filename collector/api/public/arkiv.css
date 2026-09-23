@@ -932,3 +932,7 @@
   color:var(--grey);margin:0 6px}
 :root[data-skin="arkiv"] .hm-key .hm-zero{background:var(--paper-2);box-shadow:inset 0 0 0 1px var(--hair)}
 :root[data-skin="arkiv"] .hm-key .hm-none{background:none;box-shadow:inset 0 0 0 1px var(--abs-outline)}
+/* scatter (SPEC §4): solid markers inside a 2px surface ring, and a solid
+   reference line. */
+:root[data-skin="arkiv"] .sc-dot{fill-opacity:1;stroke-width:2}
+:root[data-skin="arkiv"] .sc-ref{stroke-dasharray:none}

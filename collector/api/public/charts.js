@@ -1238,11 +1238,18 @@ export function heatmap(host, rows, opts = {}) {
    The axes were also rounded to integers — `fmt(Math.round(ymax * i / 3))` —
    which areaChart fixed for itself and nobody carried here, so a fleet with
    sub-1 AED/km rates read "0 / 0 / 1 / 1" up the side. */
-export function scatter(host, data, { x, y, label, xLabel, yLabel, onClick,
-  xFmt = (v) => fmt(v), yFmt = (v) => fmt(v), refLine = null, aria = null } = {}) {
+/* Arkiv (STEP 2, SPEC §4): drawn at the measured box; markers SOLID, r 4.5
+   (≥ 4) inside a 2px surface ring — the old 60% opacity made two dots on top
+   of each other read as one darker dot, a density nobody asked the chart to
+   show; the reference line SOLID, as every rule is. The paint is arkiv.css
+   on .sc-dot and .sc-ref; the old skin draws exactly what it drew. */
+export function scatter(host, data, opts = {}) {
+  const { x, y, label, xLabel, yLabel, onClick,
+    xFmt = (v) => fmt(v), yFmt = (v) => fmt(v), refLine = null, aria = null } = opts;
   host.innerHTML = '';
   if (!data.length) return empty(host);
-  const W = 720, H = 280, pl = 52, pr = 16, pt = 16, pb = 40;
+  const form = markForm();
+  whenLaidOut(host, form, () => scatter(host, data, opts));
   const xs = data.map((d) => +d[x]), ys = data.map((d) => +d[y]);
   /* Guarded against a single non-finite value.
      `Math.max(...xs)` over an array holding one NaN is NaN; NaN * 1.1 is NaN;
@@ -1252,6 +1259,14 @@ export function scatter(host, data, { x, y, label, xLabel, yLabel, onClick,
   const fin = (a) => a.filter(Number.isFinite);
   const xmax = (Math.max(...fin(xs), 0) || 1) * 1.1;
   const ymax = (Math.max(...fin(ys), 0) || 1) * 1.1;
+  let W = 720, H = 280, pl = 52;
+  const pr = 16, pt = 16, pb = 40;
+  if (form.fit) {
+    ({ W } = chartBox(host));
+    H = Math.round(Math.min(380, Math.max(240, W * 0.36)));
+    // The rotated y label sits in the first 20px; the ticks need the rest.
+    pl = Math.max(52, axisGutter(yTicks({ hi: ymax }).map((v) => yFmt(v))) + 20);
+  }
   const iw = W - pl - pr, ih = H - pt - pb;
   const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
   const { max: yTop } = yAxis(svg, { hi: ymax, pl, pr, pt, ih, W, fmt: yFmt });
@@ -1268,12 +1283,13 @@ export function scatter(host, data, { x, y, label, xLabel, yLabel, onClick,
   if (refLine && Number.isFinite(+refLine.slope)) {
     svg.append(mk('line', { x1: pl, y1: pt + ih,
       x2: pl + iw, y2: pt + ih - ih * Math.min(1, (xTop * +refLine.slope) / yTop),
-      stroke: 'var(--grey)', 'stroke-width': 1, 'stroke-dasharray': '4 3' }));
+      stroke: 'var(--grey)', 'stroke-width': 1, 'stroke-dasharray': '4 3', class: 'sc-ref' }));
   }
   data.forEach((d) => {
     if (!Number.isFinite(+d[x]) || !Number.isFinite(+d[y])) return;
     const cx = pl + iw * (+d[x]) / xTop, cy = pt + ih - ih * (+d[y]) / yTop;
-    const c = mk('circle', { cx, cy, r: 4.5, fill: 'var(--s1)', 'fill-opacity': .6, stroke: 'var(--surface)', 'stroke-width': 1.5 });
+    const c = mk('circle', { cx, cy, r: 4.5, fill: 'var(--s1)', 'fill-opacity': .6, stroke: 'var(--surface)', 'stroke-width': 1.5,
+      class: 'sc-dot' });
     interactive(c, `${esc(d[label])} — ${xLabel}: <b>${xFmt(d[x])}</b>, ${yLabel}: <b>${yFmt(d[y])}</b>`, onClick && (() => onClick(d)));
     svg.append(c);
   });

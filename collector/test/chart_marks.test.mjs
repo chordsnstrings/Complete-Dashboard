@@ -610,6 +610,48 @@ for (const [skin, scheme] of [['classic', 'light'], ['arkiv', 'light'], ['arkiv'
   check('no heatmap caption says "darker" — in dark mode the busiest cell is the lightest', dark.length === 0, dark.join(' '));
 }
 
+/* ── 7 · scatter ───────────────────────────────────────────────────────── */
+console.log('\n7 · scatter: solid markers in a 2px ring, a solid reference line');
+const SC = async ([w]) => {
+  const c = await import('/charts.js');
+  document.querySelector('#shost')?.remove();
+  const host = document.createElement('div'); host.id = 'shost'; host.className = 'panel';
+  host.style.cssText = `width:${w}px;position:absolute;left:0;top:0`;
+  document.body.append(host);
+  c.scatter(host, Array.from({ length: 12 }, (_, i) => ({ p: `P${i}`, km: 100 + i * 37, money: 900 + (i % 5) * 410 })),
+    { x: 'km', y: 'money', label: 'p', xLabel: 'km', yLabel: 'money in (AED)', refLine: { slope: 2.1 },
+      yFmt: (v) => `AED ${Number(v).toLocaleString('en-GB')}` });
+  const svg = host.querySelector('svg'), cs = (e) => getComputedStyle(e);
+  const dots = [...svg.querySelectorAll('circle')].map((d) => ({ op: cs(d).fillOpacity, sw: cs(d).strokeWidth, r: +d.getAttribute('r') }));
+  const ref = svg.querySelector('.sc-ref');
+  /* Client rects, not getBBox: a bbox is taken before the rotate() that
+     stands the y label up, so it would measure the label lying down. */
+  const sb = svg.getBoundingClientRect();
+  const out = [...svg.querySelectorAll('text')].map((t) => t.getBoundingClientRect())
+    .filter((b) => b.left < sb.left - 0.5 || b.right > sb.right + 0.5).map((b) => [b.left - sb.left, b.right - sb.right]);
+  return { vb: svg.getAttribute('viewBox'), dots, ref: ref && cs(ref).strokeDasharray, inside: out.length === 0, out };
+};
+for (const skin of ['classic', 'arkiv']) {
+  const { ctx, page } = await open(skin);
+  const r = await page.evaluate(SC, [860]);
+  if (skin === 'classic') {
+    check('old skin: the 720 × 280 box, 60% dots in a 1.5px ring, a dashed reference line',
+      r.vb === '0 0 720 280' && r.dots.every((d) => d.op === '0.6' && d.sw === '1.5px') && r.ref === '4px, 3px', JSON.stringify(r));
+  } else {
+    check('Arkiv: drawn at the host’s width', r.vb.startsWith('0 0 860 '), r.vb);
+    check('Arkiv: every marker solid, r ≥ 4, inside a 2px surface ring',
+      r.dots.length === 12 && r.dots.every((d) => d.op === '1' && d.sw === '2px' && d.r >= 4), JSON.stringify(r.dots[0]));
+    check('Arkiv: the reference line is solid', r.ref === 'none', r.ref);
+    check('Arkiv: every label, the rotated y label included, inside the drawing', r.inside, JSON.stringify(r.out));
+  }
+  await ctx.close();
+}
+/* #unit/assets told the reader to look "well below that line" over a scatter
+   that has never been given one. */
+check('#unit/assets names no line its scatter does not draw',
+  !/below that line/.test(read('economics.js').replace(/\/\*[\s\S]*?\*\//g, ' '))
+  || /refLine/.test(read('economics.js').replace(/\/\*[\s\S]*?\*\//g, ' ')));
+
 /* #forecast itself: the caption names the treatment the chart draws. */
 console.log('\n1b · #forecast says what it draws');
 for (const skin of ['classic', 'arkiv']) {
