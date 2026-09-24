@@ -2041,3 +2041,9 @@ This pass caught three things, all fixed before the commit:
 * A sixth band tile wrapped alone onto its own line.
 * A 57 km rate was drawn as the longest bar.
 * The first draft's fares caption said something false.
+
+### #vehicle/drivers — 2026-09-24
+
+Production through live-ui on :8611, on the busy plate from P59, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p60/`). No page error, no sideways scroll, and the fils scan is clean in both skins.
+
+Two people held the car across Bolt, Uber and Yango. Every platform cell is a swatch and an ink label.

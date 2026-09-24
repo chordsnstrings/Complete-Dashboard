@@ -3614,3 +3614,9 @@ Deviations:
 That caption corrects my own first draft, which said a weekly-paid channel "puts its money in Money in, not here". /api/vehicle/daily's revenue is `sum(price) FILTER (WHERE has_fare)` on every channel, so Uber's fares are most of the chart.
 
 Not built: the fixes split into with and without a coordinate. /api/vehicle/daily does not carry that count, so it needs a new endpoint.
+
+### P60 · #vehicle/drivers
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #vehicle/drivers | Restyle only, as the plan asks. Both custody tables are kept, with every column, the trips-descending and day-descending default sorts, the driver links and the 120-row note. A platform, in the day table and in the totals' Accounts column, is a channel swatch beside an ink label (`chanCell`), never coloured text. Fares were already exact. The page foot carries the window and the count of people | **written** | `test/arkiv_fleet.test.mjs` #vehicle/drivers 9/9. Revert-proofs (md5-restored): with the day table's platform back to the bare label, "a channel swatch beside an ink label" fails; with the accounts column's swatches off, "names its platforms the same way" fails. `arkiv_classic_frozen` ONLY=vehicle/L45235 9/9. Pinned: `routes` 65, `interlinking` 11 |

@@ -19,7 +19,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, UBER_FARE_WHY,
   noneChosen, verdict, foldRows,
   trackerState, trackerSpeed, stillNote, alertRateFigure, splitAlerts,
-  segSourceLabel, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, kpiTiles, kpiCols, sourceToken } from './ui.js';
+  segSourceLabel, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, kpiTiles, kpiCols, sourceToken, swatch } from './ui.js';
 import { qAll, href, parseHash, currentGen, alive, windowLabel } from './data.js';
 import { membersOf } from './cohorts.js';
 import { dubaiDay } from './tz.js';
@@ -542,6 +542,10 @@ function vovAbsence(root, k, mv, dd) {
 }
 
 /* ── tab: drivers ────────────────────────────────────────────────────────── */
+/* Under the page contract (plan §4 #vehicle/drivers): restyled only — both
+   custody tables, every column and sort kept; a platform is a swatch beside
+   an ink label, never coloured text. */
+const chanCell = (p) => (contract() ? `<span class="pchip">${swatch(p)}${esc(sourceLabel(p))}</span>` : esc(sourceLabel(p)));
 async function tabDrivers(root, plate) {
   const tot = panel('Who has held this car', 'Totals for this window. Click a name to open that driver.'); root.append(tot.panel);
   const tl = panel('Who held it, day by day', 'More than one row on a day means the car changed hands.'); root.append(tl.panel);
@@ -562,8 +566,10 @@ async function tabDrivers(root, plate) {
       { label: 'Accounts', key: 'driver_ids',
         render: (r) => ((r.driver_ids || []).length > 1
           ? `<span title="${esc((r.driver_ids || []).join(', '))}">${fmt(r.driver_ids.length)}`
-            + ` <span class="dim">· ${esc((r.platforms || []).map(sourceLabel).join(', '))}</span></span>`
-          : `<span class="dim">${esc((r.platforms || []).map(sourceLabel).join(', ')) || '1'}</span>`) },
+            + (contract() ? ` · ${(r.platforms || []).map(chanCell).join(' ')}</span>`
+              : ` <span class="dim">· ${esc((r.platforms || []).map(sourceLabel).join(', '))}</span></span>`)
+          : contract() && (r.platforms || []).length ? (r.platforms || []).map(chanCell).join(' ')
+            : `<span class="dim">${esc((r.platforms || []).map(sourceLabel).join(', ')) || '1'}</span>`) },
       { label: 'Days', key: 'days', num: true },
       { label: 'As primary', key: 'primary_days', num: true },
       { label: 'Trips', key: 'trips', num: true },
@@ -582,7 +588,7 @@ async function tabDrivers(root, plate) {
     { label: 'Day', key: 'day', render: (r) => dayStr(r.day) },
     { label: 'Driver', key: 'driver_name',
       render: (r) => entity('driver', r.driver_ext_id, r.driver_name || r.driver_ext_id) },
-    { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
+    { label: 'Platform', key: 'platform', render: (r) => (contract() ? chanCell(r.platform) : sourceLabel(r.platform)) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
     { label: 'First', key: '_a', render: (r) => timeStr(r.first_trip_at) },
@@ -597,6 +603,7 @@ async function tabDrivers(root, plate) {
       `The 120 most recent of ${countOf(dd.days.length, 'day')} on which somebody held this `
       + 'vehicle. Sort by Day ascending to reach the earliest of them.'));
   }
+  if (contract()) pageFoot({ colophon: [windowLabel(), countOf(dd.totals.length, 'driver')] }, root);
 }
 
 /* ── tab: movement ───────────────────────────────────────────────────────── */

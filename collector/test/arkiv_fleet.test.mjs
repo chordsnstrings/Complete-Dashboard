@@ -235,4 +235,48 @@ if (want('vehicle-overview')) {
   }
 }
 
+/* ══ #vehicle/drivers ═════════════════════════════════════════════════════ */
+if (want('vehicle-drivers')) {
+  console.log('\n#vehicle/drivers');
+  const H = 'vehicle/L45235/drivers';
+  const cells = (page) => page.evaluate(() => [...document.querySelectorAll('#view .panel')].map((p) => {
+    const hs = [...p.querySelectorAll('thead th')].map((h) => h.textContent.replace(/[↑↓]/g, '').trim());
+    const rows = [...p.querySelectorAll('tbody tr')];
+    const col = (name) => { const i = hs.findIndex((h) => h.startsWith(name)); return i < 0 ? [] : rows.map((tr) => tr.children[i]); };
+    return { h: p.querySelector('h3')?.textContent || '', heads: hs, n: rows.length,
+      plat: col('Platform').map((c) => ({ chip: !!c?.querySelector('.pchip .sw, .pchip [class*="sw"]'), txt: c?.textContent.trim(), coloured: !!c?.querySelector('[style*="color"]') })),
+      acc: col('Accounts').map((c) => ({ chip: !!c?.querySelector('.pchip'), txt: c?.textContent.trim() })),
+      trips: col('Trips').map((c) => c?.textContent.trim()), drv: col('Driver').map((c) => c?.querySelector('a')?.getAttribute('href') || '') };
+  }));
+  {
+    const { ctx, page } = await open('classic', H);
+    const c = await cells(page);
+    const days = c.find((p) => p.h === 'Who held it, day by day');
+    check('old skin: the platform column is the plain label, no chip', !!days && days.plat.length > 0 && days.plat.every((x) => !x.chip), JSON.stringify(days?.plat.slice(0, 2)));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', H);
+    const dd = answer('/api/vehicle/drivers-detail');
+    const c = await cells(page);
+    const tot = c.find((p) => p.h === 'Who has held this car');
+    const days = c.find((p) => p.h === 'Who held it, day by day');
+    check('both custody tables kept, every column', JSON.stringify(tot?.heads) === JSON.stringify(['Driver', 'Accounts', 'Days', 'As primary', 'Trips', 'Km', 'Fares', 'Held'])
+      && JSON.stringify(days?.heads) === JSON.stringify(['Day', 'Driver', 'Platform', 'Trips', 'Km', 'First', 'Last', 'Primary']), JSON.stringify([tot?.heads, days?.heads]));
+    check('every person and (up to 120) every day, a row each', tot.n === dd.totals.length && days.n === Math.min(120, dd.days.length), JSON.stringify([tot.n, dd.totals.length, days.n, dd.days.length]));
+    const tr = tot.trips.map((x) => +x.replace(/,/g, ''));
+    check('trips descending by default, every name a driver link', tr.every((v, i) => !i || tr[i - 1] >= v) && tot.drv.every((h) => /#driver\//.test(h)), JSON.stringify([tr, tot.drv.slice(0, 2)]));
+    check('a platform is a channel swatch beside an ink label, never coloured text', days.plat.length > 0 && days.plat.every((x) => x.chip && !x.coloured), JSON.stringify(days.plat.slice(0, 2)));
+    check('the accounts column names its platforms the same way', tot.acc.every((x) => x.chip || x.txt === '1'), JSON.stringify(tot.acc.slice(0, 2)));
+    const s = await shape(page);
+    check('the colophon names the window and the people', /driver/.test(s.colophon), s.colophon);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', H, { width: 390 });
+    check('#vehicle/drivers at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
