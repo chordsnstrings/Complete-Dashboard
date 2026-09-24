@@ -1435,3 +1435,17 @@ the banner's (FIX-STATUS "Arkiv reskin, STEP 4", NOT DONE).
 Screenshots of #overview, #drivers, a driver's page, #payouts, #settings and
 #live under the skin at 1440 and 390, light and dark: scratchpad
 `reskin/step4/shots/`.
+
+## Arkiv page phase — desktop — 2026-09-24
+
+The page phase (plan STEP 6) converts each desktop page to the contract under
+`?skin=arkiv`. Each page's pass is recorded below: the widths and themes it
+was looked at in, against production data through `bin/live-ui.mjs` (on
+:8611; the phone branch uses :8711), what was found and what was done.
+
+**How the old skin is held.** `node test/arkiv_classic_frozen.test.mjs`
+renders every route in the old skin with both clocks frozen and compares each
+page's normalised DOM with the base's; a route whose hash moved has its HTML
+written to `$TMPDIR` for a diff. It replaces the per-step pixel harness for
+the DOM half of "the old skin did not move"; a pixel pass is still the proof
+for CSS, and the page phase changes no old-skin CSS.

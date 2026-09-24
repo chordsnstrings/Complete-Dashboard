@@ -2993,3 +2993,16 @@ operator ruled (money to the fils) and the fixes named above.
 - **The Arkiv banner fills the phone's first screen** while three credentials
   are stopped. Shortening its detail is the operator's call (STEP 4's note).
 
+
+## Arkiv page phase — desktop — 2026-09-24, NOT ON PRODUCTION
+
+STEP 6 of docs/UI-REDESIGN-PLAN.md, the desktop half (the phone PWA is a
+separate branch). Every page converts under `contract()` — the
+`--pg-contract` token — one page a commit, with the old skin's page left
+byte-identical. Nothing here is pushed, deployed or flipped; the lead merges,
+deploys and verifies. "written" below means in this branch, with the proof
+named; none of it is on production.
+
+| # | page | what changed under the skin | state | proof |
+|---|---|---|---|---|
+| P0 | every page, the old skin | **The old skin is held byte for byte, by a test.** `test/arkiv_classic_frozen.test.mjs` renders all 125 routes of `test/routes_list.mjs` with `?skin=classic` at 1440×900 against the mock — the Node clock serving the mock and the browser's both frozen at 2026-09-23T08:00Z, the mock's `Math.random` pinned — and compares a hash of the normalised `#view` plus the title block (charts.js's random ids renumbered, Leaflet's tile pane emptied) with `test/fixtures/arkiv_classic_frozen.json`, recorded from the BASE tree `abb79ad` (`RECORD=1 PUBLIC_DIR=…`). Until now "the old skin did not move" was a scratchpad harness run once per step | **written** | Two runs of the unchanged tree: 126/126 both, 49 s. Revert proof: "Click for detail" → "Click for details" in `overviewClassic` fails the two #overview routes (`overview`, `overview?days=90&platform=uber`), restored and md5-checked |
