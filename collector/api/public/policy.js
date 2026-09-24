@@ -22,7 +22,10 @@
    carrying how many people are over the proposed line against how many are
    over the current one. Moving a lending threshold without seeing who it moves
    is the decision this page exists to stop somebody making blind. */
-import { el, esc, panel, note, loading, tableFrom, kpiRow } from './ui.js';
+import { el, esc, panel, note, loading, tableFrom, kpiRow,
+  contract, glance, absenceBand, pageFoot } from './ui.js';
+import { fmt } from './charts.js';
+import { ledgerBand, formBars, amountBands, firstReason, booksRecorded } from './ledger_ak.js';
 import { api } from './data.js';
 import { dubaiDay } from './tz.js';
 
@@ -39,14 +42,24 @@ export async function renderPolicy(root) {
     + 'a decision taken in an earlier month still reads against the line it was taken under.',
   'policy-form');
   const histPanel = panel('Every line this fleet has had', null, 'policy-history');
-  root.append(head.panel, formPanel.panel, histPanel.panel);
+  /* Under the page contract (plan §4 #policy): 00 first, whose opening lines
+     are Where it stands' own notes (its tiles become 00's); Move it and
+     Every line where they were; then what a line needs and how much of it
+     exists, and the † band. One extra GET, the exposure read. */
+  const ak = contract();
+  const AK = ak ? ledgerBand() : null;
+  const lead = ak ? el('div', 'pol-lead') : null;
+  const after = ak ? el('div') : null;
+  const exP = ak ? api('/api/ledger/exposure').catch(() => null) : null;
+  if (ak) { AK.band.insertBefore(lead, AK.tiles); root.append(AK.band, formPanel.panel, histPanel.panel, after); loading(AK.tiles); }
+  else root.append(head.panel, formPanel.panel, histPanel.panel);
   loading(head.body);
 
   async function refresh() {
     const d = await api('/api/ledger/policy').catch(() => null);
     head.body.innerHTML = '';
     histPanel.body.innerHTML = '';
-    if (!d) { head.body.append(note('The policy could not be read.', 'bad')); return; }
+    if (!d) { (ak ? lead : head.body).append(note('The policy could not be read.', 'bad')); return; }
 
     if (d.current) {
       /* kpiRow rather than a hand-rolled headline: it is the product's own
@@ -73,9 +86,13 @@ export async function renderPolicy(root) {
     }
     head.body.append(note(d.attribution_only, 'ok'));
 
+    /* Under the contract the notes above are 00's opening lines. */
+    if (ak) lead.replaceChildren(...[...head.body.children].filter((c) => !c.classList.contains('kpis')));
     if (!d.history.length) {
+      /* "below" was untrue: the form is ABOVE this panel (the plan's FIX,
+         taken under the contract; the old skin keeps its sentence). */
       histPanel.body.append(note('No line has ever been set, so there is nothing to read back. '
-        + 'The first one recorded below starts this history.', 'warn'));
+        + `The first one recorded ${ak ? 'above' : 'below'} starts this history.`, 'warn'));
     } else {
       histPanel.body.append(tableFrom(d.history, [
         { label: 'Line', key: 'pct', num: true,
@@ -100,6 +117,7 @@ export async function renderPolicy(root) {
         { label: 'Why', key: 'note', render: (r) => esc(r.note || '—') },
       ], { cards: true, cardLead: 'pct' }));
     }
+    if (ak) policyContract(AK, after, root, d, await exP);
     return d;
   }
 
@@ -125,7 +143,13 @@ export async function renderPolicy(root) {
   const pctNote = el('div', 'depnote', 'The percentage itself, so a whole number rather than a '
     + 'fraction. A fraction sent here would store a line of a fraction of one percent, under '
     + 'which every driver in the fleet reads as over it.');
-  pW.append(pct, pctNote);
+  /* Under the contract the line's field says what it holds: a visible box
+     with a "%" after it (the plan: it read as a blank gap under its label). */
+  if (ak) {
+    const box = el('span', 'ak-pct');
+    box.append(pct, el('span', 'ak-pct-u', '%'));
+    pW.append(box, pctNote);
+  } else pW.append(pct, pctNote);
 
   const dW = field('Applying from');
   const from = el('input', 'depinput');
@@ -207,4 +231,73 @@ export async function renderPolicy(root) {
     pct.value = ''; why.value = '';
     await refresh();
   };
+}
+
+/* ── #policy under the page contract ───────────────────────────────────────
+   00: Where it stands' notes as the opening lines, then the people this line
+   would govern (the hero) · the line in force (or none stored, the route's
+   words) · lines ever recorded · exposure measurable. After the history:
+   what a lending line needs and how much of it exists (the advance book,
+   the deduction book, an opening cash position, an earnings figure — each
+   over everyone the exposure read holds); how the cash-fare ceiling
+   spreads; both halves of the ratio on the same person. † a stored line,
+   what each person owes, cash held, who may move the line.
+   NOT ADOPTED: "types the register accepts 18", the registry by book and the
+   direction per type (no GET serves the registry — the mockup read schema
+   files and a refusal message). */
+function policyContract(AK, after, root, d, ex) {
+  const people = ex?.people || [];
+  const n = people.length;
+  const cur = d.current;
+  glance(AK.tiles, [
+    ex ? { label: 'People this line would govern', value: fmt(n), hero: true, sub: 'everyone on the exposure read' }
+      : { label: 'People this line would govern', hero: true, na: 'the exposure read did not answer' },
+    cur ? { label: 'The line in force', value: `${cur.pct}%`, sub: `of what a driver generates, since ${cur.effective_from}, set by ${cur.set_by}` }
+      : { label: 'The line in force', na: d.absent_reason || 'none stored' },
+    { label: 'Lines ever recorded', value: fmt(d.history.length),
+      sub: d.history.length ? 'append-only; every one still reads as it did' : 'none, ever' },
+    ex ? { label: 'Exposure measurable', value: `${fmt(ex.summary?.measurable ?? people.filter((p) => p.exposure_pct != null).length)} of ${fmt(n)}`,
+      sub: 'judged per person on the server' }
+      : { label: 'Exposure measurable', na: 'the exposure read did not answer' },
+  ]);
+  after.innerHTML = '';
+  if (!ex) { after.append(note('The exposure read did not answer, so what a line needs cannot be counted here.', 'warn')); return; }
+  const g = el('div', 'grid g3'); after.append(g);
+  const need = panel('What a lending line needs, and how much of it exists', `Each over the ${fmt(n)} people on the exposure read.`, 'policy-needs');
+  const spread = panel('How the cash-fare ceiling spreads', 'Every cash fare on record, per driver — a ceiling, not a balance.', 'policy-ceiling');
+  const halves = panel('Both halves of the ratio on the same person', 'A line judges cash against what a driver generates; it can judge only people with both.', 'policy-halves');
+  g.append(need.panel, spread.panel, halves.panel);
+  const adv = people.filter((p) => (+p.owes?.advance_rows || 0) > 0 || (p.owes?.advance_rows == null && p.owes?.advance != null)).length;
+  const ded = people.filter((p) => (+p.owes?.deduction_rows || 0) > 0 || (p.owes?.deduction_rows == null && p.owes?.deduction != null)).length;
+  const open = people.filter((p) => p.owes?.cash_basis?.opening_on).length;
+  const earn = people.filter((p) => p.earned != null).length;
+  formBars(need.body, [
+    { label: 'An advance book row', n: adv }, { label: 'A deduction book row', n: ded },
+    { label: 'An opening cash position', n: open }, { label: 'An earnings figure', n: earn },
+  ], { of: n });
+  const sp = amountBands(spread.body, people.map((p) => p.owes?.cash_taken).filter((v) => v != null),
+    { noun: 'drivers', aria: 'Drivers by cash-fare ceiling' });
+  if (sp) spread.body.append(el('p', 'cap', esc(`${fmt(sp.n)} drivers with a cash fare on record, in AED ${fmt(sp.step)} bands named by their lower edge.`)));
+  const cash = (p) => p.owes?.cash_taken != null;
+  const gen = (p) => p.earned != null;
+  formBars(halves.body, [
+    { label: 'Both', n: people.filter((p) => cash(p) && gen(p)).length },
+    { label: 'Cash fares only', n: people.filter((p) => cash(p) && !gen(p)).length },
+    { label: 'An earnings figure only', n: people.filter((p) => !cash(p) && gen(p)).length },
+    { label: 'Neither', n: people.filter((p) => !cash(p) && !gen(p)).length, outline: true },
+  ], { of: n });
+  const books = people.filter(booksRecorded).length;
+  const absHost = el('div'); after.append(absHost);
+  absenceBand(absHost, [
+    { label: 'A stored line', fig: d.history.length ? `${fmt(d.history.length)} on record` : null, none: 'None, ever',
+      why: d.history.length ? 'Every line is a new row; none is ever edited.' : (d.absent_reason || 'No threshold has been stored.') },
+    { label: 'What each person owes', fig: books ? `${fmt(books)} of ${fmt(n)} recorded` : null, none: 'Nothing recorded',
+      why: firstReason(people, (p) => p.owes?.books_absent_reason) || 'Everyone here has an advance or deduction row.' },
+    { label: 'Cash held', fig: null, none: 'Not derivable',
+      why: firstReason(people, (p) => p.owes?.cash_absent_reason)
+        || 'A cash position is stated by the accounts team; it is never derived from the trips.' },
+    { label: 'Who may move this line', fig: null, none: 'Nobody authenticated',
+      why: d.attribution_only || 'Anybody who can reach this page can move the line.' },
+  ]);
+  pageFoot({ colophon: ['The whole record', `${fmt(n)} people`, cur ? `${cur.pct}% in force` : 'no line stored'] }, root);
 }

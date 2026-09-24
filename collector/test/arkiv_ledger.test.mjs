@@ -235,4 +235,49 @@ if (want('charging')) {
   await c.ctx.close();
 }
 
+/* ══ #policy ═════════════════════════════════════════════════════════════ */
+if (want('policy')) {
+  console.log('\n#policy');
+  const { ctx, page, answer } = await open('arkiv', 'policy');
+  const s = await shape(page);
+  const d = answer('/api/ledger/policy');
+  const ex = answer('/api/ledger/exposure');
+  const n = ex.people.length;
+  const r = await page.evaluate(() => ({
+    lead: document.querySelector('.cband .pol-lead')?.textContent || '',
+    headPanel: !!document.querySelector('[data-panel="policy"]'),
+    pct: !!document.querySelector('[data-panel="policy-form"] .ak-pct input') && document.querySelector('.ak-pct-u')?.textContent,
+    needs: [...document.querySelectorAll('[data-panel="policy-needs"] .hb')].map((h) => [h.querySelector('.k').textContent, h.querySelector('.v').textContent.trim()]),
+    halves: [...document.querySelectorAll('[data-panel="policy-halves"] .hb')].map((h) => h.querySelector('.k').textContent),
+  }));
+  check('00 leads with Where it stands\' own notes as its opening lines — the note in force and "authenticates nobody"',
+    s.first === 'cband' && !r.headPanel && r.lead.includes(d.current.note) && /not authentication/.test(r.lead), r.lead.slice(0, 200));
+  check('the hero: the people this line would govern; the line in force with its date and setter',
+    s.hero === 'People this line would govern' && s.values[s.hero] === String(n) && s.values['The line in force'] === `${d.current.pct}%`
+    && s.subs['The line in force'].includes(d.current.effective_from) && s.subs['The line in force'].includes(d.current.set_by), JSON.stringify(s.values));
+  check('lines ever recorded, and exposure measurable, from the two reads', s.values['Lines ever recorded'] === String(d.history.length)
+    && s.values['Exposure measurable'] === `${ex.summary.measurable} of ${n}`, JSON.stringify(s.values));
+  check('the line\'s field is a box with "%" after it', r.pct === '%', String(r.pct));
+  check('what a line needs: the advance book, the deduction book, an opening cash position, an earnings figure — each of everyone',
+    r.needs.length === 4 && r.needs[3][1].startsWith(String(ex.people.filter((p) => p.earned != null).length)), JSON.stringify(r.needs));
+  check('both halves of the ratio on one person: both, cash only, earnings only, neither', JSON.stringify(r.halves)
+    === JSON.stringify(['Both', 'Cash fares only', 'An earnings figure only', 'Neither']), JSON.stringify(r.halves));
+  check('the † band: a stored line, what each person owes, cash held, who may move it', JSON.stringify(s.abs.map((a) => a.label))
+    === JSON.stringify(['A stored line', 'What each person owes', 'Cash held', 'Who may move this line']), JSON.stringify(s.abs));
+  await ctx.close();
+  /* Nothing ever stored: the line is ABSENT with the route's words, and the
+     history's note says the form is ABOVE it (the old skin says "below"). */
+  const e = await open('arkiv', 'policy', { fixtures: { '/api/ledger/policy': (_q, real) => ({ ...real, current: null, history: [],
+    absent_reason: 'no threshold has ever been stored for this fleet' }) } });
+  const es = await shape(e.page);
+  const hist = await txt(e.page, '[data-panel="policy-history"]');
+  check('nothing stored: the line in force is ABSENT with the route\'s words; a stored line "None, ever"',
+    es.na['The line in force'] === 'no threshold has ever been stored for this fleet' && es.abs[0].fig === 'None, ever', JSON.stringify([es.na, es.abs[0]]));
+  check('…and the history says the first line is recorded ABOVE it — where the form is', /recorded above starts this history/.test(hist), hist);
+  await e.ctx.close();
+  const c = await open('classic', 'policy');
+  check('old skin: Where it stands is still its own panel, no 00 band', !!(await c.page.$('[data-panel="policy"] .kpis')) && !(await c.page.$('#view .cband')));
+  await c.ctx.close();
+}
+
 await done();

@@ -1410,3 +1410,9 @@
 :root[data-skin="arkiv"] .leaks.ak-rank .leak.off b,:root[data-skin="arkiv"] .leaks.ak-rank .leak.leak-noscope b{
   font-size:var(--t5);font-weight:600;color:var(--ink-2);white-space:nowrap}
 :root[data-skin="arkiv"] .leaks.ak-rank .leak.off span,:root[data-skin="arkiv"] .leaks.ak-rank .leak.leak-noscope span{color:var(--grey)}
+
+/* #policy: the line's field says what it holds — a box, and "%" after it. */
+:root[data-skin="arkiv"] .ak-pct{display:inline-flex;align-items:center;gap:10px}
+:root[data-skin="arkiv"] .ak-pct .depinput{width:9ch;text-align:right}
+:root[data-skin="arkiv"] .ak-pct-u{font-family:var(--sans);font-size:var(--d3);font-weight:600;color:var(--ink-2)}
+:root[data-skin="arkiv"] .pol-lead>.note,:root[data-skin="arkiv"] .pol-lead>.cap{margin:0 0 10px}

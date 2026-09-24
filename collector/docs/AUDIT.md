@@ -1600,3 +1600,10 @@ the hero is absent with its reason and no highlight is drawn. Found by
 looking and fixed before commit: the head note read "This month" over a
 whole-record answer; the sessions row printed "0" for a count that does not
 exist.
+
+### #policy — 2026-09-24
+
+Production (no line ever stored; 347 people, 0 measurable), both skins at
+1440 and 390, light and dark (scratchpad `pagephase/shots/policy/`): no
+error, no sideways scroll, one highlight. 215 people carry both halves of
+the ratio, 61 cash only, 7 earnings only, 64 neither.
