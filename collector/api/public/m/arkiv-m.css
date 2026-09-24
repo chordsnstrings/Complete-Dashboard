@@ -439,3 +439,15 @@
   font-size:var(--t7);font-weight:600;line-height:1.4;color:var(--ink)}
 :root[data-skin="arkiv"][data-ui="phone"] .ak-verdict{display:inline-block;padding:3px 8px;font-size:var(--t1);
   letter-spacing:.14em;color:var(--ink);background:var(--paper);border:1px solid var(--ink)}
+
+/* ── 16 · the credential paste ──────────────────────────────────────────────
+   The paste box: square, a grey-2 rule, mono at a size a token can be read
+   in. "Stored …" is good news, so it takes the good dot on the neutral
+   ground rather than the staleness bar's hollow warning. */
+:root[data-skin="arkiv"][data-ui="phone"] .ak-paste{display:block;width:100%;box-sizing:border-box;min-height:132px;
+  padding:11px 12px;resize:vertical;background:var(--paper);border:1px solid var(--grey-2);border-radius:0;
+  font-family:var(--mono);font-size:var(--t4);line-height:1.5;color:var(--ink);-webkit-appearance:none}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-paste:focus-visible{outline:1px solid var(--ink);border-color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-paste::placeholder{color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stale.ak-ok::before{border:0;background:var(--sem-pos);
+  content:"";content:"" / "good: "}

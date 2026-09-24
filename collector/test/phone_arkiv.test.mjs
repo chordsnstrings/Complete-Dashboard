@@ -907,6 +907,51 @@ console.log('\n4.11 · Analyst: 00, the verdicts as tiles with no hero, and find
   await p.close();
 }
 
+console.log('\n4.12 · Credentials: the paste in the redesign’s forms, reasons whole, "Stored" as good news');
+{
+  const why = 'fleethub answered 403 — forbidden by the authentication server; the cookie was issued for another '
+    + 'organisation, so it cannot read this fleet';
+  const answer = { proposals: [
+    { key: 'UBER_WEB_COOKIE_EGARI', provider: 'uber', fleet: 'egari', verdict: 'refused', detail: why },
+    { key: 'BOLT_CLIENT_ID', provider: 'bolt', fleet: 'ecosine', verdict: 'pass', detail: 'accepted' }], applied: [] };
+  const p = await phonePage(browser, { skin: 'arkiv', fixture: withAnswer('/api/settings/paste', answer) });
+  await p.open('credentials');
+  const before = await p.page.evaluate(() => {
+    const b = document.querySelector('.m-card button');
+    const t = document.querySelector('.m-card textarea');
+    return { btn: `${b.className}|${Math.round(b.getBoundingClientRect().height)}|${Math.round(b.getBoundingClientRect().width)}`,
+      inline: b.getAttribute('style'), ta: t.className, taStyle: t.getAttribute('style') };
+  });
+  check('Read and test is the primary .m-btn, full width and 48px — not a 40px chip',
+    /^m-btn primary\|48\|3\d\d$/.test(before.btn) && !before.inline, JSON.stringify(before));
+  check('…under a square paste box in the redesign’s form', before.ta === 'ak-paste' && !before.taStyle, JSON.stringify(before));
+  await p.page.fill('.m-card textarea', 'cookie: a-long-enough-fake-value-for-the-test=1');
+  await p.page.click('.m-card button');
+  await p.settle();
+  const after = await p.page.evaluate(() => ({
+    rows: [...document.querySelectorAll('.m-deck .m-rows .m-row')].map((r) => ({ cls: r.className,
+      sub: r.querySelector('.k span').textContent, fits: r.querySelector('.k span').scrollWidth <= r.querySelector('.k span').clientWidth + 1 })),
+    go: (() => { const g = [...document.querySelectorAll('.m-deck button')].find((b) => /^Apply the/.test(b.textContent));
+      return g ? `${g.className}|${Math.round(g.getBoundingClientRect().height)}` : null; })(),
+  }));
+  check('each provider’s reason is printed whole, never cut at the end of a line',
+    after.rows[0] && after.rows[0].sub.endsWith(why) && /wrapsub/.test(after.rows[0].cls) && after.rows[0].fits, JSON.stringify(after.rows[0]));
+  check('…refused is a solid red dot, accepted a green one', /t-critical/.test(after.rows[0]?.cls) && /t-good/.test(after.rows[1]?.cls),
+    after.rows.map((r) => r.cls).join(' '));
+  check('"Apply the 1 that were accepted" is the primary button, 48px', after.go === 'm-btn primary|48', String(after.go));
+  await p.close();
+  const s = await phonePage(browser, { skin: 'arkiv', fixture: withAnswer('/api/settings/paste', { ...answer, applied: ['BOLT_CLIENT_ID'] }) });
+  await s.open('credentials');
+  await s.page.fill('.m-card textarea', 'cookie: a-long-enough-fake-value-for-the-test=1');
+  await s.page.click('.m-card button');
+  await s.settle();
+  const stored = await s.page.evaluate(() => { const e = document.querySelector('.m-stale');
+    return e ? { t: e.textContent, cls: e.className, dot: getComputedStyle(e, '::before').backgroundColor } : null; });
+  check('"Stored …" is marked as the good news it is — a green dot, not the staleness bar’s warning',
+    stored && /^Stored BOLT_CLIENT_ID/.test(stored.t) && /ak-ok/.test(stored.cls) && stored.dot === 'rgb(0, 126, 68)', JSON.stringify(stored));
+  await s.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');
@@ -920,7 +965,7 @@ console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too
   /* Screens whose own markup still sets a control's size inline, which the
      sheet cannot outrank without !important — each converts in its own
      commit and comes off this list there. */
-  const SMALL_UNTIL_CONVERTED = new Set(['credentials']);
+  const SMALL_UNTIL_CONVERTED = new Set([]);
   const old = {};
   {
     const c = await phonePage(browser, { skin: 'classic', fixture });

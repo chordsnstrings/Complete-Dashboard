@@ -1956,6 +1956,18 @@ async function credentials(deck, ctx) {
   btn.style.cssText = 'margin-top:10px;min-height:40px;padding:9px 16px';
   c.body.append(btn);
 
+  /* THE REDESIGN, only under the token: the paste box and both buttons in
+     the redesign's forms — the buttons full-width 48px .m-btn (the old chips
+     were 40px, set inline where no sheet can reach them), the first action
+     the primary one — each provider's reason printed whole rather than cut
+     at the end of one line, and "Stored …" marked as the good news it is:
+     the old screen dressed it in the staleness bar's warning colours. */
+  const AK = phoneContract();
+  if (AK) {
+    ta.removeAttribute('style'); ta.className = 'ak-paste';
+    btn.removeAttribute('style'); btn.className = 'm-btn primary';
+  }
+
   const out = el('div');
   deck.append(out);
 
@@ -1989,7 +2001,7 @@ async function credentials(deck, ctx) {
       empty(out, 'Nothing recognised', 'No part of that looked like a credential this dashboard stores.');
       return;
     }
-    rows(out, d.proposals.map((r) => row({
+    const verdicts = rows(out, d.proposals.map((r) => row({
       /* Three keys where an OAuth application resolved to three. Showing the
          first alone would hide the two that make it work. */
       title: r.keys?.length ? r.keys.join(', ') : (r.key || 'could not be named'),
@@ -1997,17 +2009,20 @@ async function credentials(deck, ctx) {
       value: r.verdict === 'pass' ? 'accepted' : r.verdict === 'unknown' ? 'no answer' : 'refused',
       tone: r.verdict === 'pass' ? 'good' : r.verdict === 'unknown' ? 'warn' : 'critical',
     })));
+    if (AK) [...verdicts.children].forEach((r) => r.classList.add('wrapsub'));
     const good = d.proposals.filter((r) => r.verdict === 'pass');
     if (d.applied?.length) {
-      out.append(el('div', 'm-stale', `Stored ${d.applied.join(', ')} — live on the collector's next tick.`));
+      out.append(el('div', AK ? 'm-stale ak-ok' : 'm-stale', `Stored ${d.applied.join(', ')} — live on the collector's next tick.`));
     } else if (good.length) {
       const go = el('button', 'm-chip');
       go.type = 'button';
       go.textContent = `Apply the ${good.length} that were accepted`;
       go.style.cssText = 'margin-top:12px;min-height:40px;padding:9px 16px';
+      if (AK) { go.removeAttribute('style'); go.className = 'm-btn primary'; }
       go.onclick = () => post(true);
       const wrap = el('div');
       wrap.style.cssText = 'display:flex;justify-content:center';
+      if (AK) wrap.removeAttribute('style');
       wrap.append(go);
       out.append(wrap);
     }
