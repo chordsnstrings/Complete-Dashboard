@@ -1506,3 +1506,15 @@ skins, 1440 and 390, light and dark (scratchpad `pagephase/shots/action/`).
 No error, no sideways scroll, one highlight (the hero; no † cell carries a
 figure to size). The silent-tracker page draws all 17 open findings of its
 rule with this one marked, which the old page could say only as a table.
+
+### #unit — 2026-09-24
+
+Production data, the three tabs in both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/unit/`). No error, no sideways scroll; three
+highlights on Money in (the hero, the busiest band, the measured hours), one
+on each list tab. Found by looking and fixed before commit: the hours bars'
+first label ran out of its column ("Online, with someone in t…"); the
+drivers-least list printed "availability has not been collected for anyone in
+this window" beside a verdict counting 100 people with measured availability
+(the pruned column's reason, now the list's own); the reference line on Every
+vehicle, once drawn, had the wrong slope (S2).

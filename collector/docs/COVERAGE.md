@@ -6550,3 +6550,11 @@ number (5 and 5), and never a passport or RTA number.
   nodes alone — invisible on screen, and exactly what
   `test/arkiv_classic_frozen` exists to catch (it failed four routes). When a
   block moves, move its template literals byte for byte.
+
+* **A PRUNED COLUMN'S REASON IS READ UNDER ONE TABLE, NOT THE WINDOW.**
+  `tableFrom` drops a column that declares `absent` when every row of THAT
+  table lacks it, and prints the reason under it. #unit's ranked lists are
+  four tables over one window: the bottom ten drivers had no measured hours
+  while 100 people did, and the reason — written about the window, "not
+  collected for anyone" — was false under that list. Write an `absent`
+  reason that is true of any subset the column can be shown for.
