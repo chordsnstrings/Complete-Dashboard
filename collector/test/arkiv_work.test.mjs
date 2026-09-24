@@ -576,4 +576,40 @@ if (want('day')) {
   }
 }
 
+/* ══ #slot ════════════════════════════════════════════════════════════════ */
+if (want('slot')) {
+  console.log('\n#slot');
+  {
+    const { ctx, page } = await open('classic', 'slot/2/19');
+    const cap = await page.evaluate(() => [...document.querySelectorAll('#view .panel')].find((p) => /across the week/.test(p.querySelector('h3')?.textContent || ''))?.textContent || '');
+    check('old skin: no 00 band; the week still compared on raw counts', !(await page.$('#view .cband')) && !/Per occurrence/.test(cap));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'slot/2/19');
+    const s = await shape(page);
+    const S = answer('/api/slot');
+    check('the tiles as a 00 band, trips in this slot the hero', s.hero === 'Trips in this slot' && s.values['Trips in this slot'] === (+S.headline.trips).toLocaleString('en-US'), JSON.stringify(s.values));
+    const peers = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => /across the week/.test(x.querySelector('h3')?.textContent || ''));
+      return p ? [...p.querySelectorAll('.hb')].map((h) => [h.querySelector('.k')?.textContent.trim(), h.querySelector('.v')?.textContent.trim()]) : []; });
+    const want = S.peers.filter((r) => r.days).map((r) => (r.trips / r.days).toFixed(1).replace(/\.0$/, ''));
+    check('the hour across the week is PER OCCURRENCE — trips over that weekday\'s days (the plan\'s fix)', peers.length === want.length
+      && peers.every(([, v], i) => v === want[i]), JSON.stringify([peers, want]));
+    const conc = await txtOf(page, '#view');
+    const top = [...S.drivers].sort((a, b) => b.trips - a.trips)[0];
+    check('the drivers table stays, and says who holds the most of the slot', !top || conc.includes(`The busiest person holds ${(+top.trips).toLocaleString('en-US')} of the slot`), '');
+    check('no ring: channel and settlement as ranked bars, the outcome a three-part bar above its table', s.rings === 0
+      && !!(await page.$('#view .panel table')), String(s.rings));
+    const noAddr = await page.evaluate(() => [...document.querySelectorAll('#view .hb .k')].filter((k) => /no address/i.test(k.textContent)).length);
+    check('"(no address)" is not drawn as a place', noAddr === 0, String(noAddr));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'slot/2/19', { width: 390 });
+    check('#slot at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

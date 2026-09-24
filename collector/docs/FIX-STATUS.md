@@ -3350,3 +3350,11 @@ Not built on #forecast: hatching every bar of next month's day-by-day chart (a b
 | #day | An `ak` flag (plan: restyle through the foundation only). The tiles as a 00 band, **bookings the hero with its fortnight change as a delta** (not repeated in its sub), the rest untoned; "Which channel" a 100% bar in channel colour, "Uber product tier" ranked bars; every panel, table and click-through kept (hour → #slot, fortnight → #day, previous/next, driver and vehicle links); † built from the page's own per-source collection verdicts — one cell per source that was not normal, "collected nothing" highlighted | **written** | `test/arkiv_work.test.mjs` #day (8). Revert — the channel ring back: fails. `arkiv_classic_frozen` ONLY=day/ 4/4; `day_routes` 73, `chart_geometry` 17, `person_vs_account_counts` 64, `unauthorized_attribution_page` 26 |
 
 Not built: the 3px channel row marker in the tables (tableFrom takes no row style).
+
+### P33 · #slot
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #slot | An `ak` flag. The tiles as a 00 band, trips in this slot the hero, untoned. 01 the drivers table (the rota answer) **full width** so no column scrolls away, with a concentration line — the busiest person holds N of the slot's trips; 02 every weekday occurrence, unchanged; 03 the channels as ranked bars in channel colour with their fares and priced counts (the table kept); 04 where the work starts, "(no address)" not drawn as a place (the caption counts it); 05 **the hour across the week PER OCCURRENCE** — peers[].trips ÷ peers[].days (the plan's fix; production: Tuesday 19:00 runs 19% above the other weekdays per occurrence, where a raw count reads more); 06 settlement as ranked bars with AED; 07 the outcome as a three-part bar above its table ("(not reported)" its own part — the review's correction), neutral pills; † the fare on unpriced bookings, what the hour was paid, the no-address bookings, online time | **written** | `test/arkiv_work.test.mjs` #slot (9). Revert — the per-occurrence bars off: fails. `arkiv_classic_frozen` ONLY=slot/ 4/4; `reachability` 19 |
+
+Deviation on #slot: "(not reported)" is a pale segment rather than an outline — donut's 100% bar draws fills only.

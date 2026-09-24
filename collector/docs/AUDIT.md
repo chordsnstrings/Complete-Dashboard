@@ -1762,3 +1762,10 @@ Production, both skins at 1440 and 390, light and dark (scratchpad
 `pagephase/shots/day/`): no error, no sideways scroll. 895 bookings, +1.0%
 on the fortnight median of 886. Found by looking and fixed before commit:
 the hero printed its fortnight change twice (delta and sub).
+
+### #slot/2/19 — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/slot/`): no error, no sideways scroll. 238
+trips on Tuesdays at 19:00; per occurrence Tuesday carries 59.5 against a
+50.2 mean of the other weekdays (+19%); the busiest person holds 7 (2.9%).
