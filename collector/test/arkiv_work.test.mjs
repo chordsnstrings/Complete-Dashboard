@@ -410,4 +410,41 @@ if (want('causes')) {
   }
 }
 
+/* ══ #forecast ════════════════════════════════════════════════════════════ */
+if (want('forecast')) {
+  console.log('\n#forecast');
+  {
+    const { ctx, page } = await open('classic', 'forecast');
+    check('old skin: no 00 band', !(await page.$('#view .cband')));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'forecast');
+    const s = await shape(page);
+    const F = answer('/api/forecast');
+    const next = F.forecast[0];
+    const sNext = F.seasonal?.ok ? F.seasonal.forecast.find((r) => r.m === next.m && r.point != null) : null;
+    const pts = [next.point, sNext?.point].filter((x) => x != null);
+    const lo = Math.min(...pts), hi = Math.max(...pts);
+    const want = lo !== hi ? `${lo.toLocaleString('en-US')} – ${hi.toLocaleString('en-US')}` : `${next.low.toLocaleString('en-US')} – ${next.high.toLocaleString('en-US')}`;
+    check('the hero is a RANGE for next month — both methods low to high, or the one method\'s interval — not a point',
+      /^The range for /.test(s.hero) && s.values[s.hero] === want && !s.labels.some((l) => /^Bookings in /.test(l)), `${s.values[s.hero]} vs ${want}`);
+    check('the plan\'s order: the range chart, the month so far, by month, both methods, the backtest, year-ago, visitors, day by day, the calendar',
+      s.heads[1] === 'The year ahead, and how wide the guess gets' && /so far, against what was forecast$/.test(s.heads[2])
+      && /^Bookings by month/.test(s.heads[3]) && /^What is in the calendar/.test(s.heads[s.heads.length - 2]), JSON.stringify(s.heads));
+    const year = await fills(page, '[data-panel="fc-year"]');
+    const nFc = F.forecast.filter((r) => r.point != null).length;
+    check('01: every forecast month hatched — each one is a projection', year.filter((b) => hatched(b.f)).length >= nFc, `${year.filter((b) => hatched(b.f)).length} of ${year.length}, ${nFc} forecast`);
+    check('months fitted is the fit\'s n over the observed months', s.values['Months fitted'] === `${F.n} of ${F.observed.filter((m) => !m.no_data).length}`, s.values['Months fitted']);
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    check('† money is not forecast, in the endpoint\'s own words', s.abs.some((a) => a.label === 'Money' && a.none), JSON.stringify(s.abs.map((a) => a.label)));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'forecast', { width: 390 });
+    check('#forecast at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

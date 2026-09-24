@@ -1733,3 +1733,11 @@ largest real move is +1,029%, Mar → Apr 2025, and the headcount explains 6%
 of it — bookings per driver the rest. Found by looking and fixed before
 commit: 02 carried hbars' "added / deducted" legend; it says "added
 bookings / took bookings away" now.
+
+### #forecast — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/forecast/`): no error, no sideways scroll. Oct 2026 is
+16,000 – 31,900 — the straight line against the scaled year-ago month, 99%
+apart with ranges that do not overlap; September is running at 23,377
+against a 14,700 forecast, outside its range.

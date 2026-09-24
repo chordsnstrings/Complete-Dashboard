@@ -45,10 +45,11 @@
    the total reports "flat" about that. Every year-on-year row carries both
    halves and says which one moved the number. */
 
-import { empty, fmt, barChart, scatter, drawnAs } from './charts.js';
+import { empty, fmt, barChart, scatter, drawnAs, gapBars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, dayStr, dateStr,
   countOf, plural, sourceLabel, signed, verdict } from './ui.js';
 import { q, href, hrefFilter, state } from './data.js';
+import { contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
 
 const MONTH = (m) => {
   const [y, mm] = String(m).slice(0, 7).split('-');
@@ -98,6 +99,13 @@ export async function renderForecast(root) {
     return;
   }
 
+  /* Under the page contract (plan §4 forecast): the verdict and a 00 band
+     whose hero is the RANGE for next month — both methods, low to high — not
+     a point; the month so far against its forecast, the fit, the months
+     fitted; 01 the year ahead with every forecast month hatched and the
+     other method as a line; the rest of the page unchanged; a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, `next: ${MONTH(d.next_month || d.forecast[0].m)}`) : null;
   const next = d.forecast[0];
   const ip = d.in_progress;
   const sdy = d.same_days_year_ago;
@@ -128,7 +136,7 @@ export async function renderForecast(root) {
     const hi = sNext ? Math.max(sNext.point, next.point) : next.point;
 
     if (split) {
-      verdict(root, {
+      verdict(ak ? AKB.vHost : root, {
         claim: `${MONTH(next.m)} is somewhere between ${fmt(lo)} and ${fmt(hi)} bookings, `
           + 'depending on which method you believe',
         figure: `${fmt(Math.round((hi - lo) / Math.max(1, lo) * 100))}%`,
@@ -149,7 +157,7 @@ export async function renderForecast(root) {
           + 'committing to either point.',
       });
     } else {
-      verdict(root, {
+      verdict(ak ? AKB.vHost : root, {
         claim: weak && !sNext
           ? `${MONTH(next.m)} is a guess, not a forecast`
           : `${MONTH(next.m)} lands near ${fmt(sNext ? sNext.point : next.point)} bookings`,
@@ -179,7 +187,7 @@ export async function renderForecast(root) {
   }
 
   /* ── the four figures the operator asked to see side by side ─────────── */
-  root.append(kpiRow([
+  const FC_TILES = [
     { label: `Bookings in ${MONTH(next.m)}`, value: fmt((sNext || next).point),
       sub: (sNext || next).low != null
         ? `somewhere between ${fmt((sNext || next).low)} and ${fmt((sNext || next).high)}`
@@ -212,7 +220,9 @@ export async function renderForecast(root) {
         ? `somewhere between ${fmt(d.year_ahead.low)} and ${fmt(d.year_ahead.high)} · ` : '')
         + `${d.year_ahead.forecast_months} forecast, ${12 - d.year_ahead.forecast_months} extrapolated`,
       tone: 'warn' } : null,
-  ]));
+  ];
+  if (ak) forecastGlance(AKB, FC_TILES, { d, next, sNext, ip });
+  else root.append(kpiRow(FC_TILES));
 
   if (!d.beats_flat) {
     root.append(el('div', 'note err',
@@ -830,6 +840,7 @@ export async function renderForecast(root) {
   }
 
   root.append(note(d.revenue_note));
+  if (ak) forecastAbsence(root, d);
   root.append(el('p', 'cap',
     `Method. Two forecasts are shown and neither is presented as the answer. The straight line is ordinary `
     + `least squares over ${d.n} whole months since the last regime change, with a 95% prediction interval `
@@ -843,4 +854,81 @@ export async function renderForecast(root) {
     + 'Months three and beyond are extrapolation and labelled as such. '
     + `<a href="${href('causes')}">Why the numbers moved</a> · `
     + `<a href="${href('playbook')}">What to do about it</a>`));
+}
+
+/* ── #forecast under the page contract ─────────────────────────────────────
+   The hero is a RANGE: the two methods' points for next month, lowest to
+   highest, each with its own interval in the sub-line — one point would
+   hide that they disagree. The point tile is not drawn (the range carries
+   both points); every other old tile is kept, untoned.
+   NOT BUILT: hatching every bar of next month's day-by-day chart (it is a
+   barChart, which has no hatched form); its caption already says it is a
+   projection. */
+function forecastGlance(AKB, tiles, { d, next, sNext, ip }) {
+  const pts = [next.point, sNext?.point].filter((x) => x != null);
+  const lo = Math.min(...pts), hi = Math.max(...pts);
+  const iv = (r) => (r.low != null ? ` (${fmt(r.low)}–${fmt(r.high)})` : '');
+  const observed = (d.observed || []).filter((m) => !m.no_data).length;
+  const head = [
+    /* With one method the range is that method's own interval. */
+    { label: `The range for ${MONTH(next.m)}`, hero: true,
+      value: lo !== hi ? `${fmt(lo)} – ${fmt(hi)}` : next.low != null ? `${fmt(next.low)} – ${fmt(next.high)}` : fmt(lo),
+      sub: `the straight line says ${fmt(next.point)}${iv(next)}`
+        + (sNext ? `; the same month a year earlier, scaled, says ${fmt(sNext.point)}${iv(sNext)}` : '; no second method can be built for it') },
+    ip && ip.forecast != null ? { label: `${MONTH(ip.m)} so far`, value: fmt(ip.projected),
+      sub: `projected from ${fmt(ip.per_day, 1)} a day over ${countOf(ip.days_so_far, 'whole day')}; ${ip.within_interval ? 'inside' : 'outside'} the forecast\u2019s range of ${fmt(ip.low)}–${fmt(ip.high)}`,
+      delta: { value: ((ip.projected - ip.forecast) / ip.forecast) * 100, unit: '%', of: `against the ${fmt(ip.forecast)} forecast`, d: 1 } }
+      : { label: 'The month so far', na: 'no month is in progress inside the forecast horizon' },
+    { label: 'Months fitted', value: `${fmt(d.n)} of ${fmt(observed)}`,
+      sub: d.months_excluded?.length ? `${countOf(d.months_excluded.length, 'month')} before the last break are not fitted` : 'every observed month' },
+  ];
+  const rest = tiles.filter(Boolean).filter((x) => !String(x.label).startsWith('Bookings in '));
+  glance(AKB.tilesHost, bandTiles([...head, ...rest]).tiles);
+  /* 01 — observed months, then the forecast months hatched, with the other
+     method as the line over them. */
+  const p = panel('The year ahead, and how wide the guess gets', 'Observed months solid; every forecast month hatched — a projection — and so is a month the record only partly covers. The line is the second method where it can be built.', 'fc-year');
+  AKB.band.after(p.panel);
+  const seasonal = new Map((d.seasonal?.forecast || []).map((r) => [r.m, r.point]));
+  const obs = (d.observed || []).slice(-12).map((m) => ({ x: MONTH(m.m), v: m.no_data ? null : +m.trips, none: !!m.no_data,
+    part: !!m.partial_month && !m.no_data, other: null, fc: false }));
+  const fut = (d.forecast || []).map((r) => ({ x: MONTH(r.m), v: r.point, none: r.point == null, part: false,
+    other: seasonal.get(r.m) ?? null, fc: true }));
+  gapBars(p.body, [...obs, ...fut], { x: 'x', y: 'v', label: 'bookings', color: '--ink', gapKey: 'none',
+    gapLabel: 'no data for this month', bucketNoun: 'months', inProgress: false,
+    hatchIf: (r) => r.fc || r.part, hatchNote: 'a projection, or a month the record only partly covers',
+    secondary: 'other', secondaryLabel: 'the same month a year earlier, scaled', secondaryLine: { color: '--grey', label: 'year-ago method' },
+    valueFmt: (v) => fmt(v) });
+  const rows = (d.forecast || []).slice(0, 3).map((r) => `${MONTH(r.m)} ${fmt(r.low)}–${fmt(r.high)}`);
+  p.body.append(el('p', 'cap', esc(`The straight line\u2019s range: ${rows.join(' · ')}. The further out, the wider.`)));
+}
+/* The plan's order for the panels the old page draws in its own order: the
+   month so far, bookings by month, both methods, the backtest, the year-ago
+   table, the visitors, next month day by day, the calendar. Moved, not
+   rebuilt — each panel is the old page's. */
+const FC_ORDER = [/so far, against what was forecast$/, /^Bookings by month/, /^Month by month, both methods/, /^Which method/,
+  /^Every month against the same month/, /^Dubai.s visitors/, /, day by day$/, /^What is in the calendar/];
+function forecastReorder(root) {
+  const anchor = root.querySelector('[data-panel="fc-year"]');
+  if (!anchor) return;
+  const panels = [...root.children].filter((n) => n.classList?.contains('panel'));
+  let at = anchor;
+  for (const re of FC_ORDER) {
+    const p = panels.find((x) => re.test(x.querySelector('h3')?.textContent.trim() || ''));
+    if (p && p !== anchor) { at.after(p); at = p; }
+  }
+}
+function forecastAbsence(root, d) {
+  forecastReorder(root);
+  const extrap = d.year_ahead ? 12 - d.year_ahead.forecast_months : null;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'A day\u2019s own uncertainty', fig: null, none: 'Not given',
+      why: 'The day-by-day figures share the month\u2019s range out by weekday; no single day carries an interval of its own.' },
+    { label: 'Months dropped', fig: fmt((d.months_excluded || []).length),
+      why: (d.months_excluded || []).length ? 'Months before the last break are a different regime, and are not fitted.' : 'Every observed month is fitted.' },
+    { label: 'Beyond the fitted horizon', fig: extrap != null ? countOf(extrap, 'month') : null, none: 'None',
+      why: extrap ? 'The twelve-month total extends the line past the months the forecast can stand on; those are extrapolated, not forecast.' : 'Nothing is extrapolated.' },
+    { label: 'Money', fig: null, none: 'Not forecast', why: d.revenue_note || 'Bookings are forecast; money is not.' },
+  ]);
+  pageFoot({ colophon: [`next: ${MONTH(d.next_month || (d.forecast[0] || {}).m)}`, `${fmt(d.n)} months fitted`] }, root);
 }
