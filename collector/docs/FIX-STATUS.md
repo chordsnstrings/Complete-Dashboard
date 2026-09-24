@@ -3691,3 +3691,15 @@ Two defects were caught on production during this page and fixed before the comm
 Deviations:
 * An outline bar for the rungs that do not narrow is drawn grey instead; hbars draws no outline bar, and the caption names the split.
 * The hero's spark is not built.
+
+### P68 · #segment
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #segment | An `ak` flag in renderSegment. **00:** a band whose note carries the verdict and the duration unchanged ("unauthorized · 29 min, 11:26 → 11:55"). The tiles are untoned: *Carried with no booking* (the hero, km with peak speed, ABSENT when no distance was measured); NEW *To the nearest booking* (minutes, channel, the channels checked, ABSENT with the channels named when none touched the car); Revenue forgone, exact, its rate named; *Who held the car* ("nobody is recorded holding this car that day" is an ABSENCE, kept apart from the attribution's inferred name below it); and *Telemetry through the window* (fixes, observed, largest gap). The place sentence, the attribution note, the links line and every evidence table are kept. Outcome, seat and occupied tags are outline chips; the speed chart is in the job token. **NEW** "What the fixes are": with a seat reading against none (grey, no speed invented), which box wrote each (the server's track does carry `source`), and the largest jump between two consecutive fixes. Channels that day become ranked bars in channel colour, not chips. **†:** who was in the car; where it ended (the coordinate when no area is named, never a guessed area); and what it was worth, naming BOTH valuations when they differ: this page's month rate, and the list's window rate from the attribution row the page already fetches. One figure is shown when they agree | **written** | `test/arkiv_fleet.test.mjs` #segment 15/15, with synthetic fixtures: a differing window rate; no distance, no nearby booking and no custody. Revert-proofs (md5-restored): the chips back make "ranked bars … not chips" fail; the second valuation off makes "both valuations" fail; one colour for the seat split makes "without (grey)" fail. `arkiv_classic_frozen` ONLY=segment 11/11. **The golden caught one regression:** the draft drew the speed chart into a new box in BOTH skins, changing the old skin's bytes on both segment routes. The box is now contract-only. `arkiv_fils` gains the route; the live scan is clean. Pinned: `segment_routes` 68, `segment_boundary` 6, `unauthorized_attribution_page` 26, `caption_matches_figure` 32 |
+
+Deviations:
+* The tile is named *Who held the car*, not the plan's "Who was driving". It reports day-grain custody, and the attribution's inference is named separately below it.
+* The speed chart stays an area in the job token, not a line with a tick strip. "What the fixes are" carries the no-seat-reading count.
+* The plan's §01 two-lane day timeline is not built. It needs a chart the shared charts.js does not have, and the day's tables below carry every booking and interval it would draw.
+* The plan's "which box wrote each fix — needs a new endpoint" does not need one: /api/segment's track already selects `source`.

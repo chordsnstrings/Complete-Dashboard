@@ -19,7 +19,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
          dtStr, timeStr, dayStr, dateStr, money, custody, verdict, foldRows,
          sourceLabel, countOf, plural, asList, noneChosen,
          trackerState, trackerSpeed, stillNote, UBER_FARE_WHY,
-         segSourceLabel, bySourceLine, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
+         segSourceLabel, bySourceLine, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, sourceToken } from './ui.js';
 import { q, qAll, api, href, state, unfiltered } from './data.js';
 
 const VERDICT_TONE = { unauthorized: 'bad', authorized: 'ok', sensor_suspect: 'warn',
@@ -1351,7 +1351,17 @@ export async function renderSegment(root, plate, at) {
       : '');
   root.append(prov);
 
-  root.append(kpiRow([
+  /* Under the page contract (plan §4 #segment): a 00 band whose note carries
+     the verdict and the duration unchanged; the tiles are what the journey
+     carried with no booking, how far the nearest booking was, what it was
+     worth, who was driving — "nobody is recorded" an absence, kept apart
+     from the inferred name below — and what the telemetry saw. The evidence
+     tables are unchanged; their tags are outline chips. New: what the fixes
+     are (with a seat reading or none, which box wrote each, the largest jump
+     between two), the channels that day as ranked bars, a † band. */
+  const ak = contract();
+  if (ak) segmentBand(root, s, d);
+  else root.append(kpiRow([
     { label: 'Verdict', value: s.verdict || '—', tone: VERDICT_TONE[s.verdict] || null,
       sub: s.matched_platform ? `matched on ${s.matched_platform}` : 'no booking matched' },
     { label: 'Duration', value: (s.duration_min ?? '—') + ' min', sub: `${timeStr(s.started_at)} → ${timeStr(s.ended_at)}` },
@@ -1499,7 +1509,7 @@ export async function renderSegment(root, plate, at) {
       { label: 'Requested', key: 'requested_at', render: (r) => timeStr(r.requested_at) },
       { label: 'Offset', key: 'gap_min', num: true, render: (r) => (r.gap_min > 0 ? '+' : '') + r.gap_min + ' min' },
       { label: 'Outcome', key: 'outcome', render: (r) => (r.outcome
-        ? `<span class="tag ${r.outcome === 'completed' ? 'ok' : 'warn'}">${esc(r.outcome)}</span>`
+        ? (ak ? pill(r.outcome) : `<span class="tag ${r.outcome === 'completed' ? 'ok' : 'warn'}">${esc(r.outcome)}</span>`)
         : `<span class="tag dim">${esc(r.status || '—')}</span>`) },
       { label: 'Fare', key: 'price', num: true,
         absent: `none of the bookings around this interval carries a fare — ${UBER_FARE_WHY}`,
@@ -1557,8 +1567,12 @@ export async function renderSegment(root, plate, at) {
         + (s.source === 'fms_trip' ? ' — the journey itself is FMS’s record; these are the positions around it' : ''));
   root.append(tp.panel);
   if (d.track.length) {
-    areaChart(tp.body, d.track.map((r) => ({ t: timeStr(r.captured_at), speed: +r.speed || 0 })),
-      { x: 't', y: 'speed', color: '--s8' });
+    /* Its own box under the contract only: the old skin draws straight into
+       the panel body, as it always did (the golden holds its bytes). */
+    const sp = ak ? el('div') : tp.body;
+    if (ak) tp.body.append(sp);
+    areaChart(sp, d.track.map((r) => ({ t: timeStr(r.captured_at), speed: +r.speed || 0 })),
+      { x: 't', y: 'speed', color: ak ? '--mk-fill' : '--s8' });
     tp.body.append(tableFrom(d.track.slice(0, 60), [
       { label: 'Time', key: 'captured_at', render: (r) => timeStr(r.captured_at) },
       trackerState, trackerSpeed,
@@ -1569,12 +1583,12 @@ export async function renderSegment(root, plate, at) {
         if (r.source === 'fms') {
           return r.seat_count == null
             ? '<span class="tag dim" title="FMS’s live seat count was not reported on this fix">not reported</span>'
-            : Number(r.seat_count) >= 1 ? `<span class="tag ok">occupied · ${fmt(r.seat_count)}</span>`
+            : Number(r.seat_count) >= 1 ? (ak ? pill(`occupied · ${fmt(r.seat_count)}`) : `<span class="tag ok">occupied · ${fmt(r.seat_count)}</span>`)
               : '<span class="tag">empty · 0</span>';
         }
         return r.seat_occupied == null
           ? '<span class="tag dim">not reported</span>'
-          : r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag">empty</span>';
+          : r.seat_occupied ? (ak ? pill('occupied') : '<span class="tag ok">occupied</span>') : '<span class="tag">empty</span>';
       } },
       { label: 'Ignition', key: 'ignition', render: (r) => (r.ignition == null ? '—' : r.ignition ? 'on' : 'off') },
       { label: 'Lat', key: 'lat', num: true }, { label: 'Lng', key: 'lng', num: true },
@@ -1582,6 +1596,7 @@ export async function renderSegment(root, plate, at) {
     const sn = stillNote(d.track.slice(0, 60));
     if (sn) tp.body.append(sn);
     if (d.track.length > 60) tp.body.append(el('p', 'cap', `First 60 of ${fmt(d.track.length)} fixes.`));
+    if (ak) segmentFixes(root, tp.panel, d.track);
   } else {
     empty(tp.body, 'No fixes are stored for this window — which means the segment itself was built from data we no longer hold');
   }
@@ -1610,10 +1625,95 @@ export async function renderSegment(root, plate, at) {
     const ch = panel('Channels that wrote rows that day',
       'A verdict of “no booking anywhere” means nothing if a channel was not collecting');
     root.append(ch.panel);
-    ch.body.append(el('div', 'chips', d.channels_that_day.map((r) =>
+    if (ak) {
+      const cb = el('div'); ch.body.append(cb);
+      hbars(cb, [...d.channels_that_day].sort((a, b) => b.rows_that_day - a.rows_that_day)
+        .map((r) => ({ label: sourceLabel(r.platform), n: +r.rows_that_day || 0, plat: r.platform })),
+      { signed: false, colorFor: (x) => sourceToken(x.plat) || '--mk-fill' });
+    } else ch.body.append(el('div', 'chips', d.channels_that_day.map((r) =>
       `<span class="chip">${esc(r.platform)} <b>${fmt(r.rows_that_day)}</b></span>`).join('')));
     ch.body.append(el('p', 'cap',
       'Counts are fleet-wide for that calendar day, not for this vehicle — a channel with zero rows fleet-wide '
       + 'was not collecting, and could not have supplied the missing booking.'));
   }
+  if (ak) segmentAbsence(root, s, d, att);
+}
+
+/* ── #segment under the page contract ────────────────────────────────────── */
+function segmentBand(root, s, d) {
+  const AKB = glanceBand(root, `${s.verdict || 'no verdict'} · ${s.duration_min ?? '—'} min, ${timeStr(s.started_at)} → ${timeStr(s.ended_at)}`);
+  const unb = s.verdict === 'unauthorized';
+  const tiles = [
+    s.distance_km == null
+      ? { label: unb ? 'Carried with no booking' : 'Distance', na: 'no distance was measured across this interval', hero: true }
+      : { label: unb ? 'Carried with no booking' : 'Distance', value: `${fmt(s.distance_km, 1)} km`, hero: true,
+        sub: d.profile.max_speed != null ? `peak ${Math.round(d.profile.max_speed)} km/h` : 'no speed recorded' },
+    s.nearest_gap_min != null
+      ? { label: 'To the nearest booking', value: `${fmt(s.nearest_gap_min)} min`,
+        sub: `${s.nearest_platform ? sourceLabel(s.nearest_platform) : 'no channel named'}${s.channels_checked ? ` · checked ${s.channels_checked}` : ''}` }
+      : { label: 'To the nearest booking', na: s.channels_checked ? `no booking on ${s.channels_checked} touched this car near the journey` : 'no nearby booking was recorded against this journey' },
+    d.value?.forgone_aed == null
+      ? { label: 'Revenue forgone', na: d.value?.basis || 'not valued' }
+      : { label: 'Revenue forgone', value: money(d.value.forgone_aed), sub: d.value?.basis || '' },
+    s.drivers
+      ? { label: 'Who held the car', value: String(s.drivers).split(',').length > 1 ? `${countOf(String(s.drivers).split(',').length, 'person', 'people')}` : String(s.drivers),
+        sub: 'day-grain custody — who HELD the car, not a narrowed name' }
+      : { label: 'Who held the car', na: 'nobody is recorded holding this car that day' },
+    { label: 'Telemetry through the window', value: `${fmt(d.profile.fixes)} fixes`,
+      sub: s.source === 'fms_trip' ? 'an FMS journey — the provider\u2019s own record, no sampling gap'
+        : `${d.profile.observed === null ? 'observation not recorded' : d.profile.observed ? 'observed fully' : 'observed with a gap'}`
+          + (s.max_gap_min != null ? ` · largest gap ${s.max_gap_min} min` : '') },
+  ];
+  glance(AKB.tilesHost, bandTiles(tiles).tiles);
+}
+/* What the fixes are: a seat reading or none (no speed or seat invented for
+   the rest), which box wrote each, and the largest jump between two. */
+function segmentFixes(root, after, track) {
+  const p = panel('What the fixes are', 'This window\u2019s fixes by what each carries and which box wrote it', 'seg-fixes');
+  after.after(p.panel);
+  const seat = track.filter((r) => r.seat_occupied != null || r.seat_count != null).length;
+  const bySrc = new Map(); track.forEach((r) => { const k = r.source || 'unnamed'; bySrc.set(k, (bySrc.get(k) || 0) + 1); });
+  const box = el('div'); p.body.append(box);
+  hbars(box, [{ label: 'with a seat reading', n: seat }, { label: 'no seat reading', n: track.length - seat }],
+    { signed: false, colorFor: (x) => (x.label === 'no seat reading' ? '--grey' : '--mk-fill') });
+  const R = (x) => (x * Math.PI) / 180;
+  let jump = null;
+  for (let i = 1; i < track.length; i++) {
+    const a = track[i - 1], b = track[i];
+    if ([a.lat, a.lng, b.lat, b.lng].some((v) => v == null)) continue;
+    const km = 6371 * 2 * Math.asin(Math.sqrt(Math.sin(R(b.lat - a.lat) / 2) ** 2
+      + Math.cos(R(a.lat)) * Math.cos(R(b.lat)) * Math.sin(R(b.lng - a.lng) / 2) ** 2));
+    const min = (Date.parse(b.captured_at) - Date.parse(a.captured_at)) / 60000;
+    if (!jump || km > jump.km) jump = { km, min, at: b.captured_at };
+  }
+  p.body.append(el('p', 'cap', `Written by ${[...bySrc.entries()].map(([k, n]) => `${esc(k === 'unnamed' ? 'a box this row does not name' : sourceLabel(k))} ${fmt(n)}`).join(', ')}.`
+    + (jump ? ` The largest jump between two consecutive fixes was ${fmt(jump.km, 2)} km in ${fmt(jump.min, 1)} minutes, at ${timeStr(jump.at)}.` : '')));
+}
+function segmentAbsence(root, s, d, att) {
+  const cells = [
+    { label: 'Who was in the car', fig: null, none: 'Not recorded',
+      why: att ? 'The name above is the attribution ladder\u2019s inference; no trip record exists for a journey no booking explains.'
+        : 'No booking explains this journey, so no trip record names its driver; the custody line is who held the car that day.' },
+    { label: 'Where it ended', fig: null, none: s.end_place?.area ? 'Named' : 'Unnamed',
+      why: s.end_place?.area ? `${s.end_place.area}, by the fleet\u2019s own trip endpoints.`
+        : s.end_lat != null ? `${Number(s.end_lat).toFixed(4)}, ${Number(s.end_lng).toFixed(4)} — ground the fleet has never driven near enough to name; no area is guessed.`
+          : 'No position was recorded for the end of this journey.' },
+    /* Both valuations, named — the plan's "name the second valuation". This
+       page prices over the segment's calendar month (/api/segment value);
+       the list it opens from prices over the reader's window, and the row the
+       attribution fetch above already found carries that figure. */
+    (att && att.forgone_aed != null && d.value?.forgone_aed != null
+      && Math.abs(Number(att.forgone_aed) - Number(d.value.forgone_aed)) < 0.005)
+      ? { label: 'What it was worth', fig: money(d.value.forgone_aed),
+        why: `The two valuations agree here: ${money(d.value.aed_per_km)}/km over the journey\u2019s own month on this page, ${money(att.aed_per_km)}/km over the window on the list it opens from. They can differ by cents on another journey; which rate rules is an owner\u2019s call.` }
+    : (att && att.forgone_aed != null && d.value?.forgone_aed != null)
+      ? { label: 'What it was worth', fig: `${money(d.value.forgone_aed)} or ${money(att.forgone_aed)}`,
+        why: `${money(d.value.forgone_aed)} at ${money(d.value.aed_per_km)}/km, the rate over the journey\u2019s own month, on this page; `
+          + `${money(att.forgone_aed)} at ${money(att.aed_per_km)}/km, the window\u2019s rate, on the list it opens from. Which rate rules is an owner\u2019s call.` }
+      : { label: 'What it was worth', fig: null, none: 'One rate of two',
+        why: `This page values the distance at the rate it names (${d.value?.basis || 'no rate'}); the list it opens from prices the same journey at the window\u2019s rate, so the two can differ by cents. Which rate rules is an owner\u2019s call.` },
+  ];
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, cells);
+  pageFoot({ colophon: [s.local_day, `${esc(s.plate || '')} · ${segSourceLabel(s)}`] }, root);
 }

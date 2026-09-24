@@ -735,4 +735,75 @@ if (want('segments')) {
   }
 }
 
+/* ══ #segment ═════════════════════════════════════════════════════════════ */
+if (want('segment')) {
+  console.log('\n#segment');
+  const H = 'segment/L45235/2026-08-03T04:00:00.000Z';
+  {
+    const { ctx, page } = await open('classic', H);
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), tiles: [...document.querySelectorAll('#view .kpis > .kpi .l')].map((l) => l.textContent.trim()),
+      chips: document.querySelectorAll('#view .chips .chip').length }));
+    check('old skin: no band, its five tiles starting with the verdict, the channels as chips', !r.band && r.tiles[0] === 'Verdict' && r.chips > 0, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', H);
+    const s = await shape(page);
+    const d = answer('/api/segment');
+    const g = d.segment;
+    check('00: the verdict and the duration in the band\'s note, unchanged', (await txtOf(page, '#view .cband .sechd')).includes(`${g.verdict} · ${g.duration_min} min`), await txtOf(page, '#view .cband .sechd'));
+    check('the tiles: what it carried (the hero), the nearest booking, its worth, who held it, the telemetry', JSON.stringify(Object.keys({ ...s.values, ...s.na })) !== '{}'
+      && s.hero === (g.verdict === 'unauthorized' ? 'Carried with no booking' : 'Distance')
+      && ['To the nearest booking', 'Revenue forgone', 'Who held the car', 'Telemetry through the window'].every((l) => l in s.values || l in s.na), JSON.stringify([s.hero, s.values, s.na]));
+    check('figures are the endpoint\'s: km, the gap, the worth exact, the fixes', s.values[s.hero] === `${(+g.distance_km).toLocaleString('en-US', { maximumFractionDigits: 1 })} km`
+      && s.values['To the nearest booking'] === `${n(g.nearest_gap_min)} min` && s.values['Revenue forgone'] === aedOf(d.value.forgone_aed)
+      && s.values['Telemetry through the window'] === `${n(d.profile.fixes)} fixes`, JSON.stringify(s.values));
+    check('who held the car: "nobody is recorded" is an absence, never a name', g.drivers ? !s.na['Who held the car'] : /nobody is recorded holding this car that day/.test(s.na['Who held the car'] || ''), JSON.stringify([g.drivers, s.na]));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const fx = await page.evaluate(() => { const p = document.querySelector('[data-panel="seg-fixes"]');
+      return p ? { bars: [...p.querySelectorAll('.hb')].map((b) => ({ k: b.querySelector('.k')?.textContent.trim(), v: b.querySelector('.v')?.textContent.trim(), fill: b.querySelector('.fill')?.getAttribute('style') })),
+        cap: [...p.querySelectorAll('p.cap')].at(-1)?.textContent || '' } : null; });
+    const seat = d.track.filter((x) => x.seat_occupied != null || x.seat_count != null).length;
+    check('what the fixes are: with a seat reading and without (grey), which box wrote them, the largest jump', fx && fx.bars[0].v === n(seat) && fx.bars[1].v === n(d.track.length - seat)
+      && /--grey/.test(fx.bars[1].fill) && /Written by/.test(fx.cap) && /largest jump/.test(fx.cap), JSON.stringify(fx));
+    const H4 = s.heads;
+    check('what the fixes are sits directly under the telemetry panel', H4.indexOf('What the fixes are') === H4.indexOf('Telemetry through the window') + 1, JSON.stringify(H4));
+    const ch = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Channels that wrote rows that day');
+      return p ? { hb: [...p.querySelectorAll('.hb')].map((b) => ({ v: b.querySelector('.v')?.textContent.trim(), fill: b.querySelector('.fill')?.getAttribute('style') })), chips: p.querySelectorAll('.chip').length } : null; });
+    check('channels that day: ranked bars in each channel\'s colour, not chips', ch && ch.chips === 0 && ch.hb.length === d.channels_that_day.length
+      && ch.hb.every((b, i) => !i || +ch.hb[i - 1].v.replace(/,/g, '') >= +b.v.replace(/,/g, '')) && ch.hb.every((b) => /--c-|--mk-fill/.test(b.fill)), JSON.stringify(ch));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('†: who was in the car, where it ended, what it was worth', ab['Who was in the car']?.fig === 'Not recorded' && !!ab['Where it ended'] && !!ab['What it was worth'], JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    check('the evidence tables kept', ['Why this verdict', 'Custody either side of this day'].every((h) => H4.includes(h)), JSON.stringify(H4));
+    await ctx.close();
+  }
+  {
+    /* The list's window rate differs from this page's month rate (synthetic):
+       the † cell names BOTH valuations and says which is which. */
+    const other = (q, real) => ({ ...real, rows: (real.rows || []).map((x) => (x.forgone_aed != null ? { ...x, forgone_aed: +(Number(x.forgone_aed) + 0.57).toFixed(2), aed_per_km: 4.52 } : x)) });
+    const { ctx, page, answer } = await open('arkiv', H, { fixtures: { '/api/unauthorized/attributed': other } });
+    const s = await shape(page);
+    const d = answer('/api/segment');
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const w = ab['What it was worth'];
+    check('what it was worth: both valuations, this page\'s and the list\'s, each with its rate', w && w.fig === `${aedOf(d.value.forgone_aed)} or ${aedOf(d.value.forgone_aed + 0.57)}`
+      && /own month, on this page/.test(w.why) && /the window’s rate, on the list/.test(w.why), JSON.stringify(w));
+    await ctx.close();
+  }
+  {
+    /* A segment no custody record covers, no distance measured (synthetic). */
+    const bare = (q, real) => ({ ...real, segment: { ...real.segment, drivers: null, distance_km: null, nearest_gap_min: null } });
+    const { ctx, page } = await open('arkiv', H, { fixtures: { '/api/segment': bare } });
+    const s = await shape(page);
+    check('no distance and no nearby booking: both absent with their reasons', /no distance was measured across this interval/.test(s.na[s.hero] || '')
+      && /no booking on .* touched this car near the journey|no nearby booking was recorded/.test(s.na['To the nearest booking'] || ''), JSON.stringify(s.na));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', H, { width: 390 });
+    check('#segment at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
