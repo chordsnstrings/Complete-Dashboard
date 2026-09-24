@@ -87,6 +87,13 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
                 count(*) FILTER (WHERE bookings > 0)::int earning,
                 count(*) FILTER (WHERE bookings = 0 AND journeys > 0)::int moved_only,
                 count(*) FILTER (WHERE bookings = 0 AND journeys = 0)::int still,
+                /* Whether the journey feed filed ANYTHING in the window. With
+                   none, moved_only is 0 and still is every idle car — not
+                   because none moved, but because nothing reported movement,
+                   and the payload could not tell those apart (plan §4
+                   #playbook). The Arkiv page draws the split as not measured
+                   when this is 0. */
+                coalesce(sum(journeys), 0)::int journeys_in_window,
                 percentile_cont(0.5) WITHIN GROUP (ORDER BY bookings)
                   FILTER (WHERE bookings > 0) AS median_bookings
           FROM v`, p),

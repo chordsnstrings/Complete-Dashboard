@@ -181,4 +181,85 @@ const PRICED = {
   await ctx.close();
 }
 
+/* ══ #playbook ═════════════════════════════════════════════════════════════ */
+console.log('\n#playbook');
+const PB_GROUPS = ['Collect', 'Protect', 'Deploy', 'Cover', 'Improve'];
+const pbRead = (page) => page.evaluate(() => {
+  const v = document.querySelector('#view');
+  const txt = (n) => (n ? n.textContent.replace(/\s+/g, ' ').trim() : '');
+  return {
+    claim: txt(v.querySelector('.cband .vdct-claim')), unit: txt(v.querySelector('.cband .vdct-fig i')),
+    tones: [...v.querySelectorAll('.kpis.glance .kpi')].filter((k) => /\bt-(warn|critical|serious|good)\b/.test(k.className)).length,
+    rate: !!v.querySelector('#pbRate'),
+    where: [...v.querySelectorAll('[data-panel="pb-where"] .hb')].map((h) => [txt(h.querySelector('.k')), txt(h.querySelector('.v')),
+      h.querySelector('.fill')?.className || '']),
+    arith: [...v.querySelectorAll('[data-panel="pb-arith"] .hb .v')].map(txt),
+    cards: v.querySelectorAll('.card.act').length,
+    tonedPills: [...v.querySelectorAll('.card.act .act-tags .pill')].filter((p) => /\b(ok|warn|critical|bad)\b/.test(p.className)).length,
+    ceilingChips: [...v.querySelectorAll('.act-cert[data-cert="ceiling"] .sw-proj')].length,
+    ceilings: [...v.querySelectorAll('.act-cert[data-cert="ceiling"]')].length,
+    errNote: !!v.querySelector('.note.err'),
+  };
+});
+{
+  const { ctx, page, answer } = await open('arkiv', 'playbook');
+  const s = await shape(page);
+  const r = await pbRead(page);
+  const d = answer('/api/playbook');
+  const groups = PB_GROUPS.filter((g) => d.actions.some((a) => a.group === g));
+  const nd = d.fleet.new_driver_first_month, med = d.fleet.median_bookings;
+  const idle = d.actions.find((a) => a.id === 'redeploy_idle_vehicles');
+  check('the order: 00, where the cars are, the arithmetic, then the groups in their order, †',
+    JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Where the fleet\'s cars are',
+      'The arithmetic behind the ceilings', ...groups, '† What this page does not know']), JSON.stringify(s.heads));
+  check('the verdict\'s unit is FIXED: a balance already earned, not "a month … over N days"',
+    /already earned and not yet in hand/.test(r.claim) && !/a month/.test(r.claim) && r.unit === 'already earned, not yet in hand',
+    `${r.claim} | ${r.unit}`);
+  check('Money already earned is the hero, the answer\'s measured total to the fils', s.hero === 'Money already earned'
+    && s.values['Money already earned'] === `AED ${Number(d.totals.aed_measured).toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+  s.values['Money already earned']);
+  check('no tile wears a tone (a level is not better-or-worse)', r.tones === 0, String(r.tones));
+  check('Modelled upside with no rate set is ABSENT with its reason, not dropped',
+    /no revenue-per-booking rate set/.test(s.na['Modelled upside'] || ''), JSON.stringify(s.na));
+  check('Idle capacity adds the same ceiling at a new driver\'s rate, labelled a ceiling',
+    s.subs['Idle capacity'].includes(`${(idle.size * nd).toLocaleString('en-US')} (${idle.size} cars × ${nd}) — a ceiling too`),
+    s.subs['Idle capacity']);
+  check('the rate control is kept (rule 3)', r.rate);
+  check('01: earned, moved-but-never-earned and still, from .fleet', r.where.length === 3
+    && r.where[1][0] === 'Moved, but never earned' && r.where[1][1].startsWith(String(d.fleet.moved_only)), JSON.stringify(r.where));
+  check('02: the median car against a new driver\'s first month', r.arith.join('|') === `${med} bookings|${nd} bookings`, r.arith.join('|'));
+  check('every card kept, no pill toned by certainty or horizon', r.cards === d.actions.length && r.tonedPills === 0,
+    `${r.cards} ${r.tonedPills}`);
+  check('a ceiling\'s chip carries the hatch swatch', r.ceilings > 0 && r.ceilingChips === r.ceilings, `${r.ceilingChips}/${r.ceilings}`);
+  check('the red caveat note has moved into the † band, with the share it MEASURED, not "roughly a third"',
+    !r.errNote && s.abs[0].label === 'The ceiling is not a forecast' && s.abs[0].fig === `${Math.round(nd / med * 100)}%`
+    && s.abs[0].why.includes(`expect about ${Math.round(nd / med * 100)}% of the ceiling`) && !/roughly a third/.test(s.abs[0].why),
+    JSON.stringify(s.abs[0]));
+  check('two highlights: the hero and the sized caveat', s.hl === 2, String(s.hl));
+  await ctx.close();
+}
+/* The journey feed filed nothing: "moved but never earned" 0 is not a count. */
+{
+  const { ctx, page } = await open('arkiv', 'playbook', { fixtures: {
+    '/api/playbook': (_q, real) => ({ ...real, fleet: { ...real.fleet, moved_only: 0,
+      still: real.fleet.still + real.fleet.moved_only, journeys_in_window: 0 } }) } });
+  const s = await shape(page);
+  const r = await pbRead(page);
+  check('with no journey filed, the split is not drawn as 0 — idle cars as one bar, the split OUTLINED',
+    r.where.length === 3 && r.where[1][0] === 'Took no booking' && /hb-outline/.test(r.where[2][2])
+    && /Not measured/.test(r.where[2][1]), JSON.stringify(r.where));
+  check('…and the † band says why', s.abs[3].label === 'Cars that moved but never earned' && s.abs[3].fig === 'Not measured'
+    && /filed no journey in this window/.test(s.abs[3].why), JSON.stringify(s.abs[3]));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('classic', 'playbook');
+  const s = await shape(page);
+  const r = await pbRead(page);
+  const claim = await page.evaluate(() => document.querySelector('#view .vdct-claim')?.textContent || '');
+  check('the old skin keeps today\'s page: a kpiRow, the red caveat note, its own verdict wording',
+    s.kpiRows === 1 && s.glance === 0 && s.abs.length === 0 && r.errNote && /worth AED .* a month/.test(claim), JSON.stringify([s.kpiRows, claim]));
+  await ctx.close();
+}
+
 await done();

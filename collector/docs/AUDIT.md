@@ -1464,3 +1464,14 @@ band said "None open" about a cancellation cost it could not see — a reason
 that was not the true one. On production today the list is not capped (197
 open), so the by-kind and cost charts are complete even before the server
 change deploys; the page says so either way.
+
+### #playbook — 2026-09-24
+
+Production data, both skins, 1440 and 390, light and dark (scratchpad
+`pagephase/shots/playbook/`): no error, no sideways scroll, two highlights.
+Found by looking and fixed before commit: the 01 caption printed "(0 journeys
+in the window)" against a server that does not send the count yet — a figure
+that was never measured, printed as 0; it now prints the count only when the
+answer carries one. The caveat said "expect roughly a third of the ceiling"
+directly after "about 5% of it" (production: 12 bookings against a median of
+224): the contract's copy prints the measured share.

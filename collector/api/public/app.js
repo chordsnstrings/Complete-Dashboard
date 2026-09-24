@@ -5262,7 +5262,7 @@ async function insightsContract(root) {
       row.innerHTML = `${mk}<div class="k">${esc(r.label)}</div>
         <div class="track"><div class="fill hb-${r.form}" style="width:${w.toFixed(1)}%;${r.form === 'outline' ? ''
     : `background:var(${r.ch ? `--c-${channelKey(r.ch)}` : '--ink'})`}"></div></div>
-        <div class="v num">${r.aed == null ? '<span class="ins-noprice">No cost model exists for these kinds</span>' : esc(money(r.aed))}</div>`;
+        <div class="v num">${r.aed == null ? '<span class="ak-why">No cost model exists for these kinds</span>' : esc(money(r.aed))}</div>`;
       wrap.append(row);
     });
     if (!rows.length) empty(cost.body, pricedN == null ? 'The summary carries no priced count.' : 'No open finding carries a cost.');

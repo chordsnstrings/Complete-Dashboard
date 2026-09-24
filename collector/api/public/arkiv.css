@@ -1341,7 +1341,7 @@
 /* The reason stands in the value column, which hbars sizes to its widest
    entry for every row (a subgrid): unwrapped, the sentence took the whole
    row at 390px and squeezed every bar to a stub. */
-:root[data-skin="arkiv"] .ins-noprice{display:inline-block;max-width:15ch;text-align:right;
+:root[data-skin="arkiv"] .ak-why{display:inline-block;max-width:15ch;text-align:right;
   font-family:var(--sans);font-size:var(--t4);line-height:1.3;color:var(--grey);
   white-space:normal;font-variant-numeric:normal}
 :root[data-skin="arkiv"] .ins-aed{font-weight:600;color:var(--ink);white-space:nowrap}

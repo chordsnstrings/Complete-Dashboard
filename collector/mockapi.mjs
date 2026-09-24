@@ -7291,7 +7291,8 @@ app.get('/api/playbook', (req, r) => {
   ];
   r.json({
     window: ['2026-07-22', '2026-08-21'], window_days: 31, actions,
-    fleet: { vehicles_seen: 131, earning: 64, moved_only: 28, still: 39, median_bookings: median,
+    fleet: { vehicles_seen: 131, earning: 64, moved_only: 28, still: 39, journeys_in_window: 1840,
+      median_bookings: median,
       median_bookings_window: median, median_unit: 'bookings per 30 days',
       // What capacity genuinely ADDED produces — about a third of the median
       // on this fleet, which is the live figure and the whole reason it is
