@@ -978,6 +978,46 @@ console.log('\n4.13 · Optimise: 00, Idle hours the hero, the When/Where switch 
   await p.close();
 }
 
+console.log('\n4.14 · Every trip: 00 over the count, channel marks, and a pager that brings the reader back up');
+{
+  const d = ans('/api/trips/list?period=month&limit=40&offset=0&grain=auto');
+  const { channelKey } = await import('../api/public/tokens.js');
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('trips');
+  const m = await p.page.evaluate(() => ({
+    order: [...document.querySelectorAll('.m-deck > div:last-of-type > *')].map((k) => k.className.split(' ')[0]).slice(0, 3),
+    claim: document.querySelector('.m-lede b')?.textContent,
+    marks: [...document.querySelectorAll('.m-deck .m-rows .m-row')].map((r) => r.dataset.ch || null),
+  }));
+  check('the search and the kind first, then 00 over the count', JSON.stringify(m.order) === JSON.stringify(['sechd', 'm-lede', 'm-rows']),
+    JSON.stringify(m.order));
+  check(`…whose figure is /api/trips/list’s total (${f0(d.total)})`, m.claim === `${f0(d.total)} bookings`, m.claim);
+  check('each booking carries its channel’s mark', m.marks.length === d.rows.length
+    && d.rows.every((r, i) => m.marks[i] === channelKey(String(r.platform || ''))), JSON.stringify(m.marks.slice(0, 5)));
+  await p.close();
+  /* The pager. A page the reader has already seen comes back from the
+     stale-while-revalidate store at once (data.js api()), so the skeleton and
+     the new rows land in one task and nothing clamps the scroll — which is
+     when the old window.scrollTo() left the reader at the foot of the rows
+     they had asked to see from the top. So: page 2, then back to page 1. */
+  const page2 = { ...d, offset: 40, truncated: false };
+  const q2 = await phonePage(browser, { skin: 'arkiv',
+    fixture: withAnswer('/api/trips/list?period=month&limit=40&offset=40&grain=auto', page2) });
+  await q2.open('trips');
+  if (d.truncated) {
+    await q2.page.click('.m-deck .m-seg:last-of-type button:has-text("Older")');
+    await q2.settle();
+    await q2.page.evaluate(() => { const k = document.querySelector('.m-deck'); k.style.scrollBehavior = 'auto'; k.scrollTop = 99999; });
+    const down = await q2.page.evaluate(() => document.querySelector('.m-deck').scrollTop);
+    await q2.page.click('.m-deck .m-seg:last-of-type button:has-text("Newer")');
+    await q2.page.waitForTimeout(400);
+    const up = await q2.page.evaluate(() => document.querySelector('.m-deck').scrollTop);
+    check('the pager brings the reader back to the top of the rows it drew (the deck scrolls, not the window)',
+      down > 200 && up < 5, `${down} → ${up}`);
+  } else check('the recording holds more than one page of trips', false, 'd.truncated is false: the pager cannot be tested');
+  await q2.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');

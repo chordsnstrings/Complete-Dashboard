@@ -1151,6 +1151,13 @@ async function sources(deck, ctx) {
 const AREA = (a) => { const s = String(a || ''); return (s.split(' - ')[1] || s).trim(); };
 
 async function tripsScreen(deck, ctx) {
+  /* THE REDESIGN, only under the token: the search and the kind stay first
+     as the list's controls; 00 heads the count; each booking carries its
+     channel's row mark (its name stays in the row, L5.6); and the pager
+     brings the reader back to the top of the list it just replaced — the old
+     one scrolled the WINDOW, which on the phone does not scroll (the deck
+     does), so "Older ›" left the reader at the foot of forty new rows. */
+  const AK = phoneContract();
   const host = el('div');
   let term = '', kind = 'bookings', offset = 0;
 
@@ -1167,6 +1174,7 @@ async function tripsScreen(deck, ctx) {
     } catch (e) { if (ctx.alive()) { host.innerHTML = ''; failed(host, e); } return; }
     if (!ctx.alive()) return;
     host.innerHTML = '';
+    if (AK) host.append(secHead('00', 'At a glance', WINDOW_NOTE()));
 
     lede(host, {
       claim: `${fmt(d.total)} ${kind === 'telematics' ? 'telematics journeys' : 'bookings'}`
@@ -1186,7 +1194,7 @@ async function tripsScreen(deck, ctx) {
        half that is long. The right is when and on whose behalf, both short.
        Putting the route in the right column, beside a channel name, gave
        every card an ellipsis three words in. */
-    rows(host, d.rows.map((r) => row({
+    const tripRows = rows(host, d.rows.map((r) => row({
       title: r.driver_name || r.driver_ext_id || 'Unnamed driver',
       sub: (r.has_fare ? `${money(r.price, r.currency || 'AED')} · ` : '')
         + `${r.plate || 'no vehicle'} · ${AREA(r.pickup_addr) || '—'} → ${AREA(r.dropoff_addr) || '—'}`,
@@ -1201,6 +1209,7 @@ async function tripsScreen(deck, ctx) {
       tone: r.outcome === 'not_completed' ? 'critical' : null,
       to: r.plate ? href('vehicle', r.plate) : (r.driver_ext_id ? href('driver', r.driver_ext_id) : null),
     })));
+    if (AK) d.rows.forEach((r, i) => rowMark(tripRows.children[i], r.platform));
 
     /* Rows, not page numbers: what a reader wants to know is how much of the
        window is behind them, not which page they are on. */
@@ -1208,7 +1217,10 @@ async function tripsScreen(deck, ctx) {
     const mk = (label, on, go) => {
       const b = el('button', null, label);
       b.type = 'button'; b.disabled = !on;
-      b.onclick = () => { offset = go; draw(); window.scrollTo({ top: 0 }); };
+      b.onclick = () => {
+        offset = go; draw();
+        if (AK) deck.scrollTo({ top: 0 }); else window.scrollTo({ top: 0 });
+      };
       nav.append(b);
     };
     mk('‹ Newer', offset > 0, Math.max(0, offset - 40));
