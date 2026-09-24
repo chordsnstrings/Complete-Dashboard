@@ -262,4 +262,94 @@ const pbRead = (page) => page.evaluate(() => {
   await ctx.close();
 }
 
+/* ══ #compare ══════════════════════════════════════════════════════════════ */
+console.log('\n#compare');
+{
+  const { ctx, page, answer } = await open('arkiv', 'compare');
+  const s = await shape(page);
+  const p = answer('/api/compare');
+  const r = await page.evaluate(() => {
+    const v = document.querySelector('#view');
+    const txt = (n) => (n ? n.textContent.replace(/\s+/g, ' ').trim() : '');
+    const rows = (sel) => [...v.querySelectorAll(`${sel} svg`)].map((svg) => ({
+      absent: svg.querySelectorAll('[data-absent]').length,
+      fills: [...new Set([...svg.querySelectorAll('[data-rise]')].map((m) => m.getAttribute('fill')))] }));
+    return {
+      basis: txt(v.querySelector('.cmp-basis')),
+      hours: rows('[data-panel="cmp-hours"]'), canc: rows('[data-panel="cmp-cancel"]'),
+      hourCaps: [...v.querySelectorAll('[data-panel="cmp-hours"] p.cap')].map(txt),
+      oldDelta: v.querySelectorAll('.dl.up, .dl.dn').length,
+      signed: [...v.querySelectorAll('[data-panel="cmp-drivers"] tbody .dlt .dlt-v')].map(txt),
+      cov: [...v.querySelectorAll('[data-panel="cmp-channel"] .cmp-cov')].map(txt),
+      chn: v.querySelectorAll('[data-panel="cmp-channel"] tbody .chn .sw').length,
+      stale: [...v.querySelectorAll('[data-panel="cmp-fresh"] .cmp-stale')].map(txt),
+      stalePill: v.querySelectorAll('[data-panel="cmp-fresh"] tbody .pill.warn').length,
+      toolbar: [...v.querySelectorAll('.toolbar input[type=date], .toolbar a.btn')].length,
+    };
+  });
+  const A = p.totals.a, B = p.totals.b;
+  check('the order: 00, hours, cancellations by hour, the driver table, channel and roster, collection, †',
+    JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Hour by hour', 'Cancellations hour by hour',
+      'Who drove more, who drove less', 'By channel', 'Started and stopped', 'Was everything collected?',
+      '† What this page does not know']), JSON.stringify(s.heads));
+  check('the toolbar keeps both pickers, Swap, Today vs yesterday and the cut toggle', r.toolbar === 5, String(r.toolbar));
+  check('six tiles, Bookings the hero — the old "Change" tile is its delta', s.glance === 6 && s.hero === 'Bookings'
+    && !s.labels.includes('Change') && s.values.Bookings === `${A.bookings} vs ${B.bookings}`, JSON.stringify(s.values));
+  const tileD = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#view .kpis.glance .kpi')]
+    .map((k) => [k.querySelector('.l').textContent.trim(), k.querySelector('.dlt')?.className.replace('dlt ', '') || '',
+      ]).map(([l, c]) => [l, c])));
+  check('Bookings\' delta is the change against the other day, red for a fall', tileD.Bookings === 'dlt-negative', JSON.stringify(tileD));
+  check('Completed moves in points, Cancelled is inverted (no change here is said as such)',
+    /dlt-/.test(tileD.Completed) && tileD.Cancelled === 'dlt-neutral', JSON.stringify(tileD));
+  check('Distance carries both days\' telematics journeys, shown nowhere before',
+    s.subs.Distance.includes(`${A.telematics} against ${B.telematics} telematics journeys`), s.subs.Distance);
+  check('FIX (rule 4): the fares line says how many rows are priced and why — not "hotel, Yango and Bolt rows only"',
+    r.basis.includes(`Fares cover ${A.priced} of ${A.bookings} bookings`) && /separate payments report/.test(r.basis)
+    && !/hotel, Yango and Bolt rows only/.test(r.basis), r.basis);
+  const pastCut = p.hours.filter((h) => h.past_cut).length;
+  check('an hour the live day has not reached is the absence OUTLINE, on both hour charts, at least every hour past the cut',
+    r.hours[0].absent >= pastCut && r.canc[0].absent === r.hours[0].absent && r.hours[1].absent === 0,
+    JSON.stringify([r.hours, pastCut]));
+  check('…and the caption counts them in hours', r.hourCaps.some((c) => c.startsWith(`${r.hours[0].absent} of 24 hours: not yet reached`)),
+    JSON.stringify(r.hourCaps));
+  check('the later day in ink, the earlier in grey — never Uber\'s blue', JSON.stringify(r.hours[0].fills) === '["var(--ink)"]'
+    && JSON.stringify(r.hours[1].fills) === '["var(--grey)"]', JSON.stringify(r.hours));
+  check('the driver table\'s changes are signed deltas, not the old arrow-and-magnitude', r.oldDelta === 0
+    && r.signed.length > 0 && r.signed.every((x) => /^[+−]/.test(x)), JSON.stringify(r.signed));
+  check('By channel names each channel with its swatch, and says where a fare covers part of it',
+    r.chn === p.platforms.length && r.cov.join('|') === 'fares on 4 of 6 vs 6 of 8', JSON.stringify(r.cov));
+  check('a stale source is ink words with the hollow dot, not an amber pill', r.stale.length === 1
+    && r.stale[0] === 'stale · never succeeded' && r.stalePill === 0, JSON.stringify(r.stale));
+  check('the † band: the fares priced share first and sized, then hours not reached, a stopped driver, silent sources',
+    s.abs.length === 4 && s.abs[0].fig === `${A.priced} of ${A.bookings}` && /hour/.test(s.abs[1].fig)
+    && s.abs[2].fig === 'Not known' && s.abs[3].fig === '1 of 2', JSON.stringify(s.abs.map((c) => c.fig)));
+  check('two highlights, no bare tile', s.hl === 2 && s.bare.length === 0, `${s.hl} ${JSON.stringify(s.bare)}`);
+  check('no sideways scroll at 1440', s.overflowX <= 0, String(s.overflowX));
+  await ctx.close();
+}
+/* A waiting time is null below two bookings: one side measured and the other
+   not is not a change of the measured side's size. */
+{
+  const { ctx, page } = await open('arkiv', 'compare', { fixtures: { '/api/compare': (_q, real) => ({ ...real,
+    drivers: real.drivers.map((d, i) => (i ? d : { ...d, a: { ...d.a, wait_min: 90 }, b: { ...d.b, wait_min: null } })) }) } });
+  const cell = await page.evaluate(() => document.querySelector('[data-panel="cmp-drivers"] tbody tr td[data-key="d_wait_min"], '
+    + '[data-panel="cmp-drivers"] tbody tr td:nth-child(5)')?.textContent.replace(/\s+/g, ' ').trim());
+  check('a waiting time measured on one day only prints no change beside it', /^1\.5 h vs —$/.test(cell), cell);
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'compare', { width: 390 });
+  const s = await shape(page);
+  check('#compare at 390: no sideways scroll', s.overflowX <= 0, String(s.overflowX));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('classic', 'compare');
+  const s = await shape(page);
+  const cap = await page.evaluate(() => document.querySelector('#view').textContent);
+  check('the old skin keeps today\'s page: seven tiles with Change, no 00, no † band',
+    s.kpiRows === 1 && s.glance === 0 && s.abs.length === 0 && /Change/.test(cap), String(s.kpiRows));
+  await ctx.close();
+}
+
 await done();

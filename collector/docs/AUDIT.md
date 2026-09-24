@@ -1475,3 +1475,15 @@ that was never measured, printed as 0; it now prints the count only when the
 answer carries one. The caveat said "expect roughly a third of the ceiling"
 directly after "about 5% of it" (production: 12 bookings against a median of
 224): the contract's copy prints the measured share.
+
+### #compare — 2026-09-24
+
+Production data (today against yesterday, cut at the Dubai minute), both
+skins, 1440 and 390, light and dark (scratchpad `pagephase/shots/compare/`):
+no error, no sideways scroll, two highlights. Found by looking and fixed
+before commit: the hour chart kept its "Loading…" line above the drawn rows;
+gapBars' caption counted the unreached hours as "17 of 24 days" (the shared
+`bucketNoun`, S1); the driver table printed "— vs — – 0.0 h" for two
+unmeasured waiting times; By channel's Trips column still used the old
+unsigned arrow. The render-audit finding STEP 3 logged here ("▲/▼ with no
+sign", ×5 routes) is the old delta, which the contract no longer draws.

@@ -1349,3 +1349,12 @@
 /* #insights' ranked list: a column of ruled rows (the old skin's .hbars
    container is hbars' grid under the skin, and put three rows on a line). */
 :root[data-skin="arkiv"] .insight-list{display:flex;flex-direction:column}
+
+/* #compare: under a fare in By channel, how much of the channel it covers —
+   a second line, not a wider cell (the panel is g23's narrow half, measured
+   against sideways scroll); a stale source in ink words with ruling 1's
+   hollow dot, not an amber pill. */
+:root[data-skin="arkiv"] .cmp-cov{display:block;font-size:var(--t4);color:var(--grey);white-space:nowrap}
+:root[data-skin="arkiv"] .cmp-stale{color:var(--ink);white-space:nowrap}
+:root[data-skin="arkiv"] .cmp-stale::before{content:"";content:"" / "warning: ";display:inline-block;box-sizing:border-box;
+  width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:.05em;border:1.5px solid var(--sem-neg)}

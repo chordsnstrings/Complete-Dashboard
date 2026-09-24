@@ -1141,12 +1141,12 @@ app.get('/api/compare', (req, r) => {
        three branches of the Paid column are reachable from here. */
     platforms: [
       { platform: 'uber',
-        a: { n: 28, completed: 26, cancelled: 2, km: 340, fares: null, paid: 2140, statement_net: null },
-        b: { n: 33, completed: 31, cancelled: 2, km: 400, fares: null, paid: null, statement_net: 2510 },
+        a: { n: 28, completed: 26, cancelled: 2, km: 340, fares: null, priced: 0, paid: 2140, statement_net: null },
+        b: { n: 33, completed: 31, cancelled: 2, km: 400, fares: null, priced: 0, paid: null, statement_net: 2510 },
         d: -5 },
       { platform: 'hotel',
-        a: { n: 6, completed: 5, cancelled: 1, km: 70, fares: 640, paid: null, statement_net: null },
-        b: { n: 8, completed: 7, cancelled: 1, km: 105, fares: 820, paid: null, statement_net: null },
+        a: { n: 6, completed: 5, cancelled: 1, km: 70, fares: 640, priced: 4, paid: null, statement_net: null },
+        b: { n: 8, completed: 7, cancelled: 1, km: 105, fares: 820, priced: 6, paid: null, statement_net: null },
         d: -2 },
     ],
     drivers: roster,
