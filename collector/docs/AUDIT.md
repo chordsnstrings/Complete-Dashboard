@@ -2047,3 +2047,9 @@ This pass caught three things, all fixed before the commit:
 Production through live-ui on :8611, on the busy plate from P59, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p60/`). No page error, no sideways scroll, and the fils scan is clean in both skins.
 
 Two people held the car across Bolt, Uber and Yango. Every platform cell is a swatch and an ink label.
+
+### #vehicle/movement — 2026-09-24
+
+Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p61/`). No page error, no sideways scroll, and the fils scan is clean.
+
+The day replayed is 24 Sept: 141 fixes with a position, 200 km between fixes, and 138 km with a passenger (69%, by FMS's live seat count). The map's lines are still map.js's grey and dashed; that changes with #map. The sandbox has no route to the map tiles, so the base map is blank.

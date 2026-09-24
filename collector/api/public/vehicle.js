@@ -607,7 +607,17 @@ async function tabDrivers(root, plate) {
 }
 
 /* ── tab: movement ───────────────────────────────────────────────────────── */
+/* Under the page contract (plan §4 #vehicle/movement): restyled only — the
+   map, the day picker and its ?day= address, the four day tiles, the verdict
+   bars and all three tables kept. The verdict bars go to the job token (a
+   verdict is not a channel); a verdict is an outline chip, and only
+   "unauthorized" keeps the negative token, as text; the seat and confidence
+   tags are outline chips. The map's line colours are map.js's and change
+   with #map. */
+const verdictChip = (v) => (v === 'unauthorized'
+  ? `<span class="pill" style="color:var(--sem-neg)">${esc(v)}</span>` : pill(v || 'unknown'));
 async function tabMovement(root, plate) {
+  const ak = contract();
   const ctl = el('div', 'toolbar');
   ctl.innerHTML = `<label class="cap" for="vDay">Replay a day</label>
     <select id="vDay" class="btn"></select>
@@ -662,7 +672,7 @@ async function tabMovement(root, plate) {
       trackerState, trackerSpeed,
       { label: 'Seat', key: 'seat_occupied', render: (r) => (r.seat_occupied == null
         ? '<span class="tag dim">not reported</span>'
-        : r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag">empty</span>') },
+        : r.seat_occupied ? (ak ? pill('occupied') : '<span class="tag ok">occupied</span>') : '<span class="tag">empty</span>') },
       { label: 'Ignition', key: 'ignition', render: (r) => (r.ignition == null ? '—' : r.ignition ? 'on' : 'off') },
       /* Six decimals, not sixteen — the same precision the parked-cluster
          table three panels down uses, so two tables on one page stop printing
@@ -715,7 +725,21 @@ async function tabMovement(root, plate) {
     // Headed with the day, because these four tiles are one date and the four
     // panels below them are the whole window.
     stat.append(el('p', 'cap', `Everything in these four tiles is ${dateStr(`${day}T12:00:00`)} alone.`));
-    stat.append(kpiRow([
+    /* Under the page contract a tile that could not be measured is ABSENT
+       WITH ITS REASON, not a bare dash: "With passenger" when no fix carried
+       a seat reading, and "Driver" when no custody record names anybody that
+       day (/api/map/journey reads vehicle_driver_day). Untoned. A reason
+       prints in the value slot only on a glance tile (kpiTile gates `na` on
+       the flag), so the row is one — with no hero: it is not the 00 band. */
+    const dayRow = (tiles) => {
+      if (!ak) return kpiRow(tiles);
+      const row = el('div', 'kpis glance');
+      row.innerHTML = kpiTiles(bandTiles(tiles.map((t) => (t.label === 'Driver' && !j.driver
+        ? { label: 'Driver', na: 'no custody record names who held the car that day' } : t))).tiles
+        .map((t) => ({ ...t, glance: true, hero: false })));
+      return row;
+    };
+    stat.append(dayRow([
       { label: 'Fixes with a position', value: fmt(j.fixes),
         sub: 'five-minute samples that carry coordinates — the picker above counts stored rows, '
           + 'including any with no satellite lock' },
@@ -758,7 +782,8 @@ async function tabMovement(root, plate) {
   else {
     /* Each bar counts a ride once across providers (the server's rule, stated
        under the bars); each provider's own segment count follows. */
-    hbars(verd.body, mv.by_verdict.map((v) => ({ label: v.verdict.replace(/_/g, ' '), n: v.n })), { label: 'label', value: 'n', seq: true });
+    hbars(verd.body, mv.by_verdict.map((v) => ({ label: v.verdict.replace(/_/g, ' '), n: v.n })),
+      ak ? { label: 'label', value: 'n', signed: false, color: '--mk-fill' } : { label: 'label', value: 'n', seq: true });
     const un = mv.by_verdict.find((v) => v.verdict === 'unauthorized');
     if (un) {
       const bs = un.by_source || {};
@@ -825,8 +850,8 @@ async function tabMovement(root, plate) {
     { label: 'Minutes', key: 'duration_min', num: true },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
     { label: 'Top speed', key: 'top_speed', num: true, render: (r) => (r.top_speed ? `${fmt(r.top_speed)} km/h` : '—') },
-    { label: 'Verdict', key: 'verdict', render: (r) => pill(r.verdict || 'unknown',
-      r.verdict === 'unauthorized' ? 'bad' : r.verdict === 'authorized' ? 'ok' : 'warn') },
+    { label: 'Verdict', key: 'verdict', render: (r) => (ak ? verdictChip(r.verdict) : pill(r.verdict || 'unknown',
+      r.verdict === 'unauthorized' ? 'bad' : r.verdict === 'authorized' ? 'ok' : 'warn')) },
     /* The reason. Without it a verdict is an assertion, and this table was
        strictly poorer than the SAME rows on #segments, which has carried the
        reason and the unreadable-channel list since it was built. */
@@ -842,7 +867,7 @@ async function tabMovement(root, plate) {
       render: (r) => {
         if (!r.low_confidence) return '<span class="tag dim">ok</span>';
         const out = asList(r.unavailable_sources).map(sourceLabel);
-        return `<span class="tag warn" title="${esc(out.length
+        return `<span class="${ak ? 'pill' : 'tag warn'}" title="${esc(out.length
           ? `unreadable when this was judged: ${out.join(', ')}`
           : 'a revenue channel was unreadable when this was judged')}">blind${
           out.length ? ` · ${esc(out.join(', '))}` : ''}</span>`;
@@ -853,6 +878,7 @@ async function tabMovement(root, plate) {
     + `<a href="${href('segments', 'plate', plate)}">All of them, filterable by verdict</a>.`));
   else if (mv.segments.length) seg.body.append(el('p', 'cap',
     `<a href="${href('segments', 'plate', plate)}">The same periods with the verdict filter and the evidence trail</a>.`));
+  if (ak) pageFoot({ colophon: [windowLabel(), countOf(mv.days.length, 'replayable day')] }, root);
 }
 
 /* ── tab: safety ─────────────────────────────────────────────────────────── */

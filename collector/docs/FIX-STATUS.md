@@ -3620,3 +3620,15 @@ Not built: the fixes split into with and without a coordinate. /api/vehicle/dail
 | page | what changed under the skin | state | proof |
 |---|---|---|---|
 | #vehicle/drivers | Restyle only, as the plan asks. Both custody tables are kept, with every column, the trips-descending and day-descending default sorts, the driver links and the 120-row note. A platform, in the day table and in the totals' Accounts column, is a channel swatch beside an ink label (`chanCell`), never coloured text. Fares were already exact. The page foot carries the window and the count of people | **written** | `test/arkiv_fleet.test.mjs` #vehicle/drivers 9/9. Revert-proofs (md5-restored): with the day table's platform back to the bare label, "a channel swatch beside an ink label" fails; with the accounts column's swatches off, "names its platforms the same way" fails. `arkiv_classic_frozen` ONLY=vehicle/L45235 9/9. Pinned: `routes` 65, `interlinking` 11 |
+
+### P61 · #vehicle/movement
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #vehicle/movement | Restyle only; the whole tab is kept. That is the map, the day picker and its `?day=` address, the four day tiles, the verdict bars and all three tables. The verdict bars go to the job token (a verdict is not a channel). A verdict is an outline chip, and only "unauthorized" keeps the negative colour, as text. The seat and confidence tags are outline chips. The four day tiles are untoned. Where a tile could not be measured it is ABSENT WITH ITS REASON, not a bare "—". *With passenger* reads "no fix this day carried a seat reading from CABMAN DT or FMS…". *Driver* reads "no custody record names who held the car that day" (/api/map/journey reads vehicle_driver_day). The row is a glance row with no hero, because kpiTile prints a reason only on a glance tile. The page foot counts the replayable days | **written** | `test/arkiv_fleet.test.mjs` #vehicle/movement 10/10, including a synthetic blind day. Revert-proofs (md5-restored): with the old toned verdict pill, "an outline chip" and "no toned chip in any table" fail (14 toned); with the sequential verdict bars, "the job token" fails; with the day tiles back in a kpiRow, both absent-with-reason checks fail. `arkiv_classic_frozen` ONLY=vehicle/L45235 9/9. `arkiv_fils` gains the route; the live scan is clean. Pinned: `routes` 65, `assets` 40, `vehicle_routes` 86, `page_contract` 95, `kpi_one_tile` 20, `chart_marks` 151 |
+
+Deviations:
+* **The map's line colours are map.js's, shared with #map.** The plan's "occupied = the feed's identity, running empty = its idle ramp step" belongs to the #map conversion and is not changed here.
+* **The day tiles' absences** (a bare "—" twice) go beyond the plan's "restyle only". The house principle requires them.
+
+Not touched, owner ruling needed (plan): the Distance tile's "2,267 km between consecutive fixes" on one car-day. The sum draws straight lines across two interleaved device streams. That is a data-model question, not a restyle item.

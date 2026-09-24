@@ -279,4 +279,63 @@ if (want('vehicle-drivers')) {
   }
 }
 
+/* ══ #vehicle/movement ════════════════════════════════════════════════════ */
+if (want('vehicle-movement')) {
+  console.log('\n#vehicle/movement');
+  const H = 'vehicle/L45235/movement';
+  const look = (page) => page.evaluate(() => {
+    const P = (h) => [...document.querySelectorAll('#view .panel')].find((p) => (p.querySelector('h3')?.textContent || '').startsWith(h));
+    const verd = P('Movement matched to a booking');
+    const seg = P('Movement periods');
+    const hs = seg ? [...seg.querySelectorAll('thead th')].map((h) => h.textContent.replace(/[↑↓]/g, '').trim()) : [];
+    const vi = hs.indexOf('Verdict');
+    const vcells = seg ? [...seg.querySelectorAll('tbody tr')].map((tr) => tr.children[vi]).filter(Boolean) : [];
+    return {
+      heads: [...document.querySelectorAll('#view .panel h3')].map((h) => h.textContent.trim()),
+      map: !!document.querySelector('#view .leaflet-container, #view [data-map], #view .map'),
+      picker: !!document.querySelector('#view select'),
+      fills: verd ? [...verd.querySelectorAll('.hb .fill')].map((f) => f.getAttribute('style') || '') : [],
+      verdicts: vcells.map((c) => ({ t: c.textContent.trim(), toned: !!c.querySelector('.pill.ok, .pill.warn, .pill.bad'), neg: /--sem-neg/.test(c.innerHTML) })),
+      tonedAnywhere: [...document.querySelectorAll('#view tbody .pill.ok, #view tbody .pill.warn, #view tbody .pill.bad, #view tbody .tag.ok, #view tbody .tag.warn')].length,
+      dayTiles: [...document.querySelectorAll('#view .kpis > .kpi')].map((k) => ({ l: k.querySelector('.l')?.textContent.trim(), na: k.querySelector('.t-na')?.textContent.trim() || null,
+        v: k.querySelector('.n')?.textContent.trim(), toned: /\bt-(good|warn|critical|bad)\b/.test(k.className) })),
+    };
+  });
+  {
+    const { ctx, page } = await open('classic', H);
+    const r = await look(page);
+    check('old skin: the verdict bars on the sequential ramp and the verdicts as toned pills', r.fills.length > 0 && !r.fills.some((f) => /--mk-fill/.test(f))
+      && r.verdicts.some((v) => v.toned), JSON.stringify([r.fills.slice(0, 1), r.verdicts.slice(0, 2)]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', H);
+    const r = await look(page);
+    const mv = answer('/api/vehicle/movement');
+    check('the whole tab kept: map, day picker, the verdict bars and all three tables', r.map && r.picker
+      && ['Where it went', 'Movement matched to a booking (whole window)', 'Where it parks (whole window)', 'Movement periods (whole window)', 'Most recent fixes'].every((h) => r.heads.includes(h)), JSON.stringify(r.heads));
+    check('verdict bars in the job token — a verdict is not a channel', r.fills.length === (mv.by_verdict || []).length && r.fills.every((f) => /--mk-fill/.test(f)), JSON.stringify(r.fills.slice(0, 2)));
+    check('a verdict is an outline chip; only "unauthorized" keeps the negative colour, as text', r.verdicts.length > 0 && r.verdicts.every((v) => !v.toned && (v.t === 'unauthorized') === v.neg), JSON.stringify(r.verdicts.slice(0, 4)));
+    check('no toned chip in any table on the tab', r.tonedAnywhere === 0, String(r.tonedAnywhere));
+    check('the four day tiles, untoned', r.dayTiles.length === 4 && r.dayTiles.every((t) => !t.toned), JSON.stringify(r.dayTiles));
+    await ctx.close();
+  }
+  {
+    /* A day no fix carried a seat reading on, with no custody record
+       (synthetic): both tiles absent with the true reason, never a dash. */
+    const blind = (q, real) => ({ ...real, occupancy_reported: false, occupied_km: null, driver: null, driver_id: null, driver_trips: null });
+    const { ctx, page } = await open('arkiv', H, { fixtures: { '/api/map/journey': blind } });
+    const r = await look(page);
+    const t = Object.fromEntries(r.dayTiles.map((x) => [x.l, x]));
+    check('with passenger: absent — no fix that day carried a seat reading', /no fix this day carried a seat reading/.test(t['With passenger']?.na || ''), JSON.stringify(t['With passenger']));
+    check('driver: absent — no custody record names anybody that day', /no custody record names who held the car that day/.test(t.Driver?.na || ''), JSON.stringify(t.Driver));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', H, { width: 390 });
+    check('#vehicle/movement at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
