@@ -596,4 +596,47 @@ if (want('online-time')) {
   }
 }
 
+/* ══ #performer ═══════════════════════════════════════════════════════════ */
+if (want('performer')) {
+  console.log('\n#performer');
+  {
+    const { ctx, page } = await open('classic', 'performer/drv-0');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      tiles: document.querySelectorAll('#view .kpis:not(.glance) > .kpi').length,
+      fares: [...document.querySelectorAll('#view table thead th')].some((th) => /^Fares/.test(th.textContent.trim()) && th.closest('.panel')?.querySelector('h3')?.textContent.includes('day by day')) }));
+    check('old skin: the five live tiles, no band, no Fares column in the day table', !r.band && r.tiles === 5 && !r.fares, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const unrec = (q, real) => ({ ...real, areas: [...(real.areas || []), { area: '(unrecorded)', picked_up: 7 }] });
+    const { ctx, page, answer } = await open('arkiv', 'performer/drv-0', { fixtures: { '/api/performer': unrec } });
+    const s = await shape(page);
+    const p = answer('/api/performer');
+    const E = answer('/api/economics/drivers');
+    const me = (E.rows || []).find((r) => r.driver_ext_id === 'drv-0' || (r.ids || []).includes('drv-0'));
+    const earners = (E.rows || []).filter((r) => Number(r.money) > 0);
+    check('00: the week\'s money the hero, from the economics row the ranking reads', s.hero === 'Money' && !!me && s.values.Money === aedOf(me.money), JSON.stringify([s.values.Money, me?.money]));
+    const d = await txtOf(page, '#view .kpis.glance .is-hero .t-d');
+    check('…set against the mean of everybody who earned that week, worded', d.includes(`the mean of the ${earners.length} who earned`), d);
+    check('the five live tiles kept with their figures, the three rates beside them', s.values.Bookings === (+p.bookings).toLocaleString('en-US')
+      && ['Days worked', 'Carrying someone', 'Of time on the road', 'Waiting between jobs', 'Per day worked', 'Per measured hour', 'Per booking'].every((l) => l in s.values || l in s.na),
+      JSON.stringify(Object.keys(s.values)));
+    const t = await page.evaluate(() => { const panel = [...document.querySelectorAll('#view .panel')].find((x) => /day by day/.test(x.querySelector('h3')?.textContent || ''));
+      return panel ? [...panel.querySelectorAll('thead th')].map((th) => th.textContent.trim()) : []; });
+    check('the day-by-day table keeps its eleven columns and gains Fares', t.length === 12 && /^Fares/.test(t[11]), JSON.stringify(t));
+    const areas = await page.evaluate(() => { const panel = [...document.querySelectorAll('#view .panel')].find((x) => /Where they picked up/.test(x.querySelector('h3')?.textContent || ''));
+      return { bars: [...panel.querySelectorAll('.hb .k')].map((k) => k.textContent.trim()), cap: panel.textContent }; });
+    const unrecN = (p.areas || []).filter((a) => /unrecorded/i.test(a.area)).reduce((x, a) => x + a.picked_up, 0);
+    check('"(unrecorded)" is not drawn as a place; the caption counts it', !areas.bars.some((b) => /unrecorded/i.test(b))
+      && areas.cap.includes(`${unrecN} pickups carry no recorded address`), JSON.stringify([areas.bars, unrecN]));
+    check('the week as a chart above the table; † four cells', /The week, as carrying and waiting/.test(s.heads.join('|')) && s.abs.length === 4, JSON.stringify(s.heads));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'performer/drv-0', { width: 390 });
+    check('#performer at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

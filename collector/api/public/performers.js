@@ -34,10 +34,10 @@
    5. IT DOES NOT CALL AN ON-TRIP HOUR AN ONLINE HOUR. Uber reports no online
       hours at all — 232 of 241 people have none — so what is shown is time
       carrying someone, measured from the trips, and it is labelled that. */
-import { hbars } from './charts.js';
+import { hbars, gapBars, barChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
   fmt, empty, noneChosen, sourceLabel, dateStr, verdict, countOf,
-  UBER_FARE_WHY } from './ui.js';
+  UBER_FARE_WHY, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, dayStr } from './ui.js';
 import { TZ } from './tz.js';
 import { q, href, state } from './data.js';
 
@@ -398,7 +398,18 @@ export async function renderPerformer(root, id, week) {
      never got filled in. It went to the endpoint and printed the API's own
      complaint. #day has always answered this properly; these four did not. */
   if (!id) return noneChosen(root, 'person', 'drivers', 'Every driver');
-  const kh = el('div', 'kpis'); root.append(kh);
+  /* Under the page contract (plan §4 #performer): a 00 band — the week's
+     money the hero, set against the mean of everybody who earned that week,
+     then the five live tiles, then the three rates against the fleet — with
+     the facts the economics row carries under it; the week as a chart above
+     the day-by-day table (which keeps its eleven columns and gains Fares);
+     fares per day; areas without "(unrecorded)" drawn as a place; a † band.
+     One extra request, the same /api/economics/drivers the ranking makes. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
+  const kh = el('div', 'kpis'); (ak ? AKB.tilesHost : root).append(kh);
+  const weekP = ak ? panel('The week, as carrying and waiting', 'Hours carrying someone each day, with the hours waiting between jobs drawn over them', 'perf-week') : null;
+  if (weekP) root.append(weekP.panel);
   /* Full width. Ten columns of a day — including the two waiting columns —
      do not fit in 2fr of a 2:1 split, and the ones pushed off the edge were
      the vehicle and the longest gap: exactly the columns that explain a day
@@ -422,7 +433,7 @@ export async function renderPerformer(root, id, week) {
   const onTrip = p.on_trip_min || 0;
   const elapsed = days.reduce((a, d) => a + (d.elapsed_min || 0), 0);
 
-  kh.replaceWith(kpiRow([
+  const PERF_TILES = [
     /* The week the SERVER answered for, not the one this page asked for: the
        two differ the moment a hand-typed address names a week the endpoint
        declines, and the tile must name the days actually counted below it.
@@ -443,7 +454,13 @@ export async function renderPerformer(root, id, week) {
       sub: elapsed && p.wait_min
         ? `${Math.round((p.wait_min / elapsed) * 100)}% of the road time, summed gap by gap`
         : 'measured from each dropoff to the next request' },
-  ]));
+  ];
+  let econ = null;
+  if (ak) {
+    kh.remove();
+    econ = await performerGlance(AKB, PERF_TILES, p, id);
+    performerWeek(weekP.body, days);
+  } else kh.replaceWith(kpiRow(PERF_TILES));
 
   dayP.body.innerHTML = '';
   if (!days.length) {
@@ -481,6 +498,10 @@ export async function renderPerformer(root, id, week) {
           : '—') },
       { label: 'Vehicle', key: 'plates',
         render: (r) => (r.plates || []).map((x) => entity('vehicle', x, x)).join(', ') || '—' },
+      /* Under the contract the day's fares, which the live table never had. */
+      ...(ak ? [{ label: 'Fares', key: 'fares', num: true,
+        render: (r) => (r.fares ? money(r.fares)
+          : `<span class="ent-off" title="no booking of theirs on this day carries a fare — ${UBER_FARE_WHY}">—</span>`) }] : []),
     ]));
     /* An overlap is a real dispatch, not dirty data — the next request came in
        before the current dropoff — so it is stated rather than smoothed away.
@@ -519,11 +540,18 @@ export async function renderPerformer(root, id, week) {
   }
 
   areaP.body.innerHTML = '';
-  const areas = (p.areas || []).filter((a) => a.picked_up > 0);
+  const areasAll = (p.areas || []).filter((a) => a.picked_up > 0);
+  /* "(unrecorded)" is not a place: under the contract it is counted in the
+     caption rather than drawn as a bar beside the real ones. */
+  const unrec = ak ? areasAll.filter((a) => /^\(?unrecorded\)?$/i.test(String(a.area || '').trim())) : [];
+  const areas = ak ? areasAll.filter((a) => !unrec.includes(a)) : areasAll;
   if (!areas.length) empty(areaP.body, 'No pickup address on any booking this week.');
   else {
     hbars(areaP.body, areas.slice(0, 12).map((a) => ({ label: a.area, n: a.picked_up })),
-      { valueFmt: (v) => `${fmt(v)} pickups` });
+      { valueFmt: (v) => `${fmt(v)} pickups`, ...(ak ? { signed: false, color: '--mk-fill' } : {}) });
+    if (unrec.length) {
+      areaP.body.append(el('p', 'cap', `${fmt(unrec.reduce((a, x) => a + x.picked_up, 0))} pickups carry no recorded address and are not drawn as a place.`));
+    }
     areaP.body.append(el('p', 'cap',
       'Parsed from free text by taking the second dash-separated segment, which is why some rows '
       + 'are roads or a country. The raw address on each trip is the record; this is a grouping.'));
@@ -548,10 +576,90 @@ export async function renderPerformer(root, id, week) {
       + 'and the earliest observation is the first time we looked and saw them, not the moment '
       + 'they logged in.'));
   }
+  if (ak) performerAbsence(root, p, econ, days);
   /* The shell titles a detail page from what its view RETURNS — see render()
      in app.js. Returning the name is what stops this page being titled after
      whatever happens to be first in the nav. */
   return { name: p.name || id };
+}
+
+/* ── #performer under the page contract ──────────────────────────────────── */
+const meanOf = (xs) => (xs.length ? xs.reduce((a, x) => a + x, 0) / xs.length : null);
+/* The money, and where this person stood. The economics row is found by the
+   account id the page is addressed by; the fleet means are over the people
+   who carry the figure that week, and say how many that is. A week the
+   endpoint will not answer leaves the five live tiles standing alone. */
+async function performerGlance(AKB, tiles, p, id) {
+  const wk = (p.week || [])[0];
+  let d = null;
+  try { d = await q('/api/economics/drivers', wk ? { from: String(wk).slice(0, 10), to: weekEnd(wk) } : {}); } catch { d = null; }
+  const rows = (d?.rows || []);
+  const me = rows.find((r) => r.driver_ext_id === id || (r.ids || []).includes(id)) || null;
+  const earners = rows.filter((r) => Number(r.money) > 0);
+  const mean = meanOf(earners.map((r) => Number(r.money)));
+  const moneyTile = me && me.money != null
+    ? { label: 'Money', value: money(me.money), hero: true,
+      sub: me.money_basis ? `basis ${String(me.money_basis)}` : 'this week',
+      ...(mean != null ? { delta: { value: Number(me.money) - mean, kind: 'gap', d: 2,
+        of: `against ${money(mean)}, the mean of the ${fmt(earners.length)} who earned` } } : {}) }
+    : { label: 'Money', hero: true, na: d ? 'no statement and no priced booking reaches this person this week' : 'the week\u2019s money could not be read just now' };
+  const rate = (label, key, unit) => {
+    const v = me?.[key];
+    const fleet = meanOf(rows.filter((r) => r[key] != null).map((r) => Number(r[key])));
+    return v == null ? { label, na: 'not measurable for this person this week' }
+      : { label, value: money(v), sub: unit,
+        ...(fleet != null ? { delta: { value: Number(v) - fleet, kind: 'gap', d: 2, of: `against the fleet mean ${money(fleet)}` } } : {}) };
+  };
+  glance(AKB.tilesHost, bandTiles([moneyTile, ...tiles,
+    rate('Per day worked', 'aed_per_day_worked', 'money over the days they drove'),
+    rate('Per measured hour', 'aed_per_measured_hour', 'money over the hours availability measured'),
+    rate('Per booking', 'aed_per_booking', 'money over their bookings'),
+  ], { reasons: { 'Carrying someone': 'no booking reports an end time', 'Of time on the road': 'no day with a first and last trip', 'Waiting between jobs': 'measured from each dropoff to the next request — none this week' } }).tiles);
+  if (me) {
+    const ranked = [...earners].sort((a, b) => Number(b.money) - Number(a.money));
+    const pos = ranked.findIndex((r) => r === me);
+    const facts = [
+      pos >= 0 ? `${fmt(pos + 1)} of ${fmt(ranked.length)} by money this week` : 'not ranked by money this week — no money reaches them',
+      me.alerts != null && Number(me.alert_km) > 0 ? `${fmt(me.alerts)} alerts, ${fmt(Number(me.alerts) / Number(me.alert_km) * 100, 1)} per 100 km` : null,
+      me.telematics_journeys != null ? `${fmt(me.telematics_journeys)} telematics journeys beside ${fmt(p.bookings)} bookings` : null,
+      me.money_basis ? `money basis ${me.money_basis}` : null,
+    ].filter(Boolean);
+    AKB.band.append(el('p', 'cap', esc(facts.join(' · '))));
+  }
+  return { d, me };
+}
+function performerWeek(host, days) {
+  host.innerHTML = '';
+  if (!days.length) { empty(host, 'No booking in this week.'); return; }
+  gapBars(host, days.map((d) => ({ x: dayStr(d.day), v: d.on_trip_min ? +(d.on_trip_min / 60).toFixed(2) : 0,
+    w: d.wait_min ? +(d.wait_min / 60).toFixed(2) : 0, none: false })), {
+    x: 'x', y: 'v', label: 'hours carrying someone', color: '--ink', gapKey: 'none', bucketNoun: 'days', inProgress: false,
+    secondary: 'w', secondaryLabel: 'hours waiting between jobs', secondaryLine: { color: '--grey', label: 'waiting' },
+    valueFmt: (v) => `${fmt(v, 1)} h` });
+  const f = days.filter((d) => d.fares);
+  if (f.length) {
+    host.append(el('p', 'cap', 'Fares each day, on the bookings that carry one:'));
+    const fh = el('div'); host.append(fh);
+    barChart(fh, days.map((d) => ({ x: dayStr(d.day), v: Number(d.fares) || 0 })), { x: 'x', y: 'v', color: '--ink',
+      valueFmt: (v) => money(v), axisFmt: (v) => money(v) });
+  }
+}
+function performerAbsence(root, p, econ, days) {
+  const me = econ?.me;
+  const noEnd = days.reduce((a, d) => a + (d.bookings || 0), 0) && p.duration_coverage_pct != null
+    ? Math.round(p.bookings * (1 - p.duration_coverage_pct / 100)) : null;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'What a second account would hide', fig: me && (me.ids || []).length > 1 ? `${fmt(me.ids.length)} accounts` : null, none: 'One account',
+      why: 'This page reads one account\u2019s bookings; the money above is the person\u2019s. Where a person drives on two, the day table shows only this one.' },
+    { label: 'Time logged in', fig: null, none: 'Not reported',
+      why: 'Uber reports no online hours for this fleet here, so the first trip is not a login and the waiting is not time online.' },
+    { label: 'Bookings with no end time', hl: !!noEnd, fig: noEnd ? `${fmt(noEnd)} of ${fmt(p.bookings)}` : null, none: 'None',
+      why: noEnd ? 'They are left out of carrying someone rather than counted as a ride of no length.' : 'Every booking this week reports an end.' },
+    { label: 'Whether a gap was waiting or rest', fig: null, none: 'Not recorded',
+      why: 'A gap between a dropoff and the next request reads the same whether the driver was online or asleep.' },
+  ]);
+  pageFoot({ colophon: [(p.week || [])[0] ? `week of ${dateStr(p.week[0])}` : 'week unknown', `${fmt(p.bookings)} bookings`] }, root);
 }
 
 const hhmm = (ts) => {

@@ -41,7 +41,7 @@ const ROUTES = [
   'drivers', 'driver/drv-0', 'driver/drv-0/activity', 'driver/drv-0/day?on=2026-09-20',
   'driver/drv-0/territory', 'driver/drv-0/earnings', 'driver/drv-0/quality', 'driver/drv-0/record',
   'driver/U-TARIQ/money', 'driver/drv-0/trips', 'driver/drv-0/unauthorized',
-  'online-time',
+  'online-time', 'performer/drv-0',
 ];
 
 const scan = (page) => page.evaluate(() => {

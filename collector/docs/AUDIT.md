@@ -1889,3 +1889,11 @@ dark (scratchpad `pagephase/shots/online-time/`): no error, no sideways
 scroll. 48 late, 29 on time, 83 cannot be judged, 71 drove of 134 allowed;
 the median wait to a first job 47 min over 62 people, 11 online with none
 yet. The latest starter came online at 10:09, ▲ 249 min late.
+
+### #performer — 2026-09-24
+
+Production (week of 14–20 Sept), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/performer/`): no error, no sideways scroll.
+AED 3,669.89, ▲ 1,983.37 against AED 1,686.52 — the mean of the 151 who
+earned; 11th of 151 by money; per day worked AED 524.27, ▲ 252.49 against
+the fleet mean; 84 bookings, 31.9 h carrying someone, 49.3 h waiting.
