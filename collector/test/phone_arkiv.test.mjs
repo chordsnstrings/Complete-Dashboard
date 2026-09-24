@@ -16,6 +16,13 @@
         the window, channel and fleet (and saying which do not apply, in the
         desktop's words), the sheet, the footer with the principle, 44px
         targets, 360px, dark mode, and the browser chrome's colour.
+     3. THE COMPONENTS — a card is a ruled, numbered section; the statement
+        band; tiles with the hero, the highlight, ink figures, the reason in
+        the value slot; the dot (ruling 1) on tiles, statements and rows;
+        44px controls with an ink fill for the chosen one; ink share bars.
+     9. EVERY SCREEN — every word the old screen printed from the same
+        answers is on the new one; nothing sideways at 390 or 360; every
+        control at least 44px; no miss, no error.
 
    Static checks run on the source; the browser checks use the hermetic
    harness (test/phone_harness.mjs): the recorded API answers and a frozen
@@ -311,6 +318,225 @@ console.log('\n2 · the shell: wordmark or back, the control bar, the sheet, the
   check('with the sheet held back 1.5s, the first render is still the new shell',
     await slow.page.evaluate(() => !!document.querySelector('.ak-ctl') && !document.querySelector('.m-head .m-ico[title="Window and channels"]')));
   await slow.close();
+}
+
+console.log('\n3 · the components: sections, statement, tiles, the dot, rows, controls, marks');
+{
+  const T = await import('../api/public/tokens.js');
+  const hexOf = (rgb) => {
+    const m = String(rgb).match(/\d+(\.\d+)?/g);
+    return m ? `#${m.slice(0, 3).map((x) => Math.round(+x).toString(16).padStart(2, '0')).join('').toUpperCase()}` : null;
+  };
+  const INK = T.NEUTRAL.ink.toUpperCase(), NEG = T.SEMANTIC.negative.toUpperCase(), POS = T.SEMANTIC.positive.toUpperCase();
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('more');
+  /* A test host inside the real deck, built with the real components, so
+     every rule the screens will meet is met here with known inputs. */
+  const m = await p.page.evaluate(async () => {
+    const U = await import('/m/ui.js');
+    const deck = document.querySelector('.m-deck');
+    const host = document.createElement('div');
+    host.id = 'akhost';
+    deck.prepend(host);
+    const { card, lede, stats, stat, row, rows, seg, chips, bars, atGlance } = U;
+    const c = card('A section', 'its caption');
+    host.append(c.card);
+    lede(host, { claim: 'A warning claim', sub: 'why', tone: 'warn' });
+    lede(host, { claim: 'A critical claim', sub: 'why', tone: 'bad' });
+    lede(host, { claim: 'A good claim', sub: 'why', tone: 'good' });
+    const g = atGlance(host, [
+      { label: 'Hero', value: '1,234' },
+      { label: 'Warned', value: '5', tone: 'warn' },
+      { label: 'Bad', value: '6', tone: 'bad' },
+      { label: 'Good', value: '7', tone: 'good' },
+      { label: 'Linked', value: '8', href: '#live' },
+      { label: 'Unmeasured', value: '—', sub: 'no channel reports it' },
+    ], { note: 'This month' });
+    const absHero = stats(host, [{ label: 'Absent hero', value: '—', sub: 'the feed did not answer' },
+      { label: 'Next', value: '2' }], false, { hero: true });
+    const rs = rows(host, [
+      row({ title: 'plain', value: '1' }),
+      row({ title: 'warn', value: '2', tone: 'warn' }),
+      row({ title: 'bad', value: '3', tone: 'bad' }),
+      row({ title: 'critical', value: '4', tone: 'critical' }),
+      row({ title: 'good', value: '5', tone: 'good' }),
+      row({ title: 'link', value: '6', note: 'bookings', to: '#live' }),
+    ]);
+    seg(host, [{ id: 'a', label: 'One' }, { id: 'b', label: 'Two' }], 'a', () => {});
+    chips(host, [{ id: 'x', label: 'Chip' }, { id: 'y', label: 'Other' }], 'y', () => {});
+    bars(host, [{ label: 'cash', n: 60 }, { label: 'card', n: 30 }, { label: 'x', n: 5 }, { label: 'y', n: 3 },
+      { label: 'z', n: 1 }, { label: 'w', n: 1 }, { label: 'v', n: 1 }], { max: 6 });
+    const cs = (e, pseudo) => getComputedStyle(e, pseudo);
+    const hexOf = (rgb) => {
+      const x = String(rgb).match(/\d+(\.\d+)?/g);
+      return x ? `#${x.slice(0, 3).map((v) => Math.round(+v).toString(16).padStart(2, '0')).join('').toUpperCase()}` : null;
+    };
+    const dot = (e) => { const s = cs(e, '::before');
+      return { content: s.content, bg: s.backgroundColor, bs: s.borderTopStyle, bw: s.borderTopWidth, bc: s.borderTopColor,
+        w: s.width }; };
+    const tiles = [...g.children];
+    const tn = (i) => tiles[i].querySelector('.n');
+    return {
+      cardRule: `${cs(c.card).borderTopWidth} ${cs(c.card).borderTopColor}`, cardRadius: cs(c.card).borderTopLeftRadius,
+      cardShadow: cs(c.card).boxShadow, h2Font: cs(c.card.querySelector('h2')).fontFamily,
+      h2Idx: cs(c.card.querySelector('h2'), '::before').content,
+      capSize: cs(c.card.querySelector('.m-cap')).fontSize,
+      ledes: [...host.querySelectorAll('.m-lede')].map((l) => ({ rule: `${cs(l).borderTopWidth} ${cs(l).borderTopColor}`,
+        dot: dot(l.querySelector('b')), claim: cs(l.querySelector('b')).color, font: cs(l.querySelector('b')).fontFamily })),
+      head: host.querySelector('.sechd')?.textContent, band: g.dataset.band,
+      hero: tiles[0].classList.contains('hero'), heroSpan: cs(tiles[0]).gridColumnStart + '/' + cs(tiles[0]).gridColumnEnd,
+      heroHl: !!tn(0).querySelector('.hl'), heroSize: parseFloat(cs(tn(0)).fontSize),
+      heroText: tn(0).textContent,
+      digits: [1, 2, 3].map((i) => hexOf(cs(tn(i)).color)),
+      tileDots: [1, 2, 3].map((i) => dot(tiles[i].querySelector('.l'))),
+      valueFont: cs(tn(1)).fontFamily, numeric: cs(tn(1)).fontVariantNumeric,
+      linkChevron: cs(tiles[4].querySelector('.l'), '::after').content,
+      absent: { text: tn(5).textContent, na: tn(5).classList.contains('t-na'), marked: tn(5).hasAttribute('data-absent'),
+        sub: !!tiles[5].querySelector('.s'), hl: !!tn(5).querySelector('.hl') },
+      absHero: { hl: !!absHero.querySelector('.hl'), text: absHero.querySelector('.n').textContent },
+      rows: [...rs.children].map((r) => ({ cls: r.className, inline: r.querySelector('.v b')?.style.color || '',
+        color: hexOf(cs(r.querySelector('.v b')).color), font: cs(r.querySelector('.v b')).fontFamily,
+        dot: dot(r.querySelector('.v b')), h: r.getBoundingClientRect().height })),
+      rowsBox: `${cs(rs).borderLeftWidth} ${cs(rs).borderTopLeftRadius}`,
+      seg: [...host.querySelectorAll('.m-seg button')].map((b) => ({ h: b.getBoundingClientRect().height,
+        bg: hexOf(cs(b).backgroundColor), fg: hexOf(cs(b).color), on: b.classList.contains('on') })),
+      chips: [...host.querySelectorAll('.m-chips .m-chip')].map((b) => ({ h: b.getBoundingClientRect().height,
+        bg: hexOf(cs(b).backgroundColor), on: b.classList.contains('on') })),
+      bars: { inline: [...host.querySelectorAll('[style*="background"]')].length,
+        fill: host.querySelector('.ak-bar-t > i') ? hexOf(cs(host.querySelector('.ak-bar-t > i')).backgroundColor) : null,
+        shares: [...host.querySelectorAll('.ak-bar-n')].map((e) => e.textContent),
+        more: host.querySelector('.ak-bars > .m-cap')?.textContent },
+      paper: hexOf(cs(document.body).backgroundColor),
+    };
+  });
+  const is = (rgb, hex) => hexOf(rgb) === hex;
+  const solid = (d, hex) => d.content !== 'none' && is(d.bg, hex) && (d.bs === 'none' || d.bw === '0px');
+  const hollow = (d) => d.content !== 'none' && /rgba\(0, 0, 0, 0\)|transparent/.test(d.bg) && d.bs === 'solid' && is(d.bc, NEG);
+  /* 1.5px in the sheet; at a device pixel ratio of 1 Chromium snaps a border
+     to whole pixels and reports 1px, so the width is read from the source and
+     the colour and the rest from the browser. */
+  check('a card is a section: a 1.5px ink rule, no box, no radius, no shadow',
+    /\.m-card\{background:none;border:0;border-top:1\.5px solid var\(--ink\)/.test(strip(read('m/arkiv-m.css')))
+    && /^1(\.5)?px /.test(m.cardRule) && is(m.cardRule.split(' ').slice(1).join(' '), INK) && m.cardRadius === '0px' && m.cardShadow === 'none',
+    `${m.cardRule} ${m.cardRadius} ${m.cardShadow}`);
+  check('…its title a mono section head, numbered from the deck’s counter',
+    /Plex Mono/.test(m.h2Font) && /counter\(arkiv-sec/.test(m.h2Idx), `${m.h2Font} ${m.h2Idx}`);
+  check('…and its caption a sentence at a caption’s size, not the body’s', parseFloat(m.capSize) < 13, m.capSize);
+  const [lw, lb, lg] = m.ledes;
+  check('the statement: warning is a 3px negative rule and a HOLLOW dot (ruling 1)',
+    /^3px/.test(lw.rule) && is(lw.rule.split(' ').slice(1).join(' '), NEG) && hollow(lw.dot), JSON.stringify(lw));
+  check('…critical a SOLID red dot', solid(lb.dot, NEG), JSON.stringify(lb.dot));
+  check('…good a solid green dot on a green rule', solid(lg.dot, POS) && is(lg.rule.split(' ').slice(1).join(' '), POS),
+    JSON.stringify(lg));
+  check('…and the claim itself stays ink, in Karla', m.ledes.every((l) => is(l.claim, INK) && /Karla/.test(l.font)));
+  check('00 · At a glance heads the tiles, with the window as its note',
+    /^00\s*At a glance\s*This month$/.test((m.head || '').replace(/\s+/g, ' ').replace(/^00 /, '00 ')) || /00.*At a glance.*This month/.test(m.head || ''),
+    m.head);
+  check('…the tiles are one band', m.band === 'glance');
+  check('the hero spans the row, at a display size, carrying the one highlight',
+    m.hero && m.heroSpan === '1/-1' && m.heroHl && m.heroSize >= 36 && m.heroText === '1,234',
+    JSON.stringify({ span: m.heroSpan, hl: m.heroHl, size: m.heroSize, text: m.heroText }));
+  check('a toned tile keeps INK figures (L4)', m.digits.every((h) => h === INK), m.digits.join(' '));
+  check('…the warning is a hollow dot in its label row', hollow(m.tileDots[0]), JSON.stringify(m.tileDots[0]));
+  check('…bad a solid red one, good a solid green one',
+    solid(m.tileDots[1], NEG) && solid(m.tileDots[2], POS), JSON.stringify(m.tileDots.slice(1)));
+  check('…the figure in Karla with proportional figures',
+    /Karla/.test(m.valueFont) && /proportional-nums/.test(m.numeric), `${m.valueFont} ${m.numeric}`);
+  check('a tile that is a link says so with a chevron', /›/.test(m.linkChevron), m.linkChevron);
+  check('a tile with no figure prints its REASON in the value slot, marked absent, once',
+    m.absent.text === 'no channel reports it' && m.absent.na && m.absent.marked && !m.absent.sub,
+    JSON.stringify(m.absent));
+  check('…and an absent hero is explained, never highlighted (L4, L5.8)',
+    !m.absHero.hl && m.absHero.text === 'the feed did not answer', JSON.stringify(m.absHero));
+  const [rPlain, rWarn, rBad, rCrit, rGood, rLink] = m.rows;
+  check('a row’s tone is a class, not an inline colour', [rWarn, rBad, rCrit, rGood].every((r) => !r.inline)
+    && /t-warn/.test(rWarn.cls) && /t-bad/.test(rBad.cls) && /t-critical/.test(rCrit.cls) && /t-good/.test(rGood.cls),
+    m.rows.map((r) => `${r.cls}|${r.inline}`).join(' '));
+  check('…its figure INK in Plex Mono', m.rows.every((r) => r.color === INK && /Plex Mono/.test(r.font)),
+    m.rows.map((r) => `${r.color} ${r.font}`).join(' | '));
+  check('…with the dot: hollow for a warning, solid red for bad and critical, solid green for good',
+    hollow(rWarn.dot) && solid(rBad.dot, NEG) && solid(rCrit.dot, NEG) && solid(rGood.dot, POS) && rPlain.dot.content === 'none',
+    JSON.stringify([rWarn.dot, rBad.dot, rGood.dot, rPlain.dot.content]));
+  check('…and every row at least 52px', m.rows.every((r) => r.h >= 52), m.rows.map((r) => r.h).join(' '));
+  check('the list has no box around it', m.rowsBox === '0px 0px', m.rowsBox);
+  check('the segmented control: 44px, the chosen one an INK FILL with paper words',
+    m.seg.every((b) => b.h >= 44) && m.seg[0].on && m.seg[0].bg === INK && m.seg[0].fg === m.paper,
+    JSON.stringify(m.seg));
+  check('the chips: 44px, the chosen one an ink fill', m.chips.every((c) => c.h >= 44) && m.chips[1].on && m.chips[1].bg === INK,
+    JSON.stringify(m.chips));
+  check('the share bars are INK, with no colour cycled by position', m.bars.inline === 0 && m.bars.fill === INK,
+    JSON.stringify(m.bars));
+  check('…each share is of EVERYTHING, and the rest is counted', m.bars.shares[0] === '60 · 59%'
+    && m.bars.more === '1 more, 1% between them.', JSON.stringify(m.bars));
+  await p.close();
+}
+
+console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
+{
+  const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');
+  /* The house rule for the redesign, as a check: every string the old screen
+     printed from these answers is printed by the new one. A figure, a reason,
+     a caption, a row. The em dash is the one thing the redesign may drop: a
+     tile with no figure prints its reason in the value slot instead of a dash
+     over the reason (m/ui.js stat()), and the reason is checked like any other
+     word. */
+  const DROPPABLE = new Set(['—']);
+  /* Screens whose own markup still sets a control's size inline, which the
+     sheet cannot outrank without !important — each converts in its own
+     commit and comes off this list there. */
+  const SMALL_UNTIL_CONVERTED = new Set(['credentials']);
+  const old = {};
+  {
+    const c = await phonePage(browser, { skin: 'classic', fixture });
+    for (const s of SCREENS) {
+      await c.open(s.route);
+      if (s.tap) { await c.page.click(s.tap); await c.settle(); }
+      old[s.as || s.route] = await wordsOf(c.page);
+    }
+    await c.close();
+  }
+  for (const width of [390, 360]) {
+    const a = await phonePage(browser, { skin: 'arkiv', fixture, width, height: width === 360 ? 780 : 844 });
+    const dropped = [], sideways = [], small = [];
+    for (const s of SCREENS) {
+      await a.open(s.route);
+      const tap = s.tapArkiv || s.tap;
+      if (tap) { await a.page.click(tap); await a.settle(); }
+      const name = s.as || s.route;
+      const text = (await a.page.evaluate(() => document.querySelector('#m .m-deck')?.textContent || ''))
+        .replace(/\s+/g, ' ');
+      if (width === 390) {
+        const lost = old[name].filter((w) => !DROPPABLE.has(w) && !text.includes(w));
+        if (lost.length) dropped.push(`${name}: ${lost.slice(0, 3).map((w) => JSON.stringify(w.slice(0, 60))).join(', ')}`);
+      }
+      const mm = await a.page.evaluate(() => ({
+        over: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        small: [...document.querySelectorAll('#m a[href], #m button, #m input:not([type=hidden]), #m select, #m textarea')]
+          .filter((e) => !e.closest('.m-fallback'))
+          .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.height < 44; })
+          .map((e) => `${e.tagName.toLowerCase()}.${(e.className || '').toString().split(' ')[0]}:${Math.round(e.getBoundingClientRect().height)}`),
+      }));
+      if (mm.over > 0) sideways.push(`${name} +${mm.over}px`);
+      if (mm.small.length && !SMALL_UNTIL_CONVERTED.has(name)) small.push(`${name}: ${[...new Set(mm.small)].slice(0, 3).join(' ')}`);
+    }
+    for (const route of DESKTOP_TABS) {
+      await a.open(route);
+      const over = await a.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      if (over > 0) sideways.push(`${route} +${over}px`);
+    }
+    if (width === 390) {
+      check(`every word the old screens printed is on the new ones (${SCREENS.length} screens)`, !dropped.length,
+        dropped.join(' | '));
+    }
+    check(`nothing pushes the page sideways at ${width}px (the desktop tabs in the fallback included)`,
+      !sideways.length, sideways.join(' | '));
+    check(`every control a thumb uses is at least 44px tall at ${width}px`, !small.length, small.join(' | '));
+    if (width === 390) {
+      check('every API call was answered from the recording', !a.misses.size, [...a.misses].join(' '));
+      check('no screen threw', !a.errors.length, a.errors.slice(0, 3).join(' | '));
+    }
+    await a.close();
+  }
 }
 
 await browser.close();

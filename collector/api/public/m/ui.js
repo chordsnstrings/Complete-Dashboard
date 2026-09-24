@@ -8,7 +8,7 @@
    What IS here is the handful of things a thumb needs and a mouse does not: a
    row instead of a table, a sheet instead of a dropdown, a segmented control
    instead of a select, and a sparkline small enough to sit inside a stat. */
-import { el, esc, money, pct, dayStr } from '../ui.js';
+import { el, esc, money, pct, dayStr, secHead, highlight } from '../ui.js';
 import { fmt, isToday, spark } from '../charts.js';
 
 export { el, esc, money, pct, dayStr, fmt, isToday, spark };
@@ -193,17 +193,63 @@ export const stat = ({ label, value, sub, tone, href, long }) => {
   const s = el(href ? 'a' : 'div', `m-stat${tone ? ` ${tone}` : ''}`);
   if (href) s.href = href;
   s.append(el('span', 'l', esc(label)));
+  /* THE REASON IN THE VALUE SLOT, under the redesign (SPEC §5, the desktop's
+     glance `na`): a figure that cannot be measured prints why, never a bare
+     dash. The old tile put "—" in the figure and the reason in the line under
+     it, which on a phone is the smaller, greyer line — the one a reader skips.
+     When the tile carries its reason as its sub, the reason moves up into the
+     value slot and is marked absent, so highlight() refuses it (L4: an
+     absent figure is explained, never emphasised). A dash with no reason
+     beside it stays a dash, marked absent: the words for it are the screen's
+     to supply, never this component's to invent. */
+  if (phoneContract() && isAbsent(value)) {
+    const why = sub || null;
+    const n = el('span', `n t-na${why ? '' : ' sm'}`, esc(why || String(value)));
+    n.dataset.absent = '';
+    s.append(n);
+    return s;
+  }
   const n = el('span', `n${long || String(value).length > 9 ? ' sm' : ''}`, esc(String(value)));
   s.append(n);
   if (sub) s.append(el('span', 's', esc(sub)));
   return s;
 };
+/* What a screen passes when it has no figure: the em dash, or the words
+   "not measured". Nothing else is read as absent — a zero is a measurement. */
+const isAbsent = (v) => v == null || v === '' || v === '—' || v === '-' || v === 'not measured';
 
-export const stats = (host, list, three = false) => {
+export const stats = (host, list, three = false, { hero = false } = {}) => {
   const g = el('div', `m-stats${three ? ' three' : ''}`);
   list.filter(Boolean).forEach((s) => g.append(stat(s)));
   host.append(g);
+  /* THE HERO (the redesign only): the tile marked `hero`, or the first,
+     spans the row at the display size and carries the screen's one counted
+     highlight (SPEC L4, ui.js highlight(): refused on an absent figure, and
+     one per band). */
+  if (hero && phoneContract()) {
+    g.dataset.band = 'glance';
+    const kids = [...g.children];
+    const at = Math.max(0, list.filter(Boolean).findIndex((t) => t.hero));
+    const h = kids[at];
+    if (h) {
+      h.classList.add('hero');
+      const n = h.querySelector('.n');
+      if (n && !n.hasAttribute('data-absent')) {
+        n.classList.remove('sm');
+        highlight(n, 'ink');
+      }
+    }
+  }
   return g;
+};
+
+/* 00 · AT A GLANCE (the redesign only). SPEC §1's contract, on a phone: the
+   section head — the desktop's own secHead(), so the number, the rule and the
+   words are the desktop's — then the tiles with their hero. `note` is the
+   head's right-hand line: the window the tiles are over. */
+export const atGlance = (host, list, { note = null, three = false } = {}) => {
+  host.append(secHead('00', 'At a glance', note));
+  return stats(host, list, three, { hero: true });
 };
 
 /* A row is an identity, a figure, and one line of why. `to` makes it a link,
@@ -234,7 +280,12 @@ export const row = ({ title, sub, value, note, to, tone, name, photo }) => {
   const v = el('div', 'v');
   if (value != null && value !== '' && value !== '\u203a') {
     const b = el('b', null, esc(String(value)));
-    if (tone) b.style.color = `var(--${tone})`;
+    /* Under the redesign the figure stays INK and the tone becomes the dot
+       before it (ruling 1: hollow for a warning, solid for critical or bad,
+       solid green for good), carried as a class m/arkiv-m.css draws \u2014 an
+       inline colour would outrank the sheet and paint the digits. */
+    if (tone && phoneContract()) r.classList.add(`t-${tone}`);
+    else if (tone) b.style.color = `var(--${tone})`;
     v.append(b);
   }
   if (note) v.append(el('span', null, esc(note)));
@@ -330,6 +381,7 @@ export const bars = (host, list, { max = 6 } = {}) => {
      visible rows made five payment types read 17% each and sum to 84%, which
      is a percentage of nothing the reader can name. */
   const total = all.reduce((a, r) => a + Number(r.n), 0) || 1;
+  if (phoneContract()) return inkBars(host, all, rowsIn, total);
   const box = el('div');
   box.style.cssText = 'display:flex;flex-direction:column;gap:9px';
   rowsIn.forEach((r, i) => {
@@ -363,3 +415,36 @@ export const bars = (host, list, { max = 6 } = {}) => {
   host.append(box);
   return box;
 };
+
+/* The same proportions, drawn to the redesign's mark rules (SPEC §4, L1).
+   ─────────────────────────────────────────────────────────────────────────
+   The bars above take their fill from --s1..--s6 BY POSITION, which under
+   the Arkiv law is a hue cycled by index — and every non-semantic hue there
+   names a channel, so a settlement class drawn in the second slot would read
+   as a channel it is not. These rows are parts of one number (settlement
+   routes, harsh-driving kinds), none of them a channel, so every bar is INK,
+   ranked, with the share printed beside the count and no coloured track: a
+   bar ≤ 8px thick with a square baseline and a 4px data end. Same rows, same
+   denominator (everything, not the rows that fitted), same "N more" line. */
+function inkBars(host, all, rowsIn, total) {
+  const box = el('div', 'ak-bars');
+  rowsIn.forEach((r) => {
+    const line = el('div', 'ak-bar');
+    const h = el('div', 'ak-bar-h');
+    h.append(el('span', 'ak-bar-l', esc(r.label)),
+      el('span', 'ak-bar-n', esc(`${fmt(r.n)} · ${Math.round((r.n / total) * 100)}%`)));
+    const track = el('div', 'ak-bar-t');
+    const fill = el('i');
+    fill.style.width = `${(r.n / total) * 100}%`;
+    track.append(fill);
+    line.append(h, track);
+    box.append(line);
+  });
+  if (all.length > rowsIn.length) {
+    const rest = all.slice(rowsIn.length).reduce((a, r) => a + Number(r.n), 0);
+    box.append(el('p', 'm-cap', esc(`${all.length - rowsIn.length} more, `
+      + `${Math.round((rest / total) * 100)}% between them.`)));
+  }
+  host.append(box);
+  return box;
+}

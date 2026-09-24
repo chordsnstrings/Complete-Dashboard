@@ -162,3 +162,215 @@
    principle, the colophon — a column on a phone. */
 :root[data-skin="arkiv"][data-ui="phone"] .m-deck>.pf-inline{margin-top:10px;gap:10px}
 :root[data-skin="arkiv"][data-ui="phone"] .m-deck>.pf-inline .pf-colophon{text-align:left}
+
+/* ── 3 · sections: a card becomes a ruled, numbered section ──────────────────
+   card() and the .m-sec labels are unchanged; the box becomes a 1.5px ink
+   rule and the title a mono section head numbered by the counter the deck
+   resets (§2) — 01, 02… after the 00 band, as the desktop's panels are. A
+   card with no title (an analyst finding, an empty state) takes a hairline:
+   it is a block inside a section, not a section of its own. ui.js secHead()
+   (arkiv.css .sechd) draws the 00 head in the same form. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-card{background:none;border:0;border-top:1.5px solid var(--ink);
+  border-radius:0;box-shadow:none;padding:10px 0 0}
+:root[data-skin="arkiv"][data-ui="phone"] .m-card:not(:has(>h2)){border-top:1px solid var(--hair)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-card>h2,
+:root[data-skin="arkiv"][data-ui="phone"] .m-sec{display:flex;align-items:baseline;gap:12px;
+  font-family:var(--mono);font-size:var(--t3);font-weight:600;letter-spacing:.2em;text-transform:uppercase;
+  line-height:1.5;color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-card>h2{margin:0 0 6px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-sec{margin:0 0 -12px;padding-top:10px;border-top:1.5px solid var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-card>h2::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-sec::before{counter-increment:arkiv-sec;
+  content:counter(arkiv-sec,decimal-leading-zero);font-weight:500;letter-spacing:.1em;color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .sechd{margin:0 0 -8px}
+:root[data-skin="arkiv"][data-ui="phone"] .sechd-note{max-width:60%}
+/* A caption is a grey sentence at reading size, wherever it sits — the old
+   card left the ones inside its body at the body's size. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-cap{font-family:var(--sans);font-size:var(--t5);line-height:1.5;
+  color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-card>.m-cap{margin:0 0 12px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-body>.m-cap,
+:root[data-skin="arkiv"][data-ui="phone"] .m-deck>.m-cap{margin:10px 0 0}
+
+/* ── 4 · the statement ─────────────────────────────────────────────────────
+   lede() is unchanged; the card with a coloured left rule becomes the
+   desktop's STATEMENT BAND: an ink rule over it (3px and semantic when the
+   claim has a tone), the claim in Karla at a display size, the figures ink,
+   and the tone as the dot before the claim (ruling 1). */
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede{background:none;border:0;border-top:1px solid var(--ink);
+  border-radius:0;padding:12px 0 0}
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede.good{border-top:3px solid var(--sem-pos)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede.warn,
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede.bad{border-top:3px solid var(--sem-neg)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede b{font-family:var(--sans);font-weight:600;font-size:var(--d2);
+  line-height:1.22;letter-spacing:-.012em;color:var(--ink);font-variant-numeric:proportional-nums}
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede p{margin:8px 0 0;font-family:var(--sans);font-size:var(--t6);
+  line-height:1.55;color:var(--grey)}
+
+/* ── 5 · tiles ─────────────────────────────────────────────────────────────
+   stat() / stats() keep their classes and tones. The boxes become the
+   desktop's tiles: an ink rule over the grid, hairline rules between tiles,
+   a mono label, the value in Karla with proportional figures, the figures
+   INK whatever the tone (L4), and the tone as a dot in the label row. The
+   column rule is drawn on every tile and the grid pulled one gutter left and
+   clipped, so the first column's rule falls outside whether or not a hero
+   spans the row above it (the desktop's .kpis trick). */
+:root[data-skin="arkiv"][data-ui="phone"] .m-stats{gap:0;margin-left:-13px;
+  clip-path:inset(-12px -12px -12px 13px);border-top:1px solid var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat{background:none;border:0;border-radius:0;box-shadow:none;
+  border-left:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:11px 10px 13px 12px;overflow:visible}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat .l{display:flex;align-items:flex-start;gap:7px;margin:0;
+  font-family:var(--mono);font-size:var(--t1);font-weight:600;letter-spacing:.16em;color:var(--grey);
+  white-space:normal;overflow:visible;line-height:1.45}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat .n{margin-top:7px;font-family:var(--sans);font-weight:600;
+  font-size:var(--d3);line-height:1.1;letter-spacing:-.018em;font-variant-numeric:proportional-nums;
+  color:var(--ink)}   /* at (0,5,0) this outranks m.css's toned .m-stat.bad .n: figures stay ink (L4) */
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat .n.sm{font-size:var(--d1)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat .s{margin-top:6px;font-family:var(--sans);font-size:var(--t4);
+  line-height:1.45;color:var(--grey)}
+/* The reason in the value slot (m/ui.js stat()): reading size, ink, allowed
+   to wrap — never a display figure, never a highlight (L4, L5.8). */
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat .n.t-na{font-size:var(--t6);font-weight:600;line-height:1.4;
+  letter-spacing:0;overflow-wrap:normal}
+/* The HERO: the whole row, at a display size, carrying the one highlight. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat.hero{grid-column:1 / -1}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat.hero .n{font-size:var(--d5);letter-spacing:-.026em;line-height:1}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat.hero .n.t-na{font-size:var(--t8)}
+/* A tile that is also a link says so with a chevron at the end of its label
+   row; the whole tile is the target. */
+:root[data-skin="arkiv"][data-ui="phone"] a.m-stat .l::after{content:"\203a";margin-left:auto;padding-left:6px;
+  font-size:var(--t8);line-height:.9;letter-spacing:0;color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] a.m-stat:active{transform:none;background:var(--paper-2)}
+
+/* ── 6 · the dot — ruling 1, on the phone ────────────────────────────────────
+   Solid green: good. HOLLOW red: a warning. Solid red: critical (the phone's
+   "bad" and "critical" both). The same 8px dot as the desktop's (arkiv.css
+   §8), each with its word for a screen reader in the pseudo-element's
+   alternative text, declared twice so a browser without the alternative form
+   still draws the dot. Tiles carry it in the label row, the statement before
+   its claim, a row before its figure (m/ui.js row() adds t-<tone>). */
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat.good .l::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat.warn .l::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat.bad .l::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede.good b::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede.warn b::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede.bad b::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-row.t-good .v b::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-row.t-warn .v b::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-row.t-bad .v b::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-row.t-critical .v b::before{content:"";display:inline-block;flex:none;
+  box-sizing:border-box;width:8px;height:8px;border-radius:50%;border:0;background:var(--sem-neg)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat .l::before{margin-top:.3em}
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede b::before{margin-right:9px;vertical-align:.18em}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row .v b::before{margin-right:6px;vertical-align:.08em}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat.good .l::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede.good b::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-row.t-good .v b::before{background:var(--sem-pos);
+  content:"";content:"" / "good: "}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat.warn .l::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede.warn b::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-row.t-warn .v b::before{background:none;
+  border:1.5px solid var(--sem-neg);content:"";content:"" / "warning: "}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat.bad .l::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-lede.bad b::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-row.t-bad .v b::before,
+:root[data-skin="arkiv"][data-ui="phone"] .m-row.t-critical .v b::before{background:var(--sem-neg);
+  content:"";content:"" / "critical: "}
+
+/* ── 7 · rows: the phone's table ─────────────────────────────────────────────
+   row() and rows() are unchanged but for the tone (§6). The box becomes the
+   desktop table's rules: hairlines between rows, none around them, the name
+   in Karla, the figure in Plex Mono with tabular figures (a column of
+   figures that aligns), its unit under it in mono capitals, and the
+   chevron in ink. A row keeps its 52px. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-rows{background:none;border:0;border-radius:0;
+  border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row{border-top:1px solid var(--hair);padding:11px 0;gap:12px;min-height:52px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row:first-child{border-top:0}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row:active{background:var(--paper-2)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row .k b{font-family:var(--sans);font-weight:600;font-size:var(--t7);
+  color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row .k span{font-family:var(--sans);font-size:var(--t4);color:var(--grey);
+  margin-top:2px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row .v b{font-family:var(--mono);font-size:var(--t6);font-weight:600;
+  letter-spacing:.01em;color:var(--ink);font-variant-numeric:tabular-nums}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row .v span{font-family:var(--mono);font-size:var(--t1);font-weight:500;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--grey);margin-top:2px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row .chev{color:var(--ink);font-size:var(--d1)}
+:root[data-skin="arkiv"][data-ui="phone"] a.m-row:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+
+/* A face: the rounded tile becomes a square hairline PLATE (plan §3
+   Components, avatar). The initials stay underneath the photograph. A
+   photograph on file that could not be fetched keeps its own look — a
+   grey-2 outline and a grey corner mark — because an absent image is not
+   bad news and never takes a semantic hue (L5.9). */
+:root[data-skin="arkiv"][data-ui="phone"] .m-av{border-radius:0;background:var(--paper-2);border:1px solid var(--hair);
+  color:var(--ink);font-family:var(--mono);font-weight:600;font-size:var(--t4);letter-spacing:.06em}
+:root[data-skin="arkiv"][data-ui="phone"] .m-av.sm{border-radius:0;font-size:var(--t2)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-av.av-lost{box-shadow:none;border:1px solid var(--grey-2)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-av.av-lost::after{border-radius:0;background:var(--grey)}
+
+/* ── 8 · controls ────────────────────────────────────────────────────────────
+   The segmented control, the chips, the search field, the date and time
+   inputs and the form buttons: square, ink-ruled, mono capitals for the
+   words on a control, and the chosen one an INK FILL with paper words (the
+   accent is retired). Every one a thumb presses is at least 44px tall; a
+   chip that is only a label (an analyst verdict) is not a target and keeps
+   its own size. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-seg{gap:0;padding:0;background:none;border:1px solid var(--ink);
+  border-radius:0}
+:root[data-skin="arkiv"][data-ui="phone"] .m-seg button{min-height:44px;border-radius:0;background:none;
+  font-family:var(--mono);font-size:var(--t2);font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-seg button+button{border-left:1px solid var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-seg button.on{background:var(--ink);color:var(--paper);box-shadow:none}
+:root[data-skin="arkiv"][data-ui="phone"] .m-seg button:disabled{color:var(--grey);cursor:default}
+:root[data-skin="arkiv"][data-ui="phone"] .m-seg button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-chip{border-radius:0;background:var(--paper);border:1px solid var(--ink);
+  color:var(--ink);font-family:var(--mono);font-size:var(--t2);font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase}
+:root[data-skin="arkiv"][data-ui="phone"] button.m-chip{min-height:44px;display:inline-flex;align-items:center;
+  padding:0 14px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-search{min-height:44px;background:var(--paper);
+  border:1px solid var(--ink);border-radius:0}
+:root[data-skin="arkiv"][data-ui="phone"] .m-search input{font-family:var(--sans);color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-search input::placeholder{color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-search span{color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-inp{min-height:44px;border-radius:0;background:var(--paper);
+  border:1px solid var(--grey-2);font-family:var(--mono);color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-inp:focus-visible{border-color:var(--ink);box-shadow:none;
+  outline:1px solid var(--ink)}
+
+/* ── 9 · empty, loading ──────────────────────────────────────────────────────
+   An explained empty state is a sentence under a hairline, not a dashed box;
+   the skeleton shimmers on paper-2 with no radius. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-empty{padding:16px 0;text-align:left;font-family:var(--sans);
+  font-size:var(--t6);line-height:1.5;color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-empty b{margin-bottom:4px;color:var(--ink);font-size:var(--t8)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-skel{background:var(--paper-2);border:0;border-radius:0}
+:root[data-skin="arkiv"][data-ui="phone"] .m-skel::after{
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--ink) 5%,transparent),transparent)}
+
+/* ── 10 · marks ──────────────────────────────────────────────────────────────
+   The share bars (m/ui.js inkBars): ink, ranked, ≤ 8px thick, a square
+   baseline and a 4px data end, no coloured track (SPEC §4; the old bars
+   cycled --s1..--s6 by position, a hue by index). The sparkline (charts.js
+   spark(), shared with the desktop's tiles): a 2px ink line over a 10% ink
+   wash and an ink end dot — restyled here, since CSS outranks an SVG
+   presentation attribute, so the shared function is untouched. Only the
+   phone's own sparklines are reached: a desktop chart drawn in the fallback
+   is not a direct child of a card body. */
+:root[data-skin="arkiv"][data-ui="phone"] .ak-bars{display:flex;flex-direction:column;gap:12px}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-bar-h{display:flex;align-items:baseline;justify-content:space-between;
+  gap:10px;margin-bottom:5px}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-bar-l{font-family:var(--sans);font-size:var(--t6);color:var(--ink);
+  min-width:0;overflow-wrap:anywhere}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-bar-n{flex:none;font-family:var(--mono);font-size:var(--t4);
+  font-weight:600;letter-spacing:.02em;color:var(--ink);font-variant-numeric:tabular-nums}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-bar-t{height:8px;border-left:1px solid var(--grey-2)}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-bar-t>i{display:block;height:100%;min-width:2px;background:var(--ink);
+  border-radius:0 4px 4px 0}
+:root[data-skin="arkiv"][data-ui="phone"] .m-body>svg path[fill="none"]{stroke:var(--ink);stroke-width:2px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-body>svg path:not([fill="none"]){fill:var(--ink);opacity:.1}
+:root[data-skin="arkiv"][data-ui="phone"] .m-body>svg circle{fill:var(--ink)}
