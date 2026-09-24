@@ -1661,3 +1661,15 @@ Production (the whole record), both skins at 1440 and 390, light and dark
 points narrower than July). Sixteen months before February 2026 carry
 neither side (outside the statement window) and draw as outlines;
 September is hatched in 04 as a period the window cuts.
+
+### #settlement, #settlement/cash, #settlement/receivables — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/settlement/`): no error, no sideways scroll.
+Cash: 22% of 3,296 cash bookings carry no fare; the platforms report AED
+111,974.42 against AED 139,366.61 we can see, so the tile now says "the
+smaller of the two" where the old one said "the larger"; 116 of 196 rows
+carry both readings and the scatter shows the two agreeing along a line
+with a cluster of statement-heavy rows at low fare value. Receivables: AED
+32,577.06 over 352 bookings, every one priced (no-fare 0), ageing 0–30 /
+31–60 / 61–90 / over 90 with the last a measured nought.

@@ -466,4 +466,126 @@ if (want('reconcile')) {
   }
 }
 
+/* ══ #settlement, #settlement/cash, #settlement/receivables ══════════════ */
+if (want('settlement')) {
+  console.log('\n#settlement');
+  let classic = {};
+  {
+    const { ctx, page } = await open('classic', 'settlement');
+    classic = await rowTiles(page, '#view .kpis .kpi');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      toned: document.querySelectorAll('#view .cards .card.t-good, #view .cards .card.t-warn').length }));
+    check('old skin: the old page — no 00 band, the route tile first, toned class cards',
+      !r.band && Object.keys(classic)[0] === 'Bookings with a settlement route' && r.toned > 0, JSON.stringify({ ...r, tiles: Object.keys(classic) }));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'settlement');
+    const s = await shape(page);
+    const M = answer('/api/settlement/mix');
+    const total = M.classes.reduce((a, c) => a + c.trips, 0);
+    check('mix: 00, the ranked bars, † — the tab bar kept above it', JSON.stringify(s.heads) === JSON.stringify(['At a glance',
+      'Every booking, by how it was paid', '† What this page does not know']) && /tabs/.test(s.first), JSON.stringify([s.first, s.heads]));
+    check('…the verdict is 00\'s statement, and "still to collect" is not repeated as a tile (ruling 7)', s.vdctIn00
+      && !s.labels.some((l) => /still to collect/i.test(l)), JSON.stringify(s.labels));
+    const line = await txtOf(page, '#view .cband > p.cap');
+    check('…the route count folds into the band\'s opening line', line.startsWith(`${total.toLocaleString('en-US')} bookings with a settlement route`), line);
+    check('…the other tiles are the old ones with the old figures, Settled at the ride leading',
+      s.hero === 'Settled at the ride' && s.labels.every((l) => s.values[l] === classic[l]), JSON.stringify([s.values, classic]));
+    check('…and none keeps a tone', (await toned(page)).length === 0, JSON.stringify(await toned(page)));
+    const bars = await page.evaluate(() => [...document.querySelectorAll('#view .panel .hbars .hb')].map((h) => ({
+      k: h.querySelector('.k')?.textContent.trim(), fill: h.querySelector('.fill')?.style.background || '', p: h.querySelector('.hb-p')?.textContent.trim() })));
+    const byLabel = Object.fromEntries(M.classes.map((c) => [c.label, c]));
+    check('01: one ranked bar per class, card and wallet ink, every other route grey, each with its share',
+      bars.length === M.classes.length && bars.every((b, i) => (i === 0 || byLabel[bars[i - 1].k].trips >= byLabel[b.k].trips)
+        && (['card', 'wallet'].includes(byLabel[b.k].settlement_class) ? /--ink/.test(b.fill) : /--grey/.test(b.fill))
+        && b.p === `${(byLabel[b.k].trips / total * 100).toFixed(1)}%`), JSON.stringify(bars));
+    const cards = await page.evaluate(() => [...document.querySelectorAll('#view .cards .card')].map((c) => ({ cls: c.className, href: c.getAttribute('href') })));
+    check('the class cards stay, untoned, and keep their links', cards.length === M.classes.length && cards.every((c) => /\bt-flat\b/.test(c.cls))
+      && cards.some((c) => c.href?.startsWith('#settlement/cash')), JSON.stringify(cards));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('† bookings with no route count the answer\'s unlabelled bookings; "not reported" is not zero',
+      ab['Bookings with no route']?.fig === String(M.unlabelled_trips) && /Not zero/.test(ab['Revenue "not reported"']?.fig || ''), JSON.stringify(s.abs.map((a) => a.fig)));
+    await ctx.close();
+  }
+  {
+    const noCash = (_q, real) => ({ ...real, classes: real.classes.filter((c) => c.settlement_class !== 'cash') });
+    const { ctx, page } = await open('arkiv', 'settlement', { fixtures: { '/api/settlement/mix': noCash } });
+    const s = await shape(page);
+    check('mix with no cash booking: Paid in cash is a measured 0.0% that says so, never a bare dash',
+      s.values['Paid in cash'] === '0.0%' && /no booking in this window was paid in cash/.test(s.subs['Paid in cash']) && !s.bare.length, JSON.stringify([s.values, s.bare]));
+    await ctx.close();
+  }
+
+  {
+    const { ctx, page, answer } = await open('arkiv', 'settlement/cash');
+    const s = await shape(page);
+    const C = answer('/api/settlement/cash-exposure'), V = answer('/api/revenue'), L = answer('/api/ledger/entries');
+    const known = +C.total_cash_value_known || 0;
+    const reported = (+V.totals.cash || 0) + (+V.totals.statement_cash || 0);
+    check('cash: 00, the two readings, the table, † — in that order', JSON.stringify(s.heads.map((h) => h.replace(/ — .*/, ''))) === JSON.stringify(['At a glance',
+      'Two readings of the same cash, driver by driver', 'Who is holding it', '† What this page does not know']), JSON.stringify(s.heads));
+    check('…Value we can see is the verdict\'s figure and is not repeated (ruling 7); the platforms\' figure leads',
+      !('Value we can see' in s.values) && s.hero === 'Cash the platforms report' && s.values['Cash the platforms report'] === aed(reported), JSON.stringify(s.values));
+    const word = reported > known ? 'the larger of the two' : reported < known ? 'the smaller of the two' : 'the same figure';
+    check('…and its comparative is computed from the two numbers (the plan\'s finding: it always said "larger")',
+      s.subs['Cash the platforms report'].includes(word), s.subs['Cash the platforms report']);
+    check('Cash bookings and Drivers holding cash keep the old figures and the cohort link', s.values['Cash bookings'] === C.total_cash_trips.toLocaleString('en-US')
+      && s.hrefs['Drivers holding cash']?.startsWith('#cohort/settlement-cash'), JSON.stringify([s.values, s.hrefs]));
+    const dots = await page.evaluate(() => document.querySelectorAll('[data-panel="cash-scatter"] svg circle').length);
+    const both = C.drivers.filter((r) => r.cash_value != null && r.statement_cash != null).length;
+    const sc = await txtOf(page, '[data-panel="cash-scatter"]');
+    check('01: one dot per row that carries both readings, and the rows with one are counted', dots === both
+      && sc.includes(`${both} of ${C.drivers.length} rows carry both readings`), `${dots} vs ${both}: ${sc.slice(-160)}`);
+    const tbl = await page.evaluate(() => [...document.querySelectorAll('#view th')].map((t) => t.textContent.replace(/[↓↑\s]+$/g, '').trim()));
+    check('the table keeps its eight columns', ['Driver', 'Cash bookings', 'Value known', 'Coverage', 'Statement cash', 'Channels', 'Vehicles', 'Last cash trip']
+      .every((h) => tbl.includes(h)), JSON.stringify(tbl));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('† Cash banked is absent, and says what the hand-in record holds from its own answer',
+      ab['Cash banked']?.none && ab['Cash banked'].why.includes(`holds ${L.totals.rows} ${L.totals.rows === 1 ? 'entry' : 'entries'}`), JSON.stringify(ab['Cash banked']));
+    check('† the supervisor exclusion and the statement filed by name are said', !!ab['Collected by a supervisor'] && !!ab['Statement cash, by name'], JSON.stringify(Object.keys(ab)));
+    await ctx.close();
+  }
+  {
+    /* The platforms report LESS than the fares show — production's case. */
+    const small = (_q, real) => ({ ...real, totals: { ...real.totals, cash: 1000, statement_cash: 0 } });
+    const { ctx, page } = await open('arkiv', 'settlement/cash', { fixtures: { '/api/revenue': small } });
+    const s = await shape(page);
+    check('cash: a platforms\' figure smaller than the fares is called the smaller of the two',
+      /the smaller of the two/.test(s.subs['Cash the platforms report'] || ''), s.subs['Cash the platforms report']);
+    await ctx.close();
+  }
+
+  {
+    const { ctx, page, answer } = await open('arkiv', 'settlement/receivables');
+    const s = await shape(page);
+    const R = answer('/api/settlement/receivables');
+    check('receivables: 00, the ageing bars, the table, †', JSON.stringify(s.heads.map((h) => h.replace(/ — .*/, ''))) === JSON.stringify(['At a glance',
+      'How old the unpaid work is', 'Who owes it', '† What this page does not know']), JSON.stringify(s.heads));
+    check('Outstanding leads with the answer\'s total', s.hero === 'Outstanding' && s.values.Outstanding === aed(R.total), JSON.stringify(s.values));
+    const bars = await page.evaluate(() => [...document.querySelectorAll('[data-panel="recv-ageing"] .hb')].map((h) => [h.querySelector('.k')?.textContent.trim(), h.querySelector('.v')?.textContent.trim()]));
+    const wantB = R.ageing.buckets.map((b) => [`${b.label} · ${b.trips} ${b.trips === 1 ? 'booking' : 'bookings'}, ${b.counterparties} ${b.counterparties === 1 ? 'counterparty' : 'counterparties'}`,
+      +b.amount ? aed(b.amount) : 'nothing outstanding']);
+    check('01: one bar per age, every column of the old table in its label, an empty bucket "nothing outstanding"',
+      JSON.stringify(bars) === JSON.stringify(wantB), JSON.stringify([bars, wantB]));
+    const nf = s.na['Bookings with no fare'] || s.values['Bookings with no fare'];
+    const diff = R.total_trips - R.priced_trips;
+    check('Bookings with no fare is the difference when it is one, and ABSENT with the reason when the answer contradicts itself',
+      diff >= 0 ? nf === String(diff) : /counts more priced bookings than bookings/.test(nf), `${nf} (${diff})`);
+    await ctx.close();
+  }
+  {
+    const fine = (_q, real) => ({ ...real, total_trips: 84, priced_trips: 81 });
+    const { ctx, page } = await open('arkiv', 'settlement/receivables', { fixtures: { '/api/settlement/receivables': fine } });
+    const s = await shape(page);
+    check('receivables: three of 84 unpriced reads 3', s.values['Bookings with no fare'] === '3', JSON.stringify(s.values));
+    await ctx.close();
+  }
+  for (const r of ['settlement', 'settlement/cash', 'settlement/receivables']) {
+    const { ctx, page } = await open('arkiv', r, { width: 390 });
+    check(`${r} at 390: nothing scrolls sideways`, (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

@@ -6626,3 +6626,12 @@ number (5 and 5), and never a passport or RTA number.
   Any "latest gap" or trend must filter with the endpoint's rule.
 * **`statement_horizon` on `/api/reconcile` is an object, `{ days, from }`.**
   `String()` of it prints "[object Object]".
+
+* **A driver handing cash to the fleet (`cash_deposit` in the ledger) is not
+  cash BANKED.** No bank statement is read by this product. A "Cash banked"
+  figure built from the hand-in record would be a reason that is not the
+  true one; say what the hand-in record holds, and leave banked absent.
+* **mockapi's `/api/settlement/receivables` counts more priced bookings
+  than bookings** (84 against 180), so `total_trips - priced_trips` is
+  negative there. Production is consistent (352 of 352). A page subtracting
+  the two must guard, not print a negative count.
