@@ -1839,3 +1839,11 @@ scroll. Booked revenue AED 14,113.32 over 253 of 278 trips; riders paid
 looking and fixed before commit: a hand-picked --seq-N ramp printed the
 shares dark on dark (stackedBar's label ink is measured for the --cat-N
 slots, not for the ramp); the bar now takes the slots.
+
+### #driver/quality — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-quality/`): no error, no sideways
+scroll. Completion 91.7%, ▼ 3.3 pts to 95%; 94.8 alerts per 100 km, ▲ 26.6
+against the fleet median of 68.2 (worse); acceptance absent — no channel
+here publishes one.

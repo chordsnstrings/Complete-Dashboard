@@ -22,7 +22,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   avatar, moneyInTile, cashOnHandTile, bankDepositTile, faresTile,
   alertRateFigure, splitAlerts, standingNote,
   UBER_FARE_WHY, dialable, segSourceLabel,
-  contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, swatch, delta } from './ui.js';
+  contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, swatch, delta, sourceToken } from './ui.js';
 import { CHANNEL_ORDER } from './tokens.js';
 /* personAddr/personIdOf/rewriteParam: the person id as an address, and the
    in-place rewrite that leaves the reader holding the canonical one. See the
@@ -2456,7 +2456,14 @@ async function tabEarnings(root, id, prof) {
 
 /* ── tab: quality ────────────────────────────────────────────────────────── */
 async function tabQuality(root, id) {
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  /* Under the page contract (plan §4 #driver/quality, restyle only): the six
+     tiles as a 00 band, untoned — completion carries its gap to 95% with
+     glyph and sign, and the rate per 100 km its gap to the fleet median as a
+     delta where LOWER is better; the non-completed bars in the colour of the
+     channel each one names; cancellations by day in ink. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
   const cx = panel('Non-completed trips', 'Who cancelled, and how often'); g.append(cx.panel);
   const ev = panel('Harsh driving', 'From the tracker, on the days this driver held the car'); g.append(ev.panel);
@@ -2471,7 +2478,7 @@ async function tabQuality(root, id) {
   const harsh = splitAlerts(qy.alerts || []);
   const totalAlerts = harsh.drivingN;
 
-  kpiHost.replaceWith(kpiRow([
+  const Q_TILES = [
     /* A null completion used to paint red. `null >= 95` is false, so every
        driver whose platforms report no outcome at all scored 'critical' — the
        page accused them of a 0% completion rate it had never measured. */
@@ -2576,7 +2583,8 @@ async function tabQuality(root, id) {
           + over,
         tone: ratio == null ? null : ratio <= 0.7 ? 'good' : ratio <= 1.3 ? null : ratio <= 2 ? 'warn' : 'critical' };
     })(),
-  ]));
+  ];
+  if (ak) { kpiHost.remove(); qualityGlance(AKB, Q_TILES, k, qy); } else kpiHost.replaceWith(kpiRow(Q_TILES));
 
   cx.body.innerHTML = '';
   /* Each platform has its own word for the same thing — Bolt reports
@@ -2588,8 +2596,9 @@ async function tabQuality(root, id) {
       : 'No platform this driver works on reported how any of these trips ended, so there is nothing to break down.'));
   } else {
     hbars(cx.body, qy.cancels.map((c) => ({
-      label: `${c.status.replace(/_/g, ' ')}${c.platform ? ` · ${c.platform}` : ''}`, n: c.n,
-    })), { label: 'label', value: 'n', seq: true });
+      label: `${c.status.replace(/_/g, ' ')}${c.platform ? ` · ${c.platform}` : ''}`, n: c.n, plat: c.platform,
+    })), ak ? { label: 'label', value: 'n', signed: false, colorFor: (x) => (x.plat ? sourceToken(x.plat) : '--mk-fill') }
+      : { label: 'label', value: 'n', seq: true });
     cx.body.append(el('p', 'cap',
       'Raw provider strings, deliberately — what counts as “did not complete” is decided by the normalised '
       + 'outcome, but the word each platform uses for it is worth seeing.'));
@@ -2665,10 +2674,35 @@ async function tabQuality(root, id) {
   } else {
     barChart(line.body, cd.map((d) => ({
       label: `${dayStr(d.day)} · ${d.cancelled} of ${d.trips}`, cancelled: d.cancelled,
-    })), { x: 'label', y: 'cancelled', color: '--s2', valueFmt: (v) => fmt(v) });
+    })), { x: 'label', y: 'cancelled', color: ak ? '--ink' : '--s2', valueFmt: (v) => fmt(v) });
     const tot = cd.reduce((a, d) => a + d.trips, 0), cx = cd.reduce((a, d) => a + d.cancelled, 0);
     line.body.append(el('p', 'cap', `${cx} cancelled out of ${tot} requested across ${cd.length} working days.`));
   }
+  if (ak) pageFoot({ colophon: [windowLabel(), 'quality'] }, root);
+}
+
+/* ── #driver/quality under the page contract ─────────────────────────────── */
+/* The tiles the old row drew, untoned, with the two comparisons the plan
+   asks for as worded deltas (ruling 4): completion against the house's 95%
+   and the alert rate against the fleet median, lower being better. A tile
+   that printed "not measured" in the value slot becomes ABSENT with the
+   reason it already carried. */
+function qualityGlance(AKB, tiles, k, qy) {
+  const out = tiles.filter(Boolean).map((t) => {
+    if (t.label === 'Completion' && k.completion_pct != null) {
+      return { ...t, hero: true, delta: { value: Number(k.completion_pct) - 95, kind: 'gap', of: 'to 95%, the house threshold', unit: 'pts', d: 1 } };
+    }
+    if (t.label === 'Per 100 km') {
+      if (t.value === 'not measured') return { label: t.label, na: t.sub || 'the alert feed did not cover these days' };
+      const base = qy.fleet_alerts_per_100km;
+      const v = Number(String(t.value).replace(/[^0-9.]/g, ''));
+      if (base != null && Number.isFinite(v)) {
+        return { ...t, delta: { value: v - Number(base), kind: 'gap', invert: true, d: 1, of: `against the fleet median ${fmt(base, 1)}` } };
+      }
+    }
+    return t;
+  });
+  glance(AKB.tilesHost, bandTiles(out).tiles);
 }
 
 /* ── tab: trips ──────────────────────────────────────────────────────────── */

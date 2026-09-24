@@ -317,4 +317,52 @@ if (want('driver-earnings')) {
   }
 }
 
+/* ══ #driver/quality ══════════════════════════════════════════════════════ */
+if (want('driver-quality')) {
+  console.log('\n#driver/quality');
+  {
+    const { ctx, page } = await open('classic', 'driver/drv-0/quality');
+    check('old skin: no 00 band', !(await page.$('#view .cband')));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'driver/drv-0/quality');
+    const s = await shape(page);
+    const k = answer('/api/driver/kpis');
+    const qy = answer('/api/driver/quality');
+    const deltas = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#view .kpis.glance > .kpi')]
+      .map((t) => [t.querySelector('.l').textContent.trim(), { d: t.querySelector('.t-d')?.textContent.replace(/\s+/g, ' ').trim() || '',
+        cls: t.querySelector('.t-d .dlt')?.className || '' }])));
+    const gap = +(Number(k.completion_pct) - 95).toFixed(1);
+    check('completion the hero, its gap to 95% worded with glyph and sign', s.hero === 'Completion'
+      && deltas.Completion.d.includes('to 95%, the house threshold') && deltas.Completion.d.includes(`${gap > 0 ? '+' : gap < 0 ? '−' : ''}${Math.abs(gap).toFixed(1)}`),
+      JSON.stringify(deltas.Completion));
+    check('the alert rate against the fleet median, where lower is better', !qy.fleet_alerts_per_100km
+      || (/against the fleet median/.test(deltas['Per 100 km'].d) && /dlt-(positive|negative|neutral)/.test(deltas['Per 100 km'].cls)), JSON.stringify(deltas['Per 100 km']));
+    check('no tile wears a tone', (await toned(page)).length === 0);
+    const bars = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => /Non-completed trips/.test(x.querySelector('h3')?.textContent || ''));
+      return p ? [...p.querySelectorAll('.hb')].map((h) => ({ k: h.querySelector('.k')?.textContent.trim(), bg: h.querySelector('.fill')?.style.background || '' })) : []; });
+    check('non-completed bars in the colour of the channel each names', bars.length > 0 && bars.every((b) => {
+      const pl = (b.k.split(' · ')[1] || '').toLowerCase();
+      return pl ? b.bg.includes(`--c-${pl}`) : true; }), JSON.stringify(bars.slice(0, 4)));
+    await ctx.close();
+  }
+  {
+    /* A window the alert feed was dark for: the rate is ABSENT with the
+       tile's own reason, never "not measured" printed as a figure. */
+    const dark = (q, real) => ({ ...real, alerts_per_100km: null, per_100km: null,
+      alerts_per_100km_absent: 'the alert feed was down for every day of this window' });
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/quality', { fixtures: { '/api/driver/quality': dark } });
+    const s = await shape(page);
+    check('an unmeasured alert rate is ABSENT with the server\'s own reason, not a value reading "not measured"',
+      s.na['Per 100 km'] === 'the alert feed was down for every day of this window', JSON.stringify([s.values['Per 100 km'], s.na]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/quality', { width: 390 });
+    check('#driver/quality at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

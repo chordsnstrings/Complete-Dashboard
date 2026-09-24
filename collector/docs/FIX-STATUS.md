@@ -3435,3 +3435,9 @@ Not built: clusters in the channel identity of the trips they hold (/api/driver/
 | page | what changed under the skin | state | proof |
 |---|---|---|---|
 | #driver/earnings | Restyle only (plan §4). The six tiles as a 00 band, booked revenue the hero, every figure and sub-line as before, untoned, a dash absent with its own sub-line as the reason. How riders paid: one 100% bar instead of a ring — a payment type is not a channel, so it takes the categorical slots, which under Arkiv are the achromatic ramp with a label ink measured per slot. Revenue by day in ink. The components bars (already the job tokens), their nested table and the statements table kept | **written** | `test/arkiv_people.test.mjs` #driver/earnings (6). Revert — the ring back: fails. `arkiv_classic_frozen` ONLY=driver/ 11/11; `driver_fares` 19, `driver_empty_window_page` 63; `arkiv_fils` gains territory and earnings |
+
+### P41 · #driver/quality
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #driver/quality | Restyle only (plan §4). The six tiles as a 00 band, untoned: completion the hero with its gap to 95% as a worded delta ("to 95%, the house threshold"), the rate per 100 km with its gap to the fleet median as a delta where LOWER is better (the ratio stays in the sub-line), a rate the alert feed did not measure ABSENT with the server's own reason instead of the words "not measured" printed as a value. Non-completed trips as bars in the colour of the channel each names; cancellations by day in ink; the harsh-driving table kept | **written** | `test/arkiv_people.test.mjs` #driver/quality (8), one fixture with the alert feed dark. Reverts, each failing: "not measured" back in the value slot; the non-completed bars in one colour. `arkiv_classic_frozen` ONLY=driver/ 11/11 |
