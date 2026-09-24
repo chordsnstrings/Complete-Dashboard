@@ -125,4 +125,53 @@ if (want('demand')) {
   }
 }
 
+/* ══ #trips ═══════════════════════════════════════════════════════════════ */
+if (want('trips')) {
+  console.log('\n#trips');
+  {
+    const { ctx, page } = await open('classic', 'trips');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      tiles: [...document.querySelectorAll('#view .kpis .kpi .l')].map((l) => l.textContent.trim()),
+      th: [...document.querySelectorAll('#view thead th')].map((t) => t.textContent.trim()) }));
+    check('old skin: the old page — its three tiles, its nine columns, no booking link',
+      !r.band && r.tiles.length === 3 && !r.th.includes('Booking') && r.th.length === 9, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'trips');
+    const s = await shape(page);
+    const L = answer('/api/trips/list'), K = answer('/api/kpis');
+    check('00 leads, the table directly under it (the plan\'s departure: operators come to find a job), then the charts and †',
+      JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Bookings', 'Whether the booking carries a price', 'How the fare settles',
+        'Every booking, a day at a time', 'How much of a day gets cancelled', '† What this page does not know']), JSON.stringify(s.heads));
+    check('Carrying a fare is the hero, the list answer\'s window count', s.hero === 'Carrying a fare' && s.values['Carrying a fare'] === (+L.priced).toLocaleString('en-US'), JSON.stringify(s.values));
+    check('Bookings, Completed and Cancelled are /api/kpis\'s, the cancellations split by who',
+      s.values.Bookings === (+K.trips).toLocaleString('en-US') && s.values.Completed === `${(+K.completion_pct).toFixed(1)}%`
+      && s.subs.Cancelled.includes(`${(+K.cancelled_by_rider).toLocaleString('en-US')} by the rider`), JSON.stringify([s.values, s.subs.Cancelled]));
+    check('Mean fare is the kpis mean over priced bookings', s.values['Mean fare'] === aed(K.avg_fare), s.values['Mean fare']);
+    check('how long a ride took is ABSENT with the true reason', /request to end is not ride time/.test(s.na['How long a ride took'] || ''), JSON.stringify(s.na));
+    const t = await page.evaluate(() => ({ th: [...document.querySelectorAll('[data-panel="trips-list"] thead th')].map((x) => x.textContent.trim()),
+      links: [...document.querySelectorAll('[data-panel="trips-list"] tbody a[href^="#trip/"]')].length,
+      toned: document.querySelectorAll('[data-panel="trips-list"] .tag.ok, [data-panel="trips-list"] .tag.bad').length }));
+    const bookable = L.rows.filter((r) => r.external_id && r.is_booking !== false).length;
+    check('the nine columns kept, Tier, Payment and a link to the booking page added on every booking row',
+      ['When', 'Channel', 'Driver', 'Vehicle', 'From', 'To', 'Km', 'Outcome', 'Fare', 'Tier', 'Payment', 'Booking'].every((h) => t.th.includes(h))
+      && t.links === bookable, JSON.stringify(t));
+    check('outcome tags lose their green/red fills', t.toned === 0, String(t.toned));
+    const ab = s.abs.find((a) => a.label === 'How long a ride took');
+    check('† ride time counts the rows with no duration', ab?.none && /duration_s is empty/.test(ab.why), JSON.stringify(ab));
+    /* The search still narrows the table and says so beside it. */
+    await page.fill('[data-panel="trips-list"] input[type=search]', 'zzzz-no-such-thing');
+    await page.waitForTimeout(1500);
+    const after = await txtOf(page, '[data-panel="trips-list"] .trips-count');
+    check('the search still narrows the list, and the count beside the table says "matching this search"', /^Matching this search: 0/.test(after), after);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'trips', { width: 390 });
+    check('at 390 nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
