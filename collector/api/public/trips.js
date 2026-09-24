@@ -307,7 +307,7 @@ function tripsCharts(root, d, K, daily, pay) {
   else {
     hbars(p5.body, [...P].sort((a, b) => (+b.n || 0) - (+a.n || 0)).map((r) => ({
       label: `${String(r.label || 'not recorded').replace(/_/g, ' ')}${+r.priced_n ? ` · ${money(+r.revenue || 0)} over ${fmt(r.priced_n)} priced` : ' · no fare reported'}`,
-      n: +r.n || 0 })), { signed: false, color: '--ink' });
+      n: +r.n || 0 })), { signed: false, color: '--mk-fill' });
   }
 
   const g2 = el('div', 'grid g2'); root.append(g2);

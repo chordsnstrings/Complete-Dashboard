@@ -772,7 +772,7 @@ function reconcileCharts(host, d, month, { coverage, withExpected, withBank }) {
   const cmp = d.rows.filter(comparableRow);
   if (!cmp.length) empty(p2.body, `No ${unit} here can be compared.`);
   else hbars(p2.body, cmp.map((r) => ({ label: labelOf(r, month), n: +r.delta_pct })),
-    { signed: true, color: '--ink', negColor: '--grey', valueFmt: (v) => pct(v, 1) });
+    { signed: true, color: '--mk-fill', negColor: '--mk-neg', valueFmt: (v) => pct(v, 1) });
   const held = d.rows.filter((r) => r.delta != null && !comparableRow(r));
   if (held.length) {
     p2.body.append(el('p', 'cap', esc(`Left out, as the endpoint leaves them out: ${held.map((r) => `${labelOf(r, month)} `
@@ -782,7 +782,7 @@ function reconcileCharts(host, d, month, { coverage, withExpected, withBank }) {
     ['Cash already taken', t.cash_collected == null ? null : -Math.abs(t.cash_collected)]].filter(([, v]) => v != null);
   if (!parts.length) empty(p3.body, 'No statement figure is on record here.');
   else {
-    hbars(p3.body, parts.map(([label, n]) => ({ label, n: +n })), { signed: true, color: '--ink', negColor: '--grey', valueFmt: (v) => money(v) });
+    hbars(p3.body, parts.map(([label, n]) => ({ label, n: +n })), { signed: true, color: '--mk-fill', negColor: '--mk-neg', valueFmt: (v) => money(v) });
     p3.body.append(el('p', 'cap', esc(`Netted: ${t.expected_payout != null ? money(t.expected_payout) : 'not computable'} expected.`)));
   }
   const p4 = panel(`Every ${unit} on record`, `The bank side, ${unit} by ${unit}. An outline is a ${unit} no payout was reported for; a hatched bar is a period the window cuts.`, 'recon-all');

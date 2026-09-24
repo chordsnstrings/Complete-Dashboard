@@ -240,7 +240,7 @@ export async function renderDay(root, day, onDetail) {
     /* tierLabel: the same raw enums that reached the #vehicles header row
        reach this legend — "drop_off" beside "Comfort". */
     add('Uber product tier', null, (b) => (ak
-      ? hbars(b, [...d.tiers].sort((x, y) => y.n - x.n).map((r) => ({ label: tierLabel(r.tier), n: r.n })), { signed: false, color: '--ink' })
+      ? hbars(b, [...d.tiers].sort((x, y) => y.n - x.n).map((r) => ({ label: tierLabel(r.tier), n: r.n })), { signed: false, color: '--mk-fill' })
       : donut(b, d.tiers.map((r) => ({ label: tierLabel(r.tier), n: r.n })))));
   }
   if (d.alerts.length) {

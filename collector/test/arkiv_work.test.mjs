@@ -288,9 +288,14 @@ if (want('platforms')) {
     check('tiers: the four tiles as a band, premium share the hero', s.hero === 'Premium share' && s.glance === 4, JSON.stringify(s.labels));
     const asked = await bars(page, '[data-panel="tiers-asked"]');
     check('01: one bar per tier the riders asked for, from the product mix', asked.length === P.filter((r) => +r.n > 0).length, `${asked.length}`);
+    /* The bars name the job token --mk-fill (the lead's ruling, main 9a96fe8:
+       default bars are asked for by job); under Arkiv it resolves to ink. So
+       compare the PAINTED colour to ink's, not the token's spelling. */
     const ink = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => /Gap to the best car/.test(x.querySelector('h3')?.textContent || ''));
-      return p ? [...p.querySelectorAll('.hb .fill')].map((f) => f.style.background) : []; });
-    check('the gap bars are ink — a shortfall against a peer is not a channel colour', ink.length === 0 || ink.every((b) => /--ink/.test(b)), JSON.stringify(ink.slice(0, 3)));
+      const probe = document.createElement('i'); probe.style.color = 'var(--ink)'; document.body.append(probe);
+      const want = getComputedStyle(probe).color; probe.remove();
+      return { want, got: p ? [...p.querySelectorAll('.hb .fill')].map((f) => getComputedStyle(f).backgroundColor) : [] }; });
+    check('the gap bars are ink — a shortfall against a peer is not a channel colour', ink.got.length === 0 || ink.got.every((b) => b === ink.want), JSON.stringify(ink));
     check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
     await ctx.close();
   }

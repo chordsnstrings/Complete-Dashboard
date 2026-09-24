@@ -2285,7 +2285,7 @@ async function demandContract(root) {
   else {
     hbars(week.body, perDow.filter((x) => x.rate != null).sort((a, b) => b.rate - a.rate)
       .map((x) => ({ label: `${x.name} · ${countOf(x.days, 'day')}`, n: Math.round(x.rate) })),
-    { signed: false, color: '--ink' });
+    { signed: false, color: '--mk-fill' });
     const none = perDow.filter((x) => x.rate == null).map((x) => x.name);
     week.body.append(el('p', 'cap', esc('A window of a month holds five of some weekdays and four of others, so each is its own sum over its own count of days.'
       + (todayDow != null ? ` ${DOW_NAME[todayDow]} counts today for the hours it has had.` : '')
@@ -3376,7 +3376,7 @@ async function platformTiers(root) {
     + 'and everybody else is behind by definition. Useful as a spread, not as a list of failures.');
   if (under.length) {
     hbars(gp.body, under.slice(0, 12).map((v) => ({ label: `${v.plate} · ${v.model_key}`, n: v.premium_gap_pct })),
-      { valueFmt: (v) => `${fmt(v, 1)} pts`, signed: false, ...(ak ? { color: '--ink' } : {}),
+      { valueFmt: (v) => `${fmt(v, 1)} pts`, signed: false, ...(ak ? { color: '--mk-fill' } : {}),
         onClick: (d) => { location.hash = href('vehicle', String(d.label).split(' · ')[0]); } });
   } else empty(gp.body, 'Every car is carrying as much premium work as its model does elsewhere');
   g.append(gp.panel);
@@ -3456,7 +3456,7 @@ function tiersGlance(root, TIER_TILES, under, prodMix) {
   hbars(p.body, [...rows].sort((a, b) => b.n - a.n).map((r) => {
     const [plat, tier] = String(r.label || '').split(/:\s*/);
     return { label: `${tier ? `${sourceLabel(plat)} · ${tierLabel(tier)}` : sourceLabel(r.label)}${r.avg_km != null ? ` · ${fmt(r.avg_km, 1)} km` : ''}`, n: +r.n };
-  }), { signed: false, color: '--ink' });
+  }), { signed: false, color: '--mk-fill' });
 }
 
 /* Yango and Bolt report what a trip table cannot: how many jobs were offered
@@ -3602,7 +3602,7 @@ function funnelGlance(root, FUNNEL_TILES, K, live) {
     ['Nobody said who', K.cancelled_unsaid, 'an outcome with no side named'],
   ].filter(([, n]) => n != null);
   if (!rows.length) { empty(p.body, 'No channel in this window reports a turned-down job.'); return; }
-  hbars(p.body, rows.map(([label, n, who]) => ({ label: `${label} · ${who}`, n: +n })), { signed: false, color: '--ink' });
+  hbars(p.body, rows.map(([label, n, who]) => ({ label: `${label} · ${who}`, n: +n })), { signed: false, color: '--mk-fill' });
 }
 
 /* Two orders of #finance until the operator flips the default skin: the old
@@ -4477,9 +4477,9 @@ async function financeContract(root) {
     const addR = priced.filter((r) => +r.amount > 0).sort((a, b) => b.amount - a.amount);
     const tookR = priced.filter((r) => +r.amount < 0).sort((a, b) => a.amount - b.amount);
     const lab = (r) => String(r.category).replace(/_/g, ' ');
-    if (addR.length) hbars(ladd.body, addR.slice(0, 12).map((r) => ({ label: lab(r), n: +r.amount })), { signed: false, color: '--ink', valueFmt: (v) => money(v) });
+    if (addR.length) hbars(ladd.body, addR.slice(0, 12).map((r) => ({ label: lab(r), n: +r.amount })), { signed: false, color: '--mk-fill', valueFmt: (v) => money(v) });
     else empty(ladd.body, priced.length ? 'No category added money in this range.' : 'No category carries an amount.');
-    if (tookR.length) hbars(ltook.body, tookR.slice(0, 12).map((r) => ({ label: lab(r), n: Math.abs(+r.amount) })), { signed: false, color: '--grey', valueFmt: (v) => money(-v) });
+    if (tookR.length) hbars(ltook.body, tookR.slice(0, 12).map((r) => ({ label: lab(r), n: Math.abs(+r.amount) })), { signed: false, color: '--mk-neg', valueFmt: (v) => money(-v) });
     else empty(ltook.body, priced.length ? 'No category took money out in this range.' : 'No category carries an amount.');
     const net = priced.reduce((a, r) => a + (+r.amount || 0), 0);
     const plats = [...new Set(ledger.map((r) => r.platform).filter(Boolean))];

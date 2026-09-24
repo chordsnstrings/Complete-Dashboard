@@ -648,8 +648,8 @@ function causesCharts(decoP, drvP, perP, months, allBreaks) {
     hbars(decoP.body, drawn.flatMap(({ b, sp }) => [
       { label: `${MONTH(b.from)} → ${MONTH(b.to)} · headcount`, n: Math.round(sp.head) },
       { label: `${MONTH(b.from)} → ${MONTH(b.to)} · per driver`, n: Math.round(sp.per) },
-    ]), { signed: true, color: '--ink', negColor: '--grey', valueFmt: (v) => `${fmt(v)} bookings`,
-      legend: [['--ink', 'added bookings'], ['--grey', 'took bookings away']] });
+    ]), { signed: true, color: '--mk-fill', negColor: '--mk-neg', valueFmt: (v) => `${fmt(v)} bookings`,
+      legend: [['--mk-fill', 'added bookings'], ['--mk-neg', 'took bookings away']] });
     const un = parts.filter((x) => !x.sp).map((x) => `${MONTH(x.b.from)} → ${MONTH(x.b.to)}`);
     if (un.length) decoP.body.append(el('p', 'cap', esc(`Unattributable, and not drawn: ${un.join(', ')} — a side of the break names no driver.`)));
   }

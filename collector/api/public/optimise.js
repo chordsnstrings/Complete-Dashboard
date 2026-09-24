@@ -326,7 +326,7 @@ function optimiseMiddle(root, opt) {
   if (!ranked.length) empty(pile.body, 'No area has more bookings than arrivals, or more arrivals than bookings, in this window.');
   else {
     hbars(pile.body, ranked.sort((a, b) => b[1] - a[1]).map(([label, n]) => ({ label, n })),
-      { signed: true, color: '--ink', negColor: '--grey', legend: [['--ink', 'more bookings than cars'], ['--grey', 'more cars than bookings']] });
+      { signed: true, color: '--mk-fill', negColor: '--mk-neg', legend: [['--mk-fill', 'more bookings than cars'], ['--mk-neg', 'more cars than bookings']] });
     pile.body.append(el('p', 'cap', esc(`The 14 areas furthest from even, of ${fmt(byArea.size)}. An area is address text, and one place written two ways is two areas here.`)));
   }
   const cells = new Map();

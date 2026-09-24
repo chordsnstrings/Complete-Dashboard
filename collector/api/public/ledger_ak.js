@@ -122,7 +122,7 @@ export function runningBars(host, people) {
     .map((p) => days(p.owes.cash_taken_from, p.owes.cash_taken_to));
   if (!spans.length) { empty(host, 'No driver has a cash fare on record.'); return; }
   hbars(host, BANDS.map(([label, lo, hi]) => ({ label, n: spans.filter((d) => d >= lo && d < hi).length })),
-    { signed: false, color: '--ink', shareOf: (x) => `${(x.n / spans.length * 100).toFixed(1)}%` });
+    { signed: false, color: '--mk-fill', shareOf: (x) => `${(x.n / spans.length * 100).toFixed(1)}%` });
 }
 
 /* The ceiling, ranked — the top N as bars, and the drivers with none as the
@@ -132,7 +132,7 @@ export function ceilingRanked(host, people, { top = 20 } = {}) {
   if (!c.n) { empty(host, 'No driver has a cash fare on record.'); return c; }
   const rows = [...c.carriers].sort((a, b) => b.owes.cash_taken - a.owes.cash_taken).slice(0, top);
   hbars(host, rows.map((p) => ({ label: p.name, n: +p.owes.cash_taken, ext: p.ext_id })),
-    { signed: false, color: '--ink', valueFmt: (v) => aed(v) || '—',
+    { signed: false, color: '--mk-fill', valueFmt: (v) => aed(v) || '—',
       onClick: (x) => { if (x.ext) location.hash = href('driver', x.ext); },
       clickable: (x) => !!x.ext });
   if (c.none) {
@@ -154,7 +154,7 @@ export function exposureBars(host, people) {
     { label: 'Measurable', n: withFig.length },
     { label: 'Not measurable', n: people.length - withFig.length },
     { label: 'Over the line', n: over },
-  ], { signed: false, color: '--ink', shareOf: (x) => (people.length ? `${(x.n / people.length * 100).toFixed(1)}%` : null) });
+  ], { signed: false, color: '--mk-fill', shareOf: (x) => (people.length ? `${(x.n / people.length * 100).toFixed(1)}%` : null) });
   return { measurable: withFig.length, not: people.length - withFig.length, over };
 }
 

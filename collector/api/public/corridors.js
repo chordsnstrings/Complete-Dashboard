@@ -279,7 +279,7 @@ export async function renderCorridors(root) {
 
   /* An area is a place, and a place with a name is something a dispatcher
      wants to open — the whole page had zero anchors on it. */
-  hbars(b1, shownOrigins.map((o) => ({ label: o.area, n: o.trips })), { signed: false, ...(ak ? { color: '--ink' } : {}) });
+  hbars(b1, shownOrigins.map((o) => ({ label: o.area, n: o.trips })), { signed: false, ...(ak ? { color: '--mk-fill' } : {}) });
   if (unrecorded && unrecorded.trips) {
     /* The tile above prints this same bucket as a share of every pickup in the
        window; here it was a share of `totalOrigin + unrecorded`, the rows this
@@ -470,7 +470,7 @@ function corridorsCharts(p0, pScatter, pSame, c) {
   p0.body.innerHTML = '';
   if (!between.length) empty(p0.body, 'No route between two named areas was seen three or more times in this window.');
   else {
-    hbars(p0.body, between.slice(0, 12).map((r) => ({ label: `${r.from_area} → ${r.to_area}`, n: +r.trips })), { signed: false, color: '--ink' });
+    hbars(p0.body, between.slice(0, 12).map((r) => ({ label: `${r.from_area} → ${r.to_area}`, n: +r.trips })), { signed: false, color: '--mk-fill' });
     p0.body.append(el('p', 'cap', esc(`The 12 busiest of ${fmt(between.length)} routes between two different named areas among the `
       + `${fmt(c.corridors.length)} the server sent.`)));
   }
@@ -487,7 +487,7 @@ function corridorsCharts(p0, pScatter, pSame, c) {
   pSame.body.innerHTML = '';
   const same = namedR.filter((r) => r.from_area === r.to_area).sort((a, b) => b.trips - a.trips);
   if (!same.length) empty(pSame.body, 'No route in this window starts and ends in the same named area.');
-  else hbars(pSame.body, same.slice(0, 12).map((r) => ({ label: r.from_area, n: +r.trips })), { signed: false, color: '--ink' });
+  else hbars(pSame.body, same.slice(0, 12).map((r) => ({ label: r.from_area, n: +r.trips })), { signed: false, color: '--mk-fill' });
 }
 function corridorsAbsence(root, c, t, unrecorded, pickupsAll) {
   const absHost = el('div'); root.append(absHost);

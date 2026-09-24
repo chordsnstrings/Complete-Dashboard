@@ -309,12 +309,12 @@ function provenanceCharts(root, d, inHeadline) {
   p1.body.append(el('p', 'cap', esc(`${fmt(rows.filter(inHeadline).length)} of ${fmt(rows.length)} calls are in the headline.`)));
   const share = d.rows.map((r) => ({ label: callName(r), n: r.rows_seen ? (100 * (r.restated_rows || 0)) / r.rows_seen : 0 }))
     .sort((a, b) => b.n - a.n);
-  hbars(p2.body, share, { signed: false, color: '--ink', valueFmt: (v) => pct(v, 1) });
+  hbars(p2.body, share, { signed: false, color: '--mk-fill', valueFmt: (v) => pct(v, 1) });
 }
 function provenanceNames(p3, d) {
   const top = [...d.categories].sort((a, b) => Math.abs(+b.amount || 0) - Math.abs(+a.amount || 0)).slice(0, 12);
   hbars(p3.body, top.map((c) => ({ label: `${words(c.category)} · ${sourceLabel(c.platform)} — ${+c.amount < 0 ? 'deducted' : 'paid'}`, n: +c.amount || 0 })),
-    { signed: top.some((c) => +c.amount < 0), color: '--ink', negColor: '--grey', valueFmt: (v) => money(v) });
+    { signed: top.some((c) => +c.amount < 0), color: '--mk-fill', negColor: '--mk-neg', valueFmt: (v) => money(v) });
   p3.body.append(el('p', 'cap', esc(`The ${fmt(top.length)} largest of ${fmt(d.categories.length)} named lines. `
     + (d.caveats?.categories || ''))));
 }

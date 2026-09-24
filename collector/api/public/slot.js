@@ -223,7 +223,7 @@ export async function renderSlot(root, dow, hour) {
     /* Under the contract "(no address)" is not drawn as a place — the
        caption below says how many carry none. */
     hbars(cp.body, (ak ? d.corridors.filter((r) => !/^\(no address\)$/i.test(r.place || '')) : d.corridors)
-      .map((r) => ({ label: r.place, n: r.trips })), ak ? { signed: false, color: '--ink' } : { seq: true, signed: false });
+      .map((r) => ({ label: r.place, n: r.trips })), ak ? { signed: false, color: '--mk-fill' } : { seq: true, signed: false });
     /* How much of the slot these bars actually cover. The rows are split on a
        different delimiter from the one #corridors uses, so twelve bars can
        cover a quarter of the hour's trips with the largest reading
@@ -267,7 +267,7 @@ export async function renderSlot(root, dow, hour) {
     if (ak) {
       hbars(stp.body, [...settle].sort((a, b) => b.trips - a.trips).map((r) => ({
         label: `${String(r.settlement_class || 'unclassified').replace(/_/g, ' ')}${r.revenue ? ` · ${money(r.revenue)}` : ''}`, n: r.trips })),
-      { signed: false, color: '--ink' });
+      { signed: false, color: '--mk-fill' });
     } else donut(stp.body, settle.map((r) => ({ label: r.settlement_class || 'unclassified', n: r.trips })));
     const cash = settle.find((r) => r.settlement_class === 'cash');
     if (cash) stp.body.append(el('p', 'cap',
@@ -307,7 +307,7 @@ function slotPeers(sp, d, dow, hour) {
   const per = d.peers.map((r) => ({ dow: r.dow, rate: r.days ? r.trips / r.days : null, days: r.days }))
     .filter((r) => r.rate != null);
   hbars(sp.body, per.map((r) => ({ label: `${DOW[r.dow].slice(0, 3)} · ${countOf(r.days, 'day')}`, n: +r.rate.toFixed(1), dow: r.dow })), {
-    signed: false, color: '--ink', valueFmt: (v) => fmt(v, 1),
+    signed: false, color: '--mk-fill', valueFmt: (v) => fmt(v, 1),
     onClick: (r) => { if (r.dow !== dow) location.hash = href('slot', String(r.dow), String(hour)); } });
   const mine = per.find((r) => r.dow === dow);
   const others = per.filter((r) => r.dow !== dow);
