@@ -57,12 +57,23 @@ check('…both dark blocks the dark-page one', /--logo:url\("\/brand\/mark-dark\
   && /--logo:url\("\/brand\/mark-dark\.png"\);/.test(explicit));
 check('.logo paints from the token, never a file of its own', /\.logo\{[^}]*background:var\(--logo\) center\/contain no-repeat;/.test(css));
 const files = ['brand/mark.png', 'brand/mark-dark.png', 'brand/fleetmirror-on-dark.png', 'brand/fleetmirror-on-light.png',
-  'brand/fleetmirror-transparent.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-192.png',
-  'icons/maskable-512.png', 'icons/apple-touch-icon.png'];
+  'brand/fleetmirror-transparent.png', 'icons/fleetmirror-192.png', 'icons/fleetmirror-512.png', 'icons/fleetmirror-maskable-192.png',
+  'icons/fleetmirror-maskable-512.png', 'icons/fleetmirror-apple-touch.png'];
 const missing = files.filter((f) => !existsSync(new URL(f, PUB)));
 check('every brand file is in the repository', missing.length === 0, missing.join(' '));
 const sw = read('sw.js');
 check('the service worker precaches both marks', /'\/brand\/mark\.png', '\/brand\/mark-dark\.png'/.test(sw));
+/* /icons is served immutable for a year (server.js), so a new picture needs a
+   new address: an icon replaced under its old name stays the old icon in
+   every browser that ever fetched it. */
+const iconRefs = [...html.matchAll(/href="(\/icons\/[^"]+)"/g), ...sw.matchAll(/'(\/icons\/[^']+)'/g)].map((m) => m[1])
+  .concat(manifest.icons.map((i) => i.src), (manifest.shortcuts || []).flatMap((s) => (s.icons || []).map((i) => i.src)));
+check('every icon the page, the manifest and the worker name is a FleetMirror file, under a new address',
+  iconRefs.length >= 8 && iconRefs.every((u) => /^\/icons\/fleetmirror-/.test(u) && existsSync(new URL(u.slice(1), PUB))),
+  iconRefs.join(' '));
+check('…and the old names are gone, so nothing can serve an old picture as a new one',
+  ['icon-192.png', 'icon-512.png', 'maskable-192.png', 'maskable-512.png', 'apple-touch-icon.png']
+    .every((f) => !existsSync(new URL(`icons/${f}`, PUB))));
 
 /* ── in a browser: the pixels, and the mark each theme state paints ─────── */
 const srv = mock.listen(0);
@@ -102,10 +113,10 @@ console.log('\n3 · the artwork, read pixel by pixel');
   }, files.filter((f) => f.endsWith('.png')));
   const sq = (f, n) => px[f].w === n && px[f].h === n;
   check('the icons are square at their named sizes',
-    sq('icons/icon-192.png', 192) && sq('icons/icon-512.png', 512) && sq('icons/maskable-192.png', 192)
-    && sq('icons/maskable-512.png', 512) && sq('icons/apple-touch-icon.png', 180),
+    sq('icons/fleetmirror-192.png', 192) && sq('icons/fleetmirror-512.png', 512) && sq('icons/fleetmirror-maskable-192.png', 192)
+    && sq('icons/fleetmirror-maskable-512.png', 512) && sq('icons/fleetmirror-apple-touch.png', 180),
     JSON.stringify(Object.fromEntries(Object.entries(px).map(([k, v]) => [k, `${v.w}x${v.h}`]))));
-  const onDark = ['icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-192.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png']
+  const onDark = ['icons/fleetmirror-192.png', 'icons/fleetmirror-512.png', 'icons/fleetmirror-maskable-192.png', 'icons/fleetmirror-maskable-512.png', 'icons/fleetmirror-apple-touch.png']
     .filter((f) => !(px[f].corner.join() === '21,21,19,255' && px[f].light > 0 && px[f].grey > 0 && px[f].dark > px[f].light));
   check('…each is the on-dark artwork: its dark ground, the light half and the grey half', onDark.length === 0, onDark.join(' '));
   const m = px['brand/mark.png'], md = px['brand/mark-dark.png'];

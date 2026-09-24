@@ -3277,6 +3277,14 @@ driver's 222 tracker fixes.
   pulse; `run-all.mjs` now asks `/api/trips/daily` about today and, if the
   answer is empty, leaves the squatter alone and starts its own mockapi on a
   kernel-assigned port.
+* **/icons, /fonts and /vendor are served IMMUTABLE for a year (server.js), so
+  a file changed under its old name never reaches a returning browser.** The
+  FleetMirror rebrand first replaced icon-192.png and the rest in place,
+  which would have left every browser and phone that had ever fetched them
+  showing the old icon for a year. Caught before it deployed. The icons now
+  have new names (`fleetmirror-*.png`), made by bin/make-icons.mjs from
+  `brand/fleetmirror-on-dark.png`, and `test/brand.test.mjs` fails on an old
+  name. Anything new in those three folders gets a new file name.
 * **The product is FleetMirror; "Fleet" is also a SECTION.** The brand
   (renamed 2026-09-24) is printed in index.html (`<title>`, the iOS title, the
   old rail), manifest.webmanifest, shell.js (Arkiv masthead) and m/app.js and

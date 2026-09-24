@@ -82,7 +82,7 @@ const SHELL_FILES = [
   /* The FleetMirror mark, both theme variants: the wordmark of every shell
      paints one of them, and offline it must not be a blank box. */
   '/brand/mark.png', '/brand/mark-dark.png',
-  '/icons/icon-192.png', '/icons/apple-touch-icon.png',
+  '/icons/fleetmirror-192.png', '/icons/fleetmirror-apple-touch.png',
   '/manifest.webmanifest',
 ];
 
