@@ -1449,6 +1449,48 @@ console.log('\n4.19 · Vehicle: 00 over the plate, Bookings the hero, a fare ave
   await l.close();
 }
 
+console.log('\n4.20 · The fallback: a desktop tab in the phone’s container, and the way on from a view built for a bigger screen');
+{
+  const { DESKTOP_TABS } = await import('./phone_harness.mjs');
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('charging');
+  const b = await p.page.evaluate(() => {
+    const x = [...document.querySelectorAll('.m-deck button')].find((e) => e.textContent === 'Open it on the desktop version');
+    const deck = document.querySelector('.m-deck > .m-fallback').getBoundingClientRect().width;
+    return x ? { cls: x.className, h: Math.round(x.getBoundingClientRect().height), w: Math.round(x.getBoundingClientRect().width),
+      deck: Math.round(deck), wrap: x.parentElement.getAttribute('style') } : null;
+  });
+  check('"Open it on the desktop version" is the house’s full-width 48px button, not a floating chip',
+    b && b.cls === 'm-btn' && b.h === 48 && b.w === b.deck && !b.wrap, JSON.stringify(b));
+  const o = (await outline(p.page)).filter((x) => x !== 'ak-applies');
+  check('…under the sentence that explains it, with the footer after', JSON.stringify(o) === JSON.stringify(['m-fallback', 'div', 'foot']),
+    o.join(' → '));
+  await p.page.getByRole('button', { name: 'Open it on the desktop version' }).click();
+  await p.page.waitForURL(/ui=desktop/);
+  check('…and it goes where it went: the desktop build, at the same address', /\/\?ui=desktop#charging$/.test(p.page.url()), p.page.url());
+  await p.close();
+  for (const width of [390, 360]) {
+    const t = await phonePage(browser, { skin: 'arkiv', fixture, width, height: width === 360 ? 780 : 844 });
+    const small = [];
+    let foot = true;
+    for (const route of DESKTOP_TABS) {
+      await t.open(route);
+      const r = await t.page.evaluate(() => [...document.querySelectorAll('.m-fallback .tabs a')]
+        .filter((a) => a.getBoundingClientRect().height > 0)
+        .map((a) => ({ t: a.textContent.trim(), h: Math.round(a.getBoundingClientRect().height), w: Math.round(a.getBoundingClientRect().width) })));
+      r.filter((a) => a.h < 44 || a.w < 44).forEach((a) => small.push(`${route} ${a.t} ${a.w}×${a.h}`));
+      if (!r.length) small.push(`${route}: no tab strip found`);
+      const ol = await outline(t.page);
+      if (ol[ol.length - 1] !== 'foot') foot = false;
+    }
+    check(`the desktop tab strip inside the phone is 44px each way at ${width}px`, !small.length, small.slice(0, 4).join(' | '));
+    check(`…and the page contract’s footer closes each desktop tab at ${width}px`, foot);
+    await t.close();
+  }
+  /* The desktop's own strip cannot be touched: §1 holds every selector in
+     m/arkiv-m.css to the phone's scope, and the desktop never loads it. */
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');

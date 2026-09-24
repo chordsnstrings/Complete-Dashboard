@@ -553,3 +553,16 @@
    in the reading face. */
 :root[data-skin="arkiv"][data-ui="phone"] .m-lede.ak-plate b{font-family:var(--mono);font-weight:600;
   letter-spacing:.06em;font-variant-numeric:tabular-nums}
+
+/* ── 21 · the fallback: a desktop tab inside the phone ───────────────────────
+   A driver's or a vehicle's TAB (#driver/x/earnings) is the desktop module
+   itself, rendered in .m-fallback and styled by arkiv.css — the desktop's
+   pages are converted there, not here (the plan: the phone restyles their
+   container only). One thing about that container is the phone's to own:
+   the tab strip is how a reader moves between those tabs, and arkiv.css
+   draws its links 34px tall (measured at 390px; "Trips" 27px wide), below
+   the 44px a thumb needs. Raised to 44px each way inside the phone's
+   container only, the short label centred in its target; the desktop's
+   strip is unchanged. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-fallback .tabs a{min-height:44px;min-width:44px;box-sizing:border-box;
+  justify-content:center}

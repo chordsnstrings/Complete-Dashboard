@@ -2657,12 +2657,17 @@ async function fallback(deck, ctx) {
   }
   empty(box, 'Built for a bigger screen',
     'This view is a wide table, and squeezing it onto a phone would lose the row you are reading.');
-  const b = el('button', 'm-chip');
+  /* Under the skin the one way on from here is the house's full-width 48px
+     button, left under the sentence that explains it, as on Credentials —
+     not a 44px chip floating in the middle of the screen, which is the
+     form the redesign gives a FILTER. Same words, same address. */
+  const AK = phoneContract();
+  const b = el('button', AK ? 'm-btn' : 'm-chip');
   b.type = 'button';
   b.textContent = 'Open it on the desktop version';
   b.onclick = () => { location.href = `/?ui=desktop#${[view, param, sub].filter(Boolean).join('/')}`; };
   const wrap = el('div');
-  wrap.style.cssText = 'display:flex;justify-content:center';
+  if (!AK) wrap.style.cssText = 'display:flex;justify-content:center';
   wrap.append(b);
   deck.append(wrap);
 }
