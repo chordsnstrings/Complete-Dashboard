@@ -1321,3 +1321,31 @@
 /* A channel named in a table cell, with its swatch beside the word. */
 :root[data-skin="arkiv"] .chn{white-space:nowrap}
 :root[data-skin="arkiv"] .chn .sw{margin-right:5px;vertical-align:-1px}
+
+/* ── 19 · the page phase (STEP 6) ───────────────────────────────────────────
+   Rules a converted page needs beyond the shared components, grouped by the
+   page that first needed them and namespaced by it. Nothing here is read by
+   the old skin: a page builds this markup only under contract(). */
+
+/* #insights, "What it costs to ignore": three FORMS side by side in hbars'
+   rows (SPEC §5) — a modelled bar HATCHED (a projection: .sw-proj's paper
+   stripes over the bar's own colour), a priced one solid, the never-priced
+   OUTLINED (1px grey-2, no fill: not measured). The reason sits where a
+   figure would, in grey at reading size. */
+:root[data-skin="arkiv"] .hb .fill.hb-hatch{position:relative;overflow:hidden}
+:root[data-skin="arkiv"] .hb .fill.hb-hatch::after{content:"";position:absolute;inset:1px;
+  background:repeating-linear-gradient(-45deg,var(--paper) 0 3px,
+    color-mix(in srgb,var(--paper) calc((1 - var(--hatch-a)) * 100%),transparent) 3px 4px)}
+:root[data-skin="arkiv"] .hb .fill.hb-outline,:root[data-skin="arkiv"] .ins-sw-outline{
+  background:none;box-shadow:inset 0 0 0 1px var(--abs-outline)}
+/* The reason stands in the value column, which hbars sizes to its widest
+   entry for every row (a subgrid): unwrapped, the sentence took the whole
+   row at 390px and squeezed every bar to a stub. */
+:root[data-skin="arkiv"] .ins-noprice{display:inline-block;max-width:15ch;text-align:right;
+  font-family:var(--sans);font-size:var(--t4);line-height:1.3;color:var(--grey);
+  white-space:normal;font-variant-numeric:normal}
+:root[data-skin="arkiv"] .ins-aed{font-weight:600;color:var(--ink);white-space:nowrap}
+:root[data-skin="arkiv"] .ins-aed .sw{margin-right:5px;vertical-align:-1px}
+/* #insights' ranked list: a column of ruled rows (the old skin's .hbars
+   container is hbars' grid under the skin, and put three rows on a line). */
+:root[data-skin="arkiv"] .insight-list{display:flex;flex-direction:column}

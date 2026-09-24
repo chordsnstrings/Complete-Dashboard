@@ -358,9 +358,18 @@ app.get('/api/compare/period', (req, r) => {
     change_pct: Object.fromEntries(Object.keys(now).map((k) => [k, pct(k)])),
     basis: 'Summed from driver_day — one row per driver per day carrying both the work and the money.' });
 });
-app.get('/api/insights/summary', (_, r) => r.json({ total: { n: 93, total_impact: '19800' },
+app.get('/api/insights/summary', (_, r) => r.json({ total: { n: 93, total_impact: '19800', priced_n: 0 },
   by_severity: [{ severity: 'critical', n: 85, impact: '19800' }, { severity: 'warning', n: 8, impact: null }],
   by_category: [{ category: 'utilisation', n: 55 }, { category: 'compliance', n: 35 }],
+  /* Per rule over every open finding (api/server.js), summing to total.n. */
+  by_code: [
+    { code: 'idle_vehicle', category: 'utilisation', n: 40, priced: 0, impact: null, channels: [] },
+    { code: 'vehicle_doc_expiring', category: 'compliance', n: 30, priced: 0, impact: null, channels: [] },
+    { code: 'drivers_online_no_trips', category: 'utilisation', n: 15, priced: 0, impact: null, channels: [] },
+    { code: 'licence_expired', category: 'compliance', n: 5, priced: 0, impact: null, channels: [] },
+    { code: 'cancellation_rate', category: 'revenue', n: 2, priced: 0, impact: null, channels: ['uber'] },
+    { code: 'tracker_feed_dark', category: 'data', n: 1, priced: 0, impact: null, channels: ['cabman'] },
+  ],
   // Modelled vs stored: the page must not present a projection as a record.
   modelled: false, stored_rows: 93, resolved_since_last_run: 6, duplicates_suppressed: 4,
   filter: { fleet: null, platform: null }, platform_applies: false }));

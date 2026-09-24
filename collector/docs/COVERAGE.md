@@ -6522,3 +6522,24 @@ number (5 and 5), and never a passport or RTA number.
   ruled it is not stored.
 - **Nothing about who is ONE person that this product applies.** Its groupings
   are proposals; a verdict on one is recorded and folds nobody.
+
+## Arkiv page phase — desktop: traps (2026-09-24)
+
+* **`.hbars` IS A GRID UNDER THE ARKIV SKIN, NOT A LIST.** app.css draws
+  `.hbars` as a flex column; arkiv.css makes it hbars' three-column grid
+  (label, bar, value) with each `.hb` a subgrid row. #insights used
+  `el('div', 'hbars')` as the container of its ranked rows, and under the
+  skin they fell into the grid three to a line. Anything that is not a `.hb`
+  row needs its own container class (#insights' is `.insight-list`).
+* **A shared column in hbars is sized by its widest entry, in every row.**
+  Under the skin `.hb` is a subgrid, so a sentence in one row's value slot
+  (#insights' "No cost model exists for these kinds") widens the value
+  column for all of them and squeezes every bar to a stub at 390px. Give
+  such a sentence a max width.
+* **The old skin is held byte for byte by `test/arkiv_classic_frozen`.** A
+  page converted under `contract()` must leave the classic branch's output
+  untouched, INCLUDING a truth defect found there: fix it under the contract
+  and name it, or ask the lead for a both-skins commit that re-records the
+  fixture (the test's header says how). A mock change that alters what an
+  old page renders fails it too — re-record from the base tree, never from
+  the working tree.

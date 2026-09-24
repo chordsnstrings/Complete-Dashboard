@@ -4614,14 +4614,21 @@ app.get('/api/insights/summary', wrap(async (req, res) => {
         AND i.computed_at >= r.last_run - interval '10 minutes'
       ORDER BY i.code, i.entity_type, i.entity_id, i.computed_at DESC)`;
   const P = [fleet];
-  const [bySev, byCat, [tot], [raw], [deduped]] = await Promise.all([
+  const [bySev, byCat, [tot], [raw], [deduped], byCode] = await Promise.all([
     q(`${base} SELECT severity, count(*)::int n FROM latest GROUP BY 1`, P),
     q(`${base} SELECT category, count(*)::int n FROM latest GROUP BY 1 ORDER BY 2 DESC`, P),
+    /* priced_n: how many open findings carry a cost at all. The Arkiv
+       #insights draws "never priced" as the absence outline beside the
+       modelled and measured bars, and without this count it could only have
+       counted the unpriced rows among the 200 the list serves — a partial
+       figure presented as the whole (plan §4 #insights, "What it costs to
+       ignore"). */
     q(`${base}
      SELECT count(*)::int n,
             round(sum(impact_aed) FILTER (WHERE code <> 'idle_vehicle')::numeric, 2) AS measured_impact,
             round(sum(impact_aed) FILTER (WHERE code = 'idle_vehicle')::numeric, 2) AS modelled_impact,
-            count(*) FILTER (WHERE code = 'idle_vehicle')::int AS idle_vehicles
+            count(*) FILTER (WHERE code = 'idle_vehicle')::int AS idle_vehicles,
+            count(*) FILTER (WHERE impact_aed IS NOT NULL)::int AS priced_n
      FROM latest`, P),
     q(`SELECT count(*)::int n FROM insight WHERE ($1::text IS NULL OR fleet_id = $1)`, P),
     /* The middle number: findings after de-duplication but BEFORE the
@@ -4634,9 +4641,24 @@ app.get('/api/insights/summary', wrap(async (req, res) => {
          SELECT DISTINCT ON (code, entity_type, entity_id) id
            FROM insight WHERE ($1::text IS NULL OR fleet_id = $1)
           ORDER BY code, entity_type, entity_id, computed_at DESC) d`, P),
+    /* BY RULE, over every open finding — the list is capped at 200 rows and
+       on production 202 were open, so a count taken from the rows the page
+       holds is a count of the first 200 that calls itself the fleet. Per
+       rule: how many, how many carry a cost and its sum (so a "measured"
+       total can say which rule it came from — cancellation_rate's is an
+       assumed 30% of the average fare, src/insights.js), and the channels its
+       findings name, where a finding is about a platform or a feed (a source
+       id is "cabman:ecosine", so only the part before the colon). */
+    q(`${base}
+     SELECT code, min(category) AS category, count(*)::int n,
+            count(impact_aed)::int AS priced,
+            round(sum(impact_aed)::numeric, 2) AS impact,
+            array_remove(array_agg(DISTINCT CASE WHEN entity_type IN ('platform', 'source')
+              THEN split_part(entity_id, ':', 1) END), NULL) AS channels
+       FROM latest GROUP BY code ORDER BY 3 DESC, 1`, P),
   ]);
   res.json({
-    total: tot, by_severity: bySev, by_category: byCat,
+    total: tot, by_severity: bySev, by_category: byCat, by_code: byCode,
     modelled: {
       idle_vehicles: tot?.idle_vehicles ?? 0,
       aed: tot?.modelled_impact ?? null,

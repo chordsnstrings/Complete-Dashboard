@@ -1,0 +1,184 @@
+/* The page phase, section "Today" — each page under the contract.
+   ═══════════════════════════════════════════════════════════════════════════
+   docs/UI-REDESIGN-PLAN.md §4 (Today), the operator's rulings (§1) and the
+   house principle. For every converted page: the contract's shape under the
+   skin, its figures against the answer the page itself received, its absences
+   with their true reasons, and the old skin still building the old page
+   (byte for byte is test/arkiv_classic_frozen.test.mjs's job).
+
+   Synthetic data only: the mock, and fixtures built here. */
+import { harness, shape } from './arkiv_pages.mjs';
+
+const { check, start, open, done } = harness('Arkiv page phase — Today');
+await start();
+
+/* ══ #insights ═════════════════════════════════════════════════════════════ */
+console.log('\n#insights');
+const INS_HEADS = ['At a glance', 'Ranked actions', 'By category, over all 93', 'What is open, by kind',
+  'What it costs to ignore', 'Cars off the road, by date', 'How old the licence backlog is',
+  'The cars nobody can see', 'What Uber is asking the fleet to fix', '† What this page does not know'];
+{
+  const { ctx, page, answer } = await open('arkiv', 'insights');
+  const s = await shape(page);
+  const sum = answer('/api/insights/summary');
+  const r = await page.evaluate(() => {
+    const v = document.querySelector('#view');
+    const txt = (n) => (n ? n.textContent.replace(/\s+/g, ' ').trim() : '');
+    return {
+      chips: v.querySelectorAll('.btnrow a.btn').length,
+      rows: v.querySelectorAll('[data-panel="ins-list"] .insight-list > .insight-row').length,
+      inHbars: v.querySelectorAll('[data-panel="ins-list"] .hbars .insight-row').length,
+      fold: txt(v.querySelector('[data-panel="ins-list"] .foldbtn')),
+      catRows: v.querySelectorAll('[data-panel="ins-cat"] .hb[data-click]').length,
+      kinds: [...v.querySelectorAll('[data-panel="ins-kind"] .hb')].map((h) => [txt(h.querySelector('.k')), txt(h.querySelector('.v')), !!h.querySelector('.hb-mk')]),
+      kindCap: txt(v.querySelector('[data-panel="ins-kind"] .cap')),
+      recHead: [...v.querySelectorAll('[data-panel="ins-recs"] thead th')].map(txt),
+      gaps: [...v.querySelectorAll('[data-panel="ins-recs"] tbody tr')].map((tr) => txt(tr.querySelector('.dlt, .pill'))
+        + '|' + (tr.querySelector('.dlt')?.className || '')),
+      recCap: txt(v.querySelector('[data-panel="ins-recs"] .pbody p.cap')),
+      costCap: txt(v.querySelector('[data-panel="ins-cost"] .cap')),
+      costRows: [...v.querySelectorAll('[data-panel="ins-cost"] .hb')].map((h) => h.querySelector('.fill').className),
+      docs: !!v.querySelector('[data-panel="ins-docs"] svg'), lic: !!v.querySelector('[data-panel="ins-lic"] svg'),
+      licText: txt(v.querySelector('[data-panel="ins-lic"] .pbody')),
+      darkCap: txt(v.querySelector('[data-panel="ins-dark"] .cap')),
+      aedInk: [...v.querySelectorAll('.insight-row .num')].every((n) => !/--critical|--warn/.test(n.getAttribute('style') || '')),
+    };
+  });
+  check('the section order is the plan\'s: 00, the list, category, kind, cost, documents, licences, trackers, targets, †',
+    JSON.stringify(s.heads) === JSON.stringify(INS_HEADS), JSON.stringify(s.heads));
+  check('00 leads the page and the verdict is its statement (ruling 7)', s.first === 'cband' && s.vdctIn00, s.first);
+  check('five tiles, Open actions the hero, its figure the summary\'s total',
+    s.glance === 5 && s.hero === 'Open actions' && s.values['Open actions'] === String(sum.total.n), JSON.stringify(s.values));
+  check('…with the stored count beside what was cleared', s.subs['Open actions'].includes(`${sum.stored_rows} findings stored`)
+    && s.subs['Open actions'].includes(`${sum.resolved_since_last_run} cleared`), s.subs['Open actions']);
+  check('Critical and Warnings are still the addresses of their lists (rule 3)',
+    s.hrefs.Critical === '#insights/severity/critical' && s.hrefs.Warnings === '#insights/severity/warning', JSON.stringify(s.hrefs));
+  check('a cost the summary does not carry is ABSENT with its reason, never "—"',
+    s.na['Measured cost'] === 'no open finding carries a measured cost'
+    && s.na['Idle capital, modelled'] === 'no idle car carries a modelled cost' && s.bare.length === 0, JSON.stringify(s.na));
+  check('the chip row keeps every address: All, each category, each severity', r.chips === 1 + sum.by_category.length
+    + sum.by_severity.filter((x) => ['critical', 'warning'].includes(x.severity) && x.n).length, String(r.chips));
+  check('the ranked list is its own column of rows, not hbars\' grid, every row kept and the tail folded',
+    r.rows === 7 && r.inHbars === 0 && /Show the other 1 action/i.test(r.fold), `${r.rows} ${r.inHbars} ${r.fold}`);
+  check('…and no row\'s AED wears a severity colour', r.aedInk);
+  check('02 draws every category as an address', r.catRows === sum.by_category.length, String(r.catRows));
+  check('03 draws every rule from by_code, its count and a channel\'s marker only where one channel is named',
+    r.kinds.length === sum.by_code.length && r.kinds.every(([, v], i) => v === String(sum.by_code[i].n))
+    && r.kinds.filter(([, , m]) => m).length === sum.by_code.filter((c) => c.channels.length === 1).length,
+    JSON.stringify(r.kinds));
+  check('…over every open finding, and it says so', /over every open finding/.test(r.kindCap), r.kindCap);
+  check('04 with nothing priced draws the never-priced as the OUTLINE, with the count', r.costRows.length === 1
+    && /hb-outline/.test(r.costRows[0]) && r.costCap.startsWith(`0 of ${sum.total.n} open findings carry a cost`),
+  `${JSON.stringify(r.costRows)} ${r.costCap}`);
+  check('05 is drawn from the vehicle documents', r.docs);
+  check('06 with no expired-licence finding says so rather than drawing an empty axis', !r.lic && /No open finding says a driving licence has expired/.test(r.licText), r.licText);
+  check('07 says a car with no hour count is not drawn, and why the bars are ink', /carry no hour count/.test(r.darkCap)
+    && /ink rather than a channel/.test(r.darkCap), r.darkCap);
+  check('08: the pill is a signed gap against the target', r.recHead.includes('Against the target')
+    && !r.recHead.includes('Meeting it'), JSON.stringify(r.recHead));
+  check('…acceptance under its target is a red ▼ −6.0 points; cancellation over its target a red ▲ +5.0 (down is good)',
+    /^▼\s*−6\.0/.test(r.gaps[0]) && /dlt-negative/.test(r.gaps[0]) && /^▲\s*\+5\.0/.test(r.gaps[1]) && /dlt-negative/.test(r.gaps[1]),
+    JSON.stringify(r.gaps));
+  check('…a rating over its target is a green ▲ +0.12', /\+0\.12/.test(r.gaps[2]) && /positive/.test(r.gaps[2]), r.gaps[2]);
+  check('the † band has its four cells, the first sizing the priced share',
+    s.abs.length === 4 && s.abs[0].fig === `0 of ${sum.total.n}` && s.abs[1].none && s.abs[2].fig === 'None', JSON.stringify(s.abs));
+  check('two highlights: the hero, and the absence band\'s sized figure', s.hl === 2, String(s.hl));
+  check('the colophon says the page is not windowed and counts what is open', /Not windowed/.test(s.colophon)
+    && s.colophon.includes(`${sum.total.n} open`), s.colophon);
+  check('the provenance line is the footer\'s basis', s.srcInFoot);
+  check('no sideways scroll at 1440', s.overflowX <= 0, String(s.overflowX));
+  await ctx.close();
+}
+/* A target with no figure on one side: missingTarget() read the null as 0
+   and printed "on target" (plan §4 #insights, FIX rule 4). */
+{
+  const { ctx, page } = await open('arkiv', 'insights', { fixtures: {
+    '/api/recommendations': (_q, real) => ({ ...real, rows: [...real.rows,
+      { platform: 'uber', rec_type: 'TRIP_COMPLETION', period_start: null, period_end: null,
+        org_value: null, target_value: null, flagged_count: 2, flagged: [] }] }),
+  } });
+  const r = await page.evaluate(() => ({
+    last: document.querySelector('[data-panel="ins-recs"] tbody tr:last-child')?.textContent || '',
+    cap: document.querySelector('[data-panel="ins-recs"] .pbody p.cap')?.textContent || '',
+  }));
+  check('a target with no published figure reads "no target published", never "on target"',
+    /no target published/i.test(r.last) && !/on target/i.test(r.last), r.last);
+  check('…and the caption counts only the targets with both figures', /targets with both figures/.test(r.cap)
+    && /1 carry no published figure/.test(r.cap), r.cap);
+  await ctx.close();
+}
+/* Priced findings: the tile says which rules priced its figure and on what
+   assumption, and the cost chart puts the three forms side by side. */
+const PRICED = {
+  total: { n: 93, measured_impact: '397.68', modelled_impact: '23520.00', idle_vehicles: 14, priced_n: 15 },
+  by_severity: [{ severity: 'critical', n: 85 }, { severity: 'warning', n: 8 }],
+  by_category: [{ category: 'utilisation', n: 55 }, { category: 'compliance', n: 35 }, { category: 'revenue', n: 3 }],
+  by_code: [
+    { code: 'idle_vehicle', category: 'utilisation', n: 55, priced: 14, impact: '23520.00', channels: [] },
+    { code: 'vehicle_doc_expiring', category: 'compliance', n: 35, priced: 0, impact: null, channels: [] },
+    { code: 'cancellation_rate', category: 'revenue', n: 3, priced: 1, impact: '397.68', channels: ['bolt'] },
+  ],
+  modelled: { idle_vehicles: 14, aed: '23520.00', assumption: 'AED 120.00 per vehicle per day of holding cost, over a 14-day lookback' },
+  stored_rows: 608, duplicates_suppressed: 0, resolved_since_last_run: 413,
+};
+{
+  const LIC = (q, real) => (q.code === 'licence_expired' ? { ...real, truncated: false, insights: [5, 40, 200, 400, 401]
+    .map((d, i) => ({ code: 'licence_expired', severity: 'critical', category: 'compliance', entity_type: 'driver',
+      entity_id: `drv-${i}`, title: 't', action: 'a', metric: -d, impact_aed: null })) } : real);
+  const { ctx, page } = await open('arkiv', 'insights', { fixtures: { '/api/insights/summary': PRICED, '/api/insights': LIC } });
+  const s = await shape(page);
+  const lic = await page.evaluate(() => ({
+    bars: document.querySelectorAll('[data-panel="ins-lic"] svg rect.bar, [data-panel="ins-lic"] svg path.bar').length,
+    cap: document.querySelector('[data-panel="ins-lic"] .pbody .cap')?.textContent || '' }));
+  check('06 buckets the days past expiry and names the newest and oldest lapse, and #compliance\'s people count',
+    /5 expired-licence findings: the newest lapsed 5 days ago, the oldest 401 days/.test(lic.cap)
+    && /#compliance counts \d+ people with an expired licence/.test(lic.cap), lic.cap);
+  const r = await page.evaluate(() => [...document.querySelectorAll('[data-panel="ins-cost"] .hb')].map((h) => ({
+    k: h.querySelector('.k').textContent.trim(), form: h.querySelector('.fill').className,
+    v: h.querySelector('.v').textContent.trim(), mk: !!h.querySelector('.hb-mk') })));
+  check('Measured cost is the summary\'s figure, and says it holds an assumed 30%',
+    s.values['Measured cost'] === 'AED 397.68' && /assumed 30%/.test(s.subs['Measured cost']), JSON.stringify([s.values, s.subs['Measured cost']]));
+  check('04: modelled HATCHED, the priced rule solid with its channel\'s marker, the unpriced 78 OUTLINED',
+    r.length === 3 && /hb-hatch/.test(r[0].form) && r[0].v === 'AED 23,520.00'
+    && /hb-solid/.test(r[1].form) && r[1].mk && r[1].v === 'AED 397.68'
+    && /hb-outline/.test(r[2].form) && r[2].k === 'The other 78 open findings' && /No cost model/.test(r[2].v), JSON.stringify(r));
+  check('the † band sizes the assumption inside the measured figure', s.abs[3].fig === 'AED 397.68'
+    && /assumed 30%/.test(s.abs[3].why), JSON.stringify(s.abs[3]));
+  check('…and the priced share', s.abs[0].fig === '15 of 93', s.abs[0].fig);
+  await ctx.close();
+}
+/* A server without by_code (production until this branch deploys), and a
+   capped list: the page counts the rows it holds and SAYS they are partial —
+   and never claims "none open" for what it cannot see. */
+{
+  const noCode = (_q, real) => { const { by_code: _drop, ...rest } = real; return { ...rest, total: { n: 93 } }; };
+  const { ctx, page } = await open('arkiv', 'insights', { fixtures: {
+    '/api/insights/summary': noCode,
+    '/api/insights': (q, real) => (Object.keys(q).some((k) => ['code', 'category', 'severity'].includes(k)) ? real
+      : { ...real, truncated: true, limit: 7 }),
+  } });
+  const s = await shape(page);
+  const cap = await page.evaluate(() => document.querySelector('[data-panel="ins-kind"] .cap')?.textContent || '');
+  check('by kind, counted from the served rows, says it is partial', /this server does not count by kind, so the chart is partial/.test(cap)
+    && /the 7 rows the list serves, of 93 open/.test(cap), cap);
+  check('…the priced share is Not counted, with the reason', s.abs[0].fig === 'Not counted'
+    && /does not count how many open findings carry a cost/.test(s.abs[0].why), JSON.stringify(s.abs[0]));
+  check('…and the cancellation assumption is Not counted rather than "None open"', s.abs[3].fig === 'Not counted', JSON.stringify(s.abs[3]));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('classic', 'insights');
+  const s = await shape(page);
+  const r = await page.evaluate(() => ({
+    list: document.querySelectorAll('#view .hbars > .insight-row').length,
+    pills: [...document.querySelectorAll('#view tbody .pill')].map((p) => p.textContent),
+  }));
+  check('the old skin keeps today\'s page: a kpiRow of five, no 00, no † band, no highlight',
+    s.first === 'kpis' && s.kpiRows === 1 && s.glance === 0 && s.abs.length === 0 && s.hl === 0, JSON.stringify(s));
+  check('…its two panels, the list in .hbars, the targets as pills', JSON.stringify(s.heads)
+    === JSON.stringify(['Ranked actions', 'What Uber is asking the fleet to fix']) && r.list === 7
+    && r.pills.join() === 'below target,below target,on target', JSON.stringify([s.heads, r]));
+  await ctx.close();
+}
+
+await done();

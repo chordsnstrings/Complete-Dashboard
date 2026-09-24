@@ -10,7 +10,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   sourceLabel, sourceToken, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
   markTallTables, kpiTile, fitKpis, UBER_FARE_WHY,
-  contract, glance, secHead, absenceBand, pageFoot, clearPageFoot, highlight, swatch,
+  contract, glance, secHead, absenceBand, pageFoot, clearPageFoot, highlight, swatch, delta,
   SEG_SOURCES, SEG_SOURCE_LABEL, bySourceLine } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
@@ -4766,27 +4766,30 @@ V.map = async (root) => {
    what it costs to leave alone. Severity is a claim, so each row shows the evidence
    that produced it — a dashboard that asserts without showing its working gets
    ignored the first time it is wrong. */
-V.insights = async (root) => {
-  const kh = el('div', 'kpis'); root.append(kh); loading(kh);
+/* Two orders of one page until the operator flips the default skin (the page
+   phase, plan §4 #insights): the old skin's page, and the page contract under
+   the skin. Everything a figure, a row or a link is built from is shared —
+   the tiles (insightsTiles), the chips (insightsChips), the verdict
+   (insightsVerdict), each ranked row (insightRow) and the targets table's
+   columns (recColumns) — so the two cannot disagree about a number. */
+V.insights = async (root) => (contract() ? insightsContract(root) : insightsClassic(root));
 
-  const [sum, page] = await Promise.all([
-    api('/api/insights/summary').catch(() => null),
-    api('/api/insights').catch(() => ({ insights: [] })),
-  ]);
-  const all = page.insights || [];
-
-  const bySev = Object.fromEntries((sum?.by_severity || []).map((r) => [r.severity, r.n]));
-  /* A modelled figure and a measured one do not belong in one total. The old
-     "Quantified cost" tile summed impact_aed across the whole table, and the
-     only rule that sets it sets a constant — fourteen days at an assumed AED
-     120 — so the headline was (number of runs) x (idle vehicles) x 1,680. It
-     read AED 1,424,592. */
-  const measured = Number(sum?.total?.measured_impact || 0);
-  const modelled = sum?.modelled || {};
-  /* The two severity tiles are the shortest route to "show me the critical
-     ones", and the endpoint has always accepted `severity`. They were plain
-     divs, so the only way to that list was to know the query string. */
-  kh.innerHTML = [
+/* A modelled figure and a measured one do not belong in one total. The old
+   "Quantified cost" tile summed impact_aed across the whole table, and the
+   only rule that sets it sets a constant — fourteen days at an assumed AED
+   120 — so the headline was (number of runs) x (idle vehicles) x 1,680. It
+   read AED 1,424,592. */
+const insightsMoney = (sum) => ({ measured: Number(sum?.total?.measured_impact || 0), modelled: sum?.modelled || {} });
+const insightsFacet = () => {
+  const kind = state.param === 'severity' ? 'severity' : (state.param ? 'category' : null);
+  return { kind, value: kind === 'severity' ? state.sub : state.param };
+};
+/* The two severity tiles are the shortest route to "show me the critical
+   ones", and the endpoint has always accepted `severity`. They were plain
+   divs, so the only way to that list was to know the query string. */
+function insightsTiles(sum, all, bySev) {
+  const { measured, modelled } = insightsMoney(sum);
+  return [
     /* Two different suppressions, and merging them told the reader the wrong
        one: a duplicate is a copy of a finding that is still true, and a
        resolved finding is one the rule has stopped emitting since it last
@@ -4804,29 +4807,21 @@ V.insights = async (root) => {
       'only findings that carry a real figure'],
     ['Idle capital, modelled', modelled.aed ? money(modelled.aed) : '—',
       modelled.assumption || 'an assumption, not a measurement', 'warn'],
-  ].map(([l, n, d, cls, link]) =>
-    kpiTile({ label: l, html: n, sub: d, tone: cls || null, to: link || null, who: false })).join('');
-
-  if (!all.length) {
-    const p0 = panel('Nothing to do right now', 'The engine runs after each collection'); root.append(p0.panel);
-    empty(p0.body, 'No findings yet — either the fleet is clean, or the collectors have not completed a cycle.');
-    return;
-  }
-
-  /* Category chips from the SUMMARY, not from the page. Built from the visible
-     rows they offered exactly two buttons — "All (200)" and one category —
-     because 200 duplicates of a single rule had consumed every slot, and the
-     operator had no way to know the other categories existed. */
+  ].map(([l, n, d, cls, link]) => ({ label: l, html: n, sub: d, tone: cls || null, to: link || null, who: false }));
+}
+/* Category chips from the SUMMARY, not from the page. Built from the visible
+   rows they offered exactly two buttons — "All (200)" and one category —
+   because 200 duplicates of a single rule had consumed every slot, and the
+   operator had no way to know the other categories existed. */
+/* The chips are ADDRESSES. They were buttons that mutated the panel and left
+   the hash alone, so a filtered list — a 29-row safety list, say — could not
+   be sent to the safety lead. `#insights/<category>` and
+   `#insights/severity/<level>` are real destinations. */
+function insightsChips(sum, all, bySev, kind, value) {
   const catCounts = Object.fromEntries((sum?.by_category || []).map((r) => [r.category, r.n]));
   const cats = Object.keys(catCounts).length
     ? Object.keys(catCounts).sort()
     : [...new Set(all.map((r) => r.category))].sort();
-  /* The chips are ADDRESSES. They were buttons that mutated the panel and left
-     the hash alone, so a filtered list — a 29-row safety list, say — could not
-     be sent to the safety lead. `#insights/<category>` and
-     `#insights/severity/<level>` are real destinations. */
-  const kind = state.param === 'severity' ? 'severity' : (state.param ? 'category' : null);
-  const value = kind === 'severity' ? state.sub : state.param;
   const bar = el('div', 'panel');
   bar.innerHTML = '<div class="btnrow">'
     + `<a class="btn${value ? '' : ' primary'}" href="${href('insights')}">All (${fmt(sum?.total?.n ?? all.length)})</a>`
@@ -4837,77 +4832,62 @@ V.insights = async (root) => {
       `<a class="btn${kind === 'severity' && value === s2 ? ' primary' : ''}" `
       + `href="${href('insights', 'severity', s2)}">${esc(s2)} (${fmt(bySev[s2])})</a>`).join('')
     + '</div>';
-  root.append(bar);
-  if (value) {
-    const clr = el('p', 'cap');
-    clr.innerHTML = `Filtered to <b>${esc(kind)} = ${esc(value)}</b> — this address carries the filter, `
-      + `so it can be sent. <a class="lnk" href="${href('insights')}">Show everything</a>`;
-    root.append(clr);
-  }
-  if (page.truncated) {
-    root.append(note(`Showing the first ${fmt(page.limit)} of ${fmt(sum?.total?.n ?? '?')} findings, `
-      + 'most severe first. Use a category above to narrow it rather than scrolling.'));
-  }
-
-  /* Fields read off /api/insights on production: {insights, truncated, limit,
-     filter}, and a row carries severity, category, title, action, impact_aed
-     and impact_kind. */
-  {
-    const bySev2 = all.reduce((a, r) => ((a[r.severity] = (a[r.severity] || 0) + 1), a), {});
-    const crit = bySev2.critical || 0;
-    const top = all.find((r) => r.severity === 'critical') || all[0];
-    verdict(root, {
-      claim: crit
-        ? `${countOf(crit, 'thing')} ${crit === 1 ? 'needs' : 'need'} doing today`
-        : all.length ? `${countOf(all.length, 'open action')}, none of them urgent`
-          : 'Nothing is flagged',
-      figure: measured ? money(measured) : fmt(all.length),
-      unit: measured ? 'a month, quantified' : 'open actions',
-      tone: crit ? 'bad' : (bySev2.warning ? 'warn' : null),
-      meta: `${fmt(sum?.total?.n ?? all.length)} open`,
-      sub: (top ? `The one at the top: ${top.title}. ` : '')
-        + (measured
-          ? 'Only the items with arithmetic behind them are in that figure — the rest are real and unpriced.'
-          : 'None of the open items carry a size, so there is nothing to total.')
-        + (page?.truncated ? ` The list is capped at ${fmt(page.limit)}.` : ''),
-    });
-  }
-
-  const listPanel = panel('Ranked actions', 'Biggest first. Click any row for the evidence behind it');
-  root.append(listPanel.panel);
-
-  const SEV = { critical: 'err', warning: 'warn', info: 'info', good: 'ok' };
-  // A finding names an entity; the entity has a page. Every row leads there.
-  const ENTITY_VIEW = { vehicle: 'vehicle', driver: 'driver', partner: 'property' };
-
-  const draw = async () => {
-    loading(listPanel.body);
-    /* Refetched per facet rather than filtered client-side: the page holds
-       at most 200 rows, so filtering them locally showed a category's first few
-       findings and called it the category. */
-    let rows = all;
-    if (value) {
-      const qs = kind === 'severity'
-        ? `severity=${encodeURIComponent(value)}` : `category=${encodeURIComponent(value)}`;
-      try { rows = (await api(`/api/insights?${qs}`)).insights || []; }
-      catch { rows = all.filter((r) => (kind === 'severity' ? r.severity : r.category) === value); }
-    }
-    listPanel.body.innerHTML = '';
-    if (!rows.length) {
-      return empty(listPanel.body, value
-        ? `No open finding with ${kind} “${value}”. That is a real answer — nothing is being hidden by `
-          + 'a date range, because this list is over the current state of the fleet rather than a window.'
-        : 'Nothing to action');
-    }
-    const list = el('div', 'hbars');
-    rows.forEach((r) => {
-      const view = ENTITY_VIEW[r.entity_type];
-      const item = el('a', 'insight-row');
-      // An address, so the evidence for one finding can be sent to somebody.
-      item.href = href('action', r.code, r.entity_id || '-');
-      const modelled = r.impact_kind === 'modelled' || r.code === 'idle_vehicle';
-      item.innerHTML = `
-        <div class="insight-sev"><span class="tag ${SEV[r.severity] || ''}">${esc(r.severity)}</span></div>
+  return bar;
+}
+const insightsFiltered = (kind, value) => {
+  const clr = el('p', 'cap');
+  clr.innerHTML = `Filtered to <b>${esc(kind)} = ${esc(value)}</b> — this address carries the filter, `
+    + `so it can be sent. <a class="lnk" href="${href('insights')}">Show everything</a>`;
+  return clr;
+};
+const insightsTruncated = (page, sum) => note(`Showing the first ${fmt(page.limit)} of ${fmt(sum?.total?.n ?? '?')} findings, `
+  + 'most severe first. Use a category above to narrow it rather than scrolling.');
+/* Fields read off /api/insights on production: {insights, truncated, limit,
+   filter}, and a row carries severity, category, title, action, impact_aed
+   and impact_kind. */
+function insightsVerdict(all, sum, measured, page) {
+  const bySev2 = all.reduce((a, r) => ((a[r.severity] = (a[r.severity] || 0) + 1), a), {});
+  const crit = bySev2.critical || 0;
+  const top = all.find((r) => r.severity === 'critical') || all[0];
+  return {
+    claim: crit
+      ? `${countOf(crit, 'thing')} ${crit === 1 ? 'needs' : 'need'} doing today`
+      : all.length ? `${countOf(all.length, 'open action')}, none of them urgent`
+        : 'Nothing is flagged',
+    figure: measured ? money(measured) : fmt(all.length),
+    unit: measured ? 'a month, quantified' : 'open actions',
+    tone: crit ? 'bad' : (bySev2.warning ? 'warn' : null),
+    meta: `${fmt(sum?.total?.n ?? all.length)} open`,
+    sub: (top ? `The one at the top: ${top.title}. ` : '')
+      + (measured
+        ? 'Only the items with arithmetic behind them are in that figure — the rest are real and unpriced.'
+        : 'None of the open items carry a size, so there is nothing to total.')
+      + (page?.truncated ? ` The list is capped at ${fmt(page.limit)}.` : ''),
+  };
+}
+const INSIGHT_SEV = { critical: 'err', warning: 'warn', info: 'info', good: 'ok' };
+// A finding names an entity; the entity has a page. Every row leads there.
+const INSIGHT_ENTITY_VIEW = { vehicle: 'vehicle', driver: 'driver', partner: 'property' };
+/* One ranked row. The old skin colours the AED by kind (--warn modelled,
+   --critical measured); under the contract a figure's digits stay ink (SPEC
+   L4) and a modelled one keeps its star and gains the hatch swatch that
+   means "projected" everywhere else on the page. */
+function insightRow(r, { ink = false } = {}) {
+  const view = INSIGHT_ENTITY_VIEW[r.entity_type];
+  const item = el('a', 'insight-row');
+  // An address, so the evidence for one finding can be sent to somebody.
+  item.href = href('action', r.code, r.entity_id || '-');
+  const modelled = r.impact_kind === 'modelled' || r.code === 'idle_vehicle';
+  const aed = !r.impact_aed ? ''
+    : ink
+      ? `<span class="num ins-aed" title="${modelled ? 'a modelled figure, not a measurement' : 'measured'}">`
+        + `${modelled ? '<i class="sw sw-proj" style="background:var(--ink)" aria-hidden="true"></i>' : ''}`
+        + `${money(r.impact_aed)}${modelled ? ' *' : ''}</span>`
+      : `<span class="num" style="color:var(${modelled ? '--warn' : '--critical'});font-weight:600" `
+        + `title="${modelled ? 'a modelled figure, not a measurement' : 'measured'}">`
+        + `${money(r.impact_aed)}${modelled ? ' *' : ''}</span>`;
+  item.innerHTML = `
+        <div class="insight-sev"><span class="tag ${INSIGHT_SEV[r.severity] || ''}">${esc(r.severity)}</span></div>
         <div class="insight-main">
           <div class="insight-title">${esc(r.title)}</div>
           <div class="insight-action">${esc(r.action || '')}</div>
@@ -4920,27 +4900,131 @@ V.insights = async (root) => {
               : `<span class="tag">${esc(r.category)}</span>`}
           ${r.fleet_id ? `<span class="tag dim">${esc(sourceLabel(r.fleet_id))}</span>` : ''}
           ${r.metric != null ? `<span class="dim num" title="the figure this rule fired on">${fmt(r.metric, 2)}</span>` : ''}
-          ${r.impact_aed
-    ? `<span class="num" style="color:var(${modelled ? '--warn' : '--critical'});font-weight:600" `
-              + `title="${modelled ? 'a modelled figure, not a measurement' : 'measured'}">`
-              + `${money(r.impact_aed)}${modelled ? ' *' : ''}</span>`
-    : ''}
+          ${aed}
         </div>`;
-      list.append(item);
-    });
-    /* 24,270px of cards. Each carries a claim, a size, the arithmetic behind
-       the size and a link to the evidence — right for the ones being acted on,
-       and unreadable for all of them at once. The list is ranked, so the first
-       few ARE the ones to act on. */
-    foldChildren(listPanel.body, list,
-      { shown: 6, total: rows.length, noun: 'action', key: 'insights' });
-    if (rows.some((r) => r.impact_kind === 'modelled' || r.code === 'idle_vehicle')) {
-      listPanel.body.append(el('p', 'cap',
-        '* a modelled figure — what it would cost if an assumption holds — never a measurement, and '
-        + 'never added to the measured ones.'));
-    }
-  };
-  draw();
+  return item;
+}
+/* The ranked list, refetched per facet rather than filtered client-side: the
+   page holds at most 200 rows, so filtering them locally showed a category's
+   first few findings and called it the category. */
+/* `cls` is the list's container. The old skin's is `.hbars`, which is a flex
+   column there; under the skin `.hbars` is hbars' three-column grid (label,
+   bar, value), and the ranked rows fell into it three to a line — so the
+   contract gives the list its own block container. */
+async function insightsList(listPanel, all, kind, value, { ink = false, cls = 'hbars' } = {}) {
+  loading(listPanel.body);
+  let rows = all;
+  if (value) {
+    const qs = kind === 'severity'
+      ? `severity=${encodeURIComponent(value)}` : `category=${encodeURIComponent(value)}`;
+    try { rows = (await api(`/api/insights?${qs}`)).insights || []; }
+    catch { rows = all.filter((r) => (kind === 'severity' ? r.severity : r.category) === value); }
+  }
+  listPanel.body.innerHTML = '';
+  if (!rows.length) {
+    return empty(listPanel.body, value
+      ? `No open finding with ${kind} “${value}”. That is a real answer — nothing is being hidden by `
+        + 'a date range, because this list is over the current state of the fleet rather than a window.'
+      : 'Nothing to action');
+  }
+  const list = el('div', cls);
+  rows.forEach((r) => list.append(insightRow(r, { ink })));
+  /* 24,270px of cards. Each carries a claim, a size, the arithmetic behind
+     the size and a link to the evidence — right for the ones being acted on,
+     and unreadable for all of them at once. The list is ranked, so the first
+     few ARE the ones to act on. */
+  foldChildren(listPanel.body, list,
+    { shown: 6, total: rows.length, noun: 'action', key: 'insights' });
+  if (rows.some((r) => r.impact_kind === 'modelled' || r.code === 'idle_vehicle')) {
+    listPanel.body.append(el('p', 'cap',
+      '* a modelled figure — what it would cost if an assumption holds — never a measurement, and '
+      + 'never added to the measured ones.'));
+  }
+}
+/* The targets table's columns. `strict` is the contract's "Against the
+   target" column in place of the pill: a signed gap with its reference named
+   (ruling 4), and "no target published" whenever EITHER figure is missing —
+   missingTarget() reads a null through Number() as 0, so a row carrying no
+   figures at all printed "on target" (plan §4 #insights, FIX rule 4). */
+function recColumns({ strict = false } = {}) {
+  return [
+    { label: 'Platform', key: 'platform', render: (r) => (strict ? `<span class="chn">${swatch(r.platform)}${esc(sourceLabel(r.platform))}</span>`
+      : sourceLabel(r.platform)) },
+    /* Two columns were both headed "Target": the name of the measure and the
+       number to beat. And the name arrived as Uber's own enum, so the cell
+       read RECOMMENDATION TYPE ORG ACCEPTANCE RATE — the protobuf constant
+       with its underscores swapped for spaces, which is not English. */
+    { label: 'Measure', key: 'rec_type', render: (r) => {
+      const raw = String(r.rec_type || '');
+      if (!raw) return '—';
+      const t = raw.replace(/^RECOMMENDATION_TYPE_/, '').replace(/^ORG_/, '')
+        .toLowerCase().replace(/_/g, ' ');
+      return esc(t.charAt(0).toUpperCase() + t.slice(1));
+    } },
+    { label: 'Period', key: '_p', render: (r) => (r.period_start
+      ? `${dayStr(r.period_start)} → ${dayStr(r.period_end)}` : 'current') },
+    { label: 'Fleet is at', key: 'org_value', num: true, render: (r) => pctOf(r.org_value) },
+    { label: 'Uber wants', key: 'target_value', num: true, render: (r) => pctOf(r.target_value) },
+    /* `flagged` is a JSON ARRAY of the drivers Uber named. `r.flagged ? …`
+       is therefore true for every row, including an empty array — so every
+       target was marked "below target", including the ones being met. The
+       comparison has to be between the two numbers. */
+    strict
+      ? { label: 'Against the target', key: '_gap', num: true, sortValue: (r) => targetGap(r)?.value ?? null,
+        render: (r) => {
+          const g = targetGap(r);
+          return g == null ? pill('no target published', '')
+            : delta(g.value, { kind: 'gap', of: 'against the target', unit: g.unit, d: g.d, invert: g.invert });
+        } }
+      : { label: 'Meeting it', key: 'm', render: (r) => {
+        const behind = missingTarget(r);
+        return behind == null ? pill('no target published', '')
+          : behind ? pill('below target', 'bad') : pill('on target', 'ok');
+      } },
+    { label: 'Drivers named', key: 'flagged_count', num: true,
+      render: (r) => (r.flagged_count != null ? fmt(r.flagged_count) : '—') },
+  ];
+}
+/* A target's gap, or null when either side is missing. A fraction pair is a
+   gap in percentage POINTS; a rating is a gap in its own units. */
+const hasFig = (v) => v != null && v !== '' && Number.isFinite(Number(v));
+function targetGap(r) {
+  if (!hasFig(r.org_value) || !hasFig(r.target_value)) return null;
+  const org = Number(r.org_value), target = Number(r.target_value);
+  const frac = org <= 1 && target <= 1;
+  return { value: frac ? (org - target) * 100 : org - target, unit: frac ? 'points' : '',
+    d: frac ? 1 : 2, invert: /cancel/i.test(String(r.rec_type || '')) };
+}
+
+async function insightsClassic(root) {
+  const kh = el('div', 'kpis'); root.append(kh); loading(kh);
+
+  const [sum, page] = await Promise.all([
+    api('/api/insights/summary').catch(() => null),
+    api('/api/insights').catch(() => ({ insights: [] })),
+  ]);
+  const all = page.insights || [];
+
+  const bySev = Object.fromEntries((sum?.by_severity || []).map((r) => [r.severity, r.n]));
+  const { measured } = insightsMoney(sum);
+  kh.innerHTML = insightsTiles(sum, all, bySev).map(kpiTile).join('');
+
+  if (!all.length) {
+    const p0 = panel('Nothing to do right now', 'The engine runs after each collection'); root.append(p0.panel);
+    empty(p0.body, 'No findings yet — either the fleet is clean, or the collectors have not completed a cycle.');
+    return;
+  }
+
+  const { kind, value } = insightsFacet();
+  root.append(insightsChips(sum, all, bySev, kind, value));
+  if (value) root.append(insightsFiltered(kind, value));
+  if (page.truncated) root.append(insightsTruncated(page, sum));
+
+  verdict(root, insightsVerdict(all, sum, measured, page));
+
+  const listPanel = panel('Ranked actions', 'Biggest first. Click any row for the evidence behind it');
+  root.append(listPanel.panel);
+  insightsList(listPanel, all, kind, value);
 
   /* What the platform itself is asking for. These are Uber's own targets for
      the org — acceptance, cancellation, ratings — and they carry weight the
@@ -4958,35 +5042,7 @@ V.insights = async (root) => {
   if (!recs.length) {
     rec.body.append(note('No platform recommendations collected. Uber publishes these per org; they appear once the fleet-portal collector has run against an account that can see them.'));
   } else {
-    rec.body.append(tableFrom(recs, [
-      { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
-      /* Two columns were both headed "Target": the name of the measure and the
-         number to beat. And the name arrived as Uber's own enum, so the cell
-         read RECOMMENDATION TYPE ORG ACCEPTANCE RATE — the protobuf constant
-         with its underscores swapped for spaces, which is not English. */
-      { label: 'Measure', key: 'rec_type', render: (r) => {
-        const raw = String(r.rec_type || '');
-        if (!raw) return '—';
-        const t = raw.replace(/^RECOMMENDATION_TYPE_/, '').replace(/^ORG_/, '')
-          .toLowerCase().replace(/_/g, ' ');
-        return esc(t.charAt(0).toUpperCase() + t.slice(1));
-      } },
-      { label: 'Period', key: '_p', render: (r) => (r.period_start
-        ? `${dayStr(r.period_start)} → ${dayStr(r.period_end)}` : 'current') },
-      { label: 'Fleet is at', key: 'org_value', num: true, render: (r) => pctOf(r.org_value) },
-      { label: 'Uber wants', key: 'target_value', num: true, render: (r) => pctOf(r.target_value) },
-      /* `flagged` is a JSON ARRAY of the drivers Uber named. `r.flagged ? …`
-         is therefore true for every row, including an empty array — so every
-         target was marked "below target", including the ones being met. The
-         comparison has to be between the two numbers. */
-      { label: 'Meeting it', key: 'm', render: (r) => {
-        const behind = missingTarget(r);
-        return behind == null ? pill('no target published', '')
-          : behind ? pill('below target', 'bad') : pill('on target', 'ok');
-      } },
-      { label: 'Drivers named', key: 'flagged_count', num: true,
-        render: (r) => (r.flagged_count != null ? fmt(r.flagged_count) : '—') },
-    ], { sortable: true, sortId: 'recs' }));
+    rec.body.append(tableFrom(recs, recColumns(), { sortable: true, sortId: 'recs' }));
     const behind = recs.filter((r) => missingTarget(r) === true);
     // One row per platform and target type — the live one — so this count is
     // over the whole population rather than over a page of it.
@@ -4995,7 +5051,357 @@ V.insights = async (root) => {
         + `open a driver's Quality page to see their own acceptance and cancellation figures.`
       : `All ${recs.length} current targets are being met.`));
   }
+}
+
+/* ── #insights under the page contract (plan §4 #insights) ─────────────────
+   In SPEC §1's order, keeping every working part of the old page (rules 1, 3):
+
+     00  AT A GLANCE — the verdict as the page's statement (ruling 7), then
+         the five tiles: Open actions the hero (with the stored count beside
+         what was cleared, in ink — nothing records whether a PERSON cleared
+         anything), Critical and Warnings still addresses of their filtered
+         lists, Measured cost saying which rules priced it and on what
+         assumption (the plan's FIX: cancellation_rate is an assumed 30% of
+         the average fare, src/insights.js), Idle capital with its assumption.
+     —   the chip row, the filter line and the truncation note, unchanged:
+         they are the addresses of every filtered list.
+     01  Ranked actions — row for row the old list (the operator's work
+         queue), the AED in ink with the modelled star and a hatch swatch.
+     02  By category, over ALL open findings (/api/insights/summary), each
+         bar the address of its list.
+     03  What is open, by kind — per rule over all open findings
+         (/api/insights/summary .by_code, added for this page), a channel's
+         marker where every finding of the kind names that one channel.
+     04  What it costs to ignore — modelled HATCHED, each measured rule
+         solid, the never-priced OUTLINED with its reason
+         (.by_code, .modelled, .total.priced_n).
+     05  Cars off the road, by date (/api/compliance/vehicles).
+     06  How old the licence backlog is (/api/insights?code=licence_expired,
+         against the people #compliance counts).
+     07  The cars nobody can see (/api/insights?code=stale_tracker).
+     08  What Uber is asking — the same table, the pill a signed gap against
+         the target, and a missing figure "no target published" (FIX).
+     †   four cells, each with its true reason.
+
+   NOT ADOPTED, each for its reason: the mockup's charts-only page (the list
+   is the work queue); folding Critical/Warnings into a sub-line (it loses
+   two one-click lists); the "Trip volume" tile (one finding, its counts only
+   in prose — it belongs on #demand); a green "better" chip on cleared
+   findings (a closure is not known to be good news); colouring 07 by feed
+   (the feed is only in the detail sentence, and parsing prose was rejected
+   by the plan — src/insights.js would have to write it into refs). */
+const INSIGHT_CODE_LABEL = {
+  idle_vehicle: 'Car reporting but not earning', vehicle_dormant: 'Car dormant — no booking at all',
+  utilisation_not_measured: 'Utilisation cannot be measured', low_utilisation: 'Car earning in few of its online hours',
+  licence_data_unreliable: 'Licence dates unreliable', licence_expired: 'Driving licence expired',
+  licence_expiring: 'Driving licence expiring', unsafe_driving: 'Harsh driving',
+  deadhead_waste: 'Driving empty between jobs', volume_trend: 'Trip volume changing',
+  tracker_feed_dark: 'A whole tracker feed went dark', stale_tracker: 'Tracker silent',
+  cancellation_rate: 'A channel cancels above 10%', weather_rain: 'Rain ahead', weather_heat: 'Extreme heat ahead',
+  partner_concentration: 'One partner carries the revenue', vehicle_doc_expired: 'Vehicle document expired',
+  vehicle_doc_expiring: 'Vehicle document expiring', drivers_online_no_trips: 'Online, nothing completed',
+  below_target_acceptance: 'Under the acceptance target', above_target_cancellation: 'Over the cancellation target',
+  low_tip_rate: 'Low tip rate',
 };
+const insightCodeLabel = (c) => INSIGHT_CODE_LABEL[c] || sentence(String(c || '').replace(/_/g, ' '));
+/* How each rule that sets impact_aed sizes it (src/insights.js). A "measured"
+   total that does not say this is claiming three different things are one. */
+const INSIGHT_COST_BASIS = {
+  cancellation_rate: 'cancellations × the average fare × an assumed 30%',
+  low_utilisation: 'hours online without a fare × the car\'s own earnings per hour',
+  partner_concentration: 'the leading partner\'s fares — revenue at risk, not a loss',
+};
+const INSIGHT_CAT_GLOSS = {
+  compliance: 'papers, licences', data: 'a feed or a tracker is dark', utilisation: 'a car not working',
+  safety: 'driving events', revenue: 'cancels, partners', demand: 'volume, weather', cost: 'empty driving',
+};
+async function insightsContract(root) {
+  const gen = currentGen();
+  const band = el('section', 'cband');
+  const vHost = el('div');
+  const tiles = el('div');
+  band.append(secHead('00', 'At a glance', 'The fleet as it stands — not windowed'), vHost, tiles);
+  root.append(band);
+  loading(tiles);
+
+  const [sum, page] = await Promise.all([
+    api('/api/insights/summary').catch(() => null),
+    api('/api/insights').catch(() => ({ insights: [] })),
+  ]);
+  if (!alive(gen)) return;
+  const all = page.insights || [];
+  const bySev = Object.fromEntries((sum?.by_severity || []).map((r) => [r.severity, r.n]));
+  const { measured, modelled } = insightsMoney(sum);
+  const total = Number(sum?.total?.n ?? all.length);
+  /* Per rule, from the summary (over every open finding). A server without
+     .by_code — production until this branch is deployed — gets the same
+     shape counted from the rows the list serves, and `partial` says whether
+     those rows are all of them: the list is capped at 200, and a count over
+     the first 200 that does not say so is a partial figure dressed as the
+     fleet (plan §4 #insights). */
+  const kindsOf = (rows) => {
+    const m = new Map();
+    rows.forEach((r) => {
+      const c = m.get(r.code) || { code: r.code, category: r.category, n: 0, priced: 0, impact: null, channels: new Set() };
+      c.n += 1;
+      if (hasFig(r.impact_aed)) { c.priced += 1; c.impact = (c.impact || 0) + Number(r.impact_aed); }
+      if ((r.entity_type === 'platform' || r.entity_type === 'source') && r.entity_id) c.channels.add(String(r.entity_id).split(':')[0]);
+      m.set(r.code, c);
+    });
+    return [...m.values()].map((c) => ({ ...c, channels: [...c.channels] }))
+      .sort((a, b) => b.n - a.n || String(a.code).localeCompare(String(b.code)));
+  };
+  const byCode = Array.isArray(sum?.by_code) ? sum.by_code : kindsOf(all);
+  const partial = !Array.isArray(sum?.by_code) && !!page.truncated;
+  const servedWord = `the ${fmt(all.length)} rows the list serves, of ${fmt(total)} open`;
+  const pricedN = sum?.total?.priced_n != null ? Number(sum.total.priced_n)
+    : partial ? null : byCode.reduce((a, r) => a + (Number(r.priced) || 0), 0);
+  const measuredRules = byCode.filter((r) => r.code !== 'idle_vehicle' && Number(r.impact) > 0);
+
+  /* ── 00 · the statement, then the tiles ──────────────────────────────── */
+  verdict(vHost, insightsVerdict(all, sum, measured, page));
+  const t = Object.fromEntries(insightsTiles(sum, all, bySev).map((x) => [x.label, x]));
+  const open = { ...t['Open actions'], hero: true,
+    sub: [t['Open actions'].sub, sum?.stored_rows != null ? `${fmt(sum.stored_rows)} findings stored` : null]
+      .filter(Boolean).join(' · ') };
+  const measuredTile = measured
+    ? { ...t['Measured cost'], sub: measuredRules.length
+      ? measuredRules.map((r) => `${insightCodeLabel(r.code)}: ${INSIGHT_COST_BASIS[r.code] || 'as the rule prices it'}`).join(' · ')
+        + (partial ? ` (the rules read off ${servedWord})` : '')
+      : t['Measured cost'].sub }
+    : { ...t['Measured cost'], na: sum ? 'no open finding carries a measured cost' : 'the summary did not load', sub: null };
+  const idleTile = modelled.aed
+    ? t['Idle capital, modelled']
+    : { ...t['Idle capital, modelled'], na: 'no idle car carries a modelled cost', sub: modelled.assumption || null };
+  glance(tiles, [open, t.Critical, t.Warnings, measuredTile, idleTile]);
+
+  if (!all.length) {
+    const p0 = panel('Nothing to do right now', 'The engine runs after each collection'); root.append(p0.panel);
+    empty(p0.body, 'No findings yet — either the fleet is clean, or the collectors have not completed a cycle.');
+    return;
+  }
+
+  /* ── the chips, the filter line, the cap — the list's addresses ───────── */
+  const { kind, value } = insightsFacet();
+  root.append(insightsChips(sum, all, bySev, kind, value));
+  if (value) root.append(insightsFiltered(kind, value));
+  if (page.truncated) root.append(insightsTruncated(page, sum));
+
+  /* ── 01 · the work queue ─────────────────────────────────────────────── */
+  const listPanel = panel('Ranked actions', 'Most severe first. Click any row for the evidence behind it', 'ins-list');
+  root.append(listPanel.panel);
+  const g1 = el('div', 'grid g2'); root.append(g1);
+  const cat = panel(`By category, over all ${fmt(total)}`, 'Click a bar for its list. The only cut on this page the 200-row cap does not touch.', 'ins-cat');
+  const code = panel('What is open, by kind', null, 'ins-kind');
+  g1.append(cat.panel, code.panel);
+  const cost = panel('What it costs to ignore', null, 'ins-cost'); root.append(cost.panel);
+  const g2 = el('div', 'grid g2'); root.append(g2);
+  const docs = panel('Cars off the road, by date', null, 'ins-docs');
+  const lic = panel('How old the licence backlog is', null, 'ins-lic');
+  g2.append(docs.panel, lic.panel);
+  const dark = panel('The cars nobody can see', null, 'ins-dark'); root.append(dark.panel);
+  const rec = panel('What Uber is asking the fleet to fix',
+    'Targets the platform sets for the org. Falling short affects trip allocation, so these are not advisory.', 'ins-recs');
+  root.append(rec.panel);
+  const absHost = el('div'); root.append(absHost);
+  [code.body, docs.body, lic.body, dark.body, rec.body].forEach((b) => loading(b));
+  insightsList(listPanel, all, kind, value, { ink: true, cls: 'insight-list' });
+
+  /* ── 02 · by category ────────────────────────────────────────────────── */
+  const cats = (sum?.by_category || []).filter((r) => Number(r.n) > 0);
+  if (!cats.length) empty(cat.body, 'The summary carries no count by category.');
+  else {
+    hbars(cat.body, cats.map((r) => ({ ...r, label: INSIGHT_CAT_GLOSS[r.category]
+      ? `${sentence(r.category)} — ${INSIGHT_CAT_GLOSS[r.category]}` : sentence(r.category) })),
+    { signed: false, shareOf: (d) => (total ? `${(d.n / total * 100).toFixed(1)}%` : null),
+      onClick: (d) => { location.hash = href('insights', d.category); } });
+  }
+
+  const [recRes, cv, licRes, staleRes, drv] = await Promise.all([
+    api('/api/recommendations').catch(() => ({ rows: [] })),
+    api('/api/compliance/vehicles').catch(() => null),
+    api('/api/insights?code=licence_expired').catch(() => null),
+    api('/api/insights?code=stale_tracker').catch(() => null),
+    api('/api/compliance/drivers').catch(() => null),
+  ]);
+  if (!alive(gen)) return;
+
+  /* ── 03 · what is open, by kind ──────────────────────────────────────── */
+  if (!byCode.length) empty(code.body, 'No open finding.');
+  else {
+    const one = (r) => (Array.isArray(r.channels) && r.channels.length === 1 ? r.channels[0] : null);
+    hbars(code.body, byCode.map((r) => ({ ...r, label: insightCodeLabel(r.code), ch: one(r) })),
+      { signed: false, colorFor: (d) => (d.ch ? sourceToken(d.ch) : null) });
+    const named = byCode.filter((r) => one(r)).length;
+    const counted = byCode.reduce((a, r) => a + (Number(r.n) || 0), 0);
+    code.body.append(el('p', 'cap', esc(`${countOf(byCode.length, 'kind')}, ${fmt(counted)} findings, `
+      + (partial ? `counted over ${servedWord} — this server does not count by kind, so the chart is partial. `
+        : 'over every open finding. ')
+      + (named ? `A marker where every finding of the kind names one channel (${fmt(named)} of them); `
+        + 'the rest are about a car, a driver or the fleet and name none.' : 'No kind here names a channel.'))));
+  }
+
+  /* ── 04 · what it costs to ignore ────────────────────────────────────── */
+  {
+    const rows = [];
+    if (Number(modelled.aed) > 0) {
+      rows.push({ label: `Modelled · ${countOf(modelled.idle_vehicles || 0, 'car')} not earning`, aed: Number(modelled.aed), form: 'hatch' });
+    }
+    if (!partial) {
+      measuredRules.forEach((r) => rows.push({ label: `Measured · ${insightCodeLabel(r.code)}`, aed: Number(r.impact),
+        form: 'solid', ch: Array.isArray(r.channels) && r.channels.length === 1 ? r.channels[0] : null }));
+    } else if (measured) rows.push({ label: 'Measured, every rule', aed: measured, form: 'solid' });
+    const unpriced = pricedN == null ? null : total - pricedN;
+    if (unpriced) rows.push({ label: `The other ${fmt(unpriced)} open findings`, aed: null, form: 'outline' });
+    const max = Math.max(...rows.map((r) => r.aed || 0), 1);
+    const wrap = el('div', 'hbars ins-costbars');
+    rows.forEach((r) => {
+      const row = el('div', 'hb');
+      const w = r.aed == null ? 24 : Math.max(r.aed / max * 100, 0.6);
+      const mk = r.ch ? `<i class="hb-mk" style="background:var(--c-${channelKey(r.ch)})"></i>` : '';
+      row.innerHTML = `${mk}<div class="k">${esc(r.label)}</div>
+        <div class="track"><div class="fill hb-${r.form}" style="width:${w.toFixed(1)}%;${r.form === 'outline' ? ''
+    : `background:var(${r.ch ? `--c-${channelKey(r.ch)}` : '--ink'})`}"></div></div>
+        <div class="v num">${r.aed == null ? '<span class="ins-noprice">No cost model exists for these kinds</span>' : esc(money(r.aed))}</div>`;
+      wrap.append(row);
+    });
+    if (!rows.length) empty(cost.body, pricedN == null ? 'The summary carries no priced count.' : 'No open finding carries a cost.');
+    else {
+      cost.body.append(wrap);
+      const key = el('div', 'legend');
+      key.innerHTML = [
+        rows.some((r) => r.form === 'hatch') ? '<span><i class="sw sw-proj" style="background:var(--ink)"></i>modelled — a projection</span>' : '',
+        rows.some((r) => r.form === 'solid') ? '<span><i class="sw" style="background:var(--ink)"></i>priced by the rule</span>' : '',
+        rows.some((r) => r.form === 'outline') ? '<span><i class="sw ins-sw-outline"></i>never priced</span>' : '',
+      ].join('');
+      cost.body.append(key);
+      cost.body.append(el('p', 'cap', esc(pricedN == null
+        ? 'This server does not count how many open findings carry a cost, so the unpriced ones are not drawn.'
+        : `${fmt(pricedN)} of ${fmt(total)} open findings carry a cost. Modelled and priced are never added together: `
+          + 'one is a constant times a count, the other is what each rule measured and assumed.')));
+    }
+  }
+
+  /* ── 05 · cars off the road, by date ─────────────────────────────────── */
+  if (!cv || !Array.isArray(cv.rows)) empty(docs.body, 'The vehicle documents did not load.');
+  else {
+    const dl = (r) => (hasFig(r.days_left) ? Number(r.days_left) : null);
+    const ahead = cv.rows.map(dl).filter((d) => d != null && d >= 0 && d <= 45);
+    if (!ahead.length) empty(docs.body, 'No vehicle document expires inside 45 days.');
+    else {
+      const line = Array.from({ length: 46 }, (_, i) => ({ d: `${i}d`, n: ahead.filter((x) => x <= i).length }));
+      areaChart(docs.body, line, { x: 'd', y: 'n', color: '--ink', aria: 'Vehicle documents expiring by days from today' });
+      const vt = cv.totals || {};
+      const first = Math.min(...ahead);
+      docs.body.append(el('p', 'cap', esc([
+        `Days from today, counting up: the first document lapses in ${countOf(first, 'day')}; `
+          + `${fmt(ahead.filter((x) => x <= 7).length)} by day 7, ${fmt(ahead.length)} by day 45.`,
+        vt.expired ? `${fmt(vt.expired)} have already expired and are off the road now — not on this line.` : '',
+        cv.truncated ? `Drawn from the ${fmt(cv.shown ?? cv.rows.length)} documents the list serves, of ${fmt(vt.total)}; `
+          + `the database counts ${fmt((vt.within_7 || 0) + (vt.within_45 || 0))} inside 45 days.` : '',
+      ].filter(Boolean).join(' '))));
+    }
+  }
+
+  /* ── 06 · how old the licence backlog is ─────────────────────────────── */
+  {
+    const rows = (licRes?.insights || []).filter((r) => r.code === 'licence_expired');
+    const past = rows.map((r) => (hasFig(r.metric) ? -Number(r.metric) : null)).filter((d) => d != null && d >= 0);
+    if (!licRes) empty(lic.body, 'The licence findings did not load.');
+    else if (!rows.length) empty(lic.body, 'No open finding says a driving licence has expired.');
+    else {
+      const B = [['0–30 days', 0, 30], ['31–90', 31, 90], ['91–180', 91, 180], ['181–365', 181, 365], ['Over a year', 366, Infinity]];
+      barChart(lic.body, B.map(([label, a, b]) => ({ label, n: past.filter((d) => d >= a && d <= b).length })),
+        { x: 'label', y: 'n', color: '--ink', label: 'licences', aria: 'Expired licences by days past expiry' });
+      const people = drv?.people_totals?.expired;
+      lic.body.append(el('p', 'cap', esc([
+        `Days past expiry, ${countOf(rows.length, 'expired-licence finding')}`
+          + (past.length ? `: the newest lapsed ${countOf(Math.min(...past), 'day')} ago, the oldest ${countOf(Math.max(...past), 'day')}.` : '.'),
+        past.length < rows.length ? `${fmt(rows.length - past.length)} carry no day count and are not drawn.` : '',
+        people != null ? `#compliance counts ${countOf(people, 'person', 'people')} with an expired licence — one person `
+          + 'with two platform accounts is one there and can be two findings here.' : '',
+        licRes.truncated ? `The rule's list is capped at ${fmt(licRes.limit)}.` : '',
+      ].filter(Boolean).join(' '))));
+    }
+  }
+
+  /* ── 07 · the cars nobody can see ────────────────────────────────────── */
+  {
+    const rows = (staleRes?.insights || []).filter((r) => r.code === 'stale_tracker');
+    const timed = rows.filter((r) => hasFig(r.metric)).sort((a, b) => Number(b.metric) - Number(a.metric));
+    if (!staleRes) empty(dark.body, 'The silent-tracker findings did not load.');
+    else if (!rows.length) empty(dark.body, 'Every tracked car has reported recently — no silent-tracker finding is open.');
+    else {
+      if (timed.length) {
+        hbars(dark.body, timed.map((r) => ({ label: r.entity_id, n: Number(r.metric), plate: r.entity_id })),
+          { signed: false, valueFmt: (v) => `${fmt(v)} h`,
+            onClick: (d) => { location.hash = href('vehicle', d.plate); } });
+      }
+      dark.body.append(el('p', 'cap', esc([
+        `Hours since the tracker last filed a position, ${countOf(rows.length, 'car')}`
+          + (timed.length ? `; the longest ${fmt(Number(timed[0].metric))} h.` : '.'),
+        rows.length > timed.length ? `${fmt(rows.length - timed.length)} carry no hour count and are not drawn.` : '',
+        'Which feed each car reports through is written only in the finding\'s sentence, not in a field, so the bars '
+          + 'are ink rather than a channel\'s colour.',
+      ].filter(Boolean).join(' '))));
+    }
+  }
+
+  /* ── 08 · what Uber is asking ────────────────────────────────────────── */
+  const recs = Array.isArray(recRes) ? recRes : (recRes.rows || []);
+  rec.body.innerHTML = '';
+  if (!recs.length) {
+    rec.body.append(note('No platform recommendations collected. Uber publishes these per org; they appear once the fleet-portal collector has run against an account that can see them.'));
+  } else {
+    rec.body.append(tableFrom(recs, recColumns({ strict: true }), { sortable: true, sortId: 'recs' }));
+    const both = recs.filter((r) => targetGap(r) != null);
+    const behind = both.filter((r) => missingTarget(r) === true);
+    rec.body.append(el('p', 'cap', esc([
+      both.length
+        ? (behind.length ? `${behind.length} of the ${both.length} targets with both figures are not being met. Each names the drivers `
+          + 'behind it — open a driver\'s Quality page to see their own acceptance and cancellation figures.'
+          : `All ${both.length} targets with both figures are being met.`)
+        : 'No target carries both figures, so none can be judged.',
+      recs.length > both.length ? `${fmt(recs.length - both.length)} carry no published figure on one side and are not judged.` : '',
+    ].filter(Boolean).join(' '))));
+  }
+
+  /* ── † what this page does not know ──────────────────────────────────── */
+  const canc = byCode.find((r) => r.code === 'cancellation_rate');
+  const cancKnown = Number(canc?.impact) > 0 || !partial;
+  const cleared = Number(sum?.resolved_since_last_run || 0);
+  absenceBand(absHost, [
+    { label: 'Findings carrying a cost', hl: true,
+      fig: pricedN == null ? null : `${fmt(pricedN)} of ${fmt(total)}`, none: 'Not counted',
+      why: pricedN == null ? 'This server does not count how many open findings carry a cost.'
+        : 'The rest are real and unpriced: no cost model exists for their kinds, so the list is ranked by '
+          + 'severity and never by a number invented to sort on.' },
+    { label: cleared ? `Who cleared the ${fmt(cleared)}` : 'Who clears a finding', fig: null, none: 'Not recorded',
+      why: 'The payload carries no actor and no acknowledgement. A finding leaves the list when its rule stops '
+        + 'finding it at the next run — nothing records whether a person acted or the fact simply changed.' },
+    { label: 'Which feed raised a compliance item', fig: null, none: 'None',
+      why: 'A compliance item is raised by a date passing, not by a feed: the dates come from the roster and the '
+        + 'vehicle documents, so such an item names no channel.' },
+    { label: 'The assumption inside Measured cost', fig: Number(canc?.impact) > 0 ? money(canc.impact) : null,
+      none: cancKnown ? 'None open' : 'Not counted',
+      why: Number(canc?.impact) > 0
+        ? 'Of the Measured cost, this is cancellation_rate\'s: each cancelled job priced at an assumed 30% of the '
+          + 'average fare (src/insights.js) — an assumption inside a figure the tile calls measured.'
+          + (partial ? ` Read off ${servedWord}.` : '')
+        : cancKnown
+          ? 'No open cancellation finding carries a cost. When one does, it is an assumed 30% of the average fare '
+            + '(src/insights.js), and this cell sizes it.'
+          : `This server does not total cost by rule, and none of ${servedWord} is a priced cancellation finding. `
+            + 'When one is, its cost is an assumed 30% of the average fare (src/insights.js).' },
+  ]);
+
+  pageFoot({ colophon: [
+    'Not windowed · the fleet as it stands',
+    `${fmt(total)} open · ${fmt(bySev.critical || 0)} critical · ${fmt(bySev.warning || 0)} warnings`,
+    [measured ? `${money(measured)} priced` : null, Number(modelled.aed) > 0 ? `${money(modelled.aed)} modelled` : null]
+      .filter(Boolean).join(' · '),
+  ] }, root);
+}
 
 /* Compliance is the one place where the data is unambiguous: a date, and a vehicle
    that is either legal or not. Sorted by urgency, not by plate. */

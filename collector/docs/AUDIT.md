@@ -1449,3 +1449,18 @@ page's normalised DOM with the base's; a route whose hash moved has its HTML
 written to `$TMPDIR` for a diff. It replaces the per-step pixel harness for
 the DOM half of "the old skin did not move"; a pixel pass is still the proof
 for CSS, and the page phase changes no old-skin CSS.
+
+### #insights — 2026-09-24
+
+Production data through live-ui :8611, `?skin=arkiv` and `?skin=classic`, at
+1440 and 390, light and dark (8 full-page shots, scratchpad
+`pagephase/shots/insights/`). No page error, no sideways scroll, two
+highlights (the hero, the priced share). Found and fixed before commit: the
+ranked rows three to a line under the skin (the list sat in `.hbars`, which
+the skin makes hbars' grid); at 390 the "No cost model exists" sentence in
+the cost chart's value column squeezed every bar to a stub (the column is
+shared by every row); and against a server without `.by_code` the absence
+band said "None open" about a cancellation cost it could not see — a reason
+that was not the true one. On production today the list is not capped (197
+open), so the by-kind and cost charts are complete even before the server
+change deploys; the page says so either way.
