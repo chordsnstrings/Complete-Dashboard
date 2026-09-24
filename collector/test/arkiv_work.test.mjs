@@ -617,4 +617,73 @@ if (want('slot')) {
   }
 }
 
+/* ══ #trip ════════════════════════════════════════════════════════════════ */
+if (want('trip')) {
+  console.log('\n#trip');
+  {
+    const { ctx, page } = await open('classic', 'trip/hotel/h-mock-1');
+    check('old skin: no 00 band', !(await page.$('#view .cband')));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'trip/hotel/h-mock-1');
+    const s = await shape(page);
+    const T = answer('/api/trip');
+    const t = T.trip, tm = T.trip_money;
+    check('the fare is the hero with its tier and payment route', s.hero === 'Fare' && s.values.Fare === aed(t.price) && /on account/.test(s.subs.Fare), JSON.stringify([s.values.Fare, s.subs.Fare]));
+    check('the driver\'s earnings from the payments report', s.values['The driver earned'] === aed(tm.earnings), s.values['The driver earned']);
+    const fx = T.telemetry.filter((f) => f.seat_occupied != null);
+    check('the rider in the car is the seat sensor\'s reading', s.values['Rider in the car'] === `${fx.filter((f) => f.seat_occupied).length} of ${fx.length}`, s.values['Rider in the car']);
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const resid = +(tm.fare + (tm.service_fee || 0) - tm.earnings).toFixed(2);
+    check('† the residual between fare and earnings is computed, not asserted', ab['Why the fare and the earnings do not meet']?.fig === aed(resid), JSON.stringify(ab['Why the fare and the earnings do not meet']));
+    check('the money table is kept', (await txtOf(page, '#view')).includes('What this trip earned'));
+    await ctx.close();
+  }
+  {
+    /* The production shape, synthetic values: FMS sends a seat COUNT and a
+       null seat_occupied, and a speed only while moving; a second feed
+       (CABMAN) whose fixes are all stationary. Both first-draft defects were
+       found on this shape and neither shows on the mock's own two fixes. */
+    const fx = (t, src, speed, extra) => ({ captured_at: `2026-08-14T${t}:00.000Z`, lat: 25.2, lng: 55.3, speed,
+      status: speed == null ? 'Idle' : 'Moving', ignition: true, source: src, seat_occupied: null, ...extra });
+    const tele = [fx('04:30', 'fms', null, { seat_count: 0 }), fx('04:36', 'fms', 62, { seat_count: 1 }),
+      fx('04:42', 'fms', 88, { seat_count: 1 }), fx('04:48', 'fms', null, { seat_count: null }),
+      fx('04:33', 'cabman', null, { seat_occupied: true }), fx('04:39', 'cabman', null, { seat_occupied: false }),
+      /* Uber's driver-status rows, as production returns them among the
+         fixes: a status, no position, no speed, no seat. */
+      { captured_at: '2026-08-14T04:50:00.000Z', lat: null, lng: null, speed: null, status: 'ONLINE', seat_occupied: null,
+        seat_count: null, ignition: null, source: 'uber' }];
+    /* And no trip_money, as on every non-Uber booking in production. */
+    const { ctx, page } = await open('arkiv', 'trip/hotel/h-mock-1', { fixtures: { '/api/trip': (q, real) => ({ ...real, telemetry: tele, trip_money: null }) } });
+    const s = await shape(page);
+    check('an FMS fix\'s seat COUNT is its seat reading (1 or more occupied), as the fixes table reads it',
+      s.values['Rider in the car'] === '3 of 5', s.values['Rider in the car']);
+    const sp = await page.evaluate(() => { const p = document.querySelector('[data-panel="trip-speed"]');
+      return { charts: p.querySelectorAll('svg').length, text: p.textContent, feeds: [...p.querySelectorAll('p.cap > b')].map((b) => b.textContent) }; });
+    check('one speed chart per feed that moved — the all-stationary feed says so in a sentence', sp.charts === 1
+      && /CABMAN — 2 fixes, none carrying a speed: this tracker reports one only while the vehicle moves/.test(sp.text)
+      && /Uber — 1 fix, none carrying a speed: this feed sends a status, not a speed/.test(sp.text), JSON.stringify([sp.charts, sp.text.slice(-260)]));
+    check('a hotel booking\'s earnings are ABSENT for the true reason — the channel reports a price and no breakdown; there is no payments report to lack a row',
+      /Hotel reports a price and no breakdown/.test(s.na['The driver earned'] || '') && !/payments report/.test(s.na['The driver earned'] || ''),
+      s.na['The driver earned']);
+    check('each feed is named as the fixes table\'s Feed column names it, never "provider not recorded"', sp.feeds.some((f) => /^FMS/.test(f))
+      && sp.feeds.includes('CABMAN') && sp.feeds.includes('Uber') && !/provider not recorded/.test(sp.text), JSON.stringify(sp.feeds));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'trip/uber/u-mock-1');
+    const s = await shape(page);
+    check('an Uber booking\'s fare is ABSENT with the channel\'s reason, never a dash — the reason alone, the tier and payment its sub',
+      /^(Uber prices no trip — see the day’s payout below|no fare on this booking)$/.test(s.na.Fare || ''), JSON.stringify([s.na.Fare, s.subs.Fare]));
+    check('…and no tile prints a bare dash', !s.bare.length, JSON.stringify(s.bare));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'trip/hotel/h-mock-1', { width: 390 });
+    check('#trip at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

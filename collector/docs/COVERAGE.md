@@ -6654,3 +6654,26 @@ number (5 and 5), and never a passport or RTA number.
   figure alone is `.vdct-fig > b`. A test comparing tile values with
   `.vdct-fig`'s text can never find a match and passes whatever the page
   does.
+
+* **`/api/trip`'s `telemetry` mixes three kinds of row.** FMS fixes carry a
+  seat COUNT in `seat_count` (occupied at 1 or more) and a null
+  `seat_occupied`; CABMAN DT fixes carry `seat_occupied`; and Uber's
+  driver-status rows arrive as fixes too — `source: 'uber'`, status
+  "ONLINE", no position, no speed, no seat. A page reading `seat_occupied`
+  alone calls every FMS fix unread; a page treating every row as a tracker
+  fix explains Uber's missing speed with the tracker's rule. FMS and CABMAN
+  send a speed only while the vehicle moves.
+* **`/api/trip`'s `segments` are one row per PROVIDER's reading.** FMS live
+  and FMS trip each report the same occupied interval, so the row count is
+  not a ride count.
+* **`segSourceLabel` takes a segment ROW, not a source key.** Given a
+  string it prints "provider not recorded". A fix's feed is a plain key and
+  is named with `sourceLabel`, as the fixes table's Feed column does.
+* **`trip_money` on `/api/trip` is Uber's payments report only**
+  (`raw.uber_payments`, api/trip_routes.js). Every other channel reports a
+  price and no breakdown, so its absence there is not "no row in the
+  payments report".
+* **`test/trip_raw_redaction` slices `trip.js` from "What the provider
+  actually sent" to the END of the file** and asserts no `panel(` in that
+  slice. Helpers appended at the module end read as a new panel inside the
+  raw block; put them above `renderTrip` (declarations hoist).

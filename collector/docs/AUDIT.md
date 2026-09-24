@@ -1769,3 +1769,17 @@ Production (This month), both skins at 1440 and 390, light and dark
 (scratchpad `pagephase/shots/slot/`): no error, no sideways scroll. 238
 trips on Tuesdays at 19:00; per occurrence Tuesday carries 59.5 against a
 50.2 mean of the other weekdays (+19%); the busiest person holds 7 (2.9%).
+
+### #trip — 2026-09-24
+
+Production, a hotel booking and an Uber booking of the day, both skins at
+1440 and 390, light and dark (scratchpad `pagephase/shots/trip/`): no
+error, no sideways scroll. The hotel booking: fare AED 108.96, 33.9 km, 40
+min request to end, 6 of 10 fixes with the seat occupied; FMS telematics
+drew 10 fixes (4 stationary), and Uber's driver-status feed contributed 2
+rows with no speed and no position. The Uber booking: fare and earnings
+absent with Uber's own reasons. Found by looking and fixed before commit:
+both feeds labelled "provider not recorded"; every FMS fix read as no seat
+reading; the occupancy count doubled by two FMS providers; the hotel
+earnings' reason naming a payments report that channel does not have; the
+Uber fare's reason drawn at display size at 390.
