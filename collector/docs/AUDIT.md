@@ -1969,3 +1969,15 @@ peak of 265 in Oct 2025, the low 92 in Dec 2024; 20 stopped (▲ +6 on Jul
 a typical run of 8 months over 246 leavers, the 170 still working 14 months
 in. Seen and not changed: the flow chart's axis text is drawn in a fixed
 viewBox and scales up at 1440 in both skins.
+
+### #compliance — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/compliance/`): no error, no sideways scroll, no
+whole-dirham amount. 50 people with a lapsed licence (the verdict; 275
+people over 438 records): none drove this week, within 30 or 90 days; 15
+longer ago; 35 with no driving we can see. 0 vehicle papers expired, 3 in
+7 days (the hero), 23 in 45; 4 people expiring in 45 days; 2 whose records
+disagree. By channel: Uber 160 records, none dated; Yango 146, all dated;
+Hotel 132 — 94 on the default date, 38 undated. 232 people carry a date
+that can be checked, 50 of them lapsed.

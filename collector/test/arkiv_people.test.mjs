@@ -1125,4 +1125,72 @@ if (want('retention')) {
   }
 }
 
+/* ══ #compliance ══════════════════════════════════════════════════════════ */
+if (want('compliance')) {
+  console.log('\n#compliance');
+  {
+    const { ctx, page } = await open('classic', 'compliance');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      rec: [...document.querySelectorAll('#view .kpis > .kpi .l')].some((l) => /Licence dates that are a default|No licence date on file/.test(l.textContent)),
+      tags: document.querySelectorAll('#view td .tag.err, #view td .tag.warn, #view td .tag.ok').length }));
+    check('old skin: no band, the record-level tiles in the row, Due and State as coloured tags', !r.band && r.rec && r.tags > 0, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'compliance');
+    const s = await shape(page);
+    const V = answer('/api/compliance/vehicles');
+    const D = answer('/api/compliance/drivers');
+    const P = D.people || [];
+    const pt = D.people_totals || {};
+    const dt = D.totals || {};
+    const n = (v) => (+v || 0).toLocaleString('en-US');
+    check('00: the verdict in the band; the record-level tiles are not tiles', s.vdctIn00
+      && !('Licence dates that are a default' in s.values) && !('No licence date on file' in s.values), JSON.stringify(s.values));
+    const f = await vfig(page);
+    const vExp = (V.totals || {}).expired ?? 0;
+    const dExp = pt.expired ?? 0;
+    const folded = vExp || dExp ? (!vExp ? 'Drivers who cannot legally work' : !dExp ? 'Vehicle docs expired' : null) : null;
+    check('ruling 7 by name: the tile the verdict IS folds into it; the rest stay', (!folded || !(folded in s.values))
+      && (folded === 'Vehicle docs expired' || s.values['Vehicle docs expired'] === n(vExp))
+      && (folded === 'Drivers who cannot legally work' || !P.length || s.values['Drivers who cannot legally work'] === n(dExp)), JSON.stringify([f, folded, s.values]));
+    check('the hero is never a nought at display size', s.values[s.hero] !== '0', JSON.stringify([s.hero, s.values[s.hero]]));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const rec = (k) => (k === 1 ? '1 record' : `${n(k)} records`);
+    check('†: the default dates and the dateless records sized, in records; the basis and withheld-number notes moved there',
+      (D.placeholder_rows ? ab['Licence dates that are a default']?.fig === rec(D.placeholder_rows) : ab['Licence dates that are a default']?.none)
+      && (dt.no_date_at_all ? ab['No licence date on file']?.fig === rec(dt.no_date_at_all) : ab['No licence date on file']?.none)
+      && (!D.person_basis_note || ab['Who is a person']?.why === D.person_basis_note), JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    const loose = await page.evaluate(() => [...document.querySelectorAll('#view > .note')].map((x) => x.textContent.slice(0, 50)));
+    check('those notes are not also printed loose above the tables', !D.person_basis_note || !loose.some((x) => D.person_basis_note.startsWith(x.slice(0, 40))), JSON.stringify(loose));
+    const cells = await page.evaluate(() => ({ tags: document.querySelectorAll('#view td .tag.err, #view td .tag.warn, #view td .tag.ok').length,
+      expired: [...document.querySelectorAll('#view td span[style*="--sem-neg"]')].map((x) => x.textContent).slice(0, 3) }));
+    const anyExp = P.some((x) => x.licence_status !== 'unknown' && +x.days_left < 0) || (V.rows || []).some((r) => +r.days_left < 0);
+    check('Due and State as words: "expired · −N d" in the negative colour, no coloured tags', cells.tags === 0
+      && (!anyExp || cells.expired.every((t) => /^expired( · −[\d,]+ d)?$/.test(t)) && cells.expired.length > 0), JSON.stringify(cells));
+    const exp = P.filter((x) => x.licence_status !== 'unknown' && +x.days_left < 0);
+    const eb = await page.evaluate(() => [...document.querySelectorAll('[data-panel="compl-expired"] .hb .v')].map((v) => +v.textContent.replace(/,/g, '')));
+    check('01 (new): the expired people by when each last drove — every one of them in a bar', !exp.length || eb.reduce((a, x) => a + x, 0) === exp.length, JSON.stringify([eb, exp.length]));
+    const ch = await page.evaluate(() => [...document.querySelectorAll('[data-panel="compl-chan"] tbody tr')].map((tr) => [...tr.children].map((td) => td.textContent.trim())));
+    const recs = P.reduce((a, x) => a + (x.accounts || []).length, 0);
+    check('02 (new): licence records by channel — dated, the default, none — summing to every record listed', ch.length > 0
+      && ch.reduce((a, r) => a + +r[1].replace(/,/g, ''), 0) === recs && ch.every((r) => +r[2] + +r[3] + +r[4] === +r[1]), JSON.stringify(ch));
+    const ok = P.filter((x) => x.licence_status !== 'unknown' && x.days_left != null).length;
+    const db = await page.evaluate(() => [...document.querySelectorAll('[data-panel="compl-dates"] .hb .v')].map((v) => +v.textContent.replace(/,/g, '')));
+    check('03 (new): the checkable dates, past and future — every checkable person once', db.reduce((a, x) => a + x, 0) === ok, JSON.stringify([db, ok]));
+    const order = s.heads.indexOf('Driver licences, by person') >= 0 ? s.heads.indexOf('Driver licences, by person') : s.heads.indexOf('Driver licences, by record');
+    check('order: the driver table, then the papers by month (new), then the vehicle table', order > 0
+      && s.heads.indexOf('Vehicle papers, by the month they run out') === order + 1 && s.heads.indexOf('Vehicle documents') === order + 2, JSON.stringify(s.heads));
+    const handles = await page.evaluate(() => ({ drv: !!document.querySelector('[data-panel="compliance-people"]') }));
+    check('the data-panel handle kept', handles.drv);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'compliance', { width: 390 });
+    check('#compliance at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

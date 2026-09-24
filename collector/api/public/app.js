@@ -11,6 +11,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
   markTallTables, kpiTile, fitKpis, UBER_FARE_WHY,
   contract, glance, secHead, absenceBand, pageFoot, clearPageFoot, highlight, swatch, delta, notRepeated,
+  glanceBand, bandTiles,
   SEG_SOURCES, SEG_SOURCE_LABEL, bySourceLine } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
@@ -6290,8 +6291,26 @@ async function insightsContract(root) {
 /* Compliance is the one place where the data is unambiguous: a date, and a vehicle
    that is either legal or not. Sorted by urgency, not by plate. */
 V.compliance = async (root) => {
-  const vHost = el('div'); root.append(vHost);
-  const kh = el('div', 'kpis'); root.append(kh); loading(kh);
+  /* Under the page contract (plan §4 compliance): the verdict as the 00
+     statement with the PEOPLE tiles, "Drivers who cannot legally work" the
+     hero (unless it IS the verdict's figure, which then folds into it — ruling
+     7); the record-level tiles (a default date, no date at all) move to the †
+     band as the size of what is missing, with the person-basis, caveat and
+     withheld-number notes. New: the expired people by when each last drove,
+     the licence records by channel and what each channel files, the
+     checkable dates past and future, and the vehicle papers by the month
+     they run out. Both tables unchanged in their columns, sorts and folds —
+     drivers first, the order of the question — their Due tags words
+     ("expired · −12 d" in the negative colour, due within 45 days in ink at
+     weight, in date grey) and their State tags ink. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
+  const vHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vHost);
+  const kh = el('div', 'kpis'); (ak ? AKB.tilesHost : root).append(kh); loading(kh);
+  const dueAk = (n) => (n < 0
+    ? `<span style="color:var(--sem-neg);white-space:nowrap" title="expired ${fmt(Math.abs(n))} days ago">expired · −${fmt(Math.abs(n))} d</span>`
+    : n <= 45 ? `<b style="white-space:nowrap">${fmt(n)} d</b>` : `<span class="dim">${fmt(n)} d</span>`);
   const [vehPage, drvPage] = await Promise.all([
     api('/api/compliance/vehicles').catch(() => ({ rows: [], totals: {} })),
     api('/api/compliance/drivers').catch(() => ({ drivers: [], totals: {} })),
@@ -6360,6 +6379,10 @@ V.compliance = async (root) => {
   /* The people the paperwork cannot answer for, as against the records. */
   const pUnknown = pt.unknown ?? 0;
   const pConflict = pt.with_conflicts ?? 0;
+  /* Ruling 7, by NAME: the tile the verdict's figure is, and only when its
+     value agrees — a value match alone folds the first equal tile, which is
+     not always the right one (COVERAGE, notRepeated). */
+  let complFig = null, complFigLabel = null;
 
   /* Compliance is the one page where the data is unambiguous — a date, and a
      vehicle either legal or not — and it opened on eight tiles with no ranking
@@ -6397,6 +6420,11 @@ V.compliance = async (root) => {
       claim = 'Nothing has expired and nothing expires this week';
       figure = fmt(vMonth + (dt.within_45 || 0)); unit = 'due in 45 days';
     }
+    complFig = figure;
+    complFigLabel = (vExpired || dExpired)
+      ? (!vExpired ? (byPerson ? 'Drivers who cannot legally work' : 'Expired licence records') : !dExpired ? 'Vehicle docs expired' : null)
+      : soon ? (!(dt.within_7 || 0) ? 'Expiring in 7 days' : null)
+        : (!(dt.within_45 || 0) ? 'Expiring in 45 days' : null);
     const blind = dPlaceholder + dNoDate;
     const numBlind = drvPage.placeholder_number_rows || 0;
     verdict(vHost, {
@@ -6420,7 +6448,7 @@ V.compliance = async (root) => {
     });
   }
 
-  kh.innerHTML = [
+  const COMP_TILES = [
     ['Vehicle docs expired', fmt(vExpired), 'cannot legally work', vExpired ? 'err' : 'ok'],
     ['Expiring in 7 days', fmt(vWeek), 'renew now', vWeek ? 'err' : 'ok'],
     ['Expiring in 45 days', fmt(vMonth), 'start the paperwork', vMonth ? 'warn' : 'ok'],
@@ -6464,7 +6492,25 @@ V.compliance = async (root) => {
       'records we cannot say are valid', 'warn']] : []),
     /* The fifth element is a handle a test can read the figure off without
        matching the label, which is prose and has to stay improvable. */
-  ].map(([l, n, d, cls, k]) => kpiTile({ label: l, html: n, sub: d, tone: cls || null, key: k || null })).join('');
+  ];
+  if (ak) {
+    kh.remove();
+    const REC = ['Licence dates that are a default', 'No licence date on file'];
+    const list = COMP_TILES.filter(([l, n]) => !REC.includes(l) && !(l === complFigLabel && n === complFig))
+      .map(([l, n, d, , k]) => ({ label: l, value: n, sub: d, key: k || null,
+        hero: l === 'Drivers who cannot legally work' || l === 'Expired licence records' }));
+    /* When the people tile IS the verdict and folds into it, the next most
+       urgent figure that is not a nought leads — never a "0" at display size. */
+    if (!list.some((x) => x.hero)) {
+      const next = ['Vehicle docs expired', 'Expiring in 7 days', 'Drivers expiring in 45 days', 'Licences expiring in 45 days', 'Expiring in 45 days']
+        .map((l) => list.find((x) => x.label === l)).find((x) => x && x.value !== '0');
+      if (next) next.hero = true;
+    }
+    glance(AKB.tilesHost, bandTiles(list).tiles);
+    complianceExpired(root, ppl, byPerson);
+    complianceChannels(root, ppl, placeholder, drvPage);
+    complianceDates(root, ppl);
+  } else kh.innerHTML = COMP_TILES.map(([l, n, d, cls, k]) => kpiTile({ label: l, html: n, sub: d, tone: cls || null, key: k || null })).join('');
 
   /* WHAT THE HEADCOUNT IS A COUNT OF — printed, always, not only when it is
      bad news. `person_basis_note` is the API's own sentence and it has four
@@ -6473,17 +6519,17 @@ V.compliance = async (root) => {
      read at all. The last two mean the figures above are records rather than
      people, and a page that renders them silently under the new label would
      ship the same defect wearing a better noun. */
-  if (drvPage.person_basis_note) {
+  if (drvPage.person_basis_note && !ak) {
     root.append(note(drvPage.person_basis_note, byPerson ? null : 'warn'));
   }
 
-  if (drvPage.caveat) root.append(note(drvPage.caveat));
+  if (drvPage.caveat && !ak) root.append(note(drvPage.caveat));
   /* Said once, above the table, so the Emirates ID column's dashes read as a
      statement about the channels rather than as missing paperwork. */
-  if (drvPage.emirates_id_caveat) root.append(note(drvPage.emirates_id_caveat));
+  if (drvPage.emirates_id_caveat && !ak) root.append(note(drvPage.emirates_id_caveat));
   /* The licence NUMBER's default, said beside the date's rather than left for a
      reader to notice that every row shows the same digits. */
-  if (drvPage.licence_no_caveat) root.append(note(drvPage.licence_no_caveat, 'warn'));
+  if (drvPage.licence_no_caveat && !ak) root.append(note(drvPage.licence_no_caveat, 'warn'));
   /* HR'S ROSTER, AND THAT ITS LICENCE DATE LEADS. Said above the table, with
      how many people it reaches and how many disagree with a platform, so a
      reader comparing this page with yesterday's knows why "cannot legally
@@ -6513,6 +6559,7 @@ V.compliance = async (root) => {
   else foldRows(vp.body, tableFrom(veh.slice(0, 120), [
     { label: 'Due', key: 'days_left', num: true, render: (r) => {
       const d = dl(r);
+      if (ak) return dueAk(d);
       const cls = d < 0 ? 'err' : d <= 7 ? 'err' : d <= 45 ? 'warn' : 'ok';
       return `<span class="tag ${cls}">${d < 0 ? Math.abs(d) + 'd ago' : d + 'd'}</span>`; } },
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
@@ -6521,7 +6568,7 @@ V.compliance = async (root) => {
     { label: 'Document', key: 'doc_type' },
     { label: 'Status', key: 'status',
       render: (r) => (r.status
-        ? pill(r.status, /active|valid/i.test(r.status) ? 'ok' : 'warn')
+        ? pill(r.status, ak ? null : /active|valid/i.test(r.status) ? 'ok' : 'warn')
         : '<span class="ent-off" title="this source publishes no status for the document">—</span>') },
     { label: 'Expires', key: 'expires_at', render: (r) => dateStr(r.expires_at) },
     { label: 'VIN', key: 'vin',
@@ -6535,7 +6582,8 @@ V.compliance = async (root) => {
       const html = custodyAsOf({ name: r.driver_name, id: r.driver_ext_id, day: r.driver_as_of });
       const ageD = r.driver_as_of ? Math.floor((Date.now() - Date.parse(r.driver_as_of)) / 864e5) : null;
       return html + (ageD != null && ageD > 14
-        ? ` <span class="tag warn" title="the custody record is ${fmt(ageD)} days old — confirm before ringing">stale</span>`
+        ? (ak ? ` <span class="pill" title="the custody record is ${fmt(ageD)} days old — confirm before ringing">stale</span>`
+          : ` <span class="tag warn" title="the custody record is ${fmt(ageD)} days old — confirm before ringing">stale</span>`)
         : '');
     } },
   ], { sortable: true, sortId: 'vdocs', defaultSort: { key: 'days_left', dir: 'asc' } }),
@@ -6621,6 +6669,7 @@ V.compliance = async (root) => {
         + 'field was never filled in — not an expiry">not filled in</span>';
     }
     const n = dl(a);
+    if (ak) return `${esc(dateStr(a.licence_expires))} ${dueAk(n)}`;
     return `${esc(dateStr(a.licence_expires))} <span class="tag ${n < 0 ? 'err' : n <= 45 ? 'warn' : 'ok'}">`
       + `${n < 0 ? Math.abs(n) + 'd ago' : n + 'd'}</span>`;
   };
@@ -6666,6 +6715,7 @@ V.compliance = async (root) => {
             'warn', `HR files ${p.licence_disagreement.hr_expires}; ${sourceLabel(p.licence_disagreement.platform)} files `
             + `${p.licence_disagreement.platform_expires} — ${fmt(Math.abs(p.licence_disagreement.days_apart))} days apart. `
             + 'HR’s date is the one counted.')}</div>` : '';
+        if (ak) return `${dueAk(n)}${src}${dis}`;
         return `<span class="tag ${n < 0 ? 'err' : n <= 45 ? 'warn' : 'ok'}">`
           + `${n < 0 ? Math.abs(n) + 'd ago' : n + 'd'}</span>${src}${dis}`;
       } },
@@ -6722,8 +6772,14 @@ V.compliance = async (root) => {
           + '<div class="idfacts">' + Object.entries(L).map(([k, label]) => {
             const d = p.hr.documents[k] || {};
             const [w, tone] = W[d.status] || ['—', 'dim'];
-            return `<span><b>${label}</b>${d.expires ? esc(dateStr(d.expires)) : ''} <span class="tag ${tone}"`
-              + `${d.status === 'missing' ? ` title="${esc(d.absent_reason || '')}"` : ''}>${w}</span>`
+            /* Under the contract the HR status is a word, as the Due column's
+               is: expired in the negative colour, due soon in ink at weight,
+               the rest grey. */
+            const word = !ak ? null : d.status === 'expired' ? `<span style="color:var(--sem-neg)">${w}</span>`
+              : /^d(30|45|90)$/.test(d.status || '') ? `<b>${w}</b>`
+                : `<span class="dim"${d.status === 'missing' ? ` title="${esc(d.absent_reason || '')}"` : ''}>${w}</span>`;
+            return `<span><b>${label}</b>${d.expires ? esc(dateStr(d.expires)) : ''} ${word || `<span class="tag ${tone}"`
+              + `${d.status === 'missing' ? ` title="${esc(d.absent_reason || '')}"` : ''}>${w}</span>`}`
               + `${d.number_on_file === true ? '<span class="dim"> · number on file</span>'
                 : d.number_on_file === false ? '<span class="dim"> · no number on file</span>' : ''}</span>`;
           }).join('') + '</div>';
@@ -6767,7 +6823,8 @@ V.compliance = async (root) => {
     { label: 'Phone', key: 'phone',
       render: (p) => (p.phone ? `<span class="plate">${esc(p.phone)}</span>`
         : '<span class="ent-off" title="no record this person holds carries a phone number">—</span>') },
-    { label: 'State', key: 'state', render: (p) => `<span class="tag ${/suspend|deact/i.test(p.state || '') ? 'warn' : 'ok'}">${esc(p.state || '—')}</span>`
+    { label: 'State', key: 'state', render: (p) => (ak ? `<span class="pill">${esc(p.state || '—')}</span>`
+      : `<span class="tag ${/suspend|deact/i.test(p.state || '') ? 'warn' : 'ok'}">${esc(p.state || '—')}</span>`)
       + (p.suspension_reason ? `<div class="dim">${esc(String(p.suspension_reason).slice(0, 90))}</div>` : '') },
     /* WHETHER THE EXPIRY MATTERS.
        ─────────────────────────────────────────────────────────────────────
@@ -6821,7 +6878,130 @@ V.compliance = async (root) => {
       ? `. ${countOf(pt.multi_account, 'person')} here ${pt.multi_account === 1 ? 'holds' : 'hold'} more than one record`
       : '')
     + '. The counts above are over all of them, not over this list. Every column here can be sorted.'));
+  if (ak) {
+    /* Drivers first, then the papers by month, then the vehicle table — the
+       order of the question; the vehicle panel is moved, not rebuilt. */
+    complianceMonths(root, veh, vt);
+    root.append(vp.panel);
+    complianceAbsence(root, { drvPage, dPlaceholder, dNoDate, byPerson, withheldWhy, docTypes, ppl });
+  }
 };
+
+/* ── #compliance under the page contract ─────────────────────────────────── */
+/* The expired people by when each last drove — the question an expiry is
+   read with: a lapsed licence on somebody who drove this week is a car to
+   take off the road this morning. last_ever, not days_since_last_trip (the
+   plan's note on the server). */
+function complianceExpired(root, ppl, byPerson) {
+  const p = panel('Expired, and when each last drove', byPerson ? 'People whose soonest licence has lapsed, by their last booking on any channel' : 'Expired licence records, by the last booking under them', 'compl-expired');
+  root.append(p.panel);
+  const exp = ppl.filter((x) => x.licence_status !== 'unknown' && Number(x.days_left) < 0);
+  if (!exp.length) { p.body.append(note('Nobody on this list holds a lapsed licence.')); return; }
+  const now = Date.now();
+  const days = (x) => (x.last_ever ? Math.floor((now - Date.parse(x.last_ever)) / 864e5) : null);
+  const B = [['this week', 0, 7], ['within 30 days', 7, 30], ['within 90 days', 30, 90], ['longer ago', 90, Infinity]];
+  const bars = B.map(([label, lo, hi]) => ({ label, n: exp.filter((x) => { const d = days(x); return d != null && d >= lo && d < hi; }).length }));
+  const never = exp.filter((x) => !x.last_ever && x.lifetime_trips === 0).length;
+  const unseen = exp.filter((x) => !x.last_ever && x.lifetime_trips !== 0).length;
+  if (never) bars.push({ label: 'never drove', n: never });
+  if (unseen) bars.push({ label: 'no driving we can see', n: unseen });
+  const box = el('div'); p.body.append(box);
+  hbars(box, bars, { signed: false, color: '--mk-fill' });
+  p.body.append(el('p', 'cap', `${countOf(exp.length, byPerson ? 'person' : 'record')} with a lapsed licence`
+    + (bars[0].n ? `; ${fmt(bars[0].n)} drove this week — those are the cars to stop first` : '') + '.'));
+}
+/* The licence records by channel, and what each channel files: dated, the
+   source's default, no date; a licence number; an Emirates ID (counted from
+   identity_held — which record HOLDS one — never from a value, which an
+   anonymous response does not carry). */
+function complianceChannels(root, ppl, placeholder, drvPage) {
+  const p = panel('Licence records, by channel', 'What each channel files against the people on this list', 'compl-chan');
+  root.append(p.panel);
+  const by = new Map();
+  ppl.forEach((x) => (x.accounts || []).forEach((a) => {
+    const k = String(a.platform || '').toLowerCase();
+    const r = by.get(k) || { platform: k, records: 0, dated: 0, def: 0, none: 0, lic: 0, eid: 0 };
+    const d = String(a.licence_expires || '').slice(0, 10);
+    r.records++;
+    if (!d) r.none++; else if (placeholder && d === placeholder) r.def++; else r.dated++;
+    const held = new Set(a.identity_held || []);
+    if (held.has('licence_no') || a.licence_no) r.lic++;
+    if (held.has('emirates_id') || a.emirates_id) r.eid++;
+    by.set(k, r);
+  }));
+  const rows = [...by.values()].sort((a, b) => (CHANNEL_ORDER.indexOf(a.platform) + 1 || 99) - (CHANNEL_ORDER.indexOf(b.platform) + 1 || 99));
+  if (!rows.length) { p.body.append(note('No licence record on this list.')); return; }
+  p.body.append(tableFrom(rows, [
+    { label: 'Channel', key: 'platform', render: (r) => `<span class="pchip">${swatch(r.platform)}${esc(sourceLabel(r.platform))}</span>` },
+    { label: 'Records', key: 'records', num: true },
+    { label: 'A real expiry', key: 'dated', num: true },
+    { label: 'The default date', key: 'def', num: true },
+    { label: 'No date', key: 'none', num: true },
+    { label: 'Licence number', key: 'lic', num: true },
+    { label: 'Emirates ID', key: 'eid', num: true },
+  ], { compact: true }));
+  p.body.append(el('p', 'cap', 'Counts of records, not people. A number counts where the record holds one — shown or withheld alike.'
+    + (drvPage.emirates_id_by_platform ? '' : '')));
+}
+/* The checkable dates, past and future: only people whose date can be
+   checked; the rest are in the † band. */
+function complianceDates(root, ppl) {
+  const p = panel('Checkable licence dates, past and future', 'People with a real expiry date, by how far it is from today', 'compl-dates');
+  root.append(p.panel);
+  const ok = ppl.filter((x) => x.licence_status !== 'unknown' && x.days_left != null).map((x) => Number(x.days_left));
+  if (!ok.length) { p.body.append(note('Nobody on this list has a licence date that can be checked.')); return; }
+  const B = [['over a year ago', -Infinity, -365], ['3–12 months ago', -365, -90], ['in the last 90 days', -90, 0],
+    ['within 45 days', 0, 46], ['46 days to 6 months', 46, 183], ['6–12 months', 183, 366], ['over a year away', 366, Infinity]];
+  const bars = B.map(([label, lo, hi]) => ({ label, n: ok.filter((d) => d >= lo && d < hi).length, past: hi <= 0 }));
+  const box = el('div'); p.body.append(box);
+  hbars(box, bars, { signed: false, colorFor: (x) => (x.past ? '--mk-neg' : '--mk-fill'),
+    legend: [['--mk-fill', 'still to come'], ['--mk-neg', 'already lapsed']] });
+  p.body.append(el('p', 'cap', `${countOf(ok.length, 'person')} with a date that can be checked.`));
+}
+/* The vehicle papers by the month they run out, the current month hatched
+   as a month still in progress. Over the documents listed (capped), and
+   said so. */
+function complianceMonths(root, veh, vt) {
+  const p = panel('Vehicle papers, by the month they run out', 'Documents with an expiry date, counted by month', 'compl-months');
+  root.append(p.panel);
+  const ms = veh.map((r) => String(r.expires_at || '').slice(0, 7)).filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
+  if (!ms.length) { p.body.append(note('No vehicle document carries an expiry date.')); return; }
+  const cur = dubaiDay(new Date()).slice(0, 7);
+  const count = new Map(); ms.forEach((m) => count.set(m, (count.get(m) || 0) + 1));
+  const series = [];
+  for (let t = Date.parse(`${ms[0]}-15T12:00:00Z`); ; t += 30 * 864e5) {
+    const m = new Date(t).toISOString().slice(0, 7);
+    if (series.length && series[series.length - 1].m === m) continue;
+    series.push({ m, label: new Date(`${m}-15T12:00:00Z`).toLocaleDateString('en-GB', { month: 'short', year: '2-digit', timeZone: 'UTC' }),
+      n: count.get(m) || 0, partial: m === cur });
+    if (m >= ms[ms.length - 1] || series.length > 120) break;
+  }
+  const box = el('div'); p.body.append(box);
+  gapBars(box, series, { x: 'label', y: 'n', label: 'documents running out', inProgress: false, aria: 'Vehicle documents by the month they expire' });
+  p.body.append(el('p', 'cap', `Over the ${countOf(ms.length, 'document')} listed below`
+    + (vt.total && vt.total > ms.length ? `, of ${fmt(vt.total)} on file` : '') + '; the month in progress is drawn as unfinished.'));
+}
+function complianceAbsence(root, { drvPage, dPlaceholder, dNoDate, byPerson, withheldWhy, docTypes, ppl }) {
+  const plats = new Set(ppl.flatMap((x) => (x.accounts || []).map((a) => String(a.platform || '').toLowerCase())));
+  const cells = [
+    { label: 'Licence dates that are a default', hl: dPlaceholder > 0, fig: dPlaceholder ? countOf(dPlaceholder, 'record') : null, none: 'None',
+      why: dPlaceholder ? 'The source writes one default date when the field was never filled in — a data problem, not an expiry, and not counted as one.' : 'No record carries the default date.' },
+    { label: 'No licence date on file', fig: dNoDate ? countOf(dNoDate, 'record') : null, none: 'None',
+      why: dNoDate ? 'Records we cannot say are valid: no date on them at all.' : 'Every record carries a date.' },
+    { label: 'Who is a person', fig: null, none: byPerson ? 'Counted' : 'Records only',
+      why: drvPage.person_basis_note || (byPerson ? 'Counted in people through the person register.' : 'The person register could not group these records.') },
+    { label: 'Licence and ID numbers', fig: null, none: 'Withheld',
+      why: [drvPage.emirates_id_caveat, drvPage.licence_no_caveat, withheldWhy].filter(Boolean).join(' ') },
+  ];
+  if (!plats.has('bolt')) cells.push({ label: 'Bolt', fig: null, none: 'Files nothing',
+    why: 'Bolt files no compliance record for any driver, so nobody working Bolt alone can be checked here.' });
+  if (docTypes.length === 1) cells.push({ label: 'Insurance, permits, tests', fig: null, none: 'Not filed',
+    why: `The one vehicle document type this source files is ${docTypes[0]}; there is no insurance, permit or test paper to check.` });
+  if (drvPage.caveat) cells.push({ label: 'What a record can say', fig: null, none: 'See the note', why: drvPage.caveat });
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, cells);
+  pageFoot({ colophon: ['licences and documents', byPerson ? 'counted in people' : 'counted in records'] }, root);
+}
 
 /* ── what is actually still owed, in days ─────────────────────────────────
    Both panels that talk about collection debt counted rows of
