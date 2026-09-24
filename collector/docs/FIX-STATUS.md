@@ -3031,6 +3031,35 @@ The operator ruled that the phone gets a redesigned PWA, which supersedes the "t
 | P26 | **The fallback.** A driver's or a vehicle's TAB (`#driver/x/earnings`, `#vehicle/x/drivers`) is still the desktop module itself, rendered in `.m-fallback` and converted by the desktop's own pass. The phone owns only the container, which now carries the page contract's inline footer after it. **Found and fixed in the container:** the desktop's tab strip drew its links 34px tall inside the phone ("Trips" 27px wide), below a thumb's 44px. They are 44px each way inside the phone's container only; §1 holds the rule to the phone's scope, so the desktop never sees it. A view built for a bigger screen keeps its sentence, its words and its address. Its one way on, "Open it on the desktop version", becomes the house's full-width 48px button under that sentence, as on Credentials, instead of a 44px chip floating in the middle: under the redesign a chip is a FILTER. Not done: the desktop tabs' own contents, including their 35px sort headers and 3px pills, belong to the desktop conversion | **written** | `phone_arkiv` §4.20 (6): the button, its place, and the address it opens (followed in the harness), plus the strip and the footer at 390 and 360. Reverts: the chip → 1 · the centring wrapper → 1 · the strip at 34px → 2 (390 and 360). Files restored, md5 checked. phone_classic 34 |
 | P27 | **Offline: every module the redesigned phone imports is precached.** The redesign added `../shell.js` (m/app.js) and `../tokens.js` (m/ui.js) to the phone's import graph, and `/m/arkiv-m.css` to its sheets. All are in `SHELL_FILES`, and the cache version follows automatically, because the server hashes the shell. A check now walks the whole static import graph from m/app.js (14 modules) and fails on any the worker does not precache. **A cold offline open was proven in a browser, NOT on production:** against live-ui on :8711 (the working tree), the page was warmed until the worker's cache held `/m/arkiv-m.css` and `/shell.js`, then the context was set offline and the app was opened fresh. Under the skin it came up with `--pg-phone` 1, the wordmark and control bar, all five sheets, and Today painted from the cached answers, with no error. The old skin, the same way, came up with its own three sheets and the same Today. Neither showed the staleness bar on that open; that behaviour is the same in both skins and is unchanged here | **written** | `phone_arkiv` §1 (new check). Revert (`/shell.js` dropped from SHELL_FILES) → 1. File restored, md5 checked. The cold open: scratchpad `offline.mjs`, screenshots `final/offline-cold-{arkiv,classic}-light-390.png` |
 
+### On production — deployment `564d636` (commit `9a96fe8`), ACTIVE 06:16:08Z
+
+This first batch merges the phone PWA redesign (29 commits) and the desktop
+page phase as it stood at `f5f861a` (45 commits), all behind `?skin=arkiv`.
+The full suite on the merged tree: 327 files, 11,530 assertions, one failing
+check. That was `chart_marks`: #platforms' completion bars named `--ink`/`--grey`
+where every default-bars caller names `--mk-fill`/`--mk-neg`, and the check
+pinned an exact count of 5. Fixed in `9a96fe8` (same paint under Arkiv; the
+count is now a floor) and proven by revert.
+
+Phone, `?ui=phone` at 390×844, light and dark, through bin/prod-mirror.mjs
+(assets byte-identical to the origin), eight screens (today, money, people,
+fleet, unauthorized, online-time, deposits, more):
+- **Current look:** `--pg-phone` is 0, `/m/arkiv-m.css` is never requested,
+  and there is no sideways overflow.
+- **Redesign:** `--pg-phone` is 1 and `/m/arkiv-m.css` loads.
+  - No sideways overflow.
+  - No button or link under 44px on any screen (the current look has two
+    to five).
+  - Money to the fils.
+  - The today card, the livebar notes, the tab bar and the five cash-entry
+    steps are all present.
+
+Desktop, #finance, #payouts and #revenue in both skins, light and dark: each
+renders; under the skin each has its footer colophon. #finance shows two
+whole-dirham amounts in both skins. They are a worked example in a fixed
+caption ("a 15% rate on AED 63 outranks a 6% rate on AED 506"), handed to the
+desktop agent to write to the fils.
+
 ## Arkiv page phase — desktop — 2026-09-24, NOT ON PRODUCTION
 
 STEP 6 of docs/UI-REDESIGN-PLAN.md, the desktop half (the phone PWA is a
