@@ -3727,3 +3727,11 @@ Deviations:
 Deviations:
 * The plan's hero, "Not reporting", is the verdict's own figure, so ruling 7 folds it and Fresh takes the hero.
 * The plan's §01, fix-age bands stacked by feed, is merged into §02: the same payload, drawn once by feed and freshness.
+
+### P71 · #feeds (post-plan)
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #feeds | #feeds is a post-plan page, converted on the contract's own rules. An `ak` flag in renderFeeds. **00:** the band's note carries the readings' as-of and the 24-hour rule. The six counts are untoned in two rows, what is missing first: the three "not receiving" with the feed missing the most cars as the hero, then the three "receiving" in a hero-less row. The table, its sort, its phone-width cards and its tel: links are unchanged. A feed state is an outline chip, and "not receiving" says so in the negative colour as text, with its reason kept in the title. The rules line stays as the page's source. **†:** the fleets with no CABMAN account (their cars counted; a fact about the account, not a fault in the car), and the cars not on Uber's list (not shown: the page starts from Uber's ACTIVE list) | **written** | `test/arkiv_fleet.test.mjs` #feeds 9/9. Revert-proofs (md5-restored): the raw tiles back make the hero check fail; the toned state pill back makes "an outline chip" fail; one glance row of six makes "two rows, what is missing first" fail. `arkiv_classic_frozen` ONLY=feeds 2/2. The page prints no money; the live scan is clean. Pinned: `vehicle_feeds` 51, `vehicle_feeds_page` 39, `tracker_feed_dark` 25, `page_contract` 95, `kpi_one_tile` 20 |
+
+This was caught on production and fixed before the commit: the draft's single row of six wrapped a lone sixth tile at 1440, because the hero spans two of six columns.

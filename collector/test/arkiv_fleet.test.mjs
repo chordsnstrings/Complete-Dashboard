@@ -959,4 +959,46 @@ if (want('live')) {
   }
 }
 
+/* ══ #feeds ═══════════════════════════════════════════════════════════════ */
+if (want('feeds')) {
+  console.log('\n#feeds');
+  const chips = (page) => page.evaluate(() => [...document.querySelectorAll('[data-panel="feeds"] tbody .pill')].map((p) => ({
+    t: p.textContent.trim(), cls: p.className, neg: /--sem-neg/.test(p.getAttribute('style') || '') })));
+  {
+    const { ctx, page } = await open('classic', 'feeds');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), toned: document.querySelectorAll('#view .kpis > .kpi.t-good, #view .kpis > .kpi.t-critical').length }));
+    const c = await chips(page);
+    check('old skin: no band, its toned tile row, the feed states as toned pills', !r.band && r.toned > 0 && c.some((x) => /\b(ok|bad)\b/.test(x.cls)), JSON.stringify([r, c.slice(0, 2)]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'feeds');
+    const s = await shape(page);
+    const d = answer('/api/vehicles/feeds');
+    const t = d.totals;
+    const worst = [['Seat sensor (CABMAN) not receiving', t.seat?.not_receiving], ['Seat sensor (FMS) not receiving', t.fms_seat?.not_receiving], ['FMS not receiving', t.fms?.not_receiving]]
+      .sort((a, b) => (b[1] || 0) - (a[1] || 0))[0][0];
+    check('00: the six counts untoned, the feed missing the most cars the hero', Object.keys(s.values).length === 6 && s.hero === worst && (await toned(page)).length === 0,
+      JSON.stringify([s.hero, worst, Object.keys(s.values)]));
+    const rowsL = await page.evaluate(() => [...document.querySelectorAll('#view .cband .kpis.glance')].map((g) => [...g.querySelectorAll(':scope > .kpi .l')].map((l) => l.textContent.trim())));
+    check('two rows, what is missing first: the three not receiving, then the three receiving (no hero there)', rowsL.length === 2
+      && rowsL[0].every((l) => /not receiving/.test(l)) && rowsL[1].every((l) => !/not receiving/.test(l)) && rowsL[0].length === 3 && rowsL[1].length === 3
+      && (await page.evaluate(() => document.querySelectorAll('#view .cband .kpi.is-hero').length)) === 1, JSON.stringify(rowsL));
+    check('the counts are the endpoint\'s', s.values['Seat sensor (CABMAN) receiving'] === n(t.seat.receiving) && s.values['FMS not receiving'] === n(t.fms.not_receiving), JSON.stringify(s.values));
+    const c = await chips(page);
+    check('a feed state is an outline chip; "not receiving" says so in the negative colour, as text', c.length > 0 && c.every((x) => x.cls === 'pill' && (x.t === 'not receiving') === x.neg), JSON.stringify(c.slice(0, 3)));
+    check('the rules line is kept as the page\'s source', !!(await page.$('#view .srcline')), '');
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const noAcc = (d.rows || []).filter((r) => r.seat_state === 'no_account').length;
+    check('†: the fleets with no CABMAN account (their cars counted), the cars not on Uber\'s list', (noAcc ? ab['A CABMAN seat sensor on these fleets']?.fig === `${n(noAcc)} car${noAcc === 1 ? '' : 's'}` : ab['A CABMAN seat sensor on these fleets']?.none)
+      && ab['Cars not on Uber’s list']?.fig === 'Not shown', JSON.stringify(s.abs));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'feeds', { width: 390 });
+    check('#feeds at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

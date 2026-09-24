@@ -2118,3 +2118,9 @@ Production through live-ui on :8611, all three tabs in both skins at 1440 and 39
 Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p70/`). No page error, no sideways scroll, and the fils scan is clean.
 
 The verdict: 169 vehicles have a stale fix, of 267 reporting; 237 are tracked with a usable fix and 30 report no satellite lock (in the band's note). Fresh: 98. Silent over a day: 158. Moving: 63. Engaged: 44 of 240. The table sits directly under the band.
+
+### #feeds — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p71/`). No page error, no sideways scroll, and the fils scan is clean.
+
+126 cars are active on Uber (91 Ecosine, 35 Egari). CABMAN seat sensor not receiving: 96, 35 of them on Egari, which has no CABMAN account; that is the hero. FMS seat count not receiving: 52. FMS not receiving: 52. The receiving counts (30 / 74 / 74) are in the second row.
