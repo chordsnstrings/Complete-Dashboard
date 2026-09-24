@@ -974,6 +974,10 @@
 :root[data-skin="arkiv"] .pchip{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;color:var(--ink)}
 :root[data-skin="arkiv"] .pchip.dim{color:var(--grey)}
 :root[data-skin="arkiv"] .lic-d{display:block;margin-top:2px}
+/* #roster's table (plan §4): driver names wrapped to four lines at 1440 in a
+   column squeezed by seventeen others; a floor on its width keeps a name to
+   one or two. The frame scrolls sideways inside itself at a phone width. */
+:root[data-skin="arkiv"] [data-panel="roster-table"] td:first-child{min-width:24ch}
 :root[data-skin="arkiv"] .insight-row:hover,:root[data-skin="arkiv"] a.insight-row:hover,
 :root[data-skin="arkiv"] .dircard:hover{background:var(--paper-2);border-top-color:var(--hair);
   box-shadow:none;transform:none}

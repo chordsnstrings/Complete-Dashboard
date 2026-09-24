@@ -42,7 +42,7 @@ const ROUTES = [
   'driver/drv-0/territory', 'driver/drv-0/earnings', 'driver/drv-0/quality', 'driver/drv-0/record',
   'driver/U-TARIQ/money', 'driver/drv-0/trips', 'driver/drv-0/unauthorized',
   'online-time', 'performer/drv-0', 'cohort/unit-licence-due', 'cohort/roster-blocked',
-  'cancellations',
+  'cancellations', 'roster', 'roster/pipeline', 'roster/idle', 'roster/blocked',
 ];
 
 const scan = (page) => page.evaluate(() => {

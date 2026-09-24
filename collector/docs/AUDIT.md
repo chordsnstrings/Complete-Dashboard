@@ -1921,3 +1921,16 @@ who work Bolt, 39 of 5,152 (0.8%) by the 34 who do not. 19 of 117 carry no
 rating. Found by looking and fixed before commit: at 390 the bar labels were
 cut off mid-word, so the four bars now carry the tiles' own short names; the
 rank columns were drawn in --ink, and are now the job token.
+
+### #roster, /pipeline, /idle, /blocked, /states — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/roster/`): no error, no sideways scroll on
+any tab. 360 on the books, 128 drove, 98 able to earn and earning nothing,
+91 recruited and never driven, 11 waiting to start, 32 stopped everywhere
+(the verdict), 31 of them holding a car across 25 plates. Recency: 101
+booked today, 21 within a week, 9 within a month, 21 within 90 days, 19
+within 180, 92 longer ago; 97 never took one. Found by looking and fixed
+before commit: the standings' counts caption was wiped by the bar's own
+redraw on layout, and at an 18ch floor driver names still wrapped to three
+lines — 24ch holds them to two.

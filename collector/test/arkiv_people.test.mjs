@@ -774,4 +774,128 @@ if (want('cancellations')) {
   }
 }
 
+/* ══ #roster and its four tabs ════════════════════════════════════════════ */
+if (want('roster')) {
+  console.log('\n#roster');
+  const panelBy = (page, title) => page.evaluate((t) => {
+    const p = [...document.querySelectorAll('#view .panel')].find((x) => (x.querySelector('h3')?.textContent || '').startsWith(t));
+    return p ? { text: p.textContent.replace(/\s+/g, ' '), bars: [...p.querySelectorAll('.hb')].map((h) => [h.querySelector('.k').textContent.trim(), h.querySelector('.v').textContent.trim(), h.querySelector('.fill').getAttribute('style')]),
+      segs: [...p.querySelectorAll('svg rect[data-fade]')].map((r) => ({ fill: r.getAttribute('fill'), click: r.style.cursor === 'pointer' })),
+      caps: [...p.querySelectorAll('p.cap')].map((c) => c.textContent) } : null;
+  }, title);
+  {
+    const { ctx, page } = await open('classic', 'roster');
+    const s = await shape(page);
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), tiles: document.querySelectorAll('#view .kpis > .kpi').length,
+      toned: document.querySelectorAll('#view td .pill.warn, #view td .pill.err, #view td .pill.bad').length }));
+    check('old skin: no band, the tile row, the standings a ring, the standing pills toned', !r.band && r.tiles >= 6 && s.rings > 0 && r.toned > 0, JSON.stringify([r, s.rings]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'roster');
+    const s = await shape(page);
+    const d = answer('/api/roster');
+    const t = d.totals || {};
+    const P = d.people || [];
+    const n = (v) => (+v || 0).toLocaleString('en-US');
+    const notEarning = (t.idle_this_window || 0) + (t.never_started || 0);
+    const pct = t.people ? Math.round((notEarning / t.people) * 100) : 0;
+    const figLabel = t.blocked ? 'Stopped everywhere' : pct >= 40 ? null : 'Drove in this window';
+    check('00: the verdict in the band; ruling 7 folds the tile the verdict IS, by name, and keeps every other',
+      s.vdctIn00 && (!figLabel || !(figLabel in s.values)) && s.values['People on the books'] === n(t.people)
+      && s.values['Able to earn, earning nothing'] === n(t.idle_this_window) && s.values['Recruited, never driven'] === n(t.never_started)
+      && (figLabel === 'Drove in this window' || s.values['Drove in this window'] === n(t.working)), JSON.stringify([figLabel, s.values]));
+    check('every cohort link kept on the tiles that had one', (!t.idle_this_window || /roster-idle/.test(s.hrefs['Able to earn, earning nothing'] || ''))
+      && (!t.never_started || /roster-never-started/.test(s.hrefs['Recruited, never driven'] || '')), JSON.stringify(s.hrefs));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const st = await panelBy(page, 'What everyone is doing');
+    check('the standings: one 100% bar, no ring, every segment but the fold still opening its people', s.rings === 0 && st.segs.length > 0
+      && st.segs.filter((x) => !/--grey/.test(x.fill)).every((x) => x.click), JSON.stringify(st.segs));
+    const cap = st.caps.find((x) => /Every segment opens the people behind it/.test(x)) || '';
+    const parts = cap.replace(/\. Every segment.*$/, '').split(' · ').map((x) => +(x.match(/([\d,]+)$/)?.[1] || 'NaN').toString().replace(/,/g, ''));
+    check('…with the count of each standing beneath it, summing to everyone on the books', parts.length === new Set(P.map((x) => x.category)).size
+      && parts.reduce((a, x) => a + x, 0) === P.length, JSON.stringify([cap, parts]));
+    const rec = await panelBy(page, 'When each person last took a booking');
+    const B = [[0, 1], [1, 7], [7, 30], [30, 90], [90, 180], [180, Infinity]];
+    const dated = P.filter((r) => r.days_since_last_trip != null && r.last_ever);
+    const bins = B.map(([lo, hi]) => String(dated.filter((r) => r.days_since_last_trip >= lo && r.days_since_last_trip < hi).length));
+    check('recency (new): six bins off people[].days_since_last_trip; never-driven counted in words, never drawn as a gap',
+      rec && JSON.stringify(rec.bars.map((b) => b[1])) === JSON.stringify(bins)
+      && (!P.some((r) => r.lifetime_trips === 0) || /never took one/.test(rec.caps.join(' '))), JSON.stringify([rec?.bars, bins]));
+    const plat = await panelBy(page, 'How many platforms each person works');
+    check('platforms per person in the job token', plat.bars.length > 0 && plat.bars.every((b) => /--mk-fill/.test(b[2])), JSON.stringify(plat.bars));
+    const tbl = await page.evaluate(() => {
+      const p = document.querySelector('[data-panel="roster-table"]');
+      const td = p?.querySelector('tbody td:first-child');
+      return { toned: p ? p.querySelectorAll('td .pill.warn, td .pill.err, td .pill.bad, td .pill.ok').length : -1,
+        chips: p ? p.querySelectorAll('td .pill').length : 0, minW: td ? parseFloat(getComputedStyle(td).minWidth) : 0,
+        cols: p ? p.querySelectorAll('thead th').length : 0 };
+    });
+    check('the table kept, its standings ink chips, the Driver column given a floor', tbl.chips > 0 && tbl.toned === 0 && tbl.minW > 100 && tbl.cols >= 10, JSON.stringify(tbl));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const noReason = P.filter((r) => !r.reason).length;
+    check('†: the reasonless rows counted, the company-account flag absent with its true reason, the caveat moved',
+      (noReason ? ab['A reason for the standing']?.fig === `${noReason} of ${P.length}` : ab['A reason for the standing']?.none)
+      && /nothing on \/api\/roster marks one/.test(ab['Rows that are not people']?.why || '') && ab['What the roster cannot say']?.why === d.caveat,
+      JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    check('the colophon names the window and the roster', new RegExp(`${n(t.people)} on the books`).test(s.colophon), s.colophon);
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'roster/pipeline');
+    const P = (answer('/api/roster').people || []).filter((x) => ['in_pipeline', 'never_started', 'unclassified', 'activity_unknown'].includes(x.category));
+    const pp = await panelBy(page, 'Which of the four it is');
+    const s = await shape(page);
+    check('pipeline: the four states as one 100% bar, and the table', pp && pp.segs.length > 0 && s.heads.some((h) => /^Not yet earning — /.test(h)), JSON.stringify([pp?.segs, s.heads]));
+    const noReason = P.filter((r) => !r.reason).length;
+    check('pipeline †: the rows with no reason counted', s.abs.find((a) => a.label === 'A reason for the standing')?.fig === (noReason ? `${noReason} of ${P.length}` : 'Every one has one'), JSON.stringify(s.abs));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'roster/idle');
+    const P = (answer('/api/roster').people || []).filter((x) => x.category === 'idle_this_window' && x.days_since_last_trip != null)
+      .sort((a, b) => b.days_since_last_trip - a.days_since_last_trip).slice(0, 12);
+    const dp = await panelBy(page, 'Dormant longest');
+    const s = await shape(page);
+    check('idle: dormant longest, the oldest last booking first, ink bars', dp && JSON.stringify(dp.bars.map((b) => b[1])) === JSON.stringify(P.map((r) => `${r.days_since_last_trip} days`))
+      && dp.bars.every((b) => /--mk-fill/.test(b[2])), JSON.stringify([dp?.bars, P.map((r) => r.days_since_last_trip)]));
+    const loose = await page.evaluate(() => [...document.querySelectorAll('#view > * .note, #view .stack > .note')].map((x) => x.textContent));
+    check('idle: the widen-the-range note moved into †, not also printed loose', /Widen the range above/.test(s.abs.find((a) => a.label === 'Why they took nothing')?.why || '')
+      && !loose.some((x) => /Widen the range above/.test(x)), JSON.stringify(loose));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'roster/blocked');
+    const P = (answer('/api/roster').people || []).filter((x) => x.category === 'blocked');
+    const holding = P.filter((x) => x.holding_vehicle_while_blocked);
+    const r = await page.evaluate(() => {
+      const cell = [...document.querySelectorAll('#view .absb-cell')].find((c) => /Holding a car while stopped/.test(c.textContent));
+      return { cell: !!cell, links: cell ? cell.querySelectorAll('a[href*="vehicle"]').length : 0, fig: cell?.querySelector('.absb-fig')?.textContent.trim(),
+        loose: [...document.querySelectorAll('#view .note')].some((n) => /still (has|have) a vehicle attached/.test(n.textContent)) };
+    });
+    check('blocked: the holding-a-car note in †, its plates still linked, not also loose', !holding.length
+      || (r.cell && r.links > 0 && r.fig === `${holding.length} of ${P.length}` && !r.loose), JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'roster/states');
+    const d = answer('/api/roster/states');
+    const s = await shape(page);
+    const plats = [...new Set((d.by_state || []).map((r) => r.platform))];
+    const mult = await page.evaluate(() => [...document.querySelectorAll('[data-panel="roster-multiples"] .grid > div')].map((b) => ({
+      name: b.querySelector('p.cap')?.textContent.trim(), fills: [...new Set([...b.querySelectorAll('.fill')].map((f) => f.getAttribute('style').match(/var\((--[\w-]+)\)/)?.[1]))],
+      labels: [...b.querySelectorAll('.hb .k')].map((k) => k.textContent.trim()) })));
+    check('states: one small multiple per channel on /api/roster/states, each in its own channel colour, "with a car" on every bar',
+      mult.length === plats.length && mult.every((m) => m.fills.length === 1 && m.labels.every((l) => /with a car$/.test(l))), JSON.stringify(mult));
+    check('states: tiles in the band, untoned; the raw-word table kept', s.glance >= 4 && (await toned(page)).length === 0
+      && s.heads.some((h) => /^What each provider says/.test(h)), JSON.stringify(s.heads));
+    await ctx.close();
+  }
+  for (const r of ['roster', 'roster/states']) {
+    const { ctx, page } = await open('arkiv', r, { width: 390 });
+    check(`#${r} at 390: nothing scrolls sideways`, (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

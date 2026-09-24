@@ -6719,3 +6719,19 @@ number (5 and 5), and never a passport or RTA number.
   damage"); the true reason is /api/ledger/exposure's
   `owes.books_absent_reason`. Read every sub-line of a converted row before
   trusting it as a reason.
+
+* **`notRepeated()` folds the FIRST tile whose value equals the verdict's
+  figure.** Where several tiles can share a value it folds the wrong one: on
+  the #roster mock "1" is the idle, the never-driven and the stopped count at
+  once, and the fold took "Able to earn, earning nothing" out of a band whose
+  verdict was about the stopped. On a page where that can happen, fold the
+  tile the verdict IS by its label; and where the figure is a sum no tile
+  prints (#roster's "not earning"), fold nothing.
+
+* **A chart drawn into a host that is not on the page yet redraws itself
+  once it is laid out — and a redraw clears its host.** `whenLaidOut` in
+  charts.js re-runs the helper when a host narrower than 240px grows, and
+  every helper starts with `host.innerHTML = ''`. So a caption or table
+  appended into the SAME host after the call vanishes a frame later (the
+  #roster standings' counts did; the test saw an empty caption list). Draw a
+  chart into its own box whenever anything else goes in that body.
