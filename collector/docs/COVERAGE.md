@@ -6690,3 +6690,11 @@ number (5 and 5), and never a passport or RTA number.
   branch.** driversVerdict's figure is the expired count there, so under
   ruling 7 the tile folds into the statement; a test that looks for a
   "Licence expired" tile on the mock (2 expired) will not find one.
+
+* **`/api/driver/standing`'s trips value and `/api/driver/kpis`'s trips are
+  two counts.** On the mock they differ (268 against 251); a gap printed
+  under the kpis tile must be computed from the kpis figure, with the
+  standing supplying only the median and percentile.
+* **`test/driver_standing.test.mjs` pins `const tone = sn.tied ? '--s1'` in
+  driver.js.** A skin-dependent fill has to be a second variable, not a
+  rewrite of that expression.

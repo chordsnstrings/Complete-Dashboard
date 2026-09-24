@@ -104,4 +104,50 @@ if (want('drivers')) {
   }
 }
 
+/* ══ #driver/overview ═════════════════════════════════════════════════════ */
+if (want('driver-overview')) {
+  console.log('\n#driver/overview');
+  {
+    const { ctx, page } = await open('classic', 'driver/drv-0');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      row: document.querySelectorAll('#view .kpis:not(.glance) > .kpi').length }));
+    check('old skin: no 00 band, the eleven-tile row', !r.band && r.row === 11, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'driver/drv-0');
+    const s = await shape(page);
+    const k = answer('/api/driver/kpis');
+    const st = answer('/api/driver/standing');
+    const tm = (st.metrics || []).find((m) => m.key === 'trips');
+    check('00: Trips the hero, the working tiles first, the money on the second row — every old tile kept',
+      s.hero === 'Trips' && s.labels.slice(0, 6).join('|') === 'Trips|Days worked|Hours online|Utilisation|Completion|Typical start'
+      && ['Money in', 'Cash on hand', 'Bank deposit', 'Fares'].every((l) => s.labels.includes(l)), JSON.stringify(s.labels));
+    const d = await txtOf(page, '#view .kpis.glance .is-hero .t-d');
+    const gap = Number(k.trips) - Number(tm.median);
+    check('the hero\'s gap is its OWN figure against the standing\'s fleet median, worded (ruling 4)',
+      s.values.Trips === (+k.trips).toLocaleString('en-US') && d.includes(`against the fleet median of ${tm.median}`)
+      && d.includes(`${gap > 0 ? '+' : '−'}${Math.abs(gap)}`), d);
+    check('no tile wears a tone', (await toned(page)).length === 0);
+    const pb = await page.evaluate(() => {
+      const probe = document.createElement('i'); probe.style.color = 'var(--ink)'; document.body.append(probe);
+      const ink = getComputedStyle(probe).color; probe.remove();
+      return { ink, fills: [...document.querySelectorAll('#view .pbar .pb-track i')].map((i) => getComputedStyle(i).backgroundColor),
+        lines: [...document.querySelectorAll('#view .pbar .pb-f')].map((x) => x.textContent) };
+    });
+    check('the rank bars in ink — a semantic colour is never an area — with each row\'s value against the median on it',
+      pb.fills.length > 0 && pb.fills.filter((f) => f !== pb.ink).length <= (st.metrics || []).filter((m) => m.tied > 1).length
+      && pb.lines.length === pb.fills.length && pb.lines.every((l) => /fleet median/.test(l)), JSON.stringify(pb).slice(0, 300));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('† a fare on every booking, counted from the kpis', ab['A fare on every booking']?.fig === `${(+k.priced_trips).toLocaleString('en-US')} of ${(+k.trips).toLocaleString('en-US')}`,
+      JSON.stringify(ab['A fare on every booking']));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0', { width: 390 });
+    check('#driver/overview at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

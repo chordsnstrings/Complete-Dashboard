@@ -140,13 +140,16 @@ function percentileBars(host, metrics, opts = {}) {
     const sn = standingNote(m);
     const tone = sn.tied ? '--s1'
       : p >= 75 ? '--good' : p >= 40 ? '--s1' : p >= 20 ? '--warn' : '--critical';
+    /* Under the page contract the fill is ink, grey on a tie — L3: a
+       semantic colour is never an area. The old skin keeps its tones. */
+    const fill = opts.ak ? (sn.tied ? '--grey' : '--ink') : tone;
     const u = unitFor(m);
     const inverted = m.higher_is_better === false || /cancel|reject|no.?show/i.test(m.label || '');
     const row = el('div', 'pbar');
     row.innerHTML = `
       <div class="pb-l">${esc(m.label)}${u ? `<span class="dim"> (${esc(u)})</span>` : ''}</div>
       <div class="pb-track">
-        <i style="width:${p}%;background:var(${tone});animation-delay:${i * 55}ms"></i>
+        <i style="width:${p}%;background:var(${fill});animation-delay:${i * 55}ms"></i>
         <span class="pb-mid" title="fleet median"></span>
       </div>
       <div class="pb-v num">${sn.tied ? '<small>tied</small>' : `${p}<small>${ordinal(p)}</small>`}</div>`;
@@ -165,6 +168,13 @@ function percentileBars(host, metrics, opts = {}) {
       inverted ? 'Lower is better here, so a high percentile means FEWER of them.' : '',
       opts.note && /revenue|fare|earn/i.test(m.label || '') ? opts.note : '',
     ].filter(Boolean).join(' ');
+    if (opts.ak) {
+      const f = el('div', 'pb-f cap', esc(`${fig(m.value)} · fleet median ${fig(m.median)}`
+        + (sn.tied ? ` · tied with ${fmt(m.tied)} of ${fmt(m.population)}` : ` · ${p}${ordinal(p)} percentile`)));
+      /* The whole row's width, not the label's column. */
+      f.style.cssText = 'grid-column:1/-1;margin:-4px 0 0';
+      row.append(f);
+    }
     wrap.append(row);
   });
   host.append(wrap);
@@ -892,7 +902,15 @@ function identityCard(p) {
 
 /* ── tab: overview ───────────────────────────────────────────────────────── */
 async function tabOverview(root, id, prof) {
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  /* Under the page contract (plan §4 #driver/overview): a 00 band — Trips
+     the hero with its gap to the fleet median from /api/driver/standing,
+     then days, hours online, utilisation, completion, typical start, and the
+     money tiles on the band's second row, every figure and sub-line as
+     before, untoned — the rank bars in ink with each row's value against
+     the fleet median printed on it, and a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
   const g1 = el('div', 'grid g23'); root.append(g1);
   /* No number in the subtitle. It said "5 or more trips" — a copy of the
      floor, in a place the response cannot reach, beside a word ("trips") the
@@ -918,7 +936,7 @@ async function tabOverview(root, id, prof) {
     qAll('/api/driver/daily', { id }), qAll('/api/driver/heatmap', { id }),
   ]);
 
-  kpiHost.replaceWith(kpiRow([
+  const OV_TILES = [
     { label: 'Typical start', value: hourStr(k.median_start_h), sub: k.start_consistency_h != null ? `±${(+k.start_consistency_h).toFixed(1)}h day to day` : null },
     { label: 'Days worked', value: fmt(k.days_worked), sub: `${fmt(k.trips_per_day, 1)} trips per day` },
     /* Both tiles say where the figure came from and over how much of the
@@ -980,7 +998,8 @@ async function tabOverview(root, id, prof) {
     /* The same renderer as the Quality tab, so the two tiles cannot drift into
        showing one driver two different ratings. */
     ratingTrend(k),
-  ]));
+  ];
+  if (ak) { kpiHost.remove(); overviewGlance(AKB, OV_TILES, st, k); } else kpiHost.replaceWith(kpiRow(OV_TILES));
 
   /* The revenue bar ranks a driver against a fleet whose median fare is zero,
      because Uber publishes no fare per trip — so a hotel driver with four
@@ -998,7 +1017,7 @@ async function tabOverview(root, id, prof) {
      only drawn where there is a chart to be empty; where the reason is known,
      the reason is the whole of it. */
   if ((st.metrics || []).length) {
-    percentileBars(stand.body, st.metrics, {
+    percentileBars(stand.body, st.metrics, { ak,
       note: 'Fares only — most of this fleet\'s work carries no fare, so this percentile is not comparable.' });
   } else stand.body.innerHTML = '';
   /* THE COUNT IN THE SENTENCE AND THE COUNT THE FLOOR WAS APPLIED TO HAVE TO
@@ -1115,8 +1134,50 @@ async function tabOverview(root, id, prof) {
       + 'thing on the chart. The days themselves are in the day-by-day table on Activity, with what '
       + 'each of them did and did not report.'));
   } else {
-    barChart(vol.body, daily.map((d) => ({ ...d, label: dayStr(d.day) })), { x: 'label', y: 'trips', color: '--b400' });
+    barChart(vol.body, daily.map((d) => ({ ...d, label: dayStr(d.day) })), { x: 'label', y: 'trips', color: ak ? '--ink' : '--b400' });
   }
+  if (ak) overviewAbsence(root, k, prof);
+}
+
+/* ── #driver/overview under the page contract ──────────────────────────── */
+/* The tiles in the plan's order — Trips first as the hero, the working
+   figures, then the money and the rating on the band's second row — each
+   the tile the old row drew, with its sub-line. Trips carries its gap to
+   the fleet median as a worded delta (ruling 4), from the standing the tab
+   already fetched; a person too thin to rank carries none, and says why. */
+function overviewGlance(AKB, tiles, st, k) {
+  const by = Object.fromEntries(tiles.filter(Boolean).map((x) => [x.label, x]));
+  const tm = (st.metrics || []).find((m) => m.key === 'trips');
+  const trips = { ...by.Trips, hero: true };
+  /* The gap is from the TILE's own figure, so the number and its delta can
+     never be two counts; the median and percentile are the standing's. */
+  if (tm && tm.median != null && k.trips != null) {
+    trips.delta = { value: Number(k.trips) - Number(tm.median), kind: 'gap', d: 0,
+      of: `against the fleet median of ${fmt(tm.median)} · ${tm.percentile}${ordinal(tm.percentile)} percentile of ${fmt(tm.population)}` };
+  }
+  const order = ['Trips', 'Days worked', 'Hours online', 'Utilisation', 'Completion', 'Typical start'];
+  const rest = tiles.filter((x) => x && !order.includes(x.label));
+  const { tiles: out } = bandTiles([trips, ...order.slice(1).map((l) => by[l]), ...rest],
+    { reasons: { 'Typical start': 'no trip in this window carries a start time', Utilisation: 'needs both online and on-job time' } });
+  glance(AKB.tilesHost, out);
+}
+function overviewAbsence(root, k, prof) {
+  const trips = Number(k.trips ?? k.bookings) || 0;
+  const priced = Number(k.priced_trips) || 0;
+  const withheld = (prof.identity_withheld || []).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'A fare on every booking', hl: trips > priced, fig: trips ? `${fmt(priced)} of ${fmt(trips)}` : null, none: 'No booking',
+      why: trips > priced ? `${UBER_FARE_WHY}; Money in takes the statement where a channel filed one.`
+        : trips ? 'Every booking in this window carries a fare.' : 'No booking in this window.' },
+    { label: 'The bank transfer itself', fig: null, none: 'Not read',
+      why: 'Bank deposit is what is left of Money in after the cash the driver already holds — a remainder, not a receipt. No bank statement is read here.' },
+    { label: 'Licence and ID numbers', fig: withheld ? `${fmt(withheld)} withheld` : null, none: 'None withheld',
+      why: withheld ? (prof.identity_withheld_reason || 'withheld from an unauthenticated response') : 'Nothing on the identity card was withheld.' },
+    { label: 'When a pickup happened', fig: null, none: 'Not sent',
+      why: 'The channels send when a booking was requested and when it ended; none sends the moment the rider got in.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), prof.person_id != null ? `p${prof.person_id}` : 'account not placed'] }, root);
 }
 
 /* ── tab: activity ───────────────────────────────────────────────────────── */

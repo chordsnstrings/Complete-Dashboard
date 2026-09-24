@@ -1793,3 +1793,11 @@ over 347 on the books (252 Ecosine, 95 Egari), 114 drove with a median of
 163 bookings each, and the top 20 ran 30.0% of the work. Found by looking
 and fixed before commit: in six columns the wrapped name ran into the trip
 count on every card; the count now sits on its own line.
+
+### #driver/overview — 2026-09-24
+
+Production (This month), a busy multi-channel driver, both skins at 1440
+and 390, light and dark (scratchpad `pagephase/shots/driver-overview/`): no
+error, no sideways scroll. 288 trips, +131 against the fleet median of 157,
+97th percentile of 121. Found by looking and fixed before commit: the rank
+row's value line sat in the label's column and wrapped; it spans the row.
