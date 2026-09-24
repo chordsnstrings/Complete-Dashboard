@@ -3673,3 +3673,7 @@ Deviations:
 * The hero is Unexplained km: the verdict carries the unexplained count, so ruling 7 folds that tile.
 * The plan's spark on the hero is not built (sparklines are not built anywhere yet).
 * The every-interval total is a caption, not a separate small chart.
+
+| fix | what | state | proof |
+|---|---|---|---|
+| P3a · #insights "The cars nobody can see" skeleton | The Fleet section's skeleton sweep (`pagephase/skelsweep.mjs`: every arkiv route on the mock, three seconds after settling) found one other page still carrying a `.skel`. On #insights, the silent-tracker panel is cleared only by hbars(). When no open finding carries an hour count, nothing is drawn, and the loading skeleton sat above the caption "N carry no hour count and are not drawn" for good. The body is now cleared first. The sweep found no other route | **written** | `arkiv_today` 103/103 with the new check "07 with nothing to draw still clears its loading skeleton". Revert: the clear removed, the check fails (102/103), md5 restored. `arkiv_classic_frozen` ONLY=insights 5/5 (the panel is arkiv-only) |

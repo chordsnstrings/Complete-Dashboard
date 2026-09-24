@@ -41,6 +41,7 @@ const INS_HEADS = ['At a glance', 'Ranked actions', 'By category, over all 93', 
       docs: !!v.querySelector('[data-panel="ins-docs"] svg'), lic: !!v.querySelector('[data-panel="ins-lic"] svg'),
       licText: txt(v.querySelector('[data-panel="ins-lic"] .pbody')),
       darkCap: txt(v.querySelector('[data-panel="ins-dark"] .cap')),
+      darkSkel: !!v.querySelector('[data-panel="ins-dark"] .skel'),
       aedInk: [...v.querySelectorAll('.insight-row .num')].every((n) => !/--critical|--warn/.test(n.getAttribute('style') || '')),
     };
   });
@@ -74,6 +75,11 @@ const INS_HEADS = ['At a glance', 'Ranked actions', 'By category, over all 93', 
   check('06 with no expired-licence finding says so rather than drawing an empty axis', !r.lic && /No open finding says a driving licence has expired/.test(r.licText), r.licText);
   check('07 says a car with no hour count is not drawn, and why the bars are ink', /carry no hour count/.test(r.darkCap)
     && /ink rather than a channel/.test(r.darkCap), r.darkCap);
+  /* The mock's one silent-tracker finding carries no hour count, so no bar is
+     drawn — and the panel kept its loading skeleton above the caption for
+     good, because only hbars() cleared the body (the Fleet section's skeleton
+     sweep found it, 2026-09-24). */
+  check('07 with nothing to draw still clears its loading skeleton', !r.darkSkel, String(r.darkSkel));
   check('08: the pill is a signed gap against the target', r.recHead.includes('Against the target')
     && !r.recHead.includes('Meeting it'), JSON.stringify(r.recHead));
   check('…acceptance under its target is a red ▼ −6.0 points; cancellation over its target a red ▲ +5.0 (down is good)',

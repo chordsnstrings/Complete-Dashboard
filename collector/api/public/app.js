@@ -6363,6 +6363,9 @@ async function insightsContract(root) {
     if (!staleRes) empty(dark.body, 'The silent-tracker findings did not load.');
     else if (!rows.length) empty(dark.body, 'Every tracked car has reported recently — no silent-tracker finding is open.');
     else {
+      /* Cleared here, not by hbars(): with no finding carrying an hour count
+         nothing is drawn, and the loading skeleton sat above the caption. */
+      dark.body.innerHTML = '';
       if (timed.length) {
         hbars(dark.body, timed.map((r) => ({ label: r.entity_id, n: Number(r.metric), plate: r.entity_id })),
           { signed: false, valueFmt: (v) => `${fmt(v)} h`,
