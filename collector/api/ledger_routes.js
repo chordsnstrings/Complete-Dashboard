@@ -85,6 +85,7 @@ import { resolvePerson, personKey } from './ledger_person.js';
 /* One answer to "who is this", read from the table src/persons.js builds. */
 import { personMap } from './person_map.js';
 import { aedText } from '../src/util.js';
+import { isPeriod, periodWindow } from './window.js';
 
 const round2 = (v) => (v == null ? null : Math.round(Number(v) * 100) / 100);
 
@@ -540,8 +541,21 @@ export function ledgerRegisterRoutes(app, { q, wrap }) {
   const LIMIT = 200;
   app.get('/api/ledger/entries', wrap(async (req, res) => {
     const d = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim()) ? String(v).trim() : null);
-    const from = d(req.query.from);
-    const to = d(req.query.to);
+    let from = d(req.query.from);
+    let to = d(req.query.to);
+    /* A NAMED PERIOD IS A WINDOW TOO. The client sends `period=month` for a
+       calendar span rather than computing its dates (api/public/data.js
+       windowParams — one calendar, the server's), and this route read only
+       from/to: #charging asked for "This month" and was answered with the
+       whole record (measured on production 2026-09-23: from null, to null),
+       under a caption saying both figures and both tables were over This
+       month. Resolved here with the same periodWindow() every windowed route
+       uses; explicit dates still win, and no window at all is still the whole
+       record. */
+    if (!from && !to && isPeriod(req.query.period)) {
+      const w = periodWindow(req.query.period);
+      if (w) [from, to] = w;
+    }
     /* person_id OR ext_id — the driver pages carry the second. Resolved
        read-only; opening a page never creates a ledger record. */
     const who = await personFor(q, req);

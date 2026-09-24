@@ -12,11 +12,11 @@
      #settlement/cash         cash         — what drivers are holding tonight
      #settlement/receivables  receivables  — what is outstanding, and from whom */
 
-import { donut, hbars, stackedBar, empty, fmt } from './charts.js';
+import { donut, hbars, stackedBar, scatter, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, entity,
   dayStr, dateStr, dtStr, timeStr, money, pct, sourceLabel, countOf, plural, verdict,
-  UBER_FARE_WHY } from './ui.js';
-import { q, href, state } from './data.js';
+  UBER_FARE_WHY, contract, glance, secHead, absenceBand, pageFoot, notRepeated } from './ui.js';
+import { q, qAll, href, state, windowLabel } from './data.js';
 
 export const SETTLE_TABS = [
   { id: 'mix', label: 'How fares are paid', ic: '◈' },
@@ -35,6 +35,12 @@ export async function renderSettlement(root, tab = 'mix') {
 }
 
 async function settleMix(host) {
+  /* Under the page contract (plan §4 settlement/mix): the verdict and the
+     tiles are a 00 band (the verdict's figure not repeated — ruling 7; no
+     tile toned, a share is a level), the stacked bar becomes ranked bars,
+     the class cards lose their tone borders and keep their links, and the
+     two notes are the † band. */
+  const ak = contract();
   loading(host);
   const s = await q('/api/settlement/mix');
   host.innerHTML = '';
@@ -46,6 +52,7 @@ async function settleMix(host) {
   const cash = s.classes.find((c) => c.settlement_class === 'cash');
   const owed = s.classes.filter((c) => ['on_account', 'salary'].includes(c.settlement_class));
   const clean = s.classes.filter((c) => ['card', 'wallet'].includes(c.settlement_class));
+  const AKM = {};
 
   /* Fields read off /api/settlement/mix on production: total_trips,
      unlabelled_trips, unlabelled_platforms, and classes[] with
@@ -68,7 +75,8 @@ async function settleMix(host) {
        off-platform are not settled at the ride in any sense and are not in
        this number. The tile directly below it says "Settled at the ride
        54.8%", so the two sentences contradicted each other on one screen. */
-    verdict(host, {
+    if (ak) { AKM.band = el('section', 'cband'); AKM.band.append(secHead('00', 'At a glance', windowLabel())); host.append(AKM.band); }
+    verdict(ak ? AKM.band : host, {
       claim: outstanding
         ? `${Math.round((outstanding / total) * 100)}% of bookings are still to be collected`
         : 'Every booking is already in the bank',
@@ -85,7 +93,7 @@ async function settleMix(host) {
     });
   }
 
-  host.append(kpiRow([
+  const MIX_TILES = [
     { label: 'Bookings with a settlement route', value: fmt(total),
       sub: s.unlabelled_trips ? `${fmt(s.unlabelled_trips)} record none` : 'all of them' },
     { label: 'Settled at the ride', value: pct((clean.reduce((a, c) => a + c.trips, 0) / total) * 100, 1),
@@ -143,10 +151,32 @@ async function settleMix(host) {
         sub: `${countOf(n, 'booking')} — ${rest.map((c) => `${c.label || c.settlement_class} `
           + `${fmt(c.trips)}`).join(', ')}. The tiles above and this one cover every booking.` };
     })(),
-  ]));
+  ];
+  if (ak) {
+    /* The route count folds into the band's opening line (the plan), and no
+       tile keeps a tone. */
+    const [routes, ...rest] = MIX_TILES;
+    const line = el('p', 'cap');
+    line.textContent = `${routes.value} bookings with a settlement route — ${routes.sub}.`;
+    AKM.band.append(line);
+    const tl = el('div'); AKM.band.append(tl);
+    /* "Paid in cash" printed a bare dash when no booking was: that is a
+       measured nought, and says so. */
+    glance(tl, rest.filter(Boolean).map((t, i) => ({ ...t, tone: null, hero: i === 0,
+      ...(t.label === 'Paid in cash' && !cash ? { value: pct(0, 1), sub: 'no booking in this window was paid in cash' } : {}) })));
+  } else host.append(kpiRow(MIX_TILES));
 
   const { panel: p0, body: b0 } = panel('Every booking, by how it was paid', null);
-  stackedBar(b0, s.classes.map((c) => ({ label: c.label, n: c.trips })));
+  if (ak) {
+    /* Ranked bars: one per class with its count and share. Cleared at the
+       ride (card, wallet) is ink; every other route grey — the only split
+       this page judges. */
+    const cleared = new Set(['card', 'wallet']);
+    hbars(b0, [...s.classes].sort((a, b) => b.trips - a.trips).map((c) => ({ label: c.label, n: c.trips, cls: c.settlement_class })),
+      { signed: false, colorFor: (d) => (cleared.has(d.cls) ? '--ink' : '--grey'),
+        shareOf: (d) => (total ? `${(d.n / total * 100).toFixed(1)}%` : null) });
+    b0.append(el('p', 'cap', 'Ink is settled at the ride (card and wallet); grey is every route where the money is somewhere else first.'));
+  } else stackedBar(b0, s.classes.map((c) => ({ label: c.label, n: c.trips })));
   host.append(p0);
 
   /* Each card is a route. They were plain divs — the Cash card printed 2,650
@@ -158,7 +188,7 @@ async function settleMix(host) {
   const wrap = el('div', 'cards'); host.append(wrap);
   s.classes.forEach((c) => {
     const to = TAB[c.settlement_class];
-    const card = el(to ? 'a' : 'div', `card t-${TONE[c.settlement_class] || 'flat'}${to ? ' card-link' : ''}`);
+    const card = el(to ? 'a' : 'div', `card t-${ak ? 'flat' : (TONE[c.settlement_class] || 'flat')}${to ? ' card-link' : ''}`);
     if (to) card.href = href(...to);
     /* An average over a tenth of the rows is not the average of the class.
        Wallet reported "Average fare AED 101.70" from 10 priced bookings of
@@ -188,6 +218,21 @@ async function settleMix(host) {
       + 'minority rather than the route. Two starred averages are not comparable with each other.'));
   }
 
+  if (ak) {
+    const absHost = el('div'); host.append(absHost);
+    absenceBand(absHost, [
+      { label: 'Bookings with no route', hl: true, fig: fmt(+s.unlabelled_trips || 0),
+        why: s.unlabelled_trips ? `${fmt(s.unlabelled_trips)} bookings carry no payment label at all`
+          + `${s.unlabelled_platforms.length ? ` (${s.unlabelled_platforms.map(sourceLabel).join(', ')})` : ''} and are left out `
+          + 'of every share above rather than counted as cash.' : 'Every booking in this window records how it was paid.' },
+      { label: 'Revenue "not reported"', fig: 'Not zero',
+        why: `${UBER_FARE_WHY}, so for a route that is mostly Uber the count is known and the value follows behind it — `
+          + 'inventing a number in the meantime is how this dashboard once reported an average fare of AED 6.98. Where a fare '
+          + 'IS shown it is the gross the rider was charged; Uber keeps a quarter of it.' },
+    ]);
+    pageFoot({ colophon: [windowLabel(), `${fmt(total)} bookings with a route`] }, host);
+    return;
+  }
   if (s.unlabelled_trips) {
     host.append(note(`${fmt(s.unlabelled_trips)} bookings carry no payment label at all`
       + `${s.unlabelled_platforms.length ? ` (${s.unlabelled_platforms.map(sourceLabel).join(', ')})` : ''} and are left out `
@@ -207,15 +252,24 @@ async function settleCash(host) {
      different source and none named which. This page measures cash from
      BOOKINGS that report a fare (8.5% of them); the payout statements report
      what the platforms say drivers took. Both are here now, labelled. */
-  const [c, rev] = await Promise.all([
+  /* Under the page contract (plan §4 settlement/cash): a 00 band (Value we
+     can see is the verdict's figure, so it is not a tile — ruling 7), the
+     platforms' figure worded as smaller OR larger from the numbers (the
+     plan's FIX: it always said "the larger of the two"), two readings of
+     the same cash driver by driver, the table unchanged, and a † band with
+     Cash banked computed from the hand-in record. */
+  const ak = contract();
+  const [c, rev, hand] = await Promise.all([
     q('/api/settlement/cash-exposure'),
     q('/api/revenue').catch(() => null),
+    ak ? qAll('/api/ledger/entries', { type_code: 'cash_deposit' }).catch(() => null) : null,
   ]);
   host.innerHTML = '';
   const reported = rev && rev.totals
     ? (rev.totals.cash != null || rev.totals.statement_cash != null
       ? (+rev.totals.cash || 0) + (+rev.totals.statement_cash || 0) : null)
     : null;
+  const AKC = {};
   /* Fields read off /api/settlement/cash-exposure on production:
      total_cash_trips, total_cash_value_known, value_known_pct, and the
      per-driver rows. Cash in a driver's hand is the fleet's money somewhere
@@ -225,7 +279,9 @@ async function settleCash(host) {
     const known = +c.total_cash_value_known || 0;
     const seen = c.value_known_pct == null ? null : +c.value_known_pct;
     const blind = seen == null ? null : Math.round(100 - seen);
-    verdict(host, {
+    if (ak) { AKC.band = el('section', 'cband'); AKC.band.append(secHead('00', 'At a glance', windowLabel())); host.append(AKC.band); }
+    AKC.figure = money(known);
+    verdict(ak ? AKC.band : host, {
       claim: blind
         ? `${blind}% of cash bookings carry no fare at all`
         : known ? `${money(known)} is in drivers’ hands` : 'No cash booking in this window',
@@ -243,7 +299,7 @@ async function settleCash(host) {
     });
   }
 
-  host.append(kpiRow([
+  const CASH_TILES = [
     { label: 'Cash bookings', value: fmt(c.total_cash_trips), sub: 'driver collected the money directly' },
     { label: 'Value we can see', value: money(c.total_cash_value_known),
       sub: `over the ${pct(c.value_known_pct, 0)} of cash bookings that report a fare — the rest is real `
@@ -287,7 +343,41 @@ async function settleCash(host) {
         ? `across ${fmt(c.driver_rows)} platform accounts`
         : (c.truncated ? `${fmt(c.drivers.length)} shown below` : 'every one of them listed below')),
       cohort: c.drivers.length ? 'settlement-cash' : null },
-  ]));
+  ];
+  if (ak) {
+    const known = +c.total_cash_value_known || 0;
+    const byLabel = Object.fromEntries(CASH_TILES.map((t) => [t.label, t]));
+    const plat = byLabel['Cash the platforms report'];
+    const cmpWord = reported == null ? '' : reported > known ? 'the larger of the two' : reported < known ? 'the smaller of the two' : 'the same figure';
+    const tl = el('div'); AKC.band.append(tl);
+    glance(tl, notRepeated([
+      { ...byLabel['Value we can see'], tone: null },
+      reported != null
+        ? { ...plat, hero: true, sub: 'from the payout statements, not from per-booking fares — a different measurement of the same money, '
+          + `and ${cmpWord}` + (c.total_statement_cash != null
+            ? `. The column below reads the same statements per person and comes to ${money(c.total_statement_cash)} across the `
+              + `${countOf(c.statement_cash_drivers || 0, 'person', 'people')} on this list` : '') }
+        : { label: 'Cash the platforms report', hero: true, na: 'no payout statement covers this window' },
+      byLabel['Cash bookings'],
+      byLabel['Drivers holding cash'],
+    ], AKC.figure).tiles);
+    if (c.drivers.length) {
+      const sp = panel('Two readings of the same cash, driver by driver',
+        'x is the value of the cash bookings that carry a fare; y is what the platform\u2019s own statement says they took. Never added.', 'cash-scatter');
+      host.append(sp.panel);
+      const both = c.drivers.filter((r) => r.cash_value != null && r.statement_cash != null);
+      const one = c.drivers.length - both.length;
+      if (!both.length) empty(sp.body, 'No row carries both readings in this window.');
+      else {
+        scatter(sp.body, both.map((r) => ({ name: r.driver_name, ext: r.driver_ext_id, v: +r.cash_value, st: +r.statement_cash })),
+          { x: 'v', y: 'st', label: 'name', xLabel: 'value known', yLabel: 'statement cash',
+            xFmt: (v) => money(v), yFmt: (v) => money(v),
+            onClick: (r) => { if (r.ext) location.hash = href('driver', r.ext); } });
+      }
+      sp.body.append(el('p', 'cap', esc(`${fmt(both.length)} of ${fmt(c.drivers.length)} rows carry both readings; `
+        + `${fmt(one)} carry only one, and a dot needs both.`)));
+    }
+  } else host.append(kpiRow(CASH_TILES));
   if (c.caveat) host.append(note(c.caveat));
   if (!c.drivers.length) return empty(host, 'No cash booking in this window');
   /* Sortable, and defaulting to the column somebody actually reconciles on.
@@ -383,17 +473,47 @@ async function settleCash(host) {
   if (c.truncated) cp.body.append(note(
     `Listing the ${fmt(c.drivers.length)} drivers holding the most cash, of ${fmt(c.driver_count)}. `
     + 'The totals above are over all of them.'));
+  if (ak) { cashAbsence(host, c, hand); return; }
   host.append(note('A fare collected by a supervisor is deliberately excluded: this is the money a '
     + 'driver personally ends a shift holding, which is the number a cash-handling control is sized on. '
     + 'It is also why this page counts fewer cash bookings than the mix tab beside it — the difference '
     + 'is the supervisor-collected ones, which are the fleet\'s money already.'));
 }
+function cashAbsence(host, c, hand) {
+  const rows = hand?.totals?.rows || 0;
+  const handed = hand?.totals?.cash;
+  const span = hand && (hand.from || hand.to) ? `between ${hand.from || 'the first entry'} and ${hand.to || 'today'}` : 'over the whole record';
+  const seen = c.value_known_pct == null ? null : +c.value_known_pct;
+  const absHost = el('div'); host.append(absHost);
+  absenceBand(absHost, [
+    /* Handed in is not banked: the hand-in record is a driver giving cash
+       to the fleet, and no bank statement is read by this product. So this
+       is absent whatever the hand-in record holds, and says what it holds. */
+    { label: 'Cash banked', fig: null, none: hand ? 'Not measured' : 'Not loaded',
+      why: hand ? 'No bank statement is read by this product, so what reached the bank is not measured. '
+        + `The hand-in record — a driver handing cash to the fleet — holds ${countOf(rows, 'entry', 'entries')} ${span}`
+        + `${rows && handed != null ? `, ${money(Math.abs(handed))} in all` : ''}.`
+        : 'The hand-in record did not answer, so not even the cash handed to the fleet is known here.' },
+    { label: 'Cash bookings with no fare', hl: true, fig: seen == null ? null : pct(100 - seen, 0), none: 'Not measured',
+      why: 'A cash booking with no fare on it is real money with no figure attached; the value we can see is a floor, not a total.' },
+    { label: 'Collected by a supervisor', fig: 'Left out',
+      why: 'A fare collected by a supervisor is the fleet\u2019s money already, so it is excluded: this is what a driver personally ends a shift holding.' },
+    { label: 'Statement cash, by name', fig: 'Filed by name',
+      why: 'The platform\u2019s statement is filed under the driver\u2019s name; where one person is spelled two ways both rows show the same money (†) and it is counted once above.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), `${fmt(c.total_cash_trips)} cash bookings`] }, host);
+}
 
 async function settleReceivables(host) {
+  /* Under the page contract (plan §4 settlement/receivables): the three
+     tiles and "bookings with no fare" as a 00 band, the ageing table as bars
+     of amount per bucket (every column kept in the labels), the age pills'
+     tones through the foundation, and the exposure note in the † band. */
+  const ak = contract();
   loading(host);
   const r = await q('/api/settlement/receivables');
   host.innerHTML = '';
-  host.append(kpiRow([
+  const RECV_TILES = [
     /* Every one of these three came off the visible list, which the endpoint
        caps at 200 counterparties ordered by amount. An outstanding figure that
        silently excludes its own tail is worse than none, because somebody will
@@ -415,7 +535,20 @@ async function settleReceivables(host) {
         : `bounded by the window: this is the oldest inside the selected range, not the oldest debt `
           + 'the fleet holds',
       tone: (r.oldest_days ?? 0) > 60 ? 'warn' : null },
-  ]));
+  ];
+  if (ak) {
+    const band = el('section', 'cband');
+    band.append(secHead('00', 'At a glance', windowLabel()));
+    host.append(band);
+    const tl = el('div'); band.append(tl);
+    const noFare = r.total_trips != null && r.priced_trips != null ? +r.total_trips - +r.priced_trips : null;
+    glance(tl, [{ ...RECV_TILES[0], hero: true }, RECV_TILES[1], { ...RECV_TILES[2], tone: null },
+      noFare == null || noFare < 0
+        ? { label: 'Bookings with no fare', na: noFare == null ? 'the answer does not count priced bookings'
+          : 'the answer counts more priced bookings than bookings, so the difference is not a count of anything' }
+        : { label: 'Bookings with no fare', value: fmt(noFare),
+          sub: noFare ? 'owed, with no amount against them — the outstanding figure is over the rest' : 'every outstanding booking carries a fare' }]);
+  } else host.append(kpiRow(RECV_TILES));
   /* r.ageing.buckets, not r.buckets.
      ─────────────────────────────────────────────────────────────────────
      The endpoint has always nested these one level down, inside `ageing`
@@ -427,7 +560,15 @@ async function settleReceivables(host) {
      outstanding receivables that the endpoint computed, shipped, and nobody
      ever saw. */
   const buckets = r.ageing?.buckets;
-  if (buckets?.length) {
+  if (ak && buckets?.length) {
+    const ap = panel('How old the unpaid work is', 'Amount per age, with its bookings and counterparties. A bucket with nothing in it is a measured nought.', 'recv-ageing');
+    host.append(ap.panel);
+    hbars(ap.body, buckets.map((x) => ({ label: `${x.label} · ${countOf(x.trips || 0, 'booking')}, ${countOf(x.counterparties || 0, 'counterparty', 'counterparties')}`,
+      n: +x.amount || 0 })), { signed: false, color: '--ink', valueFmt: (v) => (v ? money(v) : 'nothing outstanding') });
+    ap.body.append(el('p', 'cap',
+      `${esc(r.ageing.note || '')} The tiles above cover the selected window; these bars cover `
+      + `every unsettled booking up to ${dateStr(r.ageing.as_at)}, which is why their total is larger.`));
+  } else if (buckets?.length) {
     host.append(tableFrom(buckets, [
       { label: 'Age', key: 'label' },
       { label: 'Counterparties', key: 'counterparties', num: true },
@@ -468,6 +609,16 @@ async function settleReceivables(host) {
     { label: 'Newest', key: 'newest', render: (x) => dateStr(x.newest) },
   ], { sortable: true, sortId: 'recv', defaultSort: { key: 'amount', dir: 'desc' },
     capped: r.truncated ? `all ${fmt(r.counterparties)} counterparties` : null }));
+  if (ak) {
+    const absHost = el('div'); host.append(absHost);
+    absenceBand(absHost, [
+      { label: 'Whether any of it has since been collected', fig: null, none: 'Not in this data',
+        why: '"Outstanding" means the fare was recorded as settled after the ride — charged to a room, to a property account, '
+          + 'or against an employee\u2019s salary. Whether it has since been collected is not in this data: this is the exposure, not the ledger.' },
+    ]);
+    pageFoot({ colophon: [windowLabel(), `${money(r.total)} outstanding`] }, host);
+    return;
+  }
   host.append(note('"Outstanding" here means the fare was recorded as settled after the ride — '
     + 'charged to a room, to a property account, or against an employee’s salary. Whether it has since '
     + 'been collected is not in this data; this is the exposure, not the ledger.'));

@@ -149,7 +149,14 @@ const server = shell.listen(0);
 const base = `http://127.0.0.1:${server.address().port}`;
 
 const browser = await launchChromium();
-const page = await browser.newPage({ viewport: { width: 1600, height: 1400 } });
+/* reducedMotion: countUp() animates every tile from nought over ~620ms of
+   animation frames, and tiles() below trusts two equal reads 300ms apart. Under
+   the full suite's load frames stall, two reads of a figure on its way up can
+   agree, and this file failed twice in the page phase reading "AED 18,579.75"
+   for the AED 38,194.57 tile — passing alone on every rerun. With motion
+   reduced, countUp() does not run and a tile holds its real value from the
+   first frame. Nothing this file checks is about motion. */
+const page = await browser.newPage({ viewport: { width: 1600, height: 1400 }, reducedMotion: 'reduce' });
 const open = async (hash, ready) => {
   await page.goto(`${base}/?ui=desktop`, { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => { try { localStorage.clear(); sessionStorage.clear(); } catch { /* private mode */ } });

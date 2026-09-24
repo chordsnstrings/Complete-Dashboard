@@ -25,9 +25,9 @@
    this page is generated — the sentences are composed from the same figures
    the tables show, so a reader can check any claim against the row under it. */
 import { el, esc, panel, loading, tableFrom, kpiRow, note, verdict, pill, plural, countOf,
-  sourceLine, money } from './ui.js';
-import { fmt, empty, heatmap } from './charts.js';
-import { q, href } from './data.js';
+  sourceLine, money, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
+import { fmt, empty, heatmap, hbars, scatter } from './charts.js';
+import { q, href, windowLabel } from './data.js';
 
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const D3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -55,6 +55,15 @@ export async function renderOptimise(root) {
   ]);
   root.innerHTML = '';
   if (opt?.error) { root.append(note(`Could not compute this: ${opt.error}`, 'err')); return; }
+  /* Under the page contract (plan §4 optimise): the verdict and the tiles in
+     a 00 band (idle between jobs the hero, the rest untoned, the placeable
+     bookings no car waited for beside them); the rate heatmap; the waiting
+     table; where cars pile up and run out; when a car comes free; the no-car
+     table; where cars arrive and no job starts (the surplus the endpoint has
+     sent and nothing drew); the waiting against the handovers; a † band. The
+     charger warning becomes a caption — it is a basis, not a defect. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
 
   /* A cell of /api/supply/balance is PER OCCURRENCE of its weekday — that is
      what makes a Tuesday comparable to a Thursday in a 30-day window that
@@ -103,7 +112,7 @@ export async function renderOptimise(root) {
         + 'each online hour; too few hours carry enough supply to name a worst one against it.'
       : 'No weekday-hour carries enough online time to rank.';
 
-  verdict(root, {
+  const optVerdict = {
     claim: idlePct ? `${idlePct}% of the hours this fleet pays for are idle`
       : 'Availability is not being collected yet',
     figure: opt.median_wait_overall != null ? `${opt.median_wait_overall} min` : '—',
@@ -130,9 +139,10 @@ export async function renderOptimise(root) {
         + `(${Math.round((upside / Math.max(1, jobsSeen)) * 100)}% on the ${fmt(Math.round(jobsSeen))} `
         + 'this view covers) on hours already being paid for — no extra driver, no extra car.'
       : null,
-  });
+  };
+  verdict(ak ? AKB.vHost : root, optVerdict);
 
-  root.append(kpiRow([
+  const OPT_TILES = [
     { label: 'Idle, between jobs', value: `${fmt(opt.idle_h_between_jobs)} h`,
       sub: `over ${fmt(opt.handovers)} handovers`, tone: 'warn' },
     /* Shown next to the idle figure, not subtracted from it: this is a name
@@ -150,7 +160,19 @@ export async function renderOptimise(root) {
       sub: worst ? `${when(worst)} · ${fmt(Math.round(worst.idle_h))} idle hours` : null, tone: 'bad' },
     { label: 'The gap to itself', value: upside ? `+${fmt(Math.round(upside))}` : '—',
       sub: 'trips a month at the fleet median' },
-  ]));
+  ];
+  if (ak) {
+    glance(AKB.tilesHost, bandTiles([...OPT_TILES.map((x, i) => (i === 0 ? { ...x, hero: true } : x)),
+      opt.placed_bookings ? { label: 'Bookings where no car waited', value: `${opt.empty_arrival_pct}%`,
+        sub: `${fmt(opt.empty_arrivals)} of ${fmt(opt.placed_bookings)} placeable bookings began where no car had finished in the hour before — a floor` }
+        : { label: 'Bookings where no car waited', na: 'no booking in this window can be placed in an area' },
+    ], { figure: optVerdict.figure, reasons: {
+      'Of that, where a charger is': 'no charging site is named in this window\u2019s areas',
+      'Best hour of the week': 'no weekday-hour carries enough online time to rank',
+      'Worst with real supply': 'no weekday-hour has twenty online hours behind it',
+      'The gap to itself': 'no hour sits below the fleet\u2019s own median',
+    } }).tiles);
+  } else root.append(kpiRow(OPT_TILES));
 
   /* When to be out. The heatmap the rota is written against — jobs won per
      online hour, so a cell is a RATE and a thin Tuesday does not out-rank a
@@ -188,10 +210,11 @@ export async function renderOptimise(root) {
      without knowing a charger stands in two of them would move the cars away
      from the only place this largely-electric fleet can refuel. */
   if ((opt.charging_sites || []).length) {
+    const noteOrCap = ak ? (txt) => el('p', 'cap', esc(txt)) : (txt, cls) => note(txt, cls);
     const alias = (opt.charging_aliases || [])
       .map((a) => `${a.site} is written ${a.written.map((n) => `“${n}”`).join(' and ')}`)
       .join('; ');
-    w.body.append(note(`${opt.charging_sites.join(' and ')} hold charging stations, so idle `
+    w.body.append(noteOrCap(`${opt.charging_sites.join(' and ')} hold charging stations, so idle `
       + 'time in those rows mixes waiting for work with plugging in — '
       + `${opt.idle_h_at_charging_sites != null ? `${fmt(opt.idle_h_at_charging_sites)} hours ` : ''}`
       + `${opt.idle_h_charging_pct != null ? `(${opt.idle_h_charging_pct}% of all the waiting) ` : ''}`
@@ -233,6 +256,7 @@ export async function renderOptimise(root) {
   } else empty(w.body, 'No vehicle completed two bookings in this window.');
 
   /* The area arithmetic, second, with its flaw stated before the table. */
+  if (ak) optimiseMiddle(root, opt);
   const m = panel('Jobs that started where no car was waiting',
     'Bookings beginning in an area, against cars that finished a trip there in the hour before.');
   root.append(m.panel);
@@ -270,6 +294,7 @@ export async function renderOptimise(root) {
         : '')));
   } else empty(m.body, 'No area produced enough bookings to rank.');
 
+  if (ak) optimiseAfter(root, opt);
   root.append(el('p', 'cap',
     'Every figure on this page is over the window and channels selected above. '
     + `${countOf(opt.areas_seen || 0, 'area')} and ${countOf(opt.slots_seen || 0, 'place-hour')} were read.`));
@@ -282,4 +307,66 @@ export async function renderOptimise(root) {
       + 'bookings, so a channel that reports no trips contributes no waits either',
   });
   if (src) root.append(src);
+  if (ak) pageFoot({ colophon: [windowLabel(), `${fmt(opt.slots_seen || 0)} place-hours`] }, root);
+}
+
+/* ── #optimise under the page contract ─────────────────────────────────────
+   Everything below reads /api/optimise as it already arrives: slots[] (every
+   place-hour — 2,586 on production this month), waits[] (the 40 worst of
+   totals.waits), surplus[] (the 20 worst of totals.surplus). */
+function optimiseMiddle(root, opt) {
+  const slots = opt.slots || [];
+  const g = el('div', 'grid g2'); root.append(g);
+  const pile = panel('Where cars pile up, and run out', 'Bookings started in an area less cars that finished there, over every place-hour. Ink runs short; grey piles up.', 'opt-pile');
+  const free = panel('When a car comes free', 'Drop-offs by weekday and hour, over every place-hour.', 'opt-free');
+  g.append(pile.panel, free.panel);
+  const byArea = new Map();
+  slots.forEach((r) => byArea.set(r.area, (byArea.get(r.area) || 0) + (+r.pickups || 0) - (+r.arrivals || 0)));
+  const ranked = [...byArea.entries()].filter(([a, n]) => n && !/unrecorded/i.test(String(a))).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 14);
+  if (!ranked.length) empty(pile.body, 'No area has more bookings than arrivals, or more arrivals than bookings, in this window.');
+  else {
+    hbars(pile.body, ranked.sort((a, b) => b[1] - a[1]).map(([label, n]) => ({ label, n })),
+      { signed: true, color: '--ink', negColor: '--grey', legend: [['--ink', 'more bookings than cars'], ['--grey', 'more cars than bookings']] });
+    pile.body.append(el('p', 'cap', esc(`The 14 areas furthest from even, of ${fmt(byArea.size)}. An area is address text, and one place written two ways is two areas here.`)));
+  }
+  const cells = new Map();
+  slots.forEach((r) => { const k = `${r.dow}|${r.h}`; cells.set(k, (cells.get(k) || 0) + (+r.arrivals || 0)); });
+  if (!cells.size) empty(free.body, 'No drop-off in this window carries an area and an hour.');
+  else heatmap(free.body, [...cells.entries()].map(([k, n]) => { const [dow, h] = k.split('|').map(Number); return { dow, h, trips: n }; }),
+    { unit: 'drop-offs', onClick: (c) => { location.hash = href('slot', String(c.dow), String(c.h)); } });
+}
+function optimiseAfter(root, opt) {
+  const sp = panel('Where cars arrive and no job starts', `The ${fmt((opt.surplus || []).length)} place-hours with the most cars left idle, of ${fmt(opt.totals?.surplus || 0)} with more arrivals than bookings.`, 'opt-surplus');
+  root.append(sp.panel);
+  const sur = (opt.surplus || []).map((r) => ({ ...r, _when: `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][r.dow]} ${String(r.h).padStart(2, '0')}:00` }));
+  if (!sur.length) empty(sp.body, 'No place-hour in this window had more cars arrive than jobs start.');
+  else {
+    sp.body.append(tableFrom(sur, [
+      { label: 'When', key: '_when' },
+      { label: 'Area', key: 'area' },
+      { label: 'Pick-ups', key: 'pickups', num: true, render: (r) => fmt(r.pickups) },
+      { label: 'Arrivals', key: 'arrivals', num: true, render: (r) => fmt(r.arrivals) },
+      { label: 'Idle, each time', key: 'idle_per_occurrence', num: true, render: (r) => fmt(r.idle_per_occurrence, 1) },
+      { label: 'Average fare', key: 'avg_fare', num: true, absent: 'no booking in these place-hours reports a fare',
+        render: (r) => (r.avg_fare == null ? '<span class="dim">no price reported</span>'
+          : `${money(r.avg_fare)}<span class="dim"> · ${fmt(r.priced_pickups)} of ${fmt(r.pickups)}</span>`) },
+    ], { compact: true }));
+  }
+  const wp = panel('Is the waiting where the work is', `The ${fmt((opt.waits || []).length)} worst place-hours of ${fmt(opt.totals?.waits || 0)}: handovers against the median wait.`, 'opt-scatter');
+  root.append(wp.panel);
+  const W = (opt.waits || []).filter((r) => r.handovers != null && r.median_wait_min != null);
+  if (!W.length) empty(wp.body, 'No vehicle completed two bookings in this window.');
+  else scatter(wp.body, W.map((r) => ({ name: `${r.area} · ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][r.dow]} ${String(r.h).padStart(2, '0')}:00`,
+    x: +r.handovers, y: +r.median_wait_min })), { x: 'x', y: 'y', label: 'name', xLabel: 'handovers', yLabel: 'median wait (min)' });
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Why a car waited', hl: true, fig: null, none: 'Not measured',
+      why: 'No feed says whether a waiting car was offered a job and refused it, was never offered one, or was off shift.' },
+    { label: 'Charging', fig: opt.idle_h_at_charging_sites != null ? `${fmt(opt.idle_h_at_charging_sites)} h, at most` : 'None named',
+      why: 'A name match on the address, not a plug event: it says a charger was nearby, never that the car was on it.' },
+    { label: 'Places', fig: 'Names, not shapes',
+      why: 'An area is text parsed from an address; two providers can write one place two ways.' },
+    { label: 'Slots not sent', fig: fmt(Math.max(0, (opt.totals?.waits || 0) - (opt.waits || []).length)),
+      why: `The endpoint sends the ${fmt((opt.waits || []).length)} worst waits of ${fmt(opt.totals?.waits || 0)}; the waiting table and the scatter are those.` },
+  ]);
 }

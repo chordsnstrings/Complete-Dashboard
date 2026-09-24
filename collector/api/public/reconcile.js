@@ -30,10 +30,10 @@
    off" is only actionable once you can see WHICH days carry the gap — cash
    timing shows up as paired over/under days, a missing statement week as a
    run of dashes. */
-import { empty } from './charts.js';
+import { empty, gapBars, hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, fmt, pct,
-  countOf, plural, verdict, sourceLabel } from './ui.js';
-import { qChan, href } from './data.js';
+  countOf, plural, verdict, sourceLabel, dateStr, dayStr, contract, glance, secHead, absenceBand, pageFoot } from './ui.js';
+import { qChan, href, state } from './data.js';
 
 /* Why a money column can be empty for a whole year of months.
    ─────────────────────────────────────────────────────────────────────────
@@ -499,9 +499,17 @@ export async function renderReconcile(root, month) {
      Every number in the band comes from headlineVerdict above, which reads the
      endpoint's own totals rather than re-deriving them from the rows — see the
      block comment there for the 3.4x overstatement that cost. */
-  verdict(host, headlineVerdict(d, month));
+  /* Under the page contract (plan §4 reconcile, and the review's
+     correction): 00 holds the verdict and the tiles; the gap's judgement
+     (deltaPill — the salik floor, a partial statement, a cut period) is its
+     opening line; charts 01–04 before the tables; the notes as a † band. */
+  const ak = contract();
+  const AKB = ak ? el('section', 'cband') : null;
+  if (ak) { AKB.append(secHead('00', 'At a glance', span)); host.append(AKB); }
+  verdict(ak ? AKB : host, headlineVerdict(d, month));
+  if (ak) reconcileGlance(AKB, d, month, over);
 
-  host.append(kpiRow([
+  if (!ak) host.append(kpiRow([
     { label: 'Trips', value: t.trips != null ? fmt(t.trips) : '—',
       sub: `bookings ${over}` },
     { label: 'Expected payout', value: t.expected_payout != null ? money(t.expected_payout) : '—',
@@ -541,6 +549,7 @@ export async function renderReconcile(root, month) {
   // Newest first for the monthly view — reconciliation starts from the latest
   // statement — and calendar order inside a month, which is how a month reads.
   const rows = month ? d.rows : [...d.rows].reverse();
+  if (ak) reconcileCharts(host, d, month, { coverage, withExpected, withBank });
   mp.body.append(tableFrom(rows, COLS(keyCol),
     { sortable: true, sortId: month ? 'recon-days' : 'recon-months' }));
   /* Why consecutive days are byte-identical, and why this used to say so far
@@ -672,4 +681,137 @@ export async function renderReconcile(root, month) {
     + 'do. Uber’s reaches about 192 days — a rolling retention window that moves forward daily, '
     + 'so the oldest month on this table loses its statement a little at a time and can never '
     + 'get it back. Earlier months show “—”, which means unknowable, not zero.'));
+  if (ak) reconcileAbsence(host, d, month);
+}
+
+/* ── #reconcile under the page contract ────────────────────────────────────
+   00: the verdict's claim and figure (headlineVerdict, unchanged), the
+   gap's judgement as the opening line — deltaPill, with the salik floor and
+   the partial-statement and cut-period rules — then the gap in the latest
+   comparable period (the hero), the bank side that period, compared over,
+   trips. 01 what the statement expects and what the bank paid, per period
+   (the two totals and their coverage in its caption) · 02 is the gap
+   closing · 03 what the expectation is built from · 04 every period on
+   record, a period that filed no money row outlined and a period the window
+   cuts hatched · the tables, unchanged · † months that cannot be compared,
+   what "bank" means here, salik not seen, the statement horizon.
+   DEVIATION: the plan's hero "bank paid over statement" is the verdict's own
+   figure, so under ruling 7 it is the band's opening line and not a tile;
+   the bank side's change is said in words (a bigger payout is not better on
+   a page whose question is agreement). NOT BUILT: "channels answering" (the
+   plan marks it as needing a new endpoint). */
+const labelOf = (r, month) => (month ? dayStr(r.d) : MONTH_LABEL(r.m));
+/* COMPARABLE by the endpoint's own rule (api/reconcile_routes.js reconciles
+   a row only when delta != null && !statement_partial && !period_cut), not
+   by "has a delta". The first draft took the latest row with a delta_pct and
+   led the band with September's +20.2% — a month the window cuts, which the
+   endpoint itself leaves out, and which headlineVerdict says "cannot be
+   compared" one line above (production, 2026-09-24). */
+const comparableRow = (r) => r.delta != null && r.delta_pct != null && !r.statement_partial && !r.period_cut;
+function reconcileGlance(band, d, month, over) {
+  const t = d.totals || {};
+  const unit = month ? 'day' : 'month';
+  const cmp = d.rows.filter(comparableRow);
+  const last = cmp[cmp.length - 1] || null;
+  const prev = cmp[cmp.length - 2] || null;
+  if (t.delta != null) {
+    const line = el('p', 'cap rc-gapline');
+    line.innerHTML = `<b>Bank paid over statement</b> ${deltaPill(t)} · ${esc(money(t.bank_covered))} banked against `
+      + `${esc(money(t.expected_covered))} expected, on the driver-days both sides describe`;
+    band.append(line);
+  }
+  const tiles = el('div'); band.append(tiles);
+  glance(tiles, [
+    last ? { label: `The gap in ${labelOf(last, month)}`, value: `${last.delta_pct > 0 ? '+' : last.delta_pct < 0 ? '−' : ''}${pct(Math.abs(last.delta_pct), 1)}`, hero: true,
+      sub: `${money(last.bank_covered)} banked against ${money(last.expected_covered)} expected`,
+      delta: prev ? { value: Math.abs(last.delta_pct) - Math.abs(prev.delta_pct), invert: true, unit: 'points',
+        of: `against ${labelOf(prev, month)}`, d: 1 } : { value: null, na: `not compared: no earlier ${unit} can be reconciled` },
+      spark: cmp.map((r) => Math.abs(+r.delta_pct)) }
+      : { label: 'The gap', hero: true, na: `no ${unit} here has both sides describing the same driver-days` },
+    last ? { label: `Bank paid in ${labelOf(last, month)}`, value: money(last.bank_covered),
+      sub: prev ? `${last.bank_covered >= prev.bank_covered ? '+' : '−'}${money(Math.abs(last.bank_covered - prev.bank_covered))} against ${labelOf(prev, month)} — neither better nor worse`
+        : 'the only period both sides describe' }
+      : { label: 'Bank paid', na: `no ${unit} here can be compared` },
+    { label: 'Compared over', value: t.matched_pairs ? fmt(t.matched_pairs) : null,
+      ...(t.matched_pairs ? { sub: `${plural(t.matched_pairs, 'driver-day')} both sides describe, in ${countOf(t.reconciled_rows, unit)}` }
+        : { na: 'no driver-day is described by both sides' }) },
+    { label: 'Trips', value: t.trips != null ? fmt(t.trips) : null,
+      ...(t.trips != null ? { sub: `bookings ${over}` } : { na: 'no trip is on record' }) },
+  ]);
+}
+function reconcileCharts(host, d, month, { coverage, withExpected, withBank }) {
+  const t = d.totals || {};
+  const unit = month ? 'day' : 'month';
+  const one = state.platform || null;
+  const col = one ? `--c-${String(one).toLowerCase()}` : '--ink';
+  const p1 = panel(`What the statement expects, and what the bank paid, ${month ? 'day' : 'month'} by ${unit}`,
+    'Bars are the bank side on the driver-days both sides describe; the line is what the statement says was owed on those same days.', 'recon-pair');
+  host.append(p1.panel);
+  gapBars(p1.body, d.rows.map((r) => ({ x: `${labelOf(r, month)}${r.statement_partial || r.period_cut ? ' †' : ''}`,
+    bank: r.bank_covered, expected: r.expected_covered, gap: r.bank_covered == null || r.expected_covered == null })),
+  { x: 'x', y: 'bank', label: 'banked', color: col, gapKey: 'gap', gapLabel: 'the two sides do not describe the same driver-days here',
+    bucketNoun: `${unit}s`, inProgress: false, secondary: 'expected', secondaryLabel: 'expected',
+    secondaryLine: { color: '--grey', label: 'expected' }, valueFmt: (v) => money(v) });
+  p1.body.append(el('p', 'cap', esc(`Expected payout ${t.expected_payout != null ? money(t.expected_payout) : '—'} `
+    + `(on-trip net + tips + salik − cash, ${coverage(withExpected)}) · bank payout ${t.bank_payout != null ? money(t.bank_payout) : '—'} `
+    + `(what the platforms report having paid, ${coverage(withBank)}). † a statement that is partial, or a period the window cuts.`)));
+  if (month) {
+    const runs = spreadRuns(d.rows);
+    if (runs.either) {
+      p1.body.append(el('p', 'cap', esc(`Plateaus are the grain: ${countOf(runs.either, 'day')} repeat the day before `
+        + `(${fmt(runs.expected)} expected, ${fmt(runs.bank)} bank) because a weekly report is spread evenly across its days — `
+        + 'a run of equal bars is one report, not days that happened to match.')));
+    }
+    return;
+  }
+
+  const g = el('div', 'grid g2'); host.append(g);
+  const p2 = panel('Is the gap closing?', `Bank over expected, per comparable ${unit}.`, 'recon-trend');
+  const p3 = panel('What the expectation is built from', 'Over the whole record here — the four netted.', 'recon-built');
+  g.append(p2.panel, p3.panel);
+  const cmp = d.rows.filter(comparableRow);
+  if (!cmp.length) empty(p2.body, `No ${unit} here can be compared.`);
+  else hbars(p2.body, cmp.map((r) => ({ label: labelOf(r, month), n: +r.delta_pct })),
+    { signed: true, color: '--ink', negColor: '--grey', valueFmt: (v) => pct(v, 1) });
+  const held = d.rows.filter((r) => r.delta != null && !comparableRow(r));
+  if (held.length) {
+    p2.body.append(el('p', 'cap', esc(`Left out, as the endpoint leaves them out: ${held.map((r) => `${labelOf(r, month)} `
+      + `(${r.period_cut ? 'the window cuts it' : 'its statement is partial'})`).join(', ')}.`)));
+  }
+  const parts = [['On-trip net', t.ontrip_net], ['Tips', t.tips], ['Salik', t.salik],
+    ['Cash already taken', t.cash_collected == null ? null : -Math.abs(t.cash_collected)]].filter(([, v]) => v != null);
+  if (!parts.length) empty(p3.body, 'No statement figure is on record here.');
+  else {
+    hbars(p3.body, parts.map(([label, n]) => ({ label, n: +n })), { signed: true, color: '--ink', negColor: '--grey', valueFmt: (v) => money(v) });
+    p3.body.append(el('p', 'cap', esc(`Netted: ${t.expected_payout != null ? money(t.expected_payout) : 'not computable'} expected.`)));
+  }
+  const p4 = panel(`Every ${unit} on record`, `The bank side, ${unit} by ${unit}. An outline is a ${unit} no payout was reported for; a hatched bar is a period the window cuts.`, 'recon-all');
+  host.append(p4.panel);
+  gapBars(p4.body, d.rows.map((r) => ({ x: labelOf(r, month), bank: r.bank_payout, none: r.bank_payout == null, cut: !!r.period_cut })),
+    { x: 'x', y: 'bank', label: 'bank payout', color: col, gapKey: 'none', gapLabel: 'no payout reported', bucketNoun: `${unit}s`,
+      inProgress: false, hatchIf: (r) => r.cut, hatchNote: 'a period the window cuts — part of it only', valueFmt: (v) => money(v) });
+}
+function reconcileAbsence(host, d, month) {
+  const t = d.totals || {};
+  const unit = month ? 'day' : 'month';
+  const reasons = Array.isArray(t.not_comparable_reasons) ? t.not_comparable_reasons : [];
+  const noCmp = d.rows.filter((r) => r.delta == null).length;
+  const noSalik = d.rows.filter((r) => r.salik == null).length;
+  const absHost = el('div'); host.append(absHost);
+  absenceBand(absHost, [
+    { label: `${unit[0].toUpperCase()}${unit.slice(1)}s that cannot be compared`, hl: true, fig: `${fmt(noCmp)} of ${fmt(d.rows.length)}`,
+      why: reasons.length ? reasons.map((r) => (typeof r === 'string' ? r : `${r.n ?? r.count ?? ''} ${r.reason ?? r.why ?? ''}`.trim())).join('; ')
+        : 'A period is compared only where both sides describe the same driver on the same day.' },
+    { label: 'What "bank" means here', fig: 'The platform\u2019s report',
+      why: 'The bank side is the platform\u2019s own payout report, not a bank-statement feed — no bank account is read by this product.' },
+    { label: 'Salik', fig: noSalik ? `not seen in ${fmt(noSalik)}` : 'Seen throughout', why: noSalik
+      ? `${countOf(noSalik, unit)} carry no salik figure, so the expectation there leaves tolls out rather than counting them as nought.`
+      : 'Every period here carries a salik figure.' },
+    /* The endpoint's own horizon ({ days, from }), never a hard-coded one. */
+    { label: 'The statement horizon', fig: d.statement_horizon?.days ? countOf(d.statement_horizon.days, 'day') : null,
+      none: 'Not stated',
+      why: d.statement_horizon?.from ? `Nothing before ${dateStr(d.statement_horizon.from)} can be asked for now: ${MONEY_FROM}`
+        : `The answer carried no horizon; ${MONEY_FROM}` },
+  ]);
+  pageFoot({ colophon: ['The whole record', month ? MONTH_LABEL(month) : `${fmt(d.rows.length)} months`] }, host);
 }

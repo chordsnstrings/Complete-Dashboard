@@ -1435,3 +1435,316 @@ the banner's (FIX-STATUS "Arkiv reskin, STEP 4", NOT DONE).
 Screenshots of #overview, #drivers, a driver's page, #payouts, #settings and
 #live under the skin at 1440 and 390, light and dark: scratchpad
 `reskin/step4/shots/`.
+
+## Arkiv page phase — desktop — 2026-09-24
+
+The page phase (plan STEP 6) converts each desktop page to the contract under
+`?skin=arkiv`. Each page's pass is recorded below: the widths and themes it
+was looked at in, against production data through `bin/live-ui.mjs` (on
+:8611; the phone branch uses :8711), what was found and what was done.
+
+**How the old skin is held.** `node test/arkiv_classic_frozen.test.mjs`
+renders every route in the old skin with both clocks frozen and compares each
+page's normalised DOM with the base's; a route whose hash moved has its HTML
+written to `$TMPDIR` for a diff. It replaces the per-step pixel harness for
+the DOM half of "the old skin did not move"; a pixel pass is still the proof
+for CSS, and the page phase changes no old-skin CSS.
+
+### #insights — 2026-09-24
+
+Production data through live-ui :8611, `?skin=arkiv` and `?skin=classic`, at
+1440 and 390, light and dark (8 full-page shots, scratchpad
+`pagephase/shots/insights/`). No page error, no sideways scroll, two
+highlights (the hero, the priced share). Found and fixed before commit: the
+ranked rows three to a line under the skin (the list sat in `.hbars`, which
+the skin makes hbars' grid); at 390 the "No cost model exists" sentence in
+the cost chart's value column squeezed every bar to a stub (the column is
+shared by every row); and against a server without `.by_code` the absence
+band said "None open" about a cancellation cost it could not see — a reason
+that was not the true one. On production today the list is not capped (197
+open), so the by-kind and cost charts are complete even before the server
+change deploys; the page says so either way.
+
+### #playbook — 2026-09-24
+
+Production data, both skins, 1440 and 390, light and dark (scratchpad
+`pagephase/shots/playbook/`): no error, no sideways scroll, two highlights.
+Found by looking and fixed before commit: the 01 caption printed "(0 journeys
+in the window)" against a server that does not send the count yet — a figure
+that was never measured, printed as 0; it now prints the count only when the
+answer carries one. The caveat said "expect roughly a third of the ceiling"
+directly after "about 5% of it" (production: 12 bookings against a median of
+224): the contract's copy prints the measured share.
+
+### #compare — 2026-09-24
+
+Production data (today against yesterday, cut at the Dubai minute), both
+skins, 1440 and 390, light and dark (scratchpad `pagephase/shots/compare/`):
+no error, no sideways scroll, two highlights. Found by looking and fixed
+before commit: the hour chart kept its "Loading…" line above the drawn rows;
+gapBars' caption counted the unreached hours as "17 of 24 days" (the shared
+`bucketNoun`, S1); the driver table printed "— vs — – 0.0 h" for two
+unmeasured waiting times; By channel's Trips column still used the old
+unsigned arrow. The render-audit finding STEP 3 logged here ("▲/▼ with no
+sign", ×5 routes) is the old delta, which the contract no longer draws.
+
+### #analyst — 2026-09-24
+
+Production data, the default tab and Rules in both skins at 1440 and 390,
+light and dark; refuted, immaterial and unsupported at 1440 light (scratchpad
+`pagephase/shots/analyst/`). No error, no sideways scroll, two highlights
+(one on Rules). The old skin's default tab is 61,996 characters of text
+against 20,293 under the contract: the same judgements, the older ones of
+each claim folded into a closed disclosure. Found and fixed before commit:
+segment labels printed the raw platform key ("bolt") where the cut is a
+platform; they use the channel's name.
+
+### #action — 2026-09-24
+
+Production data, an idle-vehicle finding and a silent-tracker finding, both
+skins, 1440 and 390, light and dark (scratchpad `pagephase/shots/action/`).
+No error, no sideways scroll, one highlight (the hero; no † cell carries a
+figure to size). The silent-tracker page draws all 17 open findings of its
+rule with this one marked, which the old page could say only as a table.
+
+### #unit — 2026-09-24
+
+Production data, the three tabs in both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/unit/`). No error, no sideways scroll; three
+highlights on Money in (the hero, the busiest band, the measured hours), one
+on each list tab. Found by looking and fixed before commit: the hours bars'
+first label ran out of its column ("Online, with someone in t…"); the
+drivers-least list printed "availability has not been collected for anyone in
+this window" beside a verdict counting 100 people with measured availability
+(the pruned column's reason, now the list's own); the reference line on Every
+vehicle, once drawn, had the wrong slope (S2).
+
+### #playbook, again — 2026-09-24
+
+Re-shot after P2a at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/playbook/`): the verdict carries the measured total, the
+glance starts at Things to do, two highlights, no sideways scroll. The pass
+that found it checked every converted page for a tile printing the verdict's
+figure (#insights, #compare, #analyst, #action, #unit, #overview: none on the
+mock; #playbook: always; #revenue: on production, where the verdict is the
+accounted total).
+
+### #revenue — 2026-09-24
+
+Production data, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/revenue/`). No error, no sideways scroll, two highlights.
+Found by looking and fixed before commit: the verdict's AED figure was
+printed again by the Accounted for tile (ruling 7 — S4, and P2a for
+#playbook, which had the same fault); the channel swatch in the table sat
+flush against the name; at 390 the table's second line scrolled off with the
+table, and now holds to the visible width.
+
+### #corporate — 2026-09-24
+
+Production data, all five tabs in both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/corporate/`, 40 shots): no error, no sideways
+scroll; two highlights on the overview. Production has no named property
+(the one booker carries no partner id), so the overview shows the index as
+absent, the unnamed bar unlinked and "None named" in the † band. Found by
+looking and fixed before commit: the verdict's AED figure repeated by the
+Billed tile (ruling 7); booked ahead drawn as "Other (1)"; the leak list's
+rows 132px tall; the no-scope reason only in a tooltip.
+
+### #property — 2026-09-24
+
+No property resolves on production (the one booker has no partner id, so
+`#property` shows "No property chosen" in both skins, unchanged). Rendered
+against the mock's `h-palm` at 1440 and 390 (scratchpad
+`pagephase/shots/corporate/prop-mock*.png`): no error, no sideways scroll,
+one highlight (the hero).
+
+### #import-sheet — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/importsheet/`): no error, no sideways scroll, no highlight
+(a form has no figure to emphasise).
+
+### #opening — 2026-09-24
+
+Production (347 people across 810 accounts, 0 openings stated), both skins
+at 1440 and 390, light and dark (scratchpad `pagephase/shots/opening/`): no
+error, no sideways scroll, two highlights. The ceiling: AED 3,440,115.08 over
+276 of 347 drivers, 71 with no cash fare, reaching back 644 days. Found by
+looking and fixed before commit: the † "what each driver owes" cell's
+fallback claimed everyone had a book row when none did; "347 of 347 unknown"
+wrapped at 1440 (the word moved to the label).
+
+### #salary — 2026-09-24
+
+Production (347 on the payroll; no salary ever recorded; 149 with a
+generated figure, 73 exactly 0.00, 125 none), both skins at 1440 and 390,
+light and dark (scratchpad `pagephase/shots/salary/`): no error, no sideways
+scroll, two highlights. Found by looking and fixed before commit: the
+spread's band labels were cut ("30,000–40,…"); they are named by the lower
+edge and the width is said in the caption.
+
+### #advances — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/advances/`): no error, no sideways scroll, two highlights.
+215 of 347 people have both a cash fare and a generated figure; 61 have cash
+fares and no generated figure; 71 have no cash fare.
+
+### #charging — 2026-09-24
+
+Production through live-ui (whose API is production's, so the register still
+answers with the whole record until S5 deploys), both skins at 1440 and 390,
+light and dark (scratchpad `pagephase/shots/charging/`): no error, no
+sideways scroll. No charging advance has ever been recorded (0 of 347), so
+the hero is absent with its reason and no highlight is drawn. Found by
+looking and fixed before commit: the head note read "This month" over a
+whole-record answer; the sessions row printed "0" for a count that does not
+exist.
+
+### #policy — 2026-09-24
+
+Production (no line ever stored; 347 people, 0 measurable), both skins at
+1440 and 390, light and dark (scratchpad `pagephase/shots/policy/`): no
+error, no sideways scroll, one highlight. 215 people carry both halves of
+the ratio, 61 cash only, 7 earnings only, 64 neither.
+
+### #deposits — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/deposits/`): no error, no sideways scroll, two highlights.
+58 of 276 drivers carry half the ceiling; the last-cash-fare months show
+cash still coming in this month for about a hundred drivers. Found by
+looking and fixed before commit: "347 of 347 unknown" wrapped at 1440.
+
+### #finance — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/finance/`): no error, no sideways scroll, two
+highlights (the hero and the fare-coverage absence). The open week (Uber, 21
+to 27 Sept) is three hatched bars at the end of 01, worked out at 74.7% of
+that week's own fares; Money in's change (+20.7%) is over 14 to 20 Sept
+against the week before — closed statement days only — while Platform
+payouts' and Trip value's run to 16 Sept, each saying which week it
+compared. The sixth tile (The open week) wraps to a second row at 1440; left
+as it is, not reflowed.
+
+### #receipts — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/receipts/`): no error, no sideways scroll. 230
+filings from 9 source-and-channel combinations, 207 of them one day, 23 a
+week; every row carries ONE stamp (24 Sept 08:45, the register's last
+rebuild), so the arrival tile is absent and the First seen column is dropped
+with its reason. 40 filings are superseded (AED 488,609.03 set aside, all
+payout). The open Uber week (25 to 27 Sept) is claimed ahead of today and
+drawn hatched in 01. Found by looking and fixed before commit: 03 drew a
+zero axis in the middle of four positive sums (signed bars now only when a
+kind nets negative).
+
+### #payouts — 2026-09-24
+
+Production (the whole record — the page takes no window), both skins at
+1440 and 390, light and dark (scratchpad `pagephase/shots/payouts/`): no
+error, no sideways scroll. AED 10,804,335.95 over 333 transfers on 92 dates,
+every one a Monday, from 23 Dec 2024; 65 of 333 can be checked against our
+own figure, +AED 362,992.41 over those, most of it three February
+transfers (named in 02's caption). Found by looking and fixed before commit:
+02 printed "−+AED 103.05" — hbars prints the minus itself and hands
+valueFmt the magnitude.
+
+### #reconcile, #reconcile/2026-08 — 2026-09-24
+
+Production (the whole record), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/reconcile/`): no error, no sideways scroll.
+5 months of 24 can be reconciled; AED 73,861.06 more wired than owed
+(+4.7%, deltaPill); the latest comparable month is August (+4.5%, 1.1
+points narrower than July). Sixteen months before February 2026 carry
+neither side (outside the statement window) and draw as outlines;
+September is hatched in 04 as a period the window cuts.
+
+### #settlement, #settlement/cash, #settlement/receivables — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/settlement/`): no error, no sideways scroll.
+Cash: 22% of 3,296 cash bookings carry no fare; the platforms report AED
+111,974.42 against AED 139,366.61 we can see, so the tile now says "the
+smaller of the two" where the old one said "the larger"; 116 of 196 rows
+carry both readings and the scatter shows the two agreeing along a line
+with a cluster of statement-heavy rows at low fare value. Receivables: AED
+32,577.06 over 352 bookings, every one priced (no-fare 0), ageing 0–30 /
+31–60 / 61–90 / over 90 with the last a measured nought.
+
+### #provenance — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/provenance/`): no error, no sideways scroll.
+AED 674,676.46 headline; 9 calls, 14 channel-and-kind combinations; 26,667
+figures, 7.3% restating (all of them the two Uber GraphQL breakdown rows,
+72–77%); 4 of 4 channels answering. 4 of 14 calls are counted; Uber's
+statement basis matches none of the listed calls, which the hero's sub now
+says.
+
+### #demand — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/demand/`): no error, no sideways scroll. The
+busiest hour is 15:00 (67.7 bookings on an average day, 9% of the day,
+17.6× 03:00); Friday leads per occurrence at 856 a day over three Fridays;
+an average Saturday or Sunday carries 754 against 832 on a weekday.
+
+### #trips — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/trips/`): no error, no sideways scroll. 16,242
+of 18,006 bookings carry a fare; 1,697 cancelled never charged, 90 completed
+with the fare not filed yet, 8 recovered from earnings, none charged-but-
+unpriced. The settlement bars list the 24 payment types the answer names.
+
+### #supply — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/supply/`): no error, no sideways scroll. 70% of
+23,036 online hours idle; 12,031.4 h of waiting between jobs over 12,224
+waits in 214 areas; the week's online hours peak 16:00–19:00 while an hour
+buys the most at 15:00.
+
+### #platforms, /tiers, /funnel — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/platforms/`): no error, no sideways scroll.
+Uber is 91% of 17,936 bookings; Hotel completes 99.4% (+11.0 points on the
+fleet's 88.4%), Bolt 52.5% (−35.9); 168 offers declined. Found by looking
+and fixed before commit: completion by channel carried hbars' "added /
+deducted" legend over bars that mean above / below the fleet.
+
+### #corridors — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/corridors/`): no error, no sideways scroll.
+Al Garhoud → Dubai Int'l Airport leads at 279 trips; 1,742 trips (32.4% of
+the 119 routes sent) never leave their area; 89 of 90 named routes carry a
+priced trip, their fares rising with distance.
+
+### #causes — 2026-09-24
+
+Production (the whole record), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/causes/`): no error, no sideways scroll. The
+largest real move is +1,029%, Mar → Apr 2025, and the headcount explains 6%
+of it — bookings per driver the rest. Found by looking and fixed before
+commit: 02 carried hbars' "added / deducted" legend; it says "added
+bookings / took bookings away" now.
+
+### #forecast — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/forecast/`): no error, no sideways scroll. Oct 2026 is
+16,000 – 31,900 — the straight line against the scaled year-ago month, 99%
+apart with ranges that do not overlap; September is running at 23,377
+against a 14,700 forecast, outside its range.
+
+### #optimise — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/optimise/`): no error, no sideways scroll. Al
+Garhoud runs +1,201 bookings over arrivals while Dubai Int'l Airport piles
+up −483 — the same Terminal 3 written two ways, which the caption names.

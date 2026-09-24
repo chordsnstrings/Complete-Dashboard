@@ -358,9 +358,18 @@ app.get('/api/compare/period', (req, r) => {
     change_pct: Object.fromEntries(Object.keys(now).map((k) => [k, pct(k)])),
     basis: 'Summed from driver_day — one row per driver per day carrying both the work and the money.' });
 });
-app.get('/api/insights/summary', (_, r) => r.json({ total: { n: 93, total_impact: '19800' },
+app.get('/api/insights/summary', (_, r) => r.json({ total: { n: 93, total_impact: '19800', priced_n: 0 },
   by_severity: [{ severity: 'critical', n: 85, impact: '19800' }, { severity: 'warning', n: 8, impact: null }],
   by_category: [{ category: 'utilisation', n: 55 }, { category: 'compliance', n: 35 }],
+  /* Per rule over every open finding (api/server.js), summing to total.n. */
+  by_code: [
+    { code: 'idle_vehicle', category: 'utilisation', n: 40, priced: 0, impact: null, channels: [] },
+    { code: 'vehicle_doc_expiring', category: 'compliance', n: 30, priced: 0, impact: null, channels: [] },
+    { code: 'drivers_online_no_trips', category: 'utilisation', n: 15, priced: 0, impact: null, channels: [] },
+    { code: 'licence_expired', category: 'compliance', n: 5, priced: 0, impact: null, channels: [] },
+    { code: 'cancellation_rate', category: 'revenue', n: 2, priced: 0, impact: null, channels: ['uber'] },
+    { code: 'tracker_feed_dark', category: 'data', n: 1, priced: 0, impact: null, channels: ['cabman'] },
+  ],
   // Modelled vs stored: the page must not present a projection as a record.
   modelled: false, stored_rows: 93, resolved_since_last_run: 6, duplicates_suppressed: 4,
   filter: { fleet: null, platform: null }, platform_applies: false }));
@@ -1132,12 +1141,12 @@ app.get('/api/compare', (req, r) => {
        three branches of the Paid column are reachable from here. */
     platforms: [
       { platform: 'uber',
-        a: { n: 28, completed: 26, cancelled: 2, km: 340, fares: null, paid: 2140, statement_net: null },
-        b: { n: 33, completed: 31, cancelled: 2, km: 400, fares: null, paid: null, statement_net: 2510 },
+        a: { n: 28, completed: 26, cancelled: 2, km: 340, fares: null, priced: 0, paid: 2140, statement_net: null },
+        b: { n: 33, completed: 31, cancelled: 2, km: 400, fares: null, priced: 0, paid: null, statement_net: 2510 },
         d: -5 },
       { platform: 'hotel',
-        a: { n: 6, completed: 5, cancelled: 1, km: 70, fares: 640, paid: null, statement_net: null },
-        b: { n: 8, completed: 7, cancelled: 1, km: 105, fares: 820, paid: null, statement_net: null },
+        a: { n: 6, completed: 5, cancelled: 1, km: 70, fares: 640, priced: 4, paid: null, statement_net: null },
+        b: { n: 8, completed: 7, cancelled: 1, km: 105, fares: 820, priced: 6, paid: null, statement_net: null },
         d: -2 },
     ],
     drivers: roster,
@@ -7282,7 +7291,8 @@ app.get('/api/playbook', (req, r) => {
   ];
   r.json({
     window: ['2026-07-22', '2026-08-21'], window_days: 31, actions,
-    fleet: { vehicles_seen: 131, earning: 64, moved_only: 28, still: 39, median_bookings: median,
+    fleet: { vehicles_seen: 131, earning: 64, moved_only: 28, still: 39, journeys_in_window: 1840,
+      median_bookings: median,
       median_bookings_window: median, median_unit: 'bookings per 30 days',
       // What capacity genuinely ADDED produces — about a third of the median
       // on this fleet, which is the live figure and the whole reason it is

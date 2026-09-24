@@ -8,10 +8,11 @@
    The area is PARSED out of the address text — providers return a string, not a
    place id — so this is evidence of a pattern, not a geofence. */
 
-import { hbars, empty, fmt } from './charts.js';
+import { hbars, scatter, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, money, pct,
-  countOf, plural, sourceLabel, foldRows, verdict, UBER_FARE_WHY } from './ui.js';
-import { q, href, hrefFilter, state, currentGen, alive } from './data.js';
+  countOf, plural, sourceLabel, foldRows, verdict, UBER_FARE_WHY,
+  contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
+import { q, href, hrefFilter, state, currentGen, alive, windowLabel } from './data.js';
 
 /* How many bars and wave rows this page draws. One constant, used by the
    slices AND by the subtitles that describe them — the KPI row said
@@ -62,7 +63,16 @@ export async function renderCorridors(root) {
      than after the whole corridor detail — which is 8.45s cold at a 365-day
      window, and drew one page-wide skeleton for all of it. The panels are laid
      out first so the page has a shape while it fills. */
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  /* Under the page contract (plan §4 corridors): the verdict and the five
+     tiles in a 00 band with "never leaves the area" beside them; 01 the
+     busiest routes; 02 where the work starts and 03 how far a route runs
+     against what it earns; 04 morning against evening and 05 work that never
+     leaves its area; 06 the routes table, unchanged; a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const kpiHost = ak ? AKB.vHost : el('div'); if (!ak) root.append(kpiHost); loading(kpiHost);
+  const p0 = ak ? panel('The busiest routes between two areas', 'Named areas only, pickup area to a different drop-off area.', 'corr-routes') : null;
+  if (ak) { root.append(p0.panel); loading(p0.body); }
   /* `grid` alone is not a grid: app.css:537 sets display and gap and leaves
      the columns to `.g2`/`.g3`/`.g23`. Every other analytical view in the
      product passes one of those; this page and #corridors were the only two
@@ -79,10 +89,16 @@ export async function renderCorridors(root) {
   const g = el('div', 'grid g2'); root.append(g);
   const { panel: p1, body: b1 } = panel('Where jobs start', 'Pickup area, all channels combined.');
   g.append(p1); loading(b1);
+  const pScatter = ak ? panel('How far a route runs, and what it earns', 'One dot per route with a priced trip: its mean km against its mean fare.', 'corr-scatter') : null;
+  if (ak) { g.append(pScatter.panel); loading(pScatter.body); }
+  const g2 = ak ? el('div', 'grid g2') : null;
+  if (ak) root.append(g2);
   const { panel: p2, body: b2 } = panel('Morning areas and evening areas',
     'Each area against the 50/50 line. A bar reaching left is an area that mostly produces work before 09:00; '
     + 'right is an area that mostly produces it after 16:00.');
-  g.append(p2); loading(b2);
+  (ak ? g2 : g).append(p2); loading(b2);
+  const pSame = ak ? panel('Work that never leaves the area', 'Routes whose pickup and drop-off are the same area.', 'corr-same') : null;
+  if (ak) { g2.append(pSame.panel); loading(pSame.body); }
   const { panel: p3, body: b3 } = panel('Common routes', 'Pickup area to drop-off area, seen at least three times.');
   root.append(p3); loading(b3);
 
@@ -144,6 +160,7 @@ export async function renderCorridors(root) {
      totals at all; it is a floor, not a second definition. */
   const pickupsAll = +t.pickups_all || (totalOrigin + (unrecorded?.trips || 0));
   kpiHost.innerHTML = '';
+  let corrFigure = null;
   /* This page rolls addresses into areas, and the fact that decides whether any
      of it can be trusted is how many pickups carry an address at all. */
   {
@@ -159,7 +176,7 @@ export async function renderCorridors(root) {
     const noArea = all ? ((all - withArea) / all) * 100 : 0;
     const top = named[0];
     const topPct = top && withArea ? Math.round((top.trips / withArea) * 100) : 0;
-    verdict(kpiHost, {
+    const vd = {
       /* WHAT IS MISSING IS MOSTLY A PARSE. NOT ALL OF IT — corrected.
          ───────────────────────────────────────────────────────────────
          This said "carry no usable address" over "11,424 of 13,536 pickups
@@ -205,10 +222,12 @@ export async function renderCorridors(root) {
             + 'over the ones that resolve — a corridor is only as real as the addresses behind it.'
           : `They roll into ${fmt(t.origins_all ?? named.length)} areas and `
             + `${fmt(t.corridors_all ?? c.corridors.length)} origin–destination pairs.`),
-    });
+    };
+    verdict(kpiHost, vd);
+    corrFigure = vd.figure;
   }
 
-  kpiHost.append(kpiRow([
+  const CORR_TILES = [
     { label: 'Distinct pickup areas', value: fmt(t.origins_all ?? named.length),
       sub: named.length > SHOWN
         ? `${fmt(SHOWN)} drawn below, of ${fmt(named.length)} the server returned`
@@ -246,11 +265,21 @@ export async function renderCorridors(root) {
         sub: `${pct((unrecorded.trips / pickupsAll) * 100, 1)} of every pickup — `
           + 'the address text carried no community, so these are in none of the figures beside this one' }
       : null,
-  ]));
+  ];
+  if (ak) {
+    const same = c.corridors.filter((r) => r.from_area === r.to_area && r.from_area !== '(unrecorded)');
+    const sent = c.corridors.reduce((a, r) => a + (+r.trips || 0), 0);
+    const sameN = same.reduce((a, r) => a + (+r.trips || 0), 0);
+    glance(AKB.tilesHost, bandTiles([...CORR_TILES,
+      sent ? { label: 'Never leaves the area', value: fmt(sameN),
+        sub: `${pct((sameN / sent) * 100, 1)} of the trips on the ${fmt(c.corridors.length)} routes the server sent (seen three or more times)` }
+        : { label: 'Never leaves the area', na: 'no route in this window was seen three or more times' },
+    ], { figure: corrFigure, reasons: { 'Busiest pickup area': 'no pickup in this window resolves to a named area' } }).tiles);
+  } else kpiHost.append(kpiRow(CORR_TILES));
 
   /* An area is a place, and a place with a name is something a dispatcher
      wants to open — the whole page had zero anchors on it. */
-  hbars(b1, shownOrigins.map((o) => ({ label: o.area, n: o.trips })), { signed: false });
+  hbars(b1, shownOrigins.map((o) => ({ label: o.area, n: o.trips })), { signed: false, ...(ak ? { color: '--ink' } : {}) });
   if (unrecorded && unrecorded.trips) {
     /* The tile above prints this same bucket as a share of every pickup in the
        window; here it was a share of `totalOrigin + unrecorded`, the rows this
@@ -425,4 +454,54 @@ export async function renderCorridors(root) {
   if (caps.length) b3.append(el('p', 'cap', `${caps.join('. ')}.`));
 
   root.append(note(c.note));
+  if (ak) {
+    corridorsCharts(p0, pScatter, pSame, c);
+    corridorsAbsence(root, c, t, unrecorded, pickupsAll);
+  }
+}
+
+/* ── #corridors under the page contract ────────────────────────────────────
+   Every chart reads the corridors the server SENT — the busiest routes seen
+   three or more times (119 of 1,039 on production this month) — and says so;
+   '(unrecorded)' is never drawn as a place (AUDIT #47). */
+function corridorsCharts(p0, pScatter, pSame, c) {
+  const namedR = c.corridors.filter((r) => r.from_area !== '(unrecorded)' && r.to_area !== '(unrecorded)');
+  const between = namedR.filter((r) => r.from_area !== r.to_area).sort((a, b) => b.trips - a.trips);
+  p0.body.innerHTML = '';
+  if (!between.length) empty(p0.body, 'No route between two named areas was seen three or more times in this window.');
+  else {
+    hbars(p0.body, between.slice(0, 12).map((r) => ({ label: `${r.from_area} → ${r.to_area}`, n: +r.trips })), { signed: false, color: '--ink' });
+    p0.body.append(el('p', 'cap', esc(`The 12 busiest of ${fmt(between.length)} routes between two different named areas among the `
+      + `${fmt(c.corridors.length)} the server sent.`)));
+  }
+  pScatter.body.innerHTML = '';
+  const priced = namedR.filter((r) => +r.priced > 0 && r.avg_km != null && r.avg_fare != null);
+  if (!priced.length) empty(pScatter.body, `No route here carries a fare — mostly Uber, and ${UBER_FARE_WHY}.`);
+  else {
+    scatter(pScatter.body, priced.map((r) => ({ name: `${r.from_area} → ${r.to_area}${+r.priced / +r.trips < 0.5 ? ' *' : ''}`,
+      km: +r.avg_km, fare: +r.avg_fare })), { x: 'km', y: 'fare', label: 'name', xLabel: 'mean km', yLabel: 'mean fare',
+      xFmt: (v) => fmt(v, 1), yFmt: (v) => money(v) });
+    pScatter.body.append(el('p', 'cap', esc(`${fmt(priced.length)} of ${fmt(namedR.length)} named routes carry a priced trip. `
+      + '* in a route\u2019s name: its fare is over fewer than half its trips.')));
+  }
+  pSame.body.innerHTML = '';
+  const same = namedR.filter((r) => r.from_area === r.to_area).sort((a, b) => b.trips - a.trips);
+  if (!same.length) empty(pSame.body, 'No route in this window starts and ends in the same named area.');
+  else hbars(pSame.body, same.slice(0, 12).map((r) => ({ label: r.from_area, n: +r.trips })), { signed: false, color: '--ink' });
+}
+function corridorsAbsence(root, c, t, unrecorded, pickupsAll) {
+  const absHost = el('div'); root.append(absHost);
+  const notDrawn = (t.corridors_all ?? c.corridors.length) - c.corridors.length;
+  absenceBand(absHost, [
+    { label: 'Routes not drawn', fig: fmt(Math.max(0, notDrawn)),
+      why: `${fmt(t.corridors_all ?? c.corridors.length)} distinct pairs in the window; the server sends the ${fmt(c.corridors.length)} busiest seen three or more times.` },
+    { label: 'Pickups with no area', hl: true, fig: unrecorded?.trips ? fmt(unrecorded.trips) : '0',
+      why: unrecorded?.trips ? `${pct((unrecorded.trips / pickupsAll) * 100, 1)} of every pickup: the address text carried no community, so they are in no chart and no share on this page.`
+        : 'Every pickup in this window resolves to an area.' },
+    { label: 'Ride minutes reported', fig: `${fmt(c.duration_reported || 0)} of ${fmt(c.duration_measured || 0)}`,
+      why: 'No channel files a duration of its own; the table\u2019s minutes are request to drop-off, which holds the approach and the wait.' },
+    { label: 'Whether a route got busier', fig: null, none: 'One window only',
+      why: 'Every figure is over the window above; nothing here compares it with another.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), `${fmt(c.corridors.length)} routes`] }, root);
 }

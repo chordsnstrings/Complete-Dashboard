@@ -1,0 +1,486 @@
+/* The page phase, section "Money" — each page under the contract.
+   ═══════════════════════════════════════════════════════════════════════════
+   docs/UI-REDESIGN-PLAN.md §4 (Money), the operator's rulings (§1) and the
+   house principle. For every converted page: the contract's shape under the
+   skin, its figures against the answer the page itself received, its absences
+   with their true reasons, and the old skin still building the old page
+   (byte for byte is test/arkiv_classic_frozen.test.mjs's job).
+
+   Synthetic data only: the mock, and fixtures built here. */
+import { harness, shape } from './arkiv_pages.mjs';
+
+const { check, start, open, done } = harness('Arkiv page phase — Money');
+await start();
+
+/* money() as the pages print it: two decimals, separators, always. */
+const aed = (n) => `${Number(n) < 0 ? '−' : ''}AED ${Math.abs(Number(n)).toLocaleString('en-US',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const txtOf = (page, sel) => page.evaluate((s) => {
+  const n = document.querySelector(s);
+  return n ? n.textContent.replace(/\s+/g, ' ').trim() : '';
+}, sel);
+const toned = (page) => page.evaluate(() => [...document.querySelectorAll('#view .kpis.glance > .kpi')]
+  .filter((t) => /\bt-(good|warn|critical|serious)\b/.test(t.className)).map((t) => t.className));
+const keys = (page, sel) => page.evaluate((s) => [...document.querySelectorAll(s)]
+  .map((t) => t.getAttribute('data-kpi')).filter(Boolean), sel);
+
+/* ══ #unit — Money in ═════════════════════════════════════════════════════ */
+console.log('\n#unit');
+const UNIT_HEADS = ['At a glance', 'What a car earns on a day it earns anything', 'Which cars earn the money',
+  'Money per km, by channel', 'Cars earning most per day worked', 'Cars earning least per day worked',
+  'Drivers earning most per day worked', 'Drivers earning least per day worked',
+  'What a person earns on a day they work', 'Days earned against the rate, one dot per car', 'What the cars did',
+  'What the people did', 'The hours behind the hourly rate', 'Insured cars that earned nothing',
+  'Where each car was last seen', '† What this page does not know'];
+let classicUnitKeys = [];
+let classicCaps = [];
+const ledgerCaps = (page) => page.evaluate(() => ['unit-cars-top', 'unit-cars-bottom', 'unit-drivers-top', 'unit-drivers-bottom']
+  .map((k) => document.querySelector(`[data-panel="${k}"] .cap, [data-panel="${k}"] > p`)?.textContent.replace(/\s+/g, ' ').trim() || ''));
+{
+  const { ctx, page } = await open('classic', 'unit');
+  classicUnitKeys = await keys(page, '#view .kpis .kpi');
+  classicCaps = await ledgerCaps(page);
+  const r = await page.evaluate(() => ({
+    band: !!document.querySelector('#view .cband'), rows: document.querySelectorAll('#view .kpis').length,
+    hist: !!document.querySelector('[data-panel="unit-hist"]') }));
+  check('old skin: the old page — no 00 band, its tile row, none of the contract\'s charts',
+    !r.band && r.rows >= 1 && !r.hist, JSON.stringify(r));
+  await ctx.close();
+}
+{
+  const { ctx, page, answer } = await open('arkiv', 'unit');
+  const s = await shape(page);
+  const A = answer('/api/economics/assets'), D = answer('/api/economics/drivers'), K = answer('/api/kpis');
+  const t = A.totals, dt = D.totals;
+  check('the section order is the plan\'s: 00, the car histogram, the curve beside the yields, the four ledgers, '
+    + 'the people and the cars spread out, the idle-and-insured list, the map, †',
+  JSON.stringify(s.heads) === JSON.stringify(UNIT_HEADS), JSON.stringify(s.heads));
+  const order = await page.evaluate(() => { const v = document.querySelector('#view');
+    return [v.firstElementChild.className, v.children[1]?.firstElementChild?.className]; });
+  check('the tab bar is kept, and 00 is the first thing under it', order[0].includes('tabs') && order[1] === 'cband', JSON.stringify(order));
+  check('the verdict is 00\'s statement (ruling 7)', s.vdctIn00);
+  check('all eight tiles, in one band, Money placed on cars the hero with the assets answer\'s total',
+    s.glance === 8 && s.glanceBands === 1 && s.hero === 'Money placed on cars'
+    && s.values['Money placed on cars'] === aed(t.money), JSON.stringify(s.values));
+  check('…the tiles\' keys are the old page\'s, every one (rule 1)',
+    JSON.stringify(await keys(page, '#view .kpis.glance > .kpi')) === JSON.stringify(classicUnitKeys), JSON.stringify(classicUnitKeys));
+  check('…and the Finance comparison and the refusal to price never-earned idle days are still on their tiles',
+    s.subs['Money placed on cars'].includes(`against ${aed(K.accounted)} on Finance`)
+    && /have never earned, which have no rate of their own/.test(s.subs['Days a car sat idle']), s.subs['Days a car sat idle']);
+  check('no tile wears a tone — a level is not better or worse', (await toned(page)).length === 0, JSON.stringify(await toned(page)));
+  check('Cars earning and Insured and idle still open their cohorts', s.hrefs['Cars earning']?.startsWith('#cohort/unit-moved-unpaid')
+    && s.hrefs['Insured and idle']?.startsWith('#cohort/unit-idle-documented'), JSON.stringify(s.hrefs));
+
+  const perDay = A.rows.map((r) => r.aed_per_earning_day).filter((x) => x != null).map(Number).sort((a, b) => a - b);
+  const hcap = await txtOf(page, '[data-panel="unit-hist"] .cap');
+  check('01 is drawn over every car with a daily rate, and its median is the rows\' median',
+    hcap.includes(`over ${perDay.length} cars that earned`) && hcap.includes(`median ${aed(perDay[Math.floor(perDay.length / 2)])}`)
+    && !!(await page.$('[data-panel="unit-hist"] svg')), hcap);
+  check('…with the fleet rate the assets answer carries', hcap.includes(`the fleet rate is ${aed(t.aed_per_earning_day)}`), hcap);
+  check('the four ranked ledgers keep their threshold captions word for word',
+    JSON.stringify(await ledgerCaps(page)) === JSON.stringify(classicCaps) && classicCaps.every(Boolean), JSON.stringify(classicCaps));
+  const did = await page.evaluate(() => ['unit-cars-did', 'unit-people-did', 'unit-hours'].map((k) => [...document
+    .querySelectorAll(`[data-panel="${k}"] .hb`)].map((h) => [h.querySelector('.k').textContent.trim(), h.querySelector('.v').textContent.replace(/\s+/g, ' ').trim()])));
+  check('what the cars did: earning, moved with no money, never moved — the assets totals',
+    did[0].map(([, v]) => v.split(' ')[0]).join() === [t.earning, t.moved_unpaid, t.still].join(), JSON.stringify(did[0]));
+  check('what the people did: the drivers totals', did[1].map(([, v]) => v.split(' ')[0]).join() === [dt.earning, dt.drove_unpaid, dt.idle].join(),
+    JSON.stringify(did[1]));
+  const hrs = await txtOf(page, '[data-panel="unit-hours"] .cap');
+  check('the hours behind the hourly rate are the measured people\'s, and say how many',
+    did[2].length === 2 && hrs.includes(`by the ${dt.people_with_availability} people whose availability is measured`)
+    && hrs.includes(`${aed(dt.aed_per_measured_hour)} an hour`), `${JSON.stringify(did[2])} ${hrs}`);
+  const leg = await page.evaluate(() => [...document.querySelectorAll('[data-panel="unit-map"] .legend i')]
+    .map((i) => ({ cls: i.className, bg: getComputedStyle(i).backgroundColor, ring: getComputedStyle(i).boxShadow })));
+  check('the map\'s legend is by FORM: an ink dot, the negative dot, and the absence outline for a car that never moved',
+    leg.length === 3 && leg[2].cls.includes('ak-sw-out') && leg[2].bg === 'rgba(0, 0, 0, 0)' && /inset/.test(leg[2].ring)
+    && leg[0].bg !== leg[1].bg, JSON.stringify(leg));
+  check('the † band: the cost nobody holds, the measured hours, Finance\'s figure, the bookings before money',
+    s.abs.length === 4 && s.abs[0].none && s.abs[1].fig === `${dt.people_with_availability} of ${dt.people}`
+    && s.abs[2].fig === aed(K.accounted) && s.abs[2].why.includes(aed(t.money)), JSON.stringify(s.abs));
+  check('three highlights at most: the hero, the busiest band, the measured hours', s.hl === 3, String(s.hl));
+  check('the colophon counts the earning cars and the money', s.colophon.includes(`${t.earning} of ${t.vehicles} cars earning`)
+    && s.colophon.includes(aed(t.money)), s.colophon);
+  check('no sideways scroll at 1440', s.overflowX <= 0, String(s.overflowX));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'unit', { width: 390, scheme: 'dark' });
+  const s = await shape(page);
+  const ink = await page.evaluate(() => {
+    const i = document.querySelector('[data-panel="unit-map"] .legend i');
+    const probe = document.createElement('i'); probe.style.color = 'var(--ink)'; document.body.append(probe);
+    return [i && getComputedStyle(i).backgroundColor, getComputedStyle(probe).color];
+  });
+  check('390, dark: every section, no sideways scroll', s.heads.length === UNIT_HEADS.length && s.overflowX <= 0, `${s.heads.length} ${s.overflowX}`);
+  check('…and the earning dot is the dark theme\'s ink, not a fixed black', ink[0] && ink[0] === ink[1], JSON.stringify(ink));
+  await ctx.close();
+}
+/* The ranked lists prune a column nobody on the list has. The reason said
+   "availability has not been collected for anyone in this window" whenever
+   ONE list's ten rows had no hours — while the verdict counted the people
+   whose availability was measured. Under the contract the reason is the
+   list's own. */
+{
+  const noHours = (_q, real) => ({ ...real, rows: real.rows.map((r) => ({ ...r, measured_hours_online: null,
+    measured_idle_h: null, aed_per_measured_hour: null })) });
+  const why = (page) => txtOf(page, '[data-panel="unit-drivers-bottom"] .pbody');
+  const a = await open('arkiv', 'unit', { fixtures: { '/api/economics/drivers': noHours } });
+  const dt = a.answer('/api/economics/drivers').totals;
+  const wa = await why(a.page);
+  check('a list with no measured hours says so of the list, and counts who is measured',
+    wa.includes('none of the drivers on this list has measured online hours')
+    && wa.includes(`availability is measured for ${dt.people_with_availability} of ${dt.people} people`)
+    && !wa.includes('for anyone in this window'), wa.slice(0, 400));
+  await a.ctx.close();
+  const c = await open('classic', 'unit', { fixtures: { '/api/economics/drivers': noHours } });
+  check('…the old skin keeps its sentence', (await why(c.page)).includes('availability has not been collected for anyone in this window'));
+  await c.ctx.close();
+}
+
+/* ══ #unit/assets — Every vehicle ═════════════════════════════════════════ */
+console.log('\n#unit/assets');
+{
+  const { ctx, page, answer } = await open('arkiv', 'unit/assets');
+  const s = await shape(page);
+  const A = answer('/api/economics/assets');
+  const t = A.totals;
+  const r = await page.evaluate(() => ({
+    order: [document.querySelector('#view').firstElementChild.className,
+      document.querySelector('#view').children[1]?.firstElementChild?.className],
+    cov: !!document.querySelector('#view .cband .note, #view .cband p'),
+    ref: !!document.querySelector('#view svg .sc-ref'),
+    filters: document.querySelectorAll('#view .btnrow button, #view .btnrow a.btn, #view .bandbtns button').length,
+    search: !!document.querySelector('#view input[type="search"], #view input[type="text"]'),
+    rows: document.querySelectorAll('#view table tbody tr').length,
+  }));
+  const cap = await page.evaluate(() => [...document.querySelectorAll('#view .panel .cap')].map((c) => c.textContent)
+    .find((x) => /per km/.test(x)) || '');
+  check('the tab bar, then 00 with the coverage note in it', r.order[0].includes('tabs') && r.order[1] === 'cband' && r.cov, JSON.stringify(r.order));
+  check('all six tiles, Money in the hero with the answer\'s total, none toned',
+    s.glance === 6 && s.hero === 'Money in' && s.values['Money in'] === aed(t.money) && (await toned(page)).length === 0,
+    JSON.stringify(s.values));
+  check('Moved, no money / Never moved / Insured and idle still open their cohorts',
+    ['Moved, no money', 'Never moved', 'Insured and idle'].every((l) => s.hrefs[l]?.startsWith('#cohort/')), JSON.stringify(s.hrefs));
+  check('the search and the band filters are kept, and the table holds every vehicle',
+    r.search && r.rows === A.rows.length, JSON.stringify(r));
+  check('the line the caption describes is drawn, at the fleet\'s own rate', r.ref && cap.includes(`${aed(t.aed_per_km)} per km (the line)`), cap);
+  check('the colophon', s.colophon.includes(`${A.rows.length} vehicles`) && s.colophon.includes(aed(t.money)), s.colophon);
+  check('no sideways scroll at 1440', s.overflowX <= 0, String(s.overflowX));
+  await ctx.close();
+  const c = await open('classic', 'unit/assets');
+  check('old skin: no line, no 00 band', !(await c.page.$('#view svg .sc-ref')) && !(await c.page.$('#view .cband')));
+  await c.ctx.close();
+}
+
+/* ══ #unit/drivers — Every driver ═════════════════════════════════════════ */
+console.log('\n#unit/drivers');
+{
+  const { ctx, page, answer } = await open('arkiv', 'unit/drivers');
+  const s = await shape(page);
+  const D = answer('/api/economics/drivers');
+  const dt = D.totals;
+  check('seven tiles, Money to drivers the hero with the answer\'s total, none toned',
+    s.glance === 7 && s.hero === 'Money to drivers' && s.values['Money to drivers'] === aed(dt.money) && (await toned(page)).length === 0,
+    JSON.stringify(s.values));
+  check('Per hour online names the people it is computed over — not the hours_note that contradicted the verdict',
+    s.values['Per hour online'] === aed(dt.aed_per_measured_hour)
+    && s.subs['Per hour online'].startsWith(`over the ${dt.people_with_availability} people of ${dt.people} whose online hours are measured`)
+    && !s.subs['Per hour online'].includes(dt.hours_note), s.subs['Per hour online']);
+  check('Drove, no money and Earned nothing still open their cohorts', s.hrefs['Drove, no money']?.startsWith('#cohort/unit-drove-unpaid')
+    && s.hrefs['Earned nothing']?.startsWith('#cohort/unit-earned-nothing'), JSON.stringify(s.hrefs));
+  check('the table holds every person', (await page.$$eval('#view table tbody tr', (x) => x.length)) === D.rows.length);
+  check('the colophon', s.colophon.includes(`${D.rows.length} people`) && s.colophon.includes(aed(dt.money)), s.colophon);
+  await ctx.close();
+  const c = await open('classic', 'unit/drivers');
+  const cs = await shape(c.page);
+  const sub = await c.page.evaluate(() => [...document.querySelectorAll('#view .kpis .kpi')]
+    .find((k) => /Per hour online/.test(k.textContent))?.querySelector('.s')?.textContent.trim() || '');
+  check('old skin: its tile still carries the API\'s hours_note', sub === dt.hours_note && cs.glance === 0, sub);
+  await c.ctx.close();
+}
+{
+  const none = (_q, real) => ({ ...real, totals: { ...real.totals, aed_per_measured_hour: null, measured_hours_online: null,
+    people_with_availability: 0 } });
+  const { ctx, page } = await open('arkiv', 'unit/drivers', { fixtures: { '/api/economics/drivers': none } });
+  const s = await shape(page);
+  check('with nothing measured, Per hour online is ABSENT with the reason, not a dash',
+    s.na['Per hour online'] === 'no online hours were measured for anyone in this window' && s.bare.length === 0, JSON.stringify(s.na));
+  await ctx.close();
+}
+
+/* ══ #revenue — Money by platform ═════════════════════════════════════════ */
+console.log('\n#revenue');
+const REV_HEADS = ['At a glance', 'What each channel is accounted on', 'How many bookings each channel filed',
+  'Uber’s money, six ways', 'Money by channel', 'What the platforms added', 'What the platforms took out',
+  'Channels whose money is not collected', 'The payout, broken down', '† What this page does not know'];
+const revRead = (page) => page.evaluate(() => {
+  const t = (n) => (n ? n.textContent.replace(/\s+/g, ' ').trim() : '');
+  const tbl = document.querySelector('[data-panel="rev-accounted"]') ? [...document.querySelectorAll('#view table')]
+    .find((x) => /Report a fare/i.test(x.querySelector('thead')?.textContent || '')) : null;
+  return {
+    first: document.querySelector('#view .stack')?.firstElementChild?.className,
+    vfig: t(document.querySelector('.cband .vdct-fig > b')),
+    tones: [...document.querySelectorAll('#view .kpis .kpi')].map((k) => [t(k.querySelector('.l')), (k.className.match(/t-\w+/) || [''])[0]]),
+    acc: [...document.querySelectorAll('[data-panel="rev-accounted"] .hb')].map((h) => [t(h.querySelector('.k')), t(h.querySelector('.v')),
+      h.querySelector('.fill').className]),
+    six: [...document.querySelectorAll('[data-panel="rev-six"] .hb')].map((h) => [t(h.querySelector('.k')), t(h.querySelector('.v'))]),
+    head: tbl ? [...tbl.querySelectorAll('thead th')].map(t) : [],
+    rows: tbl ? [...tbl.querySelectorAll('tbody tr')].map((tr) => [tr.className, t(tr.querySelector('td'))]) : [],
+    added: document.querySelectorAll('[data-panel="rev-added"] .hb').length,
+    took: [...document.querySelectorAll('[data-panel="rev-took"] .hb .v')].map(t),
+    dropped: t(document.querySelector('.cband .rev-dropped')),
+  };
+});
+let classicRevTones = [];
+{
+  const { ctx, page } = await open('classic', 'revenue');
+  const r = await revRead(page);
+  classicRevTones = r.tones;
+  const head = await page.evaluate(() => [...document.querySelectorAll('#view table thead')].map((h) => h.textContent).join('|'));
+  check('old skin: its tile row, and the channel table still carries Basis and Why as columns',
+    !(await page.$('#view .cband')) && r.tones.length === 7 && /Basis/.test(head) && /Why/.test(head), JSON.stringify(r.tones));
+  await ctx.close();
+}
+{
+  const { ctx, page, answer } = await open('arkiv', 'revenue');
+  const s = await shape(page);
+  const r = await revRead(page);
+  const d = answer('/api/revenue');
+  const t = d.totals;
+  const live = d.platforms.filter((x) => (+x.bookings || 0) > 0);
+  check('the section order is the plan\'s: 00, accounted by channel, bookings beside Uber six ways, the table, '
+    + 'the leaf lines, the payout tree, †', JSON.stringify(s.heads) === JSON.stringify(REV_HEADS), JSON.stringify(s.heads));
+  check('00 leads the page and the verdict is its statement', r.first === 'cband' && s.vdctIn00, r.first);
+  check('all seven tiles, Accounted for the hero with the answer\'s total (the verdict\'s figure here is a count)',
+    s.glance === 7 && s.hero === 'Accounted for' && s.values['Accounted for'] === aed(t.accounted) && r.vfig !== s.values['Accounted for'],
+    JSON.stringify([r.vfig, s.values]));
+  check('…each tile keeps its tone class (the plan: labels, sub-lines and tone classes kept)',
+    JSON.stringify(r.tones) === JSON.stringify(classicRevTones), JSON.stringify([r.tones, classicRevTones]));
+  check('01: one bar per channel, its best figure and basis; a channel with none is the OUTLINE with its reason',
+    r.acc.length === live.length && live.every((p) => {
+      const row = r.acc.find(([k]) => k.startsWith(p.platform === 'hotel' ? 'Hotel' : p.platform[0].toUpperCase() + p.platform.slice(1)));
+      return row && (p.best == null ? /hb-outline/.test(row[2]) && row[1] === p.basis_note : row[1] === aed(p.best));
+    }), JSON.stringify(r.acc));
+  const u = live.find((p) => p.platform === 'uber');
+  check('03: Uber six ways, every figure the answer filed, the counted one marked',
+    r.six.every(([k, v]) => v === aed(u[{ 'Fares on the trips': 'fares', 'Statement gross': 'statement_gross',
+      'Statement net': 'statement_net', 'Paid into the bank': 'payouts', 'Service fee Uber kept': 'statement_fees',
+      'Cash taken at the kerb': 'statement_cash' }[k.replace(' · counted', '')]])) && r.six.length >= 4, JSON.stringify(r.six));
+  check('the channel table: one line of figures a row, Basis and Why on a full-width line beneath it',
+    !r.head.includes('Basis') && !r.head.includes('Why') && r.rows.filter(([c]) => c === 'rev-why').length === live.length
+    && r.rows.every(([c], i) => (i % 2 ? c === 'rev-why' : c !== 'rev-why')), JSON.stringify(r.rows));
+  /* Sorted, the second line must follow ITS channel, not the row index. */
+  await page.evaluate(() => [...document.querySelectorAll('#view table thead th')].find((th) => /^Bookings/.test(th.textContent.trim()))
+    ?.querySelector('button, .sortbtn, [role="button"]')?.click() || [...document.querySelectorAll('#view table thead th')]
+    .find((th) => /^Bookings/.test(th.textContent.trim()))?.click());
+  await page.waitForTimeout(400);
+  const after = await page.evaluate(() => {
+    const tbl = [...document.querySelectorAll('#view table')].find((x) => /Report a fare/i.test(x.querySelector('thead')?.textContent || ''));
+    return [...tbl.querySelectorAll('tbody tr')].map((tr) => [tr.className, tr.className === 'rev-why'
+      ? tr.textContent.replace(/\s+/g, ' ').trim() : tr.querySelector('td').textContent.trim()]);
+  });
+  const pairs = [];
+  for (let i = 0; i + 1 < after.length; i += 2) pairs.push([after[i][1], after[i + 1][1]]);
+  check('…and after a sort each second line is still its own channel\'s', pairs.length === live.length && pairs.every(([name, why]) => {
+    const p = live.find((x) => x.platform.toLowerCase() === name.toLowerCase());
+    return p && why.includes(p.basis_note.slice(0, 40));
+  }), JSON.stringify(pairs.map(([n, w]) => [n, w.slice(0, 60)])));
+  check('the leaf lines: eight at most each way, what was taken out signed', r.added <= 8 && r.took.every((v) => v.startsWith('−')),
+    JSON.stringify(r.took));
+  check('the † band: under-covered bookings, the bank line, channels with neither, channels silent',
+    s.abs.length === 4 && s.abs[0].fig === String(t.undercovered_bookings || 0) && s.abs[2].fig.endsWith(`of ${live.length}`),
+    JSON.stringify(s.abs));
+  check('the colophon', s.colophon.includes(`${t.bookings.toLocaleString('en-US')} bookings`) && s.colophon.includes(aed(t.accounted)), s.colophon);
+  check('no sideways scroll at 1440', s.overflowX <= 0, String(s.overflowX));
+  await ctx.close();
+}
+/* Ruling 7: when the verdict's figure IS the accounted total, the tile that
+   printed it a second time is not drawn, and its split is kept in words. */
+{
+  const priced = (_q, real) => ({ ...real, platforms: real.platforms.map((p) => (p.platform === 'uber'
+    ? { ...p, fares: 90000, priced_bookings: p.bookings, best: 61200, basis: 'statement', basis_note: 'statement net' } : p)) });
+  const { ctx, page, answer } = await open('arkiv', 'revenue', { fixtures: { '/api/revenue': priced } });
+  const s = await shape(page);
+  const r = await revRead(page);
+  const t = answer('/api/revenue').totals;
+  check('the verdict carries the accounted total, and no tile repeats it (ruling 7)',
+    r.vfig === aed(t.accounted) && !Object.values(s.values).includes(r.vfig) && !('Accounted for' in s.values), JSON.stringify([r.vfig, s.values]));
+  check('…the split it carried is kept in words under the band, and the hero passes on',
+    r.dropped.startsWith('Accounted for —') && r.dropped.includes(aed(t.accounted_fares)) && s.hero === 'Fares charged', `${r.dropped} | ${s.hero}`);
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'revenue', { width: 390, scheme: 'dark' });
+  const s = await shape(page);
+  check('390, dark: every section, no sideways scroll', s.heads.length === REV_HEADS.length && s.overflowX <= 0, `${s.heads.length} ${s.overflowX}`);
+  await ctx.close();
+}
+
+/* ══ #corporate — five tabs ═══════════════════════════════════════════════ */
+console.log('\n#corporate');
+const CORP_HEADS = ['At a glance', 'The only margin in the product', 'What is booked', 'Where the money leaks',
+  'How the fare is settled', 'Empty km before pickup, by time of day', 'Who books', 'Booked ahead or called on the spot',
+  'Empty km after the drop, by drop area', 'Empty km after each drop, by drop area', '† What this page does not know'];
+const corpRead = (page) => page.evaluate(() => {
+  const t = (n) => (n ? n.textContent.replace(/\s+/g, ' ').trim() : '');
+  const panelOf = (name) => [...document.querySelectorAll('#view .panel')].find((p) => t(p.querySelector('h3')) === name);
+  return {
+    vfig: t(document.querySelector('.cband .vdct-fig > b')),
+    bandCap: [...document.querySelectorAll('.cband > p.cap')].map(t),
+    margin: [...document.querySelectorAll('[data-panel="corp-margin"] .hb')].map((h) => [t(h.querySelector('.k')), t(h.querySelector('.v'))]),
+    marginText: t(document.querySelector('[data-panel="corp-margin"] .pbody')),
+    leaks: [...document.querySelectorAll('[data-panel="corp-leaks"] a.hb')].map((a) => [t(a.querySelector('.k')), t(a.querySelector('.v')),
+      a.getAttribute('href'), a.querySelector('.fill').className]),
+    who: [...(panelOf('Who books')?.querySelectorAll('.hb') || [])].map((h) => [t(h.querySelector('.k')), h.hasAttribute('data-click')]),
+    whoCap: t(panelOf('Who books')?.querySelector('.cap')),
+    ahead: [...(panelOf('Booked ahead or called on the spot')?.querySelectorAll('.hb') || [])].map((h) => t(h.querySelector('.k'))),
+  };
+});
+{
+  const { ctx, page, answer } = await open('arkiv', 'corporate');
+  const s = await shape(page);
+  const r = await corpRead(page);
+  const sm = answer('/api/corporate/summary');
+  const lk = answer('/api/corporate/leakage');
+  check('the order: 00, the margin, what is booked beside the leaks, settlement, empty km by time of day, who books, '
+    + 'booked ahead, the two drop-area charts, †', JSON.stringify(s.heads) === JSON.stringify(CORP_HEADS), JSON.stringify(s.heads));
+  check('00: the verdict is the statement and no tile repeats its figure (ruling 7)',
+    s.vdctIn00 && r.vfig && !Object.values(s.values).includes(r.vfig), JSON.stringify([r.vfig, s.values]));
+  check('…Billed is the verdict\'s figure, so its sub-line is kept in words under the band',
+    r.vfig === aed(sm.revenue) && !('Billed' in s.values) && r.bandCap.some((c) => c.startsWith('Billed —') && c.includes(`over ${sm.priced.toLocaleString('en-US')} priced bookings`)),
+    JSON.stringify(r.bandCap));
+  check('Kept is the hero: billed less the cost filed, and its share', s.hero === 'Kept'
+    && s.values.Kept === aed(sm.revenue - sm.cost) && s.subs.Kept.startsWith(`${((sm.revenue - sm.cost) / sm.revenue * 100).toFixed(1)}% of what was billed`),
+    JSON.stringify([s.values.Kept, s.subs.Kept]));
+  check('01: billed, cost filed, kept — the summary\'s three figures', JSON.stringify(r.margin.map(([, v]) => v))
+    === JSON.stringify([aed(sm.revenue), aed(sm.cost), aed(sm.revenue - sm.cost)]), JSON.stringify(r.margin));
+  check('03: every check, zeros included, each the address of its bookings', r.leaks.length === lk.kinds.length
+    && r.leaks.every(([, , h], i) => h.split('?')[0] === `#corporate/leakage/${lk.kinds[i].kind}`)
+    && r.leaks.some(([, v]) => v === '0'), JSON.stringify(r.leaks));
+  check('booked ahead: two NAMED bars — the booked-ahead slice is not folded into "Other"',
+    JSON.stringify(r.ahead) === JSON.stringify(['Scheduled in advance', 'On demand']), JSON.stringify(r.ahead));
+  check('who books: a named property opens its page', r.who.length > 0 && r.who.every(([, c]) => c), JSON.stringify(r.who));
+  check('the † band: which hotel, repeat business, approvals, hours given away', JSON.stringify(s.abs.map((a) => a.label))
+    === JSON.stringify(['Which hotel', 'Repeat business', 'Approvals', 'Hours given away']), JSON.stringify(s.abs));
+  check('no sideways scroll at 1440', s.overflowX <= 0, String(s.overflowX));
+  await ctx.close();
+}
+/* Production today: no booking names its property. The concentration index
+   is an artefact, and an unnamed bar must not open "No property chosen". */
+const UNNAMED = (_q, real) => [{ ...real[0], partner_id: null, name: '(unnamed)',
+  bookings: real.reduce((a, x) => a + x.bookings, 0) }];
+{
+  const { ctx, page } = await open('arkiv', 'corporate', { fixtures: { '/api/corporate/properties': UNNAMED } });
+  const s = await shape(page);
+  const r = await corpRead(page);
+  check('with no named property, How much rests on one client is ABSENT with the reason, not an index of 10,000',
+    /no booking names its property/.test(s.na['How much rests on one client'] || ''), JSON.stringify(s.na));
+  check('…the unnamed bar is not a link, and the Herfindahl caption is gone', r.who.length === 1 && r.who[0][1] === false
+    && !/Herfindahl/.test(r.whoCap), JSON.stringify([r.who, r.whoCap]));
+  check('…and the † band says no hotel is named', s.abs[0].fig === 'None named' && /no partner id/.test(s.abs[0].why), JSON.stringify(s.abs[0]));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'corporate', { fixtures: {
+    '/api/corporate/summary': (_q, real) => ({ ...real, has_cost: false, cost: null }) } });
+  const s = await shape(page);
+  const r = await corpRead(page);
+  check('with no cost filed, Kept is ABSENT with the reason and the margin chart says why it is empty',
+    /files no delivery cost/.test(s.na.Kept || '') && r.margin.length === 0 && /no margin to draw/.test(r.marginText),
+    JSON.stringify([s.na, r.marginText]));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'corporate', { fixtures: {
+    '/api/corporate/summary': (_q, real) => ({ ...real, approval_required_bookings: 0 }) } });
+  const r = await corpRead(page);
+  const u = r.leaks.find(([, , h]) => h.split('?')[0].endsWith('/unauthorized'));
+  check('an authorisation check with nothing in scope is the OUTLINE with its reason, not a measured nought',
+    u && /hb-outline/.test(u[3]) && u[1] === 'nothing in scope', JSON.stringify(u));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('classic', 'corporate');
+  const s = await shape(page);
+  check('old skin: the old overview — its tile row, no 00 band', s.kpiRows >= 1 && s.glance === 0 && !s.vdctIn00, JSON.stringify([s.kpiRows, s.glance]));
+  await ctx.close();
+}
+/* The Properties tab: an unnamed row says why it opens nothing. */
+{
+  const { ctx, page } = await open('arkiv', 'corporate/properties', { fixtures: { '/api/corporate/properties': UNNAMED } });
+  const r = await page.evaluate(() => ({
+    cell: document.querySelector('#view tbody tr td .ent-off')?.getAttribute('title') || '',
+    link: !!document.querySelector('#view tbody tr td a'),
+    cap: [...document.querySelectorAll('#view .panel .cap')].map((c) => c.textContent).find((x) => /partner id is empty/.test(x)) || '' }));
+  check('properties: the unnamed row is not a link, and its reason is on it and in the words beneath',
+    /partner id is empty/.test(r.cell) && !r.link && /\(unnamed\): no booking names its property/.test(r.cap), JSON.stringify(r));
+  await ctx.close();
+}
+/* The Passengers tab: the purpose sentence had no subject when no row names
+   its property ("Purpose is empty on 250 of these 300 rows. are the only
+   booking sources that record one"). */
+{
+  const NOPROP = (_q, real) => ({ ...real, guests: real.guests.map((g) => ({ ...g, property: null })) });
+  const a = await open('arkiv', 'corporate/guests', { fixtures: { '/api/corporate/guests': NOPROP } });
+  const ca = await a.page.evaluate(() => [...document.querySelectorAll('#view p.cap')].map((c) => c.textContent)
+    .find((x) => /^Purpose is empty/.test(x)) || '');
+  check('passengers: with no property named, the purpose sentence says so rather than losing its subject',
+    /No row here names its property/.test(ca) && !/\. are the only/.test(ca), ca);
+  await a.ctx.close();
+}
+/* Money lost: a ranked check list, the no-scope check an outline with its
+   reason in words. */
+{
+  const { ctx, page, answer } = await open('arkiv', 'corporate/leakage', { fixtures: {
+    '/api/corporate/summary': (_q, real) => ({ ...real, approval_required_bookings: 0 }) } });
+  const lk = answer('/api/corporate/leakage');
+  const r = await page.evaluate(() => ({
+    rows: [...document.querySelectorAll('#view .leaks.ak-rank .leak')].map((a) => [a.querySelector('b').textContent.trim(),
+      a.className, a.getAttribute('href')]),
+    why: document.querySelector('#view .leak-why')?.textContent || '',
+    tall: Math.max(...[...document.querySelectorAll('#view .leaks.ak-rank .leak')].map((a) => a.getBoundingClientRect().height)) }));
+  const counts = r.rows.filter(([, c]) => !/leak-noscope|off/.test(c)).map(([b]) => Number(b.replace(/,/g, '')));
+  check('money lost: every check as a ranked list, largest first, each still an address',
+    r.rows.length === lk.kinds.length && counts.every((n, i) => i === 0 || counts[i - 1] >= n)
+    && r.rows.filter(([, c]) => !/off/.test(c)).every(([, , h]) => h && h.startsWith('#corporate/leakage/')), JSON.stringify(r.rows));
+  check('…one line a check, not a 132px box', r.tall < 70, String(r.tall));
+  check('…the check with nothing in scope last, as the outline, its reason in words',
+    /leak-noscope/.test(r.rows[r.rows.length - 1][1]) && r.rows[r.rows.length - 1][0] === 'none in scope'
+    && /nothing in scope, not a measured nought/.test(r.why), JSON.stringify([r.rows[r.rows.length - 1], r.why]));
+  await ctx.close();
+  const c = await open('classic', 'corporate/leakage');
+  const order = await c.page.evaluate(() => [...document.querySelectorAll('#view .leaks .leak span')].map((x) => x.textContent));
+  check('…the old skin keeps the server\'s order', JSON.stringify(order) === JSON.stringify(lk.kinds.map((k) => k.label)), JSON.stringify(order));
+  await c.ctx.close();
+}
+
+/* ══ #property/<id> ═══════════════════════════════════════════════════════ */
+console.log('\n#property');
+{
+  const { ctx, page, answer } = await open('arkiv', 'property/h-palm');
+  const s = await shape(page);
+  const row = answer('/api/corporate/properties').find((x) => x.partner_id === 'h-palm');
+  const pr = answer('/api/corporate/property').profile;
+  check('the order: 00, billed-cost-kept, the two daily charts, the exceptions, what they book, how they settle, when, †',
+    JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Billed, cost, kept', 'Bookings and revenue per day',
+      'The exceptions on this property’s bookings', 'What they book', 'How they settle', 'When they travel', '† What this page does not know']),
+    JSON.stringify(s.heads));
+  check('Kept on this property is the hero, from the property\'s row on the list', s.hero === 'Kept on this property'
+    && s.values['Kept on this property'] === aed(row.revenue - row.cost), s.values['Kept on this property']);
+  check('…and all eight of the old tiles follow', ['Bookings', 'Revenue', 'Average fare', 'Guests', 'Drivers', 'Vehicles',
+    'First booking', 'Last booking'].every((l) => l in s.values) && s.values.Revenue === aed(pr.revenue), JSON.stringify(s.values));
+  const charts = await page.evaluate(() => document.querySelectorAll('[data-panel="prop-daily"] svg').length);
+  check('two daily charts, never a dual axis', charts === 2, String(charts));
+  check('the † band says what no per-property payload carries', s.abs.length >= 3 && s.abs.every((a) => a.why), JSON.stringify(s.abs));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'property/h-palm', { fixtures: { '/api/corporate/properties': [] } });
+  const s = await shape(page);
+  check('a property missing from the window\'s list: Kept is ABSENT with THAT reason, not "did not load"',
+    /not on the window’s property list/.test(s.na['Kept on this property'] || '') && !/did not load/.test(s.na['Kept on this property'] || ''),
+    JSON.stringify(s.na));
+  await ctx.close();
+}
+
+await done();

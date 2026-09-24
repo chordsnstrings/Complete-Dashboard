@@ -183,7 +183,13 @@ export function compareRoutes(app, { q, wrap }) {
                 count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
                 count(*) FILTER (WHERE n.outcome = 'not_completed')::int cancelled,
                 round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric, 0) km,
-                sum(n.price) FILTER (WHERE n.has_fare) fares
+                sum(n.price) FILTER (WHERE n.has_fare) fares,
+                /* How many of the channel's rows the fare covers. Uber's fares
+                   arrive with the weekly payments-report walk, so a day's Uber
+                   fares can cover a handful of its bookings — "AED 235 over 311
+                   bookings" read as a collapse with nothing to say it was a
+                   coverage gap (plan §4 #compare). */
+                count(*) FILTER (WHERE n.has_fare)::int priced
            FROM trip_norm n WHERE ${WHERE} GROUP BY 1, 2`, p),
       /* THE MONEY THE BIGGEST CHANNEL DOES REPORT.
          ─────────────────────────────────────────────────────────────────
@@ -359,7 +365,7 @@ export function compareRoutes(app, { q, wrap }) {
         const B = platforms.find((r) => r.platform === name && r.day === b) || {};
         const side = (row, day) => ({
           n: row.n || 0, completed: row.completed || 0, cancelled: row.cancelled || 0,
-          km: num(row.km), fares: num(row.fares),
+          km: num(row.km), fares: num(row.fares), priced: row.priced || 0,
           /* Beside the fares, never inside them: a fare is what the rider was
              charged and a payout is what reached the fleet after commission. */
           paid: moneyOf(paidByPlat, name, day, 'paid'),

@@ -103,6 +103,7 @@ const RENDER = async ([fn, width, data, opts]) => {
   document.body.append(host);
   const o = { ...opts };
   if (o.projectedKey) { const k = o.projectedKey; o.projected = (d) => !!d[k]; delete o.projectedKey; }
+  if (o.hatchIfKey) { const k = o.hatchIfKey; o.hatchIf = (d) => !!d[k]; delete o.hatchIfKey; }
   const today = (await import('/tz.js')).dubaiDay();
   c[fn](host, data.map((d) => (d.d === 'TODAY' ? { ...d, d: today } : d)), o);
   const svg = host.querySelector('svg');
@@ -145,6 +146,10 @@ month.push({ d: 'TODAY', trips: 12, tj: 20 });
 const weeks = [{ w: '2026-07-06', n: 50, m: 40 }, { w: '2026-07-13', n: 60, m: 45 },
   { w: '2026-07-20', n: 20, m: 30, partial: true, days: 3, of_days: 7 }];
 const GAP = { x: 'd', y: 'trips', label: 'bookings', secondary: 'tj', secondaryLabel: 'telematics journeys' };
+/* A day of hours, the last three not yet reached (#compare under the contract). */
+/* Four days, the third derived rather than filed (#finance's open week). */
+const derivedDays = [{ d: '2026-09-01', n: 40 }, { d: '2026-09-02', n: 44 }, { d: '2026-09-03', n: 41, der: true }, { d: '2026-09-04', n: 39 }];
+const hours = Array.from({ length: 24 }, (_, i) => ({ h: `${String(i).padStart(2, '0')}:00`, n: i < 21 ? 3 + (i % 4) : 0, gap: i >= 21 }));
 
 const S = {};
 for (const skin of ['classic', 'arkiv']) {
@@ -155,9 +160,28 @@ for (const skin of ['classic', 'arkiv']) {
     nine: await page.evaluate(RENDER, ['barChart', 1090, nine, { x: 'd', y: 'n' }]),
     dense: await page.evaluate(RENDER, ['barChart', 515, dense, { x: 'd', y: 'n' }]),
     fc: await page.evaluate(RENDER, ['barChart', 900, fc, { x: 'd', y: 'n', lo: 'lo', hi: 'hi', projectedKey: 'proj' }]),
+    hr: await page.evaluate(RENDER, ['gapBars', 900, hours, { x: 'h', y: 'n', gapKey: 'gap', inProgress: false,
+      bucketNoun: 'hours', gapLabel: 'not yet reached' }]),
+    der: await page.evaluate(RENDER, ['gapBars', 700, derivedDays, { x: 'd', y: 'n', inProgress: false,
+      hatchIfKey: 'der', hatchNote: 'derived from the day’s own fares' }]),
   };
   await ctx.close();
 }
+
+console.log('\n0 · gapBars counts its absent bars in the unit it is drawn in');
+check('bucketNoun: an hour chart says "3 of 24 hours", in both skins',
+  ['classic', 'arkiv'].every((k) => S[k].hr.caps.some((c) => c.startsWith('3 of 24 hours: not yet reached'))),
+  JSON.stringify([S.classic.hr.caps, S.arkiv.hr.caps]));
+check('…and every caller that does not ask still says days', ['classic', 'arkiv'].every((k) =>
+  S[k].gap.caps.some((c) => /^1 of 15 days: /.test(c))), JSON.stringify(S.arkiv.gap.caps));
+
+console.log('\n0 · gapBars hatches a bar measured differently from its neighbours');
+check('hatchIf: the derived day is drawn as the unfinished form in both skins, every other bar solid',
+  ['classic', 'arkiv'].every((k) => {
+    const m = S[k].der.all;
+    const solid = (x) => /^var\(/.test(x.fill || '') && !x['stroke-dasharray'];
+    return m.length === 4 && solid(m[0]) && solid(m[1]) && solid(m[3]) && !solid(m[2]);
+  }), JSON.stringify(['classic', 'arkiv'].map((k) => S[k].der.all.map((x) => [x.fill, x['stroke-dasharray'] || '']))));
 
 console.log('\n1 · barChart');
 const C = S.classic, A = S.arkiv;
@@ -699,6 +723,35 @@ const SC = async ([w]) => {
     .filter((b) => b.left < sb.left - 0.5 || b.right > sb.right + 0.5).map((b) => [b.left - sb.left, b.right - sb.right]);
   return { vb: svg.getAttribute('viewBox'), dots, ref: ref && cs(ref).strokeDasharray, inside: out.length === 0, out };
 };
+/* A reference line steeper than the box. It was drawn to the right edge with
+   its height clamped to the top — a different slope (#unit/assets drew AED
+   3.09 a km at 2.50). Measured in the chart's own coordinates: the line's
+   end must sit on the slope it was given, whichever edge it leaves by. */
+const STEEP = async ([w]) => {
+  const c = await import('/charts.js');
+  document.querySelector('#rhost')?.remove();
+  const host = document.createElement('div'); host.id = 'rhost'; host.className = 'panel';
+  host.style.cssText = `width:${w}px;position:absolute;left:0;top:0`;
+  document.body.append(host);
+  const pts = [{ p: 'A', km: 8000, money: 4000 }, { p: 'B', km: 1000, money: 20000 }];
+  c.scatter(host, pts, { x: 'km', y: 'money', label: 'p', xLabel: 'km', yLabel: 'AED', refLine: { slope: 5 } });
+  const svg = host.querySelector('svg');
+  const ref = svg.querySelector('.sc-ref');
+  const dot = (p) => [...svg.querySelectorAll('circle')].map((d) => [+d.getAttribute('cx'), +d.getAttribute('cy')])[p];
+  /* Two dots fix both axes' scales: A = (8000, 4000), B = (1000, 20000). */
+  const [ax, ay] = dot(0), [bx, by] = dot(1);
+  const pxPerKm = (ax - bx) / 7000, pxPerAed = (ay - by) / 16000;
+  const [x1, y1, x2, y2] = ['x1', 'y1', 'x2', 'y2'].map((k) => +ref.getAttribute(k));
+  const slope = ((y1 - y2) / pxPerAed) / ((x2 - x1) / pxPerKm); // screen y runs down
+  return { slope: Math.round(slope * 100) / 100, topY: Math.min(...[...svg.querySelectorAll('.gl')].map((g) => +g.getAttribute('y1'))), y2 };
+};
+for (const skin of ['classic', 'arkiv']) {
+  const { ctx, page } = await open(skin);
+  const st = await page.evaluate(STEEP, [860]);
+  check(`${skin}: a reference line steeper than the box keeps its slope and ends on the top edge`,
+    st.slope === 5 && Math.abs(st.y2 - st.topY) < 0.5, JSON.stringify(st));
+  await ctx.close();
+}
 for (const skin of ['classic', 'arkiv']) {
   const { ctx, page } = await open(skin);
   const r = await page.evaluate(SC, [860]);

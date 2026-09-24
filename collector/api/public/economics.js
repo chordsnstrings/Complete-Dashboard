@@ -37,11 +37,11 @@
    while producing little or nothing. Nothing here is a P&L and no panel
    pretends to be one. */
 
-import { areaChart, hbars, scatter, empty, fmt } from './charts.js';
+import { areaChart, hbars, scatter, barChart, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
   dayStr, money, pct, sourceLabel, sourceToken, countOf, plural, verdict,
-  alertRateFigure } from './ui.js';
-import { q, href, state } from './data.js';
+  alertRateFigure, contract, glance, secHead, absenceBand, pageFoot, highlight } from './ui.js';
+import { q, href, state, currentGen, alive, windowLabel } from './data.js';
 import { makeMap, fitTo } from './map.js';
 
 export const UNIT_TABS = [
@@ -131,9 +131,15 @@ export async function renderEconomics(root) {
   root.innerHTML = '';
   root.append(tabBar(UNIT_TABS, tab, (id) => href('unit', id === 'overview' ? null : id)));
   const host = el('div', 'stack'); root.append(host);
-  if (tab === 'assets') return assetsTab(host);
-  if (tab === 'drivers') return driversTab(host);
-  return moneyTab(host);
+  /* Two orders of each tab until the operator flips the default skin: the
+     old skin's, and the page contract (plan §4 #unit, #unit/assets,
+     #unit/drivers). The Money in tab's contract is its own function sharing
+     the verdict, the tiles, the ledgers and the map with the old one; the
+     two list tabs take a flag, and build the old page when it is off. */
+  const c = contract();
+  if (tab === 'assets') return assetsTab(host, { contract: c });
+  if (tab === 'drivers') return driversTab(host, { contract: c });
+  return c ? moneyTabContract(host) : moneyTab(host);
 }
 
 /* The sentence every tab has to carry: money did not exist before February,
@@ -150,104 +156,11 @@ function coverageNote(host, cov, windowDays) {
   host.append(note(parts.join(' '), cov.unpayable_bookings ? 'warn' : null));
 }
 
-/* ── tab: the money ─────────────────────────────────────────────────────── */
-async function moneyTab(root) {
-  const vuHost = el('div'); root.append(vuHost);
-  const covHost = el('div'); root.append(covHost);
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
-
-  const g1 = el('div', 'grid g23'); root.append(g1);
-  const conc = panel('Which cars earn the money',
-    'A steep line means a few cars earn most of it. Click a point to open that car.');
-  g1.append(conc.panel);
-  const chan = panel('Money per km, by channel',
-    'Compare a channel with itself over time. A payout is after commission, a fare is not.');
-  g1.append(chan.panel);
-
-  const g2 = el('div', 'grid g2'); root.append(g2);
-  /* ENOUGH OF THE WINDOW TO CARRY A RATE — AND THE WINDOW IS NOT ALWAYS A MONTH.
-     ─────────────────────────────────────────────────────────────────────────
-     The gate was a flat ten days. That is right for a month and IMPOSSIBLE for
-     any window shorter than ten, and this product's DEFAULT window is the
-     calendar month — so on the 1st of every month it emptied four of this
-     page's eight panels, and again on the 2nd, and every day to the 10th.
-
-     Measured on production on 2026-09-01: 84 vehicles and 94 drivers cleared
-     it at days=30, and ZERO at period=month, which is what the page opens on.
-     The render audit called it "4 of 8 panels have no data".
-
-     A third of the window, capped at ten and floored at one: a month still
-     asks for ten days, a week asks for three, and a one-day window ranks on
-     the day itself rather than showing four empty panels. Every caption and
-     every empty state below prints the gate it actually used, because "at
-     least 10" over a three-day window was a sentence about a different page. */
-  const best = panel('Cars earning most per day worked',
-    'Enough earning days to carry a rate, so a car that worked once for a good fare does not lead '
-    + 'the fleet.', 'unit-cars-top');
-  g2.append(best.panel);
-  const worst = panel('Cars earning least per day worked',
-    'The same threshold. These held a driver and produced almost nothing — the row above the ones '
-    + 'that produced nothing at all.', 'unit-cars-bottom');
-  g2.append(worst.panel);
-
-  const dead = panel('Insured cars that earned nothing',
-    'Papers still valid, no money in this window. This product holds no cost data.');
-  root.append(dead.panel);
-
-  const mapP = panel('Where each car was last seen',
-    'Each car at its last known position, coloured by whether it earned in this window.');
-  mapP.panel.classList.add('mapwrap');
-  root.append(mapP.panel);
-
-  const g3 = el('div', 'grid g2'); root.append(g3);
-  const pbest = panel('Drivers earning most per day worked', 'Enough days driven to carry a rate',
-    'unit-drivers-top');
-  g3.append(pbest.panel);
-  const pworst = panel('Drivers earning least per day worked',
-    'The same threshold. They worked the days, the money per day is what is low',
-    'unit-drivers-bottom');
-  g3.append(pworst.panel);
-
-  [conc.body, chan.body, best.body, worst.body, dead.body, mapP.body, pbest.body, pworst.body]
-    .forEach(loading);
-
-  /* Two requests, and deliberately not a third.
-     ─────────────────────────────────────────────────────────────────────
-     The map below wants a position per vehicle, and the obvious way to get one
-     is /api/live. It is also the slowest answer this product serves — it is
-     the one thing here that cannot be cached, because it is different every
-     five minutes, and under load production has taken over a minute to return
-     it. Asked for here, every figure on the first screen would sit behind that
-     poll for a map at the bottom of the page.
-
-     It is not needed. /api/live reads the newest telemetry_snapshot row per
-     plate, and the asset ledger already carries exactly that row — the same
-     DISTINCT ON, in the same query that produced the table. Drawing the map
-     from the ledger costs nothing, removes the slowest request on the page,
-     and guarantees the marker and the row it belongs to describe one vehicle
-     rather than two answers fetched a minute apart. */
-  const [A, D, K] = await Promise.all([
-    q('/api/economics/assets'), q('/api/economics/drivers'),
-    /* Finance's own figure, fetched rather than recomputed. This page places
-       money on vehicles by walking payouts through custody to a plate, and
-       /api/kpis sums the same payout rows without that walk — measured on
-       production the two differ by about AED 1,450 on Uber and by 4,000 on
-       Yango in the other direction. Both are real; presenting either as "the
-       fleet's money" without the other was the problem. Comparing against the
-       number Finance actually renders means the two cannot drift. */
-    q('/api/kpis').catch(() => null),
-  ]);
-  const t = A.totals, dt = D.totals;
-
-  /* Fields read off /api/economics/drivers on production: totals carries
-     people, earning, drove_unpaid, idle, money, payouts, fares, bookings, km,
-     worked_days, aed_per_day_worked, aed_per_booking, aed_per_km.
-
-     Unit economics is a page of rates, and a rate is a lie if its denominator
-     is wrong. The one that matters here is that "per driver" over the whole
-     roster and "per driver who worked" are different numbers, and the gap
-     between them is the headline. */
-  {
+/* ── shared by both orders of the Money in tab ─────────────────────────────
+   The verdict and the eight tiles, as data: the old skin draws them with
+   verdict() and kpiRow, the contract as the 00 band — one source, so the two
+   cannot disagree about a figure, a sub-line or an address. */
+function moneyVerdict(dt) {
     const people = +dt.people || 0;
     const earning = +dt.earning || 0;
     const idle = +dt.idle || 0;
@@ -259,7 +172,7 @@ async function moneyTab(root) {
     const unpaid = +dt.drove_unpaid || 0;
     const measMoney = dt.measured_money != null ? +dt.measured_money : +dt.money || 0;
     const nothing = Math.max(0, people - earning);
-    verdict(vuHost, {
+    return {
       /* Per ONLINE HOUR where we have measured it, because a day worked can be
          one job or fourteen hours logged in and dividing by it calls those the
          same day. This page used to note that the hourly rate was "the one
@@ -300,12 +213,11 @@ async function moneyTab(root) {
           + `the other ${fmt(nothing)} earned nothing, and spreading the same ${money(dt.money)} `
           + `across all ${fmt(people)} would cut every rate here to `
           + `${fmt(Math.round((earning / (people || 1)) * 100))}% of what it shows.`,
-    });
-  }
-
-  coverageNote(covHost, A.coverage, A.window_days);
-
-  kpiHost.replaceWith(kpiRow([
+    };
+}
+function moneyTiles(A, K) {
+  const t = A.totals;
+  return [
     /* Named for how it was PLACED, because #revenue answers the same question
        differently and the two must not both be "money in".
        ─────────────────────────────────────────────────────────────────────
@@ -429,19 +341,15 @@ async function moneyTab(root) {
           sub: `${pct(t.unplaced_pct, 1)} of what the platforms paid — the driver held no vehicle `
             + 'in that period, so it belongs to no car here' }
       : null,
-  ]));
+  ];
+}
 
-  /* Why this total is not the one on #revenue.
-     ─────────────────────────────────────────────────────────────────────────
-     Both pages answer "what did this fleet take in", both are right, and they
-     differ — by 0.8% over a year and by 53% over a week. A reader who notices
-     that and finds nothing explaining it has to assume one of the two pages is
-     broken, which is a worse outcome than either number. Stated where the
-     larger figure is, with the mechanism rather than a hedge. */
-  root.append(note('This page puts a weekly payout on the days the driver actually drove. Money by platform '
-    + 'spreads the same payout over all seven days of the period. Both are right, so the two '
-    + 'totals differ most over a short range.'));
-
+/* ── more of the Money in tab, shared by both orders ───────────────────────
+   Moved here verbatim from moneyTab so the contract draws the same curve,
+   the same yields, the same four ranked ledgers and the same dead-capital
+   list. */
+function drawConcentration(conc, A) {
+  const t = A.totals;
   /* Concentration: one series, so no legend — the title names it. Cumulative
      share against rank, which is a curve and therefore an area rather than
      bars. The reading is in the caption, not in a number on every point. */
@@ -465,7 +373,8 @@ async function moneyTab(root) {
       + 'at all and are not on this curve. The x axis is rank, not a plate — click a point to '
       + 'open the vehicle sitting there.'));
   }
-
+}
+function drawYields(chan, A) {
   /* Per-km yield by channel. One measure across a few named categories, ranked
      — horizontal bars, one hue, because the bar length already carries the
      magnitude and the categories have no order of their own. */
@@ -492,7 +401,8 @@ async function moneyTab(root) {
       { label: 'Per km', key: 'aed_per_km', num: true, render: (r) => money(r.aed_per_km, 'AED', 2) },
     ], { compact: true }));
   }
-
+}
+function rankCars({ best, worst, pbest, pworst }, A) {
   const rateCols = [
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Held by', key: 'current_driver',
@@ -552,7 +462,9 @@ async function moneyTab(root) {
     ledger(worst.body, rated.slice(-10).reverse(), rateCols,
       { initial: 'aed_per_earning_day', dir: 'asc', onRow: open });
   }
-
+  return { gate, days, nDays, open };
+}
+function deadList(dead, A, open) {
   /* The dead capital list. Named rather than counted: a count is a statistic
      and a list is a morning's work. */
   const idle = A.rows.filter((r) => !r.money && r.doc_days_left != null && r.doc_days_left >= 0)
@@ -615,7 +527,9 @@ async function moneyTab(root) {
       + 'The ones with journeys seen but no bookings are the expensive ones: the tracker watched '
       + 'them drive and no channel paid for it.'));
   }
-
+}
+function rankPeople({ pbest, pworst }, D, { gate, days, nDays }) {
+  const dt = D.totals;
   const pCols = [
     { label: 'Driver', key: 'driver_name',
       render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
@@ -628,8 +542,17 @@ async function moneyTab(root) {
        may be logged in fourteen hours to do it. `absent` prunes the column
        where nothing has been measured, which on a window older than Uber's
        31-day availability retention is every row. */
+    /* The reason printed when the column is pruned. It said "availability
+       has not been collected for anyone in this window" whenever the ten
+       rows of ONE list had no hours — and on 2026-09-24 the bottom ten did
+       not, while the verdict above them counted 100 people with measured
+       availability. The column is pruned per list, so under the contract the
+       reason is the list's own; the old skin's sentence is unchanged. */
     { label: 'Per online h', key: 'aed_per_measured_hour', num: true,
-      absent: 'availability has not been collected for anyone in this window — Uber serves the '
+      absent: contract() && (+dt.people_with_availability || 0) > 0
+        ? `none of the drivers on this list has measured online hours — availability is measured for `
+          + `${fmt(dt.people_with_availability)} of ${fmt(dt.people)} people in this window`
+        : 'availability has not been collected for anyone in this window — Uber serves the '
         + 'last 31 days and nothing older, so this fills in going forward',
       render: (r) => (r.aed_per_measured_hour == null
         ? '<span class="ent-off" title="no availability collected for this driver in this window">—</span>'
@@ -656,6 +579,131 @@ async function moneyTab(root) {
       `${fmt(dt.drove_unpaid)} more people drove in this window with no payout reaching them at `
       + 'all, and are not on either list — see Every driver.'));
   }
+}
+
+/* ── tab: the money ─────────────────────────────────────────────────────── */
+async function moneyTab(root) {
+  const vuHost = el('div'); root.append(vuHost);
+  const covHost = el('div'); root.append(covHost);
+  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+
+  const g1 = el('div', 'grid g23'); root.append(g1);
+  const conc = panel('Which cars earn the money',
+    'A steep line means a few cars earn most of it. Click a point to open that car.');
+  g1.append(conc.panel);
+  const chan = panel('Money per km, by channel',
+    'Compare a channel with itself over time. A payout is after commission, a fare is not.');
+  g1.append(chan.panel);
+
+  const g2 = el('div', 'grid g2'); root.append(g2);
+  /* ENOUGH OF THE WINDOW TO CARRY A RATE — AND THE WINDOW IS NOT ALWAYS A MONTH.
+     ─────────────────────────────────────────────────────────────────────────
+     The gate was a flat ten days. That is right for a month and IMPOSSIBLE for
+     any window shorter than ten, and this product's DEFAULT window is the
+     calendar month — so on the 1st of every month it emptied four of this
+     page's eight panels, and again on the 2nd, and every day to the 10th.
+
+     Measured on production on 2026-09-01: 84 vehicles and 94 drivers cleared
+     it at days=30, and ZERO at period=month, which is what the page opens on.
+     The render audit called it "4 of 8 panels have no data".
+
+     A third of the window, capped at ten and floored at one: a month still
+     asks for ten days, a week asks for three, and a one-day window ranks on
+     the day itself rather than showing four empty panels. Every caption and
+     every empty state below prints the gate it actually used, because "at
+     least 10" over a three-day window was a sentence about a different page. */
+  const best = panel('Cars earning most per day worked',
+    'Enough earning days to carry a rate, so a car that worked once for a good fare does not lead '
+    + 'the fleet.', 'unit-cars-top');
+  g2.append(best.panel);
+  const worst = panel('Cars earning least per day worked',
+    'The same threshold. These held a driver and produced almost nothing — the row above the ones '
+    + 'that produced nothing at all.', 'unit-cars-bottom');
+  g2.append(worst.panel);
+
+  const dead = panel('Insured cars that earned nothing',
+    'Papers still valid, no money in this window. This product holds no cost data.');
+  root.append(dead.panel);
+
+  const mapP = panel('Where each car was last seen',
+    'Each car at its last known position, coloured by whether it earned in this window.');
+  mapP.panel.classList.add('mapwrap');
+  root.append(mapP.panel);
+
+  const g3 = el('div', 'grid g2'); root.append(g3);
+  const pbest = panel('Drivers earning most per day worked', 'Enough days driven to carry a rate',
+    'unit-drivers-top');
+  g3.append(pbest.panel);
+  const pworst = panel('Drivers earning least per day worked',
+    'The same threshold. They worked the days, the money per day is what is low',
+    'unit-drivers-bottom');
+  g3.append(pworst.panel);
+
+  [conc.body, chan.body, best.body, worst.body, dead.body, mapP.body, pbest.body, pworst.body]
+    .forEach(loading);
+
+  /* Two requests, and deliberately not a third.
+     ─────────────────────────────────────────────────────────────────────
+     The map below wants a position per vehicle, and the obvious way to get one
+     is /api/live. It is also the slowest answer this product serves — it is
+     the one thing here that cannot be cached, because it is different every
+     five minutes, and under load production has taken over a minute to return
+     it. Asked for here, every figure on the first screen would sit behind that
+     poll for a map at the bottom of the page.
+
+     It is not needed. /api/live reads the newest telemetry_snapshot row per
+     plate, and the asset ledger already carries exactly that row — the same
+     DISTINCT ON, in the same query that produced the table. Drawing the map
+     from the ledger costs nothing, removes the slowest request on the page,
+     and guarantees the marker and the row it belongs to describe one vehicle
+     rather than two answers fetched a minute apart. */
+  const [A, D, K] = await Promise.all([
+    q('/api/economics/assets'), q('/api/economics/drivers'),
+    /* Finance's own figure, fetched rather than recomputed. This page places
+       money on vehicles by walking payouts through custody to a plate, and
+       /api/kpis sums the same payout rows without that walk — measured on
+       production the two differ by about AED 1,450 on Uber and by 4,000 on
+       Yango in the other direction. Both are real; presenting either as "the
+       fleet's money" without the other was the problem. Comparing against the
+       number Finance actually renders means the two cannot drift. */
+    q('/api/kpis').catch(() => null),
+  ]);
+  const t = A.totals, dt = D.totals;
+
+  /* Fields read off /api/economics/drivers on production: totals carries
+     people, earning, drove_unpaid, idle, money, payouts, fares, bookings, km,
+     worked_days, aed_per_day_worked, aed_per_booking, aed_per_km.
+
+     Unit economics is a page of rates, and a rate is a lie if its denominator
+     is wrong. The one that matters here is that "per driver" over the whole
+     roster and "per driver who worked" are different numbers, and the gap
+     between them is the headline. */
+  verdict(vuHost, moneyVerdict(dt));
+
+  coverageNote(covHost, A.coverage, A.window_days);
+
+  kpiHost.replaceWith(kpiRow(moneyTiles(A, K)));
+
+  /* Why this total is not the one on #revenue.
+     ─────────────────────────────────────────────────────────────────────────
+     Both pages answer "what did this fleet take in", both are right, and they
+     differ — by 0.8% over a year and by 53% over a week. A reader who notices
+     that and finds nothing explaining it has to assume one of the two pages is
+     broken, which is a worse outcome than either number. Stated where the
+     larger figure is, with the mechanism rather than a hedge. */
+  root.append(note('This page puts a weekly payout on the days the driver actually drove. Money by platform '
+    + 'spreads the same payout over all seven days of the period. Both are right, so the two '
+    + 'totals differ most over a short range.'));
+
+  drawConcentration(conc, A);
+
+  drawYields(chan, A);
+
+  const rk = rankCars({ best, worst, pbest, pworst }, A);
+
+  deadList(dead, A, rk.open);
+
+  rankPeople({ pbest, pworst }, D, rk);
   /* The map. Position comes from the live feed, money from the ledger, joined
      on the plate — a vehicle with no fix simply does not appear, and the
      caption says how many that is rather than letting the map imply a smaller
@@ -669,7 +717,12 @@ async function moneyTab(root) {
    The fix is the one the ledger already carries, so a car whose tracker went
    quiet in March is drawn where it went quiet — which is the whole point of
    this map, and something a realtime feed cannot tell you. */
-async function assetMap(host, rows) {
+/* `form`: the contract's pins. The old skin paints the three bands in the
+   status colours (good / critical / warn); under the colour law a car is not
+   "good" for earning, so earning is an ink dot, a car that moved and was paid
+   nothing the negative dot (the one band that is worse), and a car that never
+   moved the absence OUTLINE — nothing was measured moving it. */
+async function assetMap(host, rows, { form = false } = {}) {
   host.innerHTML = '';
   const pts = rows.map((r) => {
     const lat = num(r.lat), lng = num(r.lng);
@@ -685,7 +738,7 @@ async function assetMap(host, rows) {
   const layer = L.layerGroup().addTo(map);
   for (const r of pts) {
     const b = BAND[r.band] || BAND.still;
-    const m = L.circleMarker([r.lat, r.lng], {
+    const m = L.circleMarker([r.lat, r.lng], form ? FORM_PIN(r.band) : {
       radius: r.band === 'earning' ? 5 : 7,
       // A 2px surface ring rather than a border, so overlapping markers stay
       // separable without a stroke that reads as another category.
@@ -707,7 +760,7 @@ async function assetMap(host, rows) {
   pts.forEach((r) => { counts[r.band] = (counts[r.band] || 0) + 1; });
   const leg = el('div', 'legend');
   leg.innerHTML = Object.entries(BAND).map(([k, b]) =>
-    `<span><i class="sw" style="background:var(${b.colour})"></i>${esc(b.label)} · `
+    `<span><i class="${form ? FORM_SW[k] : 'sw'}" style="${form ? FORM_SW_STYLE[k] : `background:var(${b.colour})`}"></i>${esc(b.label)} · `
     + `<b class="num">${fmt(counts[k] || 0)}</b></span>`).join('');
   host.append(leg);
   const missing = rows.length - pts.length;
@@ -717,9 +770,24 @@ async function assetMap(host, rows) {
   }
 }
 
+const FORM_PIN = (band) => (band === 'earning'
+  ? { radius: 5, color: css('--paper'), weight: 2, fillColor: css('--ink'), fillOpacity: 1 }
+  : band === 'moved_unpaid'
+    ? { radius: 7, color: css('--paper'), weight: 2, fillColor: css('--sem-neg'), fillOpacity: 1 }
+    : { radius: 6, color: css('--abs-outline'), weight: 1.5, fill: false });
+const FORM_SW = { earning: 'sw ak-sw-round', moved_unpaid: 'sw ak-sw-round', still: 'sw ak-sw-round ak-sw-out' };
+const FORM_SW_STYLE = { earning: 'background:var(--ink)', moved_unpaid: 'background:var(--sem-neg)', still: '' };
+
 /* ── tab: every vehicle ─────────────────────────────────────────────────── */
-async function assetsTab(root) {
-  const covHost = el('div'); root.append(covHost);
+async function assetsTab(root, { contract: ak = false } = {}) {
+  const gen = currentGen();
+  /* Under the contract the coverage note and the tiles are the 00 band,
+     ahead of the search bar; the old skin's order is unchanged. */
+  const akBand = ak ? el('section', 'cband') : null;
+  const akTiles = ak ? el('div') : null;
+  if (ak) { akBand.append(secHead('00', 'At a glance', windowLabel())); root.append(akBand); }
+  const covHost = el('div'); (ak ? akBand : root).append(covHost);
+  if (ak) akBand.append(akTiles);
   const bar = el('div', 'toolbar');
   bar.innerHTML = '<input id="ueq" type="search" placeholder="Search by plate, make, model or driver…">'
     + '<span class="chips" id="ueb"></span><span class="cap" id="uen"></span>';
@@ -732,10 +800,12 @@ async function assetsTab(root) {
   [sc.body, tblP.body].forEach(loading);
 
   const A = await q('/api/economics/assets');
+  if (ak && !alive(gen)) return;
   coverageNote(covHost, A.coverage, A.window_days);
   const t = A.totals;
 
-  root.insertBefore(kpiRow([
+  (ak ? (tiles) => glance(akTiles, tiles.map((x, i) => ({ ...x, tone: null, hero: i === 0 })))
+    : (tiles) => root.insertBefore(kpiRow(tiles), bar))([
     { label: 'Money in', value: money(t.money), sub: `over ${fmt(A.window_days)} days` },
     { label: 'Per earning vehicle-day', value: money(t.aed_per_earning_day),
       sub: `${fmt(t.earning_vehicle_days)} earned · ${fmt(t.idle_vehicle_days)} idle` },
@@ -748,13 +818,22 @@ async function assetsTab(root) {
     { label: 'Insured and idle', value: fmt(t.idle_but_documented),
       tone: t.idle_but_documented ? 'critical' : 'good', sub: 'papers current, earned nothing',
       cohort: t.idle_but_documented ? 'unit-idle-documented' : null },
-  ]), bar);
+  ]);
+  if (ak) {
+    pageFoot({ colophon: [windowLabel(), `${fmt(A.rows.length)} vehicles`, `${money(t.money)} in`] }, root);
+  }
 
   const withKm = A.rows.filter((r) => (r.km ?? 0) > 0 && (r.money ?? 0) > 0);
   if (!withKm.length) empty(sc.body, 'No vehicle has both distance and money in this range');
   else {
+    /* Under the contract the line the caption describes is drawn: the
+       fleet’s own money per km, so "well under that" is a place on
+       the chart. The old skin's chart is unchanged. Every dot here is an
+       earning car (km and money both above nought), so the band needs no
+       second mark. */
     scatter(sc.body, withKm, { x: 'km', y: 'money', label: 'plate',
       xLabel: 'booked km', yLabel: 'money in (AED)', yFmt: (v) => money(v),
+      ...(ak && num(t.aed_per_km) != null ? { refLine: { slope: num(t.aed_per_km) } } : {}),
       onClick: (r) => { location.hash = href('vehicle', r.plate); } });
     sc.body.append(el('p', 'cap',
       `${fmt(withKm.length)} of ${fmt(A.rows.length)} vehicles have both. The fleet averages `
@@ -762,7 +841,7 @@ async function assetsTab(root) {
          passed scatter() a refLine — so the sentence named a mark the reader
          could not find. It names the rate instead. Drawing the line is the
          page phase's (a visible change to the old skin). */
-      + `${money(t.aed_per_km, 'AED', 2)} per km; a car earning well under that for each km is doing distance `
+      + `${money(t.aed_per_km, 'AED', 2)} per km${ak && num(t.aed_per_km) != null ? ' (the line)' : ''}; a car earning well under that for each km is doing distance `
       + 'that is not being paid for, which on this fleet usually means a car working a channel '
       + 'that prices nothing per trip while its driver’s payout goes somewhere else.'));
   }
@@ -850,8 +929,13 @@ async function assetsTab(root) {
 }
 
 /* ── tab: every driver ──────────────────────────────────────────────────── */
-async function driversTab(root) {
-  const covHost = el('div'); root.append(covHost);
+async function driversTab(root, { contract: ak = false } = {}) {
+  const gen = currentGen();
+  const akBand = ak ? el('section', 'cband') : null;
+  const akTiles = ak ? el('div') : null;
+  if (ak) { akBand.append(secHead('00', 'At a glance', windowLabel())); root.append(akBand); }
+  const covHost = el('div'); (ak ? akBand : root).append(covHost);
+  if (ak) akBand.append(akTiles);
   const bar = el('div', 'toolbar');
   bar.innerHTML = '<input id="udq" type="search" placeholder="Search by name…">'
     + '<span class="chips" id="udb"></span><span class="cap" id="udn"></span>';
@@ -861,10 +945,24 @@ async function driversTab(root) {
   loading(tblP.body);
 
   const D = await q('/api/economics/drivers');
+  if (ak && !alive(gen)) return;
   coverageNote(covHost, D.coverage, D.window_days);
   const t = D.totals;
 
-  root.insertBefore(kpiRow([
+  /* Under the contract the hourly tile's sub-line is the basis the rate is
+     ACTUALLY computed over. It printed the API's hours_note — "59 of 307
+     people have any online hours reported — Uber sends none" — beside a
+     rate computed over people_with_availability, the Uber availability feed
+     the Money in verdict counts (100 on 2026-09-23): two reasons for one
+     number, and the tile's was the false one (plan §4 #unit/drivers). With
+     nothing measured the value is the reason, not a dash. */
+  const hourTile = (x) => (x.label !== 'Per hour online' ? x
+    : t.aed_per_measured_hour == null
+      ? { label: x.label, na: 'no online hours were measured for anyone in this window', sub: 'Uber\u2019s availability feed serves the last 31 days and nothing older' }
+      : { ...x, sub: `over the ${countOf(t.people_with_availability || 0, 'person', 'people')} of ${fmt(t.people)} whose online hours `
+        + `are measured — ${fmt(t.measured_hours_online)} hours` });
+  (ak ? (tiles) => glance(akTiles, tiles.map((x, i) => ({ ...hourTile(x), tone: null, hero: i === 0 })))
+    : (tiles) => root.insertBefore(kpiRow(tiles), bar))([
     /* The two halves are the CHOSEN ones now — see the income rule in
        api/economics_routes.js. They add to the figure above them, which they
        did not while a channel reporting both a fare and a payout contributed
@@ -905,7 +1003,10 @@ async function driversTab(root) {
     { label: 'Per hour online',
       value: t.aed_per_measured_hour != null ? money(t.aed_per_measured_hour) : '—',
       sub: t.hours_note },
-  ]), bar);
+  ]);
+  if (ak) {
+    pageFoot({ colophon: [windowLabel(), `${fmt(D.rows.length)} people`, `${money(t.money)} to drivers`] }, root);
+  }
 
   const cols = [
     { label: 'Driver', key: 'driver_name',
@@ -995,4 +1096,198 @@ async function driversTab(root) {
   });
   bar.querySelector('#udq').oninput = (e) => { text = e.target.value.trim().toLowerCase(); draw(); };
   draw();
+}
+
+/* ── #unit (Money in) under the page contract (plan §4 #unit) ──────────────
+   Every tile, every ranked ledger with its window-scaled threshold, the
+   insured-and-idle list and the map are working parts and are kept (rules
+   1, 3). In the plan's order:
+
+     00  AT A GLANCE — the verdict as the statement (ruling 7: its figure is
+         not repeated as a tile), the coverage note, then all EIGHT tiles in
+         two rows (more than SPEC's six, on purpose — rule 1), labels, keys
+         and cohort links unchanged, Money placed on cars the hero; a level
+         tile wears no tone.
+     01  What a car earns on a day it earns anything — a histogram in AED 50
+         bands of every earning car's rate (the hero chart).
+     02  Which cars earn the money beside money per km by channel.
+     03  The four ranked ledgers.
+     04  What a person earns on a day they work; days earned against the
+         rate, one dot per car; what the cars did; what the people did; the
+         hours behind the hourly rate.
+     05  Insured cars that earned nothing.
+     06  Where each car was last seen — pins by FORM: earning an ink dot,
+         moved and paid nothing the negative dot, never moved the absence
+         outline, with a legend in words.
+     †   four cells.
+
+   NOT ADOPTED: "every figure is Uber money" (the ledger places Bolt, Hotel
+   and Yango money too); a "forgone on idle days" hero (the page prices only
+   cars with their own rate, "unearned, not lost", and refuses to price a car
+   that never earned); top-12 car bars (the ledgers carry more); the driver
+   register by state (a snapshot, not money, and another call). */
+const histogram = (vals, step) => {
+  const v = vals.filter((x) => x != null && Number.isFinite(Number(x))).map(Number);
+  if (!v.length) return [];
+  const top = Math.ceil(Math.max(...v) / step) * step;
+  const out = [];
+  for (let lo = 0; lo < Math.max(top, step); lo += step) {
+    out.push({ band: `${fmt(lo)}–${fmt(lo + step)}`, n: v.filter((x) => x >= lo && (x < lo + step || (lo + step >= top && x <= top))).length });
+  }
+  return out;
+};
+async function moneyTabContract(root) {
+  const gen = currentGen();
+  const band = el('section', 'cband');
+  const vuHost = el('div');
+  const covHost = el('div');
+  const tiles = el('div');
+  const gcap = el('div');
+  band.append(secHead('00', 'At a glance', windowLabel()), vuHost, covHost, tiles, gcap);
+  root.append(band);
+  loading(tiles);
+  const hist = panel('What a car earns on a day it earns anything', null, 'unit-hist'); root.append(hist.panel);
+  const g1 = el('div', 'grid g23'); root.append(g1);
+  const conc = panel('Which cars earn the money',
+    'A steep line means a few cars earn most of it. Click a point to open that car.', 'unit-conc');
+  const chan = panel('Money per km, by channel',
+    'Compare a channel with itself over time. A payout is after commission, a fare is not.', 'unit-chan');
+  g1.append(conc.panel, chan.panel);
+  const g2 = el('div', 'grid g2'); root.append(g2);
+  /* The captions are placeholders rankCars() rewrites with the threshold it
+     actually used, as it does on the old page. */
+  const best = panel('Cars earning most per day worked', 'Enough earning days to carry a rate.', 'unit-cars-top');
+  const worst = panel('Cars earning least per day worked', 'The same threshold.', 'unit-cars-bottom');
+  g2.append(best.panel, worst.panel);
+  const g3 = el('div', 'grid g2'); root.append(g3);
+  const pbest = panel('Drivers earning most per day worked', 'Enough days driven to carry a rate', 'unit-drivers-top');
+  const pworst = panel('Drivers earning least per day worked', 'The same threshold.', 'unit-drivers-bottom');
+  g3.append(pbest.panel, pworst.panel);
+  const g4 = el('div', 'grid g2'); root.append(g4);
+  const phist = panel('What a person earns on a day they work', null, 'unit-phist');
+  const sc = panel('Days earned against the rate, one dot per car', null, 'unit-scatter');
+  g4.append(phist.panel, sc.panel);
+  const g5 = el('div', 'grid g3'); root.append(g5);
+  const cars = panel('What the cars did', null, 'unit-cars-did');
+  const ppl = panel('What the people did', null, 'unit-people-did');
+  const hrs = panel('The hours behind the hourly rate', null, 'unit-hours');
+  g5.append(cars.panel, ppl.panel, hrs.panel);
+  const dead = panel('Insured cars that earned nothing',
+    'Papers still valid, no money in this window. This product holds no cost data.', 'unit-dead');
+  root.append(dead.panel);
+  const mapP = panel('Where each car was last seen',
+    'Each car at its last known position, by whether it earned in this window.', 'unit-map');
+  mapP.panel.classList.add('mapwrap');
+  root.append(mapP.panel);
+  const absHost = el('div'); root.append(absHost);
+  [hist.body, conc.body, chan.body, best.body, worst.body, pbest.body, pworst.body, phist.body, sc.body,
+    cars.body, ppl.body, hrs.body, dead.body, mapP.body].forEach((b) => loading(b));
+
+  const [A, D, K] = await Promise.all([
+    q('/api/economics/assets'), q('/api/economics/drivers'), q('/api/kpis').catch(() => null)]);
+  if (!alive(gen)) return;
+  const t = A.totals, dt = D.totals;
+
+  /* ── 00 ──────────────────────────────────────────────────────────────── */
+  verdict(vuHost, moneyVerdict(dt));
+  coverageNote(covHost, A.coverage, A.window_days);
+  glance(tiles, moneyTiles(A, K).filter(Boolean).map((x, i) => ({ ...x, tone: null, hero: i === 0 })));
+  gcap.append(note('This page puts a weekly payout on the days the driver actually drove. Money by platform '
+    + 'spreads the same payout over all seven days of the period. Both are right, so the two '
+    + 'totals differ most over a short range.'));
+
+  /* ── 01 · the hero chart ─────────────────────────────────────────────── */
+  const perDay = A.rows.map((r) => num(r.aed_per_earning_day)).filter((x) => x != null);
+  if (!perDay.length) empty(hist.body, 'No car earned on any day in this range, so there is no daily rate to spread.');
+  else {
+    const h = histogram(perDay, 50);
+    barChart(hist.body, h, { x: 'band', y: 'n', color: '--ink', label: 'cars', aria: 'Cars by money per earning day' });
+    const sorted = [...perDay].sort((a, b) => a - b);
+    const med = sorted[Math.floor(sorted.length / 2)];
+    const top = h.reduce((m, x) => (x.n > m.n ? x : m), h[0]);
+    const stats = el('p', 'cap');
+    stats.innerHTML = `AED per earning day, in AED 50 bands, over ${fmt(perDay.length)} cars that earned on at least one day · `
+      + `median <b>${esc(money(med))}</b> · the most cars sit in <b class="unit-top">AED ${esc(top.band)}</b> (${fmt(top.n)}) · `
+      + `the fleet rate is ${esc(money(t.aed_per_earning_day))} over ${fmt(t.earning_vehicle_days)} earning days.`;
+    hist.body.append(stats);
+    highlight(stats.querySelector('.unit-top'), 'ink');
+  }
+
+  /* ── 02 · concentration and channel yield — the old skin's code ────────── */
+  drawConcentration(conc, A);
+  drawYields(chan, A);
+
+  /* ── 03 · the four ranked ledgers — the old skin's code ────────────────── */
+  const rk = rankCars({ best, worst, pbest, pworst }, A);
+  rankPeople({ pbest, pworst }, D, rk);
+
+  /* ── 04 · the people and the cars, spread out ─────────────────────────── */
+  const pDay = D.rows.map((r) => num(r.aed_per_day_worked)).filter((x) => x != null);
+  if (!pDay.length) empty(phist.body, 'Nobody was paid for a day driven in this range.');
+  else {
+    barChart(phist.body, histogram(pDay, 50), { x: 'band', y: 'n', color: '--ink', label: 'people',
+      aria: 'People by money per day worked' });
+    phist.body.append(el('p', 'cap', esc(`AED per day worked, in AED 50 bands, over ${countOf(pDay.length, 'person', 'people')} `
+      + `with a day driven and money reaching them. The fleet rate is ${money(dt.aed_per_day_worked)} over ${fmt(dt.worked_days)} person-days.`)));
+  }
+  const dots = A.rows.filter((r) => num(r.days_earning) > 0 && num(r.aed_per_earning_day) != null);
+  if (!dots.length) empty(sc.body, 'No car earned on any day in this range.');
+  else {
+    scatter(sc.body, dots, { x: 'days_earning', y: 'aed_per_earning_day', label: 'plate',
+      xLabel: 'days earned', yLabel: 'AED per earning day', yFmt: (v) => money(v),
+      onClick: (r) => { location.hash = href('vehicle', r.plate); } });
+    sc.body.append(el('p', 'cap', esc(`${countOf(dots.length, 'car')}. Right and high is a car that works often and well; `
+      + 'left and high a car that earned well on the few days it worked. Click a dot to open the car.')));
+  }
+  const share = (n, of) => (of ? `${(n / of * 100).toFixed(1)}%` : null);
+  hbars(cars.body, [
+    { label: 'Earning', n: +t.earning || 0 },
+    { label: 'Moved, no money', n: +t.moved_unpaid || 0 },
+    { label: 'Never moved', n: +t.still || 0 },
+  ], { signed: false, shareOf: (d) => share(d.n, +t.vehicles || 0) });
+  cars.body.append(el('p', 'cap', esc(`${fmt(t.vehicles)} cars — every plate the fleet has had in a booking, a fix or a document.`)));
+  hbars(ppl.body, [
+    { label: 'Earning', n: +dt.earning || 0 },
+    { label: 'Drove, no money', n: +dt.drove_unpaid || 0 },
+    { label: 'No trip', n: +dt.idle || 0 },
+  ], { signed: false, shareOf: (d) => share(d.n, +dt.people || 0) });
+  ppl.body.append(el('p', 'cap', esc(`${countOf(dt.people, 'person', 'people')} who drove or were paid in this window.`)));
+  const onH = num(dt.measured_hours_online), idleH = num(dt.measured_idle_h);
+  if (!onH) {
+    empty(hrs.body, 'No online hours were collected for anyone in this window — Uber’s availability feed serves '
+      + 'the last 31 days and nothing older, so an older window has no hourly rate.');
+  } else {
+    hbars(hrs.body, [
+      { label: 'Someone in the car', n: Math.max(0, onH - (idleH || 0)) },
+      { label: 'Online, waiting', n: idleH || 0 },
+    ], { signed: false, valueFmt: (v) => `${fmt(v)} h`, shareOf: (d) => share(d.n, onH) });
+    hrs.body.append(el('p', 'cap', esc(`${fmt(onH)} online hours by the ${countOf(dt.people_with_availability || 0, 'person', 'people')} `
+      + `whose availability is measured; ${money(dt.measured_money)} earned over them — ${money(dt.aed_per_measured_hour)} an hour.`)));
+  }
+
+  /* ── 05 · the dead-capital list — the old skin's code ──────────────────── */
+  deadList(dead, A, rk.open);
+
+  /* ── † ───────────────────────────────────────────────────────────────── */
+  const cov = A.coverage || {};
+  absenceBand(absHost, [
+    { label: 'The cost of a car-day', fig: null, none: 'No cost feed',
+      why: 'This product holds no fuel, lease, insurance, salary or maintenance table, so nothing here is a margin: '
+        + '"losing money" means a car or a person consuming time and paid-for papers while earning little or nothing.' },
+    { label: 'Online hours measured', hl: true, fig: `${fmt(dt.people_with_availability || 0)} of ${fmt(dt.people)}`,
+      why: 'People whose availability the collector has measured; the hourly rate covers only them. Uber’s '
+        + 'availability feed serves the last 31 days, so an older window measures fewer.' },
+    { label: 'Finance’s figure for the same money', fig: K?.accounted ? money(K.accounted) : null, none: 'Not loaded',
+      why: K?.accounted
+        ? `Against ${money(t.money)} placed on cars here. Finance spreads each weekly payout over all seven days of its `
+          + 'period; this page places it on the days a driver drove, so the two differ most over a short window.'
+        : 'The kpis answer did not load, so Finance’s total is not beside this page’s.' },
+    { label: 'Bookings before money exists', fig: cov.unpayable_bookings ? fmt(cov.unpayable_bookings) : 'None in this window',
+      why: cov.note || 'Payouts begin partway through the record; bookings before then carry work and no money.' },
+  ]);
+
+  pageFoot({ colophon: [windowLabel(), `${fmt(t.earning)} of ${fmt(t.vehicles)} cars earning`,
+    `${money(t.money)} placed on cars`] }, root);
+  /* ── 06 · the map, last — it awaits Leaflet ────────────────────────────── */
+  await assetMap(mapP.body, A.rows, { form: true });
 }

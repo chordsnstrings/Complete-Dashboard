@@ -252,6 +252,9 @@ check('…and never both on the same day',
 check('the fares are not touched by any of it',
   Number(hotel?.a.fares) === 240 && Number(hotel?.b.fares) === 300,
   JSON.stringify(hotel && [hotel.a.fares, hotel.b.fares]));
+check('each channel says how many of its rows the fare covers — every hotel row, no Uber row',
+  hotel?.a.priced === 1 && hotel?.b.priced === 1 && uber?.a.priced === 0 && uber?.b.priced === 0,
+  JSON.stringify([hotel?.a.priced, hotel?.b.priced, uber?.a.priced, uber?.b.priced]));
 check('a channel with fares and no statement reports no payout rather than zero',
   hotel?.a.paid == null && hotel?.a.statement_net == null, JSON.stringify(hotel?.a));
 

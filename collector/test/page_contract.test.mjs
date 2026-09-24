@@ -466,6 +466,97 @@ console.log('\n5b · on the phone, where the shell footer is hidden');
   await ctx.close();
 }
 
+/* ── 5c · a long hero figure on a narrow screen ─────────────────────────────
+   Money carries its fils everywhere (ruling 2), so a hero amount is fourteen
+   characters and more. At --d6 it broke over two lines at 390 with the
+   highlight wrapping with it (#unit, 2026-09-24). */
+console.log('\n5c · a long hero figure stays on one line at 390');
+{
+  const { ctx, page } = await open('arkiv', { width: 390, hash: 'settings' });
+  await settle(page);
+  const r = await page.evaluate(async () => {
+    const u = await import('/ui.js');
+    const g = document.createElement('div'); document.querySelector('#view').prepend(g);
+    u.glance(g, [{ label: 'Money placed on cars', value: 'AED 663,268.99', hero: true }, { label: 'Per km', value: 'AED 3.09' }]);
+    const n = g.querySelector('.is-hero .n');
+    const lh = parseFloat(getComputedStyle(n).lineHeight) || parseFloat(getComputedStyle(n).fontSize);
+    return { h: n.getBoundingClientRect().height, lh, fs: getComputedStyle(n).fontSize, over: document.documentElement.scrollWidth - innerWidth };
+  });
+  check('a fourteen-character hero amount is one line at 390, and nothing scrolls sideways', r.h < r.lh * 1.5 && r.over <= 0, JSON.stringify(r));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', { width: 1440, hash: 'settings' });
+  await settle(page);
+  const fs = await page.evaluate(async () => {
+    const u = await import('/ui.js');
+    const g = document.createElement('div'); document.querySelector('#view').prepend(g);
+    u.glance(g, [{ label: 'Money placed on cars', value: 'AED 663,268.99', hero: true }, { label: 'Per km', value: 'AED 3.09' }]);
+    return [getComputedStyle(g.querySelector('.is-hero .n')).fontSize,
+      getComputedStyle(document.documentElement).getPropertyValue('--d6').trim()];
+  });
+  check('…and at 1440 the hero keeps --d6', parseFloat(fs[0]) === parseFloat(fs[1]) * 16 || fs[0] === fs[1], JSON.stringify(fs));
+  await ctx.close();
+}
+
+/* ── 5d · ruling 7: the verdict's figure is not repeated as a tile ─────────── */
+console.log('\n5d · notRepeated(): the tile printing the verdict\'s figure is handed back, not drawn');
+{
+  const { ctx, page } = await open('arkiv', { width: 1440, hash: 'settings' });
+  const r = await page.evaluate(async () => {
+    const u = await import('/ui.js');
+    const tiles = [{ label: 'Money already earned', value: 'AED 66,693.00', sub: 'measured', hero: true },
+      null, { label: 'Things to do', value: '7' }, { label: 'Modelled upside', na: 'no rate set' }];
+    const a = u.notRepeated(tiles, 'AED 66,693.00');
+    const b = u.notRepeated(tiles, 'AED 1.00');
+    const c = u.notRepeated(tiles, null);
+    const d = u.notRepeated([{ label: 'X', na: 'AED 5.00' }], 'AED 5.00');
+    const g = document.createElement('div'); document.body.append(g);
+    u.glance(g, a.tiles);
+    return { a: [a.tiles.map((t) => t.label), a.dropped?.label], b: [b.tiles.length, b.dropped],
+      c: [c.tiles.length, c.dropped], d: d.tiles.length, hero: g.querySelector('.is-hero .l')?.textContent };
+  });
+  check('the tile whose value is the verdict\'s figure is taken out and handed back', JSON.stringify(r.a)
+    === JSON.stringify([['Things to do', 'Modelled upside'], 'Money already earned']), JSON.stringify(r.a));
+  check('…the next tile becomes the hero', r.hero === 'Things to do', r.hero);
+  check('no match, or no figure: nothing is dropped', r.b[0] === 3 && r.b[1] === null && r.c[0] === 3 && r.c[1] === null,
+    JSON.stringify([r.b, r.c]));
+  check('an ABSENT tile is never matched — a reason is not a figure', r.d === 1, String(r.d));
+  await ctx.close();
+}
+
+/* ── 5e · bandTiles(): an old tile row made fit for the 00 band ───────────── */
+console.log('\n5e · bandTiles(): tones off, dashes absent with a reason, the verdict\'s figure not repeated');
+{
+  const { ctx, page } = await open('arkiv', { width: 1440, hash: 'settings' });
+  const r = await page.evaluate(async () => {
+    const u = await import('/ui.js');
+    const tiles = [
+      { label: 'Bookings', value: '1,204', sub: 'this window', tone: 'good' },
+      { label: 'Largest shortfall', value: '—', sub: 'no car is behind' },
+      { label: 'Commission', value: '\u2014', sub: 'not reported' },
+      { label: 'Gap', html: '<span class="pill warn">x</span>', tone: 'warn' },
+      null,
+      { label: 'Per day', value: '774', tone: 'warn' },
+    ];
+    const a = u.bandTiles(tiles, { figure: '774', reasons: { Commission: 'no record reports what the channel kept' } });
+    const host = document.createElement('div'); document.body.append(host);
+    const b = u.glanceBand(host, 'This month');
+    return { labels: a.tiles.map((x) => x.label), tones: a.tiles.map((x) => x.tone ?? null),
+      na: Object.fromEntries(a.tiles.filter((x) => x.na).map((x) => [x.label, x.na])), dropped: a.dropped?.label,
+      band: [b.band.className, b.band.querySelector('.sechd-idx')?.textContent, b.band.querySelector('.sechd-note')?.textContent,
+        b.band.children.length] };
+  });
+  check('tones are dropped from every tile', r.tones.every((x) => x === null), JSON.stringify(r.tones));
+  check('a bare dash becomes ABSENT with the caller\'s reason, or the tile\'s own sub-line',
+    r.na.Commission === 'no record reports what the channel kept' && r.na['Largest shortfall'] === 'no car is behind', JSON.stringify(r.na));
+  check('the tile printing the verdict\'s figure is handed back, not drawn (ruling 7)',
+    r.dropped === 'Per day' && !r.labels.includes('Per day') && r.labels.length === 4, JSON.stringify(r.labels));
+  check('glanceBand builds the numbered 00 frame with a verdict host and a tiles host',
+    JSON.stringify(r.band) === JSON.stringify(['cband', '00', 'This month', 3]), JSON.stringify(r.band));
+  await ctx.close();
+}
+
 /* ── 6 · tableFrom pairs ─────────────────────────────────────────────────── */
 console.log('\n6 · tableFrom: paired headers');
 {

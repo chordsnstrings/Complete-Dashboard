@@ -610,6 +610,13 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
      Opt-out rather than opt-in: `inProgress: false` for a series where the
      last bucket is not a day in progress. */
   inProgress = true,
+  /* A bar MEASURED DIFFERENTLY from its neighbours, drawn the way an
+     unfinished day is: `hatchIf(d)` true paints it in the series' hatch and
+     `hatchNote` is said in its tooltip. #finance's open week is the case —
+     each of those days is that day's own fares less the platform's
+     commission, not the platform's statement, and drawn solid it read as
+     filed. No caller that does not pass it changes. */
+  hatchIf = null, hatchNote = '',
   /* A ceiling the DATA does not get to choose.
      ─────────────────────────────────────────────────────────────────────
      barChart has always had this; gapBars never needed it until a series
@@ -628,6 +635,12 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
      charts here read better with "AED 2,000" up the side, and a percentile
      chart reads "0th, 33rd, 67th, 100th" if it is given the same treatment. */
   axisFmt = null, aria = null,
+  /* What one bar IS, for the caption that counts the absent ones. It was
+     "days" for every caller, which is true of every series drawn with this
+     until #compare's hour charts (the page phase) — where "17 of 24 days: not
+     yet reached" miscounts the unit the chart is drawn in. Defaults to
+     "days", so every existing caption is unchanged. */
+  bucketNoun = 'days',
   /* The second measure as a STEP LINE in its own identity, with a direct
      label, instead of a shape behind each bar (reskin STEP 3, #overview's
      plan entry: "telematics journeys behind the bars become an FMS-identity
@@ -754,7 +767,8 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
        as a HATCH in the series' own colour: an unfinished period is being
        measured, which is the opposite of absent, and absent is the outline. */
     const clipped = d.partial === true && +d.days > 0 && +d.days < +d.of_days;
-    const live = (inProgress && i === data.length - 1 && isToday(d[x])) || clipped;
+    const derivedBar = !!(hatchIf && hatchIf(d));
+    const live = (inProgress && i === data.length - 1 && isToday(d[x])) || clipped || derivedBar;
     const paint = !live ? { fill: `var(${color})` }
       : form.unfinished === 'hatch'
         ? { fill: hatchOf(color), stroke: `var(${color})`, 'stroke-width': 1 }
@@ -765,7 +779,8 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
     interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}${
       clipped ? ` over <b>${esc(String(d.days))} of ${esc(String(d.of_days))} days</b> — this bucket `
         + 'is cut short by the window, so its height is not comparable'
-        : live ? ` <b>so far</b>, at ${esc(nowHHMM())} Dubai — this day is still being collected`
+        : derivedBar ? ` — ${esc(hatchNote)}`
+          : live ? ` <b>so far</b>, at ${esc(nowHHMM())} Dubai — this day is still being collected`
           : ''}${
       secondary && +d[secondary] ? `<br>${fmt(d[secondary])} ${esc(secondaryLabel)}` : ''}`,
     onClick && (() => onClick(d)));
@@ -846,10 +861,10 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
        caption opened with a dangling "45 more had at least one source silent",
        more than what. */
     c.innerHTML = [
-      gaps ? `<b>${fmt(gaps)} of ${fmt(data.length)} days: ${esc(gapLabel)}</b> — drawn as `
+      gaps ? `<b>${fmt(gaps)} of ${fmt(data.length)} ${esc(bucketNoun)}: ${esc(gapLabel)}</b> — drawn as `
         + `${drawnNoun('absent', form)}, not as zero.` : '',
       partial
-        ? `${gaps ? `${fmt(partial)} more` : `${fmt(partial)} of ${fmt(data.length)} days`} had at least `
+        ? `${gaps ? `${fmt(partial)} more` : `${fmt(partial)} of ${fmt(data.length)} ${esc(bucketNoun)}`} had at least `
           + 'one source silent, so their bars are understated.'
         : '',
     ].filter(Boolean).join(' ');
@@ -1371,9 +1386,16 @@ export function scatter(host, data, opts = {}) {
       txt(gx, H - 22, xFmt(v), 'axis', 'middle'));
   });
   // The line the caller's own caption promises, when it supplies the slope.
+  /* A line steeper than the box leaves through the TOP, not the right edge.
+     It was drawn to the right edge with its height clamped to the top, which
+     is a different slope: #unit/assets' AED 3.09 a km over an 8,000 km axis
+     and an AED 20,000 one was drawn at 2.50, and a car on the fleet's rate
+     sat visibly above "the fleet's rate". It now ends where it meets the top.
+     A line that fits (every caller before this one) is drawn as it was. */
   if (refLine && Number.isFinite(+refLine.slope)) {
+    const over = (xTop * +refLine.slope) / yTop;
     svg.append(mk('line', { x1: pl, y1: pt + ih,
-      x2: pl + iw, y2: pt + ih - ih * Math.min(1, (xTop * +refLine.slope) / yTop),
+      x2: over > 1 ? pl + iw / over : pl + iw, y2: pt + ih - ih * Math.min(1, over),
       stroke: 'var(--grey)', 'stroke-width': 1, 'stroke-dasharray': '4 3', class: 'sc-ref' }));
   }
   data.forEach((d) => {

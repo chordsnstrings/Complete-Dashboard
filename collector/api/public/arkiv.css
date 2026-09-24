@@ -1228,6 +1228,15 @@
 @media(max-width:480px){
   :root[data-skin="arkiv"] .kpis.glance{grid-template-columns:minmax(0,1fr)}
   :root[data-skin="arkiv"] .kpis.glance .kpi.is-hero{grid-column:auto}
+  /* A hero money figure is fourteen characters since ruling 2 put the fils
+     on every amount ("AED 663,268.99"), and at --d6 it broke over two lines
+     at 390, the highlight wrapping with it (#unit, 2026-09-24). .n.long's
+     smaller step never reached it: the hero rule comes later at the same
+     weight. So a long hero figure is sized to the phone's width — a clamp,
+     not min(): test/type_scale.test.mjs admits only a token, a clamp or an
+     em, and a bare min() was a literal size by that rule (the Money-section
+     full suite caught it). --d4 as the floor only bites below 252px. */
+  :root[data-skin="arkiv"] .kpis.glance .kpi.is-hero .n.long{font-size:clamp(var(--d4),10.5vw,var(--d6))}
 }
 
 /* THE DELTA (SPEC L3). The colour follows the meaning, the glyph and sign
@@ -1321,3 +1330,106 @@
 /* A channel named in a table cell, with its swatch beside the word. */
 :root[data-skin="arkiv"] .chn{white-space:nowrap}
 :root[data-skin="arkiv"] .chn .sw{margin-right:5px;vertical-align:-1px}
+
+/* ── 19 · the page phase (STEP 6) ───────────────────────────────────────────
+   Rules a converted page needs beyond the shared components, grouped by the
+   page that first needed them and namespaced by it. Nothing here is read by
+   the old skin: a page builds this markup only under contract(). */
+
+/* #insights, "What it costs to ignore": three FORMS side by side in hbars'
+   rows (SPEC §5) — a modelled bar HATCHED (a projection: .sw-proj's paper
+   stripes over the bar's own colour), a priced one solid, the never-priced
+   OUTLINED (1px grey-2, no fill: not measured). The reason sits where a
+   figure would, in grey at reading size. */
+:root[data-skin="arkiv"] .hb .fill.hb-hatch{position:relative;overflow:hidden}
+:root[data-skin="arkiv"] .hb .fill.hb-hatch::after{content:"";position:absolute;inset:1px;
+  background:repeating-linear-gradient(-45deg,var(--paper) 0 3px,
+    color-mix(in srgb,var(--paper) calc((1 - var(--hatch-a)) * 100%),transparent) 3px 4px)}
+:root[data-skin="arkiv"] .hb .fill.hb-outline,:root[data-skin="arkiv"] .ins-sw-outline,
+:root[data-skin="arkiv"] .legend i.ak-sw-out{
+  background:none;box-shadow:inset 0 0 0 1px var(--abs-outline)}
+/* #unit's map legend: its pins are round, so its swatches are too. */
+:root[data-skin="arkiv"] .legend i.ak-sw-round{border-radius:50%}
+/* The reason stands in the value column, which hbars sizes to its widest
+   entry for every row (a subgrid): unwrapped, the sentence took the whole
+   row at 390px and squeezed every bar to a stub. */
+:root[data-skin="arkiv"] .ak-why{display:inline-block;max-width:15ch;text-align:right;
+  font-family:var(--sans);font-size:var(--t4);line-height:1.3;color:var(--grey);
+  white-space:normal;font-variant-numeric:normal}
+:root[data-skin="arkiv"] .ins-aed{font-weight:600;color:var(--ink);white-space:nowrap}
+:root[data-skin="arkiv"] .ins-aed .sw{margin-right:5px;vertical-align:-1px}
+/* #insights' ranked list: a column of ruled rows (the old skin's .hbars
+   container is hbars' grid under the skin, and put three rows on a line). */
+:root[data-skin="arkiv"] .insight-list{display:flex;flex-direction:column}
+
+/* #compare: under a fare in By channel, how much of the channel it covers —
+   a second line, not a wider cell (the panel is g23's narrow half, measured
+   against sideways scroll); a stale source in ink words with ruling 1's
+   hollow dot, not an amber pill. */
+:root[data-skin="arkiv"] .cmp-cov{display:block;font-size:var(--t4);color:var(--grey);white-space:nowrap}
+:root[data-skin="arkiv"] .cmp-stale{color:var(--ink);white-space:nowrap}
+:root[data-skin="arkiv"] .cmp-stale::before{content:"";content:"" / "warning: ";display:inline-block;box-sizing:border-box;
+  width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:.05em;border:1.5px solid var(--sem-neg)}
+
+/* #analyst: a verdict is not better or worse, so its chip is ink with the
+   tab's glyph; each card names the window and pass that measured it; a
+   value the database could not measure says so in the value slot; a claim's
+   earlier judgements fold beneath it, each a full card. */
+:root[data-skin="arkiv"] .an-chip{background:var(--w-ink);color:var(--ink);gap:6px}
+:root[data-skin="arkiv"] .an-when{font-family:var(--mono);font-size:var(--t2);letter-spacing:.06em;
+  color:var(--grey);margin:4px 0 0}
+:root[data-skin="arkiv"] .an-na{font-family:var(--sans);font-size:var(--t5);font-weight:600;color:var(--ink-2)}
+:root[data-skin="arkiv"] .an-claim+.an-claim{margin-top:18px}
+:root[data-skin="arkiv"] .an-times{margin:6px 0 0}
+:root[data-skin="arkiv"] .an-older{margin-top:6px}
+:root[data-skin="arkiv"] .an-older>summary{cursor:pointer;font-family:var(--mono);font-size:var(--t2);
+  letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);padding:6px 0}
+:root[data-skin="arkiv"] .an-older .finding{margin-top:10px;padding-left:14px;border-left:1px solid var(--hair)}
+
+/* #revenue: Money by channel's Basis and Why as a full-width second line
+   under each channel's row. On a phone the table scrolls sideways and the
+   line would scroll off with it, so its text holds to the visible width. */
+:root[data-skin="arkiv"] tr.rev-why>td{white-space:normal;padding-top:2px}
+@media(max-width:820px){
+  :root[data-skin="arkiv"] tr.rev-why .rev-why-in{position:sticky;left:0;max-width:calc(100vw - 64px)}
+}
+
+/* #corporate/leakage: the counters as a ranked check list — count, then
+   label, one to a line — each still the address of its bookings. A measured
+   nought is a figure and is not faded; a check with nothing in scope is the
+   absence outline, its reason in the caption beneath. */
+:root[data-skin="arkiv"] .leaks.ak-rank{display:flex;flex-direction:column;gap:0;max-width:720px}
+/* flex:none — app.css gives a counter `flex:1 1 132px`, which in a column
+   is a 132px HEIGHT. */
+:root[data-skin="arkiv"] .leaks.ak-rank .leak{display:grid;grid-template-columns:12ch 1fr;align-items:baseline;gap:14px;
+  flex:none;min-width:0;border:0;border-bottom:1px solid var(--hair);padding:10px 12px;min-height:44px}
+:root[data-skin="arkiv"] .leaks.ak-rank .leak.zero{opacity:1}
+:root[data-skin="arkiv"] .leaks.ak-rank .leak.zero b{color:var(--ink-2)}
+:root[data-skin="arkiv"] .leaks.ak-rank .leak b{font-size:var(--t8);text-align:right}
+:root[data-skin="arkiv"] .leaks.ak-rank .leak span{font-size:var(--t5);color:var(--ink)}
+:root[data-skin="arkiv"] .leaks.ak-rank .leak.on{background:var(--paper-2);box-shadow:inset 3px 0 0 var(--ink)}
+:root[data-skin="arkiv"] .leaks.ak-rank .leak.off,:root[data-skin="arkiv"] .leaks.ak-rank .leak.leak-noscope{
+  border:0;border-bottom:1px solid var(--hair);box-shadow:inset 0 0 0 1px var(--abs-outline);color:var(--grey);opacity:1}
+:root[data-skin="arkiv"] .leaks.ak-rank .leak.off b,:root[data-skin="arkiv"] .leaks.ak-rank .leak.leak-noscope b{
+  font-size:var(--t5);font-weight:600;color:var(--ink-2);white-space:nowrap}
+:root[data-skin="arkiv"] .leaks.ak-rank .leak.off span,:root[data-skin="arkiv"] .leaks.ak-rank .leak.leak-noscope span{color:var(--grey)}
+
+/* #policy: the line's field says what it holds — a box, and "%" after it. */
+:root[data-skin="arkiv"] .ak-pct{display:inline-flex;align-items:center;gap:10px}
+:root[data-skin="arkiv"] .ak-pct .depinput{width:9ch;text-align:right}
+:root[data-skin="arkiv"] .ak-pct-u{font-family:var(--sans);font-size:var(--d3);font-weight:600;color:var(--ink-2)}
+:root[data-skin="arkiv"] .pol-lead>.note,:root[data-skin="arkiv"] .pol-lead>.cap{margin:0 0 10px}
+
+/* #supply's rate grid (plan §4 supply, S8). "Sold nothing" is a MEASURED
+   nought, not a warning: the lowest step of the ramp with a small ▾ in the
+   negative token, where the old skin fills it critical red (L3: no semantic
+   fill on an area). "No availability collected" is an ABSENCE: an outline,
+   where the old skin hatches it (§5: a hatch is a projection, not a hole).
+   The legend's swatches follow the cells. */
+/* The lowest step is b1's tint (the ramp's colour at 18%); mixed rather
+   than faded with opacity, so the ▾ on top of it keeps full strength. */
+:root[data-skin="arkiv"] .sup-c.b0,:root[data-skin="arkiv"] .sw.b0{background:color-mix(in srgb,var(--s1) 18%,transparent);opacity:1}
+:root[data-skin="arkiv"] .sup-c.b0{position:relative}
+:root[data-skin="arkiv"] .sup-c.b0::after{content:'▾';position:absolute;inset:0;display:grid;place-items:center;
+  color:var(--sem-neg);font-size:var(--t1);line-height:1}
+:root[data-skin="arkiv"] .sup-c.none,:root[data-skin="arkiv"] .sw.none{background:none;box-shadow:inset 0 0 0 1px var(--abs-outline)}

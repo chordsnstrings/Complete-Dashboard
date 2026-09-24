@@ -88,6 +88,14 @@ check('the median is over the drivers whose first WHOLE month is in the window',
 check('and counts exactly those three, not the partial month or the veteran',
   measured === 3, `measured=${measured}`);
 
+/* The fixture holds bookings and no telematics journey at all, so "moved but
+   never earned" is 0 for want of a feed, not because no car moved — and the
+   answer has to say which (plan §4 #playbook; the Arkiv page draws the split
+   as not measured on journeys_in_window 0). */
+check('the fleet block says how many journeys the window holds — none here',
+  r.body?.fleet?.journeys_in_window === 0 && r.body?.fleet?.moved_only === 0,
+  JSON.stringify(r.body?.fleet));
+
 console.log('\nplaybook: one human, one ramp');
 
 /* "Zeta Six" and "Zeta Six Six" are the same person under the shared fold, so

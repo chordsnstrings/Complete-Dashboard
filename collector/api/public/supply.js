@@ -15,8 +15,9 @@
      WHERE how long the wait is after a dropoff in each area — the
            repositioning question, in the only geography this data has */
 import { el, esc, panel, loading, note, tableFrom, fmt, empty, verdict, foldRows,
-  plural, countOf, dayStr, sourceLabel } from './ui.js';
-import { q, href } from './data.js';
+  plural, countOf, dayStr, sourceLabel, contract, glance, secHead, absenceBand, pageFoot } from './ui.js';
+import { gapBars } from './charts.js';
+import { q, href, windowLabel } from './data.js';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const hh = (h) => `${String(h).padStart(2, '0')}:00`;
@@ -92,11 +93,24 @@ function balanceGrid(host, cells) {
 
 export async function renderSupply(root) {
   root.innerHTML = '';
-  const vHost = el('div'); root.append(vHost);
+  /* Under the page contract (plan §4 supply): the verdict in a 00 band with
+     the idle, online and waiting tiles; the rate heatmap as the hero chart
+     (its measure and its bins unchanged; arkiv.css recolours it); a typical
+     week hour by hour; what an online hour buys; the area table unchanged;
+     a † band; the links and the srcline as the colophon. */
+  const ak = contract();
+  const band = ak ? el('section', 'cband') : null;
+  if (ak) { band.append(secHead('00', 'At a glance', windowLabel())); root.append(band); }
+  const vHost = el('div'); (ak ? band : root).append(vHost);
+  const tilesHost = ak ? el('div') : null;
+  if (ak) band.append(tilesHost);
   const gridP = panel('Which hours sell the drivers you are paying for',
     'Jobs per online hour. Two slots with ten jobs are the same colour on a demand heatmap and '
-    + 'opposite problems here — one had four drivers online and one had forty.');
+    + 'opposite problems here — one had four drivers online and one had forty.', ak ? 'supply-grid' : undefined);
   root.append(gridP.panel);
+  const weekP = ak ? panel('A typical week, hour by hour', 'Online hours in each hour of the day across a typical week — bars — and the part of them with a rider in the car — the line.', 'supply-week') : null;
+  const buyP = ak ? panel('What an online hour actually buys', 'Jobs per hundred online hours in each hour of the day, against the window\u2019s own mean.', 'supply-buys') : null;
+  if (ak) { const g = el('div', 'grid g2'); g.append(weekP.panel, buyP.panel); root.append(g); }
   const areaP = panel('Where the waiting happens',
     'How long a driver waits after finishing a job in each area, before their next request.');
   root.append(areaP.panel);
@@ -274,6 +288,7 @@ export async function renderSupply(root) {
   gridP.body.innerHTML = '';
   balanceGrid(gridP.body, bal.cells);
   gridP.body.append(el('p', 'cap', esc(bal.basis)));
+  if (ak) supplyContract({ bal, areas, tilesHost, weekP, buyP });
 
   areaP.body.innerHTML = '';
   if (!areas.areas?.length) {
@@ -293,9 +308,84 @@ export async function renderSupply(root) {
     areaP.body.append(el('p', 'cap', esc(areas.basis)));
   }
 
+  if (ak) supplyAbsence(root, bal, areas);
   const links = el('p', 'cap');
   links.innerHTML = `<a class="lnk" href="${href('demand')}">Demand</a> shows when the work arrives; `
     + `<a class="lnk" href="${href('capacity')}">Rota gaps</a> sizes the hours that need more people. `
-    + 'This page is the two of them against each other.';
+    + 'This page is the two of them against each other.'
+    + (ak ? ` <a class="lnk" href="${href('optimise')}">Optimise</a> ranks the idle per car.` : '');
   root.append(links);
+  if (ak) pageFoot({ colophon: [windowLabel(), bal.covered ? `${fmt(bal.totals.online_h)} online hours` : 'no availability collected'] }, root);
+}
+
+/* ── #supply under the page contract ───────────────────────────────────────
+   00: the verdict (unchanged) as the statement — its figure, jobs per online
+   hour, is not repeated (ruling 7) — then the idle hours (the hero), the
+   online hours with the part on a job, and the waiting between jobs from the
+   area answer. Every tile is ABSENT with the verdict's own reason when no
+   availability was collected. 02 and 03 read the same per-occurrence cells
+   the heatmap does, summed by hour of day.
+   DEVIATION: the plan's §02 is 24 STACKED columns; charts.js has no stacked
+   column, so the online hours are the bars and the on-job hours the line
+   over them — the gap between is online and waiting. */
+function supplyContract({ bal, areas, tilesHost, weekP, buyP }) {
+  const t = bal.totals || {};
+  const A = areas.areas || [];
+  const waited = A.reduce((a, r) => a + (+r.waiting_h || 0), 0);
+  const waits = A.reduce((a, r) => a + (+r.waits || 0), 0);
+  const off = 'no availability was collected for this selection — the reason is above';
+  glance(tilesHost, [
+    bal.covered && t.idle_h != null
+      ? { label: 'Idle hours', value: `${fmt(t.idle_h)} h`, hero: true,
+        sub: `driver-hours online and not dispatched${t.idle_pct != null ? ` — ${t.idle_pct}% of the hours online` : ''}` }
+      : { label: 'Idle hours', hero: true, na: off },
+    bal.covered && t.online_h != null
+      ? { label: 'Online hours', value: `${fmt(t.online_h)} h`, sub: `${fmt(t.on_job_h)} h of them with a rider in the car` }
+      : { label: 'Online hours', na: off },
+    A.length ? { label: 'Waiting between jobs', value: `${fmt(waited, 1)} h`,
+      sub: `over ${countOf(waits, 'wait')} across ${countOf(A.length, 'area')}, dropoff to the next request` }
+      : { label: 'Waiting between jobs', na: 'not enough completed jobs with a dropoff address to measure a wait' },
+  ]);
+  const cells = bal.cells || [];
+  const byHour = Array.from({ length: 24 }, (_, h) => {
+    const mine = cells.filter((c) => +c.h === h);
+    const online = mine.reduce((a, c) => a + (+c.online_h || 0), 0);
+    const job = mine.reduce((a, c) => a + (+c.on_job_h || 0), 0);
+    const jobs = mine.reduce((a, c) => a + (+c.jobs || 0), 0);
+    return { x: hh(h), online: online || null, job, none: !online, per100: online >= 1 ? (100 * jobs) / online : null };
+  });
+  if (!bal.covered || !cells.length) {
+    empty(weekP.body, 'No availability was collected for this selection, so there are no hours to draw.');
+    empty(buyP.body, 'No availability was collected for this selection, so there is nothing to divide by.');
+    return;
+  }
+  gapBars(weekP.body, byHour, { x: 'x', y: 'online', label: 'online hours', color: '--grey', gapKey: 'none',
+    gapLabel: 'no availability collected for this hour', bucketNoun: 'hours', inProgress: false,
+    secondary: 'job', secondaryLabel: 'hours with a rider in the car', secondaryLine: { color: '--ink', label: 'on a job' },
+    valueFmt: (v) => `${fmt(v, 1)} h` });
+  weekP.body.append(el('p', 'cap', esc('Per occurrence of each weekday, summed across the seven: a typical week. The space between the line and the top of a bar is online and waiting.')));
+  const mean = t.jobs_per_online_h != null ? 100 * t.jobs_per_online_h : null;
+  gapBars(buyP.body, byHour.map((r) => ({ ...r, per100: r.per100 == null ? null : +r.per100.toFixed(1), mean, gone: r.per100 == null })),
+    { x: 'x', y: 'per100', label: 'jobs per 100 online hours', color: '--ink', gapKey: 'gone',
+      gapLabel: 'fewer than one online hour — no rate', bucketNoun: 'hours', inProgress: false,
+      secondary: mean != null ? 'mean' : null, secondaryLabel: 'the window mean', secondaryLine: mean != null ? { color: '--grey', label: 'mean' } : null,
+      valueFmt: (v) => fmt(v, 1) });
+  if (mean != null) buyP.body.append(el('p', 'cap', esc(`The window mean is ${fmt(mean, 1)} jobs per hundred online hours.`)));
+}
+function supplyAbsence(root, bal, areas) {
+  const unnamed = (areas.areas || []).find((r) => /unrecorded/i.test(String(r.area)));
+  const feeds = (bal.uncovered?.platforms || []).map(sourceLabel);
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Availability off Uber', hl: true, fig: null, none: 'Not collected',
+      why: feeds.length ? `The availability feed carries ${feeds.join(', ')} and nothing else, so no other channel\u2019s idle can be measured.`
+        : 'Availability comes from Uber\u2019s driver timeline, the only availability feed this product collects; no other channel files one, so its idle cannot be measured.' },
+    { label: 'Why a car sat idle', fig: null, none: 'Not reported',
+      why: 'No feed says whether a job was offered and refused or never offered, so an idle hour has no cause attached.' },
+    { label: 'Waits in an unnamed area', fig: unnamed ? `${fmt(+unnamed.waiting_h, 1)} h` : 'None',
+      why: unnamed ? `${countOf(unnamed.waits, 'wait')} ended where the last job left no area on record; they stay in the table as "(unrecorded)".`
+        : 'Every wait in this window has an area.' },
+    { label: 'What an idle hour cost', fig: null, none: 'Not measurable',
+      why: 'An online hour has no cost figure on any feed — no wage, fuel or charge per hour — so idle is counted in hours, never in money.' },
+  ]);
 }

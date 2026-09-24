@@ -231,6 +231,11 @@ server.close();
        guard somebody deletes. */
     .concat([...src.matchAll(/\bfunction\s*[A-Za-z_$][\w$]*\s*\(([^)]*)\)/g)]
       .flatMap((m) => m[1].split(',').map((x) => x.trim().replace(/[={].*$/, '').trim())))
+    /* And array destructuring — `const [s, props, lk, guests, strandRes] =
+       await Promise.all(…)` (#corporate's contract overview) declares all
+       five, and the harvest above read none of them. */
+    .concat([...src.matchAll(/\b(?:const|let|var)\s*\[([^\]]*)\]\s*=/g)]
+      .flatMap((m) => m[1].split(',').map((x) => x.trim().replace(/[={].*$/, '').trim())))
     .filter(Boolean));
   const read = [...src.matchAll(/(?<![.\w'"`-])([a-z][a-zA-Z0-9]*[A-Z][\w$]*)\s*\?/g)].map((m) => m[1]);
   const missing = [...new Set(read)].filter((n) => !declared.has(n));

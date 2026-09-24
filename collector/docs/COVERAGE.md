@@ -6581,3 +6581,130 @@ from the base commit's tree. Each of these cost a run or more to find.
   tree.** `node bin/phone-fixture.mjs oracle <tree> <label>` against the
   working tree would bless whatever it now draws. Take it from a
   `git archive` of the base commit, as the header of that file says.
+
+## Arkiv page phase — desktop: traps (2026-09-24)
+
+* **`.hbars` IS A GRID UNDER THE ARKIV SKIN, NOT A LIST.** app.css draws
+  `.hbars` as a flex column; arkiv.css makes it hbars' three-column grid
+  (label, bar, value) with each `.hb` a subgrid row. #insights used
+  `el('div', 'hbars')` as the container of its ranked rows, and under the
+  skin they fell into the grid three to a line. Anything that is not a `.hb`
+  row needs its own container class (#insights' is `.insight-list`).
+* **A shared column in hbars is sized by its widest entry, in every row.**
+  Under the skin `.hb` is a subgrid, so a sentence in one row's value slot
+  (#insights' "No cost model exists for these kinds") widens the value
+  column for all of them and squeezes every bar to a stub at 390px. Give
+  such a sentence a max width.
+* **The old skin is held byte for byte by `test/arkiv_classic_frozen`.** A
+  page converted under `contract()` must leave the classic branch's output
+  untouched, INCLUDING a truth defect found there: fix it under the contract
+  and name it, or ask the lead for a both-skins commit that re-records the
+  fixture (the test's header says how). A mock change that alters what an
+  old page renders fails it too — re-record from the base tree, never from
+  the working tree.
+* **RE-INDENTING CODE THAT HOLDS A MULTI-LINE TEMPLATE LITERAL CHANGES THE
+  DOM.** The whitespace between the backticks is part of the string. Moving
+  #analyst's card builder into a shared function and dedenting it by two
+  spaces changed every card's `innerHTML` in the old skin by whitespace text
+  nodes alone — invisible on screen, and exactly what
+  `test/arkiv_classic_frozen` exists to catch (it failed four routes). When a
+  block moves, move its template literals byte for byte.
+
+* **A PRUNED COLUMN'S REASON IS READ UNDER ONE TABLE, NOT THE WINDOW.**
+  `tableFrom` drops a column that declares `absent` when every row of THAT
+  table lacks it, and prints the reason under it. #unit's ranked lists are
+  four tables over one window: the bottom ten drivers had no measured hours
+  while 100 people did, and the reason — written about the window, "not
+  collected for anyone" — was false under that list. Write an `absent`
+  reason that is true of any subset the column can be shown for.
+
+* **`tableFrom` RE-ORDERS THE CALLER'S ARRAY IN PLACE.** A sort writes the new
+  order back onto the array the page passed (so row handlers index the rows
+  on screen). Anything else the page later draws from that same array sees
+  the reader's sort order, not the server's. Copy it first if the order
+  matters elsewhere.
+* **A verdict's figure is chosen at run time, so it can equal a tile's.**
+  #revenue's verdict is a dark-booking count on one window and the accounted
+  total on another; #playbook's is the measured total or the action count.
+  Pass the figure given to `verdict()` through `notRepeated()` (ruling 7)
+  rather than choosing a hero that is only right on today's data.
+
+* **`.leak` IS `flex:1 1 132px` IN app.css.** In the row flow it was built for
+  that is a width; turned into a column (#corporate/leakage's ranked list) it
+  is a 132px HEIGHT. A reused flex item needs `flex:none` in its new flow.
+* **stackedBar folds a segment under 1.5% into "Other (n)".** Where the small
+  segment is the one the chart is about (#corporate's booked-ahead share, 2
+  of 719), the fold draws the subject without its name. Use named bars.
+
+* **The ledger pages were in no route list.** `test/routes_list.mjs` (and so
+  smoke_views, render-audit and the golden test) walked none of #opening,
+  #salary, #advances, #charging, #policy, #deposits or #import-sheet. The
+  golden test now holds them through its `EXTRA` list; a new page the lists
+  do not name needs adding there before "the old skin is unchanged" means
+  anything for it.
+* **The credential banner moves every page's fold.** On the mock it is 332px
+  tall, on production two credentials' worth; a check that a form is "above
+  the fold" measures the banner, not the page. Measure the page's own
+  geometry (one row of tiles, the form directly under the band).
+
+* **`/api/ledger/entries` read only `from`/`to` until 2026-09-24.** A page
+  that called it through `qAll()` sent `period=month` and got the whole
+  record back, silently. It resolves named periods now (S5). A new route
+  that takes a window should take it through `api/window.js`, never by
+  reading `from`/`to` alone — the client sends a period name by design.
+
+* **A bar marked after drawing is marked by position, and position is not
+  the row.** gapBars draws NO bar for a day nothing reported (a hole is
+  never a nought), so on #finance 31 rows drew 29 bars; the first draft
+  hatched the open week by walking the SVG's bars beside the rows, and
+  would have hatched the wrong days. Ask the datum (`hatchIf`, S6), never
+  the index.
+* **`test/type_scale.test.mjs` admits a token, a `clamp()` or an em as a
+  font size — `min()` is a literal by its rule.** Prove a CSS change
+  against the full suite, not only the test written for it.
+
+* **`/api/finance/receipts` `first_seen` is the money register's last
+  rebuild, not a document's arrival.** Measured on production 2026-09-24:
+  230 of 230 rows this month share one stamp (08:45). Any page that prints
+  "when it reached us" off this field prints the rebuild time. Test for one
+  stamp across the rows before using it; keeping the true ingest time across
+  rebuilds is a collector change.
+
+* **`hbars(..., { signed: true })` prints the minus itself and passes
+  `valueFmt` the MAGNITUDE.** A valueFmt that adds its own sign prints
+  "−+AED 103.05" on every negative bar. Format the magnitude only.
+* **The golden test holds only `routes_list.mjs` plus its EXTRA list.**
+  #payouts was in neither, so its old skin was held by nothing until P19.
+  Before converting a page, check it is in one of the two; if not, add it
+  to EXTRA and record it from the base tree (`RECORD=1 PUBLIC_DIR=… ONLY=`).
+
+* **On `/api/reconcile`, "has a delta" is not "comparable".** A row is
+  reconciled only when `delta != null && !statement_partial && !period_cut`
+  (api/reconcile_routes.js). September 2026 carries delta_pct +20.2% and is
+  period_cut; February and March carry deltas and are statement_partial.
+  Any "latest gap" or trend must filter with the endpoint's rule.
+* **`statement_horizon` on `/api/reconcile` is an object, `{ days, from }`.**
+  `String()` of it prints "[object Object]".
+
+* **A driver handing cash to the fleet (`cash_deposit` in the ledger) is not
+  cash BANKED.** No bank statement is read by this product. A "Cash banked"
+  figure built from the hand-in record would be a reason that is not the
+  true one; say what the hand-in record holds, and leave banked absent.
+* **mockapi's `/api/settlement/receivables` counts more priced bookings
+  than bookings** (84 against 180), so `total_trips - priced_trips` is
+  negative there. Production is consistent (352 of 352). A page subtracting
+  the two must guard, not print a negative count.
+
+* **`/api/money/sources` lists no call of the kind Uber's headline is built
+  on.** `/api/revenue` gives Uber the basis `statement`; the money-sources
+  rows on production this month are of kinds fare, component, payout and
+  ledger only. A page saying the headline is "built from" or "chosen from"
+  the listed calls is saying something the rows do not support.
+* **`hbars` draws its "added / deducted" legend whenever a value is
+  negative**, even when `colorFor` makes the colour mean something else.
+  Pass `legend` whenever colour carries a different meaning.
+
+* **`/api/trips/daily`'s `sources_silent` is not "no data".** A day one
+  source was silent on still carries every other source's bookings, in the
+  daily row and in `/api/trips/heatmap`. Only `uncollected` takes a day out
+  of a per-day denominator.

@@ -86,8 +86,10 @@
    rows, which cannot. Presenting them identically would be lying by
    omission. */
 import { el, esc, panel, loading, tableFrom, kpiRow, note, sourceLabel, money,
-  countOf, dateStr, dayStr, dtStr, pill, pct, signed, foldChildren, foldRows } from './ui.js';
-import { fmt, empty, barChart } from './charts.js';
+  countOf, dateStr, dayStr, dtStr, pill, pct, signed, foldChildren, foldRows,
+  contract, glance, secHead, absenceBand, pageFoot } from './ui.js';
+import { fmt, empty, barChart, gapBars, hbars } from './charts.js';
+import { channelKey } from './tokens.js';
 import { q, qChan, currentGen, alive } from './data.js';
 
 /* A transfer is money ARRIVING, so it is shown positive whatever sign the
@@ -206,8 +208,17 @@ export async function renderPayouts(root) {
   const spans = (d.coverage || []).flatMap((c) => c.record_span || []);
   const earliest = spans.map((s) => String(s.earliest).slice(0, 10)).filter(Boolean).sort()[0] || null;
 
+  /* Under the page contract (plan §4 payouts): a 00 band in place of the
+     tile row; the wire against our own figure and the difference per
+     transfer ahead of the reconciliation table; each channel by month after
+     it; per-date bars per channel in place of the all-channel sum; neutral
+     chips; a † band. Nothing is fetched that the old page does not fetch —
+     test/payout_scope.test.mjs counts the calls. */
+  const ak = contract();
+  if (ak) payoutsGlance(root, { d, rec, payouts, coverage, publishing, silent, total, dates, weekdays, whole, WHERE, earliest });
+
   /* ── the numbers at a glance ─────────────────────────────────────────── */
-  root.append(kpiRow([
+  if (!ak) root.append(kpiRow([
     { label: 'Transferred to the bank', value: money(total),
       sub: payouts.length
         ? `${countOf(payouts.length, 'transfer')} on ${countOf(dates.size, 'date')} ${WHERE}`
@@ -245,11 +256,13 @@ export async function renderPayouts(root) {
      Its own host, because it redraws on its own after a live ask without the
      rest of the page being rebuilt: rebuilding would take the reader's scroll
      position and the results of the ask they just made. */
+  if (ak) payoutsWire(root, rec);
   {
     const host = el('div', 'stack');
     root.append(host);
     reconcileSection(host, rec, gen);
   }
+  if (ak) payoutsByMonth(root, payouts);
 
   /* ── EVERY TRANSFER, ONE ROW EACH ────────────────────────────────────── */
   if (payouts.length) {
@@ -282,7 +295,7 @@ export async function renderPayouts(root) {
       { label: 'From', key: 'source',
         render: (r) => {
           const book = r.listed_by_provider === false
-            ? `${pill('ledger', 'warn', 'Bolt’s balance ledger shows this payout leaving the fleet’s '
+            ? `${pill('ledger', ak ? null : 'warn', 'Bolt’s balance ledger shows this payout leaving the fleet’s '
                 + 'balance on this date. Bolt’s payout list has not listed it yet; when it does, '
                 + 'that row replaces this one and nothing is counted twice.')} `
             : '';
@@ -321,7 +334,8 @@ export async function renderPayouts(root) {
     }
     const series = [...byDate.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))
       .map(([day, v]) => ({ day: dayStr(day), v }));
-    if (series.length > 1) {
+    if (ak) payoutsPerDate(root, payouts);
+    else if (series.length > 1) {
       const cp = panel('The same transfers, in order',
         'Gaps between the bars are days no transfer arrived — they are not zeroes and are '
         + 'not drawn as any.');
@@ -380,8 +394,8 @@ export async function renderPayouts(root) {
         render: (c) => `<b>${esc(sourceLabel(c.platform))}</b>` },
       { label: 'Dates its transfers', key: 'publishes_payouts',
         render: (c) => (c.publishes_payouts
-          ? pill('yes', 'ok', c.how || '')
-          : pill('no', 'warn', 'this platform publishes no transfer to the company')) },
+          ? pill('yes', ak ? null : 'ok', c.how || '')
+          : pill('no', ak ? null : 'warn', 'this platform publishes no transfer to the company')) },
       { label: whole ? 'On record' : 'In this window', key: 'in_window',
         num: true,
         render: (c) => {
@@ -451,7 +465,7 @@ export async function renderPayouts(root) {
       { label: 'Fleet', key: 'fleet_id', render: (r) => esc(r.fleet_id || '—') },
       { label: 'Basis', key: 'basis',
         render: (r) => (r.basis === 'statement'
-          ? pill('statement', 'ok', 'the provider’s own balances, which close against each other')
+          ? pill('statement', ak ? null : 'ok', 'the provider’s own balances, which close against each other')
           : pill('ledger', null, 'summed by us from the provider’s dated rows — there is no '
             + 'balance here to check it against')) },
       { label: 'Opened at', key: 'opening_balance', num: true,
@@ -501,6 +515,7 @@ export async function renderPayouts(root) {
   /* The sentence that stops this page being read as a contradiction of
      Bank reconciliation. Both are true; they count different things. */
   root.append(note(d.note));
+  if (ak) payoutsAbsence(root, d, rec, coverage);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1377,4 +1392,162 @@ function verifyTable(rows) {
         ? pill('stored', 'ok', 'Uber answered and the statement row was written to the register')
         : pill('not stored', 'warn', r.why || 'nothing was written for this day')) },
   ], { sortId: 'payout-verify' });
+}
+
+/* ── #payouts under the page contract ──────────────────────────────────────
+   00: transferred to the bank, the hero — with each channel's share, the
+   transfers and dates, the weekday finding and where the record starts ·
+   can be checked against ours · the difference over those · the latest wire
+   · a channel that publishes no transfer, ABSENT with the provider's reason
+   (in place of the amber "2 of 3"). 01 every Uber transfer and our own
+   figure beside it · 02 the difference per transfer · then the
+   reconciliation table, the audit and the unasked days, unchanged · 04 | 05
+   each channel by month, on its own scale · the register · per-date bars
+   for EACH channel inside .chartscroll (the review's correction: a Bolt
+   per-date view stays) · what each platform publishes · the books · †.
+   NOT BUILT: chart 03, the zoomed twin of 02 — the plan accepts it only with
+   a threshold computed from the data and the excluded transfers named, and
+   02's caption names the largest differences instead. */
+function payoutsGlance(root, { rec, payouts, coverage, publishing, silent, total, dates, weekdays, whole, WHERE, earliest }) {
+  const band = el('section', 'cband');
+  const tiles = el('div');
+  band.append(secHead('00', 'At a glance', whole ? 'The whole record' : 'This window'), tiles);
+  root.append(band);
+  const byCh = new Map();
+  payouts.forEach((r) => byCh.set(r.platform, (byCh.get(r.platform) || 0) + amt(r.amount)));
+  const split = [...byCh.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${sourceLabel(k)} ${money(v)}`).join(' · ');
+  const ok = rec && !rec.__error;
+  const t = ok ? rec.totals || {} : {};
+  const comparable = ok ? (rec.rows || []).filter((r) => r.delta != null) : [];
+  const latest = [...comparable].sort((a, b) => (a.paid_on < b.paid_on ? 1 : -1))[0] || null;
+  const failed = 'the comparison did not load, so nothing here is checked';
+  glance(tiles, [
+    { label: 'Transferred to the bank', value: money(total), hero: true,
+      sub: payouts.length
+        ? [split, `${countOf(payouts.length, 'transfer')} on ${countOf(dates.size, 'date')} ${WHERE}`,
+          weekdays.size === 1 ? `every one of them a ${[...weekdays][0]}` : null,
+          earliest ? `the record starts ${dateStr(earliest)}` : null].filter(Boolean).join(' · ')
+        : `nothing ${WHERE}` },
+    ok ? { label: 'Can be checked against ours', value: `${fmt(t.comparable_rows)} of ${fmt(t.rows)}`,
+      sub: 'transfers that name the period they settle and have our driver-day rows for it' }
+      : { label: 'Can be checked against ours', na: failed },
+    ok && t.comparable_rows ? { label: 'The difference over those', value: `${+t.delta > 0 ? '+' : +t.delta < 0 ? '−' : ''}${money(Math.abs(+t.delta))}`,
+      sub: `${money(t.wire_comparable)} wired against ${money(t.calculated)} of our own figure` }
+      : { label: 'The difference over those', na: ok ? 'no transfer names a period we hold driver-day rows for' : failed },
+    latest ? { label: 'The latest wire', value: money(latest.wire),
+      sub: `${dateStr(latest.paid_on)}, settling ${periodOf(latest) || 'an unstated period'} · ours ${money(latest.calculated)}, `
+        + `${latest.delta >= 0 ? '+' : '−'}${money(Math.abs(latest.delta))} (${pct(Math.abs(latest.delta_pct), 2)})` }
+      : { label: 'The latest wire', na: ok ? 'no transfer can be checked against our own figure yet' : failed },
+    silent.length
+      ? { label: `${silent.map((c) => sourceLabel(c.platform)).join(', ')}: no transfer published`,
+        /* The provider's own reason, its first sentence — the whole of it is
+           in the † band and in the coverage table, and a paragraph does not
+           fit a tile. */
+        na: silent.map((c) => firstSentence(c.absent) || 'this platform publishes no transfer to the company').join(' — '),
+        sub: `${publishing.length} of ${coverage.length} platforms publish one` }
+      : { label: 'Platforms that publish a transfer', value: `${publishing.length} of ${coverage.length}`,
+        sub: 'every platform on record dates its own transfers' },
+  ]);
+}
+function payoutsWire(root, rec) {
+  if (!rec || rec.__error) return;
+  const rows = (rec.rows || []).filter((r) => r.platform === 'uber').sort((a, b) => (a.paid_on < b.paid_on ? -1 : 1));
+  const g = el('div', 'grid g2'); root.append(g);
+  const p1 = panel('Every Uber transfer, and our own figure beside it',
+    'Bars are the wire; the line is what our driver-day rows say that week earned. Where the line breaks we hold no figure of our own.', 'payout-wire');
+  const p2 = panel('The difference, per transfer', 'Only the transfers that can be checked.', 'payout-diff');
+  g.append(p1.panel, p2.panel);
+  if (!rows.length) { empty(p1.body, 'No Uber transfer is on record.'); }
+  else {
+    const host = el('div'); const sc = el('div', 'chartscroll'); sc.append(host); p1.body.append(sc);
+    gapBars(host, rows.map((r) => ({ d: r.paid_on, wire: amt(r.wire), ours: r.calculated == null ? null : +r.calculated, gap: r.wire == null })),
+      { x: 'd', y: 'wire', label: 'wired', color: '--c-uber', gapKey: 'gap', inProgress: false, secondary: 'ours',
+        secondaryLabel: 'of our own figure', secondaryLine: { color: '--ink', label: 'ours' }, valueFmt: (v) => money(v) });
+    const n = rows.filter((r) => r.calculated != null).length;
+    p1.body.append(el('p', 'cap', esc(`${fmt(n)} of ${fmt(rows.length)} Uber transfers have a figure of ours beside them.`)));
+  }
+  const cmp = rows.filter((r) => r.delta != null).sort((a, b) => (a.paid_on < b.paid_on ? 1 : -1));
+  if (!cmp.length) empty(p2.body, 'No transfer can be checked against our own figure yet.');
+  else {
+    hbars(p2.body, cmp.slice(0, 20).map((r) => ({ label: dateStr(r.paid_on), n: +r.delta })),
+      /* hbars prints the minus itself and hands valueFmt the magnitude. */
+      { signed: true, color: '--ink', negColor: '--grey', valueFmt: (v) => money(v) });
+    const big = [...cmp].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 3);
+    p2.body.append(el('p', 'cap', esc(`${cmp.length > 20 ? `The 20 newest of ${fmt(cmp.length)}. ` : ''}`
+      + `A wire above our figure and one below it are the same news — the two registers count different events. `
+      + `The largest: ${big.map((r) => `${dateStr(r.paid_on)} ${r.delta >= 0 ? '+' : '−'}${money(Math.abs(r.delta))}`).join(', ')}.`)));
+  }
+}
+/* Channels largest first, so Uber's chart leads where Uber carries the money
+   (plan §4: 04 Uber | 05 Bolt) without naming a channel in code. */
+const chansByTotal = (payouts) => {
+  const by = new Map();
+  payouts.forEach((r) => by.set(r.platform, (by.get(r.platform) || 0) + amt(r.amount)));
+  return [...by.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
+};
+const firstSentence = (s) => (s ? String(s).split(/(?<=\.)\s/)[0] : '');
+function payoutsByMonth(root, payouts) {
+  const chans = chansByTotal(payouts);
+  if (!chans.length) return;
+  const g = el('div', `grid ${chans.length > 1 ? 'g2' : ''}`.trim()); root.append(g);
+  chans.forEach((ch) => {
+    const p = panel(`${sourceLabel(ch)}, by month`, 'Its own scale — a channel is compared with itself.', `payout-month-${ch}`);
+    g.append(p.panel);
+    const by = new Map();
+    payouts.filter((r) => r.platform === ch).forEach((r) => {
+      const m = String(r.paid_on).slice(0, 7); by.set(m, (by.get(m) || 0) + amt(r.amount));
+    });
+    const series = [...by.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([m, v]) => ({ m, v }));
+    const key = channelKey(ch);
+    barChart(p.body, series, { x: 'm', y: 'v', color: key ? `--c-${key}` : '--ink', valueFmt: (v) => money(v), axisFmt: (v) => money(v),
+      aria: `${sourceLabel(ch)} transfers by month` });
+  });
+}
+function payoutsPerDate(root, payouts) {
+  const chans = chansByTotal(payouts);
+  const cp = panel('Every transfer date, by channel',
+    'Each channel on its own scale. Gaps between the bars are days no transfer arrived — not zeroes.', 'payout-dates');
+  chans.forEach((ch) => {
+    const by = new Map();
+    payouts.filter((r) => r.platform === ch).forEach((r) => {
+      const k = String(r.paid_on).slice(0, 10); by.set(k, (by.get(k) || 0) + amt(r.amount));
+    });
+    const series = [...by.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([day, v]) => ({ day: dayStr(day), v }));
+    cp.body.append(el('p', 'cap', `<b>${esc(sourceLabel(ch))}</b> — ${esc(countOf(series.length, 'date'))}`));
+    const host = el('div'); const sc = el('div', 'chartscroll'); sc.append(host); cp.body.append(sc);
+    const key = channelKey(ch);
+    barChart(host, series, { x: 'day', y: 'v', color: key ? `--c-${key}` : '--ink', valueFmt: (v) => money(v), axisFmt: (v) => money(v) });
+  });
+  cp.body.append(el('p', 'cap phone-only', 'Every payout date is drawn. On a narrow screen each chart keeps '
+    + 'its bar width and scrolls sideways rather than shrinking every bar past reading.'));
+  root.append(cp.panel);
+}
+function payoutsAbsence(root, d, rec, coverage) {
+  const ok = rec && !rec.__error;
+  const rows = ok ? rec.rows || [] : [];
+  const why = new Map();
+  rows.filter((r) => r.delta == null).forEach((r) => {
+    const k = r.calculated_absent || (r.period_start ? 'no figure of ours' : 'no period named');
+    why.set(k, (why.get(k) || 0) + 1);
+  });
+  const WORD = { no_period: 'name no period', no_driver_days: 'have no driver-day rows of ours' };
+  const unasked = ok ? (rec.unchecked || []).reduce((a, u) => a + (+u.count || 0), 0) : null;
+  const au = ok ? rec.audit : null;
+  const silent = coverage.filter((c) => !c.publishes_payouts);
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Transfers we can check', hl: true, fig: ok ? `${fmt(rec.totals?.comparable_rows || 0)} of ${fmt(rec.totals?.rows || 0)}` : null,
+      none: 'Not loaded',
+      why: ok ? ([...why.entries()].map(([k, n]) => `${fmt(n)} ${WORD[k] || String(k).replace(/_/g, ' ')}`).join('; ')
+        || 'Every transfer names its period and has our figure beside it.') : 'The comparison did not load.' },
+    { label: 'Checked against Uber\u2019s transaction report', fig: au?.audited_days ? `${fmt(au.audited_days)} days` : null, none: 'None',
+      why: au ? (au.means || `${fmt(au.audited_days || 0)} days audited; ${fmt(au.wires_the_audit_added || 0)} wires the audit added.`)
+        : 'No audit is on record.' },
+    { label: 'Days Uber was never asked about', fig: unasked != null ? fmt(unasked) : null, none: 'Not loaded',
+      why: 'A day nobody asked about has no measurement, not a clean one — the panel above names them and asks.' },
+    { label: 'A transfer some channels never publish', fig: silent.length ? null : 'Every channel', none: `${silent.map((c) => sourceLabel(c.platform)).join(', ')}: not published`,
+      why: silent.length ? silent.map((c) => `${sourceLabel(c.platform)}: ${c.absent || 'publishes no transfer to the company'}`).join(' ')
+        : 'Every channel on record dates its own transfers.' },
+  ]);
+  pageFoot({ colophon: [d.scope === 'record' ? 'The whole record' : 'This window', `${fmt((d.payouts || []).length)} transfers`] }, root);
 }
