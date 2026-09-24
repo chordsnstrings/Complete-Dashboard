@@ -1981,3 +1981,12 @@ longer ago; 35 with no driving we can see. 0 vehicle papers expired, 3 in
 disagree. By channel: Uber 160 records, none dated; Yango 146, all dated;
 Hotel 132 — 94 on the default date, 38 undated. 232 people carry a date
 that can be checked, 50 of them lapsed.
+
+### #hr-roster — 2026-09-24
+
+Production (the export of 23 Sept), both skins at 1440 and 390, light and
+dark (scratchpad `pagephase/shots/hr-roster/`): no error, no sideways
+scroll. 143 on HR's list (Ecosine 100, Egari 43), 60 with anything expiring
+in 90 days, 134 matched to a platform account (112 by id, 22 by phone, 9
+not matched), 0 off the list. The import form was not exercised (no upload
+against production).

@@ -1193,4 +1193,55 @@ if (want('compliance')) {
   }
 }
 
+/* ══ #hr-roster ═══════════════════════════════════════════════════════════ */
+if (want('hr-roster')) {
+  console.log('\n#hr-roster');
+  {
+    const { ctx, page } = await open('classic', 'hr-roster');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), tiles: document.querySelectorAll('#view .kpis > .kpi').length,
+      tags: document.querySelectorAll('#view td .tag.ok, #view td .tag.warn, #view td .tag.err, #view td .tag.bad').length }));
+    check('old skin: no band, the four tiles, statuses as coloured tags', !r.band && r.tiles === 4 && r.tags > 0, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'hr-roster');
+    const s = await shape(page);
+    const v = answer('/api/hr-roster');
+    const t = v.totals || {};
+    const n = (x) => (+x || 0).toLocaleString('en-US');
+    check('00: the four figures in the band, anything expiring the hero, off the totals', s.glance === 4 && s.hero === 'Anything expiring in 90 days'
+      && s.values['On HR’s list'] === n(t.on_list) && s.values['Anything expiring in 90 days'] === n(t.anything_expiring)
+      && s.values['Matched to a platform account'] === n(t.matched.platform_id + t.matched.phone) && s.values['Off the HR list'] === n(t.off_list), JSON.stringify(s.values));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const cells = await page.evaluate(() => ({ tags: document.querySelectorAll('[data-hr="roster-table"] td .tag.ok, [data-hr="roster-table"] td .tag.warn, [data-hr="roster-table"] td .tag.err').length,
+      neg: [...document.querySelectorAll('[data-hr="roster-table"] td span[style*="--sem-neg"]')].map((x) => x.textContent) }));
+    const anyExp = (v.people || []).some((p) => Object.values(p.documents || {}).some((d) => d.status === 'expired'));
+    check('the roster\'s statuses are words — expired in the negative colour, no coloured tags', cells.tags === 0
+      && (!anyExp || (cells.neg.length > 0 && cells.neg.every((x) => x === 'expired'))), JSON.stringify(cells));
+    check('the table, its filters, the import form and the history kept', s.heads.includes('The roster') && s.heads.includes('Bring in an HR export')
+      && s.heads.includes('Upload history') && !!(await page.$('#view .filters select')), JSON.stringify(s.heads));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const DOCK = Object.keys(t.expiring || {});
+    const missing = DOCK.reduce((a, k) => a + (+(t.expiring[k] || {}).missing || 0), 0);
+    check('†: numbers held and never shown; the dateless documents counted; the unmatched people counted',
+      ab['Document numbers']?.none && (missing ? ab['A date HR did not file']?.fig === `${n(missing)} documents` : ab['A date HR did not file']?.none)
+      && (t.matched.none ? ab['People HR lists and no platform holds']?.fig === `${t.matched.none} ${t.matched.none === 1 ? 'person' : 'people'}` : true),
+      JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    await ctx.close();
+  }
+  {
+    /* Nothing uploaded: ABSENT with the API's reason, and no empty 00 band. */
+    const none = { latest: null, people: [], uploads: [], absent_reason: 'No HR roster has been uploaded yet.' };
+    const { ctx, page } = await open('arkiv', 'hr-roster', { fixtures: { '/api/hr-roster': none } });
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), note: document.querySelector('#view .note')?.textContent || '' }));
+    check('nothing uploaded: the reason, and no empty band', !r.band && /No HR roster has been uploaded yet/.test(r.note), JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'hr-roster', { width: 390 });
+    check('#hr-roster at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
