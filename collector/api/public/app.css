@@ -181,6 +181,14 @@
      shellContract() reads it; arkiv.css declares 1, and shell.js then moves
      the same nodes into the masthead, the two rows and the control bar. */
   --pg-shell:0;
+  /* …and which PHONE app (the operator's ruling of 2026-09-24, plan "Phone
+     PWA — redesign"): 0 here, the phone screens exactly as production draws
+     them. m/ui.js phoneContract() reads it; m/arkiv-m.css — written only for
+     a phone reader under ?skin=arkiv — declares 1, and the phone builds its
+     Arkiv screens. The 1 lives in the same sheet as the rules that style
+     them, so a phone that somehow lacks that sheet draws the old screens
+     rather than new markup with no styles. */
+  --pg-phone:0;
   --mk-absent:hatch; --mk-unfinished:hollow; --mk-projected:solid; --mk-behind:outline;
   /* A donut is always a ring here (eight distinct hues), and a stale fix on
      the live map a faded fill — today's forms. The Arkiv block declares
