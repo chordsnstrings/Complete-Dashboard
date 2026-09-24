@@ -2150,3 +2150,11 @@ Production through live-ui on :8611, both skins at 1440 and 390, light and dark 
 The verdict: 19 days are missing from the record, across 2 sources with a hole; the worst is Yango, with 17. In the window, 1 day is missing (Yango). The window holds 36,174 rows over 24 days, today unfinished.
 
 The Uber check covers 34 windows at 100% agreement (246,337 on Uber's side, 247,074 on ours) with 0 never stored. The scatter sits on the line.
+
+### #providers — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p75/`), and one field's page. No page error, no sideways scroll, and the fils scan is clean.
+
+The verdict: 8 surfaces would not answer, of 28 probed across 6 providers. 20 answer. 192 fields are not kept (Bolt 71, Hotel 68, Uber 27, CABMAN 14, FMS 12). The refusals are Bolt 404 ×2, FMS 400 ×2, Uber 404 and Yango 403 ×3.
+
+The pass found "Bolt · ecosine:getDrivers" counted as answering on an error-only 200 body (FIX-STATUS P75, not fixed).

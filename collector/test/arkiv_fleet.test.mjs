@@ -1218,4 +1218,61 @@ if (want('coverage')) {
   }
 }
 
+/* ══ #providers and one field's page ══════════════════════════════════════ */
+if (want('providers')) {
+  console.log('\n#providers');
+  const look = (page) => page.evaluate(() => ({
+    kept: [...document.querySelectorAll('[data-surface] tbody .pill')].map((p) => p.className),
+    fills: document.querySelectorAll('[data-surface] .pv-fill > i').length,
+    sw: [...document.querySelectorAll('[data-surface] h3')].filter((h) => h.querySelector('.sw')).length,
+    heads: document.querySelectorAll('[data-surface] h3').length,
+    warnChips: document.querySelectorAll('[data-surface] .chip.warn').length,
+    jump: document.querySelectorAll('#view .chips a.chip[href^="#prov-"]').length,
+    toggle: !!document.querySelector('#pvUnkept'),
+  }));
+  {
+    const { ctx, page } = await open('classic', 'providers');
+    const r = await look(page);
+    const band = await page.evaluate(() => !!document.querySelector('#view .cband'));
+    check('old skin: no band, KEPT/NO as toned pills, no swatch in a heading, no fill bars', !band && r.kept.some((c) => /\b(ok|warn)\b/.test(c)) && r.sw === 0 && r.fills === 0, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'providers');
+    const s = await shape(page);
+    const d = answer('/api/probe/results');
+    const probed = d.surfaces.filter((x) => x.surface !== '(not configured)');
+    const refusedN = probed.filter((x) => (x.http_status != null && !(x.http_status >= 200 && x.http_status < 300)) || x.ok === false).length;
+    const f = await vfig(page);
+    check('00: the verdict is the statement; its figure folded out of the tiles by name (ruling 7)', s.vdctIn00
+      && (refusedN ? !('Refused or missing' in s.values) : !('Fields we are not keeping' in s.values)) && !('Providers not configured' in s.values), JSON.stringify([f, Object.keys(s.values)]));
+    check('the unconfigured providers in the band\'s note', /not configured|every provider configured/.test(await txtOf(page, '#view .cband .sechd')), await txtOf(page, '#view .cband .sechd'));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const un = await bars(page, 'prov-unkept');
+    check('fields not kept, by provider: ranked, in each provider\'s colour', un.length > 0 && un.every((b, i) => !i || +un[i - 1].v.replace(/,/g, '') >= +b.v.replace(/,/g, '')) && un.every((b) => /--c-|--mk-fill/.test(b.fill)), JSON.stringify(un));
+    const r = await look(page);
+    check('every surface panel kept, a provider swatch in each heading', r.heads === probed.length && r.sw === r.heads, JSON.stringify(r));
+    check('KEPT and NO as outline chips, the filled share a small bar, no amber chip', r.kept.length > 0 && r.kept.every((c) => c === 'pill') && r.fills > 0 && r.warnChips === 0, JSON.stringify(r));
+    check('the jump list and the unkept-only toggle kept', r.jump > 0 && r.toggle, JSON.stringify(r));
+    await page.click('#pvUnkept');
+    await page.waitForTimeout(400);
+    const r2 = await look(page);
+    const abs = await page.evaluate(() => document.querySelectorAll('#view .absband').length);
+    check('the toggle redraws the panels, and the † band once, after them', r2.heads === probed.length && abs === 1, JSON.stringify([r2.heads, abs]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'providers/uber/drivers/firstName');
+    const r = await page.evaluate(() => ({ h: document.querySelector('#view .panel h3')?.textContent, rows: document.querySelectorAll('#view tbody tr').length,
+      crumb: !!document.querySelector('#view p.cap a.lnk[href="#providers"]') }));
+    check('one field\'s page: restyle only — the crumb, the value table', r.crumb && r.h === 'firstName', JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'providers', { width: 390 });
+    check('#providers at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

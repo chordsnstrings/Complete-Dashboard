@@ -10,9 +10,10 @@
    The last column is the useful one. It is the list that answers "what else
    could this dashboard be showing", from evidence rather than from memory. */
 
-import { empty, fmt } from './charts.js';
+import { empty, fmt, hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, dtStr, dateStr, pct,
-  sourceLabel, countOf, plural, foldRows, verdict } from './ui.js';
+  sourceLabel, countOf, plural, foldRows, verdict, contract, glance, glanceBand, bandTiles,
+  absenceBand, pageFoot, swatch, sourceToken } from './ui.js';
 import { api, href, state, store } from './data.js';
 import { dubaiDay } from './tz.js';
 
@@ -111,6 +112,19 @@ export async function renderProviderField(root, provider, surface, key) {
     + 'dimension worth a column; a field with as many values as records is an identifier or free text.'));
 }
 
+/* The fields each provider sends that we keep nowhere, ranked, in the
+   provider's own colour. */
+function providersUnkept(root, live) {
+  const by = new Map();
+  live.forEach((x) => by.set(x.provider, (by.get(x.provider) || 0) + (x.unmapped_n || 0)));
+  const rows = [...by.entries()].filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+  const p = panel('Fields not kept, by provider', 'Sent by the provider, with no column on our side, over every surface that answered', 'prov-unkept');
+  root.append(p.panel);
+  if (!rows.length) { p.body.append(note('Every field every answering surface sends is kept as a column.')); return; }
+  const b = el('div'); p.body.append(b);
+  hbars(b, rows.map(([prov, n]) => ({ label: sourceLabel(prov), n, prov })), { signed: false, colorFor: (x) => sourceToken(x.prov) || '--mk-fill',
+    onClick: (x) => { document.getElementById(`prov-${x.prov}`)?.scrollIntoView({ block: 'start' }); } });
+}
 export async function renderProviders(root) {
   root.innerHTML = '';
   loading(root);
@@ -129,13 +143,24 @@ export async function renderProviders(root) {
   const live = probed.filter(answered);
   const refused = probed.filter((s) => !answered(s));
   const unmapped = live.reduce((a, s) => a + (s.unmapped_n || 0), 0);
+  /* Under the page contract (plan §4 #providers): the verdict as the 00
+     statement — its figure (the refused surfaces, or the fields dropped when
+     nothing refused) folded out of the tiles by name (ruling 7); the
+     unconfigured providers in the band's note; the rest untoned and a probe
+     that never ran ABSENT; the fields not kept ranked by provider in channel
+     colour; every surface panel, the jump list, the toggle and the refusal
+     table kept, a provider's swatch in each heading, KEPT and NO as outline
+     chips and the filled share as a small bar beside its figure; a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, unconfigured.length
+    ? `${unconfigured.map((x) => sourceLabel(x.provider)).join(', ')} not configured` : 'every provider configured') : null;
 
   /* Six tiles above 29 panels, and the question the page is open for is which
      provider is telling us something we are throwing away — or refusing to
      talk to us at all. */
   {
     const worst = [...live].sort((a, b) => (b.unmapped_n || 0) - (a.unmapped_n || 0))[0];
-    verdict(root, {
+    verdict(ak ? AKB.vHost : root, {
       claim: refused.length
         ? `${countOf(refused.length, 'surface')} would not answer`
         : unmapped
@@ -164,7 +189,7 @@ export async function renderProviders(root) {
     });
   }
 
-  root.append(kpiRow([
+  const PROV_TILES = [
     { label: 'Surfaces probed', value: fmt(probed.length),
       sub: `across ${countOf(new Set(probed.map((s) => s.provider)).size, 'provider')}` },
     { label: 'Answering', value: `${fmt(live.length)} of ${fmt(probed.length)}`,
@@ -183,7 +208,14 @@ export async function renderProviders(root) {
       tone: unconfigured.length ? 'warn' : 'good' },
     { label: 'Last probe', value: d.last_probe ? dtStr(d.last_probe) : '—',
       sub: d.last_probe ? 'the probe runs from the collector, not from this page' : 'never run' },
-  ]));
+  ];
+  if (ak) {
+    const figLabel = refused.length ? 'Refused or missing' : 'Fields we are not keeping';
+    const t = PROV_TILES.filter((x) => x.label !== figLabel && x.label !== 'Providers not configured')
+      .map((x) => (x.label === (refused.length ? 'Fields we are not keeping' : 'Answering') ? { ...x, hero: true } : x));
+    glance(AKB.tilesHost, bandTiles(t, { reasons: { 'Last probe': 'the probe has never run — it runs from the collector, never from a page load' } }).tiles);
+    providersUnkept(root, live);
+  } else root.append(kpiRow(PROV_TILES));
 
   /* A jump list. This page is 11,897 pixels tall with zero links and zero
      controls on it, so finding one provider's surface meant scrolling past
@@ -213,9 +245,10 @@ export async function renderProviders(root) {
       { label: 'Provider', key: 'provider', render: (s) => esc(sourceLabel(s.provider)) },
       { label: 'Surface', key: 'surface' },
       { label: 'Status', key: 'http_status',
-        render: (s) => (s.http_status != null
-          ? `<span class="tag ${s.http_status >= 500 ? 'err' : 'bad'}">HTTP ${esc(String(s.http_status))}</span>`
-          : '<span class="tag warn">answered 200 with an error body</span>') },
+        render: (s) => (ak ? pill(s.http_status != null ? `HTTP ${s.http_status}` : 'answered 200 with an error body')
+          : s.http_status != null
+            ? `<span class="tag ${s.http_status >= 500 ? 'err' : 'bad'}">HTTP ${esc(String(s.http_status))}</span>`
+            : '<span class="tag warn">answered 200 with an error body</span>') },
       { label: 'What came back', key: 'error', render: (s) => `<span class="wrap">${esc(refusal(s))}</span>` },
       { label: 'Probed', key: 'probed_at', render: (s) => (s.probed_at ? dtStr(s.probed_at) : '—') },
     ], { sortable: true, sortId: 'refused' }));
@@ -247,6 +280,7 @@ export async function renderProviders(root) {
               : 'did not answer',
             s.probed_at ? dtStr(s.probed_at) : null].filter(Boolean).join(' · '));
         p.setAttribute('data-surface', '');
+        if (ak) p.querySelector('h3')?.insertAdjacentHTML('afterbegin', swatch(provider));
         if (first) { p.id = `prov-${provider}`; first = false; }
         /* The provider's own collector status, as the first line. A surface
            that refused and a provider whose credential expired are the same
@@ -254,7 +288,7 @@ export async function renderProviders(root) {
         const st = (d.status || []).find((x) => x.source === provider);
         if (st) {
           const line = el('p', 'cap');
-          line.innerHTML = `Collector: <span class="tag ${st.status === 'ok' ? 'ok' : 'bad'}">${esc(st.status)}</span> `
+          line.innerHTML = `Collector: ${ak ? (st.status === 'error' ? pill('error', 'bad') : pill(st.status)) : `<span class="tag ${st.status === 'ok' ? 'ok' : 'bad'}">${esc(st.status)}</span>`} `
             + `${st.error ? `<span class="dim">${esc(String(st.error).slice(0, 120))}</span> · ` : ''}`
             + `<a class="lnk" href="${href('sources')}">what this source has actually delivered</a>`;
           body.append(line);
@@ -272,7 +306,7 @@ export async function renderProviders(root) {
         if (s.unmapped_n) {
           const strip = el('div', 'chips');
           strip.innerHTML = `<b class="chips-l">not kept:</b>${s.unmapped.map((u) =>
-            `<a class="chip warn" href="${href('providers', provider, s.surface)}/${encodeURIComponent(u)}">${esc(u)}</a>`).join('')}`;
+            `<a class="chip${ak ? '' : ' warn'}" href="${href('providers', provider, s.surface)}/${encodeURIComponent(u)}">${esc(u)}</a>`).join('')}`;
           body.append(strip);
         }
         if (!fields.length) {
@@ -285,7 +319,9 @@ export async function renderProviders(root) {
           { label: 'Field', key: 'key',
             render: (f) => `<a class="ent" href="${href('providers', provider, s.surface)}/${encodeURIComponent(f.key)}"><code>${esc(f.key)}</code></a>` },
           { label: 'Type', key: 'type' },
-          { label: 'Filled', key: 'fill_pct', num: true, render: (f) => pct(f.fill_pct, 0) },
+          { label: 'Filled', key: 'fill_pct', num: true, render: (f) => (ak
+            ? `<span class="pv-fill" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, +f.fill_pct || 0))}%"></i></span>${pct(f.fill_pct, 0)}`
+            : pct(f.fill_pct, 0)) },
           /* The cap, stated. `distinct_seen` saturates at the probe's own
              sample ceiling, so every wide field in the corpus reported the
              same number — which reads as a coincidence rather than as a cap. */
@@ -312,7 +348,7 @@ export async function renderProviders(root) {
               : `<span class="chip">${esc(v)}</span>`)).join(' ')
             : '<span class="dim">wide — an identifier or free text, contents not recorded</span>') },
           { label: 'Kept', key: 'k', render: (f) => (s.unmapped?.includes(f.key)
-            ? pill('no', 'warn') : pill('yes', 'ok')) },
+            ? pill('no', ak ? null : 'warn') : pill('yes', ak ? null : 'ok')) },
         ], { compact: true, sortable: true, sortId: `pf-${provider}-${s.surface}` });
         foldRows(body, fieldTable,
           { shown: 8, total: fields.length, noun: 'field', key: `pf-${provider}-${s.surface}` });
@@ -321,6 +357,19 @@ export async function renderProviders(root) {
     }
     root.append(note(d.note));
     root.lastChild.setAttribute('data-surface', '');
+    /* The † band and the foot are redrawn with the panels, after them. */
+    if (ak) {
+      const absHost = el('div'); absHost.setAttribute('data-surface', ''); root.append(absHost);
+      absenceBand(absHost, [
+        { label: 'What a refused surface would send', hl: refused.length > 0, fig: refused.length ? countOf(refused.length, 'surface') : null, none: 'None refused',
+          why: refused.length ? 'The fields a surface that refused would have sent are unknown — which is not the same as none.' : 'Every probed surface answered.' },
+        { label: 'Fields past the sample', fig: null, none: 'Not seen',
+          why: 'The probe describes the first few hundred records of each surface; a field that appears only in later records is not on this page.' },
+        { label: 'Providers we did not ask', fig: unconfigured.length ? countOf(unconfigured.length, 'provider') : null, none: 'None',
+          why: unconfigured.length ? 'No credential is configured for them, so nothing was asked and nothing here says what they offer.' : 'Every provider has a credential and was asked.' },
+      ]);
+      pageFoot({ colophon: ['the provider probe', d.last_probe ? dtStr(d.last_probe) : 'never run'] }, root);
+    }
   };
   drawPanels(onlyUnkept);
   bar.querySelector('#pvUnkept').onchange = (e) => {
