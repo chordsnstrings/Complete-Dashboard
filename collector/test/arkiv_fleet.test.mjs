@@ -389,4 +389,61 @@ if (want('vehicle-earnings')) {
   }
 }
 
+/* ══ #vehicle/safety ══════════════════════════════════════════════════════ */
+if (want('vehicle-safety')) {
+  console.log('\n#vehicle/safety');
+  const H = 'vehicle/L45235/safety';
+  const panelFills = (page, h) => page.evaluate((hh) => {
+    const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === hh);
+    return p ? { bars: [...p.querySelectorAll('.hb')].map((b) => ({ k: b.querySelector('.k')?.textContent.trim(), fill: b.querySelector('.fill')?.getAttribute('style') || '' })),
+      svg: p.querySelector('svg')?.outerHTML.match(/var\(--[a-z0-9-]+\)/g) || [] } : null;
+  }, h);
+  {
+    const { ctx, page } = await open('classic', H);
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), tiles: document.querySelectorAll('#view .kpis > .kpi').length }));
+    const kinds = await panelFills(page, 'Event types');
+    check('old skin: no band, its tile row, the event bars on the sequential ramp', !r.band && r.tiles >= 3 && kinds && kinds.bars.every((b) => !/--c-fms|--mk-fill/.test(b.fill)), JSON.stringify([r, kinds?.bars.slice(0, 2)]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', H);
+    const s = await shape(page);
+    const k = answer('/api/vehicle/kpis');
+    const F = answer('/api/kpis');
+    const sf = answer('/api/vehicle/safety');
+    check('00: the tiles as the band, the per-100-km rate the hero', s.hero === 'Per 100 km' && Math.abs(parseFloat(s.values['Per 100 km']) - Number(k.alerts_per_100km)) < 0.05,
+      JSON.stringify([s.values, k.alerts_per_100km]));
+    const d = await txtOf(page, '#view .cband .kpi.is-hero .t-d');
+    const gap = Number(k.alerts_per_100km) - Number(F.alerts_per_100km);
+    const worse = await page.evaluate(() => { const x = document.querySelector('#view .cband .kpi.is-hero .dlt'); return x ? x.className : ''; });
+    /* fmt() drops a trailing ".0" (52.0 prints "52"), so the figure is read
+       back as a number — the arkiv_people month check's lesson (P38b). */
+    const fx = (d.match(/against the fleet's ([\d,]+(?:\.\d+)?)/) || [])[1];
+    check('set against the fleet\'s rate, up is worse', fx != null && Math.abs(Number(fx.replace(/,/g, '')) - Number(F.alerts_per_100km)) < 0.05
+      && (gap > 0 ? /neg|bad|worse/.test(worse + d) : /pos|good|better/.test(worse + d)), JSON.stringify([d, worse, gap]));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const kinds = await panelFills(page, 'Event types');
+    check('event bars: driving kinds in the FMS/InfoTrack identity, the tracker\'s own faults in ink', kinds.bars.length === sf.by_type.length
+      && kinds.bars.every((b) => (/tracker fault/.test(b.k) ? /--ink/.test(b.fill) : /--c-fms/.test(b.fill))), JSON.stringify(kinds.bars));
+    const days = await panelFills(page, 'Events by day');
+    check('events by day in the same identity', days && days.svg.includes('var(--c-fms)'), JSON.stringify(days?.svg.slice(0, 4)));
+    check('both tables kept, and the colophon counts the alerts', s.heads.includes('Which driver was holding it') && s.heads.includes('Recent events') && /alerts/.test(s.colophon), JSON.stringify([s.heads, s.colophon]));
+    await ctx.close();
+  }
+  {
+    /* No distance for the feed's days (synthetic): the rate absent with the
+       endpoint's own reason, never "—". */
+    const blind = (q, real) => ({ ...real, alerts_per_100km: null, alerts_per_100km_absent: 'no booked distance on the days the alert feed covered' });
+    const { ctx, page } = await open('arkiv', H, { fixtures: { '/api/vehicle/kpis': blind } });
+    const s = await shape(page);
+    check('the rate absent with the endpoint\'s reason', s.na['Per 100 km'] === 'no booked distance on the days the alert feed covered', JSON.stringify(s.na));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', H, { width: 390 });
+    check('#vehicle/safety at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

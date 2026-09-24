@@ -1016,8 +1016,15 @@ async function tabEarnings(root, plate) {
   if (ak) pageFoot({ colophon: [windowLabel(), countOf(e.by_platform.length, 'channel')] }, root);
 }
 
+/* Under the page contract (plan §4 #vehicle/safety): the tiles as the 00
+   band, the per-100-km rate set against the fleet's (a worded delta, up is
+   worse); the event bars in the FMS/InfoTrack identity — every event comes
+   from that alert feed — with the tracker's own faults in ink, kept apart;
+   the per-driver and recent-event tables unchanged. */
 async function tabSafety(root, plate) {
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
   const types = panel('Event types', 'What the tracker flagged'); g.append(types.panel);
   const drv = panel('Which driver was holding it', 'The person who held the car on the day of the event'); g.append(drv.panel);
@@ -1025,13 +1032,14 @@ async function tabSafety(root, plate) {
   const recent = panel('Recent events', 'Newest first, with location where the device reported one'); root.append(recent.panel);
   [types.body, drv.body, line.body, recent.body].forEach(loading);
 
-  const [sf, k] = await Promise.all([qAll('/api/vehicle/safety', { plate }), qAll('/api/vehicle/kpis', { plate })]);
+  const [sf, k, fleetK] = await Promise.all([qAll('/api/vehicle/safety', { plate }), qAll('/api/vehicle/kpis', { plate }),
+    ak ? qAll('/api/kpis').catch(() => null) : null]);
   /* Split, not summed. See ui.js:splitAlerts — the server marks which types are
      the tracker's own fault and this page must not count them as driving. */
   const ev = splitAlerts(sf.by_type || []);
   const total = ev.total;
 
-  kpiHost.replaceWith(kpiRow([
+  const SAFE_TILES = [
     /* alert_km, not km. The events counted here happened on the days the alert
        feed was up; the vehicle's km runs to the edge of the window whether the
        feed was up or not, and "1,436 events over 12,400 km" put those two
@@ -1069,7 +1077,17 @@ async function tabSafety(root, plate) {
           : (ev.deviceN ? 'nobody — every event here is the tracker, not a driver'
             : 'no harsh-driving event to attribute') };
     })(),
-  ]));
+  ];
+  if (ak) {
+    kpiHost.remove();
+    const a = alertRateFigure(k);
+    const fr = fleetK?.alerts_per_100km != null ? Number(fleetK.alerts_per_100km) : null;
+    glance(AKB.tilesHost, bandTiles(SAFE_TILES.map((x) => {
+      if (x.label !== 'Per 100 km') return x;
+      if (!a.measured) return { label: x.label, na: a.title || 'not measured in this window' };
+      return { ...x, hero: true, ...(fr != null ? { delta: { value: a.value - fr, kind: 'gap', invert: true, d: 1, of: `against the fleet's ${fmt(fr, 1)}` } } : {}) };
+    })).tiles);
+  } else kpiHost.replaceWith(kpiRow(SAFE_TILES));
 
   types.body.innerHTML = '';
   if (!sf.by_type.length) types.body.append(note('No harsh-driving events for this vehicle in this window.'));
@@ -1078,8 +1096,9 @@ async function tabSafety(root, plate) {
        drew Main Power Lost as its longest bar on a car whose tracker was
        dying — the biggest thing on the page being the one thing nobody did. */
     hbars(types.body, sf.by_type.map((r) => ({
-      label: r.device === true ? `${r.alert_type} (tracker fault)` : r.alert_type, n: r.n,
-    })), { label: 'label', value: 'n', seq: true });
+      label: r.device === true ? `${r.alert_type} (tracker fault)` : r.alert_type, n: r.n, device: r.device === true,
+    })), ak ? { label: 'label', value: 'n', signed: false, colorFor: (x) => (x.device ? '--ink' : (sourceToken('fms') || '--mk-fill')) }
+      : { label: 'label', value: 'n', seq: true });
     if (ev.deviceN) {
       types.body.append(el('p', 'cap',
         `${fmt(ev.deviceN)} of these ${fmt(ev.total)} events are the tracker reporting its own `
@@ -1162,7 +1181,7 @@ async function tabSafety(root, plate) {
 
   line.body.innerHTML = '';
   if (!sf.daily.length) empty(line.body, 'No events in this range');
-  else barChart(line.body, sf.daily.map((d) => ({ label: dayStr(d.day), alerts: d.alerts })), { x: 'label', y: 'alerts', color: '--s2' });
+  else barChart(line.body, sf.daily.map((d) => ({ label: dayStr(d.day), alerts: d.alerts })), { x: 'label', y: 'alerts', color: ak ? (sourceToken('fms') || '--mk-fill') : '--s2' });
 
   recent.body.innerHTML = '';
   /* Columns that can never have a value are dropped rather than drawn as sixty
@@ -1192,6 +1211,7 @@ async function tabSafety(root, plate) {
       + (sf.recent.length >= 100 ? ', which is itself the newest 100' : ''));
   }
   if (caps.length) recent.body.append(el('p', 'cap', `${caps.join(' — ')}.`));
+  if (ak) pageFoot({ colophon: [windowLabel(), `${fmt(ev.total)} alerts`] }, root);
 }
 
 /* ── tab: compliance ─────────────────────────────────────────────────────── */
