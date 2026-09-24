@@ -1627,3 +1627,16 @@ against the week before — closed statement days only — while Platform
 payouts' and Trip value's run to 16 Sept, each saying which week it
 compared. The sixth tile (The open week) wraps to a second row at 1440; left
 as it is, not reflowed.
+
+### #receipts — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/receipts/`): no error, no sideways scroll. 230
+filings from 9 source-and-channel combinations, 207 of them one day, 23 a
+week; every row carries ONE stamp (24 Sept 08:45, the register's last
+rebuild), so the arrival tile is absent and the First seen column is dropped
+with its reason. 40 filings are superseded (AED 488,609.03 set aside, all
+payout). The open Uber week (25 to 27 Sept) is claimed ahead of today and
+drawn hatched in 01. Found by looking and fixed before commit: 03 drew a
+zero axis in the middle of four positive sums (signed bars now only when a
+kind nets negative).

@@ -181,4 +181,98 @@ if (want('finance')) {
   }
 }
 
+/* ══ #receipts ════════════════════════════════════════════════════════════ */
+if (want('receipts')) {
+  console.log('\n#receipts');
+  const HEADS = ['At a glance', 'How many documents claim each day', 'How many of each day’s claims a later filing displaces',
+    'What each kind is worth', 'What a later filing displaced, by kind', 'The grain each was filed at', 'Which surface filed them',
+    'By month, as the providers booked it', 'Every filing, newest first', '† What this page does not know'];
+  let classic = {};
+  let classicCols = [];
+  {
+    const { ctx, page } = await open('classic', 'receipts');
+    classic = await rowTiles(page, '#view .kpis .kpi');
+    classicCols = await page.evaluate(() => [...document.querySelectorAll('#view table')].pop()
+      ?.querySelectorAll('thead th').length || 0);
+    const band = await page.$('#view .cband');
+    check('old skin: the old page — no 00 band, its four tiles, the nine-column register',
+      !band && Object.keys(classic).length === 4 && classicCols === 9, JSON.stringify({ tiles: Object.keys(classic), classicCols }));
+    await ctx.close();
+  }
+  const dayList = (a, b) => { const o = []; for (let t = Date.parse(`${a}T12:00:00Z`), e = Date.parse(`${b}T12:00:00Z`); t <= e; t += 864e5) o.push(new Date(t).toISOString().slice(0, 10)); return o; };
+  {
+    const { ctx, page, answer } = await open('arkiv', 'receipts');
+    const s = await shape(page);
+    const R = answer('/api/finance/receipts');
+    const rows = R.rows, live = rows.filter((r) => !r.superseded), sup = rows.filter((r) => r.superseded);
+    const sum = (rs, k = 'amount') => rs.reduce((a, r) => a + (+r[k] || 0), 0);
+    check('the section order is the plan\'s: 00, per day, displaced, by kind, grain | surface, by month, the register, †',
+      JSON.stringify(s.heads) === JSON.stringify(HEADS), JSON.stringify(s.heads));
+    check('Filings on record is the hero and counts every row the register answered',
+      s.hero === 'Filings on record' && s.values['Filings on record'] === String(rows.length), JSON.stringify(s.values));
+    check('Credited, net of re-filings is KEPT with the old figure, and says it is not a total across kinds (review correction)',
+      s.values['Credited, net of re-filings'] === classic['Credited, net of re-filings']
+      && /not a total across kinds/.test(s.subs['Credited, net of re-filings']), JSON.stringify([s.values, classic]));
+    check('Set aside as re-filed is the superseded rows plus the overlapped parts of the rest',
+      s.values['Set aside as re-filed'] === aed(sum(sup) + sum(live, 'superseded_amount')), s.values['Set aside as re-filed']);
+    check('Provider rows inside is the sum of rows_seen', s.values['Provider rows inside'] === sum(rows, 'rows_seen').toLocaleString('en-US'), s.values['Provider rows inside']);
+    const days = new Set(rows.filter((r) => r.period_start && r.period_end)
+      .flatMap((r) => dayList(String(r.period_start).slice(0, 10), String(r.period_end).slice(0, 10))));
+    check('Days claimed is the union of every filing\'s days', s.values['Days claimed'] === days.size.toLocaleString('en-US'), `${s.values['Days claimed']} vs ${days.size}`);
+    check('Filed for a single date carries the old figure', s.values['Filed for a single date'] === classic['Filed for a single date'], '');
+    check('no tile wears a tone', (await toned(page)).length === 0, JSON.stringify(await toned(page)));
+    check('no tile prints a bare dash', s.bare.length === 0, JSON.stringify(s.bare));
+    const tags = await page.evaluate(() => [...document.querySelectorAll('[data-panel="rcpt-register"] .tag')].map((t) => t.className));
+    check('the register\'s tags are neutral (Superseded a grey outline, never amber; Counted never green)',
+      tags.length && tags.every((c) => /^tag( dim)?$/.test(c)), JSON.stringify([...new Set(tags)]));
+    const fees = await page.evaluate(() => [...document.querySelectorAll('[data-panel="rcpt-register"] td')]
+      .filter((td) => /^−AED/.test(td.textContent.trim())).map((td) => td.innerHTML));
+    check('fees are ink with a minus, not red', fees.length > 0 && fees.every((h) => !/critical/.test(h)), JSON.stringify(fees));
+    const hasFirst = await page.evaluate(() => [...document.querySelectorAll('[data-panel="rcpt-register"] th')].some((th) => /First seen/.test(th.textContent)));
+    const stamps = new Set(rows.map((r) => r.first_seen).filter(Boolean));
+    check('with more than one arrival stamp, the First seen column stays', stamps.size > 1 ? hasFirst : !hasFirst, String(stamps.size));
+    const kinds = await page.evaluate(() => [...document.querySelectorAll('[data-panel="rcpt-kinds"] .hb')].map((h) => [h.querySelector('.k')?.textContent.trim(), h.querySelector('.v')?.textContent.trim()]));
+    const want3 = [...new Set(rows.map((r) => r.kind))].map((k) => [k.replace(/_/g, ' '), aed(sum(live.filter((r) => r.kind === k)))]);
+    check('03: one bar per kind, each its own sum after the overlap rule — never one total',
+      JSON.stringify(kinds) === JSON.stringify(want3), JSON.stringify([kinds, want3]));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('† a total across kinds is absent, and says why', ab['A total across kinds']?.none && /counts money more than once/.test(ab['A total across kinds'].why), JSON.stringify(ab['A total across kinds']));
+    await ctx.close();
+  }
+  {
+    /* Every row one stamp — the register's last rebuild (production's case). */
+    const oneStamp = (_q, real) => ({ ...real, rows: real.rows.map((r) => ({ ...r, first_seen: '2026-09-23T06:07:00Z', last_seen: '2026-09-23T06:07:00Z' })) });
+    const { ctx, page } = await open('arkiv', 'receipts', { fixtures: { '/api/finance/receipts': oneStamp } });
+    const s = await shape(page);
+    const r = await page.evaluate(() => ({
+      th: [...document.querySelectorAll('[data-panel="rcpt-register"] th')].map((t) => t.textContent.trim()),
+      cap: [...document.querySelectorAll('[data-panel="rcpt-register"] .cap')].map((c) => c.textContent).join(' ') }));
+    check('one stamp on every row: "When each one arrived" is ABSENT with that reason, not the rebuild\'s time',
+      /one stamp on all \d+ — it is the last rebuild of the register, not when each document reached us/.test(s.na['When each one arrived'] || ''), JSON.stringify(s.na));
+    check('…the First seen column is dropped and the reason printed under the register',
+      !r.th.some((t) => /First seen/.test(t)) && /No "first seen" column: all \d+ rows carry one stamp/.test(r.cap), JSON.stringify(r));
+    const ab = s.abs.find((a) => a.label === 'When each document arrived');
+    check('…and † says the arrival of each document is not held, and is highlighted', ab?.none && s.hl >= 1 && /last rebuild/.test(ab.why), JSON.stringify(ab));
+    await ctx.close();
+  }
+  {
+    /* A filing whose period runs past today: its days to come are hatched. */
+    const ahead = (_q, real) => {
+      const t = new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10);
+      return { ...real, rows: real.rows.map((r, i) => (i === 0 ? { ...r, period_end: t, is_daily: false } : r)) };
+    };
+    const { ctx, page } = await open('arkiv', 'receipts', { fixtures: { '/api/finance/receipts': ahead } });
+    const fills = await page.evaluate(() => [...document.querySelectorAll('[data-panel="rcpt-claims"] svg [data-rise]')].map((m) => m.getAttribute('fill') || ''));
+    const hatched = fills.filter((f) => /^url\(/.test(f)).length;
+    check('01: the days after today that a filing already claims are hatched, and only those',
+      hatched >= 3 && hatched <= 4 && /^url\(/.test(fills[fills.length - 1]) && !/^url\(/.test(fills[0]), JSON.stringify({ n: fills.length, hatched }));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'receipts', { width: 390 });
+    check('at 390 nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

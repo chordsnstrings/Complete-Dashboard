@@ -6603,3 +6603,10 @@ number (5 and 5), and never a passport or RTA number.
 * **`test/type_scale.test.mjs` admits a token, a `clamp()` or an em as a
   font size — `min()` is a literal by its rule.** Prove a CSS change
   against the full suite, not only the test written for it.
+
+* **`/api/finance/receipts` `first_seen` is the money register's last
+  rebuild, not a document's arrival.** Measured on production 2026-09-24:
+  230 of 230 rows this month share one stamp (08:45). Any page that prints
+  "when it reached us" off this field prints the rebuild time. Test for one
+  stamp across the rows before using it; keeping the true ingest time across
+  rebuilds is a collector change.
