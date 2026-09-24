@@ -6759,3 +6759,7 @@ number (5 and 5), and never a passport or RTA number.
 * **FMS files its refused windows as "refused: <endpoint> failed"**, which carries no reason (81 of 236 refusals on production, 2026-09-24). A reason class read from provider wording must say "refused, with no reason given" for it, never file it under a guessed cause. Uber's rate limit reads "rate-limited, will retry next run", and Bolt's short read reads "collected N of M declared".
 
 * **Bolt refuses with a 200 whose body is `{code, error_hint, message}`** (ecosine:getDrivers on production, 2026-09-24, 0 records). providers.js `answered()` recognises error-only bodies by the key list `error|message|fault|status|code`, which misses `error_hint`, so the surface is counted as answering. A probe count of "answering" that trusts the status code alone reads a Bolt refusal as a success.
+
+### Trap: `hbars` prints a zero as a literal "0", whatever `valueFmt` says (2026-09-24)
+
+`charts.js` hbars renders the value slot as `${v === 0 ? '0' : valueFmt(...)}`, so a `valueFmt` that returns `''` for zero does nothing. A row whose zero means "not applicable" still prints "0" beside its words. On #settings, an expired key read "0 expired 28 d ago". The page rewrites that row's `.v` after drawing, row for row against the data it passed. The shared chart was not taught a special case, because a true zero printing "0" is right everywhere else.

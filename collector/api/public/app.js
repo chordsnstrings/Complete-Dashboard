@@ -8283,6 +8283,47 @@ function sourcesAbsence(root, status, coverage) {
   pageFoot({ colophon: ['collector runs and the whole record', `${countOf((Array.isArray(status) ? status : []).length, 'run')}`] }, root);
 }
 
+/* ── #settings under the page contract ───────────────────────────────────── */
+function settingsBand(AKB, leftHost, defs, unset) {
+  AKB.tilesHost.innerHTML = '';
+  const expired = defs.filter((d) => d.expiry?.expired);
+  const live = defs.filter((d) => d.expiry && !d.expiry.expired && d.expiry.days_left != null)
+    .sort((a, b) => a.expiry.days_left - b.expiry.days_left);
+  const held = defs.filter((d) => d.configured || (d.seen_by || []).length).length;
+  const env = defs.filter((d) => d.source === 'environment' || d.source === 'elsewhere');
+  const left = (x) => (x < 1 ? `${Math.max(0, Math.round(x * 24))} h` : `${fmt(x, 1)} d`);
+  glance(AKB.tilesHost, bandTiles([
+    { label: 'Credentials expired', value: fmt(expired.length), hero: true,
+      sub: expired.length ? `${expired.map((d) => d.label).slice(0, 3).join(', ')}${expired.length > 3 ? ` and ${fmt(expired.length - 3)} more` : ''} — the collector is being refused`
+        : 'none has passed its expiry' },
+    { label: 'Keys configured', value: `${fmt(held)} of ${fmt(defs.length)}`, sub: 'held here or by the collector that uses them' },
+    live.length
+      ? { label: 'Next to expire', value: left(live[0].expiry.days_left), sub: `${live[0].label} · ${live[0].key}` }
+      : { label: 'Next to expire', na: 'no credential still in force carries an expiry this page can read' },
+    { label: 'Keys not set', value: fmt(unset), sub: 'neither here nor on the collector' },
+    { label: 'Held in the environment', value: fmt(env.length), sub: 'changing one needs a redeploy, not this form' },
+  ]).tiles);
+  leftHost.innerHTML = '';
+  const withExp = defs.filter((d) => d.expiry);
+  if (!withExp.length) { leftHost.append(note('No credential here carries an expiry this page can read.')); return; }
+  const ago = (d) => (d.expiry.expires_at ? (Date.now() - Date.parse(d.expiry.expires_at)) / 864e5 : null);
+  const b = el('div'); leftHost.append(b);
+  const rows = withExp.sort((x, y) => (x.expiry.expired ? -1e9 : x.expiry.days_left) - (y.expiry.expired ? -1e9 : y.expiry.days_left))
+    .map((d) => ({ label: d.label, n: d.expiry.expired ? 0 : Math.max(0, +d.expiry.days_left || 0), expired: !!d.expiry.expired, ago: ago(d) }));
+  hbars(b, rows, { signed: false, color: '--mk-fill', valueFmt: (v) => `${fmt(v, 1)} d` });
+  /* An expired key has no days left: no bar, and in the value slot how long
+     ago it died (plan §4 #settings: "an expired key draws no bar and prints
+     '18.8 d ago'"). hbars prints a zero as a literal "0", which beside an
+     expired key reads as a count of something, so the slot is rewritten here,
+     row for row, rather than teaching the shared chart a special case. */
+  [...b.querySelectorAll('.hb')].forEach((row, i) => {
+    const r = rows[i];
+    const v = row.querySelector('.v');
+    if (r?.expired && v) v.textContent = r.ago != null ? `expired ${fmt(r.ago, 1)} d ago` : 'expired';
+  });
+  leftHost.append(el('p', 'cap', `${countOf(withExp.length, 'credential')} carry an expiry; the rest are keys with none, or none this page can read.`));
+}
+
 /* The per-file upload, and the browser's half of the bound the route enforces.
    ─────────────────────────────────────────────────────────────────────────
    These four numbers are src/credfiles.js's MAX_FILES, MAX_CHARS,
@@ -8647,6 +8688,17 @@ function pastePanel(root) {
 }
 
 V.settings = async (root) => {
+  /* Under the page contract (plan §4 #settings): the band and the days left
+     on each expiring credential sit ABOVE the paste box, one screen at most;
+     everything below keeps its order and its structure — the paste box, the
+     admin token, the credentials form, the four run buttons, the runs table
+     — restyled only: an expired credential in the negative colour with its
+     "!", days left in ink, every source and state an outline chip. The form's
+     own four-tile row is the band now, so it is not printed twice. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, 'credentials, from /api/settings') : null;
+  const leftP = ak ? panel('Days left on each credential that expires', 'The ones that carry an expiry; an expired one draws no bar and says how long ago', 'set-left') : null;
+  if (ak) { root.append(leftP.panel); loading(AKB.tilesHost); loading(leftP.body); }
   pastePanel(root);
   /* THE SUBTITLE WAS TELLING A TRUE-SOUNDING LIE. api/admin_gate.js:63 runs the
      write gate OPEN when ADMIN_TOKEN is unset — it warns once and calls next()
@@ -8700,14 +8752,15 @@ V.settings = async (root) => {
        through to the branch below that names it rather than rendering the word
        "elsewhere" in a dim tag, which says less than what was here before. */
     if (d.configured && d.source !== 'elsewhere') {
-      return `<span class="tag ${d.source === 'settings' ? 'ok' : 'dim'}">${esc(d.source)}</span>`;
+      return ak ? pill(d.source) : `<span class="tag ${d.source === 'settings' ? 'ok' : 'dim'}">${esc(d.source)}</span>`;
     }
     const others = d.seen_by || [];
     if (others.length) {
       const where = others.map((o) => o.component).join(', ');
-      return `<span class="tag ok" title="Not in this service's environment, but held by ${esc(where)} — `
+      return `<span class="${ak ? 'pill' : 'tag ok'}" title="Not in this service's environment, but held by ${esc(where)} — `
         + `which is the process that uses it.">on ${esc(where)}</span>`;
     }
+    if (ak) return pill('unset');
     return '<span class="tag warn">unset</span>';
   };
   /* Three tiers, not two.
@@ -8718,11 +8771,14 @@ V.settings = async (root) => {
   const expiryTag = (d) => {
     const e = d.expiry;
     if (!e) return '';
-    if (e.expired) return ` <span class="tag bad" title="${esc(e.expires_at)}">expired</span>`;
+    if (e.expired) return ak ? ` <span title="${esc(e.expires_at)}">${pill('expired', 'bad')}</span>`
+      : ` <span class="tag bad" title="${esc(e.expires_at)}">expired</span>`;
     const cls = e.days_left <= 2 ? 'bad' : e.days_left <= 7 ? 'warn' : 'dim';
     const left = e.days_left < 1
       ? `${Math.max(0, Math.round(e.days_left * 24))}h left`
       : `${Math.round(e.days_left)}d left`;
+    /* Days left are ink under the contract — weight for this week, grey after. */
+    if (ak) return ` <span title="expires ${esc(e.expires_at)}">${e.days_left <= 7 ? `<b>${left}</b>` : `<span class="dim">${left}</span>`}</span>`;
     return ` <span class="tag ${cls}" title="expires ${esc(e.expires_at)}">${left}</span>`;
   };
   const defs = await api('/api/settings');
@@ -8732,7 +8788,8 @@ V.settings = async (root) => {
   const expired = defs.filter((d) => d.expiry?.expired).length;
   const soon = defs.filter((d) => d.expiry && !d.expiry.expired && d.expiry.days_left <= 7).length;
   const unset = defs.filter((d) => !d.configured && !(d.seen_by || []).length).length;
-  credP.body.append(kpiRow([
+  if (ak) settingsBand(AKB, leftP.body, defs, unset);
+  else credP.body.append(kpiRow([
     { label: 'Credentials', value: fmt(defs.length), sub: 'across every provider' },
     { label: 'Expired', value: fmt(expired), sub: 'the collector is being refused',
       tone: expired ? 'critical' : 'good' },
@@ -8902,13 +8959,13 @@ V.settings = async (root) => {
         { label: 'What', key: 'mode',
           render: (r) => `<span class="rk" title="job ${esc(String(r.id))}">${esc(String(r.id))}</span>`
             + esc(r.mode ?? '—') },
-        { label: 'State', key: 'status', render: (r) => pill(r.status, TONE[r.status]) },
+        { label: 'State', key: 'status', render: (r) => pill(r.status, ak ? (r.status === 'failed' ? 'bad' : null) : TONE[r.status]) },
         /* Who asked. Every row on this fleet reads "unauthenticated", which is
            a finding about the admin gate rather than about the run — and it was
            returned and never shown, so nobody could see it. */
         { label: 'Asked by', key: 'requested_by',
           render: (r) => (r.requested_by
-            ? `<span class="tag ${r.requested_by === 'unauthenticated' ? 'warn' : 'dim'}" `
+            ? `<span class="${ak ? 'pill' : `tag ${r.requested_by === 'unauthenticated' ? 'warn' : 'dim'}`}" `
               + `title="${r.requested_by === 'unauthenticated'
                 ? 'this run was triggered without an admin token' : 'from the admin token used'}">`
               + `${esc(r.requested_by)}</span>`
@@ -8954,7 +9011,8 @@ V.settings = async (root) => {
           }
           const m = Math.round((Date.parse(r.started_at) - Date.parse(r.requested_at)) / 60000);
           return m >= 60
-            ? `<span class="pill warn">${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m</span>`
+            ? (ak ? `<b>${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m</b>`
+              : `<span class="pill warn">${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m</span>`)
             : `${fmt(m)} min`;
         } },
         { label: 'Took', key: 'seconds', num: true,
@@ -9026,6 +9084,16 @@ V.settings = async (root) => {
     }
   };
   jobs();
+  if (ak) {
+    const absHost = el('div'); root.append(absHost);
+    absenceBand(absHost, [
+      { label: 'Whether a set key is accepted', fig: null, none: 'Not known here',
+        why: 'A key being set is not a key being accepted: only the collector\u2019s next run with it proves that, and Data sources shows what it came back with.' },
+      { label: 'When a key with no token date expires', fig: null, none: 'Not readable',
+        why: 'An expiry is read only from a value that carries one (a JWT); a cookie or an API key that dies on the provider\u2019s schedule says nothing until it is refused.' },
+    ]);
+    pageFoot({ colophon: ['credentials and on-demand runs', countOf(defs.length, 'key')] }, root);
+  }
 };
 
 

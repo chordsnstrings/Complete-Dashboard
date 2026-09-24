@@ -2158,3 +2158,11 @@ Production through live-ui on :8611, both skins at 1440 and 390, light and dark 
 The verdict: 8 surfaces would not answer, of 28 probed across 6 providers. 20 answer. 192 fields are not kept (Bolt 71, Hotel 68, Uber 27, CABMAN 14, FMS 12). The refusals are Bolt 404 ×2, FMS 400 ×2, Uber 404 and Yango 403 ×3.
 
 The pass found "Bolt · ecosine:getDrivers" counted as answering on an error-only 200 body (FIX-STATUS P75, not fixed).
+
+### #settings — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p76/`). No page error. The fils scan is clean.
+
+Production read: 2 credentials expired (the fleet-portal refresh token 28 d ago, and the access token the token keeper sets 13.7 d ago). 43 of 47 keys are configured. The next to expire is the Egari portal refresh token in 4.8 d. 4 keys are not set, and 15 are held in the environment. The days-left chart draws 4 credentials; the rest carry no readable expiry.
+
+The old skin at 390 scrolls 2 px sideways on this page. That is pre-existing, and it is left because the old skin is frozen. The Arkiv skin at 390 does not scroll.

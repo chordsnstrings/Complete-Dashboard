@@ -1275,4 +1275,53 @@ if (want('providers')) {
   }
 }
 
+/* ══ #settings ════════════════════════════════════════════════════════════ */
+if (want('settings')) {
+  console.log('\n#settings');
+  const chips = (page) => page.evaluate(() => ({
+    tags: [...document.querySelectorAll('[data-panel="credentials"] .setrow .tag')].map((t) => t.className),
+    pills: [...document.querySelectorAll('[data-panel="credentials"] .setrow .pill')].map((t) => ({ c: t.className, t: t.textContent.trim() })),
+    formKpis: document.querySelectorAll('[data-panel="credentials"] .kpis > .kpi').length,
+    rows: document.querySelectorAll('[data-panel="credentials"] .setrow').length,
+    buttons: ['#saveAll', '#runInc', '#runBack', '#runProbe', '#runAnalyst'].filter((x) => document.querySelector(x)).length,
+  }));
+  {
+    const { ctx, page } = await open('classic', 'settings');
+    const c = await chips(page);
+    const band = await page.evaluate(() => !!document.querySelector('#view .cband'));
+    check('old skin: no band, the form\'s own four tiles, toned tags', !band && c.formKpis === 4 && c.tags.length > 0, JSON.stringify(c));
+    await ctx.close();
+  }
+  {
+    /* Two credentials with an expiry (synthetic): one expired, one in five
+       days — the band, the bars and the chips all have something to say. */
+    const exp = (q, real) => (real || []).map((d, i) => (i === 0 ? { ...d, expiry: { expired: true, expires_at: new Date(Date.now() - 3 * 864e5).toISOString(), days_left: -3 } }
+      : i === 1 ? { ...d, expiry: { expired: false, expires_at: new Date(Date.now() + 5 * 864e5).toISOString(), days_left: 5 } } : d));
+    const { ctx, page, answer } = await open('arkiv', 'settings', { fixtures: { '/api/settings': exp } });
+    await page.waitForFunction(() => document.querySelectorAll('#view .cband .kpi').length >= 5, null, { timeout: 8000 }).catch(() => {});
+    const s = await shape(page);
+    const defs = answer('/api/settings');
+    check('00 ABOVE the paste box, the days-left panel under it, then everything in its order', JSON.stringify(s.heads.slice(0, 6)) === JSON.stringify(['At a glance',
+      'Days left on each credential that expires', 'Paste a credential, or drop the files', 'Admin access', 'Credentials', 'Requested runs']), JSON.stringify(s.heads));
+    check('the tiles: expired (the hero), configured, next to expire, not set, held in the environment', s.hero === 'Credentials expired' && s.values['Credentials expired'] === '1'
+      && s.values['Keys configured'] === `${n(defs.filter((d) => d.configured || (d.seen_by || []).length).length)} of ${n(defs.length)}`
+      && /^5(\.0)? d$/.test(s.values['Next to expire'] || '') && s.values['Held in the environment'] === n(defs.filter((d) => d.source === 'environment' || d.source === 'elsewhere').length), JSON.stringify(s.values));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const left = await bars(page, 'set-left');
+    check('days left: the expired key draws no bar, prints no "0", says how long ago; the other its days', left.length === 2 && /^expired 3(\.0)? d ago$/.test(left[0].v) && /width:0(\.0)?%/.test(left[0].fill)
+      && /^5(\.0)? d$/.test(left[1].v) && /--mk-fill/.test(left[1].fill), JSON.stringify(left));
+    const c = await chips(page);
+    check('the form kept whole — every row, all five buttons — and its own tile row folded into the band', c.rows === defs.length && c.buttons === 5 && c.formKpis === 0, JSON.stringify(c));
+    check('every source an outline chip; the expired one red with its "!"; no toned tag', c.tags.length === 0 && c.pills.every((p) => (p.t === 'expired' ? /\bbad\b/.test(p.c) : p.c === 'pill')), JSON.stringify(c.pills));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('†: whether a set key is accepted, when a key with no token date expires', !!ab['Whether a set key is accepted'] && !!ab['When a key with no token date expires'], JSON.stringify(s.abs.map((a) => a.label)));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'settings', { width: 390 });
+    check('#settings at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
