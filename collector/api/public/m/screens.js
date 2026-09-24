@@ -212,7 +212,10 @@ async function today(deck, ctx) {
            two shells cannot drift into describing it differently. */
         (() => {
           const tv = tripValue(now, fmt, sourceLabel);
+          /* `na`: with no amount, today.js's sub IS the reason ("no booking
+             carries a price yet, and no settled day to value them from"). */
           return { label: 'Trip value', href: href('day', now.day), sub: tv.sub,
+            na: tv.amount == null ? tv.sub : null,
             value: tv.amount == null ? '\u2014'
               : (tv.estimated ? `\u2248 ${money(tv.amount)}` : money(tv.amount)) };
         })(),
@@ -224,6 +227,7 @@ async function today(deck, ctx) {
           value: now.fares != null ? money(now.fares) : '\u2014',
           sub: now.priced ? `on ${fmt(now.priced)} of ${fmt(now.bookings)} bookings`
             : 'nothing priced yet',
+          na: now.fares == null && !now.priced ? 'nothing priced yet' : null,
           href: href('day', now.day) }] : []),
         /* Money in, which is NOT the fares above and must not read as a second
            opinion about them: a fare where the channel publishes one, the
@@ -242,6 +246,9 @@ async function today(deck, ctx) {
                repeating it twice more wrapped the sub onto a second line and
                made this tile taller than the one beside it. */
             : moneyHalves(now) || 'basis on the day page',
+          na: now.money == null
+            ? (now.moneyAnswered ? 'no channel has been credited yet today'
+              : 'this figure did not load — reload the page') : null,
           href: href('day', now.day) },
         { label: 'Distance', value: now.km != null ? `${fmt(now.km)} km` : '\u2014',
           sub: now.drivers != null ? `${fmt(now.drivers)} out in ${fmt(now.vehicles)} cars` : null },
@@ -401,6 +408,7 @@ async function today(deck, ctx) {
       sub: n(k.priced_trips)
         ? `on ${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings priced`
         : 'no booking in this range carries a price',
+      na: n(k.revenue) == null && !n(k.priced_trips) ? 'no booking in this range carries a price' : null,
       /* A window that includes today is understated here by construction and
          has to say so rather than read as a bad week. */
       tone: n(k.priced_pct) != null && n(k.priced_pct) < 60 ? 'warn' : null },
@@ -653,14 +661,16 @@ async function moneyScreen(deck, ctx) {
       sub: inAll ? 'each channel counted once, on its own report' : 'fares only' },
     { label: 'Per priced booking',
       value: total && priced ? money(total / priced, 'AED', 0) : '\u2014',
-      sub: priced ? `${fmt(priced)} priced` : 'none priced' },
+      sub: priced ? `${fmt(priced)} priced` : 'none priced',
+      na: !priced ? 'none priced' : null },
     /* From the server, over the trips reporting BOTH a fare and a distance.
        This divided the priced fares by EVERY trip's distance — 65,367 over
        154,746 km — got 0.42, and then Math.round made it "AED 0". Two
        different populations and a rounding that destroys any rate below one. */
     { label: 'Per km', value: money(n(k.revenue_per_km), 'AED', 2),
       sub: n(k.priced_measured_trips)
-        ? `over ${fmt(k.priced_measured_trips)} priced trips with a distance` : 'no priced distance' },
+        ? `over ${fmt(k.priced_measured_trips)} priced trips with a distance` : 'no priced distance',
+      na: !n(k.priced_measured_trips) ? 'no priced distance' : null },
     /* Four, not five. The grid is two across, so an odd tile sits alone in a
        row of its own — and the one that was orphaned here was Bookings, which
        is the Today screen's headline and says nothing about money. */
@@ -1840,15 +1850,16 @@ async function corporate(deck, ctx) {
     stats(deck, [
       { label: 'Kept on the channel', hero: true,
         value: kept == null ? '\u2014' : money(kept),
-        sub: kept == null ? 'The channel reports a fare but no cost, so no margin can be taken from it.'
-          : `${margin}% of the fares, after what the drivers were paid` },
+        na: kept == null ? 'The channel reports a fare but no cost, so no margin can be taken from it.' : null,
+        sub: kept == null ? null : `${margin}% of the fares, after what the drivers were paid` },
       { label: 'Cost filed', value: margin != null ? money(n(sum.cost)) : '\u2014',
-        sub: margin != null ? 'what the drivers were paid, the channel\u2019s own figure' : 'the channel files no cost' },
+        na: margin != null ? null : 'the channel files no cost',
+        sub: margin != null ? 'what the drivers were paid, the channel\u2019s own figure' : null },
       ...corpTiles.map((t) => (t.label === 'Per km' && t.value === '\u2014'
-        ? { ...t, sub: sum.priced ? 'no priced booking in this window carries a distance'
+        ? { ...t, na: sum.priced ? 'no priced booking in this window carries a distance'
           : 'no booking in this window carries a price' }
         : t.label === 'Unpaid approach' && t.value === '\u2014'
-          ? { ...t, sub: 'no booking in this window has its approach measured' } : t)),
+          ? { ...t, na: 'no booking in this window has its approach measured' } : t)),
     ], false, { hero: true });
     deck.insertBefore(secHead('00', 'At a glance', WINDOW_NOTE()), statement);
   }

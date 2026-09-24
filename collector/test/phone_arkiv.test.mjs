@@ -350,9 +350,10 @@ console.log('\n3 · the components: sections, statement, tiles, the dot, rows, c
       { label: 'Bad', value: '6', tone: 'bad' },
       { label: 'Good', value: '7', tone: 'good' },
       { label: 'Linked', value: '8', href: '#live' },
-      { label: 'Unmeasured', value: '—', sub: 'no channel reports it' },
+      { label: 'Unmeasured', value: '—', na: 'no channel reports it', sub: 'no channel reports it' },
+      { label: 'Defined', value: '—', sub: 'drop-off to next pick-up' },
     ], { note: 'This month' });
-    const absHero = stats(host, [{ label: 'Absent hero', value: '—', sub: 'the feed did not answer' },
+    const absHero = stats(host, [{ label: 'Absent hero', value: '—', na: 'the feed did not answer' },
       { label: 'Next', value: '2' }], false, { hero: true });
     const rs = rows(host, [
       row({ title: 'plain', value: '1' }),
@@ -393,6 +394,8 @@ console.log('\n3 · the components: sections, statement, tiles, the dot, rows, c
       linkChevron: cs(tiles[4].querySelector('.l'), '::after').content,
       absent: { text: tn(5).textContent, na: tn(5).classList.contains('t-na'), marked: tn(5).hasAttribute('data-absent'),
         sub: !!tiles[5].querySelector('.s'), hl: !!tn(5).querySelector('.hl') },
+      defined: { text: tn(6).textContent, na: tn(6).classList.contains('t-na'), marked: tn(6).hasAttribute('data-absent'),
+        sub: tiles[6].querySelector('.s')?.textContent || null },
       absHero: { hl: !!absHero.querySelector('.hl'), text: absHero.querySelector('.n').textContent },
       rows: [...rs.children].map((r) => ({ cls: r.className, inline: r.querySelector('.v b')?.style.color || '',
         color: hexOf(cs(r.querySelector('.v b')).color), font: cs(r.querySelector('.v b')).fontFamily,
@@ -443,9 +446,12 @@ console.log('\n3 · the components: sections, statement, tiles, the dot, rows, c
   check('…the figure in Karla with proportional figures',
     /Karla/.test(m.valueFont) && /proportional-nums/.test(m.numeric), `${m.valueFont} ${m.numeric}`);
   check('a tile that is a link says so with a chevron', /›/.test(m.linkChevron), m.linkChevron);
-  check('a tile with no figure prints its REASON in the value slot, marked absent, once',
+  check('a tile with no figure prints the REASON its screen names in the value slot, marked absent, once',
     m.absent.text === 'no channel reports it' && m.absent.na && m.absent.marked && !m.absent.sub,
     JSON.stringify(m.absent));
+  check('…and a sub-line that is not a reason ("drop-off to next pick-up") is never promoted into one',
+    m.defined.text === '—' && !m.defined.na && m.defined.marked && m.defined.sub === 'drop-off to next pick-up',
+    JSON.stringify(m.defined));
   check('…and an absent hero is explained, never highlighted (L4, L5.8)',
     !m.absHero.hl && m.absHero.text === 'the feed did not answer', JSON.stringify(m.absHero));
   const [rPlain, rWarn, rBad, rCrit, rGood, rLink] = m.rows;

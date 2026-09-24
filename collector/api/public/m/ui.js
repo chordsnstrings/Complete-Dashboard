@@ -190,7 +190,7 @@ export const lede = (host, { claim, sub, tone, name, photo }) => {
   return d;
 };
 
-export const stat = ({ label, value, sub, tone, href, long }) => {
+export const stat = ({ label, value, sub, tone, href, long, na }) => {
   const s = el(href ? 'a' : 'div', `m-stat${tone ? ` ${tone}` : ''}`);
   if (href) s.href = href;
   s.append(el('span', 'l', esc(label)));
@@ -198,16 +198,22 @@ export const stat = ({ label, value, sub, tone, href, long }) => {
      glance `na`): a figure that cannot be measured prints why, never a bare
      dash. The old tile put "—" in the figure and the reason in the line under
      it, which on a phone is the smaller, greyer line — the one a reader skips.
-     When the tile carries its reason as its sub, the reason moves up into the
-     value slot and is marked absent, so highlight() refuses it (L4: an
-     absent figure is explained, never emphasised). A dash with no reason
-     beside it stays a dash, marked absent: the words for it are the screen's
-     to supply, never this component's to invent. */
+
+     THE REASON IS THE SCREEN'S TO NAME, as `na`. A first cut moved whatever
+     the sub-line said into the value slot, and a sub-line is not always a
+     reason: Optimise's Median wait reads "drop-off to next pick-up", which
+     is what the figure MEASURES — printed in place of the figure it would
+     have claimed to be why there is none, which is the one thing the house
+     rule forbids outright ("never with a reason that is not the true one").
+     So a screen passes `na` where it knows the true reason; the reason is
+     marked absent, so highlight() refuses it (L4, L5.8), and a sub-line
+     that says something else stays under it. A dash with no `na` stays a
+     dash, marked absent, with its sub-line where it was. */
   if (phoneContract() && isAbsent(value)) {
-    const why = sub || null;
-    const n = el('span', `n t-na${why ? '' : ' sm'}`, esc(why || String(value)));
+    const n = el('span', `n${na ? ' t-na' : ' sm'}`, esc(na || String(value)));
     n.dataset.absent = '';
     s.append(n);
+    if (sub && sub !== na) s.append(el('span', 's', esc(sub)));
     return s;
   }
   const n = el('span', `n${long || String(value).length > 9 ? ' sm' : ''}`, esc(String(value)));
