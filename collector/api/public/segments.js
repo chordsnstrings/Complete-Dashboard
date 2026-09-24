@@ -19,7 +19,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
          dtStr, timeStr, dayStr, dateStr, money, custody, verdict, foldRows,
          sourceLabel, countOf, plural, asList, noneChosen,
          trackerState, trackerSpeed, stillNote, UBER_FARE_WHY,
-         segSourceLabel, bySourceLine, contract } from './ui.js';
+         segSourceLabel, bySourceLine, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
 import { q, qAll, api, href, state, unfiltered } from './data.js';
 
 const VERDICT_TONE = { unauthorized: 'bad', authorized: 'ok', sensor_suspect: 'warn',
@@ -242,7 +242,7 @@ const attributionCell = (r) => {
    `distribution`, which the endpoint measures over the WHOLE WINDOW rather
    than over the current filter — a tier count that changes when you pick a
    tier tells a reader nothing about what else is there. */
-function attributionBand(root, att, pageRows = []) {
+function attributionBand(root, att, pageRows = [], AKB = null) {
   const dist = att.distribution || {};
   const tiers = dist.by_tier || [];
   const n = dist.segments || 0;
@@ -270,7 +270,7 @@ function attributionBand(root, att, pageRows = []) {
     + `trip on the car, ${fmt(dist.sole_custodian || 0)} by day custody alone, `
     + `${fmt(dist.ambiguous || 0)} with more than one candidate and `
     + `${fmt(dist.unknown || 0)} with nobody`;
-  verdict(root, {
+  verdict(AKB ? AKB.vHost : root, {
     claim: n === 0
       ? 'No unexplained journey in this window to attribute'
       : byTime * 2 >= n
@@ -303,7 +303,7 @@ function attributionBand(root, att, pageRows = []) {
         + 'rather than choosing.',
   });
 
-  root.append(kpiRow([
+  const ATT_TILES = [
     { label: 'Unexplained journeys', value: fmt(n), tone: n ? 'bad' : 'good',
       sub: 'the seat sensor saw a rider, the car covered real distance, and no booking on any '
         + 'collected channel overlaps the window' },
@@ -340,7 +340,10 @@ function attributionBand(root, att, pageRows = []) {
       tone: open > oneName ? 'bad' : open ? 'warn' : null,
       sub: `${fmt(dist.ambiguous || 0)} have two or more people who held the car that day and `
         + `nothing separates them · ${fmt(dist.unknown || 0)} have no custody record at all` },
-  ]));
+  ];
+  if (AKB) return ATT_TILES;
+  root.append(kpiRow(ATT_TILES));
+  return null;
 }
 
 /* ── the ladder, as the filter it should always have been ──────────────────
@@ -369,6 +372,16 @@ function tierChips(root, att, { kind, value, tier, who }) {
      has to hover to find out what "sole custodian" claims is a reader who will
      read it as "the driver", which is the misreading this whole surface is
      built to prevent. */
+  if (contract()) {
+    /* The same five definitions, as a compact list rather than five cards;
+       the rung named in mono small caps, never colour-coded. */
+    const dl = el('dl', 'seg-rungs');
+    TIER_ORDER.forEach((k) => {
+      dl.append(el('dt', null, `${esc(TIER_LABEL[k])} <span class="dim">${fmt(dist[k] || 0)} in this window</span>`));
+      dl.append(el('dd', null, esc(means[k] || '')));
+    });
+    p.body.append(dl);
+  } else {
   const dl = el('div', 'grid g2');
   TIER_ORDER.forEach((k) => {
     const box = el('div', 'note' + (TIER_TONE[k] === 'warn' ? ' warn' : ''));
@@ -377,6 +390,7 @@ function tierChips(root, att, { kind, value, tier, who }) {
     dl.append(box);
   });
   p.body.append(dl);
+  }
   if (att.bracket?.rule) {
     p.body.append(el('p', 'cap',
       `${att.bracket.rule} The cap is ${fmt(att.bracket.cap_min)} minutes and the channel is `
@@ -602,7 +616,18 @@ export async function renderSegments(root, kind, value) {
   /* ── the band, and it goes above every name on the page ─────────────────
      Rendered before the segment KPIs rather than after them, because it is the
      thing that says whether the names below are worth reading. */
-  if (att) attributionBand(root, att, d.rows);
+  /* Under the page contract (plan §4 #segments): the attribution verdict as
+     the 00 statement with its tiles and the segment tiles beside it, untoned,
+     plus the people the ladder narrowed to; the rung chips stay the filter,
+     the definitions a compact list; the rungs counted and in kilometres, in
+     ladder order — solid where a rung names one person, grey where it does
+     not; what could corroborate a name, and how many cars can produce a
+     journey at all; What we decided as ranked bars that still filter; the
+     vehicle bars in the job token; a † band. The per-person table, the
+     reasons, the day strip and the list are unchanged. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
+  const attTiles = att ? attributionBand(root, att, d.rows, AKB) : null;
   /* ABSENT WITH A REASON, and the reason is about US. An attribution that
      could not be read is not an attribution that found nothing, and the
      difference is the whole page. */
@@ -669,7 +694,7 @@ export async function renderSegments(root, kind, value) {
      are every provider's segment, and `Matching this filter` is their count.
      Each provider's own figures and the rule relating them follow the tiles. */
   const rawAll = vf.reduce((a, r) => a + (r.segments ?? r.n), 0);
-  root.append(kpiRow([
+  const SEG_TILES = [
     { label: 'Segments in window', value: fmt(totalAll),
       sub: rawAll > totalAll
         ? `every occupancy interval seen, a ride counted once — ${fmt(rawAll)} segments across providers`
@@ -687,7 +712,26 @@ export async function renderSegments(root, kind, value) {
         ? `${blindSources.map(sourceLabel).join(', ')} could not be read when these were judged`
         : 'a revenue channel was unreadable when these were judged',
       tone: d.low_confidence ? 'warn' : null },
-  ]));
+  ];
+  if (ak) {
+    const keys = new Set(d.rows.filter((r) => isFirm(r.attribution_tier) && r.counts_once !== false)
+      .flatMap((r) => asList(r.attribution_candidate_keys)));
+    const people = att ? { label: 'People the ladder narrowed to', value: fmt(keys.size),
+      sub: 'distinct people on the rows shown with a one-name rung' + (d.truncated ? ' — a floor, the list is capped' : '') } : null;
+    /* In the plan's order, which the band's six columns wrap into its two
+       rows (the hero spans two): what went unexplained and what it carried,
+       then the list's own counts and the one-name split. */
+    const A = Object.fromEntries((attTiles || []).map((x) => [x.label, x]));
+    const S = Object.fromEntries(SEG_TILES.map((x) => [x.label, x]));
+    const akm = (att?.distribution?.by_tier || []).reduce((a, x) => a + (Number(x.km) || 0), 0);
+    const kmTile = att ? (akm ? { label: 'Carried with no booking', value: `${fmt(akm, 1)} km`,
+      sub: 'the distance under the unexplained journeys, each counted once' }
+      : { label: 'Carried with no booking', na: 'no distance was measured under these journeys' }) : null;
+    const all = [A['Unexplained journeys'] && { ...A['Unexplained journeys'], hero: true }, kmTile,
+      A['Worth of the distance'] && { ...A['Worth of the distance'], label: 'Revenue forgone' }, A['Cannot be narrowed'], people,
+      S['Segments in window'], S.Unexplained, S['Matching this filter'], S['Assessed blind'], A['Narrowed to one person']];
+    glance(AKB.tilesHost, bandTiles(all).tiles);
+  } else root.append(kpiRow(SEG_TILES));
 
   /* The clock guard, said out loud.
      ─────────────────────────────────────────────────────────────────────────
@@ -763,8 +807,11 @@ export async function renderSegments(root, kind, value) {
      car. */
   if (att) {
     tierChips(root, att, { kind, value, tier, who });
+    if (ak) segRungs(root, att);
     root.append(note(att.note, 'warn'));
     whoPanel(root, d.rows, { kind, value, tier, who }, !!d.truncated || !!att.truncated);
+    if (ak) segNamed(root, d.rows);
+    if (ak) segEvidence(root, att, d.rows, d);
   }
 
   const g = el('div', 'grid g3'); root.append(g);
@@ -774,6 +821,7 @@ export async function renderSegments(root, kind, value) {
   g.append(vp.panel);
   if (vf.length) {
     const form = donut(vp.body, vf.map((r) => ({ label: r.key, n: r.n })), {
+      ...(ak ? { as: 'bars' } : {}),
       onClick: (s) => { location.hash = href('segments', 'verdict', s.label); } });
     /* Under the Arkiv skin a ring whose slices cannot be told apart is drawn
        as bars (charts.js ringDistinct); the caption follows the form drawn. */
@@ -792,7 +840,7 @@ export async function renderSegments(root, kind, value) {
   const plates = (d.facets.plate || []).filter((r) => r.unauthorized > 0);
   if (plates.length) {
     hbars(pp.body, plates.slice(0, 12).map((r) => ({ label: r.key, n: r.unauthorized })),
-      { color: '--s8', onClick: (s) => { location.hash = href('segments', 'plate', s.label); } });
+      { color: ak ? '--mk-fill' : '--s8', ...(ak ? { signed: false } : {}), onClick: (s) => { location.hash = href('segments', 'plate', s.label); } });
     /* The facet list is capped at the 40 busiest plates, so this count is over
        what came back. A truncated facet is not a shorter menu — the vehicle
        you are looking for is simply absent from it — so the page says how many
@@ -953,6 +1001,117 @@ export async function renderSegments(root, kind, value) {
   if (att && att.coverage?.days_with_data === 0 && att.coverage?.note) {
     root.append(note(att.coverage.note, 'warn'));
   }
+  if (ak) segAbsence(root, att, d);
+}
+
+/* ── #segments under the page contract ───────────────────────────────────── */
+/* The rungs in ladder order, counted and in kilometres: solid where the rung
+   names one person, grey where it does not (an outline bar is not a thing
+   hbars draws; the colour carries the same split and the caption says so). */
+function segRungs(root, att) {
+  const dist = att.distribution || {};
+  /* by_tier's rung is `key` (api/unauthorized_routes.js, and the mock), its km
+     a numeric STRING. The first draft read `t.tier`, and on production every
+     rung drew 0 km beside a band tile summing 11,343.5 km from the same
+     array — a zero that was a reading error, not a measurement. */
+  const by = new Map((dist.by_tier || []).map((t) => [t.key ?? t.tier, t]));
+  const g = el('div', 'grid g2'); root.append(g);
+  const a = panel('Who the evidence can name', 'Journeys on each rung, strongest first', 'seg-rungs-n');
+  const b = panel('The same rungs, in kilometres', 'The distance each rung carries', 'seg-rungs-km');
+  g.append(a.panel, b.panel);
+  const rows = TIER_ORDER.map((k) => ({ label: TIER_LABEL[k], n: +(dist[k] || 0), km: +(by.get(k)?.km || 0), firm: isFirm(k) }));
+  const colorFor = (x) => (x.firm ? '--mk-fill' : '--grey');
+  const b1 = el('div'); a.body.append(b1);
+  hbars(b1, rows, { signed: false, colorFor });
+  const b2 = el('div'); b.body.append(b2);
+  hbars(b2, rows.map((r) => ({ ...r, n: r.km })), { signed: false, colorFor, valueFmt: (v) => `${fmt(v, 1)} km` });
+  a.body.append(el('p', 'cap', 'Solid: the rung names one person. Grey: it does not — more than one candidate, or nobody.'));
+}
+/* Who is named, and how often: each person on a ONE-NAME rung, ranked by
+   the journeys naming them (a ride once), keyed on the person key so the
+   register's joined spellings count as one — the kilometres and the number
+   of spellings the key folds beside each bar. */
+function namedPeople(rows) {
+  const by = new Map();
+  rows.filter((r) => isFirm(r.attribution_tier) && r.counts_once !== false).forEach((r) => {
+    (Array.isArray(r.attribution_candidates) ? r.attribution_candidates : []).forEach((c) => {
+      const key = c.key || c.id || c.name;
+      if (!key) return;
+      const cur = by.get(key) || { key, name: c.name, id: c.id, n: 0, km: 0, names: new Set() };
+      cur.n += 1; cur.km += Number(r.distance_km) || 0;
+      if (c.name) cur.names.add(String(c.name).trim().toLowerCase());
+      by.set(key, cur);
+    });
+  });
+  return [...by.values()].sort((a, b) => b.n - a.n || String(a.name).localeCompare(String(b.name)));
+}
+function segNamed(root, rows) {
+  const ppl = namedPeople(rows);
+  if (!ppl.length) return;
+  const p = panel('Who is named, and how often', 'People on a one-name rung, by the journeys naming them', 'seg-named');
+  root.append(p.panel);
+  const box = el('div'); p.body.append(box);
+  hbars(box, ppl.slice(0, 12).map((x) => ({ label: x.name || x.key, n: x.n, km: x.km, sp: x.names.size, id: x.id })), {
+    signed: false, color: '--mk-fill',
+    shareOf: (x) => `${fmt(x.km, 1)} km${x.sp > 1 ? ` · ${fmt(x.sp)} spellings` : ''}`,
+    onClick: (x) => { if (x.id) location.hash = href('driver', x.id); } });
+  p.body.append(el('p', 'cap', `${ppl.length > 12 ? `The 12 named most often of ${fmt(ppl.length)}. ` : ''}`
+    + 'A journey counted once per ride. Named is not the same as driving: every rung is an inference from the booking record.'));
+}
+/* What could corroborate a name, and how many cars can produce a journey. */
+function segEvidence(root, att, rows, d = {}) {
+  const p = panel('What could stand behind a name', 'The record a name could be checked against, and the cars a journey can come from', 'seg-evidence');
+  root.append(p.panel);
+  const hf = att.status_feed?.history_from;
+  const un = rows.filter((r) => r.verdict === 'unauthorized' && r.counts_once !== false);
+  const g = el('div', 'grid g2'); p.body.append(g);
+  const a = el('div'); const b = el('div'); g.append(a, b);
+  /* Compared as instants, not as strings: a timestamp and a bare date sort
+     wrongly as text whenever their formats differ. */
+  a.append(el('h4', 'sub', 'Against Uber\u2019s status-feed history'));
+  if (hf) {
+    const t0 = Date.parse(hf);
+    const inside = un.filter((r) => Date.parse(r.started_at) >= t0).length;
+    const box = el('div'); a.append(box);
+    hbars(box, [{ label: 'inside the history', n: inside }, { label: 'before it began', n: un.length - inside }],
+      { signed: false, colorFor: (x) => (x.label === 'inside the history' ? '--mk-fill' : '--grey') });
+    /* The list is the NEWEST rows and stops at its cap, so on production
+       the first draft read "before it began: 0" over a window that runs nine
+       days before the history — the older journeys were simply not on the
+       list. Said, whenever the cap bites. */
+    a.append(el('p', 'cap', `The history runs from ${dateStr(hf)}. A journey before it has nothing but the booking record to speak for a name.`
+      + (d.truncated ? ` Counted over the ${fmt(d.rows.length)} most recent journeys this list holds, of ${fmt(d.total)}: the older ones — the likeliest to fall before the history — are not on it, so "before it began" is a floor.` : '')));
+  } else a.append(note('Uber\u2019s status-feed history was not reported with this attribution, so no journey can be placed inside or outside it.'));
+  b.append(el('h4', 'sub', 'The cars a journey can come from'));
+  const plates = new Set(rows.map((r) => r.plate).filter(Boolean));
+  const withSensor = att.coverage?.plates_with_sensor;
+  if (withSensor != null) {
+    const box = el('div'); b.append(box);
+    hbars(box, [{ label: 'carry a seat sensor', n: +withSensor }, { label: 'on this list', n: plates.size }],
+      { signed: false, color: '--mk-fill' });
+    b.append(el('p', 'cap', 'Only a car with a seat sensor can produce an unexplained journey at all; the rest of the fleet is invisible to this page.'));
+  } else b.append(note(`${countOf(plates.size, 'car')} on this list; how many carry a seat sensor was not reported.`));
+}
+function segAbsence(root, att, d) {
+  const dist = att?.distribution || {};
+  const cells = [
+    { label: 'Whether any name here drove', fig: null, none: 'Not recorded',
+      why: 'Every name on this page is an inference from the booking record — no trip record exists for an unbooked journey, so none of them is a record of who was at the wheel.' },
+    { label: 'Who drove the journeys the ladder cannot narrow', hl: !!((dist.ambiguous || 0) + (dist.unknown || 0)),
+      fig: (dist.ambiguous || 0) + (dist.unknown || 0) ? fmt((dist.ambiguous || 0) + (dist.unknown || 0)) : null, none: 'None',
+      why: `${fmt(dist.ambiguous || 0)} have more than one candidate and nothing separates them; ${fmt(dist.unknown || 0)} have no custody record at all.` },
+    (() => { const held = att?.coverage?.plates_held; const on = new Set((d.rows || []).map((r) => r.plate).filter(Boolean)).size;
+      return held == null
+        ? { label: 'Share of the fleet', fig: null, none: 'Not measured', why: 'The attribution does not say how many plates the fleet holds, so no share of it can be drawn.' }
+        : { label: 'Share of the fleet', fig: `${fmt(on)} of ${fmt(held)}`, why: `Plates on this list, of the ${fmt(held)} the fleet holds.` }; })(),
+    (() => { const multi = namedPeople(d.rows || []).filter((x) => x.names.size > 1).length;
+      return { label: 'Whether a multi-spelling key is one person', fig: multi ? fmt(multi) : null, none: 'None here',
+        why: multi ? `${countOf(multi, 'person key')} here ${multi === 1 ? 'folds' : 'fold'} more than one spelling. A key folds the spellings the register has joined — two it has not joined count as two people, and one it joined wrongly as one; nothing on this page proves either way.`
+          : 'No person key on this page folds more than one spelling.' }; })(),
+  ];
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, cells);
+  pageFoot({ colophon: ['seat-occupancy segments', `${fmt(d.total)} matching`] }, root);
 }
 
 /* A table of segments where every cell that names something is a link to it.

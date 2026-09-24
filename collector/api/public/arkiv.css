@@ -993,6 +993,12 @@
 :root[data-skin="arkiv"] .fnums span{font-family:var(--mono);font-size:var(--t1);letter-spacing:.14em}
 :root[data-skin="arkiv"] .whohead{border-bottom-color:var(--hair)}
 :root[data-skin="arkiv"] .sp-pair{border-radius:0}
+/* #segments (plan §4): the five rung definitions as a compact list, the rung
+   in mono small caps — named, never colour-coded. */
+:root[data-skin="arkiv"] .seg-rungs{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);gap:6px 18px;margin:12px 0 0}
+:root[data-skin="arkiv"] .seg-rungs dt{font-family:var(--mono);font-size:var(--t4);text-transform:uppercase;letter-spacing:.08em;color:var(--ink)}
+:root[data-skin="arkiv"] .seg-rungs dd{margin:0;font-size:var(--t3);color:var(--grey-strong)}
+@media (max-width:720px){:root[data-skin="arkiv"] .seg-rungs{grid-template-columns:minmax(0,1fr)}}
 /* #same-person (plan §4): an answered card says its verdict in words (.sp-
    verdict, "Confirmed one person" / "Ruled two people"); it is not faded,
    tinted or given a green or grey rule as well. */

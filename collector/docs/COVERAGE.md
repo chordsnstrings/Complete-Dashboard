@@ -6748,3 +6748,6 @@ number (5 and 5), and never a passport or RTA number.
 
 * **`/api/unauthorized/attributed` takes ~30 s on production** (29.0 s and 32.1 s cache-busted on 2026-09-24). A page must never await it with the rest. #unauthorized fetches it alongside, draws the table on custody first, and adds the rung-and-name column when it lands. #segments already awaits it with /api/segments. That is a known cost of that page and was not changed here.
 * **A chart drawn into a box of its own leaves the panel's `loading()` skeleton behind** unless the panel body is cleared first. The chart helpers clear their own host, not its parent. The first #unauthorized draft kept two skeletons for good, and `bin`-style shooting waited 120 s for them. `pagephase/skelsweep.mjs` (scratch) sweeps every arkiv route on the mock for this.
+
+* **`/api/unauthorized/attributed` → `distribution.by_tier` names its rung `key`, not `tier`, and its `km` is a numeric string** (`{"key":"last_trip","n":625,"km":"9137.7","segments":640}` on production). A test that reads the same wrong field as the page passes on zeros. Require a non-zero value, or a sum that meets another figure, before trusting the match.
+* **`/api/segments` rows are the newest and capped** (`truncated`, `total`). Anything counted off them about age, such as "before the status-feed history began", is a floor and must say so.

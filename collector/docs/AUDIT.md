@@ -2089,3 +2089,11 @@ The first pass took 129 s to draw in the arkiv skin against the old skin's 5 s. 
 * Inconclusive: 915.
 
 The every-interval total (13,862) is named in the caption under the per-day chart, not drawn on its axis.
+
+### #segments — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p67/`). No page error, no sideways scroll, and the fils scan is clean in both skins.
+
+The verdict: 700 of 801 carry one name, 76 of them narrowed by time. The rungs in km are 1,358.5 / 6,736 / 1,771.4 / 1,050.6 / 427, summing to the band's 11,343.5 km. 59 people are narrowed to. Of the 282 journeys the list holds, all fall inside the status-feed history from 10 Sept; the caption now says that count is a floor.
+
+The first pass drew zeros for the rungs in km and "before it began: 0". Both were fixed before the commit (FIX-STATUS P67).

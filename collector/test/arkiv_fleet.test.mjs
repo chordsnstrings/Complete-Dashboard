@@ -648,4 +648,91 @@ if (want('unauthorized')) {
   }
 }
 
+/* ══ #segments ════════════════════════════════════════════════════════════ */
+if (want('segments')) {
+  console.log('\n#segments');
+  const H = 'segments';
+  const TIERS = ['bracketed', 'last_trip', 'sole_custodian', 'ambiguous', 'unknown'];
+  const FIRM = ['bracketed', 'last_trip', 'sole_custodian'];
+  {
+    const { ctx, page } = await open('classic', H);
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), dl: !!document.querySelector('#view dl.seg-rungs'),
+      cards: [...document.querySelectorAll('#view .grid.g2 > .note')].length }));
+    check('old skin: no band, the five definition cards, no compact list', !r.band && r.cards === 5 && !r.dl, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', H);
+    const s = await shape(page);
+    const att = answer('/api/unauthorized/attributed');
+    const dist = att.distribution;
+    const km = dist.by_tier.reduce((a, t) => a + (+t.km || 0), 0);
+    check('00: the verdict is the statement; the tiles in the plan\'s order, the unexplained journeys the hero', s.vdctIn00 && s.hero === 'Unexplained journeys'
+      && JSON.stringify(Object.keys(s.values)) === JSON.stringify(['Unexplained journeys', 'Carried with no booking', 'Revenue forgone', 'Cannot be narrowed',
+        'People the ladder narrowed to', 'Segments in window', 'Unexplained', 'Matching this filter', 'Assessed blind', 'Narrowed to one person']), JSON.stringify(Object.keys(s.values)));
+    check('figures are the ladder\'s: journeys, the km under them, their worth at the stated rate', s.values['Unexplained journeys'] === n(dist.segments)
+      && s.values['Carried with no booking'] === `${km.toLocaleString('en-US', { maximumFractionDigits: 1 })} km`
+      && s.values['Revenue forgone'] === aedOf(km * att.value.aed_per_km), JSON.stringify([s.values, km]));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const r = await page.evaluate(() => ({ chips: [...document.querySelectorAll('#view a.chip')].map((a) => a.getAttribute('href')),
+      dt: [...document.querySelectorAll('#view dl.seg-rungs dt')].length, cards: [...document.querySelectorAll('#view .grid.g2 > .note')].length }));
+    check('the rung chips still filter; the definitions a compact list of five, not cards', r.chips.filter((h) => /tier=/.test(h)).length >= 5 && r.dt === 5 && r.cards === 0, JSON.stringify(r));
+    const rn = await bars(page, 'seg-rungs-n');
+    check('who the evidence can name: the five rungs in ladder order, solid where one name, grey where not', rn.length === 5
+      && rn.every((b, i) => b.v === n(dist[TIERS[i]] || 0) && (FIRM.includes(TIERS[i]) ? /--mk-fill/ : /--grey/).test(b.fill)), JSON.stringify(rn));
+    const rk = await bars(page, 'seg-rungs-km');
+    const byT = Object.fromEntries(dist.by_tier.map((t) => [t.key ?? t.tier, +t.km || 0]));
+    check('the same rungs in kilometres — each rung\'s own, and they sum to the band\'s km', rk.length === 5 && TIERS.some((k) => byT[k] > 0)
+      && rk.every((b, i) => parseFloat(b.v.replace(/,/g, '')) === Math.round((byT[TIERS[i]] || 0) * 10) / 10)
+      && Math.abs(rk.reduce((a, b) => a + parseFloat(b.v.replace(/,/g, '')), 0) - parseFloat(s.values['Carried with no booking'].replace(/,/g, ''))) < 0.5, JSON.stringify([rk, byT]));
+    const named = await bars(page, 'seg-named');
+    const firmRows = att.rows.filter((x) => FIRM.includes(x.attribution_tier) && x.counts_once !== false);
+    const keys = new Map();
+    firmRows.forEach((x) => (x.attribution_candidates || []).forEach((c) => { const k = c.key || c.id || c.name; keys.set(k, (keys.get(k) || 0) + 1); }));
+    check('who is named, and how often: a bar per person on a one-name rung, most first', named.length === Math.min(12, keys.size)
+      && named.every((b, i) => !i || parseFloat(named[i - 1].v.replace(/,/g, '')) >= parseFloat(b.v.replace(/,/g, ''))) && named.every((b) => / km/.test(b.v)), JSON.stringify([named.length, keys.size, named.slice(0, 2)]));
+    check('people the ladder narrowed to: the distinct keys on a one-name rung', s.values['People the ladder narrowed to'] === n(keys.size), JSON.stringify([s.values['People the ladder narrowed to'], keys.size]));
+    const decided = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'What we decided');
+      return p ? { hb: p.querySelectorAll('.hb').length, donut: !!p.querySelector('svg path.arc, svg .donut') } : null; });
+    check('what we decided: ranked bars, not a donut', decided && decided.hb > 0 && !decided.donut, JSON.stringify(decided));
+    const veh = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Vehicles with unexplained occupancy');
+      return p ? [...p.querySelectorAll('.hb .fill')].map((f) => f.getAttribute('style')) : []; });
+    check('vehicles in the job token', veh.length > 0 && veh.every((f) => /--mk-fill/.test(f)), JSON.stringify(veh.slice(0, 2)));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('†: whether any name drove, who drove the un-narrowed (their count), the fleet share (absent: plates held not reported), multi-spelling keys',
+      ab['Whether any name here drove']?.fig === 'Not recorded' && ab['Who drove the journeys the ladder cannot narrow']?.fig === n((dist.ambiguous || 0) + (dist.unknown || 0))
+      && ab['Share of the fleet']?.fig === 'Not measured' && !!ab['Whether a multi-spelling key is one person'], JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    await ctx.close();
+  }
+  {
+    /* The status-feed history begins mid-window and the fleet's plates are
+       known (synthetic): the evidence panel draws both, the † cell counts. */
+    let hf = null;
+    const withHist = (q, real) => {
+      const t = (real.rows || []).map((x) => Date.parse(x.started_at)).filter(Number.isFinite).sort((a, b) => a - b);
+      hf = new Date(t[Math.floor(t.length / 2)] || Date.now()).toISOString();
+      return { ...real, status_feed: { ...(real.status_feed || {}), history_from: hf }, coverage: { ...(real.coverage || {}), plates_held: 140 } };
+    };
+    const capped = (q, real) => ({ ...real, truncated: true, total: (real.rows || []).length + 50 });
+    const { ctx, page, answer } = await open('arkiv', H, { fixtures: { '/api/unauthorized/attributed': withHist, '/api/segments': capped } });
+    const d = answer('/api/segments');
+    const un = d.rows.filter((x) => x.verdict === 'unauthorized' && x.counts_once !== false);
+    const inside = un.filter((x) => Date.parse(x.started_at) >= Date.parse(hf)).length;
+    const ev = await bars(page, 'seg-evidence');
+    check('against the status-feed history: inside it and before it, counted as instants', ev.length >= 2 && ev[0].v === n(inside) && ev[1].v === n(un.length - inside), JSON.stringify([ev, inside, un.length]));
+    const evTxt = await txtOf(page, '[data-panel="seg-evidence"]');
+    check('…and when the list is capped the caption says "before it began" is a floor', d.truncated && /is a floor/.test(evTxt), JSON.stringify([d.truncated, evTxt.slice(-200)]));
+    const s = await shape(page);
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const plates = new Set(d.rows.map((x) => x.plate).filter(Boolean)).size;
+    check('the fleet share, once the plates held are known', ab['Share of the fleet']?.fig === `${n(plates)} of 140`, JSON.stringify(ab['Share of the fleet']));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', H, { width: 390 });
+    check('#segments at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
