@@ -6763,3 +6763,7 @@ number (5 and 5), and never a passport or RTA number.
 ### Trap: `hbars` prints a zero as a literal "0", whatever `valueFmt` says (2026-09-24)
 
 `charts.js` hbars renders the value slot as `${v === 0 ? '0' : valueFmt(...)}`, so a `valueFmt` that returns `''` for zero does nothing. A row whose zero means "not applicable" still prints "0" beside its words. On #settings, an expired key read "0 expired 28 d ago". The page rewrites that row's `.v` after drawing, row for row against the data it passed. The shared chart was not taught a special case, because a true zero printing "0" is right everywhere else.
+
+### Trap: a requestAnimationFrame timestamp can be EARLIER than performance.now() at the call (2026-09-24)
+
+`requestAnimationFrame(cb)` hands `cb` the time the frame STARTED. Code that reads `t0 = performance.now()` and then computes `(now − t0) / dur` in the callback can see a negative progress on the first frame. Under load the gap measured about 106 ms. Clamp progress to [0, 1], not just at 1. app.js countUp() did not, and a KPI briefly printed a negative figure ("-176" for 289). A stalled frame can hold that figure for hundreds of milliseconds, so a DOM read that waits for "two equal reads" can accept it. `test/countup_clock.test.mjs` shifts the frame clock by 150 ms to make the case certain rather than load-dependent.

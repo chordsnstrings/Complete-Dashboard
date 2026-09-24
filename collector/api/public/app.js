@@ -9149,8 +9149,17 @@ function countUp(node) {
     return hasComma ? Number(f).toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) : f;
   };
   const dur = 620, t0 = performance.now();
+  /* p is clamped at 0 as well as at 1. A requestAnimationFrame timestamp is
+     the START of the frame, which can be earlier than the performance.now()
+     read above when countUp is called partway through a frame. Under load that
+     gap reached about 100 ms, so p went below zero and the cubic went
+     negative: the idle-days tile read "-176" where its value is 289, and the
+     per-earning-day tile read "AED -178.65" where it is AED 293.71. Both are
+     the same fraction, −0.61, of the true figure. A stalled frame then held
+     that number long enough for test/money_contradictions to read it twice,
+     and the final full suite of the page phase failed on it (2026-09-24). */
   const tick = (now) => {
-    const p = Math.min(1, (now - t0) / dur);
+    const p = Math.max(0, Math.min(1, (now - t0) / dur));
     const eased = 1 - Math.pow(1 - p, 3);                 // ease-out cubic
     node.textContent = pre + fmtN(target * eased) + post;
     if (p < 1) requestAnimationFrame(tick);
