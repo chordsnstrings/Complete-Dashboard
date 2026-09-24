@@ -45,7 +45,7 @@ const ROUTES = [
   'cancellations', 'roster', 'roster/pipeline', 'roster/idle', 'roster/blocked',
   'top-performers', 'low-performers',
   // Fleet and Sources
-  'vehicles',
+  'vehicles', 'vehicle/L45235',
 ];
 
 const scan = (page) => page.evaluate(() => {

@@ -126,4 +126,113 @@ if (want('vehicles')) {
   }
 }
 
+/* ══ #vehicle/overview ════════════════════════════════════════════════════ */
+if (want('vehicle-overview')) {
+  console.log('\n#vehicle/overview');
+  const H = 'vehicle/L45235';
+  {
+    const { ctx, page } = await open('classic', H);
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      tiles: [...document.querySelectorAll('#view .kpis > .kpi .l')].map((l) => l.textContent.trim()),
+      earned: !!document.querySelector('[data-panel="veh-earned"]') }));
+    check('old skin: no band, its own tile row (Drivers and Last fix among them), none of the new panels',
+      !r.band && r.tiles.includes('Drivers') && r.tiles.includes('Last fix') && !r.earned, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', H);
+    const s = await shape(page);
+    const k = answer('/api/vehicle/kpis') || {};
+    const F = answer('/api/kpis') || {};
+    const rows = await page.evaluate(() => [...document.querySelectorAll('#view .cband .kpis.glance')]
+      .map((g) => [...g.querySelectorAll(':scope > .kpi .l')].map((l) => l.textContent.trim())));
+    check('00 in two rows: what the car did (five, the hero spanning two), then Utilisation, Fares, Idle days, Completion', JSON.stringify(rows) === JSON.stringify([
+      ['Money in', 'Bookings', 'Distance', 'Fare per priced km', 'Harsh events per 100 km'], ['Utilisation', 'Fares', 'Idle days', 'Completion']]), JSON.stringify(rows));
+    check('Money in the one hero, the reconciled figure exact', s.hero === 'Money in' && s.values['Money in'] === aedOf(k.accounted)
+      && (await page.evaluate(() => document.querySelectorAll('#view .cband .kpi.is-hero').length)) === 1, JSON.stringify([s.values['Money in'], k.accounted]));
+    check('Bookings and Distance are the endpoint\'s', s.values.Bookings === n(k.trips) && s.values.Distance === `${n(k.km)} km`, JSON.stringify([s.values.Bookings, s.values.Distance, k.trips, k.km]));
+    const d = await txtOf(page, '#view .cband .kpi:nth-child(4) .t-d');
+    check('fare per priced km, set against the fleet\'s own rate as a worded gap', s.values['Fare per priced km'] === aedOf(k.revenue_per_km)
+      && (F.revenue_per_km == null || d.includes(`against the fleet's ${aedOf(F.revenue_per_km)}`)), JSON.stringify([s.values['Fare per priced km'], d, F.revenue_per_km]));
+    check('Drivers and Last fix are not tiles: the card line carries the fixes in range and the drivers', !('Drivers' in s.values) && !('Last fix' in s.values)
+      && (await txtOf(page, '.idcard .vov-range')).startsWith(`In range ${n(k.fixes)} fixes`), await txtOf(page, '.idcard .vov-range'));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const want = ['At a glance', 'Fares on its bookings, day by day', 'Bookings, day by day', 'What the tracker saw', 'Who held it', 'What it did, by channel',
+      'Where its journeys stand', 'When it works', 'Harsh driving, by kind', 'Harsh driving, by person'];
+    check('order: 00 → 01 fares → 02 bookings | fixes → who | channel → verdicts | hours → kind | person → †',
+      JSON.stringify(s.heads.slice(0, want.length)) === JSON.stringify(want) && /^† /.test(s.heads.at(-1)), JSON.stringify(s.heads));
+    const dd = answer('/api/vehicle/drivers-detail') || { totals: [] };
+    const who = await bars(page, 'veh-who');
+    check('who held it: a bar per person (eight at most), in the job token', who.length === Math.min(8, dd.totals.length) && who.every((b) => /--mk-fill/.test(b.fill)), JSON.stringify(who.slice(0, 2)));
+    const mix = answer('/api/vehicle/mix') || {};
+    const ch = await bars(page, 'veh-chan');
+    const booked = (mix.platform || []).filter((r) => +r.bookings > 0);
+    check('by channel: bookings on each channel with a booking, in the channel\'s own colour', ch.length === booked.length
+      && ch.every((b) => /--c-/.test(b.fill)), JSON.stringify(ch));
+    const chanTxt = await txtOf(page, '[data-panel="veh-chan"]');
+    check('service and payment over bookings only: "unknown" (the tracker\'s journeys) never a slice', !/\bunknown\b/i.test(chanTxt) && /Service/.test(chanTxt) && /Payment/.test(chanTxt), chanTxt.slice(0, 200));
+    const mv = answer('/api/vehicle/movement') || {};
+    const vb = await bars(page, 'veh-verdicts');
+    check('where its journeys stand: a bar per verdict, with km and minutes', vb.length === (mv.by_verdict || []).length, JSON.stringify([vb.length, (mv.by_verdict || []).length]));
+    const sf = answer('/api/vehicle/safety') || {};
+    const kinds = await bars(page, 'veh-kinds');
+    check('harsh driving by kind: driving kinds in the alert feed\'s identity, the tracker\'s own faults in ink', kinds.length === (sf.by_type || []).length
+      && kinds.every((b) => (/tracker fault/.test(b.k) ? /--ink/.test(b.fill) : /--c-fms|--mk-fill/.test(b.fill))), JSON.stringify(kinds.slice(0, 3)));
+    const daily = answer('/api/vehicle/daily') || [];
+    const fsum = daily.reduce((a, r) => a + (r.revenue != null ? +r.revenue : 0), 0);
+    const earnTxt = await txtOf(page, '[data-panel="veh-earned"]');
+    check('fares day by day: the caption names the window\'s fares on every channel and says they are not Money in, nor the Fares tile\'s basis',
+      earnTxt.includes(`before commission — ${aedOf(fsum)} over the window`) && /not Money in/.test(earnTxt) && /not yet ruled/.test(earnTxt), earnTxt.slice(-400));
+    const pp = await bars(page, 'veh-persons');
+    const rated = (sf.by_driver || []).filter((r) => r.per_100km != null && r.driver_ext_id && +(r.booked_km ?? r.km) >= 200)
+      .sort((a, b) => +b.per_100km - +a.per_100km);
+    check('harsh driving by person: rated over 200 booked km, worst first', pp.length === rated.length && pp.every((b, i) => b.k === rated[i].driver_name), JSON.stringify([pp.map((b) => b.k), rated.map((r) => r.driver_name)]));
+    const hrs = await page.evaluate(() => !!document.querySelector('[data-panel="veh-hours"] svg'));
+    check('when it works: the hours the tab already fetched, drawn', hrs || !(mix.hours || []).length);
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('† utilisation only when it is absent (the report covers this car)', k.utilisation != null ? !ab.Utilisation : !!ab.Utilisation, JSON.stringify(s.abs.map((a) => a.label)));
+    check('† a channel statement, and how many people the drivers are, through the register', !!ab['A channel statement for this car']
+      && (!k.drivers || ab['Whether its drivers are that many people']?.fig === `${n(k.drivers)} counted`), JSON.stringify(s.abs));
+    await ctx.close();
+  }
+  {
+    /* A car no utilisation report covers, and journeys the telemetry cut
+       (synthetic): the tile goes absent with the true reason, the † band
+       says so and counts the cut journeys once each, from by_verdict. */
+    const noUtil = (q, real) => ({ ...real, utilisation: null, hours_online: null, hours_on_trip: null, earnings_per_hour: null, trips_per_online_hour: null });
+    const cut = (q, real) => ({ ...real, by_verdict: [...(real?.by_verdict || []).filter((r) => r.verdict !== 'partial'), { verdict: 'partial', n: 2, km: 5, minutes: 30 }] });
+    /* And the tracker's journeys in the mix, as production sends them: an
+       "unknown" service and payment, and an FMS row, with no booking. */
+    const fmsJ = (q, real) => ({ ...real,
+      product: [...real.product, { label: 'unknown', n: 263, bookings: 0, revenue: null }],
+      payment: [...real.payment, { label: 'unknown', n: 263, bookings: 0, revenue: null }],
+      platform: [...real.platform, { label: 'fms', n: 263, bookings: 0, revenue: null }] });
+    /* And a person with a rate over 57 km (synthetic, the shape production
+       showed): never drawn, counted in words. */
+    const short = (q, real) => ({ ...real, by_driver: [...(real.by_driver || []), { driver_name: 'Short Distance Driver', driver_ext_id: 'drv-short', n: 3, per_100km: 287.7, booked_km: 57 }] });
+    const { ctx, page, answer } = await open('arkiv', H, { fixtures: { '/api/vehicle/kpis': noUtil, '/api/vehicle/movement': cut, '/api/vehicle/mix': fmsJ, '/api/vehicle/safety': short } });
+    const s = await shape(page);
+    const mv = answer('/api/vehicle/movement');
+    const all = mv.by_verdict.reduce((a, r) => a + (+r.n || 0), 0);
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('utilisation absent with the TRUE reason: no report covers this car, all five fields empty', /no utilisation report in this window covers this vehicle/.test(s.na.Utilisation || ''), JSON.stringify(s.na));
+    check('† utilisation carries the same reason', /all empty for it/.test(ab.Utilisation?.why || ''), JSON.stringify(ab.Utilisation));
+    const chanTxt = await txtOf(page, '[data-panel="veh-chan"]');
+    const ch = await bars(page, 'veh-chan');
+    check('the tracker\'s 263 journeys are named in the caption, never a channel bar, a service or a payment', !/\bunknown\b/i.test(chanTxt)
+      && /263 tracker journeys on this car are not bookings/.test(chanTxt) && !ch.some((b) => /FMS/i.test(b.k)), JSON.stringify([ch.map((b) => b.k), chanTxt.slice(0, 160)]));
+    const pp = await bars(page, 'veh-persons');
+    const ppTxt = await txtOf(page, '[data-panel="veh-persons"]');
+    check('a rate over 57 km is never drawn; the people under the floor are counted in words', !pp.some((b) => b.k === 'Short Distance Driver')
+      && /under 200 booked km on this car (is|are) not rated/.test(ppTxt), JSON.stringify([pp.map((b) => b.k), ppTxt.slice(-120)]));
+    check('† journeys with a hole in the telemetry: the partial count of every journey', ab['Journeys with a hole in the telemetry']?.fig === `2 of ${n(all)}`, JSON.stringify(ab['Journeys with a hole in the telemetry']));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', H, { width: 390 });
+    check('#vehicle/overview at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

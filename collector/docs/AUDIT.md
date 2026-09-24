@@ -2025,3 +2025,19 @@ The verdict: 3 moved with nothing paying for it. Money the cars brought in: AED 
 Booked against tracked covers 73 cars: 168,988 km booked and 184,296 km tracked, 15,308 km that the tracker saw and no booking accounts for. The lowest-returning car over 100 km returned AED 1.12 a kilometre.
 
 The live fils scan is clean in both skins. The arkiv page is 11,440 characters of text against the old skin's 9,583.
+
+### #vehicle/overview — 2026-09-24
+
+Production through live-ui on :8611 on a busy plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p59/`). No page error, no sideways scroll, and the live fils scan is clean in both skins.
+
+On that car:
+* Money in: AED 15,375.18 (AED 932.00 in fares and AED 14,443.18 attributed from payouts).
+* Fare per priced km: AED 4.14, 0.39 under the fleet's 4.53.
+* Utilisation: absent. No utilisation report covers the car.
+* Fares, day by day: AED 24,064.90 on every channel over the window. That is neither Money in nor the Fares tile; see FIX-STATUS P59.
+* 307 tracker journeys are named in the channel caption and are no longer an "unknown" slice of service and payment.
+
+This pass caught three things, all fixed before the commit:
+* A sixth band tile wrapped alone onto its own line.
+* A 57 km rate was drawn as the longest bar.
+* The first draft's fares caption said something false.

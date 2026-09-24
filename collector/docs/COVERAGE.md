@@ -6743,3 +6743,5 @@ number (5 and 5), and never a passport or RTA number.
   #driver/activity.
 
 * **`glance()` always crowns a hero, and a glance host is a grid.** A band with a second row of tiles (#vehicles' register) cannot build that row with a second `glance()` call. Each call makes its first tile a hero, so the page drew two. Build the row with `kpiTiles(…map(t => ({ ...t, glance: true, hero: false })))` in a `.kpis.glance` of its own, and place it with `tilesHost.after(…)`. Do not append it into the tiles host: anything appended there becomes one more grid cell, and glance() then overwrites the caption.
+
+* **`/api/vehicle/daily`'s `revenue` is every booking's fare on every channel.** It is `sum(price) FILTER (WHERE has_fare)`, Uber included, so it is k.revenue's basis. It is neither Money in (payout-basis channels by their payout) nor the Fares tile's `accounted_fares` (fare-basis channels only). On one production car that was AED 24,064.90 against AED 15,375.18 and AED 932.00. A chart of it must say which it is. Separately, a 00 band's hero spans two of the six glance columns, so a first row carries five tiles, not six.
