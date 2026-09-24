@@ -958,6 +958,26 @@ console.log('\n4.12 · Credentials: the paste in the redesign’s forms, reasons
   await s.close();
 }
 
+console.log('\n4.13 · Optimise: 00, Idle hours the hero, the When/Where switch and its ranked hours');
+{
+  const opt = ans('/api/optimise?period=month&grain=auto');
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('optimise');
+  const o = await outline(p.page);
+  const m = await p.page.evaluate(() => ({
+    hero: `${document.querySelector('.m-stat.hero .l')?.textContent}|${document.querySelector('.m-stat.hero .n')?.textContent}`,
+    three: !!document.querySelector('.m-stats.three'),
+    cards: [...document.querySelectorAll('.m-card > h2')].map((h) => h.textContent),
+  }));
+  check('00 heads the statement, then the tiles, then the When/Where switch and its sections',
+    JSON.stringify(o.slice(0, 4)) === JSON.stringify(['head:At a glance', 'statement', 'glance', 'div']), o.join(' → '));
+  check(`the hero is Idle hours, ${f0(opt.idle_h_between_jobs)} h as /api/optimise answered, two columns under it`,
+    m.hero === `Idle hours|${f0(opt.idle_h_between_jobs)} h` && !m.three, JSON.stringify(m));
+  check('When: the hours worth being out for, and the ones that do not pay',
+    m.cards.join(' | ') === 'Worth being out for | Hours that do not pay for themselves', m.cards.join(' | '));
+  await p.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');

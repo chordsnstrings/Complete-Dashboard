@@ -2284,7 +2284,7 @@ async function optimise(deck, ctx) {
     : cells.filter((c) => n(c.jobs_per_online_h) < med)
       .reduce((a, c) => a + (med - n(c.jobs_per_online_h)) * n(c.online_h) * occ(c), 0);
 
-  lede(deck, {
+  const statement = lede(deck, {
     claim: idlePct != null ? `${idlePct}% of paid hours are idle`
       : 'Availability is not being collected yet',
     sub: idlePct != null
@@ -2294,6 +2294,11 @@ async function optimise(deck, ctx) {
     tone: idlePct >= 70 ? 'warn' : null,
   });
 
+  /* THE REDESIGN: 00 heads the statement, and the three tiles become two
+     columns with Idle hours the hero across the row \u2014 three to a row at
+     390px gave each figure 110px, and "+1,234" at a display size does not fit
+     that. Same tiles, same words. */
+  const AK = phoneContract();
   stats(deck, [
     { label: 'Idle hours', value: `${fmt(opt.idle_h_between_jobs)} h`,
       sub: `over ${fmt(opt.handovers)} handovers`, tone: 'warn' },
@@ -2302,7 +2307,8 @@ async function optimise(deck, ctx) {
       sub: 'drop-off to next pick-up' },
     { label: 'Extra trips', value: upside ? `+${fmt(Math.round(upside))}` : '\u2014',
       sub: 'a month, at the fleet median', tone: upside ? 'good' : null },
-  ], true);
+  ], !AK, { hero: AK });
+  if (AK) deck.insertBefore(secHead('00', 'At a glance', WINDOW_NOTE()), statement);
 
   const body = el('div');
   const bar = el('div');
