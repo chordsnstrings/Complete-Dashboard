@@ -1373,6 +1373,82 @@ console.log('\n4.18 · Driver: 00 over the person, contact first, Bookings the h
   await lc.close();
 }
 
+console.log('\n4.19 · Vehicle: 00 over the plate, Bookings the hero, a fare average that names its bookings, tracker faults named, failed reads that say so');
+{
+  const VK = '/api/vehicle/kpis?period=month&plate=L45235&grain=auto';
+  const VS = '/api/vehicle/safety?period=month&plate=L45235&grain=auto';
+  const VD = '/api/vehicle/drivers?period=month&plate=L45235&grain=auto';
+  const H = await import('../api/public/ui.js');
+  const k = ans(VK);
+  const sf = ans(VS);
+  const tilesOf = (page) => page.evaluate(() => [...document.querySelectorAll('.m-deck > .m-stats .m-stat')].map((s) => ({
+    l: s.querySelector('.l').textContent, n: s.querySelector('.n').textContent, s: s.querySelector('.s')?.textContent || null,
+    absent: s.querySelector('.n').hasAttribute('data-absent'), na: s.querySelector('.n').classList.contains('t-na'), cls: s.className })));
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('vehicle/L45235');
+  const o = (await outline(p.page)).filter((x) => x !== 'ak-applies');
+  const m = await p.page.evaluate(() => ({
+    plate: getComputedStyle(document.querySelector('.m-lede b')).fontFamily,
+    numbered: [...document.querySelectorAll('.m-deck > .m-card > h2, .m-deck > .m-sec')]
+      .filter((h) => /counter\(arkiv-sec/.test(getComputedStyle(h, '::before').content)).map((h) => h.textContent),
+    bars: [...document.querySelectorAll('.m-deck .m-card')].find((c) => c.querySelector(':scope > h2')?.textContent === 'Harsh-driving events')?.textContent || '',
+  }));
+  const t = await tilesOf(p.page);
+  check('00 heads the statement, then the tiles; the footer closes',
+    JSON.stringify(o.slice(0, 3)) === JSON.stringify(['head:At a glance', 'statement', 'glance']) && o[o.length - 1] === 'foot', o.join(' → '));
+  check('…the statement’s claim is the plate, set in the mono a registration is read in', /Plex Mono/.test(m.plate), m.plate);
+  check('…then the sections that were there, numbered in their order', JSON.stringify(m.numbered)
+    === JSON.stringify(['Bookings a day', 'Harsh-driving events', 'More']), JSON.stringify(m.numbered));
+  const hero = t.find((x) => /\bhero\b/.test(x.cls));
+  check(`Bookings is the hero, ${f0(k.trips)} as /api/vehicle/kpis answers`, hero && hero.l === 'Bookings' && hero.n === f0(k.trips), JSON.stringify(hero));
+  const fares = t.find((x) => x.l === 'Fares') || {};
+  check(`the fare average names the ${f0(k.priced_trips)} bookings it is over, not the ${f0(k.trips)} on the hero`,
+    fares.n === moneyOf(k.revenue) && fares.s === `${moneyOf(k.avg_fare)} a booking over the ${f0(k.priced_trips)} that report a fare`,
+    JSON.stringify(fares));
+  const ev = H.splitAlerts(sf.by_type);
+  const faultNames = sf.by_type.filter((r) => r.device === true).map((r) => r.alert_type);
+  check(`the tracker’s own power loss is named as a fault, and counted (${f0(ev.deviceN)} of ${f0(ev.total)})`,
+    faultNames.length > 0 && faultNames.every((a) => m.bars.includes(`${a} (tracker fault)`))
+      && m.bars.includes(`${f0(ev.deviceN)} of these ${f0(ev.total)} events are the tracker reporting its own power loss`),
+    m.bars.slice(0, 200));
+  await p.close();
+  const pc = await phonePage(browser, { skin: 'classic', fixture });
+  await pc.open('vehicle/L45235');
+  check('(the old phone still draws it as one more harsh-driving bar — unchanged until the flip)',
+    await pc.page.evaluate(() => !/tracker fault/.test(document.querySelector('.m-deck').textContent)));
+  await pc.close();
+
+  const k2 = { ...k, revenue: null, avg_fare: null, priced_trips: 0, km: null, avg_km: null };
+  const absentFx = { ...fixture, answers: { ...fixture.answers, [VK]: { status: 200, type: 'application/json', body: JSON.stringify(k2) } } };
+  const a = await phonePage(browser, { skin: 'arkiv', fixture: absentFx });
+  await a.open('vehicle/L45235');
+  const ta = await tilesOf(a.page);
+  const said = await a.page.evaluate(() => document.querySelector('.m-deck').textContent);
+  const by = (l) => ta.find((x) => x.l === l) || {};
+  check('Fares with no fare is absent with the desktop vehicle page’s reason',
+    by('Fares').na && by('Fares').absent && by('Fares').n === 'no booking on this vehicle carries a fare', JSON.stringify(by('Fares')));
+  check('Distance with no distance is absent with its reason — never "— km"',
+    by('Distance').na && by('Distance').n === H.avgKmSub(k2) && !/— km/.test(said), JSON.stringify(by('Distance')));
+  await a.close();
+
+  const lostFx = { ...fixture, answers: { ...fixture.answers } };
+  [VK, VS, VD].forEach((key) => delete lostFx.answers[key]);
+  const l = await phonePage(browser, { skin: 'arkiv', fixture: lostFx });
+  await l.open('vehicle/L45235');
+  const ol = (await outline(l.page)).filter((x) => x !== 'ak-applies');
+  const lw = await l.page.evaluate(() => ({ deck: document.querySelector('.m-deck').textContent,
+    errs: [...document.querySelectorAll('.m-deck .m-err')].map((e) => e.textContent) }));
+  check('a figures read that failed says so in place of the tiles — no "—", no "— km"',
+    !ol.includes('glance') && /This car’s figures could not be fetched/.test(lw.errs[0] || '') && !/— km/.test(lw.deck), ol.join(' → '));
+  check('…the harsh-driving events and who drove it each say so under their own head, rather than vanishing',
+    ol.includes('card:Harsh-driving events') && ol.includes('sec:Who drove it') && lw.errs.length === 3
+      && /harsh-driving events could not be fetched/.test(lw.errs[1]) && /Who drove this car could not be fetched/.test(lw.errs[2]),
+    JSON.stringify(lw.errs));
+  check('…every refused read was one of the three, and nothing threw',
+    [...l.misses].every((x) => [VK, VS, VD].includes(x)) && !l.errors.length, [...l.misses].join(' '));
+  await l.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');

@@ -1828,36 +1828,76 @@ async function driver(deck, ctx) {
 async function vehicle(deck, ctx) {
   const plate = ctx.param;
   skeleton(deck, 4);
+  /* Which reads FAILED — the driver screen's rule; see its block comment. */
+  const lost = new Set();
   const [profile, kpis, daily, drivers, safe] = await Promise.all([
     qAll('/api/vehicle/profile', { plate }).catch(() => null),
-    qAll('/api/vehicle/kpis', { plate }).catch(() => null),
+    qAll('/api/vehicle/kpis', { plate }).catch(() => { lost.add('kpis'); return null; }),
     qAll('/api/vehicle/daily', { plate }).catch(() => []),
-    qAll('/api/vehicle/drivers', { plate }).catch(() => []),
-    qAll('/api/vehicle/safety', { plate }).catch(() => null),
+    qAll('/api/vehicle/drivers', { plate }).catch(() => { lost.add('drivers'); return []; }),
+    qAll('/api/vehicle/safety', { plate }).catch(() => { lost.add('safety'); return null; }),
   ]);
   if (!ctx.alive()) return;
   deck.innerHTML = '';
   if (!profile) { failed(deck, new Error('No vehicle in the record carries this plate.')); return; }
 
+  /* ── THE ARKIV SKIN: the driver screen's form, for a car ────────────────
+     00 At a glance heads the statement, whose claim is the PLATE — set in
+     the mono a registration is read in, because it is a code and not a
+     name — then the tiles with Bookings as the hero, then the sections that
+     were there, numbered: Bookings a day, Harsh-driving events, Who drove it,
+     More. Found and fixed under the skin, the old phone keeping each until
+     the flip (FIX-STATUS P25):
+       Fares — "AED 36.40 a booking" beside a Bookings tile of every booking,
+         where avg_fare is avg(price) FILTER (WHERE has_fare)
+         (api/vehicle_routes.js, /api/vehicle/kpis): the average over the
+         bookings that CARRY a fare. The same denominator defect avgKmSub()
+         exists for, said the same way — "over the N that report a fare"
+         where N is not every booking. With no fare at all the tile is
+         absent with the desktop vehicle page's own reason.
+       Distance — "— km" as though a figure; absent with avgKmSub()'s reason.
+       Harsh-driving events — Main Power Lost is the tracker reporting its
+         own power loss, and the phone drew it as one more harsh-driving bar
+         and counted it in every share. The desktop vehicle page marks it
+         "(tracker fault)" in the bar's own label and says what it is; the
+         phone now does both, in the desktop's words (the desktop's closing
+         clause about a rate is left out: this screen shows no rate).
+       A failed read — kpis, safety and drivers each `.catch()` to nothing,
+         so a failed kpis read printed "—" and "— km" and a failed safety or
+         drivers read removed its section without a word. Each now says it
+         could not be fetched, in its own place. */
+  const AK = phoneContract();
   const k = kpis || {}, spec = profile.spec || {};
   ctx.setTitle(plate, [spec.make, spec.model].filter(Boolean).join(' ') || 'vehicle');
-  lede(deck, {
+  if (AK) deck.append(secHead('00', 'At a glance', windowLabel()));
+  const plateLede = lede(deck, {
     claim: plate,
     sub: [spec.year, spec.make, spec.model].filter(Boolean).join(' ')
       + (spec.colour ? ` \u00b7 ${spec.colour}` : '')
       + (spec.compliance_status ? ` \u00b7 ${spec.compliance_status.toLowerCase()}` : ''),
     tone: spec.compliance_status && spec.compliance_status !== 'ACTIVE' ? 'warn' : null,
   });
+  if (AK) plateLede.classList.add('ak-plate');
 
-  stats(deck, [
+  const priced = n(k.priced_trips);
+  const fareSub = !k.avg_fare ? null
+    : AK && priced != null && k.trips != null && priced !== n(k.trips)
+      ? `${money(n(k.avg_fare))} a booking over the ${fmt(priced)} that report a fare`
+      : `${money(n(k.avg_fare))} a booking`;
+  if (AK && lost.has('kpis')) {
+    failed(deck, new Error('This car\u2019s figures could not be fetched, so none of them is shown.'));
+  } else stats(deck, [
     { label: 'Bookings', value: fmt(k.trips), sub: k.days_worked ? `${countOfDays(k.days_worked)} worked` : null },
-    { label: 'Fares', value: money(n(k.revenue)), sub: k.avg_fare ? `${money(n(k.avg_fare))} a booking` : null },
+    { label: 'Fares', value: money(n(k.revenue)), sub: fareSub,
+      ...(AK && k.revenue == null ? { na: 'no booking on this vehicle carries a fare' } : {}) },
     /* Same rule, same helper — /api/vehicle/kpis spells the denominator
        measured_trips rather than trips_with_distance and avgKmSub reads both. */
-    { label: 'Distance', value: `${fmt(k.km)} km`, sub: avgKmSub(k), long: true },
+    AK && k.km == null
+      ? { label: 'Distance', value: '\u2014', na: avgKmSub(k), long: true }
+      : { label: 'Distance', value: `${fmt(k.km)} km`, sub: avgKmSub(k), long: true },
     { label: 'Drivers', value: fmt(k.attributed_drivers ?? unwrap(drivers).total),
       sub: 'held this car' },
-  ]);
+  ], false, { hero: AK });
 
   /* TODAY IS NOT A DAY YET, and this chart drew it as one.
      ───────────────────────────────────────────────────────────────────────
@@ -1883,12 +1923,28 @@ async function vehicle(deck, ctx) {
     deck.append(c.card);
   }
 
+  if (AK && lost.has('safety')) {
+    const c = card('Harsh-driving events', null);
+    failed(c.body, new Error('This car\u2019s harsh-driving events could not be fetched.'));
+    deck.append(c.card);
+  }
   if (safe?.by_type?.length) {
     const c = card('Harsh-driving events', 'A count says more about how far this car drove than how it was driven.');
-    bars(c.body, safe.by_type.map((r) => ({ label: r.alert_type, n: n(r.n) })), { max: 6 });
+    bars(c.body, safe.by_type.map((r) => ({
+      label: AK && r.device === true ? `${r.alert_type} (tracker fault)` : r.alert_type, n: n(r.n) })), { max: 6 });
+    const ev = splitAlerts(safe.by_type);
+    if (AK && ev.deviceN) {
+      c.body.append(el('p', 'm-cap',
+        `${fmt(ev.deviceN)} of these ${fmt(ev.total)} events are the tracker reporting its own `
+        + 'power loss rather than anything done at the wheel. They are a wiring job.'));
+    }
     deck.append(c.card);
   }
 
+  if (AK && lost.has('drivers')) {
+    deck.append(el('p', 'm-sec', 'Who drove it'));
+    failed(deck, new Error('Who drove this car could not be fetched.'));
+  }
   const dr = unwrap(drivers).rows;
   if (dr.length) {
     deck.append(el('p', 'm-sec', 'Who drove it'));
