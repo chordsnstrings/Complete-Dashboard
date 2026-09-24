@@ -1607,3 +1607,11 @@ Production (no line ever stored; 347 people, 0 measurable), both skins at
 1440 and 390, light and dark (scratchpad `pagephase/shots/policy/`): no
 error, no sideways scroll, one highlight. 215 people carry both halves of
 the ratio, 61 cash only, 7 earnings only, 64 neither.
+
+### #deposits — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/deposits/`): no error, no sideways scroll, two highlights.
+58 of 276 drivers carry half the ceiling; the last-cash-fare months show
+cash still coming in this month for about a hundred drivers. Found by
+looking and fixed before commit: "347 of 347 unknown" wrapped at 1440.

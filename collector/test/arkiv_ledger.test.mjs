@@ -280,4 +280,45 @@ if (want('policy')) {
   await c.ctx.close();
 }
 
+/* ══ #deposits ═══════════════════════════════════════════════════════════ */
+if (want('deposits')) {
+  console.log('\n#deposits');
+  const { ctx, page, answer } = await open('arkiv', 'deposits');
+  const s = await shape(page);
+  const n = answer('/api/ledger/people').people.filter((p) => p.name).length;
+  const ex = answer('/api/ledger/exposure').people;
+  const hand = answer('/api/ledger/entries', (q) => q.type_code === 'cash_deposit');
+  const carriers = ex.filter((p) => p.owes?.cash_taken != null);
+  const sum = carriers.reduce((a, p) => a + p.owes.cash_taken, 0);
+  const trips = carriers.reduce((a, p) => a + p.owes.cash_taken_trips, 0);
+  const r = await page.evaluate(() => ({
+    head: [...document.querySelectorAll('[data-panel="deposit-list"] thead th')].map((t) => t.textContent.trim()),
+    sortable: document.querySelectorAll('[data-panel="deposit-list"] thead button[data-sk]').length,
+    first: document.querySelector('[data-panel="deposit-list"] tbody tr td')?.textContent.trim(),
+    top: document.querySelectorAll('[data-panel="deposit-top"] .hb').length,
+    conc: document.querySelector('[data-panel="deposit-conc"] .pbody p.cap')?.textContent || '',
+    formFirst: document.querySelector('[data-panel="deposits"] .depform') != null,
+  }));
+  check('the order: 00, the form, the twenty largest, the table, three distributions, †', JSON.stringify(s.heads)
+    === JSON.stringify(['At a glance', 'Record a handover', 'Who is carrying the most', 'Who is carrying cash', 'The ceilings, in bands',
+      'The month each driver’s last cash fare was taken', 'How concentrated the ceiling is', '† What this page does not know']) && r.formFirst,
+  JSON.stringify(s.heads));
+  check('the hero is the ceiling, called one and not a balance', s.hero === 'Ceiling on cash outstanding' && s.values[s.hero] === aed(sum)
+    && s.subs[s.hero].startsWith('every cash fare on record, not a balance'), JSON.stringify([s.values[s.hero], s.subs[s.hero]]));
+  check('the cash trips behind it, and their mean said to be derived', s.values['Cash trips behind it'] === trips.toLocaleString('en-US')
+    && s.subs['Cash trips behind it'] === `a mean of ${aed(sum / trips)} a trip — derived`, JSON.stringify(s.subs['Cash trips behind it']));
+  check('handovers recorded, from the register\'s own count', s.values['Handovers recorded'] === String(hand.totals.rows), s.values['Handovers recorded']);
+  check('the table gains the ceiling and the last cash fare, and becomes sortable — its default order kept',
+    r.head.includes('Cash fares on record (ceiling)') && r.head.includes('Last cash fare') && r.sortable > 0
+    && r.first === [...ex].sort((a, b) => (b.owes?.cash ?? -1) - (a.owes?.cash ?? -1))[0].name, JSON.stringify([r.head, r.first]));
+  check('the twenty largest, plus the drivers with none as one count', r.top === Math.min(20, carriers.length) + 1, String(r.top));
+  check('concentration says how many drivers carry half', /carry half the ceiling/.test(r.conc), r.conc);
+  check('the † band names the window: this page is the whole record', s.abs.length === 4 && s.abs[3].fig === 'The whole record', JSON.stringify(s.abs));
+  await ctx.close();
+  const c = await open('classic', 'deposits');
+  const head = await c.page.evaluate(() => [...document.querySelectorAll('[data-panel="deposit-list"] thead th')].map((t) => t.textContent.trim()));
+  check('old skin: no 00 band, the table as it was', !(await c.page.$('#view .cband')) && !head.includes('Last cash fare'), JSON.stringify(head));
+  await c.ctx.close();
+}
+
 await done();
