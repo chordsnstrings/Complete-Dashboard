@@ -3806,3 +3806,59 @@ Effort: **S** restyle only · **M** sections restructured · **L** new data or l
 - CONFIRMED IN SOURCE: missingTarget turns Number(null) into 0 (app.js:87). The compliance sinceLast bug (server.js:5464) is real. identity.js never reads basis. cohort.js near() counts negative days_left (l.272). charging.js:79 falls back to the literal 'AED 0.00'. settlement.js:260 always says 'larger of the two'. playbook.js:68 says 'a month'. impact_kind marks every rule except idle_vehicle 'measured' (server.js:4264). compare.js:230-232 still claims Uber has no fare, and the sentence is split across two string literals, which is why the fare_reason_shared regex misses it. Alerts are written only by fms.js, so FMS identity is right for #safety. Seat occupancy is written only by cabman.js, so the #unauthorized rejection of FMS colour is right. is_booking = platform <> 'fms', so FMS identity is right for the journeys behind the bars on #overview.
 - SMALLER POINTS, not violations. #insights: the 'What Uber is asking' table ends up below six new charts; place it straight after the ranked list. #settlement/mix: 'Everything else (only when non-zero)' hides a measured-zero remainder that live shows so the tiles add up to 100%. #capacity: hatching all 168 heatmap cells blunts the sequential ramp; say it in a caption instead. #settings: the new band repeats what #authBanner already says.
 - The :8200 mirror was not answering (connection refused) during this review. Every check above was made against the source in api and api/public. No payload figure was re-measured.
+
+## Phone PWA — redesign (operator ruling 2026-09-24)
+
+The operator ruled "Phone will have a redesigned pwa app." That replaces §3 "Phone shell", which allowed only a repaint through the tokens with no screen, tab, sheet or flow changes. The standing instruction still holds for the phone: every figure, every screen's purpose and every operational flow it has today stays. Only how they look, how they are laid out and how they are reached may change. Rulings 1–8 (§1) and the house principle (absent with the true reason, never zero) apply unchanged.
+
+**Gated like the desktop.** Which DOM the phone builds is a token, `--pg-phone`: app.css declares 0, and a phone-only sheet, `m/arkiv-m.css`, declares 1. index.html writes that sheet with the parser, after arkiv.css, only when the build is the phone and the skin is Arkiv. `m/ui.js phoneContract()` reads the token, as `contract()` and `shellContract()` do. No module reads the skin attribute. Under the old skin the phone's DOM stays byte-identical to today (`test/phone_classic.test.mjs` holds it, against recorded API answers and a frozen clock). The manifest keeps production's colours until the flip (STEP 5); it is one static file, so it cannot be gated. The `theme-color` metas can be gated, and under the token they take the resolved `--paper`.
+
+### Screens, and what each keeps
+
+| screen | what it shows today (all kept) | Arkiv layout |
+|---|---|---|
+| Today (tab) | the today card (bookings, trip value ≈, priced so far, money in, distance, reporting now, latest booking, fares lag, unrated, wired); the window's daily rate and the day-on-day change; bookings a day; six window tiles; who called it off; needs attention; go to | the today card becomes a livebar: a dot lede with "as of HH:MM Dubai", the scope caption and ruled cells, with Latest booking as a cell. Then 00 At a glance: the statement, then the tiles, Bookings as hero. Then 01 Bookings a day, 02 Who called it off, 03 Needs attention, 04 Go to |
+| Money (tab) | share still to be collected; trip value against money in; trip value a day; four tiles; how fares settle; by channel | 00 statement and tiles (Trip value hero), 01 Trip value a day, 02 How fares settle (ranked ink bars, share printed), 03 By channel (a swatch beside each channel name) |
+| People (tab) | search, sort (bookings / distance / money in), rows with a face, the cut line | a control strip (search and sort), then 01 People who drove. Faces become square hairline plates |
+| Fleet (tab) | search, sort, plate rows with live state and driver, the cut line | as People |
+| More (tab) | Analyse, Operate, On the desktop; This app; open the desktop build | numbered sections; the wordmark and colophon on This app |
+| Live, Safety, Unauthorized, Sources, Corporate, Analyst, Optimise, Trips, Payouts, Credentials | each as today, including every provider sentence and coverage note | statement, 00 tiles with a hero, numbered sections. Tone becomes a dot and the figure stays ink |
+| Online time (the call list) | day and start pickers, To chase / Cannot judge / Everyone, the lede, one row per driver that dials, the reason per grey state, the no-phone count | controls first, then **added** 00 At a glance from `d.totals` (Late as hero, On time, Cannot be judged, People). Then 01 the call list, in the same order and rows, still tel: links |
+| Cash handed in (the only write) | recorded by (sticky), from (search, a picked account named), amount with echo, photograph (rear camera, compressed on device), note, Check it, Record the deposit | the same steps in the same order, numbered 01–05 as ruled sections. Targets stay ≥44px, the amount stays 56px, and the primary button is an ink fill |
+| Driver, Vehicle | as today, including Call and Email, the tiles, standing, harsh driving, the links to the desktop tabs | the face as a plate in the statement; contact rows first; 00 tiles |
+| fallback | desktop driver and vehicle tabs rendered in #m; "built for a bigger screen" for the rest | unchanged modules, placed in an Arkiv container with the inline footer |
+
+### Navigation (kept, restyled)
+
+- The bottom tab bar (five tabs): mono labels, and a 2px ink rule over the lit tab. Tapping the lit tab still returns to its root.
+- The header: the back arrow when deep, and the wordmark "Fleet" (Fraunces, the only serif) at a tab root, where it links to Today. Then the title in Karla 600 and the sub-line in mono, and ⟳. Pull-to-refresh is kept.
+- **Changed:** the ⋮ button becomes a visible control bar under the header. It names the window, the channel and the fleet, and takes one tap to the same bottom sheet. On a screen where a control does not apply, the bar says so, in the desktop's own `appliesSentence()` (shell.js).
+- The sheet keeps the same `rangePanel()`, channel list and fleet list. It is squared off under an ink rule, with mono headings and every target ≥44px.
+- Offline: the service worker precaches `m/arkiv-m.css` and every new import. The stale bar stays, as a neutral band with a hollow dot.
+
+### Arkiv treatment
+
+- **Type.** Karla for prose, names, titles and figures (proportional). Plex Mono for labels, section heads, controls, tab labels and row figures (tabular). Fraunces only on the wordmark. Every size is a step of app.css's scale.
+- **Tokens.** Only `var()`: m/arkiv-m.css has no hex, and every rule is scoped to `:root[data-skin="arkiv"]`. There is no accent: a selection is an ink fill or an ink rule. A channel is shown by a swatch beside its name, never by coloured text.
+- **Geometry.** No cards, radii or shadows. A section is a 1.5px ink rule with a numbered mono head (00, 01, …). Tiles sit two across with hairline column rules. The hero spans both columns and carries the screen's one highlight. Rows are separated by hairlines.
+- **Tap targets ≥44px.** Header buttons, segments, chips, sheet options and range chips go from 40px to 44px. Rows stay ≥52px, tabs 56px, and the amount field 56px.
+- **Dots (ruling 1).** A warning is a hollow red dot, critical a solid red dot, good a solid green dot. Each carries a screen-reader word. Digits and words stay ink.
+- **Dark mode (ruling 3).** Everything comes from the generated dark set, so the phone's existing pre-paint theme stamp covers it.
+- **Money (ruling 2).** Already precise; unchanged.
+
+### Added from the design (only where the data is already fetched, or one named GET)
+
+- The window named on every screen, and why a control does not apply (above).
+- The 00 / numbered-section page contract on every screen, and the footer on every screen: the basis (the phone's existing source line), the principle line, and a colophon naming the window and Dubai time.
+- Latest booking as a figure in the today strip (`todayLive().lastAt`, already fetched).
+- The call list's glance from `d.totals` (already fetched).
+- A swatch beside channel names on Money, Payouts and Sources.
+- † What this screen does not know, on Today and Money, from figures the screens already hold: unpriced bookings and unmapped outcomes, each with the reason the screen already prints.
+
+### Not adopted, and why
+
+- The desktop's six-column glance, and its hero charts with axes (gapBars, hbars, heatmaps). A 390px plot cannot carry legible axis labels, so the phone keeps its sparkline with first and last day, and its share bars.
+- A masthead band with a date line. It would cost the fold on every screen, and the control bar already names the window.
+- Rebuilding the desktop driver and vehicle tabs natively for the phone. The desktop agent converts those modules; the phone restyles their container only.
+- The manifest's `background_color` and `theme_color`. They are one static file, so they move at the flip (STEP 5).
+- Deltas on Today's tiles against the period before. They need `/api/compare/period` and the desktop's reason logic, which lives in app.js and cannot be imported on the phone. Left for a follow-up rather than copied.
