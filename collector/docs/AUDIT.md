@@ -2142,3 +2142,11 @@ Production through live-ui on :8611, both skins at 1440 and 390, light and dark 
 The verdict: 17 collectors failed on their last run, with 37 needing attention of 54 runs. Days still owed: 2,052, from 236 refused windows, 44 of them past retention. Rows on record: 1,777,649 across 12 datasets. Stalest scheduled feed: Bolt, 419 h; the freshest, CABMAN, 4 min.
 
 Refusals by provider: Yango 109, FMS 81, Uber 45, Bolt 1. By reason: credential 109, "refused, with no reason given" 81, past retention 44, and one each for a rate limit and a short collection.
+
+### #coverage — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p74/`). No page error, no sideways scroll, and the fils scan is clean.
+
+The verdict: 19 days are missing from the record, across 2 sources with a hole; the worst is Yango, with 17. In the window, 1 day is missing (Yango). The window holds 36,174 rows over 24 days, today unfinished.
+
+The Uber check covers 34 windows at 100% agreement (246,337 on Uber's side, 247,074 on ours) with 0 never stored. The scatter sits on the line.

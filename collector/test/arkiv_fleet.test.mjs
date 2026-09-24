@@ -1152,4 +1152,70 @@ if (want('sources')) {
   }
 }
 
+/* ══ #coverage ════════════════════════════════════════════════════════════ */
+if (want('coverage')) {
+  console.log('\n#coverage');
+  const gapTags = (page) => page.evaluate(() => [...document.querySelectorAll('#view .panel')].flatMap((p) => {
+    const hs = [...p.querySelectorAll('thead th')].map((h) => h.textContent.replace(/[↑↓]/g, '').trim());
+    const i = hs.indexOf('Was it asked for?');
+    return i < 0 ? [] : [...p.querySelectorAll('tbody tr')].map((tr) => ({ t: tr.children[i]?.textContent.trim(), cls: tr.children[i]?.querySelector('.pill, .tag')?.className || null }));
+  }));
+  {
+    const { ctx, page } = await open('classic', 'coverage');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), win: !!document.querySelector('[data-panel="cov-window"]') }));
+    const g = await gapTags(page);
+    check('old skin: no band, no window chart, the gap answers as toned tags', !r.band && !r.win && g.some((x) => /\btag\b/.test(x.cls || '')), JSON.stringify([r, g.slice(0, 2)]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'coverage');
+    const s = await shape(page);
+    const all = answer('/api/coverage/calendar', (q) => q.from === '2000-01-01');
+    const holed = all.sources.filter((x) => x.missing_days > 0);
+    const f = await vfig(page);
+    check('00: the verdict over the whole record; its figure, the sources with a hole, not a tile (ruling 7)', s.vdctIn00 && f === n(holed.length)
+      && !('Sources with a hole' in s.values) && s.hero === 'Missing days, all history', JSON.stringify([f, Object.keys(s.values), s.hero]));
+    check('the missing days and the rows are the calendar\'s', s.values['Missing days, all history'] === n(all.sources.reduce((a, x) => a + x.missing_days, 0))
+      && s.values['Rows on record'] === n(all.sources.reduce((a, x) => a + x.total_rows, 0)), JSON.stringify(s.values));
+    check('no tile anywhere wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const heroes = await page.evaluate(() => document.querySelectorAll('#view .kpi.is-hero').length);
+    check('one hero on the page: the Uber check\'s tiles are a hero-less row', heroes === 1, String(heroes));
+    const win = await page.evaluate(() => { const p = document.querySelector('[data-panel="cov-window"]'); return p ? { svg: !!p.querySelector('svg'), cap: [...p.querySelectorAll('p.cap')].at(-1)?.textContent || '' } : null; });
+    check('the window\'s rows day by day, as one chart', !!win && win.svg && /rows over [\d,]+ day/.test(win.cap), JSON.stringify(win));
+    const sc = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Checked against Uber’s own report');
+      return p ? { dots: p.querySelectorAll('svg circle.sc-dot').length, ref: !!p.querySelector('svg .sc-ref') } : null; });
+    const ver = answer('/api/coverage/verified');
+    check('Uber says against we hold: a dot per window Uber answered, the line where they agree', sc && sc.ref && sc.dots === ver.windows.filter((w) => !w.error && w.uber_rows != null && w.our_rows != null).length, JSON.stringify(sc));
+    const g = await gapTags(page);
+    check('every gap answer an ink outline chip — "a request inside it failed" included', g.length > 0 && g.every((x) => x.cls === 'pill'), JSON.stringify(g.slice(0, 3)));
+    const ds = await bars(page, 'cov-datasets');
+    check('days with a reading, per dataset: a bar per source that wrote a day', ds.length >= all.sources.length, JSON.stringify(ds.map((b) => b.k)));
+    const H = s.heads;
+    check('order: 00 → the window → the Uber check → ours only → no earnings → datasets → … → the calendars → †', H[1] === 'Rows collected on each day of the window'
+      && H[2] === 'Checked against Uber’s own report' && H[3] === 'Rows we hold that Uber’s report does not list' && /^† /.test(H.at(-1))
+      && (await page.evaluate((src) => { const d = document.querySelector('[data-panel="cov-datasets"]'); const c = document.getElementById(`src-${src}`);
+        return !!(d && c && (d.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING)); }, all.sources[0].source)), JSON.stringify(H));
+    const cov = answer('/api/coverage');
+    const nm = (cov.earnings_gaps || []).reduce((a, r) => a + (+r.bookings_before || 0), 0);
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('†: bookings with no money (counted), ratings before we asked, a second count for any channel but Uber', (nm ? ab['Bookings with no money']?.fig === n(nm) : ab['Bookings with no money']?.none)
+      && !!ab['Ratings before we first asked'] && ab['A second count for any channel but Uber']?.fig === 'Uber only', JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    await ctx.close();
+  }
+  {
+    /* The window's calendar unreadable (synthetic): the tile absent with its
+       reason, and the window chart says why it is not drawn. */
+    const { ctx, page } = await open('arkiv', 'coverage', { fixtures: { '/api/coverage/calendar': (q, real) => (q.from === '2000-01-01' ? real : null) } });
+    const s = await shape(page);
+    const k = Object.keys(s.na).find((l) => /^Missing days in the last/.test(l));
+    check('the window unreadable: its tile absent with the true reason', !!k && s.na[k] === 'the windowed calendar could not be read', JSON.stringify(s.na));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'coverage', { width: 390 });
+    check('#coverage at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
