@@ -1716,3 +1716,11 @@ Uber is 91% of 17,936 bookings; Hotel completes 99.4% (+11.0 points on the
 fleet's 88.4%), Bolt 52.5% (−35.9); 168 offers declined. Found by looking
 and fixed before commit: completion by channel carried hbars' "added /
 deducted" legend over bars that mean above / below the fleet.
+
+### #corridors — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/corridors/`): no error, no sideways scroll.
+Al Garhoud → Dubai Int'l Airport leads at 279 trips; 1,742 trips (32.4% of
+the 119 routes sent) never leave their area; 89 of 90 named routes carry a
+priced trip, their fares rising with distance.

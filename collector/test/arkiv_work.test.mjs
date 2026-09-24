@@ -311,4 +311,60 @@ if (want('platforms')) {
   }
 }
 
+/* ══ #corridors ═══════════════════════════════════════════════════════════ */
+if (want('corridors')) {
+  console.log('\n#corridors');
+  {
+    const { ctx, page } = await open('classic', 'corridors');
+    check('old skin: no 00 band', !(await page.$('#view .cband')));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'corridors');
+    const s = await shape(page);
+    const C = answer('/api/geo/corridors'), t = C.totals;
+    check('the plan\'s order: 00, busiest routes, where work starts, km against fare, morning/evening, same area, the table, †',
+      JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'The busiest routes between two areas', 'Where jobs start',
+        'How far a route runs, and what it earns', 'Morning areas and evening areas', 'Work that never leaves the area', 'Common routes',
+        '† What this page does not know']), JSON.stringify(s.heads));
+    const vfig = await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig');
+    check('the verdict is 00\'s statement and no tile repeats its figure', s.vdctIn00 && !Object.values(s.values).includes(vfig), `${vfig} ${JSON.stringify(s.values)}`);
+    const named = C.corridors.filter((r) => r.from_area !== '(unrecorded)' && r.to_area !== '(unrecorded)');
+    const same = named.filter((r) => r.from_area === r.to_area);
+    const sent = C.corridors.reduce((a, r) => a + (+r.trips || 0), 0);
+    check('Never leaves the area counts the same-area routes the server sent', s.values['Never leaves the area'] === same.reduce((a, r) => a + r.trips, 0).toLocaleString('en-US')
+      && s.subs['Never leaves the area'].includes(`routes the server sent`) && sent > 0, `${s.values['Never leaves the area']} ${s.subs['Never leaves the area']}`);
+    const r01 = await bars(page, '[data-panel="corr-routes"]');
+    const between = named.filter((r) => r.from_area !== r.to_area).sort((a, b) => b.trips - a.trips).slice(0, 12);
+    check('01: the busiest routes between two different named areas, top twelve', JSON.stringify(r01.map(([k]) => k))
+      === JSON.stringify(between.map((r) => `${r.from_area} → ${r.to_area}`)), JSON.stringify([r01.slice(0, 3), between.slice(0, 3).map((r) => r.from_area)]));
+    const unnamed = await page.evaluate(() => [...document.querySelectorAll('#view .hbars .hb .k')].filter((k) => /unrecorded/.test(k.textContent)).length);
+    check('"(unrecorded)" is never drawn as a place (AUDIT #47)', unnamed === 0, String(unnamed));
+    const dots = await page.evaluate(() => document.querySelectorAll('[data-panel="corr-scatter"] svg circle').length);
+    const priced = named.filter((r) => +r.priced > 0 && r.avg_km != null && r.avg_fare != null).length;
+    check('03: one dot per named route with a priced trip', priced ? dots === priced : dots === 0, `${dots} vs ${priced}`);
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('† routes not drawn is the pairs in the window less the routes sent', ab['Routes not drawn']?.fig === String(Math.max(0, (t.corridors_all ?? C.corridors.length) - C.corridors.length)),
+      JSON.stringify(ab['Routes not drawn']));
+    check('no tile wears a tone', (await toned(page)).length === 0);
+    await ctx.close();
+  }
+  {
+    /* The busiest route has an unnamed end: it is not drawn as a place. */
+    const unnamed = (_q, real) => ({ ...real, corridors: [{ from_area: '(unrecorded)', to_area: 'Al Garhoud', trips: 99999, avg_km: '5', priced: 10, avg_fare: '40', platforms: ['uber'] },
+      { from_area: 'Al Garhoud', to_area: '(unrecorded)', trips: 88888, avg_km: '5', priced: 10, avg_fare: '40', platforms: ['uber'] }, ...real.corridors] });
+    const { ctx, page } = await open('arkiv', 'corridors', { fixtures: { '/api/geo/corridors': unnamed } });
+    const r01 = await bars(page, '[data-panel="corr-routes"]');
+    const dots = await page.evaluate(() => [...document.querySelectorAll('[data-panel="corr-scatter"] svg circle')].length);
+    check('a route with an unnamed end is in no chart — not the busiest bar, not a dot (AUDIT #47)',
+      !r01.some(([k]) => /unrecorded/.test(k)) && !(await txtOf(page, '[data-panel="corr-scatter"]')).includes('unrecorded'), JSON.stringify([r01.slice(0, 2), dots]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'corridors', { width: 390 });
+    check('#corridors at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
