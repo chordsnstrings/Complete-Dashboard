@@ -588,4 +588,91 @@ if (want('settlement')) {
   }
 }
 
+/* ══ #provenance ══════════════════════════════════════════════════════════ */
+if (want('provenance')) {
+  console.log('\n#provenance');
+  {
+    const { ctx, page } = await open('classic', 'provenance');
+    const t = await rowTiles(page, '#view .kpis .kpi');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      toned: document.querySelectorAll('#view .tag.ok, #view .tag.bad').length }));
+    check('old skin: the old page — no 00 band, its three tiles, the toned yes/no tags', !r.band && Object.keys(t).length === 3 && r.toned > 0,
+      JSON.stringify({ ...r, tiles: Object.keys(t) }));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'provenance');
+    const s = await shape(page);
+    const D = answer('/api/money/sources'), V = answer('/api/revenue');
+    check('the section order is the plan\'s: 00, every call, the restating share, the two tables, the names, †',
+      JSON.stringify(s.heads.map((h) => h.replace(/ — .*/, ''))) === JSON.stringify(['At a glance', 'Every call that returned money',
+        'How much of each call restates', 'Every call that returned money in this window', 'Held out of the headline',
+        'The provider’s own names for the money', '† What this page does not know']), JSON.stringify(s.heads));
+    check('the headline figure is the hero — /api/revenue\'s accounted, with each channel\'s basis named',
+      s.hero === 'The headline figure' && s.values['The headline figure'] === aed(V.totals.accounted)
+      && V.platforms.every((p) => s.subs['The headline figure'].includes(p.basis === 'none' ? 'on nothing' : `on its ${p.basis.replace(/_/g, ' ')}`)),
+      `${s.values['The headline figure']} ${s.subs['The headline figure']}`);
+    const seen = D.rows.reduce((a, r) => a + r.rows_seen, 0), rest = D.rows.reduce((a, r) => a + (r.restated_rows || 0), 0);
+    check('Calls returning money, Figures sent and Figures that restate are sums over the answer\'s rows',
+      s.values['Calls returning money'] === String(new Set(D.rows.map((r) => r.source)).size)
+      && s.values['Figures the providers sent'] === seen.toLocaleString('en-US')
+      && s.values['Figures that restate'] === `${(rest / seen * 100).toFixed(1)}%`, JSON.stringify(s.values));
+    const ans = new Set(D.rows.map((r) => r.platform));
+    const known = new Set([...V.platforms.map((p) => p.platform), ...ans]);
+    check('Channels answering is counted from the rows against the channels the headline lists — never fixed text',
+      s.values['Channels answering'] === `${ans.size} of ${known.size}`, s.values['Channels answering']);
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const calls = await page.evaluate(() => [...document.querySelectorAll('[data-panel="prov-calls"] .hb')].map((h) => /--ink/.test(h.querySelector('.fill')?.style.background || '')));
+    const inTable = await page.evaluate(() => {
+      const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent.trim() === 'Every call that returned money in this window');
+      return [...p.querySelectorAll('tbody tr')].filter((tr) => /counted/.test(tr.lastElementChild?.textContent || '')).length;
+    });
+    const legend = await txtOf(page, '[data-panel="prov-calls"] .legend');
+    check('01: one bar per call, in the headline ink exactly where the table says counted, and the legend says so',
+      calls.length === D.rows.length && calls.filter(Boolean).length === inTable && /in the headline/.test(legend) && !/deducted/.test(legend),
+      JSON.stringify({ calls: calls.length, ink: calls.filter(Boolean).length, inTable, legend }));
+    const restBars = await page.evaluate(() => document.querySelectorAll('[data-panel="prov-restate"] .hb').length);
+    check('02: one bar per call', restBars === D.rows.length, `${restBars}`);
+    const tags = await page.evaluate(() => [...document.querySelectorAll('#view .tag')].map((t) => t.className).filter((c) => /\b(ok|bad|warn)\b/.test(c)));
+    check('the tables\' yes/no, per-day and counted tags are neutral — a "no" is not worse', tags.length === 0, JSON.stringify(tags));
+    const names = await page.evaluate(() => ({ bars: document.querySelectorAll('.panel .hbars .hb').length,
+      fold: document.querySelector('details.prov-fold')?.querySelectorAll('tbody tr').length ?? null }));
+    const cats = await page.evaluate(() => [...document.querySelectorAll('#view .panel')].find((x) => /own names/.test(x.querySelector('h3')?.textContent || ''))
+      ?.querySelectorAll('.hbars .hb').length);
+    check('04: the largest named lines (up to twelve) as bars, and the whole table folded under them',
+      cats === Math.min(12, D.categories.length) && names.fold === D.categories.length, JSON.stringify({ cats, fold: names.fold }));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('† a total of the calls is not footed, in the endpoint\'s own (previously unrendered) words',
+      ab[`A total of the ${D.rows.length} calls`]?.none && ab[`A total of the ${D.rows.length} calls`].why === D.caveats.restatements, JSON.stringify(ab));
+    const silent = V.platforms.map((p) => p.platform).filter((p) => !ans.has(p));
+    check('† the channels that returned no money are counted, not assumed', silent.length
+      ? ab['Channels that returned no money']?.why.includes('no call returned money') : ab['Channels that returned no money']?.fig === 'None', JSON.stringify(ab['Channels that returned no money']));
+    await ctx.close();
+  }
+  {
+    /* A channel whose headline basis no listed call carries (production:
+       Uber on its statement, no statement-kind call in the list). */
+    const hotelPayout = (_q, real) => ({ ...real, platforms: real.platforms.map((p) => (p.platform === 'hotel' ? { ...p, basis: 'payout' } : p)) });
+    const { ctx, page } = await open('arkiv', 'provenance', { fixtures: { '/api/revenue': hotelPayout } });
+    const s = await shape(page);
+    check('the headline\'s sub never claims to be built from the calls alone: a basis no call carries is named',
+      /Hotel’s payout( and [^·]*)? match(es)? no call listed here/.test(s.subs['The headline figure'] || '') && !/built from/.test(s.subs['The headline figure']),
+      s.subs['The headline figure']);
+    await ctx.close();
+  }
+  {
+    const noRev = () => ({ totals: {}, platforms: [] });
+    const { ctx, page } = await open('arkiv', 'provenance', { fixtures: { '/api/revenue': noRev } });
+    const s = await shape(page);
+    check('no headline answer: the hero is ABSENT with that reason, not a dash',
+      /did not answer|not known here/.test(s.na['The headline figure'] || ''), JSON.stringify(s.na));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'provenance', { width: 390 });
+    check('at 390 nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

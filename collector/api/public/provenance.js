@@ -21,9 +21,10 @@
    weekly statement is ONE measurement of seven days. Shown as seven daily
    figures it would be indistinguishable from seven measurements, and a number
    nobody took would be sitting in a table beside numbers somebody did. */
-import { el, esc, panel, loading, tableFrom, kpiRow, note, sourceLabel, money } from './ui.js';
-import { fmt, empty } from './charts.js';
-import { q, state } from './data.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, note, sourceLabel, money, pct, countOf, plural, andList,
+  contract, glance, secHead, absenceBand, pageFoot } from './ui.js';
+import { fmt, empty, hbars } from './charts.js';
+import { q, state, windowLabel } from './data.js';
 
 /* The provider's own word, spaced for reading but never renamed: `net_fare`
    and `your_earnings` are two APIs' names for nearly the same thing, and
@@ -103,8 +104,15 @@ export async function renderProvenance(root) {
      rather than pretending to reconcile to it. */
   const headline = rev?.totals?.accounted;
   const restated = d.rows.reduce((a, r) => a + (r.restated_rows || 0), 0);
-
-  root.append(kpiRow([
+  /* Under the page contract (plan §4 provenance): a 00 band led by the
+     headline figure and the calls it is built from, the restating share and
+     the channels answering as tiles, the endpoint's own "not a total"
+     caveat as an absence tile; the calls and their restating share as
+     charts ahead of the unchanged tables; the provider's names as a chart
+     with the full table folded under it; a † band. */
+  const ak = contract();
+  if (ak) provenanceGlance(root, d, rev, { counted, knowsBasis, headline, restated });
+  if (!ak) root.append(kpiRow([
     { label: 'API calls reporting money', value: fmt(new Set(d.rows.map((r) => r.source)).size),
       sub: `${fmt(d.rows.length)} channel-and-kind combinations` },
     { label: 'Figures the providers sent', value: fmt(d.rows.reduce((a, r) => a + r.rows_seen, 0)),
@@ -133,7 +141,7 @@ export async function renderProvenance(root) {
        read as a daily figure. */
     { label: 'Reported at', key: 'max_period_days',
       render: (r) => (r.period_rows === 0
-        ? `<span class="tag ok">per day</span>`
+        ? `<span class="tag${ak ? '' : ' ok'}">per day</span>`
         : `<span class="tag">${fmt(r.max_period_days)}-day periods</span>`
           + (r.reported_days ? `<span class="dim"> and ${fmt(r.reported_days)} single days</span>` : '')) },
     { label: 'Figures', key: 'rows_seen', num: true, render: (r) => fmt(r.rows_seen) },
@@ -149,15 +157,16 @@ export async function renderProvenance(root) {
        is a yes or a no. */
     { label: 'Can it be added?', key: 'restated_rows', num: false,
       render: (r) => (r.restated_rows
-        ? `<span class="tag bad">no</span><span class="dim"> — ${fmt(r.restated_rows)} of `
+        ? `<span class="tag${ak ? ' dim' : ' bad'}">no</span><span class="dim"> — ${fmt(r.restated_rows)} of `
           + `${fmt(r.rows_seen)} figures restate days another already covers</span>`
-        : '<span class="tag ok">yes</span><span class="dim"> — each day reported once</span>') },
+        : `<span class="tag${ak ? '' : ' ok'}">yes</span><span class="dim"> — each day reported once</span>`) },
     { label: 'In the headline', key: '_used', num: false,
       render: (r) => (inHeadline(r)
-        ? '<span class="tag ok">counted</span>'
+        ? `<span class="tag${ak ? '' : ' ok'}">counted</span>`
         : `<span class="tag dim">held out</span>`) },
   ];
 
+  if (ak) provenanceCharts(root, d, inHeadline);
   const p1 = panel('Every call that returned money in this window',
     'One row per API call, per channel, per kind of money. The amounts are sums of what that '
     + 'call itself returned — nothing here is allocated, spread or estimated. A provider that '
@@ -210,14 +219,122 @@ export async function renderProvenance(root) {
       + 'called and their sum is not a total of anything. Two of Uber’s APIs describe the same '
       + 'payout with different words, net fare and your earnings, and neither is renamed here.');
     root.append(p3.panel);
-    p3.body.append(tableFrom(d.categories, [
+    if (ak) provenanceNames(p3, d);
+    const catTable = tableFrom(d.categories, [
       { label: 'Category', key: 'category', render: (r) => esc(words(r.category)) },
       { label: 'From', key: 'source',
         render: (r) => `${esc(words(r.source))}<span class="dim"> · ${esc(sourceLabel(r.platform))}</span>` },
       { label: 'Lines', key: 'rows_seen', num: true, render: (r) => fmt(r.rows_seen) },
       { label: 'Amount', key: 'amount', num: true, render: (r) => money(r.amount) },
-    ], { compact: true }));
+    ], { compact: true });
+    if (ak) {
+      /* Folded under the chart, every row one click away (plan: "the full
+         table stays underneath, folded"). */
+      const fold = el('details', 'prov-fold');
+      fold.append(el('summary', 'cap', `Every named line — ${fmt(d.categories.length)}, in the provider’s own words`), catTable);
+      p3.body.append(fold);
+    } else p3.body.append(catTable);
   }
 
   root.append(note(d.note));
+  if (ak) provenanceAbsence(root, d, rev, { knowsBasis });
+}
+
+/* ── #provenance under the page contract ───────────────────────────────────
+   00: The headline figure (the hero — /api/revenue's accounted, with its
+   basis per channel and the calls it is built from) · Calls returning money
+   · Figures the providers sent · Figures that restate · Channels answering ·
+   A total of the calls, ABSENT with the endpoint's own caveat. 01 every
+   call, ranked, in the headline ink and held out grey · 02 how much of each
+   call restates · the two tables unchanged · 04 what the money was called
+   (the twelve largest named lines, direction in the label) with the full
+   table folded under it · †: not footed, silent channels, calls that name no
+   driver, one window only. NOT BUILT: the optional 05 (three or four more
+   reads of the heaviest money endpoints). NOT ADOPTED: 03 "how many drivers
+   each call names" (the Drivers column already says it). */
+const callName = (r) => `${words(r.source)} · ${sourceLabel(r.platform)}${r.fleet_id ? ` · ${r.fleet_id}` : ''} · ${words(r.kind)}`;
+function provenanceGlance(root, d, rev, { counted, knowsBasis, headline, restated }) {
+  const band = el('section', 'cband');
+  const tiles = el('div');
+  band.append(secHead('00', 'At a glance', windowLabel()), tiles);
+  root.append(band);
+  const seen = d.rows.reduce((a, r) => a + (+r.rows_seen || 0), 0);
+  const answering = [...new Set(d.rows.map((r) => r.platform))];
+  const known = [...new Set([...(rev?.platforms || []).map((p) => p.platform), ...answering])];
+  /* 'none' is the income rule saying no figure covered enough of the window
+     (the held-out table's own reason); "Uber on its none" was the draft. */
+  const unmatched = (rev?.platforms || []).filter((p) => {
+    const k = usedBy(p.basis);
+    return k && !d.rows.some((r) => r.platform === p.platform && r.kind === k);
+  });
+  const bases = (rev?.platforms || []).map((p) => (!p.basis || p.basis === 'none'
+    ? `${sourceLabel(p.platform)} on nothing — no figure covers enough of the window`
+    : `${sourceLabel(p.platform)} on its ${words(p.basis)}`));
+  glance(tiles, [
+    headline != null
+      ? { label: 'The headline figure', value: money(headline), hero: true,
+        /* "Built from N calls below" was the draft, and on production it was
+           false: Uber's headline basis is its statement, and no call in this
+           list is of that kind, so the four counted calls are not the whole
+           of the figure. Said from the rows instead. */
+        sub: knowsBasis ? `one figure per channel — ${bases.join(', ')} · ${countOf(counted.length, 'call')} below `
+          + `${plural(counted.length, 'is', 'are')} counted`
+          + (unmatched.length ? ` · ${andList(unmatched.map((p) => `${sourceLabel(p.platform)}’s ${words(p.basis)}`))} `
+            + `${plural(unmatched.length, 'matches', 'match')} no call listed here` : '')
+          : 'Money by platform did not say which calls it used' }
+      : { label: 'The headline figure', hero: true, na: 'Money by platform did not answer, so the figure this page explains is not known here' },
+    { label: 'Calls returning money', value: fmt(new Set(d.rows.map((r) => r.source)).size),
+      sub: `${fmt(d.rows.length)} channel-and-kind combinations` },
+    { label: 'Figures the providers sent', value: fmt(seen),
+      sub: `${fmt(d.rows.reduce((a, r) => a + r.reported_days, 0))} for a single day · `
+        + `${fmt(d.rows.reduce((a, r) => a + r.period_rows, 0))} for a span of days` },
+    { label: 'Figures that restate', value: seen ? pct((restated / seen) * 100, 1) : pct(0, 1),
+      sub: `${fmt(restated)} of ${fmt(seen)} restate days another figure already covers` },
+    { label: 'Channels answering', value: `${fmt(answering.length)} of ${fmt(known.length)}`,
+      sub: answering.length ? andList(answering.map(sourceLabel)) : 'none' },
+  ]);
+}
+function provenanceCharts(root, d, inHeadline) {
+  /* Full width, both: a call is named by four things (surface, channel,
+     fleet, kind) and at half width every label was cut. */
+  const p1 = panel('Every call that returned money', 'Ranked by what it returned. Ink is in the headline; grey is held out. Never added.', 'prov-calls');
+  const p2 = panel('How much of each call restates', 'Figures that restate days another figure already covers, as a share of what the call sent.', 'prov-restate');
+  root.append(p1.panel, p2.panel);
+  const rows = [...d.rows].sort((a, b) => Math.abs(+b.amount || 0) - Math.abs(+a.amount || 0));
+  hbars(p1.body, rows.map((r) => ({ label: callName(r), n: +r.amount || 0, _in: inHeadline(r) })),
+    /* The colour is membership, not direction — so the legend says so
+       (hbars' own legend would read "added / deducted" over it). */
+    { signed: rows.some((r) => +r.amount < 0), colorFor: (x) => (x._in ? '--ink' : '--grey'), negColor: '--grey', valueFmt: (v) => money(v),
+      legend: [['--ink', 'in the headline'], ['--grey', 'held out']] });
+  p1.body.append(el('p', 'cap', esc(`${fmt(rows.filter(inHeadline).length)} of ${fmt(rows.length)} calls are in the headline.`)));
+  const share = d.rows.map((r) => ({ label: callName(r), n: r.rows_seen ? (100 * (r.restated_rows || 0)) / r.rows_seen : 0 }))
+    .sort((a, b) => b.n - a.n);
+  hbars(p2.body, share, { signed: false, color: '--ink', valueFmt: (v) => pct(v, 1) });
+}
+function provenanceNames(p3, d) {
+  const top = [...d.categories].sort((a, b) => Math.abs(+b.amount || 0) - Math.abs(+a.amount || 0)).slice(0, 12);
+  hbars(p3.body, top.map((c) => ({ label: `${words(c.category)} · ${sourceLabel(c.platform)} — ${+c.amount < 0 ? 'deducted' : 'paid'}`, n: +c.amount || 0 })),
+    { signed: top.some((c) => +c.amount < 0), color: '--ink', negColor: '--grey', valueFmt: (v) => money(v) });
+  p3.body.append(el('p', 'cap', esc(`The ${fmt(top.length)} largest of ${fmt(d.categories.length)} named lines. `
+    + (d.caveats?.categories || ''))));
+}
+function provenanceAbsence(root, d, rev, { knowsBasis }) {
+  const answering = new Set(d.rows.map((r) => r.platform));
+  const silent = (rev?.platforms || []).map((p) => p.platform).filter((p) => !answering.has(p));
+  const noDriver = d.rows.filter((r) => !r.drivers);
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: `A total of the ${fmt(d.rows.length)} calls`, hl: true, fig: null, none: 'Not footed',
+      why: d.caveats?.restatements || 'The calls restate each other, so their sum is not a total of anything.' },
+    { label: 'Channels that returned no money', fig: silent.length ? andList(silent.map(sourceLabel)) : 'None',
+      why: !knowsBasis ? 'Money by platform did not answer, so which channels the headline expects is not known here.'
+        : silent.length ? `${plural(silent.length, 'This channel is', 'These channels are')} in the headline's list and no call returned money for ${plural(silent.length, 'it', 'them')} in this window.`
+          : 'Every channel the headline lists returned money through at least one call.' },
+    { label: 'Calls that name no driver', fig: fmt(noDriver.length),
+      why: noDriver.length ? `${andList(noDriver.map(callName))} ${plural(noDriver.length, 'is', 'are')} about the fleet, not about named drivers.`
+        : 'Every call names the drivers its money belongs to.' },
+    { label: 'Another window', fig: 'One at a time',
+      why: 'Every figure here is over the window above; nothing on this page compares it with another.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), `${fmt(d.rows.length)} calls`] }, root);
 }

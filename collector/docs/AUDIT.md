@@ -1673,3 +1673,13 @@ carry both readings and the scatter shows the two agreeing along a line
 with a cluster of statement-heavy rows at low fare value. Receivables: AED
 32,577.06 over 352 bookings, every one priced (no-fare 0), ageing 0–30 /
 31–60 / 61–90 / over 90 with the last a measured nought.
+
+### #provenance — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/provenance/`): no error, no sideways scroll.
+AED 674,676.46 headline; 9 calls, 14 channel-and-kind combinations; 26,667
+figures, 7.3% restating (all of them the two Uber GraphQL breakdown rows,
+72–77%); 4 of 4 channels answering. 4 of 14 calls are counted; Uber's
+statement basis matches none of the listed calls, which the hero's sub now
+says.

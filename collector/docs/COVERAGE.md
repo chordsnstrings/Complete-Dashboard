@@ -6635,3 +6635,12 @@ number (5 and 5), and never a passport or RTA number.
   than bookings** (84 against 180), so `total_trips - priced_trips` is
   negative there. Production is consistent (352 of 352). A page subtracting
   the two must guard, not print a negative count.
+
+* **`/api/money/sources` lists no call of the kind Uber's headline is built
+  on.** `/api/revenue` gives Uber the basis `statement`; the money-sources
+  rows on production this month are of kinds fare, component, payout and
+  ledger only. A page saying the headline is "built from" or "chosen from"
+  the listed calls is saying something the rows do not support.
+* **`hbars` draws its "added / deducted" legend whenever a value is
+  negative**, even when `colorFor` makes the colour mean something else.
+  Pass `legend` whenever colour carries a different meaning.
