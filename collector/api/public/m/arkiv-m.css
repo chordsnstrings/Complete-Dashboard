@@ -419,3 +419,14 @@
 :root[data-skin="arkiv"][data-ui="phone"] .m-btn[disabled]{opacity:1;background:var(--paper-2);border-color:var(--grey-2);
   color:var(--grey)}
 :root[data-skin="arkiv"][data-ui="phone"] .m-btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+/* ── 14 · the row marker (SPEC §4) ──────────────────────────────────────────
+   m/ui.js rowMark() names the row's channel; the mark is a 3px rule in the
+   gutter in that channel's identity, and the row's words stay ink. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-row[data-ch]{padding-left:11px;box-shadow:inset 3px 0 0 var(--mark)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row[data-ch="uber"]{--mark:var(--c-uber)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row[data-ch="bolt"]{--mark:var(--c-bolt)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row[data-ch="yango"]{--mark:var(--c-yango)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row[data-ch="hotel"]{--mark:var(--c-hotel)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row[data-ch="cabman"]{--mark:var(--c-cabman)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-row[data-ch="fms"]{--mark:var(--c-fms)}

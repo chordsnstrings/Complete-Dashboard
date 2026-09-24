@@ -12,7 +12,7 @@
 */
 import { state, q, qAll, qChan, api, href, windowLabel } from '../data.js';
 import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search, chips,
-  skeleton, empty, failed, spark, bars, unwrap, cut, splitToday, phoneContract, atGlance } from './ui.js';
+  skeleton, empty, failed, spark, bars, unwrap, cut, splitToday, phoneContract, atGlance, rowMark } from './ui.js';
 /* The redesign's page-contract pieces (docs/UI-REDESIGN-PLAN.md "Phone PWA —
    redesign"), the desktop's own: the numbered section head and the absence
    band, so a phone section and a desktop panel are one form, and the reason
@@ -901,18 +901,27 @@ async function live(deck, ctx) {
   const moving = feed.filter((v) => (v.speed || 0) > 3).length;
   const busy = feed.filter((v) => v.seat_occupied).length;
   const stale = feed.filter((v) => v.stale).length;
-  stats(deck, [
+  const liveTiles = [
     { label: 'Reporting', value: fmt(feed.length) },
     { label: 'Moving', value: fmt(moving), sub: 'above 3 km/h' },
     /* A seat reading is CABMAN DT's pad or FMS's live seat count (the API
        reads 1 or more as occupied); a vehicle with neither is not counted. */
     { label: 'Occupied', value: fmt(busy), sub: 'CABMAN DT or FMS seat reading' },
     { label: 'Stale fix', value: fmt(stale), sub: 'no recent position', tone: stale ? 'warn' : 'good' },
-  ]);
+  ];
+  /* THE REDESIGN: the four counts as 00 AT A GLANCE, Reporting the hero,
+     under a head that says how current "now" is — the newest fix in the
+     feed, in Dubai time, which the old screen left the reader to find row by
+     row. #live takes no window, so the head names the feed's own clock. */
+  const AK = phoneContract();
+  if (AK) {
+    const newest = feed.map((v) => v.polled_at).filter(Boolean).sort().pop();
+    atGlance(deck, liveTiles, { note: newest ? `newest fix ${timeStr(newest)} Dubai` : 'no fix carries a time' });
+  } else stats(deck, liveTiles);
 
   deck.append(el('p', 'm-sec', 'Every vehicle'));
-  rows(deck, [...feed]
-    .sort((a, b) => (b.speed || 0) - (a.speed || 0))
+  const bySpeed = [...feed].sort((a, b) => (b.speed || 0) - (a.speed || 0));
+  const vehRows = rows(deck, bySpeed
     .map((v) => row({
       title: v.plate,
       sub: `${v.source || 'feed'} · ${v.seat_occupied == null ? 'no seat reading'
@@ -928,6 +937,10 @@ async function live(deck, ctx) {
       tone: v.stale ? 'warn' : null,
       to: href('vehicle', v.plate),
     })));
+  /* Which feed saw each car, as SPEC §4's row marker: a 3px rule in the
+     channel's identity in the gutter (CABMAN or FMS), never a tinted row and
+     never the plate in a colour. The feed's name stays in the sub-line. */
+  if (AK) bySpeed.forEach((v, i) => rowMark(vehRows.children[i], v.source));
 }
 
 /* ── Safety and unauthorized ────────────────────────────────────────────── */

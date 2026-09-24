@@ -714,6 +714,44 @@ console.log('\n4.5 · More: numbered sections, the masthead on This app, and a f
   await p.close();
 }
 
+console.log('\n4.6 · Live: 00 with the feed’s own clock, and each car marked with the feed that saw it');
+{
+  const feed = ans('/api/live');
+  const { timeStr } = await import('../api/public/ui.js');
+  const newest = feed.map((v) => v.polled_at).filter(Boolean).sort().pop();
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('live');
+  const o = (await outline(p.page)).filter((x) => x !== 'ak-applies');
+  const m = await p.page.evaluate(() => ({
+    note: document.querySelector('.sechd .sechd-note')?.textContent,
+    hero: document.querySelector('.m-stat.hero .l')?.textContent + '|' + document.querySelector('.m-stat.hero .n')?.textContent,
+    stale: (() => { const t = [...document.querySelectorAll('.m-stat')].find((s) => s.querySelector('.l').textContent === 'Stale fix');
+      return t ? `${t.className}|${getComputedStyle(t.querySelector('.l'), '::before').borderTopStyle}` : null; })(),
+    marks: [...document.querySelectorAll('.m-deck > .m-rows .m-row')].map((r) => ({ ch: r.dataset.ch || null,
+      src: r.querySelector('.k span').textContent.split(' · ')[0], mark: getComputedStyle(r).boxShadow,
+      ink: getComputedStyle(r.querySelector('.k b')).color })),
+  }));
+  check('00 · At a glance leads, then Every vehicle', o[0] === 'head:At a glance' && o[1] === 'glance' && o[2] === 'sec:Every vehicle',
+    o.join(' → '));
+  check(`…headed by the feed’s own clock: the newest fix, ${timeStr(newest)} Dubai`,
+    m.note === `newest fix ${timeStr(newest)} Dubai`, m.note);
+  check(`the hero is the cars reporting, ${feed.length} as /api/live answered`, m.hero === `Reporting|${f0(feed.length)}`, m.hero);
+  const staleN = feed.filter((v) => v.stale).length;
+  check('Stale fix keeps its tone as a dot: a hollow warning when there is one, green when none',
+    staleN ? /warn/.test(m.stale) && /solid$/.test(m.stale) : /good/.test(m.stale), `${staleN} ${m.stale}`);
+  check('each car carries the mark of the feed that saw it (its sub-line still names it), its plate in ink',
+    m.marks.length === feed.length && m.marks.every((r) => r.ch === r.src && /3px 0px 0px 0px/.test(r.mark) && r.ink === 'rgb(10, 10, 11)'),
+    JSON.stringify(m.marks.slice(0, 3)));
+  const named = await p.page.evaluate(() => import('/m/ui.js').then(({ rowMark }) => [
+    rowMark(document.createElement('div'), 'Uber').dataset.ch || null,
+    rowMark(document.createElement('div'), 'FMS telematics').dataset.ch || null,
+    rowMark(document.createElement('div'), 'no-such-feed').dataset.ch || null,
+    rowMark(document.createElement('div'), null).dataset.ch || null]));
+  check('a mark is the channel’s by NAME; a feed that is not one of the six is marked by nothing (L1)',
+    JSON.stringify(named) === JSON.stringify(['uber', 'fms', null, null]), JSON.stringify(named));
+  await p.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');

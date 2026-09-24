@@ -10,6 +10,7 @@
    instead of a select, and a sparkline small enough to sit inside a stat. */
 import { el, esc, money, pct, dayStr, secHead, highlight } from '../ui.js';
 import { fmt, isToday, spark } from '../charts.js';
+import { channelKey } from '../tokens.js';
 
 export { el, esc, money, pct, dayStr, fmt, isToday, spark };
 
@@ -448,3 +449,14 @@ function inkBars(host, all, rowsIn, total) {
   host.append(box);
   return box;
 }
+
+/* A row's channel, as SPEC §4's ROW MARKER (the redesign only): a 3px rule
+   in the channel's identity in the row's gutter — never a tinted row, never
+   the row's words in a colour (L5.6). The mark is the channel's by NAME
+   (tokens.js channelKey); a name that is not one of the six marks nothing,
+   so an unidentified feed looks unidentified (L1). m/arkiv-m.css draws it. */
+export const rowMark = (rowEl, name) => {
+  const k = channelKey(String(name ?? ''));
+  if (rowEl && k && phoneContract()) rowEl.dataset.ch = k;
+  return rowEl;
+};
