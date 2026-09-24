@@ -808,6 +808,37 @@ console.log('\n4.8 · Unauthorized: 00, the coverage note under the claim it qua
   await q2.close();
 }
 
+console.log('\n4.9 · Sources: 00, every collector numbered and marked, and every error whole');
+{
+  const key = '/api/status';
+  const st = ans(key);
+  const long = 'upstream said 401: the session cookie was refused by the fleet portal after it rotated; '
+    + 'paste a new one on Settings → credentials and the next run collects the missed days';
+  /* One collector given an error longer than the old row's seventy characters. */
+  const withErr = st.map((r, i) => (i === 0 ? { ...r, status: 'error', error: long } : r));
+  const p = await phonePage(browser, { skin: 'arkiv', fixture: withAnswer(key, withErr) });
+  await p.open('sources');
+  const o = (await outline(p.page)).filter((x) => x !== 'ak-applies');
+  const m = await p.page.evaluate(() => [...document.querySelectorAll('.m-deck > .m-rows .m-row')].map((r) => ({
+    t: r.querySelector('.k b').textContent, sub: r.querySelector('.k span').textContent, ch: r.dataset.ch || null,
+    wrap: r.classList.contains('wrapsub'), h: r.querySelector('.k span').scrollWidth <= r.querySelector('.k span').clientWidth + 1 })));
+  check('00 heads the statement, then Every collector as a numbered section',
+    JSON.stringify(o.slice(0, 4)) === JSON.stringify(['head:At a glance', 'statement', 'head:Every collector', 'm-rows']), o.join(' → '));
+  const e = m.find((x) => x.sub.startsWith('upstream said 401'));
+  check('an error is printed whole, and wraps rather than being cut', e && e.sub === long && e.wrap && e.h, JSON.stringify(e));
+  const { channelKey } = await import('../api/public/tokens.js');
+  check('a collector that feeds one of the six channels is marked with it (uber_fleet is Uber); any other by nothing',
+    m.length > 3 && m.every((x) => x.ch === channelKey(x.t.split(' · ')[0]))
+      && m.some((x) => x.ch === null),
+    m.map((x) => `${x.t}:${x.ch}`).join(' '));
+  await p.close();
+  const c = await phonePage(browser, { skin: 'classic', fixture: withAnswer(key, withErr) });
+  await c.open('sources');
+  check('…while the old phone keeps its seventy characters', await c.page.evaluate((l) => [...document.querySelectorAll('.m-row .k span')]
+    .some((s) => s.textContent === l.slice(0, 70)), long));
+  await c.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');

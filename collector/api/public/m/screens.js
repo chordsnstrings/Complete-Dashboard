@@ -1083,14 +1083,26 @@ async function sources(deck, ctx) {
   }
   const all = [...latest.values()].sort((a, b) => String(a.source).localeCompare(String(b.source)));
   const bad = all.filter((r) => r.status !== 'ok');
-  lede(deck, {
+  const AK = phoneContract();
+  const statement = lede(deck, {
     claim: bad.length ? `${bad.length} of ${all.length} collectors need attention`
       : `All ${all.length} collectors are healthy`,
     sub: bad.length ? 'A source that stops does not empty the dashboard — it freezes it, which looks the same as a quiet week.'
       : 'Every source finished its last run without an error.',
     tone: bad.length ? 'warn' : 'good',
   });
-  rows(deck, all.map((r) => row({
+  /* THE REDESIGN: 00 heads the statement, the collectors are a numbered
+     section, each one marked with its channel's identity where it is one of
+     the six (a collector like "events" is marked by nothing, L1), and an
+     error is printed WHOLE. The old row cut every error at seventy
+     characters with no ellipsis and then let the one-line sub-line cut it
+     again — the reason a source stopped is the one thing this screen exists
+     to say, and it arrived as its first ten words. */
+  if (AK) {
+    deck.insertBefore(secHead('00', 'At a glance', 'the latest run of each'), statement);
+    deck.append(secHead(null, 'Every collector', `${fmt(all.length)} · now`));
+  }
+  const srcRows = rows(deck, all.map((r) => row({
     title: r.source + (r.fleet_id ? ` · ${r.fleet_id}` : ''),
     sub: r.error ? String(r.error).slice(0, 70)
       /* The same field the desktop's Sources table renders through dtStr, so
@@ -1102,6 +1114,16 @@ async function sources(deck, ctx) {
     note: `${fmt(r.rows_written)} rows`,
     tone: r.status === 'ok' ? 'good' : r.status === 'partial' ? 'warn' : 'critical',
   })));
+  if (AK) {
+    all.forEach((r, i) => {
+      const el2 = srcRows.children[i];
+      rowMark(el2, r.source);
+      if (r.error) {
+        el2.querySelector('.k span').textContent = String(r.error);
+        el2.classList.add('wrapsub');
+      }
+    });
+  }
 }
 
 /* ── Every trip ─────────────────────────────────────────────────────────── */
