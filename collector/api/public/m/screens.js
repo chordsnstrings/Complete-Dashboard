@@ -2609,6 +2609,33 @@ async function deposits(deck, ctx) {
 
   const people = (d.people || []).filter((p) => p.name);
 
+  /* ── THE ARKIV SKIN: the same five steps, and each state says how bad it is ──
+     The redesign keeps this screen's order, its fields, its targets and its
+     two buttons exactly (UI-REDESIGN-PLAN.md, "Phone PWA — redesign": the
+     same steps in the same order, numbered 01–05 as ruled sections — the
+     numbers are the deck's counter, arkiv-m.css §3, so nothing here counts).
+     What it adds is the one thing the old form could not say: HOW MUCH a
+     line under a field matters. The old phone paints every one of them the
+     same red — "Write a note." and a save the server refused look alike —
+     and paints "Nothing is recorded yet.", the line that must not be missed
+     with the cash already handed over, in the same grey as a file size.
+
+     Under the skin each state line carries a TONE, drawn as ruling 1's dot:
+       warn  (hollow) the form is not finished — a field missing, an amount
+             that is not money, a photograph that could not be read — or
+             the check has passed and NOTHING IS RECORDED YET;
+       crit  (solid)  the server refused the receipt or the entry, or the
+             save failed: the cash is in hand and the ledger does not say so;
+       ok    (good)   "Recorded.", the server's own word that it holds it.
+     The words stay ink either way (never red words), and are the old
+     screen's words, unchanged. Only under the token: the old phone's lines
+     keep their one red, byte for byte. */
+  const AK = phoneContract();
+  const tone = (node, t) => {
+    if (!AK) return;
+    if (t) node.dataset.tone = t; else delete node.dataset.tone;
+  };
+
   /* ── who is recording, once ─────────────────────────────────────────── */
   const whoCard = card('Recorded by', 'until user accounts exist this name, an address and a '
     + 'timestamp are what make an entry traceable');
@@ -2619,6 +2646,7 @@ async function deposits(deck, ctx) {
       [...whoCard.body.querySelectorAll('.m-chip')].forEach((c) => c.classList.toggle('on',
         c.textContent.toLowerCase() === id));
       state1.textContent = '';
+      tone(state1, '');
     });
   /* Marks these as controls rather than filters — see m.css. */
   supChips.classList.add('m-supervisors');
@@ -2672,6 +2700,7 @@ async function deposits(deck, ctx) {
       ? (amt.value.trim() ? 'digits, and at most two decimals' : '')
       : aed(v);
     amtEcho.classList.toggle('bad', v == null && !!amt.value.trim());
+    tone(amtEcho, v == null && amt.value.trim() ? 'warn' : '');
     say('');
   };
   amtCard.body.append(amt, amtEcho);
@@ -2687,10 +2716,13 @@ async function deposits(deck, ctx) {
   pic.onchange = async () => {
     shot = null; sha = null; prev.style.display = 'none'; say('');
     const f = pic.files && pic.files[0];
+    tone(picNote, '');
     if (!f) { picNote.textContent = ''; return; }
     picNote.textContent = 'Compressing…'; picNote.classList.remove('bad');
     const out = await compress(f);
-    if (out.error) { picNote.textContent = out.error; picNote.classList.add('bad'); return; }
+    if (out.error) {
+      picNote.textContent = out.error; picNote.classList.add('bad'); tone(picNote, 'warn'); return;
+    }
     shot = out;
     const kb = (v) => `${Math.round(v / 1024)}KB`;
     picNote.textContent = `${kb(out.from)} → ${kb(out.bytes)}`;
@@ -2712,9 +2744,12 @@ async function deposits(deck, ctx) {
   endCard.body.append(noteIn, state1, sentence, check, save);
   deck.append(endCard.card);
 
-  function say(text, bad = false) {
+  /* `crit` is the server's refusal, or a failed save, rather than a field
+     this form found missing — see the tones above. */
+  function say(text, bad = false, crit = false) {
     state1.textContent = text;
     state1.classList.toggle('bad', bad);
+    tone(state1, bad ? (crit ? 'crit' : 'warn') : '');
     if (!text) { sentence.style.display = 'none'; save.disabled = true; }
   }
   const missing = () => {
@@ -2740,11 +2775,11 @@ async function deposits(deck, ctx) {
     say('Checking…');
     if (!sha) {
       const up = await putReceipt(shot.blob, PHONE_SUP);
-      if (up.error) { say(up.error, true); return; }
+      if (up.error) { say(up.error, true, true); return; }
       sha = up.sha256;
     }
     const out = await submitEntry(payload());
-    if (out.error) { say(out.error, true); return; }
+    if (out.error) { say(out.error, true, true); return; }
     /* THE SERVER'S SENTENCE, verbatim. api/ledger_routes.js assembles it so
        this screen and the desktop form cannot describe one entry differently;
        composing a second one here would put that back. */
@@ -2752,17 +2787,19 @@ async function deposits(deck, ctx) {
     sentence.style.display = '';
     state1.textContent = 'Nothing is recorded yet.';
     state1.classList.remove('bad');
+    tone(state1, 'warn');
     save.disabled = false;
   };
 
   save.onclick = async () => {
     save.disabled = true;
     const out = await submitEntry(payload(), { commit: true });
-    if (out.error) { say(out.error, true); save.disabled = false; return; }
+    if (out.error) { say(out.error, true, true); save.disabled = false; return; }
     sentence.textContent = out.sentence;
     sentence.style.display = '';
     state1.textContent = 'Recorded.';
     state1.classList.remove('bad');
+    tone(state1, 'ok');
     amt.value = ''; amtEcho.textContent = ''; noteIn.value = '';
     pic.value = ''; picNote.textContent = ''; prev.style.display = 'none';
     shot = null; sha = null; chosen = null;

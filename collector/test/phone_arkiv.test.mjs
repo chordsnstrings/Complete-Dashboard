@@ -933,6 +933,12 @@ console.log('\n4.12 · Credentials: the paste in the redesign’s forms, reasons
   check('…under a square paste box in the redesign’s form', before.ta === 'ak-paste' && !before.taStyle, JSON.stringify(before));
   await p.page.fill('.m-card textarea', 'cookie: a-long-enough-fake-value-for-the-test=1');
   await p.page.click('.m-card button');
+  /* Waited for by what it draws, not by a quiet network alone: api() has an
+     await of its own before the POST leaves, and on a loaded machine the
+     harness's settle() found the network idle before the request existed
+     (measured once: the "Stored" line read as absent, on a run whose change
+     was a stylesheet this screen does not use). */
+  await p.page.waitForSelector('.m-deck .m-rows .m-row', { timeout: 10000 }).catch(() => {});
   await p.settle();
   const after = await p.page.evaluate(() => ({
     rows: [...document.querySelectorAll('.m-deck .m-rows .m-row')].map((r) => ({ cls: r.className,
@@ -950,6 +956,7 @@ console.log('\n4.12 · Credentials: the paste in the redesign’s forms, reasons
   await s.open('credentials');
   await s.page.fill('.m-card textarea', 'cookie: a-long-enough-fake-value-for-the-test=1');
   await s.page.click('.m-card button');
+  await s.page.waitForSelector('.m-deck .m-stale', { timeout: 10000 }).catch(() => {});
   await s.settle();
   const stored = await s.page.evaluate(() => { const e = document.querySelector('.m-stale');
     return e ? { t: e.textContent, cls: e.className, dot: getComputedStyle(e, '::before').backgroundColor } : null; });
@@ -1117,6 +1124,137 @@ console.log('\n4.16 · To the bank: 00, marks and swatches, and what the registe
     m.cells.some((c) => c.label === 'What we have not asked Uber about' && c.fig === f0(unasked)
       && c.why.startsWith(`We hold no Uber statement for ${f0(unasked)} days`)) && !m.unasked, JSON.stringify(m.cells.map((c) => c.label)));
   await p.close();
+}
+
+console.log('\n4.17 · Cash handed in: the same five steps, square fields, and every state line saying how much it matters');
+{
+  /* THE ONE SCREEN THAT WRITES, driven end to end on both skins with the two
+     POSTs answered here (never a server): the receipt, then the entry — its
+     dry run on "Check it" and its commit on "Record the deposit". Synthetic
+     words throughout; the person searched for is the recording's first, by
+     reference, never by name. */
+  const SENT = 'The server’s own sentence about this entry, quoted (synthetic).';
+  const REFUSED = 'A synthetic refusal, where the server’s own words would stand.';
+  const who = ans('/api/ledger/people').people.find((x) => x.name).name.slice(0, 2);
+  const run = async (skin, { theme = 'light', refuse = false } = {}) => {
+    const p = await phonePage(browser, { skin, theme, fixture });
+    const { page } = p;
+    const posts = [];
+    await page.route('**/api/ledger/receipt*', (r) => { posts.push(['receipt', new URL(r.request().url()).search]);
+      return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sha256: 'f'.repeat(64) }) }); });
+    await page.route('**/api/ledger/entry', (r) => {
+      const b = JSON.parse(r.request().postData()); posts.push(['entry', b]);
+      return refuse && !b.dry_run
+        ? r.fulfill({ status: 422, contentType: 'application/json', body: JSON.stringify({ ok: false, refused: [REFUSED] }) })
+        : r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, sentence: SENT }) });
+    });
+    await p.open('deposits');
+    const note = (i) => page.evaluate((k) => {
+      const tok = (v) => { const d = document.createElement('i'); d.style.color = `var(${v})`; document.body.append(d);
+        const c = getComputedStyle(d).color; d.remove(); return c; };
+      const n = document.querySelectorAll('.m-deck .m-card')[k].querySelector('.m-fieldnote');
+      const b = getComputedStyle(n, '::before');
+      return { t: n.textContent, tone: n.dataset.tone || '', ink: getComputedStyle(n).color === tok('--ink'),
+        hollow: parseFloat(b.borderTopWidth) > 0 && b.backgroundColor === 'rgba(0, 0, 0, 0)' && b.borderTopColor === tok('--sem-neg'),
+        solidNeg: b.backgroundColor === tok('--sem-neg'), good: b.backgroundColor === tok('--sem-pos'),
+        dot: b.content !== 'none' && b.display !== 'none' && b.width === '8px' };
+    }, i);
+    const out = { posts, states: [] };
+    out.heads = await page.evaluate(() => [...document.querySelectorAll('.m-deck .m-card > h2')].map((h) => ({
+      t: h.textContent, idx: getComputedStyle(h, '::before').content })));
+    const btns = () => page.locator('.m-deck .m-card button.m-btn');
+    await btns().first().click(); out.states.push(await note(4));                 // nothing chosen
+    await page.locator('.m-deck .m-chip').nth(2).click();
+    await page.locator('.m-deck .m-search input').focus();
+    out.ring = await page.evaluate(() => { const i = document.querySelector('.m-deck .m-search input');
+      return { input: getComputedStyle(i).outlineStyle, box: `${getComputedStyle(i.parentElement).outlineStyle} ${getComputedStyle(i.parentElement).outlineWidth}` }; });
+    await page.locator('.m-deck .m-search input').fill(who);
+    await page.waitForSelector('.m-pick');
+    out.picks = await page.evaluate(() => [...document.querySelectorAll('.m-pick')].map((b) => ({
+      h: b.getBoundingClientRect().height, r: getComputedStyle(b).borderTopLeftRadius })));
+    await page.locator('.m-pick').first().click();
+    await page.locator('.m-amount').fill('12.345'); out.states.push(await note(2));  // not money
+    await btns().first().click(); out.states.push(await note(4));                 // amount missing
+    await page.locator('.m-amount').fill('1,250.00'); out.states.push(await note(2)); // the echo
+    const png = Buffer.from(await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 320; c.height = 480;
+      const g = c.getContext('2d'); g.fillStyle = '#ddd'; g.fillRect(0, 0, 320, 480); return c.toDataURL('image/png').split(',')[1]; }), 'base64');
+    await page.locator('.m-file').setInputFiles({ name: 'receipt.png', mimeType: 'image/png', buffer: png });
+    await page.waitForFunction(() => /KB/.test(document.querySelectorAll('.m-deck .m-card')[3].querySelector('.m-fieldnote').textContent));
+    await page.locator('.m-noteinput').fill('Counted at the car');
+    await btns().first().click();
+    await page.waitForFunction(() => document.querySelector('.m-sentence').style.display !== 'none');
+    out.states.push(await note(4));                                               // checked, not recorded
+    out.form = await page.evaluate(() => {
+      const tok = (v) => { const d = document.createElement('i'); d.style.color = `var(${v})`; document.body.append(d);
+        const c = getComputedStyle(d).color; d.remove(); return c; };
+      const box = (s) => { const e = document.querySelector(s); const cs = getComputedStyle(e);
+        return { h: Math.round(e.getBoundingClientRect().height), r: cs.borderTopLeftRadius, bg: cs.backgroundColor }; };
+      return {
+        chips: [...document.querySelectorAll('.m-deck .m-supervisors .m-chip')].map((c) => Math.round(c.getBoundingClientRect().height)),
+        amount: box('.m-amount'), note: box('.m-noteinput'), file: box('.m-file'), picked: box('.m-picked'),
+        shot: box('.m-shot'), sentence: { ...box('.m-sentence'), rule: getComputedStyle(document.querySelector('.m-sentence')).borderLeft },
+        check: box('.m-deck .m-btn:not(.primary)'), save: box('.m-deck .m-btn.primary'),
+        saveInk: getComputedStyle(document.querySelector('.m-deck .m-btn.primary')).backgroundColor === tok('--ink'),
+        ink: tok('--ink'), tones: document.querySelectorAll('#m [data-tone]').length,
+      };
+    });
+    await page.locator('.m-deck .m-btn.primary').click();
+    await page.waitForFunction(() => /^(Recorded\.|A synthetic)/.test(document.querySelectorAll('.m-deck .m-card')[4].querySelector('.m-fieldnote').textContent));
+    out.states.push(await note(4));                                               // recorded, or refused
+    out.saveAgain = await page.evaluate(() => !document.querySelector('.m-deck .m-btn.primary').disabled);
+    out.anyTone = await page.evaluate(() => document.querySelectorAll('#m [data-tone]').length);
+    out.misses = [...p.misses]; out.errors = p.errors.slice();
+    await p.close();
+    return out;
+  };
+  const old = await run('classic');
+  const a = await run('arkiv');
+  const dark = await run('arkiv', { theme: 'dark' });
+  const bad = await run('arkiv', { refuse: true });
+
+  check('the same five steps in the order of the handover, each a ruled section numbered from the deck’s counter',
+    a.heads.map((h) => h.t).join('|') === 'Recorded by|From|Amount handed in|Photograph of the receipt|Note'
+      && a.heads.every((h) => /counter\(arkiv-sec/.test(h.idx)), JSON.stringify(a.heads));
+  check('…the same entry reaches the server from both skins: the receipt, the dry run, the commit, byte for byte',
+    a.posts.length === 3 && JSON.stringify(a.posts) === JSON.stringify(old.posts)
+      && a.posts[1][1].dry_run === true && a.posts[2][1].dry_run === false, JSON.stringify([old.posts.length, a.posts.length]));
+  check('…and every state line in the old screen’s words', JSON.stringify(a.states.map((s) => s.t)) === JSON.stringify(old.states.map((s) => s.t))
+    && old.states[5].t === 'Recorded.', JSON.stringify(a.states.map((s) => s.t)));
+  const small = [];
+  for (const [label, r] of [['light', a], ['dark', dark]]) {
+    const f = r.form;
+    if (!f.chips.every((h) => h >= 44)) small.push(`${label} chips ${f.chips}`);
+    if (f.amount.h < 56) small.push(`${label} amount ${f.amount.h}`);
+    ['note', 'file'].forEach((k) => { if (f[k].h < 44) small.push(`${label} ${k} ${f[k].h}`); });
+    ['check', 'save'].forEach((k) => { if (f[k].h < 48) small.push(`${label} ${k} ${f[k].h}`); });
+    if (!r.picks.length || !r.picks.every((x) => x.h >= 44)) small.push(`${label} picks ${JSON.stringify(r.picks)}`);
+  }
+  check('every target a thumb uses is where it was: supervisors and hits 44px, the amount 56px, both buttons 48px, light and dark',
+    !small.length, small.join(' | '));
+  check('the save is an ink fill in both themes (and the dark ink is not the light one)',
+    a.form.saveInk && dark.form.saveInk && a.form.ink !== dark.form.ink, `${a.form.save.bg} ${dark.form.save.bg}`);
+  const round = ['amount', 'note', 'file', 'picked', 'shot', 'sentence'].filter((k) => a.form[k].r !== '0px')
+    .concat(a.picks.some((x) => x.r !== '0px') ? ['picks'] : []);
+  check('every field, hit, the chosen driver, the photograph and the quoted sentence are square',
+    !round.length, round.map((k) => `${k} ${(a.form[k] || {}).r || ''}`).join(' | '));
+  check('…and the server’s sentence is quoted on a 3px ink rule', /^3px solid/.test(a.form.sentence.rule)
+    && a.form.sentence.rule.endsWith(a.form.ink), a.form.sentence.rule);
+  const want = ['warn', 'warn', 'warn', '', 'warn', 'ok'];
+  check('each state line says how much it matters: unfinished and NOT RECORDED YET hollow, "Recorded." good, an echo nothing',
+    JSON.stringify(a.states.map((s) => s.tone)) === JSON.stringify(want)
+      && a.states.every((s) => (s.tone === 'warn' ? s.hollow && s.dot : s.tone === 'ok' ? s.good && s.dot : !s.dot)),
+    JSON.stringify(a.states.map((s) => [s.t, s.tone, s.hollow, s.good, s.dot])));
+  check('…a save the server refused is a SOLID dot — the cash is in hand and the ledger does not say so — with the save offered again',
+    bad.states[5].t === REFUSED && bad.states[5].tone === 'crit' && bad.states[5].solidNeg && bad.states[5].dot && bad.saveAgain,
+    JSON.stringify(bad.states[5]));
+  check('…the words stay ink, never red, whatever the tone', [...a.states, bad.states[5]].filter((s) => s.tone).every((s) => s.ink),
+    JSON.stringify(a.states.map((s) => s.ink)));
+  check('the old phone carries no tone anywhere (its one red, unchanged)', old.anyTone === 0 && old.form.tones === 0,
+    `${old.anyTone} ${old.form.tones}`);
+  check('the search takes the caret’s ring as a box, not a ring drawn inside it', a.ring.input === 'none' && a.ring.box === 'solid 2px',
+    JSON.stringify(a.ring));
+  check('every API call was answered, and nothing threw', [old, a, dark, bad].every((r) => !r.misses.length && !r.errors.length),
+    JSON.stringify([old, a, dark, bad].map((r) => [r.misses, r.errors])));
 }
 
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');

@@ -6522,3 +6522,62 @@ number (5 and 5), and never a passport or RTA number.
   ruled it is not stored.
 - **Nothing about who is ONE person that this product applies.** Its groupings
   are proposals; a verdict on one is recorded and folds nobody.
+
+## Phone PWA redesign — traps, 2026-09-24 (NOT ON PRODUCTION)
+
+The redesigned phone (operator ruling 2026-09-24; `docs/UI-REDESIGN-PLAN.md`,
+"Phone PWA — redesign"; rows P0 onwards in `docs/FIX-STATUS.md`) is tested by
+a hermetic harness, `test/phone_harness.mjs`: every static file from disk,
+every `/api/` answer from a recording (`test/fixtures/phone_api.json.gz`,
+made by `bin/phone-fixture.mjs record` against the MOCK, never production),
+and the clock frozen at the recording's instant. The old phone is held
+byte-identical by `test/phone_classic.test.mjs` against a DOM oracle taken
+from the base commit's tree. Each of these cost a run or more to find.
+
+- **A routed response leaves no resource-timing entry.** `route.fulfill()`
+  answers before the network stack, so `performance.getEntriesByType('resource')`
+  is empty and `renderBlockingStatus` cannot be read. Whether a sheet blocks
+  the first paint is measured by HOLDING it (`phonePage({hold: {path: ms}})`)
+  and reading first-contentful-paint.
+- **A frozen clock records no paint entries at all.** With
+  `page.clock.setFixedTime()` the paint timeline is an empty list; the same
+  page unfrozen records first-contentful-paint. `phonePage({frozen: false})`
+  for any check that reads paint timing.
+- **A lazy `<img>` makes a DOM oracle pass on alternate runs.** Left to the
+  sandbox's network (no route out), a driver's photograph turned into "could
+  not be loaded" at whatever moment the load gave up — measured 1 run in 6
+  different. The harness answers every off-origin request with a 1px PNG at
+  once, so the photograph always loads and the DOM is the same every run.
+- **A quiet network is not a finished action.** `api()` in `data.js` awaits
+  before its request leaves, so `settle()` right after a click can find the
+  network idle before the POST exists and return at once (measured once, on
+  a loaded machine: Credentials' "Stored" line read as absent). After an
+  action, wait for what it DRAWS, then settle.
+- **The phone scrolls the deck, not the window.** `window.scrollTo()` does
+  nothing on `/?ui=phone` — the old Every-trip pager's defect (P19). And a
+  scroll check against an UNCACHED page proves nothing: the skeleton
+  shortens the deck and the browser clamps the scroll to the top anyway.
+  Test it against a page the stale-while-revalidate store already holds.
+- **A negative margin meant for the deck's gap draws through a card.** The
+  00 head's −8px pulls the statement up to it inside the deck; inside a card
+  body or a host div (Every trip, Online time) the same margin drew the next
+  block's rule through the head. Negative margins apply to `.m-deck >`
+  children only, and the §9 sweep of `test/phone_arkiv.test.mjs` fails any
+  section head overlapped by its next block.
+- **`innerText` drops the section number and returns capitals.** The 01, 02
+  … are a CSS counter on `::before`, and mono heads are `text-transform:
+  uppercase`. Compare words case-insensitively, read the numbering from
+  `getComputedStyle(h2, '::before').content`, and use `textContent` for the
+  words the old screen printed.
+- **arkiv.css's global focus ring lands on the bare input inside a box.**
+  `:root[data-skin="arkiv"] :focus-visible` draws 2px ink on whatever holds
+  focus — inside `.m-search` that is the borderless input, so the ring sat
+  inside the box's own edge. `m/arkiv-m.css` moves it to the box with
+  `:focus-within`. Any composite control added later needs the same.
+- **`--ink-2` is not allowed in `m/arkiv-m.css`.** `test/tokens.test.mjs`
+  holds an allow-list of files that may use it; the phone sheet is not on it,
+  and the second ink is not needed on a phone.
+- **The old phone's oracle comes from the BASE tree, never the working
+  tree.** `node bin/phone-fixture.mjs oracle <tree> <label>` against the
+  working tree would bless whatever it now draws. Take it from a
+  `git archive` of the base commit, as the header of that file says.

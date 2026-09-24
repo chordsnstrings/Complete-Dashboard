@@ -465,3 +465,65 @@
 /* The hero with a long figure (m/ui.js stats(): `long`, or more than 14
    characters) — one display step down, so it fits a 360px screen. */
 :root[data-skin="arkiv"][data-ui="phone"] .m-stat.hero.long .n{font-size:var(--d4);letter-spacing:-.018em}
+
+/* ── 17 · cash handed in: the one form ───────────────────────────────────────
+   The same five steps in the same order (01–05 are the deck's counter, §3),
+   the same targets: every field at least 44px, the amount 56px because it is
+   the field somebody re-reads before pressing save, the save an ink fill
+   (§13). What changes is the drawing: square fields on a grey-2 rule that
+   turns ink when it has the caret, the chosen driver edged in ink like a
+   chosen chip, the server's sentence quoted on an ink rule, and every state
+   line carrying ruling 1's dot for how much it matters — hollow while the
+   form is unfinished or NOTHING IS RECORDED YET, solid when the server
+   refused, the good dot for "Recorded." (m/screens.js deposits(), the tone
+   block). Words stay ink, never red. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-amount{min-height:56px;border-radius:0;background:var(--paper);
+  border:1px solid var(--grey-2);color:var(--ink);font-family:var(--sans);font-size:var(--d4);font-weight:600;
+  letter-spacing:-.018em;font-variant-numeric:tabular-nums lining-nums}
+:root[data-skin="arkiv"][data-ui="phone"] .m-amount::placeholder{color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-noteinput,
+:root[data-skin="arkiv"][data-ui="phone"] .m-file{min-height:44px;border-radius:0;background:var(--paper);
+  border:1px solid var(--grey-2);color:var(--ink);font-family:var(--sans)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-noteinput::placeholder{color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-amount:focus,
+:root[data-skin="arkiv"][data-ui="phone"] .m-noteinput:focus,
+:root[data-skin="arkiv"][data-ui="phone"] .m-file:focus-within{border-color:var(--ink)}
+/* The browser's own "Choose File" is a rounded grey pill; it becomes the
+   house's outline button, mono capitals on an ink edge. The whole field still
+   opens the camera, so the target is the field's 44px and not this. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-file::file-selector-button{margin-right:10px;padding:7px 12px;
+  border:1px solid var(--ink);border-radius:0;background:var(--paper);color:var(--ink);font-family:var(--mono);
+  font-size:var(--t2);font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+:root[data-skin="arkiv"][data-ui="phone"] .m-fieldnote{font-family:var(--sans);font-size:var(--t5);color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-fieldnote.bad{color:var(--ink);font-weight:500}
+:root[data-skin="arkiv"][data-ui="phone"] .m-fieldnote[data-tone]{display:flex;gap:8px;align-items:flex-start;
+  color:var(--ink);font-weight:500}
+:root[data-skin="arkiv"][data-ui="phone"] .m-fieldnote[data-tone]::before{content:"";flex:none;box-sizing:border-box;
+  width:8px;height:8px;border-radius:50%;margin-top:.4em}
+:root[data-skin="arkiv"][data-ui="phone"] .m-fieldnote[data-tone="warn"]::before{content:"" / "warning: ";
+  border:1.5px solid var(--sem-neg)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-fieldnote[data-tone="crit"]::before{content:"" / "critical: ";
+  background:var(--sem-neg)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-fieldnote[data-tone="ok"]::before{content:"" / "good: ";
+  background:var(--sem-pos)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-fieldnote:empty::before{display:none}
+/* The search hits: one ruled list rather than eight floating pills. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-picklist{gap:0;margin-top:0}
+:root[data-skin="arkiv"][data-ui="phone"] .m-pick{min-height:44px;padding:9px 12px;border-radius:0;
+  background:var(--paper);border:1px solid var(--grey-2);border-top:0;color:var(--ink);font-family:var(--sans)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-pick:active{background:var(--paper-2)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-pickhint{font-family:var(--mono);font-size:var(--t3);color:var(--grey);
+  letter-spacing:.02em}
+:root[data-skin="arkiv"][data-ui="phone"] .m-picked{border-radius:0;background:var(--paper);border:1px solid var(--ink);
+  padding:10px 12px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-picked strong{color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-picked span{color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-shot{border-radius:0;border:1px solid var(--hair);background:var(--paper-2)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-sentence{border-radius:0;border-left:3px solid var(--ink);
+  background:var(--paper-2);color:var(--ink);font-family:var(--sans)}
+/* The search box takes the caret's ring as a whole. arkiv.css draws its
+   2px ink ring on whatever element has focus, and here that is the bare
+   input INSIDE the box, so the ring sat two pixels inside the box's own
+   edge — a box within a box on People, Fleet, Every trip and this form. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-search input:focus-visible{outline:none}
+:root[data-skin="arkiv"][data-ui="phone"] .m-search:focus-within{outline:2px solid var(--ink);outline-offset:2px}
