@@ -21,7 +21,9 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   sourceLabel, completionTone, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows,
   avatar, moneyInTile, cashOnHandTile, bankDepositTile, faresTile,
   alertRateFigure, splitAlerts, standingNote,
-  UBER_FARE_WHY, dialable, segSourceLabel } from './ui.js';
+  UBER_FARE_WHY, dialable, segSourceLabel,
+  contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, swatch, delta } from './ui.js';
+import { CHANNEL_ORDER } from './tokens.js';
 /* personAddr/personIdOf/rewriteParam: the person id as an address, and the
    in-place rewrite that leaves the reader holding the canonical one. See the
    block above rewriteParam in data.js — the rewrite must not be a navigation,
@@ -3774,12 +3776,21 @@ export async function renderDriverDirectory(root) {
      forty-four laptop screens — and opened on a search field and a 361-row
      table, so the first thing a reader saw was an instruction to go looking
      rather than an answer. */
-  const vHost = el('div'); root.append(vHost);
+  /* Under the page contract (plan §4 #drivers): the verdict and five tiles
+     as 00, the busiest six as §01, then the search box DIRECTLY above the
+     table it searches — the roster's working order is otherwise unchanged. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const vHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vHost);
   const bar = el('div', 'toolbar');
   bar.innerHTML = `<input id="dq" type="search" placeholder="Search drivers by name, plate or platform…">
     <span class="cap" id="dn"></span>`;
-  root.append(bar);
-  const grid = el('div', 'dircards'); root.append(grid);
+  const grid = el('div', 'dircards');
+  if (ak) {
+    const bp = panel('The busiest six', 'Who ran the most bookings in this window. Click one to open them.', 'drivers-busiest');
+    root.append(bp.panel); bp.body.append(grid); root.append(bar);
+  } else { root.append(bar); root.append(grid); }
   /* "All drivers" now means all drivers. The directory was built from the trip
      table, so anyone who took nothing in the window had no row — under this
      exact heading — and 64 of the people missing that way had an expired
@@ -3995,8 +4006,9 @@ export async function renderDriverDirectory(root) {
         ? pill(sourceLabel(r.fleet_id), r.identity_from_history ? 'dim' : 'plat')
         : '<span class="ent-off" title="no trip of theirs names a fleet">—</span>') }] : []),
     { label: 'Platforms', key: '_p',
-      render: (r) => (r.platforms || []).map((p) => pill(sourceLabel(p),
-        r.identity_from_history ? 'dim' : 'plat')).join('') },
+      render: (r) => (ak ? platChips(r.platforms, r.identity_from_history)
+        : (r.platforms || []).map((p) => pill(sourceLabel(p),
+          r.identity_from_history ? 'dim' : 'plat')).join('')) },
     { label: 'Usual vehicle', key: 'plate',
       render: (r) => (r.plate == null ? ''
         : r.identity_from_history
@@ -4078,8 +4090,11 @@ export async function renderDriverDirectory(root) {
        to scan for; the whole reason to open this table is to find the people
        whose week went badly. */
     { label: 'Completion', key: 'completion_pct', num: true,
-      cellCls: (r) => { const t = completionTone(r.completion_pct); return t ? `v-${t}` : ''; },
-      render: (r) => (r.completion_pct != null ? pct(r.completion_pct) : '—') },
+      cellCls: (r) => { if (ak) return ''; const t = completionTone(r.completion_pct); return t ? `v-${t}` : ''; },
+      render: (r) => (r.completion_pct != null
+        ? pct(r.completion_pct) + (ak && Number(r.completion_pct) < 95
+          ? ` ${delta(Number(r.completion_pct) - 95, { kind: 'gap', of: 'to 95%', unit: 'pts', d: 1 })}` : '')
+        : '—') },
     /* Measured on the live fleet: rating is null for all 360 people, because
        nothing in the collector writes it — Uber's roster endpoint returns
        onboarding status and a vehicle, not a score, and the earnings breakdown
@@ -4117,7 +4132,8 @@ export async function renderDriverDirectory(root) {
           return '<span class="ent-off" title="this person’s platforms publish no licence expiry">—</span>';
         }
         return pill(r.licence_days_left < 0 ? 'expired' : `${r.licence_days_left}d`,
-          r.licence_days_left < 0 ? 'bad' : r.licence_days_left < 30 ? 'warn' : 'ok');
+          r.licence_days_left < 0 ? 'bad' : r.licence_days_left < 30 ? 'warn' : 'ok')
+          + (ak && r.licence_expires ? `<small class="dim lic-d">${esc(dateStr(`${String(r.licence_expires).slice(0, 10)}T12:00:00`))}</small>` : '');
       } },
   ];
   const draw = (list, term) => {
@@ -4170,6 +4186,7 @@ export async function renderDriverDirectory(root) {
       sub: `${fmt(v.active)} drove, ${fmt(v.idle)} did not, ${fmt(v.never)} never have.`
         + (v.notFilled ? ` ${fmt(v.notFilled)} carry no real licence date, so they are not counted as expired.` : ''),
     });
+    if (ak) driversGlance(AKB, { rows, active, idle, never, expired, figure });
   }
 
   draw(rows, '');
@@ -4189,5 +4206,86 @@ export async function renderDriverDirectory(root) {
       + 'They are marked "not filled in" and are NOT counted as expired — the Compliance page counts '
       + 'them the same way, so the two agree.', 'warn'));
   }
+  if (ak) {
+    tblP.panel.append(el('p', 'cap', 'Completion below 95% shows its gap to 95% — a house threshold, not a '
+      + 'fleet measurement. Licence shows the expiry date under the state.'));
+  }
   return rows;
+}
+
+/* ── #drivers under the page contract ────────────────────────────────────── */
+/* Platform chips: a swatch and an INK label, in the fixed channel order —
+   never the payload's order, never a coloured word (SPEC L5.1). */
+function platChips(platforms, fromHistory) {
+  const order = (p) => { const i = CHANNEL_ORDER.indexOf(String(p || '').toLowerCase()); return i < 0 ? 99 : i; };
+  return [...(platforms || [])].sort((a, b) => order(a) - order(b))
+    .map((p) => `<span class="pchip${fromHistory ? ' dim' : ''}">${swatch(p)}${esc(sourceLabel(p))}</span>`).join(' ');
+}
+/* The five tiles. Every figure is a count the verdict's own branch logic
+   already holds; the verdict's figure is not repeated (ruling 7), so on the
+   expired branch the Licence tile folds into the statement above it. The
+   sub-lines the plan adds are computed from the same rows. */
+function driversGlance(AKB, { rows, active, idle, never, expired, figure }) {
+  const fleets = new Map();
+  rows.forEach((r) => { if (r.fleet_id) fleets.set(r.fleet_id, (fleets.get(r.fleet_id) || 0) + 1); });
+  const tr = active.map((r) => Number(r.trips) || 0).sort((a, b) => a - b);
+  const med = tr.length ? (tr.length % 2 ? tr[(tr.length - 1) / 2] : (tr[tr.length / 2 - 1] + tr[tr.length / 2]) / 2) : null;
+  const all = rows.map((r) => Number(r.trips) || 0).sort((a, b) => b - a);
+  const tot = all.reduce((a, n) => a + n, 0);
+  const top20 = tot ? all.slice(0, 20).reduce((a, n) => a + n, 0) / tot * 100 : null;
+  const { tiles } = bandTiles([
+    { label: 'Licence expired', value: fmt(expired.length), hero: true,
+      sub: 'a real expiry date in the past — placeholder dates are not counted' },
+    { label: 'On the books', value: fmt(rows.length),
+      sub: [...fleets.entries()].sort((a, b) => b[1] - a[1]).map(([f, n]) => `${fmt(n)} ${sourceLabel(f)}`).join(' · ')
+        || 'no row names a fleet' },
+    { label: 'Drove', value: fmt(active.length),
+      sub: active.length ? `median ${fmt(med, 1)} bookings each · the busiest ${fmt(tr[tr.length - 1])}`
+        + (top20 != null && all.filter((n) => n > 0).length > 20 ? ` · the top 20 ran ${pct(top20, 1)}` : '') : 'nobody drove in this window' },
+    { label: 'Did not drive', value: fmt(idle.length), sub: 'on the books, drove before, no trip in this window' },
+    { label: 'Never have', value: fmt(never.length), sub: 'no trip on record at all' },
+  ], { figure });
+  glance(AKB.tilesHost, tiles);
+}
+/* §04 How the work concentrates — the share of the window's bookings run by
+   the busiest 10, 20 and 50, from the directory rows already fetched. */
+export function driversConcentration(host, dots) {
+  const tr = dots.map((r) => Number(r.trips) || 0).filter((n) => n > 0).sort((a, b) => b - a);
+  const tot = tr.reduce((a, n) => a + n, 0);
+  if (!tot) { empty(host, 'Nobody drove in this window, so there is no work to spread.'); return; }
+  let run = 0;
+  const curve = tr.map((n, i) => { run += n; return { rank: i + 1, share: +(run / tot * 100).toFixed(1) }; });
+  areaChart(host, curve, { x: 'rank', y: 'share', color: '--ink', valueFmt: (v) => `${v}%`,
+    aria: 'Share of the window\u2019s bookings run by the busiest people, by rank' });
+  const at = (k) => (tr.length >= k ? curve[k - 1].share : null);
+  const parts = [10, 20, 50].filter((k) => at(k) != null).map((k) => `the top ${k} ran ${pct(at(k), 1)}`);
+  host.append(el('p', 'cap', `${countOf(tr.length, 'person', 'people')} drove ${fmt(tot)} bookings; ${parts.join(', ')}`
+    + (tr.length >= 20 ? ` — an even spread would give the top 20 ${pct(20 / tr.length * 100, 1)}.` : '.')));
+}
+export function driversAbsence(root, dir) {
+  const rows = Array.isArray(dir) ? dir : [];
+  const n = rows.length;
+  const exp = rows.filter((r) => r.licence_days_left != null && r.licence_days_left < 0);
+  const tally = new Map();
+  exp.forEach((r) => { const d = String(r.licence_expires || '').slice(0, 10); if (d) tally.set(d, (tally.get(d) || 0) + 1); });
+  const [mDate, mN] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0] || [null, 0];
+  const noDate = rows.filter((r) => !r.licence_expires).length;
+  const noRating = rows.filter((r) => r.platform_rating == null).length;
+  const uberOnly = rows.filter((r) => r.active_in_window && (r.platforms || []).length === 1
+    && String(r.platforms[0]).toLowerCase() === 'uber').length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Expired licences that share one date', fig: mN > 1 ? `${fmt(mN)} of ${fmt(exp.length)}` : null, none: 'None shared',
+      why: mN > 1 ? `${fmt(mN)} of the licences in the past carry ${dateStr(`${mDate}T12:00:00`)}. One date across many people `
+        + 'is more often a field filled in once than a fleet that lapsed on one day; the register holds nothing that tells them apart.'
+        : 'No two lapsed licences carry the same date.' },
+    { label: 'People with no licence date at all', hl: true, fig: noDate ? `${fmt(noDate)} of ${fmt(n)}` : null, none: 'Every one has one',
+      why: noDate ? 'No platform or register this product reads publishes an expiry for them, so whether they may drive cannot be judged here.'
+        : 'Every person on the books carries a licence date.' },
+    { label: 'People with no platform rating', fig: noRating ? `${fmt(noRating)} of ${fmt(n)}` : null, none: 'Every one rated',
+      why: noRating ? 'Not yet collected for them: Uber is asked for a rating every Monday and Bolt\u2019s roster call is currently refused.'
+        : 'Every person carries a platform rating.' },
+    { label: 'Fares on Uber bookings', fig: uberOnly ? `${fmt(uberOnly)} people` : null, none: 'Not per booking',
+      why: `${UBER_FARE_WHY}; ${uberOnly ? `${countOf(uberOnly, 'person', 'people')} drove only Uber here, and ` : ''}their money is in the Money and Paid columns.` },
+  ]);
 }

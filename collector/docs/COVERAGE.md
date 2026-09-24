@@ -6685,3 +6685,8 @@ number (5 and 5), and never a passport or RTA number.
   included, for "AED" and a number with no fils: `test/arkiv_fils.test.mjs`
   does it for every converted page against the mock. A page converted
   after it belongs in its ROUTES list.
+
+* **The #drivers directory's licence tile IS the verdict on the expired
+  branch.** driversVerdict's figure is the expired count there, so under
+  ruling 7 the tile folds into the statement; a test that looks for a
+  "Licence expired" tile on the mock (2 expired) will not find one.

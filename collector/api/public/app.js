@@ -4,7 +4,7 @@
 // lives in ui.js and data.js so the two cannot drift apart.
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip,
   drawnAs, isToday, markForm } from './charts.js';
-import { channelKey } from './tokens.js';
+import { channelKey, CHANNEL_ORDER } from './tokens.js';
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, sourceToken, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
@@ -21,7 +21,7 @@ import { volatilePath } from './swr.js';
 import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
 import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
-import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
+import { renderDriver, renderDriverDirectory, DRIVER_TABS, driversConcentration, driversAbsence } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
 import { renderCohort } from './cohort.js';
 import { COHORTS, membersOf } from './cohorts.js';
@@ -2344,9 +2344,15 @@ V.drivers = async (root) => {
      asking the same question twice. */
   const dir = await renderDriverDirectory(root);
   if (!alive(gen)) return;
+  /* Under the page contract the scatter sits beside "How the work
+     concentrates" (§04, new, from the directory rows already held) and the
+     cross-platform table takes the full width below them. */
+  const ak = contract();
   const g = el('div', 'grid g2'); root.append(g);
   const sc = panel('Trips vs distance', 'Each dot is a driver — spot high-trip/low-km and vice versa'); g.append(sc.panel);
-  const xp = panel('Cross-platform activity', 'The same person working more than one app'); g.append(xp.panel);
+  const cc = ak ? panel('How the work concentrates', 'Share of the window\u2019s bookings run by the busiest people, busiest first.', 'drivers-conc') : null;
+  if (cc) g.append(cc.panel);
+  const xp = panel('Cross-platform activity', 'The same person working more than one app'); (ak ? root : g).append(xp.panel);
   /* Named for what the endpoint returns. It carries no acceptance field at all
      — the column below reads it from the row and finds nothing — and
      hours_online is non-null on five rows in three hundred. A caption that
@@ -2377,6 +2383,7 @@ V.drivers = async (root) => {
   scatter(sc.body, dots.slice(0, 80),
     { x: 'trips', y: 'km', label: 'driver_name', xLabel: 'trips', yLabel: 'km',
       onClick: (r) => { location.hash = href('driver', r.driver_ext_id); } });
+  if (cc) driversConcentration(cc.body, dots);
   sc.body.append(el('p', 'cap', dots.length > 80
     ? `The 80 busiest of ${fmt(dots.length)} people who drove in this window. One dot per person: `
       + 'platform accounts are folded, so somebody working two apps is one dot carrying both.'
@@ -2397,7 +2404,12 @@ V.drivers = async (root) => {
      Uber and the hotel channel scored one platform and this panel printed the
      flat denial below — on a page whose own directory had just listed them. */
   const people = cross.drivers || (Array.isArray(cross) ? cross : []);
-  const plats = cross.platforms || [];
+  /* Under the contract the platform columns run in the fixed channel order
+     (SPEC L5.1), not the payload's. */
+  const plats = ak ? [...(cross.platforms || [])].sort((a, b) => {
+    const o = (p) => { const i = CHANNEL_ORDER.indexOf(String(p).toLowerCase()); return i < 0 ? 99 : i; };
+    return o(a) - o(b);
+  }) : (cross.platforms || []);
   const col = (pl) => `${pl}_trips`;
   const multi = people.filter((r) => plats.filter((pl) => (r[col(pl)] || 0) > 0).length > 1);
   /* The headline counts come from the endpoint, which computes them over every
@@ -2493,6 +2505,10 @@ V.drivers = async (root) => {
       + 'and a catch-up describe the same week, and adding the statements would '
       + 'count those days twice.'
       + (pf.truncated ? ' The list is the most recent periods, not all of them.' : '')));
+  }
+  if (ak) {
+    driversAbsence(root, dir);
+    pageFoot({ colophon: [windowLabel(), `${fmt(Array.isArray(dir) ? dir.length : 0)} on the books`] }, root);
   }
 };
 

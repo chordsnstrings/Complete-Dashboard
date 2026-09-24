@@ -960,6 +960,20 @@
 :root[data-skin="arkiv"] .insight-row,:root[data-skin="arkiv"] .dircard{background:none;border:0;
   border-top:1px solid var(--hair);border-radius:0;box-shadow:none;transition:none}
 :root[data-skin="arkiv"] .insight-row{padding:12px 0}
+/* #drivers' busiest six (plan §4): six columns at a desktop width, the full
+   name wrapping instead of an ellipsis — AUDIT found it clipped at 133px —
+   and the platform chips in the table a swatch beside an ink label. */
+@media(min-width:1100px){:root[data-skin="arkiv"] .dircards{grid-template-columns:repeat(6,minmax(0,1fr))}}
+:root[data-skin="arkiv"] .dircard{flex-wrap:wrap;align-items:flex-start}
+:root[data-skin="arkiv"] .dircard .dc-meta b{white-space:normal;overflow:visible;text-overflow:clip}
+/* The count on its own line under the name: six columns leave no room for
+   both side by side, and the wrapped name ran into the figure. */
+:root[data-skin="arkiv"] .dircard .dc-meta{flex:1 1 0}
+:root[data-skin="arkiv"] .dircard .dc-n{flex:0 0 100%;text-align:left;display:flex;gap:6px;align-items:baseline}
+:root[data-skin="arkiv"] .dircard .dc-n .num{display:inline}
+:root[data-skin="arkiv"] .pchip{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;color:var(--ink)}
+:root[data-skin="arkiv"] .pchip.dim{color:var(--grey)}
+:root[data-skin="arkiv"] .lic-d{display:block;margin-top:2px}
 :root[data-skin="arkiv"] .insight-row:hover,:root[data-skin="arkiv"] a.insight-row:hover,
 :root[data-skin="arkiv"] .dircard:hover{background:var(--paper-2);border-top-color:var(--hair);
   box-shadow:none;transform:none}

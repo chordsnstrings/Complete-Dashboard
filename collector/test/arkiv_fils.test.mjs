@@ -37,6 +37,8 @@ const ROUTES = [
   // Work
   'demand', 'trips', 'supply', 'platforms', 'platforms/tiers', 'platforms/funnel', 'corridors', 'causes',
   'forecast', 'optimise', 'capacity', 'day/2026-08-14', 'slot/2/19', 'trip/hotel/h-mock-1', 'trip/uber/u-mock-1',
+  // People
+  'drivers',
 ];
 
 const scan = (page) => page.evaluate(() => {

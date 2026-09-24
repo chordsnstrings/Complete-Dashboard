@@ -1783,3 +1783,13 @@ both feeds labelled "provider not recorded"; every FMS fix read as no seat
 reading; the occupancy count doubled by two FMS providers; the hotel
 earnings' reason naming a payments report that channel does not have; the
 Uber fare's reason drawn at display size at 390.
+
+### #drivers — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/drivers/`): no error, no sideways scroll (the
+roster scrolls inside its own frame). 146 cannot legally work — the verdict —
+over 347 on the books (252 Ecosine, 95 Egari), 114 drove with a median of
+163 bookings each, and the top 20 ran 30.0% of the work. Found by looking
+and fixed before commit: in six columns the wrapped name ran into the trip
+count on every card; the count now sits on its own line.
