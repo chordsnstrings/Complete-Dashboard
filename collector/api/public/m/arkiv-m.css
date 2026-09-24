@@ -430,3 +430,12 @@
 :root[data-skin="arkiv"][data-ui="phone"] .m-row[data-ch="hotel"]{--mark:var(--c-hotel)}
 :root[data-skin="arkiv"][data-ui="phone"] .m-row[data-ch="cabman"]{--mark:var(--c-cabman)}
 :root[data-skin="arkiv"][data-ui="phone"] .m-row[data-ch="fms"]{--mark:var(--c-fms)}
+
+/* ── 15 · Analyst: a finding ─────────────────────────────────────────────────
+   The claim in Karla at reading size, and its verdict an ink tag in mono
+   capitals — never green or red, because a verdict on a claim is not better
+   or worse (SPEC L3). The tag is a label, not a target. */
+:root[data-skin="arkiv"][data-ui="phone"] .ak-claim{display:block;margin-bottom:8px;font-family:var(--sans);
+  font-size:var(--t7);font-weight:600;line-height:1.4;color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-verdict{display:inline-block;padding:3px 8px;font-size:var(--t1);
+  letter-spacing:.14em;color:var(--ink);background:var(--paper);border:1px solid var(--ink)}

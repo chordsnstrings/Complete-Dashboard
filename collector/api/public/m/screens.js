@@ -1876,7 +1876,8 @@ async function analyst(deck, ctx) {
     empty(deck, 'The analyst has not run yet', 'Nothing has been proposed or tested on this fleet.');
     return;
   }
-  lede(deck, {
+  const AK = phoneContract();
+  const statement = lede(deck, {
     claim: `${fmt(d.confirmed)} of ${fmt(d.confirmed + d.refuted + d.immaterial + d.unsupported)} claims held up`,
     sub: `Across ${fmt(d.runs)} passes. A claim the data refuses is as much of an answer as one it `
       + 'supports, so the refuted and the immaterial are kept rather than discarded.',
@@ -1888,6 +1889,9 @@ async function analyst(deck, ctx) {
     { label: 'Immaterial', value: fmt(d.immaterial) },
     { label: 'Unsupported', value: fmt(d.unsupported), tone: d.unsupported ? 'warn' : null },
   ]);
+  /* 00 heads the statement; the four verdicts stay tiles with no hero (the
+     statement's figure is the headline — ruling 7). */
+  if (AK) deck.insertBefore(secHead('00', 'At a glance', 'every pass the analyst has made'), statement);
   const found = d.findings || [];
   if (found.length) {
     deck.append(el('p', 'm-sec', 'What it found'));
@@ -1900,6 +1904,15 @@ async function analyst(deck, ctx) {
       tag.textContent = f.verdict || '';
       tag.style.cssText = 'font-size:.66rem;padding:3px 9px;'
         + `color:var(--${f.verdict === 'confirmed' ? 'good' : f.verdict === 'refuted' ? 'critical' : 'grey'})`;
+      /* A VERDICT ON A CLAIM IS NOT BETTER OR WORSE, so under the colour law
+         (SPEC L3: green or red means better or worse and nothing else) it is
+         not painted green or red: a refuted claim is an answer, not bad news.
+         The word carries it, in an ink tag — and the inline sizes, which the
+         sheet cannot outrank, are the redesign's classes instead. */
+      if (AK) {
+        b.removeAttribute('style'); b.className = 'ak-claim';
+        tag.removeAttribute('style'); tag.className = 'm-chip ak-verdict';
+      }
       c.body.append(b, tag);
       deck.append(c.card);
     });

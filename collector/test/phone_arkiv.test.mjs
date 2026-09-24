@@ -883,6 +883,30 @@ console.log('\n4.10 · Corporate: what the channel kept, the cost it filed, reas
   await q3.close();
 }
 
+console.log('\n4.11 · Analyst: 00, the verdicts as tiles with no hero, and findings whose verdict wears no semantic hue');
+{
+  const d = ans('/api/analyst/findings?period=month&grain=auto');
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('analyst');
+  const o = await outline(p.page);
+  const m = await p.page.evaluate(() => ({
+    hero: !!document.querySelector('.m-stat.hero'),
+    tags: [...document.querySelectorAll('.m-finding .ak-verdict')].map((t) => ({ w: t.textContent,
+      c: getComputedStyle(t).color, inline: t.getAttribute('style') })),
+    claims: [...document.querySelectorAll('.m-finding .ak-claim')].map((b) => b.textContent),
+  }));
+  check('00 heads the statement, then the tiles, then What it found',
+    JSON.stringify(o.slice(0, 4)) === JSON.stringify(['head:At a glance', 'statement', 'tiles', 'sec:What it found']), o.join(' → '));
+  check('the verdict tiles carry no hero: the statement’s figure is the headline (ruling 7)', !m.hero);
+  const found = (d.findings || []).slice(0, 12);
+  check(`every finding keeps its claim and its verdict word (${found.length})`,
+    m.claims.length === found.length && found.every((f, i) => m.claims[i] === (f.claim || '') && m.tags[i].w === (f.verdict || '')),
+    JSON.stringify(m.tags.slice(0, 3)));
+  check('…and no verdict is painted green or red (a refuted claim is an answer, not bad news)',
+    m.tags.every((t) => t.c === 'rgb(10, 10, 11)' && !t.inline), JSON.stringify(m.tags.slice(0, 3)));
+  await p.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');
