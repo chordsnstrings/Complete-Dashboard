@@ -40,7 +40,7 @@ const ROUTES = [
   // People
   'drivers', 'driver/drv-0', 'driver/drv-0/activity', 'driver/drv-0/day?on=2026-09-20',
   'driver/drv-0/territory', 'driver/drv-0/earnings', 'driver/drv-0/quality', 'driver/drv-0/record',
-  'driver/U-TARIQ/money',
+  'driver/U-TARIQ/money', 'driver/drv-0/trips',
 ];
 
 const scan = (page) => page.evaluate(() => {

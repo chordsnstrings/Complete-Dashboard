@@ -1867,3 +1867,10 @@ over the month, income at least AED 9,448.85 and AED 1,636.82 of cash fares.
 Found by looking and fixed before commit: the in-panel hero drew the income
 at display size across two lines, and the advance and deduction tiles would
 have printed their definitions as reasons.
+
+### #driver/trips — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-trips/`): no error, no sideways scroll;
+the first cold load took 63 s (the trip list for a busy driver), later ones
+4 s.

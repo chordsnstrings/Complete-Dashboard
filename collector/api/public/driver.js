@@ -2953,8 +2953,10 @@ async function tabTrips(root, id) {
             esc(r.attribution_evidence || '')}">${esc(TIER_LABEL[r.attribution_tier]
             || r.attribution_tier || 'no rung reached')}</span>`;
       }
-      return pill(r.status || '—',
-        r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'warn' : null);
+      /* Under the page contract an outcome is not better or worse: the
+         status is an ink pill (plan §4 #driver/trips). */
+      return pill(r.status || '—', contract() ? null
+        : r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'warn' : null);
     } },
     /* A trip with no fare is not a trip with no money.
        ──────────────────────────────────────────────────────────────────────
@@ -3221,6 +3223,7 @@ async function tabTrips(root, id) {
     count(list.length);
     draw(list, t);
   };
+  if (contract()) pageFoot({ colophon: [windowLabel(), `${fmt(bookings.length)} ${plural(bookings.length, 'booking')}`] }, root);
 }
 
 /* ── unexplained journeys: the pieces the two tabs share ──────────────────

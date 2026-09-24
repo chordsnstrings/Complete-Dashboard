@@ -457,4 +457,34 @@ if (want('driver-money')) {
   }
 }
 
+/* ══ #driver/trips ════════════════════════════════════════════════════════ */
+if (want('driver-trips')) {
+  console.log('\n#driver/trips');
+  const pills = (page) => page.evaluate(() => {
+    const t = [...document.querySelectorAll('#view table')].find((x) => /Status/.test(x.querySelector('thead')?.textContent || ''));
+    const i = t ? [...t.querySelectorAll('thead th')].findIndex((th) => /^Status/.test(th.textContent.trim())) : -1;
+    return t && i >= 0 ? [...t.querySelectorAll('tbody tr')].map((tr) => tr.children[i]?.querySelector('.pill')?.className || '').filter(Boolean) : [];
+  });
+  {
+    const { ctx, page } = await open('classic', 'driver/drv-0/trips');
+    const p = await pills(page);
+    check('old skin: a completed booking\'s status is a green pill', p.some((c) => /\bok\b/.test(c)), JSON.stringify(p.slice(0, 4)));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/trips');
+    const p = await pills(page);
+    const s = await shape(page);
+    check('an outcome is not better or worse: every booking\'s status an ink pill (a journey nobody booked keeps its flag)',
+      p.length > 0 && p.every((c) => !/\b(ok|warn)\b/.test(c)), JSON.stringify(p.slice(0, 6)));
+    check('the table, its paging and its journeys kept; the colophon counts the bookings', /Trip records/.test(s.heads.join('|')) && /booking/.test(s.colophon), s.colophon);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/trips', { width: 390 });
+    check('#driver/trips at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

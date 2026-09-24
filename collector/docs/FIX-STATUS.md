@@ -3455,3 +3455,11 @@ Found in both skins and not changed (the old skin is frozen, and the figure is n
 | page | what changed under the skin | state | proof |
 |---|---|---|---|
 | #driver/money | RESTYLE ONLY (plan §4: the per-driver cash reconciliation keeps its structure). Each tile row stays in the panel it sits in and is drawn as glance tiles, so a figure that cannot be measured prints its REASON in the value slot (the Arkiv absence cell) instead of a dash with a sentence under it; no tile toned; a row inside a panel has no hero and no highlight. One correction: Advances outstanding and Deductions carried their DEFINITIONS as sub-lines ("what has been advanced, less what has come back", "tolls, fines, damage"), which bandTiles would have printed as the reason — they now take the server's own books_absent_reason. Every caption, note, the statement table and its order unchanged. The colophon is set on every path through the tab, the early returns included | **written** | `test/arkiv_people.test.mjs` #driver/money (10), one fixture with no books. Reverts, each failing: the kpiRow back (no glance in the panels, dashes back); the definitions back as reasons. Golden EXTRA gains driver/U-TARIQ/money, driver/drv-0/money, driver/drv-0/day?on=2026-09-20 and driver/drv-0/unauthorized, recorded from the base; `driver_money_tab` 56 |
+
+### P44 · #driver/trips
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #driver/trips | Restyle only (plan §4: the raw evidence rows). Under the contract a booking's status is an ink pill — an outcome is not better or worse — while a journey nobody booked keeps its flag; every column, the newest-first order, the paging, the "part of AED X earned that day" cell and the interleaved journeys unchanged; the colophon counts the bookings | **written** | `test/arkiv_people.test.mjs` #driver/trips (5). Revert — the green/amber status pills back: fails. `arkiv_classic_frozen` ONLY=trips 5/5; `driver_trip_day_money` 27, `absent_columns` 25 |
+
+Not built: the 3px channel row marker in the gutter (tableFrom takes no row style).
