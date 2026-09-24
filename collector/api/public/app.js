@@ -7569,7 +7569,20 @@ export const feedLabel = (source, fleet) => sourceLabel(source)
   + (fleet ? ` · ${sourceLabel(fleet)}` : '');
 
 V.sources = async (root) => {
-  const vsHost = el('div'); root.append(vsHost);
+  /* Under the page contract (plan §4 #sources): the verdict as the 00
+     statement — its "need attention" figure not repeated as a tile (ruling
+     7) — with what failed, the days still owed, the rows on record and the
+     stalest scheduled feed; then why the windows were lost and when, per
+     provider; the collector-health and coverage tables unchanged but for
+     their status words (outline chips; red only for an error, with its "!");
+     when each feed last wrote and the rows on record by source; the windows
+     that did not land (unfolded — folding them is the operator's call) with
+     the pre-built summaries after them; the coordinates and the field census
+     (with what each field is stored as); a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
+  const vsHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vsHost);
   /* Guarded like every other long view. This one was not, and it is the
      longest: five panels, six fetches and a nested draw. An abandoned render
      goes on writing into panels the reader has already left — which is how the
@@ -7618,6 +7631,9 @@ V.sources = async (root) => {
      own warmer comment calls it a twenty-second query and names it as the
      cause of a 504 on this page — and eleven seconds of an anonymous grey bar
      is indistinguishable from a panel that will never fill. */
+  const whyP = ak ? panel('Why the windows were lost', 'Every refused window, by what the provider said — and by provider', 'src-why') : null;
+  const whenP = ak ? panel('When each provider lost a window', 'Refused windows by the month they start in, one plot per provider on one ruler', 'src-when') : null;
+  if (ak) { st.panel.before(whyP.panel, whenP.panel); loading(whyP.body); loading(whenP.body); }
   [st.body, ru.body].forEach((h) => loading(h));
   loading(cv.body, 'Reading the whole record — every trip, every alert, every fix, with no date '
     + 'window at all. This is the slowest question the product asks and takes about ten seconds.');
@@ -7683,7 +7699,9 @@ V.sources = async (root) => {
           + 'two dates cannot.'
         : null,
     });
+    if (ak) sourcesGlance(AKB, { rows, bad, partial, quietOk, oldest, ageH, coverage, status });
   }
+  if (ak) sourcesWhy(whyP.body, whenP.body, status);
 
   ru.body.innerHTML = '';
   if (!rollups.length) {
@@ -7693,7 +7711,7 @@ V.sources = async (root) => {
     ru.body.append(tableFrom(rollups, [
       { label: 'Rollup', key: 'name' },
       { label: 'Status', key: 'status',
-        render: (r) => `<span class="tag ${r.status === 'ok' ? 'ok' : 'bad'}">${esc(r.status || '—')}</span>` },
+        render: (r) => (ak ? srcState(r.status) : `<span class="tag ${r.status === 'ok' ? 'ok' : 'bad'}">${esc(r.status || '—')}</span>`) },
       /* Age, not a timestamp. "18 minutes ago" answers the question a reader
          actually has; a timestamp makes them do the subtraction. */
       { label: 'Age', key: 'age_min', num: true,
@@ -7763,7 +7781,7 @@ V.sources = async (root) => {
       absent: 'these runs predate per-fleet collection and cover the whole account',
       render: (r) => (r.fleet_id ? sourceLabel(r.fleet_id) : '—') },
     { label: 'Mode', key: 'mode' },
-    { label: 'Status', key: 'status', render: (r) => `<span class="tag ${TAG[r.status] || 'bad'}">${esc(r.status || '—')}</span>` },
+    { label: 'Status', key: 'status', render: (r) => (ak ? srcState(r.status) : `<span class="tag ${TAG[r.status] || 'bad'}">${esc(r.status || '—')}</span>`) },
     // With separators, on a screen where the table below it has them.
     { label: 'Rows', key: 'rows_written', num: true, render: (r) => fmt(r.rows_written) },
     { label: 'Windows', key: 'chunks_total', num: true, render: (r) => (r.chunks_total == null ? '—'
@@ -7787,7 +7805,7 @@ V.sources = async (root) => {
         : r.cadence && r.cadence.scheduled === false
           ? `<span class="note" title="${esc(String(r.cadence.note || ''))}">${
             esc(r.silence?.sentence || 'nothing schedules this source')}</span>`
-          : '<span class="note ok">healthy</span>') },
+          : ak ? '<span class="dim">healthy</span>' : '<span class="note ok">healthy</span>') },
   ], { sortable: true, sortId: 'status' }));
   /* The dates of the windows that failed. Without them a gap is visible but not
      fixable — you can see the hole and not know what to re-fetch. */
@@ -7802,7 +7820,7 @@ V.sources = async (root) => {
     /* What this row is worth chasing FOR. Two of the three answers here mean
        "do not bother": a range past the provider's retention will refuse for
        ever, and a range ending after the run itself was never real. */
-    const standing = (h) => (UNSERVABLE.test(String(h.error || ''))
+    const standing = (h) => (ak ? srcStanding(h) : UNSERVABLE.test(String(h.error || ''))
       ? '<span class="tag bad" title="past the provider\u2019s retention horizon — it cannot serve these days to anybody, and every backfill re-asks and is refused again">gone for good</span>'
       : h.finished_at && dayKey(h.to) > dayKey(h.finished_at)
         ? '<span class="ent-off" title="the window runs past the moment the run finished — weekChunks widens to whole weeks on purpose, so this is a future that had not happened, not a hole">not yet due</span>'
@@ -7841,6 +7859,8 @@ V.sources = async (root) => {
     hp.body.append(fix);
     root.append(hp.panel);
   }
+  /* The plan's order: the windows owed before the pre-built summaries. */
+  if (ak) root.append(ru.panel);
   cv.body.innerHTML = '';
   /* "Rows / From / Latest" reads as an unbroken span. Every hole between those
      two dates — the exact failure mode the rest of this codebase is written
@@ -7949,7 +7969,7 @@ V.sources = async (root) => {
            one query, and `days` parses. */
         ? `<a class="lnk" href="${href('coverage', null, null, { days: 365, at: `src-${r.src}` })}">`
           + `${countOf(r.cal.missing_days, 'day')}</a>`
-        : pill('none', 'ok')) },
+        : pill('none', ak ? null : 'ok')) },
     { label: 'Largest gap', key: '_g', render: (r) => {
       if (r.cal?.event_driven) {
         return '<span class="ent-off" title="this dataset records events, not a daily feed">—</span>';
@@ -7984,6 +8004,7 @@ V.sources = async (root) => {
      not under a platform, and sourceLabel(null) returns '—'. The live footnote
      read "— is missing 73 days". The row already carries the name the reader
      saw in the first column; use that. */
+  if (ak) sourcesFeeds(cv.panel, status, coverage);
   const holed = cov.filter((r) => r.cal && r.cal.missing_days && !r.cal.event_driven);
   if (holed.length) {
     const h = el('div', 'note');
@@ -8029,11 +8050,16 @@ V.sources = async (root) => {
           render: (r) => `<span class="${pct(r.dropoff_pct)}">${r.dropoff_pct}%</span>`
             + `<span class="dim"> ${fmt(r.with_dropoff)}</span>` },
       ], { sortable: true, sortId: 'geocov' }));
+      /* De-duplicated under the contract: timeline:uber and trip:uber both
+         name Uber, and the sentence read "uber and bolt and uber" (plan §4
+         #sources). The old skin's words are held by the golden. */
       const none = geo.filter((g) => g.pickup_pct === 0);
+      const noneNames = ak ? [...new Set(none.map((g) => sourceLabel(g.dataset.split(':')[1] || g.dataset)))]
+        : none.map((g) => g.dataset.split(':')[1] || g.dataset);
       gp.body.append(el('p', 'cap', none.length
-        ? `${none.map((g) => esc(g.dataset.split(':')[1] || g.dataset)).join(' and ')} `
-          + `${none.length === 1 ? 'sends' : 'send'} addresses as text and no coordinate, so `
-          + `${none.length === 1 ? 'its' : 'their'} pickups can only ever be grouped by parsing `
+        ? `${noneNames.map((x) => esc(x)).join(' and ')} `
+          + `${noneNames.length === 1 ? 'sends' : 'send'} addresses as text and no coordinate, so `
+          + `${noneNames.length === 1 ? 'its' : 'their'} pickups can only ever be grouped by parsing `
           + 'the address. That parse is where the demand map\u2019s missing areas come from.'
         : 'Every feed on the record carries a coordinate, so the demand map can be keyed off '
           + 'geometry rather than parsed address text.'));
@@ -8101,7 +8127,12 @@ V.sources = async (root) => {
         { label: 'Filled', key: 'fill_pct', num: true, render: (r) => pct(r.fill_pct) },
         { label: 'Distinct values', key: 'distinct_values', num: true, render: (r) => fmt(r.distinct_values) },
         { label: 'Kept as a column', key: 'already_a_column', render: (r) => (r.already_a_column
-          ? pill('yes', 'ok') : pill('raw only', 'warn')) },
+          ? pill('yes', ak ? null : 'ok') : pill('raw only', ak ? null : 'warn')) },
+        /* What the collector stores it as — the payload's mapped_to, fetched
+           and never shown, while the caption below apologised that matching
+           by name can miss a renamed column. */
+        ...(ak && d.fields.some((f) => f.mapped_to) ? [{ label: 'Stored as', key: 'mapped_to',
+          render: (r) => (r.mapped_to ? `<code>${esc(String(r.mapped_to))}</code>` : '<span class="ent-off">not stored</span>') }] : []),
         { label: 'Examples', key: '_e', render: (r) => esc((r.examples || []).slice(0, 3).join(' · ')) },
       ], { sortable: true, sortId: 'rawf' }));
       const unkept = d.fields.filter((f) => !f.already_a_column).length;
@@ -8118,10 +8149,139 @@ V.sources = async (root) => {
     }
   };
   const rawWin = () => rawBar.querySelector('#rawWin').value;
+  if (ak) sourcesAbsence(root, status, coverage);
   await drawRaw('uber', rawWin());
   rawBar.querySelector('#rawSrc').onchange = (e) => drawRaw(e.target.value, rawWin());
   rawBar.querySelector('#rawWin').onchange = () => drawRaw(rawBar.querySelector('#rawSrc').value, rawWin());
 };
+
+/* ── #sources under the page contract ────────────────────────────────────── */
+/* A run's status as a word: an error in the negative colour with its "!"
+   (it says worse), a partial an ink outline chip, ok plain grey. */
+const srcState = (st) => (st === 'error' ? pill('error', 'bad')
+  : st === 'ok' ? '<span class="dim">ok</span>' : pill(st || '—'));
+const srcStanding = (h) => (UNSERVABLE.test(String(h.error || ''))
+  ? '<span class="pill" title="past the provider\u2019s retention horizon — it cannot serve these days to anybody, and every backfill re-asks and is refused again">gone for good</span>'
+  : h.finished_at && dayKey(h.to) > dayKey(h.finished_at)
+    ? '<span class="ent-off" title="the window runs past the moment the run finished — weekChunks widens to whole weeks on purpose, so this is a future that had not happened, not a hole">not yet due</span>'
+    : '<span class="pill" style="color:var(--sem-neg)" title="still owed — this one is worth re-running">outstanding</span>');
+/* Why a window was lost, from the provider's own sentence. A class is an
+   inference from the wording, named as such in the caption. */
+const LOST_WHY = [
+  ['past the provider\u2019s retention', UNSERVABLE],
+  ['the credential was refused', /\b40[13]\b|unauthori[sz]ed|not_authorized|forbidden|signed in|session|token|credential|cookie|log ?in|expired|not entitled|companies_not_allowed/i],
+  ['the host never answered', /time ?out|timed out|econn|enotfound|eai_again|socket|network|\b50[234]\b|fetch failed|aborted/i],
+  ['the provider rate-limited the run', /rate.?limit|throttl|\b429\b/i],
+  ['fewer rows than asked for', /fewer|incomplete|truncat|short of|collected \d[\d,]* of \d/i],
+  /* FMS's own sentence on production is "refused: <endpoint> failed" — a
+     refusal with no reason in it (81 of 236 windows, 2026-09-24). Said so,
+     rather than guessed into a class. */
+  ['refused, with no reason given', /^refused:/i],
+];
+const lostWhy = (e) => (LOST_WHY.find(([, re]) => re.test(String(e || ''))) || ['another reason'])[0];
+function sourcesGlance(AKB, { rows, bad, partial, quietOk, oldest, ageH, coverage, status }) {
+  const debt = collectionDebt(status);
+  const sched = rows.filter((r) => r.finished_at && !(r.cadence && r.cadence.scheduled === false));
+  const fresh = sched.sort((a, b) => new Date(b.finished_at) - new Date(a.finished_at))[0];
+  const fm = fresh ? Math.round((Date.now() - new Date(fresh.finished_at)) / 6e4) : null;
+  const sets = ['trips', 'earnings', 'telemetry', 'alerts', 'ledger'].map((k) => coverage?.[k] || []);
+  const rowsOn = sets.flat().reduce((a, r) => a + (+r.n || 0), 0);
+  const tiles = [
+    { label: 'Failed on the last run', value: fmt(bad.length), hero: true,
+      sub: `${fmt(partial.length)} more left windows unfetched · ${fmt(quietOk.length)} reported success and wrote nothing` },
+    debt.entries
+      ? { label: 'Days still owed', value: fmt(debt.days), sub: `from ${countOf(debt.entries, 'refused window')}`
+        + (debt.unservable ? `; ${fmt(debt.unservable)} past retention, never to be served` : '') }
+      : { label: 'Days still owed', na: 'no window was refused on any run on record' },
+    { label: 'Rows on record', value: fmt(rowsOn), sub: `across ${countOf(sets.flat().length, 'dataset')}` },
+    ageH != null
+      ? { label: 'Stalest scheduled feed', value: `${fmt(ageH)} h`, sub: `${sourceLabel(oldest.source)}${oldest.fleet_id ? ` · ${sourceLabel(oldest.fleet_id)}` : ''}`
+        + (fm != null ? `; the freshest, ${sourceLabel(fresh.source)}, ${fmt(fm)} min ago` : '') }
+      : { label: 'Stalest scheduled feed', na: 'no scheduled collector has finished a run on record' },
+  ];
+  glance(AKB.tilesHost, bandTiles(tiles).tiles);
+}
+function sourcesWhy(whyHost, whenHost, status) {
+  whyHost.innerHTML = ''; whenHost.innerHTML = '';
+  const holes = (Array.isArray(status) ? status : []).flatMap((r) => (r.failed_windows || []).map((w) => ({ source: r.source, ...w })));
+  if (!holes.length) {
+    whyHost.append(note('No window was refused on any run on record.'));
+    whenHost.append(note('No window was refused on any run on record.'));
+    return;
+  }
+  const g = el('div', 'grid g2'); whyHost.append(g);
+  const a = el('div'); const b = el('div'); g.append(a, b);
+  a.append(el('h4', 'sub', 'By what the provider said'));
+  const by = new Map(); holes.forEach((h) => { const k = lostWhy(h.error); by.set(k, (by.get(k) || 0) + 1); });
+  const a1 = el('div'); a.append(a1);
+  hbars(a1, [...LOST_WHY.map(([k]) => k), 'another reason'].filter((k) => by.has(k)).map((k) => ({ label: k, n: by.get(k) })),
+    { signed: false, color: '--mk-fill' });
+  b.append(el('h4', 'sub', 'By provider'));
+  const bp = new Map(); holes.forEach((h) => bp.set(h.source, (bp.get(h.source) || 0) + 1));
+  const b1 = el('div'); b.append(b1);
+  hbars(b1, [...bp.entries()].sort((x, y) => y[1] - x[1]).map(([src, n]) => ({ label: sourceLabel(src), n, src })),
+    { signed: false, colorFor: (x) => sourceToken(x.src) || '--mk-fill' });
+  whyHost.append(el('p', 'cap', `${countOf(holes.length, 'refused window')}. The reason is read from the provider\u2019s own sentence `
+    + 'in the table below — an inference from its wording, not a code the provider sent.'));
+  /* When: one small plot per provider, on one ruler. */
+  const months = [...new Set(holes.map((h) => String(h.from).slice(0, 7)))].sort();
+  const provs = [...bp.keys()];
+  const counts = provs.map((src) => months.map((m) => holes.filter((h) => h.source === src && String(h.from).slice(0, 7) === m).length));
+  const top = Math.max(1, ...counts.flat());
+  const gg = el('div', 'grid g3'); whenHost.append(gg);
+  provs.forEach((src, i) => {
+    const box = el('div'); gg.append(box);
+    box.append(el('p', 'cap', `<b>${esc(sourceLabel(src))}</b> · ${fmt(counts[i].reduce((x, y) => x + y, 0))}`));
+    const c = el('div'); box.append(c);
+    barChart(c, months.map((m, j) => ({ m: MONTH_SHORT[+m.slice(5, 7) - 1] + ` ${m.slice(2, 4)}`, n: counts[i][j] })),
+      { x: 'm', y: 'n', label: 'refused windows', color: sourceToken(src) || '--mk-fill', max: top });
+  });
+}
+/* When each feed last wrote, and the rows on record by source — after the
+   coverage table they summarise. */
+function sourcesFeeds(after, status, coverage) {
+  const g = el('div', 'grid g2'); after.after(g);
+  const a = panel('When each feed last wrote', 'Hours since the newest finished run of each collector', 'src-age');
+  const b = panel('Rows on record, by source', 'Every dataset the record holds, by the source that wrote it', 'src-rows');
+  g.append(a.panel, b.panel);
+  const newest = new Map();
+  (Array.isArray(status) ? status : []).filter((r) => r.finished_at).forEach((r) => {
+    const cur = newest.get(r.source);
+    if (!cur || new Date(r.finished_at) > new Date(cur.finished_at)) newest.set(r.source, r);
+  });
+  const ages = [...newest.values()].map((r) => ({ label: sourceLabel(r.source), src: r.source,
+    n: Math.round(((Date.now() - new Date(r.finished_at)) / 36e5) * 10) / 10, unsched: r.cadence && r.cadence.scheduled === false }))
+    .sort((x, y) => y.n - x.n);
+  const a1 = el('div'); a.body.append(a1);
+  if (ages.length) {
+    hbars(a1, ages, { signed: false, colorFor: (x) => (x.unsched ? '--grey' : '--mk-fill'), valueFmt: (v) => `${fmt(v, 1)} h` });
+    if (ages.some((x) => x.unsched)) a.body.append(el('p', 'cap', 'Grey: a source nothing schedules — its age is its resting state, not a fault.'));
+  } else a1.append(note('No collector has finished a run on record.'));
+  const rows = [
+    ...(coverage.trips || []).map((r) => ({ label: `${sourceLabel(r.platform)} trips`, src: r.platform, n: +r.n || 0 })),
+    ...(coverage.earnings || []).map((r) => ({ label: `${sourceLabel(r.platform || r.source)} earnings`, src: r.platform || r.source, n: +r.n || 0 })),
+    ...(coverage.telemetry || []).map((r) => ({ label: `${sourceLabel(r.source)} telemetry`, src: r.source, n: +r.n || 0 })),
+    ...(coverage.alerts || []).map((r) => ({ label: 'safety alerts', src: 'fms', n: +r.n || 0 })),
+    ...(coverage.ledger || []).map((r) => ({ label: 'ledger entries', src: null, n: +r.n || 0 })),
+  ].filter((r) => r.n > 0).sort((x, y) => y.n - x.n);
+  const b1 = el('div'); b.body.append(b1);
+  if (rows.length) hbars(b1, rows.slice(0, 14), { signed: false, colorFor: (x) => sourceToken(x.src) || '--mk-fill' });
+  else b1.append(note('The record holds no rows yet.'));
+}
+function sourcesAbsence(root, status, coverage) {
+  const debt = collectionDebt(status);
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'What a provider holds and never sent', fig: null, none: 'Not reported',
+      why: 'No provider says how many rows it holds, so nothing here can count what a run never asked for — only what it asked for and was refused.' },
+    { label: 'Days no provider will serve again', hl: !!debt.unservableDays, fig: debt.unservableDays ? countOf(debt.unservableDays, 'day') : null, none: 'None',
+      why: debt.unservableDays ? `Past the provider\u2019s retention horizon (${dateStr(debt.unservableFrom)} → ${dateStr(debt.unservableTo)}): every backfill re-asks and is refused again.`
+        : 'No refused window is past a provider\u2019s retention.' },
+    { label: 'Why a provider refused', fig: null, none: 'Its own words',
+      why: 'The reasons above are read from the provider\u2019s sentence; no provider sends a code this product could count on.' },
+  ]);
+  pageFoot({ colophon: ['collector runs and the whole record', `${countOf((Array.isArray(status) ? status : []).length, 'run')}`] }, root);
+}
 
 /* The per-file upload, and the browser's half of the bound the route enforces.
    ─────────────────────────────────────────────────────────────────────────

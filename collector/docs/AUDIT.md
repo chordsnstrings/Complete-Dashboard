@@ -2134,3 +2134,11 @@ Production through live-ui on :8611, both skins at 1440 and 390, light and dark 
 **Replay** (a busy plate, 23 Sept). 207 fixes, 339 km from one feed, so the Distance tile is unqualified. With passenger: 24 km (23%, FMS live seat count). Below the map: 206 gaps, the longest 181 min; status words Moving 115, Idle 74, Stopped 18; top speed 116 km/h, and 92 fixes carried no speed. The car has 35 days with a trail, today drawn unfinished.
 
 The sandbox has no route to the map tiles, so the base map is blank.
+
+### #sources — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p73/`). No page error, no sideways scroll, and the fils scan is clean.
+
+The verdict: 17 collectors failed on their last run, with 37 needing attention of 54 runs. Days still owed: 2,052, from 236 refused windows, 44 of them past retention. Rows on record: 1,777,649 across 12 datasets. Stalest scheduled feed: Bolt, 419 h; the freshest, CABMAN, 4 min.
+
+Refusals by provider: Yango 109, FMS 81, Uber 45, Bolt 1. By reason: credential 109, "refused, with no reason given" 81, past retention 44, and one each for a rate limit and a short collection.

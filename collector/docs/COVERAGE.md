@@ -6755,3 +6755,5 @@ number (5 and 5), and never a passport or RTA number.
 * **A ruling-7 fold must go by LABEL on #live.** In the mock, the one stale car and the one car silent over a day are both "1": two different measures that happen to agree. A value-equality fold (or test) would take the wrong tile. This is the same trap as the roster fold (P50), met again.
 
 * **#map's live view waits on `/api/map/days` before `/api/live`, and on production the markers land ~20 s after load** (/api/live answered in 3.7 s on its own). Shooting it with the usual few-second wait gives an empty map in both skins, so shoot it at 25 s. Separately, the mock's `/api/map/journey` points carry no `source`; production's do (api/server.js). A test of feed colours on replay must supply one.
+
+* **FMS files its refused windows as "refused: <endpoint> failed"**, which carries no reason (81 of 236 refusals on production, 2026-09-24). A reason class read from provider wording must say "refused, with no reason given" for it, never file it under a guessed cause. Uber's rate limit reads "rate-limited, will retry next run", and Bolt's short read reads "collected N of M declared".

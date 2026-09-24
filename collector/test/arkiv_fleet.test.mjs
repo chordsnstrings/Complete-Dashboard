@@ -1080,4 +1080,76 @@ if (want('map')) {
   }
 }
 
+/* ══ #sources ═════════════════════════════════════════════════════════════ */
+if (want('sources')) {
+  console.log('\n#sources');
+  const statusCells = (page) => page.evaluate(() => {
+    const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Collector health');
+    const hs = [...p.querySelectorAll('thead th')].map((h) => h.textContent.replace(/[↑↓]/g, '').trim());
+    const i = hs.indexOf('Status');
+    return [...p.querySelectorAll('tbody tr')].map((tr) => ({ t: tr.children[i]?.textContent.trim(), html: tr.children[i]?.innerHTML || '' }));
+  });
+  {
+    const { ctx, page } = await open('classic', 'sources');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), why: !!document.querySelector('[data-panel="src-why"]') }));
+    const c = await statusCells(page);
+    const cap = await txtOf(page, '#view');
+    check('old skin: no band, no new panels, status as tags — and its coordinates caption as it was', !r.band && !r.why && c.every((x) => /class="tag/.test(x.html))
+      && /timeline and uber send addresses as text|uber and uber send addresses as text/.test(cap), JSON.stringify([r, c.slice(0, 2)]));
+    await ctx.close();
+  }
+  {
+    const withMap = (q, real) => ({ ...real, fields: (real.fields || []).map((f, i) => ({ ...f, mapped_to: i % 2 ? null : `col_${i}` })) });
+    const { ctx, page, answer } = await open('arkiv', 'sources', { fixtures: { '/api/schema/raw-fields': withMap } });
+    const s = await shape(page);
+    const status = answer('/api/status');
+    const cov = answer('/api/coverage');
+    const bad = status.filter((r) => r.status === 'error' || r.error).length;
+    const holes = status.flatMap((r) => (r.failed_windows || []).map((w) => ({ source: r.source, ...w })));
+    check('00: the verdict is the statement; the four tiles, what failed the hero', s.vdctIn00 && s.hero === 'Failed on the last run'
+      && JSON.stringify(Object.keys({ ...s.values, ...s.na })) === JSON.stringify(['Failed on the last run', 'Days still owed', 'Rows on record', 'Stalest scheduled feed'])
+      && s.values['Failed on the last run'] === n(bad), JSON.stringify([s.values, bad]));
+    check('ruling 7: "need attention", the verdict\'s figure, is not a tile', !Object.keys(s.values).some((l) => /attention/i.test(l)), JSON.stringify(Object.keys(s.values)));
+    const rowsOn = ['trips', 'earnings', 'telemetry', 'alerts', 'ledger'].flatMap((k) => cov[k] || []).reduce((a, r) => a + (+r.n || 0), 0);
+    check('rows on record: every dataset\'s rows summed; days still owed counted from the refused windows', s.values['Rows on record'] === n(rowsOn)
+      && (holes.length ? (s.subs['Days still owed'] || '').startsWith(`from ${n(holes.length)} refused window`) : !!s.na['Days still owed']), JSON.stringify([s.values, s.subs['Days still owed']]));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const why = await page.evaluate(() => [...document.querySelectorAll('[data-panel="src-why"] .grid > div')].map((b) => [...b.querySelectorAll('.hb')].map((h) => ({
+      k: h.querySelector('.k')?.textContent.trim(), v: +h.querySelector('.v')?.textContent.replace(/,/g, ''), fill: h.querySelector('.fill')?.getAttribute('style') || '' }))));
+    check('why the windows were lost: every refusal in one reason and under one provider, the providers in their colours', why.length === 2
+      && why[0].reduce((a, b) => a + b.v, 0) === holes.length && why[1].reduce((a, b) => a + b.v, 0) === holes.length && why[1].every((b) => /--c-|--mk-fill/.test(b.fill)), JSON.stringify(why));
+    const when = await page.evaluate(() => document.querySelectorAll('[data-panel="src-when"] .grid > div').length);
+    check('when each provider lost a window: one plot per provider', when === new Set(holes.map((h) => h.source)).size, `${when}`);
+    check('order: 00 → why → when → collector health → coverage → last wrote | rows → windows → summaries → coordinates → census → †',
+      JSON.stringify(s.heads.slice(0, 9)) === JSON.stringify(['At a glance', 'Why the windows were lost', 'When each provider lost a window', 'Collector health', 'Data coverage',
+        'When each feed last wrote', 'Rows on record, by source', 'Windows that did not land', 'Pre-built summaries']) && /^† /.test(s.heads.at(-1)), JSON.stringify(s.heads));
+    const c = await statusCells(page);
+    check('status words: an error red with its "!" pill, a partial an ink outline chip, ok plain', c.length > 0 && c.every((x) => (x.t === 'error' ? /pill bad/.test(x.html)
+      : x.t === 'ok' ? /class="dim"/.test(x.html) : /class="pill"/.test(x.html))) && !c.some((x) => /class="tag/.test(x.html)), JSON.stringify(c.slice(0, 4)));
+    const okDot = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Collector health');
+      return { ok: p.querySelectorAll('.note.ok').length, healthy: [...p.querySelectorAll('td')].filter((td) => td.textContent.trim() === 'healthy').length }; });
+    check('"healthy" is plain words — no green dot calling a level good', okDot.ok === 0, JSON.stringify(okDot));
+    const standing = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Windows that did not land');
+      return p ? [...p.querySelectorAll('tbody tr td:nth-child(3)')].map((td) => ({ t: td.textContent.trim(), html: td.innerHTML })) : []; });
+    check('windows: "outstanding" says so in the negative colour, "gone for good" an outline chip — no tag, unfolded', standing.length === holes.length
+      && standing.every((x) => (x.t === 'outstanding' ? /--sem-neg/.test(x.html) : !/class="tag/.test(x.html))), JSON.stringify(standing.slice(0, 3)));
+    const age = await bars(page, 'src-age');
+    check('when each feed last wrote: one bar per source, oldest first', age.length === new Set(status.filter((r) => r.finished_at).map((r) => r.source)).size, JSON.stringify(age.map((b) => b.k)));
+    const cap = await txtOf(page, '#view');
+    check('the coordinates caption names each source once ("uber and uber" was the defect)', /Uber sends addresses as text|Uber send addresses as text/.test(cap) && !/uber and uber/i.test(cap), (cap.match(/[^.]*send[s]? addresses as text[^.]*/) || [''])[0]);
+    await page.waitForFunction(() => [...document.querySelectorAll('#view thead th')].some((h) => h.textContent.includes('Stored as')), null, { timeout: 8000 }).catch(() => {});
+    const stored = await page.evaluate(() => [...document.querySelectorAll('#view thead th')].some((h) => h.textContent.includes('Stored as')));
+    check('the census says what each field is stored as', stored, '');
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('†: what a provider never sent, days never to be served, why a provider refused', ab['What a provider holds and never sent']?.fig === 'Not reported'
+      && !!ab['Days no provider will serve again'] && !!ab['Why a provider refused'], JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'sources', { width: 390 });
+    check('#sources at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
