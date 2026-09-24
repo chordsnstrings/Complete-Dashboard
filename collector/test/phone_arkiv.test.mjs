@@ -1018,6 +1018,59 @@ console.log('\n4.14 · Every trip: 00 over the count, channel marks, and a pager
   await q2.close();
 }
 
+console.log('\n4.15 · Online time: the call list’s 00 from what /api/online-time already answers; the list itself unchanged');
+{
+  const key = '/api/online-time?period=month&day=2026-09-24&start=06%3A00&grain=auto';
+  const d = ans(key);
+  const t = d.totals;
+  const { timeStr } = await import('../api/public/ui.js');
+  const { GREY } = { GREY: await import('../api/public/onlinetime.js').then((m) => m.GREY).catch(() => null) };
+  const tileOf = (pg) => pg.page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.m-stat')]
+    .map((x) => [x.querySelector('.l').textContent, { v: x.querySelector('.n').textContent, s: x.querySelector('.s')?.textContent || null }])));
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('online-time');
+  const o = await outline(p.page);
+  const tl = await tileOf(p);
+  check('the pickers and the filter stay first; then 00, the statement, the tiles',
+    o.filter((x) => x !== 'ak-applies')[0] === 'div' && o.includes('div'), o.join(' → '));
+  const inBody = await p.page.evaluate(() => [...document.querySelectorAll('.m-deck > div:last-of-type > *')].map((k) => k.className.split(' ')[0]));
+  check('…in the call list’s own body: 00, the statement, the tiles, before the list',
+    JSON.stringify(inBody.slice(0, 3)) === JSON.stringify(['sechd', 'm-lede', 'm-stats']), inBody.join(' → '));
+  check('Late is the statement’s figure and is not repeated as a tile (ruling 7)', !('Late' in tl), Object.keys(tl).join(', '));
+  check(`On time: ${t.on_time}, and ${t.on_time_by_trip} of them proved by a trip — /api/online-time’s own totals`,
+    tl['On time']?.v === f0(t.on_time) && (tl['On time']?.s || '').includes(`${f0(t.on_time_by_trip)} of them proved by a trip, not a timeline`),
+    JSON.stringify(tl['On time']));
+  const basis = Object.entries(t.unjudged_by_basis).filter(([, v]) => v > 0).map(([b, v]) => `${f0(v)} ${GREY?.[b] || b}`).join(' · ');
+  check('Cannot be judged: the grey states it is made of, and how many of them drove anyway',
+    tl['Cannot be judged']?.v === f0(t.unjudged) && (tl['Cannot be judged']?.s || '').startsWith(basis)
+      && (tl['Cannot be judged']?.s || '').includes(`${f0(t.unjudged_but_worked)} of these did drive`), JSON.stringify(tl['Cannot be judged']));
+  check(`Drove: ${t.worked ?? t.drove} of the ${t.people - (t.cannot_earn || 0)} allowed to take work`,
+    tl.Drove?.v === f0(t.worked ?? t.drove) && (tl.Drove?.s || '').startsWith(`of ${f0(t.people - (t.cannot_earn || 0))} allowed to take work on Uber`),
+    JSON.stringify(tl.Drove));
+  const said = await p.page.evaluate(() => document.querySelector('.m-deck').textContent);
+  check('the day nobody has been asked about is said, in the desktop’s words',
+    !t.not_asked || said.includes(`${f0(t.not_asked)} of these ${f0(t.people - (t.cannot_earn || 0))} people who could have worked have not been asked about for this day`));
+  check('…and the feed’s own clock', said.includes(`The timeline last ran at ${timeStr(d.feed.last_run_at)}.`));
+  for (const s of [' of them proved by a trip, not a timeline', ' of these did drive, just not before ',
+    ' allowed to take work on Uber', ' of them on another channel only', 'have worked have not been asked about for this day, so they are unmeasured rather ',
+    ' — those run per fleet, and these people are on one it did not reach.', ' The timeline last ran at ']) {
+    check(`the words are the desktop page’s: "${s.trim().slice(0, 44)}…"`, read('onlinetime.js').includes(s) && read('m/screens.js').includes(s));
+  }
+  await p.page.click('.m-seg button[data-id="all"]');
+  await p.settle();
+  const calls = await p.page.evaluate(() => [...document.querySelectorAll('.m-deck .m-rows a.m-row')].map((a) => a.getAttribute('href')));
+  check('the call list is still one tel: link per driver with a phone', calls.length > 0 && calls.every((h) => /^tel:\+?\d+$/.test(h)),
+    calls.slice(0, 3).join(' '));
+  await p.close();
+  /* No readable start time: nothing is judged, and the tiles say so. */
+  const q2 = await phonePage(browser, { skin: 'arkiv', fixture: withAnswer(key, { ...d, expected_start: null, start_why: 'The start time could not be read.' }) });
+  await q2.open('online-time');
+  const u = await tileOf(q2);
+  check('with no start time, On time is absent WITH the reason, never a zero',
+    u['On time']?.v === 'no start time to judge against', JSON.stringify(u['On time']));
+  await q2.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');
@@ -1044,7 +1097,7 @@ console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too
   }
   for (const width of [390, 360]) {
     const a = await phonePage(browser, { skin: 'arkiv', fixture, width, height: width === 360 ? 780 : 844 });
-    const dropped = [], sideways = [], small = [];
+    const dropped = [], sideways = [], small = [], overlaps = [];
     for (const s of SCREENS) {
       await a.open(s.route);
       const tap = s.tapArkiv || s.tap;
@@ -1063,6 +1116,15 @@ console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too
         if (lost.length) dropped.push(`${name}: ${lost.slice(0, 3).map((w) => JSON.stringify(w.slice(0, 60))).join(', ')}`);
       }
       const mm = await a.page.evaluate(() => ({
+        /* A head whose next block starts above the head's own bottom edge has
+           that block drawn through its words — measured once on the call
+           list, where a negative margin meant for the deck's gap met a
+           container with none. */
+        overlap: [...document.querySelectorAll('#m .sechd, #m .m-sec')].filter((h) => {
+          const nx = h.nextElementSibling;
+          return nx && nx.getBoundingClientRect().height > 0
+            && nx.getBoundingClientRect().top < h.getBoundingClientRect().bottom - 0.5;
+        }).map((h) => h.textContent.slice(0, 24)),
         over: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         small: [...document.querySelectorAll('#m a[href], #m button, #m input:not([type=hidden]), #m select, #m textarea')]
           .filter((e) => !e.closest('.m-fallback'))
@@ -1070,6 +1132,7 @@ console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too
           .map((e) => `${e.tagName.toLowerCase()}.${(e.className || '').toString().split(' ')[0]}:${Math.round(e.getBoundingClientRect().height)}`),
       }));
       if (mm.over > 0) sideways.push(`${name} +${mm.over}px`);
+      if (mm.overlap.length) overlaps.push(`${name}: ${mm.overlap.join(', ')}`);
       if (mm.small.length && !SMALL_UNTIL_CONVERTED.has(name)) small.push(`${name}: ${[...new Set(mm.small)].slice(0, 3).join(' ')}`);
     }
     for (const route of DESKTOP_TABS) {
@@ -1084,6 +1147,7 @@ console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too
     check(`nothing pushes the page sideways at ${width}px (the desktop tabs in the fallback included)`,
       !sideways.length, sideways.join(' | '));
     check(`every control a thumb uses is at least 44px tall at ${width}px`, !small.length, small.join(' | '));
+    check(`no section head has the next block drawn through it at ${width}px`, !overlaps.length, overlaps.join(' | '));
     if (width === 390) {
       check('every API call was answered from the recording', !a.misses.size, [...a.misses].join(' '));
       check('no screen threw', !a.errors.length, a.errors.slice(0, 3).join(' | '));

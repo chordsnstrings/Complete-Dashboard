@@ -145,9 +145,15 @@
 /* Offline, answering from the service worker's cache: a warning, so a
    HOLLOW negative dot (ruling 1) on a neutral ground, the words in ink. */
 :root[data-skin="arkiv"][data-ui="phone"] .m-stale{background:var(--w-ink);border:0;border-radius:0;
-  border-top:1px solid var(--hair);color:var(--ink);font-size:var(--t5);line-height:1.45;padding:10px 12px}
+  border-top:1px solid var(--hair);color:var(--ink);font-size:var(--t5);line-height:1.45;padding:10px 12px;
+  align-items:flex-start}
+/* On the first line of a note that wraps, not halfway down it; and apart
+   from its neighbours inside a container that has no gap of its own. */
 :root[data-skin="arkiv"][data-ui="phone"] .m-stale::before{content:"";content:"" / "warning: ";flex:none;
-  box-sizing:border-box;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--sem-neg);background:none}
+  box-sizing:border-box;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--sem-neg);background:none;
+  margin-top:.35em}
+:root[data-skin="arkiv"][data-ui="phone"] div>.m-stale{margin:12px 0}
+:root[data-skin="arkiv"][data-ui="phone"] .m-deck>.m-stale{margin:0}
 /* A screen that could not load at all: critical, a SOLID dot and a 3px
    negative rule, the words in ink — never red words. */
 :root[data-skin="arkiv"][data-ui="phone"] .m-err{background:none;border:0;border-top:3px solid var(--sem-neg);
@@ -182,7 +188,12 @@
 :root[data-skin="arkiv"][data-ui="phone"] .m-card>h2::before,
 :root[data-skin="arkiv"][data-ui="phone"] .m-sec::before{counter-increment:arkiv-sec;
   content:counter(arkiv-sec,decimal-leading-zero);font-weight:500;letter-spacing:.1em;color:var(--grey)}
-:root[data-skin="arkiv"][data-ui="phone"] .sechd{margin:0 0 -8px}
+/* A head in the deck sits on the deck's 22px gap, pulled up to 14px; one
+   inside a screen's own container (the call list's body, the trip list's
+   host) has no gap to pull from — the first cut's -8px there drew the
+   statement's rule through the head's words (measured on #online-time). */
+:root[data-skin="arkiv"][data-ui="phone"] .sechd{margin:0 0 12px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-deck>.sechd{margin:0 0 -8px}
 :root[data-skin="arkiv"][data-ui="phone"] .sechd-note{max-width:60%}
 /* A caption is a grey sentence at reading size, wherever it sits — the old
    card left the ones inside its body at the body's size. */

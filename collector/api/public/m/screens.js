@@ -2074,6 +2074,65 @@ async function credentials(deck, ctx) {
    would put "LATE" beside a driver Uber was never asked about and send a
    caller to accuse somebody of something that was never measured. The chip
    carries the state's own short word and the sub carries the full sentence. */
+/* THE CALL LIST'S 00 · AT A GLANCE (the redesign only).
+   ─────────────────────────────────────────────────────────────────────────
+   /api/online-time answers far more than the old phone printed: how many of
+   the on-time were proved by a trip rather than a timeline, WHICH grey
+   states the unjudged are in and how many of them drove anyway, how many
+   drove at all out of those allowed to take work, the feed's own clock, and
+   the day nobody has been asked about yet. The desktop page prints all of it
+   (onlinetime.js renderOnlineTime); the design puts it in the 00 band; the
+   operator's rule is that the new UI adds what it has more of. So it is
+   added — in the desktop page's own words, repeated here because they are
+   built inside renderOnlineTime and cannot be imported (and
+   test/phone_arkiv.test.mjs fails if the two drift apart).
+
+   Late is the STATEMENT's figure and is not repeated as a tile (ruling 7).
+   With no readable start time nothing is judged, and the tiles say so
+   rather than printing a zero. The call list below keeps its order, its
+   rows and its tel: links: this is added above it, nothing is moved out. */
+function callListGlance(body, statement, d, judged) {
+  const t = d.totals || {};
+  body.insertBefore(secHead('00', 'At a glance',
+    `${d.day} · ${judged ? `against ${d.expected_start}` : 'no start time'}`), statement);
+  stats(body, [
+    { label: 'On time', value: judged ? fmt(t.on_time ?? 0) : '—',
+      na: judged ? null : 'no start time to judge against',
+      tone: judged && t.on_time ? 'good' : null,
+      sub: judged
+        ? `online by ${d.expected_start}`
+          + (t.on_time_by_trip ? ` · ${fmt(t.on_time_by_trip)} of them proved by a trip, not a timeline` : '')
+        : null },
+    { label: 'Cannot be judged', value: judged ? fmt(t.unjudged ?? 0) : fmt(t.people),
+      sub: judged
+        ? Object.entries(t.unjudged_by_basis || {}).filter(([, v]) => v > 0)
+          .map(([b, v]) => `${fmt(v)} ${GREY[b] || b}`).join(' · ')
+          + (t.unjudged_but_worked
+            ? ` — ${fmt(t.unjudged_but_worked)} of these did drive, just not before ${d.expected_start}` : '')
+        : `everyone, for want of a start time · ${fmt(t.already_online + t.awaiting_feed
+          + t.not_asked + t.cannot_earn + t.absent + (t.worked_elsewhere || 0))} would be grey anyway` },
+    { label: 'Drove', value: fmt(t.worked ?? t.drove),
+      sub: `of ${fmt(t.people - (t.cannot_earn || 0))} allowed to take work on Uber`
+        + ((t.worked ?? t.drove) > t.drove
+          ? ` · ${fmt((t.worked ?? t.drove) - t.drove)} of them on another channel only` : '') },
+  ]);
+  if (t.not_asked) {
+    body.append(el('div', 'm-stale', esc(
+      `${fmt(t.not_asked)} of these ${fmt(t.people - (t.cannot_earn || 0))} people who could `
+      + 'have worked have not been asked about for this day, so they are unmeasured rather '
+      + 'than late. The timeline tick covers the whole roster every three hours over a '
+      + 'two-day window, so a recent day fills in by itself'
+      + (d.feed?.roster_swept_at
+        ? `. A whole-roster pass last covered this day at ${timeStr(d.feed.roster_swept_at)}`
+          + ' — those run per fleet, and these people are on one it did not reach.'
+        : ' — none has reached this day yet.'))));
+  }
+  if (d.feed?.note) {
+    body.append(el('p', 'm-cap', esc(d.feed.note
+      + (d.feed.last_run_at ? ` The timeline last ran at ${timeStr(d.feed.last_run_at)}.` : ''))));
+  }
+}
+
 async function onlineTime(deck, ctx) {
   /* The same localStorage key the desktop page writes. One reader, one
      standard for when the fleet starts — a phone that kept its own copy would
@@ -2125,7 +2184,7 @@ async function onlineTime(deck, ctx) {
        phone is the shell where that matters most — this lede is often the only
        line read. */
     const judged = d.expected_start != null;
-    lede(body, {
+    const statement = lede(body, {
       claim: !judged ? 'Nobody can be judged yet'
         : (t.late
           ? `${t.late} ${t.late === 1 ? 'driver has' : 'drivers have'} not started on time`
@@ -2140,6 +2199,7 @@ async function onlineTime(deck, ctx) {
           + ` · ${fmt(t.people || 0)} people`,
       tone: !judged ? null : (t.late ? 'bad' : 'good'),
     });
+    if (phoneContract()) callListGlance(body, statement, d, judged);
 
     /* Worst first. The endpoint returns the roster in its own order and the
        desktop table re-sorts on the client; the phone has no column headers to
