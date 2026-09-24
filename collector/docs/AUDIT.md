@@ -1699,3 +1699,11 @@ Production (This month), both skins at 1440 and 390, light and dark
 of 18,006 bookings carry a fare; 1,697 cancelled never charged, 90 completed
 with the fare not filed yet, 8 recovered from earnings, none charged-but-
 unpriced. The settlement bars list the 24 payment types the answer names.
+
+### #supply — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/supply/`): no error, no sideways scroll. 70% of
+23,036 online hours idle; 12,031.4 h of waiting between jobs over 12,224
+waits in 214 areas; the week's online hours peak 16:00–19:00 while an hour
+buys the most at 15:00.

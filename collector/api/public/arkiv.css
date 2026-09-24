@@ -1426,7 +1426,9 @@
    fill on an area). "No availability collected" is an ABSENCE: an outline,
    where the old skin hatches it (§5: a hatch is a projection, not a hole).
    The legend's swatches follow the cells. */
-:root[data-skin="arkiv"] .sup-c.b0,:root[data-skin="arkiv"] .sw.b0{background:var(--seq-0);opacity:1}
+/* The lowest step is b1's tint (the ramp's colour at 18%); mixed rather
+   than faded with opacity, so the ▾ on top of it keeps full strength. */
+:root[data-skin="arkiv"] .sup-c.b0,:root[data-skin="arkiv"] .sw.b0{background:color-mix(in srgb,var(--s1) 18%,transparent);opacity:1}
 :root[data-skin="arkiv"] .sup-c.b0{position:relative}
 :root[data-skin="arkiv"] .sup-c.b0::after{content:'▾';position:absolute;inset:0;display:grid;place-items:center;
   color:var(--sem-neg);font-size:var(--t1);line-height:1}

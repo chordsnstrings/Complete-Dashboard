@@ -203,4 +203,48 @@ if (want('supply')) {
   }
 }
 
+if (want('supply')) {
+  {
+    const { ctx, page, answer } = await open('arkiv', 'supply');
+    const s = await shape(page);
+    const B = answer('/api/supply/balance'), A = answer('/api/supply/areas');
+    const t = B.totals;
+    check('#supply: 00, the rate grid, a typical week, what an hour buys, the area table, †',
+      JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Which hours sell the drivers you are paying for', 'A typical week, hour by hour',
+        'What an online hour actually buys', 'Where the waiting happens', '† What this page does not know']), JSON.stringify(s.heads));
+    const vfig = await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig');
+    check('the verdict is 00\'s statement; its figure, jobs per online hour, is not a tile (ruling 7)',
+      s.vdctIn00 && !Object.values(s.values).includes(vfig) && !s.labels.some((l) => /jobs per online hour/i.test(l)), `${vfig} ${JSON.stringify(s.values)}`);
+    check('idle hours lead, then online hours with the part on a job — the balance answer\'s totals',
+      s.hero === 'Idle hours' && s.values['Idle hours'] === `${(+t.idle_h).toLocaleString('en-US')} h`
+      && s.values['Online hours'] === `${(+t.online_h).toLocaleString('en-US')} h` && s.subs['Online hours'].includes(`${(+t.on_job_h).toLocaleString('en-US')} h`), JSON.stringify(s.values));
+    const waited = A.areas.reduce((a, r) => a + (+r.waiting_h || 0), 0);
+    check('waiting between jobs sums the area answer', s.values['Waiting between jobs'] === `${waited.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} h`, s.values['Waiting between jobs']);
+    const wk = await fills(page, '[data-panel="supply-week"]'), buy = await fills(page, '[data-panel="supply-buys"]');
+    check('02 and 03 are drawn hour by hour from the same per-occurrence cells', wk.length > 0 && wk.length <= 24 && buy.length > 0 && buy.length <= 24, `${wk.length} ${buy.length}`);
+    const un = A.areas.find((r) => /unrecorded/i.test(r.area));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('† the unnamed area\'s waiting stays in the table and is named in the band', un ? ab['Waits in an unnamed area']?.fig === `${(+un.waiting_h).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} h` : true,
+      JSON.stringify(ab['Waits in an unnamed area']));
+    check('the area table keeps its sort and its fold', /Show the other/.test(await txtOf(page, '#view')) || A.areas.length <= 12);
+    await ctx.close();
+  }
+  {
+    /* No availability for this selection (a Bolt chip): every tile built on
+       online hours is ABSENT, with the reason the page already gives. */
+    const off = (_q, real) => ({ ...real, covered: false, uncovered: { reason: 'no-feed', platforms: ['uber'] },
+      totals: { online_h: null, on_job_h: null, idle_h: null, jobs: null, idle_pct: null, jobs_per_online_h: null }, cells: [] });
+    const { ctx, page } = await open('arkiv', 'supply', { fixtures: { '/api/supply/balance': off } });
+    const s = await shape(page);
+    check('no availability collected: idle and online hours are ABSENT, never nought', /no availability was collected/.test(s.na['Idle hours'] || '')
+      && /no availability was collected/.test(s.na['Online hours'] || '') && !s.bare.length, JSON.stringify(s.na));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'supply', { width: 390 });
+    check('#supply at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

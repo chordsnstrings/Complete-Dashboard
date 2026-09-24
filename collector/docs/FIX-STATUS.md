@@ -3292,3 +3292,11 @@ Not built on #trips: the 3px channel marker in the row gutter (a row style table
 | file | what changed | state | proof |
 |---|---|---|---|
 | `api/public/arkiv.css` | Under the skin only: a cell that "sold nothing" is the lowest step of the ramp at full opacity with a small ▾ in the negative token, where the old skin fills it critical red (a measured nought, not a warning; L3 forbids a semantic area fill); a cell with no availability collected is an outline, where the old skin hatches it (§5: a hatch is a projection). The legend swatches follow. | written, in the tree | `test/arkiv_work.test.mjs` #supply (3 S8 checks, the old skin's fill and hatch held); removing the outline rule fails its check, restored and md5-checked. `type_scale` 11/11. |
+
+### P25 · #supply
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #supply | An `ak` flag. 00: the verdict (unchanged, with its recommendation) as the statement — its figure, jobs per online hour, not repeated (ruling 7) — then idle hours (the hero), online hours with the part on a job, waiting between jobs (from the area answer); each ABSENT with the verdict's own reason when no availability was collected. 01 the rate heatmap, its measure and bins unchanged (S8 recolours "sold nothing" and "no availability"); 02 a typical week hour by hour (online hours as bars, the on-job hours as the line); 03 what an online hour buys (jobs per 100 online hours against the window mean); 04 the area table unchanged (sort, fold); † availability off Uber, why a car sat idle, waits in an unnamed area, what an idle hour cost; the links, with one to #optimise | **written** | `test/arkiv_work.test.mjs` #supply (13, S8's three included). Revert — the covered guard dropped: the no-availability check fails. **#supply was in neither golden list** — added to EXTRA and recorded from the base; ONLY=supply 2/2. `supply_chip_denominator` 31, `supply_span_clock` 9 |
+
+Deviation on #supply: §02 is not stacked columns (charts.js has none) — the online hours are bars and the on-job hours a line over them. S8 amended in this commit: "sold nothing" takes b1's tint (the ramp at 18%, colour-mixed so the ▾ keeps full strength); the first cut used `--seq-0`, which under the skin is darker than the lowest step.
