@@ -1640,3 +1640,14 @@ payout). The open Uber week (25 to 27 Sept) is claimed ahead of today and
 drawn hatched in 01. Found by looking and fixed before commit: 03 drew a
 zero axis in the middle of four positive sums (signed bars now only when a
 kind nets negative).
+
+### #payouts — 2026-09-24
+
+Production (the whole record — the page takes no window), both skins at
+1440 and 390, light and dark (scratchpad `pagephase/shots/payouts/`): no
+error, no sideways scroll. AED 10,804,335.95 over 333 transfers on 92 dates,
+every one a Monday, from 23 Dec 2024; 65 of 333 can be checked against our
+own figure, +AED 362,992.41 over those, most of it three February
+transfers (named in 02's caption). Found by looking and fixed before commit:
+02 printed "−+AED 103.05" — hbars prints the minus itself and hands
+valueFmt the magnitude.

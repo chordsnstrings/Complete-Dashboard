@@ -275,4 +275,94 @@ if (want('receipts')) {
   }
 }
 
+/* ══ #payouts ═════════════════════════════════════════════════════════════ */
+if (want('payouts')) {
+  console.log('\n#payouts');
+  const HEADS = ['At a glance', 'Every Uber transfer, and our own figure beside it', 'The difference, per transfer',
+    'Each wire against our own figure', 'What we have not asked Uber about', 'Uber, by month', 'Bolt, by month',
+    'Every transfer, by the date it arrived', 'Every transfer date, by channel',
+    'What each platform publishes about its own transfers', 'The provider’s own books, day by day', '† What this page does not know'];
+  let classic = {};
+  let classicApi = [];
+  {
+    const { ctx, page, answers } = await open('classic', 'payouts');
+    classic = await rowTiles(page, '#view .kpis .kpi');
+    classicApi = [...new Set(answers.map((a) => a.path))].sort();
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      order: [...document.querySelectorAll('#view .panel > h3')].some((h) => h.textContent.trim() === 'The same transfers, in order') }));
+    check('old skin: the old page — no 00 band, its four tiles, the all-channel chart', !r.band && Object.keys(classic).length === 4 && r.order,
+      JSON.stringify({ ...r, tiles: Object.keys(classic) }));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer, answers } = await open('arkiv', 'payouts');
+    const s = await shape(page);
+    const D = answer('/api/finance/payouts'), R = answer('/api/finance/payouts/reconcile');
+    const amt = (v) => Math.abs(+v || 0);
+    const total = D.payouts.reduce((a, r) => a + amt(r.amount), 0);
+    check('no fetch the old page does not make (the review: every tile reads the two payloads already loaded)',
+      JSON.stringify([...new Set(answers.map((a) => a.path))].sort()) === JSON.stringify(classicApi), JSON.stringify(classicApi));
+    check('the section order is the plan\'s, with per-date bars for each channel kept (the review\'s correction)',
+      JSON.stringify(s.heads) === JSON.stringify(HEADS), JSON.stringify(s.heads));
+    check('Transferred to the bank is the hero, the register\'s sum, the old figure',
+      s.hero === 'Transferred to the bank' && s.values['Transferred to the bank'] === aed(total)
+      && s.values['Transferred to the bank'] === classic['Transferred to the bank'], JSON.stringify(s.values));
+    const byCh = new Map();
+    D.payouts.forEach((r) => byCh.set(r.platform, (byCh.get(r.platform) || 0) + amt(r.amount)));
+    const sub = s.subs['Transferred to the bank'];
+    check('…its sub splits it per channel, and keeps the weekday finding and where the record starts',
+      [...byCh.values()].every((v) => sub.includes(aed(v))) && /the record starts/.test(sub)
+      && (new Set(D.payouts.map((r) => new Date(`${String(r.paid_on).slice(0, 10)}T12:00:00Z`).getUTCDay())).size !== 1
+        || /every one of them a/.test(sub)), sub);
+    const T = R.totals;
+    check('Can be checked against ours is the reconciliation\'s comparable rows of its rows',
+      s.values['Can be checked against ours'] === `${T.comparable_rows} of ${T.rows}`, s.values['Can be checked against ours']);
+    check('The difference over those is the signed total difference', s.values['The difference over those']
+      === `${+T.delta > 0 ? '+' : +T.delta < 0 ? '−' : ''}${aed(Math.abs(+T.delta))}`, s.values['The difference over those']);
+    const cmp = R.rows.filter((r) => r.delta != null).sort((a, b) => (a.paid_on < b.paid_on ? 1 : -1));
+    check('The latest wire is the newest comparable transfer', s.values['The latest wire'] === aed(Math.abs(+cmp[0].wire)), s.values['The latest wire']);
+    const silent = D.coverage.filter((c) => !c.publishes_payouts);
+    const silentLabel = Object.keys(s.na).find((l) => /no transfer published/.test(l));
+    check('a channel that publishes no transfer is an ABSENT tile with the provider\'s own reason (not an amber "2 of 3")',
+      silent.length ? !!silentLabel && s.na[silentLabel] === String(silent[0].absent).split(/(?<=\.)\s/)[0] : !silentLabel, JSON.stringify(s.na));
+    check('no tile wears a tone', (await toned(page)).length === 0, JSON.stringify(await toned(page)));
+    const pills = await page.evaluate(() => [...document.querySelectorAll('#view .pill.ok, #view .pill.warn, #view .pill.bad')]
+      .filter((p) => !p.closest('[data-panel="payout-reconcile"]')).map((p) => p.textContent.trim()));
+    check('the basis, ledger and publishes pills are neutral chips', pills.length === 0, JSON.stringify(pills));
+    const dates = await page.evaluate(() => {
+      const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent.trim() === 'Every transfer date, by channel');
+      return p ? { charts: p.querySelectorAll('.chartscroll svg').length, phone: !!p.querySelector('.cap.phone-only') } : null;
+    });
+    check('every channel keeps its own per-date bars inside .chartscroll, with the phone-only caption',
+      dates && dates.charts === byCh.size && dates.phone, JSON.stringify(dates));
+    const diffs = await page.evaluate(() => [...document.querySelectorAll('[data-panel="payout-diff"] .hb .v')].map((v) => v.textContent.trim()));
+    const wantD = R.rows.filter((r) => r.delta != null).sort((a, b) => (a.paid_on < b.paid_on ? 1 : -1)).slice(0, 20)
+      .map((r) => `${+r.delta < 0 ? '−' : ''}${aed(Math.abs(+r.delta))}`);
+    check('02: one bar per comparable transfer, newest first, each the signed difference (one sign, never "−+")',
+      JSON.stringify(diffs) === JSON.stringify(wantD), JSON.stringify([diffs, wantD]));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const unasked = (R.unchecked || []).reduce((a, u) => a + (+u.count || 0), 0);
+    check('† the transfers we can check, and the days Uber was never asked about, from the reconciliation',
+      ab['Transfers we can check']?.fig === `${T.comparable_rows} of ${T.rows}` && ab['Days Uber was never asked about']?.fig === String(unasked),
+      JSON.stringify([ab['Transfers we can check'], ab['Days Uber was never asked about']]));
+    await ctx.close();
+  }
+  {
+    /* Nothing can be compared: the two tiles built on the comparison say why. */
+    const none = (_q, real) => ({ ...real, totals: { ...real.totals, comparable_rows: 0, delta: null },
+      rows: real.rows.map((r) => ({ ...r, delta: null, delta_pct: null })) });
+    const { ctx, page } = await open('arkiv', 'payouts', { fixtures: { '/api/finance/payouts/reconcile': none } });
+    const s = await shape(page);
+    check('nothing comparable: the difference and the latest wire are ABSENT with that reason, never AED 0.00',
+      /no transfer names a period we hold driver-day rows for/.test(s.na['The difference over those'] || '')
+      && /no transfer can be checked against our own figure yet/.test(s.na['The latest wire'] || ''), JSON.stringify(s.na));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'payouts', { width: 390 });
+    check('at 390 nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

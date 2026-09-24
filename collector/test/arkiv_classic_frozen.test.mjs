@@ -95,7 +95,7 @@ const UNSTABLE = {};
    measured. Added here rather than to routes_list.mjs so that smoke_views and
    render-audit, which walk that list, are not changed by a test of this
    one. Recorded from the base tree like every other route. */
-const EXTRA = ['import-sheet', 'opening', 'salary', 'advances', 'charging', 'policy', 'deposits'];
+const EXTRA = ['import-sheet', 'opening', 'salary', 'advances', 'charging', 'policy', 'deposits', 'payouts'];
 const ALL = [...ROUTES, ...EXTRA.filter((r) => !ROUTES.includes(r))];
 
 const browser = await launchChromium();

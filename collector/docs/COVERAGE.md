@@ -6610,3 +6610,11 @@ number (5 and 5), and never a passport or RTA number.
   "when it reached us" off this field prints the rebuild time. Test for one
   stamp across the rows before using it; keeping the true ingest time across
   rebuilds is a collector change.
+
+* **`hbars(..., { signed: true })` prints the minus itself and passes
+  `valueFmt` the MAGNITUDE.** A valueFmt that adds its own sign prints
+  "−+AED 103.05" on every negative bar. Format the magnitude only.
+* **The golden test holds only `routes_list.mjs` plus its EXTRA list.**
+  #payouts was in neither, so its old skin was held by nothing until P19.
+  Before converting a page, check it is in one of the two; if not, add it
+  to EXTRA and record it from the base tree (`RECORD=1 PUBLIC_DIR=… ONLY=`).
