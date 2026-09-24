@@ -374,3 +374,22 @@
 :root[data-skin="arkiv"][data-ui="phone"] .m-body>svg path[fill="none"]{stroke:var(--ink);stroke-width:2px}
 :root[data-skin="arkiv"][data-ui="phone"] .m-body>svg path:not([fill="none"]){fill:var(--ink);opacity:.1}
 :root[data-skin="arkiv"][data-ui="phone"] .m-body>svg circle{fill:var(--ink)}
+
+/* ── 11 · Today ──────────────────────────────────────────────────────────────
+   THE LIVEBAR (m/screens.js today()): the today card, unnumbered — it is the
+   strip above the page, as on the desktop, not a section of it — named after
+   an ink dot (never a green "live" dot: under L3 green means better), its
+   tiles under a hairline rather than the 00 band's ink rule, and Trip value
+   carrying the strip's own emphasis: a 3px rule under the figure and no wash,
+   which does not count against the screen's highlight budget (plan §3 TODAY
+   STRIP; the desktop's .lb-hl). */
+:root[data-skin="arkiv"][data-ui="phone"] .m-card.ak-live{border-top:1px solid var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-card.ak-live>h2::before{content:"";counter-increment:none;
+  flex:none;align-self:center;width:8px;height:8px;border-radius:50%;background:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-live .m-stats{border-top-color:var(--hair)}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-live .ak-lb-hl .n{text-decoration:underline;
+  text-decoration-thickness:3px;text-underline-offset:6px;text-decoration-color:var(--ink)}
+/* The absence band (ui.js absenceBand(), arkiv.css .absband) is one column
+   at a phone's width already; on the phone its figures step down one size,
+   because a 39px figure over a sentence of reasons is a poster, not a note. */
+:root[data-skin="arkiv"][data-ui="phone"] .absb-fig{font-size:var(--d4)}

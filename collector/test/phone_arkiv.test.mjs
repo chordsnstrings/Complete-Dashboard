@@ -471,6 +471,97 @@ console.log('\n3 · the components: sections, statement, tiles, the dot, rows, c
   await p.close();
 }
 
+/* ══ 4 · the screens, one by one ══════════════════════════════════════════
+   Each screen's figures are compared with the recorded answer they came
+   from, and its order with the plan's. `ans(path)` is that answer, parsed. */
+const ans = (key) => { const a = fixture.answers[key]; return a ? JSON.parse(a.body) : null; };
+const f0 = (v) => Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+const KP = ans('/api/kpis?period=month&grain=auto');
+
+console.log('\n4.1 · Today: the livebar, 00 at a glance, the sections, † what it does not know');
+{
+  const { UBER_FARE_WHY } = await import('../api/public/ui.js');
+  const c = await phonePage(browser, { skin: 'classic', fixture });
+  await c.open('today');
+  const oldLatest = await c.page.evaluate(() => [...document.querySelectorAll('.m-deck .m-cap')]
+    .map((p) => p.textContent).find((t) => /^Latest booking /.test(t)) || null);
+  await c.close();
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('today');
+  const t = await p.page.evaluate(() => {
+    const deck = document.querySelector('.m-deck');
+    const kids = [...deck.children];
+    const at = (pred) => kids.findIndex(pred);
+    const live = deck.querySelector('.m-card.ak-live');
+    const tile = (grid, label) => [...grid.querySelectorAll('.m-stat')].find((s) => s.querySelector('.l').textContent === label);
+    const lt = live && tile(live, 'Latest booking');
+    const glance = deck.querySelector('.m-stats[data-band="glance"]');
+    const hero = glance?.querySelector('.m-stat.hero');
+    const band = deck.querySelector('.absence');
+    return {
+      order: {
+        live: at((k) => k === live), head: at((k) => k.classList.contains('sechd')),
+        lede: at((k) => k.classList.contains('m-lede')), tiles: at((k) => k === glance),
+        chart: at((k) => k.querySelector?.(':scope > h2')?.textContent === 'Bookings a day'),
+        who: at((k) => k.textContent === 'Who called it off'), band: at((k) => k === band),
+        foot: at((k) => k.classList.contains('pf-inline')), n: kids.length,
+      },
+      liveIdx: live ? getComputedStyle(live.querySelector('h2'), '::before').content : null,
+      liveCap: live?.querySelector('.m-cap')?.textContent,
+      latest: lt ? lt.querySelector('.n').textContent : null,
+      tripDeco: live ? getComputedStyle(tile(live, 'Trip value').querySelector('.n')).textDecorationThickness : null,
+      head: deck.querySelector('.sechd')?.innerText.replace(/\s+/g, ' '),
+      hero: hero ? { label: hero.querySelector('.l').textContent, value: hero.querySelector('.n').textContent,
+        hl: !!hero.querySelector('.n .hl') } : null,
+      cells: band ? [...band.querySelectorAll('.absb-cell')].map((c) => ({ label: c.querySelector('.absb-lab').textContent,
+        fig: c.querySelector('.absb-fig').textContent, why: c.querySelector('.absb-why')?.textContent })) : [],
+      bandHead: band?.querySelector('.sechd-name')?.textContent,
+      hls: document.querySelectorAll('.hl').length,
+    };
+  });
+  const o = t.order;
+  check('the livebar leads, then 00 (its head, the statement, the tiles), then the chart, then the sections',
+    o.live === 0 && o.head > o.live && o.lede === o.head + 1 && o.tiles === o.lede + 1 && o.chart > o.tiles
+      && o.who > o.chart && o.band > o.who && o.foot === o.n - 1 && o.band === o.n - 2, JSON.stringify(o));
+  check('the livebar is unnumbered (an ink dot, not 01)', t.liveIdx === '""', t.liveIdx);
+  check('…and says it does not follow the window or the channel in the bar above it',
+    /both fleets, every channel — not the window or the channel in the bar above$/.test(t.liveCap || ''), t.liveCap);
+  check('Latest booking is one of its figures, the same minute the old caption printed',
+    t.latest && oldLatest === `Latest booking ${t.latest}.`, `${t.latest} / ${oldLatest}`);
+  check('…and Trip value carries the strip’s own emphasis, a 3px rule', t.tripDeco === '3px', t.tripDeco);
+  check('00 · At a glance, over the window the control bar names', /^00 At a glance This month$/i.test(t.head || ''), t.head);
+  check(`the hero is the window’s bookings, ${f0(KP.trips)} as /api/kpis answered, highlighted`,
+    t.hero && t.hero.label === 'Bookings' && t.hero.value === f0(KP.trips) && t.hero.hl, JSON.stringify(t.hero));
+  const unpriced = t.cells.find((c) => c.label === 'Bookings not yet priced');
+  const noKm = t.cells.find((c) => c.label === 'Bookings carrying no distance');
+  check('† names what the screen does not know', t.bandHead === '† What this screen does not know', t.bandHead);
+  check(`…the unpriced bookings, ${f0(KP.trips - KP.priced_trips)} (/api/kpis trips − priced_trips)`,
+    unpriced?.fig === f0(KP.trips - KP.priced_trips), JSON.stringify(unpriced));
+  check('…with the desktop’s true reason, built on UBER_FARE_WHY',
+    (unpriced?.why || '').includes(UBER_FARE_WHY) && (unpriced?.why || '').startsWith(`${f0(KP.priced_trips)} of ${f0(KP.trips)} bookings carry a price`));
+  check(`…the bookings with no distance, ${f0(KP.trips - KP.trips_with_distance)}, and the mean they leave out`,
+    noKm?.fig === f0(KP.trips - KP.trips_with_distance)
+      && (noKm?.why || '').includes(`over the ${f0(KP.trips_with_distance)} that carry one, never over all ${f0(KP.trips)}`),
+    JSON.stringify(noKm));
+  check('…an unmapped outcome only when there is one (the answer has none)',
+    KP.other_outcome ? !!t.cells.find((c) => c.label === 'Outcome not mapped') : !t.cells.find((c) => c.label === 'Outcome not mapped'));
+  check('two highlights on the screen — the hero and the figure that sizes the gap — within SPEC L4’s three',
+    t.hls === 2, String(t.hls));
+  /* The same reasons as the desktop #overview, word for word: the phone
+     cannot import app.js, so the phone repeats them, and this is what keeps
+     the two from drifting. */
+  const appJs = read('app.js');
+  const scr = read('m/screens.js');
+  for (const s of ['bookings carry a price, and Trip value is over those alone. ',
+    ', so the newest Uber bookings are priced only after it; a booking cancelled ',
+    'without a fee has no price to carry.',
+    'The channel filed these bookings with no distance on them. The Distance tile\'s mean is over the ',
+    'that carry one, never over all ', ' name no plate, so they ', 'can appear on no per-car page.']) {
+    check(`the phone’s reason is the desktop’s: "${s.trim().slice(0, 48)}…"`, appJs.includes(s) && scr.includes(s));
+  }
+  await p.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');
@@ -506,7 +597,13 @@ console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too
       const text = (await a.page.evaluate(() => document.querySelector('#m .m-deck')?.textContent || ''))
         .replace(/\s+/g, ' ');
       if (width === 390) {
-        const lost = old[name].filter((w) => !DROPPABLE.has(w) && !text.includes(w));
+        /* Compared with the spaces taken out and a closing full stop dropped:
+           a sentence that became a figure and its label ("Latest booking
+           04:59." → LATEST BOOKING / 04:59, the desktop livebar's own cell)
+           has kept every word and every digit, in order. */
+        const squash = (s) => s.replace(/\s+/g, '').replace(/\.$/, '');
+        const flat = squash(text);
+        const lost = old[name].filter((w) => !DROPPABLE.has(w) && !flat.includes(squash(w)));
         if (lost.length) dropped.push(`${name}: ${lost.slice(0, 3).map((w) => JSON.stringify(w.slice(0, 60))).join(', ')}`);
       }
       const mm = await a.page.evaluate(() => ({

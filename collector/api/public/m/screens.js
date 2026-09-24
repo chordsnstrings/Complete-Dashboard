@@ -12,7 +12,12 @@
 */
 import { state, q, qAll, qChan, api, href, windowLabel } from '../data.js';
 import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search, chips,
-  skeleton, empty, failed, spark, bars, unwrap, cut, splitToday } from './ui.js';
+  skeleton, empty, failed, spark, bars, unwrap, cut, splitToday, phoneContract, atGlance } from './ui.js';
+/* The redesign's page-contract pieces (docs/UI-REDESIGN-PLAN.md "Phone PWA —
+   redesign"), the desktop's own: the numbered section head and the absence
+   band, so a phone section and a desktop panel are one form, and the reason
+   the desktop gives for an unpriced booking is the sentence the phone gives. */
+import { secHead, absenceBand, UBER_FARE_WHY } from '../ui.js';
 /* The deposit rules, shared with the desktop form rather than copied. A
    validation living in two bundles is how the phone comes to refuse what the
    desktop accepts — and the person standing next to the car with the cash in
@@ -130,6 +135,15 @@ const countOfDays = (nDays) => `${fmt(nDays)} ${nDays === 1 ? 'day' : 'days'}`;
 
 /* ── Today ──────────────────────────────────────────────────────────────── */
 async function today(deck, ctx) {
+  /* THE REDESIGN (docs/UI-REDESIGN-PLAN.md "Phone PWA — redesign"), only
+     under the token. Every figure and sentence below is the same; what moves
+     is the order and the form: the today card becomes the LIVEBAR (unnumbered,
+     like the desktop's strip, and it says it does not follow the control bar
+     that now sits above it, with Latest booking as one of its figures); the
+     window's statement and tiles become 00 AT A GLANCE, Bookings the hero,
+     above the chart rather than below it; and the screen closes on † what it
+     does not know, in the desktop's own reasons. */
+  const AK = phoneContract();
   skeleton(deck, 4);
   const [k, daily, status, unauth, now] = await Promise.all([
     q('/api/kpis').catch(() => null),
@@ -163,8 +177,19 @@ async function today(deck, ctx) {
     const t = card('Today so far', now.started
       ? `as of ${now.asOf} Dubai \u00b7 both fleets, every channel`
       : todayLede(now));
+    /* The livebar. Unnumbered \u2014 it is the strip above the page, not a
+       section of it, as on the desktop \u2014 with an ink dot before its name,
+       and a caption that says what the desktop strip says on its face: these
+       figures do not follow the window and channel the control bar now names
+       directly above them. On the old phone the \u22ee hid the window, so the
+       question never arose. */
+    if (AK) {
+      t.card.classList.add('ak-live');
+      t.card.querySelector('.m-cap')?.append(
+        ' \u2014 not the window or the channel in the bar above');
+    }
     if (now.started) {
-      stats(t.body, [
+      const tl = stats(t.body, [
         { label: 'Bookings', value: fmt(now.bookings),
           sub: now.completed != null
             ? `${fmt(now.completed)} done \u00b7 ${fmt(now.cancelled ?? 0)} cancelled` : null,
@@ -216,8 +241,16 @@ async function today(deck, ctx) {
         { label: 'Reporting now', value: now.fresh != null ? fmt(now.fresh) : '\u2014',
           sub: now.tracked ? `of ${fmt(now.tracked)} tracked` : null,
           href: href('live') },
+        /* The desktop livebar's own cell: the minute the last booking landed
+           is a figure, and under the redesign it sits with the others rather
+           than in a sentence under them. */
+        ...(AK && now.lastAt ? [{ label: 'Latest booking', value: timeStr(now.lastAt) }] : []),
       ]);
-      if (now.lastAt) {
+      /* Trip value carries the strip's one emphasis \u2014 a rule and a weight,
+         no wash \u2014 which does not count against the screen's highlight budget
+         (plan \u00a73 TODAY STRIP, the desktop's .lb-hl). */
+      if (AK) tl.children[1]?.classList.add('ak-lb-hl');
+      if (now.lastAt && !AK) {
         t.body.append(el('p', 'm-cap', `Latest booking ${timeStr(now.lastAt)}.`));
       }
       /* A fares count well under the booking count at breakfast is a schedule,
@@ -277,7 +310,7 @@ async function today(deck, ctx) {
   const prev = series[series.length - 2] ?? 0;
   const drift = prev ? Math.round(((last - prev) / prev) * 100) : 0;
 
-  lede(deck, {
+  const statement = lede(deck, {
     claim: perDay != null
       ? `${fmt(perDay)} bookings a day`
       /* Today is the whole window, so today is the whole answer. */
@@ -328,7 +361,7 @@ async function today(deck, ctx) {
   }
   deck.append(trend.card);
 
-  stats(deck, [
+  const windowTiles = stats(deck, [
     /* `${fmt(perDay)} a day` printed "0 a day" beside 523 bookings. The
        sub-line says what the figure IS when there is no rate to give. */
     { label: 'Bookings', value: fmt(k.trips),
@@ -385,7 +418,15 @@ async function today(deck, ctx) {
         : 'no booking in this range carries an outcome',
       tone: n(k.cancel_pct) >= 20 ? 'warn' : null },
     { label: 'Distance', value: `${fmt(k.km)} km`, sub: `${n(k.avg_km) ?? '—'} km a trip` },
-  ]);
+  ], false, { hero: AK });
+  /* 00 · AT A GLANCE: the statement, then the window's tiles — ABOVE the
+     chart, which is what SPEC §1 means by the band never being below the
+     fold: a reader who stops at the top of the window's half leaves with its
+     numbers, not with a sparkline. */
+  if (AK) {
+    deck.insertBefore(secHead('00', 'At a glance', WINDOW_NOTE()), statement);
+    deck.insertBefore(windowTiles, trend.card);
+  }
 
   /* WHO CALLED THE CANCELLATIONS OFF, as rows rather than four more tiles: a
      breakdown is a list of parts of one number and tiles read as separate
@@ -481,6 +522,36 @@ async function today(deck, ctx) {
     row({ title: 'People', sub: 'who drove, and how much', value: '›', to: href('people') }),
     row({ title: 'Money', sub: 'revenue and payment mix', value: '›', to: href('money') }),
   ]);
+
+  /* † WHAT THIS SCREEN DOES NOT KNOW (the redesign only). The figures that
+     size what the tiles above leave out, each with its TRUE reason — and the
+     reasons are the desktop #overview's own sentences (app.js overviewContract,
+     built on ui.js UBER_FARE_WHY), repeated here word for word because
+     app.js is the desktop's entry module and cannot be imported on the phone;
+     test/phone_arkiv.test.mjs fails if the two drift apart. An unmapped
+     outcome appears only when there is one, exactly as its caption above
+     does. */
+  if (AK) {
+    const noPrice = n(k.trips) != null && n(k.priced_trips) != null ? n(k.trips) - n(k.priced_trips) : null;
+    const noKm = n(k.trips) != null && n(k.trips_with_distance) != null ? n(k.trips) - n(k.trips_with_distance) : null;
+    const unplaced = n(k.other_outcome) || 0;
+    absenceBand(deck, [
+      { label: 'Bookings not yet priced', fig: noPrice == null ? null : fmt(noPrice), hl: true, none: 'Not counted',
+        why: noPrice == null ? 'The kpis answer carries no priced count for this window.'
+          : `${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings carry a price, and Trip value is over those alone. `
+            + `${UBER_FARE_WHY}, so the newest Uber bookings are priced only after it; a booking cancelled `
+            + 'without a fee has no price to carry.' },
+      { label: 'Bookings carrying no distance', fig: noKm == null ? null : fmt(noKm), none: 'Not counted',
+        why: noKm == null ? 'The kpis answer carries no count of bookings with a distance.'
+          : `The channel filed these bookings with no distance on them. The Distance tile's mean is over the `
+            + `${fmt(k.trips_with_distance)} that carry one, never over all ${fmt(k.trips)}.`
+            + (n(k.trips_without_vehicle) ? ` A further ${fmt(k.trips_without_vehicle)} name no plate, so they `
+              + 'can appear on no per-car page.' : '') },
+      unplaced ? { label: 'Outcome not mapped', fig: fmt(unplaced),
+        why: `${unplaced === 1 ? 'This booking is' : 'These bookings are'} neither completed nor cancelled `
+          + '— a status this product has not mapped to an outcome.' } : null,
+    ], { name: '† What this screen does not know' });
+  }
 }
 
 /* ── Money ──────────────────────────────────────────────────────────────── */
