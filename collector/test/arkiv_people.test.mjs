@@ -246,4 +246,41 @@ if (want('driver-day')) {
   }
 }
 
+/* ══ #driver/territory ════════════════════════════════════════════════════ */
+if (want('driver-territory')) {
+  console.log('\n#driver/territory');
+  const marks = (page) => page.evaluate(() => {
+    const p = [...document.querySelectorAll('#view .panel')].find((x) => /Where this driver works/.test(x.querySelector('h3')?.textContent || ''));
+    const paths = p ? [...p.querySelectorAll('path.leaflet-interactive')] : [];
+    return { sub: p?.querySelector('p.cap, .sub')?.textContent || p?.textContent.slice(0, 200) || '',
+      still: paths.filter((x) => x.classList.contains('terr-still')).map((x) => ({ fill: x.getAttribute('fill'), dash: x.getAttribute('stroke-dasharray') })),
+      hollowDashed: paths.filter((x) => x.getAttribute('fill') === 'none' && x.getAttribute('stroke-dasharray')).length };
+  });
+  {
+    const { ctx, page } = await open('classic', 'driver/drv-0/territory');
+    const m = await marks(page);
+    check('old skin: the stationary places still hollow dashed rings, the subtitle still says so', m.hollowDashed > 0 && /Hollow markers/.test(m.sub), JSON.stringify(m).slice(0, 200));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'driver/drv-0/territory');
+    const m = await marks(page);
+    const T = answer('/api/driver/territory');
+    check('a place the car sat still is MEASURED: a filled grey mark, never the hollow ring kept for "not measured"',
+      m.still.length === (T.idle || []).length && m.still.every((x) => x.fill && x.fill !== 'none' && !x.dash) && m.hollowDashed === 0, JSON.stringify(m).slice(0, 300));
+    check('…and the subtitle names the mark the reader is looking at', /filled grey marks/.test(m.sub) && !/Hollow/.test(m.sub), m.sub.slice(0, 160));
+    const key = await page.evaluate(() => { const i = document.querySelector('#view .legend .terr-still-key'); return i ? getComputedStyle(i).borderStyle + ' ' + getComputedStyle(i).backgroundColor : null; });
+    check('…and so does the key under the map: a filled grey swatch, not the dashed ring', !!key && !/dashed/.test(key) && !/rgba\(0, 0, 0, 0\)/.test(key), String(key));
+    const s = await shape(page);
+    check('the areas table and the distance bars kept; the colophon names the clusters', /Busiest pickup areas/.test(s.heads.join('|'))
+      && /Trip distance mix/.test(s.heads.join('|')) && /pickup cluster/.test(s.colophon), JSON.stringify([s.heads, s.colophon]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/territory', { width: 390 });
+    check('#driver/territory at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

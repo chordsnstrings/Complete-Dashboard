@@ -1820,3 +1820,12 @@ time; 11 trips, ▼ 0.6 against 11.6 a working day this month; 128.4 km, trip
 value AED 695.45. The old skin scrolls 15px sideways at 390 on this page
 (unchanged by this work — the frozen skin). The month comparison arrives
 after the first paint, so a screenshot needs a longer settle (WAITMS=5000).
+
+### #driver/territory — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-territory/`): no error, no sideways
+scroll. 84 waiting spots drawn filled and grey; 2 of 223 pickups carry
+coordinates, the rest have an address and no position, which the caption
+under the map already says. Found by looking and fixed before commit: the
+key under the map still showed the dashed ring for waiting spots.

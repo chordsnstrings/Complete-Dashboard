@@ -1618,7 +1618,16 @@ async function tabTerritory(root, id) {
   // 2.4:1, and a driver's working area is roughly square, so a full-width panel
   // is mostly empty margin however tightly the points are framed.
   const g = el('div', 'grid g23'); root.append(g);
-  const mapP = panel('Where this driver works', 'Circles are pickup clusters, sized by trips. Hollow markers are places the vehicle sat still between jobs.');
+  /* Under the page contract (plan §4 #driver/territory, restyle only): a
+     place the car sat still is MEASURED — the tracker saw it there — so it is
+     a small filled grey mark, never the hollow ring SPEC §5 keeps for "not
+     measured"; the pickup clusters are ink. The subtitle says which mark is
+     which, in the skin it is read under. The map, the table and the bars
+     keep their data and their interactions. */
+  const ak = contract();
+  const mapP = panel('Where this driver works', ak
+    ? 'Ink circles are pickup clusters, sized by trips. Small filled grey marks are places the vehicle sat still between jobs.'
+    : 'Circles are pickup clusters, sized by trips. Hollow markers are places the vehicle sat still between jobs.');
   mapP.panel.classList.add('mapwrap'); g.append(mapP.panel);
   const node = el('div', 'mapnode'); mapP.body.append(node);
   const areas = panel('Busiest pickup areas', 'From the address the platform recorded'); g.append(areas.panel);
@@ -1635,15 +1644,17 @@ async function tabTerritory(root, id) {
     const pts = [];
     const max = Math.max(1, ...terr.pickups.map((p) => p.n));
     terr.idle.forEach((s) => {
-      L.circleMarker([s.lat, s.lng], { radius: 5 + Math.min(9, Math.sqrt(s.fixes)), color: css('--s5'), weight: 1.4,
-        fill: false, opacity: .65, dashArray: '3,3' }).addTo(map)
+      L.circleMarker([s.lat, s.lng], ak
+        ? { radius: 3 + Math.min(4, Math.sqrt(s.fixes) / 2), color: css('--grey'), weight: 0, fill: true, fillColor: css('--grey'), fillOpacity: .85, className: 'terr-still' }
+        : { radius: 5 + Math.min(9, Math.sqrt(s.fixes)), color: css('--s5'), weight: 1.4,
+          fill: false, opacity: .65, dashArray: '3,3' }).addTo(map)
         .bindTooltip(`Stationary here across ${s.fixes} five-minute fixes`, { direction: 'top' });
       pts.push([s.lat, s.lng]);
     });
     terr.pickups.forEach((p) => {
       L.circleMarker([p.lat, p.lng], {
         radius: 4 + 11 * Math.sqrt(p.n / max), color: css('--pin-ring'), weight: 1.2,
-        fillColor: css('--s1'), fillOpacity: .8,
+        fillColor: css(ak ? '--ink' : '--s1'), fillOpacity: ak ? 0.55 : 0.8,
       }).addTo(map).bindTooltip(
         `<b>${esc(p.addr || 'pickup')}</b><br>${p.n} pickup${p.n > 1 ? 's' : ''}` +
         `<br>avg ${fmt(p.avg_km, 1)} km${p.avg_fare ? ` · ${money(p.avg_fare)}` : ''}`, { direction: 'top' });
@@ -1667,9 +1678,10 @@ async function tabTerritory(root, id) {
     const areaTrips = (terr.areas || []).reduce((a, x) => a + (+x.n || 0), 0);
     const plotted = terr.pickups.reduce((a, x) => a + (+x.n || 0), 0);
     mapP.body.append(el('div', 'legend', `
-      <span><i style="background:var(--s1)"></i>pickups</span>
+      <span><i style="background:var(${ak ? '--ink' : '--s1'})"></i>pickups</span>
       <span><i style="background:var(--s3)"></i>drop-offs</span>
-      <span><i style="border:1.5px dashed var(--s5);background:none"></i>waiting spots</span>
+      ${ak ? '<span><i class="terr-still-key" style="background:var(--grey);border-radius:50%"></i>waiting spots</span>'
+        : '<span><i style="border:1.5px dashed var(--s5);background:none"></i>waiting spots</span>'}
       ${pts.length ? `<span>${terr.pickups.length} pickup clusters · ${terr.idle.length} waiting spots</span>` : ''}`));
     if (pts.length && areaTrips > plotted) {
       mapP.body.append(el('p', 'cap',
@@ -1729,6 +1741,7 @@ async function tabTerritory(root, id) {
       ], { compact: true }));
     }
   }
+  if (ak) pageFoot({ colophon: [windowLabel(), `${countOf((terr.pickups || []).length, 'pickup cluster')}`] }, root);
 }
 
 /* THE FARE THE PLATFORM DOES REPORT.
