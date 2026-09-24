@@ -1856,3 +1856,14 @@ scroll. "Within their usual range", 82 jobs over 7 active days; 7th of 116
 on jobs, 12th of 113 on value. The Trip value tile's sub-line says 0 of 82
 completed trips priced beneath AED 4,923.29 — in both skins; recorded in
 FIX-STATUS as found, not changed.
+
+### #driver/money — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-money/`): no error, no sideways scroll.
+Every position absent with the ledger's own reasons (no opening cash
+position; nothing on the advance or deduction books; no stored threshold);
+over the month, income at least AED 9,448.85 and AED 1,636.82 of cash fares.
+Found by looking and fixed before commit: the in-panel hero drew the income
+at display size across two lines, and the advance and deduction tiles would
+have printed their definitions as reasons.

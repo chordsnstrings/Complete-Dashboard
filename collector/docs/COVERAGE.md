@@ -6712,3 +6712,10 @@ number (5 and 5), and never a passport or RTA number.
   gets a label ink computed for a different fill, and prints dark on dark.
   Under Arkiv the categorical slots already ARE the achromatic ramp; for a
   non-channel composition, pass no `colorFor`.
+
+* **A tile's sub-line is not always its reason.** bandTiles() turns a bare
+  dash into an absence whose reason is the sub-line unless the caller names
+  one. On #driver/money two sub-lines are DEFINITIONS ("tolls, fines,
+  damage"); the true reason is /api/ledger/exposure's
+  `owes.books_absent_reason`. Read every sub-line of a converted row before
+  trusting it as a reason.

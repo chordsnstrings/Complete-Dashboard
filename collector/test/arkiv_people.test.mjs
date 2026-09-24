@@ -403,4 +403,58 @@ if (want('driver-record')) {
   }
 }
 
+/* ══ #driver/money ════════════════════════════════════════════════════════ */
+if (want('driver-money')) {
+  console.log('\n#driver/money');
+  {
+    const { ctx, page } = await open('classic', 'driver/U-TARIQ/money');
+    const r = await page.evaluate(() => ({ glance: document.querySelectorAll('#view .kpis.glance').length,
+      rows: document.querySelectorAll('#view [data-panel="driver-money"] .kpis:not(.glance)').length }));
+    check('old skin: the tiles are kpiRows, dashes and all', r.glance === 0 && r.rows === 1, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'driver/U-TARIQ/money');
+    const s = await shape(page);
+    const ex = answer('/api/ledger/exposure');
+    const p = (ex.people || [])[0];
+    const inPanels = await page.evaluate(() => ['driver-money', 'driver-money-window'].map((k) => !!document.querySelector(`[data-panel="${k}"] .kpis.glance`)));
+    check('restyle only: each tile row stays in the panel it sits in, drawn as glance tiles', inPanels.every(Boolean), JSON.stringify(inPanels));
+    check('the positions are the ledger\'s own figures', s.values['Owed in total'] === aedOf(p.owes.total)
+      && s.values['Advances outstanding'] === aedOf(p.owes.advance), JSON.stringify(s.values));
+    check('no tile toned, none a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/money');
+    const s = await shape(page);
+    check('a flow nobody wrote down is ABSENT with its reason in the value slot — never a dash with the reason underneath',
+      /nothing written down/.test(s.na['Cash advanced'] || '') && /nothing written down/.test(s.na['Cash handed back'] || '') && !s.bare.length,
+      JSON.stringify(s.na));
+    check('every path sets the colophon, the no-record one included', /positions as of today/.test(s.colophon), s.colophon);
+    await ctx.close();
+  }
+  {
+    /* Books nobody has written in: the advance and deduction tiles are
+       ABSENT with the server's books_absent_reason — their sub-lines say what
+       the figure means, which is not why it is missing. And a tile row in a
+       panel has no hero and no highlight. */
+    const why = 'nothing has ever been recorded against this person on the advance or deduction books';
+    const noBooks = (q, real) => ({ ...real, people: (real.people || []).map((x) => ({ ...x,
+      owes: { ...x.owes, advance: null, deduction: null, books_recorded: false, books_absent_reason: why } })) });
+    const { ctx, page } = await open('arkiv', 'driver/U-TARIQ/money', { fixtures: { '/api/ledger/exposure': noBooks } });
+    const s = await shape(page);
+    check('advances and deductions ABSENT with the books\' true reason, not their definitions', s.na['Advances outstanding'] === why
+      && s.na.Deductions === why, JSON.stringify(s.na));
+    const heroes = await page.evaluate(() => document.querySelectorAll('#view [data-panel^="driver-money"] .is-hero, #view [data-panel^="driver-money"] .hl').length);
+    check('a tile row inside a panel has no hero and no highlight', heroes === 0, String(heroes));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/U-TARIQ/money', { width: 390 });
+    check('#driver/money at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

@@ -34,7 +34,8 @@
    that never has one because it records a decision or a period figure.
    Retention is twelve months and the entry is permanent, so collapsing those
    makes an expired photograph read as an entry nobody ever documented. */
-import { el, esc, panel, note, loading, tableFrom, kpiRow, empty, countOf } from './ui.js';
+import { el, esc, panel, note, loading, tableFrom, kpiRow, empty, countOf,
+  contract, glance, bandTiles, pageFoot } from './ui.js';
 import { api, qAll, windowLabel } from './data.js';
 import { aed } from './deposit_core.js';
 
@@ -66,6 +67,24 @@ function proofCell(e) {
   }
   return `<span class="dash" title="${esc(e.receipt?.absent_reason
     || 'no photograph is attached to this entry')}">—</span>`;
+}
+
+/* Under the page contract (plan §4 #driver/money, RESTYLE ONLY — the whole
+   tab is the per-driver cash reconciliation and keeps its structure): each
+   tile row is drawn as glance tiles inside the panel it already sits in, so
+   a figure that cannot be measured prints its REASON in the value slot (the
+   Arkiv absence cell) instead of a dash with the reason underneath, and no
+   tile wears a tone. The old skin keeps its kpiRow. */
+function moneyTiles(tiles, reasons = {}) {
+  if (!contract()) return kpiRow(tiles);
+  const g = el('div');
+  glance(g, bandTiles(tiles, { reasons }).tiles);
+  /* A row inside a panel, not the page's 00 band: no tile leads, and none
+     carries the band's one highlight (a hero here drew "at least AED
+     9,448.85" at display size across two lines in the middle of the tab). */
+  g.querySelector('.is-hero')?.classList.remove('is-hero');
+  g.querySelectorAll('.hl').forEach((h) => h.replaceWith(...h.childNodes));
+  return g;
 }
 
 export async function renderDriverLedger(root, id, prof) {
@@ -176,7 +195,7 @@ export async function renderDriverLedger(root, id, prof) {
   }
 
   /* ── where they stand ─────────────────────────────────────────────────── */
-  head.body.append(kpiRow([
+  head.body.append(moneyTiles([
     { label: 'Owed in total', value: aed(p.owes?.total) || '—',
       sub: p.owes?.total == null ? (p.owes?.total_absent_reason || 'not measurable')
         : 'advances and deductions, plus the cash they are holding — as it stands now, '
@@ -198,7 +217,9 @@ export async function renderDriverLedger(root, id, prof) {
     { label: 'Against the line', value: p.exposure_pct == null ? '—' : `${p.exposure_pct}%`,
       sub: p.exposure_pct == null ? (p.exposure_absent_reason || 'not measurable')
         : (p.verdict || '') },
-  ]));
+  /* The sub-lines of these two are what the figure MEANS, not why it is
+     missing; the true reason is the server's books_absent_reason. */
+  ], { 'Advances outstanding': p.owes?.books_absent_reason, Deductions: p.owes?.books_absent_reason }));
 
   /* THE CASH TERM, SHOWN AS ITS PARTS. It is the one figure on this page that
      is derived rather than recorded, and the derivation is where it can be
@@ -240,6 +261,8 @@ export async function renderDriverLedger(root, id, prof) {
      still be in its temporal dead zone. A driver whose exposure read failed
      still drove, and this panel still has an answer for them. */
   function renderWindow() {
+  /* Every path through this tab reaches here, the early returns included. */
+  if (contract()) pageFoot({ colophon: [windowLabel(), 'positions as of today, flows over the window'] }, root);
   winP.body.innerHTML = '';
   const ow = st?.over_window;
   if (!ow) {
@@ -248,7 +271,7 @@ export async function renderDriverLedger(root, id, prof) {
       + 'from a different read.', 'warn'));
   } else {
     const t = ow.cash_taken_terms || {};
-    winP.body.append(kpiRow([
+    winP.body.append(moneyTiles([
       /* THE SUB-LINE SAID "what the platforms say this driver generated",
          PLURAL, WHENEVER THERE WAS A FIGURE AT ALL — and measured on
          production a driver with four accounts had ONE reporting. Nothing on
