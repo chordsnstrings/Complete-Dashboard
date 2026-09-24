@@ -1582,3 +1582,10 @@ light and dark (scratchpad `pagephase/shots/salary/`): no error, no sideways
 scroll, two highlights. Found by looking and fixed before commit: the
 spread's band labels were cut ("30,000–40,…"); they are named by the lower
 edge and the width is said in the caption.
+
+### #advances — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/advances/`): no error, no sideways scroll, two highlights.
+215 of 347 people have both a cash fare and a generated figure; 61 have cash
+fares and no generated figure; 71 have no cash fare.

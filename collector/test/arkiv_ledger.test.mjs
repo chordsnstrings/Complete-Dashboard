@@ -134,4 +134,58 @@ if (want('salary')) {
   await c.ctx.close();
 }
 
+/* ══ #advances ═══════════════════════════════════════════════════════════ */
+if (want('advances')) {
+  console.log('\n#advances');
+  const { ctx, page, answer } = await open('arkiv', 'advances');
+  const s = await shape(page);
+  const n = answer('/api/ledger/people').people.filter((p) => p.name).length;
+  const exp = answer('/api/ledger/exposure');
+  const ex = exp.people;
+  const carriers = ex.filter((p) => p.owes?.cash_taken != null);
+  const sum = carriers.reduce((a, p) => a + p.owes.cash_taken, 0);
+  const r = await page.evaluate(() => ({
+    head: [...document.querySelectorAll('[data-panel="advances"] thead th')].map((t) => t.textContent.trim()),
+    rows: document.querySelectorAll('[data-panel="advances"] tbody tr').length,
+    dots: document.querySelectorAll('[data-panel="advances-scatter"] svg circle').length,
+    scCap: document.querySelector('[data-panel="advances-scatter"] .pbody p.cap')?.textContent || '',
+    ranked: [...document.querySelectorAll('[data-panel="advances-ceiling"] .hb')].map((h) => [h.querySelector('.k').textContent.trim(),
+      h.querySelector('.fill').className]),
+  }));
+  check('the order: 00, the owes table, the form, the register, the scatter, the ranked ceiling, †',
+    JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'What each driver owes', 'Record an entry', 'The register',
+      'Cash taken against what each driver generated', 'Who has taken the most cash in fares', '† What this page does not know']),
+    JSON.stringify(s.heads));
+  check('the hero is the cash-fare CEILING, said to be one, with who carries it and the largest single driver',
+    s.hero === 'Cash fares put in drivers’ hands' && s.values[s.hero] === aed(sum)
+    && s.subs[s.hero].startsWith('a ceiling, not a balance') && s.subs[s.hero].includes(`${carriers.length} of ${n} carry one`), JSON.stringify([s.values, s.subs[s.hero]]));
+  check('the lending line is a tile that opens #policy, its figure the one in force', s.hrefs['The lending line'] === '#policy'
+    && s.values['The lending line'] === `${exp.policy.pct}%`, JSON.stringify(s.hrefs));
+  check('the owes table keeps its rows and gains the ceiling beside Cash held',
+    r.rows === ex.length && r.head.indexOf('Cash fares on record (ceiling)') === r.head.indexOf('Cash held') + 1, JSON.stringify(r.head));
+  const both = ex.filter((p) => p.owes?.cash_taken != null && p.earned != null).length;
+  check('the scatter draws only people with both, and says so', r.dots === both && r.scCap.startsWith(`${both} of ${n} people have both`),
+    `${r.dots} ${r.scCap}`);
+  check('the ranked ceiling: bars for carriers, the drivers with none as one OUTLINED count', r.ranked.length === carriers.length + 1
+    && /hb-outline/.test(r.ranked[r.ranked.length - 1][1]) && /with no cash fare on record/.test(r.ranked[r.ranked.length - 1][0]),
+  JSON.stringify(r.ranked));
+  check('the † band: what each driver owes, cash in hand, exposure, the line', JSON.stringify(s.abs.map((a) => a.label))
+    === JSON.stringify(['What each driver owes', 'Cash in hand, as a balance', 'Exposure', 'The line itself'])
+    && s.abs[2].fig === `${n - ex.filter((p) => p.exposure_pct != null).length} of ${n} not measurable`, JSON.stringify(s.abs));
+  check('no sideways scroll at 1440', s.overflowX <= 0, String(s.overflowX));
+  await ctx.close();
+  /* No line stored: absent with where it is set. */
+  const nl = await open('arkiv', 'advances', { fixtures: { '/api/ledger/exposure': (_q, real) => ({ ...real, policy: null,
+    policy_absent_reason: 'no threshold has been stored, so no exposure can be judged.' }) } });
+  const ns = await shape(nl.page);
+  check('with no line stored, the tile is ABSENT with where it is set, and the † cell says never set',
+    /none stored/.test(ns.na['The lending line'] || '') && ns.abs[3].fig === 'Never set' && /no threshold has been stored/.test(ns.abs[3].why),
+    JSON.stringify([ns.na, ns.abs[3]]));
+  await nl.ctx.close();
+  const c = await open('classic', 'advances');
+  const head = await c.page.evaluate(() => [...document.querySelectorAll('[data-panel="advances"] thead th')].map((t) => t.textContent.trim()));
+  check('old skin: no 00 band, no ceiling column', !(await c.page.$('#view .cband')) && !head.includes('Cash fares on record (ceiling)'), JSON.stringify(head));
+  await c.ctx.close();
+}
+
 await done();

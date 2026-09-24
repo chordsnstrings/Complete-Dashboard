@@ -22,8 +22,12 @@
    exposure is refused rather than shown low. Those people are the first thing
    on this page, because a screen that quietly dropped them would look complete
    while the drivers most likely to be over the line were the ones missing. */
-import { el, esc, panel, note, loading, tableFrom, entity } from './ui.js';
-import { api } from './data.js';
+import { el, esc, panel, note, loading, tableFrom, entity,
+  contract, glance, absenceBand, pageFoot } from './ui.js';
+import { fmt, scatter } from './charts.js';
+import { api, href } from './data.js';
+import { ledgerBand, ceiling, ceilingWho, ceilingCol, ceilingRanked, firstReason,
+  booksRecorded } from './ledger_ak.js';
 import { entryForm } from './entry_form.js';
 import { aed, loadPeople } from './deposit_core.js';
 
@@ -60,6 +64,12 @@ const TYPES = [
 
 export async function renderAdvances(root) {
   root.innerHTML = '';
+  /* Under the page contract (plan §4 #advances): 00 first; the owes table,
+     the form and the register where they were; then the cash-against-
+     generated scatter, the ranked ceiling and the † band. */
+  const ak = contract();
+  const AK = ak ? ledgerBand() : null;
+  if (ak) { root.append(AK.band); loading(AK.tiles); }
   const head = panel('What each driver owes', null, 'advances');
   root.append(head.panel);
   loading(head.body);
@@ -67,6 +77,8 @@ export async function renderAdvances(root) {
   const formPanel = panel('Record an entry', null, 'advance-form');
   const listPanel = panel('The register', null, 'advance-register');
   root.append(formPanel.panel, listPanel.panel);
+  const after = ak ? el('div') : null;
+  if (ak) root.append(after);
 
   async function refresh() {
     /* THE OFFER AND THE FIGURES ARE DIFFERENT QUESTIONS — loadPeople() folds
@@ -85,6 +97,7 @@ export async function renderAdvances(root) {
 
     const people = (ex.people || []).filter((p) => p.name);
     const pol = ex.policy;
+    if (ak) advancesContract(AK, after, root, people, ex);
     head.body.append(el('p', 'cap', pol
       ? `The line is ${pol.pct}% of what a driver generates, in force since ${esc(pol.effective_from)}`
         + `${pol.set_by ? `, set by ${esc(pol.set_by)}` : ''}. Over it an override is needed and `
@@ -150,6 +163,9 @@ export async function renderAdvances(root) {
       { label: 'Cash held', key: 'cash', num: true,
         render: (p) => (p.owes?.cash != null ? esc(aed(p.owes.cash))
           : `<span class="dash" title="${esc(p.owes?.cash_absent_reason || '')}">—</span>`) },
+      /* Beside Cash held under the contract: what cash fares put in the
+         driver's hand — a ceiling on what Cash held could be, never it. */
+      ...(ak ? [ceilingCol()] : []),
       { label: 'Generated', key: 'earned', num: true,
         render: (p) => (p.earned != null ? esc(aed(p.earned))
           : `<span class="dash" title="${esc(p.earned_absent_reason || '')}">—</span>`) },
@@ -194,4 +210,80 @@ export async function renderAdvances(root) {
   }
 
   await refresh();
+}
+
+/* ── #advances under the page contract ─────────────────────────────────────
+   00: cash fares put in drivers' hands, the hero — a CEILING, not a balance,
+   with who carries it, over how many fares, between which dates, and the
+   largest single driver · recorded on the advance book · exposure
+   measurable · the lending line (or none stored, and where it is set) ·
+   generated. After the register: cash taken against generated, one dot per
+   person (those with only one of the two are counted, not drawn); the
+   ceiling ranked. † what each driver owes, cash in hand as a balance,
+   exposure, the line itself — the route's reasons.
+   This page reads exposure_pct and never computes one; nothing here divides
+   by what a driver generated (test/ledger_ui.test.mjs).
+   NOT ADOPTED: "the eighteen books" bars (no GET serves the ledger-type
+   registry); a policy line on the scatter (a client-side ratio, and none may
+   be drawn where none is stored); the ceiling across all 347 as bars (the top
+   thirty as bars, the drivers with none as one outlined count). */
+function advancesContract(AK, after, root, people, ex) {
+  const n = people.length;
+  const c = ceiling(people);
+  const books = people.filter((p) => p.owes && ((+p.owes.advance_rows || 0) > 0
+    || (p.owes.advance_rows == null && p.owes.advance != null))).length;
+  const measurable = people.filter((p) => p.exposure_pct != null).length;
+  const gen = people.filter((p) => p.earned != null && +p.earned > 0);
+  const pol = ex.policy;
+  glance(AK.tiles, [
+    c.n ? { label: 'Cash fares put in drivers’ hands', value: aed(c.sum), hero: true,
+      sub: `a ceiling, not a balance · ${ceilingWho(c)} · ${fmt(c.trips)} cash fares, ${c.from} → ${c.to}`
+        + ` · the largest single driver ${aed(c.top.owes.cash_taken)}` }
+      : { label: 'Cash fares put in drivers’ hands', hero: true,
+        na: c.measured ? 'no cash-marked trip is on record for anyone here' : 'the exposure read did not answer, so no cash fare is measured' },
+    { label: 'Recorded on the advance book', value: `${fmt(books)} of ${fmt(n)}`,
+      sub: books ? 'with at least one advance row' : 'nobody has an advance row — a balance nobody wrote down, not nought' },
+    { label: 'Exposure measurable', value: `${fmt(measurable)} of ${fmt(n)}`,
+      sub: 'judged per person by the route, never as a fleet ratio' },
+    pol ? { label: 'The lending line', value: `${pol.pct}%`, to: href('policy'),
+      sub: `of what a driver generates, in force since ${pol.effective_from}` }
+      : { label: 'The lending line', na: 'none stored — it is set on The lending line', to: href('policy') },
+    gen.length ? { label: 'Generated', value: aed(gen.reduce((a, p) => a + (+p.earned || 0), 0)),
+      sub: `by ${fmt(gen.length)} of ${fmt(n)}` }
+      : { label: 'Generated', na: firstReason(people, (p) => p.earned_absent_reason) || 'no driver here has a generated figure' },
+  ]);
+
+  after.innerHTML = '';
+  const g = el('div', 'grid g2'); after.append(g);
+  const sc = panel('Cash taken against what each driver generated', 'One dot per person with both. No lending line is drawn: exposure is judged per person on the server.', 'advances-scatter');
+  const rk = panel('Who has taken the most cash in fares', 'The ceiling, ranked — the thirty largest, and the drivers with none as one count.', 'advances-ceiling');
+  g.append(sc.panel, rk.panel);
+  const both = people.filter((p) => p.owes?.cash_taken != null && p.earned != null);
+  const cashOnly = people.filter((p) => p.owes?.cash_taken != null && p.earned == null).length;
+  if (!both.length) sc.body.append(note('Nobody here has both a cash fare on record and a generated figure.'));
+  else {
+    scatter(sc.body, both.map((p) => ({ name: p.name, ext: p.ext_id, gen: +p.earned, cash: +p.owes.cash_taken })),
+      { x: 'gen', y: 'cash', label: 'name', xLabel: 'generated (AED)', yLabel: 'cash fares taken (AED)',
+        xFmt: (v) => fmt(v), yFmt: (v) => fmt(v),
+        onClick: (d) => { if (d.ext) location.hash = href('driver', d.ext); } });
+  }
+  sc.body.append(el('p', 'cap', esc(`${fmt(both.length)} of ${fmt(n)} people have both.`
+    + (cashOnly ? ` ${fmt(cashOnly)} with cash fares and no generated figure are not drawn — a dot needs both, and theirs is missing, not nought.` : ''))));
+  ceilingRanked(rk.body, people, { top: 30 });
+
+  const known = people.filter((p) => p.owes?.cash != null).length;
+  const absHost = el('div'); after.append(absHost);
+  absenceBand(absHost, [
+    { label: 'What each driver owes', fig: people.filter(booksRecorded).length ? `${fmt(people.filter(booksRecorded).length)} of ${fmt(n)} recorded` : null,
+      none: 'Nothing recorded',
+      why: firstReason(people, (p) => p.owes?.books_absent_reason) || 'Every driver here has an advance or deduction row.' },
+    { label: 'Cash in hand, as a balance', fig: known ? `${fmt(known)} of ${fmt(n)} known` : null, none: 'Unknown',
+      why: firstReason(people, (p) => p.owes?.cash_absent_reason) || 'Every driver here has an opening cash position stated.' },
+    { label: 'Exposure', hl: true, fig: `${fmt(n - measurable)} of ${fmt(n)} not measurable`,
+      why: firstReason(people, (p) => p.exposure_absent_reason) || 'Every driver here has an exposure figure.' },
+    { label: 'The line itself', fig: pol ? `${pol.pct}%` : null, none: 'Never set',
+      why: pol ? `In force since ${pol.effective_from}${pol.set_by ? `, set by ${pol.set_by}` : ''}.`
+        : (ex.policy_absent_reason || 'No threshold has been stored.') },
+  ]);
+  pageFoot({ colophon: ['The whole record', `${fmt(n)} people`, c.n ? `${aed(c.sum)} in cash fares — a ceiling` : null] }, root);
 }
