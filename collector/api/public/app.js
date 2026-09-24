@@ -5446,8 +5446,19 @@ const hasFix = (r) => r.lat != null && r.lng != null
 const FIX_FRESH_MIN = 30;
 
 V.live = async (root) => {
-  const vHost = el('div'); root.append(vHost);
-  const kh = el('div', 'kpis'); root.append(kh);
+  /* Under the page contract (plan §4 #live): the verdict as the 00 statement
+     — its figure, the cars not reporting, is not repeated as a tile (ruling
+     7) — with Fresh, Silent over a day, Moving and Engaged beside it and the
+     count tracked in the band's note; the Live vehicles table directly under
+     the band, every column, sort, fold and row click kept, its status, seat
+     and poll chips outline chips and the fix age ink; then, below it so the
+     table does not move, the feeds by freshness, what a live row carries, and
+     what the cars say they are doing, one channel per plot; a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
+  const vHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vHost);
+  const kh = el('div', 'kpis'); (ak ? AKB.tilesHost : root).append(kh);
   /* Three feeds, not one. 80 of these rows are FMS, 48 are CABMAN and 2 are
      Uber — and only CABMAN polls every five minutes. The caption named the
      cadence of a minority as the cadence of the page. */
@@ -5501,7 +5512,7 @@ V.live = async (root) => {
   const silent = rows.filter((r) => r.fix_age_min != null && r.fix_age_min >= DAY_MIN);
   const worstDays = silent.length
     ? Math.floor(Math.max(...silent.map((r) => r.fix_age_min)) / DAY_MIN) : 0;
-  kh.innerHTML = [
+  const LIVE_TILES = [
     ['Vehicles tracked', fmt(located.length),
       `with a usable fix${noLock ? ` · ${fmt(noLock)} reporting no satellite lock` : ''}`],
     [`Fresh (<${FIX_FRESH_MIN} min)`, fmt(fresh), `of ${fmt(rows.length)} reporting at all`],
@@ -5516,7 +5527,8 @@ V.live = async (root) => {
       sensed.length
         ? `of the ${fmt(sensed.length)} vehicles carrying a seat reading — CABMAN DT or FMS`
         : 'no vehicle here carries a seat reading from CABMAN DT or FMS'],
-  ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
+  ];
+  if (!ak) kh.innerHTML = LIVE_TILES.map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
   p.body.innerHTML = '';
   if (!rows.length) { empty(p.body, 'Positions appear once a tracker feed — CABMAN or FMS — has credentials saved in Settings'); return; }
   if (feeds.length) {
@@ -5540,7 +5552,8 @@ V.live = async (root) => {
         : '<span class="ent-off" title="no custody record for this plate">nobody on record</span>') },
     { label: 'Fleet', key: 'fleet_id', render: (r) => esc(sourceLabel(r.fleet_id)) },
     { label: 'Feed', key: 'source', render: (r) => esc(sourceLabel(r.source)) },
-    { label: 'Status', key: 'status', render: (r) => `<span class="tag ${/engag/i.test(r.status || '') ? 'ok' : 'dim'}">${esc(r.status || '—')}</span>` },
+    { label: 'Status', key: 'status', render: (r) => (ak ? `<span class="pill">${esc(r.status || '—')}</span>`
+      : `<span class="tag ${/engag/i.test(r.status || '') ? 'ok' : 'dim'}">${esc(r.status || '—')}</span>`) },
     { label: 'Speed', key: 'speed', num: true, render: (r) => r.speed != null ? fmt(r.speed) + ' km/h' : '—' },
     /* The only place in the product an odometer appears at all. */
     { label: 'Odometer', key: 'odometer', num: true,
@@ -5572,12 +5585,13 @@ V.live = async (root) => {
           return '<span class="tag dim" title="this fix carries no seat reading from CABMAN DT or FMS">not reported</span>';
         }
         const who = esc(`${r.seat_source || 'seat reading'}${r.seat_count != null ? `: ${r.seat_count}` : ''}`);
-        return r.seat_occupied ? `<span class="tag ok" title="${who}">occupied</span>`
+        return r.seat_occupied ? `<span class="${ak ? 'pill' : 'tag ok'}" title="${who}">occupied</span>`
           : `<span class="tag" title="${who}">empty</span>`;
       } },
     { label: 'Fix age', key: 'fix_age_min', num: true,
-      render: (r) => `<span class="tag ${r.stale ? 'warn' : 'ok'}">${
-        r.fix_age_min != null ? `${fmt(r.fix_age_min)} min` : (r.stale ? 'stale' : 'live')}</span>` },
+      render: (r) => (ak ? `<span${r.stale ? '' : ' class="dim"'}>${r.fix_age_min != null ? `${fmt(r.fix_age_min)} min` : (r.stale ? 'stale' : 'live')}</span>`
+        : `<span class="tag ${r.stale ? 'warn' : 'ok'}">${
+        r.fix_age_min != null ? `${fmt(r.fix_age_min)} min` : (r.stale ? 'stale' : 'live')}</span>`) },
     { label: 'Last fix', key: 'captured_at', render: (r) => timeStr(r.captured_at) },
     /* When WE last asked, beside when the tracker last SAW it.
        ─────────────────────────────────────────────────────────────────────
@@ -5595,7 +5609,7 @@ V.live = async (root) => {
         if (r.poll_age_min == null) return '<span class="ent-off">—</span>';
         const stalePoll = r.poll_age_min >= 60;
         const gap = r.fix_age_min != null && r.fix_age_min - r.poll_age_min >= 1440;
-        return `<span class="tag ${stalePoll ? 'warn' : 'dim'}" title="${stalePoll
+        return `<span class="${ak ? (stalePoll ? '' : 'dim') : `tag ${stalePoll ? 'warn' : 'dim'}`}" title="${stalePoll
           ? 'nothing has asked this feed for over an hour — that is our collector, not the vehicle'
           : gap ? 'we asked a moment ago and got back a fix that is over a day old — the provider is still listing this vehicle and reporting nothing new about it'
             : 'when this feed was last polled'}">${fmt(r.poll_age_min)} min</span>`;
@@ -5643,7 +5657,72 @@ V.live = async (root) => {
   foldRows(p.body, t, { shown: 12, total: rows.length, noun: 'vehicle', key: 'live' });
   p.body.append(el('p', 'cap',
     'Click a row for that vehicle’s movement page — the map, the replayable days and every stationary cluster.'));
+  if (ak) {
+    /* The tile the verdict IS folds into it, by name. */
+    const figLabel = rows.some((r) => r.stale) ? null : 'Moving';
+    glance(AKB.tilesHost, bandTiles(LIVE_TILES.filter(([l]) => l !== 'Vehicles tracked' && l !== figLabel)
+      .map(([l, n, d]) => ({ label: l, html: n, value: n, sub: d }))).tiles);
+    AKB.band.querySelector('.sechd').append(el('div', 'sechd-note', `${fmt(located.length)} tracked with a usable fix${noLock ? ` · ${fmt(noLock)} reporting no satellite lock` : ''}`));
+    liveMarks(root, rows);
+  }
 };
+
+/* ── #live under the page contract ───────────────────────────────────────── */
+function liveMarks(root, rows) {
+  const feeds = CHANNEL_ORDER.filter((f) => rows.some((r) => r.source === f))
+    .concat([...new Set(rows.map((r) => r.source).filter((f) => f && !CHANNEL_ORDER.includes(f)))]);
+  const of = (f) => rows.filter((r) => r.source === f);
+  /* Every tracked car by feed and freshness, one channel per plot. */
+  const p1 = panel('Every tracked car, by feed and freshness', 'Reporting now (under 30 min), late today, and silent over a day — one plot per feed', 'live-fresh');
+  root.append(p1.panel);
+  const g1 = el('div', 'grid g3'); p1.body.append(g1);
+  feeds.forEach((f) => {
+    const rs = of(f); const box = el('div'); box.append(el('p', 'cap', `<b>${esc(sourceLabel(f))}</b> · ${fmt(rs.length)}`)); g1.append(box);
+    const b = el('div'); box.append(b);
+    hbars(b, [
+      { label: 'reporting now', n: rs.filter((r) => !r.stale).length },
+      { label: 'late today', n: rs.filter((r) => r.stale && (r.fix_age_min == null || r.fix_age_min < 1440)).length },
+      { label: 'silent over a day', n: rs.filter((r) => r.fix_age_min != null && r.fix_age_min >= 1440).length },
+    ], { signed: false, color: sourceToken(f) || '--mk-fill' });
+  });
+  /* What a live row carries, per feed — measured on the rows, never assumed. */
+  const p2 = panel('What a live row carries', 'The share of each feed\u2019s rows that carry each field', 'live-fields');
+  root.append(p2.panel);
+  const share = (rs, f) => (rs.length ? `${Math.round((rs.filter(f).length / rs.length) * 100)}%` : '—');
+  p2.body.append(tableFrom(feeds.map((f) => ({ feed: f, rs: of(f) })), [
+    { label: 'Feed', key: 'feed', render: (r) => `<span class="pchip">${swatch(r.feed)}${esc(sourceLabel(r.feed))}</span>` },
+    { label: 'Rows', key: '_n', num: true, render: (r) => fmt(r.rs.length) },
+    { label: 'Position', key: '_p', num: true, render: (r) => share(r.rs, hasFix) },
+    { label: 'Speed', key: '_s', num: true, render: (r) => share(r.rs, (x) => x.speed != null) },
+    { label: 'Odometer', key: '_o', num: true, render: (r) => share(r.rs, (x) => !!x.odometer) },
+    { label: 'Seat', key: '_st', num: true, render: (r) => share(r.rs, (x) => x.seat_occupied != null) },
+    { label: 'Named driver', key: '_d', num: true, render: (r) => share(r.rs, (x) => !!x.current_driver) },
+    { label: 'A/C', key: '_a', num: true, render: (r) => share(r.rs, (x) => x.ac_on != null) },
+    { label: 'Fuel', key: '_f', num: true, render: (r) => share(r.rs, (x) => x.fuel_level != null) },
+  ], { compact: true }));
+  /* What the cars say they are doing, one small panel per feed. */
+  const p3 = panel('What the live cars say they are doing', 'Each feed\u2019s own status words, counted', 'live-status');
+  root.append(p3.panel);
+  const g3 = el('div', 'grid g3'); p3.body.append(g3);
+  feeds.forEach((f) => {
+    const by = new Map(); of(f).forEach((r) => { const k = r.status || 'no status'; by.set(k, (by.get(k) || 0) + 1); });
+    const box = el('div'); box.append(el('p', 'cap', `<b>${esc(sourceLabel(f))}</b>`)); g3.append(box);
+    const b = el('div'); box.append(b);
+    hbars(b, [...by.entries()].sort((a, c) => c[1] - a[1]).slice(0, 8).map(([label, n]) => ({ label, n })), { signed: false, color: sourceToken(f) || '--mk-fill' });
+  });
+  const silent = rows.filter((r) => r.fix_age_min != null && r.fix_age_min >= 1440).length;
+  const noPos = rows.filter((r) => !hasFix(r)).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Where a silent car is', hl: silent > 0, fig: silent ? fmt(silent) : null, none: 'None silent',
+      why: 'A car silent for over a day is still drawn where it last reported; nothing says where it is now.' },
+    { label: 'Fuel in the tank', fig: null, none: 'Not reported', why: 'No feed fills it: FMS sends a zero for every car (an absent reading), CABMAN and Uber send none.' },
+    { label: 'Cars with no position', fig: noPos ? fmt(noPos) : null, none: 'None',
+      why: 'No satellite lock, or a feed row with no coordinate — counted, never placed on a map.' },
+    { label: 'A passenger on board', fig: null, none: 'Two feeds only', why: 'Only CABMAN DT\u2019s seat pad and FMS\u2019s live seat count can say so; Uber\u2019s rows carry position and speed only.' },
+  ]);
+  pageFoot({ colophon: ['live positions', `${fmt(rows.length)} reporting`] }, root);
+}
 
 
 V.map = async (root) => {

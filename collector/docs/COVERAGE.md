@@ -6751,3 +6751,5 @@ number (5 and 5), and never a passport or RTA number.
 
 * **`/api/unauthorized/attributed` → `distribution.by_tier` names its rung `key`, not `tier`, and its `km` is a numeric string** (`{"key":"last_trip","n":625,"km":"9137.7","segments":640}` on production). A test that reads the same wrong field as the page passes on zeros. Require a non-zero value, or a sum that meets another figure, before trusting the match.
 * **`/api/segments` rows are the newest and capped** (`truncated`, `total`). Anything counted off them about age, such as "before the status-feed history began", is a floor and must say so.
+
+* **A ruling-7 fold must go by LABEL on #live.** In the mock, the one stale car and the one car silent over a day are both "1": two different measures that happen to agree. A value-equality fold (or test) would take the wrong tile. This is the same trap as the roster fold (P50), met again.

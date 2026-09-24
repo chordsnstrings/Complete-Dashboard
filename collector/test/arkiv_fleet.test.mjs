@@ -888,4 +888,75 @@ if (want('safety')) {
   }
 }
 
+/* ══ #live ════════════════════════════════════════════════════════════════ */
+if (want('live')) {
+  console.log('\n#live');
+  const cells = (page) => page.evaluate(() => {
+    const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Live vehicles');
+    const hs = [...p.querySelectorAll('thead th')].map((h) => h.textContent.replace(/[↑↓]/g, '').trim());
+    const at = (n) => hs.indexOf(n);
+    return { heads: hs, rows: [...p.querySelectorAll('tbody tr')].map((tr) => ({
+      status: tr.children[at('Status')]?.querySelector('.pill, .tag')?.className || null,
+      age: tr.children[at('Fix age')]?.innerHTML || '' })) };
+  });
+  {
+    const { ctx, page } = await open('classic', 'live');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), tiles: [...document.querySelectorAll('#view .kpis > .kpi .l')].map((l) => l.textContent.trim()) }));
+    const c = await cells(page);
+    check('old skin: no band, its five tiles with Vehicles tracked, status as toned tags', !r.band && r.tiles.includes('Vehicles tracked') && c.rows.some((x) => /\btag\b/.test(x.status || '')), JSON.stringify(r.tiles));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'live');
+    const s = await shape(page);
+    const live = answer('/api/live');
+    const rows = live.rows || live;
+    const stale = rows.filter((r) => r.stale).length;
+    const f = await vfig(page);
+    /* By LABEL, not by value: in the mock the one stale car and the one car
+       silent over a day are both "1" — two different measures that happen to
+       agree (the COVERAGE trap on folding by value). */
+    check('00: the verdict is the statement; its figure is not a tile (ruling 7) and Vehicles tracked moves to the note', s.vdctIn00
+      && !Object.keys(s.values).some((l) => /not reporting|stale/i.test(l)) && (stale ? f === n(stale) : true)
+      && !('Vehicles tracked' in s.values) && /tracked with a usable fix/.test(await txtOf(page, '#view .cband .sechd')), JSON.stringify([f, s.values]));
+    check('the remaining tiles, untoned: fresh (the hero), silent over a day, engaged — and moving unless the verdict is it', s.hero === 'Fresh (<30 min)'
+      && ['Silent over a day', 'Engaged'].every((l) => l in s.values) && (stale ? 'Moving' in s.values : !('Moving' in s.values)) && (await toned(page)).length === 0, JSON.stringify(Object.keys(s.values)));
+    check('the Live vehicles table sits directly under the band, the new panels below it', s.heads[1] === 'Live vehicles'
+      && s.heads.indexOf('Every tracked car, by feed and freshness') > 1, JSON.stringify(s.heads));
+    const c = await cells(page);
+    check('status an outline chip; the fix age ink, never a toned tag', c.rows.every((x) => x.status === 'pill' && !/class="tag/.test(x.age)), JSON.stringify(c.rows.slice(0, 2)));
+    const fresh = await page.evaluate(() => [...document.querySelectorAll('[data-panel="live-fresh"] .grid > div')].map((b) => ({
+      cap: b.querySelector('.cap')?.textContent.trim(), n: [...b.querySelectorAll('.hb .v')].map((v) => +v.textContent.replace(/,/g, '')),
+      fill: b.querySelector('.hb .fill')?.getAttribute('style') || '' })));
+    const feeds = [...new Set(rows.map((r) => r.source))];
+    check('every tracked car by feed and freshness: one plot per feed in its colour, the three bands summing to the feed', fresh.length === feeds.length
+      && fresh.every((b) => b.n.reduce((a, x) => a + x, 0) === +(b.cap.split('·')[1] || '').replace(/[^\d]/g, '') && /--c-/.test(b.fill)), JSON.stringify(fresh));
+    const carry = await page.evaluate(() => [...document.querySelectorAll('[data-panel="live-fields"] tbody tr')].length);
+    check('what a live row carries: one row per feed', carry === feeds.length, `${carry} vs ${feeds.length}`);
+    const status = await page.evaluate(() => document.querySelectorAll('[data-panel="live-status"] .grid > div').length);
+    check('what the cars say they are doing: one small panel per feed', status === feeds.length, `${status}`);
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const silent = rows.filter((r) => r.fix_age_min != null && r.fix_age_min >= 1440).length;
+    check('†: where a silent car is (counted), fuel (not reported), cars with no position, a passenger on board', (silent ? ab['Where a silent car is']?.fig === n(silent) : ab['Where a silent car is']?.none)
+      && ab['Fuel in the tank']?.fig === 'Not reported' && !!ab['Cars with no position'] && !!ab['A passenger on board'], JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    await ctx.close();
+  }
+  {
+    /* Nothing stale (synthetic): the verdict is the moving count, so the
+       Moving tile folds into it by name. */
+    const fresh = (q, real) => { const rs = (real.rows || real).map((r) => ({ ...r, stale: false, fix_age_min: 2 }));
+      return Array.isArray(real) ? rs : { ...real, rows: rs }; };
+    const { ctx, page } = await open('arkiv', 'live', { fixtures: { '/api/live': fresh } });
+    const s = await shape(page);
+    check('nothing stale: the verdict counts the moving cars, and the Moving tile folds into it', /moving right now/.test(await txtOf(page, '#view .cband .vdct')) && !('Moving' in s.values)
+      && 'Fresh (<30 min)' in s.values, JSON.stringify(Object.keys(s.values)));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'live', { width: 390 });
+    check('#live at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

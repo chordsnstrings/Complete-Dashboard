@@ -2112,3 +2112,9 @@ Production through live-ui on :8611, all three tabs in both skins at 1440 and 39
 * 5,272 events fell on a plate-day nobody held the car for; that figure is in the band's note.
 * The rated drivers fall 9 / 34 / 26 / 4 across 0–200 in 50s.
 * By car, 60 of the 71 cars rated over 200 km of the feed run above the fleet rate.
+
+### #live — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p70/`). No page error, no sideways scroll, and the fils scan is clean.
+
+The verdict: 169 vehicles have a stale fix, of 267 reporting; 237 are tracked with a usable fix and 30 report no satellite lock (in the band's note). Fresh: 98. Silent over a day: 158. Moving: 63. Engaged: 44 of 240. The table sits directly under the band.

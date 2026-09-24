@@ -3717,3 +3717,13 @@ Deviations:
 * §03, the rate-against-km scatter with the 200 km fence, is not built. The scatter draws only a sloped reference line, not a vertical fence.
 * §06, the noisiest cars split into driving and faults, is not built. The plan's own condition (confirm "other" equals device faults) is unproven, and the table already carries each column.
 * At 1440 the band's sixth tile (Drivers named) takes a second row, because the hero spans two of six columns.
+
+### P70 · #live
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #live | An `ak` flag in V.live. **00:** the verdict is the statement. Its figure (the cars not reporting, or the moving count when nothing is stale) is not a tile (ruling 7), and the Moving tile folds into it by name when it is the verdict. *Vehicles tracked* moves to the band's note ("N tracked with a usable fix · N reporting no satellite lock"). Fresh (the hero), Silent over a day, Moving and Engaged follow, untoned. The **Live vehicles table** stays directly under the band, with every column, the fix-age sort, the fold and the row click kept. Status is an outline chip, and seat/poll chips are outline or plain; fix age is ink and never an amber tag. **Below the table** so it does not move: NEW every tracked car by feed and freshness (one plot per feed in its channel colour: reporting now, late today, silent over a day); NEW what a live row carries (share of each feed's rows with position, speed, odometer, seat, named driver, A/C, fuel, measured on the rows); NEW what the cars say they are doing (each feed's own status words, one plot per feed). **†:** where a silent car is (counted), fuel in the tank (not reported: the server nulls FMS's zero, api/server.js; CABMAN and Uber send none), cars with no position (counted), and a passenger on board (two feeds only) | **written** | `test/arkiv_fleet.test.mjs` #live 12/12, including a synthetic nothing-stale fleet. Revert-proofs (md5-restored): Vehicles tracked back as a tile fails two checks; the Moving fold off fails "the Moving tile folds into it"; the old toned status tag fails "an outline chip"; one colour for every feed fails "in its colour". `arkiv_classic_frozen` ONLY=live 2/2. `arkiv_fils` gains `live`; the live scan is clean. Pinned: `live_fix` 10, `phone_clock` 8 (1 skipped), `swr` 29, `nav_sections` 17, `spacing` 2 (private mock), `chart_marks` 151, `page_contract` 95 |
+
+Deviations:
+* The plan's hero, "Not reporting", is the verdict's own figure, so ruling 7 folds it and Fresh takes the hero.
+* The plan's §01, fix-age bands stacked by feed, is merged into §02: the same payload, drawn once by feed and freshness.
