@@ -215,8 +215,16 @@ if (want('driver-day')) {
     const k = answer('/api/driver/kpis', (q) => !!q.from);
     const d = await txtOf(page, '#view .kpis.glance .kpi:nth-child(3) .t-d');
     const per = k && +k.days_worked ? (+k.trips / +k.days_worked) : null;
+    /* The page prints the month's rate through fmt(), which drops a trailing
+       ".0" — 261 trips over 26 days prints "against 10", not "10.0" — so the
+       figure is read back as a number and held to the endpoint's within a
+       rounding step, never matched as a fixed-decimal string (that check
+       failed on the evening suite whenever the month's rate landed on a
+       whole number). */
+    const against = (d.match(/against\s+([\d,]+(?:\.\d+)?)/) || [])[1];
     check('trips set against the driver\'s own calendar month — one request, from/to the month holding the day',
-      !!k && per != null && d.includes(`a working day this month`) && d.includes(per.toFixed(1)), JSON.stringify([d, k && [k.trips, k.days_worked]]));
+      !!k && per != null && d.includes(`a working day this month`) && against != null
+        && Math.abs(Number(against.replace(/,/g, '')) - per) <= 0.05, JSON.stringify([d, against, k && [k.trips, k.days_worked]]));
     const D = answer('/api/driver/day');
     const areas = await page.evaluate(() => [...document.querySelectorAll('[data-panel="dday-areas"] .hb .k')].map((x) => x.textContent.trim()));
     const want = [...new Set((D.fixes || []).map((x) => x.area).filter(Boolean))];
