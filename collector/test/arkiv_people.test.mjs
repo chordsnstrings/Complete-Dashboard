@@ -639,4 +639,52 @@ if (want('performer')) {
   }
 }
 
+/* ══ #cohort ══════════════════════════════════════════════════════════════ */
+if (want('cohort')) {
+  console.log('\n#cohort');
+  {
+    const { ctx, page } = await open('classic', 'cohort/unit-licence-due');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      due: [...document.querySelectorAll('#view .kpis > .kpi')].find((k) => /Licences due/.test(k.textContent))?.querySelector('.n')?.textContent.trim() }));
+    check('old skin (frozen): no band, and "Licences due" still counts the lapsed with the due', !r.band && r.due != null, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'cohort/unit-licence-due');
+    const s = await shape(page);
+    const E = answer('/api/economics/drivers');
+    const rows = (E.rows || []).filter((r) => r.licence_days_left != null && r.licence_days_left < 30);
+    const lapsed = rows.filter((r) => r.licence_days_left < 0).length;
+    const due = rows.filter((r) => r.licence_days_left >= 0).length;
+    check('THE TRUTH FIX: lapsed and due are two tiles over the same predicate', s.values['Already lapsed'] === String(lapsed)
+      && s.values['Due within 30 days'] === String(due) && !('Licences due' in s.values), JSON.stringify(s.values));
+    const claim = await txtOf(page, '#view .cband .vdct-claim');
+    check('…and a set with a lapsed member says "licence expired or expiring"', lapsed ? /licence expired or expiring/.test(claim) : true, claim);
+    const f = await vfig(page);
+    /* The People tile IS the verdict's count and folds into it. "Already
+       lapsed" can equal it — when every member has lapsed — and is a
+       different fact, which is the point of the truth fix. */
+    check('ruling 7: the count the verdict states is not a tile of its own', !['People', 'Person'].some((l) => l in s.values)
+      && Object.entries(s.values).filter(([, v]) => v === f).every(([l]) => l === 'Already lapsed' || l === 'Due within 30 days'), JSON.stringify([f, s.values]));
+    const ch = await page.evaluate(() => [...document.querySelectorAll('[data-panel="cohort-chan"] .hb .k')].map((k) => k.textContent.trim()));
+    check('which channels carry them, by member', ch.length > 0, JSON.stringify(ch));
+    const ans = await page.evaluate(() => [...document.querySelectorAll('[data-panel="cohort-answered"] .hb')].map((h) => h.querySelector('.v')?.textContent.trim()));
+    check('what every other system could answer: N of M per system, off the cards\' own join', ans.length === 8 && ans.every((v) => new RegExp(`of ${rows.length}$`).test(v)), JSON.stringify(ans));
+    check('the full list and the member cards kept; † and colophon', s.heads.includes('The full list') && s.heads.includes('What each system holds')
+      && s.abs.length >= 1 && /from Unit economics/.test(s.colophon), JSON.stringify([s.heads, s.colophon]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'cohort/roster-blocked');
+    const s = await shape(page);
+    check('another set converts too: band, no tone, no bare dash', s.vdctIn00 && (await toned(page)).length === 0 && !s.bare.length, JSON.stringify(s.values));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'cohort/unit-licence-due', { width: 390 });
+    check('#cohort at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

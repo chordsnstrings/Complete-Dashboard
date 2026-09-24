@@ -1897,3 +1897,13 @@ Production (week of 14–20 Sept), both skins at 1440 and 390, light and dark
 AED 3,669.89, ▲ 1,983.37 against AED 1,686.52 — the mean of the 151 who
 earned; 11th of 151 by money; per day worked AED 524.27, ▲ 252.49 against
 the fleet mean; 84 bookings, 31.9 h carrying someone, 49.3 h waiting.
+
+### #cohort — 2026-09-24
+
+Production, unit-licence-due and roster-blocked, both skins at 1440 and
+390, light and dark (scratchpad `pagephase/shots/cohort/`): no error, no
+sideways scroll. The truth fix on real data: 60 people, "licence expired or
+expiring", every one of the 60 already lapsed and 0 due within 30 days —
+where the old skin reads "Licences due 60 · expiring within 30 days". 44
+of the 60 carry the same expiry date, 1 Jan 2026; 59 of 60 are still
+marked able to earn; 235 of the 308 in the source have no licence date.
