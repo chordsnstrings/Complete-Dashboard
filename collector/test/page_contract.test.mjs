@@ -483,6 +483,18 @@ console.log('\n5c · a long hero figure stays on one line at 390');
     return { h: n.getBoundingClientRect().height, lh, fs: getComputedStyle(n).fontSize, over: document.documentElement.scrollWidth - innerWidth };
   });
   check('a fourteen-character hero amount is one line at 390, and nothing scrolls sideways', r.h < r.lh * 1.5 && r.over <= 0, JSON.stringify(r));
+  /* An ABSENT hero's reason is long by nature; the long-figure clamp above
+     must not reach it (#trip on an Uber booking drew its reason at display
+     size, five lines deep, 2026-09-24). It reads at the size every other
+     reason in the band reads at. */
+  const na = await page.evaluate(async () => {
+    const u = await import('/ui.js');
+    const g = document.createElement('div'); document.querySelector('#view').prepend(g);
+    u.glance(g, [{ label: 'Fare', na: 'Uber prices no trip — see the day’s payout below', hero: true },
+      { label: 'Distance', na: 'this channel reported none' }]);
+    return [...g.querySelectorAll('.n.t-na')].map((n) => getComputedStyle(n).fontSize);
+  });
+  check('…and an absent hero\'s REASON keeps the reason\'s reading size, never the display clamp', na.length === 2 && na[0] === na[1], JSON.stringify(na));
   await ctx.close();
 }
 {

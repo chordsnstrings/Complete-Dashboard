@@ -1236,7 +1236,12 @@
      not min(): test/type_scale.test.mjs admits only a token, a clamp or an
      em, and a bare min() was a literal size by that rule (the Money-section
      full suite caught it). --d4 as the floor only bites below 252px. */
-  :root[data-skin="arkiv"] .kpis.glance .kpi.is-hero .n.long{font-size:clamp(var(--d4),10.5vw,var(--d6))}
+  /* …and never a REASON. An absent hero carries its reason in the value slot
+     (.t-na), which is long by nature, so .long matched it and this rule —
+     heavier than .t-na's — drew "Uber prices no trip — see the day's payout
+     below" at display size over five lines at 390 (#trip, production,
+     2026-09-24). A reason keeps .t-na's reading size at every width. */
+  :root[data-skin="arkiv"] .kpis.glance .kpi.is-hero .n.long:not(.t-na){font-size:clamp(var(--d4),10.5vw,var(--d6))}
 }
 
 /* THE DELTA (SPEC L3). The colour follows the meaning, the glyph and sign
