@@ -25,9 +25,9 @@
    server raises the threshold to match the number of people tested and returns
    it with the sentence explaining it; the page prints that sentence rather
    than inventing its own. */
-import { gapBars, dec } from './charts.js';
+import { gapBars, dec, scatter } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, verdict, tabBar,
-  money, fmt, dateStr, plural, countOf } from './ui.js';
+  money, fmt, dateStr, plural, countOf, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, delta } from './ui.js';
 import { api, state, href } from './data.js';
 
 const ordinal = (n) => {
@@ -113,6 +113,10 @@ function moversPanel(host, d) {
       { label: 'Difference', key: 'diff', num: true,
         render: (r) => {
           const v = Math.round(r.split?.total ?? 0);
+          /* Under the contract a difference carries its glyph AND its sign,
+             in the colour of its meaning (L3); the old skin's amber had no
+             minus at all. */
+          if (contract()) return delta(v, { d: 0 });
           const cls = v > 0 ? 'good' : 'warn';
           return `<span class="${cls}">${v > 0 ? '▲' : '▼'} ${fmt(Math.abs(v))}</span>`;
         } },
@@ -240,6 +244,10 @@ function rankTable(host, rows, basis, d) {
       render: (r) => {
         if (r.z == null) return `<span class="dim">${esc(r.no_verdict || 'no baseline yet')}</span>`;
         const v = Math.round(r.split?.total ?? 0);
+        if (contract()) {
+          return r.changed ? delta(v, { d: 0 })
+            : `<span class="dim">${v > 0 ? '+' : v < 0 ? '−' : ''}${fmt(Math.abs(v))} within range</span>`;
+        }
         const cls = !r.changed ? 'dim' : v > 0 ? 'good' : 'warn';
         const arrow = v > 0 ? '▲' : v < 0 ? '▼' : '─';
         return `<span class="${cls}">${arrow} ${fmt(Math.abs(v))}</span>`
@@ -269,9 +277,28 @@ export async function renderPerformance(root, periodParam) {
     grain, (g) => href('performance', null, null, { grain: g }),
   ));
 
-  const vHost = el('div'); root.append(vHost); loading(vHost);
-  const kHost = el('div'); root.append(kHost);
-  const pick = el('div'); root.append(pick);
+  /* Under the page contract (plan §4 performance and performance/month):
+     the grain tabs stay first; the verdict is the 00 statement with the
+     tiles — its figure IS the active-driver count, so that tile folds into
+     it (ruling 7) and Changed, the page's own question, leads; a missing
+     summary is ABSENT with its reason, never the `?? 0` nought; a complete
+     period carries its change on the last complete one, the running one
+     none — then the period chips; every driver, jobs across and trip value
+     up; the movers and both rankings unchanged, their differences signed
+     with a glyph and a minus; the trend with a period nobody measured drawn
+     as a gap, and active drivers as their own chart; How to read this kept;
+     a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
+  const vHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vHost);
+  loading(vHost);
+  const kHost = el('div'); (ak ? AKB.tilesHost : root).append(kHost);
+  /* The period chips are chrome under the contract: above the band whose
+     verdict they choose, beside the grain tabs. */
+  const pick = el('div'); if (ak) root.insertBefore(pick, AKB.band); else root.append(pick);
+  const scP = ak ? panel('Every driver, jobs against trip value', 'One dot per driver whose fares can be placed; a name opens their record', 'perf-scatter') : null;
+  if (scP) root.append(scP.panel);
   const mv = panel('Who is doing something different',
     `Measured against each driver’s own previous periods, not against each other`);
   root.append(mv.panel);
@@ -365,7 +392,7 @@ export async function renderPerformance(root, periodParam) {
     vHost.append(note(d.period_partial_note, 'warn'));
   }
 
-  kHost.replaceWith(kpiRow([
+  const PERF_TILES = [
     { key: 'perf-drivers', label: 'Active drivers', value: fmt(s?.drivers ?? 0),
       sub: `accepted at least one booking this ${L}` },
     { key: 'perf-jobs', label: 'Jobs done', value: fmt(s?.completed ?? 0),
@@ -380,7 +407,30 @@ export async function renderPerformance(root, periodParam) {
       sub: `of ${fmt(d.movement.tested)} with enough history to compare` },
     { key: 'perf-bar', label: 'The bar', value: `${dec(d.movement.threshold, 1)}σ`,
       sub: `one-in-twenty, spread across ${fmt(d.movement.tested)} drivers` },
-  ]));
+  ];
+  if (ak) {
+    kHost.remove();
+    const none = `nobody accepted work in ${periodLabel(d.period, grain)}`;
+    const at = d.periods.findIndex((x) => x.period === d.period);
+    const prev = d.period_complete && at > 0 ? [...d.periods.slice(0, at)].reverse().find((x) => x.complete) : null;
+    const dl = (now, then, dd) => (prev && now != null && then != null
+      ? { value: Number(now) - Number(then), kind: 'change', d: dd,
+        of: `on ${grain === 'month' ? '' : 'the '}${periodLabel(prev.period, grain)}` } : null);
+    const DELTA = { 'perf-jobs': dl(s?.completed, prev?.completed, 0), 'perf-value': dl(s?.value, prev?.value, 2),
+      'perf-pace': dl(s?.intensity_median, prev?.intensity_median, 1) };
+    const list = PERF_TILES.filter((x) => !(s && s.drivers && x.key === 'perf-drivers'))
+      .map((x) => ((!s || !s.drivers) && ['perf-drivers', 'perf-jobs', 'perf-pace'].includes(x.key)
+        ? { label: x.label, key: x.key, na: none }
+        : x.value === 'not measured' ? { label: x.label, key: x.key, na: x.sub }
+          /* "Changed 0" over nobody tested is not a count of nobody changing:
+             with no one's record long enough to compare, it was not measured. */
+          : x.key === 'perf-moved' && !d.movement.tested ? { label: x.label, key: x.key, hero: true,
+            na: 'nobody active in this period has enough of their own record to be compared with yet' }
+          : x.key === 'perf-moved' ? { ...x, hero: true }
+            : DELTA[x.key] ? { ...x, delta: DELTA[x.key] } : x));
+    glance(AKB.tilesHost, bandTiles(list).tiles);
+    perfScatter(scP.body, d);
+  } else kHost.replaceWith(kpiRow(PERF_TILES));
 
   moversPanel(mv.body, d);
   rankTable(jb.body, d.rows, 'jobs', d);
@@ -392,7 +442,8 @@ export async function renderPerformance(root, periodParam) {
   const series = d.periods.map((p) => ({
     period: periodShort(p.period, grain),
     iso: p.period,
-    median: p.jobs_median || 0,
+    median: ak && p.jobs_median == null ? null : (p.jobs_median || 0),
+    none: ak && p.jobs_median == null,
     drivers: p.drivers || 0,
     /* The period in progress is drawn as unfinished (hollow in the old skin,
        a hatch in its own colour under Arkiv), the same way it is on a
@@ -405,6 +456,7 @@ export async function renderPerformance(root, periodParam) {
   }));
   gapBars(trend.body, series, {
     x: 'period', y: 'median', label: 'jobs for the middle driver',
+    ...(ak ? { gapKey: 'none', gapLabel: 'nobody worked this period' } : {}),
     inProgress: false,
     onClick: (row) => { location.hash = href('performance', row.iso, null, { grain }).slice(1); },
     aria: `Jobs done by the middle driver each ${L}`,
@@ -420,6 +472,14 @@ export async function renderPerformance(root, periodParam) {
     + `from ${fmt(done[0]?.drivers ?? 0)} to ${fmt(done[done.length - 1]?.drivers ?? 0)} `
     + `over the ${countOf(done.length, 'finished ' + L)} here, and a total would move with it — `
     + 'which would be read as every driver improving. Click a bar to rank that period.'));
+  if (ak) {
+    /* Active drivers per period as its own small chart, never a second axis
+       on the median's. */
+    const box = el('div');
+    trend.body.append(el('h4', 'sub', `Active drivers, ${L} by ${L}`), box);
+    gapBars(box, series.map((x) => ({ ...x, n: x.drivers })), { x: 'period', y: 'n', label: 'active drivers',
+      inProgress: false, aria: `Drivers who accepted work each ${L}` });
+  }
 
   const how = panel('How to read this', 'Every rule here is measured on this fleet, not assumed');
   root.append(how.panel);
@@ -443,4 +503,41 @@ export async function renderPerformance(root, periodParam) {
     + 'Revenue page and on each driver’s Earnings tab.');
   how.body.innerHTML = '';
   how.body.append(ul);
+  if (ak) perfAbsence(root, d, grain);
+}
+
+/* ── #performance under the page contract ────────────────────────────────── */
+function perfScatter(host, d) {
+  const rows = (d.rows || []).filter((r) => r.value_rankable && r.value != null && r.completed != null);
+  if (!rows.length) { host.append(note('No driver in this period has enough priced trips to place on value.')); return; }
+  const box = el('div'); host.append(box);
+  scatter(box, rows.map((r) => ({ ...r, value: Number(r.value), completed: Number(r.completed) })), {
+    x: 'completed', y: 'value', label: 'driver_name', xLabel: 'jobs done', yLabel: 'trip value',
+    yFmt: (v) => money(v), xFmt: (v) => fmt(v),
+    onClick: (r) => { if (r.driver_ext_id) location.hash = href('driver', r.driver_ext_id, 'record'); } });
+  const out = (d.rows || []).length - rows.length;
+  host.append(el('p', 'cap', `${countOf(rows.length, 'driver')} whose trips are priced enough to place`
+    + (out ? `; ${fmt(out)} are on the jobs table with the reason they are not on value` : '') + '.'));
+}
+function perfAbsence(root, d, grain) {
+  const R = d.rows || [];
+  const noUsual = R.filter((r) => r.z == null);
+  const why = new Map();
+  noUsual.forEach((r) => why.set(r.no_verdict || 'no verdict given', (why.get(r.no_verdict || 'no verdict given') || 0) + 1));
+  const s = d.summary || {};
+  const dropped = R.reduce((a, r) => a + (Number(r.dropped) || 0), 0);
+  const limbo = s.accepted != null && s.completed != null ? Number(s.accepted) - Number(s.completed) - dropped : null;
+  const gate = d.rate_gates?.show ?? 30;
+  const under = R.filter((r) => r.rates?.absent).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'A usual to compare against', hl: noUsual.length > 0, fig: noUsual.length ? `${fmt(noUsual.length)} of ${fmt(R.length)}` : null, none: 'Everyone has one',
+      why: noUsual.length ? [...why.entries()].map(([w, n]) => `${fmt(n)} — ${w}`).join('; ') : 'Every active driver has enough history to compare.' },
+    { label: 'Accepted, then neither done nor dropped', fig: limbo != null && limbo > 0 ? fmt(limbo) : null, none: limbo == null ? 'Not measured' : 'None',
+      why: limbo == null ? 'This period carries no accepted or completed count.'
+        : `${fmt(s.accepted)} accepted, ${fmt(s.completed)} done and ${fmt(dropped)} dropped by the driver; the rest ended some other way — the rider, or a channel that did not say.` },
+    { label: `A completion rate under ${gate} accepted`, fig: under ? `${fmt(under)} of ${fmt(R.length)}` : null, none: 'Every one shown',
+      why: `A percentage over fewer than ${gate} accepted bookings says more about the sample than the driver, so none is printed for them.` },
+  ]);
+  pageFoot({ colophon: [periodLabel(d.period, grain), `${fmt(R.length)} active`] }, root);
 }

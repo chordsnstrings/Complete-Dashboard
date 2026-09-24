@@ -59,7 +59,7 @@ if (want('finance')) {
     check('the section order is the plan\'s: 00, money in by day, trip value | payouts, how the rider paid, '
       + 'tiers, the payout, tips, the ledger each way, †', JSON.stringify(s.heads) === JSON.stringify(HEADS), JSON.stringify(s.heads));
     check('00 leads and the verdict is its statement (ruling 7)', s.first === 'cband' && s.vdctIn00, s.first);
-    const vfig = await txtOf(page, '#view .cband .vdct .vdct-n, #view .cband .vdct-fig');
+    const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
     check('no tile repeats the verdict\'s figure (ruling 7)', !Object.values(s.values).includes(vfig) || !vfig, `${vfig} ${JSON.stringify(s.values)}`);
     check('six tiles in one band, Money in the hero with the kpis answer\'s accounted total',
       s.glance === 6 && s.glanceBands === 1 && s.hero === 'Money in' && s.values['Money in'] === aed(K.accounted), JSON.stringify(s.values));

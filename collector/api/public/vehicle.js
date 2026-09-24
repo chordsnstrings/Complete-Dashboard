@@ -13,14 +13,14 @@
    platforms know the trips, the telematics box knows the movement, the fleet
    portal knows the papers. These pages put the three next to each other. */
 
-import { barChart, gapBars, areaChart, donut, hbars, empty } from './charts.js';
+import { barChart, gapBars, areaChart, donut, hbars, empty, scatter } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, money, pct, fmt, tripTime,
   custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, UBER_FARE_WHY,
   noneChosen, verdict, foldRows,
   trackerState, trackerSpeed, stillNote, alertRateFigure, splitAlerts,
-  segSourceLabel } from './ui.js';
-import { qAll, href, parseHash, currentGen, alive } from './data.js';
+  segSourceLabel, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, kpiTiles, kpiCols, sourceToken, swatch } from './ui.js';
+import { qAll, href, parseHash, currentGen, alive, windowLabel } from './data.js';
 import { membersOf } from './cohorts.js';
 import { dubaiDay } from './tz.js';
 import { makeMap, fitTo, renderJourney } from './map.js';
@@ -101,6 +101,7 @@ function identityCard(p) {
 
 /* ── tab: overview ───────────────────────────────────────────────────────── */
 async function tabOverview(root, plate, prof) {
+  if (contract()) return tabOverviewAk(root, plate, prof);
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
   const g1 = el('div', 'grid g23'); root.append(g1);
   const vol = panel('Trips and idle days', 'A bar per day. Days with a tracker fix but no trip are the ones that cost money.'); g1.append(vol.panel);
@@ -259,7 +260,292 @@ async function tabOverview(root, plate, prof) {
   else areaChart(rev.body, withRev.map((d) => ({ label: dayStr(d.day), v: +d.revenue })), { x: 'label', y: 'v', valueFmt: (v) => money(v) });
 }
 
+/* ── tab: overview, under the page contract ──────────────────────────────── */
+/* Plan §4 #vehicle/overview. The identity card and the tab bar stay first.
+   00: Money in the hero (the reconciled figure — fares on fare-basis channels
+   plus attributed payout, never both for one channel), Bookings, Distance,
+   the fare per priced km against the fleet's, harsh events per 100 km,
+   utilisation ABSENT WITH ITS TRUE REASON when no utilisation report covers
+   the car (it printed "—" over a caption describing the metric); then Fares,
+   Idle days, Completion. Drivers and Last fix are not tiles: the card carries
+   the drivers, and the platform count, the fixes in range and the hours
+   since the last fix join its line (the review's correction — the card had
+   neither). Then: fares day by day, a gap where nothing was booked; bookings
+   a day with the tracked-but-unbooked days as outlines, and the fixes as
+   their own chart (on one axis ~400 fixes flattened 11 bookings); who held
+   it, with each person's days and fares; by channel — bookings in channel
+   colour, service and payment as 100% bars over BOOKINGS only (their
+   "unknown" slice was the tracker's journeys); where its journeys stand;
+   when it works; harsh driving by kind and by person; a † band. */
+async function tabOverviewAk(root, plate, prof) {
+  const AKB = glanceBand(root, windowLabel());
+  loading(AKB.tilesHost);
+  const earnP = panel('Fares on its bookings, day by day', 'A column a day; a day with no booking is a gap, and today is drawn unfinished', 'veh-earned');
+  root.append(earnP.panel);
+  const g1 = el('div', 'grid g2'); root.append(g1);
+  const bookP = panel('Bookings, day by day', 'Outlined: a day the tracker saw the car and nothing was booked', 'veh-bookings');
+  const fixP = panel('What the tracker saw', 'Fixes a day, on their own axis', 'veh-fixes');
+  g1.append(bookP.panel, fixP.panel);
+  const g2 = el('div', 'grid g2'); root.append(g2);
+  const whoP = panel('Who held it', 'By bookings in this window, with their days and fares; a name opens that driver', 'veh-who');
+  const chanP = panel('What it did, by channel', 'Bookings on each channel; service and payment over bookings only', 'veh-chan');
+  g2.append(whoP.panel, chanP.panel);
+  const g3 = el('div', 'grid g2'); root.append(g3);
+  const verdP = panel('Where its journeys stand', 'Seat-occupancy journeys by what the matcher decided, whole window', 'veh-verdicts');
+  const hourP = panel('When it works', 'Trip records by the Dubai hour they were requested', 'veh-hours');
+  g3.append(verdP.panel, hourP.panel);
+  const g4 = el('div', 'grid g2'); root.append(g4);
+  const kindP = panel('Harsh driving, by kind', 'What the tracker flagged; its own faults kept apart', 'veh-kinds');
+  const personP = panel('Harsh driving, by person', 'Per 100 booked km on this car; the Safety tab has the detail', 'veh-persons');
+  g4.append(kindP.panel, personP.panel);
+  [earnP.body, bookP.body, fixP.body, whoP.body, chanP.body, verdP.body, hourP.body, kindP.body, personP.body].forEach(loading);
+
+  const [k, daily, dd, mix, fleet] = await Promise.all([
+    qAll('/api/vehicle/kpis', { plate }), qAll('/api/vehicle/daily', { plate }),
+    qAll('/api/vehicle/drivers-detail', { plate }), qAll('/api/vehicle/mix', { plate }),
+    qAll('/api/kpis').catch(() => null),
+  ]);
+  /* The two new fetches draw when they land and hold nothing up. */
+  const movP = qAll('/api/vehicle/movement', { plate }).catch(() => null);
+  const safP = qAll('/api/vehicle/safety', { plate }).catch(() => null);
+
+  vovTiles(AKB, k, fleet);
+  vovIdentityLine(root, k);
+  vovDays(earnP.body, bookP.body, fixP.body, daily, k);
+  vovWho(whoP.body, dd);
+  vovChannels(chanP.body, mix);
+  vovHours(hourP.body, mix);
+  const [mv, sf] = await Promise.all([movP, safP]);
+  vovVerdicts(verdP.body, mv);
+  vovSafety(kindP.body, personP.body, sf, plate);
+  vovAbsence(root, k, mv, dd);
+}
+const allNull = (k) => ['utilisation', 'hours_online', 'hours_on_trip', 'earnings_per_hour', 'trips_per_online_hour'].every((f) => k[f] == null);
+function vovTiles(AKB, k, fleet) {
+  AKB.tilesHost.innerHTML = '';
+  const a = alertRateFigure(k);
+  const known = (k.fixes || 0) > 0 || (k.trips || 0) > 0;
+  const fr = fleet?.revenue_per_km != null ? Number(fleet.revenue_per_km) : null;
+  const tiles = [
+    k.accounted
+      ? { label: 'Money in', value: money(k.accounted), hero: true,
+        sub: [k.accounted_statements ? `${money(k.accounted_statements)} in statement net` : null,
+          k.accounted_fares ? `${money(k.accounted_fares)} in fares` : null,
+          k.accounted_payouts ? `${money(k.accounted_payouts)} attributed from platform payouts` : null,
+        ].filter(Boolean).join(' · ') + ` · ${(k.accounted_platforms || []).map(sourceLabel).join(', ')}` }
+      : { label: 'Money in', hero: true, na: 'no fare and no payout reaches this vehicle in this range' },
+    { label: 'Bookings', value: fmt(k.trips), sub: `${fmt(k.days_earning ?? k.days_worked)} earning days`
+      + (k.telematics_journeys ? ` · ${fmt(k.telematics_journeys)} tracked journeys behind them` : '') },
+    k.measured_trips
+      ? { label: 'Distance', value: `${fmt(k.km)} km`, sub: `avg ${fmt(k.avg_km, 1)} km over ${fmt(k.measured_trips)} measured bookings` }
+      : { label: 'Distance', na: 'no booking on this vehicle carries a usable distance' },
+    k.revenue_per_km != null
+      ? { label: 'Fare per priced km', value: money(k.revenue_per_km),
+        sub: `over the ${fmt(k.priced_km)} km of the bookings that carry both a fare and a distance`,
+        ...(fr != null ? { delta: { value: Number(k.revenue_per_km) - fr, kind: 'gap', d: 2, of: `against the fleet's ${money(fr)}` } } : {}) }
+      : { label: 'Fare per priced km', na: 'no booking on this vehicle carries both a fare and a distance' },
+    a.measured
+      ? { label: 'Harsh events per 100 km', value: a.text, sub: `${fmt(k.alerts)} events` + (k.alert_coverage?.basis ? ` · ${k.alert_coverage.basis}` : '') }
+      : { label: 'Harsh events per 100 km', na: a.title || 'not measured in this window' },
+    k.utilisation != null
+      ? { label: 'Utilisation', value: pct(k.utilisation * 100, 1), sub: 'platform-reported, share of online time earning' }
+      : { label: 'Utilisation', na: allNull(k)
+        ? 'no utilisation report in this window covers this vehicle — utilisation, hours online, hours on trip, earnings per hour and trips per online hour are all empty for it'
+        : 'the utilisation report for this vehicle carries hours but no utilisation share' },
+    /* The Fares tile is shown as the classic skin shows it (accounted_fares),
+       under the caption the classic skin gives it. The plan found the caption
+       describes k.revenue's basis and asks for an owner ruling; that ruling
+       is not made here. */
+    k.priced_trips
+      ? { label: 'Fares', value: money(k.accounted_fares),
+        sub: `over ${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings (${pct(100 * k.priced_trips / k.trips, 0)}) that report one` }
+      : { label: 'Fares', na: 'no booking on this vehicle carries a fare' },
+    known ? { label: 'Idle days', value: fmt(k.idle_days), sub: 'reported a position, earned nothing' }
+      : { label: 'Idle days', na: 'no booking and no tracker fix in this window — nothing to judge either way' },
+    k.completion_pct != null
+      ? { label: 'Completion', value: pct(k.completion_pct, 1), sub: `${fmt(k.completed)} of ${fmt(k.outcome_n)} bookings whose platform reports an outcome` }
+      : { label: 'Completion', na: 'no platform on this vehicle reports an outcome' },
+  ];
+  /* Two rows, as the plan lays them out: the six that say what the car did,
+     then Fares, Idle days and Completion. */
+  const t = bandTiles(tiles).tiles;
+  /* Five, not the plan's six, in the first row: the hero spans two of the
+     band's six columns, so a sixth tile wrapped onto a line of its own —
+     Utilisation, alone, under its reason. It opens the second row instead. */
+  glance(AKB.tilesHost, t.slice(0, 5));
+  AKB.band.querySelector('.vov-row2')?.remove();
+  bandSecondRow(AKB, t.slice(5), 'vov-row2', null);
+}
+/* The card's line gains what the two dropped tiles carried and it did not. */
+function vovIdentityLine(root, k) {
+  const facts = root.parentElement?.querySelector('.idcard .idfacts');
+  if (!facts) return;
+  const x = el('span');
+  x.className = 'vov-range';
+  x.innerHTML = `<b>In range</b> ${fmt(k.fixes)} fixes${k.hours_since_fix != null ? `, the last ${fmt(k.hours_since_fix, 1)} h ago` : ''}`
+    + ` · ${countOf(k.drivers || 0, 'driver')} across ${countOf(k.platforms || 0, 'platform')}`;
+  facts.append(x);
+}
+function vovDays(earnHost, bookHost, fixHost, daily, k) {
+  const byDay = new Map(daily.map((d) => [String(d.day).slice(0, 10), d]));
+  const keys = daily.map((d) => String(d.day).slice(0, 10)).sort();
+  if (!keys.length) { [earnHost, bookHost, fixHost].forEach((h) => empty(h, 'Nothing on this vehicle in this window')); return; }
+  const series = [];
+  for (let t = Date.parse(`${keys[0]}T12:00:00Z`); t <= Date.parse(`${keys[keys.length - 1]}T12:00:00Z`); t += 864e5) {
+    const key = dubaiDay(new Date(t));
+    const d = byDay.get(key);
+    const trips = d ? +d.trips || 0 : 0;
+    const fixes = d ? +d.fixes || 0 : 0;
+    series.push({ d: key, label: dayStr(key), trips, fixes, revenue: d && d.revenue != null ? +d.revenue : 0,
+      nobook: !trips, idle: !trips && fixes > 0, none: !d });
+  }
+  earnHost.innerHTML = ''; bookHost.innerHTML = ''; fixHost.innerHTML = '';
+  const e = el('div'); earnHost.append(e);
+  gapBars(e, series, { x: 'd', y: 'revenue', label: 'fares', gapKey: 'nobook', gapLabel: 'no booking this day',
+    valueFmt: (v) => money(v), color: '--mk-fill', onClick: (r) => { location.hash = href('day', r.d); } });
+  const priced = series.filter((r) => r.revenue > 0);
+  if (priced.length) {
+    const best = priced.reduce((a, r) => (r.revenue > a.revenue ? r : a), priced[0]);
+    const last = priced[priced.length - 1];
+    /* /api/vehicle/daily's revenue is every booking's fare on EVERY channel
+       (sum(price) FILTER has_fare) — Uber's included, though Uber is counted
+       in Money in by its payout. The first draft of this caption said a
+       channel paid by the week "puts its money in Money in, not here"; on
+       production Uber's fares were most of this chart. The caption now says
+       what the bars are, and that the Fares tile is on another basis — the
+       plan's open question, not ruled here. */
+    const sum = series.reduce((a, r) => a + r.revenue, 0);
+    earnHost.append(el('p', 'cap', `The best day was ${dayStr(best.d)}, ${money(best.revenue)}; the last with a fare, ${dayStr(last.d)}, ${money(last.revenue)}. `
+      + `These are the fares riders were charged on every channel, before commission — ${money(sum)} over the window. They are not Money in, which counts a channel believed on its payout by that payout; `
+      + `and the Fares tile counts only the channels believed on their fares${k?.accounted_fares != null ? ` (${money(k.accounted_fares)})` : ''} — which of the two that tile should print is not yet ruled.`));
+  } else earnHost.append(el('p', 'cap', 'No booking on this vehicle in this window reports a fare.'));
+  const b = el('div'); bookHost.append(b);
+  gapBars(b, series, { x: 'd', y: 'trips', label: 'bookings', gapKey: 'idle', gapLabel: 'the tracker saw it and nothing was booked',
+    color: '--mk-fill', onClick: (r) => { location.hash = href('day', r.d); } });
+  const idle = series.filter((r) => r.idle);
+  if (idle.length) {
+    const c = el('p', 'cap');
+    c.innerHTML = `${countOf(idle.length, 'day')} with a tracker fix and no booking on any platform: `
+      + idle.map((r) => `<a class="lnk" href="${href('day', r.d)}">${esc(dayStr(r.d))}</a>`).join(', ')
+      + '. That is the figure the Idle days tile counts.';
+    bookHost.append(c);
+  }
+  const f = el('div'); fixHost.append(f);
+  gapBars(f, series, { x: 'd', y: 'fixes', label: 'tracker fixes', gapKey: 'none', gapLabel: 'no record for this vehicle on this day',
+    color: sourceToken('fms') || '--mk-fill' });
+  fixHost.append(el('p', 'cap', `${fmt(series.reduce((a, r) => a + r.fixes, 0))} fixes over ${countOf(series.filter((r) => r.fixes).length, 'day')}; `
+    + 'every one with a position is on the Movement tab.'));
+}
+function vovWho(host, dd) {
+  host.innerHTML = '';
+  if (!dd.totals.length) { host.append(note('No custody records for this vehicle in this window.')); return; }
+  const box = el('div'); host.append(box);
+  hbars(box, dd.totals.slice(0, 8).map((t) => ({ label: t.driver_name || t.driver_ext_id, n: t.trips, t })),
+    { signed: false, color: '--mk-fill',
+      shareOf: (x) => `${countOf(x.t.days || 0, 'day')}${x.t.revenue ? ` · ${money(x.t.revenue)}` : ''}`,
+      onClick: (x) => { if (x.t.driver_ext_id) location.hash = href('driver', x.t.driver_ext_id); } });
+  if (dd.totals.length > 8) host.append(el('p', 'cap', `The 8 who held it most of ${fmt(dd.totals.length)}; the Drivers tab has everyone.`));
+}
+function vovChannels(host, mix) {
+  host.innerHTML = '';
+  const plat = (mix.platform || []).filter((r) => (+r.bookings || 0) > 0);
+  const tracked = (mix.platform || []).filter((r) => !(+r.bookings > 0)).reduce((a, r) => a + (+r.n || 0), 0);
+  if (!plat.length) { host.append(note('No booking on any channel in this window.')); return; }
+  const box = el('div'); host.append(box);
+  hbars(box, plat.map((r) => ({ label: sourceLabel(r.label), n: +r.bookings, plat: r.label, fares: r.revenue })), {
+    signed: false, colorFor: (x) => sourceToken(x.plat) || '--mk-fill',
+    shareOf: (x) => (x.fares != null && +x.fares > 0 ? money(x.fares) : 'no fare') });
+  if (tracked) host.append(el('p', 'cap', `${countOf(tracked, 'tracker journey')} on this car ${tracked === 1 ? 'is' : 'are'} not bookings and ${tracked === 1 ? 'is' : 'are'} counted on no channel here.`));
+  for (const [title, rows] of [['Service', mix.product || []], ['Payment', mix.payment || []]]) {
+    const r2 = rows.filter((r) => (+r.bookings || 0) > 0).map((r) => ({ label: r.label === 'unknown' ? 'not reported' : r.label, n: +r.bookings }));
+    host.append(el('h4', 'sub', title));
+    const b = el('div'); host.append(b);
+    if (r2.length) donut(b, r2, { as: 'bar100' });
+    else b.append(note(`No booking carries a ${title.toLowerCase()} value.`));
+  }
+}
+function vovHours(host, mix) {
+  host.innerHTML = '';
+  const hs = mix.hours || [];
+  if (!hs.length) { empty(host, 'No trip record in this window'); return; }
+  const by = new Map(hs.map((h) => [+h.h, +h.trips || 0]));
+  const box = el('div'); host.append(box);
+  barChart(box, Array.from({ length: 24 }, (_, h) => ({ h: String(h).padStart(2, '0'), n: by.get(h) || 0 })),
+    { x: 'h', y: 'n', label: 'trip records', color: '--mk-fill' });
+  host.append(el('p', 'cap', 'Bookings and the tracker\u2019s journeys together — this count does not split them.'));
+}
+function vovVerdicts(host, mv) {
+  host.innerHTML = '';
+  const bv = mv?.by_verdict || [];
+  if (!mv) { host.append(note('The movement record could not be read.')); return; }
+  if (!bv.length) { host.append(note('No seat-occupancy journey on this vehicle in this window.')); return; }
+  const box = el('div'); host.append(box);
+  hbars(box, bv.map((r) => ({ label: String(r.verdict).replace(/_/g, ' '), n: +r.n || 0, km: r.km, min: r.minutes, v: r.verdict })), {
+    signed: false, color: '--mk-fill', shareOf: (x) => `${fmt(x.km)} km · ${fmt(x.min)} min`,
+    onClick: (x) => { location.hash = href('segments', 'verdict', x.v); } });
+  if (mv.dedupe_rule) host.append(el('p', 'cap', esc(mv.dedupe_rule)));
+}
+function vovSafety(kindHost, personHost, sf, plate) {
+  kindHost.innerHTML = ''; personHost.innerHTML = '';
+  if (!sf) { kindHost.append(note('The safety record could not be read.')); personHost.append(note('The safety record could not be read.')); return; }
+  const types = sf.by_type || [];
+  if (!types.length) kindHost.append(note('No harsh-driving event on this vehicle in this window.'));
+  else {
+    const box = el('div'); kindHost.append(box);
+    hbars(box, types.map((r) => ({ label: r.device === true ? `${r.alert_type} (tracker fault)` : r.alert_type, n: +r.n || 0, device: r.device === true })), {
+      signed: false, colorFor: (x) => (x.device ? '--ink' : (sourceToken('fms') || '--mk-fill')),
+      onClick: () => { location.hash = href('vehicle', plate, 'safety'); } });
+  }
+  /* Rated as #safety rates people: over at least 200 booked km, worst
+     first. On production one person here read 287.7 per 100 km over 57 km,
+     drawn longest of three — a rate over so little means nothing, and
+     #safety would not have rated it. They are counted in words below. */
+  const KM = 200;
+  const all = (sf.by_driver || []).filter((r) => r.per_100km != null && r.driver_ext_id);
+  const ppl = all.filter((r) => +(r.booked_km ?? r.km) >= KM).sort((a, b) => +b.per_100km - +a.per_100km);
+  const under = all.length - ppl.length;
+  if (!ppl.length) personHost.append(note(all.length ? `Nobody on this car drove ${fmt(KM)} booked km or more, so nobody is rated — a rate over so little means nothing.`
+    : 'No person on this car has a rate to show — no driving event, or no booked distance to rate it over.'));
+  else {
+    const box = el('div'); personHost.append(box);
+    hbars(box, ppl.map((r) => ({ label: r.driver_name, n: +r.per_100km, id: r.driver_ext_id, km: r.booked_km ?? r.km })), {
+      signed: false, color: '--mk-fill', valueFmt: (v) => fmt(v, 1), shareOf: (x) => `over ${fmt(x.km)} km`,
+      onClick: () => { location.hash = href('vehicle', plate, 'safety'); } });
+  }
+  if (under && ppl.length) personHost.append(el('p', 'cap', `${countOf(under, 'person', 'people')} under ${fmt(KM)} booked km on this car ${under === 1 ? 'is' : 'are'} not rated; the Safety tab lists everyone.`));
+}
+function vovAbsence(root, k, mv, dd) {
+  /* `partial` is the reconciler's word for a journey whose telemetry has a
+     hole, so it cannot be judged (api/server.js); counted once per ride from
+     by_verdict, not from the capped segment list. */
+  const bv = mv?.by_verdict || [];
+  const allJ = bv.reduce((a, r) => a + (+r.n || 0), 0);
+  const cut = +(bv.find((r) => r.verdict === 'partial')?.n || 0);
+  /* Utilisation is a † cell only when it IS absent: a car the report covers
+     prints its share in the band, and a cell saying "not reported" beside it
+     would be a reason that is not the true one. */
+  const cells = [
+    ...(k.utilisation == null ? [{ label: 'Utilisation', fig: null, none: 'Not reported',
+      why: allNull(k) ? 'No utilisation report in this window covers this vehicle: utilisation, hours online, hours on trip, earnings per hour and trips per online hour are all empty for it.'
+        : 'The utilisation report carries some hours for this vehicle and no utilisation share.' }] : []),
+    { label: 'A channel statement for this car', fig: null, none: k.accounted_statements ? 'Counted' : 'None',
+      why: k.accounted_statements ? `${money(k.accounted_statements)} of statement net reaches this car and is in Money in.`
+        : 'No channel\u2019s statement net reaches this car in this window; its Money in is fares and attributed payouts.' },
+    ...(k.drivers ? [{ label: 'Whether its drivers are that many people', fig: null, none: `${fmt(k.drivers)} counted`,
+      why: `Counted through the person register: accounts it joins are one person, and two it has not joined count twice. The custody list holds ${countOf((dd.totals || []).length, 'account')}.` }] : []),
+  ];
+  if (allJ) cells.push({ label: 'Journeys with a hole in the telemetry', hl: cut > 0, fig: cut ? `${fmt(cut)} of ${fmt(allJ)}` : null, none: 'None',
+    why: cut ? 'Their telemetry has a hole, so the matcher could not judge them either way.' : 'Every seat-occupancy journey on this car had unbroken telemetry.' });
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, cells);
+  pageFoot({ colophon: [windowLabel(), 'one vehicle'] }, root);
+}
+
 /* ── tab: drivers ────────────────────────────────────────────────────────── */
+/* Under the page contract (plan §4 #vehicle/drivers): restyled only — both
+   custody tables, every column and sort kept; a platform is a swatch beside
+   an ink label, never coloured text. */
+const chanCell = (p) => (contract() ? `<span class="pchip">${swatch(p)}${esc(sourceLabel(p))}</span>` : esc(sourceLabel(p)));
 async function tabDrivers(root, plate) {
   const tot = panel('Who has held this car', 'Totals for this window. Click a name to open that driver.'); root.append(tot.panel);
   const tl = panel('Who held it, day by day', 'More than one row on a day means the car changed hands.'); root.append(tl.panel);
@@ -280,8 +566,10 @@ async function tabDrivers(root, plate) {
       { label: 'Accounts', key: 'driver_ids',
         render: (r) => ((r.driver_ids || []).length > 1
           ? `<span title="${esc((r.driver_ids || []).join(', '))}">${fmt(r.driver_ids.length)}`
-            + ` <span class="dim">· ${esc((r.platforms || []).map(sourceLabel).join(', '))}</span></span>`
-          : `<span class="dim">${esc((r.platforms || []).map(sourceLabel).join(', ')) || '1'}</span>`) },
+            + (contract() ? ` · ${(r.platforms || []).map(chanCell).join(' ')}</span>`
+              : ` <span class="dim">· ${esc((r.platforms || []).map(sourceLabel).join(', '))}</span></span>`)
+          : contract() && (r.platforms || []).length ? (r.platforms || []).map(chanCell).join(' ')
+            : `<span class="dim">${esc((r.platforms || []).map(sourceLabel).join(', ')) || '1'}</span>`) },
       { label: 'Days', key: 'days', num: true },
       { label: 'As primary', key: 'primary_days', num: true },
       { label: 'Trips', key: 'trips', num: true },
@@ -300,7 +588,7 @@ async function tabDrivers(root, plate) {
     { label: 'Day', key: 'day', render: (r) => dayStr(r.day) },
     { label: 'Driver', key: 'driver_name',
       render: (r) => entity('driver', r.driver_ext_id, r.driver_name || r.driver_ext_id) },
-    { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
+    { label: 'Platform', key: 'platform', render: (r) => (contract() ? chanCell(r.platform) : sourceLabel(r.platform)) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
     { label: 'First', key: '_a', render: (r) => timeStr(r.first_trip_at) },
@@ -315,10 +603,21 @@ async function tabDrivers(root, plate) {
       `The 120 most recent of ${countOf(dd.days.length, 'day')} on which somebody held this `
       + 'vehicle. Sort by Day ascending to reach the earliest of them.'));
   }
+  if (contract()) pageFoot({ colophon: [windowLabel(), countOf(dd.totals.length, 'driver')] }, root);
 }
 
 /* ── tab: movement ───────────────────────────────────────────────────────── */
+/* Under the page contract (plan §4 #vehicle/movement): restyled only — the
+   map, the day picker and its ?day= address, the four day tiles, the verdict
+   bars and all three tables kept. The verdict bars go to the job token (a
+   verdict is not a channel); a verdict is an outline chip, and only
+   "unauthorized" keeps the negative token, as text; the seat and confidence
+   tags are outline chips. The map's line colours are map.js's and change
+   with #map. */
+const verdictChip = (v) => (v === 'unauthorized'
+  ? `<span class="pill" style="color:var(--sem-neg)">${esc(v)}</span>` : pill(v || 'unknown'));
 async function tabMovement(root, plate) {
+  const ak = contract();
   const ctl = el('div', 'toolbar');
   ctl.innerHTML = `<label class="cap" for="vDay">Replay a day</label>
     <select id="vDay" class="btn"></select>
@@ -373,7 +672,7 @@ async function tabMovement(root, plate) {
       trackerState, trackerSpeed,
       { label: 'Seat', key: 'seat_occupied', render: (r) => (r.seat_occupied == null
         ? '<span class="tag dim">not reported</span>'
-        : r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag">empty</span>') },
+        : r.seat_occupied ? (ak ? pill('occupied') : '<span class="tag ok">occupied</span>') : '<span class="tag">empty</span>') },
       { label: 'Ignition', key: 'ignition', render: (r) => (r.ignition == null ? '—' : r.ignition ? 'on' : 'off') },
       /* Six decimals, not sixteen — the same precision the parked-cluster
          table three panels down uses, so two tables on one page stop printing
@@ -426,7 +725,21 @@ async function tabMovement(root, plate) {
     // Headed with the day, because these four tiles are one date and the four
     // panels below them are the whole window.
     stat.append(el('p', 'cap', `Everything in these four tiles is ${dateStr(`${day}T12:00:00`)} alone.`));
-    stat.append(kpiRow([
+    /* Under the page contract a tile that could not be measured is ABSENT
+       WITH ITS REASON, not a bare dash: "With passenger" when no fix carried
+       a seat reading, and "Driver" when no custody record names anybody that
+       day (/api/map/journey reads vehicle_driver_day). Untoned. A reason
+       prints in the value slot only on a glance tile (kpiTile gates `na` on
+       the flag), so the row is one — with no hero: it is not the 00 band. */
+    const dayRow = (tiles) => {
+      if (!ak) return kpiRow(tiles);
+      const row = el('div', 'kpis glance');
+      row.innerHTML = kpiTiles(bandTiles(tiles.map((t) => (t.label === 'Driver' && !j.driver
+        ? { label: 'Driver', na: 'no custody record names who held the car that day' } : t))).tiles
+        .map((t) => ({ ...t, glance: true, hero: false })));
+      return row;
+    };
+    stat.append(dayRow([
       { label: 'Fixes with a position', value: fmt(j.fixes),
         sub: 'five-minute samples that carry coordinates — the picker above counts stored rows, '
           + 'including any with no satellite lock' },
@@ -469,7 +782,8 @@ async function tabMovement(root, plate) {
   else {
     /* Each bar counts a ride once across providers (the server's rule, stated
        under the bars); each provider's own segment count follows. */
-    hbars(verd.body, mv.by_verdict.map((v) => ({ label: v.verdict.replace(/_/g, ' '), n: v.n })), { label: 'label', value: 'n', seq: true });
+    hbars(verd.body, mv.by_verdict.map((v) => ({ label: v.verdict.replace(/_/g, ' '), n: v.n })),
+      ak ? { label: 'label', value: 'n', signed: false, color: '--mk-fill' } : { label: 'label', value: 'n', seq: true });
     const un = mv.by_verdict.find((v) => v.verdict === 'unauthorized');
     if (un) {
       const bs = un.by_source || {};
@@ -536,8 +850,8 @@ async function tabMovement(root, plate) {
     { label: 'Minutes', key: 'duration_min', num: true },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
     { label: 'Top speed', key: 'top_speed', num: true, render: (r) => (r.top_speed ? `${fmt(r.top_speed)} km/h` : '—') },
-    { label: 'Verdict', key: 'verdict', render: (r) => pill(r.verdict || 'unknown',
-      r.verdict === 'unauthorized' ? 'bad' : r.verdict === 'authorized' ? 'ok' : 'warn') },
+    { label: 'Verdict', key: 'verdict', render: (r) => (ak ? verdictChip(r.verdict) : pill(r.verdict || 'unknown',
+      r.verdict === 'unauthorized' ? 'bad' : r.verdict === 'authorized' ? 'ok' : 'warn')) },
     /* The reason. Without it a verdict is an assertion, and this table was
        strictly poorer than the SAME rows on #segments, which has carried the
        reason and the unreadable-channel list since it was built. */
@@ -553,7 +867,7 @@ async function tabMovement(root, plate) {
       render: (r) => {
         if (!r.low_confidence) return '<span class="tag dim">ok</span>';
         const out = asList(r.unavailable_sources).map(sourceLabel);
-        return `<span class="tag warn" title="${esc(out.length
+        return `<span class="${ak ? 'pill' : 'tag warn'}" title="${esc(out.length
           ? `unreadable when this was judged: ${out.join(', ')}`
           : 'a revenue channel was unreadable when this was judged')}">blind${
           out.length ? ` · ${esc(out.join(', '))}` : ''}</span>`;
@@ -564,6 +878,7 @@ async function tabMovement(root, plate) {
     + `<a href="${href('segments', 'plate', plate)}">All of them, filterable by verdict</a>.`));
   else if (mv.segments.length) seg.body.append(el('p', 'cap',
     `<a href="${href('segments', 'plate', plate)}">The same periods with the verdict filter and the evidence trail</a>.`));
+  if (ak) pageFoot({ colophon: [windowLabel(), countOf(mv.days.length, 'replayable day')] }, root);
 }
 
 /* ── tab: safety ─────────────────────────────────────────────────────────── */
@@ -580,8 +895,14 @@ async function tabMovement(root, plate) {
    They are different quantities and adding them would produce a third that
    means nothing — so the page shows both, says which is which, and shows what
    share of the bookings each one covers. */
+/* Under the page contract (plan §4 #vehicle/earnings): all tiles, both
+   tables and both charts kept — the tiles as the 00 band, untoned (a fare
+   coverage is a level), exact money; a channel is a swatch and an ink label,
+   never a pill; the two day-by-day charts stay two charts. */
 async function tabEarnings(root, plate) {
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
   const chP = panel('By channel', 'Fares are measured per trip; attributed pay is a share of a driver payout'); g.append(chP.panel);
   const drvP = panel('By driver', 'Whose payout, and how much of it this vehicle earned'); g.append(drvP.panel);
@@ -591,7 +912,7 @@ async function tabEarnings(root, plate) {
   const e = await qAll('/api/vehicle/earnings', { plate });
   const t = e.totals;
 
-  kpiHost.replaceWith(kpiRow([
+  const EARN_TILES = [
     /* Which channels' payouts are IN this figure, and which are deliberately
        out. `attributed_earnings` and `accounted_payouts` differ by exactly
        Yango's payout, because Yango prices per trip AND pays out — counting
@@ -610,7 +931,19 @@ async function tabEarnings(root, plate) {
       sub: `${fmt(t.priced_platforms)} of ${fmt(t.platforms)} channels price per trip`,
       tone: t.fare_coverage_pct == null ? null : t.fare_coverage_pct >= 80 ? 'good' : t.fare_coverage_pct >= 30 ? 'warn' : 'critical' },
     { label: 'Drivers paid', value: fmt(e.attributed.length), sub: 'contributed pay to this asset' },
-  ]));
+  ];
+  if (ak) {
+    kpiHost.remove();
+    /* "AED 0.00" is not a measurement when nothing was there to measure: no
+       payout overlapping this car, or no booking carrying a fare. Those two
+       tiles go ABSENT with the reason the tables below give in words. */
+    const why = {
+      'Attributed pay': !e.attributed.length && 'no driver payout overlaps this vehicle in this window — its channels price per trip, or the payouts for these dates are not collected yet',
+      'Measured fares': !t.priced_bookings && `none of its ${fmt(t.bookings)} bookings reports a fare`,
+      'Fare coverage': t.fare_coverage_pct == null && 'no booking on this vehicle reports a fare',
+    };
+    glance(AKB.tilesHost, bandTiles(EARN_TILES.map((x) => (why[x.label] ? { label: x.label, na: why[x.label], ...(x.label === 'Attributed pay' ? { hero: true } : {}) } : x))).tiles);
+  } else kpiHost.replaceWith(kpiRow(EARN_TILES));
 
   /* The sentence that stops the two columns being read as one. Without it the
      smaller number looks like the answer and the larger like a duplicate. */
@@ -624,7 +957,7 @@ async function tabEarnings(root, plate) {
   }));
   if (!byChannel.length) chP.body.append(note('No bookings for this vehicle in this window.'));
   else chP.body.append(tableFrom(byChannel, [
-    { label: 'Channel', key: 'platform', render: (r) => pill(sourceLabel(r.platform)) },
+    { label: 'Channel', key: 'platform', render: (r) => (ak ? `<span class="pchip">${swatch(r.platform)}${esc(sourceLabel(r.platform))}</span>` : pill(sourceLabel(r.platform))) },
     { label: 'Bookings', key: 'bookings', num: true },
     { label: 'Measured fares', key: 'fares', num: true,
       render: (r) => (r.fares != null ? money(r.fares) : '—') },
@@ -642,7 +975,7 @@ async function tabEarnings(root, plate) {
   } else {
     drvP.body.append(tableFrom(e.attributed, [
       { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
-      { label: 'Channel', key: 'platform', render: (r) => pill(sourceLabel(r.platform)) },
+      { label: 'Channel', key: 'platform', render: (r) => (ak ? `<span class="pchip">${swatch(r.platform)}${esc(sourceLabel(r.platform))}</span>` : pill(sourceLabel(r.platform))) },
       { label: 'Attributed', key: 'attributed', num: true, render: (r) => money(r.attributed) },
       /* Named for the period it counts. "Trips here 288" was the trip count of
          the whole PAYOUT PERIOD, not of the window — the Drivers tab said 171
@@ -659,7 +992,7 @@ async function tabEarnings(root, plate) {
          so the share is the weakest kind of inference this page makes. Marking
          it is the difference between a number and a number you can act on. */
       { label: 'Basis', key: 'any_even_split',
-        render: (r) => pill(r.any_even_split ? 'even split' : 'by trips', r.any_even_split ? 'warn' : 'ok') },
+        render: (r) => pill(r.any_even_split ? 'even split' : 'by trips', ak ? null : r.any_even_split ? 'warn' : 'ok') },
     ], { compact: true, sortable: true, sortId: 'vattr', defaultSort: { key: 'attributed', dir: 'desc' } }));
     drvP.body.append(el('p', 'cap',
       'Attributed pay is a share of that driver’s payout for the period, split across the vehicles they '
@@ -677,13 +1010,21 @@ async function tabEarnings(root, plate) {
     const a = el('div'); const b = el('div');
     dayP.body.append(el('p', 'cap', 'Attributed pay — a share of driver payouts, by day'), a,
       el('p', 'cap', 'Measured fares — what riders paid on this vehicle’s own trips'), b);
-    areaChart(a, e.daily, { x: 'day', y: 'attributed', valueFmt: (v) => money(v) });
-    barChart(b, e.daily, { x: 'day', y: 'fares', label: 'Measured fares', valueFmt: (v) => money(v) });
+    areaChart(a, e.daily, { x: 'day', y: 'attributed', valueFmt: (v) => money(v), ...(ak ? { color: '--mk-fill' } : {}) });
+    barChart(b, e.daily, { x: 'day', y: 'fares', label: 'Measured fares', valueFmt: (v) => money(v), ...(ak ? { color: '--mk-fill' } : {}) });
   }
+  if (ak) pageFoot({ colophon: [windowLabel(), countOf(e.by_platform.length, 'channel')] }, root);
 }
 
+/* Under the page contract (plan §4 #vehicle/safety): the tiles as the 00
+   band, the per-100-km rate set against the fleet's (a worded delta, up is
+   worse); the event bars in the FMS/InfoTrack identity — every event comes
+   from that alert feed — with the tracker's own faults in ink, kept apart;
+   the per-driver and recent-event tables unchanged. */
 async function tabSafety(root, plate) {
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
   const types = panel('Event types', 'What the tracker flagged'); g.append(types.panel);
   const drv = panel('Which driver was holding it', 'The person who held the car on the day of the event'); g.append(drv.panel);
@@ -691,13 +1032,14 @@ async function tabSafety(root, plate) {
   const recent = panel('Recent events', 'Newest first, with location where the device reported one'); root.append(recent.panel);
   [types.body, drv.body, line.body, recent.body].forEach(loading);
 
-  const [sf, k] = await Promise.all([qAll('/api/vehicle/safety', { plate }), qAll('/api/vehicle/kpis', { plate })]);
+  const [sf, k, fleetK] = await Promise.all([qAll('/api/vehicle/safety', { plate }), qAll('/api/vehicle/kpis', { plate }),
+    ak ? qAll('/api/kpis').catch(() => null) : null]);
   /* Split, not summed. See ui.js:splitAlerts — the server marks which types are
      the tracker's own fault and this page must not count them as driving. */
   const ev = splitAlerts(sf.by_type || []);
   const total = ev.total;
 
-  kpiHost.replaceWith(kpiRow([
+  const SAFE_TILES = [
     /* alert_km, not km. The events counted here happened on the days the alert
        feed was up; the vehicle's km runs to the edge of the window whether the
        feed was up or not, and "1,436 events over 12,400 km" put those two
@@ -735,7 +1077,17 @@ async function tabSafety(root, plate) {
           : (ev.deviceN ? 'nobody — every event here is the tracker, not a driver'
             : 'no harsh-driving event to attribute') };
     })(),
-  ]));
+  ];
+  if (ak) {
+    kpiHost.remove();
+    const a = alertRateFigure(k);
+    const fr = fleetK?.alerts_per_100km != null ? Number(fleetK.alerts_per_100km) : null;
+    glance(AKB.tilesHost, bandTiles(SAFE_TILES.map((x) => {
+      if (x.label !== 'Per 100 km') return x;
+      if (!a.measured) return { label: x.label, na: a.title || 'not measured in this window' };
+      return { ...x, hero: true, ...(fr != null ? { delta: { value: a.value - fr, kind: 'gap', invert: true, d: 1, of: `against the fleet's ${fmt(fr, 1)}` } } : {}) };
+    })).tiles);
+  } else kpiHost.replaceWith(kpiRow(SAFE_TILES));
 
   types.body.innerHTML = '';
   if (!sf.by_type.length) types.body.append(note('No harsh-driving events for this vehicle in this window.'));
@@ -744,8 +1096,9 @@ async function tabSafety(root, plate) {
        drew Main Power Lost as its longest bar on a car whose tracker was
        dying — the biggest thing on the page being the one thing nobody did. */
     hbars(types.body, sf.by_type.map((r) => ({
-      label: r.device === true ? `${r.alert_type} (tracker fault)` : r.alert_type, n: r.n,
-    })), { label: 'label', value: 'n', seq: true });
+      label: r.device === true ? `${r.alert_type} (tracker fault)` : r.alert_type, n: r.n, device: r.device === true,
+    })), ak ? { label: 'label', value: 'n', signed: false, colorFor: (x) => (x.device ? '--ink' : (sourceToken('fms') || '--mk-fill')) }
+      : { label: 'label', value: 'n', seq: true });
     if (ev.deviceN) {
       types.body.append(el('p', 'cap',
         `${fmt(ev.deviceN)} of these ${fmt(ev.total)} events are the tracker reporting its own `
@@ -828,7 +1181,7 @@ async function tabSafety(root, plate) {
 
   line.body.innerHTML = '';
   if (!sf.daily.length) empty(line.body, 'No events in this range');
-  else barChart(line.body, sf.daily.map((d) => ({ label: dayStr(d.day), alerts: d.alerts })), { x: 'label', y: 'alerts', color: '--s2' });
+  else barChart(line.body, sf.daily.map((d) => ({ label: dayStr(d.day), alerts: d.alerts })), { x: 'label', y: 'alerts', color: ak ? (sourceToken('fms') || '--mk-fill') : '--s2' });
 
   recent.body.innerHTML = '';
   /* Columns that can never have a value are dropped rather than drawn as sixty
@@ -858,10 +1211,18 @@ async function tabSafety(root, plate) {
       + (sf.recent.length >= 100 ? ', which is itself the newest 100' : ''));
   }
   if (caps.length) recent.body.append(el('p', 'cap', `${caps.join(' — ')}.`));
+  if (ak) pageFoot({ colophon: [windowLabel(), `${fmt(ev.total)} alerts`] }, root);
 }
 
 /* ── tab: compliance ─────────────────────────────────────────────────────── */
+/* Under the page contract (plan §4 #vehicle/compliance): restyled only — the
+   documents table and its days-left sort, the specification and the photo
+   note kept. Days left is a word, as on #compliance: expired in the negative
+   colour with its minus, under 30 days in ink at weight (amber is not a
+   token) in an ink outline chip, the rest grey; the platform a swatch and
+   an ink label, its status an outline chip. */
 async function tabCompliance(root, plate, prof) {
+  const ak = contract();
   const p = panel('Documents', 'Everything with an expiry date attached to this vehicle'); root.append(p.panel);
   const docs = prof.documents || [];
   p.body.innerHTML = '';
@@ -870,11 +1231,13 @@ async function tabCompliance(root, plate, prof) {
   } else {
     p.body.append(tableFrom(docs, [
       { label: 'Document', key: 'doc_type' },
-      { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
-      { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', r.status === 'ACTIVE' ? 'ok' : 'warn') },
+      { label: 'Platform', key: 'platform', render: (r) => (ak ? chanCell(r.platform) : sourceLabel(r.platform)) },
+      { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', ak ? null : r.status === 'ACTIVE' ? 'ok' : 'warn') },
       { label: 'Expires', key: 'expires_at', render: (r) => dayStr(r.expires_at) },
       { label: 'Days left', key: 'days_left', num: true, render: (r) => (r.days_left == null ? '—'
-        : pill(r.days_left < 0 ? `expired ${Math.abs(r.days_left)}d ago` : `${r.days_left}d`, docTone(r.days_left))) },
+        : ak ? (r.days_left < 0 ? `<span style="color:var(--sem-neg);white-space:nowrap">expired · −${fmt(Math.abs(r.days_left))} d</span>`
+          : r.days_left < 30 ? pill(`${fmt(r.days_left)} d`) : `<span class="dim">${fmt(r.days_left)} d</span>`)
+          : pill(r.days_left < 0 ? `expired ${Math.abs(r.days_left)}d ago` : `${r.days_left}d`, docTone(r.days_left))) },
     ], { sortable: true, sortId: 'vdocs2', defaultSort: { key: 'days_left', dir: 'asc' } }));
     const soon = docs.filter((d) => d.days_left != null && d.days_left < 30);
     if (soon.length) p.body.append(el('p', 'cap',
@@ -915,10 +1278,15 @@ async function tabCompliance(root, plate, prof) {
     img.src = s.image_url;
     spec.body.append(img);
   }
+  if (ak) pageFoot({ colophon: ['documents and specification', countOf(docs.length, 'document')] }, root);
 }
 
 /* ── tab: trips ──────────────────────────────────────────────────────────── */
+/* Under the page contract (plan §4 #vehicle/trips): restyled only — paging,
+   columns, newest-first order and the trip links kept; the platform a swatch
+   and an ink label, the status an outline chip, fares exact. */
 async function tabTrips(root, plate) {
+  const ak = contract();
   const p = panel('Trip records', 'Every platform, newest first'); root.append(p.panel); loading(p.body);
   /* A page, not a ceiling — the twin of the driver trip ledger. The endpoint
      returns {rows, total, offset, truncated}, so the table can say how many of
@@ -940,12 +1308,12 @@ async function tabTrips(root, plate) {
     { label: 'Driver', key: 'driver_name', render: (r) => (r.driver_ext_id
       ? `<a class="lnk" href="${href('driver', r.driver_ext_id)}">${esc(r.driver_name || r.driver_ext_id)}</a>`
       : esc(r.driver_name || '—')) },
-    { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
+    { label: 'Platform', key: 'platform', render: (r) => (ak ? `<span class="pchip">${swatch(r.platform)}${esc(sourceLabel(r.platform))}</span>` : sourceLabel(r.platform)) },
     { label: 'From', key: 'pickup_addr' },
     { label: 'To', key: 'dropoff_addr' },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
     { label: 'Product', key: 'product' },
-    { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', /cancel/i.test(r.status || '') ? 'warn' : 'ok') },
+    { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', ak ? null : /cancel/i.test(r.status || '') ? 'warn' : 'ok') },
     { label: 'Fare', key: 'price', num: true,
       absent: `${UBER_FARE_WHY}, and Uber is most of what this vehicle carries — until a week has `
         + 'been collected the money for those trips is in the weekly statement alone',
@@ -986,6 +1354,7 @@ async function tabTrips(root, plate) {
   };
   count(rows.length);
   draw(rows);
+  if (ak) pageFoot({ colophon: [windowLabel(), `${fmt(total)} trip records`] }, root);
   bar.querySelector('#vq').oninput = (e) => {
     const t = e.target.value.trim().toLowerCase();
     const list = t ? rows.filter((r) => JSON.stringify(r).toLowerCase().includes(t)) : rows;
@@ -1072,7 +1441,7 @@ async function handoverPanel(host) {
     /* One measure across named cars, so one hue: the bar length already
        carries the magnitude and six colours would imply six categories. */
     hbars(bars, top.map((r) => ({ label: r.plate, n: r.idle_h, plate: r.plate })), {
-      value: 'n', valueFmt: (v) => `${fmt(v, 1)} h`, signed: false, color: '--b500',
+      value: 'n', valueFmt: (v) => `${fmt(v, 1)} h`, signed: false, color: contract() ? '--mk-fill' : '--b500',
       onClick: (d) => { location.hash = href('vehicle', d.plate); },
     });
   }
@@ -1132,16 +1501,34 @@ async function handoverPanel(host) {
 }
 
 export async function renderVehicleDirectory(root) {
-  const vHost = el('div'); root.append(vHost);
+  /* Under the page contract (plan §4 #vehicles): the verdict as the 00
+     statement, and the tiles in two rows — the operational six first (moved
+     with no booking, the money the cars brought in, what a kilometre returns,
+     took a booking, did not move, tracker gone quiet), then the register —
+     untoned, every cohort link kept, the one printing the verdict's figure
+     folded into it (ruling 7). Then money against distance and the lowest
+     returns per kilometre, above the idle-hours list and the search and the
+     full table, both unchanged; after #vehicles' own spread and tier panels,
+     booked against tracked distance and a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const vHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vHost);
   const bar = el('div', 'toolbar');
   bar.innerHTML = `<input id="vdq" type="search" placeholder="Search by plate, make, model or driver…">
     <span class="cap" id="vdn"></span>`;
-  root.append(bar);
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  if (!ak) root.append(bar);
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
+  const moneyP = ak ? panel('Money against distance', 'One dot per car: the payout that reached it, against the kilometres it was booked for', 'veh-money') : null;
+  const perKmP = ak ? panel('What a kilometre returned', 'The twelve lowest-returning cars, over a floor of 100 booked km', 'veh-perkm') : null;
+  if (ak) { const g = el('div', 'grid g2'); g.append(moneyP.panel, perKmP.panel); root.append(g); loading(moneyP.body); loading(perKmP.body); }
   const hoP = panel('Idle hours between drivers',
     'Hours a car stood still between one driver dropping off and the next picking up'); root.append(hoP.panel);
   loading(hoP.body);
-  const tblP = panel('Every vehicle', 'Includes cars with no trips in this window. Those are the ones worth finding.'); root.append(tblP.panel);
+  const tblP = panel('Every vehicle', 'Includes cars with no trips in this window. Those are the ones worth finding.');
+  /* The search sits on the table it searches under the contract. */
+  if (ak) root.append(bar);
+  root.append(tblP.panel);
   loading(tblP.body);
 
   const [rows, fleet] = await Promise.all([
@@ -1221,7 +1608,7 @@ export async function renderVehicleDirectory(root) {
      filed DIFFERENT VINs against one plate. Either the plate moved between two
      cars or a provider has it wrong, and both want a person's attention. */
   const disputed = rows.filter((r) => (r.distinct_vins || 0) > 1);
-  kpiHost.replaceWith(kpiRow([
+  const VDIR_TILES = [
     { label: 'Vehicles', value: fmt(rows.length), sub: 'plates with any record at all' },
     { label: 'Cars, by VIN', value: fmt(vins.size),
       /* Never "and the rest are duplicates". A plate with no VIN might be a
@@ -1283,7 +1670,12 @@ export async function renderVehicleDirectory(root) {
     { label: 'Documents due', value: fmt(expiring), sub: 'expiring within 30 days',
       tone: expiring === 0 ? 'good' : 'critical',
       cohort: expiring ? 'vehicles-docs-due' : null },
-  ]));
+  ];
+  if (ak) {
+    kpiHost.remove();
+    vdirGlance(AKB, VDIR_TILES, rows);
+    vdirMoney(moneyP.body, perKmP.body, rows);
+  } else kpiHost.replaceWith(kpiRow(VDIR_TILES));
   /* Bookings with no vehicle recorded appear on no vehicle page, so this table
      sums to fewer trips than the fleet does. Said plainly, because a reader who
      adds the column up and gets a different number to the overview has no way
@@ -1433,16 +1825,23 @@ export async function renderVehicleDirectory(root) {
        GREEN as long as the fix was recent. Both halves decide the tone now. */
     { label: 'Tracker', key: '_t',
       sortValue: (r) => (!r.last_fix ? 0 : r.stale ? 1 : 2),
+      /* Under the page contract (plan §4 #vehicles) the tracker state is an
+         outline chip: the word carries it, never a wash of colour. */
       render: (r) => {
-        if (!r.last_fix) return pill('none', 'warn');
+        if (!r.last_fix) return pill('none', ak ? null : 'warn');
         const down = /offline|off|dead|inactive|disconnect/i.test(r.status || '');
         const label = r.stale ? 'stale' : (r.status || 'live');
-        return pill(label, (r.stale || down) ? 'warn' : 'ok')
+        return pill(label, ak ? null : (r.stale || down) ? 'warn' : 'ok')
           + (r.fix_age_min != null ? `<span class="dim" title="minutes since the last fix"> ${fmt(r.fix_age_min)}m</span>` : '');
       } },
     { label: 'Documents', key: 'doc_days_left', num: true,
       render: (r) => (r.doc_days_left == null
         ? '<span class="ent-off" title="no document with an expiry date on this vehicle">—</span>'
+        /* Under the contract, as on #compliance: EXPIRED keeps the negative
+           colour as text with its word, under 30 days is ink at weight, the
+           rest grey — no fill. */
+        : ak ? (r.doc_days_left < 0 ? '<span style="color:var(--sem-neg);white-space:nowrap">expired</span>'
+          : r.doc_days_left < 30 ? `<b>${fmt(r.doc_days_left)}d</b>` : `<span class="dim">${fmt(r.doc_days_left)}d</span>`)
         : pill(r.doc_days_left < 0 ? 'expired' : `${r.doc_days_left}d`, docTone(r.doc_days_left))) },
     { label: 'Last trip', key: 'last_trip',
       sortValue: (r) => (r.last_trip ? Date.parse(r.last_trip) : null),
@@ -1475,4 +1874,115 @@ export async function renderVehicleDirectory(root) {
   };
   await handoverPanel(hoP.body);
   return rows;
+}
+
+/* ── #vehicles under the page contract ───────────────────────────────────── */
+/* THE MONEY THE CARS BROUGHT IN is each plate's CHOSEN payout summed
+   (vehicle_payout_basis: a channel believed on its payout lends neither its
+   fares nor its priced bookings to the row) — never added to the fares of the
+   fare-basis channels, which are a rider's charge before commission and are
+   named beside it. A KILOMETRE RETURNS is that payout over the booked km of
+   the cars it reached, sum over sum; their km include any fare-basis bookings
+   those cars also took, and the sub-line says whose km they are. */
+const med = (a) => { const v = [...a].sort((x, y) => x - y); const n = v.length;
+  return n ? (n % 2 ? v[(n - 1) / 2] : (v[n / 2 - 1] + v[n / 2]) / 2) : null; };
+function vdirGlance(AKB, tiles, rows) {
+  const paid = rows.filter((r) => Number(r.payout) > 0);
+  const payout = paid.reduce((a, r) => a + Number(r.payout), 0);
+  const km = paid.reduce((a, r) => a + (Number(r.km) || 0), 0);
+  const fares = rows.filter((r) => Number(r.revenue) > 0).reduce((a, r) => a + Number(r.revenue), 0);
+  const moneyTile = paid.length
+    ? { label: 'Money the cars brought in', value: money(payout),
+      sub: `the payout of ${countOf(paid.length, 'earning car')}, the median ${money(med(paid.map((r) => Number(r.payout))))}`
+        + (fares ? ` · ${money(fares)} of fares on fare-basis channels beside it, not added` : '') }
+    : { label: 'Money the cars brought in',
+      na: fares ? `no payout reaches any car in this window; ${money(fares)} of fares on fare-basis channels is a rider's charge, not what the fleet kept`
+        : 'no payout and no fare reaches any car in this window' };
+  const perKm = paid.length && km
+    ? { label: 'A kilometre returns', value: money(payout / km), sub: `that payout over the ${fmt(km)} booked km of the cars it reached` }
+    : { label: 'A kilometre returns', na: paid.length ? 'no car with a payout carries a booked distance' : 'no payout reaches any car in this window' };
+  const by = Object.fromEntries(tiles.filter(Boolean).map((t) => [t.label, t]));
+  const ops = [by['Moved, no booking'] && { ...by['Moved, no booking'], hero: true }, moneyTile, perKm,
+    by['Took a booking'], by['Did not move'], by['Tracker gone quiet'] || by['No tracker fix']];
+  const reg = ['Vehicles', 'Cars, by VIN', 'Confirmed by two channels', 'Two channels disagree', 'Tracked', 'Documents due']
+    .map((l) => by[l]);
+  const vf = AKB.vHost.querySelector('.vdct-fig > b')?.textContent.trim() || null;
+  const { tiles: t1, dropped } = bandTiles(ops, { figure: vf });
+  glance(AKB.tilesHost, t1);
+  bandSecondRow(AKB, bandTiles(reg, { figure: dropped ? null : vf }).tiles, 'vdir-reg', 'The register');
+}
+/* A second row of tiles in a 00 band, with no hero of its own: glance()
+   always crowns one, and a page carries one hero, so the row is built from
+   the same tiles without it. It sits BESIDE the tile grid, not in it — a
+   child of the grid would be one more cell (docs/COVERAGE.md). */
+function bandSecondRow(AKB, tiles, cls, caption) {
+  const host = el('div', cls);
+  if (caption) host.append(el('p', 'cap', caption));
+  const row = el('div', 'kpis glance');
+  row.innerHTML = kpiTiles(tiles.map((t) => ({ ...t, glance: true, hero: false })));
+  row.style.setProperty('--kpi-n', String(kpiCols(row.children.length)));
+  host.append(row);
+  AKB.tilesHost.after(host);
+  return host;
+}
+function vdirMoney(host1, host2, rows) {
+  host1.innerHTML = ''; host2.innerHTML = '';
+  const go = (r) => { location.hash = href('vehicle', r.plate); };
+  const dots = rows.filter((r) => Number(r.payout) > 0 && Number(r.km) > 0)
+    .map((r) => ({ plate: r.plate, payout: Number(r.payout), km: Number(r.km) }));
+  if (!dots.length) empty(host1, 'No car in this window carries both a payout and a booked distance.');
+  else {
+    const box = el('div'); host1.append(box);
+    scatter(box, dots, { x: 'km', y: 'payout', label: 'plate', xLabel: 'booked km', yLabel: 'payout',
+      yFmt: (v) => money(v), xFmt: (v) => fmt(v), onClick: go });
+  }
+  /* A car paid only on fare-basis channels has a fare and no payout, and the
+     two are not the same money: its own chart, in its own unit, never on the
+     payout axis above. */
+  const fareOnly = rows.filter((r) => !(Number(r.payout) > 0) && Number(r.revenue) > 0 && Number(r.km) > 0)
+    .map((r) => ({ plate: r.plate, fares: Number(r.revenue), km: Number(r.km) }));
+  const chans = [...new Set(rows.flatMap((r) => [...asList(r.payout_platforms), ...asList(r.fares_platforms)]))];
+  host1.append(el('p', 'cap', `${countOf(dots.length, 'car')} with a payout and a distance`
+    + (chans.length ? `; the working cars file on ${chans.map(sourceLabel).join(', ')}` : '') + '.'));
+  if (fareOnly.length) {
+    host1.append(el('h4', 'sub', 'Cars paid only on the fare they charge'));
+    const box = el('div'); host1.append(box);
+    scatter(box, fareOnly, { x: 'km', y: 'fares', label: 'plate', xLabel: 'booked km', yLabel: 'fares',
+      yFmt: (v) => money(v), xFmt: (v) => fmt(v), onClick: go });
+    host1.append(el('p', 'cap', `${countOf(fareOnly.length, 'car')} earning on fare-basis channels only: a rider's fare before commission, drawn apart so it is never read as a payout.`));
+  }
+  const floor = 100;
+  const per = dots.filter((r) => r.km >= floor).map((r) => ({ plate: r.plate, label: r.plate, n: Math.round((r.payout / r.km) * 100) / 100 }))
+    .sort((a, b) => a.n - b.n).slice(0, 12);
+  if (!per.length) { empty(host2, `No car booked ${floor} km or more with a payout behind it.`); return; }
+  hbars(host2, per, { signed: false, color: '--mk-fill', valueFmt: (v) => `${money(v)}/km`, onClick: go });
+  host2.append(el('p', 'cap', `The lowest, ${per[0].plate}, returned ${money(per[0].n)} a booked kilometre.`));
+}
+/* Called by V.vehicles after its own spread and tier panels. */
+export function vdirTail(root, rows) {
+  const p = panel('Booked against tracked distance', 'One dot per car that has both; the dashed line is where the two agree', 'veh-booked');
+  root.append(p.panel);
+  const dots = rows.filter((r) => Number(r.km) > 0 && Number(r.telematics_km) > 0)
+    .map((r) => ({ plate: r.plate, km: Number(r.km), tkm: Number(r.telematics_km) }));
+  if (!dots.length) empty(p.body, 'No car carries both a booked and a tracked distance in this window.');
+  else {
+    const box = el('div'); p.body.append(box);
+    scatter(box, dots, { x: 'km', y: 'tkm', label: 'plate', xLabel: 'booked km', yLabel: 'tracked km',
+      xFmt: (v) => fmt(v), yFmt: (v) => fmt(v), refLine: { slope: 1 }, onClick: (r) => { location.hash = href('vehicle', r.plate); } });
+    const b = dots.reduce((a, r) => a + r.km, 0), t = dots.reduce((a, r) => a + r.tkm, 0);
+    p.body.append(el('p', 'cap', `Over these ${countOf(dots.length, 'car')}: ${fmt(b)} km booked and ${fmt(t)} km tracked — `
+      + (t >= b ? `${fmt(t - b)} km the tracker saw that no booking accounts for.` : `${fmt(b - t)} km booked beyond what the tracker saw.`)));
+  }
+  const still = membersOf('vehicles-still', rows).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'What a car costs', fig: null, none: 'Not held',
+      why: 'No lease, fuel, insurance or Salik feed reaches this product, so no car here has a cost to set against what it brought in.' },
+    { label: 'Plates that never moved', hl: still > 0, fig: still ? `${fmt(still)} of ${fmt(rows.length)}` : null, none: 'None',
+      why: still ? 'No booking and no journey in this window. The list is a tracker and register roster, not the working fleet, so a plate here may be a car off the road or no car at all.'
+        : 'Every plate on the list took a booking or made a journey in this window.' },
+    { label: 'Which distance is right', fig: null, none: 'Neither alone',
+      why: 'Booked kilometres run from pickup to dropoff on a booking; the tracker counts every kilometre the car drove. The chart above is the gap between them.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), countOf(rows.length, 'vehicle')] }, root);
 }

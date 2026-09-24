@@ -341,7 +341,7 @@ function receiptsContract(root, d) {
     x: sum(sup.filter((r) => r.kind === k)) + sum(live.filter((r) => r.kind === k), 'superseded_amount') }));
   /* Signed only when a kind nets negative: a zero axis in the middle of a
      chart of positive sums halves every bar for nothing. */
-  hbars(p3.body, byKind.map((k) => ({ label: k.label, n: k.n })), { signed: byKind.some((k) => k.n < 0), color: '--ink', negColor: '--grey', valueFmt: (v) => money(v) });
+  hbars(p3.body, byKind.map((k) => ({ label: k.label, n: k.n })), { signed: byKind.some((k) => k.n < 0), color: '--mk-fill', negColor: '--mk-neg', valueFmt: (v) => money(v) });
   const dk = byKind.filter((k) => k.x);
   if (dk.length) hbars(p4.body, dk.map((k) => ({ label: k.label, n: k.x })), { signed: dk.some((k) => k.x < 0), color: '--grey', valueFmt: (v) => money(v) });
   else empty(p4.body, 'Nothing was displaced in this window.');
@@ -352,10 +352,10 @@ function receiptsContract(root, d) {
   g3.append(p5.panel, p6.panel);
   const grains = new Map();
   rows.forEach((r) => { const g = grainOf(r); grains.set(g, (grains.get(g) || 0) + 1); });
-  hbars(p5.body, [...grains.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => ({ label, n })), { signed: false, color: '--ink' });
+  hbars(p5.body, [...grains.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => ({ label, n })), { signed: false, color: '--mk-fill' });
   const surf = new Map();
   rows.forEach((r) => { const k = `${sourceLabel(r.platform)} · ${words(r.source)}${r.fleet_id ? ` · ${r.fleet_id}` : ''}`; surf.set(k, (surf.get(k) || 0) + 1); });
-  hbars(p6.body, [...surf.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => ({ label, n })), { signed: false, color: '--ink' });
+  hbars(p6.body, [...surf.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => ({ label, n })), { signed: false, color: '--mk-fill' });
 
   const months = monthsOf(d);
   if (months.length > 1) {

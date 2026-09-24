@@ -1748,3 +1748,425 @@ Production (This month), both skins at 1440 and 390, light and dark
 (scratchpad `pagephase/shots/optimise/`): no error, no sideways scroll. Al
 Garhoud runs +1,201 bookings over arrivals while Dubai Int'l Airport piles
 up −483 — the same Terminal 3 written two ways, which the caption names.
+
+### #capacity — 2026-09-24
+
+Production (for Oct 2026), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/capacity/`): no error, no sideways scroll. 7
+hours of the week are short, 4 driver-hours in a week; the weekday columns
+now add to that. Wednesday 15:00 is the busiest single hour.
+
+### #day/2026-09-23 — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/day/`): no error, no sideways scroll. 895 bookings, +1.0%
+on the fortnight median of 886. Found by looking and fixed before commit:
+the hero printed its fortnight change twice (delta and sub).
+
+### #slot/2/19 — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/slot/`): no error, no sideways scroll. 238
+trips on Tuesdays at 19:00; per occurrence Tuesday carries 59.5 against a
+50.2 mean of the other weekdays (+19%); the busiest person holds 7 (2.9%).
+
+### #trip — 2026-09-24
+
+Production, a hotel booking and an Uber booking of the day, both skins at
+1440 and 390, light and dark (scratchpad `pagephase/shots/trip/`): no
+error, no sideways scroll. The hotel booking: fare AED 108.96, 33.9 km, 40
+min request to end, 6 of 10 fixes with the seat occupied; FMS telematics
+drew 10 fixes (4 stationary), and Uber's driver-status feed contributed 2
+rows with no speed and no position. The Uber booking: fare and earnings
+absent with Uber's own reasons. Found by looking and fixed before commit:
+both feeds labelled "provider not recorded"; every FMS fix read as no seat
+reading; the occupancy count doubled by two FMS providers; the hotel
+earnings' reason naming a payments report that channel does not have; the
+Uber fare's reason drawn at display size at 390.
+
+### #drivers — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/drivers/`): no error, no sideways scroll (the
+roster scrolls inside its own frame). 146 cannot legally work — the verdict —
+over 347 on the books (252 Ecosine, 95 Egari), 114 drove with a median of
+163 bookings each, and the top 20 ran 30.0% of the work. Found by looking
+and fixed before commit: in six columns the wrapped name ran into the trip
+count on every card; the count now sits on its own line.
+
+### #driver/overview — 2026-09-24
+
+Production (This month), a busy multi-channel driver, both skins at 1440
+and 390, light and dark (scratchpad `pagephase/shots/driver-overview/`): no
+error, no sideways scroll. 288 trips, +131 against the fleet median of 157,
+97th percentile of 121. Found by looking and fixed before commit: the rank
+row's value line sat in the label's column and wrapped; it spans the row.
+
+### #driver/activity — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-activity/`): no error, no sideways
+scroll. 206.5 h online and not dispatched — 70% of 296.8 h online over 24
+days with availability — beside 90.3 h on job and 278 jobs, 23 with no
+dropoff. The first attempt, on the busiest driver in the fleet with three
+page loads at once, did not finish: see the trap in COVERAGE.md.
+
+### #driver/day — 2026-09-24
+
+Production, 23 Sept for a multi-channel driver, both skins at 1440 and 390,
+light and dark (scratchpad `pagephase/shots/driver-day/`): no error, no
+sideways scroll in the new skin. 4h 14m carrying someone, 33% of online
+time; 11 trips, ▼ 0.6 against 11.6 a working day this month; 128.4 km, trip
+value AED 695.45. The old skin scrolls 15px sideways at 390 on this page
+(unchanged by this work — the frozen skin). The month comparison arrives
+after the first paint, so a screenshot needs a longer settle (WAITMS=5000).
+
+### #driver/territory — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-territory/`): no error, no sideways
+scroll. 84 waiting spots drawn filled and grey; 2 of 223 pickups carry
+coordinates, the rest have an address and no position, which the caption
+under the map already says. Found by looking and fixed before commit: the
+key under the map still showed the dashed ring for waiting spots.
+
+### #driver/earnings — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-earnings/`): no error, no sideways
+scroll. Booked revenue AED 14,113.32 over 253 of 278 trips; riders paid
+38.1% braintree, 20.9% apple_pay, 16.5% offline, 14.0% cash. Found by
+looking and fixed before commit: a hand-picked --seq-N ramp printed the
+shares dark on dark (stackedBar's label ink is measured for the --cat-N
+slots, not for the ramp); the bar now takes the slots.
+
+### #driver/quality — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-quality/`): no error, no sideways
+scroll. Completion 91.7%, ▼ 3.3 pts to 95%; 94.8 alerts per 100 km, ▲ 26.6
+against the fleet median of 68.2 (worse); acceptance absent — no channel
+here publishes one.
+
+### #driver/record — 2026-09-24
+
+Production (week by week), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-record/`): no error, no sideways
+scroll. "Within their usual range", 82 jobs over 7 active days; 7th of 116
+on jobs, 12th of 113 on value. The Trip value tile's sub-line says 0 of 82
+completed trips priced beneath AED 4,923.29 — in both skins; recorded in
+FIX-STATUS as found, not changed.
+
+### #driver/money — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-money/`): no error, no sideways scroll.
+Every position absent with the ledger's own reasons (no opening cash
+position; nothing on the advance or deduction books; no stored threshold);
+over the month, income at least AED 9,448.85 and AED 1,636.82 of cash fares.
+Found by looking and fixed before commit: the in-panel hero drew the income
+at display size across two lines, and the advance and deduction tiles would
+have printed their definitions as reasons.
+
+### #driver/trips — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-trips/`): no error, no sideways scroll;
+the first cold load took 63 s (the trip list for a busy driver), later ones
+4 s.
+
+### #driver/unauthorized — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-unauthorized/`): no error, no sideways
+scroll. Named beside 4 journeys (2 by time, 2 by the car's last trip),
+44.1 km, AED 199.95 forgone — AED 186.77 of it narrowed by time.
+
+### #online-time — 2026-09-24
+
+Production (today, start 06:00), both skins at 1440 and 390, light and
+dark (scratchpad `pagephase/shots/online-time/`): no error, no sideways
+scroll. 48 late, 29 on time, 83 cannot be judged, 71 drove of 134 allowed;
+the median wait to a first job 47 min over 62 people, 11 online with none
+yet. The latest starter came online at 10:09, ▲ 249 min late.
+
+### #performer — 2026-09-24
+
+Production (week of 14–20 Sept), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/performer/`): no error, no sideways scroll.
+AED 3,669.89, ▲ 1,983.37 against AED 1,686.52 — the mean of the 151 who
+earned; 11th of 151 by money; per day worked AED 524.27, ▲ 252.49 against
+the fleet mean; 84 bookings, 31.9 h carrying someone, 49.3 h waiting.
+
+### #cohort — 2026-09-24
+
+Production, unit-licence-due and roster-blocked, both skins at 1440 and
+390, light and dark (scratchpad `pagephase/shots/cohort/`): no error, no
+sideways scroll. The truth fix on real data: 60 people, "licence expired or
+expiring", every one of the 60 already lapsed and 0 due within 30 days —
+where the old skin reads "Licences due 60 · expiring within 30 days". 44
+of the 60 carry the same expiry date, 1 Jan 2026; 59 of 60 are still
+marked able to earn; 235 of the 308 in the source have no licence date.
+
+### #cancellations — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/cancellations/`): no error, no sideways scroll,
+no whole-dirham amount in either skin. 2,092 cancellations, 11.9% of the
+17,560 bookings the 117 drivers took; 124 dropped jobs (96 Uber after
+accepting, 28 Bolt after accepting), 168 Bolt offers not taken, 1,781 by
+the rider, 19 nobody said who — all 19 from one channel, so that bar wears
+its colour. Dropped after accepting: 85 of 12,240 accepted (0.7%) by the 83
+who work Bolt, 39 of 5,152 (0.8%) by the 34 who do not. 19 of 117 carry no
+rating. Found by looking and fixed before commit: at 390 the bar labels were
+cut off mid-word, so the four bars now carry the tiles' own short names; the
+rank columns were drawn in --ink, and are now the job token.
+
+### #roster, /pipeline, /idle, /blocked, /states — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/roster/`): no error, no sideways scroll on
+any tab. 360 on the books, 128 drove, 98 able to earn and earning nothing,
+91 recruited and never driven, 11 waiting to start, 32 stopped everywhere
+(the verdict), 31 of them holding a car across 25 plates. Recency: 101
+booked today, 21 within a week, 9 within a month, 21 within 90 days, 19
+within 180, 92 longer ago; 97 never took one. Found by looking and fixed
+before commit: the standings' counts caption was wiped by the bar's own
+redraw on layout, and at an 18ch floor driver names still wrapped to three
+lines — 24ch holds them to two.
+
+### #top-performers, #low-performers — 2026-09-24
+
+Production (week of 14–20 Sept), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/performers/`): no error, no sideways scroll, no
+whole-dirham amount. 98 ranked of 155 who drove (▲ +8 on the week before);
+fleet AED 319.13 per day worked (▲ +44.91); the ends 4.4× apart, AED 638.60
+at the top and AED 145.87 at the bottom; 75 of 155 worked all seven days;
+the 39 who ran least ran 1.7% of the week's 5,865 bookings; the top 10 ran
+16.2%, the top 20 29.7% against an even 12.9%. Found by looking and fixed
+before commit: the concentration drawn as a scatter carried its even-fleet
+line past 100%.
+
+### #performance, #performance?grain=month — 2026-09-24
+
+Production, both grains, both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/performance/`): no error, no sideways scroll,
+no whole-dirham amount. Week of 14 Sept: 116 active (the verdict), 5,193
+jobs (▲ +722 on the week of 7 Sept), AED 331,057.35 of trip value
+(▲ +57,330.47), 7.2 a day, 1 changed of 107 tested at 3.5σ; 113 drivers
+placed on the scatter. August: 115 active, 12,340 jobs (▲ +2,854 on July
+2026), 4 changed of 101. Found by looking and fixed before commit: the
+month delta read "on the July 2026", and the period chips sat under the
+band whose verdict they choose.
+
+### #retention — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/retention/`): no error, no sideways scroll, no whole-dirham
+amount. 170 earning in Aug 2026 (▲ +16 on the month before), against the
+peak of 265 in Oct 2025, the low 92 in Dec 2024; 20 stopped (▲ +6 on Jul
+2026, read as worse), 8 started (▼ −1); 132 of 324 recruits still working;
+a typical run of 8 months over 246 leavers, the 170 still working 14 months
+in. Seen and not changed: the flow chart's axis text is drawn in a fixed
+viewBox and scales up at 1440 in both skins.
+
+### #compliance — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/compliance/`): no error, no sideways scroll, no
+whole-dirham amount. 50 people with a lapsed licence (the verdict; 275
+people over 438 records): none drove this week, within 30 or 90 days; 15
+longer ago; 35 with no driving we can see. 0 vehicle papers expired, 3 in
+7 days (the hero), 23 in 45; 4 people expiring in 45 days; 2 whose records
+disagree. By channel: Uber 160 records, none dated; Yango 146, all dated;
+Hotel 132 — 94 on the default date, 38 undated. 232 people carry a date
+that can be checked, 50 of them lapsed.
+
+### #hr-roster — 2026-09-24
+
+Production (the export of 23 Sept), both skins at 1440 and 390, light and
+dark (scratchpad `pagephase/shots/hr-roster/`): no error, no sideways
+scroll. 143 on HR's list (Ecosine 100, Egari 43), 60 with anything expiring
+in 90 days, 134 matched to a platform account (112 by id, 22 by phone, 9
+not matched), 0 off the list. The import form was not exercised (no upload
+against production).
+
+### #identity — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/identity/`): no error, no sideways scroll. 433 links: 68
+on a shared phone, 365 on a name (247 similar, 93 identical, 25 the same
+car too); 155 in every total (78 of the similar-name links, 2 identical, 66
+phone, 9 car). Channel pairs Hotel–Uber 106, Bolt–Uber 101, Bolt–Hotel 87,
+Hotel–Yango 48, Uber–Yango 37, Bolt–Bolt 36, Bolt–Yango 18. The correctness
+fix seen on real rows: a similar-name pair reads "SIMILAR NAMES" and "YES —
+THE NAME IS THE EVIDENCE" where the old skin reads "phone ···" and "No".
+The arkiv page is 8,908 characters of text against the old skin's 219,318.
+
+### #same-person — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/same-person/`): no error, no sideways scroll. 21 waiting,
+365 confirmed one person, 0 ruled two people; 261,396 trips on the 577
+records those 365 verdicts join, each record once. The arkiv page is 32,221
+characters of text against the old skin's 314,188 (365 unfolded cards).
+Twice during this pass production answered /api/same-person in 38 s and
+/api/kpis not at all within 20 s, after eight concurrent loads of this page
+(four of them the old skin's 314,188-character render): the shots were
+retaken one at a time once it recovered — see the COVERAGE trap on
+/api/driver/shift; this endpoint is a second one to load singly.
+
+### #vehicles — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p58/`). No page error, no sideways scroll.
+
+The verdict: 3 moved with nothing paying for it. Money the cars brought in: AED 584,322.60, the payout of 96 earning cars, with AED 91,098.83 of fares on fare-basis channels beside it and not added. A kilometre returns: AED 2.80 over 208,883 booked km. The register: 273 vehicles.
+
+Booked against tracked covers 73 cars: 168,988 km booked and 184,296 km tracked, 15,308 km that the tracker saw and no booking accounts for. The lowest-returning car over 100 km returned AED 1.12 a kilometre.
+
+The live fils scan is clean in both skins. The arkiv page is 11,440 characters of text against the old skin's 9,583.
+
+### #vehicle/overview — 2026-09-24
+
+Production through live-ui on :8611 on a busy plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p59/`). No page error, no sideways scroll, and the live fils scan is clean in both skins.
+
+On that car:
+* Money in: AED 15,375.18 (AED 932.00 in fares and AED 14,443.18 attributed from payouts).
+* Fare per priced km: AED 4.14, 0.39 under the fleet's 4.53.
+* Utilisation: absent. No utilisation report covers the car.
+* Fares, day by day: AED 24,064.90 on every channel over the window. That is neither Money in nor the Fares tile; see FIX-STATUS P59.
+* 307 tracker journeys are named in the channel caption and are no longer an "unknown" slice of service and payment.
+
+This pass caught three things, all fixed before the commit:
+* A sixth band tile wrapped alone onto its own line.
+* A 57 km rate was drawn as the longest bar.
+* The first draft's fares caption said something false.
+
+### #vehicle/drivers — 2026-09-24
+
+Production through live-ui on :8611, on the busy plate from P59, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p60/`). No page error, no sideways scroll, and the fils scan is clean in both skins.
+
+Two people held the car across Bolt, Uber and Yango. Every platform cell is a swatch and an ink label.
+
+### #vehicle/movement — 2026-09-24
+
+Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p61/`). No page error, no sideways scroll, and the fils scan is clean.
+
+The day replayed is 24 Sept: 141 fixes with a position, 200 km between fixes, and 138 km with a passenger (69%, by FMS's live seat count). The map's lines are still map.js's grey and dashed; that changes with #map. The sandbox has no route to the map tiles, so the base map is blank.
+
+### #vehicle/earnings — 2026-09-24
+
+Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p62/`). No page error, no sideways scroll, and the fils scan is clean.
+
+* Attributed pay: AED 14,443.18, the same figure the overview's Money in names as attributed from payouts.
+* Measured fares: AED 24,064.90 on 408 of 448 bookings. That is the same figure P59's day-by-day caption now names.
+* Fare coverage: 91%. Drivers paid: 3.
+
+### #vehicle/safety — 2026-09-24
+
+Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p63/`). No page error, no sideways scroll, and the fils scan is clean.
+
+The car runs 75.9 events per 100 km, 7.8 above the fleet's 68.1, drawn in the negative colour with its ▲ and sign. It had 4,445 events over the 5,859 km the feed covered. The event bars are in the alert feed's violet.
+
+### #vehicle/compliance — 2026-09-24
+
+Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p64/`). No page error, no sideways scroll. The car has one document, a Vehicle Registration Form (ACTIVE, 258 d, grey). The old skin's extra text over the arkiv page is the "scroll the table sideways" note, which a table that fits does not need.
+
+### #vehicle/trips — 2026-09-24
+
+Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p65/`). No page error, no sideways scroll, and the fils scan is clean. The page has 75,700 characters of text against the old skin's 75,506: the same 400 rows.
+
+### #unauthorized — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p66/`). No page error, no sideways scroll, and the fils scan is clean in both skins.
+
+The first pass took 129 s to draw in the arkiv skin against the old skin's 5 s. Two causes were fixed before the commit: the page awaited a 30 s attribution request, and two loading skeletons were never cleared (the shooter waits for skeletons to go). The retake is below.
+
+**The retake** (4 variants, `shots/p66/`) draws in 5–6 s. A 45 s shot (`shots/p66b/`) shows the ladder landed: the flagged table carries *Who the evidence names* beside *Driver that day*. The figures:
+* The verdict: 801 journeys moved a car with no booking, out of 13,862 examined.
+* Unexplained km: 11,344. Revenue forgone: AED 51,388.32 at the fleet's AED 4.53/km.
+* Mean a day: 36, up 5.9 on the seven days before, drawn in the negative colour with its ▲ and sign.
+* Inconclusive: 915.
+
+The every-interval total (13,862) is named in the caption under the per-day chart, not drawn on its axis.
+
+### #segments — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p67/`). No page error, no sideways scroll, and the fils scan is clean in both skins.
+
+The verdict: 700 of 801 carry one name, 76 of them narrowed by time. The rungs in km are 1,358.5 / 6,736 / 1,771.4 / 1,050.6 / 427, summing to the band's 11,343.5 km. 59 people are narrowed to. Of the 282 journeys the list holds, all fall inside the status-feed history from 10 Sept; the caption now says that count is a floor.
+
+The first pass drew zeros for the rungs in km and "before it began: 0". Both were fixed before the commit (FIX-STATUS P67).
+
+### #segment — 2026-09-24
+
+Production through live-ui on :8611, on one of the day's unexplained FMS live-seat journeys, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p68/`). No page error, no sideways scroll, and the fils scan is clean.
+
+The journey carried 25.4 km with no booking, 35 min from the nearest (Uber), worth AED 115.50 at AED 4.54/km. Two people held the car that day. The attribution names one person by the last Uber trip on the car, and the page keeps the two apart. The telemetry was 6 fixes, observed fully, with a largest gap of 6 min.
+
+### #safety (three tabs) — 2026-09-24
+
+Production through live-ui on :8611, all three tabs in both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p69/`). No page error, no sideways scroll, and the fils scan is clean.
+
+* Worst rate on the road: 184.77 per 100 km over 348 km, +116.67 on the fleet's 68.1, drawn in the negative colour with its ▲ and sign. The median rated driver is at 94.14.
+* 5,272 events fell on a plate-day nobody held the car for; that figure is in the band's note.
+* The rated drivers fall 9 / 34 / 26 / 4 across 0–200 in 50s.
+* By car, 60 of the 71 cars rated over 200 km of the feed run above the fleet rate.
+
+### #live — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p70/`). No page error, no sideways scroll, and the fils scan is clean.
+
+The verdict: 169 vehicles have a stale fix, of 267 reporting; 237 are tracked with a usable fix and 30 report no satellite lock (in the band's note). Fresh: 98. Silent over a day: 158. Moving: 63. Engaged: 44 of 240. The table sits directly under the band.
+
+### #feeds — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p71/`). No page error, no sideways scroll, and the fils scan is clean.
+
+126 cars are active on Uber (91 Ecosine, 35 Egari). CABMAN seat sensor not receiving: 96, 35 of them on Egari, which has no CABMAN account; that is the hero. FMS seat count not receiving: 52. FMS not receiving: 52. The receiving counts (30 / 74 / 74) are in the second row.
+
+### #map, #map/replay — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p72/`). No page error, no sideways scroll.
+
+**Live.** It needs about 20 s on production before the markers land; the shots were retaken at 25 s. 240 cars are on the map, of 267 reporting; 27 report 0,0 and are not drawn. Engaged: 42 of 240. Moving: 70. Stale: 165, drawn as hollow outlines. The markers are CABMAN violet and FMS lilac by ramp step, and the legend has one row per feed.
+
+**Replay** (a busy plate, 23 Sept). 207 fixes, 339 km from one feed, so the Distance tile is unqualified. With passenger: 24 km (23%, FMS live seat count). Below the map: 206 gaps, the longest 181 min; status words Moving 115, Idle 74, Stopped 18; top speed 116 km/h, and 92 fixes carried no speed. The car has 35 days with a trail, today drawn unfinished.
+
+The sandbox has no route to the map tiles, so the base map is blank.
+
+### #sources — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p73/`). No page error, no sideways scroll, and the fils scan is clean.
+
+The verdict: 17 collectors failed on their last run, with 37 needing attention of 54 runs. Days still owed: 2,052, from 236 refused windows, 44 of them past retention. Rows on record: 1,777,649 across 12 datasets. Stalest scheduled feed: Bolt, 419 h; the freshest, CABMAN, 4 min.
+
+Refusals by provider: Yango 109, FMS 81, Uber 45, Bolt 1. By reason: credential 109, "refused, with no reason given" 81, past retention 44, and one each for a rate limit and a short collection.
+
+### #coverage — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p74/`). No page error, no sideways scroll, and the fils scan is clean.
+
+The verdict: 19 days are missing from the record, across 2 sources with a hole; the worst is Yango, with 17. In the window, 1 day is missing (Yango). The window holds 36,174 rows over 24 days, today unfinished.
+
+The Uber check covers 34 windows at 100% agreement (246,337 on Uber's side, 247,074 on ours) with 0 never stored. The scatter sits on the line.
+
+### #providers — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p75/`), and one field's page. No page error, no sideways scroll, and the fils scan is clean.
+
+The verdict: 8 surfaces would not answer, of 28 probed across 6 providers. 20 answer. 192 fields are not kept (Bolt 71, Hotel 68, Uber 27, CABMAN 14, FMS 12). The refusals are Bolt 404 ×2, FMS 400 ×2, Uber 404 and Yango 403 ×3.
+
+The pass found "Bolt · ecosine:getDrivers" counted as answering on an error-only 200 body (FIX-STATUS P75, not fixed).
+
+### #settings — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p76/`). No page error. The fils scan is clean.
+
+Production read: 2 credentials expired (the fleet-portal refresh token 28 d ago, and the access token the token keeper sets 13.7 d ago). 43 of 47 keys are configured. The next to expire is the Egari portal refresh token in 4.8 d. 4 keys are not set, and 15 are held in the environment. The days-left chart draws 4 credentials; the rest carry no readable expiry.
+
+The old skin at 390 scrolls 2 px sideways on this page. That is pre-existing, and it is left because the old skin is frozen. The Arkiv skin at 390 does not scroll.
+
+### #notfound — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p77/`), for `#zzz-not-a-page` and the renamed `#hotels`. No page error, no sideways scroll, and the fils scan is clean. The Arkiv notice is ink with no red dot. `#hotels` still offers Corporate & hotels.

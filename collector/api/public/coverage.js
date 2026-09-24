@@ -10,9 +10,10 @@
    Nothing else in the product distinguishes the two, so every rate computed
    across a hole here is wrong, and the honest thing to do is show the hole. */
 
-import { empty, fmt } from './charts.js';
+import { empty, fmt, gapBars, hbars, scatter } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, dayStr, dateStr,
-  sourceLabel, countOf, plural, verdict } from './ui.js';
+  sourceLabel, countOf, plural, verdict, pill, contract, glance, glanceBand, bandTiles,
+  absenceBand, pageFoot, kpiTiles, sourceToken } from './ui.js';
 import { dubaiDay } from './tz.js';
 import { q, api, state, href, currentGen, alive, qChan } from './data.js';
 
@@ -50,6 +51,17 @@ export async function renderCoverage(root) {
   const c = all;
   root.innerHTML = '';
   if (!c.sources.length) return empty(root, 'No source has ever written a dated row.');
+  /* Under the page contract (plan §4 #coverage): the verdict as the 00
+     statement over the whole record, its figure — the sources with a hole —
+     not repeated as a tile (ruling 7), the rest untoned and an unreadable
+     window ABSENT with its reason; then the window's days as one chart; the
+     Uber check with its tiles untoned, its scatter (Uber says against we
+     hold) and its table; what we hold that Uber's report does not list; the
+     trips with no earnings; how many days each dataset has a reading on;
+     every per-source calendar and gap table unchanged but for their words
+     (outline chips) and today drawn unfinished; a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, 'over the whole record · the window beside it') : null;
 
   const holed = c.sources.filter((s) => s.missing_days > 0);
   const winHoled = win ? win.sources.filter((s) => s.missing_days > 0) : [];
@@ -65,7 +77,7 @@ export async function renderCoverage(root) {
     const missing = c.sources.reduce((a, x) => a + (+x.missing_days || 0), 0);
     const worst = [...holed].sort((a, b) => b.missing_days - a.missing_days)[0];
     const missingFromUber = (ver && ver.trips_uber_has_that_we_never_stored) || 0;
-    verdict(root, {
+    verdict(ak ? AKB.vHost : root, {
       claim: missing
         ? `${fmt(missing)} ${plural(missing, 'day')} ${missing === 1 ? 'is' : 'are'} missing from the record`
         : 'Every source has a row for every day it has been collecting',
@@ -94,7 +106,7 @@ export async function renderCoverage(root) {
     });
   }
 
-  root.append(kpiRow([
+  const COV_TILES = [
     { label: 'Sources with data', value: fmt(c.sources.length), sub: 'over the whole record' },
     { label: 'Sources with a hole', value: fmt(holed.length),
       sub: 'over the whole record', tone: holed.length ? 'warn' : 'good' },
@@ -112,7 +124,16 @@ export async function renderCoverage(root) {
       : { label: `Missing days in the last ${fmt(state.days)} days`, value: '—',
         sub: 'the windowed calendar could not be read' },
     { label: 'Rows on record', value: fmt(c.sources.reduce((a, s) => a + s.total_rows, 0)) },
-  ]));
+  ];
+  if (ak) {
+    /* The verdict's figure is the sources with a hole: that tile folds into
+       it by name. The missing days lead. */
+    const t = bandTiles(COV_TILES.filter((x) => x.label !== 'Sources with a hole')
+      .map((x) => (x.label === 'Missing days, all history' ? { ...x, hero: true } : x)),
+    { reasons: { [`Missing days in the last ${fmt(state.days)} days`]: 'the windowed calendar could not be read' } }).tiles;
+    glance(AKB.tilesHost, t);
+    coverageWindow(root, win);
+  } else root.append(kpiRow(COV_TILES));
 
   /* ── the only figure on this page that is not our own opinion of ourselves ──
      Everything above counts rows in our tables. It is a real check — it found
@@ -181,7 +202,7 @@ export async function renderCoverage(root) {
         'Matched on Uber\u2019s trip id: agreement means every booking Uber still lists for the window '
         + 'is a row in our table. It does not mean the rest of that row is right \u2014 a re-collection '
         + 'replaces everything but the id.'));
-      vb.append(kpiRow([
+      const VER_TILES = [
         { label: 'Windows checked with Uber', value: fmt(ver.measured_windows),
           sub: ver.past_retention_windows
             ? `${fmt(ver.past_retention_windows)} more are past Uber’s retention and cannot be checked`
@@ -198,14 +219,23 @@ export async function renderCoverage(root) {
         { label: 'Windows that disagree', value: fmt(ver.disagreeing_windows),
           sub: ver.errored_windows ? `${fmt(ver.errored_windows)} could not be asked` : 'of those checked',
           tone: ver.disagreeing_windows ? 'critical' : 'good' },
-      ]));
+      ];
+      if (ak) {
+        /* Untoned, no hero (the 00 band has the page's one), an unmeasured
+           agreement ABSENT with its reason. */
+        const row = el('div', 'kpis glance');
+        row.innerHTML = kpiTiles(bandTiles(VER_TILES, { reasons: { Agreement: 'no whole month has been checked with Uber yet' } }).tiles
+          .map((x) => ({ ...x, glance: true, hero: false })));
+        vb.append(row);
+        coverageScatter(vb, rows);
+      } else vb.append(kpiRow(VER_TILES));
       vb.append(tableFrom(rows, [
         { label: 'Window', key: 'window_from',
           /* Weeks are tagged, because a week window sits INSIDE a month
              window: a reader seeing two rows for overlapping ranges and no
              mark would read them as two independent checks and add them. */
           render: (r) => `${dateStr(r.window_from)} → ${dateStr(r.window_to)}`
-            + (r.kind === 'week' ? ' <span class="tag dim">week</span>' : '') },
+            + (r.kind === 'week' ? (ak ? ` ${pill('week')}` : ' <span class="tag dim">week</span>') : '') },
         { label: 'Fleet', key: 'fleet_id', render: (r) => esc(sourceLabel(r.fleet_id)) },
         { label: 'Uber says', key: 'uber_rows', num: true, render: (r) => fmt(r.uber_rows) },
         { label: 'We hold', key: 'our_rows', num: true, render: (r) => fmt(r.our_rows) },
@@ -277,6 +307,7 @@ export async function renderCoverage(root) {
     }
   }
 
+  if (ak) coverageOursOnly(root, (ver && ver.windows) || []);
   /* ── the hole that is not a collection failure ──────────────────────────
      Everything else on this page is a gap somebody can close by re-running a
      collector. This one nobody can: Uber's earnings API serves roughly the last
@@ -313,6 +344,7 @@ export async function renderCoverage(root) {
       + 'over a range that reaches into them is measuring a shorter period than it appears to.'));
     root.append(mp);
   }
+  if (ak) coverageDatasets(root, c, cov);
 
   /* ── the distinction that changes what you do about a hole ──────────────
      A gap in one source is a collection failure and the fix is to re-run the
@@ -372,7 +404,9 @@ export async function renderCoverage(root) {
         // The Dubai day, so a fix at 02:00 local counts on the day it happened.
         const key = dubaiDay(new Date(t));
         const d = seen.get(key);
-        const cell = el('i', d ? 'c' : 'c gap');
+        /* Today is unfinished: drawn hatched under the contract, so a short
+           day still being collected is not read as a thin one. */
+        const cell = el('i', d ? (ak && key === dubaiDay() ? 'c today' : 'c') : 'c gap');
         if (d) {
           // Intensity is against this source's OWN median: a tracker polling
           // 130 vehicles every five minutes and a daily report pull are not
@@ -407,7 +441,14 @@ export async function renderCoverage(root) {
         { label: 'Gap starts', key: 'from', render: (g) => entity('day', String(g.from).slice(0, 10), dateStr(g.from)) },
         { label: 'Gap ends', key: 'to', render: (g) => entity('day', String(g.to).slice(0, 10), dateStr(g.to)) },
         { label: 'Days missing', key: 'days', num: true },
-        { label: 'Was it asked for?', key: 'verdict', render: (g) => ({
+        /* Under the contract each answer is an ink outline chip: it is the
+           reason a day is absent, and absence is never a semantic hue
+           (L5.9) — "a request inside it failed" included. */
+        { label: 'Was it asked for?', key: 'verdict', render: (g) => (ak ? pill({
+          asked_and_empty: 'asked — provider returned nothing',
+          window_failed: 'a request inside it failed',
+          never_asked: 'not fully requested',
+        }[g.verdict] || 'unknown') : {
           asked_and_empty: '<span class="tag ok">asked — provider returned nothing</span>',
           window_failed: '<span class="tag bad">a request inside it failed</span>',
           never_asked: '<span class="tag warn">not fully requested</span>',
@@ -470,4 +511,85 @@ export async function renderCoverage(root) {
   root.append(note('A gap is only counted between a source’s own first and last day. A source that '
     + 'started collecting in March is not missing January — it has no history there, which is a '
     + 'different statement and belongs in a different sentence.'));
+  if (ak) coverageAbsence(root, c, cov, ver);
+}
+
+/* ── #coverage under the page contract ───────────────────────────────────── */
+/* The selected window, day by day: every source's rows summed, a day no
+   source collected on drawn as an outline, today unfinished. */
+function coverageWindow(root, win) {
+  const p = panel('Rows collected on each day of the window', 'Every source together; an outline is a day nothing was collected', 'cov-window');
+  root.append(p.panel);
+  if (!win || !win.sources?.length) { p.body.append(note('The windowed calendar could not be read, so the window cannot be drawn.')); return; }
+  const by = new Map();
+  win.sources.forEach((s) => (s.days || []).forEach((d) => by.set(d.day, (by.get(d.day) || 0) + (+d.rows || 0))));
+  const firsts = win.sources.map((s) => s.first_day).filter(Boolean).sort();
+  const lasts = win.sources.map((s) => s.last_day).filter(Boolean).sort();
+  const from = String(win.from || firsts[0] || '').slice(0, 10), to = String(win.to || lasts.at(-1) || '').slice(0, 10);
+  if (!from || !to) { p.body.append(note('No source wrote a dated row in this window.')); return; }
+  const series = [];
+  for (let t = Date.parse(`${from}T12:00:00Z`); t <= Date.parse(`${to}T12:00:00Z`); t += 864e5) {
+    const k = dubaiDay(new Date(t));
+    series.push({ d: k, rows: by.get(k) || 0, none: !by.has(k) });
+  }
+  const b = el('div'); p.body.append(b);
+  gapBars(b, series, { x: 'd', y: 'rows', label: 'rows', gapKey: 'none', gapLabel: 'nothing was collected',
+    color: '--mk-fill', onClick: (r) => { location.hash = href('day', r.d); } });
+  const dark = series.filter((r) => r.none).length;
+  p.body.append(el('p', 'cap', `${fmt(series.reduce((a, r) => a + r.rows, 0))} rows over ${countOf(series.length, 'day')}`
+    + (dark ? `; ${countOf(dark, 'day')} with nothing from any source` : '') + '. A day with rows is not proof it was collected whole — the check against Uber below is.'));
+}
+/* Uber says against we hold, one point per window: on the line they agree. */
+function coverageScatter(host, rows) {
+  const pts = rows.filter((r) => !r.error && r.uber_rows != null && r.our_rows != null)
+    .map((r) => ({ ...r, uber: +r.uber_rows, ours: +r.our_rows, lab: `${dateStr(r.window_from)} · ${sourceLabel(r.fleet_id)}` }));
+  if (!pts.length) return;
+  host.append(el('h4', 'sub', 'Uber says, against what we hold'));
+  const b = el('div'); host.append(b);
+  scatter(b, pts, { x: 'uber', y: 'ours', label: 'lab', xLabel: 'Uber says', yLabel: 'we hold',
+    xFmt: (v) => fmt(v), yFmt: (v) => fmt(v), refLine: { slope: 1 } });
+  host.append(el('p', 'cap', `${countOf(pts.length, 'window')}. On the line, every booking Uber lists is in our table; below it, bookings we never stored.`));
+}
+/* What we hold that Uber's report does not list — per window. */
+function coverageOursOnly(root, rows) {
+  const p = panel('Rows we hold that Uber\u2019s report does not list', 'Per window checked: bookings in our table that Uber\u2019s own report for that window does not carry', 'cov-ours');
+  root.append(p.panel);
+  const ok = rows.filter((r) => !r.error && r.ours_only != null);
+  if (!ok.length) { p.body.append(note('No window has been checked against Uber yet, so nothing can be said either way.')); return; }
+  const extra = ok.filter((r) => +r.ours_only > 0);
+  if (!extra.length) { p.body.append(note(`In all ${countOf(ok.length, 'window')} checked, everything we hold is on Uber\u2019s own report.`)); return; }
+  const b = el('div'); p.body.append(b);
+  hbars(b, extra.sort((x, y) => y.ours_only - x.ours_only).slice(0, 12).map((r) => ({ label: `${dateStr(r.window_from)} → ${dateStr(r.window_to)} · ${sourceLabel(r.fleet_id)}`, n: +r.ours_only })),
+    { signed: false, color: '--mk-fill' });
+  p.body.append(el('p', 'cap', `${countOf(extra.length, 'window')} of ${fmt(ok.length)} hold bookings Uber\u2019s report does not list — a trip Uber has since dropped from its report, or one filed under the other fleet.`));
+}
+/* How many days each dataset has a reading on. */
+function coverageDatasets(root, c, cov) {
+  const p = panel('Days with a reading, per dataset', 'Every source and dataset the record holds, by the days it wrote anything', 'cov-datasets');
+  root.append(p.panel);
+  const rows = [
+    ...c.sources.map((s) => ({ label: sourceLabel(s.source), n: +s.days_with_data || 0, src: s.source })),
+    ...Object.entries(cov.dataset_calendar || {}).filter(([k]) => !c.sources.some((s) => s.source === k))
+      .map(([k, v]) => ({ label: k.replace(':', ' · '), n: +v.days_with_data || 0, src: k.split(':')[1] || null })),
+  ].filter((r) => r.n > 0).sort((x, y) => y.n - x.n);
+  if (!rows.length) { p.body.append(note('No dataset has a dated reading yet.')); return; }
+  const b = el('div'); p.body.append(b);
+  hbars(b, rows, { signed: false, colorFor: (x) => sourceToken(x.src) || '--mk-fill', valueFmt: (v) => `${fmt(v)} d` });
+}
+function coverageAbsence(root, c, cov, ver) {
+  const gaps = cov.earnings_gaps || [];
+  const noMoney = gaps.reduce((a, r) => a + (+r.bookings_before || 0), 0);
+  const rating = ver?.horizons?.rating?.from_day;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Bookings with no money', hl: noMoney > 0, fig: noMoney ? fmt(noMoney) : null, none: 'None',
+      why: noMoney ? `${gaps.map((g) => sourceLabel(g.platform)).join(' and ')} serve${gaps.length === 1 ? 's' : ''} earnings on a rolling window shorter than the trip record, so the work before it is on record and the money never will be.`
+        : 'Every booking on record falls inside a window its platform still serves money for.' },
+    { label: 'Ratings before we first asked', fig: null, none: 'Never held',
+      why: rating ? `Uber reports a rating as one current number with no history; the record starts on ${dateStr(rating)}, the day we first asked, and cannot be backfilled.`
+        : 'Uber reports a rating as one current number with no history, and no reading has been taken yet.' },
+    { label: 'A second count for any channel but Uber', fig: null, none: 'Uber only',
+      why: 'Only Uber serves a report of its own trips to match ours against; every other source\u2019s calendar is our own rows, which can show a day collected nothing and cannot show a day collected a tenth.' },
+  ]);
+  pageFoot({ colophon: ['the whole record', countOf(c.sources.length, 'source')] }, root);
 }

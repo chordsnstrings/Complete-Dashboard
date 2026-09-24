@@ -17,7 +17,8 @@
    a car whose fleet has no CABMAN account says exactly that, and nothing
    that reads as a fault in the car. */
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill, countOf,
-  dtStr, dayStr, dialable, sourceLabel, andList } from './ui.js';
+  dtStr, dayStr, dialable, sourceLabel, andList, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot,
+  kpiTiles, kpiCols } from './ui.js';
 import { fmt } from './charts.js';
 import { api } from './data.js';
 
@@ -41,7 +42,12 @@ function feedCell(r, feed) {
   const at = r[`${feed}_at`];
   const state = r[`${feed}_state`];
   const reason = r[`${feed}_reason`];
-  const chip = ok ? pill('receiving', 'ok') : pill('not receiving', 'bad', reason);
+  /* Under the page contract the state is an outline chip, and "not
+     receiving" says so in the negative token as text — never a fill, never
+     colour alone. */
+  const chip = contract()
+    ? (ok ? pill('receiving') : `<span class="pill" style="color:var(--sem-neg)"${reason ? ` title="${esc(reason)}"` : ''}>not receiving</span>`)
+    : ok ? pill('receiving', 'ok') : pill('not receiving', 'bad', reason);
   const from = `<div class="dim">from ${esc(FEEDS[feed].from)}</div>`;
   const when = at ? `<div class="dim">last reading ${esc(dtStr(at))}</div>` : '';
   const why = !ok && reason && state !== 'silent' ? `<div class="dim">${esc(reason)}</div>` : '';
@@ -93,8 +99,16 @@ export async function renderFeeds(root) {
   const noAccount = rows.filter((r) => r.seat_state === 'no_account');
   const noAccountFleets = [...new Set(noAccount.map((r) => sourceLabel(r.fleet_id)))];
 
+  /* Under the page contract (a post-plan page, on the contract's own rules):
+     the six counts as the 00 band, untoned, the feed missing the most cars
+     the hero; the table, its sort, its cards at a phone width and its tel:
+     links unchanged, the feed states outline chips; the rules line kept as
+     the page's source; a † band for the fleets a provider holds no account
+     for. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, `readings as of ${dtStr(d.as_of)} · receiving means a reading in the last ${hours} hours`) : null;
   /* The count at the top: receiving and not, for each feed. */
-  root.append(kpiRow([
+  const FEED_TILES = [
     { label: 'Seat sensor (CABMAN) receiving', value: fmt(t.seat?.receiving ?? 0), tone: 'good', key: 'seat-yes',
       sub: `of ${countOf(t.vehicles ?? 0, 'car')} active on Uber` },
     { label: 'Seat sensor (CABMAN) not receiving', value: fmt(t.seat?.not_receiving ?? 0), tone: 'critical', key: 'seat-no',
@@ -109,7 +123,21 @@ export async function renderFeeds(root) {
       sub: `of ${countOf(t.vehicles ?? 0, 'car')} active on Uber` },
     { label: 'FMS not receiving', value: fmt(t.fms?.not_receiving ?? 0), tone: 'critical', key: 'fms-no',
       sub: `no reading in the last ${hours} hours` },
-  ]));
+  ];
+  if (ak) {
+    const worst = [['seat-no', t.seat?.not_receiving], ['fms-seat-no', t.fms_seat?.not_receiving], ['fms-no', t.fms?.not_receiving]]
+      .sort((a, b) => (b[1] || 0) - (a[1] || 0))[0][0];
+    /* Two rows, what is missing first: the three "not receiving" counts (the
+       feed missing the most cars the hero), then the three receiving, in a
+       hero-less row beside the grid. Six tiles in one glance row wrapped a
+       lone sixth tile at 1440, the hero spanning two of the six columns. */
+    const tiles = bandTiles(FEED_TILES.map((x) => (x.key === worst ? { ...x, hero: true } : x))).tiles;
+    glance(AKB.tilesHost, tiles.filter((x) => /-no$/.test(x.key || '')));
+    const row2 = el('div', 'kpis glance');
+    row2.innerHTML = kpiTiles(tiles.filter((x) => !/-no$/.test(x.key || '')).map((x) => ({ ...x, glance: true, hero: false })));
+    row2.style.setProperty('--kpi-n', String(kpiCols(row2.children.length)));
+    AKB.tilesHost.after(row2);
+  } else root.append(kpiRow(FEED_TILES));
 
   const fleets = Object.entries(t.fleets || {}).map(([f, n]) => `${fmt(n)} ${sourceLabel(f)}`);
   const p = panel(`${countOf(rows.length, 'car')} active on Uber`,
@@ -160,4 +188,15 @@ export async function renderFeeds(root) {
   ];
   root.append(el('div', 'cap srcline',
     rules.map(([k, v]) => `<div><b>${esc(k)}:</b> ${esc(v)}</div>`).join('')));
+  if (ak) {
+    const absHost = el('div'); root.append(absHost);
+    absenceBand(absHost, [
+      { label: 'A CABMAN seat sensor on these fleets', hl: noAccount.length > 0, fig: noAccount.length ? countOf(noAccount.length, 'car') : null, none: 'Every fleet covered',
+        why: noAccount.length ? `${andList(noAccountFleets)} has no CABMAN account, so its cars can never send a CABMAN seat reading — a fact about the account, not a fault in the car.`
+          : 'Every fleet with an active car holds a CABMAN account.' },
+      { label: 'Cars not on Uber\u2019s list', fig: null, none: 'Not shown',
+        why: 'The page starts from the cars Uber marks ACTIVE; a car on another channel only, or on none, is not on it.' },
+    ]);
+    pageFoot({ colophon: ['Uber\u2019s vehicle list and the tracker feeds', countOf(rows.length, 'car')] }, root);
+  }
 }

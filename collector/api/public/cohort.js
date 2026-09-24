@@ -15,9 +15,10 @@
    fleet portal. That join used to be a page load per person. */
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
   dayStr, dtStr, money, fmt, pct, plural, countOf, andList, verdict, foldRows, foldChildren,
-  sourceLabel, custody, SEG_SOURCE_LABEL } from './ui.js';
-import { q, qAll, api, href, params, unfiltered } from './data.js';
-import { empty } from './charts.js';
+  sourceLabel, custody, SEG_SOURCE_LABEL,
+  contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, sourceToken, dateStr } from './ui.js';
+import { q, qAll, api, href, params, unfiltered, windowLabel } from './data.js';
+import { empty, hbars } from './charts.js';
 import { COHORTS, membersOf, idOf, accountsOf } from './cohorts.js';
 
 const hrs = (min, d = 0) => (min == null ? null : fmt(Number(min) / 60, d));
@@ -235,8 +236,22 @@ export async function renderCohort(root, key) {
     empty(root, 'That drill-down does not exist');
     return null;
   }
-  const vHost = el('div'); root.append(vHost); loading(vHost);
-  const kpiHost = el('div'); root.append(kpiHost);
+  /* Under the page contract (plan §4 #cohort): the verdict as the 00
+     statement with the tiles beside it — the count it states not repeated
+     (ruling 7) — and the plan's TRUTH FIX: "Licences due … expiring within
+     30 days" counted every NEGATIVE days_left too, so a set whose members had
+     all lapsed read "59 expiring". Under the contract it is two tiles,
+     already lapsed and due within 30 days, over the same predicate. Then
+     which channels carry the set, the full list and the member cards
+     unchanged, what every other system could answer, and a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const vHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vHost);
+  loading(vHost);
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost);
+  const chanP = ak && c.kind !== 'vehicle' ? panel('Which channels carry them', 'Members of this set by the channels they drive on — a person on two is in both bars', 'cohort-chan') : null;
+  if (chanP) root.append(chanP.panel);
   const tblP = panel('The full list', 'Ranked by what is at stake. Click a row to open it.');
   root.append(tblP.panel); loading(tblP.body);
   const cardsP = panel('What each system holds',
@@ -256,10 +271,14 @@ export async function renderCohort(root, key) {
   const ids = [...new Set(rows.flatMap((r) => (c.kind === 'vehicle'
     ? [r.plate] : accountsOf(r))).filter(Boolean))];
 
+  /* A licence set whose members have lapsed is not "expiring": the verdict
+     says both words when both are true (the plan's truth fix). */
+  const lapsedLic = ak && rows.some((r) => r.licence_days_left != null && r.licence_days_left < 0)
+    && /licen[cs]e/i.test(c.label) && /expir/i.test(c.label) && !/expired/i.test(c.label);
   verdict(vHost, {
     claim: rows.length
       ? `${c.kind === 'vehicle' ? countOf(rows.length, 'vehicle')
-        : countOf(rows.length, 'person', 'people')} — ${c.label.toLowerCase()}`
+        : countOf(rows.length, 'person', 'people')} — ${lapsedLic ? 'licence expired or expiring' : c.label.toLowerCase()}`
       : `Nobody is ${c.label.toLowerCase()} in this window`,
     figure: fmt(rows.length),
     unit: c.kind === 'vehicle' ? plural(rows.length, 'vehicle') : plural(rows.length, 'person', 'people'),
@@ -283,7 +302,7 @@ export async function renderCohort(root, key) {
   const has = (f) => rows.some((r) => r[f] !== undefined);
   const near = (f) => rows.filter((r) => r[f] != null && r[f] < 30).length;
   const over = (f) => rows.some((r) => r[f] != null && r[f] < 0);
-  kpiHost.replaceWith(kpiRow([
+  const COH_TILES = [
     { label: c.kind === 'vehicle' ? plural(rows.length, 'Vehicle') : plural(rows.length, 'Person', 'People'),
       value: fmt(rows.length),
       sub: all.length ? `of ${fmt(all.length)} the source listed` : null },
@@ -336,11 +355,17 @@ export async function renderCohort(root, key) {
           sub: sumOf(rows, (r) => r.cash_value)
             ? `${money(sumOf(rows, (r) => r.cash_value))} of it reports a fare`
             : 'none of them reports a fare at all' } : null,
-  ]));
+  ];
+  if (ak) {
+    kpiHost.remove();
+    cohortGlance(AKB, COH_TILES, rows, all, fmt(rows.length));
+    if (chanP) cohortChannels(chanP.body, rows);
+  } else kpiHost.replaceWith(kpiRow(COH_TILES));
 
   if (!rows.length) {
     empty(tblP.body, 'Nothing matches in this window');
     empty(cardsP.body, 'Nothing to show');
+    if (ak) pageFoot({ colophon: [windowLabel(), `from ${c.fromLabel}`] }, root);
     return { label: c.label, from: c.from, fromLabel: c.fromLabel, n: 0 };
   }
 
@@ -486,6 +511,7 @@ export async function renderCohort(root, key) {
   } else {
     const byId = new Map(detail.rows.map((r) => [c.kind === 'vehicle' ? r.plate : r.id, r]));
     const box = el('div', 'cohort-cards');
+    const ones = [];
     /* A person keys on several provider accounts; their card merges what each
        of those accounts was told, because the roster fold already decided the
        accounts are one human. */
@@ -494,6 +520,7 @@ export async function renderCohort(root, key) {
         ? byId.get(r.plate)
         : mergeAccounts(accountsOf(r).map((x) => byId.get(x)).filter(Boolean));
       memberCard(box, c.kind, r, one);
+      ones.push(one);
     }
     /* Folded: a hundred and twenty-six cards is a page nobody scrolls, and the
        table above is what a reader uses to pick which of them to read. */
@@ -519,8 +546,88 @@ export async function renderCohort(root, key) {
       cardsP.body.append(note('This set is larger than the 400 the detail join will gather at once, '
         + 'so the cards below cover the first 400. The table above is complete.', 'warn'));
     }
+    if (ak && c.kind !== 'vehicle') cohortAnswered(root, cardsP, ones, rows.length);
+  }
+  if (ak) {
+    cohortAbsence(root, { c, all, payload, ids, detail, rows });
+    pageFoot({ colophon: [windowLabel(), `from ${c.fromLabel}`] }, root);
   }
   return { label: c.label, from: c.from, fromLabel: c.fromLabel, n: rows.length };
+}
+
+/* ── #cohort under the page contract ─────────────────────────────────────── */
+/* The tiles, untoned, the one that repeats the verdict's count taken out and
+   its sub-line kept as a caption; "…due" split into lapsed and due. The
+   licence facts the plan adds are counted off the same rows. */
+function cohortGlance(AKB, tiles, rows, all, figure) {
+  const split = [];
+  for (const t of tiles.filter(Boolean)) {
+    const f = t.label === 'Licences due' ? 'licence_days_left' : t.label === 'Papers due' ? 'doc_days_left' : null;
+    if (!f) { split.push(t); continue; }
+    const lapsed = rows.filter((r) => r[f] != null && r[f] < 0).length;
+    const due = rows.filter((r) => r[f] != null && r[f] >= 0 && r[f] < 30).length;
+    const what = f === 'licence_days_left' ? 'licence' : 'papers';
+    split.push({ label: 'Already lapsed', value: fmt(lapsed), sub: `${what} past the expiry date` });
+    split.push({ label: 'Due within 30 days', value: fmt(due), sub: `${what} still valid, expiring inside 30 days` });
+  }
+  const { tiles: out, dropped } = bandTiles(split, { figure });
+  glance(AKB.tilesHost, out);
+  const facts = [];
+  if (dropped?.sub) facts.push(`${dropped.value} ${String(dropped.label).toLowerCase()} ${dropped.sub}`);
+  if (rows.some((r) => r.licence_days_left !== undefined)) {
+    if (rows.some((r) => r.can_earn != null)) facts.push(`still marked able to earn ${fmt(rows.filter((r) => r.can_earn === true).length)} of ${fmt(rows.length)}`);
+    const tally = new Map();
+    rows.forEach((r) => { const d = String(r.licence_expires || '').slice(0, 10); if (d) tally.set(d, (tally.get(d) || 0) + 1); });
+    const [d, n] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0] || [null, 0];
+    if (n > 1) facts.push(`${fmt(n)} of ${fmt(rows.length)} carry the same expiry date, ${dateStr(`${d}T12:00:00`)}`);
+    if (all.length) facts.push(`${fmt(all.filter((r) => !r.licence_expires && r.licence_days_left == null).length)} of the ${fmt(all.length)} in the source have no licence date at all`);
+  }
+  if (facts.length) AKB.band.append(el('p', 'cap', esc(facts.join(' · '))));
+}
+function cohortChannels(host, rows) {
+  const by = new Map();
+  rows.forEach((r) => (r.platforms || []).forEach((p) => by.set(p, (by.get(p) || 0) + 1)));
+  if (!by.size) { empty(host, 'No channel is named on any member of this set.'); return; }
+  hbars(host, [...by.entries()].sort((a, b) => b[1] - a[1]).map(([p, n]) => ({ label: sourceLabel(p), n, plat: p })),
+    { signed: false, colorFor: (x) => sourceToken(x.plat) || '--mk-fill' });
+}
+/* What every other system could answer — counted off the member cards' own
+   join, so it adds no request: for each system, how many members it holds
+   anything about. A system that holds nothing on anybody is a gap in the
+   SET's evidence, not a clean record, and the † band says so. */
+const SYSTEMS = [['work', 'Ride platforms'], ['pay', 'Payouts'], ['standing', 'Standing'], ['compliance', 'Compliance'],
+  ['cars', 'Custody'], ['alerts', 'Driving events'], ['performance', 'Performance'], ['availability', 'Availability']];
+const answered = (one, k) => !!one && (k === 'availability' ? !!one.availability : (one[k] || []).length > 0);
+function cohortAnswered(root, cardsP, ones, n) {
+  const p = panel('What every other system could answer', `Of the ${fmt(n)} members, how many each system holds anything about`, 'cohort-answered');
+  cardsP.panel.after(p.panel);
+  hbars(p.body, SYSTEMS.map(([k, label]) => ({ label, n: ones.filter((o) => answered(o, k)).length })),
+    { signed: false, color: '--mk-fill', valueFmt: (v) => `${fmt(v)} of ${fmt(n)}` });
+}
+function cohortAbsence(root, { c, all, payload, ids, detail, rows }) {
+  const cells = [];
+  if (detail && (detail.rows || []).length && c.kind !== 'vehicle') {
+    const silent = SYSTEMS.filter(([k]) => !detail.rows.some((o) => answered(o, k)));
+    silent.slice(0, 3).forEach(([, label]) => cells.push({ label, fig: null, none: 'Holds nothing',
+      why: `${label} holds nothing about any member of this set — a gap in what is known about them, not a clean record.` }));
+  } else if (!detail) {
+    cells.push({ label: 'The other systems', fig: null, none: 'Not gathered',
+      why: 'The all-source join could not be read just now, so nothing is known here about what the other systems hold.' });
+  }
+  const capped = (c.cap && all.length >= c.cap) || (c.trunc && payload?.[c.trunc]);
+  cells.push({ label: 'The whole of the source', hl: !!capped, fig: capped ? `${fmt(all.length)} rows` : null, none: 'Complete',
+    why: capped ? `${c.fromLabel} capped its answer, so this set is drawn from the rows it returned and may be short.`
+      : `${c.fromLabel} returned every row it holds for this window.` });
+  if (ids.length >= 400) {
+    cells.push({ label: 'Cards beyond 400', fig: `${fmt(ids.length - 400)}`, none: 'None',
+      why: 'The detail join gathers 400 at once; the table is complete, the cards are not.' });
+  }
+  if (!cells.some((x) => x.label !== 'The whole of the source')) {
+    cells.push({ label: 'Every system', fig: null, none: 'Answered',
+      why: 'Every system holds something about at least one member of this set.' });
+  }
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, cells);
 }
 
 /* Two provider accounts, one human. Arrays concatenate; availability is summed

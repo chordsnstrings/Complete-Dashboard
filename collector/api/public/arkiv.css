@@ -960,6 +960,24 @@
 :root[data-skin="arkiv"] .insight-row,:root[data-skin="arkiv"] .dircard{background:none;border:0;
   border-top:1px solid var(--hair);border-radius:0;box-shadow:none;transition:none}
 :root[data-skin="arkiv"] .insight-row{padding:12px 0}
+/* #drivers' busiest six (plan §4): six columns at a desktop width, the full
+   name wrapping instead of an ellipsis — AUDIT found it clipped at 133px —
+   and the platform chips in the table a swatch beside an ink label. */
+@media(min-width:1100px){:root[data-skin="arkiv"] .dircards{grid-template-columns:repeat(6,minmax(0,1fr))}}
+:root[data-skin="arkiv"] .dircard{flex-wrap:wrap;align-items:flex-start}
+:root[data-skin="arkiv"] .dircard .dc-meta b{white-space:normal;overflow:visible;text-overflow:clip}
+/* The count on its own line under the name: six columns leave no room for
+   both side by side, and the wrapped name ran into the figure. */
+:root[data-skin="arkiv"] .dircard .dc-meta{flex:1 1 0}
+:root[data-skin="arkiv"] .dircard .dc-n{flex:0 0 100%;text-align:left;display:flex;gap:6px;align-items:baseline}
+:root[data-skin="arkiv"] .dircard .dc-n .num{display:inline}
+:root[data-skin="arkiv"] .pchip{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;color:var(--ink)}
+:root[data-skin="arkiv"] .pchip.dim{color:var(--grey)}
+:root[data-skin="arkiv"] .lic-d{display:block;margin-top:2px}
+/* #roster's table (plan §4): driver names wrapped to four lines at 1440 in a
+   column squeezed by seventeen others; a floor on its width keeps a name to
+   one or two. The frame scrolls sideways inside itself at a phone width. */
+:root[data-skin="arkiv"] [data-panel="roster-table"] td:first-child{min-width:24ch}
 :root[data-skin="arkiv"] .insight-row:hover,:root[data-skin="arkiv"] a.insight-row:hover,
 :root[data-skin="arkiv"] .dircard:hover{background:var(--paper-2);border-top-color:var(--hair);
   box-shadow:none;transform:none}
@@ -975,6 +993,17 @@
 :root[data-skin="arkiv"] .fnums span{font-family:var(--mono);font-size:var(--t1);letter-spacing:.14em}
 :root[data-skin="arkiv"] .whohead{border-bottom-color:var(--hair)}
 :root[data-skin="arkiv"] .sp-pair{border-radius:0}
+/* #segments (plan §4): the five rung definitions as a compact list, the rung
+   in mono small caps — named, never colour-coded. */
+:root[data-skin="arkiv"] .seg-rungs{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);gap:6px 18px;margin:12px 0 0}
+:root[data-skin="arkiv"] .seg-rungs dt{font-family:var(--mono);font-size:var(--t4);text-transform:uppercase;letter-spacing:.08em;color:var(--ink)}
+:root[data-skin="arkiv"] .seg-rungs dd{margin:0;font-size:var(--t3);color:var(--grey-strong)}
+@media (max-width:720px){:root[data-skin="arkiv"] .seg-rungs{grid-template-columns:minmax(0,1fr)}}
+/* #same-person (plan §4): an answered card says its verdict in words (.sp-
+   verdict, "Confirmed one person" / "Ruled two people"); it is not faded,
+   tinted or given a green or grey rule as well. */
+:root[data-skin="arkiv"] .sp-pair.done{opacity:1;background:none}
+:root[data-skin="arkiv"] .sp-pair.done.same,:root[data-skin="arkiv"] .sp-pair.done.different{border-left:1px solid var(--rule)}
 :root[data-skin="arkiv"] .leak{background:none;border-color:var(--hair);border-radius:0;transition:none}
 :root[data-skin="arkiv"] .leak:hover{transform:none;border-color:var(--ink)}
 :root[data-skin="arkiv"] .leak.on{border-color:var(--ink);background:var(--paper-2)}
@@ -1027,6 +1056,13 @@
    grey-2, never a hatch in a semantic hue (SPEC §5, L5.9). The tooltip on the
    cell ("nothing collected") and the gaps table under it are unchanged. */
 :root[data-skin="arkiv"] .cal .c.gap{background:none;box-shadow:inset 0 0 0 1px var(--abs-outline)}
+/* #providers: a field's filled share as a small bar beside its figure. */
+:root[data-skin="arkiv"] .pv-fill{display:inline-block;width:44px;height:6px;margin-right:8px;vertical-align:middle;background:var(--hair)}
+:root[data-skin="arkiv"] .pv-fill>i{display:block;height:100%;background:var(--mk-fill)}
+:root[data-skin="arkiv"] [data-surface] h3>.sw{margin-right:8px}
+/* Today is still being collected: hatched in ink, the unfinished-day mark
+   the charts use, so a short today is not read as a thin day (#coverage). */
+:root[data-skin="arkiv"] .cal .c.today{opacity:1 !important;background:repeating-linear-gradient(45deg,var(--ink) 0 1.5px,transparent 1.5px 3.5px);box-shadow:inset 0 0 0 1px var(--ink)}
 
 /* ── 14 · motion ────────────────────────────────────────────────────────────
    The hover lifts and the entrance choreography go: a ruled sheet does not
@@ -1236,7 +1272,12 @@
      not min(): test/type_scale.test.mjs admits only a token, a clamp or an
      em, and a bare min() was a literal size by that rule (the Money-section
      full suite caught it). --d4 as the floor only bites below 252px. */
-  :root[data-skin="arkiv"] .kpis.glance .kpi.is-hero .n.long{font-size:clamp(var(--d4),10.5vw,var(--d6))}
+  /* …and never a REASON. An absent hero carries its reason in the value slot
+     (.t-na), which is long by nature, so .long matched it and this rule —
+     heavier than .t-na's — drew "Uber prices no trip — see the day's payout
+     below" at display size over five lines at 390 (#trip, production,
+     2026-09-24). A reason keeps .t-na's reading size at every width. */
+  :root[data-skin="arkiv"] .kpis.glance .kpi.is-hero .n.long:not(.t-na){font-size:clamp(var(--d4),10.5vw,var(--d6))}
 }
 
 /* THE DELTA (SPEC L3). The colour follows the meaning, the glyph and sign

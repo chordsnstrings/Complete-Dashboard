@@ -12,10 +12,10 @@
    beside a trip reads as what the trip earned — which on a nine-trip day is
    nine times what it was. So the two sit in one panel that says which is
    which, and neither is shown without the other's caveat. */
-import { empty, fmt } from './charts.js';
+import { empty, fmt, gapBars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill, money, pct,
   dayStr, dtStr, timeStr, sourceLabel, tierLabel, countOf, plural, noneChosen,
-  trackerState, trackerSpeed, UBER_FARE_WHY, segSourceLabel } from './ui.js';
+  trackerState, trackerSpeed, UBER_FARE_WHY, segSourceLabel, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
 import { api, href } from './data.js';
 
 const OUTCOME_TONE = { completed: 'ok', not_completed: 'warn' };
@@ -45,6 +45,113 @@ const STMT_SURFACE = {
 const stmtSurface = (s) => STMT_SURFACE[String(s || '').toLowerCase()]
   || (s ? `the ${s} feed` : 'a surface the record does not name');
 
+/* ── #trip under the page contract ───────────────────────────────────────── */
+/* These sit ABOVE renderTrip, not at the module end as on every other page:
+   test/trip_raw_redaction slices this file from "What the provider actually
+   sent" to the end and asserts no panel( call in that slice (the redaction
+   note must stay one caption line). A contract helper placed after it reads
+   as a new panel inside the raw block. Function declarations hoist, so the
+   order changes nothing at run time. */
+/* A fix's seat reading, by the rule the fixes table below already applies:
+   FMS sends a live seat COUNT (occupied at 1 or more) and leaves
+   seat_occupied null; CABMAN DT's pad sends seat_occupied. Reading only
+   seat_occupied — the first draft — called every FMS fix "no seat reading"
+   on a booking whose table showed "occupied · 1" beside it (measured on a
+   production hotel booking, 2026-09-24). null = this fix carries neither. */
+const seatOf = (f) => (f.source === 'fms' && f.seat_count != null ? Number(f.seat_count) >= 1
+  : f.seat_occupied == null ? null : !!f.seat_occupied);
+function tripGlance(AKB, tiles, d) {
+  const t = d.trip, tm = d.trip_money;
+  const by = Object.fromEntries(tiles.map((x) => [x.label, x]));
+  const fixes = (d.telemetry || []).filter((f) => seatOf(f) != null);
+  const occ = fixes.filter((f) => seatOf(f)).length;
+  const route = [t.product ? tierLabel(t.product) : null, t.payment_type ? String(t.payment_type).replace(/_/g, ' ') : null].filter(Boolean).join(' · ');
+  glance(AKB.tilesHost, bandTiles([
+    /* An unpriced fare is ABSENT with the tile's own reason, and the tier
+       and payment route stay the sub — joined, the first draft printed
+       "Electric · braintree — Uber prices no trip — …" as one reason. */
+    t.price != null ? { ...by.Fare, hero: true, sub: [route, by.Fare.sub].filter(Boolean).join(' — ') }
+      : { label: 'Fare', hero: true, na: by.Fare.sub, sub: route || null },
+    tm && tm.earnings != null ? { label: 'The driver earned', value: money(tm.earnings, 'AED', 2),
+      sub: [tm.service_fee != null ? `service fee ${money(Math.abs(tm.service_fee), 'AED', 2)}` : null,
+        tm.commission_pct != null ? `${fmt(tm.commission_pct)}% commission` : null].filter(Boolean).join(' · ') || 'from the payments report' }
+      : { label: 'The driver earned', na: earnedWhy(t) },
+    by.Distance, by.Time, by.Status, by.Product,
+    fixes.length ? { label: 'Rider in the car', value: `${fmt(occ)} of ${fmt(fixes.length)}`, sub: 'tracker fixes with the seat sensor reading occupied' }
+      : { label: 'Rider in the car', na: 'no tracker fix around this booking carries a seat reading' },
+  ], { reasons: { Distance: 'this channel reported none', Time: 'no duration and no end time', Status: 'the channel sent no status' } }).tiles);
+}
+/* Why a booking has no per-booking earnings — the TRUE reason, by channel.
+   /api/trip's trip_money is read off Uber's payments report (raw.uber_payments,
+   api/trip_routes.js) and is "absent for every other channel, which report a
+   price and no breakdown". The first draft said "the payments report carries
+   no row for this booking" on a hotel booking, where there is no such report
+   to carry one (production, 2026-09-24). */
+const earnedWhy = (t) => (t.platform === 'uber'
+  ? 'Uber\u2019s payments report carries no row for this booking'
+  : `${sourceLabel(t.platform)} reports a price and no breakdown, so nothing says what the driver kept of it`);
+function tripSpeed(root, d) {
+  const T = d.telemetry || [];
+  const sources = [...new Set(T.map((f) => f.source || 'tracker'))];
+  const p = panel('The booking, and the trackers that watched it', 'Speed at each tracker fix, one chart per feed — two feeds are never interleaved.', 'trip-speed');
+  root.append(p.panel);
+  const t = d.trip;
+  /* The occupancy rows are one per PROVIDER's reading, not one per ride:
+     FMS live and FMS trip each report the same interval, so "2 occupied
+     intervals" would count one ride twice. Name who reported instead. */
+  const segBy = [...new Set((d.segments || []).map((r) => (r.source || r.source_label ? segSourceLabel(r) : 'a provider the row does not name')))];
+  p.body.append(el('p', 'cap', esc(`Booked ${t.requested_at ? timeStr(t.requested_at) : 'at an unrecorded time'}`
+    + ` · ended ${t.ended_at ? timeStr(t.ended_at) : 'at no recorded time'}`
+    + (segBy.length ? ` · occupancy reported by ${segBy.join(' and ')}` : ' · no seat sensor reported occupancy around it'))));
+  if (!T.length) { empty(p.body, 'No tracker fix falls around this booking.'); return; }
+  /* segSourceLabel takes a segment ROW; a fix's feed is a plain source key
+     and is named by sourceLabel, as the table's Feed column names it. The
+     first draft passed the key to segSourceLabel and printed "provider not
+     recorded" over both charts. And a tracker sends a speed only while the
+     vehicle MOVES (ui.js trackerSpeed): an empty bar is a stationary fix, and
+     a feed with no speed at all gets a sentence, not a chart of outlines.
+     That sentence names the tracker rule only for the two trackers it is
+     true of: production's /api/trip also returns Uber's driver-status rows
+     as fixes ("ONLINE", no position, no speed) — a feed that never sends a
+     speed, stationary or not. */
+  for (const src of sources) {
+    const mine = T.filter((f) => (f.source || 'tracker') === src);
+    const rows = mine.map((f) => ({ x: timeStr(f.captured_at), v: f.speed == null ? null : +f.speed, none: f.speed == null }));
+    const name = src === 'tracker' ? 'Feed not named' : sourceLabel(src);
+    if (!rows.some((r) => r.v != null)) {
+      p.body.append(el('p', 'cap', `<b>${esc(name)}</b> — ${esc(countOf(rows.length, 'fix', 'fixes'))}, none carrying a speed: `
+        + (src === 'fms' || src === 'cabman' ? 'this tracker reports one only while the vehicle moves.'
+          : 'this feed sends a status, not a speed.')));
+      continue;
+    }
+    p.body.append(el('p', 'cap', `<b>${esc(name)}</b> — ${esc(countOf(rows.length, 'fix', 'fixes'))}`));
+    const host = el('div'); p.body.append(host);
+    gapBars(host, rows, { x: 'x', y: 'v', label: 'km/h', color: '--ink', gapKey: 'none',
+      gapLabel: 'stationary — the tracker sends a speed only while moving',
+      bucketNoun: 'fixes', inProgress: false, valueFmt: (v) => `${fmt(v)} km/h` });
+  }
+}
+function tripAbsence(root, d) {
+  const t = d.trip, tm = d.trip_money;
+  const resid = tm && tm.fare != null && tm.earnings != null
+    ? +(tm.fare + (tm.service_fee || 0) - tm.earnings).toFixed(2) : null;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Where the booking went', fig: t.pickup_lat != null ? 'Coordinates' : null, none: 'Address only',
+      why: t.pickup_lat != null ? 'The channel sent coordinates for the ends of this booking.'
+        : 'The channel sent address text and no coordinates, so the ends cannot be placed on a map.' },
+    { label: 'How long the ride took', fig: t.duration_s != null ? `${fmt(Math.round(t.duration_s / 60))} min` : null, none: 'Not sent',
+      why: t.duration_s != null ? 'The channel reported the duration.'
+        : `${sourceLabel(t.platform)} sent no duration for this booking; request to end holds the approach and the wait.` },
+    { label: 'How many rode', fig: t.seat_count ? countOf(t.seat_count, 'seat') : null, none: 'Not sent',
+      why: t.seat_count ? 'The channel named the seats booked.' : 'No seat count on this booking.' },
+    { label: 'Why the fare and the earnings do not meet', hl: resid != null && resid !== 0, fig: resid == null ? null : money(resid, 'AED', 2), none: 'Not computable',
+      why: resid == null ? `${earnedWhy(t)}.`
+        : 'Fare plus the service fee, less the earnings: what the platform\u2019s report does not itemise on this row.' },
+  ]);
+  pageFoot({ colophon: [sourceLabel(t.platform), t.local_day ? dayStr(t.local_day) : 'no day'] }, root);
+}
+
 export async function renderTrip(root, platform, id) {
   root.innerHTML = '';
   if (!platform || !id) {
@@ -67,6 +174,14 @@ export async function renderTrip(root, platform, id) {
   /* The two ends of the journey, which is what a person means by "which
      trip". Addresses where the channel reports them, coordinates where it
      reports only those, and said plainly when it reports neither. */
+  /* Under the page contract (plan §4 trip): a 00 band first — the fare the
+     hero with its tier and payment route, the driver's earnings, distance,
+     request to end, and the rider in the car from the seat sensor where one
+     reported (ABSENT where none did) — then the header facts line, the speed
+     each tracker saw over the booking (per source: FMS and CABMAN must not
+     interleave), the money table and every table below unchanged, a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, t.local_day ? dayStr(t.local_day) : null) : null;
   const head = el('div', 'note');
   head.innerHTML = `<b>${esc(t.pickup_addr || coord(t.pickup_lat, t.pickup_lng) || 'pickup not reported')}</b>`
     + ' → '
@@ -80,7 +195,7 @@ export async function renderTrip(root, platform, id) {
   root.append(head);
 
   const mins = t.duration_s == null ? null : Math.round(Number(t.duration_s) / 60);
-  root.append(kpiRow([
+  const TRIP_TILES = [
     { label: 'Status', value: t.status || '—', tone: OUTCOME_TONE[t.outcome] || null,
       sub: t.outcome && t.outcome !== t.status ? `normalised: ${t.outcome}` : 'as the channel words it' },
     { label: 'Distance', value: t.distance_km == null ? '—' : `${fmt(t.distance_km, 1)} km`,
@@ -105,13 +220,16 @@ export async function renderTrip(root, platform, id) {
         : (n.platform_prices_trips ? 'no fare on this booking'
           : `${sourceLabel(t.platform)} prices no trip — see the day’s payout below`),
       tone: t.price == null && !n.platform_prices_trips ? 'warn' : null },
-  ]));
+  ];
+  if (ak) tripGlance(AKB, TRIP_TILES, d);
+  else root.append(kpiRow(TRIP_TILES));
 
   if (!t.is_booking) {
     root.append(note('This is a telematics journey, not a booking. The tracker recorded the vehicle '
       + 'moving; no channel sold it. It appears here because the same table holds both.', 'warn'));
   }
 
+  if (ak) tripSpeed(root, d);
   /* ── the money ────────────────────────────────────────────────────────── */
   const tm = d.trip_money;
   const mp = panel('What this trip earned',
@@ -557,5 +675,6 @@ export async function renderTrip(root, platform, id) {
     + `provider id <code>${esc(t.external_id)}</code> on ${esc(sourceLabel(t.platform))}`
     + (t.plate ? ` · <a href="${href('vehicle', t.plate, 'trips')}">this vehicle’s trips</a>` : '')
     + (t.driver_ext_id ? ` · <a href="${href('driver', t.driver_ext_id, 'trips')}">this driver’s trips</a>` : '')));
+  if (ak) tripAbsence(root, d);
   return d;
 }

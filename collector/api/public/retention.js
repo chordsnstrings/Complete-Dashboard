@@ -6,9 +6,9 @@
    keep anybody — and the remedy for each makes the other worse. This page
    exists to separate them, which a headcount cannot do and a cohort can. */
 
-import { empty, fmt } from './charts.js';
+import { empty, fmt, areaChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
-  countOf, plural, sourceLabel, signed, verdict } from './ui.js';
+  countOf, plural, sourceLabel, signed, verdict, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, delta, foldRows } from './ui.js';
 import { q, href } from './data.js';
 
 /* "Aug 25" is how every other page in this product writes a DATE — the 25th of
@@ -24,8 +24,13 @@ const MONTH = (m) => {
    Four categorical series, so the categorical palette: new, returning, left,
    and the headcount they add up to drawn as a line across them. No dual axis —
    every series here is a count of people. */
-function flowChart(host, flow) {
+function flowChart(host, flow, { ak = false } = {}) {
   host.innerHTML = '';
+  /* Under the page contract the headcount is its own chart (SPEC §4 forbids
+     the dual axis this one drew), and the flow is achromatic: arrivals an
+     ink/grey pair above the line, departures ink below it — position, not a
+     semantic fill, says which way a person went. */
+  const C = ak ? { j: '--ink', r: '--grey', l: '--ink' } : { j: '--s1', r: '--s4', l: '--s2' };
   if (!flow.length) return empty(host);
   const W = 900, H = 260, P = { l: 46, r: 14, t: 18, b: 40 };
   const up = flow.map((f) => (f.joined || 0) + (f.returning || 0));
@@ -48,24 +53,24 @@ function flowChart(host, flow) {
     const hJ = (j / maxFlow) * (ih / 2), hR = (rt / maxFlow) * (ih / 2), hL = (lf / maxFlow) * (ih / 2);
     if (j) {
       out.push(`<rect x="${x.toFixed(1)}" y="${(mid - hJ).toFixed(1)}" width="${bw.toFixed(1)}" height="${hJ.toFixed(1)}"
-        rx="2" fill="var(--s1)" data-rise><title>${esc(MONTH(f.m))} — ${j} genuinely new</title></rect>`);
+        rx="2" fill="var(${C.j})" data-rise><title>${esc(MONTH(f.m))} — ${j} genuinely new</title></rect>`);
     }
     if (rt) {
       out.push(`<rect x="${x.toFixed(1)}" y="${(mid - hJ - hR).toFixed(1)}" width="${bw.toFixed(1)}" height="${hR.toFixed(1)}"
-        rx="2" fill="var(--s4)" data-rise><title>${esc(MONTH(f.m))} — ${rt} returning after a gap</title></rect>`);
+        rx="2" fill="var(${C.r})" data-rise><title>${esc(MONTH(f.m))} — ${rt} returning after a gap</title></rect>`);
     }
     if (lf) {
       out.push(`<rect x="${x.toFixed(1)}" y="${mid.toFixed(1)}" width="${bw.toFixed(1)}" height="${hL.toFixed(1)}"
-        rx="2" fill="var(--s2)" data-rise><title>${esc(MONTH(f.m))} — ${lf} stopped</title></rect>`);
+        rx="2" fill="var(${C.l})" data-rise><title>${esc(MONTH(f.m))} — ${lf} stopped</title></rect>`);
     }
   });
   // The headcount, overlaid — scaled to its own range and labelled as such,
   // because a second axis would invite reading the two against each other.
   const lx = (i) => P.l + step * i + step / 2;
   const ly = (v) => P.t + 4 + (1 - v / maxAct) * (ih - 8);
-  out.push(`<path d="${act.map((v, i) => `${i ? 'L' : 'M'} ${lx(i).toFixed(1)} ${ly(v).toFixed(1)}`).join(' ')}"
+  if (!ak) out.push(`<path d="${act.map((v, i) => `${i ? 'L' : 'M'} ${lx(i).toFixed(1)} ${ly(v).toFixed(1)}`).join(' ')}"
     fill="none" stroke="var(--grey)" stroke-width="1.5" stroke-dasharray="4,3" data-draw/>`);
-  act.forEach((v, i) => {
+  if (!ak) act.forEach((v, i) => {
     out.push(`<circle cx="${lx(i).toFixed(1)}" cy="${ly(v).toFixed(1)}" r="7" fill="transparent">`
       + `<title>${esc(MONTH(flow[i].m))} — ${fmt(v)} drivers earning</title></circle>`);
   });
@@ -77,6 +82,13 @@ function flowChart(host, flow) {
   });
   out.push('</svg>');
   host.innerHTML = out.join('');
+  if (ak) {
+    host.append(el('div', 'legend', `
+      <span><i class="sw" style="background:var(--ink)"></i>genuinely new (above the line)</span>
+      <span><i class="sw" style="background:var(--grey)"></i>returning after a gap (above)</span>
+      <span><i class="sw" style="background:var(--ink)"></i>stopped (below the line)</span>`));
+    return;
+  }
   host.append(el('div', 'legend', `
     <span><i class="sw" style="background:var(--s1)"></i>genuinely new</span>
     <span><i class="sw" style="background:var(--s4)"></i>returning after a gap</span>
@@ -95,6 +107,15 @@ export async function renderRetention(root) {
 
   const flowLast = d.flow[d.flow.length - 1] || {};
   const t = d.tenure || {};
+  /* Under the page contract (plan §4 retention): the verdict as the 00
+     statement — its sub-line and meta written as months, not the raw ISO
+     "2026-08" — with the tiles untoned; the headcount as its own chart, the
+     arrivals and departures on one count axis with no headcount line (SPEC §4:
+     no dual axis), the flow table's New/Stopped as signed words, not pills;
+     the cohort grid in the achromatic ramp with its exact percentages; the
+     Stopped and Started tables unchanged; a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
 
   /* Fields read off /api/retention on production before the sentence was
      written: flow carries {m, active, joined, returning, left, net} per month
@@ -124,10 +145,10 @@ export async function renderRetention(root) {
       claim = `${fmt(f.active)} drivers active`;
       figure = fmt(f.active); unit = 'active';
     }
-    verdict(root, {
+    verdict(ak ? AKB.vHost : root, {
       claim, figure, unit, tone, recommend,
-      meta: d.last_complete_month ? `to ${d.last_complete_month}` : null,
-      sub: `${fmt(joined)} arrived and ${fmt(left)} stopped in ${f.m}.`
+      meta: d.last_complete_month ? `to ${ak ? MONTH(d.last_complete_month) : d.last_complete_month}` : null,
+      sub: `${fmt(joined)} arrived and ${fmt(left)} stopped in ${ak ? MONTH(f.m) : f.m}.`
         + (d.current_month_excluded
           ? ' The month in progress is left out — a partial month always looks like a collapse.'
           : ''),
@@ -137,7 +158,7 @@ export async function renderRetention(root) {
   const recruited = real.reduce((a, c) => a + c.size, 0);
   const kept = real.reduce((a, c) => a + c.still_active, 0);
 
-  root.append(kpiRow([
+  const RET_TILES = [
     { label: `Earning in ${MONTH(d.last_complete_month)}`, value: fmt(flowLast.active),
       sub: flowLast.net == null ? null
         : `${signed(flowLast.net)} on the month`,
@@ -173,7 +194,25 @@ export async function renderRetention(root) {
           ? ` · the ${fmt(t.stayers)} still working are ${t.median_months_so_far_stayers} months `
             + 'in and counting' : '')
         + (d.people_total ? ` · ${fmt(d.people_total)} people on record` : '') },
-  ]));
+  ];
+  if (ak) {
+    const vf = AKB.vHost.querySelector('.vdct-fig > b')?.textContent.trim() || null;
+    /* Against the month before, from flow[] — the month before's own
+       leavers and new joiners; more people stopping is the worse direction.
+       And the headcount against its peak, named. */
+    const prevF = d.flow[d.flow.length - 2] || null;
+    const peak = d.flow.reduce((a, f) => ((+f.active || 0) > (+a.active || 0) ? f : a), d.flow[0] || {});
+    const DL = {
+      0: flowLast.net != null ? { value: +flowLast.net, kind: 'change', d: 0, of: 'on the month before' } : null,
+      1: prevF ? { value: d.stopped_last_month.length - (+prevF.left || 0), kind: 'change', d: 0, invert: true, of: `on ${MONTH(prevF.m)}` } : null,
+      2: prevF ? { value: d.started_last_month.length - (+prevF.joined || 0), kind: 'change', d: 0, of: `on ${MONTH(prevF.m)}` } : null,
+    };
+    RET_TILES[0] = { ...RET_TILES[0], hero: true,
+      sub: peak && peak.m && peak.m !== flowLast.m ? `against the peak of ${fmt(peak.active)} in ${MONTH(peak.m)}` : 'the peak of the record' };
+    glance(AKB.tilesHost, bandTiles(RET_TILES.map((x, i) => (DL[i] ? { ...x, delta: DL[i] } : x)), { figure: vf,
+      reasons: { 'Recruits still working': 'nobody has joined since the record began', 'Typical run before stopping': 'nobody has stopped yet' } }).tiles);
+    retHeadcount(root, d.flow);
+  } else root.append(kpiRow(RET_TILES));
 
   /* The question the headcount cannot answer, answered — over the months where
      arriving MEANS something.
@@ -192,8 +231,9 @@ export async function renderRetention(root) {
   const returning = flow.reduce((a, f) => a + (f.returning || 0), 0);
   const inflow = joined + returning;
   const outflow = flow.reduce((a, f) => a + (f.left || 0), 0);
+  let flowNote = null;
   if (inflow || outflow) {
-    root.append(el('div', 'note',
+    (ak ? (x) => { flowNote = x; } : (x) => root.append(x))(el(ak ? 'p' : 'div', ak ? 'cap' : 'note',
       `Across ${countOf(flow.length, 'month')}, ${fmt(inflow)} driver-months arrived (${fmt(joined)} `
       + `genuinely new, ${fmt(returning)} returning after a gap) and ${fmt(outflow)} left. `
       + (outflow > inflow
@@ -220,19 +260,23 @@ export async function renderRetention(root) {
      returning and left sat in the same payload and appeared only as a table.
      A diverging bar puts arrivals above the line and departures below it, so
      the month where the two cross is visible rather than arithmetic. */
-  flowChart(fb, d.flow);
-  fb.append(tableFrom(d.flow, [
+  flowChart(fb, d.flow, { ak });
+  if (flowNote) fb.append(flowNote);
+  const flowTbl = tableFrom(d.flow, [
     { label: 'Month', key: 'm', render: (r) => MONTH(r.m) },
     { label: 'Earning', key: 'active', num: true },
     { label: 'New', key: 'joined', num: true,
-      render: (r) => (r.joined ? `<span class="pill ok">+${r.joined}</span>` : '—') },
+      render: (r) => (r.joined ? (ak ? delta(r.joined, { d: 0 }) : `<span class="pill ok">+${r.joined}</span>`) : '—') },
     { label: 'Returned', key: 'returning', num: true,
       render: (r) => (r.returning ? `+${r.returning}` : '—') },
     { label: 'Stopped', key: 'left', num: true,
-      render: (r) => (r.left ? `<span class="pill bad">−${r.left}</span>` : '—') },
+      render: (r) => (r.left ? (ak ? delta(-r.left, { d: 0 }) : `<span class="pill bad">−${r.left}</span>`) : '—') },
     { label: 'Net', key: 'net', num: true,
       render: (r) => (r.net == null ? '—' : esc(signed(r.net))) },
-  ], { compact: true, sortable: true, sortId: 'flow', defaultSort: { key: 'm', dir: 'asc' } }));
+  ], { compact: true, sortable: true, sortId: 'flow', defaultSort: { key: 'm', dir: 'asc' } });
+  /* The chart's table twin, folded under the contract. */
+  if (ak) foldRows(fb, flowTbl, { shown: 6, total: d.flow.length, noun: 'month', key: 'ret-flow' });
+  else fb.append(flowTbl);
 
   /* ── the cohort table ─────────────────────────────────────────────────── */
   const { panel: cp, body: cb } = panel('How long each month’s new drivers stayed',
@@ -265,7 +309,12 @@ export async function renderRetention(root) {
       }
       // Intensity from the retention itself, so the shape is readable at a glance.
       const a = 0.08 + 0.62 * (r.pct / 100);
-      tds.push(`<td class="num" style="background:color-mix(in srgb, var(--b400) ${Math.round(a * 100)}%, transparent)"
+      /* Under the contract the achromatic ramp: --b400 is Uber's identity
+         blue, and a cohort is not Uber. Paper text on the darker half. */
+      tds.push(ak
+        ? `<td class="num" style="background:color-mix(in srgb, var(--ink) ${Math.round(a * 100)}%, transparent);${a > 0.45 ? 'color:var(--paper)' : ''}"
+        title="${esc(MONTH(r.m))}: ${r.n} of ${c.size}">${r.pct}%</td>`
+        : `<td class="num" style="background:color-mix(in srgb, var(--b400) ${Math.round(a * 100)}%, transparent)"
         title="${esc(MONTH(r.m))}: ${r.n} of ${c.size}">${r.pct}%</td>`);
     }
     return `<tr>
@@ -348,10 +397,46 @@ export async function renderRetention(root) {
     }
   }
 
+  if (ak) { retAbsence(root, d, t); return; }
   root.append(note(`Tenure: people who have stopped ran a median of ${t.median_months_leavers ?? '—'} months; `
     + `people still working are ${t.median_months_so_far_stayers ?? '—'} months in and counting. ${t.note} `
     + (d.current_month_excluded
       ? `${MONTH(d.current_month_excluded)} is excluded from every figure on this page — the record stops `
         + 'inside it, and a driver who has not worked yet this week has not left.'
       : '')));
+}
+
+/* ── #retention under the page contract ──────────────────────────────────── */
+/* The headcount as its own mark, peak and low named — it was a dashed line on
+   a second, unlabelled scale over the flow. */
+function retHeadcount(root, flow) {
+  const p = panel('Drivers earning, month by month', 'A driver counts when they took at least one booking that month', 'ret-headcount');
+  root.append(p.panel);
+  if (!flow.length) { empty(p.body, 'Not enough history to draw.'); return; }
+  areaChart(p.body, flow.map((f) => ({ m: MONTH(f.m), n: Number(f.active) || 0 })), { x: 'm', y: 'n', color: '--ink',
+    aria: 'Drivers earning, month by month' });
+  const hi = flow.reduce((a, f) => ((+f.active || 0) > (+a.active || 0) ? f : a), flow[0]);
+  const lo = flow.reduce((a, f) => ((+f.active || 0) < (+a.active || 0) ? f : a), flow[0]);
+  p.body.append(el('p', 'cap', `The peak was ${fmt(hi.active)} in ${MONTH(hi.m)}; the low ${fmt(lo.active)} in ${MONTH(lo.m)}.`));
+}
+function retAbsence(root, d, t) {
+  const ids = (d.stopped_last_month || []).map((r) => r.driver_ext_id).filter(Boolean);
+  const dup = ids.length - new Set(ids).size;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    /* Its own sentence, not d.caveat: the plan named the caveat as this
+       cell's text, and the caveat is the DEFINITION of active (a booking in
+       the month, never a platform's "active" flag) — kept where it was, under
+       the cohort grid. */
+    { label: 'Why anybody left', fig: null, none: 'Not recorded',
+      why: 'No feed this product reads files a reason when somebody stops working. A roster standing records a state, and carries a reason only on a suspension.' },
+    { label: 'Leavers listed twice', hl: dup > 0, fig: dup ? `${fmt(dup)} of ${fmt(ids.length)}` : null, none: 'None',
+      why: dup ? 'The same driver id appears more than once among the leavers — one person, filed twice, counted as two.' : 'Every leaver is listed once.' },
+    { label: 'The month in progress', fig: d.current_month_excluded ? MONTH(d.current_month_excluded) : null, none: 'None excluded',
+      why: d.current_month_excluded ? 'Excluded from every figure: the record stops inside it, and a driver who has not worked yet this week has not left.'
+        : 'No month is excluded.' },
+    { label: 'Tenure, both halves', fig: t.median_months_leavers != null ? `${t.median_months_leavers} months` : null, none: 'Not measured',
+      why: `People who have stopped ran a median of ${t.median_months_leavers ?? '—'} months; people still working are ${t.median_months_so_far_stayers ?? '—'} months in and counting. ${t.note || ''}` },
+  ]);
+  pageFoot({ colophon: [d.last_complete_month ? `to ${MONTH(d.last_complete_month)}` : 'no complete month', `${fmt(d.people_total)} people on record`] }, root);
 }

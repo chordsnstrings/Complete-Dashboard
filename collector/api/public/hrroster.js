@@ -20,7 +20,7 @@
    with no date is "missing", with the reason, and sorts last; it is never
    "ok" and never "expired". */
 import { el, esc, panel, note, loading, kpiRow, tableFrom, entity, pill, sourceLabel,
-  dateStr, fmt, foldRows, countOf } from './ui.js';
+  dateStr, fmt, foldRows, countOf, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
 import { api, state, href } from './data.js';
 
 const DOCS = [
@@ -45,7 +45,14 @@ function docCell(d) {
     : `<span class="ent-off" title="${esc(d.absent_reason || '')}">no date</span>`;
   const days = d.days_left == null ? ''
     : ` <span class="dim">${d.days_left < 0 ? `${fmt(Math.abs(d.days_left))}d ago` : `${fmt(d.days_left)}d`}</span>`;
-  const tag = ` <span class="tag ${tone}"${d.status === 'missing' ? ` title="${esc(d.absent_reason || '')}"` : ''}>${label}</span>`;
+  /* Under the page contract the status is a word, not a fill: expired in the
+     negative colour, due within HR's 90 days in ink at weight (the rule
+     #compliance applies to HR's statuses), the rest grey — a document's date
+     is a level, and only a lapse is a fact. */
+  const tag = contract()
+    ? (d.status === 'expired' ? ' <span style="color:var(--sem-neg)">expired</span>'
+      : /^d(30|45|90)$/.test(d.status || '') ? ` <b>${label}</b>` : ` <span class="dim"${d.status === 'missing' ? ` title="${esc(d.absent_reason || '')}"` : ''}>${label}</span>`)
+    : ` <span class="tag ${tone}"${d.status === 'missing' ? ` title="${esc(d.absent_reason || '')}"` : ''}>${label}</span>`;
   /* A blank in the latest export is not the document vanishing: this is the
      last date HR filed, and it says which export it came from. */
   const carried = d.expires_from_export
@@ -100,7 +107,10 @@ function rosterTable(people) {
         ? `<span class="tag dim" title="HR’s own compliance label, as their export files it — not this product’s verdict">HR: ${esc(p.hr_compliance_status)}</span>`
         : '<span class="ent-off" title="HR’s export carries no compliance status for this person">—</span>') },
     { label: 'On HR’s list', key: 'on_list', sortValue: (p) => (p.on_list ? 1 : 0),
-      render: (p) => (p.on_list ? '<span class="tag ok">on the list</span>'
+      render: (p) => (contract()
+        ? (p.on_list ? '<span class="pill">on the list</span>'
+          : `<span class="pill" title="on the ${esc(dateStr(p.last_export_date))} export and not on the next one">off the HR list since ${esc(dateStr(p.off_list_since))}</span>`)
+        : p.on_list ? '<span class="tag ok">on the list</span>'
         : `<span class="tag warn" title="on the ${esc(dateStr(p.last_export_date))} export and not on the next one">off the HR list since ${esc(dateStr(p.off_list_since))}</span>`) },
   ], { sortable: true, sortId: 'hr-roster', defaultSort: { key: 'doc_licence', dir: 'asc' } });
 }
@@ -205,6 +215,13 @@ function renderPreview(host, p) {
 
 export async function renderHrRoster(root) {
   root.innerHTML = '';
+  /* Under the page contract: the four figures as a 00 band — anything
+     expiring in 90 days the hero — the roster table, its filters and fold
+     unchanged with its document states as words, the import form and the
+     upload history unchanged, and a † band for what this page will not show
+     (document numbers) and what HR did not file. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
   const head = el('div'); root.append(head); loading(head);
   const rosterP = panel('The roster', 'One row per person on the latest HR export, and the people a newer export dropped', 'hr-roster');
   const importP = panel('Bring in an HR export', 'The HR system’s active-drivers workbook, exactly as it exports it. See what it would do first; nothing is written until you commit.', 'hr-import');
@@ -326,7 +343,9 @@ export async function renderHrRoster(root) {
     }
     head.innerHTML = '';
     if (!v.latest) {
-      /* ABSENT WITH THE REASON — no tiles, no zeros. */
+      /* ABSENT WITH THE REASON — no tiles, no zeros (and under the contract
+         no empty 00 band either). */
+      if (ak) AKB.band.remove();
       head.append(note(v.absent_reason, 'warn'));
       rosterP.body.innerHTML = '';
       rosterP.body.append(el('p', 'cap', 'Bring in the HR system’s export below; the roster appears here once one is committed.'));
@@ -335,7 +354,7 @@ export async function renderHrRoster(root) {
       return;
     }
     const t = v.totals;
-    head.append(kpiRow([
+    const HR_TILES = [
       { key: 'hr-on-list', label: 'On HR’s list', value: fmt(t.on_list),
         sub: `${FLEET.ecosine} ${fmt(t.by_fleet.ecosine)} · ${FLEET.egari} ${fmt(t.by_fleet.egari)}` },
       { key: 'hr-expiring', label: 'Anything expiring in 90 days', value: fmt(t.anything_expiring),
@@ -344,7 +363,11 @@ export async function renderHrRoster(root) {
         sub: `${fmt(t.matched.platform_id)} by id · ${fmt(t.matched.phone)} by phone · ${fmt(t.matched.none)} not matched` },
       { key: 'hr-off-list', label: 'Off the HR list', value: fmt(t.off_list),
         sub: 'dropped by a newer export — kept, not deleted' },
-    ]));
+    ];
+    if (ak) {
+      AKB.tilesHost.innerHTML = '';
+      glance(AKB.tilesHost, bandTiles(HR_TILES.map((x) => (x.key === 'hr-expiring' ? { ...x, hero: true } : x))).tiles);
+    } else head.append(kpiRow(HR_TILES));
     head.append(el('p', 'cap', `From HR’s export of ${dateStr(v.latest.export_date)}, uploaded by ${v.latest.uploaded_by}. `
       + `Expiry is counted against today in Dubai, ${dateStr(v.today)}. Document numbers are held and never shown here.`));
 
@@ -407,6 +430,24 @@ export async function renderHrRoster(root) {
       { label: 'File', key: 'filename', render: (u) => esc(u.filename || '—') },
     ], { compact: true }));
     histP.body.append(el('p', 'cap', `${countOf(v.uploads.length, 'export')} on file. The same file twice is refused; an older export uploaded late is kept as history and does not change who is on the list.`));
+    if (ak) hrAbsence(root, v);
   };
   await draw();
+}
+
+/* ── #hr-roster under the page contract ──────────────────────────────────── */
+function hrAbsence(root, v) {
+  root.querySelectorAll('section.absence').forEach((n) => n.remove());
+  const t = v.totals || {};
+  const missing = DOCS.reduce((a, [k]) => a + (Number((t.expiring || {})[k]?.missing) || 0), 0);
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Document numbers', fig: null, none: 'Held, not shown',
+      why: 'Where HR files a number with a document, this product keeps it and shows only that one is on file — never the number.' },
+    { label: 'A date HR did not file', hl: missing > 0, fig: missing ? `${fmt(missing)} documents` : null, none: 'None',
+      why: missing ? 'No HR export on file carries an expiry for these documents, so they are neither in date nor expired.' : 'Every document on the latest export carries a date.' },
+    { label: 'People HR lists and no platform holds', fig: t.matched?.none ? countOf(t.matched.none, 'person', 'people') : null, none: 'None',
+      why: 'HR files no platform id for them and their phone is on no record this product holds.' },
+  ]);
+  pageFoot({ colophon: [`HR export of ${dateStr(v.latest.export_date)}`, `${fmt(t.on_list)} on the list`] }, root);
 }

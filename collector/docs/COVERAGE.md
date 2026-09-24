@@ -6715,3 +6715,121 @@ from the base commit's tree. Each of these cost a run or more to find.
   source was silent on still carries every other source's bookings, in the
   daily row and in `/api/trips/heatmap`. Only `uncollected` takes a day out
   of a per-day denominator.
+
+* **`.vdct-fig` holds the verdict's figure AND its unit and meta.** The
+  figure alone is `.vdct-fig > b`. A test comparing tile values with
+  `.vdct-fig`'s text can never find a match and passes whatever the page
+  does.
+
+* **`/api/trip`'s `telemetry` mixes three kinds of row.** FMS fixes carry a
+  seat COUNT in `seat_count` (occupied at 1 or more) and a null
+  `seat_occupied`; CABMAN DT fixes carry `seat_occupied`; and Uber's
+  driver-status rows arrive as fixes too — `source: 'uber'`, status
+  "ONLINE", no position, no speed, no seat. A page reading `seat_occupied`
+  alone calls every FMS fix unread; a page treating every row as a tracker
+  fix explains Uber's missing speed with the tracker's rule. FMS and CABMAN
+  send a speed only while the vehicle moves.
+* **`/api/trip`'s `segments` are one row per PROVIDER's reading.** FMS live
+  and FMS trip each report the same occupied interval, so the row count is
+  not a ride count.
+* **`segSourceLabel` takes a segment ROW, not a source key.** Given a
+  string it prints "provider not recorded". A fix's feed is a plain key and
+  is named with `sourceLabel`, as the fixes table's Feed column does.
+* **`trip_money` on `/api/trip` is Uber's payments report only**
+  (`raw.uber_payments`, api/trip_routes.js). Every other channel reports a
+  price and no breakdown, so its absence there is not "no row in the
+  payments report".
+* **`test/trip_raw_redaction` slices `trip.js` from "What the provider
+  actually sent" to the END of the file** and asserts no `panel(` in that
+  slice. Helpers appended at the module end read as a new panel inside the
+  raw block; put them above `renderTrip` (declarations hoist).
+
+* **Ruling 2 cannot be checked in the source.** A whole-dirham amount hides
+  in a string literal (a worked example in a caption), in a unit appended
+  to fmt() ("116 AED"), or in a histogram caption — none of them a money()
+  call. Scan the RENDERED text of the page, titles and SVG `<title>`s
+  included, for "AED" and a number with no fils: `test/arkiv_fils.test.mjs`
+  does it for every converted page against the mock. A page converted
+  after it belongs in its ROUTES list.
+
+* **The #drivers directory's licence tile IS the verdict on the expired
+  branch.** driversVerdict's figure is the expired count there, so under
+  ruling 7 the tile folds into the statement; a test that looks for a
+  "Licence expired" tile on the mock (2 expired) will not find one.
+
+* **`/api/driver/standing`'s trips value and `/api/driver/kpis`'s trips are
+  two counts.** On the mock they differ (268 against 251); a gap printed
+  under the kpis tile must be computed from the kpis figure, with the
+  standing supplying only the median and percentile.
+* **`test/driver_standing.test.mjs` pins `const tone = sn.tied ? '--s1'` in
+  driver.js.** A skin-dependent fill has to be a second variable, not a
+  rewrite of that expression.
+
+* **`/api/driver/shift` is the expensive read on production, and it can
+  stall the whole API.** Three concurrent loads of #driver/activity for the
+  busiest driver (6,925 trips on record) held it for 480 s, and for several
+  minutes nothing else on the API answered (a one-row /api/trips/list timed
+  out at 20 s; the droplet is basic-xxs). The same call for a lighter
+  driver answered in 3.4 s once the queue drained. Screenshot driver pages
+  one load at a time (`CONC=1`), and not for the fleet's busiest person.
+
+* **`stackedBar`'s share labels take their ink from `--on-cat-N`,
+  measured for the categorical slots.** A `colorFor` returning `--seq-N`
+  gets a label ink computed for a different fill, and prints dark on dark.
+  Under Arkiv the categorical slots already ARE the achromatic ramp; for a
+  non-channel composition, pass no `colorFor`.
+
+* **A tile's sub-line is not always its reason.** bandTiles() turns a bare
+  dash into an absence whose reason is the sub-line unless the caller names
+  one. On #driver/money two sub-lines are DEFINITIONS ("tolls, fines,
+  damage"); the true reason is /api/ledger/exposure's
+  `owes.books_absent_reason`. Read every sub-line of a converted row before
+  trusting it as a reason.
+
+* **`notRepeated()` folds the FIRST tile whose value equals the verdict's
+  figure.** Where several tiles can share a value it folds the wrong one: on
+  the #roster mock "1" is the idle, the never-driven and the stopped count at
+  once, and the fold took "Able to earn, earning nothing" out of a band whose
+  verdict was about the stopped. On a page where that can happen, fold the
+  tile the verdict IS by its label; and where the figure is a sum no tile
+  prints (#roster's "not earning"), fold nothing.
+
+* **A chart drawn into a host that is not on the page yet redraws itself
+  once it is laid out — and a redraw clears its host.** `whenLaidOut` in
+  charts.js re-runs the helper when a host narrower than 240px grows, and
+  every helper starts with `host.innerHTML = ''`. So a caption or table
+  appended into the SAME host after the call vanishes a frame later (the
+  #roster standings' counts did; the test saw an empty caption list). Draw a
+  chart into its own box whenever anything else goes in that body.
+
+* **`/api/same-person` is heavy on production too.** Eight concurrent loads
+  of #same-person (four in the old skin, which renders all 365 answered
+  cards) left it answering in 38 s and /api/kpis timing out at 20 s for a
+  couple of minutes. Screenshot it one load at a time (`CONC=1`), like
+  #driver/activity.
+
+* **`glance()` always crowns a hero, and a glance host is a grid.** A band with a second row of tiles (#vehicles' register) cannot build that row with a second `glance()` call. Each call makes its first tile a hero, so the page drew two. Build the row with `kpiTiles(…map(t => ({ ...t, glance: true, hero: false })))` in a `.kpis.glance` of its own, and place it with `tilesHost.after(…)`. Do not append it into the tiles host: anything appended there becomes one more grid cell, and glance() then overwrites the caption.
+
+* **`/api/vehicle/daily`'s `revenue` is every booking's fare on every channel.** It is `sum(price) FILTER (WHERE has_fare)`, Uber included, so it is k.revenue's basis. It is neither Money in (payout-basis channels by their payout) nor the Fares tile's `accounted_fares` (fare-basis channels only). On one production car that was AED 24,064.90 against AED 15,375.18 and AED 932.00. A chart of it must say which it is. Separately, a 00 band's hero spans two of the six glance columns, so a first row carries five tiles, not six.
+
+* **`/api/unauthorized/attributed` takes ~30 s on production** (29.0 s and 32.1 s cache-busted on 2026-09-24). A page must never await it with the rest. #unauthorized fetches it alongside, draws the table on custody first, and adds the rung-and-name column when it lands. #segments already awaits it with /api/segments. That is a known cost of that page and was not changed here.
+* **A chart drawn into a box of its own leaves the panel's `loading()` skeleton behind** unless the panel body is cleared first. The chart helpers clear their own host, not its parent. The first #unauthorized draft kept two skeletons for good, and `bin`-style shooting waited 120 s for them. `pagephase/skelsweep.mjs` (scratch) sweeps every arkiv route on the mock for this.
+
+* **`/api/unauthorized/attributed` → `distribution.by_tier` names its rung `key`, not `tier`, and its `km` is a numeric string** (`{"key":"last_trip","n":625,"km":"9137.7","segments":640}` on production). A test that reads the same wrong field as the page passes on zeros. Require a non-zero value, or a sum that meets another figure, before trusting the match.
+* **`/api/segments` rows are the newest and capped** (`truncated`, `total`). Anything counted off them about age, such as "before the status-feed history began", is a floor and must say so.
+
+* **A ruling-7 fold must go by LABEL on #live.** In the mock, the one stale car and the one car silent over a day are both "1": two different measures that happen to agree. A value-equality fold (or test) would take the wrong tile. This is the same trap as the roster fold (P50), met again.
+
+* **#map's live view waits on `/api/map/days` before `/api/live`, and on production the markers land ~20 s after load** (/api/live answered in 3.7 s on its own). Shooting it with the usual few-second wait gives an empty map in both skins, so shoot it at 25 s. Separately, the mock's `/api/map/journey` points carry no `source`; production's do (api/server.js). A test of feed colours on replay must supply one.
+
+* **FMS files its refused windows as "refused: <endpoint> failed"**, which carries no reason (81 of 236 refusals on production, 2026-09-24). A reason class read from provider wording must say "refused, with no reason given" for it, never file it under a guessed cause. Uber's rate limit reads "rate-limited, will retry next run", and Bolt's short read reads "collected N of M declared".
+
+* **Bolt refuses with a 200 whose body is `{code, error_hint, message}`** (ecosine:getDrivers on production, 2026-09-24, 0 records). providers.js `answered()` recognises error-only bodies by the key list `error|message|fault|status|code`, which misses `error_hint`, so the surface is counted as answering. A probe count of "answering" that trusts the status code alone reads a Bolt refusal as a success.
+
+### Trap: `hbars` prints a zero as a literal "0", whatever `valueFmt` says (2026-09-24)
+
+`charts.js` hbars renders the value slot as `${v === 0 ? '0' : valueFmt(...)}`, so a `valueFmt` that returns `''` for zero does nothing. A row whose zero means "not applicable" still prints "0" beside its words. On #settings, an expired key read "0 expired 28 d ago". The page rewrites that row's `.v` after drawing, row for row against the data it passed. The shared chart was not taught a special case, because a true zero printing "0" is right everywhere else.
+
+### Trap: a requestAnimationFrame timestamp can be EARLIER than performance.now() at the call (2026-09-24)
+
+`requestAnimationFrame(cb)` hands `cb` the time the frame STARTED. Code that reads `t0 = performance.now()` and then computes `(now − t0) / dur` in the callback can see a negative progress on the first frame. Under load the gap measured about 106 ms. Clamp progress to [0, 1], not just at 1. app.js countUp() did not, and a KPI briefly printed a negative figure ("-176" for 289). A stalled frame can hold that figure for hundreds of milliseconds, so a DOM read that waits for "two equal reads" can accept it. `test/countup_clock.test.mjs` shifts the frame clock by 150 ms to make the case certain rather than load-dependent.

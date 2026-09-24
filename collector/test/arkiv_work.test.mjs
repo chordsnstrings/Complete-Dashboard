@@ -52,7 +52,7 @@ if (want('demand')) {
     const s = await shape(page);
     const D = answer('/api/trips/daily'), G = answer('/api/trips/heatmap');
     check('the section order is the plan\'s', JSON.stringify(s.heads) === JSON.stringify(HEADS), JSON.stringify(s.heads));
-    const vfig = await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig');
+    const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
     check('the verdict (unchanged arithmetic) is 00\'s statement and its figure is not a tile (ruling 7)',
       s.vdctIn00 && !!vfig && !Object.values(s.values).includes(vfig), `${vfig} ${JSON.stringify(s.values)}`);
     /* 02 and the hero agree: the hero is the tallest SOLID column. */
@@ -212,7 +212,7 @@ if (want('supply')) {
     check('#supply: 00, the rate grid, a typical week, what an hour buys, the area table, †',
       JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Which hours sell the drivers you are paying for', 'A typical week, hour by hour',
         'What an online hour actually buys', 'Where the waiting happens', '† What this page does not know']), JSON.stringify(s.heads));
-    const vfig = await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig');
+    const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
     check('the verdict is 00\'s statement; its figure, jobs per online hour, is not a tile (ruling 7)',
       s.vdctIn00 && !Object.values(s.values).includes(vfig) && !s.labels.some((l) => /jobs per online hour/i.test(l)), `${vfig} ${JSON.stringify(s.values)}`);
     check('idle hours lead, then online hours with the part on a job — the balance answer\'s totals',
@@ -264,7 +264,7 @@ if (want('platforms')) {
     check('share: 00, the dominance bar, completion and km by channel, the fleets, coverage, †',
       JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Every booking, by channel', 'Completion by channel, against the fleet',
         'How far a booking goes, by channel', 'Trips by fleet', 'Coverage & history depth', '† What this page does not know']), JSON.stringify(s.heads));
-    const vfig = await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig');
+    const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
     check('…no tile repeats the verdict\'s figure (the leading channel\'s share is the verdict\'s)', !Object.values(s.values).includes(vfig), `${vfig} ${JSON.stringify(s.values)}`);
     check('…bookings across every channel leads, from the mix answer', s.hero === 'Bookings across every channel' && s.values['Bookings across every channel'] === total.toLocaleString('en-US'), JSON.stringify(s.values));
     check('…work turned down is the kpis answer\'s declined offers', s.values['Work turned down'] === (+K.declined_offers).toLocaleString('en-US') || /offer/.test(s.na['Work turned down'] || ''), JSON.stringify([s.values, s.na]));
@@ -288,9 +288,14 @@ if (want('platforms')) {
     check('tiers: the four tiles as a band, premium share the hero', s.hero === 'Premium share' && s.glance === 4, JSON.stringify(s.labels));
     const asked = await bars(page, '[data-panel="tiers-asked"]');
     check('01: one bar per tier the riders asked for, from the product mix', asked.length === P.filter((r) => +r.n > 0).length, `${asked.length}`);
+    /* The bars name the job token --mk-fill (the lead's ruling, main 9a96fe8:
+       default bars are asked for by job); under Arkiv it resolves to ink. So
+       compare the PAINTED colour to ink's, not the token's spelling. */
     const ink = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => /Gap to the best car/.test(x.querySelector('h3')?.textContent || ''));
-      return p ? [...p.querySelectorAll('.hb .fill')].map((f) => f.style.background) : []; });
-    check('the gap bars are ink — a shortfall against a peer is not a channel colour', ink.length === 0 || ink.every((b) => /--ink/.test(b)), JSON.stringify(ink.slice(0, 3)));
+      const probe = document.createElement('i'); probe.style.color = 'var(--ink)'; document.body.append(probe);
+      const want = getComputedStyle(probe).color; probe.remove();
+      return { want, got: p ? [...p.querySelectorAll('.hb .fill')].map((f) => getComputedStyle(f).backgroundColor) : [] }; });
+    check('the gap bars are ink — a shortfall against a peer is not a channel colour', ink.got.length === 0 || ink.got.every((b) => b === ink.want), JSON.stringify(ink));
     check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
     await ctx.close();
   }
@@ -327,7 +332,7 @@ if (want('corridors')) {
       JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'The busiest routes between two areas', 'Where jobs start',
         'How far a route runs, and what it earns', 'Morning areas and evening areas', 'Work that never leaves the area', 'Common routes',
         '† What this page does not know']), JSON.stringify(s.heads));
-    const vfig = await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig');
+    const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
     check('the verdict is 00\'s statement and no tile repeats its figure', s.vdctIn00 && !Object.values(s.values).includes(vfig), `${vfig} ${JSON.stringify(s.values)}`);
     const named = C.corridors.filter((r) => r.from_area !== '(unrecorded)' && r.to_area !== '(unrecorded)');
     const same = named.filter((r) => r.from_area === r.to_area);
@@ -385,7 +390,7 @@ if (want('causes')) {
       JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Trips per month', 'What moved, at each break', 'How many drivers', 'What each one did',
         'Big jumps between months', 'Coverage gaps', 'What was on in Dubai', 'Fewer drivers, or less work?', '† What this page does not know']), JSON.stringify(s.heads));
     check('the largest move is the hero, and no tile repeats the verdict\'s figure', s.hero === 'Largest move'
-      && !Object.values(s.values).includes(await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig')), JSON.stringify(s.values));
+      && !Object.values(s.values).includes(await txtOf(page, '#view .cband .vdct-fig > b')), JSON.stringify(s.values));
     const all = [...(T.breaks || [])].sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
     const big = all.find((b) => !b.boundary_artifact) || all[0];
     const sp = big && big.drivers_from && big.drivers_to ? (() => { const p0 = big.trips_from / big.drivers_from; const head = (big.drivers_to - big.drivers_from) * p0;
@@ -485,6 +490,198 @@ if (want('optimise')) {
   {
     const { ctx, page } = await open('arkiv', 'optimise', { width: 390 });
     check('#optimise at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
+/* ══ #capacity ════════════════════════════════════════════════════════════ */
+if (want('capacity')) {
+  console.log('\n#capacity');
+  {
+    const { ctx, page } = await open('classic', 'capacity');
+    check('old skin: no 00 band', !(await page.$('#view .cband')));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'capacity');
+    const s = await shape(page);
+    const C = answer('/api/capacity');
+    check('00, the heatmap first, then the hours and the weekdays, the tables, †', s.heads[1] === 'Every hour of the week'
+      && s.heads.includes('Drivers the hour has run, and the drivers still to find') && s.heads[s.heads.length - 1] === '† What this page does not know', JSON.stringify(s.heads));
+    const claim = await txtOf(page, '#view .cband .vdct');
+    check('the verdict (its wording, which capacity_headline asserts) is 00\'s statement', s.vdctIn00 && /\d+ hours? of the week (is|are) short of people|covered for the forecast/.test(claim), claim.slice(0, 120));
+    check('hours short is the hero, said out of 168', s.hero === 'Hours needing more people' && s.values['Hours needing more people'] === (+C.totals.cells_short).toLocaleString('en-US')
+      && /of 168/.test(s.subs['Hours needing more people']), JSON.stringify([s.values['Hours needing more people'], s.subs['Hours needing more people']]));
+    check('the rota is ABSENT with the true reason', /no roster is in any feed/.test(s.na['The rota'] || ''), JSON.stringify(s.na));
+    const wk = await fills(page, '[data-panel="cap-week"]');
+    check('the weekday columns are all hatched — every one a projection', wk.length === 7 && wk.every((b) => hatched(b.f)), JSON.stringify(wk.map((b) => b.f.slice(0, 6))));
+    /* The columns are the verdict's driver-hours, split by weekday: the same
+       short hours (driver_gap ≥ 0.5, not thin), so their heights are in the
+       proportion those sums are, and together they are the verdict's figure. */
+    const short = (c) => c.driver_gap != null && c.driver_gap >= 0.5 && !c.thin;
+    const byD = [0, 1, 2, 3, 4, 5, 6].map((d) => C.cells.filter((c) => +c.dow === d && short(c)).reduce((a, c) => a + +c.driver_gap, 0));
+    const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
+    const top = Math.max(...byD), hTop = Math.max(...wk.map((b) => b.h));
+    check('…one column per weekday, each the verdict\'s short hours on that day, adding to its figure',
+      wk.length === 7 && String(Math.ceil(byD.reduce((a, b) => a + b, 0))) === vfig.replace(/,/g, '')
+      && wk.every((b, i) => Math.abs(b.h / hTop - byD[i] / top) < 0.05), JSON.stringify({ vfig, byD: byD.map((x) => +x.toFixed(1)), h: wk.map((b) => Math.round(b.h)) }));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    await ctx.close();
+  }
+  {
+    /* Hours short by less than half a driver are not "short" (isShort), so
+       the weekday columns leave them out, as the verdict does. */
+    const small = (_q, real) => ({ ...real, cells: real.cells.map((c) => (c.driver_gap != null && c.driver_gap < 0.5 ? { ...c, driver_gap: 0.3, thin: false } : c)) });
+    const { ctx, page, answer } = await open('arkiv', 'capacity', { fixtures: { '/api/capacity': small } });
+    const C = answer('/api/capacity');
+    const wk = await fills(page, '[data-panel="cap-week"]');
+    const short = (c) => c.driver_gap != null && c.driver_gap >= 0.5 && !c.thin;
+    const byD = [0, 1, 2, 3, 4, 5, 6].map((d) => C.cells.filter((c) => +c.dow === d && short(c)).reduce((a, c) => a + +c.driver_gap, 0));
+    const top = Math.max(...byD), hTop = Math.max(...wk.map((b) => b.h));
+    check('hours short by under half a driver stay out of the weekday columns, as they stay out of the verdict',
+      wk.every((b, i) => Math.abs(b.h / hTop - byD[i] / top) < 0.05), JSON.stringify({ byD: byD.map((x) => +x.toFixed(1)), h: wk.map((b) => Math.round(b.h)) }));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'capacity', { width: 390 });
+    check('#capacity at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
+/* ══ #day ═════════════════════════════════════════════════════════════════ */
+if (want('day')) {
+  console.log('\n#day');
+  {
+    const { ctx, page } = await open('classic', 'day/2026-08-14');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), rings: document.querySelectorAll('#view svg.donut').length }));
+    check('old skin: no 00 band, the channel and tier rings', !r.band && r.rings >= 1, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'day/2026-08-14');
+    const s = await shape(page);
+    const D = answer('/api/day');
+    check('bookings is the hero with the day\'s own count, its fortnight change a delta', s.hero === 'Bookings' && s.values.Bookings === (+D.headline.bookings).toLocaleString('en-US')
+      && (D.versus_neighbours.delta_pct == null || /fortnight median/.test(await txtOf(page, '#view .kpis.glance .is-hero .t-d'))), JSON.stringify(s.values));
+    check('no ring: the channels a 100% bar, the tiers ranked bars', s.rings === 0, String(s.rings));
+    const nav = await page.evaluate(() => [...document.querySelectorAll('#view .daynav a')].map((a) => a.getAttribute('href')));
+    check('previous / next day navigation kept', nav.length === 2 && nav.every((h) => /^#day\//.test(h)), JSON.stringify(nav));
+    const bad = (D.coverage || []).filter((r) => { const m = Number(r.median_rows) || 0;
+      return !r.inside_span || (r.rows === 0 && m > 0) || (m > 0 && r.rows < m * 0.3) || (m > 0 && r.rows > m * 3); });
+    check('† is built from the collection verdicts: one cell per source that was not normal', bad.length
+      ? s.abs.length === Math.min(4, bad.length) : s.abs.length === 1 && s.abs[0].fig === 'Normal', JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'day/2026-08-14', { width: 390 });
+    check('#day at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
+/* ══ #slot ════════════════════════════════════════════════════════════════ */
+if (want('slot')) {
+  console.log('\n#slot');
+  {
+    const { ctx, page } = await open('classic', 'slot/2/19');
+    const cap = await page.evaluate(() => [...document.querySelectorAll('#view .panel')].find((p) => /across the week/.test(p.querySelector('h3')?.textContent || ''))?.textContent || '');
+    check('old skin: no 00 band; the week still compared on raw counts', !(await page.$('#view .cband')) && !/Per occurrence/.test(cap));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'slot/2/19');
+    const s = await shape(page);
+    const S = answer('/api/slot');
+    check('the tiles as a 00 band, trips in this slot the hero', s.hero === 'Trips in this slot' && s.values['Trips in this slot'] === (+S.headline.trips).toLocaleString('en-US'), JSON.stringify(s.values));
+    const peers = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => /across the week/.test(x.querySelector('h3')?.textContent || ''));
+      return p ? [...p.querySelectorAll('.hb')].map((h) => [h.querySelector('.k')?.textContent.trim(), h.querySelector('.v')?.textContent.trim()]) : []; });
+    const want = S.peers.filter((r) => r.days).map((r) => (r.trips / r.days).toFixed(1).replace(/\.0$/, ''));
+    check('the hour across the week is PER OCCURRENCE — trips over that weekday\'s days (the plan\'s fix)', peers.length === want.length
+      && peers.every(([, v], i) => v === want[i]), JSON.stringify([peers, want]));
+    const conc = await txtOf(page, '#view');
+    const top = [...S.drivers].sort((a, b) => b.trips - a.trips)[0];
+    check('the drivers table stays, and says who holds the most of the slot', !top || conc.includes(`The busiest person holds ${(+top.trips).toLocaleString('en-US')} of the slot`), '');
+    check('no ring: channel and settlement as ranked bars, the outcome a three-part bar above its table', s.rings === 0
+      && !!(await page.$('#view .panel table')), String(s.rings));
+    const noAddr = await page.evaluate(() => [...document.querySelectorAll('#view .hb .k')].filter((k) => /no address/i.test(k.textContent)).length);
+    check('"(no address)" is not drawn as a place', noAddr === 0, String(noAddr));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'slot/2/19', { width: 390 });
+    check('#slot at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
+/* ══ #trip ════════════════════════════════════════════════════════════════ */
+if (want('trip')) {
+  console.log('\n#trip');
+  {
+    const { ctx, page } = await open('classic', 'trip/hotel/h-mock-1');
+    check('old skin: no 00 band', !(await page.$('#view .cband')));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'trip/hotel/h-mock-1');
+    const s = await shape(page);
+    const T = answer('/api/trip');
+    const t = T.trip, tm = T.trip_money;
+    check('the fare is the hero with its tier and payment route', s.hero === 'Fare' && s.values.Fare === aed(t.price) && /on account/.test(s.subs.Fare), JSON.stringify([s.values.Fare, s.subs.Fare]));
+    check('the driver\'s earnings from the payments report', s.values['The driver earned'] === aed(tm.earnings), s.values['The driver earned']);
+    const fx = T.telemetry.filter((f) => f.seat_occupied != null);
+    check('the rider in the car is the seat sensor\'s reading', s.values['Rider in the car'] === `${fx.filter((f) => f.seat_occupied).length} of ${fx.length}`, s.values['Rider in the car']);
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const resid = +(tm.fare + (tm.service_fee || 0) - tm.earnings).toFixed(2);
+    check('† the residual between fare and earnings is computed, not asserted', ab['Why the fare and the earnings do not meet']?.fig === aed(resid), JSON.stringify(ab['Why the fare and the earnings do not meet']));
+    check('the money table is kept', (await txtOf(page, '#view')).includes('What this trip earned'));
+    await ctx.close();
+  }
+  {
+    /* The production shape, synthetic values: FMS sends a seat COUNT and a
+       null seat_occupied, and a speed only while moving; a second feed
+       (CABMAN) whose fixes are all stationary. Both first-draft defects were
+       found on this shape and neither shows on the mock's own two fixes. */
+    const fx = (t, src, speed, extra) => ({ captured_at: `2026-08-14T${t}:00.000Z`, lat: 25.2, lng: 55.3, speed,
+      status: speed == null ? 'Idle' : 'Moving', ignition: true, source: src, seat_occupied: null, ...extra });
+    const tele = [fx('04:30', 'fms', null, { seat_count: 0 }), fx('04:36', 'fms', 62, { seat_count: 1 }),
+      fx('04:42', 'fms', 88, { seat_count: 1 }), fx('04:48', 'fms', null, { seat_count: null }),
+      fx('04:33', 'cabman', null, { seat_occupied: true }), fx('04:39', 'cabman', null, { seat_occupied: false }),
+      /* Uber's driver-status rows, as production returns them among the
+         fixes: a status, no position, no speed, no seat. */
+      { captured_at: '2026-08-14T04:50:00.000Z', lat: null, lng: null, speed: null, status: 'ONLINE', seat_occupied: null,
+        seat_count: null, ignition: null, source: 'uber' }];
+    /* And no trip_money, as on every non-Uber booking in production. */
+    const { ctx, page } = await open('arkiv', 'trip/hotel/h-mock-1', { fixtures: { '/api/trip': (q, real) => ({ ...real, telemetry: tele, trip_money: null }) } });
+    const s = await shape(page);
+    check('an FMS fix\'s seat COUNT is its seat reading (1 or more occupied), as the fixes table reads it',
+      s.values['Rider in the car'] === '3 of 5', s.values['Rider in the car']);
+    const sp = await page.evaluate(() => { const p = document.querySelector('[data-panel="trip-speed"]');
+      return { charts: p.querySelectorAll('svg').length, text: p.textContent, feeds: [...p.querySelectorAll('p.cap > b')].map((b) => b.textContent) }; });
+    check('one speed chart per feed that moved — the all-stationary feed says so in a sentence', sp.charts === 1
+      && /CABMAN — 2 fixes, none carrying a speed: this tracker reports one only while the vehicle moves/.test(sp.text)
+      && /Uber — 1 fix, none carrying a speed: this feed sends a status, not a speed/.test(sp.text), JSON.stringify([sp.charts, sp.text.slice(-260)]));
+    check('a hotel booking\'s earnings are ABSENT for the true reason — the channel reports a price and no breakdown; there is no payments report to lack a row',
+      /Hotel reports a price and no breakdown/.test(s.na['The driver earned'] || '') && !/payments report/.test(s.na['The driver earned'] || ''),
+      s.na['The driver earned']);
+    check('each feed is named as the fixes table\'s Feed column names it, never "provider not recorded"', sp.feeds.some((f) => /^FMS/.test(f))
+      && sp.feeds.includes('CABMAN') && sp.feeds.includes('Uber') && !/provider not recorded/.test(sp.text), JSON.stringify(sp.feeds));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'trip/uber/u-mock-1');
+    const s = await shape(page);
+    check('an Uber booking\'s fare is ABSENT with the channel\'s reason, never a dash — the reason alone, the tier and payment its sub',
+      /^(Uber prices no trip — see the day’s payout below|no fare on this booking)$/.test(s.na.Fare || ''), JSON.stringify([s.na.Fare, s.subs.Fare]));
+    check('…and no tile prints a bare dash', !s.bare.length, JSON.stringify(s.bare));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'trip/hotel/h-mock-1', { width: 390 });
+    check('#trip at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
     await ctx.close();
   }
 }

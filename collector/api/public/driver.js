@@ -21,7 +21,9 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   sourceLabel, completionTone, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows,
   avatar, moneyInTile, cashOnHandTile, bankDepositTile, faresTile,
   alertRateFigure, splitAlerts, standingNote,
-  UBER_FARE_WHY, dialable, segSourceLabel } from './ui.js';
+  UBER_FARE_WHY, dialable, segSourceLabel,
+  contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, swatch, delta, sourceToken } from './ui.js';
+import { CHANNEL_ORDER } from './tokens.js';
 /* personAddr/personIdOf/rewriteParam: the person id as an address, and the
    in-place rewrite that leaves the reader holding the canonical one. See the
    block above rewriteParam in data.js — the rewrite must not be a navigation,
@@ -138,13 +140,16 @@ function percentileBars(host, metrics, opts = {}) {
     const sn = standingNote(m);
     const tone = sn.tied ? '--s1'
       : p >= 75 ? '--good' : p >= 40 ? '--s1' : p >= 20 ? '--warn' : '--critical';
+    /* Under the page contract the fill is ink, grey on a tie — L3: a
+       semantic colour is never an area. The old skin keeps its tones. */
+    const fill = opts.ak ? (sn.tied ? '--grey' : '--ink') : tone;
     const u = unitFor(m);
     const inverted = m.higher_is_better === false || /cancel|reject|no.?show/i.test(m.label || '');
     const row = el('div', 'pbar');
     row.innerHTML = `
       <div class="pb-l">${esc(m.label)}${u ? `<span class="dim"> (${esc(u)})</span>` : ''}</div>
       <div class="pb-track">
-        <i style="width:${p}%;background:var(${tone});animation-delay:${i * 55}ms"></i>
+        <i style="width:${p}%;background:var(${fill});animation-delay:${i * 55}ms"></i>
         <span class="pb-mid" title="fleet median"></span>
       </div>
       <div class="pb-v num">${sn.tied ? '<small>tied</small>' : `${p}<small>${ordinal(p)}</small>`}</div>`;
@@ -163,6 +168,13 @@ function percentileBars(host, metrics, opts = {}) {
       inverted ? 'Lower is better here, so a high percentile means FEWER of them.' : '',
       opts.note && /revenue|fare|earn/i.test(m.label || '') ? opts.note : '',
     ].filter(Boolean).join(' ');
+    if (opts.ak) {
+      const f = el('div', 'pb-f cap', esc(`${fig(m.value)} · fleet median ${fig(m.median)}`
+        + (sn.tied ? ` · tied with ${fmt(m.tied)} of ${fmt(m.population)}` : ` · ${p}${ordinal(p)} percentile`)));
+      /* The whole row's width, not the label's column. */
+      f.style.cssText = 'grid-column:1/-1;margin:-4px 0 0';
+      row.append(f);
+    }
     wrap.append(row);
   });
   host.append(wrap);
@@ -890,7 +902,15 @@ function identityCard(p) {
 
 /* ── tab: overview ───────────────────────────────────────────────────────── */
 async function tabOverview(root, id, prof) {
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  /* Under the page contract (plan §4 #driver/overview): a 00 band — Trips
+     the hero with its gap to the fleet median from /api/driver/standing,
+     then days, hours online, utilisation, completion, typical start, and the
+     money tiles on the band's second row, every figure and sub-line as
+     before, untoned — the rank bars in ink with each row's value against
+     the fleet median printed on it, and a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
   const g1 = el('div', 'grid g23'); root.append(g1);
   /* No number in the subtitle. It said "5 or more trips" — a copy of the
      floor, in a place the response cannot reach, beside a word ("trips") the
@@ -916,7 +936,7 @@ async function tabOverview(root, id, prof) {
     qAll('/api/driver/daily', { id }), qAll('/api/driver/heatmap', { id }),
   ]);
 
-  kpiHost.replaceWith(kpiRow([
+  const OV_TILES = [
     { label: 'Typical start', value: hourStr(k.median_start_h), sub: k.start_consistency_h != null ? `±${(+k.start_consistency_h).toFixed(1)}h day to day` : null },
     { label: 'Days worked', value: fmt(k.days_worked), sub: `${fmt(k.trips_per_day, 1)} trips per day` },
     /* Both tiles say where the figure came from and over how much of the
@@ -978,7 +998,8 @@ async function tabOverview(root, id, prof) {
     /* The same renderer as the Quality tab, so the two tiles cannot drift into
        showing one driver two different ratings. */
     ratingTrend(k),
-  ]));
+  ];
+  if (ak) { kpiHost.remove(); overviewGlance(AKB, OV_TILES, st, k); } else kpiHost.replaceWith(kpiRow(OV_TILES));
 
   /* The revenue bar ranks a driver against a fleet whose median fare is zero,
      because Uber publishes no fare per trip — so a hotel driver with four
@@ -996,7 +1017,7 @@ async function tabOverview(root, id, prof) {
      only drawn where there is a chart to be empty; where the reason is known,
      the reason is the whole of it. */
   if ((st.metrics || []).length) {
-    percentileBars(stand.body, st.metrics, {
+    percentileBars(stand.body, st.metrics, { ak,
       note: 'Fares only — most of this fleet\'s work carries no fare, so this percentile is not comparable.' });
   } else stand.body.innerHTML = '';
   /* THE COUNT IN THE SENTENCE AND THE COUNT THE FLOOR WAS APPLIED TO HAVE TO
@@ -1113,8 +1134,50 @@ async function tabOverview(root, id, prof) {
       + 'thing on the chart. The days themselves are in the day-by-day table on Activity, with what '
       + 'each of them did and did not report.'));
   } else {
-    barChart(vol.body, daily.map((d) => ({ ...d, label: dayStr(d.day) })), { x: 'label', y: 'trips', color: '--b400' });
+    barChart(vol.body, daily.map((d) => ({ ...d, label: dayStr(d.day) })), { x: 'label', y: 'trips', color: ak ? '--ink' : '--b400' });
   }
+  if (ak) overviewAbsence(root, k, prof);
+}
+
+/* ── #driver/overview under the page contract ──────────────────────────── */
+/* The tiles in the plan's order — Trips first as the hero, the working
+   figures, then the money and the rating on the band's second row — each
+   the tile the old row drew, with its sub-line. Trips carries its gap to
+   the fleet median as a worded delta (ruling 4), from the standing the tab
+   already fetched; a person too thin to rank carries none, and says why. */
+function overviewGlance(AKB, tiles, st, k) {
+  const by = Object.fromEntries(tiles.filter(Boolean).map((x) => [x.label, x]));
+  const tm = (st.metrics || []).find((m) => m.key === 'trips');
+  const trips = { ...by.Trips, hero: true };
+  /* The gap is from the TILE's own figure, so the number and its delta can
+     never be two counts; the median and percentile are the standing's. */
+  if (tm && tm.median != null && k.trips != null) {
+    trips.delta = { value: Number(k.trips) - Number(tm.median), kind: 'gap', d: 0,
+      of: `against the fleet median of ${fmt(tm.median)} · ${tm.percentile}${ordinal(tm.percentile)} percentile of ${fmt(tm.population)}` };
+  }
+  const order = ['Trips', 'Days worked', 'Hours online', 'Utilisation', 'Completion', 'Typical start'];
+  const rest = tiles.filter((x) => x && !order.includes(x.label));
+  const { tiles: out } = bandTiles([trips, ...order.slice(1).map((l) => by[l]), ...rest],
+    { reasons: { 'Typical start': 'no trip in this window carries a start time', Utilisation: 'needs both online and on-job time' } });
+  glance(AKB.tilesHost, out);
+}
+function overviewAbsence(root, k, prof) {
+  const trips = Number(k.trips ?? k.bookings) || 0;
+  const priced = Number(k.priced_trips) || 0;
+  const withheld = (prof.identity_withheld || []).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'A fare on every booking', hl: trips > priced, fig: trips ? `${fmt(priced)} of ${fmt(trips)}` : null, none: 'No booking',
+      why: trips > priced ? `${UBER_FARE_WHY}; Money in takes the statement where a channel filed one.`
+        : trips ? 'Every booking in this window carries a fare.' : 'No booking in this window.' },
+    { label: 'The bank transfer itself', fig: null, none: 'Not read',
+      why: 'Bank deposit is what is left of Money in after the cash the driver already holds — a remainder, not a receipt. No bank statement is read here.' },
+    { label: 'Licence and ID numbers', fig: withheld ? `${fmt(withheld)} withheld` : null, none: 'None withheld',
+      why: withheld ? (prof.identity_withheld_reason || 'withheld from an unauthenticated response') : 'Nothing on the identity card was withheld.' },
+    { label: 'When a pickup happened', fig: null, none: 'Not sent',
+      why: 'The channels send when a booking was requested and when it ended; none sends the moment the rider got in.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), prof.person_id != null ? `p${prof.person_id}` : 'account not placed'] }, root);
 }
 
 /* ── tab: activity ───────────────────────────────────────────────────────── */
@@ -1132,6 +1195,13 @@ async function tabOverview(root, id, prof) {
    TABS call site — and tabOverview and tabEarnings already declare it. This
    tab simply never took delivery. */
 async function tabActivity(root, id, prof) {
+  /* Under the page contract (plan §4 #driver/activity): a 00 band of the
+     figures the ribbon's own captions print — online and not dispatched the
+     hero, on job, waiting between jobs, online, jobs — computed over the SAME
+     days the captions total, so a tile and the sentence under the ribbon can
+     never disagree; every panel and both tables kept; a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
   /* Full width. Twenty-eight days of a 24-hour axis in half a page gives each
      hour about eight pixels, so a thirty-minute job is four pixels wide and
      the panel that exists to show WHEN somebody worked shows a smear. */
@@ -1181,6 +1251,7 @@ async function tabActivity(root, id, prof) {
      page holding one links by it rather than by the account it was opened
      with — an account link still resolves, but it hands the next reader an
      address that moves when a merge does. */
+  if (ak) activityGlance(AKB, shift);
   if ((shift.days || []).some((d) => d.first_min != null)) {
     shiftBars(sh.body, shift.days, shift, addressOf(prof, id));
   }
@@ -1292,7 +1363,7 @@ async function tabActivity(root, id, prof) {
     barChart(dist.body, daily.map((d) => ({
       label: dayStr(d.day), km: d.km == null ? 0 : +d.km,
       measured: d.km != null, worked: +d.trips > 0,
-    })), { x: 'label', y: 'km', colorFor: (d) => (d.measured ? '--b300' : d.worked ? '--surface-3' : '--surface-2'),
+    })), { x: 'label', y: 'km', colorFor: (d) => (d.measured ? (ak ? '--ink' : '--b300') : d.worked ? '--surface-3' : '--surface-2'),
       valueFmt: (v) => `${fmt(v)} km` });
     dist.body.append(el('p', 'cap',
       `${countOf(kmDays.length, 'day')} of ${fmt(daily.length)} in this window carry a measured `
@@ -1453,6 +1524,7 @@ async function tabActivity(root, id, prof) {
      }
   }
 
+  if (ak) activityAbsence(root, shift, kept);
   cust.body.innerHTML = '';
   const custRows = Array.isArray(custody) ? custody : (custody.rows || []);
   const custTotal = Array.isArray(custody) ? null : custody.total;
@@ -1491,13 +1563,71 @@ async function tabActivity(root, id, prof) {
   }
 }
 
+/* ── #driver/activity under the page contract ──────────────────────────── */
+/* Every figure here is one shiftBars() already prints in a caption, over the
+   same days — the last 28 with a job on them — and by the same arithmetic,
+   so the band restates the ribbon's sentences as figures and cannot drift
+   from them. Availability is Uber's alone and only for 31 days, so the two
+   online tiles are over the days that carry it and say how many that is. */
+function activityGlance(AKB, shift) {
+  const all = (shift.days || []).filter((d) => d.first_min != null);
+  const rows = all.slice(-28);
+  const sum = (f) => rows.reduce((a, d) => a + (f(d) || 0), 0);
+  const onJob = sum((d) => d.on_job_min), waited = sum((d) => d.wait_min), span = sum((d) => d.span_min);
+  const covered = rows.filter((d) => d.online);
+  const onlineMin = covered.reduce((a, d) => a + d.online.reduce((x, o) => x + (o.e - o.s), 0), 0);
+  const idle = Math.max(0, onlineMin - covered.reduce((a, d) => a + (d.on_job_min || 0), 0));
+  const jobs = sum((d) => (d.jobs || []).length);
+  const noDrop = sum((d) => d.unknown_end);
+  const h = (m) => `${fmt(m / 60, 1)} h`;
+  const over = all.length > rows.length ? ` · over the last ${fmt(rows.length)} days drawn` : '';
+  const noAvail = 'none of these days carries availability — only Uber publishes it, and only for 31 days';
+  const noJob = 'no day in this window carries a job with a start time';
+  glance(AKB.tilesHost, [
+    covered.length ? { label: 'Online, not dispatched', value: h(idle), hero: true,
+      sub: `${onlineMin ? Math.round((idle / onlineMin) * 100) : 0}% of the time online · over ${countOf(covered.length, 'day')} with availability` }
+      : { label: 'Online, not dispatched', hero: true, na: noAvail },
+    rows.length ? { label: 'On job', value: h(onJob), sub: `request to dropoff${over}` } : { label: 'On job', na: noJob },
+    rows.length ? { label: 'Waiting between jobs', value: h(waited),
+      sub: `${span ? Math.round((waited / span) * 100) : 0}% of first request to last dropoff` } : { label: 'Waiting between jobs', na: noJob },
+    covered.length ? { label: 'Online', value: h(onlineMin), sub: `availability for ${fmt(covered.length)} of ${countOf(rows.length, 'day')}` }
+      : { label: 'Online', na: noAvail },
+    { label: 'Jobs', value: fmt(jobs), sub: noDrop ? `${fmt(noDrop)} with no dropoff reported` : (jobs ? 'every one with a dropoff time' : 'no job in this window') },
+  ]);
+}
+function activityAbsence(root, shift, kept) {
+  const noDrop = shift.unknown_end || 0;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'A dropoff time', hl: noDrop > 0, fig: noDrop ? countOf(noDrop, 'booking') : null, none: 'Every one has one',
+      why: noDrop ? 'The channel sent no end time for these. They are hatched on the ribbon and left out of both totals rather than counted as waiting.'
+        : 'Every booking in this window carries a dropoff time.' },
+    { label: 'When the rider got in', fig: null, none: 'Not sent',
+      why: 'No channel here reports a pickup time, so on job is request to dropoff and holds the drive to the rider.' },
+    { label: 'Availability past Uber\u2019s 31 days', fig: kept?.online_days ? `${fmt(kept.online_days)} days held` : null, none: 'Not held',
+      why: `Uber serves 31 days of availability and nothing older. ${kept?.online_days ? `The stored record holds ${countOf(kept.online_days, 'day')} of it for this window, written as the collector reached them;` : 'The stored record holds none for this window;'} a day it missed cannot be recovered.` },
+    { label: 'Why a day was quiet', fig: null, none: 'Not recorded',
+      why: 'Nothing this product reads says why a driver did not work — leave, a blocked account and a car in the garage look the same here.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), 'activity'] }, root);
+}
+
 /* ── tab: territory ──────────────────────────────────────────────────────── */
 async function tabTerritory(root, id) {
   // Map beside the area list rather than above it: a full-width map is roughly
   // 2.4:1, and a driver's working area is roughly square, so a full-width panel
   // is mostly empty margin however tightly the points are framed.
   const g = el('div', 'grid g23'); root.append(g);
-  const mapP = panel('Where this driver works', 'Circles are pickup clusters, sized by trips. Hollow markers are places the vehicle sat still between jobs.');
+  /* Under the page contract (plan §4 #driver/territory, restyle only): a
+     place the car sat still is MEASURED — the tracker saw it there — so it is
+     a small filled grey mark, never the hollow ring SPEC §5 keeps for "not
+     measured"; the pickup clusters are ink. The subtitle says which mark is
+     which, in the skin it is read under. The map, the table and the bars
+     keep their data and their interactions. */
+  const ak = contract();
+  const mapP = panel('Where this driver works', ak
+    ? 'Ink circles are pickup clusters, sized by trips. Small filled grey marks are places the vehicle sat still between jobs.'
+    : 'Circles are pickup clusters, sized by trips. Hollow markers are places the vehicle sat still between jobs.');
   mapP.panel.classList.add('mapwrap'); g.append(mapP.panel);
   const node = el('div', 'mapnode'); mapP.body.append(node);
   const areas = panel('Busiest pickup areas', 'From the address the platform recorded'); g.append(areas.panel);
@@ -1514,15 +1644,17 @@ async function tabTerritory(root, id) {
     const pts = [];
     const max = Math.max(1, ...terr.pickups.map((p) => p.n));
     terr.idle.forEach((s) => {
-      L.circleMarker([s.lat, s.lng], { radius: 5 + Math.min(9, Math.sqrt(s.fixes)), color: css('--s5'), weight: 1.4,
-        fill: false, opacity: .65, dashArray: '3,3' }).addTo(map)
+      L.circleMarker([s.lat, s.lng], ak
+        ? { radius: 3 + Math.min(4, Math.sqrt(s.fixes) / 2), color: css('--grey'), weight: 0, fill: true, fillColor: css('--grey'), fillOpacity: .85, className: 'terr-still' }
+        : { radius: 5 + Math.min(9, Math.sqrt(s.fixes)), color: css('--s5'), weight: 1.4,
+          fill: false, opacity: .65, dashArray: '3,3' }).addTo(map)
         .bindTooltip(`Stationary here across ${s.fixes} five-minute fixes`, { direction: 'top' });
       pts.push([s.lat, s.lng]);
     });
     terr.pickups.forEach((p) => {
       L.circleMarker([p.lat, p.lng], {
         radius: 4 + 11 * Math.sqrt(p.n / max), color: css('--pin-ring'), weight: 1.2,
-        fillColor: css('--s1'), fillOpacity: .8,
+        fillColor: css(ak ? '--ink' : '--s1'), fillOpacity: ak ? 0.55 : 0.8,
       }).addTo(map).bindTooltip(
         `<b>${esc(p.addr || 'pickup')}</b><br>${p.n} pickup${p.n > 1 ? 's' : ''}` +
         `<br>avg ${fmt(p.avg_km, 1)} km${p.avg_fare ? ` · ${money(p.avg_fare)}` : ''}`, { direction: 'top' });
@@ -1546,9 +1678,10 @@ async function tabTerritory(root, id) {
     const areaTrips = (terr.areas || []).reduce((a, x) => a + (+x.n || 0), 0);
     const plotted = terr.pickups.reduce((a, x) => a + (+x.n || 0), 0);
     mapP.body.append(el('div', 'legend', `
-      <span><i style="background:var(--s1)"></i>pickups</span>
+      <span><i style="background:var(${ak ? '--ink' : '--s1'})"></i>pickups</span>
       <span><i style="background:var(--s3)"></i>drop-offs</span>
-      <span><i style="border:1.5px dashed var(--s5);background:none"></i>waiting spots</span>
+      ${ak ? '<span><i class="terr-still-key" style="background:var(--grey);border-radius:50%"></i>waiting spots</span>'
+        : '<span><i style="border:1.5px dashed var(--s5);background:none"></i>waiting spots</span>'}
       ${pts.length ? `<span>${terr.pickups.length} pickup clusters · ${terr.idle.length} waiting spots</span>` : ''}`));
     if (pts.length && areaTrips > plotted) {
       mapP.body.append(el('p', 'cap',
@@ -1608,6 +1741,7 @@ async function tabTerritory(root, id) {
       ], { compact: true }));
     }
   }
+  if (ak) pageFoot({ colophon: [windowLabel(), `${countOf((terr.pickups || []).length, 'pickup cluster')}`] }, root);
 }
 
 /* THE FARE THE PLATFORM DOES REPORT.
@@ -1633,7 +1767,13 @@ async function tabTerritory(root, id) {
 
 /* ── tab: earnings ───────────────────────────────────────────────────────── */
 async function tabEarnings(root, id, prof) {
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  /* Under the page contract (plan §4 #driver/earnings, restyle only): the six
+     tiles as a 00 band, untoned, a dash absent with its own sub-line as the
+     reason; how riders paid as one 100% bar in an achromatic ramp — payment
+     types are not channels; revenue by day in ink; every table kept. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
   const comp = panel('What made up the pay', 'Fares, tips, tolls and adjustments, as the platform reports them'); g.append(comp.panel);
   const pay = panel('How riders paid', 'Card vs cash changes what actually reaches the fleet'); g.append(pay.panel);
@@ -1740,7 +1880,7 @@ async function tabEarnings(root, id, prof) {
         : 'no statement covering these dates has reached us, so ')
       + 'every money figure below is absent rather than nought.'));
   }
-  kpiHost.replaceWith(kpiRow([
+  const EARN_TILES = [
     /* Every money figure here is over the trips that CARRY a fare, which on a
        driver working mostly Uber is a small fraction of their work — the Uber
        trip export has no fare column at all. Presented against the trip count
@@ -1884,7 +2024,9 @@ async function tabEarnings(root, id, prof) {
         ? `${money(k.priced_measured_revenue)} over ${fmt(k.priced_km)} km, on the `
           + `${fmt(k.priced_measured_trips)} trips reporting both`
         : 'no trip reports both a fare and a distance' },
-  ]));
+  ];
+  if (ak) { kpiHost.remove(); glance(AKB.tilesHost, bandTiles(EARN_TILES).tiles); }
+  else kpiHost.replaceWith(kpiRow(EARN_TILES));
 
   comp.body.innerHTML = '';
   if (!e.components.length) {
@@ -2001,7 +2143,13 @@ async function tabEarnings(root, id, prof) {
      so an empty one means either no booking or no booking whose payment method
      anybody recorded — and the cash tile above this reads its own absence off
      the same two facts, so the two must not tell different stories. */
-  if ((mix.payment || []).length) donut(pay.body, mix.payment, { max: 6 });
+  if ((mix.payment || []).length) {
+    /* Under the contract one 100% bar. No colorFor: a payment type is not a
+       channel, so it takes the categorical slots, which under Arkiv are the
+       achromatic ramp with a label ink measured for each (arkiv.css --on-cat-N)
+       — a hand-picked --seq-N ramp printed its shares dark on dark. */
+    donut(pay.body, mix.payment, ak ? { max: 6, as: 'bar100' } : { max: 6 });
+  }
   else {
     pay.body.append(note(worked
       ? `This driver\'s ${countOf(bookingsN, 'booking')} in this window carry no payment method at `
@@ -2032,7 +2180,7 @@ async function tabEarnings(root, id, prof) {
       }
     }
     barChart(line.body, series, { x: 'label', y: 'v', valueFmt: (v) => money(v),
-      colorFor: (d) => (d.v > 0 ? '--b400' : d.worked ? '--surface-3' : '--surface-2') });
+      colorFor: (d) => (d.v > 0 ? (ak ? '--ink' : '--b400') : d.worked ? '--surface-3' : '--surface-2') });
     line.body.append(el('p', 'cap',
       `${countOf(withRev.length, 'day')} of ${fmt(series.length)} in this window carry a fare. `
       + 'The rest are drawn at zero rather than left out, so a gap looks like a gap — pale bars are days '
@@ -2303,11 +2451,19 @@ async function tabEarnings(root, id, prof) {
         + 'rather than per payout period, so the two are two readings and not two amounts.'));
     }
   }
+  if (ak) pageFoot({ colophon: [windowLabel(), 'earnings'] }, root);
 }
 
 /* ── tab: quality ────────────────────────────────────────────────────────── */
 async function tabQuality(root, id) {
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  /* Under the page contract (plan §4 #driver/quality, restyle only): the six
+     tiles as a 00 band, untoned — completion carries its gap to 95% with
+     glyph and sign, and the rate per 100 km its gap to the fleet median as a
+     delta where LOWER is better; the non-completed bars in the colour of the
+     channel each one names; cancellations by day in ink. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
   const cx = panel('Non-completed trips', 'Who cancelled, and how often'); g.append(cx.panel);
   const ev = panel('Harsh driving', 'From the tracker, on the days this driver held the car'); g.append(ev.panel);
@@ -2322,7 +2478,7 @@ async function tabQuality(root, id) {
   const harsh = splitAlerts(qy.alerts || []);
   const totalAlerts = harsh.drivingN;
 
-  kpiHost.replaceWith(kpiRow([
+  const Q_TILES = [
     /* A null completion used to paint red. `null >= 95` is false, so every
        driver whose platforms report no outcome at all scored 'critical' — the
        page accused them of a 0% completion rate it had never measured. */
@@ -2427,7 +2583,8 @@ async function tabQuality(root, id) {
           + over,
         tone: ratio == null ? null : ratio <= 0.7 ? 'good' : ratio <= 1.3 ? null : ratio <= 2 ? 'warn' : 'critical' };
     })(),
-  ]));
+  ];
+  if (ak) { kpiHost.remove(); qualityGlance(AKB, Q_TILES, k, qy); } else kpiHost.replaceWith(kpiRow(Q_TILES));
 
   cx.body.innerHTML = '';
   /* Each platform has its own word for the same thing — Bolt reports
@@ -2439,8 +2596,9 @@ async function tabQuality(root, id) {
       : 'No platform this driver works on reported how any of these trips ended, so there is nothing to break down.'));
   } else {
     hbars(cx.body, qy.cancels.map((c) => ({
-      label: `${c.status.replace(/_/g, ' ')}${c.platform ? ` · ${c.platform}` : ''}`, n: c.n,
-    })), { label: 'label', value: 'n', seq: true });
+      label: `${c.status.replace(/_/g, ' ')}${c.platform ? ` · ${c.platform}` : ''}`, n: c.n, plat: c.platform,
+    })), ak ? { label: 'label', value: 'n', signed: false, colorFor: (x) => (x.plat ? sourceToken(x.plat) : '--mk-fill') }
+      : { label: 'label', value: 'n', seq: true });
     cx.body.append(el('p', 'cap',
       'Raw provider strings, deliberately — what counts as “did not complete” is decided by the normalised '
       + 'outcome, but the word each platform uses for it is worth seeing.'));
@@ -2516,10 +2674,35 @@ async function tabQuality(root, id) {
   } else {
     barChart(line.body, cd.map((d) => ({
       label: `${dayStr(d.day)} · ${d.cancelled} of ${d.trips}`, cancelled: d.cancelled,
-    })), { x: 'label', y: 'cancelled', color: '--s2', valueFmt: (v) => fmt(v) });
+    })), { x: 'label', y: 'cancelled', color: ak ? '--ink' : '--s2', valueFmt: (v) => fmt(v) });
     const tot = cd.reduce((a, d) => a + d.trips, 0), cx = cd.reduce((a, d) => a + d.cancelled, 0);
     line.body.append(el('p', 'cap', `${cx} cancelled out of ${tot} requested across ${cd.length} working days.`));
   }
+  if (ak) pageFoot({ colophon: [windowLabel(), 'quality'] }, root);
+}
+
+/* ── #driver/quality under the page contract ─────────────────────────────── */
+/* The tiles the old row drew, untoned, with the two comparisons the plan
+   asks for as worded deltas (ruling 4): completion against the house's 95%
+   and the alert rate against the fleet median, lower being better. A tile
+   that printed "not measured" in the value slot becomes ABSENT with the
+   reason it already carried. */
+function qualityGlance(AKB, tiles, k, qy) {
+  const out = tiles.filter(Boolean).map((t) => {
+    if (t.label === 'Completion' && k.completion_pct != null) {
+      return { ...t, hero: true, delta: { value: Number(k.completion_pct) - 95, kind: 'gap', of: 'to 95%, the house threshold', unit: 'pts', d: 1 } };
+    }
+    if (t.label === 'Per 100 km') {
+      if (t.value === 'not measured') return { label: t.label, na: t.sub || 'the alert feed did not cover these days' };
+      const base = qy.fleet_alerts_per_100km;
+      const v = Number(String(t.value).replace(/[^0-9.]/g, ''));
+      if (base != null && Number.isFinite(v)) {
+        return { ...t, delta: { value: v - Number(base), kind: 'gap', invert: true, d: 1, of: `against the fleet median ${fmt(base, 1)}` } };
+      }
+    }
+    return t;
+  });
+  glance(AKB.tilesHost, bandTiles(out).tiles);
 }
 
 /* ── tab: trips ──────────────────────────────────────────────────────────── */
@@ -2770,8 +2953,10 @@ async function tabTrips(root, id) {
             esc(r.attribution_evidence || '')}">${esc(TIER_LABEL[r.attribution_tier]
             || r.attribution_tier || 'no rung reached')}</span>`;
       }
-      return pill(r.status || '—',
-        r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'warn' : null);
+      /* Under the page contract an outcome is not better or worse: the
+         status is an ink pill (plan §4 #driver/trips). */
+      return pill(r.status || '—', contract() ? null
+        : r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'warn' : null);
     } },
     /* A trip with no fare is not a trip with no money.
        ──────────────────────────────────────────────────────────────────────
@@ -3038,6 +3223,7 @@ async function tabTrips(root, id) {
     count(list.length);
     draw(list, t);
   };
+  if (contract()) pageFoot({ colophon: [windowLabel(), `${fmt(bookings.length)} ${plural(bookings.length, 'booking')}`] }, root);
 }
 
 /* ── unexplained journeys: the pieces the two tabs share ──────────────────
@@ -3386,7 +3572,7 @@ async function tabUnauthorized(root, id) {
   const aed = sum(once, 'forgone_aed');
   const kmTime = sum(byTime, 'distance_km');
   const aedTime = sum(byTime, 'forgone_aed');
-  p.body.append(kpiRow([
+  const UN_TILES = [
     { label: 'Named beside', value: fmt(att.total), key: 'unauth-attributed',
       tone: att.total ? 'warn' : null,
       sub: att.total ? 'journeys no channel booked, a ride counted once across providers'
@@ -3421,7 +3607,9 @@ async function tabUnauthorized(root, id) {
           + 'instead — custody is not driving, and this second figure is not a debt anybody '
           + `owes. Both at ${money(res.value.aed_per_km)}/km, the fleet’s own rate here. Revenue `
           + 'forgone, not money paid out.' },
-  ]));
+  ];
+  if (contract()) unauthGlance(p, UN_TILES, cov);
+  else p.body.append(kpiRow(UN_TILES));
 
   /* THE STATUS-FEED SENTENCE, ONCE, WHEN IT IS THE SAME ON EVERY ROW.
      driver_status_event is append-only from 2026-09-14 with no backfill, so
@@ -3499,6 +3687,30 @@ async function tabUnauthorized(root, id) {
   /* The totals above are counted over the window by the endpoint, so they are
      exact even when the tables are short. The response says which in words. */
   if (res.total_basis) c.body.append(el('p', 'cap', res.total_basis));
+}
+
+/* ── #driver/unauthorized under the page contract ────────────────────────
+   Restyle only, plus the plan's ONE TRUTH FIX. When no seat-occupancy
+   evidence exists for the window (coverage.days_with_data === 0) the tab's
+   own note says nothing was looked at — and the old row then printed five
+   counts of 0 and "AED 0 … AED 0" under Revenue forgone, a measurement
+   nobody took. Under the contract every tile is ABSENT with that reason
+   instead. Where evidence exists, the tiles are the old row's, untoned (a
+   tone reads as a verdict, and most of this is custody). The band goes
+   ABOVE the panel, and only once the answer has been read: a failed or
+   unreadable request keeps its own note and draws no band at all. */
+function unauthGlance(p, tiles, cov) {
+  const holder = el('div');
+  const AKB = glanceBand(holder, windowLabel());
+  p.panel.before(AKB.band);
+  const nothing = cov.days_with_data === 0;
+  const why = 'no seat-occupancy evidence from CABMAN DT or FMS exists for this window — nothing was looked at';
+  const list = nothing ? tiles.map((t) => ({ label: t.label, na: why, ...(t.key ? { key: t.key } : {}) }))
+    : tiles.map((t, i) => (i === 0 ? { ...t, hero: true } : t));
+  glance(AKB.tilesHost, bandTiles(list, { reasons: {
+    Distance: 'no journey in this window names this person, so there is no distance to add',
+    'Revenue forgone': 'no journey in this window names this person, so there is nothing forgone to add' } }).tiles);
+  pageFoot({ colophon: [windowLabel(), nothing ? 'no seat evidence' : cov.days_with_data != null && cov.days_in_window != null ? `${fmt(cov.days_with_data)} of ${fmt(cov.days_in_window)} days watched` : 'coverage not measured'] }, p.panel.parentNode);
 }
 
 /* ── the window said out loud, once, above every tab ──────────────────────
@@ -3774,12 +3986,21 @@ export async function renderDriverDirectory(root) {
      forty-four laptop screens — and opened on a search field and a 361-row
      table, so the first thing a reader saw was an instruction to go looking
      rather than an answer. */
-  const vHost = el('div'); root.append(vHost);
+  /* Under the page contract (plan §4 #drivers): the verdict and five tiles
+     as 00, the busiest six as §01, then the search box DIRECTLY above the
+     table it searches — the roster's working order is otherwise unchanged. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const vHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vHost);
   const bar = el('div', 'toolbar');
   bar.innerHTML = `<input id="dq" type="search" placeholder="Search drivers by name, plate or platform…">
     <span class="cap" id="dn"></span>`;
-  root.append(bar);
-  const grid = el('div', 'dircards'); root.append(grid);
+  const grid = el('div', 'dircards');
+  if (ak) {
+    const bp = panel('The busiest six', 'Who ran the most bookings in this window. Click one to open them.', 'drivers-busiest');
+    root.append(bp.panel); bp.body.append(grid); root.append(bar);
+  } else { root.append(bar); root.append(grid); }
   /* "All drivers" now means all drivers. The directory was built from the trip
      table, so anyone who took nothing in the window had no row — under this
      exact heading — and 64 of the people missing that way had an expired
@@ -3995,8 +4216,9 @@ export async function renderDriverDirectory(root) {
         ? pill(sourceLabel(r.fleet_id), r.identity_from_history ? 'dim' : 'plat')
         : '<span class="ent-off" title="no trip of theirs names a fleet">—</span>') }] : []),
     { label: 'Platforms', key: '_p',
-      render: (r) => (r.platforms || []).map((p) => pill(sourceLabel(p),
-        r.identity_from_history ? 'dim' : 'plat')).join('') },
+      render: (r) => (ak ? platChips(r.platforms, r.identity_from_history)
+        : (r.platforms || []).map((p) => pill(sourceLabel(p),
+          r.identity_from_history ? 'dim' : 'plat')).join('')) },
     { label: 'Usual vehicle', key: 'plate',
       render: (r) => (r.plate == null ? ''
         : r.identity_from_history
@@ -4078,8 +4300,11 @@ export async function renderDriverDirectory(root) {
        to scan for; the whole reason to open this table is to find the people
        whose week went badly. */
     { label: 'Completion', key: 'completion_pct', num: true,
-      cellCls: (r) => { const t = completionTone(r.completion_pct); return t ? `v-${t}` : ''; },
-      render: (r) => (r.completion_pct != null ? pct(r.completion_pct) : '—') },
+      cellCls: (r) => { if (ak) return ''; const t = completionTone(r.completion_pct); return t ? `v-${t}` : ''; },
+      render: (r) => (r.completion_pct != null
+        ? pct(r.completion_pct) + (ak && Number(r.completion_pct) < 95
+          ? ` ${delta(Number(r.completion_pct) - 95, { kind: 'gap', of: 'to 95%', unit: 'pts', d: 1 })}` : '')
+        : '—') },
     /* Measured on the live fleet: rating is null for all 360 people, because
        nothing in the collector writes it — Uber's roster endpoint returns
        onboarding status and a vehicle, not a score, and the earnings breakdown
@@ -4117,7 +4342,8 @@ export async function renderDriverDirectory(root) {
           return '<span class="ent-off" title="this person’s platforms publish no licence expiry">—</span>';
         }
         return pill(r.licence_days_left < 0 ? 'expired' : `${r.licence_days_left}d`,
-          r.licence_days_left < 0 ? 'bad' : r.licence_days_left < 30 ? 'warn' : 'ok');
+          r.licence_days_left < 0 ? 'bad' : r.licence_days_left < 30 ? 'warn' : 'ok')
+          + (ak && r.licence_expires ? `<small class="dim lic-d">${esc(dateStr(`${String(r.licence_expires).slice(0, 10)}T12:00:00`))}</small>` : '');
       } },
   ];
   const draw = (list, term) => {
@@ -4170,6 +4396,7 @@ export async function renderDriverDirectory(root) {
       sub: `${fmt(v.active)} drove, ${fmt(v.idle)} did not, ${fmt(v.never)} never have.`
         + (v.notFilled ? ` ${fmt(v.notFilled)} carry no real licence date, so they are not counted as expired.` : ''),
     });
+    if (ak) driversGlance(AKB, { rows, active, idle, never, expired, figure });
   }
 
   draw(rows, '');
@@ -4189,5 +4416,86 @@ export async function renderDriverDirectory(root) {
       + 'They are marked "not filled in" and are NOT counted as expired — the Compliance page counts '
       + 'them the same way, so the two agree.', 'warn'));
   }
+  if (ak) {
+    tblP.panel.append(el('p', 'cap', 'Completion below 95% shows its gap to 95% — a house threshold, not a '
+      + 'fleet measurement. Licence shows the expiry date under the state.'));
+  }
   return rows;
+}
+
+/* ── #drivers under the page contract ────────────────────────────────────── */
+/* Platform chips: a swatch and an INK label, in the fixed channel order —
+   never the payload's order, never a coloured word (SPEC L5.1). */
+function platChips(platforms, fromHistory) {
+  const order = (p) => { const i = CHANNEL_ORDER.indexOf(String(p || '').toLowerCase()); return i < 0 ? 99 : i; };
+  return [...(platforms || [])].sort((a, b) => order(a) - order(b))
+    .map((p) => `<span class="pchip${fromHistory ? ' dim' : ''}">${swatch(p)}${esc(sourceLabel(p))}</span>`).join(' ');
+}
+/* The five tiles. Every figure is a count the verdict's own branch logic
+   already holds; the verdict's figure is not repeated (ruling 7), so on the
+   expired branch the Licence tile folds into the statement above it. The
+   sub-lines the plan adds are computed from the same rows. */
+function driversGlance(AKB, { rows, active, idle, never, expired, figure }) {
+  const fleets = new Map();
+  rows.forEach((r) => { if (r.fleet_id) fleets.set(r.fleet_id, (fleets.get(r.fleet_id) || 0) + 1); });
+  const tr = active.map((r) => Number(r.trips) || 0).sort((a, b) => a - b);
+  const med = tr.length ? (tr.length % 2 ? tr[(tr.length - 1) / 2] : (tr[tr.length / 2 - 1] + tr[tr.length / 2]) / 2) : null;
+  const all = rows.map((r) => Number(r.trips) || 0).sort((a, b) => b - a);
+  const tot = all.reduce((a, n) => a + n, 0);
+  const top20 = tot ? all.slice(0, 20).reduce((a, n) => a + n, 0) / tot * 100 : null;
+  const { tiles } = bandTiles([
+    { label: 'Licence expired', value: fmt(expired.length), hero: true,
+      sub: 'a real expiry date in the past — placeholder dates are not counted' },
+    { label: 'On the books', value: fmt(rows.length),
+      sub: [...fleets.entries()].sort((a, b) => b[1] - a[1]).map(([f, n]) => `${fmt(n)} ${sourceLabel(f)}`).join(' · ')
+        || 'no row names a fleet' },
+    { label: 'Drove', value: fmt(active.length),
+      sub: active.length ? `median ${fmt(med, 1)} bookings each · the busiest ${fmt(tr[tr.length - 1])}`
+        + (top20 != null && all.filter((n) => n > 0).length > 20 ? ` · the top 20 ran ${pct(top20, 1)}` : '') : 'nobody drove in this window' },
+    { label: 'Did not drive', value: fmt(idle.length), sub: 'on the books, drove before, no trip in this window' },
+    { label: 'Never have', value: fmt(never.length), sub: 'no trip on record at all' },
+  ], { figure });
+  glance(AKB.tilesHost, tiles);
+}
+/* §04 How the work concentrates — the share of the window's bookings run by
+   the busiest 10, 20 and 50, from the directory rows already fetched. */
+export function driversConcentration(host, dots) {
+  const tr = dots.map((r) => Number(r.trips) || 0).filter((n) => n > 0).sort((a, b) => b - a);
+  const tot = tr.reduce((a, n) => a + n, 0);
+  if (!tot) { empty(host, 'Nobody drove in this window, so there is no work to spread.'); return; }
+  let run = 0;
+  const curve = tr.map((n, i) => { run += n; return { rank: i + 1, share: +(run / tot * 100).toFixed(1) }; });
+  areaChart(host, curve, { x: 'rank', y: 'share', color: '--ink', valueFmt: (v) => `${v}%`,
+    aria: 'Share of the window\u2019s bookings run by the busiest people, by rank' });
+  const at = (k) => (tr.length >= k ? curve[k - 1].share : null);
+  const parts = [10, 20, 50].filter((k) => at(k) != null).map((k) => `the top ${k} ran ${pct(at(k), 1)}`);
+  host.append(el('p', 'cap', `${countOf(tr.length, 'person', 'people')} drove ${fmt(tot)} bookings; ${parts.join(', ')}`
+    + (tr.length >= 20 ? ` — an even spread would give the top 20 ${pct(20 / tr.length * 100, 1)}.` : '.')));
+}
+export function driversAbsence(root, dir) {
+  const rows = Array.isArray(dir) ? dir : [];
+  const n = rows.length;
+  const exp = rows.filter((r) => r.licence_days_left != null && r.licence_days_left < 0);
+  const tally = new Map();
+  exp.forEach((r) => { const d = String(r.licence_expires || '').slice(0, 10); if (d) tally.set(d, (tally.get(d) || 0) + 1); });
+  const [mDate, mN] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0] || [null, 0];
+  const noDate = rows.filter((r) => !r.licence_expires).length;
+  const noRating = rows.filter((r) => r.platform_rating == null).length;
+  const uberOnly = rows.filter((r) => r.active_in_window && (r.platforms || []).length === 1
+    && String(r.platforms[0]).toLowerCase() === 'uber').length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Expired licences that share one date', fig: mN > 1 ? `${fmt(mN)} of ${fmt(exp.length)}` : null, none: 'None shared',
+      why: mN > 1 ? `${fmt(mN)} of the licences in the past carry ${dateStr(`${mDate}T12:00:00`)}. One date across many people `
+        + 'is more often a field filled in once than a fleet that lapsed on one day; the register holds nothing that tells them apart.'
+        : 'No two lapsed licences carry the same date.' },
+    { label: 'People with no licence date at all', hl: true, fig: noDate ? `${fmt(noDate)} of ${fmt(n)}` : null, none: 'Every one has one',
+      why: noDate ? 'No platform or register this product reads publishes an expiry for them, so whether they may drive cannot be judged here.'
+        : 'Every person on the books carries a licence date.' },
+    { label: 'People with no platform rating', fig: noRating ? `${fmt(noRating)} of ${fmt(n)}` : null, none: 'Every one rated',
+      why: noRating ? 'Not yet collected for them: Uber is asked for a rating every Monday and Bolt\u2019s roster call is currently refused.'
+        : 'Every person carries a platform rating.' },
+    { label: 'Fares on Uber bookings', fig: uberOnly ? `${fmt(uberOnly)} people` : null, none: 'Not per booking',
+      why: `${UBER_FARE_WHY}; ${uberOnly ? `${countOf(uberOnly, 'person', 'people')} drove only Uber here, and ` : ''}their money is in the Money and Paid columns.` },
+  ]);
 }

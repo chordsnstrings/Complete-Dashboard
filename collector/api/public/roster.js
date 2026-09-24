@@ -19,8 +19,8 @@
 import { donut, hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
   dayStr, dateStr, dtStr, money, pct, sourceLabel, countOf, plural, verdict, foldRows,
-  UBER_FARE_WHY } from './ui.js';
-import { q, href, state } from './data.js';
+  UBER_FARE_WHY, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, sourceToken } from './ui.js';
+import { q, href, state, windowLabel } from './data.js';
 
 export const ROSTER_TABS = [
   { id: 'all', label: 'Everyone', ic: '◧' },
@@ -94,12 +94,29 @@ export async function renderRoster(root) {
   root.innerHTML = '';
   root.append(tabBar(ROSTER_TABS, tab, (id) => href('roster', id === 'all' ? null : id)));
   const host = el('div', 'stack'); root.append(host);
-  if (tab === 'states') return rosterStates(host);
+  /* Under the page contract (plan §4 roster and its four tabs): the tab bar
+     stays first; the verdict is the 00 statement and the tiles sit beside it,
+     untoned (none of them is a change), each keeping its cohort link, the one
+     repeating the verdict's figure folded into it (ruling 7); the standings as
+     one 100% bar whose segments still open the people in them; when each
+     person last took a booking (new); platforms per person; the table and its
+     sort, fold and twin column unchanged, standings as ink chips; a † band.
+     Each tab adds what the plan gives it. */
+  const ak = contract();
+  if (tab === 'states') return rosterStates(host, ak);
 
   loading(host);
   const d = await q('/api/roster');
   host.innerHTML = '';
   const t = d.totals;
+  const AKB = ak ? glanceBand(host, windowLabel()) : null;
+  /* Which TILE the verdict's figure is, by name. notRepeated() folds the
+     first tile whose value equals the figure, and on this page several can
+     share one — on the mock "1" is the idle count, the never-driven count and
+     the stopped count at once, and the fold took "Able to earn, earning
+     nothing" out of a band whose verdict was about the stopped. The not-
+     earning figure is a sum no single tile prints, so nothing folds then. */
+  let rosterFigLabel = null;
 
   /* The roster exists to find the people who are NOT earning, and it opened on
      four tiles and a 280-row table 33,019 pixels tall. */
@@ -124,7 +141,8 @@ export async function renderRoster(root) {
       claim = `${fmt(t.working)} of ${fmt(t.people)} people drove this window`;
       figure = fmt(t.working); unit = 'working';
     }
-    verdict(host, {
+    rosterFigLabel = blocked ? 'Stopped everywhere' : pct >= 40 ? null : 'Drove in this window';
+    verdict(ak ? AKB.vHost : host, {
       claim, figure, unit, tone, recommend,
       /* Whichever set the claim counted, that is the set the link opens. */
       cohort: blocked ? 'roster-blocked' : pct >= 40 ? 'roster-idle' : null,
@@ -134,7 +152,7 @@ export async function renderRoster(root) {
     });
   }
 
-  host.append(kpiRow([
+  const ROSTER_TILES = [
     { label: 'People on the books', value: fmt(t.people),
       sub: t.multi_platform ? `${fmt(t.multi_platform)} work on more than one platform` : null },
     /* A count with no denominator is half a number. This tile sits beside
@@ -182,7 +200,9 @@ export async function renderRoster(root) {
       tone: t.holding_vehicle_while_blocked ? 'critical' : null,
       sub: 'earns nothing, still depreciates, insures and parks',
       cohort: t.holding_vehicle_while_blocked ? 'roster-blocked-holding' : null },
-  ]));
+  ];
+  if (ak) glance(AKB.tilesHost, bandTiles(ROSTER_TILES.filter((x) => !x || x.label !== rosterFigLabel)).tiles);
+  else host.append(kpiRow(ROSTER_TILES));
 
   if (!d.people.length) {
     host.append(note('No provider has reported a roster yet. The standing comes from the live pollers '
@@ -238,19 +258,32 @@ const FILTER = {
       idle_this_window: ['roster', 'idle'], blocked: ['roster', 'blocked'],
       working: ['drivers'] };
     const keyOf = (label) => Object.keys(CAT).find((c) => CAT[c].label === label);
-    donut(b1, counts, {
+    /* Under the contract one 100% bar in the achromatic slots — a standing
+       is not a channel — every segment still opening the people behind it. */
+    /* Its own box under the contract: the bar is drawn before the panel is on
+       the page, redraws itself once it is laid out, and a redraw clears its
+       host — the counts appended beside it were wiped with it. */
+    const b1c = ak ? el('div') : b1;
+    if (ak) b1.append(b1c);
+    donut(b1c, counts, {
+      ...(ak ? { as: 'bar100' } : {}),
       clickable: (x) => !!SLICE_TO[keyOf(x.label)],
       onClick: (x) => { const to = SLICE_TO[keyOf(x.label)]; if (to) location.hash = href(...to); },
     });
-    b1.append(el('p', 'cap', 'Every slice opens the people behind it.'));
+    b1.append(el('p', 'cap', ak ? `${counts.map((x) => `${x.label} ${fmt(x.n)}`).join(' · ')}. Every segment opens the people behind it.`
+      : 'Every slice opens the people behind it.'));
     g.append(p1);
+    if (ak) rosterRecency(host, d.people);
     const { panel: p2, body: b2 } = panel('How many platforms each person works',
       'One person with three platform accounts is one person. The fold is by name, which is the only key that spans providers.');
     const byAcc = {};
     d.people.forEach((x) => { const n = (x.platforms || []).length || 1; byAcc[n] = (byAcc[n] || 0) + 1; });
-    hbars(b2, Object.entries(byAcc).map(([k, n]) => ({ label: `${k} platform${k === '1' ? '' : 's'}`, n })));
+    hbars(b2, Object.entries(byAcc).map(([k, n]) => ({ label: `${k} platform${k === '1' ? '' : 's'}`, n })),
+      ak ? { signed: false, color: '--mk-fill' } : undefined);
     g.append(p2);
   }
+  if (ak && tab === 'pipeline') rosterPipeline(host, people.filter(FILTER.pipeline));
+  if (ak && tab === 'idle') rosterDormant(host, people.filter(FILTER.idle));
 
   if (!shown.length) {
     host.append(note(tab === 'idle'
@@ -291,7 +324,7 @@ const FILTER = {
       + 'their custody is depreciating, insured and parked.'],
   };
   const [rTitle, rSub] = TITLE[tab] || TITLE.all;
-  const rp = panel(`${rTitle} — ${countOf(shown.length, 'person', 'people')}`, rSub);
+  const rp = panel(`${rTitle} — ${countOf(shown.length, 'person', 'people')}`, rSub, ak ? 'roster-table' : undefined);
   host.append(rp.panel);
   const rosterTable = tableFrom(shown, [
     /* The roster exists to find the people who are not earning. A row you
@@ -306,7 +339,9 @@ const FILTER = {
          stopped); the word "yet" is what is false. A person who has driven and
          cannot today is not new, and telling an operator they are waiting to
          start sends them to the wrong conversation. */
-      render: (r) => pill(categoryLabel(r), CAT[r.category]?.tone) },
+      /* Under the contract a standing is an ink chip — it is a state, not
+         a warning. */
+      render: (r) => pill(categoryLabel(r), ak ? null : CAT[r.category]?.tone) },
     { label: 'Platforms', key: 'platforms',
       render: (r) => `${(r.platforms || []).map(sourceLabel).join(', ')}${r.accounts > (r.platforms || []).length
         ? ` <small class="dim">${r.accounts} accounts</small>` : ''}` },
@@ -427,6 +462,7 @@ const FILTER = {
       + 'column names the record to check each against.'));
   }
 
+  let holdHtml = null;
   if (tab === 'blocked') {
     const holding = shown.filter((x) => x.holding_vehicle_while_blocked);
     if (holding.length) {
@@ -449,22 +485,85 @@ const FILTER = {
         + (plates.length > 12 ? ` <span class="dim">and ${fmt(plates.length - 12)} more</span>` : '')
         + '. A car assigned to somebody who is not allowed to drive it earns nothing and still '
         + 'depreciates, insures and parks. A ×2 is two stopped drivers on one vehicle, not a duplicate.';
-      host.append(n);
+      if (ak) holdHtml = { n: holding.length, html: n.innerHTML };
+      else host.append(n);
     }
   }
-  if (tab === 'idle') {
+  if (tab === 'idle' && !ak) {
     host.append(note('These people are permitted to work on at least one platform and took no booking '
       + 'in this window. Widen the range above before acting on it — a driver on leave and a driver '
       + 'who has quietly stopped look identical inside seven days.'));
   }
+  if (ak) { rosterAbsence(host, d, shown, tab, holdHtml); return; }
   host.append(note(d.caveat));
 }
 
-async function rosterStates(host) {
+/* ── #roster under the page contract ─────────────────────────────────────── */
+/* When each person last took a booking. Never-driven is counted in the
+   caption, not drawn as the longest gap (it is no gap at all); a person
+   whose feeds we do not collect is neither. */
+function rosterRecency(host, people) {
+  const p = panel('When each person last took a booking', 'Days since the last booking on any channel', 'roster-recency');
+  host.append(p.panel);
+  const B = [['today', 0, 1], ['1–6 days', 1, 7], ['7–29 days', 7, 30], ['30–89 days', 30, 90], ['90–179 days', 90, 180], ['180 days or more', 180, Infinity]];
+  const dated = people.filter((r) => r.days_since_last_trip != null && r.last_ever);
+  const never = people.filter((r) => r.lifetime_trips === 0).length;
+  const unseen = people.filter((r) => r.lifetime_trips == null).length;
+  hbars(p.body, B.map(([label, lo, hi]) => ({ label, n: dated.filter((r) => r.days_since_last_trip >= lo && r.days_since_last_trip < hi).length })),
+    { signed: false, color: '--mk-fill' });
+  p.body.append(el('p', 'cap', `${countOf(dated.length, 'person', 'people')} with a last booking on record`
+    + (never ? `; ${fmt(never)} never took one` : '') + (unseen ? `; ${fmt(unseen)} work only channels whose trips are not collected` : '')
+    + ' — neither of those is drawn as a gap.'));
+}
+/* The four pipeline states as one 100% bar. */
+function rosterPipeline(host, rows) {
+  const p = panel('Which of the four it is', 'Not yet earning, by the reason the roster gives', 'roster-pipe');
+  host.append(p.panel);
+  const by = new Map();
+  rows.forEach((r) => by.set(categoryLabel(r), (by.get(categoryLabel(r)) || 0) + 1));
+  if (!by.size) { empty(p.body, 'Nobody is waiting to start.'); return; }
+  donut(p.body, [...by.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => ({ label, n })), { as: 'bar100' });
+}
+/* Dormant longest: the twelve idle people whose last booking is oldest. */
+function rosterDormant(host, rows) {
+  const p = panel('Dormant longest', 'Able to earn: the twelve whose last booking on any channel is the oldest', 'roster-dormant');
+  host.append(p.panel);
+  const r = rows.filter((x) => x.days_since_last_trip != null).sort((a, b) => b.days_since_last_trip - a.days_since_last_trip).slice(0, 12);
+  if (!r.length) { empty(p.body, 'Nobody here has a last booking on record.'); return; }
+  hbars(p.body, r.map((x) => ({ label: x.name || '(unnamed)', n: x.days_since_last_trip, id: x.driver_ext_id })),
+    { signed: false, color: '--mk-fill', valueFmt: (v) => `${fmt(v)} days`,
+      onClick: (x) => { if (x.id) location.hash = href('driver', x.id); } });
+}
+function rosterAbsence(host, d, shown, tab, holdHtml = null) {
+  const noReason = shown.filter((r) => !r.reason).length;
+  const cells = [
+    { label: 'A reason for the standing', fig: noReason ? `${fmt(noReason)} of ${fmt(shown.length)}` : null, none: 'Every one has one',
+      why: noReason ? 'No channel gives a reason for a standing except on a suspension; these rows carry none.' : 'Every row here carries a reason.' },
+    { label: 'Rows that are not people', fig: null, none: 'Not flagged',
+      why: 'Company accounts sit on the roster as drivers and are counted here; nothing on /api/roster marks one, and telling them apart by name would be a name rule.' },
+    { label: 'What the roster cannot say', fig: null, none: 'See the note',
+      why: d.caveat || 'The roster describes a standing, not a day\u2019s work.' },
+  ];
+  if (holdHtml) {
+    /* The holding-a-car note, moved here whole — plates linked, ×k kept. */
+    cells.unshift({ label: 'Holding a car while stopped', hl: true, fig: `${fmt(holdHtml.n)} of ${fmt(shown.length)}`,
+      html: true, why: holdHtml.html });
+  }
+  if (tab === 'idle') {
+    cells.unshift({ label: 'Why they took nothing', fig: null, none: 'Not recorded',
+      why: 'These people are permitted to work on at least one platform and took no booking in this window. Widen the range above before acting on it — a driver on leave and a driver who has quietly stopped look identical inside seven days.' });
+  }
+  const absHost = el('div'); host.append(absHost);
+  absenceBand(absHost, cells);
+  pageFoot({ colophon: [windowLabel(), `${fmt((d.totals || {}).people)} on the books`] }, host);
+}
+
+async function rosterStates(host, ak = false) {
   loading(host);
   const d = await q('/api/roster/states');
   host.innerHTML = '';
-  host.append(kpiRow([
+  const AKB = ak ? glanceBand(host, null) : null;
+  const STATE_TILES = [
     /* Rows, not people: a person with an account on two channels is two rows,
        and the roster page above this one counts people. The two numbers differ
        and nothing said which was which. */
@@ -479,7 +578,11 @@ async function rosterStates(host) {
       sub: 'a mapping we could add' },
     { label: 'Providers reporting no state', value: fmt((d.no_state_reported || []).length),
       sub: (d.no_state_reported || []).map((r) => sourceLabel(r.platform)).join(', ') || 'none' },
-  ]));
+  ];
+  if (ak) {
+    glance(AKB.tilesHost, bandTiles(STATE_TILES, { reasons: { 'Oldest observation': 'no roster row carries an observation time', 'Newest observation': 'no roster row carries an observation time' } }).tiles);
+    statesMultiples(host, d.by_state || []);
+  } else host.append(kpiRow(STATE_TILES));
   if ((d.unrecognised_words || []).length) {
     const { panel: p, body } = panel('Words we could not match',
       'The provider sent a word and we have no mapping for it. These are kept as written rather than '
@@ -514,4 +617,24 @@ async function rosterStates(host) {
     { label: 'With a vehicle attached', key: 'with_vehicle', num: true,
       render: (r) => `${fmt(r.with_vehicle)} <small class="dim">${pct((r.with_vehicle / r.n) * 100, 0)}</small>` },
   ]));
+  if (ak) pageFoot({ colophon: ['roster standings', `${fmt(d.rows)} rows`] }, host);
+}
+
+/* Standings per platform as small multiples — one channel per plot, bars in
+   that channel's colour (SPEC §3.4), each labelled with the people and how
+   many of them hold a car. All four channels, not Uber alone. */
+function statesMultiples(host, byState) {
+  const plats = [...new Set(byState.map((r) => r.platform))];
+  if (!plats.length) return;
+  const p = panel('Standings per platform', 'One plot per channel: its standings, the people in each, and how many of them hold a car', 'roster-multiples');
+  host.append(p.panel);
+  const g = el('div', 'grid g2'); p.body.append(g);
+  for (const pl of plats) {
+    const box = el('div');
+    box.append(el('p', 'cap', `<b>${esc(sourceLabel(pl))}</b>`));
+    const rows = byState.filter((r) => r.platform === pl).sort((a, b) => b.n - a.n);
+    hbars(box, rows.map((r) => ({ label: `${r.state} · ${fmt(r.with_vehicle)} with a car`, n: r.n })),
+      { signed: false, color: sourceToken(pl) || '--mk-fill' });
+    g.append(box);
+  }
 }

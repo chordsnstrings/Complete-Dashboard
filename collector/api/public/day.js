@@ -13,7 +13,7 @@ import { TZ } from './tz.js';
 import { barChart, donut, hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
   dayStr, dtStr, timeStr, money, pct, custody, sourceLabel, tierLabel, payRoute, signed,
-  UBER_FARE, segSourceLabel } from './ui.js';
+  UBER_FARE, segSourceLabel, sourceToken, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
 import { api, href, state } from './data.js';
 
 /* Why a fare column on this page can be almost entirely empty. Shared between
@@ -56,9 +56,15 @@ export async function renderDay(root, day, onDetail) {
     root.append(w);
   }
 
+  /* Under the page contract (plan §4 day — restyle through the foundation):
+     the tiles as a 00 band, bookings the hero with its fortnight change; the
+     channel ring as a 100% bar in channel colour and the tier ring as ranked
+     bars; every panel, table and click-through kept; a † band built from the
+     page's own per-source collection verdicts. */
+  const ak = contract();
   const h = d.headline;
   const vs = d.versus_neighbours;
-  root.append(kpiRow([
+  const DAY_TILES = [
     { label: 'Bookings', value: fmt(h.bookings),
       sub: vs.delta_pct == null ? null
         : `${signed(vs.delta_pct, { unit: '%' })} on the fortnight median of ${fmt(vs.median_bookings)}`,
@@ -126,7 +132,14 @@ export async function renderDay(root, day, onDetail) {
       sub: `${fmt(h.telematics_km)} km — the same physical trips, seen by the trackers` },
     { label: 'First / last booking', value: h.first_at ? `${timeStr(h.first_at)} – ${timeStr(h.last_at)}` : '—' ,
       sub: 'Dubai time — the working day this page describes'},
-  ]));
+  ];
+  if (ak) {
+    const AKB = glanceBand(root, dayStr(day));
+    /* The fortnight change is the hero's delta, so it is not also its sub. */
+    glance(AKB.tilesHost, bandTiles(DAY_TILES.map((x, i) => (i === 0 ? { ...x, hero: true, sub: vs.delta_pct == null ? x.sub : null,
+      delta: vs.delta_pct == null ? null : { value: +vs.delta_pct, unit: '%', of: `on the fortnight median of ${fmt(vs.median_bookings)}`, d: 1 } } : x)),
+    { reasons: { 'First / last booking': 'no booking on this day carries a time' } }).tiles);
+  } else root.append(kpiRow(DAY_TILES));
 
   if (!h.bookings && !h.telematics) {
     /* Before the record began is not "the fleet did not move". A date earlier
@@ -212,7 +225,8 @@ export async function renderDay(root, day, onDetail) {
 
   add('Which channel', null, (b) => {
     if (!d.platforms.length) return empty(b);
-    donut(b, d.platforms.map((r) => ({ label: sourceLabel(r.platform), n: r.n })), {
+    donut(b, d.platforms.map((r) => ({ label: sourceLabel(r.platform), n: r.n, plat: r.platform })), {
+      ...(ak ? { as: 'bar100', colorFor: (x) => sourceToken(x.plat) } : {}),
       onClick: (x) => { location.hash = href('platforms'); } });
   });
 
@@ -225,7 +239,9 @@ export async function renderDay(root, day, onDetail) {
   if (d.tiers.length) {
     /* tierLabel: the same raw enums that reached the #vehicles header row
        reach this legend — "drop_off" beside "Comfort". */
-    add('Uber product tier', null, (b) => donut(b, d.tiers.map((r) => ({ label: tierLabel(r.tier), n: r.n }))));
+    add('Uber product tier', null, (b) => (ak
+      ? hbars(b, [...d.tiers].sort((x, y) => y.n - x.n).map((r) => ({ label: tierLabel(r.tier), n: r.n })), { signed: false, color: '--mk-fill' })
+      : donut(b, d.tiers.map((r) => ({ label: tierLabel(r.tier), n: r.n })))));
   }
   if (d.alerts.length) {
     add('Harsh-driving events', 'From the telematics layer, on this day only.', (b) => {
@@ -406,5 +422,28 @@ export async function renderDay(root, day, onDetail) {
     + 'flagged below three tenths of it or above three times it; between those the variation is '
     + 'ordinary. A high day is not necessarily wrong — it is worth knowing about.'));
   root.append(cp.panel);
+  if (ak) dayAbsence(root, d, day);
   return d;
+}
+
+/* ── #day under the page contract: † from the collection verdicts ─────────
+   The same four readings the table's Verdict column makes, for the sources
+   that are not "normal": a source that collected nothing is the day's
+   largest absence, and a day far above normal is worth knowing about. */
+function dayAbsence(root, d, day) {
+  const rows = (d.coverage || []).map((r) => {
+    const med = Number(r.median_rows) || 0;
+    const v = !r.inside_span ? 'no history here'
+      : r.rows === 0 && med > 0 ? 'collected nothing'
+        : med > 0 && r.rows < med * 0.3 ? 'far below normal'
+          : med > 0 && r.rows > med * 3 ? 'far above normal' : 'normal';
+    return { ...r, v, med };
+  }).filter((r) => r.v !== 'normal');
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, rows.length ? rows.slice(0, 4).map((r) => ({
+    label: sourceLabel(r.source), hl: r.v === 'collected nothing', fig: r.v === 'collected nothing' ? null : r.v, none: 'Collected nothing',
+    why: !r.inside_span ? 'This day is outside the span this source has ever collected, so it has no normal to be read against.'
+      : `${fmt(r.rows)} rows this day against a usual ${fmt(r.med)}.`,
+  })) : [{ label: 'Every source', fig: 'Normal', why: 'Every source collected within its ordinary range on this day.' }]);
+  pageFoot({ colophon: [dayStr(day), `${fmt(d.headline?.bookings || 0)} bookings`] }, root);
 }

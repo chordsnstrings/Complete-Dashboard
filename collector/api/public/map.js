@@ -6,14 +6,24 @@
    We draw straight lines between consecutive fixes and break the line wherever the
    gap is long enough that a straight line would be a lie (handled server-side in
    /api/map/journey), so the map never invents a road the car may not have taken. */
-import { timeStr } from './ui.js';
+import { timeStr, contract } from './ui.js';
 import { markForm } from './charts.js';
+import { channelKey } from './tokens.js';
 
 const OSM = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const DUBAI = [25.2048, 55.2708];
 
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+/* Under the page contract (plan §4 #map) a mark is its FEED's colour, and
+   what the car is doing is a step of that feed's own ramp — engaged (a
+   passenger aboard) the identity, moving the middle step, stopped the light
+   end (tokens.js RAMP; --c-<feed>-<state>, which follow the theme). A feed
+   this product cannot name is neutral grey, never a borrowed hue. */
+export const rampOf = (source, state) => {
+  const k = channelKey(String(source || ''));
+  return k ? css(`--c-${k}-${state}`) : css('--grey');
+};
 
 /* Leaflet, fetched the first time a map is actually drawn.
    ─────────────────────────────────────────────────────────────────────────
@@ -167,19 +177,26 @@ export function renderLive(map, rows, onPick) {
        A seat reading is CABMAN DT's pad or, since 2026-09-23, FMS's live seat
        count (the API reads 1 or more as occupied and names the provider in
        seat_source); a fix with neither is the unknown case. */
-    const colour = r.stale ? css('--grey')
-      : engaged ? css('--s3')
-        : moving ? (seatUnknown ? css('--b300') : css('--s1'))
-          : css('--s5');
+    const ak = contract();
+    const colour = ak
+      ? (r.stale ? (css('--abs-outline') || css('--grey')) : rampOf(r.source, engaged ? 'engaged' : moving ? 'available' : 'idle'))
+      : r.stale ? css('--grey')
+        : engaged ? css('--s3')
+          : moving ? (seatUnknown ? css('--b300') : css('--s1'))
+            : css('--s5');
+    /* Moving with no seat reading on the fix: the feed's moving step, with a
+       dashed ink ring — the absence of a reading, never drawn as "empty". */
+    const noSeat = ak && !r.stale && !engaged && moving && seatUnknown;
     const at = nudge(r.lat, r.lng);
     /* A stale fix, under --mk-stale: hollow (the Arkiv skin), is a ring in
        the stale grey with no fill: the graphite ramp puts it at the same
        lightness as "moving, no seat reading" (--b300), so a faded fill could
        not tell the two apart (reskin review, finding 2). The old skin keeps
        its faded fill. */
-    const hollow = r.stale && staleForm === 'hollow';
+    const hollow = r.stale && (ak || staleForm === 'hollow');
     const m = L.circleMarker(at, {
-      radius: engaged ? 7 : 6, color: hollow ? colour : css('--pin-ring'), weight: hollow ? 2.5 : 1.5,
+      radius: engaged ? 7 : 6, color: hollow ? colour : noSeat ? css('--ink') : css('--pin-ring'), weight: hollow ? 2.5 : 1.5,
+      ...(noSeat ? { dashArray: '2,2' } : {}),
       fillColor: colour, fillOpacity: hollow ? 0 : r.stale ? 0.45 : 0.95,
     }).addTo(layer);
     m.bindTooltip(
@@ -217,8 +234,13 @@ export function renderJourney(map, journey) {
          colour with a "Running empty" tooltip — a claim, not an absence. */
       const occ = run[0].occupied;
       const occupied = occ === true, unknown = occ === null || occ === undefined;
+      /* Under the contract the line is its feed's ramp: occupied the
+         identity, running empty the middle step (dashed, as before); a fix
+         with no seat reading stays grey and dotted. */
+      const ak = contract();
       L.polyline(run.map((p) => [p.lat, p.lng]), {
-        color: unknown ? css('--grey') : occupied ? css('--s3') : css('--s1'),
+        color: unknown ? css('--grey') : occupied ? (ak ? rampOf(run[0].source, 'engaged') : css('--s3'))
+          : (ak ? rampOf(run[0].source, 'available') : css('--s1')),
         weight: occupied ? 4 : 3, opacity: unknown ? .5 : occupied ? .95 : .65,
         dashArray: occupied ? null : unknown ? '2,4' : '5,6',
       }).addTo(layer).bindTooltip(
@@ -243,8 +265,9 @@ export function renderJourney(map, journey) {
   const last = pointsFlat[pointsFlat.length - 1];
   if (first) L.marker([first.lat, first.lng], { title: 'first fix' }).addTo(layer)
     .bindTooltip(`Start ${timeStr(first.t)}`, { direction: 'top' });
+  const endC = contract() ? css('--ink') : css('--s2');
   if (last && last !== first) L.circleMarker([last.lat, last.lng], {
-    radius: 8, color: css('--s2'), weight: 3, fillColor: css('--s2'), fillOpacity: .35,
+    radius: 8, color: endC, weight: 3, fillColor: endC, fillOpacity: .35,
   }).addTo(layer).bindTooltip(`Last fix ${timeStr(last.t)}`, { direction: 'top' });
 
   fitTo(map, all, { maxZoom: 16 });

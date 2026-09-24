@@ -7220,7 +7220,7 @@ app.get('/api/playbook', (req, r) => {
       aed_measured: null, certainty: 'measured', effort: 'low', link: '#compliance',
       detail: plates.slice(0, 6).map((p2, i) => ({ plate: p2, expires_at: `2026-08-${25 + (i % 5)}`, days_left: 3 + i })) }),
     mk({ id: 'collect_receivables', group: 'Collect', horizon: 'this week',
-      title: 'Chase AED 58,721 owed across 44 counterparties',
+      title: 'Chase AED 58,721.00 owed across 44 counterparties', // as api/playbook_routes.js writes it (aedText)
       why: '458 bookings in this window settle on account or against salary rather than at the kerb. The '
         + 'oldest is 45 days old.',
       basis: 'Sum of price over trip_ext rows flagged is_receivable — room charges, company accounts and '

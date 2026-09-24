@@ -564,7 +564,7 @@ async function settleReceivables(host) {
     const ap = panel('How old the unpaid work is', 'Amount per age, with its bookings and counterparties. A bucket with nothing in it is a measured nought.', 'recv-ageing');
     host.append(ap.panel);
     hbars(ap.body, buckets.map((x) => ({ label: `${x.label} · ${countOf(x.trips || 0, 'booking')}, ${countOf(x.counterparties || 0, 'counterparty', 'counterparties')}`,
-      n: +x.amount || 0 })), { signed: false, color: '--ink', valueFmt: (v) => (v ? money(v) : 'nothing outstanding') });
+      n: +x.amount || 0 })), { signed: false, color: '--mk-fill', valueFmt: (v) => (v ? money(v) : 'nothing outstanding') });
     ap.body.append(el('p', 'cap',
       `${esc(r.ageing.note || '')} The tiles above cover the selected window; these bars cover `
       + `every unsettled booking up to ${dateStr(r.ageing.as_at)}, which is why their total is larger.`));

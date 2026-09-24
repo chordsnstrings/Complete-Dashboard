@@ -398,7 +398,14 @@ const hex = (rgb) => '#' + (rgb.match(/\d+/g) || []).slice(0, 3).map((n) => Numb
     const before = { display: getComputedStyle(foot).display, principle: foot.querySelector('.pf-principle').textContent,
       src: !!foot.querySelector('.pf-basis .srcline'), srcInView: !!document.querySelector('#view .srcline'),
       colophon: foot.querySelector('.pf-colophon').textContent };
-    location.hash = '#settings';
+    /* The next page must be one that writes NO foot of its own, or a foot
+       there proves nothing about clearing. This was #settings until the page
+       phase gave #settings its own colophon ("credentials and on-demand runs ·
+       N keys", P76) — correct for that page, and it failed this check in the
+       Fleet section's full suite. An address that names no page (#notfound)
+       writes no basis and no colophon in either skin, so anything left there
+       is the last page's. */
+    location.hash = '#zzz-not-a-page';
     await new Promise((res) => setTimeout(res, 2500));
     return { before, after: { basis: foot.querySelector('.pf-basis').innerHTML,
       colophon: foot.querySelector('.pf-colophon').innerHTML,
@@ -483,6 +490,18 @@ console.log('\n5c · a long hero figure stays on one line at 390');
     return { h: n.getBoundingClientRect().height, lh, fs: getComputedStyle(n).fontSize, over: document.documentElement.scrollWidth - innerWidth };
   });
   check('a fourteen-character hero amount is one line at 390, and nothing scrolls sideways', r.h < r.lh * 1.5 && r.over <= 0, JSON.stringify(r));
+  /* An ABSENT hero's reason is long by nature; the long-figure clamp above
+     must not reach it (#trip on an Uber booking drew its reason at display
+     size, five lines deep, 2026-09-24). It reads at the size every other
+     reason in the band reads at. */
+  const na = await page.evaluate(async () => {
+    const u = await import('/ui.js');
+    const g = document.createElement('div'); document.querySelector('#view').prepend(g);
+    u.glance(g, [{ label: 'Fare', na: 'Uber prices no trip — see the day’s payout below', hero: true },
+      { label: 'Distance', na: 'this channel reported none' }]);
+    return [...g.querySelectorAll('.n.t-na')].map((n) => getComputedStyle(n).fontSize);
+  });
+  check('…and an absent hero\'s REASON keeps the reason\'s reading size, never the display clamp', na.length === 2 && na[0] === na[1], JSON.stringify(na));
   await ctx.close();
 }
 {

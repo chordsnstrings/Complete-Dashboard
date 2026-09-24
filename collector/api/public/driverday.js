@@ -13,7 +13,8 @@
    returns fixes rather than per-gap rollups so the same arithmetic is not done
    in two places that can drift apart. */
 import { el, esc, note, panel, loading, fmt, empty, pill, money, dayStr, entity, sourceLabel,
-  tierLabel, verdict } from './ui.js';
+  tierLabel, verdict, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
+import { hbars } from './charts.js';
 import { api, href } from './data.js';
 
 const hhmm = (m) => {
@@ -263,6 +264,14 @@ export async function renderDriverDay(root, id, day) {
   const medianGap = gaps.length
     ? [...gaps].map((g) => g.to - g.from).sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : null;
 
+  /* Under the page contract (plan §4 #driver/day): the headline is the 00
+     statement — its figure, the share of online time carrying someone, is
+     not repeated as a tile (ruling 7) — and the tiles set the day against
+     the driver's own calendar month, one extra request; the timeline and
+     every job and gap kept, restyled only (the review's correction); where
+     the tracker saw the car, by area; a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, dayStr(`${day}T12:00:00`)) : null;
   /* ── the verdict ───────────────────────────────────────────────────────── */
   {
     /* A figure that cannot be measured renders ABSENT WITH ITS REASON — never
@@ -273,7 +282,7 @@ export async function renderDriverDay(root, id, day) {
     const claim = share.basis === 'online'
       ? `${dur(onJob)} carrying someone, ${dur(share.idleMin)} online and waiting`
       : `${dur(onJob)} carrying someone across ${trips.length} ${trips.length === 1 ? 'job' : 'jobs'}`;
-    verdict(root, {
+    verdict(ak ? AKB.vHost : root, {
       claim,
       figure: refused ? '—'
         : share.basis === 'online' ? `${share.pct}%` : `${Math.round((onJob / span) * 100)}%`,
@@ -294,6 +303,7 @@ export async function renderDriverDay(root, id, day) {
     });
   }
 
+  if (ak) dayGlance(AKB, { id, day, trips, onJob, share, medianGap, km });
   /* ── the day as one band ───────────────────────────────────────────────── */
   const bandP = panel('The day, midnight to midnight', d.basis);
   root.append(bandP.panel);
@@ -518,4 +528,78 @@ export async function renderDriverDay(root, id, day) {
     list.append(item);
   }
   listP.body.append(list);
+  if (ak) { dayAreas(root, fixes); dayAbsence(root, { trips, fixes, day }); }
+}
+
+/* ── #driver/day under the page contract ─────────────────────────────────── */
+/* Four tiles. The day's own figures come from the arithmetic above; the
+   month they are set against is /api/driver/kpis over the calendar month
+   holding the day — trips a working day is its trips over its days worked.
+   A month that will not load leaves the tiles without a comparison rather
+   than holding the page. */
+async function dayGlance(AKB, { id, day, trips, onJob, share, medianGap, km }) {
+  const priced = trips.filter((t) => t.price != null);
+  const value = priced.reduce((a, t) => a + Number(t.price), 0);
+  const draw = (perDay) => {
+    const tripTile = { label: 'Trips', value: fmt(trips.length), sub: `${fmt(km, 1)} km over them` };
+    if (perDay != null) {
+      tripTile.delta = { value: trips.length - perDay, kind: 'gap', d: 1,
+        of: `against ${fmt(perDay, 1)} a working day this month` };
+    }
+    AKB.tilesHost.innerHTML = '';
+    glance(AKB.tilesHost, bandTiles([
+      { label: 'Carrying someone', value: dur(onJob), hero: true, sub: `request to dropoff, ${trips.length} ${trips.length === 1 ? 'job' : 'jobs'}` },
+      share.basis === 'online'
+        ? { label: 'Online and waiting', value: dur(share.idleMin), sub: medianGap != null ? `median gap between jobs ${dur(medianGap)}` : 'one job, no gap' }
+        : { label: 'Online and waiting', na: share.basis === 'refused' ? share.why
+          : 'Uber availability has not been collected for this day, so the waiting cannot be split into online and offline' },
+      tripTile,
+      { label: 'Distance', value: `${fmt(km, 1)} km`,
+        sub: priced.length ? `trip value ${money(value)} over ${fmt(priced.length)} priced · ${fmt(km / trips.length, 2)} km a job`
+          : `${fmt(km / trips.length, 2)} km a job · no job here carries a fare` },
+    ]).tiles);
+  };
+  draw(null);
+  const m0 = `${day.slice(0, 7)}-01`;
+  /* The month's last day, from the day's own digits: the count of days in the
+     month (day 0 of the next one, read back in UTC) — no clock, no zone, and
+     not the `toISOString().slice(0, 10)` shape test/timezone.test.mjs bans. */
+  const dim = new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7), 0)).getUTCDate();
+  const end = `${day.slice(0, 7)}-${String(dim).padStart(2, '0')}`;
+  try {
+    const k = await api(`/api/driver/kpis?id=${encodeURIComponent(id)}&from=${m0}&to=${end}`);
+    const perDay = k && Number(k.days_worked) > 0 ? Number(k.trips) / Number(k.days_worked) : null;
+    if (perDay != null && AKB.tilesHost.isConnected) draw(perDay);
+  } catch { /* the day stands on its own figures */ }
+}
+/* Where the tracker saw the car: fixes by area, ranked. A fix with no area
+   is counted apart, never drawn as a place. */
+function dayAreas(root, fixes) {
+  const p = panel('Where the tracker saw the car', 'Tracker fixes of the day, by the area each one falls in.', 'dday-areas');
+  root.append(p.panel);
+  if (!fixes.length) { empty(p.body, 'No tracker fix reached this day for the cars this driver held.'); return; }
+  const by = new Map();
+  let none = 0;
+  fixes.forEach((f) => { if (f.area) by.set(f.area, (by.get(f.area) || 0) + 1); else none += 1; });
+  const rows = [...by.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([label, n]) => ({ label, n }));
+  if (rows.length) hbars(p.body, rows, { signed: false, color: '--mk-fill' });
+  p.body.append(el('p', 'cap', `${fmt(fixes.length)} fixes`
+    + (none ? `; ${fmt(none)} carry no area and are not drawn as a place` : '')
+    + (by.size > 12 ? `; the 12 busiest of ${fmt(by.size)} areas shown` : '') + '.'));
+}
+function dayAbsence(root, { trips, fixes, day }) {
+  const noSpeed = fixes.filter((f) => f.speed == null).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'A speed on a fix', hl: noSpeed > 0, fig: fixes.length ? `${fmt(noSpeed)} of ${fmt(fixes.length)}` : null, none: 'No fix',
+      why: fixes.length ? 'The tracker reports a speed only while the car moves, so a stationary fix carries none.'
+        : 'No tracker fix reached this day.' },
+    { label: 'Distance with a rider in', fig: null, none: 'Not measured',
+      why: 'A job\u2019s distance runs request to dropoff and holds the drive to the rider; no channel splits it.' },
+    { label: 'Money for this day', fig: null, none: 'Not per day',
+      why: 'Payouts are weekly statements; a day\u2019s money here would be a share of a week, not a measurement of the day.' },
+    { label: 'When the rider got in', fig: null, none: 'Not sent',
+      why: 'No channel here reports a pickup time.' },
+  ]);
+  pageFoot({ colophon: [dayStr(`${day}T12:00:00`), `${trips.length} ${trips.length === 1 ? 'job' : 'jobs'}`] }, root);
 }

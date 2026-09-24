@@ -13,8 +13,8 @@
 import { empty, fmt, barChart, hbars, donut, areaChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
          dayStr, dateStr, hourStr, money, pct, sourceLabel, countOf, plural,
-         UBER_FARE, UBER_FARE_WHY } from './ui.js';
-import { q, href } from './data.js';
+         UBER_FARE, UBER_FARE_WHY, sourceToken, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
+import { q, href, windowLabel } from './data.js';
 
 /* How many occurrences a rate needs before it is a rate.
    A slot seen once in the window has a "completion" of 0% or 100% and a
@@ -49,7 +49,13 @@ export async function renderSlot(root, dow, hour) {
   /* A window holding one or two of this weekday cannot support a "typical" or
      a "covered". Widening the range is the fix and the tile says so. */
   const thin = (h.possible_days || 0) < MIN_OCCURRENCES;
-  root.append(kpiRow([
+  /* Under the page contract (plan §4 slot): the tiles as a 00 band; the
+     drivers table kept as the page's operational answer, with who holds the
+     most of the slot said under it; the hour across the week PER OCCURRENCE
+     (the plan's fix); the channel and settlement rings as ranked bars with
+     their money; the outcome as a three-part bar above its table; a † band. */
+  const ak = contract();
+  const SLOT_TILES = [
     { label: 'Trips in this slot', value: fmt(h.trips),
       sub: `across ${fmt(h.days_seen)} of the ${countOf(h.possible_days, `${DOW[dow]}`)} in this window` },
     thin
@@ -88,7 +94,11 @@ export async function renderSlot(root, dow, hour) {
       sub: h.priced_n
         ? `over the ${fmt(h.priced_n)} priced trips only — not over the ${fmt(h.trips)} in the slot`
         : 'nothing here carries a fare to average' },
-  ]));
+  ];
+  if (ak) {
+    const AKB = glanceBand(root, `${DOW[dow]} ${hourStr(hour)} · ${windowLabel()}`);
+    glance(AKB.tilesHost, bandTiles(SLOT_TILES.map((x, i) => (i === 0 ? { ...x, hero: true } : x))).tiles);
+  } else root.append(kpiRow(SLOT_TILES));
 
   if (h.priced_n && h.priced_n < h.trips) {
     root.append(note(`Only ${fmt(h.priced_n)} of ${fmt(h.trips)} trips in this slot carry a fare, so every money `
@@ -148,6 +158,14 @@ export async function renderSlot(root, dow, hour) {
   } else empty(dp.body, 'No trip in this slot is attributed to a named driver');
 
   /* ── does it turn up every week? ───────────────────────────────────────── */
+  /* The drivers table is the page's operational answer (01): full width
+     under the contract, so none of its columns scroll out of sight. */
+  if (ak) g.before(dp.panel);
+  if (ak && d.drivers?.length && h.trips) {
+    const top = [...d.drivers].sort((a, b) => (+b.trips || 0) - (+a.trips || 0))[0];
+    dp.body.append(el('p', 'cap', `The busiest person holds ${fmt(top.trips)} of the slot's ${fmt(h.trips)} trips `
+      + `(${pct((top.trips / h.trips) * 100, 1)}) — ${esc(top.driver_name || 'unnamed')}.`));
+  }
   const op = panel(`Every ${DOW[dow]} in the window`,
     'The average above is only meaningful if these are alike. A single spike and eleven quiet weeks is a different business.');
   g.append(op.panel);
@@ -179,7 +197,11 @@ export async function renderSlot(root, dow, hour) {
   const pp = panel('Which channel brings this hour', 'Share of the slot, not of the day');
   g2.append(pp.panel);
   if (d.platforms.length) {
-    donut(pp.body, d.platforms.map((r) => ({ label: sourceLabel(r.platform), n: r.trips })));
+    if (ak) {
+      hbars(pp.body, [...d.platforms].sort((a, b) => b.trips - a.trips).map((r) => ({
+        label: `${sourceLabel(r.platform)}${r.priced_n ? ` · ${money(r.revenue)} over ${fmt(r.priced_n)} priced` : ' · no fare reported'}`,
+        n: r.trips, plat: r.platform })), { signed: false, colorFor: (x) => sourceToken(x.plat) });
+    } else donut(pp.body, d.platforms.map((r) => ({ label: sourceLabel(r.platform), n: r.trips })));
     pp.body.append(tableFrom(d.platforms, [
       { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
       { label: 'Trips', key: 'trips', num: true },
@@ -198,7 +220,10 @@ export async function renderSlot(root, dow, hour) {
   const cp = panel('Where the work starts', 'Pickup area, as each channel’s address text describes it');
   g2.append(cp.panel);
   if (d.corridors.length) {
-    hbars(cp.body, d.corridors.map((r) => ({ label: r.place, n: r.trips })), { seq: true, signed: false });
+    /* Under the contract "(no address)" is not drawn as a place — the
+       caption below says how many carry none. */
+    hbars(cp.body, (ak ? d.corridors.filter((r) => !/^\(no address\)$/i.test(r.place || '')) : d.corridors)
+      .map((r) => ({ label: r.place, n: r.trips })), ak ? { signed: false, color: '--mk-fill' } : { seq: true, signed: false });
     /* How much of the slot these bars actually cover. The rows are split on a
        different delimiter from the one #corridors uses, so twelve bars can
        cover a quarter of the hour's trips with the largest reading
@@ -218,7 +243,8 @@ export async function renderSlot(root, dow, hour) {
   /* ── the same hour across the week ─────────────────────────────────────── */
   const sp = panel(`${hourStr(hour)} across the week`, 'So "busy" has something to be busy against');
   g2.append(sp.panel);
-  if (d.peers.length) {
+  if (ak && d.peers.length) slotPeers(sp, d, dow, hour);
+  else if (d.peers.length) {
     hbars(sp.body, d.peers.map((r) => ({ label: DOW[r.dow].slice(0, 3), n: r.trips, dow: r.dow })), {
       color: '--b400',
       onClick: (r) => { if (r.dow !== dow) location.hash = href('slot', String(r.dow), String(hour)); } });
@@ -238,7 +264,11 @@ export async function renderSlot(root, dow, hour) {
   g3.append(stp.panel);
   const settle = (d.settlement || []).filter((r) => r.trips);
   if (settle.length) {
-    donut(stp.body, settle.map((r) => ({ label: r.settlement_class || 'unclassified', n: r.trips })));
+    if (ak) {
+      hbars(stp.body, [...settle].sort((a, b) => b.trips - a.trips).map((r) => ({
+        label: `${String(r.settlement_class || 'unclassified').replace(/_/g, ' ')}${r.revenue ? ` · ${money(r.revenue)}` : ''}`, n: r.trips })),
+      { signed: false, color: '--mk-fill' });
+    } else donut(stp.body, settle.map((r) => ({ label: r.settlement_class || 'unclassified', n: r.trips })));
     const cash = settle.find((r) => r.settlement_class === 'cash');
     if (cash) stp.body.append(el('p', 'cap',
       `${fmt(cash.trips)} of ${fmt(h.trips)} trips in this slot settle in cash`
@@ -249,9 +279,15 @@ export async function renderSlot(root, dow, hour) {
   const op2 = panel('How trips in this hour end', 'Normalised across platforms — Bolt says “finished”, Uber says “completed”');
   g3.append(op2.panel);
   if (d.outcome.length) {
+    if (ak) {
+      /* Three parts, the review's correction: "(not reported)" is its own
+         part, never folded into not-completed. */
+      donut(op2.body, d.outcome.map((r) => ({ label: r.outcome, n: r.trips })), { as: 'bar100',
+        colorFor: (x) => (x.label === 'completed' ? '--ink' : x.label === 'not_completed' ? '--grey' : '--rule') });
+    }
     op2.body.append(tableFrom(d.outcome, [
       { label: 'Outcome', key: 'outcome', render: (r) => pill(r.outcome,
-        r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'bad' : null) },
+        ak ? null : r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'bad' : null) },
       { label: 'Trips', key: 'trips', num: true },
       { label: 'Share', key: '_s', num: true,
         render: (r) => pct((r.trips / h.trips) * 100) },
@@ -260,4 +296,41 @@ export async function renderSlot(root, dow, hour) {
       `Completion in this slot is ${pct(h.completion_pct, 1)}, over the trips whose platform reports an outcome at all. `
       + 'Telematics journeys are excluded — “did this journey complete” is not a question about a GPS trace.'));
   } else empty(op2.body, 'No outcome reported for trips in this slot');
+  if (ak) slotAbsence(root, d, h);
+}
+
+/* ── #slot under the page contract ─────────────────────────────────────────
+   THE PLAN'S FIX: the hour across the week per OCCURRENCE — peers[].trips
+   over peers[].days, both in the payload. Raw, a window holding four of this
+   weekday and three of the others made it "63% above" on the calendar alone. */
+function slotPeers(sp, d, dow, hour) {
+  const per = d.peers.map((r) => ({ dow: r.dow, rate: r.days ? r.trips / r.days : null, days: r.days }))
+    .filter((r) => r.rate != null);
+  hbars(sp.body, per.map((r) => ({ label: `${DOW[r.dow].slice(0, 3)} · ${countOf(r.days, 'day')}`, n: +r.rate.toFixed(1), dow: r.dow })), {
+    signed: false, color: '--mk-fill', valueFmt: (v) => fmt(v, 1),
+    onClick: (r) => { if (r.dow !== dow) location.hash = href('slot', String(r.dow), String(hour)); } });
+  const mine = per.find((r) => r.dow === dow);
+  const others = per.filter((r) => r.dow !== dow);
+  if (mine && others.length) {
+    const avg = others.reduce((a, r) => a + r.rate, 0) / others.length;
+    const rel = avg > 0 ? Math.round(((mine.rate - avg) / avg) * 100) : null;
+    sp.body.append(el('p', 'cap', rel == null ? '' : `Per occurrence, ${DOW[dow]} runs `
+      + `${rel > 0 ? `${rel}% above` : rel < 0 ? `${Math.abs(rel)}% below` : 'level with'} the other weekdays at this hour `
+      + `(${fmt(mine.rate, 1)} a ${DOW[dow]} against ${fmt(avg, 1)}).`));
+  }
+}
+function slotAbsence(root, d, h) {
+  const noAddr = (d.corridors || []).find((r) => /^\(no address\)$/i.test(r.place || ''));
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'The fare on unpriced bookings', hl: true, fig: h.trips - (h.priced_n || 0) ? `${fmt(h.trips - (h.priced_n || 0))} bookings` : 'None',
+      why: h.trips - (h.priced_n || 0) ? `${UBER_FARE_WHY}; every money figure here is over the ${fmt(h.priced_n || 0)} that carry one.` : 'Every trip in this slot carries a fare.' },
+    { label: 'What this hour was paid', fig: null, none: 'Not per hour',
+      why: 'Payouts are weekly statements; spreading one to a single hour would be an estimate on an estimate.' },
+    { label: 'Where the no-address bookings started', fig: noAddr ? fmt(noAddr.trips) : 'None',
+      why: noAddr ? 'The address text on these carries nothing to place them.' : 'Every booking in this slot carries an address.' },
+    { label: 'Online time in this hour', fig: null, none: 'Not here',
+      why: 'Availability is not read per slot on this page; #supply divides jobs by online hours for every hour of the week.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), `${fmt(h.trips)} trips`] }, root);
 }

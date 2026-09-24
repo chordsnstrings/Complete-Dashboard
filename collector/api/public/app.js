@@ -4,13 +4,14 @@
 // lives in ui.js and data.js so the two cannot drift apart.
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip,
   drawnAs, isToday, markForm } from './charts.js';
-import { channelKey } from './tokens.js';
+import { channelKey, CHANNEL_ORDER } from './tokens.js';
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, sourceToken, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
-  markTallTables, kpiTile, fitKpis, UBER_FARE_WHY,
+  markTallTables, kpiTile, kpiTiles, fitKpis, UBER_FARE_WHY,
   contract, glance, secHead, absenceBand, pageFoot, clearPageFoot, highlight, swatch, delta, notRepeated,
+  glanceBand, bandTiles,
   SEG_SOURCES, SEG_SOURCE_LABEL, bySourceLine } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
@@ -21,8 +22,8 @@ import { volatilePath } from './swr.js';
 import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
 import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
-import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
-import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
+import { renderDriver, renderDriverDirectory, DRIVER_TABS, driversConcentration, driversAbsence } from './driver.js';
+import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS, vdirTail } from './vehicle.js';
 import { renderCohort } from './cohort.js';
 import { COHORTS, membersOf } from './cohorts.js';
 import { renderCauses } from './causes.js';
@@ -46,7 +47,7 @@ import { renderAnalyst, ANALYST_TABS } from './analyst.js';
 import { renderProviders, renderProviderField } from './providers.js';
 import { renderRoster, ROSTER_TABS } from './roster.js';
 import { renderDay } from './day.js';
-import { renderSegments, renderSegment, segmentTable } from './segments.js';
+import { renderSegments, renderSegment, segmentTable, withAttribution } from './segments.js';
 import { renderSlot } from './slot.js';
 import { renderPlaybook } from './playbook.js';
 import { renderForecast } from './forecast.js';
@@ -898,7 +899,11 @@ V.notfound = async (root) => {
       || v.label.toLowerCase().includes(needle)).slice(0, 4)
     : [];
   const p = el('div', 'panel');
-  p.innerHTML = `<div class="note err"><b>#${esc(typed || '')}</b> is not a page in this `
+  /* Under the page contract (plan §4 #notfound) the notice is ink, not the
+     error note: a missing page is an absence, not a worse number, so it
+     wears no red. The sentence, the closest destinations and the fallback
+     link are the same in both skins. */
+  p.innerHTML = `<div class="${contract() ? 'note' : 'note err'}"><b>#${esc(typed || '')}</b> is not a page in this `
     + 'product, so there is nothing below to read. Nothing has been filtered out and no figure '
     + 'here has been withheld — the address simply does not name a destination.</div>'
     + (near.length
@@ -2285,7 +2290,7 @@ async function demandContract(root) {
   else {
     hbars(week.body, perDow.filter((x) => x.rate != null).sort((a, b) => b.rate - a.rate)
       .map((x) => ({ label: `${x.name} · ${countOf(x.days, 'day')}`, n: Math.round(x.rate) })),
-    { signed: false, color: '--ink' });
+    { signed: false, color: '--mk-fill' });
     const none = perDow.filter((x) => x.rate == null).map((x) => x.name);
     week.body.append(el('p', 'cap', esc('A window of a month holds five of some weekdays and four of others, so each is its own sum over its own count of days.'
       + (todayDow != null ? ` ${DOW_NAME[todayDow]} counts today for the hours it has had.` : '')
@@ -2344,9 +2349,15 @@ V.drivers = async (root) => {
      asking the same question twice. */
   const dir = await renderDriverDirectory(root);
   if (!alive(gen)) return;
+  /* Under the page contract the scatter sits beside "How the work
+     concentrates" (§04, new, from the directory rows already held) and the
+     cross-platform table takes the full width below them. */
+  const ak = contract();
   const g = el('div', 'grid g2'); root.append(g);
   const sc = panel('Trips vs distance', 'Each dot is a driver — spot high-trip/low-km and vice versa'); g.append(sc.panel);
-  const xp = panel('Cross-platform activity', 'The same person working more than one app'); g.append(xp.panel);
+  const cc = ak ? panel('How the work concentrates', 'Share of the window\u2019s bookings run by the busiest people, busiest first.', 'drivers-conc') : null;
+  if (cc) g.append(cc.panel);
+  const xp = panel('Cross-platform activity', 'The same person working more than one app'); (ak ? root : g).append(xp.panel);
   /* Named for what the endpoint returns. It carries no acceptance field at all
      — the column below reads it from the row and finds nothing — and
      hours_online is non-null on five rows in three hundred. A caption that
@@ -2377,6 +2388,7 @@ V.drivers = async (root) => {
   scatter(sc.body, dots.slice(0, 80),
     { x: 'trips', y: 'km', label: 'driver_name', xLabel: 'trips', yLabel: 'km',
       onClick: (r) => { location.hash = href('driver', r.driver_ext_id); } });
+  if (cc) driversConcentration(cc.body, dots);
   sc.body.append(el('p', 'cap', dots.length > 80
     ? `The 80 busiest of ${fmt(dots.length)} people who drove in this window. One dot per person: `
       + 'platform accounts are folded, so somebody working two apps is one dot carrying both.'
@@ -2397,7 +2409,12 @@ V.drivers = async (root) => {
      Uber and the hotel channel scored one platform and this panel printed the
      flat denial below — on a page whose own directory had just listed them. */
   const people = cross.drivers || (Array.isArray(cross) ? cross : []);
-  const plats = cross.platforms || [];
+  /* Under the contract the platform columns run in the fixed channel order
+     (SPEC L5.1), not the payload's. */
+  const plats = ak ? [...(cross.platforms || [])].sort((a, b) => {
+    const o = (p) => { const i = CHANNEL_ORDER.indexOf(String(p).toLowerCase()); return i < 0 ? 99 : i; };
+    return o(a) - o(b);
+  }) : (cross.platforms || []);
   const col = (pl) => `${pl}_trips`;
   const multi = people.filter((r) => plats.filter((pl) => (r[col(pl)] || 0) > 0).length > 1);
   /* The headline counts come from the endpoint, which computes them over every
@@ -2493,6 +2510,10 @@ V.drivers = async (root) => {
       + 'and a catch-up describe the same week, and adding the statements would '
       + 'count those days twice.'
       + (pf.truncated ? ' The list is the most recent periods, not all of them.' : '')));
+  }
+  if (ak) {
+    driversAbsence(root, dir);
+    pageFoot({ colophon: [windowLabel(), `${fmt(Array.isArray(dir) ? dir.length : 0)} on the books`] }, root);
   }
 };
 
@@ -2934,7 +2955,8 @@ V.vehicles = async (root) => {
   if (!alive(gen)) return;
   const earning = rows.filter((r) => (+r.trips || 0) > 0)
     .sort((a, b) => (+b.trips || 0) - (+a.trips || 0));
-  hbars(spread.body, earning.slice(0, 14).map((r) => ({ label: r.plate, n: +r.trips || 0 })), { seq: true, signed: false,
+  /* A vehicle is not a channel: ink bars under the page contract. */
+  hbars(spread.body, earning.slice(0, 14).map((r) => ({ label: r.plate, n: +r.trips || 0 })), { ...(contract() ? { color: '--mk-fill' } : { seq: true }), signed: false,
     onClick: (d) => { location.hash = href('vehicle', d.label); } });
   spread.body.append(el('p', 'cap', earning.length > 14
     ? `The 14 busiest of ${fmt(earning.length)} vehicles with a booking in this range, out of `
@@ -2999,6 +3021,7 @@ V.vehicles = async (root) => {
           : '')));
     }
   }
+  if (contract()) vdirTail(root, rows);
 };
 
 // The per-vehicle pages. `state.param` is the plate, `state.sub` is the tab.
@@ -3376,7 +3399,7 @@ async function platformTiers(root) {
     + 'and everybody else is behind by definition. Useful as a spread, not as a list of failures.');
   if (under.length) {
     hbars(gp.body, under.slice(0, 12).map((v) => ({ label: `${v.plate} · ${v.model_key}`, n: v.premium_gap_pct })),
-      { valueFmt: (v) => `${fmt(v, 1)} pts`, signed: false, ...(ak ? { color: '--ink' } : {}),
+      { valueFmt: (v) => `${fmt(v, 1)} pts`, signed: false, ...(ak ? { color: '--mk-fill' } : {}),
         onClick: (d) => { location.hash = href('vehicle', String(d.label).split(' · ')[0]); } });
   } else empty(gp.body, 'Every car is carrying as much premium work as its model does elsewhere');
   g.append(gp.panel);
@@ -3456,7 +3479,7 @@ function tiersGlance(root, TIER_TILES, under, prodMix) {
   hbars(p.body, [...rows].sort((a, b) => b.n - a.n).map((r) => {
     const [plat, tier] = String(r.label || '').split(/:\s*/);
     return { label: `${tier ? `${sourceLabel(plat)} · ${tierLabel(tier)}` : sourceLabel(r.label)}${r.avg_km != null ? ` · ${fmt(r.avg_km, 1)} km` : ''}`, n: +r.n };
-  }), { signed: false, color: '--ink' });
+  }), { signed: false, color: '--mk-fill' });
 }
 
 /* Yango and Bolt report what a trip table cannot: how many jobs were offered
@@ -3602,7 +3625,7 @@ function funnelGlance(root, FUNNEL_TILES, K, live) {
     ['Nobody said who', K.cancelled_unsaid, 'an outcome with no side named'],
   ].filter(([, n]) => n != null);
   if (!rows.length) { empty(p.body, 'No channel in this window reports a turned-down job.'); return; }
-  hbars(p.body, rows.map(([label, n, who]) => ({ label: `${label} · ${who}`, n: +n })), { signed: false, color: '--ink' });
+  hbars(p.body, rows.map(([label, n, who]) => ({ label: `${label} · ${who}`, n: +n })), { signed: false, color: '--mk-fill' });
 }
 
 /* Two orders of #finance until the operator flips the default skin: the old
@@ -4075,7 +4098,7 @@ function financeTips(tips, tipRows, tipList, tipAll, rankedTips, { plainRate = f
     tips.body.append(el('p', 'cap',
       `Tip rate is tips as a share of net fare. ${plainRate ? 'It is a plain figure — a level is not better or worse — dimmed below'
         : 'It is only toned above'} ${money(FARE_FLOOR)} of net fare, `
-      + 'because a 15% rate on AED 63 outranks a 6% rate on AED 506 while meaning less. '
+      + 'because a 15% rate on AED 63.00 outranks a 6% rate on AED 506.00 while meaning less. '
       + 'It reflects the ride experience more than the route, which is what makes it coachable.'
       + (rankedTotal > SHOWN
         ? ` Showing the ${fmt(SHOWN)} highest of ${countOf(rankedTotal, 'ranked driver')}.` : '')
@@ -4477,9 +4500,9 @@ async function financeContract(root) {
     const addR = priced.filter((r) => +r.amount > 0).sort((a, b) => b.amount - a.amount);
     const tookR = priced.filter((r) => +r.amount < 0).sort((a, b) => a.amount - b.amount);
     const lab = (r) => String(r.category).replace(/_/g, ' ');
-    if (addR.length) hbars(ladd.body, addR.slice(0, 12).map((r) => ({ label: lab(r), n: +r.amount })), { signed: false, color: '--ink', valueFmt: (v) => money(v) });
+    if (addR.length) hbars(ladd.body, addR.slice(0, 12).map((r) => ({ label: lab(r), n: +r.amount })), { signed: false, color: '--mk-fill', valueFmt: (v) => money(v) });
     else empty(ladd.body, priced.length ? 'No category added money in this range.' : 'No category carries an amount.');
-    if (tookR.length) hbars(ltook.body, tookR.slice(0, 12).map((r) => ({ label: lab(r), n: Math.abs(+r.amount) })), { signed: false, color: '--grey', valueFmt: (v) => money(-v) });
+    if (tookR.length) hbars(ltook.body, tookR.slice(0, 12).map((r) => ({ label: lab(r), n: Math.abs(+r.amount) })), { signed: false, color: '--mk-neg', valueFmt: (v) => money(-v) });
     else empty(ltook.body, priced.length ? 'No category took money out in this range.' : 'No category carries an amount.');
     const net = priced.reduce((a, r) => a + (+r.amount || 0), 0);
     const plats = [...new Set(ledger.map((r) => r.platform).filter(Boolean))];
@@ -4560,6 +4583,19 @@ V.safety = async (root) => {
       + 'telematics layer — check Collection gaps before reading that as good news.'));
     return;
   }
+  /* Under the page contract (plan §4 #safety, all three tabs): one 00 band
+     shared by the tabs — the verdict as its statement, the worst rate on the
+     road the hero against the fleet's (up is worse), the fleet rate with the
+     median driver, then the four existing figures with both cohort links;
+     "events nobody held the car for" goes to the band's note with its
+     figure. People: the rate bars in the FMS/InfoTrack identity (every event
+     is from that alert feed), with the fleet rate named, and the spread of
+     rates; Vehicles: the worst-vehicle bars in that identity; Events: one
+     ranked list, driving kinds in the identity and the tracker's own faults
+     in ink. The tables, the 200 km floor and the tabs unchanged; a † band. */
+  const ak = contract();
+  const safUnattr = (drvPage.totals || {}).unattributed ?? byVeh.reduce((a, r) => a + (r.unattributed || 0), 0);
+  const AKB = ak ? glanceBand(host, safUnattr ? `${fmt(safUnattr)} events on a plate-day nobody held the car for` : 'every event has a driver') : null;
 
   /* Verified against /api/alerts/summary: it returns [{alert_type, n}] and
      nothing else, so every rate on this page has to come from the vehicle and
@@ -4569,7 +4605,7 @@ V.safety = async (root) => {
     const tracked = +fleetK?.tracked_vehicles || vTot.vehicles || 0;
     const per = tracked ? Math.round(total / tracked) : null;
     const worst = (byDrv || [])[0];
-    verdict(host, {
+    verdict(ak ? AKB.vHost : host, {
       claim: top
         ? `${top.alert_type} is ${Math.round((top.n / total) * 100)}% of every event the trackers raised`
         : `${fmt(total)} harsh-driving events`,
@@ -4610,7 +4646,7 @@ V.safety = async (root) => {
         esc(sourceLabel(state.platform))} subset of it — every figure below is the whole fleet.`, 'warn'));
   }
   const fleetVehicles = fleetK.tracked_vehicles ?? fleetK.vehicles;
-  host.append(kpiRow([
+  const SAF_TILES = [
     { label: 'Driving events', value: fmt(drivingN), sub: 'harsh braking, acceleration, turns, speed' },
     { label: 'Device faults', value: fmt(total - drivingN),
       sub: 'power loss and similar — a tracker problem, not a driver one',
@@ -4631,8 +4667,22 @@ V.safety = async (root) => {
     { label: 'Events nobody held the car for', value: fmt(unattributed),
       sub: unattributed ? 'no custody record for that plate on that day' : 'every event has a driver',
       tone: unattributed ? 'warn' : null },
-  ]));
+  ];
+  if (ak) safetyGlance(AKB, SAF_TILES, byDrv, fleetK);
+  else host.append(kpiRow(SAF_TILES));
 
+  if (tab === 'events' && ak) {
+    const p = panel('The kinds of alert', 'Driving events first, in the alert feed\u2019s identity; the tracker\u2019s own faults after, in ink', 'saf-kinds');
+    host.append(p.panel);
+    const rows = [...driving.map((r) => ({ label: r.alert_type, n: r.n, dev: false })).sort((a, b) => b.n - a.n),
+      ...device.map((r) => ({ label: `${r.alert_type} (fault in the tracker box)`, n: r.n, dev: true })).sort((a, b) => b.n - a.n)];
+    const box = el('div'); p.body.append(box);
+    hbars(box, rows, { signed: false, colorFor: (x) => (x.dev ? '--ink' : (sourceToken('fms') || '--mk-fill')) });
+    p.body.append(el('p', 'cap', `${fmt(drivingN)} driving events (${pct((drivingN / total) * 100, 1)} of every alert) are behaviour the fleet can coach; `
+      + `${fmt(total - drivingN)} device faults (${pct(((total - drivingN) / total) * 100, 1)}) are a hardware ticket — the two are never one total.`));
+    safetyAbsence(host, { unattributed, byDrv, KM: 200 });
+    return;
+  }
   if (tab === 'events') {
     const g = el('div', 'grid g2'); host.append(g);
     const dp = panel('Driving events', 'Behaviour the fleet can coach.');
@@ -4650,8 +4700,34 @@ V.safety = async (root) => {
   if (tab === 'vehicles') {
     const vp = panel('Worst vehicles', 'Click a bar to open that vehicle.');
     hbars(vp.body, byVeh.slice(0, 12).map((r) => ({ label: r.plate, n: r.alerts })), {
-      color: '--s8', onClick: (d) => { location.hash = href('vehicle', d.label, 'safety'); } });
+      color: ak ? (sourceToken('fms') || '--mk-fill') : '--s8', ...(ak ? { signed: false } : {}),
+      onClick: (d) => { location.hash = href('vehicle', d.label, 'safety'); } });
     host.append(vp.panel);
+    /* Under the contract (plan §4 #safety/vehicles §05): the raw count ranks a
+       busy car worst, so beside it each car's events per 100 km the alert
+       feed covered (/api/vehicles/directory alerts_per_100km over alert_km —
+       the vehicle Safety tab's basis), over the same 200 km floor #safety
+       rates people on, the fleet's rate named. A second fetch that holds
+       nothing up. */
+    if (ak) {
+      const rp = panel('Above the fleet rate, car by car', 'Events per 100 km the alert feed covered, for cars over 200 km of it', 'saf-veh-rate');
+      host.append(rp.panel); loading(rp.body);
+      q('/api/vehicles/directory').then((dir) => {
+        if (!alive(gen)) return;
+        rp.body.innerHTML = '';
+        const rows = (Array.isArray(dir) ? dir : dir.rows || []).filter((r) => r.alerts_per_100km != null && Number(r.alert_km) >= 200)
+          .sort((x, y) => Number(y.alerts_per_100km) - Number(x.alerts_per_100km));
+        const fr = fleetK?.alerts_per_100km != null ? Number(fleetK.alerts_per_100km) : null;
+        if (!rows.length) { rp.body.append(note('No car carries a rate over 200 km of the alert feed in this window.')); return; }
+        const box = el('div'); rp.body.append(box);
+        hbars(box, rows.slice(0, 12).map((r) => ({ label: r.plate, n: Number(r.alerts_per_100km), km: Number(r.alert_km) })), {
+          signed: false, color: sourceToken('fms') || '--mk-fill', valueFmt: (v) => fmt(v, 1),
+          shareOf: (x) => `over ${fmt(x.km)} km`, onClick: (x) => { location.hash = href('vehicle', x.label, 'safety'); } });
+        const above = fr == null ? null : rows.filter((r) => Number(r.alerts_per_100km) > fr).length;
+        rp.body.append(el('p', 'cap', (fr != null ? `The fleet runs at ${fmt(fr, 1)} per 100 km; ${countOf(above, 'car')} of the ${fmt(rows.length)} rated ${above === 1 ? 'is' : 'are'} above it. ` : 'The fleet\u2019s own rate was not measured in this window. ')
+          + (rows.length > 12 ? `The 12 highest of ${fmt(rows.length)}. ` : '') + 'A car under 200 km of the feed is not rated here.'));
+      }).catch(() => { rp.body.innerHTML = ''; rp.body.append(note('The per-car rates could not be loaded.')); });
+    }
     /* Sixty-three rows starting straight under a chart of the worst twelve,
        with nothing saying what they were or how many. */
     const vtab = panel(`Every vehicle with an event — ${countOf(byVeh.length, 'vehicle')}`,
@@ -4682,6 +4758,7 @@ V.safety = async (root) => {
       + 'whoever holds it now — and vehicle_driver_day carries one row per platform, so custody is '
       + 'collapsed to one driver per plate-day before counting. Joining it directly once showed 584 '
       + 'events twice under two spellings of one name.'));
+    if (ak) safetyAbsence(host, { unattributed, byDrv, KM: 200 });
     return;
   }
 
@@ -4711,14 +4788,15 @@ V.safety = async (root) => {
   if (rated.length) {
     hbars(dp.body, rated.map((r) => ({
       label: `${r.driver_name} · ${fmt(rateKm(r))} km`, n: Number(r.per_100km), id: r.driver_ext_id })), {
-      color: '--s8', valueFmt: (v) => `${fmt(v, 2)} / 100km`, signed: false,
+      color: ak ? (sourceToken('fms') || '--mk-fill') : '--s8', valueFmt: (v) => `${fmt(v, 2)} / 100km`, signed: false,
       onClick: (d) => { if (d.id) location.hash = href('driver', d.id, 'quality'); } });
     dp.body.append(el('p', 'cap', 'Ordered by the rate the bars measure, with the distance it was '
       + `computed over beside each name. Drivers under ${fmt(KM_FLOOR)} booked km are left out`
       + (thinKm ? ` (${countOf(thinKm, 'driver')})` : '')
       + ' — a handful of events over a few kilometres produces a large rate and no finding. '
       + 'The distance is BOOKED kilometres: dividing by every trip in the table would count each '
-      + 'journey twice, once as a booking and once as its telematics twin.'));
+      + 'journey twice, once as a booking and once as its telematics twin.'
+      + (ak && fleetK?.alerts_per_100km != null ? ` The fleet as a whole runs at ${fmt(fleetK.alerts_per_100km, 2)} per 100 km.` : '')));
   } else {
     empty(dp.body, named.some((r) => r.per_100km != null)
       ? `No driver in this window has both events and at least ${fmt(KM_FLOOR)} km of booked distance to `
@@ -4726,6 +4804,7 @@ V.safety = async (root) => {
       : 'No driver in this window has both events and a known distance');
   }
   host.append(dp.panel);
+  if (ak) safetySpread(host, named.filter((r) => r.per_100km != null && rateKm(r) >= KM_FLOOR));
   /* The longest table on the page carried no heading — sixty-two rows of names
      and event counts that began immediately under a chart about something
      else, with nothing saying what the rows were or how many there were. */
@@ -4806,20 +4885,98 @@ V.safety = async (root) => {
     dtab.body.append(note('"(unattributed)" is not a person. It is every event on a plate-day with no '
       + 'custody record — shown rather than folded into somebody else\'s total.'));
   }
+  if (ak) safetyAbsence(host, { unattributed, byDrv, KM: KM_FLOOR });
 };
 
+/* ── #safety under the page contract ─────────────────────────────────────── */
+function safetyGlance(AKB, SAF_TILES, byDrv, fleetK) {
+  const rateKm = (r) => +(r.alert_km ?? r.booked_km);
+  const rated = (byDrv || []).filter((r) => r.driver_name !== '(unattributed)' && r.per_100km != null && rateKm(r) >= 200)
+    .sort((a, b) => Number(b.per_100km) - Number(a.per_100km));
+  const fr = fleetK?.alerts_per_100km != null ? Number(fleetK.alerts_per_100km) : null;
+  const rs = rated.map((r) => Number(r.per_100km)).sort((a, b) => a - b);
+  const med = rs.length ? (rs.length % 2 ? rs[(rs.length - 1) / 2] : (rs[rs.length / 2 - 1] + rs[rs.length / 2]) / 2) : null;
+  const worst = rated[0];
+  const tiles = [
+    worst ? { label: 'Worst rate on the road', value: `${fmt(worst.per_100km, 2)} / 100 km`, hero: true,
+      sub: `${worst.driver_name} · over ${fmt(rateKm(worst))} km`,
+      ...(fr != null ? { delta: { value: Number(worst.per_100km) - fr, kind: 'gap', invert: true, d: 2, of: `against the fleet's ${fmt(fr, 2)}` } } : {}) }
+      : { label: 'Worst rate on the road', hero: true, na: 'no driver has events and at least 200 km of booked distance to rate them over' },
+    fr != null ? { label: 'Fleet events per 100 km', value: fmt(fr, 2), sub: med != null ? `the median rated driver ${fmt(med, 2)}` : 'no driver rated over 200 km' }
+      : { label: 'Fleet events per 100 km', na: 'the fleet rate was not measured in this window' },
+    ...SAF_TILES.filter((x) => x.label !== 'Events nobody held the car for'),
+  ];
+  glance(AKB.tilesHost, bandTiles(tiles).tiles);
+}
+function safetySpread(host, rated) {
+  const p = panel('The shape of the rated drivers', 'People over 200 km, by events per 100 km', 'saf-spread');
+  host.append(p.panel);
+  if (!rated.length) { p.body.append(note('Nobody is rated in this window.')); return; }
+  /* Six equal bins from nought to a round ceiling over the worst rate. Fixed
+     bins (0–5 … 80 or more) were drawn first and on production, where the
+     median rated driver runs at 94 per 100 km, all but nine people fell in
+     the last one — a histogram with one bar. */
+  const top = Math.max(...rated.map((r) => +r.per_100km));
+  const raw = top / 6;
+  const mag = 10 ** Math.floor(Math.log10(raw || 1));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((x) => x >= raw) || 10 * mag;
+  const B = Array.from({ length: Math.max(1, Math.ceil(top / step + 1e-9)) }, (_, i) => [i * step, (i + 1) * step]);
+  const box = el('div'); p.body.append(box);
+  hbars(box, B.map(([lo, hi], i) => ({ label: `${fmt(lo, lo % 1 ? 1 : 0)}–${fmt(hi, hi % 1 ? 1 : 0)}`,
+    n: rated.filter((r) => +r.per_100km >= lo && (i === B.length - 1 ? +r.per_100km <= hi : +r.per_100km < hi)).length })),
+  { signed: false, color: sourceToken('fms') || '--mk-fill' });
+}
+function safetyAbsence(host, { unattributed, byDrv, KM }) {
+  const named = (byDrv || []).filter((r) => r.driver_name !== '(unattributed)');
+  const unrated = named.filter((r) => r.per_100km == null || +(r.alert_km ?? r.booked_km) < KM).length;
+  const absHost = el('div'); host.append(absHost);
+  absenceBand(absHost, [
+    { label: 'What counts as harsh', fig: null, none: 'The tracker\u2019s call',
+      why: 'The alert feed files an event when its own threshold trips; this product holds no threshold and cannot say how hard a brake was.' },
+    { label: 'Events nobody could place', hl: unattributed > 0, fig: unattributed ? fmt(unattributed) : null, none: 'None',
+      why: unattributed ? 'No custody record puts anybody in the car that day, so these are counted and never given to a person.' : 'Every event falls on a day somebody held the car.' },
+    { label: 'Drivers who cannot be rated', fig: unrated ? `${fmt(unrated)} of ${fmt(named.length)}` : null, none: 'None',
+      why: `Under ${fmt(KM)} booked km on the days the feed covered, or no booked distance at all — a rate over so little means nothing.` },
+    { label: 'What actually happened', fig: null, none: 'Not recorded', why: 'No feed records an outcome — a collision, a complaint, a near miss. These are the box\u2019s own events, nothing more.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), 'the FMS/InfoTrack alert feed'] }, host);
+}
+
 V.unauthorized = async (root) => {
-  const vuHost = el('div'); root.append(vuHost);
-  const kh = el('div', 'kpis'); root.append(kh);
+  /* Under the page contract (plan §4 #unauthorized): the verdict as the 00
+     statement with the tiles — the one printing its figure folded into it by
+     name (ruling 7), untoned, a mean a day over the last seven days against
+     the seven before (down is better), Revenue forgone exact and ABSENT with
+     the endpoint's own reason when there is no rate; the unexplained per day
+     on its OWN axis (every interval seen beside it flattened the unexplained
+     to the baseline), days the sensor did not collect as outlines; what the
+     matcher decided as ranked bars that still open #segments/verdict; the
+     vehicles with km beside the count; then, new, off the rows this page
+     already holds — the nearest booking by channel, when they start, where
+     they start, how long and how far; the flagged table and the seat-sensor
+     health tables unchanged; a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const vuHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vuHost);
+  const kh = el('div', 'kpis'); (ak ? AKB.tilesHost : root).append(kh);
   const g = el('div', 'grid g23'); root.append(g);
-  const trend = panel('Unexplained trips per day', 'Trips with no booking, against every trip the seat sensor saw'); g.append(trend.panel);
-  const verdicts = panel('What each flagged trip turned out to be', 'Every trip the seat sensor saw, and what explains it'); g.append(verdicts.panel);
+  const trend = panel('Unexplained trips per day', ak ? 'Journeys with no booking behind them, on their own axis' : 'Trips with no booking, against every trip the seat sensor saw'); g.append(trend.panel);
+  const verdicts = panel(ak ? 'What the matcher decided' : 'What each flagged trip turned out to be', 'Every trip the seat sensor saw, and what explains it'); g.append(verdicts.panel);
   const veh = panel('Vehicles with unexplained trips', 'Ranked by count — click to inspect'); root.append(veh.panel);
   const list = panel('Flagged segments', 'Click a row for the full evidence trail'); root.append(list.panel);
   const health = panel('Seat-sensor health', 'A dead or stuck pad makes the numbers above unreliable'); root.append(health.panel);
   [kh, trend.body, verdicts.body, veh.body, list.body, health.body].forEach(loading);
 
   const gen = currentGen();
+  /* Under the contract only: the attribution ladder, for the rung and the
+     name beside "Driver that day" in the flagged table. NOT awaited with the
+     rest: on production it answered in 29–32 s against a page that otherwise
+     draws in five, and the first draft that put it in this Promise.all held
+     the whole page for 129 s. The table draws on custody at once and gains
+     the column when the ladder lands. Caught — a table with no attribution
+     is the table as it was, and says so. */
+  const attP = ak ? qAll('/api/unauthorized/attributed', { verdict: 'unauthorized', limit: 500 }).catch(() => null) : null;
   const [sum, daily, byVeh, rows, sensors] = await Promise.all([
     q('/api/unauthorized/summary'), q('/api/unauthorized/daily'), q('/api/unauthorized/by-vehicle'),
     q('/api/unauthorized/list', { verdict: 'unauthorized' }), q('/api/sensor-health'),
@@ -4917,7 +5074,7 @@ V.unauthorized = async (root) => {
      `unverifiable` were in the donut beside them and had no tile, so the
      numbers on the page did not add up to the page — and `needs_a_human`, a
      field NAMED for an operator action, was displayed nowhere at all. */
-  kh.innerHTML = [
+  const UN_TILES = [
     /* A ride once across providers — see sum.dedupe_rule, printed under the
        per-provider table below. */
     ['Unexplained trips', fmt(t.unauthorized || 0),
@@ -4971,7 +5128,11 @@ V.unauthorized = async (root) => {
      carrying markup is judged by what the reader sees. Without it .kpi .n's
      white-space:nowrap clips "0 stuck · 12 dead" at the card edge — the tile
      is overflow:hidden, so a cut figure gets not even an ellipsis. */
-  ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
+  ];
+  if (ak) {
+    kh.remove();
+    unauthGlanceFleet(AKB, UN_TILES, t, sum, daily);
+  } else kh.innerHTML = UN_TILES.map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
 
   /* EACH PROVIDER'S OWN FIGURES, BESIDE THE COMBINED ONES ABOVE.
      ─────────────────────────────────────────────────────────────────────────
@@ -5048,6 +5209,23 @@ V.unauthorized = async (root) => {
      gapBars rather than barChart, because a day with no seat-occupancy data and
      a day where the sensor saw nobody are different facts and only one of them
      is a zero. */
+  if (ak) {
+    /* Into boxes of their own (a chart drawn into a host not laid out yet
+       redraws and clears it), so the panels' loading skeletons go first —
+       left in place, they sat under the charts for good. */
+    trend.body.innerHTML = ''; verdicts.body.innerHTML = '';
+    const tb = el('div'); trend.body.append(tb);
+    gapBars(tb, daily, { x: 'd', y: 'unauthorized', color: '--mk-fill', label: 'unexplained',
+      gapLabel: 'no seat-occupancy data',
+      onClick: (d) => { location.hash = href('segments', 'day', dayKey(d.d)); } });
+    const seen = daily.reduce((a, d) => a + (+d.segments || 0), 0);
+    trend.body.append(el('p', 'cap', `${fmt(daily.reduce((a, d) => a + (+d.unauthorized || 0), 0))} unexplained of the `
+      + `${fmt(seen)} occupancy intervals seen over these days, each counted once across providers. An outline is a day with `
+      + 'no seat-occupancy data. Click a day for its segments.'));
+    const vb = el('div'); verdicts.body.append(vb);
+    hbars(vb, (sum.byVerdict || []).map((r) => ({ label: String(r.verdict).replace(/_/g, ' '), n: +r.n || 0, v: r.verdict })),
+      { signed: false, color: '--mk-fill', onClick: (d) => { location.hash = href('segments', 'verdict', d.v); } });
+  } else {
   gapBars(trend.body, daily, { x: 'd', y: 'unauthorized', secondary: 'segments',
     color: '--s8', label: 'unexplained', secondaryLabel: 'occupancy intervals seen',
     gapLabel: 'no seat-occupancy data',
@@ -5057,6 +5235,7 @@ V.unauthorized = async (root) => {
     + 'full picture, every source and platform, is on its own page.'));
   donut(verdicts.body, (sum.byVerdict || []).map((r) => ({ label: r.verdict, n: r.n })),
     { onClick: (d) => { location.hash = href('segments', 'verdict', d.label); } });
+  }
 
   veh.body.innerHTML = '';
   // Show who was driving, not just which plate — a flag against a car nobody can
@@ -5064,8 +5243,10 @@ V.unauthorized = async (root) => {
   if (vehRows.length) {
     hbars(veh.body, vehRows.slice(0, 12).map((r) => ({
       label: r.drivers ? `${r.plate} · ${r.drivers}` : `${r.plate} · driver unknown`,
-      plate: r.plate, n: r.unauthorized })), { color: '--s8',
-      onClick: (d) => { location.hash = href('segments', 'plate', d.plate || d.label); } });
+      plate: r.plate, n: r.unauthorized, km: r.unauth_km })), ak
+      ? { signed: false, color: '--mk-fill', shareOf: (d) => (d.km != null ? `${fmt(d.km)} km` : 'no distance'),
+        onClick: (d) => { location.hash = href('segments', 'plate', d.plate || d.label); } }
+      : { color: '--s8', onClick: (d) => { location.hash = href('segments', 'plate', d.plate || d.label); } });
     const vcap = el('p', 'cap');
     vcap.innerHTML = esc(byVeh.total > 12
       ? `The 12 worst of ${fmt(byVeh.total)} vehicles with an unexplained trip in this range.`
@@ -5084,7 +5265,23 @@ V.unauthorized = async (root) => {
   /* 33 flagged segments render 6,505px — each row carries an evidence trail,
      which is right for the ones being examined and wrong for all of them at
      once. */
-  foldRows(list.body, segmentTable(rows), { shown: 8, total: rows.length, noun: 'segment', key: 'unauth-seg' });
+  if (!ak) foldRows(list.body, segmentTable(rows), { shown: 8, total: rows.length, noun: 'segment', key: 'unauth-seg' });
+  else {
+    const tHost = el('div'); const tCap = el('p', 'cap');
+    list.body.append(tHost, tCap);
+    const drawFlagged = (rs, opts) => { tHost.innerHTML = ''; foldRows(tHost, segmentTable(rs, opts), { shown: 8, total: rows.length, noun: 'segment', key: 'unauth-seg' }); };
+    drawFlagged(rows, {});
+    if (rows.length) {
+      tCap.textContent = 'Who the evidence names is still loading — until it lands, the table carries day-grain custody: who held the car that day, not a narrowed name.';
+      attP.then((attRaw) => {
+        if (!alive(gen)) return;
+        const wa = withAttribution(rows, attRaw);
+        if (wa.att) { drawFlagged(wa.rows, { withCustody: true }); tCap.remove(); }
+        else tCap.textContent = 'Who the evidence names could not be loaded for this window, so the table carries day-grain custody alone — the driver who held the car that day, not a narrowed name.';
+      });
+    } else tCap.remove();
+  }
+  if (ak) unauthFleetMarks(root, list.panel, rows, +t.unauthorized || 0);
 
   health.body.innerHTML = '';
   /* One table per provider, because each provider's "dead" is a different
@@ -5102,7 +5299,7 @@ V.unauthorized = async (root) => {
         ? '<span class="ent-off" title="no fix at all from this tracker in this window">—</span>'
         : `${r.ratio}%`) },
     { label: 'Sensor', key: 'verdict',
-      render: (r) => `<span class="tag ${TONE[r.verdict]}" title="${
+      render: (r) => `<span class="${ak ? 'pill' : `tag ${TONE[r.verdict]}`}" title="${
         r.verdict === 'too few fixes to judge'
           ? `only ${fmt(r.total_fixes)} fix(es) — under ${FIX_FLOOR} nothing can be concluded`
           : 'over this window'}">${esc(r.verdict)}</span>` },
@@ -5143,7 +5340,7 @@ V.unauthorized = async (root) => {
       ...cols,
       { label: 'Bookings', key: 'bookings', num: true },
       { label: 'Sensor', key: 'state',
-        render: (r) => `<span class="tag ${FMS_TONE[r.state] || 'dim'}" title="${esc(r.reason || '')}">${esc(r.state)}</span>` },
+        render: (r) => `<span class="${ak ? 'pill' : `tag ${FMS_TONE[r.state] || 'dim'}`}" title="${esc(r.reason || '')}">${esc(r.state)}</span>` },
     ], { sortable: true, sortId: `sensors-${capWord.replace(/\W+/g, '-')}` }));
   };
   if (sensors.by_source) {
@@ -5158,7 +5355,88 @@ V.unauthorized = async (root) => {
     ], sensors.by_source.fms_trip?.rule || 'dead when the car carried bookings and FMS filed no journey seat count',
     'live FMS fix');
   }
+  if (ak) unauthFleetAbsence(root, { t, cov: sum.coverage, rows,
+    examined: t.segments != null ? +t.segments : (sum.byVerdict || []).reduce((a, r) => a + (+r.n || 0), 0) });
 };
+
+/* ── #unauthorized under the page contract ───────────────────────────────── */
+function unauthGlanceFleet(AKB, UN_TILES, t, sum, daily) {
+  const vf = AKB.vHost.querySelector('.vdct-fig > b')?.textContent.trim() || null;
+  const figLabel = (+t.unauthorized || 0) ? 'Unexplained trips' : 'Matched to a booking';
+  /* The mean over the last seven days that have seat data, against the seven
+     such days before them; fewer unexplained is the better direction. */
+  const withData = daily.filter((d) => !d.uncollected);
+  const mean = (a) => (a.length ? a.reduce((x, d) => x + (+d.unauthorized || 0), 0) / a.length : null);
+  const last7 = withData.slice(-7), prev7 = withData.slice(-14, -7);
+  const m = mean(last7), pm = prev7.length === 7 ? mean(prev7) : null;
+  const meanTile = m == null ? { label: 'Mean a day', na: 'no day in this window carries seat-occupancy data' }
+    : { label: 'Mean a day', value: fmt(m, 1), sub: `unexplained, over the last ${countOf(last7.length, 'day')} with seat data`,
+      ...(pm != null ? { delta: { value: m - pm, kind: 'change', invert: true, d: 1, of: 'on the seven days before' } } : {}) };
+  const by = Object.fromEntries(UN_TILES.map(([l, v, d]) => [l, { label: l, html: v, value: v, sub: d }]));
+  const plain = (l) => { const x = by[l]; return x && !/</.test(x.value) ? { label: x.label, value: x.value, sub: x.sub } : x; };
+  const fold = (l) => !(l === figLabel && by[l]?.value === vf);
+  const forg = sum.value?.forgone_aed == null
+    ? { label: 'Revenue forgone', na: sum.value?.basis || 'no rate to value the unexplained distance at' }
+    : { ...plain('Revenue forgone') };
+  const km = t.unauth_km == null ? { label: 'Unexplained km', na: 'no distance was measured on these segments' } : plain('Unexplained km');
+  const row = [plain('Unexplained trips'), km, forg, meanTile, plain('Inconclusive'),
+    plain('Matched to a booking'), plain('Occupied but stationary'), by['Seat-pad faults'], plain('Could not be verified'), plain('Needs a human')]
+    .filter((x) => x && (x.na || fold(x.label)));
+  glance(AKB.tilesHost, bandTiles(row).tiles);
+}
+/* Four marks off the flagged rows this page already fetched. */
+function unauthFleetMarks(root, after, rows, total) {
+  const g1 = el('div', 'grid g2'); const g2 = el('div', 'grid g2');
+  after.after(g1); g1.after(g2);
+  /* /api/unauthorized/list stops at 300 rows, newest first. When the window
+     holds more, the four marks below are of the newest 300 and say so. */
+  if (total > rows.length) g1.before(el('p', 'cap', `The four charts below are drawn from the ${fmt(rows.length)} newest of the ${fmt(total)} unexplained journeys — the list this page reads stops at ${fmt(rows.length)}.`));
+  const near = panel('The nearest booking, by channel', 'For each unexplained journey, the channel of the closest booking on that plate', 'un-near');
+  const hours = panel('When they happen', 'Unexplained journeys by the Dubai hour they started', 'un-hours');
+  const where = panel('Where they start', 'The named area each journey started in', 'un-where');
+  const size = panel('How long, how far', 'One dot per journey: minutes against kilometres', 'un-size');
+  g1.append(near.panel, hours.panel); g2.append(where.panel, size.panel);
+  if (!rows.length) { [near, hours, where, size].forEach((p) => p.body.append(note('No unexplained journey in this window.'))); return; }
+  const nb = new Map();
+  rows.forEach((r) => { const k = r.nearest_platform || ''; nb.set(k, (nb.get(k) || 0) + 1); });
+  const none = nb.get('') || 0; nb.delete('');
+  const b1 = el('div'); near.body.append(b1);
+  if (nb.size) hbars(b1, [...nb.entries()].sort((a, b) => b[1] - a[1]).map(([p, k]) => ({ label: sourceLabel(p), n: k, plat: p })),
+    { signed: false, colorFor: (x) => sourceToken(x.plat) || '--mk-fill' });
+  const gaps = rows.map((r) => +r.nearest_gap_min).filter(Number.isFinite).sort((a, b) => a - b);
+  near.body.append(el('p', 'cap', (none ? `${countOf(none, 'journey')} had no booking at all on that plate to measure against. ` : '')
+    + (gaps.length ? `The median gap to the nearest booking was ${fmt(gaps[Math.floor(gaps.length / 2)])} minutes.` : '')));
+  const hb = el('div'); hours.body.append(hb);
+  const byH = Array.from({ length: 24 }, () => 0);
+  rows.forEach((r) => { if (!r.started_at) return; const h = +new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: TZ }).format(new Date(r.started_at)); if (Number.isFinite(h)) byH[h]++; });
+  barChart(hb, byH.map((k, h) => ({ h: String(h).padStart(2, '0'), n: k })), { x: 'h', y: 'n', label: 'journeys', color: '--mk-fill' });
+  const areas = new Map(); let noArea = 0;
+  rows.forEach((r) => { const a = r.start_place?.area; if (a) areas.set(a, (areas.get(a) || 0) + 1); else noArea++; });
+  const wb = el('div'); where.body.append(wb);
+  if (areas.size) hbars(wb, [...areas.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([label, k]) => ({ label, n: k })), { signed: false, color: '--mk-fill' });
+  where.body.append(el('p', 'cap', noArea ? `${countOf(noArea, 'journey')} started where no area is named — never drawn as a place.` : 'Every journey started in a named area.'));
+  const dots = rows.filter((r) => +r.duration_min > 0 && +r.distance_km > 0).map((r) => ({ ...r, duration_min: +r.duration_min, distance_km: +r.distance_km, lab: `${r.plate} ${timeStr(r.started_at)}` }));
+  const sb = el('div'); size.body.append(sb);
+  if (dots.length) scatter(sb, dots, { x: 'duration_min', y: 'distance_km', label: 'lab', xLabel: 'minutes', yLabel: 'km',
+    xFmt: (v) => fmt(v), yFmt: (v) => fmt(v), onClick: (r) => { location.hash = href('segment', r.plate, r.started_at); } });
+  else sb.append(note('No journey carries both a duration and a distance.'));
+}
+function unauthFleetAbsence(root, { t, cov, rows, examined }) {
+  const dark = cov && cov.days_in_window != null && cov.days_with_data != null ? cov.days_in_window - cov.days_with_data : null;
+  const noDriver = rows.filter((r) => !r.drivers || (Array.isArray(r.drivers) && !r.drivers.length)).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Days with no seat data', hl: !!dark, fig: dark ? `${fmt(dark)} of ${fmt(cov.days_in_window)}` : null, none: dark === 0 ? 'None' : 'Not stated',
+      why: dark ? 'No seat-occupancy provider filed anything on these days, so nothing on them could be judged either way.'
+        : dark === 0 ? 'Every day in this window carries seat evidence from at least one provider.' : 'The endpoint did not say which days it covered.' },
+    { label: 'Journeys nobody could judge', fig: +t.partial ? fmt(t.partial) : null, none: 'None',
+      why: 'A telemetry gap falls inside each of these, so the whole journey was never observed and no booking was compared against it.' },
+    { label: 'Journeys with no driver on record', fig: noDriver ? `${fmt(noDriver)} of ${fmt(rows.length)}` : null, none: 'None',
+      why: noDriver ? 'No custody record names who held the car that day.' : 'Every unexplained journey has somebody on the custody record that day.' },
+    { label: 'Why the car moved', fig: null, none: 'Not recorded', why: 'Nothing this product reads records the purpose of a journey — only that a seat was occupied and no booking covered it.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), `${fmt(examined)} journeys examined`] }, root);
+}
 
 /* A tracker reporting 0,0 has no satellite lock; it is not in the Gulf of
    Guinea. map.js already excludes those from the framing — the same test
@@ -5172,8 +5450,19 @@ const hasFix = (r) => r.lat != null && r.lng != null
 const FIX_FRESH_MIN = 30;
 
 V.live = async (root) => {
-  const vHost = el('div'); root.append(vHost);
-  const kh = el('div', 'kpis'); root.append(kh);
+  /* Under the page contract (plan §4 #live): the verdict as the 00 statement
+     — its figure, the cars not reporting, is not repeated as a tile (ruling
+     7) — with Fresh, Silent over a day, Moving and Engaged beside it and the
+     count tracked in the band's note; the Live vehicles table directly under
+     the band, every column, sort, fold and row click kept, its status, seat
+     and poll chips outline chips and the fix age ink; then, below it so the
+     table does not move, the feeds by freshness, what a live row carries, and
+     what the cars say they are doing, one channel per plot; a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
+  const vHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vHost);
+  const kh = el('div', 'kpis'); (ak ? AKB.tilesHost : root).append(kh);
   /* Three feeds, not one. 80 of these rows are FMS, 48 are CABMAN and 2 are
      Uber — and only CABMAN polls every five minutes. The caption named the
      cadence of a minority as the cadence of the page. */
@@ -5227,7 +5516,7 @@ V.live = async (root) => {
   const silent = rows.filter((r) => r.fix_age_min != null && r.fix_age_min >= DAY_MIN);
   const worstDays = silent.length
     ? Math.floor(Math.max(...silent.map((r) => r.fix_age_min)) / DAY_MIN) : 0;
-  kh.innerHTML = [
+  const LIVE_TILES = [
     ['Vehicles tracked', fmt(located.length),
       `with a usable fix${noLock ? ` · ${fmt(noLock)} reporting no satellite lock` : ''}`],
     [`Fresh (<${FIX_FRESH_MIN} min)`, fmt(fresh), `of ${fmt(rows.length)} reporting at all`],
@@ -5242,7 +5531,8 @@ V.live = async (root) => {
       sensed.length
         ? `of the ${fmt(sensed.length)} vehicles carrying a seat reading — CABMAN DT or FMS`
         : 'no vehicle here carries a seat reading from CABMAN DT or FMS'],
-  ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
+  ];
+  if (!ak) kh.innerHTML = LIVE_TILES.map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
   p.body.innerHTML = '';
   if (!rows.length) { empty(p.body, 'Positions appear once a tracker feed — CABMAN or FMS — has credentials saved in Settings'); return; }
   if (feeds.length) {
@@ -5266,7 +5556,8 @@ V.live = async (root) => {
         : '<span class="ent-off" title="no custody record for this plate">nobody on record</span>') },
     { label: 'Fleet', key: 'fleet_id', render: (r) => esc(sourceLabel(r.fleet_id)) },
     { label: 'Feed', key: 'source', render: (r) => esc(sourceLabel(r.source)) },
-    { label: 'Status', key: 'status', render: (r) => `<span class="tag ${/engag/i.test(r.status || '') ? 'ok' : 'dim'}">${esc(r.status || '—')}</span>` },
+    { label: 'Status', key: 'status', render: (r) => (ak ? `<span class="pill">${esc(r.status || '—')}</span>`
+      : `<span class="tag ${/engag/i.test(r.status || '') ? 'ok' : 'dim'}">${esc(r.status || '—')}</span>`) },
     { label: 'Speed', key: 'speed', num: true, render: (r) => r.speed != null ? fmt(r.speed) + ' km/h' : '—' },
     /* The only place in the product an odometer appears at all. */
     { label: 'Odometer', key: 'odometer', num: true,
@@ -5298,12 +5589,13 @@ V.live = async (root) => {
           return '<span class="tag dim" title="this fix carries no seat reading from CABMAN DT or FMS">not reported</span>';
         }
         const who = esc(`${r.seat_source || 'seat reading'}${r.seat_count != null ? `: ${r.seat_count}` : ''}`);
-        return r.seat_occupied ? `<span class="tag ok" title="${who}">occupied</span>`
+        return r.seat_occupied ? `<span class="${ak ? 'pill' : 'tag ok'}" title="${who}">occupied</span>`
           : `<span class="tag" title="${who}">empty</span>`;
       } },
     { label: 'Fix age', key: 'fix_age_min', num: true,
-      render: (r) => `<span class="tag ${r.stale ? 'warn' : 'ok'}">${
-        r.fix_age_min != null ? `${fmt(r.fix_age_min)} min` : (r.stale ? 'stale' : 'live')}</span>` },
+      render: (r) => (ak ? `<span${r.stale ? '' : ' class="dim"'}>${r.fix_age_min != null ? `${fmt(r.fix_age_min)} min` : (r.stale ? 'stale' : 'live')}</span>`
+        : `<span class="tag ${r.stale ? 'warn' : 'ok'}">${
+        r.fix_age_min != null ? `${fmt(r.fix_age_min)} min` : (r.stale ? 'stale' : 'live')}</span>`) },
     { label: 'Last fix', key: 'captured_at', render: (r) => timeStr(r.captured_at) },
     /* When WE last asked, beside when the tracker last SAW it.
        ─────────────────────────────────────────────────────────────────────
@@ -5321,7 +5613,7 @@ V.live = async (root) => {
         if (r.poll_age_min == null) return '<span class="ent-off">—</span>';
         const stalePoll = r.poll_age_min >= 60;
         const gap = r.fix_age_min != null && r.fix_age_min - r.poll_age_min >= 1440;
-        return `<span class="tag ${stalePoll ? 'warn' : 'dim'}" title="${stalePoll
+        return `<span class="${ak ? (stalePoll ? '' : 'dim') : `tag ${stalePoll ? 'warn' : 'dim'}`}" title="${stalePoll
           ? 'nothing has asked this feed for over an hour — that is our collector, not the vehicle'
           : gap ? 'we asked a moment ago and got back a fix that is over a day old — the provider is still listing this vehicle and reporting nothing new about it'
             : 'when this feed was last polled'}">${fmt(r.poll_age_min)} min</span>`;
@@ -5369,10 +5661,88 @@ V.live = async (root) => {
   foldRows(p.body, t, { shown: 12, total: rows.length, noun: 'vehicle', key: 'live' });
   p.body.append(el('p', 'cap',
     'Click a row for that vehicle’s movement page — the map, the replayable days and every stationary cluster.'));
+  if (ak) {
+    /* The tile the verdict IS folds into it, by name. */
+    const figLabel = rows.some((r) => r.stale) ? null : 'Moving';
+    glance(AKB.tilesHost, bandTiles(LIVE_TILES.filter(([l]) => l !== 'Vehicles tracked' && l !== figLabel)
+      .map(([l, n, d]) => ({ label: l, html: n, value: n, sub: d }))).tiles);
+    AKB.band.querySelector('.sechd').append(el('div', 'sechd-note', `${fmt(located.length)} tracked with a usable fix${noLock ? ` · ${fmt(noLock)} reporting no satellite lock` : ''}`));
+    liveMarks(root, rows);
+  }
 };
+
+/* ── #live under the page contract ───────────────────────────────────────── */
+function liveMarks(root, rows) {
+  const feeds = CHANNEL_ORDER.filter((f) => rows.some((r) => r.source === f))
+    .concat([...new Set(rows.map((r) => r.source).filter((f) => f && !CHANNEL_ORDER.includes(f)))]);
+  const of = (f) => rows.filter((r) => r.source === f);
+  /* Every tracked car by feed and freshness, one channel per plot. */
+  const p1 = panel('Every tracked car, by feed and freshness', 'Reporting now (under 30 min), late today, and silent over a day — one plot per feed', 'live-fresh');
+  root.append(p1.panel);
+  const g1 = el('div', 'grid g3'); p1.body.append(g1);
+  feeds.forEach((f) => {
+    const rs = of(f); const box = el('div'); box.append(el('p', 'cap', `<b>${esc(sourceLabel(f))}</b> · ${fmt(rs.length)}`)); g1.append(box);
+    const b = el('div'); box.append(b);
+    hbars(b, [
+      { label: 'reporting now', n: rs.filter((r) => !r.stale).length },
+      { label: 'late today', n: rs.filter((r) => r.stale && (r.fix_age_min == null || r.fix_age_min < 1440)).length },
+      { label: 'silent over a day', n: rs.filter((r) => r.fix_age_min != null && r.fix_age_min >= 1440).length },
+    ], { signed: false, color: sourceToken(f) || '--mk-fill' });
+  });
+  /* What a live row carries, per feed — measured on the rows, never assumed. */
+  const p2 = panel('What a live row carries', 'The share of each feed\u2019s rows that carry each field', 'live-fields');
+  root.append(p2.panel);
+  const share = (rs, f) => (rs.length ? `${Math.round((rs.filter(f).length / rs.length) * 100)}%` : '—');
+  p2.body.append(tableFrom(feeds.map((f) => ({ feed: f, rs: of(f) })), [
+    { label: 'Feed', key: 'feed', render: (r) => `<span class="pchip">${swatch(r.feed)}${esc(sourceLabel(r.feed))}</span>` },
+    { label: 'Rows', key: '_n', num: true, render: (r) => fmt(r.rs.length) },
+    { label: 'Position', key: '_p', num: true, render: (r) => share(r.rs, hasFix) },
+    { label: 'Speed', key: '_s', num: true, render: (r) => share(r.rs, (x) => x.speed != null) },
+    { label: 'Odometer', key: '_o', num: true, render: (r) => share(r.rs, (x) => !!x.odometer) },
+    { label: 'Seat', key: '_st', num: true, render: (r) => share(r.rs, (x) => x.seat_occupied != null) },
+    { label: 'Named driver', key: '_d', num: true, render: (r) => share(r.rs, (x) => !!x.current_driver) },
+    { label: 'A/C', key: '_a', num: true, render: (r) => share(r.rs, (x) => x.ac_on != null) },
+    { label: 'Fuel', key: '_f', num: true, render: (r) => share(r.rs, (x) => x.fuel_level != null) },
+  ], { compact: true }));
+  /* What the cars say they are doing, one small panel per feed. */
+  const p3 = panel('What the live cars say they are doing', 'Each feed\u2019s own status words, counted', 'live-status');
+  root.append(p3.panel);
+  const g3 = el('div', 'grid g3'); p3.body.append(g3);
+  feeds.forEach((f) => {
+    const by = new Map(); of(f).forEach((r) => { const k = r.status || 'no status'; by.set(k, (by.get(k) || 0) + 1); });
+    const box = el('div'); box.append(el('p', 'cap', `<b>${esc(sourceLabel(f))}</b>`)); g3.append(box);
+    const b = el('div'); box.append(b);
+    hbars(b, [...by.entries()].sort((a, c) => c[1] - a[1]).slice(0, 8).map(([label, n]) => ({ label, n })), { signed: false, color: sourceToken(f) || '--mk-fill' });
+  });
+  const silent = rows.filter((r) => r.fix_age_min != null && r.fix_age_min >= 1440).length;
+  const noPos = rows.filter((r) => !hasFix(r)).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Where a silent car is', hl: silent > 0, fig: silent ? fmt(silent) : null, none: 'None silent',
+      why: 'A car silent for over a day is still drawn where it last reported; nothing says where it is now.' },
+    { label: 'Fuel in the tank', fig: null, none: 'Not reported', why: 'No feed fills it: FMS sends a zero for every car (an absent reading), CABMAN and Uber send none.' },
+    { label: 'Cars with no position', fig: noPos ? fmt(noPos) : null, none: 'None',
+      why: 'No satellite lock, or a feed row with no coordinate — counted, never placed on a map.' },
+    { label: 'A passenger on board', fig: null, none: 'Two feeds only', why: 'Only CABMAN DT\u2019s seat pad and FMS\u2019s live seat count can say so; Uber\u2019s rows carry position and speed only.' },
+  ]);
+  pageFoot({ colophon: ['live positions', `${fmt(rows.length)} reporting`] }, root);
+}
 
 
 V.map = async (root) => {
+  /* Under the page contract (plan §4 #map, #map/replay): restyle only for the
+     live map — toggle, map, markers, marker-click replay, the four tiles, the
+     legend, the no-lock note and the permalink kept; the marks take their
+     feed's colour with the occupancy state as that feed's ramp, stale an
+     outline (map.js), and the legend says so per feed. In replay mode the
+     tiles are untoned and an unmeasured one is ABSENT WITH ITS REASON; the
+     Distance tile says when the day's fixes came from more than one feed,
+     because the straight-line sum then crosses between interleaved devices
+     (the plan's owner-ruling defect — flagged, not ruled); and, only in
+     replay and only BELOW the map so nothing above it moves, what the fixes
+     say: the gaps between them, their status words, the speeds, and this
+     car's days. */
+  const ak = contract();
   const { makeMap, renderLive, renderJourney } = await import('/map.js');
 
   // ── controls ──
@@ -5420,6 +5790,9 @@ V.map = async (root) => {
   /* The address follows the map. Written with replaceState, so restoring the
      state does not re-render the view that just produced it. */
   const perma = el('p', 'cap'); root.append(perma);
+  /* The replay marks' host is on the page under the contract only: the old
+     skin's DOM is held byte for byte by the golden. */
+  const marks = el('div'); if (ak) root.append(marks);
   const showPerma = (mode, plate, day) => {
     const addr = mode === 'replay' && plate
       ? `#map/replay/${encodeURIComponent(plate)}${day ? `?day=${encodeURIComponent(day)}` : ''}`
@@ -5436,6 +5809,7 @@ V.map = async (root) => {
 
   const showLive = async () => {
     clear();
+    marks.innerHTML = '';
     let rows;
     /* One slow endpoint must not take the page. A 504 here replaced the whole
        of #map — map, controls, legend — with an error box, because this fetch
@@ -5471,7 +5845,16 @@ V.map = async (root) => {
        --b300 are the same lightness (map.js renderLive, reskin review
        finding 2); a fill everywhere else. */
     const hollowStale = markForm().stale === 'hollow';
-    legend.innerHTML = [['--s3', 'Passenger aboard'], ['--s1', 'Moving — seat reading says empty'],
+    if (ak) {
+      /* One row per feed on the map: its three ramp steps, named. */
+      const feeds = CHANNEL_ORDER.filter((f) => withGps.some((r) => channelKey(String(r.source || '')) === f));
+      const unnamed = withGps.some((r) => !channelKey(String(r.source || '')));
+      legend.innerHTML = feeds.map((f) => `<span>${['engaged', 'available', 'idle'].map((st) => `<i class="sw" style="background:var(--c-${f}-${st})"></i>`).join('')}`
+        + `<b>${esc(sourceLabel(f))}</b>: passenger aboard · moving · stopped</span>`).join('')
+        + '<span><i class="sw" style="background:transparent;box-shadow:inset 0 0 0 1.5px var(--ink);outline:1px dashed var(--ink);outline-offset:-1px"></i>Moving — no seat reading on this fix</span>'
+        + '<span><i class="sw" style="background:transparent;box-shadow:inset 0 0 0 2px var(--abs-outline)"></i>Stale fix</span>'
+        + (unnamed ? '<span><i class="sw" style="background:var(--grey)"></i>A feed this product cannot name</span>' : '');
+    } else legend.innerHTML = [['--s3', 'Passenger aboard'], ['--s1', 'Moving — seat reading says empty'],
       ['--s5', 'Stopped'], ['--b300', 'Moving — no seat reading on this fix'], ['--grey', 'Stale fix', hollowStale]]
       .map(([c, t, ring]) => `<span><i class="sw" style="${ring
         ? `background:transparent;box-shadow:inset 0 0 0 2px var(${c})` : `background:var(${c})`}"></i>${t}</span>`).join('');
@@ -5523,7 +5906,7 @@ V.map = async (root) => {
       b.onclick = () => showReplay(plate); stat.append(b);
       return;
     }
-    stat.innerHTML = [
+    const REPLAY_TILES = [
       ['Fixes', fmt(j.fixes), `on ${day}`],
       ['Distance', fmt(j.distance_km) + ' km', 'between fixes'],
       /* Null, not zero, when no fix this day carried a seat reading. When FMS
@@ -5545,15 +5928,37 @@ V.map = async (root) => {
          about them. */
       ['Driver', j.driver ? entity('driver', j.driver_id, j.driver) : '—',
         j.driver_trips != null ? j.driver_trips + ' trips that day' : 'from the trip record'],
-    ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
-    legend.innerHTML = (j.occupancy_reported
+    ];
+    const jFeeds = [...new Set((j.segments || []).flatMap((sg) => sg.points).map((pt) => pt.source).filter(Boolean))];
+    if (ak) {
+      /* Untoned, and an unmeasured tile ABSENT WITH ITS REASON — a glance row
+         with no hero (kpiTile prints a reason only on a glance tile). */
+      stat.classList.add('glance');
+      stat.innerHTML = kpiTiles(REPLAY_TILES.map(([l, n, d]) => {
+        if (l === 'With passenger' && n === 'not measured') return { label: l, na: d, glance: true };
+        if (l === 'Driver' && !j.driver) return { label: l, na: 'no custody record names who held the car that day', glance: true };
+        if (l === 'Distance' && jFeeds.length > 1) {
+          return { label: l, html: n, glance: true, sub: `between fixes from ${countOf(jFeeds.length, 'feed')} (${andList(jFeeds.map(sourceLabel))}), interleaved — `
+            + 'a straight line drawn from one device\u2019s fix to the other\u2019s can overstate it; which figure is right awaits an owner\u2019s ruling' };
+        }
+        return { label: l, html: n, sub: d, glance: true };
+      }));
+    } else stat.innerHTML = REPLAY_TILES.map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
+    legend.innerHTML = ak && j.occupancy_reported
+      ? jFeeds.map((f) => `<span><i class="sw" style="background:var(--c-${channelKey(f) || 'x'}-engaged, var(--grey))"></i>${esc(sourceLabel(f))}: passenger aboard</span>`
+        + `<span><i class="sw" style="background:var(--c-${channelKey(f) || 'x'}-available, var(--grey))"></i>${esc(sourceLabel(f))}: running empty (dashed)</span>`).join('')
+        + '<span><i class="sw" style="background:var(--grey)"></i>No seat reading on the fix (dotted)</span>'
+        + '<span class="dim">Lines join consecutive 5-minute fixes; a gap over 20 minutes breaks the line '
+        + 'rather than guessing the route.</span>'
+      : (j.occupancy_reported
       ? [['--s3', 'Passenger aboard'], ['--s1', 'Running empty (dashed)']]
       : [['--grey', 'No seat reading from CABMAN DT or FMS']])
       .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('')
       + '<span class="dim">Lines join consecutive 5-minute fixes; a gap over 20 minutes breaks the line '
       + 'rather than guessing the route.</span>';
-    if (!j.fixes) { empty(stat, `No GPS fixes stored for ${plate} on ${day}`); return; }
+    if (!j.fixes) { empty(stat, `No GPS fixes stored for ${plate} on ${day}`); marks.innerHTML = ''; return; }
     layer = renderJourney(map, j);
+    if (ak) mapReplayMarks(marks, j, plate, day, jFeeds, (d2) => { dayList.value = d2; showReplay(plate); });
   };
 
   /* Populate the replay pickers from days that actually have a trail.
@@ -5604,7 +6009,7 @@ V.map = async (root) => {
   fillDays();
   $('#mPlate').addEventListener('change', fillDays);
 
-  $('#mLive').onclick = () => { setMode('live'); showPerma('live'); showLive(); };
+  $('#mLive').onclick = () => { setMode('live'); showPerma('live'); stat.classList.remove('glance'); showLive(); };
   $('#mReplay').onclick = () => { setMode('replay'); showReplay(); };
   $('#mGo').onclick = () => showReplay();
   $('#mPlate').addEventListener('change', () => showReplay());
@@ -5628,6 +6033,79 @@ V.map = async (root) => {
   showPerma('live');
   await showLive();
 };
+
+/* ── #map/replay under the page contract: what the fixes say ───────────── */
+/* Below the map, replay only. Off the journey this page already fetched,
+   and this car's own days (/api/map/days?plate= — the unfiltered list is
+   capped at 400 rows across the fleet, so the plate is passed). */
+async function mapReplayMarks(host, j, plate, day, feeds, openDay) {
+  host.innerHTML = '';
+  const pts = (j.segments || []).flatMap((sg) => sg.points).filter((pt) => pt.t)
+    .sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+  const one = feeds.length === 1 ? feeds[0] : null;
+  const tone = (st) => (one ? `--c-${channelKey(one) || 'x'}-${st}` : '--mk-fill');
+  const g1 = el('div', 'grid g3'); host.append(g1);
+  /* How long between one fix and the next. */
+  const gp = panel('How long between one fix and the next', `${countOf(Math.max(0, pts.length - 1), 'gap')} on ${dayStr(`${day}T12:00:00`)}`, 'map-gaps');
+  g1.append(gp.panel);
+  const gaps = pts.slice(1).map((pt, i) => (Date.parse(pt.t) - Date.parse(pts[i].t)) / 60000);
+  const GB = [[0, 3, 'under 3 min'], [3, 6, '3–6 min'], [6, 10, '6–10 min'], [10, 20, '10–20 min'], [20, 60, '20–60 min, the line broken'], [60, Infinity, 'an hour or more, broken']];
+  if (gaps.length) {
+    const b = el('div'); gp.body.append(b);
+    hbars(b, GB.map(([lo, hi, label]) => ({ label, n: gaps.filter((x) => x >= lo && x < hi).length, broken: lo >= 20 })),
+      { signed: false, colorFor: (x) => (x.broken ? '--grey' : tone('engaged')) });
+    gp.body.append(el('p', 'cap', `The longest silence was ${fmt(Math.max(...gaps))} minutes. A gap over 20 minutes breaks the line rather than inventing a route.`));
+  } else gp.body.append(note('One fix, so no gap to measure.'));
+  /* What each fix said it was doing — the feed's own status words. */
+  const sp = panel('What each fix said it was doing', 'The status word on each fix, counted', 'map-status');
+  g1.append(sp.panel);
+  const by = new Map(); pts.forEach((pt) => { const k = pt.status || 'no status'; by.set(k, (by.get(k) || 0) + 1); });
+  const sb = el('div'); sp.body.append(sb);
+  hbars(sb, [...by.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, n]) => ({ label, n })), { signed: false, color: tone('available') });
+  /* How fast it was going — moving fixes only; a fix with no speed is not a stop. */
+  const vp = panel('How fast it was going', 'Fixes above 3 km/h, by speed', 'map-speed');
+  g1.append(vp.panel);
+  const moving = pts.filter((pt) => pt.speed != null && +pt.speed > 3).map((pt) => +pt.speed);
+  const noSpeed = pts.filter((pt) => pt.speed == null).length;
+  const SB = [[3, 20], [20, 40], [40, 60], [60, 80], [80, 100], [100, 120], [120, Infinity]];
+  if (moving.length) {
+    const b = el('div'); vp.body.append(b);
+    hbars(b, SB.map(([lo, hi]) => ({ label: hi === Infinity ? `${lo} km/h or more` : `${lo}–${hi} km/h`, n: moving.filter((v) => v >= lo && v < hi).length })),
+      { signed: false, color: tone('engaged') });
+  } else vp.body.append(note('No fix this day reported the car above 3 km/h.'));
+  vp.body.append(el('p', 'cap', `Top speed ${moving.length ? `${fmt(Math.max(...moving))} km/h` : 'not reached above 3 km/h'}`
+    + (noSpeed ? `; ${countOf(noSpeed, 'fix')} carried no speed and ${noSpeed === 1 ? 'is' : 'are'} not counted.` : '.')));
+  /* This car's days: fixes a day and the top speed, today drawn unfinished. */
+  const dp = panel('This car\u2019s days', 'Fixes a day, and the top speed each day; click a day to replay it', 'map-days');
+  host.append(dp.panel); loading(dp.body);
+  let rows = [];
+  try { rows = (await api(`/api/map/days?plate=${encodeURIComponent(plate)}`)) || []; } catch { rows = null; }
+  dp.body.innerHTML = '';
+  if (rows == null) { dp.body.append(note('This car\u2019s days could not be read.')); return; }
+  const got = rows.map((r) => ({ d: String(r.day).slice(0, 10), fixes: +r.fixes || 0, top: r.max_speed != null ? +r.max_speed : 0,
+    trips: r.driver_trips })).sort((a, b) => (a.d < b.d ? -1 : 1));
+  if (!got.length) { dp.body.append(note('No stored trail for this car in this window.')); return; }
+  /* Every day from the first trail to the last, a day with none drawn as an
+     outline rather than left out, and today drawn unfinished (gapBars). */
+  const byD = new Map(got.map((r) => [r.d, r]));
+  const series = [];
+  for (let t = Date.parse(`${got[0].d}T12:00:00Z`); t <= Date.parse(`${got[got.length - 1].d}T12:00:00Z`); t += 864e5) {
+    const k = dubaiDay(new Date(t));
+    series.push(byD.get(k) || { d: k, fixes: 0, top: 0, trips: null, none: true });
+  }
+  const g2 = el('div', 'grid g2'); dp.body.append(g2);
+  const a = el('div'); const b = el('div'); g2.append(a, b);
+  a.append(el('h4', 'sub', 'Fixes a day'));
+  const a1 = el('div'); a.append(a1);
+  gapBars(a1, series, { x: 'd', y: 'fixes', label: 'fixes', gapKey: 'none', gapLabel: 'no stored trail this day', color: tone('engaged'), onClick: (r) => { if (!r.none) openDay(r.d); } });
+  b.append(el('h4', 'sub', 'Top speed a day'));
+  const b1 = el('div'); b.append(b1);
+  gapBars(b1, series, { x: 'd', y: 'top', label: 'top speed', gapKey: 'none', gapLabel: 'no stored trail this day', color: '--mk-fill', valueFmt: (v) => `${fmt(v)} km/h`, onClick: (r) => { if (!r.none) openDay(r.d); } });
+  const trips = got.filter((r) => r.trips != null);
+  dp.body.append(el('p', 'cap', `${countOf(got.length, 'day')} with a trail`
+    + (trips.length ? `; on those days the driver who held the car filed ${fmt(trips.reduce((x, r) => x + (+r.trips || 0), 0))} bookings.` : '.')
+    + (rows[0]?.truncated ? ` The list holds the ${fmt(rows[0].shown)} newest of ${fmt(rows[0].total)}.` : '')));
+}
 
 
 /* The action list. Everything here is something a person could do today, ordered by
@@ -6200,6 +6678,9 @@ async function insightsContract(root) {
     if (!staleRes) empty(dark.body, 'The silent-tracker findings did not load.');
     else if (!rows.length) empty(dark.body, 'Every tracked car has reported recently — no silent-tracker finding is open.');
     else {
+      /* Cleared here, not by hbars(): with no finding carrying an hour count
+         nothing is drawn, and the loading skeleton sat above the caption. */
+      dark.body.innerHTML = '';
       if (timed.length) {
         hbars(dark.body, timed.map((r) => ({ label: r.entity_id, n: Number(r.metric), plate: r.entity_id })),
           { signed: false, valueFmt: (v) => `${fmt(v)} h`,
@@ -6274,8 +6755,26 @@ async function insightsContract(root) {
 /* Compliance is the one place where the data is unambiguous: a date, and a vehicle
    that is either legal or not. Sorted by urgency, not by plate. */
 V.compliance = async (root) => {
-  const vHost = el('div'); root.append(vHost);
-  const kh = el('div', 'kpis'); root.append(kh); loading(kh);
+  /* Under the page contract (plan §4 compliance): the verdict as the 00
+     statement with the PEOPLE tiles, "Drivers who cannot legally work" the
+     hero (unless it IS the verdict's figure, which then folds into it — ruling
+     7); the record-level tiles (a default date, no date at all) move to the †
+     band as the size of what is missing, with the person-basis, caveat and
+     withheld-number notes. New: the expired people by when each last drove,
+     the licence records by channel and what each channel files, the
+     checkable dates past and future, and the vehicle papers by the month
+     they run out. Both tables unchanged in their columns, sorts and folds —
+     drivers first, the order of the question — their Due tags words
+     ("expired · −12 d" in the negative colour, due within 45 days in ink at
+     weight, in date grey) and their State tags ink. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
+  const vHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vHost);
+  const kh = el('div', 'kpis'); (ak ? AKB.tilesHost : root).append(kh); loading(kh);
+  const dueAk = (n) => (n < 0
+    ? `<span style="color:var(--sem-neg);white-space:nowrap" title="expired ${fmt(Math.abs(n))} days ago">expired · −${fmt(Math.abs(n))} d</span>`
+    : n <= 45 ? `<b style="white-space:nowrap">${fmt(n)} d</b>` : `<span class="dim">${fmt(n)} d</span>`);
   const [vehPage, drvPage] = await Promise.all([
     api('/api/compliance/vehicles').catch(() => ({ rows: [], totals: {} })),
     api('/api/compliance/drivers').catch(() => ({ drivers: [], totals: {} })),
@@ -6344,6 +6843,10 @@ V.compliance = async (root) => {
   /* The people the paperwork cannot answer for, as against the records. */
   const pUnknown = pt.unknown ?? 0;
   const pConflict = pt.with_conflicts ?? 0;
+  /* Ruling 7, by NAME: the tile the verdict's figure is, and only when its
+     value agrees — a value match alone folds the first equal tile, which is
+     not always the right one (COVERAGE, notRepeated). */
+  let complFig = null, complFigLabel = null;
 
   /* Compliance is the one page where the data is unambiguous — a date, and a
      vehicle either legal or not — and it opened on eight tiles with no ranking
@@ -6381,6 +6884,11 @@ V.compliance = async (root) => {
       claim = 'Nothing has expired and nothing expires this week';
       figure = fmt(vMonth + (dt.within_45 || 0)); unit = 'due in 45 days';
     }
+    complFig = figure;
+    complFigLabel = (vExpired || dExpired)
+      ? (!vExpired ? (byPerson ? 'Drivers who cannot legally work' : 'Expired licence records') : !dExpired ? 'Vehicle docs expired' : null)
+      : soon ? (!(dt.within_7 || 0) ? 'Expiring in 7 days' : null)
+        : (!(dt.within_45 || 0) ? 'Expiring in 45 days' : null);
     const blind = dPlaceholder + dNoDate;
     const numBlind = drvPage.placeholder_number_rows || 0;
     verdict(vHost, {
@@ -6404,7 +6912,7 @@ V.compliance = async (root) => {
     });
   }
 
-  kh.innerHTML = [
+  const COMP_TILES = [
     ['Vehicle docs expired', fmt(vExpired), 'cannot legally work', vExpired ? 'err' : 'ok'],
     ['Expiring in 7 days', fmt(vWeek), 'renew now', vWeek ? 'err' : 'ok'],
     ['Expiring in 45 days', fmt(vMonth), 'start the paperwork', vMonth ? 'warn' : 'ok'],
@@ -6448,7 +6956,25 @@ V.compliance = async (root) => {
       'records we cannot say are valid', 'warn']] : []),
     /* The fifth element is a handle a test can read the figure off without
        matching the label, which is prose and has to stay improvable. */
-  ].map(([l, n, d, cls, k]) => kpiTile({ label: l, html: n, sub: d, tone: cls || null, key: k || null })).join('');
+  ];
+  if (ak) {
+    kh.remove();
+    const REC = ['Licence dates that are a default', 'No licence date on file'];
+    const list = COMP_TILES.filter(([l, n]) => !REC.includes(l) && !(l === complFigLabel && n === complFig))
+      .map(([l, n, d, , k]) => ({ label: l, value: n, sub: d, key: k || null,
+        hero: l === 'Drivers who cannot legally work' || l === 'Expired licence records' }));
+    /* When the people tile IS the verdict and folds into it, the next most
+       urgent figure that is not a nought leads — never a "0" at display size. */
+    if (!list.some((x) => x.hero)) {
+      const next = ['Vehicle docs expired', 'Expiring in 7 days', 'Drivers expiring in 45 days', 'Licences expiring in 45 days', 'Expiring in 45 days']
+        .map((l) => list.find((x) => x.label === l)).find((x) => x && x.value !== '0');
+      if (next) next.hero = true;
+    }
+    glance(AKB.tilesHost, bandTiles(list).tiles);
+    complianceExpired(root, ppl, byPerson);
+    complianceChannels(root, ppl, placeholder, drvPage);
+    complianceDates(root, ppl);
+  } else kh.innerHTML = COMP_TILES.map(([l, n, d, cls, k]) => kpiTile({ label: l, html: n, sub: d, tone: cls || null, key: k || null })).join('');
 
   /* WHAT THE HEADCOUNT IS A COUNT OF — printed, always, not only when it is
      bad news. `person_basis_note` is the API's own sentence and it has four
@@ -6457,17 +6983,17 @@ V.compliance = async (root) => {
      read at all. The last two mean the figures above are records rather than
      people, and a page that renders them silently under the new label would
      ship the same defect wearing a better noun. */
-  if (drvPage.person_basis_note) {
+  if (drvPage.person_basis_note && !ak) {
     root.append(note(drvPage.person_basis_note, byPerson ? null : 'warn'));
   }
 
-  if (drvPage.caveat) root.append(note(drvPage.caveat));
+  if (drvPage.caveat && !ak) root.append(note(drvPage.caveat));
   /* Said once, above the table, so the Emirates ID column's dashes read as a
      statement about the channels rather than as missing paperwork. */
-  if (drvPage.emirates_id_caveat) root.append(note(drvPage.emirates_id_caveat));
+  if (drvPage.emirates_id_caveat && !ak) root.append(note(drvPage.emirates_id_caveat));
   /* The licence NUMBER's default, said beside the date's rather than left for a
      reader to notice that every row shows the same digits. */
-  if (drvPage.licence_no_caveat) root.append(note(drvPage.licence_no_caveat, 'warn'));
+  if (drvPage.licence_no_caveat && !ak) root.append(note(drvPage.licence_no_caveat, 'warn'));
   /* HR'S ROSTER, AND THAT ITS LICENCE DATE LEADS. Said above the table, with
      how many people it reaches and how many disagree with a platform, so a
      reader comparing this page with yesterday's knows why "cannot legally
@@ -6497,6 +7023,7 @@ V.compliance = async (root) => {
   else foldRows(vp.body, tableFrom(veh.slice(0, 120), [
     { label: 'Due', key: 'days_left', num: true, render: (r) => {
       const d = dl(r);
+      if (ak) return dueAk(d);
       const cls = d < 0 ? 'err' : d <= 7 ? 'err' : d <= 45 ? 'warn' : 'ok';
       return `<span class="tag ${cls}">${d < 0 ? Math.abs(d) + 'd ago' : d + 'd'}</span>`; } },
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
@@ -6505,7 +7032,7 @@ V.compliance = async (root) => {
     { label: 'Document', key: 'doc_type' },
     { label: 'Status', key: 'status',
       render: (r) => (r.status
-        ? pill(r.status, /active|valid/i.test(r.status) ? 'ok' : 'warn')
+        ? pill(r.status, ak ? null : /active|valid/i.test(r.status) ? 'ok' : 'warn')
         : '<span class="ent-off" title="this source publishes no status for the document">—</span>') },
     { label: 'Expires', key: 'expires_at', render: (r) => dateStr(r.expires_at) },
     { label: 'VIN', key: 'vin',
@@ -6519,7 +7046,8 @@ V.compliance = async (root) => {
       const html = custodyAsOf({ name: r.driver_name, id: r.driver_ext_id, day: r.driver_as_of });
       const ageD = r.driver_as_of ? Math.floor((Date.now() - Date.parse(r.driver_as_of)) / 864e5) : null;
       return html + (ageD != null && ageD > 14
-        ? ` <span class="tag warn" title="the custody record is ${fmt(ageD)} days old — confirm before ringing">stale</span>`
+        ? (ak ? ` <span class="pill" title="the custody record is ${fmt(ageD)} days old — confirm before ringing">stale</span>`
+          : ` <span class="tag warn" title="the custody record is ${fmt(ageD)} days old — confirm before ringing">stale</span>`)
         : '');
     } },
   ], { sortable: true, sortId: 'vdocs', defaultSort: { key: 'days_left', dir: 'asc' } }),
@@ -6605,6 +7133,7 @@ V.compliance = async (root) => {
         + 'field was never filled in — not an expiry">not filled in</span>';
     }
     const n = dl(a);
+    if (ak) return `${esc(dateStr(a.licence_expires))} ${dueAk(n)}`;
     return `${esc(dateStr(a.licence_expires))} <span class="tag ${n < 0 ? 'err' : n <= 45 ? 'warn' : 'ok'}">`
       + `${n < 0 ? Math.abs(n) + 'd ago' : n + 'd'}</span>`;
   };
@@ -6650,6 +7179,7 @@ V.compliance = async (root) => {
             'warn', `HR files ${p.licence_disagreement.hr_expires}; ${sourceLabel(p.licence_disagreement.platform)} files `
             + `${p.licence_disagreement.platform_expires} — ${fmt(Math.abs(p.licence_disagreement.days_apart))} days apart. `
             + 'HR’s date is the one counted.')}</div>` : '';
+        if (ak) return `${dueAk(n)}${src}${dis}`;
         return `<span class="tag ${n < 0 ? 'err' : n <= 45 ? 'warn' : 'ok'}">`
           + `${n < 0 ? Math.abs(n) + 'd ago' : n + 'd'}</span>${src}${dis}`;
       } },
@@ -6706,8 +7236,14 @@ V.compliance = async (root) => {
           + '<div class="idfacts">' + Object.entries(L).map(([k, label]) => {
             const d = p.hr.documents[k] || {};
             const [w, tone] = W[d.status] || ['—', 'dim'];
-            return `<span><b>${label}</b>${d.expires ? esc(dateStr(d.expires)) : ''} <span class="tag ${tone}"`
-              + `${d.status === 'missing' ? ` title="${esc(d.absent_reason || '')}"` : ''}>${w}</span>`
+            /* Under the contract the HR status is a word, as the Due column's
+               is: expired in the negative colour, due soon in ink at weight,
+               the rest grey. */
+            const word = !ak ? null : d.status === 'expired' ? `<span style="color:var(--sem-neg)">${w}</span>`
+              : /^d(30|45|90)$/.test(d.status || '') ? `<b>${w}</b>`
+                : `<span class="dim"${d.status === 'missing' ? ` title="${esc(d.absent_reason || '')}"` : ''}>${w}</span>`;
+            return `<span><b>${label}</b>${d.expires ? esc(dateStr(d.expires)) : ''} ${word || `<span class="tag ${tone}"`
+              + `${d.status === 'missing' ? ` title="${esc(d.absent_reason || '')}"` : ''}>${w}</span>`}`
               + `${d.number_on_file === true ? '<span class="dim"> · number on file</span>'
                 : d.number_on_file === false ? '<span class="dim"> · no number on file</span>' : ''}</span>`;
           }).join('') + '</div>';
@@ -6751,7 +7287,8 @@ V.compliance = async (root) => {
     { label: 'Phone', key: 'phone',
       render: (p) => (p.phone ? `<span class="plate">${esc(p.phone)}</span>`
         : '<span class="ent-off" title="no record this person holds carries a phone number">—</span>') },
-    { label: 'State', key: 'state', render: (p) => `<span class="tag ${/suspend|deact/i.test(p.state || '') ? 'warn' : 'ok'}">${esc(p.state || '—')}</span>`
+    { label: 'State', key: 'state', render: (p) => (ak ? `<span class="pill">${esc(p.state || '—')}</span>`
+      : `<span class="tag ${/suspend|deact/i.test(p.state || '') ? 'warn' : 'ok'}">${esc(p.state || '—')}</span>`)
       + (p.suspension_reason ? `<div class="dim">${esc(String(p.suspension_reason).slice(0, 90))}</div>` : '') },
     /* WHETHER THE EXPIRY MATTERS.
        ─────────────────────────────────────────────────────────────────────
@@ -6805,7 +7342,130 @@ V.compliance = async (root) => {
       ? `. ${countOf(pt.multi_account, 'person')} here ${pt.multi_account === 1 ? 'holds' : 'hold'} more than one record`
       : '')
     + '. The counts above are over all of them, not over this list. Every column here can be sorted.'));
+  if (ak) {
+    /* Drivers first, then the papers by month, then the vehicle table — the
+       order of the question; the vehicle panel is moved, not rebuilt. */
+    complianceMonths(root, veh, vt);
+    root.append(vp.panel);
+    complianceAbsence(root, { drvPage, dPlaceholder, dNoDate, byPerson, withheldWhy, docTypes, ppl });
+  }
 };
+
+/* ── #compliance under the page contract ─────────────────────────────────── */
+/* The expired people by when each last drove — the question an expiry is
+   read with: a lapsed licence on somebody who drove this week is a car to
+   take off the road this morning. last_ever, not days_since_last_trip (the
+   plan's note on the server). */
+function complianceExpired(root, ppl, byPerson) {
+  const p = panel('Expired, and when each last drove', byPerson ? 'People whose soonest licence has lapsed, by their last booking on any channel' : 'Expired licence records, by the last booking under them', 'compl-expired');
+  root.append(p.panel);
+  const exp = ppl.filter((x) => x.licence_status !== 'unknown' && Number(x.days_left) < 0);
+  if (!exp.length) { p.body.append(note('Nobody on this list holds a lapsed licence.')); return; }
+  const now = Date.now();
+  const days = (x) => (x.last_ever ? Math.floor((now - Date.parse(x.last_ever)) / 864e5) : null);
+  const B = [['this week', 0, 7], ['within 30 days', 7, 30], ['within 90 days', 30, 90], ['longer ago', 90, Infinity]];
+  const bars = B.map(([label, lo, hi]) => ({ label, n: exp.filter((x) => { const d = days(x); return d != null && d >= lo && d < hi; }).length }));
+  const never = exp.filter((x) => !x.last_ever && x.lifetime_trips === 0).length;
+  const unseen = exp.filter((x) => !x.last_ever && x.lifetime_trips !== 0).length;
+  if (never) bars.push({ label: 'never drove', n: never });
+  if (unseen) bars.push({ label: 'no driving we can see', n: unseen });
+  const box = el('div'); p.body.append(box);
+  hbars(box, bars, { signed: false, color: '--mk-fill' });
+  p.body.append(el('p', 'cap', `${countOf(exp.length, byPerson ? 'person' : 'record')} with a lapsed licence`
+    + (bars[0].n ? `; ${fmt(bars[0].n)} drove this week — those are the cars to stop first` : '') + '.'));
+}
+/* The licence records by channel, and what each channel files: dated, the
+   source's default, no date; a licence number; an Emirates ID (counted from
+   identity_held — which record HOLDS one — never from a value, which an
+   anonymous response does not carry). */
+function complianceChannels(root, ppl, placeholder, drvPage) {
+  const p = panel('Licence records, by channel', 'What each channel files against the people on this list', 'compl-chan');
+  root.append(p.panel);
+  const by = new Map();
+  ppl.forEach((x) => (x.accounts || []).forEach((a) => {
+    const k = String(a.platform || '').toLowerCase();
+    const r = by.get(k) || { platform: k, records: 0, dated: 0, def: 0, none: 0, lic: 0, eid: 0 };
+    const d = String(a.licence_expires || '').slice(0, 10);
+    r.records++;
+    if (!d) r.none++; else if (placeholder && d === placeholder) r.def++; else r.dated++;
+    const held = new Set(a.identity_held || []);
+    if (held.has('licence_no') || a.licence_no) r.lic++;
+    if (held.has('emirates_id') || a.emirates_id) r.eid++;
+    by.set(k, r);
+  }));
+  const rows = [...by.values()].sort((a, b) => (CHANNEL_ORDER.indexOf(a.platform) + 1 || 99) - (CHANNEL_ORDER.indexOf(b.platform) + 1 || 99));
+  if (!rows.length) { p.body.append(note('No licence record on this list.')); return; }
+  p.body.append(tableFrom(rows, [
+    { label: 'Channel', key: 'platform', render: (r) => `<span class="pchip">${swatch(r.platform)}${esc(sourceLabel(r.platform))}</span>` },
+    { label: 'Records', key: 'records', num: true },
+    { label: 'A real expiry', key: 'dated', num: true },
+    { label: 'The default date', key: 'def', num: true },
+    { label: 'No date', key: 'none', num: true },
+    { label: 'Licence number', key: 'lic', num: true },
+    { label: 'Emirates ID', key: 'eid', num: true },
+  ], { compact: true }));
+  p.body.append(el('p', 'cap', 'Counts of records, not people. A number counts where the record holds one — shown or withheld alike.'
+    + (drvPage.emirates_id_by_platform ? '' : '')));
+}
+/* The checkable dates, past and future: only people whose date can be
+   checked; the rest are in the † band. */
+function complianceDates(root, ppl) {
+  const p = panel('Checkable licence dates, past and future', 'People with a real expiry date, by how far it is from today', 'compl-dates');
+  root.append(p.panel);
+  const ok = ppl.filter((x) => x.licence_status !== 'unknown' && x.days_left != null).map((x) => Number(x.days_left));
+  if (!ok.length) { p.body.append(note('Nobody on this list has a licence date that can be checked.')); return; }
+  const B = [['over a year ago', -Infinity, -365], ['3–12 months ago', -365, -90], ['in the last 90 days', -90, 0],
+    ['within 45 days', 0, 46], ['46 days to 6 months', 46, 183], ['6–12 months', 183, 366], ['over a year away', 366, Infinity]];
+  const bars = B.map(([label, lo, hi]) => ({ label, n: ok.filter((d) => d >= lo && d < hi).length, past: hi <= 0 }));
+  const box = el('div'); p.body.append(box);
+  hbars(box, bars, { signed: false, colorFor: (x) => (x.past ? '--mk-neg' : '--mk-fill'),
+    legend: [['--mk-fill', 'still to come'], ['--mk-neg', 'already lapsed']] });
+  p.body.append(el('p', 'cap', `${countOf(ok.length, 'person')} with a date that can be checked.`));
+}
+/* The vehicle papers by the month they run out, the current month hatched
+   as a month still in progress. Over the documents listed (capped), and
+   said so. */
+function complianceMonths(root, veh, vt) {
+  const p = panel('Vehicle papers, by the month they run out', 'Documents with an expiry date, counted by month', 'compl-months');
+  root.append(p.panel);
+  const ms = veh.map((r) => String(r.expires_at || '').slice(0, 7)).filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
+  if (!ms.length) { p.body.append(note('No vehicle document carries an expiry date.')); return; }
+  const cur = dubaiDay(new Date()).slice(0, 7);
+  const count = new Map(); ms.forEach((m) => count.set(m, (count.get(m) || 0) + 1));
+  const series = [];
+  for (let t = Date.parse(`${ms[0]}-15T12:00:00Z`); ; t += 30 * 864e5) {
+    const m = new Date(t).toISOString().slice(0, 7);
+    if (series.length && series[series.length - 1].m === m) continue;
+    series.push({ m, label: new Date(`${m}-15T12:00:00Z`).toLocaleDateString('en-GB', { month: 'short', year: '2-digit', timeZone: 'UTC' }),
+      n: count.get(m) || 0, partial: m === cur });
+    if (m >= ms[ms.length - 1] || series.length > 120) break;
+  }
+  const box = el('div'); p.body.append(box);
+  gapBars(box, series, { x: 'label', y: 'n', label: 'documents running out', inProgress: false, aria: 'Vehicle documents by the month they expire' });
+  p.body.append(el('p', 'cap', `Over the ${countOf(ms.length, 'document')} listed below`
+    + (vt.total && vt.total > ms.length ? `, of ${fmt(vt.total)} on file` : '') + '; the month in progress is drawn as unfinished.'));
+}
+function complianceAbsence(root, { drvPage, dPlaceholder, dNoDate, byPerson, withheldWhy, docTypes, ppl }) {
+  const plats = new Set(ppl.flatMap((x) => (x.accounts || []).map((a) => String(a.platform || '').toLowerCase())));
+  const cells = [
+    { label: 'Licence dates that are a default', hl: dPlaceholder > 0, fig: dPlaceholder ? countOf(dPlaceholder, 'record') : null, none: 'None',
+      why: dPlaceholder ? 'The source writes one default date when the field was never filled in — a data problem, not an expiry, and not counted as one.' : 'No record carries the default date.' },
+    { label: 'No licence date on file', fig: dNoDate ? countOf(dNoDate, 'record') : null, none: 'None',
+      why: dNoDate ? 'Records we cannot say are valid: no date on them at all.' : 'Every record carries a date.' },
+    { label: 'Who is a person', fig: null, none: byPerson ? 'Counted' : 'Records only',
+      why: drvPage.person_basis_note || (byPerson ? 'Counted in people through the person register.' : 'The person register could not group these records.') },
+    { label: 'Licence and ID numbers', fig: null, none: 'Withheld',
+      why: [drvPage.emirates_id_caveat, drvPage.licence_no_caveat, withheldWhy].filter(Boolean).join(' ') },
+  ];
+  if (!plats.has('bolt')) cells.push({ label: 'Bolt', fig: null, none: 'Files nothing',
+    why: 'Bolt files no compliance record for any driver, so nobody working Bolt alone can be checked here.' });
+  if (docTypes.length === 1) cells.push({ label: 'Insurance, permits, tests', fig: null, none: 'Not filed',
+    why: `The one vehicle document type this source files is ${docTypes[0]}; there is no insurance, permit or test paper to check.` });
+  if (drvPage.caveat) cells.push({ label: 'What a record can say', fig: null, none: 'See the note', why: drvPage.caveat });
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, cells);
+  pageFoot({ colophon: ['licences and documents', byPerson ? 'counted in people' : 'counted in records'] }, root);
+}
 
 /* ── what is actually still owed, in days ─────────────────────────────────
    Both panels that talk about collection debt counted rows of
@@ -6913,7 +7573,20 @@ export const feedLabel = (source, fleet) => sourceLabel(source)
   + (fleet ? ` · ${sourceLabel(fleet)}` : '');
 
 V.sources = async (root) => {
-  const vsHost = el('div'); root.append(vsHost);
+  /* Under the page contract (plan §4 #sources): the verdict as the 00
+     statement — its "need attention" figure not repeated as a tile (ruling
+     7) — with what failed, the days still owed, the rows on record and the
+     stalest scheduled feed; then why the windows were lost and when, per
+     provider; the collector-health and coverage tables unchanged but for
+     their status words (outline chips; red only for an error, with its "!");
+     when each feed last wrote and the rows on record by source; the windows
+     that did not land (unfolded — folding them is the operator's call) with
+     the pre-built summaries after them; the coordinates and the field census
+     (with what each field is stored as); a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
+  const vsHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vsHost);
   /* Guarded like every other long view. This one was not, and it is the
      longest: five panels, six fetches and a nested draw. An abandoned render
      goes on writing into panels the reader has already left — which is how the
@@ -6962,6 +7635,9 @@ V.sources = async (root) => {
      own warmer comment calls it a twenty-second query and names it as the
      cause of a 504 on this page — and eleven seconds of an anonymous grey bar
      is indistinguishable from a panel that will never fill. */
+  const whyP = ak ? panel('Why the windows were lost', 'Every refused window, by what the provider said — and by provider', 'src-why') : null;
+  const whenP = ak ? panel('When each provider lost a window', 'Refused windows by the month they start in, one plot per provider on one ruler', 'src-when') : null;
+  if (ak) { st.panel.before(whyP.panel, whenP.panel); loading(whyP.body); loading(whenP.body); }
   [st.body, ru.body].forEach((h) => loading(h));
   loading(cv.body, 'Reading the whole record — every trip, every alert, every fix, with no date '
     + 'window at all. This is the slowest question the product asks and takes about ten seconds.');
@@ -7027,7 +7703,9 @@ V.sources = async (root) => {
           + 'two dates cannot.'
         : null,
     });
+    if (ak) sourcesGlance(AKB, { rows, bad, partial, quietOk, oldest, ageH, coverage, status });
   }
+  if (ak) sourcesWhy(whyP.body, whenP.body, status);
 
   ru.body.innerHTML = '';
   if (!rollups.length) {
@@ -7037,7 +7715,7 @@ V.sources = async (root) => {
     ru.body.append(tableFrom(rollups, [
       { label: 'Rollup', key: 'name' },
       { label: 'Status', key: 'status',
-        render: (r) => `<span class="tag ${r.status === 'ok' ? 'ok' : 'bad'}">${esc(r.status || '—')}</span>` },
+        render: (r) => (ak ? srcState(r.status) : `<span class="tag ${r.status === 'ok' ? 'ok' : 'bad'}">${esc(r.status || '—')}</span>`) },
       /* Age, not a timestamp. "18 minutes ago" answers the question a reader
          actually has; a timestamp makes them do the subtraction. */
       { label: 'Age', key: 'age_min', num: true,
@@ -7107,7 +7785,7 @@ V.sources = async (root) => {
       absent: 'these runs predate per-fleet collection and cover the whole account',
       render: (r) => (r.fleet_id ? sourceLabel(r.fleet_id) : '—') },
     { label: 'Mode', key: 'mode' },
-    { label: 'Status', key: 'status', render: (r) => `<span class="tag ${TAG[r.status] || 'bad'}">${esc(r.status || '—')}</span>` },
+    { label: 'Status', key: 'status', render: (r) => (ak ? srcState(r.status) : `<span class="tag ${TAG[r.status] || 'bad'}">${esc(r.status || '—')}</span>`) },
     // With separators, on a screen where the table below it has them.
     { label: 'Rows', key: 'rows_written', num: true, render: (r) => fmt(r.rows_written) },
     { label: 'Windows', key: 'chunks_total', num: true, render: (r) => (r.chunks_total == null ? '—'
@@ -7131,7 +7809,7 @@ V.sources = async (root) => {
         : r.cadence && r.cadence.scheduled === false
           ? `<span class="note" title="${esc(String(r.cadence.note || ''))}">${
             esc(r.silence?.sentence || 'nothing schedules this source')}</span>`
-          : '<span class="note ok">healthy</span>') },
+          : ak ? '<span class="dim">healthy</span>' : '<span class="note ok">healthy</span>') },
   ], { sortable: true, sortId: 'status' }));
   /* The dates of the windows that failed. Without them a gap is visible but not
      fixable — you can see the hole and not know what to re-fetch. */
@@ -7146,7 +7824,7 @@ V.sources = async (root) => {
     /* What this row is worth chasing FOR. Two of the three answers here mean
        "do not bother": a range past the provider's retention will refuse for
        ever, and a range ending after the run itself was never real. */
-    const standing = (h) => (UNSERVABLE.test(String(h.error || ''))
+    const standing = (h) => (ak ? srcStanding(h) : UNSERVABLE.test(String(h.error || ''))
       ? '<span class="tag bad" title="past the provider\u2019s retention horizon — it cannot serve these days to anybody, and every backfill re-asks and is refused again">gone for good</span>'
       : h.finished_at && dayKey(h.to) > dayKey(h.finished_at)
         ? '<span class="ent-off" title="the window runs past the moment the run finished — weekChunks widens to whole weeks on purpose, so this is a future that had not happened, not a hole">not yet due</span>'
@@ -7185,6 +7863,8 @@ V.sources = async (root) => {
     hp.body.append(fix);
     root.append(hp.panel);
   }
+  /* The plan's order: the windows owed before the pre-built summaries. */
+  if (ak) root.append(ru.panel);
   cv.body.innerHTML = '';
   /* "Rows / From / Latest" reads as an unbroken span. Every hole between those
      two dates — the exact failure mode the rest of this codebase is written
@@ -7293,7 +7973,7 @@ V.sources = async (root) => {
            one query, and `days` parses. */
         ? `<a class="lnk" href="${href('coverage', null, null, { days: 365, at: `src-${r.src}` })}">`
           + `${countOf(r.cal.missing_days, 'day')}</a>`
-        : pill('none', 'ok')) },
+        : pill('none', ak ? null : 'ok')) },
     { label: 'Largest gap', key: '_g', render: (r) => {
       if (r.cal?.event_driven) {
         return '<span class="ent-off" title="this dataset records events, not a daily feed">—</span>';
@@ -7328,6 +8008,7 @@ V.sources = async (root) => {
      not under a platform, and sourceLabel(null) returns '—'. The live footnote
      read "— is missing 73 days". The row already carries the name the reader
      saw in the first column; use that. */
+  if (ak) sourcesFeeds(cv.panel, status, coverage);
   const holed = cov.filter((r) => r.cal && r.cal.missing_days && !r.cal.event_driven);
   if (holed.length) {
     const h = el('div', 'note');
@@ -7373,11 +8054,16 @@ V.sources = async (root) => {
           render: (r) => `<span class="${pct(r.dropoff_pct)}">${r.dropoff_pct}%</span>`
             + `<span class="dim"> ${fmt(r.with_dropoff)}</span>` },
       ], { sortable: true, sortId: 'geocov' }));
+      /* De-duplicated under the contract: timeline:uber and trip:uber both
+         name Uber, and the sentence read "uber and bolt and uber" (plan §4
+         #sources). The old skin's words are held by the golden. */
       const none = geo.filter((g) => g.pickup_pct === 0);
+      const noneNames = ak ? [...new Set(none.map((g) => sourceLabel(g.dataset.split(':')[1] || g.dataset)))]
+        : none.map((g) => g.dataset.split(':')[1] || g.dataset);
       gp.body.append(el('p', 'cap', none.length
-        ? `${none.map((g) => esc(g.dataset.split(':')[1] || g.dataset)).join(' and ')} `
-          + `${none.length === 1 ? 'sends' : 'send'} addresses as text and no coordinate, so `
-          + `${none.length === 1 ? 'its' : 'their'} pickups can only ever be grouped by parsing `
+        ? `${noneNames.map((x) => esc(x)).join(' and ')} `
+          + `${noneNames.length === 1 ? 'sends' : 'send'} addresses as text and no coordinate, so `
+          + `${noneNames.length === 1 ? 'its' : 'their'} pickups can only ever be grouped by parsing `
           + 'the address. That parse is where the demand map\u2019s missing areas come from.'
         : 'Every feed on the record carries a coordinate, so the demand map can be keyed off '
           + 'geometry rather than parsed address text.'));
@@ -7445,7 +8131,12 @@ V.sources = async (root) => {
         { label: 'Filled', key: 'fill_pct', num: true, render: (r) => pct(r.fill_pct) },
         { label: 'Distinct values', key: 'distinct_values', num: true, render: (r) => fmt(r.distinct_values) },
         { label: 'Kept as a column', key: 'already_a_column', render: (r) => (r.already_a_column
-          ? pill('yes', 'ok') : pill('raw only', 'warn')) },
+          ? pill('yes', ak ? null : 'ok') : pill('raw only', ak ? null : 'warn')) },
+        /* What the collector stores it as — the payload's mapped_to, fetched
+           and never shown, while the caption below apologised that matching
+           by name can miss a renamed column. */
+        ...(ak && d.fields.some((f) => f.mapped_to) ? [{ label: 'Stored as', key: 'mapped_to',
+          render: (r) => (r.mapped_to ? `<code>${esc(String(r.mapped_to))}</code>` : '<span class="ent-off">not stored</span>') }] : []),
         { label: 'Examples', key: '_e', render: (r) => esc((r.examples || []).slice(0, 3).join(' · ')) },
       ], { sortable: true, sortId: 'rawf' }));
       const unkept = d.fields.filter((f) => !f.already_a_column).length;
@@ -7462,10 +8153,180 @@ V.sources = async (root) => {
     }
   };
   const rawWin = () => rawBar.querySelector('#rawWin').value;
+  if (ak) sourcesAbsence(root, status, coverage);
   await drawRaw('uber', rawWin());
   rawBar.querySelector('#rawSrc').onchange = (e) => drawRaw(e.target.value, rawWin());
   rawBar.querySelector('#rawWin').onchange = () => drawRaw(rawBar.querySelector('#rawSrc').value, rawWin());
 };
+
+/* ── #sources under the page contract ────────────────────────────────────── */
+/* A run's status as a word: an error in the negative colour with its "!"
+   (it says worse), a partial an ink outline chip, ok plain grey. */
+const srcState = (st) => (st === 'error' ? pill('error', 'bad')
+  : st === 'ok' ? '<span class="dim">ok</span>' : pill(st || '—'));
+const srcStanding = (h) => (UNSERVABLE.test(String(h.error || ''))
+  ? '<span class="pill" title="past the provider\u2019s retention horizon — it cannot serve these days to anybody, and every backfill re-asks and is refused again">gone for good</span>'
+  : h.finished_at && dayKey(h.to) > dayKey(h.finished_at)
+    ? '<span class="ent-off" title="the window runs past the moment the run finished — weekChunks widens to whole weeks on purpose, so this is a future that had not happened, not a hole">not yet due</span>'
+    : '<span class="pill" style="color:var(--sem-neg)" title="still owed — this one is worth re-running">outstanding</span>');
+/* Why a window was lost, from the provider's own sentence. A class is an
+   inference from the wording, named as such in the caption. */
+const LOST_WHY = [
+  ['past the provider\u2019s retention', UNSERVABLE],
+  ['the credential was refused', /\b40[13]\b|unauthori[sz]ed|not_authorized|forbidden|signed in|session|token|credential|cookie|log ?in|expired|not entitled|companies_not_allowed/i],
+  ['the host never answered', /time ?out|timed out|econn|enotfound|eai_again|socket|network|\b50[234]\b|fetch failed|aborted/i],
+  ['the provider rate-limited the run', /rate.?limit|throttl|\b429\b/i],
+  ['fewer rows than asked for', /fewer|incomplete|truncat|short of|collected \d[\d,]* of \d/i],
+  /* FMS's own sentence on production is "refused: <endpoint> failed" — a
+     refusal with no reason in it (81 of 236 windows, 2026-09-24). Said so,
+     rather than guessed into a class. */
+  ['refused, with no reason given', /^refused:/i],
+];
+const lostWhy = (e) => (LOST_WHY.find(([, re]) => re.test(String(e || ''))) || ['another reason'])[0];
+function sourcesGlance(AKB, { rows, bad, partial, quietOk, oldest, ageH, coverage, status }) {
+  const debt = collectionDebt(status);
+  const sched = rows.filter((r) => r.finished_at && !(r.cadence && r.cadence.scheduled === false));
+  const fresh = sched.sort((a, b) => new Date(b.finished_at) - new Date(a.finished_at))[0];
+  const fm = fresh ? Math.round((Date.now() - new Date(fresh.finished_at)) / 6e4) : null;
+  const sets = ['trips', 'earnings', 'telemetry', 'alerts', 'ledger'].map((k) => coverage?.[k] || []);
+  const rowsOn = sets.flat().reduce((a, r) => a + (+r.n || 0), 0);
+  const tiles = [
+    { label: 'Failed on the last run', value: fmt(bad.length), hero: true,
+      sub: `${fmt(partial.length)} more left windows unfetched · ${fmt(quietOk.length)} reported success and wrote nothing` },
+    debt.entries
+      ? { label: 'Days still owed', value: fmt(debt.days), sub: `from ${countOf(debt.entries, 'refused window')}`
+        + (debt.unservable ? `; ${fmt(debt.unservable)} past retention, never to be served` : '') }
+      : { label: 'Days still owed', na: 'no window was refused on any run on record' },
+    { label: 'Rows on record', value: fmt(rowsOn), sub: `across ${countOf(sets.flat().length, 'dataset')}` },
+    ageH != null
+      ? { label: 'Stalest scheduled feed', value: `${fmt(ageH)} h`, sub: `${sourceLabel(oldest.source)}${oldest.fleet_id ? ` · ${sourceLabel(oldest.fleet_id)}` : ''}`
+        + (fm != null ? `; the freshest, ${sourceLabel(fresh.source)}, ${fmt(fm)} min ago` : '') }
+      : { label: 'Stalest scheduled feed', na: 'no scheduled collector has finished a run on record' },
+  ];
+  glance(AKB.tilesHost, bandTiles(tiles).tiles);
+}
+function sourcesWhy(whyHost, whenHost, status) {
+  whyHost.innerHTML = ''; whenHost.innerHTML = '';
+  const holes = (Array.isArray(status) ? status : []).flatMap((r) => (r.failed_windows || []).map((w) => ({ source: r.source, ...w })));
+  if (!holes.length) {
+    whyHost.append(note('No window was refused on any run on record.'));
+    whenHost.append(note('No window was refused on any run on record.'));
+    return;
+  }
+  const g = el('div', 'grid g2'); whyHost.append(g);
+  const a = el('div'); const b = el('div'); g.append(a, b);
+  a.append(el('h4', 'sub', 'By what the provider said'));
+  const by = new Map(); holes.forEach((h) => { const k = lostWhy(h.error); by.set(k, (by.get(k) || 0) + 1); });
+  const a1 = el('div'); a.append(a1);
+  hbars(a1, [...LOST_WHY.map(([k]) => k), 'another reason'].filter((k) => by.has(k)).map((k) => ({ label: k, n: by.get(k) })),
+    { signed: false, color: '--mk-fill' });
+  b.append(el('h4', 'sub', 'By provider'));
+  const bp = new Map(); holes.forEach((h) => bp.set(h.source, (bp.get(h.source) || 0) + 1));
+  const b1 = el('div'); b.append(b1);
+  hbars(b1, [...bp.entries()].sort((x, y) => y[1] - x[1]).map(([src, n]) => ({ label: sourceLabel(src), n, src })),
+    { signed: false, colorFor: (x) => sourceToken(x.src) || '--mk-fill' });
+  whyHost.append(el('p', 'cap', `${countOf(holes.length, 'refused window')}. The reason is read from the provider\u2019s own sentence `
+    + 'in the table below — an inference from its wording, not a code the provider sent.'));
+  /* When: one small plot per provider, on one ruler. */
+  const months = [...new Set(holes.map((h) => String(h.from).slice(0, 7)))].sort();
+  const provs = [...bp.keys()];
+  const counts = provs.map((src) => months.map((m) => holes.filter((h) => h.source === src && String(h.from).slice(0, 7) === m).length));
+  const top = Math.max(1, ...counts.flat());
+  const gg = el('div', 'grid g3'); whenHost.append(gg);
+  provs.forEach((src, i) => {
+    const box = el('div'); gg.append(box);
+    box.append(el('p', 'cap', `<b>${esc(sourceLabel(src))}</b> · ${fmt(counts[i].reduce((x, y) => x + y, 0))}`));
+    const c = el('div'); box.append(c);
+    barChart(c, months.map((m, j) => ({ m: MONTH_SHORT[+m.slice(5, 7) - 1] + ` ${m.slice(2, 4)}`, n: counts[i][j] })),
+      { x: 'm', y: 'n', label: 'refused windows', color: sourceToken(src) || '--mk-fill', max: top });
+  });
+}
+/* When each feed last wrote, and the rows on record by source — after the
+   coverage table they summarise. */
+function sourcesFeeds(after, status, coverage) {
+  const g = el('div', 'grid g2'); after.after(g);
+  const a = panel('When each feed last wrote', 'Hours since the newest finished run of each collector', 'src-age');
+  const b = panel('Rows on record, by source', 'Every dataset the record holds, by the source that wrote it', 'src-rows');
+  g.append(a.panel, b.panel);
+  const newest = new Map();
+  (Array.isArray(status) ? status : []).filter((r) => r.finished_at).forEach((r) => {
+    const cur = newest.get(r.source);
+    if (!cur || new Date(r.finished_at) > new Date(cur.finished_at)) newest.set(r.source, r);
+  });
+  const ages = [...newest.values()].map((r) => ({ label: sourceLabel(r.source), src: r.source,
+    n: Math.round(((Date.now() - new Date(r.finished_at)) / 36e5) * 10) / 10, unsched: r.cadence && r.cadence.scheduled === false }))
+    .sort((x, y) => y.n - x.n);
+  const a1 = el('div'); a.body.append(a1);
+  if (ages.length) {
+    hbars(a1, ages, { signed: false, colorFor: (x) => (x.unsched ? '--grey' : '--mk-fill'), valueFmt: (v) => `${fmt(v, 1)} h` });
+    if (ages.some((x) => x.unsched)) a.body.append(el('p', 'cap', 'Grey: a source nothing schedules — its age is its resting state, not a fault.'));
+  } else a1.append(note('No collector has finished a run on record.'));
+  const rows = [
+    ...(coverage.trips || []).map((r) => ({ label: `${sourceLabel(r.platform)} trips`, src: r.platform, n: +r.n || 0 })),
+    ...(coverage.earnings || []).map((r) => ({ label: `${sourceLabel(r.platform || r.source)} earnings`, src: r.platform || r.source, n: +r.n || 0 })),
+    ...(coverage.telemetry || []).map((r) => ({ label: `${sourceLabel(r.source)} telemetry`, src: r.source, n: +r.n || 0 })),
+    ...(coverage.alerts || []).map((r) => ({ label: 'safety alerts', src: 'fms', n: +r.n || 0 })),
+    ...(coverage.ledger || []).map((r) => ({ label: 'ledger entries', src: null, n: +r.n || 0 })),
+  ].filter((r) => r.n > 0).sort((x, y) => y.n - x.n);
+  const b1 = el('div'); b.body.append(b1);
+  if (rows.length) hbars(b1, rows.slice(0, 14), { signed: false, colorFor: (x) => sourceToken(x.src) || '--mk-fill' });
+  else b1.append(note('The record holds no rows yet.'));
+}
+function sourcesAbsence(root, status, coverage) {
+  const debt = collectionDebt(status);
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'What a provider holds and never sent', fig: null, none: 'Not reported',
+      why: 'No provider says how many rows it holds, so nothing here can count what a run never asked for — only what it asked for and was refused.' },
+    { label: 'Days no provider will serve again', hl: !!debt.unservableDays, fig: debt.unservableDays ? countOf(debt.unservableDays, 'day') : null, none: 'None',
+      why: debt.unservableDays ? `Past the provider\u2019s retention horizon (${dateStr(debt.unservableFrom)} → ${dateStr(debt.unservableTo)}): every backfill re-asks and is refused again.`
+        : 'No refused window is past a provider\u2019s retention.' },
+    { label: 'Why a provider refused', fig: null, none: 'Its own words',
+      why: 'The reasons above are read from the provider\u2019s sentence; no provider sends a code this product could count on.' },
+  ]);
+  pageFoot({ colophon: ['collector runs and the whole record', `${countOf((Array.isArray(status) ? status : []).length, 'run')}`] }, root);
+}
+
+/* ── #settings under the page contract ───────────────────────────────────── */
+function settingsBand(AKB, leftHost, defs, unset) {
+  AKB.tilesHost.innerHTML = '';
+  const expired = defs.filter((d) => d.expiry?.expired);
+  const live = defs.filter((d) => d.expiry && !d.expiry.expired && d.expiry.days_left != null)
+    .sort((a, b) => a.expiry.days_left - b.expiry.days_left);
+  const held = defs.filter((d) => d.configured || (d.seen_by || []).length).length;
+  const env = defs.filter((d) => d.source === 'environment' || d.source === 'elsewhere');
+  const left = (x) => (x < 1 ? `${Math.max(0, Math.round(x * 24))} h` : `${fmt(x, 1)} d`);
+  glance(AKB.tilesHost, bandTiles([
+    { label: 'Credentials expired', value: fmt(expired.length), hero: true,
+      sub: expired.length ? `${expired.map((d) => d.label).slice(0, 3).join(', ')}${expired.length > 3 ? ` and ${fmt(expired.length - 3)} more` : ''} — the collector is being refused`
+        : 'none has passed its expiry' },
+    { label: 'Keys configured', value: `${fmt(held)} of ${fmt(defs.length)}`, sub: 'held here or by the collector that uses them' },
+    live.length
+      ? { label: 'Next to expire', value: left(live[0].expiry.days_left), sub: `${live[0].label} · ${live[0].key}` }
+      : { label: 'Next to expire', na: 'no credential still in force carries an expiry this page can read' },
+    { label: 'Keys not set', value: fmt(unset), sub: 'neither here nor on the collector' },
+    { label: 'Held in the environment', value: fmt(env.length), sub: 'changing one needs a redeploy, not this form' },
+  ]).tiles);
+  leftHost.innerHTML = '';
+  const withExp = defs.filter((d) => d.expiry);
+  if (!withExp.length) { leftHost.append(note('No credential here carries an expiry this page can read.')); return; }
+  const ago = (d) => (d.expiry.expires_at ? (Date.now() - Date.parse(d.expiry.expires_at)) / 864e5 : null);
+  const b = el('div'); leftHost.append(b);
+  const rows = withExp.sort((x, y) => (x.expiry.expired ? -1e9 : x.expiry.days_left) - (y.expiry.expired ? -1e9 : y.expiry.days_left))
+    .map((d) => ({ label: d.label, n: d.expiry.expired ? 0 : Math.max(0, +d.expiry.days_left || 0), expired: !!d.expiry.expired, ago: ago(d) }));
+  hbars(b, rows, { signed: false, color: '--mk-fill', valueFmt: (v) => `${fmt(v, 1)} d` });
+  /* An expired key has no days left: no bar, and in the value slot how long
+     ago it died (plan §4 #settings: "an expired key draws no bar and prints
+     '18.8 d ago'"). hbars prints a zero as a literal "0", which beside an
+     expired key reads as a count of something, so the slot is rewritten here,
+     row for row, rather than teaching the shared chart a special case. */
+  [...b.querySelectorAll('.hb')].forEach((row, i) => {
+    const r = rows[i];
+    const v = row.querySelector('.v');
+    if (r?.expired && v) v.textContent = r.ago != null ? `expired ${fmt(r.ago, 1)} d ago` : 'expired';
+  });
+  leftHost.append(el('p', 'cap', `${countOf(withExp.length, 'credential')} carry an expiry; the rest are keys with none, or none this page can read.`));
+}
 
 /* The per-file upload, and the browser's half of the bound the route enforces.
    ─────────────────────────────────────────────────────────────────────────
@@ -7831,6 +8692,17 @@ function pastePanel(root) {
 }
 
 V.settings = async (root) => {
+  /* Under the page contract (plan §4 #settings): the band and the days left
+     on each expiring credential sit ABOVE the paste box, one screen at most;
+     everything below keeps its order and its structure — the paste box, the
+     admin token, the credentials form, the four run buttons, the runs table
+     — restyled only: an expired credential in the negative colour with its
+     "!", days left in ink, every source and state an outline chip. The form's
+     own four-tile row is the band now, so it is not printed twice. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, 'credentials, from /api/settings') : null;
+  const leftP = ak ? panel('Days left on each credential that expires', 'The ones that carry an expiry; an expired one draws no bar and says how long ago', 'set-left') : null;
+  if (ak) { root.append(leftP.panel); loading(AKB.tilesHost); loading(leftP.body); }
   pastePanel(root);
   /* THE SUBTITLE WAS TELLING A TRUE-SOUNDING LIE. api/admin_gate.js:63 runs the
      write gate OPEN when ADMIN_TOKEN is unset — it warns once and calls next()
@@ -7884,14 +8756,15 @@ V.settings = async (root) => {
        through to the branch below that names it rather than rendering the word
        "elsewhere" in a dim tag, which says less than what was here before. */
     if (d.configured && d.source !== 'elsewhere') {
-      return `<span class="tag ${d.source === 'settings' ? 'ok' : 'dim'}">${esc(d.source)}</span>`;
+      return ak ? pill(d.source) : `<span class="tag ${d.source === 'settings' ? 'ok' : 'dim'}">${esc(d.source)}</span>`;
     }
     const others = d.seen_by || [];
     if (others.length) {
       const where = others.map((o) => o.component).join(', ');
-      return `<span class="tag ok" title="Not in this service's environment, but held by ${esc(where)} — `
+      return `<span class="${ak ? 'pill' : 'tag ok'}" title="Not in this service's environment, but held by ${esc(where)} — `
         + `which is the process that uses it.">on ${esc(where)}</span>`;
     }
+    if (ak) return pill('unset');
     return '<span class="tag warn">unset</span>';
   };
   /* Three tiers, not two.
@@ -7902,11 +8775,14 @@ V.settings = async (root) => {
   const expiryTag = (d) => {
     const e = d.expiry;
     if (!e) return '';
-    if (e.expired) return ` <span class="tag bad" title="${esc(e.expires_at)}">expired</span>`;
+    if (e.expired) return ak ? ` <span title="${esc(e.expires_at)}">${pill('expired', 'bad')}</span>`
+      : ` <span class="tag bad" title="${esc(e.expires_at)}">expired</span>`;
     const cls = e.days_left <= 2 ? 'bad' : e.days_left <= 7 ? 'warn' : 'dim';
     const left = e.days_left < 1
       ? `${Math.max(0, Math.round(e.days_left * 24))}h left`
       : `${Math.round(e.days_left)}d left`;
+    /* Days left are ink under the contract — weight for this week, grey after. */
+    if (ak) return ` <span title="expires ${esc(e.expires_at)}">${e.days_left <= 7 ? `<b>${left}</b>` : `<span class="dim">${left}</span>`}</span>`;
     return ` <span class="tag ${cls}" title="expires ${esc(e.expires_at)}">${left}</span>`;
   };
   const defs = await api('/api/settings');
@@ -7916,7 +8792,8 @@ V.settings = async (root) => {
   const expired = defs.filter((d) => d.expiry?.expired).length;
   const soon = defs.filter((d) => d.expiry && !d.expiry.expired && d.expiry.days_left <= 7).length;
   const unset = defs.filter((d) => !d.configured && !(d.seen_by || []).length).length;
-  credP.body.append(kpiRow([
+  if (ak) settingsBand(AKB, leftP.body, defs, unset);
+  else credP.body.append(kpiRow([
     { label: 'Credentials', value: fmt(defs.length), sub: 'across every provider' },
     { label: 'Expired', value: fmt(expired), sub: 'the collector is being refused',
       tone: expired ? 'critical' : 'good' },
@@ -8086,13 +8963,13 @@ V.settings = async (root) => {
         { label: 'What', key: 'mode',
           render: (r) => `<span class="rk" title="job ${esc(String(r.id))}">${esc(String(r.id))}</span>`
             + esc(r.mode ?? '—') },
-        { label: 'State', key: 'status', render: (r) => pill(r.status, TONE[r.status]) },
+        { label: 'State', key: 'status', render: (r) => pill(r.status, ak ? (r.status === 'failed' ? 'bad' : null) : TONE[r.status]) },
         /* Who asked. Every row on this fleet reads "unauthenticated", which is
            a finding about the admin gate rather than about the run — and it was
            returned and never shown, so nobody could see it. */
         { label: 'Asked by', key: 'requested_by',
           render: (r) => (r.requested_by
-            ? `<span class="tag ${r.requested_by === 'unauthenticated' ? 'warn' : 'dim'}" `
+            ? `<span class="${ak ? 'pill' : `tag ${r.requested_by === 'unauthenticated' ? 'warn' : 'dim'}`}" `
               + `title="${r.requested_by === 'unauthenticated'
                 ? 'this run was triggered without an admin token' : 'from the admin token used'}">`
               + `${esc(r.requested_by)}</span>`
@@ -8138,7 +9015,8 @@ V.settings = async (root) => {
           }
           const m = Math.round((Date.parse(r.started_at) - Date.parse(r.requested_at)) / 60000);
           return m >= 60
-            ? `<span class="pill warn">${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m</span>`
+            ? (ak ? `<b>${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m</b>`
+              : `<span class="pill warn">${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m</span>`)
             : `${fmt(m)} min`;
         } },
         { label: 'Took', key: 'seconds', num: true,
@@ -8210,6 +9088,16 @@ V.settings = async (root) => {
     }
   };
   jobs();
+  if (ak) {
+    const absHost = el('div'); root.append(absHost);
+    absenceBand(absHost, [
+      { label: 'Whether a set key is accepted', fig: null, none: 'Not known here',
+        why: 'A key being set is not a key being accepted: only the collector\u2019s next run with it proves that, and Data sources shows what it came back with.' },
+      { label: 'When a key with no token date expires', fig: null, none: 'Not readable',
+        why: 'An expiry is read only from a value that carries one (a JWT); a cookie or an API key that dies on the provider\u2019s schedule says nothing until it is refused.' },
+    ]);
+    pageFoot({ colophon: ['credentials and on-demand runs', countOf(defs.length, 'key')] }, root);
+  }
 };
 
 
@@ -8261,8 +9149,17 @@ function countUp(node) {
     return hasComma ? Number(f).toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) : f;
   };
   const dur = 620, t0 = performance.now();
+  /* p is clamped at 0 as well as at 1. A requestAnimationFrame timestamp is
+     the START of the frame, which can be earlier than the performance.now()
+     read above when countUp is called partway through a frame. Under load that
+     gap reached about 100 ms, so p went below zero and the cubic went
+     negative: the idle-days tile read "-176" where its value is 289, and the
+     per-earning-day tile read "AED -178.65" where it is AED 293.71. Both are
+     the same fraction, −0.61, of the true figure. A stalled frame then held
+     that number long enough for test/money_contradictions to read it twice,
+     and the final full suite of the page phase failed on it (2026-09-24). */
   const tick = (now) => {
-    const p = Math.min(1, (now - t0) / dur);
+    const p = Math.max(0, Math.min(1, (now - t0) / dur));
     const eased = 1 - Math.pow(1 - p, 3);                 // ease-out cubic
     node.textContent = pre + fmtN(target * eased) + post;
     if (p < 1) requestAnimationFrame(tick);

@@ -1471,7 +1471,7 @@ function payoutsWire(root, rec) {
   else {
     hbars(p2.body, cmp.slice(0, 20).map((r) => ({ label: dateStr(r.paid_on), n: +r.delta })),
       /* hbars prints the minus itself and hands valueFmt the magnitude. */
-      { signed: true, color: '--ink', negColor: '--grey', valueFmt: (v) => money(v) });
+      { signed: true, color: '--mk-fill', negColor: '--mk-neg', valueFmt: (v) => money(v) });
     const big = [...cmp].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 3);
     p2.body.append(el('p', 'cap', esc(`${cmp.length > 20 ? `The 20 newest of ${fmt(cmp.length)}. ` : ''}`
       + `A wire above our figure and one below it are the same news — the two registers count different events. `
