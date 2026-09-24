@@ -3862,3 +3862,10 @@ The operator ruled "Phone will have a redesigned pwa app." That replaces §3 "Ph
 - Rebuilding the desktop driver and vehicle tabs natively for the phone. The desktop agent converts those modules; the phone restyles their container only.
 - The manifest's `background_color` and `theme_color`. They are one static file, so they move at the flip (STEP 5).
 - Deltas on Today's tiles against the period before. They need `/api/compare/period` and the desktop's reason logic, which lives in app.js and cannot be imported on the phone. Left for a follow-up rather than copied.
+
+**The redesign is the phone's default** (operator, 2026-09-24: "make the
+redesign default for phone"). With no choice made, `?ui=phone` renders the Arkiv
+skin; the desktop keeps the old skin until the operator flips it. Each build
+remembers its own choice (`fleet.skin.phone` / `fleet.skin`), and the manifest's
+colours moved to Arkiv ink. That is STEP 5 for the phone only. Deleting the old
+phone code is one release later, and not done.

@@ -3277,6 +3277,13 @@ driver's 222 tracker fixes.
   pulse; `run-all.mjs` now asks `/api/trips/daily` about today and, if the
   answer is empty, leaves the squatter alone and starts its own mockapi on a
   kernel-assigned port.
+* **A default applies only where NOTHING is stored, so flipping it needs a
+  fresh key.** The skin choice was one key, `fleet.skin`, shared by both
+  builds. Everyone who compared with `?skin=classic` on their phone during the
+  preview holds "classic", and a new default would never reach them. The
+  phone's default flip (2026-09-24) gave the phone its own key,
+  `fleet.skin.phone`. When the desktop is flipped, the same question applies to
+  `fleet.skin`, which holds the preview's choices too.
 * **An orphaned `bin/prod-mirror.mjs` holds :8200 for hours, and screenshots
   quietly use it.** On 2026-09-23 a mirror left behind about seven hours
   earlier (parent PID 1) was still serving. A fresh mirror then died with

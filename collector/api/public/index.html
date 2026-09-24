@@ -50,25 +50,40 @@
     var zen = localStorage.getItem('fleet.zen');
     if (zen === '1') document.documentElement.dataset.zen = '1';
   } catch (e) { /* private mode: the choice just does not stick */ }
-  /* The skin, stamped here for the same reason as the full page: a reader
-     who chose the new one must not watch the old one paint first. ?skin=arkiv
-     or ?skin=classic is remembered, ?skin=auto forgets it, and no choice at
-     all is the old skin until the operator flips the default
-     (docs/UI-REDESIGN-PLAN.md §3, STEP 5). The URL's own word wins even
-     where storage is refused, so a private window can still be shown it. The
-     stylesheet is written in by the second script below, after app.css. */
-  var sk = new URLSearchParams(location.search).get('skin');
-  try {
-    if (sk === 'arkiv' || sk === 'classic') localStorage.setItem('fleet.skin', sk);
-    else if (sk === 'auto') localStorage.removeItem('fleet.skin');
-    if (sk !== 'arkiv' && sk !== 'classic') sk = localStorage.getItem('fleet.skin');
-  } catch (e) { /* private mode: the choice just does not stick */ }
-  if (sk === 'arkiv') document.documentElement.dataset.skin = 'arkiv';
   var pick = q || saved;
   var phone = pick ? pick === 'phone'
     : matchMedia('(max-width: 760px)').matches && matchMedia('(pointer: coarse)').matches;
   var r = document.documentElement;
   r.dataset.ui = phone ? 'phone' : 'desktop';
+  /* The skin, stamped here for the same reason as the full page: a reader
+     who chose the new one must not watch the old one paint first. ?skin=arkiv
+     or ?skin=classic is remembered, ?skin=auto forgets it. The URL's own
+     word wins even where storage is refused, so a private window can still
+     be shown it. The stylesheet is written in by the second script below,
+     after app.css.
+
+     THE DEFAULT IS PER BUILD. The operator, 2026-09-24: "make the redesign
+     default for phone". So with no choice made, the PHONE build is the Arkiv
+     skin (its redesigned PWA, m/arkiv-m.css) and the DESKTOP build is still
+     the old skin until the operator flips it (docs/UI-REDESIGN-PLAN.md §3,
+     STEP 5). Which build this is was decided just above, before the skin.
+
+     And each build REMEMBERS its own choice: fleet.skin.phone for the phone,
+     fleet.skin for the desktop, as before. One shared key would have kept the
+     old phone for exactly the readers most likely to be looking for the new
+     one: anyone who compared the two with ?skin=classic on their phone during
+     the preview has "classic" stored, and a default only applies where
+     nothing is stored. ?skin=classic on the phone is still honoured and
+     remembered, for the phone alone. */
+  var skinKey = phone ? 'fleet.skin.phone' : 'fleet.skin';
+  var sk = new URLSearchParams(location.search).get('skin');
+  try {
+    if (sk === 'arkiv' || sk === 'classic') localStorage.setItem(skinKey, sk);
+    else if (sk === 'auto') localStorage.removeItem(skinKey);
+    if (sk !== 'arkiv' && sk !== 'classic') sk = localStorage.getItem(skinKey);
+  } catch (e) { /* private mode: the choice just does not stick */ }
+  if (sk !== 'arkiv' && sk !== 'classic') sk = phone ? 'arkiv' : 'classic';
+  if (sk === 'arkiv') r.dataset.skin = 'arkiv';
   /* The theme, before the stylesheet, for BOTH builds — the key the desktop
      button writes, so a reader who set light on their laptop gets light on the
      phone too. This used to run for the phone only: the desktop build waited

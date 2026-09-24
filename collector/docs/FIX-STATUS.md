@@ -3060,6 +3060,20 @@ whole-dirham amounts in both skins. They are a worked example in a fixed
 caption ("a 15% rate on AED 63 outranks a 6% rate on AED 506"), handed to the
 desktop agent to write to the fils.
 
+### The phone's default is the redesign — operator, 2026-09-24: "make the redesign default for phone"
+
+| # | what | state | proof |
+|---|---|---|---|
+| PF1 | index.html's pre-paint script decides which build this is FIRST, then the skin. With no choice made, the phone build is the Arkiv skin (its redesigned PWA) and the desktop is still the old skin | **written** | `arkiv_skin` §3: the pre-paint checks, then a phone and a desktop in a browser. Revert (no phone default) fails 4 |
+| PF2 | Each build remembers its own choice: `fleet.skin.phone` for the phone, `fleet.skin` for the desktop. A single shared key would have kept the old phone for anyone who tried `?skin=classic` on their phone during the preview, because a default only applies where nothing is stored. `?skin=classic` / `?skin=auto` on the phone still work, for the phone alone | **written** | `arkiv_skin`: a desktop-key "classic" does not keep the old phone; the phone's own "classic" does; auto forgets it. Revert (one shared key) fails 2 |
+| PF3 | The PWA manifest (the phone app's own: start_url `?ui=phone`) moves its splash and theme colour from the old near-black `#14171a` to Arkiv ink `#0A0A0B`, as the plan's STEP 5 says; the page sets the status bar to Arkiv paper once loaded (m/app.js) | **written** | — |
+
+The tests that open the phone with no skin (phone 144, phone_render 8,
+phone_today_only 19, phone_clock, arkiv_shell, boot_order) all pass under the
+new default. phone_clock's rendered check, which skips with no server on :8100,
+was run against a mock: 13 passed. The old phone is still reachable
+(`?skin=classic`), and phone_classic (34) still holds it byte for byte.
+
 ## Arkiv page phase — desktop — 2026-09-24, NOT ON PRODUCTION
 
 STEP 6 of docs/UI-REDESIGN-PLAN.md, the desktop half (the phone PWA is a

@@ -140,8 +140,18 @@ check('each channel segment takes its label ink from --on-c-<channel>', onSeg.le
 console.log('\n3 · the switch in index.html and the service worker');
 const prePaint = html.slice(html.indexOf('<script>'), html.indexOf('</script>'));
 check('the pre-paint script reads ?skin', /get\('skin'\)/.test(prePaint));
-check('…remembers it under fleet.skin', /localStorage\.setItem\('fleet\.skin', sk\)/.test(prePaint)
-  && /localStorage\.removeItem\('fleet\.skin'\)/.test(prePaint));
+/* Each build remembers its own choice (the operator's ruling of 2026-09-24,
+   "make the redesign default for phone"): the desktop under fleet.skin as
+   before, the phone under fleet.skin.phone, so a "classic" stored during the
+   preview cannot keep the old phone. */
+check('…remembers it under a key per build: fleet.skin (desktop), fleet.skin.phone (phone)',
+  /var skinKey = phone \? 'fleet\.skin\.phone' : 'fleet\.skin';/.test(prePaint)
+  && /localStorage\.setItem\(skinKey, sk\)/.test(prePaint) && /localStorage\.removeItem\(skinKey\)/.test(prePaint));
+check('…with no choice, the phone is the Arkiv skin and the desktop the old one',
+  /if \(sk !== 'arkiv' && sk !== 'classic'\) sk = phone \? 'arkiv' : 'classic';/.test(prePaint));
+check('…decided AFTER which build this is, which the default depends on',
+  prePaint.indexOf("r.dataset.ui = phone ? 'phone' : 'desktop';") > 0
+  && prePaint.indexOf("r.dataset.ui = phone ? 'phone' : 'desktop';") < prePaint.indexOf('var skinKey'));
 check('…and stamps data-skin on <html>', /dataset\.skin = 'arkiv'/.test(prePaint));
 const appAt = html.indexOf('href="/app.css"');
 const arkAt = html.indexOf('/arkiv.css');
@@ -229,6 +239,45 @@ console.log('\n3 · the switch, in a browser');
     JSON.stringify(cl));
   await page.goto(`${base}/?ui=desktop&skin=auto#drivers`, { waitUntil: 'domcontentloaded' });
   check('?skin=auto forgets the choice', await page.evaluate(() => localStorage.getItem('fleet.skin')) === null);
+  await ctx.close();
+}
+
+/* ── the phone's default (operator, 2026-09-24: "make the redesign default
+   for phone") ─────────────────────────────────────────────────────────────
+   With nothing stored, a phone reader gets the redesigned PWA; the desktop
+   keeps the old skin. A "classic" stored under the desktop's key — which is
+   what every phone that tried ?skin=classic during the preview holds — does
+   not keep the old phone; ?skin=classic on the phone still does, remembered
+   for the phone alone. */
+{
+  const ctx = await fresh({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  const read = () => page.evaluate(() => ({ skin: document.documentElement.dataset.skin || null,
+    ui: document.documentElement.dataset.ui, desk: localStorage.getItem('fleet.skin'),
+    phone: localStorage.getItem('fleet.skin.phone'),
+    arkivM: !!document.querySelector('link[href="/m/arkiv-m.css"]') }));
+  await page.goto(`${base}/?ui=phone#today`, { waitUntil: 'domcontentloaded' });
+  const d = await read();
+  check('phone, nothing stored: the Arkiv skin and its phone sheet', d.ui === 'phone' && d.skin === 'arkiv' && d.arkivM
+    && d.phone === null, JSON.stringify(d));
+  await page.evaluate(() => localStorage.setItem('fleet.skin', 'classic'));
+  await page.goto(`${base}/?ui=phone#today`, { waitUntil: 'domcontentloaded' });
+  const legacy = await read();
+  check('…a "classic" stored under the desktop key during the preview does not keep the old phone',
+    legacy.skin === 'arkiv' && legacy.desk === 'classic', JSON.stringify(legacy));
+  await page.goto(`${base}/?ui=phone&skin=classic#today`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${base}/?ui=phone#today`, { waitUntil: 'domcontentloaded' });
+  const cl = await read();
+  check('…?skin=classic on the phone is honoured and remembered, under the phone key',
+    cl.skin === null && !cl.arkivM && cl.phone === 'classic', JSON.stringify(cl));
+  await page.goto(`${base}/?ui=phone&skin=auto#today`, { waitUntil: 'domcontentloaded' });
+  const auto = await read();
+  check('…?skin=auto on the phone forgets it, and the default is the redesign again',
+    auto.skin === 'arkiv' && auto.phone === null, JSON.stringify(auto));
+  await page.evaluate(() => localStorage.clear());
+  await page.goto(`${base}/?ui=desktop#drivers`, { waitUntil: 'domcontentloaded' });
+  const desk = await read();
+  check('the desktop, nothing stored: still the old skin', desk.ui === 'desktop' && desk.skin === null, JSON.stringify(desk));
   await ctx.close();
 }
 
