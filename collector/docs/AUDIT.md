@@ -1589,3 +1589,14 @@ Production, both skins at 1440 and 390, light and dark (scratchpad
 `pagephase/shots/advances/`): no error, no sideways scroll, two highlights.
 215 of 347 people have both a cash fare and a generated figure; 61 have cash
 fares and no generated figure; 71 have no cash fare.
+
+### #charging — 2026-09-24
+
+Production through live-ui (whose API is production's, so the register still
+answers with the whole record until S5 deploys), both skins at 1440 and 390,
+light and dark (scratchpad `pagephase/shots/charging/`): no error, no
+sideways scroll. No charging advance has ever been recorded (0 of 347), so
+the hero is absent with its reason and no highlight is drawn. Found by
+looking and fixed before commit: the head note read "This month" over a
+whole-record answer; the sessions row printed "0" for a count that does not
+exist.

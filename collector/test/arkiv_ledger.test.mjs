@@ -188,4 +188,51 @@ if (want('advances')) {
   await c.ctx.close();
 }
 
+/* ══ #charging ═══════════════════════════════════════════════════════════ */
+if (want('charging')) {
+  console.log('\n#charging');
+  const { ctx, page, answer } = await open('arkiv', 'charging');
+  const s = await shape(page);
+  const reg = answer('/api/ledger/entries');
+  const n = answer('/api/ledger/people').people.filter((p) => p.name).length;
+  const r = await page.evaluate(() => ({
+    note: document.querySelector('.cband .sechd-note')?.textContent.trim() || '',
+    span: document.querySelector('.cband .ch-span')?.textContent || '',
+    sides: [...document.querySelectorAll('[data-panel="charging-sides"] .hb')].map((h) => [h.querySelector('.k').textContent,
+      h.querySelector('.fill').className, h.querySelector('.v').textContent.trim()]),
+    gapPanel: !!document.querySelector('[data-panel="charging-gap"]'),
+    supply: !!document.querySelector('.absband a[href^="#supply"]'),
+  }));
+  check('the order: 00, Record one, Who has had what, Every entry, both sides, † — the gap panel became the band',
+    JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Record one', 'Who has had what', 'Every entry, most recent first',
+      'Both sides of this reconciliation', '† What this page does not know']) && !r.gapPanel, JSON.stringify(s.heads));
+  check('the window claimed is the window the register ANSWERED — here the whole record, said so in the head, the hero and a caption',
+    reg.from == null && reg.to == null && r.note === 'The whole record' && s.hero === 'Advanced over the whole record'
+    && /answered over the whole record/.test(r.span), JSON.stringify([r.note, s.hero, r.span]));
+  check('the hero is the register\'s own total', s.values[s.hero] === aed(reg.totals.advance), s.values[s.hero]);
+  check('drivers with one, over everyone the form can point at', s.values['Drivers with one'] === `${reg.by_person.length} of ${n}`, s.values['Drivers with one']);
+  check('a meter to check it against is ABSENT with the reason, not a nought', /none ingested/.test(s.na['A meter to check it against'] || ''), JSON.stringify(s.na));
+  check('both sides: the form\'s people, the ones with an advance, and the sessions as the OUTLINE',
+    r.sides.length === 3 && /hb-outline/.test(r.sides[2][1]) && r.sides[1][2] === String(reg.by_person.length), JSON.stringify(r.sides));
+  check('the † band keeps every bullet and the Supply link', s.abs.length === 4 && r.supply
+    && /dx\/charging\/history/.test(s.abs[0].why) && /2026-09-10/.test(s.abs[1].why) && /VEHICLE/.test(s.abs[2].why)
+    && /AREA NAME/.test(s.abs[3].why), JSON.stringify(s.abs.map((a) => a.label)));
+  await ctx.close();
+  /* A window with no charging row: the hero is ABSENT, and the window the
+     answer covers is the one named. */
+  const e = await open('arkiv', 'charging', { fixtures: { '/api/ledger/entries': (_q, real) => ({ ...real, from: '2026-09-01',
+    to: '2026-09-24', entries: [], by_person: [], totals: { ...real.totals, rows: 0, advance: null } }) } });
+  const es = await shape(e.page);
+  check('an empty window: the hero is ABSENT with "no record, not a measured nought", over the dates answered',
+    es.hero === 'Advanced over 2026-09-01 to 2026-09-24' && /no record, not a measured nought/.test(es.na[es.hero] || ''), JSON.stringify([es.hero, es.na]));
+  const who = await txt(e.page, '[data-panel="charging-people"]');
+  check('…and "who has had what" names the same dates, not the control bar\'s label', /over 2026-09-01 to 2026-09-24/.test(who)
+    && !/This month/.test(who), who);
+  await e.ctx.close();
+  const c = await open('classic', 'charging');
+  check('old skin: its tile panel and its gap panel', !!(await c.page.$('[data-panel="charging"] .kpis'))
+    && !!(await c.page.$('[data-panel="charging-gap"]')) && !(await c.page.$('#view .cband')));
+  await c.ctx.close();
+}
+
 await done();

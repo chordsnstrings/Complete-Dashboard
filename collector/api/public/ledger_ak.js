@@ -162,15 +162,19 @@ export function exposureBars(host, people) {
    people with NO RECORD as the absence outline — both proportional, both
    with their number, so "347 not recorded" is not drawn as though it were a
    quantity of something. rows: [{ label, n, outline?, why? }]. */
+/* A row with `na` has no count at all — not a nought — and prints its
+   reason where the number would be, over a fixed-width outline. */
 export function formBars(host, rows, { of = null } = {}) {
-  const max = Math.max(...rows.map((r) => +r.n || 0), 1);
+  const max = Math.max(...rows.map((r) => (r.na ? 0 : +r.n || 0)), 1);
   const w = el('div', 'hbars');
   w.innerHTML = rows.map((r) => {
-    const pc = Math.max((+r.n || 0) / max * 100, r.n ? 0.6 : 0);
+    const pc = r.na ? 24 : Math.max((+r.n || 0) / max * 100, r.n ? 0.6 : 0);
+    const out = r.outline || r.na;
     return `<div class="hb"${r.why ? ` title="${esc(r.why)}"` : ''}><div class="k">${esc(r.label)}</div>`
-      + `<div class="track"><div class="fill${r.outline ? ' hb-outline' : ''}" style="width:${pc.toFixed(1)}%;`
-      + `${r.outline ? '' : 'background:var(--ink)'}"></div></div>`
-      + `<div class="v num">${fmt(r.n)}${of ? `<span class="dim"> ${((+r.n || 0) / of * 100).toFixed(1)}%</span>` : ''}</div></div>`;
+      + `<div class="track"><div class="fill${out ? ' hb-outline' : ''}" style="width:${pc.toFixed(1)}%;`
+      + `${out ? '' : 'background:var(--ink)'}"></div></div>`
+      + `<div class="v num">${r.na ? `<span class="ak-why">${esc(r.na)}</span>`
+        : `${fmt(r.n)}${of ? `<span class="dim"> ${((+r.n || 0) / of * 100).toFixed(1)}%</span>` : ''}`}</div></div>`;
   }).join('');
   host.append(w);
 }

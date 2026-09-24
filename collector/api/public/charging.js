@@ -27,7 +27,10 @@
    left somewhere that has a charger". It can never say "this car charged", let
    alone who was in it. Putting it beside a money figure would turn a caveat
    into a claim, so it is named here as the thing it is not. */
-import { el, esc, panel, note, loading, tableFrom, kpiRow, entity, empty } from './ui.js';
+import { el, esc, panel, note, loading, tableFrom, kpiRow, entity, empty,
+  contract, glance, absenceBand, pageFoot } from './ui.js';
+import { fmt } from './charts.js';
+import { ledgerBand, formBars } from './ledger_ak.js';
 import { qAll, windowLabel, href } from './data.js';
 import { entryForm } from './entry_form.js';
 import { aed, loadPeople } from './deposit_core.js';
@@ -52,8 +55,18 @@ export async function renderCharging(root) {
   const whoPanel = panel('Who has had what', null, 'charging-people');
   const regPanel = panel('Every entry, most recent first', null, 'charging-register');
   const gapPanel = panel('What none of this is checked against', null, 'charging-gap');
-  root.append(head.panel, formPanel.panel, whoPanel.panel, regPanel.panel, gapPanel.panel);
-  loading(head.body);
+  /* Under the page contract (plan §4 #charging): 00 in place of the tile
+     panel; Record one, Who has had what and Every entry where they were;
+     then both sides of the reconciliation, and the gap panel becomes the †
+     band — every bullet's full text and the Supply link kept. */
+  const ak = contract();
+  const AK = ak ? ledgerBand(windowLabel()) : null;
+  const both = ak ? panel('Both sides of this reconciliation', 'The people a charging advance can be recorded against, '
+    + 'the ones who have one, and the charging sessions to check them against.', 'charging-sides') : null;
+  const absHost = ak ? el('div') : null;
+  if (ak) root.append(AK.band, formPanel.panel, whoPanel.panel, regPanel.panel, both.panel, absHost);
+  else root.append(head.panel, formPanel.panel, whoPanel.panel, regPanel.panel, gapPanel.panel);
+  loading(ak ? AK.tiles : head.body);
 
   async function refresh() {
     /* qAll, not a hand-built query string: it carries the shell's own window
@@ -69,13 +82,14 @@ export async function renderCharging(root) {
     regPanel.body.innerHTML = '';
 
     if (!reg) {
-      head.body.append(note('The charging register could not be read.', 'bad'));
+      (ak ? AK.tiles : head.body).append(note('The charging register could not be read.', 'bad'));
       return;
     }
 
     const t = reg.totals;
     const people = reg.by_person || [];
-    head.body.append(kpiRow([
+    if (ak) chargingContract(AK, both, reg, dir);
+    else head.body.append(kpiRow([
       /* ABSENT, NOT NOUGHT. This fell back to the literal 'AED 0.00' when
          totals.advance came back null — and null is what /api/ledger/entries
          sends when no charging row exists in the window at all (a sum over
@@ -100,10 +114,12 @@ export async function renderCharging(root) {
     /* The window governs BOTH halves of this page, which is the honest case —
        unlike a balance, "what have we advanced for charging" is a question
        about a span. Said rather than assumed. */
-    head.body.append(el('p', 'cap', `Both figures above and both tables below are over `
-      + `${esc(windowLabel())}. Unlike a driver's balance, what a fleet has advanced for `
-      + 'charging is a question about a span of dates, so the window is the right control for '
-      + 'it and changing it changes everything on this page.'));
+    if (!ak) {
+      head.body.append(el('p', 'cap', `Both figures above and both tables below are over `
+        + `${esc(windowLabel())}. Unlike a driver's balance, what a fleet has advanced for `
+        + 'charging is a question about a span of dates, so the window is the right control for '
+        + 'it and changing it changes everything on this page.'));
+    }
 
     /* ── the form, mounted once ─────────────────────────────────────────── */
     if (!formPanel.body.querySelector('.depform')) {
@@ -128,7 +144,10 @@ export async function renderCharging(root) {
 
     /* ── who has had what ───────────────────────────────────────────────── */
     if (!people.length) {
-      empty(whoPanel.body, `No charging advance has been recorded in ${windowLabel()}.`);
+      /* Under the contract: over the dates the register ANSWERED, not the
+         ones the control bar asked for (they differed — S5). */
+      empty(whoPanel.body, ak ? `No charging advance has been recorded over ${spanOf(reg)}.`
+        : `No charging advance has been recorded in ${windowLabel()}.`);
     } else {
       whoPanel.body.append(tableFrom(people, [
         { label: 'Driver', key: 'person_name',
@@ -171,6 +190,7 @@ export async function renderCharging(root) {
   }
 
   await refresh();
+  if (ak) { chargingGap(absHost, root); return; }
 
   /* ── the panel this page exists for ─────────────────────────────────── */
   gapPanel.body.append(note('Every figure above was typed by a person. None of it has been '
@@ -212,4 +232,88 @@ export async function renderCharging(root) {
     + 'against a list of areas that contain a charger. It can say a car was left somewhere with '
     + 'a charger. It cannot say the car charged, and it says nothing at all about who was in it.',
   'warn'));
+}
+
+/* ── #charging under the page contract ─────────────────────────────────────
+   00: advanced in the window, the hero — ABSENT with the true reason where
+   no charging row exists in it (a sum over no rows is not a nought) ·
+   drivers with one, of everyone the form can point at · entries · a meter
+   to check it against, none ingested. The window the page claims is the
+   window the ANSWER covers: it says "the whole record" when the register
+   answered with no dates (the route read only from/to until 2026-09-24 and
+   answered "This month" with everything — the plan's FIX; S5).
+   NOT ADOPTED: "the eighteen books" (no GET serves the registry, and it is
+   not about charging); people per channel and channels per person (the
+   identity page's question); a chart of the window asked against the window
+   answered (fixed instead of drawn). */
+const spanOf = (reg) => (reg.from || reg.to
+  ? `${reg.from || 'the first entry'} to ${reg.to || 'today'}` : 'the whole record');
+function chargingContract(AK, both, reg, dir) {
+  const t = reg.totals;
+  const people = reg.by_person || [];
+  const roster = (dir?.people || []).filter((p) => p.name).length;
+  const span = spanOf(reg);
+  glance(AK.tiles, [
+    t.advance != null
+      ? { label: `Advanced over ${span}`, value: aed(t.advance), hero: true,
+        sub: 'recorded by hand, and checked against no meter — see the last band' }
+      : { label: `Advanced over ${span}`, hero: true,
+        na: `${reg.from || reg.to ? 'no charging advance is recorded in these dates' : 'no charging advance has ever been recorded'}`
+          + ' — the register is kept by hand, so this is no record, not a measured nought' },
+    { label: 'Drivers with one', value: dir?.ok ? `${fmt(people.length)} of ${fmt(roster)}` : fmt(people.length),
+      sub: dir?.ok ? 'of everyone the form can record against' : 'the list of drivers could not be read, so there is no denominator' },
+    { label: 'Entries', value: fmt(t.rows),
+      sub: t.verification_rows ? `${fmt(t.verification_rows)} verification rows excluded from the figures`
+        : 'each with a photograph of its proof' },
+    { label: 'A meter to check it against', na: 'none ingested — this database holds no charging session at all' },
+  ]);
+  /* The band's own note too: it read the control bar's window before the
+     answer arrived, and the answer may cover something else. */
+  const hn = AK.band.querySelector('.sechd-note');
+  if (hn) hn.textContent = reg.from || reg.to ? span : 'The whole record';
+  AK.band.querySelector('.ch-span')?.remove();
+  const cap = el('p', 'cap ch-span', esc(reg.from || reg.to
+    ? `Everything on this page is over ${span}, the dates the register was asked for and answered over.`
+    : 'The register answered over the whole record — every charging advance ever entered — so the figures above are not limited to the dates chosen in the control bar.'));
+  AK.band.append(cap);
+
+  both.body.innerHTML = '';
+  formBars(both.body, [
+    { label: 'People the form can point at', n: dir?.ok ? roster : 0, outline: !dir?.ok,
+      why: dir?.ok ? '' : 'the list of drivers could not be read' },
+    { label: 'With a charging advance', n: people.length },
+    { label: 'With a charging session', na: 'none ingested', why: 'there is no table for one and no collector that fetches one' },
+  ]);
+  both.body.append(el('p', 'cap', 'The third row has no count, not a count of nought: no charging session has ever been '
+    + 'collected, so the side a reconciliation would check against does not exist here.'));
+}
+/* The gap panel's five bullets and its Supply caveat, as the † band — the
+   text is the old panel's, cell by cell, nothing dropped. */
+function chargingGap(host, root) {
+  absenceBand(host, [
+    { label: 'A meter to check it against', fig: null, none: 'None ingested', html: true,
+      why: 'Every figure above was typed by a person, and none of it has been checked against a charging meter: '
+        + 'this database holds no charging session at all — no table for one, no collector that fetches one. '
+        + '<b>The data exists upstream.</b> Tesla serves past sessions at <code>/api/1/dx/charging/history</code>, and '
+        + 'energy with pricing at <code>/api/1/dx/charging/sessions</code> — the second to business fleet owners only, '
+        + 'which this fleet is. So the gap is access, not availability.' },
+    { label: 'Why the access is not there', fig: null, none: 'Token expired', html: true,
+      why: '<b>The token cannot be renewed from this server.</b> The stored one expired on 2026-09-10, and Tesla’s '
+        + 'auth edge answers this platform’s egress with an HTML 403 before OAuth sees the request. Measured. It has to '
+        + 'be minted from a machine Tesla answers, with <code>bin/tesla-token.mjs</code>. <b>And billing gates it before '
+        + 'any of that.</b> Tesla’s default spend limit is $0 and is raised only after a payment method is added — and '
+        + 'the UAE is not on Tesla’s payment-supported country list. Every response below a 500 is billable, refusals included.' },
+    { label: 'Even with a feed', fig: null, none: 'Partial, and a car', html: true,
+      why: '<b>Even ingested, it would be partial.</b> In the operator’s own words, drivers charge outside our network '
+        + 'as well — so a reconciliation would cover our chargers and quietly call everything else unexplained. '
+        + '<b>Even complete, it would not settle who owes it.</b> A charger meters a VEHICLE and an advance is owed by a '
+        + 'PERSON. The custody record is the only bridge between the two, and it is an inference from time and plate '
+        + 'rather than ground truth.' },
+    { label: 'Idle hours at charging sites', fig: null, none: 'Not evidence', html: true,
+      why: `The idle hours reported at charging sites on <a class="lnk" href="${href('supply')}">Supply</a> are NOT `
+        + 'evidence of charging, and must not be read as a check on this page. That figure matches the AREA NAME a car '
+        + 'was left in against a list of areas that contain a charger. It can say a car was left somewhere with a '
+        + 'charger. It cannot say the car charged, and it says nothing at all about who was in it.' },
+  ]);
+  pageFoot({ colophon: ['Recorded by hand', 'Checked against no meter'] }, root);
 }
