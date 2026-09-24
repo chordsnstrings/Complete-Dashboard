@@ -3632,3 +3632,11 @@ Deviations:
 * **The day tiles' absences** (a bare "—" twice) go beyond the plan's "restyle only". The house principle requires them.
 
 Not touched, owner ruling needed (plan): the Distance tile's "2,267 km between consecutive fixes" on one car-day. The sum draws straight lines across two interleaved device streams. That is a data-model question, not a restyle item.
+
+### P62 · #vehicle/earnings
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #vehicle/earnings | All four tiles move into the 00 band, untoned (a fare coverage is a level), with the money exact and Attributed pay as the hero. "AED 0.00" is not a measurement when nothing was there to measure. *Attributed pay* goes ABSENT when no payout overlaps the car ("its channels price per trip, or the payouts for these dates are not collected yet", the reason the By-driver table already gave in words). *Measured fares* goes absent when none of its bookings reports a fare, and *Fare coverage* when it is null. The caveat, both tables and their basis wording are kept. A channel is a swatch and an ink label, never a pill, and the even-split/by-trips basis chip carries no tone. Both day-by-day series stay two charts, in the job token | **written** | `test/arkiv_fleet.test.mjs` #vehicle/earnings 10/10, with a synthetic nothing-attributed and nothing-priced fixture. Revert-proofs (md5-restored): the fares chart's colour off makes "both series in the job token" fail ([true,false]); Attributed pay's reason off makes "never AED 0.00" fail; the channel back to a pill makes "a swatch and an ink label" fail. `arkiv_classic_frozen` ONLY=vehicle/L45235 9/9. `arkiv_fils` gains the route; the live scan is clean. Pinned: `kpi_one_tile` 20, `vehicle_payout_basis` 14, `page_contract` 95, `chart_marks` 151 |
+
+Deviation: the plan asks for "the 3px channel marker in the gutter" on channel rows. The row carries the shared channel swatch beside the label, the same mark every other converted table uses.

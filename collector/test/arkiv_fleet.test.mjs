@@ -338,4 +338,55 @@ if (want('vehicle-movement')) {
   }
 }
 
+/* ══ #vehicle/earnings ════════════════════════════════════════════════════ */
+if (want('vehicle-earnings')) {
+  console.log('\n#vehicle/earnings');
+  const H = 'vehicle/L45235/earnings';
+  const chips = (page) => page.evaluate(() => ({
+    pills: [...document.querySelectorAll('#view tbody .pill')].map((p) => p.className),
+    pchips: document.querySelectorAll('#view tbody .pchip .sw').length,
+    day: [...document.querySelectorAll('#view .panel')].find((p) => p.querySelector('h3')?.textContent === 'Day by day')?.innerHTML.match(/--mk-fill/g)?.length || 0,
+    dayHtml: ([...document.querySelectorAll('#view .panel')].find((p) => p.querySelector('h3')?.textContent === 'Day by day')?.innerHTML || '').match(/(fill|stroke|background)[=:]\s*"?[^";]{0,40}/g)?.slice(0, 6),
+  }));
+  {
+    const { ctx, page } = await open('classic', H);
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), toned: document.querySelectorAll('#view .kpis > .kpi.t-good, #view .kpis > .kpi.t-warn, #view .kpis > .kpi.t-critical').length }));
+    const c = await chips(page);
+    check('old skin: no band, its toned tile row, the channel as a pill', !r.band && r.toned > 0 && c.pills.some((p) => /\bplat\b|pill$|pill /.test(p)) && c.pchips === 0, JSON.stringify([r, c]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', H);
+    const s = await shape(page);
+    const e = answer('/api/vehicle/earnings');
+    check('00: the four tiles, Attributed pay the hero, exact money', s.hero === 'Attributed pay' && s.values['Attributed pay'] === aedOf(e.totals.attributed)
+      && s.values['Measured fares'] === aedOf(e.totals.fares) && s.values['Drivers paid'] === n(e.attributed.length), JSON.stringify(s.values));
+    check('no tile wears a tone (a fare coverage is a level), none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const c = await chips(page);
+    check('a channel is a swatch and an ink label; the basis chip carries no tone', c.pchips === e.by_platform.length + e.attributed.length
+      && c.pills.every((p) => !/\b(ok|warn|bad)\b/.test(p)), JSON.stringify(c));
+    const perSvg = await page.evaluate(() => [...([...document.querySelectorAll('#view .panel')].find((p) => p.querySelector('h3')?.textContent === 'Day by day')?.querySelectorAll('svg') || [])]
+      .filter((g) => g.querySelector('path, rect')).map((g) => /--mk-fill/.test(g.outerHTML)));
+    check('both day-by-day series in the job token, still two charts', perSvg.length >= 2 && perSvg.every(Boolean), JSON.stringify([perSvg, c.dayHtml]));
+    check('both tables, the payout-period caveat and the colophon kept', s.heads.includes('By channel') && s.heads.includes('By driver')
+      && /payout period/.test(await txtOf(page, '#view')) && /channel/.test(s.colophon), s.colophon);
+    await ctx.close();
+  }
+  {
+    /* Nothing to attribute and nothing priced (synthetic): "AED 0.00" is not
+       a measurement — both tiles absent with the reason. */
+    const none = (q, real) => ({ ...real, attributed: [], totals: { ...real.totals, attributed: 0, fares: 0, priced_bookings: 0, fare_coverage_pct: null } });
+    const { ctx, page } = await open('arkiv', H, { fixtures: { '/api/vehicle/earnings': none } });
+    const s = await shape(page);
+    check('attributed pay absent: no payout overlaps this car — never AED 0.00', /no driver payout overlaps this vehicle/.test(s.na['Attributed pay'] || '') && s.hero === 'Attributed pay', JSON.stringify([s.na, s.hero]));
+    check('measured fares absent: none of its bookings reports a fare', /none of its [\d,]+ bookings reports a fare/.test(s.na['Measured fares'] || ''), JSON.stringify(s.na));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', H, { width: 390 });
+    check('#vehicle/earnings at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

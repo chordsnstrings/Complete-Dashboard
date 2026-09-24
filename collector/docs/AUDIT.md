@@ -2053,3 +2053,11 @@ Two people held the car across Bolt, Uber and Yango. Every platform cell is a sw
 Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p61/`). No page error, no sideways scroll, and the fils scan is clean.
 
 The day replayed is 24 Sept: 141 fixes with a position, 200 km between fixes, and 138 km with a passenger (69%, by FMS's live seat count). The map's lines are still map.js's grey and dashed; that changes with #map. The sandbox has no route to the map tiles, so the base map is blank.
+
+### #vehicle/earnings — 2026-09-24
+
+Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p62/`). No page error, no sideways scroll, and the fils scan is clean.
+
+* Attributed pay: AED 14,443.18, the same figure the overview's Money in names as attributed from payouts.
+* Measured fares: AED 24,064.90 on 408 of 448 bookings. That is the same figure P59's day-by-day caption now names.
+* Fare coverage: 91%. Drivers paid: 3.

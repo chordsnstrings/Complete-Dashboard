@@ -895,8 +895,14 @@ async function tabMovement(root, plate) {
    They are different quantities and adding them would produce a third that
    means nothing — so the page shows both, says which is which, and shows what
    share of the bookings each one covers. */
+/* Under the page contract (plan §4 #vehicle/earnings): all tiles, both
+   tables and both charts kept — the tiles as the 00 band, untoned (a fare
+   coverage is a level), exact money; a channel is a swatch and an ink label,
+   never a pill; the two day-by-day charts stay two charts. */
 async function tabEarnings(root, plate) {
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
   const chP = panel('By channel', 'Fares are measured per trip; attributed pay is a share of a driver payout'); g.append(chP.panel);
   const drvP = panel('By driver', 'Whose payout, and how much of it this vehicle earned'); g.append(drvP.panel);
@@ -906,7 +912,7 @@ async function tabEarnings(root, plate) {
   const e = await qAll('/api/vehicle/earnings', { plate });
   const t = e.totals;
 
-  kpiHost.replaceWith(kpiRow([
+  const EARN_TILES = [
     /* Which channels' payouts are IN this figure, and which are deliberately
        out. `attributed_earnings` and `accounted_payouts` differ by exactly
        Yango's payout, because Yango prices per trip AND pays out — counting
@@ -925,7 +931,19 @@ async function tabEarnings(root, plate) {
       sub: `${fmt(t.priced_platforms)} of ${fmt(t.platforms)} channels price per trip`,
       tone: t.fare_coverage_pct == null ? null : t.fare_coverage_pct >= 80 ? 'good' : t.fare_coverage_pct >= 30 ? 'warn' : 'critical' },
     { label: 'Drivers paid', value: fmt(e.attributed.length), sub: 'contributed pay to this asset' },
-  ]));
+  ];
+  if (ak) {
+    kpiHost.remove();
+    /* "AED 0.00" is not a measurement when nothing was there to measure: no
+       payout overlapping this car, or no booking carrying a fare. Those two
+       tiles go ABSENT with the reason the tables below give in words. */
+    const why = {
+      'Attributed pay': !e.attributed.length && 'no driver payout overlaps this vehicle in this window — its channels price per trip, or the payouts for these dates are not collected yet',
+      'Measured fares': !t.priced_bookings && `none of its ${fmt(t.bookings)} bookings reports a fare`,
+      'Fare coverage': t.fare_coverage_pct == null && 'no booking on this vehicle reports a fare',
+    };
+    glance(AKB.tilesHost, bandTiles(EARN_TILES.map((x) => (why[x.label] ? { label: x.label, na: why[x.label], ...(x.label === 'Attributed pay' ? { hero: true } : {}) } : x))).tiles);
+  } else kpiHost.replaceWith(kpiRow(EARN_TILES));
 
   /* The sentence that stops the two columns being read as one. Without it the
      smaller number looks like the answer and the larger like a duplicate. */
@@ -939,7 +957,7 @@ async function tabEarnings(root, plate) {
   }));
   if (!byChannel.length) chP.body.append(note('No bookings for this vehicle in this window.'));
   else chP.body.append(tableFrom(byChannel, [
-    { label: 'Channel', key: 'platform', render: (r) => pill(sourceLabel(r.platform)) },
+    { label: 'Channel', key: 'platform', render: (r) => (ak ? `<span class="pchip">${swatch(r.platform)}${esc(sourceLabel(r.platform))}</span>` : pill(sourceLabel(r.platform))) },
     { label: 'Bookings', key: 'bookings', num: true },
     { label: 'Measured fares', key: 'fares', num: true,
       render: (r) => (r.fares != null ? money(r.fares) : '—') },
@@ -957,7 +975,7 @@ async function tabEarnings(root, plate) {
   } else {
     drvP.body.append(tableFrom(e.attributed, [
       { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
-      { label: 'Channel', key: 'platform', render: (r) => pill(sourceLabel(r.platform)) },
+      { label: 'Channel', key: 'platform', render: (r) => (ak ? `<span class="pchip">${swatch(r.platform)}${esc(sourceLabel(r.platform))}</span>` : pill(sourceLabel(r.platform))) },
       { label: 'Attributed', key: 'attributed', num: true, render: (r) => money(r.attributed) },
       /* Named for the period it counts. "Trips here 288" was the trip count of
          the whole PAYOUT PERIOD, not of the window — the Drivers tab said 171
@@ -974,7 +992,7 @@ async function tabEarnings(root, plate) {
          so the share is the weakest kind of inference this page makes. Marking
          it is the difference between a number and a number you can act on. */
       { label: 'Basis', key: 'any_even_split',
-        render: (r) => pill(r.any_even_split ? 'even split' : 'by trips', r.any_even_split ? 'warn' : 'ok') },
+        render: (r) => pill(r.any_even_split ? 'even split' : 'by trips', ak ? null : r.any_even_split ? 'warn' : 'ok') },
     ], { compact: true, sortable: true, sortId: 'vattr', defaultSort: { key: 'attributed', dir: 'desc' } }));
     drvP.body.append(el('p', 'cap',
       'Attributed pay is a share of that driver’s payout for the period, split across the vehicles they '
@@ -992,9 +1010,10 @@ async function tabEarnings(root, plate) {
     const a = el('div'); const b = el('div');
     dayP.body.append(el('p', 'cap', 'Attributed pay — a share of driver payouts, by day'), a,
       el('p', 'cap', 'Measured fares — what riders paid on this vehicle’s own trips'), b);
-    areaChart(a, e.daily, { x: 'day', y: 'attributed', valueFmt: (v) => money(v) });
-    barChart(b, e.daily, { x: 'day', y: 'fares', label: 'Measured fares', valueFmt: (v) => money(v) });
+    areaChart(a, e.daily, { x: 'day', y: 'attributed', valueFmt: (v) => money(v), ...(ak ? { color: '--mk-fill' } : {}) });
+    barChart(b, e.daily, { x: 'day', y: 'fares', label: 'Measured fares', valueFmt: (v) => money(v), ...(ak ? { color: '--mk-fill' } : {}) });
   }
+  if (ak) pageFoot({ colophon: [windowLabel(), countOf(e.by_platform.length, 'channel')] }, root);
 }
 
 async function tabSafety(root, plate) {
