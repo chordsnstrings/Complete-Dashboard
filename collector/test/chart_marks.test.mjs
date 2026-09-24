@@ -710,6 +710,35 @@ const SC = async ([w]) => {
     .filter((b) => b.left < sb.left - 0.5 || b.right > sb.right + 0.5).map((b) => [b.left - sb.left, b.right - sb.right]);
   return { vb: svg.getAttribute('viewBox'), dots, ref: ref && cs(ref).strokeDasharray, inside: out.length === 0, out };
 };
+/* A reference line steeper than the box. It was drawn to the right edge with
+   its height clamped to the top — a different slope (#unit/assets drew AED
+   3.09 a km at 2.50). Measured in the chart's own coordinates: the line's
+   end must sit on the slope it was given, whichever edge it leaves by. */
+const STEEP = async ([w]) => {
+  const c = await import('/charts.js');
+  document.querySelector('#rhost')?.remove();
+  const host = document.createElement('div'); host.id = 'rhost'; host.className = 'panel';
+  host.style.cssText = `width:${w}px;position:absolute;left:0;top:0`;
+  document.body.append(host);
+  const pts = [{ p: 'A', km: 8000, money: 4000 }, { p: 'B', km: 1000, money: 20000 }];
+  c.scatter(host, pts, { x: 'km', y: 'money', label: 'p', xLabel: 'km', yLabel: 'AED', refLine: { slope: 5 } });
+  const svg = host.querySelector('svg');
+  const ref = svg.querySelector('.sc-ref');
+  const dot = (p) => [...svg.querySelectorAll('circle')].map((d) => [+d.getAttribute('cx'), +d.getAttribute('cy')])[p];
+  /* Two dots fix both axes' scales: A = (8000, 4000), B = (1000, 20000). */
+  const [ax, ay] = dot(0), [bx, by] = dot(1);
+  const pxPerKm = (ax - bx) / 7000, pxPerAed = (ay - by) / 16000;
+  const [x1, y1, x2, y2] = ['x1', 'y1', 'x2', 'y2'].map((k) => +ref.getAttribute(k));
+  const slope = ((y1 - y2) / pxPerAed) / ((x2 - x1) / pxPerKm); // screen y runs down
+  return { slope: Math.round(slope * 100) / 100, topY: Math.min(...[...svg.querySelectorAll('.gl')].map((g) => +g.getAttribute('y1'))), y2 };
+};
+for (const skin of ['classic', 'arkiv']) {
+  const { ctx, page } = await open(skin);
+  const st = await page.evaluate(STEEP, [860]);
+  check(`${skin}: a reference line steeper than the box keeps its slope and ends on the top edge`,
+    st.slope === 5 && Math.abs(st.y2 - st.topY) < 0.5, JSON.stringify(st));
+  await ctx.close();
+}
 for (const skin of ['classic', 'arkiv']) {
   const { ctx, page } = await open(skin);
   const r = await page.evaluate(SC, [860]);

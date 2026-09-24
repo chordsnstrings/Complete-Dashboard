@@ -1377,9 +1377,16 @@ export function scatter(host, data, opts = {}) {
       txt(gx, H - 22, xFmt(v), 'axis', 'middle'));
   });
   // The line the caller's own caption promises, when it supplies the slope.
+  /* A line steeper than the box leaves through the TOP, not the right edge.
+     It was drawn to the right edge with its height clamped to the top, which
+     is a different slope: #unit/assets' AED 3.09 a km over an 8,000 km axis
+     and an AED 20,000 one was drawn at 2.50, and a car on the fleet's rate
+     sat visibly above "the fleet's rate". It now ends where it meets the top.
+     A line that fits (every caller before this one) is drawn as it was. */
   if (refLine && Number.isFinite(+refLine.slope)) {
+    const over = (xTop * +refLine.slope) / yTop;
     svg.append(mk('line', { x1: pl, y1: pt + ih,
-      x2: pl + iw, y2: pt + ih - ih * Math.min(1, (xTop * +refLine.slope) / yTop),
+      x2: over > 1 ? pl + iw / over : pl + iw, y2: pt + ih - ih * Math.min(1, over),
       stroke: 'var(--grey)', 'stroke-width': 1, 'stroke-dasharray': '4 3', class: 'sc-ref' }));
   }
   data.forEach((d) => {

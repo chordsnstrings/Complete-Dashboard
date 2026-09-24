@@ -3061,3 +3061,9 @@ Not adopted on #action: the fleet-wide rule and cost charts (#insights owns them
 | test | what changed | state | proof |
 |---|---|---|---|
 | `test/arkiv_classic_frozen.test.mjs` | Under the full suite (321 files, several Chromium tests at once) it died with a Playwright `TimeoutError` at 70 s and reported no tally — a crash that reads like a failure of the old skin. It now waits for `#nav a` to be attached, gives each page 120 s, settles for up to 40 s and says `<route> did not settle` when it does not, retries a route once, reports a route it could not capture as a failed check ("<route>: captured") rather than a crash, and runs two routes at a time (`CONC`) | **written** | Suite run of 2026-09-24 (before this change): 321 files, 10,713 assertions, the golden test the one failing file (no tally). After: the test alone, 126 passed, 0 failed. The retries change nothing a hash compares |
+
+### S2 · shared: scatter's reference line keeps its slope (its own commit, ahead of #unit)
+
+| component | what changed | state | proof |
+|---|---|---|---|
+| charts.js `scatter` `refLine` | A line steeper than the box was drawn to the right edge with its height clamped to the top — a different slope. #unit/assets under the contract draws the fleet's AED 3.09 a km over an 8,000 km axis and an AED 20,000 one, and it came out at 2.50, so a car on the fleet's rate sat above "the fleet's rate". The line now ends where it meets the top edge. A line that fits the box is drawn exactly as before; no old-skin page passes a `refLine` | **written** | `test/chart_marks.test.mjs` §7 (2, both skins), measured in the chart's own coordinates from two dots. Revert — the clamped end back: both fail (`"slope":3` against 5), restored and md5-checked |
