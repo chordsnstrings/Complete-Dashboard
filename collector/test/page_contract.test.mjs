@@ -499,6 +499,32 @@ console.log('\n5c · a long hero figure stays on one line at 390');
   await ctx.close();
 }
 
+/* ── 5d · ruling 7: the verdict's figure is not repeated as a tile ─────────── */
+console.log('\n5d · notRepeated(): the tile printing the verdict\'s figure is handed back, not drawn');
+{
+  const { ctx, page } = await open('arkiv', { width: 1440, hash: 'settings' });
+  const r = await page.evaluate(async () => {
+    const u = await import('/ui.js');
+    const tiles = [{ label: 'Money already earned', value: 'AED 66,693.00', sub: 'measured', hero: true },
+      null, { label: 'Things to do', value: '7' }, { label: 'Modelled upside', na: 'no rate set' }];
+    const a = u.notRepeated(tiles, 'AED 66,693.00');
+    const b = u.notRepeated(tiles, 'AED 1.00');
+    const c = u.notRepeated(tiles, null);
+    const d = u.notRepeated([{ label: 'X', na: 'AED 5.00' }], 'AED 5.00');
+    const g = document.createElement('div'); document.body.append(g);
+    u.glance(g, a.tiles);
+    return { a: [a.tiles.map((t) => t.label), a.dropped?.label], b: [b.tiles.length, b.dropped],
+      c: [c.tiles.length, c.dropped], d: d.tiles.length, hero: g.querySelector('.is-hero .l')?.textContent };
+  });
+  check('the tile whose value is the verdict\'s figure is taken out and handed back', JSON.stringify(r.a)
+    === JSON.stringify([['Things to do', 'Modelled upside'], 'Money already earned']), JSON.stringify(r.a));
+  check('…the next tile becomes the hero', r.hero === 'Things to do', r.hero);
+  check('no match, or no figure: nothing is dropped', r.b[0] === 3 && r.b[1] === null && r.c[0] === 3 && r.c[1] === null,
+    JSON.stringify([r.b, r.c]));
+  check('an ABSENT tile is never matched — a reason is not a figure', r.d === 1, String(r.d));
+  await ctx.close();
+}
+
 /* ── 6 · tableFrom pairs ─────────────────────────────────────────────────── */
 console.log('\n6 · tableFrom: paired headers');
 {

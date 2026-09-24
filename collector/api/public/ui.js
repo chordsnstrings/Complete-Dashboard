@@ -2626,6 +2626,25 @@ export function glance(host, tiles) {
   return host;
 }
 
+/* RULING 7 (plan §1): the verdict is 00's statement, and its figure is not
+   repeated as a tile. Two converted pages did repeat it — #playbook's verdict
+   and its "Money already earned" hero printed the same AED figure one above
+   the other, and #revenue's "Accounted for" did whenever its verdict was the
+   accounted total — because the verdict's figure is chosen at run time and a
+   page cannot know in advance which tile it will match. So the page passes
+   the figure it actually gave verdict(), and the tile printing exactly that
+   is taken out of the list and handed back, for the page to keep its
+   sub-line in words (nothing it said is lost). A tile that is ABSENT (`na`)
+   is never matched: a reason is not a figure. No tile matches → nothing is
+   dropped. */
+export function notRepeated(tiles, figure) {
+  const list = (tiles || []).filter(Boolean);
+  const f = figure == null ? '' : String(figure).trim();
+  const i = f ? list.findIndex((t) => !t.na && String(t.value ?? '').trim() === f) : -1;
+  return i < 0 ? { tiles: list, dropped: null }
+    : { tiles: list.filter((_, j) => j !== i), dropped: list[i] };
+}
+
 /* ── a numbered section head ───────────────────────────────────────────────
    For a band a page builds by hand — 00 AT A GLANCE and the † absence band.
    An ordinary panel() is already numbered: arkiv.css prints 01, 02… before
