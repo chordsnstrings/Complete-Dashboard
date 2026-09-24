@@ -1498,3 +1498,11 @@ against 20,293 under the contract: the same judgements, the older ones of
 each claim folded into a closed disclosure. Found and fixed before commit:
 segment labels printed the raw platform key ("bolt") where the cut is a
 platform; they use the channel's name.
+
+### #action — 2026-09-24
+
+Production data, an idle-vehicle finding and a silent-tracker finding, both
+skins, 1440 and 390, light and dark (scratchpad `pagephase/shots/action/`).
+No error, no sideways scroll, one highlight (the hero; no † cell carries a
+figure to size). The silent-tracker page draws all 17 open findings of its
+rule with this one marked, which the old page could say only as a table.

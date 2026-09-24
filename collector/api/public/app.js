@@ -2276,42 +2276,46 @@ V.corridors = async (root) => renderCorridors(root);
    specific problem could not be sent to the person who has to fix it — and the
    entity it named was plain text, so a finding about a vehicle dead-ended at
    the vehicle's name. */
-V.action = async (root) => {
-  const code = state.param, entityId = state.sub === '-' ? null : state.sub;
-  root.innerHTML = '';
-  loading(root);
-  /* Ask for THIS rule, not for the whole list.
-     /api/insights is capped at 200 over 204 findings, and this page fetched
-     all of them on every load and then filtered client-side — so four genuinely
-     open findings fell off the end and their pages announced "that finding is
-     no longer open", which is the opposite of true. The narrowed request is
-     also two hundred rows lighter on every action-page load. Falls back to the
-     unfiltered list where the endpoint does not accept `code` yet. */
+/* One finding, as a page (#action/<code>/<entity>). Two orders until the
+   operator flips the default skin: the old skin's (actionClassic) and the
+   page contract (actionContract). The narrowed fetch, the not-open states,
+   the tiles, the people panel and the sibling columns are shared below. */
+V.action = async (root) => (contract() ? actionContract(root) : actionClassic(root));
+
+const ACTION_ENTITY_VIEW = { vehicle: 'vehicle', driver: 'driver', partner: 'property' };
+/* Ask for THIS rule, not for the whole list.
+   /api/insights is capped at 200 over 204 findings, and this page fetched
+   all of them on every load and then filtered client-side — so four genuinely
+   open findings fell off the end and their pages announced "that finding is
+   no longer open", which is the opposite of true. The narrowed request is
+   also two hundred rows lighter on every action-page load. Falls back to the
+   unfiltered list where the endpoint does not accept `code` yet. */
+async function actionRows(code, entityId) {
   let page = await api(`/api/insights?code=${encodeURIComponent(code || '')}`).catch(() => null);
-  let narrowed = !!page && (page.insights || []).every((r) => r.code === code);
+  const narrowed = !!page && (page.insights || []).every((r) => r.code === code);
   if (!narrowed) { page = await api('/api/insights').catch(() => ({ insights: [] })); }
   const ofCode = (page.insights || []).filter((r) => r.code === code);
   const rows = ofCode.filter((r) => entityId == null || String(r.entity_id) === String(entityId));
-  root.innerHTML = '';
-  if (!rows.length) {
-    /* Absent from a TRUNCATED list is not the same as closed. */
-    const cut = page.truncated && !narrowed;
-    root.append(note(cut
-      ? `This finding is not in the first ${fmt(page.limit)} findings the list returns, and the list is `
-        + 'capped — so it may well still be open. It could not be looked up directly because the '
-        + 'endpoint does not yet accept a rule name.'
-      : 'That finding is no longer open. Either it was resolved and the engine has stopped '
-        + 'raising it, or the collection window it was computed over has moved on.', cut ? 'warn' : null));
-    root.append(el('p', 'cap', `Looking for ${esc(code || '?')}${entityId ? ` on ${esc(entityId)}` : ''}.`));
-    const back = el('p', 'cap');
-    back.innerHTML = `<a class="lnk" href="${href('insights')}">Back to the action list</a>`;
-    root.append(back);
-    return { title: 'Finding' };
-  }
-  const r = rows[0];
-  const ENTITY_VIEW = { vehicle: 'vehicle', driver: 'driver', partner: 'property' };
-  const view = ENTITY_VIEW[r.entity_type];
-  root.append(kpiRow([
+  return { page, narrowed, ofCode, rows };
+}
+function actionNotOpen(root, page, narrowed, code, entityId) {
+  /* Absent from a TRUNCATED list is not the same as closed. */
+  const cut = page.truncated && !narrowed;
+  root.append(note(cut
+    ? `This finding is not in the first ${fmt(page.limit)} findings the list returns, and the list is `
+      + 'capped — so it may well still be open. It could not be looked up directly because the '
+      + 'endpoint does not yet accept a rule name.'
+    : 'That finding is no longer open. Either it was resolved and the engine has stopped '
+      + 'raising it, or the collection window it was computed over has moved on.', cut ? 'warn' : null));
+  root.append(el('p', 'cap', `Looking for ${esc(code || '?')}${entityId ? ` on ${esc(entityId)}` : ''}.`));
+  const back = el('p', 'cap');
+  back.innerHTML = `<a class="lnk" href="${href('insights')}">Back to the action list</a>`;
+  root.append(back);
+  return { title: 'Finding' };
+}
+const actionModelled = (r) => r.impact_kind === 'modelled' || r.code === 'idle_vehicle';
+function actionTiles(r, view) {
+  return [
     /* These arrive as the rule engine's own enum values — critical, compliance,
        vehicle — and were printed as tile VALUES, the largest text on the page,
        in lowercase. */
@@ -2332,39 +2336,70 @@ V.action = async (root) => {
       sub: r.window_start ? `over ${dayStr(r.window_start)} → ${dayStr(r.window_end)}` : 'current state' },
     r.impact_aed
       ? { label: 'Sized at', value: money(r.impact_aed),
-          sub: (r.impact_kind === 'modelled' || r.code === 'idle_vehicle')
+          sub: actionModelled(r)
             ? 'a modelled holding cost, not a measurement'
             : 'as measured',
-          tone: (r.impact_kind === 'modelled' || r.code === 'idle_vehicle') ? 'warn' : null }
+          tone: actionModelled(r) ? 'warn' : null }
       : null,
     r.metric != null ? { label: 'Measured at', value: fmt(r.metric, 2),
       sub: 'the figure the rule fired on' } : null,
     r.fleet_id ? { label: 'Fleet', value: sourceLabel(r.fleet_id) } : null,
-  ]));
+  ];
+}
+/* The people the finding is about, immediately under the instruction that
+   asks somebody to contact them. Above the sibling table deliberately: "who
+   do I ring" is the question this page is opened with, and it was answering
+   it with a number. */
+function actionPeople(r, key = null) {
+  const refs = Array.isArray(r.refs) ? r.refs.filter((x) => x && x.driver_ext_id) : [];
+  if (!refs.length) return null;
+  const resolved = peopleResolved(refs);
+  const who = panel(countOf(refs.length, 'driver') + ' named by this finding',
+    resolved === refs.length
+      ? 'Everything needed to make the call, from the record we already hold.'
+      : resolved
+        ? `${fmt(resolved)} of ${fmt(refs.length)} could be resolved to a person — the rest are `
+          + 'accounts the rule saw that no channel has filed a name or a contact for.'
+        : 'The rule named these accounts; no channel has filed a name or a contact for any of '
+          + 'them, so what follows is what we hold and no more.', key);
+  who.body.append(peopleCards(refs));
+  return who;
+}
+function siblingCols() {
+  return [
+    { label: 'About', key: 'entity_id',
+      render: (x) => (ACTION_ENTITY_VIEW[x.entity_type]
+        ? entity(ACTION_ENTITY_VIEW[x.entity_type], x.entity_id, x.entity_id) : esc(x.entity_id || '—')) },
+    { label: 'Finding', key: 'title',
+      render: (x) => `<a class="ent" href="${href('action', x.code, x.entity_id || '-')}">${esc(x.title)}</a>` },
+    { label: 'Severity', key: 'severity', render: (x) => pill(x.severity, { critical: 'bad', warning: 'warn' }[x.severity]) },
+    { label: 'Sized at', key: 'impact_aed', num: true,
+      render: (x) => (x.impact_aed
+        ? `${money(x.impact_aed)}${x.impact_kind === 'modelled' || x.code === 'idle_vehicle'
+          ? '<span class="dim" title="a modelled figure, not a measurement"> modelled</span>' : ''}`
+        : '<span class="ent-off" title="this rule does not size its findings in money">—</span>') },
+    { label: 'Computed', key: 'computed_at', render: (x) => dtStr(x.computed_at) },
+  ];
+}
+
+async function actionClassic(root) {
+  const code = state.param, entityId = state.sub === '-' ? null : state.sub;
+  root.innerHTML = '';
+  loading(root);
+  const { page, narrowed, ofCode, rows } = await actionRows(code, entityId);
+  root.innerHTML = '';
+  if (!rows.length) return actionNotOpen(root, page, narrowed, code, entityId);
+  const r = rows[0];
+  const view = ACTION_ENTITY_VIEW[r.entity_type];
+  root.append(kpiRow(actionTiles(r, view)));
   const why = panel('What we found', 'The evidence behind this flag.');
   why.body.innerHTML = `<p style="margin:0">${esc(r.detail || '')}</p>`;
   root.append(why.panel);
   const act = panel('What to do', 'The smallest useful next step.');
   act.body.innerHTML = `<p style="margin:0">${esc(r.action || '')}</p>`;
   root.append(act.panel);
-  /* The people the finding is about, immediately under the instruction that
-     asks somebody to contact them. Above the sibling table deliberately: "who
-     do I ring" is the question this page is opened with, and it was answering
-     it with a number. */
-  const refs = Array.isArray(r.refs) ? r.refs.filter((x) => x && x.driver_ext_id) : [];
-  if (refs.length) {
-    const resolved = peopleResolved(refs);
-    const who = panel(countOf(refs.length, 'driver') + ' named by this finding',
-      resolved === refs.length
-        ? 'Everything needed to make the call, from the record we already hold.'
-        : resolved
-          ? `${fmt(resolved)} of ${fmt(refs.length)} could be resolved to a person — the rest are `
-            + 'accounts the rule saw that no channel has filed a name or a contact for.'
-          : 'The rule named these accounts; no channel has filed a name or a contact for any of '
-            + 'them, so what follows is what we hold and no more.');
-    who.body.append(peopleCards(refs));
-    root.append(who.panel);
-  }
+  const who = actionPeople(r);
+  if (who) root.append(who.panel);
   if (view && r.entity_id) {
     root.append(note(`Open the ${r.entity_type} to see everything else known about it — this finding `
       + 'is one reading, and the page beside it is the rest of them.'));
@@ -2380,24 +2415,165 @@ V.action = async (root) => {
     const more = panel('The same rule elsewhere',
       `${countOf(siblings.length, 'other open finding')} from this rule — one bad asset and a fleet-wide `
       + 'pattern need different responses, and the count is how you tell them apart.');
-    more.body.append(tableFrom(siblings, [
-      { label: 'About', key: 'entity_id',
-        render: (x) => (ENTITY_VIEW[x.entity_type]
-          ? entity(ENTITY_VIEW[x.entity_type], x.entity_id, x.entity_id) : esc(x.entity_id || '—')) },
-      { label: 'Finding', key: 'title',
-        render: (x) => `<a class="ent" href="${href('action', x.code, x.entity_id || '-')}">${esc(x.title)}</a>` },
-      { label: 'Severity', key: 'severity', render: (x) => pill(x.severity, { critical: 'bad', warning: 'warn' }[x.severity]) },
-      { label: 'Sized at', key: 'impact_aed', num: true,
-        render: (x) => (x.impact_aed
-          ? `${money(x.impact_aed)}${x.impact_kind === 'modelled' || x.code === 'idle_vehicle'
-            ? '<span class="dim" title="a modelled figure, not a measurement"> modelled</span>' : ''}`
-          : '<span class="ent-off" title="this rule does not size its findings in money">—</span>') },
-      { label: 'Computed', key: 'computed_at', render: (x) => dtStr(x.computed_at) },
-    ], { sortable: true, sortId: 'sibling' }));
+    more.body.append(tableFrom(siblings, siblingCols(), { sortable: true, sortId: 'sibling' }));
     root.append(more.panel);
   }
   return { title: r.title };
+}
+
+/* ── #action under the page contract (plan §4 #action) ─────────────────────
+     00  AT A GLANCE — the size as the hero where the rule sizes one (a
+         modelled size carries the hatch swatch and says it is modelled),
+         otherwise the figure the rule fired on — now saying WHAT it is,
+         per rule, from the metric each rule writes (src/insights.js); a
+         tile for the same rule elsewhere (count, money, fleets).
+     01  What we found / What to do — verbatim, side by side.
+     —   the people it names, directly under "what to do" (who to ring).
+     02  The same rule on every entity — the rule's figure per entity, this
+         one marked, where the figure varies between them.
+     03  The same rule elsewhere — the table, every sibling, sortable.
+     †   four cells.
+   The severity tile keeps its tone: under the skin that is ruling 1's dot
+   (critical solid, warning hollow) beside ink digits — the plan's "becomes
+   ink". NOT ADOPTED: the fleet-wide rule and cost charts (#insights owns
+   them); the idle car's days-since-trip, lifetime trips and tracker hours
+   (the rule writes them only into its sentence, and parsing prose was
+   rejected — src/insights.js would have to write them into refs); "Who it
+   is written for"; "more than 200 open" (false: ?code= is the complete set). */
+const ACTION_METRIC = {
+  idle_vehicle: ['bookings in the last 14 days', (v) => fmt(v)],
+  vehicle_dormant: ['days since the car last sent a signal', (v) => fmt(v)],
+  stale_tracker: ['hours since the tracker last filed a position', (v) => `${fmt(v)} h`],
+  licence_expired: ['days to the licence date — negative is past', (v) => fmt(v)],
+  licence_expiring: ['days to the licence date', (v) => fmt(v)],
+  vehicle_doc_expired: ['days to the document\'s date — negative is past', (v) => fmt(v)],
+  vehicle_doc_expiring: ['days to the document\'s date', (v) => fmt(v)],
+  cancellation_rate: ['share of jobs cancelled', (v) => `${fmt(v * 100, 1)}%`],
+  tracker_feed_dark: ['trackers on the feed that stopped together', (v) => fmt(v)],
+  volume_trend: ['change on the base month', (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmt(Math.abs(v) * 100, 1)}%`],
+  unsafe_driving: ['harsh events per 100 km', (v) => fmt(v, 1)],
+  low_utilisation: ['share of online hours spent on a trip', (v) => `${fmt(v * 100, 1)}%`],
+  drivers_online_no_trips: ['drivers online who completed nothing', (v) => fmt(v)],
+  below_target_acceptance: ['drivers Uber named', (v) => fmt(v)],
+  above_target_cancellation: ['drivers Uber named', (v) => fmt(v)],
+  low_tip_rate: ['tips as a share of fares', (v) => `${fmt(v * 100, 1)}%`],
+  partner_concentration: ['the leading partner\'s share of partner trips', (v) => `${fmt(v * 100, 1)}%`],
 };
+const ACTION_NOT = {
+  idle_vehicle: 'The rule writes 0 for every car it flags: it is the booking count that fired it, not a measurement '
+    + 'of how long the car has stood. Days since its last trip and its tracker\'s last report are in the sentence '
+    + 'above, not in a field.',
+  stale_tracker: 'Hours since the TRACKER filed — not hours the car was off the road. A car can be working with a dead tracker.',
+  vehicle_dormant: 'Days since any signal — not proof the car left the fleet; a repair or a lay-up looks the same.',
+  licence_expired: 'Days to the date on the record — not proof the driver drove on it after it passed.',
+  vehicle_doc_expired: 'Days to the date on the record — not proof the car worked after it passed.',
+  cancellation_rate: 'A share of jobs — not who ended them. Rider and driver cancellations are counted together here.',
+};
+async function actionContract(root) {
+  const gen = currentGen();
+  const code = state.param, entityId = state.sub === '-' ? null : state.sub;
+  root.innerHTML = '';
+  loading(root);
+  const { page, narrowed, ofCode, rows } = await actionRows(code, entityId);
+  if (!alive(gen)) return { title: 'Finding' };
+  root.innerHTML = '';
+  if (!rows.length) return actionNotOpen(root, page, narrowed, code, entityId);
+  const r = rows[0];
+  const view = ACTION_ENTITY_VIEW[r.entity_type];
+  const siblings = ofCode.filter((x) => x !== r
+    && !(entityId != null && String(x.entity_id) === String(entityId)));
+  const metric = ACTION_METRIC[r.code];
+
+  /* ── 00 ──────────────────────────────────────────────────────────────── */
+  const band = el('section', 'cband');
+  const tiles = el('div');
+  band.append(secHead('00', 'At a glance', r.window_start
+    ? `over ${dayStr(r.window_start)} → ${dayStr(r.window_end)}` : 'the current state — not windowed'), tiles);
+  root.append(band);
+  const base = Object.fromEntries(actionTiles(r, view).filter(Boolean).map((t) => [t.label, t]));
+  const sized = base['Sized at'] && { ...base['Sized at'], tone: null, hero: true,
+    html: `${actionModelled(r) ? '<i class="sw sw-proj" style="background:var(--ink)" aria-hidden="true"></i>' : ''}${esc(money(r.impact_aed))}` };
+  const measured = base['Measured at'] && { ...base['Measured at'], hero: !sized,
+    value: metric ? metric[1](Number(r.metric)) : fmt(r.metric, 2),
+    sub: metric ? metric[0] : 'the figure the rule fired on' };
+  const sibAed = siblings.reduce((a, x) => a + (Number(x.impact_aed) || 0), 0);
+  const sibModelled = siblings.some((x) => actionModelled(x));
+  const fleets = [...siblings.reduce((m, x) => m.set(x.fleet_id || '—', (m.get(x.fleet_id || '—') || 0) + 1), new Map())];
+  glance(tiles, [
+    sized, measured,
+    base.Severity, base.Category, base.About, base.Computed, base.Fleet,
+    { label: 'The same rule elsewhere', value: fmt(siblings.length),
+      sub: siblings.length ? [sibAed ? `${money(sibAed)} ${sibModelled ? 'modelled' : 'as measured'}` : 'none sized in money',
+        fleets.map(([f, n]) => `${f === '—' ? 'no fleet' : sourceLabel(f)} ${fmt(n)}`).join(' · ')].join(' · ')
+        : 'no other open finding from this rule' },
+  ]);
+
+  /* ── 01 · what we found, what to do — verbatim ───────────────────────── */
+  const g = el('div', 'grid g2'); root.append(g);
+  const why = panel('What we found', 'The evidence behind this flag.', 'act-found');
+  why.body.innerHTML = `<p style="margin:0">${esc(r.detail || '')}</p>`;
+  const act = panel('What to do', 'The smallest useful next step.', 'act-do');
+  act.body.innerHTML = `<p style="margin:0">${esc(r.action || '')}</p>`;
+  g.append(why.panel, act.panel);
+  const who = actionPeople(r, 'act-people');
+  if (who) root.append(who.panel);
+  if (view && r.entity_id) {
+    root.append(note(`Open the ${r.entity_type} to see everything else known about it — this finding `
+      + 'is one reading, and the page beside it is the rest of them.'));
+  }
+
+  /* ── 02 · the same rule on every entity ──────────────────────────────── */
+  const figs = ofCode.filter((x) => hasFig(x.metric));
+  if (new Set(figs.map((x) => Number(x.metric))).size > 1) {
+    const every = panel('The same rule on every entity', null, 'act-every');
+    root.append(every.panel);
+    const sorted = [...figs].sort((a, b) => Math.abs(Number(b.metric)) - Math.abs(Number(a.metric)));
+    const SHOW = 24;
+    hbars(every.body, sorted.slice(0, SHOW).map((x) => ({ label: `${x.entity_id || '—'}${x === r ? ' · this finding' : ''}`,
+      n: Number(x.metric), x })), { valueFmt: (v) => (metric ? metric[1](v) : fmt(v, 2)),
+      legend: sorted.some((x) => Number(x.metric) < 0) ? [['--mk-fill', 'ahead'], ['--mk-neg', 'past']] : null,
+      onClick: (d) => { location.hash = href('action', d.x.code, d.x.entity_id || '-'); } });
+    every.body.append(el('p', 'cap', esc(`${metric ? sentence(metric[0]) : 'The figure the rule fired on'}, for every open finding `
+      + `of this rule — ${countOf(figs.length, 'finding')}${figs.length > SHOW ? `, the ${SHOW} largest drawn` : ''}. Click a bar for its page.`)));
+  }
+
+  /* ── 03 · the same rule elsewhere ────────────────────────────────────── */
+  if (siblings.length) {
+    const more = panel('The same rule elsewhere',
+      `${countOf(siblings.length, 'other open finding')} from this rule — one bad asset and a fleet-wide `
+      + 'pattern need different responses, and the count is how you tell them apart.', 'act-siblings');
+    more.body.append(tableFrom(siblings, siblingCols(), { sortable: true, sortId: 'sibling' }));
+    root.append(more.panel);
+  }
+
+  /* ── † ───────────────────────────────────────────────────────────────── */
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    r.entity_type === 'vehicle'
+      ? { label: 'Whether the car is parked on purpose', fig: null, none: 'Not recorded',
+        why: 'A workshop visit or a car held in reserve is recorded nowhere this product reads, so a car standing '
+          + 'on purpose cannot be told from one nobody is using.' }
+      : null,
+    r.impact_aed
+      ? { label: 'Where the AED comes from', fig: null, none: actionModelled(r) ? 'An assumption' : 'The rule\'s own arithmetic',
+        why: actionModelled(r)
+          ? 'A holding cost per day the server is configured with (VEHICLE_DAY_COST_AED), times the 14 days the rule '
+            + 'looks back — a constant, not a measurement of what this car costs.'
+          : INSIGHT_COST_BASIS[r.code] ? `${sentence(INSIGHT_COST_BASIS[r.code])}.` : 'As the rule computes it; see What we found.' }
+      : { label: 'What it would cost', fig: null, none: 'Not priced',
+        why: 'This rule does not size its findings in money, and the page never invents a number to rank it by.' },
+    { label: 'Whether anyone acted', fig: null, none: 'Not recorded',
+      why: 'A finding carries no acknowledgement and no owner. It leaves the list when its rule stops finding it — '
+        + 'nothing records whether a person acted or the fact simply changed.' },
+    r.metric != null
+      ? { label: 'What the figure is not', fig: null, none: metric ? sentence(metric[0]) : 'The rule\'s figure',
+        why: ACTION_NOT[r.code] || 'The figure the rule fired on, as it computed it — not a measure of what the finding costs.' }
+      : null,
+  ]);
+  pageFoot({ colophon: [r.code, r.entity_id ? `${r.entity_type} ${r.entity_id}` : r.entity_type || 'fleet',
+    r.computed_at ? `computed ${dtStr(r.computed_at)}` : null] }, root);
+  return { title: r.title };
+}
 /* A day is a page. It was a modal titled "Trips on 14 August" that contained a
    driver leaderboard, and could not be linked to. */
 /* Occupancy segments. `#segments/<kind>/<value>` where kind is one of

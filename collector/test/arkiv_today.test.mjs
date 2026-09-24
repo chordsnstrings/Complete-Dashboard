@@ -454,4 +454,59 @@ const anRead = (page) => page.evaluate(() => {
   await ctx.close();
 }
 
+/* ══ #action ═══════════════════════════════════════════════════════════════ */
+console.log('\n#action');
+{
+  /* The rule writes metric 0 for every idle car (src/insights.js); the mock's
+     row leaves it out. */
+  const { ctx, page } = await open('arkiv', 'action/idle_vehicle/L46207', { fixtures: {
+    '/api/insights': (_q, real) => ({ ...real, insights: real.insights.map((x) => (x.code === 'idle_vehicle' ? { ...x, metric: 0 } : x)) }) } });
+  const s = await shape(page);
+  const hero = await page.evaluate(() => ({ sw: !!document.querySelector('#view .kpis.glance .is-hero .n .sw-proj'),
+    title: document.querySelector('#viewTitle')?.textContent || '' }));
+  check('00, what we found and what to do side by side, †', JSON.stringify(s.heads)
+    === JSON.stringify(['At a glance', 'What we found', 'What to do', '† What this page does not know']), JSON.stringify(s.heads));
+  check('a modelled size is the hero, with the hatch swatch and its label', s.hero === 'Sized at'
+    && s.values['Sized at'] === 'AED 1,680.00' && hero.sw && /modelled holding cost/.test(s.subs['Sized at']), JSON.stringify(s.values));
+  check('the figure the rule fired on says what it is, per rule', s.subs['Measured at'] === 'bookings in the last 14 days',
+    s.subs['Measured at']);
+  check('a tile for the same rule elsewhere, zero said as such', s.values['The same rule elsewhere'] === '0'
+    && /no other open finding/.test(s.subs['The same rule elsewhere']), JSON.stringify(s.subs));
+  check('the † band: parked on purpose, where the AED comes from, whether anyone acted, what the figure is not',
+    JSON.stringify(s.abs.map((c) => c.label)) === JSON.stringify(['Whether the car is parked on purpose', 'Where the AED comes from',
+      'Whether anyone acted', 'What the figure is not']) && s.abs[1].fig === 'An assumption', JSON.stringify(s.abs));
+  check('the page is still titled by the finding', /L46207 is reporting but has not earned/.test(hero.title), hero.title);
+  await ctx.close();
+}
+{
+  const stale = [['L82923', 38], ['L11111', 120], ['L22222', 7]].map(([p, h]) => ({ code: 'stale_tracker', severity: h > 72 ? 'critical' : 'warning',
+    category: 'data', entity_type: 'vehicle', entity_id: p, title: `${p} has not reported a position for ${h}h`,
+    detail: 'd', action: 'a', impact_aed: null, metric: h, computed_at: '2026-08-21T09:00:00Z', window_start: null }));
+  const { ctx, page } = await open('arkiv', 'action/stale_tracker/L82923', { fixtures: {
+    '/api/insights': (_q, real) => ({ ...real, insights: [...real.insights.filter((x) => x.code !== 'stale_tracker'), ...stale] }) } });
+  const s = await shape(page);
+  const r = await page.evaluate(() => ({
+    bars: [...document.querySelectorAll('[data-panel="act-every"] .hb .k')].map((k) => k.textContent),
+    sib: document.querySelectorAll('[data-panel="act-siblings"] tbody tr').length }));
+  check('with no size, the figure the rule fired on is the hero, in its own unit', s.hero === 'Measured at'
+    && s.values['Measured at'] === '38 h' && s.subs['Measured at'] === 'hours since the tracker last filed a position', JSON.stringify(s.values));
+  check('02: the same rule on every entity, largest first, this one marked', JSON.stringify(r.bars)
+    === JSON.stringify(['L11111', 'L82923 · this finding', 'L22222']), JSON.stringify(r.bars));
+  check('03: every sibling in the table', r.sib === 2, String(r.sib));
+  check('an unpriced rule says so in the band, never a nought', s.abs.some((c) => c.label === 'What it would cost' && c.fig === 'Not priced'));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'action/nope/-');
+  const t = await page.evaluate(() => document.querySelector('#view').textContent);
+  check('a finding that is not open says so, as before', /no longer open/.test(t), t.slice(0, 120));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('classic', 'action/idle_vehicle/L46207');
+  const s = await shape(page);
+  check('the old skin keeps today\'s page: a kpiRow, no 00, no † band', s.kpiRows === 1 && s.glance === 0 && s.abs.length === 0);
+  await ctx.close();
+}
+
 await done();
