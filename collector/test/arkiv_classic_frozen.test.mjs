@@ -90,18 +90,36 @@ const UNSTABLE = {};
 const browser = await launchChromium();
 const routes = ROUTES.filter((r) => !UNSTABLE[r] && (!ONLY || r.includes(ONLY)));
 
-async function capture(route) {
+/* Under the full suite several browser files run at once, and the first run
+   of this file inside `npm test` died on a Playwright TimeoutError after 70 s
+   (a page load past the default 30 s) with no tally at all. So a capture has
+   generous timeouts, is retried once, and a route that still cannot be
+   captured is a FAILED CHECK naming the route — never a crash that hides
+   every other route's answer. */
+async function capture(route, tries = 2) {
+  try { return await captureOnce(route); } catch (e) {
+    if (tries > 1) return capture(route, tries - 1);
+    return { norm: null, errors: [`capture failed: ${String(e.message).slice(0, 160)}`] };
+  }
+}
+async function captureOnce(route) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block',
     reducedMotion: 'reduce', timezoneId: 'Asia/Dubai', locale: 'en-GB' });
+  try {
+    return await captureIn(ctx, route);
+  } finally { await ctx.close().catch(() => {}); }
+}
+async function captureIn(ctx, route) {
+  ctx.setDefaultTimeout(120_000);
   await ctx.clock.setFixedTime(new RealDate(FIXED));
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e.message).slice(0, 160)));
   await page.goto(`${base}/?ui=desktop&skin=classic#${route}`, { waitUntil: 'load' });
-  await page.waitForSelector('#nav a');
+  await page.waitForSelector('#nav a', { state: 'attached' });
   /* Settled: no skeleton left, fonts in, and two reads a beat apart agree. */
-  let prev = null, html = null;
-  for (let i = 0; i < 40; i++) {
+  let prev = null, html = null, settled = false;
+  for (let i = 0; i < 160; i++) {
     await page.waitForTimeout(250);
     if (await page.$('#view .skel')) continue;
     html = await page.evaluate(async () => {
@@ -112,10 +130,10 @@ async function capture(route) {
         .map((s) => `${s}=${document.querySelector(s)?.textContent ?? ''}`).join('\n');
       return `${head}\n${v.outerHTML}`;
     });
-    if (html === prev) break;
+    if (html === prev) { settled = true; break; }
     prev = html;
   }
-  await ctx.close();
+  if (!settled) throw new Error(`${route} did not settle`);
   /* charts.js ids, renumbered in order of first appearance. */
   const ids = [...new Set([...html.matchAll(/\bid="((?:ht|gh|g|sb)[0-9a-z]{5})\b[^"]*"/g)].map((m) => m[1]))];
   let norm = html;
@@ -133,6 +151,7 @@ const worker = async () => {
   while (queue.length) {
     const r = queue.shift();
     const { norm, errors } = await capture(r);
+    if (norm == null) { check(`${r}: captured`, false, errors[0]); continue; }
     const h = createHash('sha256').update(norm).digest('hex').slice(0, 16);
     got[r] = h;
     if (RECORD) { console.log(`  · ${r} ${h}${errors.length ? ` (page error: ${errors[0]})` : ''}`); continue; }
@@ -142,7 +161,10 @@ const worker = async () => {
     check(`${r}: the old skin renders what it did`, ok, ok ? '' : `${h} ≠ ${want[r]} (written to ${out})`);
   }
 };
-await Promise.all([worker(), worker(), worker(), worker()]);
+/* Two pages at a time by default: npm test runs several browser files at
+   once already. CONC=4 for a lone run is about twice as fast. */
+const CONC = Number(process.env.CONC || 2);
+await Promise.all(Array.from({ length: CONC }, worker));
 
 if (RECORD) {
   const merged = ONLY ? { ...want, ...got } : got;
