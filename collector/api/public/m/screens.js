@@ -946,17 +946,28 @@ async function live(deck, ctx) {
 /* ── Safety and unauthorized ────────────────────────────────────────────── */
 async function safety(deck, ctx) {
   skeleton(deck, 3);
+  const AK = phoneContract();
+  let summaryFailed = false;
   const [sum, byVehRaw] = await Promise.all([
-    q('/api/alerts/summary').catch(() => []),
+    q('/api/alerts/summary').catch(() => { summaryFailed = true; return []; }),
     q('/api/alerts/by-vehicle').catch(() => []),
   ]);
   const byVeh = unwrap(byVehRaw);
   if (!ctx.alive()) return;
   deck.innerHTML = '';
+  /* A SUMMARY THAT DID NOT LOAD IS NOT A WINDOW WITH NO EVENTS. The old
+     screen caught the failure into an empty list and then said "No
+     harsh-driving event in this window — Nothing to review.": a claim of
+     zero, over a figure nobody measured. The redesign says the fetch failed;
+     the old phone keeps its words until the flip (FIX-STATUS names it). */
+  if (AK && summaryFailed) { failed(deck, new Error('The harsh-driving summary could not be fetched.')); return; }
   const total = (sum || []).reduce((a, r) => a + (n(r.n) || 0), 0);
   if (!total) { empty(deck, 'No harsh-driving event in this window', 'Nothing to review.'); return; }
-  lede(deck, { claim: `${fmt(total)} harsh-driving events`,
+  const statement = lede(deck, { claim: `${fmt(total)} harsh-driving events`,
     sub: 'Recorded by the telematics layer. A count on its own says more about how far a car drove than how it was driven.' });
+  /* The statement IS the glance here (ruling 7: its figure is not repeated
+     as a tile), so 00 heads it directly. */
+  if (AK) deck.insertBefore(secHead('00', 'At a glance', WINDOW_NOTE()), statement);
   const c = card('By kind', null);
   bars(c.body, (sum || []).map((r) => ({ label: r.alert_type, n: n(r.n) })), { max: 8 });
   deck.append(c.card);

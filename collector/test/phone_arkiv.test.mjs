@@ -752,6 +752,30 @@ console.log('\n4.6 · Live: 00 with the feed’s own clock, and each car marked 
   await p.close();
 }
 
+console.log('\n4.7 · Safety: the statement as 00, ink bars by kind, and a failed fetch that is not a zero');
+{
+  const sum = ans('/api/alerts/summary?period=month&grain=auto');
+  const total = sum.reduce((a, r) => a + (Number(r.n) || 0), 0);
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('safety');
+  const o = await outline(p.page);
+  const claim = await p.page.evaluate(() => document.querySelector('.m-lede b')?.textContent);
+  check('00 heads the statement, then By kind, then By vehicle',
+    JSON.stringify(o.slice(0, 5)) === JSON.stringify(['head:At a glance', 'statement', 'card:By kind', 'sec:By vehicle', 'm-rows']),
+    o.join(' → '));
+  check(`…whose figure is the events /api/alerts/summary sums to (${f0(total)})`, claim === `${f0(total)} harsh-driving events`, claim);
+  await p.close();
+  /* The summary refused: the old phone said there were no events. */
+  const bad = { ...fixture, answers: { ...fixture.answers } };
+  delete bad.answers['/api/alerts/summary?period=month&grain=auto'];
+  const f = await phonePage(browser, { skin: 'arkiv', fixture: bad });
+  await f.open('safety');
+  const said = await f.page.evaluate(() => document.querySelector('.m-deck')?.textContent);
+  check('a summary that did not load says so — never "No harsh-driving event in this window"',
+    /Could not load this/.test(said) && !/No harsh-driving event/.test(said), said.slice(0, 120));
+  await f.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');
