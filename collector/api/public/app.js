@@ -4579,6 +4579,19 @@ V.safety = async (root) => {
       + 'telematics layer — check Collection gaps before reading that as good news.'));
     return;
   }
+  /* Under the page contract (plan §4 #safety, all three tabs): one 00 band
+     shared by the tabs — the verdict as its statement, the worst rate on the
+     road the hero against the fleet's (up is worse), the fleet rate with the
+     median driver, then the four existing figures with both cohort links;
+     "events nobody held the car for" goes to the band's note with its
+     figure. People: the rate bars in the FMS/InfoTrack identity (every event
+     is from that alert feed), with the fleet rate named, and the spread of
+     rates; Vehicles: the worst-vehicle bars in that identity; Events: one
+     ranked list, driving kinds in the identity and the tracker's own faults
+     in ink. The tables, the 200 km floor and the tabs unchanged; a † band. */
+  const ak = contract();
+  const safUnattr = (drvPage.totals || {}).unattributed ?? byVeh.reduce((a, r) => a + (r.unattributed || 0), 0);
+  const AKB = ak ? glanceBand(host, safUnattr ? `${fmt(safUnattr)} events on a plate-day nobody held the car for` : 'every event has a driver') : null;
 
   /* Verified against /api/alerts/summary: it returns [{alert_type, n}] and
      nothing else, so every rate on this page has to come from the vehicle and
@@ -4588,7 +4601,7 @@ V.safety = async (root) => {
     const tracked = +fleetK?.tracked_vehicles || vTot.vehicles || 0;
     const per = tracked ? Math.round(total / tracked) : null;
     const worst = (byDrv || [])[0];
-    verdict(host, {
+    verdict(ak ? AKB.vHost : host, {
       claim: top
         ? `${top.alert_type} is ${Math.round((top.n / total) * 100)}% of every event the trackers raised`
         : `${fmt(total)} harsh-driving events`,
@@ -4629,7 +4642,7 @@ V.safety = async (root) => {
         esc(sourceLabel(state.platform))} subset of it — every figure below is the whole fleet.`, 'warn'));
   }
   const fleetVehicles = fleetK.tracked_vehicles ?? fleetK.vehicles;
-  host.append(kpiRow([
+  const SAF_TILES = [
     { label: 'Driving events', value: fmt(drivingN), sub: 'harsh braking, acceleration, turns, speed' },
     { label: 'Device faults', value: fmt(total - drivingN),
       sub: 'power loss and similar — a tracker problem, not a driver one',
@@ -4650,8 +4663,22 @@ V.safety = async (root) => {
     { label: 'Events nobody held the car for', value: fmt(unattributed),
       sub: unattributed ? 'no custody record for that plate on that day' : 'every event has a driver',
       tone: unattributed ? 'warn' : null },
-  ]));
+  ];
+  if (ak) safetyGlance(AKB, SAF_TILES, byDrv, fleetK);
+  else host.append(kpiRow(SAF_TILES));
 
+  if (tab === 'events' && ak) {
+    const p = panel('The kinds of alert', 'Driving events first, in the alert feed\u2019s identity; the tracker\u2019s own faults after, in ink', 'saf-kinds');
+    host.append(p.panel);
+    const rows = [...driving.map((r) => ({ label: r.alert_type, n: r.n, dev: false })).sort((a, b) => b.n - a.n),
+      ...device.map((r) => ({ label: `${r.alert_type} (fault in the tracker box)`, n: r.n, dev: true })).sort((a, b) => b.n - a.n)];
+    const box = el('div'); p.body.append(box);
+    hbars(box, rows, { signed: false, colorFor: (x) => (x.dev ? '--ink' : (sourceToken('fms') || '--mk-fill')) });
+    p.body.append(el('p', 'cap', `${fmt(drivingN)} driving events (${pct((drivingN / total) * 100, 1)} of every alert) are behaviour the fleet can coach; `
+      + `${fmt(total - drivingN)} device faults (${pct(((total - drivingN) / total) * 100, 1)}) are a hardware ticket — the two are never one total.`));
+    safetyAbsence(host, { unattributed, byDrv, KM: 200 });
+    return;
+  }
   if (tab === 'events') {
     const g = el('div', 'grid g2'); host.append(g);
     const dp = panel('Driving events', 'Behaviour the fleet can coach.');
@@ -4669,8 +4696,34 @@ V.safety = async (root) => {
   if (tab === 'vehicles') {
     const vp = panel('Worst vehicles', 'Click a bar to open that vehicle.');
     hbars(vp.body, byVeh.slice(0, 12).map((r) => ({ label: r.plate, n: r.alerts })), {
-      color: '--s8', onClick: (d) => { location.hash = href('vehicle', d.label, 'safety'); } });
+      color: ak ? (sourceToken('fms') || '--mk-fill') : '--s8', ...(ak ? { signed: false } : {}),
+      onClick: (d) => { location.hash = href('vehicle', d.label, 'safety'); } });
     host.append(vp.panel);
+    /* Under the contract (plan §4 #safety/vehicles §05): the raw count ranks a
+       busy car worst, so beside it each car's events per 100 km the alert
+       feed covered (/api/vehicles/directory alerts_per_100km over alert_km —
+       the vehicle Safety tab's basis), over the same 200 km floor #safety
+       rates people on, the fleet's rate named. A second fetch that holds
+       nothing up. */
+    if (ak) {
+      const rp = panel('Above the fleet rate, car by car', 'Events per 100 km the alert feed covered, for cars over 200 km of it', 'saf-veh-rate');
+      host.append(rp.panel); loading(rp.body);
+      q('/api/vehicles/directory').then((dir) => {
+        if (!alive(gen)) return;
+        rp.body.innerHTML = '';
+        const rows = (Array.isArray(dir) ? dir : dir.rows || []).filter((r) => r.alerts_per_100km != null && Number(r.alert_km) >= 200)
+          .sort((x, y) => Number(y.alerts_per_100km) - Number(x.alerts_per_100km));
+        const fr = fleetK?.alerts_per_100km != null ? Number(fleetK.alerts_per_100km) : null;
+        if (!rows.length) { rp.body.append(note('No car carries a rate over 200 km of the alert feed in this window.')); return; }
+        const box = el('div'); rp.body.append(box);
+        hbars(box, rows.slice(0, 12).map((r) => ({ label: r.plate, n: Number(r.alerts_per_100km), km: Number(r.alert_km) })), {
+          signed: false, color: sourceToken('fms') || '--mk-fill', valueFmt: (v) => fmt(v, 1),
+          shareOf: (x) => `over ${fmt(x.km)} km`, onClick: (x) => { location.hash = href('vehicle', x.label, 'safety'); } });
+        const above = fr == null ? null : rows.filter((r) => Number(r.alerts_per_100km) > fr).length;
+        rp.body.append(el('p', 'cap', (fr != null ? `The fleet runs at ${fmt(fr, 1)} per 100 km; ${countOf(above, 'car')} of the ${fmt(rows.length)} rated ${above === 1 ? 'is' : 'are'} above it. ` : 'The fleet\u2019s own rate was not measured in this window. ')
+          + (rows.length > 12 ? `The 12 highest of ${fmt(rows.length)}. ` : '') + 'A car under 200 km of the feed is not rated here.'));
+      }).catch(() => { rp.body.innerHTML = ''; rp.body.append(note('The per-car rates could not be loaded.')); });
+    }
     /* Sixty-three rows starting straight under a chart of the worst twelve,
        with nothing saying what they were or how many. */
     const vtab = panel(`Every vehicle with an event — ${countOf(byVeh.length, 'vehicle')}`,
@@ -4701,6 +4754,7 @@ V.safety = async (root) => {
       + 'whoever holds it now — and vehicle_driver_day carries one row per platform, so custody is '
       + 'collapsed to one driver per plate-day before counting. Joining it directly once showed 584 '
       + 'events twice under two spellings of one name.'));
+    if (ak) safetyAbsence(host, { unattributed, byDrv, KM: 200 });
     return;
   }
 
@@ -4730,14 +4784,15 @@ V.safety = async (root) => {
   if (rated.length) {
     hbars(dp.body, rated.map((r) => ({
       label: `${r.driver_name} · ${fmt(rateKm(r))} km`, n: Number(r.per_100km), id: r.driver_ext_id })), {
-      color: '--s8', valueFmt: (v) => `${fmt(v, 2)} / 100km`, signed: false,
+      color: ak ? (sourceToken('fms') || '--mk-fill') : '--s8', valueFmt: (v) => `${fmt(v, 2)} / 100km`, signed: false,
       onClick: (d) => { if (d.id) location.hash = href('driver', d.id, 'quality'); } });
     dp.body.append(el('p', 'cap', 'Ordered by the rate the bars measure, with the distance it was '
       + `computed over beside each name. Drivers under ${fmt(KM_FLOOR)} booked km are left out`
       + (thinKm ? ` (${countOf(thinKm, 'driver')})` : '')
       + ' — a handful of events over a few kilometres produces a large rate and no finding. '
       + 'The distance is BOOKED kilometres: dividing by every trip in the table would count each '
-      + 'journey twice, once as a booking and once as its telematics twin.'));
+      + 'journey twice, once as a booking and once as its telematics twin.'
+      + (ak && fleetK?.alerts_per_100km != null ? ` The fleet as a whole runs at ${fmt(fleetK.alerts_per_100km, 2)} per 100 km.` : '')));
   } else {
     empty(dp.body, named.some((r) => r.per_100km != null)
       ? `No driver in this window has both events and at least ${fmt(KM_FLOOR)} km of booked distance to `
@@ -4745,6 +4800,7 @@ V.safety = async (root) => {
       : 'No driver in this window has both events and a known distance');
   }
   host.append(dp.panel);
+  if (ak) safetySpread(host, named.filter((r) => r.per_100km != null && rateKm(r) >= KM_FLOOR));
   /* The longest table on the page carried no heading — sixty-two rows of names
      and event counts that began immediately under a chart about something
      else, with nothing saying what the rows were or how many there were. */
@@ -4825,7 +4881,62 @@ V.safety = async (root) => {
     dtab.body.append(note('"(unattributed)" is not a person. It is every event on a plate-day with no '
       + 'custody record — shown rather than folded into somebody else\'s total.'));
   }
+  if (ak) safetyAbsence(host, { unattributed, byDrv, KM: KM_FLOOR });
 };
+
+/* ── #safety under the page contract ─────────────────────────────────────── */
+function safetyGlance(AKB, SAF_TILES, byDrv, fleetK) {
+  const rateKm = (r) => +(r.alert_km ?? r.booked_km);
+  const rated = (byDrv || []).filter((r) => r.driver_name !== '(unattributed)' && r.per_100km != null && rateKm(r) >= 200)
+    .sort((a, b) => Number(b.per_100km) - Number(a.per_100km));
+  const fr = fleetK?.alerts_per_100km != null ? Number(fleetK.alerts_per_100km) : null;
+  const rs = rated.map((r) => Number(r.per_100km)).sort((a, b) => a - b);
+  const med = rs.length ? (rs.length % 2 ? rs[(rs.length - 1) / 2] : (rs[rs.length / 2 - 1] + rs[rs.length / 2]) / 2) : null;
+  const worst = rated[0];
+  const tiles = [
+    worst ? { label: 'Worst rate on the road', value: `${fmt(worst.per_100km, 2)} / 100 km`, hero: true,
+      sub: `${worst.driver_name} · over ${fmt(rateKm(worst))} km`,
+      ...(fr != null ? { delta: { value: Number(worst.per_100km) - fr, kind: 'gap', invert: true, d: 2, of: `against the fleet's ${fmt(fr, 2)}` } } : {}) }
+      : { label: 'Worst rate on the road', hero: true, na: 'no driver has events and at least 200 km of booked distance to rate them over' },
+    fr != null ? { label: 'Fleet events per 100 km', value: fmt(fr, 2), sub: med != null ? `the median rated driver ${fmt(med, 2)}` : 'no driver rated over 200 km' }
+      : { label: 'Fleet events per 100 km', na: 'the fleet rate was not measured in this window' },
+    ...SAF_TILES.filter((x) => x.label !== 'Events nobody held the car for'),
+  ];
+  glance(AKB.tilesHost, bandTiles(tiles).tiles);
+}
+function safetySpread(host, rated) {
+  const p = panel('The shape of the rated drivers', 'People over 200 km, by events per 100 km', 'saf-spread');
+  host.append(p.panel);
+  if (!rated.length) { p.body.append(note('Nobody is rated in this window.')); return; }
+  /* Six equal bins from nought to a round ceiling over the worst rate. Fixed
+     bins (0–5 … 80 or more) were drawn first and on production, where the
+     median rated driver runs at 94 per 100 km, all but nine people fell in
+     the last one — a histogram with one bar. */
+  const top = Math.max(...rated.map((r) => +r.per_100km));
+  const raw = top / 6;
+  const mag = 10 ** Math.floor(Math.log10(raw || 1));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((x) => x >= raw) || 10 * mag;
+  const B = Array.from({ length: Math.max(1, Math.ceil(top / step + 1e-9)) }, (_, i) => [i * step, (i + 1) * step]);
+  const box = el('div'); p.body.append(box);
+  hbars(box, B.map(([lo, hi], i) => ({ label: `${fmt(lo, lo % 1 ? 1 : 0)}–${fmt(hi, hi % 1 ? 1 : 0)}`,
+    n: rated.filter((r) => +r.per_100km >= lo && (i === B.length - 1 ? +r.per_100km <= hi : +r.per_100km < hi)).length })),
+  { signed: false, color: sourceToken('fms') || '--mk-fill' });
+}
+function safetyAbsence(host, { unattributed, byDrv, KM }) {
+  const named = (byDrv || []).filter((r) => r.driver_name !== '(unattributed)');
+  const unrated = named.filter((r) => r.per_100km == null || +(r.alert_km ?? r.booked_km) < KM).length;
+  const absHost = el('div'); host.append(absHost);
+  absenceBand(absHost, [
+    { label: 'What counts as harsh', fig: null, none: 'The tracker\u2019s call',
+      why: 'The alert feed files an event when its own threshold trips; this product holds no threshold and cannot say how hard a brake was.' },
+    { label: 'Events nobody could place', hl: unattributed > 0, fig: unattributed ? fmt(unattributed) : null, none: 'None',
+      why: unattributed ? 'No custody record puts anybody in the car that day, so these are counted and never given to a person.' : 'Every event falls on a day somebody held the car.' },
+    { label: 'Drivers who cannot be rated', fig: unrated ? `${fmt(unrated)} of ${fmt(named.length)}` : null, none: 'None',
+      why: `Under ${fmt(KM)} booked km on the days the feed covered, or no booked distance at all — a rate over so little means nothing.` },
+    { label: 'What actually happened', fig: null, none: 'Not recorded', why: 'No feed records an outcome — a collision, a complaint, a near miss. These are the box\u2019s own events, nothing more.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), 'the FMS/InfoTrack alert feed'] }, host);
+}
 
 V.unauthorized = async (root) => {
   /* Under the page contract (plan §4 #unauthorized): the verdict as the 00

@@ -806,4 +806,86 @@ if (want('segment')) {
   }
 }
 
+/* ══ #safety (people, vehicles, events) ═══════════════════════════════════ */
+if (want('safety')) {
+  console.log('\n#safety');
+  const panelBars = (page, h) => page.evaluate((hh) => {
+    const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === hh);
+    return p ? [...p.querySelectorAll('.hb')].map((b) => ({ k: b.querySelector('.k')?.textContent.trim(), v: b.querySelector('.v')?.textContent.trim(),
+      fill: b.querySelector('.fill')?.getAttribute('style') || '' })) : null;
+  }, h);
+  {
+    const { ctx, page } = await open('classic', 'safety');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), tiles: [...document.querySelectorAll('#view .kpis > .kpi .l')].map((l) => l.textContent.trim()) }));
+    const b = await panelBars(page, 'Who drives hardest');
+    check('old skin: no band, its tile row with "Events nobody held the car for", the bars on --s8', !r.band && r.tiles.includes('Events nobody held the car for')
+      && b && b.every((x) => /--s8/.test(x.fill)), JSON.stringify([r.tiles, b?.slice(0, 1)]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'safety');
+    const s = await shape(page);
+    const drv = answer('/api/alerts/by-driver');
+    const F = answer('/api/kpis');
+    const rows = (drv.rows || drv).filter((r) => r.driver_name !== '(unattributed)');
+    const km = (r) => +(r.alert_km ?? r.booked_km);
+    const rated = rows.filter((r) => r.per_100km != null && km(r) >= 200).sort((a, b) => b.per_100km - a.per_100km);
+    check('00, shared by the tabs: the worst rate the hero, the fleet rate, then the four figures', s.vdctIn00 && s.hero === 'Worst rate on the road'
+      && JSON.stringify(Object.keys(s.values)) === JSON.stringify(['Worst rate on the road', 'Fleet events per 100 km', 'Driving events', 'Device faults', 'Vehicles involved', 'Drivers named']), JSON.stringify(Object.keys(s.values)));
+    check('the worst rate is the top rated driver\'s, over 200 km', s.values['Worst rate on the road'] === `${(+rated[0].per_100km).toLocaleString('en-US', { maximumFractionDigits: 2 })} / 100 km`, JSON.stringify([s.values['Worst rate on the road'], rated[0]?.per_100km]));
+    const d = await txtOf(page, '#view .cband .kpi.is-hero .t-d');
+    const fx = (d.match(/against the fleet's ([\d,]+(?:\.\d+)?)/) || [])[1];
+    check('set against the fleet\'s rate, up is worse', fx != null && Math.abs(Number(fx.replace(/,/g, '')) - Number(F.alerts_per_100km)) < 0.005
+      && (Number(rated[0].per_100km) > Number(F.alerts_per_100km) ? /worse/.test(d) : /better/.test(d)), d);
+    check('"events nobody held the car for" is in the band\'s note with its figure, not a tile', !('Events nobody held the car for' in s.values)
+      && /nobody held the car for|every event has a driver/.test(await txtOf(page, '#view .cband .sechd')), await txtOf(page, '#view .cband .sechd'));
+    check('both cohort links kept', /cohort/.test(s.hrefs['Vehicles involved'] || '') && /cohort/.test(s.hrefs['Drivers named'] || ''), JSON.stringify(s.hrefs));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const hard = await panelBars(page, 'Who drives hardest');
+    check('who drives hardest: in the FMS/InfoTrack identity, the fleet rate named', hard.length > 0 && hard.every((b) => /--c-fms/.test(b.fill))
+      && /The fleet as a whole runs at/.test(await txtOf(page, '#view')), JSON.stringify(hard.slice(0, 1)));
+    const spread = await bars(page, 'saf-spread');
+    check('the shape of the rated drivers: every rated driver in exactly one of at most six equal bins, the last reaching the worst rate', spread.length >= 1 && spread.length <= 6
+      && spread.reduce((a, b) => a + +b.v, 0) === rated.length && parseFloat((spread.at(-1).k.split('–')[1] || '').replace(/,/g, '')) >= +rated[0].per_100km, JSON.stringify([spread, rated.length]));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const unrated = rows.filter((r) => r.per_100km == null || km(r) < 200).length;
+    check('†: what counts as harsh, events nobody could place, drivers who cannot be rated (counted), what actually happened', ab['What counts as harsh']?.none
+      && !!ab['Events nobody could place'] && (unrated ? ab['Drivers who cannot be rated']?.fig === `${n(unrated)} of ${n(rows.length)}` : ab['Drivers who cannot be rated']?.none) && ab['What actually happened']?.fig === 'Not recorded', JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    await ctx.close();
+  }
+  {
+    /* The directory's rows reversed (synthetic order): the page must rank
+       them itself, not trust the order they arrive in. */
+    const rev = (q, real) => (Array.isArray(real) ? [...real].reverse() : { ...real, rows: [...(real.rows || [])].reverse() });
+    const { ctx, page, answer } = await open('arkiv', 'safety/vehicles', { fixtures: { '/api/vehicles/directory': rev } });
+    const s = await shape(page);
+    const worst = await panelBars(page, 'Worst vehicles');
+    check('#safety/vehicles: the shared band, the worst vehicles in the FMS identity', s.hero === 'Worst rate on the road' && worst.length > 0 && worst.every((b) => /--c-fms/.test(b.fill)), JSON.stringify(worst.slice(0, 1)));
+    await page.waitForFunction(() => document.querySelectorAll('[data-panel="saf-veh-rate"] .hb').length > 0 || /could not|No car/.test(document.querySelector('[data-panel="saf-veh-rate"]')?.textContent || ''), null, { timeout: 8000 }).catch(() => {});
+    const dir = answer('/api/vehicles/directory');
+    const rr = (Array.isArray(dir) ? dir : dir.rows).filter((r) => r.alerts_per_100km != null && +r.alert_km >= 200).sort((a, b) => b.alerts_per_100km - a.alerts_per_100km);
+    const vr = await bars(page, 'saf-veh-rate');
+    check('above the fleet rate, car by car: the highest rates over 200 km of the feed, highest first', vr.length === Math.min(12, rr.length) && vr.every((b, i) => b.k === rr[i].plate), JSON.stringify([vr.map((b) => b.k), rr.slice(0, 12).map((r) => r.plate)]));
+    check('the vehicle table kept', s.heads.some((h) => /^Every vehicle with an event/.test(h)), JSON.stringify(s.heads));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'safety/events');
+    const s = await shape(page);
+    const sum = answer('/api/alerts/summary');
+    const kinds = await bars(page, 'saf-kinds');
+    const drivingN = sum.filter((r) => !r.device).length;
+    check('#safety/events: one ranked list — driving kinds first in the FMS identity, the tracker\'s faults after, in ink', kinds.length === sum.length
+      && kinds.slice(0, drivingN).every((b) => /--c-fms/.test(b.fill)) && kinds.slice(drivingN).every((b) => /--ink/.test(b.fill) && /fault in the tracker box/.test(b.k)), JSON.stringify(kinds));
+    check('the two are never one total: the caption gives each its share', /driving events .* are behaviour the fleet can coach/.test(await txtOf(page, '[data-panel="saf-kinds"]')), await txtOf(page, '[data-panel="saf-kinds"]'));
+    check('no donut left on the tab', !(await page.evaluate(() => !!document.querySelector('#view svg .arc, #view svg path[data-arc]'))), '');
+    await ctx.close();
+  }
+  for (const t of ['safety', 'safety/vehicles', 'safety/events']) {
+    const { ctx, page } = await open('arkiv', t, { width: 390 });
+    check(`#${t} at 390: nothing scrolls sideways`, (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

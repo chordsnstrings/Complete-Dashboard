@@ -2103,3 +2103,12 @@ The first pass drew zeros for the rungs in km and "before it began: 0". Both wer
 Production through live-ui on :8611, on one of the day's unexplained FMS live-seat journeys, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p68/`). No page error, no sideways scroll, and the fils scan is clean.
 
 The journey carried 25.4 km with no booking, 35 min from the nearest (Uber), worth AED 115.50 at AED 4.54/km. Two people held the car that day. The attribution names one person by the last Uber trip on the car, and the page keeps the two apart. The telemetry was 6 fixes, observed fully, with a largest gap of 6 min.
+
+### #safety (three tabs) — 2026-09-24
+
+Production through live-ui on :8611, all three tabs in both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p69/`). No page error, no sideways scroll, and the fils scan is clean.
+
+* Worst rate on the road: 184.77 per 100 km over 348 km, +116.67 on the fleet's 68.1, drawn in the negative colour with its ▲ and sign. The median rated driver is at 94.14.
+* 5,272 events fell on a plate-day nobody held the car for; that figure is in the band's note.
+* The rated drivers fall 9 / 34 / 26 / 4 across 0–200 in 50s.
+* By car, 60 of the 71 cars rated over 200 km of the feed run above the fleet rate.
