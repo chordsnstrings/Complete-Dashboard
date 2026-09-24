@@ -43,6 +43,7 @@ const ROUTES = [
   'driver/U-TARIQ/money', 'driver/drv-0/trips', 'driver/drv-0/unauthorized',
   'online-time', 'performer/drv-0', 'cohort/unit-licence-due', 'cohort/roster-blocked',
   'cancellations', 'roster', 'roster/pipeline', 'roster/idle', 'roster/blocked',
+  'top-performers', 'low-performers',
 ];
 
 const scan = (page) => page.evaluate(() => {

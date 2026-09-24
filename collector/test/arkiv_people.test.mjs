@@ -898,4 +898,89 @@ if (want('roster')) {
   }
 }
 
+/* ══ #top-performers and #low-performers ══════════════════════════════════ */
+if (want('performers')) {
+  console.log('\n#top-performers, #low-performers');
+  const rankOf = (d, top) => {
+    const rows = (d.rows || []).filter((r) => (r.days_worked || 0) > 0);
+    const money = rows.some((r) => (r.money || 0) > 0);
+    const rate = (r) => (r.days_worked ? (money ? (r.money || 0) : (r.bookings || 0)) / r.days_worked : null);
+    const ranked = rows.filter((r) => (r.days_worked || 0) >= 4 && (r.bookings || 0) >= 15 && rate(r) != null)
+      .sort((a, b) => (top ? rate(b) - rate(a) : rate(a) - rate(b)));
+    return { rows, money, rate, ranked };
+  };
+  {
+    const { ctx, page } = await open('classic', 'top-performers');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), tiles: document.querySelectorAll('#view .kpis > .kpi').length,
+      pills: [...document.querySelectorAll('#view tbody tr')].slice(0, 3).some((tr) => tr.querySelectorAll('.pill').length > 0) }));
+    check('old skin: no band, the four tiles, fleet and platforms still pills', !r.band && r.tiles === 4 && r.pills, JSON.stringify(r));
+    await ctx.close();
+  }
+  for (const band of ['top', 'low']) {
+    const top = band === 'top';
+    const hash = `${band}-performers`;
+    const { ctx, page, answer } = await open('arkiv', hash);
+    await page.waitForFunction(() => document.querySelector('#view .cband .dlt-of'), null, { timeout: 15000 }).catch(() => {});
+    const s = await shape(page);
+    const d = answer('/api/economics/drivers');
+    const { rows, rate, ranked } = rankOf(d, top);
+    const n = (v) => (+v || 0).toLocaleString('en-US');
+    const order = await page.evaluate(() => { const v = document.querySelector('#view'); const kids = [...v.children];
+      return { stack: kids.findIndex((k) => k.classList.contains('stack')), band: kids.findIndex((k) => k.classList.contains('cband')) }; });
+    check(`#${hash}: the week control first, then 00`, order.stack >= 0 && order.stack < order.band, JSON.stringify(order));
+    const f = await vfig(page);
+    check(`#${hash}: the verdict in the band; ruling 7 folds the ${top ? 'Best' : 'Lowest'} per day tile into it`, s.vdctIn00
+      && !Object.values(s.values).includes(f) && !((top ? 'Best per day' : 'Lowest per day') in s.values), JSON.stringify([f, s.values]));
+    check(`#${hash}: People ranked off the rows with the page's own gate and basis`, s.values['People ranked'] === n(ranked.length), JSON.stringify([s.values, ranked.length]));
+    if (top) {
+      const seven = rows.filter((r) => Number(r.days_worked) >= 7).length;
+      check('#top: "Worked all seven days — N of M" (new)', s.values['Worked all seven days'] === `${n(seven)} of ${n(rows.length)}`, JSON.stringify(s.values));
+    } else {
+      const bk = rows.map((r) => Number(r.bookings) || 0).sort((a, b) => a - b); const qn = Math.ceil(bk.length / 4); const tot = bk.reduce((a, x) => a + x, 0);
+      check('#low: the bottom quarter\'s share of the week\'s bookings (new)', s.values['The bottom quarter’s share'] === `${((bk.slice(0, qn).reduce((a, x) => a + x, 0) / tot) * 100).toFixed(1)}%`, JSON.stringify(s.values));
+    }
+    check(`#${hash}: no tone, no bare dash; an absent tile says why in words`, (await toned(page)).length === 0 && !s.bare.length
+      && Object.values(s.na).every((w) => w.length > 20), JSON.stringify(s.na));
+    const dl = await page.evaluate(() => [...document.querySelectorAll('#view .cband .kpi')].filter((k) => k.querySelector('.dlt-of')).map((k) => k.querySelector('.l')?.textContent.trim()));
+    check(`#${hash}: the week before arrives as a worded delta on People ranked`, dl.includes('People ranked'), JSON.stringify(dl));
+    const hero = await page.evaluate(() => [...document.querySelectorAll('[data-panel="perf-hero"] .hb')].map((h) => [h.querySelector('.k').textContent.trim(), h.querySelector('.fill').getAttribute('style')]));
+    check(`#${hash}: the ${top ? 'top' : 'bottom'} twelve as bars, in rank order, channel-coloured only for a one-channel week`,
+      hero.length === Math.min(12, ranked.length) && hero.every(([k], i) => k === (ranked[i].driver_name || '(unnamed)'))
+      && hero.every(([, c], i) => ((ranked[i].platforms || []).length === 1 ? c.includes(`--c-${String(ranked[i].platforms[0]).toLowerCase()})`) : c.includes('--mk-fill)'))),
+      JSON.stringify(hero.slice(0, 4)));
+    const chips = await page.evaluate((t) => { const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === t);
+      const th = p ? [...p.querySelectorAll('thead th')].map((x) => x.textContent.replace(/[▲▼↑↓]/g, '').trim()) : [];
+      const tr = p?.querySelector('tbody tr'); const cell = (l) => tr?.children[th.indexOf(l)];
+      return tr ? { pills: ['Fleet', 'Platforms'].reduce((a, l) => a + (cell(l)?.querySelectorAll('.pill').length || 0), 0), sw: cell('Platforms')?.querySelectorAll('.pchip .sw').length || 0 } : null; }, top ? 'Ranked highest' : 'Ranked lowest');
+    check(`#${hash}: the table kept; fleet as text, platforms a swatch and an ink label — no pill in either`, chips && chips.sw > 0 && chips.pills === 0, JSON.stringify(chips));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const t = d.totals || {};
+    check(`#${hash}: † carries the coverage and hours notes as the API wrote them`, (!d.coverage?.note || ab['What the week covers']?.why === d.coverage.note)
+      && (!t.hours_note || ab['Hours online']?.why === t.hours_note), JSON.stringify(s.abs.map((a) => a.label)));
+    if (top) {
+      const tr = rows.map((r) => Number(r.bookings) || 0).filter((x) => x > 0);
+      const cap = await page.evaluate(() => [...document.querySelectorAll('[data-panel="perf-shape"] p.cap')].pop()?.textContent || '');
+      const curve = await page.evaluate(() => !!document.querySelector('[data-panel="perf-shape"] svg path'));
+      check('#top: how the work concentrates — the curve, the totals from the rows, the even fleet in words', curve && /an even week would give the top 20|ran/.test(cap)
+        && cap.startsWith(`${tr.length} ${tr.length === 1 ? 'person' : 'people'} ran ${n(tr.reduce((a, x) => a + x, 0))} bookings`), cap);
+    } else {
+      const days = await page.evaluate(() => [...document.querySelectorAll('[data-panel="perf-shape"] .hb')].map((h) => [h.querySelector('.v').textContent.trim(), h.querySelector('.fill').getAttribute('style')]));
+      check('#low: days worked 1–7, the columns under the gate set apart in grey', days.length === 7
+        && days.every(([v, c], i) => v === String(rows.filter((r) => Number(r.days_worked) === i + 1).length) && (i + 1 < 4 ? c.includes('--grey)') : c.includes('--mk-fill)'))), JSON.stringify(days));
+      const dots = await page.evaluate(() => document.querySelectorAll('[data-panel="perf-comp"] svg circle.sc-dot').length);
+      check('#low: completion against bookings, drawn only from 30 bookings', dots === ranked.filter((r) => (r.bookings || 0) >= 30 && r.completion_pct != null).length, String(dots));
+      const ch = await page.evaluate(() => [...document.querySelectorAll('[data-panel="perf-chan"] .hb')].map((h) => [h.querySelector('.k').textContent.trim(), h.querySelector('.v').textContent.trim()]));
+      check('#low: which channels the week came from, people per channel', ch.length > 0 && ch.every(([, v]) => +v > 0), JSON.stringify(ch));
+      const loose = await page.evaluate(() => [...document.querySelectorAll('#view .note')].some((x) => /It cannot tell a person who worked/.test(x.textContent)));
+      check('#low: the warning moved into † word for word, not also loose', /It cannot tell a person who worked and did little from one who was on leave/.test(ab['Why somebody did little']?.why || '') && !loose);
+    }
+    await ctx.close();
+  }
+  for (const r of ['top-performers', 'low-performers']) {
+    const { ctx, page } = await open('arkiv', r, { width: 390 });
+    check(`#${r} at 390: nothing scrolls sideways`, (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

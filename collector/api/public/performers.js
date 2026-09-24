@@ -34,10 +34,11 @@
    5. IT DOES NOT CALL AN ON-TRIP HOUR AN ONLINE HOUR. Uber reports no online
       hours at all — 232 of 241 people have none — so what is shown is time
       carrying someone, measured from the trips, and it is labelled that. */
-import { hbars, gapBars, barChart } from './charts.js';
+import { hbars, gapBars, barChart, scatter, areaChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
   fmt, empty, noneChosen, sourceLabel, dateStr, verdict, countOf,
-  UBER_FARE_WHY, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, dayStr } from './ui.js';
+  UBER_FARE_WHY, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, dayStr, swatch, pct, sourceToken } from './ui.js';
+import { CHANNEL_ORDER } from './tokens.js';
 import { TZ } from './tz.js';
 import { q, href, state } from './data.js';
 
@@ -113,11 +114,30 @@ export async function renderPerformers(root, band) {
   /* The week note and the verdict beneath it are two sections, not one block —
      see .stack in app.css. Without it they touched. */
   const head = el('div', 'stack'); root.append(head);
-  const kh = el('div', 'kpis'); root.append(kh);
+  /* Under the page contract (plan §4 top- and low-performers): the week
+     control and its note stay first, in the chrome; then 00 — the verdict and
+     the tiles, the one repeating its figure folded in (ruling 7), with the
+     week before as a worded delta once it arrives — then the ranking as bars,
+     twelve names on the page's own basis; then the week's shape (Top: how the
+     bookings concentrate, against an even fleet; Low: how many days each
+     person worked, the gate set apart); the ranked table unchanged; on Low the
+     completion scatter and the channels; the two ends; Not ranked; a † band
+     carrying the basis, coverage and hours notes (and, on Low, the warning
+     word for word). How the ranking is computed does not change. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
+  const kh = el('div', 'kpis'); if (!ak) root.append(kh);
+  const heroP = ak ? panel(top ? 'The top twelve' : 'The bottom twelve', 'On the page\u2019s own basis; a name opens that person\u2019s week', 'perf-hero') : null;
+  const shapeP2 = ak ? panel(top ? 'How the week\u2019s work concentrates' : 'How much of the week each driver worked',
+    top ? 'Share of the week\u2019s bookings run by the busiest people, busiest first' : 'People by days worked, one to seven', 'perf-shape') : null;
+  if (ak) root.append(heroP.panel, shapeP2.panel);
   const listP = panel(top ? 'Ranked highest' : 'Ranked lowest',
     `Money in per day worked, over the last complete week. At least ${MIN_DAYS} days `
     + `and ${MIN_BOOKINGS} bookings — click any row for the week in detail.`);
   root.append(listP.panel);
+  const compP = ak && !top ? panel('Completion against bookings', `One dot per ranked person with at least ${SHOW_AT} bookings`, 'perf-comp') : null;
+  const chanP = ak && !top ? panel('Which channels the week\u2019s work came from', 'People who drove on each channel this week', 'perf-chan') : null;
+  if (compP) root.append(compP.panel, chanP.panel);
   const shapeP = panel('Best and worst, side by side',
     'The same measures for the ranked group, best and worst, side by side');
   root.append(shapeP.panel);
@@ -171,7 +191,9 @@ export async function renderPerformers(root, band) {
      be caught by the same branch. */
   const basis = rows.some((r) => (r.money || 0) > 0) ? MONEY_BASIS : WORK_BASIS;
   const rate = basis.of;
-  if (basis.why) head.append(note(basis.why, 'warn'));
+  /* Under the contract the swap is said in the † band, and on the verdict,
+     the tile and the column as before. */
+  if (basis.why && !ak) head.append(note(basis.why, 'warn'));
   /* The caption was written before the fetch, when the measure was not yet
      known. It names the measure, so it is corrected here rather than left
      describing a ranking the page is not showing. */
@@ -204,7 +226,7 @@ export async function renderPerformers(root, band) {
     const base = Math.min(Math.abs(lR ?? 0), Math.abs(oR ?? 0));
     const spread = lR != null && oR != null && base
       ? Math.round((Math.abs(lR - oR) / base) * 100) : null;
-    verdict(head, {
+    verdict(ak ? AKB.vHost : head, {
       claim: led
         ? `${led.driver_name || 'Somebody'} ${basis.verb(top)} per day worked`
         : 'Nobody worked enough of this week to rank',
@@ -223,7 +245,7 @@ export async function renderPerformers(root, band) {
   }
 
   const t = d.totals || {};
-  kh.replaceWith(kpiRow([
+  const PERFS_TILES = [
     { label: 'People ranked', value: fmt(ranked.length),
       sub: `of ${fmt(rows.length)} who drove — the rest did too little of the week` },
     { label: basis.tile(top),
@@ -248,7 +270,45 @@ export async function renderPerformers(root, band) {
       return lo > 0 ? `${Math.round((hi / lo) * 10) / 10}×` : '—';
     })(),
       sub: 'between the best and the worst of the ranked' },
-  ]));
+  ];
+  if (ak) {
+    const extra = top
+      ? { label: 'Worked all seven days', value: `${fmt(rows.filter((r) => Number(r.days_worked) >= 7).length)} of ${fmt(rows.length)}`,
+        sub: 'of everybody who drove this week' }
+      : (() => {
+        const bk = rows.map((r) => Number(r.bookings) || 0).sort((a, b) => a - b);
+        const qn = Math.ceil(bk.length / 4);
+        const tot = bk.reduce((a, n) => a + n, 0);
+        return tot ? { label: 'The bottom quarter\u2019s share', value: pct((bk.slice(0, qn).reduce((a, n) => a + n, 0) / tot) * 100, 1),
+          sub: `of the week\u2019s bookings, run by the ${fmt(qn)} who ran least — an even fleet would give them 25%` }
+          : { label: 'The bottom quarter\u2019s share', na: 'no booking this week to share' };
+      })();
+    const vf = AKB.vHost.querySelector('.vdct-fig > b')?.textContent.trim() || null;
+    const drawTiles = (prev) => {
+      AKB.tilesHost.innerHTML = '';
+      const list = PERFS_TILES.map((x) => {
+        if (!prev) return x;
+        if (x.label === 'People ranked') return { ...x, delta: { value: ranked.length - prev.ranked, kind: 'change', d: 0, of: 'on the week before' } };
+        if (x.label === 'Fleet per day worked' && basis.money && prev.money && prev.perDay != null) {
+          return { ...x, delta: { value: Number(t.aed_per_day_worked) - prev.perDay, kind: 'change', d: 2, of: 'on the week before' } };
+        }
+        return x;
+      });
+      glance(AKB.tilesHost, bandTiles([...list, extra], { figure: vf,
+        reasons: { 'Fleet per day worked': NO_MONEY,
+          Spread: ranked.length < 2 ? 'fewer than two people ranked, so there are no two ends'
+            : `the lowest rate ranked is ${basis.fmt(Math.min(rate(ranked[0]) || 0, rate(ranked[ranked.length - 1]) || 0))}, and a multiple of nothing is not a number` } }).tiles);
+    };
+    drawTiles(null);
+    perfsPrev(wk, basis).then((prev) => { if (prev && AKB.tilesHost.isConnected) drawTiles(prev); });
+    perfsHero(heroP.body, ranked, rate, basis, wk);
+    if (top) perfsConcentration(shapeP2.body, rows);
+    else {
+      perfsDays(shapeP2.body, rows);
+      perfsCompletion(compP.body, ranked, wk);
+      perfsChannels(chanP.body, rows);
+    }
+  } else kh.replaceWith(kpiRow(PERFS_TILES));
 
   listP.body.innerHTML = '';
   if (!ranked.length) {
@@ -268,9 +328,11 @@ export async function renderPerformers(root, band) {
       { label: 'Driver', key: 'driver_name',
         render: (r) => `<span class="rk">${r.rank}</span>`
           + entity('driver', r.driver_ext_id, r.driver_name) },
-      { label: 'Fleet', key: 'fleet_id', render: (r) => (r.fleet_id ? pill(sourceLabel(r.fleet_id)) : '—') },
+      /* Under the contract: text, with a swatch where it is a channel — text
+         never wears the channel's colour, and a pill is a state. */
+      { label: 'Fleet', key: 'fleet_id', render: (r) => (r.fleet_id ? (ak ? esc(sourceLabel(r.fleet_id)) : pill(sourceLabel(r.fleet_id))) : '—') },
       { label: 'Platforms', key: 'platforms',
-        render: (r) => (r.platforms || []).map((x) => pill(sourceLabel(x))).join(' ') || '—' },
+        render: (r) => (ak ? chipsOf(r.platforms) : (r.platforms || []).map((x) => pill(sourceLabel(x))).join(' ')) || '—' },
       { label: basis.column, key: '_rate', num: true, render: (r) => basis.fmt(rate(r)) },
       /* `absent` rather than a column of dashes: on a week the statements do
          not reach, every money cell is empty and the reader is owed the reason
@@ -289,7 +351,7 @@ export async function renderPerformers(root, band) {
       { label: 'Standing', key: 'state',
         absent: 'no channel published a standing for these people — the roster snapshot carries '
           + 'one only for accounts a provider has judged',
-        render: (r) => (r.state ? pill(r.state, r.can_earn === false ? 'warn' : null) : '—') },
+        render: (r) => (r.state ? pill(r.state, r.can_earn === false && !ak ? 'warn' : null) : '—') },
     ], {
       /* The week travels with the click. Without it a reader who picked March,
          read the ranking and opened somebody in it landed on that person's
@@ -361,16 +423,107 @@ export async function renderPerformers(root, band) {
     }
   }
 
-  if (!top) {
-    root.append(note(
-      `This page ranks ${basis.unit} against days worked. It cannot tell a person who worked and `
-      + 'did little from one who was on leave, whose vehicle was off the road, or whose '
-      + 'licence had lapsed — the standing and days columns are there for exactly that, and '
-      + 'they should be read before anyone is spoken to.', 'warn'));
-  }
+  const warnLow = `This page ranks ${basis.unit} against days worked. It cannot tell a person who worked and `
+    + 'did little from one who was on leave, whose vehicle was off the road, or whose '
+    + 'licence had lapsed — the standing and days columns are there for exactly that, and '
+    + 'they should be read before anyone is spoken to.';
   const cov = d.coverage;
+  if (ak) { perfsAbsence(root, { top, basis, warnLow, cov, t, wk, ranked }); return; }
+  if (!top) {
+    root.append(note(warnLow, 'warn'));
+  }
   if (cov && cov.note) root.append(el('p', 'cap', esc(cov.note)));
   if (t.hours_note) root.append(el('p', 'cap', esc(t.hours_note)));
+}
+
+/* ── top- and low-performers under the page contract ─────────────────────── */
+/* The show gate #performance puts on a completion rate (RATE_GATES.show in
+   api/performance_sql.js): below it a rate is too few outcomes to read. This
+   row carries bookings, not accepted jobs, so the gate is applied to those. */
+const SHOW_AT = 30;
+const chanOrder = (p) => { const i = CHANNEL_ORDER.indexOf(String(p || '').toLowerCase()); return i < 0 ? 99 : i; };
+const chipsOf = (ps) => [...(ps || [])].sort((a, b) => chanOrder(a) - chanOrder(b))
+  .map((p) => `<span class="pchip">${swatch(p)}${esc(sourceLabel(p))}</span>`).join(' ');
+/* The week before, for the tiles' deltas: one more /api/economics/drivers
+   call, not warmed, fetched after the page is drawn so it holds nothing up.
+   Compared only like with like — a money week against a money week. */
+async function perfsPrev(wk, basis) {
+  if (!wk) return null;
+  const mon = new Date(Date.parse(`${wk}T12:00:00Z`) - 7 * 864e5).toISOString().slice(0, 10);
+  try {
+    const d = await q('/api/economics/drivers', { from: mon, to: weekEnd(mon) });
+    const rows = (d.rows || []).filter((r) => (r.days_worked || 0) > 0);
+    const money = rows.some((r) => (r.money || 0) > 0);
+    const rate = (money ? MONEY_BASIS : WORK_BASIS).of;
+    if (money !== basis.money) return null;
+    return { ranked: rows.filter(eligible).filter((r) => rate(r) != null).length, money,
+      perDay: money && d.totals?.aed_per_day_worked != null ? Number(d.totals.aed_per_day_worked) : null };
+  } catch { return null; }
+}
+/* Twelve names on the page's own basis, value direct-labelled. A bar wears
+   the channel colour when that person's week ran on one platform, the job
+   token otherwise (a person spans channels). */
+function perfsHero(host, ranked, rate, basis, wk) {
+  if (!ranked.length) { empty(host, 'Nobody worked enough of this week to be ranked.'); return; }
+  hbars(host, ranked.slice(0, 12).map((r) => ({ label: r.driver_name || '(unnamed)', n: +(rate(r) || 0).toFixed(2), r })), {
+    signed: false, valueFmt: (v) => basis.fmt(v),
+    colorFor: (x) => ((x.r.platforms || []).length === 1 ? (sourceToken(x.r.platforms[0]) || '--mk-fill') : '--mk-fill'),
+    onClick: (x) => { location.hash = href('performer', x.r.driver_ext_id, wk || null); } });
+}
+/* The cumulative share of the week's bookings by rank, busiest first, as
+   #drivers draws it; the even fleet is in the caption. (Drawn first as a
+   scatter with a reference line: scatter pads its axes, so the even-fleet line
+   ran on past 100% to a rank of 200 on a week of 155 people.) */
+function perfsConcentration(host, rows) {
+  const tr = rows.map((r) => Number(r.bookings) || 0).filter((n) => n > 0).sort((a, b) => b - a);
+  const tot = tr.reduce((a, n) => a + n, 0);
+  if (!tot) { empty(host, 'No booking this week.'); return; }
+  let run = 0;
+  const curve = tr.map((n, i) => { run += n; return { rank: i + 1, share: Math.round((run / tot) * 1000) / 10 }; });
+  const box = el('div'); host.append(box);
+  areaChart(box, curve, { x: 'rank', y: 'share', color: '--mk-fill', valueFmt: (v) => `${v}%`,
+    aria: 'Share of the week\u2019s bookings run by the busiest people, by rank' });
+  const at = (k) => (tr.length >= k ? curve[k - 1].share : null);
+  host.append(el('p', 'cap', `${countOf(tr.length, 'person', 'people')} ran ${fmt(tot)} bookings; `
+    + [10, 20].filter((k) => at(k) != null).map((k) => `the top ${k} ran ${pct(at(k), 1)}`).join(', ')
+    + (tr.length >= 20 ? ` — an even week would give the top 20 ${pct((20 / tr.length) * 100, 1)}.` : '.')));
+}
+function perfsDays(host, rows) {
+  const bars = [1, 2, 3, 4, 5, 6, 7].map((k) => ({ label: `${k} day${k === 1 ? '' : 's'}`, n: rows.filter((r) => Number(r.days_worked) === k).length }));
+  const box = el('div'); host.append(box);
+  hbars(box, bars, { signed: false, colorFor: (x) => (parseInt(x.label, 10) < MIN_DAYS ? '--grey' : '--mk-fill') });
+  host.append(el('p', 'cap', `Grey: under the ranking's gate of ${MIN_DAYS} days, so not ranked however the rest of the week went.`));
+}
+function perfsCompletion(host, ranked, wk) {
+  const dots = ranked.filter((r) => (Number(r.bookings) || 0) >= SHOW_AT && r.completion_pct != null)
+    .map((r) => ({ name: r.driver_name || '(unnamed)', bookings: Number(r.bookings), completion: Number(r.completion_pct), id: r.driver_ext_id }));
+  if (!dots.length) { empty(host, `Nobody ranked this week has ${SHOW_AT} bookings with an outcome to read a completion rate from.`); return; }
+  const box = el('div'); host.append(box);
+  scatter(box, dots, { x: 'bookings', y: 'completion', label: 'name', xLabel: 'bookings', yLabel: 'completed',
+    yFmt: (v) => `${fmt(v)}%`, onClick: (r) => { location.hash = href('performer', r.id, wk || null); } });
+  const under = ranked.length - dots.length;
+  host.append(el('p', 'cap', `${countOf(dots.length, 'ranked person', 'ranked people')} drawn`
+    + (under ? `; ${fmt(under)} with fewer than ${SHOW_AT} bookings are not — a rate over so few outcomes is noise` : '') + '.'));
+}
+function perfsChannels(host, rows) {
+  const by = new Map();
+  rows.forEach((r) => (r.platforms || []).forEach((p) => by.set(p, (by.get(p) || 0) + 1)));
+  if (!by.size) { empty(host, 'No channel is named on anybody\u2019s week.'); return; }
+  const multi = rows.filter((r) => (r.platforms || []).length > 1).length;
+  const box = el('div'); host.append(box);
+  hbars(box, [...by.entries()].sort((a, b) => chanOrder(a[0]) - chanOrder(b[0])).map(([p, n]) => ({ label: sourceLabel(p), n, plat: p })),
+    { signed: false, colorFor: (x) => sourceToken(x.plat) || '--mk-fill' });
+  host.append(el('p', 'cap', `${countOf(rows.length, 'person', 'people')} drove this week`
+    + (multi ? `; ${fmt(multi)} on more than one channel, so the bars add up to more than that` : '') + '.'));
+}
+function perfsAbsence(root, { top, basis, warnLow, cov, t, wk, ranked }) {
+  const cells = [];
+  if (!top) cells.push({ label: 'Why somebody did little', fig: null, none: 'Not recorded', why: warnLow });
+  if (!basis.money) cells.push({ label: 'Money for this week', fig: null, none: 'Not reported', why: basis.why });
+  if (cov && cov.note) cells.push({ label: 'What the week covers', fig: null, none: 'See the note', why: cov.note });
+  if (t.hours_note) cells.push({ label: 'Hours online', fig: null, none: 'Partly', why: t.hours_note });
+  if (cells.length) { const absHost = el('div'); root.append(absHost); absenceBand(absHost, cells); }
+  pageFoot({ colophon: [wk ? `week of ${dateStr(wk)}` : 'no complete week', `${fmt(ranked.length)} ranked`] }, root);
 }
 
 /* Anchored at NOON, not midnight. Adding six days to a midnight and reading

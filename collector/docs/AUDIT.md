@@ -1934,3 +1934,15 @@ within 180, 92 longer ago; 97 never took one. Found by looking and fixed
 before commit: the standings' counts caption was wiped by the bar's own
 redraw on layout, and at an 18ch floor driver names still wrapped to three
 lines — 24ch holds them to two.
+
+### #top-performers, #low-performers — 2026-09-24
+
+Production (week of 14–20 Sept), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/performers/`): no error, no sideways scroll, no
+whole-dirham amount. 98 ranked of 155 who drove (▲ +8 on the week before);
+fleet AED 319.13 per day worked (▲ +44.91); the ends 4.4× apart, AED 638.60
+at the top and AED 145.87 at the bottom; 75 of 155 worked all seven days;
+the 39 who ran least ran 1.7% of the week's 5,865 bookings; the top 10 ran
+16.2%, the top 20 29.7% against an even 12.9%. Found by looking and fixed
+before commit: the concentration drawn as a scatter carried its even-fleet
+line past 100%.
