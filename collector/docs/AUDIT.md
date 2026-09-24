@@ -1573,3 +1573,12 @@ error, no sideways scroll, two highlights. The ceiling: AED 3,440,115.08 over
 looking and fixed before commit: the † "what each driver owes" cell's
 fallback claimed everyone had a book row when none did; "347 of 347 unknown"
 wrapped at 1440 (the word moved to the label).
+
+### #salary — 2026-09-24
+
+Production (347 on the payroll; no salary ever recorded; 149 with a
+generated figure, 73 exactly 0.00, 125 none), both skins at 1440 and 390,
+light and dark (scratchpad `pagephase/shots/salary/`): no error, no sideways
+scroll, two highlights. Found by looking and fixed before commit: the
+spread's band labels were cut ("30,000–40,…"); they are named by the lower
+edge and the width is said in the caption.

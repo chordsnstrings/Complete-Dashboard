@@ -30,8 +30,11 @@
    happen, including the refusals. Only then does "Record the month" commit.
    The alternative, saving as you tab out of each field, means discovering on
    row ninety that the supervisor was never picked. */
-import { el, esc, panel, note, loading, tableFrom, entity } from './ui.js';
+import { el, esc, panel, note, loading, tableFrom, entity,
+  contract, glance, absenceBand, pageFoot } from './ui.js';
+import { fmt } from './charts.js';
 import { api } from './data.js';
+import { ledgerBand, formBars, amountBands, firstReason } from './ledger_ak.js';
 import { submitEntry, SUPERVISORS, aed, parseAmount, pooled, loadPeople,
   personRef } from './deposit_core.js';
 import { dubaiDay } from './tz.js';
@@ -46,6 +49,12 @@ const lastDay = (ym) => {
 
 export async function renderSalary(root) {
   root.innerHTML = '';
+  /* Under the page contract (plan §4 #salary): 00 first, the form and the
+     grid unchanged, then who the pay book covers and how the generated
+     figure spreads, then the † band. */
+  const ak = contract();
+  const AK = ak ? ledgerBand('The grid is one month; Generated is the whole record') : null;
+  if (ak) { root.append(AK.band); loading(AK.tiles); }
   const head = panel('Pay the month', 'One entry per driver, all in. Recorded, never '
     + 'calculated — this system holds what payroll decided and does not derive it.', 'salary');
   root.append(head.panel);
@@ -53,6 +62,8 @@ export async function renderSalary(root) {
 
   const gridPanel = panel('The month', null, 'salary-grid');
   root.append(gridPanel.panel);
+  const after = ak ? el('div') : null;
+  if (ak) root.append(after);
 
   /* EVERYONE ON THE PAYROLL, which is the roster and not the set of people who
      already carry a ledger balance. Salary is very often the FIRST thing ever
@@ -63,6 +74,9 @@ export async function renderSalary(root) {
   if (!d.ok) { head.body.append(note(esc(d.error), 'bad')); return; }
   const people = (d.people || []).filter((p) => p.name);
   if (!d.exposure_ok) head.body.append(note(esc(d.exposure_absent_reason), 'warn'));
+  /* The whole pay book, once, for the † band's "ever" — the grid's two reads
+     are one month each. */
+  const payAll = ak ? api('/api/ledger/entries?book=pay').catch(() => null) : null;
 
   /* ── the month, and who is recording ──────────────────────────────────── */
   const bar = el('div', 'depform');
@@ -125,7 +139,10 @@ export async function renderSalary(root) {
     gridPanel.body.append(tableFrom(people, [
       { label: 'Driver', key: 'name',
         render: (p) => entity('driver', p.ext_id, p.name) },
-      { label: 'Generated', key: 'earned', num: true,
+      /* "Generated, whole record" under the contract (plan §4 FIX):
+         loadPeople() is unwindowed, so this column is all-time while the
+         column beside it is one month, and a reader took it as the month's. */
+      { label: ak ? 'Generated, whole record' : 'Generated', key: 'earned', num: true,
         render: (p) => (p.earned != null ? esc(aed(p.earned))
           : `<span class="dash" title="${esc(p.earned_absent_reason || '')}">—</span>`) },
       /* `already` and `before` are keyed on person_id and come from the
@@ -152,6 +169,7 @@ export async function renderSalary(root) {
       inputs.set(Number(i.dataset.row), i);
       i.oninput = () => { verdict.innerHTML = ''; saveBtn.disabled = true; };
     });
+    if (ak) salaryContract(AK, after, root, people, { ym, prev, already, before, payAll: await payAll });
   }
 
   const filled = () => [...inputs.entries()]
@@ -207,4 +225,74 @@ export async function renderSalary(root) {
 
   month.onchange = drawGrid;
   await drawGrid();
+}
+
+/* ── #salary under the page contract ───────────────────────────────────────
+   00: salary recorded for the month (the hero) · last month · on the payroll
+   and their accounts · generated, whole record · no generated figure (none
+   at all, and exactly 0.00, said apart). After the grid: who the pay book
+   covers this month, the generated figure measured / 0.00 / none, and how
+   the measured figures spread. † wage runs on the pay book, payroll as a
+   feed, what a wage should be, and the generated figure's own reason.
+   RECORDED, NEVER CALCULATED holds here too: nothing below multiplies,
+   divides or compares a wage with anything.
+   NOT ADOPTED: a tile offering a figure "to check a wage against" (no GET
+   serves the pay basis, and this file is built never to hold one); the
+   accounts-per-person spread (an identity question, not payroll). */
+function salaryContract(AK, after, root, people, { ym, prev, already, before, payAll }) {
+  const n = people.length;
+  const gen = people.filter((p) => p.earned != null && +p.earned > 0);
+  const zero = people.filter((p) => p.earned != null && +p.earned === 0);
+  const none = people.filter((p) => p.earned == null);
+  const days = gen.reduce((a, p) => a + (+p.earning_days || 0), 0);
+  const total = Math.round(gen.reduce((a, p) => a + (+p.earned || 0), 0) * 100) / 100;
+  glance(AK.tiles, [
+    { label: `Salary recorded for ${ym}`, value: `${fmt(already.size)} of ${fmt(n)}`, hero: true,
+      sub: already.size ? 'those rows are locked in the grid below' : 'nothing is recorded for this month yet' },
+    { label: 'Last month', value: `${fmt(before.size)} of ${fmt(n)}`, sub: `recorded for ${prev}` },
+    { label: 'On the payroll', value: fmt(n),
+      sub: `across ${fmt(people.reduce((a, p) => a + (+p.accounts || 0), 0))} platform accounts` },
+    gen.length
+      ? { label: 'Generated, whole record', value: aed(total),
+        sub: `by ${fmt(gen.length)} of ${fmt(n)} over ${fmt(days)} earning days — context, never a wage` }
+      : { label: 'Generated, whole record', na: firstReason(people, (p) => p.earned_absent_reason)
+        || 'no driver here has a generated figure on the exposure read' },
+    { label: 'No generated figure', value: `${fmt(none.length + zero.length)} of ${fmt(n)}`,
+      sub: `${fmt(none.length)} none at all · ${fmt(zero.length)} exactly 0.00` },
+  ]);
+
+  after.innerHTML = '';
+  const g = el('div', 'grid g3'); after.append(g);
+  const cover = panel(`Who the pay book covers, ${ym}`, 'A person with no row is drawn as the outline: no record, not a nought.', 'salary-cover');
+  const genP = panel('Generated, whole record', 'Measured, exactly 0.00, or no figure at all — three different facts.', 'salary-generated');
+  const spread = panel('How the generated figure spreads', null, 'salary-spread');
+  g.append(cover.panel, genP.panel, spread.panel);
+  formBars(cover.body, [
+    { label: `Recorded for ${ym}`, n: already.size },
+    { label: `Recorded for ${prev}`, n: before.size },
+    { label: `Not recorded for ${ym}`, n: n - already.size, outline: true, why: 'no salary row for this month' },
+  ], { of: n });
+  formBars(genP.body, [
+    { label: 'A generated figure', n: gen.length },
+    { label: 'Exactly 0.00', n: zero.length },
+    { label: 'No figure', n: none.length, outline: true, why: firstReason(people, (p) => p.earned_absent_reason) || '' },
+  ], { of: n });
+  const sp = amountBands(spread.body, gen.map((p) => p.earned), { noun: 'people', aria: 'People by generated amount' });
+  if (sp) spread.body.append(el('p', 'cap', esc(`${fmt(sp.n)} people with a generated figure above nought, in AED ${fmt(sp.step)} bands, each named by its lower edge, over the whole record.`)));
+
+  const pays = payAll?.totals?.rows;
+  const absHost = el('div'); after.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Wage runs on the pay book', fig: pays ? `${fmt(pays)} rows` : null, none: payAll ? 'None, ever' : 'Not loaded',
+      why: !payAll ? 'The pay book did not load, so whether any wage has ever been recorded is not known here.'
+        : pays ? 'Rows on the pay book over the whole record, verification rows excluded.'
+          : 'No salary has been recorded on the pay book at any date — this page is where the first one is.' },
+    { label: 'Payroll as a feed', fig: null, none: 'Not imported',
+      why: 'No payroll system feeds this ledger. Every salary here is typed on this page or brought in from a sheet.' },
+    { label: 'What a wage should be', fig: null, none: 'Not derivable',
+      why: 'This system records what payroll decided and does not derive it: the pay basis is stored as documentation only, with nothing to multiply (sql/schema_v77.sql).' },
+    { label: 'Generated, missing', hl: true, fig: `${fmt(none.length)} of ${fmt(n)}`,
+      why: firstReason(people, (p) => p.earned_absent_reason) || 'Every driver here has a generated figure.' },
+  ]);
+  pageFoot({ colophon: [`The grid: ${ym}`, 'Generated: the whole record', `${fmt(n)} on the payroll`] }, root);
 }

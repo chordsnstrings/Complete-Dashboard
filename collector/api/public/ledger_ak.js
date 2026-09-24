@@ -186,7 +186,10 @@ export function amountBands(host, values, { noun = 'people', aria = 'People by a
   const step = [1, 2, 2.5, 5, 10].map((k) => k * mag).find((k) => k >= raw) || 10 * mag;
   const out = [];
   for (let lo = 0; lo < hi || !out.length; lo += step) {
-    out.push({ band: `${fmt(lo)}–${fmt(lo + step)}`, n: v.filter((x) => x >= lo && (x < lo + step || (lo + step >= hi && x <= hi))).length });
+    /* Labelled by the lower edge alone: "30,000–40,000" was cut to
+       "30,000–40,…" under every bar at 1440, and the band's width is said
+       once in the caption. */
+    out.push({ band: fmt(lo), n: v.filter((x) => x >= lo && (x < lo + step || (lo + step >= hi && x <= hi))).length });
   }
   barChart(host, out, { x: 'band', y: 'n', color: '--ink', label: noun, aria });
   return { step, bars: out.length, n: v.length };

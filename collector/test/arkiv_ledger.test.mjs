@@ -90,4 +90,48 @@ if (want('opening')) {
   await c.ctx.close();
 }
 
+/* ══ #salary ═════════════════════════════════════════════════════════════ */
+if (want('salary')) {
+  console.log('\n#salary');
+  const { ctx, page, answer } = await open('arkiv', 'salary');
+  const s = await shape(page);
+  const ppl = answer('/api/ledger/people').people.filter((p) => p.name);
+  const ex = answer('/api/ledger/exposure').people;
+  const n = ppl.length;
+  const ym = dubaiToday().slice(0, 7);
+  const byId = new Map(ex.map((p) => [p.person_id, p]));
+  const earned = ppl.map((p) => byId.get(p.person_id)?.earned ?? null);
+  const gen = earned.filter((v) => v != null && v > 0);
+  const r = await page.evaluate(() => ({
+    head: [...document.querySelectorAll('[data-panel="salary-grid"] thead th')].map((t) => t.textContent.trim()),
+    cover: [...document.querySelectorAll('[data-panel="salary-cover"] .hb')].map((h) => [h.querySelector('.k').textContent,
+      h.querySelector('.fill').className, h.querySelector('.v').textContent.trim()]),
+    gen: [...document.querySelectorAll('[data-panel="salary-generated"] .hb')].map((h) => [h.querySelector('.k').textContent,
+      h.querySelector('.fill').className]),
+    spread: !!document.querySelector('[data-panel="salary-spread"] svg'),
+  }));
+  check('00 leads; salary recorded for the month is the hero, over everyone on the payroll',
+    s.first === 'cband' && s.hero === `Salary recorded for ${ym}` && s.values[`Salary recorded for ${ym}`] === `0 of ${n}`, JSON.stringify(s.values));
+  check('Generated, whole record: the exposure read\'s figure, by how many, never called a wage',
+    s.values['Generated, whole record'] === aed(gen.reduce((a, v) => a + v, 0))
+    && s.subs['Generated, whole record'].startsWith(`by ${gen.length} of ${n}`), JSON.stringify([s.values, s.subs['Generated, whole record']]));
+  check('No generated figure says "none at all" and "exactly 0.00" apart',
+    s.values['No generated figure'] === `${earned.filter((v) => v == null || v === 0).length} of ${n}`
+    && /none at all · \d+ exactly 0\.00/.test(s.subs['No generated figure']), s.subs['No generated figure']);
+  check('the column the plan fixes reads "Generated, whole record" — the month is the column beside it',
+    r.head.includes('Generated, whole record') && !r.head.includes('Generated'), JSON.stringify(r.head));
+  check('who the pay book covers: no record is the OUTLINE, a count of people and not a quantity',
+    r.cover.length === 3 && /hb-outline/.test(r.cover[2][1]) && r.cover[2][2].startsWith(String(n)), JSON.stringify(r.cover));
+  check('generated measured / exactly 0.00 / none, the last outlined; the spread drawn', r.gen.length === 3
+    && /hb-outline/.test(r.gen[2][1]) && r.spread, JSON.stringify(r.gen));
+  check('the † band: wage runs on the pay book (none, ever, here), payroll as a feed, what a wage should be, generated missing',
+    s.abs.length === 4 && s.abs[0].none && s.abs[0].fig === 'None, ever' && s.abs[2].fig === 'Not derivable', JSON.stringify(s.abs));
+  check('no sideways scroll at 1440', s.overflowX <= 0, String(s.overflowX));
+  await ctx.close();
+  const c = await open('classic', 'salary');
+  const head = await c.page.evaluate(() => [...document.querySelectorAll('#view thead th')].map((t) => t.textContent.trim()));
+  check('old skin: no 00 band, and its column still reads "Generated"', !(await c.page.$('#view .cband')) && head.includes('Generated'), JSON.stringify(head));
+  await c.ctx.close();
+}
+
 await done();
