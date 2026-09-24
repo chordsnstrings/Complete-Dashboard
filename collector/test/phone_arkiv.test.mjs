@@ -779,6 +779,20 @@ console.log('\n4.7 · Safety: the statement as 00, ink bars by kind, and a faile
   const said = await f.page.evaluate(() => document.querySelector('.m-deck')?.textContent);
   check('a summary that did not load says so — never "No harsh-driving event in this window"',
     /Could not load this/.test(said) && !/No harsh-driving event/.test(said), said.slice(0, 120));
+  /* failed() is critical: a 3px negative rule and a SOLID dot (m/arkiv-m.css
+     §2). Measured before this check existed: the rule drew as the 1px
+     hairline of an untitled card, because `.m-card:not(:has(>h2))` outranks
+     `.m-err` — on every screen that could not load. */
+  const err = await f.page.evaluate(() => {
+    const e = document.querySelector('.m-deck .m-err');
+    const d = document.createElement('i'); d.style.color = 'var(--sem-neg)'; document.body.append(d);
+    const neg = getComputedStyle(d).color; d.remove();
+    const cs = getComputedStyle(e);
+    return { w: cs.borderTopWidth, c: cs.borderTopColor, neg,
+      dot: getComputedStyle(e.querySelector('b'), '::before').backgroundColor };
+  });
+  check('…drawn as critical: a 3px negative rule over it and a solid negative dot',
+    err.w === '3px' && err.c === err.neg && err.dot === err.neg, JSON.stringify(err));
   await f.close();
 }
 

@@ -527,3 +527,12 @@
    edge — a box within a box on People, Fleet, Every trip and this form. */
 :root[data-skin="arkiv"][data-ui="phone"] .m-search input:focus-visible{outline:none}
 :root[data-skin="arkiv"][data-ui="phone"] .m-search:focus-within{outline:2px solid var(--ink);outline-offset:2px}
+
+/* ── 18 · a screen that could not load, whatever else it is ──────────────────
+   failed() builds a `.m-card.m-err` with no title, and §3's
+   `.m-card:not(:has(>h2))` (0,4,1 with the scope) outranks §2's `.m-err`
+   (0,4,0), so the 3px negative rule that says CRITICAL drew as the 1px
+   hairline of an untitled block — measured on Safety's failed summary, and
+   the same rule draws every failed() block on every screen. Restated here at a weight that
+   wins; the solid dot before the words was never affected. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-card.m-err:not(:has(>h2)){border-top:3px solid var(--sem-neg)}
