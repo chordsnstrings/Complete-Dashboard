@@ -1549,3 +1549,11 @@ absent, the unnamed bar unlinked and "None named" in the † band. Found by
 looking and fixed before commit: the verdict's AED figure repeated by the
 Billed tile (ruling 7); booked ahead drawn as "Other (1)"; the leak list's
 rows 132px tall; the no-scope reason only in a tooltip.
+
+### #property — 2026-09-24
+
+No property resolves on production (the one booker has no partner id, so
+`#property` shows "No property chosen" in both skins, unchanged). Rendered
+against the mock's `h-palm` at 1440 and 390 (scratchpad
+`pagephase/shots/corporate/prop-mock*.png`): no error, no sideways scroll,
+one highlight (the hero).

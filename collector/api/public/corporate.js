@@ -747,6 +747,17 @@ async function corpApproach(host) {
 }
 
 /* ── one property ─────────────────────────────────────────────────────── */
+/* The overview's eight tiles, shared by both orders of the page. */
+const propertyTiles = (pr) => [
+  { label: 'Bookings', value: fmt(pr.bookings) },
+  { label: 'Revenue', value: money(pr.revenue), sub: `over ${fmt(pr.priced)} priced` },
+  { label: 'Average fare', value: money(pr.avg_fare, 'AED', 2) },
+  { label: 'Guests', value: fmt(pr.guests) },
+  { label: 'Drivers', value: fmt(pr.drivers) },
+  { label: 'Vehicles', value: fmt(pr.vehicles) },
+  { label: 'First booking', value: dayStr(pr.first_at) },
+  { label: 'Last booking', value: dayStr(pr.last_at) },
+];
 export const PROPERTY_TABS = [
   { id: 'overview', label: 'Overview', ic: '◱' },
   { id: 'guests', label: 'Passengers', ic: '◧' },
@@ -829,17 +840,11 @@ export async function renderProperty(root, id, tab = 'overview', onDetail) {
     return;
   }
 
+  /* The overview under the page contract (plan §4 property/overview); the
+     Passengers and Drivers tabs above are restyled only. */
+  if (contract()) return propertyOverviewContract(host, d, id);
   const pr = d.profile;
-  host.append(kpiRow([
-    { label: 'Bookings', value: fmt(pr.bookings) },
-    { label: 'Revenue', value: money(pr.revenue), sub: `over ${fmt(pr.priced)} priced` },
-    { label: 'Average fare', value: money(pr.avg_fare, 'AED', 2) },
-    { label: 'Guests', value: fmt(pr.guests) },
-    { label: 'Drivers', value: fmt(pr.drivers) },
-    { label: 'Vehicles', value: fmt(pr.vehicles) },
-    { label: 'First booking', value: dayStr(pr.first_at) },
-    { label: 'Last booking', value: dayStr(pr.last_at) },
-  ]));
+  host.append(kpiRow(propertyTiles(pr)));
   const g = grid(); host.append(g);
   add(g, 'Bookings and revenue per day', 'Two series, because a quiet day of expensive charters and a '
     + 'busy day of short hops are the same bar on a booking count.', (body) => {
@@ -1142,4 +1147,139 @@ async function corpOverviewContract(host) {
     + (s.has_cost ? '' : ' It does not report a delivery cost: the report returns one money figure per '
       + 'booking, so there is a fare and no margin, and nothing here pretends otherwise.')));
   pageFoot({ colophon: [windowLabel(), `${fmt(s.bookings)} hotel bookings`, s.revenue != null ? `${money(s.revenue)} billed` : null] }, host);
+}
+
+/* ── #property/<id> under the page contract (plan §4 property/overview) ─────
+     00  AT A GLANCE — KEPT ON THIS PROPERTY the hero, from the property's
+         row on /api/corporate/properties (the per-property endpoint returns
+         no cost), ABSENT with its reason where no cost is filed; then all
+         eight of the old tiles.
+     01  Billed, cost, kept — with what a billed km earned and the mean
+         approach, from the same row.
+     02  Bookings and revenue per day — two charts, never a dual axis, in the
+         hotel channel's identity.
+     03  The exceptions on this property's bookings — ran past the booked
+         hours, given away, booked ahead (the same row).
+     04… what they book (bars and the types table), how they settle (with the
+         receivables link), when they travel (one 100% bar).
+     †   what no per-property payload carries: rides ending outside Dubai,
+         authorisations, repeat guests, and the cost where none is filed.
+   NOT BUILT: the "unnamed booker" view (it needs a route key for a row with
+   no partner id and /api/corporate/property to accept it — an API change);
+   "unpaid approach ▼ −5.2%" (a level in the delta slot — printed as text). */
+async function propertyOverviewContract(host, d, id) {
+  const gen = currentGen();
+  const pr = d.profile;
+  const band = el('section', 'cband');
+  const tiles = el('div');
+  band.append(secHead('00', 'At a glance', windowLabel()), tiles);
+  host.append(band);
+  loading(tiles);
+  const props = await q('/api/corporate/properties').catch(() => null);
+  if (!alive(gen)) return;
+  const row = (props || []).find((r) => String(r.partner_id) === String(id)) || null;
+  const hasCost = row && row.cost != null && row.cost !== row.revenue;
+  const kept = hasCost ? (+row.revenue || 0) - (+row.cost || 0) : null;
+  /* Three different reasons for no row, said as themselves: the list did
+     not load; it loaded and this property is not on it for this window; or
+     the row is there and files no cost. */
+  const noRow = props == null ? 'the property list did not load, so its cost is not known here'
+    : 'this property is not on the window’s property list, so its cost is not known here';
+  glance(tiles, [
+    hasCost
+      ? { label: 'Kept on this property', value: money(kept), hero: true,
+        sub: row.revenue ? `${pct((kept / row.revenue) * 100, 1)} of what it was billed` : null }
+      : { label: 'Kept on this property', hero: true,
+        na: row ? 'this property’s bookings file no delivery cost, so there is no margin' : noRow },
+    ...propertyTiles(pr),
+  ]);
+
+  const m = panel('Billed, cost, kept', null, 'prop-margin'); host.append(m.panel);
+  if (!hasCost) empty(m.body, row ? 'No cost is filed on this property’s bookings, so only what they were billed is known.' : `${noRow[0].toUpperCase()}${noRow.slice(1)}.`);
+  else {
+    hbars(m.body, [{ label: 'Billed', n: +row.revenue || 0 }, { label: 'Cost filed', n: +row.cost || 0 }, { label: 'Kept', n: kept }],
+      { signed: true, color: '--c-hotel', valueFmt: (v) => money(v) });
+    m.body.append(el('p', 'cap', esc([
+      row.revenue_per_km != null ? `${money(row.revenue_per_km, 'AED', 2)} a billed kilometre` : null,
+      row.avg_deadhead_km != null ? `${fmt(row.avg_deadhead_km, 2)} km of approach a booking, on average` : null,
+    ].filter(Boolean).join(' · ') || 'Billed less the cost this channel files per booking.')));
+  }
+
+  const daily = panel('Bookings and revenue per day', 'Two series, because a quiet day of expensive charters and a '
+    + 'busy day of short hops are the same bar on a booking count.', 'prop-daily');
+  host.append(daily.panel);
+  {
+    const a = el('div'); const b = el('div');
+    daily.body.append(el('p', 'cap', 'Bookings'), a);
+    areaChart(a, d.daily, { x: 'day', y: 'bookings', color: '--c-hotel', aria: 'Bookings per day' });
+    if (d.daily.some((x) => x.revenue != null)) {
+      daily.body.append(el('p', 'cap', 'Revenue'), b);
+      areaChart(b, d.daily, { x: 'day', y: 'revenue', color: '--c-hotel', valueFmt: (v) => money(v), aria: 'Revenue per day' });
+    }
+  }
+
+  const ex = panel('The exceptions on this property’s bookings', null, 'prop-exceptions'); host.append(ex.panel);
+  if (!row) empty(ex.body, `${noRow.replace(/its cost/, 'its exceptions').replace(/^./, (c) => c.toUpperCase())}.`);
+  else {
+    hbars(ex.body, [
+      { label: 'Hourly bookings', n: +row.hourly || 0 },
+      { label: 'Given away', n: +row.foc || 0 },
+      { label: 'Booked ahead', n: Math.round((+row.scheduled_pct || 0) * (+row.bookings || 0) / 100) },
+    ], { signed: false, color: '--c-hotel', shareOf: (x) => (row.bookings ? `${(x.n / row.bookings * 100).toFixed(1)}%` : null) });
+    ex.body.append(el('p', 'cap', esc(`Of ${countOf(row.bookings, 'booking')}. Booked ahead is the property row’s `
+      + `scheduled share (${pct(row.scheduled_pct, 0)}) applied to its bookings.`)));
+  }
+
+  const g = grid(); host.append(g);
+  add(g, 'What they book', 'Bookings by type, with what each type is worth.', (body) => {
+    body.innerHTML = '';
+    const rows = d.types.map((t) => ({ label: String(t.label || '—').replace(/_/g, ' '), n: t.n, revenue: t.revenue }));
+    if (!rows.length) return empty(body, 'No booking type recorded');
+    hbars(body, rows, { signed: false, color: '--c-hotel' });
+    if (rows.some((r) => r.revenue != null)) {
+      const tot = rows.reduce((a, r) => a + (+r.revenue || 0), 0);
+      body.append(tableFrom(rows, [
+        { label: 'Type', key: 'label' },
+        { label: 'Bookings', key: 'n', num: true },
+        { label: 'Revenue', key: 'revenue', num: true,
+          render: (r) => (r.revenue == null
+            ? '<span class="ent-off" title="no booking of this type reports a fare">—</span>'
+            : `${money(r.revenue)}<span class="dim"> · ${pct(tot ? (r.revenue / tot) * 100 : 0, 1)}</span>`) },
+      ], { compact: true, sortable: true, sortId: 'ptypes', defaultSort: { key: 'revenue', dir: 'desc' } }));
+    }
+  });
+  add(g, 'How they settle', 'The provider’s own label, and what it means for us.', (body) => {
+    body.innerHTML = '';
+    const rows = d.payments.map((p2) => ({
+      label: `${p2.label} — ${p2.label_class || 'unclassified'}`, n: p2.n,
+      revenue: p2.revenue, cls: p2.label_class }));
+    hbars(body, rows, { signed: false });
+    const owed = rows.filter((r) => ['on_account', 'salary'].includes(r.cls));
+    if (owed.length) {
+      const amount = owed.reduce((a, r) => a + (+r.revenue || 0), 0);
+      const line = el('p', 'cap');
+      line.innerHTML = `${countOf(owed.reduce((a, r) => a + r.n, 0), 'booking')} settled AFTER the ride`
+        + (amount ? `, worth ${esc(money(amount))}` : '')
+        + ` — <a class="lnk" href="${href('settlement', 'receivables')}">what is outstanding across every `
+        + 'counterparty</a>.';
+      body.append(line);
+    }
+  });
+  add(g, 'When they travel', null, (body) => {
+    body.innerHTML = '';
+    donut(body, d.dayparts.map((x) => ({ label: x.label, n: x.n })), { as: 'bar100' });
+  });
+
+  const absHost = el('div'); host.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Rides that ended outside Dubai', fig: null, none: 'Not in this payload',
+      why: 'The channel’s summary counts them for the whole channel; nothing per property carries the count yet.' },
+    { label: 'Authorisations', fig: null, none: 'Not in this payload',
+      why: 'Whether this property’s bookings carried a granted authorisation is counted for the channel, not per property.' },
+    { label: 'Guests who came back', fig: null, none: 'Not measurable',
+      why: 'This channel issues a passenger id per booking, so a returning guest is several strangers; only the room recurs.' },
+    hasCost ? null : { label: 'The cost of a ride here', fig: null, none: 'Not filed',
+      why: 'No booking at this property files a delivery cost, so billed is the only money figure.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), `${fmt(pr.bookings)} bookings`, pr.revenue != null ? `${money(pr.revenue)} billed` : null] }, host);
 }

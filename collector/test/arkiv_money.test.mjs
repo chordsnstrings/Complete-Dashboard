@@ -454,4 +454,33 @@ const UNNAMED = (_q, real) => [{ ...real[0], partner_id: null, name: '(unnamed)'
   await c.ctx.close();
 }
 
+/* ══ #property/<id> ═══════════════════════════════════════════════════════ */
+console.log('\n#property');
+{
+  const { ctx, page, answer } = await open('arkiv', 'property/h-palm');
+  const s = await shape(page);
+  const row = answer('/api/corporate/properties').find((x) => x.partner_id === 'h-palm');
+  const pr = answer('/api/corporate/property').profile;
+  check('the order: 00, billed-cost-kept, the two daily charts, the exceptions, what they book, how they settle, when, †',
+    JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Billed, cost, kept', 'Bookings and revenue per day',
+      'The exceptions on this property’s bookings', 'What they book', 'How they settle', 'When they travel', '† What this page does not know']),
+    JSON.stringify(s.heads));
+  check('Kept on this property is the hero, from the property\'s row on the list', s.hero === 'Kept on this property'
+    && s.values['Kept on this property'] === aed(row.revenue - row.cost), s.values['Kept on this property']);
+  check('…and all eight of the old tiles follow', ['Bookings', 'Revenue', 'Average fare', 'Guests', 'Drivers', 'Vehicles',
+    'First booking', 'Last booking'].every((l) => l in s.values) && s.values.Revenue === aed(pr.revenue), JSON.stringify(s.values));
+  const charts = await page.evaluate(() => document.querySelectorAll('[data-panel="prop-daily"] svg').length);
+  check('two daily charts, never a dual axis', charts === 2, String(charts));
+  check('the † band says what no per-property payload carries', s.abs.length >= 3 && s.abs.every((a) => a.why), JSON.stringify(s.abs));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'property/h-palm', { fixtures: { '/api/corporate/properties': [] } });
+  const s = await shape(page);
+  check('a property missing from the window\'s list: Kept is ABSENT with THAT reason, not "did not load"',
+    /not on the window’s property list/.test(s.na['Kept on this property'] || '') && !/did not load/.test(s.na['Kept on this property'] || ''),
+    JSON.stringify(s.na));
+  await ctx.close();
+}
+
 await done();
