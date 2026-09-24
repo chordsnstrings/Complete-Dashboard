@@ -6569,3 +6569,10 @@ number (5 and 5), and never a passport or RTA number.
   total on another; #playbook's is the measured total or the action count.
   Pass the figure given to `verdict()` through `notRepeated()` (ruling 7)
   rather than choosing a hero that is only right on today's data.
+
+* **`.leak` IS `flex:1 1 132px` IN app.css.** In the row flow it was built for
+  that is a width; turned into a column (#corporate/leakage's ranked list) it
+  is a 132px HEIGHT. A reused flex item needs `flex:none` in its new flow.
+* **stackedBar folds a segment under 1.5% into "Other (n)".** Where the small
+  segment is the one the chart is about (#corporate's booked-ahead share, 2
+  of 719), the fold draws the subject without its name. Use named bars.

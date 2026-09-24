@@ -316,4 +316,142 @@ let classicRevTones = [];
   await ctx.close();
 }
 
+/* ══ #corporate — five tabs ═══════════════════════════════════════════════ */
+console.log('\n#corporate');
+const CORP_HEADS = ['At a glance', 'The only margin in the product', 'What is booked', 'Where the money leaks',
+  'How the fare is settled', 'Empty km before pickup, by time of day', 'Who books', 'Booked ahead or called on the spot',
+  'Empty km after the drop, by drop area', 'Empty km after each drop, by drop area', '† What this page does not know'];
+const corpRead = (page) => page.evaluate(() => {
+  const t = (n) => (n ? n.textContent.replace(/\s+/g, ' ').trim() : '');
+  const panelOf = (name) => [...document.querySelectorAll('#view .panel')].find((p) => t(p.querySelector('h3')) === name);
+  return {
+    vfig: t(document.querySelector('.cband .vdct-fig > b')),
+    bandCap: [...document.querySelectorAll('.cband > p.cap')].map(t),
+    margin: [...document.querySelectorAll('[data-panel="corp-margin"] .hb')].map((h) => [t(h.querySelector('.k')), t(h.querySelector('.v'))]),
+    marginText: t(document.querySelector('[data-panel="corp-margin"] .pbody')),
+    leaks: [...document.querySelectorAll('[data-panel="corp-leaks"] a.hb')].map((a) => [t(a.querySelector('.k')), t(a.querySelector('.v')),
+      a.getAttribute('href'), a.querySelector('.fill').className]),
+    who: [...(panelOf('Who books')?.querySelectorAll('.hb') || [])].map((h) => [t(h.querySelector('.k')), h.hasAttribute('data-click')]),
+    whoCap: t(panelOf('Who books')?.querySelector('.cap')),
+    ahead: [...(panelOf('Booked ahead or called on the spot')?.querySelectorAll('.hb') || [])].map((h) => t(h.querySelector('.k'))),
+  };
+});
+{
+  const { ctx, page, answer } = await open('arkiv', 'corporate');
+  const s = await shape(page);
+  const r = await corpRead(page);
+  const sm = answer('/api/corporate/summary');
+  const lk = answer('/api/corporate/leakage');
+  check('the order: 00, the margin, what is booked beside the leaks, settlement, empty km by time of day, who books, '
+    + 'booked ahead, the two drop-area charts, †', JSON.stringify(s.heads) === JSON.stringify(CORP_HEADS), JSON.stringify(s.heads));
+  check('00: the verdict is the statement and no tile repeats its figure (ruling 7)',
+    s.vdctIn00 && r.vfig && !Object.values(s.values).includes(r.vfig), JSON.stringify([r.vfig, s.values]));
+  check('…Billed is the verdict\'s figure, so its sub-line is kept in words under the band',
+    r.vfig === aed(sm.revenue) && !('Billed' in s.values) && r.bandCap.some((c) => c.startsWith('Billed —') && c.includes(`over ${sm.priced.toLocaleString('en-US')} priced bookings`)),
+    JSON.stringify(r.bandCap));
+  check('Kept is the hero: billed less the cost filed, and its share', s.hero === 'Kept'
+    && s.values.Kept === aed(sm.revenue - sm.cost) && s.subs.Kept.startsWith(`${((sm.revenue - sm.cost) / sm.revenue * 100).toFixed(1)}% of what was billed`),
+    JSON.stringify([s.values.Kept, s.subs.Kept]));
+  check('01: billed, cost filed, kept — the summary\'s three figures', JSON.stringify(r.margin.map(([, v]) => v))
+    === JSON.stringify([aed(sm.revenue), aed(sm.cost), aed(sm.revenue - sm.cost)]), JSON.stringify(r.margin));
+  check('03: every check, zeros included, each the address of its bookings', r.leaks.length === lk.kinds.length
+    && r.leaks.every(([, , h], i) => h.split('?')[0] === `#corporate/leakage/${lk.kinds[i].kind}`)
+    && r.leaks.some(([, v]) => v === '0'), JSON.stringify(r.leaks));
+  check('booked ahead: two NAMED bars — the booked-ahead slice is not folded into "Other"',
+    JSON.stringify(r.ahead) === JSON.stringify(['Scheduled in advance', 'On demand']), JSON.stringify(r.ahead));
+  check('who books: a named property opens its page', r.who.length > 0 && r.who.every(([, c]) => c), JSON.stringify(r.who));
+  check('the † band: which hotel, repeat business, approvals, hours given away', JSON.stringify(s.abs.map((a) => a.label))
+    === JSON.stringify(['Which hotel', 'Repeat business', 'Approvals', 'Hours given away']), JSON.stringify(s.abs));
+  check('no sideways scroll at 1440', s.overflowX <= 0, String(s.overflowX));
+  await ctx.close();
+}
+/* Production today: no booking names its property. The concentration index
+   is an artefact, and an unnamed bar must not open "No property chosen". */
+const UNNAMED = (_q, real) => [{ ...real[0], partner_id: null, name: '(unnamed)',
+  bookings: real.reduce((a, x) => a + x.bookings, 0) }];
+{
+  const { ctx, page } = await open('arkiv', 'corporate', { fixtures: { '/api/corporate/properties': UNNAMED } });
+  const s = await shape(page);
+  const r = await corpRead(page);
+  check('with no named property, How much rests on one client is ABSENT with the reason, not an index of 10,000',
+    /no booking names its property/.test(s.na['How much rests on one client'] || ''), JSON.stringify(s.na));
+  check('…the unnamed bar is not a link, and the Herfindahl caption is gone', r.who.length === 1 && r.who[0][1] === false
+    && !/Herfindahl/.test(r.whoCap), JSON.stringify([r.who, r.whoCap]));
+  check('…and the † band says no hotel is named', s.abs[0].fig === 'None named' && /no partner id/.test(s.abs[0].why), JSON.stringify(s.abs[0]));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'corporate', { fixtures: {
+    '/api/corporate/summary': (_q, real) => ({ ...real, has_cost: false, cost: null }) } });
+  const s = await shape(page);
+  const r = await corpRead(page);
+  check('with no cost filed, Kept is ABSENT with the reason and the margin chart says why it is empty',
+    /files no delivery cost/.test(s.na.Kept || '') && r.margin.length === 0 && /no margin to draw/.test(r.marginText),
+    JSON.stringify([s.na, r.marginText]));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'corporate', { fixtures: {
+    '/api/corporate/summary': (_q, real) => ({ ...real, approval_required_bookings: 0 }) } });
+  const r = await corpRead(page);
+  const u = r.leaks.find(([, , h]) => h.split('?')[0].endsWith('/unauthorized'));
+  check('an authorisation check with nothing in scope is the OUTLINE with its reason, not a measured nought',
+    u && /hb-outline/.test(u[3]) && u[1] === 'nothing in scope', JSON.stringify(u));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('classic', 'corporate');
+  const s = await shape(page);
+  check('old skin: the old overview — its tile row, no 00 band', s.kpiRows >= 1 && s.glance === 0 && !s.vdctIn00, JSON.stringify([s.kpiRows, s.glance]));
+  await ctx.close();
+}
+/* The Properties tab: an unnamed row says why it opens nothing. */
+{
+  const { ctx, page } = await open('arkiv', 'corporate/properties', { fixtures: { '/api/corporate/properties': UNNAMED } });
+  const r = await page.evaluate(() => ({
+    cell: document.querySelector('#view tbody tr td .ent-off')?.getAttribute('title') || '',
+    link: !!document.querySelector('#view tbody tr td a'),
+    cap: [...document.querySelectorAll('#view .panel .cap')].map((c) => c.textContent).find((x) => /partner id is empty/.test(x)) || '' }));
+  check('properties: the unnamed row is not a link, and its reason is on it and in the words beneath',
+    /partner id is empty/.test(r.cell) && !r.link && /\(unnamed\): no booking names its property/.test(r.cap), JSON.stringify(r));
+  await ctx.close();
+}
+/* The Passengers tab: the purpose sentence had no subject when no row names
+   its property ("Purpose is empty on 250 of these 300 rows. are the only
+   booking sources that record one"). */
+{
+  const NOPROP = (_q, real) => ({ ...real, guests: real.guests.map((g) => ({ ...g, property: null })) });
+  const a = await open('arkiv', 'corporate/guests', { fixtures: { '/api/corporate/guests': NOPROP } });
+  const ca = await a.page.evaluate(() => [...document.querySelectorAll('#view p.cap')].map((c) => c.textContent)
+    .find((x) => /^Purpose is empty/.test(x)) || '');
+  check('passengers: with no property named, the purpose sentence says so rather than losing its subject',
+    /No row here names its property/.test(ca) && !/\. are the only/.test(ca), ca);
+  await a.ctx.close();
+}
+/* Money lost: a ranked check list, the no-scope check an outline with its
+   reason in words. */
+{
+  const { ctx, page, answer } = await open('arkiv', 'corporate/leakage', { fixtures: {
+    '/api/corporate/summary': (_q, real) => ({ ...real, approval_required_bookings: 0 }) } });
+  const lk = answer('/api/corporate/leakage');
+  const r = await page.evaluate(() => ({
+    rows: [...document.querySelectorAll('#view .leaks.ak-rank .leak')].map((a) => [a.querySelector('b').textContent.trim(),
+      a.className, a.getAttribute('href')]),
+    why: document.querySelector('#view .leak-why')?.textContent || '',
+    tall: Math.max(...[...document.querySelectorAll('#view .leaks.ak-rank .leak')].map((a) => a.getBoundingClientRect().height)) }));
+  const counts = r.rows.filter(([, c]) => !/leak-noscope|off/.test(c)).map(([b]) => Number(b.replace(/,/g, '')));
+  check('money lost: every check as a ranked list, largest first, each still an address',
+    r.rows.length === lk.kinds.length && counts.every((n, i) => i === 0 || counts[i - 1] >= n)
+    && r.rows.filter(([, c]) => !/off/.test(c)).every(([, , h]) => h && h.startsWith('#corporate/leakage/')), JSON.stringify(r.rows));
+  check('…one line a check, not a 132px box', r.tall < 70, String(r.tall));
+  check('…the check with nothing in scope last, as the outline, its reason in words',
+    /leak-noscope/.test(r.rows[r.rows.length - 1][1]) && r.rows[r.rows.length - 1][0] === 'none in scope'
+    && /nothing in scope, not a measured nought/.test(r.why), JSON.stringify([r.rows[r.rows.length - 1], r.why]));
+  await ctx.close();
+  const c = await open('classic', 'corporate/leakage');
+  const order = await c.page.evaluate(() => [...document.querySelectorAll('#view .leaks .leak span')].map((x) => x.textContent));
+  check('…the old skin keeps the server\'s order', JSON.stringify(order) === JSON.stringify(lk.kinds.map((k) => k.label)), JSON.stringify(order));
+  await c.ctx.close();
+}
+
 await done();

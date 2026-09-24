@@ -20,8 +20,9 @@
 
 import { donut, hbars, areaChart, stackedBar, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, entity,
-  dayStr, dateStr, dtStr, money, pct, tripTime, sourceLabel, countOf, plural, noneChosen, verdict } from './ui.js';
-import { q, qAll, href, state } from './data.js';
+  dayStr, dateStr, dtStr, money, pct, tripTime, sourceLabel, countOf, plural, noneChosen, verdict,
+  contract, glance, secHead, absenceBand, pageFoot, notRepeated, andList } from './ui.js';
+import { q, qAll, href, state, currentGen, alive, windowLabel } from './data.js';
 
 /* Why a whole column is empty, in the words the page prints under it. Shared
    so that the four tables carrying a Cost or a Room say the same thing — four
@@ -51,35 +52,23 @@ export async function renderCorporate(root, tab = 'overview') {
   root.innerHTML = '';
   root.append(tabBar(CORP_TABS, tab, (id) => href('corporate', id === 'overview' ? null : id)));
   const host = el('div', 'stack'); root.append(host);
-  const page = { overview: corpOverview, properties: corpProperties, guests: corpGuests,
-    leakage: corpLeakage, approach: corpApproach }[tab] || corpOverview;
+  /* The overview under the page contract is its own function (plan §4
+     corporate/overview); the other four tabs are restyled only, with the
+     plan's fixes gated on contract() inside them. */
+  const page = { overview: contract() ? corpOverviewContract : corpOverview, properties: corpProperties,
+    guests: corpGuests, leakage: corpLeakage, approach: corpApproach }[tab] || corpOverview;
   await page(host);
 }
 
-/* ── overview ─────────────────────────────────────────────────────────── */
-async function corpOverview(host) {
-  const kpiHost = el('div'); host.append(kpiHost); loading(kpiHost);
-  const s = await q('/api/corporate/summary');
-  kpiHost.innerHTML = '';
-  // A margin needs two different numbers. This channel returns one money value
-  // per booking; the API says whether what it stored as `cost` is genuinely a
-  // second figure, and if it is not there is no margin to show.
-  const grossMargin = s.has_cost ? s.revenue - s.cost : null;
-
-  /* Fields read off /api/corporate/summary on production: bookings, priced,
-     revenue, cost, km, deadhead_km, deadhead_measured, foc_trips,
-     overrun_trips, scheduled_trips.
-
-     This is the one channel that reports a cost, a property and a guest — so
-     it is the only one where a booking given away for free is visible as such.
-     That, and the empty kilometres driven to reach the pickup, are what the
-     channel is actually costing. */
-  {
+/* The overview's verdict and tiles, as data: the old skin draws them with
+   verdict() and kpiRow, the contract re-orders them into its 00 band — one
+   source, so the two cannot disagree about a figure. */
+function corpVerdict(s) {
     const dead = +s.deadhead_km || 0;
     const km = +s.km || 0;
     const deadPct = km ? Math.round((dead / (km + dead)) * 100) : 0;
     const foc = +s.foc_trips || 0;
-    verdict(kpiHost, {
+    return {
       claim: foc
         ? `${countOf(foc, 'booking')} ${foc === 1 ? 'was' : 'were'} given away`
         : s.deadhead_measured && deadPct
@@ -95,10 +84,11 @@ async function corpOverview(host) {
         + (s.priced != null && s.priced < s.bookings
           ? `${fmt(s.bookings - s.priced)} of these bookings carry no price at all.`
           : 'Every booking carries a price.'),
-    });
-  }
-
-  kpiHost.append(kpiRow([
+    };
+}
+function corpTiles(s) {
+  const grossMargin = s.has_cost ? s.revenue - s.cost : null;
+  return [
     { label: 'Bookings', value: fmt(s.bookings), sub: `${s.properties} properties · ${s.guests} guests` },
     { label: 'Revenue', value: money(s.revenue), sub: `over ${fmt(s.priced)} priced bookings` },
     { label: 'Average fare', value: money(s.avg_fare, 'AED', 2), sub: 'complimentary rides excluded' },
@@ -177,7 +167,30 @@ async function corpOverview(host) {
           + `where above 2,500 is a concentrated book and ${fmt(10000)} is a single client`
         : null,
       tone: s.concentration_hhi > 2500 ? 'warn' : null },
-  ]));
+  ];
+}
+
+/* ── overview ─────────────────────────────────────────────────────────── */
+async function corpOverview(host) {
+  const kpiHost = el('div'); host.append(kpiHost); loading(kpiHost);
+  const s = await q('/api/corporate/summary');
+  kpiHost.innerHTML = '';
+  // A margin needs two different numbers. This channel returns one money value
+  // per booking; the API says whether what it stored as `cost` is genuinely a
+  // second figure, and if it is not there is no margin to show.
+  const grossMargin = s.has_cost ? s.revenue - s.cost : null;
+
+  /* Fields read off /api/corporate/summary on production: bookings, priced,
+     revenue, cost, km, deadhead_km, deadhead_measured, foc_trips,
+     overrun_trips, scheduled_trips.
+
+     This is the one channel that reports a cost, a property and a guest — so
+     it is the only one where a booking given away for free is visible as such.
+     That, and the empty kilometres driven to reach the pickup, are what the
+     channel is actually costing. */
+  verdict(kpiHost, corpVerdict(s));
+
+  kpiHost.append(kpiRow(corpTiles(s)));
 
   if (!s.bookings) {
     host.append(note('No corporate bookings in this window. The hotel collector writes to the '
@@ -268,6 +281,7 @@ async function corpOverview(host) {
 
 /* ── properties ───────────────────────────────────────────────────────── */
 async function corpProperties(host) {
+  const ak = contract();
   loading(host);
   const rows = await q('/api/corporate/properties');
   host.innerHTML = '';
@@ -279,7 +293,9 @@ async function corpProperties(host) {
     `${fmt(totalB)} bookings worth ${money(totalR)} in this window, ordered by revenue.`);
   host.append(pp.panel);
   pp.body.append(tableFrom(rows, [
-    { label: 'Property', key: 'name', render: (r) => entity('property', r.partner_id, r.name) },
+    { label: 'Property', key: 'name', render: (r) => (ak && r.partner_id == null
+      ? `<span class="ent-off" title="no booking names its property — partner id is empty">${esc(r.name)}</span>`
+      : entity('property', r.partner_id, r.name)) },
     { label: 'Bookings', key: 'bookings', num: true, render: (r) => `${fmt(r.bookings)} <small class="dim">${pct((r.bookings / totalB) * 100, 1)}</small>` },
     { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
     /* Revenue divided by Bookings does not give Avg fare, because avg fare is
@@ -308,6 +324,13 @@ async function corpProperties(host) {
     'Avg fare is revenue over the bookings that carry one, not over all of them, so Revenue ÷ Bookings '
     + 'will read slightly low wherever the two counts differ. AED/km divides the same revenue by the '
     + 'distance of every booking, priced or not.'));
+  /* The reason on an unnamed row is a title under the contract, and a title
+     is read by a pointer, not by a phone — so it is also said. */
+  const nameless = ak ? rows.filter((r) => r.partner_id == null) : [];
+  if (nameless.length) {
+    pp.body.append(el('p', 'cap', esc(`${andList(nameless.map((r) => r.name))}: no booking names its property — the `
+      + `partner id is empty — so ${nameless.length === 1 ? 'this row has' : 'these rows have'} no property page to open.`)));
+  }
   host.append(note(rows.some((r) => r.cost != null && r.cost !== r.revenue)
     ? 'Margin is revenue minus the cost this channel reports per booking.'
     : 'There is no margin column because there is no cost: this report returns a single money figure per '
@@ -424,9 +447,18 @@ async function corpGuests(host) {
 
    `absent` cannot prune the column, for the usual reason — some rows do carry
    a purpose — so the explanation goes under the table, once. */
+/* Under the contract (plan §4 corporate/guests): when no row names its
+   property the sentence had no subject — "Purpose is empty on 250 of these
+   300 rows. are the only booking sources that record one" — and its reason
+   (the channel the ride came through) was unsupported. It then says so. */
 const purposeNote = (rows) => {
   const named = (rows || []).filter((r) => (r.purpose || '').trim());
   if (!named.length || named.length === rows.length) return null;
+  if (contract() && !named.some((r) => r.property)) {
+    return el('p', 'cap', `Purpose is empty on ${fmt(rows.length - named.length)} of these `
+      + `${countOf(rows.length, 'row')}. No row here names its property, so which booking sources record a `
+      + 'purpose cannot be said from these rows.');
+  }
   const records = [...new Set(named.map((r) => r.property).filter(Boolean))];
   const silent = [...new Set(rows.filter((r) => !(r.purpose || '').trim())
     .map((r) => r.property).filter(Boolean))].filter((x) => !records.includes(x));
@@ -455,20 +487,43 @@ const GUEST_COLS = [
 
 /* ── leakage ──────────────────────────────────────────────────────────── */
 async function corpLeakage(host, kind = state.sub) {
+  const ak = contract();
   loading(host);
-  const l = await q('/api/corporate/leakage', kind ? { kind } : {});
+  const [l, s0] = await Promise.all([q('/api/corporate/leakage', kind ? { kind } : {}),
+    ak ? q('/api/corporate/summary').catch(() => null) : Promise.resolve(null)]);
   host.innerHTML = '';
-  const strip = el('div', 'leaks');
-  l.kinds.forEach((k) => {
+  const strip = el('div', ak ? 'leaks ak-rank' : 'leaks');
+  /* Under the contract: the authorisation check with no booking in scope is
+     not a measured nought (plan §4 corporate/leakage) — 1 of 6 properties
+     requires approval and no booking was at it. It reads "nothing in scope",
+     as an outline, with the reason on it. */
+  const noScope = (k) => ak && k.kind === 'unauthorized' && !k.disabled && s0?.approval_required_bookings === 0;
+  /* And the counters are a RANKED check list under the contract (plan §4):
+     the largest first, a measured nought after every count, and a check
+     that cannot fire or had nothing in scope last — each still the address
+     of its bookings. The old skin keeps the server's order. */
+  const rank = (k) => (k.disabled || noScope(k) ? -1 : +k.n || 0);
+  const kinds = ak ? [...l.kinds].sort((a, b) => rank(b) - rank(a)) : l.kinds;
+  kinds.forEach((k) => {
     // A category that CANNOT fire is not the same as one that found nothing,
     // and must not read as a clean bill of health.
-    const a = el(k.disabled ? 'div' : 'a', `leak${k.kind === kind ? ' on' : ''}${k.n ? '' : ' zero'}${k.disabled ? ' off' : ''}`);
+    const a = el(k.disabled ? 'div' : 'a', `leak${k.kind === kind ? ' on' : ''}${k.n ? '' : ' zero'}${k.disabled ? ' off' : ''}${noScope(k) ? ' leak-noscope' : ''}`);
     if (!k.disabled) a.href = href('corporate', 'leakage', k.kind === kind ? null : k.kind);
-    a.innerHTML = `<b class="num">${k.disabled ? 'n/a' : fmt(k.n)}</b><span>${esc(k.label)}</span>`;
+    a.innerHTML = `<b class="num">${k.disabled ? 'n/a' : noScope(k) ? 'none in scope' : fmt(k.n)}</b><span>${esc(k.label)}</span>`;
     if (k.disabled) a.title = k.disabled;
+    if (noScope(k)) {
+      a.title = `${fmt(l.summary.properties_requiring_approval)} of ${fmt(l.summary.properties)} properties require an `
+        + 'authorisation and no booking in this window was at one — this check had nothing to look at.';
+    }
     strip.append(a);
   });
   host.append(strip);
+  const ns = ak ? l.kinds.find(noScope) : null;
+  if (ns) {
+    host.append(el('p', 'cap leak-why', esc(`${ns.label}: nothing in scope, not a measured nought — `
+      + `${fmt(l.summary.properties_requiring_approval)} of ${fmt(l.summary.properties)} properties require an authorisation `
+      + 'and no booking in this window was at one.')));
+  }
   const off = l.kinds.filter((k) => k.disabled);
   if (off.length) off.forEach((k) => host.append(note(`${k.label}: ${k.disabled}`)));
 
@@ -586,7 +641,7 @@ async function corpApproach(host) {
   const { panel: p, body: chart } = panel('Empty km before pickup, by ' + by,
     'Driver to pickup only. The return leg is a separate column in the table below.');
   hbars(chart, rows.slice(0, 15).map((r) => ({ label: r.label, n: +r.deadhead_km || 0 })),
-    { valueFmt: (v) => `${fmt(v, 1)} km`, color: '--s3', signed: false });
+    { valueFmt: (v) => `${fmt(v, 1)} km`, color: contract() ? '--c-hotel' : '--s3', signed: false });
   chart.append(el('p', 'cap', rows.length > 15
     ? `The 15 largest of ${countOf(rows.length, 'group')}, by total approach kilometres.`
     : `All ${countOf(rows.length, 'group')}, by total approach kilometres.`));
@@ -657,7 +712,7 @@ async function corpApproach(host) {
       'How far the driver drove after the passenger got out. At least three measured drops each.');
     body.append(sp);
     hbars(sb, stranding.slice(0, 12).map((r) => ({ label: r.place, n: +r.avg_return_km || 0 })),
-      { valueFmt: (v) => `${fmt(v, 2)} km`, color: '--s8' });
+      { valueFmt: (v) => `${fmt(v, 2)} km`, color: contract() ? '--c-hotel' : '--s8' });
     sb.append(tableFrom(stranding, [
       { label: 'Drop-off area', key: 'place' },
       { label: 'Drops', key: 'drops', num: true },
@@ -841,4 +896,250 @@ export async function renderProperty(root, id, tab = 'overview', onDetail) {
     body.innerHTML = '';
     donut(body, d.dayparts.map((x) => ({ label: x.label, n: x.n })));
   });
+}
+
+/* ── #corporate under the page contract (plan §4 corporate/overview, with
+   the review's correction: the fallbacks stay) ────────────────────────────
+     00  AT A GLANCE — the verdict as the statement; tiles: KEPT the hero
+         (billed less the cost this channel files — ABSENT with its reason
+         where no cost is filed, and then the Revenue-per-km and Booked-in-
+         advance tiles the old page falls back to), Billed, Cost filed,
+         Unpaid approach, Given away, and How much rests on one client —
+         ABSENT where no booking names its property, because one unnamed
+         bucket holding every booking gives an index of 10,000 that is an
+         artefact, not a concentration. Bookings, guests and rides ending
+         outside Dubai are 02's caption; the authorisation tile is a † cell.
+     01  The only margin in the product — billed, cost, kept.
+     02  What is booked — bars in the hotel channel's identity.
+     03  Where the money leaks — every check, zeros included, each still
+         the address of its bookings; a check that cannot fire, or had
+         nothing in scope, is the absence OUTLINE with its reason.
+     04…  how the fare is settled, empty km by time of day, who books (a row
+         with no property id is not a link — it opened "No property chosen",
+         whose note says every name carries an id), booked ahead as one
+         100% bar, where a driver is left after the drop (total and mean
+         return by drop area).
+     †   which hotel, repeat business, approvals, hours given away.
+   NOT ADOPTED: "billed nothing 49 = 11 given away + 38 priced at zero" (the
+   payload does not key the two together — they are shown apart); levels in
+   the delta slot (printed as sub-lines); dropping the settlement mix and the
+   time-of-day chart; a single tab-less page. */
+async function corpOverviewContract(host) {
+  const gen = currentGen();
+  const band = el('section', 'cband');
+  const vHost = el('div');
+  const tiles = el('div');
+  band.append(secHead('00', 'At a glance', windowLabel()), vHost, tiles);
+  host.append(band);
+  loading(tiles);
+  const [s, props, lk, guests, strandRes] = await Promise.all([
+    q('/api/corporate/summary'),
+    q('/api/corporate/properties').catch(() => null),
+    q('/api/corporate/leakage').catch(() => null),
+    q('/api/corporate/guests').catch(() => null),
+    q('/api/corporate/stranding').catch(() => null),
+  ]);
+  if (!alive(gen)) return;
+  const cv = corpVerdict(s);
+  verdict(vHost, cv);
+  const unnamed = Array.isArray(props) && props.length > 0 && props.every((r) => r.partner_id == null);
+  const grossMargin = s.has_cost ? s.revenue - s.cost : null;
+  const base = Object.fromEntries(corpTiles(s).filter(Boolean).map((x) => [x.label, x]));
+  const plain = (x) => (x ? { ...x, tone: null } : null);
+  /* RULING 7: the verdict's figure is what was billed, so the Billed tile
+     is not drawn beside it; what its sub-line said (over how many priced
+     bookings, the average, complimentary rides excluded) is kept in words
+     under the band. */
+  const { tiles: shown, dropped } = notRepeated([
+    s.has_cost
+      ? { label: 'Kept', value: money(grossMargin), hero: true,
+        sub: s.revenue ? `${pct((grossMargin / s.revenue) * 100, 1)} of what was billed — billed less the cost this channel files` : null }
+      : { label: 'Kept', hero: true, na: 'this channel files no delivery cost, so there is no margin to keep' },
+    { ...plain(base.Revenue), label: 'Billed',
+      sub: `over ${fmt(s.priced)} priced bookings · ${money(s.avg_fare, 'AED', 2)} a priced booking, complimentary rides excluded` },
+    plain(base['Cost of delivery']) && { ...plain(base['Cost of delivery']), label: 'Cost filed' },
+    plain(base['Revenue per km']),
+    { ...plain(base['Empty km before pickup']), label: 'Unpaid approach' },
+    plain(base['Given away']),
+    plain(base['Booked in advance']),
+    unnamed
+      ? { label: 'How much rests on one client', na: 'no booking names its property, so one unnamed bucket holds them all — the index would be an artefact, not a concentration' }
+      : plain(base['How much rests on one client']),
+  ], cv.figure);
+  glance(tiles, shown);
+  if (dropped?.sub) {
+    const c = el('p', 'cap');
+    c.innerHTML = `<b>${esc(dropped.label)}</b> — ${esc(dropped.sub)}`;
+    band.append(c);
+  }
+  if (!s.bookings) {
+    host.append(note('No corporate bookings in this window. The hotel collector writes to the '
+      + 'same trip table as every other channel — check Data sources if this looks wrong.'));
+    return;
+  }
+
+  /* ── 01 · the only margin in the product ─────────────────────────────── */
+  const m = panel('The only margin in the product', null, 'corp-margin'); host.append(m.panel);
+  if (!s.has_cost) {
+    empty(m.body, 'This channel returns one money figure per booking — a fare and no cost — so there is no margin to draw.');
+  } else {
+    hbars(m.body, [
+      { label: 'Billed', n: +s.revenue || 0 }, { label: 'Cost filed', n: +s.cost || 0 }, { label: 'Kept', n: grossMargin },
+    ], { signed: true, color: '--c-hotel', valueFmt: (v) => money(v) });
+    m.body.append(el('p', 'cap', 'The hotel channel is the only one that files what a ride cost as well as what it sold for, '
+      + 'so this is the only margin anywhere in the product.'));
+  }
+
+  /* ── 02 · what is booked ─────────────────────────────────────────────── */
+  const g1 = el('div', 'grid g2'); host.append(g1);
+  const what = panel('What is booked', 'Booking types on this channel are not Uber tiers and never share an axis with them.', 'corp-types');
+  const leaks = panel('Where the money leaks', 'Every booking that cost money and should not have. Click a check for its bookings.', 'corp-leaks');
+  g1.append(what.panel, leaks.panel);
+  loading(what.body);
+  q('/api/mix', { by: 'product', platform: 'hotel' }).then((rows) => {
+    if (!alive(gen)) return;
+    what.body.innerHTML = '';
+    if (!rows.length) { empty(what.body, 'No booking in this range records a type.'); return; }
+    hbars(what.body, rows.map((r) => ({ label: String(r.label).replace(/^hotel: /, '').replace(/_/g, ' '), n: r.n })),
+      { signed: false, color: '--c-hotel', shareOf: (x) => (s.bookings ? `${(x.n / s.bookings * 100).toFixed(1)}%` : null) });
+    what.body.append(el('p', 'cap', esc([
+      `${fmt(s.bookings)} bookings`,
+      unnamed ? 'no named property — the one booker on record has no partner id' : countOf(s.properties, 'property', 'properties'),
+      countOf(s.guests, 'guest'),
+      s.outside_dubai ? `${fmt(s.outside_dubai)} ended outside Dubai — a booking the driver has to come back from empty` : null,
+    ].filter(Boolean).join(' · '))));
+  }).catch((e) => { what.body.innerHTML = ''; what.body.append(note(`Could not load: ${e.message}`)); });
+
+  /* ── 03 · where the money leaks ──────────────────────────────────────── */
+  if (!lk) empty(leaks.body, 'The leak checks did not load.');
+  else {
+    const reqB = s.approval_required_bookings;
+    const outlineWhy = (k) => k.disabled
+      || (k.kind === 'unauthorized' && reqB === 0
+        ? `${fmt(lk.summary.properties_requiring_approval)} of ${fmt(lk.summary.properties)} properties require an authorisation and `
+          + 'no booking in this window was at one, so this check had nothing in scope — not a measured nought'
+        : null);
+    const max = Math.max(...lk.kinds.map((k) => (outlineWhy(k) ? 0 : +k.n || 0)), 1);
+    const wrap = el('div', 'hbars');
+    lk.kinds.forEach((k) => {
+      const why = outlineWhy(k);
+      const row = el('a', 'hb corp-leak');
+      row.href = href('corporate', 'leakage', k.kind);
+      const w = why ? 24 : (+k.n ? Math.max(k.n / max * 100, 0.6) : 0);
+      row.innerHTML = `<div class="k">${esc(k.label)}</div>`
+        + `<div class="track"><div class="fill${why ? ' hb-outline' : ''}" style="width:${w.toFixed(1)}%;${why ? '' : 'background:var(--ink)'}"></div></div>`
+        + `<div class="v num">${why ? `<span class="ak-why" title="${esc(why)}">${esc(k.disabled ? 'cannot fire' : 'nothing in scope')}</span>` : fmt(k.n)}</div>`;
+      if (why) row.title = why;
+      wrap.append(row);
+    });
+    leaks.body.append(wrap);
+    leaks.body.append(el('p', 'cap', esc([
+      lk.summary.foc_cost ? `${money(lk.summary.foc_cost)} of delivery cost was given away.` : null,
+      lk.summary.wasted_km ? `${fmt(lk.summary.wasted_km, 1)} km driven to reach jobs shorter than the approach.` : null,
+      'A check drawn as an outline could not fire here; its reason is on the bar.',
+    ].filter(Boolean).join(' '))));
+  }
+
+  /* ── the settle mix, empty km by time of day, who books ─────────────── */
+  const g2 = grid(); host.append(g2);
+  add(g2, 'How the fare is settled', 'Cash, card, on account, or given away.', async (body) => {
+    const mix = await q('/api/settlement/mix', { platform: 'hotel' });
+    body.innerHTML = '';
+    if (!mix.classes.length) return empty(body, 'No booking in this range records how it was paid');
+    stackedBar(body, mix.classes.map((c) => ({ label: c.label, n: c.trips })));
+    const owed = mix.classes.filter((c) => ['on_account', 'salary'].includes(c.settlement_class));
+    body.append(el('p', 'cap',
+      owed.length
+        ? `${fmt(owed.reduce((a, c) => a + c.trips, 0))} bookings are settled after the ride — `
+          + `see Settlement → Receivables for what is outstanding and from whom.`
+        : 'Every booking in this window settled at the time of the ride.'));
+  });
+  add(g2, 'Empty km before pickup, by time of day', 'Straight-line distance from where the driver set off to the pickup.', async (body) => {
+    const rows = await q('/api/corporate/approach', { by: 'daypart' });
+    body.innerHTML = '';
+    if (!rows.length) return empty(body, 'No booking in this range records where the driver set off from');
+    hbars(body, rows.map((r) => ({ label: r.label, n: r.avg_deadhead_km })), {
+      valueFmt: (v) => `${fmt(v, 2)} km`, color: '--c-hotel',
+      onClick: () => { location.hash = href('corporate', 'approach', 'daypart'); },
+    });
+    body.append(el('p', 'cap', 'Approach only — driver to pickup. A straight line understates road '
+      + 'distance, so treat these as a floor, and the return leg (usually the larger of the two) is on '
+      + 'the Empty km tab. It is the only measure of positioning cost anywhere in this dataset.'));
+  });
+  add(g2, 'Who books', unnamed ? 'Bookings by property. No booking here names its property.'
+    : 'Bookings by property. Click one to open its page.', async (body) => {
+    body.innerHTML = '';
+    const rows = props || [];
+    if (!rows.length) return empty(body, 'No property booked in this window');
+    hbars(body, rows.slice(0, 10).map((r) => ({ label: r.name, n: r.bookings, id: r.partner_id })), {
+      color: '--c-hotel', signed: false, clickable: (d) => d.id != null,
+      onClick: (d) => { location.hash = href('property', d.id); },
+    });
+    if (!unnamed && s.concentration_hhi != null) {
+      body.append(el('p', 'cap', `A Herfindahl index of ${fmt(s.concentration_hhi)} out of 10,000. `
+        + 'Above 2,500 is a business resting on one customer.'));
+    }
+  });
+  add(g2, 'Booked ahead or called on the spot', null, async (body) => {
+    body.innerHTML = '';
+    /* Two named bars, not one 100% bar: at 2 of 719 the booked-ahead slice
+       is under stackedBar's 1.5% fold and was labelled "Other (1)" — the one
+       segment the chart exists for, drawn without its name. */
+    hbars(body, [
+      { label: 'Scheduled in advance', n: +s.scheduled_trips || 0 },
+      { label: 'On demand', n: (+s.bookings || 0) - (+s.scheduled_trips || 0) },
+    ], { signed: false, color: '--c-hotel',
+      shareOf: (x) => (s.bookings ? `${(x.n / s.bookings * 100).toFixed(1)}%` : null) });
+    body.append(el('p', 'cap', `${fmt(s.scheduled_trips)} of ${fmt(s.bookings)} bookings arrive with notice `
+      + `(${pct(s.scheduled_pct, 1)}). That share is how much of the day can be planned rather than reacted to.`));
+  });
+
+  /* ── where a driver is left after the drop ──────────────────────────── */
+  const strand = strandRes ? (strandRes.rows || strandRes) : [];
+  const g3 = el('div', 'grid g2'); host.append(g3);
+  const tot = panel('Empty km after the drop, by drop area', null, 'corp-strand-total');
+  const avg = panel('Empty km after each drop, by drop area', null, 'corp-strand-mean');
+  g3.append(tot.panel, avg.panel);
+  if (!strand.length) {
+    const why = 'No drop area has three measured returns in this window.';
+    empty(tot.body, why); empty(avg.body, why);
+  } else {
+    const withTot = strand.map((r) => ({ label: r.place, n: r.return_km != null ? +r.return_km
+      : (+r.avg_return_km || 0) * (+r.measured || 0) })).sort((a, b) => b.n - a.n);
+    hbars(tot.body, withTot.slice(0, 12), { signed: false, color: '--c-hotel', valueFmt: (v) => `${fmt(v, 1)} km` });
+    tot.body.append(el('p', 'cap', esc(`The return leg summed over every measured drop in the area — where the fleet `
+      + `loses the most running in total. ${strandRes?.truncated ? `The ${fmt(strand.length)} worst of ${fmt(strandRes.total)} areas.` : ''}`)));
+    hbars(avg.body, [...strand].sort((a, b) => b.avg_return_km - a.avg_return_km).slice(0, 12)
+      .map((r) => ({ label: r.place, n: +r.avg_return_km || 0 })), { signed: false, color: '--c-hotel', valueFmt: (v) => `${fmt(v, 2)} km` });
+    avg.body.append(el('p', 'cap', 'Per drop — the areas that leave a driver furthest from the next job, at least three measured drops each.'));
+  }
+
+  /* ── † ───────────────────────────────────────────────────────────────── */
+  const absHost = el('div'); host.append(absHost);
+  const fh = lk?.summary?.foc_hours;
+  absenceBand(absHost, [
+    { label: 'Which hotel', hl: unnamed, fig: unnamed ? 'None named' : `${fmt(s.properties)} named`,
+      why: unnamed ? 'No booking names its property: the one booker on record carries no partner id, so nothing here can be '
+        + 'split by hotel and no property page opens.'
+        : 'Every booking with a property id opens its property’s page.' },
+    { label: 'Repeat business', fig: guests && !guests.id_is_per_booking && guests.bookings_from_repeat_pct != null
+      ? pct(guests.bookings_from_repeat_pct, 1) : null, none: 'Not measurable',
+    why: !guests ? 'The passenger records did not load.'
+      : guests.id_is_per_booking ? (guests.caveat || 'This channel issues a new passenger id per booking, so the same person twice is two strangers.')
+        : 'Of bookings came from a guest who booked more than once — a short window understates it by construction.' },
+    { label: 'Approvals', fig: s.authorized_pct == null ? null : pct(s.authorized_pct, 1), none: 'Not applicable',
+      why: s.authorized_pct == null ? (s.authorized_absent_reason || 'No property on this channel requires an authorisation.')
+        : `${fmt(s.authorized_trips)} of ${fmt(s.approval_required_bookings)} bookings at properties that require one carried a granted authorisation`
+          + (s.authorization_pending_trips ? `; ${fmt(s.authorization_pending_trips)} raised and never granted.` : '.') },
+    { label: 'Hours given away', fig: fh ? `${fmt(fh, 1)} h` : null, none: 'Not filed',
+      why: fh ? 'Driver-hours on complimentary rides, from the durations the channel files.'
+        : 'The channel files no duration on a complimentary ride, so the driver-time given away is not known — only the rides and their kilometres.' },
+  ]);
+  host.append(note('Everything on this page comes from fields that were being collected and stored but '
+    + 'never read: the property, the booking type, the payment route, the room, the authorisation, and '
+    + 'the driver’s starting point — which makes this the only channel in the fleet where the unpaid '
+    + 'approach leg is measurable at all.'
+    + (s.has_cost ? '' : ' It does not report a delivery cost: the report returns one money figure per '
+      + 'booking, so there is a fare and no margin, and nothing here pretends otherwise.')));
+  pageFoot({ colophon: [windowLabel(), `${fmt(s.bookings)} hotel bookings`, s.revenue != null ? `${money(s.revenue)} billed` : null] }, host);
 }

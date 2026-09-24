@@ -1538,3 +1538,14 @@ printed again by the Accounted for tile (ruling 7 — S4, and P2a for
 #playbook, which had the same fault); the channel swatch in the table sat
 flush against the name; at 390 the table's second line scrolled off with the
 table, and now holds to the visible width.
+
+### #corporate — 2026-09-24
+
+Production data, all five tabs in both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/corporate/`, 40 shots): no error, no sideways
+scroll; two highlights on the overview. Production has no named property
+(the one booker carries no partner id), so the overview shows the index as
+absent, the unnamed bar unlinked and "None named" in the † band. Found by
+looking and fixed before commit: the verdict's AED figure repeated by the
+Billed tile (ruling 7); booked ahead drawn as "Other (1)"; the leak list's
+rows 132px tall; the no-scope reason only in a tooltip.
