@@ -6587,3 +6587,9 @@ number (5 and 5), and never a passport or RTA number.
   tall, on production two credentials' worth; a check that a form is "above
   the fold" measures the banner, not the page. Measure the page's own
   geometry (one row of tiles, the form directly under the band).
+
+* **`/api/ledger/entries` read only `from`/`to` until 2026-09-24.** A page
+  that called it through `qAll()` sent `period=month` and got the whole
+  record back, silently. It resolves named periods now (S5). A new route
+  that takes a window should take it through `api/window.js`, never by
+  reading `from`/`to` alone — the client sends a period name by design.

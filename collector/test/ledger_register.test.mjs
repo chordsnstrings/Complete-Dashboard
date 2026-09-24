@@ -116,6 +116,20 @@ const win = (await get('/api/ledger/entries?from=2026-09-11')).body;
 check('a window that excludes everything returns an empty list and null totals',
   win.entries.length === 0 && win.totals.rows === 0 && win.totals.advance === null,
   JSON.stringify(win.totals));
+/* A named period is resolved to its dates, as every windowed route does —
+   #charging sent period=month and was answered with the whole record. */
+{
+  const { periodWindow } = await import('../api/window.js');
+  const m = (await get('/api/ledger/entries?period=month')).body;
+  const [mf, mt] = periodWindow('month');
+  check('period=month is answered over this month\'s dates, not the whole record',
+    m.from === mf && m.to === mt, JSON.stringify([m.from, m.to, mf, mt]));
+  const both = (await get('/api/ledger/entries?period=month&from=2026-09-11')).body;
+  check('…explicit dates still win over a period', both.from === '2026-09-11' && both.entries.length === 0,
+    JSON.stringify([both.from, both.to]));
+  const none = (await get('/api/ledger/entries')).body;
+  check('…and no window at all is still the whole record', none.from === null && none.to === null);
+}
 const nobody = (await get('/api/ledger/entries?person_id=999')).body;
 check('a person with no entries is an empty register, not an error',
   nobody.entries.length === 0 && nobody.totals.rows === 0);
