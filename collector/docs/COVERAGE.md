@@ -6576,3 +6576,14 @@ number (5 and 5), and never a passport or RTA number.
 * **stackedBar folds a segment under 1.5% into "Other (n)".** Where the small
   segment is the one the chart is about (#corporate's booked-ahead share, 2
   of 719), the fold draws the subject without its name. Use named bars.
+
+* **The ledger pages were in no route list.** `test/routes_list.mjs` (and so
+  smoke_views, render-audit and the golden test) walked none of #opening,
+  #salary, #advances, #charging, #policy, #deposits or #import-sheet. The
+  golden test now holds them through its `EXTRA` list; a new page the lists
+  do not name needs adding there before "the old skin is unchanged" means
+  anything for it.
+* **The credential banner moves every page's fold.** On the mock it is 332px
+  tall, on production two credentials' worth; a check that a form is "above
+  the fold" measures the banner, not the page. Measure the page's own
+  geometry (one row of tiles, the form directly under the band).

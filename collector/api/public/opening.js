@@ -28,8 +28,12 @@
    ordinary thing — so each row carries its own date, pre-filled from the top
    and editable. Getting that wrong by a day silently moves which trips count
    as collected since. */
-import { el, esc, panel, note, loading, tableFrom, entity } from './ui.js';
+import { el, esc, panel, note, loading, tableFrom, entity,
+  contract, glance, absenceBand, pageFoot } from './ui.js';
+import { fmt } from './charts.js';
 import { api } from './data.js';
+import { ledgerBand, ceiling, ceilingWho, ceilingCol, monthBars, runningBars, exposureBars,
+  firstReason, daysSince, booksRecorded } from './ledger_ak.js';
 import { submitEntry, SUPERVISORS, aed, parseAmount, pooled, loadPeople,
   personRef } from './deposit_core.js';
 import { dubaiDay } from './tz.js';
@@ -38,12 +42,18 @@ let SUP = null;
 
 export async function renderOpening(root) {
   root.innerHTML = '';
+  /* Under the page contract (plan §4 #opening) a 00 band of ONE row goes
+     first, so the form still starts above the fold at 1440; the form and the
+     grid are unchanged; the charts and the † band follow the grid. */
+  const ak = contract();
+  const AK = ak ? ledgerBand() : null;
   const head = panel('State a starting balance', 'What each driver was holding on the day it '
     + 'was counted. Everything after that date is counted from here — so this is the figure '
     + 'that turns an exposure from “not measurable” into a number.', 'opening');
   const gridPanel = panel('Every driver', null, 'opening-grid');
-  root.append(head.panel, gridPanel.panel);
+  root.append(...(ak ? [AK.band] : []), head.panel, gridPanel.panel);
   loading(gridPanel.body);
+  if (ak) loading(AK.tiles);
 
   /* THE ROSTER, not the people who already have a ledger row. This screen's
      whole job is to state the FIRST figure for somebody, so reading a list of
@@ -57,6 +67,7 @@ export async function renderOpening(root) {
   }
   const people = (d.people || []).filter((p) => p.name);
   if (!d.exposure_ok) head.body.append(note(esc(d.exposure_absent_reason), 'warn'));
+  if (ak) openingGlance(AK, people);
 
   const bar = el('div', 'depform');
   const dW = el('div', 'depfield');
@@ -107,6 +118,9 @@ export async function renderOpening(root) {
             + `${esc(p.owes.cash_basis.opening_on)}</span>`
           : '<span class="dash" title="no starting balance has been stated, so this driver’s '
             + 'cash is unknown and their exposure is refused rather than shown low">—</span>') },
+      /* Under the contract the person counting sees who holds cash: every
+         cash fare on record, a ceiling and not a balance (plan §4). */
+      ...(ak ? [ceilingCol()] : []),
       /* KEYED ON THE ROW, NOT ON person_id. Half this list is roster accounts
          nobody has recorded against yet, and their person_id is null by
          design — so data-person="null" would collide every one of them onto a
@@ -185,7 +199,72 @@ export async function renderOpening(root) {
   checkBtn.onclick = () => run(false);
   saveBtn.onclick = () => { saveBtn.disabled = true; run(true); };
   draw();
+  if (ak) openingAfter(root, people);
   gridPanel.body.addEventListener('input', (e) => {
     if (e.target.classList.contains('opendate')) e.target.dataset.touched = '1';
   });
+}
+
+/* ── #opening under the page contract ──────────────────────────────────────
+   00 (one row): opening balances stated, the hero · the exposures an
+   unstated opening blocks · the cash ceiling of the people still to count ·
+   the people to be counted and their accounts · how far back a count
+   reaches. After the grid: the month each driver's first cash fare was
+   taken, how long each driver's cash has been running, and what the
+   exposure read could judge. † the opening position, what each driver
+   owes, the date each count is as of — the route's own reasons.
+   NOT ADOPTED: the mockup's 347-cell stated/not-stated grid (it repeats the
+   hero and the Stated column, ~350px above the form); "the daily figure that
+   looks like it: 16.3%" as a figure (a dated measurement from a comment, not
+   a payload field — the route's reason sentence quotes it instead). */
+const blocked = (p) => p.exposure_pct == null && (p.owes == null || p.owes.cash == null);
+function openingGlance(AK, people) {
+  const stated = people.filter((p) => p.owes?.cash_basis?.opening_on);
+  const unstated = people.filter((p) => !p.owes?.cash_basis?.opening_on);
+  const c = ceiling(unstated);
+  const all = ceiling(people);
+  const back = daysSince(all.from);
+  glance(AK.tiles, [
+    { label: 'Opening balances stated', value: `${fmt(stated.length)} of ${fmt(people.length)}`, hero: true,
+      sub: stated.length ? 'the rest read as unknown cash — not nought'
+        : 'nobody has one yet, so every cash position reads as unknown' },
+    { label: 'Exposures it blocks', value: fmt(people.filter(blocked).length),
+      sub: 'not measurable, because with no opening the cash term is unknown' },
+    c.n ? { label: 'Unstated, at its ceiling', value: aed(c.sum), sub: ceilingWho(c) }
+      : { label: 'Unstated, at its ceiling', na: [
+        c.measured ? `none of the ${fmt(c.measured)} on the exposure read has a cash fare on record` : null,
+        c.unmeasured ? `${fmt(c.unmeasured)} ${c.unmeasured === 1 ? 'is' : 'are'} not on it, so no cash fare has been measured for them` : null,
+      ].filter(Boolean).join('; ') },
+    { label: 'People to be counted', value: fmt(unstated.length),
+      sub: `across ${fmt(unstated.reduce((a, p) => a + (+p.accounts || 0), 0))} platform accounts` },
+    back != null
+      ? { label: 'How far back a count reaches', value: `${fmt(back)} days`, sub: `from ${all.from}, the first cash fare on record` }
+      : { label: 'How far back a count reaches', na: 'no cash fare is on record, so a count reaches back over nothing' },
+  ]);
+}
+function openingAfter(root, people) {
+  const g = el('div', 'grid g3'); root.append(g);
+  const first = panel('The month each driver’s first cash fare was taken', null, 'opening-first');
+  const run = panel('How long each driver’s cash has been running', 'From the first cash fare on record to the last.', 'opening-run');
+  const ex = panel('What the exposure read could judge', 'Counts of people, never a fleet ratio — the route refuses one.', 'opening-exposure');
+  g.append(first.panel, run.panel, ex.panel);
+  monthBars(first.body, people, 'cash_taken_from', { aria: 'Drivers by the month of their first cash fare' });
+  runningBars(run.body, people);
+  exposureBars(ex.body, people);
+  const stated = people.filter((p) => p.owes?.cash_basis?.opening_on).length;
+  const books = people.filter(booksRecorded).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Opening positions unknown', hl: true, fig: `${fmt(people.length - stated)} of ${fmt(people.length)}`,
+      why: firstReason(people, (p) => p.owes?.cash_absent_reason)
+        || 'Nobody on the exposure read is missing one.' },
+    { label: 'What each driver owes', fig: books ? `${fmt(books)} of ${fmt(people.length)} recorded` : null, none: 'Nothing recorded',
+      why: books === people.length ? 'Every driver here has an advance or deduction row on the ledger.'
+        : `${fmt(people.length - books)} of ${fmt(people.length)} have nothing on the advance or deduction books — `
+          + (firstReason(people, (p) => p.owes?.books_absent_reason)
+            || 'what they owe is a balance nobody has written down, not a balance of nought.') },
+    { label: 'The date each count is as of', fig: 'Per row',
+      why: 'Each row carries its own date, pre-filled from "Counted on" — the date decides which trips count as collected since, so a day out is a real difference.' },
+  ]);
+  pageFoot({ colophon: ['The whole record', `${fmt(people.length)} people`, `${fmt(stated)} with an opening stated`] }, root);
 }

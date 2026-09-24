@@ -1563,3 +1563,13 @@ one highlight (the hero).
 Production, both skins at 1440 and 390, light and dark (scratchpad
 `pagephase/shots/importsheet/`): no error, no sideways scroll, no highlight
 (a form has no figure to emphasise).
+
+### #opening — 2026-09-24
+
+Production (347 people across 810 accounts, 0 openings stated), both skins
+at 1440 and 390, light and dark (scratchpad `pagephase/shots/opening/`): no
+error, no sideways scroll, two highlights. The ceiling: AED 3,440,115.08 over
+276 of 347 drivers, 71 with no cash fare, reaching back 644 days. Found by
+looking and fixed before commit: the † "what each driver owes" cell's
+fallback claimed everyone had a book row when none did; "347 of 347 unknown"
+wrapped at 1440 (the word moved to the label).
