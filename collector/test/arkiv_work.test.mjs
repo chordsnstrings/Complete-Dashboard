@@ -174,4 +174,33 @@ if (want('trips')) {
   }
 }
 
+/* ══ #supply ══════════════════════════════════════════════════════════════ */
+if (want('supply')) {
+  console.log('\n#supply');
+  /* One cell sold nothing with real supply behind it; others are missing. */
+  const zero = (_q, real) => ({ ...real, cells: real.cells.map((c, i) => (i === 0 ? { ...c, jobs: 0, on_job_h: 0, jobs_per_online_h: 0, online_h: Math.max(2, +c.online_h || 0) } : c)) });
+  const gridStyle = (page) => page.evaluate(() => {
+    const cs = (sel, pseudo) => { const n = document.querySelector(sel); return n ? getComputedStyle(n, pseudo || null) : null; };
+    const b0 = cs('.sup-c.b0'), after = cs('.sup-c.b0', '::after'), none = cs('.sup-c.none');
+    return { b0: b0 ? [b0.backgroundColor, b0.opacity] : null, glyph: after ? after.content : null,
+      none: none ? [none.backgroundImage, none.boxShadow] : null };
+  });
+  {
+    const { ctx, page } = await open('classic', 'supply', { fixtures: { '/api/supply/balance': zero } });
+    const g = await gridStyle(page);
+    check('old skin: "sold nothing" is still the critical fill and "no availability" still a hatch',
+      g.b0 && g.b0[1] !== '1' && g.glyph === 'none' && /gradient/.test(g.none?.[0] || ''), JSON.stringify(g));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'supply', { fixtures: { '/api/supply/balance': zero } });
+    const g = await gridStyle(page);
+    check('S8: under the skin "sold nothing" is the lowest step at full opacity with a ▾ glyph (a measured nought)',
+      g.b0 && g.b0[1] === '1' && /▾/.test(g.glyph || ''), JSON.stringify(g));
+    check('S8: …and "no availability collected" is an outline, not a hatch (an absence, not a projection)',
+      g.none && g.none[0] === 'none' && /inset/.test(g.none[1] || ''), JSON.stringify(g));
+    await ctx.close();
+  }
+}
+
 await done();
