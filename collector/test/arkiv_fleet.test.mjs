@@ -1324,4 +1324,42 @@ if (want('settings')) {
   }
 }
 
+/* ══ #notfound ════════════════════════════════════════════════════════════ */
+if (want('notfound')) {
+  console.log('\n#notfound');
+  const look = (page) => page.evaluate(() => {
+    const n = document.querySelector('#view .panel .note');
+    return n ? { cls: n.className, text: n.textContent.trim(), dot: getComputedStyle(n, '::before').content,
+      near: [...document.querySelectorAll('#view .panel p.cap a.ent')].map((a) => a.getAttribute('href')),
+      panels: document.querySelectorAll('#view .panel').length } : null;
+  });
+  {
+    const { ctx, page } = await open('classic', 'zzz-not-a-page');
+    const r = await look(page);
+    check('old skin: the error note, as it was', !!r && r.cls === 'note err' && /^#zzz-not-a-page is not a page in this product/.test(r.text), JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'zzz-not-a-page');
+    const r = await look(page);
+    check('an ink notice: no error class, no red dot — a missing page is an absence, not a worse number', !!r && r.cls === 'note' && (r.dot === 'none' || r.dot === 'normal'), JSON.stringify(r));
+    check('the sentence kept whole, and the fallback link', !!r && /^#zzz-not-a-page is not a page in this product, so there is nothing below to read\. Nothing has been filtered out/.test(r.text)
+      && r.near.some((h) => /^#unit(\?|$)/.test(h)), JSON.stringify(r));
+    check('nothing else drawn under it', !!r && r.panels === 1, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    /* A renamed page: #hotels is matched on the LABEL to the page that holds the hotel channel. */
+    const { ctx, page } = await open('arkiv', 'hotels');
+    const r = await look(page);
+    check('the closest destinations kept: #hotels names a real page by its label', !!r && r.near.length >= 2 && r.near.some((h) => !/^#unit(\?|$)/.test(h)), JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'zzz-not-a-page', { width: 390 });
+    check('#notfound at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

@@ -899,7 +899,11 @@ V.notfound = async (root) => {
       || v.label.toLowerCase().includes(needle)).slice(0, 4)
     : [];
   const p = el('div', 'panel');
-  p.innerHTML = `<div class="note err"><b>#${esc(typed || '')}</b> is not a page in this `
+  /* Under the page contract (plan §4 #notfound) the notice is ink, not the
+     error note: a missing page is an absence, not a worse number, so it
+     wears no red. The sentence, the closest destinations and the fallback
+     link are the same in both skins. */
+  p.innerHTML = `<div class="${contract() ? 'note' : 'note err'}"><b>#${esc(typed || '')}</b> is not a page in this `
     + 'product, so there is nothing below to read. Nothing has been filtered out and no figure '
     + 'here has been withheld — the address simply does not name a destination.</div>'
     + (near.length

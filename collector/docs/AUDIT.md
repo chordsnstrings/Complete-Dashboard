@@ -2166,3 +2166,7 @@ Production through live-ui on :8611, both skins at 1440 and 390, light and dark 
 Production read: 2 credentials expired (the fleet-portal refresh token 28 d ago, and the access token the token keeper sets 13.7 d ago). 43 of 47 keys are configured. The next to expire is the Egari portal refresh token in 4.8 d. 4 keys are not set, and 15 are held in the environment. The days-left chart draws 4 credentials; the rest carry no readable expiry.
 
 The old skin at 390 scrolls 2 px sideways on this page. That is pre-existing, and it is left because the old skin is frozen. The Arkiv skin at 390 does not scroll.
+
+### #notfound — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p77/`), for `#zzz-not-a-page` and the renamed `#hotels`. No page error, no sideways scroll, and the fils scan is clean. The Arkiv notice is ink with no red dot. `#hotels` still offers Corporate & hotels.
