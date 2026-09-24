@@ -16,8 +16,10 @@
    collector that needs a credential, and naming it is the point. */
 import { empty, fmt, hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, pct,
-  dayStr, dateStr, dtStr, sourceLabel, countOf, plural, verdict, andList } from './ui.js';
-import { q, href, hrefFilter, state } from './data.js';
+  dayStr, dateStr, dtStr, sourceLabel, countOf, plural, verdict, andList,
+  contract, glance, secHead, absenceBand, pageFoot, swatch, sourceToken, notRepeated } from './ui.js';
+import { channelKey } from './tokens.js';
+import { q, href, hrefFilter, state, currentGen, alive, windowLabel } from './data.js';
 import { revenueVerdict } from './verdicts.js';
 
 const BASIS = {
@@ -62,10 +64,20 @@ const BASIS = {
     means: 'no fare on any booking and no payout reported: this channel’s money is not collected at all' },
 };
 
+/* Two orders of one page until the operator flips the default skin. One
+   function, one fetch and one set of figures, with the contract's order
+   (plan §4 #revenue) taken where `ak` is true; the old skin's path is
+   byte-for-byte the page it was (test/arkiv_classic_frozen). */
 export async function renderRevenue(root) {
+  return revenuePage(root, { ak: contract() });
+}
+
+async function revenuePage(root, { ak = false } = {}) {
+  const gen = currentGen();
   root.innerHTML = '';
   const host = el('div', 'stack'); root.append(host); loading(host);
   const d = await q('/api/revenue');
+  if (ak && !alive(gen)) return;
   host.innerHTML = '';
 
   /* A channel with no booking is not the same as a channel that is not there.
@@ -130,6 +142,8 @@ export async function renderRevenue(root) {
      A count and the list that explains it must come from the same filter. */
   const underRows = live.filter((r) => r.basis === 'partial_payout'
     || r.basis === 'partial_statement');
+  /* The contract's own nodes, created as the page reaches them. */
+  const AK = {};
 
   /* This page exists to say which channels report money and which do not, and
      it opened on six tiles of totals. The single most misread figure in the
@@ -163,7 +177,13 @@ export async function renderRevenue(root) {
         : `${fmt(live.length)} channels reported money this window`;
       figure = t.accounted != null ? money(t.accounted) : '—'; unit = 'accounted for';
     }
-    verdict(host, {
+    if (ak) {
+      AK.band = el('section', 'cband');
+      AK.band.append(secHead('00', 'At a glance', windowLabel()));
+      host.append(AK.band);
+      AK.vfig = figure;
+    }
+    verdict(ak ? AK.band : host, {
       claim, figure, unit, tone, recommend,
       meta: `${fmt(t.bookings)} bookings`,
       /* "have a price behind them" was the same overclaim as the tile below:
@@ -179,7 +199,7 @@ export async function renderRevenue(root) {
     });
   }
 
-  host.append(kpiRow([
+  const TILES = [
     { label: 'Accounted for', value: t.accounted != null ? money(t.accounted) : '—',
       sub: [
         /* accounted_fare_bookings, not the fleet's priced_bookings: a channel
@@ -303,7 +323,24 @@ export async function renderRevenue(root) {
           : null,
       ].filter(Boolean).join(' · '),
       tone: t.dark_bookings ? 'critical' : t.undercovered_bookings ? 'warn' : 'good' },
-  ]));
+  ];
+  if (ak) {
+    const tl = el('div'); AK.band.append(tl);
+    /* RULING 7: the verdict's figure is not repeated as a tile. On production
+       the verdict IS the accounted total whenever no channel is dark or
+       fare-less, and "Accounted for" printed it a second time beneath; on a
+       dark window the verdict's count can be the no-money tile's. The tile
+       that repeats it is dropped and its sub-line — the split by basis, or the
+       coverage sentence — is kept in words under the band. */
+    const { tiles: shown, dropped } = notRepeated(TILES.map((x, i) => ({ ...x, hero: i === 0 })), AK.vfig);
+    glance(tl, shown);
+    if (dropped?.sub) {
+      const c = el('p', 'cap rev-dropped');
+      c.innerHTML = `<b>${esc(dropped.label)}</b> — ${esc(dropped.sub)}`;
+      AK.band.append(c);
+    }
+    revenueCharts(host, AK, d, live, t);
+  } else host.append(kpiRow(TILES));
   /* What widening the range actually does to the tiles above.
      ─────────────────────────────────────────────────────────────────────────
      This paragraph used to end "widening the range past the statements we hold
@@ -348,7 +385,7 @@ export async function renderRevenue(root) {
   const flippedPriced = flipped.filter((r) => (+r.priced_bookings || 0) > 0);
   const flippedBare = flipped.filter((r) => !(+r.priced_bookings || 0));
   if (flipped.length) {
-    host.append(el('p', 'cap',
+    (ak ? AK.acc.body : host).append(el('p', 'cap',
       `${andList(flipped.map((r) => sourceLabel(r.platform)))} `
       + `${plural(flipped.length, 'is', 'are')} accounted for by what the platform reports rather `
       + 'than by the fares on the trips themselves — '
@@ -379,7 +416,7 @@ export async function renderRevenue(root) {
       + 'ranges before reading either number as a trend.'));
   }
 
-  if (d.caveat) host.append(el('div', 'note err', esc(d.caveat)));
+  if (d.caveat) (ak ? AK.band : host).append(el('div', 'note err', esc(d.caveat)));
 
   /* The door to the audit trail. This page states which basis each channel is
      on and why; the provenance page states which API CALL each figure came
@@ -395,12 +432,12 @@ export async function renderRevenue(root) {
   const p = panel('Money by channel',
     'Two kinds of money, kept apart. "Basis" is which one this row is, and how far it can be trusted.',
     'revenue-channels');
-  p.body.append(tableFrom(live, [
+  const CHAN_COLS = [
     /* The channel name carries which channel it is, and the link discarded it
        — all three names opened the same unfiltered #platforms, whose own
        caption then invited the reader to click a slice to filter by platform. */
     { label: 'Channel', key: 'platform',
-      render: (r) => `<a class="ent" href="${hrefFilter('platforms', { platform: r.platform })}">${esc(sourceLabel(r.platform))}</a>` },
+      render: (r) => `${ak ? `<span class="chn">${swatch(r.platform)}` : ''}<a class="ent" href="${hrefFilter('platforms', { platform: r.platform })}">${esc(sourceLabel(r.platform))}</a>${ak ? '</span>' : ''}` },
     { label: 'Bookings', key: 'bookings', num: true, render: (r) => fmt(r.bookings) },
     { label: 'Report a fare', key: 'priced_bookings', num: true,
       render: (r) => (r.bookings
@@ -484,7 +521,36 @@ export async function renderRevenue(root) {
     { label: 'Basis', key: 'basis',
       render: (r) => pill(BASIS[r.basis]?.label || r.basis, BASIS[r.basis]?.tone) },
     { label: 'Why', key: 'basis_note', render: (r) => `<span class="wrap dim">${esc(r.basis_note)}</span>` },
-  ], { sortable: true, sortId: 'chan', defaultSort: { key: 'bookings', dir: 'desc' } }));
+  ];
+  /* Under the contract Basis and Why are the second, full-width line of each
+     channel's row, so a row is one line of figures and nothing is cut off at
+     1440 (the plan measured Per km, Basis and Why off the edge, and a row
+     ~500px tall from Why wrapping in its narrow column). All nine facts stay;
+     the line is re-laid after every sort (tableFrom's `table:sorted`). */
+  const chanTbl = tableFrom(live, ak ? CHAN_COLS.filter((c) => c.key !== 'basis' && c.key !== 'basis_note') : CHAN_COLS,
+    { sortable: true, sortId: 'chan', defaultSort: { key: 'bookings', dir: 'desc' } });
+  p.body.append(chanTbl);
+  if (ak) {
+    const lay = () => {
+      chanTbl.querySelectorAll('tr.rev-why').forEach((x) => x.remove());
+      const n = chanTbl.querySelector('thead tr')?.children.length || 7;
+      /* By the row's own channel. tableFrom writes each re-ordered array
+         back onto `live`, so an index would hold today too; keyed by name,
+         the second line does not depend on that. */
+      [...chanTbl.querySelectorAll('tbody tr')].forEach((tr) => {
+        const name = tr.querySelector('td')?.textContent.trim();
+        const r = live.find((x) => sourceLabel(x.platform) === name);
+        if (!r) return;
+        const w = document.createElement('tr');
+        w.className = 'rev-why';
+        w.innerHTML = `<td colspan="${n}"><div class="rev-why-in">${pill(BASIS[r.basis]?.label || r.basis, BASIS[r.basis]?.tone)} `
+          + `<span class="dim">${esc(r.basis_note)}</span></div></td>`;
+        tr.after(w);
+      });
+    };
+    lay();
+    chanTbl.addEventListener('table:sorted', lay);
+  }
   /* The identity, and then the gap it actually leaves on THIS window.
      ───────────────────────────────────────────────────────────────────────
      This caption used to end "Reconciled on July 2026 these agree to 0.7%
@@ -555,6 +621,7 @@ export async function renderRevenue(root) {
     + 'each side actually covers.';
   p.body.append(rl);
   host.append(p.panel);
+  if (ak) revenueLeaves(host, d);
 
   /* ── what is missing, and what would fix it ──────────────────────────── */
   const missing = live.filter((r) => r.basis === 'none' || r.basis === 'partial_fares');
@@ -631,8 +698,17 @@ export async function renderRevenue(root) {
          AED −10,248 cash clawback rendered an 886px bar beside the AED +33,905
          earnings bar at 899px, because a negative width is an invalid CSS
          declaration and the fill then filled its whole track. */
+      /* Under the contract a bar is its channel's colour (the review's
+         correction: components come per platform), and direction is the
+         sign and the words — not a blue for paid and an orange for taken
+         back, which under the colour law would read as good and bad. */
+      const one = ak && new Set(top.map((c) => c.platform)).size === 1 ? channelKey(top[0].platform) : null;
       hbars(cp.body, top.map((c) => ({ label: `${sourceLabel(c.platform)}: ${String(c.category).replace(/_/g, ' ')}`,
-        n: Number(c.amount) })), {
+        n: Number(c.amount), platform: c.platform })), ak ? {
+        valueFmt: (v) => money(v), colorFor: (x) => sourceToken(x.platform),
+        ...(one ? { negColor: `--c-${one}` } : {}),
+        legend: [[one ? `--c-${one}` : '--mk-fill', one ? `${sourceLabel(one)} — a − is money taken back: cash already collected, fees`
+          : 'paid to the fleet'], ...(one ? [] : [['--mk-neg', 'taken back — cash already collected, fees']])] } : {
         valueFmt: (v) => money(v),
         legend: [['--mk-fill', 'paid to the fleet'], ['--mk-neg', 'taken back — cash already collected, fees']] });
       const net = top.reduce((a, c) => a + (Number(c.amount) || 0), 0);
@@ -762,4 +838,131 @@ export async function renderRevenue(root) {
   host.append(el('p', 'cap',
     `Window ${dateStr(`${d.window[0]}T12:00:00`)} – ${dateStr(`${d.window[1]}T12:00:00`)}, `
     + `${countOf(d.window_days, 'Dubai day')} inclusive.`));
+  if (ak) revenueAbsence(host, d, live, t, underRows);
+}
+
+/* ── #revenue under the page contract (plan §4 #revenue, the review's
+   correction) — the parts the old skin does not draw ─────────────────────
+     01  What each channel is accounted on — one bar per channel, its `best`
+         figure labelled with the basis it was counted on; a channel with no
+         figure is the absence OUTLINE with its reason. The "accounted for by
+         what the platform reports" paragraph (text unchanged, still p.cap)
+         sits under it.
+     02  How many bookings each channel filed, beside 03 Uber's money six
+         ways — fares, statement gross and net, the bank payout, the service
+         fee and the cash taken — the figure it is counted on marked.
+     05/06  What Uber added and what it took out — the leaf lines of the
+         payout tree, the eight largest each way.
+     †   four cells from the CURRENT payload.
+   NOT ADOPTED: a hero "net on the statement" (Uber only — Accounted for
+   covers every channel); "channels filing money 1 of 4" and a "files no
+   money" row (false today); a bank-transfer tile saying none is filed (Paid
+   into the bank is measured from the payout register); "trip value booked,
+   week on week" (Uber-only fares and two more calls); "cash the drivers
+   hold" (the figure is cash the platforms report, not cash held now). */
+const REV_BASIS_WORD = { statement: 'statement net', partial_statement: 'statement net, part-window',
+  fares: 'fares', partial_fares: 'fares, part of the bookings', payout: 'net payout',
+  partial_payout: 'net payout, part-window', zero_payout: 'no net', none: 'nothing reported' };
+function revenueCharts(host, AK, d, live, t) {
+  AK.acc = panel('What each channel is accounted on', null, 'rev-accounted');
+  host.append(AK.acc.panel);
+  const withBest = live.filter((r) => r.best != null && Number.isFinite(Number(r.best)));
+  const max = Math.max(...withBest.map((r) => Number(r.best)), 1);
+  const wrap = el('div', 'hbars');
+  live.forEach((r) => {
+    const row = el('div', 'hb');
+    const ch = channelKey(r.platform);
+    const has = r.best != null && Number.isFinite(Number(r.best));
+    const w = has ? Math.max(Number(r.best) / max * 100, 0.6) : 24;
+    row.innerHTML = `${ch ? `<i class="hb-mk" style="background:var(--c-${ch})"></i>` : ''}`
+      + `<div class="k">${esc(sourceLabel(r.platform))} · ${esc(REV_BASIS_WORD[r.basis] || r.basis)}</div>`
+      + `<div class="track"><div class="fill${has ? '' : ' hb-outline'}" style="width:${w.toFixed(1)}%;${has
+        ? `background:var(${ch ? `--c-${ch}` : '--ink'})` : ''}"></div></div>`
+      + `<div class="v num">${has ? esc(money(r.best)) : `<span class="ak-why">${esc(r.basis_note || 'no figure')}</span>`}</div>`;
+    wrap.append(row);
+  });
+  AK.acc.body.append(wrap);
+  AK.acc.body.append(el('p', 'cap', esc(`${money(t.accounted)} accounted for over ${countOf(live.length, 'channel')}, `
+    + 'each on one basis — never two added together.')));
+  const g = el('div', 'grid g2'); host.append(g);
+  const bk = panel('How many bookings each channel filed', null, 'rev-bookings');
+  const six = panel('Uber’s money, six ways', null, 'rev-six');
+  g.append(bk.panel, six.panel);
+  hbars(bk.body, [...live].sort((a, b) => b.bookings - a.bookings).map((r) => ({ label: sourceLabel(r.platform), n: +r.bookings || 0, platform: r.platform })),
+    { signed: false, colorFor: (x) => sourceToken(x.platform),
+      shareOf: (x) => (t.bookings ? `${(x.n / t.bookings * 100).toFixed(1)}%` : null) });
+  const u = live.find((r) => r.platform === 'uber');
+  if (!u) empty(six.body, 'Uber carries no booking in this window.');
+  else {
+    const counted = { statement: 'statement_net', partial_statement: 'statement_net', payout: 'payouts',
+      partial_payout: 'payouts', fares: 'fares', partial_fares: 'fares' }[u.basis];
+    const ways = [
+      ['fares', 'Fares on the trips'], ['statement_gross', 'Statement gross'], ['statement_net', 'Statement net'],
+      ['payouts', 'Paid into the bank'], ['statement_fees', 'Service fee Uber kept'], ['statement_cash', 'Cash taken at the kerb'],
+    ];
+    const have = ways.filter(([k]) => u[k] != null && Number.isFinite(Number(u[k])));
+    if (!have.length) empty(six.body, 'Uber filed no fare, statement or payout in this window.');
+    else {
+      hbars(six.body, have.map(([k, label]) => ({ label: `${label}${k === counted ? ' · counted' : ''}`, n: Number(u[k]) })),
+        { signed: false, color: '--c-uber', valueFmt: (v) => money(v) });
+      const missing = ways.filter(([k]) => !have.some(([h]) => h === k)).map(([, l]) => l.toLowerCase());
+      six.body.append(el('p', 'cap', esc(`One flow of money seen at six points; only the one marked "counted" is in Accounted for. `
+        + (missing.length ? `Not filed in this window: ${andList(missing)}.` : ''))));
+    }
+  }
+}
+function revenueLeaves(host, d) {
+  const comps = d.components || [];
+  if (!comps.length) return;
+  const parents = new Set(comps.filter((c) => c.parent != null).map((c) => `${c.platform}|${c.parent}`));
+  const leaves = comps.filter((c) => !parents.has(`${c.platform}|${c.category}`) && Number.isFinite(Number(c.amount)));
+  const g = el('div', 'grid g2'); host.append(g);
+  const add = panel('What the platforms added', null, 'rev-added');
+  const took = panel('What the platforms took out', null, 'rev-took');
+  g.append(add.panel, took.panel);
+  const draw = (p, rows, word) => {
+    if (!rows.length) { empty(p.body, `No leaf line of the payout ${word} money in this window.`); return; }
+    hbars(p.body, rows.slice(0, 8).map((c) => ({ label: `${sourceLabel(c.platform)}: ${String(c.category).replace(/_/g, ' ')}`,
+      n: Math.abs(Number(c.amount)), platform: c.platform })),
+    { signed: false, colorFor: (x) => sourceToken(x.platform), valueFmt: (v) => `${word === 'took out' ? '−' : ''}${money(v)}` });
+    p.body.append(el('p', 'cap', esc(`The ${rows.length > 8 ? `8 largest of ${rows.length}` : fmt(rows.length)} lines with nothing nested `
+      + `under them, so none is counted twice. The table below carries every component and where it sits.`)));
+  };
+  draw(add, leaves.filter((c) => Number(c.amount) > 0).sort((a, b) => b.amount - a.amount), 'added');
+  draw(took, leaves.filter((c) => Number(c.amount) < 0).sort((a, b) => a.amount - b.amount), 'took out');
+}
+function revenueAbsence(host, d, live, t, underRows) {
+  const absHost = el('div'); host.append(absHost);
+  const noBank = live.filter((r) => r.statement_net != null && r.statement_bank == null);
+  const neither = live.filter((r) => r.payouts == null && r.statement_net == null);
+  const silent = d.silent_platforms || [];
+  absenceBand(absHost, [
+    { label: 'Bookings under-covered', hl: true, fig: fmt(t.undercovered_bookings || 0),
+      why: underRows.length
+        ? `${andList(underRows.map((r) => {
+          const stmt = r.basis === 'partial_statement';
+          const days = stmt ? r.statement_coverage_days : r.payout_coverage_days;
+          const base = (stmt ? r.statement_coverage_base : r.payout_coverage_base) ?? d.window_days;
+          return days == null ? `${sourceLabel(r.platform)}’s report over an unstated number of days`
+            : `${sourceLabel(r.platform)}’s ${stmt ? 'statement' : 'payout'} over ${fmt(days)} of the ${fmt(base)} days it worked`;
+        }))} — money we hold over part of the window, silent about the rest.`
+        : 'Every channel’s money reaches across the days it worked in this window.' },
+    { label: 'The statement’s bank line', fig: noBank.length ? null : 'Filed', none: 'Not filed',
+      why: noBank.length
+        ? `${andList(noBank.map((r) => sourceLabel(r.platform)))} ${plural(noBank.length, 'files', 'file')} a statement with no bank `
+          + 'figure, so Paid into the bank comes from the separate payout register, not from the statement.'
+        : 'Every channel that files a statement files its bank line too.' },
+    { label: 'No payout and no statement', fig: `${fmt(neither.length)} of ${fmt(live.length)}`,
+      why: neither.length
+        ? `${andList(neither.map((r) => sourceLabel(r.platform)))} ${plural(neither.length, 'reports', 'report')} neither a payout nor a `
+          + 'statement here, so their money is only what the trips were charged.'
+        : 'Every channel reports a payout or a statement.' },
+    { label: 'Channels that reported nothing', fig: fmt(silent.length),
+      why: silent.length
+        ? `${andList(silent.map((r) => sourceLabel(r.platform)))} ${plural(silent.length, 'is', 'are')} configured and returned no booking — `
+          + 'every total here is the fleet minus whatever they carry, which is unknown rather than zero.'
+        : 'Every configured channel returned bookings in this window.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), `${fmt(t.bookings)} bookings · ${countOf(live.length, 'channel')}`,
+    t.accounted != null ? `${money(t.accounted)} accounted for` : null] }, host);
 }

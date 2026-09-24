@@ -6558,3 +6558,14 @@ number (5 and 5), and never a passport or RTA number.
   while 100 people did, and the reason — written about the window, "not
   collected for anyone" — was false under that list. Write an `absent`
   reason that is true of any subset the column can be shown for.
+
+* **`tableFrom` RE-ORDERS THE CALLER'S ARRAY IN PLACE.** A sort writes the new
+  order back onto the array the page passed (so row handlers index the rows
+  on screen). Anything else the page later draws from that same array sees
+  the reader's sort order, not the server's. Copy it first if the order
+  matters elsewhere.
+* **A verdict's figure is chosen at run time, so it can equal a tile's.**
+  #revenue's verdict is a dark-booking count on one window and the accounted
+  total on another; #playbook's is the measured total or the action count.
+  Pass the figure given to `verdict()` through `notRepeated()` (ruling 7)
+  rather than choosing a hero that is only right on today's data.

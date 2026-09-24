@@ -1528,3 +1528,13 @@ that found it checked every converted page for a tile printing the verdict's
 figure (#insights, #compare, #analyst, #action, #unit, #overview: none on the
 mock; #playbook: always; #revenue: on production, where the verdict is the
 accounted total).
+
+### #revenue — 2026-09-24
+
+Production data, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/revenue/`). No error, no sideways scroll, two highlights.
+Found by looking and fixed before commit: the verdict's AED figure was
+printed again by the Accounted for tile (ruling 7 — S4, and P2a for
+#playbook, which had the same fault); the channel swatch in the table sat
+flush against the name; at 390 the table's second line scrolled off with the
+table, and now holds to the visible width.

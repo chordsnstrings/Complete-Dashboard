@@ -208,4 +208,112 @@ console.log('\n#unit/drivers');
   await ctx.close();
 }
 
+/* ══ #revenue — Money by platform ═════════════════════════════════════════ */
+console.log('\n#revenue');
+const REV_HEADS = ['At a glance', 'What each channel is accounted on', 'How many bookings each channel filed',
+  'Uber’s money, six ways', 'Money by channel', 'What the platforms added', 'What the platforms took out',
+  'Channels whose money is not collected', 'The payout, broken down', '† What this page does not know'];
+const revRead = (page) => page.evaluate(() => {
+  const t = (n) => (n ? n.textContent.replace(/\s+/g, ' ').trim() : '');
+  const tbl = document.querySelector('[data-panel="rev-accounted"]') ? [...document.querySelectorAll('#view table')]
+    .find((x) => /Report a fare/i.test(x.querySelector('thead')?.textContent || '')) : null;
+  return {
+    first: document.querySelector('#view .stack')?.firstElementChild?.className,
+    vfig: t(document.querySelector('.cband .vdct-fig > b')),
+    tones: [...document.querySelectorAll('#view .kpis .kpi')].map((k) => [t(k.querySelector('.l')), (k.className.match(/t-\w+/) || [''])[0]]),
+    acc: [...document.querySelectorAll('[data-panel="rev-accounted"] .hb')].map((h) => [t(h.querySelector('.k')), t(h.querySelector('.v')),
+      h.querySelector('.fill').className]),
+    six: [...document.querySelectorAll('[data-panel="rev-six"] .hb')].map((h) => [t(h.querySelector('.k')), t(h.querySelector('.v'))]),
+    head: tbl ? [...tbl.querySelectorAll('thead th')].map(t) : [],
+    rows: tbl ? [...tbl.querySelectorAll('tbody tr')].map((tr) => [tr.className, t(tr.querySelector('td'))]) : [],
+    added: document.querySelectorAll('[data-panel="rev-added"] .hb').length,
+    took: [...document.querySelectorAll('[data-panel="rev-took"] .hb .v')].map(t),
+    dropped: t(document.querySelector('.cband .rev-dropped')),
+  };
+});
+let classicRevTones = [];
+{
+  const { ctx, page } = await open('classic', 'revenue');
+  const r = await revRead(page);
+  classicRevTones = r.tones;
+  const head = await page.evaluate(() => [...document.querySelectorAll('#view table thead')].map((h) => h.textContent).join('|'));
+  check('old skin: its tile row, and the channel table still carries Basis and Why as columns',
+    !(await page.$('#view .cband')) && r.tones.length === 7 && /Basis/.test(head) && /Why/.test(head), JSON.stringify(r.tones));
+  await ctx.close();
+}
+{
+  const { ctx, page, answer } = await open('arkiv', 'revenue');
+  const s = await shape(page);
+  const r = await revRead(page);
+  const d = answer('/api/revenue');
+  const t = d.totals;
+  const live = d.platforms.filter((x) => (+x.bookings || 0) > 0);
+  check('the section order is the plan\'s: 00, accounted by channel, bookings beside Uber six ways, the table, '
+    + 'the leaf lines, the payout tree, †', JSON.stringify(s.heads) === JSON.stringify(REV_HEADS), JSON.stringify(s.heads));
+  check('00 leads the page and the verdict is its statement', r.first === 'cband' && s.vdctIn00, r.first);
+  check('all seven tiles, Accounted for the hero with the answer\'s total (the verdict\'s figure here is a count)',
+    s.glance === 7 && s.hero === 'Accounted for' && s.values['Accounted for'] === aed(t.accounted) && r.vfig !== s.values['Accounted for'],
+    JSON.stringify([r.vfig, s.values]));
+  check('…each tile keeps its tone class (the plan: labels, sub-lines and tone classes kept)',
+    JSON.stringify(r.tones) === JSON.stringify(classicRevTones), JSON.stringify([r.tones, classicRevTones]));
+  check('01: one bar per channel, its best figure and basis; a channel with none is the OUTLINE with its reason',
+    r.acc.length === live.length && live.every((p) => {
+      const row = r.acc.find(([k]) => k.startsWith(p.platform === 'hotel' ? 'Hotel' : p.platform[0].toUpperCase() + p.platform.slice(1)));
+      return row && (p.best == null ? /hb-outline/.test(row[2]) && row[1] === p.basis_note : row[1] === aed(p.best));
+    }), JSON.stringify(r.acc));
+  const u = live.find((p) => p.platform === 'uber');
+  check('03: Uber six ways, every figure the answer filed, the counted one marked',
+    r.six.every(([k, v]) => v === aed(u[{ 'Fares on the trips': 'fares', 'Statement gross': 'statement_gross',
+      'Statement net': 'statement_net', 'Paid into the bank': 'payouts', 'Service fee Uber kept': 'statement_fees',
+      'Cash taken at the kerb': 'statement_cash' }[k.replace(' · counted', '')]])) && r.six.length >= 4, JSON.stringify(r.six));
+  check('the channel table: one line of figures a row, Basis and Why on a full-width line beneath it',
+    !r.head.includes('Basis') && !r.head.includes('Why') && r.rows.filter(([c]) => c === 'rev-why').length === live.length
+    && r.rows.every(([c], i) => (i % 2 ? c === 'rev-why' : c !== 'rev-why')), JSON.stringify(r.rows));
+  /* Sorted, the second line must follow ITS channel, not the row index. */
+  await page.evaluate(() => [...document.querySelectorAll('#view table thead th')].find((th) => /^Bookings/.test(th.textContent.trim()))
+    ?.querySelector('button, .sortbtn, [role="button"]')?.click() || [...document.querySelectorAll('#view table thead th')]
+    .find((th) => /^Bookings/.test(th.textContent.trim()))?.click());
+  await page.waitForTimeout(400);
+  const after = await page.evaluate(() => {
+    const tbl = [...document.querySelectorAll('#view table')].find((x) => /Report a fare/i.test(x.querySelector('thead')?.textContent || ''));
+    return [...tbl.querySelectorAll('tbody tr')].map((tr) => [tr.className, tr.className === 'rev-why'
+      ? tr.textContent.replace(/\s+/g, ' ').trim() : tr.querySelector('td').textContent.trim()]);
+  });
+  const pairs = [];
+  for (let i = 0; i + 1 < after.length; i += 2) pairs.push([after[i][1], after[i + 1][1]]);
+  check('…and after a sort each second line is still its own channel\'s', pairs.length === live.length && pairs.every(([name, why]) => {
+    const p = live.find((x) => x.platform.toLowerCase() === name.toLowerCase());
+    return p && why.includes(p.basis_note.slice(0, 40));
+  }), JSON.stringify(pairs.map(([n, w]) => [n, w.slice(0, 60)])));
+  check('the leaf lines: eight at most each way, what was taken out signed', r.added <= 8 && r.took.every((v) => v.startsWith('−')),
+    JSON.stringify(r.took));
+  check('the † band: under-covered bookings, the bank line, channels with neither, channels silent',
+    s.abs.length === 4 && s.abs[0].fig === String(t.undercovered_bookings || 0) && s.abs[2].fig.endsWith(`of ${live.length}`),
+    JSON.stringify(s.abs));
+  check('the colophon', s.colophon.includes(`${t.bookings.toLocaleString('en-US')} bookings`) && s.colophon.includes(aed(t.accounted)), s.colophon);
+  check('no sideways scroll at 1440', s.overflowX <= 0, String(s.overflowX));
+  await ctx.close();
+}
+/* Ruling 7: when the verdict's figure IS the accounted total, the tile that
+   printed it a second time is not drawn, and its split is kept in words. */
+{
+  const priced = (_q, real) => ({ ...real, platforms: real.platforms.map((p) => (p.platform === 'uber'
+    ? { ...p, fares: 90000, priced_bookings: p.bookings, best: 61200, basis: 'statement', basis_note: 'statement net' } : p)) });
+  const { ctx, page, answer } = await open('arkiv', 'revenue', { fixtures: { '/api/revenue': priced } });
+  const s = await shape(page);
+  const r = await revRead(page);
+  const t = answer('/api/revenue').totals;
+  check('the verdict carries the accounted total, and no tile repeats it (ruling 7)',
+    r.vfig === aed(t.accounted) && !Object.values(s.values).includes(r.vfig) && !('Accounted for' in s.values), JSON.stringify([r.vfig, s.values]));
+  check('…the split it carried is kept in words under the band, and the hero passes on',
+    r.dropped.startsWith('Accounted for —') && r.dropped.includes(aed(t.accounted_fares)) && s.hero === 'Fares charged', `${r.dropped} | ${s.hero}`);
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'revenue', { width: 390, scheme: 'dark' });
+  const s = await shape(page);
+  check('390, dark: every section, no sideways scroll', s.heads.length === REV_HEADS.length && s.overflowX <= 0, `${s.heads.length} ${s.overflowX}`);
+  await ctx.close();
+}
+
 await done();
