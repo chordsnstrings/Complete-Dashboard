@@ -3203,3 +3203,9 @@ Not adopted on #deposits: the mockup's absence of the form and the table; a spar
 | page | what changed | state | proof |
 |---|---|---|---|
 | #salary, #policy, #deposits (contract branch only) | The spread charts' caption said `in AED ${sp.step} bands`, a hand-built currency string — the one thing `test/money_precise.test.mjs` forbids in any page, because a hand-built "AED " + number is how money was once printed to whole dirhams in one place and to fils in the next. Found by the Money-section full suite (the only failure in it); the three captions now read `in ${aed(sp.step)} bands` / `in ${money(sp.step)} bands`. The old skin never drew these captions. | written, in the tree | `money_precise` 21/21 alone; failed on the three files before the edit (the Money-section suite run). |
+
+### S6 · charts.js gapBars: `hatchIf` / `hatchNote` (its own commit, ahead of #finance and #reconcile)
+
+| file | what changed | state | proof |
+|---|---|---|---|
+| `api/public/charts.js` gapBars | Two new options. `hatchIf(d)` true draws that bar the way an unfinished day is already drawn (the series' hatch, no solid fill) and `hatchNote` is said in its tooltip in place of "so far". The case: #finance's open week — each of those days is that day's own fares less the platform's commission, not the platform's statement, and drawn solid it reads as filed; #reconcile's periods the window cuts. The first draft marked bars by INDEX after drawing, which silently mis-marks the moment gapBars drops or reorders a bar; the option asks the datum. No existing caller passes it, so no chart changes. | written, in the tree | `chart_marks` 151/151 — new check "hatchIf: the derived day is drawn as the unfinished form in both skins, every other bar solid"; reverting the `\|\| derivedBar` term fails it (all four bars solid `var(--b400)`), restore md5-checked. |

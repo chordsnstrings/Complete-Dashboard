@@ -610,6 +610,13 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
      Opt-out rather than opt-in: `inProgress: false` for a series where the
      last bucket is not a day in progress. */
   inProgress = true,
+  /* A bar MEASURED DIFFERENTLY from its neighbours, drawn the way an
+     unfinished day is: `hatchIf(d)` true paints it in the series' hatch and
+     `hatchNote` is said in its tooltip. #finance's open week is the case —
+     each of those days is that day's own fares less the platform's
+     commission, not the platform's statement, and drawn solid it read as
+     filed. No caller that does not pass it changes. */
+  hatchIf = null, hatchNote = '',
   /* A ceiling the DATA does not get to choose.
      ─────────────────────────────────────────────────────────────────────
      barChart has always had this; gapBars never needed it until a series
@@ -760,7 +767,8 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
        as a HATCH in the series' own colour: an unfinished period is being
        measured, which is the opposite of absent, and absent is the outline. */
     const clipped = d.partial === true && +d.days > 0 && +d.days < +d.of_days;
-    const live = (inProgress && i === data.length - 1 && isToday(d[x])) || clipped;
+    const derivedBar = !!(hatchIf && hatchIf(d));
+    const live = (inProgress && i === data.length - 1 && isToday(d[x])) || clipped || derivedBar;
     const paint = !live ? { fill: `var(${color})` }
       : form.unfinished === 'hatch'
         ? { fill: hatchOf(color), stroke: `var(${color})`, 'stroke-width': 1 }
@@ -771,7 +779,8 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
     interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}${
       clipped ? ` over <b>${esc(String(d.days))} of ${esc(String(d.of_days))} days</b> — this bucket `
         + 'is cut short by the window, so its height is not comparable'
-        : live ? ` <b>so far</b>, at ${esc(nowHHMM())} Dubai — this day is still being collected`
+        : derivedBar ? ` — ${esc(hatchNote)}`
+          : live ? ` <b>so far</b>, at ${esc(nowHHMM())} Dubai — this day is still being collected`
           : ''}${
       secondary && +d[secondary] ? `<br>${fmt(d[secondary])} ${esc(secondaryLabel)}` : ''}`,
     onClick && (() => onClick(d)));
