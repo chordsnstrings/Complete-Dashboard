@@ -1990,3 +1990,15 @@ scroll. 143 on HR's list (Ecosine 100, Egari 43), 60 with anything expiring
 in 90 days, 134 matched to a platform account (112 by id, 22 by phone, 9
 not matched), 0 off the list. The import form was not exercised (no upload
 against production).
+
+### #identity — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/identity/`): no error, no sideways scroll. 433 links: 68
+on a shared phone, 365 on a name (247 similar, 93 identical, 25 the same
+car too); 155 in every total (78 of the similar-name links, 2 identical, 66
+phone, 9 car). Channel pairs Hotel–Uber 106, Bolt–Uber 101, Bolt–Hotel 87,
+Hotel–Yango 48, Uber–Yango 37, Bolt–Bolt 36, Bolt–Yango 18. The correctness
+fix seen on real rows: a similar-name pair reads "SIMILAR NAMES" and "YES —
+THE NAME IS THE EVIDENCE" where the old skin reads "phone ···" and "No".
+The arkiv page is 8,908 characters of text against the old skin's 219,318.

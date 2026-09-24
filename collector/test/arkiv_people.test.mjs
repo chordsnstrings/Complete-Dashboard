@@ -1244,4 +1244,66 @@ if (want('hr-roster')) {
   }
 }
 
+/* ══ #identity ════════════════════════════════════════════════════════════ */
+if (want('identity')) {
+  console.log('\n#identity');
+  /* Synthetic name-basis links beside the mock's phone ones — the shape
+     production carries (365 of 433 on a name) and the mock does not. */
+  const nameLinks = (q, real) => ({ ...real, links: [...(real.links || []),
+    ...['similar_name', 'same_name', 'shared_car_name', 'similar_name', 'shared_email'].map((b, i) => ({
+      alias_ext_id: `syn-a-${i}`, alias_platform: ['bolt', 'hotel', 'yango', 'bolt', 'uber'][i], alias_name: `Synthetic Alias ${i}`,
+      canonical_ext_id: `syn-c-${i}`, canonical_platform: 'uber', canonical_name: `Synthetic Person ${i}`, canonical_key: `synthetic person ${i}`,
+      basis: b, evidence: `synthetic ${b} evidence`, phone_tail: null, first_seen_at: `2026-09-1${i}T09:00:00.000Z`,
+      last_seen_at: `2026-09-1${i}T09:00:00.000Z`, confirmed_at: i < 2 ? '2026-09-20T10:00:00.000Z' : null, confirmed_by: null, promoted: i === 0 })) ] });
+  {
+    const { ctx, page } = await open('classic', 'identity', { fixtures: { '/api/drivers/identity-links': nameLinks } });
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      no: [...document.querySelectorAll('#view td .tag.warn')].filter((t) => t.textContent.trim() === 'No').length,
+      emptyTail: [...document.querySelectorAll('#view td .tag')].filter((t) => /^phone ···$/.test(t.textContent.trim())).length }));
+    check('old skin (frozen): no band, and a name-basis link still reads "phone ···" and "No" — the defect the new skin fixes', !r.band && r.no >= 5 && r.emptyTail >= 5, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'identity', { fixtures: { '/api/drivers/identity-links': nameLinks } });
+    const s = await shape(page);
+    const d = answer('/api/drivers/identity-links');
+    const L = d.links || [];
+    const names = L.filter((r) => /name/.test(r.basis || '')).length;
+    const n = (v) => (+v || 0).toLocaleString('en-US');
+    check('00: Records joined the hero, the joins split by basis (shared_email included)', s.hero === 'Records joined' && s.values['Records joined'] === n(L.length)
+      && s.values['Joined on a shared phone'] === n(L.filter((r) => (r.basis || 'shared_phone') === 'shared_phone').length)
+      && s.values['Joined on a name'] === n(names) && s.values['Joined on an email'] === n(L.filter((r) => r.basis === 'shared_email').length), JSON.stringify(s.values));
+    check('the Records joined sub-line stops calling every link a pair no name could reach', s.subs['Records joined'] === `${n(L.length - names)} on a number or an address, ${n(names)} on a name`, s.subs['Records joined']);
+    const rows = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => / joined as one person$/.test(x.querySelector('h3')?.textContent || ''));
+      const th = p ? [...p.querySelectorAll('thead th')].map((x) => x.textContent.replace(/[▲▼↑↓]/g, '').trim()) : [];
+      return p ? [...p.querySelectorAll('tbody tr')].map((tr) => ({ by: tr.children[th.indexOf('Joined by')]?.textContent.trim(), could: tr.children[th.indexOf('Could the names have done it?')]?.textContent.trim() })) : []; });
+    const nameRows = rows.filter((r) => !/^phone ···/.test(r.by));
+    check('CORRECTNESS: a name-basis link says what joined it and "Yes — the name is the evidence"; no empty phone tail anywhere',
+      rows.length > 0 && !rows.some((r) => r.by === 'phone ···') && nameRows.filter((r) => /name/.test(r.by)).every((r) => r.could === 'Yes — the name is the evidence')
+      && nameRows.some((r) => r.by === 'a shared email' && r.could === 'No'), JSON.stringify(rows));
+    const sub = await txtOf(page, '#view .panel p.cap');
+    check('the table\'s subtitle names what the rows rest on, not "the same phone number"', !/same phone number/.test(await page.evaluate(() => [...document.querySelectorAll('#view .panel')].find((x) => / joined as one person$/.test(x.querySelector('h3')?.textContent || ''))?.querySelector('p.cap')?.textContent || '')), sub);
+    const basis = await page.evaluate(() => [...document.querySelectorAll('[data-panel="id-basis"] .hb')].map((h) => [h.querySelector('.k').textContent.trim(), h.querySelector('.v').textContent.trim()]));
+    check('01 what joined them: one bar per basis, with how many are in every total', basis.length === new Set(L.map((r) => r.basis || 'shared_phone')).size
+      && basis.every(([, v]) => / in every total$/.test(v)), JSON.stringify(basis));
+    const pairs = await page.evaluate(() => [...document.querySelectorAll('[data-panel="id-pairs"] .hb .v')].reduce((a, v) => a + +v.textContent.replace(/[^\d]/g, ''), 0));
+    check('02 the channel pairs: every link once', pairs === L.length, String(pairs));
+    const found = await page.evaluate(() => !!document.querySelector('[data-panel="id-found"] svg'));
+    check('03 when each link was first found', found);
+    const fold = await page.evaluate(() => ({ fold: !!document.querySelector('[data-fold="id-links"], [data-key="id-links"]') || /Show the other/i.test(document.querySelector('#view').textContent) }));
+    check('the pair table kept (folded at twelve), the Overruled table kept', s.heads.includes('Overruled by a person') && (L.length <= 12 || fold.fold), JSON.stringify([s.heads, fold]));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const conf = L.filter((r) => r.confirmed_at); const anon = conf.filter((r) => !r.confirmed_by).length;
+    check('†: the confirmations with no name counted; the reach and applies notes moved there', (anon ? ab['A name on a confirmation']?.fig === `${anon} of ${conf.length}` : !!ab['A name on a confirmation']?.none)
+      && ab['What the rule can see']?.why === d.reach_note && ab['Where a link applies']?.why === d.applies_note, JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'identity', { width: 390 });
+    check('#identity at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
