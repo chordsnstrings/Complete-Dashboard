@@ -447,4 +447,46 @@ if (want('forecast')) {
   }
 }
 
+/* ══ #optimise ════════════════════════════════════════════════════════════ */
+if (want('optimise')) {
+  console.log('\n#optimise');
+  {
+    const { ctx, page } = await open('classic', 'optimise');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      warn: [...document.querySelectorAll('#view .note.warn')].some((n) => /charging stations/.test(n.textContent)) }));
+    check('old skin: no 00 band; the charger note is still a warning box', !r.band && r.warn, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'optimise');
+    const s = await shape(page);
+    const O = answer('/api/optimise');
+    check('the plan\'s order: 00, the rate heatmap, the waiting table, pile-up, drop-offs, the no-car table, the surplus, the scatter, †',
+      JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Best hours to be online', 'Where the waiting happens', 'Where cars pile up, and run out',
+        'When a car comes free', 'Jobs that started where no car was waiting', 'Where cars arrive and no job starts', 'Is the waiting where the work is',
+        '† What this page does not know']), JSON.stringify(s.heads));
+    check('idle between jobs leads; the median wait is the verdict\'s figure and not a tile (ruling 7)', s.hero === 'Idle, between jobs'
+      && s.values['Idle, between jobs'] === `${(+O.idle_h_between_jobs).toLocaleString('en-US')} h` && !('Median wait' in s.values), JSON.stringify(s.values));
+    check('bookings where no car waited is the answer\'s share, called a floor', s.values['Bookings where no car waited'] === `${O.empty_arrival_pct}%` && /a floor/.test(s.subs['Bookings where no car waited']),
+      JSON.stringify([s.values['Bookings where no car waited'], s.subs['Bookings where no car waited']]));
+    const surRows = await page.evaluate(() => document.querySelectorAll('[data-panel="opt-surplus"] tbody tr').length);
+    check('the surplus the endpoint sent and nothing drew is a table now, one row each', surRows === (O.surplus || []).length, `${surRows} vs ${(O.surplus || []).length}`);
+    const pile = await bars(page, '[data-panel="opt-pile"]');
+    check('pile-up and run-out: at most fourteen areas, "(unrecorded)" never a place', pile.length <= 14 && pile.length > 0 && !pile.some(([k]) => /unrecorded/.test(k)), JSON.stringify(pile.slice(0, 3)));
+    const dots = await page.evaluate(() => document.querySelectorAll('[data-panel="opt-scatter"] svg circle').length);
+    check('the scatter has a dot per worst place-hour sent', dots === (O.waits || []).filter((r) => r.handovers != null && r.median_wait_min != null).length, String(dots));
+    const warn = await page.evaluate(() => [...document.querySelectorAll('#view .note.warn')].some((n) => /charging stations/.test(n.textContent)));
+    check('the charger note is a caption now — a basis, not a defect', !warn);
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('† slots not sent are the waits the endpoint held back', ab['Slots not sent']?.fig === String(Math.max(0, (O.totals?.waits || 0) - (O.waits || []).length)), JSON.stringify(ab['Slots not sent']));
+    check('no tile wears a tone', (await toned(page)).length === 0);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'optimise', { width: 390 });
+    check('#optimise at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

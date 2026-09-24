@@ -1741,3 +1741,10 @@ Production, both skins at 1440 and 390, light and dark (scratchpad
 16,000 – 31,900 — the straight line against the scaled year-ago month, 99%
 apart with ranges that do not overlap; September is running at 23,377
 against a 14,700 forecast, outside its range.
+
+### #optimise — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/optimise/`): no error, no sideways scroll. Al
+Garhoud runs +1,201 bookings over arrivals while Dubai Int'l Airport piles
+up −483 — the same Terminal 3 written two ways, which the caption names.
