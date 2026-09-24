@@ -268,8 +268,12 @@ check('no rule or module paints a literal #fff', whites.length === 0, whites.joi
    review, finding 5). */
 check('the chosen chip is --on-fill on the accent', /\.depchip\.on\s*\{[^}]*color:\s*var\(--on-fill\)/.test(app));
 check('the phone’s primary button is --on-fill', /\.m-btn\.primary\s*\{[^}]*color:\s*var\(--on-fill\)/.test(mcss));
+/* Under the page contract (P72, plan §4 #map) a moving pin with no seat
+   reading takes a dashed INK ring instead — the absence of a reading, drawn
+   on the ring rather than as "empty" — so the map's expression may name that
+   branch before the white ring; every other pin still rings in --pin-ring. */
 check('map and driver pins ring in --pin-ring',
-  /color: (?:hollow \? colour : )?css\('--pin-ring'\)/.test(read('map.js')) && /color: css\('--pin-ring'\)/.test(read('driver.js')));
+  /color: (?:hollow \? colour : )?(?:noSeat \? css\('--ink'\) : )?css\('--pin-ring'\)/.test(read('map.js')) && /color: css\('--pin-ring'\)/.test(read('driver.js')));
 for (const t of ['--on-fill', '--pin-ring']) {
   check(`old skin: ${t} is production's white in the light :root`, valueIn(lightRoot, t) === '#ffffff', valueIn(lightRoot, t));
   check(`old skin: …and no dark block moves ${t} off it`, valueIn(mediaDark, t) == null && valueIn(explicitDark, t) == null,

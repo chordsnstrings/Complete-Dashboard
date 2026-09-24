@@ -6753,3 +6753,5 @@ number (5 and 5), and never a passport or RTA number.
 * **`/api/segments` rows are the newest and capped** (`truncated`, `total`). Anything counted off them about age, such as "before the status-feed history began", is a floor and must say so.
 
 * **A ruling-7 fold must go by LABEL on #live.** In the mock, the one stale car and the one car silent over a day are both "1": two different measures that happen to agree. A value-equality fold (or test) would take the wrong tile. This is the same trap as the roster fold (P50), met again.
+
+* **#map's live view waits on `/api/map/days` before `/api/live`, and on production the markers land ~20 s after load** (/api/live answered in 3.7 s on its own). Shooting it with the usual few-second wait gives an empty map in both skins, so shoot it at 25 s. Separately, the mock's `/api/map/journey` points carry no `source`; production's do (api/server.js). A test of feed colours on replay must supply one.

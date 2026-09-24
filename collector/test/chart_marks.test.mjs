@@ -599,24 +599,30 @@ const PINS = async () => {
   document.body.append(host);
   const map = await m.makeMap(host);
   m.renderLive(map, [
-    { plate: 'SYN1', lat: 25.2, lng: 55.3, stale: true, speed: 0, seat_occupied: null },
-    { plate: 'SYN2', lat: 25.25, lng: 55.35, stale: false, speed: 30, seat_occupied: null },
+    { plate: 'SYN1', lat: 25.2, lng: 55.3, stale: true, speed: 0, seat_occupied: null, source: 'fms' },
+    { plate: 'SYN2', lat: 25.25, lng: 55.35, stale: false, speed: 30, seat_occupied: null, source: 'fms' },
   ]);
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim().toLowerCase();
   const p = [...host.querySelectorAll('path.leaflet-interactive')].map((x) => ({
     stroke: String(x.getAttribute('stroke')).toLowerCase(), fillOpacity: x.getAttribute('fill-opacity'),
-    fill: String(x.getAttribute('fill')).toLowerCase() }));
-  return { p, grey: css('--grey'), ring: css('--pin-ring'), b300: css('--b300') };
+    fill: String(x.getAttribute('fill')).toLowerCase(), dash: x.getAttribute('stroke-dasharray') }));
+  return { p, grey: css('--grey'), ring: css('--pin-ring'), b300: css('--b300'), outline: css('--abs-outline'),
+    fmsMoving: css('--c-fms-available'), ink: css('--ink') };
 };
 for (const skin of ['classic', 'arkiv']) {
   const { ctx, page } = await open(skin);
   const r = await page.evaluate(PINS);
   const [stale, moving] = r.p;
   if (skin === 'arkiv') {
-    check('Arkiv: a stale pin is a hollow ring in the stale grey',
-      stale && stale.fillOpacity === '0' && stale.stroke === r.grey, JSON.stringify(r));
-    check('Arkiv: …while "moving, no seat reading" stays a filled pin', moving && moving.fillOpacity === '0.95'
-      && moving.fill === r.b300, JSON.stringify(moving));
+    /* The page contract's #map (P72, plan §4): a stale pin is the ABSENCE
+       outline, hollow; a moving pin with no seat reading is its feed's moving
+       step (FMS here), filled, with a dashed ink ring — no longer the graphite
+       --b300, which is what made a stale fill and it indistinguishable in the
+       first place. */
+    check('Arkiv: a stale pin is a hollow ring in the absence outline',
+      stale && stale.fillOpacity === '0' && stale.stroke === r.outline, JSON.stringify(r));
+    check('Arkiv: …while "moving, no seat reading" stays a filled pin — its feed\'s moving step, a dashed ink ring', moving && moving.fillOpacity === '0.95'
+      && moving.fill === r.fmsMoving && moving.stroke === r.ink && !!moving.dash, JSON.stringify([moving, r.fmsMoving]));
   } else {
     check('old skin: a stale pin keeps its faded fill and its white ring, as production draws it',
       stale && stale.fillOpacity === '0.45' && stale.stroke === r.ring && r.ring === '#ffffff', JSON.stringify(r));

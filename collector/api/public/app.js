@@ -9,7 +9,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, sourceToken, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
-  markTallTables, kpiTile, fitKpis, UBER_FARE_WHY,
+  markTallTables, kpiTile, kpiTiles, fitKpis, UBER_FARE_WHY,
   contract, glance, secHead, absenceBand, pageFoot, clearPageFoot, highlight, swatch, delta, notRepeated,
   glanceBand, bandTiles,
   SEG_SOURCES, SEG_SOURCE_LABEL, bySourceLine } from './ui.js';
@@ -5726,6 +5726,19 @@ function liveMarks(root, rows) {
 
 
 V.map = async (root) => {
+  /* Under the page contract (plan §4 #map, #map/replay): restyle only for the
+     live map — toggle, map, markers, marker-click replay, the four tiles, the
+     legend, the no-lock note and the permalink kept; the marks take their
+     feed's colour with the occupancy state as that feed's ramp, stale an
+     outline (map.js), and the legend says so per feed. In replay mode the
+     tiles are untoned and an unmeasured one is ABSENT WITH ITS REASON; the
+     Distance tile says when the day's fixes came from more than one feed,
+     because the straight-line sum then crosses between interleaved devices
+     (the plan's owner-ruling defect — flagged, not ruled); and, only in
+     replay and only BELOW the map so nothing above it moves, what the fixes
+     say: the gaps between them, their status words, the speeds, and this
+     car's days. */
+  const ak = contract();
   const { makeMap, renderLive, renderJourney } = await import('/map.js');
 
   // ── controls ──
@@ -5773,6 +5786,9 @@ V.map = async (root) => {
   /* The address follows the map. Written with replaceState, so restoring the
      state does not re-render the view that just produced it. */
   const perma = el('p', 'cap'); root.append(perma);
+  /* The replay marks' host is on the page under the contract only: the old
+     skin's DOM is held byte for byte by the golden. */
+  const marks = el('div'); if (ak) root.append(marks);
   const showPerma = (mode, plate, day) => {
     const addr = mode === 'replay' && plate
       ? `#map/replay/${encodeURIComponent(plate)}${day ? `?day=${encodeURIComponent(day)}` : ''}`
@@ -5789,6 +5805,7 @@ V.map = async (root) => {
 
   const showLive = async () => {
     clear();
+    marks.innerHTML = '';
     let rows;
     /* One slow endpoint must not take the page. A 504 here replaced the whole
        of #map — map, controls, legend — with an error box, because this fetch
@@ -5824,7 +5841,16 @@ V.map = async (root) => {
        --b300 are the same lightness (map.js renderLive, reskin review
        finding 2); a fill everywhere else. */
     const hollowStale = markForm().stale === 'hollow';
-    legend.innerHTML = [['--s3', 'Passenger aboard'], ['--s1', 'Moving — seat reading says empty'],
+    if (ak) {
+      /* One row per feed on the map: its three ramp steps, named. */
+      const feeds = CHANNEL_ORDER.filter((f) => withGps.some((r) => channelKey(String(r.source || '')) === f));
+      const unnamed = withGps.some((r) => !channelKey(String(r.source || '')));
+      legend.innerHTML = feeds.map((f) => `<span>${['engaged', 'available', 'idle'].map((st) => `<i class="sw" style="background:var(--c-${f}-${st})"></i>`).join('')}`
+        + `<b>${esc(sourceLabel(f))}</b>: passenger aboard · moving · stopped</span>`).join('')
+        + '<span><i class="sw" style="background:transparent;box-shadow:inset 0 0 0 1.5px var(--ink);outline:1px dashed var(--ink);outline-offset:-1px"></i>Moving — no seat reading on this fix</span>'
+        + '<span><i class="sw" style="background:transparent;box-shadow:inset 0 0 0 2px var(--abs-outline)"></i>Stale fix</span>'
+        + (unnamed ? '<span><i class="sw" style="background:var(--grey)"></i>A feed this product cannot name</span>' : '');
+    } else legend.innerHTML = [['--s3', 'Passenger aboard'], ['--s1', 'Moving — seat reading says empty'],
       ['--s5', 'Stopped'], ['--b300', 'Moving — no seat reading on this fix'], ['--grey', 'Stale fix', hollowStale]]
       .map(([c, t, ring]) => `<span><i class="sw" style="${ring
         ? `background:transparent;box-shadow:inset 0 0 0 2px var(${c})` : `background:var(${c})`}"></i>${t}</span>`).join('');
@@ -5876,7 +5902,7 @@ V.map = async (root) => {
       b.onclick = () => showReplay(plate); stat.append(b);
       return;
     }
-    stat.innerHTML = [
+    const REPLAY_TILES = [
       ['Fixes', fmt(j.fixes), `on ${day}`],
       ['Distance', fmt(j.distance_km) + ' km', 'between fixes'],
       /* Null, not zero, when no fix this day carried a seat reading. When FMS
@@ -5898,15 +5924,37 @@ V.map = async (root) => {
          about them. */
       ['Driver', j.driver ? entity('driver', j.driver_id, j.driver) : '—',
         j.driver_trips != null ? j.driver_trips + ' trips that day' : 'from the trip record'],
-    ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
-    legend.innerHTML = (j.occupancy_reported
+    ];
+    const jFeeds = [...new Set((j.segments || []).flatMap((sg) => sg.points).map((pt) => pt.source).filter(Boolean))];
+    if (ak) {
+      /* Untoned, and an unmeasured tile ABSENT WITH ITS REASON — a glance row
+         with no hero (kpiTile prints a reason only on a glance tile). */
+      stat.classList.add('glance');
+      stat.innerHTML = kpiTiles(REPLAY_TILES.map(([l, n, d]) => {
+        if (l === 'With passenger' && n === 'not measured') return { label: l, na: d, glance: true };
+        if (l === 'Driver' && !j.driver) return { label: l, na: 'no custody record names who held the car that day', glance: true };
+        if (l === 'Distance' && jFeeds.length > 1) {
+          return { label: l, html: n, glance: true, sub: `between fixes from ${countOf(jFeeds.length, 'feed')} (${andList(jFeeds.map(sourceLabel))}), interleaved — `
+            + 'a straight line drawn from one device\u2019s fix to the other\u2019s can overstate it; which figure is right awaits an owner\u2019s ruling' };
+        }
+        return { label: l, html: n, sub: d, glance: true };
+      }));
+    } else stat.innerHTML = REPLAY_TILES.map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
+    legend.innerHTML = ak && j.occupancy_reported
+      ? jFeeds.map((f) => `<span><i class="sw" style="background:var(--c-${channelKey(f) || 'x'}-engaged, var(--grey))"></i>${esc(sourceLabel(f))}: passenger aboard</span>`
+        + `<span><i class="sw" style="background:var(--c-${channelKey(f) || 'x'}-available, var(--grey))"></i>${esc(sourceLabel(f))}: running empty (dashed)</span>`).join('')
+        + '<span><i class="sw" style="background:var(--grey)"></i>No seat reading on the fix (dotted)</span>'
+        + '<span class="dim">Lines join consecutive 5-minute fixes; a gap over 20 minutes breaks the line '
+        + 'rather than guessing the route.</span>'
+      : (j.occupancy_reported
       ? [['--s3', 'Passenger aboard'], ['--s1', 'Running empty (dashed)']]
       : [['--grey', 'No seat reading from CABMAN DT or FMS']])
       .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('')
       + '<span class="dim">Lines join consecutive 5-minute fixes; a gap over 20 minutes breaks the line '
       + 'rather than guessing the route.</span>';
-    if (!j.fixes) { empty(stat, `No GPS fixes stored for ${plate} on ${day}`); return; }
+    if (!j.fixes) { empty(stat, `No GPS fixes stored for ${plate} on ${day}`); marks.innerHTML = ''; return; }
     layer = renderJourney(map, j);
+    if (ak) mapReplayMarks(marks, j, plate, day, jFeeds, (d2) => { dayList.value = d2; showReplay(plate); });
   };
 
   /* Populate the replay pickers from days that actually have a trail.
@@ -5957,7 +6005,7 @@ V.map = async (root) => {
   fillDays();
   $('#mPlate').addEventListener('change', fillDays);
 
-  $('#mLive').onclick = () => { setMode('live'); showPerma('live'); showLive(); };
+  $('#mLive').onclick = () => { setMode('live'); showPerma('live'); stat.classList.remove('glance'); showLive(); };
   $('#mReplay').onclick = () => { setMode('replay'); showReplay(); };
   $('#mGo').onclick = () => showReplay();
   $('#mPlate').addEventListener('change', () => showReplay());
@@ -5981,6 +6029,79 @@ V.map = async (root) => {
   showPerma('live');
   await showLive();
 };
+
+/* ── #map/replay under the page contract: what the fixes say ───────────── */
+/* Below the map, replay only. Off the journey this page already fetched,
+   and this car's own days (/api/map/days?plate= — the unfiltered list is
+   capped at 400 rows across the fleet, so the plate is passed). */
+async function mapReplayMarks(host, j, plate, day, feeds, openDay) {
+  host.innerHTML = '';
+  const pts = (j.segments || []).flatMap((sg) => sg.points).filter((pt) => pt.t)
+    .sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+  const one = feeds.length === 1 ? feeds[0] : null;
+  const tone = (st) => (one ? `--c-${channelKey(one) || 'x'}-${st}` : '--mk-fill');
+  const g1 = el('div', 'grid g3'); host.append(g1);
+  /* How long between one fix and the next. */
+  const gp = panel('How long between one fix and the next', `${countOf(Math.max(0, pts.length - 1), 'gap')} on ${dayStr(`${day}T12:00:00`)}`, 'map-gaps');
+  g1.append(gp.panel);
+  const gaps = pts.slice(1).map((pt, i) => (Date.parse(pt.t) - Date.parse(pts[i].t)) / 60000);
+  const GB = [[0, 3, 'under 3 min'], [3, 6, '3–6 min'], [6, 10, '6–10 min'], [10, 20, '10–20 min'], [20, 60, '20–60 min, the line broken'], [60, Infinity, 'an hour or more, broken']];
+  if (gaps.length) {
+    const b = el('div'); gp.body.append(b);
+    hbars(b, GB.map(([lo, hi, label]) => ({ label, n: gaps.filter((x) => x >= lo && x < hi).length, broken: lo >= 20 })),
+      { signed: false, colorFor: (x) => (x.broken ? '--grey' : tone('engaged')) });
+    gp.body.append(el('p', 'cap', `The longest silence was ${fmt(Math.max(...gaps))} minutes. A gap over 20 minutes breaks the line rather than inventing a route.`));
+  } else gp.body.append(note('One fix, so no gap to measure.'));
+  /* What each fix said it was doing — the feed's own status words. */
+  const sp = panel('What each fix said it was doing', 'The status word on each fix, counted', 'map-status');
+  g1.append(sp.panel);
+  const by = new Map(); pts.forEach((pt) => { const k = pt.status || 'no status'; by.set(k, (by.get(k) || 0) + 1); });
+  const sb = el('div'); sp.body.append(sb);
+  hbars(sb, [...by.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, n]) => ({ label, n })), { signed: false, color: tone('available') });
+  /* How fast it was going — moving fixes only; a fix with no speed is not a stop. */
+  const vp = panel('How fast it was going', 'Fixes above 3 km/h, by speed', 'map-speed');
+  g1.append(vp.panel);
+  const moving = pts.filter((pt) => pt.speed != null && +pt.speed > 3).map((pt) => +pt.speed);
+  const noSpeed = pts.filter((pt) => pt.speed == null).length;
+  const SB = [[3, 20], [20, 40], [40, 60], [60, 80], [80, 100], [100, 120], [120, Infinity]];
+  if (moving.length) {
+    const b = el('div'); vp.body.append(b);
+    hbars(b, SB.map(([lo, hi]) => ({ label: hi === Infinity ? `${lo} km/h or more` : `${lo}–${hi} km/h`, n: moving.filter((v) => v >= lo && v < hi).length })),
+      { signed: false, color: tone('engaged') });
+  } else vp.body.append(note('No fix this day reported the car above 3 km/h.'));
+  vp.body.append(el('p', 'cap', `Top speed ${moving.length ? `${fmt(Math.max(...moving))} km/h` : 'not reached above 3 km/h'}`
+    + (noSpeed ? `; ${countOf(noSpeed, 'fix')} carried no speed and ${noSpeed === 1 ? 'is' : 'are'} not counted.` : '.')));
+  /* This car's days: fixes a day and the top speed, today drawn unfinished. */
+  const dp = panel('This car\u2019s days', 'Fixes a day, and the top speed each day; click a day to replay it', 'map-days');
+  host.append(dp.panel); loading(dp.body);
+  let rows = [];
+  try { rows = (await api(`/api/map/days?plate=${encodeURIComponent(plate)}`)) || []; } catch { rows = null; }
+  dp.body.innerHTML = '';
+  if (rows == null) { dp.body.append(note('This car\u2019s days could not be read.')); return; }
+  const got = rows.map((r) => ({ d: String(r.day).slice(0, 10), fixes: +r.fixes || 0, top: r.max_speed != null ? +r.max_speed : 0,
+    trips: r.driver_trips })).sort((a, b) => (a.d < b.d ? -1 : 1));
+  if (!got.length) { dp.body.append(note('No stored trail for this car in this window.')); return; }
+  /* Every day from the first trail to the last, a day with none drawn as an
+     outline rather than left out, and today drawn unfinished (gapBars). */
+  const byD = new Map(got.map((r) => [r.d, r]));
+  const series = [];
+  for (let t = Date.parse(`${got[0].d}T12:00:00Z`); t <= Date.parse(`${got[got.length - 1].d}T12:00:00Z`); t += 864e5) {
+    const k = dubaiDay(new Date(t));
+    series.push(byD.get(k) || { d: k, fixes: 0, top: 0, trips: null, none: true });
+  }
+  const g2 = el('div', 'grid g2'); dp.body.append(g2);
+  const a = el('div'); const b = el('div'); g2.append(a, b);
+  a.append(el('h4', 'sub', 'Fixes a day'));
+  const a1 = el('div'); a.append(a1);
+  gapBars(a1, series, { x: 'd', y: 'fixes', label: 'fixes', gapKey: 'none', gapLabel: 'no stored trail this day', color: tone('engaged'), onClick: (r) => { if (!r.none) openDay(r.d); } });
+  b.append(el('h4', 'sub', 'Top speed a day'));
+  const b1 = el('div'); b.append(b1);
+  gapBars(b1, series, { x: 'd', y: 'top', label: 'top speed', gapKey: 'none', gapLabel: 'no stored trail this day', color: '--mk-fill', valueFmt: (v) => `${fmt(v)} km/h`, onClick: (r) => { if (!r.none) openDay(r.d); } });
+  const trips = got.filter((r) => r.trips != null);
+  dp.body.append(el('p', 'cap', `${countOf(got.length, 'day')} with a trail`
+    + (trips.length ? `; on those days the driver who held the car filed ${fmt(trips.reduce((x, r) => x + (+r.trips || 0), 0))} bookings.` : '.')
+    + (rows[0]?.truncated ? ` The list holds the ${fmt(rows[0].shown)} newest of ${fmt(rows[0].total)}.` : '')));
+}
 
 
 /* The action list. Everything here is something a person could do today, ordered by

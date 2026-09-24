@@ -1001,4 +1001,83 @@ if (want('feeds')) {
   }
 }
 
+/* ══ #map and #map/replay ═════════════════════════════════════════════════ */
+if (want('map')) {
+  console.log('\n#map');
+  /* The fills Leaflet drew, and the hexes the page's own tokens resolve to. */
+  const marks = (page) => page.evaluate(() => {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (n) => cs.getPropertyValue(n).trim().toLowerCase();
+    const ramp = {};
+    for (const f of ['uber', 'bolt', 'yango', 'hotel', 'cabman', 'fms']) for (const st of ['engaged', 'available', 'idle']) ramp[v(`--c-${f}-${st}`)] = `${f}-${st}`;
+    return { ramp, legacy: ['--s1', '--s3', '--s5', '--b300'].map(v), outline: v('--abs-outline'),
+      paths: [...document.querySelectorAll('.leaflet-overlay-pane path')].map((p) => ({ fill: (p.getAttribute('fill') || '').toLowerCase(),
+        fo: p.getAttribute('fill-opacity'), stroke: (p.getAttribute('stroke') || '').toLowerCase(), dash: p.getAttribute('stroke-dasharray') })) };
+  });
+  {
+    const { ctx, page } = await open('classic', 'map');
+    const m = await marks(page);
+    const leg = await txtOf(page, '#view .legend');
+    check('old skin: the four-state legend, markers in the old slots', /Passenger aboard/.test(leg) && !/: passenger aboard · moving · stopped/.test(leg)
+      && m.paths.filter((p) => p.fo !== '0').every((p) => !m.ramp[p.fill] || m.legacy.includes(p.fill)), JSON.stringify([leg.slice(0, 80), m.paths.slice(0, 2)]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'map');
+    const m = await marks(page);
+    const live = (answer('/api/live').rows || answer('/api/live'));
+    const drawn = m.paths.filter((p) => p.fill && p.fill !== 'none');
+    check('live: every filled mark is a step of a feed\'s own ramp; a stale one an outline with no fill', drawn.length > 0
+      && drawn.every((p) => (p.fo === '0' ? p.stroke === m.outline : !!m.ramp[p.fill])), JSON.stringify(drawn.slice(0, 3)));
+    const leg = await page.evaluate(() => [...document.querySelectorAll('#view .legend > span')].map((s) => s.textContent.trim()));
+    const feeds = [...new Set(live.filter((r) => r.lat != null && Math.abs(+r.lat) > 0.5).map((r) => r.source))];
+    check('the legend names each feed on the map with its three steps, then the no-seat-reading ring and the stale outline', feeds.every((f) => leg.some((t) => /: passenger aboard · moving · stopped/.test(t)))
+      && leg.filter((t) => /: passenger aboard · moving · stopped/.test(t)).length >= 1 && leg.some((t) => /no seat reading/.test(t)) && leg.some((t) => /Stale fix/.test(t)), JSON.stringify(leg));
+    check('the toggle, the four tiles and the permalink kept', !!(await page.$('#mLive')) && !!(await page.$('#mReplay'))
+      && (await page.evaluate(() => document.querySelectorAll('#view > .kpis > .kpi').length)) === 4 && /Click a marker to replay/.test(await txtOf(page, '#view')), '');
+    check('no replay marks in live mode', !(await page.$('[data-panel="map-gaps"]')), '');
+    await ctx.close();
+  }
+  {
+    /* Replay, the day's fixes from two feeds interleaved and no custody
+       record (synthetic): the marks below the map, the Distance tile saying
+       the two feeds were interleaved, the Driver absent with its reason. */
+    const two = (q, real) => ({ ...real, driver: null, driver_id: null, driver_trips: null,
+      segments: (real.segments || []).map((sg) => ({ ...sg, points: sg.points.map((pt, i) => ({ ...pt, source: i % 2 ? 'fms' : 'cabman', status: i % 3 ? 'Moving' : 'Idle' })) })) });
+    const { ctx, page, answer } = await open('arkiv', 'map/replay/L45235?day=2026-08-21', { fixtures: { '/api/map/journey': two } });
+    await page.waitForFunction(() => document.querySelectorAll('[data-panel="map-days"] svg').length > 0, null, { timeout: 8000 }).catch(() => {});
+    const s = await shape(page);
+    const j = answer('/api/map/journey');
+    const tiles = await page.evaluate(() => [...document.querySelectorAll('#view > .kpis > .kpi')].map((k) => ({ l: k.querySelector('.l')?.textContent.trim(),
+      na: k.querySelector('.t-na')?.textContent.trim() || null, sub: k.querySelector('.s')?.textContent.trim() || '', hero: k.classList.contains('is-hero') })));
+    const T = Object.fromEntries(tiles.map((x) => [x.l, x]));
+    check('replay: the four tiles untoned, no hero; the driver absent with its reason', tiles.length === 4 && tiles.every((x) => !x.hero)
+      && /no custody record names who held the car that day/.test(T.Driver?.na || '') && (await toned(page)).length === 0, JSON.stringify(tiles));
+    check('distance: said to be summed across two interleaved feeds, and that the right figure awaits a ruling', /from 2 feeds .*interleaved/.test(T.Distance?.sub || '')
+      && /owner’s ruling/.test(T.Distance?.sub || ''), T.Distance?.sub);
+    const pts = j.segments.flatMap((sg) => sg.points).sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+    const gaps = await bars(page, 'map-gaps');
+    check('how long between fixes: every gap in one band, the broken ones grey', gaps.length === 6 && gaps.reduce((a, b) => a + +b.v, 0) === pts.length - 1
+      && gaps.slice(4).every((b) => /--grey/.test(b.fill)), JSON.stringify(gaps));
+    const st = await bars(page, 'map-status');
+    check('what each fix said: the status words counted', st.reduce((a, b) => a + +b.v, 0) === pts.length && st.some((b) => b.k === 'Moving'), JSON.stringify(st));
+    const sp = await bars(page, 'map-speed');
+    check('how fast: the moving fixes only', sp.reduce((a, b) => a + +b.v, 0) === pts.filter((p) => p.speed != null && p.speed > 3).length, JSON.stringify(sp));
+    const days = await page.evaluate(() => document.querySelectorAll('[data-panel="map-days"] svg').length);
+    const dq = answer('/api/map/days', (q) => !!q.plate);
+    check('this car\'s days: asked for by plate (the fleet list is capped), fixes and top speed a day', !!dq && days >= 2, JSON.stringify([!!dq, days]));
+    check('the marks sit below the map and the permalink', s.heads.indexOf('How long between one fix and the next') >= 0
+      && (await page.evaluate(() => { const w = document.querySelector('#view .mapwrap'); const g = document.querySelector('[data-panel="map-gaps"]'); return !!(w && g && (w.compareDocumentPosition(g) & Node.DOCUMENT_POSITION_FOLLOWING)); })), JSON.stringify(s.heads));
+    await page.click('#mLive');
+    await page.waitForTimeout(800);
+    check('back to live: the replay marks go', !(await page.$('[data-panel="map-gaps"]')), '');
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'map', { width: 390 });
+    check('#map at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

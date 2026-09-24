@@ -2124,3 +2124,13 @@ The verdict: 169 vehicles have a stale fix, of 267 reporting; 237 are tracked wi
 Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p71/`). No page error, no sideways scroll, and the fils scan is clean.
 
 126 cars are active on Uber (91 Ecosine, 35 Egari). CABMAN seat sensor not receiving: 96, 35 of them on Egari, which has no CABMAN account; that is the hero. FMS seat count not receiving: 52. FMS not receiving: 52. The receiving counts (30 / 74 / 74) are in the second row.
+
+### #map, #map/replay — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p72/`). No page error, no sideways scroll.
+
+**Live.** It needs about 20 s on production before the markers land; the shots were retaken at 25 s. 240 cars are on the map, of 267 reporting; 27 report 0,0 and are not drawn. Engaged: 42 of 240. Moving: 70. Stale: 165, drawn as hollow outlines. The markers are CABMAN violet and FMS lilac by ramp step, and the legend has one row per feed.
+
+**Replay** (a busy plate, 23 Sept). 207 fixes, 339 km from one feed, so the Distance tile is unqualified. With passenger: 24 km (23%, FMS live seat count). Below the map: 206 gaps, the longest 181 min; status words Moving 115, Idle 74, Stopped 18; top speed 116 km/h, and 92 fixes carried no speed. The car has 35 days with a trail, today drawn unfinished.
+
+The sandbox has no route to the map tiles, so the base map is blank.
