@@ -3130,3 +3130,9 @@ Not built: the "unnamed booker" totals view (it needs a route key for a row with
 | test | what changed | state | proof |
 |---|---|---|---|
 | `test/arkiv_classic_frozen.test.mjs` | `routes_list.mjs` walks none of the ledger pages (#import-sheet, #opening, #salary, #advances, #charging, #policy, #deposits), so "the old skin is byte-identical" was, for them, a claim nothing measured. An `EXTRA` list holds them beside the routes list (not added to it, so smoke_views and render-audit are not changed by a test of this one); recorded from the base tree `abb79ad` like every other route. `ONLY` takes several substrings, comma separated | **written** | 8/8 twice on the working tree. Revert — "Choose the file" → "Choose a file" in the old #import-sheet: 1 fails, restored and md5-checked |
+
+### P10 · #import-sheet
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #import-sheet | Restyle only (the foundation's form tokens, hairline fields, 44px chips), and the plan's one line: the empty "What it matched" says why it is empty — nothing is read until a file is chosen, and nothing is sent until every row has a person chosen — gone the moment a file is chosen. The whole flow (supervisor → file → local parse → per-row person → commit) untouched | **written** | `test/arkiv_ledger.test.mjs` #import-sheet (3). Revert — the line off: 1 fails, restored and md5-checked. `arkiv_classic_frozen` ONLY=import-sheet 1/1; `ledger_import` green |

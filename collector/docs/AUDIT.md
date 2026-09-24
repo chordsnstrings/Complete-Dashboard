@@ -1557,3 +1557,9 @@ No property resolves on production (the one booker has no partner id, so
 against the mock's `h-palm` at 1440 and 390 (scratchpad
 `pagephase/shots/corporate/prop-mock*.png`): no error, no sideways scroll,
 one highlight (the hero).
+
+### #import-sheet — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/importsheet/`): no error, no sideways scroll, no highlight
+(a form has no figure to emphasise).

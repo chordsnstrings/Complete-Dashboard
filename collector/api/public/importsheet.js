@@ -22,7 +22,7 @@
    spellings are recognised; anything unrecognised is REPORTED with the headers
    that were actually found, rather than the page saying "invalid file" and
    leaving somebody to guess which column it wanted. */
-import { el, esc, panel, note, loading } from './ui.js';
+import { el, esc, panel, note, loading, contract } from './ui.js';
 import { api } from './data.js';
 import { csvObjects, SUPERVISORS, aed, pooled } from './deposit_core.js';
 
@@ -51,6 +51,14 @@ export async function renderImport(root) {
     + 'nothing is written until every row has a person chosen for it.', 'import');
   const reviewPanel = panel('What it matched', null, 'import-review');
   root.append(head.panel, reviewPanel.panel);
+  /* Under the page contract (plan §4 import-sheet: restyle only, plus this
+     one line) the empty panel says why it is empty, instead of a heading
+     over nothing. It goes the moment a file is chosen — the change handler
+     clears this body before it reads the file. */
+  if (contract()) {
+    reviewPanel.body.append(el('p', 'cap import-idle', 'Nothing is read until a file is chosen above. '
+      + 'The sheet is read on this machine, and nothing is sent until every row has a person chosen for it.'));
+  }
 
   /* EVERY CANDIDATE, so a row the matcher missed entirely can still be placed
      without leaving the page. This read used to be /api/ledger/exposure — the
