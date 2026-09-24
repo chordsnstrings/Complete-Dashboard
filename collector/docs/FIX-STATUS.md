@@ -3089,6 +3089,23 @@ new default. phone_clock's rendered check, which skips with no server on :8100,
 was run against a mock: 13 passed. The old phone is still reachable
 (`?skin=classic`), and phone_classic (34) still holds it byte for byte.
 
+### The two branches merged — one integration failure, fixed
+
+The full suite on the complete merge (`a8d7aef`) ran 331 files and 12,179
+assertions; one file failed. In `phone_arkiv`, "the page contract's footer
+closes each desktop tab" failed at 390 and 360. Each branch passed alone.
+
+- **Cause.** The phone's check was written against the unconverted driver and
+  vehicle tabs, and required the footer to be the deck's LAST CHILD. The desktop
+  phase made those tabs write their own footer through `pageFoot(…, root)`,
+  which on the phone lands inside `.m-fallback`. `m/app.js akFoot()` then
+  rightly adds no second one.
+- **What a reader sees is correct.** Measured on both tabs at both widths:
+  exactly one footer, carrying the principle, with nothing visible after it.
+  Its bottom edge is the lowest thing on the screen.
+- **The fix.** The check now asserts exactly that. Proven by revert: removing
+  akFoot's guard gives two footers (`{"n":2,"after":6}`) and fails both widths.
+
 ## Arkiv page phase — desktop — 2026-09-24, NOT ON PRODUCTION
 
 STEP 6 of docs/UI-REDESIGN-PLAN.md, the desktop half (the phone PWA is a

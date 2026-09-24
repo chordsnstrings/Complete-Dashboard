@@ -1492,6 +1492,7 @@ console.log('\n4.20 · The fallback: a desktop tab in the phone’s container, a
   for (const width of [390, 360]) {
     const t = await phonePage(browser, { skin: 'arkiv', fixture, width, height: width === 360 ? 780 : 844 });
     const small = [];
+    const footWhy = [];
     let foot = true;
     for (const route of DESKTOP_TABS) {
       await t.open(route);
@@ -1500,11 +1501,25 @@ console.log('\n4.20 · The fallback: a desktop tab in the phone’s container, a
         .map((a) => ({ t: a.textContent.trim(), h: Math.round(a.getBoundingClientRect().height), w: Math.round(a.getBoundingClientRect().width) })));
       r.filter((a) => a.h < 44 || a.w < 44).forEach((a) => small.push(`${route} ${a.t} ${a.w}×${a.h}`));
       if (!r.length) small.push(`${route}: no tab strip found`);
-      const ol = await outline(t.page);
-      if (ol[ol.length - 1] !== 'foot') foot = false;
+      /* The footer CLOSES the tab: exactly one in the deck, carrying the
+         house principle, with nothing visible after it. Not "the deck's last
+         child": since the desktop page phase, the driver and vehicle tabs
+         write their own footer through pageFoot(…, root), which on the phone
+         lands inside .m-fallback, and m/app.js akFoot() then rightly adds no
+         second one at the deck's end. Found when the two branches were merged
+         (the phone's check was written against the unconverted tabs). */
+      const f = await t.page.evaluate(() => {
+        const deck = document.querySelector('.m-deck');
+        const feet = [...deck.querySelectorAll('.pf-inline, .pagefoot')];
+        const x = feet[0];
+        const after = x ? [...deck.querySelectorAll('*')].filter((e) => !x.contains(e)
+          && (x.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING) && e.getBoundingClientRect().height > 0).length : -1;
+        return { n: feet.length, after, principle: /absent with a reason|cannot be measured/i.test(x?.textContent || '') };
+      });
+      if (!(f.n === 1 && f.after === 0 && f.principle)) { foot = false; footWhy.push(`${route} ${JSON.stringify(f)}`); }
     }
     check(`the desktop tab strip inside the phone is 44px each way at ${width}px`, !small.length, small.slice(0, 4).join(' | '));
-    check(`…and the page contract’s footer closes each desktop tab at ${width}px`, foot);
+    check(`…and the page contract’s footer closes each desktop tab at ${width}px`, foot, footWhy.join(' | '));
     await t.close();
   }
   /* The desktop's own strip cannot be touched: §1 holds every selector in
