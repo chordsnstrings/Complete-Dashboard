@@ -22,7 +22,7 @@
    carrying how many people are over the proposed line against how many are
    over the current one. Moving a lending threshold without seeing who it moves
    is the decision this page exists to stop somebody making blind. */
-import { el, esc, panel, note, loading, tableFrom, kpiRow,
+import { el, esc, panel, note, loading, tableFrom, kpiRow, money,
   contract, glance, absenceBand, pageFoot } from './ui.js';
 import { fmt } from './charts.js';
 import { ledgerBand, formBars, amountBands, firstReason, booksRecorded } from './ledger_ak.js';
@@ -277,7 +277,7 @@ function policyContract(AK, after, root, d, ex) {
   ], { of: n });
   const sp = amountBands(spread.body, people.map((p) => p.owes?.cash_taken).filter((v) => v != null),
     { noun: 'drivers', aria: 'Drivers by cash-fare ceiling' });
-  if (sp) spread.body.append(el('p', 'cap', esc(`${fmt(sp.n)} drivers with a cash fare on record, in AED ${fmt(sp.step)} bands named by their lower edge.`)));
+  if (sp) spread.body.append(el('p', 'cap', esc(`${fmt(sp.n)} drivers with a cash fare on record, in ${money(sp.step)} bands named by their lower edge.`)));
   const cash = (p) => p.owes?.cash_taken != null;
   const gen = (p) => p.earned != null;
   formBars(halves.body, [

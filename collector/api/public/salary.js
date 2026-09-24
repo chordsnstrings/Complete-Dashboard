@@ -278,7 +278,7 @@ function salaryContract(AK, after, root, people, { ym, prev, already, before, pa
     { label: 'No figure', n: none.length, outline: true, why: firstReason(people, (p) => p.earned_absent_reason) || '' },
   ], { of: n });
   const sp = amountBands(spread.body, gen.map((p) => p.earned), { noun: 'people', aria: 'People by generated amount' });
-  if (sp) spread.body.append(el('p', 'cap', esc(`${fmt(sp.n)} people with a generated figure above nought, in AED ${fmt(sp.step)} bands, each named by its lower edge, over the whole record.`)));
+  if (sp) spread.body.append(el('p', 'cap', esc(`${fmt(sp.n)} people with a generated figure above nought, in ${aed(sp.step)} bands, each named by its lower edge, over the whole record.`)));
 
   const pays = payAll?.totals?.rows;
   const absHost = el('div'); after.append(absHost);

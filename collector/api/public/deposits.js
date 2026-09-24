@@ -170,7 +170,7 @@ function depositsContract(AK, top, after, root, people, d, hand) {
   const conc = panel('How concentrated the ceiling is', null, 'deposit-conc');
   g.append(bands.panel, last.panel, conc.panel);
   const sp = amountBands(bands.body, c.carriers.map((p) => p.owes.cash_taken), { noun: 'drivers', aria: 'Drivers by cash-fare ceiling' });
-  if (sp) bands.body.append(el('p', 'cap', esc(`${fmt(sp.n)} drivers, in AED ${fmt(sp.step)} bands named by their lower edge.`)));
+  if (sp) bands.body.append(el('p', 'cap', esc(`${fmt(sp.n)} drivers, in ${aed(sp.step)} bands named by their lower edge.`)));
   monthBars(last.body, people, 'cash_taken_to', { aria: 'Drivers by the month of their last cash fare' });
   if (c.n) {
     const sorted = c.carriers.map((p) => +p.owes.cash_taken).sort((a, b) => b - a);

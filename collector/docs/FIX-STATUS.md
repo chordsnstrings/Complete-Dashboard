@@ -3197,3 +3197,9 @@ Not adopted on #deposits: the mockup's absence of the form and the table; a spar
 | file | what changed | state | proof |
 |---|---|---|---|
 | `api/public/arkiv.css` (the S3 rule) | S3 sized a long hero figure at max-width 480px as `min(var(--d6),10.5vw)`. `test/type_scale.test.mjs` admits only a token, a `clamp()` or an em as a font size — anything else is "the fiftieth size arriving" — and a bare `min()` is a literal by that rule. The Money-section full suite failed it (`arkiv.css: no rule sets a size of its own 1: min(var(--d6),10.5vw)`); S3 had been proved against page_contract alone. Now `clamp(var(--d4),10.5vw,var(--d6))`: identical at every width from 252px up (at 390 both are 40.95px), --d4 as a floor below that. The old skin reads none of this. | written, in the tree | `type_scale` 11/11 (was 10/11); `page_contract` 90/90, §5c's one-line-at-390 check still passes. |
+
+### P16a · the band captions go through money() (#salary, #policy, #deposits)
+
+| page | what changed | state | proof |
+|---|---|---|---|
+| #salary, #policy, #deposits (contract branch only) | The spread charts' caption said `in AED ${sp.step} bands`, a hand-built currency string — the one thing `test/money_precise.test.mjs` forbids in any page, because a hand-built "AED " + number is how money was once printed to whole dirhams in one place and to fils in the next. Found by the Money-section full suite (the only failure in it); the three captions now read `in ${aed(sp.step)} bands` / `in ${money(sp.step)} bands`. The old skin never drew these captions. | written, in the tree | `money_precise` 21/21 alone; failed on the three files before the edit (the Money-section suite run). |
