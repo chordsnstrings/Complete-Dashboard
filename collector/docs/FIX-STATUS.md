@@ -3921,3 +3921,29 @@ The suite gave `328 files, 11873 assertions, 1 file(s) failing` on a private moc
 | fix | what | state | proof |
 |---|---|---|---|
 | F1 · app.js countUp(): the frame clock can run behind the call | countUp() eases a KPI from 0 to its value over p = (now − t0) / 620 ms, where `now` is the requestAnimationFrame timestamp and t0 is `performance.now()` at the call. A frame's timestamp is the START of the frame, so it can precede t0. p was clamped at 1 only, so it went negative and the cubic with it. The failing run read the idle-days tile as "-176" (its value 289) and the per-earning-day tile as "AED -178.65" (AED 293.71): both −0.61 of the true figure, which is p ≈ −0.17, a frame stamped about 106 ms before the call. A frame stalled under load held the number long enough for the test's "two equal reads 300 ms apart" to accept it. P6 saw the same failure once ("-241" against 289) and filed it as "reason not established". p is now clamped at 0 as well. Both skins count up, but only the frames in flight change. The settled DOM is identical, which the golden confirms | **written** | NEW `test/countup_clock.test.mjs` 9/9. It hands every frame a timestamp 150 ms in the past, with motion ON (every other harness reduces it), and records every `.kpi .n` text after every frame on classic #unit, classic #overview and arkiv #unit. No tile whose figure is not negative may ever show a negative one. Revert-proof (the clamp at 0 removed, md5 restored): 3 failures. Classic #unit showed "AED -62,220.01" for AED 79,980.00, classic #overview "-1,796" for 2,043, and arkiv #unit "-5 / 8" for 6 / 8. `money_contradictions` 49/49 alone. `arkiv_classic_frozen` 145/145 in full |
+
+### On production — deployment `b7e80f9` (commit `459de6b`), ACTIVE 13:44:12Z
+
+This is the complete desktop page phase (P1–P77; `#overview` was the STEP 3
+pilot), behind `?skin=arkiv`. The phone default from `8c79d62` is unchanged.
+The full suite on the merged tree ran 331 files and 12,179 assertions; its one
+failure (`phone_arkiv`'s footer check) was fixed in `459de6b` and proven by
+revert.
+
+- **Pages checked.** Through bin/prod-mirror.mjs (assets byte-identical), 16
+  pages across every section: #insights, #revenue, #finance, #payouts, #trips,
+  #platforms, #drivers, #compliance, #hr-roster, #vehicles, #unauthorized,
+  #segments, #live, #feeds, #sources and #settings. Each at 1440 in both
+  skins, waiting for every loader to clear (up to 120 s).
+- **Result.** Every page loads fully in both skins. There are no script errors,
+  no sideways overflow, no whole-dirham amounts and no loader left spinning.
+  Under the skin every page has `--pg-contract` 1 and the footer colophon; the
+  old skin has neither, as intended.
+- **Timings, Arkiv / old.** 2.0–6.0 s for most pages, and about the same in
+  both skins. #live is 12.0 s / 17.5 s: the live feed, not the skin.
+- **A misleading first pass.** It waited only 2.5 s after the first text
+  appeared, flagged 17 "still loading" pages and an empty #segments (92 s,
+  from a cold cache for `/api/unauthorized/attributed`). Re-run with the proper
+  wait, #segments loads in 2.3 s in both skins. The uncached attribution cost
+  is the one named under the FMS section, and it is still open.
+
