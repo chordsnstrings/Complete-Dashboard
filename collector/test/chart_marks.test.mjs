@@ -470,8 +470,12 @@ for (const skin of ['classic', 'arkiv']) {
 {
   const keys = ['app.js', 'driver.js', 'revenue.js'].flatMap((f) =>
     [...read(f).matchAll(/legend: \[\['(--[a-z0-9-]+)', '[^']*'\], \['(--[a-z0-9-]+)'/g)].map((m) => `${f} ${m[1]} ${m[2]}`));
+  /* At least the five STEP 2 found — a floor, so the check is known to be
+     looking at something. Not an exact count: the page phase adds callers
+     (#platforms' completion bars were the sixth), and each new one is held to
+     the same rule rather than turning this red for existing. */
   check(`every hbars key over default bars names --mk-fill and --mk-neg (${keys.length})`,
-    keys.length === 5 && keys.every((k) => / --mk-fill --mk-neg$/.test(k)), keys.join(' · '));
+    keys.length >= 5 && keys.every((k) => / --mk-fill --mk-neg$/.test(k)), keys.join(' · '));
 }
 
 /* ── 5 · donut: colour by name, distinct slots, and the `as` option ─────── */
