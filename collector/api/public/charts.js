@@ -628,6 +628,12 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
      charts here read better with "AED 2,000" up the side, and a percentile
      chart reads "0th, 33rd, 67th, 100th" if it is given the same treatment. */
   axisFmt = null, aria = null,
+  /* What one bar IS, for the caption that counts the absent ones. It was
+     "days" for every caller, which is true of every series drawn with this
+     until #compare's hour charts (the page phase) — where "17 of 24 days: not
+     yet reached" miscounts the unit the chart is drawn in. Defaults to
+     "days", so every existing caption is unchanged. */
+  bucketNoun = 'days',
   /* The second measure as a STEP LINE in its own identity, with a direct
      label, instead of a shape behind each bar (reskin STEP 3, #overview's
      plan entry: "telematics journeys behind the bars become an FMS-identity
@@ -846,10 +852,10 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
        caption opened with a dangling "45 more had at least one source silent",
        more than what. */
     c.innerHTML = [
-      gaps ? `<b>${fmt(gaps)} of ${fmt(data.length)} days: ${esc(gapLabel)}</b> — drawn as `
+      gaps ? `<b>${fmt(gaps)} of ${fmt(data.length)} ${esc(bucketNoun)}: ${esc(gapLabel)}</b> — drawn as `
         + `${drawnNoun('absent', form)}, not as zero.` : '',
       partial
-        ? `${gaps ? `${fmt(partial)} more` : `${fmt(partial)} of ${fmt(data.length)} days`} had at least `
+        ? `${gaps ? `${fmt(partial)} more` : `${fmt(partial)} of ${fmt(data.length)} ${esc(bucketNoun)}`} had at least `
           + 'one source silent, so their bars are understated.'
         : '',
     ].filter(Boolean).join(' ');

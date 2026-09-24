@@ -145,6 +145,8 @@ month.push({ d: 'TODAY', trips: 12, tj: 20 });
 const weeks = [{ w: '2026-07-06', n: 50, m: 40 }, { w: '2026-07-13', n: 60, m: 45 },
   { w: '2026-07-20', n: 20, m: 30, partial: true, days: 3, of_days: 7 }];
 const GAP = { x: 'd', y: 'trips', label: 'bookings', secondary: 'tj', secondaryLabel: 'telematics journeys' };
+/* A day of hours, the last three not yet reached (#compare under the contract). */
+const hours = Array.from({ length: 24 }, (_, i) => ({ h: `${String(i).padStart(2, '0')}:00`, n: i < 21 ? 3 + (i % 4) : 0, gap: i >= 21 }));
 
 const S = {};
 for (const skin of ['classic', 'arkiv']) {
@@ -155,9 +157,18 @@ for (const skin of ['classic', 'arkiv']) {
     nine: await page.evaluate(RENDER, ['barChart', 1090, nine, { x: 'd', y: 'n' }]),
     dense: await page.evaluate(RENDER, ['barChart', 515, dense, { x: 'd', y: 'n' }]),
     fc: await page.evaluate(RENDER, ['barChart', 900, fc, { x: 'd', y: 'n', lo: 'lo', hi: 'hi', projectedKey: 'proj' }]),
+    hr: await page.evaluate(RENDER, ['gapBars', 900, hours, { x: 'h', y: 'n', gapKey: 'gap', inProgress: false,
+      bucketNoun: 'hours', gapLabel: 'not yet reached' }]),
   };
   await ctx.close();
 }
+
+console.log('\n0 · gapBars counts its absent bars in the unit it is drawn in');
+check('bucketNoun: an hour chart says "3 of 24 hours", in both skins',
+  ['classic', 'arkiv'].every((k) => S[k].hr.caps.some((c) => c.startsWith('3 of 24 hours: not yet reached'))),
+  JSON.stringify([S.classic.hr.caps, S.arkiv.hr.caps]));
+check('…and every caller that does not ask still says days', ['classic', 'arkiv'].every((k) =>
+  S[k].gap.caps.some((c) => /^1 of 15 days: /.test(c))), JSON.stringify(S.arkiv.gap.caps));
 
 console.log('\n1 · barChart');
 const C = S.classic, A = S.arkiv;
