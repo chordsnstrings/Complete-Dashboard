@@ -3429,3 +3429,9 @@ Not built: §03 "Where the car went" as a path — /api/driver/day's fixes cover
 | #driver/territory | Restyle only (plan §4), plus one correction of meaning: a place the car sat still between jobs is MEASURED — the tracker saw it there — and was drawn as a hollow dashed ring, the mark SPEC §5 keeps for "not measured". Under the contract it is a small filled grey mark, and the panel's subtitle and the key under the map say so (the old wording, "Hollow markers are…", would be false under the skin). Pickup clusters in ink. The map, its pan/zoom/fit, the areas table and the distance bars keep their data and interactions; the colophon names the clusters | **written** | `test/arkiv_people.test.mjs` #driver/territory (7). Revert — the stationary marks back to dashed rings: fails. `arkiv_classic_frozen` ONLY=driver/ 11/11 |
 
 Not built: clusters in the channel identity of the trips they hold (/api/driver/territory's pickups carry no platform), and square stationary marks (Leaflet's circleMarker; the fill is the point).
+
+### P40 · #driver/earnings
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #driver/earnings | Restyle only (plan §4). The six tiles as a 00 band, booked revenue the hero, every figure and sub-line as before, untoned, a dash absent with its own sub-line as the reason. How riders paid: one 100% bar instead of a ring — a payment type is not a channel, so it takes the categorical slots, which under Arkiv are the achromatic ramp with a label ink measured per slot. Revenue by day in ink. The components bars (already the job tokens), their nested table and the statements table kept | **written** | `test/arkiv_people.test.mjs` #driver/earnings (6). Revert — the ring back: fails. `arkiv_classic_frozen` ONLY=driver/ 11/11; `driver_fares` 19, `driver_empty_window_page` 63; `arkiv_fils` gains territory and earnings |

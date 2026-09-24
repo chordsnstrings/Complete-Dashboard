@@ -1767,7 +1767,13 @@ async function tabTerritory(root, id) {
 
 /* ── tab: earnings ───────────────────────────────────────────────────────── */
 async function tabEarnings(root, id, prof) {
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  /* Under the page contract (plan §4 #driver/earnings, restyle only): the six
+     tiles as a 00 band, untoned, a dash absent with its own sub-line as the
+     reason; how riders paid as one 100% bar in an achromatic ramp — payment
+     types are not channels; revenue by day in ink; every table kept. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
   const comp = panel('What made up the pay', 'Fares, tips, tolls and adjustments, as the platform reports them'); g.append(comp.panel);
   const pay = panel('How riders paid', 'Card vs cash changes what actually reaches the fleet'); g.append(pay.panel);
@@ -1874,7 +1880,7 @@ async function tabEarnings(root, id, prof) {
         : 'no statement covering these dates has reached us, so ')
       + 'every money figure below is absent rather than nought.'));
   }
-  kpiHost.replaceWith(kpiRow([
+  const EARN_TILES = [
     /* Every money figure here is over the trips that CARRY a fare, which on a
        driver working mostly Uber is a small fraction of their work — the Uber
        trip export has no fare column at all. Presented against the trip count
@@ -2018,7 +2024,9 @@ async function tabEarnings(root, id, prof) {
         ? `${money(k.priced_measured_revenue)} over ${fmt(k.priced_km)} km, on the `
           + `${fmt(k.priced_measured_trips)} trips reporting both`
         : 'no trip reports both a fare and a distance' },
-  ]));
+  ];
+  if (ak) { kpiHost.remove(); glance(AKB.tilesHost, bandTiles(EARN_TILES).tiles); }
+  else kpiHost.replaceWith(kpiRow(EARN_TILES));
 
   comp.body.innerHTML = '';
   if (!e.components.length) {
@@ -2135,7 +2143,13 @@ async function tabEarnings(root, id, prof) {
      so an empty one means either no booking or no booking whose payment method
      anybody recorded — and the cash tile above this reads its own absence off
      the same two facts, so the two must not tell different stories. */
-  if ((mix.payment || []).length) donut(pay.body, mix.payment, { max: 6 });
+  if ((mix.payment || []).length) {
+    /* Under the contract one 100% bar. No colorFor: a payment type is not a
+       channel, so it takes the categorical slots, which under Arkiv are the
+       achromatic ramp with a label ink measured for each (arkiv.css --on-cat-N)
+       — a hand-picked --seq-N ramp printed its shares dark on dark. */
+    donut(pay.body, mix.payment, ak ? { max: 6, as: 'bar100' } : { max: 6 });
+  }
   else {
     pay.body.append(note(worked
       ? `This driver\'s ${countOf(bookingsN, 'booking')} in this window carry no payment method at `
@@ -2166,7 +2180,7 @@ async function tabEarnings(root, id, prof) {
       }
     }
     barChart(line.body, series, { x: 'label', y: 'v', valueFmt: (v) => money(v),
-      colorFor: (d) => (d.v > 0 ? '--b400' : d.worked ? '--surface-3' : '--surface-2') });
+      colorFor: (d) => (d.v > 0 ? (ak ? '--ink' : '--b400') : d.worked ? '--surface-3' : '--surface-2') });
     line.body.append(el('p', 'cap',
       `${countOf(withRev.length, 'day')} of ${fmt(series.length)} in this window carry a fare. `
       + 'The rest are drawn at zero rather than left out, so a gap looks like a gap — pale bars are days '
@@ -2437,6 +2451,7 @@ async function tabEarnings(root, id, prof) {
         + 'rather than per payout period, so the two are two readings and not two amounts.'));
     }
   }
+  if (ak) pageFoot({ colophon: [windowLabel(), 'earnings'] }, root);
 }
 
 /* ── tab: quality ────────────────────────────────────────────────────────── */

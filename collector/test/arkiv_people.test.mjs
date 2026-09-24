@@ -23,6 +23,8 @@ const toned = (page) => page.evaluate(() => [...document.querySelectorAll('#view
   .filter((t) => /\bt-(good|warn|critical|serious|bad)\b/.test(t.className)).map((t) => t.className));
 const vfig = (page) => txtOf(page, '#view .cband .vdct-fig > b');
 const ORDER = ['uber', 'bolt', 'yango', 'hotel', 'cabman', 'fms'];
+const aedOf = (n) => `${Number(n) < 0 ? '−' : ''}AED ${Math.abs(Number(n)).toLocaleString('en-US',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /* ══ #drivers ═════════════════════════════════════════════════════════════ */
 if (want('drivers')) {
@@ -279,6 +281,38 @@ if (want('driver-territory')) {
   {
     const { ctx, page } = await open('arkiv', 'driver/drv-0/territory', { width: 390 });
     check('#driver/territory at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
+/* ══ #driver/earnings ═════════════════════════════════════════════════════ */
+if (want('driver-earnings')) {
+  console.log('\n#driver/earnings');
+  {
+    const { ctx, page } = await open('classic', 'driver/drv-0/earnings');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), rings: document.querySelectorAll('#view svg.donut').length }));
+    check('old skin: no 00 band, how riders paid still a ring', !r.band && r.rings === 1, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'driver/drv-0/earnings');
+    const s = await shape(page);
+    const k = answer('/api/driver/kpis');
+    check('00: the six tiles, booked revenue the hero, the same figures, untoned', s.glance === 6 && s.hero === 'Booked revenue'
+      && s.values['Booked revenue'] === aedOf(k.revenue) && (await toned(page)).length === 0, JSON.stringify(s.values));
+    const mix = answer('/api/driver/mix');
+    const bar = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => /How riders paid/.test(x.querySelector('h3')?.textContent || ''));
+      const segs = p ? [...p.querySelectorAll('svg rect[data-share], svg rect')].map((r) => r.getAttribute('fill') || r.style.fill) : [];
+      return { ring: !!p?.querySelector('svg.donut'), segs, txt: p?.textContent || '' }; });
+    check('how riders paid: one 100% bar in an achromatic ramp — payment types are not channels', !bar.ring
+      && (mix.payment || []).slice(0, 3).every((x) => bar.txt.includes(x.label)) && !bar.segs.some((f) => /--c-/.test(f || '')), JSON.stringify(bar.segs.slice(0, 6)));
+    check('every panel kept, the colophon set', s.heads.join('|') === 'At a glance|What made up the pay|How riders paid|Revenue by day|What each platform paid'
+      && /earnings/.test(s.colophon), JSON.stringify(s.heads));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/earnings', { width: 390 });
+    check('#driver/earnings at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
     await ctx.close();
   }
 }

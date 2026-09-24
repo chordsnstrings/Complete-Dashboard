@@ -39,6 +39,7 @@ const ROUTES = [
   'forecast', 'optimise', 'capacity', 'day/2026-08-14', 'slot/2/19', 'trip/hotel/h-mock-1', 'trip/uber/u-mock-1',
   // People
   'drivers', 'driver/drv-0', 'driver/drv-0/activity', 'driver/drv-0/day?on=2026-09-20',
+  'driver/drv-0/territory', 'driver/drv-0/earnings',
 ];
 
 const scan = (page) => page.evaluate(() => {

@@ -6706,3 +6706,9 @@ number (5 and 5), and never a passport or RTA number.
   out at 20 s; the droplet is basic-xxs). The same call for a lighter
   driver answered in 3.4 s once the queue drained. Screenshot driver pages
   one load at a time (`CONC=1`), and not for the fleet's busiest person.
+
+* **`stackedBar`'s share labels take their ink from `--on-cat-N`,
+  measured for the categorical slots.** A `colorFor` returning `--seq-N`
+  gets a label ink computed for a different fill, and prints dark on dark.
+  Under Arkiv the categorical slots already ARE the achromatic ramp; for a
+  non-channel composition, pass no `colorFor`.
