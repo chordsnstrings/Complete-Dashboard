@@ -193,5 +193,57 @@ if (want('driver-activity')) {
   }
 }
 
+/* ══ #driver/day ══════════════════════════════════════════════════════════ */
+if (want('driver-day')) {
+  console.log('\n#driver/day');
+  const H = 'driver/drv-0/day?on=2026-09-20';
+  {
+    const { ctx, page } = await open('classic', H);
+    check('old skin: the headline stands alone, no 00 band', !(await page.$('#view .cband')) && !!(await page.$('#view .vdct')));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', H);
+    const s = await shape(page);
+    const claim = await txtOf(page, '#view .cband .vdct-claim');
+    const f = await vfig(page);
+    check('00: the headline is the statement, carrying someone the hero — the same figure the claim opens with',
+      s.vdctIn00 && s.hero === 'Carrying someone' && claim.startsWith(`${s.values['Carrying someone']} carrying someone`), JSON.stringify([claim, s.values]));
+    check('ruling 7: the share in the statement is not repeated as a tile', !Object.values(s.values).includes(f), f);
+    const k = answer('/api/driver/kpis', (q) => !!q.from);
+    const d = await txtOf(page, '#view .kpis.glance .kpi:nth-child(3) .t-d');
+    const per = k && +k.days_worked ? (+k.trips / +k.days_worked) : null;
+    check('trips set against the driver\'s own calendar month — one request, from/to the month holding the day',
+      !!k && per != null && d.includes(`a working day this month`) && d.includes(per.toFixed(1)), JSON.stringify([d, k && [k.trips, k.days_worked]]));
+    const D = answer('/api/driver/day');
+    const areas = await page.evaluate(() => [...document.querySelectorAll('[data-panel="dday-areas"] .hb .k')].map((x) => x.textContent.trim()));
+    const want = [...new Set((D.fixes || []).map((x) => x.area).filter(Boolean))];
+    check('where the tracker saw the car: one bar per named area, a fix with none never drawn as a place',
+      (D.fixes || []).length ? areas.length === Math.min(12, want.length) : true, JSON.stringify([areas, want]));
+    check('† four cells, the colophon names the day', s.abs.length === 4 && /20 Sept/.test(s.colophon), JSON.stringify([s.abs.map((a) => a.label), s.colophon]));
+    await ctx.close();
+  }
+  {
+    /* Fixes with areas (synthetic): two in one area, one in another, one
+       with none and no speed — the bars name two places, the caption counts
+       the one with no area, and the speed cell counts the stationary fix. */
+    const fx = [{ m: 400, lat: 25.2, lng: 55.3, speed: 30, area: 'Area One' }, { m: 410, lat: 25.2, lng: 55.3, speed: 10, area: 'Area One' },
+      { m: 420, lat: 25.3, lng: 55.4, speed: 5, area: 'Area Two' }, { m: 430, lat: 25.3, lng: 55.4, speed: null, area: null }];
+    const { ctx, page } = await open('arkiv', H, { fixtures: { '/api/driver/day': (q, real) => ({ ...real, fixes: fx }) } });
+    const s = await shape(page);
+    const r = await page.evaluate(() => { const p = document.querySelector('[data-panel="dday-areas"]');
+      return { bars: [...p.querySelectorAll('.hb')].map((h) => [h.querySelector('.k').textContent.trim(), h.querySelector('.v').textContent.trim()]), cap: [...p.querySelectorAll('p.cap')].pop()?.textContent || '' }; });
+    check('areas ranked, the fix with no area counted in words and not drawn', JSON.stringify(r.bars) === JSON.stringify([['Area One', '2'], ['Area Two', '1']])
+      && /1 carry no area/.test(r.cap), JSON.stringify(r));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    check('† a speed on a fix: the stationary one, of all four', ab['A speed on a fix']?.fig === '1 of 4', JSON.stringify(ab['A speed on a fix']));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', H, { width: 390 });
+    check('#driver/day at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
 
 await done();

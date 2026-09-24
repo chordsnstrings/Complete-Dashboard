@@ -1810,3 +1810,13 @@ scroll. 206.5 h online and not dispatched — 70% of 296.8 h online over 24
 days with availability — beside 90.3 h on job and 278 jobs, 23 with no
 dropoff. The first attempt, on the busiest driver in the fleet with three
 page loads at once, did not finish: see the trap in COVERAGE.md.
+
+### #driver/day — 2026-09-24
+
+Production, 23 Sept for a multi-channel driver, both skins at 1440 and 390,
+light and dark (scratchpad `pagephase/shots/driver-day/`): no error, no
+sideways scroll in the new skin. 4h 14m carrying someone, 33% of online
+time; 11 trips, ▼ 0.6 against 11.6 a working day this month; 128.4 km, trip
+value AED 695.45. The old skin scrolls 15px sideways at 390 on this page
+(unchanged by this work — the frozen skin). The month comparison arrives
+after the first paint, so a screenshot needs a longer settle (WAITMS=5000).
