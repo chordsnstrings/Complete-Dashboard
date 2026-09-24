@@ -993,6 +993,11 @@
 :root[data-skin="arkiv"] .fnums span{font-family:var(--mono);font-size:var(--t1);letter-spacing:.14em}
 :root[data-skin="arkiv"] .whohead{border-bottom-color:var(--hair)}
 :root[data-skin="arkiv"] .sp-pair{border-radius:0}
+/* #same-person (plan §4): an answered card says its verdict in words (.sp-
+   verdict, "Confirmed one person" / "Ruled two people"); it is not faded,
+   tinted or given a green or grey rule as well. */
+:root[data-skin="arkiv"] .sp-pair.done{opacity:1;background:none}
+:root[data-skin="arkiv"] .sp-pair.done.same,:root[data-skin="arkiv"] .sp-pair.done.different{border-left:1px solid var(--rule)}
 :root[data-skin="arkiv"] .leak{background:none;border-color:var(--hair);border-radius:0;transition:none}
 :root[data-skin="arkiv"] .leak:hover{transform:none;border-color:var(--ink)}
 :root[data-skin="arkiv"] .leak.on{border-color:var(--ink);background:var(--paper-2)}

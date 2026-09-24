@@ -17,7 +17,8 @@
    dates, the cars — and make both answers one click. A reviewer who has to go
    and look something up will not use this twice. */
 import { el, esc, panel, loading, note, kpiRow, entity, pill, sourceLabel,
-  dateStr, fmt } from './ui.js';
+  dateStr, fmt, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, foldChildren, countOf } from './ui.js';
+import { hbars } from './charts.js';
 import { api } from './data.js';
 
 const platPill = (p) => (p ? pill(sourceLabel(p)) : '');
@@ -124,6 +125,16 @@ function pairCard(p, onDecide) {
 
 export async function renderSamePerson(root) {
   root.innerHTML = '';
+  /* Under the page contract (plan §4 same-person): a 00 band — waiting for
+     you the hero, and the trips the "same" verdicts fold — then the queue in
+     full, first; the answered pairs folded to twelve, with a filter by
+     verdict (the page was 111,110 px tall at 1440 with 365 cards); the
+     channel pairs of the decided; a † band holding the why and refuted notes
+     and the verdicts that carry no reviewer. The card markup, both buttons,
+     their wording and Put back in the queue are unchanged; a decided card
+     says its verdict in words, not with a tinted background (arkiv.css). */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
   const head = el('div'); root.append(head); loading(head);
   const queue = panel('Waiting for an answer',
     'One name sits inside the other, and nothing else says whether that is one person');
@@ -132,6 +143,7 @@ export async function renderSamePerson(root) {
   root.append(done.panel);
   [queue.body, done.body].forEach(loading);
 
+  let spFilter = 'all';
   const draw = async () => {
     let d;
     try { d = await api('/api/same-person'); } catch (e) {
@@ -140,7 +152,7 @@ export async function renderSamePerson(root) {
       return;
     }
     head.innerHTML = '';
-    head.append(kpiRow([
+    const SP_TILES = [
       { key: 'sp-pending', label: 'Waiting for you', value: fmt(d.pending.length),
         sub: 'pairs a rule cannot settle' },
       { key: 'sp-same', label: 'Confirmed one person',
@@ -149,9 +161,27 @@ export async function renderSamePerson(root) {
       { key: 'sp-diff', label: 'Ruled two people',
         value: fmt(d.decided.filter((p) => p.verdict === 'different').length),
         sub: 'never proposed again' },
-    ]));
-    head.append(note(d.why));
-    head.append(el('p', 'cap', d.refuted_note));
+    ];
+    if (ak) {
+      const same = d.decided.filter((p) => p.verdict === 'same');
+      /* EACH RECORD ONCE. One record sits in several pairs (a person with
+         three spellings is two pairs on one canonical record), and summing
+         both sides pair by pair counted it every time — 338,628 over 365
+         pairs on production when first drawn that way. */
+      const recs = new Map();
+      same.forEach((p) => [p.alias, p.canonical].forEach((x) => {
+        if (x?.driver_ext_id != null) recs.set(`${x.platform}\u0000${x.driver_ext_id}`, Number(x.trips) || 0);
+      }));
+      const folded = [...recs.values()].reduce((a, n) => a + n, 0);
+      AKB.tilesHost.innerHTML = '';
+      glance(AKB.tilesHost, bandTiles([{ ...SP_TILES[0], hero: true }, ...SP_TILES.slice(1),
+        { key: 'sp-folded', label: 'Trips on the records they join', value: fmt(folded),
+          sub: `across ${countOf(recs.size, 'record')} in the ${countOf(same.length, 'pair')} confirmed one person — each record counted once` }]).tiles);
+    } else head.append(kpiRow(SP_TILES));
+    if (!ak) {
+      head.append(note(d.why));
+      head.append(el('p', 'cap', d.refuted_note));
+    }
     if (d.hr_note) head.append(el('p', 'cap', d.hr_note));
     /* Every contradiction HR's latest export makes with what is held — some
        concern a link that is not in this queue at all (a phone link, the
@@ -192,10 +222,61 @@ export async function renderSamePerson(root) {
     done.body.innerHTML = '';
     if (!d.decided.length) {
       done.body.append(note('No pair has been answered yet.'));
+    } else if (ak) {
+      /* Folded to twelve in the order the API sends them (it carries no
+         decision time, so "the most recent" is not a thing this page can
+         know), with a filter by verdict; every card still built and still
+         answerable behind the fold's exact count. */
+      const bar = el('div', 'chips');
+      const list = el('div');
+      const paint = () => {
+        list.innerHTML = '';
+        const rows = spFilter === 'all' ? d.decided : d.decided.filter((p) => p.verdict === spFilter);
+        const box = el('div');
+        rows.forEach((p) => box.append(pairCard(p, onDecide)));
+        if (!rows.length) list.append(note('No answered pair carries that verdict.'));
+        else foldChildren(list, box, { shown: 12, total: rows.length, noun: 'answered pair', key: 'sp-done' });
+        bar.querySelectorAll('a').forEach((a) => a.classList.toggle('on', a.dataset.v === spFilter));
+      };
+      [['all', `All ${fmt(d.decided.length)}`], ['same', `One person ${fmt(d.decided.filter((p) => p.verdict === 'same').length)}`],
+        ['different', `Two people ${fmt(d.decided.filter((p) => p.verdict === 'different').length)}`]].forEach(([v, label]) => {
+        const a = el('a', 'chip', label); a.href = '#same-person'; a.dataset.v = v;
+        a.onclick = (e) => { e.preventDefault(); spFilter = v; paint(); };
+        bar.append(a);
+      });
+      done.body.append(bar, list);
+      paint();
     } else {
       d.decided.forEach((p) => done.body.append(pairCard(p, onDecide)));
     }
+    if (ak) samePersonTail(root, d);
   };
 
   await draw();
+}
+
+/* ── #same-person under the page contract ────────────────────────────────── */
+function samePersonTail(root, d) {
+  root.querySelectorAll('[data-panel="sp-pairs"], section.absence').forEach((n) => n.remove());
+  const p = panel('Which channels the answered pairs sit across', 'One bar per pair of channels', 'sp-pairs');
+  root.append(p.panel);
+  const by = new Map();
+  d.decided.forEach((x) => {
+    const k = [sourceLabel(x.canonical?.platform), sourceLabel(x.alias?.platform)].sort().join(' – ');
+    by.set(k, (by.get(k) || 0) + 1);
+  });
+  if (by.size) {
+    const box = el('div'); p.body.append(box);
+    hbars(box, [...by.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => ({ label, n })), { signed: false, color: '--mk-fill' });
+  } else p.body.append(note('No pair has been answered yet.'));
+  const anon = d.decided.filter((x) => !x.decided_by).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Who gave each verdict', hl: anon > 0, fig: anon ? `${fmt(anon)} of ${fmt(d.decided.length)}` : null,
+      none: d.decided.length ? 'Every one named' : 'None given',
+      why: anon ? 'These verdicts carry no reviewer: the product has no sign-in, and the page sends none with the answer.' : d.decided.length ? 'Every verdict names who gave it.' : 'No pair has been answered yet.' },
+    { label: 'Why a pair waits for a person', fig: null, none: 'See the note', why: d.why || '' },
+    { label: 'A pair ruled two people', fig: null, none: 'See the note', why: d.refuted_note || '' },
+  ]);
+  pageFoot({ colophon: ['the review queue', `${fmt(d.pending.length)} waiting`] }, root);
 }

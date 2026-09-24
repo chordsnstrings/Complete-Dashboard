@@ -1306,4 +1306,71 @@ if (want('identity')) {
   }
 }
 
+/* ══ #same-person ═════════════════════════════════════════════════════════ */
+if (want('same-person')) {
+  console.log('\n#same-person');
+  /* Twenty synthetic answered pairs beside the mock's, so the fold and the
+     verdict filter have something to fold. */
+  const many = (q, real) => {
+    const base = (real.decided || [])[0] || (real.pending || [])[0];
+    const extra = Array.from({ length: 20 }, (_, i) => ({ ...base, alias_ext_id: `syn-sp-${i}`, proposal_id: undefined,
+      verdict: i % 4 === 0 ? 'different' : 'same', decided_by: null, decided_note: i % 4 === 0 ? 'synthetic: two people' : null,
+      alias: { ...(base?.alias || {}), trips: 10 + i, platform: 'bolt' }, canonical: { ...(base?.canonical || {}), trips: 5, platform: 'uber' } }));
+    return { ...real, decided: [...(real.decided || []), ...extra] };
+  };
+  {
+    const { ctx, page } = await open('classic', 'same-person', { fixtures: { '/api/same-person': many } });
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), cards: document.querySelectorAll('#view .sp-pair.done').length,
+      hidden: [...document.querySelectorAll('#view .sp-pair.done')].filter((c) => c.hidden).length }));
+    check('old skin: no band, every answered card drawn and none folded', !r.band && r.cards >= 20 && r.hidden === 0, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'same-person', { fixtures: { '/api/same-person': many } });
+    const s = await shape(page);
+    const d = answer('/api/same-person');
+    const same = d.decided.filter((p) => p.verdict === 'same');
+    /* Each record once: the synthetic pairs reuse one canonical record, so a
+       pair-by-pair sum would count it twenty times. */
+    const recs = new Map();
+    same.forEach((p) => [p.alias, p.canonical].forEach((x) => { if (x?.driver_ext_id != null) recs.set(`${x.platform}|${x.driver_ext_id}`, +x.trips || 0); }));
+    const folded = [...recs.values()].reduce((a, x) => a + x, 0);
+    const n = (v) => (+v || 0).toLocaleString('en-US');
+    check('00: waiting the hero; confirmed, ruled, and the trips on the records the "same" verdicts join, each record once (new)', s.hero === 'Waiting for you'
+      && s.values['Waiting for you'] === n(d.pending.length) && s.values['Confirmed one person'] === n(same.length)
+      && s.values['Trips on the records they join'] === n(folded), JSON.stringify([s.values, folded]));
+    const q = s.heads.indexOf('Waiting for an answer'); const a = s.heads.indexOf('Already answered');
+    check('the queue in full, first; then the answered', q > 0 && a === q + 1, JSON.stringify(s.heads));
+    const cards = await page.evaluate(() => ({ pending: [...document.querySelectorAll('#view .sp-pair:not(.done)')].map((c) => [...c.querySelectorAll('.sp-actions button')].map((b) => b.textContent)),
+      done: [...document.querySelectorAll('#view .sp-pair.done')].map((c) => ({ hidden: c.hidden, undo: !!c.querySelector('.sp-verdict button'), word: c.querySelector('.sp-verdict b')?.textContent,
+        bg: getComputedStyle(c).backgroundColor, op: getComputedStyle(c).opacity })) }));
+    check('every pending card keeps both buttons, their wording unchanged', cards.pending.length === d.pending.length
+      && cards.pending.every((b) => b[0] === 'Yes — one person' && b[1] === 'No — two people'), JSON.stringify(cards.pending));
+    const shown = cards.done.filter((c) => !c.hidden).length;
+    check('the answered folded to twelve, every card still built with Put back in the queue', cards.done.length === d.decided.length && shown === 12
+      && cards.done.every((c) => c.undo), JSON.stringify([cards.done.length, shown]));
+    check('a verdict is said in words, not a faded or tinted card', cards.done.every((c) => /^(Confirmed one person|Ruled two people)$/.test(c.word) && c.op === '1'
+      && (c.bg === 'rgba(0, 0, 0, 0)' || c.bg === 'transparent')), JSON.stringify(cards.done.slice(0, 2)));
+    await page.evaluate(() => [...document.querySelectorAll('#view .chips a')].find((x) => x.dataset.v === 'different')?.click());
+    const filt = await page.evaluate(() => [...document.querySelectorAll('#view .sp-pair.done')].map((c) => c.querySelector('.sp-verdict b')?.textContent));
+    check('the verdict filter: "Two people" leaves only the ruled-apart', filt.length === d.decided.filter((p) => p.verdict === 'different').length
+      && filt.every((w) => w === 'Ruled two people'), JSON.stringify(filt));
+    const pairs = await page.evaluate(() => [...document.querySelectorAll('[data-panel="sp-pairs"] .hb .v')].reduce((a2, v) => a2 + +v.textContent.replace(/[^\d]/g, ''), 0));
+    check('the channel pairs of the answered: every decided pair once', pairs === d.decided.length, String(pairs));
+    const ab = Object.fromEntries(s.abs.map((x) => [x.label, x]));
+    const anon = d.decided.filter((p) => !p.decided_by).length;
+    check('†: verdicts with no reviewer counted; the why and refuted notes moved there, not printed loose',
+      ab['Who gave each verdict']?.fig === `${n(anon)} of ${n(d.decided.length)}` && ab['Why a pair waits for a person']?.why === d.why
+      && ab['A pair ruled two people']?.why === d.refuted_note, JSON.stringify(s.abs.map((x) => [x.label, x.fig])));
+    const loose = await page.evaluate((w) => [...document.querySelectorAll('#view .note')].some((x) => x.textContent.trim() === w), d.why);
+    check('…and the why note is not also printed loose above the queue', !loose);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'same-person', { width: 390 });
+    check('#same-person at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

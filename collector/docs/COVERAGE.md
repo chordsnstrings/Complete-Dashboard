@@ -6735,3 +6735,9 @@ number (5 and 5), and never a passport or RTA number.
   appended into the SAME host after the call vanishes a frame later (the
   #roster standings' counts did; the test saw an empty caption list). Draw a
   chart into its own box whenever anything else goes in that body.
+
+* **`/api/same-person` is heavy on production too.** Eight concurrent loads
+  of #same-person (four in the old skin, which renders all 365 answered
+  cards) left it answering in 38 s and /api/kpis timing out at 20 s for a
+  couple of minutes. Screenshot it one load at a time (`CONC=1`), like
+  #driver/activity.

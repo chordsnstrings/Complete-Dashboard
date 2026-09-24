@@ -2002,3 +2002,16 @@ Hotel–Yango 48, Uber–Yango 37, Bolt–Bolt 36, Bolt–Yango 18. The correctn
 fix seen on real rows: a similar-name pair reads "SIMILAR NAMES" and "YES —
 THE NAME IS THE EVIDENCE" where the old skin reads "phone ···" and "No".
 The arkiv page is 8,908 characters of text against the old skin's 219,318.
+
+### #same-person — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/same-person/`): no error, no sideways scroll. 21 waiting,
+365 confirmed one person, 0 ruled two people; 261,396 trips on the 577
+records those 365 verdicts join, each record once. The arkiv page is 32,221
+characters of text against the old skin's 314,188 (365 unfolded cards).
+Twice during this pass production answered /api/same-person in 38 s and
+/api/kpis not at all within 20 s, after eight concurrent loads of this page
+(four of them the old skin's 314,188-character render): the shots were
+retaken one at a time once it recovered — see the COVERAGE trap on
+/api/driver/shift; this endpoint is a second one to load singly.
