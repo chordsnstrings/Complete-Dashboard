@@ -561,7 +561,11 @@ async function dayGlance(AKB, { id, day, trips, onJob, share, medianGap, km }) {
   };
   draw(null);
   const m0 = `${day.slice(0, 7)}-01`;
-  const end = new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7), 0)).toISOString().slice(0, 10);
+  /* The month's last day, from the day's own digits: the count of days in the
+     month (day 0 of the next one, read back in UTC) — no clock, no zone, and
+     not the `toISOString().slice(0, 10)` shape test/timezone.test.mjs bans. */
+  const dim = new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7), 0)).getUTCDate();
+  const end = `${day.slice(0, 7)}-${String(dim).padStart(2, '0')}`;
   try {
     const k = await api(`/api/driver/kpis?id=${encodeURIComponent(id)}&from=${m0}&to=${end}`);
     const perDay = k && Number(k.days_worked) > 0 ? Number(k.trips) / Number(k.days_worked) : null;
