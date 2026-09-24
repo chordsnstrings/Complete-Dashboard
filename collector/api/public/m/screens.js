@@ -850,6 +850,14 @@ async function fleet(deck, ctx) {
     empty(list, 'No vehicle worked in this window', WIDEN());
     return;
   }
+  /* The redesign's section head over the list, as on People: how many cars
+     the window holds, which the old screen said only in its cut line. Each
+     row's live state (moving, stopped, stale fix, not reporting) is the
+     /api/live answer, as before. */
+  if (phoneContract()) {
+    deck.insertBefore(secHead(null, 'Vehicles that worked',
+      `${fmt(cars.total)} ${cars.total === 1 ? 'vehicle' : 'vehicles'} · ${WINDOW_NOTE()}`), list);
+  }
 
   const pos = new Map((live || []).map((l) => [l.plate, l]));
   let sort = 'trips', term = '';

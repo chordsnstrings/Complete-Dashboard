@@ -667,6 +667,24 @@ console.log('\n4.3 · People: the list under its own section head, and an empty 
   await c.close();
 }
 
+console.log('\n4.4 · Fleet: the list under its own head, the live state on every row');
+{
+  const vs = ans('/api/vehicles?period=month&grain=auto');
+  const total = vs.total ?? vs.totals?.vehicles ?? (vs.rows || vs).length;
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('fleet');
+  const o = await outline(p.page);
+  const h = await p.page.evaluate(() => document.querySelector('.m-deck > .sechd')?.innerText.replace(/\s+/g, ' '));
+  check('the search and the sort, then the list under its own numbered head',
+    o[0] === 'div' && o[1] === 'head:Vehicles that worked' && o[2] === 'div', o.join(' → '));
+  check(`…naming the window’s vehicles (${f0(total)}, /api/vehicles’ own count)`,
+    new RegExp(`^Vehicles that worked ${f0(total)} vehicles · This month$`, 'i').test(h || ''), h);
+  const subs = await p.page.evaluate(() => [...document.querySelectorAll('.m-deck .m-row .k span')].map((s) => s.textContent));
+  check('every row still says where the car is now (moving, stopped, stale fix, not reporting)',
+    subs.length > 0 && subs.every((s) => /^(moving \d+ km\/h|stopped|stale fix|not reporting)/.test(s)), subs.slice(0, 4).join(' | '));
+  await p.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');
