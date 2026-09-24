@@ -345,9 +345,15 @@ const FLEET_WORD = Object.fromEntries(FLEETS);
    is a form. data.js's lists do not name them (they are not desktop views),
    so the bar is told here rather than naming a window neither is read over. */
 const PHONE_ONLY_UNWINDOWED = new Set(['more', 'credentials']);
+/* One answer for the bar AND the footer's colophon. The first draft asked
+   windowWords() in the footer, so More read "No window applies here" in the
+   bar and "This month · Dubai time" at its foot — two claims about one
+   screen. */
+const windowOf = (id) => (PHONE_ONLY_UNWINDOWED.has(id)
+  ? { main: 'No window applies here', sub: '' } : windowWords(id));
 function akFrame(id, deep) {
   const none = PHONE_ONLY_UNWINDOWED.has(id);
-  const w = none ? { main: 'No window applies here', sub: '' } : windowWords(id);
+  const w = windowOf(id);
   const part = (text, cls = '') => el('span', `ak-ctl-p${cls}`, esc(text));
   ctlParts.replaceChildren(
     part(w.sub ? `${w.main} · ${w.sub}` : w.main, ' ak-ctl-win'),
@@ -379,7 +385,7 @@ function akApplies(g, id) {
 async function akFoot(g, id) {
   if (g !== gen) return;
   if (deck.querySelector('.pf-inline, .pagefoot')) return;
-  const w = windowWords(id);
+  const w = windowOf(id);
   const colophon = [`${w.main} · Dubai time`, 'Ecosine & Egari'];
   let line = null;
   if (!NO_SOURCE.has(id) && !deck.querySelector('.srcline')

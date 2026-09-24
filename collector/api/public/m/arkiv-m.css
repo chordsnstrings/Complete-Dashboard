@@ -398,3 +398,24 @@
    The channel's swatch (ui.js swatch(), the desktop's .sw) sits before its
    name; the name stays ink (SPEC L5.6: text never wears the data colour). */
 :root[data-skin="arkiv"][data-ui="phone"] .m-row .k b .sw{margin-right:8px;vertical-align:0}
+
+/* ── 13 · More: the masthead on "This app", and the action buttons ────────────
+   The wordmark in Fraunces and whose fleet this is, in the desktop
+   masthead's words (shell.js). The phone's buttons (.m-btn: the desktop
+   build, the deposit's check and save, the credential paste) are one form:
+   square, ink-ruled, mono capitals, 48px, and the primary an ink fill with
+   paper words (--on-fill is --paper under the skin, arkiv.css). */
+:root[data-skin="arkiv"][data-ui="phone"] .ak-mast{display:flex;align-items:baseline;gap:12px;margin:0 0 10px;
+  padding-bottom:10px;border-bottom:1px solid var(--hair)}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-mast-word{font-family:var(--disp);font-weight:600;font-size:var(--d3);
+  letter-spacing:-.015em;color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-mast-org{font-family:var(--mono);font-size:var(--t1);font-weight:600;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-btn{min-height:48px;border-radius:0;background:var(--paper);
+  border:1px solid var(--ink);color:var(--ink);font-family:var(--mono);font-size:var(--t3);font-weight:600;
+  letter-spacing:.14em;text-transform:uppercase}
+:root[data-skin="arkiv"][data-ui="phone"] .m-btn:active{background:var(--paper-2)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-btn.primary{background:var(--ink);border-color:var(--ink);color:var(--on-fill)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-btn[disabled]{opacity:1;background:var(--paper-2);border-color:var(--grey-2);
+  color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}

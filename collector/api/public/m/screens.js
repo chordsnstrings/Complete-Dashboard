@@ -1184,6 +1184,16 @@ async function more(deck) {
   b.onclick = () => { location.href = `/?ui=desktop${location.hash}`; };
   c.body.append(b);
   deck.append(c.card);
+  /* Under the redesign "This app" carries the masthead the header has no
+     room for — the wordmark and whose fleet this is — and the way to the
+     desktop is a full-width button, the form every other action on the
+     phone takes, rather than a chip that reads as a filter. */
+  if (phoneContract()) {
+    const mast = el('p', 'ak-mast');
+    mast.append(el('span', 'ak-mast-word', 'Fleet'), el('span', 'ak-mast-org', 'Ecosine &amp; Egari · Dubai'));
+    c.body.prepend(mast);
+    b.className = 'm-btn';
+  }
 }
 
 /* ── to the bank ────────────────────────────────────────────────────────

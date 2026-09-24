@@ -685,6 +685,35 @@ console.log('\n4.4 · Fleet: the list under its own head, the live state on ever
   await p.close();
 }
 
+console.log('\n4.5 · More: numbered sections, the masthead on This app, and a footer that agrees with the bar');
+{
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('more');
+  const o = await outline(p.page);
+  const m = await p.page.evaluate(() => {
+    const app = [...document.querySelectorAll('.m-card')].find((c) => c.querySelector(':scope > h2')?.textContent === 'This app');
+    const b = app?.querySelector('button');
+    return {
+      word: app?.querySelector('.ak-mast-word')?.textContent,
+      face: app?.querySelector('.ak-mast-word') ? getComputedStyle(app.querySelector('.ak-mast-word')).fontFamily : '',
+      org: app?.querySelector('.ak-mast-org')?.textContent,
+      btn: b && { cls: b.className, h: b.getBoundingClientRect().height, w: b.getBoundingClientRect().width, text: b.textContent },
+      colophon: [...document.querySelectorAll('.pf-inline .pf-colophon span')].map((s) => s.textContent),
+      bar: document.querySelector('.ak-ctl .ak-ctl-p')?.textContent,
+    };
+  });
+  check('Analyse, Operate, On the desktop and This app, as numbered sections',
+    JSON.stringify(o.filter((x) => /^(sec|card):/.test(x))) === JSON.stringify(['sec:Analyse', 'sec:Operate', 'sec:On the desktop', 'card:This app']),
+    o.join(' → '));
+  check('This app carries the masthead: the wordmark in Fraunces and whose fleet it is',
+    m.word === 'Fleet' && /Fraunces/.test(m.face) && m.org === 'Ecosine & Egari · Dubai', JSON.stringify(m));
+  check('…and the way to the desktop is a full-width button, not a chip',
+    m.btn && m.btn.cls === 'm-btn' && m.btn.h >= 44 && m.btn.w > 300 && m.btn.text === 'Open the desktop version', JSON.stringify(m.btn));
+  check('the footer’s colophon agrees with the bar: no window applies here',
+    m.bar === 'No window applies here' && m.colophon[0] === 'No window applies here · Dubai time', JSON.stringify(m));
+  await p.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');
