@@ -1569,11 +1569,14 @@ async function payouts(deck, ctx) {
 async function driver(deck, ctx) {
   const id = ctx.param;
   skeleton(deck, 4);
+  /* Which reads FAILED, as against answered with nothing — see "A READ THAT
+     FAILED" below. Recording it changes nothing the old phone draws. */
+  const lost = new Set();
   const [profile, kpis, daily, standing, quality] = await Promise.all([
     qAll('/api/driver/profile', { id }).catch(() => null),
-    qAll('/api/driver/kpis', { id }).catch(() => null),
+    qAll('/api/driver/kpis', { id }).catch(() => { lost.add('kpis'); return null; }),
     qAll('/api/driver/daily', { id }).catch(() => []),
-    qAll('/api/driver/standing', { id }).catch(() => null),
+    qAll('/api/driver/standing', { id }).catch(() => { lost.add('standing'); return null; }),
     /* The PER-PERSON endpoint, not the fleet leaderboard.
        ───────────────────────────────────────────────────────────────────
        This asked /api/alerts/by-driver with &id=, and that route reads no
@@ -1589,19 +1592,61 @@ async function driver(deck, ctx) {
        and carries what a ranked list never could: the rate, the fleet
        baseline it should be read against, and the server's own sentence for
        why the rate is sometimes not measurable at all. */
-    qAll('/api/driver/quality', { id }).catch(() => null),
+    qAll('/api/driver/quality', { id }).catch(() => { lost.add('quality'); return null; }),
   ]);
   if (!ctx.alive()) return;
   deck.innerHTML = '';
   if (!profile) { failed(deck, new Error('Nothing in the record matches this id.')); return; }
 
+  /* ── THE ARKIV SKIN: 00 over the person, the reason in every empty tile ──
+     UI-REDESIGN-PLAN.md, "Phone PWA — redesign": the face as a plate in the
+     statement, contact rows first, 00 tiles. So under the token, 00 At a
+     glance heads the statement (the face is already a square plate, §7 of
+     m/arkiv-m.css), Contact follows it as part of the statement rather than
+     as a numbered section of its own — reaching the driver is what the phone
+     is for, and it stays the first thing under their name — and the tiles
+     follow with Bookings as the hero. 01 onwards are the sections that were
+     there: Bookings a day, Against the other N, Harsh driving, More.
+
+     THE REASON IN THE VALUE SLOT. Every money tile here comes from a ui.js
+     helper that, when it has no figure, returns '—' with the TRUE reason as
+     its sub-line ("no platform statement and no priced booking covers this
+     window", "no channel reports the cash taken, so …"), so under the skin
+     that sub-line is the `na`. Two tiles built here had no reason at all:
+       Completed — completion_pct is NULL exactly when no booking in the
+         window records an outcome (api/driver_routes.js, /api/driver/kpis:
+         nullif(count(*) FILTER (WHERE outcome IS NOT NULL), 0)), so that
+         is what it says;
+       Distance — printed "— km" when km was NULL: a dash with a unit
+         glued on, which isAbsent() cannot see, so it read as a figure.
+         avgKmSub() already names the reason ("no booking here carries a
+         usable distance"), and under the skin it takes the value slot.
+     Harsh driving's "not measured" gets its reason, alertRateFigure()'s own
+     title, in the value slot the same way.
+
+     A READ THAT FAILED. /api/driver/kpis, /standing and /quality each
+     `.catch(() => null)`, and the old phone then drew as though they had
+     answered with nothing: a failed kpis read printed every money tile with
+     "no platform statement and no priced booking covers this window" — a
+     reason, and not the true one — and a failed standing or quality read
+     removed its section without a word. Under the skin each says it could
+     not be fetched, in its own place (the Safety screen's rule, P8). The old
+     phone keeps the defect until the flip — named in FIX-STATUS P24. */
+  const AK = phoneContract();
+  const why = (t) => (AK && t && t.value === '—' && t.sub ? { ...t, na: t.sub } : t);
   const k = kpis || {};
   /* The compliance row is where a person's face, phone and email live — see
      sql/schema_v57.sql. The first row that carries a picture wins: a person
      with a hotel record and an Uber one has two, and only Uber's has a photo. */
   const cRows = profile.compliance || [];
   const c = cRows.find((x) => x && x.picture_url) || cRows[0] || {};
-  ctx.setTitle(profile.name || id, `${fmt(k.trips)} bookings in this window`);
+  /* "— bookings in this window" under a failed read is a dash dressed as a
+     count; the head says what happened instead. */
+  ctx.setTitle(profile.name || id, AK && lost.has('kpis') ? 'the figures could not be fetched'
+    : `${fmt(k.trips)} bookings in this window`);
+  /* The window alone: platform and fleet do not apply to a person (the
+     control bar says so), so WINDOW_NOTE's channel suffix would be wrong. */
+  if (AK) deck.append(secHead('00', 'At a glance', windowLabel()));
   lede(deck, {
     claim: profile.name || id,
     name: profile.name || id,
@@ -1619,10 +1664,14 @@ async function driver(deck, ctx) {
   if (reach.length) {
     const rc = card('Contact', c.platform ? `from the ${sourceLabel(c.platform)} record` : null);
     rows(rc.body, reach.map((x) => row({ title: x.v, sub: x.label, to: x.to })));
+    /* Part of the statement under the skin: unnumbered, on a hairline. */
+    if (AK) rc.card.classList.add('ak-reach');
     deck.append(rc.card);
   }
 
-  stats(deck, [
+  if (AK && lost.has('kpis')) {
+    failed(deck, new Error('This driver’s figures could not be fetched, so none of them is shown.'));
+  } else stats(deck, [
     { label: 'Bookings', value: fmt(k.trips), sub: k.days_worked ? `${countOfDays(k.days_worked)} worked` : null },
     /* NOT k.revenue. Uber's trip export carries no fare column, so `revenue` is
        null for most of this fleet however much they earned — and this tile
@@ -1630,16 +1679,20 @@ async function driver(deck, ctx) {
        AED 27,761 of statement fares sitting in the very response it had
        already fetched. The desktop had the chooser and the phone did not; it
        is in ui.js now and both call it. */
-    moneyInTile(k),
+    why(moneyInTile(k)),
     /* The same two cards as the desktop, from the same helpers, because the
        one thing this pair must never do is disagree about a person's money on
        two screens. */
-    cashOnHandTile(k),
-    bankDepositTile(k),
-    faresTile(k),
+    why(cashOnHandTile(k)),
+    why(bankDepositTile(k)),
+    why(faresTile(k)),
     { label: 'Completed', value: k.completion_pct != null ? `${n(k.completion_pct)}%` : '\u2014',
       sub: k.not_completed != null ? `${fmt(k.not_completed)} did not` : null,
-      tone: n(k.completion_pct) >= 90 ? 'good' : n(k.completion_pct) >= 80 ? null : 'warn' },
+      /* …and no warning dot on it: n(null) is below 80, so the old tile
+         painted a figure nobody has as a warning. Absent is not bad news. */
+      ...(AK && k.completion_pct == null
+        ? { na: 'no booking in this window records whether it was completed', tone: null }
+        : { tone: n(k.completion_pct) >= 90 ? 'good' : n(k.completion_pct) >= 80 ? null : 'warn' }) },
     /* avgKmSub, not "N km a booking". avg_km is kilometres per booking THAT
        REPORTS A DISTANCE and the tile beside it counts every booking — the
        helper in ui.js exists for exactly this and its own comment records that
@@ -1649,8 +1702,10 @@ async function driver(deck, ctx) {
        by 197% at the worst (10 km over 3 bookings, 1 of them measured, printed
        as "9.9 km a booking"). The driver this came in about read "16.7 km a
        booking" for 100 km over 10 bookings, which is 10.0. */
-    { label: 'Distance', value: `${fmt(k.km)} km`, sub: avgKmSub(k), long: true },
-  ]);
+    AK && k.km == null
+      ? { label: 'Distance', value: '—', na: avgKmSub(k), long: true }
+      : { label: 'Distance', value: `${fmt(k.km)} km`, sub: avgKmSub(k), long: true },
+  ], false, { hero: AK });
 
   /* TODAY IS NOT A DAY YET, and this chart drew it as one.
      ───────────────────────────────────────────────────────────────────────
@@ -1677,6 +1732,10 @@ async function driver(deck, ctx) {
   }
 
   /* Against the fleet, not against nothing. */
+  if (AK && lost.has('standing')) {
+    deck.append(el('p', 'm-sec', 'Against the fleet'));
+    failed(deck, new Error('How this driver stands against the fleet could not be fetched.'));
+  }
   if (standing?.metrics?.length) {
     deck.append(el('p', 'm-sec', `Against the other ${fmt(standing.n_peers)} who drove`));
     rows(deck, standing.metrics.slice(0, 6).map((m) => row({
@@ -1709,6 +1768,10 @@ async function driver(deck, ctx) {
   const qy = quality || {};
   const ev = splitAlerts(qy.alerts || []);
   const rate = alertRateFigure(qy);
+  if (AK && lost.has('quality')) {
+    deck.append(el('p', 'm-sec', 'Harsh driving'));
+    failed(deck, new Error('This driver’s harsh-driving figures could not be fetched.'));
+  }
   if (ev.total || rate.measured) {
     deck.append(el('p', 'm-sec', 'Harsh driving'));
     const base = qy.fleet_alerts_per_100km;
@@ -1725,7 +1788,8 @@ async function driver(deck, ctx) {
               : (rate.title || 'over the days the alert feed covered'),
             tone: ratio == null ? null
               : ratio <= 0.7 ? 'good' : ratio <= 1.3 ? null : 'warn' }
-        : { label: 'Per 100 km', value: 'not measured', sub: rate.title, long: true },
+        : { label: 'Per 100 km', value: 'not measured', sub: rate.title, long: true,
+            ...(AK && rate.title ? { na: rate.title } : {}) },
       /* When the feed has not marked which rows are tracker faults, the count
          is every row and the tile says so rather than heading a total nobody
          has split with the word "driving". */

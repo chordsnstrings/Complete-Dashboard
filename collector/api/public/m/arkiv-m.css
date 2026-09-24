@@ -536,3 +536,12 @@
    the same rule draws every failed() block on every screen. Restated here at a weight that
    wins; the solid dot before the words was never affected. */
 :root[data-skin="arkiv"][data-ui="phone"] .m-card.m-err:not(:has(>h2)){border-top:3px solid var(--sem-neg)}
+
+/* ── 19 · a person's contact, as part of their statement ─────────────────────
+   On the driver screen Contact follows the name and face directly (the plan:
+   contact rows first), under 00 with them: it is who this is and how to
+   reach them, not a section of findings. So it takes no number of its own
+   and sits on a hairline, not a section's ink rule; its title stays, in the
+   same mono head, for the record it came from. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-card.ak-reach{border-top:1px solid var(--hair)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-card.ak-reach>h2::before{content:none;counter-increment:none}

@@ -1271,6 +1271,108 @@ console.log('\n4.17 · Cash handed in: the same five steps, square fields, and e
     JSON.stringify([old, a, dark, bad].map((r) => [r.misses, r.errors])));
 }
 
+console.log('\n4.18 · Driver: 00 over the person, contact first, Bookings the hero, a reason in every empty tile, a failed read that says so');
+{
+  const DK = '/api/driver/kpis?period=month&id=drv-0&grain=auto';
+  const DQ = '/api/driver/quality?period=month&id=drv-0&grain=auto';
+  const DS = '/api/driver/standing?period=month&id=drv-0&grain=auto';
+  const H = await import('../api/public/ui.js');
+  const k = ans(DK);
+  const st = ans(DS);
+  const tilesOf = (page) => page.evaluate(() => [...document.querySelectorAll('.m-deck > .m-stats .m-stat')].map((s) => ({
+    l: s.querySelector('.l').textContent, n: s.querySelector('.n').textContent,
+    absent: s.querySelector('.n').hasAttribute('data-absent'), na: s.querySelector('.n').classList.contains('t-na'),
+    cls: s.className, dot: getComputedStyle(s.querySelector('.l'), '::before').content })));
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('driver/drv-0');
+  const o = (await outline(p.page)).filter((x) => x !== 'ak-applies');
+  const m = await p.page.evaluate(() => {
+    const reach = document.querySelector('.m-deck > .m-card.ak-reach');
+    const heads = [...document.querySelectorAll('.m-deck > .m-card > h2, .m-deck > .m-sec')];
+    return {
+      reach: reach ? { idx: getComputedStyle(reach.querySelector(':scope > h2'), '::before').content,
+        rule: getComputedStyle(reach).borderTopWidth,
+        links: [...reach.querySelectorAll('a.m-row')].map((a) => a.getAttribute('href').split(':')[0]) } : null,
+      numbered: heads.filter((h) => /counter\(arkiv-sec/.test(getComputedStyle(h, '::before').content)).map((h) => h.textContent),
+    };
+  });
+  const t = await tilesOf(p.page);
+  check('00 heads the statement (the face, the name), then Contact, then the tiles; the footer closes',
+    JSON.stringify(o.slice(0, 4)) === JSON.stringify(['head:At a glance', 'statement', 'card:Contact', 'glance'])
+      && o[o.length - 1] === 'foot', o.join(' → '));
+  check('…Contact is part of the statement: unnumbered, on a hairline, and still dials and mails',
+    m.reach && m.reach.idx === 'none' && m.reach.rule === '1px' && JSON.stringify(m.reach.links) === '["tel","mailto"]',
+    JSON.stringify(m.reach));
+  check('…so 01 onwards are the sections that were there, in their order',
+    JSON.stringify(m.numbered) === JSON.stringify(['Bookings a day', `Against the other ${f0(st.n_peers)} who drove`, 'Harsh driving', 'More']),
+    JSON.stringify(m.numbered));
+  const hero = t.find((x) => /\bhero\b/.test(x.cls));
+  check(`Bookings is the hero, ${f0(k.trips)} as /api/driver/kpis answers`, hero && hero.l === 'Bookings' && hero.n === f0(k.trips),
+    JSON.stringify(hero));
+  const want = [H.moneyInTile(k), H.cashOnHandTile(k), H.bankDepositTile(k), H.faresTile(k)];
+  check('the money tiles print what the desktop’s own helpers make of the same answer',
+    want.every((w) => t.find((x) => x.l === w.label)?.n === w.value), JSON.stringify(t.map((x) => [x.l, x.n])));
+  await p.close();
+
+  /* A window with nothing to measure: the figures NULL, the rate unmeasured. */
+  const k2 = { ...k, km: null, avg_km: null, completion_pct: null, not_completed: null, revenue: null, statement_fares: null };
+  const q2 = { ...ans(DQ), alerts_per_100km: null, alerts_per_100km_absent: 'A synthetic reason the rate is not measured.' };
+  const absentFx = { ...fixture, answers: { ...fixture.answers,
+    [DK]: { status: 200, type: 'application/json', body: JSON.stringify(k2) },
+    [DQ]: { status: 200, type: 'application/json', body: JSON.stringify(q2) } } };
+  const a = await phonePage(browser, { skin: 'arkiv', fixture: absentFx });
+  await a.open('driver/drv-0');
+  const ta = await tilesOf(a.page);
+  const said = await a.page.evaluate(() => document.querySelector('.m-deck').textContent);
+  const by = (l) => ta.find((x) => x.l === l) || {};
+  check('Fares with nothing priced prints the helper’s own reason in the value slot',
+    by('Fares').na && by('Fares').n === H.faresTile(k2).sub, JSON.stringify(by('Fares')));
+  check('Distance with no distance is absent with its reason — never "— km"',
+    by('Distance').na && by('Distance').n === H.avgKmSub(k2) && !/— km/.test(said), JSON.stringify(by('Distance')));
+  check('Completed with no outcome says so, and carries no warning dot (absent is not bad news)',
+    by('Completed').na && by('Completed').n === 'no booking in this window records whether it was completed'
+      && !/\bwarn\b/.test(by('Completed').cls), JSON.stringify(by('Completed')));
+  check('Per 100 km unmeasured prints the server’s reason, not the words "not measured"',
+    by('Per 100 km').na && by('Per 100 km').n === q2.alerts_per_100km_absent, JSON.stringify(by('Per 100 km')));
+  check('…and every one of them is marked absent, so nothing can highlight it',
+    ['Fares', 'Distance', 'Completed', 'Per 100 km'].every((l) => by(l).absent), JSON.stringify(ta.map((x) => [x.l, x.absent])));
+  await a.close();
+  const ac = await phonePage(browser, { skin: 'classic', fixture: absentFx });
+  await ac.open('driver/drv-0');
+  check('(the old phone still prints "— km" and a warning on an absent Completed — unchanged until the flip)',
+    await ac.page.evaluate(() => /— km/.test(document.querySelector('.m-deck').textContent)
+      && [...document.querySelectorAll('.m-stat.warn .l')].some((l) => l.textContent === 'Completed')));
+  await ac.close();
+
+  /* Three reads refused. */
+  const lostFx = { ...fixture, answers: { ...fixture.answers } };
+  [DK, DS, DQ].forEach((key) => delete lostFx.answers[key]);
+  const l = await phonePage(browser, { skin: 'arkiv', fixture: lostFx });
+  await l.open('driver/drv-0');
+  const ol = (await outline(l.page)).filter((x) => x !== 'ak-applies');
+  const lw = await l.page.evaluate(() => ({ deck: document.querySelector('.m-deck').textContent,
+    head: document.querySelector('.m-sub')?.textContent || '',
+    errs: [...document.querySelectorAll('.m-deck > .m-err')].map((e) => e.textContent) }));
+  check('a figures read that failed says so in place of the tiles — never "no platform statement … covers this window"',
+    ol.indexOf('card:') === ol.indexOf('card:Contact') + 1 && !ol.includes('glance')
+      && /This driver’s figures could not be fetched/.test(lw.errs[0] || '') && !/no platform statement/.test(lw.deck),
+    ol.join(' → '));
+  check('…the standing and the harsh driving each say so under their own head, rather than vanishing',
+    ol.includes('sec:Against the fleet') && ol.includes('sec:Harsh driving') && lw.errs.length === 3
+      && /stands against the fleet could not be fetched/.test(lw.errs[1]) && /harsh-driving figures could not be fetched/.test(lw.errs[2]),
+    JSON.stringify(lw.errs));
+  check('…and the head says the figures could not be fetched, not "— bookings in this window"',
+    /the figures could not be fetched/.test(lw.head) && !/— bookings/.test(lw.head), lw.head.slice(0, 120));
+  check('…every refused read was one of the three', [...l.misses].every((x) => [DK, DS, DQ].includes(x)) && !l.errors.length,
+    [...l.misses].join(' '));
+  await l.close();
+  const lc = await phonePage(browser, { skin: 'classic', fixture: lostFx });
+  await lc.open('driver/drv-0');
+  check('(the old phone still reads a failed figures read as "no platform statement … covers this window" — named in FIX-STATUS)',
+    await lc.page.evaluate(() => /no platform statement and no priced booking covers this window/.test(document.querySelector('.m-deck').textContent)));
+  await lc.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');
