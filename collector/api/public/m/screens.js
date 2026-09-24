@@ -992,8 +992,14 @@ async function unauthorized(deck, ctx) {
   if (!ctx.alive()) return;
   deck.innerHTML = '';
   if (!sum) { failed(deck, new Error('Unauthorized movement could not be fetched.')); return; }
+  /* THE REDESIGN, only under the token: 00 heads the statement; the tiles
+     stay the verdict breakdown with no hero (ruling 7 — the statement's
+     figure is the headline and is not made a second one); the coverage note,
+     which qualifies the statement, moves directly under it; every row carries
+     the mark of the provider that saw it; and the list says it was cut. */
+  const AK = phoneContract();
   const v = Object.fromEntries((sum.byVerdict || []).map((r) => [r.verdict, r]));
-  lede(deck, {
+  const statement = lede(deck, {
     claim: `${fmt(v.unauthorized?.n || 0)} trips with nobody's name on them`,
     sub: 'The seat was occupied and the vehicle moved, but no channel recorded a booking.',
     tone: (v.unauthorized?.n || 0) > 0 ? 'bad' : 'good',
@@ -1029,11 +1035,15 @@ async function unauthorized(deck, ctx) {
     c2.textContent = `Only ${cov.days_with_data} of the ${cov.days_in_window} days in this `
       + `window carry seat evidence from a provider${per}, so this is over those days.`;
     deck.append(c2);
+    /* Directly under the claim it qualifies: read after the tiles, "21
+       trips" had already been read as 21 in thirty days. */
+    if (AK) deck.insertBefore(c2, statement.nextSibling);
   }
+  if (AK) deck.insertBefore(secHead('00', 'At a glance', WINDOW_NOTE()), statement);
   const items = unwrap(listRaw).rows;
   if (items.length) {
     deck.append(el('p', 'm-sec', 'Every one of them'));
-    rows(deck, items.slice(0, 40).map((r) => row({
+    const segRows = rows(deck, items.slice(0, 40).map((r) => row({
       title: r.plate || '—',
       /* custodyText, not r.driver_name — a field /api/segments has never
          returned, so every row said "no driver" including the ones naming two
@@ -1044,6 +1054,18 @@ async function unauthorized(deck, ctx) {
       note: r.distance_km != null ? 'km' : '',
       to: href('vehicle', r.plate),
     })));
+    if (AK) {
+      /* The provider's mark: CABMAN DT, or FMS (its live seat count and its
+         journeys are both FMS's). The provider's own words stay in the row. */
+      items.slice(0, 40).forEach((r, i) => rowMark(segRows.children[i],
+        /^fms/.test(String(r.source || '')) ? 'fms' : r.source));
+      /* THE LIST WAS CUT AND DID NOT SAY SO. The screen draws forty rows of
+         what /api/unauthorized/list returns — newest first, and that route
+         stops at 300 (api/server.js) — under a heading reading "Every one of
+         them". cut() says which forty, of how many. */
+      cut(deck, { rows: items.slice(0, 40), total: items.length, truncated: items.length > 40 },
+        items.length >= 300 ? 'rows the list returns (it stops at 300)' : 'rows the list returns', 'most recent');
+    }
   }
 }
 

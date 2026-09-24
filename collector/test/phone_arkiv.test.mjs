@@ -776,6 +776,38 @@ console.log('\n4.7 · Safety: the statement as 00, ink bars by kind, and a faile
   await f.close();
 }
 
+console.log('\n4.8 · Unauthorized: 00, the coverage note under the claim it qualifies, provider marks, a cut that says so');
+{
+  const key = '/api/unauthorized/list?period=month&grain=auto';
+  const list = ans(key);
+  const rowsIn = list.rows || list;
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('unauthorized');
+  const o = await outline(p.page);
+  const m = await p.page.evaluate(() => ({
+    hero: !!document.querySelector('.m-stat.hero'),
+    marks: [...document.querySelectorAll('.m-deck > .m-rows .m-row')].map((r) => `${r.dataset.ch || '-'}|${r.querySelector('.k span').textContent.split(' · ').pop()}`),
+    lede: document.querySelector('.m-lede b')?.textContent,
+  }));
+  check('00 heads the statement, and the coverage note sits directly under the claim it qualifies',
+    o[0] === 'head:At a glance' && o[1] === 'statement' && o[2] === 'm-stale' && o[3] === 'tiles', o.join(' → '));
+  check('the verdict tiles carry no hero: the statement’s figure is the headline (ruling 7)', !m.hero);
+  const src = { cabman: 'CABMAN DT' };
+  check('each row is marked with its provider — CABMAN, or FMS for both of FMS’s counts — and still names it',
+    m.marks.length === Math.min(40, rowsIn.length)
+      && m.marks.every((x) => { const [ch, label] = x.split('|'); return (/CABMAN/i.test(label) ? ch === 'cabman' : /FMS/i.test(label) ? ch === 'fms' : ch === '-'); }),
+    m.marks.slice(0, 4).join(' '));
+  check('a list of forty says nothing about being cut (it is not)',
+    await p.page.evaluate(() => !/most recent of/.test(document.querySelector('.m-deck').textContent)));
+  await p.close();
+  const more = Array.from({ length: 55 }, (_, i) => ({ ...rowsIn[i % rowsIn.length] }));
+  const q2 = await phonePage(browser, { skin: 'arkiv', fixture: withAnswer(key, more) });
+  await q2.open('unauthorized');
+  const cutLine = await q2.page.evaluate(() => [...document.querySelectorAll('.m-deck > .m-cap')].map((x) => x.textContent).find((t) => /most recent/.test(t)));
+  check('fifty-five rows drawn as forty say which forty, of how many', cutLine === 'The 40 most recent of 55 rows the list returns.', String(cutLine));
+  await q2.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');
