@@ -247,4 +247,68 @@ if (want('supply')) {
   }
 }
 
+/* ══ #platforms (share, tiers, funnel) ════════════════════════════════════ */
+if (want('platforms')) {
+  console.log('\n#platforms');
+  for (const tab of ['platforms', 'platforms/tiers', 'platforms/funnel']) {
+    const { ctx, page } = await open('classic', tab);
+    const band = await page.$('#view .cband');
+    check(`old skin: ${tab} has no 00 band`, !band);
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'platforms');
+    const s = await shape(page);
+    const M = answer('/api/mix', (q) => q.by === 'platform'), K = answer('/api/kpis', (q) => !q.platform);
+    const total = M.reduce((a, r) => a + (+r.n || 0), 0);
+    check('share: 00, the dominance bar, completion and km by channel, the fleets, coverage, †',
+      JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Every booking, by channel', 'Completion by channel, against the fleet',
+        'How far a booking goes, by channel', 'Trips by fleet', 'Coverage & history depth', '† What this page does not know']), JSON.stringify(s.heads));
+    const vfig = await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig');
+    check('…no tile repeats the verdict\'s figure (the leading channel\'s share is the verdict\'s)', !Object.values(s.values).includes(vfig), `${vfig} ${JSON.stringify(s.values)}`);
+    check('…bookings across every channel leads, from the mix answer', s.hero === 'Bookings across every channel' && s.values['Bookings across every channel'] === total.toLocaleString('en-US'), JSON.stringify(s.values));
+    check('…work turned down is the kpis answer\'s declined offers', s.values['Work turned down'] === (+K.declined_offers).toLocaleString('en-US') || /offer/.test(s.na['Work turned down'] || ''), JSON.stringify([s.values, s.na]));
+    const sub = await txtOf(page, '#view .cband .vdct');
+    const fmsDead = !M.some((r) => r.label === 'fms');
+    check('the verdict\'s sub no longer says the tracker "delivered nothing": it files journeys, not bookings (the plan\'s fix)',
+      !/FMS telematics[^.]*delivered nothing/.test(sub) && (!fmsDead || /files journeys, not bookings/.test(sub)), sub.slice(0, 400));
+    const ctl = await page.evaluate(() => [...document.querySelectorAll('[data-panel="plat-share"] button, [data-panel="plat-share"] [role="button"]')].length);
+    check('the dominance bar is still the channel filter — its segments are buttons', ctl > 0, String(ctl));
+    const fleet = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent.trim() === 'Trips by fleet');
+      return p ? { ring: !!p.querySelector('svg.donut') } : null; });
+    check('the fleets are a two-part bar, not a ring', fleet && !fleet.ring, JSON.stringify(fleet));
+    check('† four cells, the tracker among them', s.abs.length === 4 && s.abs.some((a) => a.label === 'The tracker as a channel'), JSON.stringify(s.abs.map((a) => a.label)));
+    check('no tile wears a tone', (await toned(page)).length === 0);
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'platforms/tiers');
+    const s = await shape(page);
+    const P = answer('/api/mix', (q) => q.by === 'product');
+    check('tiers: the four tiles as a band, premium share the hero', s.hero === 'Premium share' && s.glance === 4, JSON.stringify(s.labels));
+    const asked = await bars(page, '[data-panel="tiers-asked"]');
+    check('01: one bar per tier the riders asked for, from the product mix', asked.length === P.filter((r) => +r.n > 0).length, `${asked.length}`);
+    const ink = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => /Gap to the best car/.test(x.querySelector('h3')?.textContent || ''));
+      return p ? [...p.querySelectorAll('.hb .fill')].map((f) => f.style.background) : []; });
+    check('the gap bars are ink — a shortfall against a peer is not a channel colour', ink.length === 0 || ink.every((b) => /--ink/.test(b)), JSON.stringify(ink.slice(0, 3)));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'platforms/funnel');
+    const s = await shape(page);
+    const K = answer('/api/kpis');
+    check('funnel: the five tiles as a band, untoned, none a bare dash', s.glance === 5 && (await toned(page)).length === 0 && !s.bare.length, JSON.stringify(s.labels));
+    const down = await bars(page, '[data-panel="funnel-down"]');
+    const n = [K.cancelled_by_rider, K.declined_offers, K.cancelled_by_driver, K.cancelled_unsaid].filter((x) => x != null).length;
+    check('01: what any channel says about work turned down, each bar naming who files it', down.length === n && down.every(([k]) => / · /.test(k)), JSON.stringify(down));
+    await ctx.close();
+  }
+  for (const tab of ['platforms', 'platforms/tiers', 'platforms/funnel']) {
+    const { ctx, page } = await open('arkiv', tab, { width: 390 });
+    check(`${tab} at 390: nothing scrolls sideways`, (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

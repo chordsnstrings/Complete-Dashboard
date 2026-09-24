@@ -3022,7 +3022,21 @@ V.platforms = async (root) => {
 };
 
 async function platformShare(root) {
-  const vHost = el('div'); root.append(vHost);
+  /* Under the page contract (plan §4 platforms/share): a 00 band (the
+     verdict, its sub corrected, and tiles); the dominance bar — still the
+     dashboard's channel filter — as 01; completion and trip length by
+     channel; the fleet split as a two-part bar in ink and grey; the coverage
+     table unchanged; a † band. */
+  const ak = contract();
+  const band = ak ? el('section', 'cband') : null;
+  if (ak) { band.append(secHead('00', 'At a glance', windowLabel())); root.append(band); }
+  const vHost = el('div'); (ak ? band : root).append(vHost);
+  const shareTiles = ak ? el('div') : null;
+  if (ak) band.append(shareTiles);
+  const barP = ak ? panel('Every booking, by channel', 'Choose a channel to filter the whole dashboard to it.', 'plat-share') : null;
+  const doneP = ak ? panel('Completion by channel, against the fleet', 'Each channel\u2019s completed share of its own bookings, in points against the fleet\u2019s.', 'plat-done') : null;
+  const kmP = ak ? panel('How far a booking goes, by channel', 'Mean km per booking that carries a distance.', 'plat-km') : null;
+  if (ak) { root.append(barP.panel); const g = el('div', 'grid g2'); g.append(doneP.panel, kmP.panel); root.append(g); }
   /* There is no "Trips by platform" panel any more. It held a donut of the
      same byPlat the dominant bar in vHost above already draws, under a caption
      — "Share of total volume" — that is a description of the bar. Two pictures
@@ -3045,6 +3059,12 @@ async function platformShare(root) {
      which channels exist and what each carries. qAll sends the window and not
      the chips, which is exactly the shape this table needs. */
   const [byPlat, byFleet, plats] = await Promise.all([q('/api/mix', { by: 'platform' }), q('/api/mix', { by: 'fleet' }), qAll('/api/platforms')]);
+  /* The contract's extra reads: the fleet's kpis and one per channel for its
+     completion (plan: "one call per channel, no new endpoint"). */
+  const [shareK, perK] = ak ? await Promise.all([
+    q('/api/kpis').catch(() => null),
+    Promise.all(byPlat.map((r) => q('/api/kpis', { platform: r.label }).then((k) => [r.label, k]).catch(() => [r.label, null]))),
+  ]) : [];
   /* Clicking a slice used to open a modal listing that platform's drivers. It
      now sets the platform filter and goes to the driver directory — the same
      answer, on a page with the search box, the compliance columns and an
@@ -3062,7 +3082,7 @@ async function platformShare(root) {
     const dead = plats.filter((r) => !byPlat.some((b) => b.label === r.platform)
       && !(+r.window_bookings));
     const deadNames = [...new Set(dead.map((r) => sourceLabel(r.platform)))];
-    verdict(vHost, {
+    const vd = {
       claim: v.branch === 'single-channel'
         ? `This is a single-channel fleet — ${sourceLabel(v.lead.label)} is ${v.leadPct}% of the work`
         : `${fmt(total)} bookings across ${byPlat.length} ${plural(byPlat.length, 'channel')}`,
@@ -3084,7 +3104,14 @@ async function platformShare(root) {
         ? `Any figure this product reports "per platform" is ${sourceLabel(v.lead.label)}'s figure for `
           + `${v.leadPct}% of its weight. Read the others as samples, not as rates.`
         : null,
-    });
+    };
+    /* THE PLAN'S FIX, under the contract: "configured and has delivered
+       nothing" is not the true reason for FMS — `dead` is keyed on
+       window_bookings, and the tracker files journeys, not bookings (21,354
+       of them over thirty days, /api/kpis). The old skin keeps its sentence. */
+    if (ak) vd.sub = shareSub(dead, shareK);
+    verdict(vHost, vd);
+    if (ak) shareGlance(shareTiles, { v, total, vd, K: shareK, perK, byPlat });
     /* One bar, and it is the control. This page used to draw the same byPlat
        twice — this bar, and a donut immediately under it — with the bar's own
        caption reading "click a slice below", sending the reader past the
@@ -3092,7 +3119,7 @@ async function platformShare(root) {
        what this page is about (one channel carries almost all of the work) at
        a glance, where a donut asks somebody to compare arc lengths; so the bar
        became the control and the donut went. */
-    dominantBar(vHost, byPlat.map((r, i) => ({
+    dominantBar(ak ? barP.body : vHost, byPlat.map((r, i) => ({
       label: sourceLabel(r.label), key: r.label, value: shareOf(r), cls: `c${i + 1}`,
       token: sourceToken(r.label),
       note: r.revenue ? `${money(r.revenue)} reported` : 'reports no money on the trip',
@@ -3116,7 +3143,11 @@ async function platformShare(root) {
      donut turns into a comparison of arc lengths. It survived only because it
      was the sole thing on the page a reader could click. The bar carries that
      now, so the duplicate has nothing left to justify it. */
-  donut(fleetMix.body, byFleet);
+  if (ak) {
+    /* Two fleets are not two channels: a two-part bar in ink and grey. */
+    donut(fleetMix.body, byFleet, { as: 'bar100', colorFor: (d, i) => (i === 0 ? '--ink' : '--grey') });
+    shareCharts(doneP, kmP, { K: shareK, perK, byPlat });
+  } else donut(fleetMix.body, byFleet);
   cov.body.innerHTML = '';
   /* Two different counts, kept apart. This table's number is over the WHOLE
      record and over raw rows — telematics twins of bookings already counted
@@ -3180,14 +3211,95 @@ async function platformShare(root) {
       + 'no stored row at all — not a quiet channel, a collector that is not getting in. '
       + 'Data sources names the refusal.', 'warn'));
   }
+  if (ak) shareAbsence(root, { dark, K: shareK, plats });
+}
+
+/* ── #platforms under the page contract ────────────────────────────────────
+   share: 00 the verdict, then bookings across every channel (the hero), the
+   leading channel's share, the best and the worst channel's completion
+   against the fleet (in points, signed), work turned down; any tile that
+   repeats the verdict's figure is not drawn (ruling 7). 01 the dominance bar
+   (still the control), 02 completion by channel, 03 mean km by channel, 04
+   the fleets as a two-part bar, 05 coverage unchanged, †. */
+function shareSub(dead, K) {
+  const tracker = [...new Set(dead.filter((r) => r.platform === 'fms').map((r) => r.platform))];
+  const quiet = [...new Set(dead.filter((r) => r.platform !== 'fms').map((r) => sourceLabel(r.platform)))];
+  const bits = [];
+  if (quiet.length) {
+    bits.push(`${andList(quiet)} ${quiet.length === 1 ? 'is configured and has' : 'are configured and have'} delivered no booking `
+      + 'in this window — every rate computed "per platform" for those is arithmetic over no rows.');
+  }
+  if (tracker.length) {
+    bits.push(`FMS telematics files journeys, not bookings${K?.telematics_journeys != null ? ` — ${fmt(K.telematics_journeys)} of them in this window` : ''}; `
+      + 'it is the tracker behind the channels, not a channel of its own.');
+  }
+  return bits.length ? bits.join(' ') : 'Every configured channel delivered bookings in this window.';
+}
+function shareGlance(host, { v, total, vd, K, perK, byPlat }) {
+  const fleet = K?.completion_pct != null ? +K.completion_pct : null;
+  const rates = (perK || []).filter(([, k]) => k?.completion_pct != null && +k.bookable_trips > 0)
+    .map(([p, k]) => ({ p, r: +k.completion_pct, n: +k.bookable_trips })).sort((a, b) => b.r - a.r);
+  const best = rates[0], worst = rates[rates.length - 1];
+  const vs = (x) => (fleet == null ? null : { value: x.r - fleet, unit: 'points', of: 'against the fleet', d: 1 });
+  const tiles = [
+    { label: 'Bookings across every channel', value: fmt(total), hero: true,
+      sub: `${countOf(byPlat.length, 'channel')}${K?.telematics_journeys != null ? ` · the tracker's ${fmt(K.telematics_journeys)} journeys are not bookings` : ''}` },
+    v.lead ? { label: `${sourceLabel(v.lead.label)}'s share`, value: `${v.leadPct}%`, sub: `${fmt(shareOf(v.lead))} of the bookings` } : null,
+    best && rates.length > 1 ? { label: 'Best completion', value: pct(best.r, 1), sub: `${sourceLabel(best.p)}, over ${fmt(best.n)} bookings`, delta: vs(best) }
+      : { label: 'Best completion', na: K ? 'fewer than two channels report an outcome in this window' : 'the window\u2019s figures did not load' },
+    worst && rates.length > 1 ? { label: 'Worst completion', value: pct(worst.r, 1), sub: `${sourceLabel(worst.p)}, over ${fmt(worst.n)} bookings`, delta: vs(worst) }
+      : { label: 'Worst completion', na: K ? 'fewer than two channels report an outcome in this window' : 'the window\u2019s figures did not load' },
+    K?.declined_offers != null ? { label: 'Work turned down', value: fmt(K.declined_offers), sub: 'offers a driver declined, from the channels that file offers' }
+      : { label: 'Work turned down', na: K ? 'no channel in this window files an offer it could decline' : 'the window\u2019s figures did not load' },
+  ].filter(Boolean);
+  const { tiles: shown } = notRepeated(tiles, vd.figure);
+  if (shown.length && !shown.some((t) => t.hero)) shown[0] = { ...shown[0], hero: true };
+  glance(host, shown);
+}
+function shareCharts(doneP, kmP, { K, perK, byPlat }) {
+  const fleet = K?.completion_pct != null ? +K.completion_pct : null;
+  const rows = (perK || []).filter(([, k]) => k?.completion_pct != null && +k.bookable_trips > 0);
+  if (fleet == null || !rows.length) empty(doneP.body, 'No channel reports an outcome in this window.');
+  else {
+    hbars(doneP.body, rows.map(([p, k]) => ({ label: `${sourceLabel(p)} · ${pct(+k.completion_pct, 1)}`, n: +(+k.completion_pct - fleet).toFixed(1) }))
+      .sort((a, b) => b.n - a.n), { signed: true, color: '--ink', negColor: '--grey', valueFmt: (x) => `${fmt(x, 1)} pts`,
+        legend: [['--ink', 'above the fleet'], ['--grey', 'below the fleet']] });
+    doneP.body.append(el('p', 'cap', esc(`The fleet completes ${pct(fleet, 1)} of its bookings.`)));
+  }
+  const km = byPlat.filter((r) => r.avg_km != null);
+  if (!km.length) empty(kmP.body, 'No booking in this window carries a distance.');
+  else hbars(kmP.body, [...km].sort((a, b) => b.avg_km - a.avg_km).map((r) => ({ label: sourceLabel(r.label), n: +r.avg_km, plat: r.label })),
+    { signed: false, colorFor: (d) => sourceToken(d.plat), valueFmt: (x) => `${fmt(x, 1)} km` });
+}
+function shareAbsence(root, { dark, K, plats }) {
+  const tracker = plats.filter((r) => r.platform === 'fms');
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Feeds refusing to collect', fig: dark.length ? andList(dark.map(sourceLabel)) : 'None',
+      why: dark.length ? 'No stored row at all — a collector that is not getting in, not a quiet channel. Data sources names the refusal.'
+        : 'Every configured channel has stored rows.' },
+    { label: 'Car tier off Uber', fig: null, none: 'Not filed',
+      why: 'Only Uber files the tier a rider asked for; the hotel files a booking type, not a car tier.' },
+    { label: 'Offers nobody files', fig: null, none: 'Not filed',
+      why: 'Only the channels whose driver report carries offered and accepted counts can say what was turned down; the rest file the booking and nothing before it.' },
+    { label: 'The tracker as a channel', fig: K?.telematics_journeys != null ? `${fmt(K.telematics_journeys)} journeys` : (tracker.length ? 'Journeys' : 'None'),
+      why: 'FMS telematics sees where the cars went, not what anybody booked, so it carries no booking and no share.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), 'every channel'] }, root);
 }
 
 /* Uber's consumer tier is this fleet's limousine product mix. The export
    carries no fare, so this page deliberately holds no money: a tier table with
    invented revenue would be worse than no tier table. */
 async function platformTiers(root) {
+  /* Under the page contract (plan §4 platforms/tiers): the four tiles as a
+     00 band, premium share the hero; 01 which car the rider asked for (one
+     more read, /api/mix?by=product); the daypart table, the gap bars in ink
+     and the vehicle table unchanged; the deliberate no-revenue note kept. */
+  const ak = contract();
   loading(root);
-  const [t, mix] = await Promise.all([q('/api/tiers/by-vehicle'), q('/api/tiers/mix', { by: 'daypart' })]);
+  const [t, mix, prodMix] = await Promise.all([q('/api/tiers/by-vehicle'), q('/api/tiers/mix', { by: 'daypart' }),
+    ak ? q('/api/mix', { by: 'product' }).catch(() => null) : null]);
   root.innerHTML = '';
   if (!t.vehicles.length) return empty(root, 'No Uber trip with a vehicle in this range');
   /* The registry's predicate, not a second copy of it. A tile and the list
@@ -3195,7 +3307,7 @@ async function platformTiers(root) {
      is not the same as their being unable to disagree. */
   const under = membersOf('tiers-behind', t)
     .sort((a, b) => b.premium_gap_pct - a.premium_gap_pct);
-  root.append(kpiRow([
+  const TIER_TILES = [
     { label: 'Premium share', value: pct(t.fleet_premium_pct, 1), sub: 'Black and Comfort, fleet-wide' },
     { label: 'Vehicles carrying Uber work', value: fmt(t.vehicles.length) },
     /* Benchmarked against the BEST car of the model, so by construction almost
@@ -3208,7 +3320,9 @@ async function platformTiers(root) {
       cohort: under.length ? 'tiers-behind' : null },
     { label: 'Largest shortfall', value: under.length ? pct(under[0].premium_gap_pct, 1) : '—',
       sub: under.length ? `${under[0].plate} · ${under[0].model_key}` : null },
-  ]));
+  ];
+  if (ak) tiersGlance(root, TIER_TILES, under, prodMix);
+  else root.append(kpiRow(TIER_TILES));
   const g = el('div', 'grid g2'); root.append(g);
   /* The daypart was fetched and then rolled away.
      The panel is titled "Tier by time of day" and drew a plain tier donut with
@@ -3262,7 +3376,7 @@ async function platformTiers(root) {
     + 'and everybody else is behind by definition. Useful as a spread, not as a list of failures.');
   if (under.length) {
     hbars(gp.body, under.slice(0, 12).map((v) => ({ label: `${v.plate} · ${v.model_key}`, n: v.premium_gap_pct })),
-      { valueFmt: (v) => `${fmt(v, 1)} pts`, signed: false,
+      { valueFmt: (v) => `${fmt(v, 1)} pts`, signed: false, ...(ak ? { color: '--ink' } : {}),
         onClick: (d) => { location.hash = href('vehicle', String(d.label).split(' · ')[0]); } });
   } else empty(gp.body, 'Every car is carrying as much premium work as its model does elsewhere');
   g.append(gp.panel);
@@ -3321,13 +3435,39 @@ async function platformTiers(root) {
   root.append(note(`No revenue column here is deliberate. ${UBER_FARE_WHY}, so until every week is `
     + 'collected a per-tier revenue figure would cover some tiers and not others — and the mix itself '
     + 'is the lever anyway: the same car, the same hour, a different tier.'));
+  if (ak) pageFoot({ colophon: [windowLabel(), `${fmt(t.vehicles.length)} vehicles`] }, root);
+}
+/* tiers: the old tiles in a band (premium share the hero, no "—": the
+   largest shortfall is ABSENT with its reason when no car is behind), then
+   01 which car the rider asked for — Uber bookings per tier, with the mean
+   km a trip of that tier runs. */
+function tiersGlance(root, TIER_TILES, under, prodMix) {
+  const band = el('section', 'cband');
+  const tiles = el('div');
+  band.append(secHead('00', 'At a glance', windowLabel()), tiles);
+  root.append(band);
+  glance(tiles, TIER_TILES.map((x, i) => (x.label === 'Largest shortfall' && !under.length
+    ? { label: x.label, na: 'no car is measurably behind the best of its own model in this window' }
+    : { ...x, tone: null, hero: i === 0 })));
+  const p = panel('Which car the rider asked for', 'Bookings per tier, with the mean km a trip of that tier runs.', 'tiers-asked');
+  root.append(p.panel);
+  const rows = (Array.isArray(prodMix) ? prodMix : []).filter((r) => +r.n > 0);
+  if (!rows.length) { empty(p.body, prodMix ? 'No booking in this window names a tier.' : 'The tier mix did not load.'); return; }
+  hbars(p.body, [...rows].sort((a, b) => b.n - a.n).map((r) => {
+    const [plat, tier] = String(r.label || '').split(/:\s*/);
+    return { label: `${tier ? `${sourceLabel(plat)} · ${tierLabel(tier)}` : sourceLabel(r.label)}${r.avg_km != null ? ` · ${fmt(r.avg_km, 1)} km` : ''}`, n: +r.n };
+  }), { signed: false, color: '--ink' });
 }
 
 /* Yango and Bolt report what a trip table cannot: how many jobs were offered
    and who turned them down. It is the only place lost demand is visible. */
 async function platformFunnel(root) {
+  /* Under the page contract (plan §4 platforms/funnel): the five tiles as a
+     00 band, what any channel says about work turned down as 01 (from
+     /api/kpis), the table and its reasons unchanged. */
+  const ak = contract();
   loading(root);
-  const res = await q('/api/funnel/drivers');
+  const [res, funK] = await Promise.all([q('/api/funnel/drivers'), ak ? q('/api/kpis').catch(() => null) : null]);
   // {rows,total,shown,truncated} when the endpoint says so; a bare array before.
   const rows = Array.isArray(res) ? res : (res.rows || []);
   const total = Array.isArray(res) ? null : res.total;
@@ -3341,7 +3481,7 @@ async function platformFunnel(root) {
   }
   const sum = (k) => live.reduce((a, r) => a + (+r[k] || 0), 0);
   const offered = sum('offered'), accepted = sum('accepted'), completed = sum('completed');
-  root.append(kpiRow([
+  const FUNNEL_TILES = [
     { label: 'Jobs offered', value: fmt(offered) },
     { label: 'Accepted', value: fmt(accepted), sub: offered ? pct((accepted / offered) * 100, 1) : null,
       tone: offered && accepted / offered < 0.7 ? 'warn' : null },
@@ -3366,7 +3506,9 @@ async function platformFunnel(root) {
           : 'no record in this window reports what the channel kept — the offer counts above and the '
             + 'commission are published on different surfaces, so this is absent rather than nought' };
     })(),
-  ]));
+  ];
+  if (ak) funnelGlance(root, FUNNEL_TILES, funK, live);
+  else root.append(kpiRow(FUNNEL_TILES));
   const fnp = panel(`Jobs offered and completed, per driver — ${countOf(live.length, 'record')}`,
     'One row per driver per reporting period, as the channel published it. Rates within a row are '
     + 'sound; the periods overlap, so a column does not add up across rows.');
@@ -3437,6 +3579,30 @@ async function platformFunnel(root) {
     root.append(note(`Only Yango and Bolt publish an offer count. The ${sourceLabel(state.platform)} `
       + 'filter cannot narrow this page because that channel reports no funnel at all.', 'warn'));
   }
+  if (ak) pageFoot({ colophon: [windowLabel(), `${fmt(live.length)} driver-period records`] }, root);
+}
+/* funnel: the five tiles, untoned (a level is not better or worse; the
+   commission ABSENT with its reason rather than a dash), then 01 — what any
+   channel says about work turned down, each bar naming who files it. */
+function funnelGlance(root, FUNNEL_TILES, K, live) {
+  const band = el('section', 'cband');
+  const tiles = el('div');
+  band.append(secHead('00', 'At a glance', windowLabel()), tiles);
+  root.append(band);
+  glance(tiles, FUNNEL_TILES.map((x, i) => (x.value === '\u2014' ? { label: x.label, na: x.sub }
+    : { ...x, tone: null, hero: i === 0 })));
+  const p = panel('What any channel says about work turned down', 'Over the window, from each channel\u2019s own outcome codes.', 'funnel-down');
+  root.append(p.panel);
+  if (!K) { empty(p.body, 'The window\u2019s figures did not load.'); return; }
+  const chans = andList([...new Set(live.map((r) => sourceLabel(r.platform)))]);
+  const rows = [
+    ['Cancelled by the rider', K.cancelled_by_rider, 'every channel that reports an outcome'],
+    ['Declined the offer', K.declined_offers, `only ${chans || 'the channels that file offers'}`],
+    ['Dropped after accepting', K.cancelled_by_driver, 'every channel that reports an outcome'],
+    ['Nobody said who', K.cancelled_unsaid, 'an outcome with no side named'],
+  ].filter(([, n]) => n != null);
+  if (!rows.length) { empty(p.body, 'No channel in this window reports a turned-down job.'); return; }
+  hbars(p.body, rows.map(([label, n, who]) => ({ label: `${label} · ${who}`, n: +n })), { signed: false, color: '--ink' });
 }
 
 /* Two orders of #finance until the operator flips the default skin: the old

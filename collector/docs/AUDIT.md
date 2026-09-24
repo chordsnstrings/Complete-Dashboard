@@ -1707,3 +1707,12 @@ Production (This month), both skins at 1440 and 390, light and dark
 23,036 online hours idle; 12,031.4 h of waiting between jobs over 12,224
 waits in 214 areas; the week's online hours peak 16:00–19:00 while an hour
 buys the most at 15:00.
+
+### #platforms, /tiers, /funnel — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/platforms/`): no error, no sideways scroll.
+Uber is 91% of 17,936 bookings; Hotel completes 99.4% (+11.0 points on the
+fleet's 88.4%), Bolt 52.5% (−35.9); 168 offers declined. Found by looking
+and fixed before commit: completion by channel carried hbars' "added /
+deducted" legend over bars that mean above / below the fleet.
