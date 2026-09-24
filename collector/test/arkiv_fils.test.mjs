@@ -44,6 +44,8 @@ const ROUTES = [
   'online-time', 'performer/drv-0', 'cohort/unit-licence-due', 'cohort/roster-blocked',
   'cancellations', 'roster', 'roster/pipeline', 'roster/idle', 'roster/blocked',
   'top-performers', 'low-performers',
+  // Fleet and Sources
+  'vehicles',
 ];
 
 const scan = (page) => page.evaluate(() => {

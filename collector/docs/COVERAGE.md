@@ -6741,3 +6741,5 @@ number (5 and 5), and never a passport or RTA number.
   cards) left it answering in 38 s and /api/kpis timing out at 20 s for a
   couple of minutes. Screenshot it one load at a time (`CONC=1`), like
   #driver/activity.
+
+* **`glance()` always crowns a hero, and a glance host is a grid.** A band with a second row of tiles (#vehicles' register) cannot build that row with a second `glance()` call. Each call makes its first tile a hero, so the page drew two. Build the row with `kpiTiles(…map(t => ({ ...t, glance: true, hero: false })))` in a `.kpis.glance` of its own, and place it with `tilesHost.after(…)`. Do not append it into the tiles host: anything appended there becomes one more grid cell, and glance() then overwrites the caption.

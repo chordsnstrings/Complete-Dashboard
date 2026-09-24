@@ -13,14 +13,14 @@
    platforms know the trips, the telematics box knows the movement, the fleet
    portal knows the papers. These pages put the three next to each other. */
 
-import { barChart, gapBars, areaChart, donut, hbars, empty } from './charts.js';
+import { barChart, gapBars, areaChart, donut, hbars, empty, scatter } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, money, pct, fmt, tripTime,
   custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, UBER_FARE_WHY,
   noneChosen, verdict, foldRows,
   trackerState, trackerSpeed, stillNote, alertRateFigure, splitAlerts,
-  segSourceLabel } from './ui.js';
-import { qAll, href, parseHash, currentGen, alive } from './data.js';
+  segSourceLabel, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, kpiTiles, kpiCols } from './ui.js';
+import { qAll, href, parseHash, currentGen, alive, windowLabel } from './data.js';
 import { membersOf } from './cohorts.js';
 import { dubaiDay } from './tz.js';
 import { makeMap, fitTo, renderJourney } from './map.js';
@@ -1072,7 +1072,7 @@ async function handoverPanel(host) {
     /* One measure across named cars, so one hue: the bar length already
        carries the magnitude and six colours would imply six categories. */
     hbars(bars, top.map((r) => ({ label: r.plate, n: r.idle_h, plate: r.plate })), {
-      value: 'n', valueFmt: (v) => `${fmt(v, 1)} h`, signed: false, color: '--b500',
+      value: 'n', valueFmt: (v) => `${fmt(v, 1)} h`, signed: false, color: contract() ? '--mk-fill' : '--b500',
       onClick: (d) => { location.hash = href('vehicle', d.plate); },
     });
   }
@@ -1132,16 +1132,34 @@ async function handoverPanel(host) {
 }
 
 export async function renderVehicleDirectory(root) {
-  const vHost = el('div'); root.append(vHost);
+  /* Under the page contract (plan §4 #vehicles): the verdict as the 00
+     statement, and the tiles in two rows — the operational six first (moved
+     with no booking, the money the cars brought in, what a kilometre returns,
+     took a booking, did not move, tracker gone quiet), then the register —
+     untoned, every cohort link kept, the one printing the verdict's figure
+     folded into it (ruling 7). Then money against distance and the lowest
+     returns per kilometre, above the idle-hours list and the search and the
+     full table, both unchanged; after #vehicles' own spread and tier panels,
+     booked against tracked distance and a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const vHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vHost);
   const bar = el('div', 'toolbar');
   bar.innerHTML = `<input id="vdq" type="search" placeholder="Search by plate, make, model or driver…">
     <span class="cap" id="vdn"></span>`;
-  root.append(bar);
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  if (!ak) root.append(bar);
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
+  const moneyP = ak ? panel('Money against distance', 'One dot per car: the payout that reached it, against the kilometres it was booked for', 'veh-money') : null;
+  const perKmP = ak ? panel('What a kilometre returned', 'The twelve lowest-returning cars, over a floor of 100 booked km', 'veh-perkm') : null;
+  if (ak) { const g = el('div', 'grid g2'); g.append(moneyP.panel, perKmP.panel); root.append(g); loading(moneyP.body); loading(perKmP.body); }
   const hoP = panel('Idle hours between drivers',
     'Hours a car stood still between one driver dropping off and the next picking up'); root.append(hoP.panel);
   loading(hoP.body);
-  const tblP = panel('Every vehicle', 'Includes cars with no trips in this window. Those are the ones worth finding.'); root.append(tblP.panel);
+  const tblP = panel('Every vehicle', 'Includes cars with no trips in this window. Those are the ones worth finding.');
+  /* The search sits on the table it searches under the contract. */
+  if (ak) root.append(bar);
+  root.append(tblP.panel);
   loading(tblP.body);
 
   const [rows, fleet] = await Promise.all([
@@ -1221,7 +1239,7 @@ export async function renderVehicleDirectory(root) {
      filed DIFFERENT VINs against one plate. Either the plate moved between two
      cars or a provider has it wrong, and both want a person's attention. */
   const disputed = rows.filter((r) => (r.distinct_vins || 0) > 1);
-  kpiHost.replaceWith(kpiRow([
+  const VDIR_TILES = [
     { label: 'Vehicles', value: fmt(rows.length), sub: 'plates with any record at all' },
     { label: 'Cars, by VIN', value: fmt(vins.size),
       /* Never "and the rest are duplicates". A plate with no VIN might be a
@@ -1283,7 +1301,12 @@ export async function renderVehicleDirectory(root) {
     { label: 'Documents due', value: fmt(expiring), sub: 'expiring within 30 days',
       tone: expiring === 0 ? 'good' : 'critical',
       cohort: expiring ? 'vehicles-docs-due' : null },
-  ]));
+  ];
+  if (ak) {
+    kpiHost.remove();
+    vdirGlance(AKB, VDIR_TILES, rows);
+    vdirMoney(moneyP.body, perKmP.body, rows);
+  } else kpiHost.replaceWith(kpiRow(VDIR_TILES));
   /* Bookings with no vehicle recorded appear on no vehicle page, so this table
      sums to fewer trips than the fleet does. Said plainly, because a reader who
      adds the column up and gets a different number to the overview has no way
@@ -1433,16 +1456,23 @@ export async function renderVehicleDirectory(root) {
        GREEN as long as the fix was recent. Both halves decide the tone now. */
     { label: 'Tracker', key: '_t',
       sortValue: (r) => (!r.last_fix ? 0 : r.stale ? 1 : 2),
+      /* Under the page contract (plan §4 #vehicles) the tracker state is an
+         outline chip: the word carries it, never a wash of colour. */
       render: (r) => {
-        if (!r.last_fix) return pill('none', 'warn');
+        if (!r.last_fix) return pill('none', ak ? null : 'warn');
         const down = /offline|off|dead|inactive|disconnect/i.test(r.status || '');
         const label = r.stale ? 'stale' : (r.status || 'live');
-        return pill(label, (r.stale || down) ? 'warn' : 'ok')
+        return pill(label, ak ? null : (r.stale || down) ? 'warn' : 'ok')
           + (r.fix_age_min != null ? `<span class="dim" title="minutes since the last fix"> ${fmt(r.fix_age_min)}m</span>` : '');
       } },
     { label: 'Documents', key: 'doc_days_left', num: true,
       render: (r) => (r.doc_days_left == null
         ? '<span class="ent-off" title="no document with an expiry date on this vehicle">—</span>'
+        /* Under the contract, as on #compliance: EXPIRED keeps the negative
+           colour as text with its word, under 30 days is ink at weight, the
+           rest grey — no fill. */
+        : ak ? (r.doc_days_left < 0 ? '<span style="color:var(--sem-neg);white-space:nowrap">expired</span>'
+          : r.doc_days_left < 30 ? `<b>${fmt(r.doc_days_left)}d</b>` : `<span class="dim">${fmt(r.doc_days_left)}d</span>`)
         : pill(r.doc_days_left < 0 ? 'expired' : `${r.doc_days_left}d`, docTone(r.doc_days_left))) },
     { label: 'Last trip', key: 'last_trip',
       sortValue: (r) => (r.last_trip ? Date.parse(r.last_trip) : null),
@@ -1475,4 +1505,112 @@ export async function renderVehicleDirectory(root) {
   };
   await handoverPanel(hoP.body);
   return rows;
+}
+
+/* ── #vehicles under the page contract ───────────────────────────────────── */
+/* THE MONEY THE CARS BROUGHT IN is each plate's CHOSEN payout summed
+   (vehicle_payout_basis: a channel believed on its payout lends neither its
+   fares nor its priced bookings to the row) — never added to the fares of the
+   fare-basis channels, which are a rider's charge before commission and are
+   named beside it. A KILOMETRE RETURNS is that payout over the booked km of
+   the cars it reached, sum over sum; their km include any fare-basis bookings
+   those cars also took, and the sub-line says whose km they are. */
+const med = (a) => { const v = [...a].sort((x, y) => x - y); const n = v.length;
+  return n ? (n % 2 ? v[(n - 1) / 2] : (v[n / 2 - 1] + v[n / 2]) / 2) : null; };
+function vdirGlance(AKB, tiles, rows) {
+  const paid = rows.filter((r) => Number(r.payout) > 0);
+  const payout = paid.reduce((a, r) => a + Number(r.payout), 0);
+  const km = paid.reduce((a, r) => a + (Number(r.km) || 0), 0);
+  const fares = rows.filter((r) => Number(r.revenue) > 0).reduce((a, r) => a + Number(r.revenue), 0);
+  const moneyTile = paid.length
+    ? { label: 'Money the cars brought in', value: money(payout),
+      sub: `the payout of ${countOf(paid.length, 'earning car')}, the median ${money(med(paid.map((r) => Number(r.payout))))}`
+        + (fares ? ` · ${money(fares)} of fares on fare-basis channels beside it, not added` : '') }
+    : { label: 'Money the cars brought in',
+      na: fares ? `no payout reaches any car in this window; ${money(fares)} of fares on fare-basis channels is a rider's charge, not what the fleet kept`
+        : 'no payout and no fare reaches any car in this window' };
+  const perKm = paid.length && km
+    ? { label: 'A kilometre returns', value: money(payout / km), sub: `that payout over the ${fmt(km)} booked km of the cars it reached` }
+    : { label: 'A kilometre returns', na: paid.length ? 'no car with a payout carries a booked distance' : 'no payout reaches any car in this window' };
+  const by = Object.fromEntries(tiles.filter(Boolean).map((t) => [t.label, t]));
+  const ops = [by['Moved, no booking'] && { ...by['Moved, no booking'], hero: true }, moneyTile, perKm,
+    by['Took a booking'], by['Did not move'], by['Tracker gone quiet'] || by['No tracker fix']];
+  const reg = ['Vehicles', 'Cars, by VIN', 'Confirmed by two channels', 'Two channels disagree', 'Tracked', 'Documents due']
+    .map((l) => by[l]);
+  const vf = AKB.vHost.querySelector('.vdct-fig > b')?.textContent.trim() || null;
+  const { tiles: t1, dropped } = bandTiles(ops, { figure: vf });
+  glance(AKB.tilesHost, t1);
+  /* The register is a second row under the operational one, with no hero of
+     its own: glance() always crowns one, and a page carries one hero, so
+     the row is built from the same tiles without it. It sits BESIDE the
+     tile grid, not in it — a child of the grid would be one more cell. */
+  const regHost = el('div', 'vdir-reg');
+  regHost.append(el('p', 'cap', 'The register'));
+  const regRow = el('div', 'kpis glance');
+  regRow.innerHTML = kpiTiles(bandTiles(reg, { figure: dropped ? null : vf }).tiles
+    .map((t) => ({ ...t, glance: true, hero: false })));
+  regRow.style.setProperty('--kpi-n', String(kpiCols(regRow.children.length)));
+  regHost.append(regRow);
+  AKB.tilesHost.after(regHost);
+}
+function vdirMoney(host1, host2, rows) {
+  host1.innerHTML = ''; host2.innerHTML = '';
+  const go = (r) => { location.hash = href('vehicle', r.plate); };
+  const dots = rows.filter((r) => Number(r.payout) > 0 && Number(r.km) > 0)
+    .map((r) => ({ plate: r.plate, payout: Number(r.payout), km: Number(r.km) }));
+  if (!dots.length) empty(host1, 'No car in this window carries both a payout and a booked distance.');
+  else {
+    const box = el('div'); host1.append(box);
+    scatter(box, dots, { x: 'km', y: 'payout', label: 'plate', xLabel: 'booked km', yLabel: 'payout',
+      yFmt: (v) => money(v), xFmt: (v) => fmt(v), onClick: go });
+  }
+  /* A car paid only on fare-basis channels has a fare and no payout, and the
+     two are not the same money: its own chart, in its own unit, never on the
+     payout axis above. */
+  const fareOnly = rows.filter((r) => !(Number(r.payout) > 0) && Number(r.revenue) > 0 && Number(r.km) > 0)
+    .map((r) => ({ plate: r.plate, fares: Number(r.revenue), km: Number(r.km) }));
+  const chans = [...new Set(rows.flatMap((r) => [...asList(r.payout_platforms), ...asList(r.fares_platforms)]))];
+  host1.append(el('p', 'cap', `${countOf(dots.length, 'car')} with a payout and a distance`
+    + (chans.length ? `; the working cars file on ${chans.map(sourceLabel).join(', ')}` : '') + '.'));
+  if (fareOnly.length) {
+    host1.append(el('h4', 'sub', 'Cars paid only on the fare they charge'));
+    const box = el('div'); host1.append(box);
+    scatter(box, fareOnly, { x: 'km', y: 'fares', label: 'plate', xLabel: 'booked km', yLabel: 'fares',
+      yFmt: (v) => money(v), xFmt: (v) => fmt(v), onClick: go });
+    host1.append(el('p', 'cap', `${countOf(fareOnly.length, 'car')} earning on fare-basis channels only: a rider's fare before commission, drawn apart so it is never read as a payout.`));
+  }
+  const floor = 100;
+  const per = dots.filter((r) => r.km >= floor).map((r) => ({ plate: r.plate, label: r.plate, n: Math.round((r.payout / r.km) * 100) / 100 }))
+    .sort((a, b) => a.n - b.n).slice(0, 12);
+  if (!per.length) { empty(host2, `No car booked ${floor} km or more with a payout behind it.`); return; }
+  hbars(host2, per, { signed: false, color: '--mk-fill', valueFmt: (v) => `${money(v)}/km`, onClick: go });
+  host2.append(el('p', 'cap', `The lowest, ${per[0].plate}, returned ${money(per[0].n)} a booked kilometre.`));
+}
+/* Called by V.vehicles after its own spread and tier panels. */
+export function vdirTail(root, rows) {
+  const p = panel('Booked against tracked distance', 'One dot per car that has both; the dashed line is where the two agree', 'veh-booked');
+  root.append(p.panel);
+  const dots = rows.filter((r) => Number(r.km) > 0 && Number(r.telematics_km) > 0)
+    .map((r) => ({ plate: r.plate, km: Number(r.km), tkm: Number(r.telematics_km) }));
+  if (!dots.length) empty(p.body, 'No car carries both a booked and a tracked distance in this window.');
+  else {
+    const box = el('div'); p.body.append(box);
+    scatter(box, dots, { x: 'km', y: 'tkm', label: 'plate', xLabel: 'booked km', yLabel: 'tracked km',
+      xFmt: (v) => fmt(v), yFmt: (v) => fmt(v), refLine: { slope: 1 }, onClick: (r) => { location.hash = href('vehicle', r.plate); } });
+    const b = dots.reduce((a, r) => a + r.km, 0), t = dots.reduce((a, r) => a + r.tkm, 0);
+    p.body.append(el('p', 'cap', `Over these ${countOf(dots.length, 'car')}: ${fmt(b)} km booked and ${fmt(t)} km tracked — `
+      + (t >= b ? `${fmt(t - b)} km the tracker saw that no booking accounts for.` : `${fmt(b - t)} km booked beyond what the tracker saw.`)));
+  }
+  const still = membersOf('vehicles-still', rows).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'What a car costs', fig: null, none: 'Not held',
+      why: 'No lease, fuel, insurance or Salik feed reaches this product, so no car here has a cost to set against what it brought in.' },
+    { label: 'Plates that never moved', hl: still > 0, fig: still ? `${fmt(still)} of ${fmt(rows.length)}` : null, none: 'None',
+      why: still ? 'No booking and no journey in this window. The list is a tracker and register roster, not the working fleet, so a plate here may be a car off the road or no car at all.'
+        : 'Every plate on the list took a booking or made a journey in this window.' },
+    { label: 'Which distance is right', fig: null, none: 'Neither alone',
+      why: 'Booked kilometres run from pickup to dropoff on a booking; the tracker counts every kilometre the car drove. The chart above is the gap between them.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), countOf(rows.length, 'vehicle')] }, root);
 }

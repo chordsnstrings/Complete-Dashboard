@@ -23,7 +23,7 @@ import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
 import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS, driversConcentration, driversAbsence } from './driver.js';
-import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
+import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS, vdirTail } from './vehicle.js';
 import { renderCohort } from './cohort.js';
 import { COHORTS, membersOf } from './cohorts.js';
 import { renderCauses } from './causes.js';
@@ -2951,7 +2951,8 @@ V.vehicles = async (root) => {
   if (!alive(gen)) return;
   const earning = rows.filter((r) => (+r.trips || 0) > 0)
     .sort((a, b) => (+b.trips || 0) - (+a.trips || 0));
-  hbars(spread.body, earning.slice(0, 14).map((r) => ({ label: r.plate, n: +r.trips || 0 })), { seq: true, signed: false,
+  /* A vehicle is not a channel: ink bars under the page contract. */
+  hbars(spread.body, earning.slice(0, 14).map((r) => ({ label: r.plate, n: +r.trips || 0 })), { ...(contract() ? { color: '--mk-fill' } : { seq: true }), signed: false,
     onClick: (d) => { location.hash = href('vehicle', d.label); } });
   spread.body.append(el('p', 'cap', earning.length > 14
     ? `The 14 busiest of ${fmt(earning.length)} vehicles with a booking in this range, out of `
@@ -3016,6 +3017,7 @@ V.vehicles = async (root) => {
           : '')));
     }
   }
+  if (contract()) vdirTail(root, rows);
 };
 
 // The per-vehicle pages. `state.param` is the plate, `state.sub` is the tab.

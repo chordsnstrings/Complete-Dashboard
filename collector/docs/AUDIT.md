@@ -2015,3 +2015,13 @@ Twice during this pass production answered /api/same-person in 38 s and
 (four of them the old skin's 314,188-character render): the shots were
 retaken one at a time once it recovered — see the COVERAGE trap on
 /api/driver/shift; this endpoint is a second one to load singly.
+
+### #vehicles — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p58/`). No page error, no sideways scroll.
+
+The verdict: 3 moved with nothing paying for it. Money the cars brought in: AED 584,322.60, the payout of 96 earning cars, with AED 91,098.83 of fares on fare-basis channels beside it and not added. A kilometre returns: AED 2.80 over 208,883 booked km. The register: 273 vehicles.
+
+Booked against tracked covers 73 cars: 168,988 km booked and 184,296 km tracked, 15,308 km that the tracker saw and no booking accounts for. The lowest-returning car over 100 km returned AED 1.12 a kilometre.
+
+The live fils scan is clean in both skins. The arkiv page is 11,440 characters of text against the old skin's 9,583.
