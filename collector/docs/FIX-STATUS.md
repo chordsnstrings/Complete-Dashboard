@@ -3124,3 +3124,9 @@ Not adopted on #revenue: the "net on the statement" hero (Uber only); "channels 
 | #property/<id>/guests, /drivers | Restyle only | **no change needed** | — |
 
 Not built: the "unnamed booker" totals view (it needs a route key for a row with no partner id and `/api/corporate/property` to accept it — an API change the plan marks as needing a new endpoint); per-property rides outside Dubai and authorisations (not in any per-property payload — † cells say so); "unpaid approach ▼ −5.2%" (a level in the delta slot — printed as text).
+
+### P0b · the golden test holds the ledger pages too
+
+| test | what changed | state | proof |
+|---|---|---|---|
+| `test/arkiv_classic_frozen.test.mjs` | `routes_list.mjs` walks none of the ledger pages (#import-sheet, #opening, #salary, #advances, #charging, #policy, #deposits), so "the old skin is byte-identical" was, for them, a claim nothing measured. An `EXTRA` list holds them beside the routes list (not added to it, so smoke_views and render-audit are not changed by a test of this one); recorded from the base tree `abb79ad` like every other route. `ONLY` takes several substrings, comma separated | **written** | 8/8 twice on the working tree. Revert — "Choose the file" → "Choose a file" in the old #import-sheet: 1 fails, restored and md5-checked |

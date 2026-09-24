@@ -34,7 +34,8 @@
          node test/arkiv_classic_frozen.test.mjs
 
    and say in the commit which change moved which page. ONLY=<substring>
-   narrows a run to the routes whose address contains it. A failing route's
+   narrows a run to the routes whose address contains it (several, comma
+   separated). A failing route's
    normalised HTML is written to $TMPDIR (or /tmp) for a diff.
 
    Synthetic data only (the mock). */
@@ -68,7 +69,7 @@ const express = (await import('express')).default;
 
 const FIX = new URL('./fixtures/arkiv_classic_frozen.json', import.meta.url);
 const RECORD = process.env.RECORD === '1';
-const ONLY = process.env.ONLY || '';
+const ONLY = (process.env.ONLY || '').split(',').filter(Boolean);
 const PUBLIC_DIR = process.env.PUBLIC_DIR || null;
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -87,8 +88,18 @@ const base = `http://127.0.0.1:${srv.address().port}`;
    cause, never to make a run green. */
 const UNSTABLE = {};
 
+/* PAGES routes_list.mjs DOES NOT WALK, held here too. The page phase converts
+   every page, and the ledger pages (#import-sheet, #opening, #salary,
+   #advances, #charging, #policy, #deposits) were in neither harness's list —
+   so "the old skin is byte-identical" was, for them, a claim nothing
+   measured. Added here rather than to routes_list.mjs so that smoke_views and
+   render-audit, which walk that list, are not changed by a test of this
+   one. Recorded from the base tree like every other route. */
+const EXTRA = ['import-sheet', 'opening', 'salary', 'advances', 'charging', 'policy', 'deposits'];
+const ALL = [...ROUTES, ...EXTRA.filter((r) => !ROUTES.includes(r))];
+
 const browser = await launchChromium();
-const routes = ROUTES.filter((r) => !UNSTABLE[r] && (!ONLY || r.includes(ONLY)));
+const routes = ALL.filter((r) => !UNSTABLE[r] && (!ONLY.length || ONLY.some((o) => r.includes(o))));
 
 /* Under the full suite several browser files run at once, and the first run
    of this file inside `npm test` died on a Playwright TimeoutError after 70 s
@@ -167,13 +178,13 @@ const CONC = Number(process.env.CONC || 2);
 await Promise.all(Array.from({ length: CONC }, worker));
 
 if (RECORD) {
-  const merged = ONLY ? { ...want, ...got } : got;
+  const merged = ONLY.length ? { ...want, ...got } : got;
   writeFileSync(FIX, `${JSON.stringify(Object.fromEntries(Object.entries(merged).sort()), null, 1)}\n`);
   console.log(`\nrecorded ${Object.keys(got).length} routes into ${FIX.pathname}`);
 } else {
-  check('every route in routes_list.mjs is held (or named in UNSTABLE with its reason)',
-    ONLY || ROUTES.every((r) => want[r] || UNSTABLE[r]),
-    ROUTES.filter((r) => !want[r] && !UNSTABLE[r]).join(' '));
+  check('every route in routes_list.mjs and EXTRA is held (or named in UNSTABLE with its reason)',
+    ONLY.length || ALL.every((r) => want[r] || UNSTABLE[r]),
+    ALL.filter((r) => !want[r] && !UNSTABLE[r]).join(' '));
 }
 await browser.close();
 srv.close();
