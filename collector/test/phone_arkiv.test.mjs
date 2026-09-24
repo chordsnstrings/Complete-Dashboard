@@ -105,6 +105,26 @@ console.log('\n1 · the sheet: scoped, hex-free, on the scale, and loaded for th
   const sw = read('sw.js');
   const shell = sw.slice(sw.indexOf('const SHELL_FILES'), sw.indexOf('self.addEventListener')).replace(/\/\*[\s\S]*?\*\//g, ' ');
   check('the service worker precaches /m/arkiv-m.css', /'\/m\/arkiv-m\.css'/.test(shell));
+  /* A COLD OFFLINE OPEN needs every module the phone imports, not only the
+     three it names: the redesign added ../shell.js (m/app.js) and
+     ../tokens.js (m/ui.js) to the phone's graph, and a module the worker
+     did not precache is a blank app on the first launch without a network.
+     Walked from m/app.js through every static import, as the browser would. */
+  const listed = new Set([...shell.matchAll(/'([^']+)'/g)].map((x) => x[1]));
+  const graph = new Set();
+  const walk = [ '/m/app.js' ];
+  while (walk.length) {
+    const f = walk.pop();
+    if (graph.has(f)) continue;
+    graph.add(f);
+    const src = read(f.slice(1)).replace(/\/\*[\s\S]*?\*\//g, ' ');
+    for (const im of src.matchAll(/^\s*import\s[^;]*?from\s+'([^']+)'/gm)) {
+      walk.push(new URL(im[1], `http://x${f}`).pathname);
+    }
+  }
+  const unlisted = [...graph].filter((f) => !listed.has(f));
+  check(`…and every module in the phone’s static import graph (${graph.size}), so a cold offline open has them all`,
+    graph.size > 10 && graph.has('/shell.js') && graph.has('/tokens.js') && !unlisted.length, unlisted.join(' '));
 }
 
 /* ══ the browser half ═════════════════════════════════════════════════════ */
