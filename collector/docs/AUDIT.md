@@ -1847,3 +1847,12 @@ Production (This month), both skins at 1440 and 390, light and dark
 scroll. Completion 91.7%, ▼ 3.3 pts to 95%; 94.8 alerts per 100 km, ▲ 26.6
 against the fleet median of 68.2 (worse); acceptance absent — no channel
 here publishes one.
+
+### #driver/record — 2026-09-24
+
+Production (week by week), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-record/`): no error, no sideways
+scroll. "Within their usual range", 82 jobs over 7 active days; 7th of 116
+on jobs, 12th of 113 on value. The Trip value tile's sub-line says 0 of 82
+completed trips priced beneath AED 4,923.29 — in both skins; recorded in
+FIX-STATUS as found, not changed.

@@ -365,4 +365,42 @@ if (want('driver-quality')) {
   }
 }
 
+/* ══ #driver/record ═══════════════════════════════════════════════════════ */
+if (want('driver-record')) {
+  console.log('\n#driver/record');
+  {
+    const { ctx, page } = await open('classic', 'driver/drv-0/record');
+    check('old skin: no 00 band, the six position tiles in a row', !(await page.$('#view .cband'))
+      && (await page.$$('#view .kpis:not(.glance) > .kpi')).length === 6);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/record');
+    const s = await shape(page);
+    const f = await vfig(page);
+    const order = await page.evaluate(() => { const v = document.querySelector('#view .stack') || document.querySelector('#view');
+      const tabs = [...document.querySelectorAll('#view .tabs')].pop(); const band = document.querySelector('#view .cband');
+      return tabs && band ? !!(tabs.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING) : false; });
+    check('the grain switch stays first; the verdict is the 00 statement', order && s.vdctIn00, String(order));
+    check('ruling 7: no tile repeats the verdict\'s figure, and the rest of the positions are kept',
+      !Object.values(s.values).includes(f) && ['Position on jobs', 'Trip value', 'Position on value', 'Active days', 'Jobs a day'].every((l) => l in s.values || l in s.na),
+      JSON.stringify([f, s.values]));
+    check('no tile toned, none a bare dash; every chart and the period table kept', (await toned(page)).length === 0 && !s.bare.length
+      && ['Jobs done, week by week', 'Trip value, week by week', 'Where they stood, week by week', 'Every period on record', 'How to read this'].every((h) => s.heads.includes(h)),
+      JSON.stringify(s.heads));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/record?grain=month');
+    const s = await shape(page);
+    check('month by month: the band and the colophon say the grain', /month by month/.test(s.colophon) && s.vdctIn00, s.colophon);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/record', { width: 390 });
+    check('#driver/record at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

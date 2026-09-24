@@ -3441,3 +3441,11 @@ Not built: clusters in the channel identity of the trips they hold (/api/driver/
 | page | what changed under the skin | state | proof |
 |---|---|---|---|
 | #driver/quality | Restyle only (plan §4). The six tiles as a 00 band, untoned: completion the hero with its gap to 95% as a worded delta ("to 95%, the house threshold"), the rate per 100 km with its gap to the fleet median as a delta where LOWER is better (the ratio stays in the sub-line), a rate the alert feed did not measure ABSENT with the server's own reason instead of the words "not measured" printed as a value. Non-completed trips as bars in the colour of the channel each names; cancellations by day in ink; the harsh-driving table kept | **written** | `test/arkiv_people.test.mjs` #driver/quality (8), one fixture with the alert feed dark. Reverts, each failing: "not measured" back in the value slot; the non-completed bars in one colour. `arkiv_classic_frozen` ONLY=driver/ 11/11 |
+
+### P42 · #driver/record
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #driver/record | Restyle only (plan §4). The grain switch stays first; then the verdict as the 00 statement with the position tiles beside it — the tile repeating the verdict's figure (jobs done) taken out, ruling 7 — untoned, a value of "not measured" or a dash ABSENT with its sub-line as the reason. The three charts (already skin-aware through charts.js drawnAs), the period table and "How to read this" unchanged; the colophon names the grain and the periods | **written** | `test/arkiv_people.test.mjs` #driver/record (7). Revert — the verdict figure not passed: "Jobs done 71" repeats the statement's 71, fails. `arkiv_classic_frozen` ONLY=record 4/4; `performance_record` 39, `driver_empty_window_page` 63 |
+
+Found in both skins and not changed (the old skin is frozen, and the figure is not this page's to redefine): on production the Trip value tile read AED 4,923.29 above "0 of 82 completed trips priced" for one driver's week — a value with no priced trip under it. Worth a look at /api/performance/driver's value basis.

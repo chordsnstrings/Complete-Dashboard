@@ -35,7 +35,8 @@
    them in the product rather than a per-page copy. */
 import { gapBars, dec, drawnAs, drawnNoun } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, verdict, empty,
-  money, fmt, dateStr, plural, countOf, tabBar, sourceLabel } from './ui.js';
+  money, fmt, dateStr, plural, countOf, tabBar, sourceLabel,
+  contract, glance, glanceBand, bandTiles, pageFoot } from './ui.js';
 import { api, state, href, currentGen, alive, personAddr } from './data.js';
 
 /* Ordinals, because "12th of 118" is the sentence an operator reads and "the
@@ -300,8 +301,17 @@ export async function renderDriverRecord(root, id, prof) {
       + `set on the toolbar does not apply here — this is ${L}s.`));
   }
 
-  const vHost = el('div'); root.append(vHost); loading(vHost);
-  const kHost = el('div'); root.append(kHost);
+  /* Under the page contract (plan §4 #driver/record, restyle only): the
+     grain switch stays first; then the verdict as the 00 statement with the
+     position tiles beside it — the tile repeating the verdict's own figure
+     taken out (ruling 7), untoned, a dash absent with its reason — and the
+     three charts, the period table and "How to read this" unchanged. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, `${L} by ${L}`) : null;
+  const vHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vHost);
+  loading(vHost);
+  const kHost = el('div'); (ak ? AKB.tilesHost : root).append(kHost);
   const jobs = panel(`Jobs done, ${L} by ${L}`,
     /* The treatment is named by the form that draws it: an outline in the old
        skin, and under Arkiv a pale bar, because there an outline means "not
@@ -375,7 +385,12 @@ export async function renderDriverRecord(root, id, prof) {
 
   const latest = rec.periods.find((p) => p.period === rec.latest_complete) || null;
   headline(vHost, latest, grain, rec.driver?.name);
-  kHost.replaceWith(kpiRow(positionTiles(latest)));
+  if (ak) {
+    kHost.remove();
+    const vf = vHost.querySelector('.vdct-fig > b')?.textContent.trim() || null;
+    glance(AKB.tilesHost, bandTiles(positionTiles(latest).map((t) => (t.value === 'not measured' ? { ...t, value: '—' } : t)),
+      { figure: vf, reasons: { 'Jobs a day': 'no active day in this period, so no pace' } }).tiles);
+  } else kHost.replaceWith(kpiRow(positionTiles(latest)));
 
   /* ── the jobs chart ──────────────────────────────────────────────────── */
   jobs.body.innerHTML = '';
@@ -529,4 +544,5 @@ export async function renderDriverRecord(root, id, prof) {
       : ' None of these channels files an offer that was never accepted, so a day they were '
         + 'shown work and took none cannot be counted for them — it is not a clean record, '
         + 'it is an unreported one.')));
+  if (ak) pageFoot({ colophon: [`${L} by ${L}`, countOf(rec.periods.length, L)] }, root);
 }
