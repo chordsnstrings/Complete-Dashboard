@@ -983,4 +983,80 @@ if (want('performers')) {
   }
 }
 
+/* ══ #performance, by week and by month ═══════════════════════════════════ */
+if (want('performance')) {
+  console.log('\n#performance');
+  {
+    const { ctx, page } = await open('classic', 'performance');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), tiles: document.querySelectorAll('#view .kpis > .kpi').length,
+      amber: document.querySelectorAll('#view td span.good, #view td span.warn').length }));
+    check('old skin: no band, the six tiles, differences still good/warn spans with no minus', !r.band && r.tiles === 6 && r.amber > 0, JSON.stringify(r));
+    await ctx.close();
+  }
+  for (const hash of ['performance', 'performance?grain=month']) {
+    const month = /month/.test(hash);
+    const { ctx, page, answer } = await open('arkiv', hash);
+    const s = await shape(page);
+    const d = answer('/api/performance/fleet');
+    const S = d.summary || {};
+    const n = (v) => (+v || 0).toLocaleString('en-US');
+    const order = await page.evaluate(() => { const kids = [...document.querySelector('#view').children];
+      return { tabs: kids.findIndex((k) => k.querySelector('.tabs, .tabbar, [role="tablist"]') || /tab/.test(k.className)), band: kids.findIndex((k) => k.classList.contains('cband')),
+        chips: kids.findIndex((k) => k.querySelector('.chips')) }; });
+    check(`#${hash}: the grain tabs and the period chips first, in the chrome, then 00`, order.tabs >= 0 && order.tabs < order.band
+      && order.chips > order.tabs && order.chips < order.band, JSON.stringify(order));
+    check(`#${hash}: the verdict's figure is the active-driver count — that tile folds into it; Changed leads`, s.vdctIn00
+      && !('Active drivers' in s.values) && (await vfig(page)) === n(S.drivers) && s.hero === 'Changed', JSON.stringify([s.hero, s.values]));
+    check(`#${hash}: the tiles off the summary`, s.values['Jobs done'] === n(S.completed) && s.values.Changed === n(d.movers.length)
+      && (S.value == null ? 'Trip value' in s.na : s.values['Trip value'] === aedOf(S.value)), JSON.stringify(s.values));
+    check(`#${hash}: no tone, no bare dash`, (await toned(page)).length === 0 && !s.bare.length);
+    const at = d.periods.findIndex((x) => x.period === d.period);
+    const prev = d.period_complete && at > 0 ? [...d.periods.slice(0, at)].reverse().find((x) => x.complete) : null;
+    const dl = await page.evaluate(() => [...document.querySelectorAll('#view .cband .kpi')].filter((k) => k.querySelector('.dlt'))
+      .map((k) => [k.querySelector('.l')?.textContent.trim(), k.querySelector('.dlt-v')?.textContent.trim()]));
+    const want = prev ? `${S.completed - prev.completed > 0 ? '+' : S.completed - prev.completed < 0 ? '−' : ''}${n(Math.abs(S.completed - prev.completed))}` : null;
+    check(`#${hash}: a complete period carries its change on the last complete one; the running one none`,
+      prev ? dl.some(([l, v]) => l === 'Jobs done' && v === want) : dl.length === 0, JSON.stringify([dl, want, d.period_complete]));
+    const dots = await page.evaluate(() => document.querySelectorAll('[data-panel="perf-scatter"] svg circle.sc-dot').length);
+    check(`#${hash}: every placeable driver a dot, jobs against trip value`, dots === (d.rows || []).filter((r) => r.value_rankable && r.value != null && r.completed != null).length, String(dots));
+    const cells = await page.evaluate(() => ({ amber: document.querySelectorAll('#view td span.good, #view td span.warn').length,
+      signed: [...document.querySelectorAll('#view td .dlt .dlt-v')].map((x) => x.textContent) }));
+    const moverDown = (d.movers || []).some((m) => Math.round(m.split?.total ?? 0) < 0);
+    check(`#${hash}: differences signed — a glyph and a minus, never amber`, cells.amber === 0
+      && (!(d.movers || []).length || cells.signed.length > 0) && (!moverDown || cells.signed.some((v) => v.startsWith('−'))), JSON.stringify(cells));
+    const tr = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => /^The fleet, /.test(x.querySelector('h3')?.textContent || ''));
+      return { svgs: p ? p.querySelectorAll('svg').length : 0, h4: p ? [...p.querySelectorAll('h4')].map((h) => h.textContent) : [] }; });
+    check(`#${hash}: the trend, and active drivers as their own chart`, tr.svgs >= 2 && tr.h4.some((h) => /^Active drivers, /.test(h)), JSON.stringify(tr));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const R = d.rows || [];
+    const dropped = R.reduce((a, r) => a + (+r.dropped || 0), 0);
+    const limbo = S.accepted - S.completed - dropped;
+    check(`#${hash}: †: no usual, accepted-then-neither, and rates under the gate — counted from the rows`,
+      (limbo > 0 ? ab['Accepted, then neither done nor dropped']?.fig === n(limbo) : true)
+      && ab[`A completion rate under ${d.rate_gates?.show ?? 30} accepted`] != null
+      && (R.filter((r) => r.rates?.absent).length ? ab[`A completion rate under ${d.rate_gates?.show ?? 30} accepted`].fig === `${R.filter((r) => r.rates?.absent).length} of ${R.length}` : true),
+      JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    check(`#${hash}: How to read this kept`, s.heads.includes('How to read this'), JSON.stringify(s.heads));
+    void month;
+    await ctx.close();
+  }
+  {
+    /* A period nobody worked: the `?? 0` noughts become absences with the
+       true reason. */
+    const empty = (q, real) => ({ ...real, summary: null, movers: [], rows: [], movement: { ...real.movement, tested: 0, untested: 0 } });
+    const { ctx, page } = await open('arkiv', 'performance', { fixtures: { '/api/performance/fleet': empty } });
+    const s = await shape(page);
+    check('a period nobody worked: Active drivers, Jobs done and Jobs a day ABSENT with the reason, Changed absent too — never 0',
+      ['Active drivers', 'Jobs done', 'Jobs a day'].every((l) => /^nobody accepted work in /.test(s.na[l] || ''))
+      && /enough of their own record/.test(s.na.Changed || '') && !['Active drivers', 'Jobs done', 'Jobs a day', 'Changed'].some((l) => s.values[l] === '0'),
+      JSON.stringify([s.values, s.na]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'performance', { width: 390 });
+    check('#performance at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

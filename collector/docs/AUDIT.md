@@ -1946,3 +1946,15 @@ the 39 who ran least ran 1.7% of the week's 5,865 bookings; the top 10 ran
 16.2%, the top 20 29.7% against an even 12.9%. Found by looking and fixed
 before commit: the concentration drawn as a scatter carried its even-fleet
 line past 100%.
+
+### #performance, #performance?grain=month — 2026-09-24
+
+Production, both grains, both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/performance/`): no error, no sideways scroll,
+no whole-dirham amount. Week of 14 Sept: 116 active (the verdict), 5,193
+jobs (▲ +722 on the week of 7 Sept), AED 331,057.35 of trip value
+(▲ +57,330.47), 7.2 a day, 1 changed of 107 tested at 3.5σ; 113 drivers
+placed on the scatter. August: 115 active, 12,340 jobs (▲ +2,854 on July
+2026), 4 changed of 101. Found by looking and fixed before commit: the
+month delta read "on the July 2026", and the period chips sat under the
+band whose verdict they choose.
