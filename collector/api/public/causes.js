@@ -17,10 +17,11 @@
    3. An overlapping world event is a candidate, not a cause. Nothing here
       claims to have proved anything. */
 
-import { empty, markForm } from './charts.js';
+import { empty, markForm, gapBars, hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, pill, note, dayStr, dateStr, fmt, pct,
   sourceLabel, countOf, plural, signed, verdict, money } from './ui.js';
 import { api, qChan, href, hrefFilter } from './data.js';
+import { contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
 
 /* How much of a partial month is actually in the record.
    ─────────────────────────────────────────────────────────────────────────
@@ -189,7 +190,8 @@ function trendChart(host, months, onPick) {
 }
 
 /* ── one break, decomposed ───────────────────────────────────────────────── */
-function breakCard(b) {
+function breakCard(b, { ak = false } = {}) {
+  const unit = ak && b.platform === 'fms' ? 'journeys' : 'trips';
   const a = ATTRIBUTION[b.attribution] || ATTRIBUTION.mixed;
   const rose = b.change_pct >= 0;
   const dir = rose ? 'rose' : 'fell';
@@ -204,8 +206,8 @@ function breakCard(b) {
   card.innerHTML = `
     <div class="bk-head">
       <div>
-        <h4>${MONTH(b.period_from)} → ${MONTH(b.period_to)} · trips ${dir} ${Math.abs(Math.round(b.change_pct * 100))}%</h4>
-        <p class="cap">${fmt(b.value_from)} → ${fmt(b.value_to)} trips on ${esc(sourceLabel(b.platform))}</p>
+        <h4>${MONTH(b.period_from)} → ${MONTH(b.period_to)} · ${unit} ${dir} ${Math.abs(Math.round(b.change_pct * 100))}%</h4>
+        <p class="cap">${fmt(b.value_from)} → ${fmt(b.value_to)} ${unit} on ${esc(sourceLabel(b.platform))}</p>
       </div>
       ${pill(a.label, a.tone)}
     </div>
@@ -235,8 +237,17 @@ function breakCard(b) {
 }
 
 export async function renderCauses(root) {
-  const vcHost = el('div'); root.append(vcHost);
-  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  /* Under the page contract (plan §4 causes): the verdict and the tiles in a
+     00 band (the largest real move the hero, with its sign; the share of it
+     the headcount explains; bookings per driver); the trend; what moved at
+     each break, split into headcount and per-driver; drivers and bookings per
+     driver by month; the break cards folded after four; the events, the gaps
+     and the fewer-drivers table unchanged; a † band. Whole record, all
+     channels, as before. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, 'The whole record') : null;
+  const vcHost = ak ? AKB.vHost : el('div'); if (!ak) root.append(vcHost);
+  const kpiHost = el('div'); (ak ? AKB.tilesHost : root).append(kpiHost); loading(kpiHost);
   /* The caption named the wrong mark: it said "Hatched columns are months we
      hold no data for", and the chart draws those months as OUTLINES and
      hatches the PARTIAL months — so a reader looking for the hole was sent to
@@ -245,6 +256,10 @@ export async function renderCauses(root) {
   const trend = panel('Trips per month', 'Click a month to see what was happening. Outlined columns are '
     + 'months we hold no data for; hatched ones are partial months, with fewer days than the bars beside them.');
   root.append(trend.panel);
+  const decoP = ak ? panel('What moved, at each break', 'Each real break split into the part the change in headcount explains and the part the change in bookings per driver explains; the two add to the change.', 'causes-deco') : null;
+  const drvP = ak ? panel('How many drivers', 'Drivers who took a booking, month by month.', 'causes-drivers') : null;
+  const perP = ak ? panel('What each one did', 'Bookings per driver, month by month.', 'causes-per') : null;
+  if (ak) { root.append(decoP.panel); const g0 = el('div', 'grid g2'); g0.append(drvP.panel, perP.panel); root.append(g0); }
   const gapP = panel('Coverage gaps', 'Stretches with no trips from any source. These are collection holes, not quiet months.');
   const g = el('div', 'grid g23'); root.append(g);
   const brk = panel('Big jumps between months', 'Moves above 30% from one month to the next, split into drivers and work'); g.append(brk.panel);
@@ -287,6 +302,7 @@ export async function renderCauses(root) {
      The real largest is headlined and the artefact is named beside it, rather
      than the artefact leading and its explanation sitting in a branch that
      only runs when the stored decomposition is missing. */
+  let causesFigure = null;
   const allBreaks = [...(t.breaks || [])].sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
   const artifacts = allBreaks.filter((b) => b.boundary_artifact);
   const biggest = allBreaks.find((b) => !b.boundary_artifact) || allBreaks[0];
@@ -299,7 +315,7 @@ export async function renderCauses(root) {
   {
     const gapMonths = (t.gaps || []).reduce((a, x) => a + x.months, 0);
     const real = allBreaks.filter((b) => !b.boundary_artifact);
-    verdict(vcHost, {
+    const vd = {
       claim: biggest && !biggest.boundary_artifact
         ? `The largest real move is ${signed(biggest.change_pct, { unit: '%' })}, `
           + `${MONTH(biggest.from)} to ${MONTH(biggest.to)}`
@@ -316,10 +332,12 @@ export async function renderCauses(root) {
         + (gapMonths
           ? `${fmt(gapMonths)} months have no data at all, so any trend drawn across them is drawn across nothing.`
           : 'The run of months is complete.'),
-    });
+    };
+    verdict(vcHost, vd);
+    causesFigure = vd.figure;
   }
 
-  kpiHost.replaceWith(kpiRow([
+  const CAUSE_TILES = [
     { label: 'Months observed', value: `${observed.length} of ${months.length}`,
       sub: (t.gaps || []).length ? `${(t.gaps || []).reduce((a, x) => a + x.months, 0)} months with no data` : 'complete run',
       tone: (t.gaps || []).length ? 'warn' : 'good' },
@@ -339,7 +357,9 @@ export async function renderCauses(root) {
           : (artifacts.length ? ' — the largest that is not a collection boundary' : '')),
       tone: biggest.boundary_artifact ? null
         : Math.abs(biggest.change_pct) > 60 ? 'critical' : 'warn' } : null,
-  ]));
+  ];
+  if (ak) causesGlance(kpiHost, CAUSE_TILES, { biggest, observed, figure: causesFigure });
+  else kpiHost.replaceWith(kpiRow(CAUSE_TILES));
 
   /* Hoisted out of the dead branch. This warning only rendered when the stored
      decomposition was ABSENT, which is the one case where the reader is
@@ -523,8 +543,15 @@ export async function renderCauses(root) {
         ? pill(`${(r.platform_shift.from || []).join('+')} → ${(r.platform_shift.to || []).join('+')}`, 'warn') : '—') },
     ]));
   } else {
-    stored.sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct))
-      .slice(0, 12).forEach((b) => brk.body.append(breakCard(b)));
+    const cards = stored.sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct)).slice(0, 12);
+    if (ak && cards.length > 4) {
+      /* Folded after four — nothing removed, the page shorter. */
+      cards.slice(0, 4).forEach((b) => brk.body.append(breakCard(b, { ak })));
+      const more = el('details', 'causes-fold');
+      more.append(el('summary', 'cap', `Show the other ${cards.length - 4} ${cards.length - 4 === 1 ? 'break' : 'breaks'}`));
+      cards.slice(4).forEach((b) => more.append(breakCard(b, { ak })));
+      brk.body.append(more);
+    } else cards.forEach((b) => brk.body.append(breakCard(b, { ak })));
   }
 
   /* ── gaps ── */
@@ -581,4 +608,74 @@ export async function renderCauses(root) {
       + 'Seasonal and religious dates are derived; news items are classified by an LLM from regional coverage. '
       + 'Confidence is how strongly the event is expected to move Dubai ride demand, not how certain we are it occurred.'));
   }
+  if (ak) {
+    causesCharts(decoP, drvP, perP, months, allBreaks);
+    causesAbsence(root, { months, allBreaks, stored });
+  }
+}
+
+/* ── #causes under the page contract ───────────────────────────────────────
+   The decomposition is exact: ΔT = ΔD·p₀ + D₁·Δp, with p bookings per
+   driver — the headcount term and the per-driver term add to the change.
+   A break whose channel names no driver (FMS) cannot be split, and is said
+   so rather than drawn. */
+function splitBreak(b) {
+  if (b.drivers_from == null || b.drivers_to == null || !b.drivers_from || !b.drivers_to) return null;
+  const t0 = +b.trips_from, t1 = +b.trips_to, d0 = +b.drivers_from, d1 = +b.drivers_to;
+  const p0 = t0 / d0, p1 = t1 / d1;
+  return { head: (d1 - d0) * p0, per: d1 * (p1 - p0), total: t1 - t0 };
+}
+function causesGlance(host, tiles, { biggest, observed, figure }) {
+  const sp = biggest ? splitBreak(biggest) : null;
+  const last = [...observed].reverse().find((m) => m.drivers_known && m.drivers && !m.partial_month);
+  const extra = [
+    sp && sp.total ? { label: 'The headcount explains', value: `${Math.round((sp.head / sp.total) * 100)}%`,
+      sub: `of the ${MONTH(biggest.from)} → ${MONTH(biggest.to)} move; bookings per driver explain the rest` }
+      : { label: 'The headcount explains', na: biggest ? 'the largest move names no driver on one side, so it cannot be split' : 'no break in the record' },
+    last ? { label: 'Bookings per driver', value: fmt(last.trips / last.drivers, 1), sub: `in ${MONTH(last.m)}, the last whole month that names its drivers`,
+      spark: observed.filter((m) => m.drivers_known && m.drivers).map((m) => m.trips / m.drivers) }
+      : { label: 'Bookings per driver', na: 'no whole month in the record names its drivers' },
+  ];
+  const withHero = tiles.filter(Boolean).map((x) => (x.label === 'Largest move' ? { ...x, hero: true } : x));
+  glance(host, bandTiles([...withHero, ...extra], { figure }).tiles);
+}
+function causesCharts(decoP, drvP, perP, months, allBreaks) {
+  const real = allBreaks.filter((b) => !b.boundary_artifact);
+  const parts = real.map((b) => ({ b, sp: splitBreak(b) }));
+  const drawn = parts.filter((x) => x.sp);
+  if (!drawn.length) empty(decoP.body, 'No real break in the record names its drivers on both sides.');
+  else {
+    hbars(decoP.body, drawn.flatMap(({ b, sp }) => [
+      { label: `${MONTH(b.from)} → ${MONTH(b.to)} · headcount`, n: Math.round(sp.head) },
+      { label: `${MONTH(b.from)} → ${MONTH(b.to)} · per driver`, n: Math.round(sp.per) },
+    ]), { signed: true, color: '--ink', negColor: '--grey', valueFmt: (v) => `${fmt(v)} bookings`,
+      legend: [['--ink', 'added bookings'], ['--grey', 'took bookings away']] });
+    const un = parts.filter((x) => !x.sp).map((x) => `${MONTH(x.b.from)} → ${MONTH(x.b.to)}`);
+    if (un.length) decoP.body.append(el('p', 'cap', esc(`Unattributable, and not drawn: ${un.join(', ')} — a side of the break names no driver.`)));
+  }
+  const rows = months.map((m) => ({ m: MONTH(m.m), drivers: m.drivers_known ? +m.drivers : null,
+    per: m.drivers_known && m.drivers ? +(m.trips / m.drivers).toFixed(1) : null,
+    none: m.no_data || !m.drivers_known, part: !!m.partial_month }));
+  gapBars(drvP.body, rows, { x: 'm', y: 'drivers', label: 'drivers', color: '--ink', gapKey: 'none',
+    gapLabel: 'no data, or no driver named, in this month', bucketNoun: 'months', inProgress: false,
+    hatchIf: (r) => r.part, hatchNote: 'a partial month — fewer days than the months beside it', valueFmt: (v) => fmt(v) });
+  gapBars(perP.body, rows, { x: 'm', y: 'per', label: 'bookings per driver', color: '--ink', gapKey: 'none',
+    gapLabel: 'no data, or no driver named, in this month', bucketNoun: 'months', inProgress: false,
+    hatchIf: (r) => r.part, hatchNote: 'a partial month — fewer days than the months beside it', valueFmt: (v) => fmt(v, 1) });
+}
+function causesAbsence(root, { months, allBreaks, stored }) {
+  const noData = months.filter((m) => m.no_data).length;
+  const art = allBreaks.filter((b) => b.boundary_artifact).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'What caused a break', fig: null, none: 'Not measured',
+      why: 'The candidate events on each card are candidates, not proof: nothing in any feed says why a month moved.' },
+    { label: 'Months with no data', hl: !!noData, fig: `${fmt(noData)} of ${fmt(months.length)}`,
+      why: noData ? 'Collection holes, not quiet months; no comparison steps across one.' : 'Every month in the record has data.' },
+    { label: 'Moves at a collection boundary', fig: fmt(art),
+      why: art ? 'A move touching a partial month is when collection started or stopped, not something the fleet did.' : 'No move touches a partial month.' },
+    { label: 'Breaks off the booking channels', fig: fmt(stored.filter((b) => b.platform === 'fms').length),
+      why: 'The tracker\u2019s breaks are in journeys and name no driver, so they cannot be split into headcount and work.' },
+  ]);
+  pageFoot({ colophon: ['The whole record', `${fmt(months.length)} months`] }, root);
 }

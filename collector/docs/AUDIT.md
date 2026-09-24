@@ -1724,3 +1724,12 @@ Production (This month), both skins at 1440 and 390, light and dark
 Al Garhoud → Dubai Int'l Airport leads at 279 trips; 1,742 trips (32.4% of
 the 119 routes sent) never leave their area; 89 of 90 named routes carry a
 priced trip, their fares rising with distance.
+
+### #causes — 2026-09-24
+
+Production (the whole record), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/causes/`): no error, no sideways scroll. The
+largest real move is +1,029%, Mar → Apr 2025, and the headcount explains 6%
+of it — bookings per driver the rest. Found by looking and fixed before
+commit: 02 carried hbars' "added / deducted" legend; it says "added
+bookings / took bookings away" now.

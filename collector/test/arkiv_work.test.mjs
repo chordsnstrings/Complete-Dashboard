@@ -367,4 +367,47 @@ if (want('corridors')) {
   }
 }
 
+/* ══ #causes ══════════════════════════════════════════════════════════════ */
+if (want('causes')) {
+  console.log('\n#causes');
+  {
+    const { ctx, page } = await open('classic', 'causes');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      fold: !!document.querySelector('#view details.causes-fold'), journeys: /journeys on FMS/.test(document.querySelector('#view')?.textContent || '') }));
+    check('old skin: no 00 band, no fold, FMS cards still say trips', !r.band && !r.fold && !r.journeys, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'causes');
+    const s = await shape(page);
+    const T = answer('/api/trend/monthly'), B = answer('/api/breaks');
+    check('the plan\'s order: 00, the trend, what moved, drivers | per driver, the cards, gaps, events, fewer drivers, †',
+      JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Trips per month', 'What moved, at each break', 'How many drivers', 'What each one did',
+        'Big jumps between months', 'Coverage gaps', 'What was on in Dubai', 'Fewer drivers, or less work?', '† What this page does not know']), JSON.stringify(s.heads));
+    check('the largest move is the hero, and no tile repeats the verdict\'s figure', s.hero === 'Largest move'
+      && !Object.values(s.values).includes(await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig')), JSON.stringify(s.values));
+    const all = [...(T.breaks || [])].sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
+    const big = all.find((b) => !b.boundary_artifact) || all[0];
+    const sp = big && big.drivers_from && big.drivers_to ? (() => { const p0 = big.trips_from / big.drivers_from; const head = (big.drivers_to - big.drivers_from) * p0;
+      return Math.round((head / (big.trips_to - big.trips_from)) * 100); })() : null;
+    check('the headcount\'s share of the largest move is ΔD·p₀ over ΔT', sp == null ? !!s.na['The headcount explains'] : s.values['The headcount explains'] === `${sp}%`,
+      `${s.values['The headcount explains']} vs ${sp}`);
+    const real = all.filter((b) => !b.boundary_artifact && b.drivers_from && b.drivers_to);
+    const deco = await bars(page, '[data-panel="causes-deco"]');
+    check('02: a headcount bar and a per-driver bar for every real break that names its drivers', deco.length === real.length * 2, `${deco.length} vs ${real.length * 2}`);
+    const cards = Array.isArray(B) ? B.length : 0;
+    const folded = await page.evaluate(() => document.querySelectorAll('#view details.causes-fold .bk, #view details.causes-fold > div').length);
+    check('the break cards fold after the first four — nothing removed', cards > 4 ? folded > 0 : folded === 0, `${cards} cards, ${folded} folded`);
+    const fms = (Array.isArray(B) ? B : []).some((b) => b.platform === 'fms');
+    check('an FMS break card says journeys, not trips (the plan\'s fix)', !fms || /journeys on FMS/.test(await txtOf(page, '#view')), String(fms));
+    check('no tile wears a tone', (await toned(page)).length === 0);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'causes', { width: 390 });
+    check('#causes at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
