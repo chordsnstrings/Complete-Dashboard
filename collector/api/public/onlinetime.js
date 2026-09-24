@@ -21,9 +21,10 @@
    be systematically too kind, and a page that quietly did that would send
    nobody the calls it is for. */
 import { el, esc, panel, loading, tableFrom, kpiRow, entity, pill, sourceLabel, timeStr,
-  dialable } from './ui.js';
+  dialable, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, swatch, delta, dayStr } from './ui.js';
 import { dubaiDay } from './tz.js';
-import { empty, fmt } from './charts.js';
+import { empty, fmt, hbars } from './charts.js';
+import { CHANNEL_ORDER } from './tokens.js';
 import { api, qAll, href } from './data.js';
 
 /* Remembered per reader, because the expected start is a property of how this
@@ -71,6 +72,15 @@ export async function renderOnlineTime(root) {
      screen twice, 300px apart, which is the defect the platforms page was
      fixed for. This heading names what the panel actually holds: the two
      settings every figure below is measured against. */
+  /* Under the page contract (plan §4 #online-time): a 00 band — Late the
+     hero, then on time, cannot be judged, drove, and the wait to a first
+     job — ABOVE the panel holding the day and the start, which stay in the
+     page (the review's correction) and still govern every figure; the call
+     list keeps its seven columns, its order and its sort, with the online
+     cell a worded gap instead of a pink pill; two new sections from the same
+     rows; a † band. Everything is redrawn with the rest on every change. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, null) : null;
   const head = panel('The day, and the time you expect them to start',
     'Both apply to every number and every colour below');
   root.append(head.panel);
@@ -151,6 +161,10 @@ export async function renderOnlineTime(root) {
   const list = panel('Every driver',
     'Latest first, so the call list is the top of this table');
   root.append(list.panel);
+  const wait = ak ? panel('Online to a first job', 'How long after coming online each person\u2019s first booking came, on this day', 'ot-wait') : null;
+  const chan = ak ? panel('Could work it, and drove it', 'Per channel: people with a portal on it, and people who took a booking on it this day', 'ot-chan') : null;
+  const absHost = ak ? el('div') : null;
+  if (ak) root.append(wait.panel, chan.panel, absHost);
 
   let gen = 0;
   const draw = async () => {
@@ -177,7 +191,7 @@ export async function renderOnlineTime(root) {
        back and `start_why` says which of the two absences this is. */
     const judged = d.expected_start != null;
     if (!judged) tiles.append(el('p', 'note warn', d.start_why || 'No start time is set.'));
-    tiles.append(kpiRow([
+    const OT_TILES = [
       { label: 'Late', value: judged ? fmt(t.late ?? 0) : '—',
         tone: judged && t.late ? 'bad' : null,
         sub: judged ? `came online after ${esc(d.expected_start)}` : 'no start time to judge against' },
@@ -236,7 +250,14 @@ export async function renderOnlineTime(root) {
         sub: `of ${fmt(t.people - (t.cannot_earn || 0))} allowed to take work on Uber`
           + ((t.worked ?? t.drove) > t.drove
             ? ` · ${fmt((t.worked ?? t.drove) - t.drove)} of them on another channel only` : '') },
-    ]));
+    ];
+    if (ak) {
+      AKB.tilesHost.innerHTML = '';
+      glance(AKB.tilesHost, bandTiles([...OT_TILES.map((x, i) => (i === 0 ? { ...x, hero: true } : x)), otWaitTile(d.rows)],
+        { reasons: { Late: d.start_why || 'no start time to judge against', 'On time': d.start_why || 'no start time to judge against' } }).tiles);
+      otWait(wait.body, d.rows); otChannels(chan.body, d.rows);
+      absHost.innerHTML = ''; otAbsence(absHost, { ...d, day }, root);
+    } else tiles.append(kpiRow(OT_TILES));
 
     if (t.not_asked) {
       /* This said the state "does not fix itself: the roster sweep has no
@@ -273,7 +294,12 @@ export async function renderOnlineTime(root) {
          product here, and burying it would leave a reader guessing which of the
          four it is. */
       { label: 'Online', key: 'online_minute', num: true,
-        render: (r) => (r.online_local
+        render: (r) => (ak && r.online_local
+          /* The gap in words, with glyph and sign (L3), in place of the pink
+             "+234m" pill; an on-time row carries no colour at all. */
+          ? `<span title="${esc(r.online_why)}">${esc(r.online_local)}</span>`
+            + (r.late ? ` ${delta(r.minutes_late, { kind: 'gap', invert: true, unit: 'min', of: 'late', d: 0 })}` : '')
+          : r.online_local
           ? `<span class="tag ${r.late ? 'bad' : 'ok'}" title="${esc(r.online_why)}">`
             + `${esc(r.online_local)}</span>`
             + (r.late ? `<span class="dim" title="after the ${esc(d.expected_start)} you set">`
@@ -317,7 +343,8 @@ export async function renderOnlineTime(root) {
           ? `<span title="${esc(`${r.where.area} — ${r.where_why}`)}">${esc(r.where.area)}</span>`
           : `<span class="ent-off" title="${esc(r.where_why || 'no online moment to place')}">—</span>`) },
       { label: 'Portals', key: 'portals',
-        render: (r) => (r.portals || []).map((x) => pill(sourceLabel(x), 'plat')).join(' ') },
+        render: (r) => (ak ? chips(r.portals)
+          : (r.portals || []).map((x) => pill(sourceLabel(x), 'plat')).join(' ')) },
     ], { sortable: true, sortId: 'online-time',
       defaultSort: { key: 'online_minute', dir: 'desc' } }));
 
@@ -342,4 +369,82 @@ export async function renderOnlineTime(root) {
      start times. */
   startIn.onchange = () => { start = startIn.value || '06:00'; saveStart(start); draw(); };
   await draw();
+}
+
+/* ── #online-time under the page contract ────────────────────────────────── */
+const hm = (t) => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+const order = (p) => { const i = CHANNEL_ORDER.indexOf(String(p || '').toLowerCase()); return i < 0 ? 99 : i; };
+/* Swatch chips in the fixed channel order — never a coloured word. */
+const chips = (ps) => [...(ps || [])].sort((a, b) => order(a) - order(b))
+  .map((p) => `<span class="pchip">${swatch(p)}${esc(sourceLabel(p))}</span>`).join(' ');
+/* Minutes from coming online to the first booking, for the people who have
+   both on this day. A first booking BEFORE the online stamp is kept apart —
+   it is the stamp that is late, not the job that is early. */
+function waits(rows) {
+  const out = { mins: [], before: 0, waiting: 0 };
+  for (const r of rows || []) {
+    const on = r.online_local ? hm(r.online_local) : null;
+    if (on == null) continue;
+    const first = r.worked_first_local ? hm(r.worked_first_local) : null;
+    if (first == null) { out.waiting += 1; continue; }
+    if (first < on) { out.before += 1; continue; }
+    out.mins.push(first - on);
+  }
+  out.mins.sort((a, b) => a - b);
+  return out;
+}
+function otWaitTile(rows) {
+  const w = waits(rows);
+  if (!w.mins.length) {
+    return { label: 'Wait to a first job', na: 'nobody who came online on this day has a booking after it yet' };
+  }
+  const n = w.mins.length;
+  const med = n % 2 ? w.mins[(n - 1) / 2] : (w.mins[n / 2 - 1] + w.mins[n / 2]) / 2;
+  return { label: 'Wait to a first job', value: `${fmt(med, 1)} min`,
+    sub: `median over ${countOf(n, 'person', 'people')} with a booking after coming online`
+      + (w.waiting ? ` · ${fmt(w.waiting)} online with none yet` : '') };
+}
+const countOf = (n, one, many = `${one}s`) => `${fmt(n)} ${n === 1 ? one : many}`;
+function otWait(host, rows) {
+  host.innerHTML = '';
+  const w = waits(rows);
+  const B = [['0–15 min', 0, 15], ['15–30 min', 15, 30], ['30–60 min', 30, 60], ['1–2 h', 60, 120], ['2–3 h', 120, 180], ['3 h or more', 180, Infinity]];
+  const bars = B.map(([label, lo, hi]) => ({ label, n: w.mins.filter((m) => m >= lo && m < hi).length }));
+  if (!w.mins.length && !w.waiting && !w.before) { empty(host, 'Nobody came online on this day, so there is no wait to measure.'); return; }
+  hbars(host, bars, { signed: false, color: '--mk-fill' });
+  host.append(el('p', 'cap', `${countOf(w.mins.length, 'person', 'people')} came online and then took a booking`
+    + (w.waiting ? `; ${fmt(w.waiting)} came online and have none yet, and are not drawn as a wait` : '')
+    + (w.before ? `; ${fmt(w.before)} carry a booking before their online stamp, so the stamp is late and no wait is measured` : '')
+    + '.'));
+}
+function otChannels(host, rows) {
+  host.innerHTML = '';
+  const could = new Map(), drove = new Map();
+  for (const r of rows || []) {
+    for (const p of r.portals || []) could.set(p, (could.get(p) || 0) + 1);
+    for (const p of r.worked_platforms || []) drove.set(p, (drove.get(p) || 0) + 1);
+  }
+  const ch = [...new Set([...could.keys(), ...drove.keys()])].sort((a, b) => order(a) - order(b));
+  if (!ch.length) { empty(host, 'No one on the books for this day carries a portal or a booking.'); return; }
+  host.append(tableFrom(ch.map((p) => ({ p, could: could.get(p) || 0, drove: drove.get(p) || 0 })), [
+    { label: 'Channel', key: 'p', render: (r) => chips([r.p]) },
+    { label: 'Could work it', key: 'could', num: true },
+    { label: 'Drove it', key: 'drove', num: true },
+  ], { compact: true }));
+  host.append(el('p', 'cap', 'A person is counted once per channel on each side; somebody with two portals is in two rows.'));
+}
+function otAbsence(host, d, root) {
+  const t = d.totals || {};
+  absenceBand(host, [
+    { label: 'Coming online after the last pass', fig: null, none: 'Not yet seen',
+      why: d.feed?.last_run_at ? `The timeline last ran at ${timeStr(d.feed.last_run_at)}; anyone who came online since is not in these rows yet.`
+        : 'The timeline has not run for this day yet.' },
+    { label: 'People with no online event', hl: !!t.absent, fig: t.absent ? countOf(t.absent, 'person', 'people') : null, none: 'None',
+      why: 'On the books and allowed to work, and the timeline holds no online moment for them on this day.' },
+    { label: 'Start times on the other channels', fig: t.worked_elsewhere ? countOf(t.worked_elsewhere, 'person', 'people') : null, none: 'Not sent',
+      why: 'Bolt, Yango and the hotel channel report finished trips and never when somebody came online; only Uber sends a start.' },
+    { label: 'Why somebody was late', fig: null, none: 'Not recorded',
+      why: 'Nothing this product reads says why a start was late — traffic, a handover and a lie-in look the same here.' },
+  ]);
+  pageFoot({ colophon: [d.day ? dayStr(`${d.day}T12:00:00`) : '', d.expected_start ? `start ${d.expected_start}` : 'no start set'] }, root);
 }

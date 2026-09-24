@@ -532,4 +532,68 @@ if (want('driver-unauthorized')) {
   }
 }
 
+/* ══ #online-time ═════════════════════════════════════════════════════════ */
+if (want('online-time')) {
+  console.log('\n#online-time');
+  {
+    const { ctx, page } = await open('classic', 'online-time');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      pills: [...document.querySelectorAll('#view table tbody td .tag.bad')].length }));
+    check('old skin: no 00 band, the late rows still a red pill', !r.band && r.pills >= 0, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'online-time');
+    const s = await shape(page);
+    const d = answer('/api/online-time');
+    const t = d.totals;
+    check('00: late the hero, the four verdict tiles with their counts, the wait to a first job beside them',
+      s.hero === 'Late' && s.values.Late === (+t.late).toLocaleString('en-US') && s.values['On time'] === (+t.on_time).toLocaleString('en-US')
+      && s.labels.join('|') === 'Late|On time|Cannot be judged|Drove|Wait to a first job', JSON.stringify(s.values));
+    const order = await page.evaluate(() => { const b = document.querySelector('#view .cband'); const p = [...document.querySelectorAll('#view .panel')][0];
+      return { bandFirst: !!(b && p && (b.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING)), pickers: !!p?.querySelector('input[type=date]') && !!p?.querySelector('input[type=time]') }; });
+    check('the band leads; the day and start pickers stay in the page panel (the review\'s correction)', order.bandFirst && order.pickers, JSON.stringify(order));
+    const cells = await page.evaluate(() => { const t = [...document.querySelectorAll('#view table')].find((x) => /Online/.test(x.querySelector('thead')?.textContent || ''));
+      return t ? { pink: t.querySelectorAll('tbody .tag.bad').length, gaps: [...t.querySelectorAll('tbody .dlt')].map((x) => x.textContent.replace(/\s+/g, ' ')) } : null; });
+    const late = (d.rows || []).filter((r) => r.late && r.online_local).length;
+    check('a late start is a worded gap with glyph and sign, never a pink pill', cells && cells.pink === 0
+      && cells.gaps.length === late && cells.gaps.every((g) => /late/.test(g)), JSON.stringify(cells));
+    const ch = await page.evaluate(() => [...document.querySelectorAll('#view table tbody td .pchip .sw')].map((x) => x.className.match(/ch-(\w+)/)?.[1]));
+    check('portals as swatch chips', ch.length > 0, String(ch.length));
+    const waitTxt = await txtOf(page, '[data-panel="ot-wait"]');
+    check('§ online to a first job, from the same rows; nobody with no booking yet drawn as a wait', /came online and then took a booking/.test(waitTxt), waitTxt.slice(-200));
+    check('† four cells and the colophon naming the day and the start', s.abs.length === 4 && /start \d\d:\d\d/.test(s.colophon), JSON.stringify([s.abs.map((a) => a.label), s.colophon]));
+    await ctx.close();
+  }
+  {
+    /* Two late starters (synthetic): each Online cell is its time and a
+       worded gap — "▲ +84 min late" — and no row carries the pink pill. */
+    let n = 0;
+    const lateF = (q, real) => ({ ...real, rows: (real.rows || []).map((r) => (r.online_local && n < 2
+      ? (n += 1, { ...r, late: true, minutes_late: n === 1 ? 84 : 12 }) : r)) });
+    const { ctx, page } = await open('arkiv', 'online-time', { fixtures: { '/api/online-time': lateF } });
+    const cells = await page.evaluate(() => { const t = [...document.querySelectorAll('#view table')].find((x) => /Online/.test(x.querySelector('thead')?.textContent || ''));
+      return t ? { pink: t.querySelectorAll('tbody .tag.bad').length, gaps: [...t.querySelectorAll('tbody .dlt')].map((x) => x.textContent.replace(/\s+/g, '')) } : null; });
+    check('late starters: the gap in words with glyph and sign (+84 min late), no pink pill', cells && cells.pink === 0
+      && cells.gaps.length >= 1 && cells.gaps.every((g) => /late/.test(g)) && cells.gaps.some((g) => /▲\+84min.*late/.test(g)), JSON.stringify(cells));
+    await ctx.close();
+  }
+  {
+    /* No readable start: the verdict tiles are ABSENT with the endpoint's
+       own sentence, never two bold zeros (onlinetime.js keeps the old
+       expressions the old test pins). */
+    const noStart = (q, real) => ({ ...real, expected_start: null, start_why: 'no expected start could be read from the request' });
+    const { ctx, page } = await open('arkiv', 'online-time', { fixtures: { '/api/online-time': noStart } });
+    const s = await shape(page);
+    check('no start time: Late and On time ABSENT with the endpoint\'s own reason', s.na.Late === 'no expected start could be read from the request'
+      && s.na['On time'] === 'no expected start could be read from the request', JSON.stringify(s.na));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'online-time', { width: 390 });
+    check('#online-time at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

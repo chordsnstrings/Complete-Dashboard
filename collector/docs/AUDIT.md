@@ -1881,3 +1881,11 @@ Production (This month), both skins at 1440 and 390, light and dark
 (scratchpad `pagephase/shots/driver-unauthorized/`): no error, no sideways
 scroll. Named beside 4 journeys (2 by time, 2 by the car's last trip),
 44.1 km, AED 199.95 forgone — AED 186.77 of it narrowed by time.
+
+### #online-time — 2026-09-24
+
+Production (today, start 06:00), both skins at 1440 and 390, light and
+dark (scratchpad `pagephase/shots/online-time/`): no error, no sideways
+scroll. 48 late, 29 on time, 83 cannot be judged, 71 drove of 134 allowed;
+the median wait to a first job 47 min over 62 people, 11 online with none
+yet. The latest starter came online at 10:09, ▲ 249 min late.
