@@ -1282,7 +1282,11 @@ async function tabCompliance(root, plate, prof) {
 }
 
 /* ── tab: trips ──────────────────────────────────────────────────────────── */
+/* Under the page contract (plan §4 #vehicle/trips): restyled only — paging,
+   columns, newest-first order and the trip links kept; the platform a swatch
+   and an ink label, the status an outline chip, fares exact. */
 async function tabTrips(root, plate) {
+  const ak = contract();
   const p = panel('Trip records', 'Every platform, newest first'); root.append(p.panel); loading(p.body);
   /* A page, not a ceiling — the twin of the driver trip ledger. The endpoint
      returns {rows, total, offset, truncated}, so the table can say how many of
@@ -1304,12 +1308,12 @@ async function tabTrips(root, plate) {
     { label: 'Driver', key: 'driver_name', render: (r) => (r.driver_ext_id
       ? `<a class="lnk" href="${href('driver', r.driver_ext_id)}">${esc(r.driver_name || r.driver_ext_id)}</a>`
       : esc(r.driver_name || '—')) },
-    { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
+    { label: 'Platform', key: 'platform', render: (r) => (ak ? `<span class="pchip">${swatch(r.platform)}${esc(sourceLabel(r.platform))}</span>` : sourceLabel(r.platform)) },
     { label: 'From', key: 'pickup_addr' },
     { label: 'To', key: 'dropoff_addr' },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
     { label: 'Product', key: 'product' },
-    { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', /cancel/i.test(r.status || '') ? 'warn' : 'ok') },
+    { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', ak ? null : /cancel/i.test(r.status || '') ? 'warn' : 'ok') },
     { label: 'Fare', key: 'price', num: true,
       absent: `${UBER_FARE_WHY}, and Uber is most of what this vehicle carries — until a week has `
         + 'been collected the money for those trips is in the weekly statement alone',
@@ -1350,6 +1354,7 @@ async function tabTrips(root, plate) {
   };
   count(rows.length);
   draw(rows);
+  if (ak) pageFoot({ colophon: [windowLabel(), `${fmt(total)} trip records`] }, root);
   bar.querySelector('#vq').oninput = (e) => {
     const t = e.target.value.trim().toLowerCase();
     const list = t ? rows.filter((r) => JSON.stringify(r).toLowerCase().includes(t)) : rows;

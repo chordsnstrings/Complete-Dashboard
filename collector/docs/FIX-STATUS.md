@@ -3652,3 +3652,9 @@ Deviation: the plan asks for "the 3px channel marker in the gutter" on channel r
 | page | what changed under the skin | state | proof |
 |---|---|---|---|
 | #vehicle/compliance | Restyle only. Both blocks, the days-left ascending sort, the 30-day renewal note and the photo note are kept. Days left follows the plan: expired is negative text with its word and minus ("expired · −12 d", no chip); under 30 days is an ink outline chip (amber is not a token); the rest are grey. The platform's status is an outline chip, the platform itself a swatch and an ink label. The page foot counts the documents | **written** | `test/arkiv_fleet.test.mjs` #vehicle/compliance 9/9, on a synthetic three-document profile (expired, 7 days, 96 days). Revert-proofs (md5-restored): with the under-30 day back to bold text, "an ink outline chip" fails; with the toned status pill back, "the status an outline chip" fails. `arkiv_classic_frozen` ONLY=vehicle/L45235 9/9. Pinned: `routes` 65. The tab prints no money, so there is no fils route |
+
+### P65 · #vehicle/trips
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #vehicle/trips | Restyle only. Kept: paging (500 fetched, 400 drawn, "Load the next N"), every column in order, newest first, the search, the row → #trip and time → replay links. The platform is a swatch and an ink label, and the status an outline chip; the fares were already exact. The page foot counts the window's trip records | **written** | `test/arkiv_fleet.test.mjs` #vehicle/trips 9/9. Revert-proofs (md5-restored): with the toned status pill back, and separately with the bare platform label back, "a swatch and an ink label; the status an outline chip" fails. `arkiv_classic_frozen` ONLY=vehicle/L45235 9/9. `arkiv_fils` gains the route; the live scan is clean. Pinned: `routes` 65 |

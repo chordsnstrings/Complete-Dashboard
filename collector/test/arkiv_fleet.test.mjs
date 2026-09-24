@@ -494,4 +494,42 @@ if (want('vehicle-compliance')) {
   }
 }
 
+/* ══ #vehicle/trips ═══════════════════════════════════════════════════════ */
+if (want('vehicle-trips')) {
+  console.log('\n#vehicle/trips');
+  const H = 'vehicle/L45235/trips';
+  const rowsOf = (page) => page.evaluate(() => {
+    const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Trip records');
+    const hs = [...p.querySelectorAll('thead th')].map((h) => h.textContent.replace(/[↑↓]/g, '').trim());
+    const at = (n) => hs.indexOf(n);
+    return { heads: hs, more: !!p.querySelector('button.btn'), rows: [...p.querySelectorAll('tbody tr')].map((tr) => ({
+      plat: !!tr.children[at('Platform')]?.querySelector('.pchip .sw'), status: tr.children[at('Status')]?.querySelector('.pill')?.className || null,
+      fare: tr.children[at('Fare')]?.textContent.trim(), link: tr.children[at('Requested')]?.querySelector('a')?.getAttribute('href') || '' })) };
+  });
+  {
+    const { ctx, page } = await open('classic', H);
+    const r = await rowsOf(page);
+    check('old skin: the platform as a bare label, the status as a toned pill', r.rows.length > 0 && r.rows.every((x) => !x.plat) && r.rows.some((x) => /\b(ok|warn)\b/.test(x.status || '')), JSON.stringify(r.rows.slice(0, 2)));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', H);
+    const r = await rowsOf(page);
+    const res = answer('/api/vehicle/trips');
+    check('every column kept, in order', JSON.stringify(r.heads) === JSON.stringify(['Requested', 'Driver', 'Platform', 'From', 'To', 'Km', 'Product', 'Status', 'Fare']), JSON.stringify(r.heads));
+    check('the first page (drawn to 400, the rest named), and the button that loads the next', r.rows.length === Math.min(400, res.rows.length) && r.more === ((res.total ?? 0) > res.rows.length), JSON.stringify([r.rows.length, res.rows.length, res.total, r.more]));
+    check('the platform a swatch and an ink label; the status an outline chip', r.rows.every((x) => x.plat && x.status === 'pill'), JSON.stringify(r.rows.slice(0, 2)));
+    check('every fare exact, with its fils', r.rows.filter((x) => /AED/.test(x.fare || '')).every((x) => /AED [\d,]+\.\d{2}$/.test(x.fare)), JSON.stringify(r.rows.slice(0, 3).map((x) => x.fare)));
+    check('every trip time still opens that day\'s replay', r.rows.every((x) => /^#vehicle\/L45235\/movement\?(.*&)?day=\d{4}-\d{2}-\d{2}/.test(x.link)), JSON.stringify(r.rows.slice(0, 2).map((x) => x.link)));
+    const s = await shape(page);
+    check('the colophon counts the trip records', /trip records/.test(s.colophon), s.colophon);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', H, { width: 390 });
+    check('#vehicle/trips at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

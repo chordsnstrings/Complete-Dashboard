@@ -2071,3 +2071,7 @@ The car runs 75.9 events per 100 km, 7.8 above the fleet's 68.1, drawn in the ne
 ### #vehicle/compliance — 2026-09-24
 
 Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p64/`). No page error, no sideways scroll. The car has one document, a Vehicle Registration Form (ACTIVE, 258 d, grey). The old skin's extra text over the arkiv page is the "scroll the table sideways" note, which a table that fits does not need.
+
+### #vehicle/trips — 2026-09-24
+
+Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p65/`). No page error, no sideways scroll, and the fils scan is clean. The page has 75,700 characters of text against the old skin's 75,506: the same 400 rows.
