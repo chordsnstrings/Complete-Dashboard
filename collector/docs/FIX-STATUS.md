@@ -2993,3 +2993,13 @@ operator ruled (money to the fils) and the fixes named above.
 - **The Arkiv banner fills the phone's first screen** while three credentials
   are stopped. Shortening its detail is the operator's call (STEP 4's note).
 
+
+## Phone PWA redesign — operator ruling 2026-09-24, NOT ON PRODUCTION
+
+The operator ruled that the phone gets a redesigned PWA, which supersedes the "tokens only" phone shell in docs/UI-REDESIGN-PLAN.md §3. The design note is the plan's new section "Phone PWA — redesign". The work is gated on a token, `--pg-phone` (0 in app.css, 1 in m/arkiv-m.css). That sheet is written only for a phone reader under `?skin=arkiv`. Not deployed, not pushed, and the default skin is not flipped.
+
+**How the two claims are held.** `test/phone_harness.mjs` serves the phone with no server: the static files come off disk, every `/api/` answer comes from one recording (`test/fixtures/phone_api.json.gz`, recorded from mockapi.mjs by `bin/phone-fixture.mjs record`), and the page clock is frozen at the recording instant. Under the old skin, `test/phone_classic.test.mjs` requires every phone screen (25 states and the window sheet) to be byte-identical to what commit `abb79ad`, the tree before the redesign, drew from the same answers (`phone_classic_dom.json.gz`, taken by `bin/phone-fixture.mjs oracle`). Under the skin, `test/phone_arkiv.test.mjs` checks each screen as it lands.
+
+| # | what | state | proof |
+|---|---|---|---|
+| P0 | **The oracle harness.** Hermetic, so it cannot collide with another agent's mock on a shared port, and so the evening clock trap cannot reach it. Off-origin requests are answered with a one-pixel image. Left to fail, a lazy `<img>` turned its avatar into "could not be loaded" on some runs and not others (1 run in 6 before the fix, 0 in 8 after) | **written** | `phone_classic` 34/34 eight runs in a row. With "Who called it off" edited in m/screens.js it fails 2 (today, today+sheet) and prints both strings; the file was restored and its md5 checked (`a1a8de04…`) |
