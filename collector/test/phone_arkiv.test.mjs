@@ -636,6 +636,37 @@ console.log('\n4.2 · Money: 00 at a glance, the day line, how fares settle, by 
   await q2.close();
 }
 
+/* A copy of the recording with one answer replaced — for the states the
+   recording does not hold (an empty list, a missing figure). */
+const withAnswer = (key, body) => ({ ...fixture,
+  answers: { ...fixture.answers, [key]: { status: 200, type: 'application/json', body: JSON.stringify(body) } } });
+
+console.log('\n4.3 · People: the list under its own section head, and an empty window pointed at the bar');
+{
+  const lb = ans('/api/drivers/leaderboard?period=month&grain=auto');
+  const total = lb.total ?? lb.people ?? (lb.rows || lb).length;
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('people');
+  const o = await outline(p.page);
+  const h = await p.page.evaluate(() => document.querySelector('.m-deck > .sechd')?.innerText.replace(/\s+/g, ' '));
+  check('the search and the sort, then the list under its own numbered head',
+    o[0] === 'div' && o[1] === 'head:People who drove' && o[2] === 'div', o.join(' → '));
+  check(`…which names how many people the window holds (${f0(total)}, the leaderboard’s own count)`,
+    new RegExp(`^People who drove ${f0(total)} people · This month$`, 'i').test(h || ''), h);
+  await p.close();
+  const e = await phonePage(browser, { skin: 'arkiv', fixture: withAnswer('/api/drivers/leaderboard?period=month&grain=auto', { rows: [] }) });
+  await e.open('people');
+  const why = await e.page.evaluate(() => document.querySelector('.m-empty')?.textContent);
+  check('an empty window says to widen it from the bar above — the redesign has no ⋮ menu',
+    why === 'Nobody drove in this windowWiden the window from the bar above.', why);
+  await e.close();
+  const c = await phonePage(browser, { skin: 'classic', fixture: withAnswer('/api/drivers/leaderboard?period=month&grain=auto', { rows: [] }) });
+  await c.open('people');
+  check('…while the old phone still points at its ⋮', await c.page.evaluate(() => document.querySelector('.m-empty')?.textContent)
+    === 'Nobody drove in this windowWiden the window from the ⋮ menu.');
+  await c.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');

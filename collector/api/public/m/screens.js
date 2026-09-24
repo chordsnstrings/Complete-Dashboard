@@ -131,6 +131,13 @@ export function titleFor(view, param) {
    "100733", and "100733" + 0 is a bug waiting for a total. */
 const n = (v) => (v == null || v === '' ? null : Number(v));
 const D3M = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+/* Where the window is changed from, in the words of the shell the reader has.
+   The old phone opened its sheet from a ⋮ in the header; the redesign has no
+   ⋮ — its control bar names the window and opens the same sheet — so an empty
+   state telling a reader to use "the ⋮ menu" would point at a control that
+   is not on their screen. */
+const WIDEN = () => (phoneContract() ? 'Widen the window from the bar above.'
+  : 'Widen the window from the ⋮ menu.');
 const countOfDays = (nDays) => `${fmt(nDays)} ${nDays === 1 ? 'day' : 'days'}`;
 
 /* ── Today ──────────────────────────────────────────────────────────────── */
@@ -744,8 +751,15 @@ async function people(deck, ctx) {
   if (!ctx.alive()) return;
   list.innerHTML = '';
   if (!board.rows.length) {
-    empty(list, 'Nobody drove in this window', 'Widen the window from the \u22ee menu.');
+    empty(list, 'Nobody drove in this window', WIDEN());
     return;
+  }
+  /* The redesign's section head over the list — the search and the sort
+     above it are its controls, not a section — naming how many people the
+     window holds, which the old screen said only at the foot of a cut list. */
+  if (phoneContract()) {
+    deck.insertBefore(secHead(null, 'People who drove',
+      `${fmt(board.total)} ${board.total === 1 ? 'person' : 'people'} · ${WINDOW_NOTE()}`), list);
   }
 
   /* No folding here. /api/drivers/leaderboard already answers per PERSON —
@@ -833,7 +847,7 @@ async function fleet(deck, ctx) {
   const cars = unwrap(carsRaw);
   list.innerHTML = '';
   if (!cars.rows.length) {
-    empty(list, 'No vehicle worked in this window', 'Widen the window from the \u22ee menu.');
+    empty(list, 'No vehicle worked in this window', WIDEN());
     return;
   }
 
@@ -1701,7 +1715,7 @@ async function corporate(deck, ctx) {
   if (!ctx.alive()) return;
   deck.innerHTML = '';
   if (!sum || !sum.bookings) {
-    empty(deck, 'No hotel booking in this window', 'Widen the window from the \u22ee menu.');
+    empty(deck, 'No hotel booking in this window', WIDEN());
     return;
   }
   const margin = sum.has_cost && sum.revenue ? Math.round(((sum.revenue - sum.cost) / sum.revenue) * 100) : null;
