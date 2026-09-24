@@ -544,4 +544,36 @@ if (want('capacity')) {
   }
 }
 
+/* ══ #day ═════════════════════════════════════════════════════════════════ */
+if (want('day')) {
+  console.log('\n#day');
+  {
+    const { ctx, page } = await open('classic', 'day/2026-08-14');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), rings: document.querySelectorAll('#view svg.donut').length }));
+    check('old skin: no 00 band, the channel and tier rings', !r.band && r.rings >= 1, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'day/2026-08-14');
+    const s = await shape(page);
+    const D = answer('/api/day');
+    check('bookings is the hero with the day\'s own count, its fortnight change a delta', s.hero === 'Bookings' && s.values.Bookings === (+D.headline.bookings).toLocaleString('en-US')
+      && (D.versus_neighbours.delta_pct == null || /fortnight median/.test(await txtOf(page, '#view .kpis.glance .is-hero .t-d'))), JSON.stringify(s.values));
+    check('no ring: the channels a 100% bar, the tiers ranked bars', s.rings === 0, String(s.rings));
+    const nav = await page.evaluate(() => [...document.querySelectorAll('#view .daynav a')].map((a) => a.getAttribute('href')));
+    check('previous / next day navigation kept', nav.length === 2 && nav.every((h) => /^#day\//.test(h)), JSON.stringify(nav));
+    const bad = (D.coverage || []).filter((r) => { const m = Number(r.median_rows) || 0;
+      return !r.inside_span || (r.rows === 0 && m > 0) || (m > 0 && r.rows < m * 0.3) || (m > 0 && r.rows > m * 3); });
+    check('† is built from the collection verdicts: one cell per source that was not normal', bad.length
+      ? s.abs.length === Math.min(4, bad.length) : s.abs.length === 1 && s.abs[0].fig === 'Normal', JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'day/2026-08-14', { width: 390 });
+    check('#day at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

@@ -1755,3 +1755,10 @@ Production (for Oct 2026), both skins at 1440 and 390, light and dark
 (scratchpad `pagephase/shots/capacity/`): no error, no sideways scroll. 7
 hours of the week are short, 4 driver-hours in a week; the weekday columns
 now add to that. Wednesday 15:00 is the busiest single hour.
+
+### #day/2026-09-23 — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/day/`): no error, no sideways scroll. 895 bookings, +1.0%
+on the fortnight median of 886. Found by looking and fixed before commit:
+the hero printed its fortnight change twice (delta and sub).
