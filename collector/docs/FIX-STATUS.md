@@ -3064,9 +3064,24 @@ desktop agent to write to the fils.
 
 | # | what | state | proof |
 |---|---|---|---|
-| PF1 | index.html's pre-paint script decides which build this is FIRST, then the skin. With no choice made, the phone build is the Arkiv skin (its redesigned PWA) and the desktop is still the old skin | **written** | `arkiv_skin` §3: the pre-paint checks, then a phone and a desktop in a browser. Revert (no phone default) fails 4 |
-| PF2 | Each build remembers its own choice: `fleet.skin.phone` for the phone, `fleet.skin` for the desktop. A single shared key would have kept the old phone for anyone who tried `?skin=classic` on their phone during the preview, because a default only applies where nothing is stored. `?skin=classic` / `?skin=auto` on the phone still work, for the phone alone | **written** | `arkiv_skin`: a desktop-key "classic" does not keep the old phone; the phone's own "classic" does; auto forgets it. Revert (one shared key) fails 2 |
-| PF3 | The PWA manifest (the phone app's own: start_url `?ui=phone`) moves its splash and theme colour from the old near-black `#14171a` to Arkiv ink `#0A0A0B`, as the plan's STEP 5 says; the page sets the status bar to Arkiv paper once loaded (m/app.js) | **written** | — |
+| PF1 | index.html's pre-paint script decides which build this is FIRST, then the skin. With no choice made, the phone build is the Arkiv skin (its redesigned PWA) and the desktop is still the old skin | **proven** — `8c79d62`, deployment `659f1f4` (ACTIVE 08:11:15Z) | `arkiv_skin` §3: the pre-paint checks, then a phone and a desktop in a browser. Revert (no phone default) fails 4 |
+| PF2 | Each build remembers its own choice: `fleet.skin.phone` for the phone, `fleet.skin` for the desktop. A single shared key would have kept the old phone for anyone who tried `?skin=classic` on their phone during the preview, because a default only applies where nothing is stored. `?skin=classic` / `?skin=auto` on the phone still work, for the phone alone | **proven** — `8c79d62`, deployment `659f1f4` (ACTIVE 08:11:15Z) | `arkiv_skin`: a desktop-key "classic" does not keep the old phone; the phone's own "classic" does; auto forgets it. Revert (one shared key) fails 2 |
+| PF3 | The PWA manifest (the phone app's own: start_url `?ui=phone`) moves its splash and theme colour from the old near-black `#14171a` to Arkiv ink `#0A0A0B`, as the plan's STEP 5 says; the page sets the status bar to Arkiv paper once loaded (m/app.js) | **proven** — `8c79d62`, deployment `659f1f4` (ACTIVE 08:11:15Z) | — |
+
+**On production**, through bin/prod-mirror.mjs (assets byte-identical), with
+fresh browsers and nothing stored:
+1. A 390×844 touch device with no `?ui`: `ui=phone`, `skin=arkiv`,
+   `/m/arkiv-m.css` loaded, `--pg-phone` 1.
+2. The same phone holding the preview's `fleet.skin=classic`: still the
+   redesign.
+3. After `?skin=classic` on the phone, then a plain reload: the old phone,
+   remembered under `fleet.skin.phone` only.
+4. `?skin=auto` on the phone: the redesign again.
+5. A desktop with nothing stored: the old skin, no `/m/arkiv-m.css`,
+   `--pg-phone` 0.
+
+The served manifest carries `#0A0A0B` for both colours. Full suite before the
+deploy: 327 files, 11,538 assertions, 0 failing.
 
 The tests that open the phone with no skin (phone 144, phone_render 8,
 phone_today_only 19, phone_clock, arkiv_shell, boot_order) all pass under the
