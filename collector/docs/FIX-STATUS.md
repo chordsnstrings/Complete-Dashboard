@@ -3264,3 +3264,9 @@ Deviations on #settlement: the plan's heroes on mix ("still to collect") and cas
 ### Finance section — full suite (2026-09-24)
 
 `SMOKE_BASE=http://localhost:8601 npm test` against a private mock: **324 files, 11,135 assertions, 1 file failing** — `caption_matches_figure` ("the figure is what the platforms wired … reads "AED 18,579.75"", for the AED 38,194.57 tile). Not a defect in #finance: the old skin's page is byte-identical (golden), the tile reads right on every direct render, and the file passes alone (32/32) — it failed once under the suite's load and once more immediately after it. The cause is the file's own read: `tiles()` trusts two equal reads 300ms apart, and countUp() animates each figure over ~620ms of animation frames, which stall under load. Hardened: the file's page opens with `reducedMotion: 'reduce'`, so countUp() does not run (nothing the file checks is about motion). 32/32 after.
+
+### S7 · ui.js `bandTiles()` and `glanceBand()` (its own commit, ahead of the Work section)
+
+| file | what changed | state | proof |
+|---|---|---|---|
+| `api/public/ui.js` | Two additive exports. `bandTiles(tiles, { figure, reasons })` makes an old kpiRow fit for the 00 band — drops every tone (a level is not better or worse), turns a bare "—" into an ABSENT tile whose reason is the one the caller names (else the tile's own sub-line, where these pages already keep it), and runs `notRepeated()` against the verdict's figure (ruling 7). `glanceBand(root, note)` builds the numbered 00 frame with a verdict host and a tiles host. Each Finance page had done the three fixes by hand; the Work pages and after use these. Nothing existing calls them, so no page moves. | written, in the tree | `page_contract` §5e (4 checks) 94/94; reverting the tone drop fails "tones are dropped from every tile" (`["good",…]`), restored and md5-checked. `arkiv_classic_frozen` ONLY=finance 2/2. |

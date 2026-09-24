@@ -2645,6 +2645,44 @@ export function notRepeated(tiles, figure) {
     : { tiles: list.filter((_, j) => j !== i), dropped: list[i] };
 }
 
+/* ── the old tile row, as a 00 band (the page phase, S7) ───────────────────
+   Most pages converted in the page phase carry a kpiRow whose tiles are
+   right and whose treatment is not: a tone on a level (a green or amber
+   fill on a count), a bare "—" for a figure that could not be measured, and
+   sometimes the verdict's own figure printed again one line below it. Each
+   page was redoing the same three fixes by hand. This does them once:
+     · tone is dropped — a level is not better or worse (L3);
+     · a tile whose value is a bare dash (or missing) becomes ABSENT, with
+       the reason the caller names for it in `reasons[label]` — never an
+       invented one; with no named reason the tile's own sub-line is used,
+       which on these pages is where the reason already lives;
+     · notRepeated() takes out the tile printing the verdict's figure
+       (ruling 7) and hands it back as `dropped`.
+   Tiles carrying `html` (a pill, a composed figure) are left as they are. */
+export function bandTiles(tiles, { figure = null, reasons = {} } = {}) {
+  const bare = (v) => v == null || ['', '-', '—', '\u2014'].includes(String(v).trim());
+  const list = (tiles || []).filter(Boolean).map((t) => {
+    if (t.na || t.html) return { ...t, tone: null };
+    if (bare(t.value)) {
+      return { label: t.label, na: reasons[t.label] || t.sub || 'not measured in this window',
+        ...(t.key ? { key: t.key } : {}), ...(t.hero ? { hero: true } : {}) };
+    }
+    return { ...t, tone: null };
+  });
+  return notRepeated(list, figure);
+}
+
+/* The 00 band's frame: the section, its numbered head, a host for the
+   verdict and one for the tiles, appended to `root`. */
+export function glanceBand(root, note = null) {
+  const band = el('section', 'cband');
+  const vHost = el('div');
+  const tilesHost = el('div');
+  band.append(secHead('00', 'At a glance', note), vHost, tilesHost);
+  root.append(band);
+  return { band, vHost, tilesHost };
+}
+
 /* ── a numbered section head ───────────────────────────────────────────────
    For a band a page builds by hand — 00 AT A GLANCE and the † absence band.
    An ordinary panel() is already numbered: arkiv.css prints 01, 02… before

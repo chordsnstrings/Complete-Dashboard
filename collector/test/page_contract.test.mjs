@@ -525,6 +525,38 @@ console.log('\n5d · notRepeated(): the tile printing the verdict\'s figure is h
   await ctx.close();
 }
 
+/* ── 5e · bandTiles(): an old tile row made fit for the 00 band ───────────── */
+console.log('\n5e · bandTiles(): tones off, dashes absent with a reason, the verdict\'s figure not repeated');
+{
+  const { ctx, page } = await open('arkiv', { width: 1440, hash: 'settings' });
+  const r = await page.evaluate(async () => {
+    const u = await import('/ui.js');
+    const tiles = [
+      { label: 'Bookings', value: '1,204', sub: 'this window', tone: 'good' },
+      { label: 'Largest shortfall', value: '—', sub: 'no car is behind' },
+      { label: 'Commission', value: '\u2014', sub: 'not reported' },
+      { label: 'Gap', html: '<span class="pill warn">x</span>', tone: 'warn' },
+      null,
+      { label: 'Per day', value: '774', tone: 'warn' },
+    ];
+    const a = u.bandTiles(tiles, { figure: '774', reasons: { Commission: 'no record reports what the channel kept' } });
+    const host = document.createElement('div'); document.body.append(host);
+    const b = u.glanceBand(host, 'This month');
+    return { labels: a.tiles.map((x) => x.label), tones: a.tiles.map((x) => x.tone ?? null),
+      na: Object.fromEntries(a.tiles.filter((x) => x.na).map((x) => [x.label, x.na])), dropped: a.dropped?.label,
+      band: [b.band.className, b.band.querySelector('.sechd-idx')?.textContent, b.band.querySelector('.sechd-note')?.textContent,
+        b.band.children.length] };
+  });
+  check('tones are dropped from every tile', r.tones.every((x) => x === null), JSON.stringify(r.tones));
+  check('a bare dash becomes ABSENT with the caller\'s reason, or the tile\'s own sub-line',
+    r.na.Commission === 'no record reports what the channel kept' && r.na['Largest shortfall'] === 'no car is behind', JSON.stringify(r.na));
+  check('the tile printing the verdict\'s figure is handed back, not drawn (ruling 7)',
+    r.dropped === 'Per day' && !r.labels.includes('Per day') && r.labels.length === 4, JSON.stringify(r.labels));
+  check('glanceBand builds the numbered 00 frame with a verdict host and a tiles host',
+    JSON.stringify(r.band) === JSON.stringify(['cband', '00', 'This month', 3]), JSON.stringify(r.band));
+  await ctx.close();
+}
+
 /* ── 6 · tableFrom pairs ─────────────────────────────────────────────────── */
 console.log('\n6 · tableFrom: paired headers');
 {
