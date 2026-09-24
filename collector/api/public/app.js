@@ -1704,68 +1704,14 @@ export function hourProfile(hours, { days = 0, runsIntoToday = false, hour = 0 }
     share: peak && total ? Math.round((peak.rate / total) * 100) : 0 };
 }
 
-V.demand = async (root) => {
-  const vdHost = el('div'); root.append(vdHost);
-  const g = el('div', 'grid g2'); root.append(g);
-  /* Not "trip requests by hour of day", which is what the panel said while the
-     curve was a windowed SUM: with today in the window that gave every hour
-     before now one more day of bookings than the hours after it. */
-  const hourly = panel('Hourly demand curve',
-    'Bookings an hour, each hour over the days that actually reached it');
-  g.append(hourly.panel);
-  const daily = panel('Daily volume',
-    'Bookings per Dubai-local day, with telematics journeys behind them. A day nobody collected is '
-    + `${drawnAs('absent')} rather than drawn as zero. Click a bar to open that day.`);
-  g.append(daily.panel);
-  const ctxP = panel('Trips against weather and holidays',
-    'Heat, rain and Ramadan all move Dubai demand. This puts trips and weather side by side so a dip has a possible reason.');
-  root.append(ctxP.panel);
-  /* "Darker = busier" was true on a light page only: in dark mode the ramp
-     runs the other way in both skins, and the busiest cell is the lightest. */
-  const hm = panel('Busiest hours of the week', 'The stronger the shade, the busier the hour. Click a cell for that hour');
-  root.append(hm.panel);
-  [hourly.body, daily.body, ctxP.body, hm.body].forEach(loading);
+/* Two orders of #demand until the operator flips the default skin: the old
+   skin's, and the page contract (plan §4 demand). Both draw from the parts
+   below, moved verbatim out of the one function they lived in. */
+V.demand = async (root) => (contract() ? demandContract(root) : demandClassic(root));
 
-  const gen = currentGen();
-  /* Each request carries its own failure. Three of these four were in a bare
-     Promise.all, so one slow endpoint replaced the entire page — chart,
-     heatmap and all — with a single error box. A panel that cannot be
-     computed says so where it is, and the rest of the page still answers. */
-  const fail = (body, e) => {
-    body.innerHTML = '';
-    body.append(note(/migrat/i.test(String(e.message || ''))
-      ? 'The database is migrating, so this panel could not be computed.'
-      : `Could not load this panel: ${e.message}`, 'err'));
-    return null;
-  };
-  const [h, d, grid, ctx] = await Promise.all([
-    q('/api/trips/hourly').catch((e) => fail(hourly.body, e)),
-    q('/api/trips/daily').catch((e) => fail(daily.body, e)),
-    q('/api/trips/heatmap').catch((e) => fail(hm.body, e)),
-    q('/api/context').catch(() => []),
-  ]);
-  if (!alive(gen)) return;
-  if (!d) return;                          // the series every panel below reads
-  /* A filter that removes every booking is not an empty date range.
-     `#demand?platform=fms` drew four blank panels reading "No data for this
-     range yet" about a telematics feed that HAS no demand of its own, and
-     `?platform=bolt` said the same about a channel whose collector is refused
-     at the door. Both are answers; neither is a missing month. */
-  const bookings = d.reduce((a, r) => a + (+r.trips || 0), 0);
-  /* Read once, so every figure on this page is stated as of the same minute,
-     and split once, so the headline, the curve, the daily rate and the weather
-     correlation cannot disagree about which day is finished. */
-  const clock = dubaiClock();
-  /* The one place this page decides what a finished day is. The rate, the
-     busiest hour, the weather correlation and the curve the three of them sit
-     beside all divide by this same answer. */
-  const w = splitLive(d);
-  const prof = hourProfile(h, { ...w, hour: clock.hour });
-  /* Fields are /api/trips/daily's: d, trips, completed, cancelled,
-     telematics_journeys, km, revenue, uncollected, sources_silent. Demand is a
-     shape question, so the headline is WHEN rather than how much — the busiest
-     hour is what a rota is built against. */
-  if (bookings) {
+/* The verdict, as data, for both orders of #demand (moved verbatim). */
+function demandVerdict(d, w, prof, clock, bookings) {
+  {
     /* Days, not rows — see fleetVerdict in verdicts.js. A bucketed series
        carries `days` per row and this page divides by it to get a daily rate,
        so counting rows would multiply that rate by the bucket size. */
@@ -1793,7 +1739,7 @@ V.demand = async (root) => {
         : `The last ${esc(w.live.grain || 'bucket')} is not in it: the window cuts it to `
           + `${countOf(+w.live.days || 0, 'day')} of ${fmt(w.live.of_days)}, and a part-week beside `
           + 'whole ones is shorter for a reason that is the calendar, not the fleet.';
-    verdict(vdHost, {
+    return {
       claim: uncollected
         ? `${uncollected} of these ${spanDays} days were never collected`
         : peak
@@ -1816,9 +1762,12 @@ V.demand = async (root) => {
           + `day is drawn ${drawnAs('absent')} rather than as zero. ` + todayLine
         : (todayLine ? `${todayLine} ` : '')
           + 'The heatmap below splits this by weekday, which is what a rota is actually built against.',
-    });
+    };
   }
-  if (state.platform && !bookings) {
+}
+
+function demandNoBookings(root) {
+  {
     const why = state.platform === 'fms'
       ? 'FMS is a telematics feed: it reports where the cars went, not what anybody booked. '
         + 'It has no demand curve of its own — its journeys are the same physical trips the '
@@ -1836,33 +1785,9 @@ V.demand = async (root) => {
     box.append(links);
     root.insertBefore(box, root.firstChild);
   }
-  /* Plotted as a RATE, not as a windowed sum.
-     ─────────────────────────────────────────────────────────────────────────
-     With today in the window the sum gives 08:00 two days of bookings and
-     18:00 one, so the curve's own peak moved to whichever hour today had
-     already had — and it would then have disagreed with the headline above it,
-     which is the contradiction this page was fixed for. Each hour over the
-     days that reached it is the same shape on one footing. */
-  if (h) {
-    areaChart(hourly.body, prof.rows.map((r) => ({
-      label: String(r.h).padStart(2, '0') + ':00', trips: r.rate == null ? 0 : +r.rate.toFixed(2) })),
-    { x: 'label', y: 'trips', valueFmt: (v) => fmt(v, 1) });
-    const running = prof.rows.find((r) => r.running);
-    hourly.body.append(el('p', 'cap',
-      (w.days
-        ? `Bookings an hour on an average day, over the ${countOf(w.days, 'whole day')} in this window`
-        : 'Bookings an hour, over the hours today has already had')
-      + (w.runsIntoToday
-        ? (w.days
-          ? ', plus today for the hours it has already had — so the curve is a rate rather than the '
-            + 'window\u2019s total, which would give every hour before now one more day of bookings '
-            + 'than the hours after it. '
-          : '. ')
-          + `${String(running ? running.h : clock.hour).padStart(2, '0')}:00 is the hour in progress `
-          + `(this window runs to ${clock.hhmm} Dubai): it is drawn, but it is never named the `
-          + 'busiest hour, because part of today is inside it and cannot be taken back out.'
-        : '.')));
-  }
+}
+
+function demandDaily(daily, d, bookings) {
   gapBars(daily.body, d, { x: 'd', y: 'trips', label: 'bookings', secondary: 'telematics_journeys',
     onClick: (r) => { location.hash = href('day', dayKey(r.d)); } });
   /* A chart handler is not a link: no middle-click, no new tab, no hover URL,
@@ -1880,7 +1805,13 @@ V.demand = async (root) => {
      export's day grain — the same window, the same chips, the same Dubai
      days — so what downloads is the chart above it, in a spreadsheet. */
   daily.body.append(exportRow(bookings));
+}
 
+/* `plain` (the contract): a hot day is not "worse", so Max temp is a plain
+   figure, not a green/amber/red pill; a day where more than 15% did not
+   complete carries a ▼ in the negative token instead of an amber pill
+   (plan §4 demand, L3). */
+function demandWeather(ctxP, d, ctx, w, clock, { plain = false } = {}) {
   /* Join the day's trips to that day's weather and calendar. Both sides are
      keyed on the calendar date, so a missing weather row leaves the trip row
      intact rather than dropping the day. */
@@ -1970,7 +1901,7 @@ V.demand = async (root) => {
           sub: `over ${countOf(n, 'complete day')}. `
             + (Math.abs(rho) < 0.3 ? 'No meaningful relationship in this window'
               : rho < 0 ? 'Hotter days run quieter' : 'Hotter days run busier'),
-          tone: Math.abs(rho) < 0.3 ? null : 'warn' },
+          tone: plain || Math.abs(rho) < 0.3 ? null : 'warn' },
       { label: 'Days with rain', value: fmt(wet.length),
         sub: wet.length ? `averaging ${fmt(Math.round(avg(wet)))} trips` : 'none in this range' },
       hol.length ? { label: 'Holidays', value: fmt(hol.length),
@@ -2003,7 +1934,10 @@ V.demand = async (root) => {
         render: (r) => (r.cancelled == null
           ? '<span class="ent-off" title="no platform on this day reports an outcome">—</span>'
           : r.cancelled
-            ? `<span class="pill ${r.trips && r.cancelled / r.trips > 0.15 ? 'warn' : ''}">${fmt(r.cancelled)}</span>`
+            ? (plain ? (r.trips && r.cancelled / r.trips > 0.15
+              ? `<span class="dlt dlt-negative" title="more than 15% of the day did not complete"><span class="dlt-g" aria-hidden="true">▼</span>${fmt(r.cancelled)}</span>`
+              : fmt(r.cancelled))
+              : `<span class="pill ${r.trips && r.cancelled / r.trips > 0.15 ? 'warn' : ''}">${fmt(r.cancelled)}</span>`)
             : '0') },
       /* The residual. Completed and Did-not-complete sat beside Trips and did
          not add up to it — 85 and 5 against 93 on the day this was found,
@@ -2028,7 +1962,8 @@ V.demand = async (root) => {
           ? `<span class="dim"> · ${fmt(r.priced_trips)} of ${fmt(r.trips)} priced</span>` : ''}`
         : `<span class="ent-off" title="no booking on this day reports a fare — ${UBER_FARE_WHY}">—</span>`) },
       { label: 'Max temp', key: 'temp_max', num: true, render: (r) => (r.temp_max != null
-        ? `<span class="pill ${r.temp_max >= 44 ? 'bad' : r.temp_max >= 41 ? 'warn' : 'ok'}">${r.temp_max.toFixed(1)}°C</span>` : '—') },
+        ? (plain ? `${r.temp_max.toFixed(1)}°C`
+          : `<span class="pill ${r.temp_max >= 44 ? 'bad' : r.temp_max >= 41 ? 'warn' : 'ok'}">${r.temp_max.toFixed(1)}°C</span>`) : '—') },
       /* Zero millimetres IS the measurement, and on this fleet it is 28 of 30
          days. Rendered as an em-dash it read as "not recorded", which on a
          column beside a temperature and a wind speed is the opposite of what a
@@ -2055,7 +1990,9 @@ V.demand = async (root) => {
       'A correlation over a few weeks of days is a hint, not a finding — Dubai\'s temperature barely varies within a month, ' +
       'so the seasonal effect only becomes visible across a longer window. Rows marked forecast have not happened yet.'));
   }
+}
 
+function demandHeatmap(hm, grid, w, clock) {
   /* A cell used to open a modal that showed the driver ranking for the WHOLE
      range — identically whichever cell you clicked, under a title naming the
      slot. It is now a page about that slot: who covers it, on how many of the
@@ -2089,7 +2026,308 @@ V.demand = async (root) => {
       hm.body.append(jump);
     }
   }
-};
+}
+
+async function demandClassic(root) {
+  const vdHost = el('div'); root.append(vdHost);
+  const g = el('div', 'grid g2'); root.append(g);
+  /* Not "trip requests by hour of day", which is what the panel said while the
+     curve was a windowed SUM: with today in the window that gave every hour
+     before now one more day of bookings than the hours after it. */
+  const hourly = panel('Hourly demand curve',
+    'Bookings an hour, each hour over the days that actually reached it');
+  g.append(hourly.panel);
+  const daily = panel('Daily volume',
+    'Bookings per Dubai-local day, with telematics journeys behind them. A day nobody collected is '
+    + `${drawnAs('absent')} rather than drawn as zero. Click a bar to open that day.`);
+  g.append(daily.panel);
+  const ctxP = panel('Trips against weather and holidays',
+    'Heat, rain and Ramadan all move Dubai demand. This puts trips and weather side by side so a dip has a possible reason.');
+  root.append(ctxP.panel);
+  /* "Darker = busier" was true on a light page only: in dark mode the ramp
+     runs the other way in both skins, and the busiest cell is the lightest. */
+  const hm = panel('Busiest hours of the week', 'The stronger the shade, the busier the hour. Click a cell for that hour');
+  root.append(hm.panel);
+  [hourly.body, daily.body, ctxP.body, hm.body].forEach(loading);
+
+  const gen = currentGen();
+  /* Each request carries its own failure. Three of these four were in a bare
+     Promise.all, so one slow endpoint replaced the entire page — chart,
+     heatmap and all — with a single error box. A panel that cannot be
+     computed says so where it is, and the rest of the page still answers. */
+  const fail = (body, e) => {
+    body.innerHTML = '';
+    body.append(note(/migrat/i.test(String(e.message || ''))
+      ? 'The database is migrating, so this panel could not be computed.'
+      : `Could not load this panel: ${e.message}`, 'err'));
+    return null;
+  };
+  const [h, d, grid, ctx] = await Promise.all([
+    q('/api/trips/hourly').catch((e) => fail(hourly.body, e)),
+    q('/api/trips/daily').catch((e) => fail(daily.body, e)),
+    q('/api/trips/heatmap').catch((e) => fail(hm.body, e)),
+    q('/api/context').catch(() => []),
+  ]);
+  if (!alive(gen)) return;
+  if (!d) return;                          // the series every panel below reads
+  /* A filter that removes every booking is not an empty date range.
+     `#demand?platform=fms` drew four blank panels reading "No data for this
+     range yet" about a telematics feed that HAS no demand of its own, and
+     `?platform=bolt` said the same about a channel whose collector is refused
+     at the door. Both are answers; neither is a missing month. */
+  const bookings = d.reduce((a, r) => a + (+r.trips || 0), 0);
+  /* Read once, so every figure on this page is stated as of the same minute,
+     and split once, so the headline, the curve, the daily rate and the weather
+     correlation cannot disagree about which day is finished. */
+  const clock = dubaiClock();
+  /* The one place this page decides what a finished day is. The rate, the
+     busiest hour, the weather correlation and the curve the three of them sit
+     beside all divide by this same answer. */
+  const w = splitLive(d);
+  const prof = hourProfile(h, { ...w, hour: clock.hour });
+  /* Fields are /api/trips/daily's: d, trips, completed, cancelled,
+     telematics_journeys, km, revenue, uncollected, sources_silent. Demand is a
+     shape question, so the headline is WHEN rather than how much — the busiest
+     hour is what a rota is built against. */
+  if (bookings) verdict(vdHost, demandVerdict(d, w, prof, clock, bookings));
+  if (state.platform && !bookings) demandNoBookings(root);
+  /* Plotted as a RATE, not as a windowed sum.
+     ─────────────────────────────────────────────────────────────────────────
+     With today in the window the sum gives 08:00 two days of bookings and
+     18:00 one, so the curve's own peak moved to whichever hour today had
+     already had — and it would then have disagreed with the headline above it,
+     which is the contradiction this page was fixed for. Each hour over the
+     days that reached it is the same shape on one footing. */
+  if (h) {
+    areaChart(hourly.body, prof.rows.map((r) => ({
+      label: String(r.h).padStart(2, '0') + ':00', trips: r.rate == null ? 0 : +r.rate.toFixed(2) })),
+    { x: 'label', y: 'trips', valueFmt: (v) => fmt(v, 1) });
+    const running = prof.rows.find((r) => r.running);
+    hourly.body.append(el('p', 'cap',
+      (w.days
+        ? `Bookings an hour on an average day, over the ${countOf(w.days, 'whole day')} in this window`
+        : 'Bookings an hour, over the hours today has already had')
+      + (w.runsIntoToday
+        ? (w.days
+          ? ', plus today for the hours it has already had — so the curve is a rate rather than the '
+            + 'window\u2019s total, which would give every hour before now one more day of bookings '
+            + 'than the hours after it. '
+          : '. ')
+          + `${String(running ? running.h : clock.hour).padStart(2, '0')}:00 is the hour in progress `
+          + `(this window runs to ${clock.hhmm} Dubai): it is drawn, but it is never named the `
+          + 'busiest hour, because part of today is inside it and cannot be taken back out.'
+        : '.')));
+  }
+  demandDaily(daily, d, bookings);
+
+  demandWeather(ctxP, d, ctx, w, clock);
+
+  demandHeatmap(hm, grid, w, clock);
+}
+
+/* ── #demand under the page contract (plan §4 demand) ───────────────────────
+     00  the verdict (demandVerdict, unchanged: today out of the daily rate,
+         the today-only fallback, the uncollected claim) as the statement —
+         its figure, bookings a day, is not repeated as a tile (ruling 7) —
+         then: the busiest hour (the hero: its rate, its share of the day,
+         how many times the quietest hour), a weekend day against a weekday,
+         the busiest weekday PER OCCURRENCE, and demand nobody served ABSENT.
+     01  every hour of every weekday — the heatmap, promoted, its cells still
+         opening #slot, its busiest slots still listed as addresses.
+     02  the shape of a day — the same per-day RATE the old curve drew, as 24
+         columns, the hour in progress hatched and never named the peak.
+     03  the shape of a week — bookings per occurrence of each weekday: the
+         heatmap's row sum over the number of that weekday's collected whole
+         days (plus today, for the hours it has had), never a raw weekday sum.
+     04  a weekend day against a weekday — two 24-column charts on one scale.
+     05  daily volume, 06 weather and holidays — shared with the old page;
+         the weather table's temperature pills and 15% pill made plain / ▼.
+     †   demand nobody served, cells with no reading, why an hour is busy.
+   DEVIATION: the plan splits "Sun–Thu vs Fri–Sat". The UAE weekend has been
+   Saturday and Sunday since January 2022, so the split here is Monday to
+   Friday against Saturday and Sunday, and each chart names its days. */
+const DOW_NAME = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const WEEKEND = new Set([0, 6]);
+/* Per-occurrence rates off the heatmap: each (weekday, hour) cell over the
+   collected whole days of that weekday in the daily series, plus today for
+   the hours it has already had — hourProfile's rule, cell by cell. */
+function demandCells(grid, w, clock) {
+  const occ = Array(7).fill(0);
+  const dowOf = (day) => new Date(`${String(day).slice(0, 10)}T12:00:00Z`).getUTCDay();
+  for (const r of w.done) {
+    if (+r.of_days > 1) continue;                 // a bucket is not a day
+    /* Only a day nobody collected leaves the denominator. A day where one
+       source was silent still put the other sources' bookings in the
+       heatmap's row — counted out, it made production's Sunday 850 a day
+       over "2 days" in a month holding three (2026-09-24). */
+    if (r.uncollected) continue;
+    occ[dowOf(r.d)] += 1;
+  }
+  const todayDow = w.runsIntoToday ? dowOf(dubaiDay()) : null;
+  const reached = (dow, h) => occ[dow] + (todayDow === dow && h < clock.hour ? 1 : 0);
+  const cells = (grid || []).map((c) => ({ dow: +c.dow, h: +c.h, trips: +c.trips || 0,
+    days: reached(+c.dow, +c.h), running: todayDow === +c.dow && +c.h === clock.hour }));
+  return { occ, cells, todayDow };
+}
+async function demandContract(root) {
+  const band = el('section', 'cband');
+  const vdHost = el('div');
+  const tilesHost = el('div');
+  band.append(secHead('00', 'At a glance', windowLabel()), vdHost, tilesHost);
+  root.append(band);
+  const hm = panel('Every hour of every weekday', 'Bookings in each hour of each weekday over this window. Click a cell for that hour.', 'demand-heat');
+  root.append(hm.panel);
+  const shape = panel('The shape of a day', 'Bookings an hour on an average day.', 'demand-day');
+  root.append(shape.panel);
+  const g1 = el('div', 'grid g2'); root.append(g1);
+  const week = panel('The shape of a week', 'Bookings on an average day of each weekday — per occurrence, never a raw weekday sum.', 'demand-week');
+  const split = panel('A weekend day is a different day', 'Bookings an hour on an average day of each kind, on one scale.', 'demand-weekend');
+  g1.append(week.panel, split.panel);
+  const daily = panel('Daily volume',
+    'Bookings per Dubai-local day, with telematics journeys behind them. A day nobody collected is '
+    + `${drawnAs('absent')} rather than drawn as zero. Click a bar to open that day.`, 'demand-daily');
+  root.append(daily.panel);
+  const ctxP = panel('Trips against weather and holidays',
+    'Heat, rain and Ramadan all move Dubai demand. This puts trips and weather side by side so a dip has a possible reason.', 'demand-weather');
+  root.append(ctxP.panel);
+  const absHost = el('div'); root.append(absHost);
+  [tilesHost, hm.body, shape.body, week.body, split.body, daily.body, ctxP.body].forEach(loading);
+
+  const gen = currentGen();
+  const fail = (body, e) => {
+    body.innerHTML = '';
+    body.append(note(/migrat/i.test(String(e.message || ''))
+      ? 'The database is migrating, so this panel could not be computed.'
+      : `Could not load this panel: ${e.message}`, 'err'));
+    return null;
+  };
+  const [h, d, grid, ctx] = await Promise.all([
+    q('/api/trips/hourly').catch((e) => fail(shape.body, e)),
+    q('/api/trips/daily').catch((e) => fail(daily.body, e)),
+    q('/api/trips/heatmap').catch((e) => fail(hm.body, e)),
+    q('/api/context').catch(() => []),
+  ]);
+  if (!alive(gen)) return;
+  if (!d) { tilesHost.innerHTML = ''; empty(tilesHost, 'The daily series did not load, so nothing on this page can be computed.'); return; }
+  const bookings = d.reduce((a, r) => a + (+r.trips || 0), 0);
+  const clock = dubaiClock();
+  const w = splitLive(d);
+  const prof = hourProfile(h, { ...w, hour: clock.hour });
+  if (bookings) verdict(vdHost, demandVerdict(d, w, prof, clock, bookings));
+  if (state.platform && !bookings) demandNoBookings(root);
+  const hh = (x) => `${String(x).padStart(2, '0')}:00`;
+
+  /* ── the per-occurrence arithmetic ────────────────────────────────────── */
+  const { occ, cells, todayDow } = demandCells(grid, w, clock);
+  const perDow = DOW_NAME.map((name, dow) => {
+    const mine = cells.filter((c) => c.dow === dow && c.days > 0);
+    return { dow, name, days: occ[dow], rate: occ[dow] ? mine.reduce((a, c) => a + c.trips / c.days, 0) : null };
+  });
+  const byType = (weekend) => Array.from({ length: 24 }, (_, hr) => {
+    const mine = cells.filter((c) => c.h === hr && WEEKEND.has(c.dow) === weekend);
+    const days = mine.reduce((a, c) => a + c.days, 0);
+    return { h: hr, x: hh(hr), rate: days ? mine.reduce((a, c) => a + c.trips, 0) / days : null,
+      none: !days, running: mine.some((c) => c.running) };
+  });
+  const wkend = byType(true), wkday = byType(false);
+  const dayTotal = (rows) => (rows.every((r) => r.rate == null) ? null : rows.reduce((a, r) => a + (r.rate || 0), 0));
+
+  /* ── 00 ───────────────────────────────────────────────────────────────── */
+  tilesHost.innerHTML = '';
+  const peak = prof.peak;
+  const quiet = prof.ranked.length ? prof.ranked.reduce((b, r) => (r.rate < b.rate ? r : b)) : null;
+  const ranked = perDow.filter((x) => x.rate != null).sort((a, b) => b.rate - a.rate);
+  const we = dayTotal(wkend), wd = dayTotal(wkday);
+  glance(tilesHost, [
+    peak ? { label: 'The busiest hour', value: hh(peak.h), hero: true,
+      sub: `${fmt(peak.rate, 1)} bookings in it on an average day, ${prof.share}% of the day's work`
+        + (quiet && quiet.rate > 0 ? ` · ${(peak.rate / quiet.rate).toFixed(1)}× the quietest hour, ${hh(quiet.h)}`
+          : quiet ? ` · the quietest hour, ${hh(quiet.h)}, had no booking at all` : ''),
+      spark: prof.rows.map((r) => (r.rate == null ? null : r.rate)) }
+      : { label: 'The busiest hour', hero: true, na: h ? 'no hour in this window has a whole day behind it yet' : 'the hourly series did not load' },
+    we != null && wd != null
+      ? { label: 'A weekend day', value: fmt(Math.round(we)),
+        sub: `bookings on an average Saturday or Sunday, against ${fmt(Math.round(wd))} on a Monday to Friday` }
+      : { label: 'A weekend day', na: grid ? 'this window holds no whole weekend day and weekday to set side by side' : 'the heatmap did not load' },
+    ranked.length
+      ? { label: 'Busiest weekday', value: ranked[0].name,
+        sub: `${fmt(Math.round(ranked[0].rate))} bookings on an average ${ranked[0].name}, over ${countOf(ranked[0].days, ranked[0].name, `${ranked[0].name}s`)}`
+          + (ranked.length > 1 ? ` · the quietest, ${ranked[ranked.length - 1].name}, ${fmt(Math.round(ranked[ranked.length - 1].rate))}` : '') }
+      : { label: 'Busiest weekday', na: grid ? 'no weekday in this window has a whole collected day behind it' : 'the heatmap did not load' },
+    { label: 'Demand nobody served', na: 'no feed reports a request that no car took — the Did-not-complete column below is the only unserved-demand signal held' },
+  ]);
+
+  /* ── 01 · the heatmap, promoted ──────────────────────────────────────── */
+  if (grid) {
+    demandHeatmap(hm, grid, w, clock);
+    hm.body.append(el('p', 'cap', 'The shade is magnitude, not identity: grey from the quietest hour to the busiest, whatever the channel.'));
+  }
+
+  /* ── 02 · the shape of a day, as 24 columns ──────────────────────────── */
+  if (h) {
+    shape.body.innerHTML = '';
+    gapBars(shape.body, prof.rows.map((r) => ({ x: hh(r.h), rate: r.rate == null ? null : +r.rate.toFixed(2),
+      none: r.rate == null, running: r.running })),
+    { x: 'x', y: 'rate', label: 'bookings an hour', color: '--ink', gapKey: 'none', gapLabel: 'no day in this window reached this hour',
+      bucketNoun: 'hours', inProgress: false, hatchIf: (r) => r.running,
+      hatchNote: 'the hour in progress — part of today is inside it, so it is drawn and never named the busiest',
+      valueFmt: (v) => fmt(v, 1) });
+    shape.body.append(el('p', 'cap', esc((w.days
+      ? `Each hour over the ${countOf(w.days, 'whole day')} in this window that reached it${w.runsIntoToday ? ', and today for the hours it has had' : ''}`
+      : 'Each hour over the hours today has already had')
+      + (peak ? `. The peak is ${hh(peak.h)}.` : '.'))));
+  }
+
+  /* ── 03 · the shape of a week, per occurrence ────────────────────────── */
+  week.body.innerHTML = '';
+  if (!grid) empty(week.body, 'The heatmap did not load.');
+  else if (!ranked.length) empty(week.body, 'No weekday in this window has a whole collected day behind it.');
+  else {
+    hbars(week.body, perDow.filter((x) => x.rate != null).sort((a, b) => b.rate - a.rate)
+      .map((x) => ({ label: `${x.name} · ${countOf(x.days, 'day')}`, n: Math.round(x.rate) })),
+    { signed: false, color: '--ink' });
+    const none = perDow.filter((x) => x.rate == null).map((x) => x.name);
+    week.body.append(el('p', 'cap', esc('A window of a month holds five of some weekdays and four of others, so each is its own sum over its own count of days.'
+      + (todayDow != null ? ` ${DOW_NAME[todayDow]} counts today for the hours it has had.` : '')
+      + (none.length ? ` Not drawn: ${andList(none)} — no collected whole day in this window.` : ''))));
+  }
+
+  /* ── 04 · a weekend day against a weekday ────────────────────────────── */
+  split.body.innerHTML = '';
+  if (!grid || we == null || wd == null) empty(split.body, grid ? 'This window holds no whole weekend day and weekday to set side by side.' : 'The heatmap did not load.');
+  else {
+    const top = Math.max(...wkend.concat(wkday).map((r) => r.rate || 0));
+    const pair = el('div', 'grid g2'); split.body.append(pair);
+    for (const [title, rows] of [['Monday to Friday', wkday], ['Saturday and Sunday', wkend]]) {
+      const box = el('div'); pair.append(box);
+      box.append(el('p', 'cap', `<b>${esc(title)}</b>`));
+      const c = el('div'); box.append(c);
+      gapBars(c, rows, { x: 'x', y: 'rate', label: 'bookings an hour', color: '--ink', gapKey: 'none',
+        gapLabel: 'no day of this kind reached this hour', bucketNoun: 'hours', inProgress: false, max: top,
+        hatchIf: (r) => r.running, hatchNote: 'the hour in progress', valueFmt: (v) => fmt(v, 1) });
+      const pk = rows.filter((r) => r.rate != null && !r.running).reduce((b, r) => (!b || r.rate > b.rate ? r : b), null);
+      if (pk) box.append(el('p', 'cap', `Peak ${esc(pk.x)}, ${esc(fmt(pk.rate, 1))} an hour.`));
+    }
+  }
+
+  /* ── 05 · daily volume, 06 · weather (shared) ────────────────────────── */
+  daily.body.innerHTML = '';
+  demandDaily(daily, d, bookings);
+  demandWeather(ctxP, d, ctx, w, clock, { plain: true });
+
+  /* ── † ────────────────────────────────────────────────────────────────── */
+  const filled = new Set((grid || []).filter((c) => +c.trips > 0).map((c) => `${c.dow}:${c.h}`)).size;
+  absenceBand(absHost, [
+    { label: 'Demand nobody served', hl: true, fig: null, none: 'Not measured',
+      why: 'No feed reports a request that no car took. The Did-not-complete column in the weather table is the only unserved-demand signal held, and it counts bookings a car did take and did not finish.' },
+    { label: 'Cells with no reading', fig: grid ? `${fmt(168 - filled)} of 168` : null, none: 'Not loaded',
+      why: grid ? 'Weekday-hours the heatmap answer holds no cell for: no booking landed in them in this window.'
+        : 'The heatmap did not load.' },
+    { label: 'Why an hour is busy', fig: null, none: 'Not held per hour',
+      why: 'Weather is held per DAY, not per hour, and there is no surge or event feed — so this page can say when demand comes, not why it comes then.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), `${fmt(bookings)} bookings`] }, root);
+}
 
 /* Subscripted, because the id carries a hyphen and V.online-time is not a
    property access. bin/page-audit.mjs matches both forms. */

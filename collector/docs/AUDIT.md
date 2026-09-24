@@ -1683,3 +1683,11 @@ figures, 7.3% restating (all of them the two Uber GraphQL breakdown rows,
 72–77%); 4 of 4 channels answering. 4 of 14 calls are counted; Uber's
 statement basis matches none of the listed calls, which the hero's sub now
 says.
+
+### #demand — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/demand/`): no error, no sideways scroll. The
+busiest hour is 15:00 (67.7 bookings on an average day, 9% of the day,
+17.6× 03:00); Friday leads per occurrence at 856 a day over three Fridays;
+an average Saturday or Sunday carries 754 against 832 on a weekday.

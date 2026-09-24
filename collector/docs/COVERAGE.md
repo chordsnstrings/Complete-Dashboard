@@ -6644,3 +6644,8 @@ number (5 and 5), and never a passport or RTA number.
 * **`hbars` draws its "added / deducted" legend whenever a value is
   negative**, even when `colorFor` makes the colour mean something else.
   Pass `legend` whenever colour carries a different meaning.
+
+* **`/api/trips/daily`'s `sources_silent` is not "no data".** A day one
+  source was silent on still carries every other source's bookings, in the
+  daily row and in `/api/trips/heatmap`. Only `uncollected` takes a day out
+  of a per-day denominator.
