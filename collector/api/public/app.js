@@ -10,7 +10,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   sourceLabel, sourceToken, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
   markTallTables, kpiTile, fitKpis, UBER_FARE_WHY,
-  contract, glance, secHead, absenceBand, pageFoot, clearPageFoot, highlight, swatch, delta,
+  contract, glance, secHead, absenceBand, pageFoot, clearPageFoot, highlight, swatch, delta, notRepeated,
   SEG_SOURCES, SEG_SOURCE_LABEL, bySourceLine } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
@@ -105,7 +105,12 @@ function missingTarget(r) {
 /* `as` passes straight to donut() (ruling 6: each donut is replaced on its
    own page, as its plan entry says). The old skin's #overview and #finance
    call this with no option and draw the ring as they always have. */
-function paymentDonut(host, detail, { as = 'ring' } = {}) {
+/* `atRide` (#finance under the page contract, plan §4): the bars are ink
+   for the two routes settled AT the ride (card, wallet) and grey for every
+   route where the money is somewhere else first, and each label carries
+   what the route earned — or says no fare was reported, never AED 0.00 for
+   a route nobody priced. The old skin passes neither and draws what it drew. */
+function paymentDonut(host, detail, { as = 'ring', atRide = false } = {}) {
   host.innerHTML = '';
   const groups = (detail && detail.groups) || [];
   if (!groups.length) { empty(host, 'No trip in this range records how it was paid'); return; }
@@ -146,8 +151,10 @@ function paymentDonut(host, detail, { as = 'ring' } = {}) {
     'Salary deduction': ['settlement', 'receivables'], Card: ['settlement'],
     Wallet: ['settlement'], Complimentary: ['corporate', 'leakage'],
   };
-  donut(host, rows, {
+  donut(host, atRide ? rows.map((r) => ({ ...r, disp: `${r.label} · ${r.priced
+    ? `${money(r.revenue)} over ${fmt(r.priced)} priced` : 'no fare reported'}` })) : rows, {
     as,
+    ...(atRide ? { label: 'disp', colorFor: (d) => (['Card', 'Wallet'].includes(d.label) ? '--ink' : '--grey') } : {}),
     clickable: (d) => !!CLASS_TAB[d.label],
     onClick: (d) => { const t = CLASS_TAB[d.label]; if (t) location.hash = href(...t); },
   });
@@ -3194,81 +3201,17 @@ async function platformFunnel(root) {
   }
 }
 
-V.finance = async (root) => {
-  const vfHost = el('div'); root.append(vfHost);
-  const kh = el('div'); root.append(kh); loading(kh);
-  const g = el('div', 'grid g2'); root.append(g);
-  /* Money in per day — all of it, not the metered eighth.
-     ─────────────────────────────────────────────────────────────────────────
-     This drew sum(trip.price) and captioned it "Metered fares only", which was
-     an honest label on a dishonest panel: on this fleet the metered half is
-     almost nothing. Measured on production for 1–3 Sept 2026, the series
-     totalled AED 12,313 against AED 81,385 actually accounted for over the
-     same three days — 15% of the money, on the page whose subject is the
-     money. And the missing 85% is not spread evenly: 2,073 of the window's
-     2,293 bookings are Uber's, and Uber's supplier trip export carries no fare
-     column at all, so every one of them arrives with price NULL. The channels
-     that do price per trip are the small ones — hotel 110 of 112 bookings,
-     Yango 7 of 7, Bolt 53, which is every completed order it had.
+/* Two orders of #finance until the operator flips the default skin: the old
+   skin's, and the page contract (plan §4 finance). Both draw from the same
+   parts below, moved verbatim out of the one function they lived in. */
+V.finance = async (root) => (contract() ? financeContract(root) : financeClassic(root));
 
-     driver_day.money is the resolution the collector already makes: the
-     statement's net where a channel filed one, its fares where it did not,
-     at Dubai-day grain. That is what this draws, with the metered share and
-     the grain said underneath rather than left for a reader to assume. */
-  const rev = panel('Money in per day',
-    'Everything the fleet was paid, by the day it was earned — the platforms\u2019 own '
-    + 'statements where they file one, and the metered fare where they do not'); g.append(rev.panel);
-  const pay = panel('Payment mix', 'Cash vs card vs wallet — cash is money the fleet has to collect'); g.append(pay.panel);
-  const g2 = el('div', 'grid g2'); root.append(g2);
-  /* The old caption named Uber Black and Comfort over a table that can never
-     contain them: the Uber trip export has no fare column, so the only rows
-     that can ever appear here are the hotel and Yango ones. The honest
-     sentence already existed twenty lines down and only fired when the table
-     was completely empty. */
-  /* This ended "no Uber tier can reach this table however much it earned",
-     printed directly above a table whose top four rows are now Uber tiers with
-     real per-trip fares. It was the flattest never-will sentence left in the
-     product and the guard test written to stop exactly that did not match it —
-     both are fixed, and test/fare_reason_shared.test.mjs now reads the server
-     files too. */
-  const tier = panel('What each priced tier earns',
-    `A tier appears here once its rides carry a fare. ${UBER_FARE_WHY}, so an Uber tier fills in `
-    + 'behind that walk while the hotel and Yango bookings, which are priced on the trip itself, '
-    + 'have always been here.');
-  g2.append(tier.panel);
-  const comp = panel('What makes up a payout', 'Fares, tips, promotions and what the platform deducts'); g2.append(comp.panel);
-  const tips = panel('Tips by driver', 'Service quality expressed in money. Riders tip the experience, not the route.'); root.append(tips.panel);
-  const led = panel('Ledger by category', 'Platform fees, bonuses and adjustments'); root.append(led.panel);
-  [rev.body, pay.body, tier.body, comp.body, tips.body, led.body].forEach(loading);
-
-  const [k, daily, payDetail, byProd, ledger, components, tipRows, bySvc, fin] = await Promise.all([
-    q('/api/kpis'), q('/api/trips/daily'), q('/api/mix/detail', { by: 'payment' }), q('/api/mix'),
-    q('/api/finance/ledger'),
-    q('/api/earnings/components').catch(() => []),
-    q('/api/earnings/tips').catch(() => []),
-    q('/api/mix', { by: 'service' }).catch(() => []),
-    /* The day series that carries the payout half as well as the fares. */
-    q('/api/finance/daily').catch(() => null),
-  ]);
-
-  /* Cash is three labels on this fleet — `cash` (Uber), `cash-driver` and
-     `cash-supervisor` (hotel) — and /api/mix/detail returns them ordered by
-     count, so `.find` always landed on the Uber one, whose revenue is null
-     because that export has no fare column. The tile rendered "—" while the
-     fleet was holding real money. Read from the settlement endpoint instead, so
-     this and the Settlement page cannot disagree about what cash is. */
-  const settle = await q('/api/settlement/mix').catch(() => ({ classes: [] }));
-  const cash = (settle.classes || []).find((c) => c.settlement_class === 'cash');
-
-  /* Finance's headline is not how much came in — Revenue by channel answers
-     that. It is how much of it the fleet is still CHASING: cash a driver
-     collected is money the fleet has not got yet, and it is the one figure on
-     this page that is a task rather than a fact. */
-  {
+/* The verdict, as data, for both orders of #finance. */
+function financeVerdict(cash, k) {
     const held = +cash?.revenue || 0;
     const accounted = +k?.accounted || 0;
     const pct = accounted ? Math.round((held / accounted) * 100) : 0;
-    verdict(vfHost, {
+    return {
       claim: held
         ? `${money(held)} was collected in cash and has to be handed in`
         : accounted ? `${money(accounted)} accounted for, none of it in cash`
@@ -3280,44 +3223,12 @@ V.finance = async (root) => {
       sub: held
         ? 'Cash in hand names who holds it. Every other settlement route lands in the bank on its own.'
         : 'Payment mix below splits what is left by how it settles.',
-    });
-  }
-  /* Tolerant of both shapes. The backend audit gave /api/earnings/tips the
-     {rows, total, shown, truncated} envelope every other list route carries —
-     the same change it made to /api/driver/custody and /api/funnel/drivers.
-     Two of those three were covered here and this one was not, so #finance
-     died on `tipRows.reduce is not a function` the moment the two halves of
-     the audit were merged. Neither half was wrong on its own; nobody ran the
-     smoke on the merge. */
-  const tipList = Array.isArray(tipRows) ? tipRows : (tipRows?.rows || []);
-  /* The FLEET's tips, not the ranked list's.
-     ───────────────────────────────────────────────────────────────────────
-     These two lines added up `tipList`, which is /api/earnings/tips — ranked
-     by tip rate, capped at 200 rows and filtered to drivers with at least
-     AED 300 of net fare. The Tips tile then printed that sum as the fleet's
-     tips — and this page opens on a two-day window, where 60 of 85 drivers are
-     under the floor: measured on production 2026-09-02 at ?days=2, AED 68.96
-     on the tile against a real AED 168.09, 59% of the fleet's tips missing.
-     Over 365 days the same floor removes 0.2%, so the figure is wrong when the
-     page is opened and right by the time anybody checks it. The endpoint now
-     selects the population total separately; `totals.ranked_tips` is what the
-     table below still adds up to. */
-  const tipAll = tipRows?.totals || null;
-  const rankedTips = tipList.reduce((a, r) => a + (+r.tips || 0), 0);
-  const rankedFare = tipList.reduce((a, r) => a + (+r.fare || 0), 0);
-  const tipTotal = tipAll?.tips != null ? +tipAll.tips : rankedTips;
-  const fareTotal = tipAll?.fare != null ? +tipAll.fare : rankedFare;
+    };
+}
 
-  /* Every money figure here covers only the trips that carry a fare. The Uber
-     trip export has no fare column at all and telematics trips have none
-     either, so on this fleet that is roughly a fifth of the rows. Dividing by
-     everything showed an average fare of AED 6.98 against a real figure near
-     AED 125. Each tile now names the base it was computed over. */
-  const coverage = k.priced_pct != null
-    ? `${fmt(k.priced_trips)} of ${fmt(k.trips)} trips carry a fare (${pct(k.priced_pct, 1)})`
-    : 'no priced trips in this range';
-
-  const kpis = kpiRow([
+/* The eight tiles, as data, for both orders of #finance. */
+function financeTiles({ k, settle, cash, tipAll, tipTotal, fareTotal, coverage }) {
+  return [
     /* The fleet's whole income leads, with the two channels it is made of
        beside it. Revenue alone led here, and revenue is sum(price) over the
        trip table — which for this fleet is the hotel and Yango channels and
@@ -3487,27 +3398,14 @@ V.finance = async (root) => {
             : '')
         : 'no tip data collected yet',
       tone: fareTotal ? (tipTotal / fareTotal >= 0.03 ? 'good' : 'warn') : null },
-  ]);
-  kh.replaceWith(kpis);
+  ];
+}
 
-  // Say the coverage out loud once, under the tiles, so nobody reads the
-  // revenue line as the fleet's whole income.
-  if (k.priced_pct != null && k.priced_pct < 90) {
-    kpis.after(note(
-      `Fares cover ${pct(k.priced_pct, 1)} of trips — the other ${fmt(k.trips - k.priced_trips)} ` +
-      `carry no fare at all, because Uber's trip export omits them and telematics trips have none. ` +
-      `That work is paid for, and the money arrives as weekly platform statements rather than per-trip ` +
-      `fares, which is what Platform payouts counts. The two are different measurements — a fare is what ` +
-      `a rider paid, a payout is a statement net of the platform's commission — so Money in is their sum ` +
-      `and every tile below it is over fares only.`));
-  }
-
-  /* gapBars, not areaChart: a day whose statement has not arrived yet must be a
-     HOLE, not a bar at zero. The current week's Uber statement lands on the
-     following Monday, so the newest days in any window reaching to today have
-     no payout half yet — drawn as an area that would be a cliff the fleet did
-     not have, which is the same defect the landing page's trend chart was
-     fixed for. */
+/* Money in per day, for both orders of #finance (`color`: the old skin's
+   --s3; the contract's ink. `hatchIf`/`hatchNote`: the contract hatches the
+   open week's derived days; the old skin passes neither, and gapBars draws
+   exactly what it drew). */
+function financeDaily(rev, fin, { color = '--s3', hatchIf = null, hatchNote = '' } = {}) {
   {
     const fr = (fin && fin.rows) || [];
     if (!fr.length) {
@@ -3517,7 +3415,7 @@ V.finance = async (root) => {
       rev.body.append(note('The daily money series did not load, so this panel cannot say what '
         + 'came in on each day. The totals above are unaffected — they come from /api/kpis.'));
     } else {
-      gapBars(rev.body, fr, { x: 'd', y: 'money', label: 'in', color: '--s3',
+      gapBars(rev.body, fr, { x: 'd', y: 'money', label: 'in', color, hatchIf, hatchNote,
         gapKey: 'nothing_recorded', gapLabel: 'nothing has reported money for this day yet',
         valueFmt: (v) => money(v) });
       /* What the bars are MADE of, and at what grain — both required, and for
@@ -3616,8 +3514,9 @@ V.finance = async (root) => {
       }
     }
   }
-  paymentDonut(pay.body, payDetail);
+}
 
+function financeTiers(tier, byProd, bySvc) {
   /* Tier economics: the count alone hides the point, which is that a tier can
      be a small share of trips and a large share of revenue, or the reverse. */
   tier.body.innerHTML = '';
@@ -3695,7 +3594,9 @@ V.finance = async (root) => {
       : `Uber labels every one of these ${fmt(total)} trips “${esc(named[0].label.replace(/_/g, ' '))}”. ` +
         `There is no Uber for Business work in the record — that channel is either not enabled for this org or unused.`));
   }
+}
 
+function financeComponents(comp, components) {
   /* Components arrive signed: fares and tips add, cash already collected and
      fees subtract. Drawing them all one way would show a deduction as income. */
   comp.body.innerHTML = '';
@@ -3719,7 +3620,11 @@ V.finance = async (root) => {
   } else {
     comp.body.append(componentTree(compRows));
   }
+}
 
+/* `plainRate` (the contract): a tip rate is a LEVEL, so it is a plain
+   figure and not a green/amber/red pill (plan §4 #finance). */
+function financeTips(tips, tipRows, tipList, tipAll, rankedTips, { plainRate = false } = {}) {
   /* Tips are the one quality signal riders pay for directly. */
   tips.body.innerHTML = '';
   if (!tipList.length) {
@@ -3756,14 +3661,16 @@ V.finance = async (root) => {
         if (r.tip_pct == null) return '<span class="ent-off" title="no net fare recorded for this driver">—</span>';
         const enough = +r.fare >= FARE_FLOOR;
         return enough
-          ? `<span class="pill ${+r.tip_pct >= 3 ? 'ok' : +r.tip_pct >= 1 ? 'warn' : 'bad'}">${(+r.tip_pct).toFixed(2)}%</span>`
+          ? (plainRate ? `${(+r.tip_pct).toFixed(2)}%`
+            : `<span class="pill ${+r.tip_pct >= 3 ? 'ok' : +r.tip_pct >= 1 ? 'warn' : 'bad'}">${(+r.tip_pct).toFixed(2)}%</span>`)
           : `<span class="dim" title="only ${esc(money(r.fare))} of net fare — too small a base to rank on">`
             + `${(+r.tip_pct).toFixed(2)}%</span>`;
       } },
     ], { sortable: true, sortId: 'tips' }));
     const SHOWN = Math.min(30, ranked.length);
     tips.body.append(el('p', 'cap',
-      `Tip rate is tips as a share of net fare. It is only toned above ${money(FARE_FLOOR)} of net fare, `
+      `Tip rate is tips as a share of net fare. ${plainRate ? 'It is a plain figure — a level is not better or worse — dimmed below'
+        : 'It is only toned above'} ${money(FARE_FLOOR)} of net fare, `
       + 'because a 15% rate on AED 63 outranks a 6% rate on AED 506 while meaning less. '
       + 'It reflects the ride experience more than the route, which is what makes it coachable.'
       + (rankedTotal > SHOWN
@@ -3782,7 +3689,9 @@ V.finance = async (root) => {
           + 'tile above is the larger number.'
         : '')));
   }
+}
 
+function financeLedger(led, ledger) {
   led.body.innerHTML = '';
   if (ledger.length) {
     /* Signed. Math.abs() made platform fees and VAT — money going out — read
@@ -3828,7 +3737,386 @@ V.finance = async (root) => {
           + 'category that netted to nothing.'
         : '')));
   } else empty(led.body, 'Ledger fills once Yango/Bolt credentials are set');
-};
+}
+
+async function financeClassic(root) {
+  const vfHost = el('div'); root.append(vfHost);
+  const kh = el('div'); root.append(kh); loading(kh);
+  const g = el('div', 'grid g2'); root.append(g);
+  /* Money in per day — all of it, not the metered eighth.
+     ─────────────────────────────────────────────────────────────────────────
+     This drew sum(trip.price) and captioned it "Metered fares only", which was
+     an honest label on a dishonest panel: on this fleet the metered half is
+     almost nothing. Measured on production for 1–3 Sept 2026, the series
+     totalled AED 12,313 against AED 81,385 actually accounted for over the
+     same three days — 15% of the money, on the page whose subject is the
+     money. And the missing 85% is not spread evenly: 2,073 of the window's
+     2,293 bookings are Uber's, and Uber's supplier trip export carries no fare
+     column at all, so every one of them arrives with price NULL. The channels
+     that do price per trip are the small ones — hotel 110 of 112 bookings,
+     Yango 7 of 7, Bolt 53, which is every completed order it had.
+
+     driver_day.money is the resolution the collector already makes: the
+     statement's net where a channel filed one, its fares where it did not,
+     at Dubai-day grain. That is what this draws, with the metered share and
+     the grain said underneath rather than left for a reader to assume. */
+  const rev = panel('Money in per day',
+    'Everything the fleet was paid, by the day it was earned — the platforms\u2019 own '
+    + 'statements where they file one, and the metered fare where they do not'); g.append(rev.panel);
+  const pay = panel('Payment mix', 'Cash vs card vs wallet — cash is money the fleet has to collect'); g.append(pay.panel);
+  const g2 = el('div', 'grid g2'); root.append(g2);
+  /* The old caption named Uber Black and Comfort over a table that can never
+     contain them: the Uber trip export has no fare column, so the only rows
+     that can ever appear here are the hotel and Yango ones. The honest
+     sentence already existed twenty lines down and only fired when the table
+     was completely empty. */
+  /* This ended "no Uber tier can reach this table however much it earned",
+     printed directly above a table whose top four rows are now Uber tiers with
+     real per-trip fares. It was the flattest never-will sentence left in the
+     product and the guard test written to stop exactly that did not match it —
+     both are fixed, and test/fare_reason_shared.test.mjs now reads the server
+     files too. */
+  const tier = panel('What each priced tier earns',
+    `A tier appears here once its rides carry a fare. ${UBER_FARE_WHY}, so an Uber tier fills in `
+    + 'behind that walk while the hotel and Yango bookings, which are priced on the trip itself, '
+    + 'have always been here.');
+  g2.append(tier.panel);
+  const comp = panel('What makes up a payout', 'Fares, tips, promotions and what the platform deducts'); g2.append(comp.panel);
+  const tips = panel('Tips by driver', 'Service quality expressed in money. Riders tip the experience, not the route.'); root.append(tips.panel);
+  const led = panel('Ledger by category', 'Platform fees, bonuses and adjustments'); root.append(led.panel);
+  [rev.body, pay.body, tier.body, comp.body, tips.body, led.body].forEach(loading);
+
+  const [k, daily, payDetail, byProd, ledger, components, tipRows, bySvc, fin] = await Promise.all([
+    q('/api/kpis'), q('/api/trips/daily'), q('/api/mix/detail', { by: 'payment' }), q('/api/mix'),
+    q('/api/finance/ledger'),
+    q('/api/earnings/components').catch(() => []),
+    q('/api/earnings/tips').catch(() => []),
+    q('/api/mix', { by: 'service' }).catch(() => []),
+    /* The day series that carries the payout half as well as the fares. */
+    q('/api/finance/daily').catch(() => null),
+  ]);
+
+  /* Cash is three labels on this fleet — `cash` (Uber), `cash-driver` and
+     `cash-supervisor` (hotel) — and /api/mix/detail returns them ordered by
+     count, so `.find` always landed on the Uber one, whose revenue is null
+     because that export has no fare column. The tile rendered "—" while the
+     fleet was holding real money. Read from the settlement endpoint instead, so
+     this and the Settlement page cannot disagree about what cash is. */
+  const settle = await q('/api/settlement/mix').catch(() => ({ classes: [] }));
+  const cash = (settle.classes || []).find((c) => c.settlement_class === 'cash');
+
+  /* Finance's headline is not how much came in — Revenue by channel answers
+     that. It is how much of it the fleet is still CHASING: cash a driver
+     collected is money the fleet has not got yet, and it is the one figure on
+     this page that is a task rather than a fact. */
+  verdict(vfHost, financeVerdict(cash, k));
+  /* Tolerant of both shapes. The backend audit gave /api/earnings/tips the
+     {rows, total, shown, truncated} envelope every other list route carries —
+     the same change it made to /api/driver/custody and /api/funnel/drivers.
+     Two of those three were covered here and this one was not, so #finance
+     died on `tipRows.reduce is not a function` the moment the two halves of
+     the audit were merged. Neither half was wrong on its own; nobody ran the
+     smoke on the merge. */
+  const tipList = Array.isArray(tipRows) ? tipRows : (tipRows?.rows || []);
+  /* The FLEET's tips, not the ranked list's.
+     ───────────────────────────────────────────────────────────────────────
+     These two lines added up `tipList`, which is /api/earnings/tips — ranked
+     by tip rate, capped at 200 rows and filtered to drivers with at least
+     AED 300 of net fare. The Tips tile then printed that sum as the fleet's
+     tips — and this page opens on a two-day window, where 60 of 85 drivers are
+     under the floor: measured on production 2026-09-02 at ?days=2, AED 68.96
+     on the tile against a real AED 168.09, 59% of the fleet's tips missing.
+     Over 365 days the same floor removes 0.2%, so the figure is wrong when the
+     page is opened and right by the time anybody checks it. The endpoint now
+     selects the population total separately; `totals.ranked_tips` is what the
+     table below still adds up to. */
+  const tipAll = tipRows?.totals || null;
+  const rankedTips = tipList.reduce((a, r) => a + (+r.tips || 0), 0);
+  const rankedFare = tipList.reduce((a, r) => a + (+r.fare || 0), 0);
+  const tipTotal = tipAll?.tips != null ? +tipAll.tips : rankedTips;
+  const fareTotal = tipAll?.fare != null ? +tipAll.fare : rankedFare;
+
+  /* Every money figure here covers only the trips that carry a fare. The Uber
+     trip export has no fare column at all and telematics trips have none
+     either, so on this fleet that is roughly a fifth of the rows. Dividing by
+     everything showed an average fare of AED 6.98 against a real figure near
+     AED 125. Each tile now names the base it was computed over. */
+  const coverage = k.priced_pct != null
+    ? `${fmt(k.priced_trips)} of ${fmt(k.trips)} trips carry a fare (${pct(k.priced_pct, 1)})`
+    : 'no priced trips in this range';
+
+  const kpis = kpiRow(financeTiles({ k, settle, cash, tipAll, tipTotal, fareTotal, coverage }));
+  kh.replaceWith(kpis);
+
+  // Say the coverage out loud once, under the tiles, so nobody reads the
+  // revenue line as the fleet's whole income.
+  if (k.priced_pct != null && k.priced_pct < 90) {
+    kpis.after(note(
+      `Fares cover ${pct(k.priced_pct, 1)} of trips — the other ${fmt(k.trips - k.priced_trips)} ` +
+      `carry no fare at all, because Uber's trip export omits them and telematics trips have none. ` +
+      `That work is paid for, and the money arrives as weekly platform statements rather than per-trip ` +
+      `fares, which is what Platform payouts counts. The two are different measurements — a fare is what ` +
+      `a rider paid, a payout is a statement net of the platform's commission — so Money in is their sum ` +
+      `and every tile below it is over fares only.`));
+  }
+
+  /* gapBars, not areaChart: a day whose statement has not arrived yet must be a
+     HOLE, not a bar at zero. The current week's Uber statement lands on the
+     following Monday, so the newest days in any window reaching to today have
+     no payout half yet — drawn as an area that would be a cliff the fleet did
+     not have, which is the same defect the landing page's trend chart was
+     fixed for. */
+  financeDaily(rev, fin);
+  paymentDonut(pay.body, payDetail);
+
+  financeTiers(tier, byProd, bySvc);
+
+  financeComponents(comp, components);
+
+  financeTips(tips, tipRows, tipList, tipAll, rankedTips);
+
+  financeLedger(led, ledger);
+}
+
+/* ── #finance under the page contract (plan §4 finance) ──────────────────────
+     00  AT A GLANCE — the verdict as the claim line (ruling 7: a tile that
+         would print its figure is not drawn), then six tiles: Money in (the
+         hero, every channel on its chosen basis), Platform payouts (its
+         counted-elsewhere sentence kept), On-trip revenue, Cash collected —
+         measured portion (its three states kept), Trip value booked and The
+         open week (both new, from /api/finance/daily). Money in, Platform
+         payouts and Trip value carry a week-on-week change over whole days
+         and a sparkline; Money in's over closed statement weeks only.
+     01  Money in, day by day — full width, one ink series, the open-week
+         days hatched as what they are: derived from that day's own fares.
+     02  Trip value a day | 03 Platform payouts a day.
+     04  How the rider paid — ranked bars, one per settlement class, each
+         still opening its own page.
+     05  What each priced tier earns — full width, headed by Fares, Average
+         fare and Revenue per km (the three tiles over priced trips only).
+     06  What makes up a payout — full width, added in ink, deducted in grey.
+     07  Tips by driver — headed by the fleet's Tips tile; the rate a plain
+         figure (a level is not better or worse), the order unchanged.
+     08  What the operator ledger added | 09 what it took out; the net line
+         and the unvalued categories beneath the pair.
+     †   fares coverage (the old note, word for word), money out (computed
+         from the operator ledger, never hard-coded), payouts counted
+         elsewhere.
+   NOT ADOPTED: Money in as Uber's statement alone (live counts every
+   channel); "every document a provider filed" and "over how many days each
+   runs" (#receipts' job, and an 11th fetch here); "superseded filings" (also
+   #receipts'); "ledger days 0 of 30" as fixed text (the rows carry ledger
+   amounts); a hard-coded "no cost feed". */
+function wholeDays(rows) {
+  const today = dubaiDay(new Date());
+  return rows.filter((r) => r.d < today);
+}
+/* The last seven whole days against the seven before them. Null — with the
+   true reason — when the window does not hold two whole weeks of the series
+   (derived open-week days are not the statement's and are left out of
+   Money in's comparison). */
+function finWow(rows, key, { skip = () => false } = {}) {
+  const days = wholeDays(rows).filter((r) => !skip(r) && r[key] != null && !r.nothing_recorded);
+  if (days.length < 14) {
+    return { value: null, na: `not compared: this window holds ${days.length} whole ${days.length === 1 ? 'day' : 'days'} of it, and a week against a week needs fourteen` };
+  }
+  const sum = (a) => a.reduce((x, r) => x + (+r[key] || 0), 0);
+  const now = sum(days.slice(-7)), before = sum(days.slice(-14, -7));
+  if (!before) return { value: null, na: 'not compared: the week before holds nothing, and a change against nothing is not a percentage' };
+  const a = days[days.length - 14].d, b = days[days.length - 8].d;
+  return { value: ((now - before) / before) * 100, unit: '%', of: `against ${dayStr(a)} – ${dayStr(b)}` };
+}
+async function financeContract(root) {
+  const gen = currentGen();
+  const band = el('section', 'cband');
+  const vHost = el('div');
+  const tilesHost = el('div');
+  band.append(secHead('00', 'At a glance', windowLabel()), vHost, tilesHost);
+  root.append(band);
+  loading(tilesHost);
+  const rev = panel('Money in, day by day',
+    'Everything the fleet was paid, by the day it was earned — the platforms’ own '
+    + 'statements where they file one, and the metered fare where they do not', 'fin-money');
+  root.append(rev.panel);
+  const g1 = el('div', 'grid g2'); root.append(g1);
+  const tv = panel('Trip value a day', 'Gross fare on every priced booking — what riders were charged. Never added to Money in.', 'fin-tripvalue');
+  const po = panel('Platform payouts a day', 'What the platforms wired, by the day the work was done.', 'fin-payouts');
+  g1.append(tv.panel, po.panel);
+  const pay = panel('How the rider paid', 'Cash vs card vs wallet — cash is money the fleet has to collect', 'fin-paymix');
+  root.append(pay.panel);
+  const tier = panel('What each priced tier earns',
+    `A tier appears here once its rides carry a fare. ${UBER_FARE_WHY}, so an Uber tier fills in `
+    + 'behind that walk while the hotel and Yango bookings, which are priced on the trip itself, '
+    + 'have always been here.', 'fin-tiers');
+  root.append(tier.panel);
+  const comp = panel('What makes up a payout', 'Fares, tips, promotions and what the platform deducts', 'fin-components');
+  root.append(comp.panel);
+  const tips = panel('Tips by driver', 'Service quality expressed in money. Riders tip the experience, not the route.', 'fin-tips');
+  root.append(tips.panel);
+  const g2 = el('div', 'grid g2'); root.append(g2);
+  const ladd = panel('What the operator ledger added', 'Bonuses and credits, largest first.', 'fin-led-add');
+  const ltook = panel('What it took out', 'Fees, VAT and adjustments, largest first — each a deduction.', 'fin-led-took');
+  g2.append(ladd.panel, ltook.panel);
+  const ledNote = el('div'); root.append(ledNote);
+  const absHost = el('div'); root.append(absHost);
+  [rev.body, tv.body, po.body, pay.body, tier.body, comp.body, tips.body, ladd.body, ltook.body].forEach(loading);
+
+  const [k, payDetail, byProd, ledger, components, tipRows, bySvc, fin, settle, reg] = await Promise.all([
+    q('/api/kpis'), q('/api/mix/detail', { by: 'payment' }), q('/api/mix'),
+    q('/api/finance/ledger'),
+    q('/api/earnings/components').catch(() => []),
+    q('/api/earnings/tips').catch(() => []),
+    q('/api/mix', { by: 'service' }).catch(() => []),
+    q('/api/finance/daily').catch(() => null),
+    q('/api/settlement/mix').catch(() => ({ classes: [] })),
+    /* The operator ledger, for Money out. Through qAll so the window goes
+       with it; the answer's own from/to say what it covered (the route read
+       only from/to until S5, and answered a named period with everything). */
+    qAll('/api/ledger/entries').catch(() => null),
+  ]);
+  if (!alive(gen)) return;
+  const cash = (settle.classes || []).find((c) => c.settlement_class === 'cash');
+  const tipList = Array.isArray(tipRows) ? tipRows : (tipRows?.rows || []);
+  const tipAll = tipRows?.totals || null;
+  const rankedTips = tipList.reduce((a, r) => a + (+r.tips || 0), 0);
+  const rankedFare = tipList.reduce((a, r) => a + (+r.fare || 0), 0);
+  const tipTotal = tipAll?.tips != null ? +tipAll.tips : rankedTips;
+  const fareTotal = tipAll?.fare != null ? +tipAll.fare : rankedFare;
+  const coverage = k.priced_pct != null
+    ? `${fmt(k.priced_trips)} of ${fmt(k.trips)} trips carry a fare (${pct(k.priced_pct, 1)})`
+    : 'no priced trips in this range';
+
+  /* ── 00 ──────────────────────────────────────────────────────────────── */
+  const vd = financeVerdict(cash, k);
+  verdict(vHost, vd);
+  const base = Object.fromEntries(financeTiles({ k, settle, cash, tipAll, tipTotal, fareTotal, coverage })
+    .map((t) => [t.label, t]));
+  const fr = (fin && fin.rows) || [];
+  const ft = fin?.totals || {};
+  const opens = (fin?.open_statement || []).filter((o) => o);
+  const spark = (key, skip = () => false) => wholeDays(fr).map((r) => (r.nothing_recorded || skip(r) ? null : (r[key] == null ? null : +r[key])));
+  const derived = (r) => !!r.money_derived;
+  const { tiles: shown, dropped } = notRepeated([
+    { ...base['Money in'], hero: true, delta: fr.length ? finWow(fr, 'money', { skip: derived }) : null,
+      spark: fr.length ? spark('money', derived) : null },
+    { ...base['Platform payouts'], delta: fr.length ? finWow(fr, 'payout') : null, spark: fr.length ? spark('payout') : null },
+    base['On-trip revenue'],
+    base['Cash collected — measured portion'],
+    fin ? { label: 'Trip value booked', value: money(ft.fares),
+      sub: `gross fare on ${fmt(ft.priced_trips)} priced of ${fmt(ft.bookings)} bookings — what riders were charged, never added to Money in`,
+      delta: finWow(fr, 'revenue'), spark: spark('revenue') }
+      : { label: 'Trip value booked', na: 'the daily money series did not load' },
+    fin && +ft.money_derived_part > 0 && opens.length
+      ? { label: 'The open week', value: money(ft.money_derived_part),
+        sub: opens.map((o) => `${sourceLabel(o.platform)} ${dayStr(o.open_start)} – ${dayStr(o.open_end)}, `
+          + `worked out at ${(o.rate * 100).toFixed(1)}% of that week's own fares over ${countOf(o.days, 'closed statement day')}`).join(' · ') }
+      : { label: 'The open week', na: fin ? 'no week in this window is waiting for its statement' : 'the daily money series did not load' },
+  ], vd.figure);
+  /* No tile keeps a tone: every one is a level, not a change (plan §4:
+     "these are levels"). Cash collected's warn and Money in's coverage warn
+     are said in their sub-lines, which are kept word for word. */
+  for (let i = 0; i < shown.length; i++) if (shown[i].tone) shown[i] = { ...shown[i], tone: null };
+  /* With no cash held the verdict's figure IS Money in, so ruling 7 drops
+     the hero tile; the next tile leads rather than a band with no hero. */
+  if (shown.length && !shown.some((t) => t.hero)) shown[0] = { ...shown[0], hero: true };
+  glance(tilesHost, shown);
+  if (dropped?.sub) {
+    const c = el('p', 'cap');
+    c.innerHTML = `<b>${esc(dropped.label)}</b> — ${esc(dropped.sub)}`;
+    band.append(c);
+  }
+
+  /* ── 01–03 · the day series ─────────────────────────────────────────── */
+  /* The open week's days are hatched — the form gapBars gives a day that
+     is not finished — because each is that day's own fares less the
+     platform's commission, not the platform's statement. */
+  financeDaily(rev, fin, { color: '--ink', hatchIf: derived,
+    hatchNote: 'the open week: this day\u2019s own fares less the platform\u2019s commission, not its statement' });
+  if (fr.some(derived)) {
+    rev.body.append(el('p', 'cap fin-derived-key', 'Hatched bars are the open week: each is that day’s own fares less '
+      + 'the platform’s commission at the rate measured over its closed weeks, because its statement has not been filed.'));
+  }
+  if (!fr.length) {
+    empty(tv.body, 'The daily money series did not load.');
+    empty(po.body, 'The daily money series did not load.');
+  } else {
+    gapBars(tv.body, fr.map((r) => ({ ...r, tv_gap: r.revenue == null })), { x: 'd', y: 'revenue', label: 'trip value',
+      color: '--ink', gapKey: 'tv_gap', gapLabel: 'no priced booking on this day', valueFmt: (v) => money(v) });
+    tv.body.append(el('p', 'cap', esc(`${money(ft.fares)} over the window, on ${fmt(ft.priced_trips)} of ${fmt(ft.bookings)} bookings that carry a fare of their own.`)));
+    gapBars(po.body, fr.map((r) => ({ ...r, po_gap: r.payout == null })), { x: 'd', y: 'payout', label: 'payouts',
+      color: '--ink', gapKey: 'po_gap', gapLabel: 'no payout statement covers this day yet', valueFmt: (v) => money(v) });
+    po.body.append(el('p', 'cap', esc(`${money(ft.payout)} over the window. A weekly payout is divided across its days here — an allocation, not a measurement of the day.`)));
+  }
+
+  /* ── 04 · how the rider paid ────────────────────────────────────────── */
+  paymentDonut(pay.body, payDetail, { as: 'bars', atRide: true });
+
+  /* ── 05 · tiers, headed by the three tiles over priced trips ─────────── */
+  financeTiers(tier, byProd, bySvc);
+  tier.body.prepend(kpiRow([base.Fares, base['Average fare'], base['Revenue per km']]));
+
+  /* ── 06 · the payout ────────────────────────────────────────────────── */
+  financeComponents(comp, components);
+
+  /* ── 07 · tips, headed by the fleet's tips ──────────────────────────── */
+  financeTips(tips, tipRows, tipList, tipAll, rankedTips, { plainRate: true });
+  tips.body.prepend(kpiRow([base.Tips]));
+
+  /* ── 08 | 09 · the operator ledger, each way ────────────────────────── */
+  ladd.body.innerHTML = ''; ltook.body.innerHTML = '';
+  if (!ledger.length) {
+    empty(ladd.body, 'Ledger fills once Yango/Bolt credentials are set');
+    empty(ltook.body, 'Ledger fills once Yango/Bolt credentials are set');
+  } else {
+    const priced = ledger.filter((r) => r.amount != null);
+    const unpriced = ledger.filter((r) => r.amount == null);
+    const addR = priced.filter((r) => +r.amount > 0).sort((a, b) => b.amount - a.amount);
+    const tookR = priced.filter((r) => +r.amount < 0).sort((a, b) => a.amount - b.amount);
+    const lab = (r) => String(r.category).replace(/_/g, ' ');
+    if (addR.length) hbars(ladd.body, addR.slice(0, 12).map((r) => ({ label: lab(r), n: +r.amount })), { signed: false, color: '--ink', valueFmt: (v) => money(v) });
+    else empty(ladd.body, priced.length ? 'No category added money in this range.' : 'No category carries an amount.');
+    if (tookR.length) hbars(ltook.body, tookR.slice(0, 12).map((r) => ({ label: lab(r), n: Math.abs(+r.amount) })), { signed: false, color: '--grey', valueFmt: (v) => money(-v) });
+    else empty(ltook.body, priced.length ? 'No category took money out in this range.' : 'No category carries an amount.');
+    const net = priced.reduce((a, r) => a + (+r.amount || 0), 0);
+    const plats = [...new Set(ledger.map((r) => r.platform).filter(Boolean))];
+    ledNote.append(el('p', 'cap', esc(!priced.length
+      ? `The ledger holds ${countOf(ledger.length, 'category', 'categories')} for this range and no amount on any line of any of them — a ledger nobody valued, not a ledger of noughts.`
+      : `Net across ${countOf(priced.length, 'category', 'categories')}: ${net < 0 ? '−' : ''}${money(Math.abs(net))}`
+        + (plats.length ? ` · reported by ${plats.map(sourceLabel).join(', ')}` : '') + '.'
+        + (unpriced.length ? ` ${countOf(unpriced.length, 'further category', 'further categories')} `
+          + `${plural(unpriced.length, 'appears', 'appear')} with no amount on any line and ${plural(unpriced.length, 'is', 'are')} left off `
+          + 'rather than drawn at nought.' : ''))));
+  }
+
+  /* ── † ───────────────────────────────────────────────────────────────── */
+  const wired = k.reported_payouts == null ? null : +k.reported_payouts;
+  const counted = k.accounted_payouts == null ? 0 : +k.accounted_payouts;
+  const elsewhere = k.uncounted_payouts != null ? +k.uncounted_payouts
+    : (wired != null && wired - counted >= 1 ? wired - counted : 0);
+  const rows = reg?.totals?.rows;
+  const span = reg && (reg.from || reg.to) ? `between ${reg.from || 'the first entry'} and ${reg.to || 'today'}` : 'over the whole record';
+  absenceBand(absHost, [
+    { label: 'Trips that carry a fare', hl: true, fig: k.priced_pct != null ? pct(k.priced_pct, 1) : null, none: 'None',
+      why: k.priced_pct != null && k.priced_pct < 90
+        ? `Fares cover ${pct(k.priced_pct, 1)} of trips — the other ${fmt(k.trips - k.priced_trips)} `
+          + 'carry no fare at all, because Uber’s trip export omits them and telematics trips have none. '
+          + 'That work is paid for, and the money arrives as weekly platform statements rather than per-trip '
+          + 'fares, which is what Platform payouts counts. The two are different measurements — a fare is what '
+          + 'a rider paid, a payout is a statement net of the platform’s commission — so Money in is their sum '
+          + 'and every tile below it is over fares only.'
+        : k.priced_pct != null ? 'Nearly every trip in this range carries a fare of its own.' : 'No trip in this range carries a fare.' },
+    { label: 'Money out', fig: null, none: 'No cost feed',
+      why: 'No provider feed reports what the fleet spends. '
+        + (reg ? `The operator ledger — charging, salary, advances — holds ${countOf(rows || 0, 'entry', 'entries')} ${span}; `
+          + 'it records what a person typed, not a cost feed.'
+          : 'The operator ledger did not answer, so what it holds is not known here.') },
+    { label: 'Payouts counted elsewhere', fig: elsewhere ? money(elsewhere) : 'None',
+      why: elsewhere ? 'Wired by the platforms and not counted as income here, because the same work is already counted on the '
+        + 'channel’s own statement or fares — adding both would count it twice.'
+        : 'Every payout wired in this range is counted as income.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), k.accounted != null ? `${money(k.accounted)} money in` : null] }, root);
+}
 
 /* Safety — three pages, because "which car" and "which person" and "what kind
    of event" are three different questions and the page answered only the first.

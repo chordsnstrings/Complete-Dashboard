@@ -1615,3 +1615,15 @@ Production, both skins at 1440 and 390, light and dark (scratchpad
 58 of 276 drivers carry half the ceiling; the last-cash-fare months show
 cash still coming in this month for about a hundred drivers. Found by
 looking and fixed before commit: "347 of 347 unknown" wrapped at 1440.
+
+### #finance — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/finance/`): no error, no sideways scroll, two
+highlights (the hero and the fare-coverage absence). The open week (Uber, 21
+to 27 Sept) is three hatched bars at the end of 01, worked out at 74.7% of
+that week's own fares; Money in's change (+20.7%) is over 14 to 20 Sept
+against the week before — closed statement days only — while Platform
+payouts' and Trip value's run to 16 Sept, each saying which week it
+compared. The sixth tile (The open week) wraps to a second row at 1440; left
+as it is, not reflowed.

@@ -6593,3 +6593,13 @@ number (5 and 5), and never a passport or RTA number.
   record back, silently. It resolves named periods now (S5). A new route
   that takes a window should take it through `api/window.js`, never by
   reading `from`/`to` alone — the client sends a period name by design.
+
+* **A bar marked after drawing is marked by position, and position is not
+  the row.** gapBars draws NO bar for a day nothing reported (a hole is
+  never a nought), so on #finance 31 rows drew 29 bars; the first draft
+  hatched the open week by walking the SVG's bars beside the rows, and
+  would have hatched the wrong days. Ask the datum (`hatchIf`, S6), never
+  the index.
+* **`test/type_scale.test.mjs` admits a token, a `clamp()` or an em as a
+  font size — `min()` is a literal by its rule.** Prove a CSS change
+  against the full suite, not only the test written for it.
