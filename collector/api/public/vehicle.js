@@ -1215,7 +1215,14 @@ async function tabSafety(root, plate) {
 }
 
 /* ── tab: compliance ─────────────────────────────────────────────────────── */
+/* Under the page contract (plan §4 #vehicle/compliance): restyled only — the
+   documents table and its days-left sort, the specification and the photo
+   note kept. Days left is a word, as on #compliance: expired in the negative
+   colour with its minus, under 30 days in ink at weight (amber is not a
+   token) in an ink outline chip, the rest grey; the platform a swatch and
+   an ink label, its status an outline chip. */
 async function tabCompliance(root, plate, prof) {
+  const ak = contract();
   const p = panel('Documents', 'Everything with an expiry date attached to this vehicle'); root.append(p.panel);
   const docs = prof.documents || [];
   p.body.innerHTML = '';
@@ -1224,11 +1231,13 @@ async function tabCompliance(root, plate, prof) {
   } else {
     p.body.append(tableFrom(docs, [
       { label: 'Document', key: 'doc_type' },
-      { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
-      { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', r.status === 'ACTIVE' ? 'ok' : 'warn') },
+      { label: 'Platform', key: 'platform', render: (r) => (ak ? chanCell(r.platform) : sourceLabel(r.platform)) },
+      { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', ak ? null : r.status === 'ACTIVE' ? 'ok' : 'warn') },
       { label: 'Expires', key: 'expires_at', render: (r) => dayStr(r.expires_at) },
       { label: 'Days left', key: 'days_left', num: true, render: (r) => (r.days_left == null ? '—'
-        : pill(r.days_left < 0 ? `expired ${Math.abs(r.days_left)}d ago` : `${r.days_left}d`, docTone(r.days_left))) },
+        : ak ? (r.days_left < 0 ? `<span style="color:var(--sem-neg);white-space:nowrap">expired · −${fmt(Math.abs(r.days_left))} d</span>`
+          : r.days_left < 30 ? pill(`${fmt(r.days_left)} d`) : `<span class="dim">${fmt(r.days_left)} d</span>`)
+          : pill(r.days_left < 0 ? `expired ${Math.abs(r.days_left)}d ago` : `${r.days_left}d`, docTone(r.days_left))) },
     ], { sortable: true, sortId: 'vdocs2', defaultSort: { key: 'days_left', dir: 'asc' } }));
     const soon = docs.filter((d) => d.days_left != null && d.days_left < 30);
     if (soon.length) p.body.append(el('p', 'cap',
@@ -1269,6 +1278,7 @@ async function tabCompliance(root, plate, prof) {
     img.src = s.image_url;
     spec.body.append(img);
   }
+  if (ak) pageFoot({ colophon: ['documents and specification', countOf(docs.length, 'document')] }, root);
 }
 
 /* ── tab: trips ──────────────────────────────────────────────────────────── */

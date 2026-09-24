@@ -446,4 +446,52 @@ if (want('vehicle-safety')) {
   }
 }
 
+/* ══ #vehicle/compliance ══════════════════════════════════════════════════ */
+if (want('vehicle-compliance')) {
+  console.log('\n#vehicle/compliance');
+  const H = 'vehicle/L45235/compliance';
+  /* Three documents (synthetic): one expired, one inside 30 days, one well
+     clear — the three treatments the plan names. */
+  const three = (q, real) => ({ ...real, documents: [
+    { doc_type: 'Vehicle Registration Form', platform: 'uber', status: 'ACTIVE', expires_at: '2026-12-31T00:00:00Z', days_left: 96 },
+    { doc_type: 'Insurance', platform: 'uber', status: 'EXPIRED', expires_at: '2026-09-12T00:00:00Z', days_left: -12 },
+    { doc_type: 'Permit', platform: 'uber', status: 'ACTIVE', expires_at: '2026-10-01T00:00:00Z', days_left: 7 },
+  ] });
+  const docs = (page) => page.evaluate(() => {
+    const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Documents');
+    const hs = [...p.querySelectorAll('thead th')].map((h) => h.textContent.replace(/[↑↓]/g, '').trim());
+    const at = (name) => hs.indexOf(name);
+    return [...p.querySelectorAll('tbody tr')].map((tr) => {
+      const d = tr.children[at('Days left')]; const st = tr.children[at('Status')]; const pl = tr.children[at('Platform')];
+      return { doc: tr.children[at('Document')]?.textContent.trim(), days: d?.textContent.trim(), neg: /--sem-neg/.test(d?.innerHTML || ''),
+        chip: d?.querySelector('.pill')?.className || null, dim: !!d?.querySelector('.dim'),
+        status: st?.querySelector('.pill')?.className || null, plat: !!pl?.querySelector('.pchip .sw') };
+    });
+  });
+  {
+    const { ctx, page } = await open('classic', H, { fixtures: { '/api/vehicle/profile': three } });
+    const r = await docs(page);
+    check('old skin: days left as toned pills', r.some((x) => /\b(bad|warn|err)\b/.test(x.chip || '')), JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', H, { fixtures: { '/api/vehicle/profile': three } });
+    const r = await docs(page);
+    check('days left ascending, as before', JSON.stringify(r.map((x) => x.doc)) === JSON.stringify(['Insurance', 'Permit', 'Vehicle Registration Form']), JSON.stringify(r.map((x) => x.doc)));
+    const [exp, soon, clear] = r;
+    check('expired: the negative colour as text, with its word and its minus — no chip', exp.neg && !exp.chip && exp.days === 'expired · −12 d', JSON.stringify(exp));
+    check('under 30 days: an ink outline chip (amber is not a token)', soon.chip === 'pill' && !soon.neg && soon.days === '7 d', JSON.stringify(soon));
+    check('the rest grey, no chip', clear.dim && !clear.chip && clear.days === '96 d', JSON.stringify(clear));
+    check('the status an outline chip and the platform a swatch', r.every((x) => x.status === 'pill' && x.plat), JSON.stringify(r.map((x) => [x.status, x.plat])));
+    const s = await shape(page);
+    check('both blocks kept, the colophon counts the documents', s.heads.includes('Documents') && s.heads.includes('Specification') && /3 documents/.test(s.colophon), JSON.stringify([s.heads, s.colophon]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', H, { width: 390 });
+    check('#vehicle/compliance at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

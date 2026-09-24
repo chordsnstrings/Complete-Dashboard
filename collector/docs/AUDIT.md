@@ -2067,3 +2067,7 @@ Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 39
 Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p63/`). No page error, no sideways scroll, and the fils scan is clean.
 
 The car runs 75.9 events per 100 km, 7.8 above the fleet's 68.1, drawn in the negative colour with its ▲ and sign. It had 4,445 events over the 5,859 km the feed covered. The event bars are in the alert feed's violet.
+
+### #vehicle/compliance — 2026-09-24
+
+Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p64/`). No page error, no sideways scroll. The car has one document, a Vehicle Registration Form (ACTIVE, 258 d, grey). The old skin's extra text over the arkiv page is the "scroll the table sideways" note, which a table that fits does not need.
