@@ -12,9 +12,9 @@
    "how much a driver can do" would turn an artefact of demand into a
    performance judgement about people. */
 
-import { empty, fmt, heatmap } from './charts.js';
+import { empty, fmt, heatmap, gapBars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, countOf, plural,
-  signed, foldRows, verdict, sourceLine } from './ui.js';
+  signed, foldRows, verdict, sourceLine, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
 import { q, api, href } from './data.js';
 import { dubaiDay } from './tz.js';
 
@@ -36,6 +36,13 @@ const hhmm = (h) => `${String(h).padStart(2, '0')}:00`;
 const isShort = (r) => r.driver_gap != null && r.driver_gap >= 0.5 && !r.thin;
 
 export async function renderCapacity(root) {
+  /* Under the page contract (plan §4 capacity): the verdict (its arithmetic
+     and wording unchanged — capacity_headline asserts them) and the tiles in
+     a 00 band, the hours short the hero and the rota ABSENT beside them; the
+     drivers each hour has run against the drivers it needs, and which weekday
+     is shortest, ahead of the tables; a † band. */
+  let capAK = null;
+  let capVerdict = null;
   root.innerHTML = '';
   loading(root);
   /* The channels are asked for the window the PROJECTION was fitted over, not
@@ -113,7 +120,8 @@ export async function renderCapacity(root) {
        turnout in each hour, not about a fleet with nobody left. */
     const reached = shortCells.filter((r) => r.most_drivers_seen != null
       && r.drivers_needed != null && r.most_drivers_seen >= r.drivers_needed).length;
-    verdict(root, {
+    capAK = contract() ? glanceBand(root, `for ${MONTH(d.target_month)}`) : null;
+    capVerdict = {
       claim: short
         ? `${fmt(short)} ${plural(short, 'hour')} of the week ${short === 1 ? 'is' : 'are'} short of people`
         : 'Every hour of the week is covered for the forecast',
@@ -147,10 +155,11 @@ export async function renderCapacity(root) {
       recommend: short
         ? 'Each hour below opens its own slot page, with who currently works it.'
         : null,
-    });
+    };
+    verdict(capAK ? capAK.vHost : root, capVerdict);
   }
 
-  root.append(kpiRow([
+  const CAP_TILES = [
     { label: `Bookings expected in ${MONTH(d.target_month)}`, value: fmt(d.target_bookings),
       sub: d.target_low != null ? `${fmt(d.target_low)} – ${fmt(d.target_high)}` : null,
       tone: d.forecast_kind === 'extrapolation' ? 'warn' : null },
@@ -198,7 +207,9 @@ export async function renderCapacity(root) {
     })(),
     { label: 'Hours with too little history', value: fmt(t.cells_thin),
       sub: 'seen fewer than four times — shown, not planned on', tone: t.cells_thin ? 'warn' : null },
-  ]));
+  ];
+  if (capAK) capacityGlance(capAK, CAP_TILES, d, capVerdict);
+  else root.append(kpiRow(CAP_TILES));
 
   if (d.forecast_kind === 'extrapolation') {
     root.append(el('div', 'note err',
@@ -206,6 +217,7 @@ export async function renderCapacity(root) {
       + 'than a forecast. Every figure below inherits that: read them as a shape, not as a rota.'));
   }
 
+  if (capAK) capacityCharts(root, d);
   /* ── where the gap is ─────────────────────────────────────────────────── */
   const g = el('div', 'grid g2'); root.append(g);
 
@@ -372,6 +384,12 @@ export async function renderCapacity(root) {
       + 'days it was fitted over, so a channel that stopped collecting lowers it',
   });
   if (src) root.append(src);
+  if (capAK) {
+    /* 01 is the heatmap (the plan's order): moved up to follow the band. */
+    const hm = [...root.querySelectorAll('.panel')].find((x) => x.querySelector('h3')?.textContent.trim() === 'Every hour of the week');
+    if (hm) capAK.band.after(hm);
+    capacityAbsence(root, d);
+  }
 }
 
 function gapTable(rows, id) {
@@ -398,4 +416,56 @@ function gapTable(rows, id) {
       render: (r) => `<span class="pill ${r.driver_gap > 0 ? 'bad' : 'ok'}">${esc(signed(r.driver_gap, { d: 1 }))}</span>` },
   ], { compact: true, sortable: true, sortId: `gap-${id}`,
     defaultSort: { key: 'driver_gap', dir: id === 'short' ? 'desc' : 'asc' } });
+}
+
+/* ── #capacity under the page contract ─────────────────────────────────────
+   Every figure here is a projection except the drivers an hour has run, so
+   the weekday columns are drawn in the unfinished form (hatched) and the
+   hour chart draws the projection as the line over the measured bars.
+   NOT BUILT: hatching every heatmap cell — charts.js heatmap has no hatched
+   form; the caption says every cell is a projection instead. */
+function capacityGlance(AK, tiles, d, vd) {
+  const t = d.totals || {};
+  glance(AK.tilesHost, bandTiles([
+    ...tiles.map((x) => (x.label === 'Hours needing more people' ? { ...x, hero: true, sub: `of 168 in the week — ${x.sub}` } : x)),
+    { label: 'The rota', na: 'no roster is in any feed, so who is scheduled for an hour is not known here — only who has turned up' },
+  ], { figure: vd?.figure, reasons: { 'Busiest single hour': 'no hour has enough history to size' } }).tiles);
+}
+function capacityCharts(root, d) {
+  const cells = d.cells || [];
+  const g = el('div', 'grid g2'); root.append(g);
+  const hp = panel('Drivers the hour has run, and the drivers still to find', 'Across a week: drivers each hour has had on an average occurrence (bars) and the drivers the projection needs (line).', 'cap-hours');
+  const wp = panel('Which weekday is shortest', 'Driver-hours short across each weekday, over the hours that read short — every column a projection.', 'cap-week');
+  g.append(hp.panel, wp.panel);
+  if (!cells.length) { empty(hp.body, 'No hour has enough history to size.'); empty(wp.body, 'No hour has enough history to size.'); return; }
+  const byH = Array.from({ length: 24 }, (_, h) => {
+    const mine = cells.filter((c) => +c.hour === h);
+    const now = mine.reduce((a, c) => a + (+c.drivers_per_occurrence || 0), 0);
+    const need = mine.filter((c) => c.drivers_needed != null).reduce((a, c) => a + +c.drivers_needed, 0);
+    return { x: hhmm(h), now: +now.toFixed(1), need: +need.toFixed(1), none: !mine.length };
+  });
+  gapBars(hp.body, byH, { x: 'x', y: 'now', label: 'drivers on an average occurrence', color: '--ink', gapKey: 'none',
+    gapLabel: 'no history for this hour', bucketNoun: 'hours', inProgress: false, secondary: 'need',
+    secondaryLabel: 'drivers the projection needs', secondaryLine: { color: '--grey', label: 'needed' }, valueFmt: (v) => fmt(v, 1) });
+  /* Over the hours that READ short (isShort — the verdict's own rule), so
+     the seven columns add to the verdict's driver-hours. Summing every
+     positive gap added the fractions under half a driver the verdict leaves
+     out, and drew ten times its figure on production (2026-09-24). */
+  const byD = DOW.map((name, dow) => ({ x: name, gap: +cells.filter((c) => +c.dow === dow && isShort(c))
+    .reduce((a, c) => a + (+c.driver_gap || 0), 0).toFixed(1) }));
+  gapBars(wp.body, byD, { x: 'x', y: 'gap', label: 'driver-hours short', color: '--ink', gapKey: '__none', bucketNoun: 'weekdays',
+    inProgress: false, hatchIf: () => true, hatchNote: `a projection for ${MONTH(d.target_month)}, not a measurement`, valueFmt: (v) => fmt(v, 1) });
+}
+function capacityAbsence(root, d) {
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'The rota', hl: true, fig: null, none: 'Not in any feed',
+      why: 'No provider files who is scheduled for an hour, so every gap here is against who has turned up, not who was rostered.' },
+    { label: 'The target\u2019s own range', fig: d.target_low != null ? `${fmt(d.target_low)} – ${fmt(d.target_high)}` : null, none: 'No range',
+      why: d.target_low != null ? `Every cell is sized on ${fmt(d.target_bookings)}; at the low end of the forecast the gaps shrink in proportion, at the high end they grow.`
+        : 'The forecast behind this page sent no interval.' },
+    { label: 'What a driver can do', fig: 'Measured',
+      why: 'Bookings per driver in each hour is what that hour\u2019s drivers have been doing, not a capacity; a busier hour can raise it.' },
+  ]);
+  pageFoot({ colophon: [`for ${MONTH(d.target_month)}`, `${fmt(d.window_days)} days of history`] }, root);
 }

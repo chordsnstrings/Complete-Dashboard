@@ -52,7 +52,7 @@ if (want('demand')) {
     const s = await shape(page);
     const D = answer('/api/trips/daily'), G = answer('/api/trips/heatmap');
     check('the section order is the plan\'s', JSON.stringify(s.heads) === JSON.stringify(HEADS), JSON.stringify(s.heads));
-    const vfig = await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig');
+    const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
     check('the verdict (unchanged arithmetic) is 00\'s statement and its figure is not a tile (ruling 7)',
       s.vdctIn00 && !!vfig && !Object.values(s.values).includes(vfig), `${vfig} ${JSON.stringify(s.values)}`);
     /* 02 and the hero agree: the hero is the tallest SOLID column. */
@@ -212,7 +212,7 @@ if (want('supply')) {
     check('#supply: 00, the rate grid, a typical week, what an hour buys, the area table, †',
       JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Which hours sell the drivers you are paying for', 'A typical week, hour by hour',
         'What an online hour actually buys', 'Where the waiting happens', '† What this page does not know']), JSON.stringify(s.heads));
-    const vfig = await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig');
+    const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
     check('the verdict is 00\'s statement; its figure, jobs per online hour, is not a tile (ruling 7)',
       s.vdctIn00 && !Object.values(s.values).includes(vfig) && !s.labels.some((l) => /jobs per online hour/i.test(l)), `${vfig} ${JSON.stringify(s.values)}`);
     check('idle hours lead, then online hours with the part on a job — the balance answer\'s totals',
@@ -264,7 +264,7 @@ if (want('platforms')) {
     check('share: 00, the dominance bar, completion and km by channel, the fleets, coverage, †',
       JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Every booking, by channel', 'Completion by channel, against the fleet',
         'How far a booking goes, by channel', 'Trips by fleet', 'Coverage & history depth', '† What this page does not know']), JSON.stringify(s.heads));
-    const vfig = await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig');
+    const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
     check('…no tile repeats the verdict\'s figure (the leading channel\'s share is the verdict\'s)', !Object.values(s.values).includes(vfig), `${vfig} ${JSON.stringify(s.values)}`);
     check('…bookings across every channel leads, from the mix answer', s.hero === 'Bookings across every channel' && s.values['Bookings across every channel'] === total.toLocaleString('en-US'), JSON.stringify(s.values));
     check('…work turned down is the kpis answer\'s declined offers', s.values['Work turned down'] === (+K.declined_offers).toLocaleString('en-US') || /offer/.test(s.na['Work turned down'] || ''), JSON.stringify([s.values, s.na]));
@@ -327,7 +327,7 @@ if (want('corridors')) {
       JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'The busiest routes between two areas', 'Where jobs start',
         'How far a route runs, and what it earns', 'Morning areas and evening areas', 'Work that never leaves the area', 'Common routes',
         '† What this page does not know']), JSON.stringify(s.heads));
-    const vfig = await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig');
+    const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
     check('the verdict is 00\'s statement and no tile repeats its figure', s.vdctIn00 && !Object.values(s.values).includes(vfig), `${vfig} ${JSON.stringify(s.values)}`);
     const named = C.corridors.filter((r) => r.from_area !== '(unrecorded)' && r.to_area !== '(unrecorded)');
     const same = named.filter((r) => r.from_area === r.to_area);
@@ -385,7 +385,7 @@ if (want('causes')) {
       JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Trips per month', 'What moved, at each break', 'How many drivers', 'What each one did',
         'Big jumps between months', 'Coverage gaps', 'What was on in Dubai', 'Fewer drivers, or less work?', '† What this page does not know']), JSON.stringify(s.heads));
     check('the largest move is the hero, and no tile repeats the verdict\'s figure', s.hero === 'Largest move'
-      && !Object.values(s.values).includes(await txtOf(page, '#view .cband .vdct-n, #view .cband .vdct-fig')), JSON.stringify(s.values));
+      && !Object.values(s.values).includes(await txtOf(page, '#view .cband .vdct-fig > b')), JSON.stringify(s.values));
     const all = [...(T.breaks || [])].sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
     const big = all.find((b) => !b.boundary_artifact) || all[0];
     const sp = big && big.drivers_from && big.drivers_to ? (() => { const p0 = big.trips_from / big.drivers_from; const head = (big.drivers_to - big.drivers_from) * p0;
@@ -485,6 +485,61 @@ if (want('optimise')) {
   {
     const { ctx, page } = await open('arkiv', 'optimise', { width: 390 });
     check('#optimise at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
+/* ══ #capacity ════════════════════════════════════════════════════════════ */
+if (want('capacity')) {
+  console.log('\n#capacity');
+  {
+    const { ctx, page } = await open('classic', 'capacity');
+    check('old skin: no 00 band', !(await page.$('#view .cband')));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'capacity');
+    const s = await shape(page);
+    const C = answer('/api/capacity');
+    check('00, the heatmap first, then the hours and the weekdays, the tables, †', s.heads[1] === 'Every hour of the week'
+      && s.heads.includes('Drivers the hour has run, and the drivers still to find') && s.heads[s.heads.length - 1] === '† What this page does not know', JSON.stringify(s.heads));
+    const claim = await txtOf(page, '#view .cband .vdct');
+    check('the verdict (its wording, which capacity_headline asserts) is 00\'s statement', s.vdctIn00 && /\d+ hours? of the week (is|are) short of people|covered for the forecast/.test(claim), claim.slice(0, 120));
+    check('hours short is the hero, said out of 168', s.hero === 'Hours needing more people' && s.values['Hours needing more people'] === (+C.totals.cells_short).toLocaleString('en-US')
+      && /of 168/.test(s.subs['Hours needing more people']), JSON.stringify([s.values['Hours needing more people'], s.subs['Hours needing more people']]));
+    check('the rota is ABSENT with the true reason', /no roster is in any feed/.test(s.na['The rota'] || ''), JSON.stringify(s.na));
+    const wk = await fills(page, '[data-panel="cap-week"]');
+    check('the weekday columns are all hatched — every one a projection', wk.length === 7 && wk.every((b) => hatched(b.f)), JSON.stringify(wk.map((b) => b.f.slice(0, 6))));
+    /* The columns are the verdict's driver-hours, split by weekday: the same
+       short hours (driver_gap ≥ 0.5, not thin), so their heights are in the
+       proportion those sums are, and together they are the verdict's figure. */
+    const short = (c) => c.driver_gap != null && c.driver_gap >= 0.5 && !c.thin;
+    const byD = [0, 1, 2, 3, 4, 5, 6].map((d) => C.cells.filter((c) => +c.dow === d && short(c)).reduce((a, c) => a + +c.driver_gap, 0));
+    const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
+    const top = Math.max(...byD), hTop = Math.max(...wk.map((b) => b.h));
+    check('…one column per weekday, each the verdict\'s short hours on that day, adding to its figure',
+      wk.length === 7 && String(Math.ceil(byD.reduce((a, b) => a + b, 0))) === vfig.replace(/,/g, '')
+      && wk.every((b, i) => Math.abs(b.h / hTop - byD[i] / top) < 0.05), JSON.stringify({ vfig, byD: byD.map((x) => +x.toFixed(1)), h: wk.map((b) => Math.round(b.h)) }));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    await ctx.close();
+  }
+  {
+    /* Hours short by less than half a driver are not "short" (isShort), so
+       the weekday columns leave them out, as the verdict does. */
+    const small = (_q, real) => ({ ...real, cells: real.cells.map((c) => (c.driver_gap != null && c.driver_gap < 0.5 ? { ...c, driver_gap: 0.3, thin: false } : c)) });
+    const { ctx, page, answer } = await open('arkiv', 'capacity', { fixtures: { '/api/capacity': small } });
+    const C = answer('/api/capacity');
+    const wk = await fills(page, '[data-panel="cap-week"]');
+    const short = (c) => c.driver_gap != null && c.driver_gap >= 0.5 && !c.thin;
+    const byD = [0, 1, 2, 3, 4, 5, 6].map((d) => C.cells.filter((c) => +c.dow === d && short(c)).reduce((a, c) => a + +c.driver_gap, 0));
+    const top = Math.max(...byD), hTop = Math.max(...wk.map((b) => b.h));
+    check('hours short by under half a driver stay out of the weekday columns, as they stay out of the verdict',
+      wk.every((b, i) => Math.abs(b.h / hTop - byD[i] / top) < 0.05), JSON.stringify({ byD: byD.map((x) => +x.toFixed(1)), h: wk.map((b) => Math.round(b.h)) }));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'capacity', { width: 390 });
+    check('#capacity at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
     await ctx.close();
   }
 }

@@ -1748,3 +1748,10 @@ Production (This month), both skins at 1440 and 390, light and dark
 (scratchpad `pagephase/shots/optimise/`): no error, no sideways scroll. Al
 Garhoud runs +1,201 bookings over arrivals while Dubai Int'l Airport piles
 up −483 — the same Terminal 3 written two ways, which the caption names.
+
+### #capacity — 2026-09-24
+
+Production (for Oct 2026), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/capacity/`): no error, no sideways scroll. 7
+hours of the week are short, 4 driver-hours in a week; the weekday columns
+now add to that. Wednesday 15:00 is the busiest single hour.

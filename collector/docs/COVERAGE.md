@@ -6649,3 +6649,8 @@ number (5 and 5), and never a passport or RTA number.
   source was silent on still carries every other source's bookings, in the
   daily row and in `/api/trips/heatmap`. Only `uncollected` takes a day out
   of a per-day denominator.
+
+* **`.vdct-fig` holds the verdict's figure AND its unit and meta.** The
+  figure alone is `.vdct-fig > b`. A test comparing tile values with
+  `.vdct-fig`'s text can never find a match and passes whatever the page
+  does.
