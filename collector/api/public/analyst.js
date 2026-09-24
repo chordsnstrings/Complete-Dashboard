@@ -18,7 +18,7 @@
 
 import { empty, fmt, hbars, barChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, pct, dtStr, dayStr, countOf,
-  sentence, sourceLabel, sourceToken, swatch, contract, glance, secHead, absenceBand, pageFoot } from './ui.js';
+  sentence, sourceLabel, sourceToken, swatch, contract, glance, secHead, absenceBand, pageFoot, money } from './ui.js';
 import { q, api, href, state, currentGen, alive, windowLabel } from './data.js';
 
 export const ANALYST_TABS = [
@@ -150,8 +150,14 @@ function findingCard(f, { neutral = false } = {}) {
   const unit = u === '%' ? '%' : u ? ` ${u}` : '';
   /* Under the contract a value the database could not measure says so in
      the value slot, and its reason is the verdict's, printed above it. */
+  /* Ruling 2, money to the fils: an AED metric printed fmt(v, 1) + " AED" —
+     "116 AED" beside "59.8 AED", neither a money figure (found by scanning
+     the rendered text for AED amounts with no fils, 2026-09-24). Under the
+     contract it is money(), as every other amount on the dashboard is; the
+     old skin keeps its own rendering. */
+  const isAed = neutral && u === 'AED';
   const val = (v) => (neutral && (v == null || v === '')
-    ? '<span class="an-na">not measured</span>' : `${fmt(v, 1)}${unit}`);
+    ? '<span class="an-na">not measured</span>' : isAed ? money(v) : `${fmt(v, 1)}${unit}`);
   const chip = neutral
     ? `<span class="pill an-chip" data-verdict="${esc(f.verdict)}"><span aria-hidden="true">${esc(VERDICT_GLYPH[f.verdict] || '')}</span>${esc(f.verdict)}</span>`
     : pill(f.verdict, TONE[f.verdict]);
@@ -168,7 +174,7 @@ function findingCard(f, { neutral = false } = {}) {
         <div><span>everything else</span><b class="num">${val(f.baseline_value)}</b>
              <i>${fmt(f.baseline_n)} records</i></div>
         <div><span>difference</span><b class="num">${f.effect == null ? (neutral ? '<span class="an-na">not measured</span>' : '—')
-          : (f.effect > 0 ? '+' : '') + fmt(f.effect, 1) + unit}</b>
+          : isAed ? (f.effect > 0 ? '+' : '') + money(f.effect) : (f.effect > 0 ? '+' : '') + fmt(f.effect, 1) + unit}</b>
              <i>${f.effect_pct == null ? 'not comparable' : pct(f.effect_pct, 1) + ' of baseline'}</i></div>
         <div><span>by chance?</span><b class="num">${f.p_value == null ? 'no test'
           : f.p_value < 0.001 ? 'p &lt; 0.001' : 'p = ' + Number(f.p_value).toFixed(3)}</b>

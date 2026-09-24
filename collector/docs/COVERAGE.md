@@ -6677,3 +6677,11 @@ number (5 and 5), and never a passport or RTA number.
   actually sent" to the END of the file** and asserts no `panel(` in that
   slice. Helpers appended at the module end read as a new panel inside the
   raw block; put them above `renderTrip` (declarations hoist).
+
+* **Ruling 2 cannot be checked in the source.** A whole-dirham amount hides
+  in a string literal (a worked example in a caption), in a unit appended
+  to fmt() ("116 AED"), or in a histogram caption — none of them a money()
+  call. Scan the RENDERED text of the page, titles and SVG `<title>`s
+  included, for "AED" and a number with no fils: `test/arkiv_fils.test.mjs`
+  does it for every converted page against the mock. A page converted
+  after it belongs in its ROUTES list.

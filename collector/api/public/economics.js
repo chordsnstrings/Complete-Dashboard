@@ -1132,7 +1132,7 @@ const histogram = (vals, step) => {
   const top = Math.ceil(Math.max(...v) / step) * step;
   const out = [];
   for (let lo = 0; lo < Math.max(top, step); lo += step) {
-    out.push({ band: `${fmt(lo)}–${fmt(lo + step)}`, n: v.filter((x) => x >= lo && (x < lo + step || (lo + step >= top && x <= top))).length });
+    out.push({ band: `${fmt(lo)}–${fmt(lo + step)}`, lo, hi: lo + step, n: v.filter((x) => x >= lo && (x < lo + step || (lo + step >= top && x <= top))).length });
   }
   return out;
 };
@@ -1206,8 +1206,11 @@ async function moneyTabContract(root) {
     const med = sorted[Math.floor(sorted.length / 2)];
     const top = h.reduce((m, x) => (x.n > m.n ? x : m), h[0]);
     const stats = el('p', 'cap');
-    stats.innerHTML = `AED per earning day, in AED 50 bands, over ${fmt(perDay.length)} cars that earned on at least one day · `
-      + `median <b>${esc(money(med))}</b> · the most cars sit in <b class="unit-top">AED ${esc(top.band)}</b> (${fmt(top.n)}) · `
+    /* Ruling 2 reaches the prose too: "in AED 50 bands" and "AED 250–300"
+       were whole-dirham amounts in a caption (found by scanning the rendered
+       text, 2026-09-24). The bars' own axis keeps its short band labels. */
+    stats.innerHTML = `AED per earning day, in bands of ${esc(money(50))}, over ${fmt(perDay.length)} cars that earned on at least one day · `
+      + `median <b>${esc(money(med))}</b> · the most cars sit in <b class="unit-top">${esc(money(top.lo))} to ${esc(money(top.hi))}</b> (${fmt(top.n)}) · `
       + `the fleet rate is ${esc(money(t.aed_per_earning_day))} over ${fmt(t.earning_vehicle_days)} earning days.`;
     hist.body.append(stats);
     highlight(stats.querySelector('.unit-top'), 'ink');
@@ -1227,7 +1230,7 @@ async function moneyTabContract(root) {
   else {
     barChart(phist.body, histogram(pDay, 50), { x: 'band', y: 'n', color: '--ink', label: 'people',
       aria: 'People by money per day worked' });
-    phist.body.append(el('p', 'cap', esc(`AED per day worked, in AED 50 bands, over ${countOf(pDay.length, 'person', 'people')} `
+    phist.body.append(el('p', 'cap', esc(`AED per day worked, in bands of ${money(50)}, over ${countOf(pDay.length, 'person', 'people')} `
       + `with a day driven and money reaching them. The fleet rate is ${money(dt.aed_per_day_worked)} over ${fmt(dt.worked_days)} person-days.`)));
   }
   const dots = A.rows.filter((r) => num(r.days_earning) > 0 && num(r.aed_per_earning_day) != null);

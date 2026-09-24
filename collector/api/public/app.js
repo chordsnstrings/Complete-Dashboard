@@ -4075,7 +4075,7 @@ function financeTips(tips, tipRows, tipList, tipAll, rankedTips, { plainRate = f
     tips.body.append(el('p', 'cap',
       `Tip rate is tips as a share of net fare. ${plainRate ? 'It is a plain figure — a level is not better or worse — dimmed below'
         : 'It is only toned above'} ${money(FARE_FLOOR)} of net fare, `
-      + 'because a 15% rate on AED 63 outranks a 6% rate on AED 506 while meaning less. '
+      + 'because a 15% rate on AED 63.00 outranks a 6% rate on AED 506.00 while meaning less. '
       + 'It reflects the ride experience more than the route, which is what makes it coachable.'
       + (rankedTotal > SHOWN
         ? ` Showing the ${fmt(SHOWN)} highest of ${countOf(rankedTotal, 'ranked driver')}.` : '')
