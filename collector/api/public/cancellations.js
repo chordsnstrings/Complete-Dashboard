@@ -18,7 +18,8 @@
    in the window — a caveat about data nobody is looking at teaches people to
    skip caveats. */
 import { el, esc, panel, loading, note, kpiRow, tableFrom, pill, fmt, entity,
-  dialable, sourceLabel } from './ui.js';
+  dialable, sourceLabel, sourceToken, pct, countOf, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
+import { hbars, barChart, donut } from './charts.js';
 /* q(), NOT api() + filterQuery(). filterQuery builds the query string for a
    LINK — it deliberately omits the window on views that hide the range
    control, and it is not what a page fetches with. params()/q() is, and every
@@ -31,7 +32,7 @@ import { el, esc, panel, loading, note, kpiRow, tableFrom, pill, fmt, entity,
    to 2000-01-01..2100-01-01. A window control that silently governs nothing is
    worse than no control: it tells the reader a figure is bounded when it is
    not. */
-import { q } from './data.js';
+import { q, windowLabel } from './data.js';
 
 /* Declining an offer and abandoning an accepted job are different behaviours
    and only the second leaves a rider standing in the street. They used to be
@@ -65,6 +66,11 @@ const droppedDetail = (r) => {
    were shown, which is what an em-dash here would let a reader conclude about
    a named person. */
 const declinedCell = (r) => {
+  if (r.declined && contract()) {
+    return `<span title="${esc('Offered and either declined or left unanswered. Bolt broadcasts an offer '
+      + 'to several drivers at once, so one ride can be declined by several people, '
+      + 'and nobody was left waiting by it.')}"${r.declined >= 20 ? ' style="font-weight:600"' : ''}>${fmt(r.declined)}</span>`;
+  }
   if (r.declined) {
     return pill(fmt(r.declined), r.declined >= 20 ? 'warn' : null,
       'Offered and either declined or left unanswered. Bolt broadcasts an offer '
@@ -98,7 +104,18 @@ export async function renderCancellations(root) {
   root.innerHTML = '';
 
   const t = d.totals || {};
-  root.append(kpiRow([
+  /* Under the page contract (plan §4 cancellations): the five tiles as a 00
+     band with Dropped a job the hero — the figure the table is ordered by —
+     and the two sub-lines the plan adds; then a compact hero row (who called
+     it off, what a driver cancellation was); then the table, unchanged and
+     directly under it, because it is the list operators ring from; then the
+     cancellations per driver by rank and dropped-after-accepting by group; a
+     † band holding the API's unattributed sentence, the offers note and the
+     ratings, text unchanged. Counts lose their red/amber pill fills — a count
+     is not a direction — and carry weight at the old thresholds instead. */
+  const ak = contract();
+  const rows0 = d.rows || [];
+  const CANC_TILES = [
     { label: 'Cancellations', value: fmt(t.cancelled), sub: 'in this window' },
     /* Split, for the same reason the column is. One tile reading "by the
        driver" over a number that is three-quarters declined offers is the
@@ -116,7 +133,19 @@ export async function renderCancellations(root) {
        when it is zero leaves a reader unsure whether it was measured. */
     { label: 'Nobody said who', value: fmt(t.unattributed || 0),
       sub: t.unattributed ? 'the channel does not report it' : 'every channel named the actor' },
-  ]));
+  ];
+  if (ak) {
+    const AKB = glanceBand(root, windowLabel());
+    const bk = rows0.reduce((a, r) => a + (Number(r.bookings) || 0), 0);
+    const none = rows0.filter((r) => !r.dropped && !r.declined).length;
+    glance(AKB.tilesHost, bandTiles(CANC_TILES.map((x) => (x.label === 'Dropped a job'
+      ? { ...x, hero: true, sub: `${x.sub}${!rows0.length ? ''
+        : none ? ` · ${countOf(none, 'driver')} called none off themselves` : ' · every driver here called at least one off'}` }
+      : x.label === 'Cancellations' && bk
+        ? { ...x, sub: `${pct((Number(t.cancelled) / bk) * 100, 1)} of the ${fmt(bk)} bookings these ${countOf(rows0.length, 'driver')} took` }
+        : x))).tiles);
+    cancHero(root, d, t, rows0);
+  } else root.append(kpiRow(CANC_TILES));
 
   const p = panel('Cancellations by driver',
     'Ordered by the jobs somebody was left waiting for. Every column sorts.');
@@ -201,7 +230,9 @@ export async function renderCancellations(root) {
        then ended it, and somebody was waiting for it. */
     { label: 'Dropped a job', key: 'dropped', num: true,
       absent: 'A blank here is a driver who ended no job they had already accepted.',
-      render: (r) => (r.dropped
+      render: (r) => (r.dropped && ak
+        ? `<span title="${esc(droppedDetail(r) || '')}"${r.dropped >= 5 ? ' style="font-weight:600"' : ''}>${fmt(r.dropped)}</span>`
+        : r.dropped
         ? pill(fmt(r.dropped), r.dropped >= 5 ? 'err' : 'warn', droppedDetail(r) || undefined)
         : '—') },
     /* A different act, on a channel most of the fleet does not work. */
@@ -231,13 +262,23 @@ export async function renderCancellations(root) {
        up at all. */
   ], { sortable: true, defaultSort: { key: 'dropped', dir: 'desc' } }));
 
-  if (d.unattributed_why) p.body.append(note(d.unattributed_why));
+  if (d.unattributed_why && !ak) p.body.append(note(d.unattributed_why));
   /* Printed WHENEVER the offers column has anything in it, because the column
      is the part of this page most easily misread: the two numbers beside each
      other invite a reader to add them, and they do not add to anything an
      operator should act on. Says how many of the people on screen are even on
      a channel that reports an offer, so the blanks are accounted for. */
-  if (t.declined) {
+  const offersNote = t.declined ? (() => {
+    const ch = (d.offer_channels || []).map(sourceLabel).join(' and ') || 'no channel';
+    return `${fmt(t.declined)} of these are offers a driver declined or left unanswered, and `
+      + `${ch} is the only channel that files them — `
+      + `${fmt(d.offer_channel_drivers)} of the ${fmt(rows.length)} drivers here worked it in `
+      + 'this window. They are shown apart from dropped jobs rather than added to them: '
+      + 'an offer is broadcast to several drivers at once and refusing one leaves nobody '
+      + 'waiting, while abandoning a job that was accepted does. Added together they rank '
+      + 'a driver by which app they are on.';
+  })() : null;
+  if (t.declined && !ak) {
     const ch = (d.offer_channels || []).map(sourceLabel).join(' and ') || 'no channel';
     p.body.append(note(
       `${fmt(t.declined)} of these are offers a driver declined or left unanswered, and `
@@ -249,4 +290,92 @@ export async function renderCancellations(root) {
       + 'a driver by which app they are on.'));
   }
   root.append(p.panel);
+  if (ak) {
+    cancByRank(root, rows);
+    cancByGroup(root, rows);
+    cancAbsence(root, d, rows, offersNote);
+  }
+}
+
+/* ── cancellations under the page contract ───────────────────────────────── */
+/* Who called it off, four bars named as the tiles name them, and what a
+   driver cancellation was made of.
+   A rider is not a channel, so the rider and driver bars are ink and grey;
+   "nobody said who" wears the colour of the one channel that filed those
+   rows, and ink when more than one did (the review's data correction). */
+function cancHero(root, d, t, rows) {
+  const g = el('div', 'grid g2'); root.append(g);
+  const a = panel('Who called it off', 'Every cancellation in this window, by who ended it', 'canc-who');
+  const b = panel('What a driver cancellation was', 'The acts filed against drivers, kept apart as the table keeps them', 'canc-what');
+  g.append(a.panel, b.panel);
+  const up = d.unattributed_platforms || [...new Set(rows.flatMap((r) => r.unattributed_platforms || []))];
+  const unColour = up.length === 1 ? (sourceToken(up[0]) || '--ink') : '--ink';
+  hbars(a.body, [
+    { label: 'By the rider', n: Number(t.by_rider) || 0, c: '--ink' },
+    { label: 'Dropped a job', n: Number(t.dropped) || 0, c: '--grey' },
+    { label: 'Offers not taken', n: Number(t.declined) || 0, c: '--grey' },
+    { label: `Nobody said who${up.length === 1 ? ` · ${sourceLabel(up[0])}` : ''}`, n: Number(t.unattributed) || 0, c: unColour },
+  ], { signed: false, colorFor: (x) => x.c });
+  /* A composition, one bar cut four ways, each segment in the colour of the
+     channel whose own status word it is (Bolt twice: its offers and its
+     after-accept status are both Bolt's), the counts beneath it. */
+  const sum = (k) => rows.reduce((x, r) => x + (Number(r[k]) || 0), 0);
+  const parts = [
+    { label: 'Bolt offers declined or unanswered', n: Number(t.declined) || 0, c: '--c-bolt' },
+    { label: 'Uber jobs cancelled after accepting', n: sum('driver_cancelled_uber'), c: '--c-uber' },
+    { label: 'Bolt jobs abandoned after accepting', n: sum('driver_after_accept'), c: '--c-bolt' },
+    { label: 'Nobody said who — kept apart', n: Number(t.unattributed) || 0, c: unColour },
+  ].filter((x) => x.n > 0);
+  if (!parts.length) { b.body.append(note('No driver cancelled anything in this window.')); return; }
+  const box = el('div'); b.body.append(box);
+  donut(box, parts, { as: 'bar100', colorFor: (x) => x.c });
+  b.body.append(el('p', 'cap', `${parts.map((x) => `${x.label} ${fmt(x.n)}`).join(' · ')}.`));
+}
+function cancByRank(root, rows) {
+  const p = panel('Cancellations per driver, by rank', 'One column per driver, most first', 'canc-rank');
+  root.append(p.panel);
+  const r = [...rows].map((x) => Number(x.cancelled) || 0).sort((x, y) => y - x);
+  if (!r.length) { p.body.append(note('No driver cancelled anything in this window.')); return; }
+  barChart(p.body, r.map((n, i) => ({ k: String(i + 1), n })), { x: 'k', y: 'n', color: '--mk-fill', label: 'cancellations',
+    aria: 'Cancellations per driver, by rank' });
+  const med = r.length % 2 ? r[(r.length - 1) / 2] : (r[r.length / 2 - 1] + r[r.length / 2]) / 2;
+  p.body.append(el('p', 'cap', `${countOf(r.length, 'driver')}: the most cancelled ${fmt(r[0])}, the median ${fmt(med, 1)}.`));
+}
+/* Dropped after accepting, on the one basis both groups share: dropped over
+   the jobs that reached them as a dispatch (accepted), never over bookings —
+   a Bolt driver's bookings hold offers they never took. */
+function cancByGroup(root, rows) {
+  const p = panel('Dropped after accepting, by who works Bolt', 'Dropped jobs over the jobs that reached them — the basis both groups share', 'canc-group');
+  root.append(p.panel);
+  const grp = (on) => { const g = rows.filter((r) => !!r.on_offer_channel === on);
+    const acc = g.reduce((x, r) => x + (Number(r.accepted) || 0), 0), dr = g.reduce((x, r) => x + (Number(r.dropped) || 0), 0);
+    return { n: g.length, acc, dr, rate: acc ? (dr / acc) * 100 : null }; };
+  const on = grp(true), off = grp(false);
+  const bars = [
+    on.rate != null ? { label: `Work Bolt · ${countOf(on.n, 'driver')}`, n: +on.rate.toFixed(1) } : null,
+    off.rate != null ? { label: `Do not · ${countOf(off.n, 'driver')}`, n: +off.rate.toFixed(1) } : null,
+  ].filter(Boolean);
+  if (!bars.length) { p.body.append(note('No job in this window reached a driver as a dispatch, so there is no base to divide by.')); return; }
+  hbars(p.body, bars, { signed: false, color: '--mk-fill', valueFmt: (v) => `${fmt(v, 1)}%` });
+  p.body.append(el('p', 'cap', `${fmt(on.dr)} dropped of ${fmt(on.acc)} accepted by drivers who work Bolt; `
+    + `${fmt(off.dr)} of ${fmt(off.acc)} by the rest.`));
+}
+function cancAbsence(root, d, rows, offersNote) {
+  const noRating = rows.filter((r) => r.rating == null).length;
+  /* The rating is the channel's own, off its driver record (cancellation_sql
+     reads driver_platform_state, Uber's first); the channels named are the
+     ones whose rating reached any row here. */
+  const rated = [...new Set(rows.map((r) => r.rating_platform).filter(Boolean))].map(sourceLabel);
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Who cancelled, on some channels', hl: !!(d.totals || {}).unattributed, fig: (d.totals || {}).unattributed ? fmt(d.totals.unattributed) : null, none: 'Every channel said',
+      why: d.unattributed_why || 'Every cancellation in this window came from a channel that names who ended it.' },
+    { label: 'Offers on the other channels', fig: null, none: 'Not filed',
+      why: offersNote || 'Only Bolt files the offers a driver was shown; no offer was filed in this window.' },
+    { label: 'A rating', fig: noRating ? `${fmt(noRating)} of ${fmt(rows.length)}` : null, none: 'Every one rated',
+      why: noRating ? `No channel's driver record carries a rating for any account of theirs. ${rated.length
+        ? `The ratings shown are ${rated.join(' and ')}'s own, named beside each figure.` : 'No rating reached any driver here.'}`
+        : 'Every driver here carries a rating.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), `${fmt((d.totals || {}).cancelled)} cancellations`] }, root);
 }

@@ -1907,3 +1907,17 @@ expiring", every one of the 60 already lapsed and 0 due within 30 days —
 where the old skin reads "Licences due 60 · expiring within 30 days". 44
 of the 60 carry the same expiry date, 1 Jan 2026; 59 of 60 are still
 marked able to earn; 235 of the 308 in the source have no licence date.
+
+### #cancellations — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/cancellations/`): no error, no sideways scroll,
+no whole-dirham amount in either skin. 2,092 cancellations, 11.9% of the
+17,560 bookings the 117 drivers took; 124 dropped jobs (96 Uber after
+accepting, 28 Bolt after accepting), 168 Bolt offers not taken, 1,781 by
+the rider, 19 nobody said who — all 19 from one channel, so that bar wears
+its colour. Dropped after accepting: 85 of 12,240 accepted (0.7%) by the 83
+who work Bolt, 39 of 5,152 (0.8%) by the 34 who do not. 19 of 117 carry no
+rating. Found by looking and fixed before commit: at 390 the bar labels were
+cut off mid-word, so the four bars now carry the tiles' own short names; the
+rank columns were drawn in --ink, and are now the job token.

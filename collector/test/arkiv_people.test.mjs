@@ -687,4 +687,91 @@ if (want('cohort')) {
   }
 }
 
+/* ══ #cancellations ═══════════════════════════════════════════════════════ */
+if (want('cancellations')) {
+  console.log('\n#cancellations');
+  {
+    const { ctx, page } = await open('classic', 'cancellations');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      tiles: document.querySelectorAll('#view .kpis > .kpi').length,
+      pills: document.querySelectorAll('#view td .pill.err, #view td .pill.warn').length,
+      notes: document.querySelectorAll('#view .panel .note').length }));
+    check('old skin: no band, the five tiles, the counts still red/amber pills, the notes under the table',
+      !r.band && r.tiles === 5 && r.pills > 0 && r.notes >= 1, JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'cancellations');
+    const s = await shape(page);
+    const d = answer('/api/cancellations');
+    const t = d.totals || {};
+    const R = d.rows || [];
+    const n = (v) => (+v || 0).toLocaleString('en-US');
+    check('00: five tiles off the totals, Dropped a job the hero', s.glance === 5 && s.hero === 'Dropped a job'
+      && s.values.Cancellations === n(t.cancelled) && s.values['Dropped a job'] === n(t.dropped)
+      && s.values['Offers not taken'] === n(t.declined) && s.values['By the rider'] === n(t.by_rider)
+      && s.values['Nobody said who'] === n(t.unattributed), JSON.stringify([s.hero, s.values, t]));
+    const bk = R.reduce((a, r) => a + (+r.bookings || 0), 0);
+    const pc = ((+t.cancelled / bk) * 100).toFixed(1);
+    check('the plan\'s sub-lines: the share of the bookings these drivers took, and who called none off',
+      s.subs.Cancellations === `${pc}% of the ${n(bk)} bookings these ${R.length} driver${R.length === 1 ? '' : 's'} took`
+      && /called none off themselves|every driver here called at least one off/.test(s.subs['Dropped a job']), JSON.stringify(s.subs));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    const H = s.heads;
+    check('order: 00 → who called it off | what a driver cancellation was → the table → by rank → by group → †',
+      H[0] === 'At a glance' && H[1] === 'Who called it off' && H[2] === 'What a driver cancellation was'
+      && H[3] === 'Cancellations by driver' && H[4] === 'Cancellations per driver, by rank'
+      && H[5] === 'Dropped after accepting, by who works Bolt' && /^† /.test(H[6]), JSON.stringify(H));
+    const who = await page.evaluate(() => [...document.querySelectorAll('[data-panel="canc-who"] .hb')].map((h) => ({
+      k: h.querySelector('.k').textContent.trim(), v: h.querySelector('.v').textContent.trim(),
+      c: h.querySelector('.fill').getAttribute('style') })));
+    const up = [...new Set(R.flatMap((r) => r.unattributed_platforms || []))];
+    const nb = who.find((w) => /^Nobody said who/.test(w.k));
+    check('who called it off: four bars off the totals; the rider ink, the driver grey, nobody-said-who in its one channel\'s colour',
+      who.length === 4 && who[0].v === n(t.by_rider) && who[1].v === n(t.dropped) && who[2].v === n(t.declined)
+      && nb?.v === n(t.unattributed) && /--ink\)/.test(who[0].c) && /--grey\)/.test(who[1].c)
+      && (up.length === 1 ? nb.c.includes(`--c-${up[0]})`) : /--ink\)/.test(nb.c)), JSON.stringify([who, up]));
+    const comp = await page.evaluate(() => ({ fills: [...document.querySelectorAll('[data-panel="canc-what"] svg rect[data-fade]')].map((r) => r.getAttribute('fill')),
+      cap: [...document.querySelectorAll('[data-panel="canc-what"] p.cap')].pop()?.textContent || '' }));
+    const sum = (k) => R.reduce((a, r) => a + (+r[k] || 0), 0);
+    check('what a driver cancellation was: one bar cut by the channel whose status word it is, the counts beneath',
+      comp.fills.includes('var(--c-bolt)') && comp.cap.includes(`Bolt offers declined or unanswered ${n(t.declined)}`)
+      && (sum('driver_cancelled_uber') ? comp.cap.includes(`Uber jobs cancelled after accepting ${n(sum('driver_cancelled_uber'))}`) : true),
+      JSON.stringify(comp));
+    const tbl = await page.evaluate(() => {
+      const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Cancellations by driver');
+      const th = p ? [...p.querySelectorAll('thead th')].length : 0;
+      const col = p ? [...p.querySelectorAll('thead th')].findIndex((x) => /Dropped a job/.test(x.textContent)) : -1;
+      return { th, tel: p ? p.querySelectorAll('a[href^="tel:"]').length : 0, pills: p ? p.querySelectorAll('td .pill.err, td .pill.warn').length : -1,
+        first: p && col >= 0 ? p.querySelector(`tbody tr td:nth-child(${col + 1})`)?.textContent.trim() : null };
+    });
+    const maxDrop = Math.max(0, ...R.map((r) => +r.dropped || 0));
+    check('the table: ten columns, tel: links, dropped descending, and the counts ink — no red or amber fill',
+      tbl.th === 10 && tbl.tel > 0 && tbl.pills === 0 && tbl.first === (maxDrop ? n(maxDrop) : '—'), JSON.stringify([tbl, maxDrop]));
+    const rank = await page.evaluate(() => [...document.querySelectorAll('[data-panel="canc-rank"] p.cap')].pop()?.textContent || '');
+    const cs = R.map((r) => +r.cancelled || 0).sort((a, b) => b - a);
+    check('by rank: the most and the median named', rank.includes(`the most cancelled ${n(cs[0])}`), rank);
+    const grp = await page.evaluate(() => [...document.querySelectorAll('[data-panel="canc-group"] .hb')].map((h) => [h.querySelector('.k').textContent.trim(), h.querySelector('.v').textContent.trim()]));
+    const g = (on) => { const x = R.filter((r) => !!r.on_offer_channel === on); const acc = x.reduce((a, r) => a + (+r.accepted || 0), 0);
+      return acc ? `${((x.reduce((a, r) => a + (+r.dropped || 0), 0) / acc) * 100).toFixed(1)}%` : null; };
+    check('by group: dropped over accepted, the one basis both groups share', (g(true) == null || grp.some(([k, v]) => /^Work Bolt/.test(k) && v === g(true)))
+      && (g(false) == null || grp.some(([k, v]) => /^Do not/.test(k) && v === g(false))), JSON.stringify([grp, g(true), g(false)]));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const noRating = R.filter((r) => r.rating == null).length;
+    check('†: the API\'s unattributed sentence, the offers note, and the unrated drivers counted — the notes moved, text unchanged',
+      s.abs.length === 3 && (!d.unattributed_why || ab['Who cancelled, on some channels']?.why === d.unattributed_why)
+      && (!t.declined || /are shown apart from dropped jobs rather than added to them/.test(ab['Offers on the other channels']?.why || ''))
+      && (noRating ? ab['A rating']?.fig === `${noRating} of ${R.length}` : ab['A rating']?.none), JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    const loose = await page.evaluate(() => [...document.querySelectorAll('#view .panel .note')].map((x) => x.textContent.slice(0, 60)));
+    check('the notes are not also printed under the table', !loose.some((x) => /are offers a driver declined/.test(x)), JSON.stringify(loose));
+    check('the colophon names the window and the count', new RegExp(`${n(t.cancelled)} cancellations`).test(s.colophon), s.colophon);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'cancellations', { width: 390 });
+    check('#cancellations at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
