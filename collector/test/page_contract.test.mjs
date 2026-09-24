@@ -466,6 +466,39 @@ console.log('\n5b · on the phone, where the shell footer is hidden');
   await ctx.close();
 }
 
+/* ── 5c · a long hero figure on a narrow screen ─────────────────────────────
+   Money carries its fils everywhere (ruling 2), so a hero amount is fourteen
+   characters and more. At --d6 it broke over two lines at 390 with the
+   highlight wrapping with it (#unit, 2026-09-24). */
+console.log('\n5c · a long hero figure stays on one line at 390');
+{
+  const { ctx, page } = await open('arkiv', { width: 390, hash: 'settings' });
+  await settle(page);
+  const r = await page.evaluate(async () => {
+    const u = await import('/ui.js');
+    const g = document.createElement('div'); document.querySelector('#view').prepend(g);
+    u.glance(g, [{ label: 'Money placed on cars', value: 'AED 663,268.99', hero: true }, { label: 'Per km', value: 'AED 3.09' }]);
+    const n = g.querySelector('.is-hero .n');
+    const lh = parseFloat(getComputedStyle(n).lineHeight) || parseFloat(getComputedStyle(n).fontSize);
+    return { h: n.getBoundingClientRect().height, lh, fs: getComputedStyle(n).fontSize, over: document.documentElement.scrollWidth - innerWidth };
+  });
+  check('a fourteen-character hero amount is one line at 390, and nothing scrolls sideways', r.h < r.lh * 1.5 && r.over <= 0, JSON.stringify(r));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', { width: 1440, hash: 'settings' });
+  await settle(page);
+  const fs = await page.evaluate(async () => {
+    const u = await import('/ui.js');
+    const g = document.createElement('div'); document.querySelector('#view').prepend(g);
+    u.glance(g, [{ label: 'Money placed on cars', value: 'AED 663,268.99', hero: true }, { label: 'Per km', value: 'AED 3.09' }]);
+    return [getComputedStyle(g.querySelector('.is-hero .n')).fontSize,
+      getComputedStyle(document.documentElement).getPropertyValue('--d6').trim()];
+  });
+  check('…and at 1440 the hero keeps --d6', parseFloat(fs[0]) === parseFloat(fs[1]) * 16 || fs[0] === fs[1], JSON.stringify(fs));
+  await ctx.close();
+}
+
 /* ── 6 · tableFrom pairs ─────────────────────────────────────────────────── */
 console.log('\n6 · tableFrom: paired headers');
 {

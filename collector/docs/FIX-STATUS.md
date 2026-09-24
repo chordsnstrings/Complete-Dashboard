@@ -3067,3 +3067,9 @@ Not adopted on #action: the fleet-wide rule and cost charts (#insights owns them
 | component | what changed | state | proof |
 |---|---|---|---|
 | charts.js `scatter` `refLine` | A line steeper than the box was drawn to the right edge with its height clamped to the top — a different slope. #unit/assets under the contract draws the fleet's AED 3.09 a km over an 8,000 km axis and an AED 20,000 one, and it came out at 2.50, so a car on the fleet's rate sat above "the fleet's rate". The line now ends where it meets the top edge. A line that fits the box is drawn exactly as before; no old-skin page passes a `refLine` | **written** | `test/chart_marks.test.mjs` §7 (2, both skins), measured in the chart's own coordinates from two dots. Revert — the clamped end back: both fail (`"slope":3` against 5), restored and md5-checked |
+
+### S3 · shared: a long hero figure on a narrow screen (its own commit, ahead of #unit)
+
+| component | what changed | state | proof |
+|---|---|---|---|
+| arkiv.css, the glance at ≤480px | A hero money figure is fourteen characters since ruling 2 put the fils on every amount ("AED 663,268.99"), and at `--d6` it broke over two lines at 390 with its highlight wrapping with it (#unit's hero, production data). `.n.long`'s smaller step never reached a hero: `.kpi.is-hero .n` comes later at the same weight. A long hero figure at ≤480px is now `min(var(--d6), 10.5vw)`; at 1440 the hero keeps `--d6`, and nothing in the old skin reads the rule | **written** | `test/page_contract.test.mjs` §5c (2): one line at 390 with no sideways scroll; `--d6` at 1440. Revert — the rule removed: 1 fails (108.8px tall against a 50.4px line), restored and md5-checked |

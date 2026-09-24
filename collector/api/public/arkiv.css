@@ -1228,6 +1228,12 @@
 @media(max-width:480px){
   :root[data-skin="arkiv"] .kpis.glance{grid-template-columns:minmax(0,1fr)}
   :root[data-skin="arkiv"] .kpis.glance .kpi.is-hero{grid-column:auto}
+  /* A hero money figure is fourteen characters since ruling 2 put the fils
+     on every amount ("AED 663,268.99"), and at --d6 it broke over two lines
+     at 390, the highlight wrapping with it (#unit, 2026-09-24). .n.long's
+     smaller step never reached it: the hero rule comes later at the same
+     weight. So a long hero figure is sized to the phone's width. */
+  :root[data-skin="arkiv"] .kpis.glance .kpi.is-hero .n.long{font-size:min(var(--d6),10.5vw)}
 }
 
 /* THE DELTA (SPEC L3). The colour follows the meaning, the glyph and sign
