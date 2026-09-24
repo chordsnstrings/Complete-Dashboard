@@ -398,7 +398,14 @@ const hex = (rgb) => '#' + (rgb.match(/\d+/g) || []).slice(0, 3).map((n) => Numb
     const before = { display: getComputedStyle(foot).display, principle: foot.querySelector('.pf-principle').textContent,
       src: !!foot.querySelector('.pf-basis .srcline'), srcInView: !!document.querySelector('#view .srcline'),
       colophon: foot.querySelector('.pf-colophon').textContent };
-    location.hash = '#settings';
+    /* The next page must be one that writes NO foot of its own, or a foot
+       there proves nothing about clearing. This was #settings until the page
+       phase gave #settings its own colophon ("credentials and on-demand runs ·
+       N keys", P76) — correct for that page, and it failed this check in the
+       Fleet section's full suite. An address that names no page (#notfound)
+       writes no basis and no colophon in either skin, so anything left there
+       is the last page's. */
+    location.hash = '#zzz-not-a-page';
     await new Promise((res) => setTimeout(res, 2500));
     return { before, after: { basis: foot.querySelector('.pf-basis').innerHTML,
       colophon: foot.querySelector('.pf-colophon').innerHTML,
