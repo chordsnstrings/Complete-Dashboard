@@ -3089,3 +3089,9 @@ Not adopted on #unit, each for its reason: the mockup's "every figure is Uber mo
 | component | what changed | state | proof |
 |---|---|---|---|
 | ui.js `notRepeated(tiles, figure)` | Ruling 7 says the verdict's figure is not repeated as a tile. #playbook (P2) broke it: its verdict and its "Money already earned" hero printed the same AED figure one above the other — and #revenue's "Accounted for" would whenever its verdict is the accounted total, because a verdict's figure is chosen at run time. The page passes the figure it gave `verdict()`; the tile printing exactly that is taken out and handed back so the page keeps its sub-line in words. An ABSENT tile is never matched. Additive: no existing caller changes | **written** | `test/page_contract.test.mjs` §5d (4). Revert — never match: 2 fail, restored and md5-checked |
+
+### P2a · #playbook, ruling 7 (a correction to P2)
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #playbook | P2 broke ruling 7: the verdict's figure (the measured total) and the hero tile "Money already earned" printed the same AED figure one above the other. The tile list now goes through `notRepeated()` (S4) with the figure the verdict was given; the dropped tile's sub-line is the verdict's own sub ("a balance … only the items with arithmetic behind them"), so nothing it said is lost, and the hero passes to Things to do. With nothing measured the verdict's figure is the count of things to do and that tile is the one dropped | **written** | `test/arkiv_today.test.mjs` #playbook: the check that pinned the duplicate is replaced — the verdict's figure is `aed_measured` to the fils and no tile repeats it; the hero is Things to do. Revert — no figure passed: 2 fail, restored and md5-checked. `arkiv_classic_frozen` ONLY=playbook 2/2 |

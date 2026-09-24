@@ -1518,3 +1518,13 @@ drivers-least list printed "availability has not been collected for anyone in
 this window" beside a verdict counting 100 people with measured availability
 (the pruned column's reason, now the list's own); the reference line on Every
 vehicle, once drawn, had the wrong slope (S2).
+
+### #playbook, again — 2026-09-24
+
+Re-shot after P2a at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/playbook/`): the verdict carries the measured total, the
+glance starts at Things to do, two highlights, no sideways scroll. The pass
+that found it checked every converted page for a tile printing the verdict's
+figure (#insights, #compare, #analyst, #action, #unit, #overview: none on the
+mock; #playbook: always; #revenue: on production, where the verdict is the
+accounted total).

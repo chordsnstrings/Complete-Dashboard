@@ -215,9 +215,15 @@ const pbRead = (page) => page.evaluate(() => {
   check('the verdict\'s unit is FIXED: a balance already earned, not "a month … over N days"',
     /already earned and not yet in hand/.test(r.claim) && !/a month/.test(r.claim) && r.unit === 'already earned, not yet in hand',
     `${r.claim} | ${r.unit}`);
-  check('Money already earned is the hero, the answer\'s measured total to the fils', s.hero === 'Money already earned'
-    && s.values['Money already earned'] === `AED ${Number(d.totals.aed_measured).toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
-  s.values['Money already earned']);
+  /* Ruling 7: the verdict's figure is the measured total, and no tile
+     repeats it — P2 drew "Money already earned" as the hero beneath it, the
+     same AED figure twice (corrected 2026-09-24, S4). */
+  const vfig = await page.evaluate(() => document.querySelector('.cband .vdct-fig > b')?.textContent.trim() || '');
+  check('the verdict\'s figure is the answer\'s measured total to the fils, and no tile repeats it (ruling 7)',
+    vfig === `AED ${Number(d.totals.aed_measured).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+    && !Object.values(s.values).includes(vfig) && !('Money already earned' in s.values), `${vfig} ${JSON.stringify(s.values)}`);
+  check('…so the hero passes to Things to do', s.hero === 'Things to do' && s.values['Things to do'] === String(d.actions.length),
+    s.hero);
   check('no tile wears a tone (a level is not better-or-worse)', r.tones === 0, String(r.tones));
   check('Modelled upside with no rate set is ABSENT with its reason, not dropped',
     /no revenue-per-booking rate set/.test(s.na['Modelled upside'] || ''), JSON.stringify(s.na));

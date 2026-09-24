@@ -15,7 +15,7 @@
 import { dec, empty, fmt, hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money,
          entity, custody, custodyAsOf, dateStr, countOf, plural, verdict,
-         contract, glance, secHead, absenceBand, pageFoot } from './ui.js';
+         contract, glance, secHead, absenceBand, pageFoot, notRepeated } from './ui.js';
 import { q, href, store, currentGen, alive } from './data.js';
 
 const GROUPS = [
@@ -441,11 +441,12 @@ async function playbookContract(root) {
   const wc = windowCap(d);
   if (wc) band.append(wc);
   root.append(band);
+  const vfig = measured ? money(measured) : fmt(n);
   verdict(vHost, {
     claim: measured
       ? `${countOf(n, 'thing')} to do — ${money(measured)} already earned and not yet in hand`
       : `${countOf(n, 'thing')} to do`,
-    figure: measured ? money(measured) : fmt(n),
+    figure: vfig,
     unit: measured ? 'already earned, not yet in hand' : 'actions',
     tone: soon ? 'warn' : null,
     meta: soon ? `${fmt(soon)} this week or sooner` : null,
@@ -465,7 +466,14 @@ async function playbookContract(root) {
     idleTile.sub = `${idleTile.sub} · at a new driver's first-month rate, ${fmt(idle.size * fleet.new_driver_first_month)} `
       + `(${fmt(idle.size)} cars × ${fmt(fleet.new_driver_first_month)}) — a ceiling too`;
   }
-  glance(tiles, [
+  /* RULING 7: the verdict's figure is not repeated as a tile. With money
+     measured, the verdict IS "Money already earned" (the same AED figure one
+     above the other until 2026-09-24), and that tile's sub-line — "measured,
+     these rows carry a price" — is the verdict's own sub; with none, the
+     verdict's figure is the count of things to do, and that tile's "N this
+     week or sooner" is the verdict's meta. So nothing a dropped tile said is
+     lost, and the hero passes to the next tile. */
+  glance(tiles, notRepeated([
     measured ? { ...plain(base['Money already earned']), hero: true }
       : { ...plain(base['Money already earned']), hero: true, na: 'no item here carries a measured amount', sub: null },
     plain(base['Things to do']),
@@ -475,7 +483,7 @@ async function playbookContract(root) {
     plain(base['What a new driver produces']),
     base['Modelled upside'] ? plain(base['Modelled upside'])
       : { label: 'Modelled upside', na: 'no revenue-per-booking rate set — nothing is converted to money', sub: null },
-  ]);
+  ], vfig).tiles);
 
   /* ── the rate control, unchanged ─────────────────────────────────────── */
   root.append(rateBar(root, saved));
