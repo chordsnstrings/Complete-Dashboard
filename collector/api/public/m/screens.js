@@ -17,7 +17,7 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
    redesign"), the desktop's own: the numbered section head and the absence
    band, so a phone section and a desktop panel are one form, and the reason
    the desktop gives for an unpriced booking is the sentence the phone gives. */
-import { secHead, absenceBand, UBER_FARE_WHY } from '../ui.js';
+import { secHead, absenceBand, UBER_FARE_WHY, swatch } from '../ui.js';
 /* The deposit rules, shared with the desktop form rather than copied. A
    validation living in two bundles is how the phone comes to refuse what the
    desktop accepts — and the person standing next to the car with the cash in
@@ -556,6 +556,11 @@ async function today(deck, ctx) {
 
 /* ── Money ──────────────────────────────────────────────────────────────── */
 async function moneyScreen(deck, ctx) {
+  /* THE REDESIGN, only under the token: 00 AT A GLANCE (the statement, then
+     the four tiles with Trip value the hero) above the day-by-day line; the
+     sections numbered; a swatch beside each channel's name (L1: identity sits
+     beside the word, never in it); and † what the screen does not know. */
+  const AK = phoneContract();
   skeleton(deck, 4);
   const [k, daily, settle, plats] = await Promise.all([
     q('/api/kpis').catch(() => null),
@@ -598,7 +603,7 @@ async function moneyScreen(deck, ctx) {
      in, each channel counted once on the best report it files. August 2026:
      AED 744,136 against AED 585,058. */
   const inAll = n(k.accounted);
-  lede(deck, {
+  const statement = lede(deck, {
     claim: owed && routed
       ? `${Math.round((owed / routed) * 100)}% of bookings are still to be collected`
       : `${money(inAll ?? total)} in`,
@@ -633,7 +638,7 @@ async function moneyScreen(deck, ctx) {
   c.body.append(spark(rev, { h: 46, tone: 'var(--s3)' }));
   deck.append(c.card);
 
-  stats(deck, [
+  const moneyTiles = stats(deck, [
     { label: 'Trip value', value: money(total),
       sub: priced ? `what riders paid on ${fmt(priced)} of ${fmt(k.trips)} bookings`
         : 'no booking carries a price', long: true },
@@ -652,7 +657,11 @@ async function moneyScreen(deck, ctx) {
     /* Four, not five. The grid is two across, so an odd tile sits alone in a
        row of its own — and the one that was orphaned here was Bookings, which
        is the Today screen's headline and says nothing about money. */
-  ]);
+  ], false, { hero: AK });
+  if (AK) {
+    deck.insertBefore(secHead('00', 'At a glance', WINDOW_NOTE()), statement);
+    deck.insertBefore(moneyTiles, c.card);
+  }
 
   if (cls.length) {
     const m = card('How fares settle', 'Every booking that records a settlement route');
@@ -679,12 +688,46 @@ async function moneyScreen(deck, ctx) {
       byPlat.set(p2.platform, cur);
     });
     const totalTrips = [...byPlat.values()].reduce((a, v) => a + v.trips, 0) || 1;
-    rows(deck, [...byPlat.entries()].sort((a, b) => b[1].trips - a[1].trips).map(([name, v]) => row({
+    const byChannel = [...byPlat.entries()].sort((a, b) => b[1].trips - a[1].trips);
+    const chanRows = rows(deck, byChannel.map(([name, v]) => row({
       title: name === 'fms' ? 'FMS telematics' : name[0].toUpperCase() + name.slice(1),
       sub: `${Math.round((v.trips / totalTrips) * 100)}% of bookings`,
       value: v.fares ? money(v.fares) : fmt(v.trips),
       note: v.fares ? 'fares' : 'bookings',
     })));
+    /* The channel's identity BESIDE its name (SPEC L1, L5.6), from the one
+       swatch the desktop draws — never the name in the channel's colour. */
+    if (AK) {
+      byChannel.forEach(([name], i) => chanRows.children[i]?.querySelector('.k b')
+        ?.insertAdjacentHTML('afterbegin', swatch(name)));
+    }
+  }
+
+  /* † WHAT THIS SCREEN DOES NOT KNOW (the redesign only), each with the
+     reason the screen or the desktop already gives: the bookings Trip value
+     is not over (the desktop #overview's sentence, word for word — see the
+     Today screen), the day-by-day line Money in cannot have (the desktop's
+     "Money in, day by day" cell, word for word), and the bookings no
+     settlement route describes (this screen's own caption, as a figure). */
+  if (AK) {
+    const noPrice = n(k.trips) != null ? n(k.trips) - priced : null;
+    absenceBand(deck, [
+      { label: 'Bookings not yet priced', fig: noPrice == null ? null : fmt(noPrice), hl: true, none: 'Not counted',
+        why: noPrice == null ? 'The kpis answer carries no booking count for this window.'
+          : `${fmt(priced)} of ${fmt(k.trips)} bookings carry a price, and Trip value is over those alone. `
+            + `${UBER_FARE_WHY}, so the newest Uber bookings are priced only after it; a booking cancelled `
+            + 'without a fee has no price to carry.' },
+      { label: 'Money in, day by day', fig: null, none: 'No series',
+        why: n(k.accounted_statements)
+          ? `${money(n(k.accounted_statements))} of the ${money(n(k.accounted))} is payout statements, which a platform `
+            + 'files a week at a time, so Money in has no day-by-day figure. Trip value is the daily money line: '
+            + 'what riders paid, booking by booking.'
+          : 'Money in has no day-by-day series on this page; Trip value, what riders paid per booking, is the daily money line.' },
+      settle?.unlabelled_trips ? { label: 'Bookings with no settlement route', fig: fmt(settle.unlabelled_trips),
+        why: `They record no route at all${settle.unlabelled_platforms?.length
+          ? ` (${settle.unlabelled_platforms.join(', ')})` : ''}, so How fares settle can say nothing about them.` }
+        : null,
+    ], { name: '† What this screen does not know' });
   }
 }
 

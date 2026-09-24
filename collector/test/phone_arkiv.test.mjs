@@ -562,6 +562,80 @@ console.log('\n4.1 · Today: the livebar, 00 at a glance, the sections, † what
   await p.close();
 }
 
+/* The deck's children as a list of names, for an order check: a section's
+   title, a label's text, or the kind of block. */
+const outline = (page) => page.evaluate(() => [...document.querySelector('.m-deck').children].map((k) => {
+  if (k.classList.contains('sechd')) return `head:${k.querySelector('.sechd-name')?.textContent}`;
+  if (k.classList.contains('absence')) return 'absence';
+  if (k.classList.contains('pf-inline')) return 'foot';
+  if (k.classList.contains('m-lede')) return 'statement';
+  if (k.classList.contains('m-stats')) return k.dataset.band === 'glance' ? 'glance' : 'tiles';
+  if (k.classList.contains('m-sec')) return `sec:${k.textContent}`;
+  if (k.classList.contains('m-card')) return `card:${k.querySelector(':scope > h2')?.textContent || ''}`;
+  return k.className.split(' ')[0] || k.tagName.toLowerCase();
+}));
+const { money: moneyOf } = await import('../api/public/ui.js');
+
+console.log('\n4.2 · Money: 00 at a glance, the day line, how fares settle, by channel with swatches, †');
+{
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('money');
+  const o = await outline(p.page);
+  const want = ['head:At a glance', 'statement', 'glance', 'card:Trip value a day', 'card:How fares settle',
+    'sec:By channel', 'm-rows', 'absence', 'foot'];
+  check('00 (statement, tiles) above the day line, then the sections, †, the footer',
+    JSON.stringify(o.filter((x) => want.includes(x))) === JSON.stringify(want), o.join(' → '));
+  const m = await p.page.evaluate(() => {
+    const hero = document.querySelector('.m-stats[data-band="glance"] .m-stat.hero');
+    const chan = [...document.querySelectorAll('.m-deck > .m-rows')].pop();
+    const band = document.querySelector('.absence');
+    return {
+      hero: hero && { label: hero.querySelector('.l').textContent, value: hero.querySelector('.n').textContent,
+        hl: !!hero.querySelector('.hl') },
+      chans: [...chan.querySelectorAll('.m-row')].map((r) => ({ name: r.querySelector('.k b').textContent,
+        sw: r.querySelector('.k b .sw')?.className || null, ink: getComputedStyle(r.querySelector('.k b')).color })),
+      cells: [...(band?.querySelectorAll('.absb-cell') || [])].map((c) => ({ label: c.querySelector('.absb-lab').textContent,
+        fig: c.querySelector('.absb-fig').textContent, why: c.querySelector('.absb-why')?.textContent })),
+    };
+  });
+  check(`the hero is Trip value, ${moneyOf(KP.revenue)} as /api/kpis answered, highlighted`,
+    m.hero && m.hero.label === 'Trip value' && m.hero.value === moneyOf(KP.revenue) && m.hero.hl, JSON.stringify(m.hero));
+  const KEY = { Uber: 'uber', Bolt: 'bolt', Yango: 'yango', Hotel: 'hotel', 'FMS telematics': 'fms', Cabman: 'cabman' };
+  check('each channel carries its own swatch beside its name, and the name stays ink',
+    m.chans.length > 0 && m.chans.every((c) => c.sw === `sw ch-${KEY[c.name]}` && c.ink === 'rgb(10, 10, 11)'),
+    JSON.stringify(m.chans));
+  const daily = ans('/api/trips/daily?period=month&grain=auto');
+  const pricedSum = (daily || []).reduce((a, d) => a + (Number(d.priced_trips) || 0), 0);
+  const np = m.cells.find((c) => c.label === 'Bookings not yet priced');
+  check(`† the bookings Trip value is not over: ${f0(KP.trips - pricedSum)} (trips − the priced days’ sum this screen captions)`,
+    np?.fig === f0(KP.trips - pricedSum) && (np?.why || '').startsWith(`${f0(pricedSum)} of ${f0(KP.trips)} bookings carry a price`),
+    JSON.stringify(np));
+  const mi = m.cells.find((c) => c.label === 'Money in, day by day');
+  check('† Money in has no day-by-day series, said as "No series" with the desktop’s reason',
+    mi?.fig === 'No series' && (KP.accounted_statements
+      ? (mi.why || '').startsWith(`${moneyOf(KP.accounted_statements)} of the ${moneyOf(KP.accounted)} is payout statements`)
+      : /^Money in has no day-by-day series/.test(mi?.why || '')), JSON.stringify(mi));
+  for (const s of ['files a week at a time, so Money in has no day-by-day figure. Trip value is the daily money line: ',
+    'what riders paid, booking by booking.']) {
+    check(`…the same words as the desktop: "${s.slice(0, 40)}…"`, read('app.js').includes(s) && read('m/screens.js').includes(s));
+  }
+  await p.close();
+  /* The recording holds no booking without a settlement route, so the one
+     cell that depends on one is asked of a copy of it that does. */
+  const key = '/api/settlement/mix?period=month&grain=auto';
+  const mix = { ...ans(key), unlabelled_trips: 12, unlabelled_platforms: ['yango'] };
+  const fx = { ...fixture, answers: { ...fixture.answers, [key]: { ...fixture.answers[key], body: JSON.stringify(mix) } } };
+  const q2 = await phonePage(browser, { skin: 'arkiv', fixture: fx });
+  await q2.open('money');
+  const nr = await q2.page.evaluate(() => [...document.querySelectorAll('.absence .absb-cell')]
+    .map((c) => `${c.querySelector('.absb-lab').textContent}|${c.querySelector('.absb-fig').textContent}|${c.querySelector('.absb-why')?.textContent}`)
+    .find((s) => s.startsWith('Bookings with no settlement route')));
+  check('† and the bookings no settlement route describes, when there are any, with the screen’s own reason',
+    nr === 'Bookings with no settlement route|12|They record no route at all (yango), so How fares settle can say nothing about them.',
+    String(nr));
+  await q2.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');

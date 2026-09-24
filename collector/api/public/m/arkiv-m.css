@@ -393,3 +393,8 @@
    at a phone's width already; on the phone its figures step down one size,
    because a 39px figure over a sentence of reasons is a poster, not a note. */
 :root[data-skin="arkiv"][data-ui="phone"] .absb-fig{font-size:var(--d4)}
+
+/* ── 12 · a channel named in a row ───────────────────────────────────────────
+   The channel's swatch (ui.js swatch(), the desktop's .sw) sits before its
+   name; the name stays ink (SPEC L5.6: text never wears the data colour). */
+:root[data-skin="arkiv"][data-ui="phone"] .m-row .k b .sw{margin-right:8px;vertical-align:0}
