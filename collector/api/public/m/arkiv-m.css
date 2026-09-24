@@ -66,7 +66,7 @@
 /* The wordmark: Fraunces, the one serif left in the product (plan §3
    Typography), a hairline between it and the screen's own title. */
 :root[data-skin="arkiv"][data-ui="phone"] .ak-word{flex:0 0 auto;display:inline-flex;align-items:center;
-  min-height:44px;padding-right:12px;border-right:1px solid var(--hair);font-family:var(--disp);
+  min-height:44px;min-width:44px;padding-right:12px;border-right:1px solid var(--hair);font-family:var(--disp);
   font-weight:600;font-size:var(--d2);letter-spacing:-.015em;color:var(--ink);text-decoration:none}
 
 /* The control bar: one row of mono capitals — the window, then the channel,

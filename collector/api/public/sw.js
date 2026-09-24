@@ -79,6 +79,9 @@ const SHELL_FILES = [
      screen ignores in the desktop shell's own words, so m/app.js imports
      ../shell.js — a module the phone never reached before. */
   '/shell.js',
+  /* The FleetMirror mark, both theme variants: the wordmark of every shell
+     paints one of them, and offline it must not be a blank box. */
+  '/brand/mark.png', '/brand/mark-dark.png',
   '/icons/icon-192.png', '/icons/apple-touch-icon.png',
   '/manifest.webmanifest',
 ];

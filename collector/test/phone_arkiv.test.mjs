@@ -732,7 +732,7 @@ console.log('\n4.5 · More: numbered sections, the masthead on This app, and a f
     JSON.stringify(o.filter((x) => /^(sec|card):/.test(x))) === JSON.stringify(['sec:Analyse', 'sec:Operate', 'sec:On the desktop', 'card:This app']),
     o.join(' → '));
   check('This app carries the masthead: the wordmark in Fraunces and whose fleet it is',
-    m.word === 'Fleet' && /Fraunces/.test(m.face) && m.org === 'Ecosine & Egari · Dubai', JSON.stringify(m));
+    m.word === 'FleetMirror' && /Fraunces/.test(m.face) && m.org === 'Ecosine & Egari · Dubai', JSON.stringify(m));
   check('…and the way to the desktop is a full-width button, not a chip',
     m.btn && m.btn.cls === 'm-btn' && m.btn.h >= 44 && m.btn.w > 300 && m.btn.text === 'Open the desktop version', JSON.stringify(m.btn));
   check('the footer’s colophon agrees with the bar: no window applies here',

@@ -107,7 +107,7 @@ export function buildShell() {
      find it and a screenshot never shows it. */
   const mast = el('header', 'mast');
   mast.id = 'mast';
-  mast.innerHTML = '<div class="mast-l"><span class="mast-word">Fleet</span>'
+  mast.innerHTML = '<div class="mast-l"><span class="mast-word"><span class="logo" aria-hidden="true"></span>FleetMirror</span>'
     + '<span class="mast-org">Ecosine &amp; Egari · Dubai</span></div>'
     + '<div class="mast-r"><div id="mastWin" class="mast-win"></div>'
     + '<div id="mastWinSub" class="mast-win-sub"></div></div>';

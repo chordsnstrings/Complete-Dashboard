@@ -80,7 +80,15 @@ root.append(head, deck, tabs);
                    every control is a 44px square (m/arkiv-m.css). */
 let word = null, ctl = null, ctlParts = null;
 if (AK) {
-  word = el('a', 'ak-word', 'Fleet');
+  /* The mark alone in the phone's header, the name for a screen reader.
+     "FleetMirror" is more than twice "Fleet", and the header's job on a phone
+     is the SCREEN's title: with the whole word beside it, "Cash handed in"
+     and "Unauthorized" were cut at 360px and every subtitle below 390px
+     (measured at 320/360/375/390; with "Fleet" only one subtitle was cut,
+     below 390). The mark is narrower than "Fleet" was, so every title has
+     more room than before. The name is on the More screen's masthead, the
+     tab's title and the installed app's name. */
+  word = el('a', 'ak-word', '<span class="logo" aria-hidden="true"></span><span class="sr">FleetMirror</span>');
   word.setAttribute('aria-label', 'Fleet — go to Today');
   filterBtn.remove();
   head.insertBefore(word, titleWrap);
@@ -273,7 +281,7 @@ async function render() {
   titleEl.textContent = t.title;
   subEl.textContent = t.sub || '';
   backBtn.style.display = depth > 1 || !currentTab() ? '' : 'none';
-  document.title = `${t.title} · Fleet`;
+  document.title = `${t.title} · FleetMirror`;
   [...tabs.children].forEach((b) => b.classList.toggle('on', b.dataset.tab === currentTab()));
   if (AK) akFrame(id, backBtn.style.display !== 'none');
 
@@ -286,7 +294,7 @@ async function render() {
        place the name can go. */
     const setTitle = (title, sub2) => {
       if (g !== gen) return;
-      if (title) { titleEl.textContent = title; document.title = `${title} · Fleet`; }
+      if (title) { titleEl.textContent = title; document.title = `${title} · FleetMirror`; }
       if (sub2 != null) subEl.textContent = sub2;
     };
     await (screen || SCREENS.fallback)(deck,

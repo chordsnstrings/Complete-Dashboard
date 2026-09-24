@@ -3277,6 +3277,13 @@ driver's 222 tracker fixes.
   pulse; `run-all.mjs` now asks `/api/trips/daily` about today and, if the
   answer is empty, leaves the squatter alone and starts its own mockapi on a
   kernel-assigned port.
+* **The product is FleetMirror; "Fleet" is also a SECTION.** The brand
+  (renamed 2026-09-24) is printed in index.html (`<title>`, the iOS title, the
+  old rail), manifest.webmanifest, shell.js (Arkiv masthead) and m/app.js and
+  m/screens.js (the phone). The mark paints from the `--logo` token, never from
+  a file named in a component. A search for "Fleet" hits dozens of section and
+  column labels that are NOT the brand. `test/brand.test.mjs` names every
+  place the brand lives.
 * **A default applies only where NOTHING is stored, so flipping it needs a
   fresh key.** The skin choice was one key, `fleet.skin`, shared by both
   builds. Everyone who compared with `?skin=classic` on their phone during the

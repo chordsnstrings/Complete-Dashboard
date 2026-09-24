@@ -3947,3 +3947,19 @@ revert.
   wait, #segments loads in 2.3 s in both skins. The uncached attribution cost
   is the one named under the FMS section, and it is still open.
 
+## FleetMirror — the name and the mark (operator, 2026-09-24)
+
+"let's change the name to FleetMirror and the logo to this", with the artwork
+in three files: on dark, on light, and transparent.
+
+| # | what | state | proof |
+|---|---|---|---|
+| B1 | The name everywhere the product names itself: the tab title, the iOS home-screen title, the manifest (name and short_name), the old skin's rail, the Arkiv masthead, the phone's More masthead, and every phone tab title ("Today · FleetMirror"). "Fleet" as a section and a column name is not the brand and stays | **written** | `brand` §1 (10 checks) |
+| B2 | The mark. `brand/` holds the operator's three originals as given, plus `mark.png` (the transparent file cropped to its own box) and `mark-dark.png` (the same shapes with the black half in the artwork's white; the artwork has three exact colours, so this is a swap, not a redrawing). The five app icons are the on-dark file resized; the mark sits inside the maskable safe circle (farthest corner 395px of 409.6). The manifest's colours are the artwork's own `#151513` | **written** | `brand` §3: sizes, colours read pixel by pixel, identical alpha for the two marks |
+| B3 | The theme picks the mark: `--logo` in the old light `:root` and in both old dark blocks, so the four theme states and both skins follow it. The service worker precaches both marks | **written** | `brand` §4: four theme states × two skins in a browser. Reverts fail: `--logo` dropped from the dark blocks fails 5; the old rail restored fails 6 |
+| B4 | The phone's header shows the mark alone, with the name for a screen reader (`.sr`) and a 44px target. With the whole word, "Cash handed in" and "Unauthorized" were cut at 360px. The truncation measured at 320/360/375/390 is now LESS than before the rename (57/6/0/0px against 97/26/11/0), because the mark is narrower than "Fleet" was | **written** | `brand` (phone at 360); `phone_arkiv` 255 (the tap-target sweep) |
+
+Not changed: the DigitalOcean app name and the address
+(`fleet-dashboard-wpeqb.ondigitalocean.app`), and the repository's own docs,
+which describe the code, not the product.
+

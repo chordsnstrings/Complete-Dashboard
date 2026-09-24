@@ -74,6 +74,12 @@
      is 2.94:1 on the old dark accent; that is production's look, recorded in
      FIX-STATUS, and it changes at the flip, not before. */
   --on-fill:#ffffff;
+  /* THE MARK (the operator, 2026-09-24: "change the name to FleetMirror and
+     the logo to this"). Chosen by THEME, like every colour here: the black-
+     and-grey mark on a light page, the same shapes with the black half in the
+     artwork's own white on a dark one. brand/mark-dark.png is not a second
+     drawing — the artwork has three exact colours and it is a swap of one. */
+  --logo:url("/brand/mark.png");
   --pin-ring:#ffffff;
   /* Text printed on a LIGHT fill. Near-black in both themes: it is a property
      of the fill under it, not of the page around it. */
@@ -287,6 +293,7 @@
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     color-scheme: dark;
+    --logo:url("/brand/mark-dark.png");
     --paper:#14171a; --paper-2:#171b1e; --surface:#1c2024; --surface-2:#22272c; --surface-3:#2a3036;
     --rule:#2a3036; --rule-strong:#3c444b;
     --ink:#f0eee9; --grey-strong:#a9afb5; --grey:#7b8288;
@@ -335,6 +342,7 @@
 }
 :root[data-theme="dark"]{
   color-scheme: dark;
+  --logo:url("/brand/mark-dark.png");
   --paper:#14171a; --paper-2:#171b1e; --surface:#1c2024; --surface-2:#22272c; --surface-3:#2a3036;
   --rule:#2a3036; --rule-strong:#3c444b;
   --ink:#f0eee9; --grey-strong:#a9afb5; --grey:#7b8288;
@@ -635,12 +643,17 @@ a{color:var(--accent-ink)}
   font-size:var(--t9);font-weight:600;letter-spacing:-.01em;padding:0 8px;color:var(--ink);
 }
 .brand b{font-weight:600}
-.brand .dot{
-  width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none;
-  box-shadow:0 0 0 3px var(--accent-soft);
-  animation:pulse 3.2s var(--ease) infinite;
+/* The FleetMirror mark, wherever the product names itself: the rail's brand,
+   the Arkiv masthead, the phone's wordmark. One element, painted from the
+   --logo token so the theme picks the variant; its box is the artwork's own
+   proportion (169×160 once cropped), sized to the type beside it. The name
+   beside it is the accessible label, so the mark is aria-hidden. */
+.logo{
+  display:inline-block;flex:none;width:1.06em;height:1em;vertical-align:-.14em;
+  background:var(--logo) center/contain no-repeat;
 }
-@keyframes pulse{0%,100%{box-shadow:0 0 0 3px var(--accent-soft)}50%{box-shadow:0 0 0 6px var(--accent-soft)}}
+.brand .logo{width:1.27em;height:1.2em}
+.mast-word .logo,.ak-word .logo,.ak-mast-word .logo{margin-right:.26em}
 
 #nav{display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto;margin:0 -4px}
 

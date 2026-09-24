@@ -1280,7 +1280,7 @@ async function more(deck) {
      phone takes, rather than a chip that reads as a filter. */
   if (phoneContract()) {
     const mast = el('p', 'ak-mast');
-    mast.append(el('span', 'ak-mast-word', 'Fleet'), el('span', 'ak-mast-org', 'Ecosine &amp; Egari · Dubai'));
+    mast.append(el('span', 'ak-mast-word', '<span class="logo" aria-hidden="true"></span>FleetMirror'), el('span', 'ak-mast-org', 'Ecosine &amp; Egari · Dubai'));
     c.body.prepend(mast);
     b.className = 'm-btn';
   }
