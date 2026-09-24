@@ -12,6 +12,10 @@
      1. THE SHEET — m/arkiv-m.css: scoped, hex-free, on the scale, every
         var() it asks for declared; written by the parser for a phone under
         the skin and for nobody else; precached by the service worker.
+     2. THE SHELL — the wordmark or the back arrow, the control bar naming
+        the window, channel and fleet (and saying which do not apply, in the
+        desktop's words), the sheet, the footer with the principle, 44px
+        targets, 360px, dark mode, and the browser chrome's colour.
 
    Static checks run on the source; the browser checks use the hermetic
    harness (test/phone_harness.mjs): the recorded API answers and a frozen
@@ -155,6 +159,158 @@ console.log('\n1 · the sheet, in a browser');
   check('…reads --pg-phone as 0', o.token === '0', o.token);
   check('…and phoneContract() says so', !(await old.page.evaluate(() => import('/m/ui.js').then((m) => m.phoneContract()))));
   await old.close();
+}
+
+console.log('\n2 · the shell: wordmark or back, the control bar, the sheet, the footer');
+{
+  const { appliesSentence } = await import('../api/public/shell.js');
+  const { PRINCIPLE } = await import('../api/public/ui.js');
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  const shell = () => p.page.evaluate(() => {
+    const vis = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;
+    const box = (e) => { const r = e.getBoundingClientRect(); return { w: r.width, h: r.height }; };
+    const word = document.querySelector('.m-head .ak-word');
+    const back = document.querySelector('.m-head .m-ico[title="Back"]');
+    const deck = document.querySelector('.m-deck');
+    const foot = deck?.querySelector(':scope > .pf-inline');
+    return {
+      word: vis(word), wordFace: word ? getComputedStyle(word).fontFamily : '', wordHref: word?.getAttribute('href'),
+      back: vis(back), dots: !!document.querySelector('.m-head .m-ico[title="Window and channels"]'),
+      ctl: [...document.querySelectorAll('.ak-ctl .ak-ctl-p')].map((s) => s.textContent),
+      ctlBox: document.querySelector('.ak-ctl') ? box(document.querySelector('.ak-ctl')) : null,
+      order: [...document.getElementById('m').children].map((c) => c.className.split(' ')[0]),
+      first: deck?.firstElementChild?.className, firstText: deck?.firstElementChild?.textContent,
+      last: deck?.lastElementChild === foot, principle: foot?.querySelector('.pf-principle')?.textContent,
+      basis: !!foot?.querySelector('.pf-basis .srcline'),
+      colophon: [...(foot?.querySelectorAll('.pf-colophon span') || [])].map((s) => s.textContent),
+      small: [...document.querySelectorAll('.m-ico, .ak-word, .ak-ctl, .m-tab')].filter(vis)
+        .filter((e) => { const r = e.getBoundingClientRect(); return r.height < 44 || r.width < 44; })
+        .map((e) => `${e.className} ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`),
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      meta: [...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.content),
+      paper: getComputedStyle(document.documentElement).getPropertyValue('--paper').trim(),
+    };
+  });
+  await p.open('today');
+  let s = await shell();
+  check('the header, the control bar, the deck and the tabs, in that order',
+    s.order.join(' ') === 'm-head ak-ctl m-deck m-tabs', s.order.join(' '));
+  check('at a tab’s root the wordmark stands where the back arrow would, and there is no back',
+    s.word && !s.back, JSON.stringify({ word: s.word, back: s.back }));
+  check('…the wordmark is Fraunces, the one serif left', /Fraunces/.test(s.wordFace), s.wordFace);
+  check('…and it leads to Today, keeping the window in the address', /^#today\?/.test(s.wordHref || ''), s.wordHref);
+  check('the ⋮ is gone: the control bar replaces it', !s.dots);
+  check('the control bar names the window, the channel and the fleet',
+    s.ctl.join(' | ') === 'This month | All channels | Both fleets', s.ctl.join(' | '));
+  check('…and is a target a thumb can hit', s.ctlBox && s.ctlBox.h >= 44, JSON.stringify(s.ctlBox));
+  check('the deck ends with the footer', s.last);
+  check('…which prints the house principle verbatim', s.principle === PRINCIPLE, s.principle);
+  check('…the phone’s own source line as its basis', s.basis);
+  check('…and a colophon naming the window and the clock',
+    s.colophon[0] === 'This month · Dubai time' && s.colophon[1] === 'Ecosine & Egari', s.colophon.join(' | '));
+  check('every header control, the bar and every tab is at least 44px square', !s.small.length, s.small.join(' · '));
+  check('the browser chrome takes the paper the screen is drawn on (no hex written twice)',
+    s.meta.length === 2 && s.meta.every((c) => c === s.paper) && s.paper.toLowerCase() === '#ffffff', `${s.meta} / ${s.paper}`);
+  check('nothing pushes the page sideways at 390px', s.overflow <= 0, String(s.overflow));
+
+  await p.open('driver/drv-0');
+  s = await shell();
+  check('deeper, the back arrow comes back and the wordmark steps aside', s.back && !s.word);
+  check('…and a person’s screen says the channel and fleet are not applied',
+    s.ctl.join(' | ') === 'This month | Channel and fleet not applied', s.ctl.join(' | '));
+  check('…with the desktop’s own reason first in the deck',
+    s.first === 'ak-applies' && s.firstText === appliesSentence('driver'), `${s.first}: ${s.firstText}`);
+
+  await p.open('live');
+  s = await shell();
+  check('#live: no window, and the channel and fleet not applied',
+    s.ctl.join(' | ') === 'No window applies here | Channel and fleet not applied', s.ctl.join(' | '));
+  check('…and the sentence says why, in the desktop’s words',
+    s.firstText === appliesSentence('live'), s.firstText);
+  await p.open('payouts');
+  s = await shell();
+  check('#payouts: no window, but the channel chips still govern it',
+    s.ctl.join(' | ') === 'No window applies here | All channels | Both fleets', s.ctl.join(' | '));
+  check('…and it says the window does not apply, and why', s.firstText === appliesSentence('payouts'), s.firstText);
+  await p.open('more');
+  s = await shell();
+  check('More reads no window and no channel, and the bar says so rather than naming one',
+    s.ctl.join(' | ') === 'No window applies here | Channel and fleet not applied', s.ctl.join(' | '));
+  check('…and still closes on the principle, with no basis line (it describes no feed)',
+    s.principle === PRINCIPLE && !s.basis);
+
+  /* The sheet: opened from the bar, the same three groups, every choice a
+     44px target, and a choice made there shows in the bar. */
+  await p.open('live');
+  await p.page.click('.ak-ctl');
+  await p.settle();
+  await p.page.waitForTimeout(350);
+  const sh = await p.page.evaluate(() => {
+    const sheet = document.querySelector('.m-sheet');
+    const vis = (e) => e.getBoundingClientRect().height > 0;
+    return {
+      open: !!sheet, head: sheet?.querySelector('.ak-sheet-h')?.textContent,
+      applies: sheet?.querySelector('.ak-applies')?.textContent,
+      groups: [...(sheet?.querySelectorAll('h3') || [])].map((h) => h.textContent),
+      small: [...(sheet?.querySelectorAll('button, input') || [])].filter(vis)
+        .filter((b) => b.getBoundingClientRect().height < 44)
+        .map((b) => `${b.className || b.tagName}:${b.textContent.trim().slice(0, 12)} ${Math.round(b.getBoundingClientRect().height)}`),
+      radius: sheet ? getComputedStyle(sheet).borderTopLeftRadius : null,
+    };
+  });
+  check('the bar opens the window sheet', sh.open && sh.head === 'Window, channel and fleet', JSON.stringify(sh.head));
+  check('…which says first which of its choices this screen ignores', sh.applies === appliesSentence('live'), sh.applies);
+  check('…with the same three groups', sh.groups.join(' | ') === 'Window | Channel | Fleet', sh.groups.join(' | '));
+  check('…squared off', sh.radius === '0px', sh.radius);
+  check('…and every choice in it at least 44px tall', !sh.small.length, sh.small.slice(0, 6).join(' · '));
+  await p.page.click('.m-sheet .m-opt:has-text("Uber")');
+  await p.settle();
+  await p.open('today?platform=uber');
+  s = await shell();
+  check('a channel chosen is named in the bar on a screen it governs',
+    s.ctl.join(' | ') === 'This month | Uber | Both fleets', s.ctl.join(' | '));
+  await p.close();
+
+  /* 360px, and dark. */
+  const narrow = await phonePage(browser, { skin: 'arkiv', fixture, width: 360, height: 780 });
+  await narrow.open('live');
+  const n = await narrow.page.evaluate(() => ({
+    overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    lines: (() => { const parts = [...document.querySelectorAll('.ak-ctl .ak-ctl-p')];
+      return parts.map((x) => Math.round(x.getBoundingClientRect().top)); })(),
+    firstOnLine2: (() => { const parts = [...document.querySelectorAll('.ak-ctl .ak-ctl-p')];
+      const t = parts.map((x) => x.getBoundingClientRect().top);
+      const second = parts.find((x, i) => i && t[i] > t[0] + 2);
+      return second ? getComputedStyle(second, '::before').content : null; })(),
+  }));
+  check('at 360px nothing pushes the page sideways', n.overflow <= 0, String(n.overflow));
+  check('…and a bar that wraps opens its second line on a word, not on a dot',
+    n.firstOnLine2 == null || n.firstOnLine2 === 'none' || n.firstOnLine2 === 'normal', String(n.firstOnLine2));
+  await narrow.close();
+  for (const theme of ['dark', 'dark-chosen']) {
+    const dk = await phonePage(browser, { skin: 'arkiv', fixture, theme });
+    await dk.open('today');
+    const d = await dk.page.evaluate(() => {
+      const cs = getComputedStyle(document.documentElement);
+      return { paper: cs.getPropertyValue('--paper').trim(), ink: cs.getPropertyValue('--ink').trim(),
+        body: getComputedStyle(document.body).backgroundColor,
+        h1: getComputedStyle(document.querySelector('.m-head h1')).color,
+        meta: [...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.content) };
+    });
+    check(`${theme}: the phone draws on the Arkiv dark paper, in the dark ink`,
+      d.paper.toLowerCase() === '#111113' && d.body === 'rgb(17, 17, 19)' && d.h1 === 'rgb(240, 240, 241)',
+      JSON.stringify(d));
+    check(`${theme}: …and the browser chrome follows it`, d.meta.every((c) => c === d.paper), d.meta.join(' '));
+    await dk.close();
+  }
+
+  /* Held back: the first render still builds the new shell, because the
+     parser holds the deferred module until the sheet is in. */
+  const slow = await phonePage(browser, { skin: 'arkiv', fixture, frozen: false, hold: { '/m/arkiv-m.css': 1500 } });
+  await slow.open('more');
+  check('with the sheet held back 1.5s, the first render is still the new shell',
+    await slow.page.evaluate(() => !!document.querySelector('.ak-ctl') && !document.querySelector('.m-head .m-ico[title="Window and channels"]')));
+  await slow.close();
 }
 
 await browser.close();

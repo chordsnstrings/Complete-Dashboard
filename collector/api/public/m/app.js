@@ -22,10 +22,26 @@ import { state, api, parseHash, href, q, qAll, hidesRange, hidesChannel,
 import { rangePanel } from '../daterange.js';
 /* timeStr, not a formatter of this file's own: it is the same function the
    desktop shell renders every clock through, and it names timeZone: TZ. */
-import { el, esc, sourceLine, timeStr } from '../ui.js';
+import { el, esc, sourceLine, timeStr, pageFoot } from '../ui.js';
 import { SCREENS, TABS, titleFor } from './screens.js';
+import { phoneContract } from './ui.js';
+/* The desktop shell's two sentences about the window, imported rather than
+   re-worded: what the masthead calls the window and why a control does not
+   apply on a page. A phone that described either differently from the
+   desktop beside it would be another pair of pages disagreeing. shell.js
+   builds nothing on import — its moves run only when the desktop calls
+   buildShell() — so the phone takes the words and not the shell. */
+import { windowWords, appliesSentence } from '../shell.js';
 
 const root = document.getElementById('m');
+/* ── which phone app ──────────────────────────────────────────────────────
+   The operator's ruling of 2026-09-24 (docs/UI-REDESIGN-PLAN.md, "Phone PWA
+   — redesign"). Read once, here: the shell is built once, and index.html has
+   the PARSER write m/arkiv-m.css, so by the time this deferred module runs
+   the sheet that declares --pg-phone:1 is in. Under the old skin every line
+   below that is not behind AK draws exactly what it drew before
+   (test/phone_classic.test.mjs). */
+const AK = phoneContract();
 
 /* ── shell ──────────────────────────────────────────────────────────────── */
 const head = el('div', 'm-head');
@@ -47,6 +63,39 @@ head.append(backBtn, titleWrap, filterBtn, refreshBtn);
 const deck = el('div', 'm-deck');
 const tabs = el('nav', 'm-tabs');
 root.append(head, deck, tabs);
+
+/* ── the Arkiv shell: the same pieces, and a control bar ───────────────────
+   Three changes, each only under the token:
+
+     the wordmark  "Fleet", in Fraunces (the one serif left in the product),
+                   stands where the back arrow would be at a tab's root, and
+                   takes the reader to Today. Deeper, the arrow comes back.
+     the ⋮         becomes the CONTROL BAR, a full-width row under the header
+                   that NAMES the window, the channel and the fleet the
+                   screen is read over — one tap to the same sheet. A reader
+                   of the old phone had to open the sheet to learn what window
+                   a figure was over; the desktop masthead now says it on
+                   every page, and so does this.
+     the rules     the header and the bar are ruled rather than blurred, and
+                   every control is a 44px square (m/arkiv-m.css). */
+let word = null, ctl = null, ctlParts = null;
+if (AK) {
+  word = el('a', 'ak-word', 'Fleet');
+  word.setAttribute('aria-label', 'Fleet — go to Today');
+  filterBtn.remove();
+  head.insertBefore(word, titleWrap);
+  /* One line of mono capitals — the window, the channel, the fleet — that
+     wraps part by part rather than cutting one off: "All channels · Both
+     flee…" was the first draft at 390px, a default that could not be read. */
+  ctl = el('button', 'ak-ctl');
+  ctl.type = 'button';
+  ctl.title = 'Window, channel and fleet';
+  ctl.setAttribute('aria-haspopup', 'dialog');
+  ctlParts = el('span', 'ak-ctl-parts');
+  ctl.append(ctlParts, el('span', 'ak-ctl-caret', '▾'));
+  ctl.lastChild.setAttribute('aria-hidden', 'true');
+  root.insertBefore(ctl, deck);
+}
 
 TABS.forEach((t) => {
   const b = el('button', 'm-tab');
@@ -85,6 +134,17 @@ function openSheet() {
   const scrim = el('div', 'm-scrim');
   const sheet = el('div', 'm-sheet');
   sheet.append(el('div', 'm-grab'));
+  /* Under the new shell the sheet says, before any choice, which of its
+     choices this screen ignores and why — the desktop's .applies sentence.
+     The old sheet offered every control on every screen in silence, so an
+     Egari chosen on #live read as an Egari #live. */
+  if (AK) {
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', 'Window, channel and fleet');
+    sheet.append(el('h2', 'ak-sheet-h', 'Window, channel and fleet'));
+    const why = appliesSentence(state.view);
+    if (why) sheet.append(el('p', 'ak-applies', esc(why)));
+  }
   const close = () => {
     scrim.classList.remove('in'); sheet.classList.remove('in');
     setTimeout(() => { scrim.remove(); sheet.remove(); }, 280);
@@ -135,6 +195,7 @@ function openSheet() {
   requestAnimationFrame(() => { scrim.classList.add('in'); sheet.classList.add('in'); });
 }
 filterBtn.onclick = openSheet;
+if (ctl) ctl.onclick = openSheet;
 
 /* ── pull to refresh ────────────────────────────────────────────────────
    Only from a deck that is already at the top, and only downwards, so it never
@@ -214,6 +275,7 @@ async function render() {
   backBtn.style.display = depth > 1 || !currentTab() ? '' : 'none';
   document.title = `${t.title} · Fleet`;
   [...tabs.children].forEach((b) => b.classList.toggle('on', b.dataset.tab === currentTab()));
+  if (AK) akFrame(id, backBtn.style.display !== 'none');
 
   deck.scrollTop = 0;
   deck.innerHTML = '';
@@ -229,7 +291,8 @@ async function render() {
     };
     await (screen || SCREENS.fallback)(deck,
       { view: id, param, sub, alive: () => g === gen, setTitle });
-    await stampSource(g, id);
+    if (AK) akApplies(g, id);
+    await (AK ? akFoot(g, id) : stampSource(g, id));
   } catch (e) {
     if (g !== gen) return;
     deck.innerHTML = '';
@@ -264,6 +327,93 @@ async function stampSource(g, id) {
     });
     if (line) { line.classList.add('m-src'); deck.append(line); }
   } catch { /* provenance never breaks a screen */ }
+}
+
+/* ── the Arkiv shell, on every render ─────────────────────────────────────
+   The control bar names what the screen is read over, in the desktop
+   masthead's words (shell.js windowWords): a rolling window's two Dubai
+   days, a calendar period by its name alone (the server's calendar resolves
+   it, so dates worked out here could disagree with the ones the screen was
+   built over), and "No window applies here" where none does. A channel or
+   fleet the screen ignores is said to be ignored — never claimed as covered:
+   #online-time ignores the platform chip because only Uber reports time
+   online, so "every channel" there would be false. */
+const PLATFORM_WORD = Object.fromEntries(PLATFORMS);
+const FLEET_WORD = Object.fromEntries(FLEETS);
+/* Two phone screens the desktop has no page for, and which read no window
+   and no channel: More is a list of places to go, and the credential paste
+   is a form. data.js's lists do not name them (they are not desktop views),
+   so the bar is told here rather than naming a window neither is read over. */
+const PHONE_ONLY_UNWINDOWED = new Set(['more', 'credentials']);
+function akFrame(id, deep) {
+  const none = PHONE_ONLY_UNWINDOWED.has(id);
+  const w = none ? { main: 'No window applies here', sub: '' } : windowWords(id);
+  const part = (text, cls = '') => el('span', `ak-ctl-p${cls}`, esc(text));
+  ctlParts.replaceChildren(
+    part(w.sub ? `${w.main} · ${w.sub}` : w.main, ' ak-ctl-win'),
+    ...(none || hidesChannel(id)
+      ? [part('Channel and fleet not applied', ' ak-ctl-off')]
+      : [part(PLATFORM_WORD[state.platform || ''] || state.platform),
+        part(FLEET_WORD[state.fleet || ''] || state.fleet)]));
+  word.style.display = deep ? 'none' : '';
+  word.href = href('today');
+}
+
+/* The sentence naming the controls this screen ignores, and why — first in
+   the deck, where a reader looking at an unchanged screen after moving a
+   chip looks for the reason. Prepended once the screen has drawn, because
+   most screens empty the deck after their fetch. */
+function akApplies(g, id) {
+  if (g !== gen) return;
+  const why = appliesSentence(id);
+  if (why && !deck.querySelector(':scope > .ak-applies')) deck.prepend(el('p', 'ak-applies', esc(why)));
+}
+
+/* THE FOOTER, on every screen: the basis (the same source line the old phone
+   closed its deck with — sourceLine(), shared with the desktop), the house
+   principle, and a colophon naming the window and the clock. ui.js
+   pageFoot() builds it: given a host outside #view it appends its own inline
+   footer, the one the desktop's fallback tabs already draw on the phone.
+   The screens that describe no feed (More, Sources, the credential paste)
+   still carry the principle; they have no basis line, as before. */
+async function akFoot(g, id) {
+  if (g !== gen) return;
+  if (deck.querySelector('.pf-inline, .pagefoot')) return;
+  const w = windowWords(id);
+  const colophon = [`${w.main} · Dubai time`, 'Ecosine & Egari'];
+  let line = null;
+  if (!NO_SOURCE.has(id) && !deck.querySelector('.srcline')
+    && deck.querySelector('.m-card, .m-stat, .m-row, .m-lede')) {
+    try {
+      const plats = hidesChannel(id) ? await qAll('/api/platforms') : await q('/api/platforms');
+      if (g !== gen) return;
+      line = sourceLine(plats, {
+        whole: hidesRange(id),
+        only: !hidesChannel(id) && state.platform ? [state.platform] : null,
+        fleet: !hidesChannel(id) && state.fleet ? state.fleet : null,
+      });
+    } catch { /* provenance never breaks a screen */ }
+  }
+  if (g !== gen) return;
+  pageFoot({ basis: line, colophon }, deck);
+}
+
+/* The browser's own chrome in the paper the screen is drawn on. The two
+   theme-color metas in index.html carry production's linen and near-black,
+   and on an installed Android app they colour the status bar — a linen
+   strip over Arkiv's white. They are rewritten here, only under the token,
+   from the resolved --paper (no colour is written down twice; SPEC L5.1),
+   and again when the phone's theme follows the OS across a change. The
+   manifest's colours are one static file for every reader, so they wait for
+   the flip (plan STEP 5). */
+function akChrome() {
+  const paper = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim();
+  if (!paper) return;
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', paper));
+}
+if (AK) {
+  akChrome();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', akChrome);
 }
 
 function refresh() {

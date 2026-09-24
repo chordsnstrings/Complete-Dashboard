@@ -75,6 +75,10 @@ const SHELL_FILES = [
      still written by hand, so test/tokens.test.mjs now walks the phone's
      static imports from /m/app.js and fails on any module it does not name. */
   '/tokens.js', '/deposit_core.js', '/today.js', '/onlinetime.js',
+  /* The phone redesign's control bar names the window and the controls a
+     screen ignores in the desktop shell's own words, so m/app.js imports
+     ../shell.js — a module the phone never reached before. */
+  '/shell.js',
   '/icons/icon-192.png', '/icons/apple-touch-icon.png',
   '/manifest.webmanifest',
 ];

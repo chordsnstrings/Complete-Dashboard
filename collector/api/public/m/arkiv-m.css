@@ -38,3 +38,127 @@
 
 /* ── 1 · the token ─────────────────────────────────────────────────────── */
 :root[data-skin="arkiv"][data-ui="phone"]{--pg-phone:1}
+
+/* ── 2 · the shell ───────────────────────────────────────────────────────────
+   The same header, deck and tab bar m.css builds, with three changes
+   (m/app.js): the wordmark stands where the back arrow would at a tab's root;
+   the ⋮ becomes the CONTROL BAR, a full-width row naming the window, the
+   channel and the fleet; and the sentence naming the controls a screen
+   ignores opens the deck. Ruled rather than blurred: paper ground, a 1.5px
+   ink rule over the control bar, hairlines elsewhere, no radius, no shadow.
+   Every control a thumb uses is at least 44px square. */
+:root[data-skin="arkiv"][data-ui="phone"] body{font-family:var(--sans);color:var(--ink);background:var(--paper)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-head{background:var(--paper);backdrop-filter:none;
+  -webkit-backdrop-filter:none;border-bottom:0;gap:10px;min-height:56px;
+  padding:calc(var(--m-top) + 6px) 16px 6px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-head h1{font-family:var(--sans);font-weight:600;font-size:var(--d1);
+  letter-spacing:-.01em;line-height:1.2;color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-head .m-sub{font-family:var(--mono);font-size:var(--t1);
+  font-weight:500;letter-spacing:.14em;color:var(--grey);margin-top:3px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:root[data-skin="arkiv"][data-ui="phone"] .m-ico{width:44px;height:44px;border-radius:0;background:var(--paper);
+  border:1px solid var(--hair);color:var(--ink);font-size:var(--t9);transition:background .15s}
+:root[data-skin="arkiv"][data-ui="phone"] .m-ico:active{transform:none;background:var(--paper-2)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-ico.on{color:var(--ink);border-color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-ico:focus-visible,
+:root[data-skin="arkiv"][data-ui="phone"] .ak-word:focus-visible,
+:root[data-skin="arkiv"][data-ui="phone"] .m-tab:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+/* The wordmark: Fraunces, the one serif left in the product (plan §3
+   Typography), a hairline between it and the screen's own title. */
+:root[data-skin="arkiv"][data-ui="phone"] .ak-word{flex:0 0 auto;display:inline-flex;align-items:center;
+  min-height:44px;padding-right:12px;border-right:1px solid var(--hair);font-family:var(--disp);
+  font-weight:600;font-size:var(--d2);letter-spacing:-.015em;color:var(--ink);text-decoration:none}
+
+/* The control bar: one row of mono capitals — the window, then the channel,
+   then the fleet — each part kept whole and the row wrapping between parts,
+   the whole row one button onto the sheet. A control the screen ignores is
+   said in grey, never left naming a channel the figures are not over. */
+:root[data-skin="arkiv"][data-ui="phone"] .ak-ctl{flex:0 0 auto;position:relative;z-index:19;display:flex;
+  align-items:center;gap:8px;width:100%;min-height:44px;margin:0;padding:7px 16px;background:var(--paper);
+  border:0;border-top:1.5px solid var(--ink);border-bottom:1px solid var(--hair);font:inherit;
+  color:var(--ink);text-align:left;cursor:pointer;-webkit-appearance:none;appearance:none}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-ctl:active{background:var(--paper-2)}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-ctl:focus-visible{outline:2px solid var(--ink);outline-offset:-3px}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-ctl-parts{flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;
+  align-items:baseline;gap:2px 0;font-family:var(--mono);font-size:var(--t2);font-weight:500;
+  letter-spacing:.1em;text-transform:uppercase;line-height:1.5;color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-ctl-p{white-space:nowrap}
+/* The separator ENDS a part rather than starting the next, so a row that
+   wraps ends its first line on the dot instead of opening its second with
+   one (measured at 360px on #live: "· CHANNEL AND FLEET NOT APPLIED"). */
+:root[data-skin="arkiv"][data-ui="phone"] .ak-ctl-p:not(:last-child)::after{content:"\00b7";padding:0 7px;color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-ctl-win{font-weight:600}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-ctl-off{color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-ctl-caret{flex:0 0 auto;display:grid;place-items:center;width:20px;
+  font-family:var(--mono);font-size:var(--t5);color:var(--ink)}
+
+/* Which controls this screen ignores, and why: the desktop's .applies
+   sentence, first in the deck and at the head of the sheet. */
+:root[data-skin="arkiv"][data-ui="phone"] .ak-applies{margin:0;font-family:var(--sans);font-size:var(--t5);
+  line-height:1.5;color:var(--grey)}
+
+/* The deck. More air between sections than the old cards had, because a
+   ruled section has no box to separate it; one counter numbers every
+   section head on the screen (m.css's card and label heads, ui.js secHead),
+   the same counter the desktop's panels use, so a desktop tab drawn inside
+   the phone's fallback numbers on from the phone's own sections. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-deck{gap:22px;padding:16px 16px calc(var(--m-tabs) + var(--m-bot) + 26px);
+  counter-reset:arkiv-sec}
+
+/* The tab bar: mono labels, the glyph kept (a thumb finds a shape before a
+   word), and the lit tab marked by an ink rule along its top edge rather
+   than by a colour — the accent is retired (plan §3 ACCENT RETIRED). */
+:root[data-skin="arkiv"][data-ui="phone"] .m-tabs{background:var(--paper);backdrop-filter:none;
+  -webkit-backdrop-filter:none;border-top:1px solid var(--hair)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-tab{position:relative;gap:5px;color:var(--grey);font-family:var(--mono);
+  font-size:var(--t1);font-weight:600;letter-spacing:.14em;text-transform:uppercase}
+:root[data-skin="arkiv"][data-ui="phone"] .m-tab i{font-size:var(--t9);color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-tab.on,
+:root[data-skin="arkiv"][data-ui="phone"] .m-tab.on i{color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-tab.on i{transform:none}
+:root[data-skin="arkiv"][data-ui="phone"] .m-tab.on::before{content:"";position:absolute;left:20%;right:20%;top:-1px;
+  height:2px;background:var(--ink)}
+
+/* The sheet: squared off under an ink rule, the headings in mono, every
+   choice at least 44px (the range panel's own chips included). */
+:root[data-skin="arkiv"][data-ui="phone"] .m-scrim{background:color-mix(in srgb,var(--ink) 36%,transparent);
+  backdrop-filter:none}
+:root[data-skin="arkiv"][data-ui="phone"] .m-sheet{background:var(--paper);border-radius:0;border-top:1.5px solid var(--ink);
+  box-shadow:none;padding:6px 16px calc(var(--m-bot) + 18px)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-grab{width:36px;height:3px;border-radius:0;background:var(--grey-2);
+  margin:6px auto 12px}
+:root[data-skin="arkiv"][data-ui="phone"] .ak-sheet-h{margin:0 0 8px;font-family:var(--mono);font-size:var(--t3);
+  font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-sheet h3{margin:20px 0 8px;font-family:var(--mono);font-size:var(--t1);
+  font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-opt{min-height:48px;padding:12px 2px;border-top:1px solid var(--hair);
+  font-family:var(--sans);font-size:var(--t8);color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-opt.on{color:var(--ink);font-weight:600}
+:root[data-skin="arkiv"][data-ui="phone"] .m-sheet .rp-sec{font-family:var(--mono);font-size:var(--t1);
+  letter-spacing:.16em;color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-sheet .rp-chip,
+:root[data-skin="arkiv"][data-ui="phone"] .m-sheet .rp-m,
+:root[data-skin="arkiv"][data-ui="phone"] .m-sheet .rp-dates input{min-height:44px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-sheet .rp-step{width:44px;height:44px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-sheet .rp-apply{min-height:48px}
+
+/* Offline, answering from the service worker's cache: a warning, so a
+   HOLLOW negative dot (ruling 1) on a neutral ground, the words in ink. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-stale{background:var(--w-ink);border:0;border-radius:0;
+  border-top:1px solid var(--hair);color:var(--ink);font-size:var(--t5);line-height:1.45;padding:10px 12px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stale::before{content:"";content:"" / "warning: ";flex:none;
+  box-sizing:border-box;width:8px;height:8px;border-radius:50%;border:1.5px solid var(--sem-neg);background:none}
+/* A screen that could not load at all: critical, a SOLID dot and a 3px
+   negative rule, the words in ink — never red words. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-err{background:none;border:0;border-top:3px solid var(--sem-neg);
+  border-radius:0;box-shadow:none}
+:root[data-skin="arkiv"][data-ui="phone"] .m-err .m-empty{text-align:left;padding:14px 0;color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-err .m-empty b{color:var(--ink)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-err .m-empty b::before{content:"";content:"" / "critical: ";
+  display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--sem-neg);margin-right:8px;
+  vertical-align:.05em}
+
+/* The footer ui.js pageFoot() appends to the deck: the basis, the house
+   principle, the colophon — a column on a phone. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-deck>.pf-inline{margin-top:10px;gap:10px}
+:root[data-skin="arkiv"][data-ui="phone"] .m-deck>.pf-inline .pf-colophon{text-align:left}
