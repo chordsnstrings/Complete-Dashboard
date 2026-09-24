@@ -236,12 +236,17 @@ export const stats = (host, list, three = false, { hero = false } = {}) => {
   if (hero && phoneContract()) {
     g.dataset.band = 'glance';
     const kids = [...g.children];
-    const at = Math.max(0, list.filter(Boolean).findIndex((t) => t.hero));
+    const tiles = list.filter(Boolean);
+    const at = Math.max(0, tiles.findIndex((t) => t.hero));
     const h = kids[at];
     if (h) {
       h.classList.add('hero');
       const n = h.querySelector('.n');
       if (n && !n.hasAttribute('data-absent')) {
+        /* A figure that is long by nature — eight digits of dirhams and their
+           fils, a date — takes the hero's smaller display step: "AED
+           10,804,335.95" at the full one is wider than a 360px screen. */
+        if (tiles[at]?.long || String(tiles[at]?.value ?? '').length > 14) h.classList.add('long');
         n.classList.remove('sm');
         highlight(n, 'ink');
       }

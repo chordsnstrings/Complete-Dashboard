@@ -1314,6 +1314,16 @@ async function more(deck) {
    weekly events showed 6 of 303 transfers under the shell's default month.
    See the block comment in api/public/payouts.js. */
 async function payouts(deck, ctx) {
+  /* THE REDESIGN, only under the token: 00 heads the last wire's statement
+     and the register's tiles (To the bank the hero); every transfer and every
+     comparison carries its channel's row mark, and each platform its swatch;
+     and what the register cannot say — the transfers with nothing to compare
+     against, and the Uber days nobody has asked about — is gathered into
+     † WHAT THIS SCREEN DOES NOT KNOW, figure first, each with the sentence
+     the old screen printed for it, word for word. Nothing is dropped: the
+     sentences move from under a card into the band. */
+  const AK = phoneContract();
+  const unknown = [];
   skeleton(deck, 4);
   const [d, rec] = await Promise.all([
     qChan('/api/finance/payouts').catch(() => null),
@@ -1346,6 +1356,7 @@ async function payouts(deck, ctx) {
      sentence, or the honest reason there is no second half. */
   const recRows = (rec && Array.isArray(rec.rows)) ? rec.rows : [];
   const last = recRows[0] || null;
+  let statement = null;
   if (last) {
     const delta = n(last.delta);
     const matched = delta != null;
@@ -1355,7 +1366,7 @@ async function payouts(deck, ctx) {
        survives while the check a reader could do by hand does not. money()
        rounds to whole dirhams by default, which is right for a tile and wrong
        for this sentence. */
-    lede(deck, {
+    statement = lede(deck, {
       claim: `${money(n(last.wire), 'AED', 2)} on ${dayStr(last.paid_on)}`,
       sub: `${sourceLabel(last.platform)} · ${sourceLabel(last.fleet_id) || last.fleet_id}. `
         + (matched
@@ -1370,7 +1381,7 @@ async function payouts(deck, ctx) {
     });
   }
 
-  stats(deck, [
+  const payTiles = stats(deck, [
     { label: 'To the bank', value: money(total), long: true,
       sub: list.length
         ? `${fmt(list.length)} transfers on ${fmt(dates.size)} dates`
@@ -1380,7 +1391,10 @@ async function payouts(deck, ctx) {
         : (weekdays.size ? `across ${fmt(weekdays.size)} weekdays` : 'no dated transfer') },
     earliest ? { label: 'The record starts', value: dayStr(earliest), long: true,
       sub: 'the earliest transfer held for any platform' } : null,
-  ]);
+  ], false, { hero: AK });
+  /* #payouts takes no window (it is the whole register), so 00 names the
+     register's own span. */
+  if (AK) deck.insertBefore(secHead('00', 'At a glance', 'every transfer on record'), statement || payTiles);
 
   /* ── every transfer, newest first ──────────────────────────────────────
      Rows and not a table: a transfer is a date, a channel and an amount, and
@@ -1391,7 +1405,7 @@ async function payouts(deck, ctx) {
     const c = card('Every transfer, newest first',
       'One row per payment that reached the bank, on the date the provider says it did.');
     const SHOWN = 25;
-    rows(c.body, list.slice(0, SHOWN).map((r) => row({
+    const wires = rows(c.body, list.slice(0, SHOWN).map((r) => row({
       title: dayStr(r.paid_on),
       sub: `${sourceLabel(r.platform)} · ${sourceLabel(r.fleet_id) || r.fleet_id}`
         + (r.period_start && r.period_end
@@ -1399,6 +1413,7 @@ async function payouts(deck, ctx) {
           : ' · no period stated'),
       value: money(n(r.amount)),
     })));
+    if (AK) list.slice(0, SHOWN).forEach((r, i) => rowMark(wires.children[i], r.platform));
     cut(c.body, { rows: list.slice(0, SHOWN), total: list.length, truncated: list.length > SHOWN },
       'transfers', 'most recent');
     deck.append(c.card);
@@ -1438,6 +1453,7 @@ async function payouts(deck, ctx) {
            second one, the figure the row exists to compare the first against.
            .wrapsub lets it take a second line rather than lose a number. */
         el2.classList.add('wrapsub');
+        if (AK) rowMark(el2, r.platform);
         return el2;
       }));
     }
@@ -1465,7 +1481,14 @@ async function payouts(deck, ctx) {
       p2.style.cssText = 'margin:10px 2px 0';
       p2.textContent = `${fmt(rs.length)} ${rs.length === 1 ? 'transfer' : 'transfers'} `
         + `(${who}) cannot be compared, and that is not a difference of zero. ${why}`;
-      c.body.append(p2);
+      /* Labelled with the fleet as well as the channel: the kinds are keyed
+         per fleet, and two cells both reading "Not compared — Bolt" (91 and
+         88, measured on production) read as one figure printed twice. */
+      if (AK) {
+        unknown.push({ label: `Not compared — ${who} · ${[...new Set(rs.map((x) => sourceLabel(x.fleet_id) || x.fleet_id))].join(', ')}`,
+          fig: fmt(rs.length), why: p2.textContent });
+      }
+      else c.body.append(p2);
     }
     deck.append(c.card);
 
@@ -1488,7 +1511,8 @@ async function payouts(deck, ctx) {
         + 'for minutes at a time. Either way it is a day with no measurement, and a day with no '
         + 'measurement is not a day with no transfer. The nightly walk fills them Mondays first.';
       u2.body.append(p3);
-      deck.append(u2.card);
+      if (AK) unknown.push({ label: 'What we have not asked Uber about', fig: fmt(total2), why: p3.textContent });
+      else deck.append(u2.card);
     }
   }
 
@@ -1504,7 +1528,7 @@ async function payouts(deck, ctx) {
        reader got "Uber wires on a Monday, settling the Monday-to-Sun…". An
        explanation cut mid-clause is worse than no explanation, because nothing
        on screen says it was cut. */
-    rows(c.body, (d.coverage || []).map((cv) => {
+    const pubRows = rows(c.body, (d.coverage || []).map((cv) => {
       const mine = (cv.record_span || []).reduce((a, x) => a + (n(x.transfers) || 0), 0);
       return row({
         title: sourceLabel(cv.platform),
@@ -1514,6 +1538,10 @@ async function payouts(deck, ctx) {
         tone: cv.publishes_payouts ? null : 'warn',
       });
     }));
+    if (AK) {
+      (d.coverage || []).forEach((cv, i) => pubRows.children[i]?.querySelector('.k b')
+        ?.insertAdjacentHTML('afterbegin', swatch(cv.platform)));
+    }
     /* The sentence in full, under the rows, where a paragraph may wrap. Both
        kinds: a provider's cadence, and — for the one that publishes nothing —
        why there is no figure rather than a zero. */
@@ -1526,6 +1554,10 @@ async function payouts(deck, ctx) {
       c.body.append(p4);
     }
     deck.append(c.card);
+  }
+  if (AK && unknown.length) {
+    unknown[0].hl = true;
+    absenceBand(deck, unknown, { name: '† What this screen does not know' });
   }
 }
 

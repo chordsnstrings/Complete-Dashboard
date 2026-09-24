@@ -462,3 +462,6 @@
 :root[data-skin="arkiv"][data-ui="phone"] .ak-paste::placeholder{color:var(--grey)}
 :root[data-skin="arkiv"][data-ui="phone"] .m-stale.ak-ok::before{border:0;background:var(--sem-pos);
   content:"";content:"" / "good: "}
+/* The hero with a long figure (m/ui.js stats(): `long`, or more than 14
+   characters) — one display step down, so it fits a 360px screen. */
+:root[data-skin="arkiv"][data-ui="phone"] .m-stat.hero.long .n{font-size:var(--d4);letter-spacing:-.018em}

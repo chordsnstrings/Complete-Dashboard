@@ -1071,6 +1071,54 @@ console.log('\n4.15 · Online time: the call list’s 00 from what /api/online-t
   await q2.close();
 }
 
+console.log('\n4.16 · To the bank: 00, marks and swatches, and what the register cannot say gathered into †');
+{
+  const reg = ans('/api/finance/payouts');
+  const rec = ans('/api/finance/payouts/reconcile');
+  const total = reg.payouts.reduce((a, r) => a + (Number(r.amount) || 0), 0);
+  const { channelKey } = await import('../api/public/tokens.js');
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('payouts');
+  const o = (await outline(p.page)).filter((x) => x !== 'ak-applies');
+  const m = await p.page.evaluate(() => ({
+    hero: `${document.querySelector('.m-stat.hero .l')?.textContent}|${document.querySelector('.m-stat.hero .n')?.textContent}|${document.querySelector('.m-stat.hero')?.classList.contains('long')}`,
+    wires: [...document.querySelectorAll('.m-card')].find((c) => c.querySelector(':scope > h2')?.textContent === 'Every transfer, newest first')
+      ?.querySelectorAll('.m-row') || [],
+    marks: [...([...document.querySelectorAll('.m-card')].find((c) => c.querySelector(':scope > h2')?.textContent === 'Every transfer, newest first')
+      ?.querySelectorAll('.m-row') || [])].map((r) => r.dataset.ch || null),
+    sw: [...([...document.querySelectorAll('.m-card')].find((c) => c.querySelector(':scope > h2')?.textContent === 'What each platform publishes')
+      ?.querySelectorAll('.m-row .k b') || [])].map((b) => b.querySelector('.sw')?.className || null),
+    against: ([...document.querySelectorAll('.m-card')].find((c) => c.querySelector(':scope > h2')?.textContent === 'Against our own figure')
+      ?.textContent || ''),
+    unasked: !![...document.querySelectorAll('.m-card > h2')].find((h) => h.textContent === 'What we have not asked Uber about'),
+    cells: [...document.querySelectorAll('.absence .absb-cell')].map((c) => ({ label: c.querySelector('.absb-lab').textContent,
+      fig: c.querySelector('.absb-fig').textContent, why: c.querySelector('.absb-why')?.textContent })),
+  }));
+  check('00 heads the last wire’s statement and the register’s tiles; † closes the screen before the footer',
+    o[0] === 'head:At a glance' && o[1] === 'statement' && o[2] === 'glance' && o[o.length - 2] === 'absence' && o[o.length - 1] === 'foot',
+    o.join(' → '));
+  check(`the hero is To the bank, ${moneyOf(total)} (every transfer summed), at the hero’s long step`,
+    m.hero === `To the bank|${moneyOf(total)}|true`, m.hero);
+  check('every transfer carries its channel’s mark', m.marks.length > 0
+    && reg.payouts.slice(0, 25).every((r, i) => m.marks[i] === channelKey(String(r.platform || ''))), JSON.stringify(m.marks));
+  check('every platform carries its swatch', m.sw.length === reg.coverage.length
+    && reg.coverage.every((cv, i) => m.sw[i] === `sw ch-${channelKey(cv.platform)}`), JSON.stringify(m.sw));
+  const uncompared = rec.rows.filter((r) => r.calculated == null).length;
+  const unasked = rec.unchecked.filter((u) => u.count).reduce((a, u) => a + u.count, 0);
+  const notCompared = m.cells.filter((c) => /^Not compared/.test(c.label));
+  check(`† the transfers with nothing to compare against (${uncompared}), each kind with the old sentence word for word`,
+    notCompared.reduce((a, c) => a + Number(c.fig), 0) === uncompared
+      && notCompared.every((c) => /cannot be compared, and that is not a difference of zero\./.test(c.why))
+      && !/cannot be compared/.test(m.against), JSON.stringify(notCompared.map((c) => [c.label, c.fig])));
+  check('…each kind labelled with its channel AND its fleet, so no two cells read as one figure printed twice',
+    notCompared.every((c) => / · \S/.test(c.label)) && new Set(notCompared.map((c) => c.label)).size === notCompared.length,
+    notCompared.map((c) => c.label).join(' | '));
+  check(`† the days nobody has asked Uber about (${unasked}), in place of their own card`,
+    m.cells.some((c) => c.label === 'What we have not asked Uber about' && c.fig === f0(unasked)
+      && c.why.startsWith(`We hold no Uber statement for ${f0(unasked)} days`)) && !m.unasked, JSON.stringify(m.cells.map((c) => c.label)));
+  await p.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');
