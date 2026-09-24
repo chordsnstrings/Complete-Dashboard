@@ -1358,3 +1358,18 @@
 :root[data-skin="arkiv"] .cmp-stale{color:var(--ink);white-space:nowrap}
 :root[data-skin="arkiv"] .cmp-stale::before{content:"";content:"" / "warning: ";display:inline-block;box-sizing:border-box;
   width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:.05em;border:1.5px solid var(--sem-neg)}
+
+/* #analyst: a verdict is not better or worse, so its chip is ink with the
+   tab's glyph; each card names the window and pass that measured it; a
+   value the database could not measure says so in the value slot; a claim's
+   earlier judgements fold beneath it, each a full card. */
+:root[data-skin="arkiv"] .an-chip{background:var(--w-ink);color:var(--ink);gap:6px}
+:root[data-skin="arkiv"] .an-when{font-family:var(--mono);font-size:var(--t2);letter-spacing:.06em;
+  color:var(--grey);margin:4px 0 0}
+:root[data-skin="arkiv"] .an-na{font-family:var(--sans);font-size:var(--t5);font-weight:600;color:var(--ink-2)}
+:root[data-skin="arkiv"] .an-claim+.an-claim{margin-top:18px}
+:root[data-skin="arkiv"] .an-times{margin:6px 0 0}
+:root[data-skin="arkiv"] .an-older{margin-top:6px}
+:root[data-skin="arkiv"] .an-older>summary{cursor:pointer;font-family:var(--mono);font-size:var(--t2);
+  letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);padding:6px 0}
+:root[data-skin="arkiv"] .an-older .finding{margin-top:10px;padding-left:14px;border-left:1px solid var(--hair)}

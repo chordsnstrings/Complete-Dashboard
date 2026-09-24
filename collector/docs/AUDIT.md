@@ -1487,3 +1487,14 @@ gapBars' caption counted the unreached hours as "17 of 24 days" (the shared
 unmeasured waiting times; By channel's Trips column still used the old
 unsigned arrow. The render-audit finding STEP 3 logged here ("▲/▼ with no
 sign", ×5 routes) is the old delta, which the contract no longer draws.
+
+### #analyst — 2026-09-24
+
+Production data, the default tab and Rules in both skins at 1440 and 390,
+light and dark; refuted, immaterial and unsupported at 1440 light (scratchpad
+`pagephase/shots/analyst/`). No error, no sideways scroll, two highlights
+(one on Rules). The old skin's default tab is 61,996 characters of text
+against 20,293 under the contract: the same judgements, the older ones of
+each claim folded into a closed disclosure. Found and fixed before commit:
+segment labels printed the raw platform key ("bolt") where the cut is a
+platform; they use the channel's name.

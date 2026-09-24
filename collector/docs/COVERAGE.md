@@ -6543,3 +6543,10 @@ number (5 and 5), and never a passport or RTA number.
   fixture (the test's header says how). A mock change that alters what an
   old page renders fails it too — re-record from the base tree, never from
   the working tree.
+* **RE-INDENTING CODE THAT HOLDS A MULTI-LINE TEMPLATE LITERAL CHANGES THE
+  DOM.** The whitespace between the backticks is part of the string. Moving
+  #analyst's card builder into a shared function and dedenting it by two
+  spaces changed every card's `innerHTML` in the old skin by whitespace text
+  nodes alone — invisible on screen, and exactly what
+  `test/arkiv_classic_frozen` exists to catch (it failed four routes). When a
+  block moves, move its template literals byte for byte.

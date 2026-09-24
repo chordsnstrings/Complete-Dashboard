@@ -352,4 +352,106 @@ console.log('\n#compare');
   await ctx.close();
 }
 
+/* ══ #analyst ══════════════════════════════════════════════════════════════ */
+console.log('\n#analyst');
+const anRead = (page) => page.evaluate(() => {
+  const v = document.querySelector('#view');
+  const txt = (n) => (n ? n.textContent.replace(/\s+/g, ' ').trim() : '');
+  return {
+    tabs: v.querySelectorAll('.tabs a').length,
+    toned: v.querySelectorAll('.finding[class*="t-"]').length,
+    chips: [...v.querySelectorAll('.an-chip')].map(txt),
+    when: v.querySelectorAll('[data-panel="an-cards"] .an-when').length,
+    cards: v.querySelectorAll('[data-panel="an-cards"] .an-claim').length,
+    older: [...v.querySelectorAll('.an-older')].map((d) => ({ n: d.querySelectorAll('.finding').length,
+      why: d.querySelectorAll('.fwhy').length, sum: txt(d.querySelector('summary')) })),
+    times: [...v.querySelectorAll('.an-times')].map(txt),
+    na: [...v.querySelectorAll('[data-panel="an-cards"] .an-na')].map(txt),
+    fate: [...v.querySelectorAll('[data-panel="an-fate"] .hb[data-click]')].length,
+    note: /kept rather than hidden/.test(v.textContent),
+  };
+});
+{
+  const { ctx, page, answer } = await open('arkiv', 'analyst');
+  const s = await shape(page);
+  const r = await anRead(page);
+  const d = answer('/api/analyst/findings');
+  const keys = new Set(d.findings.map((f) => [f.dimension, f.segment, f.metric, f.direction].join('|')));
+  check('confirmed: 00, the fate of every claim, above/below, per pass and by cut, the cards, †',
+    JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'What became of every claim', 'Segments above the rest of the fleet',
+      'Segments below the rest of the fleet', 'Confirmed judgements per pass', 'Which cut the model found things in',
+      'Every claim, latest judgement first', '† What this page does not know']), JSON.stringify(s.heads));
+  check('the tab bar keeps its five addresses', r.tabs === 5, String(r.tabs));
+  check('the hero counts DISTINCT claims, the judgements under it', s.hero === 'Survived the check — distinct claims'
+    && s.values[s.hero] === String(keys.size) && s.subs[s.hero].startsWith(`${d.findings.length} judgement`), JSON.stringify([s.values, s.subs[s.hero]]));
+  check('five tiles, none toned (a verdict is not better or worse)', s.glance === 5
+    && !(await page.evaluate(() => document.querySelectorAll('#view .kpis.glance .kpi[class*=" t-"]').length)), String(s.glance));
+  check('01: the four verdicts as bars, each an address of its tab', r.fate === 4, String(r.fate));
+  check('cards: one per claim, each chip ink with its glyph, each naming its window and pass, none toned',
+    r.cards === keys.size && r.chips.every((c) => c.startsWith('✓')) && r.when === keys.size && r.toned === 0,
+    JSON.stringify([r.cards, r.chips, r.when, r.toned]));
+  check('the † band: window, property rows, whether anyone acted, worth in money', s.abs.length === 4
+    && s.abs[2].fig === 'Not recorded' && s.abs[3].fig === 'Not priced' && /of/.test(s.abs[0].fig), JSON.stringify(s.abs.map((c) => c.fig)));
+  check('two highlights', s.hl === 2, String(s.hl));
+  await ctx.close();
+}
+/* The same claim judged by three passes: one card, the older two folded
+   beneath it in FULL (the review's correction — rule 1). */
+{
+  const { ctx, page } = await open('arkiv', 'analyst', { fixtures: { '/api/analyst/findings': (_q, real) => {
+    const f = real.findings[0];
+    const older = [1, 2].map((k) => ({ ...f, id: 90 + k, measured_value: f.measured_value - k,
+      created_at: new Date(Date.parse(f.created_at) - k * 864e5).toISOString() }));
+    return { ...real, findings: [...real.findings, ...older] };
+  } } });
+  const r = await anRead(page);
+  const s = await shape(page);
+  check('three judgements of one claim are ONE card, "judged 3 times", the measured range stated',
+    r.cards === 2 && r.times.length === 1 && /^Judged 3 times, .* measured 68\.2% – 70\.2%\.$/.test(r.times[0]), JSON.stringify(r.times));
+  check('…and the two earlier judgements fold beneath it as full cards, each with its why', r.older.length === 1
+    && r.older[0].n === 2 && r.older[0].why === 2 && /2 earlier judgements/.test(r.older[0].sum), JSON.stringify(r.older));
+  check('…the hero still counts claims, not judgements', s.values[s.hero] === '2', s.values[s.hero]);
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'analyst/refuted');
+  const s = await shape(page); const r = await anRead(page);
+  check('refuted: its hero, how far the model was off, the kept-not-hidden note', s.hero === 'Contradicted by the data — distinct claims'
+    && s.heads.includes('How far the model was off') && r.note && r.chips.every((c) => c.startsWith('✗')), JSON.stringify([s.hero, s.heads]));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'analyst/immaterial');
+  const s = await shape(page);
+  const cap = await page.evaluate(() => document.querySelector('[data-panel="an-small"] .cap')?.textContent || '');
+  check('immaterial: each claim against the materiality floor, and which floor it is under', s.hero === 'True but too small to act on — distinct claims'
+    && /The floor is a \d+% difference/.test(cap) && /under the difference floor/.test(cap), cap);
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'analyst/unsupported');
+  const r = await anRead(page);
+  check('unsupported: a value the database could not measure says "not measured", never a bare dash',
+    r.na.length === 3 && r.na.every((x) => x === 'not measured') && r.chips.every((c) => c.startsWith('?')), JSON.stringify(r.na));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('arkiv', 'analyst/rules');
+  const s = await shape(page);
+  const sw = await page.evaluate(() => [...document.querySelectorAll('[data-panel="an-pick"] tbody tr')]
+    .map((tr) => tr.querySelectorAll('.chn .sw').length));
+  check('rules: the three thresholds as the 00 band, the four tables kept', s.glance === 3
+    && JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Numbers the model can check', 'Groups the model can compare',
+      'What the model could pick from, this window', 'Minimum absolute difference, by unit']), JSON.stringify(s.heads));
+  check('…a metric carried by one platform names it with its swatch, not coloured text', JSON.stringify(sw) === '[2,1]', JSON.stringify(sw));
+  await ctx.close();
+}
+{
+  const { ctx, page } = await open('classic', 'analyst');
+  const s = await shape(page); const r = await anRead(page);
+  check('the old skin keeps today\'s page: a kpiRow of five, toned cards, no 00', s.kpiRows === 1 && s.glance === 0
+    && r.toned > 0 && r.chips.length === 0, JSON.stringify([s.kpiRows, r.toned]));
+  await ctx.close();
+}
+
 await done();
