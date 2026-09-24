@@ -47,7 +47,7 @@ import { renderAnalyst, ANALYST_TABS } from './analyst.js';
 import { renderProviders, renderProviderField } from './providers.js';
 import { renderRoster, ROSTER_TABS } from './roster.js';
 import { renderDay } from './day.js';
-import { renderSegments, renderSegment, segmentTable } from './segments.js';
+import { renderSegments, renderSegment, segmentTable, withAttribution } from './segments.js';
 import { renderSlot } from './slot.js';
 import { renderPlaybook } from './playbook.js';
 import { renderForecast } from './forecast.js';
@@ -4828,17 +4828,40 @@ V.safety = async (root) => {
 };
 
 V.unauthorized = async (root) => {
-  const vuHost = el('div'); root.append(vuHost);
-  const kh = el('div', 'kpis'); root.append(kh);
+  /* Under the page contract (plan §4 #unauthorized): the verdict as the 00
+     statement with the tiles — the one printing its figure folded into it by
+     name (ruling 7), untoned, a mean a day over the last seven days against
+     the seven before (down is better), Revenue forgone exact and ABSENT with
+     the endpoint's own reason when there is no rate; the unexplained per day
+     on its OWN axis (every interval seen beside it flattened the unexplained
+     to the baseline), days the sensor did not collect as outlines; what the
+     matcher decided as ranked bars that still open #segments/verdict; the
+     vehicles with km beside the count; then, new, off the rows this page
+     already holds — the nearest booking by channel, when they start, where
+     they start, how long and how far; the flagged table and the seat-sensor
+     health tables unchanged; a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
+  const vuHost = ak ? AKB.vHost : el('div');
+  if (!ak) root.append(vuHost);
+  const kh = el('div', 'kpis'); (ak ? AKB.tilesHost : root).append(kh);
   const g = el('div', 'grid g23'); root.append(g);
-  const trend = panel('Unexplained trips per day', 'Trips with no booking, against every trip the seat sensor saw'); g.append(trend.panel);
-  const verdicts = panel('What each flagged trip turned out to be', 'Every trip the seat sensor saw, and what explains it'); g.append(verdicts.panel);
+  const trend = panel('Unexplained trips per day', ak ? 'Journeys with no booking behind them, on their own axis' : 'Trips with no booking, against every trip the seat sensor saw'); g.append(trend.panel);
+  const verdicts = panel(ak ? 'What the matcher decided' : 'What each flagged trip turned out to be', 'Every trip the seat sensor saw, and what explains it'); g.append(verdicts.panel);
   const veh = panel('Vehicles with unexplained trips', 'Ranked by count — click to inspect'); root.append(veh.panel);
   const list = panel('Flagged segments', 'Click a row for the full evidence trail'); root.append(list.panel);
   const health = panel('Seat-sensor health', 'A dead or stuck pad makes the numbers above unreliable'); root.append(health.panel);
   [kh, trend.body, verdicts.body, veh.body, list.body, health.body].forEach(loading);
 
   const gen = currentGen();
+  /* Under the contract only: the attribution ladder, for the rung and the
+     name beside "Driver that day" in the flagged table. NOT awaited with the
+     rest: on production it answered in 29–32 s against a page that otherwise
+     draws in five, and the first draft that put it in this Promise.all held
+     the whole page for 129 s. The table draws on custody at once and gains
+     the column when the ladder lands. Caught — a table with no attribution
+     is the table as it was, and says so. */
+  const attP = ak ? qAll('/api/unauthorized/attributed', { verdict: 'unauthorized', limit: 500 }).catch(() => null) : null;
   const [sum, daily, byVeh, rows, sensors] = await Promise.all([
     q('/api/unauthorized/summary'), q('/api/unauthorized/daily'), q('/api/unauthorized/by-vehicle'),
     q('/api/unauthorized/list', { verdict: 'unauthorized' }), q('/api/sensor-health'),
@@ -4936,7 +4959,7 @@ V.unauthorized = async (root) => {
      `unverifiable` were in the donut beside them and had no tile, so the
      numbers on the page did not add up to the page — and `needs_a_human`, a
      field NAMED for an operator action, was displayed nowhere at all. */
-  kh.innerHTML = [
+  const UN_TILES = [
     /* A ride once across providers — see sum.dedupe_rule, printed under the
        per-provider table below. */
     ['Unexplained trips', fmt(t.unauthorized || 0),
@@ -4990,7 +5013,11 @@ V.unauthorized = async (root) => {
      carrying markup is judged by what the reader sees. Without it .kpi .n's
      white-space:nowrap clips "0 stuck · 12 dead" at the card edge — the tile
      is overflow:hidden, so a cut figure gets not even an ellipsis. */
-  ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
+  ];
+  if (ak) {
+    kh.remove();
+    unauthGlanceFleet(AKB, UN_TILES, t, sum, daily);
+  } else kh.innerHTML = UN_TILES.map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
 
   /* EACH PROVIDER'S OWN FIGURES, BESIDE THE COMBINED ONES ABOVE.
      ─────────────────────────────────────────────────────────────────────────
@@ -5067,6 +5094,23 @@ V.unauthorized = async (root) => {
      gapBars rather than barChart, because a day with no seat-occupancy data and
      a day where the sensor saw nobody are different facts and only one of them
      is a zero. */
+  if (ak) {
+    /* Into boxes of their own (a chart drawn into a host not laid out yet
+       redraws and clears it), so the panels' loading skeletons go first —
+       left in place, they sat under the charts for good. */
+    trend.body.innerHTML = ''; verdicts.body.innerHTML = '';
+    const tb = el('div'); trend.body.append(tb);
+    gapBars(tb, daily, { x: 'd', y: 'unauthorized', color: '--mk-fill', label: 'unexplained',
+      gapLabel: 'no seat-occupancy data',
+      onClick: (d) => { location.hash = href('segments', 'day', dayKey(d.d)); } });
+    const seen = daily.reduce((a, d) => a + (+d.segments || 0), 0);
+    trend.body.append(el('p', 'cap', `${fmt(daily.reduce((a, d) => a + (+d.unauthorized || 0), 0))} unexplained of the `
+      + `${fmt(seen)} occupancy intervals seen over these days, each counted once across providers. An outline is a day with `
+      + 'no seat-occupancy data. Click a day for its segments.'));
+    const vb = el('div'); verdicts.body.append(vb);
+    hbars(vb, (sum.byVerdict || []).map((r) => ({ label: String(r.verdict).replace(/_/g, ' '), n: +r.n || 0, v: r.verdict })),
+      { signed: false, color: '--mk-fill', onClick: (d) => { location.hash = href('segments', 'verdict', d.v); } });
+  } else {
   gapBars(trend.body, daily, { x: 'd', y: 'unauthorized', secondary: 'segments',
     color: '--s8', label: 'unexplained', secondaryLabel: 'occupancy intervals seen',
     gapLabel: 'no seat-occupancy data',
@@ -5076,6 +5120,7 @@ V.unauthorized = async (root) => {
     + 'full picture, every source and platform, is on its own page.'));
   donut(verdicts.body, (sum.byVerdict || []).map((r) => ({ label: r.verdict, n: r.n })),
     { onClick: (d) => { location.hash = href('segments', 'verdict', d.label); } });
+  }
 
   veh.body.innerHTML = '';
   // Show who was driving, not just which plate — a flag against a car nobody can
@@ -5083,8 +5128,10 @@ V.unauthorized = async (root) => {
   if (vehRows.length) {
     hbars(veh.body, vehRows.slice(0, 12).map((r) => ({
       label: r.drivers ? `${r.plate} · ${r.drivers}` : `${r.plate} · driver unknown`,
-      plate: r.plate, n: r.unauthorized })), { color: '--s8',
-      onClick: (d) => { location.hash = href('segments', 'plate', d.plate || d.label); } });
+      plate: r.plate, n: r.unauthorized, km: r.unauth_km })), ak
+      ? { signed: false, color: '--mk-fill', shareOf: (d) => (d.km != null ? `${fmt(d.km)} km` : 'no distance'),
+        onClick: (d) => { location.hash = href('segments', 'plate', d.plate || d.label); } }
+      : { color: '--s8', onClick: (d) => { location.hash = href('segments', 'plate', d.plate || d.label); } });
     const vcap = el('p', 'cap');
     vcap.innerHTML = esc(byVeh.total > 12
       ? `The 12 worst of ${fmt(byVeh.total)} vehicles with an unexplained trip in this range.`
@@ -5103,7 +5150,23 @@ V.unauthorized = async (root) => {
   /* 33 flagged segments render 6,505px — each row carries an evidence trail,
      which is right for the ones being examined and wrong for all of them at
      once. */
-  foldRows(list.body, segmentTable(rows), { shown: 8, total: rows.length, noun: 'segment', key: 'unauth-seg' });
+  if (!ak) foldRows(list.body, segmentTable(rows), { shown: 8, total: rows.length, noun: 'segment', key: 'unauth-seg' });
+  else {
+    const tHost = el('div'); const tCap = el('p', 'cap');
+    list.body.append(tHost, tCap);
+    const drawFlagged = (rs, opts) => { tHost.innerHTML = ''; foldRows(tHost, segmentTable(rs, opts), { shown: 8, total: rows.length, noun: 'segment', key: 'unauth-seg' }); };
+    drawFlagged(rows, {});
+    if (rows.length) {
+      tCap.textContent = 'Who the evidence names is still loading — until it lands, the table carries day-grain custody: who held the car that day, not a narrowed name.';
+      attP.then((attRaw) => {
+        if (!alive(gen)) return;
+        const wa = withAttribution(rows, attRaw);
+        if (wa.att) { drawFlagged(wa.rows, { withCustody: true }); tCap.remove(); }
+        else tCap.textContent = 'Who the evidence names could not be loaded for this window, so the table carries day-grain custody alone — the driver who held the car that day, not a narrowed name.';
+      });
+    } else tCap.remove();
+  }
+  if (ak) unauthFleetMarks(root, list.panel, rows, +t.unauthorized || 0);
 
   health.body.innerHTML = '';
   /* One table per provider, because each provider's "dead" is a different
@@ -5121,7 +5184,7 @@ V.unauthorized = async (root) => {
         ? '<span class="ent-off" title="no fix at all from this tracker in this window">—</span>'
         : `${r.ratio}%`) },
     { label: 'Sensor', key: 'verdict',
-      render: (r) => `<span class="tag ${TONE[r.verdict]}" title="${
+      render: (r) => `<span class="${ak ? 'pill' : `tag ${TONE[r.verdict]}`}" title="${
         r.verdict === 'too few fixes to judge'
           ? `only ${fmt(r.total_fixes)} fix(es) — under ${FIX_FLOOR} nothing can be concluded`
           : 'over this window'}">${esc(r.verdict)}</span>` },
@@ -5162,7 +5225,7 @@ V.unauthorized = async (root) => {
       ...cols,
       { label: 'Bookings', key: 'bookings', num: true },
       { label: 'Sensor', key: 'state',
-        render: (r) => `<span class="tag ${FMS_TONE[r.state] || 'dim'}" title="${esc(r.reason || '')}">${esc(r.state)}</span>` },
+        render: (r) => `<span class="${ak ? 'pill' : `tag ${FMS_TONE[r.state] || 'dim'}`}" title="${esc(r.reason || '')}">${esc(r.state)}</span>` },
     ], { sortable: true, sortId: `sensors-${capWord.replace(/\W+/g, '-')}` }));
   };
   if (sensors.by_source) {
@@ -5177,7 +5240,88 @@ V.unauthorized = async (root) => {
     ], sensors.by_source.fms_trip?.rule || 'dead when the car carried bookings and FMS filed no journey seat count',
     'live FMS fix');
   }
+  if (ak) unauthFleetAbsence(root, { t, cov: sum.coverage, rows,
+    examined: t.segments != null ? +t.segments : (sum.byVerdict || []).reduce((a, r) => a + (+r.n || 0), 0) });
 };
+
+/* ── #unauthorized under the page contract ───────────────────────────────── */
+function unauthGlanceFleet(AKB, UN_TILES, t, sum, daily) {
+  const vf = AKB.vHost.querySelector('.vdct-fig > b')?.textContent.trim() || null;
+  const figLabel = (+t.unauthorized || 0) ? 'Unexplained trips' : 'Matched to a booking';
+  /* The mean over the last seven days that have seat data, against the seven
+     such days before them; fewer unexplained is the better direction. */
+  const withData = daily.filter((d) => !d.uncollected);
+  const mean = (a) => (a.length ? a.reduce((x, d) => x + (+d.unauthorized || 0), 0) / a.length : null);
+  const last7 = withData.slice(-7), prev7 = withData.slice(-14, -7);
+  const m = mean(last7), pm = prev7.length === 7 ? mean(prev7) : null;
+  const meanTile = m == null ? { label: 'Mean a day', na: 'no day in this window carries seat-occupancy data' }
+    : { label: 'Mean a day', value: fmt(m, 1), sub: `unexplained, over the last ${countOf(last7.length, 'day')} with seat data`,
+      ...(pm != null ? { delta: { value: m - pm, kind: 'change', invert: true, d: 1, of: 'on the seven days before' } } : {}) };
+  const by = Object.fromEntries(UN_TILES.map(([l, v, d]) => [l, { label: l, html: v, value: v, sub: d }]));
+  const plain = (l) => { const x = by[l]; return x && !/</.test(x.value) ? { label: x.label, value: x.value, sub: x.sub } : x; };
+  const fold = (l) => !(l === figLabel && by[l]?.value === vf);
+  const forg = sum.value?.forgone_aed == null
+    ? { label: 'Revenue forgone', na: sum.value?.basis || 'no rate to value the unexplained distance at' }
+    : { ...plain('Revenue forgone') };
+  const km = t.unauth_km == null ? { label: 'Unexplained km', na: 'no distance was measured on these segments' } : plain('Unexplained km');
+  const row = [plain('Unexplained trips'), km, forg, meanTile, plain('Inconclusive'),
+    plain('Matched to a booking'), plain('Occupied but stationary'), by['Seat-pad faults'], plain('Could not be verified'), plain('Needs a human')]
+    .filter((x) => x && (x.na || fold(x.label)));
+  glance(AKB.tilesHost, bandTiles(row).tiles);
+}
+/* Four marks off the flagged rows this page already fetched. */
+function unauthFleetMarks(root, after, rows, total) {
+  const g1 = el('div', 'grid g2'); const g2 = el('div', 'grid g2');
+  after.after(g1); g1.after(g2);
+  /* /api/unauthorized/list stops at 300 rows, newest first. When the window
+     holds more, the four marks below are of the newest 300 and say so. */
+  if (total > rows.length) g1.before(el('p', 'cap', `The four charts below are drawn from the ${fmt(rows.length)} newest of the ${fmt(total)} unexplained journeys — the list this page reads stops at ${fmt(rows.length)}.`));
+  const near = panel('The nearest booking, by channel', 'For each unexplained journey, the channel of the closest booking on that plate', 'un-near');
+  const hours = panel('When they happen', 'Unexplained journeys by the Dubai hour they started', 'un-hours');
+  const where = panel('Where they start', 'The named area each journey started in', 'un-where');
+  const size = panel('How long, how far', 'One dot per journey: minutes against kilometres', 'un-size');
+  g1.append(near.panel, hours.panel); g2.append(where.panel, size.panel);
+  if (!rows.length) { [near, hours, where, size].forEach((p) => p.body.append(note('No unexplained journey in this window.'))); return; }
+  const nb = new Map();
+  rows.forEach((r) => { const k = r.nearest_platform || ''; nb.set(k, (nb.get(k) || 0) + 1); });
+  const none = nb.get('') || 0; nb.delete('');
+  const b1 = el('div'); near.body.append(b1);
+  if (nb.size) hbars(b1, [...nb.entries()].sort((a, b) => b[1] - a[1]).map(([p, k]) => ({ label: sourceLabel(p), n: k, plat: p })),
+    { signed: false, colorFor: (x) => sourceToken(x.plat) || '--mk-fill' });
+  const gaps = rows.map((r) => +r.nearest_gap_min).filter(Number.isFinite).sort((a, b) => a - b);
+  near.body.append(el('p', 'cap', (none ? `${countOf(none, 'journey')} had no booking at all on that plate to measure against. ` : '')
+    + (gaps.length ? `The median gap to the nearest booking was ${fmt(gaps[Math.floor(gaps.length / 2)])} minutes.` : '')));
+  const hb = el('div'); hours.body.append(hb);
+  const byH = Array.from({ length: 24 }, () => 0);
+  rows.forEach((r) => { if (!r.started_at) return; const h = +new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: TZ }).format(new Date(r.started_at)); if (Number.isFinite(h)) byH[h]++; });
+  barChart(hb, byH.map((k, h) => ({ h: String(h).padStart(2, '0'), n: k })), { x: 'h', y: 'n', label: 'journeys', color: '--mk-fill' });
+  const areas = new Map(); let noArea = 0;
+  rows.forEach((r) => { const a = r.start_place?.area; if (a) areas.set(a, (areas.get(a) || 0) + 1); else noArea++; });
+  const wb = el('div'); where.body.append(wb);
+  if (areas.size) hbars(wb, [...areas.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([label, k]) => ({ label, n: k })), { signed: false, color: '--mk-fill' });
+  where.body.append(el('p', 'cap', noArea ? `${countOf(noArea, 'journey')} started where no area is named — never drawn as a place.` : 'Every journey started in a named area.'));
+  const dots = rows.filter((r) => +r.duration_min > 0 && +r.distance_km > 0).map((r) => ({ ...r, duration_min: +r.duration_min, distance_km: +r.distance_km, lab: `${r.plate} ${timeStr(r.started_at)}` }));
+  const sb = el('div'); size.body.append(sb);
+  if (dots.length) scatter(sb, dots, { x: 'duration_min', y: 'distance_km', label: 'lab', xLabel: 'minutes', yLabel: 'km',
+    xFmt: (v) => fmt(v), yFmt: (v) => fmt(v), onClick: (r) => { location.hash = href('segment', r.plate, r.started_at); } });
+  else sb.append(note('No journey carries both a duration and a distance.'));
+}
+function unauthFleetAbsence(root, { t, cov, rows, examined }) {
+  const dark = cov && cov.days_in_window != null && cov.days_with_data != null ? cov.days_in_window - cov.days_with_data : null;
+  const noDriver = rows.filter((r) => !r.drivers || (Array.isArray(r.drivers) && !r.drivers.length)).length;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'Days with no seat data', hl: !!dark, fig: dark ? `${fmt(dark)} of ${fmt(cov.days_in_window)}` : null, none: dark === 0 ? 'None' : 'Not stated',
+      why: dark ? 'No seat-occupancy provider filed anything on these days, so nothing on them could be judged either way.'
+        : dark === 0 ? 'Every day in this window carries seat evidence from at least one provider.' : 'The endpoint did not say which days it covered.' },
+    { label: 'Journeys nobody could judge', fig: +t.partial ? fmt(t.partial) : null, none: 'None',
+      why: 'A telemetry gap falls inside each of these, so the whole journey was never observed and no booking was compared against it.' },
+    { label: 'Journeys with no driver on record', fig: noDriver ? `${fmt(noDriver)} of ${fmt(rows.length)}` : null, none: 'None',
+      why: noDriver ? 'No custody record names who held the car that day.' : 'Every unexplained journey has somebody on the custody record that day.' },
+    { label: 'Why the car moved', fig: null, none: 'Not recorded', why: 'Nothing this product reads records the purpose of a journey — only that a seat was occupied and no booking covered it.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), `${fmt(examined)} journeys examined`] }, root);
+}
 
 /* A tracker reporting 0,0 has no satellite lock; it is not in the Gulf of
    Guinea. map.js already excludes those from the framing — the same test

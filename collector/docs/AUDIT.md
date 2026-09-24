@@ -2075,3 +2075,17 @@ Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 39
 ### #vehicle/trips — 2026-09-24
 
 Production through live-ui on :8611, on the P59 plate, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p65/`). No page error, no sideways scroll, and the fils scan is clean. The page has 75,700 characters of text against the old skin's 75,506: the same 400 rows.
+
+### #unauthorized — 2026-09-24
+
+Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p66/`). No page error, no sideways scroll, and the fils scan is clean in both skins.
+
+The first pass took 129 s to draw in the arkiv skin against the old skin's 5 s. Two causes were fixed before the commit: the page awaited a 30 s attribution request, and two loading skeletons were never cleared (the shooter waits for skeletons to go). The retake is below.
+
+**The retake** (4 variants, `shots/p66/`) draws in 5–6 s. A 45 s shot (`shots/p66b/`) shows the ladder landed: the flagged table carries *Who the evidence names* beside *Driver that day*. The figures:
+* The verdict: 801 journeys moved a car with no booking, out of 13,862 examined.
+* Unexplained km: 11,344. Revenue forgone: AED 51,388.32 at the fleet's AED 4.53/km.
+* Mean a day: 36, up 5.9 on the seven days before, drawn in the negative colour with its ▲ and sign.
+* Inconclusive: 915.
+
+The every-interval total (13,862) is named in the caption under the per-day chart, not drawn on its axis.

@@ -532,4 +532,120 @@ if (want('vehicle-trips')) {
   }
 }
 
+/* ══ #unauthorized ════════════════════════════════════════════════════════ */
+if (want('unauthorized')) {
+  console.log('\n#unauthorized');
+  const H = 'unauthorized';
+  const flagged = (page) => page.evaluate(() => {
+    const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Flagged segments');
+    const hs = [...p.querySelectorAll('thead th')].map((h) => h.textContent.replace(/[↑↓]/g, '').trim());
+    const vi = hs.findIndex((h) => h === 'Verdict');
+    return { heads: hs, cap: [...p.querySelectorAll('p.cap')].map((c) => c.textContent).join(' '),
+      verdicts: vi < 0 ? [] : [...p.querySelectorAll('tbody tr')].map((tr) => tr.children[vi]).filter(Boolean)
+        .map((c) => ({ t: c.textContent.trim(), cls: c.querySelector('.pill, .tag')?.className || null, neg: /--sem-neg/.test(c.innerHTML) })) };
+  });
+  {
+    const { ctx, page } = await open('classic', H);
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      heads: [...document.querySelectorAll('#view .panel h3')].map((h) => h.textContent.trim()) }));
+    const f = await flagged(page);
+    check('old skin: no band, the donut\'s panel, the custody column alone, toned verdict tags', !r.band && r.heads.includes('What each flagged trip turned out to be')
+      && f.heads.includes('Driver that day') && !f.heads.includes('Who the evidence names') && f.verdicts.some((v) => /\btag\b/.test(v.cls || '')), JSON.stringify([r.heads.slice(0, 4), f.heads]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', H);
+    const s = await shape(page);
+    const sum = answer('/api/unauthorized/summary');
+    const daily = answer('/api/unauthorized/daily');
+    const rows = answer('/api/unauthorized/list');
+    const t = sum.totals;
+    const f = await vfig(page);
+    check('00: the verdict is the statement, and the tile it prints is folded into it (ruling 7)', s.vdctIn00 && !Object.values(s.values).includes(f)
+      && !('Unexplained trips' in s.values), JSON.stringify([f, Object.keys(s.values)]));
+    check('the tiles, untoned: km, revenue forgone exact, the mean a day, inconclusive, then the second five', JSON.stringify(Object.keys(s.values)) === JSON.stringify(
+      ['Unexplained km', 'Revenue forgone', 'Mean a day', 'Inconclusive', 'Matched to a booking', 'Occupied but stationary', 'Seat-pad faults', 'Could not be verified', 'Needs a human'])
+      && (await toned(page)).length === 0 && !s.bare.length, JSON.stringify(Object.keys(s.values)));
+    check('figures are the endpoint\'s', s.values['Unexplained km'] === `${n(t.unauth_km)} km` && s.values['Revenue forgone'] === aedOf(sum.value.forgone_aed)
+      && s.values.Inconclusive === n(t.partial), JSON.stringify(s.values));
+    const withData = daily.filter((d) => !d.uncollected);
+    const mean = (a) => a.reduce((x, d) => x + (+d.unauthorized || 0), 0) / a.length;
+    const m = mean(withData.slice(-7)), pm = mean(withData.slice(-14, -7));
+    const md = await page.evaluate(() => [...document.querySelectorAll('#view .cband .kpi')].find((k) => k.querySelector('.l')?.textContent.trim() === 'Mean a day')?.querySelector('.t-d')?.className || '');
+    check('mean a day: the last seven days with seat data, against the seven before, fewer is better', Math.abs(parseFloat(s.values['Mean a day']) - m) < 0.05
+      && (m === pm || (m < pm ? /pos|better/.test(md + (await txtOf(page, '#view .cband'))) : /neg|worse/.test(md + (await txtOf(page, '#view .cband'))))), JSON.stringify([s.values['Mean a day'], m, pm]));
+    const trend = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Unexplained trips per day');
+      return { svg: p.querySelector('svg')?.outerHTML.match(/var\(--[a-z0-9-]+\)/g) || [], cap: [...p.querySelectorAll('p.cap')].map((c) => c.textContent).join(' ') }; });
+    const seen = daily.reduce((a, d) => a + (+d.segments || 0), 0);
+    check('unexplained a day on its own axis in the job token; every interval seen named in the caption, not drawn', trend.svg.includes('var(--mk-fill)')
+      && trend.cap.includes(`of the ${n(seen)} occupancy intervals seen`), JSON.stringify([trend.svg.slice(0, 4), trend.cap.slice(0, 120)]));
+    const verd = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'What the matcher decided');
+      return p ? [...p.querySelectorAll('.hb .fill')].map((x) => x.getAttribute('style')) : null; });
+    check('what the matcher decided: ranked bars in the job token, one per verdict', verd && verd.length === sum.byVerdict.length && verd.every((x) => /--mk-fill/.test(x)), JSON.stringify(verd));
+    const veh = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Vehicles with unexplained trips');
+      return [...p.querySelectorAll('.hb')].map((b) => ({ v: b.textContent.replace(/\s+/g, ' ').trim(), fill: b.querySelector('.fill')?.getAttribute('style') || '' })); });
+    check('vehicles: the job token, the kilometres beside the count', veh.length > 0 && veh.every((b) => /--mk-fill/.test(b.fill) && /(\d km|no distance)/.test(b.v)), JSON.stringify(veh.slice(0, 2)));
+    await page.waitForFunction(() => [...document.querySelectorAll('#view thead th')].some((h) => h.textContent.includes('Who the evidence names')), null, { timeout: 10000 }).catch(() => {});
+    const fl = await flagged(page);
+    check('flagged segments: the rung and name BESIDE the day-grain custody column', fl.heads.includes('Who the evidence names') && fl.heads.includes('Driver that day')
+      && fl.heads.indexOf('Driver that day') === fl.heads.indexOf('Who the evidence names') + 1, JSON.stringify(fl.heads));
+    check('a verdict is an outline chip; "unauthorized" in the negative colour, as text', fl.verdicts.length > 0 && fl.verdicts.every((v) => v.cls === 'pill' && (v.t === 'unauthorized') === v.neg), JSON.stringify(fl.verdicts.slice(0, 2)));
+    const near = await bars(page, 'un-near');
+    const plats = new Set(rows.filter((r) => r.nearest_platform).map((r) => r.nearest_platform));
+    check('the nearest booking by channel: a bar per channel, in its colour', near.length === plats.size && near.every((b) => /--c-/.test(b.fill)), JSON.stringify(near));
+    const nearTxt = await txtOf(page, '[data-panel="un-near"]');
+    const none = rows.filter((r) => !r.nearest_platform).length;
+    check('journeys with no booking at all on that plate are counted in words', !none || nearTxt.includes(`${n(none)} journey`), nearTxt.slice(-160));
+    const hrs = await page.evaluate(() => !!document.querySelector('[data-panel="un-hours"] svg'));
+    const where = await bars(page, 'un-where');
+    const areas = new Set(rows.map((r) => r.start_place?.area).filter(Boolean));
+    check('when they happen, drawn; where they start, a bar per named area (twelve at most)', hrs && where.length === Math.min(12, areas.size), JSON.stringify([hrs, where.length, areas.size]));
+    const dots = await page.evaluate(() => document.querySelectorAll('[data-panel="un-size"] svg circle.sc-dot').length);
+    check('how long, how far: a dot per journey with both', dots === rows.filter((r) => +r.duration_min > 0 && +r.distance_km > 0).length, String(dots));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const cov = sum.coverage;
+    check('†: the days with no seat data, the journeys nobody could judge, no driver on record, why the car moved', ab['Days with no seat data']?.fig === `${n(cov.days_in_window - cov.days_with_data)} of ${n(cov.days_in_window)}`
+      && ab['Journeys nobody could judge']?.fig === n(t.partial) && !!ab['Journeys with no driver on record'] && ab['Why the car moved']?.fig === 'Not recorded', JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    check('the colophon counts every journey examined', new RegExp(`${n(sum.byVerdict.reduce((a, r) => a + r.n, 0))} journeys examined`).test(s.colophon), s.colophon);
+    check('the seat-sensor health tables kept', s.heads.includes('Seat-sensor health'), JSON.stringify(s.heads));
+    const skel = await page.evaluate(() => [...document.querySelectorAll('#view .skel')].map((x) => x.closest('.panel')?.querySelector('h3')?.textContent || '?'));
+    check('no loading skeleton left behind anywhere on the page', !skel.length, JSON.stringify(skel));
+    await ctx.close();
+  }
+  {
+    /* The ladder unreadable and no rate (synthetic): the table stands on
+       custody alone and says why; revenue forgone absent with the basis. */
+    const noRate = (q, real) => ({ ...real, value: { forgone_aed: null, basis: 'no booking in this window carries both a fare and a distance, so there is no rate' } });
+    const { ctx, page } = await open('arkiv', H, { fixtures: { '/api/unauthorized/attributed': () => [], '/api/unauthorized/summary': noRate } });
+    await page.waitForFunction(() => /could not be loaded/.test(document.querySelector('#view')?.textContent || ''), null, { timeout: 10000 }).catch(() => {});
+    const s = await shape(page);
+    const fl = await flagged(page);
+    check('attribution unreadable: the custody column alone, and the table says why', fl.heads.includes('Driver that day') && !fl.heads.includes('Who the evidence names')
+      && /could not be loaded/.test(fl.cap), JSON.stringify([fl.heads, fl.cap.slice(0, 120)]));
+    check('revenue forgone absent with the endpoint\'s basis', s.na['Revenue forgone'] === 'no booking in this window carries both a fare and a distance, so there is no rate', JSON.stringify(s.na));
+    await ctx.close();
+  }
+  {
+    /* The ladder held (production answers it in ~30 s): the page is drawn
+       without it — every panel, the table on custody, a line saying the name
+       is still coming — and the column arrives when it lands. */
+    let release; const gate = new Promise((r) => { release = r; });
+    const { ctx, page } = await open('arkiv', H, { hold: { url: '**/api/unauthorized/attributed**', gate } });
+    const before = await flagged(page);
+    const s = await shape(page);
+    check('the ladder held: the whole page drawn, the table on custody, a line saying the name is still loading', /^† /.test(s.heads.at(-1))
+      && before.heads.includes('Driver that day') && !before.heads.includes('Who the evidence names') && /still loading/.test(before.cap), JSON.stringify([before.heads.slice(0, 5), before.cap.slice(0, 80)]));
+    release();
+    await page.waitForFunction(() => [...document.querySelectorAll('#view thead th')].some((h) => h.textContent.includes('Who the evidence names')), null, { timeout: 10000 }).catch(() => {});
+    const after = await flagged(page);
+    check('…and when it lands the rung and name join the table, the loading line gone', after.heads.includes('Who the evidence names') && after.heads.includes('Driver that day') && !/still loading/.test(after.cap), JSON.stringify([after.heads.slice(0, 5), after.cap]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', H, { width: 390 });
+    check('#unauthorized at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

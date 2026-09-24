@@ -47,6 +47,7 @@ const ROUTES = [
   // Fleet and Sources
   'vehicles', 'vehicle/L45235', 'vehicle/L45235/drivers', 'vehicle/L45235/movement',
   'vehicle/L45235/earnings', 'vehicle/L45235/safety', 'vehicle/L45235/trips',
+  'unauthorized',
 ];
 
 const scan = (page) => page.evaluate(() => {

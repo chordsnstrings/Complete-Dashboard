@@ -19,7 +19,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
          dtStr, timeStr, dayStr, dateStr, money, custody, verdict, foldRows,
          sourceLabel, countOf, plural, asList, noneChosen,
          trackerState, trackerSpeed, stillNote, UBER_FARE_WHY,
-         segSourceLabel, bySourceLine } from './ui.js';
+         segSourceLabel, bySourceLine, contract } from './ui.js';
 import { q, qAll, api, href, state, unfiltered } from './data.js';
 
 const VERDICT_TONE = { unauthorized: 'bad', authorized: 'ok', sensor_suspect: 'warn',
@@ -35,7 +35,12 @@ const VERDICT_MEANS = {
   pending: 'Not yet reconciled.',
 };
 
-const vTag = (v) => `<span class="tag ${VERDICT_TONE[v] || 'dim'}">${esc(v || '—')}</span>`;
+/* Under the page contract a verdict is an outline chip, and only
+   "unauthorized" keeps the negative token — as text, never as a fill (plan
+   §4 #unauthorized; every table this file builds reads it). */
+const vTag = (v) => (contract()
+  ? `<span class="pill"${v === 'unauthorized' ? ' style="color:var(--sem-neg)"' : ''}>${esc(v || '—')}</span>`
+  : `<span class="tag ${VERDICT_TONE[v] || 'dim'}">${esc(v || '—')}</span>`);
 
 /* ═══ WHO WAS DRIVING, WHEN NOTHING BOOKED THE JOURNEY ══════════════════════
    Asked for in these words: "we can get the unauthorized trips on the time and
@@ -996,6 +1001,26 @@ const forgoneCell = (r) => (r.forgone_aed == null
   ? `<span class="ent-off" title="${esc(r.rate_basis || 'no distance was measured across this interval')}">—</span>`
   : `<span title="${esc(r.rate_basis || '')}">${money(r.forgone_aed)}</span>`);
 
+/* The attribution merged onto rows another page already holds — the same
+   merge renderSegments does, keyed by segKey on the provider and the parsed
+   instant, the same ATT_FIELDS and the same TRUE reason for a row the ladder
+   did not reach. `attRaw` is validated the same way: a body with no
+   distribution is a failure, and the rows come back unchanged (null flag). */
+export function withAttribution(rows, attRaw) {
+  const att = attRaw && attRaw.distribution ? attRaw : null;
+  if (!att) return { rows, att: null };
+  const attOf = new Map((att.rows || []).map((r) => [segKey(r), r]));
+  return { att, rows: rows.map((r) => {
+    const a = attOf.get(segKey(r));
+    if (a) return Object.assign({}, r, Object.fromEntries(ATT_FIELDS.map((f) => [f, a[f]])));
+    const absent = r.verdict === 'unauthorized'
+      ? `this journey is past the ${fmt(att.limit)} most recent unexplained journeys the `
+        + 'attribution list returns, so no name and no value were computed for it'
+      : 'the attribution ladder is only run on unexplained journeys — a booking explains this '
+        + 'one, and that booking names its own driver and carries its own fare';
+    return Object.assign({}, r, { attribution_absent: absent, rate_basis: absent });
+  }) };
+}
 export function segmentTable(rows, opts = {}) {
   if (!rows.length) { const d = el('div'); empty(d, opts.emptyMsg || 'Nothing flagged here'); return d; }
   const anyReason = rows.some((r) => r.verdict_reason);
@@ -1043,6 +1068,13 @@ export function segmentTable(rows, opts = {}) {
       : { label: 'Driver that day', key: 'drivers',
         render: (r) => custody(r, { title: 'This driver’s other flagged segments',
           hrefFor: (d) => href('segments', 'driver', d.name) }) }),
+    /* #unauthorized under the page contract keeps its "Driver that day" column
+       and puts the rung and the name BESIDE it (plan §4 #unauthorized) — the
+       day-grain custody stays visible, labelled as what it is, next to the
+       narrower claim. No other caller passes `withCustody`. */
+    ...(anyAtt && opts.withCustody ? [{ label: 'Driver that day', key: 'drivers',
+      render: (r) => custody(r, { title: 'This driver’s other flagged segments',
+        hrefFor: (d) => href('segments', 'driver', d.name) }) }] : []),
     /* The provider's own timestamps, start and end: two providers' readings
        of one ride start and end at different moments, and the reader has to
        see both to see they are one ride. */
