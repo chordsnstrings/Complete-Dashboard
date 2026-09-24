@@ -1800,25 +1800,58 @@ async function corporate(deck, ctx) {
   ]);
   if (!ctx.alive()) return;
   deck.innerHTML = '';
+  const AK = phoneContract();
+  /* A summary that did not load is not a window with no hotel booking \u2014 the
+     old screen caught the failure into null and said "No hotel booking in
+     this window". Under the redesign it says the fetch failed (as Safety). */
+  if (AK && !sum) { failed(deck, new Error('The hotel channel\u2019s summary could not be fetched.')); return; }
   if (!sum || !sum.bookings) {
     empty(deck, 'No hotel booking in this window', WIDEN());
     return;
   }
   const margin = sum.has_cost && sum.revenue ? Math.round(((sum.revenue - sum.cost) / sum.revenue) * 100) : null;
-  lede(deck, {
+  const statement = lede(deck, {
     claim: `${money(n(sum.revenue))} from ${fmt(sum.bookings)} hotel bookings`,
     sub: margin != null
       ? `${money(n(sum.cost))} of that is what the driver was paid, leaving ${margin}%.`
       : 'The channel reports a fare but no cost, so no margin can be taken from it.',
   });
-  stats(deck, [
+  const corpTiles = [
     { label: 'Average fare', value: money(n(sum.avg_fare)) },
     { label: 'Per km', value: sum.revenue_per_km ? money(n(sum.revenue_per_km)) : '\u2014' },
     { label: 'Unpaid approach', value: sum.deadhead_km != null ? `${fmt(sum.deadhead_km)} km` : '\u2014',
       sub: sum.deadhead_ratio_pct != null ? `${n(sum.deadhead_ratio_pct)}% of the driving` : null,
       tone: n(sum.deadhead_ratio_pct) > 20 ? 'warn' : null },
     { label: 'Free of charge', value: fmt(sum.foc_trips ?? sum.foc ?? 0), sub: 'billed to nobody' },
-  ]);
+  ];
+  if (!AK) stats(deck, corpTiles);
+  else {
+    /* THE REDESIGN ADDS WHAT THE DESIGN SHOWS AND THE ANSWER ALREADY HOLDS:
+       what the channel KEPT \u2014 the fares less what the drivers were paid, the
+       two figures the statement already names, on the same bookings \u2014 as the
+       hero, and the cost the channel filed as its own tile (the design's
+       #corporate "Kept on the channel" and "Cost filed"). Where the channel
+       files no cost there is no margin, and the tile says so in the
+       statement's own words. The two tiles that could print a bare dash now
+       carry the true reason in the value slot: /api/corporate/summary
+       answers revenue_per_km only over priced bookings with a distance
+       (api/analytics_routes.js), and a deadhead only where one was measured. */
+    const kept = margin != null ? n(sum.revenue) - n(sum.cost) : null;
+    stats(deck, [
+      { label: 'Kept on the channel', hero: true,
+        value: kept == null ? '\u2014' : money(kept),
+        sub: kept == null ? 'The channel reports a fare but no cost, so no margin can be taken from it.'
+          : `${margin}% of the fares, after what the drivers were paid` },
+      { label: 'Cost filed', value: margin != null ? money(n(sum.cost)) : '\u2014',
+        sub: margin != null ? 'what the drivers were paid, the channel\u2019s own figure' : 'the channel files no cost' },
+      ...corpTiles.map((t) => (t.label === 'Per km' && t.value === '\u2014'
+        ? { ...t, sub: sum.priced ? 'no priced booking in this window carries a distance'
+          : 'no booking in this window carries a price' }
+        : t.label === 'Unpaid approach' && t.value === '\u2014'
+          ? { ...t, sub: 'no booking in this window has its approach measured' } : t)),
+    ], false, { hero: true });
+    deck.insertBefore(secHead('00', 'At a glance', WINDOW_NOTE()), statement);
+  }
   const rowsIn = unwrap(props);
   if (rowsIn.rows.length) {
     deck.append(el('p', 'm-sec', 'By property'));

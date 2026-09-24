@@ -839,6 +839,50 @@ console.log('\n4.9 · Sources: 00, every collector numbered and marked, and ever
   await c.close();
 }
 
+console.log('\n4.10 · Corporate: what the channel kept, the cost it filed, reasons in place of dashes');
+{
+  const key = '/api/corporate/summary?period=month&grain=auto';
+  const s = ans(key);
+  const tiles = (pg) => pg.page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.m-stat')]
+    .map((t) => [t.querySelector('.l').textContent, { v: t.querySelector('.n').textContent,
+      s: t.querySelector('.s')?.textContent || null, hero: t.classList.contains('hero'),
+      na: t.querySelector('.n').hasAttribute('data-absent') }])));
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.open('corporate');
+  const o = await outline(p.page);
+  const t = await tiles(p);
+  check('00 heads the statement, then the tiles, then By property',
+    JSON.stringify(o.slice(0, 4)) === JSON.stringify(['head:At a glance', 'statement', 'glance', 'sec:By property']), o.join(' → '));
+  const margin = Math.round(((s.revenue - s.cost) / s.revenue) * 100);
+  check(`the hero is what the channel kept: ${moneyOf(s.revenue - s.cost)}, its fares less its cost, ${margin}%`,
+    t['Kept on the channel']?.v === moneyOf(s.revenue - s.cost) && t['Kept on the channel'].hero
+      && t['Kept on the channel'].s === `${margin}% of the fares, after what the drivers were paid`, JSON.stringify(t['Kept on the channel']));
+  check(`…beside the cost the channel filed, ${moneyOf(s.cost)}`, t['Cost filed']?.v === moneyOf(s.cost), JSON.stringify(t['Cost filed']));
+  await p.close();
+  /* A channel that files no cost, and a window with no priced distance or
+     measured approach: every tile says why, none prints a bare dash. */
+  const noCost = { ...s, has_cost: false, cost: null, revenue_per_km: null, deadhead_km: null, deadhead_ratio_pct: null };
+  const q2 = await phonePage(browser, { skin: 'arkiv', fixture: withAnswer(key, noCost) });
+  await q2.open('corporate');
+  const u = await tiles(q2);
+  check('no cost filed: Kept is absent WITH the statement’s reason, and is not highlighted',
+    u['Kept on the channel']?.v === 'The channel reports a fare but no cost, so no margin can be taken from it.'
+      && u['Kept on the channel'].na && !(await q2.page.evaluate(() => !!document.querySelector('.m-stat.hero .hl'))),
+    JSON.stringify(u['Kept on the channel']));
+  check('…Per km and Unpaid approach say why they have no figure',
+    u['Per km']?.v === 'no priced booking in this window carries a distance'
+      && u['Unpaid approach']?.v === 'no booking in this window has its approach measured', JSON.stringify([u['Per km'], u['Unpaid approach']]));
+  await q2.close();
+  const gone = { ...fixture, answers: { ...fixture.answers } };
+  delete gone.answers[key];
+  const q3 = await phonePage(browser, { skin: 'arkiv', fixture: gone });
+  await q3.open('corporate');
+  const said = await q3.page.evaluate(() => document.querySelector('.m-deck').textContent);
+  check('a summary that did not load says so — never "No hotel booking in this window"',
+    /Could not load this/.test(said) && !/No hotel booking/.test(said), said.slice(0, 100));
+  await q3.close();
+}
+
 console.log('\n9 · every screen: nothing dropped, nothing sideways, nothing too small to hit');
 {
   const { wordsOf, SCREENS, DESKTOP_TABS } = await import('./phone_harness.mjs');
