@@ -365,4 +365,105 @@ if (want('payouts')) {
   }
 }
 
+/* ══ #reconcile and #reconcile/<month> ═══════════════════════════════════ */
+if (want('reconcile')) {
+  console.log('\n#reconcile');
+  const HEADS = ['At a glance', 'What the statement expects, and what the bank paid, month by month', 'Is the gap closing?',
+    'What the expectation is built from', 'Every month on record', 'Month by month', 'What each statement said',
+    '† What this page does not know'];
+  const ML = (m) => { const [y, mm] = String(m).split('-'); return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+mm - 1]} ${y}`; };
+  const pct1 = (v) => `${Math.abs(v).toFixed(1)}%`;
+  let classic = {};
+  {
+    const { ctx, page } = await open('classic', 'reconcile');
+    classic = await rowTiles(page, '#view .kpis .kpi');
+    const band = await page.$('#view .cband');
+    check('old skin: the old page — no 00 band, its five tiles with the Gap', !band && Object.keys(classic).length === 5 && 'Gap' in classic,
+      JSON.stringify(Object.keys(classic)));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'reconcile');
+    const s = await shape(page);
+    const D = answer('/api/reconcile'), t = D.totals;
+    check('the section order is the plan\'s: 00, expected against paid, the trend | what it is built from, every month, the two tables, †',
+      JSON.stringify(s.heads) === JSON.stringify(HEADS), JSON.stringify(s.heads));
+    check('the verdict (headlineVerdict, unchanged) is 00\'s statement', s.vdctIn00);
+    const line = await page.evaluate(() => { const l = document.querySelector('#view .cband .rc-gapline');
+      return l ? { txt: l.textContent.replace(/\s+/g, ' ').trim(), pill: l.querySelector('.pill')?.className || '' } : null; });
+    check('the gap\'s judgement opens the band through deltaPill (the review: the salik floor and the partial/cut rules carried)',
+      line && /Bank paid over statement/.test(line.txt) && /\bpill\b/.test(line.pill)
+      && line.txt.includes(aed(t.bank_covered)) && line.txt.includes(aed(t.expected_covered)), JSON.stringify(line));
+    check('no tile repeats the verdict\'s figure (ruling 7: bank over statement is the verdict\'s)',
+      !Object.values(s.values).includes(aed(t.delta)), JSON.stringify(s.values));
+    /* Comparable by the endpoint's rule, not by "has a delta". */
+    const cmp = D.rows.filter((r) => r.delta != null && r.delta_pct != null && !r.statement_partial && !r.period_cut);
+    const last = cmp[cmp.length - 1], prev = cmp[cmp.length - 2];
+    check('the mock holds a month with a delta that the endpoint leaves out (so the rule below is exercised)',
+      D.rows.some((r) => r.delta != null && (r.statement_partial || r.period_cut)));
+    const heroL = `The gap in ${ML(last.m)}`;
+    check('the hero is the gap in the latest comparable month, signed, from the rows',
+      s.hero === heroL && s.values[heroL] === `${last.delta_pct > 0 ? '+' : last.delta_pct < 0 ? '−' : ''}${pct1(last.delta_pct)}`, JSON.stringify([s.hero, s.values]));
+    const dl = (await deltaOf(page, heroL)) || "";
+    const move = Math.abs(last.delta_pct) - Math.abs(prev.delta_pct);
+    check('…its change is in points against the month before, and a narrowing gap reads as better',
+      dl.includes(`${move < 0 ? '−' : '+'}${Math.abs(move).toFixed(1)}`) && dl.includes(`against ${ML(prev.m)}`)
+      && (move < 0 ? /better/.test(dl) : /worse/.test(dl)), dl);
+    const bl = `Bank paid in ${ML(last.m)}`;
+    check('Bank paid in the latest month is its bank side, its change in words and never toned',
+      s.values[bl] === aed(last.bank_covered) && /neither better nor worse/.test(s.subs[bl]) && !(await deltaOf(page, bl)), JSON.stringify([s.values[bl], s.subs[bl]]));
+    check('Compared over and Trips carry the old page\'s figures', s.values['Compared over'] === classic['Compared over'] && s.values.Trips === classic.Trips,
+      JSON.stringify([s.values, classic]));
+    check('no tile wears a tone', (await toned(page)).length === 0, JSON.stringify(await toned(page)));
+    const cap1 = await txtOf(page, '[data-panel="recon-pair"]');
+    check('Expected payout and Bank payout are not dropped: both totals and their coverage are 01\'s caption line',
+      cap1.includes(`Expected payout ${aed(t.expected_payout)}`) && cap1.includes(`bank payout ${aed(t.bank_payout)}`), cap1.slice(-400));
+    const trend = await page.evaluate(() => document.querySelectorAll('[data-panel="recon-trend"] .hb').length);
+    check('02: one bar per comparable month', trend === cmp.length, `${trend} vs ${cmp.length}`);
+    const all = await page.evaluate(() => [...document.querySelectorAll('[data-panel="recon-all"] svg [data-rise]')].map((m) => m.getAttribute('fill') || ''));
+    const drawn = D.rows.filter((r) => r.bank_payout != null);
+    check('04: every month with a money row drawn, a month the window cuts hatched and only those',
+      all.length === drawn.length && all.every((f, i) => /^url\(/.test(f) === !!drawn[i].period_cut), JSON.stringify({ all: all.length, drawn: drawn.length }));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const noCmp = D.rows.filter((r) => r.delta == null).length;
+    check('† months that cannot be compared are counted from the rows', ab['Months that cannot be compared']?.fig === `${noCmp} of ${D.rows.length}`,
+      JSON.stringify(ab['Months that cannot be compared']));
+    check('† the statement horizon is the endpoint\'s own, not a hard-coded one',
+      ab['The statement horizon']?.fig === `${D.statement_horizon.days} days` && ab['The statement horizon'].why.includes('Nothing before'), JSON.stringify(ab['The statement horizon']));
+    check('the timing note is kept word for word', /A gap between bank and expected is usually timing, not theft/.test(await txtOf(page, '#view')));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'reconcile/2026-08');
+    const s = await shape(page);
+    const D = answer('/api/reconcile');
+    check('#reconcile/<month>: 00, chart 01 at day grain, the day table and the statements unchanged, † — no month charts',
+      JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'What the statement expects, and what the bank paid, day by day',
+        'Aug 2026, day by day', 'What each statement said', '† What this page does not know']), JSON.stringify(s.heads));
+    check('…its tiles name days as days, not ISO keys', !Object.keys(s.values).some((l) => /\d{4}-\d{2}-\d{2}/.test(l)), JSON.stringify(Object.keys(s.values)));
+    const runs = (() => { let e = 0; const same = (a, b) => a != null && b != null && +a === +b;
+      for (let i = 1; i < D.rows.length; i++) if (same(D.rows[i].expected_payout, D.rows[i - 1].expected_payout) || same(D.rows[i].bank_payout, D.rows[i - 1].bank_payout)) e++; return e; })();
+    const cap = await txtOf(page, '[data-panel="recon-pair"]');
+    check('…and where a weekly report is spread across its days, 01 says plateaus are the grain (captioned, not hatched)',
+      runs ? /Plateaus are the grain/.test(cap) : !/Plateaus/.test(cap), `${runs} ${cap.slice(-200)}`);
+    await ctx.close();
+  }
+  {
+    const none = (_q, real) => ({ ...real, rows: real.rows.map((r) => ({ ...r, delta: null, delta_pct: null })),
+      totals: { ...real.totals, delta: null, reconciled_rows: 0, matched_pairs: 0 } });
+    const { ctx, page } = await open('arkiv', 'reconcile', { fixtures: { '/api/reconcile': none } });
+    const s = await shape(page);
+    check('nothing comparable: the gap, the bank side and Compared over are ABSENT with that reason, never a nought',
+      /no month here has both sides describing the same driver-days/.test(s.na['The gap'] || '')
+      && /no month here can be compared/.test(s.na['Bank paid'] || '') && /no driver-day is described by both sides/.test(s.na['Compared over'] || ''),
+      JSON.stringify(s.na));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'reconcile', { width: 390 });
+    check('at 390 nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

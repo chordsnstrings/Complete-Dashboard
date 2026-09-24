@@ -6618,3 +6618,11 @@ number (5 and 5), and never a passport or RTA number.
   #payouts was in neither, so its old skin was held by nothing until P19.
   Before converting a page, check it is in one of the two; if not, add it
   to EXTRA and record it from the base tree (`RECORD=1 PUBLIC_DIR=… ONLY=`).
+
+* **On `/api/reconcile`, "has a delta" is not "comparable".** A row is
+  reconciled only when `delta != null && !statement_partial && !period_cut`
+  (api/reconcile_routes.js). September 2026 carries delta_pct +20.2% and is
+  period_cut; February and March carry deltas and are statement_partial.
+  Any "latest gap" or trend must filter with the endpoint's rule.
+* **`statement_horizon` on `/api/reconcile` is an object, `{ days, from }`.**
+  `String()` of it prints "[object Object]".

@@ -1651,3 +1651,13 @@ own figure, +AED 362,992.41 over those, most of it three February
 transfers (named in 02's caption). Found by looking and fixed before commit:
 02 printed "−+AED 103.05" — hbars prints the minus itself and hands
 valueFmt the magnitude.
+
+### #reconcile, #reconcile/2026-08 — 2026-09-24
+
+Production (the whole record), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/reconcile/`): no error, no sideways scroll.
+5 months of 24 can be reconciled; AED 73,861.06 more wired than owed
+(+4.7%, deltaPill); the latest comparable month is August (+4.5%, 1.1
+points narrower than July). Sixteen months before February 2026 carry
+neither side (outside the statement window) and draw as outlines;
+September is hatched in 04 as a period the window cuts.
