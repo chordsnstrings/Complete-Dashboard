@@ -92,7 +92,7 @@ export async function launch() { return launchChromium(); }
    replay (bin/phone-fixture.mjs); otherwise the fixture answers. */
 export async function phonePage(browser, {
   skin = 'classic', theme = 'light', width = 390, height = 844, fixture = null,
-  root = PUB, answer = null, at = null,
+  root = PUB, answer = null, at = null, hold = {}, frozen = true,
 } = {}) {
   const ctx = await browser.newContext({
     viewport: { width, height }, deviceScaleFactor: 1, isMobile: true, hasTouch: true,
@@ -136,6 +136,9 @@ export async function phonePage(browser, {
           body: hit.b64 ? Buffer.from(hit.b64, 'base64') : hit.body });
         return;
       }
+      /* `hold` delays a static file by path — a slow stylesheet, which is
+         how a boot-order defect shows itself. */
+      if (hold[path]) await new Promise((ok) => setTimeout(ok, hold[path]));
       const rel = path === '/' ? '/index.html' : decodeURIComponent(path);
       const file = join(root, rel);
       if (!file.startsWith(root) || !existsSync(file) || !statSync(file).isFile()) {
@@ -146,8 +149,11 @@ export async function phonePage(browser, {
         body: readFileSync(file) });
     } finally { inflight -= 1; lastActivity = Date.now(); }
   });
+  /* `frozen: false` for a check that reads the paint timeline: with the
+     clock fixed, Chromium records no paint entries at all (measured: an
+     empty list, where the same page unfixed records first-contentful-paint). */
   const clock = at || fixture?.at;
-  if (clock) await page.clock.setFixedTime(new Date(clock));
+  if (clock && frozen) await page.clock.setFixedTime(new Date(clock));
   /* The theme the reader chose, where one is asked for by name rather than by
      the OS: index.html stamps data-theme from this key before the first
      paint, on the phone as on the desktop. */
@@ -167,8 +173,8 @@ export async function phonePage(browser, {
     }
     return false;
   };
-  const open = async (route) => {
-    await page.goto(`${ORIGIN}/?ui=phone&skin=${skin}#${route}`, { waitUntil: 'domcontentloaded' });
+  const open = async (route, { ui = 'phone' } = {}) => {
+    await page.goto(`${ORIGIN}/?ui=${ui}&skin=${skin}#${route}`, { waitUntil: 'domcontentloaded' });
     await settle();
   };
   return { ctx, page, misses, errors, settle, open, close: () => ctx.close() };

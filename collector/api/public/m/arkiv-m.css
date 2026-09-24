@@ -1,0 +1,40 @@
+/* ============================================================================
+   Arkiv — the redesigned phone PWA
+   ----------------------------------------------------------------------------
+   The operator's ruling of 2026-09-24: "Phone will have a redesigned pwa app."
+   The plan is docs/UI-REDESIGN-PLAN.md, "Phone PWA — redesign". This sheet
+   is the phone's half of the Arkiv skin, as arkiv.css is the desktop's.
+
+   LOADED ONLY FOR A PHONE READER WHO CHOSE ?skin=arkiv. index.html's second
+   inline script document.writes it straight after arkiv.css, so the PARSER
+   inserts it: it blocks the first paint (the old phone never flashes first),
+   the deferred module does not run until it is in, and it wins ties with
+   arkiv.css and app.css by coming last. m.css, which the pre-paint script
+   appends earlier, stays underneath all three. A desktop reader, and a phone
+   reader on the old skin, never request it; the phone's service worker
+   precaches it with the rest of the shell, so a phone that was switched over
+   still has it on a cold offline open.
+
+   WHICH PHONE IS A TOKEN, NEVER THE ATTRIBUTE. The desktop asks --pg-contract
+   and --pg-shell which DOM to build; the phone asks --pg-phone, through
+   m/ui.js phoneContract(). app.css declares 0 for everybody and THIS sheet
+   declares 1 — deliberately here and not in arkiv.css, so the markup the token
+   switches on arrives in the same file as the rules that style it. A phone
+   missing this sheet draws the old screens under the Arkiv tokens (what it
+   did before the ruling), never new markup with no styles.
+
+   EVERY RULE IS SCOPED to :root[data-skin="arkiv"][data-ui="phone"] — (0,3,0),
+   heavier than every m.css rule and every arkiv.css rule it meets, so nothing
+   here needs !important, and inert anywhere it is loaded by mistake.
+
+   NO HEX, NO rgb(), NO NAMED COLOUR. The values live in api/public/tokens.js
+   and nowhere else (SPEC L5.1); bin/gen-tokens-css.mjs writes them into
+   app.css, light and dark, and this file names them with var(). So the dark
+   set (ruling 3) reaches every rule here with no rule of its own.
+
+   SIZES are steps of app.css's one scale (--t1..--t9, --d1..--d6).
+   test/phone_arkiv.test.mjs holds all four rules.
+   ========================================================================== */
+
+/* ── 1 · the token ─────────────────────────────────────────────────────── */
+:root[data-skin="arkiv"][data-ui="phone"]{--pg-phone:1}

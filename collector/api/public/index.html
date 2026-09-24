@@ -118,10 +118,20 @@
      point in the document, so it lands after app.css and wins ties there;
      m.css, which the phone build appends earlier, stays underneath both.
      A page on the old skin never requests the file; only the phone's
-     service worker precaches it, with the rest of the shell (sw.js). -->
+     service worker precaches it, with the rest of the shell (sw.js).
+
+     The PHONE's half of the skin comes straight after it, for the same three
+     reasons, and only on the phone build: m/arkiv-m.css carries the
+     redesigned phone app (the operator's ruling of 2026-09-24,
+     docs/UI-REDESIGN-PLAN.md "Phone PWA — redesign") and the --pg-phone:1
+     that switches the phone's modules to it. Written by the parser, so the
+     deferred module does not run before it is in and reads the token right
+     the first time. -->
 <script>
 if (document.documentElement.dataset.skin === 'arkiv')
   document.write('<link rel="stylesheet" href="/arkiv.css">');
+if (document.documentElement.dataset.skin === 'arkiv' && document.documentElement.dataset.ui === 'phone')
+  document.write('<link rel="stylesheet" href="/m/arkiv-m.css">');
 </script>
 </head>
 <body>

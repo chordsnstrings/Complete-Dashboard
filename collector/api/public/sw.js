@@ -53,6 +53,11 @@ const SHELL_FILES = [
      too — or the page paints half in one skin: app.css's tokens under the
      skin attribute, with none of the component rules that go with them. */
   '/arkiv.css',
+  /* …and the phone's half of it, the redesigned PWA (docs/UI-REDESIGN-PLAN.md
+     "Phone PWA — redesign"). It carries --pg-phone:1 as well as the rules:
+     missing on a cold offline open, the phone would draw its old screens
+     under the Arkiv tokens — usable, but not what the reader chose. */
+  '/m/arkiv-m.css',
   '/m/app.js', '/m/ui.js', '/m/screens.js',
   /* Every module the phone's three files reach, followed by hand rather than
      assumed: m/app.js imports ../daterange.js, and daterange.js imports

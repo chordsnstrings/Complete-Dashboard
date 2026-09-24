@@ -13,6 +13,34 @@ import { fmt, isToday, spark } from '../charts.js';
 
 export { el, esc, money, pct, dayStr, fmt, isToday, spark };
 
+/* ── which phone app to build ──────────────────────────────────────────────
+   The operator's ruling of 2026-09-24 gives the phone a redesign
+   (docs/UI-REDESIGN-PLAN.md, "Phone PWA — redesign"), and production keeps
+   today's phone until the default skin is flipped. Which of the two a render
+   builds is a TOKEN, as it is on the desktop (ui.js contract() reads
+   --pg-contract, shell.js shellContract() reads --pg-shell): app.css
+   declares --pg-phone:0, and m/arkiv-m.css — which index.html writes only for
+   a phone reader under ?skin=arkiv — declares 1. No module reads the skin
+   attribute (test/arkiv_skin.test.mjs scans every one); a stylesheet the
+   reader was given is what decides.
+
+   Every component below asks, so the answer is kept until the set of loaded
+   stylesheets changes: a getComputedStyle per row, on a list of three hundred
+   rows, is a layout flush per row. A sheet that lands late changes the count
+   and is re-read. No stylesheet at all (a test harness, a detached document)
+   answers the old phone, which is what production draws. */
+let pcSheets = -1, pcSays = false;
+export function phoneContract() {
+  try {
+    const n = document.styleSheets.length;
+    if (n !== pcSheets) {
+      pcSheets = n;
+      pcSays = String(getComputedStyle(document.documentElement).getPropertyValue('--pg-phone')).trim() === '1';
+    }
+    return pcSays;
+  } catch { return false; }
+}
+
 /* Today is not a day yet.
    ─────────────────────────────────────────────────────────────────────────
    /api/trips/daily fills the window to its last day, and the last day is
