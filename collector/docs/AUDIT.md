@@ -1958,3 +1958,14 @@ placed on the scatter. August: 115 active, 12,340 jobs (▲ +2,854 on July
 2026), 4 changed of 101. Found by looking and fixed before commit: the
 month delta read "on the July 2026", and the period chips sat under the
 band whose verdict they choose.
+
+### #retention — 2026-09-24
+
+Production, both skins at 1440 and 390, light and dark (scratchpad
+`pagephase/shots/retention/`): no error, no sideways scroll, no whole-dirham
+amount. 170 earning in Aug 2026 (▲ +16 on the month before), against the
+peak of 265 in Oct 2025, the low 92 in Dec 2024; 20 stopped (▲ +6 on Jul
+2026, read as worse), 8 started (▼ −1); 132 of 324 recruits still working;
+a typical run of 8 months over 246 leavers, the 170 still working 14 months
+in. Seen and not changed: the flow chart's axis text is drawn in a fixed
+viewBox and scales up at 1440 in both skins.

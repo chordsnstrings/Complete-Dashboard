@@ -1059,4 +1059,70 @@ if (want('performance')) {
   }
 }
 
+/* ══ #retention ═══════════════════════════════════════════════════════════ */
+if (want('retention')) {
+  console.log('\n#retention');
+  const MON = (iso) => new Date(`${iso}-01T12:00:00Z`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+  {
+    const { ctx, page } = await open('classic', 'retention');
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
+      line: !!document.querySelector('#view svg path[stroke-dasharray]'), pills: document.querySelectorAll('#view td .pill.ok, #view td .pill.bad').length,
+      blue: [...document.querySelectorAll('#view td.num[style]')].some((t) => /--b400/.test(t.getAttribute('style'))),
+      meta: document.querySelector('#view .vdct')?.textContent || '' }));
+    check('old skin: no band, the headcount a dashed line over the flow, New/Stopped pills, the grid in blue, the raw ISO month in the verdict',
+      !r.band && r.line && r.pills > 0 && r.blue && /\d{4}-\d{2}/.test(r.meta), JSON.stringify({ ...r, meta: r.meta.slice(0, 80) }));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'retention');
+    const s = await shape(page);
+    const d = answer('/api/retention');
+    const F = d.flow || [];
+    const last = F[F.length - 1] || {};
+    const prev = F[F.length - 2] || null;
+    const n = (v) => (+v || 0).toLocaleString('en-US');
+    const vt = await txtOf(page, '#view .cband .vdct');
+    check('00: the verdict in the band, its month written as a month, never the raw ISO', s.vdctIn00 && !/\b\d{4}-\d{2}\b/.test(vt), vt.slice(0, 160));
+    const earnL = `Earning in ${MON(d.last_complete_month)}`;
+    check('the tiles: Earning the hero, off flow[]; stopped and started off the lists', s.hero === earnL && s.values[earnL] === n(last.active)
+      && s.values['Stopped that month'] === n(d.stopped_last_month.length) && s.values['Started that month'] === n(d.started_last_month.length), JSON.stringify([s.hero, s.values]));
+    const peak = F.reduce((a, f) => ((+f.active || 0) > (+a.active || 0) ? f : a), F[0]);
+    check('Earning names its peak (new)', peak.m === last.m ? /peak of the record/.test(s.subs[earnL]) : s.subs[earnL] === `against the peak of ${n(peak.active)} in ${MON(peak.m)}`, s.subs[earnL]);
+    const dl = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#view .cband .kpi')].filter((k) => k.querySelector('.dlt'))
+      .map((k) => [k.querySelector('.l')?.textContent.trim(), [k.querySelector('.dlt-v')?.textContent.trim(), k.querySelector('.dlt').className]])));
+    const sg = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${n(Math.abs(v))}`;
+    const dStop = prev ? d.stopped_last_month.length - (+prev.left || 0) : null;
+    check('deltas against the month before (new): Earning by the net, Stopped with more read as worse', (last.net == null || dl[earnL]?.[0] === sg(+last.net))
+      && (dStop == null || (dl['Stopped that month']?.[0] === sg(dStop) && (dStop <= 0 || /negative/.test(dl['Stopped that month'][1])))), JSON.stringify([dl, dStop]));
+    check('no tile wears a tone, none prints a bare dash', (await toned(page)).length === 0 && !s.bare.length);
+    check('order: 00 → headcount → joining and leaving → cohorts → stopped / started → †', s.heads[1] === 'Drivers earning, month by month'
+      && s.heads[2] === 'Drivers joining and leaving each month' && /^How long each month/.test(s.heads[3]) && /^Stopped in /.test(s.heads[4]) && /^† /.test(s.heads.at(-1)), JSON.stringify(s.heads));
+    const flow = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => x.querySelector('h3')?.textContent === 'Drivers joining and leaving each month');
+      return { dashed: p ? p.querySelectorAll('svg path[stroke-dasharray]').length : -1, fills: p ? [...new Set([...p.querySelectorAll('svg rect[data-rise]')].map((r) => r.getAttribute('fill')))] : [],
+        pills: p ? p.querySelectorAll('td .pill').length : -1, dlt: p ? p.querySelectorAll('td .dlt').length : 0, fold: !!p?.querySelector('.fold, [data-fold], details') }; });
+    check('the flow: no headcount line on a second scale, achromatic fills, New/Stopped signed words — never pills', flow.dashed === 0
+      && flow.fills.every((f) => /--ink|--grey/.test(f)) && flow.pills === 0 && flow.dlt > 0, JSON.stringify(flow));
+    const hc = await page.evaluate(() => [...document.querySelectorAll('[data-panel="ret-headcount"] p.cap')].pop()?.textContent || '');
+    const lo = F.reduce((a, f) => ((+f.active || 0) < (+a.active || 0) ? f : a), F[0]);
+    check('the headcount its own chart, the peak and the low named', hc === `The peak was ${n(peak.active)} in ${MON(peak.m)}; the low ${n(lo.active)} in ${MON(lo.m)}.`, hc);
+    const grid = await page.evaluate(() => [...document.querySelectorAll('#view td.num[style]')].map((t) => t.getAttribute('style')).filter((x) => /color-mix/.test(x)));
+    check('the cohort grid in the achromatic ramp, its exact % kept', grid.length > 0 && grid.every((g) => /--ink/.test(g) && !/--b400/.test(g)), JSON.stringify(grid.slice(0, 2)));
+    const ab = Object.fromEntries(s.abs.map((a) => [a.label, a]));
+    const ids = d.stopped_last_month.map((r) => r.driver_ext_id).filter(Boolean);
+    const dup = ids.length - new Set(ids).size;
+    check('†: why anybody left (true reason, not the definition of active), leavers listed twice counted, the excluded month, tenure',
+      /No feed this product reads files a reason/.test(ab['Why anybody left']?.why || '') && !/counts as active/.test(ab['Why anybody left']?.why || '')
+      && (dup ? ab['Leavers listed twice'].fig === `${dup} of ${ids.length}` : ab['Leavers listed twice']?.none)
+      && (!d.current_month_excluded || ab['The month in progress']?.fig === MON(d.current_month_excluded)), JSON.stringify(s.abs.map((a) => [a.label, a.fig])));
+    const caveat = await page.evaluate(() => [...document.querySelectorAll('#view .panel')].find((x) => /^How long each month/.test(x.querySelector('h3')?.textContent || ''))?.textContent || '');
+    check('the definition of active stays under the cohort grid', caveat.includes(d.caveat.slice(0, 60)));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'retention', { width: 390 });
+    check('#retention at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();
