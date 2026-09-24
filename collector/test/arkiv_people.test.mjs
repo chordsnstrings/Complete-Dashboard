@@ -487,4 +487,49 @@ if (want('driver-trips')) {
   }
 }
 
+/* ══ #driver/unauthorized ═════════════════════════════════════════════════ */
+if (want('driver-unauthorized')) {
+  console.log('\n#driver/unauthorized');
+  /* The window nobody watched: no seat-occupancy evidence at all. */
+  const blind = (q, real) => ({ ...real, coverage: { ...(real.coverage || {}), days_with_data: 0 },
+    attributed: { ...(real.attributed || {}), total: 0, rows: [], by_tier: {} },
+    also_a_candidate: { ...(real.also_a_candidate || {}), total: 0, rows: [] } });
+  {
+    const { ctx, page } = await open('classic', 'driver/drv-0/unauthorized', { fixtures: { '/api/driver/unauthorized': blind } });
+    const zeros = await page.evaluate(() => [...document.querySelectorAll('#view .kpis > .kpi .n')].filter((n) => n.textContent.trim() === '0').length);
+    check('old skin (frozen): the blind window still prints its counts as 0 — found, not changed there', zeros >= 5, String(zeros));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, answer } = await open('arkiv', 'driver/drv-0/unauthorized');
+    const s = await shape(page);
+    const U = answer('/api/driver/unauthorized');
+    const first = await page.evaluate(() => { const b = document.querySelector('#view .cband'); const p = [...document.querySelectorAll('#view .panel')][0];
+      return !!(b && p && (b.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING)); });
+    check('00 above the panel, the tiles the endpoint\'s own counts, untoned', first && s.values['Named beside'] === (+U.attributed.total).toLocaleString('en-US')
+      && (await toned(page)).length === 0, JSON.stringify(s.values));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/unauthorized', { fixtures: { '/api/driver/unauthorized': blind } });
+    const s = await shape(page);
+    const why = /nothing was looked at/;
+    check('THE TRUTH FIX: nothing was looked at, so every tile is ABSENT with that reason — never five zeros and "AED 0 … AED 0"',
+      s.glance === 7 && Object.keys(s.na).length === 7 && Object.values(s.na).every((n) => why.test(n))
+      && !(await txtOf(page, '#view .cband')).includes('AED 0'), JSON.stringify(s.na).slice(0, 200));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/unauthorized', { fixtures: { '/api/driver/unauthorized': [] } });
+    check('an unreadable answer keeps its own note and draws no band at all', !(await page.$('#view .cband'))
+      && /cannot read/.test(await txtOf(page, '#view')));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/unauthorized', { width: 390 });
+    check('#driver/unauthorized at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
 await done();

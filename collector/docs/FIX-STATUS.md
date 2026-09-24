@@ -3463,3 +3463,11 @@ Found in both skins and not changed (the old skin is frozen, and the figure is n
 | #driver/trips | Restyle only (plan §4: the raw evidence rows). Under the contract a booking's status is an ink pill — an outcome is not better or worse — while a journey nobody booked keeps its flag; every column, the newest-first order, the paging, the "part of AED X earned that day" cell and the interleaved journeys unchanged; the colophon counts the bookings | **written** | `test/arkiv_people.test.mjs` #driver/trips (5). Revert — the green/amber status pills back: fails. `arkiv_classic_frozen` ONLY=trips 5/5; `driver_trip_day_money` 27, `absent_columns` 25 |
 
 Not built: the 3px channel row marker in the gutter (tableFrom takes no row style).
+
+### P45 · #driver/unauthorized
+
+| page | what changed under the skin | state | proof |
+|---|---|---|---|
+| #driver/unauthorized | Restyle only, plus the plan's ONE TRUTH FIX. When no seat-occupancy evidence exists for the window (`coverage.days_with_data === 0`) the tab's own note says nothing was looked at — and the old row then printed five counts of 0 and "AED 0 … AED 0" under Revenue forgone. Under the contract every one of the seven tiles is ABSENT with that reason. Otherwise the tiles are the old row's, untoned (a tone reads as a verdict and most of this is custody). The band sits above the panel, and only once the answer has been read: a failed or unreadable request keeps its own note and draws no band. The tier wording and both tables unchanged | **written** | `test/arkiv_people.test.mjs` #driver/unauthorized (6), one fixture for the blind window, one unreadable body. Revert — the blind branch off: the Distance and Revenue tiles fall back to other reasons and the counts to 0, fails. `arkiv_classic_frozen` ONLY=unauthorized 5/5 (EXTRA gained driver/drv-0/unauthorized in P43); `unauthorized_attribution_page` 26, `unauthorized_attribution` 221 |
+
+Found in the old skin and not fixed there (frozen): the blind window still prints its counts as 0 — the test pins that it does, so the day the old skin is retired the fix is already the only behaviour.

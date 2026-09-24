@@ -3572,7 +3572,7 @@ async function tabUnauthorized(root, id) {
   const aed = sum(once, 'forgone_aed');
   const kmTime = sum(byTime, 'distance_km');
   const aedTime = sum(byTime, 'forgone_aed');
-  p.body.append(kpiRow([
+  const UN_TILES = [
     { label: 'Named beside', value: fmt(att.total), key: 'unauth-attributed',
       tone: att.total ? 'warn' : null,
       sub: att.total ? 'journeys no channel booked, a ride counted once across providers'
@@ -3607,7 +3607,9 @@ async function tabUnauthorized(root, id) {
           + 'instead — custody is not driving, and this second figure is not a debt anybody '
           + `owes. Both at ${money(res.value.aed_per_km)}/km, the fleet’s own rate here. Revenue `
           + 'forgone, not money paid out.' },
-  ]));
+  ];
+  if (contract()) unauthGlance(p, UN_TILES, cov);
+  else p.body.append(kpiRow(UN_TILES));
 
   /* THE STATUS-FEED SENTENCE, ONCE, WHEN IT IS THE SAME ON EVERY ROW.
      driver_status_event is append-only from 2026-09-14 with no backfill, so
@@ -3685,6 +3687,30 @@ async function tabUnauthorized(root, id) {
   /* The totals above are counted over the window by the endpoint, so they are
      exact even when the tables are short. The response says which in words. */
   if (res.total_basis) c.body.append(el('p', 'cap', res.total_basis));
+}
+
+/* ── #driver/unauthorized under the page contract ────────────────────────
+   Restyle only, plus the plan's ONE TRUTH FIX. When no seat-occupancy
+   evidence exists for the window (coverage.days_with_data === 0) the tab's
+   own note says nothing was looked at — and the old row then printed five
+   counts of 0 and "AED 0 … AED 0" under Revenue forgone, a measurement
+   nobody took. Under the contract every tile is ABSENT with that reason
+   instead. Where evidence exists, the tiles are the old row's, untoned (a
+   tone reads as a verdict, and most of this is custody). The band goes
+   ABOVE the panel, and only once the answer has been read: a failed or
+   unreadable request keeps its own note and draws no band at all. */
+function unauthGlance(p, tiles, cov) {
+  const holder = el('div');
+  const AKB = glanceBand(holder, windowLabel());
+  p.panel.before(AKB.band);
+  const nothing = cov.days_with_data === 0;
+  const why = 'no seat-occupancy evidence from CABMAN DT or FMS exists for this window — nothing was looked at';
+  const list = nothing ? tiles.map((t) => ({ label: t.label, na: why, ...(t.key ? { key: t.key } : {}) }))
+    : tiles.map((t, i) => (i === 0 ? { ...t, hero: true } : t));
+  glance(AKB.tilesHost, bandTiles(list, { reasons: {
+    Distance: 'no journey in this window names this person, so there is no distance to add',
+    'Revenue forgone': 'no journey in this window names this person, so there is nothing forgone to add' } }).tiles);
+  pageFoot({ colophon: [windowLabel(), nothing ? 'no seat evidence' : cov.days_with_data != null && cov.days_in_window != null ? `${fmt(cov.days_with_data)} of ${fmt(cov.days_in_window)} days watched` : 'coverage not measured'] }, p.panel.parentNode);
 }
 
 /* ── the window said out loud, once, above every tab ──────────────────────

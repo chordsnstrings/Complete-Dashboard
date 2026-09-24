@@ -1874,3 +1874,10 @@ Production (This month), both skins at 1440 and 390, light and dark
 (scratchpad `pagephase/shots/driver-trips/`): no error, no sideways scroll;
 the first cold load took 63 s (the trip list for a busy driver), later ones
 4 s.
+
+### #driver/unauthorized — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-unauthorized/`): no error, no sideways
+scroll. Named beside 4 journeys (2 by time, 2 by the car's last trip),
+44.1 km, AED 199.95 forgone — AED 186.77 of it narrowed by time.
