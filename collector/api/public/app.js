@@ -3262,8 +3262,8 @@ function shareCharts(doneP, kmP, { K, perK, byPlat }) {
   if (fleet == null || !rows.length) empty(doneP.body, 'No channel reports an outcome in this window.');
   else {
     hbars(doneP.body, rows.map(([p, k]) => ({ label: `${sourceLabel(p)} · ${pct(+k.completion_pct, 1)}`, n: +(+k.completion_pct - fleet).toFixed(1) }))
-      .sort((a, b) => b.n - a.n), { signed: true, color: '--ink', negColor: '--grey', valueFmt: (x) => `${fmt(x, 1)} pts`,
-        legend: [['--ink', 'above the fleet'], ['--grey', 'below the fleet']] });
+      .sort((a, b) => b.n - a.n), { signed: true, color: '--mk-fill', negColor: '--mk-neg', valueFmt: (x) => `${fmt(x, 1)} pts`,
+        legend: [['--mk-fill', 'above the fleet'], ['--mk-neg', 'below the fleet']] });
     doneP.body.append(el('p', 'cap', esc(`The fleet completes ${pct(fleet, 1)} of its bookings.`)));
   }
   const km = byPlat.filter((r) => r.avg_km != null);
