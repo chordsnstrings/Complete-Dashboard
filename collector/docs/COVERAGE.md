@@ -6698,3 +6698,11 @@ number (5 and 5), and never a passport or RTA number.
 * **`test/driver_standing.test.mjs` pins `const tone = sn.tied ? '--s1'` in
   driver.js.** A skin-dependent fill has to be a second variable, not a
   rewrite of that expression.
+
+* **`/api/driver/shift` is the expensive read on production, and it can
+  stall the whole API.** Three concurrent loads of #driver/activity for the
+  busiest driver (6,925 trips on record) held it for 480 s, and for several
+  minutes nothing else on the API answered (a one-row /api/trips/list timed
+  out at 20 s; the droplet is basic-xxs). The same call for a lighter
+  driver answered in 3.4 s once the queue drained. Screenshot driver pages
+  one load at a time (`CONC=1`), and not for the fleet's busiest person.

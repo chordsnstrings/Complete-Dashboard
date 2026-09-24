@@ -150,4 +150,48 @@ if (want('driver-overview')) {
   }
 }
 
+/* ══ #driver/activity ═════════════════════════════════════════════════════ */
+if (want('driver-activity')) {
+  console.log('\n#driver/activity');
+  {
+    const { ctx, page } = await open('classic', 'driver/drv-0/activity');
+    check('old skin: no 00 band, no † band', !(await page.$('#view .cband')) && !(await page.$('#view .absband')));
+    await ctx.close();
+  }
+  const capOf = (page) => page.evaluate(() => [...document.querySelectorAll('#view .panel')].find((p) => /How the day was spent/.test(p.querySelector('h3')?.textContent || ''))
+    ?.querySelectorAll('p.cap') ? [...[...document.querySelectorAll('#view .panel')].find((p) => /How the day was spent/.test(p.querySelector('h3')?.textContent || '')).querySelectorAll('p.cap')].map((c) => c.textContent).join(' ') : '');
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/activity');
+    const s = await shape(page);
+    const cap = await capOf(page);
+    const m = /: ([\d,.]+) h on job, ([\d,.]+) h waiting/.exec(cap) || [];
+    check('00: on job and waiting are the ribbon caption\'s own figures, over the same days', s.values['On job'] === `${m[1]} h`
+      && s.values['Waiting between jobs'] === `${m[2]} h`, JSON.stringify([s.values['On job'], s.values['Waiting between jobs'], m.slice(1)]));
+    check('no availability on these days: the online tiles ABSENT with the true reason, never 0 h', /only Uber publishes it/.test(s.na.Online || '')
+      && /only Uber publishes it/.test(s.na['Online, not dispatched'] || ''), JSON.stringify(s.na));
+    check('† four cells and the colophon', s.abs.length === 4 && /activity/.test(s.colophon), JSON.stringify(s.abs.map((a) => a.label)));
+    await ctx.close();
+  }
+  {
+    /* Availability on every drawn day (synthetic spans), so the hero has a
+       figure: it must be the caption's "of which N h … not dispatched". */
+    const withOnline = (q, real) => ({ ...real, days: (real.days || []).map((d) => (d.first_min == null ? d
+      : { ...d, online: [{ s: Math.max(0, d.first_min - 45), e: Math.min(1440, (d.first_min || 0) + (d.span_min || 0) + 30) }] })) });
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/activity', { fixtures: { '/api/driver/shift': withOnline } });
+    const s = await shape(page);
+    const cap = await capOf(page);
+    const m = /([\d,.]+) h online, of which ([\d,.]+) h \((\d+)%\)/.exec(cap) || [];
+    check('with availability: online, not dispatched is the hero, and is the caption\'s own idle figure', s.hero === 'Online, not dispatched'
+      && s.values['Online, not dispatched'] === `${m[2]} h` && s.values.Online === `${m[1]} h`
+      && (s.subs['Online, not dispatched'] || '').startsWith(`${m[3]}% of the time online`), JSON.stringify([s.values, m.slice(1)]));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/activity', { width: 390 });
+    check('#driver/activity at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+}
+
+
 await done();

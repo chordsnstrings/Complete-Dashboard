@@ -1801,3 +1801,12 @@ and 390, light and dark (scratchpad `pagephase/shots/driver-overview/`): no
 error, no sideways scroll. 288 trips, +131 against the fleet median of 157,
 97th percentile of 121. Found by looking and fixed before commit: the rank
 row's value line sat in the label's column and wrapped; it spans the row.
+
+### #driver/activity — 2026-09-24
+
+Production (This month), both skins at 1440 and 390, light and dark
+(scratchpad `pagephase/shots/driver-activity/`): no error, no sideways
+scroll. 206.5 h online and not dispatched — 70% of 296.8 h online over 24
+days with availability — beside 90.3 h on job and 278 jobs, 23 with no
+dropoff. The first attempt, on the busiest driver in the fleet with three
+page loads at once, did not finish: see the trap in COVERAGE.md.

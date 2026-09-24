@@ -1195,6 +1195,13 @@ function overviewAbsence(root, k, prof) {
    TABS call site — and tabOverview and tabEarnings already declare it. This
    tab simply never took delivery. */
 async function tabActivity(root, id, prof) {
+  /* Under the page contract (plan §4 #driver/activity): a 00 band of the
+     figures the ribbon's own captions print — online and not dispatched the
+     hero, on job, waiting between jobs, online, jobs — computed over the SAME
+     days the captions total, so a tile and the sentence under the ribbon can
+     never disagree; every panel and both tables kept; a † band. */
+  const ak = contract();
+  const AKB = ak ? glanceBand(root, windowLabel()) : null;
   /* Full width. Twenty-eight days of a 24-hour axis in half a page gives each
      hour about eight pixels, so a thirty-minute job is four pixels wide and
      the panel that exists to show WHEN somebody worked shows a smear. */
@@ -1244,6 +1251,7 @@ async function tabActivity(root, id, prof) {
      page holding one links by it rather than by the account it was opened
      with — an account link still resolves, but it hands the next reader an
      address that moves when a merge does. */
+  if (ak) activityGlance(AKB, shift);
   if ((shift.days || []).some((d) => d.first_min != null)) {
     shiftBars(sh.body, shift.days, shift, addressOf(prof, id));
   }
@@ -1355,7 +1363,7 @@ async function tabActivity(root, id, prof) {
     barChart(dist.body, daily.map((d) => ({
       label: dayStr(d.day), km: d.km == null ? 0 : +d.km,
       measured: d.km != null, worked: +d.trips > 0,
-    })), { x: 'label', y: 'km', colorFor: (d) => (d.measured ? '--b300' : d.worked ? '--surface-3' : '--surface-2'),
+    })), { x: 'label', y: 'km', colorFor: (d) => (d.measured ? (ak ? '--ink' : '--b300') : d.worked ? '--surface-3' : '--surface-2'),
       valueFmt: (v) => `${fmt(v)} km` });
     dist.body.append(el('p', 'cap',
       `${countOf(kmDays.length, 'day')} of ${fmt(daily.length)} in this window carry a measured `
@@ -1516,6 +1524,7 @@ async function tabActivity(root, id, prof) {
      }
   }
 
+  if (ak) activityAbsence(root, shift, kept);
   cust.body.innerHTML = '';
   const custRows = Array.isArray(custody) ? custody : (custody.rows || []);
   const custTotal = Array.isArray(custody) ? null : custody.total;
@@ -1552,6 +1561,55 @@ async function tabActivity(root, id, prof) {
       + (custTotal && custTotal > custRows.length
         ? ', and the server sent only the newest of those.' : '.')));
   }
+}
+
+/* ── #driver/activity under the page contract ──────────────────────────── */
+/* Every figure here is one shiftBars() already prints in a caption, over the
+   same days — the last 28 with a job on them — and by the same arithmetic,
+   so the band restates the ribbon's sentences as figures and cannot drift
+   from them. Availability is Uber's alone and only for 31 days, so the two
+   online tiles are over the days that carry it and say how many that is. */
+function activityGlance(AKB, shift) {
+  const all = (shift.days || []).filter((d) => d.first_min != null);
+  const rows = all.slice(-28);
+  const sum = (f) => rows.reduce((a, d) => a + (f(d) || 0), 0);
+  const onJob = sum((d) => d.on_job_min), waited = sum((d) => d.wait_min), span = sum((d) => d.span_min);
+  const covered = rows.filter((d) => d.online);
+  const onlineMin = covered.reduce((a, d) => a + d.online.reduce((x, o) => x + (o.e - o.s), 0), 0);
+  const idle = Math.max(0, onlineMin - covered.reduce((a, d) => a + (d.on_job_min || 0), 0));
+  const jobs = sum((d) => (d.jobs || []).length);
+  const noDrop = sum((d) => d.unknown_end);
+  const h = (m) => `${fmt(m / 60, 1)} h`;
+  const over = all.length > rows.length ? ` · over the last ${fmt(rows.length)} days drawn` : '';
+  const noAvail = 'none of these days carries availability — only Uber publishes it, and only for 31 days';
+  const noJob = 'no day in this window carries a job with a start time';
+  glance(AKB.tilesHost, [
+    covered.length ? { label: 'Online, not dispatched', value: h(idle), hero: true,
+      sub: `${onlineMin ? Math.round((idle / onlineMin) * 100) : 0}% of the time online · over ${countOf(covered.length, 'day')} with availability` }
+      : { label: 'Online, not dispatched', hero: true, na: noAvail },
+    rows.length ? { label: 'On job', value: h(onJob), sub: `request to dropoff${over}` } : { label: 'On job', na: noJob },
+    rows.length ? { label: 'Waiting between jobs', value: h(waited),
+      sub: `${span ? Math.round((waited / span) * 100) : 0}% of first request to last dropoff` } : { label: 'Waiting between jobs', na: noJob },
+    covered.length ? { label: 'Online', value: h(onlineMin), sub: `availability for ${fmt(covered.length)} of ${countOf(rows.length, 'day')}` }
+      : { label: 'Online', na: noAvail },
+    { label: 'Jobs', value: fmt(jobs), sub: noDrop ? `${fmt(noDrop)} with no dropoff reported` : (jobs ? 'every one with a dropoff time' : 'no job in this window') },
+  ]);
+}
+function activityAbsence(root, shift, kept) {
+  const noDrop = shift.unknown_end || 0;
+  const absHost = el('div'); root.append(absHost);
+  absenceBand(absHost, [
+    { label: 'A dropoff time', hl: noDrop > 0, fig: noDrop ? countOf(noDrop, 'booking') : null, none: 'Every one has one',
+      why: noDrop ? 'The channel sent no end time for these. They are hatched on the ribbon and left out of both totals rather than counted as waiting.'
+        : 'Every booking in this window carries a dropoff time.' },
+    { label: 'When the rider got in', fig: null, none: 'Not sent',
+      why: 'No channel here reports a pickup time, so on job is request to dropoff and holds the drive to the rider.' },
+    { label: 'Availability past Uber\u2019s 31 days', fig: kept?.online_days ? `${fmt(kept.online_days)} days held` : null, none: 'Not held',
+      why: `Uber serves 31 days of availability and nothing older. ${kept?.online_days ? `The stored record holds ${countOf(kept.online_days, 'day')} of it for this window, written as the collector reached them;` : 'The stored record holds none for this window;'} a day it missed cannot be recovered.` },
+    { label: 'Why a day was quiet', fig: null, none: 'Not recorded',
+      why: 'Nothing this product reads says why a driver did not work — leave, a blocked account and a car in the garage look the same here.' },
+  ]);
+  pageFoot({ colophon: [windowLabel(), 'activity'] }, root);
 }
 
 /* ── tab: territory ──────────────────────────────────────────────────────── */
