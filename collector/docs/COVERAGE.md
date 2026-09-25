@@ -3277,6 +3277,18 @@ driver's 222 tracker fixes.
   pulse; `run-all.mjs` now asks `/api/trips/daily` about today and, if the
   answer is empty, leaves the squatter alone and starts its own mockapi on a
   kernel-assigned port.
+* **A background run started beside a `cd` can start in the wrong directory,
+  and an untimed wait then hangs for ever.** A tool call run in the
+  background shares the shell with the calls beside it. On 2026-09-24 a
+  parallel command's `cd ..` meant `node mockapi.mjs` looked for
+  `/home/user/Complete-Dashboard/mockapi.mjs` and died, and `until curl …; do
+  sleep 1; done` waited for it all night. Worse, when a later run brought a
+  mock up on the same port, the stale loop woke and ran `npm test` from the
+  wrong directory. That was harmless this time (enoent), but it could have
+  written over the new run's log. Start background runs with absolute paths,
+  bound every wait (`for i in $(seq 1 60)`, and check the server's PID is
+  still alive), and never launch one in parallel with a command that changes
+  directory.
 * **/icons, /fonts and /vendor are served IMMUTABLE for a year (server.js), so
   a file changed under its old name never reaches a returning browser.** The
   FleetMirror rebrand first replaced icon-192.png and the rest in place,
