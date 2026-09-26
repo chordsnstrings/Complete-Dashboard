@@ -6860,3 +6860,35 @@ from the base commit's tree. Each of these cost a run or more to find.
 ### Trap: a requestAnimationFrame timestamp can be EARLIER than performance.now() at the call (2026-09-24)
 
 `requestAnimationFrame(cb)` hands `cb` the time the frame STARTED. Code that reads `t0 = performance.now()` and then computes `(now − t0) / dur` in the callback can see a negative progress on the first frame. Under load the gap measured about 106 ms. Clamp progress to [0, 1], not just at 1. app.js countUp() did not, and a KPI briefly printed a negative figure ("-176" for 289). A stalled frame can hold that figure for hundreds of milliseconds, so a DOM read that waits for "two equal reads" can accept it. `test/countup_clock.test.mjs` shifts the frame clock by 150 ms to make the case certain rather than load-dependent.
+
+## What each platform calls the fleets — measured 2026-09-26
+
+Gathered for the fleet-naming design (docs/ULM-DESIGN.md §3), where the fleet's
+display name is derived from these, never typed.
+
+| platform | Ecosine | Egari | where it comes from |
+|---|---|---|---|
+| Uber | "ECOSINE TRANSPORTS" | "Egari Luxury Cars Transport LLC" | `/v1/vehicle-suppliers/orgs` → `name`; called on paste (src/credcheck.js:450-473), not stored |
+| Yango | "ECOSINE TRANSPORTS LLC" | no park | console `parks/users/profile` (api/probe.js:2299); 403 since 2026-09-06 |
+| CABMAN | "Ecosine Transports LLC" | no interface | `CompanyName` on every vehicle in `telemetry_snapshot.raw`; never read into a column |
+| Bolt fleet-integration | company 142868, no name | company 142897, no name | `getCompanies` answers 404; ids are literals in src/config.js:175-178 |
+| Bolt fleet-owner portal | — | — | `getCompanyDetails` / `getProfile` never called |
+| FMS | — | — | `GetVehicleList` → `ClientName` never called; nothing name-like in its raw snapshot |
+| Hotel channel | no name | — | `x-domain` only; hard-wired to Ecosine (src/config.js:163) |
+
+The common part across Ecosine's three names is "Ecosine Transports" once the
+legal form is dropped. Egari is named by one platform only.
+
+### Trap this adds
+
+- **CABMAN's Ecosine interface carries a second company's vehicles.** In the
+  week to 2026-09-26, `/api/schema/raw-values?table=telemetry_snapshot&platform=cabman&key=CompanyName`
+  returned two values:
+  - "Ecosine Transports LLC" on 25,183 snapshots;
+  - "Sahalat" on 64.
+
+  Every snapshot is filed as Ecosine, because the interface is configured to
+  that fleet (src/config.js:70). Two consequences:
+  - Anything that counts CABMAN cars as Ecosine's counts Sahalat's too.
+  - A fleet name taken from CABMAN has to be read per vehicle, from linked
+    vehicles only.
