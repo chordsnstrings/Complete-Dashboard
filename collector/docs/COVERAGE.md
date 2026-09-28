@@ -7076,8 +7076,12 @@ DigitalOcean as a SECRET when it is wired in).
 - **`GET /sender/List`** lists sender IDs. On 2026-09-28 only `VOLT` and
   `AD-VOLT` were **Approved**; `ECOSINE` (Transactional, OTP),
   `AD-Ecosine` (Promotional) and `PowerDrive` (OTP) had been **Requested**
-  since 2025-02-04 and never approved. The sender is therefore a setting,
-  not a literal.
+  since 2025-02-04 and never approved — and yet `ECOSINE` DELIVERS: a type-3
+  OTP sent from it at 11:08:56Z was "Delivered" at 11:08:59Z, and the
+  portal's own Send form offers ECOSINE, AD-ECOSINE, AD-VOLT, VOLT and
+  POWERDRIVE. `/sender/List`'s status is not a verdict on whether a sender
+  can send; a real send and its delivery report are. The sender is a
+  setting, not a literal — `ECOSINE` by the operator's choice.
 - **`POST /SendSmsV2` takes a JSON ARRAY, even for one message.** A single
   object is a 400 whose body is a .NET deserialiser error ("requires a JSON
   array"). Fields: `messageType` "1" promotional / "2" transactional / "3"
@@ -7096,4 +7100,5 @@ DigitalOcean as a SECRET when it is wired in).
   `TextReceived` — the full message text, so a delivery report of a sign-in
   code carries the code: never log it. Two of eight polls ten seconds apart
   came back with an empty body; retry rather than read absence as failure.
-- **Delivered in two seconds** to a UAE mobile as type 3 (OTP) from `VOLT`.
+- **Delivered in two to three seconds** to a UAE mobile as type 3 (OTP),
+  from `VOLT` and from `ECOSINE`.
