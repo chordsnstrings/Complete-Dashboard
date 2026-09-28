@@ -220,7 +220,12 @@ class Sheet {
     const cols = this.widths.length
       ? `<cols>${this.widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>` : '';
     const filter = this.filterRef() ? `<autoFilter ref="${this.filterRef()}"/>` : '';
-    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${views}<sheetFormatPr defaultRowHeight="15"/>${cols}<sheetData>${this.rows.join('')}</sheetData>${filter}</worksheet>`;
+    /* The used range. Excel does not need it, but a reader in read-only
+       mode (openpyxl's, and pandas on top of it) takes the sheet's size from
+       it and reports none without it — measured on the first production
+       download, 2026-09-28. */
+    const dim = `<dimension ref="A1${this.rows.length > 1 || this.lastCol > 1 ? `:${colName(Math.max(this.lastCol, 1) - 1)}${Math.max(this.rows.length, 1)}` : ''}"/>`;
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${dim}${views}<sheetFormatPr defaultRowHeight="15"/>${cols}<sheetData>${this.rows.join('')}</sheetData>${filter}</worksheet>`;
   }
   filterRef() {
     if (this.headerAt == null || !this.cols) return null;

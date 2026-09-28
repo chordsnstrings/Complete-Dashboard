@@ -12,7 +12,8 @@
    check fails and openpyxl then refuses the file outright); count days from
    1900-01-01 instead of Excel's 1899-12-30 (4 fail — every date lands two
    days early); crc32 off by one bit (the CRC check fails and the reader
-   refuses the zip). */
+   refuses the zip); drop the <dimension> tag (2 fail — openpyxl in read-only
+   mode, as pandas uses it, reports no rows at all). */
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -66,6 +67,7 @@ check('the table carries filter arrows over every row', /<autoFilter ref="A2:D6"
 check('…declared the way Excel expects', /_xlnm\._FilterDatabase" localSheetId="1" hidden="1">'Cash to collect'!\$A\$2:\$D\$6</.test(files.get('xl/workbook.xml').toString('utf8')));
 check('money cells carry the #,##0.00 format', /<c r="C3" s="2"><v>1234.5<\/v>/.test(sheet2) && /formatCode="#,##0\.00"/.test(files.get('xl/styles.xml').toString('utf8')));
 check('no formula anywhere in the file', ![...files.values()].some((b) => /<f[ >]/.test(b.toString('utf8'))));
+check('each sheet states its used range, for readers that need it', /<dimension ref="A1:D6"\/>/.test(sheet2));
 
 console.log('\n3. the refusals, by name');
 const throws = (fn, re) => { try { fn(); return false; } catch (e) { return re.test(e.message); } };
@@ -95,6 +97,7 @@ print(json.dumps({
   'd3': str(s['D3'].value), 'dfmt': s['D3'].number_format,
   'a4': s['A4'].value, 'a4type': s['A4'].data_type,
   'freeze': s.freeze_panes, 'filter': s.auto_filter.ref,
+  'ro_rows': openpyxl.load_workbook(sys.argv[1], read_only=True)['Cash to collect'].max_row,
 }))`, f], { encoding: 'utf8' });
   const o = JSON.parse(out);
   check('openpyxl opens it, both sheets', o.names.join('|') === 'Read me|Cash to collect');
@@ -102,6 +105,7 @@ print(json.dumps({
   check('…reads the datetime as a datetime', o.d3 === '2026-09-27 23:59:00' && o.dfmt === 'yyyy-mm-dd hh:mm', o.d3);
   check('…reads the "=" cell as text, not a formula', o.a4 === '=HYPERLINK("http://example.test")' && o.a4type === 's', o.a4type);
   check('…sees the frozen header and the filter', o.freeze === 'A3' && o.filter === 'A2:D6', `${o.freeze} ${o.filter}`);
+  check('…and in read-only mode knows how many rows there are', o.ro_rows === 6, String(o.ro_rows));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

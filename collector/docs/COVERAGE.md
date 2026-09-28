@@ -7228,10 +7228,17 @@ Measured on production before it was built:
   every dirham taken, and the file's notes say exactly that.
 - **The cash on a trip** is `trip_cash.cash_amount`: Uber's cash-collected
   where its payments report has arrived (11.1% above the fare on 73 of 73
-  trips measured — booking fee and tolls), the fare otherwise. For
-  1..27 September, 3,891 cash trips were listed by the cash page and 79.8%
-  carried a fare; a cash trip with no amount yet is COUNTED in its own column
-  ("Not priced yet") and named on the notes sheet, never added as 0.
+  trips measured — booking fee and tolls), the fare otherwise. A cash trip
+  with no amount yet is COUNTED in its own column ("Not priced yet") and
+  named on the notes sheet, never added as 0.
+- **The first download from production** (1..27 September, both fleets):
+  2.2 MB in 6–8 s; 2,919 completed cash trips, AED 181,249.08, 108 drivers
+  (105 with a mobile), every one valued — 2,524 on Uber's cash-collected
+  figure, 395 on the fare. The cash page's 3,891 for the same dates is not
+  the same count: it includes cancelled cash bookings, which put no cash in
+  anybody's hand. Checked against the pages for the same dates: 12 payouts
+  totalling AED 516,746.06 and 21,190 bookings with AED 1,165,365.94 in
+  fares — identical to #payouts and to the daily trip CSV to the fils.
 - **Payouts** exist only for Uber and Bolt (September: 3 Uber and 4 Bolt
   transfers per fleet). Yango publishes no transfer; the hotel channel has none
   collected. Listed by ARRIVAL date with the week an Uber wire pays for;

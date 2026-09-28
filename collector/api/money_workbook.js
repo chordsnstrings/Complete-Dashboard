@@ -314,14 +314,14 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
   rm.text('Summary', 'bold');
   rm.pair('Drivers with cash in these dates', tot.people, 'int');
   rm.pair('Cash from trips (AED)', h('CASH', tot.taken), 'money');
-  rm.pair('Cash advanced (AED)', h('CASH', tot.advanced), 'money');
-  rm.pair('Cash handed in (AED)', h('CASH', tot.handedIn), 'money');
+  rm.pair('Advances recorded (AED)', h('CASH', tot.advanced), 'money');
+  rm.pair('Hand-ins recorded (AED)', h('CASH', tot.handedIn), 'money');
   rm.push([['To hand in (AED)', 'bold'], [h('CASH', tot.toHandIn), 'moneyBold']]);
   rm.pair('Cash trips', tot.trips, 'int');
   rm.pair('…of which not priced yet', tot.unpriced, 'int');
   rm.blank();
   rm.text('How “To hand in” is worked out', 'bold');
-  rm.text('To hand in = cash from trips + cash advanced − cash handed in, over these dates only. '
+  rm.text('To hand in = cash from trips + advances recorded − hand-ins recorded, over these dates only. '
     + 'It is the operator’s own definition of cash taken (22 September 2026).');
   rm.text('Cash from a trip is the platform’s own cash-collected figure where it has sent one — Uber, once its nightly catch-up '
     + 'has read the payments report; it includes the booking fee and the tolls the rider paid, so it is higher than the fare — '
@@ -391,7 +391,7 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
   /* ── Cash to collect ─────────────────────────────────────────────────── */
   const cc = wb.sheet('Cash to collect', { widths: [34, 16, 20, 44, 20, 11, 16, 14, 14, 16, 12, 18, 14] });
   cc.header(['Driver', 'Fleet', 'Mobile', 'About the mobile', 'Platforms', 'Cash trips', 'Cash from trips (AED)',
-    'Cash advanced (AED)', 'Handed in (AED)', 'To hand in (AED)', 'Not priced yet', 'Last cash trip', 'Last hand-in'],
+    'Advances recorded (AED)', 'Hand-ins recorded (AED)', 'To hand in (AED)', 'Not priced yet', 'Last cash trip', 'Last hand-in'],
   ['text', 'text', 'text', 'wrap', 'text', 'int', 'money', 'money', 'money', 'money', 'int', 'datetime', 'date']);
   for (const e of cashPeople) {
     const c = contact(e);
@@ -403,7 +403,7 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
 
   /* ── Cash by day ─────────────────────────────────────────────────────── */
   const cd = wb.sheet('Cash by day', { widths: [12, 34, 16, 11, 16, 14, 14, 16, 18, 12] });
-  cd.header(['Day', 'Driver', 'Fleet', 'Cash trips', 'Cash from trips (AED)', 'Cash advanced (AED)', 'Handed in (AED)',
+  cd.header(['Day', 'Driver', 'Fleet', 'Cash trips', 'Cash from trips (AED)', 'Advances recorded (AED)', 'Hand-ins recorded (AED)',
     'To hand in that day (AED)', 'To hand in so far (AED)', 'Not priced yet'],
   ['date', 'text', 'text', 'int', 'money', 'money', 'money', 'money', 'money', 'int']);
   const pdRows = [...byPersonDay.values()].sort((a, b) => a.e.name.localeCompare(b.e.name) || a.e.key.localeCompare(b.e.key) || a.day.localeCompare(b.day));

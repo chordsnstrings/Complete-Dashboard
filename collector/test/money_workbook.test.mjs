@@ -118,7 +118,7 @@ check('the sheets, in the supervisor’s order', all.file.sheetNames.join('|')
 const cc = table(all.file, 'Cash to collect');
 const A = cc.find((r) => r.Driver === 'Test Driver A');
 check('A: cash from trips is Uber’s figure (45 + 22) plus Bolt’s fare (30) = 97', A?.['Cash from trips (AED)'] === 97, JSON.stringify(A));
-check('A: advanced 20, handed in 50 — the hand-in shown as a positive amount', A?.['Cash advanced (AED)'] === 20 && A?.['Handed in (AED)'] === 50);
+check('A: advanced 20, handed in 50 — the hand-in shown as a positive amount', A?.['Advances recorded (AED)'] === 20 && A?.['Hand-ins recorded (AED)'] === 50);
 check('A: to hand in = 97 + 20 − 50 = 67', A?.['To hand in (AED)'] === 67);
 check('A: the trip at 23:59 the night before is out, 00:05 on the 1st is in', A?.['Cash trips'] === 4, String(A?.['Cash trips']));
 check('A: the Uber trip not priced yet is counted, and in no amount', A?.['Not priced yet'] === 1);
@@ -134,7 +134,7 @@ check('the most to collect comes first', cc[0]?.Driver === 'Test Driver B' && cc
 check('a card-only driver is not on the cash sheet', !cc.some((r) => r.Driver === 'Test Driver D' && r['Cash trips'] === 0));
 
 const rm = text(all.file, 'Read me');
-check('the notes give the definition in words', /To hand in = cash from trips \+ cash advanced − cash handed in/.test(rm));
+check('the notes give the definition in words', /To hand in = cash from trips \+ advances recorded − hand-ins recorded/.test(rm));
 check('…name the platform whose trips are not priced, and why', /Uber: 1 cash trip has no amount yet — Uber prices a trip only when its nightly catch-up/.test(rm));
 check('…say a failed collection by name', /Bolt — Ecosine \| The latest collection \(2026-09-07 23:55\) FAILED; the last good one was 2026-09-06 00:00/.test(rm), rm.split('\n').filter((l) => /Bolt —/.test(l)).join(' / '));
 check('…say payouts are by the day they arrived', /Listed by the day the money ARRIVED/.test(rm) && /Yango \| Yango does not publish a transfer/.test(rm));
