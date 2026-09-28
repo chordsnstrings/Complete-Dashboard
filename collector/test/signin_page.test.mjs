@@ -30,14 +30,12 @@
 
    REVERSIONS THAT PROVE IT (each makes a named check fail):
      · signin.html inline script: drop the history.replaceState — "the invite
-       token left the address bar before the page asked about it" fails.
+       token left the address bar before signin.js had even loaded" fails.
      · signin.js safeBack: drop the backslash/control-character test —
        "/\\evil.example" and "/\\t/evil.example" fail, and so does "a hostile
        ?back= lands on this origin's /".
      · signin.js stepRecovery "saved": drop guardLeaving(false) — the landing
        after the codes never happens (Playwright dismisses beforeunload).
-     · signin.js refreshWho: drop resetWho() — after signing out in the
-       invite flow the login step is skipped for "You are signed in".
      · signin.js stepLogin: drop the `open` condition's who.now — the
        optional-sign-in line shows although /api/auth/me did not answer. */
 import pg from 'pg';
@@ -244,13 +242,17 @@ try {
             .map((e) => ({ e, h: e.getBoundingClientRect().height }))
             .filter((x) => x.h < 43.5)
             .map((x) => `${x.e.tagName.toLowerCase()}${x.e.id ? `#${x.e.id}` : ''}.${x.e.className}=${Math.round(x.h)}`) : [];
-          return { sw: document.documentElement.scrollWidth, iw: window.innerWidth, bg: cs.backgroundColor,
-            logo: getComputedStyle(document.documentElement).getPropertyValue('--logo'), small };
+          const marks = [...document.querySelectorAll('.si-mark')].filter((i) => getComputedStyle(i).display !== 'none');
+          return { sw: document.documentElement.scrollWidth, iw: window.innerWidth, bg: cs.backgroundColor, small,
+            marks: marks.map((i) => ({ src: new URL(i.src).pathname, ok: i.complete && i.naturalWidth > 0 })) };
         }, w === 390);
         if (m.sw > m.iw) bad.push(`${w}/${scheme}: scrolls sideways (${m.sw} > ${m.iw})`);
         const wantBg = scheme === 'dark' ? 'rgb(17, 17, 19)' : 'rgb(255, 255, 255)';
         if (m.bg !== wantBg) bad.push(`${w}/${scheme}: paper is ${m.bg}, not ${wantBg}`);
-        if (!(scheme === 'dark' ? /mark-dark\.png/ : /mark\.png/).test(m.logo)) bad.push(`${w}/${scheme}: mark is ${m.logo}`);
+        const wantMark = scheme === 'dark' ? '/brand/mark-dark.png' : '/brand/mark.png';
+        if (m.marks.length !== 1 || m.marks[0].src !== wantMark || !m.marks[0].ok) {
+          bad.push(`${w}/${scheme}: the mark shown is ${JSON.stringify(m.marks)}, not a loaded ${wantMark}`);
+        }
         if (m.small.length) bad.push(`${w}/${scheme}: under 44px: ${m.small.join(', ')}`);
         if (SHOTS) await page.screenshot({ path: join(SHOTS, `${String(++shotN).padStart(2, '0')}-${label.replace(/\W+/g, '-')}-${w}-${scheme}.png`), fullPage: true });
       }
@@ -409,9 +411,18 @@ try {
   const B = await newPage();
   {
     const { page, ctx } = B;
-    await page.goto(`${base}${dispatchLink}`);
-    const first = page.url();
-    check('the invite token left the address bar before the page asked about it', !first.includes('invite='), first);
+    /* signin.js is held back at the network, so what is measured here is the
+       inline script in signin.html alone: the token must already be out of
+       the address bar while the module that uses it has not even arrived. */
+    let release;
+    const held = new Promise((r) => { release = r; });
+    await ctx.route('**/signin.js', async (route) => { await held; await route.continue(); });
+    await page.goto(`${base}${dispatchLink}`, { waitUntil: 'commit' });
+    await page.waitForSelector('#signin .si-wait', { state: 'attached' });
+    const early = await page.evaluate(() => location.href);
+    release();
+    await ctx.unroute('**/signin.js');
+    check('the invite token left the address bar before signin.js had even loaded', !early.includes('invite='), early);
     await waitH1(page, 'Set up your FleetMirror account');
     check('the invite says whose account it is', (await page.inputValue('#si-account')) === 'dispatch@example.test');
     check('…and asks for a name', await page.locator('#si-name').count() === 1);

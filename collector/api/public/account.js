@@ -37,7 +37,7 @@
    demand, and this is the one of the two every signed-in person opens. */
 import { el, esc, panel, note, tableFrom, dtStr, dateStr, contract } from './ui.js';
 import { who, loadWho, getJson, post, signOut, setLook, toSignIn } from './access.js';
-import { ROLE, ROLES, CLASS, CLASSES, CAP, rank } from './access_model.js';
+import { ROLE, ROLES, CLASS, CLASSES, CAP, CAPS, rank } from './access_model.js';
 
 /* ═════════════════════════ the page ═════════════════════════ */
 
@@ -189,10 +189,13 @@ function seesPanel() {
   p.body.append(dl);
   const caps = a.capsAny || [];
   p.body.append(h('h4', { class: 'acx-h4' }, 'What you can do'));
-  p.body.append(caps.length
-    ? h('ul', { class: 'acx-list' }, caps.map((c) => h('li', null, CAP[c]?.name || c,
-      CAP[c]?.note ? h('span', { class: 'dim' }, ` — ${CAP[c].note}`) : null)))
-    : el('p', 'acx-p dim', who.preview ? 'Nothing: a preview is read-only.' : 'Read only: your roles include no action.'));
+  const list = h('ul', { class: 'acx-list' }, caps.map((c) => h('li', null, CAP[c]?.name || c,
+    CAP[c]?.note ? h('span', { class: 'dim' }, ` — ${CAP[c].note}`) : null)));
+  /* The Owner holds all twenty; the list is folded behind one sentence
+     rather than printed as a wall of bullets nobody needs to read. */
+  if (!caps.length) p.body.append(el('p', 'acx-p dim', who.preview ? 'Nothing: a preview is read-only.' : 'Read only: your roles include no action.'));
+  else if (caps.length === CAPS.length) p.body.append(h('details', { class: 'acx-more' }, h('summary', null, `Every action FleetMirror has — all ${caps.length}`), list));
+  else p.body.append(list);
   return p.panel;
 }
 
@@ -216,7 +219,7 @@ function previewPanel() {
     const ok = await act(btn, msg, () => post('/api/auth/preview', { role: sel.value }));
     if (ok) location.reload();
   });
-  p.body.append(field('Role', sel, desc), h('div', { class: 'acx-actions' }, btn, msg));
+  p.body.append(h('div', { class: 'acx-form' }, field('Role', sel, desc), h('div', { class: 'acx-actions' }, btn, msg)));
   return p.panel;
 }
 

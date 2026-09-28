@@ -56,7 +56,7 @@ import { who, loadWho, getJson, post, signOut, ROLE } from './access.js';
 export function safeBack(raw, origin = 'https://fleetmirror.invalid') {
   const s = String(raw ?? '');
   if (!s.startsWith('/') || s.startsWith('//')) return '/';
-  if (/[\\\u0000- \u007f]/.test(s)) return '/';
+  if (/[\\\u0000-\u0020\u007f]/.test(s)) return '/';
   let base, u;
   try { base = new URL(origin); u = new URL(s, base); } catch { return '/'; }
   if (u.origin !== base.origin) return '/';
@@ -485,7 +485,13 @@ async function stepTotp() {
   }
   const groups = keyGroups(setup.secret);
   const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
-  const open = `<a class="si-btn ${coarse ? '' : 'ghost'}" id="si-otpauth" href="${esc(setup.uri)}" rel="noreferrer">Open in authenticator app</a>`;
+  /* On a phone the link is the way in, so it is the first, filled button.
+     On a laptop it usually opens nothing (no authenticator is registered for
+     otpauth: there), so it is a quiet line under the key, for the reader
+     whose laptop does have one. */
+  const open = coarse
+    ? `<a class="si-btn" id="si-otpauth" href="${esc(setup.uri)}" rel="noreferrer">Open in authenticator app</a>`
+    : `<p class="si-or">Authenticator on this computer? <a class="si-link" id="si-otpauth" href="${esc(setup.uri)}" rel="noreferrer">Open it with the key filled in</a></p>`;
   const box = paint(`${TOTP_HEAD}${note}
     <ol class="si-steps">
       <li>
@@ -497,9 +503,9 @@ async function stepTotp() {
         <p class="si-key" id="si-secret">${groups.map((g) => `<span>${esc(g)}</span>`).join(' ')}</p>
         <div class="si-row">
           <button type="button" class="si-btn ghost" data-act="copykey">Copy key</button>
-          ${coarse ? '' : open}
           <span class="si-status" role="status"></span>
         </div>
+        ${coarse ? '' : open}
       </li>
       <li>
         <span class="si-label">Enter the code the app shows</span>
