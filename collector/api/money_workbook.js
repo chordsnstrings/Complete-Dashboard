@@ -119,7 +119,7 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
   const P = [from, to, fleet, platform, accts];
 
   const [cashRows, ledgerRows, acctRows, byAcct, byDay, payouts, statements, runs, compliance, drivers] = await Promise.all([
-    q(`SELECT tc.platform, tc.fleet_id, tc.external_id, ${ACCT('tc')} AS acct, tc.driver_name, tc.plate,
+    q(`SELECT tc.platform, tc.fleet_id, tc.external_id, ${ACCT('tc')} AS acct, tc.driver_ext_id, tc.driver_name, tc.plate,
               tc.fare, tc.cash_amount, tc.cash_basis,
               ${DUBAI_DAY('tc.requested_at')} AS day, ${DUBAI_AT('tc.requested_at')} AS at
          FROM trip_cash tc
@@ -141,7 +141,7 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
         ORDER BY e.effective_on, e.id`, [from, to, fleet, person?.id ?? null]),
     q(`SELECT platform, external_id, driver_id::text AS person FROM driver_platform_id
         WHERE detached_at IS NULL AND driver_id IS NOT NULL`),
-    q(`SELECT n.platform, n.fleet_id, ${ACCT('n')} AS acct, max(n.driver_name) AS name,
+    q(`SELECT n.platform, n.fleet_id, ${ACCT('n')} AS acct, max(n.driver_ext_id) AS driver_ext_id, max(n.driver_name) AS name,
               count(*)::int AS bookings,
               count(*) FILTER (WHERE n.outcome = 'completed')::int AS completed,
               count(*) FILTER (WHERE n.has_fare)::int AS priced,
@@ -498,7 +498,7 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
   /* ── Every trip ──────────────────────────────────────────────────────── */
   if (everyTrip) {
     const trips = await q(
-      `SELECT ${DUBAI_AT('n.requested_at')} AS at, n.platform, n.fleet_id, n.driver_name, ${ACCT('n')} AS acct,
+      `SELECT ${DUBAI_AT('n.requested_at')} AS at, n.platform, n.fleet_id, n.driver_name, n.driver_ext_id, ${ACCT('n')} AS acct,
               n.plate, n.product, n.payment_type, n.outcome, n.price, n.has_fare, n.distance_km, n.external_id,
               tc.cash_amount, tc.cash_basis
          FROM trip_norm n

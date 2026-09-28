@@ -211,8 +211,11 @@ console.log('\n3 · the sheet, under the skin');
     o.secrow.join(' ') === 'nav settingsLink freshness', o.secrow.join(' '));
   check('…Set up being the same link, relabelled', o.setup.text === 'Set up' && o.setup.href === '#settings',
     JSON.stringify(o.setup));
-  check('the control bar holds the six controls, then the theme, the sentence and the clock note',
-    o.ctl.join(' ') === 'fRange fGrain fPlatform fFleet refreshBtn zenBtn themeBtn fApplies tzNote', o.ctl.join(' '));
+  /* The Excel button and its refusal line joined the bar on 2026-09-28
+     (app.js xlsxButton): the money workbook is "based on the range", so it
+     sits with the range's own controls. */
+  check('the control bar holds the six controls and the workbook, then the theme, the sentence and the clock note',
+    o.ctl.join(' ') === 'fRange fGrain fPlatform fFleet refreshBtn xlsxBtn xlsxMsg zenBtn themeBtn fApplies tzNote', o.ctl.join(' '));
   check('…and it is the one thing that sticks', o.sticky === 'sticky' && o.top === '0px'
     && o.titleSticky === 'static' && o.tabsSticky === 'static', `${o.sticky} ${o.top} ${o.titleSticky} ${o.tabsSticky}`);
   check('the rail is gone and the sheet is shown', o.side === 'none' && o.vis === 'visible', `${o.side} ${o.vis}`);
