@@ -1303,6 +1303,26 @@ function settingsTab(host, ctx) {
       return n;
     }, (v) => `A sensitive grant by the only Owner now waits ${v} hours.`, 'Hours to wait');
 
+  /* The two driver messages by SMS (src/driver_sms.js). Each can be stopped
+     here without a deploy; off also stops the trip messages waiting for 07:00. */
+  const smsSwitch = (key, title, sentence, what) => {
+    const sel = h('select', { class: 'depinput acx-in', 'data-acx': key },
+      h('option', { value: 'on' }, 'On — messages are sent'), h('option', { value: 'off' }, 'Off — nothing is sent'));
+    sel.value = cfg[key] === 'off' ? 'off' : 'on';
+    one(title, key, sel, sentence, () => sel.value,
+      (v) => (v === 'off' ? `${what} are switched off. Nothing more is sent until you switch them on.` : `${what} are on.`), 'Sending');
+  };
+  smsSwitch('sms_cash', 'Driver text: cash to deposit (05:00)',
+    'Every day at 05:00 Dubai, each driver who took cash yesterday is texted: “Please deposit AED X of cash you received '
+    + 'yesterday. Talk to your supervisor on WhatsApp.” X is Uber’s own cash-collected figure and the fare on the other '
+    + 'channels. It waits until yesterday is complete, and gives up at 09:00 if it never is. The Messages page shows '
+    + 'every message and every one held back, with the reason.', 'Cash reminders');
+  smsSwitch('sms_trip', 'Driver text: register a trip',
+    'When a journey with no booking is found, the driver it names is texted: “Please Register your trip from X to Y - '
+    + 'z km with your supervisor - ADMIN.” Only when exactly one driver is named on fresh evidence, the trip is 2 km or '
+    + 'more, no booking is within 30 minutes and both places have a readable name. Found at night, it waits until 07:00.',
+    'Trip messages');
+
   const s = panel('Sessions', null, 'acx-sessions-rule');
   s.body.append(h('p', { class: 'acx-p' }, `A signed-in browser is signed out after ${plural(Math.round((cfg.idle_minutes || 720) / 60), 'hour', 'hours')} without use, `
     + `and after ${plural(cfg.session_days || 7, 'day', 'days')} whatever happens. These two are fixed for now and not changed from here.`));

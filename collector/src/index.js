@@ -14,6 +14,21 @@ import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass
 import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
 import { log } from './log.js';
+import { cashDepositRun, tripRegisterRun, flushQueued, checkDeliveries } from './driver_sms.js';
+import { deliveryReport } from './smsala.js';
+import { getConfig as accessConfig } from '../api/access/service.js';
+
+/* The driver messages by SMS (src/driver_sms.js). Each run is safe to
+   repeat — every decision is a row keyed on what it is about — so a restart
+   near 05:00 re-runs rather than skips or doubles. Logged as counts and
+   reason codes only: never a number, a name or a message. */
+const sq = (t, p) => pool.query(t, p).then((r) => r.rows);
+const smsJob = (name, fn) => () => withPinnedSettings(async () => {
+  const cfg = await accessConfig(pool, { fresh: true });
+  const r = await fn(cfg);
+  const { decisions, ...counts } = r || {};
+  if (r && (r.sent || r.held || r.queued || r.waiting || r.gaveUp || r.due)) log.info('sms', name, counts);
+}).catch((e) => log.error('sms', name, { err: String(e?.message || e).slice(0, 200) }));
 
 const cmd = process.argv[2] || 'schedule';
 
@@ -43,6 +58,18 @@ async function main() {
   if (cmd === 'profile') return uberProfileTick();
   if (cmd === 'audit') return uberAuditTick();
   if (cmd === 'discover') return withPinnedSettings(() => runDiscovery(pool, { log }));
+  /* By hand. `sms-preview` decides without writing or sending anything and
+     prints the counts and reasons — the way to see what 05:00 would do. */
+  if (cmd === 'sms-preview') {
+    return withPinnedSettings(async () => {
+      const cfg = await accessConfig(pool, { fresh: true });
+      const strip = ({ decisions, ...c }) => ({ ...c, decisions: (decisions || []).length });
+      log.info('sms', 'preview cash', strip(await cashDepositRun({ q: sq, cfg, dry: true })));
+      log.info('sms', 'preview trips', strip(await tripRegisterRun({ q: sq, cfg, dry: true })));
+    });
+  }
+  if (cmd === 'sms-cash') return smsJob('cash', (cfg) => cashDepositRun({ q: sq, cfg }))();
+  if (cmd === 'sms-trips') return smsJob('trips', (cfg) => tripRegisterRun({ q: sq, cfg }))();
 
   if (cmd === 'schedule') {
     log.info('scheduler', 'starting', {
@@ -50,6 +77,16 @@ async function main() {
     });
     // CABMAN realtime GPS — every 5 minutes, saved to the database
     cron.schedule(config.cabmanCron, () => cabmanTick());
+    /* DRIVER MESSAGES BY SMS, on Dubai's clock.
+       05:00, then every fifteen minutes until yesterday is complete; 09:00 is
+       the last try and says so. Trip requests twelve minutes after each
+       half-hourly incremental (its reconcile has written the verdicts by
+       then). Messages waiting for 07:00 go out on the five-minute tick. */
+    cron.schedule('*/15 5-8 * * *', smsJob('cash', (cfg) => cashDepositRun({ q: sq, cfg })), { timezone: 'Asia/Dubai' });
+    cron.schedule('0 9 * * *', smsJob('cash-final', (cfg) => cashDepositRun({ q: sq, cfg, final: true })), { timezone: 'Asia/Dubai' });
+    cron.schedule('12,42 * * * *', smsJob('trips', (cfg) => tripRegisterRun({ q: sq, cfg })));
+    cron.schedule('*/5 * * * *', smsJob('flush', (cfg) => flushQueued({ q: sq, cfg })));
+    cron.schedule('*/20 * * * *', smsJob('delivery', () => checkDeliveries({ q: sq, report: deliveryReport })));
     // Uber/FMS live status — lighter interval
     setInterval(() => liveStatusTick(), config.liveStatusSeconds * 1000);
     // historical/aggregate refresh every 30 minutes

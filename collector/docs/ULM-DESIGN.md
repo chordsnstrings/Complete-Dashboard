@@ -956,6 +956,7 @@ full suite pass. The design above is the target; this is the state.
 | Audit | every change and every sensitive read, in a hash chain the Access page can verify | `access_audit` |
 | Fleets | named from the platforms (§3): discovery 10 minutes after the worker starts and nightly at 02:35; the Fleet names page; no fleet name typed into a page | `src/sources/discovery.js`, `src/fleet_names.js`, `sql/schema_v87.sql` |
 | Looks | Arkiv is the desktop default; Classic is a switch on the account page (and `?skin=classic`) | `api/public/access.js inChosenLook` |
+| SMS | a reset code by SMS in place of a reset link (1 per 5 minutes, 3 tries, 10 minutes; resets the password only — two-step still applies); a staff mobile on the account page, set with step-up and a code; the Messages page (`#messages`, subject CT) and its two routes, which answer only a signed-in person in EVERY mode, because they list drivers' numbers beside what they were told; the two driver-message switches in Settings | `api/access/routes.js`, `api/sms_routes.js`, `api/public/messages.js`, `src/driver_sms.js` |
 
 ### Sign-in is OPTIONAL until the Owner makes it Required
 

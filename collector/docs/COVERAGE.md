@@ -4132,6 +4132,23 @@ untouched, and nothing projected is ever added into `accounted`.
       /v2/apps/{id}/deployments {"force_build":true}`. After any deployment,
       read `services[].source_commit_hash` and compare it with the branch
       before believing a single check.
+  26. **An FMS "unauthorized" journey is any journey without a booking.**
+      FMS's seat count is 1 or more on 234,824 of 234,824 journeys, inside
+      bookings and out, so it is not evidence of a rider. Anything that ACTS
+      on a verdict (the driver text) must add its own filter — the strict one
+      in src/driver_sms.js — and never read the verdict as proof.
+  27. **An occupancy_segment row is not a stable key.** Every reconcile pass
+      deletes its window and re-inserts, and FMS's final record starts up to
+      20 minutes off the provisional one. Anything keyed on (plate,
+      started_at) repeats itself: the driver text matches an earlier message
+      by plate-time OVERLAP (±15 min), and a test must re-insert with a new
+      start to prove it — a second source on the same plate is folded by the
+      count-once rule and proves nothing.
+  28. **A driver's phone has no single source.** Five writers, two spellings,
+      29 of 113 active people with two or three numbers, numbers on two
+      people, and an HR employee id filed against another person's account.
+      Take a number only through `phoneFor()` (src/driver_sms.js): Uber's,
+      then HR's, and held — never guessed — on any doubt.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
@@ -7058,10 +7075,11 @@ legal form is dropped. Egari is named by one platform only.
 
 ## SMSala (SMS) — measured 2026-09-28
 
-An SMS gateway, not a data source: the operator wants sign-in codes and
-password-reset codes sent by SMS. Nothing in the product calls it yet; this is
-what one test established. The token lives outside the repo (scratchpad now;
-DigitalOcean as a SECRET when it is wired in).
+An SMS gateway, not a data source. It sends a staff member's reset code (one
+per 5 minutes, 3 tries, 10 minutes' life — the operator: "simply reset code")
+and the two driver messages below ("Driver messages by SMS"). src/smsala.js is
+the only file that calls it. The token is `SMSALA_API_TOKEN`, a SECRET
+environment variable on both DigitalOcean services, never in the repo.
 
 - **Base URL** `https://api2.smsala.com`. Reference: the vendor's PDF
   (smsala.com/wp-content/uploads/api-integration-documentation-for-smsala.pdf).
@@ -7102,3 +7120,79 @@ DigitalOcean as a SECRET when it is wired in).
   came back with an empty body; retry rather than read absence as failure.
 - **Delivered in two to three seconds** to a UAE mobile as type 3 (OTP),
   from `VOLT` and from `ECOSINE`.
+
+## Driver messages by SMS — built 2026-09-28
+
+Two texts, both asked for in the operator's own words (src/driver_sms.js;
+the Messages page, `#messages`; switches in Access → Settings):
+
+- **05:00 Dubai, cash to deposit:** "Please deposit AED X of cash you
+  received yesterday. Talk to your supervisor on WhatsApp."
+- **A journey with no booking:** "Please Register your trip from X to Y -
+  z km with your supervisor - ADMIN." — a request to register it, never the
+  word "unauthorized" (the operator: "NOT that it was unauthorized").
+
+Every decision is one row in `sms_outbox` (sql/schema_v88.sql), sent or held,
+with a unique `dedupe_key`, so every run is safe to repeat. What was measured
+on production before the rules were written (read-only, 2026-09-28):
+
+- **The cash figure.** `trip_cash` (sql/schema_v80.sql) is the one
+  definition: Uber's own `cash_collected` where the payments report has it,
+  the fare elsewhere. On 2026-09-27 the 73 Uber cash trips had fares of
+  4,446.67 and cash collected of 5,001.96 — **11.1% above the fare, on 73 of
+  73 trips** (62 differ by 5.00 + n×4.20: a booking fee plus toll gates). The
+  driver holds what the rider handed over, so the message uses cash_collected.
+  `/api/driver/register` for the same day agreed with the trip-level sum for
+  every person.
+- **When yesterday is complete.** Uber prices trips only on the catch-up
+  (21:00 UTC = 01:00 Dubai) and the Sunday backfill; on the day measured the
+  catch-up finished at 01:18 Dubai. Weekdays were not observable (the running
+  week can be throttled). So the run asks every 15 minutes from 05:00 and
+  sends the moment (a) every fleet with Uber cash yesterday has an ok
+  catch-up that finished after the day ended and (b) no Uber cash trip is
+  without Uber's figure; at 09:00 it gives up for the day and says so.
+- **Placing the money on a person.** All 53 of yesterday's cash accounts sat
+  on the spine as 49 people (4 with two accounts). 5 accounts belonged to the
+  identity register's PENDING pairs — hence `HELD_IDS` below.
+- **The phone number.** No code designated an authoritative phone. Over the 7
+  days 2026-09-21..27, 113 people had a trip: 109 have a number, all valid
+  9715… mobiles; **29 have more than one different number** (24 two, 5
+  three); 6 numbers are each on two people. HR and Uber disagree on the same
+  account 29 times in 112. The operator's ruling: **Uber's number wins, HR's
+  second.** Held, never guessed: two different Uber numbers (or two HR ones),
+  no number, a number also on another person's record or on an HR employee
+  matched to nobody, and any account in a REFUSED or PENDING pair of
+  `api/identity_map.js` — REFUSED #1's spine person holds a Yango account
+  whose number is the OTHER man's.
+- **Who a journey is pinned on.** Nothing is stored: the attribution ladder
+  runs at read time (api/unauthorized_attribution.js). Last 8 days, 274 rides
+  counted once: bracketed 35, last_trip 150 (110 within 24.9 h), sole
+  custodian 53, ambiguous 28, unknown 8. The operator chose the STRICT filter:
+  exactly one candidate on bracketed, sole-custodian, or last-trip ≤ 24.9 h
+  (`FRESH_BAND_MIN` 1494); 2 km or more; no booking within 30 minutes;
+  both ends with a readable place name; no clock skew; not a CABMAN reading on
+  a car carrying both trackers; every booking channel the car used in 14 days
+  collected for its fleet after the journey; at most 3 per person per day.
+- **Place names.** No geocoder; the 0.005° grid names cells from past trip
+  addresses. Of 548 ends: 317 neighbourhood names, 102 street codes
+  (`93 D65`, `16 9 St`), 76 road names, 30 comma-joined strings.
+  `readablePlace()` takes the first comma part and refuses a name that does
+  not start with a letter.
+- **Backlog.** 1,221 unauthorized rides were on file (2026-08-21 onwards).
+  `sms_state.trip_since` is set when schema_v88 is applied and only journeys
+  that END after it are ever texted, so go-live texts nobody about August.
+- **Night.** 78 of 274 (28%) verdicts first appear between 23:00 and 07:00.
+  Found then, a trip message is queued with `not_before` = the next 07:00,
+  and the 07:00 flush re-reads the journey first: if a later pass found the
+  booking, it is held as `no_longer_unauthorized` instead of sent.
+- **Cost.** 0.095 per part; all 266 fully-named messages measured were
+  GSM-7 at 90–144 characters, one part each.
+
+The routes (`GET /api/sms/log`, `GET /api/sms/preview`) answer only a
+signed-in person, whatever the sign-in mode: the research counted 13 CT
+routes that already serve a phone to an anonymous caller in open mode, and
+these two would have added every driver's number beside what they were told.
+
+### Traps this added to the list
+
+26, 27 and 28 in "Traps that have cost time more than once".

@@ -620,7 +620,7 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       users, teams, grants, requests, devices, owners: owners.map((o) => o.id), fleets,
       roles: [...ROLES.map((r) => ({ ...r, builtin: true })), ...Object.values(custom)],
       classes: CLASSES, caps: CAPS,
-      config: { mode: cfg.mode, mfa: cfg.mfa, cash_stepup_aed: cfg.cash_stepup_aed,
+      config: { mode: cfg.mode, mfa: cfg.mfa, cash_stepup_aed: cfg.cash_stepup_aed, sms_cash: cfg.sms_cash, sms_trip: cfg.sms_trip,
         idle_minutes: cfg.idle_minutes, session_days: cfg.session_days,
         single_owner_delay_hours: cfg.single_owner_delay_hours },
       me: { id: fm.user.id, owner: isOwner(fm), levels: fm.access.levels, caps: fm.access.caps, scope: fm.access.scope },
@@ -1015,6 +1015,13 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       const n = Number(req.body.single_owner_delay_hours);
       if (!Number.isFinite(n) || n < 0 || n > 168) return fail(res, 400, 'bad_hours', 'Enter 0 to 168 hours.');
       changes.single_owner_delay_hours = n;
+    }
+    /* The two driver messages by SMS (src/driver_sms.js): on or off, each.
+       Off stops new messages AND the ones waiting for 07:00. */
+    for (const k of ['sms_cash', 'sms_trip']) {
+      if (req.body?.[k] === undefined) continue;
+      if (!['on', 'off'].includes(req.body[k])) return fail(res, 400, 'bad_switch', 'Choose on or off.');
+      changes[k] = req.body[k];
     }
     for (const [k, v] of Object.entries(changes)) await svc.setConfig(db, k, v, fm.user.id);
     await svc.getConfig(db, { fresh: true });

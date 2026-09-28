@@ -81,6 +81,7 @@ import { renderCompare } from './compare.js';
 import { renderSupply } from './supply.js';
 import { renderOptimise } from './optimise.js';
 import { renderFeeds } from './feeds.js';
+import { renderMessages } from './messages.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -480,6 +481,10 @@ const VIEWS = [
   /* Because the fold is now partly a RULE, and a rule that joins two humans
      has to be readable by the person who knows them. Under People rather than
      under Sources: it is a claim about who somebody is, not about a feed. */
+  /* The texts drivers are sent on their own — the 05:00 cash reminder and
+     the request to register a trip — and every one held back, with why.
+     Under People: each row is a message to a person. */
+  { id: 'messages', label: 'Driver messages', ic: '✉', sec: 'People', sub: 'Every text sent to a driver — the 05:00 cash reminder and the request to register a trip — and every one held back, with the reason' },
   { id: 'identity', label: 'One person, two records', ic: '⧉', sec: 'People', sub: 'Records the roster proves belong to the same driver, and the evidence for each' },
   /* Beside it, because it is the other half of the same subject: that page
      shows what a rule PROVED, this one asks about what it cannot. */
@@ -2896,6 +2901,7 @@ V.capacity = async (root) => renderCapacity(root);
 V.trips = async (root) => renderTrips(root);
 V.receipts = async (root) => renderReceipts(root);
 V.feeds = async (root) => renderFeeds(root);
+V.messages = async (root) => renderMessages(root, state.param, state.sub);
 V.payouts = async (root) => renderPayouts(root);
 V.identity = async (root) => renderIdentity(root);
 V.provenance = async (root) => renderProvenance(root);

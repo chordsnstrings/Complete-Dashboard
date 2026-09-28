@@ -9,6 +9,8 @@ import { pool, migrate } from '../src/db.js';
 import { config } from '../src/config.js';
 import { pgTx } from './tx.js';
 import { fleetNameRoutes } from './fleet_names_routes.js';
+import { smsRoutes } from './sms_routes.js';
+import { getConfig as accessConfig } from './access/service.js';
 import { importRoutes } from './import_routes.js';
 /* The operator's HR roster export: an admin-gated preview and commit, and a
    read every page may use. hrForCompliance is used INSIDE the region
@@ -6827,6 +6829,10 @@ accessRoutes(app, { db: pool, layer: access, wrap, log });
 /* Fleets named from the platforms (ULM-DESIGN §3): the names each platform
    gives, the accounts behind them, and the changes waiting for an Owner. */
 fleetNameRoutes(app, { q, wrap, db: pool, tx: pgTx(pool), log });
+/* Driver messages by SMS: what was texted and held back, and what the next
+   run would decide (api/sms_routes.js; the jobs are src/driver_sms.js). */
+const smsAccess = { getConfig: () => accessConfig(pool) };
+smsRoutes(app, { q, wrap, access: smsAccess });
 /* ── the export, and what an anonymous GET may carry away ──────────────────
    MEASURED ON PRODUCTION WITH CURL AND NO CREDENTIALS, 2026-09-05:
    GET /api/export/trips.csv?grain=trip&from=2025-09-05&to=2026-09-05 answered

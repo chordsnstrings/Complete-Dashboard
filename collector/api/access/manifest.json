@@ -5781,6 +5781,90 @@
  },
  {
   "method": "GET",
+  "path": "/api/sms/log",
+  "subject": "CT",
+  "carries": [
+   "ACCUSE",
+   "CT",
+   "ID",
+   "SYS"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].person_name",
+     "rows[].user_email"
+    ]
+   },
+   {
+    "class": "ACCUSE",
+    "paths": [
+     "rows[].message_text",
+     "rows[].detail"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/sms_routes.js: sms_outbox \u2014 every driver message and code sent, queued, failed or held with its reason. destination is a mobile (CT, the subject); message_text is what was texted (an amount of cash, a route). Refuses a caller who is not signed in, whatever the mode."
+ },
+ {
+  "method": "GET",
+  "path": "/api/sms/preview",
+  "subject": "CT",
+  "carries": [
+   "ACCUSE",
+   "CASH",
+   "CT",
+   "ID",
+   "LOC",
+   "SYS"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "decisions[].person"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "decisions[].amount"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "decisions[].from",
+     "decisions[].to_place"
+    ]
+   },
+   {
+    "class": "ACCUSE",
+    "paths": [
+     "decisions[].tier",
+     "decisions[].plate"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/sms_routes.js: a dry run of src/driver_sms.js cashDepositRun / tripRegisterRun \u2014 decides now, writes and sends nothing. decisions[].to is already masked to the last two digits. Refuses a caller who is not signed in."
+ },
+ {
+  "method": "GET",
   "path": "/api/status",
   "subject": "SYS",
   "carries": [

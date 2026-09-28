@@ -21,6 +21,10 @@ export const DEFAULTS = Object.freeze({
   idle_minutes: 720,       // 12 h without a request ends a session
   session_days: 7,         // absolute lifetime of a session
   single_owner_delay_hours: 24, // a sensitive grant by the only Owner waits this long once sign-in is required
+  /* The two driver messages by SMS. On from the first night: the operator's
+     ruling, 2026-09-28 ("live immediately"), with this switch as the brake. */
+  sms_cash: 'on',          // 05:00 Dubai: "Please deposit AED X of cash you received yesterday…"
+  sms_trip: 'on',          // an unexplained journey: "Please Register your trip from X to Y - z km…"
 });
 
 let accessVersion = 1;

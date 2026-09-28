@@ -172,7 +172,7 @@ export const VIEW_SUBJECT = Object.freeze({
      places, Trips is bookings, Unexplained trips names a likely culprit. */
   'driver/territory': 'LOC', 'driver/quality': 'COND', 'driver/trips': 'BK', 'driver/unauthorized': 'ACCUSE',
   'vehicle/compliance': 'VEH', drivers: 'ID', feeds: 'VEH', finance: 'REV', forecast: 'BK', 'hr-roster': 'HR', identity: 'MRG',
-  'import-sheet': 'CASH', insights: 'ID', live: 'LOC', 'low-performers': 'ID', map: 'LOC', notfound: 'SYS',
+  'import-sheet': 'CASH', insights: 'ID', live: 'LOC', 'low-performers': 'ID', map: 'LOC', messages: 'CT', notfound: 'SYS',
   'online-time': 'ID', opening: 'CASH', optimise: 'BK', overview: 'BK', payouts: 'PAY', performance: 'ID',
   performer: 'ID', platforms: 'BK', 'platforms/funnel': 'COND', 'platforms/tiers': 'BK', playbook: 'REV',
   policy: 'CASH', property: 'REV', 'property/drivers': 'ID', 'property/guests': 'PAX', provenance: 'REV',

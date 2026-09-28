@@ -4050,3 +4050,21 @@ that found it.
 anonymous visitor keeps every legacy page and write; one-fleet readers are
 refused on 77 routes that mix fleets; coverage days and collector status on
 `param` routes answer for either fleet.
+
+## SMS: reset code and the two driver messages — 2026-09-28
+
+Asked for by the operator on 2026-09-28: a reset code by SMS instead of a
+reset link ("1 every 5 minutes 3 retries"), a text at 05:00 telling each
+driver the cash to deposit, and a text asking a driver to register a journey
+that has no booking. Measurements and rules: `docs/COVERAGE.md` "SMSala
+(SMS)" and "Driver messages by SMS". **deployed** and **proven** are filled
+when production has been measured, not before.
+
+| # | what | test (revert fails it) | written | committed | deployed | proven |
+|---|---|---|---|---|---|---|
+| SMS-1 | SMSala client: array body, 200-with-refusal read as refusal, 19-digit id kept as text, UAE-mobile normaliser that pads nothing; `sms_outbox` (schema_v88) | smsala (36) | ✓ | ✓ 1ca4285 | | ✓ a live send from ECOSINE delivered in 3 s |
+| SMS-2 | reset code: 6 digits, HMAC bound to user and purpose, 10 minutes, 3 tries, 1 per 5 minutes; answered before any lookup; staff mobile set with step-up and a code | access_core §9g, signin_page, access_pages | ✓ | ✓ 6734451 | | |
+| SMS-3 | whose number: Uber's, then HR's; held on two numbers, a shared number, an HR employee matched to nobody carrying it, a REFUSED/PENDING identity pair | driver_sms §1 (phoneFor reversions: 3 and 2 fail) | ✓ | | | |
+| SMS-4 | 05:00 cash: Uber's cash_collected, not the fare; waits for the catch-up and every Uber figure, gives up at 09:00; channel-not-collected held; no AED 0.00; idempotent; switch | driver_sms §2 (fare 2, catch-up 5, channel 1 fail) | ✓ | | | |
+| SMS-5 | trip request: strict filter, watermark (no backlog), plate-overlap dedupe, 07:00 hold with re-check, 3 per person per day, switch | driver_sms §3 (overlap 3, night 5, re-check 3, watermark 4 fail) | ✓ | | | |
+| SMS-6 | Messages page (`#messages`, subject CT, sign-in only in every mode); switches in Access → Settings | driver_sms §4, endpoint_coverage | ✓ | | | |

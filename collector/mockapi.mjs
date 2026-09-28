@@ -2286,6 +2286,51 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
    reported, an Egari car with no CABMAN account (but FMS seat counts), two drivers assigned
    in Uber, a custody driver, a driver with no phone, and a car nobody is
    known to drive — so every branch of the cell renderers is on screen. */
+/* The Messages page (api/sms_routes.js). Synthetic people and numbers only:
+   a real driver's mobile never enters a fixture. */
+const SMS_WHY = {
+  number_shared: 'This number is also on another person’s record, so it may not be theirs.',
+  channel_not_collected: 'A booking channel this driver works on did not collect yesterday, so their cash may be missing trips.',
+  driver_not_certain: 'The evidence does not name exactly one driver on fresh information.',
+};
+app.get('/api/sms/log', (_, r) => {
+  const at = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+  const row = (id, o) => ({ id, kind: 'cash_deposit', status: 'sent', hold_reason: null, person_id: id, person_name: `Test Driver ${id}`,
+    user_id: null, user_email: null, fleet_id: 'ecosine', destination: `97150000000${id}`, sender: 'ECOSINE',
+    message_text: 'Please deposit AED 110.50 of cash you received yesterday. Talk to your supervisor on WhatsApp.',
+    not_before: null, provider_status: 'Delivered', cost: 0.095, error: null, plate: null, trip_start: null, trip_end: null,
+    business_day: '2026-08-04', detail: { amount: 110.5, source: 'uber' }, created_at: at(id), sent_at: at(id), why: null, ...o });
+  r.json({
+    rows: [
+      row(1, { kind: 'cash_run', person_id: null, person_name: null, destination: null, message_text: null, status: 'sent',
+        detail: { finished: true, people: 3, sent: 1, held: 2, holds: { number_shared: 1, channel_not_collected: 1 }, unplaced_trips: 0, unplaced_aed: 0 } }),
+      row(2, {}),
+      row(3, { status: 'held', hold_reason: 'number_shared', why: SMS_WHY.number_shared, provider_status: null, cost: null, sent_at: null }),
+      row(4, { kind: 'trip_register', status: 'queued', message_text: 'Please Register your trip from Al Garhoud to Deira - 12 km with your supervisor - ADMIN.',
+        plate: 'A12345', trip_start: at(6), trip_end: at(5.4), not_before: at(-4), provider_status: null, cost: null, sent_at: null,
+        detail: { source: 'fms_trip', tier: 'bracketed', km: 12, phone_source: 'uber' } }),
+      row(5, { kind: 'reset_code', person_id: null, person_name: null, user_id: 1, user_email: 'owner@example.test', message_text: null,
+        detail: null, business_day: null }),
+    ],
+    last7days: { sent: 2, held: 1, queued: 1, failed: 0, cost: 0.19 },
+    switches: { sms_cash: 'on', sms_trip: 'on' },
+    hold_why: SMS_WHY,
+  });
+});
+app.get('/api/sms/preview', (req, r) => {
+  if (req.query.kind === 'trip') {
+    return r.json({ kind: 'trip', candidates: 2, sent: 0, queued: 0, held: 1, skipped: 0, holds: { driver_not_certain: 1 },
+      decisions: [
+        { plate: 'A12345', started_at: '2026-08-05T02:00:00Z', tier: 'bracketed', hold: null, person: '2', name: 'Test Driver 2', to: '•••••••••02', km: 12, from: 'Al Garhoud', to_place: 'Deira', waits_until_7: false, why: null },
+        { plate: 'B67890', started_at: '2026-08-05T03:00:00Z', tier: 'ambiguous', hold: 'driver_not_certain', person: null, name: null, to: null, km: 7, from: 'Deira', to_place: 'Al Barsha 1', waits_until_7: false, why: SMS_WHY.driver_not_certain },
+      ], took_ms: 40, note: 'A dry run: decided now, nothing written, nothing sent. The real run can differ by the time it is due.' });
+  }
+  return r.json({ kind: 'cash', day: '2026-08-04', people: 2, sent: 0, held: 1, holds: { channel_not_collected: 1 }, unplaced_trips: 0, unplaced_aed: 0,
+    decisions: [
+      { person: '2', name: 'Test Driver 2', amount: 110.5, hold: null, to: '•••••••••02', source: 'uber', down: [], why: null },
+      { person: '3', name: 'Test Driver 3', amount: 35, hold: 'channel_not_collected', to: '•••••••••03', source: 'hr', down: ['bolt:ecosine'], why: SMS_WHY.channel_not_collected },
+    ], took_ms: 30, note: 'A dry run: decided now, nothing written, nothing sent. The real run can differ by the time it is due.' });
+});
 app.get('/api/vehicles/feeds', (_, r) => {
   const now = Date.now();
   const ago = (min) => new Date(now - min * 60e3).toISOString();
