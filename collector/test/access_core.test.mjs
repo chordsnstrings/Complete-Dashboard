@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { SCHEMA_FILES } from './schema.mjs';
 import { accessLayer } from '../api/access/middleware.js';
 import { accessRoutes } from '../api/access/routes.js';
+import { FOUR_EYES } from '../api/access/manifest.js';
 import * as svc from '../api/access/service.js';
 import { computeAccess } from '../api/access/principal.js';
 import { shapeBody, parsePath, transform } from '../api/access/shape.js';
@@ -25,6 +26,10 @@ import { responseCache } from '../api/cache.js';
 import { ROLE, withinCeiling, maskValue } from '../api/public/access_model.js';
 
 let pass = 0, fail = 0;
+/* Key order is not content: jsonb returns an object's keys in its own order. */
+const canon = (v) => (v == null || typeof v !== 'object' ? JSON.stringify(v ?? null)
+  : Array.isArray(v) ? `[${v.map(canon).join(',')}]`
+    : `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}`);
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
 /* ══ 1. crypto ═══════════════════════════════════════════════════════════
@@ -114,6 +119,9 @@ const MANIFEST = {
     fields: [], whole: [], fleet: 'param', fleetRows: [], fleetKey: '', cap: null },
   'POST /api/t/cash': { method: 'POST', path: '/api/t/cash', subject: 'CASH', carries: ['CASH'], grain: 'none',
     fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: 'cash.record' },
+  'POST /api/ledger/import/commit': { method: 'POST', path: '/api/ledger/import/commit', subject: 'CASH', carries: ['CASH', 'ID'],
+    grain: 'none', fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: 'cash.import.commit',
+    fourEyes: FOUR_EYES['POST /api/ledger/import/commit'] },
 };
 const lookup = (m, p) => {
   if (p.startsWith('/api/auth/') || p.startsWith('/api/access/')) return { self: true };
@@ -135,6 +143,8 @@ app.get('/api/t/cash', (req, res) => res.json([{ name: 'Test Driver A', balance:
 app.get('/api/t/kpis', (req, res) => { kpiCalls += 1; res.json({ fleet: req.query.fleet || 'all', trips: 5 }); });
 let cashWrites = 0;
 app.post('/api/t/cash', (req, res) => { cashWrites += 1; res.json({ ok: true }); });
+const imported = [];
+app.post('/api/ledger/import/commit', (req, res) => { imported.push(req.body); res.json({ ok: true, wrote: req.body.rows.length }); });
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: 'internal', detail: String(e) }));
 accessRoutes(app, { db, layer, wrap });
 const server = app.listen(0);
@@ -216,9 +226,10 @@ const people = {};
   const again = await browser().post('/api/auth/link/accept', { token: clk.r.json.link.split('invite=')[1], password: 'another long pass here' });
   check('…which works once', again.status === 404);
   await mk('dispatch@example.test', 'DSP');
+  await mk('finance@example.test', 'FIN');
   await mk('ops-egari@example.test', 'OPS', { fleets: ['egari'] });
   await mk('access@example.test', 'ACC');
-  for (const r of ['CLK', 'DSP', 'OPS', 'ACC']) {
+  for (const r of ['CLK', 'DSP', 'OPS', 'ACC', 'FIN']) {
     const s = await signIn(people[r].b, people[r].email, people[r].password);
     check(`${r} signs in`, s.status === 200, JSON.stringify(s.json));
   }
@@ -294,6 +305,35 @@ console.log('\n9. actions: capability, CSRF, preview');
   await owner.post('/api/auth/preview', { role: null });
   const back = await owner.get('/api/t/people');
   check('ending the preview restores the Owner’s view', back.json[0].phone === '0500000001');
+}
+
+console.log('\n9b. four-eyes: a cash sheet is proposed by one person and committed by another');
+{
+  /* REVERSION: make takeProposal skip the prepared_by check — "the preparer
+     cannot commit their own" fails; drop `req.body = { ...p.payload }` — "the
+     committer's own rows are ignored" fails. */
+  const rows = [{ person_id: 1, type_code: 'cash_in', amount: 50 }, { person_id: 2, type_code: 'cash_in', amount: 70 }];
+  const prop = await people.CLK.b.post('/api/ledger/import/commit', { batch: 'test-batch-1', rows });
+  check('the cash desk\'s commit becomes a proposal, and nothing is written', prop.status === 202 && prop.json.proposal && imported.length === 0,
+    JSON.stringify(prop.json));
+  const selfCommit = await people.CLK.b.post('/api/ledger/import/commit', { proposal: prop.json.proposal });
+  check('the cash desk cannot commit (no commit action)', selfCommit.status === 403 && imported.length === 0);
+  const s1 = await people.FIN.b.post('/api/auth/stepup', { password: people.FIN.password });
+  check('the Finance manager re-confirms', s1.status === 200);
+  const sneaky = await people.FIN.b.post('/api/ledger/import/commit', { proposal: prop.json.proposal,
+    rows: [{ person_id: 9, type_code: 'cash_in', amount: 99999 }] });
+  check('the Finance manager commits the stored proposal', sneaky.status === 200 && imported.length === 1, JSON.stringify(sneaky.json));
+  check('…and the committer\'s own rows are ignored: exactly what was stored is committed',
+    canon(imported[0].rows) === canon(rows) && imported[0].batch === 'test-batch-1', canon(imported[0].rows));
+  const again = await people.FIN.b.post('/api/ledger/import/commit', { proposal: prop.json.proposal });
+  check('a proposal is committed once', again.status === 409 && imported.length === 1);
+  const own = await people.FIN.b.post('/api/ledger/import/commit', { batch: 'test-batch-2', rows });
+  const ownCommit = await people.FIN.b.post('/api/ledger/import/commit', { proposal: own.json.proposal });
+  check('the preparer cannot commit their own', ownCommit.status === 403 && ownCommit.json.error === 'four_eyes' && imported.length === 1);
+  const list = await people.FIN.b.get('/api/access/proposals');
+  check('Approvals lists it, marked as the Finance manager\'s own', list.json.proposals.some((p) => p.id === own.json.proposal && p.mine && !p.canCommit));
+  const dsp = await people.DSP.b.get('/api/access/proposals');
+  check('a Dispatcher sees no cash proposals', dsp.json.proposals.length === 0);
 }
 
 console.log('\n10. sign-in required');

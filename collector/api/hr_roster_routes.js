@@ -27,6 +27,7 @@
    test harness — which mounts route modules with a fixed dependency set that
    has no gate in it — runs the real gate rather than none. The GET is not
    gated: the operator's decision is that everybody sees expiry dates. */
+import { signedInActor } from './access/actor.js';
 import express from 'express';
 import { adminGate } from './admin_gate.js';
 import { previewOf, commitRoster, rosterView } from './hr_roster.js';
@@ -66,7 +67,7 @@ export function hrRosterRoutes(app, { q, wrap, tx, requireAdmin = null }) {
     if (!bytes) return res.status(400).json({ ok: false, refusals: [NO_FILE], written: false });
     /* WHO. Recorded on the upload and shown in the history — the product has
        no sign-in, so the page asks and the route refuses a blank. */
-    const by = String(req.query.by || '').trim();
+    const by = signedInActor(req) || String(req.query.by || '').trim();
     if (by.length < 2 || by.length > 60) {
       return res.status(400).json({ ok: false, written: false,
         refusals: ['say who is uploading this (2 to 60 characters) — it is recorded against the upload'] });

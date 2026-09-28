@@ -13,6 +13,7 @@
 import * as svc from './service.js';
 import { appendAudit, verifyChain } from './audit.js';
 import { covers } from './principal.js';
+import { FOUR_EYES } from './manifest.js';
 import {
   verifyPassword, passwordProblem, newTotpSecret, verifyTotp, otpauthUri, seal, unseal,
   newRecoveryCodes, tokenHash, safeEqual, newToken,
@@ -836,6 +837,52 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       [id, fm.user.id, JSON.stringify(decisions)]);
     layer.cache.clear();
     await audit(req, 'access.review_attested', 'review', id, { removed: decisions.filter((x) => x.keep === false).length });
+    return res.json({ ok: true });
+  }));
+
+  /* ── four-eyes proposals (api/access/middleware.js propose/takeProposal) ── */
+  const proposalVisible = (fm, p) => {
+    const f = FOUR_EYES[p.kind];
+    if (!f) return false;
+    const caps = fm.access.capsAny || [];
+    if (!(caps.includes(f.propose) || caps.includes(f.commit))) return false;
+    /* The rows are cash and people: only a reader who could see them may. */
+    return (f.commitNeeds || []).every((c) => (fm.access.levelsAny?.[c] || '') !== '') || Number(p.prepared_by) === fm.user.id;
+  };
+  app.get('/api/access/proposals', wrap(async (req, res) => {
+    const fm = me(req, res);
+    if (!fm) return undefined;
+    noStore(res);
+    const { rows } = await db.query(
+      `SELECT p.id, p.kind, p.summary, p.payload, p.prepared_by, p.prepared_at, p.status, p.decided_by, p.decided_at, p.result,
+              u.email AS prepared_email, u.name AS prepared_name, d.email AS decided_email
+         FROM access_proposal p LEFT JOIN access_user u ON u.id = p.prepared_by LEFT JOIN access_user d ON d.id = p.decided_by
+        WHERE p.status = 'open' OR p.prepared_at > now() - interval '30 days'
+        ORDER BY p.prepared_at DESC LIMIT 200`);
+    const out = rows.filter((p) => proposalVisible(fm, p)).map((p) => {
+      const f = FOUR_EYES[p.kind];
+      return { ...p, id: Number(p.id), prepared_by: Number(p.prepared_by), decided_by: p.decided_by == null ? null : Number(p.decided_by),
+        canCommit: p.status === 'open' && Number(p.prepared_by) !== fm.user.id && (fm.access.capsAny || []).includes(f.commit),
+        mine: Number(p.prepared_by) === fm.user.id };
+    });
+    return res.json({ proposals: out });
+  }));
+  app.post('/api/access/proposals/:id/decline', wrap(async (req, res) => {
+    const fm = me(req, res, { write: true });
+    if (!fm) return undefined;
+    if (fm.access.preview) return fail(res, 403, 'preview', 'You are previewing a role, which is read-only.');
+    const id = Number(req.params.id);
+    const { rows } = await db.query('SELECT * FROM access_proposal WHERE id = $1', [id]);
+    const p = rows[0];
+    if (!p || p.status !== 'open') return fail(res, 404, 'not_found', 'No open proposal with that number.');
+    const f = FOUR_EYES[p.kind];
+    const mine = Number(p.prepared_by) === fm.user.id;
+    if (!mine && !(fm.access.capsAny || []).includes(f?.commit)) return fail(res, 403, 'not_allowed', 'Only the preparer or someone who may commit it can decline it.');
+    const reason = String(req.body?.reason || '').trim();
+    if (reason.length < MIN_REASON) return fail(res, 400, 'reason', 'Say why.');
+    await db.query(`UPDATE access_proposal SET status = 'declined', decided_by = $2, decided_at = now(), result = $3 WHERE id = $1 AND status = 'open'`,
+      [id, fm.user.id, JSON.stringify({ reason, withdrawn: mine })]);
+    await audit(req, mine ? 'proposal.withdrawn' : 'proposal.declined', 'proposal', id, { reason });
     return res.json({ ok: true });
   }));
 }

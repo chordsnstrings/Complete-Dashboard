@@ -147,8 +147,10 @@ check('the pre-paint script reads ?skin', /get\('skin'\)/.test(prePaint));
 check('…remembers it under a key per build: fleet.skin (desktop), fleet.skin.phone (phone)',
   /var skinKey = phone \? 'fleet\.skin\.phone' : 'fleet\.skin';/.test(prePaint)
   && /localStorage\.setItem\(skinKey, sk\)/.test(prePaint) && /localStorage\.removeItem\(skinKey\)/.test(prePaint));
-check('…with no choice, the phone is the Arkiv skin and the desktop the old one',
-  /if \(sk !== 'arkiv' && sk !== 'classic'\) sk = phone \? 'arkiv' : 'classic';/.test(prePaint));
+/* The operator, 2026-09-28: "let's do arkiv as the default, and let users
+   switch to classic" — both builds, where the phone alone was the default. */
+check('…with no choice, both builds are the Arkiv skin',
+  /if \(sk !== 'arkiv' && sk !== 'classic'\) sk = 'arkiv';/.test(prePaint));
 check('…decided AFTER which build this is, which the default depends on',
   prePaint.indexOf("r.dataset.ui = phone ? 'phone' : 'desktop';") > 0
   && prePaint.indexOf("r.dataset.ui = phone ? 'phone' : 'desktop';") < prePaint.indexOf('var skinKey'));
@@ -277,7 +279,11 @@ console.log('\n3 · the switch, in a browser');
   await page.evaluate(() => localStorage.clear());
   await page.goto(`${base}/?ui=desktop#drivers`, { waitUntil: 'domcontentloaded' });
   const desk = await read();
-  check('the desktop, nothing stored: still the old skin', desk.ui === 'desktop' && desk.skin === null, JSON.stringify(desk));
+  check('the desktop, nothing stored: the Arkiv skin too (operator, 2026-09-28)', desk.ui === 'desktop' && desk.skin === 'arkiv', JSON.stringify(desk));
+  await page.goto(`${base}/?ui=desktop&skin=classic#drivers`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${base}/?ui=desktop#drivers`, { waitUntil: 'domcontentloaded' });
+  const deskClassic = await read();
+  check('…and a desktop reader who chose Classic keeps it', deskClassic.skin === null && deskClassic.desk === 'classic', JSON.stringify(deskClassic));
   await ctx.close();
 }
 

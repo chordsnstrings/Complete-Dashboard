@@ -62,11 +62,13 @@
      be shown it. The stylesheet is written in by the second script below,
      after app.css.
 
-     THE DEFAULT IS PER BUILD. The operator, 2026-09-24: "make the redesign
-     default for phone". So with no choice made, the PHONE build is the Arkiv
-     skin (its redesigned PWA, m/arkiv-m.css) and the DESKTOP build is still
-     the old skin until the operator flips it (docs/UI-REDESIGN-PLAN.md §3,
-     STEP 5). Which build this is was decided just above, before the skin.
+     THE DEFAULT IS ARKIV, ON BOTH BUILDS. The operator, 2026-09-24: "make
+     the redesign default for phone"; then 2026-09-28: "let's do arkiv as the
+     default, and let users switch to classic" — the desktop flip that
+     docs/UI-REDESIGN-PLAN.md §3 STEP 5 was waiting for. A reader who stored
+     "classic" keeps it; the switch is on the account page and the account
+     menu, and a signed-in person's choice follows them to any browser
+     (api/public/access.js setLook).
 
      And each build REMEMBERS its own choice: fleet.skin.phone for the phone,
      fleet.skin for the desktop, as before. One shared key would have kept the
@@ -82,7 +84,7 @@
     else if (sk === 'auto') localStorage.removeItem(skinKey);
     if (sk !== 'arkiv' && sk !== 'classic') sk = localStorage.getItem(skinKey);
   } catch (e) { /* private mode: the choice just does not stick */ }
-  if (sk !== 'arkiv' && sk !== 'classic') sk = phone ? 'arkiv' : 'classic';
+  if (sk !== 'arkiv' && sk !== 'classic') sk = 'arkiv';
   if (sk === 'arkiv') r.dataset.skin = 'arkiv';
   /* The theme, before the stylesheet, for BOTH builds — the key the desktop
      button writes, so a reader who set light on their laptop gets light on the
@@ -126,6 +128,7 @@
 <link rel="preload" href="/fonts/karla-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/access.css">
 <!-- The Arkiv skin, AFTER app.css and only when the script above stamped it.
      document.write, not appendChild, and on purpose: a stylesheet the PARSER
      inserts blocks the first paint, and one a script appends does not — the

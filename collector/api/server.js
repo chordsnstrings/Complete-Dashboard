@@ -185,6 +185,30 @@ app.use(compression({
    address recorded as fact. */
 app.set('trust proxy', 1);
 
+/* SECURITY HEADERS (ULM-DESIGN §9.3), on every answer.
+   The script policy allows inline script because the page has some it needs —
+   the pre-paint skin script in index.html and an avatar's onerror in ui.js —
+   and a policy that broke the live product would be switched off, protecting
+   nothing. What it does close: framing by another site (clickjacking), plugins,
+   a <base> rewrite, form posts to other sites, and every connection that is
+   not this origin. Images may come from any https host: map tiles and the
+   platforms' driver photos. */
+app.disable('x-powered-by');
+const CSP = ["default-src 'self'", "script-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:", "font-src 'self' data:", "connect-src 'self'", "worker-src 'self'",
+  "manifest-src 'self'", "frame-ancestors 'none'", "base-uri 'self'", "form-action 'self'", "object-src 'none'"].join('; ');
+app.use((req, res, next) => {
+  res.set('Content-Security-Policy', CSP);
+  res.set('X-Frame-Options', 'DENY');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Referrer-Policy', 'same-origin');
+  res.set('Permissions-Policy', 'geolocation=(), microphone=(), payment=(), usb=()');
+  if (req.secure || String(req.get('x-forwarded-proto') || '').startsWith('https')) {
+    res.set('Strict-Transport-Security', 'max-age=31536000');
+  }
+  next();
+});
+
 app.use(express.json({ limit: '256kb' }));
 
 /* Not ready is a state, not a failure — and it must not look like either a
@@ -7158,6 +7182,12 @@ app.use(express.static(join(__dir, 'public'), {
       : 'public, max-age=300, stale-while-revalidate=604800');
   },
 }));
+/* The sign-in page: its own small document, so it loads with no data and
+   works whether or not sign-in is required yet. api/public/signin.html. */
+app.get('/signin', (_, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(join(__dir, 'public', 'signin.html'));
+});
 app.get('*', (_, res) => {
   res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
   res.sendFile(join(__dir, 'public', 'index.html'));

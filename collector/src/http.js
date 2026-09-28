@@ -2,6 +2,12 @@
 // Node 18+ has global fetch. Honors HTTPS proxy CA if the runtime sets NODE_EXTRA_CA_CERTS.
 import { log } from './log.js';
 
+/* A URL as the log may keep it: without its query. FMS takes its password in
+   the query string (username=…&Password=…), and a retry used to write that
+   whole URL to the log, which the platform keeps and people read
+   (ULM-DESIGN §9.3). The host and path are enough to know which call it was. */
+export const logUrl = (u) => String(u || '').split('?')[0];
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* WHAT NODE CALLS ITSELF, AND WHY THAT IS A PROBLEM.
@@ -35,7 +41,7 @@ export async function http(url, { method = 'GET', headers = {}, body, timeoutMs 
       clearTimeout(t);
       if (retryOn.includes(res.status) && attempt <= retries) {
         const wait = Math.min(2 ** attempt * 500, 16000);
-        log.warn('http', `retry ${res.status} ${url}`, { attempt, wait });
+        log.warn('http', `retry ${res.status} ${logUrl(url)}`, { attempt, wait });
         await sleep(wait);
         continue;
       }
@@ -78,7 +84,7 @@ export async function http(url, { method = 'GET', headers = {}, body, timeoutMs 
       clearTimeout(t);
       if (attempt <= retries) {
         const wait = Math.min(2 ** attempt * 500, 16000);
-        log.warn('http', `retry error ${err.name} ${url}`, { attempt, wait });
+        log.warn('http', `retry error ${err.name} ${logUrl(url)}`, { attempt, wait });
         await sleep(wait);
         continue;
       }

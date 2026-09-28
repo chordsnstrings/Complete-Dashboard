@@ -34,7 +34,7 @@ import { fmt } from './charts.js';
 import { api } from './data.js';
 import { ledgerBand, ceiling, ceilingWho, ceilingCol, monthBars, runningBars, exposureBars,
   firstReason, daysSince, booksRecorded } from './ledger_ak.js';
-import { submitEntry, SUPERVISORS, aed, parseAmount, pooled, loadPeople,
+import { submitEntry, SUPERVISORS, recorders, defaultRecorder, recorderLabel, aed, parseAmount, pooled, loadPeople,
   personRef } from './deposit_core.js';
 import { dubaiDay } from './tz.js';
 
@@ -80,8 +80,9 @@ export async function renderOpening(root) {
   const wW = el('div', 'depfield');
   wW.append(el('label', 'deplabel', 'Recorded by'));
   const who = el('div', 'depchips');
-  SUPERVISORS.forEach((s) => {
-    const b = el('button', `depchip${SUP === s ? ' on' : ''}`, esc(s[0].toUpperCase() + s.slice(1)));
+  if (defaultRecorder()) SUP = defaultRecorder();
+  recorders().forEach((s) => {
+    const b = el('button', `depchip${SUP === s ? ' on' : ''}`, esc(recorderLabel(s)));
     b.type = 'button';
     b.onclick = () => { SUP = s; [...who.children].forEach((c) => c.classList.toggle('on', c === b)); };
     who.append(b);

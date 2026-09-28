@@ -5,6 +5,7 @@
    linkable address rather than a modal that vanishes on reload. */
 import { dubaiDay } from './tz.js';
 import { swr } from './swr.js';
+import { WithheldError, noteWithheld, toSignIn } from './access.js';
 
 /* Storage access is guarded, not assumed. A browser with site data blocked
    THROWS on the getter rather than returning null, and this module is also
@@ -191,9 +192,27 @@ export const api = async (path, opts) => {
 
   const live = (async () => {
     const r = await fetchWithRetry(path, opts);
-    if (!r.ok) throw new Error(await failure(r));
+    /* What the server left out of this answer for this reader's role —
+       gathered so the page can say so once, at the top (access.js). */
+    noteWithheld(r.headers.get('x-fm-withheld'));
+    if (!r.ok) {
+      /* Signed out, or not shown to this role: both are answers with a true
+         reason, not failures, and each is told as what it is. */
+      if (r.status === 401 || r.status === 403) {
+        let j = null;
+        try { j = await r.clone().json(); } catch { /* not json */ }
+        if (j?.error === 'signin') { toSignIn('expired'); }
+        if (j?.error === 'restricted') { toSignIn('setup'); }
+        if (r.status === 403 && j && ['withheld', 'fleet_scope', 'bad_fleet', 'undeclared', 'not_allowed',
+          'preview', 'no_action'].includes(j.error)) throw new WithheldError(j, r.status);
+      }
+      throw new Error(await failure(r));
+    }
     const body = await r.json();
-    if (method === 'GET' && !opts) {
+    /* An answer the server marked no-store (contact details, documents, cash,
+       HR, passengers…) is never written to this browser's storage. */
+    const storable = !/no-store/i.test(r.headers.get('cache-control') || '');
+    if (method === 'GET' && !opts && storable) {
       const { changed } = swr.put(path, body);
       /* Only when it moved. Redrawing a page that is already correct costs the
          reader their scroll position and their place in a table, which is
@@ -403,6 +422,8 @@ export const NO_PLATFORM_FLEET = ['driver', 'vehicle', 'property', 'coverage', '
    the call list is a worse first version than no chip. Split it when somebody
    asks for one fleet's list, and move this id to NO_RANGE at the same time. */
 export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights',
+  /* Sign-in and access pages: about people and settings, never a window. */
+  'account', 'access', 'fleet-names', 'approvals',
   'online-time',
   /* #same-person is the whole queue of unsettled pairs, and /api/same-person
      takes no window, no platform and no fleet: a pair is a pair whenever

@@ -20,7 +20,11 @@ export function makeWrap({ log, now = () => Date.now() }) {
   let seq = 0;
   return (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
     const ref = `e${now().toString(36)}-${(++seq).toString(36)}`;
-    log.error('api', req.path, { ref, query: req.query, err: String(e) });
+    /* The query's KEYS, never its values: a query carries driver names,
+       plates and ids, and the log is read by people and kept by the platform
+       (ULM-DESIGN §9.3). The keys are enough to reproduce which variant
+       failed; the values are in the reader's own address bar. */
+    log.error('api', req.path, { ref, query: Object.keys(req.query || {}), err: String(e) });
     if (res.headersSent) return res.destroy();
     res.status(500).json({ error: 'internal', ref });
   });

@@ -40,7 +40,9 @@
    only what runs if somebody opens the file directly. */
 const VERSION = 'fleet-dev';
 const SHELL = `${VERSION}-shell`;
-const DATA = `${VERSION}-data`;
+/* -data-2 since sign-in: everything stored before it was read anonymously,
+   and a cache from before partitions existed is not one to keep. */
+const DATA = `${VERSION}-data-2`;
 
 /* The smallest set that can paint a usable first screen offline. The phone
    modules are listed by hand rather than globbed: a worker that precaches a
@@ -75,6 +77,10 @@ const SHELL_FILES = [
      still written by hand, so test/tokens.test.mjs now walks the phone's
      static imports from /m/app.js and fails on any module it does not name. */
   '/tokens.js', '/deposit_core.js', '/today.js', '/onlinetime.js',
+  /* Sign-in and access: data.js imports ./access.js, which imports
+     ./access_model.js — both on the phone's path to its first screen — and
+     every page links /access.css. */
+  '/access.js', '/access_model.js', '/access.css',
   /* The phone redesign's control bar names the window and the controls a
      screen ignores in the desktop shell's own words, so m/app.js imports
      ../shell.js — a module the phone never reached before. */
@@ -119,6 +125,23 @@ const stamp = async (res) => {
   return new Response(body, { status: res.status, statusText: res.statusText, headers: h });
 };
 
+/* The scope the data cache belongs to, kept IN the cache (a worker is
+   stopped whenever it is idle, and a scope held only in memory would be
+   forgotten — and the cache emptied — on every restart). */
+const SCOPE_KEY = '/__fm-data-scope';
+let lastScope;
+async function currentScope() {
+  if (lastScope !== undefined) return lastScope;
+  const m = await (await caches.open(DATA)).match(SCOPE_KEY);
+  lastScope = m ? await m.text() : null;
+  return lastScope;
+}
+async function startScope(scope) {
+  await caches.delete(DATA);
+  await (await caches.open(DATA)).put(SCOPE_KEY, new Response(scope));
+  lastScope = scope;
+}
+
 self.addEventListener('fetch', (e) => {
   const { request } = e;
   if (request.method !== 'GET') return;                 // never replay a write
@@ -129,15 +152,29 @@ self.addEventListener('fetch', (e) => {
     e.respondWith((async () => {
       try {
         const fresh = await fetch(request);
-        /* Only a good answer is worth keeping. A 500 cached here would be
-           served for a week after the fault was fixed. */
-        if (fresh.ok) {
+        /* WHOSE answer this is (ULM-DESIGN §9.2). The server stamps every
+           answer to a signed-in reader with x-fm-scope, a fingerprint of who
+           may see what. The first answer under a different scope — another
+           person, the same person with different access, or signed out —
+           empties this cache before anything is kept, so an offline open can
+           never paint one person's figures for another. A 401 empties it too. */
+        const scope = fresh.status === 401 ? 'signed-out' : (fresh.headers.get('x-fm-scope') || 'anonymous');
+        if (scope !== await currentScope()) await startScope(scope);
+        /* Only a good answer is worth keeping, and never one the server marked
+           no-store (contact details, documents, cash, HR, passengers, the
+           audit log) nor anything about sign-in and access itself. A 500
+           cached here would be served for a week after the fault was fixed. */
+        const noStore = /no-store/i.test(fresh.headers.get('cache-control') || '')
+          || url.pathname.startsWith('/api/auth') || url.pathname.startsWith('/api/access');
+        if (fresh.ok && !noStore) {
           const c = await caches.open(DATA);
           c.put(request, await stamp(fresh.clone()));
         }
         return fresh;
       } catch {
-        const hit = await caches.match(request);
+        /* The cache only ever holds ONE scope's answers (startScope empties it
+           on every change), so what is here belongs to the last reader seen. */
+        const hit = await caches.match(request, { cacheName: DATA });
         if (hit) {
           const h = new Headers(hit.headers);
           h.set('x-sw-cache', 'hit');

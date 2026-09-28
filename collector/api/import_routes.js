@@ -39,6 +39,7 @@
    arrive in bulk. Every other type still requires its proof, which is why the
    preview refuses them here rather than letting somebody discover it on row
    ninety. */
+import { signedInActor } from './access/actor.js';
 import { matchName } from './name_match.js';
 import { resolvePerson, personKey } from './ledger_person.js';
 import { identityLinks } from './identity_links.js';
@@ -225,7 +226,8 @@ export function importRoutes(app, { q, wrap, tx }) {
     res.set('Cache-Control', 'no-store');
     const b = req.body || {};
     const rows = Array.isArray(b.rows) ? b.rows : null;
-    const by = String(b.entered_by || '').trim().toLowerCase();
+    const signed = signedInActor(req);
+    const by = signed || String(b.entered_by || '').trim().toLowerCase();
     if (!rows || !rows.length) return res.status(400).json({ error: 'no rows' });
     if (!b.batch || String(b.batch).length < 4) {
       return res.status(400).json({ error: 'a batch id is required, so every row of one import '

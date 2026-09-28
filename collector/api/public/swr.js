@@ -37,7 +37,10 @@ const NEVER = ['/api/live', '/api/track', '/api/status', '/api/rollups',
   /* The credential banner. Painting yesterday's answer first would put back
      a red row the operator fixed on the Settings page a second earlier, and
      the correction would redraw the whole page. See api/cache.js. */
-  '/api/auth'];
+  '/api/auth',
+  /* Managing people and access (ULM): about the person asking and the people
+     they manage — never kept in the browser beyond the page that read it. */
+  '/api/access'];
 
 const cacheable = (url) => {
   const path = String(url).split('?')[0];

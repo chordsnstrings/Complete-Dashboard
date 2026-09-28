@@ -29,6 +29,7 @@
    The payload names every entry id that moved and where it came from. A merge
    made in error is undone by reading that row, not by guessing which of the
    survivor's entries used to belong to somebody else. */
+import { signedInActor } from './access/actor.js';
 import { mergedIds } from './identity_map.js';
 
 const SUPERVISORS = ['ahsan', 'haseeb', 'hossam', 'shohaib'];
@@ -55,13 +56,14 @@ export function personMergeRoutes(app, { q, wrap, tx }) {
     const dryRun = b.dry_run !== false;
     const keep = Number(b.keep) || null;
     const drop = Number(b.drop) || null;
-    const by = String(b.by || '').trim().toLowerCase();
+    const signed = signedInActor(req);
+    const by = signed || String(b.by || '').trim().toLowerCase();
     const why = String(b.why || '').trim();
     const refused = [];
 
     if (!keep || !drop) refused.push('send keep and drop — the person to keep and the one to fold into them');
     if (keep && keep === drop) refused.push('those are the same person');
-    if (!SUPERVISORS.includes(by)) {
+    if (!signed && !SUPERVISORS.includes(by)) {
       refused.push(`"${b.by || '(none)'}" is not one of the people who may record money. They `
         + `are ${SUPERVISORS.join(', ')}. This is attribution and not authentication — a merge `
         + 'moves somebody\'s balance, and the name, address and timestamp are what make it '

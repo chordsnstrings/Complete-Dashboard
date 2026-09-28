@@ -79,6 +79,7 @@
    filed a position for this person" and "this person is holding nothing" are
    different facts and only one of them is safe to lend against. */
 
+import { signedInActor } from './access/actor.js';
 import express from 'express';
 import { createHash } from 'node:crypto';
 import { resolvePerson, personKey } from './ledger_person.js';
@@ -788,8 +789,9 @@ export function ledgerWriteRoutes(app, { wrap, tx }) {
     const refusals = [];
     const refuse = (why) => refusals.push(why);
 
-    const by = String(b.entered_by || '').trim().toLowerCase();
-    if (!SUPERVISORS.includes(by)) {
+    const signed = signedInActor(req);
+    const by = signed || String(b.entered_by || '').trim().toLowerCase();
+    if (!signed && !SUPERVISORS.includes(by)) {
       refuse(`"${b.entered_by || '(none)'}" is not one of the people who may record money. `
         + `They are ${SUPERVISORS.join(', ')}. This is attribution and not authentication — `
         + 'until ULM exists, anybody who can reach this URL can write here, and the name, IP '
@@ -1026,8 +1028,9 @@ export function ledgerReceiptRoutes(app, { q, wrap }) {
      is a thing a reviewer must be able to see. */
   app.post('/api/ledger/receipt', receiptBody, wrap(async (req, res) => {
     res.set('Cache-Control', 'no-store');
-    const by = String(req.query.by || '').trim().toLowerCase();
-    if (!SUPERVISORS.includes(by)) {
+    const signed = signedInActor(req);
+    const by = signed || String(req.query.by || '').trim().toLowerCase();
+    if (!signed && !SUPERVISORS.includes(by)) {
       return res.status(400).json({ error: `"${req.query.by || '(none)'}" is not one of the `
         + `people who may record money. They are ${SUPERVISORS.join(', ')}.` });
     }
@@ -1716,7 +1719,7 @@ export function ledgerPolicyRoutes(app, { q, wrap, tx }) {
     const dryRun = b.dry_run !== false;
     const refused = [];
 
-    const by = String(b.set_by || '').trim();
+    const by = signedInActor(req) || String(b.set_by || '').trim();
     if (by.length < 2) {
       refused.push('say who is setting this, by name. It is attribution and not authentication '
         + '— until user management lands anybody who can reach this URL can move the line, and '

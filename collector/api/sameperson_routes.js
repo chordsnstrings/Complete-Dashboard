@@ -37,6 +37,7 @@
    it. What it adds is that the decision can now be made on a PAGE — before
    this, promoting a pair meant editing api/identity_map.js, regenerating
    sql/schema_v53.sql and deploying. */
+import { signedInActor } from './access/actor.js';
 import { identityLinks, clearIdentityLinkCache } from './identity_links.js';
 /* The spine, folded in the same request as the confirmation that earns it —
    see the block in the decide route for the half-hour of invisibility this
@@ -254,7 +255,7 @@ export function samePersonRoutes(app, { q, wrap }) {
       if (!Number.isInteger(id) || !['same', 'different', 'undecided'].includes(v)) {
         return res.status(400).json({ error: 'proposal_id and verdict (same | different | undecided) required' });
       }
-      const done = await decideHr(q, id, v, { by: req.body.by || null, note: req.body.note || null });
+      const done = await decideHr(q, id, v, { by: signedInActor(req) || req.body.by || null, note: req.body.note || null });
       if (!done) return res.status(404).json({ error: 'no such HR proposal', proposal_id: id });
       return res.json({ ok: true, proposal_id: id, verdict: v, source: 'hr_roster',
         applied_now: false, spine: null,

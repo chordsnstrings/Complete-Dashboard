@@ -26,6 +26,7 @@
    second one with a 413 at the end of the flow, after the cash had already
    changed hands. */
 
+import { who } from './access.js';
 import { api } from './data.js';
 import { money } from './ui.js';
 
@@ -97,6 +98,16 @@ export async function submitEntry(body, { commit = false } = {}) {
    convenience for the picker and NOT the enforcement. If they ever disagree
    the server wins and says so in words. */
 export const SUPERVISORS = ['ahsan', 'haseeb', 'hossam', 'shohaib'];
+
+/* SIGNED IN, THE PERSON RECORDING IS THE PERSON SIGNED IN (ULM-DESIGN §5.3).
+   The four names above are for a visitor while signing in is still optional;
+   a signed-in person is offered only themselves, already chosen — and the
+   server records the session's person whatever a form sends, so this is the
+   form telling the truth rather than the enforcement. */
+export const recorders = () => (who.signedIn && who.kind === 'user' ? [who.user.email] : SUPERVISORS);
+export const defaultRecorder = () => (who.signedIn && who.kind === 'user' ? who.user.email : null);
+export const recorderLabel = (s) => (who.signedIn && who.kind === 'user' && s === who.user.email
+  ? (who.user.name || who.user.email) : `${s[0].toUpperCase()}${s.slice(1)}`);
 
 /** AED with two decimals, always — a handover is counted in fils at the car.
  *  Since the money ruling of 2026-09-23 that is true of every page, so this is

@@ -22,6 +22,11 @@ import { volatilePath } from './swr.js';
 import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
 import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
+/* Sign-in and access (collector/docs/ULM-DESIGN.md). The server decides; these
+   only draw what it decided — which pages open, and the true reason where
+   something is not shown. */
+import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
+  WithheldError, toSignIn, signOut, roleNames, post as accessPost, installFetchGuard } from './access.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS, driversConcentration, driversAbsence } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS, vdirTail } from './vehicle.js';
 import { renderCohort } from './cohort.js';
@@ -610,21 +615,28 @@ const DOW_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
    anybody's localStorage: it costs nothing to leave, and a reader who goes
    back to an older build of this page still finds their groups as they left
    them. */
+/* The first page of a section this reader may open, or null when none —
+   a section with nothing open to the role is left out of the rail entirely,
+   rather than leading to a door that says "not shown to your role". */
+const openIn = (secId) => VIEWS.find((v) => v.sec === secId && canOpenView(v.id)) || null;
+export const firstOpenView = () => (VIEWS.find((v) => canOpenView(v.id)) || { id: 'account' }).id;
 function renderNav() {
   const nav = $('#nav'); nav.innerHTML = '';
   const here = sectionOf(state.view, state.param);
   SECTIONS.forEach((sec) => {
+    const first = openIn(sec.id);
+    if (!first) return;
     const a = el('a', sec.id === here ? 'on' : '',
       /* The label in its own element rather than as a bare text node: a text
          node cannot be selected, and the icons-only rail below needs to hide
          the words without hiding the mark. */
       `<span class="ic">${sec.ic}</span><span class="lb">${esc(sec.id)}</span>`);
-    a.href = href(sec.to);
+    a.href = href(canOpenView(sec.to) ? sec.to : first.id);
     /* Every page in the section, named. This was the one place the 36 subtitle
        sentences were reachable, one at a time, by hovering — they are the best
        one-line descriptions in the product and they now also appear under the
        title of the page they describe. */
-    a.title = `${sec.id}: ${VIEWS.filter((v) => v.sec === sec.id).map((v) => v.label).join(' · ')}`;
+    a.title = `${sec.id}: ${VIEWS.filter((v) => v.sec === sec.id && canOpenView(v.id)).map((v) => v.label).join(' · ')}`;
     a.setAttribute('aria-label', sec.id);
     nav.append(a);
   });
@@ -643,7 +655,7 @@ function renderSectionTabs() {
   const host = $('#sectabs');
   if (!host) return;
   const here = sectionOf(state.view, state.param);
-  const items = VIEWS.filter((v) => v.sec === here);
+  const items = VIEWS.filter((v) => v.sec === here && canOpenView(v.id));
   if (!here || items.length < 2) { host.innerHTML = ''; host.hidden = true; return; }
   host.hidden = false;
   const lit = items.some((v) => v.id === state.view)
@@ -2886,6 +2898,14 @@ V.opening = async (root) => renderOpening(root);
 V['import-sheet'] = async (root) => renderImport(root);
 V.policy = async (root) => renderPolicy(root);
 V.charging = async (root) => renderCharging(root);
+/* Sign-in and access (collector/docs/ULM-DESIGN.md): my account, Set up →
+   Access, and the fleets as the platforms name them. Loaded on demand — most
+   readers never open them, and none of their code belongs on the path to a
+   first chart. */
+V.account = async (root) => (await import('/account.js')).accountPage(root, state.param, state.sub);
+V.access = async (root) => (await import('/accessadmin.js')).accessPage(root, state.param, state.sub);
+V['fleet-names'] = async (root) => (await import('/fleetsadmin.js')).fleetsPage(root, state.param, state.sub);
+V.approvals = async (root) => (await import('/approvals.js')).approvalsPage(root);
 /* `#performer/<id>/<monday>` — the week the reader was ranking when they
    clicked, so the drill-down shows the week they came from. */
 V.performer = async (root) => renderPerformer(root, state.param, state.sub);
@@ -9257,6 +9277,56 @@ function freshView() {
   return root;
 }
 
+/* Links to pages this reader's role does not open are drawn as plain text —
+   still readable, not a door (ULM-DESIGN §7 rule 6). Run after each render
+   and each refresh; the click guard below catches anything drawn later. */
+function markShutLinks(host) {
+  if (!gated() || !host) return;
+  for (const a of host.querySelectorAll('a[href^="#"]')) {
+    const r = parseHash(a.getAttribute('href').slice(1));
+    if (!r.view || canOpenView(r.view, r.sub || '', r.param || '')) continue;
+    a.classList.add('access-shut');
+    a.setAttribute('aria-disabled', 'true');
+    a.title = 'Not shown to your role';
+  }
+}
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a[href^="#"]');
+  if (!a || !gated()) return;
+  const r = parseHash(a.getAttribute('href').slice(1));
+  if (r.view && !canOpenView(r.view, r.sub || '', r.param || '')) { e.preventDefault(); }
+}, true);
+window.addEventListener('data:refreshed', () => markShutLinks($('#view')));
+
+/* Who is signed in, in the corner of every page: the name leading to the
+   account page and a sign-out — or, while signing in is optional and nobody
+   is, a quiet "Sign in". An Owner previewing a role sees a band saying so. */
+function accountBox() {
+  let box = $('#acctBox');
+  const host = document.querySelector('.mast-r') || document.querySelector('.side-foot');
+  if (!host) return;
+  if (!box) { box = el('div', 'acct-box'); box.id = 'acctBox'; host.prepend(box); }
+  else if (box.parentElement !== host) host.prepend(box);
+  if (who.signedIn && who.kind === 'user') {
+    const name = who.user?.name || who.user?.email || 'Account';
+    const admin = (who.access?.caps || []).includes('access.manage');
+    box.innerHTML = `<a href="#account" class="acct-name" title="${esc(roleNames().join(', '))}">${esc(name)}</a>`
+      + (admin ? '<a href="#access" class="acct-link">Access</a>' : '')
+      + '<button type="button" class="acct-out">Sign out</button>';
+    box.querySelector('.acct-out').onclick = () => signOut();
+  } else if (who.signedIn && who.kind === 'device') {
+    box.innerHTML = `<span class="acct-name">${esc(who.device?.name || 'Screen')}</span>`;
+  } else if (who.loaded) {
+    box.innerHTML = '<a href="/signin" class="acct-link">Sign in</a>';
+  }
+  let band = $('#previewBand');
+  if (who.preview) {
+    if (!band) { band = el('div', 'access-preview'); band.id = 'previewBand'; document.body.prepend(band); }
+    band.innerHTML = `Previewing the ${esc(roleNames()[0] || who.preview)} role — read-only, exactly what they see. <button type="button">End preview</button>`;
+    band.querySelector('button').onclick = async () => { await accessPost('/api/auth/preview', { role: null }); location.reload(); };
+  } else if (band) band.remove();
+}
+
 async function render() {
   const gen = newRender();
   /* The Arkiv shell (reskin STEP 4, shell.js) is built on the first render
@@ -9268,6 +9338,8 @@ async function render() {
   /* The shell footer's basis and colophon belong to the page that wrote them
      (ui.js pageFoot); the principle line is the shell's and stays. */
   clearPageFoot();
+  resetWithheld();
+  accountBox();
   /* A new page starts at its top. Under the old shell that is #view: the
      title sits in the sticky topbar above it. Under the new one the title
      block is ABOVE #view, after the masthead, the rows, the banner and the
@@ -9275,10 +9347,27 @@ async function render() {
      at 390px, where that chrome is taller than the screen, it did. */
   if (ruled) window.scrollTo?.(0, 0);
   else root.scrollIntoView?.({ block: 'start' });
+  /* A page the reader's role does not open: said so, with the reason and a
+     way to ask — never a blank page, never someone else's data, never a 404
+     (ULM-DESIGN §7 rule 7). The server refuses the data regardless; this is
+     the page telling the truth about it before asking. */
+  if (gated() && !canOpenView(state.view, state.sub || '', state.param || '')) {
+    const cls = subjectOf(state.view, state.sub || '', state.param || '');
+    const label = (VIEWS.find((v) => v.id === state.view) || {}).label;
+    root.append(closedBlock({ cls, view: location.hash.replace(/^#/, ''),
+      title: label ? `${label} is not open to your role` : 'This page is not open to your role' }));
+    setHeader({ title: label || 'Not open to your role' });
+    if (alive(gen)) { freshness(); authBanner(); }
+    return;
+  }
   try {
     const detail = await (V[state.view] || V.unit)(root);
     if (!alive(gen)) return;
     setHeader(detail);                      // detail pages only know their title after fetching
+    /* What this page's answers left out for this role, said once at the top. */
+    const wb = withheldBanner();
+    if (wb) root.prepend(wb);
+    markShutLinks(root);
     await stampSource(root, gen);
     /* Before the animation, because it only adds a class. A table long enough
        to lose its column headings gets a scrollport so the headings can stay;
@@ -9385,6 +9474,13 @@ async function stampSource(root, gen) {
    including for a 504, which is usually a race the retry wins because the
    server finishes the query and caches it. */
 function failureBox(e, retry) {
+  /* Not a failure: the page's data is not shown to this role, and the reader
+     is told so — with the server's own reason — rather than "could not load". */
+  if (e instanceof WithheldError || e?.name === 'WithheldError') {
+    const w = e.withheld || {};
+    return closedBlock({ cls: w.class || null, view: location.hash.replace(/^#/, ''),
+      title: 'This is not shown to your role', detail: e.message });
+  }
   const box = el('div', 'empty');
   const migrating = /migrat/i.test(String(e.message || ''));
   box.innerHTML = `<b>Could not load this view</b>${esc(e.message)}`;
@@ -10116,5 +10212,22 @@ window.addEventListener('hashchange', () => { applyRoute(); render(); });
    sheet is already in — the old skin, and nearly every load — this is a
    microtask. A sheet slower than the wait's cap renders the page without it,
    and again when it lands (the second argument). */
-whenStyled(4000, render).then(render);
+/* Who is signed in, before the first page is drawn: the nav, the landing page
+   and every "not shown to your role" depend on it. One small request, in
+   parallel with the stylesheets. A signed-in person's chosen look follows
+   them to any browser; sign-in required and nobody signed in goes to /signin. */
+installFetchGuard();
+const whoReady = loadWho().then(() => {
+  if (who.mode === 'enforced' && !who.signedIn) { toSignIn('required'); return false; }
+  if (who.restricted) { toSignIn('setup'); return false; }
+  const look = who.user?.prefs?.look;
+  const now = document.documentElement.dataset.skin === 'arkiv' ? 'arkiv' : 'classic';
+  if ((look === 'arkiv' || look === 'classic') && look !== now) {
+    try { localStorage.setItem('fleet.skin', look); location.reload(); return false; } catch { /* keep this look */ }
+  }
+  /* The landing page, or a page this role cannot open: go to the first one it can. */
+  if (gated() && !location.hash && !canOpenView(state.view)) { location.replace(`#${firstOpenView()}`); return false; }
+  return true;
+});
+whoReady.then((go) => { if (go) whenStyled(4000, render).then(render); });
 setInterval(() => { if (state.view === 'live') render(); }, 60000);

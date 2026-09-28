@@ -22,7 +22,7 @@ import { secHead, absenceBand, UBER_FARE_WHY, swatch } from '../ui.js';
    validation living in two bundles is how the phone comes to refuse what the
    desktop accepts — and the person standing next to the car with the cash in
    their hand is the one who finds out. */
-import { compress, putReceipt, submitEntry, SUPERVISORS, aed, parseAmount,
+import { compress, putReceipt, submitEntry, SUPERVISORS, recorders, defaultRecorder, recorderLabel, aed, parseAmount,
   loadPeople, personRef } from '../deposit_core.js';
 /* The one place a channel key becomes a word a person reads — and the one
    place an instant becomes a clock. Both shared with the desktop rather than
@@ -2762,14 +2762,16 @@ async function deposits(deck, ctx) {
   };
 
   /* ── who is recording, once ─────────────────────────────────────────── */
-  const whoCard = card('Recorded by', 'until user accounts exist this name, an address and a '
-    + 'timestamp are what make an entry traceable');
+  if (defaultRecorder()) PHONE_SUP = defaultRecorder();
+  const whoCard = card('Recorded by', defaultRecorder()
+    ? 'you are signed in, so the entry is recorded as you'
+    : 'until user accounts exist this name, an address and a timestamp are what make an entry traceable');
   const supChips = chips(whoCard.body,
-    SUPERVISORS.map((x) => ({ id: x, label: x[0].toUpperCase() + x.slice(1) })),
+    recorders().map((x) => ({ id: x, label: recorderLabel(x) })),
     PHONE_SUP, (id) => {
       PHONE_SUP = id;
       [...whoCard.body.querySelectorAll('.m-chip')].forEach((c) => c.classList.toggle('on',
-        c.textContent.toLowerCase() === id));
+        c.textContent.toLowerCase() === String(recorderLabel(id)).toLowerCase()));
       state1.textContent = '';
       tone(state1, '');
     });

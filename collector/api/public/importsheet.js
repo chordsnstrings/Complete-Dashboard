@@ -24,7 +24,7 @@
    leaving somebody to guess which column it wanted. */
 import { el, esc, panel, note, loading, contract } from './ui.js';
 import { api } from './data.js';
-import { csvObjects, SUPERVISORS, aed, pooled } from './deposit_core.js';
+import { csvObjects, SUPERVISORS, recorders, defaultRecorder, recorderLabel, aed, pooled } from './deposit_core.js';
 
 let SUP = null;
 
@@ -78,8 +78,9 @@ export async function renderImport(root) {
   const whoW = el('div', 'depfield');
   whoW.append(el('label', 'deplabel', 'Recorded by'));
   const who = el('div', 'depchips');
-  SUPERVISORS.forEach((s) => {
-    const b = el('button', `depchip${SUP === s ? ' on' : ''}`, esc(s[0].toUpperCase() + s.slice(1)));
+  if (defaultRecorder()) SUP = defaultRecorder();
+  recorders().forEach((s) => {
+    const b = el('button', `depchip${SUP === s ? ' on' : ''}`, esc(recorderLabel(s)));
     b.type = 'button';
     b.onclick = () => { SUP = s; [...who.children].forEach((c) => c.classList.toggle('on', c === b)); };
     who.append(b);
@@ -254,8 +255,18 @@ export async function renderImport(root) {
     });
     const body = await r.json().catch(() => ({}));
     reviewPanel.body.innerHTML = '';
+    /* Signed in, a commit is a PROPOSAL until a second person commits it
+       (four-eyes, collector/docs/ULM-DESIGN.md §8): nothing has changed yet. */
+    if (r.status === 202 && body.proposal) {
+      reviewPanel.body.append(note(`Saved as proposal ${body.proposal} for a second person to commit. `
+        + 'Nothing has been imported yet: someone else who may commit it will find it under Approvals.', 'ok'));
+      const a = el('a', null, 'Open Approvals'); a.href = '#approvals';
+      reviewPanel.body.append(a);
+      preview = null; picks.clear(); file.value = '';
+      return;
+    }
     if (!r.ok || body.ok === false) {
-      reviewPanel.body.append(note((body.refused || []).join(' ') || 'The import was refused.', 'bad'));
+      reviewPanel.body.append(note((body.refused || []).join(' ') || body.detail || 'The import was refused.', 'bad'));
       if (body.note) reviewPanel.body.append(note(body.note));
       commitBtn.disabled = false;
       return;

@@ -25,6 +25,7 @@ import { appendAudit } from './audit.js';
 import * as svc from './service.js';
 import { INTERNAL_TOKEN } from './internal.js';
 import { safeEqual, newToken } from './crypto.js';
+import { createHash } from 'node:crypto';
 import { rank, withheldSentence, CLASS, ROLE } from '../public/access_model.js';
 
 export const SID = 'fm_sid';
@@ -69,6 +70,8 @@ const ip = (req) => req.ip || null;
 /* Actions that must be re-confirmed within ten minutes (§5.1). */
 export const STEPUP_CAPS = new Set(['credentials.write', 'hr.import', 'access.manage', 'identity.merge', 'cash.import.commit']);
 export const STEPUP_MINUTES = 10;
+/* Actions that only read (a CSV download is a plain link, and changes nothing). */
+export const READ_CAPS = new Set(['export']);
 /* Classes whose answers must never be stored by a browser or a proxy (§9.2). */
 export const NO_STORE = new Set(['CT', 'DOC', 'CASH', 'HR', 'MRG', 'PAX', 'AUDIT', 'RAW', 'CRED']);
 
@@ -259,18 +262,24 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
       const l = L[c] || '';
       if (!l || (l === 'A' && entry.grain !== 'aggregate')) return refuse(res, 403, withheldBody(c, l));
     }
-    /* Actions. */
+    /* Actions. Four-eyes routes (a cash sheet's commit, a merge) take one of
+       two actions: PROPOSE (store it, answer 202) or COMMIT a stored proposal
+       by its id — never rows the committer sends (ULM-DESIGN §8). */
+    const four = fm.kind === 'user' && entry.fourEyes ? entry.fourEyes : null;
+    const isDry = Boolean(four && four.dryRunField && req.body?.[four.dryRunField] !== false);
+    const committing = Boolean(four && !isDry && req.body?.proposal != null);
     if (entry.cap || isWrite) {
       if (access.preview) return refuse(res, 403, { error: 'preview', detail: 'You are previewing a role, which is read-only.' });
-      const cap = entry.cap;
+      const cap = four ? (committing ? four.commit : four.propose) : entry.cap;
       if (!cap) return refuse(res, 403, { error: 'no_action', detail: 'This change is not open to signed-in roles yet.' });
       if (!access.capsOver(j.targets).includes(cap)) {
         return refuse(res, 403, { error: 'not_allowed', cap, detail: `Your role cannot do this: ${cap}.` });
       }
-      if (fm.kind === 'user') {
+      if (fm.kind === 'user' && !READ_CAPS.has(cap)) {
         /* CSRF: a change must carry the token from the cookie in a header — a
            page on another site can make the browser send the cookie, but
-           cannot read it to copy it into the header. */
+           cannot read it to copy it into the header. A download (READ_CAPS) is
+           a plain link and changes nothing, so it is exempt. */
         const want = req.fmCookies?.[CSRF];
         if (!want || !safeEqual(req.get('x-fm-csrf') || '', want)) {
           return refuse(res, 403, { error: 'csrf', detail: 'Reload the page and try again.' });
@@ -282,6 +291,12 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
           }
         }
       }
+    }
+
+    if (four && !isDry) {
+      if (!committing) return propose(req, res, entry, fm);
+      const ok = await takeProposal(req, res, entry, fm, L);
+      if (!ok) return undefined;
     }
 
     /* The fleet filter, narrowed to the caller's scope. The cache key follows
@@ -306,6 +321,55 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     installShaper(req, res, entry, L, j.filterRows);
     if (isWrite || entry.cap || entry.auditRead) auditOnFinish(req, res, entry, fm, isWrite);
     return next();
+  }
+
+  /* ── four-eyes ────────────────────────────────────────────────────── */
+  const stableJson = (v) => (v == null || typeof v !== 'object' ? JSON.stringify(v ?? null)
+    : Array.isArray(v) ? `[${v.map(stableJson).join(',')}]`
+      : `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stableJson(v[k])}`).join(',')}}`);
+  const hashOf = (v) => createHash('sha256').update(stableJson(v)).digest('hex');
+
+  async function propose(req, res, entry, fm) {
+    const payload = { ...(req.body || {}) };
+    delete payload.proposal;
+    if (entry.fourEyes.dryRunField) payload[entry.fourEyes.dryRunField] = false;
+    const summary = String(entry.fourEyes.summary?.(payload) || `${req.method} ${req.path}`).slice(0, 300);
+    const { rows } = await db.query(
+      `INSERT INTO access_proposal (kind, summary, payload, payload_hash, prepared_by)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [`${req.method} ${req.path}`, summary, JSON.stringify(payload), hashOf(payload), fm.user.id]);
+    const id = Number(rows[0].id);
+    await appendAudit(db, { actorId: fm.user.id, actorLabel: fm.user.email, action: `propose:${entry.fourEyes.commit}`,
+      subjectType: 'proposal', subjectId: id, detail: { route: `${req.method} ${req.path}`, summary }, ip: ip(req), ua: req.get('user-agent') });
+    res.set('Cache-Control', 'no-store');
+    return res.status(202).json({ ok: true, proposal: id, status: 'awaiting',
+      detail: 'Saved for a second person to commit. Anyone else who may commit it will find it under Approvals; nothing has changed yet.' });
+  }
+
+  /* Swaps the request for the stored proposal, after every check. */
+  async function takeProposal(req, res, entry, fm, L) {
+    const id = Number(req.body.proposal);
+    const { rows } = await db.query('SELECT * FROM access_proposal WHERE id = $1', [id]);
+    const p = rows[0];
+    if (!p || p.kind !== `${req.method} ${req.path}`) { refuse(res, 404, { error: 'not_found', detail: 'No such proposal for this action.' }); return false; }
+    if (p.status !== 'open') { refuse(res, 409, { error: 'decided', detail: `This proposal was already ${p.status}.` }); return false; }
+    if (Number(p.prepared_by) === Number(fm.user.id)) {
+      refuse(res, 403, { error: 'four_eyes', detail: 'Someone other than the person who prepared this must commit it.' }); return false;
+    }
+    if (hashOf(p.payload) !== p.payload_hash) {
+      refuse(res, 409, { error: 'tampered', detail: 'The stored proposal no longer matches what was prepared. It cannot be committed.' }); return false;
+    }
+    for (const c of entry.fourEyes.commitNeeds || []) {
+      if ((L[c] || '') !== 'F') { refuse(res, 403, { error: 'withheld', class: c, detail: `Committing this needs ${CLASS[c]?.plain || c}, which your role does not hold.` }); return false; }
+    }
+    req.body = { ...p.payload };
+    res.on('finish', () => {
+      const ok = res.statusCode < 300;
+      db.query(`UPDATE access_proposal SET status = $2, decided_by = $3, decided_at = now(), result = $4 WHERE id = $1 AND status = 'open'`,
+        [id, ok ? 'committed' : 'failed', fm.user.id, JSON.stringify({ status: res.statusCode })])
+        .catch((e) => log.error('access', 'proposal update failed', { err: String(e).slice(0, 200) }));
+    });
+    return true;
   }
 
   function installShaper(req, res, entry, L, filterRows) {

@@ -23,7 +23,7 @@
    first — the button is disabled until the server has said what would happen. */
 import { el, esc, note, loading } from './ui.js';
 import { dubaiDay } from './tz.js';
-import { compress, putReceipt, submitEntry, SUPERVISORS, aed, parseAmount,
+import { compress, putReceipt, submitEntry, SUPERVISORS, recorders, defaultRecorder, recorderLabel, aed, parseAmount,
   personRef } from './deposit_core.js';
 
 /* The supervisor sticks for the session, across every screen that uses this
@@ -55,8 +55,9 @@ export function entryForm(host, { types, people, onSaved, settlesVia = null }) {
   /* ── who is recording ─────────────────────────────────────────────────── */
   const whoW = field('Recorded by');
   const who = el('div', 'depchips');
-  SUPERVISORS.forEach((s) => {
-    const b = el('button', `depchip${SUP === s ? ' on' : ''}`, esc(s[0].toUpperCase() + s.slice(1)));
+  if (defaultRecorder()) SUP = defaultRecorder();
+  recorders().forEach((s) => {
+    const b = el('button', `depchip${SUP === s ? ' on' : ''}`, esc(recorderLabel(s)));
     b.type = 'button';
     b.onclick = () => { SUP = s; [...who.children].forEach((c) => c.classList.toggle('on', c === b)); reset(); };
     who.append(b);

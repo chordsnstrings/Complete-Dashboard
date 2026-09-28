@@ -24,6 +24,10 @@ import { rangePanel } from '../daterange.js';
    desktop shell renders every clock through, and it names timeZone: TZ. */
 import { el, esc, sourceLine, timeStr, pageFoot } from '../ui.js';
 import { SCREENS, TABS, titleFor } from './screens.js';
+/* Sign-in and access, the same library the desktop uses (../access.js): the
+   server decides, the phone draws what it decided. */
+import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
+  WithheldError, toSignIn, signOut, roleNames, installFetchGuard } from '../access.js';
 import { phoneContract } from './ui.js';
 /* The desktop shell's two sentences about the window, imported rather than
    re-worded: what the masthead calls the window and why a control does not
@@ -287,6 +291,30 @@ async function render() {
 
   deck.scrollTop = 0;
   deck.innerHTML = '';
+  resetWithheld();
+  /* A screen this role does not open says so, with the reason and a way to
+     ask — the same rule as the desktop (ULM-DESIGN §7). */
+  if (gated() && !['account', 'access', 'fleet-names', 'more'].includes(id)
+    && !canOpenView(id, sub || '', param || '', { phone: true })) {
+    deck.append(closedBlock({ cls: subjectOf(id, sub || '', param || '', { phone: true }), view: location.hash.slice(1),
+      title: `${t.title} is not open to your role` }));
+    if (g === gen) freshness();
+    return;
+  }
+  /* The account, Access and fleet-names pages are the desktop's own modules,
+     which lay themselves out for a phone width. */
+  const PAGES = { account: ['../account.js', 'accountPage'], access: ['../accessadmin.js', 'accessPage'],
+    'fleet-names': ['../fleetsadmin.js', 'fleetsPage'] };
+  if (PAGES[id]) {
+    try {
+      const m = await import(PAGES[id][0]);
+      const d = await m[PAGES[id][1]](deck, param, sub);
+      if (d?.title && g === gen) { titleEl.textContent = d.title; document.title = `${d.title} · FleetMirror`; }
+    } catch (e) {
+      if (g === gen) deck.append(closedBlock({ title: 'This page did not open', detail: e.message }));
+    }
+    return;
+  }
   try {
     /* A detail screen only learns whose page it is after it has fetched, so it
        is given a way to name the header. The desktop does the same thing with
@@ -301,9 +329,19 @@ async function render() {
       { view: id, param, sub, alive: () => g === gen, setTitle });
     if (AK) akApplies(g, id);
     await (AK ? akFoot(g, id) : stampSource(g, id));
+    if (g === gen) {
+      const wb = withheldBanner();
+      if (wb) deck.prepend(wb);
+      if (id === 'more') deck.prepend(accountCard());
+    }
   } catch (e) {
     if (g !== gen) return;
     deck.innerHTML = '';
+    if (e instanceof WithheldError || e?.name === 'WithheldError') {
+      deck.append(closedBlock({ cls: e.withheld?.class || null, view: location.hash.slice(1),
+        title: 'This is not shown to your role', detail: e.message }));
+      return;
+    }
     const d = el('div', 'm-card m-err');
     d.innerHTML = `<div class="m-empty"><b>Could not load this screen</b>${esc(e.message || String(e))}</div>`;
     deck.append(d);
@@ -444,8 +482,38 @@ refreshBtn.onclick = () => { refreshBtn.classList.add('on'); refresh(); setTimeo
 
 addEventListener('hashchange', render);
 addEventListener('online', render);
-if (!location.hash) location.hash = href('today');
-render();
+/* Who is signed in, before the first screen: which tabs show, which screen is
+   home, and whether sign-in is required at all depend on it. */
+installFetchGuard();
+loadWho().then(() => {
+  if (who.mode === 'enforced' && !who.signedIn) { toSignIn('required'); return; }
+  if (who.restricted) { toSignIn('setup'); return; }
+  /* Tabs whose screen this role does not open are not offered. */
+  for (const b of tabs.children) {
+    const t = TABS.find((x) => x.id === b.dataset.tab);
+    b.hidden = Boolean(t) && !canOpenView(t.route, '', '', { phone: true });
+  }
+  const home = TABS.find((t) => canOpenView(t.route, '', '', { phone: true }))?.route || 'more';
+  if (!location.hash) location.hash = href(gated() ? home : 'today');
+  render();
+});
+
+/* The account on the More screen: who is signed in, the account page, the
+   Access pages for those who manage them, sign out — or a way to sign in. */
+function accountCard() {
+  const card = el('div', 'm-card acct-card');
+  if (who.signedIn && who.kind === 'user') {
+    const admin = (who.access?.caps || []).includes('access.manage');
+    card.innerHTML = `<div class="m-row"><b>${esc(who.user?.name || who.user?.email || '')}</b></div>
+      <div class="m-row">${esc(roleNames().join(', '))}</div>
+      <div class="m-row"><a href="#account">Your account</a>${admin ? ' · <a href="#access">Access</a>' : ''}</div>
+      <div class="m-row"><button type="button" class="acct-out">Sign out</button></div>`;
+    card.querySelector('.acct-out').onclick = () => signOut();
+  } else {
+    card.innerHTML = '<div class="m-row"><a href="/signin">Sign in</a></div>';
+  }
+  return card;
+}
 
 /* ── the worker ─────────────────────────────────────────────────────────
    Registered after first paint: a phone on a bad connection should spend its

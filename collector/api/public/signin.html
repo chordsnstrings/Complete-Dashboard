@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign in · FleetMirror</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- A sign-in page has nothing to rank and nothing to tell another site: no
+     index, and no Referer on the one outbound link it can have (the otpauth
+     address, which carries the two-step key). -->
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<!-- The installed phone app lands here when sign-in is required, inside its
+     own standalone window: the same manifest and icons as index.html, so the
+     window keeps its name and colour instead of turning into a browser tab. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FleetMirror">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="/icons/fleetmirror-apple-touch.png">
+<link rel="icon" href="/icons/fleetmirror-192.png" type="image/png">
+
+<!-- BEFORE ANYTHING ELSE: THE ONE-TIME TOKEN LEAVES THE ADDRESS BAR.
+     ─────────────────────────────────────────────────────────────────────
+     An invite, a reset and a screen link each carry a single-use secret in
+     the fragment (/signin#invite=…). The fragment is never sent to the
+     server and never goes out in a Referer, but it IS the address: it sits
+     in the address bar, in this tab's history entry, in a screenshot, and in
+     "copy link". So it is taken out here, in the first script the parser
+     meets — before the stylesheets, the fonts and the module have loaded —
+     and kept only in memory for signin.js. history.replaceState rewrites the
+     CURRENT entry, so Back does not bring it back. signin.js reads
+     location.hash as well, for a link pasted into a /signin tab that is
+     already open (a same-document navigation that runs no script here).
+
+     And the theme, stamped before the first paint exactly as index.html
+     does it, from the same key — a reader who chose dark on their laptop
+     does not get one white frame of this page first. -->
+<script>
+(function () {
+  var m = /^#(invite|reset|device)=(.*)$/.exec(location.hash || '');
+  if (m) {
+    window.FM_SIGNIN_LINK = { kind: m[1], token: m[2] };
+    try { history.replaceState(history.state, '', location.pathname + location.search); }
+    catch (e) { location.hash = ''; }
+  }
+  var r = document.documentElement;
+  try {
+    var t = localStorage.getItem('theme');
+    if (t === 'light' || t === 'dark') {
+      r.setAttribute('data-theme', t);
+      var metas = document.querySelectorAll('meta[name="theme-color"]');
+      for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', t === 'dark' ? '#111113' : '#FFFFFF');
+    }
+  } catch (e) { /* storage refused: follow the system */ }
+}());
+</script>
+<link rel="preload" href="/fonts/karla-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/fraunces-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/fonts.css">
+<!-- THE PAGE'S OWN LOOK, inline.
+     ─────────────────────────────────────────────────────────────────────
+     This is its own document, not a view inside app.js: it has to work
+     before anybody may read a single figure, for someone who has never opened
+     the product, on the phone app and on a wall screen. So it loads no
+     app.css, no arkiv.css and no module of the dashboard — one stylesheet
+     here, the fonts, and signin.js with the small access.js it imports.
+
+     It is ALWAYS the Arkiv look, whatever skin the reader keeps for the
+     dashboard, because the reader may not have chosen one yet and the
+     sign-in page is where the product introduces itself. The values are the
+     Arkiv neutrals from api/public/tokens.js (NEUTRAL, NEUTRAL_DARK and the
+     semantic pair), copied rather than imported because a <style> cannot
+     import a module; if tokens.js moves, these follow.
+
+     Dark follows the system unless the reader chose one ('theme' in
+     localStorage, stamped above as data-theme), through the same two
+     selectors app.css's generated dark blocks use.
+
+     Every control is at least 44px tall, and every text input is 16px, the
+     size below which iOS zooms the page on focus and leaves it zoomed. -->
+<style>
+:root{
+  --paper:#FFFFFF; --paper-2:#F6F6F7; --ink:#0A0A0B; --grey:#6D6D72; --grey-2:#97979D; --hair:#D6D6D9;
+  --neg:#961111; --pos:#007E44;
+  --logo:url("/brand/mark.png");
+  --sans:"Karla",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --disp:"Fraunces",Georgia,"Times New Roman",serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#111113; --paper-2:#1B1B1D; --ink:#F0F0F1; --grey:#8D8D92; --grey-2:#68686D; --hair:#333336;
+    --neg:#D65044; --pos:#008E60; --logo:url("/brand/mark-dark.png"); color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#111113; --paper-2:#1B1B1D; --ink:#F0F0F1; --grey:#8D8D92; --grey-2:#68686D; --hair:#333336;
+  --neg:#D65044; --pos:#008E60; --logo:url("/brand/mark-dark.png"); color-scheme:dark;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+html,body{margin:0;background:var(--paper);color:var(--ink)}
+body{font-family:var(--sans);font-size:1rem;line-height:1.5;min-height:100vh;min-height:100dvh;
+  -webkit-font-smoothing:antialiased;overflow-wrap:break-word}
+[hidden]{display:none !important}
+a{color:inherit;text-underline-offset:.18em;text-decoration-thickness:1px}
+a:hover{text-decoration-thickness:2px}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+/* The frame: the wordmark over an ink rule, the step in a single column. The
+   safe-area insets are for the installed app, whose status bar sits over the
+   page (black-translucent) and whose home indicator sits under it. */
+.si{display:flex;flex-direction:column;min-height:100vh;min-height:100dvh;
+  padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right))
+          max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+.si-top{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;
+  padding-bottom:12px;border-bottom:1.5px solid var(--ink)}
+.si-word{display:inline-flex;align-items:center;gap:.3em;font-family:var(--disp);font-weight:600;
+  font-size:1.45rem;line-height:1;letter-spacing:-.014em;color:var(--ink);text-decoration:none;min-height:44px}
+.si-logo{display:inline-block;flex:none;width:1.06em;height:1em;background:var(--logo) center/contain no-repeat}
+.si-main{flex:1 0 auto;display:flex;justify-content:center;padding:clamp(24px,8vh,88px) 0 40px}
+.si-card{width:100%;max-width:420px;min-width:0}
+.si-foot{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--grey);
+  border-top:1px solid var(--hair);padding-top:12px}
+
+/* The step. */
+.si-eyebrow{margin:0 0 10px;font-family:var(--mono);font-size:.7rem;font-weight:500;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--grey)}
+.si-card h1{margin:0 0 12px;font-family:var(--disp);font-weight:600;font-size:1.9rem;line-height:1.12;
+  letter-spacing:-.015em}
+.si-card h1:focus{outline:none}
+.si-lede{margin:0 0 22px;color:var(--grey);font-size:1rem}
+.si-lede b,.si-who b{color:var(--ink);font-weight:600}
+.si-email{overflow-wrap:anywhere}
+
+/* A one-line notice: why you are here, or what just happened. The dot
+   carries the tone (Arkiv's rule: text stays ink; a solid green dot is good,
+   a solid red dot is a refusal) so the line reads the same to a reader who
+   cannot tell the colours apart. */
+.si-note{display:flex;gap:10px;align-items:baseline;margin:0 0 20px;padding:10px 12px;background:var(--paper-2);
+  border-left:2px solid var(--ink);font-size:.95rem;line-height:1.45}
+.si-note::before,.si-err::before{content:"";flex:none;width:8px;height:8px;border-radius:50%;
+  transform:translateY(-1px);background:var(--grey)}
+.si-note.good::before{background:var(--pos)}
+.si-note.bad::before{background:var(--neg)}
+
+.si-form{display:grid;gap:16px;margin:0}
+.si-field{display:grid;gap:6px;min-width:0}
+.si-lab{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;min-height:22px}
+.si-field label,.si-label{font-family:var(--mono);font-size:.72rem;font-weight:500;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink)}
+.si-field input{width:100%;min-width:0;min-height:48px;padding:10px 12px;font:inherit;font-size:16px;
+  color:var(--ink);background:var(--paper);border:1px solid var(--grey-2);border-radius:2px;
+  -webkit-appearance:none;appearance:none}
+.si-field input:hover{border-color:var(--grey)}
+.si-field input:focus{outline:2px solid var(--ink);outline-offset:-1px;border-color:var(--ink)}
+.si-field input[readonly]{background:var(--paper-2);border-color:var(--hair);color:var(--ink)}
+.si-field input.code{font-family:var(--mono);font-size:1.25rem;letter-spacing:.2em}
+.si-hint{margin:0;font-size:.88rem;color:var(--grey);line-height:1.45}
+.si-show{min-height:44px;min-width:44px;margin:-14px -6px -8px 0;padding:0 6px;font-family:var(--mono);
+  font-size:.7rem;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--grey);
+  background:none;border:0;cursor:pointer}
+.si-show:hover{color:var(--ink)}
+
+.si-err{display:flex;gap:10px;align-items:baseline;margin:0;padding:10px 12px;border:1px solid var(--neg);
+  border-left-width:3px;font-size:.95rem;line-height:1.45;color:var(--ink)}
+.si-err::before{background:var(--neg)}
+
+.si-actions{display:grid;gap:10px}
+.si-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:48px;
+  padding:10px 16px;font-family:var(--mono);font-size:.8rem;font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase;text-decoration:none;text-align:center;cursor:pointer;border-radius:2px;
+  color:var(--paper);background:var(--ink);border:1px solid var(--ink);-webkit-appearance:none;appearance:none}
+.si-btn:hover{opacity:.9}
+.si-btn.ghost{color:var(--ink);background:transparent}
+.si-btn.ghost:hover{background:var(--paper-2);opacity:1}
+.si-btn[disabled]{opacity:.55;cursor:progress}
+.si-link{display:inline-flex;align-items:center;min-height:44px;padding:0;font:inherit;font-size:.95rem;
+  color:var(--ink);background:none;border:0;text-decoration:underline;text-underline-offset:.18em;cursor:pointer}
+.si-quiet{margin:22px 0 0;padding-top:14px;border-top:1px solid var(--hair);font-size:.92rem;color:var(--grey)}
+.si-quiet a,.si-quiet .si-link{color:var(--ink)}
+.si-quiet p{margin:0}
+.si-quiet p + p{margin-top:6px}
+.si-who{margin:0 0 22px;font-size:1rem;color:var(--grey)}
+.si-roles{display:block;margin-top:4px;font-family:var(--mono);font-size:.72rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--grey)}
+
+/* Two-step set-up: numbered parts, the QR on white in both themes (a
+   scanner wants dark modules on light, and an inverted code does not scan
+   on every app), the key in groups of four that wrap as whole groups. */
+.si-steps{list-style:none;margin:0 0 6px;padding:0;display:grid;gap:22px;counter-reset:si}
+.si-steps > li{counter-increment:si;display:grid;gap:10px;min-width:0}
+.si-steps > li > .si-label::before{content:counter(si) " · "}
+.si-qr{width:min(208px,100%);padding:10px;background:#FFFFFF;border:1px solid var(--hair)}
+.si-qr svg{display:block;width:100%;height:auto}
+.si-or{margin:0;font-size:.92rem;color:var(--grey)}
+.si-key{display:flex;flex-wrap:wrap;gap:4px 12px;margin:0;padding:10px 12px;background:var(--paper-2);
+  font-family:var(--mono);font-size:1.02rem;font-weight:500;letter-spacing:.06em;-webkit-user-select:all;user-select:all}
+.si-key span{white-space:nowrap}
+.si-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
+.si-row .si-btn{width:auto}
+.si-status{font-size:.9rem;color:var(--grey)}
+
+/* The recovery codes: two columns of mono, numbered, selectable as a block. */
+.si-codes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;margin:0 0 18px;
+  padding:14px 16px;list-style:none;border:1.5px solid var(--ink);font-family:var(--mono);font-size:1rem;
+  font-weight:500;letter-spacing:.04em}
+.si-codes li{white-space:nowrap}
+.si-codes li::before{content:attr(data-n);display:inline-block;width:2.1em;color:var(--grey);font-size:.8em}
+.si-save{margin:0 0 18px;padding:12px 14px;border:1px solid var(--ink);border-left-width:3px;font-size:.98rem;line-height:1.45}
+.si-save b{font-weight:700}
+
+.si-wait{display:flex;align-items:center;gap:12px;min-height:48px;color:var(--grey)}
+.si-wait::before{content:"";width:14px;height:14px;border:2px solid var(--hair);border-top-color:var(--ink);
+  border-radius:50%;animation:si-spin .8s linear infinite}
+@keyframes si-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.si-wait::before{animation:none}}
+
+@media (max-width: 480px){
+  .si-card h1{font-size:1.65rem}
+}
+</style>
+<script type="module" src="/signin.js"></script>
+</head>
+<body>
+<div class="si">
+  <header class="si-top">
+    <span class="si-word"><span class="si-logo" aria-hidden="true"></span>FleetMirror</span>
+  </header>
+  <main class="si-main">
+    <section class="si-card" id="signin">
+      <p class="si-wait">Checking whether this browser is signed in…</p>
+      <noscript>
+        <p class="si-note bad">Signing in needs JavaScript. Turn it on for this site and reload.</p>
+      </noscript>
+    </section>
+  </main>
+  <footer class="si-foot">Every sign-in is recorded in the audit log</footer>
+</div>
+</body>
+</html>
