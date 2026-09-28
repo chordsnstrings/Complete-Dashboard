@@ -4057,14 +4057,23 @@ Asked for by the operator on 2026-09-28: a reset code by SMS instead of a
 reset link ("1 every 5 minutes 3 retries"), a text at 05:00 telling each
 driver the cash to deposit, and a text asking a driver to register a journey
 that has no booking. Measurements and rules: `docs/COVERAGE.md` "SMSala
-(SMS)" and "Driver messages by SMS". **deployed** and **proven** are filled
-when production has been measured, not before.
+(SMS)" and "Driver messages by SMS". **committed** means on
+`claude/ecosine-egari-tracking-apis-rf9ong` at `178ffe4` (fast-forwarded
+2026-09-28 after a clean suite: 344 files, 12,979 assertions, 0 failing).
+**deployed**: `SMSALA_API_TOKEN` added as a SECRET on both services (spec
+deployment `d4fa9c75`, which re-ran `9c97a6b` — trap 25), then deployment
+`8050d0e4`, a forced build of `178ffe4`, ACTIVE 13:28Z; the API applied
+`schema_v88.sql` at 13:27:47Z, which is the trip messages' go-live watermark.
+**proven** is only what production answers without an account: the rest needs
+a signed-in person (the Messages page's log and dry run) or the first run
+itself (05:00 Dubai on 2026-09-29 for the cash; the first journey that ends
+after 13:27:47Z and clears the reconciler's two-hour wait, for a trip).
 
 | # | what | test (revert fails it) | written | committed | deployed | proven |
 |---|---|---|---|---|---|---|
-| SMS-1 | SMSala client: array body, 200-with-refusal read as refusal, 19-digit id kept as text, UAE-mobile normaliser that pads nothing; `sms_outbox` (schema_v88) | smsala (36) | ✓ | ✓ 1ca4285 | | ✓ a live send from ECOSINE delivered in 3 s |
-| SMS-2 | reset code: 6 digits, HMAC bound to user and purpose, 10 minutes, 3 tries, 1 per 5 minutes; answered before any lookup; staff mobile set with step-up and a code | access_core §9g, signin_page, access_pages | ✓ | ✓ 6734451 | | |
-| SMS-3 | whose number: Uber's, then HR's; held on two numbers, a shared number, an HR employee matched to nobody carrying it, a REFUSED/PENDING identity pair | driver_sms §1 (phoneFor reversions: 3 and 2 fail) | ✓ | | | |
-| SMS-4 | 05:00 cash: Uber's cash_collected, not the fare; waits for the catch-up and every Uber figure, gives up at 09:00; channel-not-collected held; no AED 0.00; idempotent; switch | driver_sms §2 (fare 2, catch-up 5, channel 1 fail) | ✓ | | | |
-| SMS-5 | trip request: strict filter, watermark (no backlog), plate-overlap dedupe, 07:00 hold with re-check, 3 per person per day, switch | driver_sms §3 (overlap 3, night 5, re-check 3, watermark 4 fail) | ✓ | | | |
-| SMS-6 | Messages page (`#messages`, subject CT, sign-in only in every mode); switches in Access → Settings | driver_sms §4, endpoint_coverage | ✓ | | | |
+| SMS-1 | SMSala client: array body, 200-with-refusal read as refusal, 19-digit id kept as text, UAE-mobile normaliser that pads nothing; `sms_outbox` (schema_v88) | smsala (36) | ✓ | ✓ 1ca4285 | ✓ 8050d0e4 | ✓ a live send from ECOSINE delivered in 3 s |
+| SMS-2 | reset code: 6 digits, HMAC bound to user and purpose, 10 minutes, 3 tries, 1 per 5 minutes; answered before any lookup; staff mobile set with step-up and a code | access_core §9g, signin_page, access_pages | ✓ | ✓ 6734451 | ✓ 8050d0e4 | ✓ `/api/auth/reset/confirm` answers (400 on an empty body) |
+| SMS-3 | whose number: Uber's, then HR's; held on two numbers, a shared number, an HR employee matched to nobody carrying it, a REFUSED/PENDING identity pair | driver_sms §1 (phoneFor reversions: 3 and 2 fail) | ✓ | ✓ f7cb5cd | ✓ 8050d0e4 | |
+| SMS-4 | 05:00 cash: Uber's cash_collected, not the fare; waits for the catch-up and every Uber figure, gives up at 09:00; channel-not-collected held; no AED 0.00; idempotent; switch | driver_sms §2 (fare 2, catch-up 5, channel 1 fail) | ✓ | ✓ f7cb5cd | ✓ 8050d0e4 | |
+| SMS-5 | trip request: strict filter, watermark (no backlog), plate-overlap dedupe, 07:00 hold with re-check, 3 per person per day, switch | driver_sms §3 (overlap 3, night 5, re-check 3, watermark 4 fail) | ✓ | ✓ f7cb5cd | ✓ 8050d0e4 | |
+| SMS-6 | Messages page (`#messages`, subject CT, sign-in only in every mode); switches in Access → Settings | driver_sms §4, endpoint_coverage | ✓ | ✓ 178ffe4 | ✓ 8050d0e4 | ✓ `/api/sms/log` and `/preview` → 401, no-store, with no session; `#messages` from production bytes shows the sign-in reason at 1440 and 390, no page error, no sideways scroll |
