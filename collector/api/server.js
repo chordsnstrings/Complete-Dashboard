@@ -6863,14 +6863,33 @@ accessRoutes(app, { db: pool, layer: access, wrap, log });
    exactly what a module-level "the current request is an admin" variable would
    have let them do. */
 const LOCATION_COLS = ['pickup_addr', 'dropoff_addr'];
+/* A SIGNED-IN READER'S FILE HOLDS WHAT THEIR ROLE MAY SEE — every column,
+   not only the addresses.
+   ─────────────────────────────────────────────────────────────────────────
+   The access gate shapes JSON on the way out (api/access/shape.js wraps
+   res.json); this file is written row by row with res.write, which the shaper
+   never sees. So until 2026-09-28 a Dispatcher or a Safety lead — who may
+   export, and may not see revenue — downloaded every trip's price, because
+   only the two address columns were ever withheld, and only from a caller
+   without the admin token. The columns each class covers are named here; a
+   signed-in reader gets "(withheld)" in every column of a class their role
+   does not hold IN FULL (no role that may export holds any of these four
+   masked, so there is no masked form to write). An anonymous caller while
+   sign-in is optional gets exactly what it always got. */
+const EXPORT_CLASS_COLS = {
+  LOC: LOCATION_COLS,
+  ID: ['driver_name', 'driver_ext_id'],
+  VEH: ['plate'],
+  REV: ['price', 'fares'],
+};
 /* Blanked as the rows come back, before the CSV formatter or anything else has
    seen them. `rows` is a fresh array from pg on every call, so mutating it in
    place holds nothing and copies nothing. */
-const qWithoutAddresses = async (text, params) => {
+const qWithout = (cols) => async (text, params) => {
   const rows = await q(text, params);
   for (const r of rows) {
-    for (const c of LOCATION_COLS) {
-      // An address that was never recorded stays empty. Only a real one is
+    for (const c of cols) {
+      // A value that was never recorded stays empty. Only a real one is
       // replaced, so the file distinguishes "withheld" from "never sent".
       if (r[c] != null && r[c] !== '') r[c] = '(withheld)';
     }
@@ -6879,19 +6898,35 @@ const qWithoutAddresses = async (text, params) => {
 };
 const exportFull = express.Router();
 exportRoutes(exportFull, { q, wrap, winDays, log });
-const exportRedacted = express.Router();
-exportRoutes(exportRedacted, { q: qWithoutAddresses, wrap, winDays, log });
+/* One router per set of withheld columns, built once and kept: at most one
+   per combination of the four classes. Nothing is shared between two of
+   them, so two readers exporting at once cannot race. */
+const exportWithout = new Map();
+const exportRouterFor = (cols) => {
+  const k = cols.join(',');
+  if (!exportWithout.has(k)) {
+    const r = express.Router();
+    exportRoutes(r, { q: qWithout(cols), wrap, winDays, log });
+    exportWithout.set(k, r);
+  }
+  return exportWithout.get(k);
+};
 app.use((req, res, next) => {
   /* Matched here rather than by mounting at '/api/export', because Express
      strips a mount path before the router sees it and these routes declare
      their full path — mounted at the prefix they would match nothing at all. */
   if (!req.path.startsWith('/api/export/')) return next();
-  if (isAdmin(req, undefined, 'LOC')) return exportFull(req, res, next);
-  res.setHeader('x-export-withheld', LOCATION_COLS.join(','));
-  res.setHeader('x-export-withheld-reason',
-    'pickup and drop-off addresses are served only to a caller presenting x-admin-token; '
-    + 'a cell reading (withheld) had an address, an empty cell never did');
-  return exportRedacted(req, res, next);
+  const levels = req.fm?.kind === 'user' || req.fm?.kind === 'device' ? (req.fm.levels || {}) : null;
+  const withheld = levels
+    ? Object.entries(EXPORT_CLASS_COLS).filter(([c]) => levels[c] !== 'F').flatMap(([, cols]) => cols)
+    : (isAdmin(req, undefined, 'LOC') ? [] : LOCATION_COLS);
+  if (!withheld.length) return exportFull(req, res, next);
+  res.setHeader('x-export-withheld', withheld.join(','));
+  res.setHeader('x-export-withheld-reason', levels
+    ? 'not shown to your role; a cell reading (withheld) had a value, an empty cell never did'
+    : 'pickup and drop-off addresses are served only to a caller presenting x-admin-token; '
+      + 'a cell reading (withheld) had an address, an empty cell never did');
+  return exportRouterFor(withheld)(req, res, next);
 });
 
 /* Occupancy segments as pages rather than a modal: the list with its own

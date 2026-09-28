@@ -523,6 +523,47 @@ console.log('\n/api/export/trips.csv — 262,162 rows of pickup and drop-off to 
     && dayAnon.text.includes('2026-08-05,ecosine,uber,2,2,2,3,2,12.3,2,52.1,AED'),
   dayAnon.text.slice(0, 200));
   api.close();
+
+  /* SIGNED IN: the file holds what the role may see. The gate shapes JSON on
+     the way out and never sees res.write, so before 2026-09-28 a Dispatcher —
+     who may export, and may not see revenue — downloaded every trip's price.
+     A stub stands in for the access gate: it sets req.fm exactly as gate()
+     does for a signed-in reader. REVERSION: make `withheld` ignore `levels`
+     (always LOCATION_COLS for a caller without the token) — the Dispatcher's
+     file carries 33.1 and 52.1. */
+  const as = (levels) => (req, _res, next) => { req.fm = { kind: 'user', levels }; next(); };
+  const DSP = { ID: 'F', CT: 'F', BK: 'F', LOC: 'F', VEH: 'F', SYS: 'F' };
+  const FIN = { ID: 'F', CT: 'F', EARN: 'F', CASH: 'F', REV: 'F', PAY: 'F', BK: 'F', VEH: 'F', SYS: 'F' };
+  const OWN = { ID: 'F', LOC: 'F', VEH: 'F', REV: 'F', BK: 'F' };
+  const signed = async (levels, grain) => {
+    const srv = await serve((app) => {
+      app.use(as(levels));
+      mount(app, F_EXPORT, { express, exportRoutes, q, wrap, winDays, log: null, isAdmin });
+    });
+    const r = await srv.get(`/api/export/trips.csv?grain=${grain}&${WIN}`);
+    srv.close();
+    return r;
+  };
+  const dsp = await signed(DSP, 'trip');
+  const dh = dsp.text.trim().split('\n').map((l) => l.split(','));
+  const iPrice = dh[0].indexOf('price');
+  check('a Dispatcher (no revenue) gets every trip price withheld',
+    dh[1][iPrice] === '(withheld)' && dh[2][iPrice] === '(withheld)' && !dsp.text.includes('33.1'), dh[1].join(','));
+  check('…but keeps the addresses, names and plates the role holds',
+    dsp.text.includes(PICKUP) && dsp.text.includes('Muhammed Shahab Khan') && dsp.text.includes('L39421'));
+  check('…and the response says which columns, for this role',
+    dsp.headers.get('x-export-withheld') === 'price,fares' && /your role/.test(dsp.headers.get('x-export-withheld-reason') || ''),
+    String(dsp.headers.get('x-export-withheld')));
+  const dspDay = await signed(DSP, 'day');
+  check('a Dispatcher’s daily file withholds the fares column too',
+    dspDay.text.includes('2026-08-05,ecosine,uber,2,2,2,3,2,12.3,2,(withheld),AED'), dspDay.text.slice(0, 200));
+  const fin = await signed(FIN, 'trip');
+  check('Finance (no places) gets the addresses withheld and the prices kept',
+    !fin.text.includes(PICKUP) && fin.text.includes('33.1') && fin.headers.get('x-export-withheld') === 'pickup_addr,dropoff_addr',
+    String(fin.headers.get('x-export-withheld')));
+  const own = await signed(OWN, 'trip');
+  check('a role holding all four gets the whole file and no withheld header',
+    own.text.includes(PICKUP) && own.text.includes('33.1') && !own.headers.get('x-export-withheld'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

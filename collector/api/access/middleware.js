@@ -224,6 +224,16 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
   async function gate(req, res, next) {
     const fm = req.fm || { kind: 'anonymous', mode: 'enforced' };
     const path = req.path;
+    /* ONE SPELLING OF /api. Express matches routes case-insensitively, so
+       /API/driver/profile reaches the same handler as /api/driver/profile —
+       and this gate, like identify(), only looked at paths starting with a
+       lower-case /api/. Measured in test/access_core on 2026-09-28: with
+       sign-in required, an anonymous GET /API/t/people was served the whole
+       unshaped answer, and a Dispatcher read a cash page by writing it in
+       capitals. Any other spelling of the prefix is refused outright. */
+    if (/^\/api(\/|$)/i.test(path) && !path.startsWith('/api/')) {
+      return refuse(res, 404, { error: 'not_found', detail: 'No such address.' });
+    }
     if (!path.startsWith('/api/')) return next();
     if (path === '/api/health') return next();
     const entry = lookup(req.method, path);

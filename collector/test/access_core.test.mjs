@@ -413,6 +413,16 @@ console.log('\n10. sign-in required');
   check('the Owner turns sign-in on', m.status === 200 && m.json.config.mode === 'enforced');
   const closed = await anon.get('/api/t/people');
   check('now a visitor is refused and told to sign in', closed.status === 401 && closed.json.error === 'signin');
+  /* Express matches routes case-insensitively and ignores a trailing slash;
+     the gate must not be walked round by spelling the address differently.
+     REVERSION: remove the canonical-path check at the top of gate() — the
+     upper-case address is served. */
+  for (const alt of ['/API/t/people', '/Api/t/people', '/api/T/people', '/api/t/people/', '/api/t/PEOPLE']) {
+    const r = await anon.get(alt);
+    check(`…and ${alt} is refused too, not served round the gate`, r.status !== 200 || !Array.isArray(r.json), `${r.status} ${JSON.stringify(r.json).slice(0, 80)}`);
+  }
+  const dspAlt = await people.DSP.b.get('/API/t/cash');
+  check('a Dispatcher cannot reach a cash page by writing it in capitals', dspAlt.status !== 200 || !Array.isArray(dspAlt.json), `${dspAlt.status}`);
   const cfgByAcc = await people.ACC.b.post('/api/access/config', { mode: 'open' });
   check('an Access admin cannot turn it off', cfgByAcc.status === 403);
 }
