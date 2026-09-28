@@ -622,6 +622,52 @@ await section('14', async () => {
   noErrorsSoFar('Someone who manages nothing');
 });
 
+console.log('\n15 · Driver messages: what was texted and held back, signed in and not');
+await section('15', async () => {
+  /* Synthetic: a driver named for the test and a 97150000000x number. */
+  await dbc.query(`INSERT INTO fleet (id, name) VALUES ('ecosine', 'Ecosine') ON CONFLICT DO NOTHING`);
+  const { rows: [d] } = await dbc.query(`INSERT INTO driver (fleet_id, full_name) VALUES ('ecosine', 'Test Messages Driver') RETURNING id`);
+  await dbc.query(
+    `INSERT INTO sms_outbox (kind, dedupe_key, person_id, destination, sender, message_text, status, hold_reason,
+       provider_message_id, business_day, detail, sent_at)
+     VALUES ('cash_deposit', 'test-cash-1', $1, '971500000009', 'ECOSINE',
+             'Please deposit AED 110.50 of cash you received yesterday. Talk to your supervisor on WhatsApp.',
+             'sent', NULL, '2026092800000000001', current_date - 1, '{"amount":110.5,"source":"uber"}', now()),
+            ('trip_register', 'test-trip-1', $1, NULL, NULL,
+             'Please Register your trip from Al Garhoud to Deira - 12 km with your supervisor - ADMIN.',
+             'held', 'number_shared', NULL, current_date, '{"tier":"bracketed"}', NULL)`, [d.id]);
+  await page.goto(`${BASE}/?ui=desktop&skin=arkiv#messages`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('[data-panel="msg-log"]', { timeout: 20000 });
+  await settle();
+  const t = await page.locator('[data-panel="msg-log"]').innerText();
+  check('the log lists a message sent, with its words, its driver and the number', /Please deposit AED 110\.50/.test(t)
+    && /Test Messages Driver/.test(t) && /971500000009/.test(t), t.slice(0, 300));
+  check('…and one held back, with the reason in words', /held back/i.test(t) && /also on another driver/i.test(t), t.slice(0, 300));
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/messages-log-1440.png`, fullPage: true });
+  await page.goto(`${BASE}/?ui=desktop&skin=arkiv#messages/next`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('[data-panel="msg-next"] button[data-k="trip"]', { timeout: 20000 });
+  await page.locator('[data-panel="msg-next"] button[data-k="trip"]').click();
+  await page.waitForFunction(() => !document.querySelector('[data-panel="msg-next"] .loading')
+    && /journey|nothing|Switched off|No journey/i.test(document.querySelector('[data-panel="msg-next"]')?.innerText || ''), null, { timeout: 30000 });
+  const n = await page.locator('[data-panel="msg-next"]').innerText();
+  check('the dry run of the trip requests answers in words', /No journey with no booking|journey/i.test(n), n.slice(0, 200));
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/messages-next-1440.png`, fullPage: true });
+  noErrorsSoFar('Driver messages');
+  /* Signed out, in open mode: the page says why and offers the way in, and
+     the API answers nothing about a driver. */
+  const c4 = await browser.newContext({ viewport: { width: 390, height: 900 }, serviceWorkers: 'block' });
+  const p4 = await c4.newPage();
+  await p4.goto(`${BASE}/?ui=desktop#messages`, { waitUntil: 'domcontentloaded' });
+  await p4.waitForSelector('.access-closed', { timeout: 20000 });
+  const a = await p4.locator('.access-closed').innerText();
+  check('signed out: the page says it needs a sign-in, and why', /Sign in to see this page/i.test(a) && /mobile numbers/i.test(a), a.slice(0, 160));
+  if (SHOTS) await p4.screenshot({ path: `${SHOTS}/messages-signedout-390.png`, fullPage: true });
+  await c4.close();
+  const anon = await fetch(`${BASE}/api/sms/log`);
+  const body = await anon.json();
+  check('…and the API, asked with no session, refuses and names nobody', anon.status === 401 && !body.rows);
+});
+
 /* ── the shell's own sideways scroll, printed rather than hidden ───────── */
 if (shellWide.length) {
   console.log(`\n  note: the shell scrolls sideways on ${shellWide.length} address(es), exactly as far as on #policy — not these pages: ${[...new Set(shellWide.map((x) => x.replace(/^#\S+ /, '')))].join('; ')}`);

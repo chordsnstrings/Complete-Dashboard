@@ -50,7 +50,9 @@ function statusCell(r) {
     return `${pill('waiting', 'warn')}<div class="dim">${r.not_before ? `goes at ${esc(dtStr(r.not_before))} — nothing is texted at night` : 'goes on the next pass'}</div>`;
   }
   if (r.status === 'failed') {
-    const why = r.error === 'sending' ? 'the send was interrupted' : r.error || 'the gateway refused it';
+    /* The outbox keeps "code: sentence"; the reader gets the sentence. */
+    const why = r.error === 'sending' ? 'the send was interrupted'
+      : String(r.error || '').replace(/^[a-z_0-9]+:\s*/, '') || 'the gateway refused it';
     return `${pill('not sent', 'bad')}<div class="dim">${esc(why)}</div>`;
   }
   return `${pill('held back', 'dim')}<div class="dim">${esc(r.why || r.hold_reason || '')}</div>`;
