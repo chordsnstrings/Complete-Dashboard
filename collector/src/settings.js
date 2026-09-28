@@ -116,6 +116,11 @@ export const SETTING_DEFAULTS = {
      its own charger; it is a refusal to pretend the two names are two
      places. */
   CHARGING_SITES: "Al Garhoud|Dubai Int'l Airport, Dubai Production City",
+  /* The SMS gateway (src/smsala.js). ECOSINE is the sender the operator chose
+     on 2026-09-28; it delivers although the gateway's sender list still says
+     "Requested" for it (docs/COVERAGE.md "SMSala"). */
+  SMSALA_BASE: 'https://api2.smsala.com',
+  SMSALA_SENDER: 'ECOSINE',
 };
 
 // The full catalogue the Settings page renders. `secret:true` values are never returned in clear.
@@ -325,6 +330,15 @@ export const SETTING_DEFS = [
      that is 44% electric is a large share of its measured downtime. Without
      this list the optimiser reads charging as waste and recommends moving
      the cars away from the only place they can refuel. */
+  /* SMS. A setting rather than only an environment variable so the operator
+     can rotate the token on the Settings page without a deploy. */
+  { key: 'SMSALA_API_TOKEN', group: 'SMSala (SMS)', label: 'API token', secret: true,
+    hint: 'From the SMSala portal. The account’s IP allowlist must admit this server: the app has no fixed '
+      + 'outbound address, so the operator added 0.0.0.0 (2026-09-28).' },
+  { key: 'SMSALA_SENDER', group: 'SMSala (SMS)', label: 'Sender name', secret: false,
+    hint: 'The name drivers see. ECOSINE by default; VOLT and AD-VOLT are the other senders the account can use.' },
+  { key: 'SMSALA_BASE', group: 'SMSala (SMS)', label: 'API base url', secret: false },
+
   { key: 'CHARGING_SITES', group: 'Fleet', label: 'Areas with a charging station', secret: false,
     hint: "Comma-separated area names as they appear in trip addresses. Use | to list the ways one site is written: Al Garhoud|Dubai Int'l Airport" },
 ];

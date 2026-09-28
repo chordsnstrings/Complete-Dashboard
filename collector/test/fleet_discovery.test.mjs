@@ -40,7 +40,7 @@ const q = (t, p = []) => pg.query(t, p).then((r) => r.rows);
    check here fails (and so does everything after it). */
 console.log('\n1. schema v87 replays with the rest');
 {
-  check('v87 is the last registered schema file', SCHEMA_FILES[SCHEMA_FILES.length - 1] === 'schema_v87.sql', SCHEMA_FILES.slice(-2).join(','));
+  check('v87 is a registered schema file', SCHEMA_FILES.includes('schema_v87.sql'), SCHEMA_FILES.slice(-2).join(','));
   await applySchema(pg);
   const t = (await q(`SELECT table_name FROM information_schema.tables WHERE table_name IN
     ('platform_account','platform_account_name','platform_account_vehicle','fleet_change','fleet_legal_name')`)).map((r) => r.table_name).sort();

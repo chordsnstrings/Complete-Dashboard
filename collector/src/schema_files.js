@@ -239,4 +239,10 @@ export const SCHEMA_FILES = [
      waiting for an Owner. fleet gains the admin's chosen run of words and how
      its name was derived. Additive; the two fleets keep their ids. */
   'schema_v87.sql',
+  /* SMS (2026-09-28): the outbox every message is decided into (sent,
+     waiting for 07:00, or held with its reason), a staff member's own
+     confirmed mobile for a reset code, one-time codes stored as HMACs, and the
+     moment the unregistered-trip message went live so it never reaches back
+     into the journeys already on file. Additive. */
+  'schema_v88.sql',
 ];
