@@ -227,6 +227,12 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     if (!path.startsWith('/api/')) return next();
     if (path === '/api/health') return next();
     const entry = lookup(req.method, path);
+    /* Every answer to a signed-in reader says whose it is — the sign-in and
+       Access routes and the health checks too, not only the data routes. The
+       phone's worker empties its offline copy whenever the scope changes, and
+       an /api/auth/me with no scope read as "anonymous": every page load
+       emptied a signed-in person's offline figures and started again. */
+    if ((fm.kind === 'user' || fm.kind === 'device') && fm.access) res.set('x-fm-scope', fingerprintOf(fm.access));
     if (entry?.self) return next();                 // /api/auth/*, /api/access/*: the handler decides
     if (fm.kind === 'system') return next();
 

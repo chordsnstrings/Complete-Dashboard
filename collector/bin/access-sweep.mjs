@@ -205,7 +205,11 @@ async function visit(ctx, w, route, phone) {
     try {
       if ((r.headers()['content-type'] || '').includes('json')) {
         const body = await r.json();
-        item.leaks = leaks(body, w.levels, w.fleets);
+        /* /api/auth/* answers about the reader themself (their own email),
+           and /api/access/* decides for itself who may read it — both are
+           proved in test/access_core.test.mjs, not by this key scan, which
+           would call a person's own address a leak of drivers' contacts. */
+        item.leaks = /^\/api\/(auth|access)\//.test(u.pathname) ? [] : leaks(body, w.levels, w.fleets);
         if (r.status() === 403) item.reason = body?.detail || null;
       }
     } catch { /* body unavailable */ }

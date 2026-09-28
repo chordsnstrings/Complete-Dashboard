@@ -253,7 +253,10 @@ console.log('\n7 · no literal white where a token does the job');
 const whites = [];
 for (const [f, s] of SRC) {
   if (f === 'tokens.js') continue;          // the definition, not a use
-  const code = f.endsWith('.css') ? stripComments(s) : s;
+  /* A <meta name="theme-color"> colours the browser's own bar, which no CSS
+     token can reach: the sign-in page's light bar is its white paper. */
+  const code = f.endsWith('.css') ? stripComments(s)
+    : f.endsWith('.html') ? s.replace(/<meta name="theme-color"[^>]*>/g, '') : s;
   const hit = f.endsWith('.css')
     ? [...code.matchAll(/(?:^|[;{\s])(?:color|background|border-color|stroke|fill)\s*:\s*(?:#fff(?:fff)?|white)\b/gi)]
     : [...code.matchAll(/['"](?:#fff(?:fff)?|white)['"]/gi)];

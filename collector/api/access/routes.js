@@ -216,6 +216,10 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       }
     }
     clearCookies(res, req);
+    /* A wall screen signed in by its device link, with no person signed in
+       over it, signs ITSELF out: its cookie goes too. (A person signed in on
+       a screen's browser signs only themself out; the screen stays.) */
+    if (!token && req.fmCookies?.[DEV]) setCookie(res, req, DEV, '', { maxAge: 0 });
     /* Empties this browser's HTTP cache and storage for the site, so nothing
        the person read stays behind for the next person at this machine. */
     res.set('Clear-Site-Data', '"cache", "storage"');

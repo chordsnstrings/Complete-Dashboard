@@ -307,6 +307,13 @@ console.log('\n8. the cache never crosses people');
   const me1 = await people.CLK.b.get('/api/auth/me');
   const me2 = await people.DSP.b.get('/api/auth/me');
   check('/api/auth/me is each person’s own', me1.json.user.email === 'cash@example.test' && me2.json.user.email === 'dispatch@example.test');
+  /* The phone's worker empties its offline copy when the scope changes; a
+     sign-in answer without one read as "anonymous" and emptied it on every
+     page load. REVERSION: drop the early x-fm-scope in gate() — this fails. */
+  const data2 = await people.DSP.b.get('/api/t/people');
+  check('the sign-in answer says whose it is, the same as a data answer',
+    me2.headers.get('x-fm-scope') && me2.headers.get('x-fm-scope') === data2.headers.get('x-fm-scope'),
+    `${me2.headers.get('x-fm-scope')} vs ${data2.headers.get('x-fm-scope')}`);
 }
 
 console.log('\n9. actions: capability, CSRF, preview');

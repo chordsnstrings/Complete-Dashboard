@@ -1,9 +1,10 @@
-/* VENDORED, UNMODIFIED BELOW THE NEXT LINE — qrcode-generator 2.0.4 by
-   Kazuhiko Arase, MIT licence (header kept intact beneath), file
-   dist/qrcode.mjs from `npm pack qrcode-generator` (sha1 e8b3f309…fd94).
-   Draws the two-step set-up QR on /signin as SVG. Served from /vendor, which
-   is immutable for a year: never edit this file in place — vendor a new
-   version under a new name if it must change. */
+/* VENDORED. Everything below this comment is qrcode-generator 2.0.4 by
+   Kazuhiko Arase, MIT licence (its own header follows, intact), byte for
+   byte: dist/qrcode.mjs from `npm pack qrcode-generator@2.0.4`, package
+   sha1 e8b3f30922577eba52078aa9c0d5a2a74fe1fd94. It draws the two-step
+   set-up QR code on /signin as SVG, in the browser — the key never leaves
+   the page. Served from /vendor, which is cached as immutable for a year:
+   never edit this file in place; vendor a new version under a new name. */
 //---------------------------------------------------------------------
 //
 // QR Code Generator for JavaScript

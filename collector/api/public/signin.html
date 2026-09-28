@@ -51,8 +51,12 @@
     var t = localStorage.getItem('theme');
     if (t === 'light' || t === 'dark') {
       r.setAttribute('data-theme', t);
+      /* The chosen theme's bar colour, read from its own meta above rather
+         than written a second time here. */
       var metas = document.querySelectorAll('meta[name="theme-color"]');
-      for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', t === 'dark' ? '#111113' : '#FFFFFF');
+      var pick = null;
+      for (var j = 0; j < metas.length; j++) if ((metas[j].getAttribute('media') || '').indexOf(t) >= 0) pick = metas[j].getAttribute('content');
+      if (pick) for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', pick);
     }
   } catch (e) { /* storage refused: follow the system */ }
 }());
@@ -238,7 +242,25 @@ a:hover{text-decoration-thickness:2px}
   .si-card h1{font-size:1.65rem}
 }
 </style>
-<script type="module" src="/signin.js"></script>
+<!-- If signin.js never arrives (the connection dropped mid-load, a proxy
+     refused it), the page would sit on "Checking…" for ever. It says what
+     happened instead: at once when the script fails to load, and after
+     twenty seconds if it loaded but never started. signin.js marks the card
+     data-ready when it starts. -->
+<script>
+window.FM_SIGNIN_FAILED = function () {
+  var show = function () {
+    var box = document.getElementById('signin');
+    if (!box || box.getAttribute('data-ready') === '1') return;
+    box.innerHTML = '<p class="si-eyebrow">Sign in</p><h1>The sign-in page did not load</h1>'
+      + '<p class="si-note bad" role="status">Part of this page did not arrive, so signing in cannot start. '
+      + 'The connection may have dropped. <a href="">Reload the page</a> to try again.</p>';
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show); else show();
+};
+setTimeout(window.FM_SIGNIN_FAILED, 20000);
+</script>
+<script type="module" src="/signin.js" onerror="window.FM_SIGNIN_FAILED()"></script>
 </head>
 <body>
 <div class="si">

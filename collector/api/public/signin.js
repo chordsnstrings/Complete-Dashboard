@@ -33,9 +33,12 @@
    the real site. "/" then not "//" is the obvious half. The half that is not
    obvious: the URL parser treats a backslash as a slash and silently drops
    tabs and newlines, so "/\evil.example" and "/\t/evil.example" both become
-   "//evil.example". safeBack() refuses any of those characters outright and
-   then asks the URL parser itself whether the origin survived. It also
-   refuses /signin (a loop) and /api/ (a JSON answer is not a page).
+   "//evil.example"; and dot segments collapse, so "/.//evil.example" parses
+   to the pathname "//evil.example". safeBack() refuses those characters
+   outright, asks the URL parser whether the origin survived, and then checks
+   the path it is about to hand back — not only the one it was given — in
+   the same two ways. It also refuses /signin (a loop) and /api/ (a JSON
+   answer is not a page).
 
    A NEW SIGN-IN FORGETS THE LAST READER'S COPIES. The dashboard keeps what
    it read in localStorage (swr.js, 'fleet.swr.v1') and the service worker
@@ -43,12 +46,17 @@
    show the last numbers. Signing OUT clears them (access.js signOut and the
    server's Clear-Site-Data). A session that simply EXPIRED clears nothing —
    so the next person to sign in at that browser would be drawn the previous
-   person's figures, from the previous person's role, until each request came
-   back. Both are dropped here the moment a sign-in succeeds.
+   person's figures, from the previous person's role. localStorage is
+   partitioned by access.js itself (loadWho → partitionStorage, keyed on who
+   is signed in), and this page calls loadWho after every sign-in. The
+   service worker's cache is keyed on the URL alone, so this page empties it
+   the moment a sign-in succeeds, and waits for that before moving on.
 
    The house rule holds on this page too: when something cannot be known —
-   /api/auth/me did not answer, a QR code could not be drawn — the page says
-   so and why, and offers what still works, rather than drawing a guess. */
+   /api/auth/me did not answer (or took more than twelve seconds), a QR code
+   could not be drawn, this very script did not arrive (signin.html says so
+   itself) — the page says so and why, and offers what still works, rather
+   than drawing a guess. */
 import { who, loadWho, getJson, post, signOut, ROLE } from './access.js';
 
 /* ── pure helpers (exported for test/signin_page.test.mjs) ───────────── */
@@ -61,7 +69,15 @@ export function safeBack(raw, origin = 'https://fleetmirror.invalid') {
   try { base = new URL(origin); u = new URL(s, base); } catch { return '/'; }
   if (u.origin !== base.origin) return '/';
   if (/^\/(?:signin|api)(?:[/.?#]|$)/i.test(u.pathname)) return '/';
-  return `${u.pathname}${u.search}${u.hash}`;
+  /* The OUTPUT is checked too, because the parser can make a "//" that the
+     input never had: dot segments collapse, so "/.//evil.example",
+     "/x/..//evil.example" and "/%2e//evil.example" all have the pathname
+     "//evil.example" — which location.replace() reads as another host.
+     Found by reverting the guards above one at a time, 2026-09-28. */
+  const out = `${u.pathname}${u.search}${u.hash}`;
+  if (!out.startsWith('/') || out.startsWith('//') || out.includes('\\')) return '/';
+  try { if (new URL(out, base).origin !== base.origin) return '/'; } catch { return '/'; }
+  return out;
 }
 
 /* #invite=TOKEN, #reset=TOKEN, #device=TOKEN. Tokens are base64url. A link
@@ -206,6 +222,8 @@ function onClick(e) {
     return;
   }
   const act = t?.closest('[data-act]');
+  /* A link opened into a new tab or window is left to the browser. */
+  if (act?.tagName === 'A' && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0)) return;
   if (act && S.acts[act.dataset.act]) {
     e.preventDefault();
     S.acts[act.dataset.act](act, e);
@@ -236,17 +254,15 @@ async function refreshWho() {
   } catch (err) { S.meError = says(err); return false; }
 }
 
-function forgetPreviousReader() {
+/* Awaited, but never for more than a second: an empty cache is a nicety
+   for the next reader, not a reason to hold the person at the door. */
+async function forgetPreviousReader() {
   try {
-    for (const k of Object.keys(localStorage)) if (k.startsWith('fleet.swr')) localStorage.removeItem(k);
-  } catch { /* storage refused: there is nothing kept to forget */ }
-  try {
-    if (typeof caches !== 'undefined') {
-      caches.keys()
-        .then((ks) => Promise.all(ks.filter((k) => /-data$/.test(k)).map((k) => caches.delete(k))))
-        .catch(() => {});
-    }
-  } catch { /* no Cache Storage here */ }
+    if (typeof caches === 'undefined') return;
+    const gone = caches.keys()
+      .then((ks) => Promise.all(ks.filter((k) => /-data$/.test(k)).map((k) => caches.delete(k))));
+    await Promise.race([gone, new Promise((r) => setTimeout(r, 1000))]);
+  } catch { /* no Cache Storage here, or it refused: nothing kept to forget */ }
 }
 
 const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = ''; };
@@ -327,7 +343,7 @@ function stepLogin() {
       try {
         const r = await post('/api/auth/login', { email, password: pw.value }, { retry: false });
         if (r?.mfa === 'code' && r.ticket) { S.ticket = r.ticket; stepCode(); return; }
-        if (r?.ok) { forgetPreviousReader(); await afterSignIn(); return; }
+        if (r?.ok) { await forgetPreviousReader(); await afterSignIn(); return; }
         showErr(form, 'The server did not confirm the sign-in. Try again.');
       } catch (err) {
         showErr(form, says(err));
@@ -372,7 +388,7 @@ function stepCode({ recovery = false } = {}) {
     submitting(form, 'Checking…', async () => {
       try {
         const r = await post('/api/auth/login/code', { ticket: S.ticket, code: n.code }, { retry: false });
-        if (r?.ok) { S.ticket = null; forgetPreviousReader(); await afterSignIn(); return; }
+        if (r?.ok) { S.ticket = null; await forgetPreviousReader(); await afterSignIn(); return; }
         showErr(form, 'The server did not confirm the code. Try again.');
       } catch (err) {
         /* The ticket is gone (five minutes, or five wrong codes): the
@@ -596,8 +612,14 @@ function stepSignedIn() {
       ${notice()}
       <p class="si-who">This screen is signed in as <b>${esc(who.device?.name || 'a screen')}</b>. It shows only what that screen is allowed to see.</p>
       <div class="si-actions"><a class="si-btn" href="${esc(S.back)}" data-act="continue">Continue</a></div>
-      <div class="si-quiet"><p>To stop this screen, the Owner or an Access admin revokes it on the Access page.</p></div>`,
-    { title: 'Signed in', focus: 'h1', acts: { continue: () => leave(S.back) } });
+      <div class="si-quiet">
+        <p>To stop this screen, the Owner or an Access admin revokes it on the Access page.</p>
+        <p><button type="button" class="si-link" data-act="person">Sign in as a person on this browser</button></p>
+      </div>`,
+    /* A person's session outranks the screen's (middleware.js identify reads
+       fm_sid before fm_dev), so a person can sign in here without removing
+       the screen, and the screen comes back when they sign out. */
+    { title: 'Signed in', focus: 'h1', acts: { continue: () => leave(S.back), person: () => stepLogin() } });
     return;
   }
   const u = who.user || {};
@@ -719,7 +741,7 @@ async function doDevice(token) {
   paint(wait('Signing this screen in…'), { title: 'Screen', focus: 'none' });
   let r;
   try { r = await post('/api/auth/device', { token }, { retry: false }); } catch (err) { stepBadLink(says(err)); return; }
-  forgetPreviousReader();
+  await forgetPreviousReader();
   await refreshWho();
   paint(`
     <p class="si-eyebrow">Screen</p>
@@ -753,13 +775,18 @@ export async function start() {
   S.back = safeBack(q.get('back'), location.origin);
   const why = q.get('why') || '';
   S.why = Object.prototype.hasOwnProperty.call(WHY, why) ? why : '';
+  root().dataset.ready = '1';
   root().addEventListener('click', onClick);
   window.addEventListener('hashchange', () => {
     const l = takeLink();
     if (l) openLink(l);
   });
   const link = takeLink();
-  await refreshWho();
+  /* A /api/auth/me that never answers (a database too busy to take the
+     query) would leave "Checking…" on screen for as long as the browser
+     waits. Twelve seconds, then the form, saying why. */
+  const answered = await Promise.race([refreshWho().then(() => true), new Promise((r) => { setTimeout(() => r(false), 12_000); })]);
+  if (!answered) S.meError = 'no answer after 12 seconds';
   if (link) return openLink(link);
   return route();
 }

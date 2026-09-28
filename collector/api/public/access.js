@@ -16,12 +16,15 @@ export const who = {
 };
 
 export async function loadWho() {
+  let answered = false;
   try {
     const r = await fetch('/api/auth/me', { credentials: 'same-origin', cache: 'no-store' });
-    if (r.ok) Object.assign(who, await r.json(), { loaded: true });
-    else who.loaded = true;
+    if (r.ok) { Object.assign(who, await r.json(), { loaded: true }); answered = true; } else who.loaded = true;
   } catch { who.loaded = true; }
-  partitionStorage();
+  /* Only on an ANSWER. A 503 or no connection says nothing about who is
+     here, and treating it as "anonymous" threw away a signed-in person's
+     kept figures exactly when they were offline and needed them. */
+  if (answered) partitionStorage();
   return who;
 }
 
@@ -80,7 +83,10 @@ export const csrfHeaders = () => (csrf() ? { 'x-fm-csrf': csrf() } : {});
 
 /* ── where a signed-out reader goes ───────────────────────────────────── */
 export function toSignIn(reason = '') {
-  const back = `${location.pathname}${location.hash}`;
+  /* From the sign-in page itself, keep where the reader was going. */
+  const back = location.pathname === '/signin'
+    ? (new URLSearchParams(location.search).get('back') || '/')
+    : `${location.pathname}${location.hash}`;
   const q = new URLSearchParams({ back });
   if (reason) q.set('why', reason);
   location.assign(`/signin?${q}`);

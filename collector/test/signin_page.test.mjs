@@ -28,16 +28,23 @@
    scroll, the right paper for the theme, and at 390px every control at
    least 44px tall. SIGNIN_SHOTS=<dir> saves a screenshot of each.
 
-   REVERSIONS THAT PROVE IT (each makes a named check fail):
+   REVERSIONS THAT PROVE IT — each was made, run, and seen to fail the
+   named check, 2026-09-28:
      · signin.html inline script: drop the history.replaceState — "the invite
        token left the address bar before signin.js had even loaded" fails.
-     · signin.js safeBack: drop the backslash/control-character test —
-       "/\\evil.example" and "/\\t/evil.example" fail, and so does "a hostile
-       ?back= lands on this origin's /".
-     · signin.js stepRecovery "saved": drop guardLeaving(false) — the landing
-       after the codes never happens (Playwright dismisses beforeunload).
-     · signin.js stepLogin: drop the `open` condition's who.now — the
-       optional-sign-in line shows although /api/auth/me did not answer. */
+     · signin.js safeBack: drop the check on the path it HANDS BACK — the four
+       dot-segment cases ("/.//evil.example" and kin) come back as
+       "//evil.example", another host. (Dropping the character test or the
+       input's origin test alone fails nothing: the URL parser turns
+       "/\evil.example" into a different origin whose PATH is "/", so the
+       output is still "/". The output check is the one that matters.)
+     · signin.js: drop guardLeaving(false) from leave() and from the "saved"
+       action — "…without a 'leave this page?' on the way" fails.
+     · signin.js stepLogin: drop `Boolean(who.now) &&` from `open` — "…and
+       does not claim sign-in is optional" fails when /api/auth/me is 503.
+     · signin.js forgetPreviousReader: make it delete nothing — "…and the
+       service worker's copies of them too" fails. (The localStorage half is
+       access.js partitionStorage's, and is checked, not owned, here.) */
 import pg from 'pg';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -64,6 +71,9 @@ console.log('\n1. where the page may send you, and what it reads');
     ['https://evil.example/', '/'], ['javascript:alert(1)', '/'], ['', '/'], [null, '/'], [undefined, '/'],
     ['/signin', '/'], ['/signin?back=/x', '/'], ['/signin.html', '/'], ['/api/kpis', '/'],
     ['/%2F%2Fevil.example', '/%2F%2Fevil.example'], ['drivers', '/'],
+    /* Dot segments collapse into a "//" the input never had. */
+    ['/.//evil.example', '/'], ['/..//evil.example', '/'], ['/%2e//evil.example', '/'], ['/x/..//evil.example', '/'],
+    ['/./\\evil.example', '/'], ['/#//evil.example', '/#//evil.example'],
   ];
   for (const [raw, want] of cases) check(`safeBack(${JSON.stringify(raw)}) → ${want}`, safeBack(raw, O) === want, `got ${safeBack(raw, O)}`);
   const tok = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcde';
@@ -122,7 +132,23 @@ async function cleanup() {
   try { await admin.query(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`); } catch { /* best effort */ }
   try { await admin.end(); } catch { /* gone */ }
 }
-process.on('SIGINT', () => { cleanup().finally(() => process.exit(130)); });
+/* Whatever stops this run, the server and the database go with it: a
+   Playwright call that throws outside the try below (inside a route
+   handler, say) would otherwise leave a server holding the port and a
+   database behind — measured once, 2026-09-28. And a run that hangs is
+   ended, not left running. */
+let ending = false;
+const bail = (why, code = 1) => {
+  if (ending) return;
+  ending = true;
+  console.log(`  ✗ the run stopped: ${String(why?.stack || why).slice(0, 800)}`);
+  console.log(`\n${pass} passed, ${fail + 1} failed`);
+  cleanup().finally(() => process.exit(code));
+};
+process.on('SIGINT', () => bail('interrupted', 130));
+process.on('unhandledRejection', (e) => bail(e));
+process.on('uncaughtException', (e) => bail(e));
+setTimeout(() => bail('took longer than eight minutes'), 8 * 60_000).unref();
 
 try {
   await admin.query(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`);
@@ -182,7 +208,11 @@ try {
         status: 200, contentType: 'text/html', body: '<!doctype html><title>landed</title><p id="landed">landed</p>' }));
     }
     const page = await ctx.newPage();
-    const rec = { page, ctx, errors: [], refusals: [] };
+    const rec = { page, ctx, errors: [], refusals: [], dialogs: [] };
+    /* A handler here means Playwright no longer answers dialogs itself; each
+       is recorded and accepted, so a "leave this page?" that should not have
+       been asked is counted rather than silently cancelling a navigation. */
+    page.on('dialog', (d) => { rec.dialogs.push(d.type()); d.accept().catch(() => {}); });
     page.on('console', (m) => {
       if (m.type() !== 'error') return;
       const where = page.url();
@@ -200,7 +230,16 @@ try {
   const landed = async (page) => {
     await page.waitForURL((u) => !u.pathname.startsWith('/signin'), { timeout: 15000 });
     if (!REAL_APP) await page.waitForSelector('#landed');
-    return new URL(page.url());
+    const at = new URL(page.url());
+    /* With the real app: it must STAY there — app.js sends a signed-out or
+       restricted reader to /signin, and a disagreement between the two
+       about who is signed in is a loop the reader cannot get out of. */
+    if (REAL_APP) {
+      await sleep(3000);
+      const now = new URL(page.url());
+      check(`the real app kept the reader on ${at.pathname}${at.hash} (no bounce back to /signin)`, !now.pathname.startsWith('/signin'), now.href);
+    }
+    return at;
   };
   const csrfOf = async (ctx) => (await ctx.cookies(base)).find((c) => c.name === 'fm_csrf')?.value || '';
   const api = async (ctx, path, data) => {
@@ -339,9 +378,15 @@ try {
     const clip = await page.evaluate(() => navigator.clipboard.readText());
     check('Copy codes copies all ten', ownerRecovery.every((x) => clip.includes(x.trim())));
     await layout(A, 'recovery codes');
+    check('leaving the codes unsaved asks first (beforeunload is held)', await page.evaluate(() => {
+      const e = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(e);
+      return e.defaultPrevented;
+    }));
     await page.click('[data-act=saved]');
     const u = await landed(page);
     check('"I have saved them" lands on "/"', u.pathname === '/' && !u.hash, u.href);
+    check('…without a "leave this page?" on the way', !A.dialogs.includes('beforeunload'), A.dialogs.join(','));
     const m = await me(A.ctx);
     check('…signed in, nothing still owed, two-step on', m.signedIn && m.restricted === null && m.user.totp === true, JSON.stringify(m).slice(0, 200));
   }
@@ -362,9 +407,18 @@ try {
     const { page, ctx } = A;
     const out = await api(ctx, '/api/auth/logout');
     check('POST /api/auth/logout signs the Owner out', out.status === 200 && (await me(ctx)).signedIn === false);
-    await page.evaluate(() => { try { localStorage.setItem('fleet.swr.v1', '{"stale":"from the last reader"}'); } catch { /* */ } });
     await page.goto(`${base}/signin?why=signedout&back=%2F%2Fevil.example`);
     await waitH1(page, 'Sign in to FleetMirror');
+    /* Put there AFTER the sign-out: the server's Clear-Site-Data has already
+       emptied storage by now (Chromium applies it, even to this API call, on
+       the next navigation — measured). What is left is the case this guards:
+       a session that simply expired, with the last reader's answers still in
+       the store when the next person signs in. */
+    await page.evaluate(async () => {
+      try { localStorage.setItem('fleet.swr.v1', '{"stale":"from the last reader"}'); } catch { /* */ }
+      const c = await caches.open('fleet-test-data');
+      await c.put('/api/kpis?days=1', new Response('{"stale":"from the last reader"}', { headers: { 'content-type': 'application/json' } }));
+    });
     check('?why=signedout says so in one line', (await noteText(page)).includes(WHY.signedout));
     await page.fill('#si-email', OWNER);
     await page.fill('#si-password', OWNER_PW);
@@ -382,7 +436,12 @@ try {
     ownerLast = c.step;
     const u = await landed(page);
     check('a hostile ?back= lands on this origin\'s "/"', u.origin === base && u.pathname === '/', u.href);
-    check('the last reader\'s cached answers were forgotten on sign-in', await page.evaluate(() => localStorage.getItem('fleet.swr.v1')) === null);
+    /* The stale entry must be gone; with the real app loaded, the store may
+       already hold the NEW reader's answers, which is right. */
+    check('the last reader\'s answers kept by the page were forgotten on sign-in (access.js partitionStorage)',
+      !String(await page.evaluate(() => localStorage.getItem('fleet.swr.v1'))).includes('from the last reader'));
+    check('…and the service worker\'s copies of them too',
+      !(await page.evaluate(() => caches.keys())).includes('fleet-test-data'));
     check('signed in with the second step done', (await me(ctx)).restricted === null);
   }
 
@@ -416,14 +475,14 @@ try {
        the address bar while the module that uses it has not even arrived. */
     let release;
     const held = new Promise((r) => { release = r; });
-    await ctx.route('**/signin.js', async (route) => { await held; await route.continue(); });
+    await ctx.route('**/signin.js', async (route) => { await held; await route.continue().catch(() => {}); });
     await page.goto(`${base}${dispatchLink}`, { waitUntil: 'commit' });
     await page.waitForSelector('#signin .si-wait', { state: 'attached' });
     const early = await page.evaluate(() => location.href);
     release();
-    await ctx.unroute('**/signin.js');
     check('the invite token left the address bar before signin.js had even loaded', !early.includes('invite='), early);
     await waitH1(page, 'Set up your FleetMirror account');
+    await ctx.unroute('**/signin.js');
     check('the invite says whose account it is', (await page.inputValue('#si-account')) === 'dispatch@example.test');
     check('…and asks for a name', await page.locator('#si-name').count() === 1);
     check('the token is not in the address bar or the history entry', !page.url().includes('#') && !(await page.evaluate(() => location.href)).includes('invite'));
@@ -561,6 +620,11 @@ try {
     check('…and continues to "/"', u.pathname === '/');
     const m = await me(D.ctx);
     check('…as a device', m.signedIn && m.kind === 'device' && m.device?.name === 'Test wall screen');
+    await D.page.goto(`${base}/signin`);
+    await waitH1(D.page, 'This screen is signed in');
+    await D.page.click('[data-act=person]');
+    await waitH1(D.page, 'Sign in to FleetMirror');
+    check('a person can still sign in at a screen', await D.page.locator('#si-email').count() === 1);
   }
 
   /* ── 9. what the page cannot know, it says ──────────────────────────── */
@@ -596,6 +660,27 @@ try {
     await page.goto(`${base}/signin#invite=abc`);
     await waitH1(page, 'This link cannot be used');
     check('a cut-off link is reported as incomplete', (await noteText(page)).includes('incomplete'));
+
+    await ctx.route('**/signin.js', (route) => route.abort('connectionreset'));
+    await page.goto(`${base}/signin`);
+    await waitH1(page, 'The sign-in page did not load');
+    check('when signin.js does not arrive, the page says so instead of "Checking…" for ever',
+      (await noteText(page)).includes('did not arrive'));
+    await ctx.unroute('**/signin.js');
+
+    /* /api/auth/me that never answers: the form after twelve seconds, with
+       the reason, and no claim about the sign-in mode. */
+    let hang;
+    const hung = new Promise((r) => { hang = r; });
+    await ctx.route('**/api/auth/me', async (route) => { await hung; await route.abort().catch(() => {}); });
+    const t = Date.now();
+    await page.goto(`${base}/signin`);
+    await waitH1(page, 'Sign in to FleetMirror');
+    check('a /api/auth/me that never answers gives way to the form, saying so',
+      (await noteText(page)).includes('no answer after 12 seconds') && Date.now() - t >= 11_000, await noteText(page));
+    check('…with no claim that sign-in is optional', await page.locator('.si-open').count() === 0);
+    hang();
+    await ctx.unroute('**/api/auth/me');
   }
 
   /* ── 10. sign-in required ────────────────────────────────────────────── */
@@ -617,10 +702,36 @@ try {
     check('signing in still works when it is required', u.pathname === '/');
   }
 
-  if (REAL_APP) {
-    await sleep(3000);
-    check('the real app did not send the Owner straight back to /signin', !new URL(A.page.url()).pathname.startsWith('/signin'), A.page.url());
+  /* ── 10b. links opened in a browser somebody is signed in to ─────────── */
+  console.log('\n10b. links opened in a browser that is already signed in');
+  {
+    const inv = await api(A.ctx, '/api/access/users', { email: 'second.dispatch@example.test', grants: [{ role: 'DSP' }], reason: 'test invite' });
+    const dev = await api(A.ctx, '/api/access/devices', { name: 'Test second screen' });
+    check('two more links are issued (the step-up still holds)', inv.status === 200 && dev.status === 200, JSON.stringify([inv.body, dev.body]).slice(0, 200));
+
+    /* The Owner opens somebody else's invite in their own browser. */
+    const { page, ctx } = A;
+    await page.goto(`${base}${inv.body.link}`);
+    await waitH1(page, 'Set up your FleetMirror account');
+    check('the invite warns that this browser is signed in as somebody else',
+      (await noteText(page)).includes(`signed in as ${OWNER}`), await noteText(page));
+    await page.fill('#si-new', 'garnet iris jade kestrel');
+    await page.fill('#si-confirm', 'garnet iris jade kestrel');
+    await page.click('#si-linkform button[type=submit]');
+    await waitH1(page, 'Sign in to FleetMirror');
+    check('…finishing it ends the Owner\'s session here, as it said', (await me(ctx)).signedIn === false);
+    check('…and offers sign-in for the new account', (await page.inputValue('#si-email')) === 'second.dispatch@example.test');
+
+    /* A screen link opened where a person is signed in, and accepted. */
+    const { page: bp, ctx: bctx } = B;
+    await bp.goto(`${base}${dev.body.link}`);
+    await waitH1(bp, 'Make this browser a screen?');
+    await bp.click('[data-act=go]');
+    await waitH1(bp, 'This screen is signed in');
+    const m = await me(bctx);
+    check('"Sign out and make this browser the screen" does both', m.kind === 'device' && m.device?.name === 'Test second screen', JSON.stringify(m).slice(0, 160));
   }
+
 
   /* ── 11. the console ─────────────────────────────────────────────────── */
   console.log('\n11. the console');
