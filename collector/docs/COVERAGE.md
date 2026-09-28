@@ -4104,6 +4104,19 @@ untouched, and nothing projected is ever added into `accounted`.
   21. **A setting the UI saves is not a setting the server obeys.**
       `cash_stepup_aed` was stored, echoed and promised on the Access page,
       and read by nothing. Grep for the READER of any new setting.
+  22. **A page's subject is not always the class of the list it loads.**
+      `#playbook` is about revenue and built on a bookings list; `#unit` on a
+      vehicles list. The menu judged the subject and the server judged the
+      list, so the wall screen (revenue in full, bookings and vehicles as
+      totals) was offered four pages the server then refused whole.
+      `VIEW_LIST_NEEDS` in access.js names the list; `closingClass` makes
+      the closed page name it. Measure a new page's first route against
+      the manifest, not the page's title.
+  23. **One withheld panel must not close a page.** The overview's driver
+      leaderboard needs names; refused to the wall screen, it closed the
+      overview — the page a wall screen shows. Wrap any panel whose route
+      carries a class the page's readers may lack in `unlessWithheld`, and
+      have the panel say why it is empty.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 

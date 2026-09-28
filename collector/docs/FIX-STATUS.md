@@ -4014,6 +4014,9 @@ that found it.
 | U16 | critical | an Owner who had not signed in yet was not an "active" Owner, so an Access admin could ask for their invite link and become an Owner | the account ceiling counts the waiting Owner grant | access_core §6 | ✓ | | | |
 | U17 | medium | a wall screen shows revenue in full; an Access admin could make one and open its link | the maker must hold what the screen shows | access_core §6 | ✓ | | | |
 | U18 | medium | the "re-confirm a cash entry above AED N" setting was saved and shown and never enforced | the gate asks for step-up on a recorded entry above it; the form confirms and resends | access_core §9f | ✓ | | | |
+| S1 | sweep | the overview closed for the wall screen because the driver leaderboard needs names | the panel says why it is empty; the page draws the rest | sweep (WALL #overview) | ✓ | | | |
+| S2 | sweep | the menu offered the wall screen four pages the server refuses (their lists are bookings or vehicles, held as totals) | `VIEW_LIST_NEEDS`; the closed page names the list's class | view_list_needs | ✓ | | | |
+| S3 | sweep | a wall screen on Approvals was sent to the sign-in page | the person-only routes tell a screen it is a screen (403 with the reason) | sweep (WALL #approvals) | ✓ | | | |
 | U15 | medium | the HR roster and vehicle feeds narrowed a one-fleet reader's rows but sent totals over every fleet | both `mixed`: refused with the true reason, shown as a closed page | access_manifest | ✓ | | | |
 
 **Accepted, not fixed (documented in ULM-DESIGN §16):** in open mode an

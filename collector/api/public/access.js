@@ -240,11 +240,31 @@ function viewKey(view, sub, param, phone) {
   if (param && `${view}/${param}` in map) return `${view}/${param}`;
   return view;
 }
+/* THE LIST A PAGE IS BUILT ON, where that is not the page's subject.
+   ─────────────────────────────────────────────────────────────────────────
+   #playbook is about revenue, and it is built on /api/playbook, a list of
+   bookings; #unit on /api/economics/assets, a list of vehicles. A reader who
+   holds the subject but sees that list only as totals — the wall screen:
+   revenue in full, bookings and vehicles as totals — was offered the page by
+   the menu and then refused it by the server, whole (sweep, 2026-09-28). The
+   menu now asks what the server will ask. Measured against the manifest's
+   subject and grain for the route each page loads first. */
+export const VIEW_LIST_NEEDS = Object.freeze({ playbook: 'BK', unit: 'VEH', 'corporate/leakage': 'BK', 'platforms/tiers': 'VEH' });
+const listNeed = (view, sub, phone) => (phone ? null : VIEW_LIST_NEEDS[sub ? `${view}/${sub}` : view] || null);
+/* The class that keeps a page closed to this reader: its subject, or the list
+   it is built on — so the closed page names the true one. */
+export function closingClass(view, sub = '', param = '', opts = {}) {
+  const need = listNeed(view, sub, opts.phone);
+  if (need && rank(levelOf(need)) < rank('M')) return need;
+  return subjectOf(view, sub, param, opts);
+}
 export function canOpenView(view, sub = '', param = '', opts = {}) {
   if (!gated()) return true;
   if (VIEW_CAP[view]) return (who.access?.capsAny || []).includes(VIEW_CAP[view]);
   const s = subjectOf(view, sub, param, opts);
   if (s === null) return true;
+  const need = listNeed(view, sub, opts.phone);
+  if (need && rank(levelOf(need)) < rank('M')) return false;
   const key = viewKey(view, sub, param, opts.phone);
   const totals = (opts.phone ? PHONE_AGGREGATE : VIEW_AGGREGATE).has(key);
   return rank(levelOf(s)) >= (totals ? rank('A') : rank('M'));

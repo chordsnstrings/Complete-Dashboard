@@ -6,7 +6,7 @@
    else who may commit it opens this page, reads what is stored, and commits
    THAT — by its number, never by re-sending rows a second time. The preparer
    can withdraw it; a committer can decline it, saying why. */
-import { getJson, post, who } from './access.js';
+import { getJson, post, who, closedBlock } from './access.js';
 import { esc } from './ui.js';
 import { TZ } from './tz.js';
 
@@ -36,6 +36,9 @@ export async function approvalsPage(root) {
   const draw = async () => {
     let data;
     try { data = await getJson('/api/access/proposals'); } catch (e) {
+      /* Refused (a screen, or a role with no four-eyes action) is an answer
+         with a reason, not a failure. */
+      if (e.status === 403) { host.replaceChildren(closedBlock({ view: 'approvals', title: 'This is not shown to your role', detail: e.message })); return; }
       host.innerHTML = `<p class="note err">${esc(e.message)}</p>`; return;
     }
     const open = data.proposals.filter((p) => p.status === 'open');

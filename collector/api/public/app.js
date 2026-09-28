@@ -27,7 +27,7 @@ import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
    something is not shown. */
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
   WithheldError, toSignIn, signOut, roleNames, post as accessPost, installFetchGuard, inChosenLook,
-  unlessWithheld, VIEW_CAP, VIEW_CAP_WHY, fleetLabel, fleetList, fleetNames, allFleetsLabel } from './access.js';
+  unlessWithheld, closingClass, VIEW_CAP, VIEW_CAP_WHY, fleetLabel, fleetList, fleetNames, allFleetsLabel } from './access.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS, driversConcentration, driversAbsence } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS, vdirTail } from './vehicle.js';
 import { renderCohort } from './cohort.js';
@@ -993,7 +993,7 @@ async function overviewClassic(root) {
 
   const [k, daily, byPlat, byProd, payDetail, byStatus, drivers, cmp] = await Promise.all([
     q('/api/kpis'), q('/api/trips/daily'), q('/api/mix', { by: 'platform' }), q('/api/mix'),
-    q('/api/mix/detail', { by: 'payment' }), q('/api/mix', { by: 'status' }), q('/api/drivers/leaderboard'),
+    q('/api/mix/detail', { by: 'payment' }), q('/api/mix', { by: 'status' }), leaderboardOrWhy(q('/api/drivers/leaderboard')),
     /* Only when a calendar period is selected. A rolling window compared
        against the rolling window before it is two overlapping spans and the
        "change" is mostly the overlap — the comparison is meaningful for
@@ -1158,7 +1158,7 @@ async function overviewContract(root) {
   const wantCmp = !!state.period && !state.platform;
   const [k, daily, byPlat, byProd, payDetail, byStatus, drivers, cmp] = await Promise.all([
     q('/api/kpis'), q('/api/trips/daily'), q('/api/mix', { by: 'platform' }), q('/api/mix'),
-    q('/api/mix/detail', { by: 'payment' }), q('/api/mix', { by: 'status' }), q('/api/drivers/leaderboard'),
+    q('/api/mix/detail', { by: 'payment' }), q('/api/mix', { by: 'status' }), leaderboardOrWhy(q('/api/drivers/leaderboard')),
     wantCmp ? q('/api/compare/period').catch(() => ({ failed: true })) : Promise.resolve(null),
   ]);
   /* The reader may have left while the eight answers were in flight. Every
@@ -1559,8 +1559,17 @@ function overviewVerdict(k, daily, byPlat, cmp) {
 /* #overview's Top drivers table, shared by both skins (reskin STEP 3).
    `swatches`: each channel named with its swatch beside it (the page
    contract; SPEC L5.6, identity beside the word, never on it). */
+/* The leaderboard names people. A role that sees bookings only as totals
+   and no driver names — the wall screen — was refused it, and the refusal
+   closed the whole overview, which is the page a wall screen shows (sweep,
+   2026-09-28). The panel says why it is empty; the page draws the rest. */
+const leaderboardOrWhy = (p) => unlessWithheld(p, (e) => ({ withheldWhy: e.message }));
 function topDrivers(host, drivers, { swatches = false } = {}) {
   host.innerHTML = '';
+  if (drivers?.withheldWhy) {
+    host.append(el('p', 'note', `Not shown to your role: ${drivers.withheldWhy}`));
+    return;
+  }
   /* One row per person now, not per platform account — a person working two
      apps used to appear twice with half their work on each row, and therefore
      rank below somebody who did less. Tolerant of the old bare-array shape so
@@ -9374,7 +9383,7 @@ async function render() {
      previewing a role, or not an admin are three different reasons — so the
      router leaves it to the page; the menu still hides it (canOpenView). */
   if (gated() && !VIEW_CAP[state.view] && !canOpenView(state.view, state.sub || '', state.param || '')) {
-    const cls = subjectOf(state.view, state.sub || '', state.param || '');
+    const cls = closingClass(state.view, state.sub || '', state.param || '');
     const label = (VIEWS.find((v) => v.id === state.view) || {}).label;
     root.append(closedBlock({ cls, view: location.hash.replace(/^#/, ''), detail: VIEW_CAP_WHY[state.view] || null,
       title: label ? `${label} is not open to your role` : 'This page is not open to your role' }));

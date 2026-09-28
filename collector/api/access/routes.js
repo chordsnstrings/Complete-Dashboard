@@ -43,6 +43,10 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
      the password and two-step routes must work while the session is
      restricted to exactly those. */
   const me = (req, res, { allowRestricted = false, write = false } = {}) => {
+    /* A wall screen IS signed in — as a screen. "Sign in first" sent it to
+       the sign-in page from Approvals (sweep, 2026-09-28), stranding the
+       display. It is told the true reason instead. */
+    if (req.fm?.kind === 'device') { fail(res, 403, 'not_allowed', 'This is a screen, not a person: it has no account, approvals or access to manage.'); return null; }
     if (!signedIn(req)) { fail(res, 401, 'signin', 'Sign in first.'); return null; }
     if (req.fm.restricted && !allowRestricted) { fail(res, 403, 'restricted', 'Finish setting up your account first.', { need: req.fm.restricted }); return null; }
     if (write && !csrfOk(req)) { fail(res, 403, 'csrf', 'Reload the page and try again.'); return null; }
