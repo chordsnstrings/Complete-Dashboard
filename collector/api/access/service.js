@@ -57,8 +57,16 @@ export async function setConfig(db, key, value, by) {
 let fleetCache = null; let fleetAt = 0;
 export async function allFleets(db) {
   if (fleetCache && Date.now() - fleetAt < 60_000) return fleetCache;
-  const { rows } = await db.query('SELECT id, name FROM fleet ORDER BY id');
-  fleetCache = rows.map((r) => ({ id: r.id, name: r.name }));
+  /* The NAME only when the platforms gave it (basis 'brand') or an admin
+     chose it from their words ('chosen'). Before the first discovery run
+     fleet.name is what schema.sql typed; a fleet no platform names says
+     "Unnamed fleet — …" — neither is a name to print in every masthead, so
+     the pages fall back to the fleet's own id (access.js fleetLabel), and the
+     Fleet names page says why. name_basis is read defensively: a database
+     from before v87 has no such column. */
+  const { rows } = await db.query('SELECT to_jsonb(f) AS f FROM fleet f ORDER BY f.id');
+  fleetCache = rows.map(({ f }) => ({ id: f.id,
+    name: ['brand', 'chosen'].includes(f.name_basis) ? f.name : null, basis: f.name_basis ?? null }));
   fleetAt = Date.now();
   return fleetCache;
 }

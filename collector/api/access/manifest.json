@@ -3117,6 +3117,60 @@
  },
  {
   "method": "GET",
+  "path": "/api/fleets",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/fleet_names_routes.js: every fleet's derived name, the platform names behind it, linked accounts, renames, discovery status. no-store."
+ },
+ {
+  "method": "GET",
+  "path": "/api/fleets/accounts",
+  "subject": "CRED",
+  "carries": [
+   "CRED",
+   "SYS"
+  ],
+  "grain": "list",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "platform accounts, evidence counts, changes; staff names in impact only for Owner/Access admin."
+ },
+ {
+  "method": "GET",
+  "path": "/api/fleets/accounts/:id/evidence",
+  "subject": "CRED",
+  "carries": [
+   "CRED",
+   "ID",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [],
+  "whole": [
+   "VEH",
+   "ID"
+  ],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "Owner only (handler): shared plates and driver names behind the counts."
+ },
+ {
+  "method": "GET",
   "path": "/api/forecast",
   "subject": "BK",
   "carries": [
@@ -7075,6 +7129,71 @@
   "fleetKey": "fleet",
   "cap": "finance.verify",
   "notes": "api/payout_routes.js:1107-1481. Body {fleet: 'ecosine'|'egari', days: [YYYY-MM-DD x1..5]}; the fleet comes from req.body.fleet (required, validated against FLEETS :112), NOT ?fleet= - a fleet-scope check must read the body. Side effects: loads settings and uses that fleet's stored Uber org web-session credentials (uberOrgs, :156-166) to call uber.oneDay(org, day, {live:true}) sequentially, spendin"
+ },
+ {
+  "method": "POST",
+  "path": "/api/fleets/:id/name",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "fleets.link",
+  "notes": "choose a run of the platforms' words; applies at once."
+ },
+ {
+  "method": "POST",
+  "path": "/api/fleets/accounts/:id",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "fleets.link",
+  "notes": "link|new|unlink|ignore|unignore; dry_run:true previews the impact."
+ },
+ {
+  "method": "POST",
+  "path": "/api/fleets/changes/:id/approve",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "fleets.link",
+  "stepup": true,
+  "notes": "Owner only, not the proposer (sole-Owner rule), step-up."
+ },
+ {
+  "method": "POST",
+  "path": "/api/fleets/changes/:id/decline",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "fleets.link",
+  "notes": "Owner, or the proposer withdrawing."
  },
  {
   "method": "POST",

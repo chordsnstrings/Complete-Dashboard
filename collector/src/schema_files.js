@@ -233,4 +233,10 @@ export const SCHEMA_FILES = [
      reviews, settings and a hash-chained audit log. collector/docs/ULM-DESIGN.md
      is the design. Additive: nothing existing changes. */
   'schema_v86.sql',
+  /* Fleets named from the platforms (ULM-DESIGN §3): the accounts each
+     platform reports with their real ids and the names they give, which
+     fleet each belongs to, the history of those names, and the changes
+     waiting for an Owner. fleet gains the admin's chosen run of words and how
+     its name was derived. Additive; the two fleets keep their ids. */
+  'schema_v87.sql',
 ];

@@ -44,7 +44,8 @@
    nothing re-rendered when the sheet landed. whenStyled() waits for every
    stylesheet <link> the document asked for; when they are already in, which
    is the common case, it costs a microtask. */
-import { $, el } from './ui.js';
+import { $, el, esc } from './ui.js';
+import { fleetNames } from './access.js';
 import { state, windowLabel, windowDates, hidesRange, hidesChannel, MONTH_SHORT } from './data.js';
 
 export function shellContract() {
@@ -108,7 +109,7 @@ export function buildShell() {
   const mast = el('header', 'mast');
   mast.id = 'mast';
   mast.innerHTML = '<div class="mast-l"><span class="mast-word"><span class="logo" aria-hidden="true"></span>FleetMirror</span>'
-    + '<span class="mast-org">Ecosine &amp; Egari · Dubai</span></div>'
+    + `<span class="mast-org">${esc(fleetNames())} · Dubai</span></div>`
     + '<div class="mast-r"><div id="mastWin" class="mast-win"></div>'
     + '<div id="mastWinSub" class="mast-win-sub"></div></div>';
 

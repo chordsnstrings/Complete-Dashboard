@@ -27,7 +27,7 @@ import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
    something is not shown. */
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
   WithheldError, toSignIn, signOut, roleNames, post as accessPost, installFetchGuard, inChosenLook,
-  unlessWithheld, VIEW_CAP_WHY } from './access.js';
+  unlessWithheld, VIEW_CAP_WHY, fleetLabel, fleetList, fleetNames, allFleetsLabel } from './access.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS, driversConcentration, driversAbsence } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS, vdirTail } from './vehicle.js';
 import { renderCohort } from './cohort.js';
@@ -3093,7 +3093,7 @@ async function platformShare(root) {
      same byPlat the dominant bar in vHost above already draws, under a caption
      — "Share of total volume" — that is a description of the bar. Two pictures
      of one number, a hand's width apart. */
-  const fleetMix = panel('Trips by fleet', 'Ecosine vs Egari — the two businesses on these credentials');
+  const fleetMix = panel('Trips by fleet', `${fleetNames(' vs ')} — the businesses on these credentials`);
   root.append(fleetMix.panel);
   const cov = panel('Coverage & history depth', 'What each source has actually delivered'); root.append(cov.panel);
   [fleetMix.body, cov.body].forEach(loading);
@@ -7263,7 +7263,7 @@ V.compliance = async (root) => {
         const W = { expired: ['expired', 'err'], d30: ['≤30d', 'err'], d45: ['≤45d', 'warn'],
           d90: ['≤90d', 'warn'], ok: ['ok', 'ok'], missing: ['no date', 'dim'] };
         const L = { passport: 'Passport', emirates_id: 'Emirates ID', licence: 'Licence', visa: 'Visa', rta_permit: 'RTA permit' };
-        return `<div class="dim">${esc(p.hr.fleet_id === 'egari' ? 'Egari' : 'Ecosine')} `
+        return `<div class="dim">${esc(fleetLabel(p.hr.fleet_id))} `
           + `<span class="mono">${esc(p.hr.employee_id)}</span>`
           + `${p.hr.hr_compliance_status ? ` · <span title="HR’s own label, not this product’s verdict">HR: ${esc(p.hr.hr_compliance_status)}</span>` : ''}</div>`
           + '<div class="idfacts">' + Object.entries(L).map(([k, label]) => {
@@ -9985,7 +9985,7 @@ async function todayNow() {
          1440×900 (plan §3 Risks, THE FOLD). */
       host.innerHTML = `<div class="lb-top"><span class="tn-now"><span class="tn-dot" aria-hidden="true"></span>`
         + `${esc(todayLede(t))}</span>`
-        + '<span class="lb-scope">Both fleets, every channel \u2014 this strip does not follow the '
+        + `<span class="lb-scope">${esc(allFleetsLabel())}, every channel \u2014 this strip does not follow the `
         + 'filters above.</span>'
         + `${links}</div><div class="lb-figs">${f.join('')}</div>`
         + `<details class="lb-notes"><summary>${countOf(notes.length, 'note')} on these figures</summary>`
@@ -10254,6 +10254,14 @@ const whoReady = loadWho().then(() => {
   if (who.mode === 'enforced' && !who.signedIn) { toSignIn('required'); return false; }
   if (who.restricted) { toSignIn('setup'); return false; }
   if (!inChosenLook()) { location.reload(); return false; }
+  /* The fleet control lists the fleets the server names (fleet.name, from what
+     the platforms call each fleet), not the two index.html was written with. */
+  const fsel = $('#fFleet');
+  if (fsel && who.fleets?.length) {
+    const cur = fsel.value;
+    fsel.replaceChildren(new Option(allFleetsLabel(), ''), ...fleetList().map((f) => new Option(f.name, f.id)));
+    fsel.value = cur;
+  }
   /* The landing page, or a page this role cannot open: go to the first one it can. */
   if (gated() && !location.hash && !canOpenView(state.view)) { location.replace(`#${firstOpenView()}`); return false; }
   return true;

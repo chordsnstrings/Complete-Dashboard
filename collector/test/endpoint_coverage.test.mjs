@@ -33,8 +33,14 @@ const routes = [...new Set([...server.matchAll(/app\.(?:get|post)\((['"])(\/api\
 /* A plain substring test reports /api/vehicle/drivers as used because
    /api/vehicle/drivers-detail contains it. Require the next character to end
    the path — a quote, a query string, or a template hole. */
+/* A `:param` segment is used where the page fills it in: `${a.id}` in a
+   template string, or a literal value. /api/fleets/accounts/:id is called as
+   `/api/fleets/accounts/${a.id}` and was reported as never called. */
 const usedInUi = (route) => new RegExp(
-  route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + `(?=['"\`?&]|\\$\\{|$)`, 'm').test(ui);
+  route.split('/').map((seg) => (seg.startsWith(':')
+    ? '(?:\\$\\{[^}]+\\}|[^/\'"`?${}]+)'
+    : seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).join('/')
+  + `(?=['"\`?&]|\\$\\{|$)`, 'm').test(ui);
 
 /* Endpoints that legitimately have no UI consumer. Each needs a reason, so
    adding one is a decision rather than a shrug. */
@@ -77,11 +83,10 @@ const EXEMPT = {
     + 'one; whether it is populated decides the whole cash design, and that question has to be '
     + 'answered on production before a page is built against the answer. Deliberately not wired '
     + 'to a view yet for that reason.',
-  '/api/ledger/receipt/:sha': 'serves a stored receipt by digest, for an <img> on the entry '
-    + 'screens that are not built yet. Access IS the digest: this product has no user '
-    + 'authentication (api/redact.js:1-8), so a 64-character sha that appears only on the entry '
-    + 'it belongs to is the whole control — weaker than a bank slip deserves, written down '
-    + 'rather than glossed, and to be given a real check when ULM lands.',
+  /* /api/ledger/receipt/:sha WAS here, as "serves a stored receipt by digest,
+     for an <img>". It was always used — as `/api/ledger/receipt/${sha}` — and
+     only looked unused because this file matched a `:param` route literally.
+     Found when the fleet-names routes (called the same way) read as orphans. */
   /* BUILD THE SCREEN THE FIRST TIME src/persons.js REPORTS needs_merge > 0.
      Until then this route has no work: the spine folds two person rows by
      itself while NEITHER carries a ledger entry, and it only stops — leaving

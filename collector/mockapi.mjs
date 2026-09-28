@@ -7,6 +7,7 @@ import { foldGrain, grainOf, previousWindow, PERIODS, dubaiDay } from './api/win
    and a document's status here is the status the API would compute. */
 import { readRoster, exportDateFromName, expirySummary, docStatus } from './src/hr_roster.js';
 import { createHash } from 'node:crypto';
+import { deriveFleetName, platformLabel, accountLabel } from './src/fleet_names.js';
 /* The period arithmetic and the percentile come from the real module, not a
    copy. A fixture that invents its own weeks drifts from the product the
    moment either changes, and the browser tests that read this would then be
@@ -8219,6 +8220,37 @@ app.post('/api/ledger/entry', (req, r) => {
       + `AED 1000.00 to AED ${(1000 - amt).toFixed(2)}.`,
   });
 });
+
+/* ── fleets named from the platforms (api/fleet_names_routes.js) ──────────
+   The names the platforms gave on production, measured for the fleet-naming
+   design (docs/COVERAGE.md): company names, not people. Derived by the REAL
+   rule (src/fleet_names.js), so the mock's "Ecosine"/"Egari" come from the
+   same arithmetic production's do. */
+const MOCK_FLEET_ACCOUNTS = [
+  { id: 1, platform: 'uber', account_id: 'mock-uber-org-e1', fleet_id: 'ecosine', status: 'linked',
+    reported_name: 'ECOSINE TRANSPORTS', link_basis: 'configuration' },
+  { id: 2, platform: 'yango', account_id: 'mock-yango-park-e1', fleet_id: 'ecosine', status: 'linked',
+    reported_name: 'ECOSINE TRANSPORTS LLC', link_basis: 'configuration' },
+  { id: 3, platform: 'cabman', account_id: 'mock-iface/Ecosine Transports LLC', fleet_id: 'ecosine', status: 'linked',
+    reported_name: 'Ecosine Transports LLC', link_basis: 'configuration' },
+  { id: 4, platform: 'uber', account_id: 'mock-uber-org-g1', fleet_id: 'egari', status: 'linked',
+    reported_name: 'Egari Luxury Cars Transport LLC', link_basis: 'configuration' },
+];
+app.get('/api/fleets', (_, r) => r.json({
+  fleets: ['ecosine', 'egari'].map((id) => {
+    const mine = MOCK_FLEET_ACCOUNTS.filter((a) => a.fleet_id === id);
+    const v = deriveFleetName({ id, accounts: mine, choice: null });
+    return { ...v, stored: { name: v.display ?? v.name ?? id, basis: 'brand', derivedAt: new Date().toISOString() }, created: null,
+      linked: mine.map((a) => ({ id: a.id, platform: a.platform, platformLabel: platformLabel(a.platform), account_id: a.account_id,
+        label: accountLabel(a), reported_name: a.reported_name, name_reason: null, reported_at: null, link_basis: a.link_basis })),
+      renames: [], nameChoices: [] };
+  }),
+  discovery: { lastRun: new Date().toISOString(), steps: [], reason: null },
+  asOf: new Date().toISOString(),
+}));
+/* The platform accounts are for a signed-in reader; the mock is anonymous,
+   and answers what the real route answers one. */
+app.get('/api/fleets/accounts', (_, r) => r.status(401).json({ error: 'signin', detail: 'Sign in to see platform accounts.' }));
 
 app.get(/^\/api\//, (_, r) => r.json([]));
 app.use(express.static(join(__dir, 'api', 'public')));

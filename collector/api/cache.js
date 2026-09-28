@@ -56,7 +56,7 @@ const MAX_BYTES = Number(process.env.CACHE_MAX_BYTES || 64 * 1024 * 1024);
    see, the people they manage). Cached by URL they would be served to the next
    person to ask — measured in development on 2026-09-28: a cash-desk session
    was handed the Owner's whole Access overview as an x-cache: hit. */
-const NEVER = ['/api/auth/', '/api/access/', '/api/live', '/api/track', '/api/settings', '/api/rollups',
+const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/track', '/api/settings', '/api/rollups',
   '/api/status', '/api/health', '/api/ready', '/api/probe', '/api/cache-stats',
   '/api/coverage/verified',
   /* THE TWO A PERSON'S OWN CLICK CHANGES.

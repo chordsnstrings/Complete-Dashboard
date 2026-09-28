@@ -20,6 +20,7 @@ import { el, esc, panel, loading, note, kpiRow, entity, pill, sourceLabel,
   dateStr, fmt, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, foldChildren, countOf } from './ui.js';
 import { hbars } from './charts.js';
 import { api } from './data.js';
+import { fleetLabel } from './access.js';
 
 const platPill = (p) => (p ? pill(sourceLabel(p)) : '');
 
@@ -63,7 +64,7 @@ function pairCard(p, onDecide) {
   if (hr) {
     const src = el('div', 'sp-meta');
     src.innerHTML = `${pill('HR roster', 'info', 'basis hr_roster — platform ids HR files under one employee')} `
-      + `<span class="dim">${esc(p.employee?.fleet_id === 'egari' ? 'Egari' : 'Ecosine')} employee `
+      + `<span class="dim">${esc(fleetLabel(p.employee?.fleet_id))} employee `
       + `<span class="mono">${esc(p.employee?.employee_id || '')}</span>${p.employee?.name ? ` · ${esc(p.employee.name)}` : ''}`
       + ` · ${esc(String((p.accounts || []).length))} ids on HR’s row</span>`;
     c.append(src);

@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { pool, migrate } from '../src/db.js';
 import { config } from '../src/config.js';
 import { pgTx } from './tx.js';
+import { fleetNameRoutes } from './fleet_names_routes.js';
 import { importRoutes } from './import_routes.js';
 /* The operator's HR roster export: an admin-gated preview and commit, and a
    read every page may use. hrForCompliance is used INSIDE the region
@@ -6818,6 +6819,9 @@ tripRoutes(app, { q, wrap });
 authRoutes(app, { q, wrap });
 /* Sign-in, the account page and Set up → Access (api/access/routes.js). */
 accessRoutes(app, { db: pool, layer: access, wrap, log });
+/* Fleets named from the platforms (ULM-DESIGN §3): the names each platform
+   gives, the accounts behind them, and the changes waiting for an Owner. */
+fleetNameRoutes(app, { q, wrap, db: pool, tx: pgTx(pool), log });
 /* ── the export, and what an anonymous GET may carry away ──────────────────
    MEASURED ON PRODUCTION WITH CURL AND NO CREDENTIALS, 2026-09-05:
    GET /api/export/trips.csv?grain=trip&from=2025-09-05&to=2026-09-05 answered

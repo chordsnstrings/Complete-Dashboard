@@ -374,4 +374,25 @@ export function inChosenLook() {
 }
 
 export const roleNames = () => (who.roles || []).map((r) => ROLE[r]?.name || r);
+
+/* ── the fleets, by the names the platforms give them ─────────────────────
+   The operator's ruling (2026-09-26): a fleet is called what the platforms
+   call it — the brand, the common part of those names — never a name typed
+   into the product. The server derives it (src/fleet_names.js) and keeps it
+   in fleet.name; /api/auth/me hands every page the list. The pages used to
+   print "Ecosine" and "Egari" from a dozen literals.
+
+   Before /api/auth/me has answered (or where a test serves no such route),
+   the fleets' own ids stand in, capitalised — the ids are the database's,
+   never invented. */
+const FALLBACK_FLEET_IDS = ['ecosine', 'egari'];
+const cap1 = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
+export const fleetList = () => (who.fleets?.length
+  ? who.fleets.map((f) => ({ id: f.id, name: f.name || cap1(f.id) }))
+  : FALLBACK_FLEET_IDS.map((id) => ({ id, name: cap1(id) })));
+export const isFleetId = (id) => fleetList().some((f) => f.id === String(id || '').toLowerCase());
+export const fleetLabel = (id) => fleetList().find((f) => f.id === String(id || '').toLowerCase())?.name || cap1(String(id || ''));
+/* "Ecosine & Egari"; "Both fleets" while there are two, "Every fleet" after. */
+export const fleetNames = (sep = ' & ') => fleetList().map((f) => f.name).join(sep);
+export const allFleetsLabel = () => (fleetList().length === 2 ? 'Both fleets' : 'Every fleet');
 export { CLASS, ROLE, ROLES, LEVEL_NAME, rank };

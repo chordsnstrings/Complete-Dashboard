@@ -8,7 +8,8 @@
 import cron from 'node-cron';
 import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
-import { recordCredentialVisibility } from './settings.js';
+import { recordCredentialVisibility, withPinnedSettings } from './settings.js';
+import { runDiscovery } from './sources/discovery.js';
 import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit } from './run.js';
 import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
@@ -41,6 +42,7 @@ async function main() {
      run it once and look. */
   if (cmd === 'profile') return uberProfileTick();
   if (cmd === 'audit') return uberAuditTick();
+  if (cmd === 'discover') return withPinnedSettings(() => runDiscovery(pool, { log }));
 
   if (cmd === 'schedule') {
     log.info('scheduler', 'starting', {
@@ -214,6 +216,17 @@ async function main() {
        Found by the check that asserts no two scheduled passes share a start
        time, which is the sort of thing nobody notices by reading a list. */
     cron.schedule('20 22 * * *', () => probePass());
+    /* FLEETS NAMED FROM THE PLATFORMS (ULM-DESIGN §3): which accounts each
+       platform reports and what it calls them — about a dozen read calls
+       (Uber's orgs, Yango's park profile, Bolt's company details, FMS's
+       vehicle list) plus a scan of our own stored CABMAN snapshots. Once ten
+       minutes after the worker starts, so a deploy's first run is not on top
+       of its own start-up, and then nightly. Until it has run once the
+       fleets keep the names schema.sql typed (src/sources/discovery.js). */
+    const discover = () => withPinnedSettings(() => runDiscovery(pool, { log }))
+      .catch((e) => log.error('scheduler', 'discovery', { err: String(e) }));
+    setTimeout(discover, 10 * 60_000);
+    cron.schedule('35 2 * * *', discover);
     /* Honour on-demand runs queued from the Settings page.
        One job at a time, claimed atomically. The previous version read a
        single source_state key, so two requests arriving close together meant

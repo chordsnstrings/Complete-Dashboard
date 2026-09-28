@@ -22,6 +22,7 @@
 import { el, esc, panel, note, loading, kpiRow, tableFrom, entity, pill, sourceLabel,
   dateStr, fmt, foldRows, countOf, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
 import { api, state, href } from './data.js';
+import { fleetLabel, fleetList, allFleetsLabel } from './access.js';
 
 const DOCS = [
   ['passport', 'Passport'], ['emirates_id', 'Emirates ID'], ['licence', 'Licence'],
@@ -33,7 +34,8 @@ const STATUS = {
 };
 const BUCKETS = [['expired', 'Expired'], ['d30', '≤30 days'], ['d45', '31–45'], ['d90', '46–90'],
   ['ok', 'Over 90'], ['missing', 'No date']];
-const FLEET = { ecosine: 'Ecosine', egari: 'Egari' };
+/* The fleets' names come from the platforms (access.js fleetLabel), not from a
+   map here. */
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const dateFromName = (n) => (/active-drivers-(\d{4}-\d{2}-\d{2})\.xlsx$/i.exec(String(n || '')) || [])[1] || null;
 
@@ -94,7 +96,7 @@ function accountsCell(p) {
 
 function rosterTable(people) {
   return tableFrom(people, [
-    { label: 'Fleet', key: 'fleet_id', render: (p) => esc(FLEET[p.fleet_id] || p.fleet_id) },
+    { label: 'Fleet', key: 'fleet_id', render: (p) => esc(fleetLabel(p.fleet_id) || p.fleet_id) },
     { label: 'Employee', key: 'employee_id', render: (p) => `<span class="mono">${esc(p.employee_id)}</span>` },
     { label: 'Name', key: 'name', render: whoCell },
     { label: 'Platform accounts', key: 'accounts', sortValue: (p) => p.accounts.length, render: accountsCell },
@@ -129,7 +131,7 @@ function renderPreview(host, p) {
   const m = p.match || {};
   host.append(kpiRow([
     { key: 'hrp-rows', label: 'Rows read', value: fmt(p.rows_read),
-      sub: Object.entries(p.fleet_split || {}).map(([f, n]) => `${FLEET[f] || f} ${fmt(n)}`).join(' · ') },
+      sub: Object.entries(p.fleet_split || {}).map(([f, n]) => `${fleetLabel(f) || f} ${fmt(n)}`).join(' · ') },
     { key: 'hrp-id', label: 'Matched by platform id', value: fmt(m.by_platform_id), sub: 'the id HR typed' },
     { key: 'hrp-phone', label: 'Matched by phone', value: fmt(m.by_phone), sub: 'no id of theirs is held' },
     { key: 'hrp-none', label: 'Not matched', value: fmt(m.unmatched), sub: 'never matched by name' },
@@ -176,7 +178,7 @@ function renderPreview(host, p) {
     const pp = panel('Same-person proposals this file makes',
       'Platform ids HR files under one employee. They go to the Same person? queue under basis hr_roster; nothing is merged', 'hr-preview-props');
     pp.body.append(tableFrom(p.proposals.list, [
-      { label: 'Employee', key: 'employee_id', render: (x) => `${esc(FLEET[x.fleet_id] || x.fleet_id)} <span class="mono">${esc(x.employee_id)}</span>` },
+      { label: 'Employee', key: 'employee_id', render: (x) => `${esc(fleetLabel(x.fleet_id) || x.fleet_id)} <span class="mono">${esc(x.employee_id)}</span>` },
       { label: 'Name', key: 'name' },
       { label: 'Accounts HR groups', key: 'accounts', render: (x) => x.accounts.map((a) => pill(sourceLabel(a.platform), 'plat', a.ext_id)).join(' ') },
       { label: 'Status', key: 'status', render: (x) => ({ new: pill('new', 'info'), pending: pill('already waiting'),
@@ -190,7 +192,7 @@ function renderPreview(host, p) {
       `${fmt(y.yango_older)} where Yango's date is older, ${fmt(y.yango_older_by_over_a_year)} of them by more than a year; `
       + `${fmt(y.hr_valid_yango_expired)} HR says valid and Yango says expired. HR's date is the one this product uses.`, 'hr-preview-yango');
     lp.body.append(tableFrom(y.rows, [
-      { label: 'Employee', key: 'employee_id', render: (x) => `${esc(FLEET[x.fleet_id] || x.fleet_id)} <span class="mono">${esc(x.employee_id)}</span>` },
+      { label: 'Employee', key: 'employee_id', render: (x) => `${esc(fleetLabel(x.fleet_id) || x.fleet_id)} <span class="mono">${esc(x.employee_id)}</span>` },
       { label: 'Name', key: 'name' },
       { label: 'HR', key: 'hr_expires', render: (x) => esc(dateStr(x.hr_expires)) },
       { label: 'Yango', key: 'yango_expires', render: (x) => esc(dateStr(x.yango_expires)) },
@@ -204,7 +206,7 @@ function renderPreview(host, p) {
     ap.body.append(el('p', 'cap', `${countOf(a.dropped.length, 'person', 'people')} on that export ${a.dropped.length === 1 ? 'is' : 'are'} not on this one and will read “off the HR list since ${dateStr(p.export_date)}” — never deleted. `
       + `${countOf(a.added, 'person', 'people')} ${a.added === 1 ? 'is' : 'are'} new.`));
     if (a.dropped.length) {
-      ap.body.append(el('p', 'cap', `Leaving the list: ${a.dropped.slice(0, 12).map((d) => `${FLEET[d.fleet_id] || d.fleet_id} ${d.employee_id}`).join(', ')}${a.dropped.length > 12 ? ` and ${a.dropped.length - 12} more` : ''}.`));
+      ap.body.append(el('p', 'cap', `Leaving the list: ${a.dropped.slice(0, 12).map((d) => `${fleetLabel(d.fleet_id) || d.fleet_id} ${d.employee_id}`).join(', ')}${a.dropped.length > 12 ? ` and ${a.dropped.length - 12} more` : ''}.`));
     }
     if (a.blanked.length) {
       ap.body.append(note(`Columns filled on the earlier export and blank on this one: ${a.blanked.map((b) => `${b.column} (${countOf(b.rows, 'row')})`).join(', ')}. ${a.note}`, 'warn'));
@@ -356,7 +358,7 @@ export async function renderHrRoster(root) {
     const t = v.totals;
     const HR_TILES = [
       { key: 'hr-on-list', label: 'On HR’s list', value: fmt(t.on_list),
-        sub: `${FLEET.ecosine} ${fmt(t.by_fleet.ecosine)} · ${FLEET.egari} ${fmt(t.by_fleet.egari)}` },
+        sub: Object.entries(t.by_fleet || {}).map(([f, n]) => `${fleetLabel(f)} ${fmt(n)}`).join(' · ') },
       { key: 'hr-expiring', label: 'Anything expiring in 90 days', value: fmt(t.anything_expiring),
         sub: 'people with at least one document expired or due' },
       { key: 'hr-matched', label: 'Matched to a platform account', value: fmt(t.matched.platform_id + t.matched.phone),
@@ -376,8 +378,8 @@ export async function renderHrRoster(root) {
     const bar = el('div', 'filters');
     const fleetSel = el('select');
     fleetSel.setAttribute('aria-label', 'Fleet');
-    fleetSel.innerHTML = [['', 'Both fleets'], ['ecosine', 'Ecosine'], ['egari', 'Egari']]
-      .map(([k, l]) => `<option value="${k}"${k === fleetPick ? ' selected' : ''}>${l}</option>`).join('');
+    fleetSel.innerHTML = [['', allFleetsLabel()], ...fleetList().map((f) => [f.id, f.name])]
+      .map(([k, l]) => `<option value="${esc(k)}"${k === fleetPick ? ' selected' : ''}>${esc(l)}</option>`).join('');
     const expBtn = el('button', expiringOnly ? 'on' : '', expiringOnly ? '✓ Anything expiring' : 'Anything expiring');
     expBtn.type = 'button';
     expBtn.dataset.filter = 'expiring';
@@ -401,7 +403,7 @@ export async function renderHrRoster(root) {
         foldRows(tableHost, rosterTable(rows), { shown: 25, total: rows.length, noun: 'person', key: 'hr-roster' });
       }
       shown.textContent = `Showing ${countOf(rows.length, 'person', 'people')} of ${fmt(v.people.length)}`
-        + `${fleetPick ? ` in ${FLEET[fleetPick]}` : ''}${expiringOnly ? ', with a document expired or due within 90 days' : ''}.`
+        + `${fleetPick ? ` in ${fleetLabel(fleetPick)}` : ''}${expiringOnly ? ', with a document expired or due within 90 days' : ''}.`
         + ' Each document: its expiry, how soon, and whether HR filed a number — the number itself is never shown on this page.';
     };
     fleetSel.onchange = () => { fleetPick = fleetSel.value; paint(); };

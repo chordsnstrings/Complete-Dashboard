@@ -33,7 +33,7 @@ import { sourceLabel, segSourceLabel, timeStr, dtStr, custodyText, moneyInTile, 
   cashOnHandTile, bankDepositTile, countOf,
   alertRateFigure, splitAlerts, avgKmSub } from '../ui.js';
 import { dubaiClock, dubaiDay } from '../tz.js';
-import { who, roleNames, signOut } from '../access.js';
+import { who, roleNames, signOut, fleetNames } from '../access.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from '../today.js';
 /* The three words the desktop page uses for the three states it refuses to
    colour. Imported rather than retyped — see the comment on GREY there. */
@@ -1282,7 +1282,7 @@ async function more(deck) {
      phone takes, rather than a chip that reads as a filter. */
   if (phoneContract()) {
     const mast = el('p', 'ak-mast');
-    mast.append(el('span', 'ak-mast-word', '<span class="logo" aria-hidden="true"></span>FleetMirror'), el('span', 'ak-mast-org', 'Ecosine &amp; Egari · Dubai'));
+    mast.append(el('span', 'ak-mast-word', '<span class="logo" aria-hidden="true"></span>FleetMirror'), el('span', 'ak-mast-org', `${esc(fleetNames())} · Dubai`));
     c.body.prepend(mast);
     b.className = 'm-btn';
   }

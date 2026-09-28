@@ -6,6 +6,7 @@ import { fmt, empty, spark } from './charts.js';
 import { href, params } from './data.js';
 import { TZ, TZ_LABEL, dubaiDay } from './tz.js';
 import { CHANNEL_ORDER, channelKey, semanticOf } from './tokens.js';
+import { fleetLabel, isFleetId } from './access.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const el = (tag, cls, html) => {
@@ -957,7 +958,9 @@ export const dialable = (raw) => {
 
 export const SOURCE_LABEL = {
   uber: 'Uber', yango: 'Yango', bolt: 'Bolt', hotel: 'Hotel', fms: 'FMS telematics',
-  cabman: 'CABMAN', ecosine: 'Ecosine', egari: 'Egari',
+  cabman: 'CABMAN',
+  /* The fleets are NOT here: they are named by the platforms (fleetLabel in
+     access.js, from /api/auth/me), and sourceLabel() falls back to that. */
   /* A collector /api/status reports and this map had no entry for, so
      sourceLabel() fell through to the database key and "uber_fleet · Ecosine"
      was printed at a reader — in the Settings collection-debt sentence and in
@@ -1011,7 +1014,8 @@ export const sentence = (v) => {
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : '—';
 };
 
-export const sourceLabel = (s) => SOURCE_LABEL[String(s || '').toLowerCase()] || String(s || '—');
+export const sourceLabel = (s) => SOURCE_LABEL[String(s || '').toLowerCase()]
+  || (isFleetId(s) ? fleetLabel(s) : String(s || '—'));
 
 /* ── which seat-sensor provider an occupancy segment came from ─────────────
    Since the operator's rulings of 2026-09-23 a segment has one of three

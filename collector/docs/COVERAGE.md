@@ -6953,3 +6953,33 @@ legal form is dropped. Egari is named by one platform only.
   - Anything that counts CABMAN cars as Ecosine's counts Sahalat's too.
   - A fleet name taken from CABMAN has to be read per vehicle, from linked
     vehicles only.
+
+### Fleets named from the platforms — built 2026-09-28
+
+- **Discovery** (`src/sources/discovery.js`, run by the collector ten
+  minutes after it starts and nightly at 02:35; `node src/index.js discover`
+  by hand) records every account each platform reports in
+  `platform_account` (sql/schema_v87.sql) with the name it gives, and
+  derives each fleet's brand from its linked accounts (`src/fleet_names.js`):
+  Ecosine's three names give "Ecosine", Egari's one gives "Egari", "Sahalat"
+  stays "Sahalat". About a dozen read calls a night; CABMAN costs none (it is
+  read from our own stored snapshots, by id watermark, 200k ids a slice).
+- **Not measured yet:** the response shapes of the Yango park profile, Bolt
+  `getCompanyDetails`/`getProfile` and FMS `GetVehicleList`. The extractors
+  read only a park- or company-shaped field and otherwise record "no field
+  read as a name (top-level keys: …)"; the first production run says which.
+- **All-time CABMAN CompanyNames** on the Ecosine interface
+  (docs/audit/verdicts-2026-09-05.json): Ecosine Transports LLC, Sahalat,
+  Star Skyline Luxury Transport LLC, VOLYA LIMOUSINE SERVICES L.L.C. — so the
+  interface carries more than one company, and each waits for an Owner to
+  link it rather than being filed as Ecosine's.
+- **Trap: a fleet's name reaches the pages only when the platforms gave it
+  or an admin chose it.** `fleet.name` holds the name schema.sql typed until
+  the first discovery run, and "Unnamed fleet — …" when no linked account
+  names the fleet. Neither is printed in a masthead: `/api/auth/me` sends
+  `name: null` for them and the pages fall back to the fleet's own id
+  (api/access/service.js `allFleets`, api/public/access.js `fleetLabel`).
+- **A link records ownership; it moves no stored rows.** Collectors still
+  file rows by src/config.js; rows already filed under the wrong fleet (the
+  Sahalat snapshots) are listed on #fleet-names/accounts, not moved.
+

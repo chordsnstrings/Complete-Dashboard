@@ -27,7 +27,7 @@ import { SCREENS, TABS, titleFor } from './screens.js';
 /* Sign-in and access, the same library the desktop uses (../access.js): the
    server decides, the phone draws what it decided. */
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
-  WithheldError, toSignIn, installFetchGuard } from '../access.js';
+  WithheldError, toSignIn, installFetchGuard, fleetList, fleetNames, allFleetsLabel } from '../access.js';
 import { phoneContract } from './ui.js';
 /* The desktop shell's two sentences about the window, imported rather than
    re-worded: what the masthead calls the window and why a control does not
@@ -140,7 +140,8 @@ const currentTab = () => {
    another, matching the desktop's control. */
 const PLATFORMS = [['', 'All channels'], ['uber', 'Uber'], ['yango', 'Yango'],
   ['bolt', 'Bolt'], ['hotel', 'Hotel'], ['fms', 'FMS telematics']];
-const FLEETS = [['', 'Both fleets'], ['ecosine', 'Ecosine'], ['egari', 'Egari']];
+/* The fleets by the names the platforms give them (access.js fleetList). */
+const FLEETS = () => [['', allFleetsLabel()], ...fleetList().map((f) => [f.id, f.name])];
 
 function openSheet() {
   const scrim = el('div', 'm-scrim');
@@ -201,7 +202,7 @@ function openSheet() {
     close: () => { close(); render(); },
   }));
   group('Channel', PLATFORMS, state.platform, (v) => setFilter({ platform: v }));
-  group('Fleet', FLEETS, state.fleet, (v) => setFilter({ fleet: v }));
+  group('Fleet', FLEETS(), state.fleet, (v) => setFilter({ fleet: v }));
   scrim.onclick = close;
   document.body.append(scrim, sheet);
   requestAnimationFrame(() => { scrim.classList.add('in'); sheet.classList.add('in'); });
@@ -384,7 +385,7 @@ async function stampSource(g, id) {
    #online-time ignores the platform chip because only Uber reports time
    online, so "every channel" there would be false. */
 const PLATFORM_WORD = Object.fromEntries(PLATFORMS);
-const FLEET_WORD = Object.fromEntries(FLEETS);
+const fleetWord = (k) => Object.fromEntries(FLEETS())[k];
 /* Two phone screens the desktop has no page for, and which read no window
    and no channel: More is a list of places to go, and the credential paste
    is a form. data.js's lists do not name them (they are not desktop views),
@@ -405,7 +406,7 @@ function akFrame(id, deep) {
     ...(none || hidesChannel(id)
       ? [part('Channel and fleet not applied', ' ak-ctl-off')]
       : [part(PLATFORM_WORD[state.platform || ''] || state.platform),
-        part(FLEET_WORD[state.fleet || ''] || state.fleet)]));
+        part(fleetWord(state.fleet || '') || state.fleet)]));
   word.style.display = deep ? 'none' : '';
   word.href = href('today');
 }
@@ -431,7 +432,7 @@ async function akFoot(g, id) {
   if (g !== gen) return;
   if (deck.querySelector('.pf-inline, .pagefoot')) return;
   const w = windowOf(id);
-  const colophon = [`${w.main} · Dubai time`, 'Ecosine & Egari'];
+  const colophon = [`${w.main} · Dubai time`, fleetNames()];
   let line = null;
   if (!NO_SOURCE.has(id) && !deck.querySelector('.srcline')
     && deck.querySelector('.m-card, .m-stat, .m-row, .m-lede')) {
