@@ -27,7 +27,7 @@ import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
    something is not shown. */
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
   WithheldError, toSignIn, signOut, roleNames, post as accessPost, installFetchGuard, inChosenLook,
-  unlessWithheld, VIEW_CAP_WHY, fleetLabel, fleetList, fleetNames, allFleetsLabel } from './access.js';
+  unlessWithheld, VIEW_CAP, VIEW_CAP_WHY, fleetLabel, fleetList, fleetNames, allFleetsLabel } from './access.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS, driversConcentration, driversAbsence } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS, vdirTail } from './vehicle.js';
 import { renderCohort } from './cohort.js';
@@ -9370,7 +9370,10 @@ async function render() {
      way to ask — never a blank page, never someone else's data, never a 404
      (ULM-DESIGN §7 rule 7). The server refuses the data regardless; this is
      the page telling the truth about it before asking. */
-  if (gated() && !canOpenView(state.view, state.sub || '', state.param || '')) {
+  /* An action page (#access) says why it is closed itself — signed out,
+     previewing a role, or not an admin are three different reasons — so the
+     router leaves it to the page; the menu still hides it (canOpenView). */
+  if (gated() && !VIEW_CAP[state.view] && !canOpenView(state.view, state.sub || '', state.param || '')) {
     const cls = subjectOf(state.view, state.sub || '', state.param || '');
     const label = (VIEWS.find((v) => v.id === state.view) || {}).label;
     root.append(closedBlock({ cls, view: location.hash.replace(/^#/, ''), detail: VIEW_CAP_WHY[state.view] || null,
@@ -9880,7 +9883,10 @@ async function todayNow() {
   const host = $('#todayNow');
   if (!host) return;
   try {
-    const t = await todayLive();
+    /* quiet: the strip is the shell's, not the page's. A role not shown
+       today's bookings gets no strip (it hides below), and that refusal is not
+       written into the page's own "not shown to your role" line. */
+    const t = await todayLive({ quiet: true });
     const f = [];
     let lag = false;
     /* The livebar (reskin STEP 4, plan §3 TODAY STRIP): under the Arkiv shell

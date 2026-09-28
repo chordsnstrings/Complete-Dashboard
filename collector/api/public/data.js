@@ -194,7 +194,9 @@ export const api = async (path, opts) => {
     const r = await fetchWithRetry(path, opts);
     /* What the server left out of this answer for this reader's role —
        gathered so the page can say so once, at the top (access.js). */
-    noteWithheld(r.headers.get('x-fm-withheld'));
+    /* `quiet`: chrome that is not the page (the desktop's today strip) keeps
+       its refusals out of the page's "not shown to your role" line. */
+    if (!opts?.quiet) noteWithheld(r.headers.get('x-fm-withheld'));
     if (!r.ok) {
       /* Signed out, or not shown to this role: both are answers with a true
          reason, not failures, and each is told as what it is. */

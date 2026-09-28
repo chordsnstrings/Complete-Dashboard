@@ -44,6 +44,10 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
 import { q, href, state, currentGen, alive, windowLabel } from './data.js';
 import { makeMap, fitTo } from './map.js';
 
+/* A row's band is read from money (what the car or person earned); a role
+   that is not shown that money gets the band withheld too, and the cell says
+   so rather than throwing on a band it was never sent. */
+const WITHHELD_CELL = '<span class="dim" title="Not shown to your role">—</span>';
 export const UNIT_TABS = [
   { id: 'overview', label: 'Money in', ic: '◆' },
   { id: 'assets', label: 'Every vehicle', ic: '▤' },
@@ -514,7 +518,7 @@ function deadList(dead, A, open) {
       { label: 'Papers', key: 'doc_days_left', num: true,
         render: (r) => pill(`${fmt(r.doc_days_left)}d left`,
           r.doc_days_left < 30 ? 'warn' : 'ok') },
-      { label: 'State', key: 'band', render: (r) => pill(BAND[r.band].label, BAND[r.band].tone) },
+      { label: 'State', key: 'band', render: (r) => (BAND[r.band] ? pill(BAND[r.band].label, BAND[r.band].tone) : WITHHELD_CELL) },
     ], { initial: 'idle_days', onRow: open });
     /* Never-earned and stopped-earning are two different problems with two
        different owners, and a count of "idle vehicles" hides which is which. */
@@ -896,7 +900,7 @@ async function assetsTab(root, { contract: ak = false } = {}) {
       render: (r) => (r.doc_days_left == null ? absent('no document with an expiry date on file')
         : pill(r.doc_days_left < 0 ? 'expired' : `${fmt(r.doc_days_left)}d`,
           r.doc_days_left < 0 ? 'bad' : r.doc_days_left < 30 ? 'warn' : 'ok')) },
-    { label: 'State', key: 'band', render: (r) => pill(BAND[r.band].label, BAND[r.band].tone) },
+    { label: 'State', key: 'band', render: (r) => (BAND[r.band] ? pill(BAND[r.band].label, BAND[r.band].tone) : WITHHELD_CELL) },
   ];
 
   let band = '';
@@ -1066,7 +1070,7 @@ async function driversTab(root, { contract: ak = false } = {}) {
       render: (r) => (r.licence_days_left == null ? absent('no licence expiry on file')
         : pill(r.licence_days_left < 0 ? 'expired' : `${fmt(r.licence_days_left)}d`,
           r.licence_days_left < 0 ? 'bad' : r.licence_days_left < 30 ? 'warn' : 'ok')) },
-    { label: 'State', key: 'band', render: (r) => pill(PBAND[r.band].label, PBAND[r.band].tone) },
+    { label: 'State', key: 'band', render: (r) => (PBAND[r.band] ? pill(PBAND[r.band].label, PBAND[r.band].tone) : WITHHELD_CELL) },
   ];
 
   let band = '';

@@ -54,6 +54,7 @@ import { renderDriverLedger } from './driverledger.js';
    explained none of them; a sentence that lives in one view is a sentence the
    other views do not say. */
 import { dubaiDay } from './tz.js';
+import { unlessWithheld } from './access.js';
 import { makeMap, fitTo } from './map.js';
 
 /* `day` is deliberately NOT in this list. It is a destination reached by
@@ -1233,7 +1234,10 @@ async function tabActivity(root, id, prof) {
      work is a lie, and on this panel it would erase whole jobs from the middle
      of a shift and redraw them as waiting. */
   const [daily, custody, shift, kept] = await Promise.all([
-    qAll('/api/driver/daily', { id }), qAll('/api/driver/custody', { id }),
+    qAll('/api/driver/daily', { id }),
+    /* Custody is vehicles: a role without them (the cash desk) still gets
+       the rest of Activity, and this panel says why it is empty. */
+    unlessWithheld(qAll('/api/driver/custody', { id }), (e) => ({ withheld: e.message, rows: [] })),
     qAll('/api/driver/shift', { id }),
     /* The KEPT record. /api/driver/shift derives from raw and is what the bars
        are drawn from; this is driver_day, written after every collection and
@@ -1526,6 +1530,7 @@ async function tabActivity(root, id, prof) {
 
   if (ak) activityAbsence(root, shift, kept);
   cust.body.innerHTML = '';
+  if (custody?.withheld) { cust.body.append(note(custody.withheld, 'warn')); return; }
   const custRows = Array.isArray(custody) ? custody : (custody.rows || []);
   const custTotal = Array.isArray(custody) ? null : custody.total;
   const custShown = custRows.slice(0, 60);

@@ -51,7 +51,7 @@ const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null 
 /* One shape, both shells. Each surface renders it in its own idiom; neither
    decides what "today" means, which is what kept the phone and the desktop
    disagreeing about it in the first place. */
-export async function todayLive() {
+export async function todayLive({ quiet = false } = {}) {
   const day = dubaiDay();
   /* Whole fleet, both channels: /api/day takes a day and nothing else, so a
      strip that claimed to honour the channel chips would be lying about a
@@ -70,7 +70,7 @@ export async function todayLive() {
      seconds, so a stamp that changes once a minute costs at most one real
      computation a minute and can never serve a body from before it. */
   const minute = Math.floor(Date.now() / 60000);
-  const live = (path) => api(`${path}&t=${minute}`, { cache: 'no-store' }).catch(() => null);
+  const live = (path) => api(`${path}&t=${minute}`, { cache: 'no-store', ...(quiet ? { quiet: true } : {}) }).catch(() => null);
   const [d, k] = await Promise.all([
     live(`/api/day?day=${day}`),
     live('/api/kpis?days=1'),

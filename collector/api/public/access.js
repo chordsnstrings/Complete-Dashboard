@@ -98,7 +98,7 @@ export function toSignIn(reason = '') {
    x-fm-withheld) says what was left out and why. Any other failure still
    fails. */
 export const unlessWithheld = (p, fallback) => Promise.resolve(p).catch((e) => {
-  if (e instanceof WithheldError || e?.name === 'WithheldError') return fallback;
+  if (e instanceof WithheldError || e?.name === 'WithheldError') return typeof fallback === 'function' ? fallback(e) : fallback;
   throw e;
 });
 export class WithheldError extends Error {
@@ -146,7 +146,7 @@ export const VIEW_SUBJECT = Object.freeze({
   'online-time': 'ID', opening: 'CASH', optimise: 'BK', overview: 'BK', payouts: 'PAY', performance: 'ID',
   performer: 'ID', platforms: 'BK', 'platforms/funnel': 'COND', 'platforms/tiers': 'VEH', playbook: 'REV',
   policy: 'CASH', property: 'REV', 'property/drivers': 'ID', 'property/guests': 'PAX', provenance: 'REV',
-  providers: 'SYS', receipts: 'PAY', reconcile: 'PAY', retention: 'ID', revenue: 'REV', roster: 'ID',
+  providers: 'SYS', receipts: 'PAY', reconcile: 'PAY', retention: 'BK', revenue: 'REV', roster: 'ID',
   'roster/states': 'SYS', safety: 'COND', 'safety/events': 'VEH', 'safety/vehicles': 'VEH', salary: 'CASH',
   'same-person': 'MRG', segment: 'COND', segments: 'COND', settings: 'CRED', settlement: 'REV',
   'settlement/cash': 'CASH', 'settlement/receivables': 'PAY', slot: 'BK', sources: 'SYS', supply: 'BK',
@@ -168,8 +168,10 @@ export function subjectOf(view, sub = '', param = '', { phone = false } = {}) {
   if (view === 'cohort') {
     const p = String(param || '');
     if (/^settlement-cash/.test(p)) return 'CASH';
-    /* safety-drivers ranks PEOPLE by harsh events: conduct, not vehicles. */
+    /* safety-drivers ranks PEOPLE by harsh events: conduct, not vehicles.
+       retention-* is read from /api/retention: bookings per person. */
     if (/^safety-drivers/.test(p)) return 'COND';
+    if (/^retention/.test(p)) return 'BK';
     return VEHICLE_COHORT.test(p) ? 'VEH' : 'ID';
   }
   /* `#driver/<id>/money` puts the tab in `sub`; `#platforms/tiers` and
@@ -189,12 +191,33 @@ export const VIEW_CAP = Object.freeze({ access: 'access.manage' });
 export const VIEW_CAP_WHY = Object.freeze({
   access: 'Deciding who can see what is for the Owner and Access admins. Ask one of them if you need a change.',
 });
+/* PAGES BUILT FROM TOTALS. A role may hold a class only as totals (level A:
+   the Dispatcher's conduct and passengers, the Technician's bookings, a wall
+   screen's places and vehicles). A page opens on A only when every route
+   behind its subject answers an aggregate — measured from the routes each
+   page calls (bin/access-sweep.mjs report) against their grain in
+   api/access/manifest.json, 2026-09-28. Every other page is a list or a
+   record, which the server refuses at A; offering it in the menu and then
+   refusing it is the defect this closes. */
+export const VIEW_AGGREGATE = Object.freeze(new Set(['capacity', 'causes', 'demand', 'forecast', 'optimise',
+  'overview', 'platforms', 'supply', 'corridors', 'corporate/approach', 'analyst', 'corporate', 'finance',
+  'provenance', 'revenue', 'settlement', 'receipts', 'reconcile']));
+export const PHONE_AGGREGATE = Object.freeze(new Set(['today', 'overview', 'money', 'finance', 'settlement',
+  'revenue', 'corporate', 'analyst', 'optimise']));
+function viewKey(view, sub, param, phone) {
+  const map = phone ? PHONE_SUBJECT : VIEW_SUBJECT;
+  if (sub && `${view}/${sub}` in map) return `${view}/${sub}`;
+  if (param && `${view}/${param}` in map) return `${view}/${param}`;
+  return view;
+}
 export function canOpenView(view, sub = '', param = '', opts = {}) {
   if (!gated()) return true;
   if (VIEW_CAP[view]) return (who.access?.capsAny || []).includes(VIEW_CAP[view]);
   const s = subjectOf(view, sub, param, opts);
   if (s === null) return true;
-  return rank(levelOf(s)) > 0;
+  const key = viewKey(view, sub, param, opts.phone);
+  const totals = (opts.phone ? PHONE_AGGREGATE : VIEW_AGGREGATE).has(key);
+  return rank(levelOf(s)) >= (totals ? rank('A') : rank('M'));
 }
 
 /* ── the closed page, and asking for access ───────────────────────────── */
@@ -208,7 +231,7 @@ export function closedBlock({ cls, view = '', title = 'This page is not open to 
   box.innerHTML = `
     <p class="ac-eyebrow">Not shown to your role</p>
     <h2>${esc(title)}</h2>
-    <p class="ac-why">${esc(detail || (cls ? withheldSentence(cls) : 'Your role does not include this.'))}</p>
+    <p class="ac-why">${esc(detail || (cls ? withheldSentence(cls, { level: levelOf(cls) === 'A' ? 'A' : '' }) : 'Your role does not include this.'))}</p>
     ${c ? `<p class="ac-who">This page is about <b>${esc(c.plain)}</b>. ${holders.length ? `${esc(holders.join(', '))} and the Owner` : 'The Owner'} can open it.</p>` : ''}
     ${who.preview ? `<p class="ac-who">You are previewing the <b>${esc(ROLE[who.preview]?.name || who.preview)}</b> role.</p>` : ''}
     ${who.signedIn && who.kind === 'user' && !who.preview ? `

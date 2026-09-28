@@ -9,8 +9,8 @@
    to res.json, so the shaper filters production's real answer for the role
    asking, exactly as it will filter the local handler's answer once deployed.
 
-   NEVER A WRITE. Anything that is not a GET, outside /api/auth and
-   /api/access (which run locally against a scratch database), is answered 501
+   NEVER A WRITE. Anything that is not a GET, outside /api/auth, /api/access
+   and /api/fleets (which run locally against a scratch database), is answered 501
    here and never forwarded. There is no code path that sends a POST upstream.
 
    People, sessions and grants live in a local Postgres (DATABASE_URL, default
@@ -34,6 +34,8 @@ const { pool, migrate } = await import('../src/db.js');
 const { log } = await import('../src/log.js');
 const { accessLayer } = await import('../api/access/middleware.js');
 const { accessRoutes } = await import('../api/access/routes.js');
+const { fleetNameRoutes } = await import('../api/fleet_names_routes.js');
+const { pgTx } = await import('../api/tx.js');
 
 const pub = join(dirname(fileURLToPath(import.meta.url)), '..', 'api', 'public');
 await migrate();
@@ -48,6 +50,9 @@ const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   res.status(500).json({ error: 'internal', detail: String(e).slice(0, 200) });
 });
 accessRoutes(app, { db: pool, layer, wrap, log });
+/* The fleet-names routes are new with this change and not on production yet,
+   so they run here against the sweep database, like the access routes. */
+fleetNameRoutes(app, { q: (t, p) => pool.query(t, p).then((r) => r.rows), wrap, db: pool, tx: pgTx(pool), log });
 
 /* Answers from production, kept on disk by URL. */
 const inflight = new Map();
