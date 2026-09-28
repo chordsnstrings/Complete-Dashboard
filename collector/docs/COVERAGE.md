@@ -7055,3 +7055,45 @@ legal form is dropped. Egari is named by one platform only.
   file rows by src/config.js; rows already filed under the wrong fleet (the
   Sahalat snapshots) are listed on #fleet-names/accounts, not moved.
 
+
+## SMSala (SMS) — measured 2026-09-28
+
+An SMS gateway, not a data source: the operator wants sign-in codes and
+password-reset codes sent by SMS. Nothing in the product calls it yet; this is
+what one test established. The token lives outside the repo (scratchpad now;
+DigitalOcean as a SECRET when it is wired in).
+
+- **Base URL** `https://api2.smsala.com`. Reference: the vendor's PDF
+  (smsala.com/wp-content/uploads/api-integration-documentation-for-smsala.pdf).
+  Every call carries `apiToken` (query string on GET, a body field on POST).
+- **The account has an IP allowlist.** Until the operator added an entry, every
+  call answered HTTP 200 with `{"IsSuccess":false,"ErrorCode":43,
+  "ErrorDescription":"IpAddress Not Allowed"}` — a 200, so a caller that
+  checks only the status sees success. The sandbox's egress is a pool
+  (160.79.106.128, .137, .142 seen in ten minutes) and the App Platform app has
+  no dedicated egress IP, so an allowlist of specific addresses cannot hold;
+  the operator added `0.0.0.0`, after which calls from the pool succeeded.
+- **`GET /sender/List`** lists sender IDs. On 2026-09-28 only `VOLT` and
+  `AD-VOLT` were **Approved**; `ECOSINE` (Transactional, OTP),
+  `AD-Ecosine` (Promotional) and `PowerDrive` (OTP) had been **Requested**
+  since 2025-02-04 and never approved. The sender is therefore a setting,
+  not a literal.
+- **`POST /SendSmsV2` takes a JSON ARRAY, even for one message.** A single
+  object is a 400 whose body is a .NET deserialiser error ("requires a JSON
+  array"). Fields: `messageType` "1" promotional / "2" transactional / "3"
+  OTP; `messageEncoding` "0" default (8 = UCS2 for Arabic);
+  `destinationAddress` as `9715XXXXXXXX` (country code, no plus);
+  `sourceAddress` the sender; `messageText`; optional `userReferenceId`,
+  `callBackUrl`. Answer: an array of `{MessageId, OperationCode:0,
+  Status:"Success", Remarks:"Message Submitted", …}`.
+- **`MessageId` is a 19-digit integer** (`2026092810584614800`) — above
+  2^53, so `JSON.parse` in Node silently rounds it. Read it as text (or from
+  the raw body) before it is stored or used to look up a delivery report.
+- **`GET /Dlr/GetDetails?messageId=`** answers `DlrStatus` as a WORD
+  ("Delivered"), not the numeric code the PDF lists, with `SentDateTime`
+  (UTC, measured: submitted 10:58:46Z, "2026-09-28T10:58:48"),
+  `MessageParts`, `CustomerCost` (0.095 for one 75-character OTP part) and
+  `TextReceived` — the full message text, so a delivery report of a sign-in
+  code carries the code: never log it. Two of eight polls ten seconds apart
+  came back with an empty body; retry rather than read absence as failure.
+- **Delivered in two seconds** to a UAE mobile as type 3 (OTP) from `VOLT`.
