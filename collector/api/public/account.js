@@ -76,7 +76,7 @@ export async function accountPage(root, _param, _sub) {
 
   root.append(youPanel(), seesPanel());
   if (who.owner) root.append(previewPanel());
-  root.append(passwordPanel(), twoStepPanel(), sessionsPanel(), lookPanel(), requestsPanel());
+  root.append(passwordPanel(), twoStepPanel(), mobilePanel(), sessionsPanel(), lookPanel(), requestsPanel());
   return { title: 'Your account', sub: `Signed in as ${who.user?.email || ''}` };
 }
 
@@ -250,6 +250,67 @@ function passwordPanel({ then = null } = {}) {
     if (then) setTimeout(then, 1200);
   });
   p.body.append(form);
+  return p.panel;
+}
+
+/* ── my mobile, for a reset code ──────────────────────────────────────────
+   The only place a password-reset code by text message can go. Setting it
+   asks the person to confirm it is them (post() opens that dialog on the
+   server's "stepup" answer), and it only counts once they have typed back a
+   code sent to it. The number is shown masked, even here. */
+function mobilePanel() {
+  const p = panel('Mobile for reset codes', 'If you forget your password, a reset code can be texted here from the '
+    + 'sign-in page. It resets the password only — two-step sign-in still applies.', 'acct-mobile');
+  const draw = () => {
+    p.body.replaceChildren();
+    const ph = who.user?.phone;
+    const msg = msgLine();
+    if (ph && !p.editing) {
+      p.body.append(h('p', { class: 'acx-p' }, `Reset codes go to ${ph.masked}, confirmed ${dateStr(ph.confirmedAt)}.`));
+      const change = h('button', { type: 'button', class: 'btn' }, 'Use a different mobile');
+      const remove = h('button', { type: 'button', class: 'btn' }, 'Remove it');
+      change.addEventListener('click', () => { p.editing = true; draw(); });
+      remove.addEventListener('click', async () => {
+        const ok = await act(remove, msg, () => post('/api/auth/phone/remove', {}));
+        if (!ok) return;
+        await loadWho(); draw();
+      });
+      p.body.append(h('div', { class: 'acx-actions' }, change, remove, msg));
+      return;
+    }
+    const form = h('form', { class: 'acx-form' });
+    const num = h('input', { type: 'tel', class: 'depinput acx-in', autocomplete: 'tel', inputMode: 'tel', required: true, id: uid(), placeholder: '050 123 4567' });
+    const send = h('button', { type: 'submit', class: 'btn primary' }, 'Text me a code');
+    form.append(field('UAE mobile number', num), h('div', { class: 'acx-actions' }, send, msg));
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!num.value.trim()) { msg.set('Enter your mobile number.', 'bad'); return; }
+      const r = await act(send, msg, () => post('/api/auth/phone', { phone: num.value }));
+      if (!r) return;
+      const cf = h('form', { class: 'acx-form' });
+      const code = h('input', { type: 'text', class: 'depinput acx-in', autocomplete: 'one-time-code', inputMode: 'numeric', maxLength: 6, required: true, id: uid() });
+      const ok = h('button', { type: 'submit', class: 'btn primary' }, 'Confirm');
+      const m2 = msgLine();
+      cf.append(h('p', { class: 'acx-p' }, (r && r.detail) || 'A code is on its way.'), field('Code from the text message', code),
+        h('div', { class: 'acx-actions' }, ok, m2));
+      cf.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const done = await act(ok, m2, () => post('/api/auth/phone/verify', { code: code.value.trim() }));
+        if (!done) return;
+        p.editing = false;
+        await loadWho(); draw();
+      });
+      form.replaceWith(cf);
+      code.focus();
+    });
+    p.body.append(form);
+    if (ph) {
+      const cancel = h('button', { type: 'button', class: 'btn' }, 'Keep the current one');
+      cancel.addEventListener('click', () => { p.editing = false; draw(); });
+      p.body.append(cancel);
+    }
+  };
+  draw();
   return p.panel;
 }
 

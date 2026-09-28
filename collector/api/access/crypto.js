@@ -72,6 +72,19 @@ export function generatePassword() {
   return `${pick()}-${pick()}-${pick()}-${pick()}-${digits}`;
 }
 
+/* ── one-time codes sent by SMS ───────────────────────────────────────────
+   Six digits from the CSPRNG, and only an HMAC of the code is stored, keyed
+   like the sealed secrets below and bound to the person and the purpose: a
+   code issued to confirm a mobile cannot be replayed as a reset code, and a
+   copy of access_code alone does not reveal a code (a bare sha-256 of six
+   digits falls to a million guesses). */
+export const newNumericCode = (len = 6) => String(crypto.randomInt(0, 10 ** len)).padStart(len, '0');
+const codeKey = () => crypto.createHash('sha256')
+  .update(`fleetmirror-code|${process.env.ACCESS_KEY || process.env.SETTINGS_KEY || process.env.DATABASE_URL || 'fleet-dev-key'}`)
+  .digest();
+export const codeHmac = (code, { userId, purpose }) => crypto.createHmac('sha256', codeKey())
+  .update(`${purpose}:${userId}:${String(code).trim()}`).digest('hex');
+
 /* ── sealing secrets at rest (TOTP seeds) ─────────────────────────────── */
 const sealKey = () => crypto.createHash('sha256')
   .update(`fleetmirror-access|${process.env.ACCESS_KEY || process.env.SETTINGS_KEY || process.env.DATABASE_URL || 'fleet-dev-key'}`)

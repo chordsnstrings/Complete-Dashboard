@@ -330,9 +330,10 @@ function stepLogin() {
       <div class="si-actions"><button class="si-btn" type="submit">Sign in</button></div>
     </form>
     <div class="si-quiet">
-      <p>Forgot your password? Ask the Owner or an Access admin to send you a reset link.</p>
+      <p>Forgot your password? <button type="button" class="si-link" data-act="forgot">Get a reset code by text message</button>
+        — it goes to the mobile you confirmed on your account page. Without one, ask the Owner or an Access admin to send you a reset link.</p>
       ${open ? `<p class="si-open">Signing in is optional for now — you can also <a href="${esc(S.back)}">continue without an account</a>.</p>` : ''}
-    </div>`, { title: 'Sign in', focus: S.email ? '#si-password' : 'input' });
+    </div>`, { title: 'Sign in', focus: S.email ? '#si-password' : 'input', acts: { forgot: () => stepForgot() } });
 
   const form = box.querySelector('form');
   form.addEventListener('submit', (e) => {
@@ -351,6 +352,75 @@ function stepLogin() {
         showErr(form, says(err));
         pw.select();
       }
+    });
+  });
+}
+
+/* ── 1a. a forgotten password: a reset code by text message ──────────────
+   The server answers the same whether or not the address has an account
+   (api/access/routes.js /api/auth/reset/request), so this page cannot say
+   "no such account" either: it says where a code would go and moves on. One
+   code per five minutes, three tries — the operator's rule, said here so a
+   reader who waits is not left guessing. */
+function stepForgot() {
+  const box = paint(`
+    <p class="si-eyebrow">Forgot password</p>
+    <h1 tabindex="-1">Get a reset code</h1>
+    ${notice()}
+    <form class="si-form" id="si-forgot" novalidate>
+      ${field({ id: 'si-femail', label: 'Email', type: 'email', value: S.email, auto: 'username',
+    extra: 'inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false" required' })}
+      ${errLine}
+      <div class="si-actions"><button class="si-btn" type="submit">Text me a code</button></div>
+    </form>
+    <div class="si-quiet"><p>The code goes to the mobile confirmed on your account, and only there. One code can be sent every five minutes.
+      <button type="button" class="si-link" data-act="back">Back to sign in</button></p></div>`,
+  { title: 'Forgot password', acts: { back: () => stepLogin() } });
+  const form = box.querySelector('form');
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const email = form.querySelector('#si-femail').value.trim();
+    if (!email) { showErr(form, 'Enter the email you sign in with.'); return; }
+    S.email = email;
+    submitting(form, 'Sending…', async () => {
+      try {
+        const r = await post('/api/auth/reset/request', { email }, { retry: false });
+        S.notice = { tone: '', text: r?.detail || 'If this address has a confirmed mobile, a code is on its way.' };
+        stepForgotCode();
+      } catch (err) { showErr(form, says(err)); }
+    });
+  });
+}
+
+function stepForgotCode() {
+  const box = paint(`
+    <p class="si-eyebrow">Forgot password</p>
+    <h1 tabindex="-1">Enter the code and a new password</h1>
+    ${notice()}
+    <form class="si-form" id="si-forgotcode" novalidate>
+      ${field({ id: 'si-fcode', label: 'Code from the text message', auto: 'one-time-code',
+    extra: 'inputmode="numeric" pattern="[0-9]*" maxlength="6" required', hint: 'Six digits. Three wrong tries and the code stops working.' })}
+      ${field({ id: 'si-fpass', label: 'New password', type: 'password', auto: 'new-password', show: true,
+    extra: 'required', hint: 'At least 12 characters. A few words you will remember is best.' })}
+      ${errLine}
+      <div class="si-actions"><button class="si-btn" type="submit">Set the new password</button></div>
+    </form>
+    <div class="si-quiet"><p>No text after a few minutes? <button type="button" class="si-link" data-act="again">Ask for another code</button>
+      (one every five minutes). <button type="button" class="si-link" data-act="back">Back to sign in</button></p></div>`,
+  { title: 'Forgot password', acts: { again: () => stepForgot(), back: () => stepLogin() } });
+  const form = box.querySelector('form');
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const code = form.querySelector('#si-fcode').value.trim();
+    const password = form.querySelector('#si-fpass').value;
+    if (!/^\d{6}$/.test(code)) { showErr(form, 'Enter the six digits from the text message.'); return; }
+    if (!password) { showErr(form, 'Choose a new password.'); return; }
+    submitting(form, 'Saving…', async () => {
+      try {
+        await post('/api/auth/reset/confirm', { email: S.email, code, password }, { retry: false });
+        S.notice = { tone: 'ok', text: 'Your password is changed. Sign in with it now.' };
+        stepLogin();
+      } catch (err) { showErr(form, says(err)); }
     });
   });
 }

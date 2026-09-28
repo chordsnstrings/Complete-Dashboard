@@ -187,7 +187,11 @@ app.post('/api/ledger/import/commit', async (req, res) => {
   if (req.body.slow) await new Promise((r) => setTimeout(r, 150));   // two commits in flight together (9e)
   imported.push(req.body); res.json({ ok: true, wrote: req.body.rows.length }); });
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: 'internal', detail: String(e) }));
-accessRoutes(app, { db, layer, wrap });
+/* The SMS gateway, faked: every message the routes would send lands here
+   (9g). The real client is tested on its own in test/smsala.test.mjs. */
+const smsSent = [];
+const smsSend = async (m) => { smsSent.push(m); return { ok: true, messageId: '2026092800000000001', sender: 'ECOSINE' }; };
+accessRoutes(app, { db, layer, wrap, smsSend });
 const server = app.listen(0);
 const B = `http://127.0.0.1:${server.address().port}`;
 cache.setPort(server.address().port);   // the stale refresh fetches itself here, as in server.js
@@ -459,6 +463,88 @@ console.log('\n9f. a large cash entry is re-confirmed (security review, 2026-09-
   await people.CLK.b.post('/api/auth/stepup', { password: people.CLK.password });
   const again = await people.CLK.b.post('/api/ledger/entry', { amount: 50000, dry_run: false, note: 'handover' });
   check('…and once they have, it is recorded', again.status === 200 && entries.length === 2);
+}
+
+console.log('\n9g. a forgotten password: a reset code by SMS to a confirmed mobile (2026-09-28)');
+{
+  /* The operator's rule: a reset code, never a password; one code per person
+     per five minutes; three tries. A person of their own, so resetting a
+     password does not end a session the rest of this file relies on.
+     REVERSIONS, each fails a check below: drop the stepupFresh check on
+     /api/auth/phone; drop the five-minute wait in svc.issueCode; count no
+     wrong tries in svc.checkCode; answer an unknown address differently. */
+  const email = 'reset@example.test';
+  const u = await svc.createUser(db, { email, name: 'Test Reset', status: 'active', passwordHash: hashPassword('first pass for the reset test') });
+  await svc.createGrant(db, { userId: u.id, roleCode: 'DSP', reason: 'test', by: null });
+  const b = browser();
+  await signIn(b, email, 'first pass for the reset test');
+  const codeOf = (m) => (String(m?.text || '').match(/\b(\d{6})\b/) || [])[1];
+  const lastSms = () => smsSent[smsSent.length - 1];
+  const ageCodes = () => db.query(`UPDATE access_code SET created_at = created_at - interval '6 minutes' WHERE user_id = $1`, [u.id]);
+
+  const noStep = await b.post('/api/auth/phone', { phone: '050 123 4567' });
+  check('pointing a reset code at a mobile needs a fresh re-confirmation', noStep.status === 403 && noStep.json.error === 'stepup');
+  await b.post('/api/auth/stepup', { password: 'first pass for the reset test' });
+  const bad = await b.post('/api/auth/phone', { phone: '+44 7700 900123' });
+  check('only a UAE mobile is taken', bad.status === 400 && bad.json.error === 'bad_phone');
+  const n0 = smsSent.length;
+  const set = await b.post('/api/auth/phone', { phone: '050 123 4567' });
+  check('a code goes to the mobile, as 9715…, as an OTP', set.status === 200 && smsSent.length === n0 + 1
+    && lastSms().to === '971501234567' && lastSms().type === 'otp' && /^\d{6}$/.test(codeOf(lastSms()) || ''), JSON.stringify(set.json));
+  check('…and the answer shows it masked, never whole', set.json.sentTo === '•••••••••67' && !JSON.stringify(set.json).includes('1234567'));
+  const again = await b.post('/api/auth/phone', { phone: '050 123 4567' });
+  check('a second code inside five minutes is refused', again.status === 429 && again.json.error === 'wait' && smsSent.length === n0 + 1);
+  const phoneCode = codeOf(lastSms());
+  const unconfirmed = await b.get('/api/auth/me');
+  check('the mobile does not count until its code is typed back', unconfirmed.json.user.phone === null);
+  const ok = await b.post('/api/auth/phone/verify', { code: phoneCode });
+  const me2 = await b.get('/api/auth/me');
+  check('typed back, it is confirmed and shown masked', ok.status === 200 && me2.json.user.phone?.masked === '•••••••••67');
+  const { rows: [stored] } = await db.query('SELECT code_hash FROM access_code WHERE user_id = $1 ORDER BY id DESC LIMIT 1', [u.id]);
+  check('the code itself is stored nowhere, only its keyed hash', stored.code_hash !== phoneCode && !stored.code_hash.includes(phoneCode));
+
+  const n1 = smsSent.length;
+  const unknown = await browser().post('/api/auth/reset/request', { email: 'nobody-here@example.test' });
+  const known = await browser().post('/api/auth/reset/request', { email });
+  for (let i = 0; i < 40 && smsSent.length === n1; i++) await new Promise((r) => setTimeout(r, 25));
+  check('a known and an unknown address get the same answer', unknown.status === 200 && known.status === 200
+    && unknown.json.detail === known.json.detail);
+  check('…and only the known one is sent a reset code, to the confirmed mobile', smsSent.length === n1 + 1
+    && lastSms().to === '971501234567' && /reset code is \d{6}/.test(lastSms().text));
+  const resetCode = codeOf(lastSms());
+  await browser().post('/api/auth/reset/request', { email });
+  await new Promise((r) => setTimeout(r, 200));
+  check('a second reset code inside five minutes is not sent', smsSent.length === n1 + 1);
+  const { rows: outbox } = await db.query(`SELECT kind, destination, message_text, status FROM sms_outbox WHERE user_id = $1 ORDER BY id`, [u.id]);
+  check('each code is in the outbox with its number and no text', outbox.length === 2 && outbox.every((o) => o.message_text === null && o.status === 'sent')
+    && outbox.map((o) => o.kind).join() === 'phone_code,reset_code', JSON.stringify(outbox.map((o) => o.kind)));
+
+  const reset = (code, password = 'a brand new pass for tomorrow') => browser().post('/api/auth/reset/confirm', { email, code, password });
+  const weak = await reset(resetCode, 'short');
+  check('a weak new password is refused before a try is spent', weak.status === 400 && weak.json.error === 'weak_password');
+  const wrong = String((Number(resetCode) + 1) % 1000000).padStart(6, '0');
+  const w1 = await reset(wrong);
+  const w2 = await reset(wrong);
+  check('a wrong code is refused, and says three tries is the limit', w1.status === 400 && w1.json.error === 'bad_code' && /three wrong tries/.test(w1.json.detail));
+  const phoneAsReset = await reset(phoneCode);
+  check('a code sent to confirm the mobile is no reset code (the third try)', phoneAsReset.status === 400);
+  const late = await reset(resetCode);
+  check('after three wrong tries the right code no longer works', late.status === 400 && late.json.error === 'bad_code');
+
+  await ageCodes();
+  await browser().post('/api/auth/reset/request', { email });
+  for (let i = 0; i < 40 && lastSms().text.includes(resetCode); i++) await new Promise((r) => setTimeout(r, 25));
+  const fresh = codeOf(lastSms());
+  const done = await reset(fresh);
+  check('five minutes later a new code is sent, and it resets the password', done.status === 200 && fresh !== resetCode, JSON.stringify(done.json));
+  const oldSession = await b.get('/api/auth/me');
+  check('…every session of that person ends', oldSession.json.signedIn === false);
+  const reuse = await reset(fresh, 'another brand new pass today');
+  check('…and the code cannot be used twice', reuse.status === 400);
+  const nb = browser();
+  const inNew = await signIn(nb, email, 'a brand new pass for tomorrow');
+  const inOld = await signIn(browser(), email, 'first pass for the reset test');
+  check('the new password signs in; the old one does not', inNew.status === 200 && inOld.status === 401, `${inNew.status} ${inOld.status}`);
 }
 
 console.log('\n9b. four-eyes: a cash sheet is proposed by one person and committed by another');

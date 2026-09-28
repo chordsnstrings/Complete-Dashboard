@@ -536,6 +536,22 @@ await section('13', async () => {
   await settle();
   check('…and Arkiv again after switching back', await skinNow() === 'arkiv');
   noErrorsSoFar('The look');
+
+  /* The mobile a reset code goes to (2026-09-28). This server has no SMS
+     token, so a send cannot happen: the panel must say so in the server's
+     words rather than pretend a code is on its way. */
+  const mob = page.locator('[data-panel="acct-mobile"]');
+  check('the account page offers a mobile for reset codes', await mob.count() === 1
+    && /reset code/i.test(await mob.innerText()), await mob.innerText().catch(() => ''));
+  await ensureStepup();   // setting the mobile needs a fresh re-confirmation
+  await mob.locator('input[type="tel"]').fill('050 123 4567');
+  await mob.locator('button[type="submit"]').click();
+  await page.waitForFunction(() => /could not be sent/i.test(document.querySelector('[data-panel="acct-mobile"]')?.innerText || ''),
+    null, { timeout: 8000 }).catch(() => {});
+  check('…and with no SMS gateway set up it says the text could not be sent', /could not be sent/i.test(await mob.innerText()), await mob.innerText());
+  /* That 502 is the answer this check asked for; any OTHER error still fails. */
+  const otherErrors = mine.splice(0).filter((e) => !/\/api\/auth\/phone/.test(e));
+  check('…and the page raised no other console error', otherErrors.length === 0, otherErrors.join(' | ').slice(0, 400));
 });
 
 console.log('\n14 · the same pages for an Access admin, and for someone who manages nothing');

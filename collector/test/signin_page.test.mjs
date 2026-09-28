@@ -643,6 +643,29 @@ try {
     await waitH1(page, 'Sign in to FleetMirror');
     check('an unknown ?why= says nothing', await page.locator('#signin .si-note').count() === 0);
 
+    /* Forgot password: a reset code by text message (2026-09-28). The server
+       answers alike for any address and this server has no SMS token, so
+       nothing is sent; what is tested is that the page walks the reader to
+       the code step, says where a code goes, and reports a wrong code with the
+       server's sentence. REVERSION: drop the data-act="forgot" button — the
+       first check fails. */
+    await page.locator('[data-act=forgot]').click();
+    await waitH1(page, 'Get a reset code');
+    check('"Forgot your password?" leads to a reset-code form', await page.locator('#si-femail').count() === 1);
+    await page.fill('#si-femail', OWNER);
+    await page.click('#si-forgot button[type=submit]');
+    await waitH1(page, 'Enter the code and a new password');
+    check('…asking for one says where it would go, without saying whether the address exists',
+      /confirmed mobile/.test(await noteText(page)), await noteText(page));
+    await page.fill('#si-fcode', '000000');
+    await page.fill('#si-fpass', 'a long enough new password');
+    await page.click('#si-forgotcode button[type=submit]');
+    await page.waitForFunction(() => !document.querySelector('.si-err')?.hidden, null, { timeout: 5000 }).catch(() => {});
+    check('…a wrong code is refused with the three-tries sentence', /three wrong tries/.test(await errText(page)), await errText(page));
+    await page.locator('[data-act=back]').click();
+    await waitH1(page, 'Sign in to FleetMirror');
+    check('…and "Back to sign in" goes back', true);
+
     await ctx.route('**/api/auth/me', (route) => route.fulfill({ status: 503, contentType: 'application/json',
       body: JSON.stringify({ error: 'starting', detail: 'migrations are still applying — retry shortly' }) }));
     await page.goto(`${base}/signin`);

@@ -10,7 +10,7 @@
    an entry from an older version is recomputed: a revoked grant takes effect
    on the very next request, not after the cache ages out. */
 import { computeAccess } from './principal.js';
-import { hashPassword, verifyPassword, needsRehash, newToken, tokenHash } from './crypto.js';
+import { hashPassword, verifyPassword, needsRehash, newToken, tokenHash, newNumericCode, codeHmac, safeEqual } from './crypto.js';
 import { appendAudit } from './audit.js';
 import { ROLE, CLASS_CODES } from '../public/access_model.js';
 
@@ -470,4 +470,75 @@ export async function bootstrapOwner(db, { email = process.env.BOOTSTRAP_OWNER_E
     subjectType: 'user', subjectId: user.id, detail: { email: normEmail(email) } });
   log(`bootstrapped the first Owner (${normEmail(email)})`);
   return { done: true, userId: user.id };
+}
+
+
+/* ── codes sent by SMS: a reset code, or the code that confirms a mobile ──
+   The operator's rule (2026-09-28): one code per person per five minutes,
+   and three tries at it. A code lives ten minutes. Only its HMAC is stored
+   (crypto.js codeHmac), bound to the person and the purpose. */
+export const CODE_EVERY_MIN = 5;
+export const CODE_TRIES = 3;
+export const CODE_LIFE_MIN = 10;
+
+/** A new code, unless one was issued to this person for this purpose within
+ *  the last five minutes: then {wait} — the seconds until another may be sent. */
+export async function issueCode(db, { userId, purpose, phone = null, ip = null, now = new Date() }) {
+  const { rows: [last] } = await db.query(
+    `SELECT created_at FROM access_code WHERE user_id = $1 AND purpose = $2
+      ORDER BY created_at DESC LIMIT 1`, [userId, purpose]);
+  const since = last ? (now.getTime() - new Date(last.created_at).getTime()) / 1000 : Infinity;
+  if (since < CODE_EVERY_MIN * 60) return { wait: Math.ceil(CODE_EVERY_MIN * 60 - since) };
+  const code = newNumericCode(6);
+  const { rows: [row] } = await db.query(
+    `INSERT INTO access_code (user_id, purpose, code_hash, phone, expires_at, created_at, ip)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [userId, purpose, codeHmac(code, { userId, purpose }), phone,
+      new Date(now.getTime() + CODE_LIFE_MIN * 60_000).toISOString(), now.toISOString(), ip]);
+  return { code, id: num(row.id) };
+}
+
+/** Try a code. The latest live code for this person and purpose is the only
+ *  one that counts; every wrong try is counted, and the third kills it. */
+export async function checkCode(db, { userId, purpose, code, now = new Date() }) {
+  const { rows: [c] } = await db.query(
+    `SELECT id, code_hash, phone, attempts, expires_at, used_at FROM access_code
+      WHERE user_id = $1 AND purpose = $2 ORDER BY created_at DESC LIMIT 1`, [userId, purpose]);
+  if (!c || c.used_at || new Date(c.expires_at) <= now || c.attempts >= CODE_TRIES) return { ok: false, reason: 'no_live_code' };
+  const good = /^\d{6}$/.test(String(code || '').trim()) && safeEqual(codeHmac(code, { userId, purpose }), c.code_hash);
+  if (!good) {
+    const { rows: [u] } = await db.query(
+      'UPDATE access_code SET attempts = attempts + 1 WHERE id = $1 RETURNING attempts', [c.id]);
+    return { ok: false, reason: 'wrong', triesLeft: Math.max(0, CODE_TRIES - u.attempts) };
+  }
+  /* Used exactly once: the conditional update is what stops two requests
+     racing the same right code. */
+  const { rowCount } = await db.query(
+    'UPDATE access_code SET used_at = $2 WHERE id = $1 AND used_at IS NULL', [c.id, now.toISOString()]);
+  if (!rowCount) return { ok: false, reason: 'no_live_code' };
+  return { ok: true, phone: c.phone, id: num(c.id) };
+}
+
+/* A person's own mobile. Read on its own, never in USER_COLS: the Access
+   pages list users to Access admins, who do not hold contact details (CT). */
+export async function getPhone(db, userId) {
+  const { rows: [r] } = await db.query('SELECT phone, phone_verified_at FROM access_user WHERE id = $1', [userId]);
+  return { phone: r?.phone || null, verifiedAt: r?.phone_verified_at || null };
+}
+export async function setPhone(db, userId, phone) {
+  await db.query(
+    `UPDATE access_user SET phone = $2, phone_verified_at = CASE WHEN $2::text IS NULL THEN NULL ELSE now() END WHERE id = $1`,
+    [userId, phone]);
+}
+
+/* The outbox row for a code: no text (a code is never stored), the number it
+   went to, and what the gateway said. The same table the driver messages use,
+   so one page answers "what did we send, to whom, and did it arrive". */
+export async function recordCodeSms(db, { userId, kind, codeId, destination, result }) {
+  await db.query(
+    `INSERT INTO sms_outbox (kind, dedupe_key, user_id, destination, sender, status, provider_message_id, error, sent_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $6 = 'sent' THEN now() END)
+     ON CONFLICT (dedupe_key) DO NOTHING`,
+    [kind, `code:${userId}:${codeId}`, userId, destination, result.sender || null,
+      result.ok ? 'sent' : 'failed', result.messageId || null, result.ok ? null : `${result.error}: ${result.detail || ''}`.slice(0, 300)]);
 }

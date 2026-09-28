@@ -22,10 +22,12 @@ import { SID, CSRF, DEV, setCookie, clearCookies, issueCsrf } from './middleware
 import {
   ROLES, ROLE, CLASSES, CLASS_CODES, CAPS, CAP_CODES, roleIsSensitive, rank,
 } from '../public/access_model.js';
+import { sendSms, uaeMobile, maskPhone } from '../../src/smsala.js';
 
 const MIN_REASON = 3;
 
-export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {}, error() {} } }) {
+/* `smsSend` is the gateway (src/smsala.js sendSms); a test passes a fake. */
+export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {}, error() {} }, smsSend = sendSms }) {
   const audit = (req, action, subjectType, subjectId, detail = {}) => appendAudit(db, {
     actorId: req.fm?.user?.id ?? null,
     actorLabel: req.fm?.user?.email || req.fm?.kind || 'anonymous',
@@ -125,10 +127,15 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
        "your company's own role C_…" instead of what the Owner called it. */
     const custom = (fm.grants || []).some((g) => !ROLE[g.role_code]) ? await svc.customRoles(db) : {};
     const roleName = (code) => ROLE[code]?.name || custom[code]?.name || code;
+    /* Their own mobile, masked even to themselves: the page only needs to say
+       which number a reset code would go to, and this answer is cached by
+       the browser like any other. */
+    const ph = await svc.getPhone(db, u.id);
     return res.json({
       ...base, signedIn: true, kind: 'user',
       user: { id: u.id, email: u.email, name: u.name, prefs: u.prefs || {}, totp: u.totp_enabled,
-        mustChangePassword: u.must_change_password, lastLoginAt: u.last_login_at },
+        mustChangePassword: u.must_change_password, lastLoginAt: u.last_login_at,
+        phone: ph.phone && ph.verifiedAt ? { masked: maskPhone(ph.phone), confirmedAt: ph.verifiedAt } : null },
       restricted: fm.restricted || null,
       mfaRequired: layer.mfaRequired(cfg, fm),
       owner: isOwner(fm),
@@ -296,6 +303,110 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     await svc.revokeUserSessions(db, l.user_id, `password set by ${l.purpose} link`);
     await audit(req, `auth.${l.purpose}_accepted`, 'user', l.user_id, {});
     return res.json({ ok: true, email: l.email });
+  }));
+
+  /* ── a forgotten password: a reset code by SMS ─────────────────────────
+     ─────────────────────────────────────────────────────────────────────
+     The operator's rule (2026-09-28): not a new password by SMS — a reset
+     code, one per person per five minutes, three tries. It goes only to a
+     mobile the person confirmed themselves on their account page, and it
+     resets the PASSWORD only: two-step sign-in still stands afterwards, so a
+     stolen SIM alone does not open an Owner's account.
+
+     The answer never says whether the address has an account, and the
+     request is answered BEFORE any lookup or send, so the time it takes says
+     nothing either. A cross-site form can make a browser ask; the most that
+     costs is one SMS to the owner of the address per five minutes. */
+  const RESET_SENT = 'If this address has a confirmed mobile on its account, a code is on its way. '
+    + 'A new code can be sent once every five minutes.';
+  const BAD_CODE = 'That code is not right, or it has expired. After three wrong tries a code stops '
+    + 'working — ask for a new one.';
+  app.post('/api/auth/reset/request', wrap(async (req, res) => {
+    noStore(res);
+    if (limited(`reset:${req.ip}`, 10)) return fail(res, 429, 'slow_down', 'Too many attempts. Wait fifteen minutes.');
+    const email = String(req.body?.email || '').trim();
+    res.json({ ok: true, detail: RESET_SENT });
+    /* After the answer: nothing below changes what the caller sees. */
+    try {
+      const user = email ? await svc.getUserByEmail(db, email) : null;
+      if (!user || user.status !== 'active') return;
+      const ph = await svc.getPhone(db, user.id);
+      if (!ph.phone || !ph.verifiedAt) {
+        await audit(req, 'auth.reset_code_no_phone', 'user', user.id, {});
+        return;
+      }
+      const c = await svc.issueCode(db, { userId: user.id, purpose: 'reset', ip: req.ip });
+      if (c.wait) { await audit(req, 'auth.reset_code_throttled', 'user', user.id, { wait_s: c.wait }); return; }
+      const r = await smsSend({ to: ph.phone, type: 'otp', ref: `fm-reset-${c.id}`,
+        text: `Your FleetMirror reset code is ${c.code}. It expires in 10 minutes. Do not share it.` });
+      await svc.recordCodeSms(db, { userId: user.id, kind: 'reset_code', codeId: c.id, destination: ph.phone, result: r });
+      await audit(req, r.ok ? 'auth.reset_code_sent' : 'auth.reset_code_failed', 'user', user.id,
+        { to: maskPhone(ph.phone), ...(r.ok ? {} : { error: r.error }) });
+    } catch (e) { log.error('access', 'reset code', { err: String(e?.message || e).slice(0, 200) }); }
+  }));
+
+  app.post('/api/auth/reset/confirm', wrap(async (req, res) => {
+    noStore(res);
+    if (limited(`resetc:${req.ip}`, 20)) return fail(res, 429, 'slow_down', 'Too many attempts. Wait fifteen minutes.');
+    const email = String(req.body?.email || '').trim();
+    const password = String(req.body?.password || '');
+    /* The password is judged first, so a weak one does not spend a try. */
+    const problem = passwordProblem(password, { email });
+    if (problem) return fail(res, 400, 'weak_password', problem);
+    const user = email ? await svc.getUserByEmail(db, email) : null;
+    if (!user || user.status !== 'active') return fail(res, 400, 'bad_code', BAD_CODE);
+    const c = await svc.checkCode(db, { userId: user.id, purpose: 'reset', code: req.body?.code });
+    if (!c.ok) {
+      await audit(req, 'auth.reset_code_wrong', 'user', user.id, { reason: c.reason });
+      return fail(res, 400, 'bad_code', BAD_CODE);
+    }
+    await svc.setPassword(db, user.id, password);
+    await db.query('UPDATE access_user SET failed_logins = 0, locked_until = NULL WHERE id = $1', [user.id]);
+    await svc.revokeUserSessions(db, user.id, 'password reset by SMS code');
+    await audit(req, 'auth.password_reset_by_code', 'user', user.id, {});
+    return res.json({ ok: true, detail: 'Your password is changed. Sign in with it now.' });
+  }));
+
+  /* ── my mobile: the only place a reset code can go ─────────────────────
+     Setting it needs a fresh re-confirmation (the password or the two-step
+     code): the mobile becomes a way into the account, so a borrowed session
+     must not be able to point it somewhere else. It only counts once a code
+     sent to it has been typed back. */
+  app.post('/api/auth/phone', wrap(async (req, res) => {
+    const fm = me(req, res, { write: true });
+    if (!fm) return undefined;
+    if (!stepupFresh(fm)) return fail(res, 403, 'stepup', 'Confirm it is you to continue.');
+    const phone = uaeMobile(req.body?.phone);
+    if (!phone) return fail(res, 400, 'bad_phone', 'Enter a UAE mobile number, like 050 123 4567.');
+    const c = await svc.issueCode(db, { userId: fm.user.id, purpose: 'phone', phone, ip: req.ip });
+    if (c.wait) return fail(res, 429, 'wait', `A code was sent less than five minutes ago. Try again in ${Math.ceil(c.wait / 60)} minute(s).`, { wait_s: c.wait });
+    const r = await smsSend({ to: phone, type: 'otp', ref: `fm-phone-${c.id}`,
+      text: `Your FleetMirror code is ${c.code}. It confirms this mobile for your account and expires in 10 minutes.` });
+    await svc.recordCodeSms(db, { userId: fm.user.id, kind: 'phone_code', codeId: c.id, destination: phone, result: r });
+    await audit(req, r.ok ? 'auth.phone_code_sent' : 'auth.phone_code_failed', 'user', fm.user.id,
+      { to: maskPhone(phone), ...(r.ok ? {} : { error: r.error }) });
+    if (!r.ok) return fail(res, 502, 'sms_failed', 'The text message could not be sent. Try again in five minutes.');
+    return res.json({ ok: true, sentTo: maskPhone(phone), detail: `A code is on its way to ${maskPhone(phone)}.` });
+  }));
+  app.post('/api/auth/phone/verify', wrap(async (req, res) => {
+    const fm = me(req, res, { write: true });
+    if (!fm) return undefined;
+    const c = await svc.checkCode(db, { userId: fm.user.id, purpose: 'phone', code: req.body?.code });
+    if (!c.ok) {
+      await audit(req, 'auth.phone_code_wrong', 'user', fm.user.id, { reason: c.reason });
+      return fail(res, 400, 'bad_code', BAD_CODE);
+    }
+    await svc.setPhone(db, fm.user.id, c.phone);
+    await audit(req, 'auth.phone_confirmed', 'user', fm.user.id, { phone: maskPhone(c.phone) });
+    return res.json({ ok: true, phone: maskPhone(c.phone), detail: 'Your mobile is confirmed. A reset code can now be sent to it.' });
+  }));
+  app.post('/api/auth/phone/remove', wrap(async (req, res) => {
+    const fm = me(req, res, { write: true });
+    if (!fm) return undefined;
+    if (!stepupFresh(fm)) return fail(res, 403, 'stepup', 'Confirm it is you to continue.');
+    await svc.setPhone(db, fm.user.id, null);
+    await audit(req, 'auth.phone_removed', 'user', fm.user.id, {});
+    return res.json({ ok: true });
   }));
 
   /* ── my account ───────────────────────────────────────────────────── */
