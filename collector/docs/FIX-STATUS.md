@@ -4011,7 +4011,13 @@ bootstrapped the first Owner`. The worker's: `migrations complete
 {"ran":2}` (v86, v87). Screens through bin/prod-mirror.mjs: sign-in at 1440
 and 390, the overview in Arkiv (the default) and Classic, the account page
 signed out, the phone's Today — no page error, no sideways scroll, no
-"undefined"; the credential banner renders in Arkiv as in Classic. **proven** means re-measured on production by the method
+"undefined"; the credential banner renders in Arkiv as in Classic.
+
+**Fleets named from the platforms — proven on production.** Discovery ran
+ten minutes after the worker started (09:57:11Z): `{"steps":"cabman:ok
+uber:ok yango:ok bolt:ok fms:ok hotel:ok","renamed":"ecosine→Ecosine,
+egari→Egari"}`, and `/api/auth/me` has carried `Ecosine` and `Egari` since
+09:57:41Z. Before it ran, the pages showed the fleets' own ids, as designed. **proven** means re-measured on production by the method
 that found it.
 
 | # | severity | what was wrong | fix | test (revert fails it) | written | committed | deployed | proven |
