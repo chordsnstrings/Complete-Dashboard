@@ -250,11 +250,18 @@ function viewKey(view, sub, param, phone) {
    menu now asks what the server will ask. Measured against the manifest's
    subject and grain for the route each page loads first. */
 export const VIEW_LIST_NEEDS = Object.freeze({ playbook: 'BK', unit: 'VEH', 'corporate/leakage': 'BK', 'platforms/tiers': 'VEH' });
-const listNeed = (view, sub, phone) => (phone ? null : VIEW_LIST_NEEDS[sub ? `${view}/${sub}` : view] || null);
+/* The tab comes as `param` from the address (parseHash: view/param/sub —
+   `#platforms/tiers` is view platforms, param tiers), or as `sub` from a
+   caller naming it; with neither, the page's own default tab. */
+const listNeed = (view, sub, param, phone) => {
+  if (phone) return null;
+  const tab = sub || param;
+  return VIEW_LIST_NEEDS[tab ? `${view}/${tab}` : view] || null;
+};
 /* The class that keeps a page closed to this reader: its subject, or the list
    it is built on — so the closed page names the true one. */
 export function closingClass(view, sub = '', param = '', opts = {}) {
-  const need = listNeed(view, sub, opts.phone);
+  const need = listNeed(view, sub, param, opts.phone);
   if (need && rank(levelOf(need)) < rank('M')) return need;
   return subjectOf(view, sub, param, opts);
 }
@@ -263,7 +270,7 @@ export function canOpenView(view, sub = '', param = '', opts = {}) {
   if (VIEW_CAP[view]) return (who.access?.capsAny || []).includes(VIEW_CAP[view]);
   const s = subjectOf(view, sub, param, opts);
   if (s === null) return true;
-  const need = listNeed(view, sub, opts.phone);
+  const need = listNeed(view, sub, param, opts.phone);
   if (need && rank(levelOf(need)) < rank('M')) return false;
   const key = viewKey(view, sub, param, opts.phone);
   const totals = (opts.phone ? PHONE_AGGREGATE : VIEW_AGGREGATE).has(key);

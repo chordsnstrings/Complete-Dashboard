@@ -21,12 +21,17 @@ const as = (code) => {
   Object.assign(access.who, { loaded: true, signedIn: true, kind: ROLE[code].device ? 'device' : 'user', roles: [code],
     access: { levelsAny: lv, levels: lv, capsAny: ROLE[code].caps || [] } });
 };
+/* As the address gives them: parseHash reads #platforms/tiers as view
+   'platforms', PARAM 'tiers'. The first version of this test passed the tab
+   as `sub`, which the router never does — and passed while the menu still
+   offered both pages (re-sweep, 2026-09-28). */
 const PAGES = [['playbook', ''], ['unit', ''], ['corporate', 'leakage'], ['platforms', 'tiers']];
+const open = (v, t) => access.canOpenView(v, '', t);
 
 console.log('\n1. the wall screen is not offered a page the server refuses it');
 as('WALL');
 for (const [v, s] of PAGES) {
-  check(`#${s ? `${v}/${s}` : v} is closed to the wall screen`, access.canOpenView(v, s) === false);
+  check(`#${s ? `${v}/${s}` : v} is closed to the wall screen`, open(v, s) === false);
 }
 check('…while the pages it can read stay open (the overview, revenue, the corporate summary)',
   ['overview', 'revenue', 'corporate'].every((v) => access.canOpenView(v)));
@@ -40,10 +45,14 @@ for (const r of ROLES.filter((x) => x.code !== 'WALL')) {
   for (const [v, s] of PAGES) {
     const need = access.VIEW_LIST_NEEDS[s ? `${v}/${s}` : v];
     const lv = ROLE[r.code].levels[need] || '';
-    if ((lv === 'M' || lv === 'F') && access.closingClass(v, s) !== access.subjectOf(v, s)) changed.push(`${r.code}:${v}/${s}`);
+    if ((lv === 'M' || lv === 'F') && access.closingClass(v, '', s) !== access.subjectOf(v, '', s)) changed.push(`${r.code}:${v}/${s}`);
   }
 }
 check('a role holding the list in full keeps the page', changed.length === 0, changed.join(' '));
+/* A tab of #unit is judged by its own subject, not by #unit's list: the cash
+   desk (driver names, no vehicles in full) keeps #unit/drivers. */
+as('CLK');
+check('a tab is not held to its page\'s list (#unit/drivers for the cash desk)', open('unit', 'drivers') === true && access.closingClass('unit', '', 'drivers') === 'ID');
 
 console.log('\n3. the closed page names the class that closes it');
 as('WALL');
