@@ -117,6 +117,8 @@ const MANIFEST = {
     fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: null },
   'GET /api/t/kpis': { method: 'GET', path: '/api/t/kpis', subject: 'REV', carries: ['REV', 'BK'], grain: 'aggregate',
     fields: [], whole: [], fleet: 'param', fleetRows: [], fleetKey: '', cap: null },
+  'GET /api/t/person': { method: 'GET', path: '/api/t/person', subject: 'ID', carries: ['ID'], grain: 'record',
+    fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: null },
   'GET /api/t/search': { method: 'GET', path: '/api/t/search', subject: 'BK', carries: ['BK', 'ID', 'LOC', 'VEH'], grain: 'list',
     fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: null, search: { param: 'q', classes: ['ID', 'LOC', 'VEH'] } },
   'POST /api/t/cash': { method: 'POST', path: '/api/t/cash', subject: 'CASH', carries: ['CASH'], grain: 'none',
@@ -143,6 +145,7 @@ app.get('/api/t/people', (req, res) => res.json([
   { name: 'Test Driver B', fleet_id: 'ecosine', phone: '0500000002', balance: 20 }]));
 app.get('/api/t/cash', (req, res) => res.json([{ name: 'Test Driver A', balance: 10 }]));
 app.get('/api/t/kpis', (req, res) => { kpiCalls += 1; res.json({ fleet: req.query.fleet || 'all', trips: 5 }); });
+app.get('/api/t/person', (req, res) => res.json({ name: 'Test Driver A', trips: 3 }));
 let searchCalls = 0;
 app.get('/api/t/search', (req, res) => { searchCalls += 1; res.json({ within: req.query._fmsearch ?? 'every column' }); });
 let cashWrites = 0;
@@ -267,6 +270,15 @@ console.log('\n7. what each role is answered');
   check('Cash desk: cash but no phones', c.json.every((r) => r.phone === null) && c.json[0].balance === 10);
   const dc = await people.DSP.b.get('/api/t/cash');
   check('a Dispatcher is refused a cash page outright, with the reason', dc.status === 403 && dc.json.class === 'CASH' && /Not shown to your role/.test(dc.json.detail));
+  /* A page that combines every fleet's records with no fleet on its rows
+     (a person's page): refused to a one-fleet reader WITH THE TRUE REASON.
+     REVERSION: drop the 'mixed' branch in judge() — the refusal names
+     "driver identity", a class the Operations manager holds. */
+  const pm = await people.OPS.b.get('/api/t/person');
+  check('a one-fleet reader is refused a page that mixes fleets, and told that is why',
+    pm.status === 403 && pm.json.error === 'fleet_scope' && /every fleet/.test(pm.json.detail) && !pm.json.class, JSON.stringify(pm.json));
+  const pd = await people.DSP.b.get('/api/t/person');
+  check('…while a reader of every fleet opens it', pd.status === 200 && pd.json.name === 'Test Driver A');
   const oe = await people.OPS.b.get('/api/t/people');
   check('Operations over Egari: only Egari rows', oe.status === 200 && oe.json.length === 1 && oe.json[0].fleet_id === 'egari', JSON.stringify(oe.json));
   kpiCalls = 0;

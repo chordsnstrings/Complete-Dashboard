@@ -214,6 +214,17 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
       if (!access.allScope) filterRows = scope;
     } else if (entry.fleet === 'global') {
       targets = scope.length ? scope : all;
+    } else if (!access.allScope) {
+      /* 'mixed': the answer combines every fleet's records and carries no
+         fleet on its rows to filter by (a person's page, a car's page). A
+         reader limited to some fleets is refused — with THAT reason. Before,
+         the levels were taken over every fleet, the other fleet's '' won, and
+         the refusal said "not shown to your role: driver identity" to an
+         Operations manager who plainly holds driver identity for their own
+         fleet: a reason that was not the true one. */
+      return { refuse: withheldBody(null, '', { error: 'fleet_scope',
+        detail: 'This combines the records of every fleet, and your access covers only some of them. '
+          + 'Ask the Owner or an Access admin if you need it for every fleet.' }) };
     }
     const combine = entry.fleet === 'global' ? 'max' : 'min';
     const levels = access.levelsOver(targets, combine === 'max'

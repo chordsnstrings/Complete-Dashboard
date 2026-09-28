@@ -137,7 +137,11 @@ export const VIEW_SUBJECT = Object.freeze({
   causes: 'BK', charging: 'CASH', cohort: 'ID', 'cohort/settlement-cash': 'CASH', compare: 'BK', compliance: 'ID',
   corporate: 'REV', 'corporate/approach': 'LOC', 'corporate/guests': 'PAX', corridors: 'LOC', coverage: 'SYS',
   day: 'BK', demand: 'BK', deposits: 'CASH', driver: 'ID', 'driver/earnings': 'EARN', 'driver/money': 'CASH',
-  'driver/territory': 'LOC', drivers: 'ID', feeds: 'VEH', finance: 'REV', forecast: 'BK', 'hr-roster': 'HR', identity: 'MRG',
+  /* A driver's and a vehicle's tabs are each about what their own routes are
+     about (api/access/manifest.json): Quality is conduct, Territory is
+     places, Trips is bookings, Unexplained trips names a likely culprit. */
+  'driver/territory': 'LOC', 'driver/quality': 'COND', 'driver/trips': 'BK', 'driver/unauthorized': 'ACCUSE',
+  'vehicle/compliance': 'VEH', drivers: 'ID', feeds: 'VEH', finance: 'REV', forecast: 'BK', 'hr-roster': 'HR', identity: 'MRG',
   'import-sheet': 'CASH', insights: 'ID', live: 'LOC', 'low-performers': 'ID', map: 'LOC', notfound: 'SYS',
   'online-time': 'ID', opening: 'CASH', optimise: 'BK', overview: 'BK', payouts: 'PAY', performance: 'ID',
   performer: 'ID', platforms: 'BK', 'platforms/funnel': 'COND', 'platforms/tiers': 'VEH', playbook: 'REV',
@@ -147,7 +151,7 @@ export const VIEW_SUBJECT = Object.freeze({
   'same-person': 'MRG', segment: 'COND', segments: 'COND', settings: 'CRED', settlement: 'REV',
   'settlement/cash': 'CASH', 'settlement/receivables': 'PAY', slot: 'BK', sources: 'SYS', supply: 'BK',
   'top-performers': 'ID', trip: 'BK', trips: 'BK', unauthorized: 'COND', unit: 'REV', 'unit/assets': 'VEH',
-  'unit/drivers': 'ID', vehicle: 'VEH', 'vehicle/drivers': 'ID', 'vehicle/earnings': 'EARN',
+  'unit/drivers': 'ID', vehicle: 'VEH', 'vehicle/drivers': 'ID', 'vehicle/earnings': 'REV',
   'vehicle/movement': 'LOC', 'vehicle/safety': 'COND', 'vehicle/trips': 'BK', vehicles: 'VEH',
   /* The account and access pages decide for themselves. */
   account: null, access: null, approvals: null, 'fleet-names': null,
@@ -164,6 +168,8 @@ export function subjectOf(view, sub = '', param = '', { phone = false } = {}) {
   if (view === 'cohort') {
     const p = String(param || '');
     if (/^settlement-cash/.test(p)) return 'CASH';
+    /* safety-drivers ranks PEOPLE by harsh events: conduct, not vehicles. */
+    if (/^safety-drivers/.test(p)) return 'COND';
     return VEHICLE_COHORT.test(p) ? 'VEH' : 'ID';
   }
   /* `#driver/<id>/money` puts the tab in `sub`; `#platforms/tiers` and
