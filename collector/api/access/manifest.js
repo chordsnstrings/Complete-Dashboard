@@ -26,6 +26,8 @@
      public    answers without signing in
      self      the handler makes its own access decision (/api/auth, /api/access)
      auditRead reading it is recorded in the audit log
+     fleetFrom 'body': a 'param' route whose handler takes the fleet from
+               req.body.fleet, not ?fleet= — the gate judges that one
      search    { param, classes }: a search box whose matches may only reach
                the columns of classes the caller holds in full (the gate
                writes them to ?_fmsearch=, which the handler honours) */

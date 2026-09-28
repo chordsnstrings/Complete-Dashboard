@@ -7128,6 +7128,7 @@
   "fleetRows": [],
   "fleetKey": "fleet",
   "cap": "finance.verify",
+  "fleetFrom": "body",
   "notes": "api/payout_routes.js:1107-1481. Body {fleet: 'ecosine'|'egari', days: [YYYY-MM-DD x1..5]}; the fleet comes from req.body.fleet (required, validated against FLEETS :112), NOT ?fleet= - a fleet-scope check must read the body. Side effects: loads settings and uses that fleet's stored Uber org web-session credentials (uberOrgs, :156-166) to call uber.oneDay(org, day, {live:true}) sequentially, spendin"
  },
  {

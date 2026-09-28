@@ -917,13 +917,20 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
   }));
 
   /* ── four-eyes proposals (api/access/middleware.js propose/takeProposal) ── */
+  /* A stored proposal is the payload of a route that combines every fleet
+     ('mixed'): cash rows with names, fleets and amounts; two people to merge.
+     So it is judged as that route is — the action held on EVERY fleet
+     (access.caps), and each class it carries in full on every fleet
+     (access.levels) — never on any one fleet, which showed a one-fleet cash
+     desk the other fleet's rows (security review, 2026-09-28). The preparer
+     always sees their own. */
   const proposalVisible = (fm, p) => {
     const f = FOUR_EYES[p.kind];
     if (!f) return false;
-    const caps = fm.access.capsAny || [];
+    if (Number(p.prepared_by) === fm.user.id) return true;
+    const caps = fm.access.caps || [];
     if (!(caps.includes(f.propose) || caps.includes(f.commit))) return false;
-    /* The rows are cash and people: only a reader who could see them may. */
-    return (f.commitNeeds || []).every((c) => (fm.access.levelsAny?.[c] || '') !== '') || Number(p.prepared_by) === fm.user.id;
+    return (f.commitNeeds || []).every((c) => (fm.access.levels?.[c] || '') === 'F');
   };
   app.get('/api/access/proposals', wrap(async (req, res) => {
     const fm = me(req, res);
@@ -938,7 +945,7 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     const out = rows.filter((p) => proposalVisible(fm, p)).map((p) => {
       const f = FOUR_EYES[p.kind];
       return { ...p, id: Number(p.id), view: f?.view || null, prepared_by: Number(p.prepared_by), decided_by: p.decided_by == null ? null : Number(p.decided_by),
-        canCommit: p.status === 'open' && Number(p.prepared_by) !== fm.user.id && (fm.access.capsAny || []).includes(f.commit),
+        canCommit: p.status === 'open' && Number(p.prepared_by) !== fm.user.id && (fm.access.caps || []).includes(f.commit),
         mine: Number(p.prepared_by) === fm.user.id };
     });
     return res.json({ proposals: out });

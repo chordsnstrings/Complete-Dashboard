@@ -201,7 +201,13 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     let rewrite = null;
     let filterRows = null;
     if (entry.fleet === 'param') {
-      const asked = String(req.query.fleet || '');
+      /* fleetFrom 'body': the handler acts on req.body.fleet and never reads
+         ?fleet= (POST /api/finance/payouts/verify), so that is what is judged.
+         Judging the query let a one-fleet Finance manager verify — spending
+         the other fleet's report quota, reading its wires — by naming it in
+         the body (security review, 2026-09-28). */
+      const fromBody = entry.fleetFrom === 'body';
+      const asked = String((fromBody ? req.body?.fleet : req.query.fleet) || '');
       if (asked) {
         if (!all.includes(asked)) return { refuse: withheldBody(null, '', { error: 'bad_fleet', detail: `There is no fleet called ${asked}.` }) };
         if (!scope.includes(asked)) return { refuse: withheldBody(null, '', { error: 'fleet_scope', detail: 'That fleet is outside your access.' }) };
@@ -325,8 +331,21 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
       const byBody = entry.capBy ? (entry.capBy.map[String(req.body?.[entry.capBy.field] ?? '')] || entry.capBy.default) : null;
       const cap = four ? (committing ? four.commit : four.propose) : (byBody || entry.cap);
       if (!cap) return refuse(res, 403, { error: 'no_action', detail: 'This change is not open to signed-in roles yet.' });
-      if (!access.capsOver(j.targets).includes(cap)) {
-        return refuse(res, 403, { error: 'not_allowed', cap, detail: `Your role cannot do this: ${cap}.` });
+      /* OVER WHICH FLEETS the action must be held. A 'param' action acts on
+         the fleet named (in the query, or — fleetFrom 'body' — in the body,
+         judged the same way). Every other action is company-wide ('global':
+         the lending line, the calendar), or touches whatever fleets its rows
+         name ('rows': an import), or cannot say ('mixed'): those need the
+         action on EVERY fleet. Judging them over the caller's own scope let a
+         one-fleet Finance manager move the whole company's lending line and
+         import the other fleet's statement rows (security review,
+         2026-09-28). */
+      const capTargets = entry.fleet === 'param' ? j.targets : access.allFleets;
+      if (!access.capsOver(capTargets).includes(cap)) {
+        return refuse(res, 403, { error: 'not_allowed', cap,
+          detail: capTargets === access.allFleets && !access.allScope
+            ? `Your role can do this for some fleets only, and this acts on every fleet: ${cap}.`
+            : `Your role cannot do this: ${cap}.` });
       }
       if (fm.kind === 'user' && !READ_CAPS.has(cap)) {
         /* CSRF: a change must carry the token from the cookie in a header — a

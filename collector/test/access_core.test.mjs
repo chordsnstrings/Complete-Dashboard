@@ -126,6 +126,10 @@ const MANIFEST = {
     fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: null },
   'GET /api/t/search': { method: 'GET', path: '/api/t/search', subject: 'BK', carries: ['BK', 'ID', 'LOC', 'VEH'], grain: 'list',
     fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: null, search: { param: 'q', classes: ['ID', 'LOC', 'VEH'] } },
+  'POST /api/t/policy': { method: 'POST', path: '/api/t/policy', subject: 'CASH', carries: ['CASH'], grain: 'none',
+    fields: [], whole: [], fleet: 'global', fleetRows: [], fleetKey: '', cap: 'cash.policy' },
+  'POST /api/t/verify': { method: 'POST', path: '/api/t/verify', subject: 'PAY', carries: ['PAY'], grain: 'none',
+    fields: [], whole: [], fleet: 'param', fleetFrom: 'body', fleetRows: [], fleetKey: '', cap: 'finance.verify' },
   'POST /api/t/cash': { method: 'POST', path: '/api/t/cash', subject: 'CASH', carries: ['CASH'], grain: 'none',
     fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: 'cash.record' },
   'POST /api/ledger/import/commit': { method: 'POST', path: '/api/ledger/import/commit', subject: 'CASH', carries: ['CASH', 'ID'],
@@ -166,6 +170,9 @@ app.get('/api/t/profile', (req, res) => { profileCalls += 1;
 
 let searchCalls = 0;
 app.get('/api/t/search', (req, res) => { searchCalls += 1; res.json({ within: req.query._fmsearch ?? 'every column' }); });
+const acted = [];
+app.post('/api/t/policy', (req, res) => { acted.push(['policy', 'every fleet']); res.json({ ok: true }); });
+app.post('/api/t/verify', (req, res) => { acted.push(['verify', req.body?.fleet]); res.json({ ok: true, fleet: req.body?.fleet }); });
 let cashWrites = 0;
 app.post('/api/t/cash', (req, res) => { cashWrites += 1; res.json({ ok: true }); });
 const imported = [];
@@ -240,11 +247,11 @@ async function signIn(b, email, password, secret = null) {
 console.log('\n6. the Owner invites people; the rules of granting');
 const people = {};
 {
-  const mk = async (email, role, extra = {}) => {
+  const mk = async (email, role, extra = {}, key = role) => {
     const r = await owner.post('/api/access/users', { email, name: `Test ${role}`, grants: [{ role, ...extra }], reason: 'test' });
     const token = r.json?.link?.split('invite=')[1];
     const acc = await browser().post('/api/auth/link/accept', { token, password: `a long enough pass ${role}` });
-    people[role] = { email, id: r.json?.user?.id, password: `a long enough pass ${role}`, b: browser() };
+    people[key] = { email, id: r.json?.user?.id, password: `a long enough pass ${role}`, b: browser() };
     return { r, acc };
   };
   const clk = await mk('cash@example.test', 'CLK');
@@ -255,7 +262,9 @@ const people = {};
   await mk('finance@example.test', 'FIN');
   await mk('ops-egari@example.test', 'OPS', { fleets: ['egari'] });
   await mk('access@example.test', 'ACC');
-  for (const r of ['CLK', 'DSP', 'OPS', 'ACC', 'FIN']) {
+  await mk('fin-egari@example.test', 'FIN', { fleets: ['egari'] }, 'FIN@egari');
+  await mk('cash-egari@example.test', 'CLK', { fleets: ['egari'] }, 'CLK@egari');
+  for (const r of ['CLK', 'DSP', 'OPS', 'ACC', 'FIN', 'FIN@egari', 'CLK@egari']) {
     const s = await signIn(people[r].b, people[r].email, people[r].password);
     check(`${r} signs in`, s.status === 200, JSON.stringify(s.json));
   }
@@ -416,6 +425,38 @@ console.log('\n9b. four-eyes: a cash sheet is proposed by one person and committ
     list.json.proposals.find((p) => p.id === own.json.proposal)?.view === 'rows');
   const dsp = await people.DSP.b.get('/api/access/proposals');
   check('a Dispatcher sees no cash proposals', dsp.json.proposals.length === 0);
+}
+
+console.log('\n9d. a one-fleet grant acts on its fleet only (security review, 2026-09-28)');
+{
+  /* REVERSIONS: judge actions over j.targets for every policy — the Egari
+     Finance manager moves the company-wide line. Read ?fleet= for the verify
+     route — they verify Ecosine by naming it in the body. Restore capsAny and
+     levelsAny in proposalVisible — the Egari cash desk lists Ecosine's rows. */
+  acted.length = 0;
+  const g1 = await people['FIN@egari'].b.post('/api/t/policy', { pct: 40 });
+  check('a one-fleet Finance manager cannot move a company-wide line', g1.status === 403 && g1.json.error === 'not_allowed' && !acted.length,
+    JSON.stringify(g1.json));
+  check('…and is told why: it acts on every fleet', /every fleet/.test(g1.json?.detail || ''), g1.json?.detail);
+  const g2 = await people.FIN.b.post('/api/t/policy', { pct: 40 });
+  check('…while a Finance manager of every fleet can', g2.status === 200 && acted.length === 1);
+  const v1 = await people['FIN@egari'].b.post('/api/t/verify', { fleet: 'ecosine' });
+  check('the fleet a handler takes from the body is the one judged', v1.status === 403 && v1.json.error === 'fleet_scope' && acted.length === 1,
+    JSON.stringify(v1.json));
+  const v2 = await people['FIN@egari'].b.post('/api/t/verify', { fleet: 'egari' });
+  check('…and their own fleet goes through', v2.status === 200 && v2.json.fleet === 'egari', JSON.stringify(v2.json));
+
+  const rows = [{ person_id: 17, fleet: 'ecosine', type_code: 'advance', amount: 2500 }];
+  const prop = await people.CLK.b.post('/api/ledger/import/commit', { batch: 'test-eco-batch', rows });
+  check('an all-fleet cash desk prepares an Ecosine sheet', prop.status === 202, JSON.stringify(prop.json));
+  const le = await people['CLK@egari'].b.get('/api/access/proposals');
+  check('a one-fleet cash desk is not shown another fleet\'s prepared rows',
+    le.status === 200 && !le.json.proposals.some((p) => p.id === prop.json.proposal), JSON.stringify(le.json).slice(0, 160));
+  const lf = await people['FIN@egari'].b.get('/api/access/proposals');
+  check('…nor is a one-fleet Finance manager', !lf.json.proposals.some((p) => p.id === prop.json.proposal));
+  const la = await people.FIN.b.get('/api/access/proposals');
+  check('…while a Finance manager of every fleet is, and may commit it',
+    la.json.proposals.some((p) => p.id === prop.json.proposal && p.canCommit));
 }
 
 console.log('\n9c. masked values, and showing them in full');
