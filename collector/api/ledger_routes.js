@@ -794,8 +794,9 @@ export function ledgerWriteRoutes(app, { wrap, tx }) {
     if (!signed && !SUPERVISORS.includes(by)) {
       refuse(`"${b.entered_by || '(none)'}" is not one of the people who may record money. `
         + `They are ${SUPERVISORS.join(', ')}. This is attribution and not authentication — `
-        + 'until ULM exists, anybody who can reach this URL can write here, and the name, IP '
-        + 'and timestamp are what make an entry traceable afterwards.');
+        + 'while sign-in is optional, anybody who can reach this address can write here, and the '
+        + 'name, IP and timestamp are what make an entry traceable afterwards. A signed-in '
+        + 'person\'s entry is recorded against their own account instead.');
     }
 
     const typeCode = String(b.type_code || '').trim();
@@ -1578,8 +1579,8 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
            implies is a person deciding to lend or not. */
         verdict: !measurable ? 'not measurable'
           : ratio > pct
-            ? `over the ${pct}% line — an override is needed. Nothing is blocked: the approval `
-              + 'flow arrives with user management.'
+            ? `over the ${pct}% line — an override is needed. Nothing is blocked: there is no `
+              + 'approval step for an override yet.'
             : `within the ${pct}% line`,
         last_entry: r.last_entry,
       };
@@ -1707,9 +1708,13 @@ export function ledgerPolicyRoutes(app, { q, wrap, tx }) {
       history: rows.map((r) => ({ ...r, pct: Number(r.pct) })),
       /* Said plainly rather than left for somebody to infer from the absence
          of a login. */
-      attribution_only: 'anybody who can reach this URL can move this line. The name, address '
-        + 'and timestamp on each row are what make the change traceable afterwards — they are '
-        + 'not authentication, and will not be until user management lands.',
+      /* True for every reader, signed in or not, because this answer is
+         cached once per address and served to both. */
+      attribution_only: 'a change made by a signed-in person is recorded against their account, '
+        + 'and only a role that holds the lending-policy action can make it. While sign-in is '
+        + 'optional, anybody who can reach this address can also move this line; for them the '
+        + 'name, address and timestamp on each row are what make the change traceable — they are '
+        + 'not authentication.',
     });
   }));
 
@@ -1722,8 +1727,9 @@ export function ledgerPolicyRoutes(app, { q, wrap, tx }) {
     const by = signedInActor(req) || String(b.set_by || '').trim();
     if (by.length < 2) {
       refused.push('say who is setting this, by name. It is attribution and not authentication '
-        + '— until user management lands anybody who can reach this URL can move the line, and '
-        + 'the name, address and timestamp are the whole of what makes the change traceable.');
+        + '— while sign-in is optional anybody who can reach this address can move the line, and '
+        + 'the name, address and timestamp are the whole of what makes the change traceable. '
+        + 'Signed in, the change is recorded against your account.');
     }
 
     const pct = Number(b.pct);
@@ -1837,7 +1843,7 @@ export function ledgerPolicyRoutes(app, { q, wrap, tx }) {
       : `Of ${measured} people whose exposure can be measured, ${moved.over_new} are over `
         + `${pct}%` + (prior ? ` — against ${moved.over_old} over the ${Number(prior.pct)}% it `
           + 'replaces.' : '.')
-        + ' Nothing is blocked either way: the approval step arrives with user management.';
+        + ' Nothing is blocked either way: there is no approval step for an override yet.';
 
     res.json({
       ok: true,

@@ -274,7 +274,7 @@ function samePersonTail(root, d) {
   absenceBand(absHost, [
     { label: 'Who gave each verdict', hl: anon > 0, fig: anon ? `${fmt(anon)} of ${fmt(d.decided.length)}` : null,
       none: d.decided.length ? 'Every one named' : 'None given',
-      why: anon ? 'These verdicts carry no reviewer: the product has no sign-in, and the page sends none with the answer.' : d.decided.length ? 'Every verdict names who gave it.' : 'No pair has been answered yet.' },
+      why: anon ? 'These verdicts carry no reviewer: they were given before sign-in existed, or by a visitor who was not signed in. A signed-in person\u2019s verdict carries their name.' : d.decided.length ? 'Every verdict names who gave it.' : 'No pair has been answered yet.' },
     { label: 'Why a pair waits for a person', fig: null, none: 'See the note', why: d.why || '' },
     { label: 'A pair ruled two people', fig: null, none: 'See the note', why: d.refuted_note || '' },
   ]);

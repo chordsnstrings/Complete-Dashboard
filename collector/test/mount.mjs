@@ -103,10 +103,14 @@ import { SETTING_DEFS } from '../src/settings.js';
 export const START = "/* ───────────────────────── overview ───────────────────────── */";
 export const END = '/* ───────────────── per-driver detail pages ───────────────── */';
 
-export async function mountAll(db, { serverRoutes = true, inject = {} } = {}) {
+export async function mountAll(db, { serverRoutes = true, inject = {}, pre = null } = {}) {
   const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
   const app = express();
   app.use(express.json());
+  /* Middleware that must run BEFORE every route — a stand-in for the access
+     layer setting req.fm, so a test can call a write route as a signed-in
+     person (test/actor_attribution.test.mjs). */
+  if (pre) pre(app);
 
   const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
     res.status(500).json({ error: 'internal', detail: String(e).slice(0, 300) });

@@ -253,7 +253,7 @@ function identityAbsence(root, d, links) {
   absenceBand(absHost, [
     { label: 'A name on a confirmation', hl: anon > 0, fig: anon ? `${fmt(anon)} of ${fmt(confirmed.length)}` : null,
       none: confirmed.length ? 'Every one named' : 'None confirmed',
-      why: anon ? 'These links carry the time somebody confirmed them and no name — the product has no sign-in, so it cannot say who.' : confirmed.length ? 'Every confirmation names who made it.' : 'Nobody has confirmed a link yet.' },
+      why: anon ? 'These links carry the time somebody confirmed them and no name: they were confirmed before sign-in existed, or by a visitor who was not signed in, so nobody can say who. A signed-in person\u2019s confirmation carries their name.' : confirmed.length ? 'Every confirmation names who made it.' : 'Nobody has confirmed a link yet.' },
     { label: 'What the rule can see', fig: null, none: 'See the note', why: d.reach_note || 'The rule sees only accounts that carry a phone number.' },
     { label: 'Where a link applies', fig: null, none: 'See the note', why: d.applies_note || 'A link folds the driver pages; only a promoted link folds the totals.' },
   ]);

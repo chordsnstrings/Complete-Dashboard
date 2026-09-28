@@ -76,8 +76,8 @@ export async function renderPolicy(root) {
       ]));
       if (d.current.note) head.body.append(el('p', 'cap', esc(d.current.note)));
       head.body.append(el('p', 'cap', 'Over it an override is needed and nothing is blocked. '
-        + 'The approval step arrives with user management; until then this line is what a '
-        + 'person reads before deciding, not something the system enforces.'));
+        + 'There is no approval step for an override yet, so this line is what a person reads '
+        + 'before deciding, not something the system enforces.'));
     } else {
       /* ABSENT WITH THE TRUE REASON. Never a default, and never 35 because
          that is what somebody said once in a conversation — a figure the
@@ -296,8 +296,8 @@ function policyContract(AK, after, root, d, ex) {
     { label: 'Cash held', fig: null, none: 'Not derivable',
       why: firstReason(people, (p) => p.owes?.cash_absent_reason)
         || 'A cash position is stated by the accounts team; it is never derived from the trips.' },
-    { label: 'Who may move this line', fig: null, none: 'Nobody authenticated',
-      why: d.attribution_only || 'Anybody who can reach this page can move the line.' },
+    { label: 'Who may move this line', fig: null, none: 'A role with the lending-policy action',
+      why: d.attribution_only || 'Only a role that holds the lending-policy action.' },
   ]);
   pageFoot({ colophon: ['The whole record', `${fmt(n)} people`, cur ? `${cur.pct}% in force` : 'no line stored'] }, root);
 }

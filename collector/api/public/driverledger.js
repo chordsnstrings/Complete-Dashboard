@@ -240,7 +240,7 @@ export async function renderDriverLedger(root, id, prof) {
   if (ex.policy) {
     head.body.append(el('p', 'cap', `The line is ${esc(String(ex.policy.pct))}% of what a driver `
       + `generates, in force since ${esc(ex.policy.effective_from)}. Over it an override is `
-      + 'needed and nothing is blocked — the approval step arrives with user management.'));
+      + 'needed and nothing is blocked — there is no approval step for an override yet.'));
   } else if (ex.policy_absent_reason) {
     head.body.append(note(ex.policy_absent_reason, 'warn'));
   }

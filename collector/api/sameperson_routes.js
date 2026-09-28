@@ -268,7 +268,11 @@ export function samePersonRoutes(app, { q, wrap }) {
               + 'employee is probably carrying somebody else\'s id.'
             : 'Back in the queue, unanswered.' });
     }
-    const { alias_ext_id: alias, verdict, by = null, note = null } = req.body || {};
+    const { alias_ext_id: alias, verdict, note = null } = req.body || {};
+    /* The signed-in person, never a name the page sent: a signed-in caller
+       could otherwise record the verdict under anybody's name. A visitor
+       while sign-in is optional still names themself, as before. */
+    const by = signedInActor(req) || req.body?.by || null;
     if (!alias || !['same', 'different', 'undecided'].includes(String(verdict))) {
       return res.status(400).json({ error: 'alias_ext_id and verdict (same | different | undecided) required' });
     }
