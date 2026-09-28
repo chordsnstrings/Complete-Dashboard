@@ -68,8 +68,15 @@ check('every change needs an action', allEntries().filter((e) => e.method !== 'G
 check('raw records and query plans are the Owner’s alone (subject RAW)',
   ['/api/schema/raw-fields', '/api/schema/raw-values', '/api/unauthorized/attributed/plan']
     .every((p) => lookupEntry('GET', p)?.subject === 'RAW'));
-check('probes spend quota, so they are an action', allEntries().filter((e) => e.path.startsWith('/api/probe/') && e.subject !== 'RAW')
+/* Except /api/probe/results, which reads the stored results of past probes
+   and calls nobody: the Providers page every role opens. Its verbatim sample
+   values are raw provider records, withheld below the Owner. */
+check('probes spend quota, so they are an action', allEntries()
+  .filter((e) => e.path.startsWith('/api/probe/') && e.subject !== 'RAW' && e.path !== '/api/probe/results')
   .every((e) => e.cap === 'collector.probe'));
+check('reading stored probe results is not a probe, and its raw samples are withheld',
+  lookupEntry('GET', '/api/probe/results')?.cap == null
+  && lookupEntry('GET', '/api/probe/results')?.fields.some((f) => f.class === 'RAW' && f.paths.includes('surfaces[].fields[].values')));
 check('cash pages are about cash', ['/api/ledger/entries', '/api/ledger/people', '/api/ledger/cash-position']
   .every((p) => lookupEntry('GET', p)?.subject === 'CASH'), ['/api/ledger/entries', '/api/ledger/people', '/api/ledger/cash-position']
   .map((p) => `${p}:${lookupEntry('GET', p)?.subject}`).join(' '));

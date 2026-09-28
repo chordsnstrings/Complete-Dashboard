@@ -4379,7 +4379,7 @@
  {
   "method": "GET",
   "path": "/api/probe/results",
-  "subject": "CRED",
+  "subject": "SYS",
   "carries": [
    "BK",
    "CRED",
@@ -4397,54 +4397,13 @@
     "paths": [
      "surfaces[].fields[].values"
     ]
-   },
-   {
-    "class": "ID",
-    "paths": [
-     "surfaces[].fields[].values"
-    ]
-   },
-   {
-    "class": "CT",
-    "paths": [
-     "surfaces[].fields[].values"
-    ]
-   },
-   {
-    "class": "VEH",
-    "paths": [
-     "surfaces[].fields[].values"
-    ]
-   },
-   {
-    "class": "LOC",
-    "paths": [
-     "surfaces[].fields[].values"
-    ]
-   },
-   {
-    "class": "BK",
-    "paths": [
-     "surfaces[].fields[].values"
-    ]
-   },
-   {
-    "class": "SYS",
-    "paths": [
-     "surfaces[].ok",
-     "surfaces[].http_status",
-     "surfaces[].error",
-     "surfaces[].probed_at",
-     "failing",
-     "last_probe"
-    ]
    }
   ],
   "whole": [],
   "fleet": "mixed",
   "fleetRows": [],
   "fleetKey": "",
-  "cap": "collector.probe",
+  "cap": null,
   "auditRead": true,
   "notes": "api/analytics_routes.js:2073-2087. surfaces[] = provider_probe rows {provider, surface, ok, http_status, record_count, top_keys, fields[], unmapped, error, note, probed_at, unmapped_n}, plus last_probe, failing[]{provider, surface, error} and note. fields[] comes from describe() in src/probe.js:67-140: {key, type, fill_pct, distinct_seen, distinct_capped, values, values_withheld?, values_withheld_"
  },

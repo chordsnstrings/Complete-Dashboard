@@ -93,6 +93,14 @@ export function toSignIn(reason = '') {
 }
 
 /* ── withheld answers ─────────────────────────────────────────────────── */
+/* A panel whose answer is not shown to this role, on a page that is: the
+   page draws the rest, and the withheld banner at its top (from the refusal's
+   x-fm-withheld) says what was left out and why. Any other failure still
+   fails. */
+export const unlessWithheld = (p, fallback) => Promise.resolve(p).catch((e) => {
+  if (e instanceof WithheldError || e?.name === 'WithheldError') return fallback;
+  throw e;
+});
 export class WithheldError extends Error {
   constructor(body, status) {
     super(body?.detail || 'Not shown to your role.');
@@ -129,10 +137,10 @@ export const VIEW_SUBJECT = Object.freeze({
   causes: 'BK', charging: 'CASH', cohort: 'ID', 'cohort/settlement-cash': 'CASH', compare: 'BK', compliance: 'ID',
   corporate: 'REV', 'corporate/approach': 'LOC', 'corporate/guests': 'PAX', corridors: 'LOC', coverage: 'SYS',
   day: 'BK', demand: 'BK', deposits: 'CASH', driver: 'ID', 'driver/earnings': 'EARN', 'driver/money': 'CASH',
-  drivers: 'ID', feeds: 'VEH', finance: 'REV', forecast: 'BK', 'hr-roster': 'HR', identity: 'MRG',
+  'driver/territory': 'LOC', drivers: 'ID', feeds: 'VEH', finance: 'REV', forecast: 'BK', 'hr-roster': 'HR', identity: 'MRG',
   'import-sheet': 'CASH', insights: 'ID', live: 'LOC', 'low-performers': 'ID', map: 'LOC', notfound: 'SYS',
   'online-time': 'ID', opening: 'CASH', optimise: 'BK', overview: 'BK', payouts: 'PAY', performance: 'ID',
-  performer: 'ID', platforms: 'BK', 'platforms/funnel': 'ID', 'platforms/tiers': 'VEH', playbook: 'REV',
+  performer: 'ID', platforms: 'BK', 'platforms/funnel': 'COND', 'platforms/tiers': 'VEH', playbook: 'REV',
   policy: 'CASH', property: 'REV', 'property/drivers': 'ID', 'property/guests': 'PAX', provenance: 'REV',
   providers: 'SYS', receipts: 'PAY', reconcile: 'PAY', retention: 'ID', revenue: 'REV', roster: 'ID',
   'roster/states': 'SYS', safety: 'COND', 'safety/events': 'VEH', 'safety/vehicles': 'VEH', salary: 'CASH',
@@ -168,8 +176,16 @@ export function subjectOf(view, sub = '', param = '', { phone = false } = {}) {
   if (phone) return subjectOf(view, sub, param);
   return 'SYS';
 }
+/* Pages that are an ACTION rather than a class of data: open to whoever
+   holds the action. #access manages people, so it opens for the Owner and an
+   Access admin; everyone else is told so, and it is not in their menu. */
+export const VIEW_CAP = Object.freeze({ access: 'access.manage' });
+export const VIEW_CAP_WHY = Object.freeze({
+  access: 'Deciding who can see what is for the Owner and Access admins. Ask one of them if you need a change.',
+});
 export function canOpenView(view, sub = '', param = '', opts = {}) {
   if (!gated()) return true;
+  if (VIEW_CAP[view]) return (who.access?.capsAny || []).includes(VIEW_CAP[view]);
   const s = subjectOf(view, sub, param, opts);
   if (s === null) return true;
   return rank(levelOf(s)) > 0;

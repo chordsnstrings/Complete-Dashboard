@@ -26,7 +26,8 @@ import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
    only draw what it decided — which pages open, and the true reason where
    something is not shown. */
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
-  WithheldError, toSignIn, signOut, roleNames, post as accessPost, installFetchGuard, inChosenLook } from './access.js';
+  WithheldError, toSignIn, signOut, roleNames, post as accessPost, installFetchGuard, inChosenLook,
+  unlessWithheld, VIEW_CAP_WHY } from './access.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS, driversConcentration, driversAbsence } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS, vdirTail } from './vehicle.js';
 import { renderCohort } from './cohort.js';
@@ -4594,7 +4595,11 @@ V.safety = async (root) => {
   loading(host);
   const gen = currentGen();
   const [byType, vehPage, drvPage, fleetK] = await Promise.all([
-    q('/api/alerts/summary'), q('/api/alerts/by-vehicle'), q('/api/alerts/by-driver'),
+    q('/api/alerts/summary'), q('/api/alerts/by-vehicle'),
+    /* The driver ranking is conduct: a role that sees vehicles but not
+       conduct (Finance, Technician, a wall screen) still gets the Vehicles
+       and Events tabs, and the banner says the drivers were left out. */
+    unlessWithheld(q('/api/alerts/by-driver'), { rows: [], totals: {} }),
     q('/api/kpis').catch(() => ({}))]);
   if (!alive(gen)) return;
   // Both now return {rows, totals}; the arrays are capped at 100 and the tiles
@@ -9368,7 +9373,7 @@ async function render() {
   if (gated() && !canOpenView(state.view, state.sub || '', state.param || '')) {
     const cls = subjectOf(state.view, state.sub || '', state.param || '');
     const label = (VIEWS.find((v) => v.id === state.view) || {}).label;
-    root.append(closedBlock({ cls, view: location.hash.replace(/^#/, ''),
+    root.append(closedBlock({ cls, view: location.hash.replace(/^#/, ''), detail: VIEW_CAP_WHY[state.view] || null,
       title: label ? `${label} is not open to your role` : 'This page is not open to your role' }));
     setHeader({ title: label || 'Not open to your role' });
     if (alive(gen)) { freshness(); authBanner(); }

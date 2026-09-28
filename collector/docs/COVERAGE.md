@@ -4000,6 +4000,67 @@ untouched, and nothing projected is ever added into `accounted`.
   stubbed per-test rather than a fourth copy of the injection set being written
   by hand.
 
+* **SIGN-IN AND ACCESS (ULM, 2026-09-28): THE ACCESS LAYER ONLY GOVERNS WHAT
+  PASSES THROUGH IT, IN THE SHAPE IT EXPECTS.** Each of these was measured,
+  not reasoned about, and each is now a test:
+  1. **Express matches routes case-insensitively.** `/API/driver/profile`
+     reaches the same handler as `/api/driver/profile`, and a middleware that
+     decides by `req.path.startsWith('/api/')` never sees it. With sign-in
+     required, an anonymous `GET /API/t/people` was served the whole unshaped
+     answer (`test/access_core.test.mjs` §10). `gate()` now refuses any other
+     spelling of the prefix. A new guard written the same way has the same
+     hole.
+  2. **The shaper wraps `res.json`/`res.send`; `res.write` walks past it.**
+     `/api/export/trips.csv` streams with `res.write`, so it withheld only the
+     two address columns while a Dispatcher (export yes, revenue no)
+     downloaded every price. A streaming route must withhold by
+     `req.fm.levels` itself — see `EXPORT_CLASS_COLS` in `api/server.js`.
+  3. **The response cache stores the UNSHAPED body under one key per URL.**
+     Anything about the caller (`/api/auth/*`, `/api/access/*`) must be on
+     `NEVER` in `api/cache.js`: a cash-desk session was served the Owner's
+     Access overview as an `x-cache: hit`. Anything narrowed per caller must be
+     IN the key (`req.fmCacheKey`: the one-fleet rewrite, `_fmsearch`). And
+     because the stale refresh fetches the key AS A URL, as the system, the
+     narrowing has to be a query parameter the handler honours — a request
+     property would be recomputed wide and stored under the narrow key.
+  4. **A search is an oracle for every column it matches.** `/api/trips/list
+     ?q=` matched addresses for a role the shaper then nulled them for; the
+     rows that came back still answered "which trips went there". The gate
+     now names the classes held in full (`_fmsearch`) and the handler matches
+     only those columns. Any new free-text search needs a manifest `search`.
+  5. **jsonb drops `undefined` keys and reorders keys.** A hash over the JS
+     object is not a hash over what was stored: the audit chain broke at an
+     entry nobody had touched. Hash after `JSON.parse(JSON.stringify(x))`,
+     with keys sorted.
+  6. **Every answer to a signed-in reader carries `x-fm-scope`, the sign-in
+     routes included.** The phone's worker empties its offline copy on a
+     scope change, and an answer with no header read as "anonymous" — every
+     page load emptied a signed-in person's offline figures.
+  7. **A guard test must reach the guard.** The reveal test passed with the
+     reveal guard deleted, because a step-up refusal came first. Satisfy every
+     earlier check in the test, then prove it by revert.
+  8. **Test passwords are refused if they contain the email's name part**
+     (`passwordProblem`), which is the product working: "auditor long
+     password" for auditor@… fails.
+  9. **Arkiv is the desktop default (2026-09-28).** Suites that assert the
+     Classic desktop DOM load pages with `?skin=classic`; Classic is still a
+     look anyone may choose. On a PHONE, `?skin=` sets the phone's own look
+     (`fleet.skin.phone`), so never add it to a phone page load by accident.
+  10. **`countUp()` animates every KPI from zero.** Under load a stalled
+      animation frame held "0" long enough for two reads to agree
+      (`money_contradictions`); browser tests that read figures use
+      `reducedMotion: 'reduce'`.
+  11. **The phone fixtures were recorded before sign-in existed.**
+      `test/phone_harness.mjs` answers `/api/auth/me` as the anonymous
+      open-mode visitor it would have been; a fixture that recorded it wins.
+  12. **A same-site `?back=` can still leave the site.** `/.//evil.example`
+      resolves to `//evil.example`, another host. `signin.js safeBack` checks
+      the path it HANDS BACK, not only the one it was given.
+  13. **Signing out clears the browser's storage for the site** (the logout
+      answer sends `Clear-Site-Data: "cache", "storage"`), which also resets
+      the saved theme and look. Chromium applies it at the next navigation
+      when the logout was a script's request.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
