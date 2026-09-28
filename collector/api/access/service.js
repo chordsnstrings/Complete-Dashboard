@@ -84,7 +84,7 @@ export async function getUserByEmail(db, email) {
 }
 export async function getUserSecrets(db, id) {
   const { rows } = await db.query(
-    'SELECT id, email, password_hash, totp_secret, totp_enabled, totp_last_step, recovery_codes FROM access_user WHERE id = $1', [id]);
+    'SELECT id, email, status, locked_until, password_hash, totp_secret, totp_enabled, totp_last_step, recovery_codes FROM access_user WHERE id = $1', [id]);
   return rows[0] ? { ...rows[0], id: num(rows[0].id) } : null;
 }
 export async function listUsers(db) {
@@ -129,7 +129,11 @@ export async function setPassword(db, id, plain, { mustChange = false } = {}) {
 /* Sign-in bookkeeping. Five wrong passwords lock the account for fifteen
    minutes; the lock is per account so an attacker cannot spray one password
    across every address without each of them locking in turn. */
-export const LOCK_AFTER = 5;
+/* Fifty, not five: the per-address, per-device throttle in routes.js stops
+   one guesser after five; this closes the account only against a spread-out
+   attack, so a stranger cannot lock the Owner out (security review,
+   2026-09-28). */
+export const LOCK_AFTER = 50;
 export const LOCK_MINUTES = 15;
 export async function recordFailure(db, id) {
   const { rows } = await db.query(

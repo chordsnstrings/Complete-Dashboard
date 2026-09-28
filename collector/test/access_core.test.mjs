@@ -468,6 +468,46 @@ console.log('\n12. sessions end when they should');
   check('…whose next request is refused', gone.status === 401);
 }
 
+console.log('\n12b. the sign-in throttle, and the second factor (security review, 2026-09-28)');
+{
+  /* REVERSIONS: restore the 423 'locked' answer and the per-account lock at
+     five — a real address and an unknown one answer differently, and the
+     person cannot sign in from their own device. Remove failed(`code:…`) —
+     the eleventh code is judged, not refused. Remove the totp_enabled check
+     in totp/enable — an Owner with two-step on is answered 200. */
+  const a = browser();
+  const from = (ip) => ({ csrf: false, headers: { 'x-forwarded-for': ip } });
+  const tryLogin = (email, password, ip) => a.post('/api/auth/login', { email, password }, from(ip));
+  const known = [], unknown = [];
+  for (let i = 0; i < 6; i += 1) known.push((await tryLogin(people.CLK.email, 'not the password at all', '10.0.0.1')).status);
+  for (let i = 0; i < 6; i += 1) unknown.push((await tryLogin('nobody-here@example.test', 'not the password at all', '10.0.0.2')).status);
+  check('a real address and an unknown one answer alike, failure for failure', JSON.stringify(known) === JSON.stringify(unknown),
+    `${known} vs ${unknown}`);
+  check('…and the sixth try from that device is throttled', known[5] === 429 && known.slice(0, 5).every((x) => x === 401), String(known));
+  const right = await tryLogin(people.CLK.email, people.CLK.password, '10.0.0.1');
+  check('from the throttled device even the right password waits', right.status === 429);
+  const own = await browser().post('/api/auth/login', { email: people.CLK.email, password: people.CLK.password }, from('10.0.0.3'));
+  check('…but the person signs in from their own device: a stranger cannot lock them out', own.status === 200, JSON.stringify(own.json));
+
+  const codes = [];
+  for (let t = 0; t < 3; t += 1) {
+    const b = browser();
+    const l = await b.post('/api/auth/login', { email: people.ACC.email, password: people.ACC.password }, from('10.0.0.9'));
+    for (let i = 0; i < (t < 2 ? 5 : 1); i += 1) {
+      const c = await b.post('/api/auth/login/code', { ticket: l.json.ticket, code: '000000' }, from('10.0.0.9'));
+      codes.push(c.status);
+    }
+  }
+  check('wrong two-step codes count across sign-ins: the eleventh is refused, not judged',
+    codes.length === 11 && codes.slice(0, 10).every((x) => x === 401) && codes[10] === 429, String(codes));
+  const { rows: [acc] } = await db.query('SELECT failed_logins FROM access_user WHERE email = $1', [people.ACC.email]);
+  check('…and every wrong code is recorded against the account', acc.failed_logins >= 10, String(acc.failed_logins));
+
+  const again = await owner.post('/api/auth/totp/enable', { code: '123456' });
+  check('two-step cannot be "enabled" again over itself (it re-issued recovery codes and granted step-up)',
+    again.status === 409 && again.json.error === 'already', JSON.stringify(again.json));
+}
+
 console.log('\n13. the audit log');
 {
   const { rows } = await db.query('SELECT action FROM access_audit ORDER BY id');

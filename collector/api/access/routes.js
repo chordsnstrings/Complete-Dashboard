@@ -72,6 +72,22 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     if (tries.size > 10000) tries.delete(tries.keys().next().value);
     return t.n > max;
   };
+  /* FAILURES, counted apart from attempts and read without adding one.
+     The sign-in throttle is keyed on the ADDRESS TYPED AND THE DEVICE, and
+     applies whether or not the address has an account (security review,
+     2026-09-28). The old rule locked the ACCOUNT after five wrong passwords
+     and said so with a 423: any visitor could learn which addresses have
+     accounts (an unknown one never locks), and anyone who knew the Owner's
+     address could keep the Owner locked out — the correct password was
+     refused during the lock — with five requests every fifteen minutes. Now
+     a stranger's failures throttle the stranger; the account's own counter
+     only closes it after fifty failures from anywhere (a spread-out attack),
+     and every one of these answers is the same sentence. */
+  const failures = (key) => {
+    const t = tries.get(key);
+    return t && Date.now() - t.at <= 15 * 60_000 ? t.n : 0;
+  };
+  const failed = (key) => { limited(key, Infinity); };
   /* Two-step tickets: a password was right, a code is still owed. */
   const tickets = new Map();
 
@@ -131,22 +147,29 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     noStore(res);
     const email = svc.normEmail(req.body?.email);
     const password = String(req.body?.password || '');
-    if (limited(`ip:${req.ip}`, 30) || limited(`em:${email}`, 15)) {
-      return fail(res, 429, 'slow_down', 'Too many attempts. Wait fifteen minutes and try again.');
-    }
+    const pair = `fail:${email}|${req.ip}`;
+    const slow = () => fail(res, 429, 'slow_down', 'Too many attempts from here. Wait fifteen minutes and try again.');
+    if (limited(`ip:${req.ip}`, 30) || failures(pair) >= 5 || failures(`failem:${email}`) >= 50) return slow();
     const user = email ? await svc.getUserByEmail(db, email) : null;
     const generic = () => fail(res, 401, 'bad_credentials', 'That email and password do not match an account.');
+    const wrong = () => { failed(pair); failed(`failem:${email}`); };
     if (!user || !user.password_hash) {
       /* Same work as a real check, so the answer's timing does not say
          whether the address has an account. */
       verifyPassword(password, 'scrypt$14$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAA');
+      wrong();
       await audit(req, 'auth.login_failed', 'email', null, { email, why: 'no account' });
       return generic();
     }
     if (user.locked_until && new Date(user.locked_until).getTime() > Date.now()) {
-      return fail(res, 423, 'locked', 'This account is locked after too many wrong passwords. Try again in fifteen minutes, or ask an admin to reset it.');
+      /* Closed after fifty failures from anywhere: the same work and the
+         same answer as the throttle, so it says nothing an unknown address
+         would not. */
+      verifyPassword(password, user.password_hash);
+      return slow();
     }
     if (!verifyPassword(password, user.password_hash)) {
+      wrong();
       const r = await svc.recordFailure(db, user.id);
       await audit(req, 'auth.login_failed', 'user', user.id, { failures: r?.failed_logins });
       return generic();
@@ -176,6 +199,15 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     t.tries += 1;
     if (t.tries > 5) { tickets.delete(req.body.ticket); return fail(res, 429, 'slow_down', 'Too many wrong codes. Start again.'); }
     const u = await svc.getUserSecrets(db, t.userId);
+    /* The second factor is counted too (security review, 2026-09-28): a
+       wrong code used to cost nothing but the ticket's own five tries, and a
+       new ticket was one password away — about 7,200 guesses a day against a
+       six-digit code, none of them recorded against the account. */
+    if (!u || u.status !== 'active' || failures(`code:${t.userId}`) >= 10
+      || (u.locked_until && new Date(u.locked_until).getTime() > Date.now())) {
+      tickets.delete(req.body.ticket);
+      return fail(res, 429, 'slow_down', 'Too many wrong codes. Wait fifteen minutes and try again.');
+    }
     const code = String(req.body?.code || '').trim();
     let ok = false;
     const secret = unseal(u?.totp_secret);
@@ -194,6 +226,8 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       if (rowCount === 1) { ok = true; await audit(req, 'auth.recovery_code_used', 'user', u.id, {}); }
     }
     if (!ok) {
+      failed(`code:${t.userId}`);
+      await svc.recordFailure(db, u.id);
       await audit(req, 'auth.code_failed', 'user', u?.id, {});
       return fail(res, 401, 'bad_code', 'That code is not right. Use the current code from your authenticator app.');
     }
@@ -309,8 +343,15 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     const fm = me(req, res, { allowRestricted: true, write: true });
     if (!fm) return undefined;
     const u = await svc.getUserSecrets(db, fm.user.id);
+    /* Only while two-step is OFF, and never with a code already used
+       (security review, 2026-09-28): this route checked neither. The code a
+       person had just signed in with, replayed here within its 90 seconds,
+       granted step-up, replaced the recovery codes and signed the person out
+       everywhere else. /api/auth/totp/setup clears totp_last_step, so a
+       first enrolment is unaffected. */
+    if (u.totp_enabled) return fail(res, 409, 'already', 'Two-step sign-in is already on.');
     const secret = unseal(u.totp_secret);
-    const step = secret ? verifyTotp(secret, req.body?.code) : null;
+    const step = secret ? verifyTotp(secret, req.body?.code, { lastStep: u.totp_last_step }) : null;
     if (step == null) return fail(res, 400, 'bad_code', 'That code is not right. Enter the six digits your app shows now.');
     const codes = newRecoveryCodes();
     await db.query(
