@@ -4124,6 +4124,14 @@ untouched, and nothing projected is ever added into `accounted`.
       golden only for the routes whose change is intended, from a clean
       archive of the committed tree (`ONLY=…`), and say which change moved
       which page.
+  25. **An app-spec update does not deploy the branch head.** Adding the
+      bootstrap variables with `PUT /v2/apps/{id}` started a deployment
+      (cause "app spec updated") that rebuilt NOTHING: it re-ran the last
+      built commit, `e79bf05`, with the new variables — which that code
+      ignores. The branch head only ships through `POST
+      /v2/apps/{id}/deployments {"force_build":true}`. After any deployment,
+      read `services[].source_commit_hash` and compare it with the branch
+      before believing a single check.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
