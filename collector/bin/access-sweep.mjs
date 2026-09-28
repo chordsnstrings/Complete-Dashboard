@@ -188,6 +188,7 @@ const canOpen = async (page, route, phone) => page.evaluate(async ([r, ph]) => {
 }, [route, phone]);
 
 async function visit(ctx, w, route, phone) {
+  const started = Date.now();
   const page = await ctx.newPage();
   const res = [];
   const errors = [];
@@ -219,14 +220,16 @@ async function visit(ctx, w, route, phone) {
   let nav = null;
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await page.waitForFunction(() => {
+    /* The phone build draws into #m; the desktop's #view is still in the
+       page, empty, and reading it called every phone screen blank. */
+    await page.waitForFunction((ph) => {
       if (location.pathname === '/signin') return true;
-      const v = document.querySelector('#view') || document.querySelector('.m-deck');
+      const v = ph ? document.querySelector('#m') : document.querySelector('#view');
       return v && v.innerText.trim().length > 40 && !v.querySelector('.skel, .m-skel, .loading');
-    }, null, { timeout: 120_000, polling: 500 }).catch(() => {});
+    }, phone, { timeout: 120_000, polling: 500 }).catch(() => {});
     await page.waitForTimeout(1200);
-    nav = await page.evaluate(() => {
-      const v = document.querySelector('#view') || document.querySelector('.m-deck');
+    nav = await page.evaluate((ph) => {
+      const v = ph ? document.querySelector('#m') : document.querySelector('#view');
       const text = v ? v.innerText : '';
       return {
         path: location.pathname,
@@ -237,7 +240,7 @@ async function visit(ctx, w, route, phone) {
         len: text.length,
         overflow: document.documentElement.scrollWidth - innerWidth,
       };
-    });
+    }, phone);
   } catch (e) { errors.push(`navigation: ${String(e).slice(0, 200)}`); }
   let expectOpen = null;
   if (!w.anon && nav && nav.path !== '/signin') { try { expectOpen = await canOpen(page, route, phone); } catch { /* module not reachable */ } }
@@ -259,7 +262,7 @@ async function visit(ctx, w, route, phone) {
     if (nav && !nav.closed && nav.len < 40) problems.push('rendered nearly nothing');
   }
   problems.push(...errors);
-  const rec = { who: w.key, ui: phone ? 'phone' : 'desktop', route, expectOpen, closed: nav?.closed ?? null,
+  const rec = { who: w.key, ui: phone ? 'phone' : 'desktop', route, ms: Date.now() - started, expectOpen, closed: nav?.closed ?? null,
     banner: nav?.banner || null, api: res, problems };
   if (problems.length) {
     const name = `${w.key}-${phone ? 'm' : 'd'}-${route}`.replace(/[^a-zA-Z0-9@-]+/g, '_').slice(0, 120);
@@ -295,7 +298,10 @@ async function runPerson(w) {
       report.push(rec);
       done += 1;
       if (rec.problems.length) console.log(`✗ ${w.key} ${rec.ui} #${route}: ${rec.problems.slice(0, 3).join(' | ')}`);
-      if (done % 50 === 0) console.log(`… ${done}/${total}`);
+      if (done % 50 === 0) {
+        console.log(`… ${done}/${total}`);
+        writeFileSync(join(OUT, 'report.partial.json'), JSON.stringify(report));
+      }
     }
     await ctx.close();
   }
