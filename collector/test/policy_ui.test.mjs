@@ -42,7 +42,11 @@ const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromi
    the first paint. Deterministic, and it is a state a real reader can be in. */
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
   const page = await ctx.newPage();
-  await page.goto(`${base}/#policy`, { waitUntil: 'networkidle' });
+  /* ?skin=classic: this file asserts the CLASSIC desktop page's DOM (panels,
+     tiles, pills), written when Classic was the desktop default. Arkiv became
+     the default on 2026-09-28 and draws these pages in its own layout; Classic
+     is still a look anyone can choose, so what this file proves still ships. */
+  await page.goto(`${base}/?skin=classic#policy`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-panel="policy-history"] table', { timeout: 15000 });
   const body = await page.evaluate(() => document.body.innerText);
 
@@ -143,7 +147,7 @@ const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, r
 {
   const ctx = await browser.newContext({ ...devices['iPhone 13'] });
   const page = await ctx.newPage();
-  await page.goto(`${base}/#policy`, { waitUntil: 'networkidle' });
+  await page.goto(`${base}/?skin=classic#policy`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(1200);
   const doc = await page.evaluate(() => document.documentElement.scrollWidth);
   const vw = await page.evaluate(() => window.innerWidth);

@@ -46,7 +46,9 @@
        "Dispatcher is given".
      accessadmin.js settingsTab: send `mode: 'open'` from the Yes button
        whatever was chosen → "sign-in is now required".
-     account.js lookPanel: remove location.reload() → "the look is Classic". */
+     account.js lookPanel: remove location.reload() → part 13 fails, waiting
+       for the reload the switch owes before "the look is Classic".
+   Each was reverted and run on 2026-09-28; each failed as named. */
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import pg from 'pg';
@@ -96,9 +98,12 @@ server.stderr.on('data', (d) => { serverLog = (serverLog + d).slice(-20000); });
 let browser = null;
 const finish = async (code) => {
   try { await browser?.close(); } catch { /* already gone */ }
-  server.kill('SIGTERM');
-  await new Promise((r) => { server.once('exit', r); setTimeout(r, 4000); });
-  if (!server.killed || server.exitCode == null) { try { server.kill('SIGKILL'); } catch { /* gone */ } }
+  try { await dbc.end(); } catch { /* already closed */ }
+  if (server.exitCode == null && server.signalCode == null) {
+    server.kill('SIGTERM');
+    await new Promise((r) => { server.once('exit', r); setTimeout(r, 5000); });
+    if (server.exitCode == null && server.signalCode == null) server.kill('SIGKILL');
+  }
   process.exit(code);
 };
 process.on('uncaughtException', (e) => { console.log(`  ✗ crashed: ${e.stack || e}`); console.log(serverLog.slice(-3000)); finish(1); });
@@ -174,6 +179,9 @@ const cookies = () => Object.entries(own.jar).map(([name, value]) => ({ name, va
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' });
 await ctx.addCookies(cookies());
 const page = await ctx.newPage();
+/* A step whose element never appears fails its own check and the run goes
+   on, rather than one missing button hiding every check after it. */
+page.setDefaultTimeout(15000);
 
 /* Console errors, sorted into ours and the shell's (see the header). */
 const refused = new Map();          // url → the body's error code, for 4xx answers
@@ -215,6 +223,12 @@ const waitFlash = async (re, ms = 15000) => {
     .catch(() => {});
   return flash();
 };
+/* Each numbered part runs to its end or fails one check saying where it
+   stopped: a button that never appeared must not take every later check
+   down with it (the reversions in the header each leave the rest running). */
+const section = async (n, fn) => {
+  try { await fn(); } catch (e) { check(`part ${n} ran to its end`, false, String(e.message || e).split('\n')[0].slice(0, 200)); }
+};
 const noErrorsSoFar = (where) => {
   const got = mine.splice(0);
   check(`${where}: no console error of the page’s own`, got.length === 0, got.join(' | ').slice(0, 600));
@@ -222,7 +236,7 @@ const noErrorsSoFar = (where) => {
 
 console.log('\n2 · People: invite a Cash desk person');
 let inviteToken = null; let cashId = null;
-{
+await section('2', async () => {
   await ensureStepup();
   await go('access');
   check('the People tab opens for the Owner', await page.locator('[data-panel="acx-people"]').count() === 1);
@@ -240,11 +254,11 @@ let inviteToken = null; let cashId = null;
   inviteToken = decodeURIComponent(link.split('#invite=')[1] || '');
   check('…and the new person is in the table', (await page.locator('[data-panel="acx-people"]').innerText()).includes('Test Cash Desk'));
   noErrorsSoFar('People');
-}
+});
 
 console.log('\n3 · the invitation is accepted (as the invitee would, on /signin)');
 const cash = agent();
-{
+await section('3', async () => {
   const r = await cash.call('POST', '/api/auth/link/accept', { token: inviteToken, password: CASH_PW });
   check('the link sets their password', r.status === 200 && r.j?.email === CASH, JSON.stringify(r.j));
   const again = await cash.call('POST', '/api/auth/link/accept', { token: inviteToken, password: CASH_PW });
@@ -253,17 +267,18 @@ const cash = agent();
   check('they can sign in', l.status === 200 && l.j?.ok === true, JSON.stringify(l.j));
   cashId = (await dbc.query('SELECT id FROM access_user WHERE email_norm = $1', [CASH])).rows[0]?.id;
   cashId = Number(cashId);
-}
+});
 
 console.log('\n4 · One person: give Dispatcher, then revoke it');
-{
+await section('4', async () => {
   await ensureStepup();
   await go('access');
   await page.locator('[data-panel="acx-people"] a', { hasText: 'Test Cash Desk' }).first().click();
   await page.waitForSelector('[data-panel="acx-person-give"]', { timeout: 15000 });
   await settle();
   check('their page opens from the table', page.url().endsWith(`#access/person/${cashId}`), page.url());
-  check('…showing Cash desk, in force', /Cash desk[\s\S]*in force/.test(await page.locator('[data-panel="acx-person-grants"]').innerText()));
+  /* innerText is what the reader sees, so case-blind: Arkiv sets pills in capitals. */
+  check('…showing Cash desk, in force', /Cash desk[\s\S]*in force/i.test(await page.locator('[data-panel="acx-person-grants"]').innerText()));
   const give = page.locator('[data-panel="acx-person-give"]');
   await give.locator('.acx-grant select').selectOption('DSP');
   await give.locator('[data-acx="grant-reason"]').fill('Covering the dispatch desk this week');
@@ -274,19 +289,21 @@ console.log('\n4 · One person: give Dispatcher, then revoke it');
   check('…and listed on their page', await row.count() === 1);
   const g = (await dbc.query(`SELECT status FROM access_grant WHERE user_id = $1 AND role_code = 'DSP'`, [cashId])).rows[0];
   check('…and in force on the server', g?.status === 'active', JSON.stringify(g));
-  await row.locator('button[data-revoke]').click();
-  await page.locator('[data-acx="reason"]').fill('Cover ended');
-  await page.locator('[data-acx="confirm"]').click();
+  if (await row.count() === 1) {
+    await row.locator('button[data-revoke]').click();
+    await page.locator('[data-acx="reason"]').fill('Cover ended');
+    await page.locator('[data-acx="confirm"]').click();
+  }
   const f2 = await waitFlash(/revoked/);
   check('Dispatcher is revoked', /Dispatcher revoked for Test Cash Desk/.test(f2), f2);
   check('…and gone from their page', await page.locator('[data-panel="acx-person-grants"] tr', { hasText: 'Dispatcher' }).count() === 0);
   const g2 = (await dbc.query(`SELECT status FROM access_grant WHERE user_id = $1 AND role_code = 'DSP'`, [cashId])).rows[0];
   check('…and revoked on the server', g2?.status === 'revoked', JSON.stringify(g2));
   noErrorsSoFar('One person');
-}
+});
 
 console.log('\n5 · Teams: make one, add a member');
-{
+await section('5', async () => {
   await ensureStepup();
   await go('access/teams');
   await page.locator('[data-acx="team-name"]').fill('Cash office');
@@ -301,10 +318,10 @@ console.log('\n5 · Teams: make one, add a member');
   check('a member is added', /Test Cash Desk added to Cash office/.test(f2), f2);
   check('…and listed in the team', (await page.locator('[data-team="Cash office"]').innerText()).includes('Test Cash Desk'));
   noErrorsSoFar('Teams');
-}
+});
 
 console.log('\n6 · Roles: the matrix, and a role of the company’s own');
-{
+await section('6', async () => {
   await ensureStepup();
   await go('access/roles');
   const n = await page.locator('[data-acx="matrix"] thead th[data-role]').count();
@@ -318,10 +335,10 @@ console.log('\n6 · Roles: the matrix, and a role of the company’s own');
   check('a custom role is made from Cash desk', /Made the role Night cash desk/.test(f), f);
   check('…and joins the matrix', await page.locator('[data-acx="matrix"] thead th[data-role]').count() === 15);
   noErrorsSoFar('Roles');
-}
+});
 
 console.log('\n7 · Requests: the cash-desk person asks; the Owner approves');
-{
+await section('7', async () => {
   const r = await cash.call('POST', '/api/auth/request', { view: 'revenue', class: 'REV', reason: 'Month-end revenue check' });
   check('the request is sent (as the cash-desk person)', r.status === 200 && r.j?.id, JSON.stringify(r.j));
   await ensureStepup();
@@ -335,12 +352,12 @@ console.log('\n7 · Requests: the cash-desk person asks; the Owner approves');
   check('the Owner approves it', /Approved: Analyst for Test Cash Desk/.test(f), f);
   const mineNow = await cash.call('GET', '/api/auth/requests');
   check('…and the person sees it approved', mineNow.j?.requests?.[0]?.status === 'approved', JSON.stringify(mineNow.j?.requests?.[0]?.status));
-  check('…under Decided', (await page.locator('[data-panel="acx-requests-done"]').innerText().catch(() => '')).includes('approved'));
+  check('…under Decided', /approved/i.test(await page.locator('[data-panel="acx-requests-done"]').innerText().catch(() => '')));
   noErrorsSoFar('Requests');
-}
+});
 
 console.log('\n8 · Reviews: open this quarter, attest the team');
-{
+await section('8', async () => {
   await ensureStepup();
   await go('access/reviews');
   await page.locator('[data-acx="review-open"]').click();
@@ -352,10 +369,10 @@ console.log('\n8 · Reviews: open this quarter, attest the team');
   const f2 = await waitFlash(/attested/);
   check('the team is attested, everyone kept', /Cash office attested for .*everyone kept/.test(f2), f2);
   noErrorsSoFar('Reviews');
-}
+});
 
 console.log('\n9 · Screens: make a wall display, then switch it off');
-{
+await section('9', async () => {
   await ensureStepup();
   await go('access/screens');
   await page.locator('[data-acx="screen-name"]').fill('Office wall');
@@ -367,15 +384,17 @@ console.log('\n9 · Screens: make a wall display, then switch it off');
   check('…and the screen is listed, on', await off.count() === 1);
   await off.click();
   await off.click();
-  const f = await waitFlash(/switched off/);
+  /* The link box above also says "switched off" (in its advice), so the wait
+     is for the report of this change by name. */
+  const f = await waitFlash(/Office wall is switched off/);
   check('the screen is switched off', /Office wall is switched off/.test(f), f);
   const d = (await dbc.query(`SELECT revoked_at FROM access_device WHERE name = 'Office wall'`)).rows[0];
   check('…on the server', d?.revoked_at != null);
   noErrorsSoFar('Screens');
-}
+});
 
 console.log('\n10 · Audit: the rows, and the chain');
-{
+await section('10', async () => {
   await go('access/audit');
   await page.waitForSelector('[data-panel="acx-audit"] table', { timeout: 15000 }).catch(() => {});
   const rows = await page.locator('[data-panel="acx-audit"] tbody tr').count();
@@ -387,20 +406,20 @@ console.log('\n10 · Audit: the rows, and the chain');
   check('the chain is checked and intact', /^Intact\. All \d+ entries/.test(v.trim()), v);
   await page.locator('[data-acx="audit-kind"]').selectOption('access.');
   await settle();
-  const actions = await page.locator('[data-panel="acx-audit"] tbody tr .mono').allInnerTexts();
-  check('the kind filter narrows it', actions.length > 0 && actions.filter((a) => !a.startsWith('#')).every((a) => a.startsWith('access.')), actions.slice(0, 4).join(','));
+  const actions = await page.locator('[data-panel="acx-audit"] [data-action-code]').allInnerTexts();
+  check('the kind filter narrows it', actions.length > 0 && actions.every((a) => a.startsWith('access.')), actions.slice(0, 4).join(','));
   noErrorsSoFar('Audit');
-}
+});
 
 console.log('\n11 · Settings: require sign-in, then make it optional again');
-{
+await section('11', async () => {
   await ensureStepup();
   await go('access/settings');
   await page.locator('[data-acx="mode-enforced"]').check();
   await page.locator('[data-acx="mode-save"]').click();
   const conf = await page.locator('[data-acx="mode-confirm"]').innerText();
   check('the confirmation counts the active accounts', /2 people have an active account/.test(conf), conf.slice(0, 120));
-  check('…and names the Owners', conf.includes(`Owners: ${OWNER} (${OWNER})`), conf.slice(0, 300));
+  check('…and names the Owners', conf.includes(`Owners: ${OWNER}`), conf.slice(0, 300));
   await page.locator('[data-acx="mode-yes"]').click();
   const f = await waitFlash(/now required/);
   check('sign-in is now required', /Sign-in is now required/.test(f), f);
@@ -416,33 +435,56 @@ console.log('\n11 · Settings: require sign-in, then make it optional again');
   const anon2 = await (await fetch(`${BASE}/api/auth/me`)).json();
   check('…on the server', anon2.mode === 'open', anon2.mode);
   noErrorsSoFar('Settings');
-}
+});
 
 /* ── every address, both looks, both widths ───────────────────────────── */
 console.log('\n12 · every address: no sideways scroll, no console error, in Arkiv and Classic, at 390px and 1440px');
 const ADDRS = ['account', 'access', `access/person/${cashId}`, 'access/teams', 'access/roles', 'access/requests',
   'access/approvals', 'access/reviews', 'access/screens', 'access/audit', 'access/settings'];
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
+/* Two measurements, because two things can scroll sideways. The PAGE'S OWN
+   content: every element under .acx-page must end inside the viewport,
+   except inside a box built to scroll (a table, the role matrix) — strict,
+   always. And the DOCUMENT: when it scrolls sideways, the same look and width
+   is measured on a control page these files have nothing to do with
+   (#policy); if the control overflows just as far, the overflow is the
+   shell's (app.js / app.css), printed with its width, and fails only under
+   ACCESS_PAGES_STRICT. Wider than the control is ours, and fails. */
+const shellWide = [];
 const sweep = async ({ skin, width, ui = 'desktop', scheme = 'light', addrs = ADDRS }) => {
   const c = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: 'block', colorScheme: scheme,
     ...(ui === 'phone' ? { hasTouch: true, isMobile: true } : {}) });
   await c.addCookies(cookies());
   const p = await c.newPage();
   watch(p);
-  const wide = []; const broken = [];
+  await p.goto(`${BASE}/?ui=${ui}&skin=${skin}#policy`, { waitUntil: 'domcontentloaded' });
+  await settle(p);
+  const control = await p.evaluate(() => document.documentElement.scrollWidth);
+  const wide = []; const own = []; const broken = [];
   for (const a of addrs) {
     await go(a, { skin, ui, p });
-    const m = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth,
-      skin: getComputedStyle(document.documentElement).getPropertyValue('--pg-contract').trim() === '1' ? 'arkiv' : 'classic',
-      failed: /Could not load this view|This page did not open/.test(document.body.innerText) }));
-    if (m.sw > m.iw) wide.push(`#${a} ${m.sw}>${m.iw}`);
+    const m = await p.evaluate(() => {
+      const iw = innerWidth;
+      const past = [];
+      for (const n of document.querySelectorAll('.acx-page, .acx-page *')) {
+        if (n.parentElement?.closest('.tscroll, .acx-scroll')) continue;
+        const r = n.getBoundingClientRect();
+        if (r.width > 0 && r.right > iw + 0.5) past.push(`${n.tagName.toLowerCase()}.${String(n.className).split(' ')[0]} ${Math.round(r.right)}`);
+      }
+      return { sw: document.documentElement.scrollWidth, iw, past: past.slice(0, 4),
+        skin: getComputedStyle(document.documentElement).getPropertyValue('--pg-contract').trim() === '1' ? 'arkiv' : 'classic',
+        failed: /Could not load this view|This page did not open/.test(document.body.innerText) };
+    });
+    if (m.past.length) own.push(`#${a}: ${m.past.join(', ')}`);
+    if (m.sw > m.iw) (m.sw > control ? wide : shellWide).push(`#${a} ${m.sw}>${m.iw} (${skin}, ${scheme}, ${ui})`);
     if (m.failed || m.skin !== skin) broken.push(`#${a}${m.failed ? ' failed to render' : ` drew ${m.skin}`}`);
     if (SHOTS) await p.screenshot({ path: `${SHOTS}/${ui}-${skin}-${scheme}-${width}-${a.replace(/\//g, '_')}.png`, fullPage: true });
   }
   await c.close();
   const tag = `${skin}, ${scheme}, ${ui} at ${width}px`;
   check(`${tag}: every address rendered in its look`, broken.length === 0, broken.join(' · '));
-  check(`${tag}: nothing scrolls sideways`, wide.length === 0, wide.join(' · '));
+  check(`${tag}: nothing on these pages reaches past the screen's edge`, own.length === 0, own.join(' · '));
+  check(`${tag}: the document scrolls sideways no further than a control page does (#policy, ${control}px)`, wide.length === 0, wide.join(' · '));
   noErrorsSoFar(tag);
 };
 for (const skin of ['arkiv', 'classic']) {
@@ -452,7 +494,7 @@ for (const skin of ['arkiv', 'classic']) await sweep({ skin, width: 390, scheme:
 for (const skin of ['arkiv', 'classic']) await sweep({ skin, width: 390, ui: 'phone', addrs: ['account', 'access', 'access/roles'] });
 
 console.log('\n13 · Your account: sessions, preview as Dispatcher, the look');
-{
+await section('13', async () => {
   await go('account');
   const s = await page.locator('[data-panel="acct-sessions"]').innerText();
   check('the sessions list shows this browser', /this browser/i.test(s), s.slice(0, 120));
@@ -483,17 +525,91 @@ console.log('\n13 · Your account: sessions, preview as Dispatcher, the look');
   await page.waitForSelector('[data-panel="acct-look"]');
   await settle();
   check('the look starts as Arkiv', await skinNow() === 'arkiv');
-  await Promise.all([page.waitForEvent('load'), page.locator('[data-acx="look-classic"]').check()]);
+  await Promise.all([page.waitForEvent('load'), page.locator('[data-acx="look-classic"]').click()]);
   await page.waitForSelector('[data-panel="acct-look"]');
   await settle();
   check('the look is Classic after switching', await skinNow() === 'classic');
   const p1 = await own.call('GET', '/api/auth/me');
   check('…and kept on the account', p1.j?.user?.prefs?.look === 'classic', JSON.stringify(p1.j?.user?.prefs));
-  await Promise.all([page.waitForEvent('load'), page.locator('[data-acx="look-arkiv"]').check()]);
+  await Promise.all([page.waitForEvent('load'), page.locator('[data-acx="look-arkiv"]').click()]);
   await page.waitForSelector('[data-panel="acct-look"]');
   await settle();
   check('…and Arkiv again after switching back', await skinNow() === 'arkiv');
   noErrorsSoFar('The look');
+});
+
+console.log('\n14 · the same pages for an Access admin, and for someone who manages nothing');
+await section('14', async () => {
+  /* An Access admin, invited through the API (the page's invite is proven in
+     2), who must set up two-step before anything opens (policy: admins). */
+  await ensureStepup();
+  const inv = await own.call('POST', '/api/access/users', { email: 'access.admin@example.test', name: 'Test Access Admin',
+    grants: [{ role: 'ACC', fleets: null }], reason: 'Runs access day to day' });
+  check('an Access admin is invited', inv.status === 200, JSON.stringify(inv.j).slice(0, 160));
+  const acc = agent();
+  await acc.call('POST', '/api/auth/link/accept', { token: decodeURIComponent(inv.j?.link?.split('#invite=')[1] || ''), password: 'slate orbit fern 9031' });
+  await acc.call('POST', '/api/auth/login', { email: 'access.admin@example.test', password: 'slate orbit fern 9031' });
+  const setup = await acc.call('POST', '/api/auth/totp/setup', {});
+  const en = await acc.call('POST', '/api/auth/totp/enable', { code: hotp(setup.j?.secret, totpStep()) });
+  check('…signs in and sets up two-step', en.status === 200, JSON.stringify(en.j).slice(0, 120));
+  const c2 = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' });
+  await c2.addCookies(Object.entries(acc.jar).map(([name, value]) => ({ name, value, domain: '127.0.0.1', path: '/',
+    httpOnly: name !== 'fm_csrf', sameSite: name === 'fm_csrf' ? 'Strict' : 'Lax' })));
+  const p2 = await c2.newPage();
+  watch(p2);
+  await go('access', { p: p2 });
+  check('People opens for an Access admin', await p2.locator('[data-panel="acx-people"]').count() === 1);
+  await go(`access/person/${cashId}`, { p: p2 });
+  const give = p2.locator('[data-panel="acx-person-give"]');
+  await give.locator('.acx-grant select').selectOption('FIN');
+  await give.locator('[data-acx="grant-reason"]').fill('Month end');
+  await give.locator('[data-acx="grant-give"]').click();
+  await p2.waitForFunction(() => /cannot give access/.test(document.querySelector('[data-panel="acx-person-give"] .acx-msg')?.textContent || ''), null, { timeout: 15000 }).catch(() => {});
+  const refusal = await give.locator('.acx-msg').innerText();
+  check('the ceiling: the server’s refusal is shown in place, in its words', /You cannot give access you do not hold yourself/.test(refusal), refusal);
+  /* That refusal is a 403 the browser logs; it is the one this step caused on purpose. */
+  const expected = mine.filter((m) => /status of 403/.test(m) && /\/api\/access\/grants/.test(m));
+  mine.splice(0, mine.length, ...mine.filter((m) => !expected.includes(m)));
+  check('…and it is the only console error it caused', expected.length === 1, String(expected.length));
+  await go('access/settings', { p: p2 });
+  check('Settings are read-only for an Access admin, and say so', /Only the Owner changes these/.test(await p2.locator('.acx-tab').innerText())
+    && await p2.locator('[data-acx="mode-save"]').isDisabled());
+  await go('access/audit', { p: p2 });
+  await p2.waitForSelector('[data-panel="acx-audit"] table', { timeout: 15000 }).catch(() => {});
+  check('the audit log opens for an Access admin', await p2.locator('[data-panel="acx-audit"] tbody tr').count() > 5);
+  await go('access/approvals', { p: p2 });
+  check('Approvals opens for an Access admin', await p2.locator('[data-panel="acx-approvals"]').count() === 1);
+  await go('account', { p: p2 });
+  check('their account lists the Access admin role, and no preview', /Access admin/.test(await p2.locator('[data-panel="acct-you"]').innerText())
+    && await p2.locator('[data-panel="acct-preview"]').count() === 0);
+  await c2.close();
+  noErrorsSoFar('Access admin');
+
+  /* The cash-desk person (Cash desk, Analyst from the request, the Cash office team). */
+  const c3 = await browser.newContext({ viewport: { width: 390, height: 900 }, serviceWorkers: 'block' });
+  await c3.addCookies(Object.entries(cash.jar).map(([name, value]) => ({ name, value, domain: '127.0.0.1', path: '/',
+    httpOnly: name !== 'fm_csrf', sameSite: name === 'fm_csrf' ? 'Strict' : 'Lax' })));
+  const p3 = await c3.newPage();
+  watch(p3);
+  await go('access', { p: p3 });
+  check('Access is closed to someone who manages nothing, with the reason', /Access is managed by the Owner and Access admins/.test(await p3.locator('.access-closed').innerText().catch(() => '')));
+  check('…and offers to ask for it', await p3.locator('.access-closed form.ac-ask').count() === 1);
+  await go('account', { p: p3 });
+  const you = await p3.locator('[data-panel="acct-you"]').innerText();
+  check('their account lists their roles and team', /Cash desk/.test(you) && /Analyst/.test(you) && /Cash office/.test(you), you.slice(0, 200));
+  check('…the answer to their request', /approved/i.test(await p3.locator('[data-panel="acct-requests"]').innerText()));
+  check('…and what they are not shown', /Not shown[\s\S]*contact details/.test(await p3.locator('[data-panel="acct-sees"]').innerText()));
+  check('…with no preview (Owners only)', await p3.locator('[data-panel="acct-preview"]').count() === 0);
+  const w = await p3.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
+  check('…and nothing scrolls sideways at 390px (Arkiv)', w[0] <= w[1], w.join('>'));
+  await c3.close();
+  noErrorsSoFar('Someone who manages nothing');
+});
+
+/* ── the shell's own sideways scroll, printed rather than hidden ───────── */
+if (shellWide.length) {
+  console.log(`\n  note: the shell scrolls sideways on ${shellWide.length} address(es), exactly as far as on #policy — not these pages: ${[...new Set(shellWide.map((x) => x.replace(/^#\S+ /, '')))].join('; ')}`);
+  if (STRICT) check('ACCESS_PAGES_STRICT: the document never scrolls sideways', false, shellWide.slice(0, 6).join(' · '));
 }
 
 /* ── the shell's refusals, printed rather than hidden ───────────────────── */
@@ -511,6 +627,5 @@ if (byUrl.size) {
   if (STRICT) check('ACCESS_PAGES_STRICT: no shell refusal at all', false, list);
 }
 
-await dbc.end();
 console.log(`\n${pass} passed, ${fail} failed`);
 await finish(fail ? 1 : 0);

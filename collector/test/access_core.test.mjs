@@ -19,7 +19,7 @@ import { FOUR_EYES } from '../api/access/manifest.js';
 import * as svc from '../api/access/service.js';
 import { computeAccess } from '../api/access/principal.js';
 import { shapeBody, parsePath, transform } from '../api/access/shape.js';
-import { verifyChain } from '../api/access/audit.js';
+import { verifyChain, appendAudit } from '../api/access/audit.js';
 import { hotp, totpStep, base32Encode, hashPassword, verifyPassword, passwordProblem, verifyTotp }
   from '../api/access/crypto.js';
 import { responseCache } from '../api/cache.js';
@@ -117,6 +117,8 @@ const MANIFEST = {
     fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: null },
   'GET /api/t/kpis': { method: 'GET', path: '/api/t/kpis', subject: 'REV', carries: ['REV', 'BK'], grain: 'aggregate',
     fields: [], whole: [], fleet: 'param', fleetRows: [], fleetKey: '', cap: null },
+  'GET /api/t/search': { method: 'GET', path: '/api/t/search', subject: 'BK', carries: ['BK', 'ID', 'LOC', 'VEH'], grain: 'list',
+    fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: null, search: { param: 'q', classes: ['ID', 'LOC', 'VEH'] } },
   'POST /api/t/cash': { method: 'POST', path: '/api/t/cash', subject: 'CASH', carries: ['CASH'], grain: 'none',
     fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: 'cash.record' },
   'POST /api/ledger/import/commit': { method: 'POST', path: '/api/ledger/import/commit', subject: 'CASH', carries: ['CASH', 'ID'],
@@ -141,6 +143,8 @@ app.get('/api/t/people', (req, res) => res.json([
   { name: 'Test Driver B', fleet_id: 'ecosine', phone: '0500000002', balance: 20 }]));
 app.get('/api/t/cash', (req, res) => res.json([{ name: 'Test Driver A', balance: 10 }]));
 app.get('/api/t/kpis', (req, res) => { kpiCalls += 1; res.json({ fleet: req.query.fleet || 'all', trips: 5 }); });
+let searchCalls = 0;
+app.get('/api/t/search', (req, res) => { searchCalls += 1; res.json({ within: req.query._fmsearch ?? 'every column' }); });
 let cashWrites = 0;
 app.post('/api/t/cash', (req, res) => { cashWrites += 1; res.json({ ok: true }); });
 const imported = [];
@@ -274,6 +278,24 @@ console.log('\n7. what each role is answered');
   check('the cache never hands the narrowed answer to a company-wide reader', all.json.fleet === 'all', JSON.stringify(all.json));
 }
 
+console.log('\n7b. a search matches only what the reader may see');
+{
+  /* Finance holds names and plates but not places: its search must not be an
+     oracle for "which trips went to this address". REVERSION: remove the
+     entry.search block in api/access/middleware.js — Finance's search is
+     answered over every column (and from the Owner's cached copy). */
+  const o = await owner.get('/api/t/search?q=marina');
+  check('the Owner searches every column', o.json.within === 'every column', JSON.stringify(o.json));
+  const f = await people.FIN.b.get('/api/t/search?q=marina');
+  check('Finance searches names and plates, not places', f.json.within === 'ID,VEH', JSON.stringify(f.json));
+  const w = await people.FIN.b.get('/api/t/search?q=marina&_fmsearch=ID,LOC,VEH');
+  check('…and cannot widen it by asking', w.json.within === 'ID,VEH', JSON.stringify(w.json));
+  const n = await people.FIN.b.get('/api/t/search?q=marina&_fmsearch=VEH');
+  check('…though it may narrow it', n.json.within === 'VEH', JSON.stringify(n.json));
+  const none = await people.FIN.b.get('/api/t/search');
+  check('with no search there is nothing to narrow', none.json.within === 'every column', JSON.stringify(none.json));
+}
+
 console.log('\n8. the cache never crosses people');
 {
   /* REVERSION: take '/api/access/' off NEVER in api/cache.js — the second
@@ -332,6 +354,8 @@ console.log('\n9b. four-eyes: a cash sheet is proposed by one person and committ
   check('the preparer cannot commit their own', ownCommit.status === 403 && ownCommit.json.error === 'four_eyes' && imported.length === 1);
   const list = await people.FIN.b.get('/api/access/proposals');
   check('Approvals lists it, marked as the Finance manager\'s own', list.json.proposals.some((p) => p.id === own.json.proposal && p.mine && !p.canCommit));
+  check('…and says to lay it out as rows (the page never parses route addresses)',
+    list.json.proposals.find((p) => p.id === own.json.proposal)?.view === 'rows');
   const dsp = await people.DSP.b.get('/api/access/proposals');
   check('a Dispatcher sees no cash proposals', dsp.json.proposals.length === 0);
 }
@@ -422,8 +446,12 @@ console.log('\n13. the audit log');
   check('sign-ins, invitations, grants and actions are recorded',
     ['auth.login', 'access.user_invited', 'access.grant_created', 'act:cash.record', 'access.config_changed'].every((a) => acts.includes(a)),
     acts.slice(0, 30).join(','));
+  /* A detail value of undefined is dropped by jsonb; the hash must be over
+     what was stored. REVERSION: hash scrub(detail) without the JSON round
+     trip in appendAudit — the chain breaks at this entry. */
+  await appendAudit(db, { actorId: 1, actorLabel: 'test', action: 'test.undefined_detail', detail: { role: undefined, n: 1 } });
   const v = await verifyChain(db);
-  check('the chain verifies', v.ok, JSON.stringify(v));
+  check('the chain verifies, including a detail with an undefined value', v.ok, JSON.stringify(v));
   await db.query(`UPDATE access_audit SET action = 'tampered' WHERE id = 3`);
   const t = await verifyChain(db);
   check('an edited row breaks the chain where it was edited', !t.ok && t.brokenAt === 3, JSON.stringify(t));

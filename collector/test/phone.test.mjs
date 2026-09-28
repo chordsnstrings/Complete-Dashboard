@@ -226,7 +226,9 @@ for (const f of shell) {
 /* A cached POST would replay a credential write or a collection trigger. */
 check('the worker never answers a POST from a cache',
   /request\.method !== 'GET'\) return;/.test(sw));
-check('a failed response is not cached as if it were good', /if \(fresh\.ok\)/.test(sw));
+/* `fresh.ok` alone, or `fresh.ok && …` narrowing it further (the data cache
+   also refuses a no-store answer — ULM-8); never a condition that widens it. */
+check('a failed response is not cached as if it were good', /if \(fresh\.ok(\)| && )/.test(sw));
 check('a cached answer says when it was stored', /x-sw-cached-at/.test(sw));
 check('activate retires every cache that is not this version',
   /caches\.keys\(\)[\s\S]{0,120}caches\.delete/.test(sw));

@@ -40,7 +40,10 @@ const mapp = read('m/app.js');
 check('the phone’s header: the mark, with the name for a screen reader',
   /el\('a', 'ak-word', '<span class="logo" aria-hidden="true"><\/span><span class="sr">FleetMirror<\/span>'\)/.test(mapp));
 check('…and every phone screen’s tab title ends "· FleetMirror"',
-  (mapp.match(/· FleetMirror`/g) || []).length === 2 && !/· Fleet`/.test(mapp));
+  /* Every assignment, however many screens set one (the account and Access
+     pages added a third): a count pinned at 2 failed on a correct new title. */
+  (() => { const t = mapp.match(/document\.title = `[^`]*`/g) || [];
+    return t.length >= 2 && t.every((x) => x.endsWith('· FleetMirror`')); })() && !/· Fleet`/.test(mapp));
 check('the phone’s More masthead names it',
   /el\('span', 'ak-mast-word', '<span class="logo" aria-hidden="true"><\/span>FleetMirror'\)/.test(read('m/screens.js')));
 const old = ['index.html', 'shell.js', 'm/app.js', 'm/screens.js', 'manifest.webmanifest']

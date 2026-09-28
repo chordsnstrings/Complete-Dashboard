@@ -33,6 +33,7 @@ import { sourceLabel, segSourceLabel, timeStr, dtStr, custodyText, moneyInTile, 
   cashOnHandTile, bankDepositTile, countOf,
   alertRateFigure, splitAlerts, avgKmSub } from '../ui.js';
 import { dubaiClock, dubaiDay } from '../tz.js';
+import { who, roleNames, signOut } from '../access.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from '../today.js';
 /* The three words the desktop page uses for the three states it refuses to
    colour. Imported rather than retyped — see the comment on GREY there. */
@@ -1273,6 +1274,7 @@ async function more(deck) {
   b.style.marginTop = '10px';
   b.onclick = () => { location.href = `/?ui=desktop${location.hash}`; };
   c.body.append(b);
+  c.body.append(accountBlock());
   deck.append(c.card);
   /* Under the redesign "This app" carries the masthead the header has no
      room for — the wordmark and whose fleet this is — and the way to the
@@ -1284,6 +1286,36 @@ async function more(deck) {
     c.body.prepend(mast);
     b.className = 'm-btn';
   }
+}
+
+/* The account, at the end of "This app": who is signed in and as what, the
+   account page, the Access pages and Approvals for those who use them, and
+   sign out — or, for a visitor, the way to sign in. Full-width buttons, the
+   form every action on the phone takes (48px, a thumb's target). After the
+   desktop button, so the card's first button is still the one it was. */
+function accountBlock() {
+  const box = el('div', 'acct-block');
+  const link = (to, text) => { const a = el('a', 'm-btn', esc(text)); a.href = to; return a; };
+  if (who.signedIn && who.kind === 'user') {
+    const caps = who.access?.caps || [];
+    const p = el('p', 'm-cap', `Signed in as <b>${esc(who.user?.name || who.user?.email || '')}</b>`
+      + `${roleNames().length ? ` — ${esc(roleNames().join(', '))}` : ''}.`);
+    p.style.margin = '14px 0 0';
+    box.append(p, link('#account', 'Your account'));
+    if (caps.includes('access.manage')) box.append(link('#access', 'Access'));
+    if (['cash.import', 'cash.import.commit', 'identity.merge'].some((x) => caps.includes(x))) box.append(link('#approvals', 'Approvals'));
+    const out = el('button', 'm-btn', 'Sign out');
+    out.type = 'button';
+    out.onclick = () => signOut();
+    box.append(out);
+  } else if (who.signedIn && who.kind === 'device') {
+    const p = el('p', 'm-cap', `This screen is signed in as “${esc(who.device?.name || 'a display')}”.`);
+    p.style.margin = '14px 0 0';
+    box.append(p);
+  } else {
+    box.append(link('/signin', 'Sign in'));
+  }
+  return box;
 }
 
 /* ── to the bank ────────────────────────────────────────────────────────

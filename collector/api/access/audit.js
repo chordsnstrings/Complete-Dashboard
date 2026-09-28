@@ -52,7 +52,12 @@ export async function appendAudit(db, entry) {
     action: String(entry.action),
     subject_type: entry.subjectType ?? null,
     subject_id: entry.subjectId == null ? null : String(entry.subjectId),
-    detail: scrub(entry.detail || {}),
+    /* Through JSON first, so the hash covers exactly what jsonb stores. A
+       detail value of `undefined` (a request with no role: `role: role?.code`)
+       was hashed as "role":null while jsonb dropped the key, and verifyChain
+       then reported a break at an entry nobody had touched — found by the
+       Access pages' test on 2026-09-28, entry #13. */
+    detail: JSON.parse(JSON.stringify(scrub(entry.detail || {}))),
     ip: entry.ip ?? null,
     ua: entry.ua ? String(entry.ua).slice(0, 200) : null,
   };

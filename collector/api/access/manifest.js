@@ -1,8 +1,14 @@
 /* Every route, declared: what it is about, what it carries, who may call it.
    ─────────────────────────────────────────────────────────────────────────
    ULM-DESIGN §9.1. The entries themselves are in manifest.json — one per
-   method + path, classified by reading each handler and the helpers behind
-   it (see the header of that file's generator, bin/access-manifest.mjs).
+   method + path. They were first written on 2026-09-28 by reading every
+   handler and the helpers behind it (each entry's `notes` holds that reading:
+   file and line, the response's shape, why the class) and then applying the
+   design's policy decisions: the health checks public, raw records and query
+   plans the Owner's, probes an action because they spend provider quota, the
+   trigger's action following the job it queues. From here the file is
+   maintained BY HAND: a new route needs an entry, and
+   test/access_manifest.test.mjs fails the build until it has one.
    This module loads them and answers "which entry is this request?".
 
    DENY BY DEFAULT. A signed-in caller asking for an /api path with no entry
@@ -19,7 +25,10 @@
      cap       the action a write (or a GET with side effects) needs
      public    answers without signing in
      self      the handler makes its own access decision (/api/auth, /api/access)
-     auditRead reading it is recorded in the audit log */
+     auditRead reading it is recorded in the audit log
+     search    { param, classes }: a search box whose matches may only reach
+               the columns of classes the caller holds in full (the gate
+               writes them to ?_fmsearch=, which the handler honours) */
 import { readFileSync } from 'node:fs';
 
 const ENTRIES = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
@@ -27,14 +36,17 @@ const ENTRIES = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.u
 /* FOUR-EYES (ULM-DESIGN §8): a signed-in person's commit of a cash sheet or a
    merge is STORED as a proposal; someone else commits exactly what was stored,
    by its id. `commitNeeds`: classes the committer must hold at Full — whoever
-   commits a merge that moves a cash balance must be able to see the money. */
+   commits a merge that moves a cash balance must be able to see the money.
+   `view`: how the Approvals page lays the stored payload out (a table of rows,
+   or the two people of a merge) — the page reads it from the listing rather
+   than recognising route addresses of its own. */
 export const FOUR_EYES = Object.freeze({
   'POST /api/ledger/import/commit': {
-    propose: 'cash.import', commit: 'cash.import.commit', commitNeeds: ['CASH'],
+    propose: 'cash.import', commit: 'cash.import.commit', commitNeeds: ['CASH'], view: 'rows',
     summary: (b) => `Import ${Array.isArray(b.rows) ? b.rows.length : 0} cash row(s), batch ${String(b.batch || '?').slice(0, 40)}`,
   },
   'POST /api/person/merge': {
-    propose: 'identity.merge', commit: 'identity.merge', commitNeeds: ['CASH', 'MRG'], dryRunField: 'dry_run',
+    propose: 'identity.merge', commit: 'identity.merge', commitNeeds: ['CASH', 'MRG'], dryRunField: 'dry_run', view: 'merge',
     summary: (b) => `Fold person ${b.drop} into person ${b.keep}${b.why ? ` — ${String(b.why).slice(0, 120)}` : ''}`,
   },
 });

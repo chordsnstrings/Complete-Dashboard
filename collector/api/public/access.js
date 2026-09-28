@@ -333,6 +333,12 @@ export async function setLook(look) {
 export function inChosenLook() {
   const look = who.user?.prefs?.look;
   if (look !== 'arkiv' && look !== 'classic') return true;
+  /* An address that names a look (?skin=classic) wins for this load. Without
+     this the page stored the account's look and reloaded, the pre-paint
+     script read ?skin= again and stored it back, and the page reloaded for
+     ever — measured at 21 reloads in 6 seconds (Access pages' test). */
+  const asked = new URLSearchParams(location.search).get('skin');
+  if (asked === 'arkiv' || asked === 'classic') return true;
   const now = document.documentElement.dataset.skin === 'arkiv' ? 'arkiv' : 'classic';
   if (look === now) return true;
   try { localStorage.setItem(document.documentElement.dataset.ui === 'phone' ? 'fleet.skin.phone' : 'fleet.skin', look); } catch { return true; }

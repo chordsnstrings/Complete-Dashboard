@@ -143,6 +143,16 @@ const byName = await list('&q=hotel hand');
 check('search by driver name is case-insensitive', byName.total === 10, `total ${byName.total}`);
 const byPlace = await list('&q=garhoud');
 check('search by place matches an address', byPlace.total === 10, `total ${byPlace.total}`);
+/* The access gate's `_fmsearch` (api/access/middleware.js) names the classes
+   whose columns a role's search may match. Finance holds names and plates but
+   not places, so its search for a place must find nothing — the rows would
+   otherwise answer "which trips went there" with the addresses nulled.
+   REVERSION: drop the may('LOC') guard in the handler — this finds 10. */
+check('a search held to names and plates does not match a place',
+  (await list('&q=garhoud&_fmsearch=ID,VEH')).total === 0);
+check('…while a name still matches under it', (await list('&q=hotel hand&_fmsearch=ID,VEH')).total === 10);
+check('…and a search held to nothing still matches the trip id, the row itself',
+  (await list('&q=x1&_fmsearch=none')).total > 0);
 check('a search that matches nothing says so, and does not fall back to everything',
   (await list('&q=zzzznothing')).total === 0);
 /* 40 Uber bookings run Deira → Al Barsha; the ten FMS journeys run the same
@@ -180,7 +190,11 @@ const browser = await launchChromium();
 const page = await browser.newPage({ viewport: { width: 1500, height: 1400 } });
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e.message)));
-await page.goto(`${url}/?ui=desktop#trips?days=7`, { waitUntil: 'domcontentloaded' });
+/* ?skin=classic: this file asserts the CLASSIC desktop page's DOM (panels,
+   tiles, pills), written when Classic was the desktop default. Arkiv became
+   the default on 2026-09-28 and draws these pages in its own layout; Classic
+   is still a look anyone can choose, so what this file proves still ships. */
+await page.goto(`${url}/?ui=desktop&skin=classic#trips?days=7`, { waitUntil: 'domcontentloaded' });
 await page.waitForSelector('#view table tbody tr', { timeout: 20000 }).catch(() => {});
 await page.waitForTimeout(1500);
 

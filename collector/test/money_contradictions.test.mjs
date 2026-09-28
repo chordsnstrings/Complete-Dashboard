@@ -328,11 +328,20 @@ const server = shell.listen(0);
 const base = `http://127.0.0.1:${server.address().port}`;
 
 const browser = await launchChromium();
-const page = await browser.newPage({ viewport: { width: 1600, height: 1400 } });
+/* reducedMotion: countUp() animates every figure from zero, and a stalled
+   animation frame under load held "0" long enough for two reads to agree — the
+   idle tile failed on "0" against 289 during the 2026-09-28 full suite while a
+   second browser suite ran, and passed alone. With reduced motion the figure
+   is written once, final. */
+const page = await browser.newPage({ viewport: { width: 1600, height: 1400 }, reducedMotion: 'reduce' });
 const open = async (hash, ready) => {
-  await page.goto(`${base}/?ui=desktop`, { waitUntil: 'domcontentloaded' });
+  /* ?skin=classic: this file asserts the CLASSIC desktop page's DOM (panels,
+     tiles, pills), written when Classic was the desktop default. Arkiv became
+     the default on 2026-09-28 and draws these pages in its own layout; Classic
+     is still a look anyone can choose, so what this file proves still ships. */
+  await page.goto(`${base}/?ui=desktop&skin=classic`, { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => { try { localStorage.clear(); sessionStorage.clear(); } catch { /* private mode */ } });
-  await page.goto(`${base}/?ui=desktop${hash}`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${base}/?ui=desktop&skin=classic${hash}`, { waitUntil: 'domcontentloaded' });
   for (let i = 0; i < 40; i++) {
     if (await page.evaluate(ready)) break;
     await page.waitForTimeout(500);

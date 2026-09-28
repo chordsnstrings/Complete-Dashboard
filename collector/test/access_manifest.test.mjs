@@ -57,6 +57,8 @@ for (const e of allEntries()) {
   if (e.fleet === 'rows' && !e.fleetRows.length) bad.push(`${k}: rows without paths`);
   if (e.cap && !CAP_CODES.includes(e.cap)) bad.push(`${k}: cap ${e.cap}`);
   if (e.method !== 'GET' && !e.cap) bad.push(`${k}: a write with no action`);
+  if (e.search && (!e.search.param || !Array.isArray(e.search.classes)
+    || !e.search.classes.every((c) => CLASS_CODES.includes(c)))) bad.push(`${k}: search ${JSON.stringify(e.search)}`);
   if (e.capBy) for (const c of [e.capBy.default, ...Object.values(e.capBy.map)]) if (!CAP_CODES.includes(c)) bad.push(`${k}: capBy ${c}`);
 }
 check('classes, grains, fleet rules and actions are all known values', bad.length === 0, bad.slice(0, 20).join('; '));
@@ -72,6 +74,8 @@ check('cash pages are about cash', ['/api/ledger/entries', '/api/ledger/people',
   .every((p) => lookupEntry('GET', p)?.subject === 'CASH'), ['/api/ledger/entries', '/api/ledger/people', '/api/ledger/cash-position']
   .map((p) => `${p}:${lookupEntry('GET', p)?.subject}`).join(' '));
 check('the trigger’s action follows the job it asks for', lookupEntry('POST', '/api/settings/trigger')?.capBy?.map?.backfill === 'collector.backfill');
+check('the trip search is held to the columns a role may see', JSON.stringify(lookupEntry('GET', '/api/trips/list')?.search?.classes) === '["ID","LOC","VEH"]');
+check('the park ledger follows the fleet asked for (it ignored it until 2026-09-28)', lookupEntry('GET', '/api/finance/ledger')?.fleet === 'param');
 check('four-eyes routes are declared', Object.keys(FOUR_EYES).every((k) => { const [m, p] = k.split(' '); return lookupEntry(m, p)?.fourEyes; }));
 
 console.log(`\n${pass} passed, ${fail} failed`);

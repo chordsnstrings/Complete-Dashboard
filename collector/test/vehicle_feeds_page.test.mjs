@@ -24,7 +24,11 @@ const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, 
 const page = await ctx.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
-await page.goto(`${base}/#feeds`, { waitUntil: 'networkidle' });
+/* ?skin=classic: this file asserts the CLASSIC desktop page's DOM (panels,
+   tiles, pills), written when Classic was the desktop default. Arkiv became
+   the default on 2026-09-28 and draws these pages in its own layout; Classic
+   is still a look anyone can choose, so what this file proves still ships. */
+await page.goto(`${base}/?skin=classic#feeds`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-panel="feeds"] table', { timeout: 20000 });
 
 console.log('\nwhere it lives');

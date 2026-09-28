@@ -367,7 +367,11 @@ console.log('\nthe page renders people, and says that is what it is counting');
     viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
   const page = await ctx.newPage();
   const errs = []; page.on('pageerror', (e) => errs.push(String(e).slice(0, 300)));
-  await page.goto(`${base}/#compliance`, { waitUntil: 'networkidle' });
+  /* ?skin=classic: this file asserts the CLASSIC desktop page's DOM (panels,
+     tiles, pills), written when Classic was the desktop default. Arkiv became
+     the default on 2026-09-28 and draws these pages in its own layout; Classic
+     is still a look anyone can choose, so what this file proves still ships. */
+  await page.goto(`${base}/?skin=classic#compliance`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-panel="compliance-people"] table', { timeout: 20000 });
   check('the view renders without a page error', errs.length === 0, errs.join(' | '));
 

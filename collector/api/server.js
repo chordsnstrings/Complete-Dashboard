@@ -1026,10 +1026,21 @@ app.get('/api/trips/list', wrap(async (req, res) => {
      box, matched against all four, because asking which field they mean is a
      question the product can answer itself. */
   const term = String(req.query.q || '').trim().toLowerCase();
-  const search = term
-    ? `AND (lower(plate) LIKE $5 OR lower(driver_name) LIKE $5
-            OR lower(pickup_addr) LIKE $5 OR lower(dropoff_addr) LIKE $5
-            OR lower(external_id) LIKE $5)` : '';
+  /* `_fmsearch` is written by the access gate (api/access/middleware.js) for
+     a signed-in role that does not hold all of plates, names and places in
+     full: it lists the classes whose columns the search may match, so a role
+     without places cannot find "the trips that went to this address" by
+     searching for it. Absent = every column, as before. The trip id is the
+     row itself (the page's subject) and is always searchable. */
+  const within = req.query._fmsearch == null ? null : String(req.query._fmsearch).split(',');
+  const may = (cls) => within == null || within.includes(cls);
+  const arms = [
+    may('VEH') && 'lower(plate) LIKE $5',
+    may('ID') && 'lower(driver_name) LIKE $5',
+    may('LOC') && 'lower(pickup_addr) LIKE $5 OR lower(dropoff_addr) LIKE $5',
+    'lower(external_id) LIKE $5',
+  ].filter(Boolean);
+  const search = term ? `AND (${arms.join(' OR ')})` : '';
   const args = term ? [...p, `%${term}%`] : p;
 
   /* Telematics is a different population and gets asked for explicitly. */
@@ -2488,11 +2499,22 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
 */
 
 /* ───────────────────────── finance ───────────────────────── */
-app.get('/api/finance/ledger', wrap(async (req, res) => res.json(await q(
-  `SELECT category, count(*)::int n, round(sum(amount)::numeric,2) amount, currency
-   FROM ledger_entry WHERE ${DAYWIN('event_at')} AND ($3::text IS NULL OR platform=$3)
-   GROUP BY category, currency ORDER BY abs(sum(amount)) DESC LIMIT 60`,
-  [range(req)[0], range(req)[1], range(req)[2]]))));
+/* ?fleet= was ignored here: the statement bound the platform ($3) and never
+   read ledger_entry.fleet_id, so the Egari view showed Ecosine's park ledger
+   summed in with its own under an "Egari" heading — and, once readers can be
+   limited to one fleet (ULM-DESIGN §5), a one-fleet reader would have been
+   handed the other fleet's money. Every row the Yango collector writes carries
+   the fleet it was fetched for (src/sources/yango.js, fleet_id:
+   config.yango.fleet), so the filter is exact. Unset fleet = both, unchanged. */
+app.get('/api/finance/ledger', wrap(async (req, res) => {
+  const [from, to, platform, fleet] = range(req);
+  res.json(await q(
+    `SELECT category, count(*)::int n, round(sum(amount)::numeric,2) amount, currency
+     FROM ledger_entry WHERE ${DAYWIN('event_at')} AND ($3::text IS NULL OR platform=$3)
+       AND ($4::text IS NULL OR fleet_id=$4)
+     GROUP BY category, currency ORDER BY abs(sum(amount)) DESC LIMIT 60`,
+    [from, to, platform, fleet]));
+}));
 
 /* One row per calendar day, with null — not zero — where nothing was recorded.
    areaChart positions points by array index, so days absent from the response

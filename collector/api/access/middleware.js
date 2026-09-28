@@ -23,7 +23,7 @@ import { shapeBody, needsShaping } from './shape.js';
 import { lookupEntry } from './manifest.js';
 import { appendAudit } from './audit.js';
 import * as svc from './service.js';
-import { INTERNAL_TOKEN } from './internal.js';
+import { isInternal } from './internal.js';
 import { safeEqual, newToken } from './crypto.js';
 import { createHash } from 'node:crypto';
 import { rank, withheldSentence, CLASS, ROLE } from '../public/access_model.js';
@@ -61,10 +61,6 @@ export function issueCsrf(res, req) {
   return t;
 }
 
-const loopback = (req) => {
-  const a = String(req.socket?.remoteAddress || '');
-  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
-};
 const ip = (req) => req.ip || null;
 
 /* Actions that must be re-confirmed within ten minutes (§5.1). */
@@ -128,7 +124,7 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     try {
       const cfg = await svc.getConfig(db);
       const base = { mode: cfg.mode, cfg };
-      if (INTERNAL_TOKEN && loopback(req) && safeEqual(req.get('x-fm-internal') || '', INTERNAL_TOKEN)) {
+      if (isInternal(req)) {
         req.fm = { ...base, kind: 'system', access: fullAccess((await svc.allFleets(db)).map((f) => f.id)) };
         return next();
       }
@@ -325,6 +321,28 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
       const u = new URL(req.originalUrl, 'http://local');
       u.searchParams.set('fleet', j.rewrite);
       req.fmCacheKey = `${u.pathname}${u.search}`;
+    }
+    /* A SEARCH IS A QUESTION ABOUT EVERY COLUMN IT MATCHES. /api/trips/list
+       ?q= matches the plate, the driver's name and both addresses. The shaper
+       nulls the addresses for a role without places (Finance), but the rows
+       that came back still answer "which trips went to this building" — the
+       search is an oracle for exactly what was withheld. So the gate names the
+       classes the caller holds in full in `_fmsearch`, and the handler matches
+       only those columns. It is a query parameter, not a request property, so
+       the cache keys on it and the cache's own background refresh (which
+       fetches the key as a URL, as the system) recomputes the SAME narrowed
+       answer. A caller can only narrow it: the gate overwrites it with the
+       intersection of what was asked and what is held. */
+    if (entry.search && String(req.query[entry.search.param] || '').trim()) {
+      const held = entry.search.classes.filter((c) => L[c] === 'F');
+      if (held.length < entry.search.classes.length) {
+        const asked = String(req.query._fmsearch || '').split(',').filter(Boolean);
+        const allowed = asked.length ? held.filter((c) => asked.includes(c)) : held;
+        req.query._fmsearch = allowed.join(',') || 'none';
+        const u = new URL(req.fmCacheKey || req.originalUrl, 'http://local');
+        u.searchParams.set('_fmsearch', req.query._fmsearch);
+        req.fmCacheKey = `${u.pathname}${u.search}`;
+      }
     }
     req.fm.levels = L;
     req.fm.entry = entry;

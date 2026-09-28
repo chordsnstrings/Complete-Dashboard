@@ -84,7 +84,10 @@ check('no section holds fewer than two pages',
 console.log('\nand every address the router can reach lights something');
 /* This is the assertion PARENT failed. `trip` and `cohort` had handlers and no
    entry, so two real addresses lit nothing at all. */
-const IGNORE = new Set(['notfound', 'settings']);
+/* Settings, Your account, Access, Approvals and the fleet names sit OUTSIDE
+   the rail's sections: they are reached from the masthead (the account box,
+   the settings cog), belong to no section, and highlight none. */
+const IGNORE = new Set(['notfound', 'settings', 'account', 'access', 'approvals', 'fleet-names']);
 const orphans = HANDLERS.filter((h) => !IGNORE.has(h)
   && !VIEWS.some((v) => v.id === h) && !DRILL[h]);
 check('no V handler is missing from both VIEWS and DRILL_SECTION',

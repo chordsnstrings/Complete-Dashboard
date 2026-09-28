@@ -41,7 +41,11 @@ const text = (sel) => page.$eval(sel, (e) => e.innerText).catch(() => '');
 const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 console.log('\nthe roster');
-await page.goto(`${base}/#hr-roster`, { waitUntil: 'networkidle' });
+/* ?skin=classic: this file asserts the CLASSIC desktop page's DOM (panels,
+   tiles, pills), written when Classic was the desktop default. Arkiv became
+   the default on 2026-09-28 and draws these pages in its own layout; Classic
+   is still a look anyone can choose, so what this file proves still ships. */
+await page.goto(`${base}/?skin=classic#hr-roster`, { waitUntil: 'networkidle' });
 const rendered = await page.waitForSelector('[data-panel="hr-roster"] table', { timeout: 20000 })
   .then(() => true).catch(() => false);
 check('#hr-roster renders its roster table', rendered);
@@ -128,7 +132,7 @@ console.log('\nthe import: preview, then commit on purpose');
 
 console.log('\n#compliance shows HR’s documents, HR’s date first');
 {
-  await page.goto(`${base}/#compliance`, { waitUntil: 'networkidle' });
+  await page.goto(`${base}/?skin=classic#compliance`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-panel="compliance-people"] table', { timeout: 20000 });
   const t = await text('[data-panel="compliance-people"]');
   check('an HR documents column', /HR documents/i.test(t));
@@ -143,7 +147,7 @@ console.log('\n#compliance shows HR’s documents, HR’s date first');
 
 console.log('\n#same-person carries HR’s proposals and contradictions');
 {
-  await page.goto(`${base}/#same-person`, { waitUntil: 'networkidle' });
+  await page.goto(`${base}/?skin=classic#same-person`, { waitUntil: 'networkidle' });
   await page.waitForSelector('.sp-hr', { timeout: 20000 });
   const card = await text('.sp-hr');
   check('an HR proposal is marked as HR’s, with the employee', /HR roster/i.test(card) && /employee\s+D101/i.test(card), card.slice(0, 200));
@@ -155,7 +159,7 @@ console.log('\n#same-person carries HR’s proposals and contradictions');
 
 console.log('\n#driver shows the Emirates ID, the licence number and HR’s licence expiry');
 {
-  await page.goto(`${base}/#driver/drv-0`, { waitUntil: 'networkidle' });
+  await page.goto(`${base}/?skin=classic#driver/drv-0`, { waitUntil: 'networkidle' });
   await page.waitForSelector('.idcard', { timeout: 20000 });
   const eid = await text('.idcard [data-hr="emirates_id"]');
   const lic = await text('.idcard [data-hr="licence_no"]');

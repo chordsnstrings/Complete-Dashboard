@@ -45,6 +45,8 @@ export async function accountPage(root, _param, _sub) {
   root.innerHTML = '';
   root.classList.add('acx-page');
   await loadWho();
+  /* /api/auth/me now names every grant's role, the company's own included. */
+  rememberRoles((who.grants || []).filter((g) => g.name).map((g) => ({ code: g.role, name: g.name })));
 
   if (!who.signedIn) {
     anonymousPanels(root);
@@ -581,9 +583,14 @@ let customNames = {};
 /* accessadmin.js hands in the company's own roles once it has read them, so
    a grant of a custom role reads by its name everywhere on both pages. */
 export const rememberRoles = (roles = []) => {
-  customNames = Object.fromEntries(roles.filter((r) => !ROLE[r.code]).map((r) => [r.code, r.name]));
+  customNames = { ...customNames,
+    ...Object.fromEntries(roles.filter((r) => !ROLE[r.code] && r.name).map((r) => [r.code, r.name])) };
 };
-export const roleName = (code) => ROLE[code]?.name || customNames[code] || String(code || '—');
+/* /api/auth/me sends each grant's role name, so a role the company made
+   itself reads by its name. Should a name ever be missing, it is said to be
+   the company's own rather than passed off as a name. */
+export const roleName = (code) => ROLE[code]?.name || customNames[code]
+  || (/^C_/.test(String(code || '')) ? `your company’s own role ${code}` : String(code || '—'));
 
 export function fleetsText(fleets, all = []) {
   if (!fleets || !fleets.length) return 'every fleet';

@@ -125,6 +125,17 @@ export async function phonePage(browser, {
       const path = new URL(url).pathname;
       if (path.startsWith('/api/')) {
         if (answer) { await answer(key, route); return; }
+        /* Who is asking. The fixtures were recorded before sign-in existed,
+           from an anonymous visitor while sign-in is optional — which is
+           exactly what /api/auth/me answers that visitor
+           (api/access/routes.js), so it is answered here rather than
+           re-recording every fixture. A fixture that recorded it wins. */
+        if (path === '/api/auth/me' && !fixture?.answers?.[key]) {
+          await route.fulfill({ status: 200, contentType: 'application/json', headers: { 'cache-control': 'no-store' },
+            body: JSON.stringify({ mode: 'open', signedIn: false, kind: 'anonymous', now: new Date().toISOString(),
+              fleets: [{ id: 'ecosine', name: 'Ecosine' }, { id: 'egari', name: 'Egari' }] }) });
+          return;
+        }
         const hit = fixture?.answers?.[key];
         if (!hit) {
           misses.add(key);

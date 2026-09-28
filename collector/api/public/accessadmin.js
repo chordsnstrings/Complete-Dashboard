@@ -35,6 +35,7 @@
    there. "No requests" alone reads the same as "requests are broken". */
 import { el, esc, panel, note, tableFrom, tabBar, dtStr, dateStr, kpiRow } from './ui.js';
 import { who, loadWho, getJson, post, closedBlock, toSignIn } from './access.js';
+import { dubaiDay } from './tz.js';
 import { ROLE, CLASS, CLASSES, CAPS, CAP, LEVEL_NAME, rank, roleIsSensitive } from './access_model.js';
 import {
   h, field, msgLine, act, oneTimeLink, roleSelect, fleetPicker, endOfDay, roleName, rememberRoles,
@@ -94,17 +95,30 @@ export async function accessPage(root, param, sub) {
   root.append(bar, flash, host);
 
   const ctx = { flash, host, sub, param };
-  ctx.say = (text, tone = 'ok') => { flash.replaceChildren(note(text, tone)); };
+  /* What a change reports is painted once the tab has been redrawn from the
+     server's answer, never before: a "revoked" line above a table still
+     listing the grant would be the page contradicting itself. A change calls
+     say() and then reload(); reload() is already running when the queued
+     paint comes due, so it waits for the redraw and is painted at its end. */
+  let pending = null; let reloading = false;
+  const paint = () => { if (pending) { flash.replaceChildren(note(...pending)); pending = null; } };
+  ctx.say = (text, tone = 'ok') => { pending = [text, tone]; queueMicrotask(() => { if (!reloading) paint(); }); };
   ctx.showLink = (box) => { flash.replaceChildren(box); box.scrollIntoView?.({ block: 'center' }); };
   ctx.reload = async () => {
-    try { build(ctx, await getJson('/api/access/overview')); } catch (e) {
-      host.replaceChildren(note(`The access lists could not be read: ${e.message}`, 'err'));
-      return;
+    reloading = true;
+    try {
+      try { build(ctx, await getJson('/api/access/overview')); } catch (e) {
+        host.replaceChildren(note(`The access lists could not be read: ${e.message}`, 'err'));
+        return;
+      }
+      bar.replaceChildren(tabBar(TABS.map((t) => ({ ...t, label: tabLabel(t, ctx) })), tabId,
+        (id) => (id === 'people' ? '#access' : `#access/${id}`)));
+      host.replaceChildren();
+      await (param === 'person' ? personTab : RENDER[tabId])(host, ctx);
+    } finally {
+      reloading = false;
+      paint();
     }
-    bar.replaceChildren(tabBar(TABS.map((t) => ({ ...t, label: tabLabel(t, ctx) })), tabId,
-      (id) => (id === 'people' ? '#access' : `#access/${id}`)));
-    host.replaceChildren();
-    await (param === 'person' ? personTab : RENDER[tabId])(host, ctx);
   };
   await ctx.reload();
   if (param === 'person') {
@@ -183,7 +197,7 @@ function grantFields(ctx, { selected = '', mark = null } = {}) {
   const role = roleSelect(ctx.roles, { selected, mark });
   const about = h('p', { class: 'depnote' });
   const fleets = fleetPicker(ctx.fleets);
-  const ends = h('input', { type: 'date', class: 'depinput acx-in', min: new Date().toISOString().slice(0, 10) });
+  const ends = h('input', { type: 'date', class: 'depinput acx-in', min: dubaiDay() });
   const explainRole = () => {
     const r = ctx.roleBy.get(role.value);
     if (!r) { about.textContent = ''; return; }
@@ -706,13 +720,13 @@ function rolesTab(host, ctx) {
   let group = '';
   for (const c of CLASSES) {
     if (c.group !== group) { group = c.group; rowsHtml += `<tr class="acx-grp"><th colspan="${roles.length + 1}" scope="rowgroup">${esc(group)}</th></tr>`; }
-    rowsHtml += `<tr><th scope="row"><b>${esc(c.name)}</b><div class="acx-sub">${esc(c.desc)}</div></th>${roles.map((r) => `<td>${lvCell(r.levels?.[c.code])}</td>`).join('')}</tr>`;
+    rowsHtml += `<tr><th scope="row" title="${esc(c.desc)}"><b>${esc(c.name)}</b><div class="acx-sub">${esc(c.desc)}</div></th>${roles.map((r) => `<td>${lvCell(r.levels?.[c.code])}</td>`).join('')}</tr>`;
   }
   m.body.append(h('div', { class: 'acx-scroll', 'data-acx': 'matrix', html: `<table class="acx-matrix"><thead>${head}</thead><tbody>${rowsHtml}</tbody></table>` }));
   host.append(m.panel);
 
   const c = panel('What each role can do', 'Reading is never implied by an action, and an action is never implied by reading.', 'acx-caps');
-  const capRows = CAPS.map((cap) => `<tr><th scope="row"><b>${esc(cap.name)}</b>${cap.note ? `<div class="acx-sub">${esc(cap.note)}</div>` : ''}</th>${roles.map((r) => `<td>${(r.caps || []).includes(cap.code) ? '<span class="acx-lv lv-F">Yes</span>' : '<span class="acx-lv lv-none">—</span>'}</td>`).join('')}</tr>`).join('');
+  const capRows = CAPS.map((cap) => `<tr><th scope="row" title="${esc(cap.note || cap.name)}"><b>${esc(cap.name)}</b>${cap.note ? `<div class="acx-sub">${esc(cap.note)}</div>` : ''}</th>${roles.map((r) => `<td>${(r.caps || []).includes(cap.code) ? '<span class="acx-lv lv-F">Yes</span>' : '<span class="acx-lv lv-none">—</span>'}</td>`).join('')}</tr>`).join('');
   c.body.append(h('div', { class: 'acx-scroll', html: `<table class="acx-matrix"><thead>${head.replace('>Class<', '>Action<')}</thead><tbody>${capRows}</tbody></table>` }));
   host.append(c.panel);
 
@@ -788,7 +802,7 @@ function duplicatePanel(ctx) {
 }
 
 /* ═════════════════════════ Requests ═════════════════════════ */
-function requestsTab(host, ctx) {
+async function requestsTab(host, ctx) {
   const open = ctx.requests;
   const p = panel('Waiting for a decision', 'Asked from a page that told the person it was not shown to their role. Approve by giving them a role — '
     + 'for a period, if the need is temporary — or decline with a reason they will read on their account page.', 'acx-requests');
@@ -801,7 +815,7 @@ function requestsTab(host, ctx) {
 
   const done = panel('Decided', null, 'acx-requests-done');
   host.append(done.panel);
-  (async () => {
+  {
     let d;
     try { d = await getJson('/api/access/requests'); } catch (e) { done.body.append(note(`Could not be read: ${e.message}`, 'err')); return; }
     const rows = (d.requests || []).filter((r) => r.status !== 'open').slice(0, 50);
@@ -812,7 +826,7 @@ function requestsTab(host, ctx) {
       { label: 'Answer', key: 'status', render: (r) => `<span class="pill ${r.status === 'approved' ? 'ok' : 'dim'}">${esc(r.status)}</span>` },
       { label: 'Decided', key: 'decided_at', render: (r) => `${esc(dtStr(r.decided_at))}<div class="acx-sub">by ${esc(ctx.nameOf(r.decided_by))}${r.decision_reason ? ` — ${esc(r.decision_reason)}` : ''}</div>` },
     ], { compact: true, cards: true, cardLead: 'email' }));
-  })();
+  }
 }
 
 function requestCard(r, ctx) {
@@ -1155,8 +1169,12 @@ async function auditTab(host, ctx) {
     }
     tableHost.append(tableFrom(rows.slice(), [
       { label: 'When', key: 'at', render: (r) => `${esc(dtStr(r.at))}<div class="acx-sub mono">#${r.id}</div>` },
-      { label: 'Who', key: 'actor_label', render: (r) => (r.actor_id ? ctx.personLink(r.actor_id) : esc(r.actor_label || '—')) },
-      { label: 'What', key: 'action', render: (r) => `${esc(actionWords(r.action))}<div class="acx-sub mono">${esc(r.action)}</div>` },
+      /* A sign-in is written before any session exists, so its actor is
+         "anonymous"; the person it is about is the one at the sign-in page. */
+      { label: 'Who', key: 'actor_label', render: (r) => (r.actor_id ? ctx.personLink(r.actor_id)
+        : r.subject_type === 'user' && r.subject_id && r.action.startsWith('auth.')
+          ? `${ctx.personLink(r.subject_id)}<div class="acx-sub">at the sign-in page</div>` : esc(r.actor_label || '—')) },
+      { label: 'What', key: 'action', render: (r) => `${esc(actionWords(r.action))}<div class="acx-sub mono" data-action-code>${esc(r.action)}</div>` },
       { label: 'About', key: 'subject_id', render: (r) => (r.subject_type === 'user' && r.subject_id
         ? ctx.personLink(r.subject_id) : esc([r.subject_type, r.subject_id].filter(Boolean).join(' ') || '—')) },
       { label: 'Detail', key: 'detail', render: (r) => esc(detailLine(r.detail)) || '<span class="dim">—</span>' },
@@ -1231,7 +1249,7 @@ function settingsTab(host, ctx) {
     confirmHost.append(h('div', { class: 'acx-confirm' }, want === 'enforced'
       ? [h('p', { class: 'acx-p' }, h('b', null, `${plural(active.length, 'person has', 'people have')} an active account and will be able to sign in`),
         active.length ? `: ${active.map((u) => u.name || u.email).slice(0, 15).join(', ')}${active.length > 15 ? ` and ${active.length - 15} more` : ''}.` : '.'),
-      h('p', { class: 'acx-p' }, h('b', null, `Owners: `), owners.length ? owners.map((u) => `${u.name || u.email} (${u.email})`).join(', ') : 'none active — the server will keep refusing people until one is.'),
+      h('p', { class: 'acx-p' }, h('b', null, 'Owners: '), owners.length ? owners.map((u) => (u.name ? `${u.name} (${u.email})` : u.email)).join(', ') : 'none active — the server will keep refusing people until one is.'),
       invited.length ? h('p', { class: 'acx-p' }, `${plural(invited.length, 'person has', 'people have')} an invitation they have not used yet, and cannot sign in until they do.`) : null,
       h('p', { class: 'acx-p' }, `Everyone else — anyone who opens FleetMirror without an account, including on a shared office screen — will see the sign-in page and nothing else. ${screens ? `${plural(screens, 'wall display keeps', 'wall displays keep')} working.` : 'No wall display is set up.'}`)]
       : [h('p', { class: 'acx-p' }, 'Anyone who can reach FleetMirror’s address will see every page again without signing in — driver names, cash and all. Signed-in people keep seeing their own role’s view.')],
@@ -1242,7 +1260,7 @@ function settingsTab(host, ctx) {
   host.append(m.panel);
 
   /* The other three settings, each saved on its own. */
-  const one = (title, key, control, sentence, toValue, done) => {
+  const one = (title, key, control, sentence, toValue, done, label) => {
     const p = panel(title, null, `acx-set-${key}`);
     const mm = msgLine();
     const b = h('button', { type: 'button', class: 'btn', disabled: !owner, 'data-acx': `save-${key}` }, 'Save');
@@ -1255,7 +1273,7 @@ function settingsTab(host, ctx) {
       await ctx.reload();
     });
     control.disabled = !owner;
-    p.body.append(h('p', { class: 'acx-p' }, sentence), h('div', { class: 'acx-inrow' }, control, b), mm);
+    p.body.append(h('p', { class: 'acx-p' }, sentence), h('div', { class: 'acx-inrow' }, field(label, control), b), mm);
     host.append(p.panel);
     return mm;
   };
@@ -1264,7 +1282,7 @@ function settingsTab(host, ctx) {
   mfa.value = cfg.mfa || 'admins';
   const mfaHint = h('span', null, MFA_WORDS[mfa.value]);
   mfa.addEventListener('change', () => { mfaHint.textContent = MFA_WORDS[mfa.value]; });
-  one('Who must use two-step sign-in', 'mfa', mfa, mfaHint, () => mfa.value, (v) => `Two-step policy saved: ${MFA_WORDS[v] || v}`);
+  one('Who must use two-step sign-in', 'mfa', mfa, mfaHint, () => mfa.value, (v) => `Two-step policy saved: ${MFA_WORDS[v] || v}`, 'Must use it');
 
   const cash = h('input', { type: 'number', min: '0', step: '100', class: 'depinput acx-in acx-num', value: String(cfg.cash_stepup_aed ?? ''), 'data-acx': 'cash' });
   const cmsg = one('Re-confirming a large cash entry', 'cash_stepup_aed', cash,
@@ -1273,7 +1291,7 @@ function settingsTab(host, ctx) {
       const n = Number(cash.value);
       if (cash.value === '' || !Number.isFinite(n) || n < 0) { cmsg.set('Enter an amount in AED, 0 or more.', 'bad'); return undefined; }
       return n;
-    }, (v) => `Cash entries above AED ${Number(v).toLocaleString('en-US')} now ask the recorder to confirm it is them.`);
+    }, (v) => `Cash entries above AED ${Number(v).toLocaleString('en-US')} now ask the recorder to confirm it is them.`, 'Above, in AED');
 
   const hours = h('input', { type: 'number', min: '0', max: '168', step: '1', class: 'depinput acx-in acx-num', value: String(cfg.single_owner_delay_hours ?? ''), 'data-acx': 'delay' });
   const hmsg = one('When there is only one Owner', 'single_owner_delay_hours', hours,
@@ -1283,7 +1301,7 @@ function settingsTab(host, ctx) {
       const n = Number(hours.value);
       if (hours.value === '' || !Number.isFinite(n) || n < 0 || n > 168) { hmsg.set('Enter 0 to 168 hours.', 'bad'); return undefined; }
       return n;
-    }, (v) => `A sensitive grant by the only Owner now waits ${v} hours.`);
+    }, (v) => `A sensitive grant by the only Owner now waits ${v} hours.`, 'Hours to wait');
 
   const s = panel('Sessions', null, 'acx-sessions-rule');
   s.body.append(h('p', { class: 'acx-p' }, `A signed-in browser is signed out after ${plural(Math.round((cfg.idle_minutes || 720) / 60), 'hour', 'hours')} without use, `

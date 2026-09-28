@@ -24,14 +24,14 @@ import { maskValue, rank } from '../public/access_model.js';
    case-insensitively. */
 export const DICT = Object.freeze({
   CT: ['phone', 'phone_number', 'mobile', 'mobile_number', 'email', 'email_address', 'whatsapp',
-    'contact_phone', 'driver_phone', 'hr_phone', 'hr_email', 'phones', 'emails'],
+    'contact_phone', 'driver_phone', 'hr_phone', 'hr_email', 'phones', 'emails', 'phone_tail'],
   DOC: ['emirates_id', 'eid', 'emirates_id_no', 'licence_no', 'license_no', 'licence_number',
     'license_number', 'driving_licence_no', 'passport_no', 'passport_number', 'visa_no', 'visa_number',
-    'rta_permit_no', 'permit_no'],
+    'rta_permit_no', 'permit_no', 'placeholder_licence_no'],
   PAX: ['guest_id', 'guest_name', 'guest_ids', 'room_no', 'room_number', 'trip_purpose', 'passenger_name'],
-  RAW: ['raw', 'raw_json', 'raw_payload', 'plan_text'],
+  RAW: ['raw', 'raw_json', 'raw_payload', 'plan_text', 'body_starts'],
   CRED: ['password', 'client_secret', 'refresh_token', 'access_token', 'api_key', 'cookie', 'cookies',
-    'secret', 'token_value'],
+    'secret', 'token_value', 'api_key_not_sent_to_this_host'],
 });
 const DICT_KEY = new Map();
 for (const [cls, keys] of Object.entries(DICT)) for (const k of keys) DICT_KEY.set(k, cls);

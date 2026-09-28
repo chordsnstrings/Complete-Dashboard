@@ -27,7 +27,7 @@ import { SCREENS, TABS, titleFor } from './screens.js';
 /* Sign-in and access, the same library the desktop uses (../access.js): the
    server decides, the phone draws what it decided. */
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
-  WithheldError, toSignIn, signOut, roleNames, installFetchGuard } from '../access.js';
+  WithheldError, toSignIn, installFetchGuard } from '../access.js';
 import { phoneContract } from './ui.js';
 /* The desktop shell's two sentences about the window, imported rather than
    re-worded: what the masthead calls the window and why a control does not
@@ -332,7 +332,6 @@ async function render() {
     if (g === gen) {
       const wb = withheldBanner();
       if (wb) deck.prepend(wb);
-      if (id === 'more') deck.prepend(accountCard());
     }
   } catch (e) {
     if (g !== gen) return;
@@ -497,23 +496,6 @@ loadWho().then(() => {
   if (!location.hash) location.hash = href(gated() ? home : 'today');
   render();
 });
-
-/* The account on the More screen: who is signed in, the account page, the
-   Access pages for those who manage them, sign out — or a way to sign in. */
-function accountCard() {
-  const card = el('div', 'm-card acct-card');
-  if (who.signedIn && who.kind === 'user') {
-    const admin = (who.access?.caps || []).includes('access.manage');
-    card.innerHTML = `<div class="m-row"><b>${esc(who.user?.name || who.user?.email || '')}</b></div>
-      <div class="m-row">${esc(roleNames().join(', '))}</div>
-      <div class="m-row"><a href="#account">Your account</a>${admin ? ' · <a href="#access">Access</a>' : ''}</div>
-      <div class="m-row"><button type="button" class="acct-out">Sign out</button></div>`;
-    card.querySelector('.acct-out').onclick = () => signOut();
-  } else {
-    card.innerHTML = '<div class="m-row"><a href="/signin">Sign in</a></div>';
-  }
-  return card;
-}
 
 /* ── the worker ─────────────────────────────────────────────────────────
    Registered after first paint: a phone on a bad connection should spend its

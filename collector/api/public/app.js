@@ -799,6 +799,14 @@ function setHeader(detail) {
       + `<b>${esc(one ? state.param || ''
         : [state.param, state.sub].filter(Boolean).join(' ') || 'unauthorized')}</b>`;
     crumb.style.display = 'flex';
+  } else if (['account', 'access', 'approvals', 'fleet-names'].includes(state.view)) {
+    /* The masthead pages have no VIEWS row, so without this branch they fell
+       through to the final else and were titled "Action list". Each page
+       returns its own title and sub-line. */
+    const FALLBACK = { account: 'Your account', access: 'Access', approvals: 'Approvals', 'fleet-names': 'Fleet names' };
+    $('#viewTitle').textContent = detail?.title || FALLBACK[state.view];
+    $('#viewSub').textContent = detail?.sub || '';
+    crumb.style.display = 'none';
   } else if (state.view === 'property') {
     const tab = PROPERTY_TABS.find((t) => t.id === (state.sub || 'overview')) || PROPERTY_TABS[0];
     $('#viewTitle').textContent = detail?.name || 'Property';
@@ -9309,9 +9317,15 @@ function accountBox() {
   else if (box.parentElement !== host) host.prepend(box);
   if (who.signedIn && who.kind === 'user') {
     const name = who.user?.name || who.user?.email || 'Account';
-    const admin = (who.access?.caps || []).includes('access.manage');
+    const caps = who.access?.caps || [];
+    const admin = caps.includes('access.manage');
+    /* Approvals is for whoever prepares or commits a four-eyes change (a cash
+       sheet, a merge) — a Finance manager who commits is not an Access admin,
+       and had no way to reach the page that waits for them. */
+    const fourEyes = ['cash.import', 'cash.import.commit', 'identity.merge'].some((c) => caps.includes(c));
     box.innerHTML = `<a href="#account" class="acct-name" title="${esc(roleNames().join(', '))}">${esc(name)}</a>`
       + (admin ? '<a href="#access" class="acct-link">Access</a>' : '')
+      + (fourEyes ? '<a href="#approvals" class="acct-link">Approvals</a>' : '')
       + '<button type="button" class="acct-out">Sign out</button>';
     box.querySelector('.acct-out').onclick = () => signOut();
   } else if (who.signedIn && who.kind === 'device') {
@@ -9412,6 +9426,10 @@ const NO_SOURCE_STAMP = new Set([
      Yango 7" under "Page not found" attributes figures that are not on the
      screen to feeds that were never queried for it. */
   'notfound',
+  /* The masthead pages: a person's account, who may see what, changes
+     waiting for a second person, and the fleets' names. None has a figure
+     built from a provider, so "Built from Uber …" under them was false. */
+  'account', 'access', 'approvals', 'fleet-names',
 ]);
 
 async function stampSource(root, gen) {

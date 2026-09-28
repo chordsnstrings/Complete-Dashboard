@@ -111,7 +111,11 @@ shell.use('/api', (req, res) => get(`/api${req.url}`)
 const server = shell.listen(0);
 const browser = await launchChromium();
 const page = await browser.newPage({ viewport: { width: 1750, height: 1400 } });
-await page.goto(`http://127.0.0.1:${server.address().port}/?ui=desktop#revenue?${W}`,
+/* ?skin=classic: this file asserts the CLASSIC desktop page's DOM (panels,
+   tiles, pills), written when Classic was the desktop default. Arkiv became
+   the default on 2026-09-28 and draws these pages in its own layout; Classic
+   is still a look anyone can choose, so what this file proves still ships. */
+await page.goto(`http://127.0.0.1:${server.address().port}/?ui=desktop&skin=classic#revenue?${W}`,
   { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(2000);
 for (let i = 0; i < 30; i++) {

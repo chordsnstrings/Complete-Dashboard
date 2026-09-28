@@ -112,7 +112,11 @@ console.log('\na driver who has a record');
 {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await ctx.newPage();
-  await page.goto(`${base}/#driver/U-TARIQ/money`, { waitUntil: 'networkidle' });
+  /* ?skin=classic: this file asserts the CLASSIC desktop page's DOM (panels,
+     tiles, pills), written when Classic was the desktop default. Arkiv became
+     the default on 2026-09-28 and draws these pages in its own layout; Classic
+     is still a look anyone can choose, so what this file proves still ships. */
+  await page.goto(`${base}/?skin=classic#driver/U-TARIQ/money`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-panel="driver-money-register"] table', { timeout: 20000 });
   const body = await page.evaluate(() => document.body.innerText);
 
@@ -303,7 +307,7 @@ console.log('\na driver who has no record — which is most of them');
 {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await ctx.newPage();
-  await page.goto(`${base}/#driver/U-NOBODY/money`, { waitUntil: 'networkidle' });
+  await page.goto(`${base}/?skin=classic#driver/U-NOBODY/money`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-panel="driver-money"] .note', { timeout: 20000 });
   const body = await page.evaluate(() => document.body.innerText);
 

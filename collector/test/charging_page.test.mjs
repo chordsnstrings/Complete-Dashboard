@@ -58,7 +58,11 @@ console.log('\nwhat it shows');
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
 const page = await ctx.newPage();
 const errs = []; page.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
-await page.goto(`${base}/#charging`, { waitUntil: 'networkidle' });
+/* ?skin=classic: this file asserts the CLASSIC desktop page's DOM (panels,
+   tiles, pills), written when Classic was the desktop default. Arkiv became
+   the default on 2026-09-28 and draws these pages in its own layout; Classic
+   is still a look anyone can choose, so what this file proves still ships. */
+await page.goto(`${base}/?skin=classic#charging`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-panel="charging-people"] table', { timeout: 20000 });
 const body = await page.evaluate(() => document.body.innerText);
 
@@ -170,7 +174,7 @@ console.log('\na window with no charging row');
       totals: { rows: 0, verification_rows: 0, advance: null, cash: null },
       by_person: [], shown: 0, listed_why: null, entries: [], absent_reason: null }),
   }));
-  await pg.goto(`${base}/#charging`, { waitUntil: 'networkidle' });
+  await pg.goto(`${base}/?skin=classic#charging`, { waitUntil: 'networkidle' });
   await pg.waitForSelector('[data-panel="charging"] .kpi', { timeout: 20000 });
   const tile = await pg.$eval('[data-panel="charging"] .kpi', (e) => e.innerText);
   check('the headline is a dash, not "AED 0.00"',
@@ -187,7 +191,7 @@ console.log('\non a phone');
   const p2 = await browser.newContext({ ...devices['iPhone 13'] });
   const pg = await p2.newPage();
   const e2 = []; pg.on('pageerror', (e) => e2.push(String(e).slice(0, 200)));
-  await pg.goto(`${base}/#charging`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await pg.goto(`${base}/?skin=classic#charging`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await pg.waitForTimeout(6000);
   const doc = await pg.evaluate(() => document.documentElement.scrollWidth);
   const vw = await pg.evaluate(() => window.innerWidth);

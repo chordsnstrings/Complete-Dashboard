@@ -8,12 +8,13 @@
    can withdraw it; a committer can decline it, saying why. */
 import { getJson, post, who } from './access.js';
 import { esc } from './ui.js';
+import { TZ } from './tz.js';
 
-const when = (v) => (v ? new Date(v).toLocaleString('en-GB', { timeZone: 'Asia/Dubai', dateStyle: 'medium', timeStyle: 'short' }) : '—');
+const when = (v) => (v ? new Date(v).toLocaleString('en-GB', { timeZone: TZ, dateStyle: 'medium', timeStyle: 'short' }) : '—');
 
 function detail(p) {
   const b = p.payload || {};
-  if (p.kind === 'POST /api/ledger/import/commit') {
+  if (p.view === 'rows') {
     const rows = Array.isArray(b.rows) ? b.rows : [];
     const cols = [...new Set(rows.slice(0, 50).flatMap((r) => Object.keys(r || {})))].slice(0, 8);
     return `<p>${rows.length} row(s), batch <code>${esc(b.batch || '—')}</code>.</p>
@@ -21,7 +22,7 @@ function detail(p) {
       <tbody>${rows.slice(0, 200).map((r) => `<tr>${cols.map((c) => `<td>${esc(r?.[c] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
       ${rows.length > 200 ? `<p class="ac-msg">Showing the first 200 of ${rows.length}.</p>` : ''}`;
   }
-  if (p.kind === 'POST /api/person/merge') {
+  if (p.view === 'merge') {
     return `<p>Keep person <b>${esc(b.keep)}</b>, fold person <b>${esc(b.drop)}</b> into them. Reason given: ${esc(b.why || '—')}.</p>
       <p><a href="#driver/p${esc(b.keep)}">Open the person kept</a> · <a href="#driver/p${esc(b.drop)}">Open the person folded in</a></p>`;
   }

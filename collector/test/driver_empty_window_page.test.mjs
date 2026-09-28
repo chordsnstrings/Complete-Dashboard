@@ -264,7 +264,11 @@ const port = server.address().port;
 
 const browser = await launchChromium();
 const page = await browser.newPage();
-await page.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: 'domcontentloaded' });
+/* ?skin=classic: this file asserts the CLASSIC desktop page's DOM (panels,
+   tiles, pills), written when Classic was the desktop default. Arkiv became
+   the default on 2026-09-28 and draws these pages in its own layout; Classic
+   is still a look anyone can choose, so what this file proves still ships. */
+await page.goto(`http://127.0.0.1:${port}/index.html?skin=classic`, { waitUntil: 'domcontentloaded' });
 
 /* Render one driver's one tab through the SHIPPED renderDriver, and read back
    what a person would actually see. */

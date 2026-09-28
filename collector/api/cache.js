@@ -1,4 +1,4 @@
-import { internalHeaders } from './access/internal.js';
+import { internalHeaders, isInternal } from './access/internal.js';
 /* Response cache for read endpoints.
    ─────────────────────────────────────────────────────────────────────────
    Every /api GET here answers a question about data that changes only when the
@@ -172,7 +172,7 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
     /* The warmer and the stale refresh identify themselves with the
        process's own internal token (api/access/internal.js) — `x-warm: 1`,
        which anybody could send, no longer means anything. */
-    const warm = req.fm?.kind === 'system';
+    const warm = req.fm ? req.fm.kind === 'system' : isInternal(req);
     /* The access gate narrows a one-fleet reader's filter to their fleet and
        says so in fmCacheKey; the answer is cached under what was actually
        computed, never under the address typed. */

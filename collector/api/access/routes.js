@@ -100,6 +100,11 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     const u = fm.user;
     const teams = await svc.teamsOf(db, u.id);
     const cfg = fm.cfg || await svc.getConfig(db);
+    /* Each grant's role by its NAME as well as its code: a company's own
+       role (C_…) is in no table the page carries, and the account page said
+       "your company's own role C_…" instead of what the Owner called it. */
+    const custom = (fm.grants || []).some((g) => !ROLE[g.role_code]) ? await svc.customRoles(db) : {};
+    const roleName = (code) => ROLE[code]?.name || custom[code]?.name || code;
     return res.json({
       ...base, signedIn: true, kind: 'user',
       user: { id: u.id, email: u.email, name: u.name, prefs: u.prefs || {}, totp: u.totp_enabled,
@@ -109,7 +114,7 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       owner: isOwner(fm),
       preview: fm.access.preview,
       roles: [...new Set((fm.grants || []).map((g) => g.role_code))],
-      grants: (fm.grants || []).map((g) => ({ id: g.id, role: g.role_code, fleets: g.fleets, expires_at: g.expires_at,
+      grants: (fm.grants || []).map((g) => ({ id: g.id, role: g.role_code, name: roleName(g.role_code), fleets: g.fleets, expires_at: g.expires_at,
         via: g.team_id ? 'team' : 'direct', team_id: g.team_id })),
       teams,
       access: summary(fm.access),
@@ -887,7 +892,7 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
         ORDER BY p.prepared_at DESC LIMIT 200`);
     const out = rows.filter((p) => proposalVisible(fm, p)).map((p) => {
       const f = FOUR_EYES[p.kind];
-      return { ...p, id: Number(p.id), prepared_by: Number(p.prepared_by), decided_by: p.decided_by == null ? null : Number(p.decided_by),
+      return { ...p, id: Number(p.id), view: f?.view || null, prepared_by: Number(p.prepared_by), decided_by: p.decided_by == null ? null : Number(p.decided_by),
         canCommit: p.status === 'open' && Number(p.prepared_by) !== fm.user.id && (fm.access.capsAny || []).includes(f.commit),
         mine: Number(p.prepared_by) === fm.user.id };
     });
