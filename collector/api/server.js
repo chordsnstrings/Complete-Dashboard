@@ -279,7 +279,12 @@ const cache = responseCache({
 
    /api/export/trips.csv also varies by caller and needs no entry: it answers
    with res.write, and cache.js only ever intercepts res.json. */
-const VARIES_BY_CALLER = ['/api/compliance/drivers'];
+/* /api/driver/profile and /api/admin-mode too: both ask isAdmin() and answer
+   differently for the caller (the profile's identity documents; "you are an
+   administrator"). The profile was cached by address, so the first
+   administrator to open a person put that person's documents into the
+   shared copy (security review, 2026-09-28). */
+const VARIES_BY_CALLER = ['/api/compliance/drivers', '/api/driver/profile', '/api/admin-mode'];
 app.use('/api', (req, res, next) => (
   VARIES_BY_CALLER.some((p) => req.originalUrl.split('?')[0].startsWith(p))
     ? next()

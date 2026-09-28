@@ -71,6 +71,7 @@ export const READ_CAPS = new Set(['export']);
 /* Classes whose answers must never be stored by a browser or a proxy (§9.2). */
 export const NO_STORE = new Set(['CT', 'DOC', 'CASH', 'HR', 'MRG', 'PAX', 'AUDIT', 'RAW', 'CRED']);
 
+
 export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lookup = lookupEntry }) {
   /* Resolved callers, per session, for a short while — recomputed at once
      when any grant, team, role, person or session changes. */
@@ -260,6 +261,13 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     if (fm.kind === 'anonymous') {
       if (fm.mode === 'open' && !fm.broken) {
         if (!entry) log.warn('access', 'undeclared route served in open mode', { m: req.method, path });
+        /* No shaper here, deliberately: a visitor while sign-in is optional
+           gets exactly what visitors got before sign-in existed, including
+           the operator's 2026-09-23 decision to show HR's numbers on the
+           driver page (api/driver_routes.js). What keeps the platform-filed
+           documents from them is the route's own stripIdentity() and the
+           shared cache never holding a caller-specific answer
+           (VARIES_BY_CALLER in server.js; isAdmin() false for the system). */
         return next();                              // exactly what anonymous visitors always saw
       }
       if (entry?.public) return next();

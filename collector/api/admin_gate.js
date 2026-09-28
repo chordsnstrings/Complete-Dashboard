@@ -95,7 +95,12 @@ export function isAdmin(req, env = process.env, cls = 'DOC') {
      "hidden" and the reader would be told a reason that is not the true one.
      Anonymous callers keep the rule below, unchanged. */
   const fm = req.fm;
-  if (fm && fm.kind === 'system') return true;
+  /* NOT the system caller. The warmer and the stale refresh fetch as the
+     system and their bodies go into the SHARED response cache, keyed by the
+     address alone — so they must compute what an anonymous visitor may be
+     served. Counting them as administrators put Emirates IDs and licence
+     numbers into the cached /api/driver/profile, served to the next anonymous
+     visitor while sign-in is optional (security review, 2026-09-28). */
   if (fm && (fm.kind === 'user' || fm.kind === 'device')) {
     const l = fm.levels?.[cls] ?? fm.access?.levels?.[cls] ?? '';
     return l === 'F' || l === 'M';

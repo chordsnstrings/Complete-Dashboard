@@ -23,6 +23,7 @@ import { verifyChain, appendAudit } from '../api/access/audit.js';
 import { hotp, totpStep, base32Encode, hashPassword, verifyPassword, passwordProblem, verifyTotp }
   from '../api/access/crypto.js';
 import { responseCache } from '../api/cache.js';
+import { isAdmin } from '../api/admin_gate.js';
 import { ROLE, withinCeiling, maskValue } from '../api/public/access_model.js';
 
 let pass = 0, fail = 0;
@@ -117,6 +118,8 @@ const MANIFEST = {
     fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: null },
   'GET /api/t/kpis': { method: 'GET', path: '/api/t/kpis', subject: 'REV', carries: ['REV', 'BK'], grain: 'aggregate',
     fields: [], whole: [], fleet: 'param', fleetRows: [], fleetKey: '', cap: null },
+  'GET /api/t/profile': { method: 'GET', path: '/api/t/profile', subject: 'ID', carries: ['ID', 'DOC'], grain: 'record',
+    fields: [], whole: [], fleet: 'global', fleetRows: [], fleetKey: '', cap: null },
   'GET /api/t/person': { method: 'GET', path: '/api/t/person', subject: 'ID', carries: ['ID'], grain: 'record',
     fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: null },
   'GET /api/t/search': { method: 'GET', path: '/api/t/search', subject: 'BK', carries: ['BK', 'ID', 'LOC', 'VEH'], grain: 'list',
@@ -137,7 +140,9 @@ app.use(express.json());
 const layer = accessLayer({ db, lookup });
 app.use(layer.identify);
 app.use(layer.gate);
-const cache = responseCache({ pool: db });
+/* ttlMs 0: the cache re-reads the data version on every request, so a test
+   can make an entry stale the way a collection run does (8b). */
+const cache = responseCache({ pool: db, ttlMs: 0 });
 app.use('/api', cache);
 let kpiCalls = 0;
 app.get('/api/t/people', (req, res) => res.json([
@@ -146,6 +151,11 @@ app.get('/api/t/people', (req, res) => res.json([
 app.get('/api/t/cash', (req, res) => res.json([{ name: 'Test Driver A', balance: 10 }]));
 app.get('/api/t/kpis', (req, res) => { kpiCalls += 1; res.json({ fleet: req.query.fleet || 'all', trips: 5 }); });
 app.get('/api/t/person', (req, res) => res.json({ name: 'Test Driver A', trips: 3 }));
+/* Like /api/driver/profile: the documents only for a caller isAdmin() allows. */
+let profileCalls = 0;
+app.get('/api/t/profile', (req, res) => { profileCalls += 1;
+  res.json({ name: 'Test Driver A', ...(isAdmin(req) ? { emirates_id: '000-0000-0000000-9' } : {}), v: profileCalls }); });
+
 let searchCalls = 0;
 app.get('/api/t/search', (req, res) => { searchCalls += 1; res.json({ within: req.query._fmsearch ?? 'every column' }); });
 let cashWrites = 0;
@@ -156,6 +166,7 @@ const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => re
 accessRoutes(app, { db, layer, wrap });
 const server = app.listen(0);
 const B = `http://127.0.0.1:${server.address().port}`;
+cache.setPort(server.address().port);   // the stale refresh fetches itself here, as in server.js
 
 /* A tiny browser: one cookie jar per person. */
 const browser = () => {
@@ -326,6 +337,26 @@ console.log('\n8. the cache never crosses people');
   check('the sign-in answer says whose it is, the same as a data answer',
     me2.headers.get('x-fm-scope') && me2.headers.get('x-fm-scope') === data2.headers.get('x-fm-scope'),
     `${me2.headers.get('x-fm-scope')} vs ${data2.headers.get('x-fm-scope')}`);
+}
+
+console.log('\n8b. the shared cache never carries a document to a visitor (security review, 2026-09-28)');
+{
+  /* REVERSION: make isAdmin() true for the system caller again — the
+     system's refresh puts the document into the shared copy and the visitor
+     is served it. */
+  const anon = browser();
+  const a1 = await anon.get('/api/t/profile');
+  check('a visitor while sign-in is optional gets no document', a1.status === 200 && a1.json.emirates_id == null, JSON.stringify(a1.json));
+  /* A collection run finishes: the shared copy is now stale. The next
+     visitor is handed it at once and the cache refreshes it behind them — as
+     the system, over loopback, with the process's own token. */
+  await db.query(`INSERT INTO collection_run (source, started_at, finished_at, status) VALUES ('test', now(), now(), 'ok')`);
+  const a2 = await anon.get('/api/t/profile');
+  check('the next visitor is handed the stale copy while it refreshes', a2.headers.get('x-cache') === 'stale', a2.headers.get('x-cache'));
+  await new Promise((ok) => setTimeout(ok, 300));
+  const a3 = await anon.get('/api/t/profile');
+  check('…and the refreshed shared copy the visitor after them is served carries no document',
+    a3.headers.get('x-cache') === 'hit' && a3.json.v > a1.json.v && a3.json.emirates_id == null, JSON.stringify(a3.json));
 }
 
 console.log('\n9. actions: capability, CSRF, preview');

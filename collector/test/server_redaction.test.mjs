@@ -432,6 +432,14 @@ console.log('\nthe response cache must not hand an admin body to the next anonym
     anon.text.slice(0, 200));
   check('/api/compliance/drivers bypasses the cache entirely (no x-cache header)',
     !anon.headers.get('x-cache'), String(anon.headers.get('x-cache')));
+  /* The other two routes that ask isAdmin() and are otherwise cached: a
+     person's profile (their identity documents) and "are you an
+     administrator". The profile was cached by address until 2026-09-28, so the
+     first administrator to open a person put that person's documents into the
+     shared copy for the next anonymous visitor (security review). */
+  check('/api/driver/profile and /api/admin-mode bypass the cache too',
+    /VARIES_BY_CALLER = \[[^\]]*'\/api\/driver\/profile'/.test(F_CACHE_GUARD)
+      && /VARIES_BY_CALLER = \[[^\]]*'\/api\/admin-mode'/.test(F_CACHE_GUARD), F_CACHE_GUARD.slice(0, 200));
   // Proof the guard is narrow: everything else is still cached.
   const other = await api.get('/api/anything-else');
   check('every other /api route is still cached', other.headers.get('x-cache') === 'miss',
