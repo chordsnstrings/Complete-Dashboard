@@ -4096,7 +4096,14 @@ untouched, and nothing projected is ever added into `accounted`.
       that holds it. Every account action but suspend and sign-out is held to
       the ceiling, measured against the person's active AND pending grants.
       An Access admin (SYS + AUDIT) can therefore reset almost nobody; the
-      Owner does.
+      Owner does. Every other way to come by a session counts too: an
+      invited Owner is not yet an ACTIVE Owner (`activeOwners` wants status
+      `active`), so the old "only an Owner can change an Owner" missed them;
+      and a wall-screen link is a session its maker can open. Offboarding
+      stays under the ceiling on purpose — suspending is the emergency stop.
+  21. **A setting the UI saves is not a setting the server obeys.**
+      `cash_stepup_aed` was stored, echoed and promised on the Access page,
+      and read by nothing. Grep for the READER of any new setting.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 

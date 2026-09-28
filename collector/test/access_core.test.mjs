@@ -132,6 +132,8 @@ const MANIFEST = {
     fields: [], whole: [], fleet: 'param', fleetFrom: 'body', fleetRows: [], fleetKey: '', cap: 'finance.verify' },
   'POST /api/t/cash': { method: 'POST', path: '/api/t/cash', subject: 'CASH', carries: ['CASH'], grain: 'none',
     fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: 'cash.record' },
+  'POST /api/ledger/entry': { method: 'POST', path: '/api/ledger/entry', subject: 'CASH', carries: ['CASH', 'ID'], grain: 'none',
+    fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: 'cash.record' },
   'POST /api/ledger/import/commit': { method: 'POST', path: '/api/ledger/import/commit', subject: 'CASH', carries: ['CASH', 'ID'],
     grain: 'none', fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: 'cash.import.commit',
     fourEyes: FOUR_EYES['POST /api/ledger/import/commit'] },
@@ -179,6 +181,8 @@ app.post('/api/t/verify', (req, res) => { acted.push(['verify', req.body?.fleet]
 let cashWrites = 0;
 app.post('/api/t/cash', (req, res) => { cashWrites += 1; res.json({ ok: true }); });
 const imported = [];
+const entries = [];
+app.post('/api/ledger/entry', (req, res) => { if (req.body.dry_run === false) entries.push(req.body); res.json({ ok: true }); });
 app.post('/api/ledger/import/commit', async (req, res) => {
   if (req.body.slow) await new Promise((r) => setTimeout(r, 150));   // two commits in flight together (9e)
   imported.push(req.body); res.json({ ok: true, wrote: req.body.rows.length }); });
@@ -302,6 +306,23 @@ const people = {};
   check('…nor clear their two-step', mfaOff.status === 403 && mfaOff.json.error === 'ceiling');
   const own = await people.ACC.b.post(`/api/access/users/${people.ACC.id}`, { action: 'rename', name: 'Access Admin' });
   check('…while an account within their reach (their own) can still be changed', own.status === 200);
+  /* An Owner who has not signed in yet is not an ACTIVE Owner (activeOwners
+     wants status 'active' and a grant in effect), so "only an Owner can change
+     an Owner" did not cover them: an Access admin could ask for their invite
+     link and become an Owner (security review, 2026-09-28). The ceiling
+     counts the waiting Owner grant. REVERSION: drop the ceiling block — the
+     link comes back. */
+  const inv = await owner.post('/api/access/users', { email: 'second-owner@example.test', name: 'Second Owner',
+    grants: [{ role: 'OWN' }], reason: 'a second Owner' });
+  const grab = await people.ACC.b.post(`/api/access/users/${inv.json?.user?.id}`, { action: 'reset' });
+  check('an Access admin cannot take an invited Owner\'s link', inv.status === 200 && grab.status === 403 && !grab.json.link,
+    `${inv.status} ${grab.status} ${JSON.stringify(grab.json).slice(0, 100)}`);
+  /* A screen link is a session its maker can open, and a wall screen shows
+     revenue in full. REVERSION: drop the covers() check in POST
+     /api/access/devices — the link comes back. */
+  const wall = await people.ACC.b.post('/api/access/devices', { name: 'Back office' });
+  check('an Access admin cannot make a wall screen that shows what they do not hold',
+    wall.status === 403 && !wall.json.link, `${wall.status} ${JSON.stringify(wall.json).slice(0, 100)}`);
 }
 
 console.log('\n7. what each role is answered');
@@ -421,6 +442,23 @@ console.log('\n9. actions: capability, CSRF, preview');
   await owner.post('/api/auth/preview', { role: null });
   const back = await owner.get('/api/t/people');
   check('ending the preview restores the Owner’s view', back.json[0].phone === '0500000001');
+}
+
+console.log('\n9f. a large cash entry is re-confirmed (security review, 2026-09-28)');
+{
+  /* The setting existed, the Access page promised it, and nothing read it.
+     REVERSION: drop the cash_stepup_aed block in the gate — the large entry
+     is written without a word and the first check fails. */
+  const big = await people.CLK.b.post('/api/ledger/entry', { amount: 50000, dry_run: false, note: 'handover' });
+  check('an entry above AED 10,000 asks the cash desk to confirm it is them', big.status === 403 && big.json.error === 'stepup'
+    && entries.length === 0, `${big.status} ${JSON.stringify(big.json)}`);
+  const preview = await people.CLK.b.post('/api/ledger/entry', { amount: 50000, dry_run: true, note: 'handover' });
+  check('…a preview of it does not', preview.status === 200);
+  const small = await people.CLK.b.post('/api/ledger/entry', { amount: 500, dry_run: false, note: 'handover' });
+  check('…nor an entry below the threshold', small.status === 200 && entries.length === 1);
+  await people.CLK.b.post('/api/auth/stepup', { password: people.CLK.password });
+  const again = await people.CLK.b.post('/api/ledger/entry', { amount: 50000, dry_run: false, note: 'handover' });
+  check('…and once they have, it is recorded', again.status === 200 && entries.length === 2);
 }
 
 console.log('\n9b. four-eyes: a cash sheet is proposed by one person and committed by another');

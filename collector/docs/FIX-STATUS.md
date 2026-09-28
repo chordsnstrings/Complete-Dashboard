@@ -4011,6 +4011,9 @@ that found it.
 | U12 | medium | platform-typed fleet names written unescaped into four HTML templates | names stripped of markup characters once; the sinks escape | fleet_name_markup | ✓ c690352 | | | |
 | U13 | low | the CSV export had no Cache-Control | `private, no-store` | server_redaction | ✓ c690352 | | | |
 | U14 | high | an Access admin could reset a Finance manager's password (the link came back to them) or two-step, and so act as them | account actions held to the grant ceiling over active and pending grants; suspend and sign-out exempt | access_core §6 | ✓ | | | |
+| U16 | critical | an Owner who had not signed in yet was not an "active" Owner, so an Access admin could ask for their invite link and become an Owner | the account ceiling counts the waiting Owner grant | access_core §6 | ✓ | | | |
+| U17 | medium | a wall screen shows revenue in full; an Access admin could make one and open its link | the maker must hold what the screen shows | access_core §6 | ✓ | | | |
+| U18 | medium | the "re-confirm a cash entry above AED N" setting was saved and shown and never enforced | the gate asks for step-up on a recorded entry above it; the form confirms and resends | access_core §9f | ✓ | | | |
 | U15 | medium | the HR roster and vehicle feeds narrowed a one-fleet reader's rows but sent totals over every fleet | both `mixed`: refused with the true reason, shown as a closed page | access_manifest | ✓ | | | |
 
 **Accepted, not fixed (documented in ULM-DESIGN §16):** in open mode an

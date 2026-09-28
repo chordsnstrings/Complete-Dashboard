@@ -356,10 +356,25 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
         if (!want || !safeEqual(req.get('x-fm-csrf') || '', want)) {
           return refuse(res, 403, { error: 'csrf', detail: 'Reload the page and try again.' });
         }
-        if (STEPUP_CAPS.has(cap) || entry.stepup) {
-          const at = fm.session?.stepup_at ? new Date(fm.session.stepup_at).getTime() : 0;
-          if (Date.now() - at > STEPUP_MINUTES * 60_000) {
-            return refuse(res, 403, { error: 'stepup', detail: 'Confirm it is you to continue.' });
+        const stale = () => Date.now() - (fm.session?.stepup_at ? new Date(fm.session.stepup_at).getTime() : 0)
+          > STEPUP_MINUTES * 60_000;
+        if ((STEPUP_CAPS.has(cap) || entry.stepup) && stale()) {
+          return refuse(res, 403, { error: 'stepup', detail: 'Confirm it is you to continue.' });
+        }
+        /* A LARGE CASH ENTRY IS RE-CONFIRMED.
+           ───────────────────────────────────────────────────────────────────
+           The Access settings page promised it ("a single cash entry above
+           this many AED asks the person recording it to confirm it is them")
+           and ULM-DESIGN §5.1 requires it, and nothing read the setting: an
+           unattended signed-in cash desk could record a million (security
+           review, 2026-09-28). Only the recording itself — dry_run false —
+           asks; a preview changes nothing. */
+        if (cap === 'cash.record' && req.path === '/api/ledger/entry' && req.body?.dry_run === false) {
+          const limit = Number((await svc.getConfig(db)).cash_stepup_aed);
+          const amount = Math.abs(Number(req.body?.amount));
+          if (Number.isFinite(limit) && limit >= 0 && Number.isFinite(amount) && amount > limit && stale()) {
+            return refuse(res, 403, { error: 'stepup', limit,
+              detail: `An entry above AED ${limit.toLocaleString('en-US')} needs you to confirm it is you first.` });
           }
         }
       }

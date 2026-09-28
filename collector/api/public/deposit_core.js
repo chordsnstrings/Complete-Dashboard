@@ -26,7 +26,7 @@
    second one with a 413 at the end of the flow, after the cash had already
    changed hands. */
 
-import { who } from './access.js';
+import { who, confirmIdentity } from './access.js';
 import { api } from './data.js';
 import { money } from './ui.js';
 
@@ -81,12 +81,20 @@ export async function putReceipt(blob, by) {
 /** Preview or record an entry. `commit` false is the dry run, which is the
  *  server's default and is stated explicitly here so a reader of this file does
  *  not have to know that. */
-export async function submitEntry(body, { commit = false } = {}) {
+export async function submitEntry(body, { commit = false } = {}, again = true) {
   const r = await fetch('/api/ledger/entry', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...body, dry_run: !commit }),
   });
   const j = await r.json().catch(() => ({}));
+  /* An entry above the company's threshold asks the person recording it to
+     confirm it is them (api/access/middleware.js); once, then the entry is
+     sent again exactly as it was. A dialog closed without confirming leaves
+     the entry unrecorded and says so. */
+  if (r.status === 403 && j.error === 'stepup' && again) {
+    try { await confirmIdentity(); } catch { return { error: 'Not recorded: confirming it was you was cancelled.' }; }
+    return submitEntry(body, { commit }, false);
+  }
   if (!r.ok || j.ok === false) {
     return { error: (j.refused || []).join(' ') || j.error || `refused (${r.status})` };
   }

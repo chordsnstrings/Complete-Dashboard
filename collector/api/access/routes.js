@@ -848,7 +848,18 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     if (!fm) return undefined;
     const name = String(req.body?.name || '').trim();
     if (name.length < 2) return fail(res, 400, 'bad_name', 'Name the screen, e.g. "Office wall".');
-    const d = await svc.createDevice(db, { name, fleets: parseFleets(req.body?.fleets), by: fm.user.id });
+    /* A screen's link is a session: whoever makes one can open it. A wall
+       screen shows revenue in full, so an Access admin — who holds none —
+       could read it through a screen they made themselves (review,
+       2026-09-28). The ceiling, as for any grant: the maker must hold what
+       the screen shows, over the fleets it shows. */
+    const fleets = parseFleets(req.body?.fleets);
+    const wall = await svc.roleByCode(db, 'WALL');
+    if (!covers({ levels: fm.access.levels, caps: fm.access.caps }, wall || {})
+      || (fleets || fm.access.allFleets).some((f) => !fm.access.scope.includes(f))) {
+      return fail(res, 403, 'refused', 'A wall screen shows figures you do not hold yourself, so only someone who holds them can add one.');
+    }
+    const d = await svc.createDevice(db, { name, fleets, by: fm.user.id });
     await audit(req, 'access.device_created', 'device', d.id, { name });
     return res.json({ ok: true, id: d.id, link: `/signin#device=${d.token}` });
   }));
