@@ -246,6 +246,12 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     if (/^\/api(\/|$)/i.test(path) && !path.startsWith('/api/')) {
       return refuse(res, 404, { error: 'not_found', detail: 'No such address.' });
     }
+    /* …and no trailing slash. Express answers '/api/kpis/' as '/api/kpis',
+       while the manifest (rightly) knows only one spelling of each route; two
+       spellings are two chances for the gate and the router to disagree. */
+    if (path.length > 5 && path.endsWith('/')) {
+      return refuse(res, 404, { error: 'not_found', detail: 'No such address.' });
+    }
     if (!path.startsWith('/api/')) return next();
     if (path === '/api/health') return next();
     const entry = lookup(req.method, path);

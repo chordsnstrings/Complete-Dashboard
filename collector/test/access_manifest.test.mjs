@@ -39,6 +39,8 @@ check('no entry declares a route that no longer exists', stale.length === 0, sta
 check('the sign-in and access routes decide for themselves', lookupEntry('GET', '/api/auth/me')?.self === true
   && lookupEntry('POST', '/api/access/users')?.self === true);
 check('an undeclared path has no entry (so the gate refuses it)', lookupEntry('GET', '/api/nothing-here') === null);
+check('the bare prefixes are not sign-in routes (/api/auth/ is the banner by another spelling)',
+  !lookupEntry('GET', '/api/auth/')?.self && !lookupEntry('GET', '/api/access/')?.self);
 
 console.log('\n2. every entry is well formed');
 const bad = [];

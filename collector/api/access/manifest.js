@@ -71,7 +71,13 @@ const SELF = { self: true, subject: 'SYS', carries: [], grain: 'none', fields: [
 
 export function lookupEntry(method, path) {
   const m = method === 'HEAD' ? 'GET' : method;
-  if (path.startsWith('/api/auth/') || path.startsWith('/api/access/')) return SELF;
+  /* A real segment after the prefix: '/api/auth/' alone is NOT a sign-in
+     route. Express does not route strictly, so it answers '/api/auth/' with
+     the credential banner at '/api/auth' — which this rule used to hand to
+     the handler as self-deciding, past every check: an anonymous caller read
+     every fleet's credential state with sign-in required (security review,
+     2026-09-28). */
+  if (/^\/api\/(auth|access)\/[^/]/.test(path)) return SELF;
   const e = exact.get(`${m} ${path}`);
   if (e) return e;
   for (const p of patterns) if (p.method === m && p.re.test(path)) return p.entry;

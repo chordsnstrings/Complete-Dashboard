@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { SCHEMA_FILES } from './schema.mjs';
 import { accessLayer } from '../api/access/middleware.js';
 import { accessRoutes } from '../api/access/routes.js';
-import { FOUR_EYES } from '../api/access/manifest.js';
+import { FOUR_EYES, lookupEntry } from '../api/access/manifest.js';
 import * as svc from '../api/access/service.js';
 import { computeAccess } from '../api/access/principal.js';
 import { shapeBody, parsePath, transform } from '../api/access/shape.js';
@@ -120,6 +120,8 @@ const MANIFEST = {
     fields: [], whole: [], fleet: 'param', fleetRows: [], fleetKey: '', cap: null },
   'GET /api/t/profile': { method: 'GET', path: '/api/t/profile', subject: 'ID', carries: ['ID', 'DOC'], grain: 'record',
     fields: [], whole: [], fleet: 'global', fleetRows: [], fleetKey: '', cap: null },
+  'GET /api/auth': { method: 'GET', path: '/api/auth', subject: 'CRED', carries: ['CRED'], grain: 'list',
+    fields: [], whole: [], fleet: 'global', fleetRows: [], fleetKey: '', cap: null },
   'GET /api/t/person': { method: 'GET', path: '/api/t/person', subject: 'ID', carries: ['ID'], grain: 'record',
     fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: null },
   'GET /api/t/search': { method: 'GET', path: '/api/t/search', subject: 'BK', carries: ['BK', 'ID', 'LOC', 'VEH'], grain: 'list',
@@ -130,8 +132,11 @@ const MANIFEST = {
     grain: 'none', fields: [], whole: [], fleet: 'mixed', fleetRows: [], fleetKey: '', cap: 'cash.import.commit',
     fourEyes: FOUR_EYES['POST /api/ledger/import/commit'] },
 };
+/* The self-deciding rule is the REAL one (api/access/manifest.js); only the
+   data routes are this file's own. */
 const lookup = (m, p) => {
-  if (p.startsWith('/api/auth/') || p.startsWith('/api/access/')) return { self: true };
+  const real = lookupEntry(m, p);
+  if (real?.self) return real;
   return MANIFEST[`${m} ${p}`] || null;
 };
 const app = express();
@@ -151,6 +156,9 @@ app.get('/api/t/people', (req, res) => res.json([
 app.get('/api/t/cash', (req, res) => res.json([{ name: 'Test Driver A', balance: 10 }]));
 app.get('/api/t/kpis', (req, res) => { kpiCalls += 1; res.json({ fleet: req.query.fleet || 'all', trips: 5 }); });
 app.get('/api/t/person', (req, res) => res.json({ name: 'Test Driver A', trips: 3 }));
+/* Like the real credential banner at /api/auth (server.js). Express also
+   answers '/api/auth/' with it, since routing is not strict. */
+app.get('/api/auth', (req, res) => res.json({ rows: [{ key: 'TEST_SECRET_KEY', detail: 'provider said: session rejected' }] }));
 /* Like /api/driver/profile: the documents only for a caller isAdmin() allows. */
 let profileCalls = 0;
 app.get('/api/t/profile', (req, res) => { profileCalls += 1;
@@ -464,6 +472,13 @@ console.log('\n10. sign-in required');
     const r = await anon.get(alt);
     check(`…and ${alt} is refused too, not served round the gate`, r.status !== 200 || !Array.isArray(r.json), `${r.status} ${JSON.stringify(r.json).slice(0, 80)}`);
   }
+  /* '/api/auth/' is not a sign-in route: it is the credential banner under
+     another spelling. REVERSION: restore startsWith('/api/auth/') in
+     lookupEntry and drop the trailing-slash refusal — the visitor reads it. */
+  const slash = await anon.get('/api/auth/');
+  check('a visitor cannot read the credential banner as /api/auth/', slash.status !== 200 || !slash.json?.rows, `${slash.status} ${JSON.stringify(slash.json).slice(0, 80)}`);
+  const slash2 = await anon.get('/api/t/people/');
+  check('…nor any route with a trailing slash', slash2.status === 404, String(slash2.status));
   const dspAlt = await people.DSP.b.get('/API/t/cash');
   check('a Dispatcher cannot reach a cash page by writing it in capitals', dspAlt.status !== 200 || !Array.isArray(dspAlt.json), `${dspAlt.status}`);
   const cfgByAcc = await people.ACC.b.post('/api/access/config', { mode: 'open' });
