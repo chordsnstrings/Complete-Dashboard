@@ -3982,3 +3982,36 @@ which describe the code, not the product.
   limit and hung until the session went idle. It was re-run with absolute paths
   and a 60 s start limit. COVERAGE trap added.
 
+
+---
+
+## Sign-in and access (ULM) — the security review's findings, 2026-09-28
+
+Built on `claude/ulm-access-control` (design and state: `docs/ULM-DESIGN.md`
+§16). Before the merge, four reviewers read the access layer against the
+code: authentication, authorization, the front end, and the administration
+actions. Every finding below has a test that fails when its fix is reverted.
+The **committed / deployed / proven** columns are filled in when the branch
+reaches production. **proven** means re-measured on production by the method
+that found it.
+
+| # | severity | what was wrong | fix | test (revert fails it) | written | committed | deployed | proven |
+|---|---|---|---|---|---|---|---|---|
+| U1 | critical | `/API/…` (any other case) reached the handlers and walked round the gate | the gate refuses any other spelling of the prefix | access_core §10 | ✓ 8cdc4b0 | | | |
+| U2 | critical | `/api/auth/` with a trailing slash was the credential banner, treated as a self route | the self rule needs a path segment; trailing slashes refused | access_core §10, access_manifest | ✓ c183afb | | | |
+| U3 | critical | the stale refresh ran as an administrator, so the shared cache carried Emirates IDs to the next anonymous visitor | the system caller is not an administrator; `/api/driver/profile` and its kind bypass the cache | access_core §8b | ✓ 6d00b84 | | | |
+| U4 | high | the CSV export streamed every column past the shaper | columns withheld by the reader's levels | server_redaction | ✓ 8cdc4b0 | | | |
+| U5 | high | a one-fleet grant acted company-wide; the payout verify took its fleet from the body unchecked; proposals listed other fleets' rows | actions judged against the grant's fleets; `fleetFrom: 'body'`; proposals filtered by fleet | access_core §9d | ✓ 17af1e6 | | | |
+| U6 | high | sign-in: a lockout was an oracle for which addresses exist and a lever to lock anyone out; wrong codes were not counted; two-step could be re-enabled over itself | one message for known and unknown; per (address, IP) and per-address limits; codes counted; enable refuses when on | access_core §12b | ✓ 338eaed | | | |
+| U7 | medium | the cash receipt set a year, immutable, over the gate's no-store | gate pins no-store for never-kept classes; receipt says no-store | access_core §8c, ledger_receipt | ✓ c690352 | | | |
+| U8 | medium | two commits of one proposal at once both ran | in-process claim, 409 for the second | access_core §9b | ✓ c690352 | | | |
+| U9 | medium | sign-out took no CSRF header | required when a session or device cookie is present | access_core §12 | ✓ c690352 | | | |
+| U10 | medium | kept answers painted the last reader's figures when `/api/auth/me` failed, however long ago they left | kept only for the session's 12-hour idle limit; old admin token dropped on a new reader | signin_page | ✓ c690352 | | | |
+| U11 | medium | the sign-in page's cache purge matched no cache (`-data` vs `-data-2`) | pattern matches the real name; fixture uses it | signin_page | ✓ c690352 | | | |
+| U12 | medium | platform-typed fleet names written unescaped into four HTML templates | names stripped of markup characters once; the sinks escape | fleet_name_markup | ✓ c690352 | | | |
+| U13 | low | the CSV export had no Cache-Control | `private, no-store` | server_redaction | ✓ c690352 | | | |
+
+**Accepted, not fixed (documented in ULM-DESIGN §16):** in open mode an
+anonymous visitor keeps every legacy page and write; one-fleet readers are
+refused on 75 routes that mix fleets; coverage days and collector status on
+`param` routes answer for either fleet.

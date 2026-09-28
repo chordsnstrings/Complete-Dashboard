@@ -936,6 +936,58 @@ Each phase can ship on its own.
 
 ---
 
+## 16. What is built, and what is not — 2026-09-28
+
+Branch `claude/ulm-access-control`, merged to the production branch only
+after the sweep of every role on every page (bin/access-sweep.mjs) and the
+full suite pass. The design above is the target; this is the state.
+
+### Built
+
+| area | what exists | where |
+|---|---|---|
+| People | users, invitations by link, suspension, the first Owner from `BOOTSTRAP_OWNER_EMAIL` + `BOOTSTRAP_OWNER_PASSWORD_HASH` (a scrypt hash, never the password), a forced password change and two-step setup at first sign-in (two-step is required of Owners and Access admins by default); the bootstrap acts only while no active Owner exists | `sql/schema_v86.sql`, `api/access/service.js` |
+| Sign-in | email + password, then a TOTP code (recovery codes too); throttled per address and per address+IP with one message for known and unknown addresses; 12-hour idle and absolute session limits; step-up re-confirmation for sensitive actions | `api/access/routes.js`, `api/public/signin.*` |
+| Screens | wall screens as devices with their own long-lived session, revocable | `/api/auth/device`, `/api/access/devices` |
+| Roles | the fourteen roles of §6.3 as levels per data class (A/M/F) plus actions; custom roles; teams; grants over fleets with an expiry; the grantor's ceiling; a sensitive grant waits for a second Owner's approval (with a single Owner, 24 hours once sign-in is required) | `api/public/access_model.js`, `api/access/service.js` |
+| Enforcement | every route in the manifest (192 entries, deny by default, a test fails on an undeclared route); the response shaper withholds or masks by class; a page reads "withheld — why" instead of a number it may not show; reveal-with-a-reason for masked values | `api/access/manifest.json`, `api/access/middleware.js`, `api/access/shape.js` |
+| Caches | the response cache never stores an answer about the caller, keys the one-fleet narrowing and the search narrowing, refreshes as the system and never as an administrator; `no-store` by class that a handler cannot loosen; the browser's kept answers partitioned by reader, expired with the session, and wiped on sign-out (`Clear-Site-Data`) | `api/cache.js`, `api/public/access.js`, `api/public/sw.js` |
+| Actions | a capability per write (`capBy` for the settings trigger's jobs), CSRF on every change, four-eyes stored proposals for the cash-sheet commit and person merges (the committed payload is exactly the proposed one; committed once), the signed-in person recorded as the actor | `api/access/middleware.js` |
+| Audit | every change and every sensitive read, in a hash chain the Access page can verify | `access_audit` |
+| Fleets | named from the platforms (§3): discovery 10 minutes after the worker starts and nightly at 02:35; the Fleet names page; no fleet name typed into a page | `src/sources/discovery.js`, `src/fleet_names.js`, `sql/schema_v87.sql` |
+| Looks | Arkiv is the desktop default; Classic is a switch on the account page (and `?skin=classic`) | `api/public/access.js inChosenLook` |
+
+### Sign-in is OPTIONAL until the Owner makes it Required
+
+`access_config.mode` is `open` on a fresh deploy. In open mode an anonymous
+visitor gets the product exactly as before ULM — every page, and every legacy
+write that had no gate (for instance the cash-sheet commit with no second
+person). Signed-in people are held to their role either way. Setting the mode
+to **Required** (Access → Settings) makes every `/api` request without a
+session a 401 and sends the pages to `/signin`. That switch is the operator's,
+after the staff have accounts.
+
+### Not built — deliberate deferrals
+
+- **Passkeys, SSO, email sign-in links.** Password + TOTP only (§14 decision 3
+  is still open).
+- **Row-level security and the two database roles (§4).** Fleet scope is
+  enforced in the API, not the database.
+- **One-fleet readers on the 75 `mixed` routes** (answers that mix fleets and
+  carry no fleet per row) are refused with the true reason — "this page mixes
+  both fleets" — rather than narrowed. Narrowing them needs a fleet on every
+  row, route by route.
+- **Settings per connection (§3.3)** and relinking an account as an access
+  change: the connection settings are still global.
+- **Phase 4 (§13):** quarterly reviews exist as a table and three routes, not
+  as a cycle; no dormant suspension, no export watermarks, no finding ownership.
+- **Known metadata on `param` routes:** coverage days and collector status
+  answer a one-fleet reader for the other fleet too. Counts, not records.
+- **The four-eyes claim is per process.** Fine while the API runs as one
+  instance; scaling out needs a row lock.
+
+---
+
 ## Appendix A — how to read Appendices B and C
 
 **Role codes:**

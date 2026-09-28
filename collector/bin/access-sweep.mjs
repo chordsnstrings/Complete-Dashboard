@@ -35,6 +35,8 @@ const OUT = arg('out', '/tmp/access-sweep');
 const UI = arg('ui', 'both');
 const CONC = Number(arg('conc', '3'));
 const ONLY = arg('pages', '');
+/* Arkiv is the desktop default; --skin classic sweeps the look a person may switch to. */
+const SKIN = arg('skin', 'arkiv');
 mkdirSync(OUT, { recursive: true });
 
 const { ROLES, ROLE, CLASS_CODES, rank } = await import('../api/public/access_model.js');
@@ -119,7 +121,7 @@ async function discover(browser, ownerCookies) {
   await ctx.addCookies(ownerCookies);
   const page = await ctx.newPage();
   const firstLink = async (route, prefix) => {
-    await page.goto(`${BASE}/?ui=desktop&skin=arkiv#${route}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${BASE}/?ui=desktop&skin=${SKIN}#${route}`, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction((p) => document.querySelector(`#view a[href^="#${p}"]`), prefix, { timeout: 120_000 }).catch(() => {});
     return page.evaluate((p) => document.querySelector(`#view a[href^="#${p}"]`)?.getAttribute('href')?.slice(1).split('?')[0] || null, prefix);
   };
@@ -216,7 +218,7 @@ async function visit(ctx, w, route, phone) {
     } catch { /* body unavailable */ }
     res.push(item);
   });
-  const url = `${BASE}/?ui=${phone ? 'phone' : 'desktop'}&skin=arkiv#${route}`;
+  const url = `${BASE}/?ui=${phone ? 'phone' : 'desktop'}&skin=${SKIN}#${route}`;
   let nav = null;
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
