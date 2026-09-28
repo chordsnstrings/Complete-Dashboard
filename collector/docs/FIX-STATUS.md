@@ -3993,35 +3993,52 @@ code: authentication, authorization, the front end, and the administration
 actions. Every finding below has a test that fails when its fix is reverted.
 **committed** means on `claude/ecosine-egari-tracking-apis-rf9ong`
 (fast-forwarded to `9c97a6b` on 2026-09-28, after a clean suite: 342 files,
-12,860 assertions, 0 failing). **deployed** and **proven** stay empty until
-the deployment runs; it has not. **proven** means re-measured on production by the method
+12,860 assertions, 0 failing). **deployed**: deployment `a1429529` (forced
+build of `9c97a6b`), ACTIVE 09:47:53Z on 2026-09-28 — the one before it,
+`18f0da47`, was an app-spec update that re-ran the old commit (COVERAGE trap
+25). **proven** is filled only where production could be re-measured without
+an account: the rest needs a signed-in person in each role on production,
+which exists only once the Owner has signed in and invited people; until then
+they stand on the local sweep over production's data (bin/access-sweep.mjs,
+every role, both UIs, 0 leaks).
+
+Checked on production after the deploy (curl, `&_=$RANDOM`): `/api/auth/me`
+answers `{signedIn:false, mode:'open'}`; an anonymous `/api/kpis` still 200
+(open mode unchanged); `/API/kpis`, `/api/kpis/` and `/api/auth/` 404;
+`/signin` is the sign-in page; CSP, `X-Frame-Options: DENY`, `nosniff`,
+`Referrer-Policy: same-origin` present. The API's log: `[access]
+bootstrapped the first Owner`. The worker's: `migrations complete
+{"ran":2}` (v86, v87). Screens through bin/prod-mirror.mjs: sign-in at 1440
+and 390, the overview in Arkiv (the default) and Classic, the account page
+signed out, the phone's Today — no page error, no sideways scroll, no
+"undefined"; the credential banner renders in Arkiv as in Classic. **proven** means re-measured on production by the method
 that found it.
 
 | # | severity | what was wrong | fix | test (revert fails it) | written | committed | deployed | proven |
 |---|---|---|---|---|---|---|---|---|
-| U1 | critical | `/API/…` (any other case) reached the handlers and walked round the gate | the gate refuses any other spelling of the prefix | access_core §10 | ✓ 8cdc4b0 | | ✓ 9c97a6b | |
-| U2 | critical | `/api/auth/` with a trailing slash was the credential banner, treated as a self route | the self rule needs a path segment; trailing slashes refused | access_core §10, access_manifest | ✓ c183afb | | ✓ 9c97a6b | |
-| U3 | critical | the stale refresh ran as an administrator, so the shared cache carried Emirates IDs to the next anonymous visitor | the system caller is not an administrator; `/api/driver/profile` and its kind bypass the cache | access_core §8b | ✓ 6d00b84 | | ✓ 9c97a6b | |
-| U4 | high | the CSV export streamed every column past the shaper | columns withheld by the reader's levels | server_redaction | ✓ 8cdc4b0 | | ✓ 9c97a6b | |
-| U5 | high | a one-fleet grant acted company-wide; the payout verify took its fleet from the body unchecked; proposals listed other fleets' rows | actions judged against the grant's fleets; `fleetFrom: 'body'`; proposals filtered by fleet | access_core §9d | ✓ 17af1e6 | | ✓ 9c97a6b | |
-| U6 | high | sign-in: a lockout was an oracle for which addresses exist and a lever to lock anyone out; wrong codes were not counted; two-step could be re-enabled over itself | one message for known and unknown; per (address, IP) and per-address limits; codes counted; enable refuses when on | access_core §12b | ✓ 338eaed | | ✓ 9c97a6b | |
-| U7 | medium | the cash receipt set a year, immutable, over the gate's no-store | gate pins no-store for never-kept classes; receipt says no-store | access_core §8c, ledger_receipt | ✓ c690352 | | ✓ 9c97a6b | |
-| U8 | medium | two commits of one proposal at once both ran | in-process claim, 409 for the second | access_core §9b | ✓ c690352 | | ✓ 9c97a6b | |
-| U9 | medium | sign-out took no CSRF header | required when a session or device cookie is present | access_core §12 | ✓ c690352 | | ✓ 9c97a6b | |
-| U10 | medium | kept answers painted the last reader's figures when `/api/auth/me` failed, however long ago they left | kept only for the session's 12-hour idle limit; old admin token dropped on a new reader | signin_page | ✓ c690352 | | ✓ 9c97a6b | |
-| U11 | medium | the sign-in page's cache purge matched no cache (`-data` vs `-data-2`) | pattern matches the real name; fixture uses it | signin_page | ✓ c690352 | | ✓ 9c97a6b | |
-| U12 | medium | platform-typed fleet names written unescaped into four HTML templates | names stripped of markup characters once; the sinks escape | fleet_name_markup | ✓ c690352 | | ✓ 9c97a6b | |
-| U13 | low | the CSV export had no Cache-Control | `private, no-store` | server_redaction | ✓ c690352 | | ✓ 9c97a6b | |
-| U14 | high | an Access admin could reset a Finance manager's password (the link came back to them) or two-step, and so act as them | account actions held to the grant ceiling over active and pending grants; suspend and sign-out exempt | access_core §6 | ✓ | | ✓ 9c97a6b | |
-| U16 | critical | an Owner who had not signed in yet was not an "active" Owner, so an Access admin could ask for their invite link and become an Owner | the account ceiling counts the waiting Owner grant | access_core §6 | ✓ | | ✓ 9c97a6b | |
-| U17 | medium | a wall screen shows revenue in full; an Access admin could make one and open its link | the maker must hold what the screen shows | access_core §6 | ✓ | | ✓ 9c97a6b | |
-| U18 | medium | the "re-confirm a cash entry above AED N" setting was saved and shown and never enforced | the gate asks for step-up on a recorded entry above it; the form confirms and resends | access_core §9f | ✓ | | ✓ 9c97a6b | |
-| S1 | sweep | the overview closed for the wall screen because the driver leaderboard needs names | the panel says why it is empty; the page draws the rest | sweep (WALL #overview) | ✓ | | ✓ 9c97a6b | |
-| S2 | sweep | the menu offered the wall screen four pages the server refuses (their lists are bookings or vehicles, held as totals) | `VIEW_LIST_NEEDS`; the closed page names the list's class | view_list_needs | ✓ | | ✓ 9c97a6b | |
-| S3 | sweep | a wall screen on Approvals was sent to the sign-in page | the person-only routes tell a screen it is a screen (403 with the reason) | sweep (WALL #approvals) | ✓ | | ✓ 9c97a6b | |
-| S4 | suite | the map replay's panels sat flush under their grid (drawn by default once Arkiv became the default) | the host is a `.stack` | spacing | ✓ | | ✓ 9c97a6b | |
-| S5 | suite | the Fleet names evidence named plates and drivers without linking them | linked through `entity()`; the query returns an id | interlinking | ✓ | | ✓ 9c97a6b | |
-| U15 | medium | the HR roster and vehicle feeds narrowed a one-fleet reader's rows but sent totals over every fleet | both `mixed`: refused with the true reason, shown as a closed page | access_manifest | ✓ | | ✓ 9c97a6b | |
+| U1 | critical | `/API/…` (any other case) reached the handlers and walked round the gate | the gate refuses any other spelling of the prefix | access_core §10 | ✓ 8cdc4b0 | | ✓ 9c97a6b | ✓ a1429529 | ✓ `/API/kpis` → 404 
+| U2 | critical | `/api/auth/` with a trailing slash was the credential banner, treated as a self route | the self rule needs a path segment; trailing slashes refused | access_core §10, access_manifest | ✓ c183afb | | ✓ 9c97a6b | ✓ a1429529 | ✓ `/api/auth/` → 404 
+| U3 | critical | the stale refresh ran as an administrator, so the shared cache carried Emirates IDs to the next anonymous visitor | the system caller is not an administrator; `/api/driver/profile` and its kind bypass the cache | access_core §8b | ✓ 6d00b84 | | ✓ 9c97a6b | ✓ a1429529 |
+| U4 | high | the CSV export streamed every column past the shaper | columns withheld by the reader's levels | server_redaction | ✓ 8cdc4b0 | | ✓ 9c97a6b | ✓ a1429529 |
+| U5 | high | a one-fleet grant acted company-wide; the payout verify took its fleet from the body unchecked; proposals listed other fleets' rows | actions judged against the grant's fleets; `fleetFrom: 'body'`; proposals filtered by fleet | access_core §9d | ✓ 17af1e6 | | ✓ 9c97a6b | ✓ a1429529 |
+| U6 | high | sign-in: a lockout was an oracle for which addresses exist and a lever to lock anyone out; wrong codes were not counted; two-step could be re-enabled over itself | one message for known and unknown; per (address, IP) and per-address limits; codes counted; enable refuses when on | access_core §12b | ✓ 338eaed | | ✓ 9c97a6b | ✓ a1429529 |
+| U7 | medium | the cash receipt set a year, immutable, over the gate's no-store | gate pins no-store for never-kept classes; receipt says no-store | access_core §8c, ledger_receipt | ✓ c690352 | | ✓ 9c97a6b | ✓ a1429529 |
+| U8 | medium | two commits of one proposal at once both ran | in-process claim, 409 for the second | access_core §9b | ✓ c690352 | | ✓ 9c97a6b | ✓ a1429529 |
+| U9 | medium | sign-out took no CSRF header | required when a session or device cookie is present | access_core §12 | ✓ c690352 | | ✓ 9c97a6b | ✓ a1429529 |
+| U10 | medium | kept answers painted the last reader's figures when `/api/auth/me` failed, however long ago they left | kept only for the session's 12-hour idle limit; old admin token dropped on a new reader | signin_page | ✓ c690352 | | ✓ 9c97a6b | ✓ a1429529 |
+| U11 | medium | the sign-in page's cache purge matched no cache (`-data` vs `-data-2`) | pattern matches the real name; fixture uses it | signin_page | ✓ c690352 | | ✓ 9c97a6b | ✓ a1429529 |
+| U12 | medium | platform-typed fleet names written unescaped into four HTML templates | names stripped of markup characters once; the sinks escape | fleet_name_markup | ✓ c690352 | | ✓ 9c97a6b | ✓ a1429529 |
+| U13 | low | the CSV export had no Cache-Control | `private, no-store` | server_redaction | ✓ c690352 | | ✓ 9c97a6b | ✓ a1429529 | ✓ export `private, no-store` 
+| U14 | high | an Access admin could reset a Finance manager's password (the link came back to them) or two-step, and so act as them | account actions held to the grant ceiling over active and pending grants; suspend and sign-out exempt | access_core §6 | ✓ | | ✓ 9c97a6b | ✓ a1429529 |
+| U16 | critical | an Owner who had not signed in yet was not an "active" Owner, so an Access admin could ask for their invite link and become an Owner | the account ceiling counts the waiting Owner grant | access_core §6 | ✓ | | ✓ 9c97a6b | ✓ a1429529 |
+| U17 | medium | a wall screen shows revenue in full; an Access admin could make one and open its link | the maker must hold what the screen shows | access_core §6 | ✓ | | ✓ 9c97a6b | ✓ a1429529 |
+| U18 | medium | the "re-confirm a cash entry above AED N" setting was saved and shown and never enforced | the gate asks for step-up on a recorded entry above it; the form confirms and resends | access_core §9f | ✓ | | ✓ 9c97a6b | ✓ a1429529 |
+| S1 | sweep | the overview closed for the wall screen because the driver leaderboard needs names | the panel says why it is empty; the page draws the rest | sweep (WALL #overview) | ✓ | | ✓ 9c97a6b | ✓ a1429529 |
+| S2 | sweep | the menu offered the wall screen four pages the server refuses (their lists are bookings or vehicles, held as totals) | `VIEW_LIST_NEEDS`; the closed page names the list's class | view_list_needs | ✓ | | ✓ 9c97a6b | ✓ a1429529 |
+| S3 | sweep | a wall screen on Approvals was sent to the sign-in page | the person-only routes tell a screen it is a screen (403 with the reason) | sweep (WALL #approvals) | ✓ | | ✓ 9c97a6b | ✓ a1429529 |
+| S4 | suite | the map replay's panels sat flush under their grid (drawn by default once Arkiv became the default) | the host is a `.stack` | spacing | ✓ | | ✓ 9c97a6b | ✓ a1429529 |
+| S5 | suite | the Fleet names evidence named plates and drivers without linking them | linked through `entity()`; the query returns an id | interlinking | ✓ | | ✓ 9c97a6b | ✓ a1429529 |
+| U15 | medium | the HR roster and vehicle feeds narrowed a one-fleet reader's rows but sent totals over every fleet | both `mixed`: refused with the true reason, shown as a closed page | access_manifest | ✓ | | ✓ 9c97a6b | ✓ a1429529 |
 
 **Accepted, not fixed (documented in ULM-DESIGN §16):** in open mode an
 anonymous visitor keeps every legacy page and write; one-fleet readers are
