@@ -21,6 +21,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill, countOf
   kpiTiles, kpiCols } from './ui.js';
 import { fmt } from './charts.js';
 import { api } from './data.js';
+import { closedBlock } from './access.js';
 
 /* Two seat-sensor providers and one telematics feed. FMS and CABMAN are
    separate providers and each is meant to send seat data (the operator,
@@ -89,6 +90,12 @@ export async function renderFeeds(root) {
   let d;
   try { d = await api('/api/vehicles/feeds'); } catch (e) {
     root.innerHTML = '';
+    /* Not shown to this reader — for a one-fleet reader, the totals count
+       every fleet — is an answer with a reason, not a failure. */
+    if (e?.name === 'WithheldError') {
+      root.append(closedBlock({ view: 'feeds', title: 'This is not shown to your role', detail: e.message }));
+      return;
+    }
     root.append(note(`The feed list could not be read: ${e.message}`, 'err'));
     return;
   }

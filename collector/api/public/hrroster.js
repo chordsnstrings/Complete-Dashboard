@@ -22,7 +22,7 @@
 import { el, esc, panel, note, loading, kpiRow, tableFrom, entity, pill, sourceLabel,
   dateStr, fmt, foldRows, countOf, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
 import { api, state, href } from './data.js';
-import { fleetLabel, fleetList, allFleetsLabel } from './access.js';
+import { fleetLabel, fleetList, allFleetsLabel, closedBlock } from './access.js';
 
 const DOCS = [
   ['passport', 'Passport'], ['emirates_id', 'Emirates ID'], ['licence', 'Licence'],
@@ -339,7 +339,11 @@ export async function renderHrRoster(root) {
        roster the commit wrote, not the one from before it. */
     try { v = await api('/api/hr-roster', { method: 'GET' }); } catch (e) {
       head.innerHTML = '';
-      head.append(note(`The HR roster could not be read: ${String(e && e.message ? e.message : e)}`, 'warn'));
+      /* Not shown to this reader (a one-fleet reader: the totals and the
+         upload history count every fleet) is an answer with a reason, not a
+         read that failed. */
+      if (e?.name === 'WithheldError') head.append(closedBlock({ view: 'hr-roster', title: 'This is not shown to your role', detail: e.message }));
+      else head.append(note(`The HR roster could not be read: ${String(e && e.message ? e.message : e)}`, 'warn'));
       rosterP.body.innerHTML = ''; histP.body.innerHTML = '';
       return;
     }

@@ -4084,6 +4084,19 @@ untouched, and nothing projected is ever added into `accounted`.
       drops `< > " \`` and control characters, and the innerHTML sinks
       escape. Don't `esc()` it where the sink is `textContent` — "&" would
       print as `&amp;`.
+  19. **Fleet `rows` narrows the rows and nothing else.** Totals, counts and
+      histories computed beside them still count every fleet. The HR roster
+      (`totals`, `uploads`) and the vehicle feeds (`totals.fleets`) showed a
+      one-fleet reader the other fleet's numbers as theirs; both are `mixed`
+      now. A route may be `rows` only if everything outside its rows is
+      fleet-free.
+  20. **The ceiling is about taking as well as giving.** `covers()` stopped an
+      Access admin granting what they lack, but a password-reset link (which
+      the answer hands back) or a two-step reset let them take over an account
+      that holds it. Every account action but suspend and sign-out is held to
+      the ceiling, measured against the person's active AND pending grants.
+      An Access admin (SYS + AUDIT) can therefore reset almost nobody; the
+      Owner does.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 

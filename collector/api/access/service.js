@@ -198,6 +198,23 @@ export async function effectiveGrants(db, userId) {
                WHERE m.user_id = $1 AND t.archived_at IS NULL))`, [userId]);
   return rows.map(grantOut);
 }
+/* Everything a person holds OR IS WAITING FOR: active grants whether or not
+   they have taken effect yet, and pending ones, directly and through teams.
+   The account actions (reset, two-step reset, reinstate…) measure the target
+   against the manager's own ceiling with this, not with effectiveGrants: a
+   grant that waits for an Owner's approval is access the account will have,
+   and taking the account over before the approval would collect it
+   (security review, 2026-09-28). */
+export async function heldOrWaiting(db, userId) {
+  const { rows } = await db.query(
+    `SELECT g.* FROM access_grant g
+      WHERE g.status IN ('active', 'pending')
+        AND (g.expires_at IS NULL OR g.expires_at > now())
+        AND (g.user_id = $1 OR g.team_id IN (
+              SELECT m.team_id FROM access_team_member m JOIN access_team t ON t.id = m.team_id
+               WHERE m.user_id = $1 AND t.archived_at IS NULL))`, [userId]);
+  return rows.map(grantOut);
+}
 export async function listGrants(db, { userId = null, teamId = null, statuses = ['active', 'pending'] } = {}) {
   const { rows } = await db.query(
     `SELECT * FROM access_grant

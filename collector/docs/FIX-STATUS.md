@@ -4010,8 +4010,10 @@ that found it.
 | U11 | medium | the sign-in page's cache purge matched no cache (`-data` vs `-data-2`) | pattern matches the real name; fixture uses it | signin_page | ✓ c690352 | | | |
 | U12 | medium | platform-typed fleet names written unescaped into four HTML templates | names stripped of markup characters once; the sinks escape | fleet_name_markup | ✓ c690352 | | | |
 | U13 | low | the CSV export had no Cache-Control | `private, no-store` | server_redaction | ✓ c690352 | | | |
+| U14 | high | an Access admin could reset a Finance manager's password (the link came back to them) or two-step, and so act as them | account actions held to the grant ceiling over active and pending grants; suspend and sign-out exempt | access_core §6 | ✓ | | | |
+| U15 | medium | the HR roster and vehicle feeds narrowed a one-fleet reader's rows but sent totals over every fleet | both `mixed`: refused with the true reason, shown as a closed page | access_manifest | ✓ | | | |
 
 **Accepted, not fixed (documented in ULM-DESIGN §16):** in open mode an
 anonymous visitor keeps every legacy page and write; one-fleet readers are
-refused on 75 routes that mix fleets; coverage days and collector status on
+refused on 77 routes that mix fleets; coverage days and collector status on
 `param` routes answer for either fleet.

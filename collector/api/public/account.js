@@ -641,14 +641,17 @@ export function fleetPicker(fleets = [], { name = uid() } = {}) {
   const every = h('input', { type: 'checkbox', checked: true, id: uid(), 'data-acx': 'fleet-every' });
   const boxes = fleets.map((f) => h('input', { type: 'checkbox', value: f.id, id: uid(), name, disabled: true, 'data-fleet': f.id }));
   const list = h('div', { class: 'acx-fleets-only' }, fleets.map((f, i) => h('label', { class: 'acx-check', for: boxes[i].id }, boxes[i], f.name || fleetLabel(f.id))));
-  /* What a fleet-limited grant gets, said before it is given. 75 read routes
+  /* What a fleet-limited grant gets, said before it is given. 77 read routes
      combine every fleet's records with no fleet on their rows (a person's
-     page, a car's page, the day, the overview's figures); the server refuses
+     page, a car's page, the day, the overview's figures), or count every
+     fleet beside rows that could be narrowed (the HR roster, the vehicle
+     feeds); the server refuses
      them to a reader limited to some fleets, with that reason
      (api/access/middleware.js judge()). */
   const limits = h('p', { class: 'depnote acx-fleet-limits' },
     'Limited to some fleets, this person sees those fleets’ lists and totals. Pages that combine every '
-    + 'fleet’s records — the overview figures, the day, a driver’s or a car’s page — stay closed to them, '
+    + 'fleet’s records — the overview figures, the day, a driver’s or a car’s page, the HR roster, the vehicle feeds — '
+    + 'stay closed to them, '
     + 'and say why. Choose every fleet if they need those pages.');
   limits.hidden = true;
   every.addEventListener('change', () => {

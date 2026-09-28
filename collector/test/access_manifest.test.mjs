@@ -85,6 +85,13 @@ check('cash pages are about cash', ['/api/ledger/entries', '/api/ledger/people',
 check('the trigger’s action follows the job it asks for', lookupEntry('POST', '/api/settings/trigger')?.capBy?.map?.backfill === 'collector.backfill');
 check('the trip search is held to the columns a role may see', JSON.stringify(lookupEntry('GET', '/api/trips/list')?.search?.classes) === '["ID","LOC","VEH"]');
 check('the park ledger follows the fleet asked for (it ignored it until 2026-09-28)', lookupEntry('GET', '/api/finance/ledger')?.fleet === 'param');
+/* A route narrowed by row must carry nothing counted over every fleet beside
+   those rows: the HR roster's totals and upload history and the feeds'
+   totals did, so a one-fleet reader was shown the other fleet's counts as
+   theirs. REVERSION: set either back to fleet 'rows' — this fails. */
+check('answers that count every fleet beside their rows are not narrowed by row',
+  ['/api/hr-roster', '/api/vehicles/feeds'].every((p) => lookupEntry('GET', p)?.fleet === 'mixed'),
+  ['/api/hr-roster', '/api/vehicles/feeds'].map((p) => `${p}:${lookupEntry('GET', p)?.fleet}`).join(' '));
 check('four-eyes routes are declared', Object.keys(FOUR_EYES).every((k) => { const [m, p] = k.split(' '); return lookupEntry(m, p)?.fourEyes; }));
 
 console.log(`\n${pass} passed, ${fail} failed`);

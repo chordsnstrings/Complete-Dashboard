@@ -290,6 +290,18 @@ const people = {};
   check('an Access admin re-confirms with a code', stepAcc.status === 200, JSON.stringify(stepAcc.json));
   const accCash = await people.ACC.b.post('/api/access/grants', { userId: people.DSP.id, role: 'CLK', reason: 'cover' });
   check('an Access admin cannot confer cash they do not hold', accCash.status === 403 && /do not hold/.test(accCash.json.detail));
+  /* …nor TAKE it. A reset link comes back in the answer, and a two-step
+     reset clears the second factor: an Access admin could sign in as a
+     Finance manager and commit cash under their name (security review,
+     2026-09-28). REVERSION: drop the ceiling block in POST
+     /api/access/users/:id — the link comes back and these fail. */
+  const take = await people.ACC.b.post(`/api/access/users/${people.FIN.id}`, { action: 'reset' });
+  check('an Access admin cannot take a Finance manager\'s account with a reset link',
+    take.status === 403 && take.json.error === 'ceiling' && !take.json.link, JSON.stringify(take.json).slice(0, 120));
+  const mfaOff = await people.ACC.b.post(`/api/access/users/${people.FIN.id}`, { action: 'reset_mfa' });
+  check('…nor clear their two-step', mfaOff.status === 403 && mfaOff.json.error === 'ceiling');
+  const own = await people.ACC.b.post(`/api/access/users/${people.ACC.id}`, { action: 'rename', name: 'Access Admin' });
+  check('…while an account within their reach (their own) can still be changed', own.status === 200);
 }
 
 console.log('\n7. what each role is answered');

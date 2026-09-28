@@ -3338,11 +3338,9 @@
    }
   ],
   "whole": [],
-  "fleet": "rows",
-  "fleetRows": [
-   "people[]"
-  ],
-  "fleetKey": "fleet_id",
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
   "cap": null,
   "auditRead": true,
   "notes": "api/hr_roster_routes.js:49-52 -> rosterView (api/hr_roster.js:671-776). Body: latest{upload_id, export_date, sha256, rows_read, uploaded_by, uploaded_at}, uploads[]{id, sha256, export_date, export_date_from, filename, byte_len, rows_read, uploaded_by, uploaded_at} (uploads() :400-403, no uploaded_ip), today, people[]{fleet_id, employee_id, name, phone, email, hr_compliance_status, on_list, off_lis"
@@ -7034,11 +7032,9 @@
   "whole": [
    "SYS"
   ],
-  "fleet": "rows",
-  "fleetRows": [
-   "rows[]"
-  ],
-  "fleetKey": "fleet_id",
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
   "cap": null,
   "notes": "api/feed_routes.js:306 handler. FEEDS_SQL is at :104 and has no fleet predicate. DRIVERS_SQL (:196) takes names from driver.full_name, driver_compliance and driver_platform_state. It takes the phone from driver_compliance, including OTHER accounts the spine puts on the same person (:241-250). ref() at :316-325 returns {name, id (the platform driver id, only where a driver page resolves), person_id"
  },

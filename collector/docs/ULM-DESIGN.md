@@ -973,8 +973,10 @@ after the staff have accounts.
   is still open).
 - **Row-level security and the two database roles (§4).** Fleet scope is
   enforced in the API, not the database.
-- **One-fleet readers on the 75 `mixed` routes** (answers that mix fleets and
-  carry no fleet per row) are refused with the true reason — "this page mixes
+- **One-fleet readers on the 77 `mixed` routes** (answers that mix fleets and
+  carry no fleet per row — and, since the last pass, the HR roster and the
+  vehicle feeds, whose totals and upload history count every fleet beside
+  rows the gate could narrow) are refused with the true reason — "this page mixes
   both fleets" — rather than narrowed. Narrowing them needs a fleet on every
   row, route by route.
 - **Settings per connection (§3.3)** and relinking an account as an access
@@ -982,7 +984,9 @@ after the staff have accounts.
 - **Phase 4 (§13):** quarterly reviews exist as a table and three routes, not
   as a cycle; no dormant suspension, no export watermarks, no finding ownership.
 - **Known metadata on `param` routes:** coverage days and collector status
-  answer a one-fleet reader for the other fleet too. Counts, not records.
+  answer a one-fleet reader for the other fleet too. Counts, not records. The
+  credential banner (`/api/auth`) narrows its rows and the page builds its
+  line from them, but the raw answer still carries the all-fleet counts.
 - **The four-eyes claim is per process.** Fine while the API runs as one
   instance; scaling out needs a row lock.
 

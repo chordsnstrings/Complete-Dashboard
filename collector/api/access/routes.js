@@ -12,7 +12,7 @@
    Owner for sensitive grants, and nobody approving their own request. */
 import * as svc from './service.js';
 import { appendAudit, verifyChain } from './audit.js';
-import { covers } from './principal.js';
+import { covers, computeAccess } from './principal.js';
 import { FOUR_EYES } from './manifest.js';
 import {
   verifyPassword, passwordProblem, newTotpSecret, verifyTotp, otpauthUri, seal, unseal,
@@ -601,6 +601,26 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     if (targetIsOwner && !isOwner(fm)) return fail(res, 403, 'not_allowed', 'Only an Owner can change another Owner.');
     if (targetIsOwner && owners.length === 1 && ['suspend', 'offboard'].includes(action)) {
       return fail(res, 403, 'last_owner', 'This is the only Owner. Make someone else an Owner first.');
+    }
+    /* THE CEILING, FOR ACCOUNTS AS WELL AS GRANTS.
+       ─────────────────────────────────────────────────────────────────────
+       An Access admin cannot GIVE access they do not hold (grantDecision).
+       They could still TAKE it: a password-reset link for a Finance manager
+       comes back in this response, a two-step reset clears the second
+       factor, and the account is theirs — with CASH and the commit action,
+       and every act recorded under the victim's name (security review,
+       2026-09-28). So an action on an account is held to the same ceiling as
+       a grant: the manager must hold everything the person holds or is
+       waiting for (a pending grant is access the account will have). An
+       Owner holds everything and passes. Suspending and signing out are
+       exempt: they only take access away, and are how a compromised
+       account is stopped by whoever notices first. */
+    if (!isOwner(fm) && !['suspend', 'signout'].includes(action)) {
+      const theirs = computeAccess({ grants: await svc.heldOrWaiting(db, id), roles: await svc.customRoles(db),
+        allFleets: fm.access.allFleets });
+      if (!covers({ levels: fm.access.levels, caps: fm.access.caps }, { levels: theirs.levelsAny, caps: theirs.capsAny })) {
+        return fail(res, 403, 'ceiling', 'This person holds access you do not hold yourself, so only an Owner can do that.');
+      }
     }
     if (action === 'rename') {
       await svc.updateUser(db, id, { name: String(req.body?.name || '').trim().slice(0, 120) });
