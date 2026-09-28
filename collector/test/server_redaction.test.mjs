@@ -512,6 +512,11 @@ console.log('\n/api/export/trips.csv — 262,162 rows of pickup and drop-off to 
   check('the row count and window headers still describe the file',
     anon.headers.get('x-export-rows') === '2'
       && anon.headers.get('x-export-window') === '2026-08-01..2026-08-31');
+  /* A download of rows is kept by no proxy and no browser disk cache
+     (security review, 2026-09-28). REVERSION: drop the Cache-Control line in
+     server.js's export dispatcher — this reads null. */
+  check('the file is marked never to be stored', /no-store/.test(anon.headers.get('cache-control') || ''),
+    String(anon.headers.get('cache-control')));
   // Everything else must be byte-identical, or this is a feature removal
   // dressed as a security fix.
   const admCells = admin.text.trim().split('\n').map((l) => l.split(','));

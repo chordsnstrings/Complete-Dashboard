@@ -416,7 +416,11 @@ try {
        the store when the next person signs in. */
     await page.evaluate(async () => {
       try { localStorage.setItem('fleet.swr.v1', '{"stale":"from the last reader"}'); } catch { /* */ }
-      const c = await caches.open('fleet-test-data');
+      /* Named as sw.js names it (`${VERSION}-data-2`). This said
+         'fleet-test-data', which the old /-data$/ matched while the real
+         cache was never deleted (security review, 2026-09-28). REVERSION:
+         put /-data$/ back in signin.js forgetPreviousReader — this fails. */
+      const c = await caches.open('fleet-test-data-2');
       await c.put('/api/kpis?days=1', new Response('{"stale":"from the last reader"}', { headers: { 'content-type': 'application/json' } }));
     });
     check('?why=signedout says so in one line', (await noteText(page)).includes(WHY.signedout));
@@ -441,7 +445,7 @@ try {
     check('the last reader\'s answers kept by the page were forgotten on sign-in (access.js partitionStorage)',
       !String(await page.evaluate(() => localStorage.getItem('fleet.swr.v1'))).includes('from the last reader'));
     check('…and the service worker\'s copies of them too',
-      !(await page.evaluate(() => caches.keys())).includes('fleet-test-data'));
+      !(await page.evaluate(() => caches.keys())).includes('fleet-test-data-2'));
     check('signed in with the second step done', (await me(ctx)).restricted === null);
   }
 
@@ -646,6 +650,27 @@ try {
     check('when /api/auth/me does not answer, the page says so and why',
       (await noteText(page)).includes('migrations are still applying'), await noteText(page));
     check('…and does not claim sign-in is optional', await page.locator('.si-open').count() === 0);
+    /* What a signed-in reader's pages kept is kept only while their session
+       could still be alive. Opened while the server does not answer (every
+       deploy's migrations), a shared browser used to paint the last reader's
+       figures however long ago they left (security review, 2026-09-28).
+       REVERSION: drop `else forgetIfExpired()` in access.js loadWho — the
+       expired copy survives and the first check fails. */
+    const seed = (until) => page.evaluate((u) => {
+      localStorage.setItem('fleet.swr.v1', '{"stale":"from the last reader"}');
+      localStorage.setItem('fleet.swr.until', String(u));
+    }, until);
+    await seed(Date.now() - 60_000);
+    await page.goto(`${base}/signin`);
+    await waitH1(page, 'Sign in to FleetMirror');
+    check('a reader\'s kept answers are forgotten once their session could have ended, even with the server silent',
+      await page.evaluate(() => localStorage.getItem('fleet.swr.v1')) === null);
+    await seed(Date.now() + 3600_000);
+    await page.goto(`${base}/signin`);
+    await waitH1(page, 'Sign in to FleetMirror');
+    check('…and kept while it could still be alive, for the offline reader who needs them',
+      String(await page.evaluate(() => localStorage.getItem('fleet.swr.v1'))).includes('from the last reader'));
+    await page.evaluate(() => { localStorage.removeItem('fleet.swr.v1'); localStorage.removeItem('fleet.swr.until'); });
     await ctx.unroute('**/api/auth/me');
 
     await ctx.route('**/api/auth/login', (route) => route.abort('connectionrefused'));

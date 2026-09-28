@@ -410,7 +410,14 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
 
     const fp = fingerprintOf(access);
     res.set('x-fm-scope', fp);
-    if (usedReveal || (entry.carries || []).some((c) => NO_STORE.has(c))) res.set('Cache-Control', 'no-store, private');
+    if (usedReveal || (entry.carries || []).some((c) => NO_STORE.has(c))) {
+      res.set('Cache-Control', 'no-store, private');
+      /* …and a handler cannot loosen it afterwards: a route that sets its own
+         Cache-Control (the receipt image set a year) keeps no-store. */
+      const setHeader = res.setHeader.bind(res);
+      res.setHeader = (name, value) => (String(name).toLowerCase() === 'cache-control'
+        ? setHeader(name, 'no-store, private') : setHeader(name, value));
+    }
 
     installShaper(req, res, entry, L, j.filterRows);
     if (isWrite || entry.cap || entry.auditRead) auditOnFinish(req, res, entry, fm, isWrite);
@@ -441,8 +448,15 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
   }
 
   /* Swaps the request for the stored proposal, after every check. */
+  /* Proposals being committed right now, in this process. Two commits of one
+     proposal arriving together both saw status 'open' and both ran the
+     handler (security review, 2026-09-28): the status only moves when the
+     first finishes. The API runs as one process, so a claim here closes that
+     window; it is released when the response ends either way. */
+  const committingNow = new Set();
   async function takeProposal(req, res, entry, fm, L) {
     const id = Number(req.body.proposal);
+    if (committingNow.has(id)) { refuse(res, 409, { error: 'in_progress', detail: 'This proposal is being committed right now.' }); return false; }
     const { rows } = await db.query('SELECT * FROM access_proposal WHERE id = $1', [id]);
     const p = rows[0];
     if (!p || p.kind !== `${req.method} ${req.path}`) { refuse(res, 404, { error: 'not_found', detail: 'No such proposal for this action.' }); return false; }
@@ -457,7 +471,10 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
       if ((L[c] || '') !== 'F') { refuse(res, 403, { error: 'withheld', class: c, detail: `Committing this needs ${CLASS[c]?.plain || c}, which your role does not hold.` }); return false; }
     }
     req.body = { ...p.payload };
+    committingNow.add(id);
+    res.on('close', () => committingNow.delete(id));
     res.on('finish', () => {
+      committingNow.delete(id);
       const ok = res.statusCode < 300;
       db.query(`UPDATE access_proposal SET status = $2, decided_by = $3, decided_at = now(), result = $4 WHERE id = $1 AND status = 'open'`,
         [id, ok ? 'committed' : 'failed', fm.user.id, JSON.stringify({ status: res.statusCode })])

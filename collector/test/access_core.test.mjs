@@ -157,7 +157,10 @@ let kpiCalls = 0;
 app.get('/api/t/people', (req, res) => res.json([
   { name: 'Test Driver A', fleet_id: 'egari', phone: '0500000001', balance: 10 },
   { name: 'Test Driver B', fleet_id: 'ecosine', phone: '0500000002', balance: 20 }]));
-app.get('/api/t/cash', (req, res) => res.json([{ name: 'Test Driver A', balance: 10 }]));
+/* It tries to be cached for a year, as the receipt image once did: the gate's
+   no-store for a CASH answer must survive the handler (8c). */
+app.get('/api/t/cash', (req, res) => { res.set('Cache-Control', 'public, max-age=31536000, immutable');
+  res.json([{ name: 'Test Driver A', balance: 10 }]); });
 app.get('/api/t/kpis', (req, res) => { kpiCalls += 1; res.json({ fleet: req.query.fleet || 'all', trips: 5 }); });
 app.get('/api/t/person', (req, res) => res.json({ name: 'Test Driver A', trips: 3 }));
 /* Like the real credential banner at /api/auth (server.js). Express also
@@ -176,7 +179,9 @@ app.post('/api/t/verify', (req, res) => { acted.push(['verify', req.body?.fleet]
 let cashWrites = 0;
 app.post('/api/t/cash', (req, res) => { cashWrites += 1; res.json({ ok: true }); });
 const imported = [];
-app.post('/api/ledger/import/commit', (req, res) => { imported.push(req.body); res.json({ ok: true, wrote: req.body.rows.length }); });
+app.post('/api/ledger/import/commit', async (req, res) => {
+  if (req.body.slow) await new Promise((r) => setTimeout(r, 150));   // two commits in flight together (9e)
+  imported.push(req.body); res.json({ ok: true, wrote: req.body.rows.length }); });
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: 'internal', detail: String(e) }));
 accessRoutes(app, { db, layer, wrap });
 const server = app.listen(0);
@@ -376,6 +381,16 @@ console.log('\n8b. the shared cache never carries a document to a visitor (secur
     a3.headers.get('x-cache') === 'hit' && a3.json.v > a1.json.v && a3.json.emirates_id == null, JSON.stringify(a3.json));
 }
 
+console.log('\n8c. a handler cannot loosen no-store on a class that is never kept (security review, 2026-09-28)');
+{
+  /* The receipt image set a year, immutable, after the gate had said
+     no-store; the handler's header won. REVERSION: drop the setHeader guard
+     in the gate — this reads the year. */
+  const r = await people.CLK.b.get('/api/t/cash');
+  const cc = r.headers.get('cache-control') || '';
+  check('a cash answer stays no-store whatever the route asks for', r.status === 200 && /no-store/.test(cc) && !/max-age|immutable|public/.test(cc), cc);
+}
+
 console.log('\n9. actions: capability, CSRF, preview');
 {
   cashWrites = 0;
@@ -416,9 +431,21 @@ console.log('\n9b. four-eyes: a cash sheet is proposed by one person and committ
     canon(imported[0].rows) === canon(rows) && imported[0].batch === 'test-batch-1', canon(imported[0].rows));
   const again = await people.FIN.b.post('/api/ledger/import/commit', { proposal: prop.json.proposal });
   check('a proposal is committed once', again.status === 409 && imported.length === 1);
+  /* 9e. Two commits of one proposal at the same moment. Both used to read
+     status 'open' — it only moves when the first finishes — and both ran the
+     handler: the sheet written twice. REVERSION: drop the committingNow
+     check in takeProposal — this sees two writes. */
+  const race = await people.CLK.b.post('/api/ledger/import/commit', { batch: 'test-batch-race', rows, slow: true });
+  const before = imported.length;
+  const [c1, c2] = await Promise.all([
+    people.FIN.b.post('/api/ledger/import/commit', { proposal: race.json.proposal }),
+    people.FIN.b.post('/api/ledger/import/commit', { proposal: race.json.proposal })]);
+  check('two commits of one proposal arriving together write it once',
+    imported.length === before + 1 && [c1.status, c2.status].sort().join() === '200,409',
+    `${c1.status},${c2.status} wrote ${imported.length - before}`);
   const own = await people.FIN.b.post('/api/ledger/import/commit', { batch: 'test-batch-2', rows });
   const ownCommit = await people.FIN.b.post('/api/ledger/import/commit', { proposal: own.json.proposal });
-  check('the preparer cannot commit their own', ownCommit.status === 403 && ownCommit.json.error === 'four_eyes' && imported.length === 1);
+  check('the preparer cannot commit their own', ownCommit.status === 403 && ownCommit.json.error === 'four_eyes' && imported.length === before + 1);
   const list = await people.FIN.b.get('/api/access/proposals');
   check('Approvals lists it, marked as the Finance manager\'s own', list.json.proposals.some((p) => p.id === own.json.proposal && p.mine && !p.canCommit));
   check('…and says to lay it out as rows (the page never parses route addresses)',
@@ -539,6 +566,15 @@ console.log('\n11. sensitive grants once sign-in is required');
 
 console.log('\n12. sessions end when they should');
 {
+  /* Another site could post here and sign a person out, wiping the site's
+     storage with Clear-Site-Data. REVERSION: drop the csrfOk check in the
+     logout route — the session ends and this fails. */
+  const forged = await people.CLK.b.post('/api/auth/logout', {}, { csrf: false });
+  const still = await people.CLK.b.get('/api/t/cash');
+  check('sign-out without the CSRF header is refused, and the session stands',
+    forged.status === 403 && forged.json?.error === 'csrf' && still.status === 200, `${forged.status} then ${still.status}`);
+  const nobody = await browser().post('/api/auth/logout', {});
+  check('…while a browser with no session is simply told it is out', nobody.status === 200);
   const out = await people.CLK.b.post('/api/auth/logout', {});
   check('signing out clears this browser’s cache and storage', out.headers.get('clear-site-data')?.includes('cache'));
   const after = await people.CLK.b.get('/api/t/cash');

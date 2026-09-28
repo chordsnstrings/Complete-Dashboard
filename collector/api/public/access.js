@@ -23,9 +23,33 @@ export async function loadWho() {
   } catch { who.loaded = true; }
   /* Only on an ANSWER. A 503 or no connection says nothing about who is
      here, and treating it as "anonymous" threw away a signed-in person's
-     kept figures exactly when they were offline and needed them. */
+     kept figures exactly when they were offline and needed them.
+     …but not for ever: what was kept for a signed-in person is kept only as
+     long as their session could still be alive (12 hours idle). A shared
+     browser whose last reader's session simply ran out, opened while the
+     server does not answer (every deploy's migrations, or no signal), used to
+     paint that reader's figures (security review, 2026-09-28). */
   if (answered) partitionStorage();
+  else forgetIfExpired();
   return who;
+}
+const KEPT_UNTIL = 'fleet.swr.until';
+const IDLE_MS = 12 * 3600_000;
+function forgetKept() {
+  try {
+    for (const k of Object.keys(localStorage)) if (k.startsWith('fleet.swr') || k === 'adminToken') localStorage.removeItem(k);
+  } catch { /* storage blocked */ }
+  try {
+    if (typeof caches !== 'undefined') {
+      caches.keys().then((ks) => ks.filter((k) => /-data(-\d+)?$/.test(k)).forEach((k) => caches.delete(k))).catch(() => {});
+    }
+  } catch { /* no Cache Storage */ }
+}
+function forgetIfExpired() {
+  try {
+    const until = Number(localStorage.getItem(KEPT_UNTIL) || 0);
+    if (until && Date.now() > until) forgetKept();
+  } catch { /* storage blocked */ }
 }
 
 /* The browser keeps recent answers (swr.js) for a fast first paint. Those are
@@ -39,8 +63,14 @@ function partitionStorage() {
   try {
     if (localStorage.getItem('fleet.swr.who') !== tag) {
       for (const k of Object.keys(localStorage)) if (k.startsWith('fleet.swr.v')) localStorage.removeItem(k);
+      /* The shared admin token the old Settings page kept here goes too: it is
+         a write key, and the next person at this browser is not the one who
+         typed it (security review, 2026-09-28). */
+      localStorage.removeItem('adminToken');
       localStorage.setItem('fleet.swr.who', tag);
     }
+    if (who.signedIn) localStorage.setItem(KEPT_UNTIL, String(Date.now() + IDLE_MS));
+    else localStorage.removeItem(KEPT_UNTIL);
   } catch { /* storage blocked: nothing is kept anyway */ }
 }
 
@@ -366,9 +396,7 @@ export function confirmIdentity() {
 
 export async function signOut() {
   try { await post('/api/auth/logout', {}, { retry: false }); } catch { /* signed out either way */ }
-  try {
-    for (const k of Object.keys(localStorage)) if (k.startsWith('fleet.swr')) localStorage.removeItem(k);
-  } catch { /* storage blocked */ }
+  forgetKept();
   location.assign('/signin?why=signedout');
 }
 
@@ -410,8 +438,17 @@ export const roleNames = () => (who.roles || []).map((r) => ROLE[r]?.name || r);
    never invented. */
 const FALLBACK_FLEET_IDS = ['ecosine', 'egari'];
 const cap1 = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
+/* A fleet's name is text a platform account holder typed, and the pages
+   write it into HTML in a few dozen places (sourceLabel alone reaches ~40,
+   not all of them through esc()). The security review of 2026-09-28 found
+   four such sinks unescaped; those now escape, and this is the second
+   lock: the characters that open a tag or leave a double-quoted attribute
+   are not part of any brand name, so they are dropped here, once, before
+   any page sees the name. "&" stays: "Smith & Sons" is a real name, and a
+   stray ampersand in innerHTML renders as itself. */
+const plainName = (s) => String(s).replace(/[<>"`\u0000-\u001f\u007f]/g, '').trim();
 export const fleetList = () => (who.fleets?.length
-  ? who.fleets.map((f) => ({ id: f.id, name: f.name || cap1(f.id) }))
+  ? who.fleets.map((f) => ({ id: f.id, name: (f.name && plainName(f.name)) || cap1(f.id) }))
   : FALLBACK_FLEET_IDS.map((id) => ({ id, name: cap1(id) })));
 export const isFleetId = (id) => fleetList().some((f) => f.id === String(id || '').toLowerCase());
 export const fleetLabel = (id) => fleetList().find((f) => f.id === String(id || '').toLowerCase())?.name || cap1(String(id || ''));

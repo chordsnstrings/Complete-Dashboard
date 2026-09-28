@@ -260,7 +260,9 @@ async function forgetPreviousReader() {
   try {
     if (typeof caches === 'undefined') return;
     const gone = caches.keys()
-      .then((ks) => Promise.all(ks.filter((k) => /-data$/.test(k)).map((k) => caches.delete(k))));
+      /* sw.js names it `${VERSION}-data-2`: /-data$/ matched nothing, so this
+         deleted no cache at all (security review, 2026-09-28). */
+      .then((ks) => Promise.all(ks.filter((k) => /-data(-\d+)?$/.test(k)).map((k) => caches.delete(k))));
     await Promise.race([gone, new Promise((r) => setTimeout(r, 1000))]);
   } catch { /* no Cache Storage here, or it refused: nothing kept to forget */ }
 }

@@ -1128,7 +1128,12 @@ export function ledgerReceiptRoutes(app, { q, wrap }) {
     res.set('Content-Type', row.content_type);
     res.set('Content-Length', String(row.byte_len));
     res.set('ETag', `"${sha}"`);
-    res.set('Cache-Control', 'private, max-age=31536000, immutable');
+    /* no-store: a photographed cash handover is CASH, which is never kept in
+       a browser or the service worker (api/access/middleware.js NO_STORE).
+       This was a year, immutable — on a shared browser the photo outlived the
+       session that fetched it (security review, 2026-09-28). The ETag below
+       still answers a revalidation. */
+    res.set('Cache-Control', 'private, no-store');
     if (req.get('if-none-match') === `"${sha}"`) return res.status(304).end();
     return res.end(row.bytes);
   }));

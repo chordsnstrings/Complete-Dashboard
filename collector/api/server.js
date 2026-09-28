@@ -6925,6 +6925,12 @@ app.use((req, res, next) => {
      strips a mount path before the router sees it and these routes declare
      their full path — mounted at the prefix they would match nothing at all. */
   if (!req.path.startsWith('/api/export/')) return next();
+  /* A download of rows, possibly with names, plates and fares in them, must
+     not be kept by a shared proxy or by the browser's disk cache for the next
+     person at the machine (security review, 2026-09-28: the receipt and the
+     export were the two row downloads with no Cache-Control at all). The
+     response cache never stores it — it writes with res.write, not res.json. */
+  res.setHeader('Cache-Control', 'private, no-store');
   const levels = req.fm?.kind === 'user' || req.fm?.kind === 'device' ? (req.fm.levels || {}) : null;
   const withheld = levels
     ? Object.entries(EXPORT_CLASS_COLS).filter(([c]) => levels[c] !== 'F').flatMap(([, cols]) => cols)

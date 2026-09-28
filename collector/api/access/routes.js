@@ -242,6 +242,14 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
   app.post('/api/auth/logout', wrap(async (req, res) => {
     noStore(res);
     const token = req.fmCookies?.[SID];
+    /* The CSRF header, like every other change: another site could post here
+       and sign a person out, wiping the site's storage (security review,
+       2026-09-28). A request with neither a session nor the header — a
+       cross-site form, no cookie sent — is answered and changes nothing. */
+    const csrf = req.fmCookies?.[CSRF];
+    const csrfOk = Boolean(csrf) && safeEqual(req.get('x-fm-csrf') || '', csrf);
+    if ((token || req.fmCookies?.[DEV]) && !csrfOk) return fail(res, 403, 'csrf', 'Reload the page and try again.');
+    if (!token && !req.fmCookies?.[DEV] && !csrfOk) return res.json({ ok: true });
     if (token) {
       const s = await svc.sessionForToken(db, token);
       if (s) {

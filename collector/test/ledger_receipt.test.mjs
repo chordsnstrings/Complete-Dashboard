@@ -140,8 +140,14 @@ check('the bytes come back with the type they were stored as',
 check('byte-identical to what was uploaded',
   Buffer.from(await get.arrayBuffer()).equals(jpeg));
 check('with the digest as the ETag', get.headers.get('etag') === `"${sha}"`);
-check('and immutable, because here the address IS the content',
-  /immutable/.test(get.headers.get('cache-control') || ''), get.headers.get('cache-control'));
+/* It was `immutable` for a year, on the reasoning that the address IS the
+   content. True, and beside the point: a photographed cash handover is CASH,
+   which the access layer never lets a browser keep, and on a shared machine a
+   year-long copy outlived the session that fetched it (security review,
+   2026-09-28). The ETag still answers a revalidation with a 304. */
+check('and never kept by the browser, because it is a cash record',
+  /no-store/.test(get.headers.get('cache-control') || '') && !/immutable|max-age/.test(get.headers.get('cache-control') || ''),
+  get.headers.get('cache-control'));
 const notMod = await fetch(`http://127.0.0.1:${port}/api/ledger/receipt/${sha}`,
   { headers: { 'if-none-match': `"${sha}"` } });
 check('a repeat visit costs a 304', notMod.status === 304, String(notMod.status));

@@ -4060,6 +4060,30 @@ untouched, and nothing projected is ever added into `accounted`.
       answer sends `Clear-Site-Data: "cache", "storage"`), which also resets
       the saved theme and look. Chromium applies it at the next navigation
       when the logout was a script's request.
+  14. **A handler's `Cache-Control` beats the gate's.** The gate sets
+      `no-store` for any answer carrying a never-kept class; the cash receipt
+      handler then set `max-age=31536000, immutable` and won — a photographed
+      cash handover outlived the session on a shared browser. The gate now
+      pins the header for the rest of the response (`test/access_core` §8c).
+      `res.write` routes (the CSV export) bypass the cache but NOT the browser
+      disk cache: they set `no-store` themselves.
+  15. **The service worker's data cache is `${VERSION}-data-2`, not
+      `…-data`.** A `/-data$/` filter deleted nothing on sign-in; the test
+      passed because its fake cache was named to fit the regex. Name test
+      fixtures as the real code names them.
+  16. **"The server did not answer" is not "nobody is signed in" — and not
+      "the last reader is still here" either.** Kept answers carry
+      `fleet.swr.until` (the 12-hour idle limit of a session); a page opened
+      while `/api/auth/me` fails forgets them once that has passed.
+  17. **Two commits of one four-eyes proposal at once both read `open`.** The
+      status moves only when the first finishes; the process holds an
+      in-flight claim (`committingNow`), which is enough while the API runs as
+      one instance. Scaling the API out needs a row lock instead.
+  18. **A fleet's name is typed by a platform account holder.** It reaches
+      ~40 HTML templates through `sourceLabel`/`fleetLabel`; `fleetList()`
+      drops `< > " \`` and control characters, and the innerHTML sinks
+      escape. Don't `esc()` it where the sink is `textContent` — "&" would
+      print as `&amp;`.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 

@@ -131,7 +131,7 @@ function renderPreview(host, p) {
   const m = p.match || {};
   host.append(kpiRow([
     { key: 'hrp-rows', label: 'Rows read', value: fmt(p.rows_read),
-      sub: Object.entries(p.fleet_split || {}).map(([f, n]) => `${fleetLabel(f) || f} ${fmt(n)}`).join(' · ') },
+      sub: Object.entries(p.fleet_split || {}).map(([f, n]) => `${esc(fleetLabel(f) || f)} ${fmt(n)}`).join(' · ') },
     { key: 'hrp-id', label: 'Matched by platform id', value: fmt(m.by_platform_id), sub: 'the id HR typed' },
     { key: 'hrp-phone', label: 'Matched by phone', value: fmt(m.by_phone), sub: 'no id of theirs is held' },
     { key: 'hrp-none', label: 'Not matched', value: fmt(m.unmatched), sub: 'never matched by name' },
@@ -206,7 +206,7 @@ function renderPreview(host, p) {
     ap.body.append(el('p', 'cap', `${countOf(a.dropped.length, 'person', 'people')} on that export ${a.dropped.length === 1 ? 'is' : 'are'} not on this one and will read “off the HR list since ${dateStr(p.export_date)}” — never deleted. `
       + `${countOf(a.added, 'person', 'people')} ${a.added === 1 ? 'is' : 'are'} new.`));
     if (a.dropped.length) {
-      ap.body.append(el('p', 'cap', `Leaving the list: ${a.dropped.slice(0, 12).map((d) => `${fleetLabel(d.fleet_id) || d.fleet_id} ${d.employee_id}`).join(', ')}${a.dropped.length > 12 ? ` and ${a.dropped.length - 12} more` : ''}.`));
+      ap.body.append(el('p', 'cap', `Leaving the list: ${a.dropped.slice(0, 12).map((d) => `${esc(fleetLabel(d.fleet_id) || d.fleet_id)} ${esc(d.employee_id)}`).join(', ')}${a.dropped.length > 12 ? ` and ${a.dropped.length - 12} more` : ''}.`));
     }
     if (a.blanked.length) {
       ap.body.append(note(`Columns filled on the earlier export and blank on this one: ${a.blanked.map((b) => `${b.column} (${countOf(b.rows, 'row')})`).join(', ')}. ${a.note}`, 'warn'));
@@ -358,7 +358,7 @@ export async function renderHrRoster(root) {
     const t = v.totals;
     const HR_TILES = [
       { key: 'hr-on-list', label: 'On HR’s list', value: fmt(t.on_list),
-        sub: Object.entries(t.by_fleet || {}).map(([f, n]) => `${fleetLabel(f)} ${fmt(n)}`).join(' · ') },
+        sub: Object.entries(t.by_fleet || {}).map(([f, n]) => `${esc(fleetLabel(f))} ${fmt(n)}`).join(' · ') },
       { key: 'hr-expiring', label: 'Anything expiring in 90 days', value: fmt(t.anything_expiring),
         sub: 'people with at least one document expired or due' },
       { key: 'hr-matched', label: 'Matched to a platform account', value: fmt(t.matched.platform_id + t.matched.phone),

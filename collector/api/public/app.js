@@ -3093,7 +3093,7 @@ async function platformShare(root) {
      same byPlat the dominant bar in vHost above already draws, under a caption
      — "Share of total volume" — that is a description of the bar. Two pictures
      of one number, a hand's width apart. */
-  const fleetMix = panel('Trips by fleet', `${fleetNames(' vs ')} — the businesses on these credentials`);
+  const fleetMix = panel('Trips by fleet', `${esc(fleetNames(' vs '))} — the businesses on these credentials`);
   root.append(fleetMix.panel);
   const cov = panel('Coverage & history depth', 'What each source has actually delivered'); root.append(cov.panel);
   [fleetMix.body, cov.body].forEach(loading);
