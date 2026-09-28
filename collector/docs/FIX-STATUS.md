@@ -4085,8 +4085,19 @@ payouts and cash on hand etc every detail, every platform as a downloadable
 excel file based on the range". Rules and measurements: `docs/COVERAGE.md`
 "The money workbook (Excel)".
 
+Deployed twice: `b6162d26` (`25a6758`), then `2195e3e8` (`99b081c`) with the
+used range stated on every sheet and "recorded" on the hand-in and advance
+columns, both after a clean full suite (346 files, 13,062 assertions). On
+`99b081c`, from production with no account: the whole-fleet file for 1–27
+September (2.2 MB, 7–8 s) matches #payouts and the daily CSV to the fils; a
+one-driver file (`?person=`) and a one-account file (`?account=`) each come
+back as six sheets with one row to collect; over a year is 413, an unknown
+person 404, a malformed one 400. The button shows on Drivers and on the eight
+Money and Finance pages with a date range, and not on Vehicles, Payouts or
+Cash handed in (no date range to follow).
+
 | # | what | test (revert fails it) | written | committed | deployed | proven |
 |---|---|---|---|---|---|---|
 | XL-1 | dependency-free .xlsx writer: numbers as numbers, Dubai dates as Excel dates, text never a formula, frozen header, filters, the used range stated; read back by our reader AND openpyxl | xlsx_write (32: strip 1+, epoch 4, crc 1+, dimension 2) | ✓ | ✓ e5c05e5 | ✓ b6162d26 | ✓ the production download opens in LibreOffice Calc and openpyxl; the missing used range was found there and added |
 | XL-2 | the workbook: cash to collect per driver with the mobile, cash by day, cash trips, hand-ins, drivers, money by day, payouts by arrival, platform statements, every trip ≤31 days; one driver's file; chips; withheld classes | money_workbook (42: hand-in sign 6, withheld 1, unpriced 2, Dubai day 7) | ✓ | ✓ e5c05e5 | ✓ b6162d26 | ✓ 1–27 Sep from production: payouts 12 / AED 516,746.06 and bookings 21,190 / fares AED 1,165,365.94 identical to #payouts and the daily CSV; 2,919 cash trips agree across three sheets |
-| XL-3 | the route (413 over a year, 400/404 for a bad driver, no-store), manifest (subject CASH, fleet param, audited), the button — fetched, refusal said on the page | access_pages §16 (9), access_manifest, server_wiring, mockapi, endpoint_coverage | ✓ | ✓ 25a6758 | ✓ b6162d26 | ✓ `private, no-store`, attachment named for its dates, on production |
+| XL-3 | the route (413 over a year, 400/404 for a bad driver, no-store), manifest (subject CASH, fleet param, audited), the button — fetched, refusal said on the page | access_pages §16 (9), access_manifest, server_wiring, mockapi, endpoint_coverage | ✓ | ✓ 25a6758 | ✓ 2195e3e8 | ✓ `private, no-store`, attachment named for its dates; 413/404/400 as designed; the button seen on production Drivers and Cash and unpaid |
