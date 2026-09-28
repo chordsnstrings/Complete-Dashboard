@@ -85,7 +85,6 @@
 :root{
   --paper:#FFFFFF; --paper-2:#F6F6F7; --ink:#0A0A0B; --grey:#6D6D72; --grey-2:#97979D; --hair:#D6D6D9;
   --neg:#961111; --pos:#007E44;
-  --logo:url("/brand/mark.png");
   --sans:"Karla",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --disp:"Fraunces",Georgia,"Times New Roman",serif;
   --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
@@ -94,13 +93,17 @@
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --paper:#111113; --paper-2:#1B1B1D; --ink:#F0F0F1; --grey:#8D8D92; --grey-2:#68686D; --hair:#333336;
-    --neg:#D65044; --pos:#008E60; --logo:url("/brand/mark-dark.png"); color-scheme:dark;
+    --neg:#D65044; --pos:#008E60; color-scheme:dark;
   }
+  :root:not([data-theme="light"]) .si-mark-l{display:none}
+  :root:not([data-theme="light"]) .si-mark-d{display:inline-block}
 }
 :root[data-theme="dark"]{
   --paper:#111113; --paper-2:#1B1B1D; --ink:#F0F0F1; --grey:#8D8D92; --grey-2:#68686D; --hair:#333336;
-  --neg:#D65044; --pos:#008E60; --logo:url("/brand/mark-dark.png"); color-scheme:dark;
+  --neg:#D65044; --pos:#008E60; color-scheme:dark;
 }
+:root[data-theme="dark"] .si-mark-l{display:none}
+:root[data-theme="dark"] .si-mark-d{display:inline-block}
 
 *,*::before,*::after{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
@@ -122,7 +125,15 @@ a:hover{text-decoration-thickness:2px}
   padding-bottom:12px;border-bottom:1.5px solid var(--ink)}
 .si-word{display:inline-flex;align-items:center;gap:.3em;font-family:var(--disp);font-weight:600;
   font-size:1.45rem;line-height:1;letter-spacing:-.014em;color:var(--ink);text-decoration:none;min-height:44px}
-.si-logo{display:inline-block;flex:none;width:1.06em;height:1em;background:var(--logo) center/contain no-repeat}
+/* The mark, both variants in the page and one shown. As a CSS background
+   swapped by the theme, the dark variant was only fetched when the theme
+   turned dark — and after a sign-out's Clear-Site-Data emptied the cache, a
+   reader whose system went dark in the evening saw the name with no mark
+   until it arrived (measured: 2 of 22 dark screenshots in this page's own
+   test). Two <img>s are both fetched up front, 3 KB each, and the theme
+   only chooses between them. The name beside them is the label. */
+.si-mark{flex:none;width:1.06em;height:1em;object-fit:contain}
+.si-mark-d{display:none}
 .si-main{flex:1 0 auto;display:flex;justify-content:center;padding:clamp(24px,8vh,88px) 0 40px}
 .si-card{width:100%;max-width:420px;min-width:0}
 .si-foot{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--grey);
@@ -151,7 +162,7 @@ a:hover{text-decoration-thickness:2px}
 
 .si-form{display:grid;gap:16px;margin:0}
 .si-field{display:grid;gap:6px;min-width:0}
-.si-lab{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;min-height:22px}
+.si-lab{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:22px}
 .si-field label,.si-label{font-family:var(--mono);font-size:.72rem;font-weight:500;letter-spacing:.12em;
   text-transform:uppercase;color:var(--ink)}
 .si-field input{width:100%;min-width:0;min-height:48px;padding:10px 12px;font:inherit;font-size:16px;
@@ -162,7 +173,9 @@ a:hover{text-decoration-thickness:2px}
 .si-field input[readonly]{background:var(--paper-2);border-color:var(--hair);color:var(--ink)}
 .si-field input.code{font-family:var(--mono);font-size:1.25rem;letter-spacing:.2em}
 .si-hint{margin:0;font-size:.88rem;color:var(--grey);line-height:1.45}
-.si-show{min-height:44px;min-width:44px;margin:-14px -6px -8px 0;padding:0 6px;font-family:var(--mono);
+/* 44px to the thumb, 22px to the layout: the negative margins let the
+   touch target overhang the label row instead of pushing the field down. */
+.si-show{min-height:44px;min-width:44px;margin:-11px -6px -11px 0;padding:0 6px;font-family:var(--mono);
   font-size:.7rem;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--grey);
   background:none;border:0;cursor:pointer}
 .si-show:hover{color:var(--ink)}
@@ -230,7 +243,7 @@ a:hover{text-decoration-thickness:2px}
 <body>
 <div class="si">
   <header class="si-top">
-    <span class="si-word"><span class="si-logo" aria-hidden="true"></span>FleetMirror</span>
+    <span class="si-word"><img class="si-mark si-mark-l" src="/brand/mark.png" alt="" width="169" height="160"><img class="si-mark si-mark-d" src="/brand/mark-dark.png" alt="" width="169" height="160">FleetMirror</span>
   </header>
   <main class="si-main">
     <section class="si-card" id="signin">

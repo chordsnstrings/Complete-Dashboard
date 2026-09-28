@@ -202,6 +202,12 @@ const EVERY = 'none of them changes what it shows';
 export const APPLIES_WHY = {
   /* NO_FILTER: the window, the grouping, the platform and the fleet */
   settings: 'it sets credentials and the collection schedule, and counts nothing over a window',
+  /* Sign-in and access (collector/docs/ULM-DESIGN.md): about people, grants
+     and settings, never figures over a window. */
+  account: 'it is your own account: your password, two-step sign-in, sessions and access',
+  access: 'it manages people and what each may see, which no window or channel narrows',
+  approvals: 'each change waiting here is one stored proposal, whatever window it was prepared in',
+  'fleet-names': 'it is how the platforms name each fleet, which no window or channel changes',
   live: 'it shows every car where it is now',
   sources: 'it is the state of every collector now, whatever window a page is read over',
   day: 'the day it shows is in its address, and every source that saw that day is on it',

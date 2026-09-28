@@ -110,7 +110,9 @@ const src = readFileSync('api/server.js', 'utf8');
 check('server.js no longer contains a next() that fires when ADMIN_TOKEN is unset',
   !/if \(!want\)[\s\S]{0,200}return next\(\)/.test(src));
 check('GET /api/settings redacts for a non-admin reader',
-  /app\.get\('\/api\/settings',[\s\S]{0,600}isAdmin\(req\) \? rows : redactSettings\(rows\)/.test(src));
+  /* isAdmin(req, undefined, 'CRED') since ULM: a signed-in reader is judged
+     by whether their role holds platform logins; anonymous by the token. */
+  /app\.get\('\/api\/settings',[\s\S]{0,600}isAdmin\(req(, undefined, 'CRED')?\) \? rows : redactSettings\(rows\)/.test(src));
 check('a queued collector job can no longer record itself as unauthenticated',
   !/x-admin-token'\) \? 'admin' : 'unauthenticated'/.test(src)
   && /\[mode, fleet, 'admin'\]/.test(src));

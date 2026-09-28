@@ -176,7 +176,11 @@ walk('');
 /* Code, not prose: tokens.js and ui.js both EXPLAIN the attribute in their
    comments, and a sentence about the skin is not a module branching on it. */
 const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
-const readers = modules.filter((f) => /dataset\.skin|data-skin|fleet\.skin/.test(code(read(f))));
+/* access.js is the one exception, and it changes no markup: it STORES a
+   signed-in person's chosen look (fleet.skin, the key the pre-paint script
+   reads) so the choice follows them to any browser, and reports whether this
+   page is already in it. Nothing it does draws differently per skin. */
+const readers = modules.filter((f) => f !== 'access.js' && /dataset\.skin|data-skin|fleet\.skin/.test(code(read(f))));
 check(`no module reads the skin (${modules.length} scanned)`, modules.length > 50 && readers.length === 0, readers.join(' '));
 const SHELL_IDS = ['nav', 'sectabs', 'authBanner', 'filters', 'fRange', 'fRangeLabel', 'fGrain', 'fPlatform',
   'fFleet', 'refreshBtn', 'zenBtn', 'tzNote', 'themeBtn', 'settingsLink', 'freshness', 'todayNow', 'crumb',
@@ -208,8 +212,10 @@ console.log('\n3 · the switch, in a browser');
   const plain = await page.evaluate(() => ({ skin: document.documentElement.dataset.skin || null,
     sheets: [...document.styleSheets].map((s) => new URL(s.href || location.href).pathname) }));
   await page.waitForTimeout(400);
-  check('with no choice made, there is no skin attribute', plain.skin === null, plain.skin);
-  check('…and arkiv.css is never requested', !asked.includes('/arkiv.css'), asked.filter((p) => /css/.test(p)).join(' '));
+  /* The operator, 2026-09-28: "let's do arkiv as the default, and let users
+     switch to classic" — on the desktop too. */
+  check('with no choice made, the Arkiv skin is on', plain.skin === 'arkiv', plain.skin);
+  check('…and arkiv.css is requested', asked.includes('/arkiv.css'), asked.filter((p) => /css/.test(p)).join(' '));
 
   await page.goto(`${base}/?ui=desktop&skin=arkiv#overview`, { waitUntil: 'domcontentloaded' });
   const on = await page.evaluate(() => ({ skin: document.documentElement.dataset.skin || null,

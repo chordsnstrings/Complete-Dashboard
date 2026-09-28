@@ -26,7 +26,7 @@ import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
    only draw what it decided — which pages open, and the true reason where
    something is not shown. */
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
-  WithheldError, toSignIn, signOut, roleNames, post as accessPost, installFetchGuard } from './access.js';
+  WithheldError, toSignIn, signOut, roleNames, post as accessPost, installFetchGuard, inChosenLook } from './access.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS, driversConcentration, driversAbsence } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS, vdirTail } from './vehicle.js';
 import { renderCohort } from './cohort.js';
@@ -10230,11 +10230,7 @@ installFetchGuard();
 const whoReady = loadWho().then(() => {
   if (who.mode === 'enforced' && !who.signedIn) { toSignIn('required'); return false; }
   if (who.restricted) { toSignIn('setup'); return false; }
-  const look = who.user?.prefs?.look;
-  const now = document.documentElement.dataset.skin === 'arkiv' ? 'arkiv' : 'classic';
-  if ((look === 'arkiv' || look === 'classic') && look !== now) {
-    try { localStorage.setItem('fleet.skin', look); location.reload(); return false; } catch { /* keep this look */ }
-  }
+  if (!inChosenLook()) { location.reload(); return false; }
   /* The landing page, or a page this role cannot open: go to the first one it can. */
   if (gated() && !location.hash && !canOpenView(state.view)) { location.replace(`#${firstOpenView()}`); return false; }
   return true;

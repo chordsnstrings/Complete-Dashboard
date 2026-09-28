@@ -327,5 +327,17 @@ export async function setLook(look) {
   if (who.signedIn && who.kind === 'user') { try { await post('/api/auth/prefs', { look }); } catch { /* the local choice stands */ } }
 }
 
+/* Is this page already in the look the signed-in person chose? If not, the
+   choice is stored where the pre-paint script reads it and the answer is
+   false — the caller reloads once, so the page paints in the chosen look. */
+export function inChosenLook() {
+  const look = who.user?.prefs?.look;
+  if (look !== 'arkiv' && look !== 'classic') return true;
+  const now = document.documentElement.dataset.skin === 'arkiv' ? 'arkiv' : 'classic';
+  if (look === now) return true;
+  try { localStorage.setItem(document.documentElement.dataset.ui === 'phone' ? 'fleet.skin.phone' : 'fleet.skin', look); } catch { return true; }
+  return false;
+}
+
 export const roleNames = () => (who.roles || []).map((r) => ROLE[r]?.name || r);
 export { CLASS, ROLE, ROLES, LEVEL_NAME, rank };
