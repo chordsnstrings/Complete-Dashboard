@@ -186,8 +186,12 @@ console.log('\nit is live, and there is one today per screen');
    a band that stamps a Dubai clock time on itself — on production the band read
    56 bookings "as of 07:15" while the lede three inches below it, off a
    different endpoint, read 68. */
+/* Since sign-in (2026-09-28) the band may also be `quiet` — a role that sees
+   bookings only as totals is refused /api/day, and the strip says nothing
+   rather than raising the page's withheld banner. Still an options object,
+   so still off the store. */
 check('the band takes api() off the stale-while-revalidate path',
-  /api\(`\$\{path\}&t=\$\{minute\}`, \{ cache: 'no-store' \}\)/.test(mod),
+  /api\(`\$\{path\}&t=\$\{minute\}`, \{ cache: 'no-store'(, \.\.\.\(quiet \? \{ quiet: true \} : \{\}\))? \}\)/.test(mod),
   'passing an options object is what stops api() reading and writing the store');
 check('…and stamps the minute, for the caches it cannot pass an option to',
   /const minute = Math\.floor\(Date\.now\(\) \/ 60000\)/.test(mod),

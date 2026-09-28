@@ -38,7 +38,7 @@
 
    EMPTY IS A SENTENCE. Every list that can be empty says what would appear
    in it and how it gets there. */
-import { el, esc, panel, note, tableFrom, tabBar, dtStr, pill } from './ui.js';
+import { el, esc, panel, note, tableFrom, tabBar, dtStr, pill, entity } from './ui.js';
 import { who, loadWho, getJson, post, closedBlock, toSignIn } from './access.js';
 
 const TABS = [
@@ -388,13 +388,17 @@ function evidenceLists(r, ctx) {
   const sp = r.plates.shared || [];
   box.append(h('h4', { class: 'acx-h4' }, `Plates it shares (${sp.length})`));
   if (!sp.length) box.append(empty(r.plates.reason || 'None of its plates appears in another platform’s rows.'));
-  else box.append(tableFrom(sp, [{ label: 'Fleet', key: 'fleet_id', render: (x) => esc(ctx.fleetName(x.fleet_id)) }, { label: 'Plate', key: 'plate' }], { compact: true }));
+  else {
+    box.append(tableFrom(sp, [{ label: 'Fleet', key: 'fleet_id', render: (x) => esc(ctx.fleetName(x.fleet_id)) },
+      { label: 'Plate', key: 'plate', render: (x) => entity('vehicle', x.plate, x.plate) }], { compact: true }));
+  }
   const sd = r.drivers.shared || [];
   box.append(h('h4', { class: 'acx-h4' }, `Drivers it shares (${sd.length})`));
   if (!sd.length) box.append(empty(r.drivers.reason || 'None of its drivers appears in another platform’s rows.'));
   else {
     box.append(tableFrom(sd, [{ label: 'Fleet', key: 'fleet_id', render: (x) => esc(ctx.fleetName(x.fleet_id)) },
-      { label: 'Driver', key: 'name' }, { label: 'Trips there', key: 'trips', num: true }], { compact: true }));
+      { label: 'Driver', key: 'name', render: (x) => entity('driver', x.driver_ext_id, x.name) },
+      { label: 'Trips there', key: 'trips', num: true }], { compact: true }));
   }
   return box;
 }

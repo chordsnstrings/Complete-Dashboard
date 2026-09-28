@@ -470,7 +470,10 @@ export function fleetNameRoutes(app, { q, wrap, db = null, tx = null, log = { in
         WHERE v.plate = ANY($1::text[]) AND a.status = 'linked' AND a.platform <> $2
        ORDER BY 1, 2`, [plates.list, a.platform, WINDOW_DAYS]) : [];
     const sharedDrivers = persons.list.length ? await q(
-      `SELECT t.fleet_id, t.person_key, max(t.driver_name) AS name, count(*)::int AS trips FROM trip t
+      /* One of the person's platform ids, so the name links to their page
+         (test/interlinking: every driver name comes with an id to link by). */
+      `SELECT t.fleet_id, t.person_key, max(t.driver_name) AS name, max(t.driver_ext_id) AS driver_ext_id,
+              count(*)::int AS trips FROM trip t
         WHERE t.person_key = ANY($1::text[]) AND t.platform <> $2 AND t.fleet_id IS NOT NULL
           AND t.requested_at > now() - make_interval(days => $3)
         GROUP BY 1, 2 ORDER BY 1, 3 NULLS LAST`, [persons.list, a.platform, WINDOW_DAYS]) : [];

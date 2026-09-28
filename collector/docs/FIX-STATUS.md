@@ -4017,6 +4017,8 @@ that found it.
 | S1 | sweep | the overview closed for the wall screen because the driver leaderboard needs names | the panel says why it is empty; the page draws the rest | sweep (WALL #overview) | ✓ | | | |
 | S2 | sweep | the menu offered the wall screen four pages the server refuses (their lists are bookings or vehicles, held as totals) | `VIEW_LIST_NEEDS`; the closed page names the list's class | view_list_needs | ✓ | | | |
 | S3 | sweep | a wall screen on Approvals was sent to the sign-in page | the person-only routes tell a screen it is a screen (403 with the reason) | sweep (WALL #approvals) | ✓ | | | |
+| S4 | suite | the map replay's panels sat flush under their grid (drawn by default once Arkiv became the default) | the host is a `.stack` | spacing | ✓ | | | |
+| S5 | suite | the Fleet names evidence named plates and drivers without linking them | linked through `entity()`; the query returns an id | interlinking | ✓ | | | |
 | U15 | medium | the HR roster and vehicle feeds narrowed a one-fleet reader's rows but sent totals over every fleet | both `mixed`: refused with the true reason, shown as a closed page | access_manifest | ✓ | | | |
 
 **Accepted, not fixed (documented in ULM-DESIGN §16):** in open mode an

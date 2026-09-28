@@ -4117,6 +4117,13 @@ untouched, and nothing projected is ever added into `accounted`.
       overview — the page a wall screen shows. Wrap any panel whose route
       carries a class the page's readers may lack in `unlessWithheld`, and
       have the panel say why it is empty.
+  24. **A default-look change moves every test that loads the default.**
+      With Arkiv the default, `spacing.test` measured Arkiv-only DOM for the
+      first time (the map replay's panels, flush under their grid), and
+      three Classic goldens moved with reworded sentences. Re-record a
+      golden only for the routes whose change is intended, from a clean
+      archive of the committed tree (`ONLY=…`), and say which change moved
+      which page.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 

@@ -5834,7 +5834,10 @@ V.map = async (root) => {
   const perma = el('p', 'cap'); root.append(perma);
   /* The replay marks' host is on the page under the contract only: the old
      skin's DOM is held byte for byte by the golden. */
-  const marks = el('div'); if (ak) root.append(marks);
+  /* A stack, so its panels are spaced from each other: as a plain div the
+     day list sat flush under the three-panel grid (spacing.test, 0px, once
+     Arkiv became the default look and this host was drawn by default). */
+  const marks = el('div', 'stack'); if (ak) root.append(marks);
   const showPerma = (mode, plate, day) => {
     const addr = mode === 'replay' && plate
       ? `#map/replay/${encodeURIComponent(plate)}${day ? `?day=${encodeURIComponent(day)}` : ''}`
