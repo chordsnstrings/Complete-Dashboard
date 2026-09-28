@@ -36,7 +36,7 @@
    accessadmin.js, which imports it from here: both pages are loaded on
    demand, and this is the one of the two every signed-in person opens. */
 import { el, esc, panel, note, tableFrom, dtStr, dateStr, contract } from './ui.js';
-import { who, loadWho, getJson, post, signOut, setLook, toSignIn } from './access.js';
+import { who, loadWho, getJson, post, signOut, setLook, toSignIn, fleetLabel } from './access.js';
 import { ROLE, ROLES, CLASS, CLASSES, CAP, CAPS, rank } from './access_model.js';
 
 /* ═════════════════════════ the page ═════════════════════════ */
@@ -162,8 +162,8 @@ function fleetScopeText() {
   const scope = who.access?.scope || [];
   const all = who.fleets || [];
   if (!scope.length) return 'None — your roles cover no fleet yet';
-  if (scope.length === all.length) return `Every fleet (${all.map((f) => f.name).join(', ')})`;
-  return scope.map((id) => all.find((f) => f.id === id)?.name || id).join(', ');
+  if (scope.length === all.length) return `Every fleet (${all.map((f) => f.name || fleetLabel(f.id)).join(', ')})`;
+  return scope.map((id) => all.find((f) => f.id === id)?.name || fleetLabel(id)).join(', ');
 }
 
 /* What the pages will show this person, class by class — the same levels the
@@ -594,7 +594,7 @@ export const roleName = (code) => ROLE[code]?.name || customNames[code]
 
 export function fleetsText(fleets, all = []) {
   if (!fleets || !fleets.length) return 'every fleet';
-  return fleets.map((id) => all.find((f) => f.id === id)?.name || id).join(', ');
+  return fleets.map((id) => all.find((f) => f.id === id)?.name || fleetLabel(id)).join(', ');
 }
 
 /* A browser, as a person names it, from its user-agent string. Order
@@ -640,14 +640,25 @@ export function roleSelect(roles, { selected = '', mark = null, blank = 'Choose 
 export function fleetPicker(fleets = [], { name = uid() } = {}) {
   const every = h('input', { type: 'checkbox', checked: true, id: uid(), 'data-acx': 'fleet-every' });
   const boxes = fleets.map((f) => h('input', { type: 'checkbox', value: f.id, id: uid(), name, disabled: true, 'data-fleet': f.id }));
-  const list = h('div', { class: 'acx-fleets-only' }, fleets.map((f, i) => h('label', { class: 'acx-check', for: boxes[i].id }, boxes[i], f.name)));
+  const list = h('div', { class: 'acx-fleets-only' }, fleets.map((f, i) => h('label', { class: 'acx-check', for: boxes[i].id }, boxes[i], f.name || fleetLabel(f.id))));
+  /* What a fleet-limited grant gets, said before it is given. 75 read routes
+     combine every fleet's records with no fleet on their rows (a person's
+     page, a car's page, the day, the overview's figures); the server refuses
+     them to a reader limited to some fleets, with that reason
+     (api/access/middleware.js judge()). */
+  const limits = h('p', { class: 'depnote acx-fleet-limits' },
+    'Limited to some fleets, this person sees those fleets’ lists and totals. Pages that combine every '
+    + 'fleet’s records — the overview figures, the day, a driver’s or a car’s page — stay closed to them, '
+    + 'and say why. Choose every fleet if they need those pages.');
+  limits.hidden = true;
   every.addEventListener('change', () => {
     boxes.forEach((b) => { b.disabled = every.checked; if (every.checked) b.checked = false; });
     list.classList.toggle('off', every.checked);
+    limits.hidden = every.checked;
   });
   list.classList.add('off');
   const node = h('fieldset', { class: 'acx-fleets' }, h('legend', { class: 'deplabel' }, 'Fleets'),
-    h('label', { class: 'acx-check', for: every.id }, every, 'Every fleet, including any added later'), list);
+    h('label', { class: 'acx-check', for: every.id }, every, 'Every fleet, including any added later'), list, limits);
   return {
     node,
     /* null = every fleet; [] = none ticked, which the caller refuses. */

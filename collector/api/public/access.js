@@ -144,7 +144,7 @@ export const VIEW_SUBJECT = Object.freeze({
   'vehicle/compliance': 'VEH', drivers: 'ID', feeds: 'VEH', finance: 'REV', forecast: 'BK', 'hr-roster': 'HR', identity: 'MRG',
   'import-sheet': 'CASH', insights: 'ID', live: 'LOC', 'low-performers': 'ID', map: 'LOC', notfound: 'SYS',
   'online-time': 'ID', opening: 'CASH', optimise: 'BK', overview: 'BK', payouts: 'PAY', performance: 'ID',
-  performer: 'ID', platforms: 'BK', 'platforms/funnel': 'COND', 'platforms/tiers': 'VEH', playbook: 'REV',
+  performer: 'ID', platforms: 'BK', 'platforms/funnel': 'COND', 'platforms/tiers': 'BK', playbook: 'REV',
   policy: 'CASH', property: 'REV', 'property/drivers': 'ID', 'property/guests': 'PAX', provenance: 'REV',
   providers: 'SYS', receipts: 'PAY', reconcile: 'PAY', retention: 'BK', revenue: 'REV', roster: 'ID',
   'roster/states': 'SYS', safety: 'COND', 'safety/events': 'VEH', 'safety/vehicles': 'VEH', salary: 'CASH',
@@ -200,7 +200,7 @@ export const VIEW_CAP_WHY = Object.freeze({
    record, which the server refuses at A; offering it in the menu and then
    refusing it is the defect this closes. */
 export const VIEW_AGGREGATE = Object.freeze(new Set(['capacity', 'causes', 'demand', 'forecast', 'optimise',
-  'overview', 'platforms', 'supply', 'corridors', 'corporate/approach', 'analyst', 'corporate', 'finance',
+  'overview', 'platforms', 'platforms/tiers', 'supply', 'corridors', 'corporate/approach', 'analyst', 'corporate', 'finance',
   'provenance', 'revenue', 'settlement', 'receipts', 'reconcile']));
 export const PHONE_AGGREGATE = Object.freeze(new Set(['today', 'overview', 'money', 'finance', 'settlement',
   'revenue', 'corporate', 'analyst', 'optimise']));
