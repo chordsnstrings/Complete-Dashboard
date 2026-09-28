@@ -220,6 +220,24 @@ export function withheldBanner() {
   if (masked.length) parts.push(`<b>Masked:</b> ${esc(masked.join(', '))} (last characters only)`);
   if (totals.length) parts.push(`<b>Totals only:</b> ${esc(totals.join(', '))}`);
   el.innerHTML = `${parts.join(' · ')}. Where a value is left out on this page, this is why. <a href="#account">Ask for access</a>`;
+  /* Masked values can be shown in full for ten minutes, with a reason — the
+     server records who, what and why (ULM-DESIGN §6.2). */
+  const maskedCodes = rows.filter(([, l]) => l === 'M').map(([c]) => c);
+  if (maskedCodes.length && who.kind === 'user' && !who.preview) {
+    const form = document.createElement('form');
+    form.className = 'ac-reveal';
+    form.innerHTML = `<label for="ac-reveal-why">Show the masked values in full for ten minutes — why?</label>
+      <input id="ac-reveal-why" maxlength="200" required> <button type="submit">Show in full</button> <span class="ac-msg" role="status"></span>`;
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const why = form.querySelector('input').value.trim();
+      try {
+        for (const c of maskedCodes) await post('/api/auth/reveal', { class: c, reason: why, view: location.hash.slice(1) });
+        location.reload();
+      } catch (err) { form.querySelector('.ac-msg').textContent = err.message; }
+    });
+    el.append(form);
+  }
   return el;
 }
 

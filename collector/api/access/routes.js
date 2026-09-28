@@ -375,6 +375,30 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     return res.json({ ok: true, preview: role });
   }));
 
+  /* Showing a masked class in full, for ten minutes, on this session only —
+     with a reason, after re-confirming, and recorded (ULM-DESIGN §6.2). Only
+     a class the role holds MASKED can be revealed: reveal is not a way round
+     a class the role does not hold at all. */
+  app.post('/api/auth/reveal', wrap(async (req, res) => {
+    const fm = me(req, res, { write: true });
+    if (!fm) return undefined;
+    if (fm.access.preview) return fail(res, 403, 'preview', 'You are previewing a role, which is read-only.');
+    const cls = String(req.body?.class || '');
+    if (!CLASS_CODES.includes(cls) || fm.access.levelsAny?.[cls] !== 'M') {
+      return fail(res, 403, 'not_allowed', 'Only something your role sees masked can be shown in full.');
+    }
+    const reason = String(req.body?.reason || '').trim();
+    if (reason.length < MIN_REASON) return fail(res, 400, 'reason', 'Say why you need to see it in full.');
+    if (!stepupFresh(fm)) return fail(res, 403, 'stepup', 'Confirm it is you to continue.');
+    const until = Date.now() + 10 * 60_000;
+    const cur = layer.reveals.get(fm.session.id) || {};
+    cur[cls] = until;
+    layer.reveals.set(fm.session.id, cur);
+    if (layer.reveals.size > 5000) layer.reveals.delete(layer.reveals.keys().next().value);
+    await audit(req, 'access.reveal', 'class', cls, { reason, view: String(req.body?.view || '').slice(0, 120), minutes: 10 });
+    return res.json({ ok: true, class: cls, until: new Date(until).toISOString() });
+  }));
+
   /* Asking for access from a page that said "not shown to your role". */
   app.post('/api/auth/request', wrap(async (req, res) => {
     const fm = me(req, res, { write: true });
@@ -483,6 +507,7 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       const role = await svc.roleByCode(db, g.role);
       const exp = parseExpiry(g.expires_at);
       if (exp === 'bad') return fail(res, 400, 'bad_expiry', 'An end date must be in the future.');
+      if (role?.timeboxed && !exp) return fail(res, 400, 'needs_expiry', `The ${role.name} role must have an end date.`);
       const d = await grantDecision(fm, role, parseFleets(g.fleets));
       if (d.refuse) return fail(res, 403, 'refused', d.refuse);
       decided.push({ role, fleets: parseFleets(g.fleets), exp, d });
@@ -705,6 +730,7 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     const role = await svc.roleByCode(db, req.body?.role);
     const exp = parseExpiry(req.body?.expires_at);
     if (exp === 'bad') return fail(res, 400, 'bad_expiry', 'An end date must be in the future.');
+    if (role?.timeboxed && !exp) return fail(res, 400, 'needs_expiry', `The ${role.name} role must have an end date.`);
     const d = await grantDecision(fm, role, parseFleets(req.body?.fleets), { targetUserId: r.user_id });
     if (d.refuse) return fail(res, 403, 'refused', d.refuse);
     const g = await svc.createGrant(db, { userId: r.user_id, roleCode: role.code, fleets: parseFleets(req.body?.fleets),

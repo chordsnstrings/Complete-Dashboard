@@ -336,6 +336,41 @@ console.log('\n9b. four-eyes: a cash sheet is proposed by one person and committ
   check('a Dispatcher sees no cash proposals', dsp.json.proposals.length === 0);
 }
 
+console.log('\n9c. masked values, and showing them in full');
+{
+  /* REVERSION: drop the `levelsAny[cls] !== 'M'` check in /api/auth/reveal —
+     "reveal is not a way round a class the role does not hold" fails. */
+  const noEnd = await owner.post('/api/access/users', { email: 'auditor-noend@example.test', grants: [{ role: 'AUD' }], reason: 'audit' });
+  check('an Auditor cannot be invited without an end date', noEnd.status === 400 && noEnd.json.error === 'needs_expiry');
+  const end = new Date(Date.now() + 7 * 86400_000).toISOString();
+  const r = await owner.post('/api/access/users', { email: 'auditor@example.test', grants: [{ role: 'AUD', expires_at: end }], reason: 'audit' });
+  const token = r.json.link.split('invite=')[1];
+  await browser().post('/api/auth/link/accept', { token, password: 'reads every ledger twice' });
+  const aud = browser();
+  const signedAud = await signIn(aud, 'auditor@example.test', 'reads every ledger twice');
+  check('the Auditor signs in', signedAud.status === 200, JSON.stringify({ invite: r.json, signin: signedAud.json }));
+  const masked = await aud.get('/api/t/people');
+  check('an Auditor sees phones masked to their real last two digits', masked.json[0].phone === '••••••••01', masked.json[0].phone);
+  const noWhy = await aud.post('/api/auth/reveal', { class: 'CT', reason: '' });
+  check('showing them in full needs a reason', noWhy.status === 400);
+  const noStep = await aud.post('/api/auth/reveal', { class: 'CT', reason: 'checking a complaint' });
+  check('…and a fresh re-confirmation', noStep.status === 403 && noStep.json.error === 'stepup');
+  await aud.post('/api/auth/stepup', { password: 'reads every ledger twice' });
+  const ok = await aud.post('/api/auth/reveal', { class: 'CT', reason: 'checking a complaint' });
+  check('with both, the class is shown in full for ten minutes', ok.status === 200);
+  const full = await aud.get('/api/t/people');
+  check('…and the answer carries the full value, not stored anywhere', full.json[0].phone === '0500000001'
+    && /no-store/.test(full.headers.get('cache-control') || ''));
+  await people.DSP.b.post('/api/auth/stepup', { password: people.DSP.password });
+  const dspReveal = await people.DSP.b.post('/api/auth/reveal', { class: 'CASH', reason: 'curious about it' });
+  check('reveal is not a way round a class the role does not hold', dspReveal.status === 403 && dspReveal.json.error === 'not_allowed',
+    JSON.stringify(dspReveal.json));
+  const dspCash = await people.DSP.b.get('/api/t/people');
+  check('…and a Dispatcher still gets no cash', dspCash.json.every((r) => r.balance === null));
+  const logged = await db.query(`SELECT count(*)::int n FROM access_audit WHERE action = 'access.reveal'`);
+  check('the reveal is in the audit log', logged.rows[0].n === 1);
+}
+
 console.log('\n10. sign-in required');
 {
   const anon = browser();

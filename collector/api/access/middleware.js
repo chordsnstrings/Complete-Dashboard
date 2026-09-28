@@ -80,6 +80,14 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
      when any grant, team, role, person or session changes. */
   const cache = new Map();
   const TTL = 30_000;
+  /* Reveals (ULM-DESIGN §6.2): a masked class shown in full for ten minutes,
+     for one session, after a reason and a fresh re-confirmation. In memory on
+     purpose — a restart ends every reveal, which is the safe direction. */
+  const reveals = new Map();
+  const revealed = (sid, cls) => {
+    const r = reveals.get(sid);
+    return Boolean(r && r[cls] && r[cls] > Date.now());
+  };
 
   async function resolveSession(token) {
     const key = `s:${token}`;
@@ -248,7 +256,11 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     const access = fm.access;
     const j = judge(req, entry, access);
     if (j.refuse) return refuse(res, 403, j.refuse);
-    const L = j.levels;
+    const L = { ...j.levels };
+    let usedReveal = false;
+    if (fm.kind === 'user' && fm.session) {
+      for (const c of Object.keys(L)) if (L[c] === 'M' && revealed(fm.session.id, c)) { L[c] = 'F'; usedReveal = true; }
+    }
     const isWrite = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
 
     /* The subject: what the route is about. */
@@ -270,7 +282,11 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     const committing = Boolean(four && !isDry && req.body?.proposal != null);
     if (entry.cap || isWrite) {
       if (access.preview) return refuse(res, 403, { error: 'preview', detail: 'You are previewing a role, which is read-only.' });
-      const cap = four ? (committing ? four.commit : four.propose) : entry.cap;
+      /* One route, several actions, told apart by the body — /api/settings/
+         trigger queues a backfill, an incremental run or the analyst, and each
+         is its own permission (a backfill spends provider quota). */
+      const byBody = entry.capBy ? (entry.capBy.map[String(req.body?.[entry.capBy.field] ?? '')] || entry.capBy.default) : null;
+      const cap = four ? (committing ? four.commit : four.propose) : (byBody || entry.cap);
       if (!cap) return refuse(res, 403, { error: 'no_action', detail: 'This change is not open to signed-in roles yet.' });
       if (!access.capsOver(j.targets).includes(cap)) {
         return refuse(res, 403, { error: 'not_allowed', cap, detail: `Your role cannot do this: ${cap}.` });
@@ -316,7 +332,7 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
 
     const fp = fingerprintOf(access);
     res.set('x-fm-scope', fp);
-    if ((entry.carries || []).some((c) => NO_STORE.has(c))) res.set('Cache-Control', 'no-store, private');
+    if (usedReveal || (entry.carries || []).some((c) => NO_STORE.has(c))) res.set('Cache-Control', 'no-store, private');
 
     installShaper(req, res, entry, L, j.filterRows);
     if (isWrite || entry.cap || entry.auditRead) auditOnFinish(req, res, entry, fm, isWrite);
@@ -430,5 +446,5 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     return fm.levels?.[cls] ?? fm.access?.levels?.[cls] ?? '';
   };
 
-  return { identify, gate, levelOf, resolveSession, mfaRequired, cache };
+  return { identify, gate, levelOf, resolveSession, mfaRequired, cache, reveals };
 }

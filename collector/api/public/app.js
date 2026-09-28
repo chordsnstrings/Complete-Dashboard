@@ -9636,6 +9636,16 @@ async function authBanner() {
   try { d = await api('/api/auth'); } catch { host.innerHTML = ''; return; }
   const stopped = (d?.rows || []).filter((r) => r.severity === 'stopped');
   const risk = (d?.rows || []).filter((r) => r.severity === 'at-risk');
+  /* WHICH platform login failed, and why, is credential detail (ULM-DESIGN §7
+     rule 9): a role without it is told one true line — something needs
+     attention and who has been told — never a row whose names were withheld. */
+  if (gated() && who.access?.levelsAny?.CRED !== 'F') {
+    const n = stopped.length + risk.length;
+    host.className = n ? 'auth-banner warn' : '';
+    host.innerHTML = n ? `<div class="auth-line">Some data sources need attention — the Connections admin has been told. `
+      + 'Figures that depend on them may be behind.</div>' : '';
+    return;
+  }
   /* ONE SURFACE REFUSED, THE CHANNEL STILL DELIVERING — and it is neither an
      emergency nor nothing.
      ─────────────────────────────────────────────────────────────────────────

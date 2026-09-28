@@ -9,3 +9,7 @@ test/*.png
 # than committed so a measurement in progress never lands in the branch.
 .bench/
 .verify/
+
+# bin/access-gateway.mjs keeps production's answers on disk between sweeps.
+# They are real data (names, plates, money) and never belong in the repository.
+.gateway-cache/

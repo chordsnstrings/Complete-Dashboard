@@ -1,1 +1,4444 @@
-[]
+[
+ {
+  "method": "GET",
+  "path": "/api/admin-mode",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:3899-3909. Response {open (true when ADMIN_TOKEN is unset), you_are_admin (x-admin-token matches, api/admin_gate.js:82-85), detail (fixed sentence)}. It reports the write-gate mode and never the token. It is deliberately ungated today. Read only by the Settings page 'Admin access' panel (app.js:8715). The new session layer supersedes its meaning."
+ },
+ {
+  "method": "GET",
+  "path": "/api/alerts/by-driver",
+  "subject": "COND",
+  "carries": [
+   "ACCUSE",
+   "COND",
+   "ID",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].driver_name",
+     "rows[].driver_ext_id"
+    ]
+   },
+   {
+    "class": "ACCUSE",
+    "paths": [
+     "rows[].driver_name",
+     "rows[].driver_ext_id"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "rows[].plate_list"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "alert_coverage"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:2203-2431. Sending ?id= returns 400 with {error, use:'/api/driver/quality?id=<driver>'} (2222-2228). Response at 2428: {rows[] (at most 100) {driver_name, driver_ext_id, accounts, alerts, driving_alerts, device_alerts, harsh_brake, harsh_accel, sharp_turn, overspeed, other, plates (a count), plate_list (up to 3 plates), booked_km, alert_km, per_100km, per_100km_absent}, totals{driver"
+ },
+ {
+  "method": "GET",
+  "path": "/api/alerts/by-vehicle",
+  "subject": "VEH",
+  "carries": [
+   "ACCUSE",
+   "COND",
+   "ID",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].top_driver",
+     "rows[].top_driver_id"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "rows[].top_driver",
+     "rows[].top_driver_id",
+     "rows[].top_driver_alerts"
+    ]
+   },
+   {
+    "class": "ACCUSE",
+    "paths": [
+     "rows[].top_driver",
+     "rows[].top_driver_id"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:2107-2198: {rows, totals{vehicles, alerts}, shown, truncated}. rows[] (top 100 plates by alerts): plate, alerts, harsh_brake, harsh_accel, sharp_turn, overspeed, other, unattributed, drivers (count of people), driver_accounts (count), top_driver, top_driver_id, top_driver_alerts. top_driver is the person with the most harsh-driving events on that car in the window ('who to coach', se"
+ },
+ {
+  "method": "GET",
+  "path": "/api/alerts/summary",
+  "subject": "VEH",
+  "carries": [
+   "VEH"
+  ],
+  "grain": "aggregate",
+  "fields": [],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:2086-2091: top-level array [{alert_type, n, device}] \u2014 fleet-level telematics event counts by type, filtered fleet_id=$3 (platform deliberately not applied). No driver attribution, so VEH not COND, matching the design's safety/events page (VEH subject, reachable by FIN/TEC/WALL who lack COND). The design appendix's view:VEH agrees. Also called by the phone m:safety screen (api/public"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analyst/brief",
+  "subject": "REV",
+  "carries": [
+   "BK",
+   "ID",
+   "LOC",
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "candidates.driver[].segment"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "candidates.vehicle[].segment"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "candidates.zone[].segment"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "headline.bookings",
+     "headline.telematics",
+     "headline.completed",
+     "headline.bookable",
+     "headline.priced",
+     "by_platform[].n",
+     "uber_tier_by_daypart[].n",
+     "settlement[].n",
+     "properties[].n",
+     "by_daypart[].n",
+     "coverage[].rows",
+     "metric_coverage.*.rows",
+     "candidates.*[].n"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "coverage",
+     "metric_coverage"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:2197-2205 calls buildBrief in src/analyst.js:415-521. Response: {window, fleet ('both' when unset), headline{bookings, telematics, completed, bookable, avg_fare, priced, vehicles, drivers}, by_platform[]{platform, n, completion_pct, avg_km}, uber_tier_by_daypart[]{tier, daypart, n}, settlement[]{settlement_class, n, avg_fare}, properties[]{partner_name, n, avg_fare, avg_dea"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analyst/findings",
+  "subject": "REV",
+  "carries": [
+   "ACCUSE",
+   "BK",
+   "COND",
+   "EARN",
+   "ID",
+   "LOC",
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "findings[].segment",
+     "findings[].claim",
+     "findings[].why",
+     "findings[].action",
+     "findings[].verdict_reason"
+    ]
+   },
+   {
+    "class": "ACCUSE",
+    "paths": [
+     "findings[].segment",
+     "findings[].claim",
+     "findings[].why",
+     "findings[].action",
+     "findings[].verdict_reason"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "findings[].segment",
+     "findings[].claim",
+     "findings[].why",
+     "findings[].action",
+     "findings[].verdict_reason"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "findings[].segment",
+     "findings[].claim",
+     "findings[].why",
+     "findings[].action",
+     "findings[].verdict_reason"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "findings[].segment",
+     "findings[].claim",
+     "findings[].why",
+     "findings[].action",
+     "findings[].verdict_reason"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "findings[].segment",
+     "findings[].claim",
+     "findings[].why",
+     "findings[].action",
+     "findings[].verdict_reason"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "findings[].segment_n",
+     "findings[].baseline_n"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "configured",
+     "last_pass",
+     "empty_reason",
+     "runs",
+     "last_run",
+     "model"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:2090-2190 (response at 2155). findings[] = SELECT * FROM analyst_finding (sql/schema_v10.sql:20-50): {id, run_id, window_start, window_end, fleet_id, claim, why, action, check_kind, metric, dimension, segment, direction, claimed_value, measured_value, baseline_value, segment_n, baseline_n, effect, effect_pct, p_value, verdict, verdict_reason, model, created_at}, plus unit a"
+ },
+ {
+  "method": "GET",
+  "path": "/api/analyst/rules",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:2207-2219. Static configuration from src/analyst.js:44-157: metrics[]{metric, label, kind, unit, defined_over (a SQL predicate string)}, dimensions[] (key names only), materiality{minSegmentN, minBaselineN, minRelEffect, minAbsEffect, maxP}, note. No DB access, no personal or fleet data."
+ },
+ {
+  "method": "GET",
+  "path": "/api/auth",
+  "subject": "SYS",
+  "carries": [
+   "CRED",
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [
+   {
+    "class": "CRED",
+    "paths": [
+     "rows[].credential",
+     "rows[].detail",
+     "rows[].observed_detail",
+     "degraded_rows[].label",
+     "degraded_rows[].detail",
+     "errands[].rows",
+     "headline"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "rows",
+  "fleetRows": [
+   "rows[]",
+   "degraded_rows[]"
+  ],
+  "fleetKey": "fleet_id",
+  "cap": null,
+  "notes": "api/auth_routes.js:189 handler. It reads credential_state, app_setting.updated_at (as saved_at) and collection_run (:191-214). Rows are built at :230-297. The body is at :306-383: {rows[{provider, fleet_id, credential, state, detail, surface, last_ok_at, checked_at, saved_at, last_ok_age_h, run_age_h, stall_limit_h, still_collecting, superseded, severity, observed_state?, observed_detail?}], stopp"
+ },
+ {
+  "method": "GET",
+  "path": "/api/breaks",
+  "subject": "BK",
+  "carries": [
+   "BK"
+  ],
+  "grain": "aggregate",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:6449-6459. The body is an array of metric_break rows: {metric, grain, platform, fleet_id, period_from, period_to, value_from, value_to (monthly booking counts), change_pct, drivers_from, drivers_to, driver_change_pct, productivity_change_pct, attribution, candidate_events (world_event JSON: title, category, scope, starts_on, ends_on, expected_effect, confidence, summary), detected_at"
+ },
+ {
+  "method": "GET",
+  "path": "/api/cache-stats",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:4386 returns cache.stats() = {hit, stale, miss, skip, entries, bytes, bytes_cap, version} (api/cache.js:259-260). These are process-wide counters: no fleet data and no personal data. The response cache never stores this route (api/cache.js:55), and the client-side SWR also bypasses it (api/public/swr.js:36). The settings/status view reads it (api/public/app.js:7650). Line numbers are"
+ },
+ {
+  "method": "GET",
+  "path": "/api/compare/period",
+  "subject": "BK",
+  "carries": [
+   "BK",
+   "PAY",
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "now.money",
+     "now.stmt_net",
+     "now.fares",
+     "now.tips",
+     "now.cash",
+     "now.money_days",
+     "now.paid_not_driving",
+     "before.money",
+     "before.stmt_net",
+     "before.fares",
+     "before.tips",
+     "before.cash",
+     "before.money_days",
+     "before.paid_not_driving",
+     "change_pct.money",
+     "change_pct.stmt_net",
+     "change_pct.fares",
+     "change_pct.tips",
+     "change_pct.cash"
+    ]
+   },
+   {
+    "class": "PAY",
+    "paths": [
+     "now.payout",
+     "before.payout",
+     "change_pct.payout"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:953-966: {window{from,to,grain,period}, previous{from,to}, now, before, change_pct{drivers,trips,completed,cancelled,km,money,stmt_net,fares,tips,cash,payout,online_min,on_job_min}, basis}. now/before are one row of SUMS (server.js:901-918) over driver_day: drivers, driver_accounts, paid_not_driving, trips, completed, cancelled, km, money, stmt_net, fares, tips, cash, payout, online_"
+ },
+ {
+  "method": "GET",
+  "path": "/api/compliance/drivers",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "COND",
+   "CT",
+   "DOC",
+   "HR",
+   "ID",
+   "MRG",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "CT",
+    "paths": [
+     "drivers[].phone",
+     "drivers[].email",
+     "people[].phone",
+     "people[].email",
+     "people[].accounts[].phone",
+     "people[].accounts[].email"
+    ]
+   },
+   {
+    "class": "DOC",
+    "paths": [
+     "drivers[].licence_no",
+     "drivers[].emirates_id",
+     "drivers[].licence_expires",
+     "drivers[].days_left",
+     "drivers[].licence_placeholder",
+     "drivers[].licence_no_placeholder",
+     "drivers[].identity_held",
+     "people[].accounts[].licence_no",
+     "people[].accounts[].emirates_id",
+     "people[].accounts[].licence_expires",
+     "people[].accounts[].days_left",
+     "people[].accounts[].licence_placeholder",
+     "people[].accounts[].licence_no_placeholder",
+     "people[].accounts[].identity_held",
+     "people[].licence_status",
+     "people[].days_left",
+     "people[].licence_expires",
+     "people[].licence_source",
+     "people[].soonest_account",
+     "people[].platform_licence_expires",
+     "people[].platform_days_left",
+     "people[].licence_disagreement",
+     "people[].licence_unknown_reason",
+     "people[].placeholder_accounts",
+     "people[].no_date_accounts",
+     "people[].dated_accounts",
+     "people[].conflicts",
+     "people[].conflict_fields",
+     "people[].hr.documents",
+     "placeholder_licence_no",
+     "licence_no_caveat"
+    ]
+   },
+   {
+    "class": "HR",
+    "paths": [
+     "people[].hr",
+     "people[].hr_only",
+     "people[].licence_disagreement",
+     "people[].licence_expires",
+     "people[].days_left",
+     "people[].licence_status",
+     "people[].licence_source",
+     "hr_roster"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "drivers[].rating",
+     "drivers[].state",
+     "drivers[].suspension_reason",
+     "people[].accounts[].rating",
+     "people[].accounts[].state",
+     "people[].accounts[].suspension_reason",
+     "people[].state",
+     "people[].suspension_reason"
+    ]
+   },
+   {
+    "class": "MRG",
+    "paths": [
+     "people[].person_id",
+     "people[].person_placed",
+     "people[].conflicts",
+     "people[].conflict_fields",
+     "spine_counts",
+     "counts.accounts_on_the_spine"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "drivers[].vehicle",
+     "people[].accounts[].vehicle",
+     "people[].vehicle"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "drivers[].lifetime_trips",
+     "drivers[].last_ever",
+     "drivers[].days_since_last_trip",
+     "people[].accounts[].lifetime_trips",
+     "people[].accounts[].last_ever",
+     "people[].accounts[].days_since_last_trip",
+     "people[].lifetime_trips",
+     "people[].last_ever",
+     "people[].days_since_last_trip"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/server.js:5222-6113, response at 6039. drivers[] holds one row per driver_compliance account: {platform, driver_ext_id, full_name, phone, email, picture_url, licence_no, licence_expires, emirates_id, fleet_id, days_left, state, suspension_reason, rating, last_ever, lifetime_trips, activity_by_name, days_since_last_trip, licence_placeholder, licence_no_placeholder, vehicle{plate,day}, photo_abs"
+ },
+ {
+  "method": "GET",
+  "path": "/api/compliance/vehicles",
+  "subject": "VEH",
+  "carries": [
+   "ID",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].driver_name",
+     "rows[].driver_ext_id",
+     "rows[].driver_as_of"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:5151-5190. Body: {rows[], totals{total, expired, within_7, within_45, vehicles, doc_types}, doc_types[{doc_type,n}], fleet, shown, truncated}. rows[] is {plate, doc_type, status, expires_at, days_left, make, model, year, vin, image_url, driver_name, driver_ext_id, driver_as_of}, capped at 300 with the cap disclosed. Vehicle papers, vin and image_url are VEH. The current holder (vehic"
+ },
+ {
+  "method": "GET",
+  "path": "/api/context",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:5132-5139. Body: an array of {day, temp_max, precipitation, wind_max, is_forecast, hijri_month, is_ramadan, is_holiday, holiday_name} from weather_daily LEFT JOIN calendar_day over winDays(req). It holds external weather and calendar facts: no fleet data, no personal data, and it ignores ?fleet. Appendix C says 'signed-in'. SYS is used as the subject because every built-in role holds"
+ },
+ {
+  "method": "GET",
+  "path": "/api/corporate/approach",
+  "subject": "BK",
+  "carries": [
+   "BK",
+   "ID",
+   "LOC"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "[].label"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "[].label"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:1007-1050. The body is a top-level ARRAY (up to 60): {label, bookings, measured, measured_return, measured_both, deadhead_km, avg_deadhead_km, return_km, avg_return_km, both_km, avg_both_km, paid_km, ratio_pct, both_ratio_pct, stranded_15km}. What `label` holds depends on ?by=: property (the default; a hotel name), daypart, driver (coalesce(driver_name,'(unnamed)'), so ID),"
+ },
+ {
+  "method": "GET",
+  "path": "/api/corporate/guests",
+  "subject": "PAX",
+  "carries": [
+   "BK",
+   "PAX",
+   "REV"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "guests[].revenue",
+     "rooms[].revenue"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "guests[].bookings",
+     "guests[].priced",
+     "rooms[].bookings",
+     "total_bookings",
+     "bookings_with_room",
+     "repeat_bookings",
+     "caveat"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:788-884 (response at 854). guests[] (up to 300) = {guest_id, bookings, revenue, priced, properties, property, partner_id, room_no, purpose, first_at, last_at, km, span_days}. `purpose` is max(trip_purpose) ALIASED to a name the dictionary does not catch (line 814), so it must be added as a PAX key. rooms[] (up to 80) = {room_no, bookings, properties, property, partner_id, r"
+ },
+ {
+  "method": "GET",
+  "path": "/api/corporate/leakage",
+  "subject": "BK",
+  "carries": [
+   "ACCUSE",
+   "BK",
+   "ID",
+   "PAX",
+   "REV",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "rows[].price",
+     "rows[].cost",
+     "summary.overrun_value",
+     "summary.foc_cost"
+    ]
+   },
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].driver_name",
+     "rows[].driver_ext_id"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "rows[].plate"
+    ]
+   },
+   {
+    "class": "PAX",
+    "paths": [
+     "rows[].guest_id",
+     "rows[].room_no",
+     "rows[].trip_purpose"
+    ]
+   },
+   {
+    "class": "ACCUSE",
+    "paths": [
+     "rows[].driver_name",
+     "rows[].driver_ext_id"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:890-970 (response at 942). Without a valid ?kind=, rows is []. With a kind (complimentary, overrun, unpriced, zero_priced, unauthorized, deadhead_exceeds_fare, missing), rows[] holds up to 500 hotel TRIP rows: {external_id, requested_at, ended_at, driver_name, driver_ext_id, plate, property, partner_id, product, payment_type, settlement_class, price, cost, distance_km, dead"
+ },
+ {
+  "method": "GET",
+  "path": "/api/corporate/properties",
+  "subject": "REV",
+  "carries": [
+   "BK",
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "[].bookings",
+     "[].priced",
+     "[].foc",
+     "[].overrun",
+     "[].scheduled",
+     "[].hourly",
+     "[].pick_and_drop",
+     "[].drop_off"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:691-723. The body is a top-level ARRAY, one row per hotel property: {partner_id, name, bookings, priced, revenue, cost, km, avg_deadhead_km, foc, overrun, scheduled, hourly, pick_and_drop, drop_off, guests, drivers, first_at, last_at, avg_fare, revenue_per_km, bookings_per_guest, scheduled_pct}. guests and drivers are distinct counts, not identities. Properties are corporat"
+ },
+ {
+  "method": "GET",
+  "path": "/api/corporate/property",
+  "subject": "REV",
+  "carries": [
+   "BK",
+   "EARN",
+   "ID",
+   "PAX",
+   "REV"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "PAX",
+    "paths": [
+     "guests[].guest_id",
+     "guests[].room_no"
+    ]
+   },
+   {
+    "class": "ID",
+    "paths": [
+     "drivers[].driver_name",
+     "drivers[].driver_ext_id"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "drivers[].revenue"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "profile.bookings",
+     "profile.priced",
+     "daily[].bookings",
+     "types[].n",
+     "payments[].n",
+     "guests[].bookings",
+     "drivers[].bookings",
+     "dayparts[].n"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:726-780 (response at 763). ?id= (partner_id or partner_name) is required; 400 without it, 404 when the property has no bookings in the window. Response: profile{name, partner_id, bookings, first_at, last_at, guests, drivers, vehicles, revenue, priced, avg_fare}, daily[]{day, bookings, revenue}, types[]{label, n, revenue, avg_km}, payments[]{label, settlement_class, n, reven"
+ },
+ {
+  "method": "GET",
+  "path": "/api/corporate/stranding",
+  "subject": "LOC",
+  "carries": [
+   "BK",
+   "LOC"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "rows[].drops",
+     "rows[].measured",
+     "rows[].over_15km"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:1057-1086. rows[] (up to 30) = {place, drops, measured, avg_return_km, return_km, worst_km, over_15km, avg_paid_km}, plus total, shown and truncated. `place` is the first comma segment of the hotel channel's dropoff_addr (line 1068), so it is a guest's destination (a building, hotel, street or villa name), grouped and shown only where at least 3 bookings have a measured ret"
+ },
+ {
+  "method": "GET",
+  "path": "/api/corporate/summary",
+  "subject": "REV",
+  "carries": [
+   "BK",
+   "LOC",
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "bookings",
+     "priced",
+     "foc_trips",
+     "overrun_trips",
+     "scheduled_trips",
+     "approval_required_bookings",
+     "authorized_trips",
+     "authorization_pending_trips",
+     "missing_trips",
+     "deadhead_measured",
+     "outside_dubai",
+     "zoned"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "outside_dubai",
+     "zoned",
+     "outside_dubai_pct"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:582-688 (response at 618). Spreads one aggregate row: {bookings, priced, revenue, cost, km, deadhead_km, deadhead_measured, foc_trips, overrun_trips, scheduled_trips, approval_required_bookings, authorized_trips, authorization_pending_trips, missing_trips, guests, properties, drivers, vehicles, outside_dubai, zoned}. It then adds has_cost, avg_fare, revenue_per_km, deadhead"
+ },
+ {
+  "method": "GET",
+  "path": "/api/coverage",
+  "subject": "SYS",
+  "carries": [
+   "BK",
+   "PAY",
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "PAY",
+    "paths": [
+     "earnings[].earnings"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "trips[].n",
+     "earnings_gaps[].bookings_before",
+     "geo[].n",
+     "geo[].with_pickup",
+     "geo[].with_dropoff"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:3623-3873. Response {trips[{platform, n, from_ts, to_ts}], telemetry[{source, n, from_ts, collected_from, last_poll}], alerts[{n, from_ts, latest}], ledger[{n, from_ts, latest}], earnings[{platform, n, from_day, to_day, to_day_settled, days, accrual_days, earnings}], earnings_gaps[{platform, trips_from, earnings_from, bookings_before}], dataset_calendar{'telemetry:<src>'|'alerts'|'le"
+ },
+ {
+  "method": "GET",
+  "path": "/api/coverage/calendar",
+  "subject": "SYS",
+  "carries": [
+   "BK",
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "sources[].total_rows",
+     "sources[].median_rows_per_day",
+     "sources[].days[].rows"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:1312-1560 (response at 1548). Response: {window[from,to], sources[]{source, total_rows, days_with_data, first_day, last_day, median_rows_per_day, gaps[]{from, to, days, verdict, days_answered, days_failed, days_unrequested}, missing_days, days[]{day, rows, plates, drivers}, gaps_asked_and_empty, gaps_never_asked, gaps_window_failed}, shared_silence[]{sources, from, to, days"
+ },
+ {
+  "method": "GET",
+  "path": "/api/coverage/verified",
+  "subject": "SYS",
+  "carries": [
+   "BK",
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "windows[].sample_missing",
+     "windows[].days",
+     "windows[].uber_rows",
+     "windows[].our_rows",
+     "windows[].in_both",
+     "windows[].uber_only",
+     "windows[].ours_only",
+     "windows[].misfiled",
+     "windows[].outside_window",
+     "uber_rows",
+     "our_rows",
+     "trips_uber_has_that_we_never_stored",
+     "trips_filed_under_the_other_fleet",
+     "horizons.money.rows",
+     "horizons.rating.rows"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [
+   "windows[]"
+  ],
+  "fleetKey": "fleet_id",
+  "cap": null,
+  "notes": "api/analytics_routes.js:1585-1675 (response at 1629). windows[] = every uber_trip_audit row: {fleet_id, kind, window_from, window_to, verified_at, uber_rows, our_rows, in_both, uber_only, ours_only, agreement_pct, outside_window, error, past_retention, took_ms, sample_missing, days, misfiled}. sample_missing is a JSONB array of up to 10 real Uber Trip UUIDs (src/sources/uber.js:1098, sql/schema_v4"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/custody",
+  "subject": "VEH",
+  "carries": [
+   "BK",
+   "EARN",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "rows[].trips",
+     "rows[].km",
+     "rows[].first_trip_at",
+     "rows[].last_trip_at"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "rows[].revenue"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:3618-3631, res.json :3628. {rows[]{day, plate, platform, trips, km, revenue, first_trip_at, last_trip_at, is_primary} (LIMIT 400), total, shown, truncated} from vehicle_driver_day for the addressed person. No fleet filter; rows carry no fleet key."
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/daily",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "CASH",
+   "COND",
+   "EARN",
+   "ID",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "[].trips",
+     "[].completed",
+     "[].cancelled",
+     "[].outcome_n",
+     "[].km",
+     "[].first_trip_at",
+     "[].last_trip_at",
+     "[].first_hour",
+     "[].last_hour",
+     "[].span_h"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "[].revenue",
+     "[].money",
+     "[].money_source",
+     "[].money_period_days",
+     "[].stmt_gross",
+     "[].stmt_fees",
+     "[].stmt_net",
+     "[].payout",
+     "[].platform_earnings"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "[].cash",
+     "[].payout_cash"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "[].completed",
+     "[].cancelled"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "[].plates"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:2140-2272 (single query, response is its rows). Top-level array, one row per Dubai day: day, trips, completed, cancelled, outcome_n, km, revenue, first_trip_at, last_trip_at, first_hour, last_hour, span_h, plates (comma-joined string), platforms (comma-joined), hours_online, hours_online_basis, hours_on_job, hours_idle_online, money, money_source, money_period_days, stmt_gross"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/day",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "COND",
+   "EARN",
+   "ID",
+   "LOC",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "trips"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "trips[].pickup_addr",
+     "trips[].dropoff_addr",
+     "online[].went_online",
+     "fixes",
+     "goes_online_in"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "trips[].price",
+     "trips[].currency"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "trips[].status",
+     "trips[].outcome"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "trips[].plate",
+     "fixes[].plate"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "collection"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:2609-2923, res.json :2891-2922. {day, driver{id (always undefined \u2014 d has no driver_ext_id, so it is dropped), name, keys[]}, trips[] (:2619-2633: external_id, platform, fleet_id, plate, requested_at, ended_at, status, outcome, distance_km, price, currency, product, payment_type, pickup_addr, dropoff_addr, s, e, past_midnight), online[]{s, e, open_ended, closed_by, went_online"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/days",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "COND",
+   "EARN",
+   "ID"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "days[].trips",
+     "days[].completed",
+     "days[].cancelled",
+     "days[].km",
+     "totals.trips"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "days[].fares"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "days[].completed",
+     "days[].cancelled"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:2531-2595, res.json :2576. {days[]{day, fleet_id, trips, completed, cancelled, km, fares, first_min, last_min, on_job_min, wait_min, longest_wait_min, online_min, idle_online_min, computed_at}, computed_at, basis, online_days, totals{computed_at, days, trips, on_job_min, wait_min, online_min, idle_online_min}}. days[] rows carry fleet_id, but it is min(fleet_id) across the per"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/earnings",
+  "subject": "EARN",
+  "carries": [
+   "BK",
+   "CASH",
+   "COND",
+   "EARN"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "CASH",
+    "paths": [
+     "periods[].cash_earnings",
+     "statement_cash",
+     "components[category=cash_collected]"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "periods[].trips"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "periods[].acceptance_rate",
+     "periods[].cancellation_rate",
+     "periods[].rating"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:3236-3404, res.json :3391. {components[]{category, parent, amount, currency}, periods[]{platform, period_start, period_end, period_days, days_used, first_day_used, last_day_used, earnings, counted, cash_earnings, trips, hours_online, hours_on_trip, clipped, acceptance_rate, cancellation_rate, rating}, counted_total, counted_periods, counted_clipped, tips, fare, statement_cash,"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/heatmap",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "EARN",
+   "ID"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "[].trips"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "[].revenue"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:2928-2931. Top-level array [{dow, h, trips, revenue}] \u2014 weekday x hour counts and sum(price) (no has_fare filter) over the addressed person's trips. No fleet filter."
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/kpis",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "CASH",
+   "COND",
+   "DOC",
+   "EARN",
+   "ID"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "trips",
+     "days_worked",
+     "km",
+     "avg_km",
+     "trips_with_distance",
+     "bookings",
+     "priced_trips",
+     "priced_km",
+     "priced_measured_trips",
+     "avg_minutes",
+     "trips_per_day",
+     "outcome_n",
+     "completed",
+     "not_completed",
+     "accounted_bookings",
+     "accounted_fare_bookings",
+     "dark_bookings",
+     "dark_pct",
+     "undercovered_bookings",
+     "undercovered_pct",
+     "set_aside_bookings",
+     "set_aside_fare_bookings",
+     "platform_lifetime_trips"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "revenue",
+     "avg_fare",
+     "priced_measured_revenue",
+     "reported_earnings",
+     "payout_period_days",
+     "payout_periods",
+     "payout_from",
+     "payout_to",
+     "accounted",
+     "accounted_fares",
+     "accounted_payouts",
+     "accounted_statements",
+     "accounted_statement_platforms",
+     "reported_payouts",
+     "uncounted_payouts",
+     "uncounted_payout_platforms",
+     "uncounted_payout_bases",
+     "reported_payout_platforms",
+     "reported_payout_days",
+     "accounted_platforms",
+     "statement_net",
+     "statement_platforms",
+     "undercovered_payouts",
+     "undercovered_income",
+     "undercovered_platforms",
+     "set_aside_fares",
+     "set_aside_platforms",
+     "day_money",
+     "day_money_days",
+     "day_money_period_days",
+     "day_money_source",
+     "day_stmt_gross",
+     "day_stmt_fees",
+     "day_stmt_net",
+     "day_stmt_tips",
+     "day_stmt_salik",
+     "day_payout",
+     "day_fares",
+     "day_stmt_days",
+     "day_payout_days",
+     "day_fares_days",
+     "day_rows",
+     "statement_fares",
+     "statement_fare_periods",
+     "statement_fare_from",
+     "statement_fare_to"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "cash_earnings",
+     "day_cash",
+     "day_cash_days",
+     "day_payout_cash",
+     "cash_bookings",
+     "cash_bookings_priced",
+     "cash_booking_value",
+     "cash_booking_platforms"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "completion_pct",
+     "cancel_pct",
+     "completed",
+     "not_completed",
+     "acceptance_rate",
+     "cancellation_rate",
+     "rating",
+     "rating_platform",
+     "rating_at",
+     "rating_change",
+     "rating_readings",
+     "rating_series",
+     "banned_on"
+    ]
+   },
+   {
+    "class": "DOC",
+    "paths": [
+     "platform_compliance"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/driver_routes.js:1457-2137, res.json :2057-2136. Flat object = t (:1458-1516: trips, days_worked, km, avg_km, trips_with_distance, revenue, avg_fare, completion_pct, cancel_pct, outcome_n, completed, not_completed, bookings, priced_trips, priced_km, priced_measured_revenue, priced_measured_trips, avg_minutes, vehicles (count), platforms (count)) + shift (median_start_h, median_end_h, avg_span_"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/mix",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "COND",
+   "EARN",
+   "ID"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "distance[].n",
+     "product[].n",
+     "payment[].n",
+     "status[].n",
+     "platform[].n"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "distance[].revenue",
+     "distance[].avg_fare",
+     "product[].revenue",
+     "payment[].revenue",
+     "status[].revenue",
+     "platform[].revenue"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "status"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:3214-3233, res.json :3232. {distance[]{label, ord, n, revenue, avg_fare}, product[]{label, n, revenue}, payment[]{label, n, revenue}, status[]{label, n, revenue}, platform[]{label, n, revenue}} \u2014 aggregates over the addressed person's trips. status[] is the raw provider status breakdown including cancellation / no-show words, i.e. cancellations attributed to this driver (COND)"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/photo/:platform/:id",
+  "subject": "ID",
+  "carries": [
+   "ID"
+  ],
+  "grain": "record",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:1195-1238. Returns the raw photograph bytes from driver_photo (content-type image/jpeg|png|webp|gif, etag = sha256, x-photo-fetched header) or 404 {error} with x-photo header, or 415 for a non-image stored type. No fleet check at all: any driver's face on any fleet is served to anyone who can name (platform, driver_ext_id). driver_photo has no fleet column; the driver's fleet "
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/profile",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "COND",
+   "CT",
+   "DOC",
+   "EARN",
+   "HR",
+   "ID",
+   "MRG",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "CT",
+    "paths": [
+     "compliance[].phone",
+     "compliance[].email"
+    ]
+   },
+   {
+    "class": "DOC",
+    "paths": [
+     "compliance[].emirates_id",
+     "compliance[].licence_no",
+     "compliance[].licence_expires",
+     "compliance[].licence_days_left",
+     "hr.emirates_id",
+     "hr.licence_no",
+     "hr.licence_expires",
+     "hr.licence_days_left",
+     "hr.licence_status",
+     "licence",
+     "identity_held",
+     "platform_compliance",
+     "standing[].compliance_status"
+    ]
+   },
+   {
+    "class": "HR",
+    "paths": [
+     "hr"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "compliance[].state",
+     "compliance[].suspension_reason",
+     "compliance[].rating",
+     "standing[].state",
+     "standing[].state_raw",
+     "standing[].state_reason",
+     "standing[].score",
+     "standing[].can_earn",
+     "standing[].rating",
+     "standing[].is_banned",
+     "rating",
+     "rating_platform",
+     "rating_at",
+     "rating_platforms",
+     "banned_on"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "vehicles",
+     "standing[].plate",
+     "standing[].vehicle_ext_id"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "vehicles[].revenue"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "span.trips",
+     "span.first_trip",
+     "span.last_trip",
+     "span.days_worked",
+     "accounts[].trips",
+     "accounts[].first_trip",
+     "accounts[].last_trip",
+     "vehicles[].trips",
+     "vehicles[].km",
+     "platform_lifetime_trips",
+     "standing[].lifetime_trips"
+    ]
+   },
+   {
+    "class": "MRG",
+    "paths": [
+     "person_accounts[].basis",
+     "person_absent_reason"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/driver_routes.js:1240-1452, res.json :1424-1451. Body: ...d from resolve() (:386-398: id, name, ids[], keys[] incl. 'name:<folded name>' keys, platforms[], resolved_by), hr (api/hr_roster.js:796-831: fleet_id, employee_id, name, hr_compliance_status, export_date, on_list, emirates_id (formatted 784-XXXX-XXXXXXX-X), licence_no, licence_expires, licence_days_left, licence_status, other_employees"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/quality",
+  "subject": "COND",
+  "carries": [
+   "BK",
+   "COND",
+   "SYS"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "cancel_daily[].trips",
+     "telematics_journeys"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "alert_coverage"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:3408-3526, res.json :3505. {cancels[]{status, platform, n, pct}, cancel_daily[]{day, cancelled, trips}, alerts[]{alert_type, n, latest, device}, alert_km, alerts_per_100km, alerts_per_100km_absent, device_alerts, telematics_journeys, fleet_alerts_per_100km, fleet_device_alerts, fleet_alert_km, fleet_alerts, alert_coverage{window_days, covered_days, uncovered_days, days[], firs"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/shift",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "COND",
+   "ID",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "days[].jobs",
+     "days[].bookings",
+     "days[].unknown_end",
+     "unknown_end"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "days[].jobs[].plate"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "days[].jobs[].outcome"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:2321-2521, res.json :2498. {days[]{day, jobs[]{s, e, over, platform, plate, outcome}, bookings, on_job_min, wait_min, longest_wait_min, overlaps, unknown_end, first_min, last_min, span_min, online[]{s, e, open_ended, closed_by} | null}, basis, online_basis, online_days, unknown_end}. The inventory's pickup/dropoff guess is wrong: no addresses or coordinates are selected (:2324"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/standing",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "COND",
+   "EARN",
+   "ID"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "trips_in_window",
+     "metrics[key=trips]",
+     "metrics[key=trips_per_day]",
+     "metrics[key=km]",
+     "metrics[key=avg_km]",
+     "metrics[key=days]"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "metrics[key=revenue]"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "metrics[key=completion]",
+     "metrics[key=cancel]"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:2978-3141, res.json :3075 (under the 5-trip floor: {n_peers, peer_floor, trips_in_window, metrics: []}) and :3118 ({n_peers, peer_floor, trips_in_window, metrics[]{key, label, value, percentile, median, tied, population}}). PATH NOTATION: 'metrics[key=X]' means the whole element of metrics[] whose key field equals X (value, percentile, median, tied, population together) \u2014 the "
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/territory",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "EARN",
+   "ID",
+   "LOC"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "pickups[].n",
+     "dropoffs[].n",
+     "areas[].n",
+     "pickups[].avg_km",
+     "areas[].avg_km",
+     "coverage.bookings",
+     "coverage.positioned",
+     "coverage.addressed",
+     "coverage.positioned_pct"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "pickups[].avg_fare",
+     "areas[].avg_fare"
+    ]
+   }
+  ],
+  "whole": [
+   "LOC"
+  ],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:3147-3211, res.json :3200. {pickups[]{lat, lng, n, addr, avg_km, avg_fare} (up to 400), dropoffs[]{lat, lng, n, addr} (400), areas[]{area, n, avg_km, avg_fare} (25), idle[]{lat, lng, fixes} (120), coverage{bookings, positioned, addressed, positioned_pct, unpositioned_platforms}}. LOC is whole: every list is a place; without it only coverage counts remain. idle[] is telemetry f"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/trips",
+  "subject": "BK",
+  "carries": [
+   "BK",
+   "CASH",
+   "COND",
+   "EARN",
+   "LOC",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "LOC",
+    "paths": [
+     "rows[].pickup_addr",
+     "rows[].dropoff_addr"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "rows[].plate"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "rows[].price",
+     "rows[].currency",
+     "rows[].has_fare",
+     "days[].earnings",
+     "days[].grain_reason"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "days[].cash_earnings"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "rows[].status",
+     "rows[].outcome"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:3545-3614, res.json :3606. {rows[]{platform, external_id, requested_at, ended_at, plate, pickup_addr, dropoff_addr, distance_km, duration_s, status, product, payment_type, price, currency, local_day, outcome, is_booking, has_fare}, total, shown, offset, limit, days[]{platform, day, trips, priced, earnings, cash_earnings, grain_reason}, truncated}. Paged: ?limit (max 1000) & ?o"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/vehicles",
+  "subject": "VEH",
+  "carries": [
+   "BK",
+   "EARN",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "[].trips",
+     "[].km"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "[].revenue"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:3645-3657. Top-level array [{plate, days, trips, km, revenue, first_day, last_day, primary_days, platforms[]}] grouped by plate from vehicle_driver_day. A pre-middleware copies ?driver_id into ?id (:3645-3647) \u2014 mutates req.query only, no DB side effect. No front-end view calls it (inventory views: []). No fleet filter."
+ },
+ {
+  "method": "GET",
+  "path": "/api/drivers/cross-platform",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "EARN",
+   "ID",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "EARN",
+    "paths": [
+     "drivers[].revenue"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "drivers[].plates",
+     "drivers[].plate_n",
+     "drivers[].main_plate"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "drivers[].uber_trips",
+     "drivers[].yango_trips",
+     "drivers[].bolt_trips",
+     "drivers[].hotel_trips",
+     "drivers[].fms_trips",
+     "drivers[].booking_trips",
+     "drivers[].telematics_journeys",
+     "drivers[].total_trips",
+     "drivers[].priced_trips"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:1616-1683: {platforms[], drivers[], people, multi_platform, shown, truncated, note}. drivers[] (top 150 by total_trips): person (person_key), driver_name, one column per platform named `<platform>_trips` built dynamically from the platforms with named trips in the window (server.js:1588-1592; platforms written today are uber, yango, bolt, hotel, fms \u2014 a new platform adds a new key th"
+ },
+ {
+  "method": "GET",
+  "path": "/api/drivers/directory",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "COND",
+   "DOC",
+   "EARN",
+   "ID",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "EARN",
+    "paths": [
+     "[].revenue",
+     "[].payout",
+     "[].payout_days",
+     "[].money",
+     "[].money_days",
+     "[].money_period_days",
+     "[].money_source"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "[].trips",
+     "[].completed",
+     "[].bookable",
+     "[].days",
+     "[].km",
+     "[].priced_trips",
+     "[].first_trip",
+     "[].last_trip",
+     "[].last_ever",
+     "[].lifetime_trips",
+     "[].platform_lifetime_trips",
+     "[].active_in_window",
+     "[].ever_driven",
+     "[].identity_from_history"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "[].rating",
+     "[].platform_rating",
+     "[].is_banned",
+     "[].state",
+     "[].platform_state",
+     "[].can_earn",
+     "[].completion_pct",
+     "[].completed",
+     "[].bookable"
+    ]
+   },
+   {
+    "class": "DOC",
+    "paths": [
+     "[].licence_expires",
+     "[].licence_days_left",
+     "[].licence_placeholder",
+     "[].platform_compliance"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "[].plate",
+     "[].state_plate"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [
+   "[]"
+  ],
+  "fleetKey": "fleet_id",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/driver_routes.js:570-1164, SELECT list :775-876, fold :1004-1086, res.json :1143-1163. Top-level array, one row per folded person: driver_ext_id, driver_name, person_key, trips, completed, bookable, days, km, revenue, priced_trips, payout, payout_days, money, money_days, money_period_days, money_source, last_trip, first_trip, plate, fleet_id, platforms, identity_from_history, last_ever, lifeti"
+ },
+ {
+  "method": "GET",
+  "path": "/api/drivers/identity-links",
+  "subject": "MRG",
+  "carries": [
+   "CT",
+   "ID",
+   "MRG",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "CT",
+    "paths": [
+     "links[].phone_tail",
+     "rejected[].phone_tail",
+     "links[].evidence",
+     "rejected[].evidence"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "links[].evidence",
+     "rejected[].evidence"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "coverage"
+    ]
+   }
+  ],
+  "whole": [
+   "ID"
+  ],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js:485-563, res.json at :537. links[] = identityLinks(q).rows (api/identity_links.js:65-88): alias_ext_id, alias_platform, alias_name, canonical_ext_id, canonical_platform, canonical_name, canonical_key (folded name), basis, evidence, phone_tail, first_seen_at, last_seen_at, confirmed_at, confirmed_by, plus promoted (bool). rejected[] (:519-522): alias_ext_id, alias_platform, ali"
+ },
+ {
+  "method": "GET",
+  "path": "/api/drivers/leaderboard",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "COND",
+   "EARN",
+   "ID",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "EARN",
+    "paths": [
+     "rows[].revenue",
+     "rows[].payout",
+     "rows[].payout_days",
+     "rows[].money",
+     "rows[].money_days",
+     "rows[].money_period_days",
+     "rows[].money_source"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "rows[].completion_pct",
+     "rows[].completed_trips",
+     "rows[].outcome_n"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "rows[].plate"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "rows[].trips",
+     "rows[].completed_trips",
+     "rows[].outcome_n"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:1442-1571. rows[] (top 100 people, ORDER BY completed_trips DESC): person (person_key), driver_name, driver_ext_id, platforms[], accounts, plate (mode), trips, completed_trips, km, avg_km, revenue (sum of per-trip fares), completion_pct, outcome_n, payout, payout_days, money, money_days, money_period_days, money_source, picture_url (/api/driver/photo/<platform>/<ext_id>, api/redact.j"
+ },
+ {
+  "method": "GET",
+  "path": "/api/drivers/performance",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "EARN",
+   "ID",
+   "PAY"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "EARN",
+    "paths": [
+     "rows[].earnings",
+     "rows[].counted",
+     "rows[].cash_earnings"
+    ]
+   },
+   {
+    "class": "PAY",
+    "paths": [
+     "totals.earnings",
+     "totals.cash_earnings",
+     "periods[].earnings"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "rows[].trips"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:1700-1748: {rows, periods, totals, shown, truncated}. rows[] from driver_payout (up to 300): platform, driver_name, driver_ext_id, period_start, period_end, period_days, days_used, trips, hours_online, hours_on_trip, distance_km, earnings, counted, cash_earnings \u2014 one platform payout record per named driver per period. totals (1719-1734): total, periods, payout_days, people, earnings"
+ },
+ {
+  "method": "GET",
+  "path": "/api/earnings/components",
+  "subject": "REV",
+  "carries": [
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:6183-6267. Body: {rows[], overlapping, first_period, last_period}. rows[] is {category, parent, amount, currency, drivers, driver_accounts}, grouped by (category, parent, currency) across the fleet. driver_ext_id is only counted, never returned. The inventory's EARN and driver_ext_id classification is stale: the per-driver rows were removed (see the comment at ~6150). range(req) (ser"
+ },
+ {
+  "method": "GET",
+  "path": "/api/earnings/tips",
+  "subject": "EARN",
+  "carries": [
+   "EARN",
+   "ID",
+   "REV"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].driver_ext_id",
+     "rows[].driver_name"
+    ]
+   },
+   {
+    "class": "REV",
+    "paths": [
+     "totals.tips",
+     "totals.fare",
+     "totals.ranked_tips"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:6271-6341. Body: {rows[], totals{tips, fare, drivers, tipped_drivers, ranked_tips}, fare_floor, excluded_n, total, shown, truncated}. rows[] is {driver_ext_id, driver_name, tips, fare, tip_pct}: money per named person (grouped by name_key), top 200 by tip_pct DESC, AED 300 floor. The totals are fleet-level money (REV) over every driver with no floor. STMT applies fleet_id=$4 and plat"
+ },
+ {
+  "method": "GET",
+  "path": "/api/events",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:6461-6470. The body is an array (at most 300) of world_event rows {source, code, title, category, scope, starts_on, ends_on, expected_effect, confidence, url, summary} over win(req). These are external or operator context (holidays, weather, news, manual notes), not fleet data, and the route ignores ?fleet. Operator-added rows (source='manual', POST below) hold free text an admin typ"
+ },
+ {
+  "method": "GET",
+  "path": "/api/finance/daily",
+  "subject": "REV",
+  "carries": [
+   "BK",
+   "PAY",
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "PAY",
+    "paths": [
+     "rows[].payout",
+     "rows[].payout_part",
+     "totals.payout",
+     "totals.money_payout_part"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "rows[].bookings",
+     "rows[].priced_trips",
+     "totals.bookings",
+     "totals.priced_trips"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:2502-2769. Response {rows[] (one per calendar day) {d, amount, entries (ledger_entry), revenue (fares), priced_trips, bookings, money, fares_part, payout_part, statement_part, money_period_days, money_derived, statement_gross, money_source, payout, nothing_recorded}, totals{money, fares, payout, money_fares_part, money_payout_part, money_statement_part, money_derived_part, bookings, "
+ },
+ {
+  "method": "GET",
+  "path": "/api/finance/ledger",
+  "subject": "REV",
+  "carries": [
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:2455-2458. Returns a bare array [{category, n, amount, currency}], grouped by category from ledger_entry (the Yango park ledger, written at src/sources/yango.js:935-956: platform_card, cash_collected, platform_fees, platform_tip and similar). It IGNORES ?fleet=. It binds range(req)[2], which is the PLATFORM parameter (server.js:323-330), as $3 (platform=$3) and never reads ledger_ent"
+ },
+ {
+  "method": "GET",
+  "path": "/api/funnel/drivers",
+  "subject": "COND",
+  "carries": [
+   "CASH",
+   "COND",
+   "EARN",
+   "ID"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].driver_name",
+     "rows[].driver_ext_id",
+     "rows[].person_key"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "rows[].price_cash",
+     "rows[].price_cashless",
+     "rows[].commission",
+     "rows[].commission_cost",
+     "rows[].gross",
+     "rows[].cash_pct"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "rows[].price_cash",
+     "rows[].cash_pct"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:2001-2062 (response at 2043). rows[] (up to 200, one per platform+person) = {platform, person_key (coalesce(driver_ext_id, driver_name), so an identifier), driver_name, driver_ext_id, period_start, period_end, period_days, offered, accepted, completed, cancelled_driver, cancelled_client, work_time_seconds, price_cash, price_cashless, commission, driver_score, periods_seen, "
+ },
+ {
+  "method": "GET",
+  "path": "/api/geo/corridors",
+  "subject": "LOC",
+  "carries": [
+   "BK",
+   "LOC",
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "corridors[].avg_fare"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "corridors[].trips",
+     "corridors[].priced",
+     "corridors[].complimentary",
+     "corridors[].min_n",
+     "corridors[].min_reported_n",
+     "origins[].trips",
+     "origins[].morning",
+     "origins[].evening",
+     "totals.pickups_all",
+     "totals.pickups_named",
+     "duration_measured",
+     "duration_reported"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:1739-1974 (response at 1943). Areas come from place_area(pickup_addr/dropoff_addr), which is a community such as 'Al Barsha' (lines 41-65), never a full address. corridors[] (only trips>=3, up to 120) = {from_area, to_area, trips, avg_km, avg_min, min_n, min_reported_n, priced, complimentary, avg_fare, platforms}. origins[] (up to 60) = {area, trips, morning, evening, avg_k"
+ },
+ {
+  "method": "GET",
+  "path": "/api/health",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "public": true,
+  "notes": "api/server.js:399 returns {ok:true, migrating:bool}. No DB access. Exempt from the migration 503 gate (server.js:203). Liveness probe; must stay public."
+ },
+ {
+  "method": "GET",
+  "path": "/api/insights",
+  "subject": "ID",
+  "carries": [
+   "ACCUSE",
+   "BK",
+   "COND",
+   "CT",
+   "DOC",
+   "EARN",
+   "ID",
+   "LOC",
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "CT",
+    "paths": [
+     "insights[].refs[].phone",
+     "insights[].refs[].email"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "insights[].refs[].compliance_rating",
+     "insights[].refs[].platform_rating",
+     "insights[].refs[].state",
+     "insights[].refs[].state_raw",
+     "insights[].refs[].state_reason",
+     "insights[].refs[].can_earn",
+     "insights[].refs[].is_banned",
+     "insights[].refs[].state_at",
+     "insights[].refs[].hours_online",
+     "insights[].refs[].online_at",
+     "insights[].refs[].online_ended_at",
+     "insights[].refs[].began_before_window",
+     "insights[].refs[].online_platform"
+    ]
+   },
+   {
+    "class": "ACCUSE",
+    "paths": [
+     "insights[].refs[].driver_ext_id",
+     "insights[].refs[].full_name",
+     "insights[].refs[].picture_url"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "insights[].refs[].online_lat",
+     "insights[].refs[].online_lon",
+     "insights[].refs[].last_trip_addr"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "insights[].refs[].state_plate",
+     "insights[].refs[].last_trip_plate"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "insights[].refs[].last_trip_at",
+     "insights[].refs[].last_trip_platform",
+     "insights[].refs[].lifetime_trips",
+     "insights[].refs[].trips_28d",
+     "insights[].refs[].days_28d",
+     "insights[].refs[].last_28d_day"
+    ]
+   },
+   {
+    "class": "REV",
+    "paths": [
+     "insights[].impact_aed"
+    ]
+   }
+  ],
+  "whole": [
+   "SYS"
+  ],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/server.js:4448-4600. Body: {insights[], truncated, limit, cleared, filter{severity, category, code, entity_id, fleet, from, to}}. Each insight is {code, severity, category, entity_type, entity_id, title, detail, action, impact_aed, metric, fleet_id, refs, window_start, window_end, computed_at, impact_kind}. refs is only filled on drivers_online_no_trips (src/insights.js:1051-1053, as {driver_e"
+ },
+ {
+  "method": "GET",
+  "path": "/api/insights/summary",
+  "subject": "ID",
+  "carries": [
+   "ID",
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "total.measured_impact",
+     "total.modelled_impact",
+     "by_code[].impact",
+     "modelled.aed"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:4602-4694. Body: {total{n, measured_impact, modelled_impact, idle_vehicles, priced_n}, by_severity[{severity,n}], by_category[{category,n}], by_code[{code, category, n, priced, impact, channels}], modelled{idle_vehicles, aed, assumption}, stored_rows, duplicates_suppressed, resolved_since_last_run, filter{fleet, platform}, platform_applies}. There are no names or per-person rows. The"
+ },
+ {
+  "method": "GET",
+  "path": "/api/kpis",
+  "subject": "BK",
+  "carries": [
+   "BK",
+   "PAY",
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "revenue",
+     "avg_fare",
+     "priced_measured_revenue",
+     "revenue_per_km",
+     "accounted",
+     "accounted_fares",
+     "accounted_statements",
+     "accounted_statement_platforms",
+     "accounted_fare_bookings",
+     "accounted_bookings",
+     "accounted_platforms",
+     "statement_net",
+     "statement_platforms",
+     "dark_bookings",
+     "dark_pct",
+     "undercovered_bookings",
+     "undercovered_pct",
+     "undercovered_income",
+     "undercovered_platforms",
+     "set_aside_fares",
+     "set_aside_fare_bookings",
+     "set_aside_bookings",
+     "set_aside_platforms",
+     "accounted_derived",
+     "accounted_derived_note"
+    ]
+   },
+   {
+    "class": "PAY",
+    "paths": [
+     "payouts",
+     "payout_days",
+     "payout_drivers",
+     "payout_accounts",
+     "payout_platforms",
+     "payout_coverage_pct",
+     "accounted_payouts",
+     "reported_payouts",
+     "reported_payout_platforms",
+     "reported_payout_days",
+     "uncounted_payouts",
+     "uncounted_payout_platforms",
+     "uncounted_payout_bases",
+     "undercovered_payouts"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "vehicles",
+     "vehicles_seen",
+     "trips_without_vehicle",
+     "live_vehicles",
+     "fresh",
+     "silent_vehicles",
+     "tracked_vehicles",
+     "alerts",
+     "device_alerts",
+     "alert_km",
+     "alert_window_trips",
+     "alerts_per_100km",
+     "alerts_per_100km_absent"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "alert_coverage"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "Response built at api/server.js:799-878: spread of the trip aggregate t (server.js:510-594: trips, completed_trips, cancelled_trips, bookable_trips, cancelled_by_driver, declined_offers, cancelled_by_rider, cancelled_unsaid, other_outcome, no_outcome, completion_pct, cancel_pct, telematics_journeys, telematics_km, km, avg_km, trips_with_distance, revenue, priced_trips, avg_fare, priced_km, priced_"
+ },
+ {
+  "method": "GET",
+  "path": "/api/live",
+  "subject": "VEH",
+  "carries": [
+   "ID",
+   "LOC",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "LOC",
+    "paths": [
+     "[].lat",
+     "[].lng"
+    ]
+   },
+   {
+    "class": "ID",
+    "paths": [
+     "[].current_driver",
+     "[].driver_as_of"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "rows",
+  "fleetRows": [
+   "[]"
+  ],
+  "fleetKey": "fleet_id",
+  "cap": null,
+  "notes": "api/server.js:1805-1868: top-level array, one row per plate (latest fix): plate, fleet_id, source, captured_at, polled_at, lat, lng, speed, status, seat_occupied, seat_count, seat_source, ac_on, odometer, fuel_level, stale, fix_age_min, poll_age_min, current_driver, driver_as_of. Takes NO parameters at all \u2014 ?fleet is ignored, every vehicle of both fleets is returned; rows carry fleet_id so the sh"
+ },
+ {
+  "method": "GET",
+  "path": "/api/map/days",
+  "subject": "LOC",
+  "carries": [
+   "BK",
+   "ID",
+   "LOC",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "[].driver_name",
+     "[].driver_ext_id",
+     "[].current_driver_name"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "[].driver_trips"
+    ]
+   }
+  ],
+  "whole": [
+   "VEH"
+  ],
+  "fleet": "rows",
+  "fleetRows": [
+   "[]"
+  ],
+  "fleetKey": "fleet_id",
+  "cap": null,
+  "notes": "api/server.js:1900-1942: top-level array (up to 400) of plate-days with a replayable trail: day, plate, fleet_id, fixes, first_fix, last_fix, max_speed, occupied_fixes, driver_name, driver_ext_id, driver_trips (that day's custodian from vehicle_driver_day), current_driver_name (today's custodian), plus total, shown, truncated repeated on every row. No coordinates, but it is the index of the locati"
+ },
+ {
+  "method": "GET",
+  "path": "/api/map/journey",
+  "subject": "LOC",
+  "carries": [
+   "BK",
+   "ID",
+   "LOC",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "driver",
+     "driver_id"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "driver_trips"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "segments[].points[].status",
+     "segments[].points[].speed",
+     "segments[].points[].occupied",
+     "segments[].occupied",
+     "occupied_km",
+     "occupancy_measured_km",
+     "occupancy_reported_fixes",
+     "occupancy_reported",
+     "occupancy_source",
+     "occupancy_by_source",
+     "occupancy_note"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:2042-2065: {plate, day, fixes, segments[{points[{t,lat,lng,speed,status,occupied,source}], occupied}], driver, driver_id, driver_trips, distance_km, moving_km, occupied_km, occupancy_measured_km, occupancy_reported_fixes, occupancy_reported, occupancy_source, occupancy_by_source[{source,label,occupied_km,measured_km,reported_fixes}], occupancy_note, first_fix, last_fix}. driver/drive"
+ },
+ {
+  "method": "GET",
+  "path": "/api/mix",
+  "subject": "BK",
+  "carries": [
+   "BK",
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "[].revenue",
+     "[].revenue_per_trip",
+     "[].revenue_per_km"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:1306-1379. Top-level array of {label, platform, n, revenue, priced_n, priced_km, avg_km, revenue_per_trip, revenue_per_km} (fold at server.js:1353-1362); telematics count goes out as the x-telematics-journeys header (1377), not in the body. ?by= picks one of MIX_DIMS (server.js:1297-1304: payment_type, status, platform, fleet_id, service_type, product) \u2014 no person dimension. Both que"
+ },
+ {
+  "method": "GET",
+  "path": "/api/mix/detail",
+  "subject": "BK",
+  "carries": [
+   "BK",
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "groups[].revenue",
+     "groups[].revenue_per_trip",
+     "groups[].revenue_per_km"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:1397-1411: {dimension, per_platform, total_trips, unlabelled_trips, unlabelled_platforms, groups[{platform,label,n,revenue,priced_n,revenue_per_trip,revenue_per_km}]}. The inventory's driver_name/driver_ext_id guess is WRONG: MIX_DIMS (server.js:1297-1304) has no driver dimension, and no ID ever appears. F/FB honour ?fleet."
+ },
+ {
+  "method": "GET",
+  "path": "/api/platforms",
+  "subject": "SYS",
+  "carries": [
+   "BK",
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "[].bookings",
+     "[].rows_seen",
+     "[].window_bookings"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "rows",
+  "fleetRows": [
+   "[]"
+  ],
+  "fleetKey": "fleet_id",
+  "cap": null,
+  "notes": "api/server.js:3527-3570. Ignores ?fleet= and ?platform=; it reads only the window. Returns a bare array with one row per (platform, fleet_id) from trip, plus synthetic rows for configured booking channels that have no trips (fleet_id null, all counts 0). Row shape: {platform, fleet_id, bookings, rows_seen, window_bookings, earliest, latest, window_from, window_to, windowed, collection_status, coll"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/bolt/payouts",
+  "subject": "CRED",
+  "carries": [
+   "CRED",
+   "PAY",
+   "RAW"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "PAY",
+    "paths": [
+     "fleets[].getPayouts.rows",
+     "fleets[].getPayouts.earliest",
+     "fleets[].getPayouts.latest",
+     "fleets[].getPayouts.distinct_days",
+     "fleets[].getPayouts.currencies",
+     "fleets[].getPayouts.total",
+     "fleets[].getFleetBalanceSummary.values",
+     "fleets[].getFleetBalanceDetails.values"
+    ]
+   },
+   {
+    "class": "RAW",
+    "paths": [
+     "fleets[].getFleetBalanceDetails.values"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [
+   "fleets[]"
+  ],
+  "fleetKey": "fleet",
+  "cap": "collector.probe",
+  "auditRead": true,
+  "notes": "api/probe.js:2523 handler. Body at :2638-2646: {window, host, fleets[{fleet, getPayouts{http, code, message, rows, fields (key/type shape), earliest, latest, distinct_days, currencies, total}, getFleetBalanceSummary{http, code, message, top_level_keys, values: balanceSummary()}, getFleetBalanceDetails{http, code, message, window, top_level_keys, values: balanceValues(), withheld{dropped_keys, reda"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/fms/window",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "notes": "api/probe.js:2832 handler. Body at :2871: {window, operation, fleets[{fleet, http, top_level_keys, message, records, fields (key names of the first record, up to 40), first_start (a timestamp)} | {fleet, skipped} | {fleet, error}]}. No values from the records. SIDE EFFECT: for EVERY configured fleet it sends that fleet's FMS username AND password in the URL query (:2851-2854). The error text drops"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/results",
+  "subject": "CRED",
+  "carries": [
+   "BK",
+   "CRED",
+   "CT",
+   "ID",
+   "LOC",
+   "RAW",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "none",
+  "fields": [
+   {
+    "class": "RAW",
+    "paths": [
+     "surfaces[].fields[].values"
+    ]
+   },
+   {
+    "class": "ID",
+    "paths": [
+     "surfaces[].fields[].values"
+    ]
+   },
+   {
+    "class": "CT",
+    "paths": [
+     "surfaces[].fields[].values"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "surfaces[].fields[].values"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "surfaces[].fields[].values"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "surfaces[].fields[].values"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "surfaces[].ok",
+     "surfaces[].http_status",
+     "surfaces[].error",
+     "surfaces[].probed_at",
+     "failing",
+     "last_probe"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "auditRead": true,
+  "notes": "api/analytics_routes.js:2073-2087. surfaces[] = provider_probe rows {provider, surface, ok, http_status, record_count, top_keys, fields[], unmapped, error, note, probed_at, unmapped_n}, plus last_probe, failing[]{provider, surface, error} and note. fields[] comes from describe() in src/probe.js:67-140: {key, type, fill_pct, distinct_seen, distinct_capped, values, values_withheld?, values_withheld_"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/tesla/egress",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "notes": "api/probe.js:1465 handler. Body at :1593 (res.json(out)): {egress_ipify, egress_aws (production's public egress IP), auth_host{status, blocked_at_edge, reference, answered (200 chars of Tesla's reply)}, data_host{...}, variants[{variant, status, reached_oauth, answered}], variant_reading, hosts[{host, status, reached_oauth, answered}], host_reading, reading}. No credential is sent: it posts grant_"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/uber/audit",
+  "subject": "CRED",
+  "carries": [
+   "BK",
+   "CRED",
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "fleets[].sample_missing"
+    ]
+   }
+  ],
+  "whole": [
+   "SYS"
+  ],
+  "fleet": "param",
+  "fleetRows": [
+   "fleets[]"
+  ],
+  "fleetKey": "fleet",
+  "cap": "collector.probe",
+  "notes": "api/probe.js:1749 handler, calling auditTripWindow (src/sources/uber.js:1184-1265) and compareTripSets (:1059-1110). Body at :1775-1787: {window, days, fleets[{fleet, window, uber_rows, uber_rows_in_window, uber_rows_outside_window, ours, in_both, uber_only, ours_only, agreement_pct, sample_missing (up to 10 Uber trip uuids we lack), days[{day, uber, ours, missing, misfiled}], misfiled, took_ms} |"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/uber/driver",
+  "subject": "CRED",
+  "carries": [
+   "BK",
+   "COND",
+   "CRED",
+   "ID",
+   "RAW",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "driver_uuid_asked",
+     "compliance_status"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "recognitionRating",
+     "isBanned"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "completedTripsCount"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "vehicles"
+    ]
+   },
+   {
+    "class": "RAW",
+    "paths": [
+     "body"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "auditRead": true,
+  "notes": "api/probe.js:1028 handler. The OK body at :1089-1101 is {fleet, driver_uuid_asked, recognitionRating, completedTripsCount, isBanned, compliance_status, vehicles (a count), fields_present{driverInfo[], driver[], vehicle[] \u2014 key names only}}. Error branches: :1047 {error}; :1076 {error: the first GraphQL error (up to 400 chars), errors}; :1080-1083 {error, keys, data_keys, body: the first 600 chars "
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/uber/realtime",
+  "subject": "CRED",
+  "carries": [
+   "BK",
+   "CRED",
+   "EARN",
+   "ID",
+   "RAW"
+  ],
+  "grain": "none",
+  "fields": [
+   {
+    "class": "RAW",
+    "paths": [
+     "attempts[].sample",
+     "attempts[].fields[].values"
+    ]
+   },
+   {
+    "class": "ID",
+    "paths": [
+     "attempts[].sample"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "attempts[].sample"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "attempts[].sample"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "auditRead": true,
+  "notes": "api/probe.js:1596 handler. Body at :1718-1725: {window, minutes, verdict, answered[], attempts[{attempt, method, status, message, top_level_keys, count, fields: describe(), sample} | {attempt, method, error}]}. `sample` (:1711-1712) is the FIRST transaction record returned VERBATIM on any 2xx answer. The comment at :1703-1710 says it carries the fleet's driver names and amounts (transactionUuid, t"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/uber/report-columns",
+  "subject": "CRED",
+  "carries": [
+   "CRED",
+   "RAW"
+  ],
+  "grain": "none",
+  "fields": [
+   {
+    "class": "RAW",
+    "paths": [
+     "columns[].values",
+     "sample.sample"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "auditRead": true,
+  "notes": "api/probe.js:844 handler. Body at :997-1006: {fleet, reportType, window, rows_sampled, sample?{column, distinct, sample[] | refused}, shape?{column, values_seen, classes, date_range, means}, columns[{column, distinct_seen, values}]}. Early returns: :878 {fleet, reportType, error} and :896 {fleet, reportType, window, error}. LEAK RISK: columns[].values echoes the raw CSV values of ANY column with 1"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/uber/report-types",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "notes": "api/probe.js:747 handler. Body at :825-842: {fleet, window[from,to], types[{reportType, valid, throttled, detail}], limit_note}. The 400 path returns {error, asked, candidates} or noOrg's {error, fleets_configured} (:74-84). `detail` is Uber's error words (up to 160 chars), with no personal data. SIDE EFFECTS: it POSTs GenerateReport at Uber for up to 16 report types with the stored supplier cooki"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/uber/rest",
+  "subject": "CRED",
+  "carries": [
+   "CRED",
+   "RAW"
+  ],
+  "grain": "none",
+  "fields": [
+   {
+    "class": "RAW",
+    "paths": [
+     "endpoints[].fields[].values"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "auditRead": true,
+  "notes": "api/probe.js:1135 handler; the REST allowlist is at :1107-1133. Body at :1158: {endpoints[{endpoint, status, count, top_level_keys, fields: describe()} | {endpoint, error}]}. describe() (:140-165) returns [{key, type, fill_pct, distinct_seen, values}]. `values` echoes up to 12 distinct raw values (48 chars each) for any flattened field with 12 or fewer distinct values across up to 50 records of dr"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/uber/tier",
+  "subject": "CRED",
+  "carries": [
+   "BK",
+   "COND",
+   "CRED",
+   "CT",
+   "DOC",
+   "EARN",
+   "ID",
+   "RAW"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "driver",
+     "fields[].value",
+     "fields[].retry_with_selection.value",
+     "fields_that_exist[].value",
+     "fields_that_exist[].retry_with_selection.value"
+    ]
+   },
+   {
+    "class": "CT",
+    "paths": [
+     "fields[].value",
+     "fields[].retry_with_selection.value",
+     "fields_that_exist[].value",
+     "fields_that_exist[].retry_with_selection.value"
+    ]
+   },
+   {
+    "class": "DOC",
+    "paths": [
+     "fields[].value",
+     "fields[].retry_with_selection.value",
+     "fields_that_exist[].value",
+     "fields_that_exist[].retry_with_selection.value"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "control.positive.value",
+     "fields[].value",
+     "fields[].retry_with_selection.value",
+     "fields_that_exist[].value",
+     "fields_that_exist[].retry_with_selection.value"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "fields[].value",
+     "fields_that_exist[].value"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "arg_shapes[].sample"
+    ]
+   },
+   {
+    "class": "RAW",
+    "paths": [
+     "control.positive.value",
+     "control.fields[].value",
+     "fields[].value",
+     "fields[].retry_with_selection.value",
+     "fields_that_exist[].value",
+     "fields_that_exist[].retry_with_selection.value",
+     "arg_shapes[].sample"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "auditRead": true,
+  "notes": "api/probe.js:1792 handler. Body at :2049-2092: {arg_shapes?[{operation, args, kind, verdict, detail, sample}], driver (the Uber driver uuid), org (the fleet), introspection{Type: [field names] | {refused}}, control{positive{field, value, session_works, note}, bare_object{...}, near_miss{...}, generic_refusal_means, fields[probeField rows], names_its_absent_fields, operation{...}, names_its_absent_"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/uber/timeline",
+  "subject": "RAW",
+  "carries": [
+   "BK",
+   "ID",
+   "LOC",
+   "SYS"
+  ],
+  "grain": "record",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/probe.js:1255 handler. DB only, with no provider call (loadSettings only reads). Body at :1323-1327: {id (the Uber driver uuid the caller passed), day, events[{at_dubai, kind, status, state, offline_reason, job_ext_id, lat, lon, minute}] (driver_timeline_event for day-1..day+1), trips[{started, ended, status, product, external_id}] (that driver's Uber trips that day), this_driver_this_day[{kin"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/uber/window",
+  "subject": "CRED",
+  "carries": [
+   "CRED",
+   "RAW"
+  ],
+  "grain": "none",
+  "fields": [
+   {
+    "class": "RAW",
+    "paths": [
+     "surfaces[].fields[].values"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "auditRead": true,
+  "notes": "api/probe.js:1178 handler. Body at :1235-1240: {window, earner_breakdowns{drivers, rows, rows_with_money, err} (src/sources/uber.js:1402-1411, counts only), surfaces[{surface, status, count, top_level_keys, message, fields: describe()} | {surface, error}]}. surfaces[].fields[].values can echo up to 12 distinct raw values of earner-payments or transactions records (per-driver ids or amounts on a sm"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/yango",
+  "subject": "CRED",
+  "carries": [
+   "CRED",
+   "RAW"
+  ],
+  "grain": "none",
+  "fields": [
+   {
+    "class": "RAW",
+    "paths": [
+     "with_cookie.body_starts",
+     "without_cookie.body_starts"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "auditRead": true,
+  "notes": "api/probe.js:2158 handler. Body at :2231-2262: {host, url, park_id{len, head, tail}, park_id_matches_the_cookie, park_id_in_cookie{len, head, tail}, cookie{len, head, tail, account (the yandex_login inside the session cookie, i.e. the account holder's login)}, api_key_not_sent_to_this_host{len, head, tail: the first and last 4 chars of YANGO_API_KEY}, with_cookie{status, answered_by, body_starts ("
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/yango/keyapi",
+  "subject": "CRED",
+  "carries": [
+   "CRED",
+   "RAW"
+  ],
+  "grain": "none",
+  "fields": [
+   {
+    "class": "RAW",
+    "paths": [
+     "tried[].body_starts",
+     "surfaces[].body_starts"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "auditRead": true,
+  "notes": "api/probe.js:2314 handler. Body at :2449-2471: {host, park_id{len, head, tail}, api_key{len, head, tail} (a dictionary key), client_id_stored, client_id_shape, window, tried[{shape, status, json, answered_by, top_level_keys, total, records_sampled, fields, body_starts}], surfaces[{path, needs, ...same}], reading, note}. `fields` is key paths and types only (shapeOf, :2340-2362). body_starts (:2386"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/yango/ledger",
+  "subject": "CRED",
+  "carries": [
+   "CRED",
+   "PAY",
+   "RAW"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "PAY",
+    "paths": [
+     "by_category",
+     "ledger_span"
+    ]
+   },
+   {
+    "class": "RAW",
+    "paths": [
+     "tried[].body_starts"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "auditRead": true,
+  "notes": "api/probe.js:2670 handler. Body at :2810-2830: {host, park_id{len, head, tail}, client_id_shape, window, tried[{path, status, top_level_keys, rows, fields (shape), body_starts (240 chars)} | {path, status, error}], ledger_span{rows, pages, earliest, latest, complete}, by_category[{category_id, category_name, group_id, rows, sum, rows_negative, rows_positive}] (park-wide sums, no driver), categorie"
+ },
+ {
+  "method": "GET",
+  "path": "/api/probe/zero-distance",
+  "subject": "RAW",
+  "carries": [
+   "ACCUSE",
+   "BK",
+   "EARN",
+   "ID",
+   "REV"
+  ],
+  "grain": "list",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/probe.js:1410 handler. DB only. Body at :1459: {days, by_platform[{platform, trips, accounts, drivers, people, money, cash_trips, under_a_minute}], worst_drivers[{driver_name, driver_ext_id, platform, trips, money}] (the top 15 by count), what_this_is}. worst_drivers is a NAMED ranking of drivers by completed, fare-charging, zero-distance trips. The route's own text frames these as possibly 'a"
+ },
+ {
+  "method": "GET",
+  "path": "/api/product/by-vehicle",
+  "subject": "VEH",
+  "carries": [
+   "BK",
+   "ID",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "[].driver_refs"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "[].trips"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:6361-6445. The body is a top-level array of {plate, product, trips, km, avg_km, driver_refs:[{name, id, days}] (top 3 people by custody days), driver_n, driver_accounts}. It carries no money, despite the inventory's REV. F = W() (server.js:349-355) binds fleet ($4) and platform on trip_norm. The custody CTE (vehicle_driver_day) is limited to the plates the fleet-filtered agg returned"
+ },
+ {
+  "method": "GET",
+  "path": "/api/ready",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "public": true,
+  "notes": "api/server.js:421-442 returns {ready:true, views:['trip_norm','trip_ext','source_day_coverage']} or 503 {ready:false, reason, missing?}. Only to_regclass probes, memoised in process (readyMemo), no writes. Marked public:false per the rule, BUT the comment at server.js:404-418 describes the platform's health check timing out on THIS route ('this check then waits its turn... the platform's health ch"
+ },
+ {
+  "method": "GET",
+  "path": "/api/recommendations",
+  "subject": "REV",
+  "carries": [
+   "ACCUSE",
+   "COND",
+   "ID",
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "COND",
+    "paths": [
+     "rows[].flagged[].value",
+     "rows[].flagged[].online_hours"
+    ]
+   },
+   {
+    "class": "ACCUSE",
+    "paths": [
+     "rows[].flagged[].driver_ext_id"
+    ]
+   },
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].flagged[].driver_ext_id"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:6127-6136. Body: {rows[], shown, truncated:false, history}. rows[] is {platform, rec_type, period_start, period_end, org_value, target_value, flagged_count, flagged, updated_at}. flagged is Uber's list of named drivers below the acceptance or trip-completion target, or above the cancellation target: [{driver_ext_id, value (the driver's rate or trip count), online_hours?}] (src/source"
+ },
+ {
+  "method": "GET",
+  "path": "/api/reconcile/periods",
+  "subject": "PAY",
+  "carries": [
+   "BK",
+   "PAY"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "rows[].trips"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:2796-2922. Response {rows[{platform, fleet_id, period_start, period_end, period_days, drivers (count), net, cash, trips, distance_km, whole}], grains[{period_days, periods, net}], current_by_grain[{period_days, driver_days, drivers, driver_accounts, earnings}], current_total, finest_grain, totals{net, periods, net_whole_periods, whole_periods, cut_periods, all_grains_net}, window{fro"
+ },
+ {
+  "method": "GET",
+  "path": "/api/rollups",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:4368 calls rollupState (src/rollup.js:1358-1364), which returns a bare array from rollup_state: [{name, status, finished_at, rows_written, duration_ms, covers_from, covers_to, error, age_min}]. The table has no fleet column; each rollup covers both fleets as one job. Never cached (api/cache.js:53). Used on #sources (app.js:7649)."
+ },
+ {
+  "method": "GET",
+  "path": "/api/schema/raw-fields",
+  "subject": "RAW",
+  "carries": [
+   "BK",
+   "COND",
+   "CRED",
+   "CT",
+   "DOC",
+   "EARN",
+   "ID",
+   "LOC",
+   "PAX",
+   "RAW",
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/server.js:6507-6600. Body: {table, platform, rows_with_raw, sampled, fields[]}. fields[] is {key, fill_pct, distinct_values, examples, already_a_column, mapped_to}. examples holds up to 5 distinct raw values per top-level raw key, left(value #>> '{}', 60). UNREDACTED: unlike raw-values, examples never pass through secretField or redactSampleValue. For the hotel trip key `driver`, whose object "
+ },
+ {
+  "method": "GET",
+  "path": "/api/schema/raw-values",
+  "subject": "RAW",
+  "carries": [
+   "BK",
+   "COND",
+   "CT",
+   "DOC",
+   "EARN",
+   "ID",
+   "LOC",
+   "PAX",
+   "RAW",
+   "REV",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/server.js:6635-6690. It returns 400 {error} without ?key. Otherwise the body is a top-level array (at most 60) of {value, n, withheld?, withheld_reason?} with the distinct values of raw ->> key and their counts. A secret-shaped key (api/redact.js:72-83: password, token, auth, cookie, session, emirates, licence no, passport, visa no, permit no, iban, card no) returns counts only, with value '(w"
+ },
+ {
+  "method": "GET",
+  "path": "/api/sensor-health",
+  "subject": "VEH",
+  "carries": [
+   "BK",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "rows[].bookings",
+     "rows[].journeys"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:3390-3510. Response {rows[], total, shown, truncated, by_source{cabman|fms_live|fms_trip: {label, total, shown, truncated, dead, rule}}}. Rows come in three shapes. CABMAN: {plate, occupied_fixes, unreported_fixes, total_fixes, occupied_pct, sensor_suspect_segments, judgeable, source, source_label, state, dead, reason}. fms_live: {plate, source, source_label, counted_fixes, occupied_"
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:3911-3914. describeSettings (src/settings.js:491-553) returns an array of {key, group, label, hint, secret (boolean flag), source, default_value, configured, value, updated_at, expiry, seen_by[{component, source, observed_at}]}. value is IN CLEAR for non-secret keys (org uuids, client ids, park id, usernames, hosts) and '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'+last4 for secret keys. Without a matching x-admin-tok"
+ },
+ {
+  "method": "GET",
+  "path": "/api/settings/jobs",
+  "subject": "CRED",
+  "carries": [
+   "AUDIT",
+   "CRED",
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [
+   {
+    "class": "AUDIT",
+    "paths": [
+     "jobs[].requested_by"
+    ]
+   }
+  ],
+  "whole": [
+   "SYS"
+  ],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/server.js:4388-4441. Body: {jobs[], total, shown, truncated, pending, running}. Each job is {id, mode, status, requested_by, requested_at, started_at, finished_at, error, attempts, progress, seconds, running_seconds}, capped at 40 with the cap disclosed. collector_job has a `fleet` column (the INSERT at ~4360 writes it), but this SELECT does not return it and the handler never reads ?fleet=. B"
+ },
+ {
+  "method": "GET",
+  "path": "/api/settlement/cash-exposure",
+  "subject": "CASH",
+  "carries": [
+   "BK",
+   "CASH",
+   "ID",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "drivers[].driver_name",
+     "drivers[].driver_ext_id"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "drivers[].plates"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "drivers[].cash_trips",
+     "drivers[].priced_cash_trips",
+     "drivers[].last_cash_trip",
+     "total_cash_trips",
+     "caveat"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:176-411 (response at 376). Up to 200 rows, one per (driver_name, driver_ext_id). SELECT * from the ranked CTE; the _people/_drivers/_nk/_pk/_name_rows/_person_rows helper columns are deleted at 358-367. So each drivers[] row is {driver_name, driver_ext_id, cash_trips, priced_cash_trips, cash_value, platforms[], plates[], last_cash_trip, statement_cash, statement_days, state"
+ },
+ {
+  "method": "GET",
+  "path": "/api/settlement/mix",
+  "subject": "REV",
+  "carries": [
+   "BK",
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "total_trips",
+     "unlabelled_trips",
+     "classes[].trips",
+     "classes[].priced_trips",
+     "classes[].foc_trips"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:93-138. One trip_ext GROUP BY settlement_class, platform under FB (server.js:394 = W() with $4 fleet_id, server.js:336-343). Response: {total_trips, unlabelled_trips, unlabelled_platforms[], classes[]{settlement_class,label,meaning,trips,trip_share_pct,priced_trips,revenue,avg_fare,km,foc_trips,platforms[],last_at}}. No names, no rows. Fleet-level money plus trip counts onl"
+ },
+ {
+  "method": "GET",
+  "path": "/api/settlement/receivables",
+  "subject": "REV",
+  "carries": [
+   "BK",
+   "CASH",
+   "ID",
+   "REV"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].counterparty",
+     "rows[].driver_ext_id",
+     "rows[].driver_ids"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "rows[].counterparty",
+     "rows[].driver_ext_id",
+     "rows[].driver_ids"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "rows[].trips",
+     "rows[].priced_trips",
+     "total_trips",
+     "priced_trips",
+     "ageing.total_trips",
+     "ageing.buckets[].trips"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:416-576 (response at 532). is_receivable = payment_type in room-charge, hotel-charge or posted-for-salary (sql/schema_v62.sql:60). rows[] = {settlement_class, counterparty, partner_id, driver_ext_id, driver_ids[], driver_accounts, trips, priced_trips, amount, oldest, newest, label, age_days}, capped at 200. counterparty is a DRIVER NAME when settlement_class='salary' and th"
+ },
+ {
+  "method": "GET",
+  "path": "/api/status",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "rows",
+  "fleetRows": [
+   "[]"
+  ],
+  "fleetKey": "fleet_id",
+  "cap": null,
+  "notes": "api/server.js:3596-3611. The handler is (_, res) and reads no query parameters. Returns a bare array with one row per (source, mode, fleet_id), the latest collection_run: {source, mode, fleet_id, status, rows_written, window_start, window_end, finished_at, error, chunks_total, chunks_failed, cadence, silence, failed_windows[{from,to,error}], windows[{from,to,rows,ok}]}. detail is removed. fleet_id"
+ },
+ {
+  "method": "GET",
+  "path": "/api/status/driver",
+  "subject": "ID",
+  "carries": [
+   "ID",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "VEH",
+    "paths": [
+     "plate"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "observed_at",
+     "observed_age_min",
+     "stale",
+     "stale_why"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/status_routes.js:104 handler. Body at :182-236: {day, driver_ext_id, uber_ids[] (every Uber account folded onto the same person_key, :113-122), status, status_word, status_raw, status_at, onboarding, plate, observed_at, observed_age_min, stale, absent, stale_why, today{online_since, online_since_local, online_minutes, on_trip_minutes, waiting_minutes, spans[{status, from, minutes}], history_fr"
+ },
+ {
+  "method": "GET",
+  "path": "/api/status/fleet",
+  "subject": "ID",
+  "carries": [
+   "ID",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "VEH",
+    "paths": [
+     "rows[].plate"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "feed_at",
+     "feed_age_min",
+     "stale"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [
+   "rows[]"
+  ],
+  "fleetKey": "fleet_id",
+  "cap": null,
+  "notes": "api/status_routes.js:240 handler. The single SQL at :242-265 honours ?fleet= (s.fleet_id = $1), and every total and the feed age are computed from those rows. Body at :270-301: {rows[{driver_ext_id, fleet_id, status, status_at, plate, observed_at, onboarding, person_key, full_name}], feed_at, feed_age_min, stale, stale_after_min, totals{drivers, with_status, unknown, online, ontrip, offline, worki"
+ },
+ {
+  "method": "GET",
+  "path": "/api/tesla/connect",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "credentials.write",
+  "notes": "api/tesla_routes.js:179 handler. This is a GET that WRITES: putState() stores app_setting TESLA_OAUTH_STATE (1h, single use; :88, :189). The body at :190 is {url, redirect_uri, expires_in_min, note}. `url` is Tesla's authorize URL, carrying client_id and the fresh 192-bit state. That state is the bearer authority that lets /teslaredirect store a refresh token, so the response is effectively a secr"
+ },
+ {
+  "method": "GET",
+  "path": "/api/tesla/status",
+  "subject": "CRED",
+  "carries": [
+   "CRED",
+   "VEH"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "VEH",
+    "paths": [
+     "teslas",
+     "total_teslas"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "notes": "api/tesla_routes.js:121 handler. Body at :155-172: {region, api_base, client_configured, granted, live{ok, why} | null, teslas[{model, plates, with_vin, ecosine, egari}], total_teslas, why}. It never returns secret values, only whether they are set. This is a GET WITH SIDE EFFECTS: when TESLA_REFRESH_TOKEN is set, accessToken() calls Tesla's token host and persists a rotated TESLA_REFRESH_TOKEN th"
+ },
+ {
+  "method": "GET",
+  "path": "/api/tesla/vehicles",
+  "subject": "CRED",
+  "carries": [
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "notes": "api/tesla_routes.js:287 handler. Body at :298-310: {status, count, vehicles[{vin, display_name, state, id, vehicle_id}], why}. The error path returns 409 {error, granted:false}. SIDE EFFECTS: a BILLED Tesla Fleet API call (/api/1/vehicles, pay-as-you-go), and accessToken() may rotate and persist TESLA_REFRESH_TOKEN. display_name is the owner-given car name; it is unmeasured whether any carry a per"
+ },
+ {
+  "method": "GET",
+  "path": "/api/tiers/by-vehicle",
+  "subject": "VEH",
+  "carries": [
+   "BK",
+   "ID",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "vehicles[].driver_refs[].name",
+     "vehicles[].driver_refs[].id"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "vehicles[].trips",
+     "vehicles[].black",
+     "vehicles[].comfort",
+     "vehicles[].electric",
+     "vehicles[].uberx",
+     "vehicles[].premium"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:1092-1257 (response at 1230). vehicles[] (up to 250 Uber plates) = {plate, trips, black, comfort, electric, uberx, premium, km, avg_km, make, model, year, colour, driver_refs[]{name, id, days} (top 3 people), driver_n, driver_accounts, premium_pct, model_key, model_premium_pct, model_best_pct, premium_gap_pct}. Top level: fleet_premium_pct, premium_min_trips, premium_rated_"
+ },
+ {
+  "method": "GET",
+  "path": "/api/tiers/mix",
+  "subject": "BK",
+  "carries": [
+   "BK"
+  ],
+  "grain": "aggregate",
+  "fields": [],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/analytics_routes.js:1276-1305. The body is a top-level ARRAY: {label, tier, n, avg_km}, grouped by ?by= (day, daypart, dow or hour) against the Uber product. It reads trip_norm under F, which honours $4 fleet. No money (the Uber export has no fare), even though the inventory guessed company_revenue. Trip counts only."
+ },
+ {
+  "method": "GET",
+  "path": "/api/track",
+  "subject": "LOC",
+  "carries": [
+   "LOC",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "VEH",
+    "paths": [
+     "[].speed",
+     "[].status",
+     "[].seat_occupied",
+     "[].ignition"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:1872-1881: 400 without ?plate; otherwise a top-level array of fixes {captured_at, lat, lng, speed, status, seat_occupied, ignition, source} for that plate over the window. Ignores ?fleet and the rows carry no fleet key: ANY plate of either fleet can be traced by anyone who can reach the route. A fleet-scoped caller needs the plate resolved to its fleet (telemetry_snapshot.fleet_id) b"
+ },
+ {
+  "method": "GET",
+  "path": "/api/trend/monthly",
+  "subject": "BK",
+  "carries": [
+   "BK",
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "months[].revenue",
+     "months[].accounted",
+     "months[].accounted_fares",
+     "months[].accounted_payouts",
+     "months[].accounted_statements",
+     "months[].reported_payouts",
+     "months[].uncounted_payouts",
+     "months[].statement_net",
+     "months[].undercovered_payouts",
+     "months[].undercovered_income",
+     "months[].set_aside_fares"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "NOT A SECOND ROUTE. The inventory's second entry (its line 4781, now api/server.js:4793) is a block comment inside the same handler that quotes \"app.get('/api/trend/monthly'\" while explaining test/trend_gaps.test.mjs. grep finds exactly one app.get for this path (api/server.js:4696). It is classified identically to the entry above, and the manifest needs only one entry."
+ },
+ {
+  "method": "GET",
+  "path": "/api/trips/daily",
+  "subject": "BK",
+  "carries": [
+   "BK",
+   "REV",
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "[].revenue"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "[].sources_silent",
+     "[].sources_expected",
+     "[].silent_sources",
+     "[].uncollected",
+     "[].uncollected_days"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "Top-level array (server.js:1277 foldGrain). Day grain rows (server.js:1238-1252): d, trips, completed, cancelled, telematics_journeys, km, revenue, priced_trips, drivers, sources_silent, sources_expected, silent_sources, uncollected. Week/month grain (api/window.js:350-393) replaces them with d, grain, days, partial, of_days, drivers, drivers_basis, uncollected_days, uncollected, first_day, last_d"
+ },
+ {
+  "method": "GET",
+  "path": "/api/trips/heatmap",
+  "subject": "BK",
+  "carries": [
+   "BK"
+  ],
+  "grain": "aggregate",
+  "fields": [],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:1285-1287: top-level array [{dow, h, trips}] over FB (fleet_id=$4 honoured)."
+ },
+ {
+  "method": "GET",
+  "path": "/api/trips/hourly",
+  "subject": "BK",
+  "carries": [
+   "BK"
+  ],
+  "grain": "aggregate",
+  "fields": [],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:1280-1282: top-level array [{h, trips}] grouped by local_hour over FB (bookings, fleet_id=$4 honoured)."
+ },
+ {
+  "method": "GET",
+  "path": "/api/trips/list",
+  "subject": "BK",
+  "carries": [
+   "BK",
+   "EARN",
+   "ID",
+   "LOC",
+   "REV",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].driver_name",
+     "rows[].driver_ext_id"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "rows[].plate"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "rows[].pickup_addr",
+     "rows[].dropoff_addr"
+    ]
+   },
+   {
+    "class": "REV",
+    "paths": [
+     "rows[].price"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "rows[].price"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:1005-1022 selects per trip: platform, fleet_id, external_id, requested_at, ended_at, local_day, driver_name, driver_ext_id, plate, pickup_addr, dropoff_addr, distance_km, duration_s, status, outcome, product, payment_type, price, currency, has_fare, is_booking, charged_off_trip, fare_derived (the last two are booleans derived from raw->'uber_payments'; raw itself is not returned). Re"
+ },
+ {
+  "method": "GET",
+  "path": "/api/unauthorized/by-vehicle",
+  "subject": "VEH",
+  "carries": [
+   "ACCUSE",
+   "ID",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].drivers",
+     "rows[].driver_refs",
+     "rows[].driver_refs[].name",
+     "rows[].driver_refs[].id"
+    ]
+   },
+   {
+    "class": "ACCUSE",
+    "paths": [
+     "rows[].drivers",
+     "rows[].driver_refs"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "by_source.*.days_with_data",
+     "by_source.*.first_day",
+     "by_source.*.last_day"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:3185-3268. Response {rows[] (at most 100, one per flagged plate) {plate, unauthorized, authorized, sensor_suspect, unauth_km, unauthorized_by_source{cabman, fms_live, fms_trip}, drivers (comma-joined custodian names), driver_refs[{name,id}], driver_n (count, keep)}, total, segments, shown, truncated, by_source{... same shape as summary's by_source}, dedupe_rule}. The who_person CTE ("
+ },
+ {
+  "method": "GET",
+  "path": "/api/unauthorized/daily",
+  "subject": "VEH",
+  "carries": [
+   "SYS",
+   "VEH"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "SYS",
+    "paths": [
+     "[].uncollected"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:3271-3330. Returns a bare array with one row per Dubai calendar day (capped at 400 days back from `to`): [{d, unauthorized, authorized, needs_a_human, partial, stationary, segments, unauthorized_by_source{cabman, fms_live, fms_trip} or null, uncollected}]. Counts only: no plates, no names, no places. SEG_ONCE binds fleet as $3. Called by #unauthorized (app.js:4981)."
+ },
+ {
+  "method": "GET",
+  "path": "/api/unauthorized/list",
+  "subject": "VEH",
+  "carries": [
+   "ACCUSE",
+   "BK",
+   "ID",
+   "LOC",
+   "REV",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "[].drivers",
+     "[].driver_refs",
+     "[].driver_refs[].name",
+     "[].driver_refs[].id"
+    ]
+   },
+   {
+    "class": "ACCUSE",
+    "paths": [
+     "[].drivers",
+     "[].driver_refs"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "[].start_lat",
+     "[].start_lng",
+     "[].end_lat",
+     "[].end_lng",
+     "[].start_place",
+     "[].end_place"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "[].matched_trip_id",
+     "[].nearest_trip_id"
+    ]
+   },
+   {
+    "class": "REV",
+    "paths": [
+     "[].forgone_aed",
+     "[].aed_per_km",
+     "[].rate_basis"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:3097-3180. Returns a bare array (newest first, at most 300) of occupancy_segment rows: {plate, fleet_id, started_at, ended_at, duration_min, distance_km, top_speed, fixes, max_gap_min, ignition_ratio, verdict, matched_platform, matched_trip_id, low_confidence, unavailable_sources, verdict_reason, nearest_platform, nearest_trip_id, nearest_gap_min, channels_checked, boundary_gap_min, "
+ },
+ {
+  "method": "GET",
+  "path": "/api/unauthorized/summary",
+  "subject": "VEH",
+  "carries": [
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "value.forgone_aed",
+     "value.aed_per_km",
+     "value.basis"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "coverage",
+     "by_source.*.days_with_data",
+     "by_source.*.first_day",
+     "by_source.*.last_day"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:2980-3084. Response {byVerdict[{verdict, n, km, minutes, segments}], value{forgone_aed, aed_per_km, km, basis}, coverage{days_with_data, days_in_window, complete, by_source{cabman|fms_live|fms_trip: {label, days_with_data, first_day, last_day, plates (count), absent?}}}, totals{unauthorized, authorized, unverifiable, pending, partial, sensor_suspect, stationary, segments, unauth_km, "
+ },
+ {
+  "method": "GET",
+  "path": "/api/vehicles",
+  "subject": "VEH",
+  "carries": [
+   "BK",
+   "ID",
+   "REV",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].current_driver",
+     "rows[].current_driver_id",
+     "rows[].driver_as_of"
+    ]
+   },
+   {
+    "class": "REV",
+    "paths": [
+     "rows[].revenue"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "rows[].trips",
+     "rows[].priced_trips"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js:1769-1803: {rows, total, shown, truncated}. rows[] (top 200 plates): plate, trips, telematics_journeys, km, telematics_km, revenue, priced_trips, drivers (count), platforms (count), last_trip, last_movement, current_driver, current_driver_id, driver_as_of (from vehicle_current_driver, today's custodian). W('n')/W('t') honour ?fleet \u2014 param; the custody join is by plate only but only "
+ },
+ {
+  "method": "GET",
+  "path": "/api/vehicles/feeds",
+  "subject": "VEH",
+  "carries": [
+   "CT",
+   "ID",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].driver_refs[].name",
+     "rows[].driver_refs[].id",
+     "rows[].driver_refs[].person_id"
+    ]
+   },
+   {
+    "class": "CT",
+    "paths": [
+     "rows[].driver_refs[].phone"
+    ]
+   }
+  ],
+  "whole": [
+   "SYS"
+  ],
+  "fleet": "rows",
+  "fleetRows": [
+   "rows[]"
+  ],
+  "fleetKey": "fleet_id",
+  "cap": null,
+  "notes": "api/feed_routes.js:306 handler. FEEDS_SQL is at :104 and has no fleet predicate. DRIVERS_SQL (:196) takes names from driver.full_name, driver_compliance and driver_platform_state. It takes the phone from driver_compliance, including OTHER accounts the spine puts on the same person (:241-250). ref() at :316-325 returns {name, id (the platform driver id, only where a driver page resolves), person_id"
+ },
+ {
+  "method": "POST",
+  "path": "/api/analyst/run",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "analyst.run",
+  "notes": "api/server.js:4310-4325. It is NOT behind requireAdmin, so any caller, signed in or not, can queue a pass today. The fleet comes from body.fleet, NOT ?fleet=, and an absent or invalid value means BOTH fleets. It inserts collector_job(mode='analyst', requested_by='analyst-run'), a constant, so there is no real actor. It answers 409 when a pass is already queued or running. Response {ok, queued:'ana"
+ },
+ {
+  "method": "POST",
+  "path": "/api/events",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "calendar.edit",
+  "notes": "api/server.js:6472-6494. It upserts world_event with source='manual' (ON CONFLICT (source,code,starts_on,title) DO UPDATE summary, ends_on) and returns {ok:true}, or 400 {error} when title or starts_on is missing. It is gated by requireAdmin today and records no actor, so the write should be audited. world_event is company-wide. With fleet 'global', the gate combines levels and capabilities over t"
+ },
+ {
+  "method": "POST",
+  "path": "/api/import/statement-days",
+  "subject": "EARN",
+  "carries": [
+   "CASH",
+   "EARN",
+   "ID"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [
+   "CASH",
+   "ID"
+  ],
+  "fleet": "rows",
+  "fleetRows": [
+   "rows[]"
+  ],
+  "fleetKey": "company",
+  "cap": "finance.import",
+  "notes": "api/server.js:4206-4295, behind requireAdmin. The EARN, CASH and ID data is in the REQUEST, not the response. Body rows[] (at most 500) {date, driver (name), platform, company (= fleet, checked against FLEETS), gross, fees, net, tips, salik, cash, bank, network_cash, unremitted, trips, pseudo}, plus source (default 'ledger', caller-supplied) and done. It upserts driver_statement_day, which is mone"
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/paste",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "credentials.write",
+  "notes": "api/server.js:3963-4175, behind requireAdmin. Body {text | files[{name,text}], apply}. The default dry run (apply !== true) still has side effects. checkAll (src/credcheck.js) tests every candidate live against its provider with the pasted value, which is credentials.test. proposeKeys (src/credmodel.js) sends a redacted outline of any unrecognised blocks to the external model. With apply:true it w"
+ },
+ {
+  "method": "POST",
+  "path": "/api/settings/trigger",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.run",
+  "capBy": {
+   "field": "mode",
+   "default": "collector.run",
+   "map": {
+    "backfill": "collector.backfill",
+    "incremental": "collector.run",
+    "analyst": "analyst.run",
+    "probe": "collector.probe",
+    "timeline": "collector.run",
+    "timeline-roster": "collector.run",
+    "profile": "collector.probe",
+    "audit": "collector.probe"
+   }
+  },
+  "notes": "api/server.js:4327-4358, behind requireAdmin. body.mode is one of backfill|incremental|analyst|probe|timeline|timeline-roster|profile|audit; anything else becomes incremental. The strictest capability is collector.backfill. Suggested per-mode gate: backfill and audit (one Uber report per window, spends report quota, src/run.js:589) \u2192 collector.backfill; probe \u2192 collector.probe; analyst \u2192 analyst.r"
+ },
+ {
+  "method": "PUT",
+  "path": "/api/settings",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "credentials.write",
+  "notes": "api/server.js:3916-3934, behind requireAdmin. Body {KEY: value | null | ''}. It writes or deletes app_setting rows (secret keys AES-GCM encrypted), then calls recordSaved (api/save_check.js:111-177). That tests each saved key live against its provider (outbound, can spend provider quota). If the provider hands back a rotated credential, it STORES the successor, and it updates the credential_state "
+ }
+]
