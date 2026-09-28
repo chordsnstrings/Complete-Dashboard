@@ -59,6 +59,11 @@ export function adminVerdict(configured, presented) {
 export function adminGate({ env = process.env, warn = () => {} } = {}) {
   let warned = false;
   return (req, res, next) => {
+    /* A signed-in caller reached this route through the access gate, which
+       has already checked the action against their role, their fleets, the
+       CSRF token and a recent re-confirmation. The shared token is the rule
+       for anonymous callers only, while sign-in is not yet required. */
+    if (req.fm && ['user', 'device', 'system'].includes(req.fm.kind)) return next();
     const v = adminVerdict(env.ADMIN_TOKEN || null, req.get('x-admin-token') || null);
     if (v.open && !warned) {
       warned = true;
@@ -79,7 +84,22 @@ export function adminGate({ env = process.env, warn = () => {} } = {}) {
     is the exposure the redaction exists to close. The two questions are
     genuinely different: "may this caller write" is being answered leniently on
     purpose, "is this caller an administrator" is not. */
-export function isAdmin(req, env = process.env) {
+export function isAdmin(req, env = process.env, cls = 'DOC') {
+  /* SIGNED-IN CALLERS ARE JUDGED BY THEIR ROLE, NOT BY THE TOKEN (ULM).
+     The access gate (api/access/middleware.js) has already worked out what
+     this caller holds for the fleets this request is about. A route asking
+     "may I include the documents / the credential values / the addresses"
+     gets yes when the caller holds that class at Full OR Masked: at Masked the
+     route must still include the real value so the shaper can mask it to its
+     real last characters — withholding it here would turn "masked" into
+     "hidden" and the reader would be told a reason that is not the true one.
+     Anonymous callers keep the rule below, unchanged. */
+  const fm = req.fm;
+  if (fm && fm.kind === 'system') return true;
+  if (fm && (fm.kind === 'user' || fm.kind === 'device')) {
+    const l = fm.levels?.[cls] ?? fm.access?.levels?.[cls] ?? '';
+    return l === 'F' || l === 'M';
+  }
   const want = env.ADMIN_TOKEN || null;
   return Boolean(want) && req.get('x-admin-token') === want;
 }

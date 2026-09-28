@@ -20,6 +20,7 @@
    the collector is small enough that eight parallel aggregates would be felt by
    anyone reading a page at that moment. */
 import { log } from '../src/log.js';
+import { internalHeaders } from './access/internal.js';
 import { CAPACITY_WINDOW_DAYS } from './capacity_routes.js';
 
 const SRC = 'warm';
@@ -181,7 +182,7 @@ export function startWarmer({ port, pool, everyMs = 60000, enabled = true }) {
     try {
       const hit = async (url) => {
         try {
-          const r = await fetch(url, { headers: { 'x-warm': '1' } });
+          const r = await fetch(url, { headers: internalHeaders() });
           r.ok ? ok++ : failed++;
           await r.arrayBuffer();      // drain, or the socket stays open
         } catch { failed++; }

@@ -132,6 +132,13 @@ import { refIds, peopleFor, attachPeople } from './insight_people.js';
 import { personMap } from './person_map.js';
 import { BOOKING_CHANNELS, channelHealthSql, channelHealth, healthFor } from './channels_sql.js';
 import { RAW_ALIASES } from '../src/probe.js';
+/* Sign-in and access (ULM). The layer is mounted below, BEFORE the response
+   cache: a cache hit never reaches a route, so a guard at the route would not
+   run for a cached answer. collector/docs/ULM-DESIGN.md is the design. */
+import { accessLayer } from './access/middleware.js';
+import { accessRoutes, housekeeping as accessHousekeeping } from './access/routes.js';
+import { bootstrapOwner } from './access/service.js';
+import { INTERNAL_TOKEN } from './access/internal.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
 
@@ -156,7 +163,7 @@ app.use(compression({
      and dropped — so compressing them is CPU spent on the same box that is
      meant to be answering readers. Twenty paths across four windows, every few
      minutes. */
-  filter: (req, res) => req.get('x-warm') !== '1' && compression.filter(req, res),
+  filter: (req, res) => req.get('x-fm-internal') !== INTERNAL_TOKEN && compression.filter(req, res),
 }));
 /* THE CLIENT'S ADDRESS, WHICH THIS APP HAS NEVER SEEN.
    ─────────────────────────────────────────────────────────────────────────
@@ -212,6 +219,11 @@ app.use((req, res, next) => {
    Set CACHE=off to serve everything live; the numbers are identical either
    way, so this is a lever for diagnosing a stale-looking page rather than a
    behaviour switch. */
+/* WHO IS CALLING, AND MAY THEY HAVE THIS — before the cache (see the import). */
+const access = accessLayer({ db: pool, log });
+app.use(access.identify);
+app.use(access.gate);
+
 const cache = responseCache({
   pool,
   enabled: String(process.env.CACHE || '').toLowerCase() !== 'off',
@@ -3900,7 +3912,7 @@ app.get('/api/admin-mode', wrap(async (req, res) => {
   const open = !process.env.ADMIN_TOKEN;
   res.json({
     open,
-    you_are_admin: isAdmin(req),
+    you_are_admin: isAdmin(req, undefined, 'CRED'),
     detail: open
       ? 'ADMIN_TOKEN is not set on this service, so write endpoints accept a request without '
         + 'one. Reads stay redacted either way.'
@@ -3910,7 +3922,7 @@ app.get('/api/admin-mode', wrap(async (req, res) => {
 
 app.get('/api/settings', wrap(async (req, res) => {
   const rows = await describeSettings();
-  res.json(isAdmin(req) ? rows : redactSettings(rows));
+  res.json(isAdmin(req, undefined, 'CRED') ? rows : redactSettings(rows));
 }));
 
 app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
@@ -6758,6 +6770,8 @@ teslaRoutes(app, { q, wrap });
 /* One booking as an address — reached from every trip table in the product. */
 tripRoutes(app, { q, wrap });
 authRoutes(app, { q, wrap });
+/* Sign-in, the account page and Set up → Access (api/access/routes.js). */
+accessRoutes(app, { db: pool, layer: access, wrap, log });
 /* ── the export, and what an anonymous GET may carry away ──────────────────
    MEASURED ON PRODUCTION WITH CURL AND NO CREDENTIALS, 2026-09-05:
    GET /api/export/trips.csv?grain=trip&from=2025-09-05&to=2026-09-05 answered
@@ -6826,7 +6840,7 @@ app.use((req, res, next) => {
      strips a mount path before the router sees it and these routes declare
      their full path — mounted at the prefix they would match nothing at all. */
   if (!req.path.startsWith('/api/export/')) return next();
-  if (isAdmin(req)) return exportFull(req, res, next);
+  if (isAdmin(req, undefined, 'LOC')) return exportFull(req, res, next);
   res.setHeader('x-export-withheld', LOCATION_COLS.join(','));
   res.setHeader('x-export-withheld-reason',
     'pickup and drop-off addresses are served only to a caller presenting x-admin-token; '
@@ -7161,6 +7175,15 @@ migrate()
   .then(() => {
     migrationsDone = true;
     log.info('api', 'migrations complete — serving');
+    /* The first Owner, from BOOTSTRAP_OWNER_EMAIL + BOOTSTRAP_OWNER_PASSWORD_HASH,
+       once and only while no Owner exists (api/access/service.js). Then the
+       hourly housekeeping: dormant accounts suspended, ended grants marked. */
+    bootstrapOwner(pool, { log: (m) => log.info('access', m) })
+      .catch((e) => log.error('access', 'owner bootstrap failed', { err: String(e).slice(0, 200) }));
+    const tidy = () => accessHousekeeping(pool, { log })
+      .catch((e) => log.warn('access', 'housekeeping failed', { err: String(e).slice(0, 160) }));
+    setTimeout(tidy, 60_000);
+    setInterval(tidy, 3600_000).unref?.();
     /* The payout table is filled by the worker's rollup pass. On the deploy
        that transitions it from a view — and on any fresh database — it is
        empty until that pass runs, which is up to a quarter hour of every money

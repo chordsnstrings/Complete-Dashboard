@@ -1,3 +1,4 @@
+import { internalHeaders } from './access/internal.js';
 /* Response cache for read endpoints.
    ─────────────────────────────────────────────────────────────────────────
    Every /api GET here answers a question about data that changes only when the
@@ -50,7 +51,12 @@ const MAX_BYTES = Number(process.env.CACHE_MAX_BYTES || 64 * 1024 * 1024);
    run. Measured: the audit landed six months at 100% agreement and the
    endpoint went on reporting zero windows. It is a 26-row read, so there was
    never anything to save. */
-const NEVER = ['/api/live', '/api/track', '/api/settings', '/api/rollups',
+/* /api/auth/ and /api/access/ FIRST, and above every other reason on this
+   list: their answers are about the person asking (who they are, what they may
+   see, the people they manage). Cached by URL they would be served to the next
+   person to ask — measured in development on 2026-09-28: a cash-desk session
+   was handed the Owner's whole Access overview as an x-cache: hit. */
+const NEVER = ['/api/auth/', '/api/access/', '/api/live', '/api/track', '/api/settings', '/api/rollups',
   '/api/status', '/api/health', '/api/ready', '/api/probe', '/api/cache-stats',
   '/api/coverage/verified',
   /* THE TWO A PERSON'S OWN CLICK CHANGES.
@@ -163,8 +169,14 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
 
     // A background refresh must reach the route, not be handed the stale copy
     // it was sent to replace — which would leave the entry stale for ever.
-    const warm = req.get('x-warm') === '1';
-    const key = req.originalUrl;
+    /* The warmer and the stale refresh identify themselves with the
+       process's own internal token (api/access/internal.js) — `x-warm: 1`,
+       which anybody could send, no longer means anything. */
+    const warm = req.fm?.kind === 'system';
+    /* The access gate narrows a one-fleet reader's filter to their fleet and
+       says so in fmCacheKey; the answer is cached under what was actually
+       computed, never under the address typed. */
+    const key = req.fmCacheKey || req.originalUrl;
     const v = await currentVersion();
     const hit = store.get(key);
     /* The version this answer describes, on every response — cached, stale or
@@ -208,7 +220,7 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
       if (!refreshing.has(key)) {
         refreshing.add(key);
         const url = `http://127.0.0.1:${selfPort()}${key}`;
-        fetch(url, { headers: { 'x-warm': '1' } })
+        fetch(url, { headers: internalHeaders() })
           .then((r) => r.arrayBuffer())
           .catch(() => {})
           .finally(() => refreshing.delete(key));

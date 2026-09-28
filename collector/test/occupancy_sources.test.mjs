@@ -46,8 +46,13 @@ console.log('\n1. the migration, applied to a database that already holds CABMAN
 {
   const db = new PGlite();
   const upTo = SCHEMA_FILES.slice(0, SCHEMA_FILES.indexOf('schema_v85.sql'));
-  check('schema_v85.sql is registered, and last', SCHEMA_FILES[SCHEMA_FILES.length - 1] === 'schema_v85.sql',
-    SCHEMA_FILES.slice(-2).join(','));
+  /* Registered, and replayed after v84 — not "last": v86 (sign-in and access)
+     followed it, and a test that pins which file is newest fails on every
+     later migration while protecting nothing about this one. */
+  check('schema_v85.sql is registered, after schema_v84.sql',
+    SCHEMA_FILES.indexOf('schema_v85.sql') > SCHEMA_FILES.indexOf('schema_v84.sql')
+      && SCHEMA_FILES.indexOf('schema_v84.sql') >= 0,
+    SCHEMA_FILES.slice(-3).join(','));
   for (const f of upTo) await db.exec(readFileSync(new URL(`../sql/${f}`, import.meta.url), 'utf8'));
   await db.query(`INSERT INTO occupancy_segment (plate, started_at, ended_at, fleet_id, verdict, verdict_reason)
                   VALUES ('ZQ1001', '2026-09-01T10:00:00Z', '2026-09-01T10:30:00Z', 'ecosine', 'unauthorized', 'old row'),

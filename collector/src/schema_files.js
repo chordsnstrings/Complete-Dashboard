@@ -228,4 +228,9 @@ export const SCHEMA_FILES = [
      without the source would let one provider's pass delete or overwrite the
      other's segments on the two cars that carry both trackers. */
   'schema_v85.sql',
+  /* Sign-in and access (ULM): people, sessions, teams, grants over fleets,
+     one-time links, access requests, device tokens, four-eyes proposals,
+     reviews, settings and a hash-chained audit log. collector/docs/ULM-DESIGN.md
+     is the design. Additive: nothing existing changes. */
+  'schema_v86.sql',
 ];
