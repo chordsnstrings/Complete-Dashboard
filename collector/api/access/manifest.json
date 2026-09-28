@@ -2915,6 +2915,31 @@
  },
  {
   "method": "GET",
+  "path": "/api/export/money.xlsx",
+  "subject": "CASH",
+  "carries": [
+   "BK",
+   "CASH",
+   "CT",
+   "ID",
+   "PAY",
+   "REV",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [
+   "[]"
+  ],
+  "fleetKey": "fleet",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/money_export_routes.js + api/money_workbook.js. Body is an .xlsx file, NOT JSON, so the shaper never sees inside it: the route writes (withheld) itself in every column of a class (ID, CT, CASH, REV, PAY, VEH) a signed-in reader's role does not hold in full. Sheets: cash to collect per driver with the mobile (CT), cash by day, cash trips, hand-ins and advances, drivers, money by day, bank payouts (PAY), platform statements, every trip (<=31 days). Anyone may download it (the operator, 2026-09-28: 'anyone since it's operations'), so no action is required beyond holding cash; one-fleet readers are held to their fleet by ?fleet=."
+ },
+ {
+  "method": "GET",
   "path": "/api/export/trips.csv",
   "subject": "BK",
   "carries": [

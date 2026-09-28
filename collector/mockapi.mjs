@@ -7,6 +7,7 @@ import { foldGrain, grainOf, previousWindow, PERIODS, dubaiDay } from './api/win
    and a document's status here is the status the API would compute. */
 import { readRoster, exportDateFromName, expirySummary, docStatus } from './src/hr_roster.js';
 import { createHash } from 'node:crypto';
+import { Workbook } from './src/xlsx_write.js';
 import { deriveFleetName, platformLabel, accountLabel } from './src/fleet_names.js';
 /* The period arithmetic and the percentile come from the real module, not a
    copy. A fixture that invents its own weeks drifts from the product the
@@ -2286,6 +2287,22 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
    reported, an Egari car with no CABMAN account (but FMS seat counts), two drivers assigned
    in Uber, a custody driver, a driver with no phone, and a car nobody is
    known to drive — so every branch of the cell renderers is on screen. */
+/* The money workbook (api/money_export_routes.js): a small real .xlsx, so a
+   browser test that clicks the button saves a file Excel can open. Synthetic
+   people only. */
+app.get('/api/export/money.xlsx', (req, r) => {
+  const wb = new Workbook();
+  const rm = wb.sheet('Read me');
+  rm.text(`Cash and money — Ecosine & Egari — ${req.query.from || 'this month'}`, 'title');
+  const cc = wb.sheet('Cash to collect');
+  cc.header(['Driver', 'Mobile', 'To hand in (AED)'], ['text', 'text', 'money']);
+  cc.row(['Test Driver 2', '+971 50 000 0002', 110.5]);
+  const buf = wb.toBuffer();
+  r.set('Cache-Control', 'private, no-store');
+  r.set('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  r.set('content-disposition', 'attachment; filename="cash-and-money-mock.xlsx"');
+  r.end(buf);
+});
 /* The Messages page (api/sms_routes.js). Synthetic people and numbers only:
    a real driver's mobile never enters a fixture. */
 const SMS_WHY = {

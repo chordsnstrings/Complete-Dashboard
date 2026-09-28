@@ -9370,7 +9370,7 @@ async function render() {
      its token asks for it, and filled on every one; under the old skin both
      calls return at once and the DOM is index.html's. */
   const ruled = buildShell();
-  renderNav(); renderSectionTabs(); setHeader(); tzNote(); shellFrame();
+  renderNav(); renderSectionTabs(); setHeader(); tzNote(); shellFrame(); xlsxButton();
   const root = freshView();
   /* The shell footer's basis and colophon belong to the page that wrote them
      (ui.js pageFoot); the principle line is the shell's and stays. */
@@ -10133,6 +10133,72 @@ $('#fFleet').onchange = (e) => setFilter({ fleet: e.target.value });
 $('#refreshBtn').onclick = (e) => {
   const b = e.currentTarget; b.classList.remove('spin'); void b.offsetWidth; b.classList.add('spin');
   render();
+};
+
+/* THE MONEY WORKBOOK — "download the combined money and bank payouts and cash
+   on hand etc every detail, every platform as a downloadable excel file based
+   on the range" (the operator, 2026-09-28). One button beside the dates, on
+   the pages whose subject is money and on Drivers; on a driver's own page it
+   is that driver's file. The file follows the dates and the fleet and
+   platform chips exactly as the page does, through the same params().
+
+   FETCHED, NOT NAVIGATED TO. A refusal (a range over a year, a role without
+   cash) comes back as JSON with a reason; a plain link would open that JSON
+   as a page and take the reader out of the product. So the file is fetched,
+   saved from a blob, and a refusal is said in words beside the button. */
+const XLSX_SECTIONS = new Set(['Money', 'Finance']);
+function xlsxTarget() {
+  const v = state.view;
+  if (v === 'driver' && state.param) {
+    const id = String(state.param);
+    return { extra: /^p\d+$/i.test(id) ? { person: id } : { account: id }, label: 'Excel ⤓ this driver' };
+  }
+  /* Only beside a date range the reader can see and change: on a page that
+     hides the range (Payouts, Reconciliation) the file would follow dates the
+     page gives no way to choose. */
+  if (hidesRange(v)) return null;
+  if (v === 'drivers' || XLSX_SECTIONS.has(sectionOf(v, state.param))) return { extra: {}, label: 'Excel ⤓' };
+  return null;
+}
+function xlsxButton() {
+  const b = $('#xlsxBtn');
+  if (!b) return;
+  const t = xlsxTarget();
+  b.hidden = !t;
+  if (t && !b.disabled) b.textContent = t.label;
+  const m = $('#xlsxMsg');
+  if (m && !t) { m.hidden = true; m.textContent = ''; }
+}
+$('#xlsxBtn').onclick = async () => {
+  const t = xlsxTarget();
+  if (!t) return;
+  const b = $('#xlsxBtn');
+  const m = $('#xlsxMsg');
+  const say = (text) => { m.textContent = text; m.hidden = !text; };
+  b.disabled = true; b.textContent = 'Preparing…'; say('');
+  try {
+    const r = await fetch(`/api/export/money.xlsx?${params(t.extra)}`, { credentials: 'same-origin', cache: 'no-store' });
+    if (!r.ok) {
+      let why = '';
+      try { why = (await r.json()).detail || ''; } catch { /* not json */ }
+      say(why || `The file could not be made (HTTP ${r.status}).`);
+      return;
+    }
+    const blob = await r.blob();
+    const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || 'cash-and-money.xlsx';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  } catch (e) {
+    say(`The file could not be downloaded: ${e.message}`);
+  } finally {
+    b.disabled = false;
+    b.textContent = t.label;
+  }
 };
 
 /* Which clock, and which days. Every calendar key the API computes is Dubai's

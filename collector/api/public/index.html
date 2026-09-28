@@ -221,6 +221,12 @@ if (document.documentElement.dataset.skin === 'arkiv' && document.documentElemen
           <option value="ecosine">Ecosine</option><option value="egari">Egari</option>
         </select>
         <button id="refreshBtn" title="Refresh">⟳</button>
+        <!-- The money workbook (api/money_export_routes.js): cash to collect,
+             and every figure behind it, for the dates and chips above. Shown on
+             the Money and Finance pages and on Drivers; on a driver's own page
+             it is that driver's file. -->
+        <button id="xlsxBtn" type="button" hidden title="Download the cash and money workbook (Excel) for these dates and filters">Excel ⤓</button>
+        <span id="xlsxMsg" class="xlsx-msg" role="status" hidden></span>
         <!-- Hide everything but the page. Sits in the filter row so it takes
              the styling the controls beside it already have, and it is the one
              control that never disappears when it is on — nothing that hides

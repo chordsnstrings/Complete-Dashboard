@@ -161,10 +161,11 @@ async function renderNext(root) {
   const btns = el('div', 'chips');
   btns.innerHTML = '<button type="button" class="chip" data-k="cash">The cash reminder</button> <button type="button" class="chip" data-k="trip">The trip requests</button>';
   const out = el('div');
+  out.dataset.msgOut = '';
   p.body.append(btns, out);
   const run = async (k) => {
     btns.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.k === k));
-    loading(out, true);
+    loading(out);
     let r;
     try { r = await api(`/api/sms/preview?kind=${k}`); } catch (e) {
       out.replaceChildren(e?.name === 'WithheldError'

@@ -10,6 +10,7 @@ import { config } from '../src/config.js';
 import { pgTx } from './tx.js';
 import { fleetNameRoutes } from './fleet_names_routes.js';
 import { smsRoutes } from './sms_routes.js';
+import { moneyExportRoutes } from './money_export_routes.js';
 import { getConfig as accessConfig } from './access/service.js';
 import { importRoutes } from './import_routes.js';
 /* The operator's HR roster export: an admin-gated preview and commit, and a
@@ -6833,6 +6834,11 @@ fleetNameRoutes(app, { q, wrap, db: pool, tx: pgTx(pool), log });
    run would decide (api/sms_routes.js; the jobs are src/driver_sms.js). */
 const smsAccess = { getConfig: () => accessConfig(pool) };
 smsRoutes(app, { q, wrap, access: smsAccess });
+/* The money workbook (api/money_workbook.js): cash to collect, and every
+   figure behind it, for a range. Registered BEFORE the export dispatcher
+   below, which serves the trip CSV and withholds the CSV's own columns — this
+   file withholds its own, per sheet. */
+moneyExportRoutes(app, { q, wrap, winDays, log });
 /* ── the export, and what an anonymous GET may carry away ──────────────────
    MEASURED ON PRODUCTION WITH CURL AND NO CREDENTIALS, 2026-09-05:
    GET /api/export/trips.csv?grain=trip&from=2025-09-05&to=2026-09-05 answered

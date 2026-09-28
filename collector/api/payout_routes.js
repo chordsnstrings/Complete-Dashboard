@@ -207,7 +207,7 @@ let inFlight = null;
    book it came from (`basis`, `listed_by_provider`), because "Bolt's ledger
    shows it leaving" and "Bolt has listed it as a payout" are different claims
    and the page must not merge them. */
-const ALL_PAYOUTS = `
+export const ALL_PAYOUTS = `
   reg AS (
     SELECT platform, fleet_id, paid_on, amount, currency, period_start, period_end,
            method, source, payout_ext_id, collected_at, audit_amount, audited_at,
@@ -232,6 +232,78 @@ const ALL_PAYOUTS = `
                      OR (abs(pp.paid_on - b.day) <= 2 AND abs(pp.amount - b.payout) < 0.01)))
   ),
   allp AS (SELECT * FROM reg UNION ALL SELECT * FROM led)`;
+
+/* Every provider this page is entitled to speak about, and what each one
+   publishes. Written down rather than derived from the rows, because "we
+   have no Yango payouts" and "Yango does not publish payouts" are different
+   sentences and only the table can tell them apart — an empty result set
+   looks identical either way, which is exactly how a collection failure gets
+   rendered as a zero. */
+export const PAYOUT_PROVIDERS = [
+  { platform: 'uber', publishes: true,
+    how: 'Uber’s organisation payment statement, asked one day at a time. The transfer '
+      + 'column is empty on a day with no transfer, so the date is the provider’s and '
+      + 'not ours.',
+    /* THE CADENCE IS PROVEN. THE "TO THE FILS" PART WAS NOT, AND THIS
+       SENTENCE USED TO CLAIM IT WAS.
+       ──────────────────────────────────────────────────────────────────
+       What stood here: "proven over two consecutive weeks: the transfer
+       equals the previous week's closing balance to the fils." Three
+       Ecosine Mondays are now measurable and they do not support it:
+
+         2026-08-17  opening 57,791.73   wire 57,810.41   wire 18.68 ABOVE
+         2026-09-07  opening 103,567.54  wire 103,567.54  exact
+         2026-09-14  opening 111,279.92  wire 111,179.66  wire 100.26 BELOW
+
+       One of three. The WEEK a Monday wire settles is a different claim and
+       it still holds on all three; only the equality was overstated, and it
+       was overstated from a sample of two that happened to include the one
+       Monday where it was true. */
+    cadence: 'Uber wires on a Monday, settling the Monday-to-Sunday week that ended the day '
+      + 'before. The amount is close to that Monday’s opening balance and is not reliably '
+      + 'equal to it: over the three Ecosine Mondays measured so far the wire was 18.68 '
+      + 'above the opening balance, exactly equal to it, and 100.26 below it.' },
+  { platform: 'bolt', publishes: true,
+    how: 'Bolt’s fleet portal lists every payout with the second it completed, so each '
+      + 'row is already a date. That list runs days behind the money, so each payout is '
+      + 'also read off Bolt’s balance ledger on the day it leaves, and shown from there '
+      + '— marked as such — until the list catches up.',
+    /* "NO FIXED WEEKDAY" WAS A GUESS, AND THE WHOLE REGISTER DISAGREES WITH IT.
+       ──────────────────────────────────────────────────────────────────────
+       MEASURED ON PRODUCTION 2026-09-17, over every transfer on record now
+       that this page answers whole-record — 235 across both providers, and
+       the count is the point:
+
+         uber  60 transfers, 60 on a Monday
+         bolt 175 transfers, 175 on a Monday
+         91 distinct payout dates, 91 of them Mondays, none anywhere else
+
+       175 out of 175 is not "no fixed weekday". The sentence was written
+       from a month's worth of rows, which is exactly what the operator was
+       shown by the window this page has now come off: six transfers is not a
+       sample you can say "no fixed weekday" from.
+
+       It still does not say "Bolt pays on Mondays", because Bolt publishes
+       no cadence and a rule inferred from a register is not a rule the
+       provider stated. It says what was counted, and names the count — which
+       is the difference between a measurement and an expectation, and the
+       thing the audit band further down this page exists to keep straight
+       for Uber. */
+    /* THE COUNT IS MEASURED ON EVERY REQUEST NOW — see boltCadence() in the
+       handler. This line said "175 of 175, measured 2026-09-17" and was still
+       saying it with 177 on record: a number in prose is a measurement that
+       stops being re-taken. And "Bolt publishes no cadence" was simply wrong:
+       getFleetBalanceSummary states the next payout date, and it is shown. */
+    cadence: null },
+  { platform: 'yango', publishes: false,
+    how: null,
+    why_absent: 'Yango does not publish a transfer to the company at all. Its park ledger is a '
+      + 'driver-account ledger: the only categories that mention a bank sit in a group Yango '
+      + 'names "Payouts from account balance to contractors" — the park paying its own '
+      + 'drivers — and none of them has ever carried a row for this park. What Yango does '
+      + 'give, dated to the second, is what it collected and what it charged; that is on the '
+      + 'daily movement below, and it is not a transfer.' },
+];
 
 export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
   /* A REQUEST THAT NAMES NO WINDOW MEANS THE WHOLE REGISTER — AND "THE WHOLE
@@ -323,77 +395,10 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
       span?.lo ? 'record' : 'window'];
   };
 
-  /* Every provider this page is entitled to speak about, and what each one
-     publishes. Written down rather than derived from the rows, because "we
-     have no Yango payouts" and "Yango does not publish payouts" are different
-     sentences and only the table can tell them apart — an empty result set
-     looks identical either way, which is exactly how a collection failure gets
-     rendered as a zero. */
-  const PROVIDERS = [
-    { platform: 'uber', publishes: true,
-      how: 'Uber’s organisation payment statement, asked one day at a time. The transfer '
-        + 'column is empty on a day with no transfer, so the date is the provider’s and '
-        + 'not ours.',
-      /* THE CADENCE IS PROVEN. THE "TO THE FILS" PART WAS NOT, AND THIS
-         SENTENCE USED TO CLAIM IT WAS.
-         ──────────────────────────────────────────────────────────────────
-         What stood here: "proven over two consecutive weeks: the transfer
-         equals the previous week's closing balance to the fils." Three
-         Ecosine Mondays are now measurable and they do not support it:
-
-           2026-08-17  opening 57,791.73   wire 57,810.41   wire 18.68 ABOVE
-           2026-09-07  opening 103,567.54  wire 103,567.54  exact
-           2026-09-14  opening 111,279.92  wire 111,179.66  wire 100.26 BELOW
-
-         One of three. The WEEK a Monday wire settles is a different claim and
-         it still holds on all three; only the equality was overstated, and it
-         was overstated from a sample of two that happened to include the one
-         Monday where it was true. */
-      cadence: 'Uber wires on a Monday, settling the Monday-to-Sunday week that ended the day '
-        + 'before. The amount is close to that Monday’s opening balance and is not reliably '
-        + 'equal to it: over the three Ecosine Mondays measured so far the wire was 18.68 '
-        + 'above the opening balance, exactly equal to it, and 100.26 below it.' },
-    { platform: 'bolt', publishes: true,
-      how: 'Bolt’s fleet portal lists every payout with the second it completed, so each '
-        + 'row is already a date. That list runs days behind the money, so each payout is '
-        + 'also read off Bolt’s balance ledger on the day it leaves, and shown from there '
-        + '— marked as such — until the list catches up.',
-      /* "NO FIXED WEEKDAY" WAS A GUESS, AND THE WHOLE REGISTER DISAGREES WITH IT.
-         ──────────────────────────────────────────────────────────────────────
-         MEASURED ON PRODUCTION 2026-09-17, over every transfer on record now
-         that this page answers whole-record — 235 across both providers, and
-         the count is the point:
-
-           uber  60 transfers, 60 on a Monday
-           bolt 175 transfers, 175 on a Monday
-           91 distinct payout dates, 91 of them Mondays, none anywhere else
-
-         175 out of 175 is not "no fixed weekday". The sentence was written
-         from a month's worth of rows, which is exactly what the operator was
-         shown by the window this page has now come off: six transfers is not a
-         sample you can say "no fixed weekday" from.
-
-         It still does not say "Bolt pays on Mondays", because Bolt publishes
-         no cadence and a rule inferred from a register is not a rule the
-         provider stated. It says what was counted, and names the count — which
-         is the difference between a measurement and an expectation, and the
-         thing the audit band further down this page exists to keep straight
-         for Uber. */
-      /* THE COUNT IS MEASURED ON EVERY REQUEST NOW — see boltCadence() in the
-         handler. This line said "175 of 175, measured 2026-09-17" and was still
-         saying it with 177 on record: a number in prose is a measurement that
-         stops being re-taken. And "Bolt publishes no cadence" was simply wrong:
-         getFleetBalanceSummary states the next payout date, and it is shown. */
-      cadence: null },
-    { platform: 'yango', publishes: false,
-      how: null,
-      why_absent: 'Yango does not publish a transfer to the company at all. Its park ledger is a '
-        + 'driver-account ledger: the only categories that mention a bank sit in a group Yango '
-        + 'names "Payouts from account balance to contractors" — the park paying its own '
-        + 'drivers — and none of them has ever carried a row for this park. What Yango does '
-        + 'give, dated to the second, is what it collected and what it charged; that is on the '
-        + 'daily movement below, and it is not a transfer.' },
-  ];
+  /* The providers and what each publishes: PAYOUT_PROVIDERS, at module
+     scope so the money workbook (api/money_workbook.js) says the same
+     sentences as this page. */
+  const PROVIDERS = PAYOUT_PROVIDERS;
 
   /* ── every transfer, one row each ──────────────────────────────────────── */
   app.get('/api/finance/payouts', wrap(async (req, res) => {

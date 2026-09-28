@@ -50,10 +50,11 @@
        for the reload the switch owes before "the look is Classic".
    Each was reverted and run on 2026-09-28; each failed as named. */
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import pg from 'pg';
 import { hashPassword, hotp, totpStep } from '../api/access/crypto.js';
 import { launchChromium } from './browser.mjs';
+import { readWorkbook, sheetNamed } from '../src/salary/xlsx.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -647,8 +648,10 @@ await section('15', async () => {
   await page.goto(`${BASE}/?ui=desktop&skin=arkiv#messages/next`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-panel="msg-next"] button[data-k="trip"]', { timeout: 20000 });
   await page.locator('[data-panel="msg-next"] button[data-k="trip"]').click();
-  await page.waitForFunction(() => !document.querySelector('[data-panel="msg-next"] .loading')
-    && /journey|nothing|Switched off|No journey/i.test(document.querySelector('[data-panel="msg-next"]')?.innerText || ''), null, { timeout: 30000 });
+  /* The answer itself, not the panel's caption (which says "nothing is
+     sent" before anything has loaded): the result host holds something
+     other than the loading skeleton. */
+  await page.waitForSelector('[data-msg-out] > :not(.skel)', { timeout: 30000 });
   const n = await page.locator('[data-panel="msg-next"]').innerText();
   check('the dry run of the trip requests answers in words', /No journey with no booking|journey/i.test(n), n.slice(0, 200));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/messages-next-1440.png`, fullPage: true });
@@ -666,6 +669,53 @@ await section('15', async () => {
   const anon = await fetch(`${BASE}/api/sms/log`);
   const body = await anon.json();
   check('…and the API, asked with no session, refuses and names nobody', anon.status === 401 && !body.rows);
+});
+
+console.log('\n16 · The money workbook: the button, the file, a refusal');
+await section('16', async () => {
+  /* A cash trip two hours ago on an account no person holds yet (synthetic). */
+  await dbc.query(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, plate, requested_at, ended_at,
+                                     status, payment_type, price, currency, raw)
+                   VALUES ('bolt', 'xl-1', 'ecosine', 'b-xl', 'Test Workbook Driver', 'X1', now() - interval '2 hours',
+                           now() - interval '100 minutes', 'completed', 'cash', 42.5, 'AED', '{}')`);
+  await page.goto(`${BASE}/?ui=desktop&skin=arkiv#settlement`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#xlsxBtn:not([hidden])', { timeout: 20000 });
+  await settle();
+  check('a Finance page offers the workbook beside its dates', (await page.locator('#xlsxBtn').innerText()).trim() === 'Excel ⤓');
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 90000 }), page.click('#xlsxBtn')]);
+  const file = readWorkbook(readFileSync(await dl.path()));
+  check('the download is named for its dates', /^cash-and-money-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.xlsx$/.test(dl.suggestedFilename()), dl.suggestedFilename());
+  check('…and opens as the workbook, cash to collect first after the notes',
+    file.sheetNames.slice(0, 3).join('|') === 'Read me|Cash to collect|Cash by day', file.sheetNames.join('|'));
+  const cc = sheetNamed(file, 'Cash to collect').rows;
+  const row = cc.find((r) => /Test Workbook Driver/.test(String(r[0] || '')));
+  check('…with the cash trip on it, in AED, as a number', row && row.includes(42.5), JSON.stringify(row));
+  noErrorsSoFar('The money workbook');
+  await page.goto(`${BASE}/?ui=desktop&skin=arkiv#vehicles`, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1500);
+  check('a Fleet page does not offer it', await page.locator('#xlsxBtn').isHidden());
+  const { rows: [d] } = await dbc.query(`SELECT id FROM driver WHERE full_name = 'Test Messages Driver'`);
+  if (d) {
+    await page.goto(`${BASE}/?ui=desktop&skin=arkiv#driver/p${d.id}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#xlsxBtn:not([hidden])', { timeout: 20000 });
+    check('a driver’s own page offers that driver’s file', (await page.locator('#xlsxBtn').innerText()).trim() === 'Excel ⤓ this driver');
+  }
+  /* Over a year: refused, and said beside the button — the reader stays on the page. */
+  await page.goto(`${BASE}/?ui=desktop&skin=arkiv#settlement?from=2020-01-01&to=2026-09-28`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#xlsxBtn:not([hidden])', { timeout: 20000 });
+  await settle();
+  await page.click('#xlsxBtn');
+  await page.waitForSelector('#xlsxMsg:not([hidden])', { timeout: 30000 });
+  const why = await page.locator('#xlsxMsg').innerText();
+  check('a range over a year is refused with the reason, on the page', /built for up to 366 days/.test(why) && /#settlement/.test(page.url()), why);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/workbook-refused-1440.png` });
+  /* That 413 was asked for. Chromium logs it as a failed resource, which the
+     watcher files as the shell's; it is this check's, so it is taken back
+     out — by URL and status, so any other refusal still counts. */
+  for (let i = shell.length - 1; i >= 0; i--) {
+    if (shell[i].url === '/api/export/money.xlsx' && shell[i].status === '413') shell.splice(i, 1);
+  }
+  noErrorsSoFar('The money workbook, refused');
 });
 
 /* ── the shell's own sideways scroll, printed rather than hidden ───────── */

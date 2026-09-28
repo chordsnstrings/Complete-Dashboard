@@ -4149,6 +4149,15 @@ untouched, and nothing projected is ever added into `accounted`.
       people, and an HR employee id filed against another person's account.
       Take a number only through `phoneFor()` (src/driver_sms.js): Uber's,
       then HR's, and held — never guessed — on any doubt.
+  29. **A file download is outside the access shaper.** The shaper wraps
+      res.json; a CSV written with res.write or an .xlsx sent with res.end is
+      never seen by it. Any new download must withhold by class ITSELF
+      (api/money_export_routes.js FILE_CLASSES, api/server.js
+      EXPORT_CLASS_COLS for the CSV) and write "(withheld)" — never an empty
+      cell, which reads as "nothing recorded". And a download link must be
+      FETCHED when it can be refused: a plain `<a href>` to a route that
+      answers 413 or 403 opens the JSON as a page and takes the reader out of
+      the product.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
@@ -7196,3 +7205,44 @@ these two would have added every driver's number beside what they were told.
 ### Traps this added to the list
 
 26, 27 and 28 in "Traps that have cost time more than once".
+
+## The money workbook (Excel) — built 2026-09-28
+
+`GET /api/export/money.xlsx` (api/money_export_routes.js, sheets in
+api/money_workbook.js, the file format in src/xlsx_write.js), from an
+"Excel ⤓" button beside the dates on every Money and Finance page with a date
+range, on Drivers, and — as that driver's own file — on a driver's page. The
+operator's rulings (2026-09-28): the reader is a SUPERVISOR CHASING CASH;
+payouts and every-trip detail were left to us; "not measurable is not
+acceptable" for cash on hand; anyone may download it ("it's operations");
+plain numbers, no formulas.
+
+Measured on production before it was built:
+
+- **No hand-in, no starting count, no cash advance is recorded** —
+  `driver_ledger` answered zero `cash_deposit`, `cash_opening` and
+  `cash_advance` rows for 2024-01-01..2026-09-28. So the figure chased is the
+  operator's own definition of cash taken (2026-09-22): cash trip amounts +
+  cash advances − cash handed in, **over the chosen dates**. It is always a
+  number. Until hand-ins are recorded on Money → Cash handed in, it equals
+  every dirham taken, and the file's notes say exactly that.
+- **The cash on a trip** is `trip_cash.cash_amount`: Uber's cash-collected
+  where its payments report has arrived (11.1% above the fare on 73 of 73
+  trips measured — booking fee and tolls), the fare otherwise. For
+  1..27 September, 3,891 cash trips were listed by the cash page and 79.8%
+  carried a fare; a cash trip with no amount yet is COUNTED in its own column
+  ("Not priced yet") and named on the notes sheet, never added as 0.
+- **Payouts** exist only for Uber and Bolt (September: 3 Uber and 4 Bolt
+  transfers per fleet). Yango publishes no transfer; the hotel channel has none
+  collected. Listed by ARRIVAL date with the week an Uber wire pays for;
+  Bolt does not state one.
+
+What it does not do: it is not a balance from the beginning of time. Cash
+taken before the first chosen date is outside the file, and the notes say to
+choose earlier dates to bring it in. A year (366 days) is the longest range;
+every booking is its own sheet only up to 31 days (the trip CSV streams any
+length).
+
+### Traps this added to the list
+
+29 in "Traps that have cost time more than once".

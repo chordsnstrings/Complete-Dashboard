@@ -4077,3 +4077,16 @@ after 13:27:47Z and clears the reconciler's two-hour wait, for a trip).
 | SMS-4 | 05:00 cash: Uber's cash_collected, not the fare; waits for the catch-up and every Uber figure, gives up at 09:00; channel-not-collected held; no AED 0.00; idempotent; switch | driver_sms §2 (fare 2, catch-up 5, channel 1 fail) | ✓ | ✓ f7cb5cd | ✓ 8050d0e4 | |
 | SMS-5 | trip request: strict filter, watermark (no backlog), plate-overlap dedupe, 07:00 hold with re-check, 3 per person per day, switch | driver_sms §3 (overlap 3, night 5, re-check 3, watermark 4 fail) | ✓ | ✓ f7cb5cd | ✓ 8050d0e4 | |
 | SMS-6 | Messages page (`#messages`, subject CT, sign-in only in every mode); switches in Access → Settings | driver_sms §4, endpoint_coverage | ✓ | ✓ 178ffe4 | ✓ 8050d0e4 | ✓ `/api/sms/log` and `/preview` → 401, no-store, with no session; `#messages` from production bytes shows the sign-in reason at 1440 and 390, no page error, no sideways scroll |
+
+## The money workbook (Excel) — 2026-09-28
+
+Asked for over a screenshot of Drivers: "download the combined money and bank
+payouts and cash on hand etc every detail, every platform as a downloadable
+excel file based on the range". Rules and measurements: `docs/COVERAGE.md`
+"The money workbook (Excel)".
+
+| # | what | test (revert fails it) | written | committed | deployed | proven |
+|---|---|---|---|---|---|---|
+| XL-1 | dependency-free .xlsx writer: numbers as numbers, Dubai dates as Excel dates, text never a formula, frozen header, filters; read back by our reader AND openpyxl | xlsx_write (30: strip 1+, epoch 4, crc 1+) | ✓ | | | |
+| XL-2 | the workbook: cash to collect per driver with the mobile, cash by day, cash trips, hand-ins, drivers, money by day, payouts by arrival, platform statements, every trip ≤31 days; one driver's file; chips; withheld classes | money_workbook (42: hand-in sign 6, withheld 1, unpriced 2, Dubai day 7) | ✓ | | | |
+| XL-3 | the route (413 over a year, 400/404 for a bad driver, no-store), manifest (subject CASH, fleet param, audited), the button — fetched, refusal said on the page | access_pages §16 (9), access_manifest, server_wiring, mockapi, endpoint_coverage | ✓ | | | |
