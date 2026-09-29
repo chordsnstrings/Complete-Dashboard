@@ -4199,6 +4199,22 @@ untouched, and nothing projected is ever added into `accounted`.
       message". Table styles live in one `<style>` block (Gmail and Outlook
       honour it) and the same email is 44 KB. Measure the rendered size with
       a real day's data before sending anything tabular.
+  35. **A migration keyed on the SHAPE of `raw` reaches every window that
+      shape was ever filed under, and the per-day total moves by less than
+      the rows did.** sql/schema_v92.sql restated Yango console rows whose
+      earnings were still the gross, matching on `raw`'s price fields. It was
+      described and tested as "the 112 console weeks, −AED 4,053.09"; the
+      console had also been asked over 4-day and 31-day windows in
+      July–August, filed with the same fields, and v92 restated whichever
+      of those still held the gross. Then `driver_payout_day` fell by only 3,965.23,
+      because `driver_payout_day_finest` keeps the SHORTEST window per
+      driver-day: on 18–24 August every console driver-day belongs to a 4-day
+      row, so 287.67 of the weekly commission never reached a page, and the
+      older windows added 199.81 of their own. Before stating what a
+      migration will move, count the rows it matches by window length
+      (`/api/reconcile/periods?platform=…` lists every window and its grain)
+      and predict the per-day total through the finest-grain view, not the
+      sum of the rows.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
@@ -7462,6 +7478,27 @@ the console's first (05-11: 4 trips against 22) and last (08-31: 7 against
   stored figure is still exactly the gross, lowering Yango's May–September
   earnings by the AED 4,053.09 commission, and its distance filled from
   Yango's `distance`. Rebuilt rows are never touched; a replay is a no-op.
+
+  **Measured on production after deploy 59b00cea, 2026-09-29 13:14Z.** The
+  112 weekly rows moved by exactly the amount stated: the console's weekly
+  earnings in `/api/probe/yango/weekly-rebuild` went from 18,229.00 to
+  14,175.91, and the rebuild's agreement with them on earnings rose from
+  43.8% to 90.2% of driver-weeks. **v92 also reached rows beyond those
+  weeks** (trap 35): the console had been asked over 4-day windows (22 rows,
+  starting 18–21 August) and 31-day windows (starting 23–24 July) with the
+  same fields, and v92's condition matches any row whose earnings were
+  still exactly the gross, whatever its length. The 4-day rows now total
+  1,112.37 = raw cash 303.00 + cashless 1,175.70 − commission 366.33; how
+  the 199.81 below splits between them and the 31-day rows cannot be read
+  from outside the database, because no earlier snapshot of those windows
+  was taken. Yango earnings as every page sums them
+  (`/api/coverage`, `driver_payout_day`) went from **18,680.82 to
+  14,715.59 (−3,965.23)**: −3,765.42 from the weeks, which is 4,053.09 less
+  the 287.67 falling on 18–24 August where each driver-day belongs to a
+  4-day row, and −199.81 from the older windows on the days they are the
+  finest. The shadowing measures to the fils: the weekly money on those
+  days is 961.91 × 6/7 + 889.68 × 1/7 = 951.59, exactly the gap between the
+  weekly rows' 15,067.80 and their 14,116.21 in the per-day table.
 
 Writing went on (`REBUILD_WRITES = true`) in the commit that recorded this.
 
