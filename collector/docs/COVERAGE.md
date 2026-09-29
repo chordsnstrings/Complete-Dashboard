@@ -4166,6 +4166,12 @@ untouched, and nothing projected is ever added into `accounted`.
       month as the sum of its days, and when the suite goes red after a date
       change, run the failing test on the previous commit before touching
       the change under test.
+  31. **An HTML 403 from fleet.yango.com is the edge refusing production's
+      address, not an expired cookie.** Yango's own API refuses in JSON; the
+      edge refuses in HTML, before the session is looked at. The same session
+      answered 200 from another network on 2026-09-22. Re-pasting the cookie
+      cannot fix it, and `YANGO_COOKIE: ok` on the banner is not evidence the
+      session is good ("Yango's console cookie", above).
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
@@ -7290,3 +7296,49 @@ length).
 ### Traps this added to the list
 
 29 in "Traps that have cost time more than once".
+
+## Yango's console cookie — why it "doesn't work all the time" (investigated 2026-09-29)
+
+The operator uploaded a fresh "copy as cURL" from fleet.yango.com and asked
+why the cookie keeps failing. Read-only investigation; no request was made
+to Yango with it.
+
+- **What the cookie is for.** One surface only: the weekly per-driver summary
+  at `fleet.yango.com/api/reports-api/v2/summary/drivers/list`
+  (src/sources/yango.js). Trips, roster, cars and the ledger come from the
+  keyed `fleet-api.yango.tech`, which needs no cookie and is healthy
+  (YANGO_API_KEY and YANGO_PARK_ID read `ok` on 2026-09-29).
+- **What production shows.** `YANGO_CONSOLE` is `blocked`: HTTP 403 as an
+  **HTML page** with the cookie, JSON 401 without it. Its last success was
+  **2026-09-12 11:31Z**; it failed from 09-06, recovered for a while
+  between 09-07 and 09-12, and has failed ever since. Per the API and worker logs, the paste saved at 09:19Z
+  on 2026-09-29 was refused within seconds from the API container and again
+  from the collector at 09:31.
+- **Why re-pasting cannot fix it.** On 2026-09-22 the same session answered
+  HTTP 200 from another network (yango.js, the measurement above the
+  console headers) while production got the HTML 403. Every refusal from
+  Yango's own API is JSON; this one is an edge's page, and it comes before
+  the session is checked. The refusal is of production's network address
+  (DigitalOcean, no dedicated egress IP, a new container on every deploy),
+  not of the cookie. The 09-29 upload is the same account and park as the
+  stored one, and its `Session_id`/`sessionid2` are stamped 2026-08-10 — the
+  same login session production already held.
+- **What the dashboard says that is not earned.** `YANGO_COOKIE` reads `ok`
+  because "403 with the cookie, 401 without" shows only that the edge reacts
+  to a cookie, not that the session is valid. The Settings hint for it says
+  "Expires — re-paste", which sends the operator on an errand that cannot
+  help. Runs that wrote thousands of rows from the keyed host are marked
+  `error` because the console window failed (src/db.js logRun).
+- **Volume.** About 1,000 refused console requests a week from production:
+  every 30 minutes, the daily 30-day catch-up, the Sunday backfill (~210 in
+  one burst), the daily probe and discovery, and the check on every paste.
+
+What would settle the remaining question (whether Yandex refuses the
+address, or a replayed browser jar from a non-browser client) is one pass
+from the production collector with four variants — the request unchanged, a
+junk session (the control for the `ok` row), only the session cookies, and
+the paste's full browser headers — which needs the operator's approval.
+
+### Traps this added to the list
+
+31 in "Traps that have cost time more than once".
