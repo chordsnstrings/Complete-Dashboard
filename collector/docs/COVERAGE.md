@@ -4158,6 +4158,14 @@ untouched, and nothing projected is ever added into `accounted`.
       FETCHED when it can be refused: a plain `<a href>` to a route that
       answers 413 or 403 opens the JSON as a page and takes the reader out of
       the product.
+  30. **A fixture that seeds a month's total apart from its days passes for
+      most of the month.** test/forecast_yoy gave the current month a fixed
+      1,270 trips and 47 a day beside it; from the 29th, 28 whole days
+      outgrew the month and the suite went red on the date alone (found
+      2026-09-29, red on the commit that was green the day before). Seed a
+      month as the sum of its days, and when the suite goes red after a date
+      change, run the failing test on the previous commit before touching
+      the change under test.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 

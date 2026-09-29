@@ -202,6 +202,17 @@ for (let d = 1; d <= lastDay(lyM); d++) {
    work. This single row is the whole of defect two. */
 await q('UPDATE rollup_day SET bookings = 3, trips = 3 WHERE day = $1::date AND platform = \'*\'',
   [today]);
+/* THIS MONTH'S TOTAL IS THE SUM OF ITS DAYS, as it is on production (the
+   rollups are built from the same bookings). The seed above gave the current
+   month a fixed 1,270 while the day rows carry 47 a day, so from the 29th of
+   any month 28 whole days (1,316) outgrew the "whole month including today"
+   and the check below failed on the date alone — found on 2026-09-29, failing
+   identically on the commit that passed the day before. */
+await q(
+  `UPDATE rollup_month m SET bookings = d.n, trips = d.n
+     FROM (SELECT sum(trips)::int AS n FROM rollup_day
+            WHERE platform = '*' AND fleet_id = '*' AND to_char(day, 'YYYY-MM') = $1) d
+    WHERE m.month = ($1 || '-01')::date AND m.platform = '*' AND m.fleet_id = '*'`, [curM]);
 
 const r = await get('/api/forecast?horizon=12');
 const b = r.body;
