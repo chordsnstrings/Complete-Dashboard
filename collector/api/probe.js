@@ -36,7 +36,7 @@ import { YANGO_SURFACES } from '../src/sources/yango.js';
    +04:00 arithmetic and every other server-side day key already goes through
    it or through Postgres's AT TIME ZONE 'Asia/Dubai'; a fourth private copy of
    the offset here is how the two would eventually disagree. */
-import { dubaiIso } from '../src/util.js';
+import { dubaiIso, iso as isoDay } from '../src/util.js';
 import { log } from '../src/log.js';
 
 /* The org a probe asks about: the first with a full credential pair. The
@@ -2683,15 +2683,17 @@ export function probeRoutes(app, { wrap }) {
      name is in the answer. */
   app.get('/api/probe/yango/weekly-rebuild', wrap(async (req, res) => {
     const ISO = /^\d{4}-\d{2}-\d{2}$/;
+    /* Calendar arithmetic on dates pinned to 00:00Z, never a clock: the only
+       clock read is dubaiIso(), so "today" is Dubai's. */
     const monday = (d) => {
       const x = new Date(`${d}T00:00:00Z`);
       x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7));
-      return x.toISOString().slice(0, 10);
+      return isoDay(x);
     };
     const lastClosed = (() => {
       const x = new Date(`${monday(dubaiIso())}T00:00:00Z`);
       x.setUTCDate(x.getUTCDate() - 7);
-      return x.toISOString().slice(0, 10);
+      return isoDay(x);
     })();
     const { rows: [first] } = await pool.query(
       `SELECT to_char(min(period_start), 'YYYY-MM-DD') AS s FROM driver_performance WHERE platform = 'yango'`);
