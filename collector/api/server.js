@@ -320,6 +320,7 @@ const q = async (text, params) => {
    quote. The real fix for this class of bug is test/route_smoke.test.mjs,
    which executes every route rather than grepping for it. */
 import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, peopleCountStored, personKeyStored, NAMED, JOIN_TRIP, personFold, custodyRefs, custodyNames } from './custody_sql.js';
+import { TELEMETRY_PLATES, LATEST_FIX } from './telemetry_sql.js';
 import { spanGaps } from './coverage_gaps.js';
 /* The one place the alerts-per-distance rule lives. Every page that prints a
    safety rate reads it from here, so the fleet headline and the per-vehicle
@@ -407,6 +408,7 @@ const F = W();
    silent for days — twenty-five of them are, and they are counted separately
    because "has stopped reporting" is a different fact from "is late". */
 const FIX_FRESH = "interval '30 minutes'";
+
 
 
 /* A Dubai-local day window for the tables that are keyed on a raw timestamp
@@ -670,13 +672,17 @@ app.get('/api/kpis', wrap(async (req, res) => {
      couple of cycles behind; reporting is what is being measured, not
      punctuality. The silent count is returned beside them so a page can say
      which vehicles have gone quiet instead of quietly dropping them. */
-  const [v] = await q(`SELECT
+  const [v] = await q(`WITH RECURSIVE ${TELEMETRY_PLATES}
+      SELECT
         count(*) FILTER (WHERE now() - captured_at < ${FIX_FRESH})::int live_vehicles,
         count(*) FILTER (WHERE now() - captured_at < ${FIX_FRESH})::int fresh,
         count(*) FILTER (WHERE now() - captured_at >= interval '1 day')::int silent_vehicles,
         count(*)::int tracked_vehicles
-      FROM (SELECT DISTINCT ON (plate) plate, captured_at
-              FROM telemetry_snapshot ORDER BY plate, captured_at DESC) s`);
+      /* Each plate's newest captured_at, future included — what the
+         DISTINCT ON this replaced kept. See api/telemetry_sql.js. */
+      FROM (SELECT p.plate,
+                   (SELECT max(t.captured_at) FROM telemetry_snapshot t WHERE t.plate = p.plate) AS captured_at
+              FROM plates p WHERE p.plate IS NOT NULL) s`);
   /* Alerts, and the distance they are allowed to be divided by.
      ─────────────────────────────────────────────────────────────────────────
      Alerts take the same fleet filter as the trips beside them; without it a
@@ -1859,7 +1865,8 @@ app.get('/api/vehicles', wrap(async (req, res) => {
 }));
 
 app.get('/api/live', wrap(async (_, res) => res.json(await q(
-  `SELECT s.plate, s.fleet_id, s.source, s.captured_at, s.polled_at, s.lat, s.lng, s.speed, s.status,
+  `WITH RECURSIVE ${TELEMETRY_PLATES}
+   SELECT s.plate, s.fleet_id, s.source, s.captured_at, s.polled_at, s.lat, s.lng, s.speed, s.status,
           /* TWO SEAT SENSORS, ONE READING PER ROW, EACH NAMED.
              ─────────────────────────────────────────────────────────────
              CABMAN DT reports occupied/empty in seat_occupied. FMS reports a
@@ -1917,10 +1924,12 @@ app.get('/api/live', wrap(async (_, res) => res.json(await q(
       A fix captured in the FUTURE is a tracker whose clock runs ahead of ours,
       not a newer position, so those sort last rather than winning forever —
       the same distinction api/../src/reconcile.js draws between skew and age.
-      polled_at breaks the remaining ties, so the result is deterministic. */
-   FROM (SELECT DISTINCT ON (plate) * FROM telemetry_snapshot
-          ORDER BY plate, (captured_at <= now()) DESC, captured_at DESC, polled_at DESC) s
+      polled_at breaks the remaining ties, so the result is deterministic.
+      One plate at a time through the index — see api/telemetry_sql.js. */
+   FROM plates p
+   CROSS JOIN LATERAL ${LATEST_FIX('p.plate')} s
    LEFT JOIN vehicle_current_driver cd ON cd.plate = s.plate
+   WHERE p.plate IS NOT NULL
    ORDER BY s.plate`))));
 
 // Breadcrumb trail. Only GPS-bearing sources: Uber writes driver-status rows into

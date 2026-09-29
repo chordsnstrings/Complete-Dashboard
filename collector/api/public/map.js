@@ -10,7 +10,24 @@ import { timeStr, contract } from './ui.js';
 import { markForm } from './charts.js';
 import { channelKey } from './tokens.js';
 
-const OSM = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+/* One host, no {s} subdomains: OpenStreetMap retired a/b/c.tile in favour of
+   tile.openstreetmap.org over HTTP/2, and the subdomains only split the
+   browser's connection for nothing. */
+const OSM = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+/* THE TILE SERVERS REFUSE A REQUEST THAT CARRIES NO REFERER.
+   ─────────────────────────────────────────────────────────────────────────
+   Every map in the product rendered as a wall of "Access blocked — App is not
+   following the tile usage policy of OpenStreetMap's volunteer-run servers"
+   (HTTP 403), from 2026-09-28. That day's hardening (073c243) set
+   `Referrer-Policy: same-origin` on every response, which is right for the
+   product — a URL here can carry a driver id or a date — and which also means
+   a cross-origin image request goes out with no Referer at all. OSM's policy
+   requires one from a browser, and blocks the tile otherwise.
+   So the tile images, and only they, send the ORIGIN — the site's address and
+   nothing after it, never the page path or query — which is what the policy
+   asks for and all it gets. The page-wide header stays as it is.
+   test/map_tiles_referrer.test.mjs. */
+const OSM_REFERRER = 'strict-origin';
 const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const DUBAI = [25.2048, 55.2708];
 
@@ -79,7 +96,7 @@ export async function makeMap(node, { zoom = 10 } = {}) {
   const map = L.map(node, {
     zoomControl: true, attributionControl: true, zoomSnap: 0, zoomDelta: 0.5, wheelPxPerZoomLevel: 90,
   }).setView(DUBAI, zoom);
-  L.tileLayer(OSM, { attribution: OSM_ATTR, maxZoom: 19 }).addTo(map);
+  L.tileLayer(OSM, { attribution: OSM_ATTR, maxZoom: 19, referrerPolicy: OSM_REFERRER }).addTo(map);
   /* The shell needs a handle on the live map. Leaflet caches the container's
      size and does not observe it, so when the full-page view removes the
      236px rail the map keeps the old width and renders grey down one side.

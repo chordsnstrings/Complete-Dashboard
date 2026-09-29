@@ -22,6 +22,7 @@
 import { log } from '../src/log.js';
 import { internalHeaders } from './access/internal.js';
 import { CAPACITY_WINDOW_DAYS } from './capacity_routes.js';
+import { VERSION_SQL } from './cache.js';
 
 const SRC = 'warm';
 
@@ -126,12 +127,40 @@ const BARE_PATHS = [
    All-time is deliberately still absent: it is reachable only by hand-editing a
    URL, and warming it would double this pass to serve a window nobody opens. */
 const WINDOWS = [30, 7, 90, 365];
+/* ONE FULL PASS AT BOOT, THEN THE TWO WINDOWS PEOPLE OPEN, AT MOST TWICE AN HOUR.
+   ─────────────────────────────────────────────────────────────────────────
+   This warmer re-ran all 89 aggregates every time the data version moved, and
+   on production the version moved every five minutes (CABMAN's realtime tick
+   — see VERSION_SQL in api/cache.js). A pass took 519–1,050 s there, so each
+   one ended after the next was already due and the warmer never stopped:
+   passes finished at 13:24, 13:34, 13:44, 13:54 and 14:07 on 2026-09-29, one
+   heavy aggregate after another, all day, on a two-vCPU database the pages
+   share. Its own note above expects "a minute".
 
-export function startWarmer({ port, pool, everyMs = 60000, enabled = true }) {
+   What the warmer is FOR is the first reader: a key with no entry at all is
+   computed while somebody waits. After the boot pass every key it warmed has
+   an entry, and api/cache.js serves an entry that has gone stale immediately
+   and refreshes it behind the reader, once. So after boot the warmer only
+   needs to keep the landing windows fresh, not to refill 365-day aggregates
+   nobody has asked for since:
+     - boot (and a process that has never completed a pass): every window,
+       exactly as before, so a deploy is not followed by cold pages;
+     - afterwards: the windows in PERIODIC_WINDOWS, and at most one pass per
+       minGapMs (30 minutes) — a version that moved during the gap is warmed
+       when the gap ends, never dropped.
+   test/warm.test.mjs "warm: it does not run itself into the ground". */
+export const PERIODIC_WINDOWS = [30, 7];
+export const WARM_MIN_GAP_MS = 30 * 60 * 1000;
+
+export function startWarmer({ port, pool, everyMs = 60000, enabled = true, minGapMs = WARM_MIN_GAP_MS,
+  now = () => Date.now() }) {
   if (!enabled) { log.info(SRC, 'disabled'); return { stop() {} }; }
   let lastVersion = null;
   let running = false;
   let stopped = false;
+  let passes = 0;            // completed passes; 0 means the boot pass is still owed
+  let lastStart = 0;         // when the last pass began
+  let due = false;           // the data moved and has not been warmed yet
 
   /* The window the BROWSER computes, which is the only one worth warming.
      ─────────────────────────────────────────────────────────────────────
@@ -168,16 +197,15 @@ export function startWarmer({ port, pool, everyMs = 60000, enabled = true }) {
   };
 
   async function version() {
-    const { rows } = await pool.query(
-      `SELECT (SELECT max(finished_at) FROM collection_run) AS c,
-              (SELECT max(finished_at) FROM rollup_state)   AS r`);
+    const { rows } = await pool.query(VERSION_SQL);
     return `${rows[0]?.c || '-'}|${rows[0]?.r || '-'}`;
   }
 
-  async function warm() {
+  async function warm(windows = WINDOWS) {
     if (running || stopped) return;
     running = true;
     const t0 = Date.now();
+    lastStart = now();
     let ok = 0; let failed = 0;
     try {
       const hit = async (url) => {
@@ -203,14 +231,15 @@ export function startWarmer({ port, pool, everyMs = 60000, enabled = true }) {
          constant is imported rather than repeated: a warmer guessing 84 would
          warm a key nobody requests the day that number changes. */
       if (!stopped) await hit(`http://127.0.0.1:${port}/api/platforms?${windowQs(CAPACITY_WINDOW_DAYS)}`);
-      for (const days of WINDOWS) {
+      for (const days of windows) {
         for (const path of PATHS) {
           if (stopped) return;
           const sep = path.includes('?') ? '&' : '?';
           await hit(`http://127.0.0.1:${port}${path}${sep}${windowQs(days)}`);
         }
       }
-      log.info(SRC, 'cache warmed', { ok, failed, ms: Date.now() - t0 });
+      passes++;
+      log.info(SRC, 'cache warmed', { ok, failed, ms: Date.now() - t0, windows: windows.join(',') });
     } finally { running = false; }
   }
 
@@ -218,12 +247,14 @@ export function startWarmer({ port, pool, everyMs = 60000, enabled = true }) {
     if (stopped) return;
     try {
       const v = await version();
-      if (v !== lastVersion) {
-        lastVersion = v;
-        /* Not awaited: the tick must stay short, and a warm pass takes a
-           minute. A second tick during it finds `running` true and returns. */
-        warm();
-      }
+      if (v !== lastVersion) { lastVersion = v; due = true; }
+      if (!due || running) return;
+      const boot = passes === 0;
+      if (!boot && now() - lastStart < minGapMs) return;   // warmed at the gap's end
+      due = false;
+      /* Not awaited: the tick must stay short. A second tick during a pass
+         finds `running` true and returns, leaving `due` for the next. */
+      warm(boot ? WINDOWS : PERIODIC_WINDOWS);
     } catch (e) {
       log.warn(SRC, 'version check failed', { err: String(e).slice(0, 120) });
     }
@@ -235,5 +266,5 @@ export function startWarmer({ port, pool, everyMs = 60000, enabled = true }) {
   const timer = setInterval(tick, everyMs);
   timer.unref?.();
   first.unref?.();
-  return { stop() { stopped = true; clearInterval(timer); clearTimeout(first); }, warm };
+  return { stop() { stopped = true; clearInterval(timer); clearTimeout(first); }, warm, tick, busy: () => running };
 }

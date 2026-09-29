@@ -147,13 +147,32 @@ async function main() {
     cron.schedule(config.uberRosterCron, () => uberTimelineTick({ roster: true, days: 30 })
       .catch((e) => log.error('scheduler', 'uber roster sweep', { err: String(e) })));
     /* Rollups on their own schedule as well as at the end of each run.
-       The run-end refresh covers the normal path, but CABMAN writes trips on a
-       five-minute tick of its own and a failed incremental leaves the rollups
-       behind with no other route back — and a page reading a stale rollup shows
-       a number that is wrong in a way nothing about it reveals. Fifteen minutes
-       is well inside the thirty-minute collection cycle, so the pages are never
-       more than one tick behind what has actually landed. */
-    cron.schedule('*/15 * * * *', () => refreshRollups({ days: 14 })
+       The run-end refresh covers the normal path; this one is the safety net
+       for what it cannot see — an incremental that failed before reaching its
+       rollup, and an operator's upload (a statement, a roster) that no
+       collection run carries — because a page reading a stale rollup shows a
+       number that is wrong in a way nothing about it reveals.
+
+       AT :15 AND :45, NOT EVERY QUARTER HOUR.
+       ─────────────────────────────────────────────────────────────────────
+       It ran at :00/:15/:30/:45. The :00 and :30 passes start in the same
+       minute as the incremental (every thirty minutes, below), roll up data the incremental
+       is halfway through writing, and are then repeated by the run-end
+       refresh about four minutes later — measured on production 2026-09-29,
+       passes at 13:30:00 and 13:35:06, 14:00:00 and 14:05:11. Worse, when the
+       :00 pass is still running as the incremental finishes, refreshRollups()
+       returns the pass already in flight and the run-end refresh is dropped
+       ("refresh already running — skipped", 13:15:00), so the data that run
+       collected waited for the next pass. Six passes an hour of 149–313 s
+       each were 32% of the hour on a database the pages share
+       (docs/AUDIT.md, "Page load times on production"). Mid-way between
+       collections the safety net never collides with a run-end refresh, and
+       nothing that lands waits more than about twenty minutes for a pass.
+       (An earlier version of this note said CABMAN writes trips on its
+       five-minute tick; it writes positions only — src/sources/cabman.js
+       collect → telemetry_snapshot — and no rollup reads those.)
+       test/rollup_schedule.test.mjs. */
+    cron.schedule('15,45 * * * *', () => refreshRollups({ days: 14 })
       .catch((e) => log.error('scheduler', 'rollup', { err: String(e) })));
     /* And the whole history once a day. The quarter-hourly refresh only touches
        the last fortnight, which is right for new trips and blind to a backfill

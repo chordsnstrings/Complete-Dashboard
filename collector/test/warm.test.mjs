@@ -181,6 +181,73 @@ console.log('\nit warms the keys the pages actually ask for');
   }
 }
 
+console.log('\nwarm: it does not run itself into the ground');
+
+/* Production, 2026-09-29: the version moved every five minutes on CABMAN's
+   realtime tick, a pass of 89 aggregates took 519–1,050 s, and so the
+   warmer never stopped. After the boot pass it now warms only the windows
+   people open, at most once per gap, and never drops a version that moved
+   during the gap.
+   REVERSION (each run 2026-09-29): tick() calling warm(WINDOWS) every time —
+   "a later pass warms only the periodic windows" fails; dropping the
+   minGapMs test — "a second move inside the gap starts no pass" fails;
+   dropping `due` (warming only on the tick that saw the change) — "…and
+   is warmed once the gap has passed" fails; dropping the `mode IS DISTINCT
+   FROM 'realtime'` clause from api/cache.js VERSION_SQL — "a CABMAN realtime
+   tick does not start a pass" fails. */
+{
+  const { PERIODIC_WINDOWS } = await import('../api/warm.js');
+  const log2 = [];
+  const app2 = express();
+  app2.use('/api', (req, res) => { log2.push(req.originalUrl); res.json({ ok: true }); });
+  const srv2 = app2.listen(0);
+  const port2 = srv2.address().port;
+  const bump = (mode = 'incremental') => db.query(
+    `INSERT INTO collection_run (source, mode, status, finished_at)
+     VALUES ('uber', $1, 'ok', now() + (random() * interval '1 second'))`, [mode]);
+  const windowsOf = (urls) => [...new Set(urls.map((u) => (u.match(/from=(\d{4}-\d{2}-\d{2})/) || [])[1]).filter(Boolean))];
+  /* A pass is not awaited by tick(); wait until it has started and finished. */
+  const idle = async () => {
+    await new Promise((r) => setTimeout(r, 50));
+    for (let i = 0; i < 3000 && w2.busy(); i++) await new Promise((r) => setTimeout(r, 20));
+  };
+
+  let clock = 1e12;                       // a fake clock; the gap is the default 30 minutes
+  const w2 = startWarmer({ port: port2, pool, enabled: true, everyMs: 3600e3, now: () => clock });
+  await bump();
+  await w2.tick();
+  await idle();
+  const boot = log2.splice(0);
+  check('the boot pass warms every window, as before', windowsOf(boot).length >= 4, windowsOf(boot).join(' '));
+
+  await bump();
+  await w2.tick();
+  await idle();
+  check('a second move inside the gap starts no pass', log2.length === 0, String(log2.length));
+
+  clock += 31 * 60 * 1000;                // the gap has passed; nothing new has moved
+  await w2.tick();
+  await idle();
+  const later = log2.splice(0);
+  check('…and is warmed once the gap has passed, rather than dropped', later.length > 0, String(later.length));
+  /* uiFrom() is the browser's window arithmetic, defined above. The capacity
+     page's own fixed window is warmed on every pass and is not one of these. */
+  const got = windowsOf(later);
+  check('a later pass warms only the periodic windows',
+    PERIODIC_WINDOWS.every((d) => got.includes(uiFrom(d)))
+      && [90, 365].every((d) => !got.includes(uiFrom(d))),
+    `${got.join(' ')} vs ${PERIODIC_WINDOWS.map(uiFrom).join(' ')}`);
+
+  /* A realtime tick is not a data move at all (api/cache.js VERSION_SQL). */
+  clock += 31 * 60 * 1000;
+  await bump('realtime');
+  await w2.tick();
+  await idle();
+  check('a CABMAN realtime tick does not start a pass', log2.length === 0, String(log2.length));
+  w2.stop();
+  srv2.close();
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

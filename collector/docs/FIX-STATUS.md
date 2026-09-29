@@ -4144,3 +4144,22 @@ measurement and the three traps it added. Not deployed from this session.
 |---|---|---|---|---|---|---|
 | ID-AA1 | the register: the pair leaves PENDING for the end of HAND_MERGES, dated the ruling, with the sweep's figures, its 2025-08-31 contradiction and a `ruling` naming it; assertRegister refuses an applied contradiction no ruling names; v53 regenerated (170 WHENs; its header prose now counted, not written); 132 entries / 126 people / 4 held back in the header, CLAUDE.md and the counts test — whose header regex had been pinning stale "130 over 124" words | identity_ruling_ali_abbas §1–2 (register at HEAD 23 of 52, guard removed 2, v53 count neutralised 2), identity_register_counts (register at HEAD 8 of 15, header words 1), identity_map, identity_merge (joined 74→75, folds 320→319) | ✓ | ✓ this commit | — | — expect `/api/drivers/directory?from=2026-08-31&to=2026-09-29` to show ONE row with all three ids, ~47 trips, ~4,051 ever |
 | ID-AA2 | `sql/schema_v93.sql`: the spine's two person rows folded into the one holding the Uber account — every ledger entry, account (detached too), audit and sms row re-pointed, cash rule carried, one `person_merge` audit row naming every id and amount, the row deleted; REFUSES with a recorded reason if both carry an opening of the same kind; no-op when unplaced or already one | identity_ruling_ali_abbas §4–5 (v93 emptied 16, refusal removed 4, refusal guard removed 1, detached rows left behind → FK throw, sms not moved 1) | ✓ | ✓ this commit | — | — expect `migrated schema_v93.sql` with no `schema_v93:` warning in the log; a warning means both rows carry an opening and a supervisor folds them through `POST /api/person/merge` |
+
+## Page load times and the map — 2026-09-29
+
+The operator: "the database for many pages are extremely slow. What happened?
+… do what you feel is correct but we need to ensure that we don't lose data.
+also maps isn't showing up correctly". Measurements in docs/AUDIT.md ("Page
+load times on production"). Nothing here writes, moves or deletes stored data:
+three changes are about when work runs, one is how a query reads, one adds
+indexes.
+
+| # | what | test (revert fails it) | written | committed | deployed | proven |
+|---|---|---|---|---|---|---|
+| PERF-0 | map tiles send the site's origin as Referer (`referrerPolicy: 'strict-origin'` on the Leaflet tile layer only), one tile host — OSM answered every tile with "Access blocked" (403) since 073c243 set `Referrer-Policy: same-origin` | map_tiles_referrer (no option 1, same-origin 1, {s} host 1) | ✓ | | | |
+| PERF-1 | the cache's data version ignores CABMAN's 5-minute realtime tick (it writes positions only); the warmer does one full pass at boot, then 30/7-day windows at most every 30 min, never dropping a moved version | cache (realtime 1), warm (always-full 1, no gap 1, no carry-over 2, realtime 1) | ✓ | | | |
+| PERF-2 | the safety-net rollup at :15/:45 instead of every quarter hour — the :00/:30 passes duplicated the run-end refresh four minutes later and could make it skip | rollup_schedule (every quarter hour 1) | ✓ | | | |
+| PERF-3 | /api/live and /api/kpis find each car's newest fix by skipping through the (plate, captured_at) index instead of sorting all ~657 k fixes (api/telemetry_sql.js), row for row the same as the DISTINCT ON; schema_v94 partial indexes for the feeds page's seat lookups | live_fix (no future branch 2, ranks swapped 3, KPI past-only 1), feeds_seat_index (v94 unregistered 4) | ✓ | | | |
+| PERF-4 | background refreshes of stale cache entries queue, two at a time, so pages keep the pool | cache (unbounded 1) | ✓ | | | |
+| — | suite on this tree: `354 files, 13301 assertions, 1 file(s) failing` — arkiv_classic_frozen's driver/drv-0/quality render hashed differently once under the parallel run; alone it passes 145 of 145 (twice). It renders against mockapi.mjs, so no server change reaches it, and the only page file changed (map.js) draws no map on that tab — a settle race in the harness, not a render change | — | | | | |
+| — | not changed, by decision: money_event still drops a failed source's rows until the next pass (its documented, tested design) — the trip-price step's two 120 s timeouts on 2026-09-29 were load; /api/ledger/exposure (42 s cold) needs production query plans before it is rewritten | — | | | | re-measure after deploy |

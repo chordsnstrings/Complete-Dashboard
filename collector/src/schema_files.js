@@ -268,4 +268,9 @@ export const SCHEMA_FILES = [
      with a recorded reason, if both carry an opening of the same kind. A
      no-op where the accounts are unplaced or already on one person. */
   'schema_v93.sql',
+  /* Performance (2026-09-29): three partial indexes for the feeds page's
+     "newest seat reading per car" lookups, which walked a silent car's whole
+     telemetry history — 15.9 s and 13.8 s for the page on production.
+     Additive; no row changes. test/feeds_seat_index.test.mjs. */
+  'schema_v94.sql',
 ];

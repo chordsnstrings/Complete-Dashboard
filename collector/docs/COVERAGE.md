@@ -4287,6 +4287,38 @@ untouched, and nothing projected is ever added into `accounted`.
       (`/api/reconcile/periods?platform=…` lists every window and its grain)
       and predict the per-day total through the finest-grain view, not the
       sum of the rows.
+  36. **A five-minute position tick must not move the cache's version.**
+      api/cache.js keyed every answer on the latest collection_run or rollup
+      finish, and CABMAN's five-minute realtime tick writes a collection_run
+      for what is only a batch of positions. So every cached answer went stale
+      every five minutes, api/warm.js re-ran its 89 aggregates each time (a
+      pass took 519–1,050 s, so it never stopped), and the pages queued behind
+      it: 1,332 statements over 2.5 s in one hour on 2026-09-29. VERSION_SQL
+      now skips mode 'realtime' — the three cached answers that read
+      positions (/api/kpis' reporting counts, /api/vehicles/feeds,
+      /api/sensor-health) refresh with the next rollup or collection, at most
+      about twenty minutes, as the FMS and Uber live ticks always did; the
+      live map is never cached. The warmer runs one full pass at boot, then
+      the 30- and 7-day windows at most every 30 minutes; background
+      refreshes run two at a time. Before adding a frequent writer, ask what
+      it does to `x-data-version` (docs/AUDIT.md, "Page load times on
+      production").
+  37. **A page-wide `Referrer-Policy` reaches the map tiles.** The ULM
+      hardening (073c243, 2026-09-28) set `Referrer-Policy: same-origin`, so
+      tile requests to tile.openstreetmap.org went out with no Referer, and
+      OSM's tile policy answers those with a 403 image reading "Access
+      blocked". Every map in the product was a wall of them from that day.
+      Measured 2026-09-29 with one tile (10/669/437, Dubai): no Referer →
+      the "Access blocked" picture, served with status 200 (the 403 is drawn
+      in the image, so the network panel shows nothing wrong); Referer set to
+      the site's origin → the map tile.
+      The tile layer now sends the origin only (`referrerPolicy:
+      'strict-origin'` in api/public/map.js); the page-wide header is
+      unchanged. Any new cross-origin image or script needs the same thought.
+  38. **`*/` inside a block comment ends it.** Quoting a cron step (`*/30`,
+      `*/15`) in a `/* … */` comment closes the comment there, and the rest
+      of the note is parsed as code — a SyntaxError in src/index.js and in a
+      test on 2026-09-29. Write the step in words.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 

@@ -2247,3 +2247,15 @@ a 2 vCPU / 4 GB database — which is why the ordering of the fix list is
 "stop the background work, then the scans, then size", not the reverse.
 Direct database access (pg_stat_statements, EXPLAIN, bloat) was not available
 from this sandbox, so per-statement plans are inferred from the SQL, not read.
+
+**What was done about it, the same day** (docs/FIX-STATUS.md "Page load times
+and the map", traps 36–38 in docs/COVERAGE.md). No stored row is written,
+moved or deleted by any of it:
+the cache version skips the CABMAN realtime tick; the warmer does one full pass
+at boot and then the 30- and 7-day windows at most every 30 minutes; stale
+refreshes run two at a time; the safety-net rollup runs at :15/:45 only; the
+live map and the KPI vehicle counts read each car's newest fix through the
+index instead of sorting every fix; three partial indexes (schema_v94) serve
+the feeds page's seat lookups. The map tiles, broken since 2026-09-28 by
+`Referrer-Policy: same-origin`, send the site's origin. The same two timing
+passes are to be re-run after the deploy and recorded here.

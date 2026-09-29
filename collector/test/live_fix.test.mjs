@@ -82,9 +82,61 @@ check('poll age and fix age are reported separately, so "our collector is down" 
 check('and the fresh poll on a stale fix does not hide it',
   byPlate.L100.poll_age_min <= 3 && byPlate.L100.fix_age_min >= 0);
 
-const src = (await import('node:fs')).readFileSync('api/server.js', 'utf8');
-check('the ordering column is captured_at, not polled_at',
-  /DISTINCT ON \(plate\)[\s\S]{0,200}ORDER BY plate, \(captured_at <= now\(\)\) DESC, captured_at DESC/.test(src));
+/* THE SAME ROW, FOUND WITHOUT SORTING THE TABLE (2026-09-29).
+   ─────────────────────────────────────────────────────────────────────────
+   /api/live and /api/kpis used to ask DISTINCT ON (plate) over every fix ever
+   taken — 657,000 rows on production, 24.7 s and 57.1 s for the live map —
+   and now skip through the index one plate at a time (api/telemetry_sql.js).
+   What must not change is WHICH row each plate gets, so the rule the old
+   query wrote down is kept here as the reference, and both endpoints are
+   compared with it row for row on a fixture with the cases a rewrite gets
+   wrong: a plate whose only fixes are in the future, two feeds reporting one
+   plate at the same instant (the poll time decides), and a poll time that is
+   NULL (which sorts FIRST under DESC, as it did before).
+   REVERSION (run 2026-09-29): in LATEST_FIX, drop the second branch (future
+   fixes) — "a plate whose only fixes are in the future still appears" fails;
+   swap the branch ranks — "every plate gets the row the old query chose"
+   fails; in /api/kpis use max over past fixes only — "the KPI counts match"
+   fails. */
+console.log('\nlive: the same row per plate as the DISTINCT ON it replaced');
+/* Every time from ONE instant taken here, so "the same instant" is an exact
+   tie and not two now()s a few milliseconds apart. */
+const BASE = Date.now();
+const at = (min) => (min == null ? null : new Date(BASE - min * 60000).toISOString());
+const put = (src, plate, capMin, pollMin, lng) => q(
+  `INSERT INTO telemetry_snapshot (source, plate, fleet_id, captured_at, polled_at, lat, lng)
+   VALUES ($1, $2, 'ecosine', $3::timestamptz, $4::timestamptz, 25.0, $5)`,
+  [src, plate, at(capMin), at(pollMin), lng]);
+await put('cabman', 'L300', -30, 1, 55.51);              // only future fixes
+await put('cabman', 'L300', -90, 1, 55.52);
+await put('cabman', 'L400', 10, 9, 55.61);               // two feeds, same instant:
+await put('fms', 'L400', 10, 2, 55.62);                  //   the later poll wins
+await put('cabman', 'L500', 20, null, 55.71);            // same instant, NULL poll time:
+await put('fms', 'L500', 20, 1, 55.72);                  //   NULL sorts first under DESC
+await put('fms', 'L500', 400, 1, 55.73);
+const ref = await q(`SELECT DISTINCT ON (plate) plate, source, lng
+                       FROM telemetry_snapshot
+                      ORDER BY plate, (captured_at <= now()) DESC, captured_at DESC, polled_at DESC`);
+const live2 = (await get('/api/live')).body;
+const pick = (rs) => JSON.stringify(rs.map((r) => [r.plate, r.source, Number(r.lng)]));
+check('every plate gets the row the old query chose', pick(live2) === pick(ref),
+  `${pick(live2)}\n     vs ${pick(ref)}`);
+check('a NULL poll time wins an exact tie, as it did under DESC before',
+  live2.some((r) => r.plate === 'L500' && r.source === 'cabman'), pick(live2));
+check('a plate whose only fixes are in the future still appears, with its latest-dated fix',
+  live2.some((r) => r.plate === 'L300' && Number(r.lng) === 55.52), pick(live2));
+
+const kref = (await q(`SELECT
+    count(*) FILTER (WHERE now() - captured_at < interval '30 minutes')::int live,
+    count(*) FILTER (WHERE now() - captured_at >= interval '1 day')::int silent,
+    count(*)::int tracked
+  FROM (SELECT DISTINCT ON (plate) plate, captured_at FROM telemetry_snapshot
+         ORDER BY plate, captured_at DESC) s`))[0];
+const k = (await get('/api/kpis?from=2000-01-01&to=2100-01-01')).body;
+const kk = k.vehicles_reporting || k;
+check('the KPI counts match the DISTINCT ON they replaced',
+  kk.tracked_vehicles === kref.tracked && kk.live_vehicles === kref.live && kk.silent_vehicles === kref.silent,
+  `${JSON.stringify({ tracked: kk.tracked_vehicles, live: kk.live_vehicles, silent: kk.silent_vehicles })} vs ${JSON.stringify(kref)}`);
 
 server.close();
 await db.close();

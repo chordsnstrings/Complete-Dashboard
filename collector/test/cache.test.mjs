@@ -152,6 +152,20 @@ await db.query(
    ON CONFLICT (name) DO UPDATE SET finished_at = now()`);
 check('a finished rollup is noticed too', (await get('/api/thing')).cache === 'stale');
 
+/* CABMAN's realtime tick writes positions only, every five minutes, and was
+   invalidating every entry each time (api/cache.js VERSION_SQL; measured on
+   production 2026-09-29). It must not move the version; a collection that
+   writes trips must, as above.
+   REVERSION: drop `WHERE mode IS DISTINCT FROM 'realtime'` from VERSION_SQL —
+   "a realtime tick does not move the version" fails (run 2026-09-29). */
+await new Promise((r) => setTimeout(r, 300));
+const settledRt = await get('/api/thing');
+await db.query(`INSERT INTO collection_run (source, mode, status, finished_at)
+                VALUES ('cabman', 'realtime', 'ok', now() + interval '1 second')`);
+const rt = await get('/api/thing');
+check('a realtime tick does not move the version', rt.cache === 'hit' && rt.version === settledRt.version,
+  `${settledRt.cache}/${settledRt.version} -> ${rt.cache}/${rt.version}`);
+
 /* A burst of readers on a just-invalidated page must not each start the same
    aggregate — that is the thundering herd the cache exists to prevent,
    arriving one moment later. */
@@ -163,6 +177,32 @@ await Promise.all(Array.from({ length: 8 }, () => get('/api/thing')));
 await new Promise((r) => setTimeout(r, 300));
 check('eight simultaneous readers cause one refresh, not eight',
   calls - beforeHerd <= 2, `${beforeHerd} -> ${calls}`);
+
+/* Refreshes run two at a time, and every one of them runs.
+   A page is a dozen keys; opening it after the version moved used to start a
+   dozen background aggregates at once against an eight-connection pool
+   (api/cache.js, refreshConcurrency; production 2026-09-29).
+   REVERSION: set refreshConcurrency to Infinity in responseCache — "…never
+   more than two at once" fails with 6 (run 2026-09-29). */
+{
+  let inflight = 0, most = 0, served = 0;
+  app.get('/api/slow', async (req, res) => {
+    inflight++; most = Math.max(most, inflight); served++;
+    await new Promise((r) => setTimeout(r, 120));
+    inflight--; res.json({ k: req.query.k, at: served });
+  });
+  for (let i = 0; i < 6; i++) await get(`/api/slow?k=${i}`);
+  most = 0; served = 0;
+  await db.query(`INSERT INTO collection_run (source, mode, status, finished_at)
+                  VALUES ('uber', 'incremental', 'ok', now() + interval '2 seconds')`);
+  const stale = await Promise.all(Array.from({ length: 6 }, (_, i) => get(`/api/slow?k=${i}`)));
+  check('six readers of six stale keys are each answered at once, from the cache',
+    stale.every((r) => r.cache === 'stale'), stale.map((r) => r.cache).join(','));
+  for (let i = 0; i < 100 && served < 6; i++) await new Promise((r) => setTimeout(r, 30));
+  await new Promise((r) => setTimeout(r, 200));
+  check('refreshes run two at a time — never more than two at once', most <= 2, String(most));
+  check('and every queued key is refreshed in the end', served === 6, String(served));
+}
 
 /* And a reader with NO entry still waits, because there is nothing to hand
    them — a cache that invented an answer would be a different kind of bug. */

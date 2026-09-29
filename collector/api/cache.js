@@ -24,6 +24,39 @@ import { internalHeaders, isInternal } from './access/internal.js';
        sharing a path.
      - grow without bound. */
 
+/* WHAT MOVES THE VERSION — and the one run that must not.
+   ─────────────────────────────────────────────────────────────────────────
+   The latest finish of a collection run or a rollup, EXCEPT a run in mode
+   'realtime'. That mode is CABMAN's five-minute tick (src/run.js cabmanTick →
+   src/sources/cabman.js collect), and all it writes is telemetry_snapshot —
+   positions. It writes no trip and no money.
+
+   It moved the version anyway, every five minutes, and that was most of the
+   database's load. Measured on production 2026-09-29: x-data-version changed
+   at 14:15:02, the CABMAN tick; every cached entry went stale at once; the
+   warmer (api/warm.js) started its 89 aggregates again, and a pass took
+   519–1,050 s, so it never stopped; the API logged 1,332 statements over
+   2.5 s in 62 minutes and pages queued behind them (docs/AUDIT.md, "Page load
+   times on production").
+   What excluding it changes, exactly: the live views (/api/live, /api/track)
+   are on NEVER and read positions on every request, as before. Three CACHED
+   answers also read positions — /api/kpis' vehicles-reporting counts,
+   /api/vehicles/feeds and /api/sensor-health — and those now refresh when the
+   next rollup or collection moves the version (a rollup runs at :15 and :45
+   and after each thirty-minute collection, so at most about twenty minutes)
+   instead of every five. The FMS and Uber live
+   ticks (src/run.js liveStatusTick, every 120 s) write positions with no
+   collection_run at all and never moved the version, so this puts CABMAN on
+   the rule the other two feeds were already on. Every answer still carries
+   x-data-version and, when stale, x-cache-age. A collection or rollup that
+   writes trips or money moves the version exactly as before.
+   Shared with api/warm.js, so the warmer and the cache agree on when the data
+   moved. test/cache.test.mjs "a realtime tick does not move the version". */
+export const VERSION_SQL =
+  `SELECT (SELECT max(finished_at) FROM collection_run
+            WHERE mode IS DISTINCT FROM 'realtime')     AS c,
+          (SELECT max(finished_at) FROM rollup_state)   AS r`;
+
 /* Bounded by bytes, not by entry count.
    400 entries was the first guess and it was wrong in both directions: the
    product has 35 views and offers five windows, so a single person exploring it
@@ -92,7 +125,7 @@ const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/t
      confirming the wrong story). A few hundred rows; nothing worth caching. */
   '/api/hr-roster'];
 
-export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
+export function responseCache({ pool, ttlMs = 30000, enabled = true, port, refreshConcurrency = 2,
   maxBytes = MAX_BYTES } = {}) {
   /* The port to re-request a stale key on. Set after listen, because with
      PORT=0 the real one does not exist until then. */
@@ -108,6 +141,32 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
      the thundering herd the cache exists to prevent, arriving one moment
      later. */
   const refreshing = new Set();
+  /* AT MOST `refreshConcurrency` BACKGROUND REFRESHES AT ONCE.
+     ─────────────────────────────────────────────────────────────────────────
+     A reader handed a stale answer starts that key's refresh, once per key —
+     but a page is a dozen keys, so opening one page after the version moved
+     started a dozen aggregates together, and two people opening two pages
+     started twenty-four. The API has eight database connections
+     (src/db.js). Measured on production 2026-09-29: a lookup as small as the
+     credential banner's logged 5–7 s, which was its wait for a connection,
+     not its own cost (docs/AUDIT.md, "Page load times on production").
+     The reader is not the one waiting — they already have the stale copy — so
+     there is no reason for their refreshes to go at once: they queue, two run,
+     and the pool keeps room for the page requests nobody has an answer for
+     yet. Each key is still refreshed exactly once, and every queued key is
+     refreshed in the end. test/cache.test.mjs "refreshes run two at a time". */
+  const queue = [];
+  let active = 0;
+  const pump = () => {
+    while (active < refreshConcurrency && queue.length) {
+      const key = queue.shift();
+      active++;
+      fetch(`http://127.0.0.1:${selfPort()}${key}`, { headers: internalHeaders() })
+        .then((r) => r.arrayBuffer())
+        .catch(() => {})
+        .finally(() => { refreshing.delete(key); active--; pump(); });
+    }
+  };
 
   /* Read order, not write order.
      ─────────────────────────────────────────────────────────────────────────
@@ -142,9 +201,7 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
     if (Date.now() - checkedAt < ttlMs) return version;
     checkedAt = Date.now();
     try {
-      const { rows } = await pool.query(
-        `SELECT (SELECT max(finished_at) FROM collection_run) AS c,
-                (SELECT max(finished_at) FROM rollup_state)   AS r`);
+      const { rows } = await pool.query(VERSION_SQL);
       const iso = (v) => (v?.toISOString ? v.toISOString() : String(v ?? '-'));
       version = `${iso(rows[0]?.c)}|${iso(rows[0]?.r)}`;
     } catch {
@@ -219,11 +276,8 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
       res.send(hit.body);
       if (!refreshing.has(key)) {
         refreshing.add(key);
-        const url = `http://127.0.0.1:${selfPort()}${key}`;
-        fetch(url, { headers: internalHeaders() })
-          .then((r) => r.arrayBuffer())
-          .catch(() => {})
-          .finally(() => refreshing.delete(key));
+        queue.push(key);
+        pump();
       }
       return undefined;
     }
