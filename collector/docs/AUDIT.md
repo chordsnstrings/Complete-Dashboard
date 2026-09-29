@@ -2257,5 +2257,27 @@ refreshes run two at a time; the safety-net rollup runs at :15/:45 only; the
 live map and the KPI vehicle counts read each car's newest fix through the
 index instead of sorting every fix; three partial indexes (schema_v94) serve
 the feeds page's seat lookups. The map tiles, broken since 2026-09-28 by
-`Referrer-Policy: same-origin`, send the site's origin. The same two timing
-passes are to be re-run after the deploy and recorded here.
+`Referrer-Policy: same-origin`, send the site's origin.
+
+**After the deploy (83374a15, f6a8aed, 2026-09-29), the same two passes.**
+The first ran at 16:24 on a cache the boot warm pass had filled for its 89
+keys and nothing else — so every other page was a cold first visit, the case
+that matters. The second ran at 16:27–16:30, across the start of the 16:30
+collection.
+
+| | before (worse of 2 passes) | after, pass 1 (cold) | after, pass 2 |
+|---|---|---|---|
+| median page | 2.3 s | 0.9 s | 0.2 s |
+| pages over 3 s | 24 | 13 | 0 |
+| pages over 10 s | 8 | 2 | 0 |
+| #live | 57.1 s | 1.0 s | under 1 s |
+| #hr-roster / #same-person | 18.5 s / 24.8 s | 1.0 s / 4.0 s | 1.3 s at most |
+| #feeds / #map / #safety | 15.9 / 13.6 / 11.4 s | 3.8 / 4.4 / 1.6 s | under 1 s |
+
+A whole walk of the product took about two minutes instead of about fifteen.
+Still slow on a COLD visit, and next: #policy (`/api/ledger/exposure`,
+36.5 s — it sums every cash trip twice through the trip_cash view) and
+#segments (`/api/unauthorized/attributed`, 16.2 s — seven statements at once);
+then #supply 9.5 s, #performance 6.4 s, #optimise 6.3 s, #corridors 5.9 s.
+Each is served from the cache in well under a second once visited. Rewriting
+the first two properly wants their plans on production data.

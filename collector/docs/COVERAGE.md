@@ -4319,6 +4319,23 @@ untouched, and nothing projected is ever added into `accounted`.
       `*/15`) in a `/* … */` comment closes the comment there, and the rest
       of the note is parsed as code — a SyntaxError in src/index.js and in a
       test on 2026-09-29. Write the step in words.
+  39. **A regenerated schema_v53 can deadlock on the deploy that ships it —
+      and that is survivable, but only because of two things worth
+      knowing.** v53 drops and re-adds `person_key` on trip and five derived
+      tables. On deploy 83374a15 (2026-09-29) the API ran it first and got
+      `deadlock detected` after 90 s, against something else writing those
+      tables at 16:00 — the outgoing collector's :00 collection was starting
+      and the new one was booting; the log does not say which. It cost
+      nothing: a multi-statement file sent as one query runs as ONE
+      transaction in Postgres (v53 has no BEGIN/COMMIT of its own), so the
+      whole file rolled back, and src/db.js does not record a failed file,
+      so the collector — next through the migration lock — ran it again and
+      it applied at 16:03:51 in 160 s. The API had meanwhile applied v93 and
+      v94 and was serving on the OLD person_key for those three minutes.
+      Check both components' logs for `migrated schema_v53.sql` after any
+      register change; if neither applied it, a restart of either retries.
+      Never put a BEGIN/COMMIT into a migration file without meaning it: it
+      is what would turn a rollback into a half-applied file.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
