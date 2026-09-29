@@ -249,4 +249,12 @@ export const SCHEMA_FILES = [
      the nightly probe no longer asks — it asks the key host's v2 ledger under
      'transactions/list', which is what the collector reads. */
   'schema_v89.sql',
+  /* Yango (2026-09-29): re-file the YANGO_COOKIE 'ok' the old 403/401
+     reading wrote as 'unknown', with no last-ok time — only rows written
+     before the new code went live, while the console is not ok. */
+  'schema_v90.sql',
+  /* The 07:00 daily report email (2026-09-29): recipients (added on the
+     Access page, seeded once from the environment), the day as composed,
+     and each send. Additive. */
+  'schema_v91.sql',
 ];

@@ -1031,6 +1031,70 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
   }));
 
   /* Reviews: once a quarter each team's lead keeps or removes each grant. */
+  /* ── the 07:00 daily report email: who gets it ─────────────────────────
+     The operator, 2026-09-29: "admin should be able to add more emails if
+     they want after signing in". The Owner and Access admins (access.manage)
+     keep the list; every change is audited. The list starts from
+     REPORT_RECIPIENTS, once (src/daily_report.js recipients). */
+  const reportQ = (t, p) => db.query(t, p).then((r) => r.rows);
+  app.get('/api/access/report', wrap(async (req, res) => {
+    const fm = manager(req, res);
+    if (!fm) return undefined;
+    noStore(res);
+    const { recipients: live } = await import('../../src/daily_report.js');
+    await live(reportQ);   // seeds the list the first time it is read, as the run would
+    const list = await reportQ(
+      `SELECT id, email, added_by, added_at FROM report_recipient WHERE removed_at IS NULL ORDER BY added_at, id`);
+    const runs = await reportQ(
+      `SELECT r.business_day::text AS day, r.status, r.detail->'note'->>'outcome' AS commentary,
+              r.detail->'note'->>'why' AS commentary_why, r.updated_at,
+              (SELECT count(*)::int FROM report_send s WHERE s.business_day = r.business_day AND s.status = 'sent') AS sent,
+              (SELECT count(*)::int FROM report_send s WHERE s.business_day = r.business_day AND s.status = 'failed') AS failed,
+              (SELECT max(error) FROM report_send s WHERE s.business_day = r.business_day AND s.status = 'failed') AS error,
+              r.detail->>'why' AS why
+         FROM report_run r ORDER BY r.business_day DESC LIMIT 14`);
+    return res.json({ recipients: list.map((r) => ({ ...r, id: Number(r.id) })), runs,
+      schedule: 'Every day at 07:00 Dubai, for the day before; retried every 15 minutes until 09:45 for anyone it has not reached.' });
+  }));
+  app.post('/api/access/report/recipients', wrap(async (req, res) => {
+    const fm = manager(req, res, { write: true });
+    if (!fm) return undefined;
+    const { EMAIL } = await import('../../src/daily_report.js');
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!EMAIL.test(email) || email.length > 254) return fail(res, 400, 'bad_email', 'That is not an email address.');
+    const { rows } = await db.query(
+      `INSERT INTO report_recipient (email, added_by) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id`,
+      [email, fm.user.email]);
+    if (!rows.length) return fail(res, 409, 'already', `${email} already gets the report.`);
+    await audit(req, 'report.recipient_added', 'report_recipient', Number(rows[0].id), { email });
+    noStore(res);
+    return res.json({ ok: true, id: Number(rows[0].id), email });
+  }));
+  app.post('/api/access/report/recipients/:id/remove', wrap(async (req, res) => {
+    const fm = manager(req, res, { write: true });
+    if (!fm) return undefined;
+    const { rows } = await db.query(
+      `UPDATE report_recipient SET removed_at = now(), removed_by = $2
+        WHERE id = $1 AND removed_at IS NULL RETURNING email`, [Number(req.params.id) || 0, fm.user.email]);
+    if (!rows.length) return fail(res, 404, 'not_found', 'That address is not on the list.');
+    await audit(req, 'report.recipient_removed', 'report_recipient', Number(req.params.id), { email: rows[0].email });
+    noStore(res);
+    return res.json({ ok: true, email: rows[0].email });
+  }));
+  /* The email as it would be sent for a day, drawn now from the same figures,
+     without the commentary (written only at send time, by the collector,
+     which holds the model key) and without sending anything. */
+  app.get('/api/access/report/preview', wrap(async (req, res) => {
+    const fm = manager(req, res);
+    if (!fm) return undefined;
+    const { reportFacts, renderEmail, yesterdayDubai } = await import('../../src/daily_report.js');
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || '')) ? String(req.query.day) : yesterdayDubai();
+    const facts = await reportFacts(reportQ, day);
+    const { html } = renderEmail(facts, { text: null, why: 'this is a preview; the commentary is written when the email is sent' });
+    noStore(res);
+    return res.type('html').send(html);
+  }));
+
   app.get('/api/access/reviews', wrap(async (req, res) => {
     const fm = me(req, res);
     if (!fm) return undefined;

@@ -53,6 +53,19 @@ export const config = {
     };
   },
 
+  /* The daily report's commentary model (src/daily_report.js). Its own
+     names rather than the analyst's: the analyst runs on MiniMax and the
+     report on GLM 5.2, and one key serving both would move the other the day
+     either changed. ARK_API_KEY is accepted because it is what ModelArk
+     calls its key. */
+  get reportModel() {
+    return {
+      baseUrl: get('REPORT_MODEL_BASE_URL', D.REPORT_MODEL_BASE_URL),
+      apiKey: get('REPORT_MODEL_API_KEY', get('ARK_API_KEY')),
+      model: get('REPORT_MODEL', D.REPORT_MODEL),
+    };
+  },
+
   get fms() {
     return {
       base: get('FMS_BASE', D.FMS_BASE),

@@ -120,6 +120,13 @@ export const SETTING_DEFAULTS = {
      on 2026-09-28; it delivers although the gateway's sender list still says
      "Requested" for it (docs/COVERAGE.md "SMSala"). */
   SMSALA_BASE: 'https://api2.smsala.com',
+  /* The 07:00 daily report email (src/daily_report.js). GLM 5.2 on ModelArk
+     writes its commentary — the operator's choice, 2026-09-29, and the model
+     measured right about Ramadan 1448 where MiniMax was a year stale
+     (docs/COVERAGE.md). ecosine.ae is the domain registered on Resend. */
+  REPORT_MODEL_BASE_URL: 'https://ark.ap-southeast.bytepluses.com/api/v3',
+  REPORT_MODEL: 'glm-5-2-260617',
+  REPORT_FROM: 'Ecosine Fleet <reports@ecosine.ae>',
   SMSALA_SENDER: 'ECOSINE',
 };
 
@@ -345,6 +352,20 @@ export const SETTING_DEFS = [
   { key: 'SMSALA_SENDER', group: 'SMSala (SMS)', label: 'Sender name', secret: false,
     hint: 'The name drivers see. ECOSINE by default; VOLT and AD-VOLT are the other senders the account can use.' },
   { key: 'SMSALA_BASE', group: 'SMSala (SMS)', label: 'API base url', secret: false },
+
+  /* The daily report email. Recipients are managed on the Access page by the
+     Owner and Access admins; REPORT_RECIPIENTS only seeds that list the first
+     time it is found empty. */
+  { key: 'RESEND_API_KEY', group: 'Daily report', label: 'Resend API key', secret: true,
+    hint: 'Sends the 07:00 report. The sending domain (REPORT_FROM) must be verified on Resend' },
+  { key: 'REPORT_FROM', group: 'Daily report', label: 'Sender', secret: false,
+    hint: 'Name and address on a domain verified on Resend, e.g. Ecosine Fleet <reports@ecosine.ae>' },
+  { key: 'REPORT_RECIPIENTS', group: 'Daily report', label: 'First recipients', secret: false,
+    hint: 'Comma-separated; used once, to start the list. Add and remove people on the Access page' },
+  { key: 'REPORT_MODEL_API_KEY', group: 'Daily report', label: 'Commentary model key (ModelArk)', secret: true,
+    hint: 'GLM 5.2 writes two or three sentences from the figures; without a key the email is sent without them' },
+  { key: 'REPORT_MODEL', group: 'Daily report', label: 'Commentary model', secret: false },
+  { key: 'REPORT_MODEL_BASE_URL', group: 'Daily report', label: 'Commentary model base url', secret: false },
 
   { key: 'CHARGING_SITES', group: 'Fleet', label: 'Areas with a charging station', secret: false,
     hint: "Comma-separated area names as they appear in trip addresses. Use | to list the ways one site is written: Al Garhoud|Dubai Int'l Airport" },

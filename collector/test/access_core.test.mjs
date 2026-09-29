@@ -210,7 +210,10 @@ const browser = () => {
       if (/Max-Age=0/.test(c)) delete jar[k]; else jar[k] = v;
     }
     let j = null; try { j = await r.clone().json(); } catch { /* not json */ }
-    return { status: r.status, json: j, headers: r.headers };
+    /* The text as well, for the one route that answers HTML (the daily
+       report's preview). */
+    let t = null; try { t = await r.clone().text(); } catch { /* no body */ }
+    return { status: r.status, json: j, text: t, headers: r.headers };
   };
   return { jar, get: (p, o) => call('GET', p, undefined, o), post: (p, b = {}, o) => call('POST', p, b, o) };
 };
@@ -785,6 +788,60 @@ console.log('\n13. the audit log');
   check('an edited row breaks the chain where it was edited', !t.ok && t.brokenAt === 3, JSON.stringify(t));
   const leak = await db.query(`SELECT count(*)::int n FROM access_audit WHERE detail::text ILIKE '%granite harbour%'`);
   check('no password ever reaches the log', leak.rows[0].n === 0);
+}
+
+console.log('\n12. the daily report email: who gets it');
+{
+  /* The operator, 2026-09-29: admins add addresses after signing in. The
+     list starts from REPORT_RECIPIENTS once, and only the Owner and Access
+     admins may read or change it.
+     REVERSIONS, run 2026-09-29: manager() swapped for me() on the three list
+     routes -> 191 passed, 3 FAILED ("…refused the list" 200, "…may not add
+     to it" 200, and the Owner's own add then 409 because the plain person
+     had added it); the `if (!n)` seeding guard dropped -> 193 passed,
+     1 FAILED ("a removed address is not seeded back"). */
+  process.env.REPORT_RECIPIENTS = 'first@example.test, second@example.test; not-an-address';
+  const r0 = await owner.get('/api/access/report');
+  check('the list starts from REPORT_RECIPIENTS, valid addresses only',
+    r0.status === 200 && r0.json.recipients.map((r) => r.email).join() === 'first@example.test,second@example.test',
+    JSON.stringify(r0.json));
+  /* Somebody signed in who does not manage access — found rather than
+     named, because earlier groups sign some of the test people out, and a
+     refusal of a signed-out person (401) would pass whatever the gate did. */
+  let plain = null;
+  for (const k of Object.keys(people)) {
+    const x = await people[k].b.get('/api/auth/me');
+    if (x.json?.user && !(x.json?.access?.caps || []).includes('access.manage')) { plain = people[k]; break; }
+  }
+  check('(a signed-in person who does not manage access was found)', !!plain);
+  const c0 = await plain.b.get('/api/access/report');
+  check('somebody who does not manage access is refused the list', c0.status === 403, `${c0.status} ${JSON.stringify(c0.json)}`);
+  const c1 = await plain.b.post('/api/access/report/recipients', { email: 'third@example.test' });
+  check('…and may not add to it', c1.status === 403, String(c1.status));
+  const bad = await owner.post('/api/access/report/recipients', { email: 'not an address' });
+  check('a malformed address is refused in words', bad.status === 400 && /not an email/.test(bad.json.detail), JSON.stringify(bad.json));
+  const add = await owner.post('/api/access/report/recipients', { email: 'Third@Example.test ' });
+  check('the Owner adds one, stored lower-case', add.status === 200 && add.json.email === 'third@example.test', JSON.stringify(add.json));
+  const dup = await owner.post('/api/access/report/recipients', { email: 'third@example.test' });
+  check('…once', dup.status === 409, String(dup.status));
+  const first = r0.json.recipients.find((r) => r.email === 'first@example.test');
+  const rm = await owner.post(`/api/access/report/recipients/${first.id}/remove`, {});
+  check('and removes one', rm.status === 200 && rm.json.email === 'first@example.test');
+  const r1 = await owner.get('/api/access/report');
+  check('a removed address is not seeded back from the environment',
+    r1.json.recipients.map((r) => r.email).join() === 'second@example.test,third@example.test', JSON.stringify(r1.json.recipients));
+  const aud = await db.query(`SELECT action, detail FROM access_audit WHERE action LIKE 'report.%' ORDER BY id`);
+  /* The audit log keeps an address only hashed (api/access/audit.js), so
+     the check is that each change is there, naming an address. */
+  check('each change is in the audit log, with the address hashed',
+    aud.rows.map((r) => r.action).join() === 'report.recipient_added,report.recipient_removed'
+    && aud.rows.every((r) => r.detail.email?.hashed && !JSON.stringify(r.detail).includes('@')),
+    JSON.stringify(aud.rows));
+  const prev = await owner.get('/api/access/report/preview?day=2026-09-01');
+  check('the preview is the email as HTML, drawn without sending',
+    prev.status === 200 && /<!doctype html>/i.test(prev.text || '') && /Monday 1 September 2026|1 September 2026/.test(prev.text || ''),
+    String(prev.status));
+  delete process.env.REPORT_RECIPIENTS;
 }
 
 server.close();

@@ -16,6 +16,7 @@ import { config } from './config.js';
 import { log } from './log.js';
 import { cashDepositRun, tripRegisterRun, flushQueued, checkDeliveries } from './driver_sms.js';
 import { deliveryReport } from './smsala.js';
+import { dailyReportRun } from './daily_report.js';
 import { getConfig as accessConfig } from '../api/access/service.js';
 
 /* The driver messages by SMS (src/driver_sms.js). Each run is safe to
@@ -68,6 +69,14 @@ async function main() {
       log.info('sms', 'preview trips', strip(await tripRegisterRun({ q: sq, cfg, dry: true })));
     });
   }
+  /* `report [YYYY-MM-DD] [address]`: the daily email by hand — a day other
+     than yesterday, and to one address only (still recorded, so that address
+     is not sent that day's email twice). */
+  if (cmd === 'report') {
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(process.argv[3] || '') ? process.argv[3] : undefined;
+    return withPinnedSettings(async () => log.info('report', 'by hand',
+      await dailyReportRun({ q: sq, ...(day ? { day } : {}), only: process.argv[4] || null })));
+  }
   if (cmd === 'sms-cash') return smsJob('cash', (cfg) => cashDepositRun({ q: sq, cfg }))();
   if (cmd === 'sms-trips') return smsJob('trips', (cfg) => tripRegisterRun({ q: sq, cfg }))();
 
@@ -86,6 +95,13 @@ async function main() {
     cron.schedule('0 9 * * *', smsJob('cash-final', (cfg) => cashDepositRun({ q: sq, cfg, final: true })), { timezone: 'Asia/Dubai' });
     cron.schedule('12,42 * * * *', smsJob('trips', (cfg) => tripRegisterRun({ q: sq, cfg })));
     cron.schedule('*/5 * * * *', smsJob('flush', (cfg) => flushQueued({ q: sq, cfg })));
+    /* The daily report email: 07:00 Dubai for the day before, then every
+       fifteen minutes to 09:45 for any address it has not reached — a send
+       that failed, or somebody added to the list after 07:00. Each address
+       gets a day's email once (src/daily_report.js). */
+    cron.schedule('*/15 7-9 * * *', () => withPinnedSettings(() => dailyReportRun({ q: sq }))
+      .catch((e) => log.error('report', 'daily', { err: String(e?.message || e).slice(0, 200) })),
+    { timezone: 'Asia/Dubai' });
     cron.schedule('*/20 * * * *', smsJob('delivery', () => checkDeliveries({ q: sq, report: deliveryReport })));
     // Uber/FMS live status — lighter interval
     setInterval(() => liveStatusTick(), config.liveStatusSeconds * 1000);

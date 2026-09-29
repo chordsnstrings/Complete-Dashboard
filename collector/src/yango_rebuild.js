@@ -81,13 +81,21 @@ const sumGroups = (c, heads) => Object.entries(c.groups)
   .filter(([g]) => heads.includes(LEDGER_GROUPS[g])).reduce((s, [, v]) => s + v, 0);
 export const ledgerCash = (c) => sumGroups(c, ['cash_collected']);
 export const ledgerCashless = (c) => sumGroups(c, ['earnings', 'tips']);
-export const ledgerCommission = (c) => sumGroups(c, ['commission', 'taxes']);
+/* Fees only, WITHOUT the mandatory fee. Measured on production 2026-09-29
+   against the 112 console driver-weeks from 2026-05-11: the console's
+   price_platform_commission agrees with platform + partner fees on 102 of 112
+   (91.1%) and with fees plus mandatory taxes on 63 (56.3%) — AED -4,053.09
+   against -4,358.22 and -5,098.22. So the console's commission, and the net
+   its earnings column was defined on, leave the mandatory fee out, and the
+   rebuild follows it so the two halves of the record mean the same thing. */
+export const ledgerCommission = (c) => sumGroups(c, ['commission']);
+export const ledgerTaxes = (c) => sumGroups(c, ['taxes']);
 
 /* The candidate formula per figure. compareRebuild scores each; the
    collector writes with the ones REBUILD_RULES names. */
 export const CANDIDATES = {
   trips: { console: (k) => k.trips, rebuilt: { complete_trips: (c) => c.trips_complete }, tol: () => 0 },
-  distance_km: { console: (k) => k.km,
+  distance_km: { console: (k) => k.km_raw,
     rebuilt: { complete_trips_mileage: (c) => c.km_complete },
     tol: (v) => Math.max(0.5, Math.abs(v) * 0.01) },
   cash: { console: (k) => k.cash,
@@ -97,9 +105,14 @@ export const CANDIDATES = {
     rebuilt: { ledger_earnings_and_tips: ledgerCashless, trip_price_not_cash: (c) => c.price_other },
     tol: () => 0.01 },
   commission: { console: (k) => k.commission,
-    rebuilt: { ledger_fees_and_taxes: ledgerCommission, ledger_fees_only: (c) => sumGroups(c, ['commission']) },
+    rebuilt: { ledger_fees_only: ledgerCommission, ledger_fees_and_taxes: (c) => ledgerCommission(c) + ledgerTaxes(c) },
     tol: () => 0.01 },
-  earnings: { console: (k) => k.earnings,
+  /* Against the console's own parts, not its stored earnings column: every
+     one of the 112 console rows holds the GROSS there (cash + cashless, AED
+     18,229 = 6,318 + 11,911), stored before the collector's net fix and never
+     restated because the console stopped answering. */
+  earnings: { console: (k) => (k.cash == null || k.cashless == null || k.commission == null ? null
+    : Number(k.cash) + Number(k.cashless) + Number(k.commission)),
     rebuilt: { ledger_net: (c) => ledgerCash(c) + ledgerCashless(c) + ledgerCommission(c) },
     tol: () => 0.01 },
 };
@@ -112,13 +125,16 @@ export const REBUILD_RULES = Object.freeze({
   distance_km: 'complete_trips_mileage',
   cash: 'ledger_cash_collected',
   cashless: 'ledger_earnings_and_tips',
-  commission: 'ledger_fees_and_taxes',
+  commission: 'ledger_fees_only',
 });
 export const REBUILT_FROM = 'fleet-api.yango.tech';
-/* OFF until the comparison has been read on production. The collector builds
-   nothing while this is false; /api/probe/yango/weekly-rebuild shows what it
-   would build and how that agrees with the console's own weeks. */
-export const REBUILD_WRITES = false;
+/* ON since the comparison was read on production, 2026-09-29, over the 112
+   console driver-weeks from 2026-05-11 (docs/COVERAGE.md, "Yango's weekly
+   summary, rebuilt"): completed trips agree on 106 (94.6%), cash on 107
+   (95.5%), cashless on 106 (94.6%), fees on 102 (91.1%); 15 of the 17 weeks
+   agree exactly, and the two that do not are the console's first and last.
+   /api/probe/yango/weekly-rebuild still shows the comparison. */
+export const REBUILD_WRITES = true;
 export const HOURS_ABSENT = 'Yango publishes online time only in the console’s weekly summary, '
   + 'which Yandex’s edge refuses from this server; trips, distance and money here are rebuilt '
   + 'from the API key’s trips and payment ledger.';
@@ -131,6 +147,10 @@ async function consoleWeeks(db, from, to) {
             cash_earnings::float8 AS cash, hours_online::float8 AS hours,
             (raw->>'price_cashless')::float8 AS cashless,
             (raw->>'price_platform_commission')::float8 AS commission,
+            /* Yango names it distance, in metres. The collector's mapper read
+               sum_distance, which is not there, so the stored distance_km is
+               NULL on every console row (fixed in src/sources/yango.js). */
+            coalesce((raw->>'distance')::float8, (raw->>'sum_distance')::float8) / 1000 AS km_raw,
             (SELECT jsonb_object_agg(key, value) FROM jsonb_each(raw)
               WHERE jsonb_typeof(value) = 'number') AS numbers
        FROM driver_performance

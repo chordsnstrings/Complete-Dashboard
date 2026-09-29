@@ -39,7 +39,7 @@ import { dubaiDay } from './tz.js';
 import { ROLE, CLASS, CLASSES, CAPS, CAP, LEVEL_NAME, rank, roleIsSensitive } from './access_model.js';
 import {
   h, field, msgLine, act, oneTimeLink, roleSelect, fleetPicker, endOfDay, roleName, rememberRoles,
-  fleetsText, plural, requestWhat, uid,
+  fleetsText, plural, requestWhat, uid, explain,
 } from './account.js';
 
 const TABS = [
@@ -1326,9 +1326,72 @@ function settingsTab(host, ctx) {
     + 'places have a readable name. Found at night, it waits until 07:00.',
     'Trip messages');
 
+  reportPanel(host, ctx);
+
   const s = panel('Sessions', null, 'acx-sessions-rule');
   s.body.append(h('p', { class: 'acx-p' }, `A signed-in browser is signed out after ${plural(Math.round((cfg.idle_minutes || 720) / 60), 'hour', 'hours')} without use, `
     + `and after ${plural(cfg.session_days || 7, 'day', 'days')} whatever happens. These two are fixed for now and not changed from here.`));
   host.append(s.panel);
+}
+
+/* The 07:00 daily report email (src/daily_report.js): who gets it. The Owner
+   and Access admins keep the list; each change is audited. Loaded on its own
+   so a slow answer never holds the settings above it. */
+function reportPanel(host, ctx) {
+  const p = panel('Daily report email', null, 'acx-report');
+  const mm = msgLine();
+  const listHost = h('div', { class: 'acx-report-list' });
+  const runsHost = h('div', { class: 'acx-report-runs' });
+  const input = h('input', { type: 'email', class: 'depinput acx-in', placeholder: 'name@company.ae',
+    'aria-label': 'Email address to add', 'data-acx': 'report-email', autocomplete: 'off' });
+  const add = h('button', { type: 'button', class: 'btn', 'data-acx': 'report-add' }, 'Add');
+  const RUN_WORDS = { sent: 'sent to everyone', partial: 'sent to some', failed: 'not sent', composed: 'being sent' };
+  const draw = (d) => {
+    listHost.replaceChildren(d.recipients.length
+      ? h('ul', { class: 'acx-list' }, d.recipients.map((r) => {
+        const b = h('button', { type: 'button', class: 'btn', 'data-acx': `report-remove-${r.id}` }, 'Remove');
+        b.addEventListener('click', async () => {
+          const res = await act(b, mm, () => post(`/api/access/report/recipients/${r.id}/remove`, {}));
+          if (!res) return;
+          mm.set(`${res.email || r.email} no longer gets the report.`, 'ok');
+          load();
+        });
+        return h('li', { class: 'acx-inrow' }, h('span', null, r.email), h('span', { class: 'acx-dim' }, ` added by ${r.added_by}`), b);
+      }))
+      : empty('Nobody gets the report yet. Add an address below.'));
+    runsHost.replaceChildren(d.runs.length
+      ? h('ul', { class: 'acx-list' }, d.runs.map((r) => h('li', null,
+        `${dateStr(r.day)} — ${RUN_WORDS[r.status] || r.status}`
+        + (r.sent ? ` (${r.sent} sent${r.failed ? `, ${r.failed} not` : ''})` : '')
+        + (r.error ? `: ${r.error}` : r.why ? `: ${r.why}` : '')
+        + (r.commentary && r.commentary !== 'ok' ? ` · no commentary: ${r.commentary_why || r.commentary}` : ''))))
+      : empty('No report has been sent yet. The first goes out at 07:00 Dubai.'));
+  };
+  const load = async () => {
+    try { draw(await getJson('/api/access/report')); } catch (e) { mm.set(explain(e), 'bad'); }
+  };
+  add.addEventListener('click', async () => {
+    const email = input.value.trim();
+    if (!email) { mm.set('Type an email address first.', 'bad'); return; }
+    const res = await act(add, mm, () => post('/api/access/report/recipients', { email }));
+    if (!res) return;
+    input.value = '';
+    mm.set(`${res.email} will get the report from the next one.`, 'ok');
+    load();
+  });
+  p.body.append(
+    h('p', { class: 'acx-p' }, 'Every day at 07:00 Dubai, the day before is emailed to the people below: fares, cash trips, '
+      + 'active cars, cars and drivers that earned, the average per driver and per car, and every driver who drove. '
+      + 'Two or three sentences at the top are written by GLM 5.2 from those figures alone; every number in them is '
+      + 'checked against the figures, and they are left out if one is not.'),
+    listHost,
+    h('div', { class: 'acx-inrow' }, field('Add someone', input), add),
+    mm,
+    h('p', { class: 'acx-p' }, h('a', { href: '/api/access/report/preview', target: '_blank', rel: 'noopener' },
+      'See yesterday’s email as it would be sent'), ' — without the commentary, which is written when it is sent.'),
+    h('h4', { class: 'acx-h4' }, 'The last two weeks'),
+    runsHost);
+  host.append(p.panel);
+  load();
 }
 

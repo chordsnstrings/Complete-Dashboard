@@ -822,7 +822,12 @@ async function pullDrivers(from, to, chunks = [], now = new Date()) {
       platform: SRC, fleet_id: config.yango.fleet, driver_ext_id: it.driver?.id,
       driver_name: decomposed(it.driver),
       plate: normPlate(it.car?.callsign), period_start: iso(start), period_end: iso(end),
-      trips: it.count_orders_completed, distance_km: it.sum_distance != null ? Number(it.sum_distance) / 1000 : null,
+      /* `distance`, in metres — Yango's own field name. This read
+         `sum_distance`, which the summary does not carry, so distance_km was
+         NULL on every console row ever stored (measured 2026-09-29: the 112
+         rows from 2026-05-11 carry raw.distance totalling 3,088 km). */
+      trips: it.count_orders_completed,
+      distance_km: (it.distance ?? it.sum_distance) != null ? Number(it.distance ?? it.sum_distance) / 1000 : null,
       hours_online: it.work_time_seconds != null ? it.work_time_seconds / 3600 : null,
       /* NET, like every other channel's earnings — this was the gross.
          ─────────────────────────────────────────────────────────────────
@@ -1037,22 +1042,22 @@ async function pullLedger(from, to) {
    including why online hours cannot be rebuilt. Only weeks the ledger's
    history reaches: a week before it would have trips and no money, and a
    zero there would be a figure nobody measured. */
-async function rebuildWeeks(from, to, now = new Date()) {
-  if (!REBUILD_WRITES) return 0;
-  const wanted = await weeksWanted(from, to, now);
+export async function rebuildWeeks(from, to, now = new Date(), { db = pool, upsert = upsertMany, writes = REBUILD_WRITES } = {}) {
+  if (!writes) return 0;
+  const wanted = await weeksWanted(from, to, now, db);
   if (!wanted.length) return 0;
-  const { rows: [span] } = await pool.query(
+  const { rows: [span] } = await db.query(
     `SELECT min(event_at) AS first FROM ledger_entry WHERE platform = $1`, [SRC]);
   if (!span?.first) return 0;
   const covered = wanted.filter((w) => new Date(`${iso(w.start)}T00:00:00+04:00`) >= new Date(span.first));
   if (!covered.length) return 0;
-  const comps = await weekComponents(pool, iso(covered.at(-1).start), iso(covered[0].start));
+  const comps = await weekComponents(db, iso(covered.at(-1).start), iso(covered[0].start));
   const keep = new Set(covered.map((w) => iso(w.start)));
   for (const [k, c] of comps) if (!keep.has(c.ws)) comps.delete(k);
   const rows = rebuiltRows(comps, { fleet: config.yango.fleet,
     nameOf: (id) => nameFor(id, null), plateOf: (p) => (p ? normPlate(p) : null) });
   if (rows.length) {
-    await upsertMany('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']);
+    await upsert('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']);
     log.info(SRC, 'weekly summary rebuilt from the key host',
       { weeks: keep.size, driver_weeks: rows.length });
   }

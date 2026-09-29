@@ -32,10 +32,11 @@ const round = (v, d = 1) => (v == null || !Number.isFinite(Number(v)) ? null
 const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''))
   && !Number.isNaN(new Date(`${v}T00:00:00Z`).getTime());
 
-export function dayRoutes(app, { q, wrap }) {
-  app.get('/api/day', wrap(async (req, res) => {
-    const day = req.query.day;
-    if (!isDay(day)) return res.status(400).json({ error: 'day must be YYYY-MM-DD' });
+/* The day, as data. Lifted out of the route on 2026-09-29 so the 07:00 daily
+   report email (src/daily_report.js) states exactly the figures this page
+   states for the same day, from the same queries, rather than a second copy
+   of them that could drift. `day` must already be YYYY-MM-DD. */
+export async function buildDay(q, day) {
     const p = [day];
 
     // Dubai-local bounds for the tables that are keyed on a timestamp rather
@@ -545,7 +546,7 @@ export function dayRoutes(app, { q, wrap }) {
     const projectedBookings = projected.reduce((a, r) => a + r.bookings, 0);
     const measuredRevenue = h.priced ? Number(h.revenue) : 0;
 
-    res.json({
+    return {
       day,
       headline: {
         ...h,
@@ -634,6 +635,13 @@ export function dayRoutes(app, { q, wrap }) {
             : null,
       },
       context: context[0] || null,
-    });
+    };
+}
+
+export function dayRoutes(app, { q, wrap }) {
+  app.get('/api/day', wrap(async (req, res) => {
+    const day = req.query.day;
+    if (!isDay(day)) return res.status(400).json({ error: 'day must be YYYY-MM-DD' });
+    res.json(await buildDay(q, day));
   }));
 }

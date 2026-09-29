@@ -4111,7 +4111,18 @@ Yango request was made to test it.
 
 | # | what | test (revert fails it) | written | committed | deployed | proven |
 |---|---|---|---|---|---|---|
-| YG-1 | the console asked once a Dubai day (or once after a new paste), only for closed weeks with no console row, newest first, stopping at the first refusal; no cookie-free copy; the daily probe on the key host; discovery skips a refused day | yango_once_a_day §2–3 (gate 5, break 2, held weeks 2), yango_console_edge (copy 2), fleet_discovery §9 (2) | ✓ | | | |
-| YG-2 | the answer read for what it is: edge page → console blocked, cookie **not checked**; JSON 401 → expired; the cookie green only on an answer; paste check the same; the egress address and the edge page's text logged; key-host runs partial, trips failure error; the hint rewritten | yango_once_a_day §1, §4–5 (edge 1, 200 page 1, surface 1, trips 1, old credcheck 3), yango_console_edge (cookie ok 2, address 1), credential_save_check, fms_credential_honesty | ✓ | | | |
-| YG-3 | the weekly summary rebuilt from trips and the v2 ledger (hours absent, with the reason), compared with the 855 console weeks by /api/probe/yango/weekly-rebuild; writing OFF until that comparison is read on production | yango_rebuild (20: UTC week 7, only-both 3, hours zero 1) | ✓ | | | |
+| YG-1 | the console asked once a Dubai day (or once after a new paste), only for closed weeks with no console row, newest first, stopping at the first refusal; no cookie-free copy; the daily probe on the key host; discovery skips a refused day | yango_once_a_day §2–3 (gate 5, break 2, held weeks 2), yango_console_edge (copy 2), fleet_discovery §9 (2) | ✓ | ✓ 907c40a | ✓ 068e0fc2 | ✓ the first run on the new code: `partial`, 307 rows, "not asked — 1 closed week missing; fleet.yango.com was asked at 15:01 Dubai today and refused (blocked)…" |
+| YG-2 | the answer read for what it is: edge page → console blocked, cookie **not checked**; JSON 401 → expired; the cookie green only on an answer; paste check the same; the egress address and the edge page's text logged; key-host runs partial, trips failure error; the hint rewritten | yango_once_a_day §1, §4–5 (edge 1, 200 page 1, surface 1, trips 1, old credcheck 3), yango_console_edge (cookie ok 2, address 1), credential_save_check, fms_credential_honesty | ✓ | ✓ 907c40a | ✓ 068e0fc2 | ✓ /api/auth: YANGO_CONSOLE stopped → **degraded**, run age 0 h, still collecting; the Settings hint reads the new text. The stale YANGO_COOKIE `ok` is re-filed by schema_v90 (next row) |
+| YG-2b | schema_v90: re-file the YANGO_COOKIE `ok` the old reading wrote (before 11:15Z, console not ok) as not checked, no last-ok time | yango_rebuild §6 (cutoff 1) | ✓ | | | |
+| YG-3 | the weekly summary rebuilt from trips and the v2 ledger (hours absent, with the reason), compared with the console's 112 driver-weeks by /api/probe/yango/weekly-rebuild — trips 94.6%, cash 95.5%, cashless 94.6%, fees-only commission 91.1% — then written for the closed weeks with no console row; the console mapper reads `distance` | yango_rebuild (30: UTC week 7, only-both 3, hours zero 1, ledger history 1, cutoff 1) | ✓ | ✓ 907c40a (writes off) | ✓ 068e0fc2 (comparison read) | the comparison ✓ on production; writes pending the next deploy |
 
+## The daily report email — 2026-09-29
+
+The operator: yesterday at 07:00 Dubai, Arkiv-styled, GLM 5.2 commentary,
+Resend, three first recipients and more added by admins.
+
+| # | what | test (revert fails it) | written | committed | deployed | proven |
+|---|---|---|---|---|---|---|
+| RPT-1 | the figures: buildDay() lifted out of the day route; cash from trip_cash; active cars; cars and drivers that earned; averages; every driver; a channel that did not deliver named | daily_report §1 (cash 2, earned 2), yango/day route tests | ✓ | | | |
+| RPT-2 | GLM 5.2 commentary on anonymous figures, dropped if it states a number not in them; Arkiv email under Gmail's clip (44 KB for ~100 drivers); one send per address, idempotency key, retries to 09:45, composed once | daily_report §2–3 (names 1, guard 2, dedupe 1) | ✓ | | | |
+| RPT-3 | recipients on Access → Settings for the Owner and Access admins, audited, seeded once from REPORT_RECIPIENTS; a preview of yesterday's email | access_core §12 (gate 3, seed 1) | ✓ | | | |

@@ -4193,6 +4193,12 @@ untouched, and nothing projected is ever added into `accounted`.
       one surface among several passes `chunks_cover: 'surface'`; its own
       status then stands, and it must decide `error` itself (Yango: when the
       trips surface failed).
+  34. **An email styled inline on every cell is clipped by Gmail.** The
+      daily report with ~100 drivers came to 153 KB with the style on each
+      `<td>`; Gmail cuts a message past about 102 KB behind "View entire
+      message". Table styles live in one `<style>` block (Gmail and Outlook
+      honour it) and the same email is 44 KB. Measure the rendered size with
+      a real day's data before sending anything tabular.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
@@ -7424,6 +7430,38 @@ rebuilt part, so that rate runs HIGH over such a window; over rebuilt weeks
 alone it is absent. Not fixed with the rebuild — recorded here so the next
 person to touch that rate knows.
 
+**Measured on production, 2026-09-29** (`/api/probe/yango/weekly-rebuild`,
+2026-05-11 to 2026-09-21; the console's weeks are **112 driver-weeks over 17
+weeks** — the "855" quoted earlier in this file is /api/coverage's n for
+Yango per-driver earnings, which is not a count of console weeks):
+
+| figure | rule | driver-weeks agreeing |
+|---|---|---|
+| trips | completed key-host trips | 106 / 112 (94.6%) |
+| cash | ledger `cash_collected` | 107 / 112 (95.5%) |
+| cashless | ledger card, corporate, promotions, other earnings, tips | 106 / 112 (94.6%) |
+| commission | ledger platform + partner fees, **without** the mandatory fee | 102 / 112 (91.1%) — with the fee, 63 (56.3%) |
+| (trip fares by payment type) | — | cash 64 (57.1%), non-cash 85 (75.9%): the ledger, not the fare, is what the console summed |
+
+15 of the 17 weeks agree exactly on trips and cash; the two that do not are
+the console's first (05-11: 4 trips against 22) and last (08-31: 7 against
+20). Three findings came with it:
+
+- **The console's commission leaves the mandatory fee out** (AED −740 over
+  the period), so the rebuild does too: `ledger_fees_only`.
+- **Distance was never stored from the console.** Yango's field is
+  `distance`, in metres; the mapper read `sum_distance`, so `distance_km` is
+  NULL on every console row (3,088 km sat unread in `raw`). The mapper is
+  fixed; the comparison reads `raw.distance`.
+- **Every stored console row's `earnings` is the GROSS** (AED 18,229 =
+  cash 6,318 + cashless 11,911), stored before the collector's net fix and
+  never restated because the console stopped answering. Rebuilt rows are
+  net, as the column is defined. The 112 console rows are **not restated
+  here** — that is the operator's call (it lowers Yango's May–September
+  earnings by the AED 4,053.09 commission).
+
+Writing went on (`REBUILD_WRITES = true`) in the commit that recorded this.
+
 **Checked before written.** `GET /api/probe/yango/weekly-rebuild` puts the
 rebuild beside every console week (default: from the first console week to
 the last closed week) and reports, per figure and per candidate formula, how
@@ -7431,7 +7469,63 @@ many driver-weeks agree, with totals and a few examples — database only, no
 provider call, no driver id or name in the answer. The collector writes
 rebuilt rows only when `REBUILD_WRITES` in src/yango_rebuild.js is on, which
 it is NOT in the commit that introduced it: it goes on in a commit of its
-own, with the production comparison recorded here. Rebuilt rows are only
+own, with the production comparison recorded here (above). Rebuilt rows are only
 written for closed weeks with no console row and inside the ledger's
 history, carry `raw.rebuilt_from = 'fleet-api.yango.tech'`, and are deleted
 for a week the moment the console delivers that week.
+
+## The daily report email — built 2026-09-29
+
+The operator: every morning at 07:00, yesterday's drivers' performance, cash
+trips, total revenue, active cars, cars that earned, drivers who earned and
+the average per driver and per car, styled as Arkiv, to three addresses; an
+admin adds more after signing in. GLM 5.2 writes the opening; Resend sends.
+src/daily_report.js has the whole account.
+
+- **Where every number comes from.** Fares, bookings, channels and the
+  comparison with recent days are `buildDay()` — the #day page's own
+  computation, lifted out of api/day_routes.js so both say the same thing.
+  Cash is `trip_cash` (the figure the 05:00 SMS asks each driver to
+  deposit). Active cars: plates with a booking or telematics journey that
+  Dubai day. Cars and drivers that earned: at least one priced booking. The
+  averages are fares over those. Bookings without a fare are counted and
+  named; a channel that did not deliver the day is named at the top.
+- **The model sees nobody.** GLM 5.2 (`glm-5-2-260617`, ModelArk,
+  `thinking: disabled`) gets aggregates and anonymous ranked rows — no name,
+  id or plate. Every number in its reply must be one it was given (rounded
+  or as written) or part of the date; one that is not and the commentary is
+  dropped, the email saying why. Measured 2026-09-29: a live call with
+  reasoning off returned in one short reply, 0 reasoning tokens.
+- **Sending.** One email per address (no recipient sees the others), with a
+  Resend idempotency key `daily-report/<day>/<address>`. The day is composed
+  once (`report_run`), so a retry sends what 07:00 composed. The collector
+  asks at 07:00 Dubai and every 15 minutes to 09:45 for anyone not yet sent
+  — a failed send is retried, and somebody added at 08:00 still gets that
+  day. `report_send` holds what Resend said per address.
+- **Recipients.** `report_recipient`, managed on Access → Settings → "Daily
+  report email" by the Owner and Access admins (access.manage), each change
+  audited with the address hashed. Seeded ONCE from `REPORT_RECIPIENTS` (the
+  app spec, never the repo) the first time the list is found empty; a
+  removal is kept as a row so an emptied list is not re-seeded. The panel
+  links a preview of yesterday's email (no commentary, nothing sent).
+- **By hand.** `node src/index.js report [YYYY-MM-DD] [address]` composes and
+  sends a day, optionally to one address (recorded, so that address is not
+  sent the day twice).
+- **Settings.** `RESEND_API_KEY` and `REPORT_MODEL_API_KEY` (secrets),
+  `REPORT_FROM` (default `Ecosine Fleet <reports@ecosine.ae>`),
+  `REPORT_RECIPIENTS`, `REPORT_MODEL`, `REPORT_MODEL_BASE_URL`, and
+  `PUBLIC_URL` for the "open this day" link. Set on both components.
+
+**Resend, measured 2026-09-29.** The account has one domain, **ecosine.ae**,
+created 09:24Z that day and **pending**: the two SPF records verified, DKIM
+pending. The DKIM TXT at `resend._domainkey.ecosine.ae` is published on all
+five of the domain's name servers (SiteGround and 101domain both) and matches
+Resend's expected value byte for byte (218 characters); a verify was
+requested through the API. Until Resend marks the domain verified, every send
+is refused ("domain is not verified") and recorded as failed with that
+reason, and the next quarter-hour retries it.
+
+### Traps this added to the list
+
+34 in "Traps that have cost time more than once".
+

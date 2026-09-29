@@ -23,7 +23,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { weekComponents, compareRebuild, rebuiltRows, REBUILD_WRITES, REBUILT_FROM, HOURS_ABSENT }
   from '../src/yango_rebuild.js';
-import { REBUILT_MARK } from '../src/sources/yango.js';
+import { REBUILT_MARK, rebuildWeeks } from '../src/sources/yango.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -85,13 +85,18 @@ const perf = (d, ws, { trips, km, cash, cashless, commission, earnings, hours = 
   pg.query(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, period_start, period_end,
                                             trips, distance_km, earnings, cash_earnings, hours_online, raw)
             VALUES ('yango', 'ecosine', $1, $2::date, $2::date + 6, $3, $4, $5, $6, $7, $8)`,
-  [d, ws, trips, km, earnings, cash, hours, j({ count_orders_completed: trips, price_cash: cash,
+  /* Stored as production stores them: distance_km NULL (the mapper read a
+     field Yango does not send), Yango's own `distance` in metres in raw, and
+     the GROSS in the earnings column. */
+  [d, ws, trips, null, earnings, cash, hours, j({ count_orders_completed: trips, price_cash: cash,
     price_cashless: cashless, price_platform_commission: commission, work_time_seconds: hours * 3600,
-    driver: { id: d, name: 'Synthetic Driver' } })]);
+    distance: km * 1000, driver: { id: d, name: 'Synthetic Driver' } })]);
 /* The console's week for A agrees with the rebuild to the fils. */
-await perf('drv-a', '2026-09-07', { trips: 2, km: 22.5, cash: 50, cashless: 85, commission: -35, earnings: 100 });
+/* The console's commission leaves the mandatory fee out, as production's
+   does (fees -30, the mandatory fee -5 not in it). */
+await perf('drv-a', '2026-09-07', { trips: 2, km: 22.5, cash: 50, cashless: 85, commission: -30, earnings: 135 });
 /* And driver B has a console week the key host never saw. */
-await perf('drv-b', '2026-09-07', { trips: 4, km: 40, cash: 100, cashless: 0, commission: -20, earnings: 80 });
+await perf('drv-b', '2026-09-07', { trips: 4, km: 40, cash: 100, cashless: 0, commission: -20, earnings: 100 });
 const r = await compareRebuild(db, { from: '2026-09-07', to: '2026-09-07' });
 check('every console driver-week is scored, including one the key host has nothing for',
   r.metrics.trips.complete_trips.n === 2 && r.metrics.trips.complete_trips.agree === 1, j(r.metrics.trips));
@@ -101,11 +106,15 @@ check('cash from the ledger agrees where the ledger has the week',
   r.metrics.cash.ledger_cash_collected.agree === 1, j(r.metrics.cash));
 /* B's cashless is 0 on the console and 0 in the rebuild, which is agreement;
    B's commission is -20 against nothing, which is not. */
-check('cashless is card, promotions and tips; commission is fees and taxes, as filed',
-  r.metrics.cashless.ledger_earnings_and_tips.agree === 2 && r.metrics.commission.ledger_fees_and_taxes.agree === 1,
+check('cashless is card, promotions and tips; commission is the fees without the mandatory fee',
+  r.metrics.cashless.ledger_earnings_and_tips.agree === 2 && r.metrics.commission.ledger_fees_only.agree === 1
+  && r.metrics.commission.ledger_fees_and_taxes.agree === 0,
   j([r.metrics.cashless, r.metrics.commission]));
-check('net earnings: the three together, as the console’s earnings column is',
-  r.metrics.earnings.ledger_net.agree === 1, j(r.metrics.earnings));
+check('net earnings agree with the console’s own parts, not its stored (gross) column',
+  r.metrics.earnings.ledger_net.agree === 1 && r.metrics.earnings.ledger_net.console_total === 185, j(r.metrics.earnings));
+check('distance is read from the console’s raw metres, since its stored column is empty',
+  r.metrics.distance_km.complete_trips_mileage.agree === 1 && r.metrics.distance_km.complete_trips_mileage.n === 2,
+  j(r.metrics.distance_km));
 check('the answer carries no driver id or name', !/drv-a|drv-b|Synthetic Driver/.test(j(r)), '');
 check('a rebuilt week that is not a console week is not scored against anything',
   r.driver_weeks.console === 2 && r.driver_weeks.both === 1, j(r.driver_weeks));
@@ -118,7 +127,8 @@ const rows = rebuiltRows(c, { fleet: 'ecosine', nameOf: () => 'Synthetic Driver'
 const ra = rows.find((x) => x.period_start === '2026-09-07');
 check('online hours are ABSENT on a rebuilt row, never a zero', ra && ra.hours_online === null, j(ra));
 check('…and the row says why', ra?.raw.hours_online_absent === HOURS_ABSENT && /online time/.test(HOURS_ABSENT));
-check('earnings are net — what the riders paid plus the platform’s fees', ra?.earnings === 100, ra?.earnings);
+check('earnings are net — the riders’ fares plus the platform’s fees, the mandatory fee apart as the console has it',
+  ra?.earnings === 105, ra?.earnings);
 check('cash is the ledger’s cash collected', ra?.cash_earnings === 50);
 check('the row is marked so the console can overwrite it, under the key the collector looks for',
   ra?.raw[REBUILT_MARK] === REBUILT_FROM, j(ra?.raw));
@@ -127,12 +137,83 @@ const idle = new Map([['x|2026-09-07', { d: 'x', ws: '2026-09-07', trips_complet
   price_cash: 0, price_other: 0, plate: null, ledger: {}, groups: {} }]]);
 check('a driver with no completed trip and no money that week gets no row', rebuiltRows(idle, { fleet: 'ecosine' }).length === 0);
 
-/* ── 4. nothing is written until the comparison has been read ──────────────
-   REBUILD_WRITES is the switch; it goes on in a commit of its own, with the
-   comparison measured on production recorded in docs/COVERAGE.md. */
+/* ── 4. the switch ─────────────────────────────────────────────────────────
+   REBUILD_WRITES went on only after /api/probe/yango/weekly-rebuild was read
+   on production, 2026-09-29; the numbers are in docs/COVERAGE.md. */
 console.log('\n4. the switch');
-check('rebuilt rows are not written until the production comparison has been read',
-  REBUILD_WRITES === false);
+check('rebuilt rows are written, now the production comparison has been read (docs/COVERAGE.md)',
+  REBUILD_WRITES === true);
+
+/* ── 5. the collector writes the weeks the console has not delivered ───────
+   REVERSION, run 2026-09-29: the ledger-history filter dropped from
+   rebuildWeeks -> 25 passed, 1 FAILED: "a week before the ledger's history
+   is not written…" (drv-d written with trips and no money). */
+console.log('\n5. what the collector writes');
+{
+  /* A driver the console never covered, in the week of 2026-09-14, and one
+     in a week before the ledger's history begins (2026-08-31). */
+  await trip('drv-c', '2026-09-15T08:00:00Z', { pay: 'card', price: 60 });
+  await led('drv-c', '2026-09-15T08:05:00Z', 'card', 'platform_card', 60);
+  await led('drv-c', '2026-09-15T08:06:00Z', 'platform_ride_fee', 'platform_fees', -12);
+  await pg.query(`UPDATE ledger_entry SET event_at = event_at WHERE true`);
+  const written = [];
+  const upsert = async (table, rs) => {
+    for (const r of rs) {
+      written.push(r);
+      await pg.query(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, period_start, period_end, trips,
+                        distance_km, hours_online, earnings, cash_earnings, raw)
+                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                      ON CONFLICT (platform, driver_ext_id, period_start, period_end) DO UPDATE SET earnings = EXCLUDED.earnings`,
+      [r.platform, r.fleet_id, r.driver_ext_id, r.period_start, r.period_end, r.trips, r.distance_km, r.hours_online,
+        r.earnings, r.cash_earnings, j(r.raw)]);
+    }
+    return rs.length;
+  };
+  await trip('drv-d', '2026-08-31T08:00:00Z', { pay: 'card', price: 40 });
+  const n = await rebuildWeeks(new Date('2026-08-31T00:00:00Z'), new Date('2026-09-20T00:00:00Z'),
+    new Date('2026-09-29T08:00:00Z'), { db, upsert, writes: true });
+  const c = written.find((r) => r.driver_ext_id === 'drv-c');
+  check('a closed week with no console row is written from the key host',
+    n > 0 && c && c.period_start === '2026-09-14' && c.trips === 1 && c.earnings === 48, j(written.map((r) => [r.driver_ext_id, r.period_start, r.earnings])));
+  check('…marked, so the console can replace it', c?.raw[REBUILT_MARK] === 'fleet-api.yango.tech');
+  check('a week the console delivered is not rebuilt over it', !written.some((r) => r.period_start === '2026-09-07'),
+    j(written.map((r) => r.period_start)));
+  check('a week before the ledger\u2019s history is not written: trips with no money would read as a week that earned nothing',
+    !written.some((r) => r.driver_ext_id === 'drv-d'), j(written.map((r) => r.driver_ext_id)));
+  check('with writing off, nothing is written',
+    (await rebuildWeeks(new Date('2026-08-31T00:00:00Z'), new Date('2026-09-20T00:00:00Z'),
+      new Date('2026-09-29T08:00:00Z'), { db, upsert: async () => { throw new Error('wrote'); }, writes: false })) === 0);
+}
+
+/* ── 6. sql/schema_v90.sql re-files only the cookie row the old reading wrote
+   REVERSION, run 2026-09-29: the checked_at cutoff dropped from v90 -> 1
+   FAILED: "a cookie proven after the new code went live is left alone". */
+console.log('\n6. the cookie row the old 403/401 reading painted green');
+{
+  const { readFileSync } = await import('node:fs');
+  const v90 = readFileSync(new URL('../sql/schema_v90.sql', import.meta.url), 'utf8');
+  const put = (cred, state, at, lastOk) => pg.query(
+    `INSERT INTO credential_state (provider, fleet_id, credential, state, checked_at, last_ok_at)
+     VALUES ('yango', 'ecosine', $1, $2, $3::timestamptz, $4::timestamptz)
+     ON CONFLICT (provider, fleet_id, credential) DO UPDATE SET state = EXCLUDED.state,
+       checked_at = EXCLUDED.checked_at, last_ok_at = EXCLUDED.last_ok_at`, [cred, state, at, lastOk]);
+  const cookie = async () => (await pg.query(`SELECT state, last_ok_at, detail FROM credential_state WHERE credential = 'YANGO_COOKIE'`)).rows[0];
+  await put('YANGO_CONSOLE', 'blocked', '2026-09-29T11:01:38Z', '2026-09-12T11:31:32Z');
+  await put('YANGO_COOKIE', 'ok', '2026-09-29T11:01:38Z', '2026-09-29T11:01:38Z');
+  await pg.exec(v90);
+  const a1 = await cookie();
+  check('the unearned "ok" becomes "not checked", with no last-ok time', a1.state === 'unknown' && a1.last_ok_at === null
+    && /not checked/.test(a1.detail), j(a1));
+  await pg.exec(v90);
+  check('replaying it changes nothing more', (await cookie()).state === 'unknown');
+  await put('YANGO_COOKIE', 'ok', '2026-09-30T01:00:00Z', '2026-09-30T01:00:00Z');
+  await pg.exec(v90);
+  check('a cookie proven after the new code went live is left alone', (await cookie()).state === 'ok');
+  await put('YANGO_CONSOLE', 'ok', '2026-09-29T11:01:00Z', '2026-09-29T11:01:00Z');
+  await put('YANGO_COOKIE', 'ok', '2026-09-29T11:01:38Z', '2026-09-29T11:01:38Z');
+  await pg.exec(v90);
+  check('…and so is one the console itself answered for', (await cookie()).state === 'ok');
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
