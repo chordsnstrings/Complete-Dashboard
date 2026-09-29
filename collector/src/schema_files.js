@@ -261,4 +261,11 @@ export const SCHEMA_FILES = [
      from gross to net from their own raw figures, and their distance filled
      from Yango's `distance`; rebuilt weeks untouched; a replay is a no-op. */
   'schema_v92.sql',
+  /* Identity (2026-09-29, the operator's ruling: "both of them are the same
+     people"): the two person rows for Ali Abbas Ahmed (uber) and Ali Abbas
+     Faiz Ahmed (bolt) folded into the Uber one, with every ledger entry,
+     account, audit and sms row moved and one audit row naming each. Refuses,
+     with a recorded reason, if both carry an opening of the same kind. A
+     no-op where the accounts are unplaced or already on one person. */
+  'schema_v93.sql',
 ];

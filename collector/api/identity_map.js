@@ -1,27 +1,34 @@
 /* ── the merge register: identities somebody verified, one pair at a time ────
    ──────────────────────────────────────────────────────────────────────────
-   Two lists come out of this file. MERGES is APPLIED — a hundred and thirty
-   entries over a hundred and twenty-four people, which sql/schema_v53.sql is
+   Two lists come out of this file. MERGES is APPLIED — a hundred and thirty-two
+   entries over a hundred and twenty-six people, which sql/schema_v53.sql is
    generated from, so the database already stores the answer in person_key. PENDING is VERIFIED AND
-   DELIBERATELY NOT APPLIED: five pairs that carry a CONTRADICTION, a day on
+   DELIBERATELY NOT APPLIED: four pairs that carry a CONTRADICTION, a day on
    which both records took a trip at the same time in different cars, which is
    the one observation that a shared car, a shared route and a shared phone
-   cannot explain away.
+   cannot explain away. It was five until 2026-09-29, when the operator ruled
+   on one of them — see the fifth HAND_MERGES entry.
 
-   Three sweeps built the hundred and thirty, and they are kept apart below
+   Three sweeps built the hundred and thirty-two, and they are kept apart below
    rather than blended, because they are believable for three different
    reasons. The counts in this comment are asserted in
    test/identity_register_counts.test.mjs: they said ninety-three over ninety
-   for long enough that CLAUDE.md copied the wrong pair, and a register whose
-   own header misdescribes it is a register nobody trusts to re-read:
+   for long enough that CLAUDE.md copied the wrong pair, and then a hundred and
+   thirty over a hundred and twenty-four for a week after the register had
+   reached a hundred and thirty-one — because the test pinned the header's own
+   words rather than the register's size. A register whose own header
+   misdescribes it is a register nobody trusts to re-read:
 
-     ·  4 in HAND_MERGES, checked one pair at a time against production. The
+     ·  5 in HAND_MERGES, checked one pair at a time against production. The
        fourth is a pair this file once REFUSED as undecidable and the operator
-       ruled on, 2026-09-22.
-     · 50 in CANDIDATES, from the shared-history sweep — same cars, same days,
+       ruled on, 2026-09-22. The fifth is a pair the sweep below held back in
+       PENDING over a one-trip contradiction, which the operator ruled on,
+       2026-09-29: "both of them are the same people".
+     · 49 in CANDIDATES, from the shared-history sweep — same cars, same days,
        trips interleaving inside the day rather than following one another.
-       Forty-five are clean and applied; the five with a contradiction are
-       what PENDING is.
+       Forty-five are clean and applied; the four with a contradiction are
+       what PENDING is. (The sweep found fifty; the fiftieth is the fifth hand
+       merge above, moved there with its figures and its contradiction date.)
      · 82 in FROM_ROSTER, from src/identity_link.js, on a phone number the
        roster filed against both records. Three of them name a key CANDIDATES
        had already reached by a different route — the same person found twice
@@ -107,10 +114,23 @@ export const foldName = (s) => String(s == null ? '' : s)
    `keep` is the record that survives; `merge` is the record folded into it.
    `key` is the folded name of `keep` and is asserted below to be exactly that,
    so an entry cannot invent a key that belongs to neither record. */
-/* The four a person checked one at a time, id to id, rather than by any rule.
+/* The five a person checked one at a time, id to id, rather than by any rule.
    Three of them are the oldest entries here and predate the roster rule; the
-   fourth is the operator's ruling on 2026-09-22. They keep their own name so a
-   reader can see which merges were decided by a human looking at a pair.
+   fourth and fifth are the operator's rulings on 2026-09-22 and 2026-09-29.
+   They keep their own name so a reader can see which merges were decided by a
+   human looking at a pair.
+
+   ── HOW AN OPERATOR'S RULING ENTERS THIS FILE ───────────────────────────
+   One way, twice now: the pair moves HERE, to the end of this list, with the
+   ruling as its evidence, from whichever list held it apart — REFUSED for the
+   Sana pair, PENDING for the Ali Abbas pair. Nothing about the pair is
+   deleted on the way. The fifth entry still carries the sweep's figures and
+   the contradiction date it was held back for, and a `ruling` naming who
+   decided, when, in what words, and which contradiction dates the ruling was
+   made over. assertRegister() below refuses to load an APPLIED entry that
+   carries a contradiction without such a ruling, so the filter that used to
+   keep contradicted pairs out of MERGES cannot be bypassed by a hand edit
+   that simply pastes one into this list.
 
    ── ORDER IS LOAD-BEARING; APPEND, NEVER PREPEND ────────────────────────
    Held oldest-first by `verified`, and a new entry goes on the END. That is
@@ -234,6 +254,57 @@ const HAND_MERGES = Object.freeze([
       'The evidence is a human ruling, not a measurement, and it is recorded as '
       + 'such. If the hotel record ever starts carrying trips, a simultaneity '
       + 'check becomes possible for the first time and should be run.',
+  },
+  /* Moved here from CANDIDATES, where it was the sixth entry and PENDING's
+     second. Its figures are the shared-history sweep's, byte for byte as that
+     sweep measured them on 2026-09-05 — they are the reason the pair was ever
+     proposed, and a ruling that erased them would leave nothing for a later
+     reader to check the ruling against. `contradictions` keeps the one date the
+     pair was held back for; `ruling.over` names it as the date the operator
+     ruled over, which is what assertRegister() requires of an applied entry
+     that carries one. */
+  {
+    key: 'ali abbas ahmed',
+    keep:  { id: '9e9060e7-0b8c-4f3b-8cd7-165d5eac55cd', name: 'Ali Abbas Ahmed', channel: 'uber' },
+    merge: { ids: ['6623821', 'b17bcd50-e20b-4055-80d8-468131188397'],
+             name: 'Ali Abbas Faiz Ahmed', channel: 'bolt' },
+    plates: ['L36125', 'L58905', 'L85082'],
+    days: { shared: 173, interleaved: 144, alias: 239, keep: 381 },
+    trips: { alias: 520, onSharedCars: 520 },
+    contradictions: ['2025-08-31'],
+    ruling: { by: 'operator', on: '2026-09-29', words: 'both of them are the same people',
+      over: ['2025-08-31'] },
+    verified: '2026-09-29',
+    evidence:
+      'RULED BY THE OPERATOR, 2026-09-29, looking at the Drivers page: "both of them '
+      + 'are the same people." This pair sat in PENDING — verified by the '
+      + 'shared-history sweep of 2026-09-05 and deliberately not applied — for one '
+      + 'reason only: on 2025-08-31 a single trip on the Bolt record sits on another '
+      + 'plate inside the Uber record\'s own working span. Everything else the sweep '
+      + 'measured points one way. The two records file trips on channels that do not '
+      + 'overlap (uber against bolt). They were on the same plate on 173 of the Bolt '
+      + 'record\'s 239 working days, across L36125, L58905 and L85082, and on 144 of '
+      + 'those days their trips interleave inside the day on that plate — one man '
+      + 'with two apps open, not a handover. Every one of the Bolt record\'s 520 '
+      + 'trips is on a plate the Uber record also held. One trip on another plate is '
+      + 'one feed row\'s vehicle field, not a shift in a second car, and the operator '
+      + 'settled what the data could only flag. '
+      + 'What it unblocks, read on production /api/drivers/directory for '
+      + '2026-08-31..2026-09-29 the same day: the page listed him twice, as spine '
+      + 'persons 101 and 115 — "Ali Abbas Ahmed" (uber, 42 trips in the window, '
+      + '3,516 ever) and "Ali Abbas Faiz Ahmed" (bolt, ids 6623821 and b17bcd50…, '
+      + '5 trips, 535 ever) — both Egari, both with L25054 as their usual vehicle. '
+      + 'The register alone does not join the two person rows when either carries '
+      + 'money (src/persons.js stops at money), so sql/schema_v93.sql makes the '
+      + 'recorded merge that api/person_merge_routes.js would have made.',
+    caveat:
+      'The contradiction is overruled, not explained: 2025-08-31 stays on this entry '
+      + 'so a reader can see exactly what the ruling was made over. Like the Sana '
+      + 'entry above, the deciding evidence is a human ruling and is recorded as '
+      + 'such. No licence number and no Emirates ID was compared. If a SHIFT in two '
+      + 'cars at once ever turns up for this pair — two or more trips spread over '
+      + 'hours while the other record worked — that is an observation the ruling '
+      + 'did not see, and it goes back to the operator.',
   },
 ]);
 
@@ -470,7 +541,12 @@ const pending = (m) => Object.freeze({
    filed under the same long name. Mapping one of them and not the other would split the
    man a third way rather than a second. `channel` on each side is the channels
    that record files TRIPS on; an id in the list may belong to a record of
-   another channel that has filed none. */
+   another channel that has filed none.
+
+   Forty-nine are here now. The sixth, "Ali Abbas Ahmed" against "Ali Abbas
+   Faiz Ahmed", was held back over a one-trip contradiction on 2025-08-31 until
+   the operator ruled on it, 2026-09-29, and it is the last entry of
+   HAND_MERGES above — figures, plates and contradiction date unchanged. */
 const CANDIDATES = Object.freeze([
   pending({
     key: 'shehzad ahmad ghulam muhammad',
@@ -521,16 +597,6 @@ const CANDIDATES = Object.freeze([
     days: { shared: 175, interleaved: 129, alias: 238, keep: 444 },
     trips: { alias: 420, onSharedCars: 311 },
     contradictions: ['2025-05-03'],
-  }),
-  pending({
-    key: 'ali abbas ahmed',
-    keep:  { id: '9e9060e7-0b8c-4f3b-8cd7-165d5eac55cd', name: 'Ali Abbas Ahmed', channel: 'uber' },
-    merge: { ids: ['6623821', 'b17bcd50-e20b-4055-80d8-468131188397'],
-             name: 'Ali Abbas Faiz Ahmed', channel: 'bolt' },
-    plates: ['L36125', 'L58905', 'L85082'],
-    days: { shared: 173, interleaved: 144, alias: 239, keep: 381 },
-    trips: { alias: 520, onSharedCars: 520 },
-    contradictions: ['2025-08-31'],
   }),
   pending({
     key: 'shah khalid ul haq',
@@ -1560,7 +1626,17 @@ const FROM_ROSTER = Object.freeze([
    making by accident.
 
    So they stay in PENDING — verified, published, and not applied — and the
-   forty-five clean ones join the register. */
+   forty-five clean ones join the register.
+
+   Four stay now. The one thing that moves a pair out of here is the one thing
+   that moved Sana out of REFUSED: a person who knows the man ruling on it. On
+   2026-09-29 the operator looked at "Ali Abbas Ahmed" and "Ali Abbas Faiz
+   Ahmed" on two rows of the Drivers page and said "both of them are the same
+   people"; that pair is now the fifth HAND_MERGES entry, carrying its
+   2025-08-31 contradiction and the ruling made over it. No filter here was
+   changed to do that, and none should be: a contradiction still keeps a SWEPT
+   pair out, and the guard below keeps a contradicted pair out of MERGES by any
+   route but a recorded ruling. */
 const hasContradiction = (m) => ((m.contradictions || []).length > 0);
 
 export const MERGES = Object.freeze([
@@ -1616,6 +1692,28 @@ function assertRegister() {
     if (!m.evidence || m.evidence.length < 120) throw new Error(`identity_map: ${where} has no evidence`);
     if (!m.verified) throw new Error(`identity_map: ${where} has no verification date`);
     if (list === 'PENDING') assertMeasured(m, where);
+    /* AN APPLIED CONTRADICTION NEEDS A RULING THAT NAMES IT.
+       ─────────────────────────────────────────────────────────────────────
+       Until 2026-09-29 nothing applied could carry a contradiction, because the
+       only list that held contradicted pairs was CANDIDATES and MERGES filters
+       them out of it. The operator's ruling on Ali Abbas Ahmed put the first
+       one into HAND_MERGES — deliberately, with its 2025-08-31 kept as
+       evidence — and that list has no filter. So the property the filter gave
+       for free is asserted here instead: an applied entry with a contradiction
+       loads only if it carries a ruling (who, when, in what words) whose
+       `over` names every one of its contradiction dates. A contradicted pair
+       pasted into HAND_MERGES without one does not load; neither does a ruling
+       made over one date while the entry carries another the ruler never saw. */
+    if (list === 'MERGES' && hasContradiction(m)) {
+      const r = m.ruling || {};
+      const over = new Set(r.over || []);
+      if (!r.by || !/^\d{4}-\d{2}-\d{2}$/.test(r.on || '') || !(r.words || '').trim()
+          || !m.contradictions.every((d) => over.has(d))) {
+        throw new Error(`identity_map: ${where} is applied but carries a contradiction `
+          + `(${m.contradictions.join(', ')}) with no ruling made over it — a contradicted pair `
+          + 'joins MERGES only on a recorded ruling, as the fifth HAND_MERGES entry does');
+      }
+    }
     kept.set(m.keep.id, where);
   }
   /* A chain — A merged into B, B merged into C — would make the answer depend
@@ -1708,7 +1806,8 @@ assertRegister();
 export const ALIAS_KEY = Object.freeze(new Map(
   MERGES.flatMap((m) => mergeIdsOf(m).map((id) => [id, m.key]))));
 
-/** The same thing for the pending fifty, and it is NOT wired to anything.
+/** The same thing for the held-back pairs (four since the operator's ruling of
+    2026-09-29 moved one to HAND_MERGES), and it is NOT wired to anything.
     ─────────────────────────────────────────────────────────────────────────
     It exists so the migration that applies them, or a reader checking one
     against production, does not have to walk the list to find out which ids
@@ -1799,4 +1898,9 @@ export const registerComment = () => MERGES.map((m) =>
   + `--   verified ${m.verified}`
   + (m.basis ? ` on a ${m.basis.replace(/_/g, ' ')}`
     : m.plate ? ` on plate ${m.plate}`
-      : m.plates ? ` on ${m.plates.length} shared plate${m.plates.length === 1 ? '' : 's'}` : '')).join('\n');
+      : m.plates ? ` on ${m.plates.length} shared plate${m.plates.length === 1 ? '' : 's'}` : '')
+  /* A pair applied over a contradiction says so where the SQL reader sees it,
+     with the date it was ruled over — the generated file is read by people
+     who never open this one. */
+  + (m.ruling ? `; ruled by the ${m.ruling.by} ${m.ruling.on} over the contradiction of `
+    + `${m.ruling.over.join(', ')}` : '')).join('\n');

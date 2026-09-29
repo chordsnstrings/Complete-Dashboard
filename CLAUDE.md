@@ -54,10 +54,16 @@ register rebuilds instead of being skipped. Edit the register, run
 `node bin/gen-schema-v53.mjs`, and never hand-edit the .sql.
 
 **Who is one person lives in `api/identity_map.js`,** a hand-reviewed LIST of
-verified pairs — never a name rule. It applies 131 entries over 125 people
-(4 hand-checked, 45 from a shared-custody sweep, 82 on a phone number the
-roster filed against both records) and deliberately holds back 5 that carry a
-simultaneous trip in two cars. `docs/COVERAGE.md` carries the measurements.
+verified pairs — never a name rule. It applies 132 entries over 126 people
+(5 hand-checked, 45 from a shared-custody sweep, 82 on a phone number the
+roster filed against both records) and deliberately holds back 4 that carry a
+simultaneous trip in two cars. Two of the five hand entries are operator
+rulings (2026-09-22, 2026-09-29): a ruling moves the pair to the END of
+`HAND_MERGES` with its evidence and any contradiction date kept, never deleted.
+`docs/COVERAGE.md` carries the measurements. The register is NOT the whole
+answer for the Drivers page: that groups by the person spine (`driver` +
+`driver_platform_id`, `src/persons.js`), which folds two person rows only while
+neither carries money — see `sql/schema_v93.sql` for the recorded merge.
 `mergedIds`/`canonicalName` union across every entry on a key: six people are
 on the list twice. **These counts are asserted in
 `test/identity_register_counts.test.mjs`** — they went stale once, at 93 over

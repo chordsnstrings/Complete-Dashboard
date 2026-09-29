@@ -86,8 +86,15 @@ const ID_SHAPE = /^[0-9]{4,12}$|^[0-9a-f]{24}$|^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a
 /* The sizes, pinned. A register that grows is the normal case and these
    numbers are MEANT to be edited when it does — deliberately, by the person
    who grew it, and never silently by the sweep that produced the new rows. */
-const EXPECT = { merges: 131, pending: 5, refused: 2, people: 125, aliasIds: 168,
-  joined: 74, foldsTo: 320 };
+const EXPECT = { merges: 132, pending: 4, refused: 2, people: 126, aliasIds: 170,
+  joined: 75, foldsTo: 319 };
+/* 2026-09-29, the operator's ruling on Ali Abbas Ahmed: one entry out of
+   PENDING and into MERGES (131 -> 132, pending 5 -> 4), a key the register
+   had never applied (people 125 -> 126), both of its Bolt ids (alias ids
+   168 -> 170). The fixture holds the Uber record 9e9060e7… and the Bolt UUID
+   b17bcd50… as two directory rows, so the register now joins one more group
+   over it (74 -> 75) and the roster folds one row further (320 -> 319). Every
+   one of those was measured by running this file, not computed by hand. */
 /* And by the date each sweep ran, so a batch arriving without the evidence
    shape its method produces shows up as a moved number rather than as
    nothing at all. */
@@ -98,13 +105,17 @@ const EXPECT = { merges: 131, pending: 5, refused: 2, people: 125, aliasIds: 168
 
    2026-09-22 is the operator's ruling on the Sana pair — a hand merge, so it
    carries its own date rather than joining the 2026-09-03 hand sweep.
+   2026-09-29 is the operator's ruling on Ali Abbas Ahmed, the same way: it
+   left the 2026-09-05 sweep's held-back five, so that sweep's APPLIED count
+   is still 45 — the ruling added to MERGES and took nothing out of it.
 
    COMPARED AS A SORTED SET, NOT AS JSON. This was
    `JSON.stringify(got) === JSON.stringify(BY_DATE)`, which compares INSERTION
    ORDER as well as contents: adding a hand merge at the front of HAND_MERGES
    put its date first in `got` and failed an assertion whose subject is how
    many entries each sweep contributed, not what order they iterate in. */
-const BY_DATE = { '2026-09-03': 3, '2026-09-05': 45, '2026-09-07': 82, '2026-09-22': 1 };
+const BY_DATE = { '2026-09-03': 3, '2026-09-05': 45, '2026-09-07': 82, '2026-09-22': 1,
+  '2026-09-29': 1 };
 const sortedEntries = (o) => JSON.stringify(Object.entries(o).sort((a, b) => a[0].localeCompare(b[0])));
 
 /* The control: a production record the register has never been told about.

@@ -87,15 +87,20 @@ const OLD_ID = /^[0-9a-f]{24}$|^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{
 check('…and not one of them is a shape the register used to accept',
   numeral.every((i) => !OLD_ID.test(i)));
 check('the module imports anyway — the guard runs at import, so this is the assertion',
-  MERGES.length === 131 && PENDING.length === 5, `${MERGES.length} applied, ${PENDING.length} pending`);
+  MERGES.length === 132 && PENDING.length === 4, `${MERGES.length} applied, ${PENDING.length} pending`);
 /* The phone sweep is the one that grows: it re-runs on every roster pull, and
    the roster grows when a channel starts filing compliance rows. It went 45 to
    82 on 2026-09-07, when the Yango collector moved to fleet-api.yango.tech and
    gave 145 drivers a phone number for the first time. The other two are closed
    sets — a hand check and a one-off custody sweep — so a change in either is a
-   change nobody scheduled. */
+   change nobody scheduled.
+
+   One was scheduled, by the operator: on 2026-09-29 they ruled "Ali Abbas
+   Ahmed" and "Ali Abbas Faiz Ahmed" one person, and that pair left the
+   custody sweep for HAND_MERGES, dated the ruling day — so the sweep is 49,
+   and the fiftieth is asserted below where it went rather than here. */
 check('and the three sweeps are all still in it, at the sizes they came in at',
-  HAND.length === 3 && SWEPT.length === 50 && PHONE.length === 82,
+  HAND.length === 3 && SWEPT.length === 49 && PHONE.length === 82,
   `${HAND.length} hand / ${SWEPT.length} swept / ${PHONE.length} phone`);
 check('every id on either list is one of the four shapes production issues',
   ALL.every((m) => [m.keep.id, ...ids(m)].every(
@@ -112,13 +117,24 @@ console.log('\nthe five with a contradiction, and why they are not in the ninety
    against two hundred and more shared days, and two of those five also share a
    phone. When a shared phone and a simultaneous trip disagree, the honest
    answer is to leave the records apart — merging two humans' work and money is
-   the mistake no page can help a reader notice. */
+   the mistake no page can help a reader notice.
+
+   Four remain. The fifth, Ali Abbas Ahmed, the operator ruled on 2026-09-29
+   ("both of them are the same people"), and it is APPLIED carrying its
+   contradiction and the ruling made over it — so "nothing applied carries a
+   contradiction" became "nothing applied carries one nobody ruled over", and
+   the one that does is named, so a second arriving unannounced fails here. */
 check('PENDING is exactly the swept entries that contradict themselves',
   PENDING.length === SWEPT.filter((m) => m.contradictions.length > 0).length
   && PENDING.every((m) => m.contradictions.length > 0),
   PENDING.map((m) => `${m.key} (${m.contradictions.join(' ')})`).join('; '));
-check('…and nothing applied carries one',
-  MERGES.every((m) => !(m.contradictions || []).length),
+check('…and nothing applied carries one that no ruling was made over',
+  MERGES.every((m) => !(m.contradictions || []).length
+    || (m.ruling?.on && m.ruling?.words && m.contradictions.every((d) => (m.ruling.over || []).includes(d)))),
+  MERGES.filter((m) => (m.contradictions || []).length && !m.ruling).map((m) => m.key).join(', '));
+check('…and the one applied over a contradiction is the operator\'s 2026-09-29 ruling, and only it',
+  MERGES.filter((m) => (m.contradictions || []).length).map((m) => `${m.key} ${m.ruling?.on}`).join()
+    === 'ali abbas ahmed 2026-09-29',
   MERGES.filter((m) => (m.contradictions || []).length).map((m) => m.key).join(', '));
 check('the held-back five are wired to nothing a route calls',
   [...PENDING_ALIAS_KEY.keys()].every((i) => !ALIAS_KEY.has(i)),
@@ -240,7 +256,7 @@ check('…and an entry that would join a refused pair does not load',
    name the same surviving record, or the key has quietly merged two men whose
    folded names happen to match. */
 check('a key may carry more than one entry, and six of them do',
-  new Set(MERGES.map((m) => m.key)).size === 125,
+  new Set(MERGES.map((m) => m.key)).size === 126,
   `${new Set(MERGES.map((m) => m.key)).size} keys over ${MERGES.length} entries`);
 check('…but two entries claiming one key for two different survivors do not load',
   (await loadsWith("  {\n    key: 'abidullah safi',\n    keep:  { id: 'dae09063-88a3-432e-b39f-969d8de7992b'",

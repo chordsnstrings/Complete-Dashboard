@@ -12,7 +12,7 @@
 import { writeFileSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { MERGES, registerComment, identityCase } from '../api/identity_map.js';
+import { MERGES, PENDING, registerComment, identityCase } from '../api/identity_map.js';
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'sql', 'schema_v53.sql');
 
@@ -44,6 +44,12 @@ export function render() {
   const aliasIds = MERGES.flatMap((m) => (m.merge?.ids || [m.merge?.id]).filter(Boolean));
   const probe = aliasIds[aliasIds.length - 1];
   const whens = aliasIds.length;
+  /* Counted, not written. This header said "Five carry one, they stay in
+     PENDING" as a literal, and the operator's ruling of 2026-09-29 made it
+     false the moment the register changed: four stay, and one applied pair
+     now carries a contradiction it was ruled over. A generated file whose
+     prose is not generated goes stale exactly as a hand-copied CASE would. */
+  const ruled = MERGES.filter((m) => m.ruling).length;
   return `-- ── ${MERGES.length} people who were on the roster more than once, folded onto one key each ──
 -- ---------------------------------------------------------------------------
 -- person_key is what every surface in this product groups people by, and it
@@ -71,9 +77,13 @@ export function render() {
 -- appears on no more than two records and never twice within one channel.
 -- Twenty-six people were found by both, independently.
 --
--- What is NOT here is any pair with a contradiction: a day on which both
--- records took a trip at the same time. Five carry one, they stay in PENDING,
--- and a simultaneous trip outranks a shared phone every time.
+-- What is NOT here is any pair with a contradiction nobody has ruled on: a day
+-- on which both records took a trip at the same time. ${PENDING.length} carry one, they stay
+-- in PENDING, and a simultaneous trip outranks a shared phone every time.
+-- What IS here despite one is a pair the operator ruled on over its
+-- contradiction — ${ruled} so far, marked "ruled" in the register below. A person
+-- who knows the man outranks one feed row's vehicle field, and the ruling is
+-- recorded in api/identity_map.js as a ruling, not as a measurement.
 --
 -- So the merge is a LIST of verified ids, not a rule. api/identity_map.js holds
 -- it together with the measurement that decided each one. THIS FILE IS

@@ -1,4 +1,4 @@
--- ── 131 people who were on the roster more than once, folded onto one key each ──
+-- ── 132 people who were on the roster more than once, folded onto one key each ──
 -- ---------------------------------------------------------------------------
 -- person_key is what every surface in this product groups people by, and it
 -- was the folded NAME and nothing else: lowercase, collapse runs of
@@ -25,9 +25,13 @@
 -- appears on no more than two records and never twice within one channel.
 -- Twenty-six people were found by both, independently.
 --
--- What is NOT here is any pair with a contradiction: a day on which both
--- records took a trip at the same time. Five carry one, they stay in PENDING,
--- and a simultaneous trip outranks a shared phone every time.
+-- What is NOT here is any pair with a contradiction nobody has ruled on: a day
+-- on which both records took a trip at the same time. 4 carry one, they stay
+-- in PENDING, and a simultaneous trip outranks a shared phone every time.
+-- What IS here despite one is a pair the operator ruled on over its
+-- contradiction — 1 so far, marked "ruled" in the register below. A person
+-- who knows the man outranks one feed row's vehicle field, and the ruling is
+-- recorded in api/identity_map.js as a ruling, not as a measurement.
 --
 -- So the merge is a LIST of verified ids, not a rule. api/identity_map.js holds
 -- it together with the measurement that decided each one. THIS FILE IS
@@ -49,6 +53,9 @@
 -- 67483c64055e070d79100114 (hotel "Sana Ullah Sher Zamin")
 --   -> b7511fa7-cbdf-4373-8539-c7ae020c31e2 (uber "Sanaullah Sher Zamin") = 'sanaullah sher zamin'
 --   verified 2026-09-22 on plate L20048
+-- 6623821, b17bcd50-e20b-4055-80d8-468131188397 (bolt "Ali Abbas Faiz Ahmed")
+--   -> 9e9060e7-0b8c-4f3b-8cd7-165d5eac55cd (uber "Ali Abbas Ahmed") = 'ali abbas ahmed'
+--   verified 2026-09-29 on 3 shared plates; ruled by the operator 2026-09-29 over the contradiction of 2025-08-31
 -- 6612891 (bolt "Shehzad Ahmed Ghulam Muhammad")
 --   -> f6253b6e-fca4-41cf-99c1-6c2f3e2e67b2 (uber,hotel "Shehzad Ahmad Ghulam Muhammad") = 'shehzad ahmad ghulam muhammad'
 --   verified 2026-09-05 on 7 shared plates
@@ -484,6 +491,8 @@ DECLARE
          WHEN 'ab2aec60-56ff-48e2-85c0-3591f6f29aa3' THEN 'moses arthur'
          WHEN '67483c64055e070d7910010a' THEN 'shehzad ahmad ghulam muhammad'
          WHEN '67483c64055e070d79100114' THEN 'sanaullah sher zamin'
+         WHEN '6623821' THEN 'ali abbas ahmed'
+         WHEN 'b17bcd50-e20b-4055-80d8-468131188397' THEN 'ali abbas ahmed'
          WHEN '6612891' THEN 'shehzad ahmad ghulam muhammad'
          WHEN '6598721' THEN 'aliyan khalil'
          WHEN '67483c64055e070d791000d2' THEN 'aliyan khalil'
@@ -679,7 +688,7 @@ BEGIN
          -- …and carries as many merges as this register has, so a column built
          -- from a SUPERSET that happens to end on the same pair still rebuilds.
          AND (length(c.generation_expression)
-              - length(replace(c.generation_expression, 'WHEN ', ''))) / 5 = 168);
+              - length(replace(c.generation_expression, 'WHEN ', ''))) / 5 = 170);
     need := true;
   END LOOP;
   IF NOT need THEN RETURN; END IF;

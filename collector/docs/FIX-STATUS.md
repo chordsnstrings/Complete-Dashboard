@@ -4130,3 +4130,17 @@ Resend, three first recipients and more added by admins.
 | RPT-5 | the findings: same weekday last week + 4-week norm; channel completion; hours; regulars down/absent; uncompleted; idle cars; Uber AED per online hour; 7-day cash to hand in (the workbook's rule, now shared as cashToCollect); unregistered journeys; safety; data | report_findings §1 (last week 1, channel usual, own usual, hand-ins 1), money_workbook (42, unchanged) | ✓ | ✓ 0c6a0ae | ✓ 59b00cea | route answers 401 without a session on production; first read by a person in the 07:00 email of 2026-09-30 |
 | RPT-6 | GLM 5.2 over the findings, drivers by name and cars by plate (the operator's ruling) → summary + ranked actions; refused on a stray number, a number or a person from another finding, or bad JSON; the findings' own actions otherwise; What changed + Do today in the email | report_findings §3 (guard 1, own finding 1, own name 1), daily_report (29) | ✓ | ✓ 0c6a0ae, names 59925db | ✓ 59b00cea | the first model call on production is the 07:00 send of 2026-09-30 |
 | RPT-7 | "Send me yesterday's report now": the real email to the signed-in admin only, audited | access_core §12 (only-me 3) | ✓ | ✓ 0c6a0ae | ✓ 59b00cea | POST /api/access/report/send-me answers 401 without a session on production |
+
+## Identity: the operator's ruling on Ali Abbas Ahmed — 2026-09-29, NOT ON PRODUCTION
+
+The operator, on the Drivers page: "both of them are the same people" —
+"Ali Abbas Ahmed" (uber, person 101, 42 trips in 2026-08-31..09-29, 3,516 ever)
+and "Ali Abbas Faiz Ahmed" (bolt `6623821` + `b17bcd50…`, person 115, 5 and
+535), both Egari, both on L25054. Two mechanisms held them apart; both are
+changed. docs/COVERAGE.md ("The operator's ruling on Ali Abbas Ahmed") has the
+measurement and the three traps it added. Not deployed from this session.
+
+| # | what | test (revert fails it) | written | committed | deployed | proven |
+|---|---|---|---|---|---|---|
+| ID-AA1 | the register: the pair leaves PENDING for the end of HAND_MERGES, dated the ruling, with the sweep's figures, its 2025-08-31 contradiction and a `ruling` naming it; assertRegister refuses an applied contradiction no ruling names; v53 regenerated (170 WHENs; its header prose now counted, not written); 132 entries / 126 people / 4 held back in the header, CLAUDE.md and the counts test — whose header regex had been pinning stale "130 over 124" words | identity_ruling_ali_abbas §1–2 (register at HEAD 23 of 52, guard removed 2, v53 count neutralised 2), identity_register_counts (register at HEAD 8 of 15, header words 1), identity_map, identity_merge (joined 74→75, folds 320→319) | ✓ | ✓ this commit | — | — expect `/api/drivers/directory?from=2026-08-31&to=2026-09-29` to show ONE row with all three ids, ~47 trips, ~4,051 ever |
+| ID-AA2 | `sql/schema_v93.sql`: the spine's two person rows folded into the one holding the Uber account — every ledger entry, account (detached too), audit and sms row re-pointed, cash rule carried, one `person_merge` audit row naming every id and amount, the row deleted; REFUSES with a recorded reason if both carry an opening of the same kind; no-op when unplaced or already one | identity_ruling_ali_abbas §4–5 (v93 emptied 16, refusal removed 4, refusal guard removed 1, detached rows left behind → FK throw, sms not moved 1) | ✓ | ✓ this commit | — | — expect `migrated schema_v93.sql` with no `schema_v93:` warning in the log; a warning means both rows carry an opening and a supervisor folds them through `POST /api/person/merge` |

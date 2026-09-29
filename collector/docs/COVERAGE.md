@@ -572,6 +572,78 @@ Bolt has no phone in `driver_platform_state` at all; Bolt records reach Uber
 transitively, because Bolt and the hotel channel file the same full name and
 the existing name fold already joins those two.
 
+### The operator's ruling on Ali Abbas Ahmed — 2026-09-29
+
+The operator, looking at the Drivers page: **"both of them are the same
+people."** Production's `/api/drivers/directory?from=2026-08-31&to=2026-09-29`,
+read the same day, had him on two rows:
+
+| row | channel | ids | trips in window | trips ever | fleet | usual car |
+|---|---|---|---|---|---|---|
+| "Ali Abbas Ahmed" (person 101) | uber | `9e9060e7…` | 42 | 3,516 | Egari | L25054 |
+| "Ali Abbas Faiz Ahmed" (person 115) | bolt | `6623821`, `b17bcd50…` | 5 | 535 | Egari | L25054 |
+
+The pair was **verified and held back**: the 2026-09-05 shared-history sweep
+found them on one plate on 173 of the Bolt record's 239 working days (L36125,
+L58905, L85082), interleaving inside the day on 144, with all 520 Bolt trips on
+a plate the Uber record also held — and one contradiction, **2025-08-31**, a
+single Bolt trip on another plate inside the Uber record's working span. So it
+sat in `PENDING`. The ruling settles what the data could only flag.
+
+**Two mechanisms kept him on two rows, and fixing either alone changes
+nothing on the page.**
+
+1. **The register** (`api/identity_map.js` → `person_key`, generated into
+   `sql/schema_v53.sql`). Every rollup groups by the stored key, and the Bolt
+   trips were stored under `ali abbas faiz ahmed`. Fixed the Sana way: the pair
+   moved to the **end of `HAND_MERGES`**, dated 2026-09-29, with the sweep's
+   figures and the `contradictions: ['2025-08-31']` kept, and a
+   `ruling: { by, on, words, over }` naming the date it was ruled over.
+   `assertRegister()` now refuses an applied entry that carries a contradiction
+   without such a ruling — the `CANDIDATES` filter that used to guarantee
+   "nothing applied is contradicted" does not cover `HAND_MERGES`. v53
+   regenerated; the other four held-back pairs are untouched (Soaieed Alom Ali
+   2025-05-03, Tariq Afzal 2026-06-10, Fayed Ali Muhammad 2025-12-21/23, Hammad
+   Ahmad 2025-07-02). Register: **132 entries over 126 people, 4 held back.**
+2. **The person spine** (`driver` + `driver_platform_id`, built by
+   `src/persons.js`). The directory keys every placed account on
+   `person:<id>`, and so do the driver page, the money ledger, the texts and
+   the cash workbook. With the register joined, the spine sees one component on
+   two persons — and folds them **only if neither carries a `driver_ledger` or
+   `driver_ledger_audit` row**. Whether 101 or 115 carries money on production
+   was not read (the one read that would say, `GET /api/person/merge`, was not
+   made). So `sql/schema_v93.sql` makes the recorded merge
+   `api/person_merge_routes.js` would have made, and it is correct either way:
+   the person holding `9e9060e7…` survives; every other person holding
+   `6623821` or `b17bcd50…` has ALL its `driver_ledger` entries, ALL its
+   `driver_platform_id` rows (detached ones too — they carry the foreign key),
+   its `driver_ledger_audit` rows and its `sms_outbox` rows re-pointed, its
+   `cash_rule` carried where the survivor has none, one `person_merge` audit row
+   written naming every id that moved with amounts, and the row deleted.
+   `acct_ext_id` and `person_name` on each entry do not move — they are
+   evidence. **It refuses** (a `refused` audit row, a warning, nothing moved)
+   if both persons carry an opening of the same kind: `/api/ledger/exposure`
+   reads the LATEST `cash_opening` per person and the driver register SUMS them,
+   so two openings on one person are one lost or one doubled depending on the
+   page. A no-op where the accounts are unplaced (the spine then places all
+   three on one person itself) or already on one person.
+
+Held down by `test/identity_ruling_ali_abbas.test.mjs` (52 checks, eight revert
+proofs recorded in its header), plus the count moves in
+`identity_register_counts`, `identity_map` and `identity_merge` (joined groups
+over the 395-row fixture 74 → 75, folds 320 → 319, alias ids 168 → 170).
+
+**What to check on production after deploy:** the same directory read should
+show ONE row holding `9e9060e7…`, `6623821` and `b17bcd50…`, about 47 trips in
+the window and about 4,051 ever (42 + 5, 3,516 + 535, give or take the days
+since); `/api/driver/profile?id=6623821` should answer the Uber person; and the
+collector log should carry either `migrated schema_v93.sql` with no
+`schema_v93:` warning, or the warning, which means both rows carry an opening
+and a supervisor has to resolve them and fold through `POST /api/person/merge`.
+Rollups keyed on `person_key` (driver_day, rollup_person_month) converge at the
+next daily full rebuild; the directory reads trips and the spine directly and
+does not wait for it.
+
 ### Yango has a second door, and it does not want a cookie — measured 2026-09-07
 
 `fleet.yango.com` is the web console and wants a Yandex session. It has
@@ -6385,6 +6457,39 @@ success message; ask for a fenced block explicitly or omit `--extract`.
   read in four places and written by nothing in `api/`, `src/` or `bin/`, and
   the comment at `src/persons.js:49` points at an `api/person_merge_routes.js`
   route that does not exist.
+
+* **THE REGISTER IS NOT THE DRIVERS PAGE.** Applying a pair in
+  `api/identity_map.js` (and regenerating v53) folds `person_key`, so every
+  rollup joins them — and the Drivers page can still show two rows. The
+  directory, the driver page, the ledger and the texts group by the PERSON
+  SPINE (`driver` + `driver_platform_id`); `src/persons.js` folds two person
+  rows from the register only while NEITHER carries a `driver_ledger` or
+  `driver_ledger_audit` row, and otherwise logs `needs_merge` every pass and
+  waits. Found on the Ali Abbas ruling, 2026-09-29: two rows were persons 101
+  and 115. **After any register change for people who may carry money, check
+  the person ids, not the key**, and make the merge a recorded one
+  (`sql/schema_v93.sql` is the pattern; `POST /api/person/merge` is the route,
+  which does exist now).
+
+* **A NEW `HAND_MERGES` ENTRY DOES NOT MOVE v53's LAST-ALIAS PROBE.**
+  `sql/schema_v53.sql` skips a table whose `person_key` "already carries the
+  register", judged by the LAST alias id in `MERGES` plus the count of WHEN
+  clauses. `MERGES` is `[...HAND_MERGES, ...CANDIDATES, ...FROM_ROSTER]`, so a
+  hand merge lands in the MIDDLE and the last id stays FROM_ROSTER's tail
+  (`b14f2b04…`). Only the count (168 → 170 on 2026-09-29) makes production
+  rebuild. A fresh-database test cannot see this — every fresh column rebuilds
+  — so `test/identity_ruling_ali_abbas.test.mjs` replays v53 over a column
+  built from the previous register. **Unguarded:** an edit that SWAPS one alias
+  id for another in HAND_MERGES or CANDIDATES keeps both the count and the tail,
+  and the stored column would silently keep the old register.
+
+* **A PAIR CAN LEAVE PENDING ONLY THE WAY SANA LEFT REFUSED.** A ruling moves
+  it to the end of `HAND_MERGES`, dated the ruling day, carrying the sweep's
+  figures, its `contradictions` and a `ruling: { by, on, words, over }`.
+  `assertRegister()` refuses an applied entry with a contradiction that no
+  `ruling.over` names — the `CANDIDATES` filter is not what keeps contradicted
+  pairs out of `HAND_MERGES`. Deleting the contradiction date to make the
+  filter let it through would be erasing the evidence the ruling was made over.
 
 ---
 
