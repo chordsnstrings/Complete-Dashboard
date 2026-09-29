@@ -172,6 +172,10 @@ const EXEMPT = {
     + 'getFleetBalanceDetails, three paths the collector has never called. It settles whether '
     + 'Bolt dates a payout individually (it does: `finished` is a unix second) before a collector '
     + 'is written against it. Not a page: it returns shape and totals, never a payout row.',
+  '/api/probe/yango/weekly-rebuild': 'operator tool: puts Yango\u2019s weekly per-driver summary, '
+    + 'rebuilt from the API key\u2019s trips and ledger, beside every week the console delivered, so '
+    + 'the rebuild is checked before the collector writes it (src/yango_rebuild.js). Database only; '
+    + 'read once per decision, not a page',
   '/api/probe/yango/ledger': 'operator tool: asks BOTH v1 and v2 of Yango\u2019s transactions '
     + 'paths side by side, because src/sources/yango.js records a v1 404 and concludes the ledger '
     + 'is unreachable \u2014 while Yango publishes no v1 under Transactions at all. Two 404s and '
