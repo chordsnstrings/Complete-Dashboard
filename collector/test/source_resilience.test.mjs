@@ -59,8 +59,14 @@ check('uber_timeline: and each refusal says whether it implicates the credential
 
 /* ── 3. one window's refusal is not the run's ────────────────────────────── */
 const ya = src('yango.js');
-check('yango: a refused driver week is caught and the walk carries on',
-  /catch \(e\) \{[\s\S]{0,300}?chunks\.push\(\{[\s\S]{0,120}?error: why \}\);[\s\S]{0,40}?continue;/.test(ya),
+/* A refused week is caught and recorded as that week — and, since
+   2026-09-29, the walk STOPS there rather than carrying on: the console is
+   refused at Yandex's edge, a host that refused this minute refuses the next
+   week this minute too, and walking on was 105 refused requests every Sunday.
+   The rest of the run is unaffected, which is what this check was written to
+   protect; test/yango_once_a_day.test.mjs drives the stop. */
+check('yango: a refused driver week is caught, recorded as that week, and does not take the run with it',
+  /catch \(e\) \{[\s\S]{0,400}?chunks\.push\(\{[\s\S]{0,120}?error: why \}\);[\s\S]{0,40}?break;/.test(ya),
   'post() throws on >= 400 and nothing stood between it and collect()');
 /* Every surface guarded on its own — and there are five now, across two hosts.
    Counted rather than listed: the roster and the cars arrived on 2026-09-07
@@ -84,8 +90,8 @@ check('yango: a refused driver week is caught and the walk carries on',
     pulls.length > 0 && called.length === pulls.length,
     `${called.length}/${pulls.length}: ${pulls.filter((p) => !called.includes(p)).join(', ') || 'all'}`);
 }
-check('yango: and the windows reach the run row',
-  /\.\.\.\(chunks\.length \? \{ chunks \} : \{\}\)/.test(ya));
+check('yango: and the windows reach the run row, as one surface of it',
+  /\.\.\.\(chunks\.length \? \{ chunks, chunks_cover: 'surface' \} : \{\}\)/.test(ya));
 
 const uq = src('uber.js');
 check('uber quality: a failed second report keeps what the first parsed',

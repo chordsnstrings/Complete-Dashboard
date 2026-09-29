@@ -100,12 +100,13 @@ const SEVERITY_OF = {
        said "stopped working … until they are replaced", and replacing it would
        have produced a new secret with exactly the same entitlement.
 
-     blocked — the credential authenticates and something IN FRONT of the API
-       refuses the caller. fleet.yango.com answers 403 with an HTML page from a
-       CDN edge while every Yango API refusal is JSON, the park returns 200 and
-       names ECOSINE TRANSPORTS LLC, and the same call answers 401 with the
-       cookie removed — a pair unreachable from one origin unless an edge is
-       deciding. Not a credential, not a URL: where the call comes from.
+     blocked — something IN FRONT of the API refuses the caller before any
+       credential is read. fleet.yango.com answers 403 with an HTML page from
+       a CDN edge while every Yango API refusal is JSON, and the same cookie
+       bytes answer 200 from another network. Not a credential, not a URL:
+       where the call comes from. (This used to open "the credential
+       authenticates", on a 403-with / 401-without pair that was two different
+       machines answering — see src/sources/yango.js readConsoleAnswer.)
 
      Both scored 'stopped' on the reasoning that "nothing is being collected
      and the severity is honestly identical". THAT PREMISE IS FALSE, and it was
@@ -169,11 +170,16 @@ export const ERRANDS = {
       + `${n === 1 ? 'is' : 'are'} refused the company or park, which is a permission to grant `
       + 'rather than a secret to replace',
   },
+  /* Not "the credential authenticates" any more (2026-09-29). The one
+     surface in this state is Yango's console, where the edge refuses this
+     server before the API reads the session; the old reading of 403-with /
+     401-without as proof of a working session compared two different
+     machines' answers. src/sources/yango.js readConsoleAnswer has it. */
   blocked: {
     noun: 'call',
     whole: (n) => `${n === 1 ? 'A surface is' : `${n} surfaces are`} being refused before the request `
-      + `reaches the provider — ${n === 1 ? 'the credential authenticates' : 'the credentials authenticate'} `
-      + 'and something in front of the API is turning this caller away, so there is nothing to re-paste',
+      + 'reaches the provider — something in front of the API is turning this server away before '
+      + 'any credential is read, so there is nothing to re-paste',
     part: (n) => `${n} of them refused in front of the API, where no credential is being read`,
   },
 };

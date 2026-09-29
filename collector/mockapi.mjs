@@ -6927,7 +6927,7 @@ app.get('/api/settings', (_, r) => r.json([
     secret: true, source: 'unset', configured: false, value: '', updated_at: null,
     seen_by: [{ component: 'collector', source: 'environment', observed_at: new Date().toISOString() }] },
   // And one genuinely missing everywhere, so the two render differently.
-  { key: 'YANGO_COOKIE', group: 'Yango', label: 'Yandex session cookie', hint: 'Expires — re-paste from a logged-in fleet.yango.com session',
+  { key: 'YANGO_COOKIE', group: 'Yango', label: 'Yandex session cookie', hint: 'Used only for the weekly per-driver summary (online hours); trips, drivers, cars and payments come from the API key. Yandex\u2019s edge refuses this server\u2019s address before it reads the session, so re-pasting cannot help until that changes. The console is asked once a day.',
     secret: true, source: 'unset', configured: false, value: '', updated_at: null, seen_by: [] },
   { key: 'CABMAN_PASS', group: 'CABMAN', label: 'Password', hint: null,
     secret: true, source: 'environment', configured: true, value: '••••••••7f2a', updated_at: null },

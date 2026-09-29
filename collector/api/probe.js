@@ -2252,8 +2252,13 @@ export function probeRoutes(app, { wrap }) {
       reading: withCookie.status === 200
         ? 'this host is accepted — Yango is collecting'
         : withCookie.status === 403 && bare.status === 401
-          ? 'the park id clears the pre-auth gate and the session authenticates, so the 403 is '
-            + 'not about the cookie. Settled 2026-09-22 with the same cookie bytes: this '
+          /* Not "the session authenticates" (2026-09-29): the 403 is Yandex's
+             edge and the 401 is Yango's API, two different machines, and the
+             edge refused before the API read the session. src/sources/
+             yango.js readConsoleAnswer has the table. */
+          ? 'Yandex\u2019s edge refused this server before Yango\u2019s API read the session — the 401 '
+            + 'without a cookie is the API itself answering, a different machine — so whether the '
+            + 'session is signed in cannot be told from here. Settled 2026-09-22 with the same cookie bytes: this '
             + 'deployment gets 403 with an HTML page from a Yandex CDN edge while the identical '
             + 'request from another network answers 200 with the fleet\u2019s driver rows. It is '
             + 'this caller\u2019s address, and no re-paste changes an address'
@@ -2667,6 +2672,37 @@ export function probeRoutes(app, { wrap }) {
      Two 404s and two 200s is the finding; four 404s would mean the docs
      describe a product this key is not entitled to, which is a different
      finding and needs a different fix. Neither is worth guessing at. */
+  /* YANGO'S WEEKLY SUMMARY, REBUILT, BESIDE EVERY WEEK THE CONSOLE DELIVERED.
+     The console's per-driver weekly aggregate stops at the week ending
+     2026-09-06 because Yandex's edge refuses this server; the trips and the
+     payment ledger it summarised keep arriving on the API key. This puts the
+     rebuild (src/yango_rebuild.js) next to the 855 driver-weeks the console
+     did deliver and reports, per figure and per candidate formula, how many
+     agree — which is what decides whether the collector may write rebuilt
+     rows at all. Database only: no provider is asked, and no driver id or
+     name is in the answer. */
+  app.get('/api/probe/yango/weekly-rebuild', wrap(async (req, res) => {
+    const ISO = /^\d{4}-\d{2}-\d{2}$/;
+    const monday = (d) => {
+      const x = new Date(`${d}T00:00:00Z`);
+      x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7));
+      return x.toISOString().slice(0, 10);
+    };
+    const lastClosed = (() => {
+      const x = new Date(`${monday(dubaiIso())}T00:00:00Z`);
+      x.setUTCDate(x.getUTCDate() - 7);
+      return x.toISOString().slice(0, 10);
+    })();
+    const { rows: [first] } = await pool.query(
+      `SELECT to_char(min(period_start), 'YYYY-MM-DD') AS s FROM driver_performance WHERE platform = 'yango'`);
+    const from = monday(ISO.test(String(req.query.from || '')) ? String(req.query.from) : (first?.s || lastClosed));
+    const to = monday(ISO.test(String(req.query.to || '')) ? String(req.query.to) : lastClosed);
+    if (from > to) return res.status(400).json({ error: `from (${from}) is after to (${to})` });
+    const { compareRebuild } = await import('../src/yango_rebuild.js');
+    res.set('cache-control', 'no-store');
+    res.json(await compareRebuild(pool, { from, to }));
+  }));
+
   app.get('/api/probe/yango/ledger', wrap(async (req, res) => {
     await loadSettings();
     const park = config.yango.parkId || '';

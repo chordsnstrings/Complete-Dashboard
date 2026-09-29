@@ -35,8 +35,12 @@ check('…naming the credential an operator has to replace',
    whole run — but it must still REACH the run as an error rather than an 'ok'
    with nothing in it, which is the thing this file is about. Two paths carry
    that: the status computed from `fails`, and the outer catch. */
+/* The window was 80 characters and is now 200: since 2026-09-29 a failed
+   TRIPS surface decides 'error' on its own before the partial/error split
+   (see collect()), which puts one more clause between the two. */
 check('a raised refusal reaches the run log as an error',
-  /fails\.length === 0 \? 'ok'[\s\S]{0,80}?'partial' : 'error'/.test(yango)
+  /fails\.length === 0 \? 'ok'[\s\S]{0,200}?'partial' : 'error'/.test(yango)
+  && /f\.startsWith\('trips:'\)\) && !trips \? 'error'/.test(yango)
   /* Comments blanked: the catch now carries a paragraph explaining why it is
      still there, and a character window measured over prose is a window that
      fails when somebody documents their code. */

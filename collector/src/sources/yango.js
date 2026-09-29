@@ -49,6 +49,8 @@ import { iso, closedWeeks, dubaiIso } from '../util.js';
 import { log } from '../log.js';
 import { stateRow, rawJson } from '../roster.js';
 import { noteCredential } from '../auth_state.js';
+import { egressAddress } from '../egress.js';
+import { weekComponents, rebuiltRows, REBUILD_WRITES } from '../yango_rebuild.js';
 
 const SRC = 'yango';
 
@@ -142,224 +144,152 @@ const keyHeaders = () => ({
    swallowing. So the refusal is raised here, where the run can record it,
    which is the same fix fms.js already carries for the same reason. */
 /* Who the pasted session belongs to, read out of the cookie rather than
-   guessed. "Sign in as an account that owns this park" is not an instruction
-   somebody can follow without knowing which account they are currently signed
-   in as, and the cookie carries it. */
+   guessed. "Sign in again" is not an instruction somebody can follow without
+   knowing which account they are currently signed in as, and the cookie
+   carries it. */
 const yangoAccount = () => {
   const m = /(?:^|;\s*)yandex_login=([^;]+)/.exec(config.yango.cookie || '');
-  return m ? decodeURIComponent(m[1]).slice(0, 60) : null;
+  try { return m ? decodeURIComponent(m[1]).slice(0, 60) : null; } catch { return null; }
 };
 
-/* The console's half of the same bookkeeping — see keyRefusals. */
-const consoleRefusals = new Set();
+/* WHAT A CONSOLE ANSWER PROVES, AND WHAT IT DOES NOT — read, not compared.
+   ─────────────────────────────────────────────────────────────────────────
+   Until 2026-09-29 every refusal here sent a second, cookie-free copy of the
+   request, and a 403 with the cookie beside a 401 without it was read as "the
+   session AUTHENTICATES" — YANGO_COOKIE was written 'ok' on that evidence, the
+   paste box said "the session authenticates as <the account>", and the panel
+   showed the cookie green from 2026-09-06 onwards.
+
+   The two answers came from two different machines. The 403 is an HTML page
+   from Yandex's CDN edge (its <title> is 403, its CSS and logo are served
+   from cdn.yandex.net, and every Yango API refusal is JSON). The 401 is JSON
+   from Yango's API. The edge turned the first request away BEFORE the API saw
+   the session, so the pair proves only that the edge reacts to a cookie being
+   present — not that the session is signed in. Measured on production
+   2026-09-29: a cookie pasted at 09:19:39Z was refused at the edge within
+   seconds from both containers, and the panel showed it 'ok' forty minutes
+   later without anything having read it. A green row nobody earned is the
+   reason the house principle exists: stated as true, and not established.
+
+   The comparison also doubled every refused request, and there were about a
+   thousand a week (incremental every 30 minutes, the daily catch-up, and 105
+   weeks every Sunday — 210 requests in one burst), all of them refused.
+
+   So each answer is read for what it is, once, with no second request:
+
+     answer                               console row   cookie row
+     200 JSON with items                  ok            ok        (proven)
+     an HTML page, any status             blocked       unknown   (not read)
+     401 JSON from the API                expired       expired   (signed out)
+     a redirect off fleet.yango.com
+       to a passport/sign-in host         expired       expired   (signed out)
+     403 JSON from the API                unentitled    unknown
+     anything else                        unknown       unknown
+
+   'unknown' for the cookie is the true state while the edge refuses this
+   server: whether the session is signed in cannot be told from here. The
+   panel scores it at-risk rather than red or green, and last_ok_at keeps the
+   last time it was genuinely proven. */
+const EDGE_PAGE = /<html|<!doctype/i;
+export function readConsoleAnswer(r, base = config.yango.base) {
+  const status = Number(r?.status) || 0;
+  const page = typeof r?.data === 'string' && EDGE_PAGE.test(r.data);
+  const host = (u) => { try { return new URL(u).host; } catch { return null; } };
+  const landed = r?.redirected ? host(r.finalUrl) : null;
+  const offHost = landed && landed !== host(base);
+  if (offHost) {
+    const signIn = /passport|sso|login|auth/i.test(`${landed}${String(r.finalUrl).split(landed)[1] || ''}`);
+    return signIn
+      ? { kind: 'signed_out', ok: false, console: 'expired', cookie: 'expired',
+        why: `redirected to ${landed} — the session is signed out` }
+      : { kind: 'moved', ok: false, console: 'moved', cookie: 'unknown',
+        why: `redirected to ${landed}, which is not the console` };
+  }
+  if (status >= 200 && status < 300 && r.data && typeof r.data === 'object' && Array.isArray(r.data.items)) {
+    return { kind: 'answered', ok: true, console: 'ok', cookie: 'ok', why: null };
+  }
+  /* A page with a success status is not the edge refusing: it is something
+     answering with a page where the API answers JSON — a sign-in page served
+     without a redirect is the likeliest. Not called 'blocked', because that
+     sends an operator after the address when the session may be the fault. */
+  if (page && status >= 200 && status < 300) {
+    return { kind: 'failed', ok: false, console: 'unknown', cookie: 'unknown',
+      why: `an HTML page with HTTP ${status} instead of the driver list — often a sign-in page` };
+  }
+  if (page) {
+    return { kind: 'edge', ok: false, console: 'blocked', cookie: 'unknown',
+      why: `an HTML page from Yandex’s edge (HTTP ${status}), refusing this server before Yango’s API reads anything` };
+  }
+  if (status === 401) {
+    return { kind: 'signed_out', ok: false, console: 'expired', cookie: 'expired',
+      why: 'Yango’s API answered 401 — the session is signed out' };
+  }
+  if (status === 403) {
+    const said = r.data && typeof r.data === 'object'
+      ? [r.data.code, r.data.message].filter(Boolean).join(': ').slice(0, 80) : '';
+    return { kind: 'refused', ok: false, console: 'unentitled', cookie: 'unknown',
+      why: `Yango’s API refused park ${config.yango.parkId} (403${said ? ` ${said}` : ''})` };
+  }
+  return { kind: 'failed', ok: false, console: 'unknown', cookie: 'unknown',
+    why: status >= 200 && status < 300
+      ? `HTTP ${status} with no driver list in it`
+      : `HTTP ${status || 'no status'}` };
+}
+
+/* The page, as text, so the log keeps what it SAYS rather than its markup.
+   http.js logs the first 600 characters of any refused body, which on this
+   page ends inside an empty <pre> — whatever the edge says after it (a rule
+   reference, a request id, an address) was cut off every time. It is asked
+   once a day now, so the whole text is affordable. */
+export const pageText = (html) => String(html || '')
+  .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+  .replace(/<[^>]+>/g, ' ')
+  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+  .replace(/\s+/g, ' ').trim();
+
+/* The panel's sentence per state. noteCredential keeps 240 characters, so
+   these are written to fit rather than cut. */
+const cookieDetail = (v, ip) => ({
+  ok: null,
+  expired: `signed out — ${v.why}. Sign in to fleet.yango.com${yangoAccount() ? ` as ${yangoAccount()}` : ''} `
+    + 'and paste the session again; only the weekly summary uses it.',
+  unknown: v.kind === 'edge'
+    ? `not checked — Yandex’s edge refused this server${ip ? ` (${ip})` : ''} before Yango read the `
+      + 'session, so whether it is signed in cannot be told from here. Re-pasting cannot change that.'
+    : `not established — ${v.why}.`,
+}[v.cookie] ?? null);
+const consoleDetail = (v, ip) => (v.ok ? null
+  : `fleet.yango.com: ${v.why}${ip ? `; asked from ${ip}` : ''}. Only the weekly per-driver `
+    + 'summary is behind it; asked once a day.');
 
 const post = async (path, body) => {
+  /* No retries. http() retries 429 and 5xx four times with backoff, which is
+     right for a host that answers; this one is asked once a day precisely so
+     that it is asked as little as possible. */
   const r = await http(`${config.yango.base}${path}`, {
-    method: 'POST', headers: headers(), body: JSON.stringify(body),
+    method: 'POST', headers: headers(), body: JSON.stringify(body), retries: 0,
   });
-  if (r.status && r.status >= 400) {
-    let hint = '';
-    consoleRefusals.add(path);
-    if (r.status === 401 || r.status === 403) {
-      /* Which of the three credentials is being refused.
-         ─────────────────────────────────────────────────────────────────
-         Every request carries the park id, the API key AND the cookie, so
-         the refusal on its own names none of them. This used to name the
-         cookie regardless: "the Yandex session has expired; re-paste
-         YANGO_COOKIE". Measured 2026-09-02, the endpoint answers the same
-         403 with the cookie header omitted entirely — so that sentence sent
-         an operator to re-capture a session that was never the question,
-         and the real suspect went unnamed for as long as they believed it.
-
-         One extra request settles it, and it is worth one request: this
-         path is only reached when the run is already lost. */
-      /* The SAME request minus the cookie — that is the whole experiment, and
-         it is only a clean one if the cookie is the only thing that differs.
-         The X-API-Key that used to be on both sides has gone from both, since
-         the host ignores it either way (measurement above headers()). */
-      const bare = await http(`${config.yango.base}${path}`, {
-        method: 'POST', body: JSON.stringify(body),
-        headers: { 'X-Park-Id': config.yango.parkId,
-          'content-type': 'application/json', 'Accept-Language': 'en' },
-      }).catch(() => null);
-      const cookieIsNotIt = bare && bare.status === r.status;
-      /* The bare status is recorded either way, because the verdict is only
-         as good as the comparison behind it and the comparison is invisible
-         once it has been turned into a sentence. A probe that could not run
-         at all (network, proxy, a throw) must not silently become evidence
-         FOR the cookie — that is how the old unconditional hint got there. */
-      const bareSays = bare ? `without a cookie: HTTP ${bare.status}` : 'the cookie-free probe did not complete';
-      hint = cookieIsNotIt
-        ? ` — the same refusal arrives with no cookie at all, so the session is not what is being rejected;`
-          /* YANGO_API_KEY is deliberately NOT named here any more: this host
-             ignores the header entirely (measured, see above headers()), so
-             sending somebody to re-paste it is the exact mistake the rest of
-             this block exists to stop making. */
-          + ` check YANGO_PARK_ID (${config.yango.parkId}) — this host does not read YANGO_API_KEY`
-        : bare
-          /* The sibling branch's advice was the very mistake this block was
-             written to end, one line further down.
-             ─────────────────────────────────────────────────────────────
-             A 401 without the cookie and a 403 with it is proof the session
-             AUTHENTICATES — that is what the sentence says — and the reply
-             was "re-paste YANGO_COOKIE", which is work that cannot change the
-             answer. A fresh cookie for the same account authenticates the same
-             way and is refused the same way. Measured on production
-             2026-09-03: a cookie captured that morning, verified live by
-             src/credcheck.js as a real fleet session for muzammil16075, and
-             still 403 on this park.
-             403 after authenticating is about ENTITLEMENT, so it names the
-             three things it can be: the account may not hold this park, the
-             park id may be another park's, or the API key may be. The account
-             is read out of the cookie because "sign in as somebody who owns
-             this park" is unactionable if the operator cannot see who they
-             are currently signed in as. */
-          /* AND THE FOURTH POSSIBILITY, which is the one that turned out to be
-             true and which this sentence did not name.
-             ─────────────────────────────────────────────────────────────
-             Measured 2026-09-07, minutes apart, with production's stored
-             YANGO_PARK_ID and YANGO_COOKIE confirmed updated at 08:11:14Z:
-
-               the same URL, method, headers and body, with the same park id
-               and the same session, answered HTTP 200 with live orders from
-               one host and HTTP 403 from the deployed app.
-
-             Both hosts get 401 with the cookie removed, so the park id clears
-             the pre-auth gate from both — an unrecognised park refuses 403
-             with AND without a session, which is the other branch. And the
-             API key is inert on this host: the same call returns a
-             byte-identical 200 with a junk key and with no key header at all.
-
-             That leaves nothing about the credentials. What differs is where
-             the call comes FROM, and no amount of re-pasting changes a
-             caller's address. Naming it matters because the three suspects
-             this sentence used to list are all things an operator can go and
-             fix, and they would have spent the afternoon fixing them. */
-          ? ` — with no cookie this call answers HTTP ${bare.status} instead, so the session IS`
-            + ` being read and authenticates${yangoAccount() ? ` as ${yangoAccount()}` : ''};`
-            + ' a 403 after that is about entitlement or origin rather than the session. That'
-            + ' used to be a list of four suspects, three of them credentials an operator'
-            + ' could go and re-paste. IT IS NOW SETTLED, with the strongest control there'
-            + ' is — the SAME COOKIE BYTES. Measured 2026-09-22: this deployment holds the'
-            + ` session captured that morning and, on park ${config.yango.parkId}, gets 403`
-            + ' with an HTML page from a Yandex CDN edge, while the identical cookie, park id,'
-            + ' path, method and body sent from another network the same minute answers HTTP'
-            + ' 200 with the fleet\u2019s real driver rows. So the entitlement question is'
-            + ' closed — the account, the park and the key are all fine — and the'
-            + ' refusal is of this HOST, or rather of this caller\u2019s address.'
-            + ' Re-capturing this cookie cannot help, and re-pasting the park id or the'
-            + ' API key will not change it either. What can is'
-            + ' egressing this app from an address Yango\u2019s edge does not refuse'
-          : ' — and the cookie-free comparison did not complete, so which credential is being'
-            + ' refused is not yet established';
-      /* The cookie is recorded as WORKING when it demonstrably worked.
-         ─────────────────────────────────────────────────────────────────
-         Blaming a different credential stops writing red rows against this
-         one; it does not clear the red row already there. Measured on
-         production 2026-09-03, minutes after the fix that stopped blaming the
-         cookie shipped: /api/auth carried BOTH `YANGO_PARK_ID invalid` from
-         the new code and `YANGO_COOKIE invalid` from the old, so the panel
-         accused a session that had just authenticated, for ever, because
-         nothing would ever overwrite it. Same shape as src/sources/fms.js
-         never writing 'ok' — a state only something can clear.
-
-         The evidence is the comparison itself: a 401 without the cookie and a
-         403 with it is the portal reading the session. That is a working
-         cookie whatever else is refused. */
-      if (bare && !cookieIsNotIt) {
-        await noteCredential(pool, {
-          provider: SRC, fleet: config.yango.fleet || '*', credential: 'YANGO_COOKIE',
-          state: 'ok', surface: path, detail: null,
-        });
-      }
-      /* Recorded, not only thrown: a thrown error dies with the run, and the
-         credential panel is where somebody goes to find out what to re-paste.
-         Uber has done this since the OAuth work; the other five sources never
-         did, so their refusals reached the operator as a source that had
-         simply gone quiet. */
-      /* NOT YANGO_PARK_ID any more, and the reason is that something else now
-         proves it every run.
-         ─────────────────────────────────────────────────────────────────
-         This wrote `YANGO_PARK_ID: invalid` — correct while the console was
-         the only host, and destructive the moment keyPost() started writing
-         `YANGO_PARK_ID: ok` from fleet-api.yango.tech. Both would run in the
-         same collect(): the key host would prove the park id, and then these
-         two console-only surfaces would fail four lines later and mark the
-         same row invalid. Last write wins, so the panel would have gone red
-         after every successful run, for a park the collector had just read
-         145 drivers and 104 cars from.
-
-         The console failure is real and belongs on the panel. It is just not
-         ABOUT the park id, the API key or the session: the park answers 200
-         and names ECOSINE TRANSPORTS LLC, the session authenticates (that is
-         what the 401-without-cookie comparison above establishes), and the
-         403 arrives as an HTML page from a CDN edge while every Yango API
-         refusal is JSON. So it gets a row of its own, under a name that says
-         what it is, in the state that asks for the right errand — 'blocked',
-         which api/auth_routes.js scores as stopped and describes as refused
-         in front of the API rather than as a credential to replace. */
-      /* 'blocked' keys on WHAT the cookie-free probe said, not merely on
-         whether it completed.
-         ─────────────────────────────────────────────────────────────────
-         The same refusal with and without a session — cookieIsNotIt — is the
-         signature of a park this host does not recognise, which the branch
-         above says in so many words. Writing 'blocked' for it would tell an
-         operator that something in front of the API is turning the caller
-         away, over a refusal that is about the park. 'blocked' is earned only
-         by the asymmetry: authenticated with a session, refused anyway.
-
-         Which does not make it the park id's fault either, because
-         fleet-api.yango.tech proves that park every run with the same id. So
-         the honest state for the symmetric case is 'unknown' — this host
-         refuses this park and nothing here establishes why. */
-      await noteCredential(pool, {
-        provider: SRC, fleet: config.yango.fleet || '*',
-        credential: 'YANGO_CONSOLE',
-        state: bare && !cookieIsNotIt ? 'blocked' : 'unknown', surface: path,
-        detail: `fleet.yango.com HTTP ${r.status}; ${bareSays}.`
-          + (cookieIsNotIt
-            ? ' The same refusal arrives with no session at all, so nothing here says what is'
-              + ' being rejected — and it is not the park id, which fleet-api.yango.tech accepts'
-              + ' on every run with this same value.'
-            /* The ledger came off this host on 2026-09-16 — it is
-               /v2/parks/transactions/list on the key host and has been
-               collecting since. Saying it is still blocked here overstates
-               what is missing, and an overstated gap is the same lie as an
-               understated one. YANGO_SURFACES.console is now one path. */
-            : ' The park id is proven every run by fleet-api.yango.tech, which serves trips,'
-              + ' the roster, the cars and the payment ledger; the weekly per-driver aggregate'
-              + ' is the only thing left behind this host, and it is refused by an edge in'
-              + ' front of the API rather than by any credential — the same request from'
-              + ' another network, with this same cookie, has been measured answering 200.'),
-      });
-    }
-    throw new Error(`yango ${path} refused: HTTP ${r.status}${hint}`);
+  const v = readConsoleAnswer(r);
+  const refused = r.status && r.status >= 400;
+  const ip = v.ok ? null : await egressAddress();
+  if (v.kind === 'edge') {
+    log.warn(SRC, 'console refused at the edge', { path, status: r.status, egress: ip,
+      bytes: String(r.data).length, page: pageText(r.data).slice(0, 4000) });
   }
-  /* ── the console answered, so its own row goes green ─────────────────────
-     The "a state only something can clear" fix went in for YANGO_COOKIE and
-     stopped there — and it stopped one line above the call that made
-     YANGO_PARK_ID the new write-invalid-only key. There is no YANGO_PARK_ID
-     checker in src/credcheck.js either, so once that row went red nothing in
-     the product could ever turn it green again, and api/auth_routes.js scores
-     'invalid' as "stopped" for ever.
-
-     A 200 here is the proof that the CONSOLE is reachable again — which is
-     the only thing this host can still prove, now that the park id and the API
-     key are established every run by keyPost() against fleet-api.yango.tech.
-     Writing them from here as well would be two writers on one row, and the
-     one that ran last would decide the colour. The same standard the cookie is
-     held to eleven lines up, and the same one fms.js and uber.js apply. */
-  /* Only when NOTHING on this host has been refused during the run. Both
-     console surfaces write this one row and the ledger runs last, so a refused
-     weekly aggregate followed by a ledger page that happened to answer would
-     have painted the console green over its own failure. Same rule and same
-     reason as keyRefusals above. */
-  consoleRefusals.delete(path);
-  if (consoleRefusals.size === 0) {
-    await noteCredential(pool, {
-      provider: SRC, fleet: config.yango.fleet || '*', credential: 'YANGO_CONSOLE',
-      state: 'ok', surface: path, detail: null,
-    });
+  /* Both rows, every time, from what THIS answer shows. The cookie row is the
+     one the operator reads to decide whether to re-paste, so it is never
+     written 'ok' by anything short of an answer. */
+  await noteCredential(pool, {
+    provider: SRC, fleet: config.yango.fleet || '*', credential: 'YANGO_CONSOLE',
+    state: v.console, surface: path, detail: consoleDetail(v, ip),
+  });
+  await noteCredential(pool, {
+    provider: SRC, fleet: config.yango.fleet || '*', credential: 'YANGO_COOKIE',
+    state: v.cookie, surface: path, detail: cookieDetail(v, ip),
+  });
+  if (refused || !v.ok) {
+    throw new Error(`yango ${path} refused: HTTP ${r.status} — ${v.why}${ip ? ` (from ${ip})` : ''}`);
   }
   return r;
 };
@@ -762,35 +692,115 @@ async function pullCars() {
    help, because nothing finer existed for the days only the year-row covered.
    The window a report is asked for is the key it is stored under; a moving
    window is a duplicate and a huge one is a smear. */
-async function pullDrivers(from, to, chunks = []) {
+/* ONCE A DUBAI DAY, AND ONLY FOR WEEKS WE DO NOT HAVE. (2026-09-29)
+   ─────────────────────────────────────────────────────────────────────────
+   This asked every closed week in the run's window on every run: the
+   half-hourly incremental, the daily 30-day catch-up (five weeks) and the
+   Sunday backfill (105 weeks), each refusal doubled by a cookie-free copy.
+   About a thousand requests a week to a host that has refused every one of
+   them since 2026-09-12, from an address its edge was already scoring as a
+   robot — the volume is one of the things that may keep it that way, and it
+   bought nothing: a refused week is refused whether it is asked once or
+   forty-eight times.
+
+   So the console is asked at most once per Dubai day (or once more after a
+   new session is saved on the Settings page, which deserves its own try), for
+   the closed weeks that hold no console-written rows, newest first, stopping
+   at the first refusal. A day it answers, up to CONSOLE_WEEKS_PER_DAY weeks
+   are fetched in one go. The cost is that a recovery is noticed within a day
+   rather than half an hour, for a weekly figure.
+
+   The one row every attempt writes — YANGO_CONSOLE's checked_at — is the
+   gate, so it survives the redeploys that start a new process (28 on
+   2026-09-10 alone) without a table of its own. */
+export const CONSOLE_WEEKS_PER_DAY = 8;
+/* The key in driver_performance.raw that marks a week REBUILT from the key
+   host rather than read from the console, so that the console can still fill
+   and overwrite it the day it answers. */
+export const REBUILT_MARK = 'rebuilt_from';
+
+export async function consoleGate(db = pool, now = new Date()) {
+  const { rows } = await db.query(
+    `SELECT c.checked_at, c.state,
+            (SELECT updated_at FROM app_setting WHERE key = 'YANGO_COOKIE') AS saved_at
+       FROM credential_state c
+      WHERE c.provider = $1 AND c.credential = 'YANGO_CONSOLE'
+      ORDER BY c.checked_at DESC NULLS LAST LIMIT 1`, [SRC]).catch(() => ({ rows: [] }));
+  const last = rows?.[0];
+  const asked = last?.checked_at ? new Date(last.checked_at) : null;
+  if (!asked || Number.isNaN(asked.getTime())) return { open: true, why: 'never asked' };
+  const saved = last.saved_at ? new Date(last.saved_at) : null;
+  if (saved && saved > asked) return { open: true, why: 'a new session was saved after the last attempt' };
+  if (dubaiIso(asked) !== dubaiIso(now)) return { open: true, why: 'not yet asked today' };
+  return { open: false, asked, state: last.state };
+}
+
+/* Closed weeks in the window holding no console-written row, newest first —
+   the week that has just closed is the one a reader is waiting for. */
+async function weeksWanted(from, to, now = new Date(), db = pool) {
+  const weeks = [...closedWeeks(from, to, now)];
+  if (!weeks.length) return [];
+  const { rows } = await db.query(
+    `SELECT DISTINCT period_start::text AS s FROM driver_performance
+      WHERE platform = $1 AND period_start BETWEEN $2::date AND $3::date
+        AND period_end = period_start + 6
+        AND NOT coalesce(raw ? '${REBUILT_MARK}', false)`,
+    [SRC, iso(weeks[0].start), iso(weeks.at(-1).start)]).catch(() => ({ rows: [] }));
+  const have = new Set((rows || []).map((r) => String(r.s).slice(0, 10)));
+  return weeks.filter((w) => !have.has(iso(w.start))).reverse();
+}
+
+/* Not asked, on purpose. A run that skipped the console because it refused
+   earlier today is not a run where everything worked, so it still reaches
+   the run's status — as 'partial', with this sentence — but it is not an
+   error to be logged at error level every half hour. */
+class Held extends Error {}
+const dubaiClock = (d) => new Date(d.getTime() + 4 * 3600e3).toISOString().slice(11, 16);
+
+async function pullDrivers(from, to, chunks = [], now = new Date()) {
   let total = 0;
+  const wanted = await weeksWanted(from, to, now);
+  if (!wanted.length) return 0;
+  const gate = await consoleGate(pool, now);
+  if (!gate.open) {
+    /* Answered today: whatever is still missing waits for tomorrow's pass. */
+    if (gate.state === 'ok') return 0;
+    throw new Held(`not asked — ${wanted.length} closed week${wanted.length === 1 ? '' : 's'} missing; `
+      + `fleet.yango.com was asked at ${dubaiClock(gate.asked)} Dubai today and refused (${gate.state}), `
+      + 'so it is asked again tomorrow, or sooner if a new session is saved');
+  }
   /* closedWeeks, for the same reason Uber uses it: driver_performance is keyed
      on (period_start, period_end), so an open week asked for today would key a
      partial week under the whole week's identity — and this endpoint aggregates
      whatever range it is given, which is the smear the comment above is about.
      The week lands when it closes. */
-  for (const { start, end } of closedWeeks(from, to)) {
-    /* PER WEEK, like fms.js and uber.js already do.
-       ─────────────────────────────────────────────────────────────────────
-       post() throws on any status >= 400 and nothing stood between it and
-       collect()'s single catch, so one refused week abandoned every LATER week
-       — and, because collect() ran all three pulls in one try, the trips and
-       the ledger with them. weekChunks yields oldest-first, so a refusal on
-       the oldest week of a backfill cost the entire run: exactly the shape
-       that had Bolt writing 70 rows over two years.
-
-       A window that refused is a window, not a run. */
+  for (const { start, end } of wanted.slice(0, CONSOLE_WEEKS_PER_DAY)) {
+    /* PER WEEK, like fms.js and uber.js already do — and now STOPPING at the
+       first refusal rather than walking on. A window that refused is a
+       window, not a run; but a host that refused this minute will refuse the
+       next week this minute too, and asking it again is the volume the
+       paragraph above is about. */
     let data = null;
     try {
       ({ data } = await post(YANGO_SURFACES.console.summary,
         { date_from: iso(start), date_to: iso(end), sort: { field: 'driver_id', direction: 'asc' } }));
     } catch (e) {
-      const why = String(e && e.message ? e.message : e).slice(0, 200);
-      log.warn(SRC, 'driver week refused', { from: iso(start), to: iso(end), err: why });
+      const why = String(e && e.message ? e.message : e).slice(0, 300);
+      log.warn(SRC, 'driver week refused', { from: iso(start), to: iso(end), err: why,
+        not_asked: wanted.length - 1 });
       chunks.push({ from: iso(start), to: iso(end), rows: 0, error: why });
-      continue;
+      break;
     }
     const items = data?.items || [];
+    /* The console's own week replaces a REBUILT one whole: a driver the
+       rebuild filed and the console did not would otherwise keep a rebuilt
+       row beside the console's rows for the same week. Only when it answered
+       WITH drivers — an empty list is not the console's account of a week
+       the key host saw trips in, and must not erase that account. */
+    if (items.length) {
+      await pool.query(`DELETE FROM driver_performance WHERE platform = $1 AND period_start = $2::date
+        AND period_end = $3::date AND coalesce(raw ? '${REBUILT_MARK}', false)`, [SRC, iso(start), iso(end)]);
+    }
     /* NO LIMIT IS SENT AND NO CURSOR IS READ, while both sibling endpoints in
        this file page. uber.js:1115 records what that cost once already on the
        identical shape — an API's default page of 50 against a 152-driver
@@ -905,7 +915,7 @@ async function maybeRoster(data) {
    a headline. It lands in `components` and in `unclassified`, and the run logs
    it by name — because a new group quietly added to `earnings` would move a
    money figure with nothing anywhere saying why. */
-const LEDGER_GROUPS = Object.freeze({
+export const LEDGER_GROUPS = Object.freeze({
   cash_collected: 'cash_collected',
   platform_card: 'earnings',
   platform_corporate: 'earnings',
@@ -1022,15 +1032,41 @@ async function pullLedger(from, to) {
   return total;
 }
 
+/* The weekly summary, rebuilt from the key host, for the closed weeks the
+   console has not delivered — src/yango_rebuild.js has the whole account,
+   including why online hours cannot be rebuilt. Only weeks the ledger's
+   history reaches: a week before it would have trips and no money, and a
+   zero there would be a figure nobody measured. */
+async function rebuildWeeks(from, to, now = new Date()) {
+  if (!REBUILD_WRITES) return 0;
+  const wanted = await weeksWanted(from, to, now);
+  if (!wanted.length) return 0;
+  const { rows: [span] } = await pool.query(
+    `SELECT min(event_at) AS first FROM ledger_entry WHERE platform = $1`, [SRC]);
+  if (!span?.first) return 0;
+  const covered = wanted.filter((w) => new Date(`${iso(w.start)}T00:00:00+04:00`) >= new Date(span.first));
+  if (!covered.length) return 0;
+  const comps = await weekComponents(pool, iso(covered.at(-1).start), iso(covered[0].start));
+  const keep = new Set(covered.map((w) => iso(w.start)));
+  for (const [k, c] of comps) if (!keep.has(c.ws)) comps.delete(k);
+  const rows = rebuiltRows(comps, { fleet: config.yango.fleet,
+    nameOf: (id) => nameFor(id, null), plateOf: (p) => (p ? normPlate(p) : null) });
+  if (rows.length) {
+    await upsertMany('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']);
+    log.info(SRC, 'weekly summary rebuilt from the key host',
+      { weeks: keep.size, driver_weeks: rows.length });
+  }
+  return rows.length;
+}
+
 export async function collect({ from, to, mode }) {
   /* Per RUN, not for the life of the process. The collector is long-lived and
      a refusal remembered across runs would keep a recovered surface red until
      a restart. */
   keyRefusals.clear();
-  consoleRefusals.clear();
   const fails = [];
   const chunks = [];
-  let drivers = 0, trips = 0, ledger = 0;
+  let drivers = 0, trips = 0, ledger = 0, rebuilt = 0;
   /* EACH SURFACE ON ITS OWN. Three endpoints — weekly driver summaries, the
      order list, the transaction ledger — sharing one try meant the first one
      to refuse took the other two with it, and this park refuses regularly.
@@ -1038,8 +1074,9 @@ export async function collect({ from, to, mode }) {
      having. */
   const surface = async (name, fn) => {
     try { return await fn(); } catch (e) {
-      const why = String(e && e.message ? e.message : e).slice(0, 200);
-      log.error(SRC, `${name} failed`, { err: why });
+      const why = String(e && e.message ? e.message : e).slice(0, 300);
+      if (e instanceof Held) log.info(SRC, `${name} held`, { why });
+      else log.error(SRC, `${name} failed`, { err: why });
       fails.push(`${name}: ${why}`);
       return 0;
     }
@@ -1064,8 +1101,9 @@ export async function collect({ from, to, mode }) {
        publishes no key-host replacement for the weekly per-driver aggregate,
        so this stays on the console — which is refused at Yandex's edge, so it
        is expected to fail and its failure is not news. It is still ATTEMPTED,
-       every run, because "the console started working again" is a fact nobody
-       will go and check by hand and this is the only thing that would notice.
+       once a day (see consoleGate above pullDrivers), because "the console
+       started working again" is a fact nobody will go and check by hand and
+       this is the only thing that would notice.
 
        THE LEDGER USED TO BE IN THIS SENTENCE AND WAS NEVER ENTITLED TO BE.
        It was filed as console-only on the strength of a 404 at
@@ -1076,19 +1114,38 @@ export async function collect({ from, to, mode }) {
     drivers = await surface('drivers (weekly aggregate — console only)',
       () => pullDrivers(from, to, chunks));
     ledger = await surface('ledger', () => pullLedger(from, to));
+    /* After the ledger, because the rebuild reads what it just wrote. */
+    rebuilt = await surface('weekly summary (rebuilt from the API key)', () => rebuildWeeks(from, to));
     log.info(SRC, 'names', { seeded: known, known: nameById.size });
     /* A floor the chunks can only worsen: logRun turns some-windows-failed into
        'partial' and all-failed into 'error', but it cannot see that a whole
        SURFACE was refused, because the driver weeks are the only windows here. */
+    /* AND THE CHUNKS ARE ONE SURFACE, NOT THE RUN. (2026-09-29)
+       ─────────────────────────────────────────────────────────────────────
+       The driver weeks are the only windows this source reports, so logRun
+       read "every window failed" as "the run failed" and wrote 'error' over
+       this 'partial'. Measured on production: every Yango run since the
+       console was refused was 'error' — incremental with 307 rows, catch-up
+       with 789, the Sunday backfill with 15,112 — while trips, the roster,
+       the cars and the ledger landed from the key host. /api/auth counts only
+       ok/partial runs as the channel still collecting, so the YANGO_API_KEY
+       and YANGO_PARK_ID rows had no run age at all and the console's
+       'blocked' could not be scored as the one surface it is.
+
+       `chunks_cover: 'surface'` tells logRun the windows belong to one
+       surface among several; the status above already folds that surface's
+       failure in. The trips surface is the one that decides 'error': a run
+       whose trips failed has not collected Yango, whatever else it wrote. */
     const status = fails.length === 0 ? 'ok'
-      : (roster + cars + trips + drivers + ledger > 0 ? 'partial' : 'error');
+      : fails.some((f) => f.startsWith('trips:')) && !trips ? 'error'
+        : (roster + cars + trips + drivers + ledger + rebuilt > 0 ? 'partial' : 'error');
     await logRun({ source: SRC, fleet_id: config.yango.fleet, mode,
       window_start: from, window_end: to, status,
-      ...(chunks.length ? { chunks } : {}),
-      rows_written: trips + drivers + ledger + roster + cars,
+      ...(chunks.length ? { chunks, chunks_cover: 'surface' } : {}),
+      rows_written: trips + drivers + ledger + roster + cars + rebuilt,
       error: fails.length ? fails.join('; ').slice(0, 500) : null });
     log[fails.length ? 'warn' : 'info'](SRC, 'done',
-      { trips, roster, cars, drivers, ledger, failed: fails.length || undefined });
+      { trips, roster, cars, drivers, ledger, rebuilt, failed: fails.length || undefined });
   } catch (e) {
     /* Every surface is guarded above, so this is the run row's own write. It
        stays because a source that throws without one disappears from the
@@ -1096,7 +1153,7 @@ export async function collect({ from, to, mode }) {
        actually landed rather than 0 — those rows are written and durable. */
     await logRun({ source: SRC, fleet_id: config.yango.fleet, mode,
       window_start: from, window_end: to, status: 'error',
-      rows_written: trips + drivers + ledger + roster + cars,
+      rows_written: trips + drivers + ledger + roster + cars + rebuilt,
       error: [String(e), ...fails].join('; ').slice(0, 500) });
     log.error(SRC, 'failed', { err: String(e) });
   }

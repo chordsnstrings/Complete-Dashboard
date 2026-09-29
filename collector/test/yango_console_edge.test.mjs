@@ -46,6 +46,10 @@
    Each fix was reverted in the working tree and this suite re-run. Recorded
    beside each group below.
 
+   2026-09-29: the cookie-free comparison request is gone and the refusal is
+   read for what it is (src/sources/yango.js readConsoleAnswer); groups 1 and
+   3 were rewritten to assert that. Their reversions are recorded beside them.
+
    No credential is used here. The requests are made against a stub. */
 import { readFileSync } from 'node:fs';
 import { YANGO_SURFACES } from '../src/sources/yango.js';
@@ -58,7 +62,15 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
    header set is the thing under test and a regex over `headers()` would pass
    against a call site that overrode it. */
 const { pool } = await import('../src/db.js');
-pool.query = async () => ({ rows: [{ id: 1 }], rowCount: 1 });
+/* credential_state writes are kept, so what the panel is told can be checked
+   from what was actually written rather than from the source text. */
+const credWrites = [];
+pool.query = async (text, params = []) => {
+  if (/INSERT INTO credential_state/.test(String(text))) {
+    credWrites.push({ credential: params[2], state: params[3], detail: params[4] });
+  }
+  return { rows: [{ id: 1 }], rowCount: 1 };
+};
 pool.connect = async () => ({ query: async () => ({ rows: [], rowCount: 1 }), release() {} });
 
 process.env.YANGO_PARK_ID = 'park-under-test';
@@ -70,6 +82,9 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, opt = {}) => {
   const u = String(url);
   const h = Object.fromEntries(Object.entries(opt.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+  /* The egress lookup is not a Yango call; answered with a documentation
+     address so the test can see it filed beside the refusal. */
+  if (u.includes('ipify.org')) return new Response('{"ip":"203.0.113.7"}', { status: 200 });
   seen.push({ url: u, host: new URL(u).host, path: new URL(u).pathname, headers: h });
   /* The console refuses the way production's edge refuses — an HTML page,
      which is the tell that it is not the API answering. With the cookie
@@ -109,17 +124,20 @@ check('the collector did reach the console at all, so the rest of this means som
 check('the console request carries no X-API-Key',
   withCookie.every((s) => !('x-api-key' in s.headers)),
   JSON.stringify(withCookie[0]?.headers || {}));
-check('…not even on the cookie-free comparison probe',
-  withoutCookie.length > 0 && withoutCookie.every((s) => !('x-api-key' in s.headers)),
-  JSON.stringify(withoutCookie[0]?.headers || {}));
-/* The comparison is only evidence if the cookie is the only thing that moved.
-   A header on one side and not the other makes the 401-vs-403 unreadable. */
-check('the two requests differ ONLY by the cookie, which is what makes the comparison evidence',
-  (() => {
-    const a = { ...withCookie[0]?.headers }; const b = { ...withoutCookie[0]?.headers };
-    delete a.cookie; delete b.cookie;
-    return JSON.stringify(Object.keys(a).sort()) === JSON.stringify(Object.keys(b).sort());
-  })(), JSON.stringify([Object.keys(withCookie[0]?.headers || {}), Object.keys(withoutCookie[0]?.headers || {})]));
+/* THE COOKIE-FREE COPY IS GONE (2026-09-29). It compared an answer from
+   Yandex's edge (HTML 403) with an answer from Yango's API (JSON 401) and
+   called the difference proof of a working session; it also doubled every
+   refused request.
+   REVERT E, run 2026-09-29: the bare request put back in post() and the
+   loop's `break` turned back into `continue`
+   -> 20 passed, 2 FAILED: "no cookie-free copy of the request is sent" (3
+      sent) and "the console is asked ONCE…" (3 requests). */
+check('no cookie-free copy of the request is sent',
+  withoutCookie.length === 0, `${withoutCookie.length} sent`);
+/* Three closed weeks are in the window; the newest is refused, and a host
+   that refused this minute is not asked for the next week this minute. */
+check('the console is asked ONCE for a window of three closed weeks — it stops at the first refusal',
+  withCookie.length === 1, `${withCookie.length} requests`);
 check('the console still sends the park id, which it does read',
   withCookie.every((s) => s.headers['x-park-id'] === 'park-under-test'));
 /* And the key host keeps it, because there it is load-bearing and proven on
@@ -157,19 +175,28 @@ for (const h of ['x-client-version', 'origin', 'referer', 'sec-ch-ua', 'priority
       right answer fourth, among three an operator can act on and would. */
 console.log('\nthe refusal names what can be acted on, and nothing that cannot');
 
-const yango = readFileSync('src/sources/yango.js', 'utf8');
-const advice = yango.slice(yango.indexOf('hint = cookieIsNotIt'), yango.indexOf('if (bare && !cookieIsNotIt)'));
-
-check('the advice does not name YANGO_API_KEY as something to go and check',
-  !/YANGO_API_KEY names a park|check YANGO_PARK_ID \(\$\{config\.yango\.parkId\}\) and YANGO_API_KEY/.test(advice));
-check('…and says outright that this host does not read it',
-  /does not read YANGO_API_KEY/.test(advice));
-check('the 403-after-authenticating branch states the address finding rather than four maybes',
-  /SAME COOKIE BYTES/.test(advice), advice.slice(0, 120));
-check('…and says what WOULD change it, since a reason with no remedy is half a message',
-  /egressing this app from an address/.test(advice));
-check('…and still says plainly that re-capturing the cookie cannot help',
-  /[Rr]e-capturing this cookie cannot help/.test(advice));
+/* REVERT F, run 2026-09-29: YANGO_COOKIE written 'ok' again on the 403-HTML
+   answer (the old asymmetry reading)
+   -> 20 passed, 2 FAILED: "the cookie is NOT recorded as working…" (state
+      "ok", detail null) and "…and says so". */
+const cookieRow = credWrites.filter((w) => w.credential === 'YANGO_COOKIE').at(-1);
+const consoleRow = credWrites.filter((w) => w.credential === 'YANGO_CONSOLE').at(-1);
+check('the cookie is NOT recorded as working on an edge refusal — nothing read it',
+  cookieRow && cookieRow.state === 'unknown', JSON.stringify(cookieRow));
+check('…and says so, and that re-pasting cannot change it',
+  /not checked/.test(cookieRow?.detail || '') && /[Rr]e-pasting cannot change that/.test(cookieRow?.detail || ''),
+  cookieRow?.detail);
+check('…and names no credential to go and replace',
+  !/YANGO_API_KEY|YANGO_PARK_ID/.test(cookieRow?.detail || ''));
+check('the console is recorded as blocked in front of the API',
+  consoleRow?.state === 'blocked' && /Yandex’s edge/.test(consoleRow?.detail || ''), JSON.stringify(consoleRow));
+/* REVERT G, run 2026-09-29: egressAddress() call removed from post()
+   -> 21 passed, 1 FAILED: "…with the address the request left from". */
+check('…with the address the request left from, so a window that works can be traced',
+  /203\.0\.113\.7/.test(consoleRow?.detail || ''), consoleRow?.detail);
+check('both rows fit the 240 characters noteCredential keeps, so neither is cut mid-sentence',
+  (cookieRow?.detail || '').length <= 240 && (consoleRow?.detail || '').length <= 240,
+  `${cookieRow?.detail?.length} ${consoleRow?.detail?.length}`);
 
 /* ── 4. the probe asks what the collector asks ───────────────────────────── */
 /* REVERT C: api/probe.js pointed back at '/api/reports-api/v1/orders/list'

@@ -158,7 +158,14 @@ export const SETTING_DEFS = [
 
   { key: 'YANGO_PARK_ID', group: 'Yango', label: 'Park id', secret: false },
   { key: 'YANGO_API_KEY', group: 'Yango', label: 'API key', secret: true },
-  { key: 'YANGO_COOKIE', group: 'Yango', label: 'Yandex session cookie', secret: true, hint: 'Expires — re-paste from a logged-in fleet.yango.com session. Yandex refuses a session replayed from this host: see /api/probe/yango' },
+  /* THE HINT SENT PEOPLE ON THE ONE ERRAND THAT CANNOT HELP. It opened with
+     "Expires — re-paste from a logged-in fleet.yango.com session", and on
+     2026-09-29 a cookie was re-pasted at 09:19:39Z and refused by Yandex's
+     edge within seconds, exactly as the one before it was. The edge refuses
+     this server's address before the session is read (docs/COVERAGE.md, the
+     Yango console section), so what the operator needs from this line is what
+     the cookie is for, and that pasting it again does not move the refusal. */
+  { key: 'YANGO_COOKIE', group: 'Yango', label: 'Yandex session cookie', secret: true, hint: 'Used only for the weekly per-driver summary (online hours); trips, drivers, cars and payments come from the API key. Yandex\u2019s edge refuses this server\u2019s address before it reads the session, so re-pasting cannot help until that changes. The console is asked once a day.' },
   /* The second half of the KEY-BASED route, which needs no session at all.
      fleet.yango.com authenticates with a Yandex browser session, and Yandex's
      edge refuses that session when it is replayed from this host — measured

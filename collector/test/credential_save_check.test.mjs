@@ -524,14 +524,18 @@ console.log('\nthe routes pass the recorder the truth about what they did');
 /* ══ 11. the providers' own answers, from stand-ins ═══════════════════════ */
 console.log('\nwhat each check establishes, against stand-in providers');
 {
-  let bare = 403;          // what the stand-in portal answers with no cookie
+  /* What the stand-in portal answers. Until 2026-09-29 the check sent a
+     second, cookie-free request and read "403 with, 401 without" as proof the
+     session authenticates — and the save painted the cookie green on it. The
+     403 was the edge's HTML page and the 401 Yango's API: two machines. The
+     check now asks once and reads the answer (src/sources/yango.js
+     readConsoleAnswer; test/yango_once_a_day.test.mjs has the whole table). */
+  let answer = (res) => res.status(403).type('html').send('<html>edge</html>');
   let grants = 0;
+  let asked = 0;
   const stand = express();
   stand.use(express.urlencoded({ extended: false }));
-  stand.post('/api/reports-api/v2/summary/drivers/list', (req, res) => {
-    if (req.headers.cookie) return res.status(403).type('html').send('<html>edge</html>');
-    return res.status(bare).type('html').send('<html>edge</html>');
-  });
+  stand.post('/api/reports-api/v2/summary/drivers/list', (req, res) => { asked++; answer(res, req); });
   stand.post('/oauth/token', (req, res) => {
     grants++;
     res.json({ access_token: `grant-${grants}`, expires_in: 2592000 });
@@ -544,16 +548,20 @@ console.log('\nwhat each check establishes, against stand-in providers');
   process.env.YANGO_API_KEY = 'not-a-key';
   process.env.UBER_TOKEN_URL = `${at}/oauth/token`;
 
-  const sym = await checkStored('YANGO_COOKIE', { value: 'Session_id=placeholder' });
-  check('Yango refusing the park with or without a session: the check says it is not the cookie',
-    sym.verdict === 'fail' && sym.blames === 'other', JSON.stringify({ v: sym.verdict, b: sym.blames }));
-  check('…so the save writes it as not tested, never red', stateOf(sym) === 'saved');
-  bare = 401;
-  const asym = await checkStored('YANGO_COOKIE', { value: 'Session_id=placeholder' });
-  check('Yango reading the session and refusing anyway: the check says it authenticates',
-    asym.verdict === 'unknown' && asym.authenticates === true, JSON.stringify({ v: asym.verdict, a: asym.authenticates }));
-  check('…so the save writes ok, as the collector does on the same evidence', stateOf(asym) === 'ok');
-
+  const edge = await checkStored('YANGO_COOKIE', { value: 'Session_id=placeholder' });
+  check('Yango refused at the edge: the check says it could not read the session, once',
+    edge.verdict === 'unknown' && !edge.authenticates && asked === 1,
+    JSON.stringify({ v: edge.verdict, a: edge.authenticates, asked }));
+  check('…so the save writes it as not tested — neither red nor green', stateOf(edge) === 'saved');
+  answer = (res) => res.status(403).json({ code: 'forbidden', message: 'park not permitted' });
+  const park = await checkStored('YANGO_COOKIE', { value: 'Session_id=placeholder' });
+  check('Yango’s API refusing the park: the check says it is not the cookie',
+    park.verdict === 'fail' && park.blames === 'other', JSON.stringify({ v: park.verdict, b: park.blames }));
+  check('…so the save writes it as not tested, never red', stateOf(park) === 'saved');
+  answer = (res) => res.status(200).json({ items: [] });
+  const good = await checkStored('YANGO_COOKIE', { value: 'Session_id=placeholder' });
+  check('Yango answering: the check passes, and the save writes ok on that evidence alone',
+    good.verdict === 'pass' && stateOf(good) === 'ok', JSON.stringify(good));
   /* A replaced OAuth secret is used from the next call, not after the old
      grant's thirty days. */
   const { uberOAuthToken } = await import('../src/auth/uber.js');

@@ -110,10 +110,16 @@ console.log('\nand Yango stops blaming the cookie for a refusal the cookie is no
 {
   for (const f of ['src/sources/yango.js', 'src/credcheck.js']) {
     const y = src(f);
-    /* The isolating request: the same call with no cookie header. If the
-       refusal survives it, the cookie is not what is being refused. */
-    check(`${f} asks a second time without the cookie`,
-      /cookie/.test(y) && /(cookieIsNotIt|with or without a session|no cookie at all)/.test(y), f);
+    /* The isolating request — the same call with no cookie header — was
+       retired on 2026-09-29: its "403 with, 401 without" compared Yandex's
+       edge with Yango's API and was read as a working session. Blame is now
+       decided from the ONE answer (src/sources/yango.js readConsoleAnswer),
+       and the cookie is named only on a JSON 401 or a sign-in redirect —
+       test/yango_once_a_day.test.mjs drives every case. What this group
+       still guards is the thing it was written for: a refusal the cookie is
+       not in does not blame the cookie. */
+    check(`${f} decides blame from what the answer IS, not from the status alone`,
+      /readConsoleAnswer/.test(y), f);
     check(`…and only names YANGO_COOKIE when that second answer differs`,
       !/re-paste YANGO_COOKIE/.test(y) || /cookieIsNotIt\s*\n?\s*\?/.test(y)
       || /with or without a session/.test(y), f);

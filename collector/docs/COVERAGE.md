@@ -330,7 +330,7 @@ See `test/platform_flags_truth.test.mjs`.
 |---|---|---|
 | Uber driver photo URL | CloudFront pre-signed, **exactly 12 h** (43,200 s, two runs agreeing to 0.1 s) | never store the URL — store the bytes. `sql/schema_v63.sql` |
 | Bolt refresh token | JWT, **7-day** life (`iat`→`exp`), carries `fleet_owner_id` | a weekly human paste is a scheduled outage; check whether it rotates on use before storing one in an env var |
-| Yango | park id + API key + Yandex session cookie, all three sent on every request | a 403 **with** the cookie and 401 **without** it means the cookie IS being accepted and something else is refused — do not send anybody to re-paste a session that was never the question |
+| Yango | park id + API key on fleet-api.yango.tech (trips, roster, cars, ledger); park id + Yandex session cookie on the console (the weekly summary only) | read the console's answer, not its status: an HTML page is Yandex's edge refusing this server before the session is read (cookie **not checked**), JSON 401 is a signed-out session, JSON 403 is the park refused. "403 with the cookie, 401 without" was read as "the cookie is accepted" until 2026-09-29 — it is two different machines answering (trap 32) |
 | Uber timeline window | Uber refuses >31 days; the collector cuts at 30 | `MAX_WINDOW_DAYS` in `src/sources/uber_timeline.js` |
 
 **Reverse geocoding** is reachable from the collector (not from Chromium):
@@ -4172,6 +4172,27 @@ untouched, and nothing projected is ever added into `accounted`.
       answered 200 from another network on 2026-09-22. Re-pasting the cookie
       cannot fix it, and `YANGO_COOKIE: ok` on the banner is not evidence the
       session is good ("Yango's console cookie", above).
+  32. **Two answers from two machines are not a comparison.** Yango's refusal
+      handling sent a second, cookie-free copy of each refused request and
+      read "403 with the cookie, 401 without" as "the session authenticates".
+      The 403 was Yandex's edge (an HTML page); the 401 was Yango's API
+      (JSON). The cookie was painted green on that for three weeks, the paste
+      box said "authenticates as …", and a cookie pasted on 2026-09-29 was
+      green forty minutes later without anything having read it. Before
+      comparing two statuses, establish that the same thing produced both —
+      the body's type and the host that answered. The copy also doubled every
+      refused request. src/sources/yango.js readConsoleAnswer now reads the
+      one answer for what it is.
+  33. **A source whose only windows are one surface turns every run red.**
+      src/db.js logRun escalates "every window failed" to `error`. Yango's
+      only windows were the console weeks, so every run since the edge
+      started refusing was `error` — 15,112 rows written by one Sunday
+      backfill — /api/auth had no run age for the key-host credentials, and
+      the SMS run (which counts a channel as collected only on an ok/partial
+      run) left Yango's cash out as not collected. A source whose chunks cover
+      one surface among several passes `chunks_cover: 'surface'`; its own
+      status then stands, and it must decide `error` itself (Yango: when the
+      trips surface failed).
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
@@ -7342,3 +7363,75 @@ the paste's full browser headers — which needs the operator's approval.
 ### Traps this added to the list
 
 31 in "Traps that have cost time more than once".
+
+### What was changed (2026-09-29, the operator's "1 do it")
+
+No live Yango request was made to test any of this; the four-variant probe
+above was not approved and was not run.
+
+- **Asked once a Dubai day.** src/sources/yango.js consoleGate: the console
+  is asked at most once per Dubai day — or once more after a new session is
+  saved on Settings — for the closed weeks holding no console row, newest
+  first, stopping at the first refusal; up to 8 weeks on a day it answers.
+  The gate is YANGO_CONSOLE's `checked_at`, so it survives redeploys. The
+  cookie-free copy is gone. From about 1,000 refused requests a week to
+  about 7. A run that skipped the console because it refused earlier that
+  day is `partial` with "not asked — N closed weeks missing; …".
+- **The daily probe and discovery.** src/probe.js asks trips and the ledger
+  on fleet-api.yango.tech (where the collector reads them) instead of the
+  console's abandoned v1 paths, and asks the weekly summary only if the
+  collector has not asked today. Discovery skips the park-profile call on a
+  day the console already refused and keeps the name the park last gave.
+  sql/schema_v89.sql drops the probe row for the abandoned ledger path.
+- **The panel.** Each console answer is read once (readConsoleAnswer):
+  HTML page → YANGO_CONSOLE `blocked`, YANGO_COOKIE `unknown` ("not checked
+  — Yandex's edge refused this server (address) before Yango read the
+  session …"); JSON 401 or a sign-in redirect → both `expired`; JSON 403 →
+  console `unentitled`; a 200 driver list → both `ok`, the only way the
+  cookie turns green. The paste check (src/credcheck.js) shares the reading
+  and stores an edge-refused paste as "saved, not tested". The banner's
+  `blocked` errand no longer says the credential authenticates.
+- **The address.** Each refused console answer is filed with the egress
+  address it left from (src/egress.js — ipify, then checkip.amazonaws.com,
+  cached per process), and the edge page's whole text is logged
+  ("console refused at the edge", up to 4,000 characters) instead of the
+  first 600 characters of markup.
+- **Runs.** Yango runs that wrote key-host rows are `partial`, not `error`
+  (trap 33); a run whose trips failed is still `error`.
+- **The Settings hint** for YANGO_COOKIE now says what it is used for and
+  that re-pasting cannot help while the edge refuses this server.
+
+## Yango's weekly summary, rebuilt from the API key (2026-09-29, the operator's "2. OK")
+
+The console's weekly per-driver summary stops at the week ending 2026-09-06
+(855 driver-weeks from 2026-05-11). Everything in it except online time is
+in what fleet-api.yango.tech already delivers: completed trips and their
+mileage (`trip`), and cash, cashless and the platform's fees per driver
+(`ledger_entry`, v2, `driver_profile_id`). src/yango_rebuild.js rebuilds
+it on Dubai Monday-to-Sunday weeks; the ledger's groups are read through
+the collector's own LEDGER_GROUPS (cash_collected → cash; card, corporate,
+promotions, other earnings and tips → cashless; platform and partner fees
+and mandatory taxes → commission). Earnings are net, as the console row's
+are.
+
+**Online hours cannot be rebuilt.** Yango publishes online time only in the
+console summary. A rebuilt row has `hours_online` NULL and carries the reason
+in `raw.hours_online_absent`. Pages that divide money by online hours
+(economics "AED per hour online") already divide every channel's money by
+Yango's hours alone. Once rebuilt rows are written, a window that mixes
+console weeks and rebuilt weeks adds Yango money with no Yango hours for the
+rebuilt part, so that rate runs HIGH over such a window; over rebuilt weeks
+alone it is absent. Not fixed with the rebuild — recorded here so the next
+person to touch that rate knows.
+
+**Checked before written.** `GET /api/probe/yango/weekly-rebuild` puts the
+rebuild beside every console week (default: from the first console week to
+the last closed week) and reports, per figure and per candidate formula, how
+many driver-weeks agree, with totals and a few examples — database only, no
+provider call, no driver id or name in the answer. The collector writes
+rebuilt rows only when `REBUILD_WRITES` in src/yango_rebuild.js is on, which
+it is NOT in the commit that introduced it: it goes on in a commit of its
+own, with the production comparison recorded here. Rebuilt rows are only
+written for closed weeks with no console row and inside the ledger's
+history, carry `raw.rebuilt_from = 'fleet-api.yango.tech'`, and are deleted
+for a week the moment the console delivers that week.

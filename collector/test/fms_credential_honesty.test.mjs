@@ -246,80 +246,65 @@ console.log('\na rejected login is not answered by asking sixty-two more times')
 }
 
 /* ── and the Yango advice must not contradict its own finding ─────────────
-   A 401 with no cookie and a 403 with one is proof the session AUTHENTICATES.
-   The message in that branch said exactly that and then told the operator to
-   re-paste YANGO_COOKIE — work that cannot change the answer, since a fresh
-   cookie for the same account authenticates the same way and is refused the
-   same way. Measured on production 2026-09-03 against a cookie captured that
-   morning and verified live by src/credcheck.js as a real fleet session. */
+   This group began as "a 401 with no cookie and a 403 with one is proof the
+   session AUTHENTICATES, so do not tell anybody to re-paste it". The first
+   half turned out to be false (2026-09-29): the 403 is Yandex's edge and the
+   401 is Yango's API — two different machines — so the pair never proved the
+   session was read, and the cookie was painted green on it for three weeks.
+   The cookie-free comparison is gone and each answer is read for what it is
+   (src/sources/yango.js readConsoleAnswer).
+
+   The second half stands and is what this group still guards: a refusal that
+   is not about a credential must not send an operator to replace one — not
+   the cookie, not the park id, not the API key — and a state's errand must
+   match what was refused. Driven through readConsoleAnswer rather than
+   matched against a slice of source, which is how the old version of this
+   group went stale. */
 {
   const y = readFileSync('src/sources/yango.js', 'utf8');
-  /* 1400, not 700. The branch grew a fourth possibility — measured
-     2026-09-07, the same call with the same three credentials answers 200 from
-     one host and 403 from the deployed app — and the sentence that says
-     re-pasting is futile moved past the end of a window sized for the old
-     text. A fixed-length slice of source is a fragile way to scope an
-     assertion; it is kept because the alternative is asserting against the
-     whole file, where the phrase would match the sibling branch too. */
-  const branch = y.slice(y.indexOf('so the session IS'), y.indexOf('so the session IS') + 1400);
-  check('the session-is-read branch no longer prescribes a re-paste',
-    !/re-paste YANGO_COOKIE from a logged-in/.test(branch),
-    'it had just proved the session works');
-  check('…it names entitlement, and the park it was refused for',
-    /entitlement/.test(branch) && /parkId/.test(branch));
-  check('…and says plainly that re-pasting will not change it',
-    /will not change (it|any of the four)/.test(branch));
-  /* THE FOURTH POSSIBILITY. The three this branch used to list are all things
-     an operator can go and spend an afternoon on. Measured 2026-09-07, minutes
-     apart, with production's stored park id and cookie confirmed updated:
-     byte-identical requests answered 200 with live orders from one host and
-     403 from the deployed app, and both hosts answer 401 with the cookie
-     removed — so the park id clears the pre-auth gate from both, and the API
-     key is inert on that host. Nothing about the credentials is left. */
-  check('…and names the host as a suspect, since nothing about the credentials was left',
-    /refusal is of this HOST/.test(branch), 'the three suspects are all actionable and all wrong');
-  check('the account is read from the cookie so "sign in as somebody else" is actionable',
+  const { readConsoleAnswer } = await import('../src/sources/yango.js');
+  const edge = readConsoleAnswer({ status: 403, data: '<!DOCTYPE html><html><title>403</title></html>' });
+  const park = readConsoleAnswer({ status: 403, data: { code: 'forbidden', message: 'park' } });
+  check('nothing in the collector prescribes a re-paste for a refusal the session is not in',
+    !/re-paste YANGO_COOKIE from a logged-in/.test(y));
+  check('an edge refusal names this server as what is refused, and no credential',
+    /refusing this server/.test(edge.why) && !/YANGO_(COOKIE|PARK_ID|API_KEY)/.test(edge.why), edge.why);
+  check('…and the panel is told plainly that re-pasting cannot change it',
+    /[Rr]e-pasting cannot change that/.test(y));
+  check('the account is read from the cookie so "sign in again as …" is actionable',
     /yandex_login=\(\[\^;\]\+\)/.test(y) && /const yangoAccount = /.test(y));
-  check('and a cookie that demonstrably authenticated is recorded as working',
-    /if \(bare && !cookieIsNotIt\) \{[\s\S]{0,220}credential: 'YANGO_COOKIE',[\s\S]{0,60}state: 'ok'/.test(y),
-    'ceasing to blame it does not clear the red row already against it — production carried '
-    + 'YANGO_PARK_ID invalid and YANGO_COOKIE invalid at the same time, minutes apart');
-  /* The credential blamed is not the cookie that just authenticated — and, as
-     of 2026-09-07, not the park id either.
-     ─────────────────────────────────────────────────────────────────────────
-     This pinned the literal ternary that chose between YANGO_PARK_ID and
-     YANGO_COOKIE. Both of those are now the wrong answer for this branch. The
-     collector reads three of its five surfaces from fleet-api.yango.tech,
-     which proves the park id and the API key on every successful run; two
-     writers on one row means the last one decides the colour, and the console
-     surfaces run last, so the panel would have gone red after every good run.
-
-     What is refused here is the CONSOLE, by an edge in front of it, and the
-     assertion is the property rather than the spelling: the row this branch
-     writes must not name a credential that something else proves, and its
-     state must ask for an errand that is not "replace this". */
+  /* The cookie is 'ok' only on an answer. The asymmetry that used to earn it
+     was not evidence; see the head of this group. */
+  const answers = [
+    [{ status: 200, data: { items: [] } }, 'ok'],
+    [{ status: 403, data: '<html>edge</html>' }, 'unknown'],
+    [{ status: 403, data: { code: 'forbidden' } }, 'unknown'],
+    [{ status: 401, data: { code: 'unauthorized' } }, 'expired'],
+    [{ status: 502, data: {} }, 'unknown'],
+  ];
+  check('the cookie is recorded as working only when the console answered',
+    answers.every(([r, want]) => readConsoleAnswer(r).cookie === want),
+    JSON.stringify(answers.map(([r]) => readConsoleAnswer(r).cookie)));
+  /* The credential blamed is not the park id, which fleet-api.yango.tech
+     proves on every run: two writers on one row means the last decides the
+     colour, and the console runs last. */
   const consoleRow = /credential: 'YANGO_CONSOLE'/.test(y);
-  check('and the credential blamed is neither the cookie nor the park id, which both authenticate',
-    consoleRow && !/credential: cookieIsNotIt \|\| bare \? 'YANGO_PARK_ID'/.test(y),
+  check('and the credential blamed is never the park id, which the key host proves every run',
+    consoleRow && !/credential: 'YANGO_PARK_ID'[\s\S]{0,80}state: v\./.test(y),
     'a red row against a working credential sends somebody to replace it');
   check('…and the park id is proven by the host that serves the collector, not by this one',
     /credential,\s*\n?\s*state: 'ok'/.test(y) || /for \(const credential of \['YANGO_API_KEY', 'YANGO_PARK_ID'\]\)/.test(y),
     'nothing else would ever turn those rows green again');
-  /* 'blocked' has to be EARNED by the asymmetry — authenticated with a
-     session and refused anyway. The same refusal with and without a session is
-     the signature of a park this host does not recognise, and calling that
-     "something in front of the API" would be the same kind of confident wrong
-     sentence this whole file is about. */
-  check('…in a state whose errand is not "replace it"',
-    /state: bare && !cookieIsNotIt \? 'blocked' : 'unknown'/.test(y),
-    (y.match(/credential: 'YANGO_CONSOLE',[\s\S]{0,200}/) || [''])[0]);
-  check('…and the symmetric refusal is not described as an edge, because it is not one',
-    /cookieIsNotIt[\s\S]{0,400}not the park id, which fleet-api\.yango\.tech accepts/.test(y),
-    'a 403 with and without a session says nothing about where the call came from');
+  check('…in a state whose errand is not "replace it": the edge is blocked, the park unentitled',
+    edge.console === 'blocked' && park.console === 'unentitled', JSON.stringify([edge.console, park.console]));
+  check('…and an API refusal of the park is not described as the edge, because it is not one',
+    park.kind !== 'edge' && !/edge/i.test(park.why), park.why);
   {
     const { ERRANDS } = await import('../api/auth_routes.js');
     check('…which the banner has a written errand for', !!ERRANDS.blocked,
       Object.keys(ERRANDS).join(', '));
+    check('…and that errand no longer claims the credential authenticates',
+      !/authenticat/.test(ERRANDS.blocked.whole(1)), ERRANDS.blocked.whole(1));
   }
 }
 

@@ -40,6 +40,7 @@ import { fiToken } from './sources/bolt.js';
 import { dotDate, iso, daysAgo } from './util.js';
 import { log } from './log.js';
 import { probeEarnerWindow } from './sources/uber.js';
+import { YANGO_SURFACES, consoleGate } from './sources/yango.js';
 /* Whether a FIELD NAME is one whose values must not be sampled. api/redact.js
    is the single authority on that line and on why phone and email stay the
    right side of it; this module asks it rather than growing a second opinion,
@@ -253,6 +254,11 @@ const YANGO_TRIP_ALIASES = {
   driver_full_name: 'driver_name', booked_at: 'requested_at', ended_at: 'ended_at',
   address_from: 'pickup_addr', address_to: 'dropoff_addr', mileage: 'distance_km',
   category: 'product', payment_method: 'payment_type', currency_code: 'currency',
+  /* fleet-api.yango.tech nests what the console kept flat — the table at the
+     head of src/sources/yango.js — and the probe now asks that host. */
+  'driver_profile.id': 'driver_ext_id', 'driver_profile.name': 'driver_name',
+  'car.callsign': 'plate', 'car.license.number': 'plate',
+  'address_from.address': 'pickup_addr', 'route_points.address': 'dropoff_addr',
 };
 const BOLT_DRIVER_ALIASES = {
   driver_uuid: 'driver_ext_id', first_name: 'full_name', last_name: 'full_name',
@@ -481,26 +487,56 @@ export function surfaces({ from, to }) {
   }
 
   /* Yango — trips, drivers and the park ledger. */
+  /* ON THE HOSTS THE COLLECTOR ACTUALLY READS. (2026-09-29)
+     ─────────────────────────────────────────────────────────────────────
+     All three of these asked fleet.yango.com with the session cookie: trips
+     at /api/reports-api/v1/orders/list, the ledger at /api/v1/reports/
+     transactions/park/list and the weekly summary. The collector left the
+     console for trips on 2026-09-07 and for the ledger on 2026-09-16, and the
+     v1 orders path answers 400 even from a network the edge admits, measured
+     2026-09-22 — so two of the three rows described surfaces the
+     product no longer uses, refused at the edge every night, and put the
+     session on the wire from a refused address twice more a day for nothing.
+
+     Trips and the ledger are now probed on fleet-api.yango.tech with the API
+     key, exactly as src/sources/yango.js asks them. The weekly summary is
+     still the console's, and is asked here only when the collector has not
+     already asked it today, which consoleGate reads — the collector's answer is the
+     YANGO_CONSOLE row on the credentials panel, and a second refusal the same
+     day adds nothing to it. */
   if (!config.yango?.apiKey) skip('yango', 'YANGO_API_KEY is not set, so no Yango surface can be probed');
   else {
-    const post = async (path, body) => {
-      const { data, status } = await http(`${config.yango.base}${path}`, {
+    const keyPost = async (path, body) => {
+      const { data, status } = await http(`${config.yango.keyBase}${path}`, {
         method: 'POST', timeoutMs: 60000, retries: 0,
-        headers: { 'X-Park-Id': config.yango.parkId, 'X-API-Key': config.yango.apiKey,
-          'content-type': 'application/json', 'Accept-Language': 'en', cookie: config.yango.cookie },
+        headers: { 'X-API-Key': config.yango.apiKey, 'X-Client-ID': config.yango.clientId,
+          'content-type': 'application/json', 'Accept-Language': 'en' },
         body: JSON.stringify(body) });
       return { data, status };
     };
     const dubai = (d, end) => `${iso(new Date(d))}T${end ? '23:59:59' : '00:00:00'}+04:00`;
-    add('yango', 'orders/list', TRIP_COLS, 'trips', () =>
-      post('/api/reports-api/v1/orders/list', { date_type: 'booked_at', date_from: dubai(from), date_to: dubai(to, true) }),
+    add('yango', 'orders/list', TRIP_COLS, 'trips — fleet-api.yango.tech, API key', () =>
+      keyPost(YANGO_SURFACES.key.orders, { query: { park: { id: config.yango.parkId,
+        order: { booked_at: { from: dubai(from), to: dubai(to, true) } } } }, limit: 50 }),
       YANGO_TRIP_ALIASES);
-    add('yango', 'summary/drivers/list', DRIVER_COLS, 'per-driver period summary', () =>
-      post('/api/reports-api/v2/summary/drivers/list', { date_from: dubai(from), date_to: dubai(to, true) }));
-    add('yango', 'transactions/park/list', ['platform', 'external_id', 'occurred_at', 'category', 'amount'],
-      'the park ledger', () =>
-      post('/api/v1/reports/transactions/park/list', { query: { park: { id: config.yango.parkId },
-        transaction: { event_at: { from: dubai(from), to: dubai(to, true) } } }, limit: 50 }));
+    add('yango', 'summary/drivers/list', DRIVER_COLS, 'per-driver weekly summary — fleet.yango.com, session', async () => {
+      const gate = await consoleGate();
+      if (!gate.open) {
+        throw new Error(`not asked — the collector asked fleet.yango.com today, and it was ${gate.state}; `
+          + 'the console is asked once a day, and its answer is the YANGO_CONSOLE row on the credentials panel');
+      }
+      const { data, status } = await http(`${config.yango.base}${YANGO_SURFACES.console.summary}`, {
+        method: 'POST', timeoutMs: 60000, retries: 0,
+        headers: { 'X-Park-Id': config.yango.parkId, 'content-type': 'application/json',
+          'Accept-Language': 'en', cookie: config.yango.cookie },
+        body: JSON.stringify({ date_from: iso(new Date(from)), date_to: iso(new Date(to)),
+          sort: { field: 'driver_id', direction: 'asc' } }) });
+      return { data, status };
+    });
+    add('yango', 'transactions/list', ['platform', 'external_id', 'occurred_at', 'category', 'amount'],
+      'the park ledger — fleet-api.yango.tech, API key', () =>
+      keyPost(YANGO_SURFACES.key.ledger, { query: { park: { id: config.yango.parkId,
+        transaction: { event_at: { from: dubai(from), to: dubai(to, true) } } } }, limit: 50 }));
   }
 
   /* Bolt — the fleet integration gateway.

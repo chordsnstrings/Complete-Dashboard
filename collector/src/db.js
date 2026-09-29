@@ -511,13 +511,23 @@ export async function logRun(run, db = pool) {
      run wrote rows AND left windows unfetched'. Both halves of that sentence
      were false for the loudest failure on the fleet. */
   const allFailed = !!failed && failed === (chunks ? chunks.length : 0);
-  const status = run.status === 'error' || allFailed ? 'error'
+  /* Unless the windows are ONE SURFACE of the run rather than the run.
+     ─────────────────────────────────────────────────────────────────────────
+     Yango reports only its console weeks as windows, while trips, the roster,
+     the cars and the ledger come from another host on the same run. Every
+     console week refused, so every Yango run was written 'error' here over the
+     'partial' the source had computed — 15,112 rows written on the Sunday
+     backfill of 2026-09-28 and still 'error'. A caller that passes
+     chunks_cover: 'surface' has already folded that surface's failure into its
+     own status, and it stands; the windows still say which weeks failed. */
+  const decisive = allFailed && run.chunks_cover !== 'surface';
+  const status = run.status === 'error' || decisive ? 'error'
     : (failed ? 'partial' : (run.status || 'ok'));
   /* The red cell is driven by `error`, not by status, so a run whose only
      account of itself is 44 identical window errors has to surface one of
      them. A caller that gave its own error still wins. */
   const error = run.error
-    || (allFailed ? String(chunks.find((c) => c.error).error).slice(0, 300) : null);
+    || (decisive ? String(chunks.find((c) => c.error).error).slice(0, 300) : null);
   const { rows } = await db.query(
     `INSERT INTO collection_run
        (source,fleet_id,mode,window_start,window_end,status,rows_written,finished_at,error,

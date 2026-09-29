@@ -313,6 +313,26 @@ async function discoverYango(q, d, audit) {
     await recordAccount(q, { platform: 'yango', accountId: y.parkId, name: null, nameReason: reason, sourceCall: call }, { audit });
     return [{ ok: false, reason }];
   }
+  /* NOT ASKED ON A DAY THE CONSOLE HAS ALREADY REFUSED. (2026-09-29)
+     This goes to the same host as the collector's weekly summary, and
+     Yandex's edge refuses this server's address there before any session is
+     read: every nightly profile call since 2026-09-06 came back as the edge's
+     HTML page. The collector now asks that host once a day and files the
+     answer as YANGO_CONSOLE; a second refusal the same day tells nobody
+     anything, and puts the session on the wire from a refused address once
+     more. A name already reported stays — recordAccount keeps it when this
+     call has none. */
+  const refusedToday = await safely(async () => (await q(
+    `SELECT state FROM credential_state
+      WHERE provider = 'yango' AND credential = 'YANGO_CONSOLE' AND state <> 'ok'
+        AND (checked_at AT TIME ZONE 'Asia/Dubai')::date = (now() AT TIME ZONE 'Asia/Dubai')::date
+      LIMIT 1`))[0] || null, () => null);
+  if (refusedToday) {
+    const reason = `Not asked today: fleet.yango.com already refused this server today (${refusedToday.state}), `
+      + 'and the profile call goes to the same host. The park keeps the name it last gave.';
+    await recordAccount(q, { platform: 'yango', accountId: y.parkId, name: null, nameReason: reason, sourceCall: call }, { audit });
+    return [{ ok: false, reason }];
+  }
   const got = await safely(async () => {
     const r = await d.http(`${y.base}/api/fleet/ui/v1/parks/users/profile`, {
       headers: { 'X-Park-Id': y.parkId, 'Accept-Language': 'en', cookie: y.cookie },

@@ -261,7 +261,14 @@ console.log('\nyango asks in weeks too');
 const yango = readFileSync('src/sources/yango.js', 'utf8');
 const yfn = yango.slice(yango.indexOf('async function pullDrivers'));
 const ybody = yfn.slice(0, yfn.indexOf('\nasync function ', 1) > 0 ? yfn.indexOf('\nasync function ', 1) : yfn.length);
-check('the yango summary is asked per calendar week', /closedWeeks\(from, to\)/.test(ybody));
+/* `closedWeeks(from, to, now)` since 2026-09-29: the weeks are chosen in
+   weeksWanted, which drops the ones already held, and the clock is passed in
+   so a test can fix it. Still the calendar grid, and still only closed weeks. */
+{
+  const wfn = yango.slice(yango.indexOf('async function weeksWanted'));
+  check('the yango summary is asked per calendar week',
+    /closedWeeks\(from, to, now\)/.test(wfn.slice(0, 600)) && /await weeksWanted\(from, to, now\)/.test(ybody));
+}
 /* The grid itself, once, so the wrapper cannot quietly change which weeks it
    yields. closedWeeks must be weekChunks minus exactly the unfinished week. */
 {

@@ -462,7 +462,11 @@ check('the trip table survived the injection attempt',
   // shape the collector has never written.
   const dbSrc = readFileSync('src/db.js', 'utf8');
   check('a run with a failed window cannot report ok',
-    /const status = run\.status === 'error' \|\| allFailed \? 'error'/.test(dbSrc)
+    /* `decisive` since 2026-09-29: all-failed escalates unless the caller
+       says its windows are one surface of the run (chunks_cover), which
+       test/yango_once_a_day.test.mjs drives both ways. */
+    /const status = run\.status === 'error' \|\| decisive \? 'error'/.test(dbSrc)
+    && /const decisive = allFailed && run\.chunks_cover !== 'surface'/.test(dbSrc)
     && /failed \? 'partial'/.test(dbSrc), 'logRun must downgrade to partial');
   /* And one that failed EVERY window is not a partial either — there is no
      part. Two production runs wore an amber pill on 44-of-44 failures; the

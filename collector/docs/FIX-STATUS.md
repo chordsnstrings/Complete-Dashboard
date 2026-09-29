@@ -4102,3 +4102,16 @@ Cash handed in (no date range to follow).
 | XL-1 | dependency-free .xlsx writer: numbers as numbers, Dubai dates as Excel dates, text never a formula, frozen header, filters, the used range stated; read back by our reader AND openpyxl | xlsx_write (32: strip 1+, epoch 4, crc 1+, dimension 2) | ✓ | ✓ e5c05e5 | ✓ b6162d26 | ✓ the production download opens in LibreOffice Calc and openpyxl; the missing used range was found there and added |
 | XL-2 | the workbook: cash to collect per driver with the mobile, cash by day, cash trips, hand-ins, drivers, money by day, payouts by arrival, platform statements, every trip ≤31 days; one driver's file; chips; withheld classes | money_workbook (42: hand-in sign 6, withheld 1, unpriced 2, Dubai day 7) | ✓ | ✓ e5c05e5 | ✓ b6162d26 | ✓ 1–27 Sep from production: payouts 12 / AED 516,746.06 and bookings 21,190 / fares AED 1,165,365.94 identical to #payouts and the daily CSV; 2,919 cash trips agree across three sheets |
 | XL-3 | the route (413 over a year, 400/404 for a bad driver, no-store), manifest (subject CASH, fleet param, audited), the button — fetched, refusal said on the page | access_pages §16 (9), access_manifest, server_wiring, mockapi, endpoint_coverage | ✓ | ✓ 25a6758 | ✓ 2195e3e8 | ✓ `private, no-store`, attachment named for its dates; 413/404/400 as designed; the button seen on production Drivers and Cash and unpaid |
+
+## Yango's console: once a day, an honest panel, and the weekly summary rebuilt — 2026-09-29
+
+The operator's "1 do it / 2. OK" on the findings in docs/COVERAGE.md
+("Yango's console cookie — why it 'doesn't work all the time'"). No live
+Yango request was made to test it.
+
+| # | what | test (revert fails it) | written | committed | deployed | proven |
+|---|---|---|---|---|---|---|
+| YG-1 | the console asked once a Dubai day (or once after a new paste), only for closed weeks with no console row, newest first, stopping at the first refusal; no cookie-free copy; the daily probe on the key host; discovery skips a refused day | yango_once_a_day §2–3 (gate 5, break 2, held weeks 2), yango_console_edge (copy 2), fleet_discovery §9 (2) | ✓ | | | |
+| YG-2 | the answer read for what it is: edge page → console blocked, cookie **not checked**; JSON 401 → expired; the cookie green only on an answer; paste check the same; the egress address and the edge page's text logged; key-host runs partial, trips failure error; the hint rewritten | yango_once_a_day §1, §4–5 (edge 1, 200 page 1, surface 1, trips 1, old credcheck 3), yango_console_edge (cookie ok 2, address 1), credential_save_check, fms_credential_honesty | ✓ | | | |
+| YG-3 | the weekly summary rebuilt from trips and the v2 ledger (hours absent, with the reason), compared with the 855 console weeks by /api/probe/yango/weekly-rebuild; writing OFF until that comparison is read on production | yango_rebuild (20: UTC week 7, only-both 3, hours zero 1) | ✓ | | | |
+

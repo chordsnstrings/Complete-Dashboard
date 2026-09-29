@@ -34,7 +34,7 @@ import { dubaiIso } from './util.js';
    collector abandoned. That is not hypothetical: orders moved to
    fleet-api.yango.tech and the console path this file used to spell out was
    left checking a surface nothing collects from. */
-import { YANGO_SURFACES } from './sources/yango.js';
+import { YANGO_SURFACES, readConsoleAnswer } from './sources/yango.js';
 
 /* The same host the collector uses, from the same export. This checker kept
    its own copy of the URL, so when Uber moved supplier.uber.com to fleethub
@@ -233,8 +233,8 @@ const yangoAccountOf = (cookie) => {
 };
 
 async function checkYango({ value }) {
-  if (!config.yango.parkId || !config.yango.apiKey) {
-    return { verdict: 'unknown', detail: 'YANGO_PARK_ID and YANGO_API_KEY must be set before a cookie can be tested' };
+  if (!config.yango.parkId) {
+    return { verdict: 'unknown', detail: 'YANGO_PARK_ID must be set before a cookie can be tested' };
   }
   /* The endpoint the COLLECTOR calls, with the headers it sends.
      ─────────────────────────────────────────────────────────────────────
@@ -242,97 +242,50 @@ async function checkYango({ value }) {
      version of this asked /api/v1/parks/orders/list and got a 403 for a
      cookie the collector was using successfully at that moment — a false
      failure, which is the one outcome worse than no check: it tells an
-     operator to go and re-capture a session that is fine. */
+     operator to go and re-capture a session that is fine.
+
+     The path is imported rather than spelled, and the headers are the
+     collector's own four: this sent X-API-Key for three weeks after the
+     collector stopped, to a host measured on 2026-09-22 to ignore it. */
   const day = (n) => dubaiIso(new Date(Date.now() - n * 864e5));
-  /* Three credentials ride on every Yango request — the park id, the API key
-     and the cookie — so a refusal names none of them. Asking once cannot tell
-     them apart; asking twice can. */
-  /* The path the COLLECTOR still uses on this host, imported rather than
-     spelled: orders moved to fleet-api.yango.tech and this check would
-     otherwise have gone on testing a console path the collector abandoned —
-     the exact "a check that picks its own endpoint tests its own choice"
-     failure the header above warns about, arriving the other way round. */
-  const ask = (cookie) => http(`${config.yango.base}${YANGO_SURFACES.console.summary}`, {
-    method: 'POST', timeoutMs: 30000, retries: 0,
-    headers: {
-      'X-Park-Id': config.yango.parkId, 'X-API-Key': config.yango.apiKey,
-      'content-type': 'application/json', 'Accept-Language': 'en',
-      ...(cookie ? { cookie } : {}),
-    },
-    body: JSON.stringify({ date_from: day(1), date_to: day(0),
-      sort: { field: 'driver_id', direction: 'asc' } }),
-  });
   try {
-    const { data, status } = await ask(value);
-    if (status === 401 || status === 403) {
-      /* The false failure this function's own header warns about, committed
-         one screen below it.
-         ───────────────────────────────────────────────────────────────────
-         Measured 2026-09-02: this endpoint answers 403 with a byte-identical
-         body when the cookie header is omitted ENTIRELY. So a 403 here is not
-         evidence about the cookie, and telling an operator to go back to a
-         logged-in fleet.yango.com tab and re-capture a session is telling them
-         to do work that cannot change the answer — which is exactly what the
-         product had been saying.
-
-         One extra request settles it: if the refusal is the same without the
-         cookie, the cookie is not what is being refused. */
-      const bare = await ask(null).catch(() => null);
-      if (bare && bare.status === status) {
-        /* `blames: 'other'` — a refusal, but not of this credential. The paste
-           box refuses to store on it; the Settings save must not paint the
-           cookie red for it either (api/save_check.js). */
-        return { ...verdict(false, `the portal refuses this park with or without a session (${status}), `
-          + 'so the cookie is not what it is rejecting — check YANGO_PARK_ID and YANGO_API_KEY, '
-          + `whose park is ${config.yango.parkId}`), blames: 'other' };
-      }
-      /* A SESSION THAT AUTHENTICATES IS NOT A FAILED SESSION.
-         ─────────────────────────────────────────────────────────────────
-         This returned verdict(false) — "this credential is broken" — for the
-         asymmetric case, and the asymmetric case is precisely the proof that
-         the cookie WORKS: 401 without it and 403 with it means the portal read
-         the session and then refused the request for some other reason. The
-         sentence beside the verdict has said "so the session is being read"
-         all along, one clause after declaring it dead.
-
-         It was a defensible verdict while the console was the collector and a
-         refused console meant no Yango. It is not now: the collector reads
-         trips, the roster and the cars from fleet-api.yango.tech with no
-         session at all, and 403-with-401-without is the console's measured
-         signature since 2026-09-06. So this check as written would reject
-         every cookie an operator pasted, including a fresh one captured
-         minutes earlier — which is the false failure this function's own
-         header is about, arriving through the branch that was supposed to
-         prevent it.
-
-         'unknown' rather than a pass: the session authenticates, and whether
-         it can still DO anything is a question this refusal does not answer.
-         The paste box shows what was measured and does not throw the value
-         away. */
-      if (bare) {
-        /* `authenticates` — the collector records YANGO_COOKIE as ok on
-           exactly this evidence (src/sources/yango.js), so a save that sees it
-           must not show the same cookie amber. */
-        return { verdict: 'unknown', authenticates: true,
-          detail: `the session authenticates${yangoAccountOf(value) ? ` as ${yangoAccountOf(value)}` : ''} — `
-            + `the portal answers ${bare.status} with no cookie and ${status} with this one, so it is `
-            + 'being read — but the request is refused anyway. Since 2026-09-06 that refusal is an '
-            + 'HTML page from a CDN edge while every Yango API refusal is JSON, so it is about where '
-            + 'the call comes from rather than about this credential. Nothing the collector needs '
-            + 'depends on it: trips, the roster and the cars come from fleet-api.yango.tech with no '
-            + 'session, and only the weekly driver aggregate and the payment ledger are behind '
-            + 'this host.' };
-      }
-      return { verdict: 'unknown',
-        detail: `the portal refused (${status}), and the cookie-free comparison did not complete, `
-          + 'so this does not establish which of the park id, the API key and the cookie is being refused' };
+    const r = await http(`${config.yango.base}${YANGO_SURFACES.console.summary}`, {
+      method: 'POST', timeoutMs: 30000, retries: 0,
+      headers: { 'X-Park-Id': config.yango.parkId, 'content-type': 'application/json',
+        'Accept-Language': 'en', cookie: value },
+      body: JSON.stringify({ date_from: day(1), date_to: day(0),
+        sort: { field: 'driver_id', direction: 'asc' } }),
+    });
+    /* ONE REQUEST, READ FOR WHAT IT IS — the collector's own reading.
+       ─────────────────────────────────────────────────────────────────
+       This used to send a second, cookie-free copy and call "403 with, 401
+       without" proof that the session authenticates, answering "the session
+       authenticates as <account>" in the paste box and letting the save
+       paint the cookie green. The 403 is an HTML page from Yandex's edge and
+       the 401 is JSON from Yango's API: two different machines, and the edge
+       refused before the API read the session. On 2026-09-29 a cookie pasted
+       at 09:19:39Z was shown as authenticating on exactly that evidence and
+       had not been read by anything. src/sources/yango.js readConsoleAnswer
+       carries the whole measurement; this and the collector share it so the
+       paste box and the panel cannot disagree about the same answer. */
+    const v = readConsoleAnswer(r);
+    const who = yangoAccountOf(value);
+    if (v.ok) return verdict(true, `the fleet portal answered for park ${config.yango.parkId}`);
+    if (v.kind === 'signed_out') {
+      return verdict(false, `${v.why}${who ? ` (the paste is for ${who})` : ''} — sign in to `
+        + 'fleet.yango.com again and paste a fresh session');
     }
-    /* `items` present — even empty — is the portal answering as this park. */
-    if (data && typeof data === 'object' && Array.isArray(data.items)) {
-      return verdict(true, `the fleet portal answered for park ${config.yango.parkId}`);
-    }
-    if (data && typeof data === 'object') return verdict(true, 'the fleet portal answered with this session');
-    return verdict(false, String(status || 'no answer').slice(0, 200));
+    if (v.kind === 'refused') return { ...verdict(false, `${v.why}; the park, not this session, is `
+      + 'what is being refused'), blames: 'other' };
+    /* Stored, and said plainly: nothing here read the session. 'unknown'
+       without `authenticates`, so api/save_check.js files it as saved and not
+       tested — neither green nor red — which is the truth. */
+    return { verdict: 'unknown',
+      detail: v.kind === 'edge'
+        ? `not checked — ${v.why}. Whether this session${who ? ` (${who})` : ''} is signed in cannot `
+          + 'be told from this server. Stored; the collector asks once a day and turns this green '
+          + 'the day the console answers.'
+        : `not established — ${v.why}` };
   } catch (e) {
     if (unreachable(e)) return { verdict: 'unknown', detail: `fleet.yango.com could not be reached: ${String(e.message).slice(0, 120)}` };
     return verdict(false, String(e.message || e).slice(0, 200));

@@ -213,6 +213,7 @@ const deps = {
   check('a Bolt company name is read from its own company', boltCompanyName({ data: { companies: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }] } }, 2) === 'B');
 }
 
+
 /* ══ 4. the routes, with the caller injected ═════════════════════════════ */
 const mk = async (email, role, fleets = null) => {
   const u = await svc.createUser(db, { email, name: email.split('@')[0], status: 'active', passwordHash: hashPassword('synthetic long password') });
@@ -524,6 +525,33 @@ console.log('\n5. through the real gate');
   check('…and once re-confirmed, it is approved', su.status === 200 && r6.status === 200, j(r6.body));
   check('(no Star Skyline account was ever made up)', sah === null);
   gs.close();
+}
+
+/* ══ 9. Yango's profile is not asked on a day the console already refused ═
+   2026-09-29: the collector asks fleet.yango.com once a day and files the
+   answer as YANGO_CONSOLE. Every nightly profile call since 2026-09-06 was
+   the edge's HTML page, from the same host, the same day.
+   REVERSION, run 2026-09-29: the refusedToday block removed from
+   discoverYango -> both checks below fail (1 profile call; the reason is the
+   edge refusal again, not "Not asked today"). */
+console.log('\n9. Yango, on a day the console has already refused');
+{
+  await q(`INSERT INTO credential_state (provider, fleet_id, credential, state, detail, checked_at)
+           VALUES ('yango', 'ecosine', 'YANGO_CONSOLE', 'blocked', 'refused at the edge', now())
+           ON CONFLICT (provider, fleet_id, credential) DO UPDATE SET state = 'blocked', checked_at = now()`);
+  const before = calls.length;
+  await runDiscovery(db, { log, deps });
+  const asked = calls.slice(before).filter((c) => String(c.url).includes('/parks/users/profile'));
+  check('the profile is not asked again the same day', asked.length === 0, `${asked.length} calls`);
+  const a = (await q(`SELECT reported_name, name_reason FROM platform_account WHERE platform = 'yango'`))[0];
+  check('…and the park\u2019s reason says why it was not asked', /Not asked today/.test(a?.name_reason || ''), a?.name_reason);
+  /* The day it answered, the profile IS asked. */
+  await q(`UPDATE credential_state SET state = 'ok' WHERE credential = 'YANGO_CONSOLE'`);
+  const mid = calls.length;
+  await runDiscovery(db, { log, deps });
+  check('…and on a day the console answered, it is asked as before',
+    calls.slice(mid).filter((c) => String(c.url).includes('/parks/users/profile')).length === 1);
+  await q(`DELETE FROM credential_state WHERE credential = 'YANGO_CONSOLE'`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

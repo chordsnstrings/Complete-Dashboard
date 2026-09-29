@@ -9642,11 +9642,16 @@ const ERRAND_HEAD = {
     many: 'authenticate and are refused the company or park they ask for — this is access to '
       + 'grant in the provider\u2019s portal, not a secret to replace',
   },
+  /* "The credential authenticates" was dropped from both on 2026-09-29: the
+     one surface in this state is Yango's console, where the edge turns this
+     server away BEFORE the API reads the session — so whether it would
+     authenticate is exactly what cannot be told (src/sources/yango.js,
+     readConsoleAnswer). */
   blocked: {
-    one: 'is being refused before the request reaches the provider — the credential authenticates '
-      + 'and something in front of the API is turning this caller away',
-    many: 'are being refused before the request reaches the provider — the credentials '
-      + 'authenticate and something in front of the API is turning this caller away',
+    one: 'is being refused before the request reaches the provider — something in front of the '
+      + 'API is turning this server away before any credential is read',
+    many: 'are being refused before the request reaches the provider — something in front of '
+      + 'the API is turning this server away before any credential is read',
   },
 };
 /* The noun each errand counts, so the lead reads "2 endpoints" and not

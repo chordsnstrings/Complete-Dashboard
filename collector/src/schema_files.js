@@ -245,4 +245,8 @@ export const SCHEMA_FILES = [
      moment the unregistered-trip message went live so it never reaches back
      into the journeys already on file. Additive. */
   'schema_v88.sql',
+  /* Yango (2026-09-29): drop the probe row for the console ledger path, which
+     the nightly probe no longer asks — it asks the key host's v2 ledger under
+     'transactions/list', which is what the collector reads. */
+  'schema_v89.sql',
 ];

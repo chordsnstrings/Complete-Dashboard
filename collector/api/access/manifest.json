@@ -4919,6 +4919,34 @@
  },
  {
   "method": "GET",
+  "path": "/api/probe/yango/weekly-rebuild",
+  "subject": "CRED",
+  "carries": [
+   "CRED",
+   "PAY"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "PAY",
+    "paths": [
+     "metrics",
+     "weeks",
+     "console_number_fields",
+     "ledger_categories_on_matched_weeks"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "auditRead": true,
+  "notes": "api/probe.js:2684 handler. Database only, no provider call. Body: {window{from,to}, coverage{trips_first,trips_last,ledger_first,ledger_last}, driver_weeks{console,rebuilt,both}, metrics{figure:{rule:{n,agree,agree_pct,console_total,rebuilt_total,examples[{week,console,rebuilt}]}}}, weeks[{week,console_rows,rebuilt_rows,both,console{trips,cash,earnings},rebuilt{...}}], console_number_fields, ledger_categories_on_matched_weeks, trip_status_payment[{status,payment,n}], rules_in_use}. Park-wide sums and match counts; no driver id or name."
+ },
+ {
+  "method": "GET",
   "path": "/api/probe/zero-distance",
   "subject": "RAW",
   "carries": [
