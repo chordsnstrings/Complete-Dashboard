@@ -2170,3 +2170,80 @@ The old skin at 390 scrolls 2 px sideways on this page. That is pre-existing, an
 ### #notfound — 2026-09-24
 
 Production through live-ui on :8611, both skins at 1440 and 390, light and dark (scratchpad `pagephase/shots/p77/`), for `#zzz-not-a-page` and the renamed `#hotels`. No page error, no sideways scroll, and the fils scan is clean. The Arkiv notice is ink with no red dot. `#hotels` still offers Corporate & hotels.
+
+## Page load times on production, and why they are slow — 2026-09-29
+
+The operator: "the database for many pages are extremely slow. What happened?
+find out the page load times and understand how we can optimize it."
+
+**How it was measured.** Every view's endpoints, read from the front-end
+source the way `bin/page-audit.mjs` reads them, requested all at once as a
+browser does, 30-day default window, no cache-buster, anonymous, from this
+sandbox (network floor ~0.36 s, measured on `/api/health`, which touches no
+database). Two passes: 14:12–14:28Z and 14:43–14:48Z. Detail pages keyed on an
+entity (one driver, one car) were not timed. The script is not in the tree; it
+is `bin/page-audit.mjs`'s view→endpoint map plus a timer.
+
+| page | pass 1 | pass 2 | slowest call |
+|---|---|---|---|
+| #live | 24.7 s | 57.1 s | `/api/live` (never cached) |
+| #policy | 42.1 s | 0.5 s | `/api/ledger/exposure` (cold, then cached) |
+| #same-person | 2.1 s | 24.8 s | `/api/same-person` (never cached) |
+| #segments | 23.3 s | 0.5 s | `/api/unauthorized/attributed` |
+| #hr-roster | 2.6 s | 18.5 s | `/api/hr-roster` |
+| #feeds | 15.9 s | 13.8 s | `/api/vehicles/feeds` |
+| #map | 9.7 s | 13.6 s | `/api/live` |
+| #safety | 1.6 s | 11.4 s | `/api/alerts/summary` |
+
+63 pages timed: median 2.3 s (the worse of the two passes), 24 over 3 s, 8
+over 10 s. A page served from the cache answers in 0.2–0.5 s; the numbers
+above are what a first visit, a new window, or a never-cached route costs, and
+the second pass ran across the 14:45 rollup, which is why the uncached routes
+doubled or worse.
+
+**The API's own slow-query log** (`SLOW_QUERY_MS` 2,500) from the 13:06 boot to
+14:08: 1,332 statements over 2.5 s, 14,424 s of query time in 62 minutes —
+about four slow statements running at every moment. Median 6.1 s, p90 20 s. 633
+of them fell in the five minutes after the 13:06 deploy: the response cache is
+in process memory, so every restart serves every page cold. Steady state was
+~45 slow statements per five minutes whether or not a rollup was running.
+`/api/ledger/exposure` hit the 120 s statement timeout 15 times between 13:09
+and 13:17; `/api/driver/unauthorized` three times at 14:03. The rollup's own
+`money_event trip_price` step timed out at 13:16 and 14:03. Simple lookups
+(the credential banner, `collection_run`) logged 5–7 s: queue time behind the
+8-connection pool, not their own cost.
+
+**What keeps the database busy — none of it is a reader:**
+
+1. **The cache is invalidated every five minutes.** Its version is
+   `max(collection_run.finished_at) | max(rollup_state.finished_at)`, and the
+   CABMAN realtime tick (`*/5`) writes a collection_run. Observed:
+   `x-data-version` moved at 14:15:02, the CABMAN tick.
+2. **So the warmer never stops.** `api/warm.js` re-requests 89 aggregates
+   (19 paths × 4 windows including 365 days, plus the bare ones) one after
+   another on every version change. Passes took 1,050, 541, 525, 519 and 733
+   s — its own comment expects about a minute — and a pass is always longer
+   than the five minutes before the next version, so it runs continuously.
+3. **The rollup runs six times an hour and rewrites whole tables.** Every
+   quarter hour plus after each 30-minute collection; each pass took 149–313
+   s (32% of the hour) and fully DELETEs and re-INSERTs `driver_payout_day`
+   (350–675 k rows written per pass in total), `money_event` and
+   `driver_lifetime`, then ANALYZEs `trip` and seven more tables.
+4. **"Latest per car" is answered from the whole telemetry history.**
+   `telemetry_snapshot` holds ~657 k rows (FMS alone ~12 k a day since 21 Aug)
+   and grows without bound. `/api/live` sorts all of it with an ORDER BY the
+   `(plate, captured_at DESC)` index cannot serve; `/api/kpis` runs `DISTINCT
+   ON (plate)` over all of it for every window; `/api/vehicles/feeds` runs six
+   correlated `max(captured_at)` sub-queries per car. These get slower every
+   day without anyone changing them.
+5. **A few routes are expensive on their own:** `/api/ledger/exposure` (42 s
+   cold, timeouts at 120 s), `/api/unauthorized/attributed` (23 s; seven
+   statements in `Promise.all`, i.e. seven of the pool's eight connections for
+   one page), `/api/reconcile`, `/api/analyst/brief`, `/api/optimise`,
+   `/api/geo/corridors` (5–6 s each).
+
+The data is not large — ~625 k trips, ~597 k alerts, ~657 k telemetry rows on
+a 2 vCPU / 4 GB database — which is why the ordering of the fix list is
+"stop the background work, then the scans, then size", not the reverse.
+Direct database access (pg_stat_statements, EXPLAIN, bloat) was not available
+from this sandbox, so per-statement plans are inferred from the SQL, not read.
