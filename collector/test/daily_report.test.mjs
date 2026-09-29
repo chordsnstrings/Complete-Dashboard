@@ -83,14 +83,16 @@ check('the channel that did not deliver the day is named',
   f.collection.missing.length === 1 && f.collection.missing[0].platform === 'bolt', j(f.collection));
 
 /* ── 2. the model sees no one, and may not move a number ───────────────────
-   REVERSION: modelInput passes f.drivers through whole -> 28 passed,
-   1 FAILED: "the model is shown no name, id or plate".
+   (Until 2026-09-29 the model was shown no names; the operator ruled that
+   it sees drivers by name, so the check below now asserts the names.)
    REVERSION: guardCommentary always ok -> 27 passed, 2 FAILED: "a number
    that is not in the figures is caught" and "a commentary with a number not
    in the figures is dropped…". */
 console.log('\n2. the commentary');
 const shown = j(modelInput(f));
-check('the model is shown no name, id or plate', !/Test Driver|u-a|b-b|P1|P2/.test(shown), shown.slice(0, 200));
+/* The operator, 2026-09-29: "GLM 5.2 always sees a person" — names and
+   plates, not phone numbers. */
+check('the model is shown the drivers by name, with their cars', /Test Driver A/.test(shown) && /P1/.test(shown), shown.slice(0, 200));
 check('numbers are read as written', numbersIn('AED 1,234.50 and 7 cars, 12.0%').join() === '1234.5,7,12');
 check('a sentence using only the figures passes',
   guardCommentary('Fares came to AED 200 from 5 bookings, with 2 cars earning; Bolt ecosine was not collected.', f).ok);
@@ -153,7 +155,7 @@ modelSays = { summary: 'Fares climbed 30% to AED 260.', actions: [] };
 await dailyReportRun({ q, now, http: fakeHttp });
 const html2 = calls.filter((c) => c.url.includes('resend')).at(-1)?.body?.html || '';
 check('a commentary with a number not in the figures is dropped, and the email says why',
-  !html2.includes('climbed') && /No commentary today — it stated 30, 260/.test(html2), html2.match(/No commentary[^<]*/)?.[0]);
+  !html2.includes('climbed') && /No commentary today — it stated 30; 260/.test(html2), html2.match(/No commentary[^<]*/)?.[0]);
 
 /* ── 4. the list ───────────────────────────────────────────────────────── */
 console.log('\n4. the list');

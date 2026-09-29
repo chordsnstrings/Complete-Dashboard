@@ -1,7 +1,9 @@
 /* WHAT THE DAILY REPORT FINDS, AND WHAT GLM 5.2 MAY SAY ABOUT IT.
    ═══════════════════════════════════════════════════════════════════════════
    src/report_findings.js measures; src/daily_report.js analyse() lets GLM 5.2
-   rank and phrase the actions and holds it to what was measured. Against a
+   rank and phrase the actions and holds it to what was measured — each
+   action to its own finding's numbers and people. GLM sees names and plates
+   (the operator, 2026-09-29). Against a
    real schema (PGlite) with four weeks of synthetic Mondays; a fake model.
 
    D = Monday 2026-09-28; the prior Mondays are 21, 14, 7 September and 31
@@ -120,19 +122,20 @@ check('the most severe come first', r.findings.every((f, i, a) => i === 0 || a[i
 
 console.log('\n2. what the model is shown');
 const shown = j(findingsForModel(r));
-check('no name and no plate reaches the model', !/Test Driver|P-IDLE|"PX"|"PM"/.test(shown), shown.match(/Test Driver[^"]*/)?.[0]);
-check('drivers and cars are tokens instead', /"ref":"D\d+"/.test(shown) && /"ref":"C\d+"/.test(shown));
+/* The operator, 2026-09-29: "GLM 5.2 always sees a person". */
+check('the model sees drivers by name and cars by plate', /Test Driver R/.test(shown) && /P-IDLE/.test(shown), shown.slice(0, 160));
+check('…not the internal refs, which mean nothing to it', !/"ref":/.test(shown));
 
 console.log('\n3. what it may say');
-const R = kind('driver_down'); const tokenR = R.items.find((i) => i.name === 'Test Driver R').ref;
-const X = kind('channel'); const tokenX = X.items[0].ref;
+const R = kind('driver_down'); const tokenR = 'Test Driver R';
+const X = kind('channel'); const tokenX = X.items[0].name;
 let reply;
 const fake = async () => ({ status: 200, data: { choices: [{ message: { content: typeof reply === 'string' ? reply : j(reply) } }] } });
 reply = { summary: 'Bookings fell to 24 against 37 last Monday, with Bolt completing 4 of 10.',
   actions: [{ finding: X.id, owner: 'Supervisors', action: `Ask ${tokenX} why 6 Bolt bookings did not complete.` },
     { finding: R.id, owner: 'Supervisors', action: `Call ${tokenR}: AED 100 against a usual AED 400.` }] };
 const a1 = await analyse(facts, r, { http: fake });
-check('the model’s summary and actions are kept, names put back',
+check('the model’s summary and actions are kept, with the names it wrote',
   a1.outcome === 'ok' && a1.actions[0].text === 'Ask Test Driver X why 6 Bolt bookings did not complete.'
   && a1.actions[1].text.startsWith('Call Test Driver R'), j(a1.actions.slice(0, 2)));
 check('a finding the model left out keeps its own action after the model’s', a1.actions.some((x) => x.by === 'rule'));
@@ -142,17 +145,19 @@ reply = { summary: 'Bookings fell.', actions: [{ finding: R.id, owner: 'Supervis
 const a2 = await analyse(facts, r, { http: fake });
 check('an action with a number not in the findings throws the whole reply out for the findings’ own',
   a2.outcome === 'dropped' && a2.actions.every((x) => x.by === 'rule') && /900|75/.test(a2.why), j(a2.why));
-/* REVERSION, run 2026-09-29: the own-token check removed -> 26 passed,
-   1 FAILED: "a driver token moved onto another finding's evidence…". */
+/* A driver who is in another finding, named in this one's action.
+   REVERSION, run 2026-09-29: the own-name check removed -> 27 passed,
+   1 FAILED: this check. */
 reply = { summary: 'Bookings fell.', actions: [{ finding: R.id, owner: 'Supervisors', action: `Call ${tokenX}.` }] };
 const a3 = await analyse(facts, r, { http: fake });
-check('a driver token moved onto another finding’s evidence is refused', a3.outcome === 'dropped', j(a3));
+check('a driver from another finding named in this one’s action is refused', a3.outcome === 'dropped'
+  && /test driver x/i.test(a3.why), j(a3.why));
 /* 600 is a real number — driver C's cash to hand in — but not the idle
    cars' or the day's figures'.
    REVERSION, run 2026-09-29: actions checked against every finding's
    numbers instead of their own -> 27 passed, 1 FAILED: this check. */
 const idleF = kind('cars_idle');
-const idleTok = idleF.items[0].ref;
+const idleTok = idleF.items[0].plate;
 reply = { summary: 'Bookings fell.', actions: [{ finding: idleF.id, owner: 'Fleet', action: `Put a driver in ${idleTok}, idle 600 days.` }] };
 const a6 = await analyse(facts, r, { http: fake });
 check('an action may use only its own finding\u2019s numbers — not one from another finding', a6.outcome === 'dropped', j(a6.why));

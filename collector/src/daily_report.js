@@ -27,10 +27,11 @@
    Bolt and an unfetched Bolt draw the same zero.
 
    A LANGUAGE MODEL MAY NAME AN EVENT AND MAY NOT MOVE A NUMBER (docs/
-   COVERAGE.md). GLM is given aggregates and anonymous ranked rows — no name,
-   no id, no plate, no phone — and every number in what it writes must be one
-   of the numbers it was given. One that is not, and the commentary is dropped
-   and the email says so; the figures never depend on it. */
+   COVERAGE.md). GLM is given the figures and the findings with drivers by
+   name and cars by plate (the operator, 2026-09-29: "GLM 5.2 always sees a
+   person"; phone numbers are not sent), and every number and person in what
+   it writes must be one it was given for that finding. One that is not, and
+   its text is dropped and the email says so; the figures never depend on it. */
 import { buildDay } from '../api/day_routes.js';
 import { personKey } from '../api/custody_sql.js';
 import { http as realHttp } from './http.js';
@@ -173,9 +174,11 @@ export function guardCommentary(text, facts, extra = null) {
   return stray.length ? { ok: false, stray } : { ok: true, stray: [] };
 }
 
-/* What the model is shown: aggregates and ANONYMOUS ranked rows. No name,
-   no id, no plate — driver names are personal data and the model is a third
-   party; "the top driver" is all the commentary needs. */
+/* What the model is shown: the day's figures and the drivers by name.
+   The operator, 2026-09-29: "GLM 5.2 always sees a person" — it is given
+   drivers' names and cars' plates like anyone reading the dashboard, so it
+   can say who. Phone numbers are not sent: nothing in the analysis needs
+   them. */
 export function modelInput(f) {
   return {
     day: f.day,
@@ -188,45 +191,9 @@ export function modelInput(f) {
     channels: f.channels.map((c) => ({ channel: CHANNEL[c.platform] || c.platform, bookings: c.bookings,
       fares_aed: c.fares, completion_pct: c.completion_pct })),
     channels_not_collected: f.collection.missing.map((m) => `${CHANNEL[m.platform] || m.platform} ${FLEET[m.fleet] || m.fleet}`),
-    top_drivers_by_fares: f.drivers.slice(0, 5).map((p, i) => ({ rank: i + 1, bookings: p.bookings, fares_aed: p.fares, cash_aed: p.cash })),
+    top_drivers_by_fares: f.drivers.slice(0, 10).map((p, i) => ({ rank: i + 1, name: p.name, bookings: p.bookings,
+      fares_aed: p.fares, cash_aed: p.cash, channels: p.platforms.map((x) => CHANNEL[x] || x), cars: p.plates })),
   };
-}
-
-const PROMPT = 'You write the two-to-three sentence opening of a fleet operator’s daily email about '
-  + 'yesterday. Use ONLY numbers that appear in the data, written exactly as they appear there '
-  + '(you may add thousands separators). Do not compute new numbers: no sums, differences, '
-  + 'ratios or percentages that are not already in the data. Write small counts as words only '
-  + 'if the data has them as numbers. No names, no advice, no markdown, no greeting. Plain '
-  + 'English, calm and factual. If a channel was not collected, say that its figures are missing.';
-
-export async function commentary(facts, { http = realHttp } = {}) {
-  const m = config.reportModel;
-  if (!m.apiKey) return { text: null, outcome: 'no_model', model: m.model, why: 'no model key is set (REPORT_MODEL_API_KEY)' };
-  let text;
-  try {
-    const { status, data } = await http(`${m.baseUrl}/chat/completions`, {
-      method: 'POST', timeoutMs: 60000, retries: 1,
-      headers: { authorization: `Bearer ${m.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: m.model, max_tokens: 300, temperature: 0.2,
-        /* GLM 5.2 reasons by default and bills it (docs/COVERAGE.md); three
-           sentences over given figures need none. */
-        thinking: { type: 'disabled' },
-        messages: [{ role: 'system', content: PROMPT },
-          { role: 'user', content: JSON.stringify(modelInput(facts)) }] }),
-    });
-    if (status >= 400) throw new Error(`HTTP ${status}: ${JSON.stringify(data).slice(0, 160)}`);
-    text = String(data?.choices?.[0]?.message?.content || '').replace(/\s+/g, ' ').trim();
-  } catch (e) {
-    return { text: null, outcome: 'failed', model: m.model, why: String(e.message || e).slice(0, 200) };
-  }
-  if (!text) return { text: null, outcome: 'failed', model: m.model, why: 'the model returned no text' };
-  const g = guardCommentary(text, facts);
-  if (!g.ok) {
-    log.warn(SRC, 'commentary dropped: a number not in the data', { stray: g.stray.slice(0, 5) });
-    return { text: null, outcome: 'dropped', model: m.model,
-      why: `it stated ${g.stray.slice(0, 3).join(', ')}, which ${g.stray.length === 1 ? 'is' : 'are'} not in the figures` };
-  }
-  return { text: text.slice(0, 900), outcome: 'ok', model: m.model, why: null };
 }
 
 /* ── the analysis: GLM 5.2 over the findings, held to them ───────────────── */
@@ -234,13 +201,13 @@ const OWNERS = ['Manager', 'Supervisors', 'Fleet', 'Cash desk', 'Admin'];
 const ANALYST = 'You are the operations analyst for a Dubai ride-hailing fleet (Uber, Bolt, a hotel '
   + 'channel, Yango). You are given yesterday’s figures, a comparison with the same weekday last '
   + 'week and the usual range of the four same weekdays before, and a list of findings the system has '
-  + 'already measured. Drivers and cars appear as tokens (D4, C2); use the tokens exactly, never invent '
-  + 'one. Reply with JSON only, no markdown: {"summary": "2-3 sentences on how yesterday went against '
+  + 'already measured. Name drivers and cars exactly as they are written in the data, and only the '
+  + 'ones in the data. Reply with JSON only, no markdown: {"summary": "2-3 sentences on how yesterday went against '
   + 'last week and the usual, and why", "actions": [{"finding": "F1", "owner": "Manager|Supervisors|'
   + 'Fleet|Cash desk|Admin", "action": "one imperative sentence saying who does what today"}]}. At most 8 '
   + 'actions, most important first, each tied to one finding id from the list. Use ONLY numbers that '
   + 'appear in the data; do not add, subtract, divide or compute percentages yourself. In an action, use '
-  + 'only that finding\u2019s own numbers, and give a driver or car only the numbers on its own item. '
+  + 'only that finding\u2019s own numbers and people, and give a driver or car only the numbers on its own item. '
   + 'Plain English, specific, no filler.';
 
 /* The findings' own sentence for each kind: what the email says when the
@@ -307,7 +274,13 @@ export async function analyse(facts, report, { http = realHttp } = {}) {
     return fallback('the model did not answer in the agreed form', 'dropped');
   }
   const byId = new Map(report.findings.map((f) => [f.id, f]));
-  const tokensOf = (f) => new Set(f.items.map((i) => i.ref));
+  /* Who each finding is about, by name and plate. An action that names a
+     driver or car belonging only to ANOTHER finding would put one person's
+     evidence under another's name — the same failure as a number from
+     another finding, checked the same way. */
+  const who = (f) => f.items.flatMap((i) => [i.name, i.plate, i.last_driver]).filter((x) => x && String(x).length >= 3);
+  const everyone = new Set(report.findings.flatMap(who).map((x) => String(x).toLowerCase()));
+  const mentioned = (text) => [...everyone].filter((n) => text.toLowerCase().includes(n));
   /* The summary may use any measured number; an action only its own
      finding's (and the comparison table's). Checked across all findings, an
      action could put one car's "3 days" on another car that has been idle
@@ -319,25 +292,25 @@ export async function analyse(facts, report, { http = realHttp } = {}) {
   if (summary) {
     const g = check(summary);
     if (!g.ok) bad.push(...g.stray);
-    if (/\b[DC]\d+\b/.test(summary)) bad.push('a driver or car token in the summary');
   }
   const actions = [];
   for (const a of Array.isArray(out?.actions) ? out.actions.slice(0, 8) : []) {
     const f = byId.get(String(a?.finding || ''));
     const text = typeof a?.action === 'string' ? a.action.replace(/\s+/g, ' ').trim().slice(0, 400) : '';
     if (!f || !text) continue;
-    /* A token that is not this finding's own would put one driver's name on
-       another's evidence. */
-    const own = tokensOf(f);
-    if ([...text.matchAll(/\b[DC]\d+\b/g)].some((t) => !own.has(t[0]))) { bad.push(`${a.finding}: a token not in that finding`); continue; }
+    const own = new Set(who(f).map((x) => String(x).toLowerCase()));
+    const foreign = mentioned(text).filter((n) => !own.has(n)
+      /* A name that is a part of this finding's own ("Ali" inside "Ali
+         Khan") is not somebody else. */
+      && ![...own].some((o) => o.includes(n)));
+    if (foreign.length) { bad.push(`${a.finding}: ${foreign[0]}, who is in another finding`); continue; }
     const g = check(text, f.id);
     if (!g.ok) { bad.push(...g.stray); continue; }
-    actions.push({ finding: f.id, owner: OWNERS.includes(a.owner) ? a.owner : f.owner,
-      text: text.replace(/\b[DC]\d+\b/g, (t) => report.names.get(t) || t), by: 'model' });
+    actions.push({ finding: f.id, owner: OWNERS.includes(a.owner) ? a.owner : f.owner, text, by: 'model' });
   }
   if (bad.length) {
     log.warn(SRC, 'analysis dropped: it strayed from the findings', { stray: bad.slice(0, 5) });
-    return fallback(`it stated ${bad.slice(0, 3).join(', ')}, which ${bad.length === 1 ? 'is' : 'are'} not in the findings`, 'dropped');
+    return fallback(`it stated ${bad.slice(0, 3).join('; ')} — not what the findings say`, 'dropped');
   }
   /* A finding the model left out keeps its own sentence, after the model's. */
   const covered = new Set(actions.map((a) => a.finding));
@@ -595,7 +568,7 @@ export async function dailyReportRun({ q, now = new Date(), http = realHttp, day
     facts = await reportFacts(q, day);
     const found = await reportFindings(q, day, { facts });
     note = await analyse(facts, found, { http });
-    /* Kept as composed; the token map is not needed once names are in. */
+    /* Kept as composed; the internal ref map is not needed to send it. */
     const { names: _names, cmp: _cmp, ...kept } = found;
     report = kept;
     await q(`INSERT INTO report_run (business_day, status, detail) VALUES ($1, 'composed', $2::jsonb)

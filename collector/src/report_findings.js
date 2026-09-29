@@ -8,10 +8,11 @@
    not move a number. Everything below is SQL and arithmetic — every figure,
    every comparison, every threshold — and each finding carries its evidence,
    who acts on it and how much it matters. GLM 5.2 is then given the findings
-   (with drivers and cars as tokens, never names or plates) and asked which
-   matter most and what to do about them; src/daily_report.js holds it to the
-   numbers it was given and falls back to these findings' own sentences if it
-   strays. The email is useful on the day the model is down.
+   (drivers by name, cars by plate — the operator's ruling, 2026-09-29) and
+   asked which matter most and what to do about them; src/daily_report.js
+   holds each action to its own finding's numbers and people and falls back
+   to these findings' own sentences if it strays. The email is useful on the
+   day the model is down.
 
    THE COMPARISON. Yesterday against the same weekday a week before, and
    against the usual range of the four same weekdays before it — one Monday
@@ -59,8 +60,8 @@ const median = (xs) => {
 };
 export const WEEKDAY = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
 
-/* Drivers and cars as tokens. The model is shown "D4" and "C2"; the email
-   shows the name and the plate. */
+/* A short internal ref per driver and car ("D4", "C2"), so one person keeps
+   one handle across findings. Not shown to the model or the reader. */
 function tokens() {
   const d = new Map(); const c = new Map();
   return {
@@ -350,7 +351,8 @@ const CH = { uber: 'Uber', bolt: 'Bolt', yango: 'Yango', hotel: 'Hotel', fms: 'T
 const FL = { ecosine: 'Ecosine', egari: 'Egari' };
 export const fmt = (v) => (v == null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 }));
 
-/** The findings as the model sees them: tokens, never a name or a plate. */
+/** The findings as the model sees them: by name and plate (the operator,
+    2026-09-29). The internal refs are left out — they mean nothing to it. */
 export function findingsForModel(r) {
   return {
     day: r.day, weekday: r.weekday,
@@ -358,6 +360,6 @@ export function findingsForModel(r) {
       ({ key, label, yesterday: today, last_week, usual, low, high, vs_last_week_pct, vs_usual_pct, unusual })),
     findings: r.findings.map((f) => ({ id: f.id, kind: f.kind, owner: f.owner, severity: f.severity,
       title: f.title, numbers: f.numbers,
-      items: f.items.map(({ name, plate, last_driver, ...rest }) => rest) })),
+      items: f.items.map(({ ref, ...rest }) => rest) })),
   };
 }

@@ -7490,12 +7490,21 @@ src/daily_report.js has the whole account.
   Dubai day. Cars and drivers that earned: at least one priced booking. The
   averages are fares over those. Bookings without a fare are counted and
   named; a channel that did not deliver the day is named at the top.
-- **The model sees nobody.** GLM 5.2 (`glm-5-2-260617`, ModelArk,
-  `thinking: disabled`) gets aggregates and anonymous ranked rows — no name,
-  id or plate. Every number in its reply must be one it was given (rounded
-  or as written) or part of the date; one that is not and the commentary is
-  dropped, the email saying why. Measured 2026-09-29: a live call with
-  reasoning off returned in one short reply, 0 reasoning tokens.
+- **What the model sees.** GLM 5.2 (`glm-5-2-260617`, ModelArk,
+  `thinking: disabled`) gets the day's figures, the comparison and the
+  findings **with drivers by name and cars by plate** — the operator's
+  ruling, 2026-09-29: "GLM 5.2 always sees a person". (The first version sent
+  tokens instead; the operator overruled it. Phone numbers are not sent —
+  nothing in the analysis needs them.) Every number in its reply must be one
+  it was given, and in an action one from that action's own finding; every
+  driver or car an action names must be that finding's own. Otherwise its
+  text is dropped and the findings' own sentences stand in, the email saying
+  why. Measured 2026-09-29: a live call with reasoning off returned in one
+  short reply, 0 reasoning tokens.
+- **Why GLM 5.2.** Chosen on measured results, not on where it comes from:
+  on this dashboard's own check it gave the 2027 Ramadan and Eid dates the
+  UAE press published, where MiniMax M3 gave the year before's ("A language
+  model may name an event…", above).
 - **Sending.** One email per address (no recipient sees the others), with a
   Resend idempotency key `daily-report/<day>/<address>`. The day is composed
   once (`report_run`), so a retry sends what 07:00 composed. The collector
@@ -7550,15 +7559,15 @@ everyone (the operator's call; per-role emails can follow).
   0 of 349 people on 2026-09-29 (no opening balances) — so the email uses the
   7-day "to hand in" and says how many hand-ins were recorded, because an
   empty hand-in book makes every cash driver look as if they owe it all.
-- **GLM 5.2** gets the comparison and the findings with drivers and cars as
-  tokens (D4, C2) and answers `{summary, actions[]}`. Refused and replaced by
+- **GLM 5.2** gets the comparison and the findings with drivers by name and
+  cars by plate, and answers `{summary, actions[]}`. Refused and replaced by
   the findings' own sentences if: it is not that JSON; a number in the
   summary is not measured; **an action uses a number not in its own
   finding** (checked across all findings, one car's "3 days" could sit on a
-  car idle for 7 — every number real, the sentence false); or a token is not
-  that finding's own. Names go back in after. A finding the model left out
-  keeps its own action after the model's. With no model at all, the email
-  still carries every action.
+  car idle for 7 — every number real, the sentence false); or an action
+  names a driver or car who belongs to another finding. A finding the model
+  left out keeps its own action after the model's. With no model at all, the
+  email still carries every action.
 - **"Send me yesterday's report now"** on the panel composes and sends the
   real email to the signed-in admin only (audited); the preview shows the
   findings' own actions.
