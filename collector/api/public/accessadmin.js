@@ -1379,6 +1379,15 @@ function reportPanel(host, ctx) {
     mm.set(`${res.email} will get the report from the next one.`, 'ok');
     load();
   });
+  const me = h('button', { type: 'button', class: 'btn', 'data-acx': 'report-send-me' }, 'Send me yesterday\u2019s report now');
+  const meMsg = msgLine();
+  me.addEventListener('click', async () => {
+    meMsg.set('Composing and sending — this takes up to a minute…', '');
+    const res = await act(me, meMsg, () => post('/api/access/report/send-me', {}));
+    if (!res) return;
+    meMsg.set(`Sent to ${res.to} — the report for ${dateStr(res.day)}. Nobody else on the list was sent it.`, 'ok');
+    load();
+  });
   p.body.append(
     h('p', { class: 'acx-p' }, 'Every day at 07:00 Dubai, the day before is emailed to the people below: fares, cash trips, '
       + 'active cars, cars and drivers that earned, the average per driver and per car, and every driver who drove. '
@@ -1388,7 +1397,8 @@ function reportPanel(host, ctx) {
     h('div', { class: 'acx-inrow' }, field('Add someone', input), add),
     mm,
     h('p', { class: 'acx-p' }, h('a', { href: '/api/access/report/preview', target: '_blank', rel: 'noopener' },
-      'See yesterday’s email as it would be sent'), ' — without the commentary, which is written when it is sent.'),
+      'See yesterday’s email as it would be sent'), ' — with the measured findings’ own actions; GLM 5.2 writes the summary and orders the actions when it is sent.'),
+    h('div', { class: 'acx-inrow' }, me), meMsg,
     h('h4', { class: 'acx-h4' }, 'The last two weeks'),
     runsHost);
   host.append(p.panel);

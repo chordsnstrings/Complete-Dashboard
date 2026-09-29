@@ -7525,6 +7525,44 @@ requested through the API. Until Resend marks the domain verified, every send
 is refused ("domain is not verified") and recorded as failed with that
 reason, and the next quarter-hour retries it.
 
+### The analysis (2026-09-29, the operator: "not just a preliminary report")
+
+src/report_findings.js measures; GLM 5.2 ranks and phrases. One email for
+everyone (the operator's call; per-role emails can follow).
+
+- **The comparison.** Yesterday against the same weekday last week and the
+  usual range of the four same weekdays before it, for bookings, completed,
+  fares, active cars, cars and drivers that earned, cash trips and cash. A
+  figure is **unusual** only outside all four AND ≥10% from their median; a
+  prior day with no bookings is a collection gap and leaves the norm.
+- **The findings**, each with evidence, an owner and a severity: a channel's
+  completion ≥15 points under its usual (with the drivers behind it); the
+  3-hour window furthest from its usual; regulars (≥3 of the last 4 same
+  weekdays) earning half or less of their own usual, or absent; drivers with
+  ≥5 bookings and ≥30% uncompleted; cars with a booking in the last 14 days
+  and none for ≥2; Uber drivers online ≥4 h under half the fleet's median
+  AED per online hour (`driver_day.online_min` — Uber only); cash to hand in
+  ≥ AED 500 over 7 days (`cashToCollect`, the workbook's own rule, now
+  shared); unregistered journeys per driver (`sms_outbox` trip rows); cars
+  with ≥3 safety alerts; channels that did not deliver. Thresholds in
+  `THRESHOLDS`, stated so they can be changed.
+- **Cash owed cannot be measured today** — `/api/ledger/exposure` measured
+  0 of 349 people on 2026-09-29 (no opening balances) — so the email uses the
+  7-day "to hand in" and says how many hand-ins were recorded, because an
+  empty hand-in book makes every cash driver look as if they owe it all.
+- **GLM 5.2** gets the comparison and the findings with drivers and cars as
+  tokens (D4, C2) and answers `{summary, actions[]}`. Refused and replaced by
+  the findings' own sentences if: it is not that JSON; a number in the
+  summary is not measured; **an action uses a number not in its own
+  finding** (checked across all findings, one car's "3 days" could sit on a
+  car idle for 7 — every number real, the sentence false); or a token is not
+  that finding's own. Names go back in after. A finding the model left out
+  keeps its own action after the model's. With no model at all, the email
+  still carries every action.
+- **"Send me yesterday's report now"** on the panel composes and sends the
+  real email to the signed-in admin only (audited); the preview shows the
+  findings' own actions.
+
 ### Traps this added to the list
 
 34 in "Traps that have cost time more than once".

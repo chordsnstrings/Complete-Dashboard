@@ -91,6 +91,105 @@ function mobileFor(book, person) {
   return { mobile: all.map(dialFormat).join(' / '), note: HOLD_WHY[ph.hold] || ph.hold || '' };
 }
 
+/* Cash per person, or per account no person has been placed on: cash from
+   trips (trip_cash), advances and hand-ins (driver_ledger), keyed exactly as
+   the workbook keys them. Shared by buildMoneyWorkbook and the 07:00 daily
+   report (src/report_findings.js), so "to hand in" is one rule in one place:
+   cash from trips + advances recorded − hand-ins recorded (the operator's
+   definition, 2026-09-22). Returns the map the workbook goes on to fill with
+   bookings, and the helpers it uses to do so. */
+export function assembleCash({ cashRows, ledgerRows, personOf, driverRow }) {
+  const who = new Map();
+  const keyOf = (platformId, acct) => {
+    const p = personOf.get(`${platformId}:${acct}`);
+    return p ? `p${p}` : `a${platformId}:${acct}`;
+  };
+  const entry = (k, name, platformId, acct) => {
+    if (!who.has(k)) {
+      const pid = k.startsWith('p') ? k.slice(1) : null;
+      const d = pid ? driverRow.get(pid) : null;
+      who.set(k, { key: k, person: pid, name: d?.full_name || name || '(no name on the record)',
+        placed: !!pid, platforms: new Set(), fleets: new Set(), accounts: new Set(),
+        cashTrips: 0, cashTaken: 0, unpriced: 0, advanced: 0, handedIn: 0, lastCash: null, lastHandIn: null,
+        bookings: 0, completed: 0, priced: 0, fares: 0, commission: 0, km: 0, daySet: new Set(), daysWorked: 0,
+        faresBy: {}, acctPlatform: platformId, acct, homeFleet: d?.fleet_id || null });
+    }
+    const e = who.get(k);
+    if (platformId) e.platforms.add(platformId);
+    if (acct) e.accounts.add(`${platformId}:${acct}`);
+    return e;
+  };
+
+  /* Cash per trip, per person, per day. */
+  const byPersonDay = new Map();
+  const unpricedBy = {};
+  const basisBy = {};
+  for (const t of cashRows) {
+    const e = entry(keyOf(t.platform, t.acct), t.driver_name, t.platform, t.acct);
+    if (t.fleet_id) e.fleets.add(t.fleet_id);
+    e.cashTrips += 1;
+    basisBy[t.platform] = basisBy[t.platform] || { payments_report: 0, fare_only: 0, unvalued: 0 };
+    basisBy[t.platform][t.cash_basis] = (basisBy[t.platform][t.cash_basis] || 0) + 1;
+    const pd = `${e.key}|${t.day}`;
+    if (!byPersonDay.has(pd)) byPersonDay.set(pd, { e, day: t.day, trips: 0, cash: 0, unpriced: 0, advanced: 0, handedIn: 0 });
+    const d = byPersonDay.get(pd);
+    d.trips += 1;
+    if (t.cash_amount == null) {
+      e.unpriced += 1; d.unpriced += 1;
+      unpricedBy[t.platform] = (unpricedBy[t.platform] || 0) + 1;
+    } else {
+      e.cashTaken += Number(t.cash_amount); d.cash += Number(t.cash_amount);
+    }
+    if (!e.lastCash || t.at > e.lastCash) e.lastCash = t.at;
+    t.who = e;
+  }
+  /* Hand-ins (stored negative) and advances (stored positive). */
+  for (const l of ledgerRows) {
+    const e = entry(`p${l.person}`, l.person_name, null, null);
+    if (e.homeFleet) e.fleets.add(e.homeFleet);
+    const amt = Number(l.amount);
+    const pd = `${e.key}|${l.day}`;
+    if (!byPersonDay.has(pd)) byPersonDay.set(pd, { e, day: l.day, trips: 0, cash: 0, unpriced: 0, advanced: 0, handedIn: 0 });
+    const d = byPersonDay.get(pd);
+    if (l.type_code === 'cash_advance') { e.advanced += amt; d.advanced += amt; } else {
+      e.handedIn += -amt; d.handedIn += -amt;
+      if (!e.lastHandIn || l.day > e.lastHandIn) e.lastHandIn = l.day;
+    }
+    l.who = e;
+  }
+  for (const e of who.values()) e.toHandIn = r2(e.cashTaken + e.advanced - e.handedIn);
+  return { who, keyOf, entry, byPersonDay, unpricedBy, basisBy };
+}
+
+/** "To hand in" per person over [from, to] — the Cash to collect sheet's
+    rows, without building a workbook. */
+export async function cashToCollect({ q, from, to }) {
+  const P = [from, to, null, null, null];
+  const [cashRows, ledgerRows, acctRows, drivers] = await Promise.all([
+    q(`SELECT tc.platform, tc.fleet_id, tc.external_id, ${ACCT('tc')} AS acct, tc.driver_ext_id, tc.driver_name, tc.plate,
+              tc.fare, tc.cash_amount, tc.cash_basis,
+              ${DUBAI_DAY('tc.requested_at')} AS day, ${DUBAI_AT('tc.requested_at')} AS at
+         FROM trip_cash tc
+        WHERE ${IN_DAYS('tc')} AND ${FILTERS('tc')}
+        ORDER BY tc.requested_at, tc.external_id`, P),
+    q(`SELECT e.id::text AS id, e.person_id::text AS person, e.person_name, e.type_code, e.book,
+              e.amount, to_char(e.effective_on, 'YYYY-MM-DD') AS day
+         FROM driver_ledger e
+        WHERE e.entry_source <> 'verification'
+          AND e.effective_on BETWEEN $1::date AND $2::date
+          AND ((e.book = 'cash' AND e.type_code <> 'cash_opening') OR e.type_code = 'cash_advance')
+        ORDER BY e.effective_on, e.id`, [from, to]),
+    q(`SELECT platform, external_id, driver_id::text AS person FROM driver_platform_id
+        WHERE detached_at IS NULL AND driver_id IS NOT NULL`),
+    q(`SELECT id::text AS id, full_name, fleet_id FROM driver`),
+  ]);
+  const personOf = new Map(acctRows.map((a) => [`${a.platform}:${a.external_id}`, a.person]));
+  const driverRow = new Map(drivers.map((d) => [d.id, d]));
+  const { who } = assembleCash({ cashRows, ledgerRows, personOf, driverRow });
+  return { people: [...who.values()].filter((e) => e.cashTrips || e.advanced || e.handedIn),
+    handIns: ledgerRows.filter((l) => l.type_code !== 'cash_advance').length };
+}
+
 /**
  * Build the workbook.
  * @param q        (sql, params) => rows
@@ -198,65 +297,11 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
     if (n && !compPhone.has(`${c.platform}:${c.driver_ext_id}`)) compPhone.set(`${c.platform}:${c.driver_ext_id}`, n);
   }
 
-  /* ── one entry per person, or per account no person has been placed on ── */
-  const who = new Map();
-  const keyOf = (platformId, acct) => {
-    const p = personOf.get(`${platformId}:${acct}`);
-    return p ? `p${p}` : `a${platformId}:${acct}`;
-  };
-  const entry = (k, name, platformId, acct) => {
-    if (!who.has(k)) {
-      const pid = k.startsWith('p') ? k.slice(1) : null;
-      const d = pid ? driverRow.get(pid) : null;
-      who.set(k, { key: k, person: pid, name: d?.full_name || name || '(no name on the record)',
-        placed: !!pid, platforms: new Set(), fleets: new Set(), accounts: new Set(),
-        cashTrips: 0, cashTaken: 0, unpriced: 0, advanced: 0, handedIn: 0, lastCash: null, lastHandIn: null,
-        bookings: 0, completed: 0, priced: 0, fares: 0, commission: 0, km: 0, daySet: new Set(), daysWorked: 0,
-        faresBy: {}, acctPlatform: platformId, acct, homeFleet: d?.fleet_id || null });
-    }
-    const e = who.get(k);
-    if (platformId) e.platforms.add(platformId);
-    if (acct) e.accounts.add(`${platformId}:${acct}`);
-    return e;
-  };
+  /* ── one entry per person, or per account no person has been placed on ──
+     The cash half lives in assembleCash() so the 07:00 report's "to hand in"
+     is this sheet's figure, not a second copy of the rule. */
+  const { who, keyOf, entry, byPersonDay, unpricedBy, basisBy } = assembleCash({ cashRows, ledgerRows, personOf, driverRow });
 
-  /* Cash per trip, per person, per day. */
-  const byPersonDay = new Map();
-  const unpricedBy = {};
-  const basisBy = {};
-  for (const t of cashRows) {
-    const e = entry(keyOf(t.platform, t.acct), t.driver_name, t.platform, t.acct);
-    if (t.fleet_id) e.fleets.add(t.fleet_id);
-    e.cashTrips += 1;
-    basisBy[t.platform] = basisBy[t.platform] || { payments_report: 0, fare_only: 0, unvalued: 0 };
-    basisBy[t.platform][t.cash_basis] = (basisBy[t.platform][t.cash_basis] || 0) + 1;
-    const pd = `${e.key}|${t.day}`;
-    if (!byPersonDay.has(pd)) byPersonDay.set(pd, { e, day: t.day, trips: 0, cash: 0, unpriced: 0, advanced: 0, handedIn: 0 });
-    const d = byPersonDay.get(pd);
-    d.trips += 1;
-    if (t.cash_amount == null) {
-      e.unpriced += 1; d.unpriced += 1;
-      unpricedBy[t.platform] = (unpricedBy[t.platform] || 0) + 1;
-    } else {
-      e.cashTaken += Number(t.cash_amount); d.cash += Number(t.cash_amount);
-    }
-    if (!e.lastCash || t.at > e.lastCash) e.lastCash = t.at;
-    t.who = e;
-  }
-  /* Hand-ins (stored negative) and advances (stored positive). */
-  for (const l of ledgerRows) {
-    const e = entry(`p${l.person}`, l.person_name, null, null);
-    if (e.homeFleet) e.fleets.add(e.homeFleet);
-    const amt = Number(l.amount);
-    const pd = `${e.key}|${l.day}`;
-    if (!byPersonDay.has(pd)) byPersonDay.set(pd, { e, day: l.day, trips: 0, cash: 0, unpriced: 0, advanced: 0, handedIn: 0 });
-    const d = byPersonDay.get(pd);
-    if (l.type_code === 'cash_advance') { e.advanced += amt; d.advanced += amt; } else {
-      e.handedIn += -amt; d.handedIn += -amt;
-      if (!e.lastHandIn || l.day > e.lastHandIn) e.lastHandIn = l.day;
-    }
-    l.who = e;
-  }
   /* Everything else each person did in the dates. */
   for (const a of byAcct) {
     const e = entry(keyOf(a.platform, a.acct), a.name, a.platform, a.acct);

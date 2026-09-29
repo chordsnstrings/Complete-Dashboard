@@ -191,7 +191,17 @@ const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => re
    (9g). The real client is tested on its own in test/smsala.test.mjs. */
 const smsSent = [];
 const smsSend = async (m) => { smsSent.push(m); return { ok: true, messageId: '2026092800000000001', sender: 'ECOSINE' }; };
-accessRoutes(app, { db, layer, wrap, smsSend });
+/* The daily report's sender, faked: nothing reaches a model or Resend. */
+const reportCalls = [];
+let resendAnswer = { status: 200, data: { id: 're-test-1' } };
+const reportHttp = async (url, opt = {}) => {
+  reportCalls.push({ url, body: opt.body ? JSON.parse(opt.body) : null });
+  if (String(url).includes('/chat/completions')) {
+    return { status: 200, data: { choices: [{ message: { content: JSON.stringify({ summary: 'A quiet day.', actions: [] }) } }] } };
+  }
+  return resendAnswer;
+};
+accessRoutes(app, { db, layer, wrap, smsSend, reportHttp });
 const server = app.listen(0);
 const B = `http://127.0.0.1:${server.address().port}`;
 cache.setPort(server.address().port);   // the stale refresh fetches itself here, as in server.js
@@ -841,6 +851,26 @@ console.log('\n12. the daily report email: who gets it');
   check('the preview is the email as HTML, drawn without sending',
     prev.status === 200 && /<!doctype html>/i.test(prev.text || '') && /Monday 1 September 2026|1 September 2026/.test(prev.text || ''),
     String(prev.status));
+  /* "Send me yesterday's report now": to the admin alone.
+     REVERSION, run 2026-09-29: `only: fm.user.email` dropped from the route
+     -> 195 passed, 3 FAILED: it sent the report to second@ and third@ — the
+     whole list — which is the failure this route must never have. */
+  process.env.RESEND_API_KEY = 'resend-key-under-test';
+  reportCalls.length = 0;
+  const sm = await owner.post('/api/access/report/send-me', {});
+  const sends = reportCalls.filter((c) => String(c.url).includes('resend'));
+  check('"send me" sends the report to the admin who asked, and nobody else',
+    sm.status === 200 && sends.length === 1 && sends[0].body.to.join() === 'owner@example.test', `${sm.status} ${JSON.stringify(sends.map((c) => c.body.to))}`);
+  const again = await owner.post('/api/access/report/send-me', {});
+  check('…and again on a second press, though that address had it', again.status === 200
+    && reportCalls.filter((c) => String(c.url).includes('resend')).length === 2);
+  const np = await plain.b.post('/api/access/report/send-me', {});
+  check('somebody who does not manage access cannot use it', np.status === 403, String(np.status));
+  resendAnswer = { status: 403, data: { message: 'The ecosine.ae domain is not verified.' } };
+  const bad2 = await owner.post('/api/access/report/send-me', {});
+  check('a refused send says why, in Resend\u2019s words', bad2.status === 502 && /not verified/.test(bad2.json.detail), JSON.stringify(bad2.json));
+  resendAnswer = { status: 200, data: { id: 're-test-1' } };
+  delete process.env.RESEND_API_KEY;
   delete process.env.REPORT_RECIPIENTS;
 }
 

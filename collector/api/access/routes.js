@@ -27,7 +27,9 @@ import { sendSms, uaeMobile, maskPhone } from '../../src/smsala.js';
 const MIN_REASON = 3;
 
 /* `smsSend` is the gateway (src/smsala.js sendSms); a test passes a fake. */
-export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {}, error() {} }, smsSend = sendSms }) {
+/* `reportHttp` is how the daily report reaches the model and Resend; a test
+   passes a fake so nothing is sent. Undefined means the real one. */
+export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {}, error() {} }, smsSend = sendSms, reportHttp }) {
   const audit = (req, action, subjectType, subjectId, detail = {}) => appendAudit(db, {
     actorId: req.fm?.user?.id ?? null,
     actorLabel: req.fm?.user?.email || req.fm?.kind || 'anonymous',
@@ -1081,16 +1083,41 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     noStore(res);
     return res.json({ ok: true, email: rows[0].email });
   }));
-  /* The email as it would be sent for a day, drawn now from the same figures,
-     without the commentary (written only at send time, by the collector,
-     which holds the model key) and without sending anything. */
+  /* "Send me yesterday's report now": the real email, composed exactly as
+     07:00 composes it (the model's summary and actions included), sent to
+     the signed-in admin's own address only — nobody else on the list. The
+     way to see the report before the morning, and to prove the sending path
+     after a change. Audited. */
+  app.post('/api/access/report/send-me', wrap(async (req, res) => {
+    const fm = manager(req, res, { write: true });
+    if (!fm) return undefined;
+    const { dailyReportRun } = await import('../../src/daily_report.js');
+    const r = await dailyReportRun({ q: reportQ, only: fm.user.email, force: true,
+      ...(reportHttp ? { http: reportHttp } : {}) });
+    await audit(req, 'report.sent_to_self', 'report', null, { day: r.day, sent: r.sent, failed: r.failed });
+    noStore(res);
+    if (!r.sent) {
+      const [row] = await reportQ(`SELECT error FROM report_send WHERE business_day = $1::date AND recipient = $2`,
+        [r.day, fm.user.email]).catch(() => []);
+      return fail(res, 502, 'not_sent', `Not sent: ${row?.error || r.why || 'the sender did not say why'}.`);
+    }
+    return res.json({ ok: true, day: r.day, to: fm.user.email, analysis: r.commentary });
+  }));
+
+  /* The email as it would be sent for a day, drawn now from the same figures
+     and findings, with the findings' own actions in place of the model's
+     (GLM 5.2 writes those only at send time, in the collector, which holds
+     the model key) and without sending anything. */
   app.get('/api/access/report/preview', wrap(async (req, res) => {
     const fm = manager(req, res);
     if (!fm) return undefined;
-    const { reportFacts, renderEmail, yesterdayDubai } = await import('../../src/daily_report.js');
+    const { reportFacts, renderEmail, yesterdayDubai, ruleAnalysis } = await import('../../src/daily_report.js');
+    const { reportFindings } = await import('../../src/report_findings.js');
     const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || '')) ? String(req.query.day) : yesterdayDubai();
     const facts = await reportFacts(reportQ, day);
-    const { html } = renderEmail(facts, { text: null, why: 'this is a preview; the commentary is written when the email is sent' });
+    const report = await reportFindings(reportQ, day, { facts });
+    const { html } = renderEmail(facts, ruleAnalysis(report, 'this is a preview; GLM 5.2 writes the summary and orders the actions when the email is sent'),
+      { report });
     noStore(res);
     return res.type('html').send(html);
   }));

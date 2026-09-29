@@ -101,12 +101,14 @@ check('a number that is not in the figures is caught', !stray.ok && stray.stray.
 console.log('\n3. the send');
 const calls = [];
 let resendOk = true;
-let modelSays = 'Yesterday brought 5 bookings and AED 200 in fares across 2 cars.';
+/* Since the analysis (2026-09-29) the model answers {summary, actions} in
+   JSON; test/report_findings.test.mjs drives the actions. */
+let modelSays = { summary: 'Yesterday brought 5 bookings and AED 200 in fares across 2 cars.', actions: [] };
 const fakeHttp = async (url, opt = {}) => {
   const body = opt.body ? JSON.parse(opt.body) : null;
   calls.push({ url, body, headers: opt.headers });
   if (url.includes('/chat/completions')) {
-    return { status: 200, data: { choices: [{ message: { content: modelSays } }] } };
+    return { status: 200, data: { choices: [{ message: { content: JSON.stringify(modelSays) } }] } };
   }
   if (url.includes('api.resend.com')) {
     return resendOk ? { status: 200, data: { id: `re-${calls.length}` } }
@@ -147,7 +149,7 @@ check('the subject says the day and its headline', /^Fleet 2026-09-27 — AED 20
 
 /* A commentary that invents a number is left out, and the email says so. */
 await q(`DELETE FROM report_run`); await q(`DELETE FROM report_send`);
-modelSays = 'Fares climbed 30% to AED 260.';
+modelSays = { summary: 'Fares climbed 30% to AED 260.', actions: [] };
 await dailyReportRun({ q, now, http: fakeHttp });
 const html2 = calls.filter((c) => c.url.includes('resend')).at(-1)?.body?.html || '';
 check('a commentary with a number not in the figures is dropped, and the email says why',
