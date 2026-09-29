@@ -7456,9 +7456,12 @@ the console's first (05-11: 4 trips against 22) and last (08-31: 7 against
 - **Every stored console row's `earnings` is the GROSS** (AED 18,229 =
   cash 6,318 + cashless 11,911), stored before the collector's net fix and
   never restated because the console stopped answering. Rebuilt rows are
-  net, as the column is defined. The 112 console rows are **not restated
-  here** — that is the operator's call (it lowers Yango's May–September
-  earnings by the AED 4,053.09 commission).
+  net, as the column is defined. **Restated by sql/schema_v92.sql** at the
+  operator's word ("yes correct them", 2026-09-29): each console row's
+  earnings recomputed from its own raw cash + cashless + commission where the
+  stored figure is still exactly the gross, lowering Yango's May–September
+  earnings by the AED 4,053.09 commission, and its distance filled from
+  Yango's `distance`. Rebuilt rows are never touched; a replay is a no-op.
 
 Writing went on (`REBUILD_WRITES = true`) in the commit that recorded this.
 

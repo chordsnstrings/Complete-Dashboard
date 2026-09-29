@@ -215,5 +215,40 @@ console.log('\n6. the cookie row the old 403/401 reading painted green');
   check('…and so is one the console itself answered for', (await cookie()).state === 'ok');
 }
 
+/* ── 7. sql/schema_v92.sql restates the console's weeks to net ────────────
+   REVERSIONS, run 2026-09-29: the "still exactly the gross" condition
+   dropped -> 35 passed, 2 FAILED ("a row the console restated itself…" and
+   "a replay changes nothing": 104.5 overwritten with 105); the rebuilt
+   exclusion dropped from the distance update -> 36 passed, 1 FAILED (the
+   rebuilt week given 5 km); the number-type guard dropped -> the migration
+   itself errors ("invalid input syntax for type numeric: n/a"), which on
+   production would stop the boot. */
+console.log('\n7. the console weeks restated from gross to net');
+{
+  const { readFileSync } = await import('node:fs');
+  const v92 = readFileSync(new URL('../sql/schema_v92.sql', import.meta.url), 'utf8');
+  await pg.query(`DELETE FROM driver_performance`);
+  const row = (d, ws, earnings, raw, km = null) => pg.query(
+    `INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, period_start, period_end, earnings, distance_km, raw)
+     VALUES ('yango', 'ecosine', $1, $2::date, $2::date + 6, $3, $4, $5)`, [d, ws, earnings, km, j(raw)]);
+  const get = async (d) => (await pg.query(`SELECT earnings::float8 AS e, distance_km::float8 AS km FROM driver_performance WHERE driver_ext_id = $1`, [d])).rows[0];
+  await row('gross', '2026-08-03', 135, { price_cash: 50, price_cashless: 85, price_platform_commission: -30, distance: 22500 });
+  /* Restated by the console itself, to a net that differs from the raw sum
+     by its own rounding: its figure stands. */
+  await row('net-already', '2026-08-03', 104.5, { price_cash: 50, price_cashless: 85, price_platform_commission: -30 });
+  await row('no-commission', '2026-08-03', 40, { price_cash: 40, price_cashless: 0, price_platform_commission: 0 });
+  await row('rebuilt', '2026-09-14', 60, { rebuilt_from: 'fleet-api.yango.tech', price_cash: 0, price_cashless: 60, price_platform_commission: -12, distance: 5000 });
+  await row('text-figure', '2026-08-03', 10, { price_cash: 'n/a', price_cashless: 10, price_platform_commission: -2 });
+  await pg.exec(v92);
+  check('a gross console week becomes the net, from its own raw figures', (await get('gross')).e === 105, j(await get('gross')));
+  check('…and its distance is filled from Yango\u2019s metres', (await get('gross')).km === 22.5, j(await get('gross')));
+  check('a row the console restated itself is left as it wrote it', (await get('net-already')).e === 104.5, j(await get('net-already')));
+  check('a week with no commission has nothing to restate', (await get('no-commission')).e === 40);
+  check('a rebuilt week is never touched', (await get('rebuilt')).e === 60 && (await get('rebuilt')).km === null, j(await get('rebuilt')));
+  check('a figure that is not a number in raw is never cast', (await get('text-figure')).e === 10);
+  await pg.exec(v92);
+  check('a replay changes nothing', (await get('gross')).e === 105 && (await get('net-already')).e === 104.5);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

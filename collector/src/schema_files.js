@@ -257,4 +257,8 @@ export const SCHEMA_FILES = [
      Access page, seeded once from the environment), the day as composed,
      and each send. Additive. */
   'schema_v91.sql',
+  /* Yango (2026-09-29, the operator's word): the console's weeks restated
+     from gross to net from their own raw figures, and their distance filled
+     from Yango's `distance`; rebuilt weeks untouched; a replay is a no-op. */
+  'schema_v92.sql',
 ];
