@@ -2307,14 +2307,14 @@ app.get('/api/export/money.xlsx', (req, r) => {
    a real driver's mobile never enters a fixture. */
 const SMS_WHY = {
   number_shared: 'This number is also on another person’s record, so it may not be theirs.',
-  channel_not_collected: 'A booking channel this driver works on did not collect yesterday, so their cash may be missing trips.',
+  channel_not_collected: 'Every channel this driver took cash on yesterday failed to collect, so there is no certain amount to ask for. Cash on a channel that did collect is always sent.',
   driver_not_certain: 'The evidence does not name exactly one driver on fresh information.',
 };
 app.get('/api/sms/log', (_, r) => {
   const at = (h) => new Date(Date.now() - h * 3600e3).toISOString();
   const row = (id, o) => ({ id, kind: 'cash_deposit', status: 'sent', hold_reason: null, person_id: id, person_name: `Test Driver ${id}`,
     user_id: null, user_email: null, fleet_id: 'ecosine', destination: `97150000000${id}`, sender: 'ECOSINE',
-    message_text: 'Please deposit AED 110.50 of cash you received yesterday. Talk to your supervisor on WhatsApp.',
+    message_text: 'Please deposit AED 110.50 of Uber cash you received yesterday. Talk to your supervisor on WhatsApp.',
     not_before: null, provider_status: 'Delivered', cost: 0.095, error: null, plate: null, trip_start: null, trip_end: null,
     business_day: '2026-08-04', detail: { amount: 110.5, source: 'uber' }, created_at: at(id), sent_at: at(id), why: null, ...o });
   r.json({
@@ -2344,8 +2344,10 @@ app.get('/api/sms/preview', (req, r) => {
   }
   return r.json({ kind: 'cash', day: '2026-08-04', people: 2, sent: 0, held: 1, holds: { channel_not_collected: 1 }, unplaced_trips: 0, unplaced_aed: 0,
     decisions: [
-      { person: '2', name: 'Test Driver 2', amount: 110.5, hold: null, to: '•••••••••02', source: 'uber', down: [], why: null },
-      { person: '3', name: 'Test Driver 3', amount: 35, hold: 'channel_not_collected', to: '•••••••••03', source: 'hr', down: ['bolt:ecosine'], why: SMS_WHY.channel_not_collected },
+      { person: '2', name: 'Test Driver 2', amount: 110.5, hold: null, to: '•••••••••02', source: 'uber', channels: ['uber'],
+        left_out: [{ platform: 'bolt', fleets: ['ecosine'], trips: 1, known_aed: 25, why: 'not_collected' }], why: null },
+      { person: '3', name: 'Test Driver 3', amount: 0, hold: 'channel_not_collected', to: '•••••••••03', source: 'hr', channels: [],
+        left_out: [{ platform: 'bolt', fleets: ['ecosine'], trips: 2, known_aed: 35, why: 'not_collected' }], why: SMS_WHY.channel_not_collected },
     ], took_ms: 30, note: 'A dry run: decided now, nothing written, nothing sent. The real run can differ by the time it is due.' });
 });
 app.get('/api/vehicles/feeds', (_, r) => {

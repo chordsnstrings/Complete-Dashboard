@@ -25,7 +25,7 @@
    a reason code at most (src/log.js prints whatever it is handed). */
 import { sendSms, uaeMobile, maskPhone } from './smsala.js';
 import { PENDING, REFUSED } from '../api/identity_map.js';
-import { attributionJoin, ATTRIBUTION_COLS, FRESH_BAND_MIN } from '../api/unauthorized_sql.js';
+import { attributionJoin, ATTRIBUTION_COLS } from '../api/unauthorized_sql.js';
 import { occCountsOnce } from '../api/occupancy_sql.js';
 import { placeEnds } from '../api/place_sql.js';
 
@@ -45,8 +45,25 @@ const isNight = (d) => { const h = dubaiHour(d); return h >= 23 || h < 7; };
 
 /* ── the words ──────────────────────────────────────────────────────────── */
 const aed = (n) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-export const cashText = (amount) =>
-  `Please deposit AED ${aed(amount)} of cash you received yesterday. Talk to your supervisor on WhatsApp.`;
+/* THE CHANNELS THE AMOUNT COVERS, NAMED IN THE MESSAGE — the operator,
+   2026-09-29: "send even if bolt doesn't work. At least uber is there. write
+   Uber as well in case you want to be clear." A driver who took cash on Uber
+   and on Bolt, on a night Bolt's collector failed, is asked for the Uber cash
+   and told it is the Uber cash — never handed a total that silently leaves
+   Bolt out. Always named, including when every channel is in, so the words
+   never mean different things on different mornings. */
+const CHANNEL_WORD = { uber: 'Uber', bolt: 'Bolt', yango: 'Yango', hotel: 'hotel' };
+const CHANNEL_ORDER = ['uber', 'bolt', 'yango', 'hotel'];
+export const channelWords = (platforms = []) => {
+  const known = CHANNEL_ORDER.filter((c) => platforms.includes(c));
+  const other = [...new Set(platforms.filter((c) => !CHANNEL_ORDER.includes(c)))].sort();
+  const w = [...known, ...other].map((c) => CHANNEL_WORD[c] || c);
+  return w.length <= 1 ? (w[0] || '') : `${w.slice(0, -1).join(', ')} and ${w.at(-1)}`;
+};
+export const cashText = (amount, platforms = []) => {
+  const list = channelWords(platforms);
+  return `Please deposit AED ${aed(amount)} of ${list ? `${list} ` : ''}cash you received yesterday. Talk to your supervisor on WhatsApp.`;
+};
 export const tripText = (from, to, km) =>
   `Please Register your trip from ${from} to ${to} - ${km} km with your supervisor - ADMIN.`;
 
@@ -58,13 +75,16 @@ export const HOLD_WHY = Object.freeze({
   no_number: 'No mobile on Uber or on HR’s roster for this driver.',
   number_shared: 'This mobile is also on another driver’s or employee’s record, so it may not be this driver’s.',
   no_account: 'This driver has no platform account on the register.',
-  amount_not_final: 'A cash trip yesterday has no amount yet, so the total would be too low.',
-  hotel_account_by_name: 'Some of the cash is on a hotel account keyed by a name rather than an id, which a spelling change can move to someone else.',
-  channel_not_collected: 'A booking channel this driver works on did not collect yesterday, so their cash may be missing trips.',
+  amount_not_final: 'Every cash trip this driver took yesterday is on a channel with no amount yet, so there is nothing certain to ask for.',
+  hotel_account_by_name: 'The only cash yesterday is on a hotel account keyed by a name rather than an id, which a spelling change can move to someone else.',
+  channel_not_collected: 'Every channel this driver took cash on yesterday failed to collect, so there is no certain amount to ask for. Cash on a channel that did collect is always sent.',
   driver_not_certain: 'The trip does not name exactly one driver with evidence the strict rule accepts.',
-  last_trip_stale: 'The driver is named only by an Uber trip more than 24.9 hours before this journey.',
+  /* No longer applied (the operator, 2026-09-29: "We send to the last driver
+     of the vehicle"); kept so a message held under it before then still
+     reads its reason. */
+  last_trip_stale: 'The driver is named only by an Uber trip more than 24.9 hours before this journey (held before 29 September 2026, when this stopped being a reason to hold).',
   clock_skew: 'The tracker’s clock is off for this car, so the times cannot name a driver.',
-  short: 'Shorter than 2 km.',
+  short: 'Shorter than 4 km.',
   near_booking: 'A booking on this car starts or ends within 30 minutes — likely driving to or from a pickup.',
   places_unreadable: 'The start or the end has no readable place name.',
   same_place: 'It starts and ends at the same named place.',
@@ -234,59 +254,88 @@ export async function cashDepositRun({ q, now = new Date(), send = sendSms, cfg 
        LEFT JOIN driver_platform_id a ON a.platform = tc.platform AND a.external_id = tc.driver_ext_id
                                      AND a.detached_at IS NULL
       WHERE (tc.requested_at AT TIME ZONE 'Asia/Dubai')::date = $1`, [D]);
+  /* Per person, per CHANNEL: what each channel put in their hand yesterday,
+     so a channel that cannot be counted is left out on its own and the rest
+     is still asked for. */
   const people = new Map();
   let unplaced = 0; let unplacedAed = 0;
   for (const r of rows) {
     if (!r.person) { unplaced += 1; unplacedAed += Number(r.cash_amount || 0); continue; }
-    if (!people.has(r.person)) people.set(r.person, { amount: 0, unvalued: 0, pairs: new Set(), hotelByName: false });
+    if (!people.has(r.person)) people.set(r.person, { channels: new Map(), worked: new Set() });
     const p = people.get(r.person);
-    if (r.cash_amount == null) p.unvalued += 1; else p.amount += Number(r.cash_amount);
-    p.pairs.add(`${r.platform}:${r.fleet_id}`);
-    if (r.platform === 'hotel' && !/^[0-9a-f]{24}$/i.test(String(r.driver_ext_id))) p.hotelByName = true;
+    if (!p.channels.has(r.platform)) p.channels.set(r.platform, { amount: 0, trips: 0, unvalued: 0, fleets: new Set(), byName: false });
+    const c = p.channels.get(r.platform);
+    c.trips += 1;
+    if (r.cash_amount == null) c.unvalued += 1; else c.amount += Number(r.cash_amount);
+    if (r.fleet_id) c.fleets.add(r.fleet_id);
+    if (r.platform === 'hotel' && !/^[0-9a-f]{24}$/i.test(String(r.driver_ext_id))) c.byName = true;
   }
-  /* The channels each person worked on in the last 30 days, and whether each
-     collected after yesterday ended: a Bolt collector refused all night means
-     a Bolt driver's cash is short by trips nobody fetched. */
+  /* The channels each person worked on in the last 30 days. One that did not
+     collect after yesterday ended may hold cash trips nobody fetched; it is
+     not in the amount either way, and the record names it. */
   const persons = [...people.keys()];
   const worked = persons.length ? await q(
     `SELECT DISTINCT a.driver_id::text AS person, t.platform, t.fleet_id FROM trip t
        JOIN driver_platform_id a ON a.platform = t.platform AND a.external_id = t.driver_ext_id AND a.detached_at IS NULL
       WHERE a.driver_id::text = ANY($1::text[]) AND t.requested_at >= $2 AND t.fleet_id IS NOT NULL`,
     [persons, new Date(dayEnd.getTime() - 31 * 864e5).toISOString()]) : [];
-  for (const w of worked) people.get(w.person)?.pairs.add(`${w.platform}:${w.fleet_id}`);
+  for (const w of worked) people.get(w.person)?.worked.add(`${w.platform}:${w.fleet_id}`);
   const collected = await collectedPairs(q, D, dayEnd);
   const pb = book || await loadPhoneBook(q);
 
-  const out = { day: D, people: 0, sent: 0, held: 0, holds: {}, unplaced_trips: unplaced, unplaced_aed: Math.round(unplacedAed * 100) / 100, decisions: [] };
+  /* Why a channel is left out of the amount, in the order the whole-message
+     hold reports it when nothing is left. */
+  const LEFT_OUT = { not_collected: 'channel_not_collected', not_priced: 'amount_not_final', hotel_by_name: 'hotel_account_by_name' };
+  const out = { day: D, people: 0, sent: 0, held: 0, partial: 0, holds: {}, unplaced_trips: unplaced,
+    unplaced_aed: Math.round(unplacedAed * 100) / 100, decisions: [] };
   for (const [person, p] of people) {
-    const amount = Math.round(p.amount * 100) / 100;
-    if (!(amount > 0) && !p.unvalued) continue;
+    const included = [];
+    const leftOut = [];
+    let sum = 0;
+    for (const [platform, c] of p.channels) {
+      const fleets = [...c.fleets];
+      const why = fleets.some((f) => !collected.has(`${platform}:${f}`)) ? 'not_collected'
+        : c.unvalued ? 'not_priced'
+          : c.byName ? 'hotel_by_name' : null;
+      if (why) {
+        leftOut.push({ platform, fleets, trips: c.trips, known_aed: Math.round(c.amount * 100) / 100, why });
+      } else if (c.amount > 0) {
+        included.push(platform);
+        sum += c.amount;
+      }
+    }
+    /* A channel worked on lately that did not collect, with no cash trip of
+       it seen yesterday: named, because its cash may simply not have been
+       fetched. */
+    for (const k of p.worked) {
+      const [platform, fleet] = k.split(':');
+      if (!collected.has(k) && !p.channels.has(platform)) leftOut.push({ platform, fleets: [fleet], trips: 0, known_aed: 0, why: 'not_collected' });
+    }
+    const amount = Math.round(sum * 100) / 100;
+    const seen = leftOut.filter((x) => x.trips > 0);
+    if (!(amount > 0) && !seen.length) continue;
     out.people += 1;
-    const down = [...p.pairs].filter((k) => !collected.has(k));
-    /* The amount's own reasons first, the number's second: a driver with no
-       number whose Bolt trips are missing is held because the AMOUNT is
-       wrong — that is what the operator has to fix for that day, and it
-       would still be wrong once a number is filed. */
-    let hold = null;
-    if (p.unvalued) hold = 'amount_not_final';
-    else if (p.hotelByName) hold = 'hotel_account_by_name';
-    else if (down.length) hold = 'channel_not_collected';
+    /* Nothing certain left: held with the reason of the channel that took it
+       away. Otherwise the number's own reasons, as before. */
+    let hold = amount > 0 ? null : LEFT_OUT[seen[0].why];
     const ph = phoneFor(pb, person);
     if (!hold && ph.hold) hold = ph.hold;
-    const text = cashText(amount);
-    out.decisions.push({ person, amount, hold, to: ph.phone ? maskPhone(ph.phone) : null, source: ph.source || null, down });
+    const text = amount > 0 ? cashText(amount, included) : null;
+    if (!hold && seen.length) out.partial += 1;
+    out.decisions.push({ person, amount, hold, to: ph.phone ? maskPhone(ph.phone) : null, source: ph.source || null,
+      channels: included, left_out: leftOut });
     if (hold) { out.held += 1; out.holds[hold] = (out.holds[hold] || 0) + 1; }
     if (dry) continue;
     const id = await decide(q, {
       kind: 'cash_deposit', dedupe_key: `cash:${person}:${D}`, person_id: Number(person), business_day: D,
       destination: ph.phone || null, message_text: text, status: hold ? 'held' : 'queued', hold_reason: hold,
-      detail: JSON.stringify({ amount, source: ph.source || null, channels_not_collected: down }),
+      detail: JSON.stringify({ amount, source: ph.source || null, channels: included, left_out: leftOut }),
     });
     if (!id || hold) continue;
     if (await deliver(q, id, { to: ph.phone, text, ref: `fm-cash-${D}-${person}`, send })) out.sent += 1;
   }
-  await note('sent', null, { finished: true, people: out.people, sent: out.sent, held: out.held, holds: out.holds,
-    unplaced_trips: out.unplaced_trips, unplaced_aed: out.unplaced_aed });
+  await note('sent', null, { finished: true, people: out.people, sent: out.sent, held: out.held, partial: out.partial,
+    holds: out.holds, unplaced_trips: out.unplaced_trips, unplaced_aed: out.unplaced_aed });
   return out;
 }
 
@@ -298,6 +347,18 @@ export async function cashDepositRun({ q, now = new Date(), send = sendSms, cfg 
    after a ride ends. Passed through the operator's STRICT filter; everything
    that fails it is held with its reason. */
 const OK_TIERS = new Set(['bracketed', 'last_trip', 'sole_custodian']);
+/* THE TWO RULINGS OF 2026-09-29 (the operator, over a held row reading "The
+   driver is named only by an Uber trip more than 24.9 hours before this
+   journey"): "this is fine. We send to the last driver of the vehicle. But
+   keep 4 km minimum to send text."
+     · a driver named by their LAST Uber trip on the car is texted however
+       long ago that trip was — within the attribution ladder's own reach
+       (api/unauthorized_sql.js STALE_CAP_MIN, 21.97 days), which is what
+       "the last driver of the vehicle" is. The 24.9-hour band no longer
+       holds anything back (it still decides only how the page words the
+       evidence);
+     · nothing under 4 km is texted. It was 2 km. */
+export const MIN_TRIP_KM = 4;
 
 /** A place name a driver can read: the first part before a comma, starting
  *  with a letter, words and at most a trailing district number ("Al Barsha
@@ -352,9 +413,8 @@ export async function tripRegisterRun({ q, now = new Date(), send = sendSms, cfg
     const day = dubaiDay(start);
     let hold = null;
     if (s.attribution_candidate_count !== 1 || !OK_TIERS.has(s.attribution_tier)) hold = 'driver_not_certain';
-    else if (s.attribution_tier === 'last_trip' && !(Number(s.attribution_last_trip_gap_min) <= FRESH_BAND_MIN)) hold = 'last_trip_stale';
     else if (s.clock_skew_min != null) hold = 'clock_skew';
-    else if (!(Number(s.distance_km) >= 2)) hold = 'short';
+    else if (!(Number(s.distance_km) >= MIN_TRIP_KM)) hold = 'short';
     else if (s.nearest_gap_min != null && Math.abs(Number(s.nearest_gap_min)) < 30) hold = 'near_booking';
     else if (!from_ || !to_) hold = 'places_unreadable';
     else if (from_.toLowerCase() === to_.toLowerCase()) hold = 'same_place';

@@ -1313,14 +1313,17 @@ function settingsTab(host, ctx) {
       (v) => (v === 'off' ? `${what} are switched off. Nothing more is sent until you switch them on.` : `${what} are on.`), 'Sending');
   };
   smsSwitch('sms_cash', 'Driver text: cash to deposit (05:00)',
-    'Every day at 05:00 Dubai, each driver who took cash yesterday is texted: “Please deposit AED X of cash you received '
-    + 'yesterday. Talk to your supervisor on WhatsApp.” X is Uber’s own cash-collected figure and the fare on the other '
-    + 'channels. It waits until yesterday is complete, and gives up at 09:00 if it never is. The Messages page shows '
-    + 'every message and every one held back, with the reason.', 'Cash reminders');
+    'Every day at 05:00 Dubai, each driver who took cash yesterday is texted: “Please deposit AED X of Uber cash you '
+    + 'received yesterday. Talk to your supervisor on WhatsApp.” X is Uber’s own cash-collected figure and the fare on '
+    + 'the other channels, and the message names the channels it covers (“Uber and Yango cash”). A channel that did not '
+    + 'collect — Bolt, say — is left out and the rest is still sent. It waits until Uber’s figures for yesterday are in, '
+    + 'and gives up at 09:00 if they never are. The Messages page shows every message, what each left out, and every '
+    + 'one held back, with the reason.', 'Cash reminders');
   smsSwitch('sms_trip', 'Driver text: register a trip',
     'When a journey with no booking is found, the driver it names is texted: “Please Register your trip from X to Y - '
-    + 'z km with your supervisor - ADMIN.” Only when exactly one driver is named on fresh evidence, the trip is 2 km or '
-    + 'more, no booking is within 30 minutes and both places have a readable name. Found at night, it waits until 07:00.',
+    + 'z km with your supervisor - ADMIN.” Only when exactly one driver is named — the last driver of the car counts, '
+    + 'however long ago their last Uber trip was — the trip is 4 km or more, no booking is within 30 minutes and both '
+    + 'places have a readable name. Found at night, it waits until 07:00.',
     'Trip messages');
 
   const s = panel('Sessions', null, 'acx-sessions-rule');

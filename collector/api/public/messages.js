@@ -72,12 +72,30 @@ function toCell(r) {
     ? `<div class="dim">${(r.detail.phone_source || r.detail.source) === 'hr' ? 'HR’s number' : 'Uber’s number'}</div>` : ''}`;
 }
 
+/* The channels, as the message names them (src/driver_sms.js channelWords). */
+const CHANNEL = { uber: 'Uber', bolt: 'Bolt', yango: 'Yango', hotel: 'Hotel' };
+const channelName = (p) => CHANNEL[p] || p;
+const LEFT_OUT_WHY = { not_collected: 'did not collect', not_priced: 'no amount yet', hotel_by_name: 'hotel account matched by name' };
+/* What a cash message did NOT count, and why — so a driver told "AED 44.00
+   of Uber cash" has the Bolt cash beside it on the page, not forgotten. */
+function leftOutLine(detail) {
+  const lo = Array.isArray(detail?.left_out) ? detail.left_out : [];
+  if (!lo.length) return '';
+  const words = lo.map((x) => (x.trips
+    ? `${channelName(x.platform)}: ${countOf(x.trips, 'cash trip')}${x.known_aed ? ` (${money(x.known_aed)} seen)` : ''}, ${LEFT_OUT_WHY[x.why] || x.why}`
+    : `${channelName(x.platform)} ${LEFT_OUT_WHY[x.why] || x.why}, so any ${channelName(x.platform)} cash is not in this`));
+  return `<div class="dim">Not in this amount — ${esc(words.join('; '))}</div>`;
+}
 function messageCell(r) {
   if (r.kind === 'reset_code' || r.kind === 'phone_code') return '<span class="dim">a six-digit code — never kept</span>';
   const trip = r.kind === 'trip_register' && r.plate
     ? `<div class="dim">${entity('vehicle', r.plate, r.plate)} · ${esc(dtStr(r.trip_start))}</div>` : '';
   const day = r.kind === 'cash_deposit' && r.business_day ? `<div class="dim">for ${esc(dayStr(`${r.business_day}T12:00:00`))}</div>` : '';
-  return `${r.message_text ? `“${esc(r.message_text)}”` : '<span class="ent-off">no wording — the places have no readable name</span>'}${trip}${day}`;
+  const none = r.kind === 'cash_deposit'
+    ? '<span class="ent-off">no message — nothing certain to ask for</span>'
+    : '<span class="ent-off">no wording — the places have no readable name</span>';
+  const left = r.kind === 'cash_deposit' ? leftOutLine(r.detail) : '';
+  return `${r.message_text ? `“${esc(r.message_text)}”` : none}${trip}${day}${left}`;
 }
 
 /* The 05:00 run itself: sent to how many, or why it is still waiting. */
@@ -95,7 +113,8 @@ function runLine(r) {
   }
   const holds = Object.entries(d.holds || {}).map(([k, n]) => `${fmt(n)} ${k.replace(/_/g, ' ')}`);
   const unplaced = d.unplaced_trips ? ` ${countOf(d.unplaced_trips, 'cash trip')} (${money(d.unplaced_aed)}) belong to an account not placed on any person, so nobody was texted about them.` : '';
-  return `${day}: ${countOf(d.sent || 0, 'driver')} texted, ${fmt(d.held || 0)} held back${holds.length ? ` (${holds.join(', ')})` : ''}.${unplaced}`;
+  const partial = d.partial ? ` (${fmt(d.partial)} of them with a channel left out)` : '';
+  return `${day}: ${countOf(d.sent || 0, 'driver')} texted${partial}, ${fmt(d.held || 0)} held back${holds.length ? ` (${holds.join(', ')})` : ''}.${unplaced}`;
 }
 
 async function renderLog(root, kind) {
@@ -187,7 +206,8 @@ async function renderNext(root) {
       out.append(el('p', 'cap', esc(`For ${dayStr(`${r.day}T12:00:00`)}: ${countOf(r.people || 0, 'driver')} took cash, ${fmt((r.people || 0) - (r.held || 0))} would be texted, ${fmt(r.held || 0)} held back.`)));
       out.append(tableFrom(decisionRows(r, 'cash'), [
         { label: 'Driver', key: 'person', render: (x) => entity('driver', `p${x.person}`, x.name || 'name not on file') },
-        { label: 'Cash', key: 'amount', render: (x) => esc(money(x.amount)) },
+        { label: 'Cash', key: 'amount', render: (x) => `${esc(money(x.amount))}${x.channels?.length
+          ? `<div class="dim">${esc(x.channels.map(channelName).join(' + '))}</div>` : ''}${leftOutLine(x)}` },
         { label: 'Would go to', key: 'to', render: (x) => (x.to ? `${esc(x.to)}<div class="dim">${x.source === 'hr' ? 'HR’s number' : 'Uber’s number'}</div>` : '<span class="ent-off">no number chosen</span>') },
         { label: 'Would be', key: 'hold', render: (x) => (x.hold ? `${pill('held back', 'dim')}<div class="dim">${esc(x.why || x.hold)}</div>` : pill('sent', 'ok')) },
       ], { sortable: true, sortId: 'messages-next-cash', cards: true }));
@@ -226,8 +246,8 @@ export async function renderMessages(root, param, sub) {
   if (t === 'next') await renderNext(root);
   else await renderLog(root, KIND[kind] ? kind : '');
   root.append(el('div', 'cap srcline', [
-    '<div><b>Cash to deposit:</b> at 05:00 Dubai, each driver who took cash yesterday: Uber’s own cash-collected figure, the fare on the other channels. Sent only once yesterday is complete; given up at 09:00 if it never is.</div>',
-    '<div><b>Register a trip:</b> a journey with no booking, 2 km or more, no booking within 30 minutes, one driver named on fresh evidence, and both places with a readable name. Never the word “unauthorized”. Found between 23:00 and 07:00, it waits until 07:00, and is checked again before it goes.</div>',
+    '<div><b>Cash to deposit:</b> at 05:00 Dubai, each driver who took cash yesterday: Uber’s own cash-collected figure, the fare on the other channels, and the message names the channels it covers. A channel that did not collect, has no amount yet, or is a hotel account matched by name is left out and the rest is still sent; held only when nothing certain is left. Sent once Uber’s figures for yesterday are in; given up at 09:00 if they never are.</div>',
+    '<div><b>Register a trip:</b> a journey with no booking, 4 km or more, no booking within 30 minutes, exactly one driver named — the last driver of the car counts, however long ago their last Uber trip — and both places with a readable name. Never the word “unauthorized”. Found between 23:00 and 07:00, it waits until 07:00, and is checked again before it goes.</div>',
     '<div><b>Whose number:</b> Uber’s first, HR’s second. Never a number on two people’s records, never one of two different numbers, never a record held back as possibly the same person as another.</div>',
     '<div><b>Stopping them:</b> Access → Settings has a switch for each.</div>',
   ].join('')));

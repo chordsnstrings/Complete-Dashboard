@@ -4077,6 +4077,7 @@ after 13:27:47Z and clears the reconciler's two-hour wait, for a trip).
 | SMS-4 | 05:00 cash: Uber's cash_collected, not the fare; waits for the catch-up and every Uber figure, gives up at 09:00; channel-not-collected held; no AED 0.00; idempotent; switch | driver_sms §2 (fare 2, catch-up 5, channel 1 fail) | ✓ | ✓ f7cb5cd | ✓ 8050d0e4 | |
 | SMS-5 | trip request: strict filter, watermark (no backlog), plate-overlap dedupe, 07:00 hold with re-check, 3 per person per day, switch | driver_sms §3 (overlap 3, night 5, re-check 3, watermark 4 fail) | ✓ | ✓ f7cb5cd | ✓ 8050d0e4 | |
 | SMS-6 | Messages page (`#messages`, subject CT, sign-in only in every mode); switches in Access → Settings | driver_sms §4, endpoint_coverage | ✓ | ✓ 178ffe4 | ✓ 8050d0e4 | ✓ `/api/sms/log` and `/preview` → 401, no-store, with no session; `#messages` from production bytes shows the sign-in reason at 1440 and 390, no page error, no sideways scroll |
+| SMS-7 | the operator, 2026-09-29: cash counted per channel — a channel that did not collect (29 of 34 holds on the first morning), has no amount yet, or is a hotel account matched by name is left out and the rest sent, the text naming the channels ("…of Uber cash…"); trip text to the last driver of the car whatever the age of their last Uber trip, and 4 km minimum | driver_sms §2–3 (58: uncollected counted 5, names 6, whole hold 6, no-amount 3, by-name 2, stale 2, 2 km 2) | ✓ | | | |
 
 ## The money workbook (Excel) — 2026-09-28
 

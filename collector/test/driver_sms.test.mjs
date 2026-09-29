@@ -21,7 +21,13 @@
    channel_not_collected line (1); skip the plate-overlap match (3); set
    `wait` false (5); drop the HELD_IDS check in phoneFor (3); drop
    `others.length` in phoneFor (2); skip the 07:00 re-read (3); ignore the
-   trip_since watermark (4). */
+   trip_since watermark (4).
+   And for the rulings of 2026-09-29, each failing the checks named: count
+   an uncollected channel's cash anyway (5); drop the channel names from the
+   text (6); hold the whole message when any channel is left out, as before
+   (6); stop leaving out a channel with no amount yet (3); stop leaving out a
+   hotel account matched by name (2); hold a driver named by a last Uber trip
+   over 24.9 hours old again (2); a 2 km minimum instead of 4 km (2). */
 import express from 'express';
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
@@ -60,6 +66,15 @@ await person(8, 'Test Driver S', [['uber', 'u-s']], { 'u-s': '0507777777' });
 await person(9, 'Test Driver S2', [['uber', 'u-s2']], { 'u-s2': '0507777777' });   // the same handset
 await person(10, 'Test Driver N', [['uber', 'u-n']], {});
 await person(11, 'Test Driver X', [['uber', 'u-x']], { 'u-x': '0508888888' });
+/* For the channel rule (the operator, 2026-09-29: "send even if bolt doesn't
+   work. At least uber is there"): Uber cash beside a channel that cannot be
+   counted — Bolt not collected, a Yango trip with no fare, a hotel account
+   matched by name — and one driver whose only cash has no amount. */
+await person(12, 'Test Driver M', [['uber', 'u-m'], ['bolt', 'b-m']], { 'u-m': '0503131313' });
+await person(13, 'Test Driver Y', [['uber', 'u-y'], ['yango', 'y-y']], { 'u-y': '0503232323' });
+await person(14, 'Test Driver Q', [['uber', 'u-q'], ['yango', 'y-q']], { 'u-q': '0503434343' });
+await person(15, 'Test Driver Z', [['uber', 'u-z'], ['hotel', 'name:test driver z']], { 'u-z': '0503535353' });
+await person(16, 'Test Driver V', [['yango', 'y-v']], { 'y-v': '0503636363' });
 /* HR: person H's row (matched by the Yango account), and an HR employee
    matched to nobody who carries person X's Uber number. */
 await q(`INSERT INTO hr_roster_upload (id, sha256, export_date, export_date_from, byte_len, rows_read, uploaded_by, summary)
@@ -99,10 +114,20 @@ await T('c5', { driver: 'u-d', at: '2026-09-27T13:00:00Z', price: 45 });        
 await T('c6', { driver: REFUSED[0].a.id, at: '2026-09-27T09:00:00Z', price: 20, cash: 25 });
 await T('c7', { driver: 'y-h', platform: 'yango', at: '2026-09-27T08:00:00Z', price: 35 });
 await T('c8', { driver: 'u-a', at: '2026-09-26T19:59:00Z', price: 99, cash: 99 });            // 23:59 Dubai on the 26th: not yesterday
+await T('m1', { driver: 'u-m', at: '2026-09-27T10:30:00Z', price: 40, cash: 44 });
+await T('m2', { driver: 'b-m', platform: 'bolt', at: '2026-09-27T12:30:00Z', price: 25 });     // Bolt: did not collect
+await T('y1', { driver: 'u-y', at: '2026-09-27T10:40:00Z', price: 30, cash: 33 });
+await T('y2', { driver: 'y-y', platform: 'yango', at: '2026-09-27T12:40:00Z', price: 20 });    // Yango: collected
+await T('q1', { driver: 'u-q', at: '2026-09-27T10:50:00Z', price: 50, cash: 55 });
+await T('q2', { driver: 'y-q', platform: 'yango', at: '2026-09-27T12:50:00Z', price: null });  // Yango: no fare
+await T('z1', { driver: 'u-z', at: '2026-09-27T11:00:00Z', price: 10, cash: 11 });
+await T('z2', { driver: 'name:test driver z', platform: 'hotel', at: '2026-09-27T13:00:00Z', price: 60 });  // hotel by name
+await T('v1', { driver: 'y-v', platform: 'yango', at: '2026-09-27T14:00:00Z', price: null });  // only cash, no amount
 const run = (o) => q(`INSERT INTO collection_run (source, fleet_id, mode, window_start, window_end, started_at, finished_at, status, rows_written)
                       VALUES ($1, $2, $3, '2026-08-28', $4, $5::timestamptz - interval '10 minutes', $5::timestamptz, $6, 10)`,
   [o.source, o.fleet || 'ecosine', o.mode || 'incremental', o.to || '2026-09-27', o.at, o.status || 'ok']);
 await run({ source: 'yango', at: '2026-09-27T21:40:00Z' });
+await run({ source: 'hotel', at: '2026-09-27T21:45:00Z' });
 /* Bolt ran for Ecosine and failed (as it did on production that night). */
 await run({ source: 'bolt', at: '2026-09-27T21:19:00Z', status: 'error' });
 
@@ -123,22 +148,43 @@ check('…nor before Uber’s catch-up has run since the day ended', r.waiting =
 await run({ source: 'uber', mode: 'catchup', at: '2026-09-27T21:18:00Z' });
 r = await cashDepositRun({ q, now: new Date('2026-09-28T01:45:00Z'), send, cfg: {} });
 const toA = sent.find((m) => m.to === '971501111111');
-check('a driver is told Uber’s cash collected, summed — AED 110.50, not the fare (95.00)', toA?.text === cashText(110.5)
-  && toA.text === 'Please deposit AED 110.50 of cash you received yesterday. Talk to your supervisor on WhatsApp.', toA?.text);
+check('a driver is told Uber’s cash collected, summed — AED 110.50, not the fare (95.00) — and that it is the Uber cash',
+  toA?.text === cashText(110.5, ['uber'])
+  && toA.text === 'Please deposit AED 110.50 of Uber cash you received yesterday. Talk to your supervisor on WhatsApp.', toA?.text);
 check('…and the trip at 23:59 Dubai the night before is not yesterday’s', !/209|99/.test(toA?.text || 'x'));
 check('a driver with only card trips gets nothing', !sent.some((m) => m.to === '971502222222'));
-check('a Yango driver with no Uber number is texted on HR’s number', sent.some((m) => m.to === '971509999999' && m.text === cashText(35)));
+check('a Yango driver with no Uber number is texted on HR’s number, told it is the Yango cash', sent.some((m) => m.to === '971509999999'
+  && m.text === 'Please deposit AED 35.00 of Yango cash you received yesterday. Talk to your supervisor on WhatsApp.'));
+const textTo = (n) => sent.find((m) => m.to === n)?.text || '';
+check('Bolt did not collect: the driver is still asked for the Uber cash, and told it is the Uber cash',
+  textTo('971503131313') === 'Please deposit AED 44.00 of Uber cash you received yesterday. Talk to your supervisor on WhatsApp.', textTo('971503131313'));
+check('both channels collected: the sum, and both named', textTo('971503232323')
+  === 'Please deposit AED 53.00 of Uber and Yango cash you received yesterday. Talk to your supervisor on WhatsApp.', textTo('971503232323'));
+check('a Yango trip with no fare: the Uber cash is asked for, Yango left out', textTo('971503434343')
+  === 'Please deposit AED 55.00 of Uber cash you received yesterday. Talk to your supervisor on WhatsApp.', textTo('971503434343'));
+check('a hotel account matched by name: the Uber cash is asked for, the hotel cash left out', textTo('971503535353')
+  === 'Please deposit AED 11.00 of Uber cash you received yesterday. Talk to your supervisor on WhatsApp.', textTo('971503535353'));
+const [mRow] = await q(`SELECT status, detail FROM sms_outbox WHERE kind = 'cash_deposit' AND person_id = 12`);
+const bolt = (mRow?.detail?.left_out || []).find((x) => x.platform === 'bolt');
+check('…and the record says what was left out and why: Bolt, 1 trip, AED 25.00 seen, did not collect',
+  mRow?.status === 'sent' && mRow.detail.channels.join() === 'uber' && bolt?.trips === 1 && bolt.known_aed === 25 && bolt.why === 'not_collected',
+  JSON.stringify(mRow?.detail));
+const [qRow] = await q(`SELECT detail FROM sms_outbox WHERE kind = 'cash_deposit' AND person_id = 14`);
+check('…and a trip with no fare is recorded as left out for that reason, not silently dropped',
+  (qRow?.detail?.left_out || []).some((x) => x.platform === 'yango' && x.why === 'not_priced' && x.trips === 1), JSON.stringify(qRow?.detail));
 const heldRows = await q(`SELECT person_id, hold_reason FROM sms_outbox WHERE kind = 'cash_deposit' AND status = 'held' ORDER BY person_id`);
 const heldBy = Object.fromEntries(heldRows.map((h) => [h.person_id, h.hold_reason]));
-check('a Bolt driver, when Bolt did not collect, is held — not told a short amount', heldBy[3] === 'channel_not_collected', JSON.stringify(heldBy));
+check('a Bolt-only driver, when Bolt did not collect, is held — there is no certain amount', heldBy[3] === 'channel_not_collected', JSON.stringify(heldBy));
+check('a driver whose only cash has no amount yet is held, with that reason', heldBy[16] === 'amount_not_final', JSON.stringify(heldBy));
 check('a driver in a refused same-person pair is held', heldBy[5] === 'identity_held');
-check('the counts add up: 3 sent, 2 held', r.sent === 3 && r.held === 2 && sent.length === 3, JSON.stringify({ sent: r.sent, held: r.held, n: sent.length }));
+check('the counts add up: 7 sent (3 with a channel left out), 3 held', r.sent === 7 && r.held === 3 && r.partial === 3 && sent.length === 7,
+  JSON.stringify({ sent: r.sent, held: r.held, partial: r.partial, n: sent.length }));
 const n1 = sent.length;
 r = await cashDepositRun({ q, now: new Date('2026-09-28T02:00:00Z'), send, cfg: {} });
 check('the next quarter-hour sends nothing twice', r.already === true && sent.length === n1);
 const [row] = await q(`SELECT destination, message_text, provider_message_id, status FROM sms_outbox WHERE kind = 'cash_deposit' AND person_id = 1`);
 check('the outbox keeps the number, the words and the gateway id (as text)', row.status === 'sent' && row.destination === '971501111111'
-  && row.message_text === cashText(110.5) && typeof row.provider_message_id === 'string');
+  && row.message_text === cashText(110.5, ['uber']) && typeof row.provider_message_id === 'string');
 
 /* The 28th never completes: 09:00 gives up and says so. */
 await T('c9', { driver: 'u-a', at: '2026-09-28T10:00:00Z', price: 10 });
@@ -191,18 +237,31 @@ await bracket('L7', 'u-a', '2026-09-28T05:00:00Z', '2026-09-28T05:20:00Z');
 await seg({ plate: 'L8', from: '2026-09-28T01:10:00Z', to: '2026-09-28T01:40:00Z' });
 await bracket('L8', 'u-a', '2026-09-28T01:10:00Z', '2026-09-28T01:40:00Z');
 await T('L8-bolt', { driver: 'b-c', platform: 'bolt', plate: 'L8', at: '2026-09-25T10:00:00Z', pay: 'cash', price: 12 });   // this car also works Bolt
+/* The operator, 2026-09-29: "keep 4 km minimum" — a bracketed 3 km trip is
+   now held; and "we send to the last driver of the vehicle" — a driver named
+   only by their last Uber trip on the car, two days earlier, is texted. */
+await seg({ plate: 'L12', from: '2026-09-28T04:40:00Z', to: '2026-09-28T04:55:00Z', km: 3 });
+await bracket('L12', 'u-y', '2026-09-28T04:40:00Z', '2026-09-28T04:55:00Z');
+await seg({ plate: 'L13', from: '2026-09-28T03:20:00Z', to: '2026-09-28T03:50:00Z' });
+await T('L13-last', { driver: 'u-d', plate: 'L13', at: '2026-09-26T03:00:00Z', pay: 'braintree', price: 20 });
 
 const noon = new Date('2026-09-28T08:00:00Z');
 const before = sent.length;
 r = await tripRegisterRun({ q, now: noon, send, cfg: {} });
 const byPlate = Object.fromEntries(r.decisions.map((d) => [d.plate, d]));
 check('only journeys that ended after go-live are looked at', !byPlate.L5, Object.keys(byPlate).join(','));
+const newTrips = sent.slice(before);
 check('a bracketed, 12 km trip between two named places is texted, in the operator’s words',
-  sent.length === before + 1 && sent[sent.length - 1].to === '971501111111'
-  && sent[sent.length - 1].text === 'Please Register your trip from Al Garhoud to Deira - 12 km with your supervisor - ADMIN.',
-  `${sent.length - before} ${sent[sent.length - 1]?.text}`);
-check('…never saying "unauthorized"', !/unauthori[sz]ed/i.test(sent[sent.length - 1]?.text || ''));
-check('under 2 km: held', byPlate.L2?.hold === 'short', JSON.stringify(byPlate.L2));
+  newTrips.some((m) => m.to === '971501111111'
+    && m.text === 'Please Register your trip from Al Garhoud to Deira - 12 km with your supervisor - ADMIN.'),
+  newTrips.map((m) => m.text).join(' | '));
+check('a driver named only by their last Uber trip on the car, two days before: texted — the last driver of the vehicle',
+  byPlate.L13?.tier === 'last_trip' && byPlate.L13?.hold === null && newTrips.some((m) => m.to === '971503333333'),
+  JSON.stringify(byPlate.L13));
+check('…and exactly those two are texted in this pass', newTrips.length === 2, String(newTrips.length));
+check('…never saying "unauthorized"', newTrips.every((m) => !/unauthori[sz]ed/i.test(m.text)));
+check('under 4 km: held — 1.2 km, and a bracketed 3 km trip', byPlate.L2?.hold === 'short' && byPlate.L12?.hold === 'short',
+  JSON.stringify([byPlate.L2, byPlate.L12]));
 check('nobody named on the car: held', byPlate.L3?.hold === 'driver_not_certain', JSON.stringify(byPlate.L3));
 check('a street code for a place: held', byPlate.L4?.hold === 'places_unreadable', JSON.stringify(byPlate.L4));
 check('a booking 20 minutes away: held (driving to a pickup)', byPlate.L7?.hold === 'near_booking', JSON.stringify(byPlate.L7));

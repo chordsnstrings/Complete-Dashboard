@@ -7197,6 +7197,35 @@ on production before the rules were written (read-only, 2026-09-28):
 - **Cost.** 0.095 per part; all 266 fully-named messages measured were
   GSM-7 at 90–144 characters, one part each.
 
+**Two rulings on 2026-09-29, after the first morning.** The first 05:00 run
+(for 28 September) decided 61 drivers: 27 texted, 34 held — **29 of them
+`channel_not_collected`**. That hold fired if ANY channel the driver had
+worked in the last 30 days failed to collect after the day ended, and Bolt
+for Ecosine had failed all night, so drivers with perfectly countable Uber
+cash got nothing. The operator: "send even if bolt doesn't work. At least uber
+is there. write Uber as well in case you want to be clear." Now:
+
+- the amount is built **per channel**. A channel is left out of it — and only
+  it — when it did not collect for that fleet after the day ended, when one of
+  the driver's cash trips on it has no amount yet, or when it is a hotel
+  account matched by name. The rest is sent;
+- the message **names the channels it covers**: "Please deposit AED 110.50 of
+  Uber cash you received yesterday. Talk to your supervisor on WhatsApp.",
+  "…of Uber and Yango cash…". Always named, so the words never mean
+  different things on different mornings;
+- a driver is held only when nothing certain is left (all their cash on
+  channels left out), with that channel's reason;
+- the outbox row records `channels` and `left_out` (platform, fleets, trips,
+  AED seen, why), and the Messages page prints what each message left out.
+
+Over the same hours the trip run held several journeys as `last_trip_stale`.
+The operator, over that row: "this is fine. We send to the last driver of the
+vehicle. But keep 4 km minimum to send text." So a driver named by their last
+Uber trip on the car is texted whatever that trip's age — within the
+attribution ladder's own 21.97-day reach — and **nothing under 4 km** is
+texted (it was 2 km). Messages held under the old reason keep it, worded as
+held before 29 September.
+
 The routes (`GET /api/sms/log`, `GET /api/sms/preview`) answer only a
 signed-in person, whatever the sign-in mode: the research counted 13 CT
 routes that already serve a phone to an anonymous caller in open mode, and
