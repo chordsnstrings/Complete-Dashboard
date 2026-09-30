@@ -366,6 +366,10 @@ export const SETTING_DEFS = [
      and amounts, so the addresses are the cash desk's and nobody else's. */
   { key: 'CASH_REPORT_RECIPIENTS', group: 'Daily report', label: 'Cash email recipients', secret: false,
     hint: 'Comma-separated. At 08:00 they get every driver texted that morning to deposit the day before’s cash: name, mobile, amount and platform' },
+  /* The 08:00 low-trips email (src/low_trips_email.js). The minimum itself
+     is a company setting on the Access page (low_trips_min). */
+  { key: 'LOW_TRIPS_RECIPIENTS', group: 'Daily report', label: 'Low-trips email recipients', secret: false,
+    hint: 'Comma-separated. At 08:00 they get every active driver who completed fewer than the minimum trips the day before' },
   { key: 'REPORT_MODEL_API_KEY', group: 'Daily report', label: 'Commentary model key (ModelArk)', secret: true,
     hint: 'GLM 5.2 writes two or three sentences from the figures; without a key the email is sent without them' },
   { key: 'REPORT_MODEL', group: 'Daily report', label: 'Commentary model', secret: false },

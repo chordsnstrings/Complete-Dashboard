@@ -1303,6 +1303,19 @@ function settingsTab(host, ctx) {
       return n;
     }, (v) => `A sensitive grant by the only Owner now waits ${v} hours.`, 'Hours to wait');
 
+  /* The 08:00 low-trips email (src/low_trips_email.js): its minimum. */
+  const trips = h('input', { type: 'number', min: '1', max: '100', step: '1', class: 'depinput acx-in acx-num', value: String(cfg.low_trips_min ?? 10), 'data-acx': 'low-trips' });
+  const tmsg = one('Minimum trips a day (08:00 email)', 'low_trips_min', trips,
+    'Every day at 08:00 Dubai, each active driver — anyone with a completed trip in the last 8 days — who completed fewer '
+    + 'than this many trips the day before is emailed to the list on the Settings page (Low-trips email recipients). '
+    + 'A trip is a completed booking on Uber, Bolt, Yango or the hotel channel; a driver on two platforms counts once. '
+    + 'A change applies from the next 08:00 email.',
+    () => {
+      const n = Number(trips.value);
+      if (trips.value === '' || !Number.isInteger(n) || n < 1 || n > 100) { tmsg.set('Enter a whole number of trips, 1 to 100.', 'bad'); return undefined; }
+      return n;
+    }, (v) => `From the next 08:00 email, drivers under ${v} trips a day are listed.`, 'Trips a day');
+
   /* The two driver messages by SMS (src/driver_sms.js). Each can be stopped
      here without a deploy; off also stops the trip messages waiting for 07:00. */
   const smsSwitch = (key, title, sentence, what) => {

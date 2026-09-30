@@ -435,6 +435,20 @@ await section('11', async () => {
   check('sign-in is optional again', /Sign-in is optional again/.test(f2), f2);
   const anon2 = await (await fetch(`${BASE}/api/auth/me`)).json();
   check('…on the server', anon2.mode === 'open', anon2.mode);
+  /* The 08:00 low-trips email's minimum (src/low_trips_email.js), which the
+     operator asked to set "in admin panel" (2026-09-30). REVERSION (run
+     2026-09-30): drop its panel from accessadmin.js -> 144 passed, 1 FAILED
+     (the first check; the second is not reached without the field). */
+  const trips = page.locator('[data-acx="low-trips"]');
+  check('the minimum trips a day is on the settings page, showing 10', (await trips.count()) === 1 && (await trips.inputValue()) === '10',
+    String(await trips.count()));
+  if (await trips.count()) {
+    await trips.fill('8');
+    await page.locator('[data-acx="save-low_trips_min"]').click();
+    const f3 = await waitFlash(/under 8 trips/);
+    const saved = await page.evaluate(() => fetch('/api/access/overview').then((r) => r.json()).then((j) => j.config?.low_trips_min));
+    check('…the Owner changes it to 8, is told so, and the server has 8', /under 8 trips a day are listed/.test(f3) && saved === 8, `${f3} / ${saved}`);
+  }
   noErrorsSoFar('Settings');
 });
 

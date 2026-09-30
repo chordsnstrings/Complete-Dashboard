@@ -679,6 +679,18 @@ console.log('\n10. sign-in required');
   check('the Owner re-confirms with a two-step code', s.status === 200, JSON.stringify(s.json));
   const m = await owner.post('/api/access/config', { mode: 'enforced' });
   check('the Owner turns sign-in on', m.status === 200 && m.json.config.mode === 'enforced');
+  /* The 08:00 low-trips email's minimum (src/low_trips_email.js), which the
+     operator asked to set "in admin panel" (2026-09-30).
+     REVERSION (run 2026-09-30): drop the low_trips_min block in POST
+     /api/access/config -> 198 passed, 3 FAILED (the three checks below). */
+  const lt = await owner.post('/api/access/config', { low_trips_min: 7 });
+  check('the Owner sets the low-trips minimum', lt.status === 200 && lt.json.config.low_trips_min === 7, JSON.stringify(lt.json).slice(0, 200));
+  const ltZero = await owner.post('/api/access/config', { low_trips_min: 0 });
+  const ltHalf = await owner.post('/api/access/config', { low_trips_min: 2.5 });
+  check('…and one under 1, or not a whole number, is refused', ltZero.status === 400 && ltHalf.status === 400,
+    `${ltZero.status} ${ltHalf.status}`);
+  const ltRead = await owner.get('/api/access/overview');
+  check('…and the admin panel reads it back', ltRead.json?.config?.low_trips_min === 7, JSON.stringify(ltRead.json?.config));
   const closed = await anon.get('/api/t/people');
   check('now a visitor is refused and told to sign in', closed.status === 401 && closed.json.error === 'signin');
   /* Express matches routes case-insensitively and ignores a trailing slash;

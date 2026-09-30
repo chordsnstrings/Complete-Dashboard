@@ -118,7 +118,7 @@ export async function reportFacts(q, day) {
    partial run whose window reached the day, after the day ended. Expected is
    every pair that has collected at all in the fourteen days before — a pair
    that never collects is not a gap in one morning's email. */
-async function channelsCollected(q, day) {
+export async function channelsCollected(q, day) {
   const rows = await q(
     `WITH expected AS (
        SELECT DISTINCT source, fleet_id FROM collection_run

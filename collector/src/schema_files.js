@@ -278,4 +278,9 @@ export const SCHEMA_FILES = [
      send is retried and nobody gets a day's list twice. Additive.
      test/cash_sms_email.test.mjs. */
   'schema_v95.sql',
+  /* v96 (2026-09-30): low_trips_email_send — the 08:00 email of active
+     drivers under the day's minimum trips (src/low_trips_email.js): what
+     Resend said per address, and the list as composed. Additive.
+     test/low_trips_email.test.mjs. */
+  'schema_v96.sql',
 ];

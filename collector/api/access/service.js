@@ -25,6 +25,11 @@ export const DEFAULTS = Object.freeze({
      ruling, 2026-09-28 ("live immediately"), with this switch as the brake. */
   sms_cash: 'on',          // 05:00 Dubai: "Please deposit AED X of cash you received yesterday…"
   sms_trip: 'on',          // an unexplained journey: "Please Register your trip from X to Y - z km…"
+  /* The 08:00 low-trips email (src/low_trips_email.js): an active driver who
+     completed fewer than this many trips yesterday is listed. The operator,
+     2026-09-30: "This number of trips will change so we should be able to set
+     it up in admin panel". */
+  low_trips_min: 10,
 });
 
 let accessVersion = 1;

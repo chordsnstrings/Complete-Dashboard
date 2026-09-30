@@ -18,6 +18,7 @@ import { cashDepositRun, tripRegisterRun, flushQueued, checkDeliveries } from '.
 import { deliveryReport } from './smsala.js';
 import { dailyReportRun } from './daily_report.js';
 import { cashEmailRun } from './cash_sms_email.js';
+import { lowTripsRun } from './low_trips_email.js';
 import { getConfig as accessConfig } from '../api/access/service.js';
 
 /* The driver messages by SMS (src/driver_sms.js). Each run is safe to
@@ -86,6 +87,14 @@ async function main() {
     return withPinnedSettings(async () => log.info('cash-email', 'by hand',
       await cashEmailRun({ q: sq, ...(day ? { day } : {}), only, force: Boolean(only) })));
   }
+  /* `low-trips [YYYY-MM-DD] [address]`: the 08:00 low-trips email by hand,
+     to one address, recounted and sent again. */
+  if (cmd === 'low-trips') {
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(process.argv[3] || '') ? process.argv[3] : undefined;
+    const only = process.argv[4] || null;
+    return withPinnedSettings(async () => log.info('low-trips', 'by hand',
+      await lowTripsRun({ q: sq, cfg: await accessConfig(pool, { fresh: true }), ...(day ? { day } : {}), only, force: Boolean(only) })));
+  }
   if (cmd === 'sms-cash') return smsJob('cash', (cfg) => cashDepositRun({ q: sq, cfg }))();
   if (cmd === 'sms-trips') return smsJob('trips', (cfg) => tripRegisterRun({ q: sq, cfg }))();
 
@@ -117,6 +126,14 @@ async function main() {
        goes whatever the state (src/cash_sms_email.js). */
     cron.schedule('0,15,30,45 8-9 * * *', () => withPinnedSettings(() => cashEmailRun({ q: sq }))
       .catch((e) => log.error('cash-email', 'daily', { err: String(e?.message || e).slice(0, 200) })),
+    { timezone: 'Asia/Dubai' });
+    /* The low-trips email: 08:00 Dubai, every active driver under the
+       minimum trips yesterday (the Owner sets it on the Access page), to
+       LOW_TRIPS_RECIPIENTS; each quarter hour to 09:45 for a send that
+       failed (src/low_trips_email.js). */
+    cron.schedule('0,15,30,45 8-9 * * *', () => withPinnedSettings(async () =>
+      lowTripsRun({ q: sq, cfg: await accessConfig(pool, { fresh: true }) }))
+      .catch((e) => log.error('low-trips', 'daily', { err: String(e?.message || e).slice(0, 200) })),
     { timezone: 'Asia/Dubai' });
     cron.schedule('*/20 * * * *', smsJob('delivery', () => checkDeliveries({ q: sq, report: deliveryReport })));
     // Uber/FMS live status — lighter interval

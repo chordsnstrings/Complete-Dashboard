@@ -7829,3 +7829,41 @@ deposited and from which specific platform." `src/cash_sms_email.js`.
   `node src/index.js cash-email [YYYY-MM-DD] address`.
 - **Logged as counts only**: day, sent, failed, drivers, whether the run had
   finished — never a name, a number or an amount.
+
+## The 08:00 low-trips email — built 2026-09-30
+
+The operator: "email [four addresses] any active driver who didn't have
+minimum 10 trips yesterday at 8 am Dubai time. This number of trips will
+change so we should be able to set it up in admin panel as well."
+`src/low_trips_email.js`.
+
+- **The two words, as the operator answered them.** ACTIVE: at least one
+  completed trip, on any platform, in the eight Dubai days up to and including
+  yesterday. A TRIP: a completed booking (`trip_ext.outcome = 'completed'`) on
+  Uber, Bolt, Yango or the hotel channel; a cancelled booking is not one, and
+  neither is a telematics journey. There is no one "active driver" definition
+  in this codebase to reuse — the Performance page calls a DAY active when it
+  has an accepted booking — so this one is stated in the email's own footer.
+- **One person, one row**, grouped by `personKey()` over `trip_ext`, the way
+  the #day page and the 07:00 report group drivers: a driver on Uber and Bolt
+  is summed, with the split shown.
+- **Listed when yesterday's completed trips are under the minimum** — ten is
+  enough, nine is listed — including an active driver with none at all, who
+  is shown with the last day they drove. Beside each: the seven days before
+  (trips, days driven, trips a day), so a short day reads against the driver's
+  own week.
+- **The minimum** is `low_trips_min` in the Access page's company settings
+  (default 10, whole numbers 1–100), changed by the Owner like the other
+  company settings there, re-confirmed and audited. The collector reads it at
+  08:00; the day's list is composed once, at the first send, and kept
+  (`low_trips_email_send.detail`), so a retry or a second address gets the
+  same list even if the minimum changed in between.
+- **A platform that had not delivered yesterday** (the 07:00 report's own
+  test, `channelsCollected`) is named at the top, and every listed driver who
+  worked it in the window is marked "the count may be short" — a quiet Bolt
+  and an unfetched Bolt draw the same four trips.
+- **Who.** `LOW_TRIPS_RECIPIENTS`, on the Settings page (Daily report group)
+  or the collector's environment, never the repository. One send per address
+  per day, retried each quarter hour to 09:45. By hand, to one address,
+  recounted: `node src/index.js low-trips [YYYY-MM-DD] address`. Logged as
+  counts only (min, active, below, sent, failed), never a name.

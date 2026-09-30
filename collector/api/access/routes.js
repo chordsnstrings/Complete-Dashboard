@@ -623,6 +623,7 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       roles: [...ROLES.map((r) => ({ ...r, builtin: true })), ...Object.values(custom)],
       classes: CLASSES, caps: CAPS,
       config: { mode: cfg.mode, mfa: cfg.mfa, cash_stepup_aed: cfg.cash_stepup_aed, sms_cash: cfg.sms_cash, sms_trip: cfg.sms_trip,
+        low_trips_min: cfg.low_trips_min,
         idle_minutes: cfg.idle_minutes, session_days: cfg.session_days,
         single_owner_delay_hours: cfg.single_owner_delay_hours },
       me: { id: fm.user.id, owner: isOwner(fm), levels: fm.access.levels, caps: fm.access.caps, scope: fm.access.scope },
@@ -1017,6 +1018,13 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       const n = Number(req.body.single_owner_delay_hours);
       if (!Number.isFinite(n) || n < 0 || n > 168) return fail(res, 400, 'bad_hours', 'Enter 0 to 168 hours.');
       changes.single_owner_delay_hours = n;
+    }
+    /* The minimum trips a day below which an active driver is in the 08:00
+       email (src/low_trips_email.js). A whole number, 1 to 100. */
+    if (req.body?.low_trips_min !== undefined) {
+      const n = Number(req.body.low_trips_min);
+      if (!Number.isInteger(n) || n < 1 || n > 100) return fail(res, 400, 'bad_trips', 'Enter a whole number of trips, 1 to 100.');
+      changes.low_trips_min = n;
     }
     /* The two driver messages by SMS (src/driver_sms.js): on or off, each.
        Off stops new messages AND the ones waiting for 07:00. */
