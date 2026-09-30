@@ -7782,3 +7782,50 @@ answer — a 700-character summary and eight 400-character actions — is about
 wrapped in words is read, a cut-off one is named as such, and every drop logs
 its finish reason and length (FIX-STATUS RPT-8). Read the next run's
 `commentary` in the collector log before calling the analysis proven.
+
+## The 08:00 cash email — built 2026-09-30
+
+The operator: "send emails to [the cash desk] every morning at 8 am with all
+the drivers who were supposed to deposit cash yesterday. Specifically the ones
+who got SMS. He should get name, phone number, amount of cash that needs to be
+deposited and from which specific platform." `src/cash_sms_email.js`.
+
+- **Which day.** The 05:00 text says "…cash you received yesterday", so the
+  email at 08:00 on the 1st lists the drivers texted that morning about the
+  cash they took on the 30th — their `sms_outbox.business_day`. That is who
+  should be coming in to deposit, and how much, that same morning.
+- **Everything comes from the texts, nothing is recomputed.** A row is a
+  `cash_deposit` message the gateway accepted (`status = 'sent'`): the name is
+  `driver.full_name`, the mobile the one it went to, the amount the one in the
+  text. `trip_cash` is not read again: a late fare moves that table and never
+  the message, and the cash desk holds the driver to what the driver was told.
+- **The split by platform was not being kept.** Before 2026-09-30 the 05:00
+  run worked out each driver's cash per channel in memory and stored only the
+  total and the list of channels (`detail.amount`, `detail.channels`). It now
+  also stores `detail.by_channel` — platform, amount, trips, fleets — for the
+  channels the text named. For an older text on one platform the whole amount
+  is that platform's; on two, the email names both and says the split was not
+  recorded, rather than guessing one.
+- **What it says about what it cannot show.** Cash on a channel the text left
+  out (did not collect, no fare yet, hotel account keyed by a name) is named
+  under the driver and is not in the amount. A text the gateway later reported
+  as not delivered says so, as does one with no report yet. Drivers with cash
+  who were NOT texted (no mobile, a shared mobile, a held identity, the
+  gateway refused) are counted by reason at the foot, not listed — the
+  operator asked for the ones who got the text.
+- **When.** The cash text waits, every quarter hour until 09:00, for Uber's
+  figures for the day to be complete. The email waits for that run to finish
+  (its `cash-run:<day>` row has `finished`), checks every quarter hour from
+  08:00, and at 09:15 goes whatever the state, saying why the list is short or
+  empty (still waiting, gave up at 09:00, switched off, or no run at all).
+  Uber's catch-up was measured finishing by 01:18 Dubai ("Driver messages by SMS"), so on a normal
+  morning the run has finished long before 08:00 and the email goes at 08:00.
+- **Who.** `CASH_REPORT_RECIPIENTS`, comma-separated, on the Settings page
+  (Daily report group) or in the collector's environment — never in the
+  repository. The email carries drivers' mobile numbers, so it goes only to
+  the addresses on that setting, not to the daily report's list. Each address
+  gets a day's list once (`cash_email_send`, `sql/schema_v95.sql`); a failed
+  send is retried on the next quarter hour. By hand, to one address, again:
+  `node src/index.js cash-email [YYYY-MM-DD] address`.
+- **Logged as counts only**: day, sent, failed, drivers, whether the run had
+  finished — never a name, a number or an amount.

@@ -4175,3 +4175,15 @@ doesn't take so much space. Once clicked, it opens up and shows details."
 | UI-BAN1 | the banner is a native `<details>`: folded, one line — the dot, the errand sentence cut with an ellipsis, "Show details"; open, the rows, "as of" and the Set up link as before; every page starts folded, an opened banner stays open while its page redraws, the next page folds it again; both skins and the phone | arkiv_shell §4 (always open 3, no per-route memory 1) | ✓ | ✓ 5972ea2 | ✓ fface19b | ✓ production (fface19b, 2026-09-30 06:15Z) through bin/prod-mirror.mjs: 46 px folded against 314 px open on desktop Arkiv, 46/887 phone, 45/245 Classic; the served app.js, app.css and arkiv.css carry the fold |
 | — | arkiv_shell's rolling-window check wanted a month on both sides of the dates, and failed on 2026-09-30, when the 30-day window is "1 – 30 Sep 2026" — the page was right | arkiv_shell | ✓ | | | |
 
+## The 08:00 cash email — 2026-09-30
+
+The operator: every morning at 8, to the cash desk, every driver texted to
+deposit yesterday's cash — name, mobile, amount, and which platform it came
+from. docs/COVERAGE.md "The 08:00 cash email".
+
+| # | what | test (revert fails it) | written | committed | deployed | proven |
+|---|---|---|---|---|---|---|
+| CE-1 | the 05:00 run keeps the amount per platform it texted (`detail.by_channel`) | driver_sms (split 2) | ✓ | | | the first run after deploy |
+| CE-2 | the list from the texts the gateway accepted: name, mobile, the amount texted, the split kept (one platform = the whole amount; two with no split = named, unknown); left-out cash, undelivered texts and drivers not texted, said | cash_sms_email §1–2 (sent only 6, split 4, left out 1, delivery 1) | ✓ | | | |
+| CE-3 | 08:00 Dubai once the cash run has finished, each quarter hour after, and at 09:15 whatever the state, saying why; one send per address per day; retried when Resend fails; CASH_REPORT_RECIPIENTS from Settings or the environment | cash_sms_email §3–4 (waits 3, last call 4, once 1) | ✓ | | | the first 08:00 run's `[cash-email] cash email` log line |
+

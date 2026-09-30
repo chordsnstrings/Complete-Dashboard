@@ -353,14 +353,14 @@ export async function analyse(facts, report, { http = realHttp } = {}) {
    figures and Karla for the rest, falling back to Georgia and Helvetica where
    the client will not load a web font (most will not). Tables and inline
    styles only — the one layout every mail client renders the same. */
-const T = { paper: '#FFFFFF', paper2: '#F6F6F7', ink: '#0A0A0B', ink2: '#2E2E31', grey: '#6D6D72',
+export const T = { paper: '#FFFFFF', paper2: '#F6F6F7', ink: '#0A0A0B', ink2: '#2E2E31', grey: '#6D6D72',
   hair: '#D6D6D9', neg: '#961111', pos: '#007E44' };
-const SERIF = "Fraunces,'Iowan Old Style',Georgia,serif";
-const SANS = "Karla,'Helvetica Neue',Helvetica,Arial,sans-serif";
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+export const SERIF = "Fraunces,'Iowan Old Style',Georgia,serif";
+export const SANS = "Karla,'Helvetica Neue',Helvetica,Arial,sans-serif";
+export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const aed = (v) => (v == null ? null : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-const int = (v) => Number(v || 0).toLocaleString('en-US');
-const longDay = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB',
+export const int = (v) => Number(v || 0).toLocaleString('en-US');
+export const longDay = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB',
   { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 
 /* One line per driver or car behind a finding, with the name — the model
@@ -552,7 +552,7 @@ export async function recipients(q, { initial = get('REPORT_RECIPIENTS', '') } =
   return (await q(`SELECT email FROM report_recipient WHERE removed_at IS NULL ORDER BY added_at, id`)).map((r) => r.email);
 }
 
-async function resendSend({ http, key, from, to, subject, html, text, idem }) {
+export async function resendSend({ http, key, from, to, subject, html, text, idem }) {
   const { status, data } = await http('https://api.resend.com/emails', {
     method: 'POST', timeoutMs: 30000, retries: 1,
     headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', 'Idempotency-Key': idem },

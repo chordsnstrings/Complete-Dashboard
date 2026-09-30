@@ -326,10 +326,22 @@ export async function cashDepositRun({ q, now = new Date(), send = sendSms, cfg 
       channels: included, left_out: leftOut });
     if (hold) { out.held += 1; out.holds[hold] = (out.holds[hold] || 0) + 1; }
     if (dry) continue;
+    /* The amount per channel, kept beside the total. The 08:00 cash email
+       (src/cash_sms_email.js) tells the cash desk how much of what each
+       driver was asked for came from which platform, and it must be the
+       split of the figure the driver was TEXTED — recomputed later from
+       trip_cash it could differ, because a late fare moves the table and
+       never the message. Until 2026-09-30 only the total and the list were
+       kept, so for a driver texted before then on two channels the split
+       is not known. */
+    const byChannel = included.map((platform) => {
+      const c = p.channels.get(platform);
+      return { platform, amount: Math.round(c.amount * 100) / 100, trips: c.trips, fleets: [...c.fleets] };
+    });
     const id = await decide(q, {
       kind: 'cash_deposit', dedupe_key: `cash:${person}:${D}`, person_id: Number(person), business_day: D,
       destination: ph.phone || null, message_text: text, status: hold ? 'held' : 'queued', hold_reason: hold,
-      detail: JSON.stringify({ amount, source: ph.source || null, channels: included, left_out: leftOut }),
+      detail: JSON.stringify({ amount, source: ph.source || null, channels: included, by_channel: byChannel, left_out: leftOut }),
     });
     if (!id || hold) continue;
     if (await deliver(q, id, { to: ph.phone, text, ref: `fm-cash-${D}-${person}`, send })) out.sent += 1;

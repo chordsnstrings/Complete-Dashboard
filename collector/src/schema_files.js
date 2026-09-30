@@ -273,4 +273,9 @@ export const SCHEMA_FILES = [
      telemetry history — 15.9 s and 13.8 s for the page on production.
      Additive; no row changes. test/feeds_seat_index.test.mjs. */
   'schema_v94.sql',
+  /* v95 (2026-09-30): cash_email_send — what Resend said for the 08:00 cash
+     email (src/cash_sms_email.js), one row per day per address, so a failed
+     send is retried and nobody gets a day's list twice. Additive.
+     test/cash_sms_email.test.mjs. */
+  'schema_v95.sql',
 ];

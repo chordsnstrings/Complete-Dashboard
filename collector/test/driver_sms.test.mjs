@@ -172,6 +172,23 @@ check('…and the record says what was left out and why: Bolt, 1 trip, AED 25.00
 const [qRow] = await q(`SELECT detail FROM sms_outbox WHERE kind = 'cash_deposit' AND person_id = 14`);
 check('…and a trip with no fare is recorded as left out for that reason, not silently dropped',
   (qRow?.detail?.left_out || []).some((x) => x.platform === 'yango' && x.why === 'not_priced' && x.trips === 1), JSON.stringify(qRow?.detail));
+/* The split by platform of the amount texted, kept for the 08:00 cash email
+   (src/cash_sms_email.js). REVERSION (run 2026-09-30): drop by_channel from
+   the detail -> 58 passed, 2 FAILED: this check and "the 08:00 email reads
+   the split…". */
+const [yRow] = await q(`SELECT detail FROM sms_outbox WHERE kind = 'cash_deposit' AND person_id = 13`);
+check('the record keeps the amount per platform, summing to what was texted: Uber 33.00, Yango 20.00',
+  JSON.stringify((yRow?.detail?.by_channel || []).map((c) => [c.platform, c.amount, c.trips])) === '[["uber",33,1],["yango",20,1]]'
+  && yRow.detail.amount === 53, JSON.stringify(yRow?.detail));
+{
+  const { cashEmailFacts } = await import('../src/cash_sms_email.js');
+  const ef = await cashEmailFacts(q, '2026-09-27');
+  const y = ef.drivers.find((x) => x.person_id === 13);
+  check('the 08:00 email reads the split and the texted drivers straight from this run',
+    ef.drivers.length === 7 && y?.name === 'Test Driver Y' && y.phone === '971503232323'
+    && JSON.stringify((y.split || []).map((c) => [c.platform, c.amount])) === '[["uber",33],["yango",20]]',
+    JSON.stringify(ef.drivers.map((x) => [x.person_id, x.amount, x.split])));
+}
 const heldRows = await q(`SELECT person_id, hold_reason FROM sms_outbox WHERE kind = 'cash_deposit' AND status = 'held' ORDER BY person_id`);
 const heldBy = Object.fromEntries(heldRows.map((h) => [h.person_id, h.hold_reason]));
 check('a Bolt-only driver, when Bolt did not collect, is held — there is no certain amount', heldBy[3] === 'channel_not_collected', JSON.stringify(heldBy));

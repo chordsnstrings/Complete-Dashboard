@@ -362,6 +362,10 @@ export const SETTING_DEFS = [
     hint: 'Name and address on a domain verified on Resend, e.g. Ecosine Fleet <reports@ecosine.ae>' },
   { key: 'REPORT_RECIPIENTS', group: 'Daily report', label: 'First recipients', secret: false,
     hint: 'Comma-separated; used once, to start the list. Add and remove people on the Access page' },
+  /* The 08:00 cash email (src/cash_sms_email.js): drivers' names, mobiles
+     and amounts, so the addresses are the cash desk's and nobody else's. */
+  { key: 'CASH_REPORT_RECIPIENTS', group: 'Daily report', label: 'Cash email recipients', secret: false,
+    hint: 'Comma-separated. At 08:00 they get every driver texted that morning to deposit the day before’s cash: name, mobile, amount and platform' },
   { key: 'REPORT_MODEL_API_KEY', group: 'Daily report', label: 'Commentary model key (ModelArk)', secret: true,
     hint: 'GLM 5.2 writes two or three sentences from the figures; without a key the email is sent without them' },
   { key: 'REPORT_MODEL', group: 'Daily report', label: 'Commentary model', secret: false },
