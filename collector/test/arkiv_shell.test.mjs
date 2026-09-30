@@ -271,7 +271,10 @@ console.log('\n3 · the sheet, under the skin');
   const roll = await on('#overview?days=30');
   check('a rolling window: the sentence is gone, and the two days are printed',
     roll.hidden && roll.applies === '' && roll.win === 'Last 30 days · Dubai time' && !roll.subHidden
-    && /^\d{1,2} [A-Z][a-z]{2}( \d{4})? – \d{1,2} [A-Z][a-z]{2} \d{4}$/.test(roll.sub) && !roll.setupOn, JSON.stringify(roll));
+    /* The first month is left out when both days share it: on 2026-09-30 the
+       30-day window is "1 – 30 Sep 2026", and the pattern that wanted a month
+       on both sides failed on the one day a month that is true. */
+    && /^\d{1,2}( [A-Z][a-z]{2}( \d{4})?)? – \d{1,2} [A-Z][a-z]{2} \d{4}$/.test(roll.sub) && !roll.setupOn, JSON.stringify(roll));
 
   /* A new page starts at its top, title included. */
   await page.setViewportSize({ width: 390, height: 844 });
@@ -294,7 +297,35 @@ console.log('\n4 · the credential banner as a grid');
   let rows = ROWS;
   await page.route('**/api/auth**', (r) => r.fulfill({ contentType: 'application/json', body: authBody(rows) }));
   await page.goto(`${base}/?ui=desktop&skin=arkiv#overview`, { waitUntil: 'load' });
-  await page.waitForSelector('#authBanner.stopped .ab-meta', { timeout: 15000 }).catch(() => {});
+  await page.waitForSelector('#authBanner.stopped .ab-meta', { state: 'attached', timeout: 15000 }).catch(() => {});
+  /* FOLDED TO ONE LINE UNTIL ASKED (the operator, 2026-09-30: "show the red
+     bar on every page but start minimised … once clicked, it opens up and
+     shows details").
+     REVERSION (run 2026-09-30): render the <details> with `open` always —
+     "every page starts folded" fails; drop the per-route memory
+     (bannerFold) — "…and stays open while the same page redraws" fails. */
+  const fold = () => page.evaluate(() => {
+    const e = document.querySelector('#authBanner');
+    const d = e.querySelector('details.ab-fold');
+    return { open: !!d?.open, height: e.getBoundingClientRect().height,
+      /* checkVisibility, not getClientRects: Chromium hides a closed
+         <details>' content with content-visibility, and its boxes can still
+         report rects. */
+      listShown: !!e.querySelector('.ab-list')?.checkVisibility(),
+      headShown: !!e.querySelector('.ab-head')?.checkVisibility(),
+      toggle: e.querySelector('.ab-toggle')?.innerText.trim(),
+      stopped: e.classList.contains('stopped') };
+  });
+  const f0 = await fold();
+  check('every page starts folded: the red line and its sentence, no rows',
+    f0.stopped && !f0.open && f0.headShown && !f0.listShown && f0.height < 60 && /^show details$/i.test(f0.toggle),
+    JSON.stringify(f0));
+  await page.click('#authBanner summary');
+  const f1 = await fold();
+  check('one click opens it and shows the rows', f1.open && f1.listShown && /^hide details$/i.test(f1.toggle), JSON.stringify(f1));
+  await page.evaluate(() => window.dispatchEvent(new HashChangeEvent('hashchange')));
+  await page.waitForTimeout(600);
+  check('…and stays open while the same page redraws', (await fold()).open, JSON.stringify(await fold()));
   const b = await page.evaluate(() => {
     const e = document.querySelector('#authBanner');
     const li = [...e.querySelectorAll('li')];
@@ -332,6 +363,7 @@ console.log('\n4 · the credential banner as a grid');
     saved_at: '2026-09-23T08:30:00Z', detail: 'saved, not tested' })];
   await page.evaluate(() => { location.hash = '#drivers'; });
   await page.waitForSelector('#authBanner.pending', { timeout: 15000 }).catch(() => {});
+  check('the next page starts folded again', !(await fold()).open, JSON.stringify(await fold()));
   const p = await page.evaluate(() => {
     const e = document.querySelector('#authBanner');
     const d = document.createElement('div'); d.className = 'authbanner stopped'; document.body.append(d);

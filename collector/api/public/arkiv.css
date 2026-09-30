@@ -505,6 +505,24 @@
   display:flex;flex-direction:column;align-items:flex-end}
 :root[data-skin="arkiv"] .authbanner .ab-meta a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--ink)}
 :root[data-skin="arkiv"] .authbanner .ab-meta a:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+/* FOLDED TO ONE LINE until asked (2026-09-30; app.js authBanner, "FOLDED TO
+   ONE LINE"). The grid that held dot · body · meta now holds the summary —
+   dot · the errand sentence · "Show details" — and, when open, the body
+   below it indented to the sentence, with the rows and the meta cell side by
+   side as before. Folded, the sentence is kept to one line and cut with an
+   ellipsis: the whole of it is one click away. */
+:root[data-skin="arkiv"] .ak-shell .authbanner{display:block}
+:root[data-skin="arkiv"] .authbanner .ab-sum{list-style:none;cursor:pointer;display:grid;
+  grid-template-columns:9px minmax(0,1fr) auto;gap:0 12px;align-items:start}
+:root[data-skin="arkiv"] .authbanner .ab-sum::-webkit-details-marker{display:none}
+:root[data-skin="arkiv"] .authbanner .ab-sum:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+:root[data-skin="arkiv"] .authbanner .ab-fold:not([open]) .ab-head{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+:root[data-skin="arkiv"] .authbanner .ab-toggle{font-family:var(--mono);font-size:var(--t2);letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink);white-space:nowrap;line-height:1.7;border-bottom:1px solid var(--ink)}
+:root[data-skin="arkiv"] .authbanner .ab-fold[open] .ab-show,
+:root[data-skin="arkiv"] .authbanner .ab-fold:not([open]) .ab-hide{display:none}
+:root[data-skin="arkiv"] .ak-shell .authbanner .ab-body{display:grid;grid-template-columns:minmax(0,1fr) auto;
+  gap:0 12px;align-items:start;margin-left:21px}
 
 /* ── the today strip: the livebar ─────────────────────────────────────────
    Chrome, not a card (viz.css .livebar): three lines under the control bar —
@@ -1087,7 +1105,8 @@
   :root[data-skin="arkiv"] .ak-shell .authbanner .ab-list li{grid-template-columns:minmax(0,1fr);gap:1px 0}
   :root[data-skin="arkiv"] .ak-shell .authbanner .ab-list li + li{border-top:1px solid var(--hair);padding-top:6px}
   :root[data-skin="arkiv"] .ak-shell .authbanner .ab-when{text-align:left}
-  :root[data-skin="arkiv"] .authbanner .ab-meta{grid-column:2;align-items:flex-start;text-align:left;
+  :root[data-skin="arkiv"] .ak-shell .authbanner .ab-body{grid-template-columns:minmax(0,1fr)}
+  :root[data-skin="arkiv"] .authbanner .ab-meta{grid-column:1;align-items:flex-start;text-align:left;
     white-space:normal;margin-top:8px}
   :root[data-skin="arkiv"] .todaynow .lb-top .tn-links{margin-left:0;width:100%}
   :root[data-skin="arkiv"] .todaynow .lb-scope{border-left:0;padding-left:0}

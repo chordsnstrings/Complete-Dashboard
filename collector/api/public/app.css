@@ -2372,6 +2372,18 @@ a.insight-row:hover{border-color:var(--accent)}
 /* The body text sits on the page's own ink, not the tone colour: a paragraph
    of amber is harder to read than a paragraph of text with an amber rule. */
 .authbanner .ab-detail{color:var(--fg); opacity:.85}
+/* Folded to one line until asked (2026-09-30) — see app.js authBanner,
+   "FOLDED TO ONE LINE". The summary is the dot, the errand sentence (cut to
+   one line while folded) and "Show details"; the rows open beneath it. */
+.authbanner .ab-fold{flex:1; min-width:0}
+.authbanner .ab-sum{list-style:none; cursor:pointer; display:flex; gap:.7rem; align-items:flex-start}
+.authbanner .ab-sum::-webkit-details-marker{display:none}
+.authbanner .ab-sum:focus-visible{outline:2px solid currentColor; outline-offset:2px; border-radius:4px}
+.authbanner .ab-sum .ab-head{flex:1; min-width:0}
+.authbanner .ab-fold:not([open]) .ab-head{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.authbanner .ab-toggle{flex:0 0 auto; font-size:.85em; text-decoration:underline; opacity:.85; white-space:nowrap}
+.authbanner .ab-fold[open] .ab-show, .authbanner .ab-fold:not([open]) .ab-hide{display:none}
+.authbanner .ab-fold>.ab-body{margin-left:1.3rem}
 @media (prefers-reduced-motion:reduce){ .authbanner{animation:none} }
 
 /* ── the verdict band ──────────────────────────────────────────────────────

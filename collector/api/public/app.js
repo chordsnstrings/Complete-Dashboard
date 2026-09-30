@@ -9678,6 +9678,8 @@ const savedWhen = (iso, now = new Date()) => {
   return `${d} ${MONTH_SHORT[m - 1]} ${clock}`;
 };
 
+/* Which route's banner the reader opened; see FOLDED TO ONE LINE below. */
+let bannerFold = { route: null, open: false };
 async function authBanner() {
   const host = $('#authBanner');
   if (!host) return;
@@ -9850,30 +9852,48 @@ async function authBanner() {
      checked_at among the rows shown, not the page's clock: the banner is
      about when the credentials were last looked at, and a clock reading the
      reader's own minute would claim a check nobody made. */
-  if (shellContract()) {
-    const latest = listed.map((r) => r.checked_at).filter(Boolean).sort().pop();
-    host.innerHTML = `<span class="ab-dot"></span><div class="ab-body">`
-      + `<div class="ab-head">${esc(head)}</div>`
-      + `<ul class="ab-list ab-detail">`
-      + listed.map((r) => `<li><span class="ab-who">${swatch(r.provider)}`
-        + `${esc(sourceLabel(r.provider))}${esc(fleetOf(r))}</span>`
-        + `<span class="ab-key"><code>${esc(r.credential)}</code>`
-        + `${r.surface ? `<small>${esc(r.surface)}</small>` : ''}</span>`
-        + `<span class="ab-what">${esc(detailOf(r))}</span>`
-        + `<span class="ab-when">${esc(whenOf(r))}</span></li>`).join('')
-      + `</ul></div>`
-      + `<div class="ab-meta">${latest ? `<span>as of ${esc(savedWhen(latest))} Dubai</span>` : ''}`
-      + `<a href="#settings">Set up \u2192 credentials</a></div>`;
-    return;
-  }
-  host.innerHTML = `<span class="ab-dot"></span><div class="ab-body">`
-    + `<div class="ab-head">${esc(head)}</div>`
-    + `<ul class="ab-list ab-detail">`
-    + listed.map((r) => `<li><strong>${esc(sourceLabel(r.provider))}${esc(fleetOf(r))}</strong> `
+  const latest = listed.map((r) => r.checked_at).filter(Boolean).sort().pop();
+  const rows = shellContract()
+    ? listed.map((r) => `<li><span class="ab-who">${swatch(r.provider)}`
+      + `${esc(sourceLabel(r.provider))}${esc(fleetOf(r))}</span>`
+      + `<span class="ab-key"><code>${esc(r.credential)}</code>`
+      + `${r.surface ? `<small>${esc(r.surface)}</small>` : ''}</span>`
+      + `<span class="ab-what">${esc(detailOf(r))}</span>`
+      + `<span class="ab-when">${esc(whenOf(r))}</span></li>`).join('')
+    : listed.map((r) => `<li><strong>${esc(sourceLabel(r.provider))}${esc(fleetOf(r))}</strong> `
       + `<code>${esc(r.credential)}</code> — `
       + esc(detailOf(r))
-      + ` <span class="ab-when">· ${esc(whenOf(r))}</span></li>`).join('')
-    + `</ul></div>`;
+      + ` <span class="ab-when">· ${esc(whenOf(r))}</span></li>`).join('');
+  const meta = shellContract()
+    ? `<div class="ab-meta">${latest ? `<span>as of ${esc(savedWhen(latest))} Dubai</span>` : ''}`
+      + `<a href="#settings">Set up \u2192 credentials</a></div>`
+    : '';
+  /* FOLDED TO ONE LINE UNTIL ASKED (the operator, 2026-09-30: "show the red
+     bar on every page but start minimised so that it doesn't take so much
+     space. Once clicked, it opens up and shows details").
+     ─────────────────────────────────────────────────────────────────────────
+     With three Bolt and Yango rows the banner stood 200px tall above every
+     page, every day, for faults only an admin can fix. It still shows on
+     every page, in its own colour, with the whole errand sentence — the
+     thing that says what kind of fault this is — and folds the rows, the
+     "as of" and the link behind a native <details>, so the one line is a
+     keyboard control with nothing to wire up.
+     Every page starts folded. A banner opened on a page stays open while that
+     page redraws — this runs on every refresh, and a panel that snapped shut
+     under the reader's cursor would be worse than one that never opened. The
+     state is remembered per route in memory only: the next page, or a
+     reload, starts folded again. test/arkiv_shell.test.mjs §4. */
+  const route = (location.hash || '#').split('?')[0];
+  const open = bannerFold.route === route && bannerFold.open;
+  host.innerHTML = `<details class="ab-fold"${open ? ' open' : ''}>`
+    + `<summary class="ab-sum"><span class="ab-dot"></span>`
+    + `<span class="ab-head">${esc(head)}</span>`
+    + `<span class="ab-toggle"><span class="ab-show">Show details</span>`
+    + `<span class="ab-hide">Hide details</span></span></summary>`
+    + `<div class="ab-body"><ul class="ab-list ab-detail">${rows}</ul>${meta}</div></details>`;
+  host.querySelector('.ab-fold').addEventListener('toggle', (e) => {
+    bannerFold = { route, open: e.target.open };
+  });
 }
 
 /* The sidebar freshness block.

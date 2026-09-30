@@ -2281,3 +2281,15 @@ Still slow on a COLD visit, and next: #policy (`/api/ledger/exposure`,
 then #supply 9.5 s, #performance 6.4 s, #optimise 6.3 s, #corridors 5.9 s.
 Each is served from the cache in well under a second once visited. Rewriting
 the first two properly wants their plans on production data.
+
+## The credential banner folded to one line — 2026-09-30
+
+Production's banner carried three stopped Bolt credentials and Yango's refused
+console: 314 px above every page on desktop Arkiv, 887 px on a phone. At the
+operator's word it now folds to one line on every page (46 px; Classic 45 px)
+— the dot and the errand sentence, cut with an ellipsis — and "Show details"
+opens the rows, the "as of" and the Set up link unchanged. Screens taken on
+the working tree against production data (bin/live-ui.mjs), desktop 1440 in
+both skins and phone 390, folded and open; the phone's open rows stack one
+cell under another as before.
+

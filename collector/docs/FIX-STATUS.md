@@ -4164,3 +4164,14 @@ indexes.
 | PERF-4 | background refreshes of stale cache entries queue, two at a time, so pages keep the pool | cache (unbounded 1) | ✓ | ✓ f6a8aed | ✓ 83374a15 | ✓ deployed; the stale-refresh queue is not separately visible in the log — the slow-query rate above is the combined effect |
 | — | suite on this tree: `354 files, 13301 assertions, 1 file(s) failing` — arkiv_classic_frozen's driver/drv-0/quality render hashed differently once under the parallel run; alone it passes 145 of 145 (twice). It renders against mockapi.mjs, so no server change reaches it, and the only page file changed (map.js) draws no map on that tab — a settle race in the harness, not a render change | — | | | | |
 | — | not changed, by decision: money_event still drops a failed source's rows until the next pass (its documented, tested design) — the trip-price step's two 120 s timeouts on 2026-09-29 were load; /api/ledger/exposure (42 s cold) needs production query plans before it is rewritten | — | | | | re-measure after deploy |
+
+## The credential banner, folded — 2026-09-30
+
+The operator: "show the red bar on every page but start minimised so that it
+doesn't take so much space. Once clicked, it opens up and shows details."
+
+| # | what | test (revert fails it) | written | committed | deployed | proven |
+|---|---|---|---|---|---|---|
+| UI-BAN1 | the banner is a native `<details>`: folded, one line — the dot, the errand sentence cut with an ellipsis, "Show details"; open, the rows, "as of" and the Set up link as before; every page starts folded, an opened banner stays open while its page redraws, the next page folds it again; both skins and the phone | arkiv_shell §4 (always open 3, no per-route memory 1) | ✓ | | | working tree against production data: 46 px folded against 314 px open (desktop Arkiv), 46 against 887 (phone), 45 against 245 (Classic) |
+| — | arkiv_shell's rolling-window check wanted a month on both sides of the dates, and failed on 2026-09-30, when the 30-day window is "1 – 30 Sep 2026" — the page was right | arkiv_shell | ✓ | | | |
+
