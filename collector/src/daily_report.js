@@ -255,23 +255,48 @@ export async function analyse(facts, report, { http = realHttp } = {}) {
   if (!m.apiKey) return fallback('no model key is set (REPORT_MODEL_API_KEY)', 'no_model');
   const given = findingsForModel(report);
   let raw;
+  let finish = null;
   try {
     const { status, data } = await http(`${m.baseUrl}/chat/completions`, {
       method: 'POST', timeoutMs: 90000, retries: 1,
       headers: { authorization: `Bearer ${m.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: m.model, max_tokens: 1400, temperature: 0.2,
+      /* 3000, not 1400. The answer may be a 700-character summary and eight
+         400-character actions — about 4,000 characters of JSON, which is
+         more than 1,400 tokens can hold once the findings are real. The first
+         real run (2026-09-30, the 29th's report) was dropped as "not the
+         agreed form", and on the fixture the same prompt answered cleanly in
+         408 tokens: the likeliest difference is a longer answer cut off
+         mid-JSON. A longer limit costs only what is actually written. */
+      body: JSON.stringify({ model: m.model, max_tokens: 3000, temperature: 0.2,
         thinking: { type: 'disabled' },
         messages: [{ role: 'system', content: ANALYST },
           { role: 'user', content: JSON.stringify({ figures: modelInput(facts), ...given }) }] }),
     });
     if (status >= 400) throw new Error(`HTTP ${status}: ${JSON.stringify(data).slice(0, 160)}`);
     raw = String(data?.choices?.[0]?.message?.content || '').trim();
+    finish = data?.choices?.[0]?.finish_reason || null;
   } catch (e) {
     return fallback(String(e.message || e).slice(0, 200), 'failed');
   }
-  let out;
-  try { out = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch {
-    return fallback('the model did not answer in the agreed form', 'dropped');
+  /* THE JSON, WHEREVER IN THE ANSWER IT IS — and when there is none, WHY.
+     ─────────────────────────────────────────────────────────────────────
+     The first real run was dropped here and said nothing in the log: the
+     guard below warns when it refuses a reply, this path did not, so the
+     one thing left to read the next morning was "dropped". A reply that
+     wraps the object in a sentence ("Here is the analysis: {…}") is read
+     from its first "{" to its last "}". One that was cut off at the length
+     limit is said to have been, in the email and the log; its words are not
+     logged (they name drivers), only its shape. */
+  const parse = (text) => { try { return JSON.parse(text); } catch { return undefined; } };
+  const bare = raw.replace(/^```(?:json)?\s*|\s*```$/g, '');
+  let out = parse(bare);
+  if (out === undefined && bare.indexOf('{') >= 0) out = parse(bare.slice(bare.indexOf('{'), bare.lastIndexOf('}') + 1));
+  if (out === undefined || out === null || typeof out !== 'object') {
+    const cut = finish === 'length';
+    log.warn(SRC, 'analysis dropped: the reply was not the agreed JSON',
+      { finish, chars: raw.length, starts: raw.slice(0, 1), ends: raw.slice(-1) });
+    return fallback(cut ? 'the model\u2019s answer was cut off before it finished'
+      : 'the model did not answer in the agreed form', 'dropped');
   }
   const byId = new Map(report.findings.map((f) => [f.id, f]));
   /* Who each finding is about, by name and plate. An action that names a

@@ -7770,3 +7770,15 @@ everyone (the operator's call; per-role emails can follow).
 
 34 in "Traps that have cost time more than once".
 
+
+**The first real run, 2026-09-30 07:00 Dubai (the 29th's report).** Sent to all
+three recipients at 03:00:27Z, none failed — with the findings' own actions,
+because GLM 5.2's reply was dropped as not the agreed JSON. That path logged
+nothing, so how it failed cannot be read back. The same prompt through the same
+code on the test fixture (13 findings, 2,178 prompt tokens) answered cleanly in
+408 tokens with `finish_reason: stop`; real findings are longer, and a full
+answer — a 700-character summary and eight 400-character actions — is about
+4,000 characters, more than max_tokens 1,400 reliably holds. Now 3,000, a reply
+wrapped in words is read, a cut-off one is named as such, and every drop logs
+its finish reason and length (FIX-STATUS RPT-8). Read the next run's
+`commentary` in the collector log before calling the analysis proven.

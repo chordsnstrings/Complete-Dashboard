@@ -164,6 +164,27 @@ check('an action may use only its own finding\u2019s numbers — not one from an
 reply = 'not json at all';
 const a4 = await analyse(facts, r, { http: fake });
 check('an answer that is not the agreed JSON falls back to the findings', a4.outcome === 'dropped' && a4.actions.length > 0);
+/* THE FIRST REAL RUN (2026-09-30, the 29th's report) was dropped as "not
+   the agreed form", with nothing in the log to say how. The same prompt on
+   this fixture answered cleanly in 408 tokens, so the answer on real data was
+   longer: cut off at max_tokens 1,400, or wrapped in words.
+   REVERSION (run 2026-09-30): parse only the whole reply — "an answer
+   wrapped in a sentence is still read" fails; drop the finish_reason test —
+   "an answer cut off at the limit says so" fails; max_tokens back to 1400 —
+   "the answer has room" fails. */
+const okReply = { summary: 'Bookings fell to 24 against 37 last Monday.',
+  actions: [{ finding: R.id, owner: 'Supervisors', action: `Call ${tokenR}: AED 100 against a usual AED 400.` }] };
+reply = `Here is the analysis you asked for:\n${j(okReply)}\nLet me know if you need more.`;
+const a7 = await analyse(facts, r, { http: fake });
+check('an answer wrapped in a sentence is still read', a7.outcome === 'ok' && a7.actions[0].by === 'model', j(a7.why));
+let sent = null;
+const cutOff = async (_u, opts) => { sent = JSON.parse(opts.body);
+  return { status: 200, data: { choices: [{ finish_reason: 'length', message: { content: j(okReply).slice(0, 70) } }] } }; };
+const a8 = await analyse(facts, r, { http: cutOff });
+check('an answer cut off at the limit says so, and the findings’ own actions stand',
+  a8.outcome === 'dropped' && /cut off/.test(a8.why) && a8.actions.every((x) => x.by === 'rule'), j(a8.why));
+check('the answer has room: at least 3,000 tokens for eight actions and a summary',
+  Number(sent?.max_tokens) >= 3000, String(sent?.max_tokens));
 const a5 = await analyse(facts, r, { http: async () => { throw new Error('socket hang up'); } });
 check('a model that cannot be reached leaves the actions intact', a5.outcome === 'failed' && a5.actions.length === Math.min(8, r.findings.length));
 
