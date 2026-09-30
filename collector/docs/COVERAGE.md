@@ -4336,6 +4336,15 @@ untouched, and nothing projected is ever added into `accounted`.
       register change; if neither applied it, a restart of either retries.
       Never put a BEGIN/COMMIT into a migration file without meaning it: it
       is what would turn a rollback into a half-applied file.
+  40. **"Money in" a year ago and "money in" now are different measures.**
+      Past about 192 days Uber's money exists only as FARES (gross); inside
+      it the dashboard counts Uber on its STATEMENT (net of the 25%
+      commission). Any year-on-year comparison of `accounted` compares a
+      gross with a net and reads ~25% down on a flat year — measured
+      2026-09-30, Ecosine August 2025 on fares 470,625.43, August 2026 on its
+      statement 338,359.93 against fares of 451,386.96. Compare on fares, or
+      check `basis` per platform on both sides first ("The monthly report
+      email", below).
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
@@ -7867,3 +7876,73 @@ change so we should be able to set it up in admin panel as well."
   per day, retried each quarter hour to 09:45. By hand, to one address,
   recounted: `node src/index.js low-trips [YYYY-MM-DD] address`. Logged as
   counts only (min, active, below, sent, failed), never a name.
+
+## The monthly report email — built 2026-09-30
+
+The operator: a monthly performance email comparing the month with the month
+before and the same month last year — vehicle by vehicle, driver by driver,
+active vehicles, average earning per vehicle and per active driver, trips per
+driver, total revenue, and revenue, bank payout and cash to drivers by
+company — with GLM 5.2's summary, Arkiv-styled, to five addresses kept on the
+Settings page. `src/monthly_report.js`.
+
+### Trap: last year's money and this year's are not the same measure
+
+Measured on production 2026-09-30, `/api/revenue` per month and company:
+
+| month | company | Uber basis | Uber fares | Uber statement | Uber payout |
+|---|---|---|---|---|---|
+| Aug 2025 | Ecosine | fares | 470,625.43 | — | — |
+| Aug 2025 | Egari | fares | 177,500.56 | — | — |
+| Jul 2026 | Ecosine | statement | 362,362.08 | 269,527.79 | 232,104.35 |
+| Aug 2026 | Ecosine | statement | 451,386.96 | 338,359.93 | 282,403.18 |
+| Aug 2026 | Egari | statement | 200,016.56 | 152,041.62 | 122,393.91 |
+
+A year back Uber's money exists only as FARES (what riders paid): the
+earnings surface that files statements and payouts reaches back about 192
+days. This year the dashboard's "money in" counts Uber on its STATEMENT, net
+of Uber's 25% commission. Set side by side, August 2026's money in reads about
+a quarter below August 2025's in a year where fares moved a few percent. So:
+
+- **Fares are the year-on-year line** — present in every month, on every
+  platform, priced trip by trip — for the totals, the per-vehicle and
+  per-driver averages, and every vehicle and driver row.
+- **Earned after commission** (`fleetIncome().accounted`, assembled exactly as
+  `/api/kpis` does, open-week fill included) is shown for every month but
+  compared only where both months count each platform on the same basis; the
+  email names the platform and the two bases where they differ.
+- **Paid into the bank** (`reported_payouts`: Uber and Yango) is absent for a
+  month nothing was collected for, with the 192-day reason where it applies.
+- **Fares are compared only where both months price 95% of the trips that
+  could carry a fare** — Apr–Aug 2025 was 60–97% priced for Ecosine in the
+  table at the top of this file.
+- **Cash** (`trip_cash`) is not compared against a month where more than 5% of
+  the cash trips have no amount.
+
+### What else is in it
+
+- Active vehicles and active drivers: at least one completed trip that month;
+  a driver is `personKey()`, one person across platforms. Trips per driver is
+  completed trips over active drivers.
+- Every vehicle and every driver with a completed trip that month, by fares,
+  with the change on the month before and on the year before (or "new").
+  Capped at 150 vehicles and 200 drivers to stay under Gmail's ~102 KB clip,
+  the rest counted.
+- GLM 5.2 is given every figure with each percentage already worked out, the
+  biggest risers and fallers, and the comparisons that cannot be made; it
+  writes a summary and up to five points. Every number it writes must be one
+  it was given (without its sign, at 0–2 decimals); one that is not and the
+  summary is dropped for one built from the figures, and the email says so.
+- **When.** Hourly from 10:05 Dubai on the 1st to the 3rd: sent once last
+  month is complete — every platform delivered its last day and 99% of trips
+  priced — and at the latest on the 3rd at 10:00, saying what is short. The
+  report (figures and summary) is composed once and kept in
+  `monthly_report_send.detail`, so every address gets the same email and the
+  model is asked once a month.
+- **Who.** `MONTHLY_REPORT_RECIPIENTS` on the Settings page or the collector's
+  environment, never the repository. A one-off test is
+  `MONTHLY_REPORT_TEST="YYYY-MM address"` in the environment (the collector has
+  no shell to run a command from); it sends once per month and address, a
+  minute after the collector starts, and the send log keeps a restart from
+  repeating it. By hand where there is a shell:
+  `node src/index.js monthly-report [YYYY-MM] address`.

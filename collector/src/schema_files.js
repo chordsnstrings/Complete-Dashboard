@@ -283,4 +283,8 @@ export const SCHEMA_FILES = [
      Resend said per address, and the list as composed. Additive.
      test/low_trips_email.test.mjs. */
   'schema_v96.sql',
+  /* v97 (2026-09-30): monthly_report_send — the monthly report email
+     (src/monthly_report.js): what Resend said per month per address, and the
+     report as composed. Additive. test/monthly_report.test.mjs. */
+  'schema_v97.sql',
 ];

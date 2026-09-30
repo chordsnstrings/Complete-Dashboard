@@ -4202,3 +4202,17 @@ low-trips email".
 | LT-2 | the minimum on the Access page (low_trips_min, default 10, 1–100, Owner only, audited), read at 08:00, the day's list kept once composed | low_trips_email §2, §5 (setting 1, recount 1); access_core §10 (route 3); access_pages §11 (panel 1) | ✓ | ✓ 4cbe37a | ✓ 153cbdb9 (4cbe37a): production serves the panel in accessadmin.js; POST /api/access/config without a session answers 401 | |
 | LT-3 | 08:00 Dubai to LOW_TRIPS_RECIPIENTS, one send per address per day, retried each quarter hour to 09:45 | low_trips_email §5 (send log 2) | ✓ | ✓ 4cbe37a | ✓ 153cbdb9 (4cbe37a): collector log 2026-09-30T12:30:42Z `migrated schema_v96.sql`, scheduler started; LOW_TRIPS_RECIPIENTS set on api and collector (app spec, not the repo) | the first 08:00 run's `[low-trips] low trips email` log line, 2026-10-01 04:00Z |
 
+## The monthly report email — 2026-09-30
+
+The operator: the month against the month before and the same month last
+year, by company, vehicle and driver, with GLM 5.2's summary, to the Settings
+page's list, and a test to gicbdfacebook@gmail.com. docs/COVERAGE.md "The
+monthly report email".
+
+| # | what | test (revert fails it) | written | committed | deployed | proven |
+|---|---|---|---|---|---|---|
+| MR-1 | a month per company and for both: fares, earned after commission (as /api/kpis), bank, cash, completed trips, active vehicles and drivers, three averages; every vehicle and driver | monthly_report §1, §3 (trips 4, earned 4) | ✓ | | | |
+| MR-2 | comparisons with the month before and a year ago, refused with the reason across two money bases, an uncollected payout, an under-priced month or unvalued cash | monthly_report §2 (basis 2, payout 1, coverage 1) | ✓ | | | |
+| MR-3 | GLM 5.2 summary and points on precomputed changes; a stray number drops it for the figures' own | monthly_report §4 (guard 1) | ✓ | | | |
+| MR-4 | 1st–3rd hourly, waits for a complete month, last call the 3rd; composed once; once per address; MONTHLY_REPORT_RECIPIENTS; one-shot MONTHLY_REPORT_TEST | monthly_report §6 (wait 2, recompose 1) | ✓ | | | the test email for August 2026 |
+

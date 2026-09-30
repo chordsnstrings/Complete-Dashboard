@@ -8,7 +8,7 @@
 import cron from 'node-cron';
 import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
-import { recordCredentialVisibility, withPinnedSettings } from './settings.js';
+import { recordCredentialVisibility, withPinnedSettings, get } from './settings.js';
 import { runDiscovery } from './sources/discovery.js';
 import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit } from './run.js';
 import { clearCheckpoint } from './checkpoint.js';
@@ -19,6 +19,7 @@ import { deliveryReport } from './smsala.js';
 import { dailyReportRun } from './daily_report.js';
 import { cashEmailRun } from './cash_sms_email.js';
 import { lowTripsRun } from './low_trips_email.js';
+import { monthlyReportRun } from './monthly_report.js';
 import { getConfig as accessConfig } from '../api/access/service.js';
 
 /* The driver messages by SMS (src/driver_sms.js). Each run is safe to
@@ -95,6 +96,15 @@ async function main() {
     return withPinnedSettings(async () => log.info('low-trips', 'by hand',
       await lowTripsRun({ q: sq, cfg: await accessConfig(pool, { fresh: true }), ...(day ? { day } : {}), only, force: Boolean(only) })));
   }
+  /* `monthly-report [YYYY-MM] [address]`: the monthly email by hand — a
+     month other than the last, and to one address only, composed fresh and
+     sent again even if that address has it. */
+  if (cmd === 'monthly-report') {
+    const month = /^\d{4}-\d{2}$/.test(process.argv[3] || '') ? process.argv[3] : undefined;
+    const only = process.argv[4] || null;
+    return withPinnedSettings(async () => log.info('monthly-report', 'by hand',
+      await monthlyReportRun({ q: sq, ...(month ? { month } : {}), only, force: Boolean(only) })));
+  }
   if (cmd === 'sms-cash') return smsJob('cash', (cfg) => cashDepositRun({ q: sq, cfg }))();
   if (cmd === 'sms-trips') return smsJob('trips', (cfg) => tripRegisterRun({ q: sq, cfg }))();
 
@@ -135,6 +145,22 @@ async function main() {
       lowTripsRun({ q: sq, cfg: await accessConfig(pool, { fresh: true }) }))
       .catch((e) => log.error('low-trips', 'daily', { err: String(e?.message || e).slice(0, 200) })),
     { timezone: 'Asia/Dubai' });
+    /* The monthly report: hourly from 10:05 Dubai on the 1st to the 3rd, sent
+       once last month is complete and at the latest on the 3rd
+       (src/monthly_report.js). */
+    cron.schedule('5 10-20 1-3 * *', () => withPinnedSettings(() => monthlyReportRun({ q: sq }))
+      .catch((e) => log.error('monthly-report', 'monthly', { err: String(e?.message || e).slice(0, 200) })),
+    { timezone: 'Asia/Dubai' });
+    /* A one-off test of the monthly report, asked for from the environment
+       because the collector has no shell to run it from: MONTHLY_REPORT_TEST
+       = "YYYY-MM address". Sent once per month and address — the send log
+       keeps a restart from sending it again — and a no-op once sent. */
+    const once = String(get('MONTHLY_REPORT_TEST', '') || '').trim().split(/\s+/);
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(once[0] || '') && once[1]) {
+      setTimeout(() => withPinnedSettings(async () => log.info('monthly-report', 'test',
+        await monthlyReportRun({ q: sq, month: once[0], only: once[1] })))
+        .catch((e) => log.error('monthly-report', 'test', { err: String(e?.message || e).slice(0, 200) })), 60_000);
+    }
     cron.schedule('*/20 * * * *', smsJob('delivery', () => checkDeliveries({ q: sq, report: deliveryReport })));
     // Uber/FMS live status — lighter interval
     setInterval(() => liveStatusTick(), config.liveStatusSeconds * 1000);

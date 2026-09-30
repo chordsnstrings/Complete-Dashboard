@@ -370,6 +370,9 @@ export const SETTING_DEFS = [
      is a company setting on the Access page (low_trips_min). */
   { key: 'LOW_TRIPS_RECIPIENTS', group: 'Daily report', label: 'Low-trips email recipients', secret: false,
     hint: 'Comma-separated. At 08:00 they get every active driver who completed fewer than the minimum trips the day before' },
+  /* The monthly report email (src/monthly_report.js). */
+  { key: 'MONTHLY_REPORT_RECIPIENTS', group: 'Daily report', label: 'Monthly report recipients', secret: false,
+    hint: 'Comma-separated. On the 1st of each month (by the 3rd at the latest) they get last month against the month before and the same month last year' },
   { key: 'REPORT_MODEL_API_KEY', group: 'Daily report', label: 'Commentary model key (ModelArk)', secret: true,
     hint: 'GLM 5.2 writes two or three sentences from the figures; without a key the email is sent without them' },
   { key: 'REPORT_MODEL', group: 'Daily report', label: 'Commentary model', secret: false },
