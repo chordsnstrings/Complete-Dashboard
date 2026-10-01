@@ -7946,3 +7946,32 @@ a quarter below August 2025's in a year where fares moved a few percent. So:
   minute after the collector starts, and the send log keeps a restart from
   repeating it. By hand where there is a shell:
   `node src/index.js monthly-report [YYYY-MM] address`.
+
+### The first real runs, and what they changed (2026-10-01)
+
+- **The August 2026 test** went to the one address at 2026-09-30T13:51:25Z,
+  65,265 bytes, the month complete (`ready: true`). Its figures agree with
+  `/api/revenue` to the fils — Ecosine's August fares 539,507.74 are Uber
+  451,386.96 + hotel 67,469.98 + Bolt 14,437.80 + Yango 6,213.00; Egari's bank
+  122,393.91 is its Uber payout. GLM 5.2's summary was **dropped**: it wrote
+  `24.8` and `14000`, a percentage it worked out and a figure it rounded, and
+  the email carried the figures' own summary with that reason.
+- **The 07:00 daily report** for 30 September (2026-10-01T03:00:22Z) was sent
+  to all three and its analysis dropped the same way, over one `3.4` the model
+  computed — the first run since the parse fix, and the reply now parsed.
+- So both now give the model **one second chance**: a reply that strays is
+  answered, in the same conversation, with the numbers (or names) that were not
+  in the data, and asked to rewrite with only the given ones; the rewrite meets
+  the same guard, and a second stray drops it as before, the email saying so.
+- Reading the test email also showed two faults, fixed: the year-ago "earned"
+  cell printed August 2025's FARES under "after platform commission" (a value
+  on a different basis is now not printed, only the reason); and a vehicle or
+  driver row printed +56,761.2% against a month with one trip (a change is now
+  a percentage only against a month with at least 20 of that row's trips;
+  otherwise that month's trips are shown).
+- The email showed several people twice under spellings the register does not
+  join — "Tariq Afzal Afzal" / "Tariq Afzal Said Afzal", "Umer Naveed Qadir" /
+  "Umer Naveed Abdul Qadir", "Wisal Muhammad Muhammad" / "WISAL MUHAMMAD
+  IRSHAD MUHAMMAD", "Soaieed Alom Ali" / "SOAIEED ALOM MIHIN JINNAT ALI".
+  Recorded, not merged: who is one person is the hand-reviewed register's
+  question (api/identity_map.js), not this email's.
