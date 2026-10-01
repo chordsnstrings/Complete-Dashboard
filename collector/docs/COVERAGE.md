@@ -8039,3 +8039,10 @@ and daily-cap checks.
   texted a driver whose journey the newly-fetched Bolt booking explains). Still
   unexplained: texted, naming the day ("Please Register your trip on 28 Sep
   from …"); explained: held as `no_longer_unauthorized`.
+- **The rows already on the page.** A journey is filed once and skipped by every
+  later pass, so the rows held before the fix (29 Sep – 1 Oct, the operator's
+  screenshots) would have read "nobody" for ever. Each pass now names the driver
+  — or the candidates — on held rows from the last 7 days that carry neither,
+  from the same judgement, and changes nothing else: same hold, same text,
+  nothing sent. A row the evidence names nobody on gets an empty candidate
+  list, so it is looked at once.

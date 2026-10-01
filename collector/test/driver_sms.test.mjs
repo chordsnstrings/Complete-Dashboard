@@ -317,6 +317,24 @@ check('…and where it names two, both are on the record by name',
   byPlate.L14?.hold === 'driver_not_certain' && heldWho.L14?.person_id === null
   && JSON.stringify([...(heldWho.L14?.detail?.candidates || [])].sort()) === '["Test Driver A","Test Driver D"]',
   JSON.stringify([byPlate.L14, heldWho.L14]));
+/* The rows filed BEFORE the driver was recorded: a filed journey is skipped
+   on every later pass, so without nameHeldRows the rows on the operator's
+   screen would read "nobody" for ever. Made here by wiping what the run
+   just recorded, as the older code left it.
+   REVERSION (run 2026-10-01): drop the nameHeldRows call -> 68 passed,
+   2 FAILED (both checks below). */
+await q(`UPDATE sms_outbox SET person_id = NULL, detail = detail - 'candidates' WHERE plate IN ('L2', 'L14')`);
+const n1b = sent.length;
+r = await tripRegisterRun({ q, now: new Date('2026-09-28T08:20:00Z'), send, cfg: {} });
+const again = Object.fromEntries((await q(
+  `SELECT plate, person_id, status, hold_reason, detail FROM sms_outbox WHERE plate IN ('L2', 'L14')`)).map((x) => [x.plate, x]));
+check('a held row filed before the driver was recorded is named on the next pass — and only named: same hold, nothing sent',
+  again.L2?.person_id === 4 && again.L2.status === 'held' && again.L2.hold_reason === 'short'
+  && sent.length === n1b && r.named >= 1, JSON.stringify([again.L2, r.named, sent.length - n1b]));
+check('…and one the evidence names two people on gets both names back',
+  again.L14?.person_id === null && again.L14.hold_reason === 'driver_not_certain'
+  && JSON.stringify([...(again.L14?.detail?.candidates || [])].sort()) === '["Test Driver A","Test Driver D"]',
+  JSON.stringify(again.L14));
 
 /* The same journey, reported again: the next pass deleted its window and
    re-inserted FMS's final record, three minutes off the provisional start. */

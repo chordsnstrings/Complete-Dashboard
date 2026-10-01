@@ -525,7 +525,41 @@ export async function tripRegisterRun({ q, now = new Date(), send = sendSms, cfg
     if (await deliver(q, id, { to: d.ph.phone, text, ref: `fm-trip-${id}`, send })) out.sent += 1;
   }
   if (!dry) Object.assign(out, await recheckChannelDown({ q, now, send, pb, dual, out }));
+  if (!dry) out.named = await nameHeldRows({ q, now, pb, dual });
   return out;
+}
+
+/* ── the rows filed before the driver was recorded ───────────────────────── */
+/* A journey is filed once and skipped on every later pass (the overlap test
+   above), so the rows held before 2026-10-01 — the ones on the operator's
+   screen when they asked why the driver was not found — kept "nobody the
+   evidence names" even after the run learned to record him. Each pass names
+   the driver (or the candidates) on recent held rows that carry neither,
+   from the same judgement. Nothing else about the row changes: not its hold,
+   not its text, and nothing is sent — the hold was the decision at the time.
+   A row the evidence names nobody on gets an empty candidate list, so it is
+   looked at once, not every half hour. */
+async function nameHeldRows({ q, now, pb, dual }) {
+  const rows = await q(
+    `SELECT id, plate, trip_start, trip_end FROM sms_outbox
+      WHERE kind = 'trip_register' AND status = 'held' AND person_id IS NULL
+        AND NOT (coalesce(detail, '{}'::jsonb) ? 'candidates') AND trip_end > $1
+      ORDER BY trip_end DESC LIMIT 100`, [new Date(now.getTime() - RECHECK_DAYS * 864e5).toISOString()]);
+  let named = 0;
+  for (const m of rows) {
+    const [s] = await q(`${SEGMENT_SQL(`o.plate = $1 AND o.started_at <= $3::timestamptz + interval '15 minutes'
+        AND coalesce(o.ended_at, o.started_at) >= $2::timestamptz - interval '15 minutes'`)}
+      ORDER BY (o.verdict = 'unauthorized') DESC, o.started_at LIMIT 1`,
+    [m.plate, new Date(m.trip_start).toISOString(), new Date(m.trip_end).toISOString()]);
+    const d = s ? await judgeTrip(q, s, { pb, dual, now }) : { person: null, candidates: [] };
+    await q(`UPDATE sms_outbox SET person_id = $2,
+                    detail = coalesce(detail, '{}'::jsonb) || $3::jsonb
+              WHERE id = $1 AND person_id IS NULL`,
+    [m.id, d.person ? Number(d.person) : null, JSON.stringify(d.person ? { named_at: now.toISOString() }
+      : { candidates: d.candidates, named_at: now.toISOString() })]);
+    if (d.person) named += 1;
+  }
+  return named;
 }
 
 /* ── a channel that did not collect, collecting again ────────────────────── */

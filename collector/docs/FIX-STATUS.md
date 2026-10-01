@@ -4227,8 +4227,9 @@ know." docs/COVERAGE.md "Trip messages: why every held row said nobody".
 
 | # | what | test (revert fails it) | written | committed | deployed | proven |
 |---|---|---|---|---|---|---|
-| TRIP-1 | the driver the evidence names is recorded on every trip row, held or not; several names kept as candidates; the Messages page prints them | driver_sms §3 (person 1, candidates 1) | ✓ | ✓ d26f8b4 | | |
-| TRIP-2 | a building number in front of a road is dropped; an ordinal street is a name | driver_sms §1 (addresses 1) | ✓ | ✓ d26f8b4 | | |
-| TRIP-3 | booking_channel_down holds re-checked for 7 days: released only after the channel delivered the day and the journey was judged again; texted with the day; explained ones held as no_longer_unauthorized | driver_sms §3b (re-check 2, judged-again 3) | ✓ | ✓ d26f8b4 | | |
+| TRIP-1 | the driver the evidence names is recorded on every trip row, held or not; several names kept as candidates; the Messages page prints them | driver_sms §3 (person 1, candidates 1) | ✓ | ✓ d26f8b4 | ✓ af4ca81d (316bcb0) | |
+| TRIP-2 | a building number in front of a road is dropped; an ordinal street is a name | driver_sms §1 (addresses 1) | ✓ | ✓ d26f8b4 | ✓ af4ca81d (316bcb0) | |
+| TRIP-3 | booking_channel_down holds re-checked for 7 days: released only after the channel delivered the day and the journey was judged again; texted with the day; explained ones held as no_longer_unauthorized | driver_sms §3b (re-check 2, judged-again 3) | ✓ | ✓ d26f8b4 | ✓ af4ca81d (316bcb0) | |
+| TRIP-4 | held rows filed before TRIP-1 are named on the next pass (driver or candidates), hold and text unchanged, nothing sent | driver_sms §3 (filed before, 2) | ✓ | | | |
 
 Full suite 2026-10-01 after TRIP-1..3: 356 of 357 files, 13,444 assertions; forecast_yoy alone (the 1st-of-the-month failure above, unrelated: it imports neither changed file).
