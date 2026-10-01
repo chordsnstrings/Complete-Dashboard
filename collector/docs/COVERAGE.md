@@ -4345,6 +4345,19 @@ untouched, and nothing projected is ever added into `accounted`.
       statement 338,359.93 against fares of 451,386.96. Compare on fares, or
       check `basis` per platform on both sides first ("The monthly report
       email", below).
+  41. **`trip` is not only bookings.** It also files the FMS tracker's own
+      journeys under platform `'fms'` — 155,403 rows for Ecosine and 86,366
+      for Egari on 2026-10-01. Read "which channels does this car use" from
+      `SELECT DISTINCT platform FROM trip` and every FMS-tracked car lists
+      `fms`, a channel nothing ever "collects": the trip message held every
+      journey on such a car as `booking_channel_down`, for good, from the day
+      it went live, and the hold read as "Bolt is down". Filter on
+      `is_booking` (trip_norm / trip_ext) or name the booking channels
+      (`BOOKING_SOURCES` in src/driver_sms.js). And "collected that day"
+      means a run whose window COVERS the day — `window_start <= day AND
+      window_end >= day` — not one that merely ends on or after it: the
+      half-hourly run covers 3 days, so for an older day only the nightly
+      catch-up counts.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
@@ -8046,3 +8059,13 @@ and daily-cap checks.
   from the same judgement, and changes nothing else: same hold, same text,
   nothing sent. A row the evidence names nobody on gets an empty candidate
   list, so it is looked at once.
+- **"Booking channel down" was mostly not Bolt.** Watching the first pass after
+  the deploy (11:12Z: `rechecked 0` though every channel had collected) found
+  the reason: the car's channels were read from every platform in `trip`,
+  which includes the FMS tracker's own journeys (`fms`), never "collected" —
+  so every journey on an FMS car that passed the other checks was held under
+  that name, Bolt up or down. Trap 41. The channels are now the four booking
+  channels, and a day counts as collected (and re-judged) only by a run whose
+  window covers it. The journeys held this way in the last 7 days go through
+  the re-check: each is judged again on every rule, and a driver is texted
+  — naming the day — only if it still passes all of them.

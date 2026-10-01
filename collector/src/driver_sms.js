@@ -193,14 +193,28 @@ async function deliver(q, id, { to, text, ref, send }) {
 }
 
 /* ── collection health ───────────────────────────────────────────────────── */
+/* The channels a booking can arrive through. `trip` also files the FMS
+   tracker's own journeys under platform 'fms' — 155,403 rows for Ecosine and
+   86,366 for Egari on 2026-10-01 — and those are not bookings: nothing can
+   "collect" them for a day. The car's channels were read from every platform
+   in `trip`, so every FMS-tracked car counted 'fms' among them, never found it
+   collected, and every journey on it that passed the other checks was held as
+   booking_channel_down — for good; the re-check could never release one.
+   Both sides now read this one list. */
+const BOOKING_SOURCES = ['uber', 'bolt', 'yango', 'hotel'];
 /* (platform, fleet) pairs whose booking collector ran — ok or partial — after
-   `since`, over a window reaching `day`. A pair absent from the set did not. */
+   `since`, over a window COVERING `day`. A pair absent from the set did not.
+   Covering, not merely reaching: the half-hourly run's window is the last 3
+   days, so for an older journey "a run ended on or after its day" was true of
+   every run and said nothing about the day itself — only the nightly 30-day
+   catch-up fetches it, and on 2026-09-30 that run failed for Bolt Ecosine. */
 async function collectedPairs(q, day, since) {
   const rows = await q(
     `SELECT source, fleet_id FROM collection_run
-      WHERE source IN ('uber', 'bolt', 'yango', 'hotel') AND fleet_id IS NOT NULL
-        AND status IN ('ok', 'partial') AND finished_at >= $2 AND window_end >= $1::date
-      GROUP BY 1, 2`, [day, since.toISOString()]);
+      WHERE source = ANY($3::text[]) AND fleet_id IS NOT NULL
+        AND status IN ('ok', 'partial') AND finished_at >= $2
+        AND window_start <= $1::date AND window_end >= $1::date
+      GROUP BY 1, 2`, [day, since.toISOString(), BOOKING_SOURCES]);
   return new Set(rows.map((r) => `${r.source}:${r.fleet_id}`));
 }
 
@@ -454,9 +468,9 @@ async function judgeTrip(q, s, { pb, dual, now }) {
   let used = [];
   if (!hold) {
     used = (await q(
-      `SELECT DISTINCT platform FROM trip WHERE plate = $1 AND fleet_id = $2
+      `SELECT DISTINCT platform FROM trip WHERE plate = $1 AND fleet_id = $2 AND platform = ANY($4::text[])
           AND requested_at >= $3::timestamptz - interval '14 days' AND requested_at < $3::timestamptz`,
-      [s.plate, s.fleet_id, end.toISOString()])).map((u) => u.platform);
+      [s.plate, s.fleet_id, end.toISOString(), BOOKING_SOURCES])).map((u) => u.platform);
     const collected = await collectedPairs(q, day, end);
     if (used.some((u) => !collected.has(`${u}:${s.fleet_id}`))) hold = 'booking_channel_down';
   }
@@ -595,9 +609,9 @@ async function recheckChannelDown({ q, now, send, pb, dual }) {
        one to run for each of them every half hour. */
     const end0 = new Date(m.trip_end);
     const used0 = (await q(
-      `SELECT DISTINCT platform FROM trip WHERE plate = $1 AND fleet_id = $2
+      `SELECT DISTINCT platform FROM trip WHERE plate = $1 AND fleet_id = $2 AND platform = ANY($4::text[])
           AND requested_at >= $3::timestamptz - interval '14 days' AND requested_at < $3::timestamptz`,
-      [m.plate, m.fleet_id, end0.toISOString()])).map((u) => u.platform);
+      [m.plate, m.fleet_id, end0.toISOString(), BOOKING_SOURCES])).map((u) => u.platform);
     const collected0 = await collectedPairs(q, dubaiDay(new Date(m.trip_start)), end0);
     if (used0.some((u) => !collected0.has(`${u}:${m.fleet_id}`))) continue;
     res.rechecked += 1;
@@ -611,12 +625,17 @@ async function recheckChannelDown({ q, now, send, pb, dual }) {
     }
     const d = await judgeTrip(q, s, { pb, dual, now });
     if (d.hold === 'booking_channel_down') continue;
-    /* Judged again since every channel it depends on delivered the day? */
+    /* Judged again since every channel it depends on delivered the day? The
+       reconcile after a run re-judges that run's window and nothing else, so
+       the runs that count are the ones whose window covers the journey's
+       day; a later half-hourly run over the last 3 days says nothing about a
+       journey 5 days old, and counting it would hold that journey for ever. */
     const pairs = d.used.map((u) => `${u}:${s.fleet_id}`);
     const [{ last }] = pairs.length ? await q(
       `SELECT max(finished_at) AS last FROM collection_run
         WHERE source || ':' || fleet_id = ANY($1::text[]) AND status IN ('ok', 'partial')
-          AND window_end >= $2::date AND finished_at >= $3`, [pairs, d.day, d.end.toISOString()]) : [{ last: null }];
+          AND window_start <= $2::date AND window_end >= $2::date AND finished_at >= $3`,
+      [pairs, d.day, d.end.toISOString()]) : [{ last: null }];
     if (last && !(new Date(s.ingested_at) > new Date(last))) continue;
     const text = d.from_ && d.to_ ? tripText(d.from_, d.to_, d.km, d.day) : null;
     if (d.hold) {

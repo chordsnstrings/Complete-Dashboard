@@ -132,8 +132,8 @@ await T('z1', { driver: 'u-z', at: '2026-09-27T11:00:00Z', price: 10, cash: 11 }
 await T('z2', { driver: 'name:test driver z', platform: 'hotel', at: '2026-09-27T13:00:00Z', price: 60 });  // hotel by name
 await T('v1', { driver: 'y-v', platform: 'yango', at: '2026-09-27T14:00:00Z', price: null });  // only cash, no amount
 const run = (o) => q(`INSERT INTO collection_run (source, fleet_id, mode, window_start, window_end, started_at, finished_at, status, rows_written)
-                      VALUES ($1, $2, $3, '2026-08-28', $4, $5::timestamptz - interval '10 minutes', $5::timestamptz, $6, 10)`,
-  [o.source, o.fleet || 'ecosine', o.mode || 'incremental', o.to || '2026-09-27', o.at, o.status || 'ok']);
+                      VALUES ($1, $2, $3, $7::date, $4, $5::timestamptz - interval '10 minutes', $5::timestamptz, $6, 10)`,
+  [o.source, o.fleet || 'ecosine', o.mode || 'incremental', o.to || '2026-09-27', o.at, o.status || 'ok', o.from || '2026-08-28']);
 await run({ source: 'yango', at: '2026-09-27T21:40:00Z' });
 await run({ source: 'hotel', at: '2026-09-27T21:45:00Z' });
 /* Bolt ran for Ecosine and failed (as it did on production that night). */
@@ -250,6 +250,13 @@ await uberRan('2026-09-28T07:40:00Z');
 
 await seg({ plate: 'L1', from: '2026-09-28T02:00:00Z', to: '2026-09-28T02:40:00Z' });
 await bracket('L1', 'u-a', '2026-09-28T02:00:00Z', '2026-09-28T02:40:00Z');
+/* The tracker's own journey, filed in `trip` under platform 'fms' as
+   production files 241,769 of them: not a booking channel, and never
+   "collected". Counting it as one held every FMS car as booking_channel_down.
+   REVERSION (run 2026-10-01): read the car's channels from every platform
+   again -> 68 passed, 2 FAILED — L1 is held as booking_channel_down and never
+   texted. */
+await T('L1-fms', { platform: 'fms', driver: null, plate: 'L1', at: '2026-09-27T09:00:00Z', pay: null });
 await seg({ plate: 'L2', from: '2026-09-28T03:00:00Z', to: '2026-09-28T03:10:00Z', km: 1.2 });
 await bracket('L2', 'u-d', '2026-09-28T03:00:00Z', '2026-09-28T03:10:00Z');
 await seg({ plate: 'L3', from: '2026-09-28T01:00:00Z', to: '2026-09-28T01:30:00Z' });                 // nobody on the car: unknown
@@ -406,6 +413,30 @@ check('…and one the new Bolt data explains is not texted, and says why', l16.s
 n4 = sent.length;
 r = await tripRegisterRun({ q, now: new Date('2026-09-29T05:30:00Z'), send, cfg: {} });
 check('…and nothing is texted twice', sent.length === n4);
+
+/* A journey five days back, held while Bolt was down. Only the nightly
+   30-day catch-up fetches — and re-judges — that day; the half-hourly run
+   covers the last 3 days. A later half-hourly run must not count as "the
+   data since which it has to be judged again", or it never is.
+   REVERSION (run 2026-10-01): count any run whose window merely reaches the
+   day (window_end only) -> 70 passed, 1 FAILED (this check) — held for good. */
+await seg({ plate: 'L17', from: '2026-09-24T02:00:00Z', to: '2026-09-24T02:40:00Z' });
+await bracket('L17', 'u-b', '2026-09-24T02:00:00Z', '2026-09-24T02:40:00Z');
+await T('L17-bolt', { driver: 'b-c', platform: 'bolt', plate: 'L17', at: '2026-09-20T10:00:00Z', pay: 'cash', price: 12 });
+await q(`INSERT INTO sms_outbox (kind, dedupe_key, fleet_id, status, hold_reason, plate, trip_start, trip_end, business_day, detail)
+         VALUES ('trip_register', 'trip:L17:2026-09-24T02:00:00.000Z', 'ecosine', 'held', 'booking_channel_down', 'L17',
+                 '2026-09-24T02:00:00Z', '2026-09-24T02:40:00Z', '2026-09-24', '{}'::jsonb)`);
+await run({ source: 'bolt', mode: 'catchup', from: '2026-08-30', to: '2026-09-29', at: '2026-09-29T21:20:00Z' });
+await q(`UPDATE occupancy_segment SET ingested_at = '2026-09-29T21:25:00Z' WHERE plate = 'L17'`);   // its reconcile
+await run({ source: 'bolt', from: '2026-09-26', to: '2026-09-30', at: '2026-09-29T21:31:00Z' });
+await run({ source: 'uber', from: '2026-09-26', to: '2026-09-30', at: '2026-09-29T21:31:00Z' });
+n4 = sent.length;
+r = await tripRegisterRun({ q, now: new Date('2026-09-30T05:00:00Z'), send, cfg: {} });
+const [l17] = await q(`SELECT status, hold_reason, person_id FROM sms_outbox WHERE plate = 'L17'`);
+check('a journey 5 days back is released once the catch-up that covers its day has re-judged it — later 3-day runs do not hold it',
+  l17.status === 'sent' && sent.length === n4 + 1 && sent[n4].to === '971502222222'
+  && sent[n4].text === 'Please Register your trip on 24 Sep from Al Garhoud to Deira - 12 km with your supervisor - ADMIN.',
+  JSON.stringify([l17, sent.slice(n4), r.rechecked, r.released]));
 
 /* ── 4. the Messages page's two answers ─────────────────────────────────── */
 console.log('\n4. what the page is told');
