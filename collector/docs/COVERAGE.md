@@ -8075,3 +8075,6 @@ and daily-cap checks.
   whether the gateway took the 11 — a released text was not counted, and a
   pass that only re-checked or polled delivery reports wrote no line — so the
   re-check now reports `late_sent` / `late_failed` and those passes log.
+  The 12:00Z delivery poll then checked 11 texts — it reads only rows the
+  gateway accepted (status sent, with a gateway message id) — and had 5
+  delivery reports back: the 11 drivers' texts went out.
