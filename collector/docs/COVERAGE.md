@@ -7876,6 +7876,12 @@ change so we should be able to set it up in admin panel as well."
   per day, retried each quarter hour to 09:45. By hand, to one address,
   recounted: `node src/index.js low-trips [YYYY-MM-DD] address`. Logged as
   counts only (min, active, below, sent, failed), never a name.
+- **The first run, 2026-10-01 (for 30 September):** minimum 10, 120 active
+  drivers, **84 under it**, sent to all four. That is the fleet as it is, not a
+  fault: August 2026 was 12,340 completed trips by 113 drivers — 109.2 a driver
+  for the month, about three and a half a day — and the busiest driver that
+  month averaged about eight a day (247 trips). At 10 the list is most of the
+  fleet; the Owner sets the minimum on the Access page.
 
 ## The monthly report email — built 2026-09-30
 
