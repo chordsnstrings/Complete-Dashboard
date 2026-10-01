@@ -7981,3 +7981,11 @@ a quarter below August 2025's in a year where fares moved a few percent. So:
   IRSHAD MUHAMMAD", "Soaieed Alom Ali" / "SOAIEED ALOM MIHIN JINNAT ALI".
   Recorded, not merged: who is one person is the hand-reviewed register's
   question (api/identity_map.js), not this email's.
+- **September's first scheduled try (2026-10-01 10:05 Dubai) waited**, as
+  designed, and a waiting run logs nothing — measured from the API instead:
+  September's fares were 99.9% priced (21,610 of 21,621), so the hold was the
+  other test, a platform that had not delivered the last day: Bolt · Ecosine,
+  whose every run since 2026-09-28 fails on the portal's
+  `REFRESH_TOKEN_INVALID` (and the Fleet Integration client is not entitled to
+  that company). It sends the hour Bolt Ecosine delivers again, or on the 3rd
+  at 10:00 Dubai saying Bolt · Ecosine is short.
