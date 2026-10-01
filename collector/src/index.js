@@ -31,7 +31,10 @@ const smsJob = (name, fn) => () => withPinnedSettings(async () => {
   const cfg = await accessConfig(pool, { fresh: true });
   const r = await fn(cfg);
   const { decisions, ...counts } = r || {};
-  if (r && (r.sent || r.held || r.queued || r.waiting || r.gaveUp || r.due)) log.info('sms', name, counts);
+  /* A pass that only re-checked, named or polled delivery reports logged
+     nothing, so a late text or a delivery report could not be seen. */
+  if (r && (r.sent || r.held || r.queued || r.waiting || r.gaveUp || r.due
+    || r.rechecked || r.named || r.checked)) log.info('sms', name, counts);
 }).catch((e) => log.error('sms', name, { err: String(e?.message || e).slice(0, 200) }));
 
 const cmd = process.argv[2] || 'schedule';

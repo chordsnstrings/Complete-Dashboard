@@ -8069,3 +8069,9 @@ and daily-cap checks.
   window covers it. The journeys held this way in the last 7 days go through
   the re-check: each is judged again on every rule, and a driver is texted
   — naming the day — only if it still passes all of them.
+  The first pass on production after it (11:42Z, 2026-10-01): 16 re-checked,
+  11 released and texted, 4 explained by a booking the new data held
+  (no_longer_unauthorized), 1 still waiting. That pass's log could not say
+  whether the gateway took the 11 — a released text was not counted, and a
+  pass that only re-checked or polled delivery reports wrote no line — so the
+  re-check now reports `late_sent` / `late_failed` and those passes log.

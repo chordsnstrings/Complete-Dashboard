@@ -407,7 +407,7 @@ const [l16] = await q(`SELECT status, hold_reason FROM sms_outbox WHERE plate = 
 check('Bolt delivered and the journey is still unexplained: the driver is texted, the day named',
   l8.status === 'sent' && late.length === 1 && late[0].to === '971501111111'
   && late[0].text === 'Please Register your trip on 28 Sep from Al Garhoud to Deira - 12 km with your supervisor - ADMIN.'
-  && r.released === 1, JSON.stringify([l8, late, r.released]));
+  && r.released === 1 && r.late_sent === 1 && r.late_failed === 0, JSON.stringify([l8, late, r.released, r.late_sent]));
 check('…and one the new Bolt data explains is not texted, and says why', l16.status === 'held' && l16.hold_reason === 'no_longer_unauthorized'
   && r.explained === 1, JSON.stringify(l16));
 n4 = sent.length;

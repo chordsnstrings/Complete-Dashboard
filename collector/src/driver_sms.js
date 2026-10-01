@@ -598,7 +598,9 @@ async function nameHeldRows({ q, now, pb, dual }) {
    no_longer_unauthorized, the reason the 07:00 re-read already uses. */
 export const RECHECK_DAYS = 7;
 async function recheckChannelDown({ q, now, send, pb, dual }) {
-  const res = { rechecked: 0, released: 0, explained: 0 };
+  /* late_sent / late_failed: what the gateway said to each released text —
+     "released" alone does not say a driver was reached. */
+  const res = { rechecked: 0, released: 0, explained: 0, late_sent: 0, late_failed: 0 };
   const held = await q(
     `SELECT id, plate, fleet_id, trip_start, trip_end FROM sms_outbox
       WHERE kind = 'trip_register' AND status = 'held' AND hold_reason = 'booking_channel_down'
@@ -653,7 +655,8 @@ async function recheckChannelDown({ q, now, send, pb, dual }) {
     if (!claim) continue;
     res.released += 1;
     if (d.wait) continue;
-    await deliver(q, m.id, { to: d.ph.phone, text, ref: `fm-trip-${m.id}`, send });
+    if (await deliver(q, m.id, { to: d.ph.phone, text, ref: `fm-trip-${m.id}`, send })) res.late_sent += 1;
+    else res.late_failed += 1;
   }
   return res;
 }
