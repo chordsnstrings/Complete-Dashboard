@@ -83,6 +83,9 @@ const num = (v) => (v == null ? null : Number(v));
 export const FARE_COVERAGE_MIN = 95;
 /* The month is complete enough to send when the fares are this priced… */
 export const READY_COVERAGE = 99;
+/* A vehicle's or driver's change is a percentage only against a month with
+   at least this many of its trips. */
+export const MIN_BASE_TRIPS = 20;
 
 /* ── the calendar ─────────────────────────────────────────────────────────── */
 export const shiftMonth = (m, n) => {
@@ -185,9 +188,13 @@ export function compare(key, cur, base, { now = new Date() } = {}) {
       const a = cur.earned_basis; const b = base.earned_basis;
       const diff = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()
         .find((pl) => a[pl] && b[pl] && a[pl] !== b[pl]);
+      /* `hide`: the other month's figure is not this row's measure at all —
+         August 2025's "earned" is its FARES — so it is not printed under
+         this row's name (the test email of 2026-09-30 showed 670,950.69 of
+         fares beside the words "after platform commission"). */
       if (diff) {
-        return on(`${other} counts ${PLATFORM[diff] || diff} on ${BASIS_WORD[b[diff]] || b[diff]}, `
-          + `${monthName(cur.month)} on ${BASIS_WORD[a[diff]] || a[diff]} — not the same measure`);
+        return { ...on(`${other} counts ${PLATFORM[diff] || diff} on ${BASIS_WORD[b[diff]] || b[diff]}, `
+          + `${monthName(cur.month)} on ${BASIS_WORD[a[diff]] || a[diff]} — not the same measure`), hide: true };
       }
       return { pct: pct(cur.earned, base.earned), why: null };
     }
@@ -255,7 +262,7 @@ async function rowsBy(q, what, m, prev, ly) {
 }
 
 /** Everything the email says about month `m`. */
-export async function monthFacts(q, m, { now = new Date() } = {}) {
+export async function monthFacts(q, m, { now = new Date(), minBaseTrips = MIN_BASE_TRIPS } = {}) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(m))) throw new Error(`month must be YYYY-MM, not ${m}`);
   const prev = shiftMonth(m, -1);
   const ly = shiftMonth(m, -12);
@@ -267,16 +274,21 @@ export async function monthFacts(q, m, { now = new Date() } = {}) {
   }
   const table = (scope) => METRICS.map(([key, label, kind]) => {
     const cur = at[m][scope]; const p = at[prev][scope]; const y = at[ly][scope];
-    return { key, label, kind, cur: cur[key], prev: p[key], ly: y[key],
-      vs_prev: compare(key, cur, p, { now }), vs_ly: compare(key, cur, y, { now }) };
+    const vsPrev = compare(key, cur, p, { now }); const vsLy = compare(key, cur, y, { now });
+    return { key, label, kind, cur: cur[key], prev: vsPrev.hide ? null : p[key], ly: vsLy.hide ? null : y[key],
+      vs_prev: vsPrev, vs_ly: vsLy };
   });
   const [vehicles, drivers] = [await rowsBy(q, 'vehicle', m, prev, ly), await rowsBy(q, 'driver', m, prev, ly)];
   /* A row's change is shown only where the whole month's fares compare —
      one vehicle's percentage against a month that is half unpriced is noise. */
   const okPrev = faresComparable(at[m].all, at[prev].all);
   const okLy = faresComparable(at[m].all, at[ly].all);
+  /* And only against a month the vehicle or driver actually worked: the test
+     email printed +56,761.2% for a car with one trip a year before. Under
+     MIN_BASE_TRIPS the earlier month's trips are shown instead. */
   const withChange = (r) => ({ ...r,
-    vs_prev: okPrev ? pct(r.fares, r.fares_prev) : null, vs_ly: okLy ? pct(r.fares, r.fares_ly) : null });
+    vs_prev: okPrev && r.trips_prev >= minBaseTrips ? pct(r.fares, r.fares_prev) : null,
+    vs_ly: okLy && r.trips_ly >= minBaseTrips ? pct(r.fares, r.fares_ly) : null });
   const lastDay = monthEnd(m);
   const collection = await channelsCollected(q, lastDay);
   return {
@@ -379,40 +391,56 @@ export async function analyseMonth(f, { http = realHttp } = {}) {
   const fallback = (why, outcome) => ({ outcome, why, model: m.model, summary: ruleSummary(f), points: [], by: 'rule' });
   if (!m.apiKey) return fallback('no model key is set (REPORT_MODEL_API_KEY)', 'no_model');
   const input = modelInput(f);
-  let raw; let finish = null;
-  try {
-    const { status, data } = await http(`${m.baseUrl}/chat/completions`, {
-      method: 'POST', timeoutMs: 120000, retries: 1,
-      headers: { authorization: `Bearer ${m.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: m.model, max_tokens: 3000, temperature: 0.2, thinking: { type: 'disabled' },
-        messages: [{ role: 'system', content: ANALYST }, { role: 'user', content: JSON.stringify(input) }] }),
-    });
-    if (status >= 400) throw new Error(`HTTP ${status}: ${JSON.stringify(data).slice(0, 160)}`);
-    raw = String(data?.choices?.[0]?.message?.content || '').trim();
-    finish = data?.choices?.[0]?.finish_reason || null;
-  } catch (e) {
-    return fallback(String(e.message || e).slice(0, 200), 'failed');
-  }
-  const parse = (text) => { try { return JSON.parse(text); } catch { return undefined; } };
-  const bare = raw.replace(/^```(?:json)?\s*|\s*```$/g, '');
-  let out = parse(bare);
-  if (out === undefined && bare.indexOf('{') >= 0) out = parse(bare.slice(bare.indexOf('{'), bare.lastIndexOf('}') + 1));
-  if (!out || typeof out !== 'object') {
-    log.warn(SRC, 'analysis dropped: the reply was not the agreed JSON', { finish, chars: raw.length });
-    return fallback(finish === 'length' ? 'the model’s answer was cut off before it finished'
-      : 'the model did not answer in the agreed form', 'dropped');
-  }
+  /* ONE SECOND CHANCE, TOLD EXACTLY WHAT WAS WRONG.
+     ─────────────────────────────────────────────────────────────────────
+     The first real send (the August 2026 test, 2026-09-30T13:51Z) dropped
+     GLM 5.2's summary for writing 24.8 and 14000 — a percentage it worked
+     out and a figure it rounded — and the 07:00 daily report the next
+     morning dropped its analysis for a 3.4 it computed. The prompt already
+     forbids both. So a reply that strays is answered once, in the same
+     conversation, with the numbers that were not in the data, and asked to
+     rewrite with only the given ones; the guard then holds the rewrite to
+     the same rule. A second stray, and the figures' own summary stands. */
+  const messages = [{ role: 'system', content: ANALYST }, { role: 'user', content: JSON.stringify(input) }];
   const allowed = allowedNumbers(input, f);
   const clean = (s, n) => (typeof s === 'string' ? s.replace(/\s+/g, ' ').trim().slice(0, n) : '');
-  const summary = clean(out.summary, 1200);
-  const points = (Array.isArray(out.points) ? out.points : []).slice(0, 5).map((p) => clean(p, 400)).filter(Boolean);
-  const stray = [summary, ...points].flatMap((s) => guardText(s, allowed).stray);
-  if (!summary) return fallback('the model wrote no summary', 'dropped');
-  if (stray.length) {
-    log.warn(SRC, 'analysis dropped: it stated numbers it was not given', { stray: stray.slice(0, 5) });
-    return fallback(`it stated ${[...new Set(stray)].slice(0, 3).join(', ')}, which ${stray.length === 1 ? 'is' : 'are'} not in the figures`, 'dropped');
+  const parse = (text) => { try { return JSON.parse(text); } catch { return undefined; } };
+  let last = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    let raw; let finish = null;
+    try {
+      const { status, data } = await http(`${m.baseUrl}/chat/completions`, {
+        method: 'POST', timeoutMs: 120000, retries: 1,
+        headers: { authorization: `Bearer ${m.apiKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: m.model, max_tokens: 3000, temperature: 0.2, thinking: { type: 'disabled' }, messages }),
+      });
+      if (status >= 400) throw new Error(`HTTP ${status}: ${JSON.stringify(data).slice(0, 160)}`);
+      raw = String(data?.choices?.[0]?.message?.content || '').trim();
+      finish = data?.choices?.[0]?.finish_reason || null;
+    } catch (e) {
+      return fallback(String(e.message || e).slice(0, 200), 'failed');
+    }
+    const bare = raw.replace(/^```(?:json)?\s*|\s*```$/g, '');
+    let out = parse(bare);
+    if (out === undefined && bare.indexOf('{') >= 0) out = parse(bare.slice(bare.indexOf('{'), bare.lastIndexOf('}') + 1));
+    if (!out || typeof out !== 'object') {
+      log.warn(SRC, 'analysis dropped: the reply was not the agreed JSON', { finish, chars: raw.length, attempt });
+      return fallback(finish === 'length' ? 'the model\u2019s answer was cut off before it finished'
+        : 'the model did not answer in the agreed form', 'dropped');
+    }
+    const summary = clean(out.summary, 1200);
+    const points = (Array.isArray(out.points) ? out.points : []).slice(0, 5).map((p) => clean(p, 400)).filter(Boolean);
+    if (!summary) return fallback('the model wrote no summary', 'dropped');
+    const stray = [...new Set([summary, ...points].flatMap((x) => guardText(x, allowed).stray))];
+    if (!stray.length) return { outcome: 'ok', why: null, model: m.model, summary, points, by: 'model', attempts: attempt };
+    log.warn(SRC, 'analysis strayed: it stated numbers it was not given', { stray: stray.slice(0, 5), attempt });
+    last = stray;
+    messages.push({ role: 'assistant', content: raw },
+      { role: 'user', content: `These numbers in your reply are not in the data: ${stray.slice(0, 10).join(', ')}. `
+        + 'Rewrite the same JSON using only numbers exactly as they appear in the data — no rounding, no totals, '
+        + 'no percentages of your own. Leave out anything you cannot say with the given numbers.' });
   }
-  return { outcome: 'ok', why: null, model: m.model, summary, points, by: 'model' };
+  return fallback(`it stated ${last.slice(0, 3).join(', ')}, which ${last.length === 1 ? 'is' : 'are'} not in the figures, twice`, 'dropped');
 }
 
 /* ── the email ────────────────────────────────────────────────────────────── */
@@ -448,15 +476,18 @@ export function renderMonthlyEmail(f, note, { dashboard = null } = {}) {
 </td></tr>`;
   const listTable = (rows, cap, first) => {
     const shown = rows.slice(0, cap);
-    const pctCell = (v, ok) => (v == null ? `<span class="n">${ok ? 'new' : '—'}</span>`
-      : `<span class="${v < 0 ? 'neg' : v > 0 ? 'pos' : 'n'}">${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v)}%</span>`);
+    const pctCell = (v, ok, baseTrips) => (v != null
+      ? `<span class="${v < 0 ? 'neg' : v > 0 ? 'pos' : 'n'}">${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v)}%</span>`
+      : !ok ? '<span class="n">—</span>'
+        : !baseTrips ? '<span class="n">new</span>'
+          : `<span class="n">${int(baseTrips)} trip${baseTrips === 1 ? '' : 's'}</span>`);
     return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
       <tr><th align="left" class="th">${first}</th><th align="right" class="th r">Trips</th><th align="right" class="th r">Fares AED</th>
       <th align="right" class="th r">vs ${esc(shortName(f.prev))}</th><th align="right" class="th r">vs ${esc(shortName(f.ly))}</th></tr>
       ${shown.map((r) => `<tr><td class="td">${esc(r.label)}<span class="n"> · ${esc(FLEET[r.fleet] || r.fleet || '')}</span></td>`
         + `<td class="td r">${int(r.trips)}</td><td class="td r b">${fmt(r.fares, 'aed')}</td>`
-        + `<td class="td r">${pctCell(r.vs_prev, f.rows_comparable.prev && !r.trips_prev)}</td>`
-        + `<td class="td r">${pctCell(r.vs_ly, f.rows_comparable.ly && !r.trips_ly)}</td></tr>`).join('')}
+        + `<td class="td r">${pctCell(r.vs_prev, f.rows_comparable.prev, r.trips_prev)}</td>`
+        + `<td class="td r">${pctCell(r.vs_ly, f.rows_comparable.ly, r.trips_ly)}</td></tr>`).join('')}
     </table>${rows.length > cap ? `<div class="note">And ${int(rows.length - cap)} more on the dashboard.</div>` : ''}`;
   };
   const totalTable = metricTable(f.total);
@@ -499,7 +530,7 @@ export function renderMonthlyEmail(f, note, { dashboard = null } = {}) {
 ${section('Both companies', 'n/c: the two months do not measure the same thing — the reason is under the tables.', totalTable)}
 ${section('By company', null, companyTables)}
 ${reasons.length ? `<tr><td class="pad" style="padding:12px 36px 0 36px"><div class="note">${[...new Set(reasons)].map(esc).join('<br>')}</div></td></tr>` : ''}
-${section('Vehicles', `Every vehicle with a completed trip in ${esc(monthName(f.month))}, by fares. “new” had no trip in the month compared.`, listTable(f.vehicles, MAX_ROWS.vehicles, 'Vehicle'))}
+${section('Vehicles', `Every vehicle with a completed trip in ${esc(monthName(f.month))}, by fares. A change is shown against a month with at least ${MIN_BASE_TRIPS} of its trips; otherwise that month’s trips, or “new” for none.`, listTable(f.vehicles, MAX_ROWS.vehicles, 'Vehicle'))}
 ${section('Drivers', `Every driver with a completed trip in ${esc(monthName(f.month))}, by fares; one person across platforms is one row.`, listTable(f.drivers, MAX_ROWS.drivers, 'Driver'))}
 <tr><td class="pad" style="padding:28px 36px 36px 36px;font:400 12px/1.6 ${SANS};color:${T.grey}">
   Fares are what riders paid on priced trips, before the platforms’ commission; they are the only money every month here carries, so every year-on-year comparison is made on them.

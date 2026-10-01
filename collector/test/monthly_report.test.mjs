@@ -146,6 +146,11 @@ check('earned against July: same bases, +56.8% (580 vs 370)', earned.prev === 37
 check('earned against a year ago is refused, and says why: Uber on fares then, on its statement now',
   earned.vs_ly.pct === null && /August 2025 counts Uber on fares \(before commission\), August 2026 on its statement \(after commission\) — not the same measure/.test(earned.vs_ly.why || ''),
   j(earned.vs_ly));
+/* REVERSION (run 2026-10-01): drop `hide` from the basis refusal -> 45
+   passed, 1 FAILED (this check: August 2025's 660 of fares printed under
+   "after platform commission"). */
+check('…and August 2025’s figure, which is its fares, is not printed under the after-commission row',
+  earned.ly === null && row(f.total, 'fares').ly === 660, j([earned.ly, row(f.total, 'fares').ly]));
 const bank = row(f.total, 'bank');
 check('the bank against July: +72.7% (380 vs 220)', bank.vs_prev.pct === 72.7, j(bank.vs_prev));
 check('the bank against a year ago: no payout collected, and why',
@@ -165,7 +170,13 @@ console.log('\n3. vehicles and drivers');
 check('every vehicle with a trip this month, by fares: E1, G1, E2 — not E3, which drove only in July',
   j(f.vehicles.map((v) => v.label)) === '["E1","G1","E2"]', j(f.vehicles.map((v) => v.label)));
 const e1 = f.vehicles[0];
-check('E1: 4 trips, 400 — +100% on July (200), −20% on August 2025 (500)', e1.trips === 4 && e1.fares === 400 && e1.vs_prev === 100 && e1.vs_ly === -20, j(e1));
+/* REVERSION (run 2026-10-01): drop the minBaseTrips gate -> 45 passed,
+   1 FAILED (the next check: E1 prints +100% against July's 2 trips). */
+check('E1 against months of 2 and 5 trips: no percentage — under 20 trips is not a base',
+  e1.trips === 4 && e1.fares === 400 && e1.vs_prev === null && e1.vs_ly === null && e1.trips_prev === 2 && e1.trips_ly === 5, j(e1));
+const f1 = await monthFacts(q, '2026-08', { now: NOW, minBaseTrips: 1 });
+check('…and where the base is enough: +100% on July (200), −20% on August 2025 (500)',
+  f1.vehicles[0].vs_prev === 100 && f1.vehicles[0].vs_ly === -20, j(f1.vehicles[0]));
 const e2 = f.vehicles.find((v) => v.label === 'E2');
 check('E2 had no trip a year ago: no percentage, marked new', e2.vs_ly === null && e2.trips_ly === 0, j(e2));
 check('drivers by fares, with their company', j(f.drivers.map((d) => [d.label, d.fleet])) === '[["Test Driver A","ecosine"],["Test Driver C","egari"],["Test Driver B","ecosine"]]',
@@ -187,8 +198,24 @@ const good = j({ summary: 'Fares rose 32.1% on July to AED 740 across 9 complete
 let note = await analyseMonth(f, { http: modelSays(good) });
 check('a summary using only given numbers is kept', note.outcome === 'ok' && note.by === 'model' && note.points.length === 2, j(note));
 note = await analyseMonth(f, { http: modelSays(j({ summary: 'Fares rose 41% on July.', points: [] })) });
-check('a summary with a number it was not given is dropped, the figures’ own stands in, and the email says why',
-  note.outcome === 'dropped' && note.by === 'rule' && /41/.test(note.why) && /Riders paid AED 740.00 in fares in August 2026/.test(note.summary), j(note));
+check('a summary with a number it was not given, twice, is dropped; the figures’ own stands in, and the email says why',
+  note.outcome === 'dropped' && note.by === 'rule' && /41/.test(note.why) && /twice/.test(note.why)
+  && /Riders paid AED 740.00 in fares in August 2026/.test(note.summary), j(note));
+/* The second chance: told which numbers were not in the data, the model
+   rewrites; a clean rewrite is kept, a second stray is not.
+   REVERSION (run 2026-10-01): return on the first stray (no second ask) ->
+   45 passed, 1 FAILED ("a reply that strays once is asked again…"). */
+let turn = 0;
+const strayThenGood = async (url, opt) => {
+  turn += 1;
+  const body = JSON.parse(opt.body);
+  const told = body.messages.at(-1).content;
+  return { status: 200, data: { choices: [{ message: { content: turn === 1 ? j({ summary: 'Fares rose 41% on July.', points: [] })
+    : (/not in the data: 41/.test(told) ? good : 'unexpected') }, finish_reason: 'stop' }] } };
+};
+note = await analyseMonth(f, { http: strayThenGood });
+check('a reply that strays once is asked again, told the number, and the clean rewrite is kept',
+  note.outcome === 'ok' && note.attempts === 2 && turn === 2 && /Fares rose 32.1%/.test(note.summary), j([note, turn]));
 note = await analyseMonth(f, { http: modelSays('not json at all') });
 check('an answer not in the agreed form is dropped', note.outcome === 'dropped' && /agreed form/.test(note.why), j(note));
 check('a percentage written without its sign is still a number it was given (−25% as "25%")',
@@ -240,7 +267,7 @@ r = await monthlyReportRun({ q, http: modelSays(good), month: '2026-08', now: ne
 check('an address added later gets the kept report: one send, the model asked once a month', r.sent === 1 && calls.length === 1, j([r, calls]));
 calls.length = 0;
 r = await monthlyReportRun({ q, http: modelSays(good), month: '2026-07', only: 'tester@example.test', now: NOW });
-check('the one-shot test: one address, composed fresh, sent', r.sent === 1 && calls.length === 2, j([r, calls.length]));
+check('the one-shot test: one address, composed fresh, sent', r.sent === 1 && calls.filter((u) => /resend/.test(u)).length === 1, j([r, calls.length]));
 calls.length = 0;
 r = await monthlyReportRun({ q, http: modelSays(good), month: '2026-07', only: 'tester@example.test', now: NOW });
 check('…and a restart does not send it twice', r.due === 0 && calls.length === 0, j(r));

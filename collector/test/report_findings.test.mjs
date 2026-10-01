@@ -161,6 +161,25 @@ const idleTok = idleF.items[0].plate;
 reply = { summary: 'Bookings fell.', actions: [{ finding: idleF.id, owner: 'Fleet', action: `Put a driver in ${idleTok}, idle 600 days.` }] };
 const a6 = await analyse(facts, r, { http: fake });
 check('an action may use only its own finding\u2019s numbers — not one from another finding', a6.outcome === 'dropped', j(a6.why));
+/* THE SECOND CHANCE (2026-10-01: the 30th's report dropped its analysis
+   over one "3.4" the model worked out). A reply that strays is answered once
+   with what was wrong; a clean rewrite is kept.
+   REVERSION (run 2026-10-01): return on the first stray -> 31 passed,
+   1 FAILED: this check. */
+let turns = 0;
+let toldWhat = '';
+const strayOnce = async (_u, opts) => {
+  turns += 1;
+  const body = JSON.parse(opts.body);
+  toldWhat = body.messages.at(-1).content;
+  const content = turns === 1 ? j({ summary: 'Bookings fell 35.1% to 24.', actions: [] }) : j(okReplyFirst);
+  return { status: 200, data: { choices: [{ message: { content } }] } };
+};
+const okReplyFirst = { summary: 'Bookings fell to 24 against 37 last Monday.',
+  actions: [{ finding: R.id, owner: 'Supervisors', action: `Call ${tokenR}: AED 100 against a usual AED 400.` }] };
+const a9 = await analyse(facts, r, { http: strayOnce });
+check('a reply that strays once is told the number and asked again; the clean rewrite is kept',
+  a9.outcome === 'ok' && turns === 2 && /35\.1/.test(toldWhat) && a9.actions[0].by === 'model', j([a9.outcome, a9.why, turns]));
 reply = 'not json at all';
 const a4 = await analyse(facts, r, { http: fake });
 check('an answer that is not the agreed JSON falls back to the findings', a4.outcome === 'dropped' && a4.actions.length > 0);
