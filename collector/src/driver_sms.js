@@ -64,8 +64,12 @@ export const cashText = (amount, platforms = []) => {
   const list = channelWords(platforms);
   return `Please deposit AED ${aed(amount)} of ${list ? `${list} ` : ''}cash you received yesterday. Talk to your supervisor on WhatsApp.`;
 };
-export const tripText = (from, to, km) =>
-  `Please Register your trip from ${from} to ${to} - ${km} km with your supervisor - ADMIN.`;
+export const tripText = (from, to, km, day = null) =>
+  `Please Register your trip ${day ? `on ${shortDay(day)} ` : ''}from ${from} to ${to} - ${km} km with your supervisor - ADMIN.`;
+/* "29 Sep" — the day of a trip texted late (a re-check, below), so the driver
+   can tell which trip it means. A trip texted the day it ends needs none, and
+   keeps the operator's wording exactly. */
+const shortDay = (day) => new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).replace('Sept', 'Sep');
 
 /* Why a message was held, in words the Messages page prints. */
 export const HOLD_WHY = Object.freeze({
@@ -374,11 +378,99 @@ export const MIN_TRIP_KM = 4;
 
 /** A place name a driver can read: the first part before a comma, starting
  *  with a letter, words and at most a trailing district number ("Al Barsha
- *  1"). "93 D65" and "16 9 St" are street codes, not places. */
+ *  1"). "93 D65" and "16 9 St" are street codes, not places.
+ *
+ *  A BUILDING NUMBER IN FRONT OF A ROAD IS NOT A CODE. Measured 2026-10-01 over
+ *  the 58 unexplained rides of 29 Sep – 1 Oct: 13 were held as "no readable
+ *  place", the largest single reason, and most of the names refused were
+ *  addresses — "33 Sheikh Rashid Rd", "352 Al Rasheed Road", "146 Al Khaleej
+ *  Rd", "308 Damascus Street" — or numbered streets, "30th St", "19 5th
+ *  Street". The building number is dropped and the road kept; an ordinal
+ *  street ("30th St", "5th Street") is a name. What remains refused is what
+ *  was always meant: a bare road code ("93 D65" → "D65") and a number with a
+ *  street ("16 9 St"). */
+const ORDINAL_STREET = /^\d{1,3}(?:st|nd|rd|th) (?:St|Street|Rd|Road|Ave|Avenue)\.?$/i;
 export function readablePlace(area) {
-  const a = String(area || '').split(',')[0].replace(/\s+/g, ' ').trim();
+  let a = String(area || '').split(',')[0].replace(/\s+/g, ' ').trim();
+  const rest = a.replace(/^\d{1,4} (?=\S)/, '');
+  if (rest !== a && (/^[A-Za-z]{2}/.test(rest) || ORDINAL_STREET.test(rest))) a = rest;
   if (a.length < 3 || a.length > 40) return null;
+  if (ORDINAL_STREET.test(a)) return a;
   return /^[A-Za-z][A-Za-z'’ .-]*[A-Za-z.](?: \d{1,2})?$/.test(a) ? a : null;
+}
+
+/* ── one journey, judged ─────────────────────────────────────────────────── */
+/* The segment columns the decision reads, with the attribution beside them —
+   written once for the pass over new journeys and the re-check below. */
+const SEGMENT_SQL = (where) => `
+  SELECT o.source, o.plate, o.fleet_id, o.started_at, o.ended_at, o.distance_km, o.nearest_gap_min,
+         o.verdict, o.ingested_at, ${placeEnds('o')}, ${ATTRIBUTION_COLS}
+    FROM occupancy_segment o
+    ${attributionJoin('o')}
+   WHERE ${occCountsOnce('o')} AND ${where}`;
+
+/** Every check one journey has to pass, in the order a hold is reported.
+ *
+ *  WHO THE EVIDENCE NAMES IS RECORDED WHETHER OR NOT THE MESSAGE GOES.
+ *  ──────────────────────────────────────────────────────────────────────────
+ *  This used to look the driver up only once every other check had passed,
+ *  so a journey held for any reason — under 4 km, a booking 20 minutes away, a
+ *  place with no readable name, the tracker's clock — was filed with no person
+ *  and the Messages page printed "nobody the evidence names" under it. Measured
+ *  2026-10-01 over the 58 unexplained rides of 29 Sep – 1 Oct: the evidence
+ *  named exactly one driver on 51 of them (bracketed 9, last trip 33, sole
+ *  custodian 9), and the page said nobody on every held row. The operator read
+ *  it as "it finds the car but cannot find the driver". So the person is
+ *  resolved whenever the evidence names one, and the candidates are kept by
+ *  name when it names several, and the hold says why the text did not go. */
+async function judgeTrip(q, s, { pb, dual, now }) {
+  const start = new Date(s.started_at); const end = new Date(s.ended_at || s.started_at);
+  const cands = Array.isArray(s.attribution_candidates) ? s.attribution_candidates : [];
+  const from_ = readablePlace(s.start_place?.area);
+  const to_ = readablePlace(s.end_place?.area);
+  const km = Math.round(Number(s.distance_km || 0));
+  const day = dubaiDay(start);
+  const named = s.attribution_candidate_count === 1 && OK_TIERS.has(s.attribution_tier);
+  let person = null;
+  if (named) {
+    const c = cands[0] || {};
+    const [a] = await q(
+      `SELECT driver_id::text AS person FROM driver_platform_id
+        WHERE external_id = $1 AND detached_at IS NULL AND driver_id IS NOT NULL LIMIT 1`, [String(c.id || '')]);
+    person = a?.person || null;
+  }
+  let hold = null;
+  if (!named) hold = 'driver_not_certain';
+  else if (s.clock_skew_min != null) hold = 'clock_skew';
+  else if (!(Number(s.distance_km) >= MIN_TRIP_KM)) hold = 'short';
+  else if (s.nearest_gap_min != null && Math.abs(Number(s.nearest_gap_min)) < 30) hold = 'near_booking';
+  else if (!from_ || !to_) hold = 'places_unreadable';
+  else if (from_.toLowerCase() === to_.toLowerCase()) hold = 'same_place';
+  else if (s.source === 'cabman' && dual.has(s.plate)) hold = 'cabman_dual_tracker';
+
+  /* A booking channel this car used in the last 14 days that did not
+     collect for its fleet after the journey's day: a real booking may be
+     missing, and the journey only looks unexplained. */
+  let used = [];
+  if (!hold) {
+    used = (await q(
+      `SELECT DISTINCT platform FROM trip WHERE plate = $1 AND fleet_id = $2
+          AND requested_at >= $3::timestamptz - interval '14 days' AND requested_at < $3::timestamptz`,
+      [s.plate, s.fleet_id, end.toISOString()])).map((u) => u.platform);
+    const collected = await collectedPairs(q, day, end);
+    if (used.some((u) => !collected.has(`${u}:${s.fleet_id}`))) hold = 'booking_channel_down';
+  }
+  if (!hold && !person) hold = 'driver_not_placed';
+  let ph = {};
+  if (!hold) { ph = phoneFor(pb, person); if (ph.hold) hold = ph.hold; }
+  if (!hold) {
+    const [{ n }] = await q(
+      `SELECT count(*)::int AS n FROM sms_outbox WHERE kind = 'trip_register' AND person_id = $1
+          AND status IN ('sent', 'queued') AND (trip_start AT TIME ZONE 'Asia/Dubai')::date = $2::date`, [Number(person), day]);
+    if (n >= 3) hold = 'daily_cap';
+  }
+  return { start, end, day, km, from_, to_, hold, person, ph, used, wait: !hold && isNight(now),
+    candidates: cands.map((c) => c.name).filter(Boolean).slice(0, 4) };
 }
 
 export async function tripRegisterRun({ q, now = new Date(), send = sendSms, cfg = {}, dry = false, book = null }) {
@@ -387,17 +479,11 @@ export async function tripRegisterRun({ q, now = new Date(), send = sendSms, cfg
   if (!since) return { error: 'no trip_since watermark (schema_v88 not applied)' };
   const from = new Date(Math.max(Date.parse(since.value), now.getTime() - 24 * 3600_000));
   const until = new Date(now.getTime() - 120 * 60_000);
-  if (from >= until) return { candidates: 0 };
-  const segs = await q(
-    `SELECT o.source, o.plate, o.fleet_id, o.started_at, o.ended_at, o.distance_km, o.nearest_gap_min,
-            ${placeEnds('o')}, ${ATTRIBUTION_COLS}
-       FROM occupancy_segment o
-       ${attributionJoin('o')}
-      WHERE o.verdict = 'unauthorized' AND ${occCountsOnce('o')}
-        AND o.ended_at > $1 AND o.ended_at <= $2
-      ORDER BY o.ended_at`, [from.toISOString(), until.toISOString()]);
-  const out = { candidates: segs.length, sent: 0, queued: 0, held: 0, skipped: 0, holds: {}, decisions: [] };
-  if (!segs.length) return out;
+  const out = { candidates: 0, sent: 0, queued: 0, held: 0, skipped: 0, holds: {}, decisions: [],
+    rechecked: 0, released: 0, explained: 0 };
+  const segs = from < until ? await q(`${SEGMENT_SQL(`o.verdict = 'unauthorized' AND o.ended_at > $1 AND o.ended_at <= $2`)}
+      ORDER BY o.ended_at`, [from.toISOString(), until.toISOString()]) : [];
+  out.candidates = segs.length;
 
   /* Cars carrying both trackers: a CABMAN reading on one of them may be
      filed under the wrong plate (docs/COVERAGE.md). */
@@ -418,67 +504,105 @@ export async function tripRegisterRun({ q, now = new Date(), send = sendSms, cfg
       [s.plate, start.toISOString(), end.toISOString()]);
     if (seen) { out.skipped += 1; continue; }
 
-    const cands = Array.isArray(s.attribution_candidates) ? s.attribution_candidates : [];
-    const from_ = readablePlace(s.start_place?.area);
-    const to_ = readablePlace(s.end_place?.area);
-    const km = Math.round(Number(s.distance_km || 0));
-    const day = dubaiDay(start);
-    let hold = null;
-    if (s.attribution_candidate_count !== 1 || !OK_TIERS.has(s.attribution_tier)) hold = 'driver_not_certain';
-    else if (s.clock_skew_min != null) hold = 'clock_skew';
-    else if (!(Number(s.distance_km) >= MIN_TRIP_KM)) hold = 'short';
-    else if (s.nearest_gap_min != null && Math.abs(Number(s.nearest_gap_min)) < 30) hold = 'near_booking';
-    else if (!from_ || !to_) hold = 'places_unreadable';
-    else if (from_.toLowerCase() === to_.toLowerCase()) hold = 'same_place';
-    else if (s.source === 'cabman' && dual.has(s.plate)) hold = 'cabman_dual_tracker';
-
-    /* A booking channel this car used in the last 14 days that did not
-       collect for its fleet after the journey's day: a real booking may be
-       missing, and the journey only looks unexplained. */
-    if (!hold) {
-      const used = await q(
-        `SELECT DISTINCT platform FROM trip WHERE plate = $1 AND fleet_id = $2
-            AND requested_at >= $3::timestamptz - interval '14 days' AND requested_at < $3::timestamptz`,
-        [s.plate, s.fleet_id, end.toISOString()]);
-      const collected = await collectedPairs(q, day, end);
-      if (used.some((u) => !collected.has(`${u.platform}:${s.fleet_id}`))) hold = 'booking_channel_down';
-    }
-    let person = null;
-    if (!hold) {
-      const c = cands[0] || {};
-      const [a] = await q(
-        `SELECT driver_id::text AS person FROM driver_platform_id
-          WHERE external_id = $1 AND detached_at IS NULL AND driver_id IS NOT NULL LIMIT 1`, [String(c.id || '')]);
-      person = a?.person || null;
-      if (!person) hold = 'driver_not_placed';
-    }
-    let ph = {};
-    if (!hold) { ph = phoneFor(pb, person); if (ph.hold) hold = ph.hold; }
-    if (!hold) {
-      const [{ n }] = await q(
-        `SELECT count(*)::int AS n FROM sms_outbox WHERE kind = 'trip_register' AND person_id = $1
-            AND status IN ('sent', 'queued') AND (trip_start AT TIME ZONE 'Asia/Dubai')::date = $2::date`, [Number(person), day]);
-      if (n >= 3) hold = 'daily_cap';
-    }
-    const text = from_ && to_ ? tripText(from_, to_, km) : null;
-    const wait = !hold && isNight(now);
-    out.decisions.push({ plate: s.plate, started_at: s.started_at, tier: s.attribution_tier, hold,
-      person, to: ph.phone ? maskPhone(ph.phone) : null, km, from: from_, to_place: to_, waits_until_7: wait });
-    if (hold) { out.held += 1; out.holds[hold] = (out.holds[hold] || 0) + 1; }
+    const d = await judgeTrip(q, s, { pb, dual, now });
+    const text = d.from_ && d.to_ ? tripText(d.from_, d.to_, d.km) : null;
+    out.decisions.push({ plate: s.plate, started_at: s.started_at, tier: s.attribution_tier, hold: d.hold,
+      person: d.person, to: d.ph.phone ? maskPhone(d.ph.phone) : null, km: d.km, from: d.from_, to_place: d.to_,
+      waits_until_7: d.wait });
+    if (d.hold) { out.held += 1; out.holds[d.hold] = (out.holds[d.hold] || 0) + 1; }
     if (dry) continue;
     const id = await decide(q, {
-      kind: 'trip_register', dedupe_key: `trip:${s.plate}:${start.toISOString()}`,
-      person_id: person ? Number(person) : null, fleet_id: s.fleet_id, destination: ph.phone || null,
-      message_text: text, status: hold ? 'held' : 'queued', hold_reason: hold,
-      not_before: wait ? next7am(now).toISOString() : null,
-      plate: s.plate, trip_start: start.toISOString(), trip_end: end.toISOString(), business_day: day,
-      detail: JSON.stringify({ source: s.source, tier: s.attribution_tier, km, phone_source: ph.source || null }),
+      kind: 'trip_register', dedupe_key: `trip:${s.plate}:${d.start.toISOString()}`,
+      person_id: d.person ? Number(d.person) : null, fleet_id: s.fleet_id, destination: d.ph.phone || null,
+      message_text: text, status: d.hold ? 'held' : 'queued', hold_reason: d.hold,
+      not_before: d.wait ? next7am(now).toISOString() : null,
+      plate: s.plate, trip_start: d.start.toISOString(), trip_end: d.end.toISOString(), business_day: d.day,
+      detail: JSON.stringify({ source: s.source, tier: s.attribution_tier, km: d.km, phone_source: d.ph.source || null,
+        ...(d.person ? {} : { candidates: d.candidates }) }),
     });
-    if (!id || hold) continue;
-    if (wait) { out.queued += 1; continue; }
-    if (await deliver(q, id, { to: ph.phone, text, ref: `fm-trip-${id}`, send })) out.sent += 1;
+    if (!id || d.hold) continue;
+    if (d.wait) { out.queued += 1; continue; }
+    if (await deliver(q, id, { to: d.ph.phone, text, ref: `fm-trip-${id}`, send })) out.sent += 1;
   }
+  if (!dry) Object.assign(out, await recheckChannelDown({ q, now, send, pb, dual, out }));
   return out;
+}
+
+/* ── a channel that did not collect, collecting again ────────────────────── */
+/* The operator, 2026-10-01: "if and when bolt collects, and the trip is
+   verified as unauthorized do let those drivers know." Bolt for Ecosine did
+   not collect from 2026-09-28 until its portal login was replaced on 1 Oct,
+   and every journey on a car that works Bolt was held as
+   booking_channel_down — rightly, since a Bolt booking nobody had fetched
+   may explain it — and then never looked at again.
+
+   Each pass now looks again at those holds, for RECHECK_DAYS after the
+   journey. One is released only when BOTH are true:
+     · every channel the car used has since collected that day (the same test
+       that held it), and
+     · the journey has been JUDGED AGAIN since then — its segment was written
+       by a reconcile pass after the channel's run finished (the reconcile
+       deletes and re-inserts its window, so ingested_at is when it last
+       judged). A segment still carrying the verdict from before the data
+       arrived could be one the new Bolt booking explains.
+   Still unexplained, and every other check still passed: texted, naming the
+   day, since it is late. Explained by the new data: held as
+   no_longer_unauthorized, the reason the 07:00 re-read already uses. */
+export const RECHECK_DAYS = 7;
+async function recheckChannelDown({ q, now, send, pb, dual }) {
+  const res = { rechecked: 0, released: 0, explained: 0 };
+  const held = await q(
+    `SELECT id, plate, fleet_id, trip_start, trip_end FROM sms_outbox
+      WHERE kind = 'trip_register' AND status = 'held' AND hold_reason = 'booking_channel_down'
+        AND trip_end > $1 ORDER BY trip_end LIMIT 200`, [new Date(now.getTime() - RECHECK_DAYS * 864e5).toISOString()]);
+  for (const m of held) {
+    /* Cheap first: is every channel this car used collected for the day yet?
+       Most holds are still waiting, and the attribution query below is not
+       one to run for each of them every half hour. */
+    const end0 = new Date(m.trip_end);
+    const used0 = (await q(
+      `SELECT DISTINCT platform FROM trip WHERE plate = $1 AND fleet_id = $2
+          AND requested_at >= $3::timestamptz - interval '14 days' AND requested_at < $3::timestamptz`,
+      [m.plate, m.fleet_id, end0.toISOString()])).map((u) => u.platform);
+    const collected0 = await collectedPairs(q, dubaiDay(new Date(m.trip_start)), end0);
+    if (used0.some((u) => !collected0.has(`${u}:${m.fleet_id}`))) continue;
+    res.rechecked += 1;
+    const [s] = await q(`${SEGMENT_SQL(`o.plate = $1 AND o.started_at <= $3::timestamptz + interval '15 minutes'
+        AND coalesce(o.ended_at, o.started_at) >= $2::timestamptz - interval '15 minutes'`)}
+      ORDER BY (o.verdict = 'unauthorized') DESC, o.started_at LIMIT 1`,
+    [m.plate, new Date(m.trip_start).toISOString(), new Date(m.trip_end).toISOString()]);
+    if (!s || s.verdict !== 'unauthorized') {
+      await q(`UPDATE sms_outbox SET hold_reason = 'no_longer_unauthorized' WHERE id = $1 AND status = 'held'`, [m.id]);
+      res.explained += 1; continue;
+    }
+    const d = await judgeTrip(q, s, { pb, dual, now });
+    if (d.hold === 'booking_channel_down') continue;
+    /* Judged again since every channel it depends on delivered the day? */
+    const pairs = d.used.map((u) => `${u}:${s.fleet_id}`);
+    const [{ last }] = pairs.length ? await q(
+      `SELECT max(finished_at) AS last FROM collection_run
+        WHERE source || ':' || fleet_id = ANY($1::text[]) AND status IN ('ok', 'partial')
+          AND window_end >= $2::date AND finished_at >= $3`, [pairs, d.day, d.end.toISOString()]) : [{ last: null }];
+    if (last && !(new Date(s.ingested_at) > new Date(last))) continue;
+    const text = d.from_ && d.to_ ? tripText(d.from_, d.to_, d.km, d.day) : null;
+    if (d.hold) {
+      await q(`UPDATE sms_outbox SET hold_reason = $2, person_id = $3 WHERE id = $1 AND status = 'held'`,
+        [m.id, d.hold, d.person ? Number(d.person) : null]);
+      continue;
+    }
+    const [claim] = await q(
+      `UPDATE sms_outbox SET status = 'queued', hold_reason = NULL, person_id = $2, destination = $3,
+              message_text = $4, not_before = $5,
+              detail = coalesce(detail, '{}'::jsonb) || $6::jsonb
+        WHERE id = $1 AND status = 'held' AND hold_reason = 'booking_channel_down' RETURNING id`,
+    [m.id, Number(d.person), d.ph.phone, text, d.wait ? next7am(now).toISOString() : null,
+      JSON.stringify({ rechecked_at: now.toISOString(), phone_source: d.ph.source || null })]);
+    if (!claim) continue;
+    res.released += 1;
+    if (d.wait) continue;
+    await deliver(q, m.id, { to: d.ph.phone, text, ref: `fm-trip-${m.id}`, send });
+  }
+  return res;
 }
 
 /* ── 07:00: the trip messages found overnight ─────────────────────────────── */

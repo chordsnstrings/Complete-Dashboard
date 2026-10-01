@@ -7989,3 +7989,53 @@ a quarter below August 2025's in a year where fares moved a few percent. So:
   `REFRESH_TOKEN_INVALID` (and the Fleet Integration client is not entitled to
   that company). It sends the hour Bolt Ecosine delivers again, or on the 3rd
   at 10:00 Dubai saying Bolt · Ecosine is short.
+
+## Trip messages: why every held row said "nobody", and Bolt coming back (2026-10-01)
+
+The operator, over the Messages page: "unauthorized trips text needs to be
+worked on. it still finds the car, but can't find the driver for some reason.
+Understand why. Also, if and when bolt collects, and the trip is verified as
+unauthorized do let those drivers know."
+
+**Measured on production**, `/api/unauthorized/attributed` for 29 Sep – 1 Oct,
+the 58 rides that count once:
+
+| | rides |
+|---|---|
+| the evidence names one driver — bracketed / last Uber trip / sole custodian | 9 / 33 / 9 |
+| it names several, or nobody — ambiguous / unknown | 6 / 1 |
+
+And replaying the trip message's checks over them, in their order:
+places_unreadable 13, short 11, driver_not_certain 7, near_booking 6,
+clock_skew 6, same_place 1 — and 14 through to the channel, register, phone
+and daily-cap checks.
+
+- **"Nobody the evidence names" was a recording fault, not an attribution
+  one.** `tripRegisterRun` looked the driver up only after every other check
+  had passed, so a journey held for being short, near a booking, unreadable or
+  skewed was filed with no person — 51 of 58 named a driver, and every held row
+  said nobody. The person is now resolved whenever the evidence names one;
+  where it names several (or one not on the register) the names go into the
+  row's `detail.candidates`, and the page prints "A or B — 2 people, the
+  evidence does not settle which".
+- **The real "cannot find the driver" cases** are the 7: a tracker whose clock
+  is off (CABMAN L46706, 21–134 min behind) turns off the time-based rules and
+  leaves day-custody, which on that car is two people; and on L45243 the three
+  candidates include "Zain Hassan Raja Nasrullah Khan" and "Zain Raja" — very
+  likely one man on two records, which only the identity register can join.
+- **The place rule refused addresses.** 13 rides — the largest single reason —
+  were held for "no readable place", most of them a building number in front
+  of a road ("33 Sheikh Rashid Rd", "352 Al Rasheed Road") or a numbered street
+  ("30th St"). `readablePlace` now drops the building number and accepts an
+  ordinal street; a bare road code ("D65") and a number with a street ("16 9
+  St") are still refused.
+- **A channel that comes back.** A journey on a car that works a channel that
+  had not collected is held as `booking_channel_down` — a booking nobody
+  fetched may explain it — and was never looked at again; Bolt Ecosine was
+  down 28 Sep – 1 Oct. Each half-hourly pass now re-checks those holds for 7
+  days: released only once every channel the car used has collected that day
+  AND the journey has been judged again since (its segment was rewritten by a
+  reconcile after the channel's run finished — without that test the fixture
+  texted a driver whose journey the newly-fetched Bolt booking explains). Still
+  unexplained: texted, naming the day ("Please Register your trip on 28 Sep
+  from …"); explained: held as `no_longer_unauthorized`.

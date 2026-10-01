@@ -4219,3 +4219,15 @@ monthly report email".
 | — | full suite 2026-10-01: 355 of 357 files pass. access_pages ran while the local Postgres was down and passes alone (146); forecast_yoy fails 7 on the 1st of the month — identically on dd1db6e, before these changes | | | | | |
 | — | September's figures checked against independent sources before anyone acts on +74.9%: completed trips 21,018 vs 12,340 (trip export) and paid into the bank 762,027.79 vs 409,223.80 (Uber's own netOutstanding) move together — August was the low month. One likely hole: Bolt · Ecosine shows 0 bookings on 2026-09-24 (Egari 13 that day; Ecosine's other days 7–37) — about 25 bookings, under 0.1% of the month; the 30-day catch-up should refill it now the portal works | | | | | |
 
+## Trip messages: the driver on every row, readable addresses, Bolt coming back — 2026-10-01
+
+The operator: "it still finds the car, but can't find the driver … if and when
+bolt collects, and the trip is verified as unauthorized do let those drivers
+know." docs/COVERAGE.md "Trip messages: why every held row said nobody".
+
+| # | what | test (revert fails it) | written | committed | deployed | proven |
+|---|---|---|---|---|---|---|
+| TRIP-1 | the driver the evidence names is recorded on every trip row, held or not; several names kept as candidates; the Messages page prints them | driver_sms §3 (person 1, candidates 1) | ✓ | | | |
+| TRIP-2 | a building number in front of a road is dropped; an ordinal street is a name | driver_sms §1 (addresses 1) | ✓ | | | |
+| TRIP-3 | booking_channel_down holds re-checked for 7 days: released only after the channel delivered the day and the journey was judged again; texted with the day; explained ones held as no_longer_unauthorized | driver_sms §3b (re-check 2, judged-again 3) | ✓ | | | |
+

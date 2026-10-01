@@ -97,6 +97,14 @@ check('no number anywhere: held, not guessed', phoneFor(book, 10).hold === 'no_n
 check('a readable place, and street codes that are not', readablePlace('Al Garhoud') === 'Al Garhoud'
   && readablePlace('Al Barsha 1') === 'Al Barsha 1' && readablePlace('Production city,  Plot 12') === 'Production city'
   && readablePlace('93 D65') === null && readablePlace('16 9 St') === null && readablePlace('') === null);
+/* 2026-10-01: 13 of 58 unexplained rides were held for "no readable place",
+   most of them ordinary addresses. REVERSION (run 2026-10-01): drop the
+   building-number strip -> 67 passed, 1 FAILED (this check). */
+check('an address with a building number is its road; a numbered street is a name',
+  readablePlace('33 Sheikh Rashid Rd') === 'Sheikh Rashid Rd' && readablePlace('352 Al Rasheed Road') === 'Al Rasheed Road'
+  && readablePlace('30th St') === '30th St' && readablePlace('19 5th Street') === '5th Street'
+  && readablePlace('D65') === null && readablePlace('12 B') === null,
+  [readablePlace('33 Sheikh Rashid Rd'), readablePlace('30th St'), readablePlace('19 5th Street')].join(' | '));
 
 /* ── 2. the 05:00 cash reminder ─────────────────────────────────────────── */
 console.log('\n2. the 05:00 cash reminder');
@@ -262,6 +270,18 @@ await bracket('L12', 'u-y', '2026-09-28T04:40:00Z', '2026-09-28T04:55:00Z');
 await seg({ plate: 'L13', from: '2026-09-28T03:20:00Z', to: '2026-09-28T03:50:00Z' });
 await T('L13-last', { driver: 'u-d', plate: 'L13', at: '2026-09-26T03:00:00Z', pay: 'braintree', price: 20 });
 
+/* Two people had the car that day and no booking names either: the
+   evidence names two, and the record must say who they are. */
+await seg({ plate: 'L14', from: '2026-09-28T05:10:00Z', to: '2026-09-28T05:40:00Z' });
+for (const [dvr, nm] of [['u-a', 'Test Driver A'], ['u-d', 'Test Driver D']]) {
+  await q(`INSERT INTO vehicle_driver_day (plate, day, driver_ext_id, platform, driver_name, fleet_id, trips, is_primary)
+           VALUES ('L14', '2026-09-28', $1, 'uber', $2, 'ecosine', 1, false)`, [dvr, nm]);
+}
+/* A second car that works Bolt, held while Bolt is down, whose journey a
+   Bolt booking will explain once Bolt delivers. */
+await seg({ plate: 'L16', from: '2026-09-28T05:20:00Z', to: '2026-09-28T05:50:00Z' });
+await bracket('L16', 'u-d', '2026-09-28T05:20:00Z', '2026-09-28T05:50:00Z');
+await T('L16-bolt', { driver: 'b-c', platform: 'bolt', plate: 'L16', at: '2026-09-25T11:00:00Z', pay: 'cash', price: 12 });
 const noon = new Date('2026-09-28T08:00:00Z');
 const before = sent.length;
 r = await tripRegisterRun({ q, now: noon, send, cfg: {} });
@@ -283,6 +303,20 @@ check('nobody named on the car: held', byPlate.L3?.hold === 'driver_not_certain'
 check('a street code for a place: held', byPlate.L4?.hold === 'places_unreadable', JSON.stringify(byPlate.L4));
 check('a booking 20 minutes away: held (driving to a pickup)', byPlate.L7?.hold === 'near_booking', JSON.stringify(byPlate.L7));
 check('a car that also works Bolt, when Bolt did not collect: held', byPlate.L8?.hold === 'booking_channel_down', JSON.stringify(byPlate.L8));
+/* WHO THE EVIDENCE NAMES, ON A HELD ROW (2026-10-01: every held row read
+   "nobody the evidence names" though 51 of 58 named one driver).
+   REVERSION (run 2026-10-01): resolve the person only when nothing else
+   held it, as before -> 67 passed, 1 FAILED (the first check); keep no
+   candidates on the record -> 67 passed, 1 FAILED (the second). */
+const heldWho = Object.fromEntries((await q(
+  `SELECT plate, person_id, detail FROM sms_outbox WHERE kind = 'trip_register' AND status = 'held'`)).map((x) => [x.plate, x]));
+check('a held journey still records the driver the evidence names: short (L2), near a booking (L7), a street code (L4), Bolt down (L8)',
+  heldWho.L2?.person_id === 4 && heldWho.L7?.person_id === 1 && heldWho.L4?.person_id === 11 && heldWho.L8?.person_id === 1,
+  JSON.stringify(['L2', 'L7', 'L4', 'L8'].map((k) => [k, heldWho[k]?.person_id])));
+check('…and where it names two, both are on the record by name',
+  byPlate.L14?.hold === 'driver_not_certain' && heldWho.L14?.person_id === null
+  && JSON.stringify([...(heldWho.L14?.detail?.candidates || [])].sort()) === '["Test Driver A","Test Driver D"]',
+  JSON.stringify([byPlate.L14, heldWho.L14]));
 
 /* The same journey, reported again: the next pass deleted its window and
    re-inserted FMS's final record, three minutes off the provisional start. */
@@ -318,6 +352,42 @@ r = await tripRegisterRun({ q, now: noon, send, cfg: { sms_trip: 'off' } });
 check('switched off: no trip is looked at', r.off === true);
 check('nothing texted anywhere says "unauthorized"', sent.every((m) => !/unauthori[sz]ed/i.test(m.text)));
 check('every message went as transactional, never OTP or promotional', sent.every((m) => m.type === 'transactional'));
+
+/* ── 3b. Bolt collects again ──────────────────────────────────────────────
+   The operator, 2026-10-01: "if and when bolt collects, and the trip is
+   verified as unauthorized do let those drivers know."
+   REVERSION (run 2026-10-01): skip recheckChannelDown -> 66 passed,
+   2 FAILED (the release and the explained check); drop the "judged again
+   since" test -> 65 passed, 3 FAILED — and the journey the new Bolt booking
+   explains is TEXTED, which is the whole reason for the test. */
+console.log('\n3b. a channel that collects again');
+const atNine = new Date('2026-09-29T05:00:00Z');            // 09:00 Dubai
+let n4 = sent.length;
+r = await tripRegisterRun({ q, now: atNine, send, cfg: {} });
+check('while Bolt has still not delivered the day, the held journey stays held', sent.length === n4
+  && (await q(`SELECT status FROM sms_outbox WHERE plate = 'L8'`))[0].status === 'held');
+await run({ source: 'bolt', at: '2026-09-29T01:00:00Z', to: '2026-09-29' });         // Bolt delivers the 28th
+await q(`UPDATE occupancy_segment SET ingested_at = '2026-09-28T07:00:00Z' WHERE plate IN ('L8', 'L16')`);
+r = await tripRegisterRun({ q, now: atNine, send, cfg: {} });
+check('not before the journey has been judged again on the new data', sent.length === n4
+  && (await q(`SELECT status FROM sms_outbox WHERE plate = 'L8'`))[0].status === 'held', JSON.stringify(r));
+/* The reconcile re-judges the window: L8 still unexplained; L16 explained
+   by the Bolt booking that arrived. */
+await q(`UPDATE occupancy_segment SET ingested_at = '2026-09-29T01:10:00Z' WHERE plate IN ('L8', 'L16')`);
+await q(`UPDATE occupancy_segment SET verdict = 'authorized' WHERE plate = 'L16'`);
+r = await tripRegisterRun({ q, now: atNine, send, cfg: {} });
+const late = sent.slice(n4);
+const [l8] = await q(`SELECT status, hold_reason, message_text FROM sms_outbox WHERE plate = 'L8'`);
+const [l16] = await q(`SELECT status, hold_reason FROM sms_outbox WHERE plate = 'L16'`);
+check('Bolt delivered and the journey is still unexplained: the driver is texted, the day named',
+  l8.status === 'sent' && late.length === 1 && late[0].to === '971501111111'
+  && late[0].text === 'Please Register your trip on 28 Sep from Al Garhoud to Deira - 12 km with your supervisor - ADMIN.'
+  && r.released === 1, JSON.stringify([l8, late, r.released]));
+check('…and one the new Bolt data explains is not texted, and says why', l16.status === 'held' && l16.hold_reason === 'no_longer_unauthorized'
+  && r.explained === 1, JSON.stringify(l16));
+n4 = sent.length;
+r = await tripRegisterRun({ q, now: new Date('2026-09-29T05:30:00Z'), send, cfg: {} });
+check('…and nothing is texted twice', sent.length === n4);
 
 /* ── 4. the Messages page's two answers ─────────────────────────────────── */
 console.log('\n4. what the page is told');

@@ -60,9 +60,17 @@ function statusCell(r) {
 
 /* `link` is handed in by the column, so the column that names a driver
    visibly links to one (test/interlinking.test.mjs reads the column). */
+/* A held trip message used to carry no person at all, so every one read
+   "nobody the evidence names" — though the evidence named one driver on 51 of
+   58 (2026-10-01). src/driver_sms.js now records the person whenever the
+   evidence names one, and the candidates by name when it names several or
+   names someone not on the register. */
 function whoCell(r, link) {
   if (r.person_id != null) return link(`p${r.person_id}`, r.person_name || 'name not on file');
   if (r.user_id != null) return `<span>${esc(r.user_email || 'a staff account')}</span><div class="dim">staff</div>`;
+  const c = Array.isArray(r.detail?.candidates) ? r.detail.candidates : [];
+  if (c.length === 1) return `<span>${esc(c[0])}</span><div class="dim">not on the driver register</div>`;
+  if (c.length > 1) return `<span>${esc(c.join(' or '))}</span><div class="dim">${c.length} people — the evidence does not settle which</div>`;
   return '<span class="ent-off">nobody the evidence names</span>';
 }
 
