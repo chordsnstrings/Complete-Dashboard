@@ -110,8 +110,10 @@ const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/t
   /* THE REVENUE TARGET, which the Owner's save and the trips-a-day setting
      move (api/target_routes.js). Neither advances the version above, so a save
      would be answered with the target from before it — the same failure as
-     the two above. Four grouped reads over the month; cheap enough live. */
-  '/api/target',
+     the two above. Four grouped reads over the month; cheap enough live.
+     Its hour-by-hour view is "so far today" and "by this minute", which a
+     cached answer would freeze at the minute it was cached. */
+  '/api/target', '/api/target/hours',
   /* THE CREDENTIAL BANNER, which a Settings save changes.
      ───────────────────────────────────────────────────────────────────────
      A save tests the value it stored and rewrites the banner rows

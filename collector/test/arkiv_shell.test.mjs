@@ -122,7 +122,7 @@ const settle = async (page) => {
   await page.waitForTimeout(300);
 };
 const SHELL_IDS = ['nav', 'sectabs', 'authBanner', 'filters', 'fRange', 'fRangeLabel', 'fGrain', 'fPlatform',
-  'fFleet', 'refreshBtn', 'zenBtn', 'tzNote', 'themeBtn', 'settingsLink', 'freshness', 'targetNow', 'todayNow', 'crumb',
+  'fFleet', 'refreshBtn', 'zenBtn', 'tzNote', 'themeBtn', 'settingsLink', 'freshness', 'todayNow', 'crumb',
   'viewTitle', 'viewSub', 'view', 'tt', 'm', 'pageFoot'];
 const SYNTH = (o) => ({ fleet_id: 'egari', surface: 'synthetic surface', last_ok_at: null,
   checked_at: '2026-09-23T08:30:00Z', last_ok_age_h: 3, run_age_h: 9, stall_limit_h: 6, still_collecting: true,
@@ -162,7 +162,7 @@ console.log('\n0 · the old skin keeps index.html’s shell, untouched');
   check('#nav in the rail, #filters in the topbar, #themeBtn in the rail’s foot',
     o.nav === 'side' && o.filters === 'topbar' && o.theme === 'side-foot', `${o.nav} ${o.filters} ${o.theme}`);
   check('…and the main column in index.html’s order',
-    o.order.join(' ') === 'authBanner topbar sectabs targetNow todayNow view pageFoot',
+    o.order.join(' ') === 'authBanner topbar sectabs todayNow view pageFoot',
     o.order.join(' '));
   check('settings is still "⚙ settings"', /⚙ settings/.test(o.setup), o.setup);
   check('freshness is still three lines', (o.fresh.match(/<br>/g) || []).length === 2 && !/fr-sep/.test(o.fresh), o.fresh);
@@ -203,9 +203,8 @@ console.log('\n3 · the sheet, under the skin');
       on: document.querySelector('#nav a.on .lb')?.textContent,
     };
   }, SHELL_IDS);
-  /* targetNow: the revenue target (2026-10-02), above the strip. */
-  check('the order: masthead, section row, view row, banner, controls, target, strip, title, page, footer',
-    o.order.join(' ') === 'mast secRow sectabs authBanner filters targetNow todayNow topbar view pageFoot', o.order.join(' '));
+  check('the order: masthead, section row, view row, banner, controls, strip, title, page, footer',
+    o.order.join(' ') === 'mast secRow sectabs authBanner filters todayNow topbar view pageFoot', o.order.join(' '));
   check('every shell id is in the document exactly once, #fRangeLabel and #pageFoot included', o.ids.length === 0,
     JSON.stringify(o.ids));
   check('the section row holds the sections, then Set up, then freshness',

@@ -575,15 +575,13 @@
 :root[data-skin="arkiv"] .todaynow .lb-notes summary:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 :root[data-skin="arkiv"] .todaynow .lb-note{margin:4px 0 0;max-width:var(--measure,72ch);font-family:var(--sans);
   font-size:var(--t4);line-height:1.5;color:var(--grey)}
-/* the month's revenue target, above the livebar on the Today pages: the same
+/* the month's revenue target, at the head of the Target view: the same
    language — paper ground, an ink rule under it, mono labels in capitals, a
    sans figure — with the semantic pair carrying over and under (and the
    arrow and the word beside every coloured figure, L3). */
-/* The frame on the desktop host only (#targetNow): the phone's card wears
-   the same classes and its own frame (m.css .m-target). */
-:root[data-skin="arkiv"] #targetNow{margin:0;padding:12px var(--shell-x) 12px;background:var(--paper);border:0;
-  border-bottom:1px solid var(--hair);border-radius:0;font-size:var(--t5)}
-:root[data-skin="arkiv"] .ak-shell .targetnow:not([hidden]){display:block}
+/* The panel's frame is the page's (the Target view's section, .tg-page in
+   app.css); the phone's card wears the same classes and its own frame
+   (m.css .m-target). */
 :root[data-skin="arkiv"] .targetnow .tg-title{font-family:var(--mono);font-size:var(--t3);font-weight:600;
   letter-spacing:.14em;text-transform:uppercase;color:var(--ink)}
 :root[data-skin="arkiv"] .targetnow .tg-scope{font-family:var(--sans);font-size:var(--t4);font-style:italic;
@@ -606,6 +604,12 @@
 :root[data-skin="arkiv"] .targetnow .tg-legend{font-family:var(--mono);font-size:var(--t2);letter-spacing:.04em}
 :root[data-skin="arkiv"] .targetnow .tg-key{border-color:var(--hair)}
 :root[data-skin="arkiv"] .targetnow .tg-band + .tg-band{border-top-color:var(--faint)}
+:root[data-skin="arkiv"] .mf th,:root[data-skin="arkiv"] .mf td,:root[data-skin="arkiv"] .hp th,
+:root[data-skin="arkiv"] .hp td{border-top-color:var(--hair)}
+:root[data-skin="arkiv"] .mf thead th,:root[data-skin="arkiv"] .hp thead th{font-family:var(--mono);letter-spacing:.07em}
+:root[data-skin="arkiv"] .mf tbody th{font-family:var(--mono);font-size:var(--t3);letter-spacing:.06em;text-transform:uppercase}
+:root[data-skin="arkiv"] .hp tbody th,:root[data-skin="arkiv"] .hc .hc-x{font-family:var(--mono)}
+:root[data-skin="arkiv"] .hp-key{font-family:var(--mono);font-size:var(--t2);letter-spacing:.04em}
 
 /* ── 4 · panels and grids ───────────────────────────────────────────────────
    panel() is unchanged — the .pbody body and the data-panel keys. The card

@@ -15,7 +15,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   SEG_SOURCES, SEG_SOURCE_LABEL, bySourceLine } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
-import { targetLive, targetView, targetHtml } from './target.js';
+import { targetPage } from './targetpage.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
   applyWindow, MONTH_SHORT, dayLabel } from './data.js';
@@ -390,11 +390,18 @@ function componentTree(components) {
    twelve distinct rules, of which 27 are one dormant-vehicle rule and 25 are
    one expiring-document rule. Twenty-seven dormant cars is one decision, not
    twenty-seven — which is the next thing to fix on that page, and a better
-   problem to have on a home screen than a two-minute wait. */
-export const LANDING = 'insights';
+   problem to have on a home screen than a two-minute wait.
+
+   THEN THE OPERATOR SET A TARGET, and the home screen became the target
+   (2026-10-02): "The first page simply aligns the operations and everyone
+   live updates" — the month, today, and every hour on target or not, for
+   revenue and for trips (./targetpage.js). Asked where the findings list
+   should go, the operator chose to take it off Today: it is under Work now,
+   unchanged, at the same address. */
+export const LANDING = 'target';
 
 const VIEWS = [
-  { id: 'insights', label: 'Action list', ic: '✦', sec: 'Today', sub: 'What needs doing, ranked by what it costs to ignore' },
+  { id: 'target', label: 'Target', ic: '◎', sec: 'Today', sub: 'The month, today and every hour — on target or not, live for everyone' },
   { id: 'playbook', label: 'To-do list', ic: '☑', sec: 'Today', sub: 'Jobs to do this month to earn more, each with the sums behind it' },
   { id: 'overview', label: 'Fleet activity', ic: '◱', sec: 'Today', sub: 'How many trips the fleet ran, on which platforms, and how they ended' },
   { id: 'compare', label: 'Today vs yesterday', ic: '⧉', sec: 'Today', sub: 'Two days side by side, both counted up to the same Dubai minute' },
@@ -522,6 +529,7 @@ const VIEWS = [
   { id: 'forecast', label: 'Forecast', ic: '◠', sec: 'Work', sub: 'Expected trips for next month, day by day, and how uncertain each day is' },
   { id: 'optimise', label: 'Cut waiting time', ic: '◎', sec: 'Work', sub: 'Which online hours sell, and where drivers wait for the next job' },
   { id: 'capacity', label: 'Rota gaps', ic: '◫', sec: 'Work', sub: 'Which hours next month need more drivers than the rota covers today' },
+  { id: 'insights', label: 'Action list', ic: '✦', sec: 'Work', sub: 'What needs doing, ranked by what it costs to ignore' },
   { id: 'sources', label: 'Data sources', ic: '⛁', sec: 'Sources', sub: 'Whether each source is still collecting, and how far back it goes' },
   { id: 'coverage', label: 'Collection gaps', ic: '▦', sec: 'Sources', sub: 'Which days each source collected, and which days are missing' },
   { id: 'providers', label: 'What each API offers', ic: '⌗', sec: 'Sources', sub: 'Every field each source sends, and the ones we do not store yet' },
@@ -575,7 +583,7 @@ const VIEWS = [
    other reason it wants a place of its own rather than four tabs deep in a
    strip about utilisation. */
 const SECTIONS = [
-  { id: 'Today', ic: '◉', to: 'insights' },
+  { id: 'Today', ic: '◉', to: 'target' },
   { id: 'Money', ic: '◆', to: 'unit' },
   { id: 'Finance', ic: '⑆', to: 'finance' },
   { id: 'Work', ic: '◱', to: 'demand' },
@@ -913,6 +921,9 @@ const V = {};
    following a stale money link therefore read a real figure off a page they
    had not asked for. This one renders instead: no data, the address quoted
    back, and the nearest real destinations. */
+/* The first page: the month, today, and today hour by hour (./targetpage.js). */
+V.target = async (root) => { await targetPage(root); };
+
 V.notfound = async (root) => {
   const addr = String(state.missing || '');
   const typed = addr.split('?')[0].split('/')[0];
@@ -9398,7 +9409,7 @@ async function render() {
     root.append(closedBlock({ cls, view: location.hash.replace(/^#/, ''), detail: VIEW_CAP_WHY[state.view] || null,
       title: label ? `${label} is not open to your role` : 'This page is not open to your role' }));
     setHeader({ title: label || 'Not open to your role' });
-    if (alive(gen)) { freshness(); authBanner(); targetNow(); }
+    if (alive(gen)) { freshness(); authBanner(); }
     return;
   }
   try {
@@ -9421,7 +9432,7 @@ async function render() {
     root.innerHTML = '';
     root.append(failureBox(e, () => render()));
   }
-  if (alive(gen)) { freshness(); authBanner(); todayNow(); targetNow(); }
+  if (alive(gen)) { freshness(); authBanner(); todayNow(); }
 }
 
 /* ── every page says what it was built from ───────────────────────────────
@@ -10054,37 +10065,6 @@ async function todayNow() {
   } catch {
     /* A band that cannot be built is removed, not left saying something
        wrong: every page below it is still correct. */
-    host.hidden = true; host.innerHTML = '';
-  }
-}
-
-/* THE MONTH'S REVENUE TARGET, first on every Today page.
-   ─────────────────────────────────────────────────────────────────────────
-   The operator, 2026-10-02: "the first page will show how much every day we
-   need to earn and yesterday were we over or under." What the panel says, and
-   when green and red are allowed, is ./target.js, shared with the phone; the
-   arithmetic is the server's (api/revenue_target.js).
-
-   On the Today section only: the strip below it is about this minute and
-   belongs everywhere; the target is a morning question, and a panel this tall
-   on every page would push every page's own first figure past the fold.
-   A role not shown revenue — or shown only one fleet, since the target is
-   both fleets' — gets no panel, as it gets no strip: the refusal belongs to
-   the route, not to the page under it. */
-async function targetNow() {
-  const host = $('#targetNow');
-  if (!host) return;
-  if (sectionOf(state.view, state.param) !== 'Today') { host.hidden = true; host.innerHTML = ''; return; }
-  const gen = currentGen();
-  try {
-    const [t, live] = await Promise.all([targetLive({ quiet: true }), todayLive({ quiet: true }).catch(() => null)]);
-    if (gen !== currentGen()) return;
-    const vm = targetView(t, live);
-    if (!vm) { host.hidden = true; host.innerHTML = ''; return; }
-    host.innerHTML = targetHtml(vm, { link: (d) => href('day', d) });
-    host.hidden = false;
-  } catch {
-    if (gen !== currentGen()) return;
     host.hidden = true; host.innerHTML = '';
   }
 }

@@ -4396,6 +4396,17 @@ untouched, and nothing projected is ever added into `accounted`.
       the first fell out of the window and the check read "trips 3 — four
       were seeded" with nothing changed. Seed relative to today (`ago(n)`, a
       Dubai day n days back) when the route under test counts back from now.
+  46. **"Now" on a live page is the last collection, not the clock — and
+      only the INTRADAY collection.** Bookings arrive with each collection
+      run: on production at 10:59 the live strip's latest booking was 10:27.
+      Judged at the clock, the first page read half an hour of trips behind
+      with nothing wrong. Judge at the last `incremental` run of the booking
+      channels (they run together every half hour: Uber, Bolt and the hotel
+      channel all finished within a minute of 11:01 on 2026-10-02). Two
+      wrong turns, both measured: the oldest last run of every channel that
+      ran today pins the cut at 01:21 all day, because the nightly `catchup`
+      runs then and counts as "ran today"; and the clock overstates the
+      shortfall by the lag. api/target_hours.js collectedTo().
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
@@ -8198,6 +8209,35 @@ And, before it went out: "set october target to 1.705 Million not 1.6"
   before Save what it comes to — AED a car a day, a day's share, and whether
   the trips target agrees at last month's fare; every save kept with who and
   when. The trips setting is now titled as the Today trips target too.
+- **The first page, rebuilt the same day.** Put first above the live strip on
+  every Today page, the operator said: "I asked you to change the page TODAY.
+  You changed the LIVE TODAY", then "where's the monthly and overall view on
+  the main page? first ops get the full view and THEN the tasks", then "it
+  needs to be a bit more granular with more data. After that you can put in
+  today's target, what target they should achieve within the specific hour
+  of the day today … and how much left for today … The first page simply
+  aligns the operations and everyone live updates", and "every hour if they
+  are on target or not based on hourly income of the day and possibilities.
+  Including number of trips. These are separate panels each." Asked where the
+  findings list goes, the operator took it off Today. So: the Today section
+  opens on **Target** (#target, the landing; api/public/targetpage.js) — 00
+  the month (the cells and day strips above, then the month in figures: what
+  every day left must bring, the average day, where the month lands at this
+  pace, best and worst day, each fleet's part); 01 today (target, done, left,
+  right now, this hour); 02 revenue hour by hour; 03 trips hour by hour —
+  refreshed every minute. The live strip carries no target. The Action list
+  is under Work, unchanged, at #insights.
+- **An hour's target** (api/target_hours.js, GET /api/target/hours): today's
+  target × the share of a day's fares (revenue) or completed trips (trips)
+  that Dubai hour carried over the last 28 days, the hour's usual beside it.
+  An hour that has ended is over or under; the day so far against the usual
+  curve to the cut (the current hour by the minutes gone, trap 46); what is
+  left shared over the hours left in the same proportions ("to land the
+  day"); an hour that asked nothing and did nothing is neither. Revenue today
+  is the live strip's own estimate spread by each channel's unpriced bookings
+  per hour, so the hours add to the strip's figure exactly, marked ≈. Under 7
+  days of history, or no target: absent with the reason. The answer is kept
+  30 seconds across screens (every open page asks every minute).
 - **On production, 2026-10-02.** The seed applied once (api log, 06:34:37Z):
   AED 1,705,000 over 101 cars = AED 544.55 a car a day, AED 55,000.00 a day
   flat; 1 October earned 52,103.03 — under by 2,896.97 (94.7%), settled — so

@@ -490,10 +490,11 @@ await section('11', async () => {
     check('…the Owner saves it, is told so, and the server holds it with who saved it',
       /Saved: .* at AED 930,000\.00/.test(await tpText()) && Number(saved?.gross_target) === 930000 && saved.cars === 3 && saved.set_by_label === OWNER,
       `${(await tpText()).slice(0, 300)} / ${JSON.stringify(saved)}`);
-    await page.goto(`${BASE}/?ui=desktop&skin=arkiv#insights`, { waitUntil: 'domcontentloaded' });
-    await page.waitForSelector('#targetNow:not([hidden])', { timeout: 20000 }).catch(() => {});
-    const panelText = (await page.locator('#targetNow').innerText().catch(() => '')).replace(/\s+/g, ' ');
-    check('…and the Today page leads with it: the month target and what today needs',
+    /* The first page (#target, 2026-10-02): the month and today, live. */
+    await page.goto(`${BASE}/?ui=desktop&skin=arkiv#target`, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => /AED 930,000\.00/.test(document.querySelector('#view .tg-page')?.innerText || ''), null, { timeout: 20000 }).catch(() => {});
+    const panelText = (await page.locator('#view').innerText().catch(() => '')).replace(/\s+/g, ' ');
+    check('…and the first page leads with it: the month target and what today needs',
       /AED 930,000\.00/.test(panelText) && /to earn/.test(panelText), panelText.slice(0, 300));
   }
   noErrorsSoFar('Settings');

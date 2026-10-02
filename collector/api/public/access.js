@@ -178,6 +178,9 @@ export const VIEW_SUBJECT = Object.freeze({
   policy: 'CASH', property: 'REV', 'property/drivers': 'ID', 'property/guests': 'PAX', provenance: 'REV',
   providers: 'SYS', receipts: 'PAY', reconcile: 'PAY', retention: 'BK', revenue: 'REV', roster: 'ID',
   'roster/states': 'SYS', safety: 'COND', 'safety/events': 'VEH', 'safety/vehicles': 'VEH', salary: 'CASH',
+  /* The first page, the month's target hour by hour (2026-10-02): about
+     revenue; its trip counts follow the reader's BK level. */
+  target: 'REV',
   'same-person': 'MRG', segment: 'COND', segments: 'COND', settings: 'CRED', settlement: 'REV',
   'settlement/cash': 'CASH', 'settlement/receivables': 'PAY', slot: 'BK', sources: 'SYS', supply: 'BK',
   'top-performers': 'ID', trip: 'BK', trips: 'BK', unauthorized: 'COND', unit: 'REV', 'unit/assets': 'VEH',

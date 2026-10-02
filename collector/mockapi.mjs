@@ -18,6 +18,7 @@ import { shape, windowOf, driverRecord, fleetRecord } from './api/performance_ro
    made-up month, for the same reason: a fixture typed by hand would certify
    a shape the server stopped returning. */
 import { computeMonth, addDays as tgAddDays, monthOf as tgMonthOf, daysIn as tgDaysIn, monthName as tgMonthName } from './api/revenue_target.js';
+import { hoursOf } from './api/target_hours.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -4709,7 +4710,42 @@ app.get('/api/target', (req, r) => {
   out.context = { cars_7_days: 40, cars_yesterday: 38, active_drivers: 46, drivers_a_day: 41.1,
     last_month: { month: pm, month_name: tgMonthName(pm), fares: 652000, cars: 41, avg_fare: 34.6 } };
   out.saves = out.saves.map(({ set_by: _by, set_by_label: label, ...x }) => ({ ...x, seeded: label === 'system:seed' }));
+  /* Each fleet's part (monthTarget's byFleet): two thirds Ecosine, a third Egari. */
+  const earned = out.summary?.earned || 0;
+  const tripsGone = out.trips_summary?.trips || 0;
+  out.fleets = [['ecosine', 2 / 3, 27], ['egari', 1 / 3, 13]].map(([fleet, k, cars]) => ({ fleet,
+    earned: Math.round(earned * k * 100) / 100, earned_yday: Math.round((out.yesterday?.earned || 0) * k * 100) / 100,
+    trips: Math.round(tripsGone * k), trips_yday: Math.round((out.yesterday?.trips || 0) * k), cars_week: cars }));
   r.set('cache-control', 'private, no-store').json(out);
+});
+/* /api/target/hours (api/target_hours.js): today hour by hour, from the real
+   hoursOf() over a made-up usual day (a morning peak, an evening peak), with
+   today running a little under it — so the first page draws past hours green
+   and red, the hour now in ink, and the hours to come with their catch-up. */
+app.get('/api/target/hours', (req, r) => {
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.asof || '')) ? String(req.query.asof) : dubaiDay(new Date());
+  const t = tgMonth(tgMonthOf(today), today);
+  const td = t.days.find((d) => d.day === today) || {};
+  const local = new Date(Date.now() + 4 * 3600e3);
+  const cur = local.getUTCHours();
+  const gone = local.getUTCMinutes() / 60;
+  const curve = [1, 1, 1, 2, 3, 4, 5, 6, 7, 6, 5, 5, 5, 5, 5, 5, 6, 7, 7, 6, 4, 2, 1, 1];
+  const tot = curve.reduce((x, v) => x + v, 0);
+  const share = curve.map((v) => v / tot);
+  const usualTrips = curve.map((v) => (v / tot) * 520);
+  const usualAed = curve.map((v) => (v / tot) * 20500);
+  const doneTrips = usualTrips.map((v, h) => (h < cur ? Math.round(v * (h % 3 === 0 ? 1.1 : 0.85)) : h === cur ? Math.round(v * gone) : 0));
+  const doneAed = doneTrips.map((v) => Math.round(v * 39.4 * 100) / 100);
+  const clock = local.toISOString().slice(11, 16);
+  const basis = { days: 28, from: tgAddDays(today, -28), to: tgAddDays(today, -1) };
+  r.set('cache-control', 'private, no-store').json({
+    today, clock, hour: cur, now_clock: clock, at: new Date().toISOString(), cut_at: new Date().toISOString(),
+    cut_by: 'collection', lag_min: 0, latest_at: new Date().toISOString(), month: t.month, month_name: t.month_name,
+    revenue: { ...hoursOf({ target: t.summary.today_needs, share, usual: usualAed, done: doneAed, cur, gone, money: true }),
+      estimate: true, projected: 4100, measured: 980.5, basis },
+    trips: { ...hoursOf({ target: td.trips_target || 552, share, usual: usualTrips, done: doneTrips, cur, gone }),
+      active: td.active_drivers || 46, min: 12, basis },
+  });
 });
 /* The Today workbook (api/today_workbook.js): the six sheet names in the
    page's order and the month's own Days rows from the fixture above, so a

@@ -116,6 +116,7 @@ export const monthName = (m) => new Date(`${m}-15T12:00:00Z`).toLocaleDateString
 /* The moment a Dubai day ends (Dubai keeps UTC+4 all year). */
 const endOfDay = (d) => Date.parse(`${addDays(d, 1)}T00:00:00+04:00`);
 const r2 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 100) / 100);
+const r1 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 10) / 10);
 
 /* ── what the database holds, for a span of days ─────────────────────────── */
 /* Four reads over the span, each grouped by day, and nothing else: the
@@ -340,6 +341,18 @@ export function computeMonth({ month, today, rows = [], facts, min = 10 }) {
     over: past.filter((x) => x.verdict === 'over').length,
     under: past.filter((x) => x.verdict === 'under').length,
     unsettled: past.filter((x) => x.verdict === 'unsettled').length,
+    /* What the month is moving towards (the operator, 2026-10-02: "so that
+       they know what their today's target is, and what monthly target is and
+       what they are moving towards … a bit more granular with more data"):
+       what every day left must bring on average, the average day so far, and
+       where the month lands if every day left is like that average. */
+    days_gone: past.length,
+    per_day_left: t && D - days.indexOf(t) ? r2(Math.max(0, monthTargetNow - earnedToDate) / (D - days.indexOf(t))) : null,
+    avg_day: past.length ? r2(earnedToDate / past.length) : null,
+    month_end_pace: past.length ? r2((earnedToDate / past.length) * D) : null,
+    pace_pct: past.length && monthTargetNow ? r2((100 * (earnedToDate / past.length) * D) / monthTargetNow) : null,
+    best: past.length ? (({ day, label, earned }) => ({ day, label, earned }))(past.reduce((a, b) => ((b.earned ?? -1) > (a.earned ?? -1) ? b : a))) : null,
+    worst: past.length ? (({ day, label, earned }) => ({ day, label, earned }))(past.reduce((a, b) => ((b.earned ?? Infinity) < (a.earned ?? Infinity) ? b : a))) : null,
   } : null;
   /* The trips chart's own summary — set or not, the minimum exists. "A
      driver a day" is the month's trips ÷ its active driver-days, so a day
@@ -362,6 +375,9 @@ export function computeMonth({ month, today, rows = [], facts, min = 10 }) {
     today_target: t ? t.trips_target : null,
     today_active: t ? t.active_drivers : null,
     today_trips: t ? t.trips : null,
+    days_gone: tdays.length,
+    avg_trips_day: tdays.length ? r1(tsum('trips') / tdays.length) : null,
+    avg_active: tdays.length ? r1(driverDays / tdays.length) : null,
   };
   return {
     month, month_name: monthName(month), today, first, last, days_in_month: D,
@@ -417,7 +433,29 @@ export async function monthTarget(q, { month = null, today = null, now = new Dat
       summary: prev.summary };
   }
   out.context = await context(q, day, facts);
+  out.fleets = await byFleet(q, m, day);
   return out;
+}
+
+/* Each fleet's part of the month and of yesterday: one target for both
+   fleets, and still the first thing ops asks is which fleet is carrying it.
+   The month runs to yesterday, the same days the month so far is judged on;
+   on the 1st it is empty and yesterday is the month before's last day. */
+async function byFleet(q, month, day) {
+  const first = `${month}-01`;
+  const yday = addDays(day, -1);
+  const rows = await q(
+    `SELECT n.fleet_id AS fleet,
+            coalesce(round(sum(n.price) FILTER (WHERE n.has_fare AND n.local_day >= $1::date AND n.local_day < $3::date)::numeric, 2), 0)::float AS earned,
+            coalesce(round(sum(n.price) FILTER (WHERE n.has_fare AND n.local_day = $2::date)::numeric, 2), 0)::float AS earned_yday,
+            count(*) FILTER (WHERE n.outcome = 'completed' AND n.local_day >= $1::date AND n.local_day < $3::date)::int AS trips,
+            count(*) FILTER (WHERE n.outcome = 'completed' AND n.local_day = $2::date)::int AS trips_yday,
+            count(DISTINCT btrim(n.plate)) FILTER (WHERE n.has_fare AND n.price > 0 AND n.local_day >= $4::date AND n.local_day < $3::date)::int AS cars_week
+       FROM trip_norm n
+      WHERE n.local_day BETWEEN least($1::date, $4::date) AND $3::date AND n.is_booking AND n.fleet_id IS NOT NULL
+      GROUP BY 1 ORDER BY 1`, [first, yday, day, addDays(day, -CAR_DAYS)]);
+  return rows.map((r) => ({ fleet: r.fleet, earned: r.earned, earned_yday: r.earned_yday, trips: r.trips,
+    trips_yday: r.trips_yday, cars_week: r.cars_week }));
 }
 
 /* What the Owner reads while typing a target: the cars it will be shared

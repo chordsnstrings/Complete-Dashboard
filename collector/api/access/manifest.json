@@ -7739,7 +7739,15 @@
      "yesterday_month.target.rate",
      "yesterday_month.summary.month_target",
      "yesterday_month.summary.earned",
-     "yesterday_month.summary.ahead"
+     "yesterday_month.summary.ahead",
+     "summary.per_day_left",
+     "summary.avg_day",
+     "summary.month_end_pace",
+     "summary.pace_pct",
+     "summary.best.earned",
+     "summary.worst.earned",
+     "fleets[].earned",
+     "fleets[].earned_yday"
     ]
    },
    {
@@ -7766,7 +7774,10 @@
      "trips_summary.reached",
      "trips_summary.per_active",
      "trips_summary.today_target",
-     "trips_summary.today_trips"
+     "trips_summary.today_trips",
+     "trips_summary.avg_trips_day",
+     "fleets[].trips",
+     "fleets[].trips_yday"
     ]
    },
    {
@@ -7781,7 +7792,8 @@
      "saves[].cars",
      "context.cars_7_days",
      "context.cars_yesterday",
-     "context.last_month.cars"
+     "context.last_month.cars",
+     "fleets[].cars_week"
     ]
    },
    {
@@ -7800,5 +7812,69 @@
   "fleetKey": "",
   "cap": null,
   "notes": "api/target_routes.js + api/revenue_target.js (2026-10-02). The monthly revenue target for BOTH fleets: the month day by day (cars, AED a car a day, plan, what each day needed, fares earned, over or under once settled), yesterday's verdict, the summary the Today page leads with, and the figures the Owner's panel prints beside the target box. Gross = fares before any platform commission. Combines every fleet, so a reader limited to one is refused with that reason ('mixed'). Who saved a target is not in it (GET /api/access/target). Never cached (api/cache.js NEVER): a save moves it. The trips chart (same day): every day's completed trips against its active drivers × the trips minimum, and trips_summary over the month — trip counts and everything derived from them are BK."
+ },
+ {
+  "method": "GET",
+  "path": "/api/target/hours",
+  "subject": "REV",
+  "carries": [
+   "BK",
+   "REV"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "revenue.target",
+     "revenue.done",
+     "revenue.left",
+     "revenue.need_by_now",
+     "revenue.ahead",
+     "revenue.usual_day",
+     "revenue.projected",
+     "revenue.measured",
+     "revenue.hours[].usual",
+     "revenue.hours[].need",
+     "revenue.hours[].done",
+     "revenue.hours[].diff",
+     "revenue.hours[].cum_need",
+     "revenue.hours[].cum_done",
+     "revenue.hours[].catch_up",
+     "revenue.this_hour.need",
+     "revenue.this_hour.catch_up",
+     "revenue.this_hour.done",
+     "revenue.this_hour.usual"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "trips.target",
+     "trips.done",
+     "trips.left",
+     "trips.need_by_now",
+     "trips.ahead",
+     "trips.usual_day",
+     "trips.hours[].usual",
+     "trips.hours[].need",
+     "trips.hours[].done",
+     "trips.hours[].diff",
+     "trips.hours[].cum_need",
+     "trips.hours[].cum_done",
+     "trips.hours[].catch_up",
+     "trips.this_hour.need",
+     "trips.this_hour.catch_up",
+     "trips.this_hour.done",
+     "trips.this_hour.usual"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/target_routes.js + api/target_hours.js (2026-10-02). Today's target hour by hour, both fleets: each Dubai hour's share of a day's fares and completed trips over the last 28 days, today's target laid over it, what each hour has done (trips counted; revenue on record plus the live strip's own estimate for unpriced bookings), on target or not, and what the hours left must carry. Revenue REV, trips BK. Both fleets in one plan, so a reader limited to one is refused with that reason ('mixed'). Never cached (api/cache.js NEVER)."
  }
 ]

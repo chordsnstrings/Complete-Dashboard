@@ -2358,3 +2358,28 @@ earn", "AED 1,705,000.00", "▼ Under by 669 trips", "1,488 trips to complete",
 error, no sideways scroll, nothing undefined; neither band on #drivers; the
 phone's two cards above Today so far.
 
+
+
+### The first page — 2026-10-02, after the operator's correction
+
+Re-run on the bridge (production's 1 October, the 1,705,000 target, today's
+60 bookings unpriced as Uber's are, an intraday collection at 08:35): the
+bare address and #target open Target; Today's tabs are Target, To-do list,
+Fleet activity, Today vs yesterday, Analyst; #insights is under Work. Arkiv
+1440 light and dark, Classic 1440, Arkiv 960: the month's cells and strips,
+nine rows of the month in figures, five cells for today, both hourly panels
+with 24 rows each; no page error, no sideways scroll, nothing undefined.
+
+Found and fixed:
+- Side by side, the two hourly tables ran into each other at 1440 (seven
+  columns of money in half the width; Classic scrolled sideways 82px). One
+  above the other, each the page's width.
+- An hour that asked nothing and did nothing read "▲ On target"; it reads
+  "— nothing asked".
+- "−0 trips" from a rounded catch-up; zero is zero.
+- "This hour" printed the catch-up with no word for what it was; it reads
+  "AED 2,442.83 more by 09:00", with the hour's own target beside it.
+- The hourly chart, drawn 720 wide and shown 1,300, doubled its labels; drawn
+  at the width it is shown at.
+- The cut: first the oldest last run of every channel that ran today, which
+  the bridge pinned at 01:20 (the nightly catch-up) — trap 46.

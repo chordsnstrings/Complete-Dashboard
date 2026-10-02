@@ -2758,6 +2758,62 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
 /* The trips chart (the operator, the same day: "a similar chart for that
    too") — the same cells and strip under the revenue's, a rule between. */
 .targetnow .tg-band + .tg-band{margin-top:14px;padding-top:12px;border-top:1px solid var(--rule)}
+/* ── the first page (./targetpage.js) ─────────────────────────────────────
+   The month, today and every hour. On the page the section is the frame, so
+   the panel draws none of its own (.tg-page). */
+.targetnow.tg-page{margin:4px 0 0;padding:0;border:0;border-radius:0;background:none}
+.targetnow .tg-cells5{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media (max-width:1180px){.targetnow .tg-cells5{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .targetnow .tg-cells5 .tg-cell:nth-child(3n+1){padding-left:0;border-left:0}}
+/* the month in figures: label, revenue, trips */
+.mf{width:100%;margin:16px 0 0;border-collapse:collapse;font-size:var(--t5);font-variant-numeric:tabular-nums}
+.mf th,.mf td{padding:6px 12px 6px 0;text-align:left;vertical-align:baseline;border-top:1px solid var(--rule)}
+.mf thead th{border-top:0;font-size:var(--t3);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--grey)}
+.mf tbody th{font-weight:600;color:var(--ink);white-space:nowrap;width:16em}
+.mf td b{font-weight:600;color:var(--ink)}
+.mf td b.tg-over{color:var(--good)}
+.mf td b.tg-under{color:var(--critical)}
+.mf td b.tg-wait{color:var(--grey-strong)}
+.mf .mf-dim{color:var(--grey)}
+.mf tr.mf-fleet th{font-weight:500}
+/* hour by hour: the summary, the chart, its key, the table */
+.hp-lede{margin:0 0 8px;max-width:var(--measure,80ch);color:var(--grey-strong)}
+.hp-lede b{font-weight:600;color:var(--ink)}
+.hp-lede b.tg-over{color:var(--good)}
+.hp-lede b.tg-under{color:var(--critical)}
+.hc{display:block;width:100%;height:auto;max-height:220px;margin:4px 0}
+.hc .hc-base{stroke:var(--rule);stroke-width:1}
+.hc .hc-need{fill:none;stroke:var(--grey);stroke-width:1}
+.hc .hc-catch{fill:none;stroke:var(--ink);stroke-width:1;stroke-dasharray:3 2}
+.hc .hc-usual{stroke:var(--grey-strong);stroke-width:1.5}
+.hc .hc-done{fill:var(--grey)}
+.hc .hc-over .hc-done{fill:var(--good)}
+.hc .hc-under .hc-done{fill:var(--critical)}
+.hc .hc-now .hc-done{fill:var(--ink)}
+.hc .hc-x{font-size:var(--t2);fill:var(--grey)}
+.hp-key{margin:2px 0 10px;font-size:var(--t3);color:var(--grey);display:flex;flex-wrap:wrap;align-items:center;gap:2px 0}
+.hp-key .hk{display:inline-block;width:10px;height:10px;margin:0 5px 0 12px;vertical-align:-1px;border:1px solid transparent}
+.hp-key .hk:first-child{margin-left:0}
+.hp-key .hk-done-over{background:var(--good)}
+.hp-key .hk-done-under{background:var(--critical)}
+.hp-key .hk-done-now{background:var(--ink)}
+.hp-key .hk-need{border-color:var(--grey)}
+.hp-key .hk-catch{border:1px dashed var(--ink)}
+.hp-key .hk-usual{height:0;border:0;border-top:2px solid var(--grey-strong)}
+.hp{width:100%;border-collapse:collapse;font-size:var(--t4);font-variant-numeric:tabular-nums}
+.hp th,.hp td{padding:3px 10px 3px 0;text-align:right;white-space:nowrap;border-top:1px solid var(--rule)}
+.hp th:first-child,.hp td:nth-child(5){text-align:left}
+.hp thead th{border-top:0;font-size:var(--t3);font-weight:600;color:var(--grey)}
+.hp tbody th{font-weight:600;color:var(--ink)}
+.hp .tg-over{color:var(--good)}
+.hp .tg-under{color:var(--critical)}
+.hp .hp-now{color:var(--ink);font-weight:600}
+.hp .hp-dim{color:var(--grey)}
+.hp tr.hp-quiet{color:var(--grey)}
+.hp tr.hp-cur{background:var(--paper-2,var(--surface))}
+.hp-basis{margin-top:8px}
+.hp-wrap,.targetnow.tg-page,.mf{min-width:0}
+[data-panel="tp-rev"] .tablewrap,[data-panel="tp-trips"] .tablewrap{overflow-x:auto}
 @media (max-width:980px){
   .targetnow .tg-cells{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 0}
   .targetnow .tg-cell:nth-child(odd){padding-left:0;border-left:0}

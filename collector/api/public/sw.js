@@ -79,6 +79,8 @@ const SHELL_FILES = [
   '/tokens.js', '/deposit_core.js', '/today.js', '/onlinetime.js',
   /* m/screens.js imports ../target.js for the revenue target (2026-10-02). */
   '/target.js',
+  /* app.js imports it: the first page, the target hour by hour (2026-10-02). */
+  '/targetpage.js',
   /* Sign-in and access: data.js imports ./access.js, which imports
      ./access_model.js — both on the phone's path to its first screen — and
      every page links /access.css. */

@@ -4,6 +4,10 @@
          ?month=YYYY-MM           another month (default: the Dubai month of today)
          ?asof=YYYY-MM-DD         computed as if today were this day, from the
                                   data held now (a past month's last morning)
+     GET /api/target/hours        today's target hour by hour, revenue and
+                                  trips, each against the usual day — the
+                                  first page's two hourly panels
+                                  (api/target_hours.js)
      GET /api/export/today.xlsx   the Today page as a workbook
 
    The arithmetic and every rule behind it live in api/revenue_target.js and
@@ -16,6 +20,9 @@
    the page from before it, the failure /api/same-person is listed there for. */
 import { monthTarget, validMonth, validDay } from './revenue_target.js';
 import { buildTodayWorkbook, TODAY_FILE_CLASSES } from './today_workbook.js';
+import { targetHours } from './target_hours.js';
+
+export const HOURS_KEEP_MS = 30000;
 
 export function targetRoutes(app, { q, wrap, log = null }) {
   app.get('/api/target', wrap(async (req, res) => {
@@ -27,6 +34,20 @@ export function targetRoutes(app, { q, wrap, log = null }) {
        staff member's email is not part of a figure. A seed says it is one. */
     out.saves = out.saves.map(({ set_by: _by, set_by_label: label, ...s }) => ({ ...s, seeded: label === 'system:seed' }));
     return res.json(out);
+  }));
+
+  /* The first page asks every minute from every screen that has it open, and
+     one answer is the month's arithmetic, 28 days of hourly history and the
+     live strip's whole day. So the answer is kept for HOURS_KEEP_MS: every
+     screen inside that window gets the same figures (which is the point of the
+     page), the database does the work once, and a target saved on the Access
+     page is on it within the half-minute. The access layer shapes each
+     reader's copy after this handler, so one stored answer serves every role. */
+  let kept = { at: 0, val: null };
+  app.get('/api/target/hours', wrap(async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    if (!kept.val || Date.now() - kept.at > HOURS_KEEP_MS) kept = { at: Date.now(), val: await targetHours(q) };
+    return res.json(structuredClone(kept.val));
   }));
 
   app.get('/api/export/today.xlsx', wrap(async (req, res) => {
