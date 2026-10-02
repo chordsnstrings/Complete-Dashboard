@@ -2349,3 +2349,12 @@ Found and fixed:
 - On the Arkiv phone the target cards now lead Today, ahead of the live bar
   the redesign plan put first; test/phone_arkiv says so in the order it pins.
 
+### On production — 2026-10-02, after the seed
+
+The same six views through bin/prod-mirror.mjs (production's own bytes):
+both bands on every Today view, "▼ Under by AED 2,896.97", "AED 55,096.57 to
+earn", "AED 1,705,000.00", "▼ Under by 669 trips", "1,488 trips to complete",
+"▼ 6.7 a driver a day", "12 trips a day"; red in each skin's token; no page
+error, no sideways scroll, nothing undefined; neither band on #drivers; the
+phone's two cards above Today so far.
+

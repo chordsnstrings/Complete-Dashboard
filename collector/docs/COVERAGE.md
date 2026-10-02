@@ -8190,12 +8190,18 @@ And, before it went out: "set october target to 1.705 Million not 1.6"
   minimum always exists); withheld whole, with the reason, from a role
   without booking counts (every trip figure is declared BK in
   api/access/manifest.json — an undeclared one rides through the shaper).
-  What it will read: 843 trips by 107 drivers on 1 October against roughly
-  126 active — about 6.7 a driver, so under 12 by some 670 trips a day.
+  Measured on production once it went out (2026-10-02): 1 October, 843
+  trips by 126 active drivers (104 of them drove that day) — 6.69 a driver,
+  1,512 needed, under by 669; 20 drivers did 12 or more. Today asked 124 ×
+  12 = 1,488.
 - **Set up › Access** (Owner only, re-confirmed): the month, the gross, and
   before Save what it comes to — AED a car a day, a day's share, and whether
   the trips target agrees at last month's fare; every save kept with who and
   when. The trips setting is now titled as the Today trips target too.
+- **On production, 2026-10-02.** The seed applied once (api log, 06:34:37Z):
+  AED 1,705,000 over 101 cars = AED 544.55 a car a day, AED 55,000.00 a day
+  flat; 1 October earned 52,103.03 — under by 2,896.97 (94.7%), settled — so
+  today needs 55,096.57 (545.51 a car over 101). docs/FIX-STATUS.md TGT.
 - **The seed.** `TARGET_SEED="2026-10 1705000 trips=12"` on the api service:
   applied once at boot (the way BOOTSTRAP_OWNER_* made the first Owner), on the
   audit chain as `target.seed` by `system:seed`; it never overwrites a month
