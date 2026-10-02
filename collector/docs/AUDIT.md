@@ -2412,3 +2412,9 @@ by 12:31, the rest arriving overnight or later, so a fixed 98% line never
 let them settle. An hour now settles when the usual day stops adding to it
 (under 2% more within the hour), and is judged against what the usual day
 had in of it by then.
+
+After 1a3f296, at 13:01: 00:00–10:00 settled, 11:00 still arriving on the
+trips panel, 10:00's revenue "on pace" below its target. And one more lag:
+the answer counted the 12:00 hour at 37 trips against 14 due — the 13:01
+Uber run had stored trips ending 12:59 but not yet written its finish, so
+the cut still read 12:41. The cut now follows the newest row stored.

@@ -109,7 +109,8 @@ export function todayHtml(h) {
     + `<span class="tg-l">${esc(label)}</span><b class="tg-v">${esc(value)}</b>`
     + subs.filter(Boolean).map((x) => `<span class="tg-sub${x.tone ? ` tg-${x.tone}` : ''}">${esc(x.text || x)}</span>`).join('') + '</div>';
   const cut = h.cut_by === 'collection' ? `counted to ${h.clock}, the last collection`
-    : h.cut_by === 'last_booking' ? `counted to the last booking, ${h.clock}` : `as of ${h.clock}`;
+    : h.cut_by === 'received' ? `counted to ${h.clock}, the newest data received`
+      : h.cut_by === 'last_booking' ? `counted to the last booking, ${h.clock}` : `as of ${h.clock}`;
   const cells = [
     cell('Today’s target', rOk ? aed(R.target) : trips(P.target), [
       rOk && pOk ? `${trips(P.target)} — ${countOf(P.active, 'active driver')} × ${P.min}` : null,

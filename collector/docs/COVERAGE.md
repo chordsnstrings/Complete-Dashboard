@@ -4406,7 +4406,13 @@ untouched, and nothing projected is ever added into `accounted`.
       wrong turns, both measured: the oldest last run of every channel that
       ran today pins the cut at 01:21 all day, because the nightly `catchup`
       runs then and counts as "ran today"; and the clock overstates the
-      shortfall by the lag. api/target_hours.js collectedTo().
+      shortfall by the lag. api/target_hours.js collectedTo(). And a run
+      stores its rows as it goes and writes `finished_at` at the end: on
+      production the answer computed at 13:01 counted Uber trips that ended
+      12:59 against a cut of 12:41, because the 13:01 run (finished 13:01:51)
+      had stored them already — the page read the 12:00 hour at 37 trips
+      against 14 due. The cut is the later of the last finished run and the
+      newest row stored today (`trip.ingested_at`), never later than now.
   47. **An hour holds the trips REQUESTED in it, and Uber files a trip only
       once it is over — so the hour just gone is about half in.** Measured on
       production 2026-10-02 through the API (GET /api/trips/list for the

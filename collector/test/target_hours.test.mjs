@@ -55,7 +55,9 @@
      "over" waits for the hour to settle ............ 54 passed,  1 FAILED
      trips.hours[].expect left out of the manifest .. 54 passed,  1 FAILED
      an arriving hour drawn as "▼ Under" ............ 54 passed,  1 FAILED
-     on pace drawn as a bare "▲ On target" .......... 54 passed,  1 FAILED */
+     on pace drawn as a bare "▲ On target" .......... 54 passed,  1 FAILED
+   and against the 56, the cut blind to rows a run has stored before it
+   finished ......................................... 55 passed,  1 FAILED */
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { applySchema } from './schema.mjs';
@@ -98,6 +100,9 @@ for (let c = 1; c <= 10; c += 1) {
   for (let i = 0; i < 4; i += 1) await T({ fleet: c <= 7 ? 'ecosine' : 'egari', driver: `Test Driver ${c}`, plate: `C${c}`, at: `2026-10-02T18:${String(10 + i).padStart(2, '0')}:00+04:00`, price: null });
 }
 await T({ fleet: 'ecosine', driver: 'Test Driver 1', plate: 'C1', at: '2026-10-02T19:30:00+04:00', price: null });
+/* Today's rows carry no stored time until a check gives them one, so the
+   cut is the collection run or, without one, the newest booking. */
+await q(`UPDATE trip SET ingested_at = NULL WHERE requested_at >= '2026-10-02T00:00:00+04:00'`);
 await q(`INSERT INTO access_config (key, value) VALUES ('low_trips_min', '10') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
 /* AED 155,000 for October over the 10 cars that earned in the week before
    the 1st: AED 500 a car a day, 5,000 a day — exactly the usual day — and the
@@ -171,6 +176,15 @@ const cut = await targetHours(q, { now: NOW });
 check('the cut is the last intraday collection (a nightly catch-up cannot move it): 19:10, twenty minutes behind the clock',
   cut.cut_by === 'collection' && cut.clock === '19:10' && cut.now_clock === '19:30' && cut.lag_min === 20
   && cut.trips.hours[18].state === 'under' && cut.trips.hours[19].state === 'now', j([cut.cut_by, cut.clock, cut.lag_min, cut.trips.hours[19].state]));
+/* A run stores its rows as it goes and writes its finish at the end: on
+   production the answer at 13:01 counted trips ending 12:59 against a cut
+   of 12:41. Rows stored at 19:20, after the 19:10 run: the cut is 19:20. */
+await q(`UPDATE trip SET ingested_at = '2026-10-02T19:20:00+04:00'
+          WHERE requested_at >= '2026-10-02T18:00:00+04:00' AND requested_at < '2026-10-02T19:00:00+04:00'`);
+const mid = await targetHours(q, { now: NOW });
+check('rows a run has stored before it finished move the cut: 19:20, the newest received, not the 19:10 run',
+  mid.cut_by === 'received' && mid.clock === '19:20' && mid.lag_min === 10, j([mid.cut_by, mid.clock, mid.lag_min]));
+await q(`UPDATE trip SET ingested_at = NULL WHERE requested_at >= '2026-10-02T00:00:00+04:00'`);
 await q(`DELETE FROM collection_run`);
 
 /* ── 4. what cannot be measured ─────────────────────────────────────────── */

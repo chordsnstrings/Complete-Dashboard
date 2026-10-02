@@ -35,8 +35,13 @@
    `catchup` re-reads the days gone and says nothing about today's progress,
    so it cannot move the cut, and nor can one channel left behind: the
    freshest cycle is the cut, and a channel that failed it shows as missing
-   work on the page and as a failing source in the shell. With no intraday
-   run today, the last booking counted stands in; never later than now.
+   work on the page and as a failing source in the shell. A run stores its
+   rows as it goes and writes its finish at the end: on production, the
+   answer computed at 13:01 counted Uber trips that ended at 12:59 against a
+   cut of 12:41, because the 13:01 run had stored them and not yet finished.
+   Today is counted from every row stored, so the cut is the later of the
+   last finished run and the newest row stored today (trip.ingested_at); with
+   neither, the last booking counted stands in; never later than now.
 
    REPORTED, NOT REQUESTED. An hour holds the trips REQUESTED in it, and a
    provider files a trip only once it is over: on production, 161 Uber trips
@@ -170,7 +175,7 @@ async function todayByHour(q, today) {
                    count(*) FILTER (WHERE n.outcome = 'completed')::int AS completed,
                    count(*) FILTER (WHERE n.has_fare)::int AS priced,
                    coalesce(sum(n.price) FILTER (WHERE n.has_fare), 0)::float AS fares,
-                   max(n.requested_at) AS latest
+                   max(n.requested_at) AS latest, max(n.ingested_at) AS stored
               FROM trip_norm n
              WHERE n.local_day = $1::date AND n.is_booking
              GROUP BY 1, 2`, [today]);
@@ -262,8 +267,11 @@ export async function targetHours(q, { now = new Date(), min = null } = {}) {
     buildDay(q, today).catch(() => null),
     collectedTo(q, today),
   ]);
-  const latestBooking = rows.reduce((m, r) => (r.latest && (!m || new Date(r.latest) > m) ? new Date(r.latest) : m), null);
-  const cutAt = [ran || latestBooking || now, now].reduce((a, b) => (a < b ? a : b));
+  const newest = (k) => rows.reduce((m, r) => (r[k] && (!m || new Date(r[k]) > m) ? new Date(r[k]) : m), null);
+  const latestBooking = newest('latest');
+  const stored = newest('stored');
+  const byRows = stored && (!ran || stored > ran);
+  const cutAt = [(byRows ? stored : ran) || latestBooking || now, now].reduce((a, b) => (a < b ? a : b));
   const local = new Date(cutAt.getTime() + 4 * 3600e3);
   const sameDay = local.toISOString().slice(0, 10) === today;
   const cur = sameDay ? local.getUTCHours() : 0;
@@ -320,7 +328,7 @@ export async function targetHours(q, { now = new Date(), min = null } = {}) {
       timing: timing(tSeen, 'trips') };
   return {
     today, clock, hour: cur, now_clock: hhmm(now), at: now.toISOString(), cut_at: cutAt.toISOString(),
-    cut_by: ran ? 'collection' : latestBooking ? 'last_booking' : 'clock',
+    cut_by: byRows ? 'received' : ran ? 'collection' : latestBooking ? 'last_booking' : 'clock',
     lag_min: Math.round((now - cutAt) / 60000),
     latest_at: latestBooking ? latestBooking.toISOString() : null,
     month: t.month, month_name: t.month_name, revenue, trips,
