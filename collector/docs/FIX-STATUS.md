@@ -4267,7 +4267,7 @@ target".
 | TGT-15 | the month's detail: per day left, average day, month-end at this pace, best/worst, trips a day and active drivers, each fleet's part; all declared by class | target_hours (36/2, 37/1) | ✓ | 1f17063 | a172169c | ✓ 2026-10-02 |
 | TGT-16 | judged on what the usual day had REPORTED by the cut's clock (trip.ingested_at over the 28 days collected live): "due by now" like for like; an hour gone over at once, still arriving before it settles; restored days left out, under 7 live days the clock with its reason; the page's words, grey bar, key and basis; Classic's month note in the panel caption (spacing) | target_hours §9 (49/6, 51/4, 44/11, 54/1, 54/1, 54/1, 54/1) | ✓ | 31fce4c | 1aaf2e53 | ✓ 2026-10-02 "due by now" (revenue 16,065.14 against ≈ 17,176.69 at 12:31, trips 429.3 against 275); ✗ settled — TGT-17 |
 | TGT-17 | settled is when the usual day stops adding to an hour (under 2% more within the hour), not a fixed 98%: the usual day had 95.3–100% of the hours 00:00–10:00 in at 12:31, and 03:00 (97.8%) read "arriving"; a settled hour judged against what the usual day had in of it, the shortfall printed against its target; "▲ On pace · a usual day has 97% of it in by now" | target_hours §9 (53/2, 53/2, 54/1) | ✓ | 1a3f296 | 1aca7fab | ✓ 2026-10-02 13:01: 00:00–10:00 settled, 11:00 (trips, 89.7% in) arriving, 10:00 revenue on pace at 2,661.31 against 2,606.01 in by then (target 2,735.70) |
-| TGT-18 | the cut follows rows a run has stored before it finishes: the later of the last finished run and the newest row stored today (13:01 counted trips ending 12:59 against a 12:41 cut) | target_hours §3 (55/1) | ✓ | | | |
+| TGT-18 | the cut follows rows a run has stored before it finishes: the later of the last finished run and the newest row stored today (13:01 counted trips ending 12:59 against a 12:41 cut) | target_hours §3 (55/1) | ✓ | 3259efd | 6403aaf6 | ✓ 2026-10-02 13:09: cut_by received at 13:09:21, Uber's run finishing 13:09:54; then collection at 13:10 |
 
 Proven on production 2026-10-02 (fcdbf7b, then the seed's redeploy of the same
 commit). Before the seed, /api/target answered "No target is set for October
@@ -4301,4 +4301,15 @@ Analyst; the month's nine rows (Ecosine 36,314.10 and 580 trips, Egari
 error, no sideways scroll. The same pass found TGT-13's defect: the 12:00
 hour held 0 trips of a usual 40 at a 12:08 cut with every channel in, and
 the latest booking held was 11:57 — trap 47, fixed as TGT-16.
+
+After 3259efd (deployment 6403aaf6), through bin/prod-mirror.mjs (6 assets,
+0 differ), at 13:10: Arkiv 1440 light and dark, Classic 1440, Arkiv 960 —
+revenue ≈ AED 19,109.45 done against 17,665.75 the usual day had in by then,
+▲ 1,443.70 ahead; trips 302 against 474, ▼ 172 behind; this hour AED
+2,992.70 and 104 trips to land the day. Revenue hours 00:00–11:00 settled
+(10:00 "▲ On pace · a usual day has 95% of it in by now"), 12:00 "▲ On pace
+so far … still arriving" in grey; trips 11:00 and 12:00 "▼ Short by … so far
+· still arriving"; the lede and the basis say why. Classic's month note in
+its caption. No page error, no sideways scroll, nothing undefined; #insights
+under Work.
 
