@@ -229,6 +229,9 @@ export const APPLIES_WHY = {
   segment: 'it is one occupancy segment, addressed by plate and time',
   trip: 'it is one booking, addressed by the provider’s own id',
   feeds: 'it is every car Uber lists as active now, judged on the last day',
+  /* The first page (./targetpage.js): the month's target is set for the
+     calendar month and both fleets together, and the hours are today's. */
+  target: 'it is this month and today against the target set for both fleets on every channel',
   /* NO_RANGE: the window and the grouping */
   reconcile: 'its rows are whole months',
   compare: 'it carries its own two days in its address',
