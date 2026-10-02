@@ -50,12 +50,18 @@
    figure that had been collected by the cut's own clock time on each of the
    28 days (trip.ingested_at, which an upsert does not move; seenCurve). The
    day so far is judged against that; an hour that has ended is over as soon
-   as it reaches its target — more can only add — but under only once it has
-   settled (SETTLED of it reported on a usual day); until then it is
-   ARRIVING, judged "so far" against what the usual day had reported of it by
-   now. Days whose rows were not collected live (a restore, a backfill) are
-   left out of the timing; with fewer than HISTORY_MIN_DAYS live days the
-   clock stands in, and the panel says so.
+   as it reaches its target — more can only add — and otherwise ARRIVING
+   while a usual day would still add ARRIVING of it in the hour after the
+   cut, judged "so far" against what the usual day had reported of it by now.
+   Settled is not a fixed share: on production after 31fce4c, at 12:31, the
+   usual day had 95.3–99.7% of the hours 00:00–10:00 in (fares; trips
+   95.7–100%), the rest coming with the nightly catch-up or later, and a 98%
+   line left 03:00 (97.8%) "arriving" nine hours on. A settled hour is judged against what the usual day had in of
+   it by now too, so that remainder never counts against it; the shortfall
+   it prints is against its target, as the table's columns read. Days whose
+   rows were not collected live (a restore, a backfill) are left out of the
+   timing; with fewer than HISTORY_MIN_DAYS live days the clock stands in,
+   and the panel says so.
 
    REVENUE TODAY IS AN ESTIMATE, AND SAYS SO. Uber prices a day overnight, so
    most of today's fares are not on record yet. The page's live strip already
@@ -75,9 +81,9 @@ import { dubaiDay } from './window.js';
 
 export const HISTORY_DAYS = 28;
 export const HISTORY_MIN_DAYS = 7;
-/* An hour that ended is judged final once a usual day has reported this
-   much of it by the same clock. */
-export const SETTLED = 0.98;
+/* An hour that ended is still arriving while a usual day would add at
+   least this share of it in the hour after the cut. */
+export const ARRIVING = 0.02;
 const r2 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 100) / 100);
 const r1 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 10) / 10);
 
@@ -119,9 +125,10 @@ export async function usualDay(q, today) {
   };
 }
 
-/** How much of each hour a usual day had REPORTED by the cut's clock time:
-    per Dubai hour, the share of its completed trips (or, `fares`, of its
-    fares) that had been collected by that time of day on that day, pooled
+/** How much of each hour a usual day had REPORTED by the cut's clock time
+    (`seen`) and an hour after it (`next`): per Dubai hour, the share of its
+    completed trips (or, `fares`, of its fares) that had been collected by
+    that time of day on that day, pooled
     over the days from..to whose rows were collected live — at least half of
     the day's bookings first collected within a day of being requested. A
     day restored or backfilled carries its restore's time, which says
@@ -142,14 +149,17 @@ export async function seenCurve(q, { from, to, today, cut, fares = false }) {
      )
      SELECT b.h, sum(b.w)::float AS tot,
             coalesce(sum(b.w) FILTER (WHERE b.ing <= $3::timestamptz - ($4::date - b.d) * interval '1 day'), 0)::float AS seen,
+            coalesce(sum(b.w) FILTER (WHERE b.ing <= $3::timestamptz + interval '1 hour' - ($4::date - b.d) * interval '1 day'), 0)::float AS next,
             (SELECT count(*) FROM days)::int AS days
        FROM b JOIN days USING (d)
       GROUP BY b.h`, [from, to, cut.toISOString(), today]);
   const days = rows[0]?.days || 0;
-  if (days < HISTORY_MIN_DAYS) return { days, seen: null };
+  if (days < HISTORY_MIN_DAYS) return { days, seen: null, next: null };
   const seen = Array(24).fill(0);
-  for (const r of rows) seen[r.h] = r.tot > 0 ? Math.min(1, Math.max(0, r.seen / r.tot)) : 0;
-  return { days, seen };
+  const next = Array(24).fill(0);
+  const frac = (v, tot) => (tot > 0 ? Math.min(1, Math.max(0, v / tot)) : 0);
+  for (const r of rows) { seen[r.h] = frac(r.seen, r.tot); next[r.h] = frac(r.next, r.tot); }
+  return { days, seen, next };
 }
 
 /* Today's work so far, by hour: completed trips, and fares on record with
@@ -170,9 +180,9 @@ async function todayByHour(q, today) {
    and what the hours left must carry. `cur` is the current hour and `gone`
    the fraction of it gone; `done[h]` what each hour has done. `seen[h]`, when
    history has it (seenCurve), is how much of hour h a usual day had reported
-   by the cut; without it the clock stands in — every hour gone whole, this
-   one by the minutes gone. */
-export function hoursOf({ target, share, usual, done, cur, gone, seen = null, money = false }) {
+   by the cut, and `next[h]` an hour later; without them the clock stands in —
+   every hour gone whole, this one by the minutes gone. */
+export function hoursOf({ target, share, usual, done, cur, gone, seen = null, next = null, money = false }) {
   const R = money ? r2 : r1;
   const eps = money ? 0.005 : 1e-9;
   const need = share.map((s) => target * s);
@@ -194,15 +204,18 @@ export function hoursOf({ target, share, usual, done, cur, gone, seen = null, mo
     cumNeed += need[h];
     if (h <= cur) cumDone += done[h];
     const expect = need[h] * vis[h];
+    const coming = seen && next ? Math.max(0, Math.min(1, next[h] || 0) - vis[h]) : 0;
     /* An hour gone that asked nothing and did nothing is neither: "on
        target" over two zeros is a claim about nothing. Over is final the
-       moment it is reached — a late report only adds. Under waits until the
-       hour has settled; before that it is still arriving, and is judged so
-       far against what the usual day had reported of it by now. */
+       moment it is reached — a late report only adds. Otherwise, while the
+       usual day would still add ARRIVING of it within the hour, it is still
+       arriving, judged so far; after that it is settled, and judged against
+       what the usual day had in of it by now — on the clock, all of it. */
     const state = h > cur ? 'future' : h === cur ? 'now'
       : !need[h] && !done[h] ? 'idle'
         : done[h] >= need[h] - eps ? 'over'
-          : vis[h] >= SETTLED ? 'under' : 'arriving';
+          : coming >= ARRIVING ? 'arriving'
+            : done[h] >= expect - eps ? 'over' : 'under';
     const catchUp = h < cur || !restShare ? null
       : left * (h === cur ? s * (1 - vis[h]) : s) / restShare;
     return {
@@ -259,7 +272,7 @@ export async function targetHours(q, { now = new Date(), min = null } = {}) {
   const td = t.days.find((d) => d.state === 'today') || null;
   /* How much of each hour a usual day had reported by this clock. Before
      today's first collection nothing of today is due yet. */
-  const none = { days: null, seen: Array(24).fill(0) };
+  const none = { days: null, seen: Array(24).fill(0), next: Array(24).fill(0) };
   const [tSeen, fSeen] = sameDay ? await Promise.all([
     seenCurve(q, { from: usual.trips.from, to: usual.trips.to, today, cut: cutAt }),
     seenCurve(q, { from: usual.fares.from, to: usual.fares.to, today, cut: cutAt, fares: true }),
@@ -291,7 +304,7 @@ export async function targetHours(q, { now = new Date(), min = null } = {}) {
       ? { absent: `An hour's revenue target needs ${HISTORY_MIN_DAYS} days of priced fares to learn the usual day from; `
         + `${usual.fares.days} ${usual.fares.days === 1 ? 'is' : 'are'} on record.` }
       : { ...hoursOf({ target: t.summary.today_needs, share: usual.fares.share, usual: usual.fares.usual,
-        done: faresDone, cur, gone, seen: fSeen.seen, money: true }),
+        done: faresDone, cur, gone, seen: fSeen.seen, next: fSeen.next, money: true }),
       estimate: projected > 0, projected: r2(projected), measured: r2(rows.reduce((s, r) => s + Number(r.fares), 0)),
       basis: { days: usual.fares.days, from: usual.fares.from, to: usual.fares.to },
       timing: timing(fSeen, 'fares') };
@@ -301,7 +314,7 @@ export async function targetHours(q, { now = new Date(), min = null } = {}) {
       ? { absent: `An hour's trips target needs ${HISTORY_MIN_DAYS} days of completed trips to learn the usual day from; `
         + `${usual.trips.days} ${usual.trips.days === 1 ? 'is' : 'are'} on record.` }
       : { ...hoursOf({ target: td.trips_target, share: usual.trips.share, usual: usual.trips.usual,
-        done: tripsDone, cur, gone, seen: tSeen.seen }),
+        done: tripsDone, cur, gone, seen: tSeen.seen, next: tSeen.next }),
       active: td.active_drivers, min: t.trips_min,
       basis: { days: usual.trips.days, from: usual.trips.from, to: usual.trips.to },
       timing: timing(tSeen, 'trips') };

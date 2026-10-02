@@ -187,7 +187,12 @@ export function hoursHtml(x, h, { isMoney }) {
     + '<span class="hk hk-need"></span>target<span class="hk hk-catch"></span>to land the day'
     + '<span class="hk hk-usual"></span>what the hour usually does</p>';
   const rows = x.hours.map((r) => {
-    const status = r.state === 'over' ? `<span class="tg-over">▲ On target${r.diff > 0 ? ` +${esc(plain(r.diff))}` : ''}</span>`
+    /* Over, below its printed target: the hour has settled at or above what
+       the usual day has in of it by now, and the rest of a usual hour reaches
+       us later (trap 47) — said in those words, not as a bare tick. */
+    const status = r.state === 'over' ? (r.diff < 0 && r.reported != null
+      ? `<span class="tg-over">▲ On pace</span> <span class="hp-dim">· a usual day has ${Math.round(r.reported * 100)}% of it in by now</span>`
+      : `<span class="tg-over">▲ On target${r.diff > 0 ? ` +${esc(plain(r.diff))}` : ''}</span>`)
       : r.state === 'under' ? `<span class="tg-under">▼ Under by ${esc(plain(-r.diff))}</span>`
         : r.state === 'arriving' ? (r.so_far === 'over' ? `<span class="tg-over">▲ On pace so far${r.diff > 0 ? ` +${esc(plain(r.diff))}` : ''}</span>`
           : `<span class="tg-under">▼ Short by ${esc(plain(-r.diff))} so far</span>`) + ' <span class="hp-dim">· still arriving</span>'
@@ -200,7 +205,7 @@ export function hoursHtml(x, h, { isMoney }) {
       + `<td>${r.cum_done == null ? '<span class="hp-dim">—</span>' : esc(`${f(r.cum_done)} / ${plain(r.cum_need)}`)}</td></tr>`;
   }).join('');
   const timing = x.timing?.why ? ` ${x.timing.why}`
-    : x.timing?.days ? ` “Due by now” is what the usual day had reported by this time of day — a trip reaches us after it is over — over the ${countOf(x.timing.days, 'day')} collected live.` : '';
+    : x.timing?.days ? ` “Due by now” is what the usual day had reported by this time of day — a trip reaches us after it is over — over the ${countOf(x.timing.days, 'day')} collected live; an hour gone is still arriving while the usual day would add more of it within the hour.` : '';
   const basis = `<p class="cap hp-basis">${esc(`Each hour’s target is today’s ${plain(x.target)} × the share of a day’s ${isMoney ? 'fares' : 'completed trips'} that hour carried over the last ${countOf(x.basis?.days, 'day')} (${x.basis?.from} to ${x.basis?.to}). “To land the day” shares what is still to do over the hours left in the same proportions.${timing}`)}`
     + (est ? ` ${esc('Today’s revenue is the live strip’s estimate — fares on record plus each channel’s unpriced bookings at its settled per-booking rate — until Uber prices the day overnight.')}` : '') + '</p>';
   return `${head}${hourChart(x, { isMoney })}${key}`

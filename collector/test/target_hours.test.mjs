@@ -25,9 +25,11 @@
      9. reported, not requested (docs/COVERAGE.md trap 47): with the days
         gone collected live, "due by now" is what the usual day had REPORTED
         by the same clock, and an hour that has ended is still arriving —
-        judged so far — until it settles; over is final at once; days not
-        collected live are left out, and under 7 of them the clock stands in
-        and says so.
+        judged so far — while the usual day would add 2% more of it within
+        the hour; settled, it is judged against what the usual day had in by
+        now, never against the part that comes overnight; over is final at
+        once; days not collected live are left out, and under 7 of them the
+        clock stands in and says so.
    Synthetic plates (C…) and drivers (Test Driver …) only.
 
    REVERSIONS, run 2026-10-02 against the 38 checks below — each rule
@@ -42,15 +44,18 @@
      revenue.hours[].done left out of the manifest .. 37 passed,  1 FAILED
      an idle hour drawn as "▲ On target" ............ 37 passed,  1 FAILED
      the strip's estimate not spread over the hours . 30 passed,  8 FAILED
-   and, the same day after trap 47, against the 53 — each restored and its
-   md5 checked:
-     the timing ignored (every hour judged by clock)  47 passed,  6 FAILED
-     an ended hour judged at once (no "arriving") ... 49 passed,  4 FAILED
-     backfilled days kept in the timing ............. 42 passed, 11 FAILED
-     the hour now counted by the minutes gone ....... 52 passed,  1 FAILED
-     "over" waits for the hour to settle ............ 52 passed,  1 FAILED
-     trips.hours[].expect left out of the manifest .. 52 passed,  1 FAILED
-     an arriving hour drawn as "▼ Under" ............ 52 passed,  1 FAILED */
+   and, the same day after trap 47 and its settled rule, against the 55 —
+   each restored and its md5 checked:
+     the timing ignored (every hour judged by clock)  49 passed,  6 FAILED
+     no "arriving": an ended hour judged at once .... 51 passed,  4 FAILED
+     settled at a fixed 98% share ................... 53 passed,  2 FAILED
+     a settled hour judged against its whole target . 53 passed,  2 FAILED
+     backfilled days kept in the timing ............. 44 passed, 11 FAILED
+     the hour now counted by the minutes gone ....... 54 passed,  1 FAILED
+     "over" waits for the hour to settle ............ 54 passed,  1 FAILED
+     trips.hours[].expect left out of the manifest .. 54 passed,  1 FAILED
+     an arriving hour drawn as "▼ Under" ............ 54 passed,  1 FAILED
+     on pace drawn as a bare "▲ On target" .......... 54 passed,  1 FAILED */
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { applySchema } from './schema.mjs';
@@ -59,7 +64,7 @@ let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 const j = JSON.stringify;
 
-const { targetHours, usualDay, hoursOf, HISTORY_MIN_DAYS, SETTLED } = await import('../api/target_hours.js');
+const { targetHours, usualDay, hoursOf, HISTORY_MIN_DAYS, ARRIVING } = await import('../api/target_hours.js');
 const { saveTarget, monthTarget, addDays } = await import('../api/revenue_target.js');
 
 const db = new PGlite();
@@ -279,7 +284,7 @@ check('the 18:00 hour ended 10 short of its 50, but it is still arriving, not un
 check('an hour that reached its target is over, settled or not', at(LP, 8).state === 'over', at(LP, 8).state);
 await ran('2026-10-02T19:15:00+04:00');
 const settled = await targetHours(q, { now: NOW });
-check(`by 19:15 the usual day had the whole 18:00 hour (${SETTLED * 100}% settles it): now it is under, by 10 of its 50`,
+check(`by 19:15 the usual day had the whole 18:00 hour and would add nothing more (under ${ARRIVING * 100}%): settled, and under by 10 of its 50`,
   at(settled.trips, 18).state === 'under' && at(settled.trips, 18).diff === -10 && settled.trips.need_by_now === 80
   && settled.trips.arriving === 0, j([at(settled.trips, 18), settled.trips.need_by_now]));
 /* Pure: the current hour by what is reported of it, not by the minutes
@@ -292,10 +297,24 @@ check('the hour now counts by what a usual day had reported of it: at 08:30, 6 d
   cur8.need_by_now === 6 && cur8.ahead === 4 && Math.abs(cur8.this_hour.catch_up - 90 * 0.24 / 0.94) < 0.06 && cur8.this_hour.expect === 6,
   j([cur8.need_by_now, cur8.this_hour]));
 const seen9 = Array(24).fill(0); seen9[8] = 0.5;
-const at9 = (d8) => hoursOf({ target: 100, share: SH, usual: Array(24).fill(0), done: Array(24).fill(0).map((_, i) => (i === 8 ? d8 : 0)), cur: 9, gone: 0, seen: seen9 }).hours[8];
+const next9 = Array(24).fill(0); next9[8] = 1;
+const at9 = (d8, s = seen9, nx = next9) => hoursOf({ target: 100, share: SH, usual: Array(24).fill(0),
+  done: Array(24).fill(0).map((_, i) => (i === 8 ? d8 : 0)), cur: 9, gone: 0, seen: s, next: nx }).hours[8];
 check('an hour half reported that has already done its 30 is over; one at 20 is still arriving, 5 ahead of the 15 expected so far; at 10, 5 short',
   at9(30).state === 'over' && at9(20).state === 'arriving' && at9(20).so_far === 'over' && at9(20).diff === 5
   && at9(10).so_far === 'under' && at9(10).diff === -5, j([at9(30).state, at9(20), at9(10).diff]));
+/* Production after 31fce4c: the hours long gone stood at 95–99.7% all day —
+   the rest of an hour comes with the nightly catch-up — and a fixed 98% line
+   left 03:00 "arriving" at 12:31. An hour the usual day has 97% of, and adds
+   nothing more to within the hour, is settled and judged against that 97%. */
+const flat = Array(24).fill(0); flat[8] = 0.97;
+check('settled is when the usual day stops adding to it, not a fixed share: at 97% and flat, 29.2 of 30 is on pace (0.8 short of its target, which it prints), 28 is under by 2',
+  at9(29.2, flat, flat).state === 'over' && at9(29.2, flat, flat).diff === -0.8 && at9(29.2, flat, flat).reported === 0.97
+  && at9(28, flat, flat).state === 'under' && at9(28, flat, flat).diff === -2, j([at9(29.2, flat, flat), at9(28, flat, flat).state]));
+const ph9 = hoursHtml({ ...hoursOf({ target: 100, share: SH, usual: Array(24).fill(0), done: Array(24).fill(0).map((_, i) => (i === 8 ? 29.2 : 0)),
+  cur: 9, gone: 0, seen: flat, next: flat }), basis: { days: 28, from: '2026-09-04', to: '2026-10-01' }, timing: { days: 28 } }, { clock: '09:00' }, { isMoney: false });
+check('…and the page says why it is on pace below its target, in words', /<span class="tg-over">▲ On pace<\/span> <span class="hp-dim">· a usual day has 97% of it in by now<\/span>/.test(ph9),
+  (ph9.match(/<th scope="row">08:00<\/th>.*?<\/tr>/) || [''])[0]);
 /* Days not collected live: everything before 26 September stamped three
    days late, as a backfill or a restore stamps it. */
 await q(`UPDATE trip SET ingested_at = requested_at + interval '3 days' WHERE requested_at < '2026-09-26T00:00:00+04:00'`);
@@ -316,7 +335,7 @@ check('the page: the hour just gone reads "on pace so far … still arriving", n
   /<span class="tg-over">▲ On pace so far \+10 trips<\/span> <span class="hp-dim">· still arriving<\/span>/.test(lr['18:00'].html)
   && !/Under by/.test(lr['18:00'].html) && /<b class="tg-over">▲ 11 trips ahead<\/b>/.test(lh)
   && /The hour just gone is still arriving — a trip reaches us about half an hour after it is requested/.test(lh)
-  && /“Due by now” is what the usual day had reported by this time of day — a trip reaches us after it is over — over the 28 days collected live\./.test(lh)
+  && /“Due by now” is what the usual day had reported by this time of day — a trip reaches us after it is over — over the 28 days collected live; an hour gone is still arriving while the usual day would add more of it within the hour\./.test(lh)
   && /class="hc-h hc-arriving"/.test(lh), lr['18:00'].html);
 const lt = todayHtml(lag);
 check('today: right now is 550 ahead, against what the usual day had reported by 19:00',

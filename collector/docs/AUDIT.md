@@ -2402,3 +2402,13 @@ and the page has none. Measured instead with spacing.test.mjs's own MEASURE
 against the mock at Arkiv 1440, Classic 1440 and Arkiv 960: Classic put the
 month's note as a bare span 3px above the panel body (minimum 10). It is the
 panel's caption paragraph now; 0 pairs under 10px in all three.
+
+On production after 31fce4c, at 12:31: "due by now" read like for like —
+revenue ≈ 17,176.69 done against 16,065.14 the usual day had in by then
+(1,111.55 ahead), trips 275 against 429.3 (154.3 behind) — and the hour
+just gone (11:00) read still arriving. But so did 03:00 (trips 97.8% in),
+and 08:00 to 10:00: the usual day had 95.3–100% of the hours 00:00–10:00 in
+by 12:31, the rest arriving overnight or later, so a fixed 98% line never
+let them settle. An hour now settles when the usual day stops adding to it
+(under 2% more within the hour), and is judged against what the usual day
+had in of it by then.

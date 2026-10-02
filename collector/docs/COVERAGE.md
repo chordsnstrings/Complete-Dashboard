@@ -4425,9 +4425,15 @@ untouched, and nothing projected is ever added into `accounted`.
       like: api/target_hours.js seenCurve() reads, per hour, the share of
       its final figure that had been collected by the cut's clock on each of
       the 28 days, and judges "due by now" and each hour gone against that;
-      an hour is under only once 98% of it would have been in (SETTLED),
-      "still arriving" until then, and over the moment it reaches its
-      target. A restored or backfilled day carries the restore's time in
+      an hour is over the moment it reaches its target, "still arriving"
+      while a usual day would add 2% more of it within the next hour
+      (ARRIVING), and settled after that — judged against what the usual day
+      had in of it by now, not against all of it. Settled cannot be a fixed
+      share: on production after 31fce4c, at 12:31, the hours 00:00–10:00
+      stood at 95.3–99.7% of their final figure (fares) and 95.7–100%
+      (trips) on the usual day — the rest of an hour comes with the nightly
+      catch-up or later — and a first rule of "98% in" left 03:00 (97.8%)
+      still arriving nine hours on. A restored or backfilled day carries the restore's time in
       `ingested_at`, which would read as "nothing reported by now" and turn
       every day into a day ahead — so a day counts only when half its
       bookings were first collected within a day of being requested, and
@@ -8261,8 +8267,9 @@ And, before it went out: "set october target to 1.705 Million not 1.6"
   that Dubai hour carried over the last 28 days, the hour's usual beside it.
   The day so far against what the usual day had REPORTED by the cut's clock
   (trap 47), at the cut (trap 46); an hour that has ended is over as soon as
-  it reaches its target, under once it has settled, and still arriving —
-  judged so far — before that; what is left shared over the rest of the day
+  it reaches its target, still arriving — judged so far — while the usual
+  day would add more of it within the hour, and after that judged against
+  what the usual day had in of it by now; what is left shared over the rest of the day
   in the same proportions ("to land the day"); an hour that asked nothing and
   did nothing is neither. Revenue today
   is the live strip's own estimate spread by each channel's unpriced bookings
