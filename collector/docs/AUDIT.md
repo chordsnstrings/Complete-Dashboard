@@ -2293,3 +2293,59 @@ the working tree against production data (bin/live-ui.mjs), desktop 1440 in
 both skins and phone 390, folded and open; the phone's open rows stack one
 cell under another as before.
 
+## The revenue target on Today — 2026-10-02
+
+A pass before deploying, on the working tree: a scratch bridge on :8300 that
+serves api/public and proxies every /api route to production, except
+/api/target and /api/export/today.xlsx, answered from a local copy seeded to
+production's measured 1 October (101 cars in the 7 days to it, AED 52,103.03,
+843 trips) with a 1.6M target saved (the operator's figure then; October went out
+at 1,705,000). Desktop 1440 (Arkiv light and dark,
+Classic), desktop 960, phone 390, and #drivers. Every view: no page error, no
+sideways scroll, no "undefined"/"NaN"/"null" in the panel; the panel on the
+Today pages only; "Excel ⤓ today" on Today, the money workbook's "Excel ⤓"
+on Drivers; the workbook downloaded from both buttons and read back.
+
+Found and fixed in the pass:
+- The panel landed UNDER the page title: the Arkiv shell (shell.js) prepends a
+  fixed list of hosts and leaves any other where prepend() leaves strangers.
+  It is named in that list now, above the strip; test/arkiv_shell.test.mjs
+  pins the order with it (77 pass).
+- A rule before the first cell, and down the phone's single column: arkiv.css
+  restated the whole cell border at a higher specificity than app.css's
+  width rules that remove it. Arkiv now sets the colour only; the frame is on
+  the desktop host (#targetNow) and not on the phone card that shares the
+  classes.
+- The Set up preview divided a month's first save by the days LEFT (AED
+  10,333.33 a car a day for a save that stored 10,000.00); the browser check in
+  test/access_pages.test.mjs §11 caught it.
+
+### The trips chart — 2026-10-02, the same bridge
+
+"There should also be a minimum 12 trips per day per active driver. there
+should be a similar chart for that too." Re-run with the target at 1,705,000
+(AED 544.55 a car a day over 101 cars; 1 October planned at exactly 55,000.00).
+The same six views, both bands drawn on every Today view and neither on
+#drivers. Read off the panel at 1440, both skins, light and dark: revenue
+yesterday "▼ Under by AED 2,896.97" (55,000 − 52,103.03), today "AED
+55,096.57 to earn" (55,000 + 2,896.97 ÷ 30), the month AED 1,705,000.00;
+trips yesterday "▼ Under by 525 trips" (843 of the bridge's 114 active × 12 =
+1,368), today "1,380 trips to complete", the month "▼ 7.4 a driver a day" —
+every red value the skin's --critical (#961111 Arkiv light, #D65044 dark,
+#901D38 Classic), today in ink. One legend for both strips. No page error,
+no sideways scroll, no "undefined"/"NaN"/"null" in either band or either
+phone card.
+
+Found and fixed:
+- The phone strip's days were links 14px tall — test/phone_arkiv's 44px
+  thumb rule failed on `a.tg-d` at 390 and 360. Thirty-one squares in 390px
+  are eleven pixels wide whatever their height, so on the phone the strip is
+  a chart and links nowhere; the desktop keeps its links.
+- A day that met the minimum to the trip read "▲ Over by 0 trips"; it reads
+  "▲ Met exactly".
+- The strip's 10px day numbers, and `font-size:0` to hide them on a narrow
+  screen, were literal sizes off the type scale (test/type_scale): --t2, and
+  pushed out of the square with text-indent instead.
+- On the Arkiv phone the target cards now lead Today, ahead of the live bar
+  the redesign plan put first; test/phone_arkiv says so in the order it pins.
+

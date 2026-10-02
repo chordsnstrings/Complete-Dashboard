@@ -575,6 +575,37 @@
 :root[data-skin="arkiv"] .todaynow .lb-notes summary:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 :root[data-skin="arkiv"] .todaynow .lb-note{margin:4px 0 0;max-width:var(--measure,72ch);font-family:var(--sans);
   font-size:var(--t4);line-height:1.5;color:var(--grey)}
+/* the month's revenue target, above the livebar on the Today pages: the same
+   language — paper ground, an ink rule under it, mono labels in capitals, a
+   sans figure — with the semantic pair carrying over and under (and the
+   arrow and the word beside every coloured figure, L3). */
+/* The frame on the desktop host only (#targetNow): the phone's card wears
+   the same classes and its own frame (m.css .m-target). */
+:root[data-skin="arkiv"] #targetNow{margin:0;padding:12px var(--shell-x) 12px;background:var(--paper);border:0;
+  border-bottom:1px solid var(--hair);border-radius:0;font-size:var(--t5)}
+:root[data-skin="arkiv"] .ak-shell .targetnow:not([hidden]){display:block}
+:root[data-skin="arkiv"] .targetnow .tg-title{font-family:var(--mono);font-size:var(--t3);font-weight:600;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink)}
+:root[data-skin="arkiv"] .targetnow .tg-scope{font-family:var(--sans);font-size:var(--t4);font-style:italic;
+  color:var(--grey);border-left:1px solid var(--hair);padding-left:14px}
+:root[data-skin="arkiv"] .targetnow .tg-meta{font-family:var(--mono);font-size:var(--t3);letter-spacing:.06em;color:var(--grey)}
+:root[data-skin="arkiv"] .targetnow .tg-absent{font-family:var(--sans);font-size:var(--t5);color:var(--ink-2)}
+/* The colour only: which cells carry a rule is the layout's (app.css, by
+   width), and restating the whole border here re-drew it before the first
+   cell and down the phone's single column. */
+:root[data-skin="arkiv"] .targetnow .tg-cell{border-left-color:var(--faint)}
+:root[data-skin="arkiv"] .targetnow .tg-l{font-family:var(--mono);font-size:var(--t3);letter-spacing:.07em}
+:root[data-skin="arkiv"] .targetnow .tg-v{font-family:var(--sans);font-size:var(--d1);font-weight:600;
+  letter-spacing:-.012em;font-variant-numeric:proportional-nums}
+:root[data-skin="arkiv"] .targetnow .tg-sub{font-family:var(--sans)}
+:root[data-skin="arkiv"] .targetnow .tg-wait .tg-v{color:var(--ink-2)}
+:root[data-skin="arkiv"] .targetnow .tg-bar{background:var(--faint)}
+:root[data-skin="arkiv"] .targetnow .tg-d{border-color:var(--hair);font-family:var(--mono)}
+:root[data-skin="arkiv"] .targetnow .tg-d.tg-over,:root[data-skin="arkiv"] .targetnow .tg-d.tg-under{color:var(--paper)}
+:root[data-skin="arkiv"] .targetnow .tg-d.tg-wait{background:repeating-linear-gradient(135deg,var(--hair) 0 2px,transparent 2px 5px)}
+:root[data-skin="arkiv"] .targetnow .tg-legend{font-family:var(--mono);font-size:var(--t2);letter-spacing:.04em}
+:root[data-skin="arkiv"] .targetnow .tg-key{border-color:var(--hair)}
+:root[data-skin="arkiv"] .targetnow .tg-band + .tg-band{border-top-color:var(--faint)}
 
 /* ── 4 · panels and grids ───────────────────────────────────────────────────
    panel() is unchanged — the .pbody body and the data-panel keys. The card

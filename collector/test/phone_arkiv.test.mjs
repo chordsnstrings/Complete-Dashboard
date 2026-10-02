@@ -526,6 +526,7 @@ console.log('\n4.1 · Today: the livebar, 00 at a glance, the sections, † what
     const band = deck.querySelector('.absence');
     return {
       order: {
+        targets: kids.map((k, i) => (k.classList.contains('m-target') ? i : -1)).filter((i) => i >= 0),
         live: at((k) => k === live), head: at((k) => k.classList.contains('sechd')),
         lede: at((k) => k.classList.contains('m-lede')), tiles: at((k) => k === glance),
         chart: at((k) => k.querySelector?.(':scope > h2')?.textContent === 'Bookings a day'),
@@ -546,8 +547,12 @@ console.log('\n4.1 · Today: the livebar, 00 at a glance, the sections, † what
     };
   });
   const o = t.order;
-  check('the livebar leads, then 00 (its head, the statement, the tiles), then the chart, then the sections',
-    o.live === 0 && o.head > o.live && o.lede === o.head + 1 && o.tiles === o.lede + 1 && o.chart > o.tiles
+  /* The month's revenue target and the trips minimum come first on Today,
+     on every shell — the operator, 2026-10-02: "the first page will show how
+     much every day we need to earn and yesterday were we over or under", and
+     "a similar chart" for trips. After them, the plan's order as it was. */
+  check('the target and the trips minimum lead, then the livebar, then 00 (its head, the statement, the tiles), then the chart, then the sections',
+    JSON.stringify(o.targets) === '[0,1]' && o.live === 2 && o.head > o.live && o.lede === o.head + 1 && o.tiles === o.lede + 1 && o.chart > o.tiles
       && o.who > o.chart && o.band > o.who && o.foot === o.n - 1 && o.band === o.n - 2, JSON.stringify(o));
   check('the livebar is unnumbered (an ink dot, not 01)', t.liveIdx === '""', t.liveIdx);
   check('…and says it does not follow the window or the channel in the bar above it',

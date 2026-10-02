@@ -442,3 +442,10 @@ a.m-stat:active{ transform:scale(.985) }
 .m-chips.m-supervisors { flex-wrap: wrap; overflow: visible; gap: 8px; }
 .m-chips.m-supervisors .m-chip { min-height: 44px; padding: 0 16px;
   display: inline-flex; align-items: center; font-size: var(--t7); }
+
+/* The revenue target card (../target.js): the desktop panel's own classes,
+   inside a card, so the card's frame is the only frame. */
+.m-target .targetnow { margin: 0; padding: 0; border: 0; border-radius: 0; background: none; }
+.m-target .tg-cells { gap: 14px 0; }
+.m-target .tg-strip { margin-top: 14px; }
+.m-target .tg-xl { margin-top: 14px; }

@@ -7670,5 +7670,135 @@
   "fleetKey": "",
   "cap": "credentials.write",
   "notes": "api/server.js:3916-3934, behind requireAdmin. Body {KEY: value | null | ''}. It writes or deletes app_setting rows (secret keys AES-GCM encrypted), then calls recordSaved (api/save_check.js:111-177). That tests each saved key live against its provider (outbound, can spend provider quota). If the provider hands back a rotated credential, it STORES the successor, and it updates the credential_state "
+ },
+ {
+  "method": "GET",
+  "path": "/api/export/today.xlsx",
+  "subject": "REV",
+  "carries": [
+   "BK",
+   "EARN",
+   "ID",
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/target_routes.js + api/today_workbook.js (2026-10-02). The Today page as an .xlsx: Target, Days, Cars yesterday (plates, VEH), Drivers yesterday (names ID, fares EARN), Action list (api/insights_sql.js, withheld whole without ID), Today so far. Body is a FILE, not JSON, so the shaper never sees inside it: the route writes (withheld) itself in every cell of a class (ID, REV, EARN, VEH, BK) a signed-in reader's role does not hold in full, the money workbook's rule. Both fleets: 'mixed'."
+ },
+ {
+  "method": "GET",
+  "path": "/api/target",
+  "subject": "REV",
+  "carries": [
+   "BK",
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "days[].rate",
+     "days[].plan",
+     "days[].needed",
+     "days[].earned",
+     "days[].diff",
+     "yesterday.rate",
+     "yesterday.plan",
+     "yesterday.needed",
+     "yesterday.earned",
+     "yesterday.diff",
+     "summary.month_target",
+     "summary.gross_set",
+     "summary.rate",
+     "summary.since_set",
+     "summary.earned",
+     "summary.planned",
+     "summary.ahead",
+     "summary.to_go",
+     "summary.today_needs",
+     "summary.today_per_car",
+     "target.gross",
+     "target.rate",
+     "saves[].gross",
+     "saves[].rate",
+     "saves[].past_plan",
+     "context.last_month.fares",
+     "context.last_month.avg_fare",
+     "yesterday_month.target.gross",
+     "yesterday_month.target.rate",
+     "yesterday_month.summary.month_target",
+     "yesterday_month.summary.earned",
+     "yesterday_month.summary.ahead"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "days[].trips",
+     "days[].trips_target",
+     "days[].trips_per_active",
+     "days[].reached",
+     "days[].drove",
+     "days[].bookings",
+     "yesterday.trips",
+     "yesterday.trips_target",
+     "yesterday.trips_per_active",
+     "yesterday.reached",
+     "yesterday.drove",
+     "yesterday.bookings",
+     "days[].trips_diff",
+     "days[].trips_pct",
+     "yesterday.trips_diff",
+     "yesterday.trips_pct",
+     "trips_summary.trips",
+     "trips_summary.needed",
+     "trips_summary.reached",
+     "trips_summary.per_active",
+     "trips_summary.today_target",
+     "trips_summary.today_trips"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "days[].cars",
+     "yesterday.cars",
+     "summary.cars_at_set",
+     "summary.cars_now",
+     "summary.today_cars",
+     "target.cars",
+     "saves[].cars",
+     "context.cars_7_days",
+     "context.cars_yesterday",
+     "context.last_month.cars"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "days[].why",
+     "days[].coverage",
+     "yesterday.why",
+     "yesterday.coverage"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/target_routes.js + api/revenue_target.js (2026-10-02). The monthly revenue target for BOTH fleets: the month day by day (cars, AED a car a day, plan, what each day needed, fares earned, over or under once settled), yesterday's verdict, the summary the Today page leads with, and the figures the Owner's panel prints beside the target box. Gross = fares before any platform commission. Combines every fleet, so a reader limited to one is refused with that reason ('mixed'). Who saved a target is not in it (GET /api/access/target). Never cached (api/cache.js NEVER): a save moves it. The trips chart (same day): every day's completed trips against its active drivers × the trips minimum, and trips_summary over the month — trip counts and everything derived from them are BK."
  }
 ]

@@ -107,6 +107,11 @@ const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/t
      identity-links page reads the same verdict and would be stale in the same
      way. Both are small reads over one table; neither is worth a cache. */
   '/api/same-person', '/api/drivers/identity-links',
+  /* THE REVENUE TARGET, which the Owner's save and the trips-a-day setting
+     move (api/target_routes.js). Neither advances the version above, so a save
+     would be answered with the target from before it — the same failure as
+     the two above. Four grouped reads over the month; cheap enough live. */
+  '/api/target',
   /* THE CREDENTIAL BANNER, which a Settings save changes.
      ───────────────────────────────────────────────────────────────────────
      A save tests the value it stored and rewrites the banner rows

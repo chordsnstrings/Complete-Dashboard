@@ -232,7 +232,12 @@ await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name)
    show up as two rows — it shows up as six trips where there are three, on the
    page an operator reads to decide who is working. An assertion that only
    counted rows would have passed against the bug; this one counts the trips. */
-for (const [i, day] of ['2026-09-02', '2026-09-03', '2026-09-04'].entries()) {
+/* Dubai days counted back from today, not fixed dates: the checks below ask
+   for the last 30 days, and seeded on 2–5 September the first trip fell out
+   of that window on 2 October 2026 — "trips 3 — four were seeded", a test
+   failing on the calendar rather than on the code. */
+const ago = (n) => new Date(Date.now() + 4 * 3600e3 - n * 864e5).toISOString().slice(0, 10);
+for (const [i, day] of [ago(10), ago(9), ago(8)].entries()) {
   await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
              requested_at, ended_at, status, distance_km)
            VALUES ('uber',$1,'ecosine','L777','zz-second-account','Sorts Last',
@@ -263,7 +268,7 @@ await q(`INSERT INTO driver_photo (platform, driver_ext_id, bytes, content_type,
   await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
              requested_at, ended_at, status, distance_km)
            VALUES ('bolt','aa-trip-1','ecosine','L777','aa-first-account','Sorts Last',
-                   '2026-09-05T09:00:00+04:00','2026-09-05T09:20:00+04:00','completed',10)`);
+                   $1::timestamptz, $1::timestamptz + interval '20 minutes','completed',10)`, [`${ago(7)}T09:00:00+04:00`]);
   const r = await get('/api/drivers/leaderboard?days=30');
   const rows = (r.body?.rows || []);
   const who = rows.find((x) => /Sorts Last/.test(x.driver_name || ''));

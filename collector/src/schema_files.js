@@ -287,4 +287,8 @@ export const SCHEMA_FILES = [
      (src/monthly_report.js): what Resend said per month per address, and the
      report as composed. Additive. test/monthly_report.test.mjs. */
   'schema_v97.sql',
+  /* v98 (2026-10-02): revenue_target — the month's gross target for both
+     fleets, one row per save, never updated (api/revenue_target.js). Additive.
+     test/revenue_target.test.mjs. */
+  'schema_v98.sql',
 ];

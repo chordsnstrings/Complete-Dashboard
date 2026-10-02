@@ -141,7 +141,11 @@ export function buildShell() {
   /* The order, top to bottom. prepend() MOVES nodes that are already in the
      document, so #view and #pageFoot, which are not named here, stay where
      they are: after all of these. */
-  main.prepend(mast, sec, $('#sectabs'), $('#authBanner'), filters, $('#todayNow'), topbar);
+  /* #targetNow (the month's revenue target, Today pages only) goes first
+     among the page's own content, above the strip: the operator, 2026-10-02,
+     "the first page will show how much every day we need to earn". Left
+     unnamed it stayed where prepend() leaves strangers — under the title. */
+  main.prepend(mast, sec, $('#sectabs'), $('#authBanner'), filters, $('#targetNow'), $('#todayNow'), topbar);
 
   /* Last, because arkiv.css keeps #app invisible until this class is on it:
      the stylesheet can arrive a frame before this module does, and the old

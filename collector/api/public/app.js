@@ -15,6 +15,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   SEG_SOURCES, SEG_SOURCE_LABEL, bySourceLine } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
+import { targetLive, targetView, targetHtml } from './target.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
   applyWindow, MONTH_SHORT, dayLabel } from './data.js';
@@ -9397,7 +9398,7 @@ async function render() {
     root.append(closedBlock({ cls, view: location.hash.replace(/^#/, ''), detail: VIEW_CAP_WHY[state.view] || null,
       title: label ? `${label} is not open to your role` : 'This page is not open to your role' }));
     setHeader({ title: label || 'Not open to your role' });
-    if (alive(gen)) { freshness(); authBanner(); }
+    if (alive(gen)) { freshness(); authBanner(); targetNow(); }
     return;
   }
   try {
@@ -9420,7 +9421,7 @@ async function render() {
     root.innerHTML = '';
     root.append(failureBox(e, () => render()));
   }
-  if (alive(gen)) { freshness(); authBanner(); todayNow(); }
+  if (alive(gen)) { freshness(); authBanner(); todayNow(); targetNow(); }
 }
 
 /* ── every page says what it was built from ───────────────────────────────
@@ -10057,6 +10058,37 @@ async function todayNow() {
   }
 }
 
+/* THE MONTH'S REVENUE TARGET, first on every Today page.
+   ─────────────────────────────────────────────────────────────────────────
+   The operator, 2026-10-02: "the first page will show how much every day we
+   need to earn and yesterday were we over or under." What the panel says, and
+   when green and red are allowed, is ./target.js, shared with the phone; the
+   arithmetic is the server's (api/revenue_target.js).
+
+   On the Today section only: the strip below it is about this minute and
+   belongs everywhere; the target is a morning question, and a panel this tall
+   on every page would push every page's own first figure past the fold.
+   A role not shown revenue — or shown only one fleet, since the target is
+   both fleets' — gets no panel, as it gets no strip: the refusal belongs to
+   the route, not to the page under it. */
+async function targetNow() {
+  const host = $('#targetNow');
+  if (!host) return;
+  if (sectionOf(state.view, state.param) !== 'Today') { host.hidden = true; host.innerHTML = ''; return; }
+  const gen = currentGen();
+  try {
+    const [t, live] = await Promise.all([targetLive({ quiet: true }), todayLive({ quiet: true }).catch(() => null)]);
+    if (gen !== currentGen()) return;
+    const vm = targetView(t, live);
+    if (!vm) { host.hidden = true; host.innerHTML = ''; return; }
+    host.innerHTML = targetHtml(vm, { link: (d) => href('day', d) });
+    host.hidden = false;
+  } catch {
+    if (gen !== currentGen()) return;
+    host.hidden = true; host.innerHTML = '';
+  }
+}
+
 async function freshness() {
   const host = $('#freshness');
   try {
@@ -10181,6 +10213,12 @@ function xlsxTarget() {
   /* Only beside a date range the reader can see and change: on a page that
      hides the range (Payouts, Reconciliation) the file would follow dates the
      page gives no way to choose. */
+  /* THE TODAY WORKBOOK (the operator, 2026-10-02: "Make sure from the today
+     dashboard an excel can be downloaded as well"). Today follows no range,
+     so it is asked before the range test below, and the file is the page's:
+     the target, the month day by day, yesterday's cars and drivers, the
+     Action list and the strip (api/today_workbook.js). */
+  if (sectionOf(v, state.param) === 'Today') return { url: '/api/export/today.xlsx', label: 'Excel ⤓ today' };
   if (hidesRange(v)) return null;
   if (v === 'drivers' || XLSX_SECTIONS.has(sectionOf(v, state.param))) return { extra: {}, label: 'Excel ⤓' };
   return null;
@@ -10202,7 +10240,7 @@ $('#xlsxBtn').onclick = async () => {
   const say = (text) => { m.textContent = text; m.hidden = !text; };
   b.disabled = true; b.textContent = 'Preparing…'; say('');
   try {
-    const r = await fetch(`/api/export/money.xlsx?${params(t.extra)}`, { credentials: 'same-origin', cache: 'no-store' });
+    const r = await fetch(t.url || `/api/export/money.xlsx?${params(t.extra)}`, { credentials: 'same-origin', cache: 'no-store' });
     if (!r.ok) {
       let why = '';
       try { why = (await r.json()).detail || ''; } catch { /* not json */ }
@@ -10210,7 +10248,7 @@ $('#xlsxBtn').onclick = async () => {
       return;
     }
     const blob = await r.blob();
-    const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || 'cash-and-money.xlsx';
+    const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || (t.url ? 'today.xlsx' : 'cash-and-money.xlsx');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = name;

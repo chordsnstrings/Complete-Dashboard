@@ -4358,6 +4358,44 @@ untouched, and nothing projected is ever added into `accounted`.
       window_end >= day` — not one that merely ends on or after it: the
       half-hourly run covers 3 days, so for an older day only the nightly
       catch-up counts.
+  42. **Sum the raw figures; round only to print.** A total built by adding
+      figures already rounded to the fils drifts: the revenue target's month
+      read AED 3,999.95 for a target typed as 4,000 — 27 days at 131.85
+      instead of 131.851852 (api/revenue_target.js computeMonth keeps the
+      unrounded plans for every sum; test/revenue_target.test.mjs §5 fails
+      three checks without it).
+  43. **`page.goto` to the URL the page is already on is a hash jump, not a
+      reload.** A Playwright test that writes rows and then "goes" to
+      `/?ui=desktop#access/settings` while already there keeps the page's old
+      figures — the Access pages test read "0 cars" from a panel drawn before
+      its trips existed, while the save one second later found 3. Reload
+      explicitly (`page.reload()`) after writing what the page must show.
+      Hit again the same day re-taking the phone oracle: a second
+      `open('today')` on the page whose target cards had just been removed
+      captured the stripped screen as "today with the sheet open", and the
+      replay failed on it. Take each capture on a fresh page.
+  44. **A new API call on a phone screen fails two suites that have nothing
+      to do with it.** test/phone_classic and test/phone_arkiv answer every
+      `/api/` request from one recording (test/fixtures/phone_api.json.gz)
+      and fail "every API call was answered from the recording" on any key it
+      lacks — `/api/target?t=29836915` when the Today screen started asking
+      for the month's target. Do NOT re-record the whole file: the mock is
+      random, so every screen's data changes and the classic oracle would
+      have to be re-taken whole. Add the ONE answer, from the mock, as of the
+      recording's own instant (`at`, frozen into the page's clock — the key
+      carries that minute), then re-take only the screens it changes, after
+      proving each is byte-identical to its old oracle with the new element
+      removed (2026-10-02: Today, 6,930 characters either way). Say so in
+      the oracle's `retaken`. The mock (mockapi.mjs) needs the route too, or
+      test/mockapi and test/route_smoke fail "every route the UI calls has a
+      mock fixture" — and their summary line prints only the first route
+      missing.
+  45. **A test seeded on fixed dates against a "last N days" window fails on
+      the calendar, not on the code.** test/driver_photo seeded four trips on
+      2–5 September and asked `/api/drivers/directory?days=30`; on 2 October
+      the first fell out of the window and the check read "trips 3 — four
+      were seeded" with nothing changed. Seed relative to today (`ago(n)`, a
+      Dubai day n days back) when the route under test counts back from now.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
@@ -8078,3 +8116,101 @@ and daily-cap checks.
   The 12:00Z delivery poll then checked 11 texts — it reads only rows the
   gateway accepted (status sent, with a gateway message id) — and had 5
   delivery reports back: the 11 drivers' texts went out.
+
+## The monthly revenue target — built 2026-10-02
+
+The operator, 2026-10-02: "Every month, the admin will set a specific revenue
+target. the first page will show how much every day we need to earn and
+yesterday were we over or under … The revenue target will be gross income
+(before the platform commissions) and it will automatically change the rest of
+the days target if one day it has not been met … 10 vehicles mean each car
+needs to make 10AED … if 5 more cars get activated … instead of 100 per day,
+then it would be 150 per day, and accordingly the initial month's target will
+change too." Asked the same day: ONE target for both fleets; a car counts when
+it earned in the last 7 days; the month split EQUALLY over its days; a day over
+lowers the rest as a day under raises it; the trips target is the 08:00 email's
+minimum per active driver, raised to 12; and 3,000 at 10 cars over 30 days
+becoming 3,800 when 5 cars join on day 15 is right. Then: "set the target to 12
+trips per day, per active driver, and 1.6M gross income divided to whatever it
+comes. Make sure from the today dashboard an excel can be downloaded as well."
+And, before it went out: "set october target to 1.705 Million not 1.6"
+
+- **The arithmetic** (api/revenue_target.js). AED a car a day is fixed at the
+  save: target ÷ (days in the month × cars that earned in the 7 days before
+  it) — 1,705,000 ÷ (31 × 101) = 544.55. A day's plan = that rate × the cars
+  that earned in the 7 days before the day; the month target is the sum of the
+  plans, so a car that joins adds its share of the days left. What a day needs
+  = its plan + the shortfall so far ÷ the days left (that day included), never
+  below zero. Days before the first save are planned at the cars counted at it
+  (so the month reads what was typed); a later save keeps every day gone at its
+  plan and re-spreads only what is left (so editing never re-scores history).
+  A same-day correction replaces the earlier figure, for the days before it too.
+- **What counts.** Gross = fares (platformFares' sum; /api/day's revenue): AED
+  52,103.03 on 1 October, Ecosine 36,314.10 and Egari 15,788.93. A car earned
+  when one of its bookings carries a fare above zero. An active driver is the
+  08:00 email's own rule (a completed trip in the 8 days to the day), pinned
+  equal in the test.
+- **Measured on production before building it** (/api/kpis per day, /api/day,
+  /api/forecast, 2026-10-02): 91 cars earned on 1 October and 101 in the 7
+  days to it (85–93 on any one day of that week); drivers did 5.7–8.5
+  completed trips a day that week (843 by 107 on the 1st, 7.9 each), so 12
+  per active driver is well above where the fleet is — the trips line will
+  read red until it moves. Over 8 weeks Sundays carried 25% fewer bookings
+  than an average day and Thursdays 17% more; the operator chose the EQUAL
+  split knowingly, so a Sunday under target and a Thursday over it partly
+  record the weekday, not the performance.
+- **Settled, or not.** A day is judged once every booking channel that has
+  been collecting delivered it (a run whose window covers it, trap 41) and
+  99% of its chargeable bookings carry a fare (the monthly report's
+  readiness). Uber prices a day overnight, so today is never judged. An
+  unsettled day already over its need is over ("at least"); one still short
+  says what it waits for. Behind for the month with a day unsettled is said in
+  ink, not red.
+- **On Today** (api/public/target.js, both shells): first on every Today page,
+  above the live strip — yesterday over or under (green or red, always with
+  ▲/▼ and the word), what today needs and per car with today's estimate so far,
+  the month so far, the month target, and the month day by day (each day gone
+  a link to its day page on the desktop; on the phone a square is eleven
+  pixels wide, a quarter of a thumb, so there it is a chart and links nowhere).
+  On the phone, first on the Today screen. The colours are each skin's
+  semantic pair (--good, --critical), so dark mode and Classic keep their own
+  checked values.
+- **The trips chart** — the operator, the same day, once the revenue chart was
+  built: "There should also be a minimum 12 trips per day per active driver.
+  there should be a similar chart for that too." The same four cells and the
+  same strip, under the revenue (a second card on the phone): yesterday over
+  or under in trips, what today asks (its active drivers × 12) and what is
+  done so far, the month's trips a driver a day, and the minimum itself. A day
+  is OVER when the fleet's completed trips reach its active drivers × the
+  minimum; how many drivers did 12 or more is said beside it. A FLOOR, not a
+  quota: a day short is not carried into the next (nothing to re-spread), and
+  "a driver a day" for the month is its trips ÷ its active driver-days, so a
+  thin day does not weigh as much as a full one. Judged by the same settled
+  rule as the revenue; there whether or not a revenue target is set (the
+  minimum always exists); withheld whole, with the reason, from a role
+  without booking counts (every trip figure is declared BK in
+  api/access/manifest.json — an undeclared one rides through the shaper).
+  What it will read: 843 trips by 107 drivers on 1 October against roughly
+  126 active — about 6.7 a driver, so under 12 by some 670 trips a day.
+- **Set up › Access** (Owner only, re-confirmed): the month, the gross, and
+  before Save what it comes to — AED a car a day, a day's share, and whether
+  the trips target agrees at last month's fare; every save kept with who and
+  when. The trips setting is now titled as the Today trips target too.
+- **The seed.** `TARGET_SEED="2026-10 1705000 trips=12"` on the api service:
+  applied once at boot (the way BOOTSTRAP_OWNER_* made the first Owner), on the
+  audit chain as `target.seed` by `system:seed`; it never overwrites a month
+  that has a target and a restart never undoes the Owner's later change. It
+  is how the operator's own figures went in without anybody signing in as
+  them.
+- **The Today workbook** (GET /api/export/today.xlsx; "Excel ⤓ today" on every
+  Today page, "Download today as Excel" on the phone): Target, Days, Cars
+  yesterday, Drivers yesterday, Action list (the page's own query, moved to
+  api/insights_sql.js and proved byte-identical), Today so far. Days carries
+  the trips chart's columns (trips needed, over or under, its verdict) and
+  Target its summary, whether or not a revenue target is set; Drivers
+  yesterday carries each driver's id beside the name. A class a signed-in
+  role does not hold in full is written "(withheld)"; without driver identity
+  the Action list is withheld whole.
+- **Never cached** (api/cache.js NEVER): a save and the trips setting move it
+  and neither moves the cache's version.
+

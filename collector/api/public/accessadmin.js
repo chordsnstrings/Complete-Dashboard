@@ -33,7 +33,7 @@
    ── EMPTY IS A SENTENCE ──────────────────────────────────────────────────
    Every list that can be empty says what would appear in it and how it gets
    there. "No requests" alone reads the same as "requests are broken". */
-import { el, esc, panel, note, tableFrom, tabBar, dtStr, dateStr, kpiRow } from './ui.js';
+import { el, esc, panel, note, tableFrom, tabBar, dtStr, dateStr, kpiRow, money } from './ui.js';
 import { who, loadWho, getJson, post, closedBlock, toSignIn } from './access.js';
 import { dubaiDay } from './tz.js';
 import { ROLE, CLASS, CLASSES, CAPS, CAP, LEVEL_NAME, rank, roleIsSensitive } from './access_model.js';
@@ -1303,13 +1303,20 @@ function settingsTab(host, ctx) {
       return n;
     }, (v) => `A sensitive grant by the only Owner now waits ${v} hours.`, 'Hours to wait');
 
-  /* The 08:00 low-trips email (src/low_trips_email.js): its minimum. */
+  /* The monthly revenue target (api/revenue_target.js), first: it is the
+     figure the Today page now leads with. */
+  targetPanel(host, ctx);
+
+  /* The 08:00 low-trips email (src/low_trips_email.js): its minimum — and,
+     on the operator's ruling of 2026-10-02, the Today page's trips target
+     per active driver too, so the page and the email cannot disagree. */
   const trips = h('input', { type: 'number', min: '1', max: '100', step: '1', class: 'depinput acx-in acx-num', value: String(cfg.low_trips_min ?? 10), 'data-acx': 'low-trips' });
-  const tmsg = one('Minimum trips a day (08:00 email)', 'low_trips_min', trips,
-    'Every day at 08:00 Dubai, each active driver — anyone with a completed trip in the last 8 days — who completed fewer '
+  const tmsg = one('Trips a day per active driver (Today target and 08:00 email)', 'low_trips_min', trips,
+    'The trips target on the Today page — active drivers × this many trips a day — and the 08:00 email’s minimum: '
+    + 'every day at 08:00 Dubai, each active driver — anyone with a completed trip in the last 8 days — who completed fewer '
     + 'than this many trips the day before is emailed to the list on the Settings page (Low-trips email recipients). '
     + 'A trip is a completed booking on Uber, Bolt, Yango or the hotel channel; a driver on two platforms counts once. '
-    + 'A change applies from the next 08:00 email.',
+    + 'A change shows on Today at once and applies from the next 08:00 email.',
     () => {
       const n = Number(trips.value);
       if (trips.value === '' || !Number.isInteger(n) || n < 1 || n > 100) { tmsg.set('Enter a whole number of trips, 1 to 100.', 'bad'); return undefined; }
@@ -1350,6 +1357,113 @@ function settingsTab(host, ctx) {
 /* The 07:00 daily report email (src/daily_report.js): who gets it. The Owner
    and Access admins keep the list; each change is audited. Loaded on its own
    so a slow answer never holds the settings above it. */
+/* ── the monthly revenue target ─────────────────────────────────────────
+   The operator, 2026-10-02: "Every month, the admin will set a specific
+   revenue target … when setting it the admin panel will show yesterday's
+   active cars which earned money." The Owner types the month's gross; the
+   panel says, before Save, what it comes to — AED a car a day over the cars
+   that earned this week, the day's share, and whether the trips a day agree
+   with it at last month's fare. Every save is kept (who, when, at how many
+   cars); a later one re-spreads only the days left. */
+function targetPanel(host, ctx) {
+  const owner = ctx.owner;
+  const p = panel('Monthly revenue target', null, 'acx-target');
+  const mm = msgLine();
+  const state = h('div', { class: 'acx-target-now' });
+  const facts = h('div', { class: 'acx-target-facts' });
+  const preview = h('p', { class: 'acx-p acx-dim', 'aria-live': 'polite' });
+  const histHost = h('div', { class: 'acx-target-hist' });
+  const month = h('select', { class: 'depinput acx-in', 'data-acx': 'target-month' });
+  const gross = h('input', { type: 'number', min: '1', step: '1000', class: 'depinput acx-in acx-num',
+    placeholder: '1705000', 'data-acx': 'target-gross', inputmode: 'numeric' });
+  const save = h('button', { type: 'button', class: 'btn primary', disabled: !owner, 'data-acx': 'target-save' }, 'Save target');
+  month.disabled = !owner; gross.disabled = !owner;
+  let d = null;
+  const two = (v) => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pick = () => (d && month.value === d.next.month ? d.next : d?.current);
+  const say = () => {
+    const m = pick();
+    const g = Number(gross.value);
+    if (!m || !(g > 0)) { preview.textContent = 'Type the month’s gross target to see what it comes to.'; return; }
+    const pv = m.preview;
+    if (!pv.cars) { preview.textContent = 'No car earned in the last 7 days, so there is nothing to share a target over yet.'; return; }
+    /* The save's own rule (api/revenue_target.js saveTarget): a month's
+       first save is shared over EVERY day of it — the days already gone are
+       planned at it too, so the month reads what was typed — and a later one
+       re-spreads what is left over the days left. Dividing a first save by
+       the days left showed AED 10,333.33 a car a day for a save that stored
+       10,000.00 (test/access_pages.test.mjs). */
+    const keep = pv.past_plan != null ? pv.past_plan : 0;
+    const rate = pv.past_plan != null ? (g - keep) / (pv.cars * pv.days_left) : g / (pv.cars * m.days_in_month);
+    if (!(rate > 0)) {
+      preview.textContent = `The days already gone were planned at AED ${two(keep)}; a month total at or below that leaves nothing for the days left.`;
+      return;
+    }
+    const perDay = g / m.days_in_month;
+    const c = d.context;
+    const tripsDay = c.active_drivers && c.last_month.avg_fare ? c.active_drivers * d.trips_min * c.last_month.avg_fare : null;
+    preview.textContent = (pv.past_plan != null
+      ? `The ${pv.days_left} days left share AED ${two(g - keep)} over ${pv.cars} cars: AED ${two(rate)} a car a day. `
+        + `The days already gone keep the AED ${two(keep)} they were planned at.`
+      : `AED ${two(rate)} a car a day over the ${pv.cars} cars that earned in the last 7 days — AED ${two(perDay)} a day over ${m.days_in_month} days.`)
+      + (tripsDay ? ` At ${d.trips_min} trips a day for each of the ${c.active_drivers} active drivers and ${c.last_month.month_name}’s `
+        + `AED ${two(c.last_month.avg_fare)} a trip, the trips target alone would bring about AED ${two(tripsDay)} a day — `
+        + `${tripsDay >= perDay ? `${Math.round((100 * (tripsDay - perDay)) / perDay)}% more than` : `${Math.round((100 * (perDay - tripsDay)) / perDay)}% less than`} this target.` : '');
+  };
+  const draw = () => {
+    const c = d.context;
+    facts.replaceChildren(h('ul', { class: 'acx-list' },
+      h('li', null, h('b', null, `${c.cars_7_days} cars`), ` earned in the 7 days to yesterday; ${c.cars_yesterday} earned yesterday.`),
+      h('li', null, h('b', null, `${c.active_drivers} active drivers`), ` (a completed trip in the last 8 days); about ${Math.round(c.drivers_a_day)} drive on a day.`),
+      c.last_month.fares != null ? h('li', null, h('b', null, c.last_month.month_name), `: ${money(c.last_month.fares)} gross over ${c.last_month.cars} cars`
+        + (c.last_month.avg_fare ? `, AED ${two(c.last_month.avg_fare)} a trip.` : '.')) : null));
+    const cur = d.current;
+    state.replaceChildren(cur.target
+      ? h('p', { class: 'acx-p' }, h('b', null, `${cur.month_name}: ${money(cur.summary.month_target)}`),
+        ` — ${money(cur.target.rate)} a car a day over ${cur.summary.cars_now} cars. Set at ${money(cur.target.gross)} over ${cur.target.cars} cars`
+        + (cur.summary.since_set ? `; ${cur.summary.since_set > 0 ? 'cars have joined' : 'cars have dropped out'} since, which moved it by ${money(Math.abs(cur.summary.since_set))}.` : '.'))
+      : h('p', { class: 'acx-p' }, h('b', null, `${cur.month_name} has no target yet. `), 'The Today page says so until one is saved.'));
+    const opts = [[cur.month, `${cur.month_name} (this month)`], [d.next.month, `${d.next.month_name} (next month)`]];
+    const was = month.value;
+    month.replaceChildren(...opts.map(([v, l]) => h('option', { value: v }, l)));
+    month.value = opts.some(([v]) => v === was) ? was : cur.month;
+    const saves = [...cur.saves.map((x) => ({ ...x, m: cur.month_name })), ...d.next.saves.map((x) => ({ ...x, m: d.next.month_name }))];
+    histHost.replaceChildren(saves.length
+      ? h('ul', { class: 'acx-list' }, saves.slice().reverse().map((x) => h('li', null,
+        `${x.m}: ${money(x.gross)} — set ${dtStr(x.set_at)} by ${x.by === 'system:seed' ? 'the deploy, on the operator’s instruction' : (x.by || 'someone no longer named')}, `
+        + `over ${x.cars} cars, AED ${two(x.rate)} a car a day from that day.`)))
+      : empty('No target has been saved yet.'));
+    say();
+  };
+  const load = async () => {
+    try { d = await getJson('/api/access/target'); draw(); } catch (e) { mm.set(explain(e), 'bad'); }
+  };
+  month.addEventListener('change', say);
+  gross.addEventListener('input', say);
+  save.addEventListener('click', async () => {
+    const g = Number(gross.value);
+    if (!(g > 0)) { mm.set('Enter the month’s gross target in AED, above zero.', 'bad'); return; }
+    const res = await act(save, mm, () => post('/api/access/target', { month: month.value, gross: g }));
+    if (!res) return;
+    mm.set(`Saved: ${res.month_name} at ${money(res.saved.gross)} — ${money(res.saved.rate)} a car a day over ${res.saved.cars} cars`
+      + (res.summary?.today_needs != null ? `; today needs ${money(res.summary.today_needs)}.` : '.'), 'ok');
+    gross.value = '';
+    await load();
+  });
+  p.body.append(...[
+    h('p', { class: 'acx-p' }, 'One gross target for both fleets — fares, before any platform commission. It is shared over the cars '
+      + 'that earned in the last 7 days: AED a car a day = the target ÷ (days in the month × those cars). A car that joins adds its '
+      + 'share of the days left to the month; a day under target is spread over the days left, and a day over lowers them the same '
+      + 'way. The Today page leads with what today needs and whether yesterday was over (green) or under (red).'),
+    state, facts,
+    h('div', { class: 'acx-inrow' }, field('Month', month), field('Gross target, AED', gross), save),
+    preview, mm,
+    owner ? null : h('p', { class: 'acx-p acx-dim' }, 'Only the Owner sets it.'),
+    h('h4', { class: 'acx-h4' }, 'Saved'), histHost].filter(Boolean));
+  host.append(p.panel);
+  load();
+}
+
 function reportPanel(host, ctx) {
   const p = panel('Daily report email', null, 'acx-report');
   const mm = msgLine();

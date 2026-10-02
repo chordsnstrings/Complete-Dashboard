@@ -35,6 +35,7 @@ import { sourceLabel, segSourceLabel, timeStr, dtStr, custodyText, moneyInTile, 
 import { dubaiClock, dubaiDay } from '../tz.js';
 import { who, roleNames, signOut, fleetNames } from '../access.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from '../today.js';
+import { targetLive, targetView, downloadToday } from '../target.js';
 /* The three words the desktop page uses for the three states it refuses to
    colour. Imported rather than retyped — see the comment on GREY there. */
 import { GREY } from '../onlinetime.js';
@@ -141,6 +142,74 @@ const WIDEN = () => (phoneContract() ? 'Widen the window from the bar above.'
   : 'Widen the window from the ⋮ menu.');
 const countOfDays = (nDays) => `${fmt(nDays)} ${nDays === 1 ? 'day' : 'days'}`;
 
+/* ── the revenue target card ──────────────────────────────────────────────
+   The desktop's panel in the phone's card: the same words from ../target.js
+   (so the two shells cannot word a verdict differently), stacked, with the
+   month day by day under them and the Today workbook a tap away — fetched,
+   so a refusal is said here rather than opened as a page. */
+function targetBand(vm) {
+  const box = el('div', 'targetnow tg-phone');
+  if (vm.absent) {
+    box.append(el('p', 'tg-absent', esc(vm.absent)));
+  } else {
+    const g = el('div', 'tg-cells');
+    for (const x of vm.cells) {
+      const cell = el('div', `tg-cell${x.tone ? ` tg-${x.tone}` : ''}`);
+      cell.dataset.tg = x.key;
+      cell.append(el('span', 'tg-l', esc(x.label)), el('b', 'tg-v', esc(x.value)));
+      if (x.bar != null) {
+        const b = el('span', 'tg-bar');
+        const i = document.createElement('i');
+        i.style.width = `${x.bar.toFixed(1)}%`;
+        b.append(i);
+        cell.append(b);
+      }
+      for (const sub of x.subs) cell.append(el('span', `tg-sub${sub.tone ? ` tg-${sub.tone}` : ''}`, esc(sub.text)));
+      g.append(cell);
+    }
+    /* A chart here, not thirty-one controls: a day's square is eleven
+       pixels wide at 390px, a quarter of what a thumb needs (44px,
+       test/phone_arkiv), so on the phone it says its day and links nowhere.
+       The desktop's squares are links; a pointer can hit them. */
+    const strip = el('div', 'tg-strip');
+    for (const d of vm.strip) {
+      const a = el('span', `tg-d tg-${d.tone}`, String(d.n));
+      a.title = d.title;
+      a.setAttribute('aria-label', d.title);
+      strip.append(a);
+    }
+    box.append(g, strip);
+  }
+  return box;
+}
+function targetCard(vm) {
+  const c = card(vm.title, vm.meta ? `${vm.scope} \u00b7 ${vm.meta}` : vm.scope);
+  c.card.classList.add('m-target');
+  const box = targetBand(vm);
+  const btn = el('button', 'm-btn tg-xl', 'Download today as Excel');
+  btn.type = 'button';
+  const msg = el('p', 'm-cap');
+  msg.hidden = true;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    msg.hidden = true;
+    try { await downloadToday(); } catch (e) { msg.textContent = e.message; msg.hidden = false; }
+    finally { btn.disabled = false; }
+  });
+  c.body.append(box, btn, msg);
+  return c.card;
+}
+/* The trips minimum, the revenue card's twin — the operator, the same day:
+   "There should also be a minimum 12 trips per day per active driver. there
+   should be a similar chart for that too." Same words as the desktop's band
+   (../target.js tripsView), the same cells, the same strip. */
+function tripsCard(b) {
+  const c = card(b.title, b.meta ? `${b.scope} \u00b7 ${b.meta}` : b.scope);
+  c.card.classList.add('m-target');
+  c.body.append(targetBand(b));
+  return c.card;
+}
+
 /* ── Today ──────────────────────────────────────────────────────────────── */
 async function today(deck, ctx) {
   /* THE REDESIGN (docs/UI-REDESIGN-PLAN.md "Phone PWA — redesign"), only
@@ -153,7 +222,7 @@ async function today(deck, ctx) {
      does not know, in the desktop's own reasons. */
   const AK = phoneContract();
   skeleton(deck, 4);
-  const [k, daily, status, unauth, now] = await Promise.all([
+  const [k, daily, status, unauth, now, tgt] = await Promise.all([
     q('/api/kpis').catch(() => null),
     q('/api/trips/daily').catch(() => []),
     api('/api/status').catch(() => []),
@@ -164,10 +233,16 @@ async function today(deck, ctx) {
        are different questions, so the screen answers them one after the other
        instead of choosing. */
     todayLive().catch(() => null),
+    /* The month's revenue target (../target.js): first on this screen, as
+       on the desktop's Today pages. A role not shown revenue gets no card. */
+    targetLive().catch(() => null),
   ]);
   if (!ctx.alive()) return;
   deck.innerHTML = '';
   if (!k) { failed(deck, new Error('The overview could not be fetched.')); return; }
+  const tvm = targetView(tgt, now);
+  if (tvm) deck.append(targetCard(tvm));
+  if (tvm?.trips) deck.append(tripsCard(tvm.trips));
 
   /* ── today, first, on the tab called Today ───────────────────────────────
      This screen led with the month and mentioned the current day in a clause

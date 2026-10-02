@@ -14,6 +14,10 @@ import { deriveFleetName, platformLabel, accountLabel } from './src/fleet_names.
    moment either changes, and the browser tests that read this would then be
    certifying a shape nothing ships. */
 import { shape, windowOf, driverRecord, fleetRecord } from './api/performance_routes.js';
+/* The revenue target and the trips minimum are the real arithmetic over a
+   made-up month, for the same reason: a fixture typed by hand would certify
+   a shape the server stopped returning. */
+import { computeMonth, addDays as tgAddDays, monthOf as tgMonthOf, daysIn as tgDaysIn, monthName as tgMonthName } from './api/revenue_target.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -4657,6 +4661,75 @@ app.get('/api/settings/jobs', (_, r) => r.json({
   total: 63, shown: 6, truncated: true,
 }));
 
+
+/* ── /api/target — the month's revenue target and the trips minimum ───────
+   computeMonth itself (api/revenue_target.js) over a synthetic fleet: 40
+   cars earning about AED 21,000 a day, 46 drivers doing 8 to 14 trips each,
+   one channel that has delivered every finished day, and a target saved on
+   the 1st at AED 525 a car a day. Yesterday, the 1st of a month included,
+   is chosen exactly as GET /api/target chooses it. */
+const tgFacts = (from, to, today) => {
+  const days = new Map(), carDays = new Map(), personDays = new Map();
+  const cars = Array.from({ length: 40 }, (_, i) => `M${40100 + i}`);
+  for (let d = from, i = 0; d <= to; d = tgAddDays(d, 1), i += 1) {
+    const n = Number(d.slice(8));
+    /* Today is a morning's worth: 14 drivers out, two to four trips each. */
+    const part = d === today;
+    days.set(d, { day: d, fares: part ? 5200 : 19000 + ((n * 2371) % 4600), priced: part ? 90 : 600, chargeable: part ? 160 : 600,
+      completed: part ? 150 : 560, bookings: part ? 170 : 620 });
+    carDays.set(d, new Set(cars.slice(0, part ? 14 : 37 + (n % 4))));
+    personDays.set(d, new Map(Array.from({ length: part ? 14 : 40 + (n % 3) }, (_, k) => [`p${(k + n) % 46}`, part ? 2 + (k % 3) : 8 + ((k * 5 + n) % 7)])));
+  }
+  const fin = Date.parse(`${to}T00:30:00+04:00`);
+  return { from, to, days, carDays, personDays,
+    runs: [{ source: 'uber', fleet: 'ecosine', ws: tgAddDays(from, -1), we: to, fin }] };
+};
+const tgMonth = (month, today) => {
+  const first = `${month}-01`;
+  const D = tgDaysIn(month);
+  const rows = [{ id: 1, gross_target: 525 * 40 * D, cars: 40, rate: 525, past_plan: 0, set_day: first,
+    set_at: `${first}T06:00:00Z`, set_by: null, set_by_label: 'owner@example.test' }];
+  const to = today > tgAddDays(first, D - 1) ? tgAddDays(first, D - 1) : today;
+  return computeMonth({ month, today, rows, facts: tgFacts(tgAddDays(first, -9), to, today), min: 12 });
+};
+app.get('/api/target', (req, r) => {
+  /* ?asof= as the real route reads it, so a recording made at a frozen
+     instant (test/phone_harness.mjs) can ask for that instant's month. */
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.asof || '')) ? String(req.query.asof) : dubaiDay(new Date());
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : tgMonthOf(today);
+  const out = tgMonth(month, today);
+  const yday = tgAddDays(today, -1);
+  if (tgMonthOf(yday) === month) out.yesterday = out.days.find((x) => x.day === yday) || null;
+  else {
+    const prev = tgMonth(tgMonthOf(yday), today);
+    out.yesterday = prev.days.find((x) => x.day === yday) || null;
+    out.yesterday_month = { month: prev.month, month_name: prev.month_name, target: prev.target, why: prev.why, summary: prev.summary };
+  }
+  const pm = tgMonthOf(tgAddDays(`${month}-01`, -1));
+  out.context = { cars_7_days: 40, cars_yesterday: 38, active_drivers: 46, drivers_a_day: 41.1,
+    last_month: { month: pm, month_name: tgMonthName(pm), fares: 652000, cars: 41, avg_fare: 34.6 } };
+  out.saves = out.saves.map(({ set_by: _by, set_by_label: label, ...x }) => ({ ...x, seeded: label === 'system:seed' }));
+  r.set('cache-control', 'private, no-store').json(out);
+});
+/* The Today workbook (api/today_workbook.js): the six sheet names in the
+   page's order and the month's own Days rows from the fixture above, so a
+   browser test that clicks "Excel ⤓ today" saves a file Excel opens. */
+app.get('/api/export/today.xlsx', (req, r) => {
+  const today = dubaiDay(new Date());
+  const t = tgMonth(tgMonthOf(today), today);
+  const wb = new Workbook();
+  const s1 = wb.sheet('Target');
+  s1.text(`Revenue target — ${t.month_name}`, 'title');
+  s1.push([['Month target now (AED)', 'bold'], [t.summary.month_target, 'money']]);
+  const s2 = wb.sheet('Days');
+  s2.header(['Day', 'State', 'Needed (AED)', 'Earned (AED)', 'Trips', 'Trips needed'], ['date', 'text', 'money', 'money', 'int', 'int']);
+  for (const d of t.days) s2.row([d.day, d.state, d.needed, d.earned, d.trips, d.trips_target]);
+  for (const name of ['Cars yesterday', 'Drivers yesterday', 'Action list', 'Today so far']) wb.sheet(name).text('Mock.', 'dim');
+  r.set('Cache-Control', 'private, no-store');
+  r.set('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  r.set('content-disposition', `attachment; filename="today-${today}-target-${t.month}.xlsx"`);
+  r.end(wb.toBuffer());
+});
 
 app.get('/api/day', (req, r) => {
   const day = req.query.day || dayISO(1).slice(0, 10);

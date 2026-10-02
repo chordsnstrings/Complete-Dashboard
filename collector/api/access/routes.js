@@ -1040,6 +1040,58 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     return res.json({ ok: true, config: await svc.getConfig(db, { fresh: true }) });
   }));
 
+  /* ── the monthly revenue target (api/revenue_target.js) ─────────────────
+     The operator, 2026-10-02: "Every month, the admin will set a specific
+     revenue target … when setting it the admin panel will show yesterday's
+     active cars which earned money." The Owner sets it, re-confirmed, like
+     the company settings above. Every save is a new row and an audit entry,
+     never an edit, so what each day was asked is kept: a later save re-spreads
+     only the days left. The read is any Access manager's; the panel shows who
+     saved each figure, which the public /api/target does not carry. */
+  const tq = (t, p) => db.query(t, p).then((r) => r.rows);
+  app.get('/api/access/target', wrap(async (req, res) => {
+    const fm = manager(req, res);
+    if (!fm) return undefined;
+    noStore(res);
+    const rt = await import('../revenue_target.js');
+    const cur = await rt.monthTarget(tq, {});
+    const next = rt.monthOf(rt.addDays(cur.last, 1));
+    const nextSaves = (await rt.targetRows(tq, next)).map((r) => ({
+      gross: Number(r.gross_target), cars: Number(r.cars), rate: Number(r.rate), set_day: r.set_day,
+      set_at: new Date(r.set_at).toISOString(), by: r.set_by_label || null }));
+    /* What a save made now would do, so the panel can say it before Save:
+       the cars it is shared over, and — when an earlier day already has a
+       target — what the days already gone were planned at, which a new
+       figure leaves as it is. */
+    const earlierToday = cur.saves.some((x) => x.set_day < cur.today);
+    return res.json({
+      today: cur.today, trips_min: cur.trips_min, context: cur.context,
+      current: { month: cur.month, month_name: cur.month_name, days_in_month: cur.days_in_month,
+        target: cur.target, summary: cur.summary, why: cur.why,
+        saves: cur.saves.map((x) => ({ gross: x.gross, cars: x.cars, rate: x.rate, set_day: x.set_day,
+          set_at: x.set_at, by: x.set_by_label || null })),
+        preview: { cars: cur.context.cars_7_days,
+          days_left: cur.summary ? cur.summary.days_left : cur.days.filter((d) => d.state !== 'past').length,
+          past_plan: earlierToday ? cur.summary.planned : null } },
+      next: { month: next, month_name: rt.monthName(next), days_in_month: rt.daysIn(next), saves: nextSaves,
+        preview: { cars: cur.context.cars_7_days, days_left: rt.daysIn(next), past_plan: null } },
+    });
+  }));
+  app.post('/api/access/target', wrap(async (req, res) => {
+    const fm = manager(req, res, { write: true, stepup: true });
+    if (!fm) return undefined;
+    if (!isOwner(fm)) return fail(res, 403, 'not_allowed', 'Only the Owner sets the revenue target.');
+    const rt = await import('../revenue_target.js');
+    const r = await rt.saveTarget(tq, { month: String(req.body?.month || ''), gross: req.body?.gross,
+      by: fm.user.id, byLabel: fm.user.email || '' });
+    if (r.error) return fail(res, r.status || 400, r.error, r.detail);
+    await audit(req, 'target.set', 'revenue_target', r.row.id,
+      { month: r.month, gross: r.row.gross, cars: r.row.cars, rate: r.row.rate, past_plan: r.row.past_plan });
+    const now = await rt.monthTarget(tq, { month: r.month });
+    return res.json({ ok: true, saved: { ...r.row, set_by_label: undefined },
+      month: r.month, month_name: now.month_name, summary: now.summary });
+  }));
+
   /* Reviews: once a quarter each team's lead keeps or removes each grant. */
   /* ── the 07:00 daily report email: who gets it ─────────────────────────
      The operator, 2026-09-29: "admin should be able to add more emails if

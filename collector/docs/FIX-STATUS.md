@@ -4236,3 +4236,29 @@ know." docs/COVERAGE.md "Trip messages: why every held row said nobody".
 | TRIP-7 | the re-check counts what the gateway said to each late text (late_sent / late_failed), and a pass that only re-checked, named or polled delivery reports now writes its log line | driver_sms §3b (late_sent: 70/1 reverted) | ✓ | ✓ 8f784a1 | ✓ 19598971 (8f784a1) | 12:00Z delivery poll: checked 11 (sent, with a gateway id), 5 reports back |
 
 Full suite 2026-10-01 after TRIP-1..3: 356 of 357 files, 13,444 assertions; forecast_yoy alone (the 1st-of-the-month failure above, unrelated: it imports neither changed file).
+
+## The monthly revenue target, the Today panel and the Today workbook — 2026-10-02
+
+The operator: "Every month, the admin will set a specific revenue target. the
+first page will show how much every day we need to earn and yesterday were we
+over or under … set the target to 12 trips per day, per active driver, and
+1.6M gross income … Make sure from the today dashboard an excel can be
+downloaded as well." Then: "set october target to 1.705 Million not 1.6", and
+"There should also be a minimum 12 trips per day per active driver. there
+should be a similar chart for that too." docs/COVERAGE.md "The monthly revenue
+target".
+
+| # | what | test (revert fails it) | written | committed | deployed | proven |
+|---|---|---|---|---|---|---|
+| TGT-1 | the arithmetic: AED a car a day fixed at the save; a day's plan at the 7-day car count; need = plan + shortfall ÷ days left (a surplus lowers it); 3,000 → 3,800 when 5 cars join; past days anchored at the first save; a later save re-spreads only what is left; sums unrounded | revenue_target §1 (6), §2 (1, 4), §5 (3) | ✓ | | | |
+| TGT-2 | a day judged only when settled (every channel delivered it, a covering window; 99% priced); over-before-settled is "at least"; today never judged | revenue_target §3 (1, 3) | ✓ | | | |
+| TGT-3 | cars that earned in the 7 days before; active drivers and the trips target are the 08:00 email's own rule and setting | revenue_target §4 (1) | ✓ | | | |
+| TGT-4 | POST /api/access/target: the Owner only, re-confirmed, audited; GET for the panel with who saved what | access_core §10 (3) | ✓ | | | |
+| TGT-5 | Set up › Access panel: cars it is shared over (7-day and yesterday's), the figure's effect before Save (first save over every day of the month — the preview divided by the days left until the check caught it), the trips check, every save | access_pages §11 (1; preview 1) | ✓ | | | |
+| TGT-6 | Today panel, both shells, first above the live strip: green/red only on settled days, ▲/▼ and the word on every colour, behind-with-unsettled in ink, no target as a sentence | revenue_target §10 (1); arkiv_shell order (77) | ✓ | | | |
+| TGT-7 | the Today workbook (6 sheets, withheld by class) and its buttons; the Action list query shared with the page (byte-identical) | revenue_target §8–9 (1) | ✓ | | | |
+| TGT-8 | TARGET_SEED: the operator's AED 1,705,000 for October (corrected from 1.6M before it went out) and 12 trips, once, audited, never overwriting | revenue_target §7 (4) | ✓ | | | |
+| TGT-9 | the trips chart: a day over when its completed trips reach its active drivers × the minimum; a floor, nothing carried; the month's trips ÷ its driver-days; settled like the revenue; there with no revenue target; desktop band + phone card; Excel columns | revenue_target §12 (12, 12, 1, 6, 6) | ✓ | | | |
+| TGT-10 | every trip figure in /api/target declared BK, so a role without booking counts reads why, not the counts | revenue_target §12 (1) | ✓ | | | |
+| TGT-11 | the suite's other casualties: a driver id beside each name in the workbook (interlinking); /api/target and the workbook in the mock (mockapi, route_smoke); the target answer in the phone recording and Today's oracle re-taken, proved identical with the cards removed (phone_classic, phone_arkiv); the phone strip a chart, not 11px links (phone_arkiv 44px); the strip's sizes on the type scale (type_scale); driver_photo seeded relative to today (it failed on the calendar, trap 45) | the named suites, each failing before | ✓ | | | |
+

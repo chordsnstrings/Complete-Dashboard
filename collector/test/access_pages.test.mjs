@@ -449,6 +449,53 @@ await section('11', async () => {
     const saved = await page.evaluate(() => fetch('/api/access/overview').then((r) => r.json()).then((j) => j.config?.low_trips_min));
     check('…the Owner changes it to 8, is told so, and the server has 8', /under 8 trips a day are listed/.test(f3) && saved === 8, `${f3} / ${saved}`);
   }
+  /* The monthly revenue target (api/revenue_target.js), the operator's of
+     2026-10-02: on the settings page with the cars it will be shared over,
+     what a figure comes to before Save, the Owner's save — with who — and the
+     Today page leading with it. Three cars earned yesterday, AED 100 each.
+     REVERSION (run 2026-10-02): drop targetPanel(host, ctx) from
+     settingsTab -> 146 passed, 1 FAILED (the first; the other three need
+     the box and are not reached). Divide a first save by the days LEFT in
+     the preview -> 149 passed, 1 FAILED ("…says what a figure comes to"):
+     the bug this check found, the preview reading AED 10,333.33 a car a
+     day for a save that stored 10,000.00. */
+  const yAt = new Date(Date.now() - 864e5).toISOString();
+  for (let c = 1; c <= 3; c++) {
+    await dbc.query(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, plate, requested_at, status, payment_type, price, currency, raw)
+      VALUES ('uber', $1, 'ecosine', $2, $3, $4, $5::timestamptz, 'completed', 'card', 100, 'AED', '{}'::jsonb)`,
+    [`tgt-${c}`, `u-tgt-${c}`, `Test Driver T${c}`, `C${c}`, yAt]);
+  }
+  /* A real reload: go() to the address the page is already on is a same-
+     document hash jump, and the panel would keep the figures it drew before
+     these trips existed. */
+  await go('access/settings');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.acx-page', { timeout: 20000 });
+  await settle();
+  const tp = page.locator('[data-panel="acx-target"]');
+  await page.waitForFunction(() => /cars earned/.test(document.querySelector('[data-panel="acx-target"]')?.innerText || ''), null, { timeout: 15000 }).catch(() => {});
+  const tpText = async () => (await tp.innerText().catch(() => '')).replace(/\s+/g, ' ');
+  check('the revenue target is on the settings page, with the cars it will be shared over',
+    (await tp.count()) === 1 && /3 cars earned in the 7 days to yesterday; 3 earned yesterday/.test(await tpText()), (await tpText()).slice(0, 300));
+  const dubaiNow = new Date(Date.now() + 4 * 3600e3);
+  const D = new Date(Date.UTC(dubaiNow.getUTCFullYear(), dubaiNow.getUTCMonth() + 1, 0)).getUTCDate();
+  const rateText = (930000 / (D * 3)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (await page.locator('[data-acx="target-gross"]').count()) {
+    await page.locator('[data-acx="target-gross"]').fill('930000');
+    check('…and says what a figure comes to before it is saved', (await tpText()).includes(`AED ${rateText} a car a day over the 3 cars`),
+      (await tpText()).slice(0, 400));
+    await page.locator('[data-acx="target-save"]').click();
+    await page.waitForFunction(() => /Saved:/.test(document.querySelector('[data-panel="acx-target"]')?.innerText || ''), null, { timeout: 15000 }).catch(() => {});
+    const saved = (await dbc.query(`SELECT gross_target, cars, set_by_label FROM revenue_target ORDER BY id DESC LIMIT 1`)).rows[0];
+    check('…the Owner saves it, is told so, and the server holds it with who saved it',
+      /Saved: .* at AED 930,000\.00/.test(await tpText()) && Number(saved?.gross_target) === 930000 && saved.cars === 3 && saved.set_by_label === OWNER,
+      `${(await tpText()).slice(0, 300)} / ${JSON.stringify(saved)}`);
+    await page.goto(`${BASE}/?ui=desktop&skin=arkiv#insights`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#targetNow:not([hidden])', { timeout: 20000 }).catch(() => {});
+    const panelText = (await page.locator('#targetNow').innerText().catch(() => '')).replace(/\s+/g, ' ');
+    check('…and the Today page leads with it: the month target and what today needs',
+      /AED 930,000\.00/.test(panelText) && /to earn/.test(panelText), panelText.slice(0, 300));
+  }
   noErrorsSoFar('Settings');
 });
 

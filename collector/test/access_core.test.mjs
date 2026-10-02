@@ -691,6 +691,35 @@ console.log('\n10. sign-in required');
     `${ltZero.status} ${ltHalf.status}`);
   const ltRead = await owner.get('/api/access/overview');
   check('…and the admin panel reads it back', ltRead.json?.config?.low_trips_min === 7, JSON.stringify(ltRead.json?.config));
+  /* The monthly revenue target (api/revenue_target.js), the operator's of
+     2026-10-02: the Owner sets it, re-confirmed; an Access admin cannot. Four
+     cars earned yesterday, so the target is shared over four.
+     REVERSION (run 2026-10-02): drop the isOwner() test in POST
+     /api/access/target -> 203 passed, 3 FAILED ("an Access admin cannot …",
+     and the two after it, which then read the admin's save as the first). */
+  const yAt = new Date(Date.now() - 864e5).toISOString();
+  for (let c = 1; c <= 4; c++) {
+    await db.query(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, plate, requested_at, status, payment_type, price, currency, raw)
+      VALUES ('uber', $1, 'ecosine', $2, $3, $4, $5::timestamptz, 'completed', 'card', 50, 'AED', '{}'::jsonb)`,
+    [`tgt-${c}`, `u-tgt-${c}`, `Test Driver T${c}`, `C${c}`, yAt]);
+  }
+  const { dubaiDay } = await import('../api/window.js');
+  const thisMonth = dubaiDay(new Date()).slice(0, 7);
+  const accTarget = await people.ACC.b.post('/api/access/target', { month: thisMonth, gross: 1000000 });
+  check('an Access admin cannot set the revenue target — the Owner does', accTarget.status === 403
+    && /Only the Owner sets the revenue target/.test(accTarget.json?.detail || ''), JSON.stringify(accTarget.json));
+  const badTarget = await owner.post('/api/access/target', { month: thisMonth, gross: 'a lot' });
+  check('…a target that is not an amount is refused', badTarget.status === 400 && badTarget.json.error === 'bad_target', JSON.stringify(badTarget.json));
+  const setTarget = await owner.post('/api/access/target', { month: thisMonth, gross: 1240000 });
+  const D = new Date(Date.UTC(+thisMonth.slice(0, 4), +thisMonth.slice(5, 7), 0)).getUTCDate();
+  check('the Owner sets it: shared over the 4 cars that earned this week, and the month reads what was typed',
+    setTarget.status === 200 && setTarget.json.saved.cars === 4 && Math.abs(setTarget.json.saved.rate - 1240000 / (D * 4)) < 1e-6
+    && setTarget.json.summary.month_target === 1240000, JSON.stringify(setTarget.json).slice(0, 300));
+  const readTarget = await owner.get('/api/access/target');
+  check('…the panel reads who saved it, and the cars it was shared over', readTarget.json?.current?.saves?.[0]?.by === 'owner@example.test'
+    && readTarget.json.context.cars_7_days === 4 && readTarget.json.trips_min === 7, JSON.stringify(readTarget.json?.current?.saves));
+  const tgtAudit = await db.query(`SELECT count(*)::int n FROM access_audit WHERE action = 'target.set'`);
+  check('…and the save is on the audit chain', tgtAudit.rows[0].n === 1);
   const closed = await anon.get('/api/t/people');
   check('now a visitor is refused and told to sign in', closed.status === 401 && closed.json.error === 'signin');
   /* Express matches routes case-insensitively and ignores a trailing slash;

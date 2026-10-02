@@ -77,6 +77,8 @@ const SHELL_FILES = [
      still written by hand, so test/tokens.test.mjs now walks the phone's
      static imports from /m/app.js and fails on any module it does not name. */
   '/tokens.js', '/deposit_core.js', '/today.js', '/onlinetime.js',
+  /* m/screens.js imports ../target.js for the revenue target (2026-10-02). */
+  '/target.js',
   /* Sign-in and access: data.js imports ./access.js, which imports
      ./access_model.js — both on the phone's path to its first screen — and
      every page links /access.css. */
