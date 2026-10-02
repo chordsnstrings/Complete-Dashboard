@@ -11,14 +11,23 @@
         day (28 days of history), and the usual hour is printed beside it;
      2. an hour that has ended is over or under its own target; the running
         total counts the current hour by the minutes gone; what is left is
-        shared over the rest of the day in the usual proportions;
+        shared over the rest of the day in the usual proportions — all of it
+        on the clock, which is what stands in while the collection times of
+        the days gone are not on record (the fixture's rows are stamped three
+        days late, as a backfill stamps them);
      3. today's revenue is the live strip's own estimate spread over the
         hours, so the hours add up to the strip's figure, and it says so;
      4. no target, or too little history: absent, with the reason;
      5. the access layer withholds every figure by class; the route is never
         cached;
      6. the month's detail: what each day left must bring, the average day,
-        where the month lands at this pace, and each fleet's part.
+        where the month lands at this pace, and each fleet's part;
+     9. reported, not requested (docs/COVERAGE.md trap 47): with the days
+        gone collected live, "due by now" is what the usual day had REPORTED
+        by the same clock, and an hour that has ended is still arriving —
+        judged so far — until it settles; over is final at once; days not
+        collected live are left out, and under 7 of them the clock stands in
+        and says so.
    Synthetic plates (C…) and drivers (Test Driver …) only.
 
    REVERSIONS, run 2026-10-02 against the 38 checks below — each rule
@@ -32,7 +41,16 @@
      no month-end projection (the earned to date) ... 36 passed,  2 FAILED
      revenue.hours[].done left out of the manifest .. 37 passed,  1 FAILED
      an idle hour drawn as "▲ On target" ............ 37 passed,  1 FAILED
-     the strip's estimate not spread over the hours . 30 passed,  8 FAILED */
+     the strip's estimate not spread over the hours . 30 passed,  8 FAILED
+   and, the same day after trap 47, against the 53 — each restored and its
+   md5 checked:
+     the timing ignored (every hour judged by clock)  47 passed,  6 FAILED
+     an ended hour judged at once (no "arriving") ... 49 passed,  4 FAILED
+     backfilled days kept in the timing ............. 42 passed, 11 FAILED
+     the hour now counted by the minutes gone ....... 52 passed,  1 FAILED
+     "over" waits for the hour to settle ............ 52 passed,  1 FAILED
+     trips.hours[].expect left out of the manifest .. 52 passed,  1 FAILED
+     an arriving hour drawn as "▼ Under" ............ 52 passed,  1 FAILED */
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { applySchema } from './schema.mjs';
@@ -41,7 +59,7 @@ let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 const j = JSON.stringify;
 
-const { targetHours, usualDay, hoursOf, HISTORY_MIN_DAYS } = await import('../api/target_hours.js');
+const { targetHours, usualDay, hoursOf, HISTORY_MIN_DAYS, SETTLED } = await import('../api/target_hours.js');
 const { saveTarget, monthTarget, addDays } = await import('../api/revenue_target.js');
 
 const db = new PGlite();
@@ -50,8 +68,9 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 await q(`INSERT INTO fleet (id, name) VALUES ('ecosine','Ecosine'),('egari','Egari') ON CONFLICT DO NOTHING`);
 let n = 0;
 const T = (o) => q(
-  `INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, plate, requested_at, ended_at, status, payment_type, price, currency, raw)
-   VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $7::timestamptz + interval '20 minutes', 'completed', 'card', $8, 'AED', '{}'::jsonb)`,
+  `INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, plate, requested_at, ended_at, status, payment_type, price, currency, raw, ingested_at)
+   VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $7::timestamptz + interval '20 minutes', 'completed', 'card', $8, 'AED', '{}'::jsonb,
+           $7::timestamptz + interval '3 days')`,
   [o.platform || 'uber', `t${++n}`, o.fleet, `u-${o.driver}`, o.driver, o.plate, o.at, o.price === undefined ? 50 : o.price]);
 const span = (a, b) => { const out = []; for (let d = a; d <= b; d = addDays(d, 1)) out.push(d); return out; };
 /* Every day of September and 1 October: ten drivers, each in their own car
@@ -157,13 +176,16 @@ await q(`DELETE FROM revenue_target`);
 const bare = await targetHours(q, { now: NOW });
 check('no target: the revenue panel says so; the trips panel stands — the minimum always exists',
   /^No target is set for October 2026/.test(bare.revenue.absent || '') && !bare.revenue.hours && bare.trips.target === 100, j(bare.revenue));
+check('no day gone collected live: the clock stands in, and each panel says why',
+  P.timing?.days === 0 && /^When trips reach us is on record for 0 days collected live, fewer than the 7 needed, so the day is read by the clock/.test(P.timing.why || '')
+  && /^When fares reach us/.test(R.timing?.why || ''), j([P.timing, R.timing]));
 
 /* ── 5. the access layer, and the cache ───────────────────────────────── */
 console.log('\n5. withheld by class; never cached');
 const { shapeBody } = await import('../api/access/shape.js');
 const { lookupEntry } = await import('../api/access/manifest.js');
 const entry = lookupEntry('GET', '/api/target/hours');
-const nums = (o) => JSON.stringify(o).match(/"(target|done|left|need_by_now|ahead|usual_day|projected|measured|usual|need|diff|cum_need|cum_done|catch_up)":-?\d/g) || [];
+const nums = (o) => JSON.stringify(o).match(/"(target|done|left|need_by_now|ahead|usual_day|projected|measured|usual|need|diff|cum_need|cum_done|catch_up|expect)":-?\d/g) || [];
 const noRev = shapeBody(JSON.parse(j(h)), entry, { BK: 'F' }).body;
 check('without REV: not one revenue figure left, and _withheld says so', nums(noRev.revenue).length === 0 && noRev._withheld?.REV === '', nums(noRev.revenue).slice(0, 4).join(' '));
 const noBk = shapeBody(JSON.parse(j(h)), entry, { REV: 'F' }).body;
@@ -229,6 +251,78 @@ check('the month in figures: what every day left must bring, the average day, wh
   /Every day left must bring<\/th><td><b>AED 5,000\.00<\/b>/.test(mf) && /At this pace the month ends at<\/th><td><b class="tg-over">AED 155,000\.00<\/b>/.test(mf)
   && /<th scope="row">Ecosine<\/th><td><b>AED 3,500\.00<\/b>/.test(mf) && /<th scope="row">Egari<\/th>/.test(mf), mf.slice(0, 300));
 check('nothing undefined, NaN or null anywhere on the page', ![ph, rh, th, mf].some((x) => /undefined|NaN|\bnull\b|\[object Object\]/.test(x)));
+check('read by the clock, the basis says why', /fewer than the 7 needed, so the day is read by the clock/.test(ph), ph.slice(-500));
+
+/* ── 9. reported, not requested (docs/COVERAGE.md trap 47) ─────────────────
+   Every trip of the days gone first collected 35 minutes after it was
+   requested (production's median for Uber, 2026-10-01: 37). The 18:00 hour's
+   trips (18:15–18:35) land 18:50–19:10, so at a 19:00 cut the usual day had
+   3 of that hour's 5 reported; by 19:15, all 5. */
+console.log('\n9. judged on what the usual day had reported by the same clock');
+await q(`UPDATE trip SET ingested_at = requested_at + interval '35 minutes' WHERE requested_at < '2026-10-02T00:00:00+04:00'`);
+const ran = (at) => q(`DELETE FROM collection_run`).then(() => q(
+  `INSERT INTO collection_run (source, fleet_id, mode, window_start, window_end, status, rows_written, finished_at)
+   VALUES ('uber', 'ecosine', 'incremental', '2026-09-30', '2026-10-02', 'ok', 5, $1::timestamptz)`, [at]));
+await ran('2026-10-02T19:00:00+04:00');
+const lag = await targetHours(q, { now: NOW });
+const LP = lag.trips;
+const LR = lag.revenue;
+check('the timing is learned from the 28 days gone, every one collected live', LP.timing?.days === 28 && !LP.timing.why
+  && LR.timing?.days === 28 && !LR.timing.why, j([LP.timing, LR.timing]));
+check('at 19:00 the usual day had all of the 08:00 hour and 3 of the 18:00 hour\'s 5 trips reported: 30 + 30 = 60 due, not 80',
+  LP.need_by_now === 60 && at(LP, 8).reported === 1 && at(LP, 18).reported === 0.6 && at(LP, 18).expect === 30, j([LP.need_by_now, at(LP, 18)]));
+check('so 71 done is 11 ahead, not 9 behind — and ≈ AED 3,550 against 3,000 due, 550 ahead',
+  LP.ahead === 11 && LR.need_by_now === 3000 && LR.ahead === 550, j([LP.ahead, LR.need_by_now, LR.ahead]));
+check('the 18:00 hour ended 10 short of its 50, but it is still arriving, not under — on pace so far, 40 against the usual day\'s 30',
+  at(LP, 18).state === 'arriving' && at(LP, 18).so_far === 'over' && at(LP, 18).diff === 10 && LP.arriving === 1
+  && at(LR, 18).state === 'arriving' && at(LR, 18).so_far === 'over', j(at(LP, 18)));
+check('an hour that reached its target is over, settled or not', at(LP, 8).state === 'over', at(LP, 8).state);
+await ran('2026-10-02T19:15:00+04:00');
+const settled = await targetHours(q, { now: NOW });
+check(`by 19:15 the usual day had the whole 18:00 hour (${SETTLED * 100}% settles it): now it is under, by 10 of its 50`,
+  at(settled.trips, 18).state === 'under' && at(settled.trips, 18).diff === -10 && settled.trips.need_by_now === 80
+  && settled.trips.arriving === 0, j([at(settled.trips, 18), settled.trips.need_by_now]));
+/* Pure: the current hour by what is reported of it, not by the minutes
+   gone; over the moment it is reached. 08:30, a usual day had a fifth of
+   the 08:00 hour in. */
+const SH = [0, 0, 0, 0, 0, 0, 0, 0, 0.3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.5, 0, 0, 0, 0.2, 0];
+const seen8 = Array(24).fill(0); seen8[8] = 0.2;
+const cur8 = hoursOf({ target: 100, share: SH, usual: Array(24).fill(0), done: Array(24).fill(0).map((_, i) => (i === 8 ? 10 : 0)), cur: 8, gone: 0.5, seen: seen8 });
+check('the hour now counts by what a usual day had reported of it: at 08:30, 6 due (not 15), and its catch-up is for the 80% still to come',
+  cur8.need_by_now === 6 && cur8.ahead === 4 && Math.abs(cur8.this_hour.catch_up - 90 * 0.24 / 0.94) < 0.06 && cur8.this_hour.expect === 6,
+  j([cur8.need_by_now, cur8.this_hour]));
+const seen9 = Array(24).fill(0); seen9[8] = 0.5;
+const at9 = (d8) => hoursOf({ target: 100, share: SH, usual: Array(24).fill(0), done: Array(24).fill(0).map((_, i) => (i === 8 ? d8 : 0)), cur: 9, gone: 0, seen: seen9 }).hours[8];
+check('an hour half reported that has already done its 30 is over; one at 20 is still arriving, 5 ahead of the 15 expected so far; at 10, 5 short',
+  at9(30).state === 'over' && at9(20).state === 'arriving' && at9(20).so_far === 'over' && at9(20).diff === 5
+  && at9(10).so_far === 'under' && at9(10).diff === -5, j([at9(30).state, at9(20), at9(10).diff]));
+/* Days not collected live: everything before 26 September stamped three
+   days late, as a backfill or a restore stamps it. */
+await q(`UPDATE trip SET ingested_at = requested_at + interval '3 days' WHERE requested_at < '2026-09-26T00:00:00+04:00'`);
+await ran('2026-10-02T19:00:00+04:00');
+const six = await targetHours(q, { now: NOW });
+check('six days collected live are too few: the clock stands in, and the panel says why',
+  six.trips.timing?.days === 6 && /^When trips reach us is on record for 6 days collected live, fewer than the 7 needed/.test(six.trips.timing.why || '')
+  && at(six.trips, 18).state === 'under' && six.trips.need_by_now === 80, j([six.trips.timing, six.trips.need_by_now]));
+await q(`UPDATE trip SET ingested_at = requested_at + interval '35 minutes'
+          WHERE requested_at >= '2026-09-25T00:00:00+04:00' AND requested_at < '2026-09-26T00:00:00+04:00'`);
+const seven = await targetHours(q, { now: NOW });
+check('seven are enough, and the 21 backfilled days are left out of the timing rather than read as "nothing reported": 60 due at 19:00, not 15',
+  seven.trips.timing?.days === 7 && !seven.trips.timing.why && seven.trips.need_by_now === 60 && at(seven.trips, 18).state === 'arriving',
+  j([seven.trips.timing, seven.trips.need_by_now]));
+const lh = hoursHtml(LP, lag, { isMoney: false });
+const lr = Object.fromEntries(rowsOf(lh).map((r) => [r.h, r]));
+check('the page: the hour just gone reads "on pace so far … still arriving", never "Under"; the summary says why; the basis says what "due by now" is',
+  /<span class="tg-over">▲ On pace so far \+10 trips<\/span> <span class="hp-dim">· still arriving<\/span>/.test(lr['18:00'].html)
+  && !/Under by/.test(lr['18:00'].html) && /<b class="tg-over">▲ 11 trips ahead<\/b>/.test(lh)
+  && /The hour just gone is still arriving — a trip reaches us about half an hour after it is requested/.test(lh)
+  && /“Due by now” is what the usual day had reported by this time of day — a trip reaches us after it is over — over the 28 days collected live\./.test(lh)
+  && /class="hc-h hc-arriving"/.test(lh), lr['18:00'].html);
+const lt = todayHtml(lag);
+check('today: right now is 550 ahead, against what the usual day had reported by 19:00',
+  /Right now, 19:00<\/span><b class="tg-v">▲ ≈ AED 550\.00 ahead<\/b>/.test(lt) && /the usual day had AED 3,000\.00 reported by now/.test(lt), lt.slice(0, 600));
+check('nothing undefined, NaN or null on the lagged page', ![lh, lt].some((x) => /undefined|NaN|\bnull\b|\[object Object\]/.test(x)));
+await q(`DELETE FROM collection_run`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 api.server.close();

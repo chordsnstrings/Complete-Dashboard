@@ -2383,3 +2383,22 @@ Found and fixed:
   at the width it is shown at.
 - The cut: first the oldest last run of every channel that ran today, which
   the bridge pinned at 01:20 (the nightly catch-up) — trap 46.
+
+On production the same day (29ffc19), the figures were right and one verdict
+was not. At 12:08 the page called the 11:00 hour "▼ Under" and the day
+AED 2,344.78 behind, while the 12:00 hour held 0 trips of a usual 40 after
+a collection with every channel in. An hour holds the trips requested in
+it, and Uber files a trip once it is over: 20 / 37 / 55 minutes after the
+request (161 trips of 1 October; the same every one of the 28 days before)
+— trap 47. Now each hour gone and "due by now" are read against what the
+usual day had reported by the same clock; the hour just gone is "still
+arriving", its bar grey, its words "▲ On pace so far" or "▼ Short by … so
+far", and it turns over or under when it settles.
+
+#target is not in test/routes_list.mjs, so the route sweeps (spacing, smoke,
+render audit) have never walked it; adding it there would fail
+arkiv_classic_frozen, which holds a pre-Arkiv recording of every listed route
+and the page has none. Measured instead with spacing.test.mjs's own MEASURE
+against the mock at Arkiv 1440, Classic 1440 and Arkiv 960: Classic put the
+month's note as a bare span 3px above the panel body (minimum 10). It is the
+panel's caption paragraph now; 0 pairs under 10px in all three.

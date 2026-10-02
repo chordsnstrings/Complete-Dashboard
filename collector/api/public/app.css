@@ -2790,6 +2790,7 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
 .hc .hc-over .hc-done{fill:var(--good)}
 .hc .hc-under .hc-done{fill:var(--critical)}
 .hc .hc-now .hc-done{fill:var(--ink)}
+.hc .hc-arriving .hc-done{fill:var(--grey-strong)}
 .hc .hc-x{font-size:var(--t2);fill:var(--grey)}
 .hp-key{margin:2px 0 10px;font-size:var(--t3);color:var(--grey);display:flex;flex-wrap:wrap;align-items:center;gap:2px 0}
 .hp-key .hk{display:inline-block;width:10px;height:10px;margin:0 5px 0 12px;vertical-align:-1px;border:1px solid transparent}
@@ -2797,6 +2798,7 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
 .hp-key .hk-done-over{background:var(--good)}
 .hp-key .hk-done-under{background:var(--critical)}
 .hp-key .hk-done-now{background:var(--ink)}
+.hp-key .hk-done-arriving{background:var(--grey-strong)}
 .hp-key .hk-need{border-color:var(--grey)}
 .hp-key .hk-catch{border:1px dashed var(--ink)}
 .hp-key .hk-usual{height:0;border:0;border-top:2px solid var(--grey-strong)}

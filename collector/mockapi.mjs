@@ -4721,7 +4721,10 @@ app.get('/api/target', (req, r) => {
 /* /api/target/hours (api/target_hours.js): today hour by hour, from the real
    hoursOf() over a made-up usual day (a morning peak, an evening peak), with
    today running a little under it — so the first page draws past hours green
-   and red, the hour now in ink, and the hours to come with their catch-up. */
+   and red, the hour now in ink, and the hours to come with their catch-up.
+   Read as production reads it (trap 47): a usual day has about half of the
+   hour just gone reported by now and nearly all of the one before, so that
+   hour draws as still arriving. */
 app.get('/api/target/hours', (req, r) => {
   const today = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.asof || '')) ? String(req.query.asof) : dubaiDay(new Date());
   const t = tgMonth(tgMonthOf(today), today);
@@ -4734,17 +4737,18 @@ app.get('/api/target/hours', (req, r) => {
   const share = curve.map((v) => v / tot);
   const usualTrips = curve.map((v) => (v / tot) * 520);
   const usualAed = curve.map((v) => (v / tot) * 20500);
-  const doneTrips = usualTrips.map((v, h) => (h < cur ? Math.round(v * (h % 3 === 0 ? 1.1 : 0.85)) : h === cur ? Math.round(v * gone) : 0));
+  const seen = share.map((_, h) => (h < cur - 2 ? 1 : h === cur - 2 ? 0.99 : h === cur - 1 ? 0.55 : h === cur ? gone * 0.3 : 0));
+  const doneTrips = usualTrips.map((v, h) => (h <= cur ? Math.round(v * seen[h] * (h % 3 === 0 ? 1.1 : 0.85)) : 0));
   const doneAed = doneTrips.map((v) => Math.round(v * 39.4 * 100) / 100);
   const clock = local.toISOString().slice(11, 16);
   const basis = { days: 28, from: tgAddDays(today, -28), to: tgAddDays(today, -1) };
   r.set('cache-control', 'private, no-store').json({
     today, clock, hour: cur, now_clock: clock, at: new Date().toISOString(), cut_at: new Date().toISOString(),
     cut_by: 'collection', lag_min: 0, latest_at: new Date().toISOString(), month: t.month, month_name: t.month_name,
-    revenue: { ...hoursOf({ target: t.summary.today_needs, share, usual: usualAed, done: doneAed, cur, gone, money: true }),
-      estimate: true, projected: 4100, measured: 980.5, basis },
-    trips: { ...hoursOf({ target: td.trips_target || 552, share, usual: usualTrips, done: doneTrips, cur, gone }),
-      active: td.active_drivers || 46, min: 12, basis },
+    revenue: { ...hoursOf({ target: t.summary.today_needs, share, usual: usualAed, done: doneAed, cur, gone, seen, money: true }),
+      estimate: true, projected: 4100, measured: 980.5, basis, timing: { days: 28 } },
+    trips: { ...hoursOf({ target: td.trips_target || 552, share, usual: usualTrips, done: doneTrips, cur, gone, seen }),
+      active: td.active_drivers || 46, min: 12, basis, timing: { days: 28 } },
   });
 });
 /* The Today workbook (api/today_workbook.js): the six sheet names in the

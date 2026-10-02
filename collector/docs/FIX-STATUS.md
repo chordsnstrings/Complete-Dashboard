@@ -4261,10 +4261,11 @@ target".
 | TGT-9 | the trips chart: a day over when its completed trips reach its active drivers × the minimum; a floor, nothing carried; the month's trips ÷ its driver-days; settled like the revenue; there with no revenue target; desktop band + phone card; Excel columns | revenue_target §12 (12, 12, 1, 6, 6) | ✓ | fcdbf7b | e71f97ec, seed 42cd8d85 | ✓ 2026-10-02 |
 | TGT-10 | every trip figure in /api/target declared BK, so a role without booking counts reads why, not the counts | revenue_target §12 (1) | ✓ | fcdbf7b | e71f97ec, seed 42cd8d85 | ✓ 2026-10-02 |
 | TGT-11 | the suite's other casualties: a driver id beside each name in the workbook (interlinking); /api/target and the workbook in the mock (mockapi, route_smoke); the target answer in the phone recording and Today's oracle re-taken, proved identical with the cards removed (phone_classic, phone_arkiv); the phone strip a chart, not 11px links (phone_arkiv 44px); the strip's sizes on the type scale (type_scale); driver_photo seeded relative to today (it failed on the calendar, trap 45) | the named suites, each failing before | ✓ | fcdbf7b | e71f97ec, seed 42cd8d85 | ✓ 2026-10-02 |
-| TGT-12 | the first page: #target is the Today landing — the month (cells, day strips, the month in figures, each fleet), today, revenue hour by hour, trips hour by hour — every minute; the live strip carries no target; the Action list moved to Work | target_hours §1–8 (38); access_pages (150); nav_sections; arkiv_shell | ✓ | | | |
-| TGT-13 | an hour's target from the usual day (28 days by Dubai hour), on/off per hour gone, the day against the curve to the cut, the rest shared in proportion, idle hours neither, revenue the strip's estimate spread by hour, absent under 7 days or without a target | target_hours (26/12, 37/1, 34/4, 37/1, 36/2, 30/8) | ✓ | | | |
-| TGT-14 | the cut is the last intraday collection, not the clock or the oldest channel (trap 46) | target_hours (37/1) | ✓ | | | |
-| TGT-15 | the month's detail: per day left, average day, month-end at this pace, best/worst, trips a day and active drivers, each fleet's part; all declared by class | target_hours (36/2, 37/1) | ✓ | | | |
+| TGT-12 | the first page: #target is the Today landing — the month (cells, day strips, the month in figures, each fleet), today, revenue hour by hour, trips hour by hour — every minute; the live strip carries no target; the Action list moved to Work; its own reason for the pickers that do not apply (arkiv_shell, in 29ffc19) | target_hours §1–8 (38); access_pages (150); nav_sections; arkiv_shell (77) | ✓ | 1f17063, 29ffc19 | a172169c | ✓ 2026-10-02 |
+| TGT-13 | an hour's target from the usual day (28 days by Dubai hour), on/off per hour gone, the day against the curve to the cut, the rest shared in proportion, idle hours neither, revenue the strip's estimate spread by hour, absent under 7 days or without a target | target_hours (26/12, 37/1, 34/4, 37/1, 36/2, 30/8) | ✓ | 1f17063 | a172169c | ✗ — the hour gone and "by now" judged before their trips are filed (trap 47); TGT-16 |
+| TGT-14 | the cut is the last intraday collection, not the clock or the oldest channel (trap 46) | target_hours (37/1) | ✓ | 1f17063 | a172169c | ✓ 2026-10-02 (12:01, then 12:08 — every booking channel's run) |
+| TGT-15 | the month's detail: per day left, average day, month-end at this pace, best/worst, trips a day and active drivers, each fleet's part; all declared by class | target_hours (36/2, 37/1) | ✓ | 1f17063 | a172169c | ✓ 2026-10-02 |
+| TGT-16 | judged on what the usual day had REPORTED by the cut's clock (trip.ingested_at over the 28 days collected live): "due by now" like for like; an hour gone over at once, under once settled (98%), still arriving before; restored days left out, under 7 live days the clock with its reason; the page's words, grey bar, key and basis | target_hours §9 (47/6, 49/4, 42/11, 52/1, 52/1, 52/1, 52/1) | ✓ | | | |
 
 Proven on production 2026-10-02 (fcdbf7b, then the seed's redeploy of the same
 commit). Before the seed, /api/target answered "No target is set for October
@@ -4282,4 +4283,20 @@ in each skin's own token (#961111, #D65044, #901D38), no page error, no
 sideways scroll, nothing undefined, neither band on #drivers. The workbook
 from production: six sheets, Target with both summaries, Days with 1 October
 under on both counts, Drivers yesterday 126 rows each with its id.
+
+The first page, proven on production 2026-10-02 (29ffc19, deployment
+a172169c): GET /api/target/hours 200 in 6.4 s cold and 0.68 s kept,
+`private, no-store`; cut_by collection at 12:01, then 12:08 (Uber, Bolt,
+Yango and the hotel channel's incremental runs all finished 12:08); today
+needs AED 55,096.57 and 1,488 trips (124 active × 12), the hours' targets
+adding to it (55,096.58 / 1,487.7 after rounding); the usual day 44,326.66
+and 709.1 trips, so the trips target is 2.1 times a usual day. Through
+bin/prod-mirror.mjs (6 assets, 0 differ): the bare address opens Target;
+Today's tabs Target, To-do list, Fleet activity, Today vs yesterday,
+Analyst; the month's nine rows (Ecosine 36,314.10 and 580 trips, Egari
+15,788.93 and 263 on the 1st), five cells for today, 48 hour rows; Arkiv
+1440 light and dark, Classic 1440, Arkiv 960; #insights under Work; no page
+error, no sideways scroll. The same pass found TGT-13's defect: the 12:00
+hour held 0 trips of a usual 40 at a 12:08 cut with every channel in, and
+the latest booking held was 11:57 — trap 47, fixed as TGT-16.
 

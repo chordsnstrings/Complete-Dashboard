@@ -32,8 +32,12 @@
 
    Green and red: an hour that has ENDED is over or under its target, and the
    day so far is ahead or behind; the hour in progress and the hours to come
-   are ink. Every coloured figure carries ▲ or ▼ and a word. Revenue today is
-   an estimate until Uber prices the day overnight, and is marked ≈. */
+   are ink. An hour that has ended but whose trips are still being filed
+   (Uber files a trip about half an hour after it is requested — trap 47) is
+   STILL ARRIVING: its bar is grey, and its words say how it stands SO FAR
+   against what the usual day had reported of it by now. Every coloured
+   figure carries ▲ or ▼ and a word. Revenue today is an estimate until Uber
+   prices the day overnight, and is marked ≈. */
 import { api, alive, currentGen, href } from './data.js';
 import { el, esc, money, countOf, sourceLabel, panel, secHead, loading, contract } from './ui.js';
 import { fmt } from './charts.js';
@@ -115,7 +119,7 @@ export function todayHtml(h) {
       est ? 'Revenue ≈ an estimate until Uber prices the day overnight' : null]),
     cell('Left for today', rOk ? approx(R.left, est) : trips(P.left), [rOk && pOk ? trips(P.left) : null]),
     cell(`Right now, ${h.clock}`, rOk ? sign(R.ahead, (v) => `${est ? '≈ ' : ''}${money(v)}`) : sign(P.ahead, trips), [
-      rOk ? { text: `the usual day has ${money(R.need_by_now)} done by now` } : null,
+      rOk ? { text: `the usual day had ${money(R.need_by_now)} reported by now` } : null,
       pOk ? { text: `${sign(P.ahead, trips)} — ${trips(P.need_by_now)} due by now`, tone: tone(P.ahead) } : null],
     tone(rOk ? R.ahead : P.ahead)),
     (() => {
@@ -134,8 +138,9 @@ export function todayHtml(h) {
 /* ── 02 / 03 · hour by hour ────────────────────────────────────────────── */
 /* Each hour: its target as an outline, what the hour usually does as a
    tick, and what it did as a bar — green over, red under once the hour has
-   ended, ink while it runs. The hours to come carry their catch-up as a
-   dashed outline where it asks more than the plan. */
+   ended and settled, grey while its trips are still arriving, ink while it
+   runs. The hours to come carry their catch-up as a dashed outline where it
+   asks more than the plan. */
 function hourChart(x, { isMoney }) {
   /* Drawn at the width it is shown at (a full-width panel, ~1,300px at a
      1440 screen), so the hour labels stay at reading size. */
@@ -149,6 +154,7 @@ function hourChart(x, { isMoney }) {
     const bx = pl + step * i + (step - bw) / 2;
     const tip = `${r.label}: target ${f(r.need)}, usually ${f(r.usual)}`
       + (r.done != null ? `, done ${isMoney && x.estimate ? '≈ ' : ''}${f(r.done)}` : '')
+      + (r.state === 'arriving' ? ` so far — still arriving; the usual day had ${f(r.expect)} of it reported by now` : '')
       + (r.catch_up != null ? `, to land the day ${f(r.catch_up)}` : '');
     const g = [`<g class="hc-h hc-${r.state}"><title>${esc(tip)}</title>`];
     if (r.done != null && r.done > 0) g.push(`<rect class="hc-done" x="${bx.toFixed(1)}" y="${y(r.done).toFixed(1)}" width="${bw.toFixed(1)}" height="${(pt + ih - y(r.done)).toFixed(1)}"/>`);
@@ -172,15 +178,19 @@ export function hoursHtml(x, h, { isMoney }) {
   const head = `<p class="hp-lede"><b class="tg-${tone(x.ahead)}">${esc(sign(x.ahead, f))}</b> `
     + `${esc(`at ${h.clock} — ${f(x.done)} done, ${plain(x.need_by_now)} due by now on the usual day.`)} `
     + `${esc(`Left for today: ${f(x.left)}.`)}`
+    + (x.arriving ? ` ${esc(`${x.arriving === 1 ? 'The hour just gone is' : `${x.arriving} hours just gone are`} still arriving — a trip reaches us about half an hour after it is requested, so an hour is called under only once it has settled.`)}` : '')
     + (x.this_hour ? ` ${esc(`This hour, ${x.this_hour.label}: ${plain(x.this_hour.catch_up ?? x.this_hour.need)} in what is left of it to land the day (its target ${plain(x.this_hour.need)}).`)}` : '')
     + '</p>';
   const key = '<p class="hp-key"><span class="hk hk-done-over"></span>done, on target'
-    + '<span class="hk hk-done-under"></span>done, under<span class="hk hk-done-now"></span>this hour so far'
+    + '<span class="hk hk-done-under"></span>done, under<span class="hk hk-done-arriving"></span>ended, still arriving'
+    + '<span class="hk hk-done-now"></span>this hour so far'
     + '<span class="hk hk-need"></span>target<span class="hk hk-catch"></span>to land the day'
     + '<span class="hk hk-usual"></span>what the hour usually does</p>';
   const rows = x.hours.map((r) => {
     const status = r.state === 'over' ? `<span class="tg-over">▲ On target${r.diff > 0 ? ` +${esc(plain(r.diff))}` : ''}</span>`
       : r.state === 'under' ? `<span class="tg-under">▼ Under by ${esc(plain(-r.diff))}</span>`
+        : r.state === 'arriving' ? (r.so_far === 'over' ? `<span class="tg-over">▲ On pace so far${r.diff > 0 ? ` +${esc(plain(r.diff))}` : ''}</span>`
+          : `<span class="tg-under">▼ Short by ${esc(plain(-r.diff))} so far</span>`) + ' <span class="hp-dim">· still arriving</span>'
         : r.state === 'now' ? '<span class="hp-now">In progress</span>'
           : r.state === 'idle' ? '<span class="hp-dim">— nothing asked</span>' : '<span class="hp-dim">To come</span>';
     const quiet = !r.need && !r.done && !r.usual ? ' class="hp-quiet"' : (r.state === 'now' ? ' class="hp-cur"' : '');
@@ -189,7 +199,9 @@ export function hoursHtml(x, h, { isMoney }) {
       + `<td>${r.catch_up == null ? '<span class="hp-dim">—</span>' : esc(plain(r.catch_up))}</td>`
       + `<td>${r.cum_done == null ? '<span class="hp-dim">—</span>' : esc(`${f(r.cum_done)} / ${plain(r.cum_need)}`)}</td></tr>`;
   }).join('');
-  const basis = `<p class="cap hp-basis">${esc(`Each hour’s target is today’s ${plain(x.target)} × the share of a day’s ${isMoney ? 'fares' : 'completed trips'} that hour carried over the last ${countOf(x.basis?.days, 'day')} (${x.basis?.from} to ${x.basis?.to}). “To land the day” shares what is still to do over the hours left in the same proportions.`)}`
+  const timing = x.timing?.why ? ` ${x.timing.why}`
+    : x.timing?.days ? ` “Due by now” is what the usual day had reported by this time of day — a trip reaches us after it is over — over the ${countOf(x.timing.days, 'day')} collected live.` : '';
+  const basis = `<p class="cap hp-basis">${esc(`Each hour’s target is today’s ${plain(x.target)} × the share of a day’s ${isMoney ? 'fares' : 'completed trips'} that hour carried over the last ${countOf(x.basis?.days, 'day')} (${x.basis?.from} to ${x.basis?.to}). “To land the day” shares what is still to do over the hours left in the same proportions.${timing}`)}`
     + (est ? ` ${esc('Today’s revenue is the live strip’s estimate — fares on record plus each channel’s unpriced bookings at its settled per-booking rate — until Uber prices the day overnight.')}` : '') + '</p>';
   return `${head}${hourChart(x, { isMoney })}${key}`
     + `<div class="tablewrap"><table class="hp"><thead><tr><th scope="col">Hour</th><th scope="col">Usually</th><th scope="col">Target</th>`
@@ -210,8 +222,13 @@ export async function targetPage(root) {
     band.append(secHead('00', 'The month', note), month);
     root.append(band);
   } else {
+    /* The note in the panel's own caption paragraph: a bare span between the
+       heading and the body sat 3px above it (test/spacing.test.mjs's rule,
+       measured on #target, which test/routes_list.mjs does not walk). */
     const p = panel('The month', null, 'tp-month');
-    p.panel.querySelector('h3')?.after(note);
+    const cap = el('p', 'cap');
+    cap.append(note);
+    p.panel.querySelector('h3')?.after(cap);
     p.body.append(month);
     root.append(p.panel);
   }

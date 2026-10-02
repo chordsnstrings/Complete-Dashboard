@@ -7841,10 +7841,12 @@
      "revenue.hours[].cum_need",
      "revenue.hours[].cum_done",
      "revenue.hours[].catch_up",
+     "revenue.hours[].expect",
      "revenue.this_hour.need",
      "revenue.this_hour.catch_up",
      "revenue.this_hour.done",
-     "revenue.this_hour.usual"
+     "revenue.this_hour.usual",
+     "revenue.this_hour.expect"
     ]
    },
    {
@@ -7863,10 +7865,12 @@
      "trips.hours[].cum_need",
      "trips.hours[].cum_done",
      "trips.hours[].catch_up",
+     "trips.hours[].expect",
      "trips.this_hour.need",
      "trips.this_hour.catch_up",
      "trips.this_hour.done",
-     "trips.this_hour.usual"
+     "trips.this_hour.usual",
+     "trips.this_hour.expect"
     ]
    }
   ],
@@ -7875,6 +7879,6 @@
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "api/target_routes.js + api/target_hours.js (2026-10-02). Today's target hour by hour, both fleets: each Dubai hour's share of a day's fares and completed trips over the last 28 days, today's target laid over it, what each hour has done (trips counted; revenue on record plus the live strip's own estimate for unpriced bookings), on target or not, and what the hours left must carry. Revenue REV, trips BK. Both fleets in one plan, so a reader limited to one is refused with that reason ('mixed'). Never cached (api/cache.js NEVER)."
+  "notes": "api/target_routes.js + api/target_hours.js (2026-10-02). Today's target hour by hour, both fleets: each Dubai hour's share of a day's fares and completed trips over the last 28 days, today's target laid over it, what each hour has done (trips counted; revenue on record plus the live strip's own estimate for unpriced bookings), on target or not, and what the hours left must carry; an hour that has ended is judged against what the usual day had REPORTED of it by the same clock (trip.ingested_at), and is 'arriving' until it settles. Revenue REV, trips BK. Both fleets in one plan, so a reader limited to one is refused with that reason ('mixed'). Never cached (api/cache.js NEVER)."
  }
 ]

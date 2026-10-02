@@ -4407,6 +4407,35 @@ untouched, and nothing projected is ever added into `accounted`.
       ran today pins the cut at 01:21 all day, because the nightly `catchup`
       runs then and counts as "ran today"; and the clock overstates the
       shortfall by the lag. api/target_hours.js collectedTo().
+  47. **An hour holds the trips REQUESTED in it, and Uber files a trip only
+      once it is over — so the hour just gone is about half in.** Measured on
+      production 2026-10-02 through the API (GET /api/trips/list for the
+      day, then GET /api/trip for each sampled trip's `ingested_at`, which
+      an upsert does not move): 161 Uber trips of 1 October, spread over the
+      day, were first collected 20 / 37 / 55 minutes after they were
+      REQUESTED (10th / median / 90th percentile) — 2 / 11 / 26 minutes
+      after they ENDED, so most of the wait is the trip itself and the rest
+      the collection cadence. Six a day over the 28 days before: the same
+      shape every day (5 September slower, one trip 8 hours). Bolt and the
+      hotel channel file within minutes of the request. The first page as
+      first shipped judged an hour final the minute it ended: at 12:08 it
+      called 11:00–12:00 under and the day AED 2,344.78 behind, while the
+      12:00 hour held 0 trips of a usual 40 and the latest booking held was
+      11:57 — a collection at 12:08 with every channel in. Compare like with
+      like: api/target_hours.js seenCurve() reads, per hour, the share of
+      its final figure that had been collected by the cut's clock on each of
+      the 28 days, and judges "due by now" and each hour gone against that;
+      an hour is under only once 98% of it would have been in (SETTLED),
+      "still arriving" until then, and over the moment it reaches its
+      target. A restored or backfilled day carries the restore's time in
+      `ingested_at`, which would read as "nothing reported by now" and turn
+      every day into a day ahead — so a day counts only when half its
+      bookings were first collected within a day of being requested, and
+      under 7 such days the clock stands in and the panel says so. Not
+      covered: a Bolt trip is stored at request and marked completed later
+      (its `ended_at` is after its `ingested_at`), and no column says when;
+      it is read as reported from its first collection — a small over-read
+      on a channel of about 5% of trips.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
@@ -8230,10 +8259,12 @@ And, before it went out: "set october target to 1.705 Million not 1.6"
 - **An hour's target** (api/target_hours.js, GET /api/target/hours): today's
   target × the share of a day's fares (revenue) or completed trips (trips)
   that Dubai hour carried over the last 28 days, the hour's usual beside it.
-  An hour that has ended is over or under; the day so far against the usual
-  curve to the cut (the current hour by the minutes gone, trap 46); what is
-  left shared over the hours left in the same proportions ("to land the
-  day"); an hour that asked nothing and did nothing is neither. Revenue today
+  The day so far against what the usual day had REPORTED by the cut's clock
+  (trap 47), at the cut (trap 46); an hour that has ended is over as soon as
+  it reaches its target, under once it has settled, and still arriving —
+  judged so far — before that; what is left shared over the rest of the day
+  in the same proportions ("to land the day"); an hour that asked nothing and
+  did nothing is neither. Revenue today
   is the live strip's own estimate spread by each channel's unpriced bookings
   per hour, so the hours add to the strip's figure exactly, marked ≈. Under 7
   days of history, or no target: absent with the reason. The answer is kept
