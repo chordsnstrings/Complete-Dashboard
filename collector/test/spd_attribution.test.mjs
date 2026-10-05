@@ -38,6 +38,8 @@ const srv = readFileSync(new URL('../api/server.js', import.meta.url), 'utf8');
 check('a statement over PLAN_QUERY_MS logs its plan, once per head, never re-run with ANALYZE',
   /if \(ms >= PLAN_MS\) logPlan\(text, params, ms\);/.test(srv)
   && /pool\.query\(`EXPLAIN \$\{text\}`, params\)/.test(srv) && /planned\.has\(head\)/.test(srv));
+check('W() carries the raw requested_at range beside local_day, so fleet and platform windows can use their indexes',
+  /\$\{c\}requested_at >= \(\$1::date::timestamp AT TIME ZONE 'Asia\/Dubai'\)`\s*\n\s*\+ ` AND \$\{c\}requested_at < \(\(\$2::date \+ 1\)::timestamp AT TIME ZONE 'Asia\/Dubai'\)`/.test(srv));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

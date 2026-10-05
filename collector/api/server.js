@@ -406,7 +406,16 @@ const range = (req) => {
    into "Could not load this view" over the entire Vehicles page. */
 const W = (alias = '') => {
   const c = alias ? `${alias}.` : '';
+  /* The raw requested_at range says the same days again (local_day IS the
+     Dubai date of requested_at), so no row changes — but it is a predicate
+     the (fleet_id, requested_at) and (platform, requested_at) indexes can
+     range over. Written on local_day alone, /api/kpis at 90 days with a fleet
+     was planned as a walk of the whole of trip in plate order with the window
+     as a filter (logged plan, SPD 2026-10-05; 19.2 s). The DAYWIN fix in
+     api/driver_routes.js is the same idea. */
   return `${c}local_day BETWEEN $1::date AND $2::date`
+    + ` AND ${c}requested_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai')`
+    + ` AND ${c}requested_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')`
     + ` AND ($3::text IS NULL OR ${c}platform=$3)`
     + ` AND ($4::text IS NULL OR ${c}fleet_id=$4)`;
 };

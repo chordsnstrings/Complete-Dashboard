@@ -4332,4 +4332,5 @@ under Work.
 | SPD-7 | schema v99: trip (person_key, driver_ext_id), trip (plate, coalesce(ended_at, requested_at)) | yes | pending deploy | spd_attribution |
 | SPD-8 | slow statements over 5 s log their plan | yes | pending deploy | spd_attribution |
 | SPD-9 | economics/drivers FMS journeys: raw requested_at range | yes | pending deploy | — |
+| SPD-11 | W() (api/server.js) adds the raw requested_at range beside local_day, so fleet and platform windows range on their (…, requested_at) indexes | yes | pending deploy | spd_attribution 8 |
 
