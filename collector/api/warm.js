@@ -127,6 +127,10 @@ const BARE_PATHS = [
    All-time is deliberately still absent: it is reachable only by hand-editing a
    URL, and warming it would double this pass to serve a window nobody opens. */
 const WINDOWS = [30, 7, 90, 365];
+/* #unauthorized's own list, as the page asks for it (verdict and limit from
+   api/public/segments.js): 21–31 s cold on production 2026-10-05, the slowest
+   first open left once the driver route was fixed. Default window only. */
+const MONTH_ONLY_UNAUTH = '/api/unauthorized/attributed?verdict=unauthorized&limit=500';
 /* ONE FULL PASS AT BOOT, THEN THE TWO WINDOWS PEOPLE OPEN, AT MOST TWICE AN HOUR.
    ─────────────────────────────────────────────────────────────────────────
    This warmer re-ran all 89 aggregates every time the data version moved, and
@@ -231,6 +235,19 @@ export function startWarmer({ port, pool, everyMs = 60000, enabled = true, minGa
          constant is imported rather than repeated: a warmer guessing 84 would
          warm a key nobody requests the day that number changes. */
       if (!stopped) await hit(`http://127.0.0.1:${port}/api/platforms?${windowQs(CAPACITY_WINDOW_DAYS)}`);
+      /* THE KEY THE BROWSER ACTUALLY ASKS FIRST. The window opens on "This
+         month", so api/public/data.js params() sends period=month, then the
+         page's own parameters, then grain=auto — and the cache keys on the
+         exact address (api/access/middleware.js fmCacheKey). Every key below
+         is from=/to=, so the default view of every list page was a miss:
+         the timing sweep of 2026-10-05 found /api/vehicles/directory,
+         /api/economics/* and the rest cold on first open after each pass.
+         First, because it is the one people open. */
+      for (const path of [...PATHS, MONTH_ONLY_UNAUTH]) {
+        if (stopped) return;
+        const [base, own] = path.split('?');
+        await hit(`http://127.0.0.1:${port}${base}?period=month${own ? `&${own}` : ''}&grain=auto`);
+      }
       for (const days of windows) {
         for (const path of PATHS) {
           if (stopped) return;

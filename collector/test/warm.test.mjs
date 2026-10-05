@@ -38,6 +38,15 @@ await warmer.warm();
 console.log('\nwarm: it asks for what a browser will ask for');
 
 check('it warmed a substantial number of pages', seen.length > 30, String(seen.length));
+/* The window opens on "This month": the browser's first key for every list
+   is period=month, the page's own parameters, grain=auto (api/public/data.js
+   params()). The from=/to= keys alone missed every default open
+   (production, 2026-10-05). */
+check('the browser\'s default keys are warmed, byte for byte: period=month, own parameters, grain=auto',
+  seen.includes('/api/vehicles/directory?period=month&grain=auto')
+  && seen.includes('/api/mix?period=month&by=product&grain=auto')
+  && seen.includes('/api/unauthorized/attributed?period=month&verdict=unauthorized&limit=500&grain=auto'),
+  seen.filter((u) => /period=month/.test(u)).slice(0, 3).join(' | '));
 
 /* The window is the part that silently goes wrong. The front end computes
    Dubai dates; a warmer using UTC would populate entries under keys nobody
