@@ -483,6 +483,23 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
      Resolved through the shared driverScope(), so `p` is [from, to, keys] in
      the house argument order and a merged identity answers once rather than
      once per platform account. */
+  /* THE CARS THIS PERSON COULD BE NAMED ON, FIRST. Every candidate the
+     attribution ladder names comes from a trip or a custody row on the
+     journey's own plate (api/unauthorized_sql.js attributionJoin: `trip t` and
+     `vehicle_driver_day v`, each WHERE plate = o.plate), keyed by
+     personKeyStored = coalesce(person_key, driver_ext_id). So a journey on a
+     car this person has no such row on cannot name them, and is dropped
+     before the ladder runs rather than after. Measured on production
+     2026-10-05: #driver/p121/unauthorized?period=last_month waited 71.8 s on
+     this route — the ladder ran over every journey of the month, twice
+     (rows, then the tally), to keep a handful. person_key OR driver_ext_id
+     is a superset of the stored key, never narrower. */
+  const MY_PLATES = `o.plate IN (
+      SELECT t.plate FROM trip t
+       WHERE t.person_key IN (SELECT pkey FROM me) OR t.driver_ext_id IN (SELECT pkey FROM me)
+      UNION
+      SELECT v.plate FROM vehicle_driver_day v
+       WHERE v.person_key IN (SELECT pkey FROM me) OR v.driver_ext_id IN (SELECT pkey FROM me))`;
   app.get('/api/driver/unauthorized', withDriver(async (req, res, d, p) => {
     const [from, to] = p;
     const { verdict, rejected } = verdictOf(req);
@@ -519,6 +536,7 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
         WHERE ${DAYWIN('o.started_at')}
           AND ($4 = 'all' OR o.verdict = $4)
           AND ($5::text IS NULL OR o.fleet_id = $5)
+          AND ${MY_PLATES}
           AND att.candidate_keys
               && coalesce((SELECT array_agg(pkey) FROM me), ARRAY[]::text[])
         ORDER BY o.started_at DESC, o.source LIMIT 400`, params);
@@ -553,6 +571,7 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
         WHERE ${DAYWIN('o.started_at')}
           AND ($4 = 'all' OR o.verdict = $4)
           AND ($5::text IS NULL OR o.fleet_id = $5)
+          AND ${MY_PLATES}
           AND att.candidate_keys
               && coalesce((SELECT array_agg(pkey) FROM me), ARRAY[]::text[])
         GROUP BY 1`, params);

@@ -65,5 +65,17 @@ const late = await q(
 check('Dubai-evening timestamps keep the right date',
   new Date(late[0].d).toISOString().slice(0, 10) === '2026-08-19', String(late[0].d));
 
+/* /api/driver/unauthorized runs the attribution ladder only over the cars
+   this person has a trip or custody row on (MY_PLATES) — 71.8 s on production
+   2026-10-05 without it. Both ladder queries carry it; that the filter is a
+   superset (person_key as well as driver_ext_id) is pinned by
+   unauthorized_attribution.test.mjs, which fails with it narrowed. */
+{
+  const src = readFileSync('api/unauthorized_routes.js', 'utf8');
+  check('the driver route runs the ladder only over the person\'s own cars, in both queries',
+    (src.match(/AND \$\{MY_PLATES\}\n\s+AND att\.candidate_keys/g) || []).length === 2
+    && /SELECT t\.plate FROM trip t\s+WHERE t\.person_key IN \(SELECT pkey FROM me\) OR t\.driver_ext_id IN/.test(src));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
