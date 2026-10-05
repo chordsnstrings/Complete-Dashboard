@@ -217,16 +217,14 @@ function tripsCard(b) {
    unauthorized trips and who did it in one single page." Same words as the
    desktop (todayHtml, hoursNearHtml); the phone keeps the hours a shift acts
    on — three gone, this one, two to come — and #target has all 24. */
-function hoursCards(h, why) {
-  const cut = h ? (h.cut_by === 'collection' ? `counted to ${h.clock}, the last collection`
-    : h.cut_by === 'received' ? `counted to ${h.clock}, the newest data received` : `as of ${h.clock}`) : '';
-  const c0 = card('Today against target', h ? `both fleets · ${cut} · again every minute` : null);
+function hoursCards(h, why, waiting = false) {
+  const c0 = card('Today against target', 'both fleets');
   const c1 = card('Revenue, hour by hour', null);
   const c2 = card('Trips, hour by hour', null);
   for (const c of [c0, c1, c2]) c.card.classList.add('m-target', 'm-hours');
-  const fill = (x) => {
+  const fill = (x, err = why) => {
     if (!x) {
-      c0.body.innerHTML = `<p class="tg-absent">${esc(`Today’s hourly target could not be read${why ? `: ${why}` : '.'}`)}</p>`;
+      c0.body.innerHTML = `<p class="tg-absent">${esc(`Today’s hourly target could not be read${err ? `: ${err}` : '.'}`)}</p>`;
       c1.card.hidden = true;
       c2.card.hidden = true;
       return;
@@ -236,8 +234,14 @@ function hoursCards(h, why) {
     c2.body.innerHTML = hoursNearHtml(x.trips, x, { isMoney: false });
     c1.card.hidden = false;
     c2.card.hidden = false;
+    c0.card.querySelector(':scope > .m-cap').textContent = `both fleets · ${x.cut_by === 'collection' ? `counted to ${x.clock}, the last collection`
+      : x.cut_by === 'received' ? `counted to ${x.clock}, the newest data received` : `as of ${x.clock}`} · again every minute`;
   };
-  fill(h);
+  if (waiting) {
+    c0.body.innerHTML = '<p class="m-cap">Reading today against its target…</p>';
+    c1.card.hidden = true;
+    c2.card.hidden = true;
+  } else fill(h);
   return { cards: [c0.card, c1.card, c2.card], fill };
 }
 
@@ -310,6 +314,13 @@ async function today(deck, ctx) {
      does not know, in the desktop's own reasons. */
   const AK = phoneContract();
   skeleton(deck, 4);
+  /* Asked first and never awaited: /api/unauthorized/attributed took 13–16 s
+     on production uncached (2026-10-05), and the screen waited for it. Both
+     cards are drawn at once and filled when their answers land. */
+  const errOf = (e) => ({ err: String(e?.message || e) });
+  const dayNow = dubaiDay(new Date());
+  const hrsP = targetHoursLive().catch(errOf);
+  const whoP = api(`/api/unauthorized/attributed?from=${yesterdayOf(dayNow)}&to=${dayNow}&limit=200`).catch(errOf);
   const [k, daily, status, unauth, now, tgt] = await Promise.all([
     q('/api/kpis').catch(() => null),
     q('/api/trips/daily').catch(() => []),
@@ -325,12 +336,6 @@ async function today(deck, ctx) {
        on the desktop's Today pages. A role not shown revenue gets no card. */
     targetLive().catch(() => null),
   ]);
-  const errOf = (e) => ({ err: String(e?.message || e) });
-  const day = dubaiDay(new Date());
-  const [hrs, who] = await Promise.all([
-    targetHoursLive().catch(errOf),
-    api(`/api/unauthorized/attributed?from=${yesterdayOf(day)}&to=${day}&limit=200`).catch(errOf),
-  ]);
   if (!ctx.alive()) return;
   deck.innerHTML = '';
   if (!k) { failed(deck, new Error('The overview could not be fetched.')); return; }
@@ -339,15 +344,20 @@ async function today(deck, ctx) {
   if (tvm?.trips) deck.append(tripsCard(tvm.trips));
   /* Today against its target and the hours around now, redrawn every minute
      while this screen is the one open — the same minute as the desktop. */
-  const hc = hoursCards(hrs?.err ? null : hrs, hrs?.err);
+  const hc = hoursCards(null, null, true);
   deck.append(...hc.cards);
+  hrsP.then((x) => { if (ctx.alive()) hc.fill(x?.err ? null : x, x?.err); });
   const tick = setInterval(async () => {
     if (!ctx.alive()) { clearInterval(tick); return; }
     if (document.hidden) return;
     const x = await targetHoursLive().catch(() => null);
     if (x && ctx.alive()) hc.fill(x);
   }, REFRESH_MS);
-  deck.append(unauthWhoCard(who?.err ? null : who, who?.err));
+  const whoSlot = card('Unexplained journeys — who drove', 'yesterday and today · both fleets');
+  whoSlot.card.classList.add('m-who');
+  whoSlot.body.append(el('p', 'm-cap', 'Reading who drove the journeys no booking explains…'));
+  deck.append(whoSlot.card);
+  whoP.then((u) => { if (ctx.alive()) whoSlot.card.replaceWith(unauthWhoCard(u?.err ? null : u, u?.err)); });
 
   /* ── today, first, on the tab called Today ───────────────────────────────
      This screen led with the month and mentioned the current day in a clause
