@@ -493,13 +493,21 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
      2026-10-05: #driver/p121/unauthorized?period=last_month waited 71.8 s on
      this route — the ladder ran over every journey of the month, twice
      (rows, then the tally), to keep a handful. person_key OR driver_ext_id
-     is a superset of the stored key, never narrower. */
+     is a superset of the stored key, never narrower. And bounded in time
+     like the ladder is: a candidate's trip is at most STALE_CAP_MIN + 480
+     minutes (~22.3 days) before the journey (last_near) or BRACKET_CAP_MIN
+     after it, custody is the journey's own days — so the window less 24 days
+     to the window plus 2 is a superset. Unbounded, a driver who has rotated
+     through most of the fleet kept most of the fleet: 40.8 s after the first
+     cut, on production the same day. $1 / $2 are the window. */
   const MY_PLATES = `o.plate IN (
       SELECT t.plate FROM trip t
-       WHERE t.person_key IN (SELECT pkey FROM me) OR t.driver_ext_id IN (SELECT pkey FROM me)
+       WHERE t.requested_at >= $1::date - interval '24 days' AND t.requested_at < $2::date + interval '2 days'
+         AND (t.person_key IN (SELECT pkey FROM me) OR t.driver_ext_id IN (SELECT pkey FROM me))
       UNION
       SELECT v.plate FROM vehicle_driver_day v
-       WHERE v.person_key IN (SELECT pkey FROM me) OR v.driver_ext_id IN (SELECT pkey FROM me))`;
+       WHERE v.day BETWEEN $1::date - 24 AND $2::date + 2
+         AND (v.person_key IN (SELECT pkey FROM me) OR v.driver_ext_id IN (SELECT pkey FROM me)))`;
   app.get('/api/driver/unauthorized', withDriver(async (req, res, d, p) => {
     const [from, to] = p;
     const { verdict, rejected } = verdictOf(req);

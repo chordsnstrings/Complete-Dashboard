@@ -46,6 +46,21 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
       const c = alias ? `${alias}.` : '';
       return `AND ($3::text IS NULL OR ${c}platform=$3) AND ($4::text IS NULL OR ${c}fleet_id=$4)`;
     };
+    /* The plates trip and telemetry hold, by skipping through their plate
+       indexes (api/telemetry_sql.js TELEMETRY_PLATES): ~150 probes each
+       rather than a read of every trip and every fix — both #playbook queries
+       took 11–15 s on production 2026-10-05 reading them whole. `plate > ''`
+       is the old `plate IS NOT NULL AND plate <> ''`. */
+    const PLATES_SKIP = `tp AS (
+           (SELECT plate FROM trip WHERE plate > '' ORDER BY plate LIMIT 1)
+           UNION ALL
+           SELECT (SELECT t.plate FROM trip t WHERE t.plate > tp.plate ORDER BY t.plate LIMIT 1) FROM tp WHERE tp.plate IS NOT NULL
+         ),
+         tt AS (
+           (SELECT plate FROM telemetry_snapshot ORDER BY plate LIMIT 1)
+           UNION ALL
+           SELECT (SELECT t.plate FROM telemetry_snapshot t WHERE t.plate > tt.plate ORDER BY t.plate LIMIT 1) FROM tt WHERE tt.plate IS NOT NULL
+         ),`;
     const FLEET = (alias = '', bind = '$4') => {
       const c = alias ? `${alias}.` : '';
       return `AND (${bind}::text IS NULL OR ${c}fleet_id=${bind})`;
@@ -69,12 +84,13 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
          capacity by exactly the vehicles that are most idle: a car that
          produced nothing and did not even move is invisible to a query
          scoped to the window's own rows. */
-      q(`WITH plates AS (
-           SELECT DISTINCT plate FROM (
-             SELECT plate FROM trip WHERE plate IS NOT NULL AND plate <> '' ${FLEET()}
-             UNION SELECT plate FROM telemetry_snapshot WHERE true ${FLEET()}
-             UNION SELECT plate FROM vehicle_document WHERE plate IS NOT NULL ${FLEET()}
-           ) s
+      q(`WITH RECURSIVE ${PLATES_SKIP}
+         plates AS (
+           SELECT plate FROM tp WHERE plate IS NOT NULL
+              AND ($4::text IS NULL OR EXISTS (SELECT 1 FROM trip x WHERE x.plate = tp.plate AND x.fleet_id = $4))
+           UNION SELECT plate FROM tt WHERE plate IS NOT NULL
+              AND ($4::text IS NULL OR EXISTS (SELECT 1 FROM telemetry_snapshot x WHERE x.plate = tt.plate AND x.fleet_id = $4))
+           UNION SELECT plate FROM vehicle_document WHERE plate IS NOT NULL ${FLEET()}
          ),
          v AS (
            SELECT p.plate,
@@ -99,12 +115,13 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
           FROM v`, p),
 
       // Vehicles on the books that took no booking in the window.
-      q(`WITH plates AS (
-           SELECT DISTINCT plate FROM (
-             SELECT plate FROM trip WHERE plate IS NOT NULL AND plate <> '' ${FLEET()}
-             UNION SELECT plate FROM telemetry_snapshot WHERE true ${FLEET()}
-             UNION SELECT plate FROM vehicle_document WHERE plate IS NOT NULL ${FLEET()}
-           ) s
+      q(`WITH RECURSIVE ${PLATES_SKIP}
+         plates AS (
+           SELECT plate FROM tp WHERE plate IS NOT NULL
+              AND ($4::text IS NULL OR EXISTS (SELECT 1 FROM trip x WHERE x.plate = tp.plate AND x.fleet_id = $4))
+           UNION SELECT plate FROM tt WHERE plate IS NOT NULL
+              AND ($4::text IS NULL OR EXISTS (SELECT 1 FROM telemetry_snapshot x WHERE x.plate = tt.plate AND x.fleet_id = $4))
+           UNION SELECT plate FROM vehicle_document WHERE plate IS NOT NULL ${FLEET()}
          ),
          /* "veh", not "v" — and the rename is the whole fix.
             custodyOverWindow and custodyCountOverWindow alias

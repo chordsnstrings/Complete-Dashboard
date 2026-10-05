@@ -74,7 +74,7 @@ check('Dubai-evening timestamps keep the right date',
   const src = readFileSync('api/unauthorized_routes.js', 'utf8');
   check('the driver route runs the ladder only over the person\'s own cars, in both queries',
     (src.match(/AND \$\{MY_PLATES\}\n\s+AND att\.candidate_keys/g) || []).length === 2
-    && /SELECT t\.plate FROM trip t\s+WHERE t\.person_key IN \(SELECT pkey FROM me\) OR t\.driver_ext_id IN/.test(src));
+    && /AND \(t\.person_key IN \(SELECT pkey FROM me\) OR t\.driver_ext_id IN/.test(src));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
