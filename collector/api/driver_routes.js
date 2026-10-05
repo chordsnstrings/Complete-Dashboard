@@ -439,7 +439,16 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
 
      `$2::date` truncates that widened upper bound back to its day, which is
      what a day-grain comparison wants. */
-  const DAYWIN = (col) => `(${col} AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date`;
+  /* The Dubai-day test, PLUS the same window as a range on the raw column
+     (Dubai midnight of $1 to Dubai midnight after $2 — identical rows) so the
+     planner can use the column's own index. The cast alone hid every
+     started_at / occurred_at index: occupancy_segment and alert were read
+     whole on every windowed query — measured on production 2026-10-05, the
+     driver unauthorized route cost 13.9 s for a one-day window with no rows,
+     and alert day scans ran 5–31 s. */
+  const DAYWIN = (col) => `((${col} AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date`
+    + ` AND ${col} >= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai')`
+    + ` AND ${col} < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai'))`;
 
   // Shared trip predicate: any of this person's keys, over the window.
   // `$1..$2` window, `$3` key array — keep this argument order in every query.
@@ -3489,7 +3498,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
           WHERE day BETWEEN $1::date AND $2::date AND day = ANY($3::date[])),
        a AS (
          SELECT ${drivingCount()} n, ${deviceCount()} device FROM alert
-          WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
+          WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date AND occurred_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai') AND occurred_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
             AND (occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($3::date[]))
        SELECT round(k.km::numeric, 0) AS km, a.n AS alerts, a.device AS device_alerts
          FROM k, a`, [p[0], p[1], cov.days]);

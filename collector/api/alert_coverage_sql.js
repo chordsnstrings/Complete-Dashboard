@@ -145,7 +145,7 @@ export async function alertCoverage(q, from, to, { fleet = null } = {}) {
     `SELECT to_char((occurred_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day
        FROM alert
       WHERE occurred_at IS NOT NULL
-        AND (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
+        AND (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date AND occurred_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai') AND occurred_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
         AND ($3::text IS NULL OR fleet_id = $3)
       GROUP BY 1 ORDER BY 1`,
     [from, to, fleet]);

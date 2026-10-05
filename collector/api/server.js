@@ -426,7 +426,16 @@ const FIX_FRESH = "interval '30 minutes'";
    after 4am on the last requested day was silently dropped. Since the front
    end's default window ends on today, the live Unauthorized page was rendering
    all zeros for the current day, every day. */
-const DAYWIN = (col) => `(${col} AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date`;
+/* The Dubai-day test, PLUS the same window as a range on the raw column
+   (Dubai midnight of $1 to Dubai midnight after $2 — identical rows) so the
+   planner can use the column's own index. The cast alone hid every
+   started_at / occurred_at index: occupancy_segment and alert were read
+   whole on every windowed query — measured on production 2026-10-05, the
+   driver unauthorized route cost 13.9 s for a one-day window with no rows,
+   and alert day scans ran 5–31 s. */
+const DAYWIN = (col) => `((${col} AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date`
+  + ` AND ${col} >= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai')`
+  + ` AND ${col} < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai'))`;
 
 /* Collapse a driver name to one key per person: lower-cased, whitespace
    normalised, and with a repeated surname folded ("Asad Khan Khan" is one

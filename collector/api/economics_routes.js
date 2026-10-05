@@ -400,7 +400,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
               days rather than agreeing by accident. */
            SELECT plate, ${drivingCount()} alerts, ${deviceCount()} device_alerts
            FROM alert
-           WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
+           WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date AND occurred_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai') AND occurred_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
              AND (occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($3::date[])
            GROUP BY plate
          )
@@ -1123,7 +1123,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
          FROM alert a
          JOIN held h ON h.plate = a.plate
           AND (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date = h.day
-         WHERE (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
+         WHERE (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date AND a.occurred_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai') AND a.occurred_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
            AND (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($3::date[])
          GROUP BY 1`, [from, to, cov.days]),
 

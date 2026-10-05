@@ -260,7 +260,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        al AS (
          SELECT plate, ${drivingCount()} alerts, ${deviceCount()} device_alerts
          FROM alert
-         WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
+         WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date AND occurred_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai') AND occurred_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
          GROUP BY plate
        ),
        /* What each car was PAID, not only what its riders were charged.
