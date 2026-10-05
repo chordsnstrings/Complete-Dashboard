@@ -138,10 +138,20 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          SELECT (SELECT min(x.plate) FROM trip x WHERE x.plate > d.plate)
            FROM driven d WHERE d.plate IS NOT NULL
        ),
+       /* The tracked plates by the same skip through the (plate, captured_at)
+          index (api/telemetry_sql.js TELEMETRY_PLATES): ~150 probes, not a
+          read of every fix. This page sorted all ~700,000 fixes twice — here
+          and in tel — and took 55.5 s cold on production 2026-10-05. */
+       tplates AS (
+         (SELECT plate FROM telemetry_snapshot ORDER BY plate LIMIT 1)
+         UNION ALL
+         SELECT (SELECT t.plate FROM telemetry_snapshot t WHERE t.plate > p.plate ORDER BY t.plate LIMIT 1)
+           FROM tplates p WHERE p.plate IS NOT NULL
+       ),
        plates AS (
          /* UNION already answers DISTINCT; the register is a set. */
          SELECT plate FROM driven WHERE plate IS NOT NULL
-         UNION SELECT plate FROM telemetry_snapshot
+         UNION SELECT plate FROM tplates WHERE plate IS NOT NULL
          UNION SELECT plate FROM vehicle_document WHERE plate IS NOT NULL
        ),
        by_account AS (
@@ -228,8 +238,14 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          GROUP BY 1
        ),
        tel AS (
-         SELECT DISTINCT ON (plate) plate, captured_at last_fix, polled_at, status, speed
-         FROM telemetry_snapshot ORDER BY plate, captured_at DESC
+         /* Each plate's newest fix, one index probe a plate — the same row
+            DISTINCT ON (plate) … ORDER BY plate, captured_at DESC kept. */
+         SELECT p.plate, s.captured_at last_fix, s.polled_at, s.status, s.speed
+           FROM tplates p
+           CROSS JOIN LATERAL (SELECT t.captured_at, t.polled_at, t.status, t.speed
+                                 FROM telemetry_snapshot t WHERE t.plate = p.plate
+                                ORDER BY t.captured_at DESC LIMIT 1) s
+          WHERE p.plate IS NOT NULL
        ),
        doc AS (
          SELECT plate, min(expires_at) soonest_expiry, count(*)::int docs

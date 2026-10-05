@@ -219,12 +219,15 @@ export function cohortRoutes(app, { q, wrap }) {
            FROM vehicle_document
           WHERE plate = ANY($1)
           ORDER BY expires_at ASC NULLS LAST`, [plates]),
-      q(`SELECT DISTINCT ON (plate) plate, source, captured_at AS last_fix, status, speed,
-                odometer, ignition,
-                round(extract(epoch FROM now() - captured_at) / 60)::int AS fix_age_min
-           FROM telemetry_snapshot
-          WHERE plate = ANY($1)
-          ORDER BY plate, captured_at DESC`, [plates]),
+      /* Each plate's newest fix by one index probe a plate, not a sort of all
+         its fixes (#cohort/tiers-behind 12.5 s cold on production 2026-10-05). */
+      q(`SELECT p.plate, s.source, s.captured_at AS last_fix, s.status, s.speed, s.odometer, s.ignition,
+                round(extract(epoch FROM now() - s.captured_at) / 60)::int AS fix_age_min
+           FROM (SELECT DISTINCT unnest($1::text[]) AS plate) p
+           CROSS JOIN LATERAL (SELECT t.source, t.captured_at, t.status, t.speed, t.odometer, t.ignition
+                                 FROM telemetry_snapshot t WHERE t.plate = p.plate
+                                ORDER BY t.captured_at DESC LIMIT 1) s
+          ORDER BY p.plate`, [plates]),
       q(`SELECT plate, alert_type, count(*)::int AS n, max(occurred_at) AS last_at
            FROM alert
           WHERE plate = ANY($1) AND ${dubaiSpanSql('occurred_at', '$2', '$3')}

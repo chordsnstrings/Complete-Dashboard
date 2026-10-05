@@ -355,9 +355,19 @@ export function economicsRoutes(app, { q, wrap, range }) {
            SELECT (SELECT min(x.plate) FROM trip x WHERE x.plate > d.plate)
              FROM driven d WHERE d.plate IS NOT NULL
          ),
+         /* Tracked plates by the (plate, captured_at) index skip
+            (api/telemetry_sql.js), not a read of every fix: this and tel
+            sorted all ~700,000 fixes, and /api/economics/assets took 35–39 s
+            cold on production 2026-10-05. */
+         tplates AS (
+           (SELECT plate FROM telemetry_snapshot ORDER BY plate LIMIT 1)
+           UNION ALL
+           SELECT (SELECT t.plate FROM telemetry_snapshot t WHERE t.plate > p.plate ORDER BY t.plate LIMIT 1)
+             FROM tplates p WHERE p.plate IS NOT NULL
+         ),
          plates AS (
            SELECT plate FROM driven WHERE plate IS NOT NULL
-           UNION SELECT plate FROM telemetry_snapshot
+           UNION SELECT plate FROM tplates WHERE plate IS NOT NULL
            UNION SELECT plate FROM vehicle_document WHERE plate IS NOT NULL
          ),
          tel AS (
@@ -369,12 +379,15 @@ export function economicsRoutes(app, { q, wrap, range }) {
               true is not a fix, so it is dropped here rather than drawn.
               The captured_at stays — the tracker DID report, and when it last
               reported is a separate fact from where. */
-           SELECT DISTINCT ON (plate) plate, captured_at last_fix, status,
-                  CASE WHEN abs(coalesce(lat,0)) < 0.5 AND abs(coalesce(lng,0)) < 0.5
-                       THEN NULL ELSE lat END AS lat,
-                  CASE WHEN abs(coalesce(lat,0)) < 0.5 AND abs(coalesce(lng,0)) < 0.5
-                       THEN NULL ELSE lng END AS lng
-           FROM telemetry_snapshot ORDER BY plate, captured_at DESC
+           SELECT p.plate, s.captured_at last_fix, s.status,
+                  CASE WHEN abs(coalesce(s.lat,0)) < 0.5 AND abs(coalesce(s.lng,0)) < 0.5
+                       THEN NULL ELSE s.lat END AS lat,
+                  CASE WHEN abs(coalesce(s.lat,0)) < 0.5 AND abs(coalesce(s.lng,0)) < 0.5
+                       THEN NULL ELSE s.lng END AS lng
+           FROM tplates p
+           CROSS JOIN LATERAL (SELECT t.captured_at, t.status, t.lat, t.lng FROM telemetry_snapshot t
+                                WHERE t.plate = p.plate ORDER BY t.captured_at DESC LIMIT 1) s
+          WHERE p.plate IS NOT NULL
          ),
          doc AS (
            SELECT plate, min(expires_at) soonest_expiry
