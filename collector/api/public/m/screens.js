@@ -256,10 +256,12 @@ function namedBy(r) {
   const names = (r.attribution_candidates || []).map((x) => x && x.name).filter(Boolean);
   const tier = r.attribution_tier;
   if (tier === 'unknown' || !names.length) return 'nobody can be named';
+  /* A last trip days old is a weaker naming; said in the few words a phone
+     row has room for ("that trip 21 days before" was cut by its ellipsis). */
   const gap = Number(r.attribution_last_trip_gap_min);
-  const old = tier === 'last_trip' && gap > 1440 ? ` · that trip ${Math.round(gap / 1440)} days before` : '';
+  const rule = tier === 'last_trip' && gap > 1440 ? `last trip ${Math.round(gap / 1440)} d before` : (TIER_SHORT[tier] || tier);
   return tier === 'ambiguous' ? `${names.slice(0, 2).join(' or ')}${names.length > 2 ? ` +${names.length - 2}` : ''} · ${TIER_SHORT.ambiguous}`
-    : `${r.attribution_responsible || names[0]} · ${TIER_SHORT[tier] || tier}${old}`;
+    : `${r.attribution_responsible || names[0]} · ${rule}`;
 }
 function unauthWhoCard(u, why) {
   const c = card('Unexplained journeys — who drove', 'yesterday and today · both fleets · seat occupied, car moved, no booking on any channel');
