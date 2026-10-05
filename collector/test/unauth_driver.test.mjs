@@ -72,8 +72,9 @@ check('Dubai-evening timestamps keep the right date',
    unauthorized_attribution.test.mjs, which fails with it narrowed. */
 {
   const src = readFileSync('api/unauthorized_routes.js', 'utf8');
-  check('the driver route runs the ladder only over the person\'s own cars, in both queries',
-    (src.match(/AND \$\{MY_PLATES\}\n\s+AND att\.candidate_keys/g) || []).length === 2
+  check('the driver route filters the journeys to the person\'s own cars first, fenced, in both queries',
+    (src.match(/segs AS MATERIALIZED \(/g) || []).length === 2 && (src.match(/AND \$\{MY_PLATES\}\)/g) || []).length === 2
+    && (src.match(/FROM segs o/g) || []).length === 2
     && /AND \(t\.person_key IN \(SELECT pkey FROM me\) OR t\.driver_ext_id IN/.test(src));
 }
 

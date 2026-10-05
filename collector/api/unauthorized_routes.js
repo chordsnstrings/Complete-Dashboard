@@ -534,18 +534,24 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
        is about 120 rows over a quarter — the cost of not storing an inference
        that would go stale the moment a trip arrived late. */
     const rows = await q(
-      `WITH me AS (${personKeysForDriver('$3')})
+      `WITH me AS (${personKeysForDriver('$3')}),
+       /* The journeys first, fenced: MATERIALIZED so the planner cannot run
+          the ladder before the plate filter. On production after acd0196 one
+          of these two statements still took 30–121 s while its twin took
+          3–5 s — the same filter, planned the other way round. */
+       segs AS MATERIALIZED (
+         SELECT o.* FROM occupancy_segment o
+          WHERE ${DAYWIN('o.started_at')}
+            AND ($4 = 'all' OR o.verdict = $4)
+            AND ($5::text IS NULL OR o.fleet_id = $5)
+            AND ${MY_PLATES})
        SELECT ${SEG_COLS}, ${ATTRIBUTION_COLS}, st.statuses AS candidate_statuses,
               nb.nearest_booking
-         FROM occupancy_segment o
+         FROM segs o
          ${attributionJoin('o')}
          ${statusJoin('o')}
          ${nearestJoin('o')}
-        WHERE ${DAYWIN('o.started_at')}
-          AND ($4 = 'all' OR o.verdict = $4)
-          AND ($5::text IS NULL OR o.fleet_id = $5)
-          AND ${MY_PLATES}
-          AND att.candidate_keys
+        WHERE att.candidate_keys
               && coalesce((SELECT array_agg(pkey) FROM me), ARRAY[]::text[])
         ORDER BY o.started_at DESC, o.source LIMIT 400`, params);
 
@@ -569,18 +575,24 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
        car carried two readings of one trip. `n` counts through
        occCountsOnce(); `by_source` counts each provider's segments. */
     const tally = await q(
-      `WITH me AS (${personKeysForDriver('$3')})
+      `WITH me AS (${personKeysForDriver('$3')}),
+       /* The journeys first, fenced: MATERIALIZED so the planner cannot run
+          the ladder before the plate filter. On production after acd0196 one
+          of these two statements still took 30–121 s while its twin took
+          3–5 s — the same filter, planned the other way round. */
+       segs AS MATERIALIZED (
+         SELECT o.* FROM occupancy_segment o
+          WHERE ${DAYWIN('o.started_at')}
+            AND ($4 = 'all' OR o.verdict = $4)
+            AND ($5::text IS NULL OR o.fleet_id = $5)
+            AND ${MY_PLATES})
        SELECT att.tier AS key, count(*) FILTER (WHERE ${ONCE})::int AS n,
               count(*) FILTER (WHERE o.source = 'cabman')::int AS cabman,
               count(*) FILTER (WHERE o.source = 'fms_live')::int AS fms_live,
               count(*) FILTER (WHERE o.source = 'fms_trip')::int AS fms_trip
-         FROM occupancy_segment o
+         FROM segs o
          ${attributionJoin('o')}
-        WHERE ${DAYWIN('o.started_at')}
-          AND ($4 = 'all' OR o.verdict = $4)
-          AND ($5::text IS NULL OR o.fleet_id = $5)
-          AND ${MY_PLATES}
-          AND att.candidate_keys
+        WHERE att.candidate_keys
               && coalesce((SELECT array_agg(pkey) FROM me), ARRAY[]::text[])
         GROUP BY 1`, params);
     const byTier = Object.fromEntries(tally.map((t) => [t.key, t.n]));
