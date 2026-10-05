@@ -282,6 +282,11 @@ export function performerRoutes(app, { q, wrap }) {
        components, which ARE the date the column holds, in either zone. */
     res.json({
       weeks: out,
+      /* Every week since the first booking: the list is the whole population,
+         and says so. test/truncation.test.mjs read a list of exactly ten rows
+         with no count beside it as a page cut at LIMIT 10 — on 2026-10-05,
+         when the seeded weeks first reached ten. */
+      total: out.length,
       latest_complete: out[0]?.week || null,
       first_booking: isoDay(rows[0]?.first_day),
       last_booking: isoDay(rows[0]?.last_day),
