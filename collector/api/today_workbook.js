@@ -143,7 +143,7 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
             coalesce(round(sum(n.price) FILTER (WHERE n.has_fare AND n.local_day = $2::date)::numeric, 2), 0)::float AS fares,
             count(*) FILTER (WHERE n.local_day < $2::date)::int AS before,
             count(DISTINCT n.local_day) FILTER (WHERE n.local_day < $2::date)::int AS before_days
-       FROM trip_norm n JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
+       FROM trip_norm n CROSS JOIN LATERAL (SELECT n.*) t
       WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
         AND n.outcome = 'completed' AND n.driver_name IS NOT NULL
       GROUP BY 1

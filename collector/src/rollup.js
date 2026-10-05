@@ -70,7 +70,7 @@ const MEASURES = `
    Postgres froze its column list at creation (see schema_v18/v20). Joining the
    base table back on is what makes the folded distinct count available without
    rebuilding two long view bodies in a third file. */
-const FROM_TRIPS = `FROM trip_norm n JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id`;
+const FROM_TRIPS = `FROM trip_norm n CROSS JOIN LATERAL (SELECT n.*) t`;
 
 /* GROUPING SETS leaves NULL in the columns a set did not group by, and NULL is
    also a legitimate fleet_id on a row we could not attribute. coalesce alone
