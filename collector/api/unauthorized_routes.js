@@ -533,7 +533,7 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
        person is in. That is the whole window's segments, which on this fleet
        is about 120 rows over a quarter — the cost of not storing an inference
        that would go stale the moment a trip arrived late. */
-    const rows = await q(
+    const rowsP = q(
       `WITH me AS (${personKeysForDriver('$3')}),
        /* The journeys first, fenced: MATERIALIZED so the planner cannot run
           the ladder before the plate filter. On production after acd0196 one
@@ -574,7 +574,7 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
        person; a per-person count of accusations must not double because the
        car carried two readings of one trip. `n` counts through
        occCountsOnce(); `by_source` counts each provider's segments. */
-    const tally = await q(
+    const tallyP = q(
       `WITH me AS (${personKeysForDriver('$3')}),
        /* The journeys first, fenced: MATERIALIZED so the planner cannot run
           the ladder before the plate filter. On production after acd0196 one
@@ -595,19 +595,23 @@ export function unauthorizedRoutes(app, { q, wrap, range, DAYWIN }) {
         WHERE att.candidate_keys
               && coalesce((SELECT array_agg(pkey) FROM me), ARRAY[]::text[])
         GROUP BY 1`, params);
-    const byTier = Object.fromEntries(tally.map((t) => [t.key, t.n]));
-    /* Per provider, per side of the split: the segments behind each total. */
-    const sideBySource = (tiers) => Object.fromEntries(OCC_SOURCES.map((s) => [s,
-      tally.filter((t) => tiers.includes(t.key)).reduce((a, t) => a + (t[s] || 0), 0)]));
-
     /* THE CARS THIS PERSON ACTUALLY HELD, so the coverage note below is a
        statement about them rather than about the fleet. See coverageOf(). */
-    const held = await q(
+    const heldP = q(
       `WITH me AS (${personKeysForDriver('$3')})
        SELECT DISTINCT v.plate FROM vehicle_driver_day v
         WHERE v.day BETWEEN $1::date AND $2::date
           AND ${personKeyStored('v')} = ANY(coalesce((SELECT array_agg(pkey) FROM me),
                                                      ARRAY[]::text[]))`, p.slice(0, 3));
+    /* Three independent reads, so they run together (SPD, 2026-10-05): one
+       after another they cost 10.2 s for 6628822 at a month, each under the
+       5 s at which a plan is logged. */
+    const [rows, tally, held] = await Promise.all([rowsP, tallyP, heldP]);
+    const byTier = Object.fromEntries(tally.map((t) => [t.key, t.n]));
+    /* Per provider, per side of the split: the segments behind each total. */
+    const sideBySource = (tiers) => Object.fromEntries(OCC_SOURCES.map((s) => [s,
+      tally.filter((t) => tiers.includes(t.key)).reduce((a, t) => a + (t[s] || 0), 0)]));
+
     const plates = held.map((h) => h.plate);
 
     const [coverage, { rate, basis }, historyFrom] = await Promise.all([

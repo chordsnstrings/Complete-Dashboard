@@ -40,6 +40,13 @@ check('a statement over PLAN_QUERY_MS logs its plan, once per head, never re-run
   && /pool\.query\(`EXPLAIN \$\{text\}`, params\)/.test(srv) && /planned\.has\(head\)/.test(srv));
 check('W() carries the raw requested_at range beside local_day, so fleet and platform windows can use their indexes',
   /\$\{c\}requested_at >= \(\$1::date::timestamp AT TIME ZONE 'Asia\/Dubai'\)`\s*\n\s*\+ ` AND \$\{c\}requested_at < \(\(\$2::date \+ 1\)::timestamp AT TIME ZONE 'Asia\/Dubai'\)`/.test(srv));
+const ur = readFileSync(new URL('../api/unauthorized_routes.js', import.meta.url), 'utf8');
+check('the driver tab runs its three independent reads together',
+  /const \[rows, tally, held\] = await Promise\.all\(\[rowsP, tallyP, heldP\]\);/.test(ur)
+  && !/const (rows|tally|held) = await q\(/.test(ur.slice(ur.indexOf("app.get('/api/driver/unauthorized'"))));
+check('coverage starts its geo count before the nine counts, and marks it handled',
+  /const geoP = q\(/.test(srv) && /geoP\.catch\(\(\) => \{\}\);/.test(srv) && /const geo = await geoP;/.test(srv)
+  && srv.indexOf('const geoP = q(') < srv.indexOf("earnDays] = await Promise.all(["));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

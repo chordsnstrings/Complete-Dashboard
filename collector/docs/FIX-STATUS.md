@@ -4333,4 +4333,6 @@ under Work.
 | SPD-8 | slow statements over 5 s log their plan | yes | pending deploy | spd_attribution |
 | SPD-9 | economics/drivers FMS journeys: raw requested_at range | yes | pending deploy | — |
 | SPD-11 | W() (api/server.js) adds the raw requested_at range beside local_day, so fleet and platform windows range on their (…, requested_at) indexes | yes | pending deploy | spd_attribution 8 |
+| SPD-12 | driver unauthorized tab: rows, tally and cars-held run concurrently (10.2 s sequential, each under 5 s) | yes | pending deploy | spd_attribution 10; unauth_driver 9 |
+| SPD-13 | /api/coverage: the whole-table geo count starts before the nine counts instead of after them | yes | pending deploy | spd_attribution 10; route_smoke |
 

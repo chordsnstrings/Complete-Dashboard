@@ -3742,6 +3742,22 @@ app.get('/api/coverage', wrap(async (req, res) => {
   const pl = req.query.platform || null;
   const fl = req.query.fleet || null;
   const P = [pl, fl];
+  /* Started now and awaited where it is read: it depends on nothing above
+     it, and waiting behind the nine counts and the unpaid-gap count put a
+     whole-table scan of trip on the critical path (SPD, 2026-10-05). */
+  const geoP = q(
+    `SELECT 'trip:' || platform AS dataset, count(*)::int n,
+            count(pickup_lat)::int with_pickup, count(dropoff_lat)::int with_dropoff
+       FROM trip WHERE ($1::text IS NULL OR platform=$1)
+                   AND ($2::text IS NULL OR fleet_id=$2)
+      GROUP BY 1
+      UNION ALL
+     SELECT 'timeline:' || platform, count(*)::int, count(lat)::int, count(lat)::int
+       FROM driver_timeline_event
+      WHERE ($1::text IS NULL OR platform=$1) AND ($2::text IS NULL OR fleet_id=$2)
+      GROUP BY 1
+      ORDER BY 1`, P);
+  geoP.catch(() => {});   // handled where awaited; this only stops an early rejection being 'unhandled'
   const [trips, telemetry, alerts, ledger, earnings, telDays, alertDays, ledgerDays,
     earnDays] = await Promise.all([
     q(`SELECT platform, count(*)::int n, min(requested_at) from_ts, max(requested_at) to_ts
@@ -3972,18 +3988,7 @@ app.get('/api/coverage', wrap(async (req, res) => {
 
      Counted, not sampled, and reported as a share so a source that is 3%
      covered cannot read as a source that has coordinates. */
-  const geo = await q(
-    `SELECT 'trip:' || platform AS dataset, count(*)::int n,
-            count(pickup_lat)::int with_pickup, count(dropoff_lat)::int with_dropoff
-       FROM trip WHERE ($1::text IS NULL OR platform=$1)
-                   AND ($2::text IS NULL OR fleet_id=$2)
-      GROUP BY 1
-      UNION ALL
-     SELECT 'timeline:' || platform, count(*)::int, count(lat)::int, count(lat)::int
-       FROM driver_timeline_event
-      WHERE ($1::text IS NULL OR platform=$1) AND ($2::text IS NULL OR fleet_id=$2)
-      GROUP BY 1
-      ORDER BY 1`, P);
+  const geo = await geoP;
   res.json({ trips, telemetry, alerts, ledger, earnings, earnings_gaps: gaps,
     dataset_calendar,
     geo: geo.map((r) => ({ ...r,
