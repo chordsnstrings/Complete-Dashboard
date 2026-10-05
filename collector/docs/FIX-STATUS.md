@@ -4332,5 +4332,4 @@ under Work.
 | SPD-7 | schema v99: trip (person_key, driver_ext_id), trip (plate, coalesce(ended_at, requested_at)) | yes | pending deploy | spd_attribution |
 | SPD-8 | slow statements over 5 s log their plan | yes | pending deploy | spd_attribution |
 | SPD-9 | economics/drivers FMS journeys: raw requested_at range | yes | pending deploy | — |
-| SPD-10 | schema v100: trip_norm / trip_ext / trip_cash rebuilt so they carry person_key; JOIN_TRIP and six inline copies are a lateral projection, not a primary-key join | yes | pending deploy | trip_norm_person_key 15 (reverted 10/5); same rows and same people on data |
 

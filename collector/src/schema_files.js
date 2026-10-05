@@ -296,10 +296,4 @@ export const SCHEMA_FILES = [
      coalesce(ended_at, requested_at)) for the newest-trip-in-window probe.
      Additive. test/spd_attribution.test.mjs. */
   'schema_v99.sql',
-  /* v100 (2026-10-05): trip_norm, trip_ext and trip_cash rebuilt so the
-     views' frozen `t.*` re-expands and carries person_key; JOIN_TRIP
-     (api/custody_sql.js) then reads it from the row in hand instead of a
-     primary-key lookup per row. Bodies verbatim from v18, v62, v80.
-     test/trip_norm_person_key.test.mjs. */
-  'schema_v100.sql',
 ];

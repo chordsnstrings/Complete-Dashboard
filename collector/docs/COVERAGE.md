@@ -8411,19 +8411,14 @@ month (211 journeys, 31 s under EXPLAIN):
 - **Only one route had EXPLAIN.** Now any statement over `PLAN_QUERY_MS` (5 s)
   logs `slow query plan` beside its `slow query` line. It is plain EXPLAIN,
   logged once per statement head per process.
-- **The view's frozen star cost a primary-key join on every people count.**
-  `trip_norm` last re-expanded `t.*` in v18, before v20 added
-  `trip.person_key`. Every query counting PEOPLE therefore joined `trip` back
-  on its primary key, row by row: `JOIN_TRIP` plus six inline copies,
-  including the rollup's `FROM_TRIPS`. With the plan logger on, this was the
-  common node under the slowest statements left: /api/kpis at 90 days
-  19.2 s, and the people, plates and channel statements 8–16 s each.
-  schema v100 rebuilds `trip_norm`, `trip_ext` and `trip_cash`, with bodies
-  copied verbatim from v18, v62 and v80. `JOIN_TRIP` is now
-  `CROSS JOIN LATERAL (SELECT n.*) t`, a projection of the row in hand.
-  The next column added to `trip` is invisible to these views again until
-  they are rebuilt.
 
-After round 2 (5bdd2bd), cold: attributed at a month 4.3 s (was 18.7), at
-six months 7.4 s (was 41.4).
-
+- **Do not put `trip.person_key` in a view.** Tried 2026-10-05 (deda811,
+  reverted in the next commit): rebuilding `trip_norm` so its `t.*` carries
+  person_key, so that `JOIN_TRIP` could stop joining `trip` back by primary
+  key (/api/kpis at 90 days 19 s). The suite caught it.
+  `sql/schema_v53.sql` drops and re-adds `person_key` whenever the identity
+  register changes, and a view that depends on the column makes that DROP
+  fail. On production, the next register edit would have failed at boot.
+  The same attempt also put one view in two schema files, which route_smoke
+  refuses. The primary-key join stays until it can be removed without a view
+  depending on person_key.

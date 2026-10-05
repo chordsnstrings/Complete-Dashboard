@@ -231,15 +231,7 @@ export const personKeyStored = (a) =>
    JOIN_TRIP is the join that makes it available, written once because it has
    now been needed in four places and each copy is a chance to join on the wrong
    pair of columns. */
-/* NO LONGER A JOIN (SPD, 2026-10-05). It was 'JOIN trip t ON t.platform =
-   n.platform AND t.external_id = n.external_id' — a primary-key lookup per
-   row, because the view could not carry person_key (its star froze at v18).
-   EXPLAIN on production showed that lookup as the cost of /api/kpis at 90
-   days (19.2 s) and of the people, plates and channel statements (8-16 s).
-   sql/schema_v100.sql rebuilds the views so the row in hand already has every
-   trip column, person_key included, and `t` is now that same row under the
-   name the callers use. One-to-one either way, so no count changes. */
-export const JOIN_TRIP = 'CROSS JOIN LATERAL (SELECT n.*) t';
+export const JOIN_TRIP = 'JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id';
 
 export const peopleCountStored = (keyCol = 't.person_key', idCol = 'n.driver_ext_id') =>
   `count(DISTINCT coalesce(nullif(${keyCol}, ''), ${idCol}))`;

@@ -140,7 +140,7 @@ export async function loadFacts(q, from, to) {
     /* One person, one row — the stored fold of api/custody_sql.js, the same
        answer the 08:00 email's personKey() gives and a hundred times cheaper. */
     q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS day, ${personKeyStored('t')} AS pk, count(*)::int AS trips
-         FROM trip_norm n CROSS JOIN LATERAL (SELECT n.*) t
+         FROM trip_norm n JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
           AND n.outcome = 'completed' AND n.driver_name IS NOT NULL
         GROUP BY 1, 2`, [from, to]),

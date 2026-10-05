@@ -58,7 +58,7 @@ export function retentionRoutes(app, { q, wrap }) {
                 to_char(date_trunc('month', n.local_day), 'YYYY-MM') AS m,
                 count(*)::int bookings,
                 (array_agg(DISTINCT n.driver_ext_id) FILTER (WHERE n.driver_ext_id IS NOT NULL))[1] AS driver_ext_id
-         FROM trip_norm n CROSS JOIN LATERAL (SELECT n.*) t
+         FROM trip_norm n JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
          WHERE n.is_booking AND t.person_key IS NOT NULL AND t.person_key <> ''
            AND ($1::text IS NULL OR n.platform = $1) AND ($2::text IS NULL OR n.fleet_id = $2)
          GROUP BY 1, 3`, [pl, fl]);

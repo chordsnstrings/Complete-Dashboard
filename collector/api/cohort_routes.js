@@ -58,7 +58,7 @@ export function cohortRoutes(app, { q, wrap }) {
                 count(*) FILTER (WHERE n.has_fare)::int AS priced,
                 min(n.requested_at) AS first_trip, max(n.requested_at) AS last_trip
            FROM trip_norm n
-           CROSS JOIN LATERAL (SELECT n.*) t
+           JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
           WHERE coalesce(nullif(btrim(t.driver_ext_id), ''), 'name:' || t.person_key) = ANY($1)
             AND n.local_day BETWEEN $2::date AND $3::date
           GROUP BY 1, 2`, P),
@@ -141,7 +141,7 @@ export function cohortRoutes(app, { q, wrap }) {
       q(`SELECT coalesce(nullif(btrim(t.driver_ext_id), ''), 'name:' || t.person_key) AS id,
                 n.platform, t.status, n.outcome, count(*)::int AS n
            FROM trip_norm n
-           CROSS JOIN LATERAL (SELECT n.*) t
+           JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
           WHERE coalesce(nullif(btrim(t.driver_ext_id), ''), 'name:' || t.person_key) = ANY($1)
             AND n.local_day BETWEEN $2::date AND $3::date
             AND n.outcome IS NOT NULL AND n.outcome <> 'completed'

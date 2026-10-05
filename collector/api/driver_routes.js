@@ -682,7 +682,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                 max(n.requested_at) last_trip, min(n.requested_at) first_trip,
                 array_agg(DISTINCT n.platform) platforms,
                 mode() WITHIN GROUP (ORDER BY n.plate) AS plate
-         FROM trip_norm n CROSS JOIN LATERAL (SELECT n.*) bt
+         FROM trip_norm n JOIN trip bt ON bt.platform = n.platform AND bt.external_id = n.external_id
          -- Grouped on the SAME synthesised key as the ids CTE below. Keyed on
          -- the raw column, a driver named without an id had an ids row and no
          -- work to join to it, so they appeared with a permanent zero, which is
