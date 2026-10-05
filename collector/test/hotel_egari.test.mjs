@@ -22,9 +22,17 @@
         06:08:33 finished AED 125), so Ecosine's is never borrowed.
      5. src/sources/hotel.js: every account is collected; each credential
         verdict names its own key; a booking stored under another fleet is
-        never refiled; `total` is in scope for the error run. */
+        never refiled; `total` is in scope for the error run.
+     6. Settings paste (src/credkit.js): a hotel bearer is recognised bare, as
+        `HOTEL_EGARI_TOKEN=…`, in a curl, or in a Postman collection holding
+        BOTH fleets in one block, and filed by the x-domain beside it.
+     7. checkHotel (src/credcheck.js): the tenant that accepts a bearer names
+        its fleet; the other answers 401 "You are not registered with this
+        company" (measured with both real bearers on both domains). */
 import { readFileSync } from 'node:fs';
 import { uncollectedByFleet, uncollectedReason, judgeSegment } from '../src/reconcile.js';
+import { recognise, unrecognised } from '../src/credkit.js';
+import { checkHotel } from '../src/credcheck.js';
 import { config } from '../src/config.js';
 
 let pass = 0, fail = 0;
@@ -100,6 +108,56 @@ check('an account with no token is skipped, not guessed', /if \(!c\.token \|\| !
 check('a booking stored under another fleet is never refiled',
   src.includes('fleet_id IS DISTINCT FROM $3') && src.includes("upsertMany('trip', mine,"));
 check('total is declared before the try', /let total = 0;\n  try \{\n    await loadHotels\(c\)/.test(src));
+
+console.log('6. pasting a hotel bearer into Settings');
+{
+  /* Synthetic bearers in the platform's shape — {id, role, iat}, no exp. */
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const jwt = (id, role = 'operation_manager') => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ id, role, iat: 1782652555 })}.c2lnbmF0dXJlLXN5bnRoZXRpYw`;
+  const EG = jwt('egari-manager-0001'), ECO = jwt('ecosine-manager-01');
+  const postman = JSON.stringify({ info: { name: 'Hotel' }, item: [
+    { name: 'Egari Trips', request: { header: [{ key: 'Authorization', value: `Bearer ${EG}` }, { key: 'x-domain', value: 'hotel.egari.ae' }],
+      url: { raw: 'https://whale-app-iofbt.ondigitalocean.app/api/operation-managers/report/get-trip-report?startDate=2026-10-01' } } },
+    { name: 'Ecosine Trips', request: { header: [{ key: 'Authorization', value: `Bearer ${ECO}` }, { key: 'x-domain', value: 'hotel.ecosine.ae' }],
+      url: { raw: 'https://whale-app-iofbt.ondigitalocean.app/api/operation-managers/report/get-trip-report?startDate=2026-09-08' } } },
+  ] }, null, 2);
+  const r = recognise(postman);
+  const by = Object.fromEntries(r.map((c) => [c.key, c]));
+  check('a Postman collection with both fleets yields two bearers', r.length === 2, JSON.stringify(r.map((c) => c.key)));
+  check('…Egari\'s filed under HOTEL_EGARI_TOKEN', by.HOTEL_EGARI_TOKEN?.value === EG && by.HOTEL_EGARI_TOKEN.fleet === 'egari');
+  check('…Ecosine\'s under HOTEL_TOKEN', by.HOTEL_TOKEN?.value === ECO && by.HOTEL_TOKEN.fleet === 'ecosine');
+  check('…and nothing in it is left for the model to read', unrecognised(postman).length === 0);
+  const curl = recognise(`curl 'https://whale-app-iofbt.ondigitalocean.app/api/x' -H 'x-domain: hotel.egari.ae' -H 'Authorization: Bearer ${EG}'`);
+  check('a curl is filed by its x-domain', curl.length === 1 && curl[0].key === 'HOTEL_EGARI_TOKEN' && curl[0].ok);
+  const bare = recognise(EG);
+  check('a bare bearer arrives keyless, for the check to file', bare.length === 1 && bare[0].key === null
+    && bare[0].ok === true && bare[0].kind === 'hotel');
+  const labelled = recognise(`HOTEL_EGARI_TOKEN=${EG}`);
+  check('a labelled one is still a hotel bearer, filed by the tenant', labelled[0]?.kind === 'hotel' && labelled[0].value === EG);
+  const odd = recognise(`-H 'x-domain: hotel.example.com' -H 'Authorization: Bearer ${EG}'`);
+  check('an x-domain we do not read is refused', odd[0]?.ok === false && /not a hotel account/.test(odd[0].why));
+  check('a JWT of another role is not taken for a hotel bearer', recognise(jwt('x', 'driver')).every((c) => c.kind !== 'hotel'));
+}
+
+console.log('7. the live check names the fleet');
+{
+  const NOT = { status: 401, data: { status: false, error: 'You are not registered with this company' } };
+  const OK = { status: 200, data: { data: [{ _id: 'a' }, { _id: 'b' }] } };
+  const asked = [];
+  const egOnly = async (acct, domain) => { asked.push(domain); return domain === 'hotel.egari.ae' ? OK : NOT; };
+  const k = await checkHotel({ key: null, value: 'x' }, { fetchHotel: egOnly });
+  check('keyless: tried on each tenant, filed under the one that accepts it', k.verdict === 'pass'
+    && k.key === 'HOTEL_EGARI_TOKEN' && k.fleet === 'egari' && asked.join() === 'hotel.ecosine.ae,hotel.egari.ae', JSON.stringify(k));
+  asked.length = 0;
+  const keyed = await checkHotel({ key: 'HOTEL_TOKEN', value: 'x' }, { fetchHotel: egOnly });
+  check('keyed: tried on its own tenant only, and refused there', keyed.verdict === 'fail' && asked.join() === 'hotel.ecosine.ae'
+    && /not registered with this company/.test(keyed.detail), JSON.stringify(keyed));
+  const down = await checkHotel({ key: 'HOTEL_EGARI_TOKEN', value: 'x' }, { fetchHotel: async () => { throw new Error('ECONNRESET'); } });
+  check('unreachable is unknown, not fail', down.verdict === 'unknown');
+  const cc = readFileSync(new URL('../src/credcheck.js', import.meta.url), 'utf8');
+  check('both hotel keys are routed to checkHotel on save', /HOTEL_TOKEN: checkHotel,\s*HOTEL_EGARI_TOKEN: checkHotel/.test(cc));
+  check('a keyless hotel bearer is routed before the key test', cc.includes("cand.kind === 'hotel' && !cand.key"));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

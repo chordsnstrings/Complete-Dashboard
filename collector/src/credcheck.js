@@ -495,6 +495,41 @@ async function checkUberOAuth({ value, secret, said_fleet: said }) {
   }
 }
 
+/* ── Hotel: which tenant accepts this bearer? ───────────────────────────
+   The property list is the cheapest authenticated read and it is tenant-
+   scoped: the other fleet's tenant answers 401 "You are not registered with
+   this company" (measured 2026-10-05, both bearers, both domains). So a
+   bearer with a key is tried on that key's tenant only; one without is tried
+   on each configured tenant in turn and filed under the one that says 200 —
+   the tenant names the fleet, not the operator and not the order of a paste.
+   `fetchHotel` is replaceable so a test holds down what is sent. */
+export async function checkHotel(cand, { fetchHotel = null } = {}) {
+  const accts = (config.hotels || []).filter((h) => !cand.key || h.cred === cand.key);
+  if (!accts.length) return verdict(false, `${cand.key} is not a hotel account this dashboard reads`);
+  const ask = fetchHotel || (async (acct, domain) => {
+    const { status, data } = await http(`${acct.base}/api/operation-managers/hotels`, {
+      timeoutMs: 20000, retries: 0,
+      headers: { authorization: `Bearer ${cand.value}`, 'x-domain': domain } });
+    return { status, data };
+  });
+  const refused = [];
+  for (const acct of accts) {
+    const domain = (cand.key && cand.domain) || acct.domain;
+    let r;
+    try { r = await ask(acct, domain); } catch (e) {
+      return { verdict: 'unknown', detail: `the hotel platform could not be reached (${String(e).slice(0, 80)})` };
+    }
+    if (r.status === 200) {
+      const n = Array.isArray(r.data?.data) ? r.data.data.length : Array.isArray(r.data) ? r.data.length : null;
+      return { verdict: 'pass', key: acct.cred, fleet: acct.fleet, domain,
+        detail: `the ${acct.fleet} hotel tenant (${domain}) accepts it${n != null ? ` — ${n} properties` : ''}` };
+    }
+    if (r.status === 401 || r.status === 403) { refused.push(`${domain}: ${r.data?.error || r.status}`); continue; }
+    return { verdict: 'unknown', detail: `${domain} answered HTTP ${r.status}, so this could not be judged` };
+  }
+  return verdict(false, `no hotel tenant accepts this bearer — ${refused.join('; ')}`);
+}
+
 const CHECKS = { Uber: checkUber, Bolt: checkBolt, Yango: checkYango };
 /* Which check belongs to which KEY. The provider map above is the fallback for
    a credential that named itself by shape; this is what a credential the
@@ -512,6 +547,8 @@ const BY_KEY = {
   BOLT_REFRESH_TOKEN: checkBolt,
   BOLT_REFRESH_TOKEN_ECOSINE: checkBolt,
   BOLT_REFRESH_TOKEN_EGARI: checkBolt,
+  HOTEL_TOKEN: checkHotel,
+  HOTEL_EGARI_TOKEN: checkHotel,
 };
 
 /** Test one recognised candidate. Never stores, never mutates. */
@@ -522,6 +559,11 @@ export async function checkCandidate(cand) {
      must still pass. */
   if (cand?.ok && cand.kind === 'oauth' && cand.provider === 'Uber') {
     return { ...cand, ...(await checkUberOAuth(cand)) };
+  }
+  /* A hotel bearer with no x-domain arrives keyless too: the tenant that
+     accepts it is the key. */
+  if (cand?.ok && cand.kind === 'hotel' && !cand.key) {
+    return { ...cand, ...(await checkHotel(cand)) };
   }
   if (!cand?.ok || !cand.key) {
     return { ...cand, verdict: 'fail', detail: cand?.why || 'this credential could not be named' };
@@ -574,9 +616,12 @@ const fleetOfKey = (key) => (/_EGARI$/.test(key) ? 'egari'
   : /_ECOSINE$/.test(key) ? 'ecosine'
   /* The unsuffixed Uber cookie is Ecosine's: src/config.js gives Egari its own
      key and Ecosine the plain one. */
-    : key === 'UBER_WEB_COOKIE' ? 'ecosine' : null);
+    : key === 'UBER_WEB_COOKIE' ? 'ecosine'
+    /* The hotel keys carry the fleet mid-name; config.hotels is the map. */
+    : (config.hotels || []).find((h) => h.cred === key)?.fleet || null);
 const PROVIDER_OF_KEY = (key) => (key.startsWith('UBER') ? 'Uber'
-  : key.startsWith('BOLT') ? 'Bolt' : key.startsWith('YANGO') ? 'Yango' : null);
+  : key.startsWith('BOLT') ? 'Bolt' : key.startsWith('YANGO') ? 'Yango'
+    : key.startsWith('HOTEL') ? 'Hotel' : null);
 
 /** The fleet a check of `key` depends on: the Uber org and the Bolt company
     are per fleet, a Yango session and an untestable key are not. Lets a

@@ -8361,6 +8361,16 @@ platform is multi-company and Egari is a tenant we never asked.
   `rows_written: total` threw its own ReferenceError, so a failed hotel run
   was never logged.
 
+- **A hotel bearer names no fleet; the tenant does.** The JWT is
+  `{id, role: "operation_manager", iat}`, with no exp and no company. Each
+  fleet's bearer is refused on the other's tenant with 401 "You are not
+  registered with this company" (measured, both bearers, both domains). So
+  the Settings paste box (src/credkit.js) files a hotel bearer by the x-domain
+  beside it: a curl, a header pair, or a Postman collection with both fleets
+  in one block, which is how the operator's arrived. A bare bearer is filed
+  by checkHotel() (src/credcheck.js), under whichever tenant answers 200. Both
+  hotel keys are live-checked on save. Before this, no hotel key had a check.
+
 ### Load-time sweep (SPD, 2026-10-05)
 
 After 72cf0816 and the warm pass, all 126 routes timed cold through the

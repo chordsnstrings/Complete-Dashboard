@@ -310,6 +310,52 @@ const RECOGNISERS = [
     };
   },
 
+  /* Hotel: a corporate-portal operations manager's bearer.
+     ─────────────────────────────────────────────────────────────────────
+     A JWT whose payload says role "operation_manager" and nothing else of
+     note — `{id, role, iat}`, no exp, no company. Which fleet it is for is
+     not in the token: the platform is one backend, and the tenant is the
+     x-domain header sent beside the bearer (hotel.ecosine.ae, hotel.egari.ae).
+     Measured 2026-10-05 with both fleets' bearers: each is refused on the
+     other's tenant with 401 "You are not registered with this company".
+
+     So the x-domain decides when the paste carries one — a curl, a raw header
+     pair, or a Postman collection (the operator's arrived as one, BOTH
+     fleets' requests in a single JSON with no blank line between them, which
+     is why this returns a list) — paired with each bearer by nearest position
+     in the text. A bare bearer arrives with no key, and checkHotel()
+     (src/credcheck.js) files it under the tenant that accepts it, the way an
+     Uber OAuth pair is filed under the org its grant reaches. */
+  (raw) => {
+    const text = deCmd(raw);
+    const tokens = [...text.matchAll(/\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g)]
+      .filter((m) => jwtPayload(m[0])?.role === 'operation_manager');
+    if (!tokens.length) return null;
+    const hotels = config.hotels || [];
+    const domains = [...text.matchAll(/\bhotel\.[a-z0-9-]+(?:\.[a-z0-9-]+)+\b/gi)]
+      .map((m) => ({ at: m.index, domain: m[0].toLowerCase() }));
+    const seen = new Set();
+    return tokens.filter((m) => !seen.has(m[0]) && seen.add(m[0])).map((m) => {
+      const value = m[0];
+      const near = domains.length
+        ? domains.reduce((a, b) => (Math.abs(b.at - m.index) < Math.abs(a.at - m.index) ? b : a)) : null;
+      const id = jwtPayload(value)?.id || null;
+      if (!near) {
+        return { provider: 'Hotel', kind: 'hotel', key: null, fleet: null, value, account: id, ok: true,
+          why: 'a hotel operations-manager bearer with no x-domain beside it — the check tries each '
+            + 'fleet\'s hotel tenant and files it under the one that accepts it' };
+      }
+      const acct = hotels.find((h) => String(h.domain || '').toLowerCase() === near.domain);
+      return acct
+        ? { provider: 'Hotel', kind: 'hotel', key: acct.cred, fleet: acct.fleet, value, account: id,
+          domain: near.domain, why: `a hotel operations-manager bearer sent with x-domain ${near.domain}, `
+            + `which is the ${acct.fleet} hotel account` }
+        : { provider: 'Hotel', kind: 'hotel', key: null, fleet: null, value, account: id, ok: false,
+          domain: near.domain, why: `a hotel operations-manager bearer for ${near.domain}, which is not `
+            + 'a hotel account this dashboard reads' };
+    });
+  },
+
   /* The credential the operator names.
      ─────────────────────────────────────────────────────────────────────
      The header above says a credential carrying no identity of its own is
@@ -368,6 +414,12 @@ export function recognise(text) {
       let hit = null;
       try { hit = fn(block); } catch { hit = null; }
       if (!hit) continue;
+      /* A list is several credentials in one block — the hotel recogniser's
+         Postman collection. Each is pushed as its own find. */
+      if (Array.isArray(hit)) {
+        for (const h of hit) found.push({ ...h, ok: h.ok !== undefined ? h.ok : Boolean(h.key) });
+        break;
+      }
       /* A recogniser that already knows whether its find is usable says so.
          Every credential above is named or it is nothing, so `ok` follows
          from having a key — but an OAuth pair reaches the live check
