@@ -1035,6 +1035,7 @@ const dailyFor = (id) => {
 app.get('/api/performer/weeks', (_, r) => r.json({
   weeks: [{ week: '2026-08-17', to: '2026-08-23' }, { week: '2026-08-10', to: '2026-08-16' },
     { week: '2025-11-03', to: '2025-11-09' }],
+  total: 3,
   latest_complete: '2026-08-17',
   first_booking: '2025-11-03',
   last_booking: '2026-08-23',
