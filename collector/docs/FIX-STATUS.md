@@ -4314,3 +4314,10 @@ so far … still arriving" in grey; trips 11:00 and 12:00 "▼ Short by … so f
 its caption. No page error, no sideways scroll, nothing undefined; #insights
 under Work.
 
+
+## HTL — Egari hotel bookings (2026-10-05)
+
+| id | fix | written | production | proven |
+|---|---|---|---|---|
+| HTL-1 | Egari journeys with no booking read unverifiable, not unauthorized, while no Egari hotel booking is stored; channels_checked per fleet | yes | pending deploy | test/hotel_egari.test.mjs 19, reverted 16/3 |
+| HTL-2 | Egari hotel account collected (HOTEL_EGARI_TOKEN, x-domain hotel.egari.ae); another fleet's booking never refiled | yes | pending deploy | same test, reverted 18/1; bearer checked by hand against the reported trip |

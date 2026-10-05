@@ -211,6 +211,9 @@ export const SETTING_DEFS = [
   { key: 'HOTEL_TOKEN', group: 'Hotel (ecosine.ae)', label: 'Operations manager bearer token', secret: true },
   { key: 'HOTEL_DOMAIN', group: 'Hotel (ecosine.ae)', label: 'x-domain header', secret: false },
   { key: 'HOTEL_BASE', group: 'Hotel (ecosine.ae)', label: 'API base url', secret: false },
+  { key: 'HOTEL_EGARI_TOKEN', group: 'Hotel (Egari)', label: 'Operations manager bearer token — Egari', secret: true, hint: 'Egari hotel bookings are not collected until this is set (x-domain defaults to hotel.egari.ae). Until an Egari hotel booking is stored, no Egari journey is called unauthorized, because a hotel job cannot be ruled out.' },
+  { key: 'HOTEL_EGARI_DOMAIN', group: 'Hotel (Egari)', label: 'x-domain header — Egari (blank = hotel.egari.ae)', secret: false },
+  { key: 'HOTEL_EGARI_BASE', group: 'Hotel (Egari)', label: 'API base url — Egari (blank = the Ecosine one)', secret: false },
 
   /* TESLA FLEET API.
      ────────────────────────────────────────────────────────────────────────

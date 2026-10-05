@@ -17,6 +17,7 @@
 // can never delete another's segments (sql/schema_v85.sql puts `source` in the key).
 import { pool } from './db.js';
 import { log } from './log.js';
+import { config } from './config.js';
 
 export const RULES = {
   pollMinutes: 5,
@@ -522,6 +523,39 @@ const JOURNEY_REASON = {
    NEITHER is not part of this fleet's booking surface and must not block one —
    bolt has produced zero bookings here, ever, and blocking on it made the
    unauthorized verdict unreachable. `fms` is telematics, not a channel. */
+/* A CHANNEL THE FLEET RUNS BUT WE DO NOT READ — per fleet, not per window.
+   ─────────────────────────────────────────────────────────────────────────
+   blockingChannels() asks whether a channel produced bookings in the window,
+   fleet-wide. The hotel channel always did — Ecosine's — so an Egari journey
+   with no booking was called unauthorized "across bolt, hotel, uber, yango"
+   when no Egari hotel booking had ever been read (0 of 2,568 over a year, on
+   any of 40 Egari plates; the operator holds one for L-64172 on 2026-10-05).
+   Each fleet's hotel account is declared in config.hotels. Judged on what
+   was READ, not on what is configured: a fleet with a declared hotel account
+   but no hotel booking ever stored for it is uncollected, whatever token is
+   set — a token the tenant refuses would otherwise lift the guard on nothing.
+   The guard lifts by itself on the first booking that lands for the fleet.
+   A channel with no booking for ANY fleet stays what blockingChannels() says
+   it is — not configured — so this only fires where the channel is read for
+   one fleet and not for another. */
+export function uncollectedByFleet(hotels, ever) {
+  const read = new Set((ever || []).filter((r) => r.n > 0).map((r) => `${r.platform}|${r.fleet_id}`));
+  const anyHotel = [...read].some((k) => k.startsWith('hotel|'));
+  const out = new Map();
+  for (const h of hotels || []) {
+    if (!anyHotel || !h?.fleet || read.has(`hotel|${h.fleet}`)) continue;
+    out.set(h.fleet, [...(out.get(h.fleet) || []), 'hotel']);
+  }
+  return out;
+}
+
+export function uncollectedReason(fleet, channels) {
+  const name = fleet ? fleet[0].toUpperCase() + fleet.slice(1) : 'This fleet';
+  const ch = channels.join(', ');
+  return `no ${name} ${ch} booking has ever been collected — the ${ch} account we read is `
+    + `another fleet's — so a ${ch} job on this car cannot be ruled out`;
+}
+
 export function blockingChannels(everSeen, inWindow) {
   const seen = inWindow instanceof Set ? inWindow : new Set(inWindow || []);
   return (everSeen || []).filter((c) => c && c !== 'fms' && !seen.has(c));
@@ -747,6 +781,9 @@ export function judgeSegment(seg, classify, ctx) {
     } else if (ctx.unavailable.length) {
       verdict = 'unverifiable';
       reason = `no bookings collected from ${ctx.unavailable.join(', ')} in this window, so a booking there cannot be ruled out`;
+    } else if (ctx.uncollected?.get(seg.fleet_id)?.length) {
+      verdict = 'unverifiable';
+      reason = uncollectedReason(seg.fleet_id, ctx.uncollected.get(seg.fleet_id));
     } else {
       verdict = 'unauthorized';
       reason = found.nearest
@@ -758,7 +795,8 @@ export function judgeSegment(seg, classify, ctx) {
 }
 
 /* One row of occupancy_segment, from a judged segment of any source. */
-function segmentRow(seg, source, { verdict, reason, found }, { configured, inWindow, unavailable }) {
+function segmentRow(seg, source, { verdict, reason, found }, { configured, inWindow, unavailable, uncollected }) {
+  const notRead = new Set(uncollected?.get(seg.fleet_id) || []);
   // Every verdict carries a reason, including the three that never reach
   // the branch above. They were being written with a NULL reason, which is
   // indistinguishable from "issued before this code existed" — and the v8
@@ -806,7 +844,7 @@ function segmentRow(seg, source, { verdict, reason, found }, { configured, inWin
     /* What was actually checked, which is the same set the verdict was
        reached against. Reading a hardcoded list here claimed bolt had been
        consulted on a fleet that has never had a bolt booking. */
-    channels_checked: configured.filter((c) => c !== 'fms' && inWindow.has(c)).join(',') || null,
+    channels_checked: configured.filter((c) => c !== 'fms' && inWindow.has(c) && !notRead.has(c)).join(',') || null,
     low_confidence: verdict === 'unverifiable' || verdict === 'pending',
     unavailable_sources: unavailable.length ? unavailable.join(',') : null,
   };
@@ -881,9 +919,9 @@ export async function reconcile({ from, to }) {
      what separates a channel that is down from one this fleet does not use.
      Asked once per pass, not once per provider. */
   const { rows: ever } = await pool.query(
-    `SELECT platform, count(*)::int n FROM trip_norm WHERE is_booking GROUP BY platform`);
+    `SELECT platform, fleet_id, count(*)::int n FROM trip_norm WHERE is_booking GROUP BY platform, fleet_id`);
   const inWindow = new Set(seen.map((r) => r.platform));
-  const configured = ever.filter((r) => r.n > 0).map((r) => r.platform);
+  const configured = [...new Set(ever.filter((r) => r.n > 0).map((r) => r.platform))];
   // A channel we have never seen at all is not configured; one we have seen but
   // that produced nothing here is unavailable for this window.
   // See blockingChannels() above for why this is not a hardcoded list.
@@ -920,7 +958,7 @@ export async function reconcile({ from, to }) {
   // yet, must not be judged. Platform trip exports lag.
   const judgeBefore = new Date(to).getTime() - RULES.bookingLagMin * 60000;
   const base = { bookingsByPlate, bookingIndex: indexBookings(bookingsByPlate),
-    judgeBefore, unavailable, configured, inWindow };
+    judgeBefore, unavailable, configured, inWindow, uncollected: uncollectedByFleet(config.hotels, ever) };
 
   const bySource = {};
   let segmentsTotal = 0;

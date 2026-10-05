@@ -193,7 +193,7 @@ async function loadHotels(c) {
     if (status && status >= 400) {
       if (isAuthStatus(status, data)) {
         await noteCredential(pool, { provider: SRC, fleet: c.fleet || '*',
-          credential: 'HOTEL_TOKEN', state: 'invalid', surface: 'hotels',
+          credential: c.cred || 'HOTEL_TOKEN', state: 'invalid', surface: 'hotels',
           detail: `HTTP ${status}` });
       }
       throw new Error(`hotel property list refused: HTTP ${status}`);
@@ -217,12 +217,26 @@ async function loadHotels(c) {
   } catch (e) { log.warn(SRC, 'hotel list failed', { err: String(e).slice(0, 80) }); }
 }
 
-export async function collect({ from, to, mode }) {
-  const c = config.hotel;
-  if (!c.token) { log.warn(SRC, 'no HOTEL_TOKEN — skipping'); return; }
+/* Every fleet's hotel account in turn — see config.hotels for why Egari has
+   its own and what reconcile does while it is unset. An account without a
+   token or an x-domain is skipped with a warning, never guessed. */
+export async function collect(args) {
+  for (const c of config.hotels) {
+    if (args?.fleet && args.fleet !== c.fleet) continue;   // a run narrowed to one fleet (src/run.js)
+    if (!c.token || !c.domain) {
+      log.warn(SRC, `no ${c.cred}${c.token ? ' x-domain' : ''} — ${c.fleet} hotel skipping`);
+      continue;
+    }
+    await collectAccount(c, args);
+  }
+}
+
+async function collectAccount(c, { from, to, mode }) {
+  /* `total` lived inside the try, so the catch's rows_written: total threw a
+     ReferenceError of its own and the error run was never logged. */
+  let total = 0;
   try {
     await loadHotels(c);          // property names, so partner trips carry a label
-    let total = 0;
     const chunks = [];
     for (const [s, e] of dateChunks(from, to, 31)) {
       const chunk = { from: iso(s), to: iso(e), rows: 0, error: null };
@@ -242,18 +256,18 @@ export async function collect({ from, to, mode }) {
         if (status && status >= 400) {
           if (isAuthStatus(status, data)) {
             await noteCredential(pool, { provider: SRC, fleet: c.fleet || '*',
-              credential: 'HOTEL_TOKEN', state: 'invalid', surface: 'get-trip-report',
+              credential: c.cred || 'HOTEL_TOKEN', state: 'invalid', surface: 'get-trip-report',
               detail: `HTTP ${status}` });
           }
           throw new Error(`hotel trip report refused: HTTP ${status}`
             + (isAuthStatus(status, data)
-              ? ' — the corporate portal bearer is no longer accepted' : ''));
+              ? ` — the ${c.fleet} corporate portal bearer (${c.cred}) is no longer accepted` : ''));
         }
         /* The bearer answered, so say so. HOTEL_TOKEN had no 'ok' writer
            anywhere in this file and no entry in src/credcheck.js's BY_KEY, so
            one bad gateway minute left it red for ever. */
         await noteCredential(pool, { provider: SRC, fleet: c.fleet || '*',
-          credential: 'HOTEL_TOKEN', state: 'ok', surface: 'get-trip-report', detail: null });
+          credential: c.cred || 'HOTEL_TOKEN', state: 'ok', surface: 'get-trip-report', detail: null });
         trips = data?.data?.trips || [];
         /* The response counts its own trips, and nothing ever compared it with
            what arrived. A truncated window is otherwise indistinguishable from
@@ -310,12 +324,27 @@ export async function collect({ from, to, mode }) {
         // thing stripped on the way IN rather than at the boundary.
         raw: storableRaw(t),
       })).filter((r) => r.external_id && r.requested_at);
-      if (rows.length) total += await upsertMany('trip', rows, ['platform', 'external_id']);
-      chunk.rows = rows.length;
+      /* One booking, one fleet. Two accounts now write the same table, and a
+         token pasted into the wrong slot (or a tenant that ignored x-domain)
+         would hand one fleet's bookings to the other's pass; the upsert on
+         (platform, external_id) would then refile them. A booking already stored under another fleet is
+         dropped here and counted, never relabelled. */
+      const { rows: taken } = rows.length ? await pool.query(
+        `SELECT external_id FROM trip WHERE platform = $1 AND external_id = ANY($2) AND fleet_id IS DISTINCT FROM $3`,
+        [SRC, rows.map((r) => r.external_id), c.fleet]) : { rows: [] };
+      const other = new Set(taken.map((r) => r.external_id));
+      if (other.size) {
+        log.warn(SRC, `${c.fleet}: ${other.size} of ${rows.length} bookings are another fleet's — not refiled`,
+          { domain: c.domain });
+        chunk.other_fleet = other.size;
+      }
+      const mine = other.size ? rows.filter((r) => !other.has(r.external_id)) : rows;
+      if (mine.length) total += await upsertMany('trip', mine, ['platform', 'external_id']);
+      chunk.rows = mine.length;
 
       // Driver licence expiry rides along on every trip record — the only place we get it.
       const seen = new Map();
-      for (const t of trips) {
+      for (const t of trips.filter((x) => !other.has(x._id))) {
         const d = t.driver; if (!d?._id || seen.has(d._id)) continue;
         seen.set(d._id, {
           platform: SRC, driver_ext_id: d._id, fleet_id: c.fleet,

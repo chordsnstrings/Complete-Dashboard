@@ -174,7 +174,36 @@ export const config = {
       domain: get('HOTEL_DOMAIN', D.HOTEL_DOMAIN),
       token: get('HOTEL_TOKEN'),
       fleet: 'ecosine',
+      cred: 'HOTEL_TOKEN',
     };
+  },
+
+  /* ONE HOTEL ACCOUNT PER FLEET — Egari's was never read.
+     ────────────────────────────────────────────────────────────────────────
+     HOTEL_TOKEN is the Ecosine operations manager on hotel.ecosine.ae, and it
+     was the only hotel account this collector knew. Measured 2026-10-05: of
+     2,568 hotel bookings stored over a year, 0 are on any of the 40 Egari
+     plates — while the operator holds an Egari hotel booking (L-64172, 05:31
+     to 06:08 UTC that day) that the dashboard called unauthorized "across
+     bolt, hotel, uber, yango". Hotel was never checked for Egari; the reason
+     said it was. The Egari account is its own slot. Until an Egari hotel
+     booking is stored, src/reconcile.js reads hotel as UNCOLLECTED for Egari
+     and refuses to call an Egari journey unauthorized (see uncollectedByFleet
+     there). Base defaults to the Ecosine one — same platform, other tenant.
+
+     Measured with the Egari operations manager's own bearer, 2026-10-05:
+     x-domain hotel.egari.ae answers get-trip-report with its own `company`
+     id (688f12af…, Ecosine's is 688f0f1a…) — 11 bookings that day, among
+     them L-64172 05:31:37–06:08:33, finished, AED 125 — and 153 in October
+     2025. A separate operator user, so Ecosine's bearer is not borrowed. */
+  get hotels() {
+    return [this.hotel, {
+      base: get('HOTEL_EGARI_BASE') || get('HOTEL_BASE', D.HOTEL_BASE),
+      domain: get('HOTEL_EGARI_DOMAIN') || 'hotel.egari.ae',
+      token: get('HOTEL_EGARI_TOKEN'),
+      fleet: 'egari',
+      cred: 'HOTEL_EGARI_TOKEN',
+    }];
   },
 
   get bolt() {

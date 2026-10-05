@@ -8317,3 +8317,56 @@ And, before it went out: "set october target to 1.705 Million not 1.6"
 - **Never cached** (api/cache.js NEVER): a save and the trips setting move it
   and neither moves the cache's version.
 
+
+## Egari hotel bookings were never read (2026-10-05)
+
+Reported: Egari L-64172, FMS journey 05:30–05:54 UTC, "unauthorized — no
+booking … across bolt, hotel, uber, yango"; the operator holds the hotel
+booking (05:31–06:08, a named driver). Measured the same day:
+
+| | |
+|---|---|
+| hotel bookings stored, a year | 2,568 |
+| on any of the 40 Egari plates | **0** |
+| distinct `company` id on them | 1 (Ecosine's, `688f…664b`) |
+| L-64172 bookings, a year | uber 501, bolt 16, hotel 0 |
+| Egari journeys "unauthorized" in October to the 5th | 78 of 215 |
+
+`HOTEL_TOKEN` is the Ecosine operations manager on `hotel.ecosine.ae`.
+`hotel.egari.ae` is a live portal behind the same SiteGround front, so the
+platform is multi-company and Egari is a tenant we never asked.
+
+### Traps this added to the list
+
+- **"Checked" was fleet-wide.** `channels_checked` and the "across …" reason
+  came from channels that produced a booking for ANY fleet. Hotel always had
+  — Ecosine's — so every Egari journey claimed a hotel check that never
+  happened. Now judged per fleet (`uncollectedByFleet`, src/reconcile.js): a
+  channel read for one fleet and never for another makes the other's
+  no-booking journeys **unverifiable**, with that reason. It lifts on the
+  first booking stored for the fleet.
+- **Egari's hotel is a separate operator user, not a second x-domain on
+  Ecosine's.** The operator supplied the Egari operations manager's bearer
+  (2026-10-05). With it, `x-domain: hotel.egari.ae` answers get-trip-report
+  with company `688f12af…` (Ecosine's is `688f0f1a…`): 11 bookings on the
+  5th, among them **L-64172 05:31:37–06:08:33, finished, Mohammed Fazlul
+  Karim Imran Abu Bakar Siddique, AED 125** — the reported journey — and 153
+  in October 2025. Set as `HOTEL_EGARI_TOKEN` (DO secret, api + collector);
+  x-domain defaults to `hotel.egari.ae`. Its JWT carries `iat` and no `exp`.
+- **An upsert on (platform, external_id) relabels.** Two accounts write one
+  table; a token pasted into the wrong slot would hand one fleet's bookings
+  to the other's pass, which would refile them. A booking already stored under another fleet is dropped and
+  counted (`other_fleet` on the run's window).
+- `collect()`'s `let total` sat inside the try; the catch's
+  `rows_written: total` threw its own ReferenceError, so a failed hotel run
+  was never logged.
+
+### Load-time sweep (SPD, 2026-10-05)
+
+After 72cf0816 and the warm pass, all 126 routes timed cold through the
+mirror: the page floor is ~4 s (auth + status + mirror hop, each 0.4–0.8 s),
+so "over 4 s" counts 83 routes that are not slow. Requests over 3 s, by
+endpoint: attributed list at a 180-day window 42 s; kpis / economics assets
+/ economics drivers at 90 days, one fleet or platform, 17–20 s; schema
+raw-fields at a year 17 s; driver/unauthorized 7 s; trips/daily 90 days 7 s;
+target/hours 6.8 s; day 5 s. Default (month) windows are all under 3 s.
