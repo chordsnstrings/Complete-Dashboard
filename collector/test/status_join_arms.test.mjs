@@ -108,12 +108,17 @@ console.log('\nthe live SQL is the SQL that was tested');
    true the moment the copy drifts. */
 const { readFileSync } = await import('node:fs');
 const live = readFileSync('api/unauthorized_sql.js', 'utf8');
-const shipped = live.slice(live.indexOf('AND e.driver_ext_id IN ('));
+/* Anchored on the id set, which since SPD (2026-10-05) is a FROM-list
+   derived table probed per account rather than an IN-list over the event log. */
+const shipped = live.slice(live.indexOf('FROM (SELECT t3.driver_ext_id FROM trip t3'));
 check('api/unauthorized_sql.js ships the two-arm UNION, not the OR',
   /UNION\s*\n\s*SELECT t3\.driver_ext_id FROM trip t3/.test(shipped)
   && !/OR \(coalesce\(btrim\(t3\.person_key\)/.test(shipped));
 check('…including the <> \'\' that lets the PARTIAL index apply',
   /t3\.person_key IS NOT NULL AND t3\.person_key <> ''/.test(shipped));
+check('the status is one probe per account on (driver_ext_id, at), not a walk of the log',
+  /WHERE e\.driver_ext_id = ids\.driver_ext_id\s*\n\s*AND e\.at <= \$\{o\}\.started_at\s*\n\s*ORDER BY e\.at DESC LIMIT 1\) e/.test(live)
+  && !live.replace(/\/\*[\s\S]*?\*\//g, '').includes('AND e.driver_ext_id IN ('));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await db.close();

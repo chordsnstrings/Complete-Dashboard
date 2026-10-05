@@ -291,4 +291,9 @@ export const SCHEMA_FILES = [
      fleets, one row per save, never updated (api/revenue_target.js). Additive.
      test/revenue_target.test.mjs. */
   'schema_v98.sql',
+  /* v99 (2026-10-05): two trip indexes for the attribution — (person_key,
+     driver_ext_id) for the candidate's Uber status, (plate,
+     coalesce(ended_at, requested_at)) for the newest-trip-in-window probe.
+     Additive. test/spd_attribution.test.mjs. */
+  'schema_v99.sql',
 ];

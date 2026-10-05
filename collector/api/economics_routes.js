@@ -1160,6 +1160,11 @@ export function economicsRoutes(app, { q, wrap, range }) {
           AND (t.requested_at AT TIME ZONE 'Asia/Dubai')::date = h.day
          WHERE t.platform = 'fms'
            AND (t.requested_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
+           /* The same window on the raw column, so trip_platform_requested_idx
+              (platform, requested_at) can range over it instead of reading
+              every FMS journey ever stored (SPD, 2026-10-05). */
+           AND t.requested_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai')
+           AND t.requested_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
          GROUP BY 1`, [from, to]),
 
       /* Which cars each person actually held, busiest first and capped at

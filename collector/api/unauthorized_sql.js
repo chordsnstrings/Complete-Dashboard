@@ -1280,6 +1280,16 @@ LEFT JOIN LATERAL (
       FROM trip t
      WHERE t.plate = ${o}.plate
        AND coalesce(btrim(t.driver_ext_id), '') <> ''
+       /* ONLY WHERE THE LAST-TRIP RULE REACHED NOBODY (SPD, 2026-10-05).
+          Every figure here feeds no_last_reason and WHY_NO_LAST, which are
+          read only on rows whose last_ppl is empty: sole_custodian, the
+          non-tie ambiguous branch and unknown. A row with a skewed clock
+          reads 'skew' before any of them. On production this aggregate was
+          18.0 s of a 31 s plan — 85 ms over ~3,200 trips per car, run for
+          all 211 journeys of the month. Uncorrelated with t, so Postgres
+          plans it as a one-time filter and skips the scan; the aggregate
+          still returns its one row, of zeros, which nothing reads. */
+       AND NOT EXISTS (SELECT 1 FROM last_ppl)
   ),
   tally AS (
     SELECT (SELECT count(*) FROM cust)::int    AS custodians,
@@ -1394,6 +1404,7 @@ LEFT JOIN LATERAL (
               channel it does run on. */
            (SELECT t4.platform FROM trip t4
              WHERE t4.plate = ${o}.plate
+               AND NOT EXISTS (SELECT 1 FROM last_ppl)   -- read only by WHY_NO_LAST; see hist
                AND t4.platform NOT IN ${PV}
                AND coalesce(btrim(t4.driver_ext_id), '') <> ''
              GROUP BY t4.platform ORDER BY count(*) DESC, t4.platform LIMIT 1) AS other_platform,
@@ -1964,8 +1975,15 @@ LEFT JOIN LATERAL (
            AS c(name text, id text, key text)
     LEFT JOIN LATERAL (
       SELECT e.status, e.at
-        FROM driver_status_event e
-       WHERE e.at <= ${o}.started_at
+        FROM (SELECT t3.driver_ext_id FROM trip t3
+            WHERE t3.person_key = c.key
+              AND t3.person_key IS NOT NULL AND t3.person_key <> ''
+              AND coalesce(btrim(t3.driver_ext_id), '') <> ''
+           UNION
+           SELECT t3.driver_ext_id FROM trip t3
+            WHERE t3.driver_ext_id = c.key
+              AND coalesce(btrim(t3.person_key), '') = ''
+              AND coalesce(btrim(t3.driver_ext_id), '') <> '') ids
          /* SARGABLE, so this rides trip_person_key_idx instead of scanning.
             ──────────────────────────────────────────────────────────────────
             THE DEFECT. This read
@@ -2028,16 +2046,22 @@ LEFT JOIN LATERAL (
             whose person_key IS the key, arm 2 rows with no usable person_key
             whose account id is, and no row can satisfy both — exactly the
             partition the OR expressed. */
-         AND e.driver_ext_id IN (
-           SELECT t3.driver_ext_id FROM trip t3
-            WHERE t3.person_key = c.key
-              AND t3.person_key IS NOT NULL AND t3.person_key <> ''
-              AND coalesce(btrim(t3.driver_ext_id), '') <> ''
-           UNION
-           SELECT t3.driver_ext_id FROM trip t3
-            WHERE t3.driver_ext_id = c.key
-              AND coalesce(btrim(t3.person_key), '') = ''
-              AND coalesce(btrim(t3.driver_ext_id), '') <> '')
+         /* ONE INDEX PROBE PER ACCOUNT, NOT A WALK OF THE EVENT LOG (SPD,
+            2026-10-05). This was 'FROM driver_status_event e WHERE e.at <=
+            started_at AND e.driver_ext_id IN (the two arms)', which the
+            planner ran as a backward walk of dse_at_idx — 7,124 events per
+            candidate on production, each tested against the hashed id set:
+            7.6 s of a 31 s plan over 232 candidates. The ids are one or two
+            accounts per person, and dse_driver_idx is (driver_ext_id, at
+            DESC), so the newest event at or before the journey is one probe
+            each; the outer ORDER BY then takes the newest across them, which
+            is what the IN form returned. */
+        CROSS JOIN LATERAL (
+          SELECT e.status, e.at
+            FROM driver_status_event e
+           WHERE e.driver_ext_id = ids.driver_ext_id
+             AND e.at <= ${o}.started_at
+           ORDER BY e.at DESC LIMIT 1) e
        ORDER BY e.at DESC LIMIT 1) s ON true
 ) st ON true`;
 

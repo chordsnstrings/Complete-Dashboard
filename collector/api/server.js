@@ -318,8 +318,26 @@ const q = async (text, params) => {
   } finally {
     const ms = Date.now() - t0;
     if (ms >= SLOW_MS) log.warn('api', 'slow query', { ms, sql: String(text).replace(/\s+/g, ' ').trim().slice(0, 150) });
+    if (ms >= PLAN_MS) logPlan(text, params, ms);
   }
 };
+/* THE PLAN BESIDE THE SLOW LINE (SPD, 2026-10-05). The line above names the
+   statement; it cannot say why it was slow, and only the unauthorized list
+   had an EXPLAIN route, so every other slow statement took a deploy per
+   guess. A statement over PLAN_QUERY_MS (5 s) now logs its plan — plain
+   EXPLAIN, which plans and does not run it again — once per statement head
+   per process, after the response, never in its way. */
+const PLAN_MS = Number(process.env.PLAN_QUERY_MS || 5000);
+const planned = new Set();
+function logPlan(text, params, ms) {
+  const head = String(text).replace(/\s+/g, ' ').trim().slice(0, 150);
+  if (planned.has(head) || planned.size > 200 || /^\s*EXPLAIN/i.test(text)) return;
+  planned.add(head);
+  pool.query(`EXPLAIN ${text}`, params).then((r) => {
+    const plan = r.rows.map((x) => x['QUERY PLAN']).join('\n');
+    log.warn('api', 'slow query plan', { ms, sql: head, plan: plan.slice(0, 6000) });
+  }).catch(() => {});
+}
 /* A 500 body used to carry the driver's own message, which names the storage
    engine, the column and the type ("invalid input syntax for type timestamp
    with time zone"). The full error is logged; the caller gets a reference to

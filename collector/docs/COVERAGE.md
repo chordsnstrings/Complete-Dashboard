@@ -8380,3 +8380,35 @@ endpoint: attributed list at a 180-day window 42 s; kpis / economics assets
 / economics drivers at 90 days, one fleet or platform, 17–20 s; schema
 raw-fields at a year 17 s; driver/unauthorized 7 s; trips/daily 90 days 7 s;
 target/hours 6.8 s; day 5 s. Default (month) windows are all under 3 s.
+
+### Unauthorized list: where the time went (SPD round 2, 2026-10-05)
+
+Cold on production: `/api/unauthorized/attributed` at a month 18.7 s, at six
+months 41.4 s; the driver's unauthorized tab 16.7 s. EXPLAIN ANALYZE at a
+month (211 journeys, 31 s under EXPLAIN):
+
+| node | per loop | loops | total |
+|---|---|---|---|
+| `hist`: aggregate over every trip on the car (~3,200) | 85 ms | 211 | 18.0 s |
+| candidate status: backward walk of `dse_at_idx`, each event tested against the person's ~2,200 trips | 36 ms | 211 | 7.6 s |
+| newest non-Uber trip in a window, on `trip_plate_idx` (6,914 rows filtered) | 30 ms | 107 | 3.2 s |
+
+#### Traps this added to the list
+
+- **An aggregate the row never reads still runs.** `hist` feeds only
+  `no_last_reason` / WHY_NO_LAST, which are read only where `last_ppl` is
+  empty. It is now gated with `AND NOT EXISTS (SELECT 1 FROM last_ppl)`.
+  That condition doesn't reference `t`, so Postgres plans it as a one-time
+  filter and skips the scan. An aggregate with no GROUP BY still returns one
+  row, of zeros, which nothing reads.
+- **`IN (subquery)` over an event log walks the log.** The status lookup was
+  `FROM driver_status_event WHERE at <= started_at AND driver_ext_id IN (…)`,
+  which the planner ran as a backward walk of `dse_at_idx`. The ids are now
+  a derived table, each probed on `dse_driver_idx (driver_ext_id, at DESC)`.
+- **An index on `plate` does not serve a window on
+  `coalesce(ended_at, requested_at)`.** schema v99 adds that exact
+  expression, plus `(person_key, driver_ext_id)` for the id lookup.
+- **Only one route had EXPLAIN.** Now any statement over `PLAN_QUERY_MS` (5 s)
+  logs `slow query plan` beside its `slow query` line. It is plain EXPLAIN,
+  logged once per statement head per process.
+

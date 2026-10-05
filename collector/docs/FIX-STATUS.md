@@ -4322,3 +4322,14 @@ under Work.
 | HTL-1 | Egari journeys with no booking read unverifiable, not unauthorized, while no Egari hotel booking is stored; channels_checked per fleet | yes | pending deploy | test/hotel_egari.test.mjs 19, reverted 16/3 |
 | HTL-2 | Egari hotel account collected (HOTEL_EGARI_TOKEN, x-domain hotel.egari.ae); another fleet's booking never refiled | yes | pending deploy | same test, reverted 18/1; bearer checked by hand against the reported trip |
 | HTL-3 | Settings paste recognises a hotel bearer (bare, labelled, curl, Postman with both fleets) and files it by tenant; HOTEL_TOKEN / HOTEL_EGARI_TOKEN live-checked on save | yes | pending deploy | test/hotel_egari.test.mjs §6–7; recogniser reverted 26/8, tenant fallthrough 32/2; real Postman file → both pass |
+
+## SPD-2 — unauthorized list and plan logging (2026-10-05)
+
+| id | fix | written | production | proven |
+|---|---|---|---|---|
+| SPD-5 | `hist` and the other-channel probe gated on an empty last_ppl | yes | pending deploy | spd_attribution 7 (reverted 5/2); attribution suites green |
+| SPD-6 | candidate status: one probe per account on dse_driver_idx | yes | pending deploy | status_join_arms 14 (old file 11/3) |
+| SPD-7 | schema v99: trip (person_key, driver_ext_id), trip (plate, coalesce(ended_at, requested_at)) | yes | pending deploy | spd_attribution |
+| SPD-8 | slow statements over 5 s log their plan | yes | pending deploy | spd_attribution |
+| SPD-9 | economics/drivers FMS journeys: raw requested_at range | yes | pending deploy | — |
+
