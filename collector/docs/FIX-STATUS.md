@@ -4336,3 +4336,11 @@ under Work.
 | SPD-12 | driver unauthorized tab: rows, tally and cars-held run concurrently (10.2 s sequential, each under 5 s) | yes | pending deploy | spd_attribution 10; unauth_driver 9 |
 | SPD-13 | /api/coverage: the whole-table geo count starts before the nine counts instead of after them | yes | pending deploy | spd_attribution 10; route_smoke |
 
+
+SPD on production (137ef48, cold, after the warm pass): attributed month
+5.6 s (was 18.7), six months 7.4 s (was 41.4); driver unauthorized p121
+last month 0.5 s (was 123), 6628822 month 9.4 s (was 16.7; SPD-12 bought
+0.8 s, because one statement dominates); kpis month 2.7 s; day 2.0 s;
+target/hours 3.6 s; coverage 12.7 s (SPD-13 bought nothing measurable).
+Still slow: kpis / economics at 90 days with a fleet (9–15 s), because of
+the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
