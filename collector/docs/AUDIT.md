@@ -2418,3 +2418,15 @@ trips panel, 10:00's revenue "on pace" below its target. And one more lag:
 the answer counted the 12:00 hour at 37 trips against 14 due — the 13:01
 Uber run had stored trips ending 12:59 but not yet written its finish, so
 the cut still read 12:41. The cut now follows the newest row stored.
+
+### The phone's Today — 2026-10-05
+
+Audited on production (390px) before changing: two month cards, today so
+far, the month window, cancellations, "151 unauthorized trips" as a link, †
+absences. Nothing about the hour, nothing about who drove. Added after the
+month cards: today against target, revenue and trips by hour (six hours
+around now, the day as a 360px chart), and who drove since yesterday. Found
+on the mock: the hours table ran off the right edge (verdicts cut), the
+chart's 00:00 label was clipped, in-card section heads were overlapped in
+Arkiv (phone_arkiv's own check). Fixed: a wrapping three-column table, the
+first label anchored at its bar, caption lines for the sub-lists.

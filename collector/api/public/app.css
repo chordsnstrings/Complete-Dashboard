@@ -2814,6 +2814,13 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
 .hp tr.hp-quiet{color:var(--grey)}
 .hp tr.hp-cur{background:var(--paper-2,var(--surface))}
 .hp-basis{margin-top:8px}
+/* The phone's hours around now (targetpage.js hoursNearHtml): three columns
+   in 358px, so the verdict wraps under itself instead of running off. */
+.hp.hp-near{table-layout:fixed}
+.hp.hp-near th,.hp.hp-near td{white-space:normal;vertical-align:top}
+.hp.hp-near th:first-child{width:3.4em}
+.hp.hp-near td:nth-child(2){width:46%}
+.hp.hp-near td:nth-child(3),.hp.hp-near th:nth-child(3){text-align:left}
 .hp-wrap,.targetnow.tg-page,.mf{min-width:0}
 [data-panel="tp-rev"] .tablewrap,[data-panel="tp-trips"] .tablewrap{overflow-x:auto}
 @media (max-width:980px){

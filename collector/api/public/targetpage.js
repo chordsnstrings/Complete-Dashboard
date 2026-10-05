@@ -142,10 +142,11 @@ export function todayHtml(h) {
    ended and settled, grey while its trips are still arriving, ink while it
    runs. The hours to come carry their catch-up as a dashed outline where it
    asks more than the plan. */
-function hourChart(x, { isMoney }) {
+export function hourChart(x, { isMoney, W = 1300, every = 3 }) {
   /* Drawn at the width it is shown at (a full-width panel, ~1,300px at a
-     1440 screen), so the hour labels stay at reading size. */
-  const W = 1300, H = 190, pl = 6, pr = 6, pt = 10, pb = 22;
+     1440 screen; the phone's card, 360), so the hour labels stay at reading
+     size — the phone labels every sixth hour. */
+  const H = W < 600 ? 120 : 190, pl = 6, pr = 6, pt = 10, pb = 22;
   const iw = W - pl - pr, ih = H - pt - pb, step = iw / 24, bw = step * 0.62;
   const hi = Math.max(1, ...x.hours.map((r) => Math.max(r.need || 0, r.done || 0, r.usual || 0, r.catch_up || 0)));
   const y = (v) => pt + ih - (ih * (v || 0)) / hi;
@@ -164,10 +165,57 @@ function hourChart(x, { isMoney }) {
     if (r.usual > 0) g.push(`<line class="hc-usual" x1="${(bx - 2).toFixed(1)}" x2="${(bx + bw + 2).toFixed(1)}" y1="${y(r.usual).toFixed(1)}" y2="${y(r.usual).toFixed(1)}"/>`);
     g.push('</g>');
     parts.push(g.join(''));
-    if (i % 3 === 0) parts.push(`<text class="hc-x" x="${(bx + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${r.label}</text>`);
+    /* The first label starts at its bar, so the edge does not clip it. */
+    if (i % every === 0) parts.push(`<text class="hc-x" x="${(i ? bx + bw / 2 : bx).toFixed(1)}" y="${H - 6}" text-anchor="${i ? 'middle' : 'start'}">${r.label}</text>`);
   });
   return `<svg class="hc" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(`Each hour today: its target, what it usually does, and what it did`)}">`
     + `<line class="hc-base" x1="${pl}" x2="${W - pr}" y1="${pt + ih}" y2="${pt + ih}"/>${parts.join('')}</svg>`;
+}
+
+/** An hour's verdict in words: the same on the desktop table and the phone. */
+export function statusHtml(r, plain) {
+  /* Over, below its printed target: the hour has settled at or above what
+     the usual day has in of it by now, and the rest of a usual hour reaches
+     us later (trap 47) — said in those words, not as a bare tick. */
+  return r.state === 'over' ? (r.diff < 0 && r.reported != null
+    ? `<span class="tg-over">▲ On pace</span> <span class="hp-dim">· a usual day has ${Math.round(r.reported * 100)}% of it in by now</span>`
+    : `<span class="tg-over">▲ On target${r.diff > 0 ? ` +${esc(plain(r.diff))}` : ''}</span>`)
+    : r.state === 'under' ? `<span class="tg-under">▼ Under by ${esc(plain(-r.diff))}</span>`
+      : r.state === 'arriving' ? (r.so_far === 'over' ? `<span class="tg-over">▲ On pace so far${r.diff > 0 ? ` +${esc(plain(r.diff))}` : ''}</span>`
+        : `<span class="tg-under">▼ Short by ${esc(plain(-r.diff))} so far</span>`) + ' <span class="hp-dim">· still arriving</span>'
+        : r.state === 'now' ? '<span class="hp-now">In progress</span>'
+          : r.state === 'idle' ? '<span class="hp-dim">— nothing asked</span>' : '<span class="hp-dim">To come</span>';
+}
+
+/* The panel's first paragraph: the day so far, what is left, this hour. */
+function ledeHtml(x, h, { isMoney }) {
+  const est = isMoney && x.estimate;
+  const f = isMoney ? (v) => `${est ? '≈ ' : ''}${money(v)}` : (v) => trips(v);
+  const plain = isMoney ? (v) => money(v) : (v) => trips(v);
+  return `<p class="hp-lede"><b class="tg-${tone(x.ahead)}">${esc(sign(x.ahead, f))}</b> `
+    + `${esc(`at ${h.clock} — ${f(x.done)} done, ${plain(x.need_by_now)} due by now on the usual day.`)} `
+    + `${esc(`Left for today: ${f(x.left)}.`)}`
+    + (x.arriving ? ` ${esc(`${x.arriving === 1 ? 'The hour just gone is' : `${x.arriving} hours just gone are`} still arriving — a trip reaches us about half an hour after it is requested, so an hour is called under only once it has settled.`)}` : '')
+    + (x.this_hour ? ` ${esc(`This hour, ${x.this_hour.label}: ${plain(x.this_hour.catch_up ?? x.this_hour.need)} in what is left of it to land the day (its target ${plain(x.this_hour.need)}).`)}` : '')
+    + '</p>';
+}
+
+/** The phone's hourly card: the summary, the day at 360px, and the hours
+    around now — the three just gone, this one, the two to come. Every hour
+    is on the desktop's #target; the phone holds the ones a shift acts on. */
+export function hoursNearHtml(x, h, { isMoney }) {
+  if (!x || x.absent) return `<p class="tg-absent">${esc(x?.absent || 'Not measured.')}</p>`;
+  const est = isMoney && x.estimate;
+  const f = isMoney ? (v) => `${est ? '≈ ' : ''}${money(v)}` : (v) => trips(v);
+  const plain = isMoney ? (v) => money(v) : (v) => trips(v);
+  const cur = h.hour ?? 0;
+  const near = x.hours.filter((r) => r.h >= cur - 3 && r.h <= cur + 2);
+  const rows = near.map((r) => `<tr${r.state === 'now' ? ' class="hp-cur"' : ''}><th scope="row">${r.label}</th>`
+    + `<td>${r.done == null ? '<span class="hp-dim">—</span>' : esc(f(r.done))} <span class="hp-dim">/ ${esc(plain(r.need))}</span></td>`
+    + `<td>${r.catch_up != null && r.state !== 'now' ? `<span class="hp-dim">${esc(plain(r.catch_up))} to land the day</span>` : statusHtml(r, plain)}</td></tr>`).join('');
+  return `${ledeHtml(x, h, { isMoney })}${hourChart(x, { isMoney, W: 360, every: 6 })}`
+    + `<table class="hp hp-near"><thead><tr><th scope="col">Hour</th><th scope="col">Done / target</th><th scope="col">On target?</th></tr></thead>`
+    + `<tbody>${rows}</tbody></table>`;
 }
 
 /** One hourly panel's body: the summary, the chart, the key, the hours. */
@@ -176,29 +224,14 @@ export function hoursHtml(x, h, { isMoney }) {
   const est = isMoney && x.estimate;
   const f = isMoney ? (v) => `${est ? '≈ ' : ''}${money(v)}` : (v) => trips(v);
   const plain = isMoney ? (v) => money(v) : (v) => trips(v);
-  const head = `<p class="hp-lede"><b class="tg-${tone(x.ahead)}">${esc(sign(x.ahead, f))}</b> `
-    + `${esc(`at ${h.clock} — ${f(x.done)} done, ${plain(x.need_by_now)} due by now on the usual day.`)} `
-    + `${esc(`Left for today: ${f(x.left)}.`)}`
-    + (x.arriving ? ` ${esc(`${x.arriving === 1 ? 'The hour just gone is' : `${x.arriving} hours just gone are`} still arriving — a trip reaches us about half an hour after it is requested, so an hour is called under only once it has settled.`)}` : '')
-    + (x.this_hour ? ` ${esc(`This hour, ${x.this_hour.label}: ${plain(x.this_hour.catch_up ?? x.this_hour.need)} in what is left of it to land the day (its target ${plain(x.this_hour.need)}).`)}` : '')
-    + '</p>';
+  const head = ledeHtml(x, h, { isMoney });
   const key = '<p class="hp-key"><span class="hk hk-done-over"></span>done, on target'
     + '<span class="hk hk-done-under"></span>done, under<span class="hk hk-done-arriving"></span>ended, still arriving'
     + '<span class="hk hk-done-now"></span>this hour so far'
     + '<span class="hk hk-need"></span>target<span class="hk hk-catch"></span>to land the day'
     + '<span class="hk hk-usual"></span>what the hour usually does</p>';
   const rows = x.hours.map((r) => {
-    /* Over, below its printed target: the hour has settled at or above what
-       the usual day has in of it by now, and the rest of a usual hour reaches
-       us later (trap 47) — said in those words, not as a bare tick. */
-    const status = r.state === 'over' ? (r.diff < 0 && r.reported != null
-      ? `<span class="tg-over">▲ On pace</span> <span class="hp-dim">· a usual day has ${Math.round(r.reported * 100)}% of it in by now</span>`
-      : `<span class="tg-over">▲ On target${r.diff > 0 ? ` +${esc(plain(r.diff))}` : ''}</span>`)
-      : r.state === 'under' ? `<span class="tg-under">▼ Under by ${esc(plain(-r.diff))}</span>`
-        : r.state === 'arriving' ? (r.so_far === 'over' ? `<span class="tg-over">▲ On pace so far${r.diff > 0 ? ` +${esc(plain(r.diff))}` : ''}</span>`
-          : `<span class="tg-under">▼ Short by ${esc(plain(-r.diff))} so far</span>`) + ' <span class="hp-dim">· still arriving</span>'
-        : r.state === 'now' ? '<span class="hp-now">In progress</span>'
-          : r.state === 'idle' ? '<span class="hp-dim">— nothing asked</span>' : '<span class="hp-dim">To come</span>';
+    const status = statusHtml(r, plain);
     const quiet = !r.need && !r.done && !r.usual ? ' class="hp-quiet"' : (r.state === 'now' ? ' class="hp-cur"' : '');
     return `<tr${quiet}><th scope="row">${r.label}</th><td>${esc(plain(r.usual))}</td><td>${esc(plain(r.need))}</td>`
       + `<td>${r.done == null ? '<span class="hp-dim">—</span>' : esc(f(r.done))}</td><td>${status}</td>`

@@ -8268,6 +8268,19 @@ And, before it went out: "set october target to 1.705 Million not 1.6"
   right now, this hour); 02 revenue hour by hour; 03 trips hour by hour —
   refreshed every minute. The live strip carries no target. The Action list
   is under Work, unchanged, at #insights.
+- **The phone's Today, 2026-10-05.** The operator: "change the phone's today
+  screen too. But keep more information like unauthorized trips and who did it
+  in one single page." Audited first: it held the month's two target cards,
+  today so far, the month window, cancellations, a count of unauthorized trips
+  that only linked away, and its absences — no hour, no "right now", no names.
+  Now, after the month's two cards: today against target (the desktop's five
+  cells), revenue and trips hour by hour (the day at 360px and the six hours
+  around now; all 24 on #target), and who drove the journeys no booking
+  explains since yesterday — each ride once, the people named most (each a link
+  to the driver), the latest eight (each to its car) with the rule that named
+  them and the fare forgone at the fleet's rate, and that every name is an
+  inference (/api/unauthorized/attributed). The hourly cards redraw every
+  minute while the screen is open. The rest of the screen is unchanged.
 - **An hour's target** (api/target_hours.js, GET /api/target/hours): today's
   target × the share of a day's fares (revenue) or completed trips (trips)
   that Dubai hour carried over the last 28 days, the hour's usual beside it.

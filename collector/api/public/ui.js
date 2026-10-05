@@ -819,6 +819,19 @@ export const custody = (r, { title = null, hrefFor = null } = {}) => {
    "Driver that day" rather than "Driver", because whoever held the vehicle
    that day is not the same assertion as whoever was at the wheel. This keeps
    both: the same source fields, the same hedge, one definition. */
+/* How an unexplained journey's driver was named (api/unauthorized_routes.js
+   attribution tiers). Used by ./segments.js and the phone's Today. */
+export const TIER_LABEL = {
+  bracketed: 'Named by time',
+  last_trip: 'Last Uber trip on the car',
+  sole_custodian: 'Only custodian that day',
+  ambiguous: 'More than one candidate',
+  unknown: 'Nobody can be named',
+};
+/* Room for four words in a table cell, and the cell has a name beside it. */
+export const TIER_SHORT = { bracketed: 'by time', last_trip: 'last trip on the car',
+  sole_custodian: 'only custodian', ambiguous: 'one of several', unknown: 'nobody' };
+
 export const custodyText = (r, { max = 1 } = {}) => {
   const refs = r?.driver_refs || (r?.drivers
     ? String(r.drivers).split(',').map((x) => ({ name: x.trim() })) : []);

@@ -30,12 +30,13 @@ import { compress, putReceipt, submitEntry, SUPERVISORS, recorders, defaultRecor
    both: timeStr and dtStr pass timeZone: TZ, which is what makes the phone's
    collector-health times equal the ones on the desktop page beside them. */
 import { sourceLabel, segSourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile, standingNote, dialable,
-  cashOnHandTile, bankDepositTile, countOf,
+  cashOnHandTile, bankDepositTile, countOf, TIER_SHORT,
   alertRateFigure, splitAlerts, avgKmSub } from '../ui.js';
 import { dubaiClock, dubaiDay } from '../tz.js';
 import { who, roleNames, signOut, fleetNames } from '../access.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from '../today.js';
 import { targetLive, targetView, downloadToday } from '../target.js';
+import { targetHoursLive, todayHtml, hoursNearHtml, REFRESH_MS } from '../targetpage.js';
 /* The three words the desktop page uses for the three states it refuses to
    colour. Imported rather than retyped — see the comment on GREY there. */
 import { GREY } from '../onlinetime.js';
@@ -210,6 +211,93 @@ function tripsCard(b) {
   return c.card;
 }
 
+/* ── today against its target, hour by hour (../targetpage.js) ───────────
+   The desktop's first page in the phone's cards — the operator, 2026-10-05:
+   "change the phone's today screen too. But keep more information like
+   unauthorized trips and who did it in one single page." Same words as the
+   desktop (todayHtml, hoursNearHtml); the phone keeps the hours a shift acts
+   on — three gone, this one, two to come — and #target has all 24. */
+function hoursCards(h, why) {
+  const cut = h ? (h.cut_by === 'collection' ? `counted to ${h.clock}, the last collection`
+    : h.cut_by === 'received' ? `counted to ${h.clock}, the newest data received` : `as of ${h.clock}`) : '';
+  const c0 = card('Today against target', h ? `both fleets · ${cut} · again every minute` : null);
+  const c1 = card('Revenue, hour by hour', null);
+  const c2 = card('Trips, hour by hour', null);
+  for (const c of [c0, c1, c2]) c.card.classList.add('m-target', 'm-hours');
+  const fill = (x) => {
+    if (!x) {
+      c0.body.innerHTML = `<p class="tg-absent">${esc(`Today’s hourly target could not be read${why ? `: ${why}` : '.'}`)}</p>`;
+      c1.card.hidden = true;
+      c2.card.hidden = true;
+      return;
+    }
+    c0.body.innerHTML = `<div class="targetnow tg-phone tg-page">${todayHtml(x)}</div>`;
+    c1.body.innerHTML = hoursNearHtml(x.revenue, x, { isMoney: true });
+    c2.body.innerHTML = hoursNearHtml(x.trips, x, { isMoney: false });
+    c1.card.hidden = false;
+    c2.card.hidden = false;
+  };
+  fill(h);
+  return { cards: [c0.card, c1.card, c2.card], fill };
+}
+
+/* ── who drove the journeys no booking explains ───────────────────────────
+   /api/unauthorized/attributed since yesterday: each ride once (a journey
+   two providers saw is one ride), the person the attribution rules name and
+   the rule that named them — in ../ui.js's words — and the fare it would
+   have earned at the fleet's own rate. Every name is an INFERENCE, never a
+   trip record (the route's own note), and the card says so. */
+const yesterdayOf = (day) => new Date(Date.parse(`${day}T12:00:00Z`) - 864e5).toISOString().slice(0, 10);
+function namedBy(r) {
+  const names = (r.attribution_candidates || []).map((x) => x && x.name).filter(Boolean);
+  const tier = r.attribution_tier;
+  if (tier === 'unknown' || !names.length) return 'nobody can be named';
+  const gap = Number(r.attribution_last_trip_gap_min);
+  const old = tier === 'last_trip' && gap > 1440 ? ` · that trip ${Math.round(gap / 1440)} days before` : '';
+  return tier === 'ambiguous' ? `${names.slice(0, 2).join(' or ')}${names.length > 2 ? ` +${names.length - 2}` : ''} · ${TIER_SHORT.ambiguous}`
+    : `${r.attribution_responsible || names[0]} · ${TIER_SHORT[tier] || tier}${old}`;
+}
+function unauthWhoCard(u, why) {
+  const c = card('Unexplained journeys — who drove', 'yesterday and today · both fleets · seat occupied, car moved, no booking on any channel');
+  c.card.classList.add('m-who');
+  if (!u) {
+    c.body.append(el('p', 'tg-absent', esc(`Could not be read${why ? `: ${why}` : '.'}`)));
+    return c.card;
+  }
+  const once = (u.rows || []).filter((r) => r.counts_once !== false);
+  if (!once.length) {
+    c.body.append(el('p', 'm-cap', 'None since yesterday: every journey with a seat occupied had a booking on some channel.'));
+    return c.card;
+  }
+  const lost = once.reduce((a, r) => a + (Number(r.forgone_aed) || 0), 0);
+  const tally = new Map();
+  for (const r of once) {
+    const one = r.attribution_tier !== 'ambiguous' && r.attribution_tier !== 'unknown' && r.attribution_candidates?.[0];
+    if (!one) continue;
+    const t = tally.get(one.id) || { name: r.attribution_responsible || one.name, id: one.id, n: 0, km: 0 };
+    t.n += 1;
+    t.km += Number(r.distance_km) || 0;
+    tally.set(one.id, t);
+  }
+  const top = [...tally.values()].sort((a, b) => b.n - a.n || b.km - a.km).slice(0, 5);
+  c.body.append(el('p', 'm-cap', esc(`${fmt(u.rides ?? once.length)} ${(u.rides ?? once.length) === 1 ? 'journey' : 'journeys'}`
+    + ` · ≈ ${money(lost)} of fares at the fleet’s rate${u.truncated ? ' (the most recent shown)' : ''}`)));
+  if (top.length) {
+    c.body.append(el('p', 'm-cap', '<b>Named most</b> · journeys each'));
+    rows(c.body, top.map((t) => row({ title: t.name, sub: `${fmt(t.km, 1)} km`, value: `${fmt(t.n)}`, to: href('driver', t.id) })));
+  }
+  c.body.append(el('p', 'm-cap', '<b>Latest</b> · fare forgone at the fleet’s rate'));
+  rows(c.body, once.slice(0, 8).map((r) => row({
+    title: `${r.plate || '—'} · ${dtStr(r.started_at)} · ${fmt(r.distance_km, 1)} km`,
+    sub: namedBy(r),
+    value: r.forgone_aed != null ? money(r.forgone_aed) : '—',
+    to: href('vehicle', r.plate),
+  })));
+  c.body.append(el('p', 'm-cap', 'Each name is an inference from who held or last drove the car, never a trip record.'));
+  rows(c.body, [row({ title: 'Every unexplained journey', sub: 'the rule behind each name, and its evidence', to: href('unauthorized') })]);
+  return c.card;
+}
+
 /* ── Today ──────────────────────────────────────────────────────────────── */
 async function today(deck, ctx) {
   /* THE REDESIGN (docs/UI-REDESIGN-PLAN.md "Phone PWA — redesign"), only
@@ -237,12 +325,29 @@ async function today(deck, ctx) {
        on the desktop's Today pages. A role not shown revenue gets no card. */
     targetLive().catch(() => null),
   ]);
+  const errOf = (e) => ({ err: String(e?.message || e) });
+  const day = dubaiDay(new Date());
+  const [hrs, who] = await Promise.all([
+    targetHoursLive().catch(errOf),
+    api(`/api/unauthorized/attributed?from=${yesterdayOf(day)}&to=${day}&limit=200`).catch(errOf),
+  ]);
   if (!ctx.alive()) return;
   deck.innerHTML = '';
   if (!k) { failed(deck, new Error('The overview could not be fetched.')); return; }
   const tvm = targetView(tgt, now);
   if (tvm) deck.append(targetCard(tvm));
   if (tvm?.trips) deck.append(tripsCard(tvm.trips));
+  /* Today against its target and the hours around now, redrawn every minute
+     while this screen is the one open — the same minute as the desktop. */
+  const hc = hoursCards(hrs?.err ? null : hrs, hrs?.err);
+  deck.append(...hc.cards);
+  const tick = setInterval(async () => {
+    if (!ctx.alive()) { clearInterval(tick); return; }
+    if (document.hidden) return;
+    const x = await targetHoursLive().catch(() => null);
+    if (x && ctx.alive()) hc.fill(x);
+  }, REFRESH_MS);
+  deck.append(unauthWhoCard(who?.err ? null : who, who?.err));
 
   /* ── today, first, on the tab called Today ───────────────────────────────
      This screen led with the month and mentioned the current day in a clause

@@ -19,7 +19,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
          dtStr, timeStr, dayStr, dateStr, money, custody, verdict, foldRows,
          sourceLabel, countOf, plural, asList, noneChosen,
          trackerState, trackerSpeed, stillNote, UBER_FARE_WHY,
-         segSourceLabel, bySourceLine, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, sourceToken } from './ui.js';
+         segSourceLabel, bySourceLine, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, sourceToken, TIER_LABEL, TIER_SHORT } from './ui.js';
 import { q, qAll, api, href, state, unfiltered } from './data.js';
 
 const VERDICT_TONE = { unauthorized: 'bad', authorized: 'ok', sensor_suspect: 'warn',
@@ -85,16 +85,8 @@ const vTag = (v) => (contract()
    so the chip row omitted the rung that carries most of the list and a row on
    it rendered its raw key, `last_trip`, as its own label. */
 const TIER_ORDER = ['bracketed', 'last_trip', 'sole_custodian', 'ambiguous', 'unknown'];
-const TIER_LABEL = {
-  bracketed: 'Named by time',
-  last_trip: 'Last Uber trip on the car',
-  sole_custodian: 'Only custodian that day',
-  ambiguous: 'More than one candidate',
-  unknown: 'Nobody can be named',
-};
-/* Room for four words in a table cell, and the cell has a name beside it. */
-const TIER_SHORT = { bracketed: 'by time', last_trip: 'last trip on the car',
-  sole_custodian: 'only custodian', ambiguous: 'one of several', unknown: 'nobody' };
+/* TIER_LABEL and TIER_SHORT live in ./ui.js, so the phone's Today (which
+   names who drove an unexplained journey) says it in these same words. */
 /* NO COLOUR RAMP DOWN THIS COLUMN, and that is not an oversight.
    ─────────────────────────────────────────────────────────────────────────
    This was { bracketed: 'ok', sole_custodian: null, ambiguous: 'warn',

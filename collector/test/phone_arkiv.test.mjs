@@ -33,6 +33,7 @@ import { join } from 'node:path';
 import { PUB, launch, phonePage, loadFixture } from './phone_harness.mjs';
 
 let pass = 0, fail = 0;
+const j = JSON.stringify;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 const read = (f) => readFileSync(join(PUB, f), 'utf8');
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, ' ');
@@ -532,7 +533,14 @@ console.log('\n4.1 · Today: the livebar, 00 at a glance, the sections, † what
         chart: at((k) => k.querySelector?.(':scope > h2')?.textContent === 'Bookings a day'),
         who: at((k) => k.textContent === 'Who called it off'), band: at((k) => k === band),
         foot: at((k) => k.classList.contains('pf-inline')), n: kids.length,
+        unx: at((k) => k.classList.contains('m-who')),
       },
+      hours: [...deck.querySelectorAll('.m-hours')].map((c) => ({ title: c.querySelector('h2')?.textContent,
+        rows: c.querySelectorAll('.hp-near tbody tr').length, chart: !!c.querySelector('svg.hc'),
+        cells: c.querySelectorAll('.tg-cell').length })),
+      whoCard: (() => { const c = deck.querySelector('.m-who'); return c ? { text: c.textContent,
+        drivers: [...c.querySelectorAll('a.m-row')].filter((a) => /#driver\//.test(a.getAttribute('href'))).length,
+        cars: [...c.querySelectorAll('a.m-row')].filter((a) => /#vehicle\//.test(a.getAttribute('href'))).length } : null; })(),
       liveIdx: live ? getComputedStyle(live.querySelector('h2'), '::before').content : null,
       liveCap: live?.querySelector('.m-cap')?.textContent,
       latest: lt ? lt.querySelector('.n').textContent : null,
@@ -550,10 +558,22 @@ console.log('\n4.1 · Today: the livebar, 00 at a glance, the sections, † what
   /* The month's revenue target and the trips minimum come first on Today,
      on every shell — the operator, 2026-10-02: "the first page will show how
      much every day we need to earn and yesterday were we over or under", and
-     "a similar chart" for trips. After them, the plan's order as it was. */
-  check('the target and the trips minimum lead, then the livebar, then 00 (its head, the statement, the tiles), then the chart, then the sections',
-    JSON.stringify(o.targets) === '[0,1]' && o.live === 2 && o.head > o.live && o.lede === o.head + 1 && o.tiles === o.lede + 1 && o.chart > o.tiles
+     "a similar chart" for trips. Then, 2026-10-05, the desktop's first page —
+     today against its target and the hours around now — and who drove the
+     journeys no booking explains: "keep more information like unauthorized
+     trips and who did it in one single page". After them, the plan's order. */
+  check('the month\'s two targets, today against target and its two hourly cards, who drove, then the livebar, then 00, the chart, the sections',
+    JSON.stringify(o.targets) === '[0,1,2,3,4]' && o.unx === 5 && o.live === 6 && o.head > o.live && o.lede === o.head + 1 && o.tiles === o.lede + 1 && o.chart > o.tiles
       && o.who > o.chart && o.band > o.who && o.foot === o.n - 1 && o.band === o.n - 2, JSON.stringify(o));
+  /* Reverted 2026-10-05, each restored and md5-checked: no hourly cards
+     255/2, no who card 255/2, names without the inference note 256/1. */
+  check('today against target: five cells; revenue and trips each with the day at 360px and the six hours around now',
+    j(t.hours.map((h) => [h.title, h.cells, h.rows, h.chart])) === j([['Today against target', 5, 0, false],
+      ['Revenue, hour by hour', 0, 6, true], ['Trips, hour by hour', 0, 6, true]]), j(t.hours));
+  check('who drove: the count and fares forgone, the people named most (each a link to the driver), the latest journeys (each to its car), and that every name is an inference',
+    t.whoCard && /journeys? · ≈ AED [\d,.]+ of fares at the fleet’s rate/.test(t.whoCard.text) && /Named most · journeys each/.test(t.whoCard.text)
+      && t.whoCard.drivers >= 1 && t.whoCard.cars >= 1 && /Each name is an inference from who held or last drove the car, never a trip record\./.test(t.whoCard.text),
+    j(t.whoCard && { ...t.whoCard, text: t.whoCard.text.slice(0, 200) }));
   check('the livebar is unnumbered (an ink dot, not 01)', t.liveIdx === '""', t.liveIdx);
   check('…and says it does not follow the window or the channel in the bar above it',
     /both fleets, every channel — not the window or the channel in the bar above$/.test(t.liveCap || ''), t.liveCap);
