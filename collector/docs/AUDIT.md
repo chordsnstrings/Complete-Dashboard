@@ -2430,3 +2430,25 @@ on the mock: the hours table ran off the right edge (verdicts cut), the
 chart's 00:00 label was clipped, in-card section heads were overlapped in
 Arkiv (phone_arkiv's own check). Fixed: a wrapping three-column table, the
 first label anchored at its bar, caption lines for the sub-lists.
+
+## #feeds — a count of cars receiving no data at all (2026-10-06)
+
+The operator: "it should also show a number of vehicle which is not receiving
+any data whether fms or cabman". There is now a seventh count, **Receiving no
+data at all**: no CABMAN seat sensor, no FMS seat count and no FMS reading in
+the window.
+
+- **Arkiv:** it is the hero of the "not receiving" row (two of six columns
+  plus three tiles, one line at 1440).
+- **Classic:** it is the first tile.
+- **Sub-line:** the window, the split by fleet, and how many never sent
+  anything at all (every feed `never`, or no account for the fleet).
+- **Table:** each such car says "no data at all" or "no data ever" under its
+  plate. The endpoint already lists these cars first, because it orders by
+  how many feeds a car is receiving.
+- **Data:** `/api/vehicles/feeds` gains `totals.no_data {vehicles, never,
+  fleets}` and the per-row flags `no_data` and `no_data_ever`. The page
+  works the count out from the rows when an older cached answer has no total.
+
+Tests: arkiv_fleet 259 (the old page fails 256/3); vehicle_feeds 53 (the old
+route fails 51/2).

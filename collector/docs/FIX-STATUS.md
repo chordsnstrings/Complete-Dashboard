@@ -4351,3 +4351,4 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
 |---|---|---|---|---|
 | TGS-1 | src/target_sms.js: 13:00/18:00 goal texts — fixed goal (low_trips_min) across all apps, on pace = 85% of the Target page's need-by-now, areas from booked pickups at the slot's hours | yes | pending deploy | target_sms 24 (reverting on-pace 19/5, channel freshness 23/1, dry mode 22/2) |
 | TGS-2 | sms_target switch: dry (default) / on / off on Access → Settings; Messages page filter, preview and dry-run note; schema v100 kinds | yes | pending deploy | 19 related suites green |
+| FD-1 | #feeds: "Receiving no data at all" count (hero) with fleet split and never-reported count; per-row "no data at all / ever" | yes | pending deploy | arkiv_fleet 259 (old 256/3), vehicle_feeds 53 (old 51/2) |

@@ -115,7 +115,23 @@ export async function renderFeeds(root) {
   const ak = contract();
   const AKB = ak ? glanceBand(root, `readings as of ${dtStr(d.as_of)} · receiving means a reading in the last ${hours} hours`) : null;
   /* The count at the top: receiving and not, for each feed. */
+  /* From the endpoint, or from the rows when an older answer has no total
+     (a cached response straight after a deploy): the same rule either way. */
+  const nd = t.no_data || (() => {
+    const dark = rows.filter((r) => !r.seat_receiving && !r.fms_seat_receiving && !r.fms_receiving);
+    const fleets = {};
+    for (const r of dark) fleets[r.fleet_id || 'unknown'] = (fleets[r.fleet_id || 'unknown'] || 0) + 1;
+    const gone = (x) => x === 'never' || x === 'no_account';
+    return { vehicles: dark.length, fleets,
+      never: dark.filter((r) => gone(r.seat_state) && gone(r.fms_seat_state) && gone(r.fms_state)).length };
+  })();
+  const ndFleets = Object.entries(nd.fleets || {}).filter(([, n]) => n).map(([f, n]) => `${fmt(n)} ${sourceLabel(f)}`);
   const FEED_TILES = [
+    /* The car no tracker sees at all (the operator, 2026-10-06). First, and
+       the hero: a car missing ONE feed still has another; this one has none. */
+    { label: 'Receiving no data at all', value: fmt(nd.vehicles ?? 0), tone: 'critical', key: 'none-no', hero: true,
+      sub: `neither CABMAN nor FMS in the last ${hours} hours`
+        + (nd.vehicles ? ` · ${ndFleets.join(' · ')} · ${fmt(nd.never)} never sent anything` : '') },
     { label: 'Seat sensor (CABMAN) receiving', value: fmt(t.seat?.receiving ?? 0), tone: 'good', key: 'seat-yes',
       sub: `of ${countOf(t.vehicles ?? 0, 'car')} active on Uber` },
     { label: 'Seat sensor (CABMAN) not receiving', value: fmt(t.seat?.not_receiving ?? 0), tone: 'critical', key: 'seat-no',
@@ -132,13 +148,11 @@ export async function renderFeeds(root) {
       sub: `no reading in the last ${hours} hours` },
   ];
   if (ak) {
-    const worst = [['seat-no', t.seat?.not_receiving], ['fms-seat-no', t.fms_seat?.not_receiving], ['fms-no', t.fms?.not_receiving]]
-      .sort((a, b) => (b[1] || 0) - (a[1] || 0))[0][0];
-    /* Two rows, what is missing first: the three "not receiving" counts (the
-       feed missing the most cars the hero), then the three receiving, in a
-       hero-less row beside the grid. Six tiles in one glance row wrapped a
-       lone sixth tile at 1440, the hero spanning two of the six columns. */
-    const tiles = bandTiles(FEED_TILES.map((x) => (x.key === worst ? { ...x, hero: true } : x))).tiles;
+    /* Two rows, what is missing first: the cars receiving nothing at all
+       (the hero, two of the six columns), then the three "not receiving"
+       counts — five columns, one line at 1440 — and below them the three
+       receiving, in a hero-less row. */
+    const tiles = bandTiles(FEED_TILES).tiles;
     glance(AKB.tilesHost, tiles.filter((x) => /-no$/.test(x.key || '')));
     const row2 = el('div', 'kpis glance');
     row2.innerHTML = kpiTiles(tiles.filter((x) => !/-no$/.test(x.key || '')).map((x) => ({ ...x, glance: true, hero: false })));
@@ -158,7 +172,10 @@ export async function renderFeeds(root) {
   } else {
     const on = (feed) => (r) => (r[`${feed}_receiving`] ? 1 : 0);
     p.body.append(tableFrom(rows, [
-      { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.vehicle_page ? r.plate : null, r.plate) },
+      { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.vehicle_page ? r.plate : null, r.plate)
+        + (!r.seat_receiving && !r.fms_seat_receiving && !r.fms_receiving
+          ? `<div class="dim">${['seat_state', 'fms_seat_state', 'fms_state'].every((k) => r[k] === 'never' || r[k] === 'no_account')
+            ? 'no data ever' : 'no data at all'}</div>` : '') },
       { label: 'Fleet', key: 'fleet_id', render: (r) => esc(sourceLabel(r.fleet_id)) },
       { label: FEEDS.seat.label, key: 'seat_receiving', sortValue: on('seat'), render: (r) => feedCell(r, 'seat') },
       { label: FEEDS.fms_seat.label, key: 'fms_seat_receiving', sortValue: on('fms_seat'), render: (r) => feedCell(r, 'fms_seat') },

@@ -273,6 +273,19 @@ check('receiving and not receiving are counted per feed over every listed car',
   && d.totals.fms.receiving === 4 && d.totals.fms.not_receiving === 4
   && d.totals.fms_seat?.receiving === 3 && d.totals.fms_seat?.not_receiving === 5,
   JSON.stringify(d.totals));
+{
+  /* The operator, 2026-10-06: the cars receiving nothing at all, whether
+     CABMAN or FMS. Counted from the rows by the same rule, so the total and
+     the rows cannot disagree; each row says so, and whether it ever had. */
+  const dark = (d.rows || []).filter((r) => !r.seat_receiving && !r.fms_seat_receiving && !r.fms_receiving);
+  const never = dark.filter((r) => [r.seat_state, r.fms_seat_state, r.fms_state].every((x) => x === 'never' || x === 'no_account'));
+  check('the cars receiving no data at all are counted, with how many never sent anything',
+    d.totals?.no_data?.vehicles === dark.length && dark.length > 0 && d.totals.no_data.never === never.length
+    && Object.values(d.totals.no_data.fleets || {}).reduce((a, b) => a + b, 0) === dark.length,
+    JSON.stringify([d.totals?.no_data, dark.map((r) => r.plate)]));
+  check('…and each such row carries the flag; no other row does',
+    (d.rows || []).every((r) => r.no_data === dark.includes(r) && (!r.no_data_ever || r.no_data)));
+}
 check('…and per fleet', d.totals?.fleets?.ecosine === 7 && d.totals?.fleets?.egari === 1,
   JSON.stringify(d.totals?.fleets));
 check('the cars that need attention come first',

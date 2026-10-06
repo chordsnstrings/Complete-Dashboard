@@ -349,6 +349,16 @@ export function feedRoutes(app, { q, wrap }) {
         fms_seat_state: fmsSeat.state, fms_seat_reason: fmsSeat.reason,
         fms_receiving: !!r.fms_receiving, fms_at: r.fms_at, fms_state: fms.state,
         fms_reason: fms.reason,
+        /* NOTHING AT ALL: no CABMAN seat sensor, no FMS seat count and no FMS
+           reading in the window — the car is invisible to every tracker we
+           read, so no journey it makes can be checked against a booking.
+           The operator, 2026-10-06: "it should also show a number of vehicle
+           which is not receiving any data whether fms or cabman". */
+        no_data: !r.seat_receiving && !r.fms_seat_receiving && !r.fms_receiving,
+        /* …and never has: every feed is 'never' or has no account for its
+           fleet. Kept apart from one that went silent, because one is a car
+           nobody fitted or linked and the other is a device that stopped. */
+        no_data_ever: [seat.state, fmsSeat.state, fms.state].every((x) => x === 'never' || x === 'no_account'),
         driver_refs: refs,
         driver_basis: assigned ? 'uber_assignment' : refs.length ? 'custody' : null,
         driver_as_of: assigned ? null : r.custody_as_of || null,
@@ -358,6 +368,9 @@ export function feedRoutes(app, { q, wrap }) {
     });
 
     const count = (feed, yes) => out.filter((r) => r[`${feed}_receiving`] === yes).length;
+    const dark = out.filter((r) => r.no_data);
+    const noData = { vehicles: dark.length, never: dark.filter((r) => r.no_data_ever).length, fleets: {} };
+    for (const r of dark) noData.fleets[r.fleet_id || 'unknown'] = (noData.fleets[r.fleet_id || 'unknown'] || 0) + 1;
     const fleets = {};
     for (const r of out) fleets[r.fleet_id || 'unknown'] = (fleets[r.fleet_id || 'unknown'] || 0) + 1;
     /* The database's clock, which is the one the window was measured on. */
@@ -372,6 +385,7 @@ export function feedRoutes(app, { q, wrap }) {
         seat: { receiving: count('seat', true), not_receiving: count('seat', false) },
         fms_seat: { receiving: count('fms_seat', true), not_receiving: count('fms_seat', false) },
         fms: { receiving: count('fms', true), not_receiving: count('fms', false) },
+        no_data: noData,
       },
       rows: out,
     });

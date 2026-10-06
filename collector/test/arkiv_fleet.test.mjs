@@ -976,13 +976,19 @@ if (want('feeds')) {
     const s = await shape(page);
     const d = answer('/api/vehicles/feeds');
     const t = d.totals;
-    const worst = [['Seat sensor (CABMAN) not receiving', t.seat?.not_receiving], ['Seat sensor (FMS) not receiving', t.fms_seat?.not_receiving], ['FMS not receiving', t.fms?.not_receiving]]
-      .sort((a, b) => (b[1] || 0) - (a[1] || 0))[0][0];
-    check('00: the six counts untoned, the feed missing the most cars the hero', Object.keys(s.values).length === 6 && s.hero === worst && (await toned(page)).length === 0,
-      JSON.stringify([s.hero, worst, Object.keys(s.values)]));
+    /* The operator, 2026-10-06: "it should also show a number of vehicle
+       which is not receiving any data whether fms or cabman" — a seventh
+       count, and the hero: a car missing one feed still has another. */
+    check('00: the seven counts untoned, the cars receiving nothing at all the hero', Object.keys(s.values).length === 7
+      && s.hero === 'Receiving no data at all' && (await toned(page)).length === 0,
+      JSON.stringify([s.hero, Object.keys(s.values)]));
+    const dark = (d.rows || []).filter((r) => !r.seat_receiving && !r.fms_seat_receiving && !r.fms_receiving).length;
+    check('…and that count is the cars with no CABMAN, no FMS seat count and no FMS reading', s.values['Receiving no data at all'] === n(dark),
+      JSON.stringify([s.values['Receiving no data at all'], dark]));
     const rowsL = await page.evaluate(() => [...document.querySelectorAll('#view .cband .kpis.glance')].map((g) => [...g.querySelectorAll(':scope > .kpi .l')].map((l) => l.textContent.trim())));
-    check('two rows, what is missing first: the three not receiving, then the three receiving (no hero there)', rowsL.length === 2
-      && rowsL[0].every((l) => /not receiving/.test(l)) && rowsL[1].every((l) => !/not receiving/.test(l)) && rowsL[0].length === 3 && rowsL[1].length === 3
+    check('two rows, what is missing first: nothing at all, the three not receiving, then the three receiving (no hero there)', rowsL.length === 2
+      && rowsL[0][0] === 'Receiving no data at all' && rowsL[0].slice(1).every((l) => /not receiving/.test(l))
+      && rowsL[1].every((l) => !/not receiving|no data/.test(l)) && rowsL[0].length === 4 && rowsL[1].length === 3
       && (await page.evaluate(() => document.querySelectorAll('#view .cband .kpi.is-hero').length)) === 1, JSON.stringify(rowsL));
     check('the counts are the endpoint\'s', s.values['Seat sensor (CABMAN) receiving'] === n(t.seat.receiving) && s.values['FMS not receiving'] === n(t.fms.not_receiving), JSON.stringify(s.values));
     const c = await chips(page);
