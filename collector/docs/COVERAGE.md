@@ -4463,6 +4463,17 @@ untouched, and nothing projected is ever added into `accounted`.
   company arrives as a NEW pending account on interface 81 (five companies on
   one id, so it is never linked by configuration); link it on Fleets.
 
+* **`arkiv_classic_frozen` driver/drv-0 CAN FAIL UNDER FULL-SUITE LOAD AND
+  PASS ALONE — THE AVATAR'S ERROR RACES THE SNAPSHOT.** Measured 2026-10-06:
+  the only difference between the failing and recorded HTML was the avatar.
+  The mock photo URL (cloudfront) cannot load in this sandbox, so `onerror`
+  adds `av-lost`. The harness waits a fixed 250 ms, and under the full suite
+  the error sometimes lands after the snapshot. The same tree then passed 3/3
+  run alone, and the parent commit passed alone too. Before blaming a change
+  for this view, diff the written HTML. If the only difference is `av-photo`
+  vs `av-photo av-lost`, it is this race. The lasting fix is to wait for
+  `document.images` to settle before hashing.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
