@@ -48,6 +48,8 @@ export const SETTING_DEFAULTS = {
   CABMAN_URL: 'https://app.cabman.ae/dtcabmanrestservice/api/trackingServices/GetIVDData',
   CABMAN_ECOSINE_ID: '81',
   CABMAN_ECOSINE_USER: 'admin_ecosine',
+  CABMAN_EGARI_ID: '81',
+  CABMAN_EGARI_USER: 'Egari_Luxury_Cars_Integration',
   CABMAN_CRON: '*/5 * * * *',
   /* Three-hourly, offset off the hour so it does not start alongside the
      thirty-minute incremental and compete with it for the same session. */
@@ -137,9 +139,12 @@ export const SETTING_DEFS = [
   { key: 'FMS_EGARI_USER', group: 'FMS / InfoTrack', label: 'Egari username', secret: false },
   { key: 'FMS_EGARI_PASS', group: 'FMS / InfoTrack', label: 'Egari password', secret: true },
 
-  { key: 'CABMAN_ECOSINE_ID', group: 'CABMAN DT', label: 'Interface unique id', secret: false },
-  { key: 'CABMAN_ECOSINE_USER', group: 'CABMAN DT', label: 'Interface username', secret: false },
-  { key: 'CABMAN_ECOSINE_PASS', group: 'CABMAN DT', label: 'Interface password', secret: true },
+  { key: 'CABMAN_ECOSINE_ID', group: 'CABMAN DT', label: 'Ecosine interface unique id', secret: false },
+  { key: 'CABMAN_ECOSINE_USER', group: 'CABMAN DT', label: 'Ecosine interface username', secret: false },
+  { key: 'CABMAN_ECOSINE_PASS', group: 'CABMAN DT', label: 'Ecosine interface password', secret: true },
+  { key: 'CABMAN_EGARI_ID', group: 'CABMAN DT', label: 'Egari interface unique id', secret: false },
+  { key: 'CABMAN_EGARI_USER', group: 'CABMAN DT', label: 'Egari interface username', secret: false },
+  { key: 'CABMAN_EGARI_PASS', group: 'CABMAN DT', label: 'Egari interface password', secret: true },
 
   { key: 'UBER_CLIENT_ID', group: 'Uber', label: 'OAuth client id', secret: false },
   { key: 'UBER_CLIENT_SECRET', group: 'Uber', label: 'OAuth client secret', secret: true },

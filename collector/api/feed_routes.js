@@ -245,8 +245,10 @@ export const DRIVERS_SQL = `
 
 /* Which fleets hold an account on each feed — read from the collector's own
    configuration, because that is the thing that decides whether a fleet can
-   ever have a reading. CABMAN lists Ecosine alone (src/config.js: "Egari DT
-   credentials can be added here once provided"); FMS lists both. */
+   ever have a reading. Both fleets now hold one on every feed: CABMAN listed
+   Ecosine alone until Egari's own DT login was configured on 2026-10-06, and
+   until then Egari's cars read "no CABMAN account for Egari" — true of what we
+   asked, while the CABMAN portal showed five of them connected. */
 export const feedAccounts = () => ({
   seat: config.cabman.fleets.map((f) => f.fleet),
   fms_seat: config.fms.fleets.map((f) => f.fleet),

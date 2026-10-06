@@ -183,7 +183,7 @@ hours early.
 | Bolt | yes — 99.7% of chargeable Aug | **yes, per Monday** — `getPayouts` (lags days) and the balance ledger `getFleetBalanceDetails` (same day); see the trap below | figure is GROSS; the ledger does publish commission per day (`commissions_in_app`, `commissions_cash`) |
 | Yango | yes — 100% | yes | earnings are NET: cash + cashless + commission (commission is negative) |
 | FMS | journeys, not bookings | n/a | watches cars, does not sell rides; the second seat-sensor provider (a live seat count and a Seat Count on each journey) — judged for unauthorized trips, never a booking source |
-| CABMAN | realtime GPS, 5-min poll | n/a | a live seat pad, Ecosine only (FMS is the second seat-sensor provider — see "FMS in unauthorized-trip detection") |
+| CABMAN | realtime GPS, 5-min poll | n/a | a live seat pad — Ecosine's login since 2026-08-21, Egari's own since 2026-10-06 (FMS is the second seat-sensor provider — see "FMS in unauthorized-trip detection") |
 
 `COMMISSION_CHANNELS = {uber, bolt, yango, careem}` — the channels whose fares
 are a gross the platform takes a cut of. `fleetIncome()` / `chooseBasis()` pick
@@ -4449,6 +4449,20 @@ untouched, and nothing projected is ever added into `accounted`.
       it is read as reported from its first collection — a small over-read
       on a channel of about 5% of trips.
 
+* **A CABMAN LOGIN IS THE USER, NOT THE INTERFACE ID — AND "NO ACCOUNT" WAS
+  ONLY EVER "NOBODY ASKED".** Ecosine and Egari share InterfaceUniqueId 81;
+  `admin_ecosine` returns 175 plates over four companies and none of Egari's,
+  `Egari_Luxury_Cars_Integration` returns exactly Egari's five Teslas. So a
+  second fleet is a second entry in `config.cabman.fleets` with its own user
+  and password, never a second interface id, and two logins on one id are
+  normal. Before 2026-10-06 #feeds said "no CABMAN account for Egari" and the
+  occupancy notes said "Ecosine only" while the portal showed the cars
+  connected for weeks. When a car reads "no account" on a feed, ask the
+  operator whether the provider's portal shows it before believing the
+  sentence. Discovery files accounts as `81/<CompanyName>`, so the Egari
+  company arrives as a NEW pending account on interface 81 (five companies on
+  one id, so it is never linked by configuration); link it on Fleets.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
@@ -8499,3 +8513,40 @@ driver status. They are 5 of the 7 "never sent anything" cars on #feeds.
   the portal list reads, `normPlate` keeps `16308` and it will never meet
   Uber's `L16308` (`reconcilePlate` exists but CABMAN does not use it). Read
   the first payload before trusting the match.
+
+### Fixed the same day — Egari's own CABMAN login is read (2026-10-06)
+
+- **Supplied:** InterfaceUniqueId 81 (the same as Ecosine's), user
+  `Egari_Luxury_Cars_Integration`, and a password held only in the DO app
+  spec (`CABMAN_EGARI_PASS`, SECRET, on `api` and `collector`) and Settings.
+- **First payload, read before wiring:** 5 vehicles, all CompanyName
+  `EGARI LUXURY CARS TRANSPORT L.L.C`, VehicleID already `L16308`-shaped, so
+  `normPlate` meets Uber's plate with no `reconcilePlate`. All five listed,
+  L16308 reporting `Engaged` with a seat value of 1. None of them is on
+  Ecosine's login, so the shared upsert key `(source, plate, captured_at)`
+  cannot re-file one fleet's car under the other.
+- **Code:** one entry in `config.cabman.fleets`; `CABMAN_EGARI_ID/_USER/_PASS`
+  in Settings (the Ecosine labels now say Ecosine). The collector, roster,
+  probe and discovery already loop per fleet. `feedAccounts()` reads the
+  config, so #feeds judges Egari's cars on their readings from the first poll.
+  A car is written on its third consecutive listing (`ADMIT_POLLS`), so the
+  five appear about fifteen minutes after the first poll.
+- **The notes that said "Ecosine only":** `api/occupancy_sql.js` now gives
+  the true reason by window. An Egari window before 2026-10-06 has no CABMAN
+  reading because the login was first read after it; it is no longer
+  "no account". The no-evidence sentence names both logins and their dates.
+- **What it changes downstream:** the five Teslas now produce CABMAN
+  seat-pad segments, so they enter unauthorized-trip judgment like Ecosine's
+  CABMAN cars. Egari's channels are judged per fleet (`uncollectedByFleet`),
+  so a channel never read for Egari makes those segments unverifiable, not
+  unauthorized.
+- **Tests:**
+  - `test/cabman_egari.test.mjs` (11): each login is asked with its own user
+    and password; rows are filed under the login's fleet; each fleet keeps its
+    own roster; a login with no password is not asked and is named missing.
+    Against the old config and settings it fails 8.
+  - `vehicle_feeds`: the no_account path is still proved, by one read under
+    Ecosine's login alone. 3 checks fail against the old config.
+  - `occupancy_sources`: fails 1 against the old notes.
+  - `credential_silence` now refuses both logins.
+

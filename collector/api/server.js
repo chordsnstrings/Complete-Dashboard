@@ -3125,7 +3125,7 @@ app.get('/api/unauthorized/summary', wrap(async (req, res) => {
                presented as an answer about thirty.
 
                Three sources now reach back three different distances: CABMAN
-               DT's pad is a live poll with no history (and Ecosine only), FMS's
+               DT's pad is a live poll with no history (Egari's from 2026-10-06), FMS's
                live seat count exists from 2026-09-23, and FMS journeys reach
                back about two years but only over windows the reconciler has
                judged. So the days are counted overall AND per provider
@@ -3207,9 +3207,9 @@ app.get('/api/unauthorized/summary', wrap(async (req, res) => {
    segments on ECOSINE plates, each labelled Ecosine in its own Fleet column.
    The page named one fleet and accused another's cars.
 
-   CABMAN DT is configured for Ecosine only (src/config.js says so: Egari's
-   credentials have never been supplied). Egari's seat evidence comes from FMS
-   — its live seat count and its journeys — so an Egari-filtered list holds
+   CABMAN DT was configured for Ecosine only until 2026-10-06, when Egari's own
+   DT login (five Teslas) was added; before that Egari's seat evidence came from
+   FMS alone — its live seat count and its journeys. An Egari-filtered list holds
    Egari's own FMS segments, each row naming its provider in `source` and
    `source_label`, and never somebody else's vehicles. */
 app.get('/api/unauthorized/list', wrap(async (req, res) => {

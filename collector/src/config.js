@@ -81,7 +81,14 @@ export const config = {
       url: get('CABMAN_URL', D.CABMAN_URL),
       fleets: [
         { fleet: 'ecosine', interfaceId: get('CABMAN_ECOSINE_ID', D.CABMAN_ECOSINE_ID), user: get('CABMAN_ECOSINE_USER', D.CABMAN_ECOSINE_USER), pass: get('CABMAN_ECOSINE_PASS') },
-        // Egari DT credentials can be added here once provided
+        /* Egari's own DT login (2026-10-06). The SAME interface id as Ecosine's
+           — 81 — under a different user, and the user is what decides the
+           answer: admin_ecosine returns 175 plates across four companies and
+           none of Egari's, Egari_Luxury_Cars_Integration returns exactly
+           Egari's five Teslas (L16308, L10595, L12377, L27976, L64998). Until
+           this entry existed those five read "no data at all" on #feeds while
+           the CABMAN portal showed them connected — nobody had asked. */
+        { fleet: 'egari', interfaceId: get('CABMAN_EGARI_ID', D.CABMAN_EGARI_ID), user: get('CABMAN_EGARI_USER', D.CABMAN_EGARI_USER), pass: get('CABMAN_EGARI_PASS') },
       ],
     };
   },

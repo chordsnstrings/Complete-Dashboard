@@ -619,8 +619,13 @@ console.log('\n11. every sentence names both providers, and none says CABMAN is 
     .every((k) => sum.coverage.by_source?.[k] && 'days_with_data' in sum.coverage.by_source[k]),
     JSON.stringify(sum.coverage.by_source));
   const eg = (await get('/api/unauthorized/summary?from=2026-09-10&to=2026-09-25&fleet=egari')).body;
-  check('over Egari, CABMAN’s figures are absent with the true reason — no account — never 0',
-    eg.by_source.cabman.unauthorized === null && /no account for Egari/.test(eg.by_source.cabman.absent || ''),
+  /* The true reason moved on 2026-10-06: Egari's own CABMAN login exists now,
+     so a September window has no Egari reading because that account was first
+     read after it — "no account" would be the wrong reason, not just old. */
+  check('over Egari, CABMAN’s figures are absent with the true reason — first read after this window — never 0',
+    eg.by_source.cabman.unauthorized === null
+    && /Egari’s account has been read only since 2026-10-06, after this window/.test(eg.by_source.cabman.absent || '')
+    && !/no account/.test(eg.by_source.cabman.absent || ''),
     JSON.stringify(eg.by_source.cabman));
   check('…while FMS covers Egari', eg.by_source.fms_trip.segments > 0, JSON.stringify(eg.by_source.fms_trip));
   const list = (await get('/api/unauthorized/list?from=2026-09-10&to=2026-09-25&verdict=all')).body;

@@ -5,7 +5,8 @@
    once: FMS's live seat count and FMS's per-journey Seat Count. So an
    occupancy segment now carries `source` (sql/schema_v85.sql):
 
-     cabman    CABMAN DT's seat pad, a 5-minute poll, Ecosine only
+     cabman    CABMAN DT's seat pad, a 5-minute poll — Ecosine's account since
+               2026-08-21, Egari's since 2026-10-06
      fms_live  FMS's live Seatcount, occupied when it is 1 or more
      fms_trip  one FMS journey whose Seat Count is 1 or more
 
@@ -107,6 +108,14 @@ export const OCC_DEDUPE_RULE = 'Combined figures count a ride once. Where segmen
    CABMAN DT and FMS live are polls with no history behind them; FMS journeys
    reach back two years through GetTripPassenger. */
 export const OCC_CABMAN_SINCE = '2026-08-21';
+/* Egari's own CABMAN login was supplied and first read on this day. Before it
+   these sentences said "CABMAN DT holds an account for Ecosine only", which was
+   true of what we ASKED and false of the provider: Egari's five Teslas were
+   connected on the CABMAN portal the whole time (docs/COVERAGE.md, "Egari's
+   CABMAN cars are never asked for"). The date is the true reason an Egari window
+   before it has no CABMAN reading — not a missing account. */
+export const OCC_CABMAN_EGARI_SINCE = '2026-10-06';
+const CABMAN_READ = `Ecosine’s account has been read since ${OCC_CABMAN_SINCE} and Egari’s since ${OCC_CABMAN_EGARI_SINCE}`;
 export const OCC_FMS_LIVE_SINCE = '2026-09-23';
 
 /* Why a provider has NOTHING in a window — the true reason, which depends on
@@ -115,13 +124,17 @@ export const OCC_FMS_LIVE_SINCE = '2026-09-23';
 export function occSourceAbsent(source, { from = null, to = null, fleet = null } = {}) {
   const before = (d) => to && String(to).slice(0, 10) < d;
   if (source === 'cabman') {
-    if (fleet === 'egari') return 'CABMAN DT holds no account for Egari, so it has no seat reading for this fleet.';
-    if (before(OCC_CABMAN_SINCE)) {
+    const both = fleet ? '' : ` ${CABMAN_READ}.`;
+    if (fleet === 'egari' && before(OCC_CABMAN_EGARI_SINCE)) {
+      return 'CABMAN DT’s seat pad is a live poll with no history, and Egari’s account has been read '
+        + `only since ${OCC_CABMAN_EGARI_SINCE}, after this window.`;
+    }
+    if (fleet !== 'egari' && before(OCC_CABMAN_SINCE)) {
       return 'CABMAN DT’s seat pad is a live poll with no history, and collection began on '
-        + `${OCC_CABMAN_SINCE}, after this window. It holds an account for Ecosine only.`;
+        + `${OCC_CABMAN_SINCE}, after this window.${both}`;
     }
     return 'No CABMAN DT fix in this window formed a segment — a segment needs consecutive fixes '
-      + 'reporting an occupied seat. CABMAN DT holds an account for Ecosine only.';
+      + `reporting an occupied seat.${both}`;
   }
   if (source === 'fms_live') {
     if (before(OCC_FMS_LIVE_SINCE)) {
@@ -179,6 +192,6 @@ export const occCoverageClause = (bySource) => OCC_SOURCES
    are true at once, and which one applies depends on the window and fleet, so
    the sentence names all three rather than guessing. */
 export const OCC_NO_EVIDENCE_WHY = 'Three sources feed this and none produced a segment here: '
-  + 'CABMAN DT’s seat pad is a live poll with no history and holds an account for Ecosine only; '
+  + `CABMAN DT’s seat pad is a live poll with no history — ${CABMAN_READ}; `
   + `FMS’s live seat count has been collected only since ${OCC_FMS_LIVE_SINCE}; and FMS journeys, `
   + 'which reach back about two years, are judged only over the windows the reconciler has run.';

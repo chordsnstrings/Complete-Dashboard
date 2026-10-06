@@ -29,6 +29,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
 import { FEED_WINDOW_H } from '../api/feed_routes.js';
+import { config } from '../src/config.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -49,7 +50,7 @@ const uber = async (plate, fleet, status, assigned = []) => q(
 await uber('Q10001', 'ecosine', 'ACTIVE', ['drv-a1']);        // both feeds current
 await uber('Q10002', 'ecosine', 'ACTIVE');                    // both feeds three days old
 await uber('Q10003', 'ecosine', 'ACTIVE');                    // nothing, ever, and nobody
-await uber('Q20001', 'egari', 'ACTIVE', ['drv-e1', 'drv-e2']); // two assigned; no CABMAN account
+await uber('Q20001', 'egari', 'ACTIVE', ['drv-e1', 'drv-e2']); // two assigned; never reported by CABMAN
 await uber('Q10004', 'ecosine', 'INACTIVE');                  // not active: must not be listed
 await uber('Q10007', 'ecosine', 'ACTIVE');                    // seat reading 23h50m ago
 await uber('Q10008', 'ecosine', 'ACTIVE');                    // seat reading 24h10m ago
@@ -176,9 +177,24 @@ console.log('\nreceiving both, neither');
   check('…with no last-received time to show', r?.seat_at == null && r?.fms_at == null);
 }
 
+/* CABMAN as production ran it until 2026-10-06: Ecosine's login alone. Egari's
+   own DT login exists now (src/config.js), so no fleet of ours lacks a CABMAN
+   account — but the no_account path is what keeps a red cell from blaming a
+   device when the cause is a login nobody holds, and it is proved here by
+   reading once under the configuration that had it. A distinct query string,
+   so the response cache cannot hand back the read made under the real one. */
+const ecosineOnly = async () => {
+  const real = Object.getOwnPropertyDescriptor(config, 'cabman');
+  Object.defineProperty(config, 'cabman', { configurable: true,
+    get: () => { const c = real.get.call(config); return { ...c, fleets: c.fleets.filter((f) => f.fleet === 'ecosine') }; } });
+  try { return (await get(`/api/vehicles/feeds?_=ecosine-only-${Date.now()}`)).body; }
+  finally { Object.defineProperty(config, 'cabman', real); }
+};
+
 console.log('\na fleet with no CABMAN account');
 {
-  const r = row('Q20001');
+  const old = await ecosineOnly();
+  const r = (old.rows || []).find((x) => x.plate === 'Q20001');
   check('an Egari car is red on the seat sensor', r?.seat_receiving === false, JSON.stringify(r));
   check('…and the reason is the account, in those words',
     r?.seat_state === 'no_account' && r?.seat_reason === 'no CABMAN account for Egari',
@@ -188,9 +204,24 @@ console.log('\na fleet with no CABMAN account');
   check('…and so is its FMS seat sensor: Egari has seat data, just not from CABMAN',
     r?.fms_seat_receiving === true && r?.fms_seat_state === 'receiving' && !!r?.fms_seat_at, JSON.stringify(r));
   check('the response names which fleets hold which accounts',
-    JSON.stringify(d.accounts?.seat) === '["ecosine"]'
-    && JSON.stringify([...(d.accounts?.fms || [])].sort()) === '["ecosine","egari"]',
-    JSON.stringify(d.accounts));
+    JSON.stringify(old.accounts?.seat) === '["ecosine"]'
+    && JSON.stringify([...(old.accounts?.fms || [])].sort()) === '["ecosine","egari"]',
+    JSON.stringify(old.accounts));
+}
+
+console.log('\nEgari\'s own CABMAN login (2026-10-06)');
+{
+  /* The operator's five Teslas were connected on the CABMAN portal and read
+     "no data at all" here, because the collector only ever asked as Ecosine.
+     With Egari's login configured the account exists, so a car it has never
+     reported is "never", and the sentence is about the car — not a missing
+     account that is no longer missing. */
+  const r = row('Q20001');
+  check('both fleets hold a CABMAN account',
+    JSON.stringify([...(d.accounts?.seat || [])].sort()) === '["ecosine","egari"]', JSON.stringify(d.accounts));
+  check('an Egari car CABMAN has never reported is judged on its readings, not on an account',
+    r?.seat_state === 'never' && r?.seat_reason === 'no CABMAN seat-sensor reading on record for this car',
+    String(r?.seat_state) + ' / ' + String(r?.seat_reason));
 }
 
 console.log('\nthe window');
@@ -304,7 +335,9 @@ check('a car the feed used to report is red with the feed named as the cause',
   && /nothing from CABMAN for any Ecosine car in 24 hours/.test(row('Q10001')?.seat_reason || ''),
   String(row('Q10001')?.seat_reason));
 check('…but a car it never reported still says only that', row('Q10003')?.seat_state === 'never');
-check('…and the fleet without an account still says only that', row('Q20001')?.seat_state === 'no_account');
+check('…and a car it never reported still says only that, on Egari too', row('Q20001')?.seat_state === 'never');
+check('…and under Ecosine\'s login alone the fleet without an account still says only that',
+  (await ecosineOnly()).rows.find((r) => r.plate === 'Q20001')?.seat_state === 'no_account');
 check('…and the other feed is untouched', row('Q10001')?.fms_state === 'receiving');
 
 server.close();

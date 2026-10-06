@@ -4352,3 +4352,11 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
 | TGS-1 | src/target_sms.js: 13:00/18:00 goal texts — fixed goal (low_trips_min) across all apps, on pace = 85% of the Target page's need-by-now, areas from booked pickups at the slot's hours | yes | pending deploy | target_sms 24 (reverting on-pace 19/5, channel freshness 23/1, dry mode 22/2) |
 | TGS-2 | sms_target switch: dry (default) / on / off on Access → Settings; Messages page filter, preview and dry-run note; schema v100 kinds | yes | pending deploy | 19 related suites green |
 | FD-1 | #feeds: "Receiving no data at all" count (hero) with fleet split and never-reported count; per-row "no data at all / ever" | yes | pending deploy | arkiv_fleet 259 (old 256/3), vehicle_feeds 53 (old 51/2) |
+
+## CBE — Egari's own CABMAN login (2026-10-06)
+
+| id | fix | written | production | proven |
+|---|---|---|---|---|
+| CBE-1 | `config.cabman.fleets` gains Egari (interface 81, user Egari_Luxury_Cars_Integration, `CABMAN_EGARI_PASS`); Settings keys; Ecosine labels named | yes | pending deploy | cabman_egari 11 (old config 3/8), vehicle_feeds 56 (old 53/3) |
+| CBE-2 | Occupancy "Ecosine only" sentences replaced by the true per-window reason (Egari's login first read 2026-10-06) | yes | pending deploy | occupancy_sources 95 (old 94/1) |
+

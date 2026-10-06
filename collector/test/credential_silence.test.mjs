@@ -75,6 +75,7 @@ console.log('\nand a refusal is never read as an empty answer');
 
   process.env.CABMAN_URL = `http://127.0.0.1:${port}/`;
   process.env.CABMAN_ECOSINE_PASS = 'x';
+  process.env.CABMAN_EGARI_PASS = 'x';   // both logins asked, both refused
   const { pullLive } = await import('../src/sources/cabman.js');
   let wrote = null;
   try { wrote = await pullLive(); } catch (e) { wrote = `threw: ${String(e).slice(0, 80)}`; }
