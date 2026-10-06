@@ -61,6 +61,9 @@ check('FMS seat sensor: 3 receiving, 3 not', (await tile('fms-seat-yes')) === '3
   `${await tile('fms-seat-yes')} / ${await tile('fms-seat-no')}`);
 check('FMS data: 2 receiving, 4 not', (await tile('fms-yes')) === '2' && (await tile('fms-no')) === '4',
   `${await tile('fms-yes')} / ${await tile('fms-no')}`);
+check('receiving no data at all, whether CABMAN or FMS: 2 — in the old skin too', (await tile('none-no')) === '2', String(await tile('none-no')));
+const noneSub = await page.$eval('[data-kpi="none-no"] .s', (e) => e.textContent).catch(() => '');
+check('…with the fleets and how many never sent anything', /1 never sent anything/.test(noneSub), noneSub);
 const seatNoSub = await page.$eval('[data-kpi="seat-no"] .s', (e) => e.textContent).catch(() => '');
 check('the CABMAN count says how many of its reds are the missing CABMAN account',
   /2 of them on Egari, which has no CABMAN account/.test(seatNoSub), seatNoSub);
@@ -70,6 +73,10 @@ const rows = await page.$$eval('[data-panel="feeds"] tbody tr', (trs) => trs.map
   const td = [...tr.querySelectorAll('td')];
   return {
     text: td.map((c) => c.innerText.replace(/\s+/g, ' ').trim()),
+    /* The plate alone: since 2026-10-06 the cell also says "no data at all"
+       or "no data ever" under it, for a car no feed reaches. */
+    plate: (td[0]?.innerText || '').split('\n')[0].trim(),
+    mark: (td[0]?.innerText || '').split('\n').slice(1).join(' ').trim(),
     plateHref: td[0]?.querySelector('a')?.getAttribute('href') || null,
     seat: td[2]?.querySelector('.pill')?.className || '',
     fmsSeat: td[3]?.querySelector('.pill')?.className || '',
@@ -78,7 +85,7 @@ const rows = await page.$$eval('[data-panel="feeds"] tbody tr', (trs) => trs.map
     tel: [...(td[6]?.querySelectorAll('a[href^="tel:"]') || [])].map((a) => a.getAttribute('href')),
   };
 }));
-const by = (plate) => rows.find((r) => r.text[0] === plate);
+const by = (plate) => rows.find((r) => r.plate === plate);
 check('one row per car, every car the route returned', rows.length === 6, String(rows.length));
 check('the columns are the ones asked for',
   JSON.stringify(await page.$$eval('[data-panel="feeds"] thead th', (th) => th.map((t) => t.textContent.replace(/[↑↓]/g, '').trim())))
@@ -133,8 +140,13 @@ check('every seat-sensor and FMS cell names its provider',
   check('a custody driver says which day they drove it', /drove it most on/.test(r?.text[5]), r?.text[5]);
 }
 check('the cars missing a feed come first, as the route ordered them',
-  rows[0]?.text[0] === 'Q10003' && rows[rows.length - 1]?.text[0] === 'Q10001',
-  rows.map((r) => r.text[0]).join(','));
+  rows[0]?.plate === 'Q10003' && rows[rows.length - 1]?.plate === 'Q10001',
+  rows.map((r) => r.plate).join(','));
+/* The operator, 2026-10-06: "it should also show a number of vehicle which
+   is not receiving any data whether fms or cabman" — "put it in both". */
+check('a car no feed reaches says so under its plate: "no data ever" if it never sent anything, else "no data at all"',
+  by('Q10003')?.mark === 'no data ever' && by('Q10002')?.mark === 'no data at all'
+  && rows.filter((r) => r.mark).length === 2, rows.map((r) => `${r.plate}:${r.mark}`).join(','));
 
 console.log('\nthe colours are the product’s verdict colours');
 const colours = await page.evaluate(() => {

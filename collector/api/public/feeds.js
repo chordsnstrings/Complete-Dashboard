@@ -128,7 +128,9 @@ export async function renderFeeds(root) {
   const ndFleets = Object.entries(nd.fleets || {}).filter(([, n]) => n).map(([f, n]) => `${fmt(n)} ${sourceLabel(f)}`);
   const FEED_TILES = [
     /* The car no tracker sees at all (the operator, 2026-10-06). First, and
-       the hero: a car missing ONE feed still has another; this one has none. */
+       the hero: a car missing ONE feed still has another; this one has none.
+       In both skins, by the operator's word ("put it in both"), so the old
+       skin's frozen rendering of #feeds was re-recorded with it. */
     { label: 'Receiving no data at all', value: fmt(nd.vehicles ?? 0), tone: 'critical', key: 'none-no', hero: true,
       sub: `neither CABMAN nor FMS in the last ${hours} hours`
         + (nd.vehicles ? ` · ${ndFleets.join(' · ')} · ${fmt(nd.never)} never sent anything` : '') },
@@ -152,13 +154,13 @@ export async function renderFeeds(root) {
        (the hero, two of the six columns), then the three "not receiving"
        counts — five columns, one line at 1440 — and below them the three
        receiving, in a hero-less row. */
-    const tiles = bandTiles(FEED_TILES).tiles;
+    const tiles = bandTiles(FEED_TILES.filter(Boolean)).tiles;
     glance(AKB.tilesHost, tiles.filter((x) => /-no$/.test(x.key || '')));
     const row2 = el('div', 'kpis glance');
     row2.innerHTML = kpiTiles(tiles.filter((x) => !/-no$/.test(x.key || '')).map((x) => ({ ...x, glance: true, hero: false })));
     row2.style.setProperty('--kpi-n', String(kpiCols(row2.children.length)));
     AKB.tilesHost.after(row2);
-  } else root.append(kpiRow(FEED_TILES));
+  } else root.append(kpiRow(FEED_TILES.filter(Boolean)));
 
   const fleets = Object.entries(t.fleets || {}).map(([f, n]) => `${fmt(n)} ${sourceLabel(f)}`);
   const p = panel(`${countOf(rows.length, 'car')} active on Uber`,

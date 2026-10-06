@@ -2452,3 +2452,11 @@ the window.
 
 Tests: arkiv_fleet 259 (the old page fails 256/3); vehicle_feeds 53 (the old
 route fails 51/2).
+
+**In both skins, by the operator's word ("put it in both", 2026-10-06).** The
+old skin's frozen rendering of #feeds was re-recorded from the working tree
+with `RECORD=1 ONLY=feeds` (test/arkiv_classic_frozen.test.mjs; only that
+entry moved). test/vehicle_feeds_page.test.mjs reads the plate from the first
+line of the Vehicle cell, because the cell now also carries the marker. It
+asserts the Classic tile (2 on the mock, "1 never sent anything") and both
+markers. The page from before the tile fails it 39/3.
