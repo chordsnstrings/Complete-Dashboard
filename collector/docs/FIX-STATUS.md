@@ -4357,6 +4357,19 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
 
 | id | fix | written | production | proven |
 |---|---|---|---|---|
-| CBE-1 | `config.cabman.fleets` gains Egari (interface 81, user Egari_Luxury_Cars_Integration, `CABMAN_EGARI_PASS`); Settings keys; Ecosine labels named | yes | pending deploy | cabman_egari 11 (old config 3/8), vehicle_feeds 56 (old 53/3) |
-| CBE-2 | Occupancy "Ecosine only" sentences replaced by the true per-window reason (Egari's login first read 2026-10-06) | yes | pending deploy | occupancy_sources 95 (old 94/1) |
+| CBE-1 | `config.cabman.fleets` gains Egari (interface 81, user Egari_Luxury_Cars_Integration, `CABMAN_EGARI_PASS`); Settings keys; Ecosine labels named | yes | **on production 2e22083, verified** | cabman_egari 11 (old config 3/8), vehicle_feeds 56 (old 53/3) |
+| CBE-2 | Occupancy "Ecosine only" sentences replaced by the true per-window reason (Egari's login first read 2026-10-06) | yes | on production 2e22083 | occupancy_sources 95 (old 94/1) |
+
+- **CBE-1 proven on production (2026-10-06).** First poll 14:20:24Z: the
+  Egari login was accepted and listed all 5 cars, held back by
+  `ADMIT_POLLS`; the probe answered `cabman/egari:GetIVDData ok, 5 records`.
+  At 14:31Z `/api/vehicles/feeds` had `accounts.seat` = ecosine, egari, and
+  all five (L16308, L10595, L12377, L64998, L27976) were `receiving`.
+  "No data at all" went from 28 to 23, "never sent anything" from 7 to 2,
+  and Egari's share from 9 to 4. The page through the prod mirror shows each
+  row as "RECEIVING from CABMAN DT", with no sideways overflow at 1440. FMS
+  still reads "no reading on record" for the five: they have no InfoTrack
+  unit, which is a separate question. Trap: `pkill -f prod-mirror` from a
+  shell whose own command line contains that text kills the shell itself
+  (exit 144). Use `pgrep -f "node bin/prod-mirror"` in its own call.
 
