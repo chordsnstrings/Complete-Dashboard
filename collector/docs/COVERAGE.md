@@ -8465,3 +8465,37 @@ AREAS, English only, a dry run first.
 - **`sms_outbox.kind` has a CHECK.** A new message kind needs a schema file
   that replaces `sms_outbox_kind_check` (v100). An insert under an unlisted
   kind fails at run time, not at boot.
+
+## Egari's CABMAN cars are never asked for (2026-10-06, measured, no code changed)
+
+The operator: Egari's CABMAN portal shows these five cars connected:
+L16308, L10595, L12377, L64998 and L27976 (all Tesla Model Y).
+In our data they are Egari cars, active on Uber. We hold no CABMAN reading
+and no FMS reading for any of them, ever; the only thing we have is Uber's
+driver status. They are 5 of the 7 "never sent anything" cars on #feeds.
+
+- **Cause: we only ask CABMAN as Ecosine.** `config.cabman.fleets` has one
+  entry: InterfaceUniqueId 81, user `admin_ecosine`. Egari's entry is a
+  placeholder comment ("Egari DT credentials can be added here once
+  provided"), and Settings has only the `CABMAN_ECOSINE_*` keys. The
+  GetIVDData interface returns the vehicles of the interface it is asked as.
+- **Ecosine's interface does not carry Egari.** On 2026-10-06 our CABMAN
+  feed held 175 plates:
+  - 38 on Ecosine's Uber list;
+  - 137 on neither Uber list;
+  - **0 of Egari's 36** Uber-active cars.
+  Its `CompanyName` over a year is Ecosine Transports LLC, Sahalat, Star
+  Skyline Luxury Transport LLC and VOLYA LIMOUSINE SERVICES, never Egari.
+  So Egari's cars sit behind a different CABMAN interface.
+- **What is needed:** Egari's own CABMAN DT interface credentials, the same
+  three Ecosine has: Interface Unique ID, Interface username and Interface
+  password, for `dtcabmanrestservice/api/trackingServices/GetIVDData`. A
+  portal login is not the same thing.
+- **Trap, before wiring it — CABMAN sends no VIN.** The feed's fields are
+  VehicleID, device_id, CompanyName, VehicleType, FuelTypeName, Status,
+  SeatSensorStatus/Value, state, gmt, lat, lng, speed, odometer,
+  LastReported*. So a car is matched on `VehicleID` alone. Ecosine's
+  interface files it as `L46706`. If Egari's files it as `16308`, the way
+  the portal list reads, `normPlate` keeps `16308` and it will never meet
+  Uber's `L16308` (`reconcilePlate` exists but CABMAN does not use it). Read
+  the first payload before trusting the match.
