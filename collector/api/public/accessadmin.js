@@ -1345,6 +1345,22 @@ function settingsTab(host, ctx) {
     + 'however long ago their last Uber trip was — the trip is 4 km or more, no booking is within 30 minutes and both '
     + 'places have a readable name. Found at night, it waits until 07:00.',
     'Trip messages');
+  /* The goal texts (src/target_sms.js): three states, dry run by default. */
+  {
+    const sel = h('select', { class: 'depinput acx-in', 'data-acx': 'sms_target' },
+      h('option', { value: 'dry' }, 'Dry run — decided and shown on Messages, nothing sent'),
+      h('option', { value: 'on' }, 'On — messages are sent'), h('option', { value: 'off' }, 'Off — nothing is decided or sent'));
+    sel.value = ['on', 'off'].includes(cfg.sms_target) ? cfg.sms_target : 'dry';
+    one('Driver text: today’s trip goal (13:00 and 18:00)', 'sms_target', sel,
+      `At 13:00 and 18:00 Dubai, a driver behind today’s goal of ${cfg.low_trips_min || 10} trips (the minimum above, `
+      + 'counted across every app they drive on) is texted how many they have, how many are left, and the busiest areas '
+      + 'for the next hours. A driver on pace — at least 85% of what a usual day has reported by now — or already at the '
+      + 'goal gets nothing; so does one who has not started today. If the latest collection is over 45 minutes old the '
+      + 'slot waits, and at :30 gives up rather than text on old numbers. The Messages page shows every decision.',
+      () => sel.value,
+      (v) => (v === 'off' ? 'Goal texts are switched off.' : v === 'dry' ? 'Goal texts are a dry run: decided and shown, not sent.'
+        : 'Goal texts are on.'), 'Sending');
+  }
 
   reportPanel(host, ctx);
 

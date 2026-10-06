@@ -99,6 +99,12 @@ export const HOLD_WHY = Object.freeze({
   no_longer_unauthorized: 'By the time it was due, the journey was no longer judged unexplained.',
   switched_off: 'Driver messages of this kind were switched off when it was due.',
   not_complete: 'Yesterday’s cash was not complete by 09:00 Dubai, so no reminder was sent.',
+  /* The goal texts, src/target_sms.js. */
+  dry_run: 'Dry run: decided and written here, not sent. Switch the goal texts to On in Access → Settings to send them.',
+  channel_not_fresh: 'An app this driver used in the last 8 days has not collected in the last 90 minutes, so today’s trip count may be short.',
+  run_cap: 'This run had already sent its 300 messages, the brake on a wrong reading texting the whole fleet.',
+  no_target_curve: 'The Target page has no trips target for today, so nobody can be judged behind it.',
+  data_stale: 'The last collection was over 45 minutes old at :30, so this slot’s goal texts were not sent.',
 });
 
 /* ── who a mobile belongs to ─────────────────────────────────────────────── */

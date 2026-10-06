@@ -622,7 +622,7 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       users, teams, grants, requests, devices, owners: owners.map((o) => o.id), fleets,
       roles: [...ROLES.map((r) => ({ ...r, builtin: true })), ...Object.values(custom)],
       classes: CLASSES, caps: CAPS,
-      config: { mode: cfg.mode, mfa: cfg.mfa, cash_stepup_aed: cfg.cash_stepup_aed, sms_cash: cfg.sms_cash, sms_trip: cfg.sms_trip,
+      config: { mode: cfg.mode, mfa: cfg.mfa, cash_stepup_aed: cfg.cash_stepup_aed, sms_cash: cfg.sms_cash, sms_trip: cfg.sms_trip, sms_target: cfg.sms_target,
         low_trips_min: cfg.low_trips_min,
         idle_minutes: cfg.idle_minutes, session_days: cfg.session_days,
         single_owner_delay_hours: cfg.single_owner_delay_hours },
@@ -1032,6 +1032,12 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       if (req.body?.[k] === undefined) continue;
       if (!['on', 'off'].includes(req.body[k])) return fail(res, 400, 'bad_switch', 'Choose on or off.');
       changes[k] = req.body[k];
+    }
+    /* The goal texts (src/target_sms.js) have a third state: a dry run that
+       decides and records every message and sends none. */
+    if (req.body?.sms_target !== undefined) {
+      if (!['on', 'dry', 'off'].includes(req.body.sms_target)) return fail(res, 400, 'bad_switch', 'Choose on, dry run or off.');
+      changes.sms_target = req.body.sms_target;
     }
     for (const [k, v] of Object.entries(changes)) await svc.setConfig(db, k, v, fm.user.id);
     await svc.getConfig(db, { fresh: true });

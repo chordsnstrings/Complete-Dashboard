@@ -8422,3 +8422,46 @@ month (211 journeys, 31 s under EXPLAIN):
   The same attempt also put one view in two schema files, which route_smoke
   refuses. The primary-key join stays until it can be removed without a view
   depending on person_key.
+
+## Goal texts to drivers, 13:00 and 18:00 (2026-10-06, src/target_sms.js)
+
+The operator's rules: one fixed daily goal for every driver, the same text
+whatever app they drive on, nothing to a driver on pace, the text points at
+AREAS, English only, a dry run first.
+
+- **Goal** = `low_trips_min` (Access page; 12). It is the same per-driver
+  minimum the Target page asks of each active driver. Trips are counted
+  across every app a person drives on (`driver_platform_id`).
+- **Why trips, not AED:** Uber prices its trips only on the nightly
+  catch-up, so a midday revenue figure for an Uber driver is an estimate,
+  and we do not text a driver an estimate of their own earnings.
+- **On pace** comes from `targetHours()` (api/target_hours.js): the share of
+  a usual day's trips reported by the last collection is
+  `need_by_now ÷ target`, and a driver's need-by-now is goal × that share.
+  A driver at 85% of it or more gets nothing, so the text and the Target page
+  cannot disagree.
+- **Left alone, every reason counted:**
+  - not started (no booking today, never online on Uber);
+  - at the goal;
+  - on pace;
+  - an app used in the last 8 days not collected in the last 90 minutes
+    (held `channel_not_fresh`);
+  - the phone book's holds;
+  - collection more than 45 minutes old (the slot waits, and at :30 gives up
+    as `data_stale`).
+- **Areas:** booked pickups at the slot's hours (13–16 or 18–21 Dubai) over
+  28 days. These are FMS journeys matched to a booking, counted once,
+  named by `place_cell` with at least 3 votes and cleaned by
+  `readablePlace()`; the busiest two are named.
+- **Switch:** `sms_target` (Access → Settings): `dry` by default, `on` or
+  `off`. In dry mode every message is decided and written to the outbox as
+  held `dry_run`, so the Messages page shows exactly what would have gone.
+  At most 300 messages are sent in one run.
+- **Commands:** `node src/index.js sms-target` runs the job by hand;
+  `sms-preview` now also prints the goal texts.
+
+### Traps this added to the list
+
+- **`sms_outbox.kind` has a CHECK.** A new message kind needs a schema file
+  that replaces `sms_outbox_kind_check` (v100). An insert under an unlisted
+  kind fails at run time, not at boot.

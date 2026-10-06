@@ -4344,3 +4344,10 @@ last month 0.5 s (was 123), 6628822 month 9.4 s (was 16.7; SPD-12 bought
 target/hours 3.6 s; coverage 12.7 s (SPD-13 bought nothing measurable).
 Still slow: kpis / economics at 90 days with a fleet (9–15 s), because of
 the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
+
+## TGS — goal texts to drivers (2026-10-06)
+
+| id | fix | written | production | proven |
+|---|---|---|---|---|
+| TGS-1 | src/target_sms.js: 13:00/18:00 goal texts — fixed goal (low_trips_min) across all apps, on pace = 85% of the Target page's need-by-now, areas from booked pickups at the slot's hours | yes | pending deploy | target_sms 24 (reverting on-pace 19/5, channel freshness 23/1, dry mode 22/2) |
+| TGS-2 | sms_target switch: dry (default) / on / off on Access → Settings; Messages page filter, preview and dry-run note; schema v100 kinds | yes | pending deploy | 19 related suites green |

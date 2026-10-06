@@ -296,4 +296,7 @@ export const SCHEMA_FILES = [
      coalesce(ended_at, requested_at)) for the newest-trip-in-window probe.
      Additive. test/spd_attribution.test.mjs. */
   'schema_v99.sql',
+  /* v100 (2026-10-06): sms_outbox kinds target_nudge and target_run for the
+     13:00 / 18:00 goal texts (src/target_sms.js). test/target_sms.test.mjs. */
+  'schema_v100.sql',
 ];

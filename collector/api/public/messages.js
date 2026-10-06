@@ -32,11 +32,13 @@ const TABS = [
 const KIND = {
   cash_deposit: 'Cash to deposit', trip_register: 'Register a trip',
   reset_code: 'Staff reset code', phone_code: 'Staff mobile check', cash_run: 'The 05:00 run',
+  target_nudge: 'Trip goal', target_run: 'A goal-text run',
 };
 const FILTERS = [
   { id: '', label: 'Everything' },
   { id: 'cash_deposit', label: 'Cash to deposit' },
   { id: 'trip_register', label: 'Register a trip' },
+  { id: 'target_nudge', label: 'Trip goal' },
   { id: 'reset_code', label: 'Staff codes' },
 ];
 
@@ -147,8 +149,10 @@ async function renderLog(root, kind) {
     { label: 'Gateway charge', value: c.cost ? Number(c.cost).toFixed(3) : 'none reported', sub: 'last 7 days, in the gateway account’s own currency' },
   ]));
   const sw = d.switches || {};
-  const off = [sw.sms_cash === 'off' && 'the 05:00 cash reminder', sw.sms_trip === 'off' && 'the trip request'].filter(Boolean);
+  const off = [sw.sms_cash === 'off' && 'the 05:00 cash reminder', sw.sms_trip === 'off' && 'the trip request',
+    sw.sms_target === 'off' && 'the trip-goal texts'].filter(Boolean);
   if (off.length) hold.append(note(`Switched off in Access → Settings: ${andList(off)}. Nothing of that kind is sent until it is switched back on.`, 'warn'));
+  if (sw.sms_target === 'dry') hold.append(note('The trip-goal texts (13:00 and 18:00) are a dry run: each is decided and listed here as held “dry run”, and none is sent. Switch them On in Access → Settings.', 'info'));
 
   const rows = d.rows || [];
   const runs = rows.filter((r) => r.kind === 'cash_run');
@@ -186,7 +190,7 @@ async function renderNext(root) {
   const p = panel('What the next run would do', 'Decided now, from what the database holds this minute. Nothing is written and nothing is sent. The real run can differ by the time it is due.', 'msg-next');
   root.append(p.panel);
   const btns = el('div', 'chips');
-  btns.innerHTML = '<button type="button" class="chip" data-k="cash">The cash reminder</button> <button type="button" class="chip" data-k="trip">The trip requests</button>';
+  btns.innerHTML = '<button type="button" class="chip" data-k="cash">The cash reminder</button> <button type="button" class="chip" data-k="trip">The trip requests</button> <button type="button" class="chip" data-k="target">The trip-goal texts</button>';
   const out = el('div');
   out.dataset.msgOut = '';
   p.body.append(btns, out);
@@ -219,6 +223,21 @@ async function renderNext(root) {
         { label: 'Would go to', key: 'to', render: (x) => (x.to ? `${esc(x.to)}<div class="dim">${x.source === 'hr' ? 'HR’s number' : 'Uber’s number'}</div>` : '<span class="ent-off">no number chosen</span>') },
         { label: 'Would be', key: 'hold', render: (x) => (x.hold ? `${pill('held back', 'dim')}<div class="dim">${esc(x.why || x.hold)}</div>` : pill('sent', 'ok')) },
       ], { sortable: true, sortId: 'messages-next-cash', cards: true }));
+    } else if (k === 'target') {
+      if (r.already) { out.append(note(`The ${r.slot}:00 run for today has already finished. The Sent and held back tab shows what it did.`, '')); return; }
+      if (r.held === 'no_target_curve') { out.append(note(r.why || 'No trips target for today.', 'warn')); return; }
+      if (r.waiting || r.gaveUp) { out.append(note(`The latest collection is ${r.lag_min} minutes old, over the 45 allowed, so nobody would be texted now.`, 'warn')); return; }
+      const sk = r.skipped || {};
+      out.append(el('p', 'cap', esc(`Goal ${r.goal} trips; by ${r.clock} a usual day has reported ${Math.round((r.frac || 0) * 100)}% of its trips. `
+        + `${countOf(r.active || 0, 'active driver')}: ${fmt(sk.on_pace || 0)} on pace, ${fmt(sk.goal_met || 0)} at the goal, `
+        + `${fmt(sk.not_started || 0)} not started, ${fmt(r.behind || 0)} behind — ${fmt((r.behind || 0) - (r.held || 0))} would be texted. `
+        + `Busy areas: ${r.areas?.length ? r.areas.join(', ') : 'none named'}.`)));
+      out.append(tableFrom(decisionRows(r, 'target'), [
+        { label: 'Driver', key: 'person', render: (x) => entity('driver', `p${x.person}`, x.name || 'name not on file') },
+        { label: 'Trips', key: 'done', render: (x) => `${fmt(x.done)}<div class="dim">${esc(`about ${x.need_now} due by now`)}</div>` },
+        { label: 'Text', key: 'text', render: (x) => esc(x.text || '') },
+        { label: 'Would be', key: 'hold', render: (x) => (x.hold ? `${pill('held back', 'dim')}<div class="dim">${esc(x.why || x.hold)}</div>` : pill('sent', 'ok')) },
+      ], { sortable: true, sortId: 'messages-next-target', cards: true }));
     } else {
       if (r.error) { out.append(note(r.error, 'err')); return; }
       if (!r.decisions?.length) { out.append(note('No journey with no booking has ended since the last pass and passed the reconciler’s two-hour wait.', '')); return; }

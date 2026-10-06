@@ -14,6 +14,7 @@
    pages still show everything to anyone, and this list would add every
    driver's number beside the words texted to them. */
 import { HOLD_WHY, cashDepositRun, tripRegisterRun } from '../src/driver_sms.js';
+import { targetNudgeRun } from '../src/target_sms.js';
 
 export function smsRoutes(app, { q, wrap, access }) {
   const signedIn = (req, res) => {
@@ -27,7 +28,7 @@ export function smsRoutes(app, { q, wrap, access }) {
   app.get('/api/sms/log', wrap(async (req, res) => {
     if (!signedIn(req, res)) return undefined;
     res.set('Cache-Control', 'private, no-store');
-    const kind = ['cash_deposit', 'trip_register', 'reset_code', 'phone_code', 'cash_run'].includes(String(req.query.kind))
+    const kind = ['cash_deposit', 'trip_register', 'reset_code', 'phone_code', 'cash_run', 'target_nudge', 'target_run'].includes(String(req.query.kind))
       ? String(req.query.kind) : null;
     const status = ['sent', 'queued', 'held', 'failed'].includes(String(req.query.status)) ? String(req.query.status) : null;
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
@@ -42,8 +43,8 @@ export function smsRoutes(app, { q, wrap, access }) {
         WHERE ($1::text IS NULL OR m.kind = $1) AND ($2::text IS NULL OR m.status = $2)
         ORDER BY m.created_at DESC, m.id DESC LIMIT ${limit}`, [kind, status]);
     const [counts] = await q(
-      `SELECT count(*) FILTER (WHERE status = 'sent' AND kind IN ('cash_deposit', 'trip_register'))::int AS sent,
-              count(*) FILTER (WHERE status = 'held' AND kind IN ('cash_deposit', 'trip_register'))::int AS held,
+      `SELECT count(*) FILTER (WHERE status = 'sent' AND kind IN ('cash_deposit', 'trip_register', 'target_nudge'))::int AS sent,
+              count(*) FILTER (WHERE status = 'held' AND kind IN ('cash_deposit', 'trip_register', 'target_nudge'))::int AS held,
               count(*) FILTER (WHERE status = 'queued')::int AS queued,
               count(*) FILTER (WHERE status = 'failed' AND coalesce(error, '') <> 'sending')::int AS failed,
               coalesce(sum(cost) FILTER (WHERE status = 'sent'), 0)::float AS cost
@@ -53,7 +54,7 @@ export function smsRoutes(app, { q, wrap, access }) {
       rows: rows.map((r) => ({ ...r, id: Number(r.id), person_id: r.person_id == null ? null : Number(r.person_id),
         user_id: r.user_id == null ? null : Number(r.user_id), why: r.hold_reason ? HOLD_WHY[r.hold_reason] || r.hold_reason : null })),
       last7days: counts,
-      switches: { sms_cash: cfg.sms_cash, sms_trip: cfg.sms_trip },
+      switches: { sms_cash: cfg.sms_cash, sms_trip: cfg.sms_trip, sms_target: cfg.sms_target || 'dry' },
       hold_why: HOLD_WHY,
     });
   }));
@@ -61,12 +62,12 @@ export function smsRoutes(app, { q, wrap, access }) {
   app.get('/api/sms/preview', wrap(async (req, res) => {
     if (!signedIn(req, res)) return undefined;
     res.set('Cache-Control', 'private, no-store');
-    const kind = String(req.query.kind) === 'trip' ? 'trip' : 'cash';
+    const kind = ['trip', 'target'].includes(String(req.query.kind)) ? String(req.query.kind) : 'cash';
     const cfg = await access.getConfig();
     const t0 = Date.now();
-    const r = kind === 'cash'
-      ? await cashDepositRun({ q, cfg, dry: true })
-      : await tripRegisterRun({ q, cfg, dry: true });
+    const r = kind === 'cash' ? await cashDepositRun({ q, cfg, dry: true })
+      : kind === 'target' ? await targetNudgeRun({ q, cfg, dry: true })
+        : await tripRegisterRun({ q, cfg, dry: true });
     /* The name beside each person, so the preview reads like the log. */
     const ids = [...new Set((r.decisions || []).map((d) => d.person).filter(Boolean).map(String))];
     const names = new Map(ids.length ? (await q(

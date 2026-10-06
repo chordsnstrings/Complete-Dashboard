@@ -25,6 +25,9 @@ export const DEFAULTS = Object.freeze({
      ruling, 2026-09-28 ("live immediately"), with this switch as the brake. */
   sms_cash: 'on',          // 05:00 Dubai: "Please deposit AED X of cash you received yesterday…"
   sms_trip: 'on',          // an unexplained journey: "Please Register your trip from X to Y - z km…"
+  /* The 13:00 / 18:00 goal texts (src/target_sms.js). Dry run first, by the
+     operator's ruling of 2026-10-06: 'dry' decides and records, sends nothing. */
+  sms_target: 'dry',       // 'off' | 'dry' | 'on'
   /* The 08:00 low-trips email (src/low_trips_email.js): an active driver who
      completed fewer than this many trips yesterday is listed. The operator,
      2026-09-30: "This number of trips will change so we should be able to set

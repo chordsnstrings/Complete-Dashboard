@@ -15,6 +15,7 @@ import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
 import { log } from './log.js';
 import { cashDepositRun, tripRegisterRun, flushQueued, checkDeliveries } from './driver_sms.js';
+import { targetNudgeRun } from './target_sms.js';
 import { deliveryReport } from './smsala.js';
 import { dailyReportRun } from './daily_report.js';
 import { cashEmailRun } from './cash_sms_email.js';
@@ -73,6 +74,7 @@ async function main() {
       const strip = ({ decisions, ...c }) => ({ ...c, decisions: (decisions || []).length });
       log.info('sms', 'preview cash', strip(await cashDepositRun({ q: sq, cfg, dry: true })));
       log.info('sms', 'preview trips', strip(await tripRegisterRun({ q: sq, cfg, dry: true })));
+      log.info('sms', 'preview target', strip(await targetNudgeRun({ q: sq, cfg, dry: true })));
     });
   }
   /* `report [YYYY-MM-DD] [address]`: the daily email by hand — a day other
@@ -110,6 +112,7 @@ async function main() {
   }
   if (cmd === 'sms-cash') return smsJob('cash', (cfg) => cashDepositRun({ q: sq, cfg }))();
   if (cmd === 'sms-trips') return smsJob('trips', (cfg) => tripRegisterRun({ q: sq, cfg }))();
+  if (cmd === 'sms-target') return smsJob('target', (cfg) => targetNudgeRun({ q: sq, cfg }))();
 
   if (cmd === 'schedule') {
     log.info('scheduler', 'starting', {
@@ -125,6 +128,10 @@ async function main() {
     cron.schedule('*/15 5-8 * * *', smsJob('cash', (cfg) => cashDepositRun({ q: sq, cfg })), { timezone: 'Asia/Dubai' });
     cron.schedule('0 9 * * *', smsJob('cash-final', (cfg) => cashDepositRun({ q: sq, cfg, final: true })), { timezone: 'Asia/Dubai' });
     cron.schedule('12,42 * * * *', smsJob('trips', (cfg) => tripRegisterRun({ q: sq, cfg })));
+    /* The goal texts (src/target_sms.js): due at 13:00 and 18:00 Dubai, asked
+       again at :15 if the data was stale, and given up at :30. */
+    cron.schedule('0,15,30 13,18 * * *', smsJob('target', (cfg) => targetNudgeRun({ q: sq, cfg,
+      final: new Date().getUTCMinutes() >= 30 })), { timezone: 'Asia/Dubai' });
     cron.schedule('*/5 * * * *', smsJob('flush', (cfg) => flushQueued({ q: sq, cfg })));
     /* The daily report email: 07:00 Dubai for the day before, then every
        fifteen minutes to 09:45 for any address it has not reached — a send
