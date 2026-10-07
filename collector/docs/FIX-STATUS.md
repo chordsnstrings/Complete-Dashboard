@@ -4380,5 +4380,17 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
 | UBF-1 | `fareRefresh(2)` at 09:00 Dubai: `uber.collect({mode:'fares'})` runs the fare walk only, queued with the other collections | yes | pending deploy | uber_fares_mode 5 (gating off: 4/1); credential_save_check 109 (lists it as a pinned unit) |
 | UBF-2 | Payout audit annotates a held wire with `UPDATE`, not a NOT-NULL-violating upsert; write step extracted as `recordWires` | yes | pending deploy | payout_audit_orders 18 (old upsert: 14/4, with production's exact error) |
 | UBF-3 | Settings → "Fetch Uber fares (last 2 days)" queues job mode `fares` (= fareRefresh(2)) on demand; route_smoke now fails any queued mode with no worker branch (an unwired mode silently ran as an incremental) | yes | pending deploy | route_smoke 60 (worker line removed: 59/1); classic settings frozen hash re-recorded for the new button only |
-| UBF-4 | The fares button posts to its own `POST /api/uber/fares/run`, with no admin token (operator's ruling, 2026-10-07), a duplicate guard (409) and a manifest entry with cap collector.run | yes | pending deploy | fares_run_open 4, against the real adminGate with a synthetic token (route gated: 1/3) |
+| UBF-4 | The fares button posts to its own `POST /api/uber/fares/run`, with no admin token (operator's ruling, 2026-10-07), a duplicate guard (409) and a manifest entry with cap collector.run | yes | **on production 06e4b93, verified** | fares_run_open 4, against the real adminGate with a synthetic token (route gated: 1/3) |
+
+- **UBF-4 proven on production (2026-10-07).** A POST with no token was
+  accepted (job 56) and claimed at 07:50Z. It waited behind the incremental,
+  then ran the fare walk alone: 1 week; ecosine 954 orders / 950 priced /
+  4 held, egari 543 / 541 / 2; unmatched 0; trips 0, perf 0, quality 0.
+- **What it found about 6 Oct (measured, not assumed):** Uber's payments
+  report at 07:55Z contained no line for the 50 completed Uber trips of 6 Oct
+  still unpriced (801 of 851 priced before and after; Target still 92.19%).
+  Every order in the report matched a held trip, so those 50 had no payment
+  order at Uber yet. That is Uber's lag, not ours: asking sooner cannot fetch
+  a price Uber has not issued. Whether 09:00 is late enough to settle the day
+  before is what the 2026-10-08 check measures.
 
