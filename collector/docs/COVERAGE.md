@@ -4500,6 +4500,16 @@ untouched, and nothing projected is ever added into `accounted`.
   on /api/status. If a morning still reads unsettled, check that row before
   anything else.
 
+* **`test/mount.mjs` STUBS `requireAdmin` TO A PASS-THROUGH, SO NO ROUTE TEST
+  CAN SEE THE ADMIN GATE.** A route moved behind or out from under
+  `requireAdmin` passes `route_smoke` either way, and setting `ADMIN_TOKEN` in
+  the env changes nothing, because the stub never reads it. To test the gate,
+  mount with the real one: `mountAll(db, { inject: { requireAdmin:
+  adminGate({ env: { ADMIN_TOKEN: 'synthetic' } }) } })`, as
+  `test/fares_run_open.test.mjs` does for the open `POST /api/uber/fares/run`.
+  That route has no gate by the operator's ruling of 2026-10-07 ("stop admin
+  token check on this one").
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`

@@ -4450,6 +4450,31 @@ app.post('/api/analyst/run', wrap(async (req, res) => {
   res.json({ ok: true, queued: 'analyst', fleet, job_id: job.id, job });
 }));
 
+/* YESTERDAY'S UBER FARES, ON DEMAND, WITH NO ADMIN TOKEN.
+   ─────────────────────────────────────────────────────────────────────────
+   The operator pressed "Fetch Uber fares (last 2 days)" on 2026-10-07 and was
+   asked for the admin token, which /api/settings/trigger requires, and ruled:
+   "stop admin token check on this one". So, like the analyst run above, it
+   has its own route. It is safe to leave open for the same reason: it asks
+   Uber for the payments report over two days and writes prices onto trips
+   already held — no credential is read or changed, nothing is deleted. The
+   duplicate guard is the protection that matters, because a second pass while
+   one is queued or running spends Uber's report slots on the same weeks. */
+app.post('/api/uber/fares/run', wrap(async (_req, res) => {
+  const [existing] = await q(
+    `SELECT id, status, requested_at FROM collector_job
+      WHERE mode = 'fares' AND status IN ('queued', 'running') ORDER BY requested_at LIMIT 1`);
+  if (existing) {
+    return res.status(409).json({ ok: false, mode: 'fares',
+      already: existing.status, job_id: existing.id, requested_at: existing.requested_at,
+      detail: 'an Uber fares pass is already queued or running; a second one would ask Uber for the same weeks again' });
+  }
+  const [job] = await q(
+    `INSERT INTO collector_job (mode, fleet, requested_by) VALUES ('fares', NULL, 'fares-run')
+     RETURNING id, mode, fleet, status, requested_at`);
+  res.json({ ok: true, queued: 'fares', job_id: job.id, job });
+}));
+
 app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
   const mode = JOB_MODES.includes(req.body?.mode) ? req.body.mode : 'incremental';
   /* One fleet, or both. Ecosine and Egari are separate businesses with

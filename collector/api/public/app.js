@@ -8996,7 +8996,12 @@ V.settings = async (root) => {
     runBack: ['backfill', 'backfill queued — this pulls up to 12 months and takes a while'],
     runProbe: ['probe', 'probe queued — it describes every provider surface and stores the shape'],
     runAnalyst: ['analyst', 'analyst queued — it costs one model call and judges its own claims'],
-    runFares: ['fares', 'Uber fares queued — yesterday and the day before, asked again; prices land in about 10 minutes'],
+  };
+  /* Its own route, with no admin token (the operator, 2026-10-07): see
+     POST /api/uber/fares/run in api/server.js. */
+  actions.querySelector('#runFares').onclick = async () => {
+    const j = await post('/api/uber/fares/run', {});
+    if (j) { note.textContent = `Uber fares queued — yesterday and the day before, asked again; prices land in about 10 minutes (job ${j.job_id})`; jobs(); }
   };
   Object.entries(RUN).forEach(([id, [mode, msg]]) => {
     actions.querySelector('#' + id).onclick = async () => {

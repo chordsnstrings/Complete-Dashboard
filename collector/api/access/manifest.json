@@ -7219,6 +7219,22 @@
  },
  {
   "method": "POST",
+  "path": "/api/uber/fares/run",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.run",
+  "notes": "api/server.js, beside /api/analyst/run. NOT behind requireAdmin, by the operator's ruling of 2026-10-07 (\"stop admin token check on this one\"): any caller can queue it. It queues collector_job(mode='fares', requested_by='fares-run'), which the worker runs as src/run.js fareRefresh(2): Uber's payments report for yesterday and the day before, the same pass that runs at 09:00 Dubai. Nothing it does is destructive or reads a secret: it asks Uber for prices and writes them onto trips already held. It answers 409 when a fares pass is already queued or running. Response {ok, queued:'fares', job_id, job}."
+ },
+ {
+  "method": "POST",
   "path": "/api/events",
   "subject": "SYS",
   "carries": [
@@ -7650,7 +7666,8 @@
     "timeline": "collector.run",
     "timeline-roster": "collector.run",
     "profile": "collector.probe",
-    "audit": "collector.probe"
+    "audit": "collector.probe",
+    "fares": "collector.run"
    }
   },
   "notes": "api/server.js:4327-4358, behind requireAdmin. body.mode is one of backfill|incremental|analyst|probe|timeline|timeline-roster|profile|audit; anything else becomes incremental. The strictest capability is collector.backfill. Suggested per-mode gate: backfill and audit (one Uber report per window, spends report quota, src/run.js:589) \u2192 collector.backfill; probe \u2192 collector.probe; analyst \u2192 analyst.r"
