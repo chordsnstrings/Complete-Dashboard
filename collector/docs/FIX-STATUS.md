@@ -4373,3 +4373,10 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
   shell whose own command line contains that text kills the shell itself
   (exit 144). Use `pgrep -f "node bin/prod-mirror"` in its own call.
 
+## UBF — Uber prices the morning after, and the payout audit (2026-10-07)
+
+| id | fix | written | production | proven |
+|---|---|---|---|---|
+| UBF-1 | `fareRefresh(2)` at 09:00 Dubai: `uber.collect({mode:'fares'})` runs the fare walk only, queued with the other collections | yes | pending deploy | uber_fares_mode 5 (gating off: 4/1); credential_save_check 109 (lists it as a pinned unit) |
+| UBF-2 | Payout audit annotates a held wire with `UPDATE`, not a NOT-NULL-violating upsert; write step extracted as `recordWires` | yes | pending deploy | payout_audit_orders 18 (old upsert: 14/4, with production's exact error) |
+

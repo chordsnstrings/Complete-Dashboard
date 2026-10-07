@@ -200,39 +200,7 @@ export async function auditWindow(org, w) {
   const byDay = new Map();
   for (const x of wires) byDay.set(x.day, (byDay.get(x.day) || 0) + x.amount);
 
-  let added = 0;
-  let disagreed = 0;
-  for (const [day, amount] of byDay) {
-    const extId = `${org.fleet}:${day}`;
-    const { rows: [have] } = await pool.query(
-      `SELECT amount::float8 AS amount FROM platform_payout
-        WHERE platform = 'uber' AND fleet_id = $1 AND payout_ext_id = $2`,
-      [org.fleet, extId]);
-    const rounded = Math.round(amount * 100) / 100;
-    if (!have) {
-      /* A WIRE THE REGISTER DID NOT HOLD. This is the case the audit exists
-         for — a transfer on a day the Mondays-first walk had not reached, or
-         would never have reached. */
-      added += 1;
-      await upsertMany('platform_payout', [{
-        platform: SRC, fleet_id: org.fleet, payout_ext_id: extId, paid_on: day,
-        amount: rounded, currency: 'AED', method: 'bank',
-        source: `${ORDER_REPORT} (so.payout row, dated by "${ORDER_COLUMNS.at}")`,
-        audit_amount: rounded, audited_at: new Date().toISOString(),
-      }], ['platform', 'fleet_id', 'payout_ext_id']);
-      log.warn(SRC, 'payout audit: a wire the register did not hold',
-        { fleet: org.fleet, day, amount: rounded });
-      continue;
-    }
-    if (Math.abs(Number(have.amount) - rounded) >= 0.01) disagreed += 1;
-    /* NEVER an overwrite of `amount`. Two Uber reports disagreeing about one
-       transfer is a finding, and resolving it by writing order would destroy
-       the only evidence that they disagree. Both travel, and the page says so. */
-    await upsertMany('platform_payout', [{
-      platform: SRC, fleet_id: org.fleet, payout_ext_id: extId,
-      audit_amount: rounded, audited_at: new Date().toISOString(),
-    }], ['platform', 'fleet_id', 'payout_ext_id']);
-  }
+  const { added, disagreed } = await recordWires(org.fleet, byDay);
 
   await record(org, w, 'audited',
     disagreed ? `${disagreed} wire(s) disagree with the register` : null,
@@ -240,6 +208,55 @@ export async function auditWindow(org, w) {
   log.info(SRC, 'payout audit: window read',
     { fleet: org.fleet, ...w, rows: recs.length, wires: byDay.size, added, disagreed });
   return { found: byDay.size, added, disagreed, rows: recs.length };
+}
+
+/* The register, compared and annotated — one row per day the report named.
+   ─────────────────────────────────────────────────────────────────────────
+   The annotation of a wire the register ALREADY held was an upsertMany of
+   five columns — platform, fleet, id, audit_amount, audited_at — and that
+   cannot work: Postgres checks NOT NULL on the row an INSERT … ON CONFLICT
+   proposes before it looks for the conflict, and the proposal had no
+   paid_on. So every window containing one known wire threw "null value in
+   column paid_on of relation platform_payout violates not-null constraint"
+   (production, both fleets, nightly — 2026-10-06 23:44Z and 23:47Z) and no
+   such window was ever recorded as audited. The test of this rule wrote its
+   own INSERT with paid_on in it, so it proved the SQL it contained and never
+   the module's. A row that exists is now UPDATEd, which is what was meant:
+   audit_amount and audited_at, and never amount. */
+export async function recordWires(fleet, byDay) {
+  let added = 0;
+  let disagreed = 0;
+  for (const [day, amount] of byDay) {
+    const extId = `${fleet}:${day}`;
+    const { rows: [have] } = await pool.query(
+      `SELECT amount::float8 AS amount FROM platform_payout
+        WHERE platform = 'uber' AND fleet_id = $1 AND payout_ext_id = $2`,
+      [fleet, extId]);
+    const rounded = Math.round(amount * 100) / 100;
+    if (!have) {
+      /* A WIRE THE REGISTER DID NOT HOLD. This is the case the audit exists
+         for — a transfer on a day the Mondays-first walk had not reached, or
+         would never have reached. */
+      added += 1;
+      await upsertMany('platform_payout', [{
+        platform: SRC, fleet_id: fleet, payout_ext_id: extId, paid_on: day,
+        amount: rounded, currency: 'AED', method: 'bank',
+        source: `${ORDER_REPORT} (so.payout row, dated by "${ORDER_COLUMNS.at}")`,
+        audit_amount: rounded, audited_at: new Date().toISOString(),
+      }], ['platform', 'fleet_id', 'payout_ext_id']);
+      log.warn(SRC, 'payout audit: a wire the register did not hold', { fleet, day, amount: rounded });
+      continue;
+    }
+    if (Math.abs(Number(have.amount) - rounded) >= 0.01) disagreed += 1;
+    /* NEVER an overwrite of `amount`. Two Uber reports disagreeing about one
+       transfer is a finding, and resolving it by writing order would destroy
+       the only evidence that they disagree. Both travel, and the page says so. */
+    await pool.query(
+      `UPDATE platform_payout SET audit_amount = $3, audited_at = now()
+        WHERE platform = 'uber' AND fleet_id = $1 AND payout_ext_id = $2`,
+      [fleet, extId, rounded]);
+  }
+  return { added, disagreed };
 }
 
 /** One window per fleet per run, newest un-audited first. */

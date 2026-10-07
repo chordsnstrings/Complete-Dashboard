@@ -10,7 +10,7 @@ import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility, withPinnedSettings, get } from './settings.js';
 import { runDiscovery } from './sources/discovery.js';
-import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit } from './run.js';
+import { backfill, incremental, catchUp, fareRefresh, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit } from './run.js';
 import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
 import { log } from './log.js';
@@ -276,6 +276,11 @@ async function main() {
        analyst so three heavy passes do not land together. */
     cron.schedule('0 21 * * *', () => catchUp(30)
       .catch((e) => log.error('scheduler', 'catch-up', { err: String(e) })));
+    /* 09:00 Dubai (05:00 UTC): the same fare walk for the last two days, so
+       yesterday's Uber prices land the same morning instead of the next night.
+       src/run.js fareRefresh says why. */
+    cron.schedule('0 5 * * *', () => fareRefresh(2)
+      .catch((e) => log.error('scheduler', 'fare refresh', { err: String(e) })));
     cron.schedule('0 22 * * 0', () => backfill()
       .catch((e) => log.error('scheduler', 'weekly backfill', { err: String(e) })));
 

@@ -654,7 +654,7 @@ console.log('\na unit of work reads values and versions from one moment');
     const at = run.search(new RegExp(`export (async function ${name}\\b|const ${name} = )`));
     return at < 0 ? '' : run.slice(at, at + 400);
   };
-  const units = ['payoutWalk', 'payoutAudit', 'cabmanTick', 'probePass', 'uberTimelineTick',
+  const units = ['payoutWalk', 'payoutAudit', 'fareRefresh', 'cabmanTick', 'probePass', 'uberTimelineTick',
     'uberProfileTick', 'uberAuditTick', 'liveStatusTick'];
   const bare = units.filter((u) => !/withPinnedSettings\(/.test(bodyOf(u)));
   check('every scheduled unit of work runs inside a pin', bare.length === 0, bare.join(', ') || '');

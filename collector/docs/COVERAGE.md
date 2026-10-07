@@ -4474,6 +4474,32 @@ untouched, and nothing projected is ever added into `accounted`.
   vs `av-photo av-lost`, it is this race. The lasting fix is to wait for
   `document.images` to settle before hashing.
 
+* **`INSERT … ON CONFLICT DO UPDATE` CHECKS NOT NULL ON THE PROPOSED ROW
+  FIRST — AN "UPDATE-ONLY" `upsertMany` OF A FEW COLUMNS CANNOT WORK.**
+  `src/sources/uber_payout_orders.js` annotated a payout already in the
+  register with `upsertMany('platform_payout', [{platform, fleet_id,
+  payout_ext_id, audit_amount, audited_at}])`. Postgres refuses that proposed
+  row for its missing `paid_on` before it ever finds the conflict, so every
+  audit window containing one known wire threw. On production that was both
+  fleets, every night: "null value in column paid_on … violates not-null
+  constraint", 2026-10-06 23:44Z and 23:47Z. Its test passed because it wrote
+  its own INSERT with `paid_on` in it, so it proved its own SQL and not the
+  module's. To change columns of a row that exists, use `UPDATE`, and test
+  through the module's function (`recordWires`), never with hand-written SQL.
+
+* **YESTERDAY READS "UNSETTLED" EVERY MORNING UNLESS UBER'S FARES ARE ASKED
+  AGAIN AFTER 01:00.** Trip rows arrive every 30 minutes. The per-trip fare
+  comes only from the payments report (`pullTripFaresAcross`), which the
+  incremental never asks for. Until 2026-10-07 only the 01:00 Dubai catch-up
+  asked, five hours after the day closed and before Uber had priced the late
+  trips. Tue 6 Oct read 92.1% priced the next morning (801 of 851 completed
+  Uber trips), and Target settles a day at 99% (`SETTLED_COVERAGE`), so every
+  day settled about 29 hours after it ended. Since 2026-10-07,
+  `fareRefresh(2)` runs at 09:00 Dubai: `collect({ mode: 'fares' })`, the
+  fare walk alone, in the collection queue. Its run rows read `uber / fares`
+  on /api/status. If a morning still reads unsettled, check that row before
+  anything else.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`

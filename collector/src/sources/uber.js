@@ -1992,7 +1992,19 @@ export async function collect({ from, to, mode, onStep, fleet = null, checkpoint
 
   /* 1. Trips, for every fleet. FIRST because the fare walk UPDATEs rows this
         creates and never inserts its own. */
-  for (const s of st.values()) await phase(s, 'trips', () => pullTrips(from, to, onStep, ckFor(s.o)));
+  /* mode 'fares' is the 09:00 Dubai pass (src/run.js fareRefresh): the trips
+     are already current from the half-hourly incremental, and what is missing
+     the morning after is the PRICE on the day's late trips — the nightly
+     catch-up asks at 01:00, five hours after the day closes, before Uber has
+     priced them. Measured 2026-10-07: Tue 6 Oct at 92.1% priced after that
+     pass (801 of 851 completed Uber trips), so the Target page held the day
+     "unsettled" until the NEXT night's catch-up, 29 hours after it ended. This
+     mode runs the fare walk alone, so it costs the payments reports and
+     nothing else. */
+  const faresOnly = mode === 'fares';
+  if (!faresOnly) {
+    for (const s of st.values()) await phase(s, 'trips', () => pullTrips(from, to, onStep, ckFor(s.o)));
+  }
 
   /* 2. The per-trip fare, week by week ACROSS the fleets — see
         pullTripFaresAcross. Not on the incremental: the payments report has a
@@ -2028,8 +2040,10 @@ export async function collect({ from, to, mode, onStep, fleet = null, checkpoint
         Last for the same reason the fares are second: trips and earnings are
         the product, acceptance and ratings make it rankable, and a run that
         runs out of slots should end having collected the money. */
-  for (const s of st.values()) {
-    await phase(s, 'perf', () => pullEarnerBreakdowns(from, to, onStep, ckFor(s.o)));
+  if (!faresOnly) {
+    for (const s of st.values()) {
+      await phase(s, 'perf', () => pullEarnerBreakdowns(from, to, onStep, ckFor(s.o)));
+    }
   }
   /* A separate loop, not the tail of the one above. Perf and quality are each
      a walk of their own, so pairing them per fleet would put the second
@@ -2039,7 +2053,7 @@ export async function collect({ from, to, mode, onStep, fleet = null, checkpoint
      week the way the fares are: both are bounded by the provider's rolling
      horizon (192 days, and QUALITY_WEEK_HORIZON weeks) rather than by the
      whole backfill, so a fleet is minutes behind here and not hours. */
-  if (mode !== 'incremental') {
+  if (mode !== 'incremental' && !faresOnly) {
     for (const s of st.values()) {
       await phase(s, 'qual', () => pullDriverQuality(from, to, onStep, ckFor(s.o)));
     }

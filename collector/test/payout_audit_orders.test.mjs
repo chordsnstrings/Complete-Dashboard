@@ -21,7 +21,8 @@
    surfaced rather than resolved by writing order. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
-import { ORDER_COLUMNS, PAYOUT_MARK } from '../src/sources/uber_payout_orders.js';
+import { ORDER_COLUMNS, PAYOUT_MARK, recordWires } from '../src/sources/uber_payout_orders.js';
+import { pool } from '../src/db.js';
 import { pathKey, money } from '../src/sources/uber_payout.js';
 
 let pass = 0, fail = 0;
@@ -129,6 +130,39 @@ check('only a window that was READ counts as checked',
 /* REVERSION: let the route count 'refused' windows as audited and the page
    would tell an operator a month was clear on the strength of a limiter
    outage — the exact shape of claim this product exists to refuse. */
+
+console.log('\nthe module\'s own write, against a wire the register already holds');
+/* The section above proves the RULE with SQL the test wrote itself, paid_on
+   included — which is why it passed while production failed every night:
+   the module annotated a held wire with an upsert that carried no paid_on,
+   and Postgres refuses that proposed row for NOT NULL before it looks for
+   the conflict ("null value in column paid_on of relation platform_payout",
+   both fleets, 2026-10-06 23:44Z). This drives recordWires itself. */
+{
+  pool.query = (t, p) => db.query(t, p);
+  pool.connect = async () => ({
+    query: (t, p) => (/^(BEGIN|COMMIT|ROLLBACK)$/i.test(String(t).trim())
+      ? Promise.resolve({ rows: [] }) : db.query(t, p)),
+    release: () => {},
+  });
+  await db.query(
+    `INSERT INTO platform_payout (platform, fleet_id, payout_ext_id, paid_on, amount, currency, method, source)
+     VALUES ('uber','egari','egari:2026-09-28','2026-09-28', 1000.00, 'AED', 'bank', 'stmt')`);
+  let threw = null, res = null;
+  try {
+    res = await recordWires('egari', new Map([['2026-09-28', 999.5], ['2026-09-30', 250.25]]));
+  } catch (e) { threw = String(e).slice(0, 160); }
+  check('annotating a held wire does not throw', threw === null, threw || '');
+  const held = (await db.query(`SELECT amount::float8 a, audit_amount::float8 au, audited_at IS NOT NULL at
+                                  FROM platform_payout WHERE payout_ext_id = 'egari:2026-09-28'`)).rows[0];
+  check('…its audit figure is written beside it and its own amount is untouched',
+    held?.a === 1000 && held?.au === 999.5 && held?.at === true, JSON.stringify(held));
+  const fresh = (await db.query(`SELECT paid_on::text d, amount::float8 a FROM platform_payout
+                                   WHERE payout_ext_id = 'egari:2026-09-30'`)).rows[0];
+  check('a wire the register did not hold is added, dated',
+    fresh?.d === '2026-09-30' && fresh?.a === 250.25, JSON.stringify(fresh));
+  check('…and the counts say one added, one disagreeing', res?.added === 1 && res?.disagreed === 1, JSON.stringify(res));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await db.close();

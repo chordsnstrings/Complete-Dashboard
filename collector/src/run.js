@@ -86,16 +86,23 @@ const HISTORICAL = { uber, uberFleet, yango, bolt, hotel, external, events, uber
    tail never rejects, so a failed run does not poison the queue behind it. */
 let queued = 0;
 let tail = Promise.resolve();
-export async function runWindow(mode, from, to, onProgress, fleet = null, jobId = null) {
-  if (queued) log.info('run', `${mode} waiting — ${queued} collection(s) ahead of it`);
+/* One collection at a time. A pass that asks Uber for reports takes the same
+   queue as the window runs, because the provider caps reports in flight per
+   org and two passes asking at once spend each other's slots. */
+function enqueue(label, fn) {
+  if (queued) log.info('run', `${label} waiting — ${queued} collection(s) ahead of it`);
   queued++;
   const run = async () => {
-    try { return await runWindowInner(mode, from, to, onProgress, fleet, jobId); }
+    try { return await fn(); }
     finally { queued--; }
   };
   const mine = tail.then(run, run);
   tail = mine.then(() => {}, () => {});
   return mine;
+}
+
+export async function runWindow(mode, from, to, onProgress, fleet = null, jobId = null) {
+  return enqueue(mode, () => runWindowInner(mode, from, to, onProgress, fleet, jobId));
 }
 
 /* A pulse on every progress report: how big this process is, and when.
@@ -428,6 +435,22 @@ export const incremental = (onProgress, fleet = null, jobId = null) =>
    this on a timer safe rather than merely convenient. */
 export const catchUp = (days = 30, onProgress, fleet = null, jobId = null) =>
   runWindow('catchup', daysAgo(days), new Date(), onProgress, fleet, jobId);
+
+/* YESTERDAY'S UBER PRICES, ASKED AGAIN IN THE MORNING.
+   ─────────────────────────────────────────────────────────────────────────
+   Uber's per-trip fare comes only from the payments report, and only the
+   nightly catch-up asked for it — at 01:00 Dubai, five hours after the day
+   closes, when Uber has not yet priced the late trips. Tue 6 Oct read 92.1%
+   priced that morning and the Target page held it "unsettled" (it settles at
+   99%, api/revenue_target.js SETTLED_COVERAGE) until the next night's pass.
+   This asks the payments report alone, for the last two days, in the
+   collection queue so it never competes with the half-hourly incremental for
+   Uber's report slots. Two days because on a Monday morning yesterday is the
+   previous week, and the walk is by week. */
+export const fareRefresh = (days = 2) => enqueue('fares', async () => {
+  await loadSettings(true);
+  return withPinnedSettings(() => uber.collect({ from: daysAgo(days), to: new Date(), mode: 'fares' }));
+});
 
 /* THE PAYOUT WALK ALONE, WITHOUT THE EIGHT SOURCES AROUND IT.
    ─────────────────────────────────────────────────────────────────────────
