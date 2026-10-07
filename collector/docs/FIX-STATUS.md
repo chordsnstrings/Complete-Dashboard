@@ -4379,4 +4379,5 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
 |---|---|---|---|---|
 | UBF-1 | `fareRefresh(2)` at 09:00 Dubai: `uber.collect({mode:'fares'})` runs the fare walk only, queued with the other collections | yes | pending deploy | uber_fares_mode 5 (gating off: 4/1); credential_save_check 109 (lists it as a pinned unit) |
 | UBF-2 | Payout audit annotates a held wire with `UPDATE`, not a NOT-NULL-violating upsert; write step extracted as `recordWires` | yes | pending deploy | payout_audit_orders 18 (old upsert: 14/4, with production's exact error) |
+| UBF-3 | Settings → "Fetch Uber fares (last 2 days)" queues job mode `fares` (= fareRefresh(2)) on demand; route_smoke now fails any queued mode with no worker branch (an unwired mode silently ran as an incremental) | yes | pending deploy | route_smoke 60 (worker line removed: 59/1); classic settings frozen hash re-recorded for the new button only |
 

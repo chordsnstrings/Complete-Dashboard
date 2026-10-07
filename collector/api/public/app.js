@@ -8964,6 +8964,7 @@ V.settings = async (root) => {
     <button class="btn sec" id="runBack">Run 12-month backfill</button>
     <button class="btn sec" id="runProbe">Describe every provider API</button>
     <button class="btn sec" id="runAnalyst">Run the analyst</button>
+    <button class="btn sec" id="runFares">Fetch Uber fares (last 2 days)</button>
     <span class="note" id="setNote"></span>`;
   credP.body.append(actions);
   const note = actions.querySelector('#setNote');
@@ -8995,6 +8996,7 @@ V.settings = async (root) => {
     runBack: ['backfill', 'backfill queued — this pulls up to 12 months and takes a while'],
     runProbe: ['probe', 'probe queued — it describes every provider surface and stores the shape'],
     runAnalyst: ['analyst', 'analyst queued — it costs one model call and judges its own claims'],
+    runFares: ['fares', 'Uber fares queued — yesterday and the day before, asked again; prices land in about 10 minutes'],
   };
   Object.entries(RUN).forEach(([id, [mode, msg]]) => {
     actions.querySelector('#' + id).onclick = async () => {

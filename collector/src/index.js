@@ -467,6 +467,7 @@ async function main() {
              at the window it had reached rather than spending the slots
              again. */
           else if (job.mode === 'audit') await uberAuditTick({ fleet: job.fleet || null, jobId: job.id });
+          else if (job.mode === 'fares') await fareRefresh(2);
           else if (job.mode === 'timeline-roster') await uberTimelineTick({ roster: true, days: 30 });
           else await incremental(progress, job.fleet || null, job.id);
           await pool.query(

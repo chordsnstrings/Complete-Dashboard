@@ -4305,7 +4305,10 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
    ban and papers. On the list because the first thing anyone wants after
    wiring a new surface is to run it once and look, and because a rating that
    only ever arrives on a Monday cron is a rating nobody can check today. */
-const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe', 'timeline', 'timeline-roster', 'profile', 'audit'];
+/* 'fares' is src/run.js fareRefresh(2) on demand — the 09:00 Dubai pass, for
+   an operator who needs yesterday's Uber prices before the next scheduled
+   one (2026-10-07: "I need the fares for yesterday. I need to check."). */
+const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe', 'timeline', 'timeline-roster', 'profile', 'audit', 'fares'];
 /* The fleets a run can be narrowed to. Taken from the configured Uber orgs
    rather than written down twice: a third fleet is a credential the operator
    pastes, not a code change, and a list that has to be edited alongside is a

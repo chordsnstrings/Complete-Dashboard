@@ -538,6 +538,15 @@ check('the trip table survived the injection attempt',
     /JOB_MODES\.includes\(req\.body\?\.mode\)/.test(src2));
   check('the old single-slot trigger is gone',
     !/key='trigger'/.test(src2) && !/'trigger',\$1/.test(src2));
+  /* An allowed mode with no branch in the worker is not refused — it falls
+     through to the final `else await incremental(...)`, answers "done", and
+     did something else. 'fares' (2026-10-07) would have been an incremental,
+     which by design never asks Uber for a fare. */
+  const modes = (src2.match(/const JOB_MODES = \[([^\]]+)\]/) || [])[1]?.match(/'([a-z-]+)'/g)?.map((x) => x.slice(1, -1)) || [];
+  const worker = readFileSync('src/index.js', 'utf8');
+  const unwired = modes.filter((m) => m !== 'incremental' && !worker.includes(`job.mode === '${m}'`));
+  check('every mode the API queues has its own branch in the worker', modes.length > 5 && !unwired.length,
+    `unwired: ${unwired.join(', ')}`);
 }
 
 /* A 500 body must not hand an unauthenticated caller the storage engine.
