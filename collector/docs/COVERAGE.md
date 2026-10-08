@@ -4573,6 +4573,39 @@ untouched, and nothing projected is ever added into `accounted`.
   same goes for `test/arkiv_classic_frozen.test.mjs` on the desktop. A
   partial run is a guess; the full suite is the proof.
 
+* **A LINK CONFIRMED ON THE SAME PERSON PAGE IS NOT A PROMOTED ONE.**
+  Confirming a pair folds the Drivers page and the driver pages
+  (`api/identity_links.js`) and leaves `person_key` exactly where it was. Every
+  total groups by `person_key`: Target, Month target, the 08:00 email, payouts
+  and statements. So those totals kept counting the two records apart.
+  Measured on production 2026-10-08:
+  - 295 confirmed links had never been promoted, splitting 184 people;
+  - the Month target page's 137 "active drivers" were 119 people;
+  - the Target page's trips minimum (active × 12) was inflated to match.
+  `/api/drivers/identity-links` marks each link `promoted` or not; anything
+  unpromoted is a count that is wrong. The operator's review that day
+  promoted them all (FROM_REVIEW in `api/identity_map.js`). Re-check the
+  count after any batch of confirmations on the page.
+
+* **"TWO CARS AT ONCE" COUNTS COMPLETED TRIPS ONLY.** `/api/driver/trips`
+  returns cancelled requests too, with a plate and a time window. A Bolt
+  request cancelled while the driver was mid-ride on Uber looks exactly like
+  a second car. The first pass of the 2026-10-08 sweep read every row and
+  found 90 overlapping trips on 24 days for one man. On completed trips
+  there were 7, and 20 "contradicted" people became 7. Filter
+  `outcome = 'completed'` before calling any pair two people. Hotel
+  `ended_at` is a booking close, not a drop-off (the Shehzad entry's
+  caveat), so a hotel trip spans its start plus a short window, never its
+  `ended_at`.
+
+* **`/api/driver/profile` AND `/api/driver/trips` RESOLVE BY NAME, SO TWO
+  MEN WITH ONE NAME READ AS ONE.** Asking for "ZAHID KHAN ISMAIL ISMAIL"
+  by his own Uber id returned the accounts and trips of "Zahid Khan Afridi
+  Mohabbat Khan": the two share the folded key "zahid khan". Group people by
+  the directory (`/api/drivers/directory`, the Drivers page's own spine),
+  never by a profile's `ids`. And do not separate two same-named men with
+  these endpoints at all; that question goes to the operator.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
@@ -8725,4 +8758,72 @@ the target:**
   leave inside their 8-day window is asked for a full share.
 - Cash a driver collected but has not handed in. Gross is fares, not money
   received.
+
+## Duplicate drivers: the review of 2026-10-08
+
+The operator: "There are still drivers who are the same drivers working on
+different platforms but counted as two. it's time we go through it together
+to fix it."
+
+**What was measured, on production that morning:**
+- **The spine and the counts disagreed.** The Drivers page folded 830
+  accounts into 348 people. Of the 458 identity links, 163 were promoted
+  into the register and 295 were not (see the trap above).
+- **Look-alikes nothing had joined.** 123 pairs of people share two
+  distinctive name words. After normalising Muhammad/Mohammad,
+  Ahmad/Ahmed and glued "-ullah", "-uddin", 88 of them sit on different
+  channels.
+- **How each pair was measured.** All completed trips of both people, the
+  smaller record's whole history against the larger's over the same dates:
+  - days in the same car;
+  - days whose trips interleave inside the day in that car (one man with two
+    apps open, not a handover);
+  - completed trips at the same moment in two different cars (two men).
+- **The result.**
+
+  | Group | Pairs | Evidence |
+  |---|---|---|
+  | Strong | 27 | Passed the 2026-09-05 sweep's own tests |
+  | Weak | 4 | Too thin to call |
+  | No trips on one side | 52 | No trip can settle it; 4 stand on the other's exact car |
+  | Two cars at once | 30 | Two men; left apart |
+  | Never the same car | 10 | Left apart |
+
+  The sweep's tests: same car on at least a quarter of the smaller record's
+  working days, interleaving on at least one of them, and two cars at once on
+  at most 1 day in 50.
+- **The 184 link-joined people, re-checked on completed trips.** 168 never
+  drove two cars at once, 9 did on one day, and 7 did on 2 to 7 days, with at
+  most 7 trips.
+
+**What the operator ruled, on a sheet that showed every pair with these
+figures:**
+- **Part 1, the 184 already joined:** "Yes, all 184".
+- **Part 2, the 27 strong pairs:** "All 27 are the same".
+- **Part 3, the 4 weak pairs:** all four ticked as the same person.
+- **Part 4:** "Join those 4, leave the rest".
+- **Two accounts, asked by name:**
+  - the Bolt "ZAHID KHAN ISMAIL" (6633205): "Not sure — leave it". It is left
+    out, and its trips stay with Zahid Khan Ismail Ismail by name.
+  - the Yango "MUHAMMAD KHALID" (8089d680…): "HR is right". The HR roster
+    files it under D034 Muhammad Khalid Younas Gul, so it stays out of
+    Muhammad Khalifa Afzal Khalid, and the pair is in REFUSED.
+
+**What the register now holds:** 460 entries over 237 people, none held
+back.
+- 324 entries in FROM_REVIEW, one per alias account.
+- The four pairs PENDING held back over a contradiction date, now at the end
+  of HAND_MERGES with the date and the ruling.
+- Amshid Khan, whom the register itself had filed under two keys, re-keyed
+  onto the key his trips carry.
+- Every one of the 219 ruled people and pairs resolves to one key.
+
+**Not done here, and why:**
+- **The link that joined the Yango "MUHAMMAD KHALID" to Muhammad Khalifa
+  Afzal Khalid is still confirmed in `driver_identity_link`.** Only a
+  signed-in person can reject it, on the Same person page. Until then the
+  Drivers page still shows that account under him, while every count keeps
+  it apart.
+- **The 48 other trip-less roster names, and the 30 pairs seen in two cars
+  at once,** were left apart.
 

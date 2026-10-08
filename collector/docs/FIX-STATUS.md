@@ -4488,3 +4488,11 @@ What the first rendering found, and what was changed before commit:
   `api/identity_map.js` (hand-reviewed pairs, never a name rule), so it is
   left to the operator.
 
+## ID — duplicate drivers, the operator's review (2026-10-08)
+
+| id | fix | written | production | proven |
+|---|---|---|---|---|
+| ID-1 | 295 confirmed-but-unpromoted links promoted into the register (FROM_REVIEW, one entry per alias account), so totals count the 184 people the Drivers page already joined as one | yes | pending deploy | identity_register_counts 16 (old register: the test cannot load); all 219 ruled people/pairs resolve to one key (scratchpad check) |
+| ID-2 | 35 look-alike pairs no link had joined, measured on completed trips and ruled same (27 strong, 4 weak, 4 no-trip on the exact car) | yes | pending deploy | as ID-1 |
+| ID-3 | The four PENDING pairs ruled and moved to the end of HAND_MERGES with their contradiction dates; Amshid Khan re-keyed off the second key the register had given him; Yango "MUHAMMAD KHALID" ↔ Uber "Muhammad Khalid" REFUSED on the HR roster | yes | pending deploy | register guard loads; schema_v53 regenerated (505 WHEN lines) |
+
