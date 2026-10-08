@@ -19,6 +19,7 @@ import { shape, windowOf, driverRecord, fleetRecord } from './api/performance_ro
    a shape the server stopped returning. */
 import { computeMonth, addDays as tgAddDays, monthOf as tgMonthOf, daysIn as tgDaysIn, monthName as tgMonthName } from './api/revenue_target.js';
 import { hoursOf } from './api/target_hours.js';
+import { monthViewOf, monthWorkbookOf } from './api/target_month.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -4686,14 +4687,44 @@ const tgFacts = (from, to, today) => {
   return { from, to, days, carDays, personDays,
     runs: [{ source: 'uber', fleet: 'ecosine', ws: tgAddDays(from, -1), we: to, fin }] };
 };
-const tgMonth = (month, today) => {
+const tgRows = (month) => [{ id: 1, gross_target: 525 * 40 * tgDaysIn(month), cars: 40, rate: 525, past_plan: 0,
+  set_day: `${month}-01`, set_at: `${month}-01T06:00:00Z`, set_by: null, set_by_label: 'owner@example.test' }];
+const tgSpan = (month, today) => {
   const first = `${month}-01`;
-  const D = tgDaysIn(month);
-  const rows = [{ id: 1, gross_target: 525 * 40 * D, cars: 40, rate: 525, past_plan: 0, set_day: first,
-    set_at: `${first}T06:00:00Z`, set_by: null, set_by_label: 'owner@example.test' }];
-  const to = today > tgAddDays(first, D - 1) ? tgAddDays(first, D - 1) : today;
-  return computeMonth({ month, today, rows, facts: tgFacts(tgAddDays(first, -9), to, today), min: 12 });
+  const last = tgAddDays(first, tgDaysIn(month) - 1);
+  return tgFacts(tgAddDays(first, -9), today > last ? last : today, today);
 };
+const tgMonth = (month, today) => computeMonth({ month, today, rows: tgRows(month), facts: tgSpan(month, today), min: 12 });
+/* /api/target/month (api/target_month.js): monthViewOf itself over the same
+   fleet, so the days are tgMonth's to the fils. Each of the 46 made-up
+   drivers ("Driver 07") earns AED 36 to 44 a completed trip — less than the
+   day's fares, so the line for bookings that name no driver is drawn — half
+   of them Ecosine's and half Egari's, and the trips a day (8 to 14) put a
+   good share under the minimum of 12, so both lists have names on them. */
+const tgMonthView = (month, today) => {
+  const facts = tgSpan(month, today);
+  const byDay = new Map();
+  for (const [d, ppl] of facts.personDays) {
+    byDay.set(d, new Map([...ppl].map(([pk, n]) => [pk, { trips: n, gross: Math.round(n * (36 + (Number(pk.slice(1)) % 9)) * 100) / 100 }])));
+  }
+  const who = new Map(Array.from({ length: 46 }, (_, k) => [`p${k}`, { pk: `p${k}`, name: `Driver ${String(k + 1).padStart(2, '0')}`,
+    driver_ext_id: `drv-${k + 1}`, fleet: k % 2 ? 'egari' : 'ecosine', platforms: k % 3 ? ['uber'] : ['bolt', 'uber'] }]));
+  return monthViewOf({ month, today, rows: tgRows(month), facts, dd: { byDay, who }, min: 12 });
+};
+app.get('/api/target/month', (req, r) => {
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.asof || '')) ? String(req.query.asof) : dubaiDay(new Date());
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query.month || '')) ? String(req.query.month) : tgMonthOf(today);
+  r.set('cache-control', 'private, no-store').json(tgMonthView(month, today));
+});
+app.get('/api/export/target-month.xlsx', (req, r) => {
+  const today = dubaiDay(new Date());
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query.month || '')) ? String(req.query.month) : tgMonthOf(today);
+  const { wb, name } = monthWorkbookOf(tgMonthView(month, today));
+  r.set('Cache-Control', 'private, no-store');
+  r.set('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  r.set('content-disposition', `attachment; filename="${name}"`);
+  r.end(wb.toBuffer());
+});
 app.get('/api/target', (req, r) => {
   /* ?asof= as the real route reads it, so a recording made at a frozen
      instant (test/phone_harness.mjs) can ask for that instant's month. */

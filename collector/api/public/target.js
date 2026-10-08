@@ -9,8 +9,8 @@
 
    ── GREEN AND RED, AND WHAT CARRIES THEM ───────────────────────────────────
    Green is over, red is under, and only on a day that is FINISHED and
-   SETTLED: today is an estimate until Uber prices it overnight and is never
-   coloured. Every coloured verdict also carries ▲ or ▼ and the word OVER or
+   SETTLED: today is an estimate until Uber publishes its fares (hours after
+   the ride, fetched every hour) and is never coloured. Every coloured verdict also carries ▲ or ▼ and the word OVER or
    UNDER, so it still reads for the one man in twelve who cannot tell the two
    colours apart, and on a printout. The colours are the skin's own semantic
    tokens (--good, --critical), already checked in both themes.
@@ -274,15 +274,19 @@ export function targetHtml(vm, { link = null } = {}) {
 
 /** The Today workbook, fetched rather than navigated to: a refusal comes back
     as JSON with a reason and is said in words, not opened as a page. */
-export async function downloadToday() {
-  const r = await fetch('/api/export/today.xlsx', { credentials: 'same-origin', cache: 'no-store' });
+export const downloadToday = () => downloadFile('/api/export/today.xlsx', 'today.xlsx');
+
+/** Any of the Today section's workbooks (the Month target page's too), the
+    same way: fetched, saved from a blob, a refusal thrown as its reason. */
+export async function downloadFile(url, fallback) {
+  const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
   if (!r.ok) {
     let why = '';
     try { why = (await r.json()).detail || ''; } catch { /* not json */ }
     throw new Error(why || `The file could not be made (HTTP ${r.status}).`);
   }
   const blob = await r.blob();
-  const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || 'today.xlsx';
+  const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || fallback;
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;

@@ -10,6 +10,10 @@
 export const ROUTES = [
   // The first screen and its two ledgers.
   'unit', 'unit/assets', 'unit/drivers', 'unit/nonsense',
+  /* The Month target page (2026-10-08): this month — days gone, today, days
+     to come — and a month that is over, the branch where the last cell says
+     whether the target was met instead of what each day left must bring. */
+  'month-target', 'month-target/2026-08',
   /* Both lists, and two drill-downs: drv-0 has an Uber status row, drv-9
      deliberately has none, so the branch that says so is rendered too. */
   'top-performers', 'low-performers', 'performer/drv-0', 'performer/drv-9',

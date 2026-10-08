@@ -61,8 +61,8 @@
    only once it is SETTLED: every booking channel that has been collecting
    delivered it (a run whose window COVERS the day and that finished after the
    day ended — docs/COVERAGE.md trap 41), and 99% of its chargeable bookings
-   carry a fare (src/monthly_report.js READY_COVERAGE). Uber prices a day
-   overnight, so TODAY is never judged. An unsettled day that has ALREADY
+   carry a fare (src/monthly_report.js READY_COVERAGE). Uber publishes a
+   day's fares hours after the rides (fetched hourly), so TODAY is never judged. An unsettled day that has ALREADY
    beaten what it needed is over whatever arrives later, and says "at least";
    one still short says what it is waiting for. */
 import { personKeyStored } from './custody_sql.js';
@@ -404,21 +404,27 @@ export async function targetRows(q, month) {
 }
 const cfgDb = (q) => ({ query: (t, p) => q(t, p).then((rows) => ({ rows })) });
 
+/** The days a month's arithmetic reads: back far enough for the first day's
+    7-day car window and 8-day driver window, and forward to whichever is
+    later — the month's end or today (a month set in advance still counts
+    today's cars). Shared with the month page (api/target_month.js), so the
+    two cannot read different spans for the same month. */
+export function monthSpan(m, day) {
+  const first = `${m}-01`;
+  const last = addDays(first, daysIn(m) - 1);
+  return { first, last, from: addDays(first < day ? first : day, -(DRIVER_DAYS + 1)), to: last > day ? last : day };
+}
+/** The trips a day an active driver is asked for, from the Access page. */
+export const tripsMin = async (q) => tripsTarget(await getConfig(cfgDb(q)));
+
 /** The month as the page shows it: the arithmetic, the day before today
     (which on the 1st belongs to the month before), and the figures the
     admin panel prints beside the target box. */
 export async function monthTarget(q, { month = null, today = null, now = new Date(), min = null } = {}) {
   const day = today || dubaiDay(now);
   const m = month || monthOf(day);
-  const D = daysIn(m);
-  const first = `${m}-01`;
-  const last = addDays(first, D - 1);
-  /* Reach back far enough for the first day's 7-day car window and 8-day
-     driver window, and forward to whichever is later: the month's end or
-     today (a month set in advance still counts today's cars). */
-  const from = addDays(first < day ? first : day, -(DRIVER_DAYS + 1));
-  const to = last > day ? last : day;
-  const trips = min ?? tripsTarget(await getConfig(cfgDb(q)));
+  const { from, to } = monthSpan(m, day);
+  const trips = min ?? await tripsMin(q);
   const [rows, facts] = await Promise.all([targetRows(q, m), loadFacts(q, from, to)]);
   const out = computeMonth({ month: m, today: day, rows, facts, min: trips });
 

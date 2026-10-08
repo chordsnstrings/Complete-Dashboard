@@ -16,6 +16,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
 import { targetPage } from './targetpage.js';
+import { monthTargetPage, workbookUrl as monthWorkbookUrl } from './targetmonth.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
   applyWindow, MONTH_SHORT, dayLabel } from './data.js';
@@ -402,6 +403,11 @@ export const LANDING = 'target';
 
 const VIEWS = [
   { id: 'target', label: 'Target', ic: '◎', sec: 'Today', sub: 'The month, today and every hour — on target or not, live for everyone' },
+  /* The operator, 2026-10-08: "next to target there should be a page for
+     monthly view of the target, per day" — every day against its target on
+     one chart, where the month lands at today's pace, and the 30 drivers
+     furthest behind their share (./targetmonth.js). */
+  { id: 'month-target', label: 'Month target', ic: '▦', sec: 'Today', sub: 'Every day of the month against its target, where the month lands, and the drivers behind' },
   { id: 'playbook', label: 'To-do list', ic: '☑', sec: 'Today', sub: 'Jobs to do this month to earn more, each with the sums behind it' },
   { id: 'overview', label: 'Fleet activity', ic: '◱', sec: 'Today', sub: 'How many trips the fleet ran, on which platforms, and how they ended' },
   { id: 'compare', label: 'Today vs yesterday', ic: '⧉', sec: 'Today', sub: 'Two days side by side, both counted up to the same Dubai minute' },
@@ -923,6 +929,7 @@ const V = {};
    back, and the nearest real destinations. */
 /* The first page: the month, today, and today hour by hour (./targetpage.js). */
 V.target = async (root) => { await targetPage(root); };
+V['month-target'] = async (root) => { await monthTargetPage(root, state.param); };
 
 V.notfound = async (root) => {
   const addr = String(state.missing || '');
@@ -10205,6 +10212,10 @@ function xlsxTarget() {
      so it is asked before the range test below, and the file is the page's:
      the target, the month day by day, yesterday's cars and drivers, the
      Action list and the strip (api/today_workbook.js). */
+  /* The Month target page's own workbook — the month on screen, its days and
+     every driver against their target — asked before the Today branch it
+     would otherwise fall into. */
+  if (v === 'month-target') return { url: monthWorkbookUrl(state.param), label: 'Excel ⤓ month', name: 'month-target.xlsx' };
   if (sectionOf(v, state.param) === 'Today') return { url: '/api/export/today.xlsx', label: 'Excel ⤓ today' };
   if (hidesRange(v)) return null;
   if (v === 'drivers' || XLSX_SECTIONS.has(sectionOf(v, state.param))) return { extra: {}, label: 'Excel ⤓' };
@@ -10235,7 +10246,7 @@ $('#xlsxBtn').onclick = async () => {
       return;
     }
     const blob = await r.blob();
-    const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || (t.url ? 'today.xlsx' : 'cash-and-money.xlsx');
+    const name = /filename="([^"]+)"/.exec(r.headers.get('content-disposition') || '')?.[1] || t.name || (t.url ? 'today.xlsx' : 'cash-and-money.xlsx');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = name;

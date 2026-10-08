@@ -9,6 +9,12 @@
                                   first page's two hourly panels
                                   (api/target_hours.js)
      GET /api/export/today.xlsx   the Today page as a workbook
+     GET /api/target/month        the Month target page: every day against its
+         ?month=YYYY-MM           target, where the month lands at two paces,
+         ?asof=YYYY-MM-DD         and every active driver against their share
+                                  (api/target_month.js)
+     GET /api/export/target-month.xlsx
+         ?month=YYYY-MM           the Month target page as a workbook
 
    The arithmetic and every rule behind it live in api/revenue_target.js and
    api/today_workbook.js. Setting a target is the Owner's, re-confirmed, at
@@ -21,6 +27,7 @@
 import { monthTarget, validMonth, validDay } from './revenue_target.js';
 import { buildTodayWorkbook, TODAY_FILE_CLASSES } from './today_workbook.js';
 import { targetHours } from './target_hours.js';
+import { monthView, buildTargetMonthWorkbook, MONTH_FILE_CLASSES } from './target_month.js';
 
 export const HOURS_KEEP_MS = 30000;
 
@@ -48,6 +55,34 @@ export function targetRoutes(app, { q, wrap, log = null }) {
     res.set('Cache-Control', 'private, no-store');
     if (!kept.val || Date.now() - kept.at > HOURS_KEEP_MS) kept = { at: Date.now(), val: await targetHours(q) };
     return res.json(structuredClone(kept.val));
+  }));
+
+  /* The Month target page. Not kept like /hours: it is asked once a page
+     load rather than every minute, and the response cache never holds it —
+     /api/target is a prefix on api/cache.js NEVER, for the reason in this
+     file's header. */
+  app.get('/api/target/month', wrap(async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    const month = validMonth(req.query.month) ? String(req.query.month) : null;
+    const asof = validDay(req.query.asof) ? String(req.query.asof) : null;
+    return res.json(await monthView(q, { month, today: asof }));
+  }));
+
+  app.get('/api/export/target-month.xlsx', wrap(async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    const levels = req.fm?.kind === 'user' || req.fm?.kind === 'device' ? (req.fm.levels || {}) : null;
+    const hide = new Set(levels ? MONTH_FILE_CLASSES.filter((c) => levels[c] !== 'F') : []);
+    const month = validMonth(req.query.month) ? String(req.query.month) : null;
+    const t0 = Date.now();
+    const { wb, name, month: m, drivers, days } = await buildTargetMonthWorkbook({ q, month, hide });
+    const buf = wb.toBuffer();
+    res.setHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('content-disposition', `attachment; filename="${name}"`);
+    res.setHeader('content-length', String(buf.length));
+    res.setHeader('x-export-month', m);
+    if (hide.size) res.setHeader('x-export-withheld', [...hide].join(','));
+    log?.info?.('api', 'month target workbook', { month: m, drivers, days, bytes: buf.length, ms: Date.now() - t0 });
+    return res.end(buf);
   }));
 
   app.get('/api/export/today.xlsx', wrap(async (req, res) => {

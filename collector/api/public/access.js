@@ -181,6 +181,10 @@ export const VIEW_SUBJECT = Object.freeze({
   /* The first page, the month's target hour by hour (2026-10-02): about
      revenue; its trip counts follow the reader's BK level. */
   target: 'REV',
+  /* The Month target page (2026-10-08): the month's days against the target
+     and each driver against their share — revenue first; names follow ID,
+     a driver's gross EARN, trips BK, each said in words where withheld. */
+  'month-target': 'REV',
   'same-person': 'MRG', segment: 'COND', segments: 'COND', settings: 'CRED', settlement: 'REV',
   'settlement/cash': 'CASH', 'settlement/receivables': 'PAY', slot: 'BK', sources: 'SYS', supply: 'BK',
   'top-performers': 'ID', trip: 'BK', trips: 'BK', unauthorized: 'COND', unit: 'REV', 'unit/assets': 'VEH',

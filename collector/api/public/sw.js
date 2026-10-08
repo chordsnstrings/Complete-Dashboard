@@ -81,6 +81,8 @@ const SHELL_FILES = [
   '/target.js',
   /* app.js imports it: the first page, the target hour by hour (2026-10-02). */
   '/targetpage.js',
+  /* …and the Month target page beside it (2026-10-08), imported the same way. */
+  '/targetmonth.js',
   /* Sign-in and access: data.js imports ./access.js, which imports
      ./access_model.js — both on the phone's path to its first screen — and
      every page links /access.css. */

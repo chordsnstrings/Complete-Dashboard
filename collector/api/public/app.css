@@ -2823,6 +2823,63 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
 .hp.hp-near td:nth-child(3),.hp.hp-near th:nth-child(3){text-align:left}
 .hp-wrap,.targetnow.tg-page,.mf{min-width:0}
 [data-panel="tp-rev"] .tablewrap,[data-panel="tp-trips"] .tablewrap{overflow-x:auto}
+/* ── the Month target page (./targetmonth.js) ─────────────────────────────
+   The Target page's cells and key, its green and red, and two charts of its
+   own: the days (.mc — the target an outline, the gross a bar, the gap
+   printed above) and the month added up (.mp — the target's path, what was
+   earned, both paces to the month's end). */
+.mt-note,.mt-lede{margin:8px 0 0;max-width:var(--measure,80ch);color:var(--grey-strong)}
+.mt-lede{margin:0 0 8px}
+.mt-nav{margin-left:10px;white-space:nowrap}
+.mt-nav a + a{margin-left:10px}
+.mc,.mp{display:block;width:100%;height:auto;margin:4px 0}
+.mc .mc-base,.mp .mp-base{stroke:var(--grey);stroke-width:1}
+.mc .mc-grid,.mp .mp-grid{stroke:var(--rule);stroke-width:1}
+.mc .mc-y,.mc .mc-x,.mp .mp-y,.mp .mp-x,.mp .mp-tl{font-size:var(--t2);fill:var(--grey);font-variant-numeric:tabular-nums}
+.mc .mc-x.mc-xnow{fill:var(--ink);font-weight:600}
+.mc .mc-need{fill:none;stroke:var(--grey-strong);stroke-width:1}
+.mc .mc-future .mc-need{stroke:var(--grey);stroke-dasharray:3 2}
+.mc .mc-done{fill:var(--grey)}
+.mc .mc-over .mc-done{fill:var(--good)}
+.mc .mc-under .mc-done{fill:var(--critical)}
+.mc .mc-now .mc-done{fill:var(--ink)}
+.mc .mc-lab{font-size:var(--t2);font-weight:600;font-variant-numeric:tabular-nums}
+.mc .mc-lab.tg-over{fill:var(--good)}
+.mc .mc-lab.tg-under{fill:var(--critical)}
+.mp .mp-plan{fill:none;stroke:var(--grey);stroke-width:1.5}
+.mp .mp-earned{fill:none;stroke:var(--ink);stroke-width:2.5}
+.mp .mp-avg{fill:none;stroke:var(--grey-strong);stroke-width:1.5;stroke-dasharray:7 4}
+.mp .mp-recent{fill:none;stroke:var(--ink);stroke-width:1.5;stroke-dasharray:2 3}
+.mp .mp-target{stroke:var(--grey);stroke-width:1;stroke-dasharray:1 3}
+.mp .mp-today{stroke:var(--rule);stroke-width:1}
+.mp .mp-dot{fill:var(--ink)}
+.mp .mp-dot-avg{fill:var(--grey-strong)}
+.hp-key .mt-hk-wait{background:var(--grey)}
+.hp-key .mt-hk-plan,.hp-key .mt-hk-earned,.hp-key .mt-hk-avg,.hp-key .mt-hk-recent{width:18px;height:0;border:0;border-top:2px solid var(--grey)}
+.hp-key .mt-hk-earned{border-top:3px solid var(--ink)}
+.hp-key .mt-hk-avg{border-top:2px dashed var(--grey-strong)}
+.hp-key .mt-hk-recent{border-top:2px dotted var(--ink)}
+.mt-paces p{margin:0 0 4px;max-width:var(--measure,80ch);color:var(--grey-strong)}
+.mt-paces b{font-weight:600;color:var(--ink)}
+.mt-paces b.tg-over{color:var(--good)}
+.mt-paces b.tg-under{color:var(--critical)}
+.mt-pick{margin:14px 0 10px;align-items:center}
+.mt-pick button.chip{cursor:pointer}
+.mt-pick .mt-xlsx{margin-left:auto}
+.mt-xmsg{flex-basis:100%;text-align:right;font-size:var(--t4);color:var(--critical)}
+.mt-t{width:100%;border-collapse:collapse;font-size:var(--t4);font-variant-numeric:tabular-nums}
+.mt-t th,.mt-t td{padding:4px 12px 4px 0;text-align:right;white-space:nowrap;border-top:1px solid var(--rule)}
+.mt-t .l{text-align:left}
+.mt-t thead th{border-top:0;font-size:var(--t3);font-weight:600;color:var(--grey);vertical-align:bottom}
+.mt-t tbody th{font-weight:600;color:var(--ink)}
+.mt-t tfoot th,.mt-t tfoot td{font-weight:600;color:var(--ink);border-top:1.5px solid var(--ink)}
+.mt-t .tg-over{color:var(--good)}
+.mt-t .tg-under{color:var(--critical)}
+.mt-t .mt-dim{color:var(--grey);font-weight:400}
+.mt-t tr.mt-today{background:var(--paper-2,var(--surface-2))}
+.mt-t tr.mt-future{color:var(--grey)}
+.mt-rule{margin-top:10px}
+[data-panel="mt-days"] .tablewrap,[data-panel="mt-drivers"] .tablewrap{overflow-x:auto}
 @media (max-width:980px){
   .targetnow .tg-cells{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 0}
   .targetnow .tg-cell:nth-child(odd){padding-left:0;border-left:0}

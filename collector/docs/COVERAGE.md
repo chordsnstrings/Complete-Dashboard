@@ -4540,6 +4540,19 @@ untouched, and nothing projected is ever added into `accounted`.
   That route has no gate by the operator's ruling of 2026-10-07 ("stop admin
   token check on this one").
 
+* **A DAY "NOT SETTLED" HAS TWO CAUSES, AND THE WORDS MUST NAME THE ONE THAT
+  HOLDS.** `settledness()` (api/revenue_target.js) holds a day back when a
+  channel that has been collecting has not delivered it yet, OR when fewer
+  than 99% of its bookings carry a fare. The day's own `why` says which.
+  Since UBF-5 the second cause is the common one, so it is tempting to write
+  "waiting for Uber's fares" for every unsettled day. The Month target page's
+  first draft did exactly that, and the mock caught it: 31 August was 100%
+  priced and was held back only because a channel had not delivered it, yet
+  the page blamed Uber. A page that speaks about an unsettled day prints the
+  day's `why` (the month page: `trajectory.unsettled[].why`,
+  `drivers.left_out[].why`, a `title` on the table cell). Never a guessed
+  reason. `test/target_month.test.mjs` holds the channel case.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
@@ -8626,4 +8639,70 @@ driver status. They are 5 of the 7 "never sent anything" cars on #feeds.
     Ecosine's login alone. 3 checks fail against the old config.
   - `occupancy_sources`: fails 1 against the old notes.
   - `credential_silence` now refuses both logins.
+
+## The Month target page — built 2026-10-08
+
+`#month-target` (api/public/targetmonth.js) sits in TODAY next to Target.
+The operator asked for "a page for monthly view of the target, per day …
+daily targets, gross revenue from all platforms, how much was missed every
+day on one graph", "drivers who didn't earn target gross fare, or trip
+numbers, 30 of them, downloadable as an excel", and "what our current
+trajectory would mean for the end of the month". It reads
+`GET /api/target/month` (api/target_month.js) and the file
+`GET /api/export/target-month.xlsx`.
+
+**The days are the Target page's, not a second computation.** `monthView`
+runs `computeMonth` over the same span of days (`monthSpan`, now shared by
+both routes), so a day's target, gross and verdict cannot differ between the
+two pages. `test/target_month.test.mjs` compares the two routes field by
+field against a real schema.
+
+**A driver's target. This is a rule, not a measurement, so it is written
+here:**
+- **Money.** Each COUNTED day's PLAN is shared equally among that day's
+  active drivers. Active means a completed trip in the 8 Dubai days up to
+  and including the day, the 08:00 email's rule (`driversActiveOn`). A
+  driver's target is the sum of their shares. The targets therefore add up
+  to the fleet's plan for those days: every driver reaching theirs is the
+  fleet reaching its plan.
+- **Why the plan and not `needed`.** `needed` adds the month's shortfall
+  spread over the days left. Charging that shortfall to drivers on top of
+  the fleet would count it twice.
+- **Gross.** A driver's gross is their fares on every platform, before
+  commission, on the same days. That includes a charged cancellation,
+  because it is money the fleet earned through them.
+- **Trips.** The minimum (12) for every counted day the driver was active.
+- **An active driver who drove none of the counted days** still has a
+  target and shows as behind, with 0. That is the point of the list.
+- **Counted days are finished days that have SETTLED.** A day still waiting
+  is left out and named with its own reason; counting it would make every
+  driver look short by fares not yet published.
+- **One person on two platforms is one row.** Rows group by the stored
+  person key (`personKeyStored`), the same fold every other driver count
+  uses.
+- **Fares on a booking that names no driver** belong to nobody's row. They
+  are printed as "fares on no named driver", so the drivers' total and the
+  fleet's total reconcile.
+
+**The trajectory has two paces, and both are said as AED short of or over
+the target:**
+- **The average day so far × the days in the month.** This is exactly the
+  Target page's "At this pace" (`summary.month_end_pace`).
+- **The last 7 SETTLED days' average, carried over the days left (today
+  included) on top of what is earned.** This is the "current trajectory",
+  which a slow start or a recent change moves.
+- A past day not settled yet counts at what is on record, as on the Target
+  page, so both paces may read low until it settles. The page says so, with
+  that day's reason.
+- **A month that is over has no pace.** It shows what it came to, its days
+  on target, and its best and worst day. Its rate is described over the
+  cars of its own save, because today's fleet says nothing about August.
+
+**What this page does NOT know:**
+- A driver's hours online, so a target is per day ACTIVE, not per hour
+  driven.
+- Which of a driver's active days they were rostered off. A driver on
+  leave inside their 8-day window is asked for a full share.
+- Cash a driver collected but has not handed in. Gross is fares, not money
+  received.
 

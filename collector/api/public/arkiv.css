@@ -610,6 +610,13 @@
 :root[data-skin="arkiv"] .mf tbody th{font-family:var(--mono);font-size:var(--t3);letter-spacing:.06em;text-transform:uppercase}
 :root[data-skin="arkiv"] .hp tbody th,:root[data-skin="arkiv"] .hc .hc-x{font-family:var(--mono)}
 :root[data-skin="arkiv"] .hp-key{font-family:var(--mono);font-size:var(--t2);letter-spacing:.04em}
+/* The Month target page (./targetmonth.js): its tables and charts in the
+   skin's mono for figures and hairlines for rules, as the hours above. */
+:root[data-skin="arkiv"] .mt-t th,:root[data-skin="arkiv"] .mt-t td{border-top-color:var(--hair)}
+:root[data-skin="arkiv"] .mt-t thead th{font-family:var(--mono);letter-spacing:.07em}
+:root[data-skin="arkiv"] .mt-t tbody th,:root[data-skin="arkiv"] .mc text,:root[data-skin="arkiv"] .mp text{font-family:var(--mono)}
+:root[data-skin="arkiv"] .mc .mc-grid,:root[data-skin="arkiv"] .mp .mp-grid{stroke:var(--faint)}
+:root[data-skin="arkiv"] .mt-nav{font-family:var(--mono);font-size:var(--t3);letter-spacing:.04em}
 
 /* ── 4 · panels and grids ───────────────────────────────────────────────────
    panel() is unchanged — the .pbody body and the data-panel keys. The card

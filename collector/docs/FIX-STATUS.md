@@ -4423,3 +4423,22 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
   did not advance in that hour: it is published in batches, not trip by trip.
   Hourly asking is what catches a batch soon after it lands, whenever that is.
 
+## MT — the Month target page (2026-10-08)
+
+| id | fix | written | production | proven |
+|---|---|---|---|---|
+| MT-1 | `GET /api/target/month` (api/target_month.js): the month's days from `computeMonth` over the Target page's own span (`monthSpan`, now shared), both paces, and every active driver against their share; manifest entry (REV; driver rows dropped by fleet) | yes | pending deploy | target_month 59 — share `needed` instead of plan: 49/7; count unsettled days: 45/11; target only for who drove: 45/11 |
+| MT-2 | The page `#month-target` (api/public/targetmonth.js), in TODAY after Target, both skins: 00 the month, 01 day by day (one chart: target outline, gross bar, gap printed; table), 02 where the month lands (cumulative chart), 03 drivers behind target (30, money or trips) | yes | pending deploy | target_month 59 — client list order: 55/1; true reason for an unsettled day: 57/2; frozen classic recorded for `month-target` and `month-target/2026-08` |
+| MT-3 | `GET /api/export/target-month.xlsx` with sheets Month, Days, Behind on money (30), Behind on trips (30), All drivers; a class the role does not hold in full is written "(withheld)" | yes | pending deploy | target_month 59 — read back through `src/salary/xlsx.js`; ID and EARN withheld |
+
+What the first rendering found, and what was changed before commit:
+- **The page blamed Uber's fares for a day a channel had not delivered.**
+  Fixed: every "not settled" line now prints the day's own reason. Trap in
+  COVERAGE.
+- **A finished month said "AED 525 a car a day over 0 cars".** It was
+  counting today's fleet against August. Fixed: a finished month now uses
+  the cars of its own save.
+- **A finished month offered two "paces" over 0 days left.** Fixed: it now
+  shows what the month came to, its days on target, and its best and worst
+  day.
+

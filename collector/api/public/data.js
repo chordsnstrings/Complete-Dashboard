@@ -424,8 +424,10 @@ export const NO_PLATFORM_FLEET = ['driver', 'vehicle', 'property', 'coverage', '
    the call list is a worse first version than no chip. Split it when somebody
    asks for one fleet's list, and move this id to NO_RANGE at the same time. */
 export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights',
-  /* The target is the month's and today's, both fleets, every channel. */
-  'target',
+  /* The target is the month's and today's, both fleets, every channel. The
+     Month target page is the same month, so the same: its month is its own
+     address (#month-target/2026-09), never the range above it. */
+  'target', 'month-target',
   /* Sign-in and access pages: about people and settings, never a window. */
   'account', 'access', 'fleet-names', 'approvals',
   'online-time',

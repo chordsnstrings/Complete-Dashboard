@@ -232,6 +232,9 @@ export const APPLIES_WHY = {
   /* The first page (./targetpage.js): the month's target is set for the
      calendar month and both fleets together, and the hours are today's. */
   target: 'it is this month and today against the target set for both fleets on every channel',
+  /* The Month target page (./targetmonth.js): a calendar month, chosen by
+     its own address and the links either side of it. */
+  'month-target': 'it is one calendar month against the target set for both fleets on every channel, chosen on the page',
   /* NO_RANGE: the window and the grouping */
   reconcile: 'its rows are whole months',
   compare: 'it carries its own two days in its address',

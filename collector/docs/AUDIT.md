@@ -2460,3 +2460,31 @@ entry moved). test/vehicle_feeds_page.test.mjs reads the plate from the first
 line of the Vehicle cell, because the cell now also carries the marker. It
 asserts the Classic tile (2 on the mock, "1 never sent anything") and both
 markers. The page from before the tile fails it 39/3.
+
+## #month-target — built 2026-10-08
+
+Rendered against the mock with both clocks frozen (2026-10-08T08:00Z):
+Arkiv at 1440 and 390, classic at 1440, and `#month-target/2026-08` (a
+finished month) at 1440.
+
+- **Page errors and layout:** no page errors, no console errors. No
+  horizontal scroll at 390: tables scroll inside `.tablewrap`.
+- **Excel button:** "Excel ⤓ month" in the top bar. "Excel ⤓ every driver"
+  downloads `month-target-2026-10-as-of-2026-10-08.xlsx`.
+- **Money/trips switch:** works. `aria-pressed` follows the list.
+
+What was seen and fixed before commit:
+- A finished month said "over 0 cars" and showed paces over 0 days left.
+- A day a channel had not delivered was put down to Uber's fares.
+
+Details are in FIX-STATUS MT.
+
+What the page shows that the Target page does not:
+- Every day's target as an outline beside its gross, with the gap printed
+  in thousands over each judged day.
+- The month added up day by day, with both paces drawn to its end.
+- Every active driver against their share.
+
+At a 390px width, the chart drops the per-day figures rather than overprint
+them. The table under it carries every figure to the fils.
+
