@@ -84,6 +84,13 @@ const KEEP = '9e9060e7-0b8c-4f3b-8cd7-165d5eac55cd';
 const BOLT = '6623821';
 const BOLT2 = 'b17bcd50-e20b-4055-80d8-468131188397';
 const THREE = [KEEP, BOLT, BOLT2].sort();
+/* His hotel record, joined by the operator's review of 2026-10-08 (a link
+   confirmed on the Same person page, promoted with the rest — FROM_REVIEW).
+   The register's checks below are about the person, so they read all four;
+   the seeded databases in §2–§4 hold the three accounts this ruling was about,
+   and their checks stay on those three. */
+const HOTEL = '680790c003051f14d956b356';
+const FOUR = [KEEP, BOLT, BOLT2, HOTEL].sort();
 const SRC = readFileSync(new URL('../api/identity_map.js', import.meta.url), 'utf8');
 const V93 = readFileSync(new URL('../sql/schema_v93.sql', import.meta.url), 'utf8');
 const sorted = (a) => JSON.stringify([...a].sort());
@@ -92,8 +99,12 @@ const sorted = (a) => JSON.stringify([...a].sort());
 console.log('\nthe register: the pair is applied, on the ruling, with its evidence kept');
 
 const entries = MERGES.filter((m) => m.key === KEY);
-const entry = entries[0];
-check('the pair is applied — exactly one MERGES entry on the key', entries.length === 1,
+const entry = entries.find((m) => m.verified === '2026-09-29');
+/* One entry was this ruling's; the second is the review's (2026-10-08), the
+   hotel record, which is why the key carries two. */
+check('the pair is applied — exactly one 2026-09-29 entry on the key, and the review\'s hotel record beside it',
+  entries.length === 2 && entries.filter((m) => m.verified === '2026-09-29').length === 1
+  && entries.some((m) => m.verified === '2026-10-08' && m.merge.id === HOTEL && m.keep.id === KEEP),
   String(entries.length));
 check('both Bolt ids resolve to the Uber person\'s key',
   ALIAS_KEY.get(BOLT) === KEY && ALIAS_KEY.get(BOLT2) === KEY,
@@ -103,11 +114,12 @@ check('…and the Uber record keeps its own key — nothing moves but the alias'
 check('personOf answers the survivor\'s key for a Bolt id filed under the long name',
   personOf(BOLT, 'Ali Abbas Faiz Ahmed') === KEY && personOf(BOLT2, 'Ali Abbas Faiz Ahmed') === KEY,
   `${personOf(BOLT, 'Ali Abbas Faiz Ahmed')}`);
-check('asked from any of the three ids, the person is all three',
-  [KEEP, BOLT, BOLT2].every((id) => sorted(mergedIds(id)) === JSON.stringify(THREE)),
+check('asked from any of his ids, the person is all of them — the three this ruled on and his hotel record',
+  FOUR.every((id) => sorted(mergedIds(id)) === JSON.stringify(FOUR)),
   JSON.stringify(mergedIds(BOLT)));
-check('…filed under the survivor\'s name, on both channels',
-  canonicalName(BOLT) === 'Ali Abbas Ahmed' && sorted(mergedPlatforms(KEEP)) === '["bolt","uber"]',
+check('…filed under the survivor\'s name, on every channel',
+  canonicalName(BOLT) === 'Ali Abbas Ahmed' && canonicalName(HOTEL) === 'Ali Abbas Ahmed'
+  && sorted(mergedPlatforms(KEEP)) === '["bolt","hotel","uber"]',
   `${canonicalName(BOLT)} ${JSON.stringify(mergedPlatforms(KEEP))}`);
 check('the SQL the stored column is generated from carries both Bolt ids',
   identityCase('x', 'y').includes(`WHEN '${BOLT}' THEN '${KEY}'`)
@@ -142,13 +154,24 @@ check('it entered the way the Sana ruling did — a hand merge dated the ruling 
 /* The other four held-back pairs are not the operator's ruling and must not
    move with it. Pinned by key AND date, so moving one of them — or quietly
    dropping a contradiction date — reads here as what it is. */
-check('the other four held-back pairs are exactly as they were',
-  JSON.stringify(PENDING.map((m) => [m.key, m.contradictions])) === JSON.stringify([
+/* They did move, on 2026-10-08 — by the operator's own ruling, not with this
+   one. So the pin is now on where they went: applied, each still carrying the
+   dates it was held back over, under a ruling made over exactly those. */
+{
+  const HELD = [
     ['soaieed alom ali', ['2025-05-03']],
     ['tariq afzal', ['2026-06-10']],
     ['fayed ali muhammad', ['2025-12-21', '2025-12-23']],
     ['hammad ahmad', ['2025-07-02']],
-  ]), JSON.stringify(PENDING.map((m) => [m.key, m.contradictions])));
+  ];
+  const where = HELD.map(([k, dates]) => MERGES.find((m) => m.key === k
+    && JSON.stringify(m.contradictions) === JSON.stringify(dates)));
+  check('the other four held-back pairs were ruled on 2026-10-08, and kept their dates under that ruling',
+    PENDING.length === 0 && where.every((m, i) => m && m.ruling?.by === 'operator'
+      && m.ruling?.on === '2026-10-08'
+      && JSON.stringify(m.ruling.over) === JSON.stringify(HELD[i][1])),
+    JSON.stringify(where.map((m) => m && [m.key, m.ruling?.on, m.ruling?.over])));
+}
 
 /* The filter that kept contradicted pairs out of MERGES applies to CANDIDATES
    only, and HAND_MERGES has none — so the guard at import is what now stops
@@ -233,7 +256,8 @@ check('a different account under the same long name is NOT folded — ids, not n
     `SELECT driver_ext_id AS id, min(person_key) AS k FROM trip WHERE driver_ext_id = ANY($1::text[])
       GROUP BY 1`, [[BOLT, BOLT2]])).map((r) => [r.id, r.k]));
   check('the previous register\'s file is the real one minus exactly the pair',
-    previous !== V53 && count === 170 && !previous.includes(`'${BOLT}'`) && !previous.includes(`'${BOLT2}'`),
+    /* 170 when this ruling shipped; 504 since the review of 2026-10-08. */
+    previous !== V53 && count === 504 && !previous.includes(`'${BOLT}'`) && !previous.includes(`'${BOLT2}'`),
     `count ${count}`);
   await a.exec(previous);
   const was = await stored();

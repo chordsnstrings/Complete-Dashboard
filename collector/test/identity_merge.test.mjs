@@ -57,7 +57,7 @@ import { applySchema } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 import { MERGES, PENDING, REFUSED, ALIAS_KEY, foldName, mergedIds, canonicalName,
-  mergedPlatforms } from '../api/identity_map.js';
+  mergedPlatforms, personOf } from '../api/identity_map.js';
 import { personKey, personKeyStored, personFold, custodyNames, custodyRefs,
   custodyCountOverWindow, custodyOverWindow } from '../api/custody_sql.js';
 import { render } from '../bin/gen-schema-v53.mjs';
@@ -86,15 +86,23 @@ const ID_SHAPE = /^[0-9]{4,12}$|^[0-9a-f]{24}$|^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a
 /* The sizes, pinned. A register that grows is the normal case and these
    numbers are MEANT to be edited when it does — deliberately, by the person
    who grew it, and never silently by the sweep that produced the new rows. */
-const EXPECT = { merges: 132, pending: 4, refused: 2, people: 126, aliasIds: 170,
-  joined: 75, foldsTo: 319 };
+const EXPECT = { merges: 460, pending: 0, refused: 3, people: 237, aliasIds: 504,
+  joined: 143, foldsTo: 247 };
 /* 2026-09-29, the operator's ruling on Ali Abbas Ahmed: one entry out of
    PENDING and into MERGES (131 -> 132, pending 5 -> 4), a key the register
    had never applied (people 125 -> 126), both of its Bolt ids (alias ids
    168 -> 170). The fixture holds the Uber record 9e9060e7… and the Bolt UUID
    b17bcd50… as two directory rows, so the register now joins one more group
    over it (74 -> 75) and the roster folds one row further (320 -> 319). Every
-   one of those was measured by running this file, not computed by hand. */
+   one of those was measured by running this file, not computed by hand.
+
+   2026-10-08, the operator's review of the duplicates ("go through it
+   together"): 132 → 460 entries — one per alias ACCOUNT now, so a man with
+   three accounts is three entries on one key — over 126 → 237 people, 170 →
+   504 alias ids, PENDING 4 → 0 (all four ruled and applied), and REFUSED
+   2 → 3 (the Yango "MUHAMMAD KHALID", ruled "HR is right"). Over this file's
+   2026-09-03 roster the register now joins 143 groups and the 395 rows fold
+   to 247. Measured by running this file. */
 /* And by the date each sweep ran, so a batch arriving without the evidence
    shape its method produces shows up as a moved number rather than as
    nothing at all. */
@@ -114,15 +122,25 @@ const EXPECT = { merges: 132, pending: 4, refused: 2, people: 126, aliasIds: 170
    ORDER as well as contents: adding a hand merge at the front of HAND_MERGES
    put its date first in `got` and failed an assertion whose subject is how
    many entries each sweep contributed, not what order they iterate in. */
-const BY_DATE = { '2026-09-03': 3, '2026-09-05': 45, '2026-09-07': 82, '2026-09-22': 1,
-  '2026-09-29': 1 };
+/* 2026-10-08 is the operator's review: 324 FROM_REVIEW entries and five
+   HAND_MERGES — the four PENDING held, ruled, and Amshid Khan, whom the
+   register had split across two keys, moved off the phone sweep (82 → 81)
+   onto one. The 2026-09-05 sweep's applied count stays 45: the four left its
+   held-back list, not its applied one. */
+const BY_DATE = { '2026-09-03': 3, '2026-09-05': 45, '2026-09-07': 81, '2026-09-22': 1,
+  '2026-09-29': 1, '2026-10-08': 329 };
 const sortedEntries = (o) => JSON.stringify(Object.entries(o).sort((a, b) => a[0].localeCompare(b[0])));
 
 /* The control: a production record the register has never been told about.
    Whatever it does to the ninety, this man's key is his own folded name and
    his row does not move. */
-const UNTOUCHED = { id: '9efd4d0b-2db7-4f57-88e8-8450e2803f8f',
-  name: 'Muhammad Talha Faizullah', key: 'muhammad talha faizullah' };
+/* Was Muhammad Talha Faizullah (9efd4d0b…) until 2026-10-08, when the
+   operator's review joined him to his Bolt record — a control the register
+   now answers for is no control. Of the 395 fixture rows, eleven are still on
+   no entry, refused by none, alone on their folded name and on no register
+   key; this is one of them. */
+const UNTOUCHED = { id: '81a19c16-30bf-4321-b0c8-979ce54f97d5',
+  name: 'Rashid Meethale Kunhammad', key: 'rashid meethale kunhammad' };
 
 /* ══ 1. the register, before any database is involved ══════════════════ */
 console.log('\nthe register is a list somebody wrote down, with its reasons');
@@ -132,6 +150,8 @@ check(`it holds exactly the ${EXPECT.merges} entries somebody measured into it`,
 /* PENDING is the half of the sweep that did NOT get applied, and it has to
    stay unapplied: a day with both records in different cars at overlapping
    times is the one observation a shared phone cannot explain away. */
+/* None since 2026-10-08: the operator ruled on all four. The shape is kept so
+   a pair held back again is checked the same way. */
 check(`…and the ${EXPECT.pending} with a contradiction are held back, not applied`,
   PENDING.length === EXPECT.pending
   && PENDING.every((m) => m.contradictions.length > 0)
@@ -179,7 +199,17 @@ check('…and is what production already stores for that record',
    to trips, and these people's second records have none to be seen on. */
 {
   const fx = new Set(FX.rows.map((r) => r.id));
-  const keepsOff = MERGES.filter((m) => !fx.has(m.keep.id));
+  /* AGAINST THE REGISTER AS IT STOOD WHEN THE FIXTURE WAS TAKEN. The two
+     shape checks below are claims about a 2026-09-03 snapshot, and the
+     operator's review of 2026-10-08 was measured on production's directory
+     that day — 830 accounts, a month of new drivers later. Seventeen of its
+     survivors are Uber and Bolt records that started filing trips after the
+     snapshot (Leon Anthony Marcus, Javeed Ahmed Abuthahir, …), which says
+     nothing about the register and everything about the snapshot's age. So the
+     review is held to its own evidence in test/identity_register_counts.test.mjs
+     and api/identity_map.js's guard; these hold the earlier sweeps. */
+  const SNAP = MERGES.filter((m) => m.verified < '2026-10-08');
+  const keepsOff = SNAP.filter((m) => !fx.has(m.keep.id));
   const aliasIds = MERGES.flatMap(mergeIds);
   const aliasOn = aliasIds.filter((id) => fx.has(id)).length;
   /* Which CHANNELS a record off the fixture belongs to, rather than how many
@@ -201,7 +231,7 @@ check('…and is what production already stores for that record',
      people the trip table has never named, which is the entire point of
      joining on a phone number. Held as a shape, not a count: both sides must
      be roster-only channels, or the pair really is unaccounted for. */
-  const unseen = MERGES.filter((m) => !bothSides(m).some((id) => fx.has(id)));
+  const unseen = SNAP.filter((m) => !bothSides(m).some((id) => fx.has(id)));
   check('an entry production has never seen at all is a roster row on both sides',
     unseen.every((m) => ['hotel', 'yango'].includes(m.keep.channel)
       && ['hotel', 'yango'].includes(m.merge.channel)),
@@ -396,12 +426,19 @@ check(`the number of distinct people it reports falls by exactly ${395 - EXPECT.
   `${before.size} → ${after.size}`);
 
 console.log('\nand what it must never join');
+/* The stored key where the fixture holds the record, else the key the JS
+   computes for it. The Yango "MUHAMMAD KHALID" (refused 2026-10-08) filed no
+   trip by the snapshot's date, so it has no stored row here — and "absent from
+   the fixture" must not read as "two people" by way of `undefined !== key`. */
+const keyFor = (id, name) => stored.find((x) => x.id === id)?.person_key ?? personOf(id, name);
 for (const r of REFUSED) {
-  const a = stored.find((x) => x.id === r.a.id), b = stored.find((x) => x.id === r.b.id);
+  const a = keyFor(r.a.id, r.a.name), b = keyFor(r.b.id, r.b.name);
   check(`"${r.a.name}" and "${r.b.name}" are still two people`,
-    !!a && !!b && a.person_key !== b.person_key,
-    `${a?.person_key} vs ${b?.person_key}`);
+    !!a && !!b && a !== b, `${a} vs ${b}`);
 }
+check('…including the Yango MUHAMMAD KHALID, kept off the man the Same person page had joined him to',
+  keyFor('8089d680edf14bccb846737205b30520', 'MUHAMMAD KHALID') === 'muhammad khalid'
+  && keyFor('76ede4ae-768b-4126-804b-0b5c88043682', 'Muhammad Khalid') === 'muhammad khalifa afzal khalid');
 /* The widening that was considered and rejected. Sorting the folded words
    catches two of the three pairs and, on TODAY'S roster only, nothing else —
    but it is a rule about names, so it would fire on a name nobody has looked
@@ -808,7 +845,13 @@ for (const p of PAIRS) {
 }
 
 console.log('\nthe pairs that are two people are still two rows');
-for (const r of REFUSED) {
+/* The pairs this twelve-record directory seeds. The third refusal (the Yango
+   "MUHAMMAD KHALID", 2026-10-08) is a record with no trip on this fixture, so
+   it is asserted by key over the 395-row roster above; counted here so the
+   scoping cannot quietly empty the loop. */
+const SEEDED = REFUSED.filter((r) => [r.a.id, r.b.id].every((id) => REC.some((x) => x.id === id)));
+check('two of the three refused pairs are seeded here', SEEDED.length === 2, String(SEEDED.length));
+for (const r of SEEDED) {
   const a = row(r.a.id), b = row(r.b.id);
   check(`"${r.a.name}" and "${r.b.name}" have a row each`,
     !!a && !!b && a !== b && a.ids.length === 1 && b.ids.length === 1,

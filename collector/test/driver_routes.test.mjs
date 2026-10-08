@@ -521,8 +521,16 @@ console.log('\nthe account fold closes, whichever door it is entered by');
   check('all three doors return the SAME account set',
     JSON.stringify(seen.bolt) === JSON.stringify(seen.hotel)
     && JSON.stringify(seen.hotel) === JSON.stringify(seen.uber), JSON.stringify(seen));
-  check('…and that set is all three accounts, not two',
-    seen.bolt.length === 3, JSON.stringify(seen.bolt));
+  /* "All three" until 2026-10-08, when the operator's review gave the real
+     person behind HOTEL two more register accounts (his Bolt 6628504 and
+     Yango 518aacd8…, FROM_REVIEW). The property is the same one: the closure
+     returns EVERY account — the register's whole set for him plus the link's
+     one — and not the two a single pass reaches. */
+  const { mergedIds } = await import('../api/identity_map.js');
+  const every = [...new Set([...mergedIds(HOTEL), BOLTX])].sort();
+  check('…and that set is every account — the register\'s and the link\'s — not two',
+    JSON.stringify(seen.bolt) === JSON.stringify(every) && every.length === 5,
+    JSON.stringify(seen.bolt));
 }
 
 

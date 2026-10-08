@@ -427,6 +427,9 @@ const HAND_MERGES = Object.freeze([
       + 'under "amshid khan". This entry carries that phone evidence over and puts every record on the key '
       + 'his 1,606 Uber trips already carry; only the Bolt account\'s 384 trips change key. Completed trips at '
       + 'the same moment in two cars: none.',
+    caveat:
+      'The two Uber accounts carry the same name and only one has ever filed a trip; nothing measured says '
+      + 'why Uber issued him a second id. The phone tail is the roster\'s, from 2026-09-07, and was not re-read.',
   },
 ]);
 

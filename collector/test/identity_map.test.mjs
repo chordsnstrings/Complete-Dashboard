@@ -87,7 +87,7 @@ const OLD_ID = /^[0-9a-f]{24}$|^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{
 check('…and not one of them is a shape the register used to accept',
   numeral.every((i) => !OLD_ID.test(i)));
 check('the module imports anyway — the guard runs at import, so this is the assertion',
-  MERGES.length === 132 && PENDING.length === 4, `${MERGES.length} applied, ${PENDING.length} pending`);
+  MERGES.length === 460 && PENDING.length === 0, `${MERGES.length} applied, ${PENDING.length} pending`);
 /* The phone sweep is the one that grows: it re-runs on every roster pull, and
    the roster grows when a channel starts filing compliance rows. It went 45 to
    82 on 2026-09-07, when the Yango collector moved to fleet-api.yango.tech and
@@ -98,9 +98,16 @@ check('the module imports anyway — the guard runs at import, so this is the as
    One was scheduled, by the operator: on 2026-09-29 they ruled "Ali Abbas
    Ahmed" and "Ali Abbas Faiz Ahmed" one person, and that pair left the
    custody sweep for HAND_MERGES, dated the ruling day — so the sweep is 49,
-   and the fiftieth is asserted below where it went rather than here. */
+   and the fiftieth is asserted below where it went rather than here.
+
+   And on 2026-10-08 the operator ruled on the four the sweep still held back
+   (PENDING) — they left it for HAND_MERGES the same way, dated that day — and
+   the roster's Amshid Khan entry moved there too, re-keyed onto the one key
+   the register had split him across. 49 → 45 swept, 82 → 81 phone. The
+   review's own 324 entries (FROM_REVIEW) are dated 2026-10-08 and are
+   counted in test/identity_register_counts.test.mjs. */
 check('and the three sweeps are all still in it, at the sizes they came in at',
-  HAND.length === 3 && SWEPT.length === 49 && PHONE.length === 82,
+  HAND.length === 3 && SWEPT.length === 45 && PHONE.length === 81,
   `${HAND.length} hand / ${SWEPT.length} swept / ${PHONE.length} phone`);
 check('every id on either list is one of the four shapes production issues',
   ALL.every((m) => [m.keep.id, ...ids(m)].every(
@@ -132,10 +139,21 @@ check('…and nothing applied carries one that no ruling was made over',
   MERGES.every((m) => !(m.contradictions || []).length
     || (m.ruling?.on && m.ruling?.words && m.contradictions.every((d) => (m.ruling.over || []).includes(d)))),
   MERGES.filter((m) => (m.contradictions || []).length && !m.ruling).map((m) => m.key).join(', '));
-check('…and the one applied over a contradiction is the operator\'s 2026-09-29 ruling, and only it',
-  MERGES.filter((m) => (m.contradictions || []).length).map((m) => `${m.key} ${m.ruling?.on}`).join()
-    === 'ali abbas ahmed 2026-09-29',
-  MERGES.filter((m) => (m.contradictions || []).length).map((m) => m.key).join(', '));
+/* This read "the one applied over a contradiction is the operator's
+   2026-09-29 ruling, and only it" — true until 2026-10-08, when the operator
+   went through the duplicates and ruled 32 more entries (19 people) one person
+   over the completed trips that put them in two cars at once: the four PENDING
+   held, and the stray rows the review sheet showed beside each person. Every
+   one of them is an operator ruling, dated one of those two days, and the
+   count is pinned so a thirty-fourth arriving unannounced still fails here. */
+{
+  const over = MERGES.filter((m) => (m.contradictions || []).length);
+  const days = [...new Set(over.map((m) => `${m.ruling?.by} ${m.ruling?.on}`))].sort();
+  check('…and every one applied over a contradiction is an operator\'s ruling of 2026-09-29 or 2026-10-08',
+    over.length === 33 && JSON.stringify(days) === '["operator 2026-09-29","operator 2026-10-08"]'
+    && over.filter((m) => m.ruling.on === '2026-09-29').map((m) => m.key).join() === 'ali abbas ahmed',
+    `${over.length} entries: ${days.join(', ')}`);
+}
 check('the held-back five are wired to nothing a route calls',
   [...PENDING_ALIAS_KEY.keys()].every((i) => !ALIAS_KEY.has(i)),
   [...PENDING_ALIAS_KEY.keys()].filter((i) => ALIAS_KEY.has(i)).join(', '));
@@ -161,8 +179,9 @@ console.log('\nthe pairs, and the man each of them gives his work back to');
 /* Three the audit asked about by name, one from each sweep. */
 for (const [who, alias, keep, list] of [
   ['fahad ali',        '6610649', 'ec17d708-7879-42fc-90ec-6d19f01677fb', 'applied'],
-  ['hammad ahmad',     '7523458', 'd454e6b8-6d69-469e-91a5-37c174dac8fd', 'held back'],
-  ['soaieed alom ali', '6639200', 'fb7c2c86-4ba0-41d6-b73f-6e9dd77b08ff', 'held back'],
+  /* Held back until the operator's ruling of 2026-10-08; applied since. */
+  ['hammad ahmad',     '7523458', 'd454e6b8-6d69-469e-91a5-37c174dac8fd', 'applied'],
+  ['soaieed alom ali', '6639200', 'fb7c2c86-4ba0-41d6-b73f-6e9dd77b08ff', 'applied'],
   ['zubair khan shaukat ali', 'a83f63fc-88bb-4bbd-9ee3-55d5aeb00e8c',
    '67483c64055e070d791000e4', 'applied'],
 ]) {
@@ -254,9 +273,13 @@ check('…and an entry that would join a refused pair does not load',
 /* And the same shape one level up: two entries may share a KEY — three people
    are on the list twice, found by two sweeps independently — but they must
    name the same surviving record, or the key has quietly merged two men whose
-   folded names happen to match. */
-check('a key may carry more than one entry, and six of them do',
-  new Set(MERGES.map((m) => m.key)).size === 126,
+   folded names happen to match. Since the review of 2026-10-08 one entry is
+   written per alias ACCOUNT, so a person with three accounts is three entries
+   on one key: 237 people over 460 entries, 160 of them on more than one. */
+check('a key may carry more than one entry, and 160 of them do',
+  new Set(MERGES.map((m) => m.key)).size === 237
+  && Object.values(MERGES.reduce((o, m) => ((o[m.key] = (o[m.key] || 0) + 1), o), {}))
+    .filter((n) => n > 1).length === 160,
   `${new Set(MERGES.map((m) => m.key)).size} keys over ${MERGES.length} entries`);
 check('…but two entries claiming one key for two different survivors do not load',
   (await loadsWith("  {\n    key: 'abidullah safi',\n    keep:  { id: 'dae09063-88a3-432e-b39f-969d8de7992b'",

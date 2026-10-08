@@ -299,4 +299,16 @@ export const SCHEMA_FILES = [
   /* v100 (2026-10-06): sms_outbox kinds target_nudge and target_run for the
      13:00 / 18:00 goal texts (src/target_sms.js). test/target_sms.test.mjs. */
   'schema_v100.sql',
+  /* v101 (2026-10-08): the Yango "MUHAMMAD KHALID" (8089d680…) moved off the
+     person row of Muhammad Khalifa Afzal Khalid onto one of its own — the
+     operator: "unlink these two and put it back in queue". The spine never
+     detaches, so the link going back to the queue did not split the row. */
+  'schema_v101.sql',
+  /* v102 (2026-10-08): the operator's review of the duplicates, on the person
+     spine. 192 people ruled one person; those still on two person rows
+     because of ledger money are folded the way v93 folded Ali Abbas Ahmed,
+     with an audit row each, refused where an opening is on both rows or the
+     row that would fold holds somebody else's account.
+     test/identity_review_merge.test.mjs. */
+  'schema_v102.sql',
 ];

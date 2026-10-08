@@ -4606,6 +4606,28 @@ untouched, and nothing projected is ever added into `accounted`.
   never by a profile's `ids`. And do not separate two same-named men with
   these endpoints at all; that question goes to the operator.
 
+* **PUTTING A LINK BACK IN THE QUEUE DOES NOT SPLIT THE DRIVERS-PAGE ROW.**
+  `POST /api/same-person/decide {verdict:'undecided'}` clears `confirmed_at`
+  and the card is pending again, but the person spine (`src/persons.js`)
+  folded the two accounts onto one person row when the link was confirmed,
+  and the spine NEVER detaches — by design, because a row may carry money.
+  Measured 2026-10-08 on the Yango "MUHAMMAD KHALID" (8089d680…): link back
+  in the queue, and `/api/drivers/directory` still listed the account inside
+  Muhammad Khalifa Afzal Khalid. The product has no detach route; the split is
+  a recorded migration (`sql/schema_v101.sql`). Check the directory row, not
+  the link, after any un-confirm.
+
+* **A REGISTER MERGE DOES NOT FOLD TWO PERSON ROWS THAT CARRY MONEY.** The
+  spine folds a component's rows only while neither has a ledger or ledger-
+  audit row, and on this fleet almost every person row has one. So promoting
+  a ruled pair into `api/identity_map.js` fixes every `person_key` total and
+  leaves the Drivers page showing two rows. Measured 2026-10-08: 35 of the 192
+  people the operator ruled one person were still two rows. The operator's
+  ruling is the authorisation; the fold is a recorded migration that moves the
+  money with an audit row (`sql/schema_v93.sql`, `sql/schema_v102.sql`). After
+  any register change, group the directory by register key and look for a key
+  on two rows.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
@@ -8818,12 +8840,33 @@ back.
   onto the key his trips carry.
 - Every one of the 219 ruled people and pairs resolves to one key.
 
+**Afterwards, the same day — the Yango "MUHAMMAD KHALID" unlinked.** The
+operator: "unlink these two and put it back in queue". The link (basis
+`same_name`, confirmed 2026-09-21 with no reviewer recorded) was set back to
+unanswered through the page's own door, `POST /api/same-person/decide`
+`{verdict:'undecided'}` — that route takes no sign-in (see "IS
+UNAUTHENTICATED" above). It is in the queue now, pending. Nothing withdraws
+it: `src/name_proposals.js` never deletes a `same_name` row, and
+`src/identity_link.js` withdraws only the bases it writes. The register keeps
+the two apart in every total (REFUSED). The Drivers page row is split by
+`sql/schema_v101.sql`, because the spine never detaches (trap above).
+
+**And the Drivers page, for the ruled people with money on two rows.** The
+register fixed every `person_key` total, but 35 ruled people still sat on two
+person rows, nearly all carrying ledger money (trap above).
+`sql/schema_v102.sql` folds each of the 192 ruled people onto one row the way
+v93 folded Ali Abbas Ahmed: ledger, accounts, audit and SMS rows moved, one
+audit row per fold. It refuses a person whose two rows both hold an opening of
+the same kind, or whose second row holds somebody else's account; those stay
+apart with a REFUSED audit row and a warning.
+
 **Not done here, and why:**
-- **The link that joined the Yango "MUHAMMAD KHALID" to Muhammad Khalifa
-  Afzal Khalid is still confirmed in `driver_identity_link`.** Only a
-  signed-in person can reject it, on the Same person page. Until then the
-  Drivers page still shows that account under him, while every count keeps
-  it apart.
 - **The 48 other trip-less roster names, and the 30 pairs seen in two cars
   at once,** were left apart.
+- **Spelling-only look-alikes were not swept.** The sweep paired people who
+  share two distinctive name words, so a pair spelled differently in each word
+  is invisible to it. Noticed while choosing a test control: Uber
+  "Maimaitiyiming Abduduhaibaier" (369c8442…) and Bolt "Maimaitiyiming
+  Abuduhaibaier" (6997355) are on no entry together. Unmeasured; a question
+  for the next review, not a merge.
 

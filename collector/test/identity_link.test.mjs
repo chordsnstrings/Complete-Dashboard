@@ -187,19 +187,50 @@ check('a confirmation survives it too',
    none of the reasoning that settled it attached. A rule that re-raises a
    closed decision is a rule nobody trusts the second time. */
 {
-  const { PENDING, REFUSED } = await import('../api/identity_map.js');
+  const { PENDING, REFUSED, MERGES } = await import('../api/identity_map.js');
   const idsOf = (m) => (m.merge?.ids || [m.merge?.id]).filter(Boolean);
-  const heldBack = PENDING[0];
-  const [ka, kb] = [heldBack.keep.id, idsOf(heldBack)[0]];
-  const held = linksFrom([
-    { platform: 'uber', driver_ext_id: ka, full_name: heldBack.keep.name, phone: '971500001111' },
-    { platform: 'yango', driver_ext_id: kb, full_name: heldBack.merge.name, phone: '971500001111' },
-  ]);
-  check('a pair held back over a simultaneous trip is not proposed again',
-    held.links.length === 0, JSON.stringify(held.links.map((l) => l.canonical_name)));
-  check('…and the skip says a person already ruled on it',
-    held.skipped.some((sk) => /already looked at this pair/.test(sk.why)),
-    JSON.stringify(held.skipped.map((sk) => sk.why)));
+  /* 2026-10-08: PENDING IS EMPTY. The operator ruled on all four pairs it
+     held ("go through it together") and they are applied, in HAND_MERGES,
+     with the contradiction dates kept under the ruling. The checks on the
+     first held-back pair therefore run only while there is one; what replaces
+     them below is the guard that still has pairs to guard — every REFUSED
+     pair, the newest of which (the Yango "MUHAMMAD KHALID", ruled "HR is
+     right" that day) was CONFIRMED on the Same person page when it was ruled. */
+  if (PENDING.length) {
+    const heldBack = PENDING[0];
+    const [ka, kb] = [heldBack.keep.id, idsOf(heldBack)[0]];
+    const held = linksFrom([
+      { platform: 'uber', driver_ext_id: ka, full_name: heldBack.keep.name, phone: '971500001111' },
+      { platform: 'yango', driver_ext_id: kb, full_name: heldBack.merge.name, phone: '971500001111' },
+    ]);
+    check('a pair held back over a simultaneous trip is not proposed again',
+      held.links.length === 0, JSON.stringify(held.links.map((l) => l.canonical_name)));
+    check('…and the skip says a person already ruled on it',
+      held.skipped.some((sk) => /already looked at this pair/.test(sk.why)),
+      JSON.stringify(held.skipped.map((sk) => sk.why)));
+  } else {
+    const ruled = ['soaieed alom ali', 'tariq afzal', 'fayed ali muhammad', 'hammad ahmad'];
+    const applied = ruled.filter((k) => MERGES.some((m) => m.key === k
+      && m.ruling?.on === '2026-10-08' && (m.contradictions || []).length));
+    check('nothing is held back: the four pairs PENDING held are applied, each on a ruling over its dates',
+      applied.length === 4, applied.join(', '));
+  }
+  {
+    const KHALID = REFUSED.find((r) => r.a.id === '8089d680edf14bccb846737205b30520');
+    check('the Yango MUHAMMAD KHALID pair is REFUSED, against the Uber Muhammad Khalid',
+      KHALID?.b?.id === '76ede4ae-768b-4126-804b-0b5c88043682', JSON.stringify(KHALID?.b));
+    const missedRef = [];
+    for (const r of REFUSED) {
+      const out = linksFrom([
+        { platform: 'uber', driver_ext_id: r.b.id, full_name: r.b.name, phone: '971500001111' },
+        { platform: 'yango', driver_ext_id: r.a.id, full_name: r.a.name, phone: '971500001111' },
+      ]);
+      const why = out.skipped.some((sk) => /already looked at this pair/.test(sk.why));
+      if (out.links.length || !why) missedRef.push(r.a.name);
+    }
+    check('every refused pair, sharing a phone, is not proposed, and the skip says a person ruled on it',
+      missedRef.length === 0 && REFUSED.length === 3, missedRef.join(', ') || String(REFUSED.length));
+  }
   /* Every held-back pair, not just the first — and every id on it, because an
      alias is often two provider records and pairing only the first two would
      leave the rest reachable. */
@@ -320,11 +351,21 @@ console.log('\nthe directory folds the two records into one row');
 
   /* Opening EITHER account has to land on the same person, or the directory
      and the driver page give two answers to one question. */
+  /* "Both accounts" is the two this fixture seeds, PLUS whatever the register
+     files under the same person: since the operator's review of 2026-10-08
+     the register holds his Bolt and Yango ids as well (FROM_REVIEW, key
+     'muhammad khalifa afzal khalid'), and the profile unions those as it
+     should. So the check is the one that matters — both seeded ids are there,
+     and the register's set for him, nothing else — not a count of two. */
+  const { mergedIds } = await import('../api/identity_map.js');
+  const his = JSON.stringify([...new Set([KHALIFA[0].driver_ext_id, KHALIFA[1].driver_ext_id,
+    ...mergedIds(KHALIFA[0].driver_ext_id), ...mergedIds(KHALIFA[1].driver_ext_id)])].sort());
   for (const [which, id] of [['the hotel record', KHALIFA[0].driver_ext_id],
     ['the Uber record', KHALIFA[1].driver_ext_id]]) {
     const prof = await get(`/api/driver/profile?id=${id}&${W}`);
     check(`opening ${which} finds both accounts`,
-      prof.status === 200 && (prof.body?.ids || []).length === 2,
+      prof.status === 200 && JSON.stringify([...(prof.body?.ids || [])].sort()) === his
+      && !(prof.body?.ids || []).includes('8089d680edf14bccb846737205b30520'),
       JSON.stringify([prof.status, prof.body?.ids]));
     check(`…under the fuller name`,
       prof.body?.name === 'MUHAMMAD KHALIFA AFZAL KHALID', String(prof.body?.name));
