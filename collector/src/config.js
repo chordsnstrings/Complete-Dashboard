@@ -13,6 +13,8 @@ export const config = {
   get incrementalDays() { return getInt('INCREMENTAL_DAYS', Number(D.INCREMENTAL_DAYS)); },
   // CABMAN realtime GPS: fixed 5-minute refresh saved to telemetry_snapshot.
   get cabmanCron() { return get('CABMAN_CRON', D.CABMAN_CRON); },
+  // Uber's per-trip fares (payments report), asked hourly — src/run.js fareRefresh.
+  get faresCron() { return get('FARES_CRON', D.FARES_CRON); },
   get uberTimelineCron() { return get('UBER_TIMELINE_CRON', D.UBER_TIMELINE_CRON); },
   get uberRosterCron() { return get('UBER_ROSTER_CRON', D.UBER_ROSTER_CRON); },
   /* Areas holding a charging station, as they are written in trip addresses.

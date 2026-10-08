@@ -187,7 +187,7 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
     ['Completed', hid('BK', h.completed ?? null), 'int', null],
     ['Cancelled', hid('BK', h.not_completed ?? null), 'int', null],
     ['Trip value, estimated (AED)', money(h.expected_revenue ?? null), 'money',
-      h.expected_revenue != null ? 'Bookings with no price yet valued at what a booking on the same channel was worth over the settled days behind them. Uber prices a day overnight.' : null],
+      h.expected_revenue != null ? 'Bookings with no price yet valued at what a booking on the same channel was worth over the settled days behind them. Uber publishes fares hours after the ride; they are fetched every hour.' : null],
     ['Fares on record (AED)', money(h.revenue ?? null), 'money', h.priced != null && h.bookings != null ? `On ${h.priced} of ${h.bookings} bookings priced so far.` : null],
     ['Money in (AED)', money(h.accounted ?? null), 'money', 'Fares where a channel publishes one, the platform’s statement or payout where it publishes that instead — not the target’s measure.'],
     ['Booked km', hid('BK', h.booked_km ?? null), 'int', null],

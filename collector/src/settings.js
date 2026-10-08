@@ -51,6 +51,11 @@ export const SETTING_DEFAULTS = {
   CABMAN_EGARI_ID: '81',
   CABMAN_EGARI_USER: 'Egari_Luxury_Cars_Integration',
   CABMAN_CRON: '*/5 * * * *',
+  /* Uber's fares, hourly at five past — src/run.js fareRefresh says why. Five
+     past so it queues behind the :00 incremental and lands before the :15
+     rollup; hourly because Uber publishes a ride's fare hours after it and
+     the delay varies (measured 2026-10-07/08: 4 h one night, 15 h the next). */
+  FARES_CRON: '5 * * * *',
   /* Three-hourly, offset off the hour so it does not start alongside the
      thirty-minute incremental and compete with it for the same session. */
   UBER_TIMELINE_CRON: '17 */3 * * *',
@@ -337,6 +342,7 @@ export const SETTING_DEFS = [
   { key: 'BACKFILL_MONTHS', group: 'Collector', label: 'Backfill months', secret: false },
   { key: 'INCREMENTAL_DAYS', group: 'Collector', label: 'Incremental window (days)', secret: false },
   { key: 'CABMAN_CRON', group: 'Collector', label: 'CABMAN schedule (cron)', secret: false },
+  { key: 'FARES_CRON', group: 'Collector', label: 'Uber fares schedule (cron, UTC)', secret: false },
   { key: 'UBER_ROSTER_CRON', group: 'Collector', secret: false,
     label: 'Uber whole-roster timeline sweep (cron)',
     help: 'The deep repair pass: every driver on the roster, thirty days back. The three-hourly '

@@ -68,8 +68,8 @@
    timing; with fewer than HISTORY_MIN_DAYS live days the clock stands in,
    and the panel says so.
 
-   REVENUE TODAY IS AN ESTIMATE, AND SAYS SO. Uber prices a day overnight, so
-   most of today's fares are not on record yet. The page's live strip already
+   REVENUE TODAY IS AN ESTIMATE, AND SAYS SO. Uber publishes a day's fares hours behind the ride (fetched hourly), so
+   the latest hours' fares are not on record yet. The page's live strip already
    values the unpriced bookings at each channel's per-booking rate over its
    settled days (api/day_routes.js buildDay); that very estimate is spread
    over the hours here, each channel's projected value in proportion to its

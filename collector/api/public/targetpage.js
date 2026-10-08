@@ -37,7 +37,7 @@
    STILL ARRIVING: its bar is grey, and its words say how it stands SO FAR
    against what the usual day had reported of it by now. Every coloured
    figure carries ▲ or ▼ and a word. Revenue today is an estimate until Uber
-   prices the day overnight, and is marked ≈. */
+   publishes the day's fares (hours behind the ride; fetched hourly), and is marked ≈. */
 import { api, alive, currentGen, href } from './data.js';
 import { el, esc, money, countOf, sourceLabel, panel, secHead, loading, contract } from './ui.js';
 import { fmt } from './charts.js';
@@ -117,7 +117,7 @@ export function todayHtml(h) {
       !rOk ? R.absent : null]),
     cell('Done so far', rOk ? approx(R.done, est) : trips(P.done), [
       rOk && pOk ? trips(P.done) : null, cut,
-      est ? 'Revenue ≈ an estimate until Uber prices the day overnight' : null]),
+      est ? 'Revenue ≈ an estimate until Uber publishes the day’s fares (fetched every hour)' : null]),
     cell('Left for today', rOk ? approx(R.left, est) : trips(P.left), [rOk && pOk ? trips(P.left) : null]),
     cell(`Right now, ${h.clock}`, rOk ? sign(R.ahead, (v) => `${est ? '≈ ' : ''}${money(v)}`) : sign(P.ahead, trips), [
       rOk ? { text: `the usual day had ${money(R.need_by_now)} reported by now` } : null,
@@ -241,7 +241,7 @@ export function hoursHtml(x, h, { isMoney }) {
   const timing = x.timing?.why ? ` ${x.timing.why}`
     : x.timing?.days ? ` “Due by now” is what the usual day had reported by this time of day — a trip reaches us after it is over — over the ${countOf(x.timing.days, 'day')} collected live; an hour gone is still arriving while the usual day would add more of it within the hour.` : '';
   const basis = `<p class="cap hp-basis">${esc(`Each hour’s target is today’s ${plain(x.target)} × the share of a day’s ${isMoney ? 'fares' : 'completed trips'} that hour carried over the last ${countOf(x.basis?.days, 'day')} (${x.basis?.from} to ${x.basis?.to}). “To land the day” shares what is still to do over the hours left in the same proportions.${timing}`)}`
-    + (est ? ` ${esc('Today’s revenue is the live strip’s estimate — fares on record plus each channel’s unpriced bookings at its settled per-booking rate — until Uber prices the day overnight.')}` : '') + '</p>';
+    + (est ? ` ${esc('Today’s revenue is the live strip’s estimate — fares on record plus each channel’s unpriced bookings at its settled per-booking rate — until Uber publishes the day’s fares, which are fetched every hour.')}` : '') + '</p>';
   return `${head}${hourChart(x, { isMoney })}${key}`
     + `<div class="tablewrap"><table class="hp"><thead><tr><th scope="col">Hour</th><th scope="col">Usually</th><th scope="col">Target</th>`
     + `<th scope="col">Done</th><th scope="col">On target?</th><th scope="col">To land the day</th><th scope="col">Running, done / target</th></tr></thead>`

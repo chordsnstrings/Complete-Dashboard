@@ -1,3 +1,4 @@
+import { TRIP_RUN_SQL } from './run_kinds.js';
 /* The channels this deployment collects bookings from — including the ones
    that answer with nothing.
    ─────────────────────────────────────────────────────────────────────────
@@ -56,6 +57,7 @@ export function channelHealthSql() {
   return `SELECT DISTINCT ON (source, fleet_id) source, fleet_id, status, error,
                  rows_written, finished_at
             FROM collection_run
+           WHERE ${TRIP_RUN_SQL}
            ORDER BY source, fleet_id, finished_at DESC NULLS LAST`;
 }
 

@@ -167,16 +167,18 @@ export async function todayLive({ quiet = false } = {}) {
    On production at 07:15 the band read "AED 964 in fares on 15 of 56 priced
    so far", which is true and, without this, unexplained. Uber carries no fare
    on its trip export at all: the price arrives on a separate PAYMENTS report
-   asked for a whole week at a time, and that report has a generation cap of
-   its own — so it is walked on the nightly catch-up and the Sunday backfill,
-   never on the half-hourly incremental. Every other channel prices a booking
-   on the trip row the same day.
+   asked for a whole week at a time, which Uber publishes hours behind the
+   ride (4 h one night, 15 h the next, measured 2026-10-07/08) — so it is read
+   every hour by src/run.js fareRefresh, plus the nightly catch-up and the
+   Sunday backfill, never on the half-hourly incremental. Every other channel
+   prices a booking on the trip row the same day.
 
    A low ratio here is therefore a schedule, not a hole, and the difference
    matters: one is worth investigating and the other is worth waiting for. */
 export const FARES_LAG = 'Uber carries no fare on its trip export \u2014 the price arrives '
-  + 'on a separate weekly report, walked overnight, so today\u2019s Uber bookings are priced '
-  + 'by the morning rather than as they happen. Every other channel prices a booking as it lands.';
+  + 'on a separate payments report that Uber publishes hours after the ride, sometimes most of a '
+  + 'day later, and that is read every hour, so today\u2019s Uber bookings are priced hours behind '
+  + 'rather than as they happen. Every other channel prices a booking as it lands.';
 
 /* The one sentence both shells lead with, so they cannot word it differently. */
 export const todayLede = (t) => (t.started

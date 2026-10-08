@@ -34,6 +34,7 @@
    its text is dropped and the email says so; the figures never depend on it. */
 import { buildDay } from '../api/day_routes.js';
 import { personKey } from '../api/custody_sql.js';
+import { TRIP_RUN_SQL } from '../api/run_kinds.js';
 import { http as realHttp } from './http.js';
 import { config } from './config.js';
 import { get } from './settings.js';
@@ -123,11 +124,11 @@ export async function channelsCollected(q, day) {
     `WITH expected AS (
        SELECT DISTINCT source, fleet_id FROM collection_run
         WHERE source IN ('uber', 'bolt', 'yango', 'hotel') AND fleet_id IS NOT NULL
-          AND status IN ('ok', 'partial') AND finished_at >= $1::date - 14),
+          AND status IN ('ok', 'partial') AND ${TRIP_RUN_SQL} AND finished_at >= $1::date - 14),
      delivered AS (
        SELECT DISTINCT source, fleet_id FROM collection_run
         WHERE source IN ('uber', 'bolt', 'yango', 'hotel') AND fleet_id IS NOT NULL
-          AND status IN ('ok', 'partial') AND window_end >= $1::date
+          AND status IN ('ok', 'partial') AND ${TRIP_RUN_SQL} AND window_end >= $1::date
           AND finished_at >= (($1::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai'))
      SELECT e.source, e.fleet_id, (d.source IS NOT NULL) AS delivered
        FROM expected e LEFT JOIN delivered d USING (source, fleet_id)

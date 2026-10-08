@@ -28,6 +28,7 @@ import { PENDING, REFUSED } from '../api/identity_map.js';
 import { attributionJoin, ATTRIBUTION_COLS } from '../api/unauthorized_sql.js';
 import { occCountsOnce } from '../api/occupancy_sql.js';
 import { placeEnds } from '../api/place_sql.js';
+import { TRIP_RUN_SQL } from '../api/run_kinds.js';
 
 /* ── Dubai's calendar (UTC+4, no daylight saving) ───────────────────────── */
 const DXB_MS = 4 * 3600_000;
@@ -214,11 +215,11 @@ const BOOKING_SOURCES = ['uber', 'bolt', 'yango', 'hotel'];
    days, so for an older journey "a run ended on or after its day" was true of
    every run and said nothing about the day itself — only the nightly 30-day
    catch-up fetches it, and on 2026-09-30 that run failed for Bolt Ecosine. */
-async function collectedPairs(q, day, since) {
+export async function collectedPairs(q, day, since) {
   const rows = await q(
     `SELECT source, fleet_id FROM collection_run
       WHERE source = ANY($3::text[]) AND fleet_id IS NOT NULL
-        AND status IN ('ok', 'partial') AND finished_at >= $2
+        AND status IN ('ok', 'partial') AND finished_at >= $2 AND ${TRIP_RUN_SQL}
         AND window_start <= $1::date AND window_end >= $1::date
       GROUP BY 1, 2`, [day, since.toISOString(), BOOKING_SOURCES]);
   return new Set(rows.map((r) => `${r.source}:${r.fleet_id}`));
@@ -642,6 +643,7 @@ async function recheckChannelDown({ q, now, send, pb, dual }) {
     const [{ last }] = pairs.length ? await q(
       `SELECT max(finished_at) AS last FROM collection_run
         WHERE source || ':' || fleet_id = ANY($1::text[]) AND status IN ('ok', 'partial')
+          AND ${TRIP_RUN_SQL}
           AND window_start <= $2::date AND window_end >= $2::date AND finished_at >= $3`,
       [pairs, d.day, d.end.toISOString()]) : [{ last: null }];
     if (last && !(new Date(s.ingested_at) > new Date(last))) continue;

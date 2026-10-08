@@ -42,6 +42,7 @@
    in api/custody_sql.js because it has been needed in five places now and each
    copy is a chance to join on the wrong pair of columns. */
 import { peopleCountStored, JOIN_TRIP } from './custody_sql.js';
+import { TRIP_RUN_SQL } from './run_kinds.js';
 
 export function compareRoutes(app, { q, wrap }) {
   const num = (v) => (v == null ? null : Number(v));
@@ -279,7 +280,7 @@ export function compareRoutes(app, { q, wrap }) {
       q(`SELECT source, max(finished_at) AS last_run,
                 max(finished_at) FILTER (WHERE status = 'ok') AS last_ok,
                 sum(rows_written) FILTER (WHERE finished_at > now() - interval '24 hours')::int rows_24h
-           FROM collection_run WHERE finished_at IS NOT NULL
+           FROM collection_run WHERE finished_at IS NOT NULL AND ${TRIP_RUN_SQL}
           GROUP BY 1 ORDER BY 1`, []),
     ]);
 

@@ -49,6 +49,7 @@ import { minTrips, ACTIVE_DAYS } from './low_trips_email.js';
 import { targetHours } from '../api/target_hours.js';
 import { placeAt } from '../api/place_sql.js';
 import { occCountsOnce } from '../api/occupancy_sql.js';
+import { TRIP_RUN_SQL } from '../api/run_kinds.js';
 
 export const SLOTS = Object.freeze({ 13: { from: 13, to: 16, label: '1-5 PM' }, 18: { from: 18, to: 21, label: '6-10 PM' } });
 export const ON_PACE = 0.85;          // at or above this share of need-by-now, nothing is sent
@@ -140,10 +141,11 @@ async function people(q, today, now) {
 
 /** platform:fleet pairs whose booking collector finished ok/partial within
  *  FRESH_CHANNEL_MIN over a window covering today. */
-async function freshChannels(q, today, now) {
+export async function freshChannels(q, today, now) {
   const rows = await q(
     `SELECT source, fleet_id FROM collection_run
       WHERE status IN ('ok', 'partial') AND fleet_id IS NOT NULL AND finished_at >= $2
+        AND ${TRIP_RUN_SQL}
         AND window_start <= $1::date AND window_end >= $1::date
       GROUP BY 1, 2`, [today, new Date(now.getTime() - FRESH_CHANNEL_MIN * 60000).toISOString()]);
   return new Set(rows.map((r) => `${r.source}:${r.fleet_id}`));

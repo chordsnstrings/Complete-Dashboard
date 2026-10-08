@@ -4378,9 +4378,11 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
 | id | fix | written | production | proven |
 |---|---|---|---|---|
 | UBF-1 | `fareRefresh(2)` at 09:00 Dubai: `uber.collect({mode:'fares'})` runs the fare walk only, queued with the other collections | yes | pending deploy | uber_fares_mode 5 (gating off: 4/1); credential_save_check 109 (lists it as a pinned unit) |
-| UBF-2 | Payout audit annotates a held wire with `UPDATE`, not a NOT-NULL-violating upsert; write step extracted as `recordWires` | yes | pending deploy | payout_audit_orders 18 (old upsert: 14/4, with production's exact error) |
+| UBF-2 | Payout audit annotates a held wire with `UPDATE`, not a NOT-NULL-violating upsert; write step extracted as `recordWires` | yes | **on production, verified** | payout_audit_orders 18 (old upsert: 14/4, with production's exact error) |
 | UBF-3 | Settings → "Fetch Uber fares (last 2 days)" queues job mode `fares` (= fareRefresh(2)) on demand; route_smoke now fails any queued mode with no worker branch (an unwired mode silently ran as an incremental) | yes | pending deploy | route_smoke 60 (worker line removed: 59/1); classic settings frozen hash re-recorded for the new button only |
 | UBF-4 | The fares button posts to its own `POST /api/uber/fares/run`, with no admin token (operator's ruling, 2026-10-07), a duplicate guard (409) and a manifest entry with cap collector.run | yes | **on production 06e4b93, verified** | fares_run_open 4, against the real adminGate with a synthetic token (route gated: 1/3) |
+| UBF-5 | Fares hourly (`FARES_CRON` '5 * * * *', a Settings key) in place of once at 09:00 Dubai; every user-facing "Uber prices … overnight" sentence made true (Target both skins, Today `FARES_LAG`, settled reason, two workbooks) | yes | pending deploy | uber_fares_mode 8 (old once-a-day default: 7/1); revenue_target 85, today_band 38, money_workbook 42 updated to the new wording |
+| UBF-6 | `api/run_kinds.js` TRIP_RUN_SQL: fares and payout runs no longer count as a day's bookings collected — SMS freshness ×3, Target settled rule, report data health, channel health, compare, money workbook | yes | pending deploy | trip_runs_only 8 (rule off: 4/4; not NULL-safe: 7/1) |
 
 - **UBF-4 proven on production (2026-10-07).** A POST with no token was
   accepted (job 56) and claimed at 07:50Z. It waited behind the incremental,
@@ -4393,4 +4395,18 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
   order at Uber yet. That is Uber's lag, not ours: asking sooner cannot fetch
   a price Uber has not issued. Whether 09:00 is late enough to settle the day
   before is what the 2026-10-08 check measures.
+
+- **Why UBF-5/6 (2026-10-08).** The operator: "There's something wrong with
+  6th data. It can't still be not complete." By then 6 Oct was complete
+  (settled 01:42 Dubai on the 8th; 99.89%; AED 57,488.79; 851 of 851
+  completed Uber trips priced; no duplicate trip ids, and no same-driver pair
+  within two minutes that both completed). But it had taken 29 hours, and the
+  09:00 pass (UBF-1) had not helped: Uber's report was still cut at about
+  21:10 Dubai on the 6th at 11:55 on the 7th. A pass run at 07:07 Dubai on the
+  8th completed 7 Oct (100%, AED 54,817.79) and released that morning's cash
+  texts. Measurements are in COVERAGE.
+- **UBF-2 proven on production.** The 23:40 UTC audit on 2026-10-07 read both
+  fleets' window 2026-08-10..2026-09-09 without the paid_on error:
+  ecosine 10,310 rows / 5 wires, egari 4,533 / 5; added 0, disagreed 0. The
+  two nights before, it threw on both fleets.
 

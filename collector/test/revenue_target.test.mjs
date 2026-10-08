@@ -144,7 +144,7 @@ check('a run whose window does not cover the day does not count for it (a later 
   settledness(f3, '2026-09-13').missing.length === 1 && settledness(f3, '2026-09-14').missing.length === 0);
 const d12 = m3.days.find((x) => x.day === '2026-09-12');
 check('fewer than 99% of a day’s bookings priced: not settled, and it says Uber prices overnight',
-  d12.settled === false && /only 97\.0% of Sat 12 Sep’s bookings carry a fare yet — Uber prices a day overnight/i.test(d12.why || ''), j(d12));
+  d12.settled === false && /only 97\.0% of Sat 12 Sep’s bookings carry a fare yet — Uber publishes fares hours after the ride, sometimes most of a day later, and they are fetched every hour/i.test(d12.why || ''), j(d12));
 const d11 = m3.days.find((x) => x.day === '2026-09-11');
 check('a settled day is judged: over', d11.settled === true && d11.verdict === 'over' && !d11.provisional, j(d11));
 const f3b = mk({ fares: { ...fares1, '2026-09-13': 400 }, cars: cars1, runs });

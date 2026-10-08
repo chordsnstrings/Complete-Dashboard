@@ -135,7 +135,7 @@ check('a card-only driver is not on the cash sheet', !cc.some((r) => r.Driver ==
 
 const rm = text(all.file, 'Read me');
 check('the notes give the definition in words', /To hand in = cash from trips \+ advances recorded − hand-ins recorded/.test(rm));
-check('…name the platform whose trips are not priced, and why', /Uber: 1 cash trip has no amount yet — Uber prices a trip only when its nightly catch-up/.test(rm));
+check('…name the platform whose trips are not priced, and why', /Uber: 1 cash trip has no amount yet — Uber publishes a trip’s amount on its payments report hours after the ride/.test(rm) && /read every hour/.test(rm));
 check('…say a failed collection by name', /Bolt — Ecosine \| The latest collection \(2026-09-07 23:55\) FAILED; the last good one was 2026-09-06 00:00/.test(rm), rm.split('\n').filter((l) => /Bolt —/.test(l)).join(' / '));
 check('…say payouts are by the day they arrived', /Listed by the day the money ARRIVED/.test(rm) && /Yango \| Yango does not publish a transfer/.test(rm));
 check('…and carry the summary total to hand in', (sheetNamed(all.file, 'Read me').rows.find((r) => r[0] === 'To hand in (AED)') || [])[1] === 67 + 77.5 + 16.25 + 12 + 60);

@@ -276,10 +276,12 @@ async function main() {
        analyst so three heavy passes do not land together. */
     cron.schedule('0 21 * * *', () => catchUp(30)
       .catch((e) => log.error('scheduler', 'catch-up', { err: String(e) })));
-    /* 09:00 Dubai (05:00 UTC): the same fare walk for the last two days, so
-       yesterday's Uber prices land the same morning instead of the next night.
-       src/run.js fareRefresh says why. */
-    cron.schedule('0 5 * * *', () => fareRefresh(2)
+    /* Every hour (FARES_CRON, five past, UTC): the fare walk alone for the
+       last two days. Once at 09:00 Dubai was not enough — see src/run.js
+       fareRefresh: Uber publishes fares hours behind the ride, so a day is
+       complete whenever Uber gets there, and the hour after that is when it
+       lands here. The 05:00 Dubai cash texts and the 07:00 report read it. */
+    cron.schedule(config.faresCron, () => fareRefresh(2)
       .catch((e) => log.error('scheduler', 'fare refresh', { err: String(e) })));
     cron.schedule('0 22 * * 0', () => backfill()
       .catch((e) => log.error('scheduler', 'weekly backfill', { err: String(e) })));

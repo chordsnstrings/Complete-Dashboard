@@ -35,6 +35,7 @@
 import { Workbook } from '../src/xlsx_write.js';
 import { phoneFor, HOLD_WHY, loadPhoneBook } from '../src/driver_sms.js';
 import { uaeMobile } from '../src/smsala.js';
+import { TRIP_RUN_SQL } from './run_kinds.js';
 import { ALL_PAYOUTS, PAYOUT_PROVIDERS } from './payout_routes.js';
 
 /* Every trip is one row each on the Trips sheet up to this many days. A
@@ -281,7 +282,7 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
               (array_agg(status ORDER BY started_at DESC))[1] AS latest_status,
               ${DUBAI_AT('max(started_at)')} AS latest_at
          FROM collection_run
-        WHERE source IN ('uber', 'bolt', 'yango', 'hotel') AND fleet_id IS NOT NULL
+        WHERE source IN ('uber', 'bolt', 'yango', 'hotel') AND fleet_id IS NOT NULL AND ${TRIP_RUN_SQL}
         GROUP BY 1, 2 ORDER BY 1, 2`),
     q(`SELECT platform, driver_ext_id, phone FROM driver_compliance
         WHERE phone IS NOT NULL AND btrim(phone) <> ''`),
@@ -380,7 +381,7 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
   for (const [p, n] of Object.entries(unpricedBy).sort()) {
     rm.text(`${plat(p)}: ${n.toLocaleString('en')} cash trip${n === 1 ? ' has' : 's have'} no amount yet — `
       + (p === 'uber'
-        ? 'Uber prices a trip only when its nightly catch-up (01:00 Dubai) or the Sunday backfill reads the payments report, so the latest days fill in overnight.'
+        ? 'Uber publishes a trip’s amount on its payments report hours after the ride, sometimes most of a day later; that report is read every hour, so the latest trips fill in as Uber publishes them.'
         : `${plat(p)} sent no fare for ${n === 1 ? 'it' : 'them'}.`)
       + ' They are counted under “Not priced yet” and are in no amount.');
   }

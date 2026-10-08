@@ -69,6 +69,7 @@ import { personKeyStored } from './custody_sql.js';
 import { dubaiDay } from './window.js';
 import { getConfig, setConfig } from './access/service.js';
 import { appendAudit } from './access/audit.js';
+import { TRIP_RUN_SQL } from './run_kinds.js';
 
 /* The booking channels whose collection decides whether a day is complete.
    The FMS tracker's journeys are in `trip` too, and are not bookings. */
@@ -148,6 +149,7 @@ export async function loadFacts(q, from, to) {
               to_char(window_end, 'YYYY-MM-DD') AS we, max(finished_at) AS fin
          FROM collection_run
         WHERE source = ANY($3::text[]) AND fleet_id IS NOT NULL AND status IN ('ok', 'partial')
+          AND ${TRIP_RUN_SQL}
           AND finished_at >= $1::date - 14 AND window_end >= $1::date - 1 AND window_start <= $2::date
         GROUP BY 1, 2, 3, 4`, [from, to, BOOKING_SOURCES]),
   ]);
@@ -201,7 +203,7 @@ export function settledness(facts, day) {
   }
   if (coverage < SETTLED_COVERAGE) {
     why.push(`only ${(Math.floor(coverage * 10) / 10).toFixed(1)}% of ${shortDay(day)}’s bookings carry a fare yet `
-      + '— Uber prices a day overnight');
+      + '— Uber publishes fares hours after the ride, sometimes most of a day later, and they are fetched every hour');
   }
   return { settled: !why.length, missing, coverage: r2(coverage), why: why.length ? `${cap(why.join('; '))}.` : null };
 }

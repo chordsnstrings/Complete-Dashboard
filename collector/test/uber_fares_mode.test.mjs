@@ -62,6 +62,24 @@ const runs = runRows.map((r) => r.mode);
 check('…and records its run under its own mode, so /api/status can tell it from a catch-up',
   runs.includes('fares'), JSON.stringify(runs));
 
+console.log('\nthe schedule: every hour, before the page refresh and the morning texts');
+/* Once at 09:00 Dubai was the first version of this, and it was measured
+   insufficient (src/run.js fareRefresh): Uber publishes a ride's fare hours
+   later by a delay that changed from 4 h to 15 h between two nights, and the
+   05:00 Dubai cash texts wait for every Uber cash trip's amount. Hourly, at a
+   minute before the :15 rollup. */
+{
+  const { config } = await import('../src/config.js');
+  const { SETTING_DEFS } = await import('../src/settings.js');
+  const [min, hour, dom, mon, dow] = String(config.faresCron).trim().split(/\s+/);
+  check('the fare pass runs every hour of every day', hour === '*' && dom === '*' && mon === '*' && dow === '*',
+    config.faresCron);
+  check('…at a fixed minute before the :15 rollup, so pages refresh with the new fares',
+    /^\d+$/.test(min) && Number(min) < 15, config.faresCron);
+  check('…and the schedule is a Settings key, not a constant nobody can see',
+    SETTING_DEFS.some((d) => d.key === 'FARES_CRON' && d.secret === false));
+}
+
 console.log('\nthe half-hourly incremental is unchanged');
 asked.length = 0;
 await collect({ from, to, mode: 'incremental' });

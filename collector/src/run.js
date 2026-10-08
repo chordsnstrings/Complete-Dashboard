@@ -436,17 +436,33 @@ export const incremental = (onProgress, fleet = null, jobId = null) =>
 export const catchUp = (days = 30, onProgress, fleet = null, jobId = null) =>
   runWindow('catchup', daysAgo(days), new Date(), onProgress, fleet, jobId);
 
-/* YESTERDAY'S UBER PRICES, ASKED AGAIN IN THE MORNING.
+/* UBER'S PRICES, ASKED FOR EVERY HOUR.
    ─────────────────────────────────────────────────────────────────────────
-   Uber's per-trip fare comes only from the payments report, and only the
-   nightly catch-up asked for it — at 01:00 Dubai, five hours after the day
-   closes, when Uber has not yet priced the late trips. Tue 6 Oct read 92.1%
-   priced that morning and the Target page held it "unsettled" (it settles at
-   99%, api/revenue_target.js SETTLED_COVERAGE) until the next night's pass.
-   This asks the payments report alone, for the last two days, in the
+   Uber's per-trip fare comes only from the payments report, and Uber
+   publishes that report HOURS behind the ride — by a delay that is not fixed.
+   Measured on production:
+
+     7 Oct, asked at 01:10 Dubai 8 Oct: every trip that ended up to 21:08 Dubai
+       was in the report and none after it — 87 completed trips, 11 of them
+       cash. Asked again at 07:07 Dubai: all 786 priced. A 4-hour lag.
+     6 Oct, asked at 01:10 Dubai 7 Oct AND again at 11:55 Dubai 7 Oct: the
+       report still stopped at about 21:10 Dubai on the 6th (954 Ecosine
+       orders where the trips needed about 1,190). It had them by 01:10 Dubai
+       on the 8th. A lag of 15 hours or more.
+
+   So one ask a night — and then one at 09:00, the first version of this —
+   left yesterday "unsettled" for as long as Uber took plus up to a day, and
+   it cost more than a figure: the 05:00 Dubai cash texts wait for every Uber
+   cash trip to have Uber's amount (src/driver_sms.js cashDepositRun) and give
+   up at 09:00, so a late night meant no deposit texts at all. Hourly, a day
+   completes within the hour after Uber publishes it, whenever that is.
+
+   The payments report alone, for the last two days (on a Monday morning
+   yesterday is the previous week, and the walk is by week), in the
    collection queue so it never competes with the half-hourly incremental for
-   Uber's report slots. Two days because on a Monday morning yesterday is the
-   previous week, and the walk is by week. */
+   Uber's report slots. Uber's limit on this report is one generation at a
+   time ("wait for current reports to complete"), not a daily quota, and the
+   queue guarantees one at a time. Schedule: FARES_CRON in Settings. */
 export const fareRefresh = (days = 2) => enqueue('fares', async () => {
   await loadSettings(true);
   return withPinnedSettings(() => uber.collect({ from: daysAgo(days), to: new Date(), mode: 'fares' }));

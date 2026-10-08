@@ -204,7 +204,7 @@ console.log('\nand a low fares ratio is explained as the schedule it is');
 
 check('the reason lives in one place',
   /export const FARES_LAG/.test(mod)
-  && /separate weekly report, walked overnight/.test(mod));
+  && /separate payments report that Uber publishes hours after the ride/.test(mod) && /read every hour/.test(mod));
 check('the desktop hangs it off the band when the ratio is short',
   /lag \? `\\n\\n\$\{FARES_LAG\}` : ''/.test(app));
 check('and the phone prints it, having no hover to put it in',

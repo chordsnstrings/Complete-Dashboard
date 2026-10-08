@@ -104,7 +104,7 @@ export function targetView(t, live = null) {
       const est = live.expected != null ? live.expected : live.fares;
       if (est != null) {
         subs.push({ text: live.expected != null
-          ? `≈ ${money(Math.round(est / 10) * 10)} so far — an estimate until Uber prices the day overnight`
+          ? `≈ ${money(Math.round(est / 10) * 10)} so far — an estimate until Uber publishes the day’s fares (fetched every hour)`
           : `${money(est)} so far, on record` });
         bar = s.today_needs > 0 ? Math.max(0, Math.min(100, (100 * est) / s.today_needs)) : 100;
       }

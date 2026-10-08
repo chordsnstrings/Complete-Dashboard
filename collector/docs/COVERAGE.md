@@ -4487,18 +4487,48 @@ untouched, and nothing projected is ever added into `accounted`.
   module's. To change columns of a row that exists, use `UPDATE`, and test
   through the module's function (`recordWires`), never with hand-written SQL.
 
-* **YESTERDAY READS "UNSETTLED" EVERY MORNING UNLESS UBER'S FARES ARE ASKED
-  AGAIN AFTER 01:00.** Trip rows arrive every 30 minutes. The per-trip fare
-  comes only from the payments report (`pullTripFaresAcross`), which the
-  incremental never asks for. Until 2026-10-07 only the 01:00 Dubai catch-up
-  asked, five hours after the day closed and before Uber had priced the late
-  trips. Tue 6 Oct read 92.1% priced the next morning (801 of 851 completed
-  Uber trips), and Target settles a day at 99% (`SETTLED_COVERAGE`), so every
-  day settled about 29 hours after it ended. Since 2026-10-07,
-  `fareRefresh(2)` runs at 09:00 Dubai: `collect({ mode: 'fares' })`, the
-  fare walk alone, in the collection queue. Its run rows read `uber / fares`
-  on /api/status. If a morning still reads unsettled, check that row before
-  anything else.
+* **UBER PUBLISHES A RIDE'S FARE HOURS LATER, BY A DELAY THAT IS NOT FIXED —
+  SO ASK EVERY HOUR, AND READ THE CUTOFF BEFORE BLAMING ANYTHING.** Trip rows
+  arrive every 30 minutes; the per-trip fare comes only from the payments
+  report (`pullTripFaresAcross`), and that report stops at a point in time
+  that trails the clock. Measured on production:
+  - **7 Oct**, asked at 01:10 Dubai on the 8th: every trip that ended up to
+    21:08 Dubai was in it, and none after (87 completed trips, 11 of them
+    cash). Asked again at 07:07 Dubai: all 786 priced. A lag of about 4 hours.
+  - **6 Oct**, asked at 01:10 AND at 11:55 Dubai on the 7th: the report still
+    stopped at about 21:10 Dubai on the 6th (954 Ecosine orders where the
+    trips needed about 1,190). It had them by 01:10 Dubai on the 8th. A lag of
+    15 hours or more.
+  The tell is the shape: priced trips end at a clean time and NOTHING after
+  it is priced, whatever the payment method or fleet. Every order in the
+  report matched a held trip (`unmatched: 0`), so the missing ones were
+  simply not published yet. `iso()` is a UTC date and the report's end date is
+  inclusive, so the window was not the cause.
+
+  It cost more than a figure. Target settles a day at 99% priced
+  (`SETTLED_COVERAGE`), and the 05:00 Dubai cash texts (`cashDepositRun`) wait
+  for every Uber cash trip to carry Uber's amount and give up at 09:00. On
+  8 Oct they waited 05:00–07:00 for 11 cash trips and went at 07:15 only
+  because a pass was run by hand at 07:07; 6 Oct's late trips were not
+  published until that evening, so its cash texts most likely never went.
+  One ask a night (and then one at 09:00, 2026-10-07) was not enough. Since
+  2026-10-08 `fareRefresh(2)` runs every hour at five past (`FARES_CRON` in
+  Settings): the fare walk alone, in the collection queue, so a day completes
+  within the hour after Uber publishes it. Its run rows read `uber / fares`.
+  If a morning still reads unsettled, look at those rows and at the hour the
+  priced trips stop.
+
+* **AN OK ROW IN `collection_run` IS NOT A TRIP COLLECTION.** Two kinds of
+  `uber` run fetch no trips: `fares` (hourly) and `<x>:payout` (the payout
+  walk, every two hours). The SMS freshness gates, the Target settled rule,
+  the morning report's data health, the channel-health and compare panels and
+  the money workbook all counted any ok row as "the day was collected", so the
+  payout walk had been vouching for trips it never fetched, and the hourly
+  fares pass would have done it every hour. They share `api/run_kinds.js`
+  `TRIP_RUN_SQL` now (NULL-safe: `mode` is nullable). The credential banner
+  deliberately does NOT use it, because a fares run does prove the login
+  works. A new reader of `collection_run` that means "were bookings fetched"
+  must use it.
 
 * **`test/mount.mjs` STUBS `requireAdmin` TO A PASS-THROUGH, SO NO ROUTE TEST
   CAN SEE THE ADMIN GATE.** A route moved behind or out from under
