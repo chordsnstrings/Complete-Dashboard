@@ -4381,8 +4381,8 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
 | UBF-2 | Payout audit annotates a held wire with `UPDATE`, not a NOT-NULL-violating upsert; write step extracted as `recordWires` | yes | **on production, verified** | payout_audit_orders 18 (old upsert: 14/4, with production's exact error) |
 | UBF-3 | Settings → "Fetch Uber fares (last 2 days)" queues job mode `fares` (= fareRefresh(2)) on demand; route_smoke now fails any queued mode with no worker branch (an unwired mode silently ran as an incremental) | yes | pending deploy | route_smoke 60 (worker line removed: 59/1); classic settings frozen hash re-recorded for the new button only |
 | UBF-4 | The fares button posts to its own `POST /api/uber/fares/run`, with no admin token (operator's ruling, 2026-10-07), a duplicate guard (409) and a manifest entry with cap collector.run | yes | **on production 06e4b93, verified** | fares_run_open 4, against the real adminGate with a synthetic token (route gated: 1/3) |
-| UBF-5 | Fares hourly (`FARES_CRON` '5 * * * *', a Settings key) in place of once at 09:00 Dubai; every user-facing "Uber prices … overnight" sentence made true (Target both skins, Today `FARES_LAG`, settled reason, two workbooks) | yes | pending deploy | uber_fares_mode 8 (old once-a-day default: 7/1); revenue_target 85, today_band 38, money_workbook 42 updated to the new wording |
-| UBF-6 | `api/run_kinds.js` TRIP_RUN_SQL: fares and payout runs no longer count as a day's bookings collected — SMS freshness ×3, Target settled rule, report data health, channel health, compare, money workbook | yes | pending deploy | trip_runs_only 8 (rule off: 4/4; not NULL-safe: 7/1) |
+| UBF-5 | Fares hourly (`FARES_CRON` '5 * * * *', a Settings key) in place of once at 09:00 Dubai; every user-facing "Uber prices … overnight" sentence made true (Target both skins, Today `FARES_LAG`, settled reason, two workbooks) | yes | **on production ab91df6, verified** | uber_fares_mode 8 (old once-a-day default: 7/1); revenue_target 85, today_band 38, money_workbook 42 updated to the new wording |
+| UBF-6 | `api/run_kinds.js` TRIP_RUN_SQL: fares and payout runs no longer count as a day's bookings collected — SMS freshness ×3, Target settled rule, report data health, channel health, compare, money workbook | yes | **on production ab91df6** | trip_runs_only 8 (rule off: 4/4; not NULL-safe: 7/1) |
 
 - **UBF-4 proven on production (2026-10-07).** A POST with no token was
   accepted (job 56) and claimed at 07:50Z. It waited behind the incremental,
@@ -4409,4 +4409,17 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
   fleets' window 2026-08-10..2026-09-09 without the paid_on error:
   ecosine 10,310 rows / 5 wires, egari 4,533 / 5; added 0, disagreed 0. The
   two nights before, it threw on both fleets.
+- **UBF-5/6 proven on production (2026-10-08).** ab91df6 went live at 03:51Z;
+  118 suites that import a touched module were green first. The first
+  scheduled hourly pass fired at 04:05Z, walked at 04:06:51 behind the 04:00
+  incremental and finished at 04:10:33, before the 04:15 rollup: fares only
+  (trips 0, perf 0, quality 0). Production serves the new wording
+  (targetpage.js, target.js, today.js), and every past October day is still
+  settled under the trip-runs-only rule. /api/platforms, /api/revenue and
+  /api/compare answer 200.
+- **A second measurement of Uber's publishing.** That 04:06 pass found
+  exactly the 1,537 Ecosine and 863 Egari orders the 03:07 pass had found,
+  although 8 Oct's early trips had run in between. So Uber's payments report
+  did not advance in that hour: it is published in batches, not trip by trip.
+  Hourly asking is what catches a batch soon after it lands, whenever that is.
 
