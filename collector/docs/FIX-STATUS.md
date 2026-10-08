@@ -4440,9 +4440,9 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
 
 | id | fix | written | production | proven |
 |---|---|---|---|---|
-| MT-1 | `GET /api/target/month` (api/target_month.js): the month's days from `computeMonth` over the Target page's own span (`monthSpan`, now shared), both paces, and every active driver against their share; manifest entry (REV; driver rows dropped by fleet) | yes | pending deploy | target_month 59 — share `needed` instead of plan: 49/7; count unsettled days: 45/11; target only for who drove: 45/11 |
-| MT-2 | The page `#month-target` (api/public/targetmonth.js), in TODAY after Target, both skins: 00 the month, 01 day by day (one chart: target outline, gross bar, gap printed; table), 02 where the month lands (cumulative chart), 03 drivers behind target (30, money or trips) | yes | pending deploy | target_month 59 — client list order: 55/1; true reason for an unsettled day: 57/2; frozen classic recorded for `month-target` and `month-target/2026-08` |
-| MT-3 | `GET /api/export/target-month.xlsx` with sheets Month, Days, Behind on money (30), Behind on trips (30), All drivers; a class the role does not hold in full is written "(withheld)" | yes | pending deploy | target_month 59 — read back through `src/salary/xlsx.js`; ID and EARN withheld |
+| MT-1 | `GET /api/target/month` (api/target_month.js): the month's days from `computeMonth` over the Target page's own span (`monthSpan`, now shared), both paces, and every active driver against their share; manifest entry (REV; driver rows dropped by fleet) | yes | **on production 2ae61a4, verified** | target_month 59 — share `needed` instead of plan: 49/7; count unsettled days: 45/11; target only for who drove: 45/11 |
+| MT-2 | The page `#month-target` (api/public/targetmonth.js), in TODAY after Target, both skins: 00 the month, 01 day by day (one chart: target outline, gross bar, gap printed; table), 02 where the month lands (cumulative chart), 03 drivers behind target (30, money or trips) | yes | **on production 2ae61a4, verified** | target_month 59 — client list order: 55/1; true reason for an unsettled day: 57/2; frozen classic recorded for `month-target` and `month-target/2026-08` |
+| MT-3 | `GET /api/export/target-month.xlsx` with sheets Month, Days, Behind on money (30), Behind on trips (30), All drivers; a class the role does not hold in full is written "(withheld)" | yes | **on production 2ae61a4, verified** | target_month 59 — read back through `src/salary/xlsx.js`; ID and EARN withheld |
 
 What the first rendering found, and what was changed before commit:
 - **The page blamed Uber's fares for a day a channel had not delivered.**
@@ -4454,4 +4454,35 @@ What the first rendering found, and what was changed before commit:
 - **A finished month offered two "paces" over 0 days left.** Fixed: it now
   shows what the month came to, its days on target, and its best and worst
   day.
+
+**On production (2ae61a4, deployed 2026-10-08, ACTIVE at 06:27Z).**
+- **The route.** `GET /api/target/month` answers 200 in 1.4 s. Its 31 days
+  and its summary equal `/api/target`'s field for field.
+- **The month.** October: target AED 1,795,786.01. Earned AED 346,145.25 to
+  7 Oct, AED 54,160.72 behind plan. At the average day the month ends at
+  AED 1,532,928.96, which is AED 262,857.05 short (85.4%). The last 7
+  settled days are the same 7 days, so that pace says the same. Every day
+  left must bring AED 60,401.70.
+- **The drivers.** 137 active: 56 on target for money and 81 behind; 7 on
+  target for trips and 130 behind. Their targets add up to AED 400,305.88,
+  against a plan of 400,305.98 for the counted days; the gap is rounding to
+  the fils. Fares on no named driver: AED 0.00.
+- **The workbook.** It downloads as
+  `month-target-2026-10-as-of-2026-10-08.xlsx`, 29.8 KB, with five sheets:
+  30, 30 and 137 drivers.
+- **The page.** Rendered through `bin/prod-mirror.mjs` in both skins at
+  1440 with no page errors. The switch to trips works, and "Excel ⤓ month"
+  is in the top bar.
+- **MT-4 — found there and fixed in the commit after.** The days table
+  printed a day's trips as "▼ -736": two signs, an ASCII hyphen and no word.
+  It now prints "▼ 736 under" / "▲ 120 over", as the Target page words it.
+  target_month 60 (reverted: 59/1).
+- **Seen, not changed: who sits at the top of the money list.** 7 of the
+  137 active drivers drove none of the counted days: 4 hotel-only records
+  and 3 Bolt-only. 5 of the 7 share two or more name words with a driver who
+  did drive, so they are most likely second records of the same people. Each
+  is asked for a full share and shows at the top with AED 0. The Target
+  page's trips target counts them too, by the same rule. The fix belongs in
+  `api/identity_map.js` (hand-reviewed pairs, never a name rule), so it is
+  left to the operator.
 

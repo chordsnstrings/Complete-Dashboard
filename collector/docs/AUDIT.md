@@ -2488,3 +2488,16 @@ What the page shows that the Target page does not:
 At a 390px width, the chart drops the per-day figures rather than overprint
 them. The table under it carries every figure to the fils.
 
+### #month-target on production — 2026-10-08, 2ae61a4
+
+Rendered through `bin/prod-mirror.mjs` (production's own bytes) in Arkiv and
+classic at 1440:
+- **No page errors.** Five cells, both paces, 30 rows in the list. The
+  switch to trips works, and the top bar's button reads "Excel ⤓ month".
+- **One fix (MT-4).** The days table's trips column printed "▼ -736": a
+  coloured figure with no word, a doubled sign and an ASCII hyphen. It now
+  reads "▼ 736 under".
+- **One finding left to the operator.** Second person records of drivers
+  who drove under another name sit at the top of the money list with
+  AED 0. See FIX-STATUS MT.
+

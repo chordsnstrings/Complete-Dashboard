@@ -45,7 +45,10 @@
        reason (targetmonth.js monthNotes — what the first draft did, seen
        on the mock's 31 August, which a channel had not delivered) -> 57
        passed, 2 FAILED, among them "a day a channel has not delivered says
-       so — not that Uber's fares are late". */
+       so — not that Uber's fares are late";
+     · print a day's trips as "▼ -736" again (what production showed on the
+       first deploy: two signs, an ASCII hyphen, no word) -> 59 passed,
+       1 FAILED. */
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { applySchema } from './schema.mjs';
@@ -282,6 +285,8 @@ const dh = page.daysHtml(fixtureView, { W: 1300 });
 check('the table: a finished day links to its day page, with what it missed or made in words',
   /<a href="#day\/2026-10-01">Thu 1 Oct<\/a>/.test(dh) && /<span class="tg-under">▼ Missed by AED 50\.00<\/span>/.test(dh)
   && /<span class="tg-over">▲ Over by AED 98\.33<\/span>/.test(dh) && /Not settled yet · 90% priced/.test(dh), dh.slice(0, 300));
+check('…and the trips the same way: the arrow, the count unsigned, and the word — never "▼ -736"',
+  /<span class="tg-under">▼ \d[\d,]* under<\/span>/.test(dh) && !/▼ -|▼ −/.test(dh), (dh.match(/<span class="tg-(?:over|under)">[▲▼][^<]*<\/span><\/td><\/tr>/g) || []).slice(0, 3).join(' '));
 const ph = page.pathHtml(fixtureView, { W: 1300 });
 check('where the month lands, in words and on the chart', /▲ AED 775\.00 over<\/b> at the average day/.test(ph)
   && /the month ends at AED 33,500\.00/.test(ph) && /<polyline class="mp-recent"/.test(ph) && /<polyline class="mp-earned"/.test(ph), ph.slice(0, 500));

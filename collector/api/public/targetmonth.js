@@ -276,8 +276,11 @@ export function daysTable(v) {
     const trips = tripsHidden || d.state === 'future' ? '<span class="mt-dim">—</span>'
       : `${esc(n0(d.trips))} <span class="mt-dim">/ ${esc(n0(d.trips_target))}</span>`;
     const tv = d.state !== 'past' || tripsHidden ? '<span class="mt-dim">—</span>'
-      : d.trips_verdict === 'over' ? `<span class="tg-over">▲ ${d.trips_diff ? `+${esc(n0(d.trips_diff))}` : 'Met'}</span>`
-        : d.trips_verdict === 'under' ? `<span class="tg-under">▼ ${esc(n0(d.trips_diff))}</span>`
+      /* The arrow AND the word, and the count unsigned: "▼ -736" printed a
+         sign twice, in an ASCII hyphen, and no word (seen on production,
+         2026-10-08). */
+      : d.trips_verdict === 'over' ? `<span class="tg-over">▲ ${d.trips_diff ? `${esc(n0(d.trips_diff))} over` : 'met'}</span>`
+        : d.trips_verdict === 'under' ? `<span class="tg-under">▼ ${esc(n0(-d.trips_diff))} under</span>`
           : d.trips_verdict === 'unsettled' ? '<span class="mt-dim">not settled</span>' : '<span class="mt-dim">—</span>';
     return `<tr${cls}><th scope="row" class="l">${day}</th><td>${esc(aed(d.needed))}</td><td>${gross}</td>`
       + `<td class="l">${gapCell}</td><td>${d.state === 'past' ? esc(pc(d.pct)) : '<span class="mt-dim">—</span>'}</td>`
