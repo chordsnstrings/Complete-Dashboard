@@ -4476,7 +4476,9 @@ What the first rendering found, and what was changed before commit:
 - **MT-4 — found there and fixed in the commit after.** The days table
   printed a day's trips as "▼ -736": two signs, an ASCII hyphen and no word.
   It now prints "▼ 736 under" / "▲ 120 over", as the Target page words it.
-  target_month 60 (reverted: 59/1).
+  target_month 60 (reverted: 59/1). **On production 30ef63a (ACTIVE
+  06:33Z), verified:** the column reads "▼ 736 under", "▼ 708 under",
+  "▼ 899 under" for 1–3 Oct in both skins, with no page errors.
 - **Seen, not changed: who sits at the top of the money list.** 7 of the
   137 active drivers drove none of the counted days: 4 hotel-only records
   and 3 Bolt-only. 5 of the 7 share two or more name words with a driver who

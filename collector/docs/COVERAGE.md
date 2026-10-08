@@ -2390,6 +2390,12 @@ driver's 222 tracker fixes.
   matches the agent's command line as well as the server's. Start the second
   server on a second port, or rewrite the response in the browser with
   Playwright's `page.route()`, and never reach for `pkill`.
+  `pgrep -f <pattern> | xargs kill` is the same mistake, even run alone in
+  its own call: the shell running it carries the pattern in its own command
+  line, so it kills itself (exit 144, again on 2026-10-08, stopping
+  `bin/prod-mirror.mjs`). Keep the PID from `$!` when you start a server and
+  kill that PID. If a pattern cannot be avoided, bracket one character
+  (`pgrep -f "bin/prod-mirro[r]"`) so the pattern cannot match itself.
 
 * **`route.fulfill({ response, json })` in Playwright serves the ORIGINAL
   body — the `json` is ignored when `response` is passed.** Cost half an hour
