@@ -8860,6 +8860,15 @@ audit row per fold. It refuses a person whose two rows both hold an opening of
 the same kind, or whose second row holds somebody else's account; those stay
 apart with a REFUSED audit row and a warning.
 
+**Measured on production after the deploy (0317d3c), the same day:**
+- Drivers page: 348 → 314 people. 35 person rows folded by v102 and one split
+  off by v101; no ruled person is on two rows, and no fold was refused.
+- Month target: 137 → 116 active drivers, with the gross unchanged at AED
+  346,145.25 and nothing on no named driver. Trips needed to Wed 7 Oct:
+  10,992 → 9,624. Target page, yesterday's active drivers: 132 → 115.
+- Confirmed links not in the register: 295 → 1, the Bolt "ZAHID KHAN
+  ISMAIL" the operator was not sure about.
+
 **Not done here, and why:**
 - **The 48 other trip-less roster names, and the 30 pairs seen in two cars
   at once,** were left apart.
