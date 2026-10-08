@@ -4422,6 +4422,13 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
   although 8 Oct's early trips had run in between. So Uber's payments report
   did not advance in that hour: it is published in batches, not trip by trip.
   Hourly asking is what catches a batch soon after it lands, whenever that is.
+- **UBF-5's sentences on the phone (2026-10-08).** The full suite caught
+  that the phone's old-skin oracle still held the two retired sentences: the
+  Today estimate line and the Uber fares caption
+  (`test/phone_classic.test.mjs`, 32/2). The oracle was re-taken from the
+  tree. It differs from the old one by exactly those two sentences on
+  `today` and `today+sheet`, and the other 24 screens are byte-identical.
+  phone_classic 34, phone_arkiv 257. Trap in COVERAGE.
 - **The 2026-10-08 05:40Z check (the routine set on the 7th).** The 05:05Z
   hourly pass finished at 05:09:24Z for both fleets, `ok`, with no error
   (window 6–8 Oct). Tue 7 Oct reads settled at 100% priced, AED 54,817.79.

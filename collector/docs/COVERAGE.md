@@ -4553,6 +4553,20 @@ untouched, and nothing projected is ever added into `accounted`.
   `drivers.left_out[].why`, a `title` on the table cell). Never a guessed
   reason. `test/target_month.test.mjs` holds the channel case.
 
+* **"THE SUITES THAT IMPORT A TOUCHED MODULE" DO NOT INCLUDE THE ONES THAT
+  RENDER IT.** ab91df6 (UBF-5) changed two sentences in
+  `api/public/target.js` and `today.js`. It went out after the 118 suites
+  that import a touched module were green. `test/phone_classic.test.mjs`
+  was not among them: it renders the phone's screens in Chromium from the
+  served files and compares each `#m` to a recorded oracle, so it never
+  imports `target.js`. It failed at the next full run (2026-10-08) on
+  exactly those two sentences. An intended change to anything the phone's
+  old skin draws is not finished until the oracle is re-taken
+  (`bin/phone-fixture.mjs oracle api/public "<label>"`) and the new oracle
+  is proven to differ from the old by nothing but the intended text. The
+  same goes for `test/arkiv_classic_frozen.test.mjs` on the desktop. A
+  partial run is a guess; the full suite is the proof.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
