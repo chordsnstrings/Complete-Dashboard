@@ -4377,7 +4377,7 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
 
 | id | fix | written | production | proven |
 |---|---|---|---|---|
-| UBF-1 | `fareRefresh(2)` at 09:00 Dubai: `uber.collect({mode:'fares'})` runs the fare walk only, queued with the other collections | yes | pending deploy | uber_fares_mode 5 (gating off: 4/1); credential_save_check 109 (lists it as a pinned unit) |
+| UBF-1 | `fareRefresh(2)` at 09:00 Dubai: `uber.collect({mode:'fares'})` runs the fare walk only, queued with the other collections | yes | **on production 1ad1d44; its schedule superseded by UBF-5 (hourly)** | uber_fares_mode 5 (gating off: 4/1); credential_save_check 109 (lists it as a pinned unit) |
 | UBF-2 | Payout audit annotates a held wire with `UPDATE`, not a NOT-NULL-violating upsert; write step extracted as `recordWires` | yes | **on production, verified** | payout_audit_orders 18 (old upsert: 14/4, with production's exact error) |
 | UBF-3 | Settings → "Fetch Uber fares (last 2 days)" queues job mode `fares` (= fareRefresh(2)) on demand; route_smoke now fails any queued mode with no worker branch (an unwired mode silently ran as an incremental) | yes | pending deploy | route_smoke 60 (worker line removed: 59/1); classic settings frozen hash re-recorded for the new button only |
 | UBF-4 | The fares button posts to its own `POST /api/uber/fares/run`, with no admin token (operator's ruling, 2026-10-07), a duplicate guard (409) and a manifest entry with cap collector.run | yes | **on production 06e4b93, verified** | fares_run_open 4, against the real adminGate with a synthetic token (route gated: 1/3) |
@@ -4422,6 +4422,12 @@ the trip_pkey lookup per row (see the COVERAGE trap on person_key in a view).
   although 8 Oct's early trips had run in between. So Uber's payments report
   did not advance in that hour: it is published in batches, not trip by trip.
   Hourly asking is what catches a batch soon after it lands, whenever that is.
+- **The 2026-10-08 05:40Z check (the routine set on the 7th).** The 05:05Z
+  hourly pass finished at 05:09:24Z for both fleets, `ok`, with no error
+  (window 6–8 Oct). Tue 7 Oct reads settled at 100% priced, AED 54,817.79.
+  The day before had read 92.1% the morning after. 6 Oct holds at 99.89%.
+  The payout audit had already been proven on last night's run (UBF-2
+  above), so the log was not read again.
 
 ## MT — the Month target page (2026-10-08)
 
