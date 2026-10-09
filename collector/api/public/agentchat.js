@@ -25,7 +25,7 @@
    and "New chat" forgets it at once. */
 
 const API = { state: '/api/agent/state', chat: '/api/agent/chat', fresh: '/api/agent/new' };
-const OPEN_KEY = 'ak-open';
+const OPEN_KEY = 'asst-open';
 const SUGGEST = [
   'How many trips did the fleet complete yesterday?',
   'Top 5 drivers by completed trips last week',
@@ -71,7 +71,7 @@ const NUMERIC = new Set(['aed', 'int', 'km', 'pct', 'num', 'num2', 'pts']);
 /* ── the answer's text: paragraphs, lists, bold — and where the tables and
    files go, at the place the model put them. Escaped first, always. ─── */
 function renderText(text, blocks) {
-  const wrap = h('div', 'ak-text');
+  const wrap = h('div', 'asst-text');
   const lines = String(text || '').split('\n');
   let list = null; let para = [];
   const flushPara = () => {
@@ -112,13 +112,13 @@ const inline = (s) => esc(s)
 
 function renderTable(t) {
   const box = h('div');
-  const wrap = h('div', 'ak-tablewrap');
-  const table = h('table', 'ak-table');
+  const wrap = h('div', 'asst-tablewrap');
+  const table = h('table', 'asst-table');
   const cap = h('caption', null, t.title || '');
   table.append(cap);
   const thead = h('thead'); const tr = h('tr');
   for (const c of t.columns || []) {
-    const th = h('th', NUMERIC.has(c.kind) ? 'n' : null, c.kind === 'aed' ? `${c.label} (AED)` : c.label);
+    const th = h('th', NUMERIC.has(c.kind) ? 'asst-n' : null, c.kind === 'aed' ? `${c.label} (AED)` : c.label);
     tr.append(th);
   }
   thead.append(tr); table.append(thead);
@@ -129,18 +129,18 @@ function renderTable(t) {
        percentages in one column). */
     for (const c of t.columns || []) {
       const kind = c.kind === 'num' && row.__kind ? (c.key === 'change_pct' ? 'pct' : row.__kind) : c.kind;
-      r.append(h('td', NUMERIC.has(c.kind) ? 'n' : null, cell(row[c.key], kind)));
+      r.append(h('td', NUMERIC.has(c.kind) ? 'asst-n' : null, cell(row[c.key], kind)));
     }
     tb.append(r);
   }
   table.append(tb); wrap.append(table); box.append(wrap);
   if ((t.total_rows || 0) > (t.rows || []).length) {
-    box.append(h('div', 'ak-more', `Showing ${(t.rows || []).length} of ${t.total_rows.toLocaleString('en-US')} rows — ask for it as an Excel file to get all of them.`));
+    box.append(h('div', 'asst-more', `Showing ${(t.rows || []).length} of ${t.total_rows.toLocaleString('en-US')} rows — ask for it as an Excel file to get all of them.`));
   }
   return box;
 }
 function renderFile(f) {
-  const a = h('a', 'ak-file');
+  const a = h('a', 'asst-file');
   /* Built here from the two ids rather than following a server-written href:
      the link can only ever be this route, and test/endpoint_coverage.test.mjs
      can see that the UI reaches it (an href taken from the answer left the
@@ -160,42 +160,42 @@ export function mountAssistant() {
   /* BEFORE arkiv.css, never after it: the Arkiv skin wins every tie by being
      the last stylesheet in the document (test/arkiv_skin.test.mjs), and an
      appended link took that place — 1 check failed in the full suite. The
-     widget's own rules are all .ak-* classes, so they lose nothing by order. */
+     widget's own rules are all .asst-* classes, so they lose nothing by order. */
   const css = document.createElement('link');
   css.rel = 'stylesheet'; css.href = '/agentchat.css';
   const arkiv = document.querySelector('link[rel=stylesheet][href="/arkiv.css"]');
   if (arkiv) arkiv.parentNode.insertBefore(css, arkiv);
   else document.head.append(css);
 
-  const fab = h('button', 'ak-fab');
+  const fab = h('button', 'asst-fab');
   fab.type = 'button'; fab.hidden = true;
   fab.setAttribute('aria-label', 'Ask the assistant');
   fab.setAttribute('aria-expanded', 'false');
   fab.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/></svg>';
-  const dot = h('span', 'ak-dot'); dot.hidden = true; fab.append(dot);
+  const dot = h('span', 'asst-dot'); dot.hidden = true; fab.append(dot);
 
-  const panel = h('section', 'ak-panel');
+  const panel = h('section', 'asst-panel');
   panel.hidden = true;
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Assistant');
-  const head = h('header', 'ak-head');
-  const title = h('div', 'ak-title');
+  const head = h('header', 'asst-head');
+  const title = h('div', 'asst-title');
   title.innerHTML = '<b>Ask FleetMirror</b><span>Answers from the dashboard’s own figures · read-only · forgets after 24 hours</span>';
-  const actions = h('div', 'ak-actions');
-  const btnNew = h('button', 'ak-btn', 'New chat'); btnNew.type = 'button';
+  const actions = h('div', 'asst-actions');
+  const btnNew = h('button', 'asst-btn', 'New chat'); btnNew.type = 'button';
   btnNew.title = 'Start again — forgets this conversation and its files now';
-  const btnMin = h('button', 'ak-btn ak-icon', '–'); btnMin.type = 'button';
+  const btnMin = h('button', 'asst-btn asst-icon', '–'); btnMin.type = 'button';
   btnMin.setAttribute('aria-label', 'Minimise'); btnMin.title = 'Minimise';
   actions.append(btnNew, btnMin);
   head.append(title, actions);
-  const chips = h('div', 'ak-chips'); chips.hidden = true;
-  const log = h('div', 'ak-log'); log.setAttribute('aria-live', 'polite');
-  const form = h('form', 'ak-form');
+  const chips = h('div', 'asst-chips'); chips.hidden = true;
+  const log = h('div', 'asst-log'); log.setAttribute('aria-live', 'polite');
+  const form = h('form', 'asst-form');
   const box = h('textarea'); box.rows = 1; box.placeholder = 'Ask about trips, drivers, cars, cash, targets…';
   box.setAttribute('aria-label', 'Your question'); box.maxLength = 2000;
-  const send = h('button', 'ak-send', 'Send'); send.type = 'submit';
+  const send = h('button', 'asst-send', 'Send'); send.type = 'submit';
   form.append(box, send);
-  const foot = h('div', 'ak-foot', 'It reads only what your access already shows. Check “How I got this” under any answer.');
+  const foot = h('div', 'asst-foot', 'It reads only what your access already shows. Check “How I got this” under any answer.');
   panel.append(head, chips, log, form, foot);
   document.body.append(fab, panel);
 
@@ -233,7 +233,7 @@ export function mountAssistant() {
     if (context.platform) items.push(['platform', 'Platform', context.platform[0].toUpperCase() + context.platform.slice(1)]);
     for (const [k, label, value] of items) {
       if (clear.has(k)) continue;
-      const c = h('span', 'ak-chip');
+      const c = h('span', 'asst-chip');
       c.innerHTML = `<b>${esc(label)}</b><span>${esc(value)}</span>`;
       const x = h('button', null, '×'); x.type = 'button';
       x.setAttribute('aria-label', `Forget ${label.toLowerCase()} ${value}`);
@@ -247,14 +247,14 @@ export function mountAssistant() {
   const scrollDown = () => { log.scrollTop = log.scrollHeight; };
 
   function emptyState() {
-    const e = h('div', 'ak-empty');
+    const e = h('div', 'asst-empty');
     e.append(h('p', null, available
       ? 'Ask about the fleet in plain English — trips, drivers, cars, cash, targets. It checks every number against the dashboard, asks when a name or date is unclear, and can give you an Excel file.'
       : 'The assistant is not set up yet: it has no model key. An administrator can add one in Settings → Assistant.'));
     if (available) {
-      const s = h('div', 'ak-suggest');
+      const s = h('div', 'asst-suggest');
       for (const q of SUGGEST) {
-        const b = h('button', 'ak-btn', q); b.type = 'button';
+        const b = h('button', 'asst-btn', q); b.type = 'button';
         b.onclick = () => ask(q);
         s.append(b);
       }
@@ -264,39 +264,39 @@ export function mountAssistant() {
   }
 
   function addUser(text) {
-    log.querySelector('.ak-empty')?.remove();
-    log.append(h('div', 'ak-msg ak-user', text));
+    log.querySelector('.asst-empty')?.remove();
+    log.append(h('div', 'asst-msg asst-user', text));
     scrollDown();
   }
 
   function addBot(m) {
-    log.querySelector('.ak-empty')?.remove();
-    const wrap = h('div', 'ak-msg ak-bot');
+    log.querySelector('.asst-empty')?.remove();
+    const wrap = h('div', 'asst-msg asst-bot');
     if (m.type === 'ask') {
       wrap.append(renderText(m.question, {}));
-      const opts = h('div', 'ak-options');
+      const opts = h('div', 'asst-options');
       for (const o of m.options || []) {
-        const b = h('button', 'ak-btn', o); b.type = 'button';
+        const b = h('button', 'asst-btn', o); b.type = 'button';
         b.onclick = () => { opts.querySelectorAll('button').forEach((x) => { x.disabled = true; }); ask(o); };
         opts.append(b);
       }
       if ((m.options || []).length) wrap.append(opts);
     } else if (m.type === 'error') {
-      const t = h('div', 'ak-text ak-error', m.text || 'Something went wrong.');
+      const t = h('div', 'asst-text asst-error', m.text || 'Something went wrong.');
       wrap.append(t);
     } else {
       const blocks = {};
       for (const t of m.tables || []) blocks[`table:${t.id}`] = renderTable(t);
       for (const f of m.files || []) blocks[`file:${f.id}`] = renderFile(f);
       const text = renderText(m.text, blocks);
-      if (m.plain) text.classList.add('ak-plain');
+      if (m.plain) text.classList.add('asst-plain');
       wrap.append(text);
       /* A table or file the text did not place still belongs to the answer. */
       for (const b of Object.values(blocks)) if (!b.dataset.placed) wrap.append(b);
     }
     const src = (m.sources || []).filter((s) => s.definition);
     if (src.length) {
-      const d = h('details', 'ak-how');
+      const d = h('details', 'asst-how');
       d.append(h('summary', null, 'How I got this'));
       const ul = h('ul');
       for (const s of src) {
@@ -307,14 +307,14 @@ export function mountAssistant() {
       }
       d.append(ul); wrap.append(d);
     }
-    if (m.fallback && m.model) wrap.append(h('div', 'ak-meta', `Answered by the lighter model (${m.model}) because the main one did not respond.`));
+    if (m.fallback && m.model) wrap.append(h('div', 'asst-meta', `Answered by the lighter model (${m.model}) because the main one did not respond.`));
     log.append(wrap);
     scrollDown();
     if (panel.hidden) dot.hidden = false;
   }
 
   function setWorking(text) {
-    if (!working) { working = h('div', 'ak-working'); log.append(working); }
+    if (!working) { working = h('div', 'asst-working'); log.append(working); }
     working.textContent = text;
     scrollDown();
   }
@@ -358,10 +358,10 @@ export function mountAssistant() {
       if (last.context) { context = last.context; drawChips(); }
     } catch (e) {
       stopWorking();
-      const wrap = h('div', 'ak-msg ak-bot');
-      wrap.append(h('div', 'ak-text ak-error', e.shown ? e.message : 'Could not reach the server — check the connection and try again.'));
-      const retry = h('button', 'ak-btn', 'Try again'); retry.type = 'button';
-      retry.onclick = () => { wrap.remove(); log.lastElementChild?.classList.contains('ak-user') && log.lastElementChild.remove(); ask(q); };
+      const wrap = h('div', 'asst-msg asst-bot');
+      wrap.append(h('div', 'asst-text asst-error', e.shown ? e.message : 'Could not reach the server — check the connection and try again.'));
+      const retry = h('button', 'asst-btn', 'Try again'); retry.type = 'button';
+      retry.onclick = () => { wrap.remove(); log.lastElementChild?.classList.contains('asst-user') && log.lastElementChild.remove(); ask(q); };
       wrap.append(retry);
       log.append(wrap); scrollDown();
     } finally {
@@ -425,7 +425,7 @@ export function mountAssistant() {
   /* The phone's keyboard: the panel follows the visible viewport, so the box
      stays above the keys instead of behind them. */
   if (window.visualViewport) {
-    const fit = () => { document.documentElement.style.setProperty('--ak-vh', `${Math.round(window.visualViewport.height)}px`); };
+    const fit = () => { document.documentElement.style.setProperty('--asst-vh', `${Math.round(window.visualViewport.height)}px`); };
     window.visualViewport.addEventListener('resize', fit);
     fit();
   }

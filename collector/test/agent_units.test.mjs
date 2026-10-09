@@ -8,7 +8,11 @@
      · the one-word carrier rule removed from findDriver: "Shehzad"-style
        first names are offered as one man — 1 fails.
      · callModel's 401 short-circuit removed: a refused key is retried on the
-       fallback model — 1 fails. */
+       fallback model — 1 fails.
+     · one widget class put back to the Arkiv skin's prefix (.ak-btn in
+       agentchat.css) — 1 fails; an .asst-panel rule added to arkiv.css — 1
+       fails. The first run also caught the bare `n` on numeric cells, which
+       four other stylesheets style. */
 import { resolvePeriod, shiftRange } from '../api/agent_period.js';
 import { findDriver, findCar, normName } from '../api/agent_people.js';
 import { checkReply, formatValue, plainAnswer } from '../api/agent_guard.js';
@@ -129,6 +133,28 @@ const cfg = { baseUrl: 'http://m', apiKey: 'k', model: 'pro', fallback: 'lite' }
   const http = async (url, o) => { sent = JSON.parse(o.body); return ok('pro'); };
   await callModel({ messages: [], cfg, http });
   check('thinking is off and the temperature low', sent.thinking?.type === 'disabled' && sent.temperature <= 0.2);
+}
+
+console.log('\nthe widget keeps to its own class names');
+{
+  /* The widget's classes were first written ak-*, the prefix the Arkiv skin
+     already uses for its own (.ak-ctl, .ak-bar-n — 32 of them in arkiv.css
+     and m/arkiv-m.css). Disjoint on 2026-10-09 by luck, not by rule: one
+     .ak-panel added to the skin would have restyled the chat window, and one
+     .ak-btn in agentchat.css every Arkiv button on the page. Renamed to asst-*
+     before it shipped; these two checks keep the namespaces apart. */
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const PUB = new URL('../api/public/', import.meta.url).pathname;
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '');
+  const classes = (t) => [...new Set([...strip(t).matchAll(/\.([_a-zA-Z][\w-]*)/g)].map((m) => m[1]))];
+  const own = classes(readFileSync(join(PUB, 'agentchat.css'), 'utf8'));
+  check('every class the widget styles is its own (asst-*)', own.length > 10 && own.every((c) => c.startsWith('asst-')),
+    own.filter((c) => !c.startsWith('asst-')).join(' '));
+  const sheets = [...readdirSync(PUB).map((f) => f), ...readdirSync(join(PUB, 'm')).map((f) => `m/${f}`)]
+    .filter((f) => f.endsWith('.css') && f !== 'agentchat.css');
+  const borrowers = sheets.filter((f) => classes(readFileSync(join(PUB, f), 'utf8')).some((c) => c.startsWith('asst-')));
+  check('…and no other stylesheet styles an asst-* class', sheets.length > 3 && !borrowers.length, borrowers.join(' '));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

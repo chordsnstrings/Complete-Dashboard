@@ -4678,6 +4678,24 @@ untouched, and nothing projected is ever added into `accounted`.
   that reason alone. Restart it after every server-side edit before judging a
   screenshot. Only the static files under `api/public/` are read fresh.
 
+* **A COMPONENT MOUNTED ON `<body>` INHERITS EVERY SKIN'S GLOBAL CLASSES —
+  ITS NAMES MUST BE ITS OWN.** The chat widget was first written with `ak-*`
+  classes, which is the Arkiv skin's own prefix (`.ak-ctl`, `.ak-bar-n`: 32
+  of them in `arkiv.css` and `m/arkiv-m.css`). The two sets happened to be
+  disjoint, but nothing kept them so: a skin `.ak-panel` would have restyled
+  the chat window, and a widget `.ak-btn` every Arkiv button on the page.
+  It also marked numeric cells with a bare `n`, which `app.css`,
+  `arkiv.css`, `m/m.css` and `m/arkiv-m.css` all style globally. Renamed to
+  `asst-*` before it shipped. `test/agent_units.test.mjs` fails if the
+  widget's stylesheet styles a class without that prefix, or if any other
+  stylesheet styles one with it (each proved by revert). Two more rules for
+  anything mounted on `<body>`:
+  - its stylesheet goes BEFORE `arkiv.css`, which must stay the last sheet
+    (`arkiv_skin`);
+  - every route it calls needs a mock fixture (`mockapi`) and an entry in
+    the phone recording `test/fixtures/phone_api.json.gz` (`phone_classic`,
+    `phone_arkiv`). A call that is missing from either is reported as a miss.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
