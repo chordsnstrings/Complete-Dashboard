@@ -26,6 +26,7 @@ import { el, esc, sourceLine, timeStr, pageFoot } from '../ui.js';
 import { SCREENS, TABS, titleFor } from './screens.js';
 /* Sign-in and access, the same library the desktop uses (../access.js): the
    server decides, the phone draws what it decided. */
+import { mountAssistant } from '../agentchat.js';
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
   WithheldError, toSignIn, installFetchGuard, fleetList, fleetNames, allFleetsLabel } from '../access.js';
 import { phoneContract } from './ui.js';
@@ -496,6 +497,9 @@ loadWho().then(() => {
   const home = TABS.find((t) => canOpenView(t.route, '', '', { phone: true }))?.route || 'more';
   if (!location.hash) location.hash = href(gated() ? home : 'today');
   render();
+  /* The chat assistant, the whole screen when open, a button above the tabs
+     when not (agentchat.js). */
+  mountAssistant();
 });
 
 /* ── the worker ─────────────────────────────────────────────────────────

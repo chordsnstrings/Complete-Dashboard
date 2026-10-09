@@ -134,6 +134,12 @@ export const SETTING_DEFAULTS = {
   REPORT_MODEL_BASE_URL: 'https://ark.ap-southeast.bytepluses.com/api/v3',
   REPORT_MODEL: 'glm-5-2-260617',
   REPORT_FROM: 'Ecosine Fleet <reports@ecosine.ae>',
+  /* The chat assistant (api/agent_routes.js): Seed 2.0 Pro, Seed 2.0 Lite when
+     Pro does not answer (the operator, 2026-10-09). Both verified callable on
+     the account that day with ModelArk's free probe. */
+  AGENT_BASE_URL: 'https://ark.ap-southeast.bytepluses.com/api/v3',
+  AGENT_MODEL: 'seed-2-0-pro-260328',
+  AGENT_FALLBACK_MODEL: 'seed-2-0-lite-260428',
   SMSALA_SENDER: 'ECOSINE',
 };
 
@@ -391,6 +397,13 @@ export const SETTING_DEFS = [
     hint: 'GLM 5.2 writes two or three sentences from the figures; without a key the email is sent without them' },
   { key: 'REPORT_MODEL', group: 'Daily report', label: 'Commentary model', secret: false },
   { key: 'REPORT_MODEL_BASE_URL', group: 'Daily report', label: 'Commentary model base url', secret: false },
+
+  { key: 'AGENT_API_KEY', group: 'Assistant', label: 'Chat assistant model key (ModelArk)', secret: true,
+    hint: 'Optional — without it the assistant uses the daily report\'s ModelArk key' },
+  { key: 'AGENT_MODEL', group: 'Assistant', label: 'Chat assistant model', secret: false },
+  { key: 'AGENT_FALLBACK_MODEL', group: 'Assistant', label: 'Chat assistant fallback model', secret: false,
+    hint: 'Used when the main model does not answer' },
+  { key: 'AGENT_BASE_URL', group: 'Assistant', label: 'Chat assistant model base url', secret: false },
 
   { key: 'CHARGING_SITES', group: 'Fleet', label: 'Areas with a charging station', secret: false,
     hint: "Comma-separated area names as they appear in trip addresses. Use | to list the ways one site is written: Al Garhoud|Dubai Int'l Airport" },

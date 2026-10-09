@@ -16,6 +16,7 @@ import { insightListSql } from './insights_sql.js';
 /* The monthly revenue target and the Today workbook (api/target_routes.js);
    the deploy seed of the operator's first target (api/revenue_target.js). */
 import { targetRoutes } from './target_routes.js';
+import { agentRoutes } from './agent_routes.js';
 import { applyTargetSeed } from './revenue_target.js';
 import { getConfig as accessConfig } from './access/service.js';
 import { importRoutes } from './import_routes.js';
@@ -6850,6 +6851,9 @@ smsRoutes(app, { q, wrap, access: smsAccess });
    file withholds its own, per sheet. */
 moneyExportRoutes(app, { q, wrap, winDays, log });
 targetRoutes(app, { q, wrap, log });
+/* The chat assistant (api/agent_routes.js): a read-only conversation over the
+   dashboard's own routes, as the person asking; it forgets after 24 hours. */
+agentRoutes(app, { q, wrap });
 /* ── the export, and what an anonymous GET may carry away ──────────────────
    MEASURED ON PRODUCTION WITH CURL AND NO CREDENTIALS, 2026-09-05:
    GET /api/export/trips.csv?grain=trip&from=2025-09-05&to=2026-09-05 answered

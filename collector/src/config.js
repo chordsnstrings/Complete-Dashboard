@@ -68,6 +68,20 @@ export const config = {
     };
   },
 
+  /* The chat assistant (api/agent_routes.js, api/agent_model.js). Seed 2.0
+     Pro on ModelArk, Seed 2.0 Lite when Pro does not answer — the operator's
+     choice, 2026-10-09. Without its own key it uses the daily report's
+     ModelArk key (same endpoint), then ARK_API_KEY; whether that key may
+     call Seed is only known when it is asked — a refusal reads as the key. */
+  get agentModel() {
+    return {
+      baseUrl: get('AGENT_BASE_URL', D.AGENT_BASE_URL),
+      apiKey: get('AGENT_API_KEY', get('REPORT_MODEL_API_KEY', get('ARK_API_KEY'))),
+      model: get('AGENT_MODEL', D.AGENT_MODEL),
+      fallback: get('AGENT_FALLBACK_MODEL', D.AGENT_FALLBACK_MODEL),
+    };
+  },
+
   get fms() {
     return {
       base: get('FMS_BASE', D.FMS_BASE),

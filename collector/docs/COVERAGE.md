@@ -4628,6 +4628,56 @@ untouched, and nothing projected is ever added into `accounted`.
   any register change, group the directory by register key and look for a key
   on two rows.
 
+* **A LOOPBACK CALL THAT DOES NOT CARRY THE ASKER'S COOKIE IS ANONYMOUS — AND
+  WHILE SIGN-IN IS OPTIONAL, ANONYMOUS IS SERVED EVERYTHING.** The chat
+  assistant reads the data by calling the dashboard's own routes over
+  `127.0.0.1`. A call made without the asker's `fm_sid` reaches the gate as a
+  visitor, and in open mode the gate gives a visitor every class of data. A
+  Dispatcher (no cash) was then handed the cash figures, and an Egari-only
+  manager got both fleets' totals. Measured by reverting `fetchApi` in
+  `api/agent_routes.js` to send no cookie: 3 of 12 checks in
+  `test/agent_access.test.mjs` fail. Any server-side code that calls its own
+  API on somebody's behalf must forward that person's cookie (and only it).
+  Forwarding the cookie IS the access control.
+
+* **A `fleet: 'mixed'` ROUTE REFUSES A ONE-FLEET READER OUTRIGHT; A `param`
+  ROUTE NARROWS SILENTLY.** `/api/kpis` combines both fleets in every row, so
+  the gate refuses it to an Egari-only role with "combines the records of
+  every fleet". `/api/drivers/directory` is `param`, so the gate narrows it to
+  Egari without the caller asking. Two consequences:
+  - Anything that labels a result from its own arguments ("both fleets")
+    mislabels a narrowed one. The assistant takes the reader's one fleet from
+    the gate (`fixedFleet`) and writes it into every definition; reverting
+    that fails 1 check in `agent_access`.
+  - A one-fleet reader's question about totals has to be answered from a
+    `param` route, or said to be closed to them. It must never be shown as a
+    zero.
+
+* **A MODEL'S OWN DATE ARITHMETIC IS NOT TO BE TRUSTED, AND NEITHER IS ITS
+  USE OF ITS OWN PLACEHOLDERS.** Seed 2.0 Pro, rehearsed on production data
+  on 2026-10-09:
+  - It read "last Thursday" as yesterday, and could not express "the same day
+    last week" at all. Every date now goes through `resolve_period` and
+    `shift_period` (`api/agent_period.js`), which say which reading they
+    took. The prompt forbids computing a date.
+  - Given `{{r1.gross_fares_aed}}`, it wrote "AED {{…}}" and "{{…}}%". The
+    fill absorbs a repeated unit.
+  - It invented a placeholder form, `{{r4.rows[0].completed}}`, which went to
+    the phone unfilled. The fill knows exactly two forms (`{{rN.key}}`,
+    `{{rN.rows[i].col}}`). Any other text in double braces is refused and
+    corrected, and never shown.
+
+* **THE CHAT CANNOT BE REHEARSED THROUGH `bin/live-ui.mjs`, AND A SCRATCH
+  SERVER HOLDS THE CODE IT STARTED WITH.** `live-ui.mjs` proxies GETs to
+  production and has no write path. The chat is `POST /api/agent/chat`, and
+  production's copy is whatever was last deployed. So a rehearsal of
+  working-tree agent code needs a local server that mounts
+  `agentRoutes` itself and proxies its loopback tool calls to production.
+  That server is a Node process: it does not reload `api/agent_*.js` when you
+  edit them, and one rehearsal "still" showed a bug that was already fixed for
+  that reason alone. Restart it after every server-side edit before judging a
+  screenshot. Only the static files under `api/public/` are read fresh.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
@@ -8879,3 +8929,111 @@ apart with a REFUSED audit row and a warning.
   Abuduhaibaier" (6997355) are on no entry together. Unmeasured; a question
   for the next review, not a merge.
 
+
+## The chat assistant — built 2026-10-09
+
+The operator asked for "an AI agent powered by … seed 2.0 pro where users can
+chat and get data". It should understand context, never invent data, build
+Excel files, combine and analyse figures, understand date ranges and names,
+ask for clarification, and correct itself. Their rulings:
+- it is read-only ("Read only. Absolutely.");
+- anyone who can open the dashboard can use it;
+- English only;
+- all memory goes after 24 hours, generated files included;
+- names go to BytePlus like everything else;
+- GLM 5.2 is not a fallback ("extremely slow");
+- it is a chat button at the bottom, not a page: a window on desktop, the
+  whole screen on a phone, with a minimise button.
+
+**Where it lives.**
+
+| file | what it holds |
+|---|---|
+| `api/agent_routes.js` | the turn loop, memory, routes, system prompt |
+| `api/agent_tools.js` | the tools |
+| `api/agent_guard.js` | the number guard and the placeholder fill |
+| `api/agent_period.js` | the calendar |
+| `api/agent_people.js` | name and plate matching |
+| `api/agent_model.js` | the model and its fallback |
+| `api/public/agentchat.{js,css}` | the widget |
+| `sql/schema_v103.sql` | three tables: conversation, message, result |
+
+**How a figure reaches the screen.**
+1. Every data tool is a GET to the dashboard's own route over the loopback,
+   carrying the asker's cookie. So the access layer judges it exactly as it
+   judges the page (trap above).
+2. Each result is stored whole as `r1`, `r2`… on the conversation. The model
+   sees the first 12 rows.
+3. The model answers with placeholders. The server fills them, formatted the
+   way the pages format them.
+4. Before the reply is shown, the guard refuses:
+   - any number that is in no result and was not typed by the person;
+   - a sentence saying "on Bolt" or "Egari" over a figure that is not;
+   - a driver named over a result about somebody else;
+   - any other text in double braces.
+
+   A refused reply goes back once with what was wrong. A second refusal is
+   replaced by the figures as measured, said plainly.
+5. A withheld route comes back as the gate's own sentence and is shown under
+   the answer. It is never a zero.
+
+**What it can read.** These routes, and nothing else:
+- `/api/kpis` (fleet totals);
+- `/api/trips/daily`;
+- `/api/drivers/directory`;
+- `/api/driver/trips`;
+- `/api/vehicles/directory`;
+- `/api/settlement/cash-exposure` (cash trips);
+- `/api/target/month`;
+- `/api/target` (yesterday against target);
+- `/api/unauthorized/summary`.
+
+On top of these it can summarise (sort, top N), compare two results, combine
+results, and build an Excel file. It has nothing for ledger balances and
+statements, live positions, SMS or Yango's weekly summary. Payouts it sees only
+as the Drivers page's column. The prompt tells it to say plainly that it
+cannot see data no tool gives, and never to answer from a nearby figure. That
+rule was not rehearsed against the real model before deploy.
+
+**Measured with the tools, thinking off (2026-10-09).**
+- Time per step: Pro 1.9–3.1 s, Lite 1.6–3.1 s.
+- Thinking on took the first tool call from 2.4 s to 6.8 s, so it is off.
+- Offered two Khalids, both models asked "which one?". Both wrote placeholders
+  rather than digits.
+- Rehearsed through the widget against production's data with the real model:
+  - yesterday's completed trips (1,005, Thu 8 Oct) against the same day last
+    week;
+  - the top 5 drivers last week;
+  - an Excel of Egari's September cash trips;
+  - the month against target;
+  - "How did Khalid do this month?", which asked which Khalid and, after the
+    button, answered 134 completed trips and AED 8,036.36.
+
+**The model.**
+- Order: `seed-2-0-pro-260328`, Pro again, then `seed-2-0-lite-260428`, 45 s
+  each.
+- An answer not written by Pro says so.
+- A 401/403 is the shared key: it is reported as the key and not retried.
+- When neither model answers, the chat says it cannot reach its model; it
+  does not answer without one.
+- Key: `AGENT_API_KEY`, else the report's `REPORT_MODEL_API_KEY`, else
+  `ARK_API_KEY`. It can also be set on Settings → Assistant.
+
+**Memory.**
+- Every message and result is deleted 24 hours after it was written, and a
+  conversation 24 hours after its last message. The sweep runs hourly and at
+  every turn.
+- "New chat" deletes the person's conversations at once.
+- An Excel file is built from the stored results when it is downloaded, so
+  it goes with them.
+- A visitor (sign-in optional) is told apart by a random one-day `fm_agent`
+  cookie.
+- 400 turns a day per person (`AGENT_DAILY_TURNS`).
+- The log carries counts, tool names, the model and the time. It never
+  carries what anybody typed or what a tool returned.
+
+**Not done, and why.**
+- No streaming of the model's own words. A reply is held until the guard has
+  read it, which is the point of the guard. The widget shows what the
+  assistant is doing step by step instead.
+- No other language, on the operator's ruling.

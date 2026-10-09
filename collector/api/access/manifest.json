@@ -8055,5 +8055,70 @@
   "cap": null,
   "auditRead": true,
   "notes": "api/target_routes.js + api/target_month.js (2026-10-08). The Month target page as an .xlsx: Month, Days, Behind on money (30), Behind on trips (30), All drivers (names ID, gross and targets EARN, trips BK). Body is a FILE, not JSON, so the shaper never sees it: the route writes \"(withheld)\" in every cell of a class the signed-in reader's role does not hold in full (MONTH_FILE_CLASSES), the Today workbook's rule."
+ },
+ {
+  "method": "GET",
+  "path": "/api/agent/state",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/agent_routes.js (2026-10-09). The chat assistant. It holds no data of its own: every figure it relays was fetched by a tool as a GET to another /api route over the loopback, carrying the asker's own cookie, so the gate and shaper judged each one exactly as they judge the page it belongs to (a role without CASH is refused the cash tool in the cash page's words). It writes only its own 24-hour memory (agent_conversation/agent_message/agent_result, sql/schema_v103.sql), keyed on the asker; it has no tool that is not a GET. Anyone who can open the dashboard may use it (the operator, 2026-10-09): every person role holds agent.ask. Body {available, model, memory_hours, read_only, conversation:{id, context, messages}} — the asker's own conversation only."
+ },
+ {
+  "method": "POST",
+  "path": "/api/agent/chat",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "agent.ask",
+  "notes": "api/agent_routes.js (2026-10-09). The chat assistant. It holds no data of its own: every figure it relays was fetched by a tool as a GET to another /api route over the loopback, carrying the asker's own cookie, so the gate and shaper judged each one exactly as they judge the page it belongs to (a role without CASH is refused the cash tool in the cash page's words). It writes only its own 24-hour memory (agent_conversation/agent_message/agent_result, sql/schema_v103.sql), keyed on the asker; it has no tool that is not a GET. Anyone who can open the dashboard may use it (the operator, 2026-10-09): every person role holds agent.ask. Body {message, page, clear}; answers application/x-ndjson events (status, ask, answer, error). Each answer's figures come from tool results stored on the conversation."
+ },
+ {
+  "method": "POST",
+  "path": "/api/agent/new",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "agent.ask",
+  "notes": "api/agent_routes.js (2026-10-09). The chat assistant. It holds no data of its own: every figure it relays was fetched by a tool as a GET to another /api route over the loopback, carrying the asker's own cookie, so the gate and shaper judged each one exactly as they judge the page it belongs to (a role without CASH is refused the cash tool in the cash page's words). It writes only its own 24-hour memory (agent_conversation/agent_message/agent_result, sql/schema_v103.sql), keyed on the asker; it has no tool that is not a GET. Anyone who can open the dashboard may use it (the operator, 2026-10-09): every person role holds agent.ask. Deletes every conversation of the asker, with its results and so its file links. Body {ok, forgotten}."
+ },
+ {
+  "method": "GET",
+  "path": "/api/agent/file/:conversation/:file",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/agent_routes.js (2026-10-09). The chat assistant. It holds no data of its own: every figure it relays was fetched by a tool as a GET to another /api route over the loopback, carrying the asker's own cookie, so the gate and shaper judged each one exactly as they judge the page it belongs to (a role without CASH is refused the cash tool in the cash page's words). It writes only its own 24-hour memory (agent_conversation/agent_message/agent_result, sql/schema_v103.sql), keyed on the asker; it has no tool that is not a GET. Anyone who can open the dashboard may use it (the operator, 2026-10-09): every person role holds agent.ask. An .xlsx built at request time from the asker's own stored results; 404 for anybody else's conversation or after 24 hours.",
+  "auditRead": true
  }
 ]

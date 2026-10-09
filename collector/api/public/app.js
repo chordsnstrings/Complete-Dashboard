@@ -27,6 +27,7 @@ import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
 /* Sign-in and access (collector/docs/ULM-DESIGN.md). The server decides; these
    only draw what it decided — which pages open, and the true reason where
    something is not shown. */
+import { mountAssistant } from './agentchat.js';
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
   WithheldError, toSignIn, signOut, roleNames, post as accessPost, installFetchGuard, inChosenLook,
   unlessWithheld, closingClass, VIEW_CAP, VIEW_CAP_WHY, fleetLabel, fleetList, fleetNames, allFleetsLabel } from './access.js';
@@ -10417,5 +10418,11 @@ const whoReady = loadWho().then(() => {
   if (gated() && !location.hash && !canOpenView(state.view)) { location.replace(`#${firstOpenView()}`); return false; }
   return true;
 });
-whoReady.then((go) => { if (go) whenStyled(4000, render).then(render); });
+whoReady.then((go) => {
+  if (!go) return;
+  whenStyled(4000, render).then(render);
+  /* The chat assistant's button and window (agentchat.js), on <body> so it
+     outlives every view. Mounted only once sign-in is settled. */
+  mountAssistant();
+});
 setInterval(() => { if (state.view === 'live') render(); }, 60000);

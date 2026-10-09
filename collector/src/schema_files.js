@@ -311,4 +311,9 @@ export const SCHEMA_FILES = [
      row that would fold holds somebody else's account.
      test/identity_review_merge.test.mjs. */
   'schema_v102.sql',
+  /* v103 (2026-10-09): the chat assistant's conversations, messages and
+     fetched results — deleted 24 hours after they are written (the operator:
+     "remove all memory every 24 hours, including generated files").
+     test/agent_routes.test.mjs. */
+  'schema_v103.sql',
 ];
