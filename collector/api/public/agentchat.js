@@ -151,9 +151,15 @@ let mounted = false;
 export function mountAssistant() {
   if (mounted || typeof document === 'undefined') return;
   mounted = true;
+  /* BEFORE arkiv.css, never after it: the Arkiv skin wins every tie by being
+     the last stylesheet in the document (test/arkiv_skin.test.mjs), and an
+     appended link took that place — 1 check failed in the full suite. The
+     widget's own rules are all .ak-* classes, so they lose nothing by order. */
   const css = document.createElement('link');
   css.rel = 'stylesheet'; css.href = '/agentchat.css';
-  document.head.append(css);
+  const arkiv = document.querySelector('link[rel=stylesheet][href="/arkiv.css"]');
+  if (arkiv) arkiv.parentNode.insertBefore(css, arkiv);
+  else document.head.append(css);
 
   const fab = h('button', 'ak-fab');
   fab.type = 'button'; fab.hidden = true;
