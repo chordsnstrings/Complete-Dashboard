@@ -9050,6 +9050,15 @@ rule was not rehearsed against the real model before deploy.
 - The log carries counts, tool names, the model and the time. It never
   carries what anybody typed or what a tool returned.
 
+**On production, 2026-10-09 (`cb5c5e5`).**
+- Production's model key reaches Seed 2.0 Pro: 5.7 s for a one-tool answer,
+  and 12–24 s for a comparison, an Excel file, or a name question with its
+  follow-up.
+- A chat answer cannot be shown through `bin/prod-mirror.mjs`, which answers
+  GET only and forwards no header. It was verified through a scratch
+  pass-through that adds exactly `POST /api/agent/chat|new` and the
+  `fm_agent` cookie. FIX-STATUS "AG" has what each conversation returned.
+
 **Not done, and why.**
 - No streaming of the model's own words. A reply is held until the guard has
   read it, which is the point of the guard. The widget shows what the

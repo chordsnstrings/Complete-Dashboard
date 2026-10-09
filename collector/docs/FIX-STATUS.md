@@ -4505,7 +4505,42 @@ What the first rendering found, and what was changed before commit:
 | id | fix | written | production | proven |
 |---|---|---|---|---|
 | AG-1 | Spike: Seed 2.0 Pro and Lite on ModelArk with the assistant's own tools, thinking off — 1.9–3.1 s and 1.6–3.1 s a step, both ask "which Khalid?", both write placeholders | n/a | n/a | measured, COVERAGE "The chat assistant" |
-| AG-2 | Tools (`api/agent_tools.js`): the calendar (`agent_period.js`), names and plates (`agent_people.js`), nine data tools that are GETs to the pages' own routes carrying the asker's cookie, summarise / compare / combine / Excel / ask_user; results stored whole, the model shown 12 rows | yes | pending deploy | agent_units 57 — "last week" case removed 2, one-word carrier rule removed 1; agent_access 12 — no cookie forwarded 3, fixedFleet ignored 1 |
-| AG-3 | The turn (`api/agent_routes.js`): placeholders filled by the server, the guard (`agent_guard.js`) refusing unsourced numbers, mismatched platform/fleet/driver sentences and stray braces, one correction then the plain figures; Pro, Pro, Lite and an honest refusal (`agent_model.js`); NDJSON status stream; 24-hour sweep; "New chat" deletes; a log line with counts only; `sql/schema_v103.sql` | yes | pending deploy | agent_routes 28 (reverts recorded in its header: stray number 2, platform sentence 2, owner check 1, sweep 3, a file without its conversation 2); agent_units — 401 short-circuit removed 1 |
-| AG-4 | The widget (`api/public/agentchat.{js,css}`): bottom button, docked window on desktop in both skins, whole screen with minimise on a phone, page context as removable chips, options as buttons, tables, Excel links, "How I got this"; mounted after sign-in on desktop and phone; in the SW shell | yes | pending deploy | screenshots against production data with the real model (Arkiv, Classic, phone with a follow-up and minimised); tokens.test walks the SW shell; arkiv_skin — the widget's stylesheet was appended after arkiv.css and took the last place the skin needs (1 fail in the full suite), now inserted before it; endpoint_coverage — the file route counted as orphaned while the widget followed a server-written href (1 fail in the full suite); the widget now builds the link from the conversation and file ids; mockapi — no fixture for /api/agent/state (1 fail in the full suite), now the real route's no-key answer; phone_classic 1 / phone_arkiv 4 — /api/agent/state not in the phone recording, now added (the mock's answer, every other answer unchanged); classes renamed ak-* → asst-* (the Arkiv skin's prefix) and the bare `n` → asst-n, guarded in agent_units (a foreign class in agentchat.css 1 fail, an asst-* class in arkiv.css 1 fail) |
-| AG-5 | Access: four manifest entries (state, chat, new, file), capability `agent.ask` on the twelve person roles; files open only for their owner | yes | pending deploy | agent_access 12 under the real gate and real roles |
+| AG-2 | Tools (`api/agent_tools.js`): the calendar (`agent_period.js`), names and plates (`agent_people.js`), nine data tools that are GETs to the pages' own routes carrying the asker's cookie, summarise / compare / combine / Excel / ask_user; results stored whole, the model shown 12 rows | yes | **on production** `cb5c5e5` (deployment 6af0f542, 2026-10-09) | agent_units 57 — "last week" case removed 2, one-word carrier rule removed 1; agent_access 12 — no cookie forwarded 3, fixedFleet ignored 1 |
+| AG-3 | The turn (`api/agent_routes.js`): placeholders filled by the server, the guard (`agent_guard.js`) refusing unsourced numbers, mismatched platform/fleet/driver sentences and stray braces, one correction then the plain figures; Pro, Pro, Lite and an honest refusal (`agent_model.js`); NDJSON status stream; 24-hour sweep; "New chat" deletes; a log line with counts only; `sql/schema_v103.sql` | yes | **on production** `cb5c5e5` (deployment 6af0f542, 2026-10-09) | agent_routes 28 (reverts recorded in its header: stray number 2, platform sentence 2, owner check 1, sweep 3, a file without its conversation 2); agent_units — 401 short-circuit removed 1 |
+| AG-4 | The widget (`api/public/agentchat.{js,css}`): bottom button, docked window on desktop in both skins, whole screen with minimise on a phone, page context as removable chips, options as buttons, tables, Excel links, "How I got this"; mounted after sign-in on desktop and phone; in the SW shell | yes | **on production** `cb5c5e5` (deployment 6af0f542, 2026-10-09) | screenshots against production data with the real model (Arkiv, Classic, phone with a follow-up and minimised); tokens.test walks the SW shell; arkiv_skin — the widget's stylesheet was appended after arkiv.css and took the last place the skin needs (1 fail in the full suite), now inserted before it; endpoint_coverage — the file route counted as orphaned while the widget followed a server-written href (1 fail in the full suite); the widget now builds the link from the conversation and file ids; mockapi — no fixture for /api/agent/state (1 fail in the full suite), now the real route's no-key answer; phone_classic 1 / phone_arkiv 4 — /api/agent/state not in the phone recording, now added (the mock's answer, every other answer unchanged); classes renamed ak-* → asst-* (the Arkiv skin's prefix) and the bare `n` → asst-n, guarded in agent_units (a foreign class in agentchat.css 1 fail, an asst-* class in arkiv.css 1 fail) |
+| AG-5 | Access: four manifest entries (state, chat, new, file), capability `agent.ask` on the twelve person roles; files open only for their owner | yes | **on production** `cb5c5e5` (deployment 6af0f542, 2026-10-09) | agent_access 12 under the real gate and real roles |
+
+**On production (`cb5c5e5`, deployment 6af0f542, ACTIVE by 13:18Z on 2026-10-09).**
+- **The route.** `/api/agent/state` answers 200 with `available: true`, so
+  the v103 tables are there and the api service holds a model key.
+  `agentchat.js` (with `asst-fab`) and `sw.js` (listing it) are deployed.
+- **The key reaches Seed.** Asked anonymously with curl (production is in
+  open mode), the assistant answered "The fleet completed 1,005 trips
+  yesterday (Thu 8 Oct 2026)" in 5.7 s from `seed-2-0-pro-260328`, with no
+  fallback. That equals `/api/kpis` `completed_trips` for 8 Oct. "New chat"
+  then answered `{ok:true, forgotten:1}`.
+- **Three conversations in a real browser**, through a scratch pass-through
+  that serves production's bytes and lets only the two assistant POSTs and
+  the `fm_agent` cookie through. None had a page error.
+  - Arkiv desktop, 14.4 s: 1,005 against 860 on Thu 1 Oct, up 145 and
+    16.9%, with the comparison table.
+  - Classic desktop, 12–14 s: "Make me an Excel of Egari's cash trips in
+    September" downloaded as an .xlsx (200, 6,902 bytes). Read back, it has
+    one sheet of 72 rows: title, the floor note (292 of 1,386 cash trips
+    have no fare), a "made by" line, a blank row, the header and 67 driver
+    rows.
+  - Phone, 24.1 s: "How did Khalid do this month?" was asked back with four
+    named candidates as buttons. After the tap: 137 completed of 151, AED
+    8,036.36 gross and AED 5,001.40 payout over Thu 1 – Fri 9 Oct, labelled
+    "today is still running". Minimised, the button sits above the tab bar.
+- **Stylesheet order, measured in a browser.** Every computed style of 131
+  widget elements was compared with `agentchat.css` before `arkiv.css` and
+  after it. Nothing differed in Arkiv desktop, the phone or Classic.
+- **Suite.** 371 files, 13,927 assertions, none failing.
+  `access_pages` ran against a local Postgres: 150 checks, and no assistant
+  call was among the refusals it lists.
+- **Not fixed: a cosmetic flaw.** The Classic answer printed "1386", not
+  "1,386": the model typed a number that is in a result instead of citing
+  it. The guard allows such numbers but does not format them. Formatting
+  bare digits would need to tell years and ids apart, so it is left for now.
+
