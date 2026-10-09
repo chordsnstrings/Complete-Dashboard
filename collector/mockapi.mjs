@@ -4725,6 +4725,14 @@ app.get('/api/export/target-month.xlsx', (req, r) => {
   r.set('content-disposition', `attachment; filename="${name}"`);
   r.end(wb.toBuffer());
 });
+/* The chat assistant's state (api/agent_routes.js). The mock has no model,
+   so it answers what the real route answers with no key: not available, no
+   conversation — the widget then says it is not set up instead of offering a
+   chat that cannot answer. */
+app.get('/api/agent/state', (_, r) => {
+  r.set('Cache-Control', 'no-store');
+  r.json({ available: false, model: 'seed-2-0-pro-260328', memory_hours: 24, read_only: true, conversation: null });
+});
 app.get('/api/target', (req, r) => {
   /* ?asof= as the real route reads it, so a recording made at a frozen
      instant (test/phone_harness.mjs) can ask for that instant's month. */
