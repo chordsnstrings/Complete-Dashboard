@@ -141,7 +141,13 @@ function renderTable(t) {
 }
 function renderFile(f) {
   const a = h('a', 'ak-file');
-  a.href = f.url; a.setAttribute('download', '');
+  /* Built here from the two ids rather than following a server-written href:
+     the link can only ever be this route, and test/endpoint_coverage.test.mjs
+     can see that the UI reaches it (an href taken from the answer left the
+     route "orphaned" in the full suite). */
+  const conv = encodeURIComponent(f.conversation || '');
+  const file = encodeURIComponent(`${f.id}.xlsx`);
+  a.href = `/api/agent/file/${conv}/${file}`; a.setAttribute('download', '');
   a.innerHTML = `<span aria-hidden="true">⬇</span><span><b>${esc(f.title || 'Excel file')}.xlsx</b><br><small>${f.rows != null ? `${Number(f.rows).toLocaleString('en-US')} rows · ` : ''}kept for 24 hours</small></span>`;
   return a;
 }

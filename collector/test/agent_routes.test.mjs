@@ -28,7 +28,11 @@
      · the owner check dropped from the file route: a stranger downloads the
        file — 1 fails.
      · sweepAgentMemory's three DELETEs made no-ops: the conversation, its
-       results and the Excel link survive 25 hours — 3 fail. */
+       results and the Excel link survive 25 hours — 3 fail.
+     · the answer's file without its `conversation` (api/agent_routes.js):
+       the link the widget builds from it is a 404 — 2 of 28 fail, then the
+       workbook read throws. (Counts above are of the 27 checks before this
+       one was added.) */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
@@ -185,11 +189,16 @@ const t5 = await chat('Give me that in Excel');
 const file = t5.last.files?.[0];
 check('the answer carries a file link and the grouped table',
   file?.url === `/api/agent/file/${t1.events[0].conversation}/r6.xlsx` && t5.last.tables?.[0]?.id === 'r5', JSON.stringify(t5.last).slice(0, 300));
+/* The widget builds the link from these two ids (agentchat.js renderFile),
+   not from the url — so they are what has to reach a download. */
+check('…and names its conversation and id, which the widget builds the link from',
+  file?.conversation === t1.events[0].conversation && file?.id === 'r6', JSON.stringify(file));
 check('…and the grouped table is the server\'s count: 5 completed, 1 not completed',
   JSON.stringify(t5.last.tables?.[0]?.rows) === JSON.stringify([{ outcome: 'completed', count: 5 }, { outcome: 'not_completed', count: 1 }]),
   JSON.stringify(t5.last.tables?.[0]?.rows));
 {
-  const r = await fetch(`${base}${file.url}`, { headers: { cookie } });
+  const r = await fetch(`${base}/api/agent/file/${encodeURIComponent(file.conversation || '')}/${encodeURIComponent(`${file.id}.xlsx`)}`,
+    { headers: { cookie } });
   const buf = Buffer.from(await r.arrayBuffer());
   check('the file downloads for its owner, as an .xlsx', r.status === 200
     && /spreadsheetml/.test(r.headers.get('content-type') || '') && buf.slice(0, 2).toString() === 'PK', `${r.status}`);

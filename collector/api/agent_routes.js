@@ -317,7 +317,7 @@ async function runTurn({ q, req, conv, owner, text, page, clear, emit, signal })
       } else {
         answer = { type: 'answer', text: g.text,
           tables: g.tables.map((id) => tableBlock(results.get(id))),
-          files: g.files.map((id) => { const r = results.get(id); return { id, title: r.title, url: r.url, rows: r.values?.rows ?? null }; }) };
+          files: g.files.map((id) => { const r = results.get(id); return { id, conversation: conv.id, title: r.title, url: r.url, rows: r.values?.rows ?? null }; }) };
         outcome = retried ? 'corrected' : 'answered';
       }
       const cited = new Set([...g.used, ...g.tables, ...g.files]);
