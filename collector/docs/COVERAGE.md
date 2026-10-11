@@ -9243,6 +9243,18 @@ basis saying "last 3 Sundays" when 3 of the last 4 were on record). All
 fixed and each proven by revert in test/target_weights (22 reverts, 46
 checks).
 
+**On production, 2026-10-11 (deploy 9c1bc473, 600694a).** Compared with a
+snapshot of /api/target taken before the deploy: the month target
+AED 1,795,786.01 before and after; none of 1–10 Oct moved (plan, need or
+verdict); Sun 11 Oct needs AED 48,739.39 (was 62,230.20), Thu 15 Oct
+70,507.83; the trips minimum Sun 10 … Thu/Fri 14, today 115 drivers × 10 =
+1,150; both hourly panels "on the last 4 Sundays (13 Sep – 4 Oct)"; the month
+paced at 85.07% of plan. One sentence was wrong there and nowhere in a test:
+the Month target page called the 13,764 trips needed to 10 Oct "each weekday
+its share" when all ten days were asked a flat 12. A span that began before
+the rule must say where the rule began; it now does (test/target_weights §8,
+the 23rd revert).
+
 **Not done, and why:**
 - **Public holidays.** No calendar of them is held. A holiday reads under or
   over its weekday for that reason, and a test of it would need the calendar

@@ -188,7 +188,16 @@ function monthNotes(v, lastPast, wh) {
   const ts = v.trips_summary;
   const closed = v.summary && v.summary.days_left === 0;
   if (ts && ts.trips != null && ts.needed) {
-    notes.push(`Trips: ${fmt(ts.trips)} completed of ${fmt(ts.needed)} needed to ${lastPast} — ${v.trips_min} a day per active driver${ts.weighted ? ' on an average day, each weekday its share' : ''}; `
+    /* Say "each weekday its share" only of the days that were asked it: on
+       production October's 1–10 were asked a flat 12 (the rule started on
+       the 11th), and the first build said "each weekday its share" of all
+       ten (seen on production, 2026-10-11). */
+    const gone = (v.days || []).filter((d) => d.state === 'past');
+    const wFrom = ts.weighted ? ts.weights_from : null;
+    const firstW = wFrom ? gone.find((d) => d.day >= wFrom) : null;
+    const how = !firstW ? '' : gone[0].day >= wFrom ? ' on an average day, each weekday its share'
+      : ` on an average day — each weekday its share from ${firstW.label}, the same every day before`;
+    notes.push(`Trips: ${fmt(ts.trips)} completed of ${fmt(ts.needed)} needed to ${lastPast} — ${v.trips_min} a day per active driver${how}; `
       + `${fmt(ts.per_active, 1)} a driver a day ${closed ? 'over the month' : 'so far'}.`);
   } else if (wh.BK != null) notes.push(said('BK', wh.BK));
   const un = v.trajectory?.unsettled || [];

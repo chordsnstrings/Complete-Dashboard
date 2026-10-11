@@ -24,11 +24,12 @@
         day's own minimum.
    Synthetic plates (C…) and drivers (Test Driver …) only.
    REVERSIONS, each run against this file on 2026-10-11, recorded beside the
-   checks they break — 22 of them, after an independent review of the first
+   checks they break — 23 of them, after an independent review of the first
    build found a day already gone re-scored by a later save, a weighted month
    on plan read as 79% paced, a Monday learning from a Sunday seconds old, a
    future "as of" page keeping a month, and the re-shape's bookkeeping handed
-   to the pages. Each of those has its own check here. */
+   to the pages. Each of those has its own check here; the 23rd, the month
+   page's trips sentence, was seen on production after the deploy. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 
@@ -349,6 +350,20 @@ const { targetHours } = await import('../api/target_hours.js');
 const th = await targetHours(q, { now: at('2026-10-18', '13:00'), min: 12 });
 check('the hourly trips panel carries the day’s minimum and the average day’s', th.trips.min === 10 && th.trips.min_average === 12
   && th.trips.target === sd.trips_target, j({ min: th.trips.min, avg: th.trips.min_average, target: th.trips.target, absent: th.trips.absent }));
+
+/* The Month target page's trips sentence claims the weekday share only of
+   the days that were asked it. October 1–10 were a flat 12 on production.
+   REVERSION: the first build's wording (weighted → "each weekday its share"
+   of every day counted) -> 1 FAILS. */
+const pageMod = await import('../api/public/targetmonth.js');
+const { monthView } = await import('../api/target_month.js');
+const tripsLine = (html) => (html.match(/Trips: [^<]*/) || [''])[0];
+const v11 = await monthView(q, { month: '2026-10', today: '2026-10-11', min: 12, now: at('2026-10-11') });
+const v18 = await monthView(q, { month: '2026-10', today: '2026-10-18', min: 12, now: at('2026-10-18') });
+check('the month page: 1–10 Oct counted as 12 a day; to the 17th, the weekday share from Sun 11 Oct only',
+  /per active driver; /.test(tripsLine(pageMod.monthHtml(v11))) && !/weekday/.test(tripsLine(pageMod.monthHtml(v11)))
+  && /each weekday its share from Sun 11 Oct, the same every day before/.test(tripsLine(pageMod.monthHtml(v18))),
+  j([tripsLine(pageMod.monthHtml(v11)), tripsLine(pageMod.monthHtml(v18))]));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
