@@ -1410,18 +1410,27 @@ function targetPanel(host, ctx) {
        the days left showed AED 10,333.33 a car a day for a save that stored
        10,000.00 (test/access_pages.test.mjs). */
     const keep = pv.past_plan != null ? pv.past_plan : 0;
-    const rate = pv.past_plan != null ? (g - keep) / (pv.cars * pv.days_left) : g / (pv.cars * m.days_in_month);
+    /* Since 2026-10-11 a save shares by weekday (api/target_weights.js): the
+       rate is AED a car on an AVERAGE day, what is spread ÷ (cars × the sum
+       of the weights of the days it spreads over), which the server sends as
+       weight_sum — so this figure is the one Save stores. */
+    const span = pv.weight_sum > 0 ? pv.weight_sum : (pv.past_plan != null ? pv.days_left : m.days_in_month);
+    const rate = (g - keep) / (pv.cars * span);
     if (!(rate > 0)) {
       preview.textContent = `The days already gone were planned at AED ${two(keep)}; a month total at or below that leaves nothing for the days left.`;
       return;
     }
     const perDay = g / m.days_in_month;
     const c = d.context;
+    const W = pv.weights;
+    const wk = W?.ok ? ` Shared by weekday — ${W.line} of an average day, from the ${W.basis.used} whole weeks `
+      + `${W.basis.from} to ${W.basis.to}: a Sunday asks AED ${two(rate * W.fares[0])} a car, a Thursday AED ${two(rate * W.fares[4])}.`
+      : (W ? ` Every day is asked the same: ${W.basis.why}` : '');
     const tripsDay = c.active_drivers && c.last_month.avg_fare ? c.active_drivers * d.trips_min * c.last_month.avg_fare : null;
     preview.textContent = (pv.past_plan != null
-      ? `The ${pv.days_left} days left share AED ${two(g - keep)} over ${pv.cars} cars: AED ${two(rate)} a car a day. `
-        + `The days already gone keep the AED ${two(keep)} they were planned at.`
-      : `AED ${two(rate)} a car a day over the ${pv.cars} cars that earned in the last 7 days — AED ${two(perDay)} a day over ${m.days_in_month} days.`)
+      ? `The ${pv.days_left} days left share AED ${two(g - keep)} over ${pv.cars} cars: AED ${two(rate)} a car on an average day. `
+        + `The days already gone keep the AED ${two(keep)} they were planned at.${wk}`
+      : `AED ${two(rate)} a car on an average day over the ${pv.cars} cars that earned in the last 7 days — AED ${two(perDay)} a day on average over ${m.days_in_month} days.${wk}`)
       + (tripsDay ? ` At ${d.trips_min} trips a day for each of the ${c.active_drivers} active drivers and ${c.last_month.month_name}’s `
         + `AED ${two(c.last_month.avg_fare)} a trip, the trips target alone would bring about AED ${two(tripsDay)} a day — `
         + `${tripsDay >= perDay ? `${Math.round((100 * (tripsDay - perDay)) / perDay)}% more than` : `${Math.round((100 * (perDay - tripsDay)) / perDay)}% less than`} this target.` : '');
@@ -1436,7 +1445,7 @@ function targetPanel(host, ctx) {
     const cur = d.current;
     state.replaceChildren(cur.target
       ? h('p', { class: 'acx-p' }, h('b', null, `${cur.month_name}: ${money(cur.summary.month_target)}`),
-        ` — ${money(cur.target.rate)} a car a day over ${cur.summary.cars_now} cars. Set at ${money(cur.target.gross)} over ${cur.target.cars} cars`
+        ` — ${money(cur.target.rate)} a car ${cur.summary.weighted ? 'on an average day' : 'a day'} over ${cur.summary.cars_now} cars. Set at ${money(cur.target.gross)} over ${cur.target.cars} cars`
         + (cur.summary.since_set ? `; ${cur.summary.since_set > 0 ? 'cars have joined' : 'cars have dropped out'} since, which moved it by ${money(Math.abs(cur.summary.since_set))}.` : '.'))
       : h('p', { class: 'acx-p' }, h('b', null, `${cur.month_name} has no target yet. `), 'The Today page says so until one is saved.'));
     const opts = [[cur.month, `${cur.month_name} (this month)`], [d.next.month, `${d.next.month_name} (next month)`]];
@@ -1446,8 +1455,10 @@ function targetPanel(host, ctx) {
     const saves = [...cur.saves.map((x) => ({ ...x, m: cur.month_name })), ...d.next.saves.map((x) => ({ ...x, m: d.next.month_name }))];
     histHost.replaceChildren(saves.length
       ? h('ul', { class: 'acx-list' }, saves.slice().reverse().map((x) => h('li', null,
-        `${x.m}: ${money(x.gross)} — set ${dtStr(x.set_at)} by ${x.by === 'system:seed' ? 'the deploy, on the operator’s instruction' : (x.by || 'someone no longer named')}, `
-        + `over ${x.cars} cars, AED ${two(x.rate)} a car a day from that day.`)))
+        `${x.m}: ${money(x.gross)} — set ${dtStr(x.set_at)} by ${x.by === 'system:seed' ? 'the deploy, on the operator’s instruction'
+          : x.by === 'system:reweight' ? 'the weekday re-shape (the same month target, the days left shared by weekday)'
+            : (x.by || 'someone no longer named')}, `
+        + `over ${x.cars} cars, AED ${two(x.rate)} a car ${x.weighted ? 'on an average day, shared by weekday,' : 'a day'} from that day.`)))
       : empty('No target has been saved yet.'));
     say();
   };
@@ -1461,16 +1472,18 @@ function targetPanel(host, ctx) {
     if (!(g > 0)) { mm.set('Enter the month’s gross target in AED, above zero.', 'bad'); return; }
     const res = await act(save, mm, () => post('/api/access/target', { month: month.value, gross: g }));
     if (!res) return;
-    mm.set(`Saved: ${res.month_name} at ${money(res.saved.gross)} — ${money(res.saved.rate)} a car a day over ${res.saved.cars} cars`
+    mm.set(`Saved: ${res.month_name} at ${money(res.saved.gross)} — ${money(res.saved.rate)} a car ${res.saved.weights ? 'on an average day' : 'a day'} over ${res.saved.cars} cars`
       + (res.summary?.today_needs != null ? `; today needs ${money(res.summary.today_needs)}.` : '.'), 'ok');
     gross.value = '';
     await load();
   });
   p.body.append(...[
     h('p', { class: 'acx-p' }, 'One gross target for both fleets — fares, before any platform commission. It is shared over the cars '
-      + 'that earned in the last 7 days: AED a car a day = the target ÷ (days in the month × those cars). A car that joins adds its '
-      + 'share of the days left to the month; a day under target is spread over the days left, and a day over lowers them the same '
-      + 'way. The Today page leads with what today needs and whether yesterday was over (green) or under (red).'),
+      + 'that earned in the last 7 days, and over the days BY WEEKDAY, the way the fleet’s own last 8 weeks ran — a Sunday is asked '
+      + 'for less than a Thursday. AED a car on an average day = the target ÷ (those cars × the weekday weights of the month’s days). '
+      + 'A car that joins adds its share of the days left to the month; a day under target is caught up over the days left in the '
+      + 'same weekday proportions, and a day over lowers them the same way. The Today page leads with what today needs and whether '
+      + 'yesterday was over (green) or under (red).'),
     state, facts,
     h('div', { class: 'acx-inrow' }, field('Month', month), field('Gross target, AED', gross), save),
     preview, mm,

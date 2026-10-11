@@ -10,7 +10,12 @@
        Bolt, Yango or the hotel channel. A telematics journey is not a trip.
    The minimum is `low_trips_min` in the Access page's company settings
    (api/access/service.js DEFAULTS, 10), which the Owner changes without a
-   deploy; the email reads it when it runs and prints it.
+   deploy; the email reads it when it runs and prints it. Since 2026-10-11 it
+   is the minimum on an AVERAGE day, and yesterday is judged against its own
+   weekday's share of it — a Sunday 10 of an average day's 12 (the operator:
+   "A historically bad day on a Sunday can't be expected to perform the same
+   way as weekday"; api/target_weights.js minimumOn, the number the Target
+   page and the goal texts ask for that day too).
 
    ONE PERSON, ONE ROW. Grouped by api/custody_sql.js personKey() over
    trip_ext, exactly as the #day page and the 07:00 report group drivers, so a
@@ -28,6 +33,7 @@ import { get } from './settings.js';
 import { log } from './log.js';
 import { personKey } from '../api/custody_sql.js';
 import { yesterdayDubai, resendSend, channelsCollected, EMAIL, T, SERIF, SANS, esc, int, longDay } from './daily_report.js';
+import { monthWeights, minimumOn, WEEKDAY } from '../api/target_weights.js';
 
 const SRC = 'low-trips';
 const PLATFORM = { uber: 'Uber', bolt: 'Bolt', yango: 'Yango', hotel: 'Hotel' };
@@ -101,6 +107,17 @@ export async function lowTripsFacts(q, day, { min = DEFAULT_MIN } = {}) {
   };
 }
 
+/* Where the minimum came from: the Owner's figure, and — when the day is
+   weighted — its weekday's share of it. */
+export function minimumSentence(f) {
+  if (f.min_weight != null && f.min_average != null && f.min !== f.min_average) {
+    const wd = WEEKDAY[new Date(`${f.day}T12:00:00Z`).getUTCDay()];
+    return `The minimum, ${f.min}, is ${wd}’s share of the ${f.min_average} a day the Owner sets on the Access page `
+      + `(${wd}s bring ${Math.round(f.min_weight * 100)}% of an average day).`;
+  }
+  return `The minimum, ${f.min}, is set by the Owner on the Access page.`;
+}
+
 export function renderLowTripsEmail(f, { dashboard = null } = {}) {
   const wd = new Date(`${f.day}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
   const gapWords = (g) => g.map((m) => `${platformName(m.platform)} · ${FLEET[m.fleet] || m.fleet}`).join(', ');
@@ -160,7 +177,7 @@ ${f.below.length ? `<tr><td class="pad" style="padding:0 36px 8px 36px">
 <tr><td class="pad" style="padding:24px 36px 36px 36px;font:400 12px/1.6 ${SANS};color:${T.grey}">
   A trip is a completed booking on Uber, Bolt, Yango or the hotel channel, in the Dubai day ${esc(f.day)}; a driver on two platforms is one row.
   Active means at least one completed trip in the ${ACTIVE_DAYS} days to ${esc(wd)}. ${int(f.at_or_above)} active driver${f.at_or_above === 1 ? '' : 's'} reached ${int(f.min)} or more.
-  The minimum, ${int(f.min)}, is set by the Owner on the Access page.
+  ${esc(minimumSentence(f))}
   ${dashboard ? `<br><a href="${esc(dashboard)}/#day/${esc(f.day)}" style="color:${T.ink}">Open this day on the dashboard</a>` : ''}
 </td></tr>
 </table></td></tr></table></body></html>`;
@@ -176,7 +193,7 @@ ${f.below.length ? `<tr><td class="pad" style="padding:0 36px 8px 36px">
       x.yesterday === 0 ? `   Did not drive ${wd}; last trip ${x.last_day}.` : null,
       x.maybe_short.length ? `   ${gapWords(x.maybe_short)} had not delivered — the count may be short.` : null,
     ].filter(Boolean).join('\n')),
-    '', `Active: at least one completed trip in the ${ACTIVE_DAYS} days to ${wd}. ${f.at_or_above} reached ${f.min} or more. The minimum is set on the Access page.`,
+    '', `Active: at least one completed trip in the ${ACTIVE_DAYS} days to ${wd}. ${f.at_or_above} reached ${f.min} or more. ${minimumSentence(f)}`,
   ].filter((l) => l != null).join('\n');
   const dm = new Date(`${f.day}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
   const subject = `Under ${f.min} trips — ${dm} · ${int(f.below.length)} of ${int(f.active)} active drivers`;
@@ -200,7 +217,12 @@ export async function lowTripsRun({ q, now = new Date(), http = realHttp, day = 
      half-way through the morning. A forced send by hand recomposes. */
   const [kept] = force ? [] : await q(
     `SELECT detail FROM low_trips_email_send WHERE business_day = $1::date AND detail ? 'facts' ORDER BY created_at LIMIT 1`, [day]);
-  const facts = kept?.detail?.facts || await lowTripsFacts(q, day, { min: minTrips(cfg) });
+  let facts = kept?.detail?.facts;
+  if (!facts) {
+    const base = minTrips(cfg);
+    const m = minimumOn(base, await monthWeights(q, day.slice(0, 7), day), day);
+    facts = { ...await lowTripsFacts(q, day, { min: m.min }), min_average: base, min_weight: m.weighted ? m.weight : null };
+  }
   const key = get('RESEND_API_KEY', '');
   const from = get('REPORT_FROM', 'Ecosine Fleet <reports@ecosine.ae>');
   const { html, text, subject } = renderLowTripsEmail(facts, { dashboard });

@@ -17,7 +17,7 @@ import { insightListSql } from './insights_sql.js';
    the deploy seed of the operator's first target (api/revenue_target.js). */
 import { targetRoutes } from './target_routes.js';
 import { agentRoutes } from './agent_routes.js';
-import { applyTargetSeed } from './revenue_target.js';
+import { applyTargetSeed, applyWeightCutover } from './revenue_target.js';
 import { getConfig as accessConfig } from './access/service.js';
 import { importRoutes } from './import_routes.js';
 /* The operator's HR roster export: an admin-gated preview and commit, and a
@@ -7313,7 +7313,13 @@ migrate()
        for on 2026-10-02, the same way the first Owner is created above. A no-op
        once applied, and it never overwrites a month that has a target. */
     applyTargetSeed(pool, { log: (m) => log.info('target', m) })
-      .catch((e) => log.error('target', 'target seed failed', { err: String(e).slice(0, 200) }));
+      .catch((e) => log.error('target', 'target seed failed', { err: String(e).slice(0, 200) }))
+      /* Then, once per month, a month saved under the equal split is re-shaped
+         by weekday from today — its month target and its days gone kept
+         exactly (api/revenue_target.js applyWeightCutover; the operator,
+         2026-10-11). A no-op once a month's latest save carries weights. */
+      .then(() => applyWeightCutover(pool, { log: (m) => log.info('target', m) }))
+      .catch((e) => log.error('target', 'weekday re-shape failed', { err: String(e).slice(0, 200) }));
     const tidy = () => accessHousekeeping(pool, { log })
       .catch((e) => log.warn('access', 'housekeeping failed', { err: String(e).slice(0, 160) }));
     setTimeout(tidy, 60_000);

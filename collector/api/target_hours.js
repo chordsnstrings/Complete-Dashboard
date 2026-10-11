@@ -13,8 +13,10 @@
    THE HOURLY TARGET. Today's target (api/revenue_target.js: AED today needs,
    and active drivers × the trips minimum) is laid over the day the way the
    fleet's own days run: an hour's target = today's target × the share of a
-   day's work that hour usually carries, measured over the last 28 days by
-   Dubai hour — fares for the revenue, completed trips for the trips. What
+   day's work that hour usually carries ON THIS WEEKDAY — the last 4 Sundays
+   for a Sunday (since 2026-10-11; HOUR_WEEKS below; the 28 days pooled before
+   that, and still when too few of them are on record) — by Dubai hour, fares
+   for the revenue, completed trips for the trips. What
    that hour USUALLY does is printed beside it, so the gap between the usual
    and the target says how much harder than usual the hour has to work.
 
@@ -86,47 +88,84 @@ import { dubaiDay } from './window.js';
 
 export const HISTORY_DAYS = 28;
 export const HISTORY_MIN_DAYS = 7;
+/* THE SAME WEEKDAY (the operator, 2026-10-11: the distribution "hourly and
+   daily based on previous performance … A historically bad day on a Sunday
+   can't be expected to perform the same way as weekday"). A Sunday's hours
+   are shared the way the last HOUR_WEEKS Sundays ran, not the way the last 28
+   days ran pooled. Back-tested on production's bookings, every day from 17
+   Aug to 9 Oct 2026 (40 days with a full history), the share of the day put
+   in the wrong hours: pooled 28 days 10.7%, the same weekday over the last 4
+   weeks 9.3%, over the last 8 weeks 10.3%, half of each 9.9% — the gain is
+   largest at the weekend (Saturday 12.1% → 9.6%, Sunday 13.9% → 11.5%), and
+   8 weeks was worse than 4 because the fleet nearly doubled in September.
+   Fewer than HOUR_MIN_DAYS of those days on record (a new fleet, a gap) and
+   the pooled 28 days stand in, and the panel says which it used. When a
+   trip REACHES us (seenCurve) is not a weekday matter and stays pooled. */
+export const HOUR_WEEKS = 4;
+export const HOUR_MIN_DAYS = 3;
 /* An hour that ended is still arriving while a usual day would add at
    least this share of it in the hour after the cut. */
 export const ARRIVING = 0.02;
 const r2 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 100) / 100);
 const r1 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 10) / 10);
+const WEEKDAYS = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dm = (d) => { const t = new Date(`${d}T12:00:00Z`); return `${t.getUTCDate()} ${MON[t.getUTCMonth()]}`; };
 
-/** The usual day, by Dubai hour, over the HISTORY_DAYS before `today`:
-    completed trips (to yesterday) and fares (to the day before yesterday,
-    which Uber has priced by now). */
+/* One metric's usual day from rows {d, h, v}: the same weekday as `today`
+   over the last HOUR_WEEKS weeks when HOUR_MIN_DAYS of them are on record,
+   else every day of the span pooled. `basis.text` is the phrase the pages
+   print after "that hour carried". */
+export function shapeOf(rows, { today, from, to }) {
+  const byDay = new Map();
+  for (const r of rows) {
+    if (!byDay.has(r.d)) byDay.set(r.d, Array(24).fill(0));
+    byDay.get(r.d)[r.h] += Number(r.v) || 0;
+  }
+  const held = [...byDay.entries()].filter(([, v]) => v.some((x) => x > 0));
+  const add = (days) => days.reduce((acc, [, v]) => acc.map((x, h) => x + v[h]), Array(24).fill(0));
+  const want = Array.from({ length: HOUR_WEEKS }, (_, i) => addDays(today, -7 * (i + 1)));
+  const same = held.filter(([d]) => want.includes(d)).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  const weekday = WEEKDAYS[new Date(`${today}T12:00:00Z`).getUTCDay()];
+  const useSame = same.length >= HOUR_MIN_DAYS;
+  const pick = useSame ? same : held;
+  const tot = add(pick);
+  const T = tot.reduce((s, v) => s + v, 0);
+  const n = pick.length;
+  const basis = useSame
+    ? { kind: 'weekday', weekday, days: n, dates: same.map(([d]) => d), from: same[0][0], to: same[n - 1][0],
+      text: `on the last ${n} ${weekday} (${dm(same[0][0])} – ${dm(same[n - 1][0])})` }
+    : { kind: 'pooled', days: n, from, to,
+      text: `over the last ${n} ${n === 1 ? 'day' : 'days'} (${from} to ${to})`,
+      why: `Only ${same.length} of the last ${HOUR_WEEKS} ${weekday} ${same.length === 1 ? 'is' : 'are'} on record, so the hours are shared the way every day of the last ${HISTORY_DAYS} ran.` };
+  return { days: n, from: basis.from, to: basis.to, ok: (useSame || n >= HISTORY_MIN_DAYS) && T > 0,
+    share: tot.map((v) => (T ? v / T : 0)), usual: tot.map((v) => (n ? v / n : 0)), basis };
+}
+
+/** The usual day, by Dubai hour, before `today`: completed trips (to
+    yesterday) and fares (to the day before yesterday, which Uber has priced
+    by now) — today's weekday over the last HOUR_WEEKS weeks (shapeOf). */
 export async function usualDay(q, today) {
   const tripsTo = addDays(today, -1);
   const faresTo = addDays(today, -2);
   const from = addDays(today, -HISTORY_DAYS);
   const faresFrom = addDays(faresTo, -(HISTORY_DAYS - 1));
-  const [trips, fares, [td], [fd]] = await Promise.all([
-    q(`SELECT n.local_hour AS h, count(*)::int AS n
+  const [trips, fares] = await Promise.all([
+    q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS d, n.local_hour AS h, count(*)::int AS v
          FROM trip_norm n
         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking AND n.outcome = 'completed'
-        GROUP BY 1`, [from, tripsTo]),
-    q(`SELECT n.local_hour AS h, coalesce(sum(n.price) FILTER (WHERE n.has_fare), 0)::float AS aed
+        GROUP BY 1, 2`, [from, tripsTo]),
+    q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS d, n.local_hour AS h,
+              coalesce(sum(n.price) FILTER (WHERE n.has_fare), 0)::float AS v
          FROM trip_norm n
         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
-        GROUP BY 1`, [faresFrom, faresTo]),
-    q(`SELECT count(DISTINCT n.local_day)::int AS days FROM trip_norm n
-        WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking AND n.outcome = 'completed'`, [from, tripsTo]),
-    q(`SELECT count(DISTINCT n.local_day)::int AS days FROM trip_norm n
-        WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking AND n.has_fare`, [faresFrom, faresTo]),
+        GROUP BY 1, 2`, [faresFrom, faresTo]),
   ]);
-  const tripDays = td?.days || 0;
-  const fareDays = fd?.days || 0;
-  const tn = Array(24).fill(0);
-  const fa = Array(24).fill(0);
-  for (const r of trips) tn[r.h] = r.n;
-  for (const r of fares) fa[r.h] = Number(r.aed);
-  const tTot = tn.reduce((s, v) => s + v, 0);
-  const fTot = fa.reduce((s, v) => s + v, 0);
+  /* `window` is the whole span read — what seenCurve pools over, since when
+     a trip reaches us does not depend on the weekday. */
   return {
-    trips: { days: tripDays, from, to: tripsTo, ok: tripDays >= HISTORY_MIN_DAYS && tTot > 0,
-      share: tn.map((v) => (tTot ? v / tTot : 0)), usual: tn.map((v) => (tripDays ? v / tripDays : 0)) },
-    fares: { days: fareDays, from: faresFrom, to: faresTo, ok: fareDays >= HISTORY_MIN_DAYS && fTot > 0,
-      share: fa.map((v) => (fTot ? v / fTot : 0)), usual: fa.map((v) => (fareDays ? v / fareDays : 0)) },
+    trips: { ...shapeOf(trips, { today, from, to: tripsTo }), window: { from, to: tripsTo } },
+    fares: { ...shapeOf(fares, { today, from: faresFrom, to: faresTo }), window: { from: faresFrom, to: faresTo } },
   };
 }
 
@@ -282,8 +321,8 @@ export async function targetHours(q, { now = new Date(), min = null } = {}) {
      today's first collection nothing of today is due yet. */
   const none = { days: null, seen: Array(24).fill(0), next: Array(24).fill(0) };
   const [tSeen, fSeen] = sameDay ? await Promise.all([
-    seenCurve(q, { from: usual.trips.from, to: usual.trips.to, today, cut: cutAt }),
-    seenCurve(q, { from: usual.fares.from, to: usual.fares.to, today, cut: cutAt, fares: true }),
+    seenCurve(q, { from: usual.trips.window.from, to: usual.trips.window.to, today, cut: cutAt }),
+    seenCurve(q, { from: usual.fares.window.from, to: usual.fares.window.to, today, cut: cutAt, fares: true }),
   ]) : [none, none];
   const timing = (x, what) => (x.seen ? { days: x.days }
     : { days: x.days || 0, why: `When ${what} reach us is on record for ${countDays(x.days || 0)} collected live, `
@@ -314,7 +353,7 @@ export async function targetHours(q, { now = new Date(), min = null } = {}) {
       : { ...hoursOf({ target: t.summary.today_needs, share: usual.fares.share, usual: usual.fares.usual,
         done: faresDone, cur, gone, seen: fSeen.seen, next: fSeen.next, money: true }),
       estimate: projected > 0, projected: r2(projected), measured: r2(rows.reduce((s, r) => s + Number(r.fares), 0)),
-      basis: { days: usual.fares.days, from: usual.fares.from, to: usual.fares.to },
+      basis: usual.fares.basis,
       timing: timing(fSeen, 'fares') };
   const trips = !td || !td.trips_target
     ? { absent: 'Nobody has completed a trip in the last 8 days, so today asks for none.' }
@@ -323,8 +362,8 @@ export async function targetHours(q, { now = new Date(), min = null } = {}) {
         + `${usual.trips.days} ${usual.trips.days === 1 ? 'is' : 'are'} on record.` }
       : { ...hoursOf({ target: td.trips_target, share: usual.trips.share, usual: usual.trips.usual,
         done: tripsDone, cur, gone, seen: tSeen.seen, next: tSeen.next }),
-      active: td.active_drivers, min: t.trips_min,
-      basis: { days: usual.trips.days, from: usual.trips.from, to: usual.trips.to },
+      active: td.active_drivers, min: td.trips_min, min_average: t.trips_min, min_weight: td.trips_weight,
+      basis: usual.trips.basis,
       timing: timing(tSeen, 'trips') };
   return {
     today, clock, hour: cur, now_clock: hhmm(now), at: now.toISOString(), cut_at: cutAt.toISOString(),

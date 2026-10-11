@@ -119,8 +119,8 @@ export function monthHtml(v) {
      (the Target page's figure); a month that is over was set over the cars
      of its own save — today's fleet says nothing about August. */
   cells.push(cell('target', 'Month target', aed(s.month_target), [
-    over ? `${money(s.rate)} a car a day, set over ${countOf(s.cars_at_set, 'car')}`
-      : `${money(s.rate)} a car a day over ${countOf(s.cars_now, 'car')}`,
+    over ? `${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'}, set over ${countOf(s.cars_at_set, 'car')}`
+      : `${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'} over ${countOf(s.cars_now, 'car')}`,
     `${countOf(v.days_in_month, 'day')} · gross fares, before commission`]));
   cells.push(cell('earned', lastPast ? `Earned to ${lastPast}` : 'Earned so far', past.length ? aed(s.earned) : '—', [
     past.length ? `of ${money(s.planned)} planned to then` : 'Nothing of the month has finished yet.',
@@ -178,7 +178,7 @@ function monthNotes(v, lastPast, wh) {
   const ts = v.trips_summary;
   const closed = v.summary && v.summary.days_left === 0;
   if (ts && ts.trips != null && ts.needed) {
-    notes.push(`Trips: ${fmt(ts.trips)} completed of ${fmt(ts.needed)} needed to ${lastPast} — ${v.trips_min} a day per active driver; `
+    notes.push(`Trips: ${fmt(ts.trips)} completed of ${fmt(ts.needed)} needed to ${lastPast} — ${v.trips_min} a day per active driver${ts.weighted ? ' on an average day, each weekday its share' : ''}; `
       + `${fmt(ts.per_active, 1)} a driver a day ${closed ? 'over the month' : 'so far'}.`);
   } else if (wh.BK != null) notes.push(said('BK', wh.BK));
   const un = v.trajectory?.unsettled || [];
@@ -309,7 +309,10 @@ export function daysHtml(v, { W = 1300 } = {}) {
   const judged = s.over + s.under;
   const lede = judged || s.unsettled
     ? `${countOf(s.over, 'day')} over target, ${countOf(s.under, 'day')} under${s.unsettled ? `, ${countOf(s.unsettled, 'day')} not settled yet` : ''}. `
-      + 'A day’s target is its share of the month (AED a car a day × the cars that earned in the week before it), plus the month’s shortfall so far spread over the days left — the Target page’s figure. Gross is fares on every platform, before any commission.'
+      + (s.weighted
+        ? 'A day’s target is its share of the month — AED a car on an average day × the cars that earned in the week before it × its weekday’s weight, learned from the fleet’s last 8 weeks (a Sunday is asked for less than a Thursday) — plus the month’s shortfall so far caught up over the days left in the same proportions: the Target page’s figure.'
+        : 'A day’s target is its share of the month (AED a car a day × the cars that earned in the week before it), plus the month’s shortfall so far spread over the days left — the Target page’s figure.')
+      + ' Gross is fares on every platform, before any commission.'
     : 'No day of the month has finished yet — a day is judged the morning after it.';
   return `<p class="mt-lede">${esc(lede)}</p>${dayChart(v, { W })}${DAY_KEY}${daysTable(v)}`;
 }

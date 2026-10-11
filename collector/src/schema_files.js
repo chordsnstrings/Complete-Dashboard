@@ -316,4 +316,9 @@ export const SCHEMA_FILES = [
      "remove all memory every 24 hours, including generated files").
      test/agent_routes.test.mjs. */
   'schema_v103.sql',
+  /* v104 (2026-10-11): the month target shared by weekday — the weights each
+     save shared its month by, and each month's trips-minimum weights,
+     frozen. The operator: "A historically bad day on a Sunday can't be
+     expected to perform the same way as weekday." api/target_weights.js. */
+  'schema_v104.sql',
 ];

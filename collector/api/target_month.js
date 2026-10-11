@@ -57,6 +57,7 @@ import {
 import { personKeyStored } from './custody_sql.js';
 import { dubaiDay } from './window.js';
 import { Workbook } from '../src/xlsx_write.js';
+import { monthWeights, minimumWords } from './target_weights.js';
 
 /* The operator's number: the drivers furthest behind, on the page and in each
    behind sheet of the file. */
@@ -66,6 +67,8 @@ export const RECENT_DAYS = 7;
 
 const r2 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 100) / 100);
 const r1 = (v) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 10) / 10);
+/* The trips minimum in words, by weekday when the month is weighted. */
+const tripsWords = (v) => minimumWords(v.trips_min, v.trips_summary?.weights);
 
 /* ── what the database holds, per person per day ─────────────────────────── */
 /** Completed trips and gross fares per person per day, and who each person
@@ -128,7 +131,10 @@ export function driverTargets({ t, facts, dd, min }) {
     for (const pk of active) {
       const a = get(pk);
       a.days_active += 1;
-      a.trips_target += min;
+      /* The day's own minimum: the minimum on an average day × its weekday's
+         trips weight (api/target_weights.js) — a Sunday asks fewer trips of
+         a driver than a Thursday, as it does of the fleet. */
+      a.trips_target += d.trips_min ?? min;
       if (share != null) a.gross_target += share;
     }
     for (const [pk, x] of dd.byDay.get(d.day) || []) {
@@ -263,8 +269,9 @@ export async function monthView(q, { month = null, today = null, now = new Date(
   const m = validMonth(month) ? month : monthOf(day);
   const { from, to } = monthSpan(m, day);
   const trips = min ?? await tripsMin(q);
-  const [rows, facts, dd] = await Promise.all([targetRows(q, m), loadFacts(q, from, to), loadDriverDays(q, from, to)]);
-  return monthViewOf({ month: m, today: day, rows, facts, dd, min: trips });
+  const [rows, facts, dd, mw] = await Promise.all([targetRows(q, m), loadFacts(q, from, to), loadDriverDays(q, from, to),
+    monthWeights(q, m, day)]);
+  return monthViewOf({ month: m, today: day, rows, facts, dd, min: trips, mw });
 }
 
 /* ── the file ────────────────────────────────────────────────────────────── */
@@ -331,7 +338,7 @@ export function monthWorkbookOf(v, { now = new Date(), hide = new Set() } = {}) 
         dr.left_out.length ? `Left out, not settled: ${dr.left_out.map((d) => d.label).join(', ')}.` : 'Every finished day is settled.'],
       ['Active drivers', tt.drivers, 'int', 'A completed trip in the 8 Dubai days to a counted day (the 08:00 email’s rule).'],
       ['On target for money / behind', tt.money_on == null ? '—' : `${tt.money_on} / ${tt.money_behind}`, 'text', dr.money_why],
-      [`On target for trips (${v.trips_min} a day) / behind`, `${tt.trips_on} / ${tt.trips_behind}`, 'text', null],
+      [`On target for trips (${tripsWords(v)}) / behind`, `${tt.trips_on} / ${tt.trips_behind}`, 'text', null],
       ['Drivers’ targets, added up (AED)', rev(tt.targets), 'money', 'Equals the fleet’s plan for the counted days: each day’s plan shared over its active drivers.'],
       ['Drivers’ gross, added up (AED)', earn(tt.drivers_gross), 'money', null],
       ['Fares on no named driver (AED)', rev(tt.unattributed), 'money', 'Bookings that name no driver. In the fleet’s total, in nobody’s row.'],
@@ -341,19 +348,20 @@ export function monthWorkbookOf(v, { now = new Date(), hide = new Set() } = {}) 
   s1.blank();
   s1.text('How a driver’s target is set', 'bold');
   s1.text('Money: each counted day’s plan (the share of the month target that day was planned at) is divided equally among the drivers active that day; a driver’s target is the sum of their shares, and their gross is their fares on every platform, before commission, on the same days. '
-    + `Trips: ${v.trips_min} for every counted day they were active. A counted day is a finished day that has settled — every channel delivered and 99% of its bookings priced.`, 'wrap');
+    + `Trips: the day’s minimum for every counted day they were active — ${tripsWords(v)}. A counted day is a finished day that has settled — every channel delivered and 99% of its bookings priced.`, 'wrap');
 
   /* ── Days ── */
-  const s2 = wb.sheet('Days', { widths: [11, 9, 9, 13, 13, 13, 14, 10, 12, 10, 46, 9, 12, 13, 12] });
+  const s2 = wb.sheet('Days', { widths: [11, 9, 9, 13, 13, 13, 14, 10, 12, 10, 46, 9, 12, 13, 12, 10, 10] });
   s2.header(['Day', 'Weekday', 'State', 'Plan (AED)', 'Target (AED)', 'Gross (AED)', 'Over (+) / missed (−)',
-    '% of target', 'Verdict', 'Settled', 'Why not settled', 'Trips', 'Trips target', 'Trips over (+) / under (−)', 'Trips verdict'],
-  ['date', 'text', 'text', 'money', 'money', 'money', 'money', 'num1', 'text', 'text', 'wrap', 'int', 'int', 'int', 'text']);
+    '% of target', 'Verdict', 'Settled', 'Why not settled', 'Trips', 'Trips target', 'Trips over (+) / under (−)', 'Trips verdict',
+    'Weekday weight', 'Minimum a driver'],
+  ['date', 'text', 'text', 'money', 'money', 'money', 'money', 'num1', 'text', 'text', 'wrap', 'int', 'int', 'int', 'text', 'text', 'int']);
   for (const d of v.days) {
     const verdict = d.verdict ? `${VERDICT[d.verdict]}${d.provisional ? ' (at least)' : ''}` : (d.state === 'today' ? 'today — not judged' : null);
     const tv = d.trips_verdict ? `${VERDICT[d.trips_verdict]}${d.trips_provisional ? ' (at least)' : ''}` : null;
     s2.row([d.day, d.label.split(' ')[0], d.state, rev(d.plan), rev(d.needed), rev(d.earned), rev(d.diff), d.pct, verdict,
       d.settled == null ? null : (d.settled ? 'yes' : 'no'), d.why, hid('BK', d.trips), hid('BK', d.trips_target),
-      hid('BK', d.trips_diff), tv]);
+      hid('BK', d.trips_diff), tv, d.weight == null ? null : d.weight.toFixed(2), d.trips_min]);
   }
 
   /* ── the drivers ── */
@@ -376,7 +384,7 @@ export function monthWorkbookOf(v, { now = new Date(), hide = new Set() } = {}) 
   sheetOf(`Behind on money (${SHOW_BEHIND})`, behind(dr.rows, 'money'),
     `The ${SHOW_BEHIND} drivers furthest below their money target, ${span}.${dr.money_why ? ` ${dr.money_why}` : ''}`);
   sheetOf(`Behind on trips (${SHOW_BEHIND})`, behind(dr.rows, 'trips'),
-    `The ${SHOW_BEHIND} drivers furthest below ${v.trips_min} trips a day active, ${span}.`);
+    `The ${SHOW_BEHIND} drivers furthest below their trips — ${tripsWords(v)} — ${span}.`);
   sheetOf('All drivers', dr.rows, `Every driver active on a counted day, ${span}, furthest behind on money first.`);
 
   const name = `month-target-${v.month}-as-of-${v.today}.xlsx`;
@@ -385,8 +393,8 @@ export function monthWorkbookOf(v, { now = new Date(), hide = new Set() } = {}) 
 
 /** Pure: a month's view from facts already in hand — the route, the file,
     the mock and the tests all assemble it here. */
-export function monthViewOf({ month, today, rows, facts, dd, min }) {
-  const t = computeMonth({ month, today, rows, facts, min });
+export function monthViewOf({ month, today, rows, facts, dd, min, mw = null }) {
+  const t = computeMonth({ month, today, rows, facts, min, mw });
   return {
     month: t.month, month_name: t.month_name, today: t.today, first: t.first, last: t.last,
     days_in_month: t.days_in_month, target: t.target, why: t.why, trips_min: t.trips_min,

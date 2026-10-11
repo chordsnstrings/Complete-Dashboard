@@ -10,8 +10,9 @@
    first.
 
    THE GOAL is the month target's own per-driver minimum: low_trips_min on the
-   Access page (12 since 2026-10-02), the same number the Target page asks of
-   every active driver. Trips, counted across every app a person drives on
+   Access page (12 since 2026-10-02) on an average day, and since 2026-10-11
+   today's weekday share of it — the same number the Target page asks of
+   every active driver today. Trips, counted across every app a person drives on
    (driver_platform_id folds the accounts), because trips are what every
    channel reports during the day. Revenue is not: Uber prices its trips only
    on the nightly catch-up, so a midday AED figure for an Uber driver would be
@@ -168,8 +169,13 @@ export async function targetNudgeRun({ q, now = new Date(), send = sendSms, cfg 
   };
   if (mode === 'off') { await note('held', 'switched_off', { finished: true, slot }); return { day: D, slot, off: true }; }
 
-  const goal = minTrips(cfg);
-  const th = hours || await targetHours(q, { now, min: goal });
+  /* The goal is TODAY's minimum: the Access page's minimum on an average day
+     × today's weekday share of it (api/target_weights.js minimumOn) — the
+     number the Target page asks of every active driver today, which the
+     trips panel carries. A Sunday asks 10 where the average day asks 12. */
+  const base = minTrips(cfg);
+  const th = hours || await targetHours(q, { now, min: base });
+  const goal = Number.isInteger(th.trips?.min) && th.trips.min >= 1 ? th.trips.min : base;
   if (th.trips?.absent || !(th.trips?.target > 0)) {
     const detail = { finished: true, slot, why: th.trips?.absent || 'No trips target for today.' };
     await note('held', 'no_target_curve', detail);

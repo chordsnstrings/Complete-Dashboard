@@ -1064,23 +1064,35 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     const next = rt.monthOf(rt.addDays(cur.last, 1));
     const nextSaves = (await rt.targetRows(tq, next)).map((r) => ({
       gross: Number(r.gross_target), cars: Number(r.cars), rate: Number(r.rate), set_day: r.set_day,
-      set_at: new Date(r.set_at).toISOString(), by: r.set_by_label || null }));
+      set_at: new Date(r.set_at).toISOString(), by: r.set_by_label || null, weighted: r.weights != null }));
     /* What a save made now would do, so the panel can say it before Save:
        the cars it is shared over, and — when an earlier day already has a
        target — what the days already gone were planned at, which a new
        figure leaves as it is. */
     const earlierToday = cur.saves.some((x) => x.set_day < cur.today);
+    /* The weekday weights a save made now would share by (learned from the
+       8 whole weeks before today, api/target_weights.js), and their sum over
+       the days it would spread across — so the panel's "AED a car on an
+       average day" before Save is the figure Save stores. */
+    const tw = await import('../target_weights.js');
+    const lw = await tw.learnWeights(tq, cur.today);
+    const wsum = (a, b) => { let n = 0; for (let d = a; d <= b; d = rt.addDays(d, 1)) n += lw.ok ? lw.fares[tw.dowOf(d)] : 1; return n; };
+    const nextFirst = `${next}-01`;
+    const weights = { ok: lw.ok, fares: lw.fares, line: tw.weightsLine(lw.fares), basis: lw.basis };
     return res.json({
       today: cur.today, trips_min: cur.trips_min, context: cur.context,
       current: { month: cur.month, month_name: cur.month_name, days_in_month: cur.days_in_month,
         target: cur.target, summary: cur.summary, why: cur.why,
         saves: cur.saves.map((x) => ({ gross: x.gross, cars: x.cars, rate: x.rate, set_day: x.set_day,
-          set_at: x.set_at, by: x.set_by_label || null })),
+          set_at: x.set_at, by: x.set_by_label || null, weighted: !!x.weights })),
         preview: { cars: cur.context.cars_7_days,
           days_left: cur.summary ? cur.summary.days_left : cur.days.filter((d) => d.state !== 'past').length,
-          past_plan: earlierToday ? cur.summary.planned : null } },
+          past_plan: earlierToday ? cur.summary.planned : null,
+          /* With no earlier save the whole month is shared at once. */
+          weight_sum: Math.round(wsum(earlierToday ? cur.today : cur.first, cur.last) * 1e4) / 1e4, weights } },
       next: { month: next, month_name: rt.monthName(next), days_in_month: rt.daysIn(next), saves: nextSaves,
-        preview: { cars: cur.context.cars_7_days, days_left: rt.daysIn(next), past_plan: null } },
+        preview: { cars: cur.context.cars_7_days, days_left: rt.daysIn(next), past_plan: null,
+          weight_sum: Math.round(wsum(nextFirst, rt.addDays(nextFirst, rt.daysIn(next) - 1)) * 1e4) / 1e4, weights } },
     });
   }));
   app.post('/api/access/target', wrap(async (req, res) => {

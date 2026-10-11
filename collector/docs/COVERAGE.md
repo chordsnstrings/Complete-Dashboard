@@ -4696,6 +4696,27 @@ untouched, and nothing projected is ever added into `accounted`.
     the phone recording `test/fixtures/phone_api.json.gz` (`phone_classic`,
     `phone_arkiv`). A call that is missing from either is reported as a miss.
 
+* **RE-SAVING A MONTH'S TYPED TARGET IS NOT NEUTRAL — THE MONTH TARGET FLOATS
+  WITH THE CARS.** October 2026 was typed as AED 1,750,500 over 101 cars; by 11
+  October 104 cars had earned and the month read AED 1,795,786.01. A save of
+  the same typed figure re-bases on today's cars and quietly takes the joined
+  cars' share back out. Anything that re-saves a month on the operator's
+  behalf (the weekday cutover, applyWeightCutover) must keep the month as it
+  STANDS — computeMonth's monthRaw — not the typed gross. Measured by revert:
+  test/target_weights §5, 37,100 became 34,100.
+
+* **A TARGET SHAPE LEARNED FROM HISTORY MUST BE FROZEN WHERE IT IS USED, OR IT
+  RE-SCORES THE DAYS ALREADY JUDGED.** Weekday weights computed from "the last
+  8 weeks" on every request move every morning, and a day already reported
+  over or under would change verdict. So a revenue save stores the weights it
+  shared by on its own row, and a month's trips weights are kept in
+  target_weights the first time the month is read on or after its first
+  weighted day. And note what this means for tests: a fixture with under 4
+  whole weeks of history never reaches the weighted path at all —
+  revenue_target, target_month, low_trips_email and target_sms passed
+  untouched for exactly that reason; test/target_weights is the one that
+  builds 13 weeks.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
@@ -8434,6 +8455,9 @@ trips per day, per active driver, and 1.6M gross income divided to whatever it
 comes. Make sure from the today dashboard an excel can be downloaded as well."
 And, before it went out: "set october target to 1.705 Million not 1.6"
 
+- **SUPERSEDED 2026-10-11: the month is now shared BY WEEKDAY**, on the
+  operator's word — see "The target shared by weekday" below. What follows
+  is the equal split as built, which every save made before that day keeps.
 - **The arithmetic** (api/revenue_target.js). AED a car a day is fixed at the
   save: target ÷ (days in the month × cars that earned in the 7 days before
   it) — 1,705,000 ÷ (31 × 101) = 544.55. A day's plan = that rate × the cars
@@ -9064,3 +9088,90 @@ rule was not rehearsed against the real model before deploy.
   read it, which is the point of the guard. The widget shows what the
   assistant is doing step by step instead.
 - No other language, on the operator's ruling.
+
+## The target shared by weekday — built 2026-10-11
+
+The operator: "I think the target distribution makes more sense hourly and
+daily based on previous performance. A historically bad day on a Sunday can't
+be expected to perform the same way as weekday. Plan. Audit. Execute." This
+replaces the equal split of 2026-10-02, which was chosen knowing Sundays ran
+25% under an average day.
+
+**Measured on production that morning** (/api/trips/daily and
+/api/trips/hourly, 467 days held, July 2025 to 10 October 2026):
+
+- **The weekday shape.** Each day was read against the average day of its
+  own Monday–Sunday week, then averaged by weekday:
+
+  | Window | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
+  |---|---|---|---|---|---|---|---|
+  | Sep 2025 – Feb 2026, fares | 0.98 | 1.00 | 1.07 | 1.14 | 1.09 | 0.95 | 0.77 |
+  | 8 weeks to 4 Oct 2026, fares | 0.94 | 1.03 | 1.04 | 1.13 | 1.13 | 0.95 | 0.78 |
+  | 8 weeks to 4 Oct 2026, completed trips | 0.93 | 1.04 | 1.04 | 1.13 | 1.13 | 0.94 | 0.80 |
+
+  March–July 2026 ran Friday and Saturday higher (1.16, 1.03). It also held
+  a fifth of the trips of the months either side: collected trips fell from
+  about 700 a day to about 200 on 1 March 2026, Yango silent that day.
+- **Back-test, days.** For every week, each day's share of the week was
+  predicted from the N weeks before it.
+
+  | Prediction | Oct 2025 – Jan 2026 | Aug – Sep 2026 |
+  |---|---|---|
+  | Equal split | 10.5–11.0% wrong | 10.6–11.2% wrong |
+  | Weights from 4 weeks | 6.6–6.8% | 6.2–6.3% |
+  | Weights from 8 weeks | 5.9–6.0% | 6.6% |
+  | Weights from 26 weeks | 5.8–6.0% | 6.1–6.4% |
+
+  Eight weeks was chosen: inside 4–26 weeks the length barely matters. The
+  worst weeks, up to 84% wrong, are holiday weeks (National Day, New Year),
+  which no weekday rule foresees.
+- **Back-test, hours.** 40 days (17 Aug – 9 Oct 2026), the share of the day
+  put in the wrong hours:
+
+  | Hour shape | Wrong |
+  |---|---|
+  | Pooled 28 days (the old rule) | 10.7% |
+  | Same weekday, last 4 weeks | 9.3% |
+  | Same weekday, last 8 weeks | 10.3% |
+  | Half and half | 9.9% |
+
+  The largest gains were Saturday (12.1% → 9.6%) and Sunday (13.9% → 11.5%).
+- **The gap rule.** Over the year the quietest days against their week were
+  Sun 1 Feb 2026 (0.54) and late-Ramadan days near 0.6. The one day under 0.4
+  was 1 Mar 2026 (0.27), the break above. So a week with any day under 0.4
+  is left out. The same rule keeps an empty week out: without it the weights
+  divide by zero.
+
+**The rule** (api/target_weights.js; the arithmetic in api/revenue_target.js):
+
+- **A day's plan** = AED a car on an average day × its cars × its weekday's
+  weight. The rate makes the plans of the days a save spreads over add up to
+  what was typed.
+- **A shortfall** is caught up over the days left in the same proportions.
+- **Each save stores its weights,** so a day is always judged against what it
+  was asked. With fewer than 4 usable weeks a save stores none, the split
+  stays equal, and the page says why.
+- **The trips minimum** (12) is the minimum on an average day. Each day asks
+  round(12 × its weekday's trips weight) of each active driver: Mon 11, Tue
+  12, Wed 12, Thu 14, Fri 14, Sat 11, Sun 10, which is 84 a week. A month's
+  trips weights are frozen in target_weights. The same number goes to the
+  Target and Month target pages, the 13:00/18:00 goal texts and the 08:00
+  email.
+- **An hour's share** comes from the same weekday over the last 4 weeks. With
+  fewer than 3 of those days on record, the pooled 28 days are used and the
+  panel says so. When a trip reaches us (seenCurve) stays pooled.
+- **October 2026, in progress, was re-shaped once at boot** by a recorded
+  system save (target.reweight, system:reweight). It keeps the month target
+  to the fils, every day gone, and the Owner's typed figure and cars on the
+  row. Simulated on production's figures before building: Sunday 11 Oct goes
+  from AED 62,230.20 needed to 48,740.97 (468.66 a car); Thursday from
+  62,230.20 to 70,509.58. Over 1–10 Oct, read the same way, Sun 4 Oct would
+  have been 84.0% of what it was asked rather than 65.0%, and Thu 8 Oct
+  103.4% rather than 113.5%.
+
+**Not done, and why:**
+- **Public holidays.** No calendar of them is held. A holiday reads under or
+  over its weekday for that reason, and a test of it would need the calendar
+  first.
+- **No per-fleet weights.** The target is one figure for both fleets.
+

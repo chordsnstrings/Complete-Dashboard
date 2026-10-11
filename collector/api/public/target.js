@@ -62,6 +62,10 @@ const tripsVerdict = (d) => {
   return { text: '—', tone: null };
 };
 const perDriver = (v) => (v == null ? '—' : Number(v).toFixed(1));
+const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+/* "Mon 11, Tue 12, … Sun 10" — api/target_weights.js minimumOn, Monday first. */
+const weekdayMinimums = (min, w) => [1, 2, 3, 4, 5, 6, 0]
+  .map((i) => `${WEEKDAY[i].slice(0, 3)} ${Math.max(1, Math.round(min * Number(w[i])))}`).join(', ');
 
 /** The words: { title, scope, meta, cells[{label, value, tone, subs[{text,tone}], bar}], strip[], absent }. */
 export function targetView(t, live = null) {
@@ -70,7 +74,7 @@ export function targetView(t, live = null) {
   const vm = {
     title: `${monthWord(t.month)} target`,
     scope: 'Both fleets · gross fares, before platform commission',
-    meta: s ? `${plural(s.cars_now, 'car')} · ${money(s.rate)} a car a day` : null,
+    meta: s ? `${plural(s.cars_now, 'car')} · ${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'}` : null,
     cells: [], strip: [], absent: null,
     trips: tripsView(t),
   };
@@ -99,6 +103,11 @@ export function targetView(t, live = null) {
   const td = t.days.find((d) => d.state === 'today') || null;
   if (td) {
     const subs = [{ text: `${plural(s.today_cars, 'car')} × ${money(s.today_per_car)}` }];
+    /* Shared by weekday since 2026-10-11 (api/target_weights.js): what share
+       of an average day this weekday is asked for, and why. */
+    if (s.weighted && s.today_weight != null) {
+      subs.push({ text: `${WEEKDAY[td.dow]}s bring ${Math.round(100 * s.today_weight)}% of an average day, so today is asked that share` });
+    }
     let bar = null;
     if (live && live.started) {
       const est = live.expected != null ? live.expected : live.fares;
@@ -160,7 +169,7 @@ export function tripsView(t) {
   const min = t.trips_min;
   const ts = t.trips_summary || null;
   const out = {
-    title: `Trips · at least ${min} a day per active driver`,
+    title: ts?.weighted ? `Trips · at least ${min} a day per active driver, by weekday` : `Trips · at least ${min} a day per active driver`,
     scope: 'Both fleets · completed trips; an active driver completed one in the last 8 days',
     meta: null, cells: [], strip: [], absent: null,
   };
@@ -172,7 +181,7 @@ export function tripsView(t) {
       : 'No trips have been counted for this month yet.';
     return out;
   }
-  if (ts.today_active != null) out.meta = `${plural(ts.today_active, 'active driver')} today · ${min} trips each`;
+  if (ts.today_active != null) out.meta = `${plural(ts.today_active, 'active driver')} today · ${ts.today_min ?? min} trips each`;
 
   /* ── yesterday ─────────────────────────────────────────────────────────── */
   const y = t.yesterday || null;
@@ -181,8 +190,8 @@ export function tripsView(t) {
     const subs = [{ text: y.trips_verdict === 'unsettled'
       ? `${n0(y.trips)} counted of ${n0(y.trips_target)} needed`
       : `${n0(y.trips)} of ${n0(y.trips_target)} needed${y.trips_pct != null ? ` · ${pct(y.trips_pct)}` : ''}` },
-    { text: `${perDriver(y.trips_per_active)} a driver · ${plural(y.active_drivers, 'active driver')} × ${min}` },
-    { text: `${n0(y.reached)} of the ${n0(y.drove)} who drove did ${min} or more` }];
+    { text: `${perDriver(y.trips_per_active)} a driver · ${plural(y.active_drivers, 'active driver')} × ${y.trips_min ?? min}` },
+    { text: `${n0(y.reached)} of the ${n0(y.drove)} who drove did ${y.trips_min ?? min} or more` }];
     if (y.trips_verdict === 'over' && y.trips_provisional && y.why) subs.push({ text: `At least: ${y.why}` });
     if (y.trips_verdict === 'unsettled' && y.why) subs.push({ text: y.why });
     out.cells.push({ key: 'trips-yesterday', label: `Yesterday · ${y.label}`, value: v.text, tone: v.tone, subs });
@@ -196,7 +205,8 @@ export function tripsView(t) {
   if (td && td.trips_target) {
     out.cells.push({ key: 'trips-today', label: `Today · ${td.label}`, value: `${n0(td.trips_target)} trips to complete`,
       tone: null, bar: Math.max(0, Math.min(100, (100 * (td.trips || 0)) / td.trips_target)),
-      subs: [{ text: `${plural(td.active_drivers, 'active driver')} × ${min}` },
+      subs: [{ text: `${plural(td.active_drivers, 'active driver')} × ${td.trips_min ?? min}`
+        + (td.trips_weight != null && td.trips_min !== min ? ` — a ${WEEKDAY[td.dow]}’s share of ${min}` : '') },
         { text: `${n0(td.trips)} completed so far, on record` }] });
   } else if (td) {
     out.cells.push({ key: 'trips-today', label: `Today · ${td.label}`, value: '—',
@@ -206,7 +216,9 @@ export function tripsView(t) {
   /* ── the month so far ──────────────────────────────────────────────────── */
   const past = t.days.filter((d) => d.state === 'past' && d.trips_target);
   if (past.length && ts.per_active != null) {
-    const ok = ts.per_active >= min;
+    /* Against what the days asked — each its weekday's minimum — not
+       against the average day's: a month of Sundays asks fewer. */
+    const ok = ts.trips >= ts.needed;
     out.cells.push({ key: 'trips-month', label: `${monthWord(t.month)} so far`,
       value: `${ok ? '▲' : '▼'} ${perDriver(ts.per_active)} a driver a day`,
       tone: ok ? 'over' : (ts.unsettled ? 'wait' : 'under'),
@@ -219,9 +231,12 @@ export function tripsView(t) {
   }
 
   /* ── the minimum ───────────────────────────────────────────────────────── */
-  out.cells.push({ key: 'trips-min', label: 'The minimum', value: `${min} trips a day`,
-    subs: [{ text: 'Per active driver. A day short is not carried over: every day starts at the minimum again.' },
-      { text: 'Set in Set up › Access — the 08:00 email names each driver under it.' }] });
+  out.cells.push({ key: 'trips-min', label: 'The minimum', value: ts.weighted ? `${min} trips on an average day` : `${min} trips a day`,
+    subs: [{ text: ts.weighted
+      ? `Per active driver, by weekday: ${weekdayMinimums(min, ts.weights)}. A day short is not carried over: every day starts at its minimum again.`
+      : 'Per active driver. A day short is not carried over: every day starts at the minimum again.' },
+    { text: ts.weighted ? 'Set in Set up › Access — the 08:00 email names each driver under the day’s minimum.'
+      : 'Set in Set up › Access — the 08:00 email names each driver under it.' }] });
 
   /* ── day by day ────────────────────────────────────────────────────────── */
   out.strip = t.days.map((d) => {

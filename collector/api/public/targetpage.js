@@ -57,6 +57,12 @@ const tone = (v) => (v == null ? null : v >= 0 ? 'over' : 'under');
 const trips = (v) => { if (v == null) return '—'; const n = Math.round(v) || 0; return `${fmt(n)} ${n === 1 ? 'trip' : 'trips'}`; };
 const aed = (v) => (v == null ? '—' : money(v));
 const approx = (v, est) => (v == null ? '—' : `${est ? '≈ ' : ''}${money(v)}`);
+/* Weekday weights (index 0 Sunday) as the fleet reads a week, Monday first. */
+const WD3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dm = (d) => (d ? `${Number(d.slice(8, 10))} ${MON3[Number(d.slice(5, 7)) - 1]}` : '');
+const weightsLine = (w) => [1, 2, 3, 4, 5, 6, 0].map((i) => `${WD3[i]} ${Number(w[i]).toFixed(2)}`).join(' · ');
+const weekdayMinimums = (min, w) => [1, 2, 3, 4, 5, 6, 0].map((i) => `${WD3[i]} ${Math.max(1, Math.round(min * Number(w[i])))}`).join(', ');
 
 /* ── 00 · the month in figures ─────────────────────────────────────────── */
 /** The month's detail under the cells: label | revenue | trips. */
@@ -69,15 +75,25 @@ export function monthFiguresHtml(t) {
   const b = (v, t2 = null) => `<b${t2 ? ` class="tg-${t2}"` : ''}>${esc(v)}</b>`;
   const dim = (v) => `<span class="mf-dim">${esc(v)}</span>`;
   if (s) {
-    row('Target for the month', `${b(money(s.month_target))} ${dim(`${money(s.rate)} a car a day over ${countOf(s.cars_now, 'car')}`)}`,
-      ts ? `${b(`${t.trips_min} a day`)} ${dim(`per active driver — ${countOf(ts.today_active, 'active driver')} today`)}` : '—');
+    row('Target for the month', `${b(money(s.month_target))} ${dim(`${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'} over ${countOf(s.cars_now, 'car')}`)}`,
+      ts ? `${b(`${t.trips_min} ${ts.weighted ? 'on an average day' : 'a day'}`)} ${dim(`per active driver — ${countOf(ts.today_active, 'active driver')} today`)}` : '—');
+    /* The operator, 2026-10-11: "A historically bad day on a Sunday can't be
+       expected to perform the same way as weekday." What each weekday is
+       asked, and the weeks it was learned from — or why every day is asked
+       the same (api/target_weights.js). */
+    const wb = s.weights_basis;
+    row('Shared by weekday', s.weighted
+      ? `${b(weightsLine(s.weights))} ${dim(`of an average day, from the ${countOf(wb?.used, 'whole week')} ${dm(wb?.from)} – ${dm(wb?.to)}; a day under is caught up in the same proportions`)}`
+      : dim(wb?.why || 'Every day is asked the same: this month’s target was set before targets were shared by weekday.'),
+    ts && ts.weighted ? `${b(weekdayMinimums(t.trips_min, ts.weights))} ${dim('trips a driver')}`
+      : dim(ts?.weights_basis?.why || 'the same every day'));
     row('Done so far', `${b(money(s.earned))} ${dim(`of ${money(s.planned)} planned to yesterday`)}`,
       ts && ts.trips != null ? `${b(fmt(ts.trips))} ${dim(`of ${fmt(ts.needed)} needed to yesterday`)}` : '—');
     row('Ahead or behind', b(sign(s.ahead, money), s.ahead >= 0 ? 'over' : (s.unsettled ? 'wait' : 'under')),
       ts && ts.trips != null ? b(sign(ts.trips - ts.needed, (v) => trips(v)), ts.trips >= ts.needed ? 'over' : (ts.unsettled ? 'wait' : 'under')) : '—');
     row('Still to go', `${b(money(s.to_go))} ${dim(`in ${countOf(s.days_left, 'day')}, today included`)}`, dim('a floor each day, not a sum'));
     row('Every day left must bring', s.per_day_left != null ? `${b(money(s.per_day_left))} ${dim('on average')}` : '—',
-      ts && ts.today_target != null ? `${b(fmt(ts.today_target))} ${dim(`today — ${countOf(ts.today_active, 'active driver')} × ${t.trips_min}`)}` : '—');
+      ts && ts.today_target != null ? `${b(fmt(ts.today_target))} ${dim(`today — ${countOf(ts.today_active, 'active driver')} × ${ts.today_min ?? t.trips_min}`)}` : '—');
     row('The average day so far', s.avg_day != null ? `${b(money(s.avg_day))} ${dim(`over ${countOf(s.days_gone, 'day')}`)}` : dim('nothing gone yet'),
       ts && ts.avg_trips_day != null ? `${b(`${fmt(ts.avg_trips_day, 1)} trips`)} ${dim(`by ${fmt(ts.avg_active, 1)} active drivers — ${fmt(ts.per_active, 1)} each`)}` : dim('nothing gone yet'));
     row('At this pace the month ends at', s.month_end_pace != null
@@ -240,7 +256,7 @@ export function hoursHtml(x, h, { isMoney }) {
   }).join('');
   const timing = x.timing?.why ? ` ${x.timing.why}`
     : x.timing?.days ? ` “Due by now” is what the usual day had reported by this time of day — a trip reaches us after it is over — over the ${countOf(x.timing.days, 'day')} collected live; an hour gone is still arriving while the usual day would add more of it within the hour.` : '';
-  const basis = `<p class="cap hp-basis">${esc(`Each hour’s target is today’s ${plain(x.target)} × the share of a day’s ${isMoney ? 'fares' : 'completed trips'} that hour carried over the last ${countOf(x.basis?.days, 'day')} (${x.basis?.from} to ${x.basis?.to}). “To land the day” shares what is still to do over the hours left in the same proportions.${timing}`)}`
+  const basis = `<p class="cap hp-basis">${esc(`Each hour’s target is today’s ${plain(x.target)} × the share of a day’s ${isMoney ? 'fares' : 'completed trips'} that hour carried ${x.basis?.text || `over the last ${countOf(x.basis?.days, 'day')} (${x.basis?.from} to ${x.basis?.to})`}.${x.basis?.why ? ` ${x.basis.why}` : ''} “To land the day” shares what is still to do over the hours left in the same proportions.${timing}`)}`
     + (est ? ` ${esc('Today’s revenue is the live strip’s estimate — fares on record plus each channel’s unpriced bookings at its settled per-booking rate — until Uber publishes the day’s fares, which are fetched every hour.')}` : '') + '</p>';
   return `${head}${hourChart(x, { isMoney })}${key}`
     + `<div class="tablewrap"><table class="hp"><thead><tr><th scope="col">Hour</th><th scope="col">Usually</th><th scope="col">Target</th>`

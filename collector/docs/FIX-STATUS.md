@@ -4544,3 +4544,16 @@ What the first rendering found, and what was changed before commit:
   it. The guard allows such numbers but does not format them. Formatting
   bare digits would need to tell years and ids apart, so it is left for now.
 
+
+## WT — the target shared by weekday (2026-10-11)
+
+The operator: "the target distribution makes more sense hourly and daily based on previous performance. A historically bad day on a Sunday can't be expected to perform the same way as weekday."
+
+| id | fix | written | production | proven |
+|---|---|---|---|---|
+| WT-1 | `api/target_weights.js`: weekday weights from the 8 whole Mon–Sun weeks before a day, each day against its own week (growth does not tilt them), mean 1; a week with a day under 40% of its week left out and named; under 4 usable weeks none, with the reason | yes | pending deploy | target_weights §1 — gap rule removed: 3 fail then a throw (an empty week divides by zero); minimum-weeks rule removed: 2 fail |
+| WT-2 | Revenue: each save learns and stores its weights (`sql/schema_v104.sql`); a day's plan = rate on an average day × cars × weight, adding up to what was typed; a shortfall caught up in the same proportions; saves before the rule unchanged | yes | pending deploy | target_weights §3–4 — weight off the plan 7 fail, even shortfall 2, divide by days 1; revenue_target 85 and target_month 60 unchanged |
+| WT-3 | October in progress re-shaped once at boot by a recorded system save (`target.reweight`): month target kept to the fils, days gone kept, the Owner's figures on the row | yes | pending deploy | target_weights §5 — typed gross instead of the month as it stands: 1 fail (37,100 → 34,100); the once-only test removed: 2 fail |
+| WT-4 | Trips minimum by weekday, frozen per month (`target_weights` table): round(12 × weight) — Sun 10 … Thu/Fri 14, 84 a week — on the Target and Month target pages, the hourly trips panel, the 13:00/18:00 goal texts and the 08:00 email | yes | pending deploy | target_weights §2, §6, §8 — unrounded 4 fail; never stored 5 fail; email reading the flat minimum 1; texts reading it 1 |
+| WT-5 | Hours: the same weekday over the last 4 weeks (pooled 28 days, said so, under 3 of them); the timing curve stays pooled | yes | pending deploy | target_weights §7 — always pooled: 2 fail; target_hours 56 unchanged |
+| WT-6 | Pages, workbooks, admin preview and the assistant say the weekday share and where it was learned; an unweighted month renders exactly as before | yes | pending deploy | phone_classic 34 and phone_arkiv 257 (byte-compared old-skin DOM), arkiv_classic_frozen 147, access_core 206 unchanged; weighted wording to be seen on production |

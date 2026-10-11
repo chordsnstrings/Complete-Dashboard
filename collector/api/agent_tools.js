@@ -413,13 +413,15 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           each_day_left_needs_aed: num(s.per_day_left ?? s.today_needs), average_day_aed: num(s.avg_day),
           month_end_at_pace_aed: num(s.month_end_pace), pace_pct: num(s.pace_pct), cars_now: num(s.cars_now),
           trips_completed: num(ts.trips), trips_needed_to_date: num(ts.needed), trips_min_per_driver_day: num(ts.min),
+          trips_min_today: num(ts.today_min), today_share_of_average_day_pct: s.today_weight != null ? r2(100 * s.today_weight) : null,
           active_drivers: num(dt.drivers), drivers_on_target_money: num(dt.money_on), drivers_on_target_trips: num(dt.trips_on),
         },
         kinds: { month_target_aed: 'aed', earned_aed: 'aed', planned_to_date_aed: 'aed', ahead_aed: 'aed',
           behind_plan_aed: 'aed', ahead_of_plan_aed: 'aed',
           still_to_earn_aed: 'aed', days_left: 'int', each_day_left_needs_aed: 'aed', average_day_aed: 'aed',
           month_end_at_pace_aed: 'aed', pace_pct: 'pct', cars_now: 'int', trips_completed: 'int',
-          trips_needed_to_date: 'int', trips_min_per_driver_day: 'int', active_drivers: 'int',
+          trips_needed_to_date: 'int', trips_min_per_driver_day: 'int', trips_min_today: 'int', today_share_of_average_day_pct: 'pct',
+          active_drivers: 'int',
           drivers_on_target_money: 'int', drivers_on_target_trips: 'int' },
         columns: [col('driver', 'Driver', 'text'), col('fleet', 'Fleet', 'text'), col('platforms', 'Platforms', 'text'),
           col('days_active', 'Days active', 'int'), col('gross_aed', 'Gross', 'aed'), col('gross_target_aed', 'Gross target', 'aed'),
@@ -427,7 +429,9 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           col('trips', 'Trips', 'int'), col('trips_target', 'Trips target', 'int'), col('trips_short', 'Trips short', 'int'),
           col('on_target_trips', 'On target (trips)', 'text')],
         rows,
-        note: 'say "behind plan by {{behind_plan_aed}}" or "ahead by {{ahead_of_plan_aed}}", not a negative number; figures are gross fares before commission, counted to the last settled day' };
+        note: 'say "behind plan by {{behind_plan_aed}}" or "ahead by {{ahead_of_plan_aed}}", not a negative number; figures are gross fares before commission, counted to the last settled day. '
+          + (s.weighted ? 'The month is shared by weekday (since 11 Oct 2026, from the fleet’s last 8 weeks): a Sunday is asked less than a Thursday; today_share_of_average_day_pct is today’s share. ' : '')
+          + 'trips_min_per_driver_day is the minimum on an average day; trips_min_today is what today asks of each active driver.' };
     },
 
     async yesterday_target() {

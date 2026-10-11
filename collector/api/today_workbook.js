@@ -30,6 +30,7 @@ import { personKeyStored } from './custody_sql.js';
 import { insightListSql } from './insights_sql.js';
 import { buildDay } from './day_routes.js';
 import { dubaiDay } from './window.js';
+import { weightsLine, minimumWords } from './target_weights.js';
 
 export const TODAY_FILE_CLASSES = ['ID', 'REV', 'EARN', 'VEH', 'BK'];
 const W = '(withheld)';
@@ -55,7 +56,12 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
     const pairs = [
       ['Month target now (AED)', money(sm.month_target), 'money', 'The sum of every day’s plan: the target as set, moved by every car that has joined or dropped out since.'],
       ['Target as set (AED)', money(sm.gross_set), 'money', `Saved on ${t.target.set_day}${t.saves.length > 1 ? `; ${t.saves.length} saves this month` : ''}.`],
-      ['AED a car a day', money(sm.rate), 'money', 'Fixed at the save: the target ÷ (days in the month × cars that earned in the 7 days before it).'],
+      sm.weighted
+        ? ['AED a car on an average day', money(sm.rate), 'money', 'Fixed at the save: what it spreads ÷ (cars that earned in the 7 days before it × the weekday weights of the days it spreads over).']
+        : ['AED a car a day', money(sm.rate), 'money', 'Fixed at the save: the target ÷ (days in the month × cars that earned in the 7 days before it).'],
+      ['Shared by weekday', sm.weighted ? weightsLine(sm.weights) : 'the same every day', 'text', sm.weighted
+        ? `Of an average day, from the ${sm.weights_basis?.used} whole weeks ${sm.weights_basis?.from} to ${sm.weights_basis?.to} (the operator, 2026-10-11: a Sunday cannot be asked what a Thursday is). A day under is caught up over the days left in the same proportions.`
+        : (sm.weights_basis?.why || 'This month’s target was set before targets were shared by weekday.')],
       ['Cars when set', hid('VEH', sm.cars_at_set), 'int', 'Cars that earned in the 7 days before the save.'],
       ['Cars now', hid('VEH', sm.cars_now), 'int', 'Cars that earned in the 7 days before today.'],
       ['Earned to yesterday (AED)', money(sm.earned), 'money', 'Fares on every day of the month before today.'],
@@ -63,7 +69,9 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
       ['Ahead (+) / behind (−) (AED)', money(sm.ahead), 'money', null],
       ['Still to earn (AED)', money(sm.to_go), 'money', null],
       ['Days left, today included', sm.days_left, 'int', null],
-      ['Today needs (AED)', money(sm.today_needs), 'money', 'Today’s plan plus the shortfall so far shared over the days left (a surplus lowers it the same way).'],
+      ['Today needs (AED)', money(sm.today_needs), 'money', sm.weighted
+        ? 'Today’s plan (its weekday’s share) plus the shortfall so far caught up over the days left in proportion to their weekdays (a surplus lowers it the same way).'
+        : 'Today’s plan plus the shortfall so far shared over the days left (a surplus lowers it the same way).'],
       ['Today needs a car (AED)', money(sm.today_per_car), 'money', null],
       ['Days judged / over / under / not settled', `${sm.judged} / ${sm.over} / ${sm.under} / ${sm.unsettled}`, 'text', 'A day is judged once every channel has delivered it and 99% of its bookings carry a fare.'],
     ];
@@ -76,9 +84,12 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
   s1.text(`Trips — at least ${t.trips_min} a day per active driver`, 'bold');
   if (ts) {
     const tp = [
-      ['Trips a day per active driver (minimum)', t.trips_min, 'int', 'The Access page’s minimum (the 08:00 email’s); an active driver completed a trip in the 8 days to the day.'],
+      ['Trips a day per active driver (minimum)', t.trips_min, 'int', ts.weighted
+        ? `The Access page’s minimum on an average day; each weekday asks its share — ${minimumWords(t.trips_min, ts.weights)}. An active driver completed a trip in the 8 days to the day.`
+        : 'The Access page’s minimum (the 08:00 email’s); an active driver completed a trip in the 8 days to the day.'],
+      ['Today’s minimum a driver', ts.today_min, 'int', ts.weighted ? 'Today’s weekday’s share of the minimum — what the goal texts ask today.' : null],
       ['Trips to yesterday', hid('BK', ts.trips), 'int', null],
-      ['Trips needed to yesterday', hid('BK', ts.needed), 'int', 'Each day’s active drivers × the minimum, added up. A day short is not carried into the next.'],
+      ['Trips needed to yesterday', hid('BK', ts.needed), 'int', 'Each day’s active drivers × that day’s minimum, added up. A day short is not carried into the next.'],
       ['Trips a driver a day, month so far', hid('BK', ts.per_active), 'num1', 'The month’s trips ÷ its active driver-days.'],
       ['Trip days judged / over / under / not settled', `${ts.judged} / ${ts.over} / ${ts.under} / ${ts.unsettled}`, 'text', 'Judged by the same settled rule as the revenue.'],
       ['Active drivers today', ts.today_active, 'int', null],
@@ -89,20 +100,20 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
   }
 
   /* ── Days ───────────────────────────────────────────────────────────── */
-  const s2 = wb.sheet('Days', { widths: [11, 10, 9, 7, 11, 13, 13, 13, 13, 9, 12, 9, 46, 9, 8, 9, 9, 9, 9, 7, 12, 12] });
+  const s2 = wb.sheet('Days', { widths: [11, 10, 9, 7, 11, 13, 13, 13, 13, 9, 12, 9, 46, 9, 8, 9, 9, 9, 9, 7, 12, 12, 10, 10] });
   s2.header(['Day', 'Weekday', 'State', 'Cars', 'AED a car', 'Plan (AED)', 'Needed (AED)', 'Earned (AED)',
     'Over (+) / under (−)', '% of need', 'Verdict', 'Settled', 'Why not settled', 'Fare cover %',
     'Trips', 'Active drivers', 'Trips needed', 'Trips a driver', `At ${t.trips_min} or more`, 'Drove',
-    'Trips over (+) / under (−)', 'Trips verdict'],
+    'Trips over (+) / under (−)', 'Trips verdict', 'Weekday weight', 'Minimum a driver'],
   ['date', 'text', 'text', 'int', 'money', 'money', 'money', 'money', 'money', 'num1', 'text', 'text', 'wrap', 'num1',
-    'int', 'int', 'int', 'num1', 'int', 'int', 'int', 'text']);
+    'int', 'int', 'int', 'num1', 'int', 'int', 'int', 'text', 'text', 'int']);
   for (const d of t.days) {
     const verdict = d.verdict ? `${VERDICT[d.verdict]}${d.provisional ? ' (at least)' : ''}` : (d.state === 'today' ? 'today — not judged' : null);
     const tv = d.trips_verdict ? `${VERDICT[d.trips_verdict]}${d.trips_provisional ? ' (at least)' : ''}` : (d.state === 'today' ? 'today — not judged' : null);
     s2.row([d.day, shortDay(d.day).split(' ')[0], d.state, hid('VEH', d.cars), money(d.rate), money(d.plan), money(d.needed),
       money(d.earned), money(d.diff), d.pct, verdict, d.settled == null ? null : (d.settled ? 'yes' : 'no'), d.why,
       d.coverage, hid('BK', d.trips), d.active_drivers, hid('BK', d.trips_target), hid('BK', d.trips_per_active),
-      hid('BK', d.reached), d.drove, hid('BK', d.trips_diff), tv]);
+      hid('BK', d.reached), d.drove, hid('BK', d.trips_diff), tv, d.weight == null ? null : d.weight.toFixed(2), d.trips_min]);
   }
 
   /* ── Cars yesterday ─────────────────────────────────────────────────── */
@@ -148,14 +159,17 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
         AND n.outcome = 'completed' AND n.driver_name IS NOT NULL
       GROUP BY 1
       ORDER BY 4, 6 DESC, 2`, [addDays(yday, -(DRIVER_DAYS - 1)), yday]);
+  /* Yesterday's own minimum — its weekday's share (api/target_weights.js),
+     the number the 08:00 email judged that day by. */
+  const yMin = t.yesterday?.trips_min ?? t.trips_min;
   const s4 = wb.sheet('Drivers yesterday', { widths: [32, 24, 10, 10, 9, 9, 14, 14, 12] });
   s4.text(`${shortDay(yday)}: every active driver — a completed trip in the 8 days to it, the 08:00 email’s rule. `
-    + `Minimum ${t.trips_min} trips a day.`, 'dim');
+    + `Minimum ${yMin} trips that day${yMin !== t.trips_min ? ` — its weekday’s share of ${t.trips_min} on an average day` : ''}.`, 'dim');
   s4.header(['Driver', 'Driver id', 'Fleet', 'Trips', 'Target', 'Short by', 'Fares (AED)', 'Trips, 7 days before', 'Days driven'],
     ['text', 'text', 'text', 'int', 'int', 'int', 'money', 'int', 'int']);
   for (const p of ppl) {
-    s4.row([hid('ID', p.name), hid('ID', p.driver_ext_id), p.fleet, hid('BK', p.yday), t.trips_min,
-      hid('BK', Math.max(0, t.trips_min - p.yday)), hid('EARN', p.fares), hid('BK', p.before), p.before_days]);
+    s4.row([hid('ID', p.name), hid('ID', p.driver_ext_id), p.fleet, hid('BK', p.yday), yMin,
+      hid('BK', Math.max(0, yMin - p.yday)), hid('EARN', p.fares), hid('BK', p.before), p.before_days]);
   }
 
   /* ── Action list ────────────────────────────────────────────────────── */

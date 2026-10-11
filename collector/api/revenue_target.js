@@ -57,6 +57,27 @@
    may still hold its trips), and it is there whether or not a revenue target
    is set: the minimum always exists.
 
+   SHARED BY WEEKDAY, FROM 2026-10-11 (api/target_weights.js). The operator:
+   "A historically bad day on a Sunday can't be expected to perform the same
+   way as weekday." The equal split above stands for the saves made under it;
+   every save since carries seven weekday weights learned from the fleet's
+   own last 8 weeks (Sun 0.78 … Thu 1.13 of an average day, measured that
+   morning), and then:
+     · AED A CAR A DAY is the AED a car on an AVERAGE day; a day's PLAN is
+       rate × its cars × its weekday's weight. The rate is fixed so the plans
+       of the days it spreads over add up to what was typed, whatever mix of
+       weekdays they are: target ÷ (cars × the sum of their weights).
+     · A SHORTFALL is caught up over the days left IN THE SAME PROPORTIONS: a
+       day needs its plan + the shortfall × its weight ÷ the weights of the
+       days left (it included). With every weight 1 that is the even spread
+       above, exactly.
+     · The TRIPS MINIMUM is the minimum on an average day; a day asks
+       round(minimum × its weekday's trips weight) of each active driver
+       (minimumOn) — at 12, a Sunday 10 and a Thursday 14.
+     · The month in progress when the rule arrived was re-shaped once, by a
+       recorded system save that keeps its month target, its rate and every
+       day already gone exactly as they were (applyWeightCutover).
+
    A FIGURE THAT CANNOT BE MEASURED IS ABSENT WITH ITS REASON. A day is judged
    only once it is SETTLED: every booking channel that has been collecting
    delivered it (a run whose window COVERS the day and that finished after the
@@ -70,6 +91,7 @@ import { dubaiDay } from './window.js';
 import { getConfig, setConfig } from './access/service.js';
 import { appendAudit } from './access/audit.js';
 import { TRIP_RUN_SQL } from './run_kinds.js';
+import { learnWeights, monthWeights, minimumOn, weightOf, dowOf } from './target_weights.js';
 
 /* The booking channels whose collection decides whether a day is complete.
    The FMS tracker's journeys are in `trip` too, and are not bookings. */
@@ -208,24 +230,33 @@ export function settledness(facts, day) {
   return { settled: !why.length, missing, coverage: r2(coverage), why: why.length ? `${cap(why.join('; '))}.` : null };
 }
 
-const normRow = (r) => ({
-  id: Number(r.id),
-  gross: Number(r.gross_target),
-  cars: Number(r.cars),
-  rate: Number(r.rate),
-  past_plan: Number(r.past_plan || 0),
-  set_day: typeof r.set_day === 'string' ? r.set_day.slice(0, 10) : dubaiDay(new Date(r.set_day)),
-  set_at: new Date(r.set_at).toISOString(),
-  set_by: r.set_by == null ? null : Number(r.set_by),
-  set_by_label: r.set_by_label || '',
-});
+const jsonOf = (v) => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : v);
+const normRow = (r) => {
+  const w = jsonOf(r.weights);
+  return {
+    id: Number(r.id),
+    gross: Number(r.gross_target),
+    cars: Number(r.cars),
+    rate: Number(r.rate),
+    past_plan: Number(r.past_plan || 0),
+    set_day: typeof r.set_day === 'string' ? r.set_day.slice(0, 10) : dubaiDay(new Date(r.set_day)),
+    set_at: new Date(r.set_at).toISOString(),
+    set_by: r.set_by == null ? null : Number(r.set_by),
+    set_by_label: r.set_by_label || '',
+    /* Seven weekday weights (index 0 Sunday), or null: a save made before
+       2026-10-11 shares its days equally, as it always did. */
+    weights: Array.isArray(w) && w.length === 7 ? w.map(Number) : null,
+    weights_basis: jsonOf(r.weights_basis),
+  };
+};
 const bySave = (a, b) => (a.set_at < b.set_at ? -1 : a.set_at > b.set_at ? 1 : a.id - b.id);
 
 /* ── the month, day by day ───────────────────────────────────────────────── */
 /** Pure: the month's plan, needs and verdicts from the saves and the facts.
-    `today` is the Dubai day the page is speaking on; `min` the trips a day an
-    active driver is asked for. */
-export function computeMonth({ month, today, rows = [], facts, min = 10 }) {
+    `today` is the Dubai day the page is speaking on; `min` the trips an
+    active driver is asked for on an average day; `mw` the month's weekday
+    weights for that minimum (api/target_weights.js monthWeights), or null. */
+export function computeMonth({ month, today, rows = [], facts, min = 10, mw = null }) {
   const D = daysIn(month);
   const first = `${month}-01`;
   const last = addDays(first, D - 1);
@@ -248,26 +279,43 @@ export function computeMonth({ month, today, rows = [], facts, min = 10 }) {
      rounded to the fils drifts — 27 days at 131.85 is 3,559.95, and the month
      read AED 3,999.95 for a target typed as 4,000. Rounded only to print. */
   const raw = [];
+  /* Each day's weekday weight under the save in force for it — 1 under a
+     save made before the weights — and the weights of every day from each
+     one to the month's end: what a shortfall is shared over, in proportion.
+     All 1, a day's share is 1 ÷ the days left: the even spread, exactly. */
+  const wOf = Array.from({ length: D }, (_, i) => {
+    const d = addDays(first, i);
+    return saves.length ? weightOf(inForce(d), d) : 1;
+  });
+  const wLeft = Array(D + 1).fill(0);
+  for (let i = D - 1; i >= 0; i--) wLeft[i] = wLeft[i + 1] + wOf[i];
+  const shareOf = (i, from) => (wLeft[from] > 0 ? wOf[i] / wLeft[from] : 1 / (D - from));
   for (let i = 0; i < D; i++) {
     const day = addDays(first, i);
-    const left = D - i;  // this day and the ones after it
     const state = day < today ? 'past' : day === today ? 'today' : 'future';
     const save = saves.length ? inForce(day) : null;
     const cars = save && day < firstSave ? save.cars
       : state === 'future' ? carsNow : carsAsOf(facts, day).size;
-    const plan = save ? save.rate * cars : null;
+    const plan = save ? save.rate * cars * wOf[i] : null;
     const f = facts.days.get(day);
     const earned = state === 'future' ? null : (f ? Number(f.fares) : 0);
-    const needed = save && state !== 'future' ? Math.max(0, plan + shortfall / left) : null;
+    const needed = save && state !== 'future' ? Math.max(0, plan + shortfall * shareOf(i, i)) : null;
+    const tmin = minimumOn(min, mw, day);
 
     raw.push({ plan, needed });
     const row = {
-      day, dow: new Date(`${day}T12:00:00Z`).getUTCDay(), label: shortDay(day), state,
-      cars, rate: save ? save.rate : null, plan: r2(plan), needed: r2(needed),
+      day, dow: dowOf(day), label: shortDay(day), state,
+      /* `rate` is the AED a car THIS day is asked for — the save's rate on
+         an average day × this weekday's weight; `weight` that weight. */
+      cars, rate: save ? save.rate * wOf[i] : null, weight: save ? Math.round(wOf[i] * 1e4) / 1e4 : null,
+      plan: r2(plan), needed: r2(needed),
       earned: r2(earned), diff: null, pct: null, verdict: null, provisional: false,
       settled: null, why: null, coverage: null,
       bookings: f ? f.bookings : (state === 'future' ? null : 0),
       trips: null, active_drivers: null, trips_target: null, trips_per_active: null,
+      /* The trips this day asks of each active driver (api/target_weights.js
+         minimumOn): the minimum on an average day × the weekday's weight. */
+      trips_min: tmin.min, trips_weight: tmin.weighted ? tmin.weight : null,
       reached: null, drove: null, trips_verdict: null, trips_diff: null, trips_pct: null,
       trips_provisional: false,
     };
@@ -276,9 +324,9 @@ export function computeMonth({ month, today, rows = [], facts, min = 10 }) {
       const active = driversActiveOn(facts, day).size;
       const trips = [...ppl.values()].reduce((s, n) => s + n, 0);
       Object.assign(row, {
-        trips, active_drivers: active, trips_target: active * min,
+        trips, active_drivers: active, trips_target: active * tmin.min,
         trips_per_active: active ? r2(trips / active) : null,
-        reached: [...ppl.values()].filter((n) => n >= min).length, drove: ppl.size,
+        reached: [...ppl.values()].filter((n) => n >= tmin.min).length, drove: ppl.size,
       });
     }
     if (state === 'past') {
@@ -308,10 +356,10 @@ export function computeMonth({ month, today, rows = [], facts, min = 10 }) {
      what each will need if today is exactly met. */
   const t = days.find((x) => x.state === 'today') || null;
   if (saves.length) {
-    const L = t ? D - days.indexOf(t) : D;
+    const ti = t ? days.indexOf(t) : 0;
     days.forEach((x, i) => {
       if (x.state !== 'future') return;
-      raw[i].needed = Math.max(0, raw[i].plan + (t ? shortfall / L : 0));
+      raw[i].needed = Math.max(0, raw[i].plan + (t ? shortfall * shareOf(i, ti) : 0));
       x.needed = r2(raw[i].needed);
     });
   }
@@ -338,6 +386,13 @@ export function computeMonth({ month, today, rows = [], facts, min = 10 }) {
     today_needs: t ? t.needed : null,
     today_per_car: t && t.cars ? r2(raw[days.indexOf(t)].needed / t.cars) : null,
     today_cars: t ? t.cars : null,
+    /* The weekday weights the days left are shared by (the latest save's),
+       where they were learned, and today's — null under a save made before
+       them, which shares the month equally. */
+    weighted: !!latest.weights,
+    weights: latest.weights,
+    weights_basis: latest.weights_basis,
+    today_weight: t ? t.weight : null,
     met: monthTargetNow > 0 && earnedToDate >= monthTargetNow,
     judged: past.filter((x) => x.verdict === 'over' || x.verdict === 'under').length,
     over: past.filter((x) => x.verdict === 'over').length,
@@ -376,6 +431,13 @@ export function computeMonth({ month, today, rows = [], facts, min = 10 }) {
     unsettled: tdays.filter((x) => x.trips_verdict === 'unsettled').length,
     today_target: t ? t.trips_target : null,
     today_active: t ? t.active_drivers : null,
+    /* `min` is the minimum on an average day; `today_min` what today asks
+       of each active driver, by its weekday (api/target_weights.js). */
+    today_min: t ? t.trips_min : null,
+    weighted: !!(mw && mw.trips),
+    weights: mw && mw.trips ? mw.trips : null,
+    weights_from: mw ? mw.from_day : null,
+    weights_basis: mw ? mw.basis : null,
     today_trips: t ? t.trips : null,
     days_gone: tdays.length,
     avg_trips_day: tdays.length ? r1(tsum('trips') / tdays.length) : null,
@@ -393,13 +455,14 @@ export function computeMonth({ month, today, rows = [], facts, min = 10 }) {
     summary, days,
     saves,
     plannedRaw: plannedToDate,
+    monthRaw: monthTargetNow,
   };
 }
 
 /* ── reading it ──────────────────────────────────────────────────────────── */
 export async function targetRows(q, month) {
   return q(`SELECT id, gross_target, cars, rate, past_plan, to_char(set_day, 'YYYY-MM-DD') AS set_day,
-                   set_at, set_by, set_by_label
+                   set_at, set_by, set_by_label, weights, weights_basis
               FROM revenue_target WHERE month = $1::date ORDER BY set_at, id`, [`${month}-01`]);
 }
 const cfgDb = (q) => ({ query: (t, p) => q(t, p).then((rows) => ({ rows })) });
@@ -425,8 +488,8 @@ export async function monthTarget(q, { month = null, today = null, now = new Dat
   const m = month || monthOf(day);
   const { from, to } = monthSpan(m, day);
   const trips = min ?? await tripsMin(q);
-  const [rows, facts] = await Promise.all([targetRows(q, m), loadFacts(q, from, to)]);
-  const out = computeMonth({ month: m, today: day, rows, facts, min: trips });
+  const [rows, facts, mw] = await Promise.all([targetRows(q, m), loadFacts(q, from, to), monthWeights(q, m, day)]);
+  const out = computeMonth({ month: m, today: day, rows, facts, min: trips, mw });
 
   /* Yesterday's verdict is the headline. On the 1st it belongs to the month
      before, which has its own target (or none, said so). */
@@ -435,7 +498,8 @@ export async function monthTarget(q, { month = null, today = null, now = new Dat
   else if (monthOf(yday) < m) {
     const pm = monthOf(yday);
     const prev = computeMonth({ month: pm, today: day, rows: await targetRows(q, pm),
-      facts: await loadFacts(q, addDays(`${pm}-01`, -(DRIVER_DAYS + 1)), yday), min: trips });
+      facts: await loadFacts(q, addDays(`${pm}-01`, -(DRIVER_DAYS + 1)), yday), min: trips,
+      mw: await monthWeights(q, pm, day) });
     out.yesterday = prev.days.find((x) => x.day === yday) || null;
     out.yesterday_month = { month: pm, month_name: prev.month_name, target: prev.target, why: prev.why,
       summary: prev.summary };
@@ -519,15 +583,26 @@ export async function saveTarget(q, { month, gross, now = new Date(), by = null,
   /* Saves from EARLIER days keep the days already gone at their plan. Saves
      from today are being replaced by this one, so they do not count. */
   const earlier = (await targetRows(q, month)).filter((r) => normRow(r).set_day < today);
+  /* The weekday weights this save shares by, learned from the 8 complete
+     weeks before today (api/target_weights.js); too few usable weeks and
+     there are none — every day asked the same, and the basis says why. The
+     rate is fixed so the plans of the days it spreads over add up to what is
+     typed: what is spread ÷ (cars × the sum of those days' weights). With
+     no weights that sum is the number of days, as it always was. */
+  const lw = await learnWeights(q, today);
+  const weights = lw.ok ? lw.fares : null;
+  const wSum = (a, b) => { let s = 0; for (let d = a; d <= b; d = addDays(d, 1)) s += weights ? weights[dowOf(d)] : 1; return s; };
+  const restFrom = today > first ? today : first;
   let rate; let pastPlan = 0;
-  const pastDays = today <= first ? 0 : Math.min(D, Math.round((Date.parse(`${today}T12:00:00Z`) - Date.parse(`${first}T12:00:00Z`)) / 864e5));
   if (!earlier.length) {
-    rate = g / (D * cars);
-    pastPlan = rate * cars * pastDays;
+    /* The days before the first save are planned at its cars, so the whole
+       month is shared at once. */
+    rate = g / (cars * wSum(first, last));
+    pastPlan = today > first ? rate * cars * wSum(first, addDays(today, -1)) : 0;
   } else {
     const was = computeMonth({ month, today, rows: earlier, facts });
     pastPlan = was.plannedRaw;
-    rate = (g - pastPlan) / (cars * (D - pastDays));
+    rate = (g - pastPlan) / (cars * wSum(restFrom, last));
     if (!(rate > 0)) {
       return { error: 'below_past', status: 409,
         detail: `The days of ${monthName(month)} already gone were planned at AED ${r2(pastPlan).toLocaleString('en-US', { minimumFractionDigits: 2 })}; `
@@ -535,11 +610,79 @@ export async function saveTarget(q, { month, gross, now = new Date(), by = null,
     }
   }
   const [row] = await q(
-    `INSERT INTO revenue_target (month, gross_target, cars, rate, past_plan, set_day, set_at, set_by, set_by_label)
-     VALUES ($1::date, $2, $3, $4, $5, $6::date, $7, $8, $9)
-     RETURNING id, gross_target, cars, rate, past_plan, to_char(set_day, 'YYYY-MM-DD') AS set_day, set_at, set_by, set_by_label`,
-    [first, r2(g), cars, Math.round(rate * 1e6) / 1e6, r2(pastPlan), today, now.toISOString(), by, String(byLabel || '').slice(0, 200)]);
+    `INSERT INTO revenue_target (month, gross_target, cars, rate, past_plan, set_day, set_at, set_by, set_by_label, weights, weights_basis)
+     VALUES ($1::date, $2, $3, $4, $5, $6::date, $7, $8, $9, $10::jsonb, $11::jsonb)
+     RETURNING id, gross_target, cars, rate, past_plan, to_char(set_day, 'YYYY-MM-DD') AS set_day, set_at, set_by, set_by_label,
+               weights, weights_basis`,
+    [first, r2(g), cars, Math.round(rate * 1e6) / 1e6, r2(pastPlan), today, now.toISOString(), by, String(byLabel || '').slice(0, 200),
+      weights ? JSON.stringify(weights) : null, JSON.stringify(lw.basis)]);
   return { row: normRow(row), month };
+}
+
+/* ── the day the weekday rule arrived ────────────────────────────────────── */
+/* The operator, 2026-10-11: "A historically bad day on a Sunday can't be
+   expected to perform the same way as weekday." A month already under way
+   was saved under the equal split, and its saves carry no weights. Re-saving
+   it with the figure typed would NOT be neutral: the month target floats with
+   the cars (October: AED 1,750,500 typed over 101 cars, AED 1,795,786.01
+   with 104 on 11 Oct), and a re-save of the typed figure would quietly undo
+   that. So the month is re-shaped by a save of its own, made once per month
+   at boot and recorded on the audit chain as `target.reweight` by
+   `system:reweight`, that keeps three things exactly:
+     · the month target as it stands (what the equal rule would have made
+       of it) — the rate is (that − the days gone) ÷ (today's cars × the
+       weights of the days left); over whole weeks that is the same rate;
+     · every day already gone, at the plan it was judged against (it is a
+       LATER save, and a later save never re-scores history);
+     · the Owner's own figures on the row — the gross and the cars it was set
+       over — so "set at AED 1,750,500 over 101 cars" still reads true; the
+       cars the rate was taken over are in weights_basis.
+   A month whose weights cannot be learned (too few whole weeks) is left as
+   it is and logged; the next boot tries again. */
+export async function applyWeightCutover(db, { now = new Date(), log = () => {} } = {}) {
+  const q = (t, p) => db.query(t, p).then((r) => r.rows);
+  const today = dubaiDay(now);
+  const months = (await q(`SELECT DISTINCT to_char(month, 'YYYY-MM') AS m FROM revenue_target
+                            WHERE (month + interval '1 month')::date > $1::date ORDER BY 1`, [today])).map((r) => r.m);
+  const out = [];
+  for (const m of months) {
+    const rows = await targetRows(q, m);
+    const saves = rows.map(normRow).sort(bySave);
+    const latest = saves[saves.length - 1];
+    if (!latest || latest.weights) continue;
+    const lw = await learnWeights(q, today);
+    if (!lw.ok) {
+      log(`target ${m} stays shared equally: ${lw.basis.why}`);
+      out.push({ month: m, done: false, why: lw.basis.why });
+      continue;
+    }
+    const { first, last, from, to } = monthSpan(m, today);
+    const facts = await loadFacts(q, from, to);
+    const was = computeMonth({ month: m, today, rows, facts });
+    const cars = carsAsOf(facts, today).size;
+    const restFrom = today > first ? today : first;
+    let wsum = 0;
+    for (let d = restFrom; d <= last; d = addDays(d, 1)) wsum += lw.fares[dowOf(d)];
+    const rate = cars && wsum ? (was.monthRaw - was.plannedRaw) / (cars * wsum) : 0;
+    if (!(rate > 0)) {
+      out.push({ month: m, done: false, why: 'nothing left to share' });
+      continue;
+    }
+    const basis = { ...lw.basis, cutover: true, cars_now: cars, month_target_kept: r2(was.monthRaw),
+      rate_before: latest.rate, from_save: latest.id };
+    const [row] = await q(
+      `INSERT INTO revenue_target (month, gross_target, cars, rate, past_plan, set_day, set_at, set_by, set_by_label, weights, weights_basis)
+       VALUES ($1::date, $2, $3, $4, $5, $6::date, $7, NULL, 'system:reweight', $8::jsonb, $9::jsonb) RETURNING id`,
+      [first, latest.gross, latest.cars, Math.round(rate * 1e6) / 1e6, r2(was.plannedRaw), today, now.toISOString(),
+        JSON.stringify(lw.fares), JSON.stringify(basis)]);
+    const detail = { month: m, row: row.id, month_target: r2(was.monthRaw), rate_before: latest.rate,
+      rate_after: Math.round(rate * 1e6) / 1e6, weights: lw.fares, weeks: `${lw.basis.from}..${lw.basis.to}`, used: lw.basis.used };
+    await appendAudit(db, { actorLabel: 'system:reweight', action: 'target.reweight', subjectType: 'revenue_target',
+      subjectId: row.id, detail });
+    log(`target ${m} shared by weekday from ${today}: month target ${r2(was.monthRaw)} kept, rate ${latest.rate} → ${detail.rate_after}`);
+    out.push({ month: m, done: true, ...detail });
+  }
+  return out;
 }
 
 /* ── the deploy seed ─────────────────────────────────────────────────────── */
