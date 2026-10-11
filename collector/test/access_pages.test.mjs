@@ -447,7 +447,10 @@ await section('11', async () => {
     await page.locator('[data-acx="save-low_trips_min"]').click();
     const f3 = await waitFlash(/under 8 trips/);
     const saved = await page.evaluate(() => fetch('/api/access/overview').then((r) => r.json()).then((j) => j.config?.low_trips_min));
-    check('…the Owner changes it to 8, is told so, and the server has 8', /under 8 trips a day are listed/.test(f3) && saved === 8, `${f3} / ${saved}`);
+    /* Since 2026-10-11 the setting is the minimum on an AVERAGE day: each
+       weekday asks its own share of it (api/target_weights.js minimumOn). */
+    check('…the Owner changes it to 8, is told so, and the server has 8',
+      /under the day’s share of 8 trips on an average day are listed/.test(f3) && saved === 8, `${f3} / ${saved}`);
   }
   /* The monthly revenue target (api/revenue_target.js), the operator's of
      2026-10-02: on the settings page with the cars it will be shared over,

@@ -1429,10 +1429,14 @@ function targetPanel(host, ctx) {
       + `${W.basis.from} to ${W.basis.to}: a Sunday asks AED ${two(rate * W.fares[0])} a car, a Thursday AED ${two(rate * W.fares[4])}.`
       : (W ? ` Every day is asked the same: ${W.basis.why}` : '');
     const tripsDay = c.active_drivers && c.last_month.avg_fare ? c.active_drivers * d.trips_min * c.last_month.avg_fare : null;
+    /* Shared by weekday, the rate is what a car is asked on an AVERAGE day;
+       with no weights learned every day is asked the same, and the sentence
+       is the one this panel always printed. */
+    const aCar = W?.ok ? 'a car on an average day' : 'a car a day';
     preview.textContent = (pv.past_plan != null
-      ? `The ${pv.days_left} days left share AED ${two(g - keep)} over ${pv.cars} cars: AED ${two(rate)} a car on an average day. `
+      ? `The ${pv.days_left} days left share AED ${two(g - keep)} over ${pv.cars} cars: AED ${two(rate)} ${aCar}. `
         + `The days already gone keep the AED ${two(keep)} they were planned at.${wk}`
-      : `AED ${two(rate)} a car on an average day over the ${pv.cars} cars that earned in the last 7 days — AED ${two(perDay)} a day on average over ${m.days_in_month} days.${wk}`)
+      : `AED ${two(rate)} ${aCar} over the ${pv.cars} cars that earned in the last 7 days — AED ${two(perDay)} a day${W?.ok ? ' on average' : ''} over ${m.days_in_month} days.${wk}`)
       + (tripsDay ? ` At ${d.trips_min} trips a day for each of the ${c.active_drivers} active drivers and ${c.last_month.month_name}’s `
         + `AED ${two(c.last_month.avg_fare)} a trip, the trips target alone would bring about AED ${two(tripsDay)} a day — `
         + `${tripsDay >= perDay ? `${Math.round((100 * (tripsDay - perDay)) / perDay)}% more than` : `${Math.round((100 * (perDay - tripsDay)) / perDay)}% less than`} this target.` : '');
