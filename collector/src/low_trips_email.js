@@ -220,7 +220,7 @@ export async function lowTripsRun({ q, now = new Date(), http = realHttp, day = 
   let facts = kept?.detail?.facts;
   if (!facts) {
     const base = minTrips(cfg);
-    const m = minimumOn(base, await monthWeights(q, day.slice(0, 7), day), day);
+    const m = minimumOn(base, await monthWeights(q, day.slice(0, 7), { now }), day);
     facts = { ...await lowTripsFacts(q, day, { min: m.min }), min_average: base, min_weight: m.weighted ? m.weight : null };
   }
   const key = get('RESEND_API_KEY', '');

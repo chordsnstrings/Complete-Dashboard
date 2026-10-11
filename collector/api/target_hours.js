@@ -134,7 +134,10 @@ export function shapeOf(rows, { today, from, to }) {
   const n = pick.length;
   const basis = useSame
     ? { kind: 'weekday', weekday, days: n, dates: same.map(([d]) => d), from: same[0][0], to: same[n - 1][0],
-      text: `on the last ${n} ${weekday} (${dm(same[0][0])} – ${dm(same[n - 1][0])})` }
+      text: n === HOUR_WEEKS
+        ? `on the last ${n} ${weekday} (${dm(same[0][0])} – ${dm(same[n - 1][0])})`
+        : `on ${n} of the last ${HOUR_WEEKS} ${weekday} (${dm(same[0][0])} – ${dm(same[n - 1][0])}; `
+          + `${want.filter((d) => !same.some(([x]) => x === d)).sort().map(dm).join(', ')} not on record)` }
     : { kind: 'pooled', days: n, from, to,
       text: `over the last ${n} ${n === 1 ? 'day' : 'days'} (${from} to ${to})`,
       why: `Only ${same.length} of the last ${HOUR_WEEKS} ${weekday} ${same.length === 1 ? 'is' : 'are'} on record, so the hours are shared the way every day of the last ${HISTORY_DAYS} ran.` };

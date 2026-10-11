@@ -169,7 +169,7 @@ export function tripsView(t) {
   const min = t.trips_min;
   const ts = t.trips_summary || null;
   const out = {
-    title: ts?.weighted ? `Trips · at least ${min} a day per active driver, by weekday` : `Trips · at least ${min} a day per active driver`,
+    title: ts?.weighted ? `Trips · at least ${min} on an average day per active driver, each weekday its share` : `Trips · at least ${min} a day per active driver`,
     scope: 'Both fleets · completed trips; an active driver completed one in the last 8 days',
     meta: null, cells: [], strip: [], absent: null,
   };

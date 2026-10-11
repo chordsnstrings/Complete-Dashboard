@@ -1312,16 +1312,18 @@ function settingsTab(host, ctx) {
      per active driver too, so the page and the email cannot disagree. */
   const trips = h('input', { type: 'number', min: '1', max: '100', step: '1', class: 'depinput acx-in acx-num', value: String(cfg.low_trips_min ?? 10), 'data-acx': 'low-trips' });
   const tmsg = one('Trips a day per active driver (Today target and 08:00 email)', 'low_trips_min', trips,
-    'The trips target on the Today page — active drivers × this many trips a day — and the 08:00 email’s minimum: '
+    'The trips each active driver is asked for on an AVERAGE day. Since 11 October 2026 each weekday asks its share of it, '
+    + 'learned from the fleet’s own last 8 weeks — a Sunday fewer than a Thursday; the Target page lists each weekday’s — and that day’s number '
+    + 'is the Today page’s trips target (active drivers × it), the 13:00/18:00 driver texts’ goal and the 08:00 email’s minimum: '
     + 'every day at 08:00 Dubai, each active driver — anyone with a completed trip in the last 8 days — who completed fewer '
-    + 'than this many trips the day before is emailed to the list on the Settings page (Low-trips email recipients). '
+    + 'than the day before’s minimum is emailed to the list on the Settings page (Low-trips email recipients). '
     + 'A trip is a completed booking on Uber, Bolt, Yango or the hotel channel; a driver on two platforms counts once. '
     + 'A change shows on Today at once and applies from the next 08:00 email.',
     () => {
       const n = Number(trips.value);
       if (trips.value === '' || !Number.isInteger(n) || n < 1 || n > 100) { tmsg.set('Enter a whole number of trips, 1 to 100.', 'bad'); return undefined; }
       return n;
-    }, (v) => `From the next 08:00 email, drivers under ${v} trips a day are listed.`, 'Trips a day');
+    }, (v) => `From the next 08:00 email, drivers under the day’s share of ${v} trips on an average day are listed.`, 'Trips a day');
 
   /* The two driver messages by SMS (src/driver_sms.js). Each can be stopped
      here without a deploy; off also stops the trip messages waiting for 07:00. */
@@ -1352,7 +1354,7 @@ function settingsTab(host, ctx) {
       h('option', { value: 'on' }, 'On — messages are sent'), h('option', { value: 'off' }, 'Off — nothing is decided or sent'));
     sel.value = ['on', 'off'].includes(cfg.sms_target) ? cfg.sms_target : 'dry';
     one('Driver text: today’s trip goal (13:00 and 18:00)', 'sms_target', sel,
-      `At 13:00 and 18:00 Dubai, a driver behind today’s goal of ${cfg.low_trips_min || 10} trips (the minimum above, `
+      `At 13:00 and 18:00 Dubai, a driver behind today’s goal (today’s weekday share of the ${cfg.low_trips_min || 10} trips above, `
       + 'counted across every app they drive on) is texted how many they have, how many are left, and the busiest areas '
       + 'for the next hours. A driver on pace — at least 85% of what a usual day has reported by now — or already at the '
       + 'goal gets nothing; so does one who has not started today. If the latest collection is over 45 minutes old the '

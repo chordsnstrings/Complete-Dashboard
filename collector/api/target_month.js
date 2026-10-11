@@ -220,22 +220,36 @@ export function trajectory(t) {
   const target = s.month_target;
   const gap = (v) => (v == null || target == null ? null : r2(v - target));
   const pct = (v) => (v == null || !target ? null : r1((100 * v) / target));
-  const recentEnd = recentAvg == null ? null : s.earned + recentAvg * left;
+  /* Shared by weekday (s.weighted), each pace runs the days left by their
+     weights: the recent days' earning per AVERAGE day (their fares ÷ their
+     weights), and the month's share of plan for the average-day pace — so
+     four days left that are Sun–Wed are not projected as four average days.
+     Equal, both are the plain averages as before. */
+  const weighted = !!s.weighted;
+  const recentPerW = weighted && recent.length
+    ? recent.reduce((x, d) => x + (d.earned || 0), 0) / (recent.reduce((x, d) => x + (d.weight || 1), 0) || 1) : null;
+  const leftDays = t.days.filter((d) => d.state !== 'past');
+  const leftW = leftDays.reduce((x, d) => x + (d.weight || 1), 0);
+  const recentEnd = recentAvg == null ? null : weighted ? s.earned + recentPerW * leftW : s.earned + recentAvg * left;
+  const planRatio = weighted && s.planned > 0 ? s.earned / s.planned : null;
   /* The chart: the target path (the plans added up), what was earned (past
      days only — today is not judged), and both paces from the last day
      gone to the month's end. */
-  let cumPlan = 0, cumEarned = 0;
+  let cumPlan = 0, cumEarned = 0, aheadPlan = 0, aheadW = 0;
   const lastPast = past.length ? past[past.length - 1].day : null;
   const series = t.days.map((d, i) => {
     cumPlan += d.plan || 0;
     if (d.state === 'past') cumEarned += d.earned || 0;
     const ahead = lastPast && d.day > lastPast ? i + 1 - past.length : 0;
+    if (lastPast && d.day > lastPast) { aheadPlan += d.plan || 0; aheadW += d.weight || 1; }
+    const atAvg = s.avg_day == null ? null : weighted && planRatio != null ? s.earned + planRatio * aheadPlan : s.earned + s.avg_day * ahead;
+    const atRecent = recentAvg == null ? null : weighted ? s.earned + recentPerW * aheadW : s.earned + recentAvg * ahead;
     return {
       day: d.day, label: d.label, state: d.state,
       plan_to_date: r2(cumPlan),
       earned_to_date: d.state === 'past' ? r2(cumEarned) : null,
-      at_avg: lastPast && d.day >= lastPast && s.avg_day != null ? r2(s.earned + s.avg_day * ahead) : null,
-      at_recent: lastPast && d.day >= lastPast && recentAvg != null ? r2(s.earned + recentAvg * ahead) : null,
+      at_avg: lastPast && d.day >= lastPast && atAvg != null ? r2(atAvg) : null,
+      at_recent: lastPast && d.day >= lastPast && atRecent != null ? r2(atRecent) : null,
     };
   });
   return {
@@ -248,10 +262,12 @@ export function trajectory(t) {
     per_day_left: s.per_day_left,
     avg: s.avg_day == null ? null : {
       per_day: s.avg_day, days: s.days_gone, month_end: s.month_end_pace,
-      vs_target: gap(s.month_end_pace), pct: s.pace_pct,
+      vs_target: gap(s.month_end_pace), pct: s.pace_pct, basis: s.pace_basis,
+      share_of_plan: planRatio == null ? null : r1(100 * planRatio),
     },
     recent: recentAvg == null ? null : {
-      per_day: r2(recentAvg), days: recent.length, from: recent[0].day, to: recent[recent.length - 1].day,
+      per_day: r2(recentAvg), per_average_day: weighted ? r2(recentPerW) : null,
+      days: recent.length, from: recent[0].day, to: recent[recent.length - 1].day,
       month_end: r2(recentEnd), vs_target: gap(recentEnd), pct: pct(recentEnd),
     },
     /* A past day not settled yet counts at what is on record, the way the
@@ -270,7 +286,7 @@ export async function monthView(q, { month = null, today = null, now = new Date(
   const { from, to } = monthSpan(m, day);
   const trips = min ?? await tripsMin(q);
   const [rows, facts, dd, mw] = await Promise.all([targetRows(q, m), loadFacts(q, from, to), loadDriverDays(q, from, to),
-    monthWeights(q, m, day)]);
+    monthWeights(q, m, { now })]);
   return monthViewOf({ month: m, today: day, rows, facts, dd, min: trips, mw });
 }
 

@@ -72,6 +72,15 @@ export const WEIGHT_MIN_WEEKS = 4;
    a break, and a week that straddles one teaches nothing about weekdays. */
 export const GAP_SHARE = 0.4;
 export const WEIGHTED_FROM = '2026-10-11';
+/* The newest week must have ENDED this many days before the day it is
+   learned for. Uber prices a day overnight and sometimes most of a day later
+   (fetched hourly; the 01:00 catch-up re-reads days gone), so a Sunday read
+   on the Monday after is still filling: a month starting on a Monday froze
+   its weights at about 00:00 from a Sunday seconds old, and 5% of Sunday
+   still to come turns Sunday's 10 trips into 9 for the whole month
+   (independent review, 2026-10-11). Two days: a Monday learns from the
+   weeks to the Sunday before last. */
+export const SETTLE_DAYS = 2;
 
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -82,10 +91,10 @@ const short = (d) => { const t = new Date(`${d}T12:00:00Z`); return `${WD[t.getU
 const daysIn = (month) => { const [y, m] = month.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
 const r4 = (v) => Math.round(v * 1e4) / 1e4;
 
-/** The complete Monday-to-Sunday weeks that ended before `before`, newest
-    first. */
+/** The complete Monday-to-Sunday weeks that ended at least SETTLE_DAYS
+    before `before`, newest first. */
 export function weeksBefore(before, n = WEIGHT_WEEKS) {
-  let sun = addDays(before, -1);
+  let sun = addDays(before, -SETTLE_DAYS);
   while (dowOf(sun) !== 0) sun = addDays(sun, -1);
   return Array.from({ length: n }, (_, i) => { const s = addDays(sun, -7 * i); return { mon: addDays(s, -6), sun: s }; });
 }
@@ -149,14 +158,18 @@ export async function learnWeights(q, before) {
 const parse = (v) => (v == null ? null : typeof v === 'string' ? JSON.parse(v) : v);
 
 /** A month's trips weights: the frozen row, or — the first time the month is
-    read on or after its first weighted day — learned and frozen; before
-    that, learned and NOT frozen (a month looked at in advance). null for a
-    month that ended before the rule. */
-export async function monthWeights(q, month, today) {
+    read on or after its first weighted day BY THE REAL CLOCK — learned and
+    frozen; before that, learned and NOT frozen (a month looked at in
+    advance, or through an ?asof= in the future, which the first build froze
+    from weeks that had not happened yet). null for a month wholly before the
+    rule. The rule's first day is the day the first month was frozen — the
+    deploy — so the trips minimum and the revenue re-shape (which runs at
+    that boot and freezes its month here) start on the same day, whatever day
+    the deploy lands; WEIGHTED_FROM is only its floor. */
+export async function monthWeights(q, month, { now = new Date() } = {}) {
   const first = `${month}-01`;
   const last = addDays(first, daysIn(month) - 1);
-  if (last < WEIGHTED_FROM) return null;
-  const from = first > WEIGHTED_FROM ? first : WEIGHTED_FROM;
+  const realToday = new Date(now.getTime() + 4 * 3600e3).toISOString().slice(0, 10);   // Dubai keeps UTC+4
   const read = async () => {
     const [r] = await q(`SELECT to_char(from_day, 'YYYY-MM-DD') AS from_day, trips, fares, basis
                            FROM target_weights WHERE month = $1::date`, [first]);
@@ -164,9 +177,13 @@ export async function monthWeights(q, month, today) {
   };
   const kept = await read();
   if (kept) return kept;
+  const [st] = await q(`SELECT to_char(min(from_day), 'YYYY-MM-DD') AS d FROM target_weights`);
+  const ruleStart = st?.d || (realToday > WEIGHTED_FROM ? realToday : WEIGHTED_FROM);
+  if (last < ruleStart) return null;
+  const from = first > ruleStart ? first : ruleStart;
   const lw = await learnWeights(q, from);
   const out = { month, from_day: from, trips: lw.ok ? lw.trips : null, fares: lw.ok ? lw.fares : null, basis: lw.basis, frozen: false };
-  if (today < from) return out;
+  if (realToday < from) return out;
   await q(`INSERT INTO target_weights (month, from_day, trips, fares, basis) VALUES ($1::date, $2::date, $3::jsonb, $4::jsonb, $5::jsonb)
            ON CONFLICT (month) DO NOTHING`,
   [first, from, out.trips ? JSON.stringify(out.trips) : null, out.fares ? JSON.stringify(out.fares) : null, JSON.stringify(out.basis)]);

@@ -24,7 +24,11 @@
         day's own minimum.
    Synthetic plates (C…) and drivers (Test Driver …) only.
    REVERSIONS, each run against this file on 2026-10-11, recorded beside the
-   checks they break. */
+   checks they break — 22 of them, after an independent review of the first
+   build found a day already gone re-scored by a later save, a weighted month
+   on plan read as 79% paced, a Monday learning from a Sunday seconds old, a
+   future "as of" page keeping a month, and the re-shape's bookkeeping handed
+   to the pages. Each of those has its own check here. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 
@@ -57,6 +61,10 @@ const before = '2026-10-11';                                  // a Sunday
 const ws = weeksBefore(before);
 check('eight whole Monday-to-Sunday weeks, the newest ending the Sunday before',
   ws.length === 8 && ws[0].sun === '2026-10-04' && ws[0].mon === '2026-09-28' && ws[7].mon === '2026-08-10', j(ws.slice(0, 2)));
+/* REVERSION: SETTLE_DAYS = 1 -> 1 FAILS: a month starting Monday 1 Feb 2027
+   would learn from Sunday 31 Jan, seconds old. */
+check('a Monday learns from the weeks to the Sunday before last — yesterday is still being priced',
+  weeksBefore('2027-02-01')[0].sun === '2027-01-24' && weeksBefore('2026-10-13')[0].sun === '2026-10-11', j(weeksBefore('2027-02-01')[0]));
 /* A fleet that doubles over the eight weeks: week w carries (1 + w/7)× the
    pattern. Each day is read against its own week, so growth does not tilt. */
 const grow = new Map();
@@ -143,6 +151,35 @@ check('a save made before the rule shares equally, and the shortfall over the da
   near(t.days[1].plan, 1000) && near(t.days[1].needed, 1000 + 1000 / 30, 0.01) && near(t.days[3].needed, 1000 + 1000 / 30, 0.01)
   && t.summary.weighted === false, j([t.days[1].plan, t.days[1].needed, t.days[3].needed]));
 
+/* A later save never re-scores a day already judged. Production's weights
+   (not tidy tenths), a weighted save on Tue 13 Oct after an equal one.
+   REVERSION: a past day's share summed under the LATER days' saves (the
+   first build) -> 1 FAILS: 1–12 Oct all move. */
+const FARE_W = [0.783, 0.942, 1.026, 1.044, 1.133, 1.126, 0.945];
+const earnedOct = Object.fromEntries(span('2026-10-01', '2026-10-14').map((d, i) => [d, 1000 + 37 * i]));
+const eq = [row({ id: 1, gross: 37200, cars: 12, rate: 100, day: '2026-10-02', weights: null })];
+const later = [...eq, row({ id: 2, gross: 37200, cars: 12, rate: 100, day: '2026-10-13', by: 'system:reweight', weights: FARE_W })];
+const t1 = computeMonth({ month: '2026-10', today: '2026-10-15', rows: eq, facts: mk(earnedOct) });
+const t2 = computeMonth({ month: '2026-10', today: '2026-10-15', rows: later, facts: mk(earnedOct) });
+const moved = t1.days.slice(0, 12).filter((d, i) => d.needed !== t2.days[i].needed || d.verdict !== t2.days[i].verdict);
+check('a weighted save on Tue 13 Oct leaves every day before it exactly as judged', moved.length === 0,
+  j(moved.slice(0, 2).map((d) => d.day)));
+/* Where the month lands: a weighted month meeting every day's plan exactly
+   is on pace — not "79% of the target" on its 2nd. REVERSION: the average
+   day × the days in the month -> 2 FAIL. REVERSION: the Month target page's
+   recent pace run over the days left as average days -> 1 FAILS. */
+const { trajectory } = await import('../api/target_month.js');
+const novW = span('2026-11-01', '2026-11-30').reduce((x, d) => x + FARE_W[dow(d)], 0);
+const novRows = [row({ id: 3, gross: 30000, cars: 12, rate: 30000 / (12 * novW), day: '2026-11-01', weights: FARE_W })];
+const planOf = (d) => (30000 / (12 * novW)) * 12 * FARE_W[dow(d)];
+const onPlan = Object.fromEntries(span('2026-11-01', '2026-11-01').map((d) => [d, Math.round(planOf(d) * 100) / 100]));
+const tp = computeMonth({ month: '2026-11', today: '2026-11-02', rows: novRows, facts: mk(onPlan) });
+check('a weighted month that met its plan on the 1st (a Sunday) is on pace for the whole month',
+  near(tp.summary.pace_pct, 100, 0.05) && tp.summary.pace_basis === 'plan', j([tp.summary.pace_pct, tp.summary.month_end_pace]));
+const tj = trajectory(tp);
+check('…on the Month target page too: both paces land on the target',
+  near(tj.avg.month_end, 30000, 1) && (tj.recent == null || near(tj.recent.month_end, 30000, 1)), j([tj.avg, tj.recent && tj.recent.month_end]));
+
 /* ── a fleet in a real schema ─────────────────────────────────────────────
    From Mon 3 Aug 2026 to Sat 31 Oct: every day PATTERN[weekday] drivers —
    Test Driver 1…n in car Cn — each complete one AED 10 trip at noon Dubai. */
@@ -169,10 +206,14 @@ const at = (d, hhmm = '10:00') => new Date(`${d}T${hhmm}:00+04:00`);
    1 FAILS: November reads AED 29,700 for a target typed as 30,000 (it has
    five Sundays and Mondays, four Thursdays and Fridays). */
 console.log('\n4. a save learns the weights');
-let s = await saveTarget(q, { month: '2026-11', gross: 30000, now: at('2026-10-25'), by: 7, byLabel: 'owner@example.test' });
+/* The clock here is the deploy day, Sun 11 Oct, and only ever runs forward
+   from it: the first read of any month keeps the PREVIOUS month too, and a
+   first read on the 25th would start October's weekday minimum on the 25th
+   — which is the rule (§6), not what this section is about. */
+let s = await saveTarget(q, { month: '2026-11', gross: 30000, now: at('2026-10-11'), by: 7, byLabel: 'owner@example.test' });
 check('a save stores the weekday weights it learned, Sunday first', Array.isArray(s.row?.weights)
   && s.row.weights.every((v, i) => near(v, WANT[i])) && s.row.weights_basis?.used === 8, j(s.row));
-let m = await monthTarget(q, { month: '2026-11', today: '2026-10-25', min: 12 });
+let m = await monthTarget(q, { month: '2026-11', today: '2026-10-11', min: 12, now: at('2026-10-11') });
 check('…and the month it shares reads exactly what was typed', m.summary.month_target === 30000, String(m.summary.month_target));
 check('…a Sunday asked 0.8 of an average day, a Thursday 1.2',
   near(m.days.find((d) => d.day === '2026-11-01').plan / m.days.find((d) => d.day === '2026-11-05').plan, 0.8 / 1.2), '');
@@ -184,16 +225,25 @@ check('with under 4 whole weeks before it, a save stores no weights and says why
    October saved on the 2nd under the equal split (no weights), over 11 cars:
    12 earn now, so the month has floated above what was typed.
    REVERSION: the cutover re-saving the TYPED figure (latest.gross) instead
-   of the month as it stands -> 1 FAILS: 37,100 becomes 34,100 — the cars
+   of the month as it stands -> 2 FAIL: 37,100 becomes 34,100 — the cars
    that joined since the save quietly undone. REVERSION: the "already
    weighted" test removed -> 2 FAIL (a second system save, a second audit
-   row, on the second boot). */
+   row, on the second boot). REVERSION: the system row storing the Owner's
+   34,100 over 11 (what was typed) beside a rate worked over 37,100 and 12
+   cars -> 1 FAILS. REVERSION: "set at" read from the latest row, the
+   system's -> 1 FAILS: the page would say the Owner set 37,100. */
 console.log('\n5. the month in progress, re-shaped once');
 await q(`INSERT INTO revenue_target (month, gross_target, cars, rate, past_plan, set_day, set_at, set_by, set_by_label)
          VALUES ('2026-10-01', 34100, 11, 100, 1100, '2026-10-02', '2026-10-02T06:00:00Z', 7, 'owner@example.test')`);
-const beforeCut = await monthTarget(q, { month: '2026-10', today: '2026-10-11', min: 12 });
+const beforeCut = await monthTarget(q, { month: '2026-10', today: '2026-10-11', min: 12, now: at('2026-10-11', '09:00') });
+/* On production the boot re-shapes before any page is read, so nothing is
+   kept yet: clear what the reads above kept. REVERSION: the cutover not
+   freezing the month -> 1 FAILS (the minimum would start whenever a page is
+   first read — after midnight, a day later than the money). */
+await q(`DELETE FROM target_weights`);
 const out = await applyWeightCutover(db, { now: at('2026-10-11') });
-const afterCut = await monthTarget(q, { month: '2026-10', today: '2026-10-11', min: 12 });
+const keptByBoot = (await q(`SELECT to_char(from_day, 'YYYY-MM-DD') AS f FROM target_weights WHERE month = '2026-10-01'`))[0]?.f;
+const afterCut = await monthTarget(q, { month: '2026-10', today: '2026-10-11', min: 12, now: at('2026-10-11') });
 check('one system save, weighted, recorded on the audit chain', out.length === 1 && out[0].done
   && afterCut.saves.length === 2 && afterCut.saves[1].set_by_label === 'system:reweight' && Array.isArray(afterCut.saves[1].weights)
   && (await q(`SELECT count(*)::int AS n FROM access_audit WHERE action = 'target.reweight'`))[0].n === 1, j(out));
@@ -204,21 +254,30 @@ check('every day already gone keeps the plan it was judged against',
   j(afterCut.days.slice(0, 3).map((d) => d.plan)));
 check('from today each day is its weekday’s share: Sunday the 11th 0.8 of Thursday the 15th',
   near(afterCut.days[10].plan / afterCut.days[14].plan, 0.8 / 1.2), j([afterCut.days[10].plan, afterCut.days[14].plan]));
-check('…and the Owner’s own figures stay on the row: typed 34,100 over 11 cars',
-  afterCut.saves[1].gross === 34100 && afterCut.saves[1].cars === 11, j(afterCut.saves[1]));
+check('the re-shape’s row holds what it spreads and the cars it spreads over; "set at" stays the Owner’s 34,100 over 11',
+  afterCut.saves[1].gross === afterCut.summary.month_target && afterCut.saves[1].cars === 12
+  && afterCut.summary.gross_set === 34100 && afterCut.summary.cars_at_set === 11 && afterCut.target.gross === 34100
+  && afterCut.summary.rate_cars === 12, j([afterCut.saves[1], afterCut.summary.gross_set, afterCut.summary.cars_at_set]));
+/* REVERSION: publicBasis skipped (the row's basis as stored) -> 1 FAILS. */
+check('no page is handed the re-shape’s own bookkeeping — car counts and money stay out of weights_basis',
+  !('cars_now' in (afterCut.summary.weights_basis || {})) && !('month_target_kept' in (afterCut.summary.weights_basis || {}))
+  && afterCut.saves.every((x) => !x.weights_basis || (!('cars_now' in x.weights_basis) && !('rate_before' in x.weights_basis)))
+  && afterCut.summary.weights_basis?.used === 8, j(afterCut.summary.weights_basis));
+check('…and the re-shape froze October’s trips weights the same day, so both start on 11 Oct', keptByBoot === '2026-10-11', String(keptByBoot));
 const again = await applyWeightCutover(db, { now: at('2026-10-11', '11:00') });
 check('the next boot does nothing: the month’s latest save carries weights', again.length === 0
   && (await q(`SELECT count(*)::int AS n FROM revenue_target WHERE month = '2026-10-01'`))[0].n === 2, j(again));
 
 /* ── 6. a month's trips weights, frozen ───────────────────────────────────
-   REVERSION: monthWeights never storing (learning on every read) -> 5 FAIL:
-   October is not kept, the new Sundays move its weights mid-month, and the
+   REVERSION: monthWeights never storing (learning on every read) -> 7 FAIL:
+   October is not kept (by the boot or by a read), the new Sundays move its
+   weights mid-month, a late deploy is not where the rule starts, and the
    page, the email and the hourly panel ask Sunday 11 instead of 10. */
 console.log('\n6. a month’s trips weights, frozen');
-const early = await monthWeights(q, '2026-12', '2026-11-20');
+const early = await monthWeights(q, '2026-12', { now: at('2026-11-20') });
 check('a month looked at before it begins is learned, not kept', early.frozen === false
   && (await q(`SELECT count(*)::int AS n FROM target_weights WHERE month = '2026-12-01'`))[0].n === 0, j(early));
-const oct = await monthWeights(q, '2026-10', '2026-10-11');
+const oct = await monthWeights(q, '2026-10', { now: at('2026-10-11') });
 check('October’s, read on the rule’s first day: kept, from 11 Oct, learned from the weeks before it',
   oct.frozen && oct.from_day === '2026-10-11' && oct.trips.every((v, i) => near(v, WANT[i])) && oct.basis.to === '2026-10-04', j(oct));
 /* Sundays double in the weeks it was learned from — after it was kept. */
@@ -226,9 +285,25 @@ const extra = span('2026-08-10', '2026-10-04').filter((d) => dow(d) === 0)
   .map((d, i) => `('uber','x${i}','ecosine','u-Test Driver 99','Test Driver 99','C99','${d}T09:00:00Z','${d}T09:20:00Z','completed','card',80,'AED','{}'::jsonb)`);
 await q(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, plate, requested_at, ended_at, status, payment_type, price, currency, raw)
          VALUES ${extra.join(',')}`);
-const still = await monthWeights(q, '2026-10', '2026-10-20');
+const still = await monthWeights(q, '2026-10', { now: at('2026-10-20') });
 check('…and a Sunday’s minimum does not move under a driver mid-month when the history does', near(still.trips[0], 0.8), j(still.trips));
-check('a month before the rule has none', (await monthWeights(q, '2026-09', '2026-10-11')) === null);
+check('a month before the rule has none', (await monthWeights(q, '2026-09', { now: at('2026-10-11') })) === null);
+/* REVERSION: freezing by the caller's day (asof) instead of the real clock
+   -> 1 FAILS: December is kept, empty, from weeks that have not happened. */
+await monthTarget(q, { month: '2026-12', today: '2026-12-05', min: 12, now: at('2026-10-11') });
+check('a page asked "as of" a day in the future learns December but does not keep it',
+  (await q(`SELECT count(*)::int AS n FROM target_weights WHERE month = '2026-12-01'`))[0].n === 0);
+/* The rule starts the day the first month is kept — the deploy — whatever
+   day that is. A database first read on Tue 13 Oct: October's weekday
+   minimum starts on the 13th, not on the 11th it was ruled. REVERSION: from
+   = max(first, WEIGHTED_FROM) only -> 1 FAILS. */
+const db2 = new PGlite();
+await applySchema(db2);
+const q2 = (s2, p = []) => db2.query(s2, p).then((r) => r.rows);
+const late = await monthWeights(q2, '2026-10', { now: at('2026-10-13') });
+const nov2 = await monthWeights(q2, '2026-11', { now: at('2026-11-01') });
+check('a deploy on Tue 13 Oct starts the weekday minimum on the 13th; November on its 1st',
+  late.from_day === '2026-10-13' && late.frozen && nov2.from_day === '2026-11-01', j([late.from_day, nov2.from_day]));
 const relearned = await learnWeights(q, '2026-10-11');
 check('(the history did move: learned again it reads Sundays higher)', relearned.trips[0] > 0.85, j(relearned.trips));
 
@@ -253,7 +328,7 @@ check(`with fewer than ${HOUR_MIN_DAYS} of them on record, every day of the span
    REVERSION: the 08:00 email reading minTrips(cfg) -> 1 FAILS. REVERSION:
    the goal texts reading minTrips(cfg) -> 1 FAILS. */
 console.log('\n8. one minimum: the page, the hours, the 08:00 email, the goal texts');
-const sun = await monthTarget(q, { month: '2026-10', today: '2026-10-18', min: 12 });
+const sun = await monthTarget(q, { month: '2026-10', today: '2026-10-18', min: 12, now: at('2026-10-18') });
 const sd = sun.days.find((d) => d.day === '2026-10-18');
 check('the Target page: Sunday asks 10 trips of each active driver, the trips target its drivers × 10',
   sd.trips_min === 10 && sd.trips_target === sd.active_drivers * 10 && sun.trips_summary.today_min === 10 && sun.trips_summary.min === 12,

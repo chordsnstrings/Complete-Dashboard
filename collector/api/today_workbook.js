@@ -81,7 +81,8 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
      the minimum always exists. */
   const ts = t.trips_summary;
   s1.blank();
-  s1.text(`Trips — at least ${t.trips_min} a day per active driver`, 'bold');
+  s1.text(ts?.weighted ? `Trips — at least ${t.trips_min} on an average day per active driver, each weekday its share`
+    : `Trips — at least ${t.trips_min} a day per active driver`, 'bold');
   if (ts) {
     const tp = [
       ['Trips a day per active driver (minimum)', t.trips_min, 'int', ts.weighted
@@ -103,7 +104,7 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
   const s2 = wb.sheet('Days', { widths: [11, 10, 9, 7, 11, 13, 13, 13, 13, 9, 12, 9, 46, 9, 8, 9, 9, 9, 9, 7, 12, 12, 10, 10] });
   s2.header(['Day', 'Weekday', 'State', 'Cars', 'AED a car', 'Plan (AED)', 'Needed (AED)', 'Earned (AED)',
     'Over (+) / under (−)', '% of need', 'Verdict', 'Settled', 'Why not settled', 'Fare cover %',
-    'Trips', 'Active drivers', 'Trips needed', 'Trips a driver', `At ${t.trips_min} or more`, 'Drove',
+    'Trips', 'Active drivers', 'Trips needed', 'Trips a driver', t.trips_summary?.weighted ? 'At the day’s minimum or more' : `At ${t.trips_min} or more`, 'Drove',
     'Trips over (+) / under (−)', 'Trips verdict', 'Weekday weight', 'Minimum a driver'],
   ['date', 'text', 'text', 'int', 'money', 'money', 'money', 'money', 'money', 'num1', 'text', 'text', 'wrap', 'num1',
     'int', 'int', 'int', 'num1', 'int', 'int', 'int', 'text', 'text', 'int']);

@@ -4703,7 +4703,13 @@ untouched, and nothing projected is ever added into `accounted`.
   cars' share back out. Anything that re-saves a month on the operator's
   behalf (the weekday cutover, applyWeightCutover) must keep the month as it
   STANDS — computeMonth's monthRaw — not the typed gross. Measured by revert:
-  test/target_weights §5, 37,100 became 34,100.
+  test/target_weights §5, 37,100 became 34,100 (2 checks fail). And the row it
+  writes must hold what it spreads: the month as it stands and the cars it
+  spreads over, beside the rate worked from them. The first build kept the
+  Owner's 34,100 over 11 on a row whose rate was worked over 37,100 and 12 —
+  three figures on one row that do not multiply out. "Set at" on the pages is
+  read from the last save NOT labelled system:reweight (`typed` in
+  computeMonth), so the Owner's figure is still what the page says was set.
 
 * **A TARGET SHAPE LEARNED FROM HISTORY MUST BE FROZEN WHERE IT IS USED, OR IT
   RE-SCORES THE DAYS ALREADY JUDGED.** Weekday weights computed from "the last
@@ -4716,6 +4722,46 @@ untouched, and nothing projected is ever added into `accounted`.
   revenue_target, target_month, low_trips_email and target_sms passed
   untouched for exactly that reason; test/target_weights is the one that
   builds 13 weeks.
+
+* **FREEZING THE WEIGHTS ON EACH SAVE IS NOT ENOUGH: A DAY'S SHARE OF A
+  SHORTFALL ALSO DIVIDES BY THE WEIGHTS LEFT, AND THOSE MUST BE THE SAME
+  SAVE'S.** The first weighted build gave day i the share w(i) ÷ (the weights
+  of days i…end), each of those days weighted by the save in force on ITS
+  date. A later save therefore changed the denominator of every day before
+  it, and a day met to the fils could turn "under" a week later. An
+  independent review found it (2026-10-11); with production-like weights and
+  a weighted save on Tue 13 Oct, every day of 1–12 Oct moved. computeMonth's
+  shareOf(i, from) now reads both the weight and the weights left under the
+  save in force on `from`. test/target_weights §3 fails 1 check when it is
+  undone.
+
+* **A LEARNED SHAPE IS FROZEN BY THE REAL CLOCK, NEVER BY THE DAY A PAGE WAS
+  ASKED "AS OF" — AND THE RULE STARTS THE DAY IT IS FIRST FROZEN, NOT THE DAY
+  IT WAS RULED.** `monthTarget(q, { today })` accepts any day; freezing by it
+  kept December, in October, from weeks that had not happened yet. And a
+  deploy that lands after the ruled day (WEIGHTED_FROM, 11 Oct) must not
+  re-score the days between: the first month kept sets min(from_day), and
+  every later month reads its start from there. monthWeights takes
+  `{ now }` (the real clock); the caller's day is only what it reads. Tests:
+  give every monthTarget/monthWeights/lowTripsRun call an explicit `now`, and
+  make the test's clock run forward only — the first read of a month also
+  keeps the PREVIOUS month (yesterday's verdict on the 1st), so one call "on
+  the 25th" before the deploy-day section froze October from the 25th and
+  failed five unrelated checks.
+
+* **"THE LAST 8 WEEKS" ON A MONDAY INCLUDES A SUNDAY SECONDS OLD.** The
+  collectors settle a day over the next morning (Uber files a trip ~37
+  minutes after it is requested; the nightly catch-up runs after 02:00). A
+  month that starts on a Monday would learn from the Sunday that just ended,
+  half priced. weeksBefore() takes the newest week that ended SETTLE_DAYS (2)
+  before the learn day — 1 Feb 2027 learns to 24 Jan, not 31 Jan.
+
+* **A WEIGHTED MONTH'S PACE IS EARNED ÷ PLANNED, NOT THE AVERAGE DAY × THE
+  DAYS.** A month that opens on a Sunday (0.78 of an average day) and meets
+  its plan to the fils read "79% of the target" on the 2nd under the old
+  pace. paceEnd for a weighted month is earned + (earned ÷ planned) × (the
+  plans left); the Month target page's recent pace runs its earning per
+  AVERAGE day over the weights left. Both are summary.pace_basis = 'plan'.
 
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
@@ -9162,12 +9208,40 @@ replaces the equal split of 2026-10-02, which was chosen knowing Sundays ran
   panel says so. When a trip reaches us (seenCurve) stays pooled.
 - **October 2026, in progress, was re-shaped once at boot** by a recorded
   system save (target.reweight, system:reweight). It keeps the month target
-  to the fils, every day gone, and the Owner's typed figure and cars on the
-  row. Simulated on production's figures before building: Sunday 11 Oct goes
+  to the fils and every day gone. The row holds the month as it stands and
+  the cars it spreads over; "set at" on every page stays the Owner's typed
+  figure and cars, read from the last save that is not the system's. The
+  same boot keeps October's trips weights, so the money and the minimum both
+  start on the deploy day. Simulated on production's figures before building: Sunday 11 Oct goes
   from AED 62,230.20 needed to 48,740.97 (468.66 a car); Thursday from
   62,230.20 to 70,509.58. Over 1–10 Oct, read the same way, Sun 4 Oct would
   have been 84.0% of what it was asked rather than 65.0%, and Thu 8 Oct
   103.4% rather than 113.5%.
+
+- **Where the weeks end.** A day learns from the 8 whole Monday–Sunday weeks
+  that ended at least 2 days before it (SETTLE_DAYS): a Sunday 11 Oct learns
+  to 4 Oct, a Monday 1 Feb 2027 to 24 Jan.
+- **Where the rule starts.** The first month kept in target_weights sets the
+  start (min(from_day)); before anything is kept, the later of 11 Oct 2026
+  and the real Dubai day. A month is kept only once the real day reaches its
+  first weighted day — a page read "as of" a later day learns but keeps
+  nothing.
+- **Pace.** Weighted, a month's end is earned + (earned ÷ planned) × the
+  plans left; the Month target page's recent pace is the recent days'
+  earning per average day × the weights left.
+
+**Independent review, 2026-10-11, before deploy.** One high finding (a day
+already gone re-scored by a later save's weights — fixed, see the trap
+above), six medium (freezing by the page's day rather than the clock; a
+Monday learning from a Sunday seconds old; the rule's start vs the deploy
+day; the month pace unweighted on a weighted month; three pages still
+saying "12 a day" and "a car a day"; the re-shape's bookkeeping — car counts
+and the money kept — handed to the pages in weights_basis, now cut to
+weeks/used/from/to/before/skipped/why/cutover by publicBasis), and three low
+(the re-shape's row not multiplying out; the trips panel's title; the hourly
+basis saying "last 3 Sundays" when 3 of the last 4 were on record). All
+fixed and each proven by revert in test/target_weights (22 reverts, 46
+checks).
 
 **Not done, and why:**
 - **Public holidays.** No calendar of them is held. A holiday reads under or

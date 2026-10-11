@@ -74,6 +74,12 @@ export const shiftMonth = (m, k) => {
 
 const aed = (v) => (v == null ? '—' : money(v));
 const n0 = (v) => (v == null ? '—' : fmt(v));
+/* The trips minimum as a driver's target counts it: by weekday when the month
+   is weighted (api/target_weights.js), the flat number — word for word as
+   before — when it is not. */
+const WD3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const weekdayMinimums = (min, w) => [1, 2, 3, 4, 5, 6, 0].map((i) => `${WD3[i]} ${Math.max(1, Math.round(min * Number(w[i])))}`).join(', ');
+const tripsMinWord = (v, min, flat) => (v.trips_summary?.weighted ? 'the day’s minimum' : `${min}${flat ? ` ${flat}` : ''}`);
 const pc = (v) => (v == null ? '—' : `${fmt(v, 1)}%`);
 const tone = (v) => (v == null ? null : v >= 0 ? 'over' : 'under');
 const said = (cls, lvl) => withheldSentence(cls, { level: lvl === 'A' || lvl === 'M' ? lvl : '' });
@@ -119,7 +125,7 @@ export function monthHtml(v) {
      (the Target page's figure); a month that is over was set over the cars
      of its own save — today's fleet says nothing about August. */
   cells.push(cell('target', 'Month target', aed(s.month_target), [
-    over ? `${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'}, set over ${countOf(s.cars_at_set, 'car')}`
+    over ? `${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'}, set over ${countOf(s.rate_cars ?? s.cars_at_set, 'car')}`
       : `${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'} over ${countOf(s.cars_now, 'car')}`,
     `${countOf(v.days_in_month, 'day')} · gross fares, before commission`]));
   cells.push(cell('earned', lastPast ? `Earned to ${lastPast}` : 'Earned so far', past.length ? aed(s.earned) : '—', [
@@ -150,11 +156,15 @@ export function monthHtml(v) {
       tone(p.vs_target))
     : cell(key, label, '—', [none]));
   cells.push(pace('avg', 'At the average day so far', tj?.avg, 'Nothing of the month has finished yet.',
-    (p) => `${money(p.per_day)} a day over ${countOf(p.days, 'day')} — the Target page’s “at this pace”`));
+    (p) => (p.basis === 'plan'
+      ? `${pc(p.share_of_plan)} of plan over ${countOf(p.days, 'day')}, carried over the days left as each weekday is planned — the Target page’s “at this pace”`
+      : `${money(p.per_day)} a day over ${countOf(p.days, 'day')} — the Target page’s “at this pace”`)));
   const rn = tj?.recent?.days || 7;
   const dayOf = (d) => v.days.find((x) => x.day === d)?.label || d;
   cells.push(pace('recent', `At the last ${rn} settled ${rn === 1 ? 'day' : 'days'}`, tj?.recent, 'No day of the month has settled yet.',
-    (p) => `${money(p.per_day)} a day, ${dayOf(p.from)} to ${dayOf(p.to)}, carried over the ${countOf(s.days_left, 'day')} left`));
+    (p) => (p.per_average_day != null
+      ? `${money(p.per_average_day)} an average day, ${dayOf(p.from)} to ${dayOf(p.to)}, carried over the ${countOf(s.days_left, 'day')} left by weekday`
+      : `${money(p.per_day)} a day, ${dayOf(p.from)} to ${dayOf(p.to)}, carried over the ${countOf(s.days_left, 'day')} left`)));
   if (s.days_left > 0) {
     const r = tj?.recent;
     const enough = r && s.per_day_left != null ? r.per_day - s.per_day_left : null;
@@ -389,10 +399,12 @@ export function pathHtml(v, { W = 1300 } = {}) {
     lines.push(`<b class="tg-${tone(end)}">${esc(gapWords(end, { over: 'over the target', short: 'short of the target' }))}</b> ${esc(`— the month ended at ${money(tj.earned)}, ${pc((100 * tj.earned) / tj.target)} of it.`)}`);
   }
   if (tj.days_left > 0 && tj.avg) {
-    lines.push(`<b class="tg-${tone(tj.avg.vs_target)}">${esc(gapWords(tj.avg.vs_target))}</b> ${esc(`at the average day so far (${money(tj.avg.per_day)} over ${countOf(tj.avg.days, 'day')}): the month ends at ${money(tj.avg.month_end)}.`)}`);
+    lines.push(`<b class="tg-${tone(tj.avg.vs_target)}">${esc(gapWords(tj.avg.vs_target))}</b> ${esc(tj.avg.basis === 'plan'
+      ? `at the month’s pace so far (${pc(tj.avg.share_of_plan)} of plan over ${countOf(tj.avg.days, 'day')}, carried over each weekday as planned): the month ends at ${money(tj.avg.month_end)}.`
+      : `at the average day so far (${money(tj.avg.per_day)} over ${countOf(tj.avg.days, 'day')}): the month ends at ${money(tj.avg.month_end)}.`)}`);
   }
   if (tj.days_left > 0 && tj.recent) {
-    lines.push(`<b class="tg-${tone(tj.recent.vs_target)}">${esc(gapWords(tj.recent.vs_target))}</b> ${esc(`at the last ${countOf(tj.recent.days, 'settled day')}${tj.recent.days === 1 ? '’s' : '’'} pace (${money(tj.recent.per_day)} a day): the month ends at ${money(tj.recent.month_end)}.`)}`);
+    lines.push(`<b class="tg-${tone(tj.recent.vs_target)}">${esc(gapWords(tj.recent.vs_target))}</b> ${esc(`at the last ${countOf(tj.recent.days, 'settled day')}${tj.recent.days === 1 ? '’s' : '’'} pace (${tj.recent.per_average_day != null ? `${money(tj.recent.per_average_day)} an average day, by weekday` : `${money(tj.recent.per_day)} a day`}): the month ends at ${money(tj.recent.month_end)}.`)}`);
   }
   if (tj.days_left > 0 && tj.per_day_left != null) {
     lines.push(esc(`To land the target, every day left — ${countOf(tj.days_left, 'day')}, today included — must bring ${money(tj.per_day_left)} on average.`));
@@ -446,7 +458,7 @@ export function driversHtml(v, by = 'money') {
       moneyKnown ? { text: `▼ ${countOf(mOff, 'driver')} behind`, tone: mOff ? 'under' : null }
         : (dr.money_why || (wh.EARN != null ? said('EARN', wh.EARN) : 'Not measured.')),
       tt.targets != null ? `their targets add up to ${money(tt.targets)} — the plan for the counted days` : null]),
-    cell('trips', `On target for trips · ${dr.min} a day`, tKnown ? `${n0(tOn)} of ${n0(N)}` : '—', [
+    cell('trips', `On target for trips · ${tripsMinWord(v, dr.min, 'a day')}`, tKnown ? `${n0(tOn)} of ${n0(N)}` : '—', [
       tKnown ? { text: `▼ ${countOf(tOff, 'driver')} behind`, tone: tOff ? 'under' : null }
         : (wh.BK != null ? said('BK', wh.BK) : 'Not measured.')]),
     cell('none', 'Fares on no named driver', aed(tt.unattributed), [
@@ -461,7 +473,7 @@ export function driversHtml(v, by = 'money') {
     + '<button type="button" class="btn sec mt-xlsx" data-xlsx="1">Excel ⤓ every driver</button>'
     + '<span class="mt-xmsg" role="status" hidden></span></div>';
   const head = !pool ? '' : `<p class="mt-lede">${esc(by === 'trips'
-    ? `The ${pool > SHOW_BEHIND ? `${SHOW_BEHIND} drivers furthest` : `${countOf(pool, 'driver')}`} below ${dr.min} trips for every counted day they were active, most trips short first.`
+    ? `The ${pool > SHOW_BEHIND ? `${SHOW_BEHIND} drivers furthest` : `${countOf(pool, 'driver')}`} below ${tripsMinWord(v, dr.min, '')} trips for every counted day they were active, most trips short first.`
     : `The ${pool > SHOW_BEHIND ? `${SHOW_BEHIND} drivers furthest` : `${countOf(pool, 'driver')}`} below their money target, most AED short first.`)}`
     + `${pool > SHOW_BEHIND ? esc(` ${countOf(pool - SHOW_BEHIND, 'more driver')} ${pool - SHOW_BEHIND === 1 ? 'is' : 'are'} behind as well — every driver is in the Excel file.`) : ''}</p>`;
   const notes = [];
@@ -472,7 +484,7 @@ export function driversHtml(v, by = 'money') {
   if (wh.ID != null) notes.push(said('ID', wh.ID));
   if (wh.EARN != null && moneyKnown) notes.push(said('EARN', wh.EARN));
   const table = !list.length
-    ? `<p class="tg-absent">${esc(by === 'trips' ? (tKnown ? `Every active driver reached ${dr.min} trips for each counted day they were active.` : 'Trips are not measured for your role.')
+    ? `<p class="tg-absent">${esc(by === 'trips' ? (tKnown ? `Every active driver reached ${tripsMinWord(v, dr.min, '')} trips for each counted day they were active.` : 'Trips are not measured for your role.')
       : (moneyKnown ? 'Every active driver reached their money target.' : (dr.money_why || 'Money targets are not measured for your role.')))}</p>`
     : '<div class="tablewrap"><table class="mt-t mt-drv"><thead><tr><th scope="col">#</th><th scope="col" class="l">Driver</th>'
       + '<th scope="col" class="l">Fleet</th><th scope="col">Days active</th><th scope="col">Gross</th><th scope="col">Money target</th>'
@@ -491,7 +503,7 @@ export function driversHtml(v, by = 'money') {
           + `<td>${r.trips_short ? `<span class="tg-under">▼ ${esc(n0(r.trips_short))}</span>` : (r.trips_on ? '<span class="tg-over">▲ on target</span>' : '—')}</td></tr>`;
       }).join('')
       + '</tbody></table></div>';
-  const rule = `<p class="cap mt-rule">${esc(`How a driver’s target is set. Money: each counted day’s plan — its share of the month’s target — is divided equally among the drivers active that day (a completed trip in the 8 days to it); a driver’s target is the sum of their shares, so every driver reaching theirs is the fleet reaching its plan. Gross is their fares on every platform, before commission, on the same days. Trips: ${dr.min} for every counted day they were active. A counted day is a finished day whose fares are all in — every channel delivered and 99% of its bookings priced.`)}</p>`;
+  const rule = `<p class="cap mt-rule">${esc(`How a driver’s target is set. Money: each counted day’s plan — its share of the month’s target — is divided equally among the drivers active that day (a completed trip in the 8 days to it); a driver’s target is the sum of their shares, so every driver reaching theirs is the fleet reaching its plan. Gross is their fares on every platform, before commission, on the same days. Trips: ${tripsMinWord(v, dr.min, '')} for every counted day they were active.${v.trips_summary?.weighted ? ` Each weekday asks its share of ${dr.min} on an average day: ${weekdayMinimums(dr.min, v.trips_summary.weights)}.` : ''} A counted day is a finished day whose fares are all in — every channel delivered and 99% of its bookings priced.`)}</p>`;
   return `<div class="targetnow tg-page"><div class="tg-cells">${cells.join('')}</div></div>`
     + `${pick}${head}${notes.map((x) => `<p class="mt-note">${esc(x)}</p>`).join('')}${table}${rule}`;
 }
