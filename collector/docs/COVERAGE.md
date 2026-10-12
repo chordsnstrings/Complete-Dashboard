@@ -8173,6 +8173,32 @@ company refusal and did not cover a refused method.
 weekly rebuild (above) has no online hours because only the console summary
 carried them; this method may. Not asked, not measured.
 
+## Who is a hotel driver — measured 2026-10-12
+
+Asked for a report of the 45 lowest earners "who don't mostly work in
+hotels". Measured over 12 Sep – 11 Oct 2026 from production (read-only):
+
+- **The split is clean.** Of the 117 people with a trip, 2 drove only for
+  the hotel channel, 12 did 81–100% of their trips there, and every other
+  driver did **19% or less** (most 0–3%). "Mostly hotel" (over half the
+  trips) and any threshold between 20% and 80% pick the same 14 people.
+- **`/api/drivers/directory`'s `platforms` is not the window.** It lists
+  every channel a person has ever driven; KASHAN MALIK, M MAEN M ALAA
+  SHEKFA, Kazi Fuad Ahmed and others list Uber and Bolt and were 100% hotel
+  in the window. The in-window share is `/api/driver/mix` (platform counts),
+  which agreed with the directory's trip totals for every person.
+- **One person on two directory rows.** Binu Abdul Rehman Kunju appears as
+  a Bolt row (1 trip) and an Uber row (11 trips); `/api/driver/kpis` and
+  `/api/driver/mix`, addressed by either account, resolve both to one
+  person (12 trips, AED 298.29). Anything built from the directory must
+  count a person once — key on the per-person answer, not the row.
+- **The report's basis:** earnings = fares (`revenue`, before commission,
+  every channel — the daily report's basis); cash % =
+  `kpis.cash_bookings / kpis.trips` (`trip_ext.driver_holds_cash`). The
+  middle of the 103 non-hotel drivers: AED 13,209 over 30 days, AED 490 a
+  day worked, 28 days, 19% of trips in cash. The 45th and 46th were AED
+  61.39 apart.
+
 ## The daily report email — built 2026-09-29
 
 The operator: every morning at 07:00, yesterday's drivers' performance, cash
