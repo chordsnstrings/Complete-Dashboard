@@ -256,8 +256,9 @@ check('a different account under the same long name is NOT folded — ids, not n
     `SELECT driver_ext_id AS id, min(person_key) AS k FROM trip WHERE driver_ext_id = ANY($1::text[])
       GROUP BY 1`, [[BOLT, BOLT2]])).map((r) => [r.id, r.k]));
   check('the previous register\'s file is the real one minus exactly the pair',
-    /* 170 when this ruling shipped; 504 since the review of 2026-10-08. */
-    previous !== V53 && count === 504 && !previous.includes(`'${BOLT}'`) && !previous.includes(`'${BOLT2}'`),
+    /* 170 when this ruling shipped; 504 since the review of 2026-10-08; 505
+       since the ruling on Shajahan Machilakath, 2026-10-12. */
+    previous !== V53 && count === 505 && !previous.includes(`'${BOLT}'`) && !previous.includes(`'${BOLT2}'`),
     `count ${count}`);
   await a.exec(previous);
   const was = await stored();

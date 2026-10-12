@@ -50,6 +50,13 @@ const V102 = readFileSync(new URL('../sql/schema_v102.sql', import.meta.url), 'u
 console.log('\nthe list v102 folds is exactly the people the register says were ruled on 2026-10-08');
 
 const LIST = JSON.parse(V102.slice(V102.indexOf('$list$') + 6, V102.lastIndexOf('$list$')));
+/* A person a LATER ruling re-keyed. v102 is a snapshot and is never edited, so
+   its entry stays as it was ruled; the register has moved on. 2026-10-12: the
+   operator ruled the Bolt "shajahan Mk" one man with the Uber "Shajahan
+   Machilakath", and both Bolt accounts moved onto the Uber record's key
+   (sql/schema_v105.sql folds the row v102 made). Held to: every id v102 named
+   for him is on the new key, and nothing else is excused. */
+const RE_KEYED = { 'shajahan mk': 'shajahan machilakath' };
 const want = [...new Set(MERGES.filter((m) => m.verified === '2026-10-08').map((m) => m.key))].sort()
   .map((k) => {
     const es = MERGES.filter((m) => m.key === k);
@@ -59,10 +66,17 @@ const want = [...new Set(MERGES.filter((m) => m.verified === '2026-10-08').map((
       words: [...new Set(es.filter((m) => m.verified === '2026-10-08').map((m) => m.ruling.words))].sort(),
     };
   });
+const kept102 = LIST.filter((l) => !RE_KEYED[l.k]);
 check('192 people, each with the survivor, every alias id on the key, and the ruling\'s words',
-  LIST.length === 192 && JSON.stringify(LIST) === JSON.stringify(want),
+  LIST.length === 192 && JSON.stringify(kept102) === JSON.stringify(want),
   `${LIST.length} listed, ${want.length} in the register`
-  + (LIST.length === want.length ? '' : `; missing ${want.filter((w) => !LIST.some((l) => l.k === w.k)).map((w) => w.k).slice(0, 3)}`));
+  + (kept102.length === want.length ? '' : `; missing ${want.filter((w) => !LIST.some((l) => l.k === w.k)).map((w) => w.k).slice(0, 3)}`));
+check('…and the one person a later ruling re-keyed has every id v102 named for him on his new key',
+  Object.entries(RE_KEYED).every(([from, to]) => {
+    const was = LIST.find((l) => l.k === from);
+    const now = new Set(MERGES.filter((m) => m.key === to).flatMap((m) => [m.keep.id, ...(m.merge.ids || [m.merge.id])]));
+    return was && !MERGES.some((m) => m.key === from) && [was.keep, ...was.alias].every((id) => now.has(id));
+  }));
 check('…including the ones measured on two Drivers-page rows that morning',
   ['shehzad ahmad ghulam muhammad', 'umar ali zarid khan', 'younas khan shah', 'khan akbar khan',
     'sayed kamal sayed', 'alzain alfatih ahmed', 'soaieed alom ali', 'fayed ali muhammad']

@@ -20,24 +20,28 @@
    words rather than the register's size. A register whose own header
    misdescribes it is a register nobody trusts to re-read:
 
-     · 10 in HAND_MERGES, checked one pair at a time against production or
+     · 11 in HAND_MERGES, checked one pair at a time against production or
        ruled by the operator. The fourth is a pair this file once REFUSED as
        undecidable and the operator ruled on, 2026-09-22. The fifth is a pair
        the sweep below held back in PENDING over a one-trip contradiction,
        which the operator ruled on, 2026-09-29: "both of them are the same
        people". The sixth to ninth are the other four PENDING held back, ruled
        2026-10-08, and the tenth is one man the register itself had split
-       under two keys, re-keyed the same day.
+       under two keys, re-keyed the same day. The eleventh is the operator's
+       ruling of 2026-10-12 on a pair the bottom-45 report flagged: the Bolt
+       "shajahan Mk" and the Uber "Shajahan Machilakath", one car, one man.
      · 45 in CANDIDATES, from the shared-history sweep — same cars, same days,
        trips interleaving inside the day rather than following one another.
        All forty-five are clean and applied. (The sweep found fifty; the other
        five are HAND_MERGES' fifth to ninth, moved there with their figures and
        their contradiction dates.)
-     · 324 in FROM_REVIEW, the operator's review of 2026-10-08, one entry per
+     · 323 in FROM_REVIEW, the operator's review of 2026-10-08, one entry per
        alias account, behind 295 links confirmed on the Same person page and
        never promoted (two accounts held back by name — see its header) and 35
        look-alike pairs measured on completed trips and ruled one by one or in
-       groups. Its own header says how each was put.
+       groups. Its own header says how each was put. It held 324 until
+       2026-10-12, when its "shajahan mk" link moved into HAND_MERGES' eleventh
+       entry, re-keyed onto the Uber record that carries his trips.
      · 81 in FROM_ROSTER, from src/identity_link.js, on a phone number the
        roster filed against both records. Three of them name a key CANDIDATES
        had already reached by a different route — the same person found twice
@@ -430,6 +434,38 @@ const HAND_MERGES = Object.freeze([
     caveat:
       'The two Uber accounts carry the same name and only one has ever filed a trip; nothing measured says '
       + 'why Uber issued him a second id. The phone tail is the roster\'s, from 2026-09-07, and was not re-read.',
+  },
+  /* Ruled 2026-10-12. The bottom-45 driver report (12 Sep – 11 Oct) listed
+     these two records at #3 and #33 and flagged them — same car, a matching
+     first name, never linked — rather than merging them on a name. The
+     operator: "the duplicate is a duplicate". The Bolt accounts were the
+     review's 'shajahan mk' key (FROM_REVIEW, 2026-10-08); they move here,
+     re-keyed onto the key his Uber trips already carry (the Amshid Khan
+     precedent), so only the Bolt account's 19 trips change key. */
+  {
+    key: 'shajahan machilakath',
+    keep:  { id: '72f3f926-3cd6-40ac-acfb-6d8450477f1b', name: 'Shajahan Machilakath Machilakath', channel: 'uber' },
+    merge: { ids: ['9585892', '0f314ca4-fedd-4de5-9b48-59f274776381'], name: 'shajahan Mk', channel: 'bolt' },
+    plates: ['L19262'],
+    days: { shared: 13, interleaved: 12, alias: 13, keep: 41 },
+    trips: { alias: 19, onSharedCars: 19 },
+    contradictions: [],
+    ruling: { by: 'operator', on: '2026-10-12', words: 'the duplicate is a duplicate', over: [] },
+    verified: '2026-10-12',
+    evidence:
+      'RULED BY THE OPERATOR, 2026-10-12, on the bottom-45 report that flagged the pair: "the duplicate is a '
+      + 'duplicate". Measured on production the same morning (/api/driver/trips, whole history): both records '
+      + 'begin on 2026-09-02 and every trip either has filed is on one car, L19262, in Egari. The Bolt record '
+      + '(9585892; its second account 0f314ca4 files nothing) worked 13 days, 19 bookings, 11 completed; all 13 '
+      + 'are days the Uber record worked on that same car (41 days, 295 bookings, 257 completed), and on 12 of '
+      + 'them the two records\' bookings interleave inside the day — the nearest Uber trip to each Bolt request '
+      + 'is 0.0, 1.1, 1.5, 2.8, 4.6 … minutes away. Completed trips at the same moment in two cars: none (one '
+      + 'Bolt trip starts inside an Uber trip on the same car — one man, two apps). The Drivers page listed them '
+      + 'as two people, #3 and #33 of the report, Bolt AED 823.00 and Uber AED 11,077.76 over 30 days.',
+    caveat:
+      'The deciding evidence is the operator\'s ruling; the measurements are consistent with it and could not '
+      + 'have decided it alone (a shared car with a co-driver interleaves too). No licence or Emirates ID was '
+      + 'compared. If a shift in two cars at once ever turns up for this pair, it goes back to the operator.',
   },
 ]);
 
@@ -1752,7 +1788,7 @@ const FROM_ROSTER = Object.freeze([
 
    The operator was shown every pair on a review sheet, grouped by evidence,
    and ruled, in these words, on these questions (RULED and ASKED below):
-     link    Part 1 — the 184 people already joined on the Drivers page   324 entries in all,
+     link    Part 1 — the 184 people already joined on the Drivers page   323 entries in all,
      strong  Part 2 — 27 pairs, same car, interleaving, never apart       by the account each
      weak    Part 3 — 4 pairs too thin for a rule; ticked one by one      moves; see the count
      car     Part 4 — 4 records with no trips, standing on the exact car  test for the split
@@ -1762,7 +1798,9 @@ const FROM_ROSTER = Object.freeze([
    the Yango "MUHAMMAD KHALID" (8089d680…), which the HR roster files under a
    different employee — "HR is right", and that pair is in REFUSED. The four
    pairs PENDING held back, and the one man the register itself had split
-   under two keys, are the last entries of HAND_MERGES.
+   under two keys, are the last entries of HAND_MERGES. (324 until 2026-10-12:
+   the "shajahan mk" link below moved to HAND_MERGES when the operator ruled
+   the Bolt record one man with the Uber "Shajahan Machilakath".)
 
    ── how an entry here is built ──────────────────────────────────────────
    One entry per alias ACCOUNT, so each spelling is its own merge.name and
@@ -3061,10 +3099,12 @@ const FROM_REVIEW = Object.freeze([
     keep: { id: '2c085db3-dbb1-48a6-99ca-0af7e5ee3ea5', name: 'Mohammed Musab Rahmathulla', channel: 'uber' },
     merge: { id: '2bde54e1ec3d46e787c3562a15459a16', name: 'MOHAMMED MUSAB', channel: 'yango' },
     seen: { days: 3, shared: 2, interleaved: 1, atOnce: 0, plates: ['L75122'] } }),
-  fromReview({ key: 'shajahan mk', part: 'link',
-    keep: { id: '9585892', name: 'shajahan Mk', channel: 'bolt' },
-    merge: { id: '0f314ca4-fedd-4de5-9b48-59f274776381', name: 'shajahan Mk', channel: 'bolt' },
-    link: { basis: 'same_name', confirmed: '2026-09-21' } }),
+  /* 'shajahan mk' (Bolt 9585892 kept, Bolt 0f314ca4 merged; a same-name link
+     confirmed 2026-09-21, ruled with Part 1) stood here until 2026-10-12. The
+     operator then ruled that Bolt man the Uber "Shajahan Machilakath" too, and
+     both accounts moved to the last HAND_MERGES entry, on the key his Uber
+     trips carry. sql/schema_v102.sql folded the two Bolt rows on 2026-10-08;
+     sql/schema_v105.sql folds that row into the Uber one. */
   fromReview({ key: 'maen m alaa shekfa', part: 'link',
     keep: { id: '67483c64055e070d79100133', name: 'M MAEN M ALAA SHEKFA', channel: 'hotel' },
     merge: { id: '00c0221c4aec47db9813f6c525167561', name: 'M MAEN M ALAA SHEKFA', channel: 'yango' },

@@ -86,8 +86,8 @@ const ID_SHAPE = /^[0-9]{4,12}$|^[0-9a-f]{24}$|^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a
 /* The sizes, pinned. A register that grows is the normal case and these
    numbers are MEANT to be edited when it does — deliberately, by the person
    who grew it, and never silently by the sweep that produced the new rows. */
-const EXPECT = { merges: 460, pending: 0, refused: 3, people: 237, aliasIds: 504,
-  joined: 143, foldsTo: 247 };
+const EXPECT = { merges: 460, pending: 0, refused: 3, people: 237, aliasIds: 505,
+  joined: 144, foldsTo: 246 };
 /* 2026-09-29, the operator's ruling on Ali Abbas Ahmed: one entry out of
    PENDING and into MERGES (131 -> 132, pending 5 -> 4), a key the register
    had never applied (people 125 -> 126), both of its Bolt ids (alias ids
@@ -102,7 +102,16 @@ const EXPECT = { merges: 460, pending: 0, refused: 3, people: 237, aliasIds: 504
    504 alias ids, PENDING 4 → 0 (all four ruled and applied), and REFUSED
    2 → 3 (the Yango "MUHAMMAD KHALID", ruled "HR is right"). Over this file's
    2026-09-03 roster the register now joins 143 groups and the 395 rows fold
-   to 247. Measured by running this file. */
+   to 247. Measured by running this file.
+
+   2026-10-12, the operator's ruling on the Bolt "shajahan Mk" and the Uber
+   "Shajahan Machilakath" ("the duplicate is a duplicate"): one review entry
+   moved into HAND_MERGES and re-keyed onto the Uber record, so 460 over 237
+   stand, but the Bolt account 9585892 — the review's survivor, now an alias —
+   adds an alias id (504 → 505). It filed trips and is on this file's roster
+   beside the Uber record, so the register joins one more group over it (143 →
+   144) and the rows fold one further (247 → 246). Measured by running this
+   file. */
 /* And by the date each sweep ran, so a batch arriving without the evidence
    shape its method produces shows up as a moved number rather than as
    nothing at all. */
@@ -126,9 +135,11 @@ const EXPECT = { merges: 460, pending: 0, refused: 3, people: 237, aliasIds: 504
    HAND_MERGES — the four PENDING held, ruled, and Amshid Khan, whom the
    register had split across two keys, moved off the phone sweep (82 → 81)
    onto one. The 2026-09-05 sweep's applied count stays 45: the four left its
-   held-back list, not its applied one. */
+   held-back list, not its applied one. 2026-10-12 is the operator's ruling on
+   Shajahan Machilakath, a hand merge carrying its own date; it took the
+   review's "shajahan mk" entry with it (329 → 328). */
 const BY_DATE = { '2026-09-03': 3, '2026-09-05': 45, '2026-09-07': 81, '2026-09-22': 1,
-  '2026-09-29': 1, '2026-10-08': 329 };
+  '2026-09-29': 1, '2026-10-08': 328, '2026-10-12': 1 };
 const sortedEntries = (o) => JSON.stringify(Object.entries(o).sort((a, b) => a[0].localeCompare(b[0])));
 
 /* The control: a production record the register has never been told about.

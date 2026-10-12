@@ -9123,6 +9123,39 @@ apart with a REFUSED audit row and a warning.
   for the next review, not a merge.
 
 
+### One more, ruled 2026-10-12: Shajahan Machilakath
+
+The bottom-45 driver report (12 Sep – 11 Oct) listed the Bolt "shajahan Mk"
+(#3, AED 823.00) and the Uber "Shajahan Machilakath Machilakath" (#33, AED
+11,077.76) and flagged them rather than merging on a name. The operator:
+"the duplicate is a duplicate". Measured on production first
+(/api/driver/trips, whole history): both begin 2026-09-02, every trip on both
+is on L19262 (Egari), all 13 Bolt days are Uber days on that car, 12 of them
+interleaved, and never in two cars at once.
+
+- **Re-keyed, not added.** The two Bolt accounts were the review's
+  `shajahan mk` key (FROM_REVIEW, a same-name link). They moved to the last
+  HAND_MERGES entry on the Uber record's key, `shajahan machilakath` — the
+  Amshid Khan precedent — so only the Bolt account's 19 trips change key.
+  The register stays 460 entries over 237 people (HAND 10 → 11, FROM_REVIEW
+  324 → 323); v53 is regenerated (504 → 505 WHEN lines, because the Bolt
+  survivor 9585892 is now an alias), and the WHEN count is what makes
+  production rebuild the column: the entry sits mid-register, so the
+  last-alias probe alone would not fire.
+- **A ruling can re-key a person a frozen migration listed.** v102's list is
+  a snapshot of 2026-10-08 and is never edited; its drift check now excuses
+  exactly the re-keyed person, and only while every id v102 named for him is
+  on the new key.
+- **The spine needs its own recorded merge.** The Uber row carries his
+  statements, so the spine would not fold it; `sql/schema_v105.sql` runs
+  v102's statements for this one person (refusals and audit row included),
+  test/identity_shajahan_merge.test.mjs (12; v105 a no-op → 6 fail, keyed the
+  old way → 2 fail).
+- **Not done:** Binu Abdul Rehman Kunju also shows as two Drivers-page rows —
+  the register joins his Uber 06e30918 and Bolt 808537b4, but his Bolt
+  numeral 9770175 (the account his one Bolt trip is filed under) is in no
+  entry. Left for the operator to rule.
+
 ## The chat assistant — built 2026-10-09
 
 The operator asked for "an AI agent powered by … seed 2.0 pro where users can

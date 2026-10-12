@@ -31,6 +31,10 @@
    held back, ruled, and Amshid Khan re-keyed), CANDIDATES 49 → 45,
    FROM_ROSTER 82 → 81 (the Amshid entry moved), and a fourth list,
    FROM_REVIEW, of 324. Keys carrying more than one entry: 6 → 160.
+   2026-10-12, the operator's ruling on the pair the bottom-45 report flagged
+   ("the duplicate is a duplicate"): HAND_MERGES 10 → 11, FROM_REVIEW 324 →
+   323 — the "shajahan mk" link moved and re-keyed onto the Uber record — so
+   the total stays 460 over 237 and 160 keys still carry more than one.
 
    Proved by revert, 15 checks: with only the header's words put back to "a
    hundred and thirty-one … a hundred and twenty-five" (what it should have
@@ -77,7 +81,7 @@ check('the three sweeps add up to the applied total',
   hand.length + (cand.length - PENDING.length) + roster.length + review.length === MERGES.length,
   `${hand.length} + ${cand.length - PENDING.length} + ${roster.length} + ${review.length}`);
 check('and each sweep is the size the header states',
-  hand.length === 10 && cand.length === 45 && roster.length === 81 && review.length === 324,
+  hand.length === 11 && cand.length === 45 && roster.length === 81 && review.length === 323,
   `${hand.length} / ${cand.length} / ${roster.length} / ${review.length}`);
 {
   const per = {};
@@ -92,12 +96,12 @@ check('the register header states the applied total',
   'api/identity_map.js');
 check('…and the held-back count', /PENDING is VERIFIED AND\s+DELIBERATELY NOT APPLIED: none since 2026-10-08/.test(src));
 check('…and the roster sweep size', /·\s*81 in FROM_ROSTER/.test(src));
-check('…and the hand-merge size', /·\s*10 in HAND_MERGES/.test(src));
+check('…and the hand-merge size', /·\s*11 in HAND_MERGES/.test(src));
 check('…and the shared-history sweep size', /·\s*45 in CANDIDATES/.test(src));
-check('…and the review size', /·\s*324 in FROM_REVIEW/.test(src));
+check('…and the review size', /·\s*323 in FROM_REVIEW/.test(src));
 check('CLAUDE.md states the same pair',
   /applies 460 entries over 237 people/.test(claude), 'CLAUDE.md');
-check('…the same sweep split', /10 hand-checked or hand-ruled, 45 from a shared-custody sweep, 81 on a phone\s+number the roster filed against both records, 324 from the operator's review/.test(claude));
+check('…the same sweep split', /11 hand-checked or hand-ruled, 45 from a shared-custody sweep, 81 on a phone\s+number the roster filed against both records, 323 from the operator's review/.test(claude));
 check('…the same held-back count', /and holds back none/.test(claude));
 check('…and the same duplicate count', /160 people\s*\n?carry more than one entry/.test(claude));
 

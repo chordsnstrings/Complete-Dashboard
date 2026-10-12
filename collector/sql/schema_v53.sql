@@ -71,6 +71,9 @@
 -- 9c09415b-9aa2-43dc-ac9e-298c3c72ac32, 67483c64055e070d791000e5, 6633456 (uber,hotel,bolt "AMSHID KHAN ALEEM KHAN")
 --   -> e6fd4328-b270-4e7e-bff8-2c6e0f290a28 (uber "Amshid Khan Khan") = 'amshid khan'
 --   verified 2026-10-08; ruled by the operator 2026-10-08
+-- 9585892, 0f314ca4-fedd-4de5-9b48-59f274776381 (bolt "shajahan Mk")
+--   -> 72f3f926-3cd6-40ac-acfb-6d8450477f1b (uber "Shajahan Machilakath Machilakath") = 'shajahan machilakath'
+--   verified 2026-10-12 on 1 shared plate; ruled by the operator 2026-10-12
 -- 6612891 (bolt "Shehzad Ahmed Ghulam Muhammad")
 --   -> f6253b6e-fca4-41cf-99c1-6c2f3e2e67b2 (uber,hotel "Shehzad Ahmad Ghulam Muhammad") = 'shehzad ahmad ghulam muhammad'
 --   verified 2026-09-05 on 7 shared plates
@@ -1355,9 +1358,6 @@
 -- 2bde54e1ec3d46e787c3562a15459a16 (yango "MOHAMMED MUSAB")
 --   -> 2c085db3-dbb1-48a6-99ca-0af7e5ee3ea5 (uber "Mohammed Musab Rahmathulla") = 'mohammed musab rahmathulla'
 --   verified 2026-10-08 on a review ruling; ruled by the operator 2026-10-08
--- 0f314ca4-fedd-4de5-9b48-59f274776381 (bolt "shajahan Mk")
---   -> 9585892 (bolt "shajahan Mk") = 'shajahan mk'
---   verified 2026-10-08 on a review ruling; ruled by the operator 2026-10-08
 -- 00c0221c4aec47db9813f6c525167561 (yango "M MAEN M ALAA SHEKFA")
 --   -> 67483c64055e070d79100133 (hotel "M MAEN M ALAA SHEKFA") = 'maen m alaa shekfa'
 --   verified 2026-10-08 on a review ruling; ruled by the operator 2026-10-08
@@ -1488,6 +1488,8 @@ DECLARE
          WHEN '9c09415b-9aa2-43dc-ac9e-298c3c72ac32' THEN 'amshid khan'
          WHEN '67483c64055e070d791000e5' THEN 'amshid khan'
          WHEN '6633456' THEN 'amshid khan'
+         WHEN '9585892' THEN 'shajahan machilakath'
+         WHEN '0f314ca4-fedd-4de5-9b48-59f274776381' THEN 'shajahan machilakath'
          WHEN '6612891' THEN 'shehzad ahmad ghulam muhammad'
          WHEN '6598721' THEN 'aliyan khalil'
          WHEN '67483c64055e070d791000d2' THEN 'aliyan khalil'
@@ -1953,7 +1955,6 @@ DECLARE
          WHEN '413c9c74-c8dc-402e-98dd-7317c9855d33' THEN 'emad alabdon'
          WHEN '7643640' THEN 'mohammed musab rahmathulla'
          WHEN '2bde54e1ec3d46e787c3562a15459a16' THEN 'mohammed musab rahmathulla'
-         WHEN '0f314ca4-fedd-4de5-9b48-59f274776381' THEN 'shajahan mk'
          WHEN '00c0221c4aec47db9813f6c525167561' THEN 'maen m alaa shekfa'
          WHEN '6628845' THEN 'maen m alaa shekfa'
          WHEN 'd43a09f3ab8a44b5ab6d35331edb59af' THEN 'farhan khan manazir khan'
@@ -2006,7 +2007,7 @@ BEGIN
          -- …and carries as many merges as this register has, so a column built
          -- from a SUPERSET that happens to end on the same pair still rebuilds.
          AND (length(c.generation_expression)
-              - length(replace(c.generation_expression, 'WHEN ', ''))) / 5 = 504);
+              - length(replace(c.generation_expression, 'WHEN ', ''))) / 5 = 505);
     need := true;
   END LOOP;
   IF NOT need THEN RETURN; END IF;

@@ -321,4 +321,9 @@ export const SCHEMA_FILES = [
      frozen. The operator: "A historically bad day on a Sunday can't be
      expected to perform the same way as weekday." api/target_weights.js. */
   'schema_v104.sql',
+  /* v105 (2026-10-12): the operator's ruling that the Bolt "shajahan Mk" and
+     the Uber "Shajahan Machilakath" are one man — the row v102 made of his
+     Bolt accounts folded into his Uber row, as v102 folds, with an audit row.
+     test/identity_shajahan_merge.test.mjs. */
+  'schema_v105.sql',
 ];
