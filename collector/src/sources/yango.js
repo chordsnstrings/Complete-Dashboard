@@ -337,15 +337,43 @@ const keyPost = async (path, body) => {
       : String(r.data || '').slice(0, 120);
     if (r.status === 401 || r.status === 403) {
       keyRefusals.add(path);
+      /* A REFUSED METHOD IS NOT A DEAD KEY.
+         ──────────────────────────────────────────────────────────────────
+         Every 403 used to be written 'invalid', and the banner turned that
+         into "stopped working and has to be replaced". From 2026-10-11 Yango
+         answered /v1/parks/orders/list with 403 {"message":"Method not
+         allowed"} while the SAME key, in the same run, read the roster (146
+         drivers) and the cars (104): the key was accepted and one method was
+         refused. Yango words a key or client id it does not accept itself —
+         403 "invalid client id or api key", measured with the wrong client id
+         shapes by /api/probe/yango/keyapi — so anything else on a 403 is the
+         method, not the secret. Measured the same morning from the console:
+         all four of the park's keys still listed
+         fleet-api:v1-parks-orders-list:POST, and Yango's console carried the
+         notice "Only main functions of the fleetroom are available at the
+         moment". A new key would have been refused exactly the same.
+         'unentitled' is the state that means "authenticates, and is refused
+         what it asks for" (api/auth_routes.js), and its errand is a
+         permission, not a replacement. Only for a JSON answer — Yango's API
+         speaking; a page from something in front of it is not Yango refusing
+         a method, and keeps the reading it had. */
+      const badKey = r.status === 401 || !(r.data && typeof r.data === 'object')
+        || /invalid client id or api key/i.test(said);
       await noteCredential(pool, {
         provider: SRC, fleet: config.yango.fleet || '*', credential: 'YANGO_API_KEY',
-        state: 'invalid', surface: path,
+        state: badKey ? 'invalid' : 'unentitled', surface: path,
         /* Both credentials named, because Yango's own wording refuses to
            choose between them, and a detail line that picks one is inventing
            the half the provider withheld. */
-        detail: `HTTP ${r.status} on ${config.yango.keyBase}: ${said}`
-          + ' — this host authenticates on X-API-Key plus X-Client-ID and its refusal'
-          + ' does not say which; the client id shape that works is taxi/park/<park id>',
+        detail: badKey
+          ? `HTTP ${r.status} on ${config.yango.keyBase}: ${said}`
+            + ' — this host authenticates on X-API-Key plus X-Client-ID and its refusal'
+            + ' does not say which; the client id shape that works is taxi/park/<park id>'
+          /* Under the 240 characters noteCredential keeps (the path is the
+             row's surface): the first draft lost its own conclusion there. */
+          : `403 ${said || 'with no reason'} — Yango accepted the key and refused this method (a key it`
+            + ' rejects is answered "invalid client id or api key"). A new key changes nothing: allow'
+            + ' the method in Yango’s console › API, or Yango restores it',
       });
     }
     throw new Error(`yango ${path} refused: HTTP ${r.status}${said ? ` — ${said}` : ''}`

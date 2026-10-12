@@ -9664,10 +9664,10 @@ const ERRAND_HEAD = {
       + 'what is wrong: the URL is',
   },
   unentitled: {
-    one: 'authenticates and is refused the company or park it asks for — this is access to grant '
-      + 'in the provider\u2019s portal, not a secret to replace',
-    many: 'authenticate and are refused the company or park they ask for — this is access to '
-      + 'grant in the provider\u2019s portal, not a secret to replace',
+    one: 'authenticates and is refused the company, park or method it asks for — this is access '
+      + 'for the provider to allow, not a secret to replace',
+    many: 'authenticate and are refused the company, park or method they ask for — this is access '
+      + 'for the provider to allow, not a secret to replace',
   },
   /* "The credential authenticates" was dropped from both on 2026-09-29: the
      one surface in this state is Yango's console, where the edge turns this
@@ -9686,7 +9686,7 @@ const ERRAND_HEAD = {
 const NOUN_OF = { moved: 'endpoint', unentitled: 'credential', blocked: 'surface' };
 const ERRAND_PART = {
   moved: 'because the endpoint moved, not the credential',
-  unentitled: 'not permitted that company or park, which is a permission to grant rather than a '
+  unentitled: 'not permitted that company, park or method, which is a permission to grant rather than a '
     + 'secret to replace',
   blocked: 'refused in front of the API, where no credential is being read',
 };

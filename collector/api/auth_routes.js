@@ -162,12 +162,12 @@ export const ERRANDS = {
     noun: 'credential',
     whole: (n) => `${n === 1 ? 'A credential is' : `${n} credentials are`} not permitted what `
       + `${n === 1 ? 'it is' : 'they are'} asking for — ${n === 1 ? 'it authenticates' : 'they authenticate'} `
-      + 'and the account is refused the company or park, so replacing the secret changes nothing: '
-      + 'the access has to be granted in the provider\u2019s portal',
+      + 'and the account is refused the company, park or method, so replacing the secret changes '
+      + 'nothing: the provider has to allow it (or switch it back on)',
     /* Singular and plural, because these clauses are joined onto a count and
        "1 of them authenticate" is a sentence a reader stops trusting. */
     part: (n) => `${n} of them ${n === 1 ? 'authenticates' : 'authenticate'} and `
-      + `${n === 1 ? 'is' : 'are'} refused the company or park, which is a permission to grant `
+      + `${n === 1 ? 'is' : 'are'} refused the company, park or method, which is a permission to grant `
       + 'rather than a secret to replace',
   },
   /* Not "the credential authenticates" any more (2026-09-29). The one

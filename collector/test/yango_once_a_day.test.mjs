@@ -65,7 +65,8 @@ globalThis.fetch = async (url) => {
   seen.push(u);
   if (u.includes('fleet.yango.com')) return consoleAnswer();
   if (tripsFail && u.includes('/orders/list')) {
-    return new Response(JSON.stringify({ code: '403', message: 'invalid client id or api key' }), { status: 403 });
+    return new Response(JSON.stringify({ code: '403', message: tripsFail === 'method' ? 'Method not allowed'
+      : 'invalid client id or api key' }), { status: 403 });
   }
   /* The key host answers, with one car, so a run has rows to its name. */
   return new Response(JSON.stringify({ driver_profiles: [], orders: [], transactions: [],
@@ -226,6 +227,29 @@ reset();
 consoleAnswer = () => new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
 const v200 = await checkStored('YANGO_COOKIE', { value: 'Session_id=good' });
 check('an answer passes', v200.verdict === 'pass', j(v200));
+
+/* ══ 6. a refused method is not a dead key ════════════════════════════════
+   From 2026-10-11 Yango answered orders/list 403 {"message":"Method not
+   allowed"} while the same key read the roster and the cars, and the banner
+   told the operator to REPLACE a key Yango was accepting (Yango had cut the
+   park to "only main functions"; all four keys still listed the method).
+   REVERSION: every 403 written 'invalid' (the old branch) -> 1 FAILS. */
+console.log('\n6. a refused method is not a dead key');
+const keyRows = () => creds.filter((c) => c.credential === 'YANGO_API_KEY');
+reset();
+tripsFail = 'method'; consoleRow = null;
+await collect({ ...WINDOW, mode: 'incremental' });
+tripsFail = false;
+const lastKey = keyRows().slice(-1)[0];
+check('"Method not allowed" while the roster and cars answer: unentitled, and the detail says a new key changes nothing',
+  lastKey?.state === 'unentitled' && /new key changes nothing/i.test(lastKey.detail || '')
+  && /Method not allowed/.test(lastKey.detail || '') && runs[0]?.status === 'error', j([lastKey, runs[0]?.status]));
+reset();
+tripsFail = 'invalid'; consoleRow = null;
+await collect({ ...WINDOW, mode: 'incremental' });
+tripsFail = false;
+check('…while Yango’s own "invalid client id or api key" is still a key to replace',
+  keyRows().slice(-1)[0]?.state === 'invalid', j(keyRows().slice(-1)[0]));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

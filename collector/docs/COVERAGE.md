@@ -4454,6 +4454,22 @@ untouched, and nothing projected is ever added into `accounted`.
       (its `ended_at` is after its `ingested_at`), and no column says when;
       it is read as reported from its first collection — a small over-read
       on a channel of about 5% of trips.
+  48. **A 403 from fleet-api.yango.tech is not always the key — read Yango's
+      own words.** A key or client id Yango does not accept is answered 403
+      `{"message":"invalid client id or api key"}` (measured with the wrong
+      client id shapes, /api/probe/yango/keyapi). Anything else on a 403 is
+      the METHOD: on 2026-10-11/12 orders/list answered 403 "Method not
+      allowed" while the same key read 146 drivers and 104 cars in the same
+      run, all four of the park's keys still listed the orders permission,
+      and the cause was Yango cutting the park to its main functions. The
+      collector wrote every 403 as `invalid` and the banner said "replace
+      YANGO_API_KEY". src/sources/yango.js keyPost now writes `unentitled`
+      for anything but Yango's bad-key wording (test/yango_once_a_day §6).
+      Before blaming a Yango credential, ask the console with a working
+      session for its notifications
+      (`POST /api/fleet/notifications/v3/notifications/fetch`) — Yango
+      announces a reduced mode there ("Yango cut to its main functions",
+      below).
 
 * **A CABMAN LOGIN IS THE USER, NOT THE INTERFACE ID — AND "NO ACCOUNT" WAS
   ONLY EVER "NOBODY ASKED".** Ecosine and Egari share InterfaceUniqueId 81;
@@ -8093,6 +8109,69 @@ own, with the production comparison recorded here (above). Rebuilt rows are only
 written for closed weeks with no console row and inside the ledger's
 history, carry `raw.rebuilt_from = 'fleet-api.yango.tech'`, and are deleted
 for a week the moment the console delivers that week.
+
+## Yango cut to its main functions — 2026-10-11/12
+
+The operator, 2026-10-12: "yango is still messing up", with a fresh "copy as
+cURL" from fleet.yango.com (a `cars-catalog` GET carrying a session for
+`muzammil16075`, `Session_id` stamped 2026-10-12 03:50Z). Measured that
+morning, read-only:
+
+**What production showed.** Every Yango run since at least 2026-10-11
+21:24Z is `error` with three refusals: `trips: /v1/parks/orders/list
+refused: HTTP 403 — Method not allowed`, `ledger: /v2/parks/transactions/list
+refused: HTTP 429 — Limit exceeded.`, and the console blocked at the edge as
+before. The banner said YANGO_API_KEY had "stopped working and has to be
+replaced". The last Yango trip held was booked 2026-10-11 02:07Z; ledger and
+Yango earnings stop at 2026-10-11. /api/probe/yango/keyapi, live: the same
+key and client id answered driver-profiles 200 (146) and cars 200 (104), and
+orders/list 403 `{"code":"403","message":"Method not allowed"}`.
+
+**What the console said, with the operator's session, from this sandbox**
+(not production's address — production's is still refused at the edge):
+
+- The session is good: the console answered JSON, not the edge's page.
+- `POST /api/reports-api/v2/summary/drivers/list` (the weekly summary) →
+  403 `{"code":"no_permissions","message":"No permissions"}` — Yango's API,
+  after reading the session.
+- `GET /api/fleet/ui/v1/parks/users/profile`: the account is
+  `is_superuser: true` with 495 permissions, and **none** of
+  `report_summary_view`, `report_orders_view`, `report_transactions_view`,
+  `report_quality_view`, nor any orders grant; `report_payouts_view`,
+  driver, car and payout grants are all there.
+- `POST /api/fleet/uapi-keys/v1/list` + `GET /api/fleet/uapi-keys/v1/key`:
+  the park has four API keys (ids 43431296, 473163, 465912, 465911; the
+  newest edited 2026-08-29), and **every one** still lists
+  `fleet-api:v1-parks-orders-list:POST`, `fleet-api:v2-parks-transactions-
+  list:POST`, driver-profiles, cars and
+  `fleet-api:v2-parks-contractors-supply-hours:GET`. Nobody at the park
+  changed a key.
+- `GET /api/fleet/offers/v2/agreements`: taxi terms and taxi marketing
+  terms signed (only the delivery ones are not — irrelevant to a taxi
+  park), so no unsigned agreement is holding anything back.
+- `POST /api/fleet/notifications/v3/notifications/fetch` (what the console
+  polls every 5 minutes): one notice, created **2026-10-11 20:53:32Z** —
+  **"Only main functions of the fleetroom are available at the moment.
+  We’re already working on it."**
+
+**So:** Yango is running the park in a reduced mode — orders, reports and
+the transaction list switched off for it, everything else up. Not the key,
+not the cookie, not anything on this side; re-pasting either changes
+nothing. The orders gap backfills on its own once Yango restores them: the
+half-hourly run asks 3 days back and the nightly catch-up 30.
+
+**What was changed.** The banner was giving a reason that is not the true
+one (trap 48): a 403 other than Yango's own bad-key wording is now
+`unentitled` ("authenticates and is refused what it asks for … a permission
+to grant rather than a secret to replace"), with the detail line saying a
+new key changes nothing. The `unentitled` wording on the page and in the
+headline now reads "company, park or method" — it was written for Bolt's
+company refusal and did not cover a refused method.
+
+**A lead, not built:** `fleet-api:v2-parks-contractors-supply-hours:GET`
+("Get contractor time online") is grantable and on all four keys. The
+weekly rebuild (above) has no online hours because only the console summary
+carried them; this method may. Not asked, not measured.
 
 ## The daily report email — built 2026-09-29
 
