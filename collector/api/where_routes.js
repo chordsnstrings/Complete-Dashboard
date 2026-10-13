@@ -56,8 +56,8 @@ import { dubaiIso } from '../src/util.js';
 export const TOLERANCE_MIN = 30;      // a fix further than this from the moment is not "where it was"
 export const STOP_RADIUS_KM = 0.25;   // a stop stays within this of where it began…
 export const STOP_MIN = 10;           // …for at least this long
-const GAP_MIN = 20;                   // /api/map/journey's rule for a drawable step
-const HOP_KM = 60;                    // /api/map/journey's bad-fix rule
+export const GAP_MIN = 20;            // /api/map/journey's rule for a drawable step
+export const HOP_KM = 60;             // /api/map/journey's bad-fix rule
 const DUBAI_MS = 4 * 3600_000;
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -91,7 +91,7 @@ export function km(a, b) {
    or FMS's live passenger count read as occupied at 1 or more (the operator's
    ruling of 2026-09-23). Null when the fix carries no reading — which is not
    an empty seat. The same rule as /api/live and /api/map/journey. */
-const seatOf = (f) => (f.source === 'fms'
+export const seatOf = (f) => (f.source === 'fms'
   ? (f.seat_count == null ? null : Number(f.seat_count) >= 1)
   : (f.seat_occupied == null ? null : Boolean(f.seat_occupied)));
 const motionOf = (f) => (f.speed == null ? null : Number(f.speed) > 3 ? 'moving' : 'stopped');

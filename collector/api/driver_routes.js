@@ -17,6 +17,11 @@ import { win, winDays } from './window.js';
    drifted into the same defect at once; see the module header for the
    measurement. */
 import { onlineSpansSql } from './online_span_sql.js';
+import { SPANS_SQL } from './status_routes.js';
+import { seatOf } from './where_routes.js';
+import { statusSpans, custodyWindows, carRuns, movementSegments, movementTotals } from './day_movement.js';
+/* "L1 and L2" for a sentence; the page's own helper lives in the browser. */
+const listWordsPlain = (xs) => (xs.length < 2 ? (xs[0] || '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 /* One definition of a driver's position among their peers — see the pct()
    helper below, which used to be a second copy of it. */
 import { position } from './performance_sql.js';
@@ -2801,10 +2806,99 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
         + 'the driver.';
     }
 
+    /* ── Uber's live status for the day, and which car was his when ────────
+       2026-10-13, Kashif Ali Ayyub Khan: online from 07:04 by Uber's live
+       feed, on a trip at 11:38, and this page drew nothing — no booking had
+       been filed yet (Uber files a trip about 37 minutes after it, the trip
+       feed runs half-hourly), the log-in record stopped where its three-hourly
+       collector stopped (10:17), and the car was found ONLY through the
+       bookings. Three fixes:
+         · the live status feed's spans for the day, on /api/status/driver's
+           own query (api/status_routes.js SPANS_SQL), so this page and the
+           status strip cannot disagree;
+         · the car found from Uber's OWN status rows too — src/sources/uber.js
+           writes one telemetry_snapshot row per status change with the plate
+           and the whole driver overview in raw, driverInfo.driverUuid
+           included — so a day with no booking still has its car;
+         · the tracker's fixes kept to the hours the car was HIS
+           (api/day_movement.js custodyWindows), never another driver's shift
+           in a shared car. */
+    const dayStartMs = Date.parse(`${day}T00:00:00+04:00`);
+    const nowMs = Date.now();
+    const nowMin = Math.floor((nowMs - dayStartMs) / 60000);
+    const isToday = nowMin >= 0 && nowMin < 1440;
+    const limit = Math.max(0, Math.min(1440, nowMin));
+    const statusRows = await q(SPANS_SQL, p);
+    const statusAll = statusSpans(statusRows, dayStartMs, isToday ? nowMs : null);
+    /* The cars he could have been in: his bookings' that day, the car Uber's
+       live record and roster have him in, and the cars his bookings put him
+       in the week around it. Only candidates — custody is decided by the
+       evidence below, not by this list. */
+    const candidates = new Set(trips.map((t) => t.plate).filter(Boolean));
+    for (const r of await q(
+      `SELECT plate FROM vehicle_driver_day
+        WHERE driver_ext_id = ANY($1) AND day BETWEEN $2::date - 7 AND $2::date + 1
+       UNION SELECT plate FROM driver_status_now WHERE driver_ext_id = ANY($1)
+       UNION SELECT plate FROM driver_platform_state WHERE driver_ext_id = ANY($1)`, p)) {
+      if (r.plate) candidates.add(r.plate);
+    }
+    const mins = (ts) => Math.floor((new Date(ts).getTime() - dayStartMs) / 60000);
+    /* Uber's status rows in those cars, the day and the evening before (a
+       status that began yesterday is in force at midnight). Only ONLINE and
+       ONTRIP are evidence of working IN the car; OFFLINE only says the app
+       had the vehicle against the account, which two drivers of one shared
+       car can both have overnight. */
+    const uberRows = candidates.size ? await q(
+      `SELECT plate, captured_at, upper(coalesce(status, '')) AS status,
+              raw->'driverInfo'->>'driverUuid' AS who_id,
+              nullif(btrim(concat_ws(' ', raw->'driverInfo'->>'firstName', raw->'driverInfo'->>'lastName')), '') AS who_name
+         FROM telemetry_snapshot
+        WHERE source = 'uber' AND plate = ANY($1)
+          AND captured_at >= (($2::date - 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+          AND captured_at <  (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+        ORDER BY captured_at`, [[...candidates], day]) : [];
+    const keySet = new Set((d.keys || []).map(String));
+    const working = (st) => st && st !== 'OFFLINE';
+    const own = [];
+    const others = [];
+    for (const t of trips) {
+      if (!t.plate) continue;
+      const e = t.e == null ? t.s : (t.past_midnight ? 1440 : Math.max(t.e, t.s));
+      own.push({ plate: t.plate, s: t.s, e, kind: 'booking' });
+    }
+    for (const r of uberRows) {
+      if (!working(r.status) || !r.who_id) continue;
+      const m = Math.max(0, mins(r.captured_at));
+      if (m >= 1440) continue;
+      (keySet.has(String(r.who_id)) ? own : others).push({ plate: r.plate, s: m, e: m,
+        kind: 'uber_vehicle', who: r.who_name, who_id: r.who_id });
+    }
+    /* Other people's bookings in the cars he was in, for the same reason. */
+    const ownPlates = [...new Set(own.map((o) => o.plate))];
+    if (ownPlates.length) {
+      for (const t of await q(
+        `SELECT plate, driver_name, ${PKEY} AS driver_ext_id,
+                (extract(hour FROM requested_at AT TIME ZONE 'Asia/Dubai') * 60
+                 + extract(minute FROM requested_at AT TIME ZONE 'Asia/Dubai'))::int AS s,
+                CASE WHEN ended_at IS NULL THEN NULL ELSE
+                  (extract(hour FROM ended_at AT TIME ZONE 'Asia/Dubai') * 60
+                   + extract(minute FROM ended_at AT TIME ZONE 'Asia/Dubai'))::int END AS e
+           FROM trip_norm
+          WHERE plate = ANY($3) AND is_booking AND NOT (${PKEY} = ANY($1))
+            AND (requested_at AT TIME ZONE 'Asia/Dubai')::date = $2::date`, [d.keys, day, ownPlates])) {
+        others.push({ plate: t.plate, s: t.s, e: t.e == null ? t.s : Math.max(t.s, t.e), who: t.driver_name || null, who_id: t.driver_ext_id || null, kind: 'booking' });
+      }
+    }
+    const windows = custodyWindows({ own, others, limit: isToday ? limit : 1440,
+      online: [...online.map((o) => ({ s: o.s, e: o.e })),
+        ...statusAll.filter((x) => x.status !== 'offline').map((x) => ({ s: x.s, e: x.e }))] });
+
     /* Where the car was, minute-bucketed. Returned as fixes rather than as
        per-gap rollups because the gaps are computed on the client from the
-       jobs, and doing it twice in two places is how the two stop agreeing. */
-    const plates = [...new Set(trips.map((t) => t.plate).filter(Boolean))];
+       jobs, and doing it twice in two places is how the two stop agreeing.
+       Now for the cars and the hours that were his (above), each fix with its
+       source and its seat reading. */
+    const plates = [...new Set(windows.map((w) => w.plate))];
     /* Every fix carries the name of the ground it sits on, joined out of the
        gazetteer (sql/schema_v67.sql). A decimal pair is not an answer to
        "where was the car waiting" — nobody reads 25.112, 55.139 and pictures
@@ -2817,20 +2911,30 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        cell one trip named is not the same claim as a cell four hundred trips
        agree on and the page has to be able to say which it is holding. A cell
        nothing has ever named returns NULL and renders as unnamed. */
-    const fixes = plates.length ? await q(
-      `SELECT s.plate,
+    const plateFixes = (plates.length ? await q(
+      `SELECT s.plate, s.source, s.captured_at AS at,
+              to_char(s.captured_at AT TIME ZONE 'Asia/Dubai', 'HH24:MI') AS time,
               (extract(hour FROM s.captured_at AT TIME ZONE 'Asia/Dubai') * 60
                + extract(minute FROM s.captured_at AT TIME ZONE 'Asia/Dubai'))::int AS m,
-              s.lat, s.lng, s.speed,
+              s.lat, s.lng, s.speed, s.seat_count, s.seat_occupied,
               pc.area, pc.n AS area_votes, pc.observations AS area_seen
          FROM telemetry_snapshot s
          LEFT JOIN place_cell pc
            ON pc.cell_lat = round(s.lat / 0.005)::int
           AND pc.cell_lng = round(s.lng / 0.005)::int
-        WHERE s.plate = ANY($1)
-          AND (s.captured_at AT TIME ZONE 'Asia/Dubai')::date = $2::date
+        WHERE s.plate = ANY($1) AND s.source <> 'uber'
+          AND s.captured_at >= (($2::date)::timestamp AT TIME ZONE 'Asia/Dubai')
+          AND s.captured_at <  (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
           AND s.lat IS NOT NULL AND s.lng IS NOT NULL
-        ORDER BY s.captured_at`, [plates, day]) : [];
+        ORDER BY s.captured_at`, [plates, day]) : []).map((f) => ({
+      plate: f.plate, source: f.source, at: new Date(f.at).toISOString(), time: f.time, m: f.m,
+      lat: Number(f.lat), lng: Number(f.lng), speed: f.speed == null ? null : Number(f.speed),
+      /* The seat by the operator's rule (/api/where seatOf): CABMAN's flag,
+         FMS's passenger count at 1 or more; null where the fix has none. */
+      passenger: seatOf(f), area: f.area || null, area_votes: f.area_votes ?? null, area_seen: f.area_seen ?? null,
+    }));
+    const fixes = plateFixes.filter((f) => windows.some((w) => w.plate === f.plate && f.m >= w.from && f.m <= w.to));
+    const outsideFixes = plateFixes.length - fixes.length;
 
     /* WHERE the shift began, which Uber will not tell us.
        ─────────────────────────────────────────────────────────────────────
@@ -2897,6 +3001,34 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       .map(([area, spans]) => ({ area, spans }))
       .sort((a, b) => b.spans - a.spans || a.area.localeCompare(b.area));
 
+    /* The live feed's spells, each one that began a working stretch (after
+       offline, or the day's first) placed the same way as the log-in
+       record's: the tracker's fix nearest in time, within 30 minutes. */
+    const statusPlaced = statusAll.map((x, i) => ((x.status !== 'offline'
+      && (i === 0 || statusAll[i - 1].status === 'offline')) ? { ...x, went_online: placeAt(x.s) } : x));
+
+    /* The day as the car saw it (api/day_movement.js). */
+    const runs = carRuns(fixes);
+    const movement = {
+      windows: windows.map((w) => ({ plate: w.plate, from: w.from, to: w.to, core_from: w.core_from, core_to: w.core_to,
+        stretched: w.stretched, basis: w.basis, overlap: !!w.overlap,
+        shared: w.shared.map((x) => ({ who: x.who, who_id: x.who_id || null, s: x.s, e: x.e })) })),
+      runs,
+      segments: movementSegments(fixes, windows),
+      totals: movementTotals(fixes, windows, runs),
+      outside_fixes: outsideFixes,
+      absent: windows.length ? (fixes.length ? null
+        : `the tracker in ${listWordsPlain(plates)} reported no position while ${d.name || 'this driver'} had it`)
+        : candidates.size
+          ? 'no car is on record as his on this day — no booking names one, and Uber’s own record does not show him working in any of the cars he usually drives'
+          : 'no car is on record as his on this day — no booking names one, and Uber has never recorded him in a vehicle',
+      basis: 'A car is this driver’s from his first to his last evidence in it — his bookings, and Uber’s own '
+        + 'status record, which names the vehicle the app had him in — stretched to the edges of the online spell that '
+        + 'evidence sits in, and never across another driver’s evidence in the same car. Positions outside those '
+        + 'hours are the car’s, not his, and are not shown. A stop is 10 minutes within 250 m; the seat is the '
+        + 'tracker’s own reading (CABMAN’s seat flag, FMS’s passenger count), never inferred from the jobs.',
+    };
+
     res.json({
       day,
       driver: { id: d.driver_ext_id, name: d.name, keys: d.keys },
@@ -2930,6 +3062,13 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
         + 'The gaps between jobs are waiting; where the tracker saw the car during one, its '
         + 'position and how much of it was stationary are shown against that gap.',
       online_known: online.length > 0,
+      /* Uber's live status, spell by spell, current to the minute. */
+      status_spans: statusPlaced,
+      status_basis: 'Uber’s live status feed, read every few minutes: online, on a trip, offline. It runs '
+        + 'ahead of the log-in record above it, which Uber serves to a collector that runs every few hours.',
+      movement,
+      today: isToday,
+      now_min: isToday ? limit : null,
     });
   }));
 

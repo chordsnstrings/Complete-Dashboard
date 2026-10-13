@@ -60,7 +60,7 @@ const STATUS_WORD = {
    out, a driver who came online at 05:00 and was still online at midnight
    reads as having started work at their first change AFTER midnight — which on
    a night shift is the moment they went offline. */
-const SPANS_SQL = `
+export const SPANS_SQL = `
   WITH bounds AS (
     SELECT ($2::date::timestamp AT TIME ZONE 'Asia/Dubai')               AS day_start,
            (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')         AS day_end

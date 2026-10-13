@@ -1,5 +1,6 @@
 // Local stand-in API so the UI can be reviewed without the production database.
 // Not shipped — used only to render and screenshot the dashboard during development.
+import { custodyWindows, carRuns, movementSegments, movementTotals } from './api/day_movement.js';
 import express from 'express';
 import { foldGrain, grainOf, previousWindow, PERIODS, dubaiDay } from './api/window.js';
 /* The HR roster's own parser and status rule — real, so the page's import
@@ -3567,6 +3568,42 @@ app.get('/api/driver/day', (req, r) => {
     dropoff_addr: 'DXB Terminal 3 - Dubai - United Arab Emirates',
     s, e, past_midnight: false, ...extra,
   });
+  /* The car's day (2026-10-13): fixes every five minutes 09:20–13:40 in A
+     12345, parked at Dubai Marina, driving with a passenger during the three
+     jobs, and one fix on ground nothing has ever named (the caption for it is
+     a sentence, not a blank). Movement is computed by the REAL arithmetic
+     (api/day_movement.js) over these fixes, so the mock cannot draw a day the
+     server would not. */
+  const iso = (m) => new Date(Date.parse(`${day}T00:00:00+04:00`) + m * 60000).toISOString();
+  const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const jobs = [[mins(9, 43), mins(9, 54)], [mins(12, 38), mins(12, 47)], [mins(13, 7), mins(13, 23)]];
+  const dayFixes = [];
+  for (let m = mins(9, 20); m <= mins(13, 40); m += 5) {
+    const onJob = jobs.some(([a, b]) => m > a && m <= b);
+    const k = jobs.findIndex(([a, b]) => m > a && m <= b);
+    const unnamed = m === mins(12, 10);
+    /* On a job the car runs a straight line out from the stand and back,
+       about 0.6 km a minute — a real drive's shape, not a zig-zag. */
+    const [js, je] = k >= 0 ? jobs[k] : [0, 1];
+    const f = k >= 0 ? (m - js) / (je - js) : 0;
+    const out = f < 0.5 ? f * 2 : (1 - f) * 2;
+    dayFixes.push({ plate: 'A 12345', source: 'fms', at: iso(m), time: hm(m), m,
+      lat: onJob ? 25.247 - 0.03 * out : unnamed ? 25.251 : 25.247,
+      lng: onJob ? 55.347 - 0.04 * out : unnamed ? 55.352 : 55.347,
+      speed: onJob ? 42 : unnamed ? 14 : 0, passenger: onJob,
+      area: unnamed ? null : onJob ? 'Jumeirah Lakes Towers' : 'Dubai Marina',
+      area_votes: unnamed ? null : onJob ? 120 : 312, area_seen: unnamed ? null : onJob ? 160 : 340 });
+  }
+  const windows = custodyWindows({ own: jobs.map(([s, e]) => ({ plate: 'A 12345', s, e, kind: 'booking' })),
+    online: [{ s: mins(9, 20), e: mins(19, 35) }] }).map((w) => ({ ...w, to: Math.min(w.to, mins(13, 40)) }));
+  const runs = carRuns(dayFixes);
+  const statusSp = [
+    { status: 'online', s: mins(9, 20), e: mins(9, 43), went_online: { where: 'Dubai Marina', within_min: 0, lat: 25.247, lng: 55.347, votes: 312, of: 340, why: null } },
+    { status: 'ontrip', s: mins(9, 43), e: mins(9, 54) }, { status: 'online', s: mins(9, 54), e: mins(12, 38) },
+    { status: 'ontrip', s: mins(12, 38), e: mins(12, 47) }, { status: 'online', s: mins(12, 47), e: mins(13, 7) },
+    { status: 'ontrip', s: mins(13, 7), e: mins(13, 23) }, { status: 'online', s: mins(13, 23), e: mins(19, 35) },
+    { status: 'offline', s: mins(19, 35), e: 1440 },
+  ];
   r.json({
     day,
     driver: { id: req.query.id || 'u-khalid', name: 'Khalid A', keys: [req.query.id || 'u-khalid'] },
@@ -3625,16 +3662,7 @@ app.get('/api/driver/day', (req, r) => {
         + 'reached 22:17, so the remaining 1h 43m of the day has not been fetched yet. A band that '
         + 'stops there is the record stopping, not necessarily the driver.',
     },
-    fixes: [
-      { plate: 'A 12345', m: mins(10, 10), lat: 25.247, lng: 55.347, speed: 0,
-        area: 'Dubai Marina', area_votes: 312, area_seen: 340 },
-      { plate: 'A 12345', m: mins(11, 10), lat: 25.247, lng: 55.347, speed: 0,
-        area: 'Dubai Marina', area_votes: 312, area_seen: 340 },
-      /* One fix on ground nothing has ever named — the caption for it is a
-         sentence, not a blank. */
-      { plate: 'A 12345', m: mins(12, 10), lat: 25.251, lng: 55.352, speed: 14,
-        area: null, area_votes: null, area_seen: null },
-    ],
+    fixes: dayFixes,
     basis: 'A job runs from the request to the dropoff, so it contains the drive to the rider.',
     online_known: true,
     goes_online_in: [{ area: 'Dubai Marina', spans: 1 }],
@@ -3643,6 +3671,18 @@ app.get('/api/driver/day', (req, r) => {
       + 'someone went online is read from the tracker in the same car, at the fix nearest in time. '
       + 'The area name comes from the fleet\'s own history: every FMS trip arrives with both a '
       + 'position and an address, and those pairs name the ground within about half a kilometre.',
+    status_spans: statusSp,
+    status_basis: 'Uber\u2019s live status feed, read every few minutes: online, on a trip, offline.',
+    movement: {
+      windows: windows.map((w) => ({ plate: w.plate, from: w.from, to: w.to, core_from: w.core_from, core_to: w.core_to,
+        stretched: w.stretched, basis: w.basis, overlap: false, shared: [] })),
+      runs, segments: movementSegments(dayFixes, windows), totals: movementTotals(dayFixes, windows, runs),
+      /* The car before he was in it — counted apart, never shown as his. */
+      outside_fixes: 6, absent: null,
+      basis: 'A car is this driver\u2019s from his first to his last evidence in it, stretched to the edges of the online spell.',
+    },
+    today: false,
+    now_min: null,
   });
 });
 

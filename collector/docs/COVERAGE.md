@@ -3272,10 +3272,21 @@ driver's 222 tracker fixes.
   feed that would have told you otherwise** — and carry out which bound it was,
   because "still running" and "we stopped asking" are opposite claims that look
   identical on a chart.
-* `/api/driver/day` derives its position feed from **that day's trips**
-  (`api/driver_routes.js`), so a driver with zero trips gets `fixes: 0` — which
-  is exactly the cohort any "online but idle" question is about. Take the plate
-  from `driver_standing` instead.
+* `/api/driver/day` derived its position feed from **that day's trips**
+  (`api/driver_routes.js`), so a driver with zero trips got `fixes: 0` — which
+  is exactly the cohort any "online but idle" question is about. **Fixed
+  2026-10-13**: the car is now also found from **Uber's own status rows** in
+  `telemetry_snapshot` (source `uber`): src/sources/uber.js writes one row per
+  status change with the plate AND the whole driver overview in `raw`, so
+  `raw->'driverInfo'->>'driverUuid'` names who was working in that car at that
+  instant. Two things about those rows that cost time: `polled_at` is NOT
+  advanced on conflict (upsertMany updates only the columns a row carries, and
+  the Uber rows carry no polled_at), so a row is evidence at `captured_at`
+  only, never an interval; and only ONLINE/ONTRIP rows are evidence of working
+  in the car — OFFLINE only says the app had the vehicle against the account,
+  which both drivers of a shared car can have overnight. Positions are kept to
+  the hours the car was his (api/day_movement.js custodyWindows), never a
+  shared car's other shift.
 * Online spans are **clipped to the Dubai day**, so a shift that began 23:43 the
   night before reads as `00:00`. Never print that as a start time; read the
   un-clipped ONLINE transition.
@@ -9487,6 +9498,58 @@ one-minute join removed makes a blip a break and the chat says "2 breaks";
 verification rows kept show the production ritual's row as a debt; the hours
 format removed prints 11.25; /api/live without the gazetteer names nothing;
 and each of the review's thirteen fixes, reverted alone, fails its check.
+
+## One driver's day as the car saw it — #driver/…/day, 2026-10-13
+
+The operator, about Kashif Ali Ayyub Khan's day page: "kashif was online for 4
+hours today since the morning, it didn't show. We need to see when he was
+online, from where, and where he moved on a granular level … his whole day's
+movement as reported by cabman or fms and potentially with a passenger or not.
+and you've not used the colors that is set for uber yango bolt hotel for the
+bars."
+
+**Measured on production that morning (11:4x Dubai).** `/api/driver/day` for
+13 Oct: 0 trips (Uber files a trip about half an hour after it; the trip feed
+runs half-hourly), 3 log-in spans ending 10:17 (the timeline collector runs
+every three hours), 0 fixes — the car was found only through bookings. Uber's
+live status feed had him online from 07:04 and on a trip at 11:38 in L27045,
+whose FMS tracker held 74 fixes that day (26.7 km, four stops, a passenger
+reading on every fix). The page printed "No booking on 13 Oct for this driver"
+and nothing else. 12 Oct (one trip at 01:22) drew a black job bar and a grey
+online bar — no channel colour anywhere.
+
+**What the route answers now** (api/driver_routes.js, arithmetic in
+api/day_movement.js, test/driver_day_movement.test.mjs):
+- `status_spans` — Uber's live feed for the day on /api/status/driver's own
+  query (api/status_routes.js SPANS_SQL), heartbeat ONLINEs merged into one
+  spell, each working spell placed where it began (the tracker's fix nearest
+  in time, 30 minutes at most). A day with no event before midnight opens
+  UNKNOWN, never "offline".
+- `movement.windows` — which car was his, and when: his own evidence in each
+  car (bookings; Uber's status rows naming him, ONLINE/ONTRIP only),
+  stretched to the edges of the online spell it sits in, never across another
+  driver's evidence in the same car; another driver's evidence INSIDE his is
+  returned as `shared`, said, never given to either; two cars at once is
+  `overlap`. Today a window stops at now.
+- `fixes` — only inside those windows, each with its `source` and `passenger`
+  (the operator's seat rule: CABMAN's flag, FMS's count at 1 or more; null is
+  no reading, never an empty seat). `movement.outside_fixes` counts the rest,
+  which the page says are not his.
+- `movement.runs` (passenger aboard / moving / stopped, nothing across a
+  silence over 20 minutes), `movement.segments` (stops by /api/where's rule —
+  10 minutes within 250 m — drives with from, to, via, km and the minutes a
+  passenger was in, silences with how far the car moved while unseen),
+  `movement.totals` (km split by seat, summing to the total on /api/where's
+  step rule).
+
+**The page** (api/public/driverday.js): yesterday · today · tomorrow; a day with
+no booking draws everything else and says why the booking is missing; one clock
+for every row — jobs in their platform's colour, Uber's log-in record and live
+status in Uber's ramp, the car in its tracker's ramp; the custody sentence, the
+distances, a map of the track split at silences, and a log with Uber's status
+changes in their place. The driver page's live strip links to today. The
+absence band's "Distance with a rider in" is now MEASURED where the tracker
+reads the seat.
 
 ## The target shared by weekday — built 2026-10-11
 

@@ -2538,21 +2538,63 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .dday-ruler>span:first-child{transform:none}
 .dday-ruler>span:last-child{transform:translateX(-100%)}
 .dday-onrow{display:flex;align-items:center;gap:12px;margin-top:10px}
+/* The rows share one clock: the same label and total widths on every row. */
+.dday-rows{display:flex;flex-direction:column}
+.dday-rows>.dday-onrow{margin-top:8px}
+.dday-rows>.dday-onrow>.dday-band,.dday-rows>.dday-onrow>.dday-ruler{flex:1 1 auto}
+.dday-rows .dday-ontot{flex:0 0 5.5rem;text-align:right}
+.dday-rows .dday-onlab{flex:0 0 11rem;min-width:0}
 .dday-onlab{font-size:var(--t4);color:var(--grey);flex:0 0 auto;min-width:9rem}
 .dday-ontot{font-family:"IBM Plex Mono",monospace;font-size:var(--t4);color:var(--grey);flex:0 0 auto}
 .dday-online{position:relative;flex:1 1 auto;height:8px;background:var(--surface-2);border-radius:4px}
-.dday-online>i{position:absolute;top:0;height:8px;border-radius:4px;background:var(--s1);opacity:.55}
+/* Uber's own rows in Uber's colour (2026-10-13, the operator: "you've not
+   used the colors that is set for uber yango bolt hotel for the bars"). The
+   ramp step is the Arkiv token; the old skin has only the identity colour,
+   which --c-uber aliases, so it falls back to that. */
+.dday-online>i{position:absolute;top:0;height:8px;border-radius:4px;background:var(--c-uber-available,var(--c-uber));opacity:.8}
+.dday-status>i.st-on{background:var(--c-uber-available,var(--c-uber));opacity:.8}
+.dday-status>i.st-trip{background:var(--c-uber-engaged,var(--c-uber));opacity:1}
+.dday-status>i.open{-webkit-mask-image:linear-gradient(90deg,#000 70%,transparent);mask-image:linear-gradient(90deg,#000 70%,transparent)}
+/* The car: each run painted inline with its tracker's ramp step; a moving
+   stretch with no seat reading is striped so it never reads as "empty". */
+.dday-car{height:12px}
+.dday-car>i{height:12px;border-radius:2px;opacity:1}
+.dday-car>i.noseat{background-image:repeating-linear-gradient(90deg,transparent 0 3px,var(--surface) 3px 5px)}
+.sw.nopos{background:var(--surface-2);border:1px solid var(--rule)}
 /* An OPEN-ENDED online span: the last ONLINE Uber sent, with no closing event
    yet. It is drawn to the earliest of now, the end of the day and the last
    moment we actually asked Uber — so its right-hand edge is where the RECORD
    stops, not where the driver did. The fade says that; a hard edge would make
    the two look like the same claim. The hover names which bound it was. */
-.dday-online>i.open{background:linear-gradient(90deg,var(--s1) 0%,var(--s1) 65%,transparent 100%)}
+.dday-online>i.open{background:linear-gradient(90deg,var(--c-uber-available,var(--c-uber)) 0%,var(--c-uber-available,var(--c-uber)) 65%,transparent 100%)}
 /* Where the shift started, under the bar that says when it did. Indented to
    the same column as the bar itself so it reads as a caption on that row and
    not as a new fact about the day. */
-.dday-onwhere{margin-top:8px;padding-left:calc(9rem + 12px);font-size:var(--t4);color:var(--grey-strong)}
-.dday-onbasis{margin-top:4px;padding-left:calc(9rem + 12px);font-size:var(--t5);max-width:62ch;line-height:1.5}
+.dday-onwhere{margin-top:8px;padding-left:calc(11rem + 12px);font-size:var(--t4);color:var(--grey-strong)}
+/* Around the day: yesterday, today, tomorrow. */
+.lstat-day{margin-left:auto;font-size:var(--t4);color:var(--accent);text-decoration:none;white-space:nowrap}
+.lstat-day:hover{text-decoration:underline}
+.dday-nav{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:baseline;margin:0 0 14px;font-size:var(--t5)}
+.dday-nav a{color:var(--accent);text-decoration:none}
+.dday-nav a:hover{text-decoration:underline}
+.dday-nav .dday-today.on{color:var(--ink);font-weight:600}
+/* Where the car went. */
+.dday-held{display:flex;flex-direction:column;gap:6px;font-size:var(--t5);color:var(--grey-strong);margin-bottom:10px}
+.dday-held b{font-family:"IBM Plex Mono",monospace;color:var(--ink)}
+.dday-warn{color:var(--warn,var(--critical));margin-top:2px}
+.dday-msum{display:flex;flex-wrap:wrap;gap:6px 22px;font-size:var(--t5);color:var(--grey-strong);margin:6px 0 10px}
+.dday-msum b{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--ink);font-weight:600}
+.dday-map{height:340px;border:1px solid var(--rule);border-radius:6px;margin:4px 0 14px;background:var(--surface-2)}
+.dday-mlog{display:flex;flex-direction:column}
+.dday-mrow{display:grid;grid-template-columns:7.5rem 1fr;gap:12px;padding:7px 0 7px 12px;border-left:4px solid var(--mk,var(--rule));
+  border-bottom:1px solid var(--rule);font-size:var(--t5);color:var(--grey-strong);line-height:1.45}
+.dday-mrow b{color:var(--ink);font-weight:600}
+.dday-mrow.st{padding-top:4px;padding-bottom:4px;border-left-width:2px;background:var(--surface-2)}
+.dday-mrow.gap{border-left-style:dashed}
+.dday-mt{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--ink)}
+.dday-seat{margin-left:4px;font-size:var(--t4);padding:1px 6px;border-radius:3px;background:var(--surface-2);white-space:nowrap}
+
+.dday-onbasis{margin-top:4px;padding-left:calc(11rem + 12px);font-size:var(--t5);max-width:62ch;line-height:1.5}
 .sw.waitsw{background:var(--surface-3)} .sw.onsw{background:var(--s1);opacity:.55}
 .sw.cx{background:var(--critical)} .sw.j{background:var(--s1)}
 
@@ -2595,7 +2637,14 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
   .dday-job{grid-template-columns:52px 1fr;gap:10px}
   .dday-open{grid-column:2;justify-self:start;margin-top:6px}
   .dday-onlab{min-width:6rem}
+  /* On a phone the track takes the whole width under its label and total,
+     so the ruler's five times have room and every row keeps one clock. */
+  .dday-rows>.dday-onrow{display:grid;grid-template-columns:1fr auto;gap:3px 8px;align-items:baseline}
+  .dday-rows>.dday-onrow>:nth-child(2){grid-column:1 / -1;grid-row:2}
+  .dday-rows .dday-onlab,.dday-rows .dday-ontot{flex:none}
   .dday-onwhere,.dday-onbasis{padding-left:0}
+  .dday-mrow{grid-template-columns:5.5rem 1fr;gap:8px}
+  .dday-map{height:260px}
 }
 /* A shift row is an address. */
 a.shift.clickable{text-decoration:none;color:inherit;border-radius:6px;transition:background .16s var(--ease)}

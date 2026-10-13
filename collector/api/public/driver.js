@@ -640,7 +640,18 @@ const isPlaceholderLicence = (c) => !!(c.licence_placeholder
    WHEN the provider says it changed, because "online" without "since 06:14" is
    not actionable; and when the FEED last answered, because a status read off a
    dead feed looks exactly like a live one and is a claim about the past. */
-function statusStrip(st) {
+/* A link from the live strip to TODAY's day page (2026-10-13): a driver
+   online all morning had no way in, because the Activity tab draws only the
+   days the stored record holds and today's online hours with no booking yet
+   were on none of them. Dubai's calendar. */
+function todayLink(box, id, st) {
+  if (!id || !(st?.today?.online_minutes || st?.status === 'online' || st?.status === 'ontrip')) return;
+  const today = dubaiDay();
+  const a = el('a', 'lstat-day', 'today, minute by minute →');
+  a.href = `${href('driver', id, 'day')}?on=${encodeURIComponent(today)}`;
+  box.append(a);
+}
+function statusStrip(st, id = null) {
   const box = el('div', 'lstat');
   /* `!st.status` as well as `st.absent`, and not only because the endpoint now
      always sets one alongside the other. The last rung of the word ladder
@@ -661,6 +672,7 @@ function statusStrip(st) {
       box.append(el('span', 'lstat-sum',
         `${h}h ${String(m).padStart(2, '0')}m online earlier today`));
     }
+    todayLink(box, id, st);
     return box;
   }
   const tone = st.stale ? 'stale' : st.status === 'ontrip' ? 'ontrip'
@@ -693,6 +705,7 @@ function statusStrip(st) {
   /* The staleness sentence is never optional when it applies: this is the one
      line that stops a reader acting on a status the feed stopped confirming. */
   if (st.stale && st.stale_why) box.append(el('span', 'lstat-why', st.stale_why));
+  todayLink(box, id, st);
   return box;
 }
 
@@ -3928,7 +3941,7 @@ export async function renderDriver(root, addr, tab = 'overview') {
      the profile, which IS cached and should stay that way. */
   const live = el('div'); head.append(live);
   qAll('/api/status/driver', { id })
-    .then((st) => { if (alive(gen)) { live.innerHTML = ''; live.append(statusStrip(st)); } })
+    .then((st) => { if (alive(gen)) { live.innerHTML = ''; live.append(statusStrip(st, id)); } })
     /* ABSENT WITH A REASON, not a blank. A strip that silently fails to load
        is indistinguishable from a driver with no live status, and those are
        different facts — one is about the driver and one is about us. */

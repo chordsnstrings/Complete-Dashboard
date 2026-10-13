@@ -1821,6 +1821,19 @@ value AED 695.45. The old skin scrolls 15px sideways at 390 on this page
 (unchanged by this work — the frozen skin). The month comparison arrives
 after the first paint, so a screenshot needs a longer settle (WAITMS=5000).
 
+### #driver/day — 2026-10-13, the car's day
+
+Against the mock first (production had no new fields yet), both skins at 1440
+and the phone at 390 (scratchpad `dday/shots/`): no page error. Found by
+looking and fixed before commit: the map drew no track and the Leaflet
+attribution flag filled the corner — the movement panel lacked `mapwrap`, so
+the charts' `.panel:not(.mapwrap) svg{width:100%}` collapsed Leaflet's overlay
+(app.css says so; this page had not read it); the rows did not share a clock —
+the jobs band ran the full width and the other rows began after a label column,
+so 12:00 sat in two places; on the phone the ruler's five times collided until
+each row's track went full-width under its label; the open-ended tail of the
+log-in row was still the old neutral. Production pass below once deployed.
+
 ### #driver/territory — 2026-09-24
 
 Production (This month), both skins at 1440 and 390, light and dark
