@@ -249,20 +249,30 @@ console.log('\nthe driver day: where somebody went online, in words');
   await seed(25.2000, 55.2800, 'Business Bay');
   await refreshPlaceCells(db, { force: true });
 
-  /* The person's own day: one Uber trip so the plate is discoverable, and the
-     tracker reporting that plate through the morning. */
-  await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+  /* The person's own day: a booking of his in each working spell, so the car
+     is HIS in both — and the tracker reporting that plate inside them.
+     Until 2026-10-13 this held one 09:00 booking and expected the car's
+     12:00 and 12:30 positions, and the 08:00 one before he went online, to be
+     his. That was the defect the operator found on Kashif's day page: a car's
+     positions are his only in the hours something puts him in it
+     (api/day_movement.js custodyWindows), and an afternoon with no booking and
+     no Uber status row of his in the car is a shared car's other shift as
+     often as it is his. So the afternoon carries the booking that would put
+     him there, and the fixes sit inside his hours. */
+  const trip = (id, from, to) => q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
              requested_at, ended_at, status, distance_km, price, pickup_addr, dropoff_addr)
-           VALUES ('uber', 't-online', 'ecosine', 'L900', $1, 'Online Person',
-             '${DAY}T09:00:00+04:00', '${DAY}T09:30:00+04:00', 'completed', 10, 40,
-             'A - B - Al Barsha - Dubai - UAE', 'C - D - Business Bay - Dubai - UAE')`, [DRV]);
+           VALUES ('uber', $2, 'ecosine', 'L900', $1, 'Online Person',
+             '${DAY}T${from}:00+04:00', '${DAY}T${to}:00+04:00', 'completed', 10, 40,
+             'A - B - Al Barsha - Dubai - UAE', 'C - D - Business Bay - Dubai - UAE')`, [DRV, id]);
+  await trip('t-online', '09:00', '09:30');
+  await trip('t-online-pm', '12:40', '13:00');
   const fix = (hh, mm, lat, lng) => q(
     `INSERT INTO telemetry_snapshot (source, plate, captured_at, lat, lng, speed)
      VALUES ('fms', 'L900', $1, $2, $3, 0)`,
     [`${DAY}T${hh}:${mm}:00+04:00`, lat, lng]);
-  await fix('08', '00', 25.1000, 55.1800);      // Al Barsha, before the first span
+  await fix('08', '10', 25.1000, 55.1800);      // Al Barsha, just after he went online
   await fix('08', '30', 25.1000, 55.1800);
-  await fix('12', '00', 25.2000, 55.2800);      // Business Bay, before the second
+  await fix('12', '15', 25.2000, 55.2800);      // Business Bay, just after the second
   await fix('12', '30', 25.2000, 55.2800);
 
   /* Uber's own timeline: two ONLINE spans, and lat/lon NULL exactly as
@@ -273,9 +283,14 @@ console.log('\nthe driver day: where somebody went online, in words');
     [DRV, `${DAY}T${hh}:${mm}:00+04:00`, status]);
   await ev('08', '05', 'ONLINE'); await ev('10', '00', 'OFFLINE');
   await ev('12', '10', 'ONLINE'); await ev('14', '00', 'OFFLINE');
-  /* A third span in the middle of the night, hours from any fix — the one that
-     must come back unplaced rather than borrowing a distant position. */
+  /* A third span in the middle of the night, hours from any fix and from any
+     hour the car was his — the one that must come back unplaced rather than
+     borrowing a distant position. */
   await ev('03', '00', 'ONLINE'); await ev('04', '00', 'OFFLINE');
+  /* A fourth, twenty minutes after his morning in the car, when the tracker's
+     last named position is 110 minutes old: near his hours, too far from any
+     position. */
+  await ev('10', '20', 'ONLINE'); await ev('10', '40', 'OFFLINE');
 
   const app = express();
   const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: String(e) }));
@@ -303,7 +318,12 @@ console.log('\nthe driver day: where somebody went online, in words');
   const night = (day.online || []).find((o) => o.s < 300);
   check('a span hours from any fix is NOT placed', !!night && !night.went_online?.where,
     'borrowing a five-hour-old position would be a fabricated answer');
-  check('…and says why, in words', /too far to call it the same place/.test(night?.went_online?.why || ''));
+  check('…and says why, in words — no car is on record as his then', /no car is on record as his at that moment/.test(night?.went_online?.why || ''),
+    String(night?.went_online?.why));
+  const late = (day.online || []).find((o) => o.s === 620);
+  check('a span near his hours in the car but far from any position is NOT placed, and says how far',
+    !!late && !late.went_online?.where && /110 minutes away, too far to call it the same place/.test(late.went_online?.why || ''),
+    JSON.stringify(late?.went_online));
   check('the unplaceable spans are counted, never quietly dropped',
     (day.online_spans_unplaced || 0) >= 1);
 

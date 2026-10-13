@@ -76,7 +76,14 @@ console.log('\n§1 the links');
   check('every day link carries ONE query string with `on` in it (href already carries ?period=)',
     links.length >= 2 && links.every((h) => (h.match(/\?/g) || []).length === 1 && /[?&]on=\d{4}-\d{2}-\d{2}/.test(h)), JSON.stringify(links));
   await page.click('.dday-nav a >> nth=0');
-  await page.waitForTimeout(1500);
+  /* Wait for the page to settle on an answer, not for a fixed time: a 1.5 s
+     sleep failed this check inside the full suite, where the machine is busy
+     and the new day had not drawn yet. Either outcome ends the wait — the day
+     drawn, or the "addressed as" note the defect produced. */
+  await page.waitForFunction(() => {
+    const t = document.querySelector('#view')?.innerText || '';
+    return /addressed as/.test(t) || (/19 Sept/i.test(t) && /Where the car went/i.test(t));
+  }, null, { timeout: 60000 }).catch(() => {});
   const after = await page.evaluate(() => (document.querySelector('#view')?.innerText || ''));
   check('…and following one opens that day, not the "addressed as" note', !/addressed as/.test(after) && /19 Sept/i.test(after) && /Where the car went/i.test(after), after.slice(0, 200));
   await ctx.close();
