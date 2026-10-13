@@ -1847,6 +1847,25 @@ the words around midnight, now and absence. 17 checks, every one proved by
 revert (the running-trip colour check passed with its fix removed until it
 compared the running trip with a finished one, not with the online bar).
 
+**Production pass, 2026-10-13 15:28 Dubai** (`87f5cca`, deployment ca1815a1;
+bin/prod-mirror.mjs, both skins at 1440 and the phone at 390, Kashif Ali Ayyub
+Khan, scratchpad `dday/prod_shots/`): no page error on any of six views. Today:
+Uber's live feed online from 07:04, placed at Emirates Rd; three trips
+11:36–12:16 in Uber's colour; L27045 his 07:04–now by Uber's vehicle record
+and his bookings, 42 of the car's positions outside those hours said as not
+his; 50.4 km driven — 5.1 with a passenger, 45.3 empty — 4h 49m stopped, 1h
+09m unseen, and a log from "stopped 1h 38m at Emirates Rd" through Dubai
+Silicon Oasis, Al Garhoud and Downtown Dubai to Rostamani Tower, with Uber's
+six status changes in their place. 12 Oct: "00:00 already on a trip when the
+day began", offline at 02:17, 37.2 km. The old skin draws Uber's blue and
+FMS's own grey in three steps. Found by looking, NOT fixed (a data finding,
+not the page's): L27045's FMS passenger count read the seat empty through the
+whole of 12 Oct's 01:22–01:49 Uber trip, and registered a rider for 18 of
+today's 36 minutes on trips — the page shows both, as it should; the seat
+sensor in that car is worth checking. The phone header names the person by
+the address id rather than the name — every phone person page, not this
+view's change.
+
 ### #driver/territory — 2026-09-24
 
 Production (This month), both skins at 1440 and 390, light and dark
