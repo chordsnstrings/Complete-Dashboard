@@ -3287,6 +3287,32 @@ driver's 222 tracker fixes.
   which both drivers of a shared car can have overnight. Positions are kept to
   the hours the car was his (api/day_movement.js custodyWindows), never a
   shared car's other shift.
+* **An Uber status row from before midnight is evidence only while it is the
+  car's latest.** The day route reads the previous evening's rows so a shift
+  that began at 23:40 still finds its car. But a row from 21:00 naming A,
+  followed by one at 23:00 naming B, does not put A in the car at 00:00 —
+  keep only the last row per plate before the day began (`inForce` in
+  api/driver_routes.js). Found by review 2026-10-13: without it, a driver who
+  handed the car over at 22:00 was given the next driver's night.
+* **`href(view, param, sub, extra)` already carries `?period=`.** A sub of
+  `day?on=2026-10-12` built `#driver/X/day?period=month?on=2026-10-12`; the
+  router reads the period as `month?on=2026-10-12`, the day as missing, and
+  the page lands on the "addressed as" note. Every day link the 2026-10-13
+  rework added did this. Put query keys in `extra`, which merges them into
+  the one query string.
+* **The channel ramp tokens (`--c-<ch>-engaged|available|idle`) exist only
+  under Arkiv.** A fallback of `var(--c-<ch>)` paints all three steps one
+  colour in the old skin, so a passenger aboard, moving and stopped read the
+  same. The fallback is `color-mix(in srgb, var(--c-<ch>) N%, transparent)` at
+  100 / 62 / 34. And an inline `background:` shorthand wipes a class's
+  `background-image`, so the "no seat reading" stripe never showed — set
+  `background-color` inline when a class draws a pattern.
+* **The access shaper nulls a field, it does not remove the object.** A role
+  holding bookings only as totals (Fleet technician) receives
+  `movement.windows[].shared: null`; page code that reads `.length` on any
+  BK/VEH/LOC path throws for that role. Read every classed field as possibly
+  null, and say the withheld class with `withheldSentence()` — never "No
+  booking" or "no car is on record" about a day the role is not shown.
 * Online spans are **clipped to the Dubai day**, so a shift that began 23:43 the
   night before reads as `00:00`. Never print that as a start time; read the
   un-clipped ONLINE transition.
@@ -9550,6 +9576,43 @@ distances, a map of the track split at silences, and a log with Uber's status
 changes in their place. The driver page's live strip links to today. The
 absence band's "Distance with a rider in" is now MEASURED where the tracker
 reads the seat.
+
+**What the independent review changed (2026-10-13, 33 findings, each proved by
+revert in test/driver_day_movement.test.mjs and test/driver_day_page.test.mjs):**
+- **Custody is built spell by spell.** Evidence is grouped by online spell and
+  car, so a driver who worked 07:00–10:00 and 15:00–18:00 in the same car is
+  not handed the afternoon gap between. Inside a spell, another driver's
+  evidence lying wholly between two of his cuts the window. Windows sort by
+  their core (his own evidence), not by the stretched edge.
+- **The spells come from the live feed first,** then log-in spans that began
+  before the live feed's first row. A log-in span closed only by the day's end
+  (`closed_by: 'day'`) counts from its start alone — it says when he logged
+  in, not that he stayed.
+- **A stale live feed closes the last span.** When `driver_status_now` is older
+  than 8 minutes (`STALE_AFTER_MIN`, api/status_routes.js), the open span stops
+  at the last observation and the route says `status_stale`; the page says
+  the feed went quiet rather than drawing him online to now.
+- **Two trackers in one car:** the source with more fixes that day is drawn;
+  the other is named in `windows[].second_tracker`, never summed (CABMAN and
+  FMS on L30002 on 7 Oct each walked the same road).
+- **Distance never crosses cars or trackers.** A step between two fixes counts
+  only when both are the same car and the same source; the total is the sum of
+  the rounded parts, so the parts add up on the page.
+- **A spell carried in from the night before** is marked `carried_in`; the page
+  writes "already online when the day began" and never logs a change at 00:00
+  or places it.
+- **No car, no place.** A status change with no window within 30 minutes says
+  why it has no place ("no car is on record as his at that moment").
+- **Today is never cached** (api/cache.js `neverToday`): a day still running
+  goes stale in minutes. A past day caches as before.
+- **What each role reads.** The page renders against the real shaper for every
+  role: Cash desk and HR are told bookings, the car and positions are not shown
+  to them; Finance is told "Where the car went: Not shown to your role" and
+  never "No tracker fix reached this day".
+- **Words around now:** "to now" only for a silence that runs to the present;
+  "to the end of his hours in it" otherwise. "so far" on the log-in record only
+  while today's record is behind the live feed. A car whose tracker sent
+  nothing has its reason, never "0.0 km".
 
 ## The target shared by weekday — built 2026-10-11
 

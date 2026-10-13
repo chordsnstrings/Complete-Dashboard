@@ -1,4 +1,5 @@
 import { internalHeaders, isInternal } from './access/internal.js';
+import { dubaiIso } from '../src/util.js';
 /* Response cache for read endpoints.
    ─────────────────────────────────────────────────────────────────────────
    Every /api GET here answers a question about data that changes only when the
@@ -137,6 +138,17 @@ const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/t
      confirming the wrong story). A few hundred rows; nothing worth caching. */
   '/api/hr-roster'];
 
+/* ONE DAY OF ONE DRIVER, WHEN THE DAY IS TODAY (2026-10-13).
+   /api/driver/day for a past day only changes when a collection lands, which
+   is what the version above follows. For TODAY it carries Uber's live status
+   and the car's position up to the minute — and a cached answer froze "online
+   since 07:04 … now" at the moment it was cached, for a driver who had since
+   gone offline (the independent review of 2026-10-13). So today's day is
+   computed on every read; every other day is cached as before. Dubai's
+   calendar, the server's clock. */
+const neverToday = (req, path) => path === '/api/driver/day'
+  && String(req.query?.day || '').slice(0, 10) === dubaiIso();
+
 export function responseCache({ pool, ttlMs = 30000, enabled = true, port, refreshConcurrency = 2,
   maxBytes = MAX_BYTES } = {}) {
   /* The port to re-request a stale key on. Set after listen, because with
@@ -234,7 +246,7 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port, refre
        that silently guards nothing is worse than no guard, because the list
        reads as if the question had been considered. */
     const path = req.originalUrl.split('?')[0];
-    if (NEVER.some((p) => path.startsWith(p))) { stats.skip++; return next(); }
+    if (NEVER.some((p) => path.startsWith(p)) || neverToday(req, path)) { stats.skip++; return next(); }
 
     // A background refresh must reach the route, not be handed the stale copy
     // it was sent to replace — which would leave the entry stale for ever.

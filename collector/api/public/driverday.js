@@ -18,6 +18,7 @@ import { hbars } from './charts.js';
 import { api, href } from './data.js';
 import { dubaiDay } from './tz.js';
 import { channelKey } from './tokens.js';
+import { withheldSentence } from './access_model.js';
 
 const hhmm = (m) => {
   if (m == null || !Number.isFinite(m)) return '—';
@@ -230,7 +231,16 @@ export async function renderDriverDay(root, id, day) {
   }
   loading(root);
   let d;
-  try { d = await api(`/api/driver/day?id=${encodeURIComponent(id)}&day=${encodeURIComponent(day)}`); }
+  /* TODAY IS READ FRESH. A day that has ended is the same answer every time
+     and the client's stale-while-revalidate store may hand it back at once;
+     today carries Uber's live status and the car's position to the minute,
+     and a held copy froze "online … now" (review, 2026-10-13). Passing
+     options skips that store (data.js api); the server skips its cache for
+     today's day too (api/cache.js). */
+  try {
+    d = await api(`/api/driver/day?id=${encodeURIComponent(id)}&day=${encodeURIComponent(day)}`,
+      day === dubaiToday() ? {} : undefined);
+  }
   catch (e) { root.innerHTML = ''; root.append(note(`Could not load this day: ${e.message}`)); return; }
   root.innerHTML = '';
 
@@ -239,6 +249,22 @@ export async function renderDriverDay(root, id, day) {
   const fixes = d.fixes || [];
   const status = d.status_spans || [];
   const mv = d.movement || {};
+  /* WITHHELD IS NOT ABSENT. The gate answers a role without a class with
+     the field nulled and the class named in `_withheld`; the review of
+     2026-10-13 found this page telling a Cash desk officer "No booking from
+     today has reached us yet" and "no car is on record as his" about a day
+     with twelve bookings and a car — fields their role is not shown. Every
+     sentence below asks this first. */
+  const W = d._withheld || {};
+  const wh = {
+    trips: d.trips === null || (W.BK != null && !(d.trips || []).length),
+    bkLevel: W.BK ?? null,
+    fixes: d.fixes === null,
+    veh: mv.totals === null || mv.runs === null,
+    /* An answer from before the movement record existed (a cached copy, or
+       a server not yet deployed) is not "no car on record". */
+    predates: d.movement === undefined,
+  };
   dayNav(root, id, day);
   /* A DAY WITH NO BOOKING IS NOT AN EMPTY DAY (2026-10-13). This returned
      "No booking on … for this driver" and drew nothing else — for a driver
@@ -246,16 +272,16 @@ export async function renderDriverDay(root, id, day) {
      Uber files a trip about half an hour after it and none had arrived. The
      page now stops only when there is nothing at all: no booking, no log-in
      record, no live status and no car. */
-  if (!trips.length && !online.length && !status.length && !(mv.windows || []).length) {
+  if (!wh.trips && !trips.length && !online.length && !status.length && !(mv.windows || []).length) {
     root.append(note(`Nothing is on record for this driver on ${dayStr(`${day}T12:00:00`)} — no booking, `
       + 'no log-in record, no live status from Uber and no car.'));
     return;
   }
   if (!trips.length) {
-    quietDay(root, { d, day, status, online, mv });
-    drawBand(root, { d, trips, online, status, mv });
-    await renderMovement(root, { d, status, trips });
-    if (contract()) { dayAreas(root, fixes); dayAbsence(root, { trips, fixes, day, mv }); }
+    quietDay(root, { d, day, status, online, mv, wh });
+    drawBand(root, { d, trips, online, status, mv, wh });
+    await renderMovement(root, { d, status, trips, wh });
+    if (contract()) { dayAreas(root, fixes, wh); dayAbsence(root, { trips, fixes, day, mv, wh }); }
     return;
   }
 
@@ -324,8 +350,8 @@ export async function renderDriverDay(root, id, day) {
 
   if (ak) dayGlance(AKB, { id, day, trips, onJob, share, medianGap, km });
   /* ── the day as one band, then where the car went ─────────────────────── */
-  drawBand(root, { d, trips, online, status, mv });
-  await renderMovement(root, { d, status, trips });
+  drawBand(root, { d, trips, online, status, mv, wh });
+  await renderMovement(root, { d, status, trips, wh });
 
   /* ── the day as a list ─────────────────────────────────────────────────── */
   const listP = panel('Every job, and the gaps between them',
@@ -468,7 +494,7 @@ export async function renderDriverDay(root, id, day) {
     list.append(item);
   }
   listP.body.append(list);
-  if (ak) { dayAreas(root, fixes); dayAbsence(root, { trips, fixes, day, mv }); }
+  if (ak) { dayAreas(root, fixes, wh); dayAbsence(root, { trips, fixes, day, mv, wh }); }
 }
 
 /* ── #driver/day under the page contract ─────────────────────────────────── */
@@ -514,10 +540,11 @@ async function dayGlance(AKB, { id, day, trips, onJob, share, medianGap, km }) {
 }
 /* Where the tracker saw the car: fixes by area, ranked. A fix with no area
    is counted apart, never drawn as a place. */
-function dayAreas(root, fixes) {
+function dayAreas(root, fixes, wh = {}) {
   const p = panel('Where the tracker saw the car', 'Tracker fixes of the day, by the area each one falls in.', 'dday-areas');
   root.append(p.panel);
-  if (!fixes.length) { empty(p.body, 'No tracker fix reached this day for the cars this driver held.'); return; }
+  if (wh.fixes) { empty(p.body, withheldSentence('LOC')); return; }
+  if (!fixes.length) { empty(p.body, 'No tracker fix reached this day while a car was his.'); return; }
   const by = new Map();
   let none = 0;
   fixes.forEach((f) => { if (f.area) by.set(f.area, (by.get(f.area) || 0) + 1); else none += 1; });
@@ -527,20 +554,23 @@ function dayAreas(root, fixes) {
     + (none ? `; ${fmt(none)} carry no area and are not drawn as a place` : '')
     + (by.size > 12 ? `; the 12 busiest of ${fmt(by.size)} areas shown` : '') + '.'));
 }
-function dayAbsence(root, { trips, fixes, day, mv = {} }) {
+function dayAbsence(root, { trips, fixes, day, mv = {}, wh = {} }) {
   const noSpeed = fixes.filter((f) => f.speed == null).length;
   const t = mv.totals || {};
   const absHost = el('div'); root.append(absHost);
   absenceBand(absHost, [
-    { label: 'A speed on a fix', hl: noSpeed > 0, fig: fixes.length ? `${fmt(noSpeed)} of ${fmt(fixes.length)}` : null, none: 'No fix',
-      why: fixes.length ? 'The tracker reports a speed only while the car moves, so a stationary fix carries none.'
-        : 'No tracker fix reached this day.' },
+    { label: 'A speed on a fix', hl: noSpeed > 0, fig: fixes.length ? `${fmt(noSpeed)} of ${fmt(fixes.length)}` : null,
+      none: wh.fixes ? 'Withheld' : 'No fix',
+      why: wh.fixes ? withheldSentence('LOC')
+        : fixes.length ? 'The tracker reports a speed only while the car moves, so a stationary fix carries none.'
+          : 'No tracker fix reached this day while a car was his.' },
     /* MEASURED NOW WHERE THE TRACKER READS THE SEAT (2026-10-13). This read
        "Not measured" because no BOOKING channel splits a job's distance; the
        car's own tracker does — FMS sends a passenger count, CABMAN a seat
        flag — so over the hours the car was his the distance with someone in
        it is the tracker's reading, not an inference from the jobs. */
-    t.seat_reported
+    wh.veh ? { label: 'Distance with a passenger in', fig: null, none: 'Withheld', why: withheldSentence('VEH') }
+    : t.seat_reported
       ? { label: 'Distance with a passenger in', fig: `${fmt(t.km_with_passenger, 1)} km`,
         why: `Of ${fmt(t.km, 1)} km the tracker saw while the car was his, by its own seat reading`
           + `${t.km_seat_not_reported ? ` (${fmt(t.km_seat_not_reported, 1)} km with no reading)` : ''}. A job’s distance still holds the drive to the rider.` }
@@ -567,7 +597,10 @@ const shiftDay = (day, n) => {
 };
 function dayNav(root, id, day) {
   const today = dubaiToday();
-  const to = (k) => `${href('driver', id, 'day')}?on=${encodeURIComponent(k)}`;
+  /* Through href's own query, never "+?on=": href already carries the
+     shell's period (`?period=month`), and a second "?" made every one of
+     these links land on the "addressed as" note (review, 2026-10-13). */
+  const to = (k) => href('driver', id, 'day', { on: k });
   const nav = el('nav', 'dday-nav');
   const prev = shiftDay(day, -1); const next = shiftDay(day, 1);
   nav.innerHTML = `<a href="${esc(to(prev))}">← ${esc(dayStr(`${prev}T12:00:00`))}</a>`
@@ -581,37 +614,55 @@ const minsOf = (spans) => spanMin(merge(spans.map((o) => ({ s: +o.s, e: +o.e }))
 const STATUS_WORD = { online: 'online', ontrip: 'on a trip', offline: 'offline' };
 
 /* ── a day with no booking on record: the verdict from what IS known ────── */
-function quietDay(root, { d, day, status, online, mv }) {
+function quietDay(root, { d, day, status, online, mv, wh = {} }) {
   const live = status.filter((x) => x.status !== 'offline');
   const liveMin = minsOf(live);
   const logMin = minsOf(online);
   const onTrip = minsOf(status.filter((x) => x.status === 'ontrip'));
-  const first = [...live.map((x) => x.s), ...online.map((o) => o.s)].sort((a, b) => a - b)[0];
+  /* The day's first REAL start: a spell carried in from before midnight is
+     not a start at 00:00 (review, 2026-10-13). */
+  const carried = live.find((x) => x.carried_in);
+  const starts = [...live.filter((x) => !x.carried_in).map((x) => x.s), ...online.filter((o) => o.s > 0).map((o) => o.s)].sort((a, b) => a - b);
   const lastSt = status[status.length - 1];
   const t = mv.totals || {};
+  const windows = mv.windows || [];
+  /* A distance needs positions: a car on record whose tracker sent nothing
+     has no distance, not a distance of nought (review, 2026-10-13). */
+  const measured = !mv.absent && (t.fixes || 0) >= 2;
   const ak = contract();
   const AKB = ak ? glanceBand(root, dayStr(`${day}T12:00:00`)) : null;
   const onlineMin = liveMin || logMin;
-  const claim = d.today
-    ? 'No booking from today has reached us yet'
-    : 'No booking on this day';
+  const claim = wh.trips
+    ? 'Bookings are not shown to your role'
+    : d.today ? 'No booking from today has reached us yet' : 'No booking on this day';
   verdict(ak ? AKB.vHost : root, {
     claim: onlineMin ? `${claim} — ${dur(onlineMin)} online` : claim,
     figure: onlineMin ? dur(onlineMin) : '—',
     unit: liveMin ? 'online per Uber’s live feed' : logMin ? 'online per Uber’s log-in record' : 'no online record',
-    meta: t.km != null && (mv.windows || []).length ? `${fmt(t.km, 1)} km in the car` : '',
+    meta: measured && windows.length ? `${fmt(t.km, 1)} km in the car` : '',
     sub: [
-      first != null ? `First online ${hhmm(first)}` : null,
+      carried ? 'Already online when the day began' : null,
+      starts.length ? `${carried ? 'Next online' : 'First online'} ${hhmm(starts[0])}` : null,
       onTrip ? `${dur(onTrip)} on a trip by Uber’s live feed` : null,
       d.today && lastSt && lastSt.open_ended ? `${STATUS_WORD[lastSt.status] || lastSt.status} since ${hhmm(lastSt.s)}` : null,
+      d.status_stale || null,
       /* WHY there is no booking, said rather than left as a puzzle beside a
-         driver who was plainly working. */
-      d.today ? 'Uber files a trip about half an hour after it and the trip feed runs every half hour, so today’s trips arrive behind the live status' : null,
+         driver who was plainly working — and only when that is the reason. */
+      wh.trips ? withheldSentence('BK', { level: wh.bkLevel === 'A' ? 'A' : '' })
+        : d.today ? 'Uber files a trip about half an hour after it and the trip feed runs every half hour, so today’s trips arrive behind the live status' : null,
+      /* Two records, said as two: the log-in record is collected every few
+         hours and can hold less (today, not yet fetched) or more (a heartbeat
+         the live feed did not repeat) than the live feed. */
       liveMin && logMin && liveMin !== logMin
-        ? `Uber’s log-in record, collected every few hours, holds ${dur(logMin)} of it so far` : null,
+        ? (d.today && logMin < liveMin
+          ? `Uber’s log-in record, collected every few hours, holds ${dur(logMin)} of it so far`
+          : `Uber’s log-in record holds ${dur(logMin)} for the day`) : null,
     ].filter(Boolean).join('. ') + '.',
   });
   if (ak) {
+    const carNa = wh.veh ? withheldSentence('VEH')
+      : wh.predates ? 'this answer predates the car’s movement record — reload'
+        : mv.absent || 'no car is on record as his';
     glance(AKB.tilesHost, bandTiles([
       { label: 'Online', value: onlineMin ? dur(onlineMin) : null, hero: true,
         na: onlineMin ? null : 'Uber has no online record for this day',
@@ -619,12 +670,12 @@ function quietDay(root, { d, day, status, online, mv }) {
       { label: 'On a trip', value: onTrip ? dur(onTrip) : null,
         na: onTrip ? null : (status.length ? 'no trip on Uber’s live feed' : 'Uber’s live feed has nothing for this day'),
         sub: 'Uber’s live feed — ahead of the bookings' },
-      (mv.windows || []).length && t.km != null
-        ? { label: 'The car moved', value: `${fmt(t.km, 1)} km`, sub: `${(mv.windows || []).map((w) => w.plate).join(', ')} · tracker` }
-        : { label: 'The car moved', na: mv.absent || 'no car is on record as his' },
-      t.seat_reported
+      windows.length && measured && !wh.veh
+        ? { label: 'The car moved', value: `${fmt(t.km, 1)} km`, sub: `${windows.map((w) => w.plate).filter(Boolean).join(', ')} · tracker` }
+        : { label: 'The car moved', na: carNa },
+      !wh.veh && measured && t.seat_reported
         ? { label: 'With a passenger', value: `${fmt(t.km_with_passenger, 1)} km`, sub: `${dur(t.with_passenger_min)} by the tracker’s seat reading` }
-        : { label: 'With a passenger', na: (mv.windows || []).length ? 'this car’s tracker sends no seat reading' : 'no car is on record as his' },
+        : { label: 'With a passenger', na: wh.veh || !measured ? carNa : 'this car’s tracker sends no seat reading' },
     ]).tiles);
   }
 }
@@ -634,7 +685,13 @@ function quietDay(root, { d, day, status, online, mv }) {
 const chColor = (source, state = null) => {
   const k = channelKey(String(source || ''));
   if (!k) return 'var(--grey)';
-  return state ? `var(--c-${k}-${state}, var(--c-${k}))` : `var(--c-${k})`;
+  /* The old skin defines only the identity colour; the three states were one
+     colour there, and the legend three identical swatches (review,
+     2026-10-13). Its fallback is the identity at falling strength over the
+     page — distinct steps on a light or a dark ground. */
+  const mix = { engaged: 100, available: 62, idle: 34 }[state];
+  if (!state || mix == null) return `var(--c-${k})`;
+  return `var(--c-${k}-${state}, color-mix(in srgb, var(--c-${k}) ${mix}%, transparent))`;
 };
 
 /* ── the day as one band ─────────────────────────────────────────────────
@@ -644,7 +701,7 @@ const chColor = (source, state = null) => {
    Coloured by the channel ramps (api/public/tokens.js RAMP: engaged,
    available, idle), the operator's palette, so Uber's rows read as Uber and
    the car's as its tracker's. */
-function drawBand(root, { d, trips, online, status, mv }) {
+function drawBand(root, { d, trips, online, status, mv, wh = {} }) {
   const bandP = panel('The day, midnight to midnight', d.basis);
   root.append(bandP.panel);
   const pct = (m) => (m / 1440) * 100;
@@ -711,16 +768,18 @@ function drawBand(root, { d, trips, online, status, mv }) {
   }
   /* The car, as its tracker saw it while it was his. */
   const runs = mv.runs || [];
-  const plates = (mv.windows || []).map((w) => w.plate);
+  const plates = (mv.windows || []).map((w) => w.plate).filter(Boolean);
   if (runs.length) {
     row(`the car${plates.length ? ` · ${plates.join(', ')}` : ''}`, 'dday-online dday-car', runs.map((r) =>
-      `<i class="${r.seat == null && r.state !== 'idle' ? 'noseat' : ''}" style="left:${pct(r.s)}%;width:${pct(Math.max(1, r.e - r.s))}%;background:${
+      `<i class="${r.seat == null && r.state !== 'idle' ? 'noseat' : ''}" style="left:${pct(r.s)}%;width:${pct(Math.max(1, r.e - r.s))}%;background-color:${
         chColor(r.source, r.state)}" title="${esc(hhmm(r.s))}–${esc(hhmm(r.e))} ${esc(r.state === 'engaged' ? 'a passenger aboard'
         : r.state === 'available' ? (r.seat == null ? 'moving — no seat reading' : 'moving, no passenger') : 'stopped')} · ${esc(sourceLabel(r.source))}"></i>`).join(''),
       mv.totals?.km != null ? `${fmt(mv.totals.km, 1)} km` : '');
-  } else if (mv.runs === null) {
-    notes.push(el('div', 'dday-onbasis dim', 'What the car was doing is withheld from your role.'));
+  } else if (wh.veh) {
+    notes.push(el('div', 'dday-onbasis dim', `What the car was doing: ${withheldSentence('VEH')}`));
   }
+  /* A live feed that stopped answering is said under the rows it ends. */
+  if (d.status_stale) notes.push(el('div', 'dday-onbasis dim', `${d.status_stale}.`));
   const rulerRow = el('div', 'dday-onrow');
   rulerRow.innerHTML = '<span class="dday-onlab"></span>';
   const ruler = el('div', 'dday-ruler');
@@ -767,7 +826,9 @@ function drawBand(root, { d, trips, online, status, mv }) {
     + (online.length || live.length ? sw(chColor('uber', 'available'), 'online (Uber)') : '')
     + (live.some((x) => x.status === 'ontrip') ? sw(chColor('uber', 'engaged'), 'on a trip (Uber, live)') : '')
     + sources.map((s) => sw(chColor(s, 'engaged'), `passenger aboard (${sourceLabel(s)})`)
-      + sw(chColor(s, 'available'), 'moving') + sw(chColor(s, 'idle'), 'stopped')).join('')
+      + sw(chColor(s, 'available'), 'moving, no passenger') + sw(chColor(s, 'idle'), 'stopped')
+      + (runs.some((r) => r.source === s && r.seat == null && r.state !== 'idle')
+        ? `<span><i class="sw noseat" style="background-color:${chColor(s, 'available')}"></i>moving, no seat reading</span>` : '')).join('')
     + (runs.length ? '<span><i class="sw nopos"></i>no position</span>' : '');
   bandP.body.append(lg);
 }
@@ -777,7 +838,7 @@ function drawBand(root, { d, trips, online, status, mv }) {
    the seat, and the same day as a log — each stop with its place and length,
    each drive with where from and to, how far, and whether a passenger was
    in — with Uber's status changes in their place among them. */
-async function renderMovement(root, { d, status, trips }) {
+async function renderMovement(root, { d, status, trips, wh = {} }) {
   const mv = d.movement || {};
   const p = panel('Where the car went', mv.basis || '');
   /* `mapwrap` opts the panel out of the charts' `svg{width:100%}` rule
@@ -785,8 +846,14 @@ async function renderMovement(root, { d, status, trips }) {
      nowhere and the attribution flag filled the corner on the first render. */
   p.panel.classList.add('mapwrap');
   root.append(p.panel);
-  if (mv.segments === null || d.fixes === null) {
-    p.body.append(note('Positions are withheld from your role, so where the car went is not shown.'));
+  if (wh.predates) {
+    /* An answer from before the movement record existed — a copy cached
+       before the deploy — is not "no car is on record" (review, 2026-10-13). */
+    p.body.append(note('This answer predates the car’s movement record. Reload the page for the hours the car was his and where it went.'));
+    return;
+  }
+  if (mv.segments === null || wh.fixes) {
+    p.body.append(note(`Where the car went: ${withheldSentence('LOC')}`));
     return;
   }
   const windows = mv.windows || [];
@@ -794,14 +861,28 @@ async function renderMovement(root, { d, status, trips }) {
     empty(p.body, mv.absent ? `${mv.absent.charAt(0).toUpperCase()}${mv.absent.slice(1)}.` : 'No car is on record as his on this day.');
     if (!windows.length) return;
   }
-  /* Whose car, when — said, with how it is known. */
+  /* Whose car, when — said, with how it is known. The hours come from his
+     bookings as well as Uber's record, so a role not shown bookings gets the
+     car and not the hours; `shared` and `others` name other drivers' records
+     and are withheld the same way — null, said, never read (the Fleet
+     technician's page threw on `w.shared.length`, review 2026-10-13). */
   const BASIS = { booking: 'his bookings', uber_vehicle: 'Uber’s record of the vehicle he was working in' };
   const who = el('div', 'dday-held');
-  who.innerHTML = windows.map((w) => `<div><b>${esc(w.plate)}</b> was his ${esc(hhmm(w.from))}–${
-    d.today && w.to >= (d.now_min ?? 1441) ? 'now' : esc(hhmm(w.to))}<span class="dim"> · by ${esc(listWords(w.basis.map((b) => BASIS[b] || b)))}${
-    w.stretched ? ', to the edges of the online spell it sits in' : ''}</span>${
-    w.shared.length ? `<div class="dday-warn">${esc(listWords(w.shared.map((x) => `${x.who || 'another driver'} ${hhmm(x.s)}${x.e > x.s ? `–${hhmm(x.e)}` : ''}`)))} is on record in this car inside these hours too — the record cannot say whose those minutes were.</div>` : ''}${
-    w.overlap ? '<div class="dday-warn">He is on record in two cars at once here; both are shown, neither is chosen.</div>' : ''}</div>`).join('')
+  who.innerHTML = windows.map((w) => {
+    const shared = Array.isArray(w.shared) ? w.shared : [];
+    const head = w.from == null || w.to == null
+      ? `<b>${esc(w.plate || 'A car')}</b> was his on this day<span class="dim"> · ${esc(withheldSentence('BK', { level: wh.bkLevel === 'A' ? 'A' : '' }))}</span>`
+      : `<b>${esc(w.plate || 'A car')}</b> was his ${esc(hhmm(w.from))}–${
+        d.today && w.to >= (d.now_min ?? 1441) ? 'now' : esc(hhmm(w.to))}<span class="dim"> · by ${esc(listWords((w.basis || []).map((b) => BASIS[b] || b)))}${
+        w.stretched ? ', to the edges of the online spell it sits in' : ''}</span>`;
+    const tracker = w.second_tracker
+      ? `<div class="dim">${esc(w.plate || 'This car')} carries two trackers, which put it kilometres apart at the same minute; ${esc(sourceLabel(w.second_tracker.kept))} is shown and ${
+        esc(listWords(w.second_tracker.dropped.map((x) => `${sourceLabel(x.source)}’s ${fmt(x.fixes)} positions`)))} are left out.</div>` : '';
+    return `<div>${head}${shared.length ? `<div class="dday-warn">${esc(listWords(shared.map((x) => `${x.who || 'another driver'} ${hhmm(x.s)}${x.e > x.s ? `–${hhmm(x.e)}` : ''}`)))} is on record in this car inside these hours too — the record cannot say whose those minutes were.</div>` : ''}${
+      w.overlap ? '<div class="dday-warn">He is on record in two cars at once here; both are shown, neither is chosen.</div>' : ''}${tracker}</div>`;
+  }).join('')
+    + (Array.isArray(mv.others) && mv.others.length
+      ? `<div>${esc(listWords(mv.others.map((o) => `${o.who || 'another driver'} ${hhmm(o.s)}${o.e > o.s ? `–${hhmm(o.e)}` : ''} (${o.plate})`)))} ${mv.others.length === 1 ? 'is' : 'are'} on record in his car between his hours in it — not shown as his.</div>` : '')
     + (mv.outside_fixes ? `<div class="dim">The tracker reported ${fmt(mv.outside_fixes)} more ${mv.outside_fixes === 1 ? 'position' : 'positions'} for ${
       windows.length === 1 ? 'this car' : 'these cars'} outside those hours — another driver’s, or the car with nobody on record. They are not shown as his.</div>` : '');
   p.body.append(who);
@@ -809,7 +890,8 @@ async function renderMovement(root, { d, status, trips }) {
 
   const t = mv.totals || {};
   const sum = el('div', 'dday-msum');
-  sum.innerHTML = [
+  if (wh.veh) sum.innerHTML = `<span class="dim">${esc(withheldSentence('VEH'))}</span>`;
+  else sum.innerHTML = [
     `<span><b>${esc(fmt(t.km, 1))}</b> km driven</span>`,
     t.seat_reported ? `<span><b>${esc(fmt(t.km_with_passenger, 1))}</b> km with a passenger</span>` : null,
     t.seat_reported ? `<span><b>${esc(fmt(t.km_empty, 1))}</b> km empty</span>` : null,
@@ -845,7 +927,10 @@ async function renderMovement(root, { d, status, trips }) {
   const seg = mv.segments || [];
   const items = [
     ...seg.map((x) => ({ at: x.s, x })),
-    ...status.map((x, i) => (i === 0 || status[i - 1].status !== x.status ? { at: x.s, st: x } : null)).filter(Boolean),
+    /* The day's opening state is not a change at 00:00: an offline carried
+       in is not listed, an online one is said as already online. */
+    ...status.map((x, i) => ((i === 0 || status[i - 1].status !== x.status) && !(x.carried_in && x.status === 'offline')
+      ? { at: x.s, st: x } : null)).filter(Boolean),
   ].sort((a, b) => a.at - b.at || (a.st ? -1 : 1));
   const log = el('div', 'dday-mlog');
   for (const it of items) {
@@ -854,7 +939,8 @@ async function renderMovement(root, { d, status, trips }) {
       const x = it.st;
       r.classList.add('st');
       r.style.setProperty('--mk', x.status === 'offline' ? 'var(--rule-strong)' : chColor('uber', x.status === 'ontrip' ? 'engaged' : 'available'));
-      r.innerHTML = `<span class="dday-mt">${esc(hhmm(x.s))}</span><span>${esc(x.status === 'offline' ? 'went offline' : x.status === 'ontrip' ? 'on a trip' : 'online')} <span class="dim">· Uber’s live feed${
+      r.innerHTML = `<span class="dday-mt">${esc(hhmm(x.s))}</span><span>${esc(x.carried_in ? `already ${x.status === 'ontrip' ? 'on a trip' : 'online'} when the day began`
+        : x.status === 'offline' ? 'went offline' : x.status === 'ontrip' ? 'on a trip' : 'online')} <span class="dim">· Uber’s live feed${
         x.went_online?.where ? ` · at <b>${esc(x.went_online.where)}</b>` : ''}</span></span>`;
     } else if (it.x.kind === 'stop') {
       const x = it.x;
@@ -878,7 +964,8 @@ async function renderMovement(root, { d, status, trips }) {
       r.classList.add('gap');
       r.innerHTML = `<span class="dday-mt">${esc(hhmm(x.s))}–${esc(hhmm(x.e))}</span><span class="dim">no position for ${esc(dur(x.minutes))}${
         x.moved_km >= 0.3 ? ` — when it spoke again the car was ${esc(fmt(x.moved_km, 1))} km away${x.to_area ? `, at ${esc(x.to_area)}` : ''}` : ''}${
-        x.edge === 'start' ? ' — from when it became his to its first position' : x.edge === 'end' ? (d.today ? ' — to now' : ' — to the end of his hours in it') : ''}</span>`;
+        x.edge === 'start' ? ' — from when it became his to its first position'
+          : x.edge === 'end' ? (d.today && x.e >= (d.now_min ?? 1441) ? ' — to now' : ' — to the end of his hours in it') : ''}</span>`;
     }
     log.append(r);
   }

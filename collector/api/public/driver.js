@@ -648,7 +648,8 @@ function todayLink(box, id, st) {
   if (!id || !(st?.today?.online_minutes || st?.status === 'online' || st?.status === 'ontrip')) return;
   const today = dubaiDay();
   const a = el('a', 'lstat-day', 'today, minute by minute →');
-  a.href = `${href('driver', id, 'day')}?on=${encodeURIComponent(today)}`;
+  /* href's own query: it already carries the shell's period. */
+  a.href = href('driver', id, 'day', { on: today });
   box.append(a);
 }
 function statusStrip(st, id = null) {

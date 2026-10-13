@@ -1834,6 +1834,19 @@ so 12:00 sat in two places; on the phone the ruler's five times collided until
 each row's track went full-width under its label; the open-ended tail of the
 log-in row was still the old neutral. Production pass below once deployed.
 
+**The review's rendering pass, now a test.** An independent review rendered
+the page in its head under every role and data shape and found it saying
+things the data did not (a Fleet technician's page threw; a Cash desk officer
+was told "No booking"; every day link landed on "addressed as"; the old skin
+painted three states one colour; the "no seat reading" stripe never showed).
+test/driver_day_page.test.mjs now renders the page in Chromium against the
+mock, put through the REAL access shaper with each role's REAL levels — TEC,
+CLK, FIN, HRO and an answer from before the movement record — and reads what
+a person reads: links, words per role, the classic colours, the stripe, and
+the words around midnight, now and absence. 17 checks, every one proved by
+revert (the running-trip colour check passed with its fix removed until it
+compared the running trip with a finished one, not with the online bar).
+
 ### #driver/territory — 2026-09-24
 
 Production (This month), both skins at 1440 and 390, light and dark

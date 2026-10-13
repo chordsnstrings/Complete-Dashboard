@@ -2554,12 +2554,15 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .dday-online>i{position:absolute;top:0;height:8px;border-radius:4px;background:var(--c-uber-available,var(--c-uber));opacity:.8}
 .dday-status>i.st-on{background:var(--c-uber-available,var(--c-uber));opacity:.8}
 .dday-status>i.st-trip{background:var(--c-uber-engaged,var(--c-uber));opacity:1}
+/* After the open-ended gradient, so a trip still running keeps its trip colour (review, 2026-10-13). */
+.dday-status>i.st-trip.open{background:var(--c-uber-engaged,var(--c-uber))}
 .dday-status>i.open{-webkit-mask-image:linear-gradient(90deg,#000 70%,transparent);mask-image:linear-gradient(90deg,#000 70%,transparent)}
 /* The car: each run painted inline with its tracker's ramp step; a moving
    stretch with no seat reading is striped so it never reads as "empty". */
 .dday-car{height:12px}
 .dday-car>i{height:12px;border-radius:2px;opacity:1}
 .dday-car>i.noseat{background-image:repeating-linear-gradient(90deg,transparent 0 3px,var(--surface) 3px 5px)}
+.sw.noseat{background-image:repeating-linear-gradient(90deg,transparent 0 3px,var(--surface) 3px 5px)}
 .sw.nopos{background:var(--surface-2);border:1px solid var(--rule)}
 /* An OPEN-ENDED online span: the last ONLINE Uber sent, with no closing event
    yet. It is drawn to the earliest of now, the end of the day and the last

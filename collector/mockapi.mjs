@@ -3595,7 +3595,7 @@ app.get('/api/driver/day', (req, r) => {
       area_votes: unnamed ? null : onJob ? 120 : 312, area_seen: unnamed ? null : onJob ? 160 : 340 });
   }
   const windows = custodyWindows({ own: jobs.map(([s, e]) => ({ plate: 'A 12345', s, e, kind: 'booking' })),
-    online: [{ s: mins(9, 20), e: mins(19, 35) }] }).map((w) => ({ ...w, to: Math.min(w.to, mins(13, 40)) }));
+    spells: [{ s: mins(9, 20), e: mins(19, 35) }] }).map((w) => ({ ...w, to: Math.min(w.to, mins(13, 40)) }));
   const runs = carRuns(dayFixes);
   const statusSp = [
     { status: 'online', s: mins(9, 20), e: mins(9, 43), went_online: { where: 'Dubai Marina', within_min: 0, lat: 25.247, lng: 55.347, votes: 312, of: 340, why: null } },
@@ -3673,9 +3673,11 @@ app.get('/api/driver/day', (req, r) => {
       + 'position and an address, and those pairs name the ground within about half a kilometre.',
     status_spans: statusSp,
     status_basis: 'Uber\u2019s live status feed, read every few minutes: online, on a trip, offline.',
+    status_stale: null,
     movement: {
       windows: windows.map((w) => ({ plate: w.plate, from: w.from, to: w.to, core_from: w.core_from, core_to: w.core_to,
-        stretched: w.stretched, basis: w.basis, overlap: false, shared: [] })),
+        stretched: w.stretched, basis: w.basis, overlap: false, shared: [], second_tracker: null })),
+      others: [],
       runs, segments: movementSegments(dayFixes, windows), totals: movementTotals(dayFixes, windows, runs),
       /* The car before he was in it — counted apart, never shown as his. */
       outside_fixes: 6, absent: null,

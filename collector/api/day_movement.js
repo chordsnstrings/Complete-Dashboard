@@ -66,14 +66,19 @@ export function mergeRanges(ranges) {
    one spell. */
 export function statusSpans(rows, dayStartMs, nowMs) {
   const out = [];
-  for (const r of rows || []) {
+  (rows || []).forEach((r, i) => {
     const s = Math.max(0, Math.floor((ms(r.from_at) - dayStartMs) / 60000));
     const e = Math.min(1440, Math.floor((ms(r.to_at) - dayStartMs) / 60000));
-    if (e <= s) continue;
+    if (e <= s) return;
     const last = out[out.length - 1];
-    if (last && last.status === r.status && last.e >= s) { last.e = Math.max(last.e, e); continue; }
-    out.push({ status: r.status, s, e });
-  }
+    if (last && last.status === r.status && last.e >= s) { last.e = Math.max(last.e, e); return; }
+    /* CARRIED IN, NOT BEGUN. SPANS_SQL opens the day with the state in force
+       at midnight, timed AT midnight; it is not a change that happened then.
+       The review (2026-10-13) caught the page printing "went online in Deira
+       at 00:00" and "00:00 went offline" from it — COVERAGE's trap: a clipped
+       00:00 is never a start time. */
+    out.push({ status: r.status, s, e, ...(i === 0 && ms(r.from_at) <= dayStartMs ? { carried_in: true } : {}) });
+  });
   const last = out[out.length - 1];
   /* Still running: the last span reaches the moment of asking. Said, because
      "on a trip until 11:46" and "on a trip, and that is as far as now" are
@@ -83,49 +88,75 @@ export function statusSpans(rows, dayStartMs, nowMs) {
 }
 
 /* ── 1. which car, and when it was his ─────────────────────────────────────
-   own:    [{ plate, s, e }]        his evidence in a car, minutes of the day
-   others: [{ plate, s, e, who }]   anybody else's evidence in those cars
-   online: [{ s, e }]               his online spells (log-in record and live
-                                    status together)
+   own:    [{ plate, s, e, kind }]      his evidence in a car, minutes of the day
+   others: [{ plate, s, e, who, who_id }] anybody else's evidence in those cars
+   spells: [{ s, e }]                   the stretches he was WORKING, by the
+                                        record the route trusts for each part
+                                        of the day (see /api/driver/day)
    limit:  the last minute that can be his — now, on today; 1440 otherwise.
 
-   The core of a window is the first to the last minute of his OWN evidence
-   in that car. It is stretched back to the start of the online spell the
-   first evidence sits in (he went online in the car before the app recorded
-   the vehicle against him) and forward to the end of the spell the last sits
-   in — but never across another driver's evidence in the same car, which is
-   where a shared car changes hands. Another driver's evidence INSIDE the core
-   cannot be resolved from the record and is returned as `shared`, said, never
-   silently given to either. Two windows in two cars that overlap at their
-   cores are flagged `overlap` for the same reason. */
-export function custodyWindows({ own = [], others = [], online = [], limit = 1440 } = {}) {
-  const spells = mergeRanges(online);
-  const plates = [...new Set(own.map((o) => o.plate).filter(Boolean))];
-  const windows = plates.map((plate) => {
-    const mine = own.filter((o) => o.plate === plate);
-    const coreFrom = Math.max(0, Math.min(...mine.map((o) => o.s)));
-    const coreTo = Math.min(limit, Math.max(...mine.map((o) => (o.e ?? o.s))));
-    let from = coreFrom; let to = coreTo;
-    const startIn = spells.find((sp) => sp.s <= coreFrom && sp.e >= coreFrom);
-    const endIn = spells.find((sp) => sp.s <= coreTo && sp.e >= coreTo);
-    if (startIn) from = Math.max(0, startIn.s);
-    if (endIn) to = Math.min(limit, endIn.e);
-    const shared = [];
-    for (const o of others.filter((x) => x.plate === plate)) {
-      const oe = o.e ?? o.s;
-      if (oe <= coreFrom) { if (oe > from) from = oe; } else if (o.s >= coreTo) { if (o.s < to) to = o.s; } else {
-        shared.push({ who: o.who || null, who_id: o.who_id || null, s: Math.max(o.s, coreFrom), e: Math.min(oe, coreTo) });
-      }
+   Built spell by spell, never from his first evidence to his last across the
+   day. The first version did the latter, and the independent review of
+   2026-10-13 showed what it cost: a driver online 06:00–10:00 and
+   15:00–19:00 in a car another man drove 10:30–14:30 was given that man's
+   whole shift, passenger kilometres and all, labelled "shared".
+
+   So: within one spell, his evidence in a car is cut into runs wherever
+   ANOTHER driver's evidence in the same car falls between two of his; each
+   run reaches back to the start of the spell (or the other driver's last
+   evidence before it) and forward to the end of the spell (or the other's
+   next). The stretch between belongs to nobody on this page. Evidence of his
+   outside every spell (a booking with no availability record — hotel, Bolt)
+   is its own interval, not stretched. Another driver's evidence that falls
+   INSIDE one of his own intervals is a genuine contradiction and is returned
+   as `shared`; across spells, two cars whose cores overlap are `overlap`. */
+export function custodyWindows({ own = [], others = [], spells = [], limit = 1440 } = {}) {
+  const sp = mergeRanges(spells.map((x) => ({ s: Math.max(0, x.s), e: Math.min(limit, x.e) })).filter((x) => x.e >= x.s));
+  const spellOf = (m) => sp.findIndex((x) => x.s <= m && m <= x.e);
+  const groups = new Map();
+  for (const o of own) {
+    if (!o.plate || o.s > limit) continue;
+    const k = `${spellOf(o.s)}|${o.plate}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push({ ...o, e: Math.min(limit, o.e ?? o.s) });
+  }
+  const windows = [];
+  for (const [k, mine] of groups) {
+    const [si, plate] = [Number(k.split('|')[0]), k.slice(k.indexOf('|') + 1)];
+    const S = si >= 0 ? sp[si] : null;
+    mine.sort((a, b) => a.s - b.s || a.e - b.e);
+    const theirs = others.filter((o) => o.plate === plate).map((o) => ({ ...o, e: o.e ?? o.s }))
+      .filter((o) => (S ? o.e >= S.s && o.s <= S.e : true)).sort((a, b) => a.s - b.s);
+    /* Runs of his evidence with no other driver's evidence between them. */
+    const runs = [];
+    for (const ev of mine) {
+      const cur = runs[runs.length - 1];
+      const between = cur && cur.e < ev.s && theirs.some((o) => o.s >= cur.e && o.e <= ev.s);
+      if (!cur || between) runs.push({ s: ev.s, e: ev.e, kinds: [ev.kind] });
+      else { cur.e = Math.max(cur.e, ev.e); cur.kinds.push(ev.kind); }
     }
-    return { plate, from, to: Math.max(from, to), core_from: coreFrom, core_to: Math.max(coreFrom, coreTo),
-      stretched: from < coreFrom || to > coreTo, shared, basis: [...new Set(mine.map((o) => o.kind).filter(Boolean))] };
-  }).sort((a, b) => a.from - b.from);
+    for (const r of runs) {
+      let from = S ? S.s : r.s; let to = S ? S.e : r.e;
+      const shared = [];
+      for (const o of theirs) {
+        if (o.e <= r.s) { if (o.e > from) from = o.e; } else if (o.s >= r.e) { if (o.s < to) to = o.s; } else {
+          shared.push({ who: o.who || null, who_id: o.who_id || null, s: Math.max(o.s, r.s), e: Math.min(o.e, r.e) });
+        }
+      }
+      windows.push({ plate, from: Math.min(from, r.s), to: Math.max(to, r.e), core_from: r.s, core_to: r.e,
+        stretched: from < r.s || to > r.e, shared, basis: [...new Set(r.kinds.filter(Boolean))] });
+    }
+  }
+  /* In order of his own evidence, not of the stretched edges: two windows
+     stretched back to one spell's start tie on `from`, and the order they
+     were pushed in decided which was "first" (review, 2026-10-13). */
+  windows.sort((a, b) => a.core_from - b.core_from || a.core_to - b.core_to);
   for (let i = 0; i + 1 < windows.length; i += 1) {
     const w = windows[i]; const n = windows[i + 1];
     if (w.to <= n.from) continue;
     if (w.core_to <= n.core_from) {
-      /* The stretches meet: the change of car is at his last evidence in the
-         first one. */
+      /* The stretches meet: the change of car (or of run) is at his last
+         evidence in the first one. */
       n.from = Math.max(n.from, w.core_to);
       w.to = Math.min(w.to, n.from);
     } else {
@@ -151,11 +182,23 @@ const movingOn = (a, b) => {
    The names are the channel ramps' own (api/public/tokens.js RAMP), so the
    page paints them with the tracker's colours. A silence longer than
    SILENCE_MIN draws nothing: the car is not "stopped" where nobody saw it. */
+/* Fixes by car: two cars at once (an `overlap`) interleave by time, and a
+   step from one car to the other is not driving — the first version skipped
+   every such pair and read a two-car hour as "0 km, no position" (review,
+   2026-10-13). */
+const byPlate = (fixes) => {
+  const m = new Map();
+  for (const f of fixes) { if (!m.has(f.plate)) m.set(f.plate, []); m.get(f.plate).push(f); }
+  return [...m.values()];
+};
 export function carRuns(fixes) {
+  return byPlate(fixes).flatMap((fs) => carRunsOne(fs)).sort((a, b) => a.s - b.s || String(a.plate).localeCompare(String(b.plate)));
+}
+function carRunsOne(fixes) {
   const runs = [];
   for (let i = 1; i < fixes.length; i += 1) {
     const a = fixes[i - 1]; const b = fixes[i];
-    if (a.plate !== b.plate) continue;
+    if (a.plate !== b.plate || a.source !== b.source) continue;
     if ((ms(b.at) - ms(a.at)) / 60000 > SILENCE_MIN) continue;
     const seat = seatOn(a, b);
     const state = seat === true ? 'engaged' : movingOn(a, b) ? 'available' : 'idle';
@@ -191,18 +234,20 @@ const seatWord = (t) => {
 /* Distance by seat, on /api/where's step rule (a step over GAP_MIN or a hop
    over HOP_KM is not driving). The three parts sum to the total. */
 export function distanceBySeat(fixes) {
-  const t = { total: 0, with: 0, without: 0, unknown: 0 };
-  for (let i = 1; i < fixes.length; i += 1) {
-    const a = fixes[i - 1]; const b = fixes[i];
-    if (a.plate !== b.plate) continue;
+  const t = { with: 0, without: 0, unknown: 0 };
+  for (const fs of byPlate(fixes)) for (let i = 1; i < fs.length; i += 1) {
+    const a = fs[i - 1]; const b = fs[i];
+    if (a.source !== b.source) continue;
     const gap = (ms(b.at) - ms(a.at)) / 60000;
     const step = km(a, b);
     if (gap > GAP_MIN || step >= HOP_KM) continue;
     const seat = seatOn(a, b);
-    t.total += step;
     t[seat === true ? 'with' : seat === false ? 'without' : 'unknown'] += step;
   }
-  return { km: r1(t.total), km_with_passenger: r1(t.with), km_empty: r1(t.without), km_seat_not_reported: r1(t.unknown) };
+  /* The total is the sum of the rounded parts, so the three figures the page
+     prints beside it add up to it (review, 2026-10-13: 0.3 = 0.2 + 0.2). */
+  const parts = { km_with_passenger: r1(t.with), km_empty: r1(t.without), km_seat_not_reported: r1(t.unknown) };
+  return { km: r1(parts.km_with_passenger + parts.km_empty + parts.km_seat_not_reported), ...parts };
 }
 
 const drive = (fs) => {
@@ -282,7 +327,7 @@ export function movementTotals(fixes, windows, runs) {
   const d = distanceBySeat(inside);
   const mins = (st) => runs.filter((r) => r.state === st).reduce((a, r) => a + (r.e - r.s), 0);
   const covered = runs.reduce((a, r) => a + (r.e - r.s), 0);
-  const held = windows.reduce((a, w) => a + Math.max(0, w.to - w.from), 0);
+  const held = mergeRanges(windows.map((w) => ({ s: w.from, e: w.to }))).reduce((a, w) => a + Math.max(0, w.e - w.s), 0);
   return { ...d, fixes: inside.length,
     with_passenger_min: mins('engaged'), moving_empty_min: mins('available'), stopped_min: mins('idle'),
     held_min: held, unseen_min: Math.max(0, held - covered),

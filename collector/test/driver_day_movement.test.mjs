@@ -39,20 +39,20 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
 console.log('\n§1 whose car, and when');
 {
   const w = custodyWindows({ own: [{ plate: 'L1', s: 430, e: 430, kind: 'uber_vehicle' }, { plate: 'L1', s: 700, e: 730, kind: 'booking' }],
-    others: [{ plate: 'L1', s: 30, e: 300, who: 'Night' }], online: [{ s: 424, e: 760 }] });
+    others: [{ plate: 'L1', s: 30, e: 300, who: 'Night' }], spells: [{ s: 424, e: 760 }] });
   check('his window runs from the start of the online spell to its end', w.length === 1 && w[0].from === 424 && w[0].to === 760
     && w[0].core_from === 430 && w[0].core_to === 730 && w[0].stretched, JSON.stringify(w));
   const c = custodyWindows({ own: [{ plate: 'L1', s: 430, e: 430 }], others: [{ plate: 'L1', s: 400, e: 410, who: 'Night' }],
-    online: [{ s: 380, e: 500 }] });
+    spells: [{ s: 380, e: 500 }] });
   check('…but never back across the other driver\'s evidence in the same car', c[0].from === 410, JSON.stringify(c));
-  const sh = custodyWindows({ own: [{ plate: 'L1', s: 430, e: 430 }, { plate: 'L1', s: 600, e: 600 }],
-    others: [{ plate: 'L1', s: 500, e: 520, who: 'Other' }], online: [] });
-  check('another driver\'s evidence INSIDE his own is said as shared, not given to either',
-    sh[0].shared.length === 1 && sh[0].shared[0].who === 'Other' && sh[0].from === 430 && sh[0].to === 600, JSON.stringify(sh));
-  const two = custodyWindows({ own: [{ plate: 'L1', s: 420, e: 480 }, { plate: 'L2', s: 600, e: 650 }], online: [{ s: 400, e: 700 }] });
+  const sh = custodyWindows({ own: [{ plate: 'L1', s: 430, e: 460, kind: 'booking' }],
+    others: [{ plate: 'L1', s: 440, e: 440, who: 'Other' }], spells: [] });
+  check('another driver\'s evidence INSIDE one of his own bookings is said as shared, not given to either',
+    sh[0].shared.length === 1 && sh[0].shared[0].who === 'Other' && sh[0].from === 430 && sh[0].to === 460, JSON.stringify(sh));
+  const two = custodyWindows({ own: [{ plate: 'L1', s: 420, e: 480 }, { plate: 'L2', s: 600, e: 650 }], spells: [{ s: 400, e: 700 }] });
   check('two cars in one spell: the change of car is at his last evidence in the first',
     two.length === 2 && two[0].plate === 'L1' && two[0].to === 480 && two[1].plate === 'L2' && two[1].from === 480, JSON.stringify(two));
-  const now = custodyWindows({ own: [{ plate: 'L1', s: 430, e: 430 }], online: [{ s: 424, e: 700 }], limit: 650 });
+  const now = custodyWindows({ own: [{ plate: 'L1', s: 430, e: 430 }], spells: [{ s: 424, e: 700 }], limit: 650 });
   check('today the window stops at now', now[0].to === 650, JSON.stringify(now));
   const sp = statusSpans([{ status: 'online', from_at: '2026-10-11T03:04:00Z', to_at: '2026-10-11T03:46:00Z' },
     { status: 'online', from_at: '2026-10-11T03:46:00Z', to_at: '2026-10-11T05:00:00Z' },
@@ -109,6 +109,8 @@ await uberRow('05:00', 'OFFLINE', O, 'Test Oscar');
 await uberRow('07:04', 'ONLINE', K, 'Test Kilo');
 await uberRow('09:00', 'ONTRIP', K, 'Test Kilo');
 await uberRow('09:30', 'ONLINE', K, 'Test Kilo');
+/* …and OFFLINE at 12:10: the tick writes a row for every status change. */
+await uberRow('12:10', 'OFFLINE', K, 'Test Kilo');
 /* Uber's live status events for Kilo. */
 const sev = (hm, status, day = D) => q(`INSERT INTO driver_status_event (platform, driver_ext_id, at, status, status_raw, fleet_id)
   VALUES ('uber',$1,$2::timestamptz,$3,$4,'ecosine')`, [K, T(day, hm), status, `DRIVER_STATUS_${status.toUpperCase()}`]);
@@ -186,6 +188,10 @@ const sinceMidnight = Math.floor(((Date.now() + DUBAI_MS) % 86400000) / 60000);
 const back = Math.max(2, Math.min(40, sinceMidnight - 1));
 const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
 await q(`INSERT INTO driver_status_event (platform, driver_ext_id, at, status, status_raw, fleet_id) VALUES ('uber',$1,$2::timestamptz,'online','DRIVER_STATUS_ONLINE','ecosine')`, [K, ago(back)]);
+/* The live feed answering now, as the tick writes it. */
+await q(`INSERT INTO driver_status_now (platform, driver_ext_id, fleet_id, status, status_raw, status_at, observed_at, plate)
+         VALUES ('uber',$1,'ecosine','online','DRIVER_STATUS_ONLINE',$2::timestamptz,now(),'L30001')
+         ON CONFLICT (platform, driver_ext_id) DO UPDATE SET observed_at = now(), status = 'online', status_at = EXCLUDED.status_at`, [K, ago(back)]);
 await q(`INSERT INTO telemetry_snapshot (source, plate, fleet_id, captured_at, polled_at, status, raw)
          VALUES ('uber','L30001','ecosine',$1::timestamptz,$1::timestamptz,'ONLINE',$2::jsonb)`,
 [ago(back), JSON.stringify({ driverInfo: { driverUuid: K, firstName: 'Test', lastName: 'Kilo' } })]);
@@ -196,6 +202,131 @@ const tw = tb.movement?.windows?.[0];
 check('today, with no booking: the spell is open and the window runs to now',
   tb.today === true && tb.status_spans?.at(-1)?.open_ended === true && tw?.to === tb.now_min && tb.fixes.length >= 1,
   JSON.stringify({ today: tb.today, now: tb.now_min, spans: tb.status_spans, w: tb.movement?.windows }));
+
+/* ── §5 the independent review of 2026-10-13 ───────────────────────────────
+   Thirty-three findings, every one confirmed by a second reader trying to
+   refute it. The server's, each held here: yesterday's rows putting a driver
+   in a shared car from midnight; another man's shift inside his day counted
+   as his; a log-in span that ran to midnight only because nothing came after
+   it; a live feed that stopped answering read as a driver still online; two
+   trackers on one car summed into a car crossing the city every minute; the
+   state the day opened in placed as "went online at 00:00"; windows that
+   depended on the order evidence arrived in; two cars at once read as 0 km;
+   parts that did not add up to their total. */
+console.log('\n§5 the review: custody, spells, feeds, trackers');
+{
+  const ord = custodyWindows({ own: [{ plate: 'B', s: 800, e: 830, kind: 'booking' }, { plate: 'A', s: 430, e: 430, kind: 'uber_vehicle' },
+    { plate: 'A', s: 550, e: 550, kind: 'uber_vehicle' }], spells: [{ s: 420, e: 1020 }] });
+  check('windows follow his evidence, not the order it arrived in: A then B, the change at his last evidence in A, no "two cars at once"',
+    ord.map((w) => `${w.plate}:${w.from}-${w.to}`).join() === 'A:420-550,B:550-1020' && !ord.some((w) => w.overlap), JSON.stringify(ord));
+  const cut = custodyWindows({ own: [{ plate: 'L1', s: 360, e: 360, kind: 'uber_vehicle' }, { plate: 'L1', s: 900, e: 900, kind: 'uber_vehicle' }],
+    others: [{ plate: 'L1', s: 630, e: 870, who: 'Other' }], spells: [{ s: 360, e: 1140 }] });
+  check('inside ONE spell, another driver\'s evidence between two of his cuts the car in two — the stretch between is nobody\'s here',
+    cut.map((w) => `${w.from}-${w.to}`).join() === '360-630,870-1140' && cut.every((w) => !w.shared.length), JSON.stringify(cut));
+  const two = [F('08:00', 25.20, 55.30), { ...F('08:00', 25.00, 55.10), plate: 'L2' }, F('08:05', 25.21, 55.31),
+    { ...F('08:05', 25.01, 55.11), plate: 'L2' }, F('08:10', 25.22, 55.32), { ...F('08:10', 25.02, 55.12), plate: 'L2' }];
+  const dTwo = distanceBySeat(two);
+  const each = distanceBySeat(two.filter((f) => f.plate === 'L1')).km + distanceBySeat(two.filter((f) => f.plate === 'L2')).km;
+  check('two cars at once interleave by time, and each is measured on its own — not 0 km, and no jump from one car to the other',
+    dTwo.km > 2 && Math.abs(dTwo.km - each) <= 0.1
+    && carRuns(two).filter((r) => r.plate === 'L2').length === 1 && carRuns(two).filter((r) => r.plate === 'L1').length === 1, JSON.stringify(dTwo));
+  const tiny = distanceBySeat([F('08:00', 25.2, 55.3, { passenger: true }), F('08:01', 25.2, 55.30151, { passenger: true }),
+    F('08:02', 25.2, 55.30302, { passenger: false })]);
+  check('the parts the page prints add up to the total it prints', tiny.km === Math.round((tiny.km_with_passenger + tiny.km_empty + tiny.km_seat_not_reported) * 10) / 10,
+    JSON.stringify(tiny));
+}
+/* Yesterday: Kilo drove the same car 07:00–15:00 and went OFFLINE. */
+await uberRow('07:00', 'ONLINE', K, 'Test Kilo', '2026-10-10');
+await uberRow('09:00', 'ONTRIP', K, 'Test Kilo', '2026-10-10');
+await uberRow('15:00', 'OFFLINE', K, 'Test Kilo', '2026-10-10');
+const y = await get(`/api/driver/day?id=${K}&day=${D}`);
+check('yesterday in the same car does not make it his from midnight: his window still opens at 07:04, none of the night man\'s fixes',
+  (y.movement?.windows || []).length === 1 && y.movement.windows[0].from === mm('07:04') && y.fixes.every((f) => f.m >= mm('07:04')),
+  JSON.stringify(y.movement?.windows));
+
+/* 12 Oct, split shifts: Kilo online 06:00–10:00 and 15:00–19:00 in L30001;
+   Oscar has it 10:30–14:30 with a booking 12:00–13:30 and a passenger in.
+   Kilo was also online from 23:30 the night before to 03:00 (carried in),
+   and online 04:00–04:30 with no car on record. */
+const D2 = '2026-10-12';
+await q(`INSERT INTO driver_status_event (platform, driver_ext_id, at, status, status_raw, fleet_id) VALUES ('uber',$1,'2026-10-11T23:30:00+04:00','online','DRIVER_STATUS_ONLINE','ecosine')`, [K]);
+for (const [hm, st] of [['03:00', 'offline'], ['04:00', 'online'], ['04:30', 'offline'], ['06:00', 'online'], ['10:00', 'offline'], ['15:00', 'online'], ['19:00', 'offline']]) await sev(hm, st, D2);
+await uberRow('06:00', 'ONLINE', K, 'Test Kilo', D2); await uberRow('15:00', 'ONLINE', K, 'Test Kilo', D2);
+await uberRow('10:30', 'ONLINE', O, 'Test Oscar', D2); await uberRow('12:00', 'ONTRIP', O, 'Test Oscar', D2); await uberRow('14:30', 'OFFLINE', O, 'Test Oscar', D2);
+await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name, requested_at, ended_at, status, price, distance_km)
+         VALUES ('uber','o-noon','ecosine','L30001',$1,'Test Driver Oscar',$2::timestamptz,$3::timestamptz,'completed',40,12)`, [O, T(D2, '12:00'), T(D2, '13:30')]);
+for (let m = 360; m <= 1140; m += 10) {
+  const hm = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  await q(`INSERT INTO telemetry_snapshot (source, plate, fleet_id, captured_at, polled_at, lat, lng, speed, seat_count)
+           VALUES ('fms','L30001','ecosine',$1::timestamptz,$1::timestamptz,$2,$3,$4,$5)`,
+  [T(D2, hm), 25.20 + (m % 60) * 0.0004, 55.30 + (m % 60) * 0.0004, 30, m >= 720 && m < 810 ? 1 : 0]);
+}
+const s2 = await get(`/api/driver/day?id=${K}&day=${D2}`);
+const w2 = s2.movement?.windows || [];
+check('split shifts: two windows, 06:00–10:00 and 15:00–19:00 — the other man\'s 10:30–14:30 is not his',
+  w2.map((w) => `${w.from}-${w.to}`).join() === `${mm('06:00')}-${mm('10:00')},${mm('15:00')}-${mm('19:00')}`
+  && !s2.fixes.some((f) => f.m > mm('10:00') && f.m < mm('15:00')), JSON.stringify(w2));
+check('…so none of the other man\'s passenger minutes are counted as his, and he is said to have had the car',
+  s2.movement?.totals?.with_passenger_min === 0 && (s2.movement?.others || []).some((o) => o.who_id === O),
+  JSON.stringify({ t: s2.movement?.totals, others: s2.movement?.others }));
+const carried = s2.status_spans?.[0];
+check('the spell carried in from before midnight is marked so, and is not placed as "went online at 00:00"',
+  carried?.carried_in === true && carried?.s === 0 && carried?.went_online === undefined, JSON.stringify(carried));
+const noCar = s2.status_spans?.find((x) => x.s === mm('04:00'));
+check('a spell with no car on record is not placed from someone else\'s shift, and says why',
+  noCar?.went_online?.where == null && /no car is on record as his at that moment/.test(noCar?.went_online?.why || ''), JSON.stringify(noCar));
+
+/* 8 Oct: the log-in record's last ONLINE never got a successor (closed by
+   the day, a claim), no live feed; one booking 08:00–08:30. */
+const D3 = '2026-10-08';
+await q(`INSERT INTO driver_timeline_event (platform, driver_ext_id, fleet_id, at, kind, status, state) VALUES ('uber',$1,'ecosine',$2::timestamptz,'status','ONLINE','')`, [K, T(D3, '07:00')]);
+await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name, requested_at, ended_at, status, price, distance_km)
+         VALUES ('uber','k-d3','ecosine','L30001',$1,'Test Driver Kilo',$2::timestamptz,$3::timestamptz,'completed',20,5)`, [K, T(D3, '08:00'), T(D3, '08:30')]);
+for (const hm of ['07:00', '08:00', '08:15', '08:30', '12:00', '18:00', '23:00']) {
+  await q(`INSERT INTO telemetry_snapshot (source, plate, fleet_id, captured_at, polled_at, lat, lng, speed, seat_count)
+           VALUES ('fms','L30001','ecosine',$1::timestamptz,$1::timestamptz,25.2,55.3,0,0)`, [T(D3, hm)]);
+}
+const s3 = await get(`/api/driver/day?id=${K}&day=${D3}`);
+check('a log-in span that ran to midnight only because nothing came after it does not stretch the car to midnight',
+  (s3.online || []).some((o) => o.closed_by === 'day') && (s3.movement?.windows || []).length === 1
+  && s3.movement.windows[0].to === mm('08:30'), JSON.stringify({ online: s3.online, w: s3.movement?.windows }));
+
+/* 7 Oct: a car with BOTH trackers, a dozen km apart at the same minute. */
+const D4 = '2026-10-07';
+await sev('08:00', 'online', D4); await sev('10:00', 'offline', D4);
+await q(`INSERT INTO telemetry_snapshot (source, plate, fleet_id, captured_at, polled_at, status, raw)
+         VALUES ('uber','L30002','ecosine',$1::timestamptz,$1::timestamptz,'ONLINE',$2::jsonb)`,
+[T(D4, '08:00'), JSON.stringify({ driverInfo: { driverUuid: K, firstName: 'Test', lastName: 'Kilo' } })]);
+for (let m = 480; m <= 600; m += 5) {
+  const hm = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  await q(`INSERT INTO telemetry_snapshot (source, plate, fleet_id, captured_at, polled_at, lat, lng, speed, seat_count)
+           VALUES ('fms','L30002','ecosine',$1::timestamptz,$1::timestamptz,25.20,55.30,0,0)`, [T(D4, hm)]);
+  if (m % 10 === 0) {
+    await q(`INSERT INTO telemetry_snapshot (source, plate, fleet_id, captured_at, polled_at, lat, lng, speed, seat_occupied)
+             VALUES ('cabman','L30002','ecosine',$1::timestamptz + interval '20 seconds',$1::timestamptz,25.30,55.38,0,false)`, [T(D4, hm)]);
+  }
+}
+const s4 = await get(`/api/driver/day?id=${K}&day=${D4}`);
+const w4 = s4.movement?.windows?.[0];
+check('a car with two trackers is read from one — the one with more positions — and the other is counted, not summed into phantom km',
+  new Set(s4.fixes.map((f) => f.source)).size === 1 && w4?.second_tracker?.kept === 'fms'
+  && w4?.second_tracker?.dropped?.[0]?.source === 'cabman' && s4.movement.totals.km < 1,
+  JSON.stringify({ w: w4, km: s4.movement?.totals?.km, sources: [...new Set(s4.fixes.map((f) => f.source))] }));
+
+/* Today: the live feed stopped answering for Oscar. */
+const backO = Math.max(2, Math.min(40, sinceMidnight - 1));
+if (backO > 9) {
+  await q(`INSERT INTO driver_status_event (platform, driver_ext_id, at, status, status_raw, fleet_id) VALUES ('uber',$1,$2::timestamptz,'online','DRIVER_STATUS_ONLINE','ecosine')`, [O, ago(backO)]);
+  await q(`INSERT INTO driver_status_now (platform, driver_ext_id, fleet_id, status, status_raw, status_at, observed_at, plate)
+           VALUES ('uber',$1,'ecosine','online','DRIVER_STATUS_ONLINE',$2::timestamptz,$2::timestamptz,'L30003')`, [O, ago(backO)]);
+  const so = await get(`/api/driver/day?id=${O}&day=${today}`);
+  const lastO = so.status_spans?.at(-1);
+  check('a live feed that stopped answering is not "still online now": the spell ends where the feed last answered, and says so',
+    lastO && lastO.open_ended !== true && lastO.feed_stale === true && /last answered/.test(so.status_stale || ''),
+    JSON.stringify({ last: lastO, stale: so.status_stale }));
+} else {
+  console.log('  · (the stale-feed check needs ten minutes of today; it is constructed after 00:10 Dubai)');
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

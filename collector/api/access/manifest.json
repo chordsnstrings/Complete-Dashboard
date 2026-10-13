@@ -1461,7 +1461,13 @@
     "class": "BK",
     "paths": [
      "trips",
-     "movement.windows[].shared"
+     "movement.windows[].shared",
+     "movement.windows[].from",
+     "movement.windows[].to",
+     "movement.windows[].core_from",
+     "movement.windows[].core_to",
+     "movement.windows[].basis",
+     "movement.others"
     ]
    },
    {
@@ -1500,7 +1506,9 @@
      "movement.runs",
      "movement.totals",
      "movement.outside_fixes",
-     "movement.absent"
+     "movement.absent",
+     "movement.windows[].second_tracker",
+     "movement.others"
     ]
    },
    {

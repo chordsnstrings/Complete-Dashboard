@@ -17,7 +17,7 @@ import { win, winDays } from './window.js';
    drifted into the same defect at once; see the module header for the
    measurement. */
 import { onlineSpansSql } from './online_span_sql.js';
-import { SPANS_SQL } from './status_routes.js';
+import { SPANS_SQL, STALE_AFTER_MIN } from './status_routes.js';
 import { seatOf } from './where_routes.js';
 import { statusSpans, custodyWindows, carRuns, movementSegments, movementTotals } from './day_movement.js';
 /* "L1 and L2" for a sentence; the page's own helper lives in the browser. */
@@ -2830,25 +2830,45 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const limit = Math.max(0, Math.min(1440, nowMin));
     const statusRows = await q(SPANS_SQL, p);
     const statusAll = statusSpans(statusRows, dayStartMs, isToday ? nowMs : null);
+    /* A LIVE FEED THAT STOPPED ANSWERING IS NOT A DRIVER STILL ONLINE. The
+       last span runs to now() whatever the feed is doing; /api/status/driver
+       marks the same status stale after STALE_AFTER_MIN, and this page did
+       not — it drew "online … now" and stretched the car's custody across the
+       dead stretch (review, 2026-10-13). Closed where the feed last saw him. */
+    let statusStale = null;
+    const lastSt = statusAll[statusAll.length - 1];
+    if (isToday && lastSt?.open_ended) {
+      const [obs] = await q(`SELECT max(observed_at) AS at FROM driver_status_now WHERE driver_ext_id = ANY($1)`, [d.keys]);
+      const age = obs?.at ? (nowMs - new Date(obs.at).getTime()) / 60000 : null;
+      if (age == null || age > STALE_AFTER_MIN) {
+        const seen = obs?.at ? Math.max(lastSt.s, Math.min(lastSt.e, Math.floor((new Date(obs.at).getTime() - dayStartMs) / 60000))) : lastSt.s;
+        lastSt.e = seen; lastSt.open_ended = false; lastSt.feed_stale = true;
+        statusStale = obs?.at
+          ? `Uber’s live feed last answered for this driver at ${String(Math.floor(seen / 60)).padStart(2, '0')}:${String(seen % 60).padStart(2, '0')}, so nothing after that is known from it`
+          : 'Uber’s live feed holds no current answer for this driver, so the last status is not known to still hold';
+      }
+    }
     /* The cars he could have been in: his bookings' that day, the car Uber's
-       live record and roster have him in, and the cars his bookings put him
-       in the week around it. Only candidates — custody is decided by the
-       evidence below, not by this list. */
+       live record and roster have him in, the cars his bookings put him in the
+       week around it — and every car UBER'S OWN STATUS ROWS name him in that
+       day, found by his id through the (source, polled_at) index. Only
+       candidates: custody is decided by the evidence below. */
     const candidates = new Set(trips.map((t) => t.plate).filter(Boolean));
     for (const r of await q(
       `SELECT plate FROM vehicle_driver_day
         WHERE driver_ext_id = ANY($1) AND day BETWEEN $2::date - 7 AND $2::date + 1
        UNION SELECT plate FROM driver_status_now WHERE driver_ext_id = ANY($1)
-       UNION SELECT plate FROM driver_platform_state WHERE driver_ext_id = ANY($1)`, p)) {
+       UNION SELECT plate FROM driver_platform_state WHERE driver_ext_id = ANY($1)
+       UNION SELECT DISTINCT plate FROM telemetry_snapshot
+        WHERE source = 'uber'
+          AND polled_at >= (($2::date - 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+          AND polled_at <  (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai') + interval '1 hour'
+          AND raw->'driverInfo'->>'driverUuid' = ANY($1)`, p)) {
       if (r.plate) candidates.add(r.plate);
     }
     const mins = (ts) => Math.floor((new Date(ts).getTime() - dayStartMs) / 60000);
-    /* Uber's status rows in those cars, the day and the evening before (a
-       status that began yesterday is in force at midnight). Only ONLINE and
-       ONTRIP are evidence of working IN the car; OFFLINE only says the app
-       had the vehicle against the account, which two drivers of one shared
-       car can both have overnight. */
-    const uberRows = candidates.size ? await q(
+    /* Uber's status rows in those cars, the day and the day before. */
+    const uberAll = candidates.size ? await q(
       `SELECT plate, captured_at, upper(coalesce(status, '')) AS status,
               raw->'driverInfo'->>'driverUuid' AS who_id,
               nullif(btrim(concat_ws(' ', raw->'driverInfo'->>'firstName', raw->'driverInfo'->>'lastName')), '') AS who_name
@@ -2857,6 +2877,16 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
           AND captured_at >= (($2::date - 1)::timestamp AT TIME ZONE 'Asia/Dubai')
           AND captured_at <  (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
         ORDER BY captured_at`, [[...candidates], day]) : [];
+    /* THE STATE IN FORCE AT MIDNIGHT, PER CAR — ONE ROW, WHOEVER IT NAMES.
+       The first version clamped EVERY working row from yesterday to 00:00, so
+       a day man who drove the car yesterday 07:00–15:00 was "in it from
+       midnight" today and given the night man's shift (review, 2026-10-13).
+       Before midnight only the LAST row per car counts, OFFLINE included — an
+       OFFLINE at 15:00 yesterday ends the 07:00 ONLINE — and it is evidence
+       at 00:00 only if it is a working status. */
+    const inForce = new Map();
+    for (const r of uberAll) if (mins(r.captured_at) < 0) inForce.set(r.plate, r);
+    const uberRows = uberAll.filter((r) => mins(r.captured_at) >= 0 || inForce.get(r.plate) === r);
     const keySet = new Set((d.keys || []).map(String));
     const working = (st) => st && st !== 'OFFLINE';
     const own = [];
@@ -2889,9 +2919,27 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
         others.push({ plate: t.plate, s: t.s, e: t.e == null ? t.s : Math.max(t.s, t.e), who: t.driver_name || null, who_id: t.driver_ext_id || null, kind: 'booking' });
       }
     }
-    const windows = custodyWindows({ own, others, limit: isToday ? limit : 1440,
-      online: [...online.map((o) => ({ s: o.s, e: o.e })),
-        ...statusAll.filter((x) => x.status !== 'offline').map((x) => ({ s: x.s, e: x.e }))] });
+    /* THE SPELLS HE WAS WORKING, from the record that knows each part of the
+       day. Where Uber's live feed covers the day it decides — it is current
+       and it says OFFLINE, which the log-in record's heartbeat cannot; before
+       the live feed's first word, the log-in record. A log-in span that ran
+       to midnight only because no later event ever arrived (closed_by 'day')
+       is a claim, not a spell: it counts from its start only (review,
+       2026-10-13 — it had stretched a car's custody to midnight). */
+    const liveStart = statusAll.length ? statusAll[0].s : 1440;
+    const spells = [
+      ...statusAll.filter((x) => x.status !== 'offline').map((x) => ({ s: x.s, e: x.e })),
+      ...online.filter((o) => o.s < liveStart).map((o) => ({ s: o.s,
+        e: Math.min(liveStart, o.open_ended && o.closed_by === 'day' ? o.s : o.e) })),
+    ];
+    const windows = custodyWindows({ own, others, spells, limit: isToday ? limit : 1440 });
+    /* Other drivers in his cars between his first and last hour in them,
+       said on the page — the hours they explain are not shown as his. */
+    const othersInSpells = others.filter((o) => {
+      const mine = windows.filter((w) => w.plate === o.plate);
+      return mine.length && o.s <= Math.max(...mine.map((w) => w.to)) && (o.e ?? o.s) >= Math.min(...mine.map((w) => w.from));
+    })
+      .map((o) => ({ plate: o.plate, who: o.who || null, who_id: o.who_id || null, s: o.s, e: o.e ?? o.s, kind: o.kind }));
 
     /* Where the car was, minute-bucketed. Returned as fixes rather than as
        per-gap rollups because the gaps are computed on the client from the
@@ -2933,8 +2981,22 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          FMS's passenger count at 1 or more; null where the fix has none. */
       passenger: seatOf(f), area: f.area || null, area_votes: f.area_votes ?? null, area_seen: f.area_seen ?? null,
     }));
-    const fixes = plateFixes.filter((f) => windows.some((w) => w.plate === f.plate && f.m >= w.from && f.m <= w.to));
+    let fixes = plateFixes.filter((f) => windows.some((w) => w.plate === f.plate && f.m >= w.from && f.m <= w.to));
     const outsideFixes = plateFixes.length - fixes.length;
+    /* ONE TRACKER PER CAR. Where a car carries both CABMAN and FMS they put it
+       a median 12.7–25.6 km apart at the same minute (the trap "Check the
+       plates with both providers before combining them"), and alternating
+       between them is a car crossing the city every minute. The tracker with
+       more positions in his hours is kept; the other is counted and said. */
+    const secondTracker = new Map();
+    for (const plate of plates) {
+      const by = new Map();
+      for (const f of fixes) if (f.plate === plate) by.set(f.source, (by.get(f.source) || 0) + 1);
+      if (by.size < 2) continue;
+      const [keep, ...rest] = [...by.entries()].sort((x, y) => y[1] - x[1]);
+      secondTracker.set(plate, { kept: keep[0], dropped: rest.map(([source, n]) => ({ source, fixes: n })) });
+      fixes = fixes.filter((f) => f.plate !== plate || f.source === keep[0]);
+    }
 
     /* WHERE the shift began, which Uber will not tell us.
        ─────────────────────────────────────────────────────────────────────
@@ -2956,6 +3018,14 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const ONLINE_FIX_TOLERANCE_MIN = 30;
     const namedFixes = fixes.filter((f) => f.area);
     const placeAt = (minute) => {
+      /* The car's position is his only inside the hours it was his; a minute
+         outside them is not placed from somebody else's shift, and says so
+         (review, 2026-10-13: it borrowed a reason about the whole day). */
+      if (!windows.some((w) => minute >= w.from - ONLINE_FIX_TOLERANCE_MIN && minute <= w.to + ONLINE_FIX_TOLERANCE_MIN)) {
+        return { where: null, why: windows.length
+          ? 'no car is on record as his at that moment, so no tracker can place him'
+          : 'no car is on record as his on this day, so no tracker can place him' };
+      }
       if (!fixes.length) {
         return { where: null, why: plates.length
           ? 'the tracker recorded no position for this car on this day'
@@ -3004,7 +3074,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     /* The live feed's spells, each one that began a working stretch (after
        offline, or the day's first) placed the same way as the log-in
        record's: the tracker's fix nearest in time, within 30 minutes. */
-    const statusPlaced = statusAll.map((x, i) => ((x.status !== 'offline'
+    const statusPlaced = statusAll.map((x, i) => ((x.status !== 'offline' && !x.carried_in
       && (i === 0 || statusAll[i - 1].status === 'offline')) ? { ...x, went_online: placeAt(x.s) } : x));
 
     /* The day as the car saw it (api/day_movement.js). */
@@ -3012,16 +3082,17 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const movement = {
       windows: windows.map((w) => ({ plate: w.plate, from: w.from, to: w.to, core_from: w.core_from, core_to: w.core_to,
         stretched: w.stretched, basis: w.basis, overlap: !!w.overlap,
-        shared: w.shared.map((x) => ({ who: x.who, who_id: x.who_id || null, s: x.s, e: x.e })) })),
+        shared: w.shared.map((x) => ({ who: x.who, who_id: x.who_id || null, s: x.s, e: x.e })),
+        second_tracker: secondTracker.get(w.plate) || null })),
+      others: othersInSpells,
       runs,
       segments: movementSegments(fixes, windows),
       totals: movementTotals(fixes, windows, runs),
       outside_fixes: outsideFixes,
       absent: windows.length ? (fixes.length ? null
         : `the tracker in ${listWordsPlain(plates)} reported no position while ${d.name || 'this driver'} had it`)
-        : candidates.size
-          ? 'no car is on record as his on this day — no booking names one, and Uber’s own record does not show him working in any of the cars he usually drives'
-          : 'no car is on record as his on this day — no booking names one, and Uber has never recorded him in a vehicle',
+        /* What was CHECKED, never "never" (review, 2026-10-13). */
+        : 'no car is on record as his on this day — no booking of his names one, and Uber’s status record for the day shows him working in none',
       basis: 'A car is this driver’s from his first to his last evidence in it — his bookings, and Uber’s own '
         + 'status record, which names the vehicle the app had him in — stretched to the edges of the online spell that '
         + 'evidence sits in, and never across another driver’s evidence in the same car. Positions outside those '
@@ -3066,6 +3137,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       status_spans: statusPlaced,
       status_basis: 'Uber’s live status feed, read every few minutes: online, on a trip, offline. It runs '
         + 'ahead of the log-in record above it, which Uber serves to a collector that runs every few hours.',
+      status_stale: statusStale,
       movement,
       today: isToday,
       now_min: isToday ? limit : null,

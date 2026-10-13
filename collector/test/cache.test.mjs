@@ -36,6 +36,8 @@ app.get('/api/drivers/identity-links', (_q, res) => { calls++; res.json({ n: cal
 /* The credential banner, which a Settings save rewrites (api/save_check.js). */
 app.get('/api/auth', (_q, res) => { calls++; res.json({ n: calls }); });
 app.post('/api/thing', (_q, res) => { calls++; res.json({ n: calls }); });
+/* One driver's day: today is live, every other day is a stored record. */
+app.get('/api/driver/day', (_q, res) => { calls++; res.json({ n: calls }); });
 const server = app.listen(0);
 const port = server.address().port;
 // The cache re-requests stale keys on itself, so it needs the real port.
@@ -355,6 +357,21 @@ check('and the hit rate is visible, so a cache that stopped working can be seen'
 
 /* Disabled means disabled — this is the lever for diagnosing a page that looks
    stale, and a lever that does not move is worse than none. */
+/* TODAY'S DAY OF ONE DRIVER IS NEVER CACHED (2026-10-13). It carries Uber's
+   live status and the car's position to the minute; a cached copy froze
+   "online … now" for a driver who had since gone offline (the independent
+   review of the day page). Any other day is a stored record and caches. */
+{
+  const DUBAI = new Date(Date.now() + 4 * 3600_000);
+  const todayIso = `${DUBAI.getUTCFullYear()}-${String(DUBAI.getUTCMonth() + 1).padStart(2, '0')}-${String(DUBAI.getUTCDate()).padStart(2, '0')}`;
+  const t1 = await get(`/api/driver/day?id=x&day=${todayIso}`);
+  const t2 = await get(`/api/driver/day?id=x&day=${todayIso}`);
+  check("today's day of a driver reaches the route every time", t2.body.n === t1.body.n + 1 && t2.cache !== 'hit', JSON.stringify([t1, t2]));
+  const p1 = await get('/api/driver/day?id=x&day=2026-01-15');
+  const p2 = await get('/api/driver/day?id=x&day=2026-01-15');
+  check('…and a past day is still served from the cache', p2.body.n === p1.body.n && p2.cache === 'hit', JSON.stringify([p1, p2]));
+}
+
 const app2 = express();
 app2.use('/api', responseCache({ pool, enabled: false }));
 let n2 = 0;
