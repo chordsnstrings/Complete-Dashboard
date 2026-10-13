@@ -4779,6 +4779,59 @@ untouched, and nothing projected is ever added into `accounted`.
   plans left); the Month target page's recent pace runs its earning per
   AVERAGE day over the weights left. Both are summary.pace_basis = 'plan'.
 
+* **A FIELD THE GATE BLANKED LOOKS EXACTLY LIKE A FIELD THAT WAS NEVER
+  THERE — AND A NEW FIELD IS ONLY BLANKED IF THE MANIFEST NAMES IT.** The
+  shaper (api/access/shape.js) answers a role that lacks a class with a 200
+  whose withheld fields are null. A null position is also what a dead
+  tracker looks like, so a reader of the body alone says "no tracker
+  reported" — a reason that is not the true one. Read the classes it
+  withheld from `x-fm-withheld` (and `_withheld` on an object body); the
+  assistant's `get()` does (api/agent_tools.js), and `live_cars` says
+  "withheld from your role". The other half: adding a field to an existing
+  route adds nothing to its manifest entry. `place` (the area name) on
+  /api/live is a location, and until `[].place` sat beside `[].lat`/`[].lng`
+  under LOC, a Finance manager — who holds no locations — was handed "Deira"
+  for every car (proved by revert in test/agent_reach.test.mjs). Every new
+  field on a classed route goes into manifest.json in the same commit.
+
+* **/api/live IS NOT "ONE ROW PER CAR WITH A POSITION".** Measured on
+  production 2026-10-13: 268 rows — 176 CABMAN, 70 FMS, and 22 Uber
+  driver-status rows that carry no coordinates at all; 179 of them stale
+  (no fix in 30 minutes), the oldest last heard from about 2.5 years ago.
+  76 cars had a fresh position. Count positions after `lat IS NOT NULL`,
+  and never call a stale row "where the car is" — it is where the tracker
+  last spoke, with an age.
+
+* **A MANIFEST PATH WRITTEN `list[key=value]` BLANKS NOTHING — NOT
+  FIXED, FOUND 2026-10-13.** api/access/shape.js `parsePath` splits on dots
+  and peels trailing `[]`; it has no selector syntax, so
+  `components[category=cash_collected]` is one literal key no object
+  carries, and `transform` walks past it. Four entries are written this
+  way (measured by reading every path in manifest.json):
+  /api/driver/earnings `components[category=cash_collected]` (CASH), and
+  /api/driver/standing `metrics[key=revenue]` (EARN),
+  `metrics[key=completion|cancel]` (COND) and five `metrics[key=…]` (BK).
+  So, on the pages, a role holding EARN but not CASH (Analyst, Operations
+  manager) is shown the cash-collected statement lines, and on a driver's
+  standing a Dispatcher, Fleet technician or Clerk sees the revenue
+  percentile and a Finance manager, Fleet technician or Clerk the completion
+  and cancellation percentiles. The assistant's `platform_statements` drops
+  the cash lines itself when the gate says CASH was withheld (agent_reach
+  §7, proved by revert); the shaper is left as it was, pending the
+  operator's word. Until it is fixed: never write a selector into a path
+  and believe it is enforced — check with a role that lacks the class.
+
+* **A SNAPSHOT TEST THAT SETTLES ON "TWO READS AGREE" CAN SETTLE ON A
+  HALF-LOADED IMAGE.** test/arkiv_classic_frozen.test.mjs failed inside
+  `npm test` and passed alone (2026-10-13): driver/drv-0 activity and
+  territory, the captured HTML differing from the recorded one in one
+  `<img>` and nothing else. The mock's driver photograph is a cloudfront
+  address this sandbox cannot reach; it ends in the onerror swap to the
+  initials, and under the suite's load the failure took longer than two
+  250 ms reads. The settle loop now also waits while any image in view is
+  incomplete. A file that passes alone and fails in the suite is a race to
+  measure, never a flake to re-run.
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`
@@ -9180,6 +9233,7 @@ ask for clarification, and correct itself. Their rulings:
 | `api/agent_guard.js` | the number guard and the placeholder fill |
 | `api/agent_period.js` | the calendar |
 | `api/agent_people.js` | name and plate matching |
+| `api/where_routes.js` | where a car was at a moment or over a stretch (2026-10-13) |
 | `api/agent_model.js` | the model and its fallback |
 | `api/public/agentchat.{js,css}` | the widget |
 | `sql/schema_v103.sql` | three tables: conversation, message, result |
@@ -9203,7 +9257,8 @@ ask for clarification, and correct itself. Their rulings:
 5. A withheld route comes back as the gate's own sentence and is shown under
    the answer. It is never a zero.
 
-**What it can read.** These routes, and nothing else:
+**What it can read.** These routes as built on 2026-10-09, plus the eleven
+of "The second reach" below (2026-10-13), and nothing else:
 - `/api/kpis` (fleet totals);
 - `/api/trips/daily`;
 - `/api/drivers/directory`;
@@ -9215,11 +9270,12 @@ ask for clarification, and correct itself. Their rulings:
 - `/api/unauthorized/summary`.
 
 On top of these it can summarise (sort, top N), compare two results, combine
-results, and build an Excel file. It has nothing for ledger balances and
-statements, live positions, SMS or Yango's weekly summary. Payouts it sees only
-as the Drivers page's column. The prompt tells it to say plainly that it
-cannot see data no tool gives, and never to answer from a nearby figure. That
-rule was not rehearsed against the real model before deploy.
+results, and build an Excel file. Since 2026-10-13 it also reads hours, live
+positions and statuses, the money ledger, platform statements and payouts,
+and where a car was at a time — "The second reach" below. It still has
+nothing for SMS or Yango's weekly summary. The prompt tells it to say plainly
+that it cannot see data no tool gives, and never to answer from a nearby
+figure.
 
 **Measured with the tools, thinking off (2026-10-09).**
 - Time per step: Pro 1.9–3.1 s, Lite 1.6–3.1 s.
@@ -9272,6 +9328,112 @@ rule was not rehearsed against the real model before deploy.
   read it, which is the point of the guard. The widget shows what the
   assistant is doing step by step instead.
 - No other language, on the operator's ruling.
+
+### The second reach — hours, live, money, places (2026-10-13)
+
+The operator: "let the chat have access to Driver online hours, logged in
+time, shift durations or break times · Live car positions or real-time driver
+status · Full ledger balances, driver statement line items, payment
+settlement history · historical location based on time".
+
+Eleven tools, each a GET to a route a page already reads, so a figure is the
+page's figure and the gate judges it as it judges the page:
+
+| tool | reads | answers |
+|---|---|---|
+| `driver_hours` | `/api/driver/daily` | one driver's online, on-job and waiting hours per day, first and last trip; totals over the days that HAVE hours (the hours tile's rule) |
+| `driver_shift` | `/api/driver/day` | one day's log-in sessions, the breaks between them, shift span, longest break, where they went online |
+| `fleet_hours` | `/api/economics/drivers` | every driver's measured online hours, waiting, money per online hour |
+| `start_times` | `/api/online-time` | who came online when; late against a start time read by the server |
+| `live_cars` | `/api/live` | each car's latest position as an area name, live or stale, moving, passenger, driver; a driver's car via Uber's live record |
+| `driver_status` | `/api/status/driver`, `/api/status/fleet` | live Uber status, today's online/on-trip/waiting minutes, fleet counts |
+| `whereabouts` | `/api/where`, `/api/where/fleet` (new) | where a car (or a driver's car) was at a moment or over a stretch: nearest fix, fixes either side, who was driving, stops and areas |
+| `ledger_balances` | `/api/ledger/exposure` | advances and deductions owed, cash held (only with a stated opening), cash taken (a ceiling), exposure against the line |
+| `ledger_entries` | `/api/ledger/entries` | the driver money statement's lines, verification rows left out |
+| `platform_statements` | `/api/driver/earnings` | the platforms' statements: gross, fees, net, tips, cash, Salik; line items or periods |
+| `payouts` | `/api/finance/payouts` | bank transfers from each platform to the company |
+
+**Decisions, and why.**
+- **The model never reads a clock.** "3pm" goes to `resolveClock`
+  (api/agent_period.js), as "last week" goes to `resolvePeriod`. A bare "3"
+  is asked back with 03:00 and 15:00 as buttons; "evening" is read as
+  17:00–21:00 and the reading is said.
+- **A break is time logged OUT between two sessions.** Waiting while logged
+  in is not a break; it is counted inside the logged-in time. Two spans one
+  floored minute apart are one session (12:00:30 off, 12:01:10 on reads as
+  minutes 720 and 721).
+- **Where, in words.** /api/where answers with the gazetteer's area names
+  (api/place_sql.js), the nearest fix within 30 minutes (the tolerance
+  /api/driver/day already uses), and refuses past it with the gap said.
+  Stops are by displacement (10 minutes within 250 m), because FMS fixes
+  often carry no speed. Who was driving comes from the trip in progress in
+  that car, or the same person's trips either side; two different people
+  either side is a handover, said, not chosen.
+- **New route, new manifest entries.** `/api/where` is subject LOC, 'mixed'
+  like /api/track (a one-fleet reader is refused with that reason);
+  `/api/where/fleet` is 'param', so the gate's rewrite narrows its totals.
+  Both are on the cache's NEVER list with /api/live: "where is it now"
+  answered from a cache is the live-map error again. /api/live gained
+  `place`, classed LOC (the trap above).
+- **Hours and minutes read as people say them:** kind `hours` prints
+  "11h 15m" and `min` prints "45 min" in the sentence, the chat table and
+  the Excel header's unit, so 9.07 hours is never read as nine hours and
+  seven minutes.
+
+**Measured on production before building (2026-10-13), the shapes the tools
+read:** `/api/driver/daily` gives hours_online with its basis per day;
+`/api/driver/day` gave 3 online spans and 168 named fixes for one driver on
+11 Oct, with a zero-length span (801–801) the tool drops; `/api/status/fleet`
+162 drivers, 96 with a status, 66 with none; `/api/online-time` 161 people on
+12 Oct, 93 with a log-in; `/api/economics/drivers` 309 people, 98 with
+measured hours; `/api/ledger/entries` for a driver with no lines answers an
+empty register with a person, not an error.
+
+**The review (2026-10-13).** An independent read of the change before it
+shipped found thirteen faults, all fixed, each held by a check in
+agent_reach §7:
+- **Absences read as zeros.** A role holding bookings as totals only (BK:A)
+  had `days_worked: 0` from blanked trips; `driver_status` said "0 min
+  online" for a driver with no day on record; `whereabouts` said "0 stops"
+  over a stretch with a single position. Each figure is now left out with
+  the reason said.
+- **Refusals read as absences.** `live_cars` read the gate's refusal of
+  /api/status/driver as "no car on record"; `start_times` read a withheld
+  late/on-time verdict as "not judged". Both now say "withheld from your
+  role".
+- **A sentence carrying a class past the gate.** `driver_at_why` (the
+  handover sentence) names the trip times either side, so it is classed BK
+  as well as ID. A Fleet technician gets the place and no booking times.
+- **One person read as two.** /api/where compared the trips either side by
+  account (`driver_ext_id`), so a man ending an Uber trip at 15:05 and
+  starting a Bolt one at 16:00 was "a handover". It compares by
+  `coalesce(person_key, driver_ext_id)`.
+- **Midnight.** A session past midnight is cut at the day's edge by
+  /api/driver/day; the tool said a log-out at "24:00" and, next day, a
+  log-in at "00:00". Both edges are now said as what they are ("still logged
+  in at midnight", "already online at midnight").
+- **The pay book's sign.** In /api/ledger/exposure the pay book is the
+  ledger's signed sum, and salary, commission, incentive and reimbursement
+  are written −1 (owed TO the driver) while pay_out is +1. So a negative
+  pay book is money the company owes. `pay_owed_to_driver_aed` is
+  max(0, −pay_book), and a positive one is `paid_beyond_recorded_pay_aed`.
+- **"10 at night"** was read as 10:00 + 12 with the afternoon's rule;
+  "night" now adds 12 only from 6 upward, and 12 at night is midnight.
+- **The guard refusing true sentences.** The platform and fleet checks
+  matched a key by prefix, so `fleet_hours`' `fleet_id` read as a fleet's
+  name; they now match a key's whole words. "11h 15m hours" doubled the
+  unit; a unit word after an hours figure is absorbed.
+- **Cash lines past a role without CASH** — the shaper gap in the traps
+  above; the tool drops them.
+
+**Proved by revert** (test/agent_reach.test.mjs, 58 checks; each count is
+in its header): the manifest's `[].place` removed hands a Finance manager
+area names; `live_cars` ignoring x-fm-withheld says "no tracker" to the
+same person; the raw "3pm" sent to the route loses the moment; the
+one-minute join removed makes a blip a break and the chat says "2 breaks";
+verification rows kept show the production ritual's row as a debt; the hours
+format removed prints 11.25; /api/live without the gazetteer names nothing;
+and each of the review's thirteen fixes, reverted alone, fails its check.
 
 ## The target shared by weekday — built 2026-10-11
 

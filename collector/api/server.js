@@ -91,7 +91,7 @@ import { capacityRoutes } from './capacity_routes.js';
    the same page without either being mistaken for the other. */
 import { payoutRoutes } from './payout_routes.js';
 import { revenueRoutes, receiptRoutes } from './revenue_routes.js';
-import { placeEnds, RATE_SQL, forgone } from './place_sql.js';
+import { placeEnds, placeAt, RATE_SQL, forgone } from './place_sql.js';
 /* The seat-sensor providers and the rule that counts one ride once across
    them. An api/*_sql.js module, so test/mount.mjs injects it by discovery. */
 import { occCountsOnce, occSourceLabel, occBySource, occCoverageBySource, OCC_DEDUPE_RULE,
@@ -102,6 +102,9 @@ import { performerRoutes } from './performer_routes.js';
 import { compareRoutes } from './compare_routes.js';
 import { performanceRoutes } from './performance_routes.js';
 import { statusRoutes } from './status_routes.js';
+/* Where a car was at a moment or over a stretch, in the gazetteer's words —
+   the assistant's "historical location based on time" (2026-10-13). */
+import { whereRoutes } from './where_routes.js';
 import { samePersonRoutes } from './sameperson_routes.js';
 import { registerRoutes } from './register_routes.js';
 /* Folding two people into one, and moving the money with them — the operation
@@ -1953,7 +1956,13 @@ app.get('/api/live', wrap(async (_, res) => res.json(await q(
           (now() - s.captured_at > ${FIX_FRESH}) AS stale,
           round(extract(epoch FROM now() - s.captured_at) / 60)::int AS fix_age_min,
           round(extract(epoch FROM now() - s.polled_at) / 60)::int AS poll_age_min,
-          cd.driver_name AS current_driver, cd.as_of AS driver_as_of
+          cd.driver_name AS current_driver, cd.as_of AS driver_as_of,
+          /* THE GROUND IT IS ON, named by the fleet's own history
+             (api/place_sql.js). Added 2026-10-13 for the assistant, which is
+             asked "where is L19262" and must not answer with a decimal pair;
+             the map ignores it. Withheld with lat/lng from a role without
+             locations — the manifest's LOC paths name it. */
+          ${placeAt('s.lat', 's.lng')} AS place
    /* The newest FIX, not the newest poll.
       ─────────────────────────────────────────────────────────────────────
       CABMAN returns the last known position of every vehicle on every cycle,
@@ -7036,6 +7045,9 @@ performanceRoutes(app, { q, wrap });
    prefix is on api/cache.js's NEVER list, and a cached live status is a wrong
    live status. */
 statusRoutes(app, { q, wrap });
+
+/* Where a car was, when — api/where_routes.js. */
+whereRoutes(app, { q, wrap });
 
 /* The pairs a rule cannot settle, and a person's verdict on them. A phone or
    an email merges on its own; a name that sits inside another name is a

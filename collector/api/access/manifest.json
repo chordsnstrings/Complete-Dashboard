@@ -3782,7 +3782,8 @@
     "class": "LOC",
     "paths": [
      "[].lat",
-     "[].lng"
+     "[].lng",
+     "[].place"
     ]
    },
    {
@@ -3800,7 +3801,7 @@
   ],
   "fleetKey": "fleet_id",
   "cap": null,
-  "notes": "api/server.js:1805-1868: top-level array, one row per plate (latest fix): plate, fleet_id, source, captured_at, polled_at, lat, lng, speed, status, seat_occupied, seat_count, seat_source, ac_on, odometer, fuel_level, stale, fix_age_min, poll_age_min, current_driver, driver_as_of. Takes NO parameters at all \u2014 ?fleet is ignored, every vehicle of both fleets is returned; rows carry fleet_id so the sh"
+  "notes": "api/server.js:1805-1868: top-level array, one row per plate (latest fix): plate, fleet_id, source, captured_at, polled_at, lat, lng, speed, status, seat_occupied, seat_count, seat_source, ac_on, odometer, fuel_level, stale, fix_age_min, poll_age_min, current_driver, driver_as_of. Takes NO parameters at all \u2014 ?fleet is ignored, every vehicle of both fleets is returned; rows carry fleet_id so the sh 2026-10-13: each row also carries place {area, votes, seen} \u2014 the gazetteer's name for the ground at lat/lng (api/place_sql.js placeAt), for the chat assistant's live_cars tool. A location, so it is under LOC with lat/lng: a role without locations gets all three nulled."
  },
  {
   "method": "GET",
@@ -6172,6 +6173,106 @@
   "fleetKey": "",
   "cap": null,
   "notes": "api/server.js:1872-1881: 400 without ?plate; otherwise a top-level array of fixes {captured_at, lat, lng, speed, status, seat_occupied, ignition, source} for that plate over the window. Ignores ?fleet and the rows carry no fleet key: ANY plate of either fleet can be traced by anyone who can reach the route. A fleet-scoped caller needs the plate resolved to its fleet (telemetry_snapshot.fleet_id) b"
+ },
+ {
+  "method": "GET",
+  "path": "/api/where",
+  "subject": "LOC",
+  "carries": [
+   "BK",
+   "ID",
+   "LOC",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "held_by[].name",
+     "held_by[].driver_ext_id",
+     "driver_at.name",
+     "driver_at.driver_ext_id",
+     "driver_at_why"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "held_by[].trips",
+     "held_by[].first_trip",
+     "held_by[].last_trip",
+     "driver_at.trip_from",
+     "driver_at.trip_to",
+     "driver_at.trip_before",
+     "driver_at.trip_after",
+     "driver_at.platform",
+     "driver_at_why"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "position.speed",
+     "position.motion",
+     "position.passenger",
+     "before.speed",
+     "before.motion",
+     "before.passenger",
+     "after.speed",
+     "after.motion",
+     "after.passenger",
+     "first.speed",
+     "first.motion",
+     "first.passenger",
+     "last.speed",
+     "last.motion",
+     "last.passenger"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/where_routes.js (2026-10-13). One car, by ?plate, on ?day, either at one moment (?at=HH:MM: {mode:'moment', position (the nearest fix within tolerance_min, with area/area_votes/area_seen from the gazetteer, lat/lng, speed, motion, passenger, source) or null with position_why, gap_min, before, after, driver_at {name, driver_ext_id, basis on_trip|between_their_trips, trip times, platform} or null with driver_at_why (which names drivers), fixes_that_day}) or over a stretch (?from/?to or the whole day: {mode:'span', fixes, first, last, distance_km, stops[{from,to,minutes,area,lat,lng,fixes,longest_silence_min}], stopped_min, areas_in_order, longest_silence_min, why}). Always: plate, day, fleet_id, held_by[{name, driver_ext_id, trips, first_trip, last_trip, primary}] from vehicle_driver_day, tolerance_min, place_basis. Subject LOC like /api/track: a role without locations is refused the route, not handed a stripped answer. 'mixed' like /api/track: the plate is the key and the handler does not filter by fleet, so a one-fleet reader is refused with that reason. Driver names are ID; trip times are BK; speed/motion/seat are VEH, as /api/track classes them. driver_at_why is under BOTH ID and BK: it names drivers and quotes their booking times (review, 2026-10-13 \u2014 a Fleet technician, who holds ID but bookings only as totals, read the times through it)."
+ },
+ {
+  "method": "GET",
+  "path": "/api/where/fleet",
+  "subject": "LOC",
+  "carries": [
+   "ID",
+   "LOC",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "cars[].held_by",
+     "cars[].held_by_id"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "cars[].speed",
+     "cars[].motion",
+     "cars[].passenger"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [
+   "cars[]"
+  ],
+  "fleetKey": "fleet_id",
+  "cap": null,
+  "notes": "api/where_routes.js (2026-10-13). Every car at one moment: ?day, ?at=HH:MM, ?fleet honoured in the SQL (f.fleet_id = $4), so the totals and by_area are computed over the fleet asked and the gate's rewrite for a one-fleet reader narrows all of them. Body {day, at, fleet, tolerance_min, cars[{plate, fleet_id, at, time, lat, lng, area, area_votes, area_seen, speed, motion, passenger, source, gap_min, held_by, held_by_id}], totals{cars, moving, stopped, with_passenger, unnamed_ground}, by_area[{area, cars}], basis}."
  },
  {
   "method": "GET",

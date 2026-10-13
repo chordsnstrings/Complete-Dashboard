@@ -48,6 +48,12 @@ const lookup = (r, row, key) => {
   return { ok: true, value: r.values[key], kind: (r.kinds || {})[key] };
 };
 const MARK = /\[\[\s*(table|file)\s+(r\d+)\s*\]\]/gi;
+/* Does a figure's own name say which platform or fleet it is? Every word of
+   it counts, not only the first: payouts are keyed uber_ecosine_aed, and
+   "Uber paid Ecosine {{r4.uber_ecosine_aed}}" is a true sentence the first
+   version refused on its fleet half, because the key did not START with
+   ecosine (review, 2026-10-13). */
+const keyNames = (key, word) => String(key).split('_').includes(word);
 
 /* The pages' formatting, so a figure reads the same in the chat as on the
    page it came from. */
@@ -57,7 +63,20 @@ export function formatValue(v, kind) {
     return kind === 'date' && /^\d{4}-\d{2}-\d{2}/.test(v) ? rangeLabel(v.slice(0, 10), v.slice(0, 10)) : String(v);
   }
   if (kind === 'date') return /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? rangeLabel(String(v).slice(0, 10), String(v).slice(0, 10)) : String(v);
+  /* A clock time is already words ("15:04"); it is never a number to format. */
+  if (kind === 'time') return String(v);
   const n = Number(v);
+  /* Hours and minutes as a person says them — "9h 04m", "45 min" — rather
+     than 9.07, which reads as nine hours and seven minutes and is not
+     (2026-10-13, with the hours tools). The value stays a number underneath,
+     so the Excel file and summarise still add it up. */
+  if (kind === 'hours' || kind === 'min') {
+    if (!Number.isFinite(n)) return String(v);
+    const total = Math.round(Math.abs(kind === 'hours' ? n * 60 : n));
+    const sg = n < 0 ? '−' : '';
+    if (total < 60) return `${sg}${total} min`;
+    return `${sg}${Math.floor(total / 60).toLocaleString('en-US')}h ${String(total % 60).padStart(2, '0')}m`;
+  }
   const f = (d) => Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
   const sign = n < 0 ? '−' : '';
   switch (kind) {
@@ -162,7 +181,7 @@ export function checkReply(text, results, { userTexts = [], args = [], driverNam
     const low = sentence.replace(PH, ' ').toLowerCase();
     for (const p of PLATFORMS) {
       if (!new RegExp(`\\b${p}\\b`).test(low)) continue;
-      const fine = cited.some(({ r, key }) => r.filters?.platform === p || key.startsWith(`${p}_`)
+      const fine = cited.some(({ r, key }) => r.filters?.platform === p || keyNames(key, p)
         || (r.filters?.grouped_by === 'platform' && key.includes(p)) || r.kind === 'period' || r.kind === 'lookup');
       if (!fine) {
         const c = cited[0];
@@ -172,7 +191,7 @@ export function checkReply(text, results, { userTexts = [], args = [], driverNam
     }
     for (const f of FLEETS) {
       if (!new RegExp(`\\b${f}\\b`).test(low)) continue;
-      const fine = cited.some(({ r, key }) => r.filters?.fleet === f || key.startsWith(`${f}_`)
+      const fine = cited.some(({ r, key }) => r.filters?.fleet === f || keyNames(key, f)
         || (r.filters?.grouped_by === 'fleet' && key.includes(f)) || r.kind === 'period' || r.kind === 'lookup');
       if (!fine) {
         problems.push(`a sentence says "${f}" but cites ${cited[0].r.id} (${cited[0].r.definition}), which covers ${cited[0].r.filters?.fleet || 'both fleets'}`);
@@ -192,7 +211,9 @@ export function checkReply(text, results, { userTexts = [], args = [], driverNam
      rehearsal of 2026-10-09 showed the model adding its own as well:
      "16.9%%", "AED 412,126.99 AED". A unit is only absorbed when it is the
      figure's own; "AED {{r1.trips}}" is left for the reader to see. */
-  const UNIT = /(AED\s*)?\{\{\s*(r\d+)\.(?:rows\[(\d+)\]\.)?([a-z0-9_]+)\s*\}\}(\s*(?:%|percent\b|per cent\b|AED\b|dirhams?\b|km\b))?/gi;
+  /* Hours and minutes too (2026-10-13): the server writes "11h 15m" and
+     "45 min", and "{{r1.online_hours}} hours" would read "11h 15m hours". */
+  const UNIT = /(AED\s*)?\{\{\s*(r\d+)\.(?:rows\[(\d+)\]\.)?([a-z0-9_]+)\s*\}\}(\s*(?:%|percent\b|per cent\b|AED\b|dirhams?\b|km\b|hours?\b|hrs?\b|minutes?\b|mins?\b))?/gi;
   const filled = raw.replace(UNIT, (all, pre, rid, row, key, post) => {
     const f = lookup(results.get(rid), row, key);
     if (!f.ok) return '(not available)';
@@ -201,7 +222,7 @@ export function checkReply(text, results, { userTexts = [], args = [], driverNam
     const p0 = pre || ''; const p1 = post || '';
     const dropPre = kind === 'aed' && /AED/i.test(p0);
     const dropPost = (kind === 'aed' && /AED|dirham/i.test(p1)) || ((kind === 'pct' || kind === 'pts') && /%|percent|per cent/i.test(p1))
-      || (kind === 'km' && /km/i.test(p1));
+      || (kind === 'km' && /km/i.test(p1)) || ((kind === 'hours' || kind === 'min') && /hour|hr|minute|min/i.test(p1));
     return `${dropPre ? '' : p0}${v}${dropPost ? '' : p1}`;
   });
   const text2 = filled.replace(ANY_BRACES, '(not available)');

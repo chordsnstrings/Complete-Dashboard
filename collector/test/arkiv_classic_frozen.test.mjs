@@ -136,6 +136,17 @@ async function captureIn(ctx, route) {
   for (let i = 0; i < 160; i++) {
     await page.waitForTimeout(250);
     if (await page.$('#view .skel')) continue;
+    /* NOR AN IMAGE STILL ON ITS WAY. The mock's driver photograph is a
+       cloudfront address this sandbox cannot reach, so it always ends in the
+       onerror swap to the "could not be loaded" initials — and under the full
+       suite's load that failure can take longer than two 250 ms reads, which
+       then agree on the half-way state. Measured 2026-10-13: driver/drv-0
+       activity and territory failed inside `npm test` and passed alone, and
+       the captured HTML differed from the recorded one in exactly that <img>
+       and nothing else. Only images in view count: a lazy one below the fold
+       never starts and would hold the capture for its whole budget. */
+    if (await page.evaluate(() => [...document.querySelectorAll('#view img')]
+      .some((i) => !i.complete && i.getBoundingClientRect().top < innerHeight))) continue;
     html = await page.evaluate(async () => {
       await document.fonts.ready;
       const v = document.querySelector('#view').cloneNode(true);

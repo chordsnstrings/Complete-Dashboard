@@ -98,6 +98,11 @@ app.get('/api/live', (_, r) => r.json(plates.map((p, i) => ({
   fix_age_min: i === 7 ? 581000 : i, poll_age_min: 1,
   fuel_level: i % 3 === 2 ? null : 40 + i * 5, ac_on: i % 2 === 0, odometer: 190000 + i * 1400,
   current_driver: drivers[i], driver_as_of: '2026-08-21',
+  /* The gazetteer's name for the ground (2026-10-13), and one row with none —
+     ground the fleet has never named. Deterministic rather than from rnd(),
+     so adding it does not move the pinned random stream every other fixture
+     draws from (test/arkiv_classic_frozen.test.mjs). */
+  place: i % 5 === 4 ? null : { area: ['Deira', 'Al Barsha 1', 'Dubai Marina', 'Business Bay'][i % 4], votes: 120 + i, seen: 200 + i },
 }))));
 
 /* The replay day picker reached exactly 400 rows in production, which is what

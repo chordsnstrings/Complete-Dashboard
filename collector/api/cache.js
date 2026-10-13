@@ -92,6 +92,11 @@ const MAX_BYTES = Number(process.env.CACHE_MAX_BYTES || 64 * 1024 * 1024);
 const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/track', '/api/settings', '/api/rollups',
   '/api/status', '/api/health', '/api/ready', '/api/probe', '/api/cache-stats',
   '/api/coverage/verified',
+  /* WHERE A CAR WAS (api/where_routes.js, 2026-10-13) — the same positions
+     /api/live and /api/track read, and asked about today as often as about
+     last week: "where is L19262 now" answered from a cache is the live-map
+     error again. Two small index reads per call; nothing worth keeping. */
+  '/api/where',
   /* THE TWO A PERSON'S OWN CLICK CHANGES.
      ───────────────────────────────────────────────────────────────────────
      Every other entry above is here because the answer moves faster than the

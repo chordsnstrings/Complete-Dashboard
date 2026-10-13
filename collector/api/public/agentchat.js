@@ -57,16 +57,23 @@ function cell(v, kind) {
     const d = new Date(`${String(v).slice(0, 10)}T00:00:00Z`);
     return `${DSHORT[(d.getUTCDay() + 6) % 7]} ${d.getUTCDate()} ${MSHORT[d.getUTCMonth()]}`;
   }
+  if (kind === 'time') return String(v);
   if (!num) return String(v);
   const f = (dp) => Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
   const sign = n < 0 ? '−' : '';
+  /* Hours and minutes the way api/agent_guard.js formatValue writes them in
+     the sentence above the table, so the two cannot disagree. */
+  if (kind === 'hours' || kind === 'min') {
+    const total = Math.round(Math.abs(kind === 'hours' ? n * 60 : n));
+    return total < 60 ? `${sign}${total} min` : `${sign}${Math.floor(total / 60).toLocaleString('en-US')}h ${String(total % 60).padStart(2, '0')}m`;
+  }
   if (kind === 'aed') return `${sign}${f(2)}`;
   if (kind === 'int') return `${sign}${f(0)}`;
   if (kind === 'km') return `${sign}${f(Math.abs(n) >= 100 ? 0 : 1)}`;
   if (kind === 'pct') return `${sign}${f(1)}%`;
   return Number.isInteger(n) ? `${sign}${f(0)}` : `${sign}${f(2)}`;
 }
-const NUMERIC = new Set(['aed', 'int', 'km', 'pct', 'num', 'num2', 'pts']);
+const NUMERIC = new Set(['aed', 'int', 'km', 'pct', 'num', 'num2', 'pts', 'hours', 'min']);
 
 /* ── the answer's text: paragraphs, lists, bold — and where the tables and
    files go, at the place the model put them. Escaped first, always. ─── */

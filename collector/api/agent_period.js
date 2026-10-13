@@ -292,6 +292,147 @@ export function resolvePeriod(text, now = Date.now()) {
     options: ['today', 'yesterday', 'last week (Mon–Sun)', 'last 7 days', 'this month', 'last month'] };
 }
 
+/* THE ASSISTANT'S CLOCK — a person's words about a time of day, turned into
+   minutes past Dubai midnight, with every assumption said out loud.
+   ──────────────────────────────────────────────────────────────────────────
+   Added 2026-10-13 with the location tools ("where was L19262 at 3pm
+   yesterday"). The same rule as resolvePeriod: the model does not convert
+   "3pm" into 15:00 itself, because a model asked "at 3" has two defensible
+   answers and picks one silently, and every position it then fetches is the
+   right position at the wrong hour. So:
+
+     "15:00", "9:05", "3pm", "3:30 pm", "11.15am", "noon", "midnight"
+                                            one moment
+     "3 in the afternoon", "8 at night"     one moment, the part of day decides
+     "now"                                  this minute, today
+     "2pm to 5pm", "between 14:00 and 18:00", "2-5pm"
+                                            a stretch
+     "morning", "afternoon", "evening", "night", "early morning"
+                                            a stretch, and the hours it was read
+                                            as are said, because they are a
+                                            convention and not a fact
+
+   A bare "3" is refused with both readings to offer: a dispatcher's "at 3"
+   is three in the afternoon and a night supervisor's is three in the morning,
+   and the person asking knows which. 13–23 and 0 are unambiguous and read as
+   a 24-hour clock. */
+const PARTS = {
+  'early morning': [0, 360, 'early morning read as 00:00–06:00'],
+  morning: [360, 720, 'morning read as 06:00–12:00'],
+  afternoon: [720, 1020, 'afternoon read as 12:00–17:00'],
+  evening: [1020, 1260, 'evening read as 17:00–21:00'],
+  night: [1260, 1440, 'night read as 21:00–24:00'],
+  'late night': [1260, 1440, 'late night read as 21:00–24:00'],
+};
+const hm = (n) => `${pad(Math.floor(n / 60) % 24)}:${pad(n % 60)}`;
+/* One clock reading, or null. `pm` is the half-day a range's second end
+   lends its first ("2-5pm"). Returns { min, said } or { ambiguous: [a, b] }. */
+function readClock(s, pm = null) {
+  const t = s.trim().replace(/\s+/g, ' ').replace(/([ap])\.\s?m\.?/g, '$1m');
+  if (/^(noon|midday|12 noon)$/.test(t)) return { min: 720, said: null };
+  if (/^midnight$/.test(t)) return { min: 0, said: 'midnight read as the start of the day (00:00)' };
+  let m = /^(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)$/.exec(t);
+  if (m) {
+    let h = Number(m[1]); const mi = Number(m[2] || 0);
+    if (h < 1 || h > 12 || mi > 59) return null;
+    if (m[3] === 'am') h = h === 12 ? 0 : h; else h = h === 12 ? 12 : h + 12;
+    return { min: h * 60 + mi, said: null };
+  }
+  m = /^(\d{1,2})(?:[:.](\d{2}))?(?: o'?clock)? (?:in the )?(morning|afternoon|evening|at night|night)$/.exec(t);
+  if (m) {
+    let h = Number(m[1]); const mi = Number(m[2] || 0);
+    if (h < 1 || h > 12 || mi > 59) return null;
+    /* Each part of the day decides the half on its own terms. "At night"
+       runs both sides of midnight: "2 at night" is 02:00 and "12 at night"
+       is midnight, while "9 at night" is 21:00 — a reviewer read "2 at night"
+       as 14:00 off the first version, which treated night as afternoon. */
+    if (m[3] === 'morning') { if (h === 12) h = 0; } else if (m[3] === 'afternoon') { if (h < 12) h += 12; } else if (m[3] === 'evening') { if (h < 12) h += 12; } else if (h === 12) h = 0;
+    else if (h >= 6) h += 12;
+    return { min: h * 60 + mi, said: null };
+  }
+  m = /^(\d{1,2})[:.](\d{2})$/.exec(t);
+  if (m) {
+    const h = Number(m[1]); const mi = Number(m[2]);
+    if (h > 23 || mi > 59) return null;
+    if (pm != null && h >= 1 && h <= 12) return readClock(`${h}:${m[2]}${pm}`);
+    /* "3:30" on its own is as ambiguous as "3": the colon does not make it
+       a 24-hour clock. 13:00–23:59, 0:xx and a written leading zero ("09:30")
+       are, because nobody writes a 12-hour time that way. */
+    if (h >= 1 && h <= 12 && !/^0/.test(m[1])) return { ambiguous: [`${pad(h === 12 ? 0 : h)}:${m[2]}`, `${pad(h === 12 ? 12 : h + 12)}:${m[2]}`] };
+    return { min: h * 60 + mi, said: null };
+  }
+  m = /^(\d{1,2})(?: o'?clock)?$/.exec(t);
+  if (m) {
+    const h = Number(m[1]);
+    if (h > 23) return null;
+    if (pm != null && h >= 1 && h <= 12) return readClock(`${h}${pm}`);
+    if (h === 0 || h >= 13) return { min: h * 60, said: null };
+    return { ambiguous: [`${pad(h === 12 ? 0 : h)}:00`, `${pad(h === 12 ? 12 : h + 12)}:00`] };
+  }
+  return null;
+}
+
+/**
+ * Resolve a person's words into a time of day in Dubai.
+ * @returns {{ok:true, kind:'moment', minute, hhmm, label, now?, assumption}
+ *          | {ok:true, kind:'span', from_min, to_min, from, to, label, assumption}
+ *          | {ok:false, why, options?}}
+ */
+export function resolveClock(text, now = Date.now()) {
+  const raw = String(text || '').trim();
+  const s = raw.toLowerCase().replace(/[’']/g, "'").replace(/[?!.]$/, '').replace(/\s+/g, ' ')
+    .replace(/^(?:at|around|about|approximately|approx|roughly|by|on|in the|during the|this|last|yesterday|today)\s+/, '')
+    .replace(/^(?:at|around|about|the)\s+/, '').trim();
+  if (!s) return { ok: false, why: 'no time of day was named' };
+  if (/^(?:now|right now|currently|at the moment|this minute|just now)$/.test(s)) {
+    const d = new Date(now + 4 * 3600_000);
+    const minute = d.getUTCHours() * 60 + d.getUTCMinutes();
+    return { ok: true, kind: 'moment', minute, hhmm: hm(minute), label: `now (${hm(minute)})`, now: true, assumption: null };
+  }
+  if (PARTS[s]) {
+    const [a, b, said] = PARTS[s];
+    return { ok: true, kind: 'span', from_min: a, to_min: b, from: hm(a), to: b >= 1440 ? '24:00' : hm(b),
+      label: `${hm(a)}–${b >= 1440 ? '24:00' : hm(b)}`, assumption: said };
+  }
+  const r = /^(?:from |between )?(.+?)\s*(?:to|until|till|and|-|–)\s*(.+)$/.exec(s);
+  if (r) {
+    const end = readClock(r[2]);
+    const lend = /(am|pm)$/.exec(r[2].replace(/\s+/g, ''))?.[1] || null;
+    const own = /(am|pm)$/.test(r[1].replace(/\s+/g, ''));
+    let start = readClock(r[1], own ? null : lend);
+    /* "11 to 2pm" is eleven in the MORNING: a start that borrowed the end's
+       half-day and landed after the end borrows the other half instead. */
+    if (!own && lend === 'pm' && start?.min != null && end?.min != null && start.min >= end.min) {
+      const am = readClock(r[1], 'am');
+      if (am?.min != null && am.min < end.min) start = am;
+    }
+    if (start?.ambiguous || end?.ambiguous) {
+      return { ok: false, why: `"${raw}" does not say whether it is morning or afternoon`,
+        options: [...new Set([...(start?.ambiguous || []), ...(end?.ambiguous || [])])].slice(0, 4) };
+    }
+    if (start && end) {
+      let b = end.min;
+      if (b === 0) b = 1440;                       // "10pm to midnight"
+      if (b <= start.min) {
+        return { ok: false, why: `"${raw}" ends before it starts on one day — ask about each day separately`,
+          options: [`${hm(start.min)}–24:00`, `00:00–${hm(end.min)}`] };
+      }
+      return { ok: true, kind: 'span', from_min: start.min, to_min: b, from: hm(start.min),
+        to: b >= 1440 ? '24:00' : hm(b), label: `${hm(start.min)}–${b >= 1440 ? '24:00' : hm(b)}`,
+        /* midnight's own note says "the start of the day", which is false of
+           it as the END of a stretch — the label's 24:00 already says so. */
+        assumption: [start.said, end.min === 0 ? null : end.said].filter(Boolean).join('; ') || null };
+    }
+  }
+  const one = readClock(s);
+  if (one?.ambiguous) {
+    return { ok: false, why: `"${raw}" could be ${one.ambiguous[0]} or ${one.ambiguous[1]}`, options: one.ambiguous };
+  }
+  if (one) return { ok: true, kind: 'moment', minute: one.min, hhmm: hm(one.min), label: hm(one.min), assumption: one.said };
+  return { ok: false, why: `"${raw}" is not a time of day this assistant can read with confidence`,
+    options: ['now', '09:00', '15:00', 'morning', 'evening'] };
+}
+
 /* THE SAME SPAN, EARLIER — "the same day last week", "the same days last
    month", "the week before", "the same period last year". A comparison is
    only fair between like spans, and a model asked for one will compute the

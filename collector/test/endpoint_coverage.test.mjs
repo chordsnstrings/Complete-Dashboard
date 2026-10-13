@@ -102,6 +102,16 @@ const EXEMPT = {
     + 'reading it. Built before the screen because src/persons.js needs somewhere to send '
     + 'the pairs it refuses to fold — see the note above for the condition that makes the '
     + 'screen due.',
+  /* The chat assistant's (2026-10-13). Its tools live in api/agent_tools.js,
+     which this file does not scan — every other route a tool reads is also a
+     page's, so this never came up until a route existed for the assistant
+     alone. */
+  '/api/where': 'read by the chat assistant’s whereabouts tool (api/agent_tools.js) over the '
+    + 'loopback, as the person asking: where a car was at a moment or over part of a day, in the '
+    + 'gazetteer’s words. The map draws the same fixes from /api/map/journey and has no use '
+    + 'for a worded answer',
+  '/api/where/fleet': 'read by the chat assistant’s whereabouts tool for "where was every car at '
+    + '9pm" — the same fixes the map holds, one per car, named. No page asks that question',
   '/api/health': 'liveness probe for the platform, not for people',
   '/api/import/statement-days': 'operator tool: batched import of the daily ledger — driven by '
     + 'bin/import-ledger.mjs, not by a page',
