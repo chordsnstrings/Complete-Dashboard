@@ -4801,6 +4801,20 @@ untouched, and nothing projected is ever added into `accounted`.
   76 cars had a fresh position. Count positions after `lat IS NOT NULL`,
   and never call a stale row "where the car is" — it is where the tracker
   last spoke, with an age.
+  **And an Uber row HIDES the car's position.** /api/live keeps the newest
+  telemetry row per plate from any source (`LATEST_FIX`,
+  api/telemetry_sql.js), and Uber's driver-status rows — no coordinates —
+  are often the newest. Measured on production 2026-10-13, 11:2x Dubai: all
+  22 coordinate-free rows were Uber's, and 13 of those cars had a GPS fix
+  under 30 minutes old (/api/where/fleet at that minute). L19262 had been
+  placed by FMS eight minutes earlier; the assistant said "no tracker
+  position is on record". The assistant now asks /api/where/fleet (fixes
+  only) for those cars, and /api/where for one car's last fix today. **The
+  live map has the same gap and is NOT changed** — it draws only rows with
+  coordinates, so those cars are missing from it; the fix there is a
+  `LATEST_FIX` that prefers a row with coordinates, which costs the
+  one-index-probe-per-plate path (PERF-3) for plates with only Uber rows,
+  and waits for the operator's word.
 
 * **A MANIFEST PATH WRITTEN `list[key=value]` BLANKS NOTHING — NOT
   FIXED, FOUND 2026-10-13.** api/access/shape.js `parsePath` splits on dots
@@ -9426,7 +9440,32 @@ agent_reach §7:
 - **Cash lines past a role without CASH** — the shaper gap in the traps
   above; the tool drops them.
 
-**Proved by revert** (test/agent_reach.test.mjs, 58 checks; each count is
+**On production with the real model (2026-10-13, deployment 580fd57d,
+`4ee1675`).** Nine questions; five answers were wrong or fell back to plain
+figures, and each cause is fixed and held in agent_reach §8:
+- "Where is car L19262 right now?" — "no tracker position is on record",
+  while FMS had it on Al Khaleej Rd eight minutes earlier: Uber's status row
+  hides the fix (the trap above).
+- The shift question fell back: the guard refused "Uber's record has him
+  logged in …" because the shift result did not say it was Uber's. The
+  shift, start-time and live-status results now carry `platform: 'uber'` —
+  they are Uber's timeline and status feed and nothing else — and the
+  prompt no longer forbids saying so.
+- "How many drivers are online?" fell back on "Ecosine has
+  {{rN.rows[0].count}}": a grouped row whose own fleet cell is ecosine. And
+  the car question fell back on "an Egari car" citing a one-row result whose
+  row is Egari's. The guard now accepts a cited row (or a result's only
+  row) whose own fleet or platform cell EQUALS the word; a cell listing
+  "bolt, uber" is not about Uber alone.
+- "What does he owe?" said "76 cash trips last week" when his week held 68
+  trips in all: the balance route counts every cash trip up to the as-of
+  date (positions are not windowed; only `earned` is), and the tool had
+  labelled the result with the period asked. It now says "as of", gives the
+  first and last cash trip's dates, and `earned_over` on its own.
+- The plain-figures fallback printed "fares aed AED 208.39" and "logged in
+  minutes 8h 31m"; a label no longer repeats the unit its value carries.
+
+**Proved by revert** (test/agent_reach.test.mjs, 72 checks; each count is
 in its header): the manifest's `[].place` removed hands a Finance manager
 area names; `live_cars` ignoring x-fm-withheld says "no tracker" to the
 same person; the raw "3pm" sent to the route loses the moment; the

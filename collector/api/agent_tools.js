@@ -670,7 +670,11 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
         blankedNote(g, ['BK', 'COND', 'LOC']),
         b.collection?.why || null,
       ].filter(Boolean);
-      return { kind: 'table', definition, period: p, filters: { driver: one.name }, source: '/api/driver/day',
+      /* Every figure here is Uber's log-in record — the only provider whose
+         timeline the product holds — so the result is about Uber alone, and
+         "Uber's record has him logged in 8h 31m" is a true sentence the guard
+         refused on production (2026-10-13) while the filter said nothing. */
+      return { kind: 'table', definition, period: p, filters: { driver: one.name, platform: 'uber' }, source: '/api/driver/day',
         columns: [col('what', 'What', 'text'), col('from', 'From', 'time'), col('to', 'To', 'time'),
           col('minutes', 'Length', 'min'), col('where', 'Went online in', 'text'), col('ends', 'Note', 'text')],
         rows, values, kinds, note: notes.join(' — ') };
@@ -747,7 +751,7 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           Object.assign(kinds, { late: 'int', on_time: 'int', not_judged: 'int' });
         }
       }
-      return { kind: 'table', definition, period: p, source: '/api/online-time',
+      return { kind: 'table', definition, period: p, filters: { platform: 'uber' }, source: '/api/online-time',
         columns: [col('driver', 'Driver', 'text'), col('came_online', 'Came online', 'time'), col('how', 'Record', 'text'),
           col('first_trip', 'First trip', 'time'), col('late', 'Verdict', 'text'), col('minutes_late', 'Minutes late', 'int'),
           col('car', 'Car', 'text'), col('went_online_in', 'Went online in', 'text'), col('driver_id', 'Driver id', 'text')],
@@ -816,11 +820,62 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           position_age_min: num(r.fix_age_min), tracker: r.source,
           lat: r.lat == null ? null : Number(r.lat), lng: r.lng == null ? null : Number(r.lng),
         }));
-      if (plate) {
-        const want = plate.replace(/^[A-Z]+/, '');
-        rows = rows.filter((r) => normPlate(r.plate) === plate
-          || (want.length >= 4 && normPlate(r.plate).replace(/^[A-Z]+/, '') === want));
+      const want = plate ? plate.replace(/^[A-Z]+/, '') : '';
+      const samePlate = (x) => normPlate(x) === plate || (want.length >= 4 && normPlate(x).replace(/^[A-Z]+/, '') === want);
+      /* THE NEWEST ROW IS NOT ALWAYS A POSITION (production, 2026-10-13).
+         /api/live keeps the newest telemetry row per plate from ANY source,
+         and Uber's driver-status rows — which carry no coordinates — are
+         often the newest. "Where is L19262 right now?" was answered "no
+         tracker position is on record" while FMS had placed it on Al Khaleej
+         Rd eight minutes earlier; measured that hour, 13 of the 22 Uber rows
+         hid a fix under 30 minutes old. The live map has the same gap (it
+         draws only rows with coordinates) — recorded in COVERAGE.md, not
+         changed here. The assistant asks /api/where/fleet, which reads
+         fixes only, for those cars; one car with no fix in 30 minutes is
+         asked /api/where for its last fix today, said as stale with its age. */
+      let fromFixes = 0;
+      if (!locHidden) {
+        const uberOnly = new Map((Array.isArray(g.body) ? g.body : [])
+          .filter((r) => r.source === 'uber' && r.lat == null && (!fleet || r.fleet_id === fleet) && (!plate || samePlate(r.plate)))
+          .map((r) => [normPlate(r.plate), r]));
+        if (uberOnly.size) {
+          const at = dubaiTime(new Date(now()));
+          const w = await get(`/api/where/fleet?${qs({ day: today, at, fleet })}`);
+          for (const c of (w.withheld || w.error ? [] : w.body?.cars || [])) {
+            const u = uberOnly.get(normPlate(c.plate));
+            if (!u || c.lat == null) continue;
+            uberOnly.delete(normPlate(c.plate));
+            fromFixes += 1;
+            /* Age from the fix's own instant: the route's gap_min is to the
+               asked minute, which is the clock truncated, up to 59 s early. */
+            const age = c.at ? Math.round((now() - Date.parse(c.at)) / 60000) : num(c.gap_min);
+            rows.push({ plate: c.plate, fleet: c.fleet_id || u.fleet_id || null, driver: u.current_driver || null,
+              area: c.area || null, state: age != null && age <= 30 ? 'live' : 'stale', motion: c.motion || null, speed_kmh: num(c.speed),
+              passenger: c.passenger == null ? 'not reported' : c.passenger ? 'yes' : 'no',
+              position_time: c.time || null, position_age_min: age, tracker: c.source,
+              lat: Number(c.lat), lng: Number(c.lng) });
+          }
+          if (plate && uberOnly.size) {
+            const [u] = uberOnly.values();
+            const one = await get(`/api/where?${qs({ plate: u.plate, day: today, at })}`);
+            if (one.withheld) return { kind: 'value', definition, filters: { fleet, plate, driver: driverName }, withheld: one.withheld };
+            const f = one.body?.before;
+            if (f && f.lat != null) {
+              fromFixes += 1;
+              rows.push({ plate: u.plate, fleet: u.fleet_id || null, driver: u.current_driver || null,
+                area: f.area || null, state: 'stale', motion: f.motion || null, speed_kmh: num(f.speed),
+                passenger: f.passenger == null ? 'not reported' : f.passenger ? 'yes' : 'no',
+                position_time: f.time || null, position_age_min: f.at ? Math.round((now() - Date.parse(f.at)) / 60000) : null,
+                tracker: f.source, lat: Number(f.lat), lng: Number(f.lng) });
+            } else {
+              return { kind: 'value', definition, filters: { fleet, plate, driver: driverName },
+                error: `no tracker has reported a position for ${u.plate} today — the live list holds only Uber's driver status for it`
+                  + `${u.status ? ` (${String(u.status).toLowerCase()}${u.current_driver ? `, ${u.current_driver}` : ''})` : ''}, which carries no position` };
+            }
+          }
+        }
       }
+      if (plate) rows = rows.filter((r) => samePlate(r.plate));
       rows.sort((x, y) => (x.state === y.state ? String(x.plate).localeCompare(String(y.plate)) : x.state === 'live' ? -1 : 1));
       const live = rows.filter((r) => r.state === 'live');
       const filters = { fleet, plate, driver: driverName };
@@ -831,6 +886,7 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
       const notes = [
         locHidden ? 'positions (area and coordinates) are withheld from this person\'s role — say so in one sentence; do not guess where any car is' : null,
         held, 'live = a tracker position in the last 30 minutes; a stale row is the last position the tracker reported, with its age — never say a stale car is there now',
+        fromFixes ? `${fromFixes === 1 ? 'one car\'s position comes' : `${fromFixes} cars' positions come`} from the tracker's fixes, because Uber's newer driver-status row for it carries no position` : null,
       ].filter(Boolean);
       if (plate) {
         const r = rows[0];
@@ -877,7 +933,7 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           waiting_today_minutes: noDay ? null : num(t.waiting_minutes) };
         for (const k of Object.keys(values)) if (values[k] == null) delete values[k];
         return { kind: 'table', definition: `${definition} · ${rangeLabel(b.day, b.day)}`, period: { from: b.day, to: b.day, label: rangeLabel(b.day, b.day) },
-          filters: { driver: one.name }, source: '/api/status/driver',
+          filters: { driver: one.name, platform: 'uber' }, source: '/api/status/driver',
           columns: [col('status', 'Status', 'text'), col('from', 'From', 'time'), col('minutes', 'For', 'min')],
           rows, values,
           kinds: { status: 'text', since: 'time', car: 'text', last_heard_minutes_ago: 'min', online_since_today: 'time',
@@ -893,7 +949,9 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
       const rows = (b.rows || []).map((r) => ({ driver: r.full_name || r.person_key || null, driver_id: r.driver_ext_id || null,
         status: r.status ? (WORD[r.status] || r.status) : 'no status reported', since: dubaiTime(r.status_at),
         car: r.plate || null, fleet: r.fleet_id || null }));
-      return { kind: 'table', definition, filters: { fleet }, source: '/api/status/fleet',
+      /* Uber's live status feed (driver_status_event) and nothing else — the
+         other providers send no status — so its counts are Uber's alone. */
+      return { kind: 'table', definition, filters: { fleet, platform: 'uber' }, source: '/api/status/fleet',
         columns: [col('driver', 'Driver', 'text'), col('status', 'Status', 'text'), col('since', 'Since', 'time'),
           col('car', 'Car', 'text'), col('fleet', 'Fleet', 'text'), col('driver_id', 'Driver id', 'text')],
         rows,
@@ -1053,8 +1111,16 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
       if ((a.from || a.to) && !p) return badDates;
       let one = null;
       if (a.driver_id) { one = ctx.drivers.get(String(a.driver_id)); if (!one) return notFromLookup(a); }
-      const definition = defn(one ? 'Ledger balances' : 'Ledger balances by driver', { period: p || undefined, driver: one?.name })
-        + (p ? '' : ' · as of today');
+      /* A BALANCE IS A POSITION, NOT A PERIOD'S FIGURE (production,
+         2026-10-13). The route counts advances, deductions and cash taken
+         from the beginning of the record up to `to`; only `earned` is over
+         from–to (api/ledger_routes.js "POSITIONS ARE NOT WINDOWED"). The
+         first version labelled the whole result with the period asked for,
+         and the chat said "76 cash trips last week" for a driver whose week
+         held 68 trips in all. The definition now says "as of", and the two
+         windows are figures of their own. */
+      const asOf = p ? p.to : dubaiDay(new Date(now()));
+      const definition = `${defn(one ? 'Ledger balances' : 'Ledger balances by driver', { driver: one?.name })} · as of ${rangeLabel(asOf, asOf)}`;
       const filters = { driver: one?.name || null };
       const g = await get(`/api/ledger/exposure?${qs({ ext_id: one ? a.driver_id : null, from: p?.from, to: p?.to })}`);
       if (g.withheld || g.error) return { kind: 'table', definition, period: p, filters, ...g };
@@ -1069,6 +1135,7 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
         return { driver: x.name, driver_id: x.ext_id || null,
           advance_owed_aed: num(o.advance), deductions_owed_aed: num(o.deduction), cash_held_aed: num(o.cash),
           cash_taken_aed: num(o.cash_taken), cash_trips: num(o.cash_taken_trips), total_owed_aed: num(o.total),
+          cash_trips_from: o.cash_taken_from || null, cash_trips_to: o.cash_taken_to || null,
           /* THE PAY BOOK RUNS THE OTHER WAY (sql/schema_v78.sql): salary,
              commission, incentives and reimbursements are entered −1 — pay
              the company owes the driver — and a pay-out +1 settles it. Its
@@ -1096,26 +1163,30 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
         col('earned_aed', 'Earned', 'aed'), col('exposure_pct', 'Exposure', 'pct'), col('against_line', 'Against the line', 'text'),
         col('driver_id', 'Driver id', 'text')];
       const NOTE = 'advances and deductions owed are what the ledger records; cash held is known only where the accounts team stated an opening cash position; cash taken is every cash fare on record — a ceiling on what they could still hold, not a balance; pay owed to the driver is recorded salary, commission, incentives and reimbursements not yet paid out; an empty figure means nothing was recorded, never a balance of nought';
+      const earnedOver = p ? rangeLabel(p.from, p.to) : 'every date on record';
+      const WINDOWS = `every balance, cash taken and cash trips is everything recorded up to ${rangeLabel(asOf, asOf)} — NEVER only a period's, so never say "last week" or any period beside them; cash_trips_from/to are the dates of the first and last cash trip counted; only earned_aed is over ${earnedOver}`;
       if (one) {
         const r = rows[0] || {};
         const values = { advance_owed_aed: r.advance_owed_aed, deductions_owed_aed: r.deductions_owed_aed, cash_held_aed: r.cash_held_aed,
-          cash_taken_aed: r.cash_taken_aed, cash_trips: r.cash_trips, total_owed_aed: r.total_owed_aed,
+          cash_taken_aed: r.cash_taken_aed, cash_trips: r.cash_trips, cash_trips_from: r.cash_trips_from, cash_trips_to: r.cash_trips_to,
+          total_owed_aed: r.total_owed_aed, earned_over: earnedOver,
           pay_owed_to_driver_aed: r.pay_owed_to_driver_aed, paid_beyond_recorded_pay_aed: r.paid_beyond_recorded_pay_aed,
           earned_aed: r.earned_aed, exposure_pct: r.exposure_pct,
           lending_line_pct: pct, against_line: r.against_line };
         for (const k of Object.keys(values)) if (values[k] == null) delete values[k];
         return { kind: 'table', definition, period: p, filters, source: '/api/ledger/exposure', columns, rows, values,
           kinds: { advance_owed_aed: 'aed', deductions_owed_aed: 'aed', cash_held_aed: 'aed', cash_taken_aed: 'aed', cash_trips: 'int',
+            cash_trips_from: 'date', cash_trips_to: 'date', earned_over: 'text',
             total_owed_aed: 'aed', pay_owed_to_driver_aed: 'aed', paid_beyond_recorded_pay_aed: 'aed', earned_aed: 'aed',
             exposure_pct: 'pct', lending_line_pct: 'pct', against_line: 'text' },
-          note: [NOTE, ...reasons.map((x) => String(x).slice(0, 260)), blankedNote(g, ['EARN', 'BK'])].filter(Boolean).join(' — ') };
+          note: [NOTE, WINDOWS, ...reasons.map((x) => String(x).slice(0, 260)), blankedNote(g, ['EARN', 'BK'])].filter(Boolean).join(' — ') };
       }
       return { kind: 'table', definition, period: p, filters, source: '/api/ledger/exposure', columns, rows,
         values: { ...totalsOf(rows, ['advance_owed_aed', 'deductions_owed_aed', 'cash_held_aed', 'cash_taken_aed', 'pay_owed_to_driver_aed'],
           { drivers: rows.length, over_the_line: rows.filter((r) => r.against_line === 'over the line').length }),
           ...(pct != null ? { lending_line_pct: pct } : {}) },
         kinds: { lending_line_pct: 'pct' },
-        note: [NOTE, blankedNote(g, ['EARN', 'BK'])].filter(Boolean).join(' — ') };
+        note: [NOTE, WINDOWS, blankedNote(g, ['EARN', 'BK'])].filter(Boolean).join(' — ') };
     },
 
     async ledger_entries(a, ctx) {

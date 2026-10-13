@@ -54,6 +54,19 @@ const MARK = /\[\[\s*(table|file)\s+(r\d+)\s*\]\]/gi;
    version refused on its fleet half, because the key did not START with
    ecosine (review, 2026-10-13). */
 const keyNames = (key, word) => String(key).split('_').includes(word);
+/* Does the ROW a figure comes from say which platform or fleet it is? On
+   production (2026-10-13) two true sentences were refused on this: "Ecosine
+   has {{r15.rows[0].count}} drivers" citing a grouped-by-fleet row whose own
+   fleet cell is ecosine (the key, `count`, names nothing), and "L19262, an
+   Egari car, made {{r3.total_trips}} trips" citing a car's figures — one row,
+   fleet egari — under a "both fleets" filter. A cell EQUAL to the word is the
+   test, never a list containing it: a row with platforms "bolt, uber" is not
+   about Uber alone. A result's figures are about that row alone only when it
+   has exactly one row; the rows are stored whole (agent_tools.js), so one is
+   the whole of it. */
+const rowIs = (row, word) => !!row && typeof row === 'object'
+  && Object.values(row).some((v) => typeof v === 'string' && v.trim().toLowerCase() === word);
+const aboutRow = (r, row, word) => rowIs(row != null ? (r.rows || [])[Number(row)] : (r.rows || []).length === 1 ? r.rows[0] : null, word);
 
 /* The pages' formatting, so a figure reads the same in the chat as on the
    page it came from. */
@@ -176,12 +189,12 @@ export function checkReply(text, results, { userTexts = [], args = [], driverNam
 
   /* 3. Each sentence agrees with the results it cites. */
   for (const sentence of raw.split(/(?<=[.!?])\s+|\n+/)) {
-    const cited = [...sentence.matchAll(PH)].map((m) => ({ r: results.get(m[1]), key: m[3].toLowerCase() })).filter((c) => c.r);
+    const cited = [...sentence.matchAll(PH)].map((m) => ({ r: results.get(m[1]), row: m[2] ?? null, key: m[3].toLowerCase() })).filter((c) => c.r);
     if (!cited.length) continue;
     const low = sentence.replace(PH, ' ').toLowerCase();
     for (const p of PLATFORMS) {
       if (!new RegExp(`\\b${p}\\b`).test(low)) continue;
-      const fine = cited.some(({ r, key }) => r.filters?.platform === p || keyNames(key, p)
+      const fine = cited.some(({ r, row, key }) => r.filters?.platform === p || keyNames(key, p) || aboutRow(r, row, p)
         || (r.filters?.grouped_by === 'platform' && key.includes(p)) || r.kind === 'period' || r.kind === 'lookup');
       if (!fine) {
         const c = cited[0];
@@ -191,7 +204,7 @@ export function checkReply(text, results, { userTexts = [], args = [], driverNam
     }
     for (const f of FLEETS) {
       if (!new RegExp(`\\b${f}\\b`).test(low)) continue;
-      const fine = cited.some(({ r, key }) => r.filters?.fleet === f || keyNames(key, f)
+      const fine = cited.some(({ r, row, key }) => r.filters?.fleet === f || keyNames(key, f) || aboutRow(r, row, f)
         || (r.filters?.grouped_by === 'fleet' && key.includes(f)) || r.kind === 'period' || r.kind === 'lookup');
       if (!fine) {
         problems.push(`a sentence says "${f}" but cites ${cited[0].r.id} (${cited[0].r.definition}), which covers ${cited[0].r.filters?.fleet || 'both fleets'}`);
@@ -238,8 +251,13 @@ export function plainAnswer(results, why) {
     if (r.kind === 'period' || r.kind === 'lookup') continue;
     if (r.withheld) { lines.push(`- ${r.definition}: not shown — ${r.withheld}`); continue; }
     if (r.error) { lines.push(`- ${r.definition}: not available — ${r.error}`); continue; }
+    /* The label without the unit the value already carries: production
+       printed "fares aed AED 208.39" and "logged in minutes 8h 31m"
+       (2026-10-13) — the formatted value says AED, "8h 31m", "15.0 km". */
+    const UNIT_TAIL = { aed: /_aed$/, min: /_(min|mins|minutes)$/, hours: /_(h|hours|hrs)$/, km: /_km$/, pct: /_pct$/ };
     const vals = Object.entries(r.values || {}).filter(([, v]) => v != null).slice(0, 8)
-      .map(([k, v]) => `${k.replace(/_/g, ' ')} ${formatValue(v, (r.kinds || {})[k])}`);
+      .map(([k, v]) => { const kind = (r.kinds || {})[k];
+        return `${k.replace(UNIT_TAIL[kind] || /$^/, '').replace(/_/g, ' ')} ${formatValue(v, kind)}`; });
     lines.push(`- ${r.definition}${vals.length ? `: ${vals.join('; ')}` : ''}`);
     if (r.columns && (r.rows || []).length) tables.push(r.id);
   }

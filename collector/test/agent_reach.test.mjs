@@ -75,7 +75,21 @@
      · the guard not absorbing "hours" after an hours figure: "11h 15m
        hours" — 1 fails.
      · "10 at night" read as 22:00's afternoon twin — 1 fails.
-     · driver_hours counting withheld trips as zero days worked — 1 fails. */
+     · driver_hours counting withheld trips as zero days worked — 1 fails.
+   Production's five (§8, after the first conversation with the real model),
+   each reverted alone against the 72-check file:
+     · live_cars without the fill under Uber's coordinate-free rows: the car
+       eight minutes from its fix reads "no tracker position" — 4 fail.
+     · one car's last fix today not asked of /api/where — 2 fail.
+     · the guard without a row's own fleet/platform cell — 2 fail.
+     · a cell CONTAINING the word accepted ("bolt, uber" as Uber's) — 1 fails.
+     · driver_shift not marked as Uber's record — 1 fails.
+     · ledger balances labelled with the period asked — 1 fails.
+     · plain labels keeping their unit ("fares aed AED") — 1 fails.
+   Not proved by revert: live_cars taking a filled car's age from the fix's
+   own instant rather than the route's gap_min (to the truncated minute) —
+   the two differ by under a minute, which a check cannot pin without
+   freezing the database's clock. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
@@ -85,7 +99,7 @@ import { hashPassword } from '../api/access/crypto.js';
 import { agentTest } from '../api/agent_routes.js';
 import { toolbox } from '../api/agent_tools.js';
 import { resolveClock } from '../api/agent_period.js';
-import { formatValue, checkReply } from '../api/agent_guard.js';
+import { formatValue, checkReply, plainAnswer } from '../api/agent_guard.js';
 import { findStops } from '../api/where_routes.js';
 
 let pass = 0, fail = 0;
@@ -224,8 +238,8 @@ const fetchVia = (port, cookie = '') => async (path) => {
   let body = null; try { body = await r.json(); } catch { body = null; }
   return { status: r.status, body, withheld: r.headers.get('x-fm-withheld') };
 };
-function harness(fetchApi) {
-  const run = toolbox({ fetchApi, now: () => NOW });
+function harness(fetchApi, clock = () => NOW) {
+  const run = toolbox({ fetchApi, now: clock });
   let n = 0;
   const ctx = { results: new Map(), drivers: new Map([[A, { name: NAME, ids: [A] }]]),
     store(r) { const id = `r${++n}`; const s = { id, ...r }; this.results.set(id, s); return s; } };
@@ -444,6 +458,75 @@ const gu = checkReply(`${NAME} was logged in for {{r2.logged_in_minutes}} minute
 check('…and absorbs the unit after an hours figure: "11h 15m", not "11h 15m minutes"', gu.text === `${NAME} was logged in for 11h 15m.`, gu.text);
 check('"2 at night" is 02:00 and "12 at night" is midnight', resolveClock('2 at night', NOW).hhmm === '02:00'
   && resolveClock('12 at night', NOW).hhmm === '00:00' && resolveClock('9 at night', NOW).hhmm === '21:00');
+
+/* ── §8 production, 2026-10-13 ───────────────────────────────────────────
+   The first conversation with the real model on production found five
+   faults the synthetic fleet above had not: a car the tracker had placed
+   eight minutes earlier answered "no tracker position", because Uber's newer
+   status row (no coordinates) is the row /api/live keeps; two true sentences
+   refused by the guard; a lifetime cash figure said as "last week"; and
+   labels that repeated their unit. Live rows are written at the real clock,
+   so this section's tools run on it too. */
+console.log('\n§8 production: positions under Uber rows, true sentences, windows, labels');
+const realTool = harness(fetchVia(bare.port), () => Date.now());
+await fix(ago(8), DEIRA, 20, 'L88881', 'fms', 'egari', 1);
+await fix(ago(35), ZAB, 0, 'L88882', 'fms', 'ecosine');
+for (const p of ['L88881', 'L88882', 'L88883']) {
+  await q(`INSERT INTO telemetry_snapshot (source, plate, fleet_id, captured_at, polled_at, status)
+           VALUES ('uber',$1,'egari',$2::timestamptz,$2::timestamptz,'ONLINE')`, [p, ago(1)]);
+}
+const under = await realTool('live_cars', { plate: 'L88881' });
+check('a car whose newest row is Uber\'s status is placed by its tracker\'s fix eight minutes ago — Deira, live',
+  under.values?.area === 'Deira' && under.values?.state === 'live' && under.values?.position_age_min === 8
+  && /Uber's newer driver-status row/.test(under.note || ''), JSON.stringify(under).slice(0, 400));
+const older = await realTool('live_cars', { plate: 'L88882' });
+check('…one whose last fix is 35 minutes old is said as stale, with that age and place',
+  older.values?.state === 'stale' && older.values?.area === "Za'abeel 1" && older.values?.position_age_min === 35,
+  JSON.stringify(older).slice(0, 400));
+const none = await realTool('live_cars', { plate: 'L88883' });
+check('…and one with no fix today says Uber\'s status carries no position — never "may have no tracker"',
+  /no tracker has reported a position for L88883 today — the live list holds only Uber's driver status/.test(none.error || ''),
+  JSON.stringify(none).slice(0, 400));
+const all = await realTool('live_cars', {});
+check('the fleet\'s live list counts the car under the Uber row', all.rows?.some((r) => r.plate === 'L88881' && r.state === 'live')
+  && !all.rows?.some((r) => r.plate === 'L88883'), JSON.stringify(all.values));
+
+const RP = new Map([
+  ['r1', { id: 'r1', kind: 'table', definition: 'Live driver status — grouped by fleet', filters: { fleet: null, grouped_by: 'fleet' },
+    rows: [{ fleet: 'ecosine', count: 116 }, { fleet: 'egari', count: 46 }], values: { ecosine_count: 116, egari_count: 46 },
+    kinds: { ecosine_count: 'int', egari_count: 'int' }, columns: [{ key: 'fleet' }, { key: 'count' }] }],
+  ['r2', { id: 'r2', kind: 'table', definition: 'Car figures · car L19262 · both fleets', filters: { fleet: null },
+    rows: [{ plate: 'L19262', fleet: 'egari', trips: 2 }], values: { total_trips: 2 }, kinds: { total_trips: 'int' } }],
+  ['r3', { id: 'r3', kind: 'table', definition: 'Two cars', filters: { fleet: null },
+    rows: [{ plate: 'L19262', fleet: 'egari', trips: 2 }, { plate: 'L55555', fleet: 'ecosine', trips: 1 }], values: { total_trips: 3 }, kinds: { total_trips: 'int' } }],
+  ['r4', { id: 'r4', kind: 'table', definition: 'A driver on two platforms', filters: { platform: null },
+    rows: [{ driver: NAME, platforms: 'bolt, uber', trips: 9 }], values: { total_trips: 9 }, kinds: { total_trips: 'int' } }],
+]);
+check('the guard accepts "Ecosine has {{r1.rows[0].count}}" — the row\'s own fleet is ecosine',
+  checkReply('Ecosine has {{r1.rows[0].count}} drivers working.', RP).ok, JSON.stringify(checkReply('Ecosine has {{r1.rows[0].count}} drivers working.', RP).problems));
+check('…and refuses "Egari has {{r1.rows[0].count}}" — that row is Ecosine\'s', !checkReply('Egari has {{r1.rows[0].count}} drivers working.', RP).ok);
+check('…accepts "L19262, an Egari car, made {{r2.total_trips}}" — the result\'s one row is Egari\'s',
+  checkReply('L19262, an Egari car, made {{r2.total_trips}} trips today.', RP).ok);
+check('…refuses the same over two cars of two fleets', !checkReply('L19262, an Egari car, made {{r3.total_trips}} trips today.', RP).ok);
+check('…and a row listing "bolt, uber" is not about Uber alone', !checkReply('On Uber he made {{r4.total_trips}} trips.', RP).ok);
+const shiftR = await tool('driver_shift', { driver_id: A, day: D });
+const gsh = checkReply(`Uber's record has ${NAME} logged in for {{${shiftR.id}.logged_in_minutes}}.`,
+  new Map([[shiftR.id, shiftR]]), { driverNames: [NAME] });
+check('a sentence calling the shift Uber\'s record is true, and passes', gsh.ok, JSON.stringify(gsh.problems));
+const gshB = checkReply(`On Bolt ${NAME} was logged in for {{${shiftR.id}.logged_in_minutes}}.`, new Map([[shiftR.id, shiftR]]), { driverNames: [NAME] });
+check('…calling it Bolt\'s is not', !gshB.ok);
+
+const bal = await tool('ledger_balances', { driver_id: A, from: '2026-10-05', to: D });
+check('ledger balances are labelled "as of" the period\'s end, never with the period itself',
+  /as of Sun 11 Oct 2026/.test(bal.definition) && !/Mon 5 Oct/.test(bal.definition), bal.definition);
+check('…only "earned" carries the period, and the note forbids a period beside a balance',
+  bal.values?.earned_over === 'Mon 5 Oct – Sun 11 Oct 2026' && /NEVER only a period's/.test(bal.note || ''),
+  `${JSON.stringify(bal.values)} ${bal.note}`);
+
+const plain = plainAnswer([{ id: 'r1', kind: 'table', definition: 'Shift', values: { fares_aed: 208.39, logged_in_minutes: 511, total_km: 15 },
+  kinds: { fares_aed: 'aed', logged_in_minutes: 'min', total_km: 'km' } }], 'why');
+check('the plain figures do not repeat their unit: "fares AED 208.39", "logged in 8h 31m", "total 15.0 km"',
+  /fares AED 208\.39; logged in 8h 31m; total 15\.0 km/.test(plain.text), plain.text);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

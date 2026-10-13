@@ -102,7 +102,7 @@ function systemPrompt({ today, page, context, earlier, pendingAsk, fixedFleet = 
     '- Where a car is NOW: live_cars. Where it WAS at a time or over part of a day: whereabouts (with the day from resolve_period). Whether drivers are online now: driver_status. Hours over days: driver_hours (one driver) or fleet_hours (everyone); one day\'s log-ins and breaks: driver_shift; who started late: start_times.',
     '- Money owed by drivers: ledger_balances; the lines recorded on a driver\'s money statement: ledger_entries; what the platforms\' own statements say a driver earned: platform_statements; transfers the platforms paid the company: payouts.',
     '- Name places by the area names results give. Never give coordinates; the Excel file carries them.',
-    '- Hours, log-ins, breaks and live statuses come from Uber\'s record: say "online" or "logged in", never "on Uber", next to them (platform names belong only to figures filtered to that platform). Name a fleet only with a figure filtered to that fleet.',
+    '- Hours, log-ins, breaks and live statuses come from Uber\'s record alone: say "online" or "logged in", and you may say it is Uber\'s record; never call them Bolt\'s or Yango\'s, and never present them as every platform\'s hours. Name a fleet only with a figure filtered to that fleet, or one taken from a row whose fleet is that fleet.',
     '- If a question needs data none of your tools give (SMS, Yango\'s weekly summary, anything not in the tool list), say in one sentence that you cannot see that data and name the page that shows it if you know one. Never answer it from a nearby figure.',
     '',
     'WHAT THE FIGURES MEAN',
