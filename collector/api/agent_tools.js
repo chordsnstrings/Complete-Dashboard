@@ -573,7 +573,18 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
       const kinds = { days_worked: 'int', days_with_online_hours: 'int', online_hours: 'hours', on_job_hours: 'hours',
         waiting_online_hours: 'hours', average_online_hours_per_day: 'hours', on_job_share_of_online_pct: 'pct',
         on_job_hours_every_day: 'hours', longest_online_day_hours: 'hours' };
+      /* The hours are Uber's log-in record on every day that has them —
+         production (2026-10-13) refused "logged in to Uber for 72h 47m" because
+         this result also carries every platform's trips, so the platform
+         cannot be the whole result's. It is the hours figures'. Only when
+         EVERY measured day is Uber's record: a day a platform report supplied
+         (the `h` source in /api/driver/daily, which no channel files today)
+         would make the total no longer Uber's alone. */
+      const uberHours = measured.length > 0 && measured.every((r) => r.hours_from === 'Uber log-in record');
       return { kind: 'table', definition, period: p, filters: { driver: one.name }, source: '/api/driver/daily',
+        figure_platform: uberHours ? UBER_FIGURES(['online_h', 'on_job_h', 'waiting_online_h', 'days_with_online_hours', 'online_hours',
+          'on_job_hours', 'waiting_online_hours', 'average_online_hours_per_day', 'on_job_share_of_online_pct',
+          'on_job_hours_every_day', 'longest_online_day_hours']) : undefined,
         columns: [col('day', 'Day', 'date'), col('online_h', 'Online', 'hours'), col('on_job_h', 'On a job', 'hours'),
           col('waiting_online_h', 'Waiting online', 'hours'), col('first_trip', 'First trip', 'time'),
           col('last_trip', 'Last trip', 'time'), col('first_to_last_trip_h', 'First to last trip', 'hours'),
@@ -706,6 +717,11 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           aed_per_online_hour: num(t.aed_per_measured_hour), money_of_drivers_with_hours_aed: num(t.measured_money) },
         kinds: { drivers: 'int', drivers_with_online_hours: 'int', online_hours: 'hours', waiting_online_hours: 'hours',
           aed_per_online_hour: 'aed', money_of_drivers_with_hours_aed: 'aed' },
+        /* The hours are Uber's availability record (measured_*, people_with_
+           availability); trips, money and days worked are every platform's.
+           So "Uber" is true beside an hours figure and not beside the rest. */
+        figure_platform: UBER_FIGURES(['online_h', 'on_job_h', 'waiting_online_h', 'days_with_hours',
+          'drivers_with_online_hours', 'online_hours', 'waiting_online_hours']),
         note: [HOURS_NOTE, 'the money per online hour is over the drivers who have hours only, both halves over the same people',
           blankedNote(g, ['BK', 'EARN'])].filter(Boolean).join(' — ') };
     },
@@ -955,12 +971,16 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
         columns: [col('driver', 'Driver', 'text'), col('status', 'Status', 'text'), col('since', 'Since', 'time'),
           col('car', 'Car', 'text'), col('fleet', 'Fleet', 'text'), col('driver_id', 'Driver id', 'text')],
         rows,
-        values: { drivers: num(t.drivers), working: num(t.working), online_waiting: num(t.online), on_trip: num(t.ontrip),
+        /* "How many drivers are online right now?" is answered by waiting +
+           on a trip; production's model (2026-10-13) wrote that sum inside a
+           placeholder because the figure was called `working`, and fell back
+           to plain figures. It is named for the question now. */
+        values: { drivers: num(t.drivers), online_now: num(t.working), online_waiting: num(t.online), on_trip: num(t.ontrip),
           offline: num(t.offline), no_status_reported: num(t.unknown), feed_minutes_old: num(b.feed_age_min) },
-        kinds: { drivers: 'int', working: 'int', online_waiting: 'int', on_trip: 'int', offline: 'int', no_status_reported: 'int',
+        kinds: { drivers: 'int', online_now: 'int', online_waiting: 'int', on_trip: 'int', offline: 'int', no_status_reported: 'int',
           feed_minutes_old: 'min' },
         note: [b.stale ? `the live feed has not answered for ${b.feed_age_min ?? 'an unknown number of'} minutes, so these are the last statuses it gave, not necessarily now` : null,
-          'working = online + on a trip', b.unknown_note, 'only Uber reports a live status; Bolt, Yango and hotel drivers are not on this list and are not offline'].filter(Boolean).join(' — ') };
+          'online_now = everyone logged in: waiting for a job + on a trip — the answer to "how many are online"', b.unknown_note, 'only Uber reports a live status; Bolt, Yango and hotel drivers are not on this list and are not offline'].filter(Boolean).join(' — ') };
     },
 
     /* ══ WHERE, WHEN ═════════════════════════════════════════════════════
@@ -1560,6 +1580,10 @@ function agg(rows, m) {
 }
 const slug = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'none';
 const dayCount = (p) => Math.round((Date.parse(`${p.to}T00:00:00Z`) - Date.parse(`${p.from}T00:00:00Z`)) / 864e5) + 1;
+/* Which figures of a mixed result are one platform's: { online_hours: 'uber' }.
+   The guard reads it (agent_guard.js) so "Uber" is true beside those figures
+   and not beside the result's others. */
+const UBER_FIGURES = (keys) => Object.fromEntries(keys.map((k) => [k, 'uber']));
 function dubaiTime(ts) {
   if (!ts) return null;
   try {

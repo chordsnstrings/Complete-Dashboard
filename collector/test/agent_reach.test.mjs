@@ -86,6 +86,14 @@
      · driver_shift not marked as Uber's record — 1 fails.
      · ledger balances labelled with the period asked — 1 fails.
      · plain labels keeping their unit ("fares aed AED") — 1 fails.
+   And the second production run's two (§8 again, 74 checks):
+     · the guard ignoring figure_platform: "Uber's record has him online
+       for 72h 47m" refused because the week's result also holds every
+       platform's trips — 1 fails; driver_hours not marking its hours as
+       Uber's — the same 1.
+     · the live status figure still called `working`: the model wrote
+       "{{r15.online_waiting + r15.on_trip}}" for "how many are online" — 1
+       fails.
    Not proved by revert: live_cars taking a filled car's age from the fix's
    own instant rather than the route's gap_min (to the truncated minute) —
    the two differ by under a minute, which a check cannot pin without
@@ -515,6 +523,17 @@ const gsh = checkReply(`Uber's record has ${NAME} logged in for {{${shiftR.id}.l
 check('a sentence calling the shift Uber\'s record is true, and passes', gsh.ok, JSON.stringify(gsh.problems));
 const gshB = checkReply(`On Bolt ${NAME} was logged in for {{${shiftR.id}.logged_in_minutes}}.`, new Map([[shiftR.id, shiftR]]), { driverNames: [NAME] });
 check('…calling it Bolt\'s is not', !gshB.ok);
+
+const hrsR = await tool('driver_hours', { driver_id: A, from: D0, to: D });
+const hrsMap = new Map([[hrsR.id, hrsR]]);
+const gHrs = checkReply(`Uber's record has ${NAME} online for {{${hrsR.id}.online_hours}} over the period.`, hrsMap, { driverNames: [NAME] });
+const gTrips = checkReply(`On Uber ${NAME} worked {{${hrsR.id}.days_worked}} days.`, hrsMap, { driverNames: [NAME] });
+check('the week\'s hours are Uber\'s and may be called so — its days worked (every platform\'s trips) may not',
+  gHrs.ok && !gTrips.ok, `${JSON.stringify(gHrs.problems)} ${JSON.stringify(gTrips.problems)}`);
+const dfNow = await tool('driver_status', {});
+check('"how many are online" has a figure of its own: online now = waiting + on a trip',
+  dfNow.values?.online_now === (dfNow.values?.online_waiting ?? 0) + (dfNow.values?.on_trip ?? 0) && dfNow.values?.online_now === 1
+  && dfNow.values?.working === undefined, JSON.stringify(dfNow.values));
 
 const bal = await tool('ledger_balances', { driver_id: A, from: '2026-10-05', to: D });
 check('ledger balances are labelled "as of" the period\'s end, never with the period itself',

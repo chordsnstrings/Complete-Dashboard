@@ -194,7 +194,7 @@ export function checkReply(text, results, { userTexts = [], args = [], driverNam
     const low = sentence.replace(PH, ' ').toLowerCase();
     for (const p of PLATFORMS) {
       if (!new RegExp(`\\b${p}\\b`).test(low)) continue;
-      const fine = cited.some(({ r, row, key }) => r.filters?.platform === p || keyNames(key, p) || aboutRow(r, row, p)
+      const fine = cited.some(({ r, row, key }) => r.filters?.platform === p || r.figure_platform?.[key] === p || keyNames(key, p) || aboutRow(r, row, p)
         || (r.filters?.grouped_by === 'platform' && key.includes(p)) || r.kind === 'period' || r.kind === 'lookup');
       if (!fine) {
         const c = cited[0];

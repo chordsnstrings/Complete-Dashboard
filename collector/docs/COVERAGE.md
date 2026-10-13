@@ -9465,7 +9465,21 @@ figures, and each cause is fixed and held in agent_reach §8:
 - The plain-figures fallback printed "fares aed AED 208.39" and "logged in
   minutes 8h 31m"; a label no longer repeats the unit its value carries.
 
-**Proved by revert** (test/agent_reach.test.mjs, 72 checks; each count is
+**The second run (deployment b40712cc, `14942d0`)** answered six of nine
+in sentences, and the car now read "last seen in Al Garhoud … 36 minutes
+old (stale)" — the true state. Two still fell back, both fixed:
+- "Show me his working hours day by day" — "logged in to Uber for 72h
+  47m" was refused because the week's result also carries every platform's
+  trips, so the platform cannot be the whole result's. A result can now
+  name which of its figures are one platform's (`figure_platform`); the
+  hours tools mark their hours figures Uber's — driver_hours only when
+  every measured day is Uber's log-in record (a platform-reported day would
+  make the total no longer Uber's alone).
+- "How many drivers are online right now?" — the model wrote a sum inside
+  a placeholder, because the figure that answers it was called `working`.
+  It is `online_now` (waiting for a job + on a trip).
+
+**Proved by revert** (test/agent_reach.test.mjs, 74 checks; each count is
 in its header): the manifest's `[].place` removed hands a Finance manager
 area names; `live_cars` ignoring x-fm-withheld says "no tracker" to the
 same person; the raw "3pm" sent to the route loses the moment; the
