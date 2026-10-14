@@ -147,7 +147,7 @@ Each line on a visit picks one; free text sits beside it, never instead of it �
 | driver | who was driving the car — suggested from the car's last booking before the visit, editable (operator, 2026-10-14) |
 | garage | from the list |
 | in | date and time; suggested from the tracker when the car entered the garage's area |
-| reason | accident · mechanical fault · scheduled service · tyres · battery/charging · body/cosmetic · RTA registration/inspection · recall · other |
+| maintenance or accident | one of the two, required — the operator's top level (2026-10-14); the work types sit beneath it, and an accident visit also needs the driver, the fault and the paperwork below |
 | state | waiting for approval/paperwork → in repair → waiting for parts → ready for collection → back on the road (or written off); every change kept with who and when |
 | accident paperwork | police report number, insurer, surveyor date, approval date — UAE Federal Traffic Law Art. 41 bars repairing accident damage without the authority's permission, so "waiting for paperwork" is its own state |
 | fault (accidents) | at fault (red paper) · not at fault (green paper) · not yet decided — required on an accident visit (operator, 2026-10-14) |
@@ -270,6 +270,13 @@ never shown.
    above which a second person must approve, are not decided; nothing is built
    for them yet.
 8. **No signed price lists** exist for the current garages.
+9. **Every visit is maintenance or accident** — the top level, above the work
+   types.
+10. **Insurance excess is its own work type**, and always an accident.
+11. **Al Muhandes R0392 and R0393 are separate purchases** (AED 12,495 each),
+    not copies of CCF_000081 — all three count.
+12. **The Sajdaf invoices the payment advice R0378 pays but the archive lacks**
+    are unknown to the operator; R0378 stays out of spend and on the review list.
 
 ## The existing records, consolidated (2026-10-14)
 
@@ -295,7 +302,13 @@ second, bookings as evidence only. What that showed, for whoever imports it:
   fault is written once ("Accident Red Paper"). The visit record's fault and
   police fields are therefore new information, not a copy of anything held.
 - 481 visits result: 106 invoice and log, 128 invoice only, 247 log only (AED
-  387,002.50 approved in the log with no invoice found).
+  387,002.50 approved in the log with no invoice found). Only 5 are accidents by
+  what the records say (one with its fault written); 68 Body & paint visits
+  carry no accident word and sit under maintenance until someone says otherwise.
+- **A car's "current driver" in the register is the driver of its last booking
+  the register sees**, dated `driver_as_of` — today's driver only for a working
+  car. 35 of the 139 had none since 1 Oct 2026; L26153 none since 15 Oct 2025,
+  yet it went to a garage eight times, the last on 29 Sep 2026.
 
 ## Inputs needed from the operator
 
