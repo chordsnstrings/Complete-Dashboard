@@ -238,15 +238,78 @@ car driven 26 of 30 days; the dormant finding flags working cars; the phone's
 Fleet tab hides every idle car; the area names the API already computes are
 never shown.
 
-## Order of work, when approved
+## Fitting it into the product (plan, 2026-10-14 — nothing built)
 
-1. The fixes above.
-2. Garages, work types, visits with lines and states, the board, the car's
-   history — the record itself.
-3. The tracker suggestions and the daily car-state row.
-4. Repeat work, cost and garage views; the morning email's "off the road"
-   section.
-5. Due-soon and odometer — after one question to InfoTrack (below).
+The operator: *"let's figure out how we will incorporate this into our fleet
+ecosystem. audit, plan including UI and views. wait for execution command."*
+The views, drawn on the consolidated history, are on the Garage Desk page
+(claude.ai artifact, private); this section is the build's reference.
+
+**Where it lives.**
+
+| place | what changes |
+|---|---|
+| side menu | a new **Garage** section beside Fleet: Off the road · Visits · Repeat work · Garage costs · Garages · Cars & owners |
+| `#vehicle/<plate>` | an eighth tab, **Garage** (`VEHICLE_TABS`, `api/public/vehicle.js:31`): every visit, line, cost, days off road; the Overview's first line carries the state |
+| driver page | accidents the person was driving in, the fault, any damage charge; a day off explained by the car's visit |
+| phone, Fleet tab | the board, "send to a garage", state changes (`TABS`, `api/public/m/screens.js:44`; the Fleet tab owns `fleet`, `vehicles`, `vehicle`) |
+| To-do and Action list | the absence lines that say a workshop visit is recorded nowhere (`api/public/playbook.js:563`, `api/public/app.js:2875`, `api/public/driver.js:1629`) answer from the record; new items: overdue return, visit open while the car works, car with no responsible person, repeat within the window |
+| morning email | an "Off the road" section; the `cars_idle` finding (`src/report_findings.js:260`) names the garage |
+| Target pages | cars in a garage shown as unavailable — question 1 below |
+| driver ledger | an at-fault accident may PROPOSE a `damage` entry (`sql/schema_v78.sql:146`); Finance commits it; the visit links to it |
+| assistant | tools beside `find_car`/`whereabouts` in `api/agent_tools.js`: off the road, a car's garage history, repeat work, garage costs |
+| Excel | a Garage workbook through `src/xlsx_write.js` |
+
+**Access.** The roles exist (`api/public/access_model.js`); garage work adds a
+class and capabilities, not roles. A new class **GAR — garage costs**, so a
+dispatcher sees that a car is in a garage without seeing what it cost.
+Capabilities: `garage.record` (open/update visits and states), `garage.cost`
+(enter invoices and lines), `garage.assign` (set a car's responsible person),
+`garage.list` (garages and work types), `garage.import` / `garage.import.commit`
+(the history, four-eyes like `cash.import.commit`), `garage.charge` (propose a
+damage charge; the commit is Finance's existing `cash.record`). Owner all;
+Management sees all and assigns; Operations manager records, costs, assigns,
+keeps the lists, proposes charges; Fleet technician records and costs; Finance
+sees GAR and commits charges and the import; Safety sees visits and accidents;
+Dispatcher sees state only.
+
+**Stored** (new migrations only): `garage` (name, kind, contact, pins,
+retired), `car_owner` (responsible `access_user`, effective-dated, never
+overwritten), `garage_visit` (car, maintenance|accident, garage, reason,
+driver, fault, police report, insurer, in / expected / back, state, who pays),
+`garage_visit_event` (every state and expected-back change, who, when),
+`garage_invoice` (unique per garage + number) and `garage_line` (work type,
+description, parts, labour, quantity, VAT), `garage_attachment` (bytea keyed by
+sha256, the `driver_ledger_receipt` pattern at `sql/schema_v78.sql:305`, which
+allows images only and expires in 12 months — invoices need PDFs and a longer
+life, question 4), and `car_day_state` (one row per car per day).
+
+**The history goes in through the existing import path**: parsed in the
+browser, previewed, committed by a second person (`api/public/importsheet.js`,
+`api/import_routes.js`, `api/public/approvals.js`). Imports are CSV today; the
+consolidated workbook's Visits, Invoices and Invoice lines sheets export as CSV.
+
+**Measured for the board, 2026-10-14** (fleet register read that morning):
+48 of the 139 cars had no booking for two days or more (31 for 30+). For 12 of
+them the history already holds a tow or a garage visit after the last booking
+— the board can show those without anyone typing. The long-idle cars are real:
+no bookings and parked trackers for months, and the log's tow rows ("Abu Hail
+To Ras Al Khor") are idle cars being moved.
+
+## Order of work, when the operator says go
+
+1. The vehicle pages' false statements (FIXLIST, "found 2026-10-14").
+2. The record: garages, cars & owners, visits with lines and states, the
+   vehicle Garage tab, the phone screens, the access class and capabilities;
+   then the history import, committed by a second person.
+3. The board and the catch-up: `car_day_state`, Off the road, the suggestions,
+   the To-do and Action list items, the morning email section.
+4. Analysis and links: repeat work, costs, accidents on the driver page, the
+   damage-charge proposal, the assistant's tools, the Excel workbook.
+5. Due-soon and odometer — after the InfoTrack questions (below).
+
+Each step: tests proved by revert, notes in the same commit, the full suite,
+deploy, screenshots of production.
 
 ## The operator's rulings (2026-10-14)
 
@@ -311,6 +374,18 @@ second, bookings as evidence only. What that showed, for whoever imports it:
   yet it went to a garage seven times after that, the last on 29 Sep 2026.
 
 ## Inputs needed from the operator
+
+Asked 2026-10-14, before building:
+
+- **Targets** — does a car in a garage stop counting as available on the Target
+  pages (lowering each working car's share), or stay in?
+- **Repeat window** — 30 days (the approval question used 30) or 90?
+- **Accounts** — the responsible person is an `access_user`; is every
+  operations member invited?
+- **Invoice retention** — receipts expire after 12 months; UAE VAT rules expect
+  tax records kept at least five years. Five years for garage invoices?
+
+Earlier list:
 
 1. **The garages in use now** — name, location (address or pin), what work each
    takes. Whether any of the four places above is one of them, a company yard,
