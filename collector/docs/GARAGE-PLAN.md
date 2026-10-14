@@ -143,12 +143,14 @@ Each line on a visit picks one; free text sits beside it, never instead of it �
 
 | field | how it is filled |
 |---|---|
-| car | picked; the plate's make, fleet and current driver shown |
+| car | picked; the plate's make, fleet, current driver and the operations member responsible for it shown |
+| driver | who was driving the car — suggested from the car's last booking before the visit, editable (operator, 2026-10-14) |
 | garage | from the list |
 | in | date and time; suggested from the tracker when the car entered the garage's area |
 | reason | accident · mechanical fault · scheduled service · tyres · battery/charging · body/cosmetic · RTA registration/inspection · recall · other |
 | state | waiting for approval/paperwork → in repair → waiting for parts → ready for collection → back on the road (or written off); every change kept with who and when |
 | accident paperwork | police report number, insurer, surveyor date, approval date — UAE Federal Traffic Law Art. 41 bars repairing accident damage without the authority's permission, so "waiting for paperwork" is its own state |
+| fault (accidents) | at fault (red paper) · not at fault (green paper) · not yet decided — required on an accident visit (operator, 2026-10-14) |
 | expected back | a date; changing it keeps the old one (slippage is a finding) |
 | back | date and time; suggested when the car left the area / took its first booking |
 | odometer in / out | from CABMAN where it reports one; typed otherwise |
@@ -246,17 +248,66 @@ never shown.
    section.
 5. Due-soon and odometer — after one question to InfoTrack (below).
 
+## The operator's rulings (2026-10-14)
+
+1. **Staff enter; the system catches up.** The visit is typed by the team; the
+   trackers and bookings only suggest (section 5).
+2. **Work types are the operator's fifteen:** A/C & cooling; Suspension &
+   steering; Tyres; Wheel/rim work; Alignment & balancing; Brakes; Battery &
+   electrical; Programming & diagnostics; Body & paint; Glass/windows/mirrors;
+   Engine/mechanical/drivetrain; Routine servicing; Recovery/towing; SRS/safety
+   systems; Exterior/underbody components. **Lamps file under Exterior** — no
+   sixteenth "Lights" type. This replaces the grouped list in section 2.
+3. **Operations owns the view, car by car.** Every car in operation — the whole
+   fleet — has one named operations member responsible for it. The car's record
+   carries that name; the visit shows it.
+4. **The driver driving the car belongs on the visit**, and on an accident visit
+   **the fault** (see the visit table).
+5. **"Out of service" is set by people**, never inferred from a provider flag.
+6. **Bolt's vehicle state is not collected** ("Bolt has no updated database") —
+   input 6 below is closed.
+7. **Approvals wait.** Who approves a repeat within 30 days, and the amount
+   above which a second person must approve, are not decided; nothing is built
+   for them yet.
+8. **No signed price lists** exist for the current garages.
+
+## The existing records, consolidated (2026-10-14)
+
+Two files the operator supplied — the audit workbook built from the invoices
+(Garage_Spend_Stage4_Comprehensive_Audit.xlsx) and the team's maintenance log
+(Garage_Maintenance_Log.xlsx) — were joined into one history, **invoices first**
+(the operator: "the first one is invoices so that takes precedence"), the log
+second, bookings as evidence only. What that showed, for whoever imports it:
+
+- **367 documents are 239 invoices**, AED 423,841.96: 126 copies (identical,
+  undated, revised) and 2 payment documents (a cheque cover page equal to the
+  nine invoices behind it; a payment advice repeating two invoices' lines).
+  Counting documents overstates spend by AED 256,992.70.
+- **The audit's lines are not always the invoice's.** A line set copied onto
+  other invoices fits only the one it came from; 23 invoices have no lines of
+  their own that add up (7 the audit itself marks "Bundled invoice total").
+  Typing such an invoice's cost from borrowed lines is a guess.
+- **The audit's job text for every M M Sajdaf invoice is "Accident/repair
+  work"** — A/C compressors and wiring included. It is a label, not evidence of
+  an accident.
+- **The log's dates turn day-first at row 250**, and Excel read every ambiguous
+  one month-first; its "Police Report Link" column holds only "N/A" or nothing;
+  fault is written once ("Accident Red Paper"). The visit record's fault and
+  police fields are therefore new information, not a copy of anything held.
+- 481 visits result: 106 invoice and log, 128 invoice only, 247 log only (AED
+  387,002.50 approved in the log with no invoice found).
+
 ## Inputs needed from the operator
 
 1. **The garages in use now** — name, location (address or pin), what work each
    takes. Whether any of the four places above is one of them, a company yard,
    or a staff base.
-2. **The starting work-type list** — or approval of the grouped list above.
+2. ~~The starting work-type list~~ — given (rulings, 2).
 3. **The repeat window** — 90 days by default.
-4. **Who enters, who approves**, and the cost approval threshold.
+4. **Who is responsible for each car** (rulings, 3), by name. Approvers and the
+   threshold come later (rulings, 7).
 5. **Whether to ask InfoTrack** three questions: what sets `outofservice`;
    whether workshop geofences can be held and read (`GetGeofenceInfo`); what
    `previousDistance` is (an odometer would make service-due possible for the
    FMS cars).
-6. **Whether to collect Bolt's vehicle state** (`getVehicles`), which would name
-   suspended and deactivated cars on that platform.
+6. ~~Whether to collect Bolt's vehicle state~~ — no (rulings, 6).
