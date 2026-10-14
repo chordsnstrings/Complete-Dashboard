@@ -194,11 +194,16 @@ await q(`INSERT INTO place_cell (cell_lat, cell_lng, area, n, distinct_names, ob
 [Math.round(DEIRA[0] / 0.005), Math.round(DEIRA[1] / 0.005), Math.round(ZAB[0] / 0.005), Math.round(ZAB[1] / 0.005)]);
 
 /* Live: L19262 reported two minutes ago in Deira, moving, a passenger
-   aboard; L55555 last reported three days ago (stale); an Uber status row
+   aboard; L55555 last reported days ago (stale); an Uber status row
    with no coordinates, which is not a position. */
 const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
 await fix(ago(2), DEIRA, 35, 'L19262', 'fms', 'egari', 1);
-await fix(ago(3 * 1440), ZAB, 0, 'L55555', 'cabman', 'ecosine');
+/* A FIXED instant, not ago(3 days). "Three days ago" lands on D itself when
+   the suite runs three days after it, and at 14:00–14:45 Dubai that put
+   L55555 inside the ±30 minutes of the fleet-at-14:15 check below — it read 2
+   cars instead of 1 (the full suite of 2026-10-14, run at 14:23). Any instant
+   days old is stale to the live list, which is all this car is for. */
+await fix(T('2026-10-08', '03:00'), ZAB, 0, 'L55555', 'cabman', 'ecosine');
 await q(`INSERT INTO telemetry_snapshot (source, plate, fleet_id, captured_at, polled_at, status)
          VALUES ('uber','L77777','ecosine',$1::timestamptz,$1::timestamptz,'online')`, [ago(1)]);
 await q(`INSERT INTO driver_status_now (platform, driver_ext_id, fleet_id, status, status_raw, status_at, observed_at, plate)

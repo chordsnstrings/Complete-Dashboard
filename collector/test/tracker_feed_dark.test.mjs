@@ -158,12 +158,26 @@ console.log('\nthe idle rule leaves the dark ones to the feed finding');
   /* Seed the crowd fresh enough to pass the idle rule's 48h window but old
      enough to be a dead feed: 40 hours, nine plates, one hour, one source —
      and no trips at all, so idle_vehicle would otherwise take every one. */
+  /* FIXLIST V7 (2026-10-14) moved this rule's ground. idle_vehicle is now
+     about the fleet's CARS — a plate with a VIN — that took no booking and did
+     not move in 14 days; the tracker decides only what the sentence may say,
+     never whether the car is idle. So the plates here are declared cars, and
+     a car in the dark cluster that has neither earned nor moved IS idle — what
+     it must never get is the old claim that it is "present and powered" off a
+     fix 40 hours old, which was the defect this block was written for. */
+  for (const plate of ['L-LIVE', ...Array.from({ length: 9 }, (_, i) => `L-TOGETHER-${i}`)]) {
+    await q(`INSERT INTO vehicle_profile (platform, vehicle_ext_id, plate, fleet_id, make, model, vin)
+             VALUES ('uber', $1, $2, 'ecosine', 'Tesla', 'Model Y', $3) ON CONFLICT DO NOTHING`,
+    [`v-${plate}`, plate, `VIN${plate}`]);
+  }
+  await computeInsights({});
   const idle = await q(
-    `SELECT entity_id FROM insight WHERE code = 'idle_vehicle' ORDER BY entity_id`);
+    `SELECT entity_id, detail FROM insight WHERE code = 'idle_vehicle' ORDER BY entity_id`);
   const names = idle.map((r) => r.entity_id);
-  check('no plate in the dark cluster is also reported as an idle vehicle',
-    !names.some((p2) => String(p2).startsWith('L-TOGETHER')),
-    JSON.stringify(names.slice(0, 12)));
+  const darkIdle = idle.filter((r) => String(r.entity_id).startsWith('L-TOGETHER'));
+  check('a car in the dark cluster that neither earned nor moved is idle, and is never said to be "present and powered"',
+    darkIdle.length === 9 && darkIdle.every((r) => !/present and powered/.test(r.detail || '')),
+    JSON.stringify(darkIdle.slice(0, 2)));
   /* And the exclusion has to be surgical. L-LIVE reported twelve minutes ago
      and has never earned, which is exactly what an idle vehicle is — if the
      dark-feed guard swallowed it too, the rule would have been silenced

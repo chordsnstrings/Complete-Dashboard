@@ -4649,3 +4649,24 @@ three Online time states differ by the new card alone. The desktop page was
 looked at against the mock in both skins at 1440 and 390 before any of that:
 one defect found and fixed — the hour column sorted as text (00, 01, 10, …).
 
+**The full suite on 8d2378d (379 files, 14,203 assertions): 5 failing, each
+reproduced alone and fixed.**
+- `timezone`: api/online_hours_routes.js computed today as
+  `new Date(Date.now() + 4h).toISOString().slice(0, 10)` — the right day by
+  hand-rolled arithmetic, which the rule bans; now `dubaiIso()` (src/util.js).
+- `rollup`: the test names every pass that records a state row; it now names
+  `driver_online_hour`.
+- `mockapi`: the mock lacked `expired_undated` (V1), `cab_days_moved` (V3) and
+  `doc_expired_undated` (V1) — added with neutral values (false / 0); the
+  classic desktop snapshot is unchanged by them (149/149).
+- `agent_reach`: NOT caused by this work — a date-and-time collision in the
+  fixture (COVERAGE trap below): a stale car stamped `ago(3 days)` landed on the
+  fixed day D at 14:23 and inside the fleet-at-14:15 window. Pinned to a fixed
+  instant.
+- `tracker_feed_dark`: the idle check encoded the pre-V7 rule (any tracker
+  plate; a dark-feed plate is never idle). Under V7 idle is about cars (VIN)
+  that neither earned nor moved, and the tracker decides only the sentence.
+  The fixture now declares its plates cars; the check asserts the nine dark
+  cars ARE idle and none is called "present and powered" — 2 fail when the
+  "powered" cut-off is moved from 6 h to 48 h.
+

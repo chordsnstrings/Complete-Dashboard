@@ -23,10 +23,11 @@
    is a driver; a person with two Uber accounts would count twice, and the
    response says so in `basis`. */
 import { winDays } from './window.js';
+import { dubaiIso } from '../src/util.js';
 import { LIVE_HOURS_SQL } from './online_hours_sql.js';
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
-const dubaiToday = () => new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
+const dubaiToday = () => dubaiIso();
 const dayStartMs = (day) => Date.parse(`${day}T00:00:00+04:00`);
 const r1 = (v) => Math.round(v * 10) / 10;
 

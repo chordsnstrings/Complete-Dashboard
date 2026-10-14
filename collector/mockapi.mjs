@@ -460,6 +460,9 @@ const mkDoc = (plate, make, model, days, drv) => ({
   plate, make, model, year: 2023, doc_type: 'Vehicle Registration Form',
   status: 'ACTIVE', expires_at: new Date(Date.now() + days * 864e5).toISOString(),
   days_left: days, driver_name: drv,
+  /* FIXLIST V1: a document the source calls EXPIRED with no date is listed and
+     flagged. None in this fixture is, so every list here keeps its date. */
+  expired_undated: false,
   // The id, so a document about to expire names somebody you can open rather
   // than only somebody you can read; and the day that custody is drawn from,
   // because "held by X" means something different if it is eleven weeks old.
@@ -2343,6 +2346,7 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
   last_trip_ever: i === 6 ? new Date(Date.now() - 41 * 864e5).toISOString()
     : new Date(Date.now() - i * 72e5).toISOString(),
   cab_days_moved: i === 6 ? 3 : 0,
+  doc_expired_undated: false,
   soonest_expiry: new Date(Date.now() + (i === 1 ? -12 : 5 + i * 14) * 864e5).toISOString(),
   doc_days_left: i === 1 ? -12 : 5 + i * 14,
   /* The safety rate comes from the endpoint now, over the days the alert feed
@@ -7864,7 +7868,10 @@ app.get('/api/economics/assets', (_, r) => {
   r.json({
     window: [dayISO(uWindowDays), dayISO(0)], window_days: uWindowDays,
     alert_coverage: alertCoverage(uWindowDays),
-    rows: uAssets,
+    /* FIXLIST V3: days a car moved that only CABMAN saw (above walking pace),
+       carried beside days_moved. Zero here: every fixture car's movement is
+       on its FMS journeys. */
+    rows: uAssets.map((x) => ({ cab_days_moved: 0, ...x })),
     by_platform: [
       { platform: 'uber', bookings: Math.round(bookings * 0.92), priced_bookings: 0, booking_days: 30,
         chargeable_bookings: Math.round(bookings * 0.82), uncharged_bookings: Math.round(bookings * 0.10),

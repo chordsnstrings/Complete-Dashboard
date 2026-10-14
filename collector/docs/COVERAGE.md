@@ -4932,6 +4932,16 @@ untouched, and nothing projected is ever added into `accounted`.
   `last_position` now share the one predicate. A new read of
   `telemetry_snapshot` positions uses it or says why not.
 
+* **A FIXTURE THAT MIXES A FIXED DAY WITH `ago(N days)` FAILS ON ONE DAY, AT
+  ONE HOUR.** test/agent_reach.test.mjs pins its scenario to D = 2026-10-11 and
+  stamped a "stale" car `ago(3 * 1440)`. On 2026-10-14 between 13:45 and 14:45
+  Dubai that instant IS D at the hour the fleet-at-14:15 check reads, and the
+  check counted two cars (the full suite of 2026-10-14, run at 14:23). It
+  passes on every other day and at every other hour, which is what makes it
+  look like a flake. A fixture anchored on a fixed day stamps every other row
+  on fixed instants too; `ago()` belongs only to rows the test reads relative
+  to now.
+
 * **THE PHONE RECORDING ANSWERS ONLY WHAT IT RECORDED, AND A NEW FETCH
   FAILS TWO CHECKS AT ONCE.** test/phone_arkiv.test.mjs asserts that every
   call at 390 px was answered from test/fixtures/phone_api.json.gz, and

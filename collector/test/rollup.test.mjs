@@ -317,7 +317,7 @@ const state = await rollupState(db);
    state — which is the point, since nobody can tell such a pass has stopped
    running — but it also passes when one pass disappears and another is added
    in the same change, and it says nothing about WHICH one went missing. */
-const PASSES = ['driver_day', 'driver_lifetime', 'driver_payout_day', 'driver_statement_day',
+const PASSES = ['driver_day', 'driver_lifetime', 'driver_online_hour', 'driver_payout_day', 'driver_statement_day',
   'money_event', 'rollup_day', 'rollup_month', 'rollup_person_month', 'rollup_week'];
 const seen = state.map((s) => s.name).sort();
 check('every rollup pass records a state row',
