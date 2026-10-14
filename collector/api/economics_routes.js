@@ -47,6 +47,7 @@
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome, chooseBasis, COMPLETED_SQL } from './income_sql.js';
 import { vehiclesOverWindow } from './custody_sql.js';
+import { CABMAN_MOVE_DAYS } from './telemetry_sql.js';
 /* The alerts-per-distance rule, in one place. Both tables on this page carry a
    safety rate and both were dividing a partial numerator by a whole-window
    denominator; the module says why, and what the covered-day rule assumes. */
@@ -158,6 +159,13 @@ export function economicsRoutes(app, { q, wrap, range }) {
     const cov = await alertCoverage(q, from, to);
     const pd = [...p, cov.days];
 
+    /* CABMAN files positions, not journeys, so its cars' movement was missing
+       from days_moved and a car driven every day without a booking read
+       "still" (FIXLIST V3). Movement is not a channel: under a platform chip
+       it is not added. */
+    const cabP = p[2] ? Promise.resolve([])
+      : q(`SELECT plate, array_agg(to_char(local_day, 'YYYY-MM-DD')) days
+             FROM (${CABMAN_MOVE_DAYS('$1', '$2', '$3')}) c GROUP BY plate`, [from, to, p[3]]);
     const [work, attributed, decor, unatt, coverage] = await Promise.all([
       /* The work, at BOTH grains, from ONE scan of the trip table.
          ──────────────────────────────────────────────────────────────────
@@ -213,6 +221,9 @@ export function economicsRoutes(app, { q, wrap, range }) {
                   count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
                   count(DISTINCT local_day) FILTER (WHERE is_booking)::int days_earning,
                   count(DISTINCT local_day)::int days_moved,
+                  -- the days themselves, so CABMAN's moving days can be added
+                  -- without counting a day twice (FIXLIST V3)
+                  array_agg(DISTINCT to_char(local_day, 'YYYY-MM-DD')) move_days,
                   round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
                   /* The SAME distance, narrowed to the days the alert feed was
                      up. It is the only denominator alerts_per_100km may have:
@@ -495,6 +506,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
       || (stamp.has(plate) && stamp.get(plate) == null && touched.has(plate));
     const assetDecor = decor.filter((d) => mine(d.plate));
     const assetWork = work.filter((w) => mine(w.plate));
+    const cabDays = new Map((await cabP).map((c) => [c.plate, c.days || []]));
     const assetAttributed = attributed.filter((a) => mine(a.plate));
     /* The register plates a chip cannot place on either fleet: no fleet on the
        vehicle record and no work under the chosen one. Counted rather than
@@ -525,13 +537,23 @@ export function economicsRoutes(app, { q, wrap, range }) {
     for (const d of assetDecor) Object.assign(row(d.plate), d, { fleet_id: d.fleet_id || null });
     for (const w of assetWork) {
       const r = row(w.plate);
+      const moved = new Set([...(w.move_days || []), ...(cabDays.get(w.plate) || [])]);
       Object.assign(r, {
         bookings: w.bookings, telematics_journeys: w.telematics_journeys,
-        days_earning: w.days_earning, days_moved: w.days_moved,
+        days_earning: w.days_earning, days_moved: moved.size,
+        cab_days_moved: (cabDays.get(w.plate) || []).length,
         km: n(w.km), alert_km: n(w.alert_km),
         measured_bookings: w.measured_bookings, drivers: w.drivers,
         last_trip: w.last_trip, fleet_id: r.fleet_id || w.fleet_id,
       });
+    }
+    /* A registered car with no trip at all in the window still moved if CABMAN
+       saw it moving (FIXLIST V3). Only cars already on the register: the
+       tracker's own plate list holds plates that are not cars. */
+    const worked = new Set(assetWork.map((w) => w.plate));
+    for (const [plate, days] of cabDays) {
+      if (worked.has(plate) || !byPlate.has(plate)) continue;
+      Object.assign(byPlate.get(plate), { days_moved: days.length, cab_days_moved: days.length });
     }
     /* WHEN DID THIS CAR LAST EARN — over the whole record, not the window.
        ─────────────────────────────────────────────────────────────────────
@@ -649,6 +671,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
            alert feed was dark, and a reader has to be able to see that. */
         alert_km: r.alert_km ?? null,
         days_earning: r.days_earning, days_moved: r.days_moved, idle_days: idleDays,
+        cab_days_moved: r.cab_days_moved || 0,
         window_days: windowDays,
         drivers: r.drivers,
         /* reported_payouts, not accounted_payouts: api/income_sql.js now counts a

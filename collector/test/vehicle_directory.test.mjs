@@ -27,6 +27,7 @@ import { rebuildCustody } from '../src/custody.js';
 import { peopleCountStored, personKey, JOIN_TRIP } from '../api/custody_sql.js';
 import { attributedEarnings } from '../api/attribution_sql.js';
 import { drivingCount, deviceCount } from '../api/alert_coverage_sql.js';
+import { CABMAN_MOVE_DAYS } from '../api/telemetry_sql.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -127,6 +128,8 @@ NEW = NEW.replace('${drivingCount()}', drivingCount())
 const CAP = Number(/const DIR_LIMIT = (\d+);/.exec(SRC)?.[1]);
 if (!Number.isFinite(CAP)) throw new Error('api/vehicle_routes.js no longer declares DIR_LIMIT');
 NEW = NEW.replace('${DIR_LIMIT + 1}', String(CAP + 1));
+/* CABMAN's moving days, from the module the route imports (FIXLIST V3). */
+NEW = NEW.replace("${CABMAN_MOVE_DAYS('$1', '$2')}", CABMAN_MOVE_DAYS('$1', '$2'));
 if (/\$\{/.test(NEW)) throw new Error(`the route interpolates something this test does not substitute: ${NEW.match(/\$\{[^}]*\}/g)}`);
 
 const WIN = ['2026-08-01', '2026-08-31'];
@@ -150,6 +153,10 @@ async function compare(label, db) {
      also carries the payout attributed to each car. Those get their own
      assertions below rather than failing this one. */
     const KEYS = new Set(Object.keys(before[0] || {}));
+  /* days_moved changed ON PURPOSE (FIXLIST V3, 2026-10-14): a day a CABMAN
+     car was seen moving now counts, and the old query could not see it. It
+     is held below by its own assertion against an independent count. */
+  KEYS.delete('days_moved');
   const fixed = (r) => JSON.stringify(Object.fromEntries(
     Object.entries(r).filter(([k]) => k !== CLOCK && KEYS.has(k))));
   const diffs = [];
@@ -182,6 +189,43 @@ async function payoutRows(database) {
   return qq(NEW, WIN);
 }
 const small = await compare('small fleet', db);
+
+/* days_moved, against a count written here independently: the Dubai days with
+   a booking or an FMS journey, united with the days a CABMAN fix ran above
+   3 km/h. Then a CABMAN-only car, driven on three days and parked on a
+   fourth, which the old rule called "did not move". */
+async function movedHolds(label, database) {
+  const qq = (t, p = []) => database.query(t, p).then((r) => r.rows);
+  const want = new Map((await qq(
+    `SELECT plate, count(*)::int n FROM (
+        SELECT plate, local_day FROM trip_norm
+         WHERE local_day BETWEEN $1::date AND $2::date AND plate IS NOT NULL AND plate <> ''
+        UNION
+        SELECT plate, (captured_at AT TIME ZONE 'Asia/Dubai')::date FROM telemetry_snapshot
+         WHERE source = 'cabman' AND speed > 3
+           AND (captured_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date) u
+      GROUP BY plate`, WIN)).map((r) => [r.plate, r.n]));
+  const got = await qq(NEW, WIN);
+  const bad = got.filter((r) => (want.get(r.plate) || 0) !== r.days_moved);
+  check(`${label}: days moved counts bookings, FMS journeys and CABMAN movement, each day once`,
+    bad.length === 0, bad.slice(0, 3).map((r) => `${r.plate} ${r.days_moved} vs ${want.get(r.plate) || 0}`).join(', '));
+  return got;
+}
+await movedHolds('small fleet', db);
+for (const [day, kmh] of [['2026-08-03', 40], ['2026-08-04', 22], ['2026-08-05', 18], ['2026-08-06', 1]]) {
+  for (const hh of ['09', '13']) {
+    await db.query(`INSERT INTO telemetry_snapshot (source, fleet_id, plate, captured_at, lat, lng, speed, status)
+                    VALUES ('cabman','ecosine','CAB777',$1::timestamptz,25.2,55.3,$2,'Active')`, [`${day}T${hh}:00:00+04:00`, kmh]);
+  }
+}
+{
+  const got = await movedHolds('with a CABMAN-only car', db);
+  const c = got.find((r) => r.plate === 'CAB777');
+  check('a CABMAN car driven on three days with no booking moved on three days, not zero',
+    c && c.days_moved === 3 && c.cab_days_moved === 3 && c.trips === 0 && c.telematics_journeys === 0,
+    JSON.stringify(c && { d: c.days_moved, cab: c.cab_days_moved, t: c.trips }));
+  await db.query(`DELETE FROM telemetry_snapshot WHERE plate = 'CAB777'`);
+}
 check('and it is a fleet, not an empty answer',
   small.length >= PLATES.length, `${small.length} plates`);
 

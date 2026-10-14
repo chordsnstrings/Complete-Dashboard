@@ -93,7 +93,9 @@ export const COHORTS = {
     question: 'Which cars drove with nothing paying for the journey?',
     why: 'The tracker saw the car move and every channel reported no booking behind it. '
       + 'Unauthorized trips lists the journeys themselves.',
-    test: (r) => !r.trips && r.telematics_journeys > 0,
+    /* A car (it has a VIN — FIXLIST V2) that took no booking and moved: an FMS
+       journey, or CABMAN positions above walking pace (V3). */
+    test: (r) => !!r.vin && !r.trips && (r.telematics_journeys > 0 || r.cab_days_moved > 0),
   },
   'vehicles-still': {
     kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false, cap: 500,
@@ -102,7 +104,7 @@ export const COHORTS = {
     question: 'Which cars produced neither a booking nor a journey?',
     why: 'Nothing at all in this window — the longest-standing of these are where '
       + 'redeployment starts.',
-    test: (r) => !r.trips && !r.telematics_journeys,
+    test: (r) => !!r.vin && !r.trips && !r.telematics_journeys && !r.cab_days_moved,
   },
   'vehicles-untracked': {
     kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false, cap: 500,
@@ -111,7 +113,7 @@ export const COHORTS = {
     question: 'Which cars has no tracker ever reported a position for?',
     why: 'Nothing can say where these are. Every movement-based check on this product '
       + 'is blind to them.',
-    test: (r) => !r.last_fix,
+    test: (r) => !!r.vin && !r.last_fix,
   },
   'vehicles-stale': {
     kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false, cap: 500,
@@ -120,7 +122,7 @@ export const COHORTS = {
     question: 'Which cars have a tracker that has not reported in 11 minutes?',
     why: 'A tracker that stops reporting looks exactly like a car that stopped moving, '
       + 'and only one of those is a fleet problem.',
-    test: (r) => !!r.stale && !!r.last_fix,
+    test: (r) => !!r.vin && !!r.stale && !!r.last_fix,
   },
   'vehicles-docs-due': {
     kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false, cap: 500,
@@ -129,7 +131,7 @@ export const COHORTS = {
     question: 'Which cars have a document expiring within 30 days?',
     why: 'A lapsed registration or insurance takes the car off the road on the day it '
       + 'expires, whatever it was earning.',
-    test: (r) => r.doc_days_left != null && r.doc_days_left < 30,
+    test: (r) => !!r.vin && (r.doc_expired_undated || (r.doc_days_left != null && r.doc_days_left < 30)),
   },
 
   /* ── Roster · who is on the books ────────────────────────────────────

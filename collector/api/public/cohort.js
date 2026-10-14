@@ -300,8 +300,11 @@ export async function renderCohort(root, key) {
      nobody measured. */
   const all = (c.pick ? payload?.[c.pick] : payload) || [];
   const has = (f) => rows.some((r) => r[f] !== undefined);
-  const near = (f) => rows.filter((r) => r[f] != null && r[f] < 30).length;
-  const over = (f) => rows.some((r) => r[f] != null && r[f] < 0);
+  /* A registration its source calls EXPIRED with no date is expired, not
+     "not due" (FIXLIST V1): Uber files its 11 inactive cars that way. */
+  const undated = (r, f) => f === 'doc_days_left' && r.doc_expired_undated;
+  const near = (f) => rows.filter((r) => undated(r, f) || (r[f] != null && r[f] < 30)).length;
+  const over = (f) => rows.some((r) => undated(r, f) || (r[f] != null && r[f] < 0));
   const COH_TILES = [
     { label: c.kind === 'vehicle' ? plural(rows.length, 'Vehicle') : plural(rows.length, 'Person', 'People'),
       value: fmt(rows.length),
@@ -417,7 +420,8 @@ export async function renderCohort(root, key) {
       { label: 'Idle days', key: 'idle_days', num: true,
         absent: 'Idle days are not computed on this list.' },
       { label: 'Papers', key: 'doc_days_left', num: true,
-        render: (r) => (r.doc_days_left == null ? '—'
+        render: (r) => (r.doc_expired_undated ? pill('expired · no date', 'bad')
+          : r.doc_days_left == null ? '—'
           : r.doc_days_left < 0 ? pill(`expired ${fmt(-r.doc_days_left)} d`, 'bad')
             : r.doc_days_left < 30 ? pill(`${fmt(r.doc_days_left)} d`, 'warn')
               : `${fmt(r.doc_days_left)} d`),

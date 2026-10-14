@@ -559,6 +559,26 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
     (vc.doc_types || []).some((d) => d.doc_type === 'registration'), JSON.stringify(vc.doc_types));
   check('the response says whether the list was cut', 'truncated' in vc);
 
+  /* FIXLIST V1 (2026-10-14): Uber files each inactive car's registration as
+     status EXPIRED with NO expiry date. Every filter here was
+     `expires_at IS NOT NULL`, so production said "expired 0" while Uber held
+     eleven cars off the road for exactly that. */
+  for (let i = 0; i < 2; i++) {
+    await q(`INSERT INTO vehicle_document (platform,vehicle_ext_id,doc_type,plate,fleet_id,status,expires_at)
+             VALUES ('uber',$1,'registration',$2,'ecosine','EXPIRED',NULL)`, [`vx${i}`, `LZ${i}`]);
+  }
+  await q(`INSERT INTO vehicle_document (platform,vehicle_ext_id,doc_type,plate,fleet_id,status,expires_at)
+           VALUES ('uber','vy0','insurance','LZ9','ecosine','ACTIVE',NULL)`);
+  const vu = await get('/api/compliance/vehicles');
+  check('an EXPIRED document with no date counts as expired',
+    vu.totals.expired === 4 && vu.totals.expired_undated === 2, `${vu.totals.expired} / ${vu.totals.expired_undated}`);
+  check('the undated expired documents are listed, marked, and first',
+    vu.rows.length === 8 && vu.rows[0].expired_undated === true && vu.rows[1].expired_undated === true
+      && vu.rows.filter((r) => r.expired_undated).length === 2, JSON.stringify(vu.rows.slice(0, 3).map((r) => [r.plate, r.expired_undated])));
+  check('an undated document that is not expired stays out of the due list',
+    !vu.rows.some((r) => r.plate === 'LZ9'), JSON.stringify(vu.rows.map((r) => r.plate)));
+  await q(`DELETE FROM vehicle_document WHERE vehicle_ext_id IN ('vx0','vx1','vy0')`);
+
   /* Six drivers share one licence date — the placeholder this source writes
      for an unset field — plus one genuine expiry and two with no date at all.
      The placeholder must not be counted as an expiry, and the people with NO

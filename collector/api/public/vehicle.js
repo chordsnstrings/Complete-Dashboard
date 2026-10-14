@@ -1234,7 +1234,8 @@ async function tabCompliance(root, plate, prof) {
       { label: 'Platform', key: 'platform', render: (r) => (ak ? chanCell(r.platform) : sourceLabel(r.platform)) },
       { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', ak ? null : r.status === 'ACTIVE' ? 'ok' : 'warn') },
       { label: 'Expires', key: 'expires_at', render: (r) => dayStr(r.expires_at) },
-      { label: 'Days left', key: 'days_left', num: true, render: (r) => (r.days_left == null ? '—'
+      { label: 'Days left', key: 'days_left', num: true, render: (r) => (r.days_left == null
+        ? (/^expired$/i.test(r.status || '') ? (ak ? '<span style="color:var(--sem-neg);white-space:nowrap">expired · no date</span>' : pill('expired · no date', 'bad')) : '—')
         : ak ? (r.days_left < 0 ? `<span style="color:var(--sem-neg);white-space:nowrap">expired · −${fmt(Math.abs(r.days_left))} d</span>`
           : r.days_left < 30 ? pill(`${fmt(r.days_left)} d`) : `<span class="dim">${fmt(r.days_left)} d</span>`)
           : pill(r.days_left < 0 ? `expired ${Math.abs(r.days_left)}d ago` : `${r.days_left}d`, docTone(r.days_left))) },
@@ -1544,18 +1545,28 @@ export async function renderVehicleDirectory(root) {
      drift apart — see api/public/cohorts.js. `earning` has no drill-down of
      its own (it is the whole point of the fleet, not an exception), so it
      stays a subtraction and the three still sum to the fleet. */
+  /* THE FLEET IS THE CARS (FIXLIST V2, 2026-10-14). Every count below was
+     over every plate with any record — 273 on production, 132 of them plates
+     the CABMAN feed once reported and stopped listing — so the headline read
+     "62% of the fleet took no booking" when the real figure was 35 of the 139
+     cars. A car is a plate with a VIN; the rest stay in the table and are
+     named as set aside, never silently dropped. The cohorts behind these
+     tiles apply the same test (api/public/cohorts.js), so a tile and its list
+     cannot disagree. */
+  const cars = rows.filter((r) => r.vin);
+  const setAside = rows.length - cars.length;
   const movedOnly = membersOf('vehicles-moved-no-booking', rows).length;
   const still = membersOf('vehicles-still', rows).length;
-  const earning = rows.length - movedOnly - still;
-  const tracked = rows.length - membersOf('vehicles-untracked', rows).length;
+  const earning = cars.length - movedOnly - still;
+  const tracked = cars.length - membersOf('vehicles-untracked', rows).length;
   const staleN = membersOf('vehicles-stale', rows).length;
   const expiring = membersOf('vehicles-docs-due', rows).length;
 
   /* The question this page answers is which cars are NOT working, and it opened
      on a search box and 170 rows sorted by the ones that are. */
   {
-    const idle = rows.length - earning;
-    const idlePct = rows.length ? Math.round((idle / rows.length) * 100) : 0;
+    const idle = cars.length - earning;
+    const idlePct = cars.length ? Math.round((idle / cars.length) * 100) : 0;
     let claim, figure, unit, tone = null, recommend = null;
     if (movedOnly) {
       tone = 'bad';
@@ -1571,15 +1582,16 @@ export async function renderVehicleDirectory(root) {
         ? `${countOf(expiring, 'vehicle')} of the fleet also has a document expiring within 30 days.`
         : 'Sort by Idle to bring the longest-standing cars together.';
     } else {
-      claim = `${fmt(earning)} of ${fmt(rows.length)} vehicles earned this window`;
+      claim = `${fmt(earning)} of ${fmt(cars.length)} cars earned this window`;
       figure = fmt(earning); unit = 'earning';
     }
     verdict(vHost, {
       claim, figure, unit, tone, recommend,
       cohort: movedOnly ? 'vehicles-moved-no-booking' : idle ? 'vehicles-still' : null,
-      meta: `${fmt(rows.length)} on the books`,
+      meta: `${fmt(cars.length)} cars`,
       sub: `${fmt(earning)} took a booking, ${fmt(movedOnly)} moved without one, ${fmt(still)} did not move at all.`
-        + (tracked < rows.length ? ` ${fmt(rows.length - tracked)} carry no tracker fix, so nothing can say where they are.` : '')
+        + (tracked < cars.length ? ` ${fmt(cars.length - tracked)} carry no tracker fix, so nothing can say where they are.` : '')
+        + (setAside ? ` ${fmt(setAside)} other ${plural(setAside, 'plate', 'plates')} with no VIN — tracker or booking records that are not a car this fleet can identify — are in the table below and not counted here.` : '')
         + (staleN ? ` ${fmt(staleN)} have a tracker that has gone quiet.` : ''),
     });
   }
@@ -1631,10 +1643,10 @@ export async function renderVehicleDirectory(root) {
             + 'between cars or one of them is wrong, and nothing here can say which',
           tone: 'critical' }
       : null,
-    { label: 'Took a booking', value: fmt(earning), sub: 'earned in this window',
-      tone: earning === rows.length ? 'good' : rows.length - earning > rows.length / 4 ? 'critical' : 'warn' },
+    { label: 'Took a booking', value: fmt(earning), sub: `of ${fmt(cars.length)} cars, earned in this window`,
+      tone: earning === cars.length ? 'good' : cars.length - earning > cars.length / 4 ? 'critical' : 'warn' },
     { label: 'Moved, no booking', value: fmt(movedOnly),
-      sub: 'the tracker saw it drive and nothing paid for it',
+      sub: 'a tracker saw it drive (an FMS journey, or CABMAN above walking pace) and nothing paid for it',
       tone: movedOnly ? 'critical' : 'good',
       cohort: movedOnly ? 'vehicles-moved-no-booking' : null },
     { label: 'Did not move', value: fmt(still), sub: 'no booking and no journey',
@@ -1663,8 +1675,8 @@ export async function renderVehicleDirectory(root) {
       ? { label: 'Tracker gone quiet', value: fmt(staleN), tone: 'warn',
           sub: 'reported a position once and has stopped',
           cohort: 'vehicles-stale' }
-      : tracked < rows.length
-        ? { label: 'No tracker fix', value: fmt(rows.length - tracked), tone: 'warn',
+      : tracked < cars.length
+        ? { label: 'No tracker fix', value: fmt(cars.length - tracked), tone: 'warn',
             sub: 'nothing can say where these are', cohort: 'vehicles-untracked' }
         : null,
     { label: 'Documents due', value: fmt(expiring), sub: 'expiring within 30 days',
@@ -1714,7 +1726,7 @@ export async function renderVehicleDirectory(root) {
     { label: 'Days moved', key: 'days_moved', num: true,
       render: (r) => (r.days_moved == null
         ? '<span class="ent-off" title="no tracker on this vehicle">—</span>'
-        : fmt(r.days_moved)) },
+        : `${fmt(r.days_moved)}${r.cab_days_moved ? `<span class="dim" title="${fmt(r.cab_days_moved)} of them seen by CABMAN positions above walking pace"> · CABMAN ${fmt(r.cab_days_moved)}</span>` : ''}`) },
     { label: 'Booked km', key: 'km', num: true, render: (r) => fmt(r.km) },
     /* The column behind the "Moved, no booking" tile. The tile is painted
        critical off telematics_km and the table had no column carrying it, so
@@ -1722,7 +1734,13 @@ export async function renderVehicleDirectory(root) {
        bookings account for could not be found from this page. */
     { label: 'Tracked km', key: 'telematics_km', num: true,
       render: (r) => {
-        if (r.telematics_km == null) return '<span class="ent-off" title="no tracker on this vehicle">—</span>';
+        /* CABMAN reports positions, not journeys, so a CABMAN car has no
+           tracked distance here even though it has a tracker (FIXLIST V3). */
+        if (r.telematics_km == null) {
+          return r.last_fix
+            ? '<span class="ent-off" title="this car\'s tracker reports positions, not journeys, so it has no tracked distance">—</span>'
+            : '<span class="ent-off" title="no tracker has reported this car">—</span>';
+        }
         const over = r.km > 0 && r.telematics_km > r.km * 1.2;
         return `${fmt(r.telematics_km)}${over
           ? `<span class="dim" title="the tracker saw ${fmt(Math.round((r.telematics_km / r.km - 1) * 100))}% more distance than the bookings account for"> · +${

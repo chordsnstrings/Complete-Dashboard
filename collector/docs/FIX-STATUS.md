@@ -4576,3 +4576,16 @@ The operator: "the target distribution makes more sense hourly and daily based o
 | WT-10 | Review: a weighted month's pace is earned ÷ planned (summary and the Month target page's average pace), and the recent pace runs over the weights left | yes | on production 2026-10-11 (9c1bc473): pace 85.07%, basis plan, month ends 1,527,736.43 on both pages | target_weights §3 — average day × days: 2 fail (79% on plan); recent pace unweighted: 1 |
 | WT-11 | Review: pages handed weights_basis through publicBasis only (no car counts or money from the re-shape); wording on the Month target drivers panel, Access preview and today workbook; trips title; hourly "N of the last 4 Sundays" | yes | on production 2026-10-11 (9c1bc473): weights_basis carries weeks/used/from/to/before/skipped/why/cutover only | target_weights §5 — publicBasis skipped: 1 fail; wording to be seen on production |
 | WT-12 | Seen on production after deploy 9c1bc473: the Month target page said the 13,764 trips needed to 10 Oct were "each weekday its share" — all ten days were asked a flat 12. It now names the weekday share only from the day it began ("from Sun 11 Oct, the same every day before") | yes | on production 2026-10-11 (9840e3f6, 2bda8f5): Month target, both skins, reads "13,764 needed to Sat 10 Oct — 12 a day per active driver" | target_weights §8 — the first build's sentence: 1 fail |
+
+
+## VF — the vehicle pages made truthful (2026-10-14)
+
+The operator, after the garage plan: "go". Step 1 of `docs/GARAGE-PLAN.md`'s
+order: the twelve false statements in FIXLIST "The vehicle pages and the
+idle-car rules — found 2026-10-14".
+
+| id | fix | written | production | proven |
+|---|---|---|---|---|
+| V1 | `/api/compliance/vehicles`: a document is listed when it has a date OR its source calls it EXPIRED; undated expired ones are marked `expired_undated`, counted inside `expired` (plus `expired_undated`), sorted first. The directory carries `doc_expired_undated`. #compliance, the vehicle Compliance tab and the register's Papers column read "expired · no date" instead of "0 d" / "—" | yes | no | `server_audit`: 2 of 3 new checks fail with `api/server.js` reverted |
+| V2 | #vehicles counts the CARS (a plate with a VIN), not every plate with a record: the verdict, the tiles and the five directory cohorts (`api/public/cohorts.js`) apply the same test, and the verdict names the plates set aside | yes | no | `cohorts`: 5 checks fail with `cohorts.js` reverted |
+| V3 | A day moved includes a CABMAN fix above 3 km/h (`CABMAN_MOVE_DAYS`, `api/telemetry_sql.js`), in the directory (`days_moved`, `cab_days_moved`) and `/api/economics/assets` (not under a platform chip; registered cars only). "Moved, no booking" / "Did not move" use it; "Tracked km" says a CABMAN car has a tracker that reports positions, not journeys | yes | no | `vehicle_directory`: 3 fail with `vehicle_routes.js` reverted (the fixture's L94178 moved 8 days, read 0); `economics`: 2 fail with `economics_routes.js` reverted |

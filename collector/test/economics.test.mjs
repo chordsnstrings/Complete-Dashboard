@@ -207,6 +207,30 @@ check('a platform filter narrows the asset ledger',
   uberOnly.rows.every((r) => !r.money_platforms.length
     || r.money_platforms.every((p) => p === 'uber')),
   uberOnly.rows.flatMap((r) => r.money_platforms).filter((p) => p !== 'uber').join(', '));
+/* ── CABMAN movement is movement (FIXLIST V3, 2026-10-14) ────────────────
+   CABMAN files positions, never journeys, so days_moved — and the band built
+   on it — read a CABMAN car driven without a booking as "still". The days are
+   counted here independently from the fixes (Dubai days with a CABMAN speed
+   above 3 km/h) and must match; such a car with no trip at all is moved, not
+   still. Movement is not a channel, so under a platform chip none is added. */
+{
+  const want = new Map((await db.query(
+    `SELECT plate, count(DISTINCT (captured_at AT TIME ZONE 'Asia/Dubai')::date)::int n FROM telemetry_snapshot
+      WHERE source = 'cabman' AND speed > 3
+        AND (captured_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN '2026-08-01' AND '2026-08-31'
+      GROUP BY plate`)).rows.map((r) => [r.plate, r.n]));
+  const listed = A.rows.filter((r) => want.has(r.plate));
+  check('the fixture has CABMAN movement on listed cars', listed.length > 0, `${want.size} CABMAN plates, ${listed.length} listed`);
+  const off = listed.filter((r) => r.cab_days_moved !== want.get(r.plate) || r.days_moved < want.get(r.plate));
+  check('each car\'s CABMAN moving days are counted, and days moved holds at least them',
+    off.length === 0, off.slice(0, 3).map((r) => `${r.plate} cab ${r.cab_days_moved} moved ${r.days_moved} want ${want.get(r.plate)}`).join(', '));
+  const moverNoTrip = listed.filter((r) => !r.bookings && !r.telematics_journeys);
+  check('a car CABMAN saw moving with no trip at all is not "still"',
+    moverNoTrip.length > 0 && moverNoTrip.every((r) => r.band !== 'still'),
+    JSON.stringify(moverNoTrip.map((r) => [r.plate, r.band, r.days_moved])));
+  check('under a platform chip no CABMAN movement is added',
+    uberOnly.rows.every((r) => !r.cab_days_moved), uberOnly.rows.filter((r) => r.cab_days_moved).map((r) => r.plate).join(', '));
+}
 const oneFleet = await get(`/api/economics/drivers?${WIN}&fleet=ecosine`);
 check('a fleet filter narrows the people ledger', Array.isArray(oneFleet.rows));
 

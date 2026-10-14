@@ -5230,9 +5230,18 @@ app.get('/api/compliance/vehicles', wrap(async (req, res) => {
      a source ('fms'), which is not a booking channel, so the platform chip is
      deliberately not applied. */
   const vFleet = req.query.fleet || null;
+  /* EXPIRED WITH NO DATE IS STILL EXPIRED (FIXLIST V1, 2026-10-14).
+     Every filter here was `expires_at IS NOT NULL`, and Uber files the
+     registration of each of its 11 INACTIVE cars as status EXPIRED with no
+     expiry date at all — so the page said "expired 0" while Uber held eleven
+     cars off the road for exactly that. A document is in this list when it has
+     a date OR when its source calls it expired; the undated ones are marked,
+     counted inside `expired`, and sort first. */
+  const DUE = `(d.expires_at IS NOT NULL OR upper(d.status) = 'EXPIRED')`;
   const rows = await q(
     `SELECT d.plate, d.doc_type, d.status, d.expires_at,
             (d.expires_at::date - now()::date) AS days_left,
+            (d.expires_at IS NULL AND upper(d.status) = 'EXPIRED') AS expired_undated,
             p.make, p.model, p.year, p.vin, p.image_url,
             -- Whoever holds the car NOW, which is the right person for a
             -- document expiring next week — with the id, so the name can be a
@@ -5241,23 +5250,24 @@ app.get('/api/compliance/vehicles', wrap(async (req, res) => {
      FROM vehicle_document d
      LEFT JOIN vehicle_profile p ON p.platform=d.platform AND p.vehicle_ext_id=d.vehicle_ext_id
      LEFT JOIN vehicle_current_driver cd ON cd.plate = d.plate
-     WHERE d.expires_at IS NOT NULL
+     WHERE ${DUE}
        AND ($1::text IS NULL OR coalesce(d.fleet_id, p.fleet_id) = $1)
-     ORDER BY d.expires_at ASC LIMIT 300`, [vFleet]);
+     ORDER BY (d.expires_at IS NULL) DESC, d.expires_at ASC LIMIT 300`, [vFleet]);
   const [t] = await q(
     `SELECT count(*)::int total,
-            count(*) FILTER (WHERE expires_at::date < now()::date)::int expired,
+            count(*) FILTER (WHERE d.expires_at::date < now()::date OR d.expires_at IS NULL)::int expired,
+            count(*) FILTER (WHERE d.expires_at IS NULL)::int expired_undated,
             count(*) FILTER (WHERE expires_at::date >= now()::date
                                AND expires_at::date <= now()::date + 7)::int within_7,
             count(*) FILTER (WHERE expires_at::date > now()::date + 7
                                AND expires_at::date <= now()::date + 45)::int within_45,
             count(DISTINCT plate)::int vehicles,
             count(DISTINCT doc_type)::int doc_types
-     FROM vehicle_document
-     WHERE expires_at IS NOT NULL AND ($1::text IS NULL OR fleet_id = $1)`, [vFleet]);
+     FROM vehicle_document d
+     WHERE ${DUE} AND ($1::text IS NULL OR d.fleet_id = $1)`, [vFleet]);
   const types = await q(
-    `SELECT doc_type, count(*)::int n FROM vehicle_document
-     WHERE expires_at IS NOT NULL AND doc_type IS NOT NULL
+    `SELECT doc_type, count(*)::int n FROM vehicle_document d
+     WHERE ${DUE} AND doc_type IS NOT NULL
        AND ($1::text IS NULL OR fleet_id = $1)
      GROUP BY 1 ORDER BY n DESC`, [vFleet]);
   res.json({ rows, totals: t, doc_types: types, fleet: vFleet,

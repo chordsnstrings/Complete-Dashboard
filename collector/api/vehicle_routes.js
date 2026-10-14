@@ -13,6 +13,7 @@
    "is this asset earning, and is it legal to be on the road". */
 
 import { peopleCount, personKey, custodyNames } from './custody_sql.js';
+import { CABMAN_MOVE_DAYS } from './telemetry_sql.js';
 import { winDays, dubaiSpanSql } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
@@ -237,6 +238,18 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          WHERE c.bookings > 0
          GROUP BY 1
        ),
+       /* A day moved is a day with a booking, an FMS journey, or a CABMAN fix
+          above walking pace (api/telemetry_sql.js CABMAN_MOVE_DAYS, FIXLIST
+          V3): CABMAN writes no journeys, so its cars read "did not move". */
+       cmove AS (${CABMAN_MOVE_DAYS('$1', '$2')}),
+       mv AS (
+         SELECT d.plate, count(*)::int days_moved, count(*) FILTER (WHERE d.cab)::int cab_days_moved
+           FROM (SELECT u.plate, u.local_day, bool_or(u.cab) cab
+                   FROM (SELECT plate, local_day, false AS cab FROM by_account
+                         UNION ALL SELECT plate, local_day, true FROM cmove) u
+                  GROUP BY 1, 2) d
+          GROUP BY 1
+       ),
        tel AS (
          /* Each plate's newest fix, one index probe a plate — the same row
             DISTINCT ON (plate) … ORDER BY plate, captured_at DESC kept. */
@@ -248,8 +261,11 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
           WHERE p.plate IS NOT NULL
        ),
        doc AS (
-         SELECT plate, min(expires_at) soonest_expiry, count(*)::int docs
-         FROM vehicle_document WHERE expires_at IS NOT NULL GROUP BY plate
+         -- an EXPIRED status with no date is expired (FIXLIST V1): Uber files
+         -- its 11 inactive cars' registrations that way
+         SELECT plate, min(expires_at) soonest_expiry, count(*)::int docs,
+                bool_or(expires_at IS NULL AND upper(status) = 'EXPIRED') doc_expired_undated
+         FROM vehicle_document WHERE expires_at IS NOT NULL OR upper(status) = 'EXPIRED' GROUP BY plate
        ),
        /* Driving events and hardware faults counted apart. Main Power Lost is
           the tracker complaining about its own wiring, and ranking cars on the
@@ -319,7 +335,8 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        SELECT p.plate,
               coalesce(w.trips,0) trips,
               coalesce(w.telematics_journeys,0) telematics_journeys,
-              coalesce(w.days,0) days, coalesce(w.days_moved,0) days_moved,
+              coalesce(w.days,0) days, coalesce(mv.days_moved,0) days_moved,
+              coalesce(mv.cab_days_moved,0) cab_days_moved,
               w.km, w.telematics_km, w.revenue, coalesce(w.priced_trips,0) priced_trips,
               pay.payout, coalesce(pay.payout_days,0) payout_days, pay.payout_even_split,
               /* The two grains that let api/income_sql.js choose per channel.
@@ -366,6 +383,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               (now() - tel.last_fix > interval '11 minutes') stale,
               round(extract(epoch FROM now() - tel.last_fix) / 60)::int fix_age_min,
               doc.soonest_expiry, (doc.soonest_expiry::date - now()::date) doc_days_left,
+              coalesce(doc.doc_expired_undated, false) doc_expired_undated,
               coalesce(al.alerts,0) alerts,
               /* Carried out of the CTE, not just computed in it. Without this
                  the row reaches alertRate() with device undefined, and a plate
@@ -377,6 +395,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               cd.driver_name current_driver, cd.driver_ext_id current_driver_id, cd.as_of driver_as_of
        FROM plates p
        LEFT JOIN work w ON w.plate = p.plate
+       LEFT JOIN mv ON mv.plate = p.plate
        LEFT JOIN pay ON pay.plate = p.plate
        LEFT JOIN chan ON chan.plate = p.plate
        LEFT JOIN pay_chan ON pay_chan.plate = p.plate

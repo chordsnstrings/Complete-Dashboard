@@ -94,37 +94,48 @@ check('moved-unpaid and never-moved partition the non-earners',
   JSON.stringify(m('unit-moved-unpaid', assets)) === '["P2"]'
   && JSON.stringify(m('unit-still', assets)) === '["P3","P4","P5"]');
 
-/* /api/vehicles/directory — a bare array, and `trips` is 0, never null. */
+/* /api/vehicles/directory — a bare array, and `trips` is 0, never null.
+   The fleet is the CARS — plates with a VIN (FIXLIST V2, 2026-10-14). V5 is a
+   plate the CABMAN feed once reported and stopped listing: no VIN, no work,
+   no fix. It used to be counted as a car that "did not move" and "has no
+   tracker", which is how the page came to say 62% of the fleet stood still.
+   V6 is a CABMAN car driven without a booking: no FMS journey, but CABMAN saw
+   it above walking pace on five days (V3) — it moved. V7's registration is
+   EXPIRED with no date (V1). */
 const dir = [
-  { plate: 'V1', trips: 42, telematics_journeys: 60, last_fix: '2026-08-28T00:00:00Z', stale: false, doc_days_left: 90 },
-  { plate: 'V2', trips: 0, telematics_journeys: 38, last_fix: '2026-08-28T00:00:00Z', stale: false, doc_days_left: 12 },
-  { plate: 'V3', trips: 0, telematics_journeys: 0, last_fix: null, stale: null, doc_days_left: null },
-  { plate: 'V4', trips: 0, telematics_journeys: 0, last_fix: '2026-07-01T00:00:00Z', stale: true, doc_days_left: 200 },
+  { plate: 'V1', vin: 'VIN1', trips: 42, telematics_journeys: 60, cab_days_moved: 0, last_fix: '2026-08-28T00:00:00Z', stale: false, doc_days_left: 90 },
+  { plate: 'V2', vin: 'VIN2', trips: 0, telematics_journeys: 38, cab_days_moved: 0, last_fix: '2026-08-28T00:00:00Z', stale: false, doc_days_left: 12 },
+  { plate: 'V3', vin: 'VIN3', trips: 0, telematics_journeys: 0, cab_days_moved: 0, last_fix: null, stale: null, doc_days_left: null },
+  { plate: 'V4', vin: 'VIN4', trips: 0, telematics_journeys: 0, cab_days_moved: 0, last_fix: '2026-07-01T00:00:00Z', stale: true, doc_days_left: 200 },
+  { plate: 'V5', vin: null, trips: 0, telematics_journeys: 0, cab_days_moved: 0, last_fix: null, stale: null, doc_days_left: null },
+  { plate: 'V6', vin: 'VIN6', trips: 0, telematics_journeys: 0, cab_days_moved: 5, last_fix: '2026-08-28T00:00:00Z', stale: false, doc_days_left: 300 },
+  { plate: 'V7', vin: 'VIN7', trips: 3, telematics_journeys: 0, cab_days_moved: 0, last_fix: '2026-08-28T00:00:00Z', stale: false, doc_days_left: null, doc_expired_undated: true },
 ];
-check('moved-with-no-booking is the middle bucket, not every idle car',
-  JSON.stringify(m('vehicles-moved-no-booking', dir)) === '["V2"]',
+check('moved-with-no-booking is the middle bucket, not every idle car — CABMAN movement included',
+  JSON.stringify(m('vehicles-moved-no-booking', dir)) === '["V2","V6"]',
   JSON.stringify(m('vehicles-moved-no-booking', dir)));
-check('did-not-move excludes the car that moved without a booking',
+check('did-not-move excludes the car that moved without a booking, and the plate that is not a car',
   JSON.stringify(m('vehicles-still', dir)) === '["V3","V4"]',
   JSON.stringify(m('vehicles-still', dir)));
 /* The two tracker cohorts are different claims and must not overlap: a car
    nothing has ever reported is not "a tracker that has gone quiet". */
-check('untracked is only the car with no fix at all',
-  JSON.stringify(m('vehicles-untracked', dir)) === '["V3"]');
+check('untracked is only the car with no fix at all, never a plate with no VIN',
+  JSON.stringify(m('vehicles-untracked', dir)) === '["V3"]', JSON.stringify(m('vehicles-untracked', dir)));
 check('gone-quiet excludes the car that never reported',
   JSON.stringify(m('vehicles-stale', dir)) === '["V4"]');
 check('the two tracker cohorts do not overlap',
   m('vehicles-untracked', dir).every((x) => !m('vehicles-stale', dir).includes(x)));
-check('documents due counts only a date inside 30 days',
-  JSON.stringify(m('vehicles-docs-due', dir)) === '["V2"]');
-/* The three buckets on the Vehicles page must sum to the fleet, or the tiles
-   above the table do not add up to the table. */
+check('documents due counts a date inside 30 days and an EXPIRED registration with no date',
+  JSON.stringify(m('vehicles-docs-due', dir)) === '["V2","V7"]', JSON.stringify(m('vehicles-docs-due', dir)));
+/* The three buckets on the Vehicles page must sum to the CARS, or the tiles
+   above the table do not add up to the fleet they describe. */
 {
-  const earning = dir.filter((r) => r.trips > 0).length;
+  const cars = dir.filter((r) => r.vin);
+  const earning = cars.filter((r) => r.trips > 0).length;
   const moved = membersOf('vehicles-moved-no-booking', dir).length;
   const still = membersOf('vehicles-still', dir).length;
-  check('earning + moved-unpaid + still is the whole fleet',
-    earning + moved + still === dir.length, `${earning}+${moved}+${still} of ${dir.length}`);
+  check('earning + moved-unpaid + still is the whole fleet of cars',
+    earning + moved + still === cars.length, `${earning}+${moved}+${still} of ${cars.length}`);
 }
 
 /* /api/roster — rows under `people`, bucketed server-side by `category`. */

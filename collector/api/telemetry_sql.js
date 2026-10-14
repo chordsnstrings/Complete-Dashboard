@@ -38,3 +38,24 @@ export const LATEST_FIX = (plateExpr) => `(
         WHERE t.plate = ${plateExpr} AND t.captured_at > now()
         ORDER BY t.captured_at DESC, t.polled_at DESC LIMIT 1)
     ) f ORDER BY f.fix_rank LIMIT 1)`;
+
+/* THE DAYS A CABMAN CAR WAS SEEN MOVING (FIXLIST V3, 2026-10-14).
+   ───────────────────────────────────────────────────────────────────────
+   "Moved" on #vehicles, the directory's days_moved and /api/economics/assets
+   was read off trip_norm alone — bookings plus FMS journeys. CABMAN files
+   positions, never journeys, so a CABMAN car driven every day without a
+   booking read "did not move": on production L74169 was driven 26 of 30 days
+   and counted still. A Dubai day counts here when any CABMAN fix that day
+   carried a speed above walking pace — the same 3 km/h line the driver-day
+   page draws (api/day_movement.js). Only CABMAN: an FMS car's movement is
+   already a journey row, and counting its fixes too would be the same
+   movement twice. `fromP`/`toP` are SQL expressions for the window's first and
+   last Dubai day. */
+export const CABMAN_MOVING_KMH = 3;
+export const CABMAN_MOVE_DAYS = (fromP, toP, fleetP = 'NULL') => `SELECT plate, (captured_at AT TIME ZONE 'Asia/Dubai')::date AS local_day
+      FROM telemetry_snapshot
+     WHERE source = 'cabman' AND speed > ${CABMAN_MOVING_KMH}
+       AND (${fleetP}::text IS NULL OR fleet_id = ${fleetP})
+       AND captured_at >= (${fromP}::date::timestamp AT TIME ZONE 'Asia/Dubai')
+       AND captured_at <  ((${toP}::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+     GROUP BY 1, 2`;

@@ -3022,11 +3022,13 @@ V.vehicles = async (root) => {
   /* A vehicle is not a channel: ink bars under the page contract. */
   hbars(spread.body, earning.slice(0, 14).map((r) => ({ label: r.plate, n: +r.trips || 0 })), { ...(contract() ? { color: '--mk-fill' } : { seq: true }), signed: false,
     onClick: (d) => { location.hash = href('vehicle', d.label); } });
+  /* Out of the CARS, not every plate with a record (FIXLIST V2). */
+  const carsN = rows.filter((r) => r.vin).length;
   spread.body.append(el('p', 'cap', earning.length > 14
-    ? `The 14 busiest of ${fmt(earning.length)} vehicles with a booking in this range, out of `
-      + `${fmt(rows.length)} on the books. Every one of them is in the directory above.`
-    : `Every one of the ${fmt(earning.length)} vehicles with a booking in this range, out of `
-      + `${fmt(rows.length)} on the books.`));
+    ? `The 14 busiest of ${fmt(earning.length)} vehicles with a booking in this range; the fleet is `
+      + `${fmt(carsN)} cars. Every one of them is in the directory above.`
+    : `Every one of the ${fmt(earning.length)} vehicles with a booking in this range; the fleet is `
+      + `${fmt(carsN)} cars.`));
 
   tierP.body.innerHTML = '';
   if (!byTier.length) {
@@ -6852,7 +6854,9 @@ V.compliance = async (root) => {
   ]);
   const veh = vehPage.rows || [];
   const drv = drvPage.drivers || [];
-  const dl = (r) => Number(r.days_left);
+  /* null stays null: Number(null) is 0, and a registration Uber calls EXPIRED
+     with no date would read "0 d" — due today rather than already expired. */
+  const dl = (r) => (r.days_left == null ? null : Number(r.days_left));
   /* Counted in the database, not by filtering the list on screen. Both lists
      are capped — 300 documents, 300 licences — and every tile on this page was
      a .filter().length over whichever rows arrived, under captions like
@@ -6860,9 +6864,9 @@ V.compliance = async (root) => {
      because expired rows sort first; they stop agreeing the day the fleet
      crosses the cap, silently. */
   const vt = vehPage.totals || {};
-  const vExpired = vt.expired ?? veh.filter((r) => dl(r) < 0).length;
-  const vWeek = vt.within_7 ?? veh.filter((r) => dl(r) >= 0 && dl(r) <= 7).length;
-  const vMonth = vt.within_45 ?? veh.filter((r) => dl(r) > 7 && dl(r) <= 45).length;
+  const vExpired = vt.expired ?? veh.filter((r) => r.expired_undated || (dl(r) != null && dl(r) < 0)).length;
+  const vWeek = vt.within_7 ?? veh.filter((r) => dl(r) != null && dl(r) >= 0 && dl(r) <= 7).length;
+  const vMonth = vt.within_45 ?? veh.filter((r) => dl(r) != null && dl(r) > 7 && dl(r) <= 45).length;
   /* A licence date shared by most of the roster is what this source writes when
      the field was never filled in. Counted as expiries it read "77 drivers must
      stand down" — while the insight engine, which runs the same check, was
@@ -7094,6 +7098,11 @@ V.compliance = async (root) => {
   else foldRows(vp.body, tableFrom(veh.slice(0, 120), [
     { label: 'Due', key: 'days_left', num: true, render: (r) => {
       const d = dl(r);
+      if (r.expired_undated) {
+        return ak ? '<span style="color:var(--sem-neg);white-space:nowrap" title="the source marks it EXPIRED and publishes no date">expired · no date</span>'
+          : '<span class="tag err" title="the source marks it EXPIRED and publishes no date">expired · no date</span>';
+      }
+      if (d == null) return '—';
       if (ak) return dueAk(d);
       const cls = d < 0 ? 'err' : d <= 7 ? 'err' : d <= 45 ? 'warn' : 'ok';
       return `<span class="tag ${cls}">${d < 0 ? Math.abs(d) + 'd ago' : d + 'd'}</span>`; } },
