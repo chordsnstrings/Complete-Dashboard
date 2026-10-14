@@ -4670,3 +4670,41 @@ reproduced alone and fixed.**
   cars ARE idle and none is called "present and powered" — 2 fail when the
   "powered" cut-off is moved from 6 h to 48 h.
 
+
+## UNA — unbooked journeys on the Activity tab and the day page (2026-10-14)
+
+The operator, with screenshots of a driver's Activity tab and day page:
+"unauthorized trips should show on activity tab and daily pages". Nothing new
+is computed: both pages read `/api/driver/unauthorized` (ACCUSE — a role
+without it is told so) over the window they already draw, and
+`api/public/unbooked.js` folds the answer into RIDES by the server's own
+`dedupe_rule`: a ride is the reading the server counts once, every other
+reading of it (same car, most overlap) only lends it strength, and a ride is
+NAMED if any reading names this person. Neither page awaits it — the
+attribution ladder takes ~10 s for a fortnight on production — so the bars
+and the day are already true without it.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| UNA-1 | Activity: each ride marked on its day's 24-hour track at its real time — solid where the person is named beside it, hollow where they are one of several who held the car; the rung in each mark's title; the key names only the forms drawn; a sentence under the bars counts rides by rung, says a ride its readings disagree about, counts rides on days with no bar, says what the seat sensor watched, and links the Unexplained trips tab | yes | no | `unbooked_marks`: 15 of 18 fail against the old pages; the key-only-what-is-drawn check fails with the old legend rule |
+| UNA-2 | Day page: an "unbooked journeys" row on the band (one mark per ride, "N · M named"), and each ride in the list of jobs at its time — from/to, km, minutes with a passenger aboard, car, which sensor saw it, a named / one-of-several pill, the rung and the evidence in words, "not a record of who drove", and the way to the journey (`#segment/<plate>/<start>`); a day with no job gets its own panel | yes | no | `unbooked_marks` (above) |
+| UNA-3 | A wait that holds a ride says so in the wait ("Inside this wait the car made a journey no channel booked, 10:00–10:30 on … ; below"). The wait's minutes are NOT reduced: the ride's attribution is an inference, and subtracting it would turn the inference into a figure | yes | no | `unbooked_marks`: 1 fails with the line removed |
+| UNA-4 | A capped answer says where it stops. The route returns at most 400 readings, newest first, with `truncated`; both pages now say "the server returned only its newest N sensor readings, reaching back to <day>; a day before that can carry a journey that is not marked here" | yes | no | `unbooked_marks`: 2 fail with the sentence removed |
+| UNA-5 | A failed request says so on both pages and marks nothing ("says nothing about whether there are any"); a 403 says the role does not see it | yes | no | `unbooked_marks`: 2 checks |
+
+Measured against production before writing the fold (one person, 1–14
+October, the route's own answer): the server's totals were 6 named + 12
+candidate; the rides are 7 + 11 — the same 18, with one ride at 17:06 on
+13 October named by one reading (last trip on the car) and one of several by
+the other. Drawing by `counts_once` alone would have shown it hollow; drawing
+every reading would have drawn 27 marks for 18 rides. COVERAGE trap below.
+
+Also: `.dday-leg`'s `minmax(19rem,1fr)` floor (304 px) ran every day list 15 px
+off the classic page at 390 px (scrollWidth 405, measured on the base tree);
+the unbooked entries' extra padding then pushed Arkiv over too. Now
+`minmax(min(19rem,100%),1fr)` and no extra padding — both skins at 390 measure
+390. The classic desktop snapshot re-recorded `driver/drv-0/activity` and
+`driver/drv-0/day?on=2026-09-20` after a diff against the base tree's capture
+showed only the intended additions (the `data-day` / `data-s` / gap
+`data-from`/`data-to` attributes, the sentence, the day's "none on this day"
+line); every other driver route held (15/15).

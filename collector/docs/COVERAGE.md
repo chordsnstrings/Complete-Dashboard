@@ -4954,6 +4954,21 @@ untouched, and nothing projected is ever added into `accounted`.
   changes every answer (the mock is random) and is not the fix. Done this way
   for /api/vehicles/directory on 2026-10-14 (FIX-STATUS VF).
 
+* **ONE RIDE, TWO READINGS, AND THEY CAN DISAGREE ABOUT WHO.** Since
+  2026-09-23 an FMS car's ride is usually two `occupancy_segment` rows — FMS's
+  journey seat count and FMS's live seat count — and `/api/driver/unauthorized`
+  attributes each reading on its own. They can land on DIFFERENT sides of its
+  split: on 2026-10-14 one person's fortnight held a ride (13 October, 17:06)
+  named by the live reading (last trip on the car) and only a candidate by the
+  journey reading, which is the one the server counts (`counts_once`). So the
+  server's totals said 6 named + 12 candidate where the rides are 7 + 11. Any
+  view that draws these per ride must fold readings into rides by the
+  response's `dedupe_rule` and take the strongest rung any reading gives —
+  `api/public/unbooked.js` `ridesOf` does — or it either draws one ride twice
+  (every reading) or quietly downgrades it (`counts_once` alone). The answer
+  is also capped at 400 readings, newest first (`truncated`): say where it
+  stops (`truncationWords`).
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`

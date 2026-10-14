@@ -2546,3 +2546,26 @@ classic at 1440:
   who drove under another name sit at the top of the money list with
   AED 0. See FIX-STATUS MT.
 
+
+## Driver Activity tab and day page — unbooked journeys (2026-10-14)
+
+Rendered against the mock with `/api/driver/unauthorized` answered by
+test/unbooked_marks.test.mjs's synthetic body (a ride two readings saw, a ride
+its readings disagree about, a candidate-only ride), both skins, 1440 and 390:
+
+- Activity: one mark per ride on its own day at its time, solid / hollow; the
+  key gained the two forms. Found and fixed: the key listed both forms while
+  the mock's own rides all fell on days with no bar — it now names only what
+  is drawn.
+- Day page: the "unbooked journeys" row sits above the ruler on the band; the
+  rides are in the job list at their start, the 10:00 one after the
+  "waiting 2h 44m" it happened inside. Found and fixed: the wait still read as
+  plain waiting — it now names the ride inside it.
+- 390 px: the day list ran sideways — classic 405 on the BASE tree already
+  (`.dday-leg` floor of 19rem = 304 px), Arkiv 394 once the unbooked entries
+  added 10 px of padding. Fixed in app.css; both measure 390. Activity at 390
+  measured 390 in both skins.
+
+To repeat: the script shape is test/unbooked_marks.test.mjs's `open()` with a
+`page.screenshot` per element (`.unbooked-note`'s panel, `.dday-unrow`'s band,
+`.dday-list`) and a scan for elements whose right edge passes `innerWidth`.

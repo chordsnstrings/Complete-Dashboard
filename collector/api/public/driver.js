@@ -55,6 +55,7 @@ import { renderDriverLedger } from './driverledger.js';
    other views do not say. */
 import { dubaiDay } from './tz.js';
 import { unlessWithheld } from './access.js';
+import { ridesOf, rideWords, coverageWords, readable, truncationWords } from './unbooked.js';
 import { makeMap, fitTo } from './map.js';
 
 /* `day` is deliberately NOT in this list. It is a destination reached by
@@ -294,6 +295,94 @@ function startScatter(host, days) {
    The third exists so that missing data is never quietly rendered as idleness.
    Uber reports a dropoff on most trips and none on the others, and folding
    those into the gaps would invent waiting that nobody can verify. */
+/* UNBOOKED JOURNEYS ON THE ACTIVITY BARS (the operator, 2026-10-14:
+   "unauthorized trips should show on activity tab and daily pages").
+   ───────────────────────────────────────────────────────────────────────
+   /api/driver/unauthorized over the same window the bars are drawn from,
+   folded into rides by api/public/unbooked.js (the server's own ride rule),
+   and marked on each day's 24-hour track at its real time: solid where this
+   person is NAMED beside the ride, hollow where they are one of several who
+   held the car. The rung is in each mark's title and the counts by rung are
+   in the sentence under the bars, because the strengths are different claims
+   and a single tally of them is the number that would get quoted (see the
+   long note on total_basis in api/unauthorized_routes.js). None of it is
+   drawn as the person's trip, and the working behind each ride is on the
+   Unexplained trips tab, linked.
+
+   A failed request says so and claims nothing; a role without ACCUSE is told
+   its role does not see this; a day the seat sensor did not watch is said. */
+async function unbookedOnBars(barsHost, host, id, prof) {
+  host.innerHTML = '<p class="cap dim">Looking for journeys no channel booked on the cars this person held…</p>';
+  let res;
+  try {
+    res = await unlessWithheld(qAll('/api/driver/unauthorized', { id }), (e) => ({ withheld: e.message }));
+  } catch {
+    res = null;
+  }
+  if (!host.isConnected) return;
+  host.innerHTML = '';
+  if (res && res.withheld) {
+    host.append(el('p', 'cap dim', esc(`Journeys no channel booked: not shown to your role — ${res.withheld}`)));
+    return;
+  }
+  if (!readable(res)) {
+    host.append(note('The journeys no channel booked could not be loaded, so none is marked on these '
+      + 'days. This says nothing about whether there are any — the request for them failed.', 'warn'));
+    return;
+  }
+  const rides = ridesOf(res);
+  const clock = (ms) => { const d = new Date(ms + 4 * 3600e3); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };
+  const pct = (m) => (m / 1440) * 100;
+  let marked = 0;
+  const unmarkedDays = new Set();
+  const drawn = new Set();
+  for (const r of rides) {
+    const w = rideWords(r, { clock });
+    for (const piece of r.pieces) {
+      const track = barsHost.querySelector(`.shift[data-day="${piece.day}"] .sh-track`);
+      if (!track) { unmarkedDays.add(piece.day); continue; }
+      const i = document.createElement('i');
+      i.className = r.named ? 'x' : 'xc';
+      i.style.left = `${pct(piece.s)}%`;
+      i.style.width = `${pct(Math.max(6, piece.e - piece.s))}%`;
+      i.title = w.line;
+      track.append(i);
+      drawn.add(i.className);
+      marked += 1;
+    }
+  }
+  /* The key names only the marks actually drawn: a legend entry for a form
+     nowhere on the chart sends the reader looking for something absent (seen
+     on the mock, where every ride fell on a day with no bar). */
+  const legendHost = barsHost.querySelector('.lgnd');
+  if (legendHost) {
+    if (drawn.has('x')) legendHost.insertAdjacentHTML('beforeend', '<span><i class="sw x"></i>unbooked journey, this person named beside it</span>');
+    if (drawn.has('xc')) legendHost.insertAdjacentHTML('beforeend', '<span><i class="sw xc"></i>unbooked journey, one of several who held the car</span>');
+  }
+  const named = rides.filter((r) => r.named);
+  const cand = rides.filter((r) => !r.named);
+  const byTier = (t) => named.filter((r) => r.tier === t).length;
+  const mixed = named.filter((r) => r.mixed).length;
+  const link = `<a class="lnk" href="${href('driver', addressOf(prof, id), 'unauthorized')}">Unexplained trips ↗</a>`;
+  const said = !rides.length
+    ? `No journey that no channel booked names this person, or lists them among those who held the car, in this window. ${esc(coverageWords(res.coverage))}`
+    : esc(`Journeys no channel booked, on the cars this person held: ${countOf(named.length, 'ride')} where they are named beside it`
+      + (named.length ? ` (${[['bracketed', 'by time'], ['last_trip', 'by the last trip on the car'], ['sole_custodian', 'by day-custody alone']]
+        .filter(([t]) => byTier(t)).map(([t, w2]) => `${byTier(t)} ${w2}`).join(', ')})` : '')
+      + (mixed ? `, ${mixed === 1 ? 'one of them' : `${mixed} of them`} named by one sensor reading and one of several by the other` : '')
+      + ` — and ${countOf(cand.length, 'ride')} where they are one of several who held the car. These are inferences from the booking record, never a record of who drove. `
+      + (unmarkedDays.size
+        ? `${countOf(unmarkedDays.size, 'day')} with one ${unmarkedDays.size === 1 ? 'has' : 'have'} no bar above — no job that day, or before the 28 days drawn — so ${unmarkedDays.size === 1 ? 'it is' : 'they are'} in the list, not on the chart. `
+        : '')
+      + coverageWords(res.coverage) + (truncationWords(res) ? ` ${truncationWords(res)}` : '')
+      + ' The working behind each is on ') + link + '.';
+  const p = el('p', 'cap');
+  p.innerHTML = said;
+  host.append(p);
+  host.dataset.rides = String(rides.length);
+  host.dataset.marked = String(marked);
+}
+
 function shiftBars(host, days, meta = {}, shiftId = null) {
   host.innerHTML = '';
   const all = (days || []).filter((d) => d.first_min != null);
@@ -369,6 +458,7 @@ function shiftBars(host, days, meta = {}, shiftId = null) {
     const dayKeyStr = String(d.day).slice(0, 10);
     const to = shiftId ? href('driver', shiftId, 'day') : null;
     const r = el(to ? 'a' : 'div', `shift${to ? ' clickable' : ''}`);
+    r.dataset.day = dayKeyStr;
     if (to) r.href = `${to}${to.includes('?') ? '&' : '?'}on=${encodeURIComponent(dayKeyStr)}`;
     r.innerHTML = `<div class="sh-d">${dayStr(d.day)}</div>
       <div class="sh-track">${span}${onlineSegs}${segs}</div>
@@ -1272,8 +1362,7 @@ async function tabActivity(root, id, prof) {
   if (ak) activityGlance(AKB, shift);
   if ((shift.days || []).some((d) => d.first_min != null)) {
     shiftBars(sh.body, shift.days, shift, addressOf(prof, id));
-  }
-  else {
+  } else {
     sh.body.innerHTML = '';
     sh.body.append(note((shift.days || []).length
       ? `The feed reached ${countOf(shift.days.length, 'day')} in this window and not one of them `
@@ -1281,6 +1370,13 @@ async function tabActivity(root, id, prof) {
         + '24-hour track would read as a day spent waiting; these are days with nothing on them.'
       : 'No day in this window carries a job for this driver, so there is no shift to lay out.'));
   }
+  /* The journeys no channel booked, on the same clock (2026-10-14). Not
+     awaited: the attribution ladder is computed per request and takes
+     seconds over a month, and the bars are already true without it. With no
+     bars drawn every ride lands in the sentence's "no bar above" count. */
+  const unbookedHost = el('div', 'unbooked-note');
+  sh.panel.append(unbookedHost);
+  unbookedOnBars(sh.body, unbookedHost, id, prof);
   /* Stated under the bars: what is kept, and how far back it goes. A reader
      looking at a chart that is bare on the left should not have to infer
      whether that is a quiet month or a provider that forgets. */

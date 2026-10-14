@@ -1792,6 +1792,14 @@ a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:translateX
   box-shadow:inset 0 0 0 1px var(--grey);
   opacity:.7;
 }
+/* JOURNEYS NO CHANNEL BOOKED (2026-10-14), on the same clock as the jobs.
+   Solid critical where the person is NAMED beside the ride; a hollow outline
+   in the same colour where they are one of several who held the car — two
+   strengths of claim, two forms, never two shades a reader has to compare.
+   Drawn last, over the waiting band, which is where an unbooked ride falls. */
+.sh-track>i.x,.lgnd .sw.x{background:var(--critical);opacity:1}
+.sh-track>i.xc,.lgnd .sw.xc{background:var(--surface);box-shadow:inset 0 0 0 2px var(--critical);opacity:1}
+.sh-track>i.x,.sh-track>i.xc{top:-2px;bottom:-2px;z-index:2}
 /* Same classes as the bars, so a colour cannot be changed in one place and
    explained in another. */
 .lgnd{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 10px;font-size:var(--t4);color:var(--grey-strong)}
@@ -2601,6 +2609,19 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .sw.waitsw{background:var(--surface-3)} .sw.onsw{background:var(--s1);opacity:.55}
 .sw.cx{background:var(--critical)} .sw.j{background:var(--s1)}
 
+/* Journeys no channel booked, on the day's clock and in its list
+   (2026-10-14). The same two forms as the Activity bars: solid critical where
+   the person is named beside the ride, a hollow critical outline where they
+   are one of several who held the car. The list entry is ruled in critical on
+   its left edge and never takes a job's colours — it is not their job. */
+.dday-unbooked>i.x{background:var(--critical);opacity:1}
+.dday-unbooked>i.xc{background:var(--surface);box-shadow:inset 0 0 0 2px var(--critical);opacity:1}
+.dday-unbooked>i{height:8px}
+.dday-job.dday-unb{background:linear-gradient(90deg,var(--critical) 0 3px,transparent 3px)}
+.dday-job.dday-unb.cand{background:linear-gradient(90deg,var(--critical-bg,var(--surface-2)) 0 3px,transparent 3px)}
+.dday-job.dday-unb .dday-pt>i.o{border-color:var(--critical)}
+.dday-where.dday-ungap{color:var(--critical);font-style:normal}
+.dday-why{margin-top:8px;font-size:var(--t5);color:var(--grey-strong);max-width:78ch;line-height:1.5}
 .dday-list{display:flex;flex-direction:column;gap:0;margin-top:2px}
 /* A job: the clock on the left, the leg in the middle, the way in on the right. */
 .dday-job{
@@ -2611,7 +2632,11 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .dday-when{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;line-height:1.4}
 .dday-when>b{display:block;font-size:var(--t8);color:var(--ink);font-weight:600}
 .dday-when>span{display:block;font-size:var(--t5);color:var(--grey)}
-.dday-leg{display:grid;grid-template-columns:repeat(auto-fit,minmax(19rem,1fr));gap:6px 26px}
+/* min(19rem,100%): a fixed 19rem floor is 304px, wider than a job's text
+   column on a 390px screen, so every day list ran 15px off the classic page
+   at phone width (measured 2026-10-14, scrollWidth 405 of 390). The floor
+   still holds wherever two legs fit side by side. */
+.dday-leg{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(19rem,100%),1fr));gap:6px 26px}
 .dday-pt{display:grid;grid-template-columns:14px 1fr;gap:0 8px;align-items:baseline}
 .dday-pt>i{width:9px;height:9px;border-radius:50%;align-self:center}
 .dday-pt>i.o{border:2px solid var(--s1)}

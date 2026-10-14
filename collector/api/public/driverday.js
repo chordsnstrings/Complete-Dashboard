@@ -19,6 +19,8 @@ import { api, href } from './data.js';
 import { dubaiDay } from './tz.js';
 import { channelKey } from './tokens.js';
 import { withheldSentence } from './access_model.js';
+import { unlessWithheld } from './access.js';
+import { ridesOf, rideWords, coverageWords, readable, truncationWords } from './unbooked.js';
 
 const hhmm = (m) => {
   if (m == null || !Number.isFinite(m)) return '—';
@@ -243,6 +245,12 @@ export async function renderDriverDay(root, id, day) {
   }
   catch (e) { root.innerHTML = ''; root.append(note(`Could not load this day: ${e.message}`)); return; }
   root.innerHTML = '';
+  /* The journeys no channel booked on this day, asked for now and placed when
+     the page is built (unbookedOnDay below) — the attribution is computed per
+     request and must not hold the rest of the day. */
+  const unbookedP = unlessWithheld(
+    api(`/api/driver/unauthorized?id=${encodeURIComponent(id)}&from=${encodeURIComponent(day)}&to=${encodeURIComponent(day)}`),
+    (e) => ({ withheld: e.message })).catch(() => null);
 
   const trips = (d.trips || []).filter((t) => t.s != null).sort((a, b) => a.s - b.s);
   const online = d.online || [];
@@ -282,6 +290,7 @@ export async function renderDriverDay(root, id, day) {
     drawBand(root, { d, trips, online, status, mv, wh });
     await renderMovement(root, { d, status, trips, wh });
     if (contract()) { dayAreas(root, fixes, wh); dayAbsence(root, { trips, fixes, day, mv, wh }); }
+    unbookedP.then((res) => unbookedOnDay(root, { res, day, list: null }));
     return;
   }
 
@@ -385,6 +394,7 @@ export async function renderDriverDay(root, id, day) {
     const g = gapBefore.get(t);
     if (!g && prevJob && prevJob.e == null && t.s - prevJob.s >= UNMEASURED_MIN) {
       const row = el('div', 'dday-gap');
+      row.dataset.from = String(prevJob.s); row.dataset.to = String(t.s);
       row.innerHTML = `<div class="dday-gaphead"><b>${esc(dur(t.s - prevJob.s))} unaccounted for</b>`
         + `<span class="dim">until ${esc(hhmm(t.s))}</span></div>`;
       row.append(el('div', 'dday-where dim',
@@ -398,6 +408,7 @@ export async function renderDriverDay(root, id, day) {
       const mins = g.to - g.from;
       const mo = gapMotion(fixes, g.from, g.to);
       const row = el('div', `dday-gap${mins >= 90 ? ' long' : ''}`);
+      row.dataset.from = String(g.from); row.dataset.to = String(g.to);
       const head = el('div', 'dday-gaphead');
       head.innerHTML = `<b>waiting ${esc(dur(mins))}</b>`
         + (mins >= 90 ? ' <span class="tag warn">long wait</span>' : '')
@@ -460,6 +471,7 @@ export async function renderDriverDay(root, id, day) {
        it survived. */
     const done = jobCompleted(t);
     const item = el('div', `dday-job${done ? '' : ' bad'}`);
+    item.dataset.s = String(t.s);
     const when = el('div', 'dday-when');
     when.innerHTML = `<b>${esc(hhmm(t.s))}</b><span>${t.e != null ? esc(hhmm(t.e)) : '—'}</span>`;
     const body = el('div', 'dday-body');
@@ -495,6 +507,120 @@ export async function renderDriverDay(root, id, day) {
   }
   listP.body.append(list);
   if (ak) { dayAreas(root, fixes, wh); dayAbsence(root, { trips, fixes, day, mv, wh }); }
+  unbookedP.then((res) => unbookedOnDay(root, { res, day, list }));
+}
+
+/* ── journeys no channel booked, on this day ─────────────────────────────
+   The operator, 2026-10-14: "unauthorized trips should show on activity tab
+   and daily pages". /api/driver/unauthorized for this one day, folded into
+   rides by api/public/unbooked.js (the server's own rule: a ride once), and
+   put where the day already says what happened:
+
+     · a row on the band, on the same clock as the jobs, Uber's two rows and
+       the car — solid where this person is NAMED beside the ride, hollow
+       where they are one of several who held the car;
+     · each ride in the list of jobs and gaps, at its time, with the rung in
+       words and the working the attribution rests on, and the way to the
+       journey itself. Never styled or worded as their job.
+
+   A failed answer says so and claims nothing. A role without ACCUSE is told
+   its role does not see it. A day the seat sensor did not watch is said. */
+function unbookedOnDay(root, { res, day, list }) {
+  if (!root.isConnected) return;
+  const band = root.querySelector('.dday-rows');
+  const bandBody = band?.parentElement;
+  const say = (text, tone) => { if (bandBody) bandBody.append(el('div', `dday-onbasis${tone ? '' : ' dim'}`, esc(text))); };
+  if (res && res.withheld) { say(`Journeys no channel booked: not shown to your role — ${res.withheld}`); return; }
+  if (!readable(res)) {
+    say('The journeys no channel booked could not be loaded for this day, so none is shown. This says '
+      + 'nothing about whether there were any — the request for them failed.', 'warn');
+    return;
+  }
+  const clock = (ms) => { const x = new Date(ms + 4 * 3600e3); return `${String(x.getUTCHours()).padStart(2, '0')}:${String(x.getUTCMinutes()).padStart(2, '0')}`; };
+  const rides = (ridesOf(res) || []).filter((r) => r.pieces.some((p) => p.day === day));
+  const pct = (m) => (m / 1440) * 100;
+  const cov = res.coverage || {};
+  if (truncationWords(res)) say(truncationWords(res), 'warn');
+  if (!rides.length) {
+    say(cov.days_with_data === 0
+      ? `No journey no channel booked can be shown for this day: ${coverageWords(cov)}`
+      : 'No journey that no channel booked names this person, or lists them among those who held the car, on this day.');
+    return;
+  }
+  const named = rides.filter((r) => r.named).length;
+  /* The row on the band, before the ruler. */
+  if (band) {
+    const row = el('div', 'dday-onrow dday-unrow');
+    row.innerHTML = '<span class="dday-onlab">unbooked journeys</span>';
+    const track = el('div', 'dday-online dday-unbooked');
+    track.innerHTML = rides.map((r) => {
+      const piece = r.pieces.find((p) => p.day === day);
+      return `<i class="${r.named ? 'x' : 'xc'}" style="left:${pct(piece.s)}%;width:${pct(Math.max(4, piece.e - piece.s))}%" title="${esc(rideWords(r, { clock }).line)}"></i>`;
+    }).join('');
+    row.append(track, el('span', 'dday-ontot', `${rides.length} · ${named} named`));
+    const ruler = band.querySelector('.dday-ruler')?.parentElement;
+    band.insertBefore(row, ruler || null);
+    const lg = bandBody.querySelector('.lgnd');
+    if (lg) {
+      if (named) lg.insertAdjacentHTML('beforeend', '<span><i class="sw x"></i>unbooked journey, this person named beside it</span>');
+      if (rides.length > named) lg.insertAdjacentHTML('beforeend', '<span><i class="sw xc"></i>unbooked journey, one of several who held the car</span>');
+    }
+  }
+  /* Each ride in the list, at its time. A day with no job has no list, so
+     the rides get one of their own, under the band. */
+  let host = list;
+  if (!host) {
+    const p = panel('Journeys no channel booked on this day',
+      'What the seat sensor saw with a passenger aboard that no channel booked, on a car this person held');
+    root.append(p.panel);
+    host = el('div', 'dday-list');
+    p.body.append(host);
+  }
+  for (const r of rides) {
+    const w = rideWords(r, { clock });
+    const piece = r.pieces.find((p) => p.day === day);
+    const item = el('div', `dday-job dday-unb ${r.named ? 'named' : 'cand'}`);
+    item.dataset.s = String(piece.s);
+    const when = el('div', 'dday-when');
+    when.innerHTML = `<b>${esc(clock(r.start))}</b><span>${esc(clock(r.end))}</span>`;
+    const body = el('div', 'dday-body');
+    body.innerHTML = `
+      <div class="dday-leg">
+        <div class="dday-pt"><i class="o"></i><span class="dday-lab">unbooked journey · from</span>
+          <b>${esc(r.from || 'ground no trip has named')}</b></div>
+        <div class="dday-pt"><i class="x"></i><span class="dday-lab">to</span>
+          <b>${esc(r.to || 'ground no trip has named')}</b></div>
+      </div>
+      <div class="dday-facts">
+        ${r.km != null ? `<span><b>${esc(fmt(r.km, 2))}</b> km</span>` : ''}
+        <span><b>${esc(dur(Math.max(1, Math.round((r.end - r.start) / 60000))))}</b> with a passenger aboard</span>
+        <span>car <b>${esc(r.plate)}</b></span>
+        <span>seen by <b>${esc(r.sources.join(' and '))}</b></span>
+        <span class="dday-out">${pill(r.named ? 'named beside it' : 'one of several', r.named ? 'bad' : null)}</span>
+      </div>
+      <div class="dday-why">${esc(w.rung.charAt(0).toUpperCase() + w.rung.slice(1))}. No channel booked this journey; this is an inference from the booking record, not a record of who drove.${
+  r.evidence ? `<br><span class="dim">${esc(r.evidence)}</span>` : ''}</div>`;
+    const open = el('a', 'dday-open', 'open ↗');
+    open.href = href('segment', r.plate, r.anchor.started_at, r.source ? { source: r.source } : null);
+    item.append(when, body, open);
+    const next = [...host.children].find((c) => c.classList.contains('dday-job') && Number(c.dataset.s) > piece.s);
+    host.insertBefore(item, next || null);
+    /* A ride inside a wait is said IN the wait. Ordered by start the ride
+       already sits after the wait that holds it, but the wait above it still
+       reads "waiting 2h 44m" while the car carried a passenger for half an
+       hour of it (seen on the mock, 2026-10-14). The wait's minutes stay as
+       the booking record measured them — the ride's attribution is an
+       inference, and subtracting it would turn the inference into a figure —
+       so the wait names the ride instead. */
+    for (const gap of host.querySelectorAll('.dday-gap[data-from]')) {
+      if (Number(gap.dataset.from) < piece.e && Number(gap.dataset.to) > piece.s) {
+        gap.append(el('div', 'dday-where dday-ungap', esc(`Inside this wait the car made a journey no channel booked, `
+          + `${w.when} on ${r.plate} — ${r.named ? 'this person named beside it' : 'this person one of several who held the car'}; `
+          + `${Number(gap.dataset.from) <= piece.s ? 'below' : 'above'}.`)));
+      }
+    }
+  }
+  root.dataset.unbooked = String(rides.length);
 }
 
 /* ── #driver/day under the page contract ─────────────────────────────────── */
