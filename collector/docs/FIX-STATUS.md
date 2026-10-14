@@ -4760,3 +4760,16 @@ cannot explain a journey".
 unbooked.js took the Dubai day by adding four hours to a UTC clock. It and the
 two pages' clocks now go through `dubaiDay` / `dubaiClock` (api/public/tz.js);
 `timezone` 19/19, `unbooked_marks` 25/25.
+
+**The full suite on c8bf7b8 (381 files, 14,253 assertions): 2 failing, both
+fixed.** `mockapi`: the route gained `recorded_to`, `built_at`, `built_from`
+and the mock had not — it now answers them (the store built since the last
+timeline run, back through all history), and the phone recording, the old
+phone's oracle and the online-hours snapshot are unchanged by it.
+`driver_day_page` failed in the suite and passed alone: the live strip's
+"today" link was waited for 30 s. Measured: the strip draws in 1 s alone and in
+8 / 21 / 41 s with Chromium's CPU throttled ×10 / ×20 / ×40, so a loaded
+machine crosses 30 s — and a failed status request would have read as the
+same null. The check now waits up to the file's own 60 s for the strip to
+SETTLE (its link, or its "could not be loaded" sentence) and prints the
+strip's text when it fails.

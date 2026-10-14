@@ -1899,6 +1899,10 @@ app.get('/api/online/hours', (req, r) => {
   const peak = past.reduce((b, x) => (b == null || x.drivers > b.drivers ? x : b), null);
   r.json({ day, fleet: req.query.fleet || null, platform: 'uber',
     timeline_to: new Date(toMs).toISOString(),
+    /* What the store was built from (sql/schema_v107.sql): built since the
+       timeline's last run, back through all of history — so every recorded
+       hour above is recorded. */
+    recorded_to: new Date(toMs).toISOString(), built_at: new Date(toMs + 5 * 60000).toISOString(), built_from: '1900-01-01',
     live_from: day === today ? new Date(toMs).toISOString() : null, live_to: day === today ? new Date(now).toISOString() : null,
     hours, drivers: people.sort((a, b) => b.total_min - a.total_min),
     totals: { drivers: people.filter((p) => p.total_min > 0).length,
@@ -1923,6 +1927,8 @@ app.get('/api/online/hours/range', (req, r) => {
   r.json({ from: days[0].day, to, fleet: req.query.fleet || null, platform: 'uber', days,
     avg_drivers_by_hour: OH_SHAPE.map((_, h) => (held.length ? Math.round(held.reduce((a, d) => a + d.drivers[h], 0) / held.length * 10) / 10 : null)),
     days_averaged: held.length, timeline_to: new Date(Date.now() - 3 * 3600e3).toISOString(),
+    recorded_to: new Date(Date.now() - 3 * 3600e3).toISOString(),
+    built_at: new Date(Date.now() - 3 * 3600e3 + 5 * 60000).toISOString(), built_from: '1900-01-01',
     basis: 'Online means ONLINE or on a trip on Uber.' });
 });
 

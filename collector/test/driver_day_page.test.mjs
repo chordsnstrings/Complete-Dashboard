@@ -91,9 +91,17 @@ console.log('\n§1 the links');
 {
   const { ctx, page } = await open({}, { on: '2026-09-20' });
   await page.goto(`${base}/?ui=desktop#driver/drv-0`, { waitUntil: 'load' });
-  await page.waitForSelector('.lstat-day', { timeout: 30000 }).catch(() => {});
+  /* Wait for the strip to SETTLE — its link, or the sentence it prints when
+     the status request failed — not for the link alone, and for as long as
+     this file's other waits. 30 s failed inside the full suite of 2026-10-14
+     and passed alone: measured, the strip takes 1 s alone and 8 / 21 / 41 s
+     with the CPU throttled ×10 / ×20 / ×40, so a loaded machine crosses 30 s;
+     and a failed request would have read as the same null. Now it says which. */
+  await page.waitForFunction(() => document.querySelector('.lstat-day')
+    || /live status could not be loaded/.test(document.querySelector('.lstat')?.textContent || ''), null, { timeout: 60000 }).catch(() => {});
   const h = await page.$eval('.lstat-day', (a) => a.getAttribute('href')).catch(() => null);
-  check('the live strip\'s "today" link carries one query string with today\'s `on`', h && (h.match(/\?/g) || []).length === 1 && /[?&]on=\d{4}-\d{2}-\d{2}/.test(h), String(h));
+  const strip = await page.$eval('.lstat', (x) => x.textContent.replace(/\s+/g, ' ').slice(0, 160)).catch(() => 'no strip drawn within 60 s');
+  check('the live strip\'s "today" link carries one query string with today\'s `on`', h && (h.match(/\?/g) || []).length === 1 && /[?&]on=\d{4}-\d{2}-\d{2}/.test(h), `${h} — strip: ${strip}`);
   await ctx.close();
 }
 
