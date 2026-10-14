@@ -76,6 +76,13 @@ for (let i = 0; i < 3; i++) {
 
 console.log('\n1. what is found');
 const facts = { ...(await reportFacts(q, D)), collection: { missing: [{ platform: 'bolt', fleet: 'egari' }], delivered: 3 } };
+/* FIXLIST V7: a car standing longer than the 14-day lookback dropped off the
+   email entirely. Two of the fleet's cars (a plate with a VIN): one laid up a
+   month, one with no booking ever. A plate with no VIN is not counted. */
+await q(`INSERT INTO vehicle_profile (platform, vehicle_ext_id, plate, fleet_id, vin)
+         VALUES ('uber','v-lay','P-LAIDUP','ecosine','VINLAY'), ('uber','v-new','P-NEVER','ecosine','VINNEW'),
+                ('uber','v-idle','P-IDLE','ecosine','VINIDLE')`);
+await T({ driver: 'u-l', name: 'Test Driver L', plate: 'P-LAIDUP', at: at('2026-08-20', '12:00') });
 const r = await reportFindings(q, D, { facts });
 const kind = (k) => r.findings.find((f) => f.kind === k);
 const bookings = r.compare.find((c) => c.key === 'bookings');
@@ -107,6 +114,9 @@ check('a driver with half their bookings uncompleted', kind('noncomplete')?.item
   j(kind('noncomplete')));
 check('a car idle three days, with its last driver', kind('cars_idle')?.items.some((i) => i.plate === 'P-IDLE' && i.idle_days === 3
   && i.last_driver === 'Test Driver I'), j(kind('cars_idle')));
+check('cars laid up longer than the lookback are counted, not dropped',
+  kind('cars_idle')?.numbers.laid_up === 2 && /2 more none in 14 days/.test(kind('cars_idle')?.title || ''),
+  j(kind('cars_idle') && [kind('cars_idle').numbers, kind('cars_idle').title]));
 check('long hours online on Uber for little', kind('hourly')?.items.some((i) => i.name === 'Test Driver H' && i.online_hours === 10 && i.aed_per_hour === 5),
   j(kind('hourly')));
 /* REVERSION, run 2026-09-29: hand-ins left out of assembleCash -> 26 passed,

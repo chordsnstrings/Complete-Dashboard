@@ -256,11 +256,25 @@ export async function reportFindings(q, day, { facts = null } = {}) {
             (SELECT count(*)::int FROM trip_ext t WHERE t.plate = l.plate AND t.local_day = $1::date AND NOT t.is_booking) AS journeys_yesterday
        FROM last l WHERE ($1::date - l.last_day) >= $3::int
       ORDER BY idle_days DESC, l.plate`, [day, T.idleLookbackDays, T.idleDays]);
-  if (idle.length) {
+  /* The cars laid up LONGER than the lookback (FIXLIST V7, 2026-10-14). The
+     list above needs a booking inside the last ${T.idleLookbackDays} days, so a
+     car standing for a month dropped off this email entirely — the cars the
+     line exists for. They are counted here, among the fleet's cars (a plate
+     with a VIN), and said beside the list rather than named one by one. */
+  const [{ n: laidUp } = { n: 0 }] = await q(
+    `SELECT count(*)::int n FROM vehicle_plate v
+      WHERE v.vin IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM trip_ext t WHERE t.plate = v.plate AND t.is_booking
+                          AND t.local_day BETWEEN $1::date - $2::int AND $1::date)`, [day, T.idleLookbackDays]);
+  if (idle.length || laidUp) {
     add({ kind: 'cars_idle', owner: 'Fleet', severity: 2,
-      title: `${idle.length} car${idle.length === 1 ? '' : 's'} had no booking for ${T.idleDays} days or more`,
-      numbers: { cars: idle.length },
-      evidence: [`Each had a booking in the ${T.idleLookbackDays} days before and none for at least ${T.idleDays} days`],
+      title: idle.length
+        ? `${idle.length} car${idle.length === 1 ? '' : 's'} had no booking for ${T.idleDays} days or more`
+          + (laidUp ? `, and ${laidUp} more none in ${T.idleLookbackDays} days` : '')
+        : `${laidUp} car${laidUp === 1 ? '' : 's'} took no booking in ${T.idleLookbackDays} days`,
+      numbers: { cars: idle.length, laid_up: laidUp },
+      evidence: [`Each listed car had a booking in the ${T.idleLookbackDays} days before and none for at least ${T.idleDays} days`]
+        .concat(laidUp ? [`${laidUp} of the fleet's cars took no booking in all of the last ${T.idleLookbackDays} days`] : []),
       items: idle.slice(0, 10).map((c) => ({ ref: tk.car(c.plate), plate: c.plate, idle_days: c.idle_days,
         last_driver: c.last_driver, moved_without_booking: c.journeys_yesterday })) });
   }

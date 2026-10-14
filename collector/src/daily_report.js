@@ -233,7 +233,10 @@ export function plainAction(f, weekday) {
     case 'driver_down': return `Call ${names(f)}: each earned half or less of their usual ${weekday}.`;
     case 'driver_absent': return `Check on ${names(f)}: regulars on ${weekday}s who did not drive yesterday.`;
     case 'noncomplete': return `Ask ${names(f)} why so many of their bookings did not complete.`;
-    case 'cars_idle': return `Put a driver in ${names(f, 'plate')}, or find out why ${f.items.length === 1 ? 'it is' : 'they are'} standing.`;
+    case 'cars_idle': return f.items.length
+      ? `Put a driver in ${names(f, 'plate')}, or find out why ${f.items.length === 1 ? 'it is' : 'they are'} standing.`
+        + (f.numbers.laid_up ? ` ${f.numbers.laid_up} more ${f.numbers.laid_up === 1 ? 'has' : 'have'} stood longer — the Vehicles page lists them.` : '')
+      : `Find out why ${f.numbers.laid_up} ${f.numbers.laid_up === 1 ? 'car has' : 'cars have'} taken no booking for two weeks — the Vehicles page lists them.`;
     case 'hourly': return `Talk to ${names(f)}: long hours online on Uber for little fare.`;
     case 'cash': return `Collect cash from ${names(f)}.`;
     case 'unregistered': return `Ask ${names(f)} to register their journeys with no booking.`;

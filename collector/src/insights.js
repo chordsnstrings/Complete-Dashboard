@@ -8,6 +8,7 @@ import { dubaiIso } from './util.js';
 import { isoDay } from './sources/ledger.js';
 /* Money in a sentence, to the fils like every page (the ruling of 2026-09-23). */
 import { aedText } from './util.js';
+import { CABMAN_MOVING_KMH, TRACKER_SOURCES_SQL, REAL_FIX } from '../api/telemetry_sql.js';
 
 const SRC = 'insights';
 const q = (t, p) => pool.query(t, p).then((r) => r.rows);
@@ -183,50 +184,47 @@ async function put(row) {
 const IDLE_LOOKBACK_DAYS = 14;
 
 async function idleVehicles() {
+  /* REWRITTEN 2026-10-14 (FIXLIST V7). Measured on production, the old rule
+     flagged 7 cars and missed 15 of the 21 Uber-active cars that took no
+     booking in thirty days, and it flagged L74169 — driven 26 of 30 days — with
+     workshop advice:
+       · it asked for a tracker fix in the last 48 hours, so a car laid up with
+         its tracker asleep or dead was never idle — the cars this rule exists
+         for;
+       · it asked only for no BOOKING, so a car driven every day without one
+         (CABMAN movement, which writes no journey row) read idle;
+       · its population was every plate the trackers ever sent, not the cars.
+     Now: the fleet's cars (a plate with a VIN), with no booking AND no
+     movement — no FMS journey, no CABMAN fix above walking pace — in the
+     lookback. A car that moved without a booking is a different finding (the
+     Vehicles page's "Moved, no booking" and Unauthorized trips). The tracker
+     no longer decides WHETHER a car is idle, only what the sentence can say
+     about it: powered now, on the road recently, quiet in a feed outage, quiet
+     for days, or never tracked at all. */
   const rows = await q(
-    `WITH seen AS (
-       SELECT plate, fleet_id, max(captured_at) last_seen
-       FROM telemetry_snapshot WHERE plate IS NOT NULL GROUP BY plate, fleet_id),
+    `WITH cars AS (
+       SELECT plate, fleet_id FROM vehicle_plate WHERE vin IS NOT NULL),
      earned AS (
        SELECT plate, count(*)::int trips
        FROM trip_norm WHERE requested_at > now() - ($1 || ' days')::interval
          AND is_booking AND plate IS NOT NULL
        GROUP BY plate),
-     /* The last trip EVER, unbounded. Reading it out of the 14-day CTE meant a
-        NULL там stood for "no trip in the lookback" and the template turned it
-        into the absolute claim "No trip has ever been recorded for this plate".
-        Live, all 200 rows on the Action list carried that sentence and it was
-        false for every one of them — the plate at the top had 81 trips, and one
-        of the 23 had 1,039. */
-     ever AS (
-       SELECT plate, max(requested_at) last_trip, count(*) FILTER (WHERE platform <> 'fms')::int lifetime
-       FROM trip WHERE plate IS NOT NULL GROUP BY plate),
-     /* Cars whose FEED died are not idle cars.
-        ──────────────────────────────────────────────────────────────────
-        The guard below asks only that a fix arrived in the last 48 hours,
-        and the sentence it licenses is "the vehicle is present and powered".
-        On production that sentence was printed 78 times, and 59 of those
-        plates last reported inside the same CABMAN outage this file already
-        reports as tracker_feed_dark — so one action list asserted, of the
-        same cars, that they were powered and that they were dark.
-
-        A plate is excluded when its last fix falls in a crowd: five or more
-        on one source inside the same hour, more than six hours ago. That is
-        the same shape staleTelemetry() clusters on, applied here to stop the
-        two rules contradicting each other. */
+     moved AS (
+       SELECT DISTINCT plate FROM trip_norm
+        WHERE requested_at > now() - ($1 || ' days')::interval AND NOT is_booking AND plate IS NOT NULL
+       UNION
+       SELECT DISTINCT plate FROM telemetry_snapshot
+        WHERE source = 'cabman' AND speed > ${CABMAN_MOVING_KMH}
+          AND captured_at > now() - ($1 || ' days')::interval),
+     /* A feed outage, said rather than excluded: a car whose last fix falls in
+        a crowd — five or more on one source within an hour of each other, more
+        than six hours ago — went quiet with the feed, not alone. The same
+        gap-and-island shape staleTelemetry() uses, so the two rules cannot
+        contradict each other about the same cars. */
      last_fix AS (
        SELECT plate, source, max(captured_at) AS max_at
-         FROM telemetry_snapshot WHERE plate IS NOT NULL GROUP BY plate, source),
-     /* Gap-and-island, not a clock bucket. staleTelemetry() clusters by
-        PROXIMITY for a reason its own comment records: an outage beginning at
-        07:58 puts some vehicles in one calendar hour and the rest in the next,
-        and bucketing splits it — the first version of this exclusion did
-        exactly that and left four of nine plates behind, still being called
-        idle by one rule and dark by the other. A new island starts wherever
-        the gap to the previous last-fix on the same feed exceeds an hour,
-        which is the same rule expressed in SQL. */
-     /* Two steps, because a window function cannot be nested inside another:
-        the gap flag first, the running sum of it second. */
+         FROM telemetry_snapshot WHERE plate IS NOT NULL AND source IN ${TRACKER_SOURCES_SQL}
+        GROUP BY plate, source),
      breaks AS (
        SELECT plate, source, max_at,
               CASE WHEN max_at - lag(max_at) OVER (PARTITION BY source ORDER BY max_at)
@@ -240,32 +238,38 @@ async function idleVehicles() {
        SELECT plate FROM islands
         WHERE (source, island) IN (
           SELECT source, island FROM islands GROUP BY 1, 2 HAVING count(*) >= 5))
-     SELECT s.plate, s.fleet_id, s.last_seen, coalesce(e.trips,0) trips,
-            ev.last_trip, coalesce(ev.lifetime, 0) AS lifetime
-     FROM seen s
+     SELECT c.plate, c.fleet_id,
+            (SELECT max(f.max_at) FROM last_fix f WHERE f.plate = c.plate) AS last_seen,
+            (SELECT max(x.requested_at) FROM trip x WHERE x.plate = c.plate AND x.platform <> 'fms') AS last_trip,
+            (SELECT count(*)::int FROM trip x WHERE x.plate = c.plate AND x.platform <> 'fms') AS lifetime,
+            (c.plate IN (SELECT plate FROM dark)) AS feed_dark
+     FROM cars c
      LEFT JOIN earned e USING (plate)
-     LEFT JOIN ever ev USING (plate)
-     WHERE coalesce(e.trips,0) = 0
-       AND s.last_seen > now() - interval '48 hours'     -- tracker genuinely reporting
-       AND s.plate NOT IN (SELECT plate FROM dark)       -- the feed is what stopped, not the car
-     ORDER BY s.last_seen DESC`, [String(IDLE_LOOKBACK_DAYS)]);
+     WHERE coalesce(e.trips, 0) = 0
+       AND c.plate NOT IN (SELECT plate FROM moved)
+     ORDER BY 3 DESC NULLS LAST, c.plate`, [String(IDLE_LOOKBACK_DAYS)]);
   for (const r of rows) {
-    /* "Present and powered" is a claim about NOW, and a fix can be two days
-       old. Said only when it is recent enough to mean it. */
-    const fixAgeH = (Date.now() - new Date(r.last_seen)) / 36e5;
+    const fixAgeH = r.last_seen ? (Date.now() - new Date(r.last_seen)) / 36e5 : null;
     const lastTrip = r.last_trip
       ? `Its last recorded trip was ${dubaiIso(r.last_trip)}, ${n_(daysAgoFrom(r.last_trip), 'day')} ago`
         + ` (${r.lifetime} recorded in total).`
       : `No trip has ever been recorded for this plate in the collected data.`;
+    /* What the tracker can say, and only that. "Present and powered" is a
+       claim about now, made only off a fix from the last six hours. */
+    const tracker = fixAgeH == null
+      ? 'No tracker has ever reported this car, so where it is cannot be said'
+      : fixAgeH <= 6
+        ? `The tracker reported as recently as ${dubaiMinute(r.last_seen)}, so the vehicle is present and powered`
+        : fixAgeH <= 48
+          ? `The tracker last reported ${dubaiMinute(r.last_seen)}, ${Math.round(fixAgeH)}h ago`
+          : r.feed_dark
+            ? `Its tracker went quiet ${dubaiMinute(r.last_seen)} together with other cars on the same feed, so where it is now cannot be said`
+            : `Its tracker last reported ${dubaiMinute(r.last_seen)}, ${n_(Math.round(fixAgeH / 24), 'day')} ago, so where it is now cannot be said`;
     await put({
       code: 'idle_vehicle', severity: 'critical', category: 'utilisation',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
-      title: `${r.plate} is reporting but has not earned in ${IDLE_LOOKBACK_DAYS} days`,
-      detail: (fixAgeH <= 6
-        ? `The tracker reported as recently as ${dubaiMinute(r.last_seen)}, so the vehicle is present and powered`
-        : `The tracker last reported ${dubaiMinute(r.last_seen)}, ${Math.round(fixAgeH)}h ago — recent enough `
-          + 'that the car is on the road, though not recent enough to say it is powered right now')
-        + ` — but no booking on any platform in the last ${IDLE_LOOKBACK_DAYS} days. ${lastTrip}`,
+      title: `${r.plate} has neither earned nor moved in ${IDLE_LOOKBACK_DAYS} days`,
+      detail: `${tracker} — and no booking on any platform and no movement in the last ${IDLE_LOOKBACK_DAYS} days. ${lastTrip}`,
       action: `Confirm it is not in workshop or reserve. If roadworthy, assign a driver — otherwise take it off the active cost base.`,
       impact_aed: money(IDLE_LOOKBACK_DAYS * VEHICLE_DAY_COST_AED), metric: 0,
       window_start: null, window_end: null,
@@ -277,9 +281,21 @@ async function idleVehicles() {
 /* ─────────────────── 1b. Dormant vehicles: is this still our car? ─────────────────── */
 async function dormantVehicles() {
   const rows = await q(
-    `SELECT plate, fleet_id, max(captured_at) last_seen
-     FROM telemetry_snapshot WHERE plate IS NOT NULL
-     GROUP BY plate, fleet_id
+    /* By PLATE, from the TRACKERS, with a real position (FIXLIST V8,
+       2026-10-14). It grouped by (plate, fleet_id), so old rows once filed
+       under egari made at least 7 Ecosine cars that worked 22–30 of 30 days
+       read "no signal for 34–46 days"; and it counted the Uber collector's
+       driver-status rows — no coordinates — as signal and printed them as a
+       "last position": L26153 has never had a GPS fix. The fleet is the
+       newest fix's; a signal is any tracker fix, and a car's last POSITION is
+       only a fix that had one. */
+    `SELECT plate,
+            (array_agg(fleet_id ORDER BY captured_at DESC))[1] AS fleet_id,
+            max(captured_at) last_seen,
+            max(captured_at) FILTER (WHERE ${REAL_FIX()}) last_position
+     FROM telemetry_snapshot
+     WHERE plate IS NOT NULL AND source IN ${TRACKER_SOURCES_SQL}
+     GROUP BY plate
      HAVING max(captured_at) < now() - interval '30 days'
      ORDER BY 3 DESC`);
   /* Two populations, not one.
@@ -307,8 +323,8 @@ async function dormantVehicles() {
       /* "usually means the vehicle left the fleet" is a hedge worth making at
          forty days and worth dropping at eight hundred. */
       detail: gone
-        ? `Last position ${dubaiIso(r.last_seen)}. Nothing is off the road for ${n_(days, 'day')} and coming back: this car has left the fleet or its tracker was removed, and it is still carried in the vehicle list, where it inflates every per-vehicle average.`
-        : `Last position ${dubaiIso(r.last_seen)}. A gap this long usually means the vehicle left the fleet, or the tracker was removed — but it is short enough to be a repair or a lay-up, so it is worth asking before retiring it.`,
+        ? `${r.last_position ? `Last position ${dubaiIso(r.last_position)}.` : 'No fix from it ever carried a position.'} Nothing is off the road for ${n_(days, 'day')} and coming back: this car has left the fleet or its tracker was removed, and it is still carried in the vehicle list, where it inflates every per-vehicle average.`
+        : `${r.last_position ? `Last position ${dubaiIso(r.last_position)}.` : 'No fix from it ever carried a position.'} A gap this long usually means the vehicle left the fleet, or the tracker was removed — but it is short enough to be a repair or a lay-up, so it is worth asking before retiring it.`,
       action: gone
         ? `Retire it from the asset register, or refit the tracker if the car is still ours — either way it should stop counting as a vehicle in service.`
         : `Reconcile against the asset register: retire it, or refit the tracker if the car is still ours.`,
