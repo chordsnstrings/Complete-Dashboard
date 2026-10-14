@@ -132,10 +132,23 @@ console.log('\n/api/online/hours — today: the timeline to its last run, the li
   const dt = d ? d.minutes.reduce((x, y) => x + y, 0) : 0;
   check('a live feed that stopped is not read as everyone still online: D counts to the last poll (10 min), not to now (50)',
     d && Math.abs(dt - 10) < 1, JSON.stringify(d?.minutes));
-  // The timeline's run moves past the live minutes: they are the timeline's now, and the live feed is not read for them.
+  /* The timeline's run moves past the live minutes. Until the store is
+     rebuilt from that run it holds nothing for them, so they are still the
+     live feed's — calling them "recorded" read them from an empty store as
+     nobody online (production, 2026-10-14). The rollup that follows every
+     collection rebuilds; after it they are the timeline's, and the live feed
+     is not read for them. */
   await q(`UPDATE collection_run SET finished_at = now() WHERE source = 'uber_timeline'`);
+  const t1 = (await get(`/api/online/hours?day=${today}`)).body;
+  const c1 = t1.drivers.find((x) => x.driver_ext_id === 'acc-c');
+  const cBefore = s.drivers.find((x) => x.driver_ext_id === 'acc-c');
+  const sum = (x) => (x ? x.minutes.reduce((a, b) => a + b, 0) : -1);
+  check('a newer timeline run the store has not been built from yet does not empty the hours: C’s minutes still count, from the live feed',
+    c1 && sum(cBefore) > 0 && Math.abs(sum(c1) - sum(cBefore)) < 1 && c1.live.some(Boolean)
+      && !t1.hours.some((h) => h.state === 'recorded' && h.live_h > 0), JSON.stringify(c1?.minutes));
+  await refreshOnlineHours(db);
   const t2 = (await get(`/api/online/hours?day=${today}`)).body;
-  check('once the timeline has reached an hour, the live feed is not read for it — no minute counted from both',
+  check('once the store is built from that run, the live feed is not read for its hours — no minute counted from both',
     t2.drivers.every((x) => x.live.every((f) => !f)), JSON.stringify(t2.drivers.map((x) => [x.driver_ext_id, x.live.filter(Boolean).length])));
 }
 
@@ -149,6 +162,48 @@ console.log('\n/api/online/hours/range — day × hour, from the store');
   check('a day with nobody online is a row with its reason, not a missing row',
     d0 && d0.drivers === null && /no Uber account was recorded online/.test(d0.absent_why || ''), JSON.stringify(d0));
   check('the per-hour average is over the recorded days only', r.days_averaged === 1 && r.avg_drivers_by_hour[9] === 2, JSON.stringify([r.days_averaged, r.avg_drivers_by_hour[9]]));
+}
+
+console.log('\nan hour the store has not been built for is never a zero');
+{
+  /* No pass has recorded what it built — the state of production straight
+     after the deploy that added the table. */
+  await q('DELETE FROM driver_online_hour_build');
+  const r = (await get(`/api/online/hours?day=${D}`)).body;
+  check('no hour is "recorded" when no pass has said what it built', !r.hours.some((h) => /recorded/.test(h.state)),
+    JSON.stringify(r.hours.map((h) => h.state).slice(8, 12)));
+  check('…and the day says the record has not been built, not that nobody was online',
+    /has not been built/.test(r.absent_why || '') && !/^no Uber account/.test(r.absent_why || ''), r.absent_why);
+  const pre = (await get('/api/online/hours?day=2026-09-01')).body;
+  check('a day before the live feed began, unbuilt: every hour not_built, no figure — never "live, nobody online"',
+    pre.hours.every((h) => h.state === 'not_built' && h.drivers === null && h.online_h === null) && pre.live_from === null,
+    JSON.stringify([pre.hours[9], pre.live_from]));
+  check('…and its totals are absent, not zero', pre.totals.drivers === null && pre.totals.online_h === null, JSON.stringify(pre.totals));
+
+  // A narrow pass from D: built back to D, and no further.
+  await refreshOnlineHours(db, { since: D });
+  const rg = (await get('/api/online/hours/range?from=2026-09-30&to=2026-10-01')).body;
+  const a = rg.days.find((d) => d.day === '2026-09-30');
+  const b = rg.days.find((d) => d.day === D);
+  check('a narrow pass builds back to its own first day: the day before says it has not been built back to yet',
+    a && a.drivers === null && /not been built back to this day/.test(a.absent_why || '') && b && b.complete === true,
+    JSON.stringify([a, b && b.complete]));
+  check('…and that day is not averaged as a day with nobody online', rg.days_averaged === 1, String(rg.days_averaged));
+  const r2 = (await get(`/api/online/hours?day=${D}`)).body;
+  check('the built day reads recorded again', r2.hours[9].state === 'recorded' && r2.hours[9].drivers === 2, JSON.stringify(r2.hours[9]));
+
+  // The full pass builds all of history: the earlier day is now recorded as empty.
+  await refreshOnlineHours(db);
+  const rg2 = (await get('/api/online/hours/range?from=2026-09-30&to=2026-10-01')).body;
+  check('after a full pass the earlier day is recorded — and empty, said as such',
+    /no Uber account was recorded online/.test(rg2.days.find((d) => d.day === '2026-09-30')?.absent_why || ''),
+    JSON.stringify(rg2.days.find((d) => d.day === '2026-09-30')));
+  const st = (await q('SELECT built_from::text f FROM driver_online_hour_build'))[0];
+  check('a narrow pass after the full one does not shrink what is built', await (async () => {
+    await refreshOnlineHours(db, { since: D });
+    const s2 = (await q('SELECT built_from::text f FROM driver_online_hour_build'))[0];
+    return st.f === '1900-01-01' && s2.f === '1900-01-01';
+  })(), JSON.stringify(st));
 }
 
 await db.close();

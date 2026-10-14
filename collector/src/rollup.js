@@ -1349,6 +1349,17 @@ export async function refreshOnlineHours(db = pool, { since = null } = {}) {
     `DELETE FROM driver_online_hour
       WHERE computed_at < $1::timestamptz ${since ? 'AND day >= $2::date' : ''}`,
     since ? [t0, since] : [t0]);
+  /* WHAT THIS PASS BUILT, for the routes to judge an hour by
+     (sql/schema_v107.sql says why). least() keeps the day the table is built
+     back to from moving forward on a narrow pass; a full pass writes
+     1900-01-01, all of history. */
+  await db.query(
+    `INSERT INTO driver_online_hour_build (id, read_at, built_from, built_to, finished_at)
+     VALUES (true, $1::timestamptz, $2::date, (SELECT max(day) FROM driver_online_hour), now())
+     ON CONFLICT (id) DO UPDATE SET read_at = EXCLUDED.read_at,
+       built_from = least(driver_online_hour_build.built_from, EXCLUDED.built_from),
+       built_to = EXCLUDED.built_to, finished_at = EXCLUDED.finished_at`,
+    [t0, since || '1900-01-01']);
   const { rows } = await db.query('SELECT count(*)::int n FROM driver_online_hour');
   return rows[0].n;
 }

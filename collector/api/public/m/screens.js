@@ -2628,14 +2628,16 @@ async function onlineTime(deck, ctx) {
       c.body.append(el('p', 'm-cap', esc(h.absent_why ? `Nobody to show: ${h.absent_why}.` : 'No Uber account was online on this day.')));
       return;
     }
-    c.body.append(spark(past.map((x) => x.drivers || 0), { h: 44 }));
+    /* Only the hours something measured: an unmeasured hour is null, and
+       `|| 0` drew it as an hour with nobody online. */
+    c.body.append(spark(past.filter((x) => x.drivers != null).map((x) => x.drivers), { h: 44 }));
     const t = h.totals || {};
     const liveHours = past.filter((x) => x.live_h > 0).length;
     rows(c.body, [
       { title: 'Busiest hour', value: t.peak_drivers ? `${String(t.peak_hour).padStart(2, '0')}:00` : '\u2014',
         sub: t.peak_drivers ? `${fmt(t.peak_drivers)} online in it` : 'nobody online' },
-      { title: 'Drivers online', value: fmt(t.drivers ?? 0), sub: 'at any point in the day' },
-      { title: 'Driver-hours', value: Number(t.online_h ?? 0).toFixed(1), sub: liveHours
+      { title: 'Drivers online', value: fmt(t.drivers), sub: 'at any point in the day' },
+      { title: 'Driver-hours', value: t.online_h == null ? '\u2014' : Number(t.online_h).toFixed(1), sub: liveHours
         ? `the last ${liveHours === 1 ? 'hour is' : `${liveHours} hours are`} from the live feed, until the timeline arrives`
         : 'from Uber\u2019s timeline' },
       { title: 'Every hour, every driver', sub: 'on the desktop page', value: '\u203a', to: `#online-hours/${day}` },

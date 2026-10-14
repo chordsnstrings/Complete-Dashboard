@@ -29,7 +29,7 @@
    A FAILED ANSWER IS NOT A CLEAN RECORD. A request that threw, or came back
    without the shape, is said as a failure; a day the seat sensor did not
    watch is not a day with no unbooked journey. */
-import { dubaiDay } from './tz.js';
+import { dubaiDay, dubaiClock } from './tz.js';
 
 export const RUNG = {
   bracketed: 'named by time — their own Uber trips on the car either side of it',
@@ -44,10 +44,12 @@ const STRENGTH = { bracketed: 3, last_trip: 2, sole_custodian: 1, ambiguous: 0 }
    attributed list and the coverage must both be there. */
 export const readable = (res) => !!(res && res.attributed && Array.isArray(res.attributed.rows) && res.coverage);
 
-/* Minutes since Dubai midnight of an instant, and its Dubai day. */
-const DUBAI_MS = 4 * 3600e3;
-const dayOf = (ms) => new Date(ms + DUBAI_MS).toISOString().slice(0, 10);
-const minOf = (ms) => { const d = new Date(ms + DUBAI_MS); return d.getUTCHours() * 60 + d.getUTCMinutes() + d.getUTCSeconds() / 60; };
+/* Minutes since Dubai midnight of an instant, and its Dubai day — through
+   tz.js, never by adding four hours to a UTC clock (test/timezone.test.mjs). */
+const dayOf = (ms) => dubaiDay(new Date(ms));
+const minOf = (ms) => { const c = dubaiClock(new Date(ms)); return c.hour * 60 + c.minute; };
+/* HH:MM in Dubai, for the pages that print a ride's times. */
+export const clockOf = (ms) => dubaiClock(new Date(ms)).hhmm;
 
 /* Every reading on both sides of the split, folded into rides BY THE
    SERVER'S OWN RULE (the response's dedupe_rule): a ride is the reading the

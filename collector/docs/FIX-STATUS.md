@@ -4708,3 +4708,55 @@ the unbooked entries' extra padding then pushed Arkiv over too. Now
 showed only the intended additions (the `data-day` / `data-s` / gap
 `data-from`/`data-to` attributes, the sentence, the day's "none on this day"
 line); every other driver route held (15/15).
+
+## UOH-6 — an hour the store has not been built for is never a zero (2026-10-14)
+
+Found verifying the UOH deploy (8855315) on production: `/api/online/hours?day=
+2026-10-13` answered `recorded` for all 24 hours, 0 drivers, "no Uber account
+was recorded online on this day". The route judged an hour recorded by the
+TIMELINE's last run, but reads the hours from `driver_online_hour`, which held
+nothing yet — the rollup had not run since the deploy. The same false zero
+would have recurred every cycle for the hours between a timeline run and the
+next pass, and for every day a narrow pass had not reached.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| UOH-6a | `driver_online_hour_build` (sql/schema_v107.sql, registered): one row, rewritten by every pass — when it read the timeline, and back to which day the store is built (`least()`, so a narrow pass never shrinks it; a full pass writes 1900-01-01) | yes | no | `online_hours`: a narrow pass after a full one keeps 1900-01-01 |
+| UOH-6b | `/api/online/hours`: recorded only up to the last timeline run that finished before the build read it, on a day built back to; the live feed answers the rest but never before it began (13:41 UTC, 14 Sep 2026); an hour nothing measured is `not_built` / `not_collected` with `drivers: null`; totals null when nothing is measured; an unbuilt day never reads the store (no minute from both) | yes | no | `online_hours`: 6 of the new checks fail against the old route and rollup |
+| UOH-6c | `/api/online/hours/range`: a day before what is built says "has not been built back to this day yet", is not complete, and is not averaged | yes | no | `online_hours` (above) |
+| UOH-6d | #online-hours and the phone card draw an unmeasured hour as no bar (not 0), say how many and why, and show `—` tiles | yes | no | page and phone suites green; mock answers unchanged, snapshot holds |
+
+The existing check "once the timeline has reached an hour, the live feed is
+not read for it" now rebuilds the store first, as the rollup after every
+collection does — and a new check holds the state between the two.
+
+## NB — a cancelled booking is a moment, not a ride (2026-10-14)
+
+The operator: "a lot of trips show bolt trips as 0 minute away which means
+it's not unauthorized, it's bolt trip." Measured on production the same hour,
+over the newest 300 unbooked journeys (7–14 Oct): 17 said "0 min away" — 13
+Uber, 3 Bolt (2 orders), 1 hotel. Every one of those bookings was fetched:
+**16 were cancelled** (`rider_cancelled` 12, `driver_cancelled` 1,
+`driver_cancelled_after_accept` 1 order, `client_cancelled` 1 order) and carried
+no end time; Bolt's own fields said the ride never ran (`ride_duration 0`,
+`fare_finalised 0`, `arrived_to_pickup 0`). `bookingWindow()` gave each an
+invented ride (≈2 min a km, up to 3 h), and that invented ride is what touched
+the journey — an AED 486 order cancelled at 17:16 "touched" a journey at 18:27.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| NB-1 | `bookingWindow`: a `not_completed` booking with no end is its request instant | yes | no | `nearest_cancelled`: 6 of 11 fail against the old reconciler (it says 0 for both cases) |
+| NB-2 | the reason says what the booking was: "nearest is a bolt booking that never ran — the driver cancelled after accepting it; requested 12 min before the journey began"; a completed one keeps "a <p> trip N min away"; never "min behind" (the clock guard's phrase); Yango's bare `cancelled` names no canceller | yes | no | `nearest_cancelled` |
+| NB-3 | the attribution card's nearest-booking sentence carries the booking's status | yes | no | `unauthorized_attribution` 221/221 |
+
+No verdict moves: a cancelled booking never authorized anything. The stored
+reasons change as journeys are judged again — the collection window on every
+run, everything on the weekly backfill.
+
+The seventeenth was a real miss and is NOT fixed here: FIXLIST "An open booking
+cannot explain a journey".
+
+**UNA, from the full suite on 8855315:** `timezone` failed — api/public/
+unbooked.js took the Dubai day by adding four hours to a UTC clock. It and the
+two pages' clocks now go through `dubaiDay` / `dubaiClock` (api/public/tz.js);
+`timezone` 19/19, `unbooked_marks` 25/25.

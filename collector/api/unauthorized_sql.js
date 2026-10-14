@@ -1933,10 +1933,17 @@ LEFT JOIN LATERAL (
            'name', t.driver_name, 'id', t.driver_ext_id,
            'key', ${personKeyStored('t')},
            'requested_at', t.requested_at, 'ended_at', t.ended_at,
+           'status', t.status,
            'gap_min', ${o}.nearest_gap_min,
+           /* The booking's own status is in the sentence: "a bolt trip 0
+              minutes from this window" was read as a Bolt trip (the
+              operator, 2026-10-14) when Bolt's record said the driver
+              cancelled it after accepting and it never ran. A cancelled
+              booking's gap is measured from its request (src/reconcile.js
+              bookingWindow). */
            'means', format(
              'Context, not a candidate. The nearest booking the reconciler could find is a '
-             || '%s trip %s minutes from this window, and it did NOT explain the journey — '
+             || '%s booking with status %s, %s minutes from this window, and it did NOT explain the journey — '
              /* Worded around test/collector_invariants.test.mjs's bare-interval-keyword
                 rule, which reads any token followed by a bare unit and a comma,
                 inside a template literal containing SELECT, as a column alias. It
@@ -1945,7 +1952,8 @@ LEFT JOIN LATERAL (
              || 'that is why the verdict stands. A booking that far from the window describes '
              || 'the car’s movements rather than who was in the car, so this name is '
              || 'deliberately absent from the candidate list above.',
-             t.platform, abs(coalesce(${o}.nearest_gap_min, 0)))) AS nearest_booking
+             t.platform, coalesce(nullif(btrim(t.status), ''), 'not given'),
+             abs(coalesce(${o}.nearest_gap_min, 0)))) AS nearest_booking
     FROM trip t
    WHERE t.external_id = ${o}.nearest_trip_id
      AND t.platform = ${o}.nearest_platform

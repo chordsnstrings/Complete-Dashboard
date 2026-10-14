@@ -20,7 +20,7 @@ import { dubaiDay } from './tz.js';
 import { channelKey } from './tokens.js';
 import { withheldSentence } from './access_model.js';
 import { unlessWithheld } from './access.js';
-import { ridesOf, rideWords, coverageWords, readable, truncationWords } from './unbooked.js';
+import { ridesOf, rideWords, coverageWords, readable, truncationWords, clockOf } from './unbooked.js';
 
 const hhmm = (m) => {
   if (m == null || !Number.isFinite(m)) return '—';
@@ -536,7 +536,7 @@ function unbookedOnDay(root, { res, day, list }) {
       + 'nothing about whether there were any — the request for them failed.', 'warn');
     return;
   }
-  const clock = (ms) => { const x = new Date(ms + 4 * 3600e3); return `${String(x.getUTCHours()).padStart(2, '0')}:${String(x.getUTCMinutes()).padStart(2, '0')}`; };
+  const clock = clockOf;
   const rides = (ridesOf(res) || []).filter((r) => r.pieces.some((p) => p.day === day));
   const pct = (m) => (m / 1440) * 100;
   const cov = res.coverage || {};

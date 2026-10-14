@@ -55,7 +55,7 @@ import { renderDriverLedger } from './driverledger.js';
    other views do not say. */
 import { dubaiDay } from './tz.js';
 import { unlessWithheld } from './access.js';
-import { ridesOf, rideWords, coverageWords, readable, truncationWords } from './unbooked.js';
+import { ridesOf, rideWords, coverageWords, readable, truncationWords, clockOf } from './unbooked.js';
 import { makeMap, fitTo } from './map.js';
 
 /* `day` is deliberately NOT in this list. It is a destination reached by
@@ -331,7 +331,7 @@ async function unbookedOnBars(barsHost, host, id, prof) {
     return;
   }
   const rides = ridesOf(res);
-  const clock = (ms) => { const d = new Date(ms + 4 * 3600e3); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };
+  const clock = clockOf;
   const pct = (m) => (m / 1440) * 100;
   let marked = 0;
   const unmarkedDays = new Set();

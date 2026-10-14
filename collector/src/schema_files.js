@@ -331,4 +331,8 @@ export const SCHEMA_FILES = [
      timeline (the operator, 2026-10-14: "show driver online by hour on uber and
      store it"). Written by src/rollup.js refreshOnlineHours. */
   'schema_v106.sql',
+  /* v107: driver_online_hour_build — what the hour store was last built from
+     (the instant it read the timeline, and back to which day), so
+     /api/online/hours never reads an unbuilt hour as nobody online. */
+  'schema_v107.sql',
 ];

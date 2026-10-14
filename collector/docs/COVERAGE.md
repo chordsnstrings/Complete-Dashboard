@@ -4969,6 +4969,31 @@ untouched, and nothing projected is ever added into `accounted`.
   is also capped at 400 readings, newest first (`truncated`): say where it
   stops (`truncationWords`).
 
+* **A CANCELLED BOOKING HAS NO END, AND `bookingWindow()` WILL INVENT ONE.**
+  Its estimates (≈2 min a km, up to 3 h; 30 min with nothing) are for a
+  COMPLETED booking that arrived without its end. On a cancelled one they drew
+  a ride that never happened, and the unbooked list said "nearest is a bolt
+  trip 0 min away" — read by the operator as a Bolt trip (2026-10-14; 16 of the
+  17 "0 min" rows that week were cancelled bookings, Bolt's own record saying
+  `ride_duration 0`, `fare_finalised 0`). A cancelled booking is now its
+  request instant, and the reason names the cancellation (FIX-STATUS NB).
+  Bolt's raw order carries `ride_duration`, `arrived_to_pickup`,
+  `pickup_duration` and `fare_finalised` — read them before calling an order
+  a ride.
+
+* **A STORE IS RECORDED ONLY AS FAR AS IT HAS BEEN BUILT.** A page reading a
+  rolled-up table must judge "complete" by what the last pass READ, not by the
+  collector's last run: /api/online/hours did the second and, straight after
+  the deploy that added `driver_online_hour`, answered "nobody online" for a
+  whole day from an empty table (2026-10-14). `driver_online_hour_build`
+  (v107) records the instant the pass read the timeline and the first day it
+  is built back to.
+
+* **THE FRONT END DOES NOT ADD FOUR HOURS EITHER.** test/timezone.test.mjs
+  reads api/public/ too: `new Date(ms + 4 * 3600e3).toISOString().slice(0, 10)`
+  in api/public/unbooked.js failed it in the full suite on 2026-10-14. Use
+  `dubaiDay` / `dubaiClock` (api/public/tz.js).
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`

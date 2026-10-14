@@ -25,7 +25,12 @@ import { api, href } from './data.js';
 const HH = (h) => `${String(h).padStart(2, '0')}:00`;
 const STATE_WORD = {
   recorded: 'timeline', 'recorded+live': 'timeline + live', live: 'live feed',
-  partial: 'part measured', not_collected: 'not collected yet', future: '—',
+  partial: 'part measured', not_collected: 'not collected yet', not_built: 'not built yet', future: '—',
+};
+/* Why an hour has no figure, in a title. */
+const UNMEASURED = {
+  not_built: 'the timeline has reached this hour, but the hour-by-hour record has not been built from it yet',
+  not_collected: 'the timeline has not reached this hour',
 };
 /* Minutes in an hour, 0–60, as one of the sequential steps; 0 is the surface. */
 const shade = (m) => (m > 0 ? `var(${SEQ[Math.min(SEQ.length - 1, Math.floor((m / 60) * (SEQ.length - 0.01)))]})` : 'var(--surface-2)');
@@ -82,10 +87,11 @@ export async function renderOnlineHours(root, param) {
       : null;
     const anyLive = d.hours.some((h) => h.live_h > 0);
     const TILES = [
-      { label: 'Drivers online', value: fmt(t.drivers ?? 0), sub: 'Uber accounts online at any point in the day' },
+      /* A day nothing measured has no figure — `—` and the reason, never 0. */
+      { label: 'Drivers online', value: fmt(t.drivers), sub: t.drivers == null ? 'no hour of this day is measured yet' : 'Uber accounts online at any point in the day' },
       { label: 'Busiest hour', value: t.peak_drivers ? HH(t.peak_hour) : '—',
         sub: t.peak_drivers ? `${countOf(t.peak_drivers, 'driver')} online in it` : 'nobody online' },
-      { label: 'Driver-hours', value: fmt(t.online_h ?? 0, 1), sub: 'online time, summed over everyone' },
+      { label: 'Driver-hours', value: fmt(t.online_h, 1), sub: t.online_h == null ? 'no hour of this day is measured yet' : 'online time, summed over everyone' },
       { label: 'Online at once', value: avgAll == null ? '—' : fmt(avgAll, 1),
         sub: avgAll == null ? 'no hour of this day is measured yet' : 'on average, over the measured hours' },
       { label: 'Timeline reached', value: d.timeline_to ? timeStr(d.timeline_to) : '—',
@@ -100,14 +106,23 @@ export async function renderOnlineHours(root, param) {
     if (d.absent_why && !past.some((h) => h.drivers)) {
       empty(chartP.body, `Nobody to show: ${esc(d.absent_why)}.`);
     } else {
-      const rows = d.hours.map((h) => ({ h: HH(h.hour).slice(0, 2), drivers: h.drivers ?? 0, live: h.live_h > 0 && h.state !== 'recorded' }));
+      /* An hour nothing measured keeps its null: barChart draws no bar and its
+         tooltip says —, and the caption says how many and why. `?? 0` drew
+         those hours as hours with nobody online. */
+      const rows = d.hours.map((h) => ({ h: HH(h.hour).slice(0, 2), drivers: h.drivers, live: h.live_h > 0 && h.state !== 'recorded' }));
       const box = el('div'); chartP.body.append(box);
       barChart(box, rows, { x: 'h', y: 'drivers', label: 'drivers online', color: '--mk-fill',
         colorFor: (r) => (r.live ? '--b300' : null), projected: (r) => r.live,
         aria: `Uber drivers online in each hour of ${day}` });
       chartP.body.append(el('p', 'cap', (anyLive
         ? 'The lighter, hatched bars are hours the timeline has not reached yet, counted from Uber’s live status feed; the timeline replaces them within three hours. '
-        : '') + 'A driver online for a minute of an hour is online in that hour; "online at once" in the table below is the measure that weighs the minutes.'));
+        : '') + 'A driver online for a minute of an hour is online in that hour; "online at once" in the table below is the measure that weighs the minutes.'
+        + (() => {
+          const gap = past.filter((h) => h.drivers == null);
+          if (!gap.length) return '';
+          const why = UNMEASURED[gap[0].state] || 'no minute of it is measured';
+          return ` ${countOf(gap.length, 'hour')} ${gap.length === 1 ? 'has' : 'have'} no bar because nothing measured ${gap.length === 1 ? 'it' : 'them'}: ${why}.`;
+        })()));
     }
 
     tableP.body.innerHTML = '';
@@ -119,7 +134,7 @@ export async function renderOnlineHours(root, param) {
       { label: 'Driver-hours', key: 'online_h', num: true, render: (h) => fmt(h.online_h, 1) },
       { label: 'From', key: 'state', render: (h) => (/live/.test(h.state) ? pill(STATE_WORD[h.state], 'warn')
         : h.state === 'recorded' ? esc(STATE_WORD[h.state])
-          : `<span class="ent-off" title="${esc(h.state === 'partial' ? `${h.measured_min} of the hour’s minutes are measured` : 'the timeline has not reached this hour')}">${esc(STATE_WORD[h.state])}</span>`) },
+          : `<span class="ent-off" title="${esc(h.state === 'partial' ? `${h.measured_min} of the hour’s minutes are measured` : UNMEASURED[h.state] || 'nothing measured this hour')}">${esc(STATE_WORD[h.state] || h.state)}</span>`) },
     ], { compact: true, sortable: true, sortId: 'oh-hours', defaultSort: { key: 'hour', dir: 'asc' } }));
     tableP.body.append(el('p', 'cap', esc(d.basis)));
 

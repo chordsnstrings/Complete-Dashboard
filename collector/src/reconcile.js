@@ -364,6 +364,22 @@ export function journeyUnverifiableReason(s) {
 export function bookingWindow(b) {
   const b0 = new Date(b.requested_at).getTime();
   if (b.ended_at) return [b0, new Date(b.ended_at).getTime(), 'ended_at'];
+  /* A CANCELLED BOOKING IS A MOMENT, NOT A RIDE.
+     ───────────────────────────────────────────────────────────────────────
+     The estimates below exist for a COMPLETED booking that arrived without
+     its end, and they are generous on purpose. Applied to a booking the
+     channel says never ran they invented a ride: a Bolt order requested at
+     11:19 and cancelled by the driver after accepting (Bolt: ride_duration 0,
+     fare_finalised 0) was given 8.6 km × 2 min — to 11:36 — and the 11:30
+     journey the seat sensor saw read "nearest is a bolt trip 0 min away"; an
+     AED 486 order requested at 17:16 and cancelled by the rider stretched to
+     three hours and touched a journey that began at 18:27. The operator read
+     those as Bolt trips (2026-10-14). Measured that day over the newest 300
+     unbooked journeys: 17 said "0 min away", and 16 of the 17 bookings were
+     cancelled ones. A cancelled booking cannot authorize anything (findMatch
+     takes completed ones only), so this moves no verdict; it makes the
+     nearest-booking evidence say how far the REQUEST was from the journey. */
+  if (b.outcome === 'not_completed') return [b0, b0, 'cancelled'];
   if (b.duration_s > 0) return [b0, b0 + b.duration_s * 1000, 'duration'];
   // ~2 minutes per km is a slow-city estimate; deliberately generous, since the
   // cost of over-covering is a missed flag and the cost of under-covering is a
@@ -483,6 +499,36 @@ export function findMatchIndexed(seg, plateIndex, rules = RULES) {
   }
   return { match: match ? match.b : null, nearest: best ? best.b : null,
     nearest_gap_min: bestGap == null ? null : Math.round(bestGap / 60000) };
+}
+
+/* The nearest booking, in the words the evidence column prints. A completed
+   one is "a <platform> trip N min away", as before (api/unauthorized_sql.js
+   documents that shape). A cancelled one is said as what it was — whose
+   cancellation, and how long before or after the journey it was REQUESTED —
+   because "a bolt trip 0 min away" read as a Bolt trip to the operator
+   (2026-10-14), and Bolt's own record of it said the ride never ran.
+   Never the words "min behind": that phrase is the clock guard's signal. */
+const CANCELLED_BY = {
+  driver_cancelled_after_accept: 'the driver cancelled after accepting it',
+  driver_cancelled: 'the driver cancelled it',
+  rider_cancelled: 'the rider cancelled it',
+  client_cancelled: 'the rider cancelled it',
+  driver_did_not_respond: 'the driver did not respond to it',
+  driver_rejected: 'the driver rejected it',
+  client_did_not_show: 'the rider did not show',
+  no_show: 'the rider did not show',
+  cancelled: 'it was cancelled — the channel does not say by whom',
+};
+export function nearestWords(b, gapMin, seg) {
+  if (b.outcome !== 'not_completed') return `a ${b.platform} trip ${gapMin} min away`;
+  const st = String(b.status || '').toLowerCase().replace(/^optional_ride_/, '');
+  const why = CANCELLED_BY[st] || `it did not complete (status ${st || 'not given'})`;
+  const t = new Date(b.requested_at).getTime();
+  const s0 = new Date(seg.started_at).getTime();
+  const s1 = new Date(seg.ended_at).getTime();
+  const when = t < s0 ? `requested ${gapMin} min before the journey began`
+    : t > s1 ? `requested ${gapMin} min after the journey ended` : 'requested during the journey';
+  return `a ${b.platform} booking that never ran — ${why}; ${when}`;
 }
 
 /** Full pass over a window: build, classify, match, persist. */
@@ -787,7 +833,7 @@ export function judgeSegment(seg, classify, ctx) {
     } else {
       verdict = 'unauthorized';
       reason = found.nearest
-        ? `no completed booking overlaps; nearest is a ${found.nearest.platform} trip ${found.nearest_gap_min} min away`
+        ? `no completed booking overlaps; nearest is ${nearestWords(found.nearest, found.nearest_gap_min, seg)}`
         : `no booking of any kind on this plate in the window, across ${ctx.configured.join(', ') || 'no channels'}`;
     }
   }
@@ -898,7 +944,7 @@ export async function reconcile({ from, to }) {
      journey judged against an FMS "booking" would match on every row. */
   const { rows: bookings } = await pool.query(
     `SELECT platform, external_id, plate, requested_at, ended_at, duration_s, distance_km,
-            driver_name, driver_ext_id, outcome
+            driver_name, driver_ext_id, outcome, status
      FROM trip_norm
      WHERE requested_at BETWEEN $1 AND $2 AND plate IS NOT NULL AND plate <> ''
        AND is_booking`,
