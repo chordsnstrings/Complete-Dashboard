@@ -255,7 +255,7 @@ The views, drawn on the consolidated history, are on the Garage Desk page
 | phone, Fleet tab | the board, "send to a garage", state changes (`TABS`, `api/public/m/screens.js:44`; the Fleet tab owns `fleet`, `vehicles`, `vehicle`) |
 | To-do and Action list | the absence lines that say a workshop visit is recorded nowhere (`api/public/playbook.js:563`, `api/public/app.js:2875`, `api/public/driver.js:1629`) answer from the record; new items: overdue return, visit open while the car works, car with no responsible person, repeat within the window |
 | morning email | an "Off the road" section; the `cars_idle` finding (`src/report_findings.js:260`) names the garage |
-| Target pages | cars in a garage shown as unavailable — question 1 below |
+| Target pages | a car in a garage or out of service leaves that day's plan (ruling 13) |
 | driver ledger | an at-fault accident may PROPOSE a `damage` entry (`sql/schema_v78.sql:146`); Finance commits it; the visit links to it |
 | assistant | tools beside `find_car`/`whereabouts` in `api/agent_tools.js`: off the road, a car's garage history, repeat work, garage costs |
 | Excel | a Garage workbook through `src/xlsx_write.js` |
@@ -281,8 +281,8 @@ driver, fault, police report, insurer, in / expected / back, state, who pays),
 `garage_invoice` (unique per garage + number) and `garage_line` (work type,
 description, parts, labour, quantity, VAT), `garage_attachment` (bytea keyed by
 sha256, the `driver_ledger_receipt` pattern at `sql/schema_v78.sql:305`, which
-allows images only and expires in 12 months — invoices need PDFs and a longer
-life, question 4), and `car_day_state` (one row per car per day).
+allows images only and expires in 12 months — garage attachments take PDFs and
+are kept five years, ruling 16), and `car_day_state` (one row per car per day).
 
 **The history goes in through the existing import path**: parsed in the
 browser, previewed, committed by a second person (`api/public/importsheet.js`,
@@ -340,6 +340,18 @@ deploy, screenshots of production.
     not copies of CCF_000081 — all three count.
 12. **The Sajdaf invoices the payment advice R0378 pays but the archive lacks**
     are unknown to the operator; R0378 stays out of spend and on the review list.
+13. **Cars out of commission are not in the target.** A car in a garage or out
+    of service on a day is not one of that day's cars. In `api/revenue_target.js`
+    a day's plan is the rate × the cars that earned in the 7 days before it
+    (`carsAsOf`, line 202); an off-road car leaves that set for the day, so the
+    fleet's plan falls by its share and each working car's rate is unchanged.
+14. **The repeat window is 90 days.**
+15. **For now, anyone with a dashboard account can be a car's responsible
+    person.**
+16. **Garage invoices are kept five years.** In the database to begin with,
+    the `driver_ledger_receipt` pattern widened to PDFs; the operator will
+    choose a cheaper store later, so the visit refers to an attachment by its
+    sha256 and never by where the bytes live.
 
 ## The existing records, consolidated (2026-10-14)
 
@@ -375,15 +387,7 @@ second, bookings as evidence only. What that showed, for whoever imports it:
 
 ## Inputs needed from the operator
 
-Asked 2026-10-14, before building:
-
-- **Targets** — does a car in a garage stop counting as available on the Target
-  pages (lowering each working car's share), or stay in?
-- **Repeat window** — 30 days (the approval question used 30) or 90?
-- **Accounts** — the responsible person is an `access_user`; is every
-  operations member invited?
-- **Invoice retention** — receipts expire after 12 months; UAE VAT rules expect
-  tax records kept at least five years. Five years for garage invoices?
+The four questions asked 2026-10-14 are answered (rulings 13–16).
 
 Earlier list:
 
