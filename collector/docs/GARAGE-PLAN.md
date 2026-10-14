@@ -308,7 +308,7 @@ second, bookings as evidence only. What that showed, for whoever imports it:
 - **A car's "current driver" in the register is the driver of its last booking
   the register sees**, dated `driver_as_of` — today's driver only for a working
   car. 35 of the 139 had none since 1 Oct 2026; L26153 none since 15 Oct 2025,
-  yet it went to a garage eight times, the last on 29 Sep 2026.
+  yet it went to a garage seven times after that, the last on 29 Sep 2026.
 
 ## Inputs needed from the operator
 
