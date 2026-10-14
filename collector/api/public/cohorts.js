@@ -119,7 +119,7 @@ export const COHORTS = {
     kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false, cap: 500,
     from: 'vehicles', fromLabel: 'Vehicles',
     label: 'Tracker gone quiet',
-    question: 'Which cars have a tracker that has not reported in 11 minutes?',
+    question: 'Which cars have a tracker that has gone quiet — no fix in 30 minutes (FMS) or 2 hours (CABMAN)?',
     why: 'A tracker that stops reporting looks exactly like a car that stopped moving, '
       + 'and only one of those is a fleet problem.',
     test: (r) => !!r.vin && !!r.stale && !!r.last_fix,

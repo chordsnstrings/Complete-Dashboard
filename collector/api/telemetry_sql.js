@@ -59,3 +59,63 @@ export const CABMAN_MOVE_DAYS = (fromP, toP, fleetP = 'NULL') => `SELECT plate, 
        AND captured_at >= (${fromP}::date::timestamp AT TIME ZONE 'Asia/Dubai')
        AND captured_at <  ((${toP}::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
      GROUP BY 1, 2`;
+
+/* A FIX WITH A REAL POSITION (FIXLIST V11, 2026-10-14). A tracker with no
+   satellite lock files 0,0 — "null island", in the Gulf of Guinea — and
+   /api/where and /api/map/days passed those through: L68713's last position on
+   record was 0,0. Anything within a degree of 0,0 is not this fleet, which
+   works around 25°N 55°E. `a` is the table alias, with its dot. */
+export const REAL_FIX = (a = '') => `(${a}lat IS NOT NULL AND ${a}lng IS NOT NULL
+      AND NOT (abs(${a}lat) < 1 AND abs(${a}lng) < 1))`;
+
+/* HOW LONG A CAR STOOD WHERE IT STOOD (FIXLIST V5, 2026-10-14).
+   "Where it parks" multiplied the number of stationary fixes by five minutes.
+   A parked CABMAN car reports about hourly and a sleeping FMS unit every few
+   days, so a car that stood ~277 hours read 21. Measured instead from the gap
+   to the car's NEXT fix: when that fix is still stationary at the same spot
+   (3 decimals, ~100 m), the car was there the whole gap and all of it counts
+   (capped at a week, past which nothing is claimed); when it is elsewhere or
+   moving, the car left at some unknown moment, and at most PARK_STEP_MIN
+   counts. The last fix in the window counts nothing — its end is unknown. */
+export const PARK_STEP_MIN = 5;
+export const PARKED_SPOTS_SQL = (plateP, tsPred) => `WITH f AS (
+       SELECT round(lat::numeric, 3) AS lat, round(lng::numeric, 3) AS lng,
+              coalesce(speed, 0) < 2 AS still, captured_at,
+              lead(captured_at) OVER (ORDER BY captured_at) AS nxt_at,
+              lead(round(lat::numeric, 3)) OVER (ORDER BY captured_at) AS nxt_lat,
+              lead(round(lng::numeric, 3)) OVER (ORDER BY captured_at) AS nxt_lng,
+              lead(coalesce(speed, 0) < 2) OVER (ORDER BY captured_at) AS nxt_still
+         FROM telemetry_snapshot
+        WHERE plate = ${plateP} AND ${tsPred} AND ${REAL_FIX()}
+     )
+     SELECT lat, lng, count(*)::int fixes,
+            round((sum(CASE
+              WHEN nxt_at IS NULL THEN 0
+              WHEN nxt_still AND nxt_lat = lat AND nxt_lng = lng
+                THEN least(extract(epoch FROM nxt_at - captured_at), 7 * 86400)
+              ELSE least(extract(epoch FROM nxt_at - captured_at), ${PARK_STEP_MIN} * 60) END) / 3600)::numeric, 1)::float8 AS hours
+       FROM f WHERE still
+      GROUP BY 1, 2 HAVING count(*) >= 3
+      ORDER BY hours DESC, fixes DESC LIMIT 60`;
+
+/* A CAR'S TRACKER, AND WHAT IT IS DOING (FIXLIST V6, 2026-10-14).
+   ───────────────────────────────────────────────────────────────────────
+   The vehicle header and the directory took their pill, "last fix" and
+   odometer from the newest telemetry_snapshot row of ANY source — and the Uber
+   collector writes its drivers' online status there too (ONLINE / ONTRIP /
+   OFFLINE, src/sources/uber.js). So a busy car wore Uber's "ONTRIP" and lost
+   its odometer, a car parked 47 days with the ignition off wore CABMAN's green
+   "ACTIVE", and one status column mixed four vocabularies. A car's tracker is
+   CABMAN or FMS; its state is said in one vocabulary, from what the fix
+   measured: moving above walking pace, standing, or quiet.
+
+   QUIET is per tracker, not one number for both: an FMS unit reports every
+   ~5 min while it is awake, a parked CABMAN car about hourly (COVERAGE), and
+   the directory's 11-minute rule called every parked CABMAN car stale. Quiet
+   is twice the normal rhythm: 30 min for FMS, 120 for CABMAN. */
+export const TRACKER_SOURCES_SQL = `('cabman', 'fms')`;
+export const QUIET_MIN = Object.freeze({ fms: 30, cabman: 120 });
+export const QUIET_SQL = (a = '') => `(now() - ${a}captured_at > CASE ${a}source WHEN 'cabman'
+      THEN interval '${QUIET_MIN.cabman} minutes' ELSE interval '${QUIET_MIN.fms} minutes' END)`;
+export const TRACKER_STATE_SQL = (a = '') => `CASE WHEN ${QUIET_SQL(a)} THEN 'quiet'
+      WHEN coalesce(${a}speed, 0) > ${CABMAN_MOVING_KMH} THEN 'moving' ELSE 'standing' END`;

@@ -27,7 +27,7 @@ import { rebuildCustody } from '../src/custody.js';
 import { peopleCountStored, personKey, JOIN_TRIP } from '../api/custody_sql.js';
 import { attributedEarnings } from '../api/attribution_sql.js';
 import { drivingCount, deviceCount } from '../api/alert_coverage_sql.js';
-import { CABMAN_MOVE_DAYS } from '../api/telemetry_sql.js';
+import { CABMAN_MOVE_DAYS, QUIET_SQL, TRACKER_STATE_SQL, TRACKER_SOURCES_SQL } from '../api/telemetry_sql.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -130,6 +130,9 @@ if (!Number.isFinite(CAP)) throw new Error('api/vehicle_routes.js no longer decl
 NEW = NEW.replace('${DIR_LIMIT + 1}', String(CAP + 1));
 /* CABMAN's moving days, from the module the route imports (FIXLIST V3). */
 NEW = NEW.replace("${CABMAN_MOVE_DAYS('$1', '$2')}", CABMAN_MOVE_DAYS('$1', '$2'));
+/* The tracker vocabulary (FIXLIST V6), from the same module. */
+NEW = NEW.replace("${QUIET_SQL('t.')}", QUIET_SQL('t.')).replace("${TRACKER_STATE_SQL('t.')}", TRACKER_STATE_SQL('t.'))
+  .replace('${TRACKER_SOURCES_SQL}', TRACKER_SOURCES_SQL);
 if (/\$\{/.test(NEW)) throw new Error(`the route interpolates something this test does not substitute: ${NEW.match(/\$\{[^}]*\}/g)}`);
 
 const WIN = ['2026-08-01', '2026-08-31'];
@@ -157,6 +160,10 @@ async function compare(label, db) {
      car was seen moving now counts, and the old query could not see it. It
      is held below by its own assertion against an independent count. */
   KEYS.delete('days_moved');
+  /* status and stale changed ON PURPOSE too (FIXLIST V6): the newest row of
+     ANY source made Uber's driver status a car's tracker state, and one
+     11-minute rule called every parked CABMAN car stale. Held below. */
+  KEYS.delete('status'); KEYS.delete('stale');
   const fixed = (r) => JSON.stringify(Object.fromEntries(
     Object.entries(r).filter(([k]) => k !== CLOCK && KEYS.has(k))));
   const diffs = [];
@@ -189,6 +196,28 @@ async function payoutRows(database) {
   return qq(NEW, WIN);
 }
 const small = await compare('small fleet', db);
+
+/* FIXLIST V6: the tracker is CABMAN or FMS, never the Uber driver-status rows
+   the Uber collector writes to the same table; its state is moving, standing
+   or quiet; quiet is 30 min for FMS and 2 h for CABMAN. */
+{
+  const at = (min) => new Date(Date.now() - min * 60000).toISOString();
+  await db.query(`INSERT INTO telemetry_snapshot (source, fleet_id, plate, captured_at, lat, lng, speed, status, odometer)
+                  VALUES ('cabman','ecosine','TRK001',$1,25.2,55.3,0,'Active',123456),
+                         ('uber','ecosine','TRK001',$2,NULL,NULL,NULL,'ONTRIP',NULL),
+                         ('fms','ecosine','TRK002',$3,25.2,55.3,55,'Moving',NULL),
+                         ('cabman','ecosine','TRK003',$4,25.2,55.3,0,'Active',NULL)`,
+    [at(60), at(2), at(40), at(150)]);
+  const rows = await db.query(NEW, WIN).then((r) => r.rows);
+  const t1 = rows.find((r) => r.plate === 'TRK001'), t2 = rows.find((r) => r.plate === 'TRK002'), t3 = rows.find((r) => r.plate === 'TRK003');
+  check('a newer Uber driver-status row is not the car\'s tracker',
+    t1 && t1.tracker_source === 'cabman' && t1.device_status === 'Active' && t1.status === 'standing',
+    JSON.stringify(t1 && [t1.tracker_source, t1.device_status, t1.status]));
+  check('a parked CABMAN car an hour since its last fix is not stale', t1 && t1.stale === false, String(t1 && t1.stale));
+  check('an FMS car 40 minutes quiet is quiet', t2 && t2.stale === true && t2.status === 'quiet', JSON.stringify(t2 && [t2.stale, t2.status]));
+  check('a CABMAN car two and a half hours quiet is quiet', t3 && t3.stale === true && t3.status === 'quiet', JSON.stringify(t3 && [t3.stale, t3.status]));
+  await db.query(`DELETE FROM telemetry_snapshot WHERE plate IN ('TRK001','TRK002','TRK003')`);
+}
 
 /* days_moved, against a count written here independently: the Dubai days with
    a booking or an FMS journey, united with the days a CABMAN fix ran above
@@ -276,6 +305,19 @@ check('and so does one sorting past every other plate',
 check('a vehicle with no work in the window reports absence, not zero distance',
   edges.find((r) => r.plate === 'A00001')?.km == null,
   JSON.stringify(edges.find((r) => r.plate === 'A00001')));
+/* FIXLIST V4: last_trip is bounded by the window, so a car whose last
+   booking predates it printed "Last trip: never" — L44284 had 3,290 bookings.
+   The row now carries the last booking ever, and an FMS journey is not one. */
+{
+  const old = edges.find((r) => r.plate === 'A00001');
+  check('a car with no booking in the window carries its last booking on record',
+    old && old.last_trip == null && old.last_trip_ever
+      && new Date(old.last_trip_ever).toISOString().startsWith('2025-02-11T05:00'),
+    JSON.stringify(old && { w: old.last_trip, ever: old.last_trip_ever }));
+  const busy = edges.find((r) => r.trips > 0 && r.last_trip);
+  check('and for a car that worked in the window it is at least its last trip in the window',
+    busy && new Date(busy.last_trip_ever) >= new Date(busy.last_trip), JSON.stringify(busy && [busy.last_trip, busy.last_trip_ever]));
+}
 check('a blank plate is not a vehicle', !plates.includes(''), JSON.stringify(plates));
 check('and the database refuses to store one at all', blankRejected,
   'CHECK (plate <> \'\') is missing — a blank plate can be written again');

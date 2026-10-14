@@ -13,7 +13,7 @@
    "is this asset earning, and is it legal to be on the road". */
 
 import { peopleCount, personKey, custodyNames } from './custody_sql.js';
-import { CABMAN_MOVE_DAYS } from './telemetry_sql.js';
+import { CABMAN_MOVE_DAYS, PARKED_SPOTS_SQL, TRACKER_SOURCES_SQL, QUIET_SQL, TRACKER_STATE_SQL } from './telemetry_sql.js';
 import { winDays, dubaiSpanSql } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
@@ -253,10 +253,12 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        tel AS (
          /* Each plate's newest fix, one index probe a plate — the same row
             DISTINCT ON (plate) … ORDER BY plate, captured_at DESC kept. */
-         SELECT p.plate, s.captured_at last_fix, s.polled_at, s.status, s.speed
+         SELECT p.plate, s.captured_at last_fix, s.polled_at, s.status, s.speed, s.source, s.quiet, s.tracker_state
            FROM tplates p
-           CROSS JOIN LATERAL (SELECT t.captured_at, t.polled_at, t.status, t.speed
+           CROSS JOIN LATERAL (SELECT t.captured_at, t.polled_at, t.status, t.speed, t.source,
+                                      ${QUIET_SQL('t.')} quiet, ${TRACKER_STATE_SQL('t.')} tracker_state
                                  FROM telemetry_snapshot t WHERE t.plate = p.plate
+                                  AND t.source IN ${TRACKER_SOURCES_SQL}
                                 ORDER BY t.captured_at DESC LIMIT 1) s
           WHERE p.plate IS NOT NULL
        ),
@@ -337,6 +339,12 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               coalesce(w.telematics_journeys,0) telematics_journeys,
               coalesce(w.days,0) days, coalesce(mv.days_moved,0) days_moved,
               coalesce(mv.cab_days_moved,0) cab_days_moved,
+              /* The last booking EVER, not in the window (FIXLIST V4): the
+                 window-bound last_trip printed "never" on 35 VIN cars that had
+                 earned before it — L44284 with 3,290 bookings. One probe of
+                 trip_plate_requested_idx per plate. */
+              (SELECT max(x.requested_at) FROM trip x
+                WHERE x.plate = p.plate AND x.platform <> 'fms') last_trip_ever,
               w.km, w.telematics_km, w.revenue, coalesce(w.priced_trips,0) priced_trips,
               pay.payout, coalesce(pay.payout_days,0) payout_days, pay.payout_even_split,
               /* The two grains that let api/income_sql.js choose per channel.
@@ -371,16 +379,17 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
                  which is a contradiction a reader has to be shown rather than
                  have resolved for them. */
               vp.vin_platforms vin_channels, vp.distinct_vins,
-              tel.last_fix, tel.status, tel.speed,
+              -- the tracker's state in one vocabulary, its own word beside it (V6)
+              tel.last_fix, tel.tracker_state status, tel.status device_status, tel.source tracker_source, tel.speed,
               /* Staleness is a property of the FIX, not of our poll. CABMAN
                  re-sends every vehicle's last position on every cycle, so a
                  tracker dead for a year still got a fresh polled_at. */
-              /* Eleven minutes here, thirty in server.js FIX_FRESH, which /api/live
-                 and /api/kpis use. Measured on production the two feeds differ
-                 enough that neither number fits both — FMS reports every ~5 min,
-                 CABMAN sits at a median of 43 — so the pages state which rule
-                 they applied rather than one being quietly imposed on both. */
-              (now() - tel.last_fix > interval '11 minutes') stale,
+              /* It was eleven minutes for both feeds, which called every parked
+                 CABMAN car stale — FMS reports every ~5 min, CABMAN at a median
+                 of 43 and about hourly when parked. Each tracker is now judged
+                 by its own rhythm (api/telemetry_sql.js QUIET_MIN). */
+              -- quiet by the tracker's own rhythm: 30 min FMS, 120 CABMAN (V6)
+              coalesce(tel.quiet, false) stale,
               round(extract(epoch FROM now() - tel.last_fix) / 60)::int fix_age_min,
               doc.soonest_expiry, (doc.soonest_expiry::date - now()::date) doc_days_left,
               coalesce(doc.doc_expired_undated, false) doc_expired_undated,
@@ -848,11 +857,18 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
                 FILTER (WHERE is_booking)::int days_worked,
               ${peopleCount()}::int drivers
        FROM trip_norm WHERE ${TW}`, p);
+    /* The car's TRACKER (CABMAN or FMS), never Uber's driver-status rows, and
+       its state in one vocabulary; the odometer is the newest one any fix
+       carried (FIXLIST V6, api/telemetry_sql.js). */
     const [tel] = await q(
-      `SELECT captured_at last_fix, polled_at, lat, lng, speed, status, seat_occupied,
-              odometer, fuel_level, ignition, source,
-              (now() - polled_at > interval '11 minutes') stale
-       FROM telemetry_snapshot WHERE plate = $1 ORDER BY captured_at DESC LIMIT 1`, [plate]);
+      `SELECT captured_at last_fix, polled_at, lat, lng, speed, status device_status, seat_occupied,
+              fuel_level, ignition, source,
+              ${QUIET_SQL()} stale, ${TRACKER_STATE_SQL()} tracker_state,
+              (SELECT o.odometer FROM telemetry_snapshot o
+                WHERE o.plate = $1 AND o.odometer IS NOT NULL AND o.source IN ${TRACKER_SOURCES_SQL}
+                ORDER BY o.captured_at DESC LIMIT 1) odometer
+       FROM telemetry_snapshot WHERE plate = $1 AND source IN ${TRACKER_SOURCES_SQL}
+       ORDER BY captured_at DESC LIMIT 1`, [plate]);
     const documents = await q(
       `SELECT platform, doc_type, status, expires_at,
               (expires_at::date - now()::date) days_left
@@ -1330,11 +1346,9 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        WHERE plate = $3 AND ${TS('captured_at')} AND lat IS NOT NULL
        GROUP BY 1 HAVING count(*) >= 3 ORDER BY 1 DESC LIMIT 90`, p);
     // Where it spends its stationary time — depot, driver's home, or a rank.
-    const parked = await q(
-      `SELECT round(lat::numeric,3) lat, round(lng::numeric,3) lng, count(*)::int fixes
-       FROM telemetry_snapshot
-       WHERE plate = $3 AND ${TS('captured_at')} AND coalesce(speed,0) < 2 AND lat IS NOT NULL
-       GROUP BY 1,2 HAVING count(*) >= 3 ORDER BY fixes DESC LIMIT 60`, p);
+    /* Hours measured from the gaps between fixes, not fixes × 5 min (FIXLIST
+       V5) — api/telemetry_sql.js PARKED_SPOTS_SQL says how. */
+    const parked = await q(PARKED_SPOTS_SQL('$3', TS('captured_at')), p);
     res.json({ segments, by_verdict: byVerdict, days, parked, dedupe_rule: OCC_DEDUPE_RULE });
   }));
 

@@ -164,7 +164,11 @@ check('the tracker\'s own last sighting survives as last_movement',
 check('and last_movement is never earlier than last_trip',
   prof.span.last_movement >= prof.span.last_trip,
   `${ISO(prof.span?.last_movement)} < ${ISO(prof.span?.last_trip)}`);
-check('latest telemetry fix attached', prof.telemetry?.status === 'Idle', prof.telemetry?.status);
+/* The device's own word is kept as device_status; the state is said in one
+   vocabulary (FIXLIST V6). This fix is from August, so the tracker is quiet. */
+check('latest telemetry fix attached, the device word kept beside the state',
+  prof.telemetry?.device_status === 'Idle' && prof.telemetry?.tracker_state === 'quiet',
+  JSON.stringify([prof.telemetry?.device_status, prof.telemetry?.tracker_state]));
 check('documents sorted soonest-expiry first', prof.documents[0]?.doc_type === 'Vehicle Registration Form', prof.documents[0]?.doc_type);
 check('document days-left computed', typeof prof.documents[0]?.days_left === 'number');
 
@@ -261,6 +265,40 @@ check('a movement segment carries the reason for its verdict and what could not 
   JSON.stringify(Object.keys(mv.segments[0] || {})));
 check('parking clusters come from stationary fixes', mv.parked.length === 1 && mv.parked[0].fixes === 3, JSON.stringify(mv.parked));
 
+/* FIXLIST V5: hours were fixes × 5 min. A parked CABMAN car reports about
+   hourly, so a car that stood ~277 h read 21. Eleven hourly fixes at one spot
+   are ten hours; a move away ends the stay (only five minutes of that gap is
+   claimed); a fix at 0,0 (V11, no satellite lock) is not a place. */
+{
+  const P2 = 'L55501';
+  for (let h = 0; h <= 10; h++) {
+    await q(`INSERT INTO telemetry_snapshot (source, fleet_id, plate, captured_at, lat, lng, speed, status)
+             VALUES ('cabman','ecosine',$1,$2::timestamptz,25.2001,55.3001,0,'Active')`,
+      [P2, `2026-08-20T${String(h).padStart(2, '0')}:00:00+04:00`]);
+  }
+  await q(`INSERT INTO telemetry_snapshot (source, fleet_id, plate, captured_at, lat, lng, speed, status)
+           VALUES ('cabman','ecosine',$1,'2026-08-20T13:00:00+04:00',25.3000,55.4000,40,'Engaged'),
+                  ('cabman','ecosine',$1,'2026-08-20T14:00:00+04:00',0,0,0,'Active'),
+                  ('cabman','ecosine',$1,'2026-08-20T15:00:00+04:00',0,0,0,'Active'),
+                  ('cabman','ecosine',$1,'2026-08-20T16:00:00+04:00',0,0,0,'Active')`, [P2]);
+  const pk = (await get(`/api/vehicle/movement?plate=${P2}&${W}`)).body;
+  const spot = (pk.parked || []).find((r) => Math.abs(r.lat - 25.2) < 0.01);
+  check('parked hours come from the gaps between fixes, not fixes × 5 minutes',
+    spot && spot.fixes === 11 && Math.abs(spot.hours - 10.1) < 0.05, JSON.stringify(pk.parked));
+  /* FIXLIST V6: the header took the newest row of ANY source, and the Uber
+     collector writes driver status (ONTRIP) there with no odometer. */
+  await q(`INSERT INTO telemetry_snapshot (source, fleet_id, plate, captured_at, lat, lng, speed, status, odometer)
+           VALUES ('cabman','ecosine',$1,now() - interval '50 minutes',25.2,55.3,0,'Active',98765),
+                  ('uber','ecosine',$1,now() - interval '1 minute',NULL,NULL,NULL,'ONTRIP',NULL)`, [P2]);
+  const pr = (await get(`/api/vehicle/profile?plate=${P2}&${W}`)).body;
+  check('the vehicle header reads the car\'s tracker, not Uber\'s driver status',
+    pr.telemetry && pr.telemetry.source === 'cabman' && pr.telemetry.tracker_state === 'standing'
+      && pr.telemetry.device_status === 'Active' && Number(pr.telemetry.odometer) === 98765 && pr.telemetry.stale === false,
+    JSON.stringify(pr.telemetry && { s: pr.telemetry.source, st: pr.telemetry.tracker_state, d: pr.telemetry.device_status, o: pr.telemetry.odometer, q: pr.telemetry.stale }));
+  check('a fix at 0,0 is not a parking place', !(pk.parked || []).some((r) => Math.abs(r.lat) < 1 && Math.abs(r.lng) < 1),
+    JSON.stringify(pk.parked));
+}
+
 /* ── safety ─────────────────────────────────────────────────────────────── */
 const sf = (await get(`/api/vehicle/safety?plate=${PLATE}&${W}`)).body;
 check('alert types ranked', sf.by_type[0]?.alert_type === 'Overspeed', sf.by_type[0]?.alert_type);
@@ -338,7 +376,8 @@ check('directory lists every known plate',
 const row = dir.find((r) => r.plate === PLATE);
 check('directory carries make and model', row?.make === 'Tesla' && row?.model === 'Model Y');
 check('directory carries the soonest document expiry', row?.soonest_expiry != null);
-check('directory carries last telemetry status', row?.status === 'Idle', row?.status);
+check('directory carries the tracker state and the device word',
+  row?.status === 'quiet' && row?.device_status === 'Idle', JSON.stringify([row?.status, row?.device_status]));
 check('directory sorted by trips', dir[0].trips >= dir[1].trips);
 
 // A plate that only ever appears in a document must still be listed — an asset

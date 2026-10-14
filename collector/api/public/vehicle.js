@@ -62,7 +62,10 @@ function identityCard(p) {
       <div class="idsub">
         ${s.fleet_id ? pill(s.fleet_id, 'plat') : ''}
         ${s.fuel_type ? pill(s.fuel_type, 'plat') : ''}
-        ${t ? pill(t.stale ? 'tracker stale' : (t.status || 'tracked'), t.stale ? 'warn' : 'ok') : pill('no tracker', 'warn')}
+        ${/* The tracker's state in one vocabulary — moving, standing, quiet —
+              never Uber's driver status or a device's own word (FIXLIST V6). */''}${t
+    ? `<span title="${esc(`${(t.source || 'tracker').toUpperCase()} last said ${t.device_status || 'nothing'}`)}">${pill(t.stale ? 'tracker quiet' : (t.tracker_state || 'tracked'), t.stale ? 'warn' : 'ok')}</span>`
+    : pill('no tracker', 'warn')}
         ${soonest ? pill(`${esc(soonest.doc_type)} ${soonest.days_left < 0 ? `expired ${Math.abs(soonest.days_left)}d ago` : `${soonest.days_left}d left`}`, docTone(soonest.days_left)) : ''}
       </div>
       <div class="idfacts">
@@ -804,15 +807,16 @@ async function tabMovement(root, plate) {
     { label: 'Location', key: 'lat', num: true,
       render: (r) => `<span class="plate">${(+r.lat).toFixed(6)}, ${(+r.lng).toFixed(6)}</span>` },
     { label: 'Fixes', key: 'fixes', num: true },
-    { label: 'Approx. hours', key: '_h', num: true,
-      sortValue: (r) => (r.fixes * 5) / 60,
-      render: (r) => fmt((r.fixes * 5) / 60, 1) },
-  ], { compact: true, sortable: true, sortId: 'parked', defaultSort: { key: 'fixes', dir: 'desc' } }));
+    /* Measured from the gap to the next fix, not fixes × 5 min (FIXLIST V5):
+       a parked CABMAN car reports about hourly and read 21 h for ~277. */
+    { label: 'Hours', key: 'hours', num: true, render: (r) => (r.hours == null ? '—' : fmt(r.hours, 1)) },
+  ], { compact: true, sortable: true, sortId: 'parked', defaultSort: { key: 'hours', dir: 'desc' } }));
   park.body.append(el('p', 'cap',
-    'Each fix is a five-minute sample, so the hours column is a floor, not a measure.'
+    'Hours are the time between a fix here and the car\'s next one, counted in full when the next fix is still '
+    + 'standing at the same spot and at most five minutes when it is not — so a gap the car may have spent '
+    + 'elsewhere is never claimed. A car can stand longer than this says, not shorter.'
     + (mv.parked.length > parkShown.length
-      ? ` Showing the ${fmt(parkShown.length)} longest of ${countOf(mv.parked.length, 'cluster')}, `
-        + 'ordered by how many fixes landed there.'
+      ? ` Showing the ${fmt(parkShown.length)} longest of ${countOf(mv.parked.length, 'spot')}.`
       : '')));
 
   seg.body.innerHTML = '';
@@ -1665,7 +1669,7 @@ export async function renderVehicleDirectory(root) {
        fresh. Picking one number for both feeds is a decision about what the
        word should mean, so both tiles now state the rule they used instead. */
     { label: 'Tracked', value: fmt(tracked),
-      sub: `${fmt(staleN)} with no fix in 11 min`,
+      sub: `${fmt(staleN)} quiet — no fix in 30 min (FMS) or 2 h (CABMAN)`,
       tone: staleN === 0 ? 'good' : 'warn' },
     /* Its own tile rather than a link on the one above: a tile whose number
        counts the cars that ARE tracked cannot lead to the ones that are not,
@@ -1847,9 +1851,10 @@ export async function renderVehicleDirectory(root) {
          outline chip: the word carries it, never a wash of colour. */
       render: (r) => {
         if (!r.last_fix) return pill('none', ak ? null : 'warn');
-        const down = /offline|off|dead|inactive|disconnect/i.test(r.status || '');
-        const label = r.stale ? 'stale' : (r.status || 'live');
-        return pill(label, ak ? null : (r.stale || down) ? 'warn' : 'ok')
+        /* status is the tracker's state in one vocabulary (moving / standing /
+           quiet); the device's own word is a tooltip (FIXLIST V6). */
+        const label = r.stale ? 'quiet' : (r.status || 'live');
+        return `<span title="${esc(`${(r.tracker_source || 'tracker').toUpperCase()} last said ${r.device_status || 'nothing'}`)}">${pill(label, ak ? null : r.stale ? 'warn' : 'ok')}</span>`
           + (r.fix_age_min != null ? `<span class="dim" title="minutes since the last fix"> ${fmt(r.fix_age_min)}m</span>` : '');
       } },
     { label: 'Documents', key: 'doc_days_left', num: true,
@@ -1861,9 +1866,13 @@ export async function renderVehicleDirectory(root) {
         : ak ? (r.doc_days_left < 0 ? '<span style="color:var(--sem-neg);white-space:nowrap">expired</span>'
           : r.doc_days_left < 30 ? `<b>${fmt(r.doc_days_left)}d</b>` : `<span class="dim">${fmt(r.doc_days_left)}d</span>`)
         : pill(r.doc_days_left < 0 ? 'expired' : `${r.doc_days_left}d`, docTone(r.doc_days_left))) },
+    /* "never" only when there is no booking on record at all (FIXLIST V4): a
+       car whose last booking falls before this window shows that date. */
     { label: 'Last trip', key: 'last_trip',
-      sortValue: (r) => (r.last_trip ? Date.parse(r.last_trip) : null),
-      render: (r) => (r.last_trip ? dateStr(r.last_trip) : '<span class="ent-off">never</span>') },
+      sortValue: (r) => { const t = r.last_trip || r.last_trip_ever; return t ? Date.parse(t) : null; },
+      render: (r) => (r.last_trip ? dateStr(r.last_trip)
+        : r.last_trip_ever ? `<span class="dim" title="no booking in this window; this is its last booking on record">${dateStr(r.last_trip_ever)}</span>`
+          : '<span class="ent-off" title="no booking on record for this plate">never</span>') },
   ];
   const draw = (list, term) => {
     tblP.body.innerHTML = '';
