@@ -348,7 +348,7 @@ function logPlan(text, params, ms) {
    quote. The real fix for this class of bug is test/route_smoke.test.mjs,
    which executes every route rather than grepping for it. */
 import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, peopleCountStored, personKeyStored, NAMED, JOIN_TRIP, personFold, custodyRefs, custodyNames } from './custody_sql.js';
-import { TELEMETRY_PLATES, LATEST_FIX } from './telemetry_sql.js';
+import { TELEMETRY_PLATES, LATEST_FIX, REAL_FIX } from './telemetry_sql.js';
 import { spanGaps } from './coverage_gaps.js';
 /* The one place the alerts-per-distance rule lives. Every page that prints a
    safety rate reads it from here, so the fleet headline and the per-vehicle
@@ -1986,12 +1986,14 @@ app.get('/api/live', wrap(async (_, res) => res.json(await q(
 
 // Breadcrumb trail. Only GPS-bearing sources: Uber writes driver-status rows into
 // the same table with no coordinates, and those would otherwise punch holes in a path.
+// And no 0,0 "no satellite lock" fixes (FIXLIST V11): one of those in a trail
+// drew a line to the Gulf of Guinea and back.
 app.get('/api/track', wrap(async (req, res) => {
   if (!req.query.plate) return res.status(400).json({ error: 'plate required' });
   res.json(await q(
     `SELECT captured_at, lat, lng, speed, status, seat_occupied, ignition, source
      FROM telemetry_snapshot
-     WHERE plate=$1 AND lat IS NOT NULL AND lng IS NOT NULL
+     WHERE plate=$1 AND ${REAL_FIX()}
        AND ${dubaiSpanSql('captured_at', '$2', '$3')}
      ORDER BY captured_at`,
     [req.query.plate.toUpperCase().replace(/[\s-]+/g, ''), ...win(req)]));
@@ -2020,7 +2022,10 @@ app.get('/api/map/days', wrap(async (req, res) => {
               round(max(t.speed)::numeric,0) max_speed,
               sum((t.seat_occupied)::int)::int occupied_fixes
        FROM telemetry_snapshot t
-       WHERE t.lat IS NOT NULL
+       /* A position, not a 0,0 "no satellite lock" (FIXLIST V11,
+          api/telemetry_sql.js REAL_FIX): a day of nothing but 0,0 fixes was
+          offered as a replayable day that drew the car in the Gulf of Guinea. */
+       WHERE ${REAL_FIX('t.')}
          AND ($1::text IS NULL OR t.plate = $1)
          AND ${dubaiSpanSql('t.captured_at', '$2', '$3')}
        GROUP BY 1,2,3
@@ -2042,7 +2047,7 @@ app.get('/api/map/days', wrap(async (req, res) => {
   const [t] = await q(
     `SELECT count(*)::int n FROM (
        SELECT 1 FROM telemetry_snapshot t
-        WHERE t.lat IS NOT NULL AND ($1::text IS NULL OR t.plate = $1)
+        WHERE ${REAL_FIX('t.')} AND ($1::text IS NULL OR t.plate = $1)
           AND ${dubaiSpanSql('t.captured_at', '$2', '$3')}
         GROUP BY (t.captured_at AT TIME ZONE 'Asia/Dubai')::date, t.plate
        HAVING count(*) >= 2) g`, [plate, ...win(req)]);

@@ -2262,7 +2262,20 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
   fleet_id: i % 3 ? 'ecosine' : 'egari',
   make: vehSpec[i][0], model: vehSpec[i][1], year: vehSpec[i][2],
   last_fix: i === 7 ? new Date(Date.now() - 38 * 36e5).toISOString() : new Date(Date.now() - i * 6e4).toISOString(),
-  status: i % 3 === 0 ? 'Engaged' : 'Active', speed: i % 3 ? Math.round(rnd(0, 70)) : 0, stale: i === 7,
+  /* The tracker's state in the server's one vocabulary (FIXLIST V6) — moving,
+     standing, quiet — with the device's own word beside it and which tracker
+     said it. Derived from the same single rnd() draw as before, so the pinned
+     random stream every frozen page reads is not moved. */
+  ...((sp) => ({ speed: sp, status: i === 7 ? 'quiet' : sp > 3 ? 'moving' : 'standing',
+    device_status: i % 3 === 0 ? 'Engaged' : 'Active', tracker_source: i % 3 ? 'cabman' : 'fms' }))(
+    i % 3 ? Math.round(rnd(0, 70)) : 0),
+  stale: i === 7,
+  /* The last booking EVER (FIXLIST V4): the idle car last earned 41 days ago,
+     outside any window the page asks for. CABMAN movement days (V3): the idle
+     car moved on 3 of them with no booking. */
+  last_trip_ever: i === 6 ? new Date(Date.now() - 41 * 864e5).toISOString()
+    : new Date(Date.now() - i * 72e5).toISOString(),
+  cab_days_moved: i === 6 ? 3 : 0,
   soonest_expiry: new Date(Date.now() + (i === 1 ? -12 : 5 + i * 14) * 864e5).toISOString(),
   doc_days_left: i === 1 ? -12 : 5 + i * 14,
   /* The safety rate comes from the endpoint now, over the days the alert feed
@@ -2440,10 +2453,14 @@ app.get('/api/vehicles/handover', (_, r) => {
       handover_days: +(handover_h / 24).toFixed(1),
       median_h: 3.6, quick_h: 1.4, p90_h: 9.8,
       parked: 3, parked_days: 7.4,
+      /* Cars still off the road at the window's end (FIXLIST V12). */
+      still_out: 2, still_out_days: 52.6,
       recoverable_h: +(handover_h - 1.4 * handovers).toFixed(1),
       timed_rows: 412, custody_rows: 460,
     },
     plates: rows,
+    still_out: [{ plate: plates[6], since: new Date(Date.now() - 41 * 864e5).toISOString(), days: 41 },
+      { plate: plates[7], since: new Date(Date.now() - 11.6 * 864e5).toISOString(), days: 11.6 }],
   });
 });
 
@@ -2559,10 +2576,20 @@ app.get('/api/vehicle/profile', (req, r) => {
       platform: 'uber', vehicle_ext_id: 'veh-' + i, fleet_id: i % 3 ? 'ecosine' : 'egari' },
     span: { first_trip: dayISO(DAYS), last_trip: new Date().toISOString(), trips: 470 - i * 44,
       days_worked: 27 - i, drivers: 1 + (i % 3) },
+    /* The server's shape since FIXLIST V6: the device's word is device_status,
+       and tracker_state is the one vocabulary every page prints. */
     telemetry: { last_fix: new Date(Date.now() - i * 6e4).toISOString(), polled_at: new Date().toISOString(),
       lat: 25.2 + i * 0.01, lng: 55.27 - i * 0.01, speed: i % 3 ? 41 : 0,
-      status: i % 3 === 0 ? 'Engaged' : 'Active', seat_occupied: i % 3 === 0,
+      device_status: i % 3 === 0 ? 'Engaged' : 'Active', seat_occupied: i % 3 === 0,
+      tracker_state: i === 7 ? 'quiet' : i % 3 ? 'moving' : 'standing',
       odometer: 68000 + i * 2100, fuel_level: 74 - i * 3, ignition: true, source: 'cabman', stale: i === 7 },
+    /* Where it was last seen, named, and its last booking ever (FIXLIST V9,
+       V10). Car 5 stands where the gazetteer has no name; car 6 last earned
+       41 days ago. Deterministic, no rnd(). */
+    last_position: { at: new Date(Date.now() - i * 6e4).toISOString(), lat: 25.2 + i * 0.01,
+      lng: 55.27 - i * 0.01, source: 'cabman',
+      place: i === 5 ? null : { area: ['Deira', 'Al Barsha 1', 'Dubai Marina', 'Business Bay'][i % 4], votes: 120 + i, seen: 200 + i } },
+    last_booking_ever: new Date(Date.now() - (i === 6 ? 41 * 864e5 : i * 72e5)).toISOString(),
     documents: [
       { platform: 'uber', doc_type: 'Vehicle Registration Form', status: 'ACTIVE',
         expires_at: new Date(Date.now() + (i === 1 ? -12 : 5 + i * 14) * 864e5).toISOString(),
@@ -2708,8 +2735,12 @@ app.get('/api/vehicle/movement', (req, r) => {
         by_source: { cabman: 1, fms_live: 0, fms_trip: 0 } }],
     dedupe_rule: MOCK_DEDUPE_RULE,
     days: Array.from({ length: 12 }, (_, n) => ({ day: dayISO(n), fixes: 220 - n * 6 })),
-    parked: [{ lat: 25.253, lng: 55.365, fixes: 142 }, { lat: 25.078, lng: 55.139, fixes: 71 },
-      { lat: 25.196, lng: 55.276, fixes: 44 }, { lat: 25.118, lng: 55.200, fixes: 21 }],
+    /* Hours measured from the gap to the next fix (FIXLIST V5) and the
+       gazetteer's area (V10); the last spot has no name. */
+    parked: [{ lat: 25.253, lng: 55.365, fixes: 142, hours: 277.4, place: { area: 'Al Qusais', votes: 88, seen: 120 } },
+      { lat: 25.078, lng: 55.139, fixes: 71, hours: 41.5, place: { area: 'Dubai Marina', votes: 300, seen: 340 } },
+      { lat: 25.196, lng: 55.276, fixes: 44, hours: 9.2, place: { area: 'Business Bay', votes: 210, seen: 260 } },
+      { lat: 25.118, lng: 55.200, fixes: 21, hours: 1.4, place: null }],
   });
 });
 

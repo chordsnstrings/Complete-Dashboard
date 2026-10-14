@@ -1042,14 +1042,30 @@ async function fleet(deck, ctx) {
   deck.append(list);
   skeleton(list, 5);
 
-  const [carsRaw, live] = await Promise.all([
+  /* THE CARS THAT DID NOT WORK, TOO (FIXLIST V9, 2026-10-14).
+     ────────────────────────────────────────────────────────────────�
+     This tab read /api/vehicles alone, which lists a plate only when it took a
+     booking in the window — so a car laid up for a month was not on the phone
+     at all (32 of the 139 cars over 30 days, measured on production on
+     2026-10-14). They are listed under their own head from
+     /api/vehicles/directory, the cars
+     only (a VIN: CABMAN's tracker-only plates are not cars), longest without
+     a booking first, each with what its tracker says and the area it was last
+     in. A directory that cannot be fetched says so; it never reads as "every
+     car worked". */
+  const [carsRaw, live, dirRaw] = await Promise.all([
     q('/api/vehicles').catch(() => []),
     api('/api/live').catch(() => []),
+    q('/api/vehicles/directory').catch(() => null),
   ]);
   if (!ctx.alive()) return;
   const cars = unwrap(carsRaw);
+  const fleetCars = dirRaw ? unwrap(dirRaw).rows.filter((r) => r.vin) : null;
+  const idle = fleetCars ? fleetCars.filter((r) => !(n(r.trips) > 0)) : null;
   list.innerHTML = '';
-  if (!cars.rows.length) {
+  const idleHost = el('div', 'fleet-idle');
+  deck.append(idleHost);
+  if (!cars.rows.length && !idle?.length) {
     empty(list, 'No vehicle worked in this window', WIDEN());
     return;
   }
@@ -1066,6 +1082,8 @@ async function fleet(deck, ctx) {
   let sort = 'trips', term = '';
   const draw = () => {
     list.innerHTML = '';
+    drawIdle();
+    if (!cars.rows.length) { empty(list, 'No vehicle worked in this window', WIDEN()); return; }
     const key = (c) => (sort === 'trips' ? (c.trips ?? c.bookings) : c[sort]);
     const shown = cars.rows
       .filter((c) => !term || String(c.plate).toLowerCase().includes(term.toLowerCase()))
@@ -1085,6 +1103,39 @@ async function fleet(deck, ctx) {
       });
     }));
     if (!term) cut(list, cars, 'vehicles');
+  };
+  /* Longest without a booking first; a car that never took one heads the list. */
+  const since = (r) => (r.last_trip_ever ? Date.parse(r.last_trip_ever) : -Infinity);
+  const drawIdle = () => {
+    idleHost.innerHTML = '';
+    if (!fleetCars) {
+      idleHost.append(el('p', 'm-cap', 'The cars that took no booking could not be fetched, so this tab lists only the ones that did.'));
+      return;
+    }
+    const shown = idle
+      .filter((c) => !term || String(c.plate).toLowerCase().includes(term.toLowerCase()))
+      .sort((a, b) => since(a) - since(b));
+    const title = 'Cars that took no booking';
+    const note = `${fmt(idle.length)} of ${fmt(fleetCars.length)} cars \u00b7 ${WINDOW_NOTE()}`;
+    let host = idleHost;
+    if (phoneContract()) idleHost.append(secHead(null, title, note));
+    else { const c = card(title, note); idleHost.append(c.card); host = c.body; }
+    if (!idle.length) { host.append(el('p', 'm-cap', 'Every car took a booking in this window.')); return; }
+    if (!shown.length) { host.append(el('p', 'm-cap', 'No plate matches that.')); return; }
+    rows(host, shown.map((c) => {
+      const p = pos.get(c.plate);
+      const tracker = !c.last_fix ? 'no tracker' : c.stale ? 'tracker quiet' : (c.status || 'tracked');
+      const area = p?.place?.area;
+      const moved = n(c.days_moved) > 0 ? `moved on ${fmt(c.days_moved)} ${c.days_moved === 1 ? 'day' : 'days'}` : null;
+      const days = c.last_trip_ever ? Math.max(0, Math.floor((Date.now() - Date.parse(c.last_trip_ever)) / 864e5)) : null;
+      return row({
+        title: c.plate,
+        sub: [tracker, area, moved].filter(Boolean).join(' \u00b7 '),
+        value: days == null ? '\u2014' : fmt(days),
+        note: days == null ? 'never booked' : `days since ${dayStr(c.last_trip_ever)}`,
+        to: href('vehicle', c.plate),
+      });
+    }));
   };
   search(bar, 'Search plates', (v) => { term = v; draw(); });
   seg(bar, [{ id: 'trips', label: 'Bookings' }, { id: 'km', label: 'Distance' },
@@ -2122,6 +2173,32 @@ async function vehicle(deck, ctx) {
     { label: 'Drivers', value: fmt(k.attributed_drivers ?? unwrap(drivers).total),
       sub: 'held this car' },
   ], false, { hero: AK });
+
+  /* WHERE THE CAR IS AND HOW LONG SINCE IT EARNED (FIXLIST V9, V10). The
+     phone's car page had the window's figures and nothing about the car now:
+     not whether its tracker is reporting, not where it stands, not how long
+     since it last took a booking — the three things asked of a car that is
+     not working. From /api/vehicle/profile: the tracker's state in the one
+     vocabulary the desktop uses (moving, standing, quiet), the area of the
+     newest fix that carried a real position, and the last booking on any
+     channel, unwindowed. Each absent one says why. */
+  {
+    const t = profile.telemetry, w = profile.last_position, b = profile.last_booking_ever;
+    const ago = (iso) => { const d = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 864e5));
+      return d === 0 ? 'today' : d === 1 ? 'yesterday' : `${fmt(d)} days ago`; };
+    const at = (iso) => `${dayStr(iso)} ${timeStr(iso)}`;
+    rows(deck, [
+      t ? { title: 'Tracker', value: t.stale ? 'quiet' : (t.tracker_state || 'reporting'),
+        sub: `${String(t.source || 'tracker').toUpperCase()} \u00b7 last fix ${at(t.last_fix)}`,
+        tone: t.stale ? 'warn' : null }
+        : { title: 'Tracker', value: 'none', sub: 'no CABMAN or FMS tracker has ever reported this car', tone: 'warn' },
+      w ? { title: 'Last seen', value: w.place?.area || 'unnamed area',
+        sub: `${at(w.at)} \u00b7 ${ago(w.at)}${w.place?.area ? '' : ' \u00b7 no trip has named this spot'}` }
+        : { title: 'Last seen', value: '\u2014', sub: 'no fix from its tracker has ever carried a position' },
+      b ? { title: 'Last booking', value: ago(b), sub: dayStr(b) }
+        : { title: 'Last booking', value: '\u2014', sub: 'no channel has ever filed a booking in this car' },
+    ]);
+  }
 
   /* TODAY IS NOT A DAY YET, and this chart drew it as one.
      ───────────────────────────────────────────────────────────────────────

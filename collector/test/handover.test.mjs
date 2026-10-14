@@ -73,6 +73,12 @@ await trip('H6', 'd-jay', 'Jay Omar', `${D}T12:00:00+04:00`, { fleet: 'egari' })
 await trip('H7', 'd-kim', 'Kim Lee', `${D}T08:00:00+04:00`, { end: null });
 await trip('H7', 'd-leo', 'Leo Diaz', `${D}T12:00:00+04:00`);
 
+/* H8 — worked to the last day of the window, its last day on another
+   channel: on Uber on the 25th, on Bolt on the 31st, one person. Not out of
+   service at the window's end, under any chip (FIXLIST V12). */
+await trip('H8', 'd-mo', 'Mo Saleh', '2026-08-25T10:00:00+04:00');
+await trip('H8', 'd-mo', 'Mo Saleh', '2026-08-31T09:00:00+04:00', { platform: 'bolt' });
+
 await rebuildCustody({ from: '2026-08-01', to: '2026-08-31', db });
 
 /* ── the fold itself ─────────────────────────────────────────────────────── */
@@ -140,11 +146,35 @@ check('its gap falls back to the last request', byPlate.get('H7')?.idle_h === 4,
 check('the response reports how many rows were assumed',
   t.timed_rows < t.custody_rows && t.custody_rows > 0, JSON.stringify([t.timed_rows, t.custody_rows]));
 
+/* ── still out at the window's end (FIXLIST V12) ────────────────────────────
+   The parked figure counts a gap only once the next driver takes the car, so
+   a car that went off the road and had not come back was in no figure at all.
+   H3 last finished at 08:30 on the 23rd; the window ends at midnight going
+   into 1 September, Dubai: 207.5 hours, 8.6 car-days, still running. */
+{
+  const out = new Map((r.body.still_out || []).map((x) => [x.plate, x]));
+  check('a car off the road at the window\u2019s end is counted as still out',
+    out.get('H3')?.days === 8.6, JSON.stringify(out.get('H3')));
+  check('…from the end of its last stint', out.get('H3') && +new Date(out.get('H3').since) === +new Date('2026-08-23T08:30:00+04:00'),
+    JSON.stringify(out.get('H3')));
+  check('a car that worked on the window\u2019s last day is not still out', !out.has('H8'), JSON.stringify([...out.keys()]));
+  check('the total is the cars listed, and its days their sum',
+    t.still_out === out.size && t.still_out === 7
+      && Math.abs(t.still_out_days - [...out.values()].reduce((a, x) => a + x.days, 0)) < 0.2,
+    JSON.stringify([t.still_out, t.still_out_days, out.size]));
+  check('it is kept apart from the gaps that ended', t.parked === 1, JSON.stringify(t));
+  const ubOut = new Set((ub.still_out || []).map((x) => x.plate));
+  check('under the Uber chip, a car that carried on on Bolt is not "still out"', !ubOut.has('H8'), JSON.stringify([...ubOut]));
+  const egOut = (eg.still_out || []).map((x) => x.plate);
+  check('the fleet chip is honoured', egOut.length === 1 && egOut[0] === 'H6' && eg.totals.still_out === 1, JSON.stringify(egOut));
+}
+
 /* A window with nothing in it must answer with zeros rather than nulls the
    page would print as "NaN h". */
 const empty = (await get('/api/vehicles/handover?from=2025-01-01&to=2025-01-31')).body;
 check('an empty window is zeros, not nulls',
-  empty.totals.handovers === 0 && empty.totals.handover_h === 0 && empty.plates.length === 0,
+  empty.totals.handovers === 0 && empty.totals.handover_h === 0 && empty.plates.length === 0
+    && empty.totals.still_out === 0 && empty.totals.still_out_days === 0,
   JSON.stringify(empty.totals));
 
 server.close();

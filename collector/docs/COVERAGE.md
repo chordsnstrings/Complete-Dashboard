@@ -4914,6 +4914,36 @@ untouched, and nothing projected is ever added into `accounted`.
   incomplete. A file that passes alone and fails in the suite is a race to
   measure, never a flake to re-run.
 
+* **A SYNTHETIC PLATE WITH A DASH 404s EVERY VEHICLE ROUTE.**
+  `normPlate` (api/vehicle_routes.js) and /api/where, /api/track strip
+  spaces and dashes from `?plate=`, so a fixture plate `P-CAR` is asked for as
+  `PCAR` and is "vehicle not found" — and a check written as "no 0,0 fix in the
+  trail" then passes on an empty answer, proving nothing (2026-10-14,
+  test/vehicle_place.test.mjs, caught only by the revert run). Insight tests
+  that call `computeInsights` directly are unaffected; anything through a
+  route must use a dash-free plate.
+
+* **0,0 IS "NO SATELLITE LOCK", NOT A POSITION, ON EVERY READ — use
+  `REAL_FIX` (api/telemetry_sql.js).** `lat IS NOT NULL` is not enough:
+  trackers file 0,0 without a lock, and every route that said only "not
+  null" drew the car in the Gulf of Guinea (L68713's last position on
+  record, 2026-10-14). /api/where (three reads), /api/where/fleet,
+  /api/map/days, /api/track, the parked spots and the vehicle profile's
+  `last_position` now share the one predicate. A new read of
+  `telemetry_snapshot` positions uses it or says why not.
+
+* **THE PHONE RECORDING ANSWERS ONLY WHAT IT RECORDED, AND A NEW FETCH
+  FAILS TWO CHECKS AT ONCE.** test/phone_arkiv.test.mjs asserts that every
+  call at 390 px was answered from test/fixtures/phone_api.json.gz, and
+  test/phone_classic.test.mjs compares the old phone's DOM byte for byte. A
+  screen that starts asking for a new endpoint therefore needs that ONE answer
+  added (taken from mockapi.mjs with the Node clock frozen at the
+  recording's `at`, as bin/phone-fixture.mjs would) and, if the old skin
+  draws it, the classic oracle re-taken — after showing which screens moved
+  and that each change is the intended one. Re-recording the whole file
+  changes every answer (the mock is random) and is not the fix. Done this way
+  for /api/vehicles/directory on 2026-10-14 (FIX-STATUS VF).
+
 ## The exact bank wire EXISTS — `REPORT_TYPE_PAYMENTS_ORGANIZATION`, probed 2026-09-16
 
 The product has never held the amount Uber actually sent to the bank. `bank_payout`

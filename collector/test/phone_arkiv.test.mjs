@@ -730,10 +730,43 @@ console.log('\n4.4 · Fleet: the list under its own head, the live state on ever
     o[0] === 'div' && o[1] === 'head:Vehicles that worked' && o[2] === 'div', o.join(' → '));
   check(`…naming the window’s vehicles (${f0(total)}, /api/vehicles’ own count)`,
     new RegExp(`^Vehicles that worked ${f0(total)} vehicles · This month$`, 'i').test(h || ''), h);
-  const subs = await p.page.evaluate(() => [...document.querySelectorAll('.m-deck .m-row .k span')].map((s) => s.textContent));
+  // The worked list only — the cars that took no booking have their own section below.
+  const subs = await p.page.evaluate(() => [...document.querySelectorAll('.m-deck .m-row .k span')]
+    .filter((s) => !s.closest('.fleet-idle')).map((s) => s.textContent));
   check('every row still says where the car is now (moving, stopped, stale fix, not reporting)',
     subs.length > 0 && subs.every((s) => /^(moving \d+ km\/h|stopped|stale fix|not reporting)/.test(s)), subs.slice(0, 4).join(' | '));
+
+  /* FIXLIST V9: the cars that took NO booking, which this tab never listed —
+     from /api/vehicles/directory, the cars only (a VIN), longest idle first. */
+  const dir = ans('/api/vehicles/directory?period=month&grain=auto');
+  const cars = dir.filter((r) => r.vin);
+  const idle = cars.filter((r) => !(r.trips > 0));
+  const at = Date.parse(fixture.at);
+  const idleView = await p.page.evaluate(() => {
+    const host = document.querySelector('.m-deck .fleet-idle');
+    return { head: host?.querySelector('.sechd')?.innerText.replace(/\s+/g, ' '),
+      rows: [...(host?.querySelectorAll('.m-row') || [])].map((r) => ({ plate: r.querySelector('.k b')?.textContent,
+        sub: r.querySelector('.k span')?.textContent, v: r.querySelector('.v b')?.textContent, href: r.getAttribute('href') })) };
+  });
+  check(`the cars that took no booking have their own head: ${idle.length} of ${cars.length} cars (the VINs), the window named`,
+    idle.length > 0 && new RegExp(`^Cars that took no booking ${idle.length} of ${cars.length} cars · This month$`, 'i').test(idleView.head || ''), idleView.head);
+  const first = idle[0];
+  const days = Math.floor((at - Date.parse(first.last_trip_ever)) / 864e5);
+  const r0 = idleView.rows[0] || {};
+  check(`…each with the days since its last booking ever (${first.plate}: ${days}), linked to the car`,
+    r0.plate === first.plate && r0.v === String(days) && /#vehicle\//.test(r0.href || ''), JSON.stringify(r0));
+  check('…and what its tracker says, and the days it moved without a booking',
+    new RegExp(`^${first.status}`).test(r0.sub || '') && (first.days_moved > 0 ? new RegExp(`moved on ${first.days_moved} days`).test(r0.sub) : true), r0.sub);
+  check('a tracker-only plate with no VIN is not listed as a car', !idleView.rows.some((r) => dir.find((d) => d.plate === r.plate && !d.vin)));
   await p.close();
+  const lostDir = { ...fixture, answers: { ...fixture.answers } };
+  delete lostDir.answers['/api/vehicles/directory?period=month&grain=auto'];
+  const ld = await phonePage(browser, { skin: 'arkiv', fixture: lostDir });
+  await ld.open('fleet');
+  const said = await ld.page.evaluate(() => document.querySelector('.m-deck .fleet-idle')?.textContent);
+  check('a directory that cannot be fetched says so — never reads as "every car worked"',
+    /The cars that took no booking could not be fetched/.test(said || ''), said);
+  await ld.close();
 }
 
 console.log('\n4.5 · More: numbered sections, the masthead on This app, and a footer that agrees with the bar');
@@ -1492,6 +1525,38 @@ console.log('\n4.19 · Vehicle: 00 over the plate, Bookings the hero, a fare ave
   check('…every refused read was one of the three, and nothing threw',
     [...l.misses].every((x) => [VK, VS, VD].includes(x)) && !l.errors.length, [...l.misses].join(' '));
   await l.close();
+
+  /* FIXLIST V9, V10: the car NOW — its tracker's state, where it was last
+     seen in words, and how long since its last booking ever. */
+  const VP = '/api/vehicle/profile?period=month&plate=L45235&grain=auto';
+  const prof = ans(VP);
+  const atMs = Date.parse(fixture.at);
+  const nowRows = (page) => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.m-deck .m-row')]
+    .filter((r) => ['Tracker', 'Last seen', 'Last booking'].includes(r.querySelector('.k b')?.textContent))
+    .map((r) => [r.querySelector('.k b').textContent, { v: r.querySelector('.v b')?.textContent, sub: r.querySelector('.k span')?.textContent }])));
+  const withNow = { ...prof,
+    telemetry: { ...prof.telemetry, stale: false, tracker_state: 'standing' },
+    last_position: { at: new Date(atMs - 9 * 864e5).toISOString(), lat: 25.2, lng: 55.3, source: 'cabman',
+      place: { area: 'Test Quarter', votes: 40, seen: 40 } },
+    last_booking_ever: new Date(atMs - 41 * 864e5).toISOString() };
+  const nw = await phonePage(browser, { skin: 'arkiv', fixture: withAnswer(VP, withNow) });
+  await nw.open('vehicle/L45235');
+  const got = await nowRows(nw.page);
+  check('the car page says its tracker\u2019s state in the desktop\u2019s word', got.Tracker?.v === 'standing', JSON.stringify(got.Tracker));
+  check('…where it was last seen, named, and how long ago', got['Last seen']?.v === 'Test Quarter' && /9 days ago/.test(got['Last seen']?.sub || ''),
+    JSON.stringify(got['Last seen']));
+  check('…and how long since its last booking on any channel', got['Last booking']?.v === '41 days ago', JSON.stringify(got['Last booking']));
+  const oo = (await outline(nw.page)).filter((x) => x !== 'ak-applies');
+  check('…under the tiles, which still follow the statement', JSON.stringify(oo.slice(0, 3)) === JSON.stringify(['head:At a glance', 'statement', 'glance']), oo.join(' → '));
+  await nw.close();
+  const none = { ...prof, last_position: null, last_booking_ever: null };
+  const nn = await phonePage(browser, { skin: 'arkiv', fixture: withAnswer(VP, none) });
+  await nn.open('vehicle/L45235');
+  const gn = await nowRows(nn.page);
+  check('a car with no position and no booking ever says why, never a blank',
+    gn['Last seen']?.v === '\u2014' && /has ever carried a position/.test(gn['Last seen']?.sub || '')
+      && gn['Last booking']?.v === '\u2014' && /no channel has ever filed a booking/.test(gn['Last booking']?.sub || ''), JSON.stringify(gn));
+  await nn.close();
 }
 
 console.log('\n4.20 · The fallback: a desktop tab in the phone’s container, and the way on from a view built for a bigger screen');

@@ -13,7 +13,8 @@
    "is this asset earning, and is it legal to be on the road". */
 
 import { peopleCount, personKey, custodyNames } from './custody_sql.js';
-import { CABMAN_MOVE_DAYS, PARKED_SPOTS_SQL, TRACKER_SOURCES_SQL, QUIET_SQL, TRACKER_STATE_SQL } from './telemetry_sql.js';
+import { CABMAN_MOVE_DAYS, PARKED_SPOTS_SQL, TRACKER_SOURCES_SQL, QUIET_SQL, TRACKER_STATE_SQL, REAL_FIX } from './telemetry_sql.js';
+import { placeAt } from './place_sql.js';
 import { winDays, dubaiSpanSql } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
@@ -723,7 +724,29 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          WHERE prev_person IS NOT NULL AND prev_person <> person AND s > prev_end
       )`;
 
-    const [tot, plates, cover] = await Promise.all([
+    /* STILL OUT AT THE END OF THE WINDOW (FIXLIST V12, 2026-10-14).
+       ────────────────────────────────────────────────────────────────�
+       "Car-days out of service between drivers" counted a gap only once the
+       next driver took the car, so a car that went off the road inside the
+       window and had not come back was not in the figure at all — the longest
+       absences, the ones still running, were exactly the ones missing. Each
+       car's last stint in the window is measured to the window's end (or to
+       now, inside today), and a day or more is counted apart as an OPEN gap:
+       "still out, N car-days so far", never folded into the closed figure,
+       which stays a measurement of absences that ended.
+
+       Across every channel, on purpose: under a platform chip a car that moved
+       from Uber to Bolt is not out of service, and the chip must not say it is.
+       The fleet chip is honoured. A car with no stint in the window at all is
+       the directory's idle question and is not repeated here. */
+    const OPEN = `
+      SELECT plate, max(coalesce(last_end_at, last_trip_at)) AS last_end
+        FROM vehicle_driver_day
+       WHERE day BETWEEN $1::date AND $2::date
+         AND first_trip_at IS NOT NULL
+         AND ($3::text IS NULL OR fleet_id = $3)
+       GROUP BY plate`;
+    const [tot, plates, cover, open] = await Promise.all([
       q(`${GAPS}
          SELECT count(*) FILTER (WHERE h < ${HANDOVER_MAX_H})::int              AS handovers,
                 count(DISTINCT plate) FILTER (WHERE h < ${HANDOVER_MAX_H})::int AS plates,
@@ -763,6 +786,14 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
             AND first_trip_at IS NOT NULL
             AND ($3::text IS NULL OR platform = $3)
             AND ($4::text IS NULL OR fleet_id = $4)`, p),
+      q(`WITH o AS (${OPEN})
+         SELECT plate, last_end,
+                extract(epoch FROM (least(now(), (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai'))
+                                     - last_end)) / 3600 AS h
+           FROM o
+          WHERE extract(epoch FROM (least(now(), (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai'))
+                                     - last_end)) / 3600 >= ${HANDOVER_MAX_H}
+          ORDER BY h DESC, plate`, [from, to, req.query.fleet || null]),
     ]);
 
     const t = tot[0] || {};
@@ -784,6 +815,9 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
         p90_h: num(t.p90_h),
         parked: num(t.parked) || 0,
         parked_days: num(t.parked_days) || 0,
+        /* Open gaps: off the road at the window's end, measured so far (V12). */
+        still_out: open.length,
+        still_out_days: Math.round(open.reduce((a, r) => a + Number(r.h), 0) / 24 * 10) / 10,
         /* The fleet's own benchmark, not an invented target: what it would
            recover if every change-over went as fast as its own quickest
            quarter already do. */
@@ -804,6 +838,9 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
         driver_refs: [{ name: r.worst_from, id: r.worst_from_id },
                       { name: r.worst_to, id: r.worst_to_id }].filter((d) => d.name),
       })),
+      /* Which cars, longest out first, so the sentence can name them. */
+      still_out: open.slice(0, 50).map((r) => ({
+        plate: r.plate, since: r.last_end, days: Math.round(Number(r.h) / 24 * 10) / 10 })),
     });
   }));
   /* ── what this asset is ────────────────────────────────────────────────── */
@@ -869,13 +906,34 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
                 ORDER BY o.captured_at DESC LIMIT 1) odometer
        FROM telemetry_snapshot WHERE plate = $1 AND source IN ${TRACKER_SOURCES_SQL}
        ORDER BY captured_at DESC LIMIT 1`, [plate]);
+    /* WHERE THE CAR IS, IN WORDS, AND HOW LONG IT HAS STOOD (FIXLIST V9, V10).
+       ────────────────────────────────────────────────────────────────�
+       The newest fix can be a 0,0 "no satellite lock" or carry no position at
+       all, so "where" is the newest fix that carried a real one (REAL_FIX),
+       named by the gazetteer (place.area, api/place_sql.js) — the area the
+       server already computed for /api/where and /api/live and no vehicle page
+       ever printed. Its time rides with it: a position from nine days ago is
+       not where the car is, and the page has to be able to say so.
+
+       last_booking_ever is unwindowed, beside span.last_trip which is not:
+       "no booking for 41 days" is the question the phone's vehicle page has to
+       answer, and a 30-day window cannot see past its own start. Same rule as
+       the directory's last_trip_ever (is_booking = platform <> 'fms'). */
+    const [where] = await q(
+      `SELECT f.captured_at AS at, f.lat, f.lng, f.source, ${placeAt('f.lat', 'f.lng')} AS place
+         FROM telemetry_snapshot f
+        WHERE f.plate = $1 AND f.source IN ${TRACKER_SOURCES_SQL} AND ${REAL_FIX('f.')}
+        ORDER BY f.captured_at DESC LIMIT 1`, [plate]);
+    const [ever] = await q(
+      `SELECT max(requested_at) AS last_booking_ever FROM trip WHERE plate = $1 AND platform <> 'fms'`, [plate]);
     const documents = await q(
       `SELECT platform, doc_type, status, expires_at,
               (expires_at::date - now()::date) days_left
        FROM vehicle_document WHERE plate = $1 ORDER BY expires_at ASC NULLS LAST`, [plate]);
     const [current] = await q(
       `SELECT driver_name, driver_ext_id, as_of FROM vehicle_current_driver WHERE plate = $1`, [plate]);
-    res.json({ plate, spec, span, telemetry: tel || null, documents, current_driver: current || null });
+    res.json({ plate, spec, span, telemetry: tel || null, last_position: where || null,
+      last_booking_ever: ever?.last_booking_ever || null, documents, current_driver: current || null });
   }));
 
   /* ── headline numbers ─────────────────────────────────────────────────── */
@@ -1348,7 +1406,15 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
     // Where it spends its stationary time — depot, driver's home, or a rank.
     /* Hours measured from the gaps between fixes, not fixes × 5 min (FIXLIST
        V5) — api/telemetry_sql.js PARKED_SPOTS_SQL says how. */
-    const parked = await q(PARKED_SPOTS_SQL('$3', TS('captured_at')), p);
+    /* Each spot named by the gazetteer (FIXLIST V10): "25.204811, 55.270783"
+       told the reader nothing a place name does not tell them better, and the
+       area was already being computed for /api/where and /api/live. The
+       coordinates stay on the row for the map link and for a cell the
+       gazetteer has not named. */
+    const parked = await q(
+      `SELECT s.*, ${placeAt('s.lat', 's.lng')} AS place
+         FROM (${PARKED_SPOTS_SQL('$3', TS('captured_at'))}) s
+        ORDER BY s.hours DESC, s.fixes DESC`, p);
     res.json({ segments, by_verdict: byVerdict, days, parked, dedupe_rule: OCC_DEDUPE_RULE });
   }));
 

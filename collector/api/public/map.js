@@ -6,7 +6,7 @@
    We draw straight lines between consecutive fixes and break the line wherever the
    gap is long enough that a straight line would be a lie (handled server-side in
    /api/map/journey), so the map never invents a road the car may not have taken. */
-import { timeStr, contract } from './ui.js';
+import { timeStr, contract, esc } from './ui.js';
 import { markForm } from './charts.js';
 import { channelKey } from './tokens.js';
 
@@ -218,6 +218,9 @@ export function renderLive(map, rows, onPick) {
     }).addTo(layer);
     m.bindTooltip(
       `<b>${r.plate}</b>${r.current_driver ? '<br>' + r.current_driver : ''}` +
+      /* The area, in the fleet's own words (FIXLIST V10) — sent on every
+         live row since 2026-10-13 and never shown on the map. */
+      `${r.place?.area ? `<br>${esc(r.place.area)}` : ''}` +
       `<br>${r.status || '—'} · ${r.speed != null ? r.speed + ' km/h' : 'no speed'}` +
       `<br>${seatUnknown && !/engag/i.test(r.status || '') ? 'no seat reading from CABMAN DT or FMS on this fix'
         : engaged ? `passenger on board${r.seat_source ? ` · ${r.seat_source}${r.seat_count != null ? ` ${r.seat_count}` : ''}` : ''}`

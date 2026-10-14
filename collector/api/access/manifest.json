@@ -7066,7 +7066,10 @@
     "class": "LOC",
     "paths": [
      "telemetry.lat",
-     "telemetry.lng"
+     "telemetry.lng",
+     "last_position.lat",
+     "last_position.lng",
+     "last_position.place"
     ]
    }
   ],

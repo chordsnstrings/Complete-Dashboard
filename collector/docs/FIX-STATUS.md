@@ -4594,3 +4594,27 @@ idle-car rules — found 2026-10-14".
 | V6 | A car's tracker is CABMAN or FMS, never the Uber driver-status rows in the same table; the header and the directory say moving / standing / quiet, the device's word kept as `device_status`; quiet is 30 min for FMS and 2 h for CABMAN (`QUIET_SQL`), not 11 min for both; the header's odometer is the newest any tracker fix carried | yes | no | `vehicle_directory`: 3 fail and `vehicle_routes`: 1 fails with `vehicle_routes.js` reverted |
 | V7 | `idle_vehicle`: the fleet's cars (VIN), with no booking AND no movement (FMS journey or CABMAN above 3 km/h) in 14 days; the tracker only decides the sentence (powered now / recent / quiet in a feed outage / quiet N days / never tracked), never whether a car is idle. The 07:00 email's `cars_idle` adds the cars laid up longer than its lookback (`numbers.laid_up`) to the title, evidence and action | yes | no | `vehicle_rules`: 6 fail with `src/insights.js` reverted; `report_findings`: 1 fails with `src/report_findings.js` reverted |
 | V8 | `vehicle_dormant` groups by plate (the newest fix's fleet), counts only CABMAN/FMS fixes as signal, and prints a last POSITION only from a fix that had one ("No fix from it ever carried a position") | yes | no | `vehicle_rules`: 3 fail with `src/insights.js` reverted |
+| V9 | The phone's Fleet tab lists the cars that took NO booking under their own head ("Cars that took no booking — N of M cars"), from `/api/vehicles/directory`, VIN cars only, longest idle first: days since the last booking ever, the tracker's state, the area, days moved without a booking; a directory that fails says so. The phone car page gains Tracker / Last seen / Last booking rows under the tiles, each absent with its reason. `/api/vehicle/profile` carries `last_position` (newest REAL fix, named) and `last_booking_ever` (unwindowed) | yes | no | `vehicle_place`: 4 fail with the routes reverted; `phone_arkiv`: 8 fail with `m/screens.js` reverted |
+| V10 | The gazetteer's area is printed: #live gains an Area column, the live map's tooltip names it, the vehicle header says "Last seen <area> · <when>" and "Last booking", the parked table leads with the area (coordinates kept, dimmed). Unnamed cells say "not named" with the reason | yes | no | `vehicle_place`: 2 fail (profile area, parked area) with `vehicle_routes.js` reverted; desktop pages held by the classic snapshot, re-recorded (below) |
+| V11 | `REAL_FIX` (no NULL, no 0,0) on `/api/where` (its fixes, its "ever reported a position", and `/api/where/fleet`), `/api/map/days` (both queries) and `/api/track` | yes | no | `vehicle_place`: 5 fail with `where_routes.js` and `server.js` reverted (a 0,0 noon fix in the stretch; "last position from 09:05" for a tracker that never had a lock; a 0,0 car placed at noon; a 0,0-only day offered for replay; a 0,0 point in the trail) |
+| V12 | `/api/vehicles/handover` adds the OPEN gaps: each car's last stint in the window measured to the window's end (or now), a day or more counted as `still_out` / `still_out_days` and listed (`still_out[]`), across every channel (a car that moved to Bolt is not out under the Uber chip), the fleet chip honoured; the panel names them, linked | yes | no | `handover`: 5 fail with `vehicle_routes.js` reverted; 1 fails when the open gaps honour the platform chip |
+
+**What moved with V9–V12, and why each fixture was re-taken.**
+`mockapi.mjs` now answers in the server's shape since V3–V12 (directory:
+`status` is the tracker state, `device_status`, `tracker_source`,
+`last_trip_ever`, `cab_days_moved`; profile: `telemetry.tracker_state` /
+`device_status`, `last_position`, `last_booking_ever`; movement: parked
+`hours` and `place`; handover: `still_out`), every value deterministic so the
+pinned random stream is untouched. `test/fixtures/arkiv_classic_frozen.json`
+was first re-recorded from the base tree (4bf1076) on the new mock — 8 vehicle
+routes moved, nothing else — then the working tree was diffed against that:
+`vehicles` (V2 the cars, V3 CABMAN days, V4 last booking ever, V6 tracker
+words, V12 the still-out sentence), `vehicle/L45235` and its six tabs (V6
+tracker word, V9/V10 last seen and last booking in the header), the movement
+tab (V5 hours, V10 area column), `live` (V10 Area column) — and re-recorded
+from the working tree. The phone recording gained ONE answer,
+`/api/vehicles/directory?period=month&grain=auto`, taken from the mock with
+the Node clock frozen at the recording's instant; the old phone's oracle was
+re-taken from the working tree after checking that exactly three screens
+differ (fleet, fleet+fares: the new no-booking section; vehicle: the three
+rows), each a pure addition.

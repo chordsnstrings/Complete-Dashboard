@@ -51,6 +51,7 @@
    column, which test/indexes.test.mjs rightly treats as a filter that needs
    an expression index. */
 import { placeAt } from './place_sql.js';
+import { REAL_FIX } from './telemetry_sql.js';
 import { dubaiIso } from '../src/util.js';
 
 export const TOLERANCE_MIN = 30;      // a fix further than this from the moment is not "where it was"
@@ -153,10 +154,15 @@ export function distanceKm(fixes) {
 }
 
 export function whereRoutes(app, { q, wrap }) {
+  /* Positions only — never a 0,0 "no satellite lock" (FIXLIST V11, measured
+     2026-10-14: L68713's last position on record was 0,0, so the trail ended in
+     the Gulf of Guinea and "where was it at 15:00" could answer with the sea).
+     The same predicate guards "has it ever reported a position" below, and the
+     fleet-at-a-moment read, so the three can never disagree about a fix. */
   const FIXES = `SELECT captured_at, lat, lng, speed, source, seat_occupied, seat_count, fleet_id,
                         ${placeAt('lat', 'lng')} AS place
                    FROM telemetry_snapshot
-                  WHERE plate = $1 AND lat IS NOT NULL AND lng IS NOT NULL
+                  WHERE plate = $1 AND ${REAL_FIX()}
                     AND captured_at >= $2::timestamptz AND captured_at < $3::timestamptz
                   ORDER BY captured_at`;
 
@@ -220,7 +226,7 @@ export function whereRoutes(app, { q, wrap }) {
       /* Whether this car has EVER reported a position, so "no fix today" can
          say whether the tracker is quiet today or the car has none at all. */
       q(`SELECT max(captured_at) AS last_fix FROM telemetry_snapshot
-          WHERE plate = $1 AND lat IS NOT NULL`, [plate]),
+          WHERE plate = $1 AND ${REAL_FIX()}`, [plate]),
     ]);
     const fixes = raw.map((f) => fixOut(f, day));
     const inDay = fixes.filter((f) => f.minute >= 0 && f.minute < 1440);
@@ -329,14 +335,14 @@ export function whereRoutes(app, { q, wrap }) {
          SELECT DISTINCT plate FROM telemetry_snapshot
           WHERE captured_at BETWEEN $1::timestamptz - make_interval(mins => $2)
                                 AND $1::timestamptz + make_interval(mins => $2)
-            AND lat IS NOT NULL AND lng IS NOT NULL)
+            AND ${REAL_FIX()})
        SELECT p.plate, f.captured_at, f.lat, f.lng, f.speed, f.source, f.seat_occupied, f.seat_count,
               f.fleet_id, ${placeAt('f.lat', 'f.lng')} AS place,
               h.driver_name AS held_by, h.driver_ext_id AS held_by_id
          FROM p
          CROSS JOIN LATERAL (
            SELECT s.* FROM telemetry_snapshot s
-            WHERE s.plate = p.plate AND s.lat IS NOT NULL AND s.lng IS NOT NULL
+            WHERE s.plate = p.plate AND ${REAL_FIX('s.')}
               AND s.captured_at BETWEEN $1::timestamptz - make_interval(mins => $2)
                                     AND $1::timestamptz + make_interval(mins => $2)
             ORDER BY abs(extract(epoch FROM (s.captured_at - $1::timestamptz))) LIMIT 1) f

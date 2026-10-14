@@ -5515,6 +5515,16 @@ const hasFix = (r) => r.lat != null && r.lng != null
   && Number.isFinite(+r.lat) && Number.isFinite(+r.lng)
   && !(Math.abs(+r.lat) < 0.5 && Math.abs(+r.lng) < 0.5);
 
+/* One car's area, or the reason there is none — used wherever a row carries
+   the gazetteer's `place` beside its coordinates. A role without locations
+   has lat/lng withheld with it, so it reads as no position, not as a name. */
+function areaCell(r) {
+  if (!hasFix(r)) return '<span class="ent-off" title="no usable position on this fix">—</span>';
+  const a = r.place?.area;
+  return a ? esc(a)
+    : '<span class="ent-off" title="no trip in the fleet\u2019s history has named this half-kilometre cell">not named</span>';
+}
+
 /* /api/live flags a fix stale at FIX_FRESH — thirty minutes. Kept here so the
    tiles that count that flag can name the rule that produced it. */
 const FIX_FRESH_MIN = 30;
@@ -5629,6 +5639,11 @@ V.live = async (root) => {
     { label: 'Status', key: 'status', render: (r) => (ak ? `<span class="pill">${esc(r.status || '—')}</span>`
       : `<span class="tag ${/engag/i.test(r.status || '') ? 'ok' : 'dim'}">${esc(r.status || '—')}</span>`) },
     { label: 'Speed', key: 'speed', num: true, render: (r) => r.speed != null ? fmt(r.speed) + ' km/h' : '—' },
+    /* The area the car is in, named by the fleet's own trip history
+       (api/place_sql.js). The server has sent it on every row since
+       2026-10-13 and no page printed it (FIXLIST V10). A cell no trip has ever
+       named stays unnamed, with the reason, rather than borrowing a neighbour. */
+    { label: 'Area', key: '_area', render: (r) => areaCell(r), sortValue: (r) => r.place?.area || '' },
     /* The only place in the product an odometer appears at all. */
     { label: 'Odometer', key: 'odometer', num: true,
       render: (r) => (r.odometer ? `${fmt(r.odometer)} km`

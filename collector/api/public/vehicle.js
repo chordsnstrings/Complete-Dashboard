@@ -51,6 +51,28 @@ const docTone = (d) => (d == null ? null : d < 0 ? 'bad' : d < 30 ? 'warn' : 'ok
    only place on the page the twin feed is quantified — were fetched on every
    visit and shown nowhere. They are drawn together now, under a heading that
    names the window they belong to. */
+/* WHERE IT WAS LAST SEEN, AND WHEN IT LAST EARNED (FIXLIST V9, V10).
+   The area of the newest fix that carried a real position, in the fleet's own
+   words, with its age — a car parked nine days ago in Al Quoz is not "in Al
+   Quoz" in the present tense. And the last booking on any channel, unwindowed,
+   because "no booking for 41 days" is the question a 30-day window cannot
+   answer. Each says what is missing when it is missing. */
+const daysAgo = (iso) => Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 864e5));
+const agoWords = (iso) => { const d = daysAgo(iso); return d === 0 ? 'today' : d === 1 ? 'yesterday' : `${fmt(d)} days ago`; };
+export function seenLine(p) {
+  const w = p.last_position;
+  const seen = w
+    ? `<span><b>Last seen</b> ${w.place?.area ? esc(w.place.area)
+      : '<span class="ent-off" title="no trip in the fleet\u2019s history has named this half-kilometre cell">an unnamed area</span>'}`
+      + ` <span class="dim">${dateStr(w.at)} ${timeStr(w.at)} · ${agoWords(w.at)}</span></span>`
+    : '<span><b>Last seen</b> <span class="ent-off" title="no tracker fix for this car has ever carried a real position">no position on record</span></span>';
+  const b = p.last_booking_ever;
+  const booked = b
+    ? `<span><b>Last booking</b> ${dateStr(b)} <span class="dim">· ${agoWords(b)}</span></span>`
+    : '<span><b>Last booking</b> <span class="ent-off" title="no channel has ever filed a booking in this car">none on record</span></span>';
+  return seen + booked;
+}
+
 function identityCard(p) {
   const s = p.spec || {}, t = p.telemetry;
   const soonest = (p.documents || []).find((d) => d.days_left != null);
@@ -85,6 +107,7 @@ function identityCard(p) {
     ? `<span><b>Charge</b> ${fmt(t.fuel_level)}%</span>`
     : '<span><b>Charge</b> <span class="ent-off" title="this vehicle’s feed reports no fuel or charge level — a 0 here is an absent reading, not an empty tank">not reported</span></span>'}
         <span><b>Last fix</b> ${t?.last_fix ? `${dateStr(t.last_fix)} ${timeStr(t.last_fix)}` : '—'}</span>
+        ${seenLine(p)}
         ${/* first_trip stays INSIDE the window sentence. Given its own heading
               it read as the day the car entered service, and it is not: at
               days=30 it says 27 July 2026 and at days=365 it says 26 August
@@ -802,10 +825,15 @@ async function tabMovement(root, plate) {
   park.body.innerHTML = '';
   const parkShown = mv.parked.slice(0, 12);
   park.body.append(tableFrom(parkShown, [
+    /* The area first (FIXLIST V10); the coordinates stay, smaller, because
+       two spots in one area are told apart only by them. */
+    { label: 'Area', key: '_area', sortValue: (r) => r.place?.area || '',
+      render: (r) => (r.place?.area ? esc(r.place.area)
+        : '<span class="ent-off" title="no trip in the fleet\u2019s history has named this half-kilometre cell">not named</span>') },
     // Six decimals, matching the fix table above — the two printed the same
     // kind of coordinate at three decimals and at sixteen on one page.
     { label: 'Location', key: 'lat', num: true,
-      render: (r) => `<span class="plate">${(+r.lat).toFixed(6)}, ${(+r.lng).toFixed(6)}</span>` },
+      render: (r) => `<span class="plate dim">${(+r.lat).toFixed(6)}, ${(+r.lng).toFixed(6)}</span>` },
     { label: 'Fixes', key: 'fixes', num: true },
     /* Measured from the gap to the next fix, not fixes × 5 min (FIXLIST V5):
        a parked CABMAN car reports about hourly and read 21 h for ~277. */
@@ -1494,6 +1522,19 @@ async function handoverPanel(host) {
       + `${plural(t.parked, 'is', 'are')} excluded — ${fmt(t.parked_days, 1)} car-days where the car went `
       + 'out of service between drivers rather than changing hands. Those are the idle assets the '
       + 'tiles above count.'));
+  }
+  /* …and the ones that have not come back (FIXLIST V12). The figure above is
+     gaps that ENDED — a car still off the road at the window's end was in
+     neither it nor the handovers, so the longest absences read as none. */
+  if (t.still_out) {
+    const named = (h.still_out || []).slice(0, 6)
+      .map((r) => `${entity('vehicle', r.plate, r.plate)} (${fmt(r.days, 1)} d)`).join(', ');
+    /* Built as markup, not through note(), which escapes its text: the
+       plates are links to the cars, and escaped they printed as raw <a> tags. */
+    host.append(el('div', 'note', esc(`${countOf(t.still_out, 'car')} ${plural(t.still_out, 'was', 'were')} still out of service `
+      + `at the end of the window — no booking for a day or more since ${plural(t.still_out, 'its', 'their')} last driver, `
+      + `${fmt(t.still_out_days, 1)} car-days so far, and not in the figure above: `)
+      + named + esc(`${t.still_out > 6 ? `, and ${fmt(t.still_out - 6)} more` : ''}.`)));
   }
   /* The gap starts at the outgoing driver's DROP-OFF. Where a channel sends no
      drop-off time the request time stands in, and that gap is one trip too
