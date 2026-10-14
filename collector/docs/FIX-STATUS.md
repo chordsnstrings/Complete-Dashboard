@@ -4599,6 +4599,12 @@ idle-car rules — found 2026-10-14".
 | V11 | `REAL_FIX` (no NULL, no 0,0) on `/api/where` (its fixes, its "ever reported a position", and `/api/where/fleet`), `/api/map/days` (both queries) and `/api/track` | yes | no | `vehicle_place`: 5 fail with `where_routes.js` and `server.js` reverted (a 0,0 noon fix in the stretch; "last position from 09:05" for a tracker that never had a lock; a 0,0 car placed at noon; a 0,0-only day offered for replay; a 0,0 point in the trail) |
 | V12 | `/api/vehicles/handover` adds the OPEN gaps: each car's last stint in the window measured to the window's end (or now), a day or more counted as `still_out` / `still_out_days` and listed (`still_out[]`), across every channel (a car that moved to Bolt is not out under the Uber chip), the fleet chip honoured; the panel names them, linked | yes | no | `handover`: 5 fail with `vehicle_routes.js` reverted; 1 fails when the open gaps honour the platform chip |
 
+**Caught by the first full suite after V1–V12:** test/dubai_day_window counted
+the vehicle routes' shared Dubai-midnight window as occurrences of `${TS(`; V5
+hands `TS('captured_at')` to `PARKED_SPOTS_SQL` as an argument, so the count
+read 13 of 14 with the window still the one shared expression. The check now
+counts calls of `TS(` (14 before V5 and after).
+
 **What moved with V9–V12, and why each fixture was re-taken.**
 `mockapi.mjs` now answers in the server's shape since V3–V12 (directory:
 `status` is the tracker state, `device_status`, `tracker_source`,

@@ -204,9 +204,13 @@ for (const [plate, day, trips] of [['L1', '2026-08-05', 3], ['L2', '2026-08-06',
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   check('no query behind the vehicle page still bounds a timestamp on the UTC day',
     !/(occurred_at|captured_at|started_at) BETWEEN \$1 AND \$2/.test(code));
+  /* Counted as calls of TS(), not as `${TS(` — since FIXLIST V5 (2026-10-14)
+     the parked-spot read hands TS('captured_at') to PARKED_SPOTS_SQL as an
+     argument rather than interpolating it, which is still the one shared
+     window and is what this check exists to see. */
   check('they share one Dubai-midnight window expression rather than fourteen copies',
-    (code.match(/\$\{TS\('/g) || []).length === 14,
-    String((code.match(/\$\{TS\('/g) || []).length));
+    (code.match(/\bTS\('/g) || []).length === 14,
+    String((code.match(/\bTS\('/g) || []).length));
 }
 
 /* ── the class, not the four instances ───────────────────────────────────
