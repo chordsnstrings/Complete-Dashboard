@@ -4773,3 +4773,18 @@ machine crosses 30 s — and a failed status request would have read as the
 same null. The check now waits up to the file's own 60 s for the strip to
 SETTLE (its link, or its "could not be loaded" sentence) and prints the
 strip's text when it fails.
+
+**On production (c8bf7b8, deployed 2026-10-14; 1baac2f changes only the mock,
+a test and these notes).** Before the first pass on the new build,
+/api/online/hours answered 13 October from the live feed (24 hours `live`:
+91 drivers, 1,055.6 driver-hours, peak 78 at 18:00) and 1 September as
+`not_built` with no figures. The first pass (16:07 Dubai) wrote the build
+record — built from 1900-01-01 — and 13 October became `recorded`: 91 drivers,
+1,057.9 driver-hours, peak 80 at 18:00. Two independent sources, Uber's
+timeline and its two-minute status feed, agree to 2.3 driver-hours in 1,058.
+The 14 October L46185 journey was judged again by the next collection and
+now reads "nearest is a bolt booking that never ran — the driver cancelled
+after accepting it; requested 12 min before the journey began"; no unbooked
+journey of the last two days says "0 min away". UOH-6, NB-1/2 and UNA (marks
+seen on production at 8855315: 36 rides, 13 named, both skins, 390 fits) are
+on production and proven there.
