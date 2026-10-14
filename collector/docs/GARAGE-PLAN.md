@@ -250,7 +250,7 @@ The views, drawn on the consolidated history, are on the Garage Desk page
 | place | what changes |
 |---|---|
 | side menu | a new **Garage** section beside Fleet: Off the road · Visits · Repeat work · Garage costs · Garages · Cars & owners |
-| `#vehicle/<plate>` | an eighth tab, **Garage** (`VEHICLE_TABS`, `api/public/vehicle.js:31`): every visit, line, cost, days off road; the Overview's first line carries the state |
+| `#vehicle/<plate>` | an eighth tab, **Garage** (`VEHICLE_TABS`, `api/public/vehicle.js:28`): every visit, line, cost, days off road; the Overview's first line carries the state |
 | driver page | accidents the person was driving in, the fault, any damage charge; a day off explained by the car's visit |
 | phone, Fleet tab | the board, "send to a garage", state changes (`TABS`, `api/public/m/screens.js:44`; the Fleet tab owns `fleet`, `vehicles`, `vehicle`) |
 | To-do and Action list | the absence lines that say a workshop visit is recorded nowhere (`api/public/playbook.js:563`, `api/public/app.js:2875`, `api/public/driver.js:1629`) answer from the record; new items: overdue return, visit open while the car works, car with no responsible person, repeat within the window |
