@@ -38,6 +38,8 @@ export const ROUTES = [
      whole product is refusing to colour a row it cannot support is a page
      whose rendering has to be looked at. */
   'online-time',
+  /* Uber online by hour (2026-10-14): today, and a past day in the address. */
+  'online-hours', 'online-hours/2026-09-20',
   'roster', 'roster/pipeline', 'roster/idle', 'roster/blocked', 'roster/states',
   'vehicles', 'vehicle/L45235', 'vehicle/L45235/drivers', 'vehicle/L45235/movement',
   'vehicle/L45235/earnings', 'vehicle/L45235/safety', 'vehicle/L45235/compliance',

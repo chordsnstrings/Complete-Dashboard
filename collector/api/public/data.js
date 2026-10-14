@@ -430,7 +430,7 @@ export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'ac
   'target', 'month-target',
   /* Sign-in and access pages: about people and settings, never a window. */
   'account', 'access', 'fleet-names', 'approvals',
-  'online-time',
+  'online-time', 'online-hours',
   /* #same-person is the whole queue of unsettled pairs, and /api/same-person
      takes no window, no platform and no fleet: a pair is a pair whenever
      either record drove. All three controls would govern nothing, and would

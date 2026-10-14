@@ -102,6 +102,7 @@ import { performerRoutes } from './performer_routes.js';
 import { compareRoutes } from './compare_routes.js';
 import { performanceRoutes } from './performance_routes.js';
 import { statusRoutes } from './status_routes.js';
+import { onlineHoursRoutes } from './online_hours_routes.js';
 /* Where a car was at a moment or over a stretch, in the gazetteer's words —
    the assistant's "historical location based on time" (2026-10-13). */
 import { whereRoutes } from './where_routes.js';
@@ -7060,6 +7061,10 @@ performanceRoutes(app, { q, wrap });
    prefix is on api/cache.js's NEVER list, and a cached live status is a wrong
    live status. */
 statusRoutes(app, { q, wrap });
+
+/* Uber online by hour, one day or a range — api/online_hours_routes.js, the
+   hours kept in driver_online_hour (sql/schema_v106.sql). */
+onlineHoursRoutes(app, { q, wrap });
 
 /* Where a car was, when — api/where_routes.js. */
 whereRoutes(app, { q, wrap });

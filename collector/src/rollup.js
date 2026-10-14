@@ -33,6 +33,7 @@ import { personKey } from '../api/custody_sql.js';
    — which is exactly how the dangling-ONLINE defect survived in four places at
    once. Imported the same way personKey above is. */
 import { onlineSpansSql } from '../api/online_span_sql.js';
+import { ONLINE_HOURS_SLICES, ONLINE_HOURS_ROWS } from '../api/online_hours_sql.js';
 import { log } from './log.js';
 import { dubaiIso } from './util.js';
 
@@ -598,6 +599,9 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
   out.push(await runOne(db, 'driver_payout_day', () => refreshPayouts(db)));
   out.push(await runOne(db, 'driver_statement_day', () => refreshStatements(db)));
   out.push(await runOne(db, 'driver_day', () => refreshDriverDays(db, { since })));
+  /* Beside driver_day because it is cut from the same spans; it reads only
+     driver_timeline_event, so its place in the order is not load-bearing. */
+  out.push(await runOne(db, 'driver_online_hour', () => refreshOnlineHours(db, { since })));
   out.push(await runOne(db, 'driver_lifetime', () => refreshLifetime(db)));
   /* Last, and deliberately: it reads the collector-written tables, not the
      rollups, so it does not depend on this order — but running it here means
@@ -615,7 +619,7 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
      cheap next to the rollup that just ran. Failure is not fatal: stale
      statistics are a slow query, not a wrong one. */
   try {
-    await db.query('ANALYZE trip, rollup_day, rollup_week, rollup_month, rollup_person_month, driver_payout_day, driver_day, driver_lifetime');
+    await db.query('ANALYZE trip, rollup_day, rollup_week, rollup_month, rollup_person_month, driver_payout_day, driver_day, driver_lifetime, driver_online_hour');
   } catch (e) { log.warn(SRC, 'analyze failed — plans may be stale', { err: String(e).slice(0, 120) }); }
 
   const failed = out.filter((o) => o.error);
@@ -1304,6 +1308,48 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
        computed_at = now()`, p);
 
   const { rows } = await db.query('SELECT count(*)::int n FROM driver_day');
+  return rows[0].n;
+}
+
+/* UBER, ONLINE BY THE HOUR — kept (sql/schema_v106.sql).
+   ───────────────────────────────────────────────────────────────────────
+   The same spans driver_day.online_min sums (api/online_span_sql.js), cut at
+   each Dubai hour and stored per account, so "who was online at 14:00 on a
+   day two months ago" survives Uber's 31-day timeline.
+
+   The narrow pass writes the days from `since` and reads events from three
+   days before it: a span is closed by its own next event, so the scan has to
+   reach back past the first day written, and a shift that opened before the
+   bound is still closed by what Uber sent. The full pass (since = null)
+   reads everything.
+
+   Upsert, then sweep, rather than delete-then-insert. The pool hands each
+   statement its own connection, so a BEGIN here would not hold the two
+   together; instead every hour this pass computes is written with a fresh
+   computed_at, and afterwards the hours in the window this pass did NOT
+   produce (a span that shrank when a late event arrived) are removed by
+   comparing against the instant the pass started on the database's clock.
+   A reader in between sees the previous answer plus the new one for the same
+   hour — never a hole. */
+export async function refreshOnlineHours(db = pool, { since = null } = {}) {
+  const [{ t0 }] = (await db.query('SELECT now() AS t0')).rows;
+  const where = since
+    ? "at >= (($1::date - 3)::timestamp AT TIME ZONE 'Asia/Dubai')"
+    : 'TRUE';
+  const p = since ? [since] : [];
+  await db.query(
+    `WITH ${ONLINE_HOURS_SLICES(where)}
+     INSERT INTO driver_online_hour
+       (platform, driver_ext_id, fleet_id, hour_start, day, hour, online_min, open_min, computed_at)
+     SELECT r.*, now() FROM (${ONLINE_HOURS_ROWS(since ? '$1' : 'NULL')}) r
+     ON CONFLICT (platform, driver_ext_id, hour_start) DO UPDATE SET
+       fleet_id = EXCLUDED.fleet_id, online_min = EXCLUDED.online_min,
+       open_min = EXCLUDED.open_min, computed_at = EXCLUDED.computed_at`, p);
+  await db.query(
+    `DELETE FROM driver_online_hour
+      WHERE computed_at < $1::timestamptz ${since ? 'AND day >= $2::date' : ''}`,
+    since ? [t0, since] : [t0]);
+  const { rows } = await db.query('SELECT count(*)::int n FROM driver_online_hour');
   return rows[0].n;
 }
 

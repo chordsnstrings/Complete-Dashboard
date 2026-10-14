@@ -146,8 +146,14 @@ const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/t
    gone offline (the independent review of 2026-10-13). So today's day is
    computed on every read; every other day is cached as before. Dubai's
    calendar, the server's clock. */
-const neverToday = (req, path) => path === '/api/driver/day'
-  && String(req.query?.day || '').slice(0, 10) === dubaiIso();
+const neverToday = (req, path) => (path === '/api/driver/day'
+  && String(req.query?.day || '').slice(0, 10) === dubaiIso())
+  /* Uber online by hour (api/online_hours_routes.js): today's hours past the
+     timeline's last run come from the live status feed, which moves every two
+     minutes and advances no version. A missing ?day= IS today. Past days are
+     the stored record and cache like any other page. */
+  || (path === '/api/online/hours'
+    && (String(req.query?.day || '').slice(0, 10) || dubaiIso()) === dubaiIso());
 
 export function responseCache({ pool, ttlMs = 30000, enabled = true, port, refreshConcurrency = 2,
   maxBytes = MAX_BYTES } = {}) {

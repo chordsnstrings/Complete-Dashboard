@@ -2604,6 +2604,43 @@ async function onlineTime(deck, ctx) {
   deck.append(head);
   const body = el('div');
   deck.append(body);
+  /* UBER, ONLINE BY THE HOUR (2026-10-14) — the operator's "show driver online
+     by hour on uber". Under the call list, for the same day: how many were
+     online in each hour, the busiest hour, the driver-hours, and the way to
+     every driver's hours on the desktop page (#online-hours/<day>). Hours past
+     the timeline's last run are the live feed's and say so. */
+  // A section, not a div: the call list stays the deck's last div, where the
+  // page's own tests and its scroll anchor look for it.
+  const hoursHost = el('section');
+  deck.append(hoursHost);
+  const loadHours = async () => {
+    hoursHost.innerHTML = '';
+    let h;
+    try { h = await q('/api/online/hours', { day }); } catch (e) {
+      const c = card('Online by hour', null); hoursHost.append(c.card);
+      failed(c.body, new Error('The hours could not be fetched.')); return;
+    }
+    if (!ctx.alive()) return;
+    const past = (h.hours || []).filter((x) => x.state !== 'future');
+    const c = card('Online by hour', `Uber drivers online in each hour of ${dayStr(`${day}T12:00:00`)}`);
+    hoursHost.append(c.card);
+    if (!past.some((x) => x.drivers)) {
+      c.body.append(el('p', 'm-cap', esc(h.absent_why ? `Nobody to show: ${h.absent_why}.` : 'No Uber account was online on this day.')));
+      return;
+    }
+    c.body.append(spark(past.map((x) => x.drivers || 0), { h: 44 }));
+    const t = h.totals || {};
+    const liveHours = past.filter((x) => x.live_h > 0).length;
+    rows(c.body, [
+      { title: 'Busiest hour', value: t.peak_drivers ? `${String(t.peak_hour).padStart(2, '0')}:00` : '\u2014',
+        sub: t.peak_drivers ? `${fmt(t.peak_drivers)} online in it` : 'nobody online' },
+      { title: 'Drivers online', value: fmt(t.drivers ?? 0), sub: 'at any point in the day' },
+      { title: 'Driver-hours', value: Number(t.online_h ?? 0).toFixed(1), sub: liveHours
+        ? `the last ${liveHours === 1 ? 'hour is' : `${liveHours} hours are`} from the live feed, until the timeline arrives`
+        : 'from Uber\u2019s timeline' },
+      { title: 'Every hour, every driver', sub: 'on the desktop page', value: '\u203a', to: `#online-hours/${day}` },
+    ]);
+  };
 
   const ctrl = el('div');
   ctrl.style.cssText = 'display:flex;gap:10px;align-items:center;flex-wrap:wrap';
@@ -2758,12 +2795,13 @@ async function onlineTime(deck, ctx) {
     paint();
   };
 
-  dayIn.onchange = () => { day = dayIn.value || dubaiDay(); load(); };
+  dayIn.onchange = () => { day = dayIn.value || dubaiDay(); load(); loadHours(); };
   startIn.onchange = () => {
     start = startIn.value || '06:00';
     try { localStorage.setItem(KEY, start); } catch { /* private window */ }
     load();
   };
+  loadHours();
   await load();
 }
 

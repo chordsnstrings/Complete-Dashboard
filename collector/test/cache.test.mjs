@@ -38,6 +38,8 @@ app.get('/api/auth', (_q, res) => { calls++; res.json({ n: calls }); });
 app.post('/api/thing', (_q, res) => { calls++; res.json({ n: calls }); });
 /* One driver's day: today is live, every other day is a stored record. */
 app.get('/api/driver/day', (_q, res) => { calls++; res.json({ n: calls }); });
+/* Uber online by hour: today's hours read the live status feed. */
+app.get('/api/online/hours', (_q, res) => { calls++; res.json({ n: calls }); });
 const server = app.listen(0);
 const port = server.address().port;
 // The cache re-requests stale keys on itself, so it needs the real port.
@@ -370,6 +372,18 @@ check('and the hit rate is visible, so a cache that stopped working can be seen'
   const p1 = await get('/api/driver/day?id=x&day=2026-01-15');
   const p2 = await get('/api/driver/day?id=x&day=2026-01-15');
   check('…and a past day is still served from the cache', p2.body.n === p1.body.n && p2.cache === 'hit', JSON.stringify([p1, p2]));
+  /* Uber online by hour (2026-10-14): today's hours past the timeline's last
+     run come from the live feed every two minutes, and a missing ?day= is
+     today; a past day is the stored record. */
+  const h1 = await get(`/api/online/hours?day=${todayIso}`);
+  const h2 = await get(`/api/online/hours?day=${todayIso}`);
+  const n1 = await get('/api/online/hours');
+  const n2 = await get('/api/online/hours');
+  check("today's online-by-hour reaches the route every time, asked by date or by default",
+    h2.body.n === h1.body.n + 1 && h2.cache !== 'hit' && n2.body.n === n1.body.n + 1 && n2.cache !== 'hit', JSON.stringify([h1, h2, n1, n2]));
+  const o1 = await get('/api/online/hours?day=2026-10-01');
+  const o2 = await get('/api/online/hours?day=2026-10-01');
+  check('…and a past day of it is served from the cache', o2.body.n === o1.body.n && o2.cache === 'hit', JSON.stringify([o1, o2]));
 }
 
 const app2 = express();

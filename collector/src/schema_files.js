@@ -326,4 +326,9 @@ export const SCHEMA_FILES = [
      Bolt accounts folded into his Uber row, as v102 folds, with an audit row.
      test/identity_shajahan_merge.test.mjs. */
   'schema_v105.sql',
+  /* v106: driver_online_hour — Uber availability per account per Dubai hour,
+     cut from the spans driver_day.online_min sums and kept past Uber's 31-day
+     timeline (the operator, 2026-10-14: "show driver online by hour on uber and
+     store it"). Written by src/rollup.js refreshOnlineHours. */
+  'schema_v106.sql',
 ];

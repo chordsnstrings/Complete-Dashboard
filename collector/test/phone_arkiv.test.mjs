@@ -1157,7 +1157,9 @@ console.log('\n4.15 · Online time: the call list’s 00 from what /api/online-t
   }
   await p.page.click('.m-seg button[data-id="all"]');
   await p.settle();
-  const calls = await p.page.evaluate(() => [...document.querySelectorAll('.m-deck .m-rows a.m-row')].map((a) => a.getAttribute('href')));
+  // The call list only — the "Online by hour" card under it has a link row of its own.
+  const calls = await p.page.evaluate(() => [...document.querySelectorAll('.m-deck .m-rows a.m-row')]
+    .filter((a) => !a.closest('section')).map((a) => a.getAttribute('href')));
   check('the call list is still one tel: link per driver with a phone', calls.length > 0 && calls.every((h) => /^tel:\+?\d+$/.test(h)),
     calls.slice(0, 3).join(' '));
   await p.close();
@@ -1168,6 +1170,30 @@ console.log('\n4.15 · Online time: the call list’s 00 from what /api/online-t
   check('with no start time, On time is absent WITH the reason, never a zero',
     u['On time']?.v === 'no start time to judge against', JSON.stringify(u['On time']));
   await q2.close();
+
+  /* UBER ONLINE BY THE HOUR (2026-10-14), under the call list for the same day. */
+  const HK = '/api/online/hours?period=month&day=2026-09-24&grain=auto';
+  const oh = ans(HK);
+  const ph = await phonePage(browser, { skin: 'arkiv', fixture });
+  await ph.open('online-time');
+  const card = await ph.page.evaluate(() => {
+    const c = [...document.querySelectorAll('.m-deck section .m-card')].find((x) => x.querySelector('h2')?.textContent === 'Online by hour');
+    return c && { spark: !!c.querySelector('svg'), rows: Object.fromEntries([...c.querySelectorAll('.m-row')]
+      .map((r) => [r.querySelector('.k b')?.textContent, { v: r.querySelector('.v b')?.textContent, href: r.getAttribute('href') }])) };
+  });
+  check('the day\u2019s hours: a card under the call list, the hours drawn', card && card.spark, JSON.stringify(card));
+  check(`…the busiest hour as /api/online/hours answers it (${String(oh.totals.peak_hour).padStart(2, '0')}:00)`,
+    card?.rows['Busiest hour']?.v === `${String(oh.totals.peak_hour).padStart(2, '0')}:00`, JSON.stringify(card?.rows['Busiest hour']));
+  check('…and the way to every driver\u2019s hours on that day', card?.rows['Every hour, every driver']?.href === '#online-hours/2026-09-24',
+    JSON.stringify(card?.rows['Every hour, every driver']));
+  await ph.close();
+  const lostH = { ...fixture, answers: { ...fixture.answers } };
+  delete lostH.answers[HK];
+  const lh = await phonePage(browser, { skin: 'arkiv', fixture: lostH });
+  await lh.open('online-time');
+  check('hours that cannot be fetched say so in their own card',
+    await lh.page.evaluate(() => /The hours could not be fetched/.test(document.querySelector('.m-deck section')?.textContent || '')));
+  await lh.close();
 }
 
 console.log('\n4.16 · To the bank: 00, marks and swatches, and what the register cannot say gathered into †');

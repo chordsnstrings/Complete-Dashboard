@@ -216,6 +216,7 @@ export const APPLIES_WHY = {
   action: 'it is one finding and the evidence it was raised on',
   'online-time': 'it has its own day picker, only Uber reports time online, and the call list covers '
     + 'every driver we hold data for',
+  'online-hours': 'it has its own day picker and fleet choice, and only Uber reports time online',
   'same-person': 'a pair is a pair whenever either record drove',
   deposits: 'a cash position is a position against a person, not a window or a channel',
   advances: 'an exposure is a position against a person, not a window',

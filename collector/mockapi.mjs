@@ -1856,6 +1856,73 @@ app.get('/api/status/driver', (req, r) => {
   });
 });
 
+/* Uber online by hour (api/online_hours_routes.js, 2026-10-14). One day's 24
+   hours and every driver's minutes, deterministic — no rnd(), so the pinned
+   random stream the frozen pages read does not move. Today runs to the clock:
+   the hours after the timeline's last run (3 h ago) are the live feed's, and
+   the hours not yet reached are future. A day before 28 Jul 2026 is absent
+   with its reason. */
+const OH_SHAPE = [3, 2, 2, 1, 1, 2, 4, 7, 9, 10, 11, 11, 10, 10, 11, 12, 12, 11, 10, 9, 8, 7, 5, 4];
+app.get('/api/online/hours', (req, r) => {
+  const today = new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
+  const day = String(req.query.day || today);
+  const d0 = Date.parse(`${day}T00:00:00+04:00`);
+  const now = Date.now();
+  const toMs = now - 3 * 3600e3;
+  const before = day < '2026-07-28';
+  const people = before ? [] : drivers.slice(0, 12).map((name, i) => {
+    const minutes = OH_SHAPE.map((n, h) => {
+      const hs = d0 + h * 3600e3;
+      if (hs >= now || i >= n) return 0;
+      return (h + i) % 5 === 0 ? 25 : 60;
+    });
+    const live = minutes.map((m, h) => m > 0 && d0 + h * 3600e3 >= toMs);
+    const on = minutes.map((m, h) => (m > 0 ? h : -1)).filter((h) => h >= 0);
+    return { driver_ext_id: `drv-${i}`, name, fleet_id: i % 3 ? 'ecosine' : 'egari', minutes, live,
+      total_min: minutes.reduce((a, b) => a + b, 0), first_hour: on.length ? on[0] : -1, last_hour: on.length ? on[on.length - 1] : -1 };
+  }).filter((p) => !req.query.fleet || p.fleet_id === req.query.fleet);
+  const hours = OH_SHAPE.map((_, h) => {
+    const hs = d0 + h * 3600e3;
+    if (hs >= now) return { hour: h, state: 'future', drivers: null, drivers_live_only: 0, online_h: null, live_h: 0, avg_online: null, measured_min: 0 };
+    const mins = people.reduce((a, p) => a + p.minutes[h], 0);
+    const liveMins = people.reduce((a, p) => a + (p.live[h] ? p.minutes[h] : 0), 0);
+    const drv = people.filter((p) => p.minutes[h] > 0).length;
+    const isLive = hs + 3600e3 > toMs;
+    return { hour: h, state: isLive ? (hs < toMs ? 'recorded+live' : 'live') : 'recorded', drivers: drv,
+      drivers_live_only: isLive && hs >= toMs ? drv : 0, online_h: Math.round(mins / 6) / 10, live_h: Math.round(liveMins / 6) / 10,
+      avg_online: Math.round(mins / 6) / 10, measured_min: 60 };
+  });
+  const past = hours.filter((h) => h.drivers != null);
+  const peak = past.reduce((b, x) => (b == null || x.drivers > b.drivers ? x : b), null);
+  r.json({ day, fleet: req.query.fleet || null, platform: 'uber',
+    timeline_to: new Date(toMs).toISOString(),
+    live_from: day === today ? new Date(toMs).toISOString() : null, live_to: day === today ? new Date(now).toISOString() : null,
+    hours, drivers: people.sort((a, b) => b.total_min - a.total_min),
+    totals: { drivers: people.filter((p) => p.total_min > 0).length,
+      online_h: Math.round(people.reduce((a, p) => a + p.total_min, 0) / 6) / 10,
+      peak_hour: peak && peak.drivers ? peak.hour : null, peak_drivers: peak ? peak.drivers : 0 },
+    absent_why: before ? 'Uber\u2019s timeline is held from 28 July 2026; the days before it were never collected and Uber no longer answers for them' : null,
+    basis: 'Online means ONLINE or on a trip on Uber, from Uber\u2019s own timeline of each account.',
+    sources: { timeline: 'Uber chronicle GetTimelineInfo', live: 'Uber driver status, every 2 minutes' } });
+});
+app.get('/api/online/hours/range', (req, r) => {
+  const n = Math.min(60, Math.max(1, Math.round((Date.parse(String(req.query.to || dayISO(0))) - Date.parse(String(req.query.from || dayISO(13)))) / 864e5) + 1));
+  const to = String(req.query.to || dayISO(0));
+  const days = Array.from({ length: n }, (_, k) => {
+    const day = new Date(Date.parse(`${to}T12:00:00Z`) - (n - 1 - k) * 864e5).toISOString().slice(0, 10);
+    if (day < '2026-07-28') return { day, drivers: null, online_h: null, total_h: null, peak: null, complete: true, absent_why: 'before Uber\u2019s timeline was first collected (28 Jul 2026)' };
+    if (k === 2) return { day, drivers: null, online_h: null, total_h: null, peak: null, complete: true, absent_why: 'no Uber account was recorded online' };
+    const dr = OH_SHAPE.map((v, h) => Math.max(0, v - ((k + h) % 3)));
+    return { day, drivers: dr, online_h: dr.map((v) => v * 0.8), total_h: Math.round(dr.reduce((a, v) => a + v * 0.8, 0) * 10) / 10,
+      peak: Math.max(...dr), complete: k < n - 1 };
+  });
+  const held = days.filter((d) => d.drivers && d.complete);
+  r.json({ from: days[0].day, to, fleet: req.query.fleet || null, platform: 'uber', days,
+    avg_drivers_by_hour: OH_SHAPE.map((_, h) => (held.length ? Math.round(held.reduce((a, d) => a + d.drivers[h], 0) / held.length * 10) / 10 : null)),
+    days_averaged: held.length, timeline_to: new Date(Date.now() - 3 * 3600e3).toISOString(),
+    basis: 'Online means ONLINE or on a trip on Uber.' });
+});
+
 app.get('/api/status/fleet', (_req, r) => {
   const rows = drivers.map((name, i) => ({
     driver_ext_id: `drv-${i}`, fleet_id: i % 2 ? 'egari' : 'ecosine',

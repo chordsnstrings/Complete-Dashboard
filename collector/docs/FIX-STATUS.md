@@ -4618,3 +4618,28 @@ the Node clock frozen at the recording's instant; the old phone's oracle was
 re-taken from the working tree after checking that exactly three screens
 differ (fleet, fleet+fares: the new no-booking section; vehicle: the three
 rows), each a pure addition.
+
+## UOH — Uber drivers online by hour, stored (2026-10-14)
+
+The operator: "we need to show driver online by hour on uber and store it to
+fetch previous data. audit, understand UI changes, plan and then execute". The
+audit and the plan are in COVERAGE "Online by the hour, kept". Executed:
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| UOH-1 | `driver_online_hour` (sql/schema_v106.sql, registered): one row per Uber account per Dubai hour, online and open (bound-closed) minutes, the account's fleet; never pruned | yes | no | `online_hours`: the hours of two synthetic drivers to the minute, and their sum against `driver_day.online_min` |
+| UOH-2 | `refreshOnlineHours` in the rollup (14-day pass with a 3-day event margin; full nightly), upsert-then-sweep | yes | no | `online_hours`: 4 fail with no sweep; 1 fails when the sweep is not bounded to the pass's days (history deleted) |
+| UOH-3 | `GET /api/online/hours` (a day: 24 hours with state recorded / recorded+live / live / partial / not collected / future, drivers, online at once, driver-hours; every driver's 24 hours) and `/range` (day × hour, an average over recorded whole days, a reason for every empty day); manifest entries (BK; names ID); today never cached | yes | no | `online_hours`: 3 fail with no live read; 1 when the live read is not capped at the feed's last poll; 3 when it starts at the day's start instead of the timeline's last run (minutes counted twice) |
+| UOH-4 | #online-hours (People): tiles, the 24-hour chart (live hours hatched), the hour table, every driver × hour, the 14/30-day grid with links to each day, the † band; nav, view, access, shell and routes_list registered | yes | no | rendered against the mock in both skins at 1440 and 390 (no page error, no sideways scroll); the classic snapshot records both addresses |
+| UOH-5 | The phone's Online time screen: an "Online by hour" card under the call list (the day's shape, busiest hour, drivers, driver-hours, the way to #online-hours/<day>); a failed read says so | yes | no | `phone_arkiv`: 4 checks (fail with the card removed) |
+
+Also: `api/cache.js` never caches today's `/api/online/hours` (a missing
+`?day=` is today) — `cache`: 1 fails with the old file. `mockapi.mjs` answers
+both routes deterministically; the classic desktop snapshot records
+`online-hours` and `online-hours/2026-09-20` (no other route moved); the phone
+recording gained `/api/online/hours?period=month&day=2026-09-24&grain=auto`
+(frozen-clock mock) and the old phone's oracle was re-taken after showing the
+three Online time states differ by the new card alone. The desktop page was
+looked at against the mock in both skins at 1440 and 390 before any of that:
+one defect found and fixed — the hour column sorted as text (00, 01, 10, …).
+

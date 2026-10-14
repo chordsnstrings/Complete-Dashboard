@@ -5414,6 +5414,39 @@ wrong with the message, only with which fleet it was shown against.
   `DISTINCT ON (source` was the searchable signature here, and it sat in a
   second file for as long as it took somebody to be misled by it.
 
+### Online by the hour, kept — 2026-10-14
+
+The operator: "show driver online by hour on uber and store it to fetch
+previous data". What existed and what was added, so the next person does not
+re-measure it:
+
+| what | where | per hour? | history |
+|---|---|---|---|
+| Uber timeline (ONLINE heartbeats, OFFLINE, job stages) | `driver_timeline_event`, every 3 h, last 2 days + weekly 30-day sweep | no — events | from 2026-07-28; Uber answers for ~31 days only |
+| a driver's online minutes a DAY | `driver_day.online_min` (src/rollup.js) | no | kept |
+| weekday × hour AVERAGE | `/api/supply/balance`, computed per request | yes, but not by date | not stored |
+| live status (online / ontrip / offline) | `driver_status_event`, every 120 s | no — events | from 2026-09-14 |
+| weekly online hours | `driver_performance.hours_online` (REPORT_TYPE_DRIVER_ACTIVITY) | no — a week | kept |
+| **NEW: per account per Dubai hour** | **`driver_online_hour` (sql/schema_v106.sql)** | **yes** | **kept, never pruned** |
+
+`driver_online_hour` is cut from the SAME spans `driver_day.online_min` sums
+(api/online_span_sql.js → api/online_hours_sql.js), so a driver's 24 hours add
+up to their day (test/online_hours.test.mjs holds it to one minute). Rebuilt by
+`refreshOnlineHours` on every rollup pass for the last 14 days (events read
+from three days earlier, so a span that opened before the bound is closed by
+its own events) and in full nightly; upsert-then-sweep, because the pool gives
+each statement its own connection and a `BEGIN` there would not hold.
+
+/api/online/hours answers a day: the stored hours up to the timeline's last
+run, and — today only — the hours after it from `driver_status_event` at
+request time, never stored, capped at the live feed's own last poll
+(`driver_status_now.observed_at`) so a stopped feed is not read as everyone
+still online. The two never cover the same minute: the live read starts where
+the timeline's last run ended. "Drivers" are Uber ACCOUNTS (the timeline has no
+person key). Pages: #online-hours (desktop, the day in the address, a 14/30-day
+day × hour grid below) and an "Online by hour" card under the phone's Online
+time list. Today's answer is never cached (api/cache.js `neverToday`).
+
 ### Going online: what Uber tells us, and the four ways it does not — 2026-09-09
 
 The Online time page (`#online-time`, under People) answers "who came online at
@@ -5433,6 +5466,12 @@ it fetches, and it chooses them from `trip`, not from the roster. Cron is
 `UBER_TIMELINE_CRON`, `17 */3 * * *`. There is a whole-roster mode
 (`node src/index.js timeline-roster`, 30 days) which has **no cron at all** and
 last ran 2026-08-27.
+
+*Out of date — corrected 2026-10-14.* The collector now asks about the whole
+roster on every three-hourly tick (`src/index.js:186-217`) and sweeps 30 days
+weekly on `UBER_ROSTER_CRON` (`40 23 * * 6`); Uber refuses any single request
+longer than 31 days (`src/sources/uber_timeline.js:17,54-57`). The two
+paragraphs above describe 2026-09-09.
 
 **The four absences, and which of them heal.**
 

@@ -8241,5 +8241,64 @@
   "cap": null,
   "notes": "api/agent_routes.js (2026-10-09). The chat assistant. It holds no data of its own: every figure it relays was fetched by a tool as a GET to another /api route over the loopback, carrying the asker's own cookie, so the gate and shaper judged each one exactly as they judge the page it belongs to (a role without CASH is refused the cash tool in the cash page's words). It writes only its own 24-hour memory (agent_conversation/agent_message/agent_result, sql/schema_v103.sql), keyed on the asker; it has no tool that is not a GET. Anyone who can open the dashboard may use it (the operator, 2026-10-09): every person role holds agent.ask. An .xlsx built at request time from the asker's own stored results; 404 for anybody else's conversation or after 24 hours.",
   "auditRead": true
+ },
+ {
+  "method": "GET",
+  "path": "/api/online/hours",
+  "subject": "BK",
+  "carries": [
+   "BK",
+   "ID",
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "drivers[].name",
+     "drivers[].driver_ext_id"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "timeline_to",
+     "live_from",
+     "live_to",
+     "sources"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/online_hours_routes.js. One Dubai day of Uber availability: hours[24] {hour, state recorded|recorded+live|live|partial|not_collected|future, drivers, drivers_live_only, online_h, live_h, avg_online, measured_min}; drivers[] {driver_ext_id, name, fleet_id, minutes[24], live[24], total_min, first_hour, last_hour}; totals; timeline_to; live_from/live_to; absent_why; basis. Stored hours from driver_online_hour (sql/schema_v106.sql); hours past the timeline's last run from driver_status_event at request time. Names are ID; minutes per account are aggregate availability."
+ },
+ {
+  "method": "GET",
+  "path": "/api/online/hours/range",
+  "subject": "BK",
+  "carries": [
+   "BK",
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "SYS",
+    "paths": [
+     "timeline_to"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/online_hours_routes.js. Day x hour from driver_online_hour only: days[] {day, drivers[24], online_h[24], total_h, peak, complete, absent_why}; avg_drivers_by_hour[24] over complete days; days_averaged; timeline_to; basis. No names."
  }
 ]

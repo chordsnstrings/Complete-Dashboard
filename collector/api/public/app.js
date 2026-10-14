@@ -38,6 +38,7 @@ import { COHORTS, membersOf } from './cohorts.js';
 import { renderCauses } from './causes.js';
 import { renderTrips } from './trips.js';
 import { renderOnlineTime } from './onlinetime.js';
+import { renderOnlineHours } from './onlinehours.js';
 import { renderCancellations } from './cancellations.js';
 import { peopleCards, peopleResolved, namesLine } from './people.js';
 import { renderProvenance } from './provenance.js';
@@ -477,6 +478,7 @@ const VIEWS = [
   { id: 'platforms', label: 'Platforms', ic: '◨', sec: 'Work', sub: 'How Uber, Yango and Bolt compare on share, car tier and jobs accepted' },
   { id: 'corridors', label: 'Popular routes', ic: '⇄', sec: 'Work', sub: 'Which pickup areas feed which drop-off areas' },
   { id: 'drivers', label: 'Drivers', ic: '◧', sec: 'People', sub: 'Trips, quality and platform activity for every driver' },
+  { id: 'online-hours', label: 'Online by hour', ic: '◷', sec: 'People', sub: 'How many Uber drivers were online in each hour of any day kept, and who — the hours are stored, so the days Uber has forgotten are still here' },
   { id: 'online-time', label: 'Online time', ic: '◔', sec: 'People', sub: 'When each driver came online on Uber — or, where Uber has no timeline for them, when they were first given a job on another channel — against the time you expect them to start' },
   { id: 'cancellations', label: 'Cancellations', ic: '⊘', sec: 'People', sub: 'Every driver with a cancelled booking, and whether they or the rider called it off' },
   { id: 'roster', label: 'Driver roster', ic: '☰', sec: 'People', sub: 'Every driver on the books on each platform, and who is earning nothing' },
@@ -2392,6 +2394,9 @@ async function demandContract(root) {
 /* Subscripted, because the id carries a hyphen and V.online-time is not a
    property access. bin/page-audit.mjs matches both forms. */
 V['online-time'] = async (root) => renderOnlineTime(root);
+/* Uber drivers online by hour (2026-10-14): the day is in the address,
+   #online-hours/2026-10-01, so a day can be sent to somebody. */
+V['online-hours'] = async (root) => renderOnlineHours(root, state.param);
 V.cancellations = async (root) => renderCancellations(root);
 
 V.drivers = async (root) => {
