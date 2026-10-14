@@ -3313,6 +3313,37 @@ driver's 222 tracker fixes.
   BK/VEH/LOC path throws for that role. Read every classed field as possibly
   null, and say the withheld class with `withheldSentence()` — never "No
   booking" or "no car is on record" about a day the role is not shown.
+* **A point-in-time view of the fleet undercounts a parked yard by about four
+  fifths.** Many FMS units sleep when the car is parked and wake every few days
+  for 2–8 fixes (others report all day — it is the unit, not the make); dead
+  CABMAN units send nothing. `/api/where/fleet` saw 1–4 cars at the Al Doha St
+  yard while 13–15 had been parked there (measured 2026-10-14). A "where are the
+  idle cars" answer needs each car's LAST POSITIONED fix with its age, never a
+  snapshot. And `/api/vehicles/directory`'s `last_fix` is the newest telemetry
+  row from ANY source, including Uber's coordinate-free status rows — it is not
+  a last position; `/api/where`'s "last position on record" (lat IS NOT NULL) is.
+* **"Moved" from a maximum speed is wrong for a parked FMS car.** GPS jitter on
+  a stationary unit reads 15–24 km/h and 1–3 km in a day; every low-speed
+  "moved" day sampled on 2026-10-14 was one stop of about 1,430 minutes. Decide
+  movement from distance and stop structure (`/api/where`), not `max_speed`.
+  And CABMAN writes no journeys, so every "days moved" built on `trip_norm`
+  (the directory, the #vehicles cohorts, `/api/economics/assets`) cannot see a
+  CABMAN car driven without a booking.
+* **FMS rewrites a stored fix's status later.** It re-sends the same
+  `tracktime` with a new `vehiclestatus` and the upsert overwrites the row: L46172's
+  fix at 2026-10-13 06:59:54Z read Moving at 21.4 h of silence and Inactive at
+  21.9 h. A parked car can read "Moving" for 20 hours. "Inactive since" must be
+  captured when the change is seen; it cannot be read back from history.
+* **Every vehicle status table is overwritten in place.** `vehicle_profile`,
+  `vehicle_document` have no time in their key and `updated_at` is first-insert
+  time only, so the day a car went INACTIVE (Uber), was suspended (Bolt) or set
+  to repairing (Yango) is gone by the next 30-minute poll. A car-state history
+  has to be written on purpose — `driver_rating_history` is the precedent.
+* **Long stays at the configured charging sites are not garage time either.**
+  The two busiest dwell addresses in FMS (48 51st St – Al Garhoud, Production
+  City Plot C23) are the operator's `CHARGING_SITES` and shift points; working
+  cars gather there. Same ruling as the charging trap below: a place is a
+  suggestion for a person to confirm, never a record.
 * Online spans are **clipped to the Dubai day**, so a shift that began 23:43 the
   night before reads as `00:00`. Never print that as a start time; read the
   un-clipped ONLINE transition.
@@ -9613,6 +9644,54 @@ revert in test/driver_day_movement.test.mjs and test/driver_day_page.test.mjs):*
   "to the end of his hours in it" otherwise. "so far" on the log-in record only
   while today's record is behind the live feed. A car whose tracker sent
   nothing has its reason, never "0.0 km".
+
+## Vehicles off the road — what the data says, measured 2026-10-14
+
+The operator: "A lot of vehicles can stay in garage, which is out of sanction
+for the day. Garage management can be a key to operations - and what work is
+being done, and when it is back to work. Audit, research and report. don't code
+yet." Then: "none of the platforms has it. it will be here." The plan is
+`docs/GARAGE-PLAN.md`; this section holds what was measured (30 Dubai days
+2026-09-14..10-13, production's read API only, each figure re-derived by a
+second pass; corrected figures are the ones given).
+
+- **The fleet:** 139 VIN cars (one more than 2026-09-07), 128 Uber-ACTIVE, 11
+  INACTIVE. 92.2 of the 128 took a booking on an average day (81–97); idle
+  share 24.2–36.7%, mean 28.0%, Sundays idlest. 25,805 of 25,836 bookings carry
+  a VIN plate.
+- **Idle:** 21 Uber-ACTIVE cars took no booking in 30 days (630 of 1,075 idle
+  active car-days); the rest is a rotation of about 15 cars a day, mostly
+  one-day gaps. 29 of the 31 cars with neither a booking nor an FMS journey
+  all window, and all 11 INACTIVE cars, are Teslas (79 of 139).
+- **Where idle cars stand** (street names from the gazetteer, never a
+  business): 26-28 Al Doha St (≥15 Ecosine cars, all parked — a lay-up yard by
+  behaviour); Production City Plot C23 (a hub and a configured charging site;
+  cars staged there before returning to work); 93 Manama St / 208 Ras Al Khor
+  St (Ras Al Khor Industrial); Al Quoz Industrial Area 2 (one car's every
+  night). None is proven to be a garage. Cars are moved between these places
+  with no booking — a measurable transfer.
+- **Provider flags:** Yango car `status` documents `repairing`, collected every
+  30 min, all 104 read `working`. Bolt `getVehicles` (active / deactivated /
+  suspended + reason) is not collected. Uber compliance ACTIVE 128 / INACTIVE
+  11 follows ONE document, the Vehicle Registration Form; the 11 INACTIVE are
+  exactly the 11 EXPIRED registrations with a null expiry. FMS `GetVehicleStats`
+  (`outofservice`) is not collected; `GetGeofenceInfo` answered
+  "Authentication failed". No feed carries a reason, a workshop, a cost or an
+  expected return.
+- **Odometer:** CABMAN on every fix. FMS sends Odometer/DeviceOdometer in
+  `GetVehicleCurrentDetails` (polled every 2 min) but only `Seatcount` is kept
+  (`src/sources/fms.js:546-587`); raw `previousDistance` (100% fill) carries
+  odometer-sized values on some cars, meaning undocumented — one question for
+  InfoTrack before an odometer collector is written.
+- **Registration expiry** is the only dated document: 8 cars due within 7 days,
+  28 within 45 (on 2026-10-14).
+- **Trackers:** 7 of the 15 cars dark all window had trackers that died while
+  the car still worked; CABMAN's missed working days sit on 7 units, FMS's on
+  8. "Main Power Lost": 7,193 alerts on 12 cars in 30 days, mostly cars that
+  work daily — a wiring fault, not a garage signal.
+- **Not measured:** what a day off the road costs. `VEHICLE_DAY_COST_AED`
+  (AED 120) is a setting; fares exist on 981 of 2,765 working car-days, so a
+  car's day needs its attributed payout, not its fares.
 
 ## The target shared by weekday — built 2026-10-11
 
