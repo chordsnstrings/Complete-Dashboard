@@ -1,6 +1,6 @@
 /* ── the merge register: identities somebody verified, one pair at a time ────
    ──────────────────────────────────────────────────────────────────────────
-   Two lists come out of this file. MERGES is APPLIED — four hundred and sixty
+   Two lists come out of this file. MERGES is APPLIED — four hundred and sixty-one
    entries over two hundred and thirty-seven people, which sql/schema_v53.sql is
    generated from, so the database already stores the answer in person_key. PENDING is VERIFIED AND
    DELIBERATELY NOT APPLIED: none since 2026-10-08. It held the pairs that carry a CONTRADICTION, a day on
@@ -10,7 +10,7 @@
    until the review of 2026-10-08 ruled the last of them; all five are at the
    end of HAND_MERGES with the dates they were ruled over.
 
-   Four lists built the four hundred and sixty, and they are kept apart below
+   Four lists built the four hundred and sixty-one, and they are kept apart below
    rather than blended, because they are believable for three different
    reasons. The counts in this comment are asserted in
    test/identity_register_counts.test.mjs: they said ninety-three over ninety
@@ -20,7 +20,7 @@
    words rather than the register's size. A register whose own header
    misdescribes it is a register nobody trusts to re-read:
 
-     · 11 in HAND_MERGES, checked one pair at a time against production or
+     · 12 in HAND_MERGES, checked one pair at a time against production or
        ruled by the operator. The fourth is a pair this file once REFUSED as
        undecidable and the operator ruled on, 2026-09-22. The fifth is a pair
        the sweep below held back in PENDING over a one-trip contradiction,
@@ -30,6 +30,9 @@
        under two keys, re-keyed the same day. The eleventh is the operator's
        ruling of 2026-10-12 on a pair the bottom-45 report flagged: the Bolt
        "shajahan Mk" and the Uber "Shajahan Machilakath", one car, one man.
+       The twelfth is the next report's pair, ruled 2026-10-15: the Bolt
+       "Mohammad Shahin Mohammad Shahazan" linked onto the key the roster had
+       already given his Uber and hotel records — five cars, one man.
      · 45 in CANDIDATES, from the shared-history sweep — same cars, same days,
        trips interleaving inside the day rather than following one another.
        All forty-five are clean and applied. (The sweep found fifty; the other
@@ -466,6 +469,42 @@ const HAND_MERGES = Object.freeze([
       'The deciding evidence is the operator\'s ruling; the measurements are consistent with it and could not '
       + 'have decided it alone (a shared car with a co-driver interleaves too). No licence or Emirates ID was '
       + 'compared. If a shift in two cars at once ever turns up for this pair, it goes back to the operator.',
+  },
+  /* Ruled 2026-10-15. The bottom-45 driver report (14 Sep – 13 Oct) listed
+     these two records at #1 and #42 and flagged them — one car, names a
+     letter apart, never linked. The key already exists: FROM_ROSTER joined
+     his hotel record and the Uber account 47f7edb9 on 2026-09-07. The Bolt
+     account was in no entry, so this one links it onto that key; only the
+     Bolt account's trips change key. */
+  {
+    key: 'mohammad shahin mohammad shahazanan',
+    /* The key's survivor is the roster entry's: his hotel record, with the
+       Uber account 47f7edb9 already an alias of it (the register is flat —
+       a kept id may not also be merged). The figures below are the Uber
+       account's, the record that carries his trips. */
+    keep:  { id: '67483c64055e070d79100129', name: 'Mohammad Shahin Mohammad Shahazanan', channel: 'hotel' },
+    merge: { id: '6628697', name: 'Mohammad Shahin Mohammad Shahazan', channel: 'bolt' },
+    plates: ['L44286', 'L76101', 'L75122', 'L44305', 'L77059'],
+    days: { shared: 227, interleaved: 179, alias: 302, keep: 381 },
+    trips: { alias: 675, onSharedCars: 557 },
+    contradictions: [],
+    ruling: { by: 'operator', on: '2026-10-15', words: 'Yes merge', over: [] },
+    verified: '2026-10-15',
+    evidence:
+      'RULED BY THE OPERATOR, 2026-10-15, on the bottom-45 report that flagged the pair: "Yes merge". Measured on '
+      + 'production the day before (/api/driver/trips, whole history: Bolt 6628697 675 bookings, 298 completed; '
+      + 'Uber 47f7edb9 2,417, 2,046 completed). The two records moved through the same five cars in the same '
+      + 'order on the same dates — L44286, L76101, L75122 (one day, 2025-10-02, on both), L44305 (2025-10-03 to '
+      + '2026-04-25 on both, first day and last) and L77059 (from 2026-08-29 on both). 227 of the Bolt record\'s '
+      + '302 days are days the Uber record worked the same car, and on 179 of them a Bolt booking falls between '
+      + 'that day\'s Uber bookings; the nearest are 0.1 minutes apart. 557 of the 675 Bolt bookings are on cars '
+      + 'the Uber record drove; the other 118 are 2024-12-29 to 2025-02-05, before the Uber record\'s first trip '
+      + '(2025-04-05). Completed trips within ten minutes of each other in two different cars: none; in the same '
+      + 'car: 72. The report listed them as two people, #1 (Bolt, AED 504.00) and #42 (Uber, AED 12,163.14).',
+    caveat:
+      'The deciding evidence is the operator\'s ruling; a shared car with a co-driver interleaves too, though '
+      + 'not across five cars in the same order. No licence or Emirates ID was compared. If a shift in two cars '
+      + 'at once ever turns up for this pair, it goes back to the operator.',
   },
 ]);
 

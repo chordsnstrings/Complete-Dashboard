@@ -9410,6 +9410,38 @@ interleaved, and never in two cars at once.
   numeral 9770175 (the account his one Bolt trip is filed under) is in no
   entry. Left for the operator to rule.
 
+### And another, ruled 2026-10-15: Mohammad Shahin Mohammad Shahazanan
+
+The next bottom-45 report (14 Sep – 13 Oct) listed the Bolt "Mohammad Shahin
+Mohammad Shahazan" (#1, 6628697, AED 504.00) and the Uber "Mohammad Shahin
+Mohammad Shahazanan" (#42, 47f7edb9, AED 12,163.14), both on L77059, and
+flagged them. The operator: "Yes merge". Measured on production first over
+both whole histories (675 Bolt bookings, 2,417 Uber):
+
+- **Five cars, one order, one set of dates.** L44286 → L76101 → L75122 (one
+  day, 2025-10-02, on both) → L44305 (2025-10-03 to 2026-04-25 on both, to the
+  day) → L77059 (from 2026-08-29 on both). 227 of the Bolt record's 302 days
+  are days the Uber record worked the same car, 179 interleaved, the nearest
+  bookings 0.1 minutes apart; completed trips within ten minutes of each other
+  in two different cars: none. Measuring a pair on its shared CAR alone would
+  have missed the strongest evidence here — the order of the cars over two
+  years — and the contradiction check must run over every car either record
+  drove, not only the shared one: the Bolt record's 283 trips on L44305 were
+  the trips that could have proved two men, and did not.
+- **Added, not re-keyed — onto a key the roster already held.** FROM_ROSTER
+  had joined his hotel record and the Uber account on 2026-09-07; the Bolt
+  account was in no entry. The new HAND_MERGES entry keeps the roster's
+  survivor (the hotel record): the register is flat, and `assertRegister`
+  refuses an id that is kept in one entry and merged in another — the first
+  draft, keeping the Uber account, failed it at import. 461 entries over 237
+  people (HAND 11 → 12), 161 keys with more than one entry, v53 506 WHENs.
+- **The spine's survivor is not the register's.** On production he was person
+  99 (Uber + hotel) and person 223 (Bolt). `sql/schema_v108.sql` keeps the row
+  holding the Uber account and folds any other row holding his accounts into
+  it; test/identity_shahazan_merge.test.mjs checks that v108 names exactly the
+  register's ids for the key (13; v108 a no-op → 6 fail; the register entry
+  removed → 3 fail).
+
 ## The chat assistant — built 2026-10-09
 
 The operator asked for "an AI agent powered by … seed 2.0 pro where users can

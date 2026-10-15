@@ -86,7 +86,7 @@ const ID_SHAPE = /^[0-9]{4,12}$|^[0-9a-f]{24}$|^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a
 /* The sizes, pinned. A register that grows is the normal case and these
    numbers are MEANT to be edited when it does — deliberately, by the person
    who grew it, and never silently by the sweep that produced the new rows. */
-const EXPECT = { merges: 460, pending: 0, refused: 3, people: 237, aliasIds: 505,
+const EXPECT = { merges: 461, pending: 0, refused: 3, people: 237, aliasIds: 506,
   joined: 144, foldsTo: 246 };
 /* 2026-09-29, the operator's ruling on Ali Abbas Ahmed: one entry out of
    PENDING and into MERGES (131 -> 132, pending 5 -> 4), a key the register
@@ -111,7 +111,15 @@ const EXPECT = { merges: 460, pending: 0, refused: 3, people: 237, aliasIds: 505
    adds an alias id (504 → 505). It filed trips and is on this file's roster
    beside the Uber record, so the register joins one more group over it (143 →
    144) and the rows fold one further (247 → 246). Measured by running this
-   file. */
+   file.
+
+   2026-10-15, the operator's ruling on the next report's pair ("Yes merge"):
+   the Bolt "Mohammad Shahin Mohammad Shahazan" (6628697) linked onto the key
+   the roster had already given his Uber and hotel records — a new entry
+   (460 → 461) on an existing key (people stay 237), one new alias id (505 →
+   506). The Bolt account is not on this file's 2026-09-03 snapshot, so the
+   groups joined and the rows folded over it do not move (144, 246). Measured
+   by running this file. */
 /* And by the date each sweep ran, so a batch arriving without the evidence
    shape its method produces shows up as a moved number rather than as
    nothing at all. */
@@ -137,9 +145,11 @@ const EXPECT = { merges: 460, pending: 0, refused: 3, people: 237, aliasIds: 505
    onto one. The 2026-09-05 sweep's applied count stays 45: the four left its
    held-back list, not its applied one. 2026-10-12 is the operator's ruling on
    Shajahan Machilakath, a hand merge carrying its own date; it took the
-   review's "shajahan mk" entry with it (329 → 328). */
+   review's "shajahan mk" entry with it (329 → 328). 2026-10-15 is the
+   operator's ruling on Mohammad Shahin Mohammad Shahazanan, a new hand merge
+   carrying its own date. */
 const BY_DATE = { '2026-09-03': 3, '2026-09-05': 45, '2026-09-07': 81, '2026-09-22': 1,
-  '2026-09-29': 1, '2026-10-08': 328, '2026-10-12': 1 };
+  '2026-09-29': 1, '2026-10-08': 328, '2026-10-12': 1, '2026-10-15': 1 };
 const sortedEntries = (o) => JSON.stringify(Object.entries(o).sort((a, b) => a[0].localeCompare(b[0])));
 
 /* The control: a production record the register has never been told about.

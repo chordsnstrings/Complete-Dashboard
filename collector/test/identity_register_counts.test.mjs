@@ -35,6 +35,9 @@
    ("the duplicate is a duplicate"): HAND_MERGES 10 → 11, FROM_REVIEW 324 →
    323 — the "shajahan mk" link moved and re-keyed onto the Uber record — so
    the total stays 460 over 237 and 160 keys still carry more than one.
+   2026-10-15, the operator's ruling on the next report's pair ("Yes merge"):
+   HAND_MERGES 11 → 12, a new link onto a key the roster already held, so 461
+   over 237, and that key now carries two entries (160 → 161).
 
    Proved by revert, 15 checks: with only the header's words put back to "a
    hundred and thirty-one … a hundred and twenty-five" (what it should have
@@ -74,36 +77,36 @@ const review = keysIn('FROM_REVIEW');
 const people = new Set(MERGES.map((m) => m.key)).size;
 
 console.log('\nthe register is the size both documents say it is');
-check('MERGES is 460 entries', MERGES.length === 460, String(MERGES.length));
+check('MERGES is 461 entries', MERGES.length === 461, String(MERGES.length));
 check('…over 237 people', people === 237, String(people));
 check('…and none is held back any more', PENDING.length === 0, String(PENDING.length));
 check('the three sweeps add up to the applied total',
   hand.length + (cand.length - PENDING.length) + roster.length + review.length === MERGES.length,
   `${hand.length} + ${cand.length - PENDING.length} + ${roster.length} + ${review.length}`);
 check('and each sweep is the size the header states',
-  hand.length === 11 && cand.length === 45 && roster.length === 81 && review.length === 323,
+  hand.length === 12 && cand.length === 45 && roster.length === 81 && review.length === 323,
   `${hand.length} / ${cand.length} / ${roster.length} / ${review.length}`);
 {
   const per = {};
   for (const m of MERGES) per[m.key] = (per[m.key] || 0) + 1;
   const multi = Object.values(per).filter((n) => n > 1).length;
-  check('160 keys carry more than one entry, which mergedIds() unions', multi === 160, String(multi));
+  check('161 keys carry more than one entry, which mergedIds() unions', multi === 161, String(multi));
 }
 
 console.log('\nand both documents say those numbers, in words');
 check('the register header states the applied total',
-  /four hundred and sixty\s+entries\s+over two hundred and thirty-seven people/.test(src),
+  /four hundred and sixty-one\s+entries\s+over two hundred and thirty-seven people/.test(src),
   'api/identity_map.js');
 check('…and the held-back count', /PENDING is VERIFIED AND\s+DELIBERATELY NOT APPLIED: none since 2026-10-08/.test(src));
 check('…and the roster sweep size', /·\s*81 in FROM_ROSTER/.test(src));
-check('…and the hand-merge size', /·\s*11 in HAND_MERGES/.test(src));
+check('…and the hand-merge size', /·\s*12 in HAND_MERGES/.test(src));
 check('…and the shared-history sweep size', /·\s*45 in CANDIDATES/.test(src));
 check('…and the review size', /·\s*323 in FROM_REVIEW/.test(src));
 check('CLAUDE.md states the same pair',
-  /applies 460 entries over 237 people/.test(claude), 'CLAUDE.md');
-check('…the same sweep split', /11 hand-checked or hand-ruled, 45 from a shared-custody sweep, 81 on a phone\s+number the roster filed against both records, 323 from the operator's review/.test(claude));
+  /applies 461 entries over 237 people/.test(claude), 'CLAUDE.md');
+check('…the same sweep split', /12 hand-checked or hand-ruled, 45 from a shared-custody sweep, 81 on a phone\s+number the roster filed against both records, 323 from the operator's review/.test(claude));
 check('…the same held-back count', /and holds back none/.test(claude));
-check('…and the same duplicate count', /160 people\s*\n?carry more than one entry/.test(claude));
+check('…and the same duplicate count', /161 people\s*\n?carry more than one entry/.test(claude));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

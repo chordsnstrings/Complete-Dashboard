@@ -335,4 +335,8 @@ export const SCHEMA_FILES = [
      (the instant it read the timeline, and back to which day), so
      /api/online/hours never reads an unbuilt hour as nobody online. */
   'schema_v107.sql',
+  /* v108: the operator's ruling of 2026-10-15 — the Bolt "Mohammad Shahin
+     Mohammad Shahazan" folded into the person row holding his Uber account
+     (v105's recorded merge, for this one person). */
+  'schema_v108.sql',
 ];

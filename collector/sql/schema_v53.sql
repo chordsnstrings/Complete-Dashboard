@@ -1,4 +1,4 @@
--- ── 460 people who were on the roster more than once, folded onto one key each ──
+-- ── 461 people who were on the roster more than once, folded onto one key each ──
 -- ---------------------------------------------------------------------------
 -- person_key is what every surface in this product groups people by, and it
 -- was the folded NAME and nothing else: lowercase, collapse runs of
@@ -29,7 +29,7 @@
 -- on which both records took a trip at the same time. 0 carry one, they stay
 -- in PENDING, and a simultaneous trip outranks a shared phone every time.
 -- What IS here despite one is a pair the operator ruled on over its
--- contradiction — 330 so far, marked "ruled" in the register below. A person
+-- contradiction — 331 so far, marked "ruled" in the register below. A person
 -- who knows the man outranks one feed row's vehicle field, and the ruling is
 -- recorded in api/identity_map.js as a ruling, not as a measurement.
 --
@@ -74,6 +74,9 @@
 -- 9585892, 0f314ca4-fedd-4de5-9b48-59f274776381 (bolt "shajahan Mk")
 --   -> 72f3f926-3cd6-40ac-acfb-6d8450477f1b (uber "Shajahan Machilakath Machilakath") = 'shajahan machilakath'
 --   verified 2026-10-12 on 1 shared plate; ruled by the operator 2026-10-12
+-- 6628697 (bolt "Mohammad Shahin Mohammad Shahazan")
+--   -> 67483c64055e070d79100129 (hotel "Mohammad Shahin Mohammad Shahazanan") = 'mohammad shahin mohammad shahazanan'
+--   verified 2026-10-15 on 5 shared plates; ruled by the operator 2026-10-15
 -- 6612891 (bolt "Shehzad Ahmed Ghulam Muhammad")
 --   -> f6253b6e-fca4-41cf-99c1-6c2f3e2e67b2 (uber,hotel "Shehzad Ahmad Ghulam Muhammad") = 'shehzad ahmad ghulam muhammad'
 --   verified 2026-09-05 on 7 shared plates
@@ -1490,6 +1493,7 @@ DECLARE
          WHEN '6633456' THEN 'amshid khan'
          WHEN '9585892' THEN 'shajahan machilakath'
          WHEN '0f314ca4-fedd-4de5-9b48-59f274776381' THEN 'shajahan machilakath'
+         WHEN '6628697' THEN 'mohammad shahin mohammad shahazanan'
          WHEN '6612891' THEN 'shehzad ahmad ghulam muhammad'
          WHEN '6598721' THEN 'aliyan khalil'
          WHEN '67483c64055e070d791000d2' THEN 'aliyan khalil'
@@ -2007,7 +2011,7 @@ BEGIN
          -- …and carries as many merges as this register has, so a column built
          -- from a SUPERSET that happens to end on the same pair still rebuilds.
          AND (length(c.generation_expression)
-              - length(replace(c.generation_expression, 'WHEN ', ''))) / 5 = 505);
+              - length(replace(c.generation_expression, 'WHEN ', ''))) / 5 = 506);
     need := true;
   END LOOP;
   IF NOT need THEN RETURN; END IF;

@@ -54,12 +54,12 @@ register rebuilds instead of being skipped. Edit the register, run
 `node bin/gen-schema-v53.mjs`, and never hand-edit the .sql.
 
 **Who is one person lives in `api/identity_map.js`,** a hand-reviewed LIST of
-verified pairs — never a name rule. It applies 460 entries over 237 people
-(11 hand-checked or hand-ruled, 45 from a shared-custody sweep, 81 on a phone
+verified pairs — never a name rule. It applies 461 entries over 237 people
+(12 hand-checked or hand-ruled, 45 from a shared-custody sweep, 81 on a phone
 number the roster filed against both records, 323 from the operator's review of
 2026-10-08) and holds back none: the last pairs that carried a simultaneous
-trip in two cars were ruled on 2026-10-08. Eight of the eleven hand entries are
-operator rulings (2026-09-22, 2026-09-29, 2026-10-08, 2026-10-12): a ruling moves the pair
+trip in two cars were ruled on 2026-10-08. Nine of the twelve hand entries are
+operator rulings (2026-09-22, 2026-09-29, 2026-10-08, 2026-10-12, 2026-10-15): a ruling moves the pair
 to the END of `HAND_MERGES` with its evidence and any contradiction date kept,
 never deleted. A link confirmed on the Same person page folds the Drivers page
 but NOT `person_key` — every total counts the two records apart until the link
@@ -69,7 +69,7 @@ answer for the Drivers page: that groups by the person spine (`driver` +
 `driver_platform_id`, `src/persons.js`), which folds two person rows only while
 neither carries money, and never detaches — see `sql/schema_v93.sql` and
 `sql/schema_v102.sql` for recorded merges, `sql/schema_v101.sql` for a split.
-`mergedIds`/`canonicalName` union across every entry on a key: 160 people
+`mergedIds`/`canonicalName` union across every entry on a key: 161 people
 carry more than one entry. **These counts are asserted in
 `test/identity_register_counts.test.mjs`** — they went stale once, at 93 over
 90, and prose nobody checks is prose that lies.
