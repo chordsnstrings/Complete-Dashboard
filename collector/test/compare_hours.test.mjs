@@ -30,7 +30,14 @@
      (e) the withheld branch removed: 1 fails — "No revenue on either day"
          printed to a role that may not see revenue.
      (f) the stale-answer guard removed: 1 fails — a response cached across
-         the deploy drew "Nothing" for people and money. */
+         the deploy drew "Nothing" for people and money.
+     (g) complimentary rides counted as pending again: 5 fail — Egari's
+         hotel channel projected on a day with nothing left to price (whole
+         fleet, Egari alone and the day page), and in both skins two more
+         hatched hours and a caption naming a hotel estimate.
+     (h) unvalued counted as bookings minus priced: 3 fail — the Yango
+         cancellation counted as money missing, on the route and in both
+         skins' captions ("2 bookings on Yango"). */
 import { PGlite } from '@electric-sql/pglite';
 import express from 'express';
 import { applySchema } from './schema.mjs';
@@ -49,9 +56,9 @@ let n = 0;
 const trip = (o) => q(
   `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
      requested_at, ended_at, distance_km, status, price, payment_type)
-   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,10,'completed',$9,$10)`,
+   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,10,$11,$9,$10)`,
   [o.platform || 'uber', `h${n++}`, o.fleet || 'ecosine', o.plate || 'L100', o.drv, o.name,
-    o.at, o.end || null, o.price ?? null, o.pay || null]);
+    o.at, o.end || null, o.price ?? null, o.pay || null, o.status || 'completed']);
 
 /* The settled fortnight behind both days: ten Uber bookings a day per fleet,
    nine priced — AED 50 a fare on ecosine, AED 100 on egari, so the two fleets'
@@ -62,6 +69,12 @@ await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id
                 ('2026-08-' || lpad(d::text, 2, '0') || 'T12:00:00+04:00')::timestamptz, 10, 'completed',
                 CASE WHEN g <= 9 THEN CASE f WHEN 'ecosine' THEN 50 ELSE 100 END END
            FROM generate_series(10, 23) d, generate_series(1, 10) g, unnest(ARRAY['ecosine','egari']) f`);
+/* …and Egari's hotel channel, which prices every ride as it lands. */
+await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+           requested_at, distance_km, status, price, payment_type)
+         SELECT 'hotel', 'hh-' || d || '-' || g, 'egari', 'L800', 'hist-hotel', 'History hotel',
+                ('2026-08-' || lpad(d::text, 2, '0') || 'T12:00:00+04:00')::timestamptz, 10, 'completed', 100, 'room-charge'
+           FROM generate_series(10, 23) d, generate_series(1, 5) g`);
 
 /* B, settled: three Uber bookings, each priced. */
 await trip({ drv: 'u-1', name: 'Same Person', at: `${B}T08:10:00+04:00`, price: 60 });
@@ -79,8 +92,22 @@ await trip({ drv: 'u-2', name: 'Other One', at: `${A}T09:05:00+04:00` });
 await trip({ drv: 'u-2', name: 'Other One', at: `${A}T09:40:00+04:00` });
 await trip({ drv: 'u-3', name: 'Third Driver', at: `${A}T14:20:00+04:00` });
 await trip({ drv: 'e-1', name: 'Egari Driver', fleet: 'egari', plate: 'L700', at: `${A}T14:30:00+04:00` });
-// …and a channel with no settled day anywhere behind it.
+// …and a channel with no settled day anywhere behind it — one finished ride
+// with no fare, and one cancellation, which is not money missing.
 await trip({ drv: 'y-1', name: 'Yango Driver', platform: 'yango', at: `${A}T16:00:00+04:00` });
+await trip({ drv: 'y-1', name: 'Yango Driver', platform: 'yango', at: `${A}T16:30:00+04:00`, status: 'cancelled' });
+/* Egari's hotel rides on the pending day: two billed, two given away — the
+   shape production showed on 15 October 2026 (6 completed, 4 priced, the
+   other two foc-complimentary), which read as 2 of 4 "pending" and drew an
+   estimate on a day with nothing left to price. */
+await trip({ drv: 'eh-1', name: 'Egari Hotel Driver', platform: 'hotel', fleet: 'egari', plate: 'L800',
+  at: `${A}T20:00:00+04:00`, price: 100, pay: 'room-charge' });
+await trip({ drv: 'eh-1', name: 'Egari Hotel Driver', platform: 'hotel', fleet: 'egari', plate: 'L800',
+  at: `${A}T20:20:00+04:00`, price: 100, pay: 'room-charge' });
+await trip({ drv: 'eh-1', name: 'Egari Hotel Driver', platform: 'hotel', fleet: 'egari', plate: 'L800',
+  at: `${A}T20:40:00+04:00`, price: 50, pay: 'foc-complimentary' });
+await trip({ drv: 'eh-1', name: 'Egari Hotel Driver', platform: 'hotel', fleet: 'egari', plate: 'L800',
+  at: `${A}T21:00:00+04:00`, price: 50, pay: 'foc-complimentary' });
 
 const { server, get: raw } = await mountAll(db, { serverRoutes: false });
 const cmp = async (qs) => (await raw(`/api/compare?a=${A}&b=${B}&${qs}`)).body;
@@ -113,7 +140,7 @@ check('…on the same working: channel, unpriced bookings, rate and value',
     === JSON.stringify((day.projection_parts || []).map((p) => [p.platform, p.bookings, p.per_booking, p.value])),
   JSON.stringify([rbA.parts, day.projection_parts]));
 check('…the fares on record are the fares the page totals', near(sum(full.hours, 'a_fares'), full.full_day.a.fares)
-  && near(rbA.on_record, 240), `${sum(full.hours, 'a_fares')} / ${full.full_day.a.fares}`);
+  && near(rbA.on_record, 440), `${sum(full.hours, 'a_fares')} / ${full.full_day.a.fares}`);
 check('each hour takes its share by its unpriced bookings: 09:00 holds two, 08:00 one',
   H(8).a_estimated > 0 && near(H(9).a_estimated, 2 * H(8).a_estimated) && near(H(14).a_estimated, 2 * H(8).a_estimated),
   JSON.stringify([H(8).a_estimated, H(9).a_estimated, H(14).a_estimated]));
@@ -123,6 +150,11 @@ check('a settled day carries no estimate anywhere',
   rbB.estimated === null && full.hours.every((h) => h.b_estimated === 0)
   && near(sum(full.hours, 'b_revenue'), 180) && near(full.full_day.b.fares, 180),
   JSON.stringify(rbB));
+check('rides given away are never pending: no estimate for the hotel, whole fleet or Egari alone',
+  !rbA.parts.some((p) => p.platform === 'hotel') && H(20).a_estimated === 0 && H(21).a_estimated === 0
+  && !(await cmp('cut=full&fleet=egari')).revenue_basis.a.parts.some((p) => p.platform === 'hotel')
+  && !(day.projection_parts || []).some((p) => p.platform === 'hotel'),
+  JSON.stringify([rbA.parts, (await cmp('cut=full&fleet=egari')).revenue_basis.a.parts]));
 check('a channel with no settled day adds nothing, and is named with its bookings',
   (rbA.unvalued_platforms || []).includes('yango') && rbA.unvalued_bookings === 1
   && H(16).a_unvalued === 1 && H(16).a_revenue === 0, JSON.stringify([rbA.unvalued_platforms, H(16)]));

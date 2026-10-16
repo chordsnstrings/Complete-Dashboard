@@ -133,6 +133,10 @@ export async function buildDay(q, day) {
                 count(*) FILTER (WHERE is_booking)::int bookings,
                 count(*) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::int priced,
                 count(*) FILTER (WHERE outcome = 'completed')::int completed,
+                /* Rides given away are finished and never priced, so the
+                   projection must not read them as pending
+                   (api/projection_sql.js). */
+                count(*) FILTER (WHERE outcome = 'completed' AND is_complimentary)::int complimentary,
                 count(*) FILTER (WHERE outcome IS NOT NULL)::int bookable,
                 sum(price) FILTER (WHERE NOT is_complimentary) revenue,
                 round(sum(distance_km) FILTER (WHERE has_distance)::numeric, 0) km

@@ -3998,9 +3998,12 @@ defensible, and two of them were learned by getting it wrong on production:
 spread over hours live in `api/projection_sql.js` (`PRICING_RATE_SQL`,
 `projectUnpriced`, `spreadByHour`), and three surfaces read them: `/api/day`
 (the trip value), `/api/target/hours` (revenue by hour on Target) and
-`/api/compare` (revenue by hour on #compare). Unfiltered, #compare's hours add
-up to the day page's `expected_revenue` for the same day to the fils
-(`test/compare_hours.test.mjs`). Measured on production before the change, at
+`/api/compare` (revenue by hour on #compare). Unfiltered, #compare's
+`revenue_basis` equals the day page's `expected_revenue` for the same day to
+the fils, and the 24 hours — each rounded to the fils on its own — sum to
+within a few fils of it: 18,417.41 against 18,417.39 on production at 14:15
+on 16 October. The caption prints the day figure, never the sum of the
+rounded hours (`test/compare_hours.test.mjs`). Measured on production before the change, at
 about 14:00 Dubai on 16 October: Uber is priced within hours now, not the next
 morning — 205 completed, 25 pending (12.2%), AED 2,294.50 projected over AED
 11,186.84 on record; 14 and 15 October carried no projection at all.
@@ -4012,6 +4015,21 @@ fleet (`api/access/middleware.js`), so a projection decided over both fleets
 and then shared out would hand that reader a rate and a floor built from the
 other fleet's money. The two fleets' #compare pages therefore need not add up
 to the unfiltered one to the dirham; each says only what its own records hold.
+
+**A ride given away is never pending.** The decision is completed minus
+priced, and `has_fare` excludes a complimentary ride, so a finished FOC ride
+read as "waiting for its price" — on a channel that will never price it.
+Deciding per fleet exposed it on the first production check (2026-10-16):
+Egari's hotel channel on the settled 15 October was 6 completed, 4 priced and
+2 `foc-complimentary`, "pending" 2 of 6 = 33%, and the page added AED 26.07 to
+a day with nothing left to arrive. Over both fleets the same two rides were 2
+of 28 and the 10% threshold had been hiding them. `projectUnpriced` now takes
+completed rides given away out before the subtraction (`complimentary` on
+each channel row, from `is_complimentary`). Scanned the day page for the 45
+days to 16 October: none carried an estimate on any channel at the time, so no
+whole-fleet figure moved. The "could not be valued" count on #compare counts
+finished, chargeable, unpriced rides only — a cancellation or a ride given
+away is not money missing.
 
 Measured against the day it projects: valuing 2026-09-08's unpriced bookings at
 the fourteen settled days behind them gives **≈ AED 35,600**, and 2026-09-07

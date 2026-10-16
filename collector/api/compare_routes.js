@@ -343,8 +343,14 @@ export function compareRoutes(app, { q, wrap }) {
                 count(*) FILTER (WHERE n.is_booking AND n.has_fare)::int priced,
                 count(*) FILTER (WHERE n.has_fare)::int priced_all,
                 count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
+                count(*) FILTER (WHERE n.outcome = 'completed' AND n.is_complimentary)::int complimentary,
+                /* Finished, chargeable and still without a fare: the bookings
+                   an unrated channel leaves unvalued. A cancellation without a
+                   fee or a ride given away is not money missing. */
+                count(*) FILTER (WHERE n.is_booking AND n.outcome = 'completed'
+                                   AND NOT n.is_complimentary AND NOT n.has_fare)::int pending,
                 sum(n.price) FILTER (WHERE n.has_fare) fares
-           FROM trip_norm n
+           FROM trip_ext n
           WHERE n.local_day IN ($1::date, $2::date)
             AND ($4::text IS NULL OR n.fleet_id = $4)
             AND ($5::text IS NULL OR n.platform = $5)
@@ -460,8 +466,8 @@ export function compareRoutes(app, { q, wrap }) {
       const rows = hourMoney.filter((r) => r.day === day).map((r) => ({ ...r, h: r.hour }));
       const chan = new Map();
       for (const r of rows) {
-        const c = chan.get(r.platform) || { platform: r.platform, bookings: 0, priced: 0, completed: 0, revenue: null };
-        c.bookings += r.bookings; c.priced += r.priced_all; c.completed += r.completed;
+        const c = chan.get(r.platform) || { platform: r.platform, bookings: 0, priced: 0, completed: 0, complimentary: 0, revenue: null };
+        c.bookings += r.bookings; c.priced += r.priced_all; c.completed += r.completed; c.complimentary += r.complimentary;
         if (r.fares != null) c.revenue = (c.revenue || 0) + Number(r.fares);
         chan.set(r.platform, c);
       }
@@ -475,14 +481,15 @@ export function compareRoutes(app, { q, wrap }) {
         fares[r.hour] += Number(r.fares);
         if (r.by_cut) faresByCut += Number(r.fares);
       }
-      /* Bookings with no price on a channel that has no settled day to value
-         them by. Absent with a reason: they add nothing to the hours they sit
-         in, and the page says how many there are rather than letting those
-         hours read as quiet. */
+      /* Finished, chargeable bookings with no price on a channel that has no
+         settled day to value them by. Absent with a reason: they add nothing
+         to the hours they sit in, and the page says how many there are rather
+         than letting those hours read as quiet. Cancellations and rides given
+         away are not counted — no money is missing for them. */
       const unvalued = Array(24).fill(0);
       const unratedSet = new Set(unrated.map((u) => u.platform));
       for (const r of rows) {
-        if (unratedSet.has(r.platform)) unvalued[r.hour] += Math.max(0, r.bookings - r.priced);
+        if (unratedSet.has(r.platform)) unvalued[r.hour] += r.pending;
       }
       const sum = (xs) => xs.reduce((x, v) => x + v, 0);
       const estimated = sum(est);

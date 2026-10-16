@@ -4799,11 +4799,11 @@ ONE scale, an hour the live day has not reached absent, never zero.
 
 | id | what | written | production | proven |
 |---|---|---|---|---|
-| CMP-H1 | `/api/compare` `hours[].a_drivers`/`b_drivers`: people with a booking requested in the hour, every channel, folded on the stored person key exactly as the Drivers out tile is (JOIN_TRIP, the same fallback to the account), fleet- and channel-bound; an FMS journey is no one | yes | no | `compare_hours`: counted on `driver_ext_id` → 3 fail |
-| CMP-H2 | `hours[].a_revenue` = `a_fares` (on record) + `a_estimated` (the day page's projection for bookings not priced yet, spread by each hour's unpriced bookings); `a_unvalued` counts bookings on a channel with no settled day; `revenue_basis.{a,b}` carries on record / estimated / both up to the cut, the parts and their rates. Unfiltered, the hours add up to `/api/day`'s `expected_revenue` | yes | no | `compare_hours`: spread evenly → 1 fails |
-| CMP-H3 | The projection lifted into `api/projection_sql.js`; `/api/day` and `/api/target/hours` read it (no figure moves: `day_routes` 73/73, `target_hours` 56/56). Under a fleet chip the decision and the rate are the fleet's own (`PRICING_RATE_SQL` `$3`) — a reader limited to one fleet gets nothing of the other fleet's fares | yes | no | `compare_hours`: the fleet clause removed → 2 fail (the fleet's own rate; the other fleet's history moving its page) |
-| CMP-H4 | The page: an hour holding an estimate is drawn as one (Arkiv hatch, old-skin hollow) and the caption names on record and estimated per day, the channel, its unpriced bookings, its rate and days, and "by HH:MM" for both days; people captioned with the busiest hour, why the hours overcount the day, and a link to Online by hour | yes | no | `compare_hours`: `hatchIf` dropped → 2 fail |
-| CMP-H5 | Absent with the true reason: a role served revenue as null is told "Not shown to your role", not "No revenue on either day"; an answer cached from before the fields existed says so, not "Nothing" | yes | no | `compare_hours`: each guard removed → 1 fails |
+| CMP-H1 | `/api/compare` `hours[].a_drivers`/`b_drivers`: people with a booking requested in the hour, every channel, folded on the stored person key exactly as the Drivers out tile is (JOIN_TRIP, the same fallback to the account), fleet- and channel-bound; an FMS journey is no one | yes | **on production** `f6260cf` | `compare_hours`: counted on `driver_ext_id` → 3 fail |
+| CMP-H2 | `hours[].a_revenue` = `a_fares` (on record) + `a_estimated` (the day page's projection for bookings not priced yet, spread by each hour's unpriced bookings); `a_unvalued` counts bookings on a channel with no settled day; `revenue_basis.{a,b}` carries on record / estimated / both up to the cut, the parts and their rates. Unfiltered, `revenue_basis` equals `/api/day`'s `expected_revenue`; the hours, each rounded on its own, sum within a few fils of it | yes | **on production** `f6260cf` | `compare_hours`: spread evenly → 1 fails |
+| CMP-H3 | The projection lifted into `api/projection_sql.js`; `/api/day` and `/api/target/hours` read it (no figure moves: `day_routes` 73/73, `target_hours` 56/56). Under a fleet chip the decision and the rate are the fleet's own (`PRICING_RATE_SQL` `$3`) — a reader limited to one fleet gets nothing of the other fleet's fares | yes | **on production** `f6260cf` | `compare_hours`: the fleet clause removed → 2 fail (the fleet's own rate; the other fleet's history moving its page) |
+| CMP-H4 | The page: an hour holding an estimate is drawn as one (Arkiv hatch, old-skin hollow) and the caption names on record and estimated per day, the channel, its unpriced bookings, its rate and days, and "by HH:MM" for both days; people captioned with the busiest hour, why the hours overcount the day, and a link to Online by hour | yes | **on production** `f6260cf` | `compare_hours`: `hatchIf` dropped → 2 fail |
+| CMP-H5 | Absent with the true reason: a role served revenue as null is told "Not shown to your role", not "No revenue on either day"; an answer cached from before the fields existed says so, not "Nothing" | yes | **on production** `f6260cf` | `compare_hours`: each guard removed → 1 fails |
 
 Money is printed to the fils on the axis and in the captions (the 2026-09-23
 ruling; a whole-dirham caption helper written first was caught against the
@@ -4819,3 +4819,20 @@ ones sit between cancellations and the driver table, where they were put; the
 pinned order now names them (103/103). `compare_hours` 29, `compare` 45,
 `access_manifest` 17, `access_pages` 150, `person_vs_account_counts` 64,
 `grain` 67, `day_routes` 73, `target_hours` 56 all green in the same run.
+
+**On production (f6260cf, deployment d3019638, 2026-10-16).** `/api/compare`
+for 16 against 15 October, cut at 14:15: today's `revenue_basis` AED
+18,417.39 = 14,946.41 on record + 3,470.98 estimated for 82 Uber bookings at
+AED 54.76 over 14 settled days — the same parts, rate and total `/api/day`
+answered for the day; the hours sum to 18,417.41 (each rounded on its own).
+15 October is settled: no estimate, the hours sum to the AED 46,614.60 on
+record. People at work peaked at 40 at 10:00 today and 64 at 18:00 on the
+15th; the hours sum to 260 and 676 against 87 and 101 people out — the
+overcount the caption says. Under each fleet chip the rate is the fleet's own
+(Uber AED 55.75 ecosine, 52.88 egari). The answer took 0.85–1.45 s against
+0.7–1.2 s before the deploy.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| CMP-H6 | A complimentary ride is never pending: `projectUnpriced` takes completed rides given away out of `completed` before subtracting `priced` (`complimentary` on each channel row — `/api/day`'s platform query and #compare's hourly money query, now over `trip_ext`); #compare's unvalued count is finished, chargeable, unpriced rides only. Found on that check: Egari alone on the settled 15 October drew AED 26.07 for 2 `foc-complimentary` hotel rides (2 of 6 = 33% "pending"; over both fleets 2 of 28, under the threshold) | yes | no | `compare_hours` 30/30: FOC counted as pending again → 5 fail; unvalued as bookings minus priced → 3 fail; `day_routes` 73, `target_hours` 56, `compare` 45 unchanged |
+

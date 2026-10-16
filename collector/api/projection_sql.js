@@ -84,8 +84,9 @@ const round = (v, d = 1) => (v == null || !Number.isFinite(Number(v)) ? null
 /* One day's projection, channel by channel.
 
    `platforms` is the day's rows per channel over the whole fleet —
-   { platform, bookings, priced, completed, revenue } with `priced` the count
-   of bookings carrying a fare and `revenue` the fares on record; `rateRows`
+   { platform, bookings, priced, completed, complimentary, revenue } with
+   `priced` the count of rows carrying a fare, `complimentary` the completed
+   rides given away, and `revenue` the fares on record; `rateRows`
    is what PRICING_RATE_SQL returned for that day. Returns the parts that were
    projected and the channels that could not be valued. */
 export function projectUnpriced(platforms, rateRows) {
@@ -135,10 +136,19 @@ export function projectUnpriced(platforms, rateRows) {
                      bolt   completed  10  priced  10  pending 0
 
        `priced` exceeds `completed` on a settled Uber day because some
-       cancellations do carry a fee, which is why this floors at zero. The 10%
-       threshold drops the one or two complimentary hotel rides that show up as
-       3-5% of a small channel and would otherwise project the whole of it. */
-    const done = r.completed || 0;
+       cancellations do carry a fee, which is why this floors at zero.
+
+       A COMPLIMENTARY RIDE IS NEVER PENDING. It is finished, it carries a
+       price that is not a price (has_fare excludes it), and nothing will ever
+       price it — so it is taken out of the completed count before the
+       subtraction. Found on production 2026-10-16, the day #compare began
+       deciding per fleet: Egari's hotel channel on the settled 15 October ran
+       6 completed and 4 priced, the other 2 `foc-complimentary`, and "pending"
+       read 2 of 6 — 33%, over the threshold — so a settled day was given an
+       estimate of AED 26.07. Over the whole fleet the same two were 2 of 28
+       and the threshold hid them, which is all the threshold had ever done for
+       them. It stays, for what it was also for: the odd ride nobody billed. */
+    const done = Math.max(0, (r.completed || 0) - (r.complimentary || 0));
     const pending = Math.max(0, done - (r.priced || 0));
     if (pending <= 0 || pending < done * 0.1) continue;
     /* Never below what is already on record: an estimate may add to a
