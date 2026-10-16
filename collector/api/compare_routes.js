@@ -504,7 +504,14 @@ export function compareRoutes(app, { q, wrap }) {
           on_record_by_cut: r2(faresByCut),
           estimated_by_cut: estimated ? r2(sum(estByCut)) : null,
           revenue_by_cut: r2(faresByCut + sum(estByCut)),
+          /* `waiting` is the count the caption names: finished, chargeable
+             rides with no price, row by row — where the estimate lands.
+             `pending` is the DECISION's net count (completed less priced, and
+             priced includes cancellations that took a fee), so it runs short
+             of the rides actually waiting: 73 against 83 on production at
+             15:15 on 2026-10-16. Both are carried; neither is the other. */
           parts: projected.map((x) => ({ platform: x.platform, bookings: x.bookings, pending: x.pending,
+            waiting: rows.filter((r) => r.platform === x.platform).reduce((n, r) => n + r.pending, 0),
             per_booking: x.per_booking, days: x.days, value: x.value })),
           unvalued_bookings: sum(unvalued) || null,
           unvalued_platforms: unrated.map((u) => u.platform),

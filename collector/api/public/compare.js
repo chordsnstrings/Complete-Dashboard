@@ -631,10 +631,12 @@ function peopleAndMoney(peopleHost, moneyHost, p, a, b, { colors, words, nowMin,
       ? ` — ${money(x.on_record)} on record and ${money(x.estimated)} estimated for `
         /* The rides WAITING for a price, not every booking without one: a
            cancellation that took no fee will never be priced, and on
-           production the two counts were 42 and 65. The working is said in
+           production the two counts were 42 and 65. `waiting` counts them row
+           by row; the decision's `pending` is a net figure and runs short
+           (73 against 83 at 15:15 the same day). The working is said in
            words because neither count times the rate is the figure — the
            channel's whole day is valued per booking, less what is on record. */
-        + andList(parts.map((r) => `${fmt(r.pending)} finished ${sourceLabel(r.platform)} ${plural(r.pending, 'ride')} not priced yet `
+        + andList(parts.map((r) => `${fmt(r.waiting ?? r.pending)} finished ${sourceLabel(r.platform)} ${plural(r.waiting ?? r.pending, 'ride')} not priced yet `
           + `(the channel’s bookings at ${money(r.per_booking)} each over ${countOf(r.days, 'settled day')}, less what is on record)`))
       : ', all of it fares on record';
     const unv = x.unvalued_bookings

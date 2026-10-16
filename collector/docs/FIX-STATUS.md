@@ -4853,3 +4853,14 @@ and `/api/day`'s channel rows had gained `complimentary` (CMP-H6) while the
 mock's had not; they carry it now (10/10). `compare_hours` 31, `target_hours`
 56, `day_routes` 73, `arkiv_today` 103, `arkiv_classic_frozen` 149 green in the
 same run; `chart_marks` 151 and `route_smoke` 60 re-run green on the mock change.
+
+**On production (42d13b3, deployment a31ae729, 15:15 on 2026-10-16).** The
+estimate now lands only on 13:00 (AED 2,510.83) and 14:00 (AED 2,335.65) —
+in the ratio of the finished, unpriced Uber rides the trip rows hold there,
+43 and 40. Target's revenue by hour adds up to the same AED 21,907.47 the day
+page and #compare answer (17,060.99 on record + 4,846.48 estimated).
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| CMP-H8 | The caption counts the rides WAITING (`parts[].waiting`, row by row), not the decision's net `pending`: on that check it said "73 finished Uber rides not priced yet" while the trip rows held 83 — the decision subtracts every priced row, cancellations that took a fee among them | yes | no | `compare_hours` 32/32: the caption counting `pending` → 2 fail (both skins) |
+

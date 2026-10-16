@@ -38,6 +38,8 @@
      (i) the estimate spread over every unpriced booking again: 4 fail —
          05:00, whose only unpriced booking was a cancellation, given revenue;
          the share by 10:00 moved with it; and both skins hatch a fourth hour.
+     (k) the caption counting the decision's `pending`: 2 fail — "4
+         finished Uber rides" in both skins, against the 5 waiting.
      (h) unvalued counted as bookings minus priced: 3 fail — the Yango
          cancellation counted as money missing, on the route and in both
          skins' captions ("2 bookings on Yango"). */
@@ -94,6 +96,9 @@ await trip({ drv: 'u-9', name: 'Tracker Only', platform: 'fms', at: `${A}T08:15:
 await trip({ drv: 'u-2', name: 'Other One', at: `${A}T09:05:00+04:00` });
 await trip({ drv: 'u-2', name: 'Other One', at: `${A}T09:40:00+04:00` });
 await trip({ drv: 'u-3', name: 'Third Driver', at: `${A}T14:20:00+04:00` });
+// …a rider cancellation at 06:00 that took a fee: priced, so the decision's net
+// "pending" (completed less priced) runs one short of the rides waiting.
+await trip({ drv: 'u-3', name: 'Third Driver', at: `${A}T06:10:00+04:00`, status: 'cancelled', price: 10 });
 // …and a rider cancellation at 05:00 with no fee: no revenue is coming to 05:00.
 await trip({ drv: 'u-3', name: 'Third Driver', at: `${A}T05:10:00+04:00`, status: 'cancelled' });
 await trip({ drv: 'e-1', name: 'Egari Driver', fleet: 'egari', plate: 'L700', at: `${A}T14:30:00+04:00` });
@@ -145,7 +150,9 @@ check('…on the same working: channel, unpriced bookings, rate and value',
     === JSON.stringify((day.projection_parts || []).map((p) => [p.platform, p.bookings, p.per_booking, p.value])),
   JSON.stringify([rbA.parts, day.projection_parts]));
 check('…the fares on record are the fares the page totals', near(sum(full.hours, 'a_fares'), full.full_day.a.fares)
-  && near(rbA.on_record, 440), `${sum(full.hours, 'a_fares')} / ${full.full_day.a.fares}`);
+  && near(rbA.on_record, 450), `${sum(full.hours, 'a_fares')} / ${full.full_day.a.fares}`);
+check('the caption\'s count is the rides waiting, not the decision\'s net figure',
+  rbA.parts[0]?.waiting === 5 && rbA.parts[0]?.pending === 4, JSON.stringify(rbA.parts));
 check('each hour takes its share by its unpriced bookings: 09:00 holds two, 08:00 one',
   H(8).a_estimated > 0 && near(H(9).a_estimated, 2 * H(8).a_estimated) && near(H(14).a_estimated, 2 * H(8).a_estimated),
   JSON.stringify([H(8).a_estimated, H(9).a_estimated, H(14).a_estimated]));
@@ -181,7 +188,7 @@ const eco = await cmp('cut=full&fleet=ecosine');
 const ecoRate = Math.round(((13 * 450 + 180) / 133) * 100) / 100;
 check('the estimate is valued at the fleet\'s own rate over its own bookings',
   eco.revenue_basis.a.parts.length === 1 && eco.revenue_basis.a.parts[0].per_booking === ecoRate
-  && eco.revenue_basis.a.parts[0].pending === 4 && eco.revenue_basis.a.parts[0].bookings === 5,
+  && eco.revenue_basis.a.parts[0].waiting === 4 && eco.revenue_basis.a.parts[0].bookings === 5,
   JSON.stringify(eco.revenue_basis.a.parts));
 check('…and its people are its own', eco.hours[14].a_drivers === 1, String(eco.hours[14].a_drivers));
 await q(`UPDATE trip SET price = price * 3 WHERE fleet_id = 'egari' AND external_id LIKE 'hist-%'`);

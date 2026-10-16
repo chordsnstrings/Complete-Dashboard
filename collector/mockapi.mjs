@@ -1167,7 +1167,7 @@ app.get('/api/compare', (req, r) => {
     }),
     revenue_basis: {
       a: { on_record: 430, estimated: 330, revenue: 760, on_record_by_cut: 430, estimated_by_cut: 330,
-        revenue_by_cut: 760, parts: [{ platform: 'uber', bookings: 6, pending: 6, per_booking: 55, days: 14, value: 330 }],
+        revenue_by_cut: 760, parts: [{ platform: 'uber', bookings: 6, pending: 6, waiting: 6, per_booking: 55, days: 14, value: 330 }],
         unvalued_bookings: null, unvalued_platforms: [], lookback_days: 14 },
       b: { on_record: 3960, estimated: null, revenue: 3960, on_record_by_cut: 2160, estimated_by_cut: null,
         revenue_by_cut: 2160, parts: [], unvalued_bookings: null, unvalued_platforms: [], lookback_days: 14 },
