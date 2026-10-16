@@ -84,6 +84,7 @@
    target, said so. */
 import { monthTarget, addDays, BOOKING_SOURCES } from './revenue_target.js';
 import { buildDay } from './day_routes.js';
+import { spreadByHour } from './projection_sql.js';
 import { dubaiDay } from './window.js';
 
 export const HISTORY_DAYS = 28;
@@ -340,12 +341,7 @@ export async function targetHours(q, { now = new Date(), min = null } = {}) {
   const faresDone = Array(24).fill(0);
   for (const r of rows) faresDone[r.h] += Number(r.fares);
   const parts = day?.headline?.projection_parts || [];
-  for (const p of parts) {
-    const mine = rows.filter((r) => r.platform === p.platform);
-    const unpriced = mine.reduce((s, r) => s + Math.max(0, r.bookings - r.priced), 0);
-    if (!unpriced || !p.value) continue;
-    for (const r of mine) faresDone[r.h] += (p.value * Math.max(0, r.bookings - r.priced)) / unpriced;
-  }
+  spreadByHour(parts, rows).forEach((v, h) => { faresDone[h] += v; });
   const projected = parts.reduce((s, p) => s + (Number(p.value) || 0), 0);
 
   const revenue = !t.summary || t.summary.today_needs == null

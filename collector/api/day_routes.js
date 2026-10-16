@@ -21,11 +21,10 @@ import { occSourceLabel } from './occupancy_sql.js';
    product has already got wrong twice is a second place to get it wrong. */
 import { isoDay } from '../src/sources/ledger.js';
 
-/* How far back to look for what a booking on a channel is worth. Fourteen
-   days rather than seven: Uber files Monday-to-Sunday and the fares of the
-   running week are rewritten every night, so a seven-day window is one bad
-   night away from resting on a single settled week. */
-const PRICING_LOOKBACK_DAYS = 14;
+/* What the day's unpriced bookings will be worth: the rate, the decision and
+   the spread live in one module since 2026-10-16, because #compare's hours
+   and the Target page's hours value the same bookings with the same rule. */
+import { PRICING_LOOKBACK_DAYS, PRICING_RATE_SQL, projectUnpriced } from './projection_sql.js';
 
 const round = (v, d = 1) => (v == null || !Number.isFinite(Number(v)) ? null
   : Math.round(Number(v) * 10 ** d) / 10 ** d);
@@ -397,31 +396,10 @@ export async function buildDay(q, day) {
          FROM driver_statement_day
          WHERE day = $1::date AND source = 'ledger' AND net IS NOT NULL
          GROUP BY 1`, p),
-      /* What a booking on each channel was worth over the SETTLED days behind
-         this one. Used only to value the bookings this day holds that carry no
-         price yet; the block below the fold explains why that is needed and
-         why the rate is per booking rather than per priced booking.
-
-         A day joins the rate only once at least half that channel's bookings
-         on it carry a fare. Without the guard the day being projected would
-         drag its own rate down through the window as soon as it aged one day:
-         2026-09-08 would enter the 2026-09-09 rate at 0 of 596 Uber bookings
-         priced and halve it. */
-      q(`WITH byday AS (
-           SELECT platform, local_day,
-                  count(*)::int bookings,
-                  count(*) FILTER (WHERE price IS NOT NULL
-                                     AND NOT is_complimentary)::int priced,
-                  sum(price) FILTER (WHERE NOT is_complimentary) revenue
-             FROM trip_ext
-            WHERE is_booking AND local_day >= $1::date - $2::int
-              AND local_day < $1::date
-            GROUP BY 1, 2)
-         SELECT platform, sum(bookings)::int rate_bookings,
-                sum(revenue) rate_revenue, count(*)::int rate_days
-           FROM byday
-          WHERE priced > 0 AND priced::numeric / bookings >= 0.5
-          GROUP BY 1`, [day, PRICING_LOOKBACK_DAYS]),
+      /* What a booking on each channel was worth over the settled days behind
+         this one (api/projection_sql.js says why, and why a day joins the
+         rate only once half its bookings carry a fare). */
+      q(PRICING_RATE_SQL, [day, PRICING_LOOKBACK_DAYS, null]),
     ]);
     const byPlat = new Map();
     const plat = (name) => {
@@ -445,103 +423,15 @@ export async function buildDay(q, day) {
       ledger_net: y.ledger_net == null ? null : Number(y.ledger_net) });
     const income = fleetIncome([...byPlat.values()], 1);
 
-    /* WHAT THE DAY'S BOOKINGS WILL BE WORTH, AND WHY IT HAS TO BE ESTIMATED.
-       ─────────────────────────────────────────────────────────────────────
-       At 20:07 Dubai on 2026-09-08 this endpoint answered revenue 2874 over
-       664 bookings, and for 2026-09-07 it answered 35,965 over 675. The fleet
-       had not collapsed by 92%: 0 of the day's 596 Uber bookings carried a
-       price, because Uber publishes no fare on its trip export at all and the
-       price arrives on a separate weekly PAYMENTS report walked on the nightly
-       catch-up (src/sources/uber.js:563 UPDATEs trip.price to the RIDER FARE).
-       The split by channel that evening was uber 0 of 596 priced, hotel 34 of
-       34, bolt 10 of 31, yango 3 of 3 — every priced booking on the screen came
-       from a channel that is not most of the fleet.
-
-       So the measured figure is right and useless: it answers "what have we
-       been told a price for" when the operator is asking "what did the fleet
-       do today". Both are worth having and they are different questions, so
-       this reports both and never lets the second impersonate the first.
-
-       THE RATE IS PER BOOKING, NOT PER PRICED BOOKING. About a tenth of
-       bookings never carry a fare — 89.9% of 2026-09-07 was priced, against
-       87.6% completed, so the unpriced remainder is very nearly the
-       cancellations that took no fee. Dividing the settled days' revenue by
-       their PRICED bookings and multiplying by every unpriced booking would
-       therefore bill the fleet for its cancellations: AED 59.25 a priced
-       booking against AED 53.28 a booking on 2026-09-07, an 11% overstatement.
-       Per booking already averages the fee-less cancellations in.
-
-       Measured against the day it is projecting: valuing 2026-09-08's 596
-       unpriced Uber bookings at the fourteen settled days behind it gives
-       about AED 35,600 for the day, and 2026-09-07 settled at AED 35,965.
-
-       An estimate, and it says so in every field it fills. `revenue` above
-       stays exactly what it has always been — the fares actually on record —
-       and nothing here is ever added into `accounted`. */
-    const rate = new Map();
-    for (const r of rateByPlat) {
-      if (!r.rate_bookings || r.rate_revenue == null) continue;
-      rate.set(r.platform, { per_booking: Number(r.rate_revenue) / r.rate_bookings,
-        days: r.rate_days ?? 0 });
-    }
-    const projected = [];
-    /* Absent with a reason, and the reason has to be the true one: a channel
-       we hold no settled day for cannot be valued at another channel's rate,
-       and its bookings are named rather than folded in at somebody else's
-       price or silently dropped. */
-    const unrated = [];
-    for (const r of platforms) {
-      const bk = r.bookings || 0;
-      const short = bk - (r.priced || 0);
-      if (bk <= 0 || short <= 0) continue;
-      const at = rate.get(r.platform);
-      if (!at) { unrated.push({ platform: r.platform, bookings: short }); continue; }
-      /* A COMPLETED BOOKING WITH NO PRICE IS PENDING. A CANCELLED ONE IS DONE.
-         ─────────────────────────────────────────────────────────────────────
-         The first version projected every unpriced booking, and it was wrong on
-         the day easiest to check: 2026-09-07 is settled — Uber's report had been
-         walked overnight — and it still added AED 3,355 for the 68 bookings
-         without a price, reporting an expected 39,320 over a measured 35,965.
-         Those 68 are not late. They are cancellations that took no fee, and the
-         per-booking rate already spreads them in, so charging for them again is
-         a double count by construction.
-
-         The second version asked whether the channel's priced share was short
-         of where it settles. Better, and still a proxy: on 2026-09-07 Bolt ran
-         21 of 40 priced against a 61.9% settled share, read as "still walking",
-         and added AED 133 — on a channel that prices every booking as it lands
-         and had simply cancelled more than usual that day. A channel that never
-         defers pricing would be projected on every bad day and, because the
-         estimate is floored at the measurement, never marked down on a good one.
-
-         The signal is not a share at all. It is a count this endpoint already
-         holds: COMPLETED MINUS PRICED — work that finished and carries no
-         money. Measured on production, it separates the two cases outright:
-
-           2026-09-07  uber   completed 541  priced 557  pending 0
-                       bolt   completed  21  priced  21  pending 0
-           2026-09-08  uber   completed 569  priced   0  pending 569 (100%)
-                       bolt   completed  10  priced  10  pending 0
-
-         `priced` exceeds `completed` on a settled Uber day because some
-         cancellations do carry a fee, which is why this floors at zero. The 10%
-         threshold drops the one or two complimentary hotel rides that show up as
-         3-5% of a small channel and would otherwise project the whole of it. */
-      const done = r.completed || 0;
-      const pending = Math.max(0, done - (r.priced || 0));
-      if (pending <= 0 || pending < done * 0.1) continue;
-      /* Never below what is already on record: an estimate may add to a
-         measurement, never contradict one. */
-      const measured = r.revenue == null ? 0 : Number(r.revenue);
-      const whole = Math.max(measured, bk * at.per_booking);
-      projected.push({ platform: r.platform, bookings: short,
-        /* `bookings` is what the caption names — the channel's bookings with no
-           price on them. `pending` is what made the DECISION, reported beside it
-           so the row explains itself rather than asserting a total. */
-        pending, completed: done, pending_pct: round((pending / done) * 100, 1),
-        per_booking: round(at.per_booking, 2), days: at.days,
-        measured: round(measured, 2), value: round(whole - measured, 2) });
-    }
+    /* WHAT THE DAY'S BOOKINGS WILL BE WORTH. Uber prices a day's trips on a
+       weekly report walked overnight, so a day not yet walked holds hundreds
+       of bookings with no fare on them; api/projection_sql.js values them at
+       each channel's per-booking rate over its settled days, and says at
+       length why the rate is per booking and why only completed work with no
+       price counts as pending. `revenue` stays exactly what it has always
+       been — the fares actually on record — and nothing here is ever added
+       into `accounted`. */
+    const { projected, unrated } = projectUnpriced(platforms, rateByPlat);
     const projectedValue = projected.reduce((a, r) => a + r.value, 0);
     const projectedBookings = projected.reduce((a, r) => a + r.bookings, 0);
     const measuredRevenue = h.priced ? Number(h.revenue) : 0;

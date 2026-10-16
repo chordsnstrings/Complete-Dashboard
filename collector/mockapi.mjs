@@ -1150,9 +1150,29 @@ app.get('/api/compare', (req, r) => {
     },
     full_day: { a: { day: a, bookings: 34, km: 410, fares: 640, drivers: 3 },
       b: { day: b, bookings: 58, km: 720, fares: 1180, drivers: 4 } },
-    hours: [...Array(24).keys()].map((h) => ({
-      hour: h, a: h < 13 ? (h % 5) + 1 : 0, b: (h % 6) + 1,
-      a_cancelled: h === 9 ? 1 : 0, b_cancelled: 0, past_cut: h * 60 >= cut })),
+    /* People and money by hour (the operator, 2026-10-15). Today's last
+       three hours before the cut carry Uber bookings not priced yet, so the
+       estimate is drawn and named; the earlier day is settled. */
+    hours: [...Array(24).keys()].map((h) => {
+      const A = h < 13 ? (h % 5) + 1 : 0, B = (h % 6) + 1;
+      const aFares = h < 10 ? A * 20 : 0, aEst = h >= 10 && h < 13 ? A * 55 : 0;
+      return {
+        hour: h, a: A, b: B,
+        a_cancelled: h === 9 ? 1 : 0, b_cancelled: 0,
+        a_drivers: Math.min(A, 3), b_drivers: Math.min(B, 4),
+        a_revenue: aFares + aEst, b_revenue: B * 45,
+        a_fares: aFares, b_fares: B * 45, a_estimated: aEst, b_estimated: 0,
+        a_unvalued: 0, b_unvalued: 0,
+        past_cut: h * 60 >= cut };
+    }),
+    revenue_basis: {
+      a: { on_record: 430, estimated: 330, revenue: 760, on_record_by_cut: 430, estimated_by_cut: 330,
+        revenue_by_cut: 760, parts: [{ platform: 'uber', bookings: 6, pending: 6, per_booking: 55, days: 14, value: 330 }],
+        unvalued_bookings: null, unvalued_platforms: [], lookback_days: 14 },
+      b: { on_record: 3960, estimated: null, revenue: 3960, on_record_by_cut: 2160, estimated_by_cut: null,
+        revenue_by_cut: 2160, parts: [], unvalued_bookings: null, unvalued_platforms: [], lookback_days: 14 },
+      method: 'Fares on record, plus an estimate for bookings not priced yet.',
+    },
     /* Uber prices nothing and is paid; the hotel channel prices everything and
        has no statement; and one day of the Uber row falls outside the payout
        horizon, so its money comes from the operator's ledger instead. All

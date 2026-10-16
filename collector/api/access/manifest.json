@@ -587,7 +587,14 @@
      "platforms[].a.statement_net",
      "platforms[].b.fares",
      "platforms[].b.paid",
-     "platforms[].b.statement_net"
+     "platforms[].b.statement_net",
+     "hours[].a_revenue",
+     "hours[].b_revenue",
+     "hours[].a_fares",
+     "hours[].b_fares",
+     "hours[].a_estimated",
+     "hours[].b_estimated",
+     "revenue_basis"
     ]
    },
    {
@@ -621,7 +628,7 @@
   ],
   "fleetKey": "fleet_id",
   "cap": null,
-  "notes": "api/compare_routes.js:70-420, body at :391-419. Trip/money queries all bind ?fleet= (WHERE at :100-104 uses $4; uncut/hours/paidByPlat/stmtByPlat bind $3 at :169-226). The one unfiltered part is collectors[] (collection_run, :279-283) = global system freshness, SYS, removable. drivers[] = one row per ACCOUNT over both days: pk (driver_ext_id or 'name:'+driver_name), driver_ext_id, driver_name, fle"
+  "notes": "hours[] also carries a_drivers/b_drivers (people with a booking per hour, folded, fleet-bound) and a_revenue/a_fares/a_estimated/a_unvalued (+b_) from a fleet-bound hourly money query; revenue_basis{a,b,method} is each day's on-record/estimated split with the projection parts (api/projection_sql.js), decided and rated on the requested fleet only (PRICING_RATE_SQL $3). api/compare_routes.js:70-420, body at :391-419. Trip/money queries all bind ?fleet= (WHERE at :100-104 uses $4; uncut/hours/paidByPlat/stmtByPlat bind $3 at :169-226). The one unfiltered part is collectors[] (collection_run, :279-283) = global system freshness, SYS, removable. drivers[] = one row per ACCOUNT over both days: pk (driver_ext_id or 'name:'+driver_name), driver_ext_id, driver_name, fle"
  },
  {
   "method": "GET",

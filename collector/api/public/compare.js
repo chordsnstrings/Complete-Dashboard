@@ -30,13 +30,14 @@
       reports one — hotel, Yango, Bolt — and Uber reports none at all, so a
       day that is 89% Uber shows a fares column that describes a tenth of the
       work. Said once, on the page, rather than implied by a small number. */
-import { barChart, gapBars, drawnAs } from './charts.js';
+import { barChart, gapBars, drawnAs, drawnNoun } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
   fmt, empty, dayStr, plural, countOf, sourceLabel, verdict, signed, andList, sentence,
   UBER_FARE_WHY, swatch, contract, glance, secHead, absenceBand, pageFoot,
   delta as uiDelta } from './ui.js';
 import { q, href, parseHash, state, qChan, currentGen, alive } from './data.js';
 import { dubaiDay, TZ } from './tz.js';
+import { withheldSentence } from './access_model.js';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -285,6 +286,11 @@ async function compareClassic(root, aParam, bParam) {
   const hourP = panel('Hour by hour',
     'Bookings in each Dubai hour on both days — the shape of the day, not just its total');
   root.append(hourP.panel);
+  const peopleP = panel('People at work, hour by hour',
+    'People with a booking in each Dubai hour, on every channel, both days on one scale');
+  const revP = panel('Revenue, hour by hour',
+    'Fares in each Dubai hour, with an estimate for bookings not priced yet, both days on one scale');
+  root.append(peopleP.panel, revP.panel);
 
   /* Full width, not a grid half. Nine columns of two-sided figures need the
      whole page: at 2fr of a 2:1 split the last three columns were cut off at
@@ -309,7 +315,7 @@ async function compareClassic(root, aParam, bParam) {
   const freshP = panel('Was everything collected?',
     'A quiet day and an uncollected day look identical on every chart above');
   root.append(freshP.panel);
-  [movedP.body, platP.body, rosterP.body, freshP.body].forEach(loading);
+  [movedP.body, platP.body, rosterP.body, freshP.body, peopleP.body, revP.body].forEach(loading);
   loading(hourP.body);
 
   /* Both day pickers and the cut toggle are real addresses, so any comparison
@@ -445,6 +451,8 @@ async function compareClassic(root, aParam, bParam) {
       + `(${fmt(peakA.a)}), ${String(peakB.hour).padStart(2, '0')}:00 on ${dayStr(b)} (${fmt(peakB.b)}).`
       + (partial ? ` Hours from ${p.cut_label} are shown for ${dayStr(b)} only.` : ''))));
   }
+  peopleAndMoney(peopleP.body, revP.body, p, a, b, { colors: ['--b400', '--b200'], nowMin: HOUR_NOW(), partial,
+    words: `${dayStr(a)} in the darker bars, ${dayStr(b)} in the lighter, on one scale.` });
 
   movedP.body.innerHTML = '';
   const ds = p.drivers || [];
@@ -504,12 +512,16 @@ async function compareClassic(root, aParam, bParam) {
          the earlier day in grey, the later in ink (these series span every
          channel, and blue is Uber's), and an hour the live day has not
          reached drawn as the absence OUTLINE, never as a zero-height bar.
-     03  Who drove more, who drove less — the nine columns, the change a
+     03  People at work hour by hour, 04 revenue hour by hour (the operator,
+         2026-10-15) — the same two rows on one scale; revenue is fares on
+         record plus the day page's estimate for bookings not priced yet,
+         an hour holding an estimate hatched (peopleAndMoney, above).
+     05  Who drove more, who drove less — the nine columns, the change a
          signed delta.
-     04  By channel — the channel with its swatch, FMS labelled "journeys,
+     06  By channel — the channel with its swatch, FMS labelled "journeys,
          not bookings", and under a fare the share of the channel it covers
          (/api/compare .platforms[].a/.b .priced, added for this page).
-     05  Started and stopped, 06 was everything collected — the stale mark
+     07  Started and stopped, 08 was everything collected — the stale mark
          in ink words, not an amber pill.
      †   four cells.
 
@@ -524,6 +536,118 @@ const HOUR_NOW = () => {
     hour12: false }).format(new Date()).split(':').map(Number);
   return h * 60 + m;
 };
+/* Has this hour happened yet on this side? An hour the live day has not
+   reached is drawn absent, never as a zero-height bar (SPEC §5). */
+const reachedHour = (p, key, h, nowMin) => !(p.is_today[key] && (h.past_cut || h.hour * 60 > nowMin));
+const hh = (h) => `${String(h).padStart(2, '0')}:00`;
+
+/* Two days hour by hour, one row each, on ONE scale.
+   ──────────────────────────────────────────────────────────────────────────
+   The contract's two-row chart, lifted out of compareContract so the old
+   skin's new panels draw the same thing: two independently scaled charts make
+   a peak of 5 and a peak of 7 the same height, which is the opposite of what
+   this page is for. `hatch` names the field whose non-zero value marks a bar
+   measured differently (the revenue estimate), said in `hatchNote`. */
+function hourPairs(host, p, a, b, { ka, kb, noun, colors, nowMin, valueFmt, axisFmt, hatch = null, hatchNote = '' }) {
+  host.innerHTML = '';
+  const hs = (p.hours || []).filter((h) => h[ka] || h[kb]);
+  if (!hs.length) { empty(host, `No ${noun} on either day.`); return null; }
+  const peak = Math.max(...p.hours.map((h) => Math.max(h[ka] || 0, h[kb] || 0)), 1);
+  const row = (key, day, color) => {
+    const side = key[0];
+    const data = p.hours.map((h) => ({ at: hh(h.hour), v: h[key], gap: !reachedHour(p, side, h, nowMin),
+      est: hatch ? Number(h[`${side}_${hatch}`]) || 0 : 0 }));
+    const gaps = data.filter((x) => x.gap).length;
+    host.append(el('p', 'cap', esc(`${dayStr(day)}${gaps ? ` — ${countOf(gaps, 'hour')} not yet reached` : ''}`)));
+    const c = el('div'); host.append(c);
+    gapBars(c, data, { x: 'at', y: 'v', color, label: noun, max: peak, gapKey: 'gap', inProgress: false, bucketNoun: 'hours',
+      gapLabel: 'not yet reached — this hour has not happened', aria: `${sentence(noun)} each hour on ${dayStr(day)}`,
+      valueFmt, axisFmt, hatchIf: hatch ? (d) => d.est > 0 : null, hatchNote,
+      onClick: () => { location.hash = href('day', day); } });
+  };
+  row(ka, a, colors[0]);
+  row(kb, b, colors[1]);
+  return hs;
+}
+
+/* PEOPLE AT WORK AND MONEY, HOUR BY HOUR — the operator, 2026-10-15:
+   "#compare should have hourly active driver, and hourly revenue as well."
+   Drawn by both skins from /api/compare's hours (a_drivers/b_drivers,
+   a_revenue/b_revenue with the estimate beside it) and revenue_basis.
+
+   People: a person counts in an hour they took a booking in, on any channel,
+   once however many accounts they drive under — the Drivers out tile read per
+   hour. Summed over the day it overcounts, so the caption says the tile is the
+   day's count, and points at Uber's own online count for the question "who
+   was logged in".
+
+   Money: fares on record plus, for a channel whose finished work is not
+   priced yet, the day page's own estimate spread over the hours its unpriced
+   bookings were requested in. A bar holding any estimate is drawn as one, and
+   the caption names the estimate, its rate and its days — and any bookings
+   that could not be valued, which add nothing rather than a guess. */
+function peopleAndMoney(peopleHost, moneyHost, p, a, b, { colors, words, nowMin, partial }) {
+  /* An answer from before these fields existed — a response cached across a
+     deploy — carries no hourly people or money at all, and "No people on
+     either day" would be a reason that is not the true one. */
+  const has = (k) => (p.hours || []).some((h) => k in h);
+  const stale = 'This answer was saved before the server counted this hour by hour. Reload the page to fetch a fresh one.';
+  if (!has('a_drivers')) { peopleHost.innerHTML = ''; empty(peopleHost, stale); }
+  if (!has('a_revenue')) { moneyHost.innerHTML = ''; empty(moneyHost, stale); }
+  const pp = has('a_drivers')
+    ? hourPairs(peopleHost, p, a, b, { ka: 'a_drivers', kb: 'b_drivers', noun: 'people', colors, nowMin }) : null;
+  if (pp) {
+    const top = (k) => pp.reduce((m, h) => ((h[k] || 0) > (m ? m[k] || 0 : -1) ? h : m), null);
+    const ta = top('a_drivers'), tb = top('b_drivers');
+    const cap = el('p', 'cap');
+    cap.append(esc(`${words} Most people at work: ${hh(ta.hour)} on ${dayStr(a)} (${fmt(ta.a_drivers)}), `
+      + `${hh(tb.hour)} on ${dayStr(b)} (${fmt(tb.b_drivers)}). A person counts once in an hour however many accounts `
+      + 'they drive under, in every hour they took a booking — so the hours add up to more than the day’s Drivers out, '
+      + 'which counts each person once. How many Uber drivers were logged in, booked or not, is '));
+    const link = el('a', '', 'Online by hour');
+    link.href = href('online-hours', a);
+    cap.append(link, '.');
+    peopleHost.append(cap);
+  }
+  if (!has('a_revenue')) return;
+  /* Withheld, not empty: a role that may not see revenue is served these
+     fields as null (api/access/shape.js), and "No revenue on either day" would
+     be a reason that is not the true one. */
+  const held = p._withheld?.REV;
+  if (held != null && (p.hours || []).every((h) => h.a_revenue == null && h.b_revenue == null)) {
+    moneyHost.innerHTML = '';
+    empty(moneyHost, withheldSentence('REV', { level: held === 'A' ? 'A' : '' }));
+    return;
+  }
+  const rb = p.revenue_basis || {};
+  const hatchNote = 'part of it is an estimate — bookings whose price has not arrived yet, valued at the channel’s usual rate';
+  const mm = hourPairs(moneyHost, p, a, b, { ka: 'a_revenue', kb: 'b_revenue', noun: 'revenue', colors, nowMin,
+    valueFmt: (v) => money(v), axisFmt: (v) => money(v), hatch: 'estimated', hatchNote });
+  if (!mm) return;
+  const dayWords = (day, x) => {
+    if (!x) return '';
+    const parts = x.parts || [];
+    const est = x.estimated
+      ? ` — ${money(x.on_record)} on record and ${money(x.estimated)} estimated for `
+        + andList(parts.map((r) => `${fmt(r.bookings)} ${sourceLabel(r.platform)} ${plural(r.bookings, 'booking')} not priced yet, `
+          + `at ${money(r.per_booking)} a booking over ${countOf(r.days, 'settled day')}`))
+      : ', all of it fares on record';
+    const unv = x.unvalued_bookings
+      ? ` ${fmt(x.unvalued_bookings)} ${plural(x.unvalued_bookings, 'booking')} on ${andList((x.unvalued_platforms || []).map(sourceLabel))} `
+        + `${x.unvalued_bookings === 1 ? 'carries' : 'carry'} no price, and nothing settled on that channel says what a booking is worth, `
+        + `so ${x.unvalued_bookings === 1 ? 'it adds' : 'they add'} nothing here and the ${x.unvalued_bookings === 1 ? 'hour holding it reads' : 'hours holding them read'} low.`
+      : '';
+    return `${dayStr(day)}: ${money(x.revenue)}${est}.${unv}`;
+  };
+  const cut = partial && rb.a && rb.b
+    ? ` By ${p.cut_label}: ${money(rb.a.revenue_by_cut)} on ${dayStr(a)} against ${money(rb.b.revenue_by_cut)} on ${dayStr(b)}.`
+    : '';
+  const hatched = (p.hours || []).some((h) => h.a_estimated > 0 || h.b_estimated > 0);
+  moneyHost.append(el('p', 'cap', esc(`${words}${cut} ${dayWords(a, rb.a)} ${dayWords(b, rb.b)}`
+    + (hatched ? ` An hour holding an estimate is drawn as ${drawnNoun('unfinished')}; its height is on record plus estimate.` : '')
+    + (p.fleet ? ' Decided on this fleet’s own bookings and valued at its own rate; the hour charts are not cut.'
+      : ' The same estimate the day page shows as its trip value; the hour charts are not cut.'))));
+}
 /* A change, signed, in the contract's form: the colour follows the meaning
    (`worse` inverts it), the glyph and sign the arithmetic, and no change is
    said as such rather than as a dash. */
@@ -553,9 +677,13 @@ async function compareContract(root, aParam, bParam) {
   root.append(band);
   const hourP = panel('Hour by hour', 'Bookings in each Dubai hour on both days, on one scale — the shape of the day, not just its total', 'cmp-hours');
   const cancP = panel('Cancellations hour by hour', 'Cancelled bookings in each Dubai hour, both days on one scale', 'cmp-cancel');
+  const peopleP = panel('People at work, hour by hour',
+    'People with a booking in each Dubai hour, on every channel, both days on one scale', 'cmp-people');
+  const revP = panel('Revenue, hour by hour',
+    'Fares in each Dubai hour, with an estimate for bookings not priced yet, both days on one scale', 'cmp-revenue');
   const movedP = panel('Who drove more, who drove less',
     'Every person who drove on either day, ordered by how much their booking count changed', 'cmp-drivers');
-  root.append(hourP.panel, cancP.panel, movedP.panel);
+  root.append(hourP.panel, cancP.panel, peopleP.panel, revP.panel, movedP.panel);
   const g = el('div', 'grid g23'); root.append(g);
   const platP = panel('By channel', 'Where the change came from', 'cmp-channel');
   const rosterP = panel('Started and stopped',
@@ -565,7 +693,7 @@ async function compareContract(root, aParam, bParam) {
     'A quiet day and an uncollected day look identical on every chart above', 'cmp-fresh');
   root.append(freshP.panel);
   const absHost = el('div'); root.append(absHost);
-  [tiles, hourP.body, cancP.body, movedP.body, platP.body, rosterP.body, freshP.body].forEach((x) => loading(x));
+  [tiles, hourP.body, cancP.body, peopleP.body, revP.body, movedP.body, platP.body, rosterP.body, freshP.body].forEach((x) => loading(x));
   toolbarPicks(bar, a, b, cut);
 
   const p = await qChan('/api/compare', { a, b, cut });
@@ -641,25 +769,8 @@ async function compareContract(root, aParam, bParam) {
 
   /* ── 01 / 02 · both days, one scale, the unreached hours outlined ──── */
   const nowMin = HOUR_NOW();
-  const reached = (key, h) => !(p.is_today[key] && (h.past_cut || h.hour * 60 > nowMin));
-  const twoRows = (host, ka, kb, noun) => {
-    host.innerHTML = '';
-    const hs = (p.hours || []).filter((h) => h[ka] || h[kb]);
-    if (!hs.length) { empty(host, `No ${noun} on either day.`); return null; }
-    const peak = Math.max(...p.hours.map((h) => Math.max(h[ka] || 0, h[kb] || 0)), 1);
-    const row = (key, day, color) => {
-      const data = p.hours.map((h) => ({ at: `${String(h.hour).padStart(2, '0')}:00`, v: h[key], gap: !reached(key[0], h) }));
-      const gaps = data.filter((x) => x.gap).length;
-      host.append(el('p', 'cap', esc(`${dayStr(day)}${gaps ? ` — ${countOf(gaps, 'hour')} not yet reached` : ''}`)));
-      const c = el('div'); host.append(c);
-      gapBars(c, data, { x: 'at', y: 'v', color, label: noun, max: peak, gapKey: 'gap', inProgress: false, bucketNoun: 'hours',
-        gapLabel: 'not yet reached — this hour has not happened', aria: `${sentence(noun)} each hour on ${dayStr(day)}`,
-        onClick: () => { location.hash = href('day', day); } });
-    };
-    row(ka, a, '--ink');
-    row(kb, b, '--grey');
-    return hs;
-  };
+  const reached = (key, h) => reachedHour(p, key, h, nowMin);
+  const twoRows = (host, ka, kb, noun) => hourPairs(host, p, a, b, { ka, kb, noun, colors: ['--ink', '--grey'], nowMin });
   const hs = twoRows(hourP.body, 'a', 'b', 'bookings');
   if (hs) {
     const peakA = hs.reduce((m, h) => (h.a > (m ? m.a : -1) ? h : m), null);
@@ -677,6 +788,8 @@ async function compareContract(root, aParam, bParam) {
       + `${fmt(sum('b_cancelled'))} on ${dayStr(b)} across the whole day — the hour charts are not cut, `
       + `so ${dayStr(b)}'s later hours are there to compare against when ${dayStr(a)} reaches them.`)));
   }
+  peopleAndMoney(peopleP.body, revP.body, p, a, b, { colors: ['--ink', '--grey'], nowMin, partial,
+    words: `${dayStr(a)} in ink, ${dayStr(b)} in grey, on one scale.` });
 
   /* ── 03 · the phone-call list ───────────────────────────────────────── */
   movedP.body.innerHTML = '';

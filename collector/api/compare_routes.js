@@ -43,6 +43,10 @@
    copy is a chance to join on the wrong pair of columns. */
 import { peopleCountStored, JOIN_TRIP } from './custody_sql.js';
 import { TRIP_RUN_SQL } from './run_kinds.js';
+/* What a day's unpriced bookings will be worth — the day page's own rule, so
+   the revenue hour by hour here adds up to the day page's "≈ trip value" for
+   the same day and cannot disagree with it. */
+import { PRICING_LOOKBACK_DAYS, PRICING_RATE_SQL, projectUnpriced, spreadByHour } from './projection_sql.js';
 
 export function compareRoutes(app, { q, wrap }) {
   const num = (v) => (v == null ? null : Number(v));
@@ -104,7 +108,8 @@ export function compareRoutes(app, { q, wrap }) {
         AND ($4::text IS NULL OR n.fleet_id = $4)
         AND ($5::text IS NULL OR n.platform = $5)`;
 
-    const [totals, uncut, hours, platforms, paidByPlat, stmtByPlat, people, gaps, fresh] = await Promise.all([
+    const [totals, uncut, hours, platforms, paidByPlat, stmtByPlat, people, gaps, fresh,
+      hourPeople, hourMoney, rateA, rateB] = await Promise.all([
       q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS day,
                 count(*) FILTER (WHERE n.is_booking)::int bookings,
                 count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
@@ -282,6 +287,72 @@ export function compareRoutes(app, { q, wrap }) {
                 sum(rows_written) FILTER (WHERE finished_at > now() - interval '24 hours')::int rows_24h
            FROM collection_run WHERE finished_at IS NOT NULL AND ${TRIP_RUN_SQL}
           GROUP BY 1 ORDER BY 1`, []),
+      /* PEOPLE AT WORK, HOUR BY HOUR.
+         ─────────────────────────────────────────────────────────────────
+         The operator, 2026-10-15: "#compare should have hourly active driver,
+         and hourly revenue as well." Active here is what the Drivers out tile
+         already means — a person with a booking — read per Dubai hour of the
+         request, on every channel, folded on the stored person key exactly as
+         the tile is (the same JOIN_TRIP, the same fallback to the account), so
+         an hour cannot count one person twice for driving two accounts.
+
+         A person on a ninety-minute airport run is counted in the hour the
+         booking was requested, not in every hour it ran: the bookings chart
+         beside it buckets the same way, and "people who took work in this
+         hour" is a figure the two charts can be read against. Summed over the
+         day it overcounts — somebody working eight hours is in eight of them
+         — which is why the tile, not this, says how many people drove.
+
+         Uncut, like the bookings hours: an hour today has not reached is drawn
+         absent by the page, never as zero. */
+      q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS day, n.local_hour AS hour,
+                ${peopleCountStored('t.person_key', 'n.driver_ext_id')}
+                  FILTER (WHERE n.is_booking AND n.driver_ext_id IS NOT NULL)::int drivers
+           FROM trip_norm n ${JOIN_TRIP}
+          WHERE n.local_day IN ($1::date, $2::date)
+            AND ($3::text IS NULL OR n.fleet_id = $3)
+            AND ($4::text IS NULL OR n.platform = $4)
+          GROUP BY 1, 2`, pw),
+      /* MONEY, HOUR BY HOUR.
+         ─────────────────────────────────────────────────────────────────
+         Fares on record are only part of a recent day: Uber prices its trips
+         from a report fetched hours behind the ride, so at 14:00 the morning's
+         Uber bookings can be priced and the last two hours' not — and an hour
+         chart of fares alone draws the fleet collapsing into the present,
+         every afternoon. So each hour carries its fares AND its share of the
+         day page's estimate for the bookings not priced yet
+         (api/projection_sql.js), the share drawn as an estimate.
+
+         Decided on the rows this page is showing. With no fleet chip that is
+         the whole fleet, and the hours add up to the day page's trip value for
+         the same day. With one, it is that fleet's rows valued at that fleet's
+         own rate: a reader whose access covers one fleet has ?fleet= rewritten
+         by the gate (api/access/middleware.js), and an estimate decided over
+         both fleets would carry the other fleet's fares into their page in
+         the rate and in the floor. So the two fleets' pages need not add up to
+         the unfiltered one to the dirham, and each says only what its own
+         records hold.
+
+         `by_cut` splits each hour at the page's cut, so "revenue by this
+         minute" is like for like on both days. A row with no request time
+         falls outside the cut, as it does in every cut figure above. */
+      q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS day, n.local_hour AS hour, n.platform,
+                coalesce((extract(hour FROM n.requested_at AT TIME ZONE 'Asia/Dubai') * 60
+                  + extract(minute FROM n.requested_at AT TIME ZONE 'Asia/Dubai')) < $3::int, false) AS by_cut,
+                count(*) FILTER (WHERE n.is_booking)::int bookings,
+                count(*) FILTER (WHERE n.is_booking AND n.has_fare)::int priced,
+                count(*) FILTER (WHERE n.has_fare)::int priced_all,
+                count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
+                sum(n.price) FILTER (WHERE n.has_fare) fares
+           FROM trip_norm n
+          WHERE n.local_day IN ($1::date, $2::date)
+            AND ($4::text IS NULL OR n.fleet_id = $4)
+            AND ($5::text IS NULL OR n.platform = $5)
+          GROUP BY 1, 2, 3, 4`, p),
+      /* What a booking on each channel was worth over the settled days behind
+         each of the two days — the day page's rate, on this page's fleet. */
+      q(PRICING_RATE_SQL, [a, PRICING_LOOKBACK_DAYS, fleet]),
+      q(PRICING_RATE_SQL, [b, PRICING_LOOKBACK_DAYS, fleet]),
     ]);
 
     /* The day comes back as TEXT, not as a date.
@@ -380,11 +451,76 @@ export function compareRoutes(app, { q, wrap }) {
         };
       }).sort((x, y) => (y.a.n + y.b.n) - (x.a.n + x.b.n));
 
+    /* One day's money by hour. The channel totals the decision is made on
+       are in the shape buildDay reads off trip_ext — `priced` and `revenue`
+       over every row, `bookings` over bookings — so with no fleet chip the
+       parts projected here are the parts the day page projects for the day. */
+    const r2 = (v) => Math.round(v * 100) / 100;
+    const hourMoneyOf = (day, rateRows) => {
+      const rows = hourMoney.filter((r) => r.day === day).map((r) => ({ ...r, h: r.hour }));
+      const chan = new Map();
+      for (const r of rows) {
+        const c = chan.get(r.platform) || { platform: r.platform, bookings: 0, priced: 0, completed: 0, revenue: null };
+        c.bookings += r.bookings; c.priced += r.priced_all; c.completed += r.completed;
+        if (r.fares != null) c.revenue = (c.revenue || 0) + Number(r.fares);
+        chan.set(r.platform, c);
+      }
+      const { projected, unrated } = projectUnpriced([...chan.values()], rateRows);
+      const est = spreadByHour(projected, rows);
+      const estByCut = spreadByHour(projected, rows, (r) => r.by_cut);
+      const fares = Array(24).fill(0);
+      let faresByCut = 0;
+      for (const r of rows) {
+        if (r.fares == null) continue;
+        fares[r.hour] += Number(r.fares);
+        if (r.by_cut) faresByCut += Number(r.fares);
+      }
+      /* Bookings with no price on a channel that has no settled day to value
+         them by. Absent with a reason: they add nothing to the hours they sit
+         in, and the page says how many there are rather than letting those
+         hours read as quiet. */
+      const unvalued = Array(24).fill(0);
+      const unratedSet = new Set(unrated.map((u) => u.platform));
+      for (const r of rows) {
+        if (unratedSet.has(r.platform)) unvalued[r.hour] += Math.max(0, r.bookings - r.priced);
+      }
+      const sum = (xs) => xs.reduce((x, v) => x + v, 0);
+      const estimated = sum(est);
+      return {
+        fares, est, unvalued,
+        basis: {
+          on_record: r2(sum(fares)),
+          estimated: estimated ? r2(estimated) : null,
+          revenue: r2(sum(fares) + estimated),
+          /* Up to the page's cut, both halves, so the caption compares like
+             with like on a day that has not finished. */
+          on_record_by_cut: r2(faresByCut),
+          estimated_by_cut: estimated ? r2(sum(estByCut)) : null,
+          revenue_by_cut: r2(faresByCut + sum(estByCut)),
+          parts: projected.map((x) => ({ platform: x.platform, bookings: x.bookings, pending: x.pending,
+            per_booking: x.per_booking, days: x.days, value: x.value })),
+          unvalued_bookings: sum(unvalued) || null,
+          unvalued_platforms: unrated.map((u) => u.platform),
+          lookback_days: PRICING_LOOKBACK_DAYS,
+        },
+      };
+    };
+    const MA = hourMoneyOf(a, rateA), MB = hourMoneyOf(b, rateB);
     const hourly = [...Array(24).keys()].map((h) => {
       const A = hours.find((r) => r.hour === h && r.day === a) || {};
       const B = hours.find((r) => r.hour === h && r.day === b) || {};
+      const PA = hourPeople.find((r) => r.hour === h && r.day === a) || {};
+      const PB = hourPeople.find((r) => r.hour === h && r.day === b) || {};
       return { hour: h, a: A.bookings || 0, b: B.bookings || 0,
         a_cancelled: A.cancelled || 0, b_cancelled: B.cancelled || 0,
+        /* People with a booking requested in this hour, folded. */
+        a_drivers: PA.drivers || 0, b_drivers: PB.drivers || 0,
+        /* Fares on record, the estimate for the hour's unpriced bookings, and
+           the two added — the estimate never hidden inside the total. */
+        a_revenue: r2(MA.fares[h] + MA.est[h]), b_revenue: r2(MB.fares[h] + MB.est[h]),
+        a_fares: r2(MA.fares[h]), b_fares: r2(MB.fares[h]),
+        a_estimated: r2(MA.est[h]), b_estimated: r2(MB.est[h]),
+        a_unvalued: MA.unvalued[h], b_unvalued: MB.unvalued[h],
         past_cut: h * 60 >= cut };
     });
 
@@ -403,6 +539,16 @@ export function compareRoutes(app, { q, wrap }) {
       totals: { a: shape(row(totals, a)), b: shape(row(totals, b)) },
       full_day: { a: row(uncut, a), b: row(uncut, b) },
       hours: hourly,
+      /* How each day's revenue hours were reached: the fares on record, the
+         estimate and its working, and the bookings that could not be valued. */
+      revenue_basis: {
+        a: MA.basis, b: MB.basis,
+        method: 'Fares on record, plus — for a channel whose completed work does not carry its price yet — '
+          + 'each unpriced booking valued at what a booking on that channel was worth over the settled days '
+          + `behind the day (up to ${PRICING_LOOKBACK_DAYS}), spread over the hours those bookings were requested in. `
+          + (fleet ? 'Decided on this fleet’s own bookings and valued at its own rate.'
+            : 'The same estimate the day page shows as its trip value.'),
+      },
       platforms: plats,
       drivers,
       /* Named, not just counted: "3 people who drove yesterday have not started

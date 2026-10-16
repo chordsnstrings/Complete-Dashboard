@@ -2569,3 +2569,28 @@ its readings disagree about, a candidate-only ride), both skins, 1440 and 390:
 To repeat: the script shape is test/unbooked_marks.test.mjs's `open()` with a
 `page.screenshot` per element (`.unbooked-note`'s panel, `.dday-unrow`'s band,
 `.dday-list`) and a scan for elements whose right edge passes `innerWidth`.
+
+## #compare — people at work and revenue, hour by hour (2026-10-16)
+
+Rendered against the mock (`/api/compare` gained the hourly fields and
+`revenue_basis`; today cut at 13:15 with three hours holding an Uber estimate,
+the earlier day settled), Arkiv at 1440 and 390, the old skin at 1440:
+
+- Both panels draw two rows on one scale; the ten hours after the cut are the
+  absence outline in Arkiv and the hatched band in the old skin, and the
+  captions name the form ("drawn as an empty outline, not as zero").
+- The three estimate hours are hatched in Arkiv and hollow-dashed in the old
+  skin — two different marks from the absence in each skin, and the caption
+  names whichever is drawn (`drawnNoun('unfinished')`).
+- Found and fixed before commit: the first caption printed revenue in whole
+  dirhams (AED 760) through a local helper; money is to the fils on this
+  product (COVERAGE traps, 2026-09-23), so the axis and captions go through
+  `money()` — "AED 760.00 — AED 430.00 on record and AED 330.00 estimated for
+  6 Uber bookings not priced yet, at AED 55.00 a booking over 14 settled days".
+- 390 px: the document measures 390 in Arkiv; the axis keeps four ticks.
+
+To repeat: serve `mockapi.mjs`'s app, open
+`/?ui=desktop[&skin=classic]#compare/2026-08-25/2026-08-24`, wait for a
+`[data-rise]` bar inside the "Revenue, hour by hour" panel, and screenshot the
+two panels found by their h3; `test/compare_hours.test.mjs` asserts the same
+against the real route.

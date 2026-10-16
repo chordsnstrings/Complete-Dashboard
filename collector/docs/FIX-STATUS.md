@@ -4789,3 +4789,26 @@ after accepting it; requested 12 min before the journey began"; no unbooked
 journey of the last two days says "0 min away". UOH-6, NB-1/2 and UNA (marks
 seen on production at 8855315: 36 rides, 13 named, both skins, 390 fits) are
 on production and proven there.
+
+## CMP-H — #compare hour by hour: people at work and revenue (2026-10-16)
+
+The operator: "#compare should have hourly active driver, and hourly revenue as
+well." The page had bookings and cancellations by hour; it now has two more
+panels in both skins, drawn the same way — both days one above the other on
+ONE scale, an hour the live day has not reached absent, never zero.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| CMP-H1 | `/api/compare` `hours[].a_drivers`/`b_drivers`: people with a booking requested in the hour, every channel, folded on the stored person key exactly as the Drivers out tile is (JOIN_TRIP, the same fallback to the account), fleet- and channel-bound; an FMS journey is no one | yes | no | `compare_hours`: counted on `driver_ext_id` → 3 fail |
+| CMP-H2 | `hours[].a_revenue` = `a_fares` (on record) + `a_estimated` (the day page's projection for bookings not priced yet, spread by each hour's unpriced bookings); `a_unvalued` counts bookings on a channel with no settled day; `revenue_basis.{a,b}` carries on record / estimated / both up to the cut, the parts and their rates. Unfiltered, the hours add up to `/api/day`'s `expected_revenue` | yes | no | `compare_hours`: spread evenly → 1 fails |
+| CMP-H3 | The projection lifted into `api/projection_sql.js`; `/api/day` and `/api/target/hours` read it (no figure moves: `day_routes` 73/73, `target_hours` 56/56). Under a fleet chip the decision and the rate are the fleet's own (`PRICING_RATE_SQL` `$3`) — a reader limited to one fleet gets nothing of the other fleet's fares | yes | no | `compare_hours`: the fleet clause removed → 2 fail (the fleet's own rate; the other fleet's history moving its page) |
+| CMP-H4 | The page: an hour holding an estimate is drawn as one (Arkiv hatch, old-skin hollow) and the caption names on record and estimated per day, the channel, its unpriced bookings, its rate and days, and "by HH:MM" for both days; people captioned with the busiest hour, why the hours overcount the day, and a link to Online by hour | yes | no | `compare_hours`: `hatchIf` dropped → 2 fail |
+| CMP-H5 | Absent with the true reason: a role served revenue as null is told "Not shown to your role", not "No revenue on either day"; an answer cached from before the fields existed says so, not "Nothing" | yes | no | `compare_hours`: each guard removed → 1 fails |
+
+Money is printed to the fils on the axis and in the captions (the 2026-09-23
+ruling; a whole-dirham caption helper written first was caught against the
+traps list before commit). The old skin's frozen snapshot moved on the five
+#compare routes only: the BASE tree renders the old hashes against the new
+mock (so the mock change is inert), and the working tree draws the two new
+panels.
+

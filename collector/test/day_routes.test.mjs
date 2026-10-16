@@ -531,8 +531,10 @@ check('the trip table survived', (await q('SELECT count(*)::int n FROM trip'))[0
     `${h.revenue} + ${h.projected_revenue} = ${h.expected_revenue}`);
   /* And the floor, which is what stops an estimate contradicting a
      measurement: a channel that has already out-earned its own rate keeps its
-     measured figure rather than being marked down to the average. */
-  const routes = readFileSync('api/day_routes.js', 'utf8');
+     measured figure rather than being marked down to the average. The rule
+     lives in api/projection_sql.js since 2026-10-16, shared with the Target
+     page's hours and #compare's. */
+  const routes = readFileSync('api/projection_sql.js', 'utf8');
   check('an estimate may add to a measurement and never contradict one',
     /Math\.max\(measured, bk \* at\.per_booking\)/.test(routes));
 }

@@ -3994,6 +3994,25 @@ defensible, and two of them were learned by getting it wrong on production:
   contradicting a measurement. Proved in `test/day_routes.test.mjs` on a channel
   at 20 of 100 priced: whole-channel adds 7,000, the remainder form adds 7,200.
 
+**One module since 2026-10-16.** The rate SQL, the pending decision and the
+spread over hours live in `api/projection_sql.js` (`PRICING_RATE_SQL`,
+`projectUnpriced`, `spreadByHour`), and three surfaces read them: `/api/day`
+(the trip value), `/api/target/hours` (revenue by hour on Target) and
+`/api/compare` (revenue by hour on #compare). Unfiltered, #compare's hours add
+up to the day page's `expected_revenue` for the same day to the fils
+(`test/compare_hours.test.mjs`). Measured on production before the change, at
+about 14:00 Dubai on 16 October: Uber is priced within hours now, not the next
+morning — 205 completed, 25 pending (12.2%), AED 2,294.50 projected over AED
+11,186.84 on record; 14 and 15 October carried no projection at all.
+
+**Under a fleet chip the estimate is that fleet's own** — its rows decide
+whether a channel is pending, and `PRICING_RATE_SQL`'s `$3` keeps the rate to
+its fares. The access gate rewrites `?fleet=` for a reader limited to one
+fleet (`api/access/middleware.js`), so a projection decided over both fleets
+and then shared out would hand that reader a rate and a floor built from the
+other fleet's money. The two fleets' #compare pages therefore need not add up
+to the unfiltered one to the dirham; each says only what its own records hold.
+
 Measured against the day it projects: valuing 2026-09-08's unpriced bookings at
 the fourteen settled days behind them gives **≈ AED 35,600**, and 2026-09-07
 settled at **AED 35,965**. A settled day reports **no estimate at all**:
