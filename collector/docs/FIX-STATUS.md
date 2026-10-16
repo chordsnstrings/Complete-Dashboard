@@ -4812,3 +4812,10 @@ traps list before commit). The old skin's frozen snapshot moved on the five
 mock (so the mock change is inert), and the working tree draws the two new
 panels.
 
+
+**The full suite on 236108d (383 files, 14,296 assertions): 1 failing,
+fixed.** `arkiv_today` pins the order of #compare's panels and the two new
+ones sit between cancellations and the driver table, where they were put; the
+pinned order now names them (103/103). `compare_hours` 29, `compare` 45,
+`access_manifest` 17, `access_pages` 150, `person_vs_account_counts` 64,
+`grain` 67, `day_routes` 73, `target_hours` 56 all green in the same run.

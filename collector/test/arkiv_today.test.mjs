@@ -300,9 +300,12 @@ console.log('\n#compare');
     };
   });
   const A = p.totals.a, B = p.totals.b;
-  check('the order: 00, hours, cancellations by hour, the driver table, channel and roster, collection, †',
+  /* People at work and revenue by hour joined the hour charts on 2026-10-16
+     (the operator: "#compare should have hourly active driver, and hourly
+     revenue as well"), after cancellations and before the driver table. */
+  check('the order: 00, hours, cancellations, people and revenue by hour, the driver table, channel and roster, collection, †',
     JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Hour by hour', 'Cancellations hour by hour',
-      'Who drove more, who drove less', 'By channel', 'Started and stopped', 'Was everything collected?',
+      'People at work, hour by hour', 'Revenue, hour by hour', 'Who drove more, who drove less', 'By channel', 'Started and stopped', 'Was everything collected?',
       '† What this page does not know']), JSON.stringify(s.heads));
   check('the toolbar keeps both pickers, Swap, Today vs yesterday and the cut toggle', r.toolbar === 5, String(r.toolbar));
   check('six tiles, Bookings the hero — the old "Change" tile is its delta', s.glance === 6 && s.hero === 'Bookings'
