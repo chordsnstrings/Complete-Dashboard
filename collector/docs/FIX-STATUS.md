@@ -4834,8 +4834,8 @@ overcount the caption says. Under each fleet chip the rate is the fleet's own
 
 | id | what | written | production | proven |
 |---|---|---|---|---|
-| CMP-H6 | A complimentary ride is never pending: `projectUnpriced` takes completed rides given away out of `completed` before subtracting `priced` (`complimentary` on each channel row — `/api/day`'s platform query and #compare's hourly money query, now over `trip_ext`); #compare's unvalued count is finished, chargeable, unpriced rides only. Found on that check: Egari alone on the settled 15 October drew AED 26.07 for 2 `foc-complimentary` hotel rides (2 of 6 = 33% "pending"; over both fleets 2 of 28, under the threshold) | yes | no | `compare_hours` 30/30: FOC counted as pending again → 5 fail; unvalued as bookings minus priced → 3 fail; `day_routes` 73, `target_hours` 56, `compare` 45 unchanged |
-| CMP-H7 | The estimate lands where the unpriced WORK is: `spreadByHour` weights each hour by its finished, chargeable rides with no price (`pending`), not by every booking without one — and has no fallback, so a caller without the column stops adding up. #compare's caption names those rides ("42 finished Uber rides not priced yet (the channel's bookings at AED 54.76 each over 14 settled days, less what is on record)"). Found in the production screenshots of f6260cf/90d401a: 00:00 and 01:00 today drawn hatched with revenue on the way, their only unpriced bookings rider cancellations; the 42 finished unpriced rides were all at 13:00–14:00, the other 23 of the "65 bookings not priced yet" were cancellations from 00:00 to 12:00. The Target page's revenue by hour spread the same way and is fixed with it (its query now carries `pending`, over `trip_ext`) | yes | no | `compare_hours` 31/31: spread over unpriced bookings again → 4 fail; `target_hours` 56/56: its query without `pending` → 11 fail; `day_routes` 73 |
+| CMP-H6 | A complimentary ride is never pending: `projectUnpriced` takes completed rides given away out of `completed` before subtracting `priced` (`complimentary` on each channel row — `/api/day`'s platform query and #compare's hourly money query, now over `trip_ext`); #compare's unvalued count is finished, chargeable, unpriced rides only. Found on that check: Egari alone on the settled 15 October drew AED 26.07 for 2 `foc-complimentary` hotel rides (2 of 6 = 33% "pending"; over both fleets 2 of 28, under the threshold) | yes | **on production** `1071c74` | `compare_hours` 30/30: FOC counted as pending again → 5 fail; unvalued as bookings minus priced → 3 fail; `day_routes` 73, `target_hours` 56, `compare` 45 unchanged |
+| CMP-H7 | The estimate lands where the unpriced WORK is: `spreadByHour` weights each hour by its finished, chargeable rides with no price (`pending`), not by every booking without one — and has no fallback, so a caller without the column stops adding up. #compare's caption names those rides ("42 finished Uber rides not priced yet (the channel's bookings at AED 54.76 each over 14 settled days, less what is on record)"). Found in the production screenshots of f6260cf/90d401a: 00:00 and 01:00 today drawn hatched with revenue on the way, their only unpriced bookings rider cancellations; the 42 finished unpriced rides were all at 13:00–14:00, the other 23 of the "65 bookings not priced yet" were cancellations from 00:00 to 12:00. The Target page's revenue by hour spread the same way and is fixed with it (its query now carries `pending`, over `trip_ext`) | yes | **on production** `1071c74` | `compare_hours` 31/31: spread over unpriced bookings again → 4 fail; `target_hours` 56/56: its query without `pending` → 11 fail; `day_routes` 73 |
 
 **On production (90d401a, deployment e2a57981).** Egari alone on 15 October
 answers AED 15,527.72, all on record (it read 15,553.79 with the AED 26.07
@@ -4862,5 +4862,15 @@ page and #compare answer (17,060.99 on record + 4,846.48 estimated).
 
 | id | what | written | production | proven |
 |---|---|---|---|---|
-| CMP-H8 | The caption counts the rides WAITING (`parts[].waiting`, row by row), not the decision's net `pending`: on that check it said "73 finished Uber rides not priced yet" while the trip rows held 83 — the decision subtracts every priced row, cancellations that took a fee among them | yes | no | `compare_hours` 32/32: the caption counting `pending` → 2 fail (both skins) |
+| CMP-H8 | The caption counts the rides WAITING (`parts[].waiting`, row by row), not the decision's net `pending`: on that check it said "73 finished Uber rides not priced yet" while the trip rows held 83 — the decision subtracts every priced row, cancellations that took a fee among them | yes | **on production** `1071c74` | `compare_hours` 32/32: the caption counting `pending` → 2 fail (both skins) |
+
+**On production (1071c74, deployment 1ca627f9, 15:30 on 2026-10-16) — the
+whole of CMP-H.** #compare today against yesterday: AED 22,181.28 = 17,060.99
+on record + 5,120.29 estimated, equal to `/api/day`; the caption names "88
+finished Uber rides not priced yet" and the trip rows hold 88 (43 at 13:00,
+45 at 14:00); the estimate sits on those two hours only, in that ratio. People
+at work peaked at 41 at 13:00. Egari alone on 15 October: AED 15,527.72, all
+on record. Screenshots through prod-mirror — Arkiv 1440 and 390, the old skin
+1440, Egari in full — draw both panels, no page error, nothing undefined, 390
+measures 390.
 
