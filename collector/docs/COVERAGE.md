@@ -4031,6 +4031,18 @@ whole-fleet figure moved. The "could not be valued" count on #compare counts
 finished, chargeable, unpriced rides only — a cancellation or a ride given
 away is not money missing.
 
+**The estimate lands on the unpriced WORK, not on every unpriced booking.**
+`spreadByHour` weights each hour by its finished, chargeable rides with no
+price yet. Spread over every booking without a price (as Target's revenue by
+hour first did), it put money in hours that had none coming: at 14:30 on 16
+October the 42 finished Uber rides waiting for a price were all at
+13:00–14:00, and the other 23 of the 65 unpriced bookings were rider
+cancellations from 00:00 to 12:00 — so 00:00 and 01:00 were drawn hatched with
+revenue on the way. The per-booking RATE still averages the fee-less
+cancellations in; that is about what the day is worth, not where it lands.
+Any caller of `spreadByHour` must pass `pending` on its rows: there is no
+fallback, so one that does not stops adding up to the day.
+
 Measured against the day it projects: valuing 2026-09-08's unpriced bookings at
 the fourteen settled days behind them gives **≈ AED 35,600**, and 2026-09-07
 settled at **AED 35,965**. A settled day reports **no estimate at all**:

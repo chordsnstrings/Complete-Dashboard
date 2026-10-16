@@ -4835,4 +4835,14 @@ overcount the caption says. Under each fleet chip the rate is the fleet's own
 | id | what | written | production | proven |
 |---|---|---|---|---|
 | CMP-H6 | A complimentary ride is never pending: `projectUnpriced` takes completed rides given away out of `completed` before subtracting `priced` (`complimentary` on each channel row — `/api/day`'s platform query and #compare's hourly money query, now over `trip_ext`); #compare's unvalued count is finished, chargeable, unpriced rides only. Found on that check: Egari alone on the settled 15 October drew AED 26.07 for 2 `foc-complimentary` hotel rides (2 of 6 = 33% "pending"; over both fleets 2 of 28, under the threshold) | yes | no | `compare_hours` 30/30: FOC counted as pending again → 5 fail; unvalued as bookings minus priced → 3 fail; `day_routes` 73, `target_hours` 56, `compare` 45 unchanged |
+| CMP-H7 | The estimate lands where the unpriced WORK is: `spreadByHour` weights each hour by its finished, chargeable rides with no price (`pending`), not by every booking without one — and has no fallback, so a caller without the column stops adding up. #compare's caption names those rides ("42 finished Uber rides not priced yet (the channel's bookings at AED 54.76 each over 14 settled days, less what is on record)"). Found in the production screenshots of f6260cf/90d401a: 00:00 and 01:00 today drawn hatched with revenue on the way, their only unpriced bookings rider cancellations; the 42 finished unpriced rides were all at 13:00–14:00, the other 23 of the "65 bookings not priced yet" were cancellations from 00:00 to 12:00. The Target page's revenue by hour spread the same way and is fixed with it (its query now carries `pending`, over `trip_ext`) | yes | no | `compare_hours` 31/31: spread over unpriced bookings again → 4 fail; `target_hours` 56/56: its query without `pending` → 11 fail; `day_routes` 73 |
+
+**On production (90d401a, deployment e2a57981).** Egari alone on 15 October
+answers AED 15,527.72, all on record (it read 15,553.79 with the AED 26.07
+complimentary-ride estimate on f6260cf); Ecosine 31,086.88 + Egari 15,527.72 =
+the unfiltered 46,614.60. Today at 14:30: AED 19,457.89 = 17,020.99 on record
++ 2,436.90 estimated, the same parts and total as `/api/day`. Screenshots
+through prod-mirror, Arkiv at 1440 and 390 and the old skin at 1440: both
+panels draw, no page error, nothing undefined, 390 measures 390; the
+production screenshots are what showed CMP-H7.
 

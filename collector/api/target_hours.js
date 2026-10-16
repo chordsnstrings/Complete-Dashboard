@@ -217,9 +217,13 @@ async function todayByHour(q, today) {
                    count(*)::int AS bookings,
                    count(*) FILTER (WHERE n.outcome = 'completed')::int AS completed,
                    count(*) FILTER (WHERE n.has_fare)::int AS priced,
+                   /* Finished, chargeable and not priced yet: where the
+                      estimate lands (api/projection_sql.js spreadByHour). */
+                   count(*) FILTER (WHERE n.outcome = 'completed' AND NOT n.is_complimentary
+                                      AND NOT n.has_fare)::int AS pending,
                    coalesce(sum(n.price) FILTER (WHERE n.has_fare), 0)::float AS fares,
                    max(n.requested_at) AS latest, max(n.ingested_at) AS stored
-              FROM trip_norm n
+              FROM trip_ext n
              WHERE n.local_day = $1::date AND n.is_booking
              GROUP BY 1, 2`, [today]);
 }

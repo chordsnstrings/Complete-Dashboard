@@ -168,23 +168,41 @@ export function projectUnpriced(platforms, rateRows) {
 
 /* A day's projection laid over its hours.
 
-   Each channel's projected value is spread in proportion to the bookings
-   without a price in each hour, so the hours add up to exactly the day's
-   figure — the day page's "≈ trip value" and an hour chart beside it cannot
-   disagree. `rows` are the day's bookings per hour per channel, the same rows
-   the projection was decided on, { h, platform, bookings, priced }; the
-   denominators are taken over all of them. `keep(row)` picks the rows whose
-   share is returned — the part of the day before a cut. Returns 24 numbers. */
+   Each channel's projected value is spread over the hours that hold its
+   PENDING work — finished, chargeable rides with no price yet — in
+   proportion to how many each hour holds, so the hours add up to exactly the
+   day's figure and the estimate sits where the unpriced work is.
+
+   It was spread over every booking without a price, and that put money in
+   hours that had none coming. Measured on production at 14:30 Dubai on
+   2026-10-16: the day's Uber estimate (AED 2,436.90) covered 65 unpriced
+   bookings, but the 42 finished ones were all at 13:00–14:00 and the other 23
+   were rider cancellations scattered from 00:00 to 12:00 — so 00:00 and 01:00,
+   whose only unpriced bookings were cancellations, were drawn hatched with
+   revenue on the way. The per-booking rate already averages the fee-less
+   cancellations into the VALUE; they are not where it lands.
+
+   `rows` are the day's bookings per hour per channel, the same rows the
+   projection was decided on: { h, platform, pending }. The decision
+   guarantees pending work exists wherever a channel is projected (a channel's
+   pending count is at most its rows' pending — `priced` there also counts
+   cancellations that took a fee), so there is deliberately NO fallback: a
+   caller whose rows lack `pending` spreads nothing, its hours stop adding up
+   to the day, and its own test of that sum fails — which is how
+   test/target_hours.test.mjs proves the Target page's query carries the
+   column. `keep(row)` picks the rows whose share is returned — the part of
+   the day before a cut. Returns 24 numbers. */
 export function spreadByHour(parts, rows, keep = () => true) {
   const out = Array(24).fill(0);
   for (const p of parts) {
     const v = Number(p.value) || 0;
     if (!v) continue;
     const mine = rows.filter((r) => r.platform === p.platform);
-    const unpriced = mine.reduce((s, r) => s + Math.max(0, r.bookings - r.priced), 0);
-    if (!unpriced) continue;
+    const w = (r) => Math.max(0, Number(r.pending) || 0);
+    const total = mine.reduce((s, r) => s + w(r), 0);
+    if (!total) continue;
     for (const r of mine) {
-      if (keep(r)) out[r.h] += (v * Math.max(0, r.bookings - r.priced)) / unpriced;
+      if (keep(r)) out[r.h] += (v * w(r)) / total;
     }
   }
   return out;

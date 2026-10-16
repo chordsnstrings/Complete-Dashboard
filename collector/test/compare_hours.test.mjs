@@ -35,6 +35,9 @@
          hotel channel projected on a day with nothing left to price (whole
          fleet, Egari alone and the day page), and in both skins two more
          hatched hours and a caption naming a hotel estimate.
+     (i) the estimate spread over every unpriced booking again: 4 fail —
+         05:00, whose only unpriced booking was a cancellation, given revenue;
+         the share by 10:00 moved with it; and both skins hatch a fourth hour.
      (h) unvalued counted as bookings minus priced: 3 fail — the Yango
          cancellation counted as money missing, on the route and in both
          skins' captions ("2 bookings on Yango"). */
@@ -91,6 +94,8 @@ await trip({ drv: 'u-9', name: 'Tracker Only', platform: 'fms', at: `${A}T08:15:
 await trip({ drv: 'u-2', name: 'Other One', at: `${A}T09:05:00+04:00` });
 await trip({ drv: 'u-2', name: 'Other One', at: `${A}T09:40:00+04:00` });
 await trip({ drv: 'u-3', name: 'Third Driver', at: `${A}T14:20:00+04:00` });
+// …and a rider cancellation at 05:00 with no fee: no revenue is coming to 05:00.
+await trip({ drv: 'u-3', name: 'Third Driver', at: `${A}T05:10:00+04:00`, status: 'cancelled' });
 await trip({ drv: 'e-1', name: 'Egari Driver', fleet: 'egari', plate: 'L700', at: `${A}T14:30:00+04:00` });
 // …and a channel with no settled day anywhere behind it — one finished ride
 // with no fare, and one cancellation, which is not money missing.
@@ -144,6 +149,8 @@ check('…the fares on record are the fares the page totals', near(sum(full.hour
 check('each hour takes its share by its unpriced bookings: 09:00 holds two, 08:00 one',
   H(8).a_estimated > 0 && near(H(9).a_estimated, 2 * H(8).a_estimated) && near(H(14).a_estimated, 2 * H(8).a_estimated),
   JSON.stringify([H(8).a_estimated, H(9).a_estimated, H(14).a_estimated]));
+check('an hour whose only unpriced booking was cancelled is given none of the estimate',
+  H(5).a_estimated === 0 && H(5).a_revenue === 0 && H(5).a === 1, JSON.stringify(H(5)));
 check('…and an hour is its fares plus its estimate, the estimate never hidden',
   near(H(8).a_revenue, 240 + H(8).a_estimated) && H(8).a_fares === 240, JSON.stringify(H(8)));
 check('a settled day carries no estimate anywhere',
@@ -174,7 +181,8 @@ const eco = await cmp('cut=full&fleet=ecosine');
 const ecoRate = Math.round(((13 * 450 + 180) / 133) * 100) / 100;
 check('the estimate is valued at the fleet\'s own rate over its own bookings',
   eco.revenue_basis.a.parts.length === 1 && eco.revenue_basis.a.parts[0].per_booking === ecoRate
-  && eco.revenue_basis.a.parts[0].bookings === 4, JSON.stringify(eco.revenue_basis.a.parts));
+  && eco.revenue_basis.a.parts[0].pending === 4 && eco.revenue_basis.a.parts[0].bookings === 5,
+  JSON.stringify(eco.revenue_basis.a.parts));
 check('…and its people are its own', eco.hours[14].a_drivers === 1, String(eco.hours[14].a_drivers));
 await q(`UPDATE trip SET price = price * 3 WHERE fleet_id = 'egari' AND external_id LIKE 'hist-%'`);
 const eco2 = await cmp('cut=full&fleet=ecosine');
@@ -226,7 +234,7 @@ for (const skin of ['', '&skin=classic']) {
   check(`${label}: revenue drawn for both days, the three hours holding an estimate marked as one`,
     r.money?.charts === 2 && r.money.marked[0] === 3 && r.money.marked[1] === 0, JSON.stringify(r.money?.marked));
   check(`${label}: the caption names the estimate, its rate and its days, and the settled day as all on record`,
-    /estimated for 5 Uber bookings not priced yet, at AED [\d.,]+ a booking over 14 settled days/.test(r.money?.text || '')
+    /estimated for 5 finished Uber rides not priced yet \(the channel’s bookings at AED [\d.,]+ each over 14 settled days, less what is on record\)/.test(r.money?.text || '')
     && /all of it fares on record/.test(r.money?.text || '')
     && /1 booking on Yango carries no price/.test(r.money?.text || ''),
     (r.money?.text || '').slice(0, 700));

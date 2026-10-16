@@ -2594,3 +2594,24 @@ To repeat: serve `mockapi.mjs`'s app, open
 `[data-rise]` bar inside the "Revenue, hour by hour" panel, and screenshot the
 two panels found by their h3; `test/compare_hours.test.mjs` asserts the same
 against the real route.
+
+### On production — 2026-10-16
+
+Through prod-mirror (production bytes, production API), #compare today
+against yesterday, Arkiv at 1440 and 390, the old skin at 1440, and Egari
+alone for 15 against 14 October in full:
+
+- Both panels draw on all four; no page error; nothing undefined or NaN; the
+  document measures its viewport (390 at 390).
+- People: today peaked at 40 at 10:00 and yesterday at 64 at 18:00; the
+  caption names both and links Online by hour.
+- Revenue: the caption reads "By 14:30: AED 19,457.89 on Oct 16 against AED
+  20,794.20 on Oct 15", the day split as on record and estimated, the settled
+  day "all of it fares on record".
+- Found: 00:00 and 01:00 today were hatched as holding an estimate, though
+  their only unpriced bookings were rider cancellations — the estimate was
+  spread over every unpriced booking. Fixed (FIX-STATUS CMP-H7): it lands on
+  finished rides without a price, which were all at 13:00–14:00. Found on the
+  API pass before it: Egari alone drew AED 26.07 on a settled day for two
+  complimentary hotel rides (CMP-H6).
+
