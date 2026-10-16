@@ -5057,9 +5057,9 @@ app.get('/api/day', (req, r) => {
        api/day_routes.js deliberately does not give (there it is a coverage
        flag). The projection above is computed from exactly these three. */
     platforms: [
-      { platform: 'uber', n: 168, bookings: 168, priced: 0, completed: 160, bookable: 168, revenue: null, km: 2100, completion_pct: 95.2 },
-      { platform: 'hotel', n: 41, bookings: 41, priced: 41, completed: 41, bookable: 41, revenue: 4180, km: 690, completion_pct: 100 },
-      { platform: 'yango', n: 6, bookings: 6, priced: 6, completed: 5, bookable: 6, revenue: 210, km: 90, completion_pct: 83.3 },
+      { platform: 'uber', n: 168, bookings: 168, priced: 0, completed: 160, complimentary: 0, bookable: 168, revenue: null, km: 2100, completion_pct: 95.2 },
+      { platform: 'hotel', n: 41, bookings: 41, priced: 41, completed: 41, complimentary: 0, bookable: 41, revenue: 4180, km: 690, completion_pct: 100 },
+      { platform: 'yango', n: 6, bookings: 6, priced: 6, completed: 5, complimentary: 0, bookable: 6, revenue: 210, km: 90, completion_pct: 83.3 },
     ],
     /* One row per PERSON — accounts says how many platform records that one
        row stands for, so a reader can see the fold rather than only its

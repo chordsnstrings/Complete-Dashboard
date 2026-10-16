@@ -4846,3 +4846,10 @@ through prod-mirror, Arkiv at 1440 and 390 and the old skin at 1440: both
 panels draw, no page error, nothing undefined, 390 measures 390; the
 production screenshots are what showed CMP-H7.
 
+
+**The full suite on 1f043ec (383 files, 14,298 assertions): 1 failing,
+fixed.** `mockapi` compares the mock's answers with the real routes' shapes,
+and `/api/day`'s channel rows had gained `complimentary` (CMP-H6) while the
+mock's had not; they carry it now (10/10). `compare_hours` 31, `target_hours`
+56, `day_routes` 73, `arkiv_today` 103, `arkiv_classic_frozen` 149 green in the
+same run; `chart_marks` 151 and `route_smoke` 60 re-run green on the mock change.
