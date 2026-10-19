@@ -4931,7 +4931,9 @@ file reads back with the same 69; the print is 13 landscape A4 sheets with the
 head on the first; the phone screens fill in both skins; no page error, no
 sideways scroll at 1440 or 390.
 
-Found on production and fixed in the next commit: the written line read
+Found on production and fixed in 86d0f5e (deployment c602a386, verified: all
+69 lines on production read "better than" 25, "worse than" 16, "in step with"
+23, too few days 5 — the head's own counts): the written line read
 "improving last week: down 7.1 points, everyone else fell 21.5" — right by
 the rule (the verdict is against everyone else's move) and wrong in words.
 It now reads "better than everyone else last week: down 7.1 points while
