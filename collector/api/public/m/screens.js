@@ -946,9 +946,6 @@ async function moneyScreen(deck, ctx) {
 
 /* ── People ─────────────────────────────────────────────────────────────── */
 async function people(deck, ctx) {
-  /* Low performers (2026-10-19): who is below their target this month, one
-     tap from the people list. */
-  rows(deck, [row({ title: 'Below target', sub: 'everyone under their share of the target, and who is improving', value: '›', to: href('low-performers') })]);
   const bar = el('div');
   bar.style.cssText = 'display:flex;flex-direction:column;gap:10px';
   deck.append(bar);
@@ -1495,7 +1492,11 @@ async function more(deck) {
        no phone screen goes. It has one now. */
     row({ title: 'To the bank', sub: 'every transfer a platform made', value: '›', to: href('payouts') }),
     row({ title: 'Analyst', sub: 'claims the data was asked to settle', value: '›', to: href('analyst') }),
-    row({ title: 'Below target', sub: 'drivers under their share, and watch lists', value: '›', to: href('low-performers') }),
+    /* Low performers (2026-10-19), under the redesign only: the old skin's
+       phone draws what it drew before, byte for byte, until the operator
+       flips the default (test/phone_classic.test.mjs) — its readers reach the
+       screen by its address. */
+    phoneContract() ? row({ title: 'Below target', sub: 'drivers under their share, and watch lists', value: '›', to: href('low-performers') }) : null,
   ]);
   deck.append(el('p', 'm-sec', 'Operate'));
   rows(deck, [

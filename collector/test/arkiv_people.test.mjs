@@ -924,7 +924,10 @@ if (want('performers')) {
     check('old skin: no band, the four tiles, fleet and platforms still pills', !r.band && r.tiles === 4 && r.pills, JSON.stringify(r));
     await ctx.close();
   }
-  for (const band of ['top', 'low']) {
+  /* #low-performers no longer ranks a week (2026-10-19): it is everyone below
+     their target over a period (./lowperf.js), checked in its own block
+     below. The ranking checks hold for #top-performers, which still draws it. */
+  for (const band of ['top']) {
     const top = band === 'top';
     const hash = `${band}-performers`;
     const { ctx, page, answer } = await open('arkiv', hash);
@@ -984,7 +987,41 @@ if (want('performers')) {
     }
     await ctx.close();
   }
-  for (const r of ['top-performers', 'low-performers']) {
+  /* #low-performers, rebuilt (2026-10-19): everyone below their share of the
+     target, read against the answer the page received. */
+  {
+    const { ctx, page, answer } = await open('arkiv', 'low-performers');
+    await page.waitForFunction(() => document.querySelector('#view .lp-grid'), null, { timeout: 15000 }).catch(() => {});
+    const d = answer('/api/lowperf');
+    const r = await page.evaluate(() => {
+      const box = document.querySelector('#view .lp-page');
+      const cells = [...(box?.querySelectorAll('.tg-cell') || [])].map((c) => [c.querySelector('.tg-l')?.textContent.trim(), c.querySelector('.tg-v')?.textContent.trim()]);
+      return {
+        boxed: !!box && !document.querySelector('#view').classList.contains('lp-page'),
+        head: box?.querySelector('.cband .sechd-name')?.textContent.trim(),
+        cells,
+        bands: [...document.querySelectorAll('#view .lp-t tr.lp-band th')].map((t) => t.textContent.trim()),
+        rows: document.querySelectorAll('#view .lp-t tbody tr[data-pk]').length,
+        grid: [...document.querySelectorAll('#view .lp-grid tbody tr')].map((tr) => tr.querySelectorAll('td').length),
+        off: document.querySelectorAll('#view .lp-grid td.lp-c-off').length,
+        print: !!document.getElementById('lp-print'),
+      };
+    });
+    const rows = d?.rows || [];
+    check('#low: the page sits in its own stack, never a class left on #view for the next page to inherit', r.boxed, JSON.stringify(r.boxed));
+    check('#low: 00 is Below target, its first cell N of the population the server measured',
+      r.head === 'Below target' && r.cells[0]?.[1] === `${rows.length} of ${d.totals.population}`, JSON.stringify([r.head, r.cells[0]]));
+    check('#low: four cells', r.cells.length === 4, JSON.stringify(r.cells.map((c) => c[0])));
+    check('#low: every person below target listed once, grouped by how far below', r.rows === rows.length
+      && r.bands.length === new Set(rows.map((x) => x.band)).size, JSON.stringify([r.rows, rows.length, r.bands]));
+    check('#low: the grid has a row per person and a cell per day of the period', r.grid.length === rows.length
+      && r.grid.every((n) => n === d.days.length), JSON.stringify([r.grid.length, d.days.length]));
+    check('#low: a day active and not driven reads "off" — as many as the answer has', r.off
+      === rows.reduce((a, x) => a + x.days.filter((c) => c.share != null && !c.trips && !c.fares).length, 0), String(r.off));
+    check('#low: a landscape print rule while the page is open', r.print);
+    await ctx.close();
+  }
+  for (const r of ['top-performers', 'low-performers', 'watchlist/1']) {
     const { ctx, page } = await open('arkiv', r, { width: 390 });
     check(`#${r} at 390: nothing scrolls sideways`, (await shape(page)).overflowX <= 0);
     await ctx.close();
