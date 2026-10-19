@@ -42,6 +42,7 @@ import { fmt } from './charts.js';
 import { withheldSentence } from './access_model.js';
 import { downloadFile } from './target.js';
 import { who, canDo, post } from './access.js';
+import { dubaiDay } from './tz.js';
 
 export const HOTEL_MODES = ['hide', 'mostly', 'show'];
 export const HOTEL_WORD = {
@@ -100,7 +101,8 @@ export function landscape(host) {
   window.addEventListener('hashchange', later);
   window.addEventListener('beforeprint', off);
 }
-const dubaiToday = () => new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
+/* Today in Dubai, by the shared clock rule (./tz.js), never the UTC day. */
+const dubaiToday = () => dubaiDay(new Date());
 
 /* ── the address ─────────────────────────────────────────────────────────── */
 /** #low-performers[/FROM..TO[/HOTEL[.FLEET]]] → the request. */

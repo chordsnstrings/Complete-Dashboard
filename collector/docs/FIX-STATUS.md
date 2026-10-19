@@ -4899,3 +4899,19 @@ concern that page only.
 | LP6 | Saves and edits only by a signed-in Owner or Operations manager (capability `watchlist.edit`, OPS and OWN only); the handler also refuses a visitor who is not signed in, which open mode would otherwise let through | yes | pending deploy | the visitor guard removed → 1 fails |
 | LP7 | Pages: `#low-performers[/FROM..TO[/HOTEL[.FLEET]]]` in both skins (head, list grouped by band with a written line, the day-by-day grid shaded against each day's own target with "off" in words, the weeks against everyone else, watch lists); `#watchlist[/ID[/A_B]]`; phone screens; Excel for both; Print / PDF as a landscape A4 (a `@page` the page adds only while open — a named page broke the first sheet) | yes | pending deploy | `lowperf` §7: "off" shaded as under half → 2 fail; the fleet dropped from the address → 1 fails |
 | LP8 | Access: subject EARN; names ID, cash rides CASH, Uber hours COND, trips BK, car VEH, each withheld in words; one fleet's rows for a one-fleet reader; the files write "(withheld)"; never cached (`/api/lowperf` on api/cache.js NEVER) | yes | pending deploy | `lowperf` §6 |
+
+**The full suite on ba5090b (384 files): 6 failing; on 6cd7d7b: 3.** Caused by
+this change and fixed: the phone's offline file list lacked `/lowperf.js`
+(`tokens`, `phone_arkiv`); the Below target links moved the old skin's phone
+People and More screens and the redesign's pinned People order — the People
+link is gone and the More link is drawn under the redesign only
+(`phone_classic` 34/34, `phone_arkiv` 271/271); `arkiv_people` read the old
+weekly ranking on #low-performers and now checks the rebuilt page against its
+own answer (241/241); the page took "today" as UTC+4 by hand instead of the
+shared `tz.js` rule (`timezone` 19/19); the watch page's two control rows sat
+8px apart against the 10px minimum (`spacing` clean on every low-performers
+and watchlist address). `access_pages` had run before the local Postgres was
+up (150/150 after). Not this change: `arkiv_classic_frozen`'s six routes that
+hold a Leaflet map (unit, unit/nonsense, unit?days=90&fleet=ecosine, map,
+map/replay/L45235, vehicle/L45235/movement) fail with identical hashes on
+834bcb4, the commit before this work, and are left as they are.
