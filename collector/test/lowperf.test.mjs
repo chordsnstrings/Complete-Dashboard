@@ -381,7 +381,9 @@ check('a watch list’s head: the list and everyone else, before and after', /42
 check('its members table names the move against everyone else', /improving/.test(pg.membersHtml(w)) && /against \+12\.3/.test(pg.membersHtml(w)), pg.membersHtml(w).slice(0, 600));
 check('the save day is marked in the grid', /lp-saved/.test(pg.gridHtml(w, { saved: '2026-10-15' })));
 const css = readFileSync('api/public/app.css', 'utf8');
-check('printing is a landscape A4 of its own, not every page’s', /@page lp-land\{size:A4 landscape/.test(css) && /\.lp-page\{page:lp-land\}/.test(css));
+check('printing is a landscape A4 of this page’s own — a rule it adds while open, never one every page prints under',
+  pg.PRINT_CSS === '@media print{@page{size:A4 landscape;margin:9mm}}' && !/@page/.test(css.slice(css.indexOf('── Low performers'))),
+  pg.PRINT_CSS);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

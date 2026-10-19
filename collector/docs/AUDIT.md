@@ -2615,3 +2615,44 @@ alone for 15 against 14 October in full:
   API pass before it: Egari alone drew AED 26.07 on a settled day for two
   complimentary hotel rides (CMP-H6).
 
+
+## #low-performers and #watchlist — rebuilt 2026-10-19
+
+Rendered against the mock (`/api/lowperf` and the watch routes compute with
+`lowperfOf`/`watchOf` over the Month target mock's fleet, with every eleventh
+driver at AED 17 a trip so all three bands are filled, two hotel-only drivers,
+one mostly-hotel and one who stops driving five days before the end), Arkiv
+and the old skin at 1440 and 390, the phone app in both skins, and the print
+view as a PDF:
+
+- No page error, no request over 400, and the document measures its viewport
+  at every width (horizontal overflow 0).
+- Found and fixed before commit: five head cells wrapped the fifth onto a row
+  of its own — the bands went into the first cell's line; the written line
+  repeated the columns beside it ("Earned AED … of …, active 17 counted days,
+  … trips") and read "up 0 points … moved +0" — it now says only the days off
+  and the move in words ("improving last week: up 40 points, everyone else
+  held"); at 390 the written line made every row a screen tall — it is hidden
+  under 760 px (its trend is in the cell beside it).
+- The grid reads like the bottom-45 day-by-day PDF: each day's fares shaded
+  against that day's own share, "off" in words, an uncounted day's column
+  hatched with its reason on hover, the save day ruled on a watch list.
+- Print, found and fixed before deploy: the first PDF came out US-letter
+  portrait, and with a CSS named page (`page: lp-land`) on the page's block,
+  then on `:root:has(.lp-page)`, Chromium broke the sheet where the name
+  changed — sheet one was the shell's header and the credentials banner
+  stretched over the whole page, the list starting on sheet two (bisected by
+  overriding `page:auto` on everything: the break went). The landscape A4 is
+  now a `<style>@media print{@page{…}}</style>` the page adds while open and
+  removes on the next navigation or before any print with the page gone:
+  Low performers prints 9 landscape sheets with the head on the first, a
+  watch list 3, and #month-target still prints as before.
+- Also found: the router clones `#view`'s attributes onto the next page's
+  root (`freshView`), so the first draft's `lp-page` class on `#view` would
+  have followed the reader to every later page; the page's content now sits
+  in its own `.stack.lp-page`.
+
+To repeat: serve `mockapi.mjs`'s app, open
+`/?skin=arkiv|classic#low-performers` and `#watchlist/1` (and
+`/?ui=phone#low-performers`), wait four seconds, screenshot full page; print
+with `emulateMedia('print')` and `page.pdf({ preferCSSPageSize: true })`.

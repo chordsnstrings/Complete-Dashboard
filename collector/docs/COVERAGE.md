@@ -10019,3 +10019,45 @@ the 23rd revert).
   first.
 - **No per-fleet weights.** The target is one figure for both fleets.
 
+
+## Low performers and watch lists — built 2026-10-19
+
+`#low-performers` names everyone below their target over a period, and
+`#watchlist/<id>` follows a list saved from it (api/lowperf.js). What it
+holds, and what it does not:
+
+* **The target is the Month target page's**, rule for rule: each settled
+  day's plan divided among the drivers active that day (a completed trip in
+  the 8 Dubai days to it). A driver active on a day they did not drive is
+  still asked that day's share (the operator's ruling, 2026-10-19: "Count
+  it"). For the same days the two pages name the same people with the same
+  gross and target to the fils — `test/lowperf.test.mjs` holds them side by
+  side. A day that is not settled, or in a month with no target, counts for
+  nobody and is named with its reason.
+* **Gross** is fares on every platform before commission (`has_fare`), the
+  same measure as the bottom-45 reports and the Month target page — not the
+  statement income the old Low performers tab ranked on.
+* **Hours online are Uber's only.** Availability comes from one source,
+  `src/sources/uber_timeline.js` → `driver_timeline_event` →
+  `driver_day.online_min`; no other channel files it. A person with two Uber
+  accounts is credited the longer of the two each day (two apps open at once
+  are one shift); an account whose trips name two people is credited to
+  nobody. "No Uber hours" is said, never 0.
+* **Cash rides** are `trip_ext.driver_holds_cash` (payment `cash` or
+  `cash-driver`), the predicate #settlement and the driver page count.
+* **Hotel share** is bookings on the `hotel` channel over the period and the
+  7 days before it — the active rule's own reach.
+* **Watch-list members** are stored person keys plus every platform account
+  they held when saved: a later ruling in the identity register re-keys a
+  person (`person_key` is generated from the register), and the list finds
+  them again by account. A member found on no day shown is named, not dropped.
+* **Who saved a list is not shown** (a staff email is not part of a figure,
+  the target routes' rule); the access audit log holds the request.
+* **Two front-end traps met building it.** A CSS named page (`page:` +
+  `@page name`) makes Chromium start a new sheet wherever the page name
+  changes, including between the shell and the page — print one page in
+  landscape by adding a plain `@page` in a `<style>` while that page is open
+  instead (api/public/lowperf.js `landscape()`). And the router clones
+  `#view`'s attributes onto the next page's root (app.js `freshView`): a
+  class put on `#view` by one page follows the reader to the next; put it on
+  an element of the page's own.

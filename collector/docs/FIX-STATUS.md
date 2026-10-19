@@ -4874,3 +4874,28 @@ on record. Screenshots through prod-mirror — Arkiv 1440 and 390, the old skin
 1440, Egari in full — draw both panels, no page error, nothing undefined, 390
 measures 390.
 
+
+## LP — Low performers: everyone below target, day by day, and watch lists (2026-10-19)
+
+The operator, after the bottom-45 PDFs: "I want reports like this for the low
+performer on the platform … so that we can check their performance
+improvement as well", "don't keep drivers who only drives in hotel, or let us
+filter it out", and who belongs: "anyone who is earning less than the target
+per day". Ruled the same day: days off count; the month so far; watch lists
+kept by the Owner and the Operations managers; PDF by printing the page.
+
+The old tab (`api/public/performers.js` with `'low'`) ranked one Monday–Sunday
+week on money in per day worked and is no longer what `#low-performers`
+renders; `#top-performers` still uses it, so FIXLIST H65, H118 and 98 now
+concern that page only.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| LP1 | `GET /api/lowperf`: below target over any period (default the month so far, at most 93 days, across months) by the Month target page's own rule — each settled day's plan shared among that day's active drivers, days off counted — and for the same days the same people with the same gross and target, to the fils | yes | pending deploy | `lowperf` §1 and §5 hold it against `driverTargets` and `/api/target/month`; sharing the day's *needed* → 11 fail; a share only on days driven → the run dies on "the same people" |
+| LP2 | Hotel switch: hotel-only hidden by default (every booking in the period and the 7 days before on the hotel channel), mostly-hotel (> 50%) on request, everyone on request — each counted as hidden; fleet switch | yes | pending deploy | the hotel-only rule dropped → 5 fail |
+| LP3 | Bands under 50% / 50–80% / 80–100%; per person days active, driven and off, AED a day driven against the target a day, trips against the minimum, completion, cash rides (trip_ext.driver_holds_cash), Uber hours online (the longer account a day, never the sum; a shared account credited to nobody), car, last booking | yes | pending deploy | `lowperf` §1 |
+| LP4 | Three weeks ending on the last COUNTED day; improving / slipping only at 10 points beyond everyone else's move; a week with fewer than 3 active days says why | yes | pending deploy | judged on the person's own move → 1 fails; weeks ending on an unsettled yesterday → 1 fails |
+| LP5 | Watch lists (`sql/schema_v109.sql`): saved by the server from a period and settings (never the page's names or figures), kept with every account each member held; followed from 14 days before the save, before against after or any two days or spans, against everyone else; a member re-keyed by a merge found by an account; one found nowhere named; nothing deleted | yes | pending deploy | `lowperf` §4–5: person-key-only lookup → the run dies on "re-keyed"; saving the page's names → 3 fail |
+| LP6 | Saves and edits only by a signed-in Owner or Operations manager (capability `watchlist.edit`, OPS and OWN only); the handler also refuses a visitor who is not signed in, which open mode would otherwise let through | yes | pending deploy | the visitor guard removed → 1 fails |
+| LP7 | Pages: `#low-performers[/FROM..TO[/HOTEL[.FLEET]]]` in both skins (head, list grouped by band with a written line, the day-by-day grid shaded against each day's own target with "off" in words, the weeks against everyone else, watch lists); `#watchlist[/ID[/A_B]]`; phone screens; Excel for both; Print / PDF as a landscape A4 (a `@page` the page adds only while open — a named page broke the first sheet) | yes | pending deploy | `lowperf` §7: "off" shaded as under half → 2 fail; the fleet dropped from the address → 1 fails |
+| LP8 | Access: subject EARN; names ID, cash rides CASH, Uber hours COND, trips BK, car VEH, each withheld in words; one fleet's rows for a one-fleet reader; the files write "(withheld)"; never cached (`/api/lowperf` on api/cache.js NEVER) | yes | pending deploy | `lowperf` §6 |

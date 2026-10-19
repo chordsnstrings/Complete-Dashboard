@@ -3008,11 +3008,11 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
 .lp-save input{font:inherit;padding:3px 6px;min-width:28ch}
 .lp-save .mt-xmsg{flex-basis:auto;text-align:left}
 [data-panel="lp-list"] .tablewrap,[data-panel="lp-members"] .tablewrap{overflow-x:auto}
-/* PRINT: a landscape A4 of its own (a named page, so no other page's print
-   changes), the controls and watch-list forms gone, the grid at full width. */
-@page lp-land{size:A4 landscape;margin:9mm}
+/* PRINT: the controls and watch-list forms gone, the grid at full width.
+   The landscape A4 itself is a <style> the page adds only while it is open
+   (./lowperf.js landscape()), so no other page's print changes. */
 @media print{
-  .lp-page{page:lp-land}
+  .lp-page .lp-t .lp-meta{white-space:normal}
   .lp-noprint,.lp-page .lp-ctl{display:none !important}
   .lp-page .lp-gridwrap,.lp-page .tablewrap{overflow:visible}
   .lp-grid{font-size:var(--t1)}

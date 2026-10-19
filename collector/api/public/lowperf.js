@@ -29,9 +29,13 @@
    not sent. Absent, never zero: a class withheld from the reader's role, a
    day not settled, a week too short to judge — each is said in words.
 
-   PRINT. "Print / PDF" prints the page as a landscape A4 (app.css @page
-   lp-land): the controls and the shell fall away and the grid fits the
-   width. The browser's own "Save as PDF" makes the file. */
+   PRINT. "Print / PDF" prints the page as a landscape A4: the controls fall
+   away and the grid fits the width; the browser's own "Save as PDF" makes the
+   file. The landscape @page lives in a <style> this page adds while it is on
+   screen and takes away when it is not (landscape() below). A CSS named page
+   was tried first and Chromium broke the sheet wherever the name changed —
+   the first PDF was the shell's header and the credentials banner stretched
+   over a whole page, the list starting on the second. */
 import { api, alive, currentGen, href } from './data.js';
 import { el, esc, money, countOf, sourceLabel, panel, secHead, loading, contract } from './ui.js';
 import { fmt } from './charts.js';
@@ -66,6 +70,36 @@ export const shortDay = (d) => {
   const t = new Date(`${d}T12:00:00Z`);
   return `${WD[t.getUTCDay()]} ${t.getUTCDate()} ${MON[t.getUTCMonth()]}`;
 };
+/* The page's content sits in its own stack: the router clones #view's
+   attributes onto the next page's root (app.js freshView), so a class put on
+   #view itself would follow the reader to the next page. */
+const pageBox = (root) => {
+  const box = el('div', 'stack lp-page');
+  root.append(box);
+  return box;
+};
+export const PRINT_ID = 'lp-print';
+export const PRINT_CSS = '@media print{@page{size:A4 landscape;margin:9mm}}';
+/** A landscape A4 for printing, in the document only while `host` is on it:
+    removed on the next navigation, and checked again before any print. */
+export function landscape(host) {
+  if (typeof document === 'undefined' || !document.head) return;
+  if (!document.getElementById(PRINT_ID)) {
+    const st = document.createElement('style');
+    st.id = PRINT_ID;
+    st.textContent = PRINT_CSS;
+    document.head.append(st);
+  }
+  const off = () => {
+    if (host.isConnected) return;
+    document.getElementById(PRINT_ID)?.remove();
+    window.removeEventListener('hashchange', later);
+    window.removeEventListener('beforeprint', off);
+  };
+  const later = () => setTimeout(off, 250);
+  window.addEventListener('hashchange', later);
+  window.addEventListener('beforeprint', off);
+}
 const dubaiToday = () => new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
 
 /* ── the address ─────────────────────────────────────────────────────────── */
@@ -302,8 +336,10 @@ export function watchListsHtml(lists, v, { editor = canEditWatch() } = {}) {
 }
 export const canEditWatch = () => who.signedIn === true && who.kind === 'user' && !who.preview && canDo('watchlist.edit');
 
-export async function lowPerformersPage(root, param = null, sub = null) {
+export async function lowPerformersPage(outer, param = null, sub = null) {
   const gen = currentGen();
+  const root = pageBox(outer);
+  landscape(root);
   const ak = contract();
   const r = parseParam(param === 'month' ? null : param, sub);
   const note = el('span');
@@ -327,7 +363,6 @@ export async function lowPerformersPage(root, param = null, sub = null) {
   const saved = panel('Watch lists', null, 'lp-watch');
   saved.panel.classList.add('lp-noprint');
   root.append(list.panel, grid.panel, weeks.panel, saved.panel);
-  root.classList.add('lp-page');
   [head, list.body, grid.body, weeks.body, saved.body].forEach((b) => loading(b));
   ctl.innerHTML = controlsHtml(r, null);
 
@@ -446,9 +481,10 @@ function spanControls(id, w) {
 }
 
 /** #watchlist — every saved list; #watchlist/ID — one followed. */
-export async function watchListPage(root, param = null, sub = null) {
+export async function watchListPage(outer, param = null, sub = null) {
   const gen = currentGen();
-  root.classList.add('lp-page');
+  const root = pageBox(outer);
+  landscape(root);
   if (!param) {
     const p = panel('Watch lists', 'Lists saved from the Low performers page, each followed from the day it was saved.', 'lp-watch');
     root.append(p.panel);

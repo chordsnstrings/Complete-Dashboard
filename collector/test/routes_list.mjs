@@ -17,6 +17,10 @@ export const ROUTES = [
   /* Both lists, and two drill-downs: drv-0 has an Uber status row, drv-9
      deliberately has none, so the branch that says so is rendered too. */
   'top-performers', 'low-performers', 'performer/drv-0', 'performer/drv-9',
+  /* Low performers (2026-10-19) with its own period, hotel switch and fleet
+     in the address, and a watch list followed — saved lists, one list, and
+     one compared over two days of the reader's choosing. */
+  'low-performers/2026-09-01..2026-09-20/show.egari', 'watchlist', 'watchlist/1', 'watchlist/1/2026-09-15_2026-09-22',
   /* Better or worse, in the three shapes it is reachable in: the default
      (the latest COMPLETE period), an explicit period, and the month grain —
      which is a different set of periods and a different set of baselines, not
