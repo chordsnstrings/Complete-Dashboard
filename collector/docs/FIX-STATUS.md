@@ -4891,14 +4891,14 @@ concern that page only.
 
 | id | what | written | production | proven |
 |---|---|---|---|---|
-| LP1 | `GET /api/lowperf`: below target over any period (default the month so far, at most 93 days, across months) by the Month target page's own rule — each settled day's plan shared among that day's active drivers, days off counted — and for the same days the same people with the same gross and target, to the fils | yes | pending deploy | `lowperf` §1 and §5 hold it against `driverTargets` and `/api/target/month`; sharing the day's *needed* → 11 fail; a share only on days driven → the run dies on "the same people" |
-| LP2 | Hotel switch: hotel-only hidden by default (every booking in the period and the 7 days before on the hotel channel), mostly-hotel (> 50%) on request, everyone on request — each counted as hidden; fleet switch | yes | pending deploy | the hotel-only rule dropped → 5 fail |
-| LP3 | Bands under 50% / 50–80% / 80–100%; per person days active, driven and off, AED a day driven against the target a day, trips against the minimum, completion, cash rides (trip_ext.driver_holds_cash), Uber hours online (the longer account a day, never the sum; a shared account credited to nobody), car, last booking | yes | pending deploy | `lowperf` §1 |
-| LP4 | Three weeks ending on the last COUNTED day; improving / slipping only at 10 points beyond everyone else's move; a week with fewer than 3 active days says why | yes | pending deploy | judged on the person's own move → 1 fails; weeks ending on an unsettled yesterday → 1 fails |
-| LP5 | Watch lists (`sql/schema_v109.sql`): saved by the server from a period and settings (never the page's names or figures), kept with every account each member held; followed from 14 days before the save, before against after or any two days or spans, against everyone else; a member re-keyed by a merge found by an account; one found nowhere named; nothing deleted | yes | pending deploy | `lowperf` §4–5: person-key-only lookup → the run dies on "re-keyed"; saving the page's names → 3 fail |
-| LP6 | Saves and edits only by a signed-in Owner or Operations manager (capability `watchlist.edit`, OPS and OWN only); the handler also refuses a visitor who is not signed in, which open mode would otherwise let through | yes | pending deploy | the visitor guard removed → 1 fails |
-| LP7 | Pages: `#low-performers[/FROM..TO[/HOTEL[.FLEET]]]` in both skins (head, list grouped by band with a written line, the day-by-day grid shaded against each day's own target with "off" in words, the weeks against everyone else, watch lists); `#watchlist[/ID[/A_B]]`; phone screens; Excel for both; Print / PDF as a landscape A4 (a `@page` the page adds only while open — a named page broke the first sheet) | yes | pending deploy | `lowperf` §7: "off" shaded as under half → 2 fail; the fleet dropped from the address → 1 fails |
-| LP8 | Access: subject EARN; names ID, cash rides CASH, Uber hours COND, trips BK, car VEH, each withheld in words; one fleet's rows for a one-fleet reader; the files write "(withheld)"; never cached (`/api/lowperf` on api/cache.js NEVER) | yes | pending deploy | `lowperf` §6 |
+| LP1 | `GET /api/lowperf`: below target over any period (default the month so far, at most 93 days, across months) by the Month target page's own rule — each settled day's plan shared among that day's active drivers, days off counted — and for the same days the same people with the same gross and target, to the fils | yes | **on production** `5cc44db` | `lowperf` §1 and §5 hold it against `driverTargets` and `/api/target/month`; sharing the day's *needed* → 11 fail; a share only on days driven → the run dies on "the same people" |
+| LP2 | Hotel switch: hotel-only hidden by default (every booking in the period and the 7 days before on the hotel channel), mostly-hotel (> 50%) on request, everyone on request — each counted as hidden; fleet switch | yes | **on production** `5cc44db` | the hotel-only rule dropped → 5 fail |
+| LP3 | Bands under 50% / 50–80% / 80–100%; per person days active, driven and off, AED a day driven against the target a day, trips against the minimum, completion, cash rides (trip_ext.driver_holds_cash), Uber hours online (the longer account a day, never the sum; a shared account credited to nobody), car, last booking | yes | **on production** `5cc44db` | `lowperf` §1 |
+| LP4 | Three weeks ending on the last COUNTED day; improving / slipping only at 10 points beyond everyone else's move; a week with fewer than 3 active days says why | yes | **on production** `5cc44db` | judged on the person's own move → 1 fails; weeks ending on an unsettled yesterday → 1 fails |
+| LP5 | Watch lists (`sql/schema_v109.sql`): saved by the server from a period and settings (never the page's names or figures), kept with every account each member held; followed from 14 days before the save, before against after or any two days or spans, against everyone else; a member re-keyed by a merge found by an account; one found nowhere named; nothing deleted | yes | **on production** `5cc44db` | `lowperf` §4–5: person-key-only lookup → the run dies on "re-keyed"; saving the page's names → 3 fail |
+| LP6 | Saves and edits only by a signed-in Owner or Operations manager (capability `watchlist.edit`, OPS and OWN only); the handler also refuses a visitor who is not signed in, which open mode would otherwise let through | yes | **on production** `5cc44db` | the visitor guard removed → 1 fails |
+| LP7 | Pages: `#low-performers[/FROM..TO[/HOTEL[.FLEET]]]` in both skins (head, list grouped by band with a written line, the day-by-day grid shaded against each day's own target with "off" in words, the weeks against everyone else, watch lists); `#watchlist[/ID[/A_B]]`; phone screens; Excel for both; Print / PDF as a landscape A4 (a `@page` the page adds only while open — a named page broke the first sheet) | yes | **on production** `5cc44db` | `lowperf` §7: "off" shaded as under half → 2 fail; the fleet dropped from the address → 1 fails |
+| LP8 | Access: subject EARN; names ID, cash rides CASH, Uber hours COND, trips BK, car VEH, each withheld in words; one fleet's rows for a one-fleet reader; the files write "(withheld)"; never cached (`/api/lowperf` on api/cache.js NEVER) | yes | **on production** `5cc44db` | `lowperf` §6 |
 
 **The full suite on ba5090b (384 files): 6 failing; on 6cd7d7b: 3.** Caused by
 this change and fixed: the phone's offline file list lacked `/lowperf.js`
@@ -4915,3 +4915,32 @@ up (150/150 after). Not this change: `arkiv_classic_frozen`'s six routes that
 hold a Leaflet map (unit, unit/nonsense, unit?days=90&fleet=ecosine, map,
 map/replay/L45235, vehicle/L45235/movement) fail with identical hashes on
 834bcb4, the commit before this work, and are left as they are.
+
+**On production (5cc44db, deployment 897d2d4d, 2026-10-19).** `/api/lowperf`
+with hotel drivers shown names exactly the 83 people `/api/target/month`
+has behind on money for 1–18 October, with the same gross, target and days
+active for every one (0 differences, 18 counted days). By default 69 of 105
+are below target with 14 hotel-only drivers left out — 15 under half, 28 at
+half to 80%, 26 at 80% or more, the figures measured before the build; "mostly
+hotel" leaves out 2 more. Short of their targets AED 180,196.45 (earned
+410,102.38 of 590,298.83); everyone else, 36 drivers, at 124.1%. Last week
+against the one before: 25 better than everyone else, 16 worse, 23 in step, 5
+too few days. Uber hours filed for 67 of the 69. 176 days off among 46
+people. Answers in 5.5–7.5 s, about the Month target page's 6.4 s. The Excel
+file reads back with the same 69; the print is 13 landscape A4 sheets with the
+head on the first; the phone screens fill in both skins; no page error, no
+sideways scroll at 1440 or 390.
+
+Found on production and fixed in the next commit: the written line read
+"improving last week: down 7.1 points, everyone else fell 21.5" — right by
+the rule (the verdict is against everyone else's move) and wrong in words.
+It now reads "better than everyone else last week: down 7.1 points while
+everyone else fell 21.5" (and "worse than", "in step with").
+
+Also measured: September 2026 has no target, so a period reaching into it
+counts only its October days and names every September day with that reason.
+Over 14 Sep – 13 Oct (mostly-hotel left out) 64 of 101 are below target, and
+41 of the 44 people on the reissued bottom-45 list are among them. A watch
+list saves everyone below target for its period, so "the 14 Oct list" saved
+from there would hold those 64 until the other 23 are removed on its page.
+Saving needs a signed-in Owner or Operations manager; none was made here.

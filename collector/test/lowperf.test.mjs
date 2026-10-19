@@ -370,7 +370,8 @@ check('the list: grouped by how far below, in the server’s order', /Under half
   && lh.indexOf('Driver O') < lh.indexOf('Driver X') && lh.indexOf('Driver X') < lh.indexOf('Driver Y'), lh.slice(0, 400));
 check('the written line says what the columns do not: the days off, and the move against everyone else',
   /5 days off while active — each still asks its share/.test(pg.readingOf(by.o))
-  && /^Drove every day they were active; improving last week: up 40 points, everyone else held\.$/.test(pg.readingOf(by.x)), j([pg.readingOf(by.o), pg.readingOf(by.x)]));
+  && /^Drove every day they were active; better than everyone else last week: up 40 points while everyone else held\.$/.test(pg.readingOf(by.x))
+  && /worse than everyone else last week: down 40 points while everyone else held/.test(pg.readingOf(by.y)), j([pg.readingOf(by.o), pg.readingOf(by.x), pg.readingOf(by.y)]));
 const lhId = pg.listHtml({ ...shId, _withheld: { ID: '' } });
 check('a role without names reads “(withheld)” and the reason — never a blank row', /\(withheld\)/.test(lhId) && !/Driver [OXYZ]/.test(lhId)
   && /Not shown to your role/.test(lhId), lhId.slice(0, 500));

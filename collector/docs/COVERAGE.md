@@ -10053,6 +10053,14 @@ holds, and what it does not:
   them again by account. A member found on no day shown is named, not dropped.
 * **Who saved a list is not shown** (a staff email is not part of a figure,
   the target routes' rule); the access audit log holds the request.
+* **The Month target page lists one more person than Low performers
+  measures** (120 against 119 on 2026-10-19): someone with fares on a counted
+  day but no completed trip in the 8 days to it is not active, so is asked
+  nothing; the Month target page lists them "on target" against a target of
+  0, Low performers leaves them out. Below target, the two agree exactly.
+* **September 2026 has no target saved**, so any period reaching into it
+  counts only its October days; each September day is named "No target was
+  set for September 2026".
 * **Two front-end traps met building it.** A CSS named page (`page:` +
   `@page name`) makes Chromium start a new sheet wherever the page name
   changes, including between the shell and the page — print one page in

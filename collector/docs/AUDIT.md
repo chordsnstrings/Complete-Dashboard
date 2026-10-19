@@ -2656,3 +2656,14 @@ To repeat: serve `mockapi.mjs`'s app, open
 `/?skin=arkiv|classic#low-performers` and `#watchlist/1` (and
 `/?ui=phone#low-performers`), wait four seconds, screenshot full page; print
 with `emulateMedia('print')` and `page.pdf({ preferCSSPageSize: true })`.
+
+### On production — 2026-10-19, 5cc44db
+
+Through prod-mirror, #low-performers and #watchlist in Arkiv and the old skin
+at 1440 and 390, the phone in both skins, and the print as a PDF: no page
+error, no request over 400, document width equal to the viewport everywhere.
+The head reads 69 of 105, 15 · 28 · 26, short AED 180,196.45, everyone else
+124.1%; the print is 13 landscape A4 sheets with the head on the first. The
+old-skin phone sat on its skeleton for the first 12 seconds of one shot —
+the list takes 5–7 s to compute — and filled on a 30-second wait. Found: the
+written line's "improving … down 7.1 points" (FIX-STATUS LP), reworded.

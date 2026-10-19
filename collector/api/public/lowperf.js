@@ -192,9 +192,13 @@ export function readingOf(r) {
   else if (r.days_active) out.push('drove every day they were active');
   const t = r.trend || {};
   if (t.verdict && t.change != null) {
+    /* The verdict is against everyone else's move, so the sentence says so:
+       on production the first draft read "improving last week: down 7.1
+       points" for a driver who fell less than everyone else's 21.5. */
     const me = t.change === 0 ? 'no change' : `${t.change > 0 ? 'up' : 'down'} ${fmt(Math.abs(t.change), 1)} points`;
     const them = !t.rest_change ? 'everyone else held' : `everyone else ${t.rest_change > 0 ? 'rose' : 'fell'} ${fmt(Math.abs(t.rest_change), 1)}`;
-    out.push(`${t.verdict} last week: ${me}, ${them}`);
+    const how = { improving: 'better than everyone else', slipping: 'worse than everyone else', steady: 'in step with everyone else' }[t.verdict];
+    out.push(`${how} last week: ${me} while ${them}`);
   } else if (t.why) out.push(t.why.replace(/\.$/, '').replace(/^./, (c) => c.toLowerCase()));
   const s = out.join('; ');
   return `${s.charAt(0).toUpperCase()}${s.slice(1)}.`;
