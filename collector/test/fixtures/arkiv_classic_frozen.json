@@ -65,8 +65,8 @@
  "insights/safety": "34ef23597ed89714",
  "insights/severity/critical": "f23401fcc9ce5757",
  "live": "d69a14fc5b673c4d",
- "low-performers": "21b3f9dd532ac9ed",
- "low-performers/2026-09-01..2026-09-20/show.egari": "681a4bb8785cf2a3",
+ "low-performers": "5782c6d75b25846a",
+ "low-performers/2026-09-01..2026-09-20/show.egari": "ffb9b096155cd541",
  "map": "a169d100c3c9d49d",
  "map/replay/L45235": "c5349f3681374e4e",
  "month-target": "20a7285d18184cb6",
@@ -148,7 +148,7 @@
  "vehicle/L45235/trips": "91710f374bdadcf2",
  "vehicles": "5008101821cacdf2",
  "watchlist": "856086c49fc947dd",
- "watchlist/1": "a263a7eb70a4cb49",
- "watchlist/1/2026-09-15_2026-09-22": "76e8b07f89bf1aed",
+ "watchlist/1": "84112e31ff64633d",
+ "watchlist/1/2026-09-15_2026-09-22": "7e1a78ae2a6ca5f2",
  "zzz-not-a-page": "d4c90a13a05036c8"
 }

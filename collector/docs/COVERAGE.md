@@ -10069,3 +10069,24 @@ holds, and what it does not:
   `#view`'s attributes onto the next page's root (app.js `freshView`): a
   class put on `#view` by one page follows the reader to the next; put it on
   an element of the page's own.
+* **What a driver's day holds, measured 2026-10-19** (the 30 people of the
+  bottom-45 list, 14 Sep – 13 Oct, 699 days driven): first request and last
+  drop-off on 100% of days, minutes on jobs on ~100% (a booking without an
+  `ended_at` is not timed; a day with none timed has no hours, not 0), km on
+  100% of days with a completed trip, **Uber hours online on 93%** — the only
+  channel that files availability, so a Bolt- or hotel-only day has none and
+  says so. Hours on jobs are request to drop-off summed per person (the
+  rollup's `on_job_min`, per person rather than per account); they are not
+  hours online and must never be read as them.
+* **Abandoned and declined are different things** (api/cancellation_sql.js):
+  abandoned is a job the driver accepted and then cancelled (Uber
+  `driver_cancelled`, Bolt `driver_cancelled_after_accept`); declined is an
+  offer turned down, which only Bolt logs. The "abandoned jobs" cause is
+  judged on abandoned over accepted (bookings less declined), never on
+  declined, or every Bolt driver would read worse than every Uber driver.
+* **The causes are held against a middle value, not a fixed bar.** Everyone
+  else's median over the same days and settings moves with the season and
+  the hotel switch; a cause is named only past a margin (three-quarters of
+  the hours or trips, 85% of the rate, two hours later AND short days, a
+  quarter of active days off AND twice everyone else's share, 3 abandons AND
+  5% AND twice everyone else's rate). A rate needs 3 days driven.

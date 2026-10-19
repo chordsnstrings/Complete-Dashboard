@@ -74,6 +74,7 @@ import {
 import { loadDriverDays } from './target_month.js';
 import { monthWeights } from './target_weights.js';
 import { personKeyStored } from './custody_sql.js';
+import { DROPPED_SQL, DECLINED_SQL } from './cancellation_sql.js';
 import { dubaiDay } from './window.js';
 
 /* The longest period one answer covers: three months of days × a person grid
@@ -195,9 +196,81 @@ export async function loadHours(q, from, to) {
         FROM acct a JOIN driver_day d ON d.driver_ext_id = a.id
        WHERE d.day BETWEEN $1::date AND $2::date AND d.online_min IS NOT NULL
        GROUP BY 1, 2)
-    SELECT pk, sum(online_min)::float AS online_min, count(*)::int AS online_days FROM per_day GROUP BY 1`, [from, to]);
-  return new Map(rows.map((r) => [r.pk, { online_min: Number(r.online_min) || 0, online_days: Number(r.online_days) || 0 }]));
+    SELECT pk, to_char(day, 'YYYY-MM-DD') AS day, online_min::float AS online_min FROM per_day`, [from, to]);
+  const out = new Map();
+  for (const r of rows) {
+    if (!out.has(r.pk)) out.set(r.pk, { online_min: 0, online_days: 0, byDay: new Map() });
+    const h = out.get(r.pk);
+    h.online_min += Number(r.online_min) || 0;
+    h.online_days += 1;
+    h.byDay.set(r.day, Number(r.online_min) || 0);
+  }
+  return out;
 }
+
+/* Minutes from Dubai midnight, the rollup's own spelling (src/rollup.js): a
+   drop-off on a later Dubai day is minute 1440 of this one, never minute 20. */
+const MIN_OF = (c) => `(extract(hour FROM ${c} AT TIME ZONE 'Asia/Dubai') * 60 + extract(minute FROM ${c} AT TIME ZONE 'Asia/Dubai'))::int`;
+const END_MIN = `CASE WHEN n.ended_at IS NULL THEN NULL
+                      WHEN (n.ended_at AT TIME ZONE 'Asia/Dubai') >= (n.local_day + 1) THEN 1440
+                      ELSE greatest(${MIN_OF('n.ended_at')}, ${MIN_OF('n.requested_at')}) END`;
+
+/** Each person's days in detail, from their own bookings (the stored person
+    key, so two accounts are one person and a shared account is split by who
+    drove): the first request and the last drop-off of the day, the minutes on
+    jobs (request to drop-off, summed — driver_day's on_job_min, per person),
+    km on completed trips, bookings, jobs accepted and then abandoned and
+    offers declined (api/cancellation_sql.js, the Cancellations page's two
+    halves), the platforms and the car. Also each person's completed trips by
+    the hour they were requested, and the fleet's bookings by hour. */
+export async function loadDetail(q, from, to, fleet = null) {
+  const pk = personKeyStored('t');
+  const [days, hrs, fleetHrs] = await Promise.all([
+    q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS day, ${pk} AS pk,
+              min(${MIN_OF('n.requested_at')}) AS first_min,
+              max(${END_MIN}) AS last_min,
+              coalesce(sum(greatest(0, ${END_MIN} - ${MIN_OF('n.requested_at')})) FILTER (WHERE n.ended_at IS NOT NULL), 0)::int AS job_min,
+              count(*) FILTER (WHERE n.ended_at IS NOT NULL)::int AS timed,
+              round(sum(n.distance_km) FILTER (WHERE n.has_distance AND n.outcome = 'completed')::numeric, 1)::float AS km,
+              count(*)::int AS bookings,
+              count(*) FILTER (WHERE ${DROPPED_SQL})::int AS abandoned,
+              count(*) FILTER (WHERE ${DECLINED_SQL})::int AS declined,
+              array_agg(DISTINCT n.platform ORDER BY n.platform) AS platforms,
+              mode() WITHIN GROUP (ORDER BY btrim(n.plate)) FILTER (WHERE coalesce(btrim(n.plate), '') <> '') AS plate
+         FROM trip_norm n JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
+        WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking AND n.driver_name IS NOT NULL
+        GROUP BY 1, 2`, [from, to]),
+    q(`SELECT ${pk} AS pk, n.local_hour AS h, count(*)::int AS n
+         FROM trip_norm n JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
+        WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking AND n.driver_name IS NOT NULL
+          AND n.outcome = 'completed'
+        GROUP BY 1, 2`, [from, to]),
+    q(`SELECT n.local_hour AS h, count(*)::int AS n
+         FROM trip_norm n
+        WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
+          AND ($3::text IS NULL OR n.fleet_id = $3)
+        GROUP BY 1`, [from, to, fleet]),
+  ]);
+  const byDay = new Map();
+  for (const r of days) {
+    if (!byDay.has(r.day)) byDay.set(r.day, new Map());
+    byDay.get(r.day).set(r.pk, {
+      first: r.first_min == null ? null : Number(r.first_min), last: r.last_min == null ? null : Number(r.last_min),
+      job_min: Number(r.timed) ? Number(r.job_min) : null, km: r.km == null ? null : Number(r.km),
+      bookings: Number(r.bookings) || 0, abandoned: Number(r.abandoned) || 0, declined: Number(r.declined) || 0,
+      platforms: r.platforms || [], plate: r.plate || null,
+    });
+  }
+  const hours = new Map();
+  for (const r of hrs) {
+    if (!hours.has(r.pk)) hours.set(r.pk, Array(24).fill(0));
+    hours.get(r.pk)[Number(r.h)] = Number(r.n) || 0;
+  }
+  const fleetHours = Array(24).fill(0);
+  for (const r of fleetHrs) fleetHours[Number(r.h)] = Number(r.n) || 0;
+  return { byDay, hours, fleetHours };
+}
+const NO_DETAIL = { byDay: new Map(), hours: new Map(), fleetHours: Array(24).fill(0) };
 
 /** Each month of [lo, to]'s arithmetic over its own span, exactly as its
     Month target page reads it, and the people's days over [lo, to]. */
@@ -217,17 +290,18 @@ async function loadDays(q, { lo, to, today, now, min }) {
 
 /** Everything the list needs: the period, the trend's weeks before it, and
     the period's extras. */
-export async function loadLowperf(q, { from, to, today, now = new Date(), min = null }) {
+export async function loadLowperf(q, { from, to, today, now = new Date(), min = null, fleet = null }) {
   /* The trend's weeks end on the period's last COUNTED day, which a morning
      with yesterday still unpriced puts a day or two before `to`: a further
      week of days is read so the first week is whole even then. */
   const lo = earlier(from, addDays(to, -(WEEK * (WEEKS + 1) - 1)));
-  const [days, extras, hours] = await Promise.all([
+  const [days, extras, hours, detail] = await Promise.all([
     loadDays(q, { lo, to, today, now, min }),
     loadExtras(q, { hotelFrom: addDays(from, -(DRIVER_DAYS - 1)), from, to }),
     loadHours(q, from, to),
+    loadDetail(q, from, to, fleet),
   ]);
-  return { from, to, lo, today, ...days, extras, hours };
+  return { from, to, lo, today, ...days, extras, hours, detail };
 }
 
 /* ── the days ────────────────────────────────────────────────────────────── */
@@ -266,26 +340,152 @@ const publicDays = (days) => days.map((d) => ({
 }));
 
 /** Pure. One person's figures over a set of judged days: what they earned and
-    were asked, the days they were active and drove, and the grid. */
-export function tally(pk, days, dd) {
-  const a = { gross: 0, target: 0, trips: 0, trips_target: 0, days_active: 0, days_driven: 0, days_off: 0 };
+    were asked, the days they were active and drove, the grid — and, where the
+    day's detail is in hand (loadDetail, loadHours), how each day went: the
+    first request and last drop-off, minutes on jobs, Uber minutes online, km,
+    bookings, jobs abandoned and offers declined, the platforms and the car.
+    Everything summed is summed over COUNTED active days only, the days the
+    gross and the target are counted on, so the averages share one base. */
+export function tally(pk, days, dd, detail = NO_DETAIL, hours = new Map()) {
+  const a = { gross: 0, target: 0, trips: 0, trips_target: 0, days_active: 0, days_driven: 0, days_off: 0,
+    gross_driven: 0, job_min: 0, job_days: 0, gross_timed: 0, km: 0, bookings: 0, abandoned: 0, declined: 0,
+    online_min: 0, online_days: 0, firsts: [], lasts: [], dow: Array.from({ length: 7 }, () => ({ gross: 0, target: 0, days: 0 })) };
   const grid = [];
+  const h = hours.get(pk) || null;
   for (const d of days) {
     const x = dd.byDay.get(d.day)?.get(pk) || null;
     const on = !!(d.counted && d.active.has(pk));
     const fares = x ? x.gross : 0;
     const trips = x ? x.trips : 0;
-    grid.push({ fares: r2(fares), trips, active: d.active ? d.active.has(pk) : null, share: on ? r2(d.share) : null });
+    const det = detail.byDay.get(d.day)?.get(pk) || null;
+    const online = h?.byDay?.get(d.day) ?? null;
+    grid.push({ fares: r2(fares), trips, active: d.active ? d.active.has(pk) : null, share: on ? r2(d.share) : null,
+      first: det?.first ?? null, last: det?.last ?? null, job_min: det?.job_min ?? null, online_min: online,
+      km: det?.km ?? null, bookings: det?.bookings ?? 0, abandoned: det?.abandoned ?? 0, declined: det?.declined ?? 0,
+      platforms: det?.platforms ?? [], plate: det?.plate ?? null });
     if (!on) continue;
     a.days_active += 1;
     a.target += d.share;
     a.trips_target += d.trips_min;
     a.gross += fares;
     a.trips += trips;
-    if (trips > 0) a.days_driven += 1; else a.days_off += 1;
+    const w = a.dow[d.dow];
+    w.gross += fares; w.target += d.share; w.days += 1;
+    if (det) { a.bookings += det.bookings; a.abandoned += det.abandoned; a.declined += det.declined; }
+    if (trips > 0) {
+      a.days_driven += 1;
+      a.gross_driven += fares;
+      if (det?.job_min) { a.job_min += det.job_min; a.job_days += 1; a.gross_timed += fares; }
+      if (det?.km != null) a.km += det.km;
+      if (det?.first != null) a.firsts.push(det.first);
+      if (det?.last != null) a.lasts.push(det.last);
+      if (online != null) { a.online_min += online; a.online_days += 1; }
+    } else a.days_off += 1;
   }
   return { ...a, pct: pctOf(a.gross, a.target), grid };
 }
+
+const median = (xs) => {
+  const v = xs.filter((x) => x != null && Number.isFinite(x)).sort((p, q) => p - q);
+  if (!v.length) return null;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+};
+/* A day driven too few times says nothing about a rate: below this many,
+   the rate-type causes are not judged for a person. */
+export const MIN_DAYS_FOR_RATE = 3;
+/** Pure. The measures the causes are judged on, from a tally. */
+export function measuresOf(t) {
+  const enough = t.days_driven >= MIN_DAYS_FOR_RATE;
+  const accepted = t.bookings - t.declined;
+  return {
+    off_share: t.days_active ? r1((100 * t.days_off) / t.days_active) : null,
+    job_h_day: enough && t.job_days ? r1(t.job_min / 60 / t.job_days) : null,
+    aed_per_job_h: enough && t.job_min > 0 ? r2(t.gross_timed / (t.job_min / 60)) : null,
+    trips_day: enough ? r1(t.trips / t.days_driven) : null,
+    start_med: t.firsts.length ? Math.round(median(t.firsts)) : null,
+    finish_med: t.lasts.length ? Math.round(median(t.lasts)) : null,
+    abandon_pct: accepted > 0 ? r1((100 * t.abandoned) / accepted) : null,
+    abandoned: t.abandoned, declined: t.declined,
+  };
+}
+
+/* WHY BELOW TARGET — each cause a measurement held against everyone else's
+   middle value (the median of the drivers on or over target, same days, same
+   settings), never a guess. A cause is named only when it is plainly the
+   case; a driver can carry several, or none (then the gap is spread thin and
+   the page says so). The thresholds are this file's and printed on the page:
+     days off      a quarter or more of their active days off, and at least
+                   twice everyone else's share — the target is per active day;
+     short days    under three-quarters of everyone else's hours on jobs a day
+                   driven;
+     low rate      under 85% of everyone else's fares an hour on jobs;
+     late starts   the day's first request typically two hours or more after
+                   everyone else's AND short days — a night driver who works
+                   full hours is not "late";
+     few trips     under three-quarters of everyone else's trips a day driven;
+     abandons      3 or more accepted jobs abandoned, at least 5% of accepted
+                   jobs and twice everyone else's rate (offers declined are not
+                   abandons: Bolt logs them and Uber does not). */
+export const CAUSES = [
+  { key: 'days_off', label: 'Days off', rule: 'a quarter or more of their active days not driven, and twice everyone else’s share or more' },
+  { key: 'short_days', label: 'Short days', rule: 'under three-quarters of everyone else’s hours on jobs a day driven' },
+  { key: 'low_rate', label: 'Low AED an hour', rule: 'under 85% of everyone else’s fares an hour on jobs' },
+  { key: 'late_start', label: 'Late starts', rule: 'first request of the day two hours or more after everyone else’s, with short days' },
+  { key: 'few_trips', label: 'Few trips', rule: 'under three-quarters of everyone else’s trips a day driven' },
+  { key: 'abandons', label: 'Abandoned jobs', rule: 'three or more accepted jobs abandoned, 5% of accepted jobs or more and twice everyone else’s rate' },
+];
+/** Pure. Everyone else's middle values, from their measures. */
+export function mediansOf(list) {
+  const k = (f) => median(list.map(f));
+  return {
+    off_share: r1(k((m) => m.off_share)), job_h_day: r1(k((m) => m.job_h_day)), aed_per_job_h: r2(k((m) => m.aed_per_job_h)),
+    trips_day: r1(k((m) => m.trips_day)), start_med: k((m) => m.start_med) == null ? null : Math.round(k((m) => m.start_med)),
+    abandon_pct: r1(k((m) => m.abandon_pct)), people: list.length,
+  };
+}
+/** Pure. The causes a person's measures carry against everyone else's. */
+export function causesOf(m, med, t) {
+  const out = {};
+  const say = (key, value, rest) => { out[key] = { value, rest }; };
+  if (t.days_active && t.days_driven === 0) say('days_off', m.off_share, med.off_share);
+  else if (m.off_share != null && m.off_share >= Math.max(25, 2 * (med.off_share || 0))) say('days_off', m.off_share, med.off_share);
+  const short = m.job_h_day != null && med.job_h_day != null && m.job_h_day < 0.75 * med.job_h_day;
+  if (short) say('short_days', m.job_h_day, med.job_h_day);
+  if (m.aed_per_job_h != null && med.aed_per_job_h != null && m.aed_per_job_h < 0.85 * med.aed_per_job_h) say('low_rate', m.aed_per_job_h, med.aed_per_job_h);
+  if (short && m.start_med != null && med.start_med != null && m.start_med >= med.start_med + 120) say('late_start', m.start_med, med.start_med);
+  if (m.trips_day != null && med.trips_day != null && m.trips_day < 0.75 * med.trips_day) say('few_trips', m.trips_day, med.trips_day);
+  if (m.abandoned >= 3 && m.abandon_pct != null && m.abandon_pct >= Math.max(5, 2 * (med.abandon_pct || 0))) say('abandons', m.abandon_pct, med.abandon_pct);
+  return out;
+}
+const DOW_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const DOW_NAME = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const weekdaysOf = (dow) => DOW_ORDER.map((i) => ({ dow: i, label: DOW_NAME[i], days: dow[i].days,
+  gross: r2(dow[i].gross), target: r2(dow[i].target), pct: pctOf(dow[i].gross, dow[i].target) }));
+/** Pure. Each day's reference figures, from tallies' grids — the rows under
+    the grid's head. Fares and trips are averaged over the people active on
+    the day, a day off counting as nothing, as the target counts it; hours on
+    jobs and the first request over those who drove it (an hour or a start
+    time is not a thing a day off has), the start as the middle value. The
+    grid's cell switch prints the one that matches the cells, so a "first
+    request" column is never held against an average of fares. */
+function dayAverages(tallies, n) {
+  return Array.from({ length: n }, (_, i) => {
+    const on = tallies.map((t) => t.grid[i]).filter((c) => c && c.share != null);
+    const drove = on.filter((c) => c.trips > 0);
+    const jobs = drove.filter((c) => c.job_min != null).map((c) => c.job_min / 60);
+    const firsts = drove.map((c) => c.first).filter((x) => x != null);
+    return {
+      avg: on.length ? r2(on.reduce((s, c) => s + c.fares, 0) / on.length) : null, n: on.length,
+      trips: on.length ? r1(on.reduce((s, c) => s + c.trips, 0) / on.length) : null,
+      job_h: jobs.length ? r1(jobs.reduce((s, x) => s + x, 0) / jobs.length) : null,
+      first: firsts.length ? Math.round(median(firsts)) : null,
+    };
+  });
+}
+/** A day as the grid's head prints it, with its two reference rows. */
+const refDay = (d, l, r) => ({ ...d, list_avg: l.avg, list_n: l.n, list_trips: l.trips, list_job_h: l.job_h, list_first: l.first,
+  rest_avg: r.avg, rest_n: r.n, rest_trips: r.trips, rest_job_h: r.job_h, rest_first: r.first });
 /** A tally as a page prints it, without the grid. */
 const figures = (x) => ({ gross: r2(x.gross), target: r2(x.target), pct: x.pct, days_active: x.days_active,
   days_driven: x.days_driven, trips: x.trips, trips_target: x.trips_target });
@@ -350,9 +550,11 @@ function populationOf(days, { dd, extras, hotel, fleet, keep = new Set() }) {
 }
 
 /** Pure. A person's row: who they are and their figures over `days`. */
-function rowOf(p, t, hours) {
+function rowOf(p, t, hours, detail = NO_DETAIL) {
   const { w, ex } = p;
   const h = hours.get(p.pk) || null;
+  const m = measuresOf(t);
+  const perDayTarget = t.days_active ? t.target / t.days_active : null;
   return {
     pk: p.pk, name: w.name || '(unnamed)', driver_ext_id: w.driver_ext_id || null, ids: ex.ids || [], fleet: w.fleet || null,
     plate: ex.plate || null, platforms: w.platforms || [],
@@ -368,13 +570,28 @@ function rowOf(p, t, hours) {
     by_platform: ex.by_platform,
     online_h: h ? r1(h.online_min / 60) : null, online_days: h ? h.online_days : 0,
     last_booking: ex.last_booking || null,
+    /* The two averages the operator asked for (2026-10-19), over the days
+       shown that counted: per ACTIVE day — days off as zero, the base the
+       target is judged on — and per day DRIVEN, what a day at work brings;
+       each against the target a day. */
+    avg_active: t.days_active ? r2(t.gross / t.days_active) : null,
+    avg_active_pct: t.pct,
+    avg_driven: t.days_driven ? r2(t.gross_driven / t.days_driven) : null,
+    avg_driven_pct: t.days_driven && perDayTarget ? pctOf(t.gross_driven / t.days_driven, perDayTarget) : null,
+    job_h_day: m.job_h_day, aed_per_job_h: m.aed_per_job_h, trips_day: m.trips_day,
+    start_med: m.start_med, finish_med: m.finish_med,
+    km_day: t.days_driven && t.km ? r1(t.km / t.days_driven) : null,
+    online_h_day: t.online_days ? r1(t.online_min / 60 / t.online_days) : null,
+    abandoned: t.abandoned, declined: t.declined, abandon_pct: m.abandon_pct,
+    weekdays: weekdaysOf(t.dow),
+    hours: detail.hours.get(p.pk) || Array(24).fill(0),
     days: t.grid,
   };
 }
 
 /** Pure. The whole answer, from loadLowperf's bundle. `hotel` one of
     HOTEL_MODES; `fleet` 'ecosine' | 'egari' | null. */
-export function lowperfOf({ from, to, lo, today, min, months, dd, extras, hours, hotel = 'hide', fleet = null, notes = [] }) {
+export function lowperfOf({ from, to, lo, today, min, months, dd, extras, hours, detail = NO_DETAIL, hotel = 'hide', fleet = null, notes = [] }) {
   const all = judgeDays({ lo, to, today, months, min });
   const period = all.filter((d) => d.day >= from);
   const counted = period.filter((d) => d.counted);
@@ -387,7 +604,7 @@ export function lowperfOf({ from, to, lo, today, min, months, dd, extras, hours,
 
   const { pop, hidden } = populationOf(period, { dd, extras, hotel, fleet });
   for (const p of pop) {
-    p.t = tally(p.pk, period, dd);
+    p.t = tally(p.pk, period, dd, detail, hours);
     p.weeks = weekDays.map((ds, i) => ({ ...weekDefs[i], ...tally(p.pk, ds, dd) }));
   }
   const below = pop.filter((p) => p.t.target > 0 && p.t.gross < p.t.target - 0.005);
@@ -397,8 +614,11 @@ export function lowperfOf({ from, to, lo, today, min, months, dd, extras, hours,
     weeks: weekDefs.map((w, i) => sumOf(list.map((p) => p.weeks[i]))) });
   const restY = yard(rest);
 
+  /* Everyone else's middle values: what each cause is held against. */
+  const medians = mediansOf(rest.map((p) => measuresOf(p.t)));
   const rows = below.map((p) => ({
-    ...rowOf(p, p.t, hours),
+    ...rowOf(p, p.t, hours, detail),
+    causes: causesOf(measuresOf(p.t), medians, p.t),
     weeks: p.weeks.map((x) => ({ gross: r2(x.gross), target: r2(x.target), pct: x.pct, days_active: x.days_active })),
     trend: verdictOf(p.weeks[WEEKS - 2], p.weeks[WEEKS - 1], restY.weeks[WEEKS - 2].pct, restY.weeks[WEEKS - 1].pct),
   }));
@@ -409,6 +629,16 @@ export function lowperfOf({ from, to, lo, today, min, months, dd, extras, hours,
   const bands = Object.fromEntries(BANDS.map((b) => [b.key, rows.filter((r) => r.band === b.key).length]));
   const trend = { improving: 0, steady: 0, slipping: 0, unknown: 0 };
   for (const r of rows) trend[r.trend.verdict || 'unknown'] += 1;
+  const causes = Object.fromEntries(CAUSES.map((c) => [c.key, rows.filter((r) => r.causes[c.key]).length]));
+  const noCause = rows.filter((r) => !Object.keys(r.causes).length).length;
+  const listAvg = dayAverages(below.map((p) => p.t), period.length);
+  const restAvg = dayAverages(rest.map((p) => p.t), period.length);
+  const dowSum = (list) => DOW_ORDER.map((i) => {
+    const g = list.reduce((s, p) => s + p.t.dow[i].gross, 0);
+    const tg = list.reduce((s, p) => s + p.t.dow[i].target, 0);
+    return { dow: i, label: DOW_NAME[i], pct: pctOf(g, tg) };
+  });
+  const hourSum = (list) => Array.from({ length: 24 }, (_, hh) => list.reduce((s, p) => s + ((detail.hours.get(p.pk) || [])[hh] || 0), 0));
   return {
     from, to, today, hotel, fleet, notes,
     trips_min: min,
@@ -417,13 +647,17 @@ export function lowperfOf({ from, to, lo, today, min, months, dd, extras, hours,
         : null,
     counted_days: counted.length,
     left_out: period.filter((d) => !d.counted).map((d) => ({ day: d.day, label: d.label, why: d.why })),
-    days: publicDays(period),
+    days: publicDays(period).map((d, i) => refDay(d, listAvg[i], restAvg[i])),
     weeks: weekDefs.map((w, i) => ({ ...w, counted_days: weekDays[i].filter((d) => d.counted).length })),
     bands: BANDS,
+    cause_rules: CAUSES,
+    medians,
+    weekdays: { below: dowSum(below), rest: dowSum(rest) },
+    hours: { below: hourSum(below), rest: hourSum(rest), fleet: detail.fleetHours },
     totals: {
       population: pop.length, below: rows.length, on_target: pop.length - rows.length,
       hidden_hotel_only: hidden.hotel_only, hidden_mostly_hotel: hidden.mostly_hotel, hidden_other_fleet: hidden.other_fleet,
-      bands, trend,
+      bands, trend, causes, no_cause: noCause,
       plan: r2(counted.reduce((s, d) => s + d.plan, 0)),
       /* Summed unrounded, then rounded once: a sum of figures each already
          rounded to the fils drifts (2,833.34 for two shares of 1,416.665). */
@@ -439,7 +673,8 @@ export function lowperfOf({ from, to, lo, today, min, months, dd, extras, hours,
 export async function lowperfView(q, { from = null, to = null, hotel = 'hide', fleet = null, now = new Date(), today = null, min = null } = {}) {
   const day = today || dubaiDay(now);
   const p = periodOf({ from, to, today: day });
-  const bundle = await loadLowperf(q, { from: p.from, to: p.to, today: day, now, min });
+  const fl = ['ecosine', 'egari'].includes(fleet) ? fleet : null;
+  const bundle = await loadLowperf(q, { from: p.from, to: p.to, today: day, now, min, fleet: fl });
   return lowperfOf({ ...bundle, hotel: HOTEL_MODES.includes(hotel) ? hotel : 'hide',
     fleet: ['ecosine', 'egari'].includes(fleet) ? fleet : null, notes: p.notes });
 }
@@ -468,23 +703,24 @@ export function spansOf({ saved, today, a = null, b = null }) {
 }
 
 /** Everything a watch page needs: the grid's days and both spans, read once. */
-export async function loadWatch(q, { saved, a, b, today, now = new Date(), min = null }) {
+export async function loadWatch(q, { saved, a, b, today, now = new Date(), min = null, fleet = null }) {
   const yesterday = addDays(today, -1);
   let lo = [addDays(saved, -WATCH_BEFORE), a.from, b.from].sort()[0];
   const to = [yesterday, a.to, b.to].sort().pop();
   if (daysOver(lo, to).length > MAX_DAYS * 2) lo = addDays(to, -(MAX_DAYS * 2 - 1));
-  const [days, extras, hours] = await Promise.all([
+  const [days, extras, hours, detail] = await Promise.all([
     loadDays(q, { lo, to, today, now, min }),
     loadExtras(q, { hotelFrom: addDays(lo, -(DRIVER_DAYS - 1)), from: lo, to }),
     loadHours(q, lo, to),
+    loadDetail(q, lo, to, fleet),
   ]);
-  return { lo, to, today, ...days, extras, hours };
+  return { lo, to, today, ...days, extras, hours, detail };
 }
 
 /** Pure. A saved list followed: each member day by day, both spans, and the
     move from one to the other against everyone else's. `members` are
     [{ pk, ids, name }] as saved. */
-export function watchOf({ watch, members, a, b, lo, to, today, min, months, dd, extras, hours }) {
+export function watchOf({ watch, members, a, b, lo, to, today, min, months, dd, extras, hours, detail = NO_DETAIL }) {
   const all = judgeDays({ lo, to, today, months, min });
   const inSpan = (s) => all.filter((d) => d.day >= s.from && d.day <= s.to);
   const A = inSpan(a);
@@ -516,6 +752,7 @@ export function watchOf({ watch, members, a, b, lo, to, today, min, months, dd, 
 
   const seen = new Set();
   const rows = [];
+  const memberTallies = [];
   for (const m of found) {
     if (seen.has(m.now)) continue;            // two saved entries a merge has made one person
     seen.add(m.now);
@@ -523,11 +760,12 @@ export function watchOf({ watch, members, a, b, lo, to, today, min, months, dd, 
     const w = dd.who.get(m.now) || { name: m.name };
     const hotelShare = pctOf(ex.hotel_w, ex.bookings_w);
     const p = { pk: m.now, w, ex, hotelShare, hotelOnly: ex.bookings_w > 0 && ex.hotel_w === ex.bookings_w };
-    const g = tally(m.now, grid, dd);
+    const g = tally(m.now, grid, dd, detail, hours);
+    memberTallies.push(g);
     const ta = tally(m.now, A, dd);
     const tb = tally(m.now, B, dd);
     rows.push({
-      ...rowOf(p, g, hours),
+      ...rowOf(p, g, hours, detail),
       saved_pk: m.pk, rekeyed: m.pk !== m.now, at_save: m.at_save || null,
       a: figures(ta), b: figures(tb),
       move: verdictOf({ ...ta, label: a.label }, { ...tb, label: b.label }, restA.pct, restB.pct, Math.min(need(A), need(B))),
@@ -539,10 +777,15 @@ export function watchOf({ watch, members, a, b, lo, to, today, min, months, dd, 
   const moves = { improving: 0, steady: 0, slipping: 0, unknown: 0 };
   for (const r of rows) moves[r.move.verdict || 'unknown'] += 1;
   const ch = (x, y) => (x.pct == null || y.pct == null ? null : r1(y.pct - x.pct));
+  /* Each day's reference averages: the list's members and everyone else,
+     among those active on the day — the grid's two rows under its head. */
+  const listAvg = dayAverages(memberTallies, grid.length);
+  const restAvg = dayAverages(rest.map((p) => tally(p.pk, grid, dd, detail)), grid.length);
   return {
     watch, today, from: gridFrom, to,
     a: sA, b: sB,
-    days: publicDays(grid),
+    days: publicDays(grid).map((d, i) => refDay(d, listAvg[i], restAvg[i])),
+    hours: { fleet: detail.fleetHours },
     list: { a: listA, b: listB, change: ch(listA, listB) },
     rest: { people: rest.length, a: restA, b: restB, change: ch(restA, restB) },
     moves,

@@ -26,7 +26,15 @@
         for a one-fleet reader, never a zero;
      7. the page: the address round-trips, four head cells, each day shaded
         against its own target with "off" in words, the written line says
-        what the columns do not, a print page of its own.
+        what the columns do not, a print page of its own;
+     8. more granular (the operator, the same day: "this should have average
+        of all the days shown for the driver as well. and more granular data
+        on the page"): two averages a row (a day active, a day off as nothing;
+        a day driven, absent when no day was), each day's list and
+        everyone-else figures under the grid's head in the figure the cells
+        print, the day in detail from the bookings in Dubai time, the causes
+        held against everyone else's middle values, weekdays and hours, the
+        workbook's four new sheets, and the new fields withheld by class.
 
    REVERSIONS (run 2026-10-19, each against this file as it then stood; 65
    pass for sections 1-6 and 78 with section 7, the page, added):
@@ -58,6 +66,25 @@
      · the page: shade a day off as "under half" instead of "off"
        (api/public/lowperf.js cellClass) -> 76 passed, 2 FAILED, among them
        "the grid: o's five days off print off";
+   and for section 8 (run 2026-10-19, 104 pass with it):
+     · average a day driven over the active days (rowOf) -> 103 passed, 1
+       FAILED: "o, five days off: … a day driven not measured … never a
+       zero";
+     · the day's reference rows over those who drove only (dayAverages) ->
+       1 FAILED: "each day's references … 1 Oct: (0 + 80 + 160 + 120) ÷ 4";
+     · a late start named without short days (causesOf) -> 1 FAILED: "a
+       cause is named only when it is plainly so";
+     · rates from one day driven (measuresOf) -> 1 FAILED: "a rate needs
+       three days driven";
+     · the day's clock read in UTC (loadDetail MIN_OF) -> 102 passed, 2
+       FAILED: "the route's day in detail: first request 09:30 …" and the
+       day sheet's clocks;
+     · the grid's reference rows always in fares (api/public/lowperf.js
+       gridHtml) -> 1 FAILED: "the cell switch … never fares against a start
+       time";
+     · rows[].days[].first left off the manifest -> 1 FAILED: "a role without
+       bookings or conduct: the day's times … withheld".
+
      · drop the fleet from the page's address (pageHref) -> 77 passed,
        1 FAILED: "the address carries the period, the hotel switch and the
        fleet, and reads back". */
@@ -306,7 +333,8 @@ as = null;
 
 const x1 = await fetch(`http://127.0.0.1:${api.port}/api/export/lowperf.xlsx?from=2026-10-01&to=2026-10-06&hotel=show&asof=${ASOF}`);
 const book = readWorkbook(Buffer.from(await x1.arrayBuffer()));
-check('GET /api/export/lowperf.xlsx: the four sheets', x1.status === 200 && book.sheetNames.join('|') === 'Summary|Below target|Day by day (AED)|Day by day (% of target)',
+check('GET /api/export/lowperf.xlsx: the eight sheets', x1.status === 200
+  && book.sheetNames.join('|') === 'Summary|Below target|Day by day (AED)|Day by day (% of target)|Day detail|Why below target|Weekdays|Hours',
   `${x1.status} ${book.sheetNames.join('|')}`);
 const flat = (bk, name) => (sheetNamed(bk, name)?.rows || []).flat().map(String).join('|');
 check('…every below-target driver in it', L.rows.every((x) => flat(book, 'Below target').includes(x.name)), flat(book, 'Below target').slice(0, 300));
@@ -314,7 +342,20 @@ check('…and a day off reads “off” on the % sheet', !lr['Test Driver 3'] ||
 const x2 = await fetch(`http://127.0.0.1:${api.port}/api/export/lowperf-watch.xlsx?id=${listId}&asof=2026-10-07`);
 const book2 = readWorkbook(Buffer.from(await x2.arrayBuffer()));
 check('GET /api/export/lowperf-watch.xlsx: the list followed, as a workbook', x2.status === 200
-  && book2.sheetNames.join('|') === 'Watch list|Members|Day by day (AED)|Day by day (% of target)', book2.sheetNames.join('|'));
+  && book2.sheetNames.join('|') === 'Watch list|Members|Day by day (AED)|Day by day (% of target)|Day detail', book2.sheetNames.join('|'));
+/* The day in detail, from the bookings themselves (loadDetail): Test Driver
+   2 books at 05:30 and 06:30 UTC, twenty minutes each — 09:30 and 10:30 in
+   Dubai, the last drop-off at 10:50, forty minutes on jobs, car C2. */
+const d2 = lr['Test Driver 2'];
+const d2day = d2?.days.find((c) => c.trips > 0) || {};
+check('the route’s day in detail: first request 09:30, last drop-off 10:50, 40 minutes on jobs, two bookings, Uber, C2 — Dubai time',
+  d2day.first === 570 && d2day.last === 650 && d2day.job_min === 40 && d2day.bookings === 2 && j(d2day.platforms) === j(['uber'])
+  && d2day.plate === 'C2' && d2day.abandoned === 0 && d2day.km === null, j(d2day));
+check('…and their trips by the hour requested: 09:00 and 10:00, one a day each; the fleet’s bookings beside them',
+  d2 && d2.hours[9] === d2.days_driven && d2.hours[10] === d2.days_driven && d2.hours[5] === 0
+  && L.hours.fleet[14] >= d2.days_driven, j([d2?.hours, L.hours?.fleet]));
+check('…the day sheet carries a row a driver a day, the times as clocks', /Test Driver 2\|Egari\|[^|]+\|yes\|[^|]+\|50\|[^|]+\|2\|2\|09:30\|10:50\|0\.7/.test(flat(book, 'Day detail')),
+  flat(book, 'Day detail').slice(0, 400));
 
 /* ── 6. access ─────────────────────────────────────────────────────────── */
 console.log('\n6. withheld, never zero');
@@ -364,7 +405,7 @@ check('cells shade against that day’s own target: at it, half to it, under hal
   && pg.cellClass({ fares: 0, trips: 0, share: null }) === 'lp-c-blank');
 const gh = pg.gridHtml(v);
 check('the grid: o’s five days off print “off”, and the key says what each shade means',
-  (gh.match(/class="lp-c-off[^"]*"[^>]*>off</g) || []).length >= 5 && /active and did not drive/.test(gh) && /at or above that day’s target/.test(gh), gh.slice(0, 600));
+  (gh.match(/class="lp-c-off[^"]*"[^>]*>(?:<a [^>]*>)?off</g) || []).length >= 5 && /active and did not drive/.test(gh) && /at or above that day’s target/.test(gh), gh.slice(0, 600));
 const lh = pg.listHtml(v);
 check('the list: grouped by how far below, in the server’s order', /Under half of target/.test(lh) && /Half to 80% of target/.test(lh)
   && lh.indexOf('Driver O') < lh.indexOf('Driver X') && lh.indexOf('Driver X') < lh.indexOf('Driver Y'), lh.slice(0, 400));
@@ -385,6 +426,88 @@ const css = readFileSync('api/public/app.css', 'utf8');
 check('printing is a landscape A4 of this page’s own — a rule it adds while open, never one every page prints under',
   pg.PRINT_CSS === '@media print{@page{size:A4 landscape;margin:9mm}}' && !/@page/.test(css.slice(css.indexOf('── Low performers'))),
   pg.PRINT_CSS);
+
+/* ── 8. more granular: the averages, the day in detail, why, when ─────── */
+console.log('\n8. averages, the day in detail, why below target, weekdays and hours');
+/* The operator, 2026-10-19, on the grid: "this should have average of all the
+   days shown for the driver as well. and more granular data on the page".
+   Each day driven, as loadDetail reads it: everyone else (a and b) on jobs
+   eight hours from 07:00, ten trips; x three hours from 10:00 — short days
+   and a late start; y full days at 07:00 but an accepted job abandoned every
+   day out of six bookings; z (hotel) full days. */
+const DET = {
+  a: { first: 420, job_min: 480, bookings: 10 }, b: { first: 420, job_min: 480, bookings: 10 },
+  x: { first: 600, job_min: 180, bookings: 5 }, y: { first: 420, job_min: 480, bookings: 6, abandoned: 1 },
+  z: { first: 420, job_min: 480, bookings: 4 },
+};
+const detail = { byDay: new Map(), hours: new Map(), fleetHours: Array.from({ length: 24 }, (_, h) => (h >= 7 && h < 23 ? 30 : 2)) };
+for (const [d, o] of Object.entries(people)) {
+  detail.byDay.set(d, new Map(Object.keys(o).filter((pk) => DET[pk]).map((pk) => [pk, { last: DET[pk].first + DET[pk].job_min + 60, km: 12.5,
+    abandoned: 0, declined: 0, platforms: ['uber'], plate: 'C9', ...DET[pk] }])));
+}
+for (const pk of ['a', 'b', 'x', 'y', 'z']) detail.hours.set(pk, Array.from({ length: 24 }, (_, h) => (h >= Math.floor(DET[pk].first / 60) && h < Math.floor(DET[pk].first / 60) + 3 ? 7 : 0)));
+const G = LP.lowperfOf({ ...bundle, detail, hotel: 'show' });
+const gb = Object.fromEntries(G.rows.map((r) => [r.pk, r]));
+check('the detail changes nobody’s place or figure: the same people, gross and target', j(G.rows.map((r) => [r.pk, r.gross, r.gross_target]))
+  === j(v.rows.map((r) => [r.pk, r.gross, r.gross_target])));
+check('two averages a row: x a day active 2,240 ÷ 21 = 106.67 (55.5%, as the target counts), a day driven the same — x drove every day',
+  gb.x.avg_active === 106.67 && gb.x.avg_active_pct === 55.5 && gb.x.avg_driven === 106.67 && gb.x.avg_driven_pct === 55.5, j([gb.x.avg_active, gb.x.avg_active_pct, gb.x.avg_driven, gb.x.avg_driven_pct]));
+check('…o, five days off: a day active 0 and 0%; a day driven not measured — no day was, so no figure, never a zero',
+  gb.o.avg_active === 0 && gb.o.avg_active_pct === 0 && gb.o.avg_driven === null && gb.o.avg_driven_pct === null, j([gb.o.avg_active, gb.o.avg_driven]));
+check('each day’s references: the list’s average and everyone else’s among those active, a day off as nothing — 1 Oct: (0 + 80 + 160 + 120) ÷ 4 = 90; a and b 300',
+  G.days[0].list_avg === 90 && G.days[0].list_n === 4 && G.days[0].rest_avg === 300 && G.days[0].rest_n === 2
+  && G.days[0].rest_job_h === 8 && G.days[0].rest_first === 420 && G.days[0].list_first === 420, j(G.days[0]));
+check('the day in detail rides the grid: x on 1 Oct, 10:00 to 14:00, three hours on jobs, the car', gb.x.days[0].first === 600 && gb.x.days[0].last === 840
+  && gb.x.days[0].job_min === 180 && gb.x.days[0].plate === 'C9' && gb.x.job_h_day === 3 && gb.x.start_med === 600, j(gb.x.days[0]));
+check('everyone else’s middle values: eight hours a day, 07:00, ten trips, AED 37.50 an hour, nothing abandoned',
+  G.medians.job_h_day === 8 && G.medians.start_med === 420 && G.medians.trips_day === 10 && G.medians.aed_per_job_h === 37.5
+  && G.medians.abandon_pct === 0 && G.medians.people === 2, j(G.medians));
+check('x: short days (3 h against 8), a late start (10:00 against 07:00, with short days), few trips (5 against 10) — not a low rate (AED 35.56 an hour against 37.50)',
+  j(Object.keys(gb.x.causes).sort()) === j(['few_trips', 'late_start', 'short_days']) && gb.x.causes.short_days.value === 3 && gb.x.causes.short_days.rest === 8
+  && gb.x.aed_per_job_h === 35.56, j([gb.x.causes, gb.x.aed_per_job_h]));
+check('y: full days at 07:00, so neither short nor late — a low rate (AED 16.67 an hour), few trips, and one accepted job in six abandoned every day',
+  j(Object.keys(gb.y.causes).sort()) === j(['abandons', 'few_trips', 'low_rate']) && gb.y.abandoned === 21 && gb.y.abandon_pct === 16.7, j([gb.y.causes, gb.y.abandoned]));
+check('o: drove none of their active days — days off, and no rate it could be judged on', j(Object.keys(gb.o.causes)) === j(['days_off']) && gb.o.job_h_day === null, j(gb.o.causes));
+check('the counts at the top add up the people, each cause once a person', G.totals.causes.few_trips === 3 && G.totals.causes.short_days === 1
+  && G.totals.causes.days_off === 1 && G.totals.causes.abandons === 1 && G.totals.no_cause === 0 && G.cause_rules.length === 6, j([G.totals.causes, G.totals.no_cause]));
+check('weekdays Monday first; x’s share of target by weekday, the counted days of each', j(gb.x.weekdays.map((w) => w.label)) === j(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
+  && gb.x.weekdays.reduce((s, w) => s + w.days, 0) === gb.x.days_active && G.weekdays.below.length === 7 && G.weekdays.rest[0].pct > 140, j(gb.x.weekdays));
+check('hours: x’s trips by the hour, the list’s and everyone else’s sums, the fleet’s bookings', gb.x.hours[10] === 7 && G.hours.below[10] === 7
+  && G.hours.rest[7] === 14 && G.hours.fleet[7] === 30, j([gb.x.hours, G.hours.below, G.hours.rest]));
+const cm = LP.causesOf({ off_share: 20, job_h_day: 6, aed_per_job_h: 40, trips_day: 8, start_med: 600, abandon_pct: 4, abandoned: 2 },
+  { off_share: 0, job_h_day: 8, aed_per_job_h: 40, trips_day: 10, start_med: 420, abandon_pct: 1 }, { days_active: 10, days_driven: 8 });
+check('a cause is named only when it is plainly so: 20% days off, 6 h against 8, a late start on full-ish days, 2 abandons — none', j(cm) === '{}', j(cm));
+check('a rate needs three days driven: two days say nothing about an hour, a trip or a day’s length', LP.measuresOf({ days_active: 5, days_driven: 2, days_off: 3,
+  job_days: 2, job_min: 200, gross_timed: 100, trips: 4, bookings: 4, declined: 0, abandoned: 0, firsts: [500], lasts: [700] }).job_h_day === null);
+const ref = pg.gridHtml(G);
+check('the grid ends each row in both averages, and carries the day’s asked, their average and everyone else’s under the head',
+  /Average a day active/.test(ref) && /Average a day driven/.test(ref) && /Their average, AED/.test(ref) && /Everyone else, AED/.test(ref)
+  && /Asked of each, AED/.test(ref) && />107<small class="tg-under">56%<\/small>/.test(ref), ref.slice(ref.indexOf('Driver X'), ref.indexOf('Driver X') + 2600).slice(-500));
+const refStart = pg.gridHtml(G, { metric: 'start' });
+check('the cell switch: the first request in the cells and the rows under the head, never fares against a start time', />10:00</.test(refStart)
+  && /Everyone else, start<\/th><td[^>]*>07:00</.test(refStart) && !/Asked of each/.test(refStart) && !/Everyone else, AED/.test(refStart), refStart.slice(0, 400));
+check('a figure opens that driver’s day', /href="#driver\/u-x\/day\?[^"]*on=2026-10-01"/.test(ref));
+const why = pg.causesHtml(G);
+check('“why below target”: each cause, how many drivers carry it, the rule and everyone else’s middle value', /Short days<\/th><td>1</.test(why)
+  && /Few trips<\/th><td>3</.test(why) && /07:00/.test(why) && /8 h on jobs a day driven/.test(why), why.slice(0, 800));
+const dx = pg.detailHtml(gb.x, G);
+check('a driver opened: the causes in words, their figures, a line a day, the weekdays and the hours against the fleet',
+  /first request typically 10:00; everyone else 07:00/.test(dx) && /3 h on jobs a day driven; everyone else 8 h/.test(dx)
+  && /10:00 – 14:00/.test(dx) && /Their completed trips/.test(dx) && /Fleet bookings/.test(dx) && /AED 106\.67 \(55\.5%\)/.test(dx), dx.slice(0, 900));
+check('the list carries each person’s causes beside their name and a way to open their days', /lp-chip[^>]*>Short days</.test(pg.listHtml(G))
+  && /data-open="x"/.test(pg.listHtml(G)));
+check('the patterns: the list and everyone else by weekday, and the three hour rows', /Below target/.test(pg.patternsHtml(G)) && /Fleet bookings/.test(pg.patternsHtml(G)));
+const wbG = readWorkbook(lowperfWorkbookOf(G).wb.toBuffer());
+check('the workbook: both averages on each grid row, the causes and their middle values, a day a row', /Driver X\|Ecosine\|80\|[^]*\|160\|106\.67\|106\.67\|/.test(flat(wbG, 'Day by day (AED)'))
+  && /Everyone else’s middle value\|null\|null\|0\|8\|37\.5\|07:00\|10\|0\|/.test(flat(wbG, 'Why below target'))
+  && /Driver X\|Ecosine\|55\.5\|0\|3\|35\.56\|10:00\|5\|0\|short days, late starts, few trips/.test(flat(wbG, 'Why below target'))
+  && /Driver X\|Ecosine\|[^|]+\|yes\|166\.67\|80\|48\|5\|5\|10:00\|14:00\|3\|null\|12\.5\|26\.67\|16\|0\|0\|uber\|C9/.test(flat(wbG, 'Day detail')),
+  ['Day by day (AED)', 'Why below target', 'Day detail'].map((n) => { const t = flat(wbG, n); const i = t.search(/Driver X|Everyone else’s middle/); return t.slice(i, i + 160); }).join(' // '));
+const shG = shapeBody(structuredClone(G), entry('GET', '/api/lowperf'), { ...FULL, COND: '', BK: '' }).body;
+check('a role without bookings or conduct: the day’s times, hours, abandons and the causes they make withheld; the money stays',
+  shG.rows.every((x) => x.days.every((c) => c.first === null && c.job_min === null && c.abandoned === null) && x.job_h_day === null && x.abandoned === null
+    && x.causes.short_days == null && x.causes.abandons == null && x.avg_active != null) && shG.medians.job_h_day === null && shG.hours.fleet === null
+  && shG.days.every((d) => d.list_first === null && d.list_avg != null), j(shG.rows[1]).slice(0, 600));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

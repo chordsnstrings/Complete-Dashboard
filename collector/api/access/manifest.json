@@ -8240,7 +8240,25 @@
      "yardstick.below.weeks[].pct",
      "totals.below_gross",
      "totals.below_target",
-     "totals.below_short"
+     "totals.below_short",
+     "rows[].avg_active",
+     "rows[].avg_active_pct",
+     "rows[].avg_driven",
+     "rows[].avg_driven_pct",
+     "rows[].aed_per_job_h",
+     "rows[].weekdays[].gross",
+     "rows[].weekdays[].target",
+     "rows[].weekdays[].pct",
+     "rows[].causes.low_rate",
+     "days[].list_avg",
+     "days[].rest_avg",
+     "medians.aed_per_job_h",
+     "weekdays.below[].gross",
+     "weekdays.below[].target",
+     "weekdays.below[].pct",
+     "weekdays.rest[].gross",
+     "weekdays.rest[].target",
+     "weekdays.rest[].pct"
     ]
    },
    {
@@ -8253,7 +8271,34 @@
      "rows[].completion_pct",
      "rows[].by_platform",
      "rows[].last_booking",
-     "rows[].days[].trips"
+     "rows[].days[].trips",
+     "rows[].days[].first",
+     "rows[].days[].last",
+     "rows[].days[].job_min",
+     "rows[].days[].km",
+     "rows[].days[].bookings",
+     "rows[].days[].platforms",
+     "rows[].job_h_day",
+     "rows[].trips_day",
+     "rows[].start_med",
+     "rows[].finish_med",
+     "rows[].km_day",
+     "rows[].hours",
+     "rows[].causes.short_days",
+     "rows[].causes.late_start",
+     "rows[].causes.few_trips",
+     "days[].list_trips",
+     "days[].rest_trips",
+     "days[].list_job_h",
+     "days[].rest_job_h",
+     "days[].list_first",
+     "days[].rest_first",
+     "hours.fleet",
+     "medians.job_h_day",
+     "medians.trips_day",
+     "medians.start_med",
+     "hours.below",
+     "hours.rest"
     ]
    },
    {
@@ -8267,13 +8312,23 @@
     "class": "COND",
     "paths": [
      "rows[].online_h",
-     "rows[].online_days"
+     "rows[].online_days",
+     "rows[].days[].abandoned",
+     "rows[].days[].declined",
+     "rows[].days[].online_min",
+     "rows[].online_h_day",
+     "rows[].abandoned",
+     "rows[].declined",
+     "rows[].abandon_pct",
+     "rows[].causes.abandons",
+     "medians.abandon_pct"
     ]
    },
    {
     "class": "VEH",
     "paths": [
-     "rows[].plate"
+     "rows[].plate",
+     "rows[].days[].plate"
     ]
    },
    {
@@ -8298,7 +8353,7 @@
    "rows[]"
   ],
   "fleetKey": "fleet",
-  "notes": "api/lowperf_routes.js + api/lowperf.js (2026-10-19). The Low performers page: every driver below their target over a period (default the month so far), furthest behind first, banded under 50% / 50-80% / 80-100%, with the day-by-day grid, three weeks and the trend against everyone else. A driver's target is the Month target page's: each settled day's plan shared equally among that day's active drivers (a completed trip in the 8 days to it); a day active and not driven still asks its share. Hotel-only drivers hidden by default (?hotel=). The rows are each one fleet's and are dropped for a reader who does not see that fleet; the totals and yardsticks cover both (mixed), the Month target page's convention. Names ID, a driver's money EARN, trips and bookings BK, cash rides CASH, Uber hours online COND, the car VEH."
+  "notes": "api/lowperf_routes.js + api/lowperf.js (2026-10-19). The Low performers page: every driver below their target over a period (default the month so far), furthest behind first, banded under 50% / 50-80% / 80-100%, with the day-by-day grid, three weeks and the trend against everyone else. A driver's target is the Month target page's: each settled day's plan shared equally among that day's active drivers (a completed trip in the 8 days to it); a day active and not driven still asks its share. Hotel-only drivers hidden by default (?hotel=). The rows are each one fleet's and are dropped for a reader who does not see that fleet; the totals and yardsticks cover both (mixed), the Month target page's convention. Names ID, a driver's money EARN, trips and bookings BK, cash rides CASH, Uber hours online COND, the car VEH. Since 2026-10-19 each day of a row also carries the first request and last drop-off, minutes on jobs, km, bookings and platforms (BK), abandoned and declined jobs and Uber minutes online (COND) and the car (VEH); each row its two averages (a day active, a day driven) and AED an hour on jobs (EARN), the measures the causes are judged on and its weekday (EARN) and hour (BK) profiles; each day the list's and everyone else's average (fares EARN, trips, hours and start BK); the medians the causes are held against, classed as the measure they are."
  },
  {
   "method": "GET",
@@ -8321,7 +8376,7 @@
   "fleetRows": [],
   "fleetKey": "",
   "auditRead": true,
-  "notes": "api/lowperf_routes.js + api/lowperf_workbook.js (2026-10-19). The Low performers page as an .xlsx: Summary, Below target, Day by day (AED), Day by day (% of target). Body is a FILE, so the shaper never sees it: the route writes \"(withheld)\" in every cell of a class the signed-in reader's role does not hold in full (LOWPERF_FILE_CLASSES), the Month target workbook's rule."
+  "notes": "api/lowperf_routes.js + api/lowperf_workbook.js (2026-10-19). The Low performers page as an .xlsx: Summary, Below target, Day by day (AED), Day by day (% of target), Day detail, Why below target, Weekdays, Hours. Body is a FILE, so the shaper never sees it: the route writes \"(withheld)\" in every cell of a class the signed-in reader's role does not hold in full (LOWPERF_FILE_CLASSES), the Month target workbook's rule."
  },
  {
   "method": "GET",
@@ -8417,7 +8472,18 @@
      "rest.b.gross",
      "rest.b.target",
      "rest.b.pct",
-     "rest.change"
+     "rest.change",
+     "rows[].avg_active",
+     "rows[].avg_active_pct",
+     "rows[].avg_driven",
+     "rows[].avg_driven_pct",
+     "rows[].aed_per_job_h",
+     "rows[].weekdays[].gross",
+     "rows[].weekdays[].target",
+     "rows[].weekdays[].pct",
+     "rows[].causes.low_rate",
+     "days[].list_avg",
+     "days[].rest_avg"
     ]
    },
    {
@@ -8432,7 +8498,29 @@
      "rows[].last_booking",
      "rows[].days[].trips",
      "rows[].a.trips",
-     "rows[].b.trips"
+     "rows[].b.trips",
+     "rows[].days[].first",
+     "rows[].days[].last",
+     "rows[].days[].job_min",
+     "rows[].days[].km",
+     "rows[].days[].bookings",
+     "rows[].days[].platforms",
+     "rows[].job_h_day",
+     "rows[].trips_day",
+     "rows[].start_med",
+     "rows[].finish_med",
+     "rows[].km_day",
+     "rows[].hours",
+     "rows[].causes.short_days",
+     "rows[].causes.late_start",
+     "rows[].causes.few_trips",
+     "days[].list_trips",
+     "days[].rest_trips",
+     "days[].list_job_h",
+     "days[].rest_job_h",
+     "days[].list_first",
+     "days[].rest_first",
+     "hours.fleet"
     ]
    },
    {
@@ -8446,13 +8534,22 @@
     "class": "COND",
     "paths": [
      "rows[].online_h",
-     "rows[].online_days"
+     "rows[].online_days",
+     "rows[].days[].abandoned",
+     "rows[].days[].declined",
+     "rows[].days[].online_min",
+     "rows[].online_h_day",
+     "rows[].abandoned",
+     "rows[].declined",
+     "rows[].abandon_pct",
+     "rows[].causes.abandons"
     ]
    },
    {
     "class": "VEH",
     "paths": [
-     "rows[].plate"
+     "rows[].plate",
+     "rows[].days[].plate"
     ]
    },
    {
@@ -8515,7 +8612,7 @@
   "fleetRows": [],
   "fleetKey": "",
   "auditRead": true,
-  "notes": "api/lowperf_routes.js + api/lowperf_workbook.js (2026-10-19). One watch list followed, as an .xlsx: Watch list, Members, Day by day (AED), Day by day (% of target). A FILE: \"(withheld)\" in every cell of a class the reader does not hold in full."
+  "notes": "api/lowperf_routes.js + api/lowperf_workbook.js (2026-10-19). One watch list followed, as an .xlsx: Watch list, Members, Day by day (AED), Day by day (% of target), Day detail. A FILE: \"(withheld)\" in every cell of a class the reader does not hold in full."
  },
  {
   "method": "GET",

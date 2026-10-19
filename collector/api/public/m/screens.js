@@ -3026,7 +3026,11 @@ async function fallback(deck, ctx) {
    person's share of their target, what they are short by, their days off and
    whether last week was better than the one before against everyone else.
    The grid and the written lines stay on the desktop: a fortnight of numbers
-   across 390 pixels is the wide table this app exists not to squeeze. */
+   across 390 pixels is the wide table this app exists not to squeeze. What
+   travels (2026-10-19): the count of each measured cause at the top, and per
+   person the two averages a day — active (a day off as nothing) and driven —
+   and the causes they carry, in words. */
+const LP_CAUSE = { days_off: 'days off', short_days: 'short days', low_rate: 'low AED an hour', late_start: 'late starts', few_trips: 'few trips', abandons: 'abandoned jobs' };
 const LP_TREND = { improving: '▲ improving', slipping: '▼ slipping', steady: '– steady' };
 const lpPct = (v) => (v == null ? '—' : `${fmt(v, 1)}%`);
 async function lowPerformers(deck, ctx) {
@@ -3053,12 +3057,20 @@ async function lowPerformers(deck, ctx) {
     { label: 'Half to 80%', value: fmt(band('lt80').length) },
     { label: '80% to target', value: fmt(band('lt100').length) },
   ], true);
+  const causes = (v.cause_rules || []).filter((c) => v.totals.causes?.[c.key]);
+  if (causes.length) {
+    const c = card('Why below target', `against the middle of the ${fmt(v.medians?.people ?? 0)} on or over target`);
+    rows(c.body, causes.map((x) => row({ title: x.label, sub: x.rule, value: fmt(v.totals.causes[x.key]) })));
+    list.append(c.card);
+  }
   for (const [k, title] of [['lt50', 'Under half of target'], ['lt80', 'Half to 80% of target'], ['lt100', '80% to target']]) {
     const b = band(k);
     if (!b.length) continue;
     const c = card(title, `${fmt(b.length)} ${b.length === 1 ? 'driver' : 'drivers'}`);
     rows(c.body, b.map((x) => row({ title: x.name || '(withheld)',
-      sub: `${lpPct(x.gross_pct)} of target${x.days_off ? ` · ${fmt(x.days_off)} ${x.days_off === 1 ? 'day' : 'days'} off` : ''} · ${LP_TREND[x.trend?.verdict] || 'too few days to say'}`,
+      sub: `${lpPct(x.gross_pct)} of target${x.days_off ? ` · ${fmt(x.days_off)} ${x.days_off === 1 ? 'day' : 'days'} off` : ''} · ${LP_TREND[x.trend?.verdict] || 'too few days to say'}`
+        + `${x.avg_active != null ? ` · a day ${money(x.avg_active)} active${x.avg_driven != null ? `, ${money(x.avg_driven)} driven` : ''}` : ''}`
+        + `${Object.keys(x.causes || {}).length ? ` · ${Object.keys(x.causes).map((k2) => LP_CAUSE[k2] || k2).join(', ')}` : ''}`,
       value: x.gross_short ? `▼ ${money(x.gross_short)}` : '—', tone: 'critical', to: x.driver_ext_id ? href('driver', x.driver_ext_id) : undefined })));
     list.append(c.card);
   }

@@ -2667,3 +2667,32 @@ The head reads 69 of 105, 15 · 28 · 26, short AED 180,196.45, everyone else
 old-skin phone sat on its skeleton for the first 12 seconds of one shot —
 the list takes 5–7 s to compute — and filled on a 30-second wait. Found: the
 written line's "improving … down 7.1 points" (FIX-STATUS LP), reworded.
+
+### More granular — 2026-10-19 (FIX-STATUS LPG)
+
+Against the mock (its bundle now carries each day's first request, last
+drop-off, minutes on jobs, km, bookings, abandons, Uber minutes and the hours,
+with every eighth driver starting at 13:00), Arkiv and the old skin at 1440
+and 390, the grid in each of its five figures, one driver opened, the phone in
+both skins, and the print as shown and with every driver opened:
+
+- Found and fixed before commit: at 390 the weekday and hour tables pushed
+  the page 58 px (Arkiv) and 80 px (old skin) sideways — their frames now
+  scroll; the opened driver inherited the list's right-aligned numbers, so
+  the causes and figures hugged the right edge — left-aligned; in the old skin
+  the opened driver was as wide as the list and scrolled with it — it is now
+  held to the list frame's width and pinned to its left edge (released in
+  print); the rows under the grid's head printed fares under a column of
+  start times or hours — they now print the figure the cells print, and the
+  "% of target" view printed an uncounted day's fares as if a share —
+  now a dash; a "no single cause" chip on 18 of 37 rows was noise — the list
+  shows only causes, the opened driver says why none stands out.
+- The print as shown: 13 landscape A4 sheets, the head and the causes on the
+  first; with every driver opened (37): 55 sheets, each driver's days kept
+  whole where a line a day fits.
+- No page error, no request over 400, no sideways scroll at either width;
+  every figure in the grid links to `#driver/<id>/day?on=<day>`.
+
+To repeat: the mock as above, `node lp_inter.mjs` (open the first driver,
+click each figure, screenshot the frame) and print with `emulateMedia('print')`
+before and after clicking every `[data-open]`.

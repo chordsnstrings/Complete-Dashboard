@@ -4932,8 +4932,37 @@ const lpBundle = (from, to, today) => {
       by_platform: hotel === b ? { hotel: b } : { uber: b - hotel, ...(hotel ? { hotel } : {}) }, plate: `M${40100 + (k % 40)}`,
       last_booking: to, ids: [`drv-${k + 1}`] }];
   }));
-  const hours = new Map(Array.from({ length: 46 }, (_, k) => [`p${k}`, k % 4 ? { online_min: 2400 + k * 31, online_days: 9 } : null]).filter(([, h]) => h));
-  return { from, to, lo, today, min: 12, months, dd: { byDay, who }, extras, hours };
+  /* Each day driven, as loadDetail reads it: a first request between 06:00
+     and 14:00 (Driver 08 and every eighth after starts at 13:00 or later,
+     the "late start"), 25 minutes on each trip, 9 km a trip, a booking
+     abandoned every so often, the car and the platforms; the hours a trip
+     was requested in, and the fleet's bookings by the hour. */
+  const det = new Map();
+  const hrs = new Map();
+  const fleetHours = Array(24).fill(0);
+  for (const [d, ppl] of byDay) {
+    const m = new Map();
+    for (const [pk, x] of ppl) {
+      const k = Number(pk.slice(1));
+      const first = (k % 8 === 7 ? 13 * 60 : 6 * 60 + (k * 37) % 480) + (d.charCodeAt(9) % 3) * 10;
+      const job = x.trips * (k % 11 === 4 ? 14 : 25);
+      const last = Math.min(1440, first + job + 120);
+      const ab = (k % 13 === 5 ? 1 : 0) + (d.charCodeAt(9) % 7 === 0 ? 1 : 0);
+      m.set(pk, { first, last, job_min: job, km: Math.round(x.trips * 9 * 10) / 10, bookings: x.trips + ab + (k % 3),
+        abandoned: ab, declined: k % 3, platforms: [2, 5].includes(k) ? ['hotel'] : k % 3 ? ['uber'] : ['bolt', 'uber'], plate: `M${40100 + (k % 40)}` });
+      const hh = hrs.get(pk) || Array(24).fill(0);
+      for (let t = 0; t < x.trips; t += 1) {
+        const h = Math.min(23, Math.floor((first + t * 50) / 60));
+        hh[h] += 1;
+        fleetHours[h] += 1;
+      }
+      hrs.set(pk, hh);
+    }
+    det.set(d, m);
+  }
+  const hours = new Map(Array.from({ length: 46 }, (_, k) => [`p${k}`, k % 4 ? { online_min: 2400 + k * 31, online_days: 9,
+    byDay: new Map([...byDay].filter(([, ppl]) => ppl.has(`p${k}`)).map(([d, ppl]) => [d, ppl.get(`p${k}`).trips * 40 + 60])) } : null]).filter(([, h]) => h));
+  return { from, to, lo, today, min: 12, months, dd: { byDay, who }, extras, hours, detail: { byDay: det, hours: hrs, fleetHours } };
 };
 const lpView = (q) => {
   const today = /^\d{4}-\d{2}-\d{2}$/.test(String(q.asof || '')) ? String(q.asof) : dubaiDay(new Date());

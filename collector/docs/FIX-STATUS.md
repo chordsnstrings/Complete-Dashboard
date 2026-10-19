@@ -4946,3 +4946,23 @@ Over 14 Sep – 13 Oct (mostly-hotel left out) 64 of 101 are below target, and
 list saves everyone below target for its period, so "the 14 Oct list" saved
 from there would hold those 64 until the other 23 are removed on its page.
 Saving needs a signed-in Owner or Operations manager; none was made here.
+
+## LPG — Low performers, more granular: averages, the day in detail, why, when (2026-10-19)
+
+The operator, on the day-by-day grid: "this should have average of all the
+days shown for the driver as well. and more granular data on the page". Ruled
+the same day: both averages side by side; and all four additions — grid
+upgrades, each driver's days in detail, why below target, weekday and hour
+patterns — on the page, in Excel and in the printout.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| LPG1 | Each grid row ends in two averages: a day **active** (fares over the counted days they were active, a day off counting as nothing — the base the target is judged on) and a day **driven**, each with its % of the target a day. A person who drove no day has no "a day driven" — absent, never 0 | yes | — | `lowperf` §8: the driven average taken over active days → "o … never a zero" fails |
+| LPG2 | Under the grid's head, each day: what it asked of each active driver, the list's average and everyone else's among those active on it (fares and trips with a day off as nothing; hours on jobs and the first request over those who drove, the start as the middle value) — always in the figure the cells print. A switch prints fares, % of that day's target, trips, hours on jobs or the first request in the cells; the shade is always the fares' verdict. Every figure opens that driver's day page. Names cut at 14 characters under 760 px | yes | — | references over drivers only → 1 fails; the rows always in fares → "never fares against a start time" fails |
+| LPG3 | Each person's days in detail (`loadDetail`, from the bookings by stored person key, Dubai time): first request, last drop-off (a drop-off past midnight is minute 1440), minutes on jobs (request to drop-off, summed), km on completed trips, bookings, jobs accepted then abandoned and offers declined (`cancellation_sql.js`), platforms, car; Uber minutes online that day; completed trips by the hour requested, and the fleet's bookings by hour | yes | — | the clock read in UTC → 2 fail |
+| LPG4 | Why below target: six measured causes held against everyone else's middle value (the drivers on or over target, same days and settings) — days off, short days, low AED an hour on jobs, late starts (only with short days), few trips, abandoned jobs; a rate needs 3 days driven; the count of each at the top, the rule and the middle value printed; a person with none is counted as "no single cause" | yes | — | a late start without short days → 1 fails; rates from one day → 1 fails |
+| LPG5 | A driver opened ("Days ▸"): the causes in words with their figure and everyone else's, ten figures (both averages, asked a day, hours on jobs, AED an hour and a trip, trips, start and finish, Uber online, km, abandoned · declined), a line a day, share of target by weekday, their trips by hour against the fleet's bookings. "Print with every driver" opens all, prints, closes them again | yes | — | `lowperf` §8 page checks |
+| LPG6 | When: share of their own targets by weekday (Mon–Sun) for the list and everyone else; completed trips by the hour for both and the fleet's bookings | yes | — | `lowperf` §8 |
+| LPG7 | Excel: both averages and the reference rows on both grid sheets; sixteen more columns on Below target; new sheets Day detail (a row a driver a day), Why below target, Weekdays, Hours; the watch list's file gains Day detail | yes | — | `lowperf` §5 and §8 read the files back |
+| LPG8 | Access: every new field classed on the manifest — times, hours on jobs, km, trips and bookings, platforms, hours by hour BK; abandoned, declined and Uber online COND; the day's car VEH; averages, AED an hour and weekday shares EARN; the medians and causes as the measure they are | yes | — | `rows[].days[].first` left off the manifest → 1 fails |
+| LPG9 | Phone: the count of each cause at the top; per person both averages a day and their causes in words | yes | — | rendered |

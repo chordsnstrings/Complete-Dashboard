@@ -20,6 +20,17 @@
          half; "off" for a day they were active and did not drive.
      03  WATCH LISTS — save this list on a day and follow it (#watchlist/ID).
 
+   More granular, the same day ("this should have average of all the days
+   shown for the driver as well. and more granular data on the page"): WHY
+   THEY ARE BELOW TARGET above the list (each measured cause, how many carry
+   it, its rule and everyone else's middle value); each name with its causes
+   and a "Days ▸" that opens the driver (the causes in words, ten figures, a
+   line a day, weekdays, hours against the fleet); the grid ending each row in
+   both averages — a day active (a day off as nothing) and a day driven — with
+   the day's asked, the list's and everyone else's figures under its head, a
+   switch for the figure the cells print, and every figure a link to that
+   driver's day; WHEN, the list and everyone else by weekday and by hour.
+
    #watchlist/ID[/A_B]: one list followed — the members before and after the
    save (or any two days or spans), each against everyone else's move, and
    the same grid with a line on the save day.
@@ -235,9 +246,10 @@ export function listHtml(v) {
         i += 1;
         const plat = (r.platforms || []).map(sourceLabel).join(', ');
         const car = r.plate ? ` · ${esc(r.plate)}` : '';
-        return `<tr data-pk="${esc(r.pk || '')}"><td class="mt-dim">${i}</td>`
+        return `<tr data-pk="${esc(r.pk || '')}"><td class="mt-dim">${i}<button type="button" class="lp-open lp-noprint" data-open="${esc(r.pk || '')}" aria-expanded="false"`
+          + ` title="Each day, the causes, the weekdays and the hours">Days ▸</button></td>`
           + `<th scope="row" class="l">${who_(r)}<span class="lp-meta">${esc(r.fleet ? sourceLabel(r.fleet) : '—')}${car}${plat ? ` · ${esc(plat)}` : ''}`
-          + `${r.hotel_share ? ` · hotel ${esc(fmt(r.hotel_share, 0))}%` : ''}</span></th>`
+          + `${r.hotel_share ? ` · hotel ${esc(fmt(r.hotel_share, 0))}%` : ''}</span>${r.causes ? `<span class="lp-chips">${causeChips(r)}</span>` : ''}</th>`
           + `<td><b class="tg-under">${esc(pc(r.gross_pct))}</b><span class="lp-bar" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, r.gross_pct || 0))}%"></i></span></td>`
           + `<td>${esc(aed(r.gross))}<span class="lp-meta">of ${esc(aed(r.gross_target))}</span></td>`
           + `<td>${r.gross_short ? `<span class="tg-under">▼ ${esc(money(r.gross_short))}</span>` : '—'}</td>`
@@ -263,7 +275,8 @@ const RULE = (v) => 'How a driver’s target is set — the Month target page’
   + 'The three weeks end on the last settled day; improving or slipping means at least 10 points more, or less, than everyone else moved.';
 
 /* ── 02 day by day ──────────────────────────────────────────────────────── */
-/** One grid cell: the day's fares, shaded against that day's own target. */
+/** One grid cell: the day's fares, shaded against that day's own target. The
+    shade is always the fares' verdict, whatever the cell is set to print. */
 export function cellClass(c) {
   if (c.share == null) return c.fares ? 'lp-c-none' : 'lp-c-blank';
   if (!c.trips && !c.fares) return 'lp-c-off';
@@ -271,30 +284,239 @@ export function cellClass(c) {
   if (c.fares >= c.share / 2) return 'lp-c-mid';
   return 'lp-c-low';
 }
-const cellText = (c) => {
+/** Minutes from Dubai midnight as a clock: 1440 is a drop-off after midnight. */
+export const hhmm = (m) => (m == null ? '—' : `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+/* What a grid cell can print. The shade stays the fares' verdict in every one,
+   so a short day reads short whatever is printed in it. */
+export const GRID_METRICS = [
+  { key: 'fares', label: 'Fares, AED' },
+  { key: 'pct', label: '% of that day’s target' },
+  { key: 'trips', label: 'Trips' },
+  { key: 'hours', label: 'Hours on jobs' },
+  { key: 'start', label: 'First request' },
+];
+export function cellText(c, metric = 'fares') {
   const k = cellClass(c);
   if (k === 'lp-c-off') return 'off';
   if (k === 'lp-c-blank') return '';
+  if (metric === 'pct') return c.share ? `${Math.round((100 * c.fares) / c.share)}%` : '—';
+  if (metric === 'trips') return fmt(c.trips);
+  if (metric === 'hours') return c.job_min == null ? '—' : fmt(Math.round(c.job_min / 6) / 10, 1);
+  if (metric === 'start') return hhmm(c.first);
   return c.fares == null ? '—' : fmt(Math.round(c.fares));
-};
-export function gridHtml(v, { saved = null } = {}) {
+}
+/** The days a row's averages are taken over: counted, active, and (for the
+    second) driven — the same days the gross and the target are counted on. */
+const activeCells = (r) => (r.days || []).filter((c) => c.share != null);
+const drivenCells = (r) => activeCells(r).filter((c) => c.trips > 0);
+const mean = (xs) => (xs.length ? xs.reduce((a, x) => a + x, 0) / xs.length : null);
+/** The row-end figures for a metric: per active day, and per day driven. */
+export function rowAverages(r, metric = 'fares') {
+  const A = activeCells(r);
+  const D = drivenCells(r);
+  if (metric === 'trips') return [mean(A.map((c) => c.trips)), mean(D.map((c) => c.trips))].map((x) => (x == null ? '—' : fmt(Math.round(x * 10) / 10, 1)));
+  if (metric === 'hours') {
+    const h = D.filter((c) => c.job_min != null).map((c) => c.job_min / 60);
+    return ['', h.length ? fmt(Math.round(mean(h) * 10) / 10, 1) : '—'];
+  }
+  if (metric === 'start') {
+    const f = D.map((c) => c.first).filter((x) => x != null).sort((x, y) => x - y);
+    return ['', f.length ? hhmm(f[Math.floor((f.length - 1) / 2)]) : '—'];
+  }
+  if (metric === 'pct') return [r.avg_active_pct, r.avg_driven_pct].map((x) => (x == null ? '—' : `${fmt(x, 1)}%`));
+  return [r.avg_active, r.avg_driven].map((x) => (x == null ? '—' : fmt(Math.round(x))));
+}
+/** Under the fares averages, each as a share of the target a day. */
+const avgPct = (r, metric) => (metric !== 'fares' ? ['', ''] : [r.avg_active_pct, r.avg_driven_pct]
+  .map((x) => (x == null ? '' : `<small class="${x < 100 ? 'tg-under' : ''}">${esc(fmt(Math.round(x)))}%</small>`)));
+const dayHref = (r, day) => (r.driver_ext_id ? href('driver', r.driver_ext_id, 'day', { on: day }) : null);
+export function gridHtml(v, { saved = null, metric = 'fares' } = {}) {
   const rows = v.rows || [];
   if (!rows.length || !v.days?.length) return '';
   const days = v.days;
   const col = (d) => `${d.counted ? '' : 'lp-nc'}${saved && d.day === saved ? ' lp-saved' : ''}`.trim();
+  const avgHead = metric === 'hours' || metric === 'start'
+    ? '<th scope="col" class="lp-avg"></th><th scope="col" class="lp-avg">Typical day driven</th>'
+    : '<th scope="col" class="lp-avg">Average a day active</th><th scope="col" class="lp-avg">Average a day driven</th>';
+  /* The rows under the head print the same figure as the cells: what each
+     driver was asked, then the list's and everyone else's day (the server's
+     list_* and rest_*), so a quiet day for everyone reads as one. */
+  const unit = { fares: 'AED', pct: '% of target', trips: 'trips', hours: 'h on jobs', start: 'start' }[metric] || 'AED';
+  const refOf = (d, who) => {
+    if (who === 'ask') {
+      if (metric === 'fares') return d.share;
+      if (metric === 'pct') return d.share == null ? null : 100;
+      if (metric === 'trips') return d.share == null ? null : d.trips_min;
+      return null;
+    }
+    if (metric === 'fares') return d[`${who}_avg`];
+    if (metric === 'pct') return d[`${who}_avg`] == null || !d.share ? null : (100 * d[`${who}_avg`]) / d.share;
+    if (metric === 'trips') return d[`${who}_trips`];
+    if (metric === 'hours') return d[`${who}_job_h`];
+    return d[`${who}_first`];
+  };
+  const refText = (x) => {
+    if (x == null) return '—';
+    if (metric === 'start') return hhmm(Math.round(x));
+    if (metric === 'pct') return `${fmt(Math.round(x))}%`;
+    if (metric === 'trips' || metric === 'hours') return fmt(Math.round(x * 10) / 10, 1);
+    return fmt(Math.round(x));
+  };
+  const refEnd = (who) => {
+    const xs = days.filter((d) => d.counted).map((d) => refOf(d, who)).filter((x) => x != null);
+    if (!xs.length) return '—';
+    if (metric === 'start') return refText([...xs].sort((p, q) => p - q)[Math.floor((xs.length - 1) / 2)]);
+    return refText(mean(xs));
+  };
+  const endCols = (who) => (metric === 'hours' || metric === 'start'
+    ? `<td class="lp-avg"></td><td class="lp-avg">${esc(refEnd(who))}</td>` : `<td class="lp-avg">${esc(refEnd(who))}</td><td class="lp-avg"></td>`);
+  const refRow = (label, who, cls) => `<tr class="lp-ref ${cls}"><th scope="row" class="l lp-who">${esc(`${label}, ${unit}`)}</th>`
+    + days.map((d) => `<td class="${col(d)}">${esc(refText(refOf(d, who)))}</td>`).join('') + `${endCols(who)}</tr>`;
+  const asks = metric === 'fares' || metric === 'pct' || metric === 'trips';
   const head = '<thead><tr><th scope="col" class="l lp-who">Driver</th>'
     + days.map((d) => `<th scope="col" class="${col(d)}" title="${esc(d.counted ? `${d.label}: each active driver was asked ${money(d.share)}` : `${d.label}: not counted — ${d.why || ''}`)}">`
-      + `${esc(d.label.split(' ')[0].slice(0, 2))}<br>${esc(d.label.split(' ')[1])}</th>`).join('') + '</tr>'
-    + '<tr class="lp-share"><th scope="row" class="l lp-who">Asked of each</th>'
-    + days.map((d) => `<td class="${col(d)}">${d.share == null ? '—' : esc(fmt(Math.round(d.share)))}</td>`).join('') + '</tr></thead>';
-  const body = rows.map((r) => `<tr><th scope="row" class="l lp-who">${who_(r)}</th>`
-    + (r.days || []).map((c, i) => `<td class="${cellClass(c)} ${col(days[i])}"${c.share != null ? ` title="${esc(`${days[i].label}: ${money(c.fares)} of ${money(c.share)}, ${c.trips} trips`)}"` : ''}>${esc(cellText(c))}</td>`).join('')
-    + '</tr>').join('');
+      + `${esc(d.label.split(' ')[0].slice(0, 2))}<br>${esc(d.label.split(' ')[1])}</th>`).join('') + `${avgHead}</tr>`
+    + (asks ? `<tr class="lp-share"><th scope="row" class="l lp-who">${esc(`Asked of each, ${unit}`)}</th>`
+      + days.map((d) => `<td class="${col(d)}">${esc(refText(refOf(d, 'ask')))}</td>`).join('') + `${endCols('ask')}</tr>` : '')
+    + (days.some((d) => d.list_avg != null) ? refRow('Their average', 'list', 'lp-ref-list') : '')
+    + (days.some((d) => d.rest_avg != null) ? refRow('Everyone else', 'rest', 'lp-ref-rest') : '')
+    + '</thead>';
+  const body = rows.map((r) => {
+    const avgs = rowAverages(r, metric);
+    const pcs = avgPct(r, metric);
+    return `<tr><th scope="row" class="l lp-who">${who_(r)}</th>`
+      + (r.days || []).map((c, i) => {
+        const t = cellText(c, metric);
+        const link = t && t !== '' ? dayHref(r, days[i].day) : null;
+        const tip = c.share != null || c.fares ? ` title="${esc(`${days[i].label}: ${money(c.fares)}${c.share != null ? ` of ${money(c.share)}` : ''}, ${c.trips} trips`
+          + `${c.job_min != null ? `, ${fmt(Math.round(c.job_min / 6) / 10, 1)} h on jobs` : ''}${c.first != null ? `, ${hhmm(c.first)}–${hhmm(c.last)}` : ''}`)}"` : '';
+        return `<td class="${cellClass(c)} ${col(days[i])}"${tip}>${link ? `<a href="${esc(link)}">${esc(t)}</a>` : esc(t)}</td>`;
+      }).join('')
+      + `<td class="lp-avg">${esc(avgs[0])}${pcs[0]}</td><td class="lp-avg">${esc(avgs[1])}${pcs[1]}</td></tr>`;
+  }).join('');
   const key = '<p class="lp-key"><span class="lp-k lp-c-over">812</span>at or above that day’s target'
     + '<span class="lp-k lp-c-mid">402</span>half to target<span class="lp-k lp-c-low">96</span>under half'
     + '<span class="lp-k lp-c-off">off</span>active and did not drive<span class="lp-k lp-c-blank"></span>not active — the day asked nothing'
-    + (saved ? '<span class="lp-k lp-k-saved"></span>the day the list was saved' : '') + '</p>';
-  return `${key}<div class="tablewrap lp-gridwrap"><table class="lp-grid">${head}<tbody>${body}</tbody></table></div>`;
+    + (saved ? '<span class="lp-k lp-k-saved"></span>the day the list was saved' : '')
+    + '<span>The shade is always the day’s fares against its target; a figure opens that driver’s day.</span></p>';
+  const pick = `<div class="chips lp-metric lp-noprint" role="group" aria-label="What each day shows">${GRID_METRICS.map((m) => `<button type="button" class="chip${m.key === metric ? ' on' : ''}" data-metric="${m.key}" aria-pressed="${m.key === metric}">${esc(m.label)}</button>`).join('')}</div>`;
+  const rule = '<p class="cap mt-rule">Average a day active: their fares over the counted days they were active, a day off counting as nothing — the base their target is judged on. '
+    + 'Average a day driven: over the days they drove. Their average and everyone else: each day among the people active on it, on the list and off it — '
+    + 'fares and trips with a day off as nothing; hours on jobs and the first request over those who drove, the start as the middle value. '
+    + 'Hours on jobs: request to drop-off, summed. First request: the day’s first booking.</p>';
+  return `${pick}${key}<div class="tablewrap lp-gridwrap"><table class="lp-grid">${head}<tbody>${body}</tbody></table></div>${rule}`;
+}
+
+/* ── why below target ─────────────────────────────────────────────────────── */
+const CAUSE_LABEL = { days_off: 'Days off', short_days: 'Short days', low_rate: 'Low AED an hour', late_start: 'Late starts', few_trips: 'Few trips', abandons: 'Abandoned jobs' };
+/** One cause in words: their figure and everyone else's. */
+export function causeWords(key, c, r) {
+  const n1 = (x) => fmt(x, 1);
+  if (key === 'days_off') return r.days_driven === 0 ? `did not drive on any of their ${r.days_active} active days`
+    : `${r.days_off} of ${r.days_active} active days not driven (${n1(c.value)}%; everyone else ${c.rest == null ? '—' : `${n1(c.rest)}%`})`;
+  if (key === 'short_days') return `${n1(c.value)} h on jobs a day driven; everyone else ${n1(c.rest)} h`;
+  if (key === 'low_rate') return `${money(c.value)} an hour on jobs; everyone else ${money(c.rest)}`;
+  if (key === 'late_start') return `first request typically ${hhmm(c.value)}; everyone else ${hhmm(c.rest)}`;
+  if (key === 'few_trips') return `${n1(c.value)} trips a day driven; everyone else ${n1(c.rest)}`;
+  if (key === 'abandons') return `${r.abandoned} accepted jobs abandoned (${n1(c.value)}%); everyone else ${c.rest == null ? '—' : `${n1(c.rest)}%`}`;
+  return '';
+}
+const causeChips = (r) => {
+  const ks = Object.keys(r.causes || {});
+  if (!r.causes) return '';
+  return ks.map((k) => `<span class="lp-chip" title="${esc(causeWords(k, r.causes[k], r))}">${esc(CAUSE_LABEL[k] || k)}</span>`).join('');
+};
+export function causesHtml(v) {
+  const t = v.totals || {};
+  if (!t.causes || !v.rows?.length) return '';
+  const md = v.medians || {};
+  const restOf = { days_off: md.off_share == null ? '—' : `${fmt(md.off_share, 1)}% of active days off`,
+    short_days: md.job_h_day == null ? '—' : `${fmt(md.job_h_day, 1)} h on jobs a day driven`,
+    low_rate: md.aed_per_job_h == null ? '—' : `${money(md.aed_per_job_h)} an hour on jobs`,
+    late_start: md.start_med == null ? '—' : `first request ${hhmm(md.start_med)}`,
+    few_trips: md.trips_day == null ? '—' : `${fmt(md.trips_day, 1)} trips a day driven`,
+    abandons: md.abandon_pct == null ? '—' : `${fmt(md.abandon_pct, 1)}% of accepted jobs abandoned` };
+  const rows = (v.cause_rules || []).map((c) => `<tr><th scope="row" class="l">${esc(c.label)}</th><td>${esc(fmt(t.causes[c.key] || 0))}</td>`
+    + `<td class="l">${esc(c.rule)}</td><td class="l">${esc(restOf[c.key])}</td></tr>`).join('');
+  return `<p class="mt-lede">${esc(`Each cause is a measurement held against everyone else’s middle value — the ${md.people ?? 0} drivers on or over target, the same days and settings. A driver can carry several; ${countOf(t.no_cause || 0, 'driver')} carr${(t.no_cause || 0) === 1 ? 'ies' : 'y'} none, so their gap is spread thin.`)}</p>`
+    + '<div class="tablewrap"><table class="mt-t lp-causes"><thead><tr><th scope="col" class="l">Cause</th><th scope="col">Drivers</th>'
+    + '<th scope="col" class="l">Named when</th><th scope="col" class="l">Everyone else’s middle value</th></tr></thead>'
+    + `<tbody>${rows}</tbody></table></div>`;
+}
+
+/* ── one driver in detail ─────────────────────────────────────────────────── */
+const heat = (xs) => {
+  const hi = Math.max(1, ...xs);
+  return xs.map((x) => (x ? Math.min(4, 1 + Math.floor((3.999 * x) / hi)) : 0));
+};
+/** Twenty-four hours as shaded cells, each with its count on hover. */
+export function hoursStrip(rowsOf) {
+  return '<div class="tablewrap"><table class="lp-hours"><thead><tr><th scope="col" class="l"></th>'
+    + Array.from({ length: 24 }, (_, h) => `<th scope="col">${h % 3 ? '' : String(h).padStart(2, '0')}</th>`).join('') + '</tr></thead><tbody>'
+    + rowsOf.map(([label, xs, unit]) => {
+      const lv = heat(xs);
+      return `<tr><th scope="row" class="l">${esc(label)}</th>${xs.map((x, h) => `<td class="lp-h${lv[h]}" title="${esc(`${String(h).padStart(2, '0')}:00 — ${fmt(x)} ${unit}`)}"></td>`).join('')}</tr>`;
+    }).join('') + '</tbody></table></div>';
+}
+export function weekdayBars(list, rest = null) {
+  return '<div class="tablewrap"><table class="mt-t lp-wd"><thead><tr><th scope="col" class="l"></th>'
+    + list.map((w) => `<th scope="col">${esc(w.label)}</th>`).join('') + '</tr></thead><tbody>'
+    + `<tr><th scope="row" class="l">${esc(rest ? 'Below target' : 'Share of target')}</th>${list.map((w) => `<td>${w.pct == null ? '—' : `<b class="${w.pct < 50 ? 'tg-under' : ''}">${esc(fmt(Math.round(w.pct)))}%</b>`}${w.days != null ? `<span class="lp-meta">${esc(countOf(w.days, 'day'))}</span>` : ''}</td>`).join('')}</tr>`
+    + (rest ? `<tr><th scope="row" class="l">Everyone else</th>${rest.map((w) => `<td>${w.pct == null ? '—' : `${esc(fmt(Math.round(w.pct)))}%`}</td>`).join('')}</tr>` : '')
+    + '</tbody></table></div>';
+}
+export function detailHtml(r, v) {
+  const days = v.days || [];
+  const ks = Object.keys(r.causes || {});
+  const causes = r.causes ? `<ul class="lp-why">${ks.length ? ks.map((k) => `<li><b>${esc(CAUSE_LABEL[k] || k)}</b> — ${esc(causeWords(k, r.causes[k], r))}</li>`).join('')
+    : '<li>No single cause stands out against everyone else: the gap is spread across days, hours and rate.</li>'}</ul>` : '';
+  const facts = [
+    ['Average a day active', r.avg_active == null ? '—' : `${money(r.avg_active)} (${pc(r.avg_active_pct)})`],
+    ['Average a day driven', r.avg_driven == null ? '—' : `${money(r.avg_driven)} (${pc(r.avg_driven_pct)})`],
+    ['Asked a day', aed(r.per_day_target)],
+    ['Hours on jobs a day driven', r.job_h_day == null ? '—' : `${fmt(r.job_h_day, 1)} h`],
+    ['AED an hour on jobs', aed(r.aed_per_job_h)],
+    ['AED a trip', r.trips ? money(r.gross / r.trips) : '—'],
+    ['Trips a day driven', r.trips_day == null ? '—' : fmt(r.trips_day, 1)],
+    ['First request, last drop-off', r.start_med == null ? '—' : `${hhmm(r.start_med)} – ${hhmm(r.finish_med)} typically`],
+    ['Uber online a day', r.online_h_day == null ? 'no Uber hours' : `${fmt(r.online_h_day, 1)} h`],
+    ['Km a day driven', r.km_day == null ? '—' : fmt(r.km_day, 1)],
+    ['Abandoned · declined', `${fmt(r.abandoned ?? 0)} · ${fmt(r.declined ?? 0)}${r.abandon_pct != null ? ` (${fmt(r.abandon_pct, 1)}% of accepted abandoned)` : ''}`],
+  ];
+  const factList = `<dl class="lp-facts">${facts.map(([k, x]) => `<div><dt>${esc(k)}</dt><dd>${esc(x)}</dd></div>`).join('')}</dl>`;
+  const lines = (r.days || []).map((c, i) => ({ c, d: days[i] })).filter(({ c }) => c.share != null || c.trips || c.bookings);
+  const table = '<div class="tablewrap"><table class="mt-t lp-dt"><thead><tr><th scope="col" class="l">Day</th><th scope="col">Asked</th><th scope="col">Fares</th><th scope="col">%</th>'
+    + '<th scope="col">Trips / bookings</th><th scope="col">First – last</th><th scope="col">On jobs</th><th scope="col">Uber online</th><th scope="col">Km</th>'
+    + '<th scope="col">AED an hour</th><th scope="col">AED a trip</th><th scope="col">Abandoned · declined</th><th scope="col" class="l">Platforms · car</th></tr></thead><tbody>'
+    + lines.map(({ c, d }) => {
+      const link = dayHref(r, d.day);
+      const rate = c.job_min ? money(c.fares / (c.job_min / 60)) : '—';
+      return `<tr class="${cellClass(c)}-row"><th scope="row" class="l">${link ? `<a href="${esc(link)}">${esc(d.label)}</a>` : esc(d.label)}${d.counted ? '' : ' <span class="mt-dim">not counted</span>'}</th>`
+        + `<td>${c.share == null ? '<span class="mt-dim">—</span>' : esc(aed(c.share))}</td>`
+        + `<td class="${cellClass(c)}">${c.share != null && !c.trips && !c.fares ? 'off' : esc(aed(c.fares))}</td>`
+        + `<td>${c.share ? esc(`${Math.round((100 * c.fares) / c.share)}%`) : '—'}</td>`
+        + `<td>${esc(fmt(c.trips))} / ${esc(fmt(c.bookings))}</td>`
+        + `<td>${c.first == null ? '—' : esc(`${hhmm(c.first)} – ${hhmm(c.last)}`)}</td>`
+        + `<td>${c.job_min == null ? '—' : esc(`${fmt(Math.round(c.job_min / 6) / 10, 1)} h`)}</td>`
+        + `<td>${c.online_min == null ? '—' : esc(`${fmt(Math.round(c.online_min / 6) / 10, 1)} h`)}</td>`
+        + `<td>${c.km == null ? '—' : esc(fmt(c.km, 1))}</td><td>${esc(rate)}</td><td>${c.trips ? esc(money(c.fares / c.trips)) : '—'}</td>`
+        + `<td>${esc(`${fmt(c.abandoned)} · ${fmt(c.declined)}`)}</td>`
+        + `<td class="l">${esc([(c.platforms || []).map(sourceLabel).join(', '), c.plate].filter(Boolean).join(' · ') || '—')}</td></tr>`;
+    }).join('') + '</tbody></table></div>';
+  const fleetH = v.hours?.fleet || Array(24).fill(0);
+  return `<div class="lp-detail">${causes}${factList}${table}`
+    + `<p class="lp-sub">Share of target by weekday, over the counted days</p>${weekdayBars(r.weekdays || [])}`
+    + `<p class="lp-sub">When they work, against when the fleet is booked</p>${hoursStrip([['Their completed trips', r.hours || Array(24).fill(0), 'trips'], ['Fleet bookings', fleetH, 'bookings']])}</div>`;
+}
+
+/* ── when: weekdays and hours, the list against everyone else ─────────────── */
+export function patternsHtml(v) {
+  if (!v.weekdays || !v.rows?.length) return '';
+  const h = v.hours || {};
+  return `<p class="lp-sub">Share of their own targets by weekday, over the counted days</p>${weekdayBars(v.weekdays.below, v.weekdays.rest)}`
+    + `<p class="lp-sub">Completed trips by the hour they were requested, against the fleet’s bookings</p>`
+    + hoursStrip([['Below target', h.below || [], 'trips'], ['Everyone else', h.rest || [], 'trips'], ['Fleet bookings', h.fleet || [], 'bookings']])
+    + '<p class="cap mt-rule">Each row is shaded against its own busiest hour, so the three can be read for shape side by side; hover an hour for its count.</p>';
 }
 
 /* ── the weeks against everyone else ────────────────────────────────────── */
@@ -324,7 +546,33 @@ function controlsHtml(r, v) {
     + `<div class="chips" role="group" aria-label="Fleet">${[null, ...FLEETS].map((f) => chip(pageHref({ ...r, fleet: f }), f ? sourceLabel(f) : 'Both fleets', r.fleet === f)).join('')}</div>`
     + '<div class="chips lp-acts"><button type="button" class="btn sec" data-act="xlsx">Excel ⤓</button>'
     + '<button type="button" class="btn sec" data-act="print">Print / PDF</button>'
+    + '<button type="button" class="btn sec" data-act="print-all" title="Every driver opened to their days, then printed">Print with every driver</button>'
     + '<span class="mt-xmsg" role="status" hidden></span></div></div>';
+}
+
+/** Open or close one driver's days under their row in the list. */
+function toggleDetail(btn, v, byPk, open = null) {
+  const tr = btn.closest('tr');
+  const next = tr?.nextElementSibling;
+  const isOpen = next?.classList.contains('lp-drow');
+  const want = open == null ? !isOpen : open;
+  if (want === isOpen) return false;
+  btn.setAttribute('aria-expanded', String(want));
+  btn.textContent = want ? 'Days ▾' : 'Days ▸';
+  if (!want) { next.remove(); return true; }
+  const r = byPk.get(btn.dataset.open);
+  if (!r) return false;
+  const d = document.createElement('tr');
+  d.className = 'lp-drow';
+  d.innerHTML = `<td colspan="11">${detailHtml(r, v)}</td>`;
+  tr.after(d);
+  /* The list is wider than a narrow screen and scrolls inside its frame; the
+     detail is held to the frame's width and pinned to its left edge, so it
+     reads without scrolling the list sideways. Print lets it go (app.css). */
+  const wrap = tr.closest('.tablewrap');
+  const box = d.querySelector('.lp-detail');
+  if (wrap && box) box.style.width = `${wrap.clientWidth}px`;
+  return true;
 }
 
 /** The saved lists, and saving this one. */
@@ -339,6 +587,17 @@ export function watchListsHtml(lists, v, { editor = canEditWatch() } = {}) {
       : `<p class="mt-note lp-noprint">${esc(who.signedIn ? 'Watch lists are kept by the Owner and the Operations managers.'
         : 'Sign in as the Owner or an Operations manager to save this list and follow it from today.')}</p>`;
   return `${items ? `<ul class="lp-lists">${items}</ul>` : '<p class="mt-note">No watch list has been saved yet.</p>'}${save}`;
+}
+/** The grid's cell switch: redraw the grid with the chosen figure in it. */
+function metricSwitch(host, draw) {
+  host.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-metric]');
+    if (!b) return;
+    const x = host.querySelector('.lp-gridwrap')?.scrollLeft || 0;
+    host.innerHTML = draw(b.dataset.metric);
+    const w = host.querySelector('.lp-gridwrap');
+    if (w) w.scrollLeft = x;
+  });
 }
 export const canEditWatch = () => who.signedIn === true && who.kind === 'user' && !who.preview && canDo('watchlist.edit');
 
@@ -363,13 +622,15 @@ export async function lowPerformersPage(outer, param = null, sub = null) {
     p.body.append(ctl, head);
     root.append(p.panel);
   }
+  const why = panel('Why they are below target', null, 'lp-why');
   const list = panel('The list — furthest behind first', null, 'lp-list');
   const grid = panel('Day by day, against each day’s own target', null, 'lp-grid');
+  const when = panel('When — weekdays and hours, against everyone else', null, 'lp-when');
   const weeks = panel('Week by week, against everyone else', null, 'lp-weeks');
   const saved = panel('Watch lists', null, 'lp-watch');
   saved.panel.classList.add('lp-noprint');
-  root.append(list.panel, grid.panel, weeks.panel, saved.panel);
-  [head, list.body, grid.body, weeks.body, saved.body].forEach((b) => loading(b));
+  root.append(why.panel, list.panel, grid.panel, when.panel, weeks.panel, saved.panel);
+  [head, why.body, list.body, grid.body, when.body, weeks.body, saved.body].forEach((b) => loading(b));
   ctl.innerHTML = controlsHtml(r, null);
 
   const [v, lists] = await Promise.all([
@@ -379,16 +640,25 @@ export async function lowPerformersPage(outer, param = null, sub = null) {
   if (!alive(gen)) return null;
   if (v._err) {
     const msg = `<p class="tg-absent">${esc(`The list could not be read: ${v._err.message || 'no answer'}`)}</p>`;
-    head.innerHTML = msg; list.body.innerHTML = msg; grid.body.innerHTML = ''; weeks.body.innerHTML = ''; saved.body.innerHTML = '';
+    head.innerHTML = msg; list.body.innerHTML = msg;
+    for (const b of [why.body, grid.body, when.body, weeks.body, saved.body]) b.innerHTML = '';
     return null;
   }
   note.textContent = `${periodWords(v)} · as of ${v.today}`;
   ctl.innerHTML = controlsHtml(r, v) + (v.notes || []).map((x) => `<p class="mt-note">${esc(x)}</p>`).join('');
   head.innerHTML = headHtml(v);
+  why.body.innerHTML = causesHtml(v) || '<p class="mt-note">Nobody below target to explain.</p>';
   list.body.innerHTML = listHtml(v);
   grid.body.innerHTML = gridHtml(v) || '<p class="mt-note">Nobody to show.</p>';
+  when.body.innerHTML = patternsHtml(v) || '<p class="mt-note">Nobody to show.</p>';
   weeks.body.innerHTML = weeksHtml(v);
   saved.body.innerHTML = watchListsHtml(lists?.lists, v);
+  const byPk = new Map((v.rows || []).map((x) => [x.pk, x]));
+  list.body.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-open]');
+    if (b) toggleDetail(b, v, byPk);
+  });
+  metricSwitch(grid.body, (metric) => gridHtml(v, { metric }));
 
   ctl.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -400,6 +670,14 @@ export async function lowPerformersPage(outer, param = null, sub = null) {
     const b = e.target.closest('[data-act]');
     if (!b || b.disabled) return;
     if (b.dataset.act === 'print') { window.print(); return; }
+    if (b.dataset.act === 'print-all') {
+      /* Every driver opened for the printout, and the ones this opened
+         closed again after it, so the screen is left as it was. */
+      const opened = [...list.body.querySelectorAll('[data-open]')].filter((x) => toggleDetail(x, v, byPk, true));
+      window.print();
+      for (const x of opened) toggleDetail(x, v, byPk, false);
+      return;
+    }
     const msg = ctl.querySelector('.lp-acts .mt-xmsg');
     const was = b.textContent;
     b.disabled = true; b.textContent = 'Preparing…';
@@ -537,6 +815,7 @@ export async function watchListPage(outer, param = null, sub = null) {
   head.innerHTML = watchHeadHtml(w);
   mem.body.innerHTML = membersHtml(w, { editor });
   grid.body.innerHTML = gridHtml(w, { saved: w.watch.saved_day });
+  metricSwitch(grid.body, (metric) => gridHtml(w, { saved: w.watch.saved_day, metric }));
   if (editor) {
     const m = el('form', 'lp-save lp-noprint');
     m.innerHTML = `<label>Name <input name="name" maxlength="120" value="${esc(w.watch.name)}"></label>`

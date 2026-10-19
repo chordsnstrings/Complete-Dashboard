@@ -118,7 +118,7 @@ export function lowperfRoutes(app, { q, wrap, log = null }) {
     const p = periodOf({ from: validDay(b.from) ? b.from : null, to: validDay(b.to) ? b.to : null, today });
     const hotel = HOTEL_MODES.includes(String(b.hotel)) ? String(b.hotel) : 'hide';
     const fleet = FLEETS.includes(String(b.fleet)) ? String(b.fleet) : null;
-    const v = lowperfOf({ ...(await loadLowperf(q, { from: p.from, to: p.to, today })), hotel, fleet, notes: p.notes });
+    const v = lowperfOf({ ...(await loadLowperf(q, { from: p.from, to: p.to, today, fleet })), hotel, fleet, notes: p.notes });
     const want = Array.isArray(b.pks) ? new Set(b.pks.map(String)) : null;
     const members = v.rows.filter((r) => !want || want.has(r.pk));
     if (!members.length) {
@@ -149,7 +149,7 @@ export function lowperfRoutes(app, { q, wrap, log = null }) {
     const sp = spansOf({ saved: watch.saved_day, today, a: req.query.a, b: req.query.b });
     const members = await q(`SELECT pk, ids, name, at_save FROM lowperf_watch_member
                               WHERE watch_id = $1 AND removed_at IS NULL ORDER BY pk`, [watch.id]);
-    const bundle = await loadWatch(q, { saved: watch.saved_day, a: sp.a, b: sp.b, today });
+    const bundle = await loadWatch(q, { saved: watch.saved_day, a: sp.a, b: sp.b, today, fleet: watch.fleet || null });
     return { ...watchOf({ watch, members, a: sp.a, b: sp.b, ...bundle }), default_spans: sp.defaults };
   };
 

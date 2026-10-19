@@ -3007,7 +3007,51 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
 .lp-save{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
 .lp-save input{font:inherit;padding:3px 6px;min-width:28ch}
 .lp-save .mt-xmsg{flex-basis:auto;text-align:left}
-[data-panel="lp-list"] .tablewrap,[data-panel="lp-members"] .tablewrap{overflow-x:auto}
+[data-panel="lp-list"] .tablewrap,[data-panel="lp-members"] .tablewrap,[data-panel="lp-why"] .tablewrap,[data-panel="lp-when"] .tablewrap,.lp-detail .tablewrap{overflow-x:auto}
+/* The grid's row ends, reference rows and cell switch; a figure in a cell
+   is a link to that driver's day, so it keeps the cell's colour. */
+.lp-metric{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
+.lp-grid td a{color:inherit;text-decoration:none}
+.lp-grid td a:hover,.lp-grid td a:focus-visible{text-decoration:underline}
+.lp-grid .lp-avg{border-left:1px solid var(--rule);font-weight:600;color:var(--ink);min-width:7ch;white-space:normal}
+.lp-grid .lp-avg small{display:block;font-size:var(--t1);font-weight:400;color:var(--grey)}
+.lp-grid .lp-avg small.tg-under{color:var(--critical)}
+.lp-grid thead th.lp-avg{font-size:var(--t2);line-height:1.15;max-width:10ch}
+.lp-grid .lp-ref td,.lp-grid .lp-ref th{color:var(--grey);font-style:italic;text-align:center}
+.lp-grid .lp-ref th{text-align:left}
+.lp-grid .lp-ref-rest td,.lp-grid .lp-ref-rest th{border-bottom:1.5px solid var(--ink)}
+@media (max-width:760px){.lp-grid .lp-who{max-width:14ch}}
+/* Causes: a chip per measured cause beside a name; the detail row under it. */
+.lp-chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}
+.lp-chip{display:inline-block;padding:0 5px;font-size:var(--t2);font-weight:500;line-height:1.5;color:var(--critical);background:var(--critical-bg);white-space:nowrap}
+.lp-chip-none{color:var(--grey);background:transparent;border:1px solid var(--rule)}
+.lp-open{display:block;margin-top:4px;padding:0 4px;font:inherit;font-size:var(--t2);color:var(--ink);background:transparent;border:1px solid var(--rule);cursor:pointer;white-space:nowrap}
+.lp-open:hover,.lp-open:focus-visible{border-color:var(--ink)}
+.lp-t tr.lp-drow>td{padding:6px 0 18px;border-top:0;background:var(--surface)}
+.lp-detail{display:flex;flex-direction:column;gap:10px;position:sticky;left:0;box-sizing:border-box;text-align:left;white-space:normal}
+.lp-t tr.lp-drow>td{text-align:left}
+.lp-why{margin:0;padding-left:18px;color:var(--ink)}
+.lp-why li{margin:2px 0}
+.lp-facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px 18px;margin:0}
+.lp-facts div{min-width:0}
+.lp-facts dt{font-size:var(--t2);color:var(--grey);text-transform:none}
+.lp-facts dd{margin:0;font-variant-numeric:tabular-nums;color:var(--ink)}
+.lp-sub{margin:6px 0 2px;font-size:var(--t3);font-weight:600;color:var(--grey-strong)}
+.lp-dt td,.lp-dt th{white-space:nowrap}
+.lp-dt td.lp-c-low,.lp-dt td.lp-c-off{color:var(--critical);background:var(--critical-bg)}
+.lp-wd th,.lp-wd td{text-align:center}
+.lp-wd th.l{text-align:left}
+.lp-wd .lp-meta{display:block;font-size:var(--t2);color:var(--grey)}
+.lp-hours{width:auto;border-collapse:collapse;font-size:var(--t2)}
+.lp-hours th{font-weight:400;color:var(--grey);padding:0 6px 0 0;text-align:left;white-space:nowrap}
+.lp-hours thead th{padding:0;text-align:left;min-width:14px}
+.lp-hours td{width:18px;min-width:14px;height:14px;padding:0;border:1px solid var(--surface)}
+.lp-hours .lp-h0{background:transparent;outline:1px solid var(--rule);outline-offset:-1px}
+.lp-hours .lp-h1{background:color-mix(in srgb,var(--ink) 18%,transparent)}
+.lp-hours .lp-h2{background:color-mix(in srgb,var(--ink) 40%,transparent)}
+.lp-hours .lp-h3{background:color-mix(in srgb,var(--ink) 64%,transparent)}
+.lp-hours .lp-h4{background:var(--ink)}
+.lp-causes td,.lp-causes th{white-space:normal}
 /* PRINT: the controls and watch-list forms gone, the grid at full width.
    The landscape A4 itself is a <style> the page adds only while it is open
    (./lowperf.js landscape()), so no other page's print changes. */
@@ -3023,6 +3067,11 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
   .lp-page .panel{break-inside:auto}
   .lp-grid tr,.lp-t tr{break-inside:avoid}
   .lp-grid .lp-c-low,.lp-grid .lp-c-off,.lp-grid .lp-nc{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .lp-chip,.lp-dt td.lp-c-low,.lp-dt td.lp-c-off,.lp-hours td{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .lp-t tr.lp-drow{break-inside:auto}
+  .lp-detail{position:static;width:auto !important}
+  .lp-dt tr{break-inside:avoid}
+  .lp-grid td a{text-decoration:none}
 }
 @media (max-width:980px){
   .targetnow .tg-cells{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 0}
