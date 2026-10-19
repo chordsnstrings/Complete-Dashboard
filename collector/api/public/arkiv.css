@@ -617,6 +617,13 @@
 :root[data-skin="arkiv"] .mt-t tbody th,:root[data-skin="arkiv"] .mc text,:root[data-skin="arkiv"] .mp text{font-family:var(--mono)}
 :root[data-skin="arkiv"] .mc .mc-grid,:root[data-skin="arkiv"] .mp .mp-grid{stroke:var(--faint)}
 :root[data-skin="arkiv"] .mt-nav{font-family:var(--mono);font-size:var(--t3);letter-spacing:.04em}
+/* Low performers (./lowperf.js): the Month target page's tables, and its grid
+   in the mono face on hairlines, like every Arkiv figure. */
+:root[data-skin="arkiv"] .lp-grid th,:root[data-skin="arkiv"] .lp-grid td{border-top-color:var(--hair)}
+:root[data-skin="arkiv"] .lp-grid,:root[data-skin="arkiv"] .lp-key{font-family:var(--mono)}
+:root[data-skin="arkiv"] .lp-grid thead th{letter-spacing:.06em}
+:root[data-skin="arkiv"] .lp-grid .lp-who{background:var(--paper,var(--surface))}
+:root[data-skin="arkiv"] .lp-t tr.lp-band th{font-family:var(--mono);letter-spacing:.07em;text-transform:uppercase;font-size:var(--t3)}
 
 /* ── 4 · panels and grids ───────────────────────────────────────────────────
    panel() is unchanged — the .pbody body and the data-panel keys. The card

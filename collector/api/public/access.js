@@ -172,7 +172,7 @@ export const VIEW_SUBJECT = Object.freeze({
      places, Trips is bookings, Unexplained trips names a likely culprit. */
   'driver/territory': 'LOC', 'driver/quality': 'COND', 'driver/trips': 'BK', 'driver/unauthorized': 'ACCUSE',
   'vehicle/compliance': 'VEH', drivers: 'ID', feeds: 'VEH', finance: 'REV', forecast: 'BK', 'hr-roster': 'HR', identity: 'MRG',
-  'import-sheet': 'CASH', insights: 'ID', live: 'LOC', 'low-performers': 'ID', map: 'LOC', messages: 'CT', notfound: 'SYS',
+  'import-sheet': 'CASH', insights: 'ID', live: 'LOC', 'low-performers': 'EARN', map: 'LOC', messages: 'CT', notfound: 'SYS',
   'online-time': 'ID', 'online-hours': 'BK', opening: 'CASH', optimise: 'BK', overview: 'BK', payouts: 'PAY', performance: 'ID',
   performer: 'ID', platforms: 'BK', 'platforms/funnel': 'COND', 'platforms/tiers': 'BK', playbook: 'REV',
   policy: 'CASH', property: 'REV', 'property/drivers': 'ID', 'property/guests': 'PAX', provenance: 'REV',
@@ -187,7 +187,10 @@ export const VIEW_SUBJECT = Object.freeze({
   'month-target': 'REV',
   'same-person': 'MRG', segment: 'COND', segments: 'COND', settings: 'CRED', settlement: 'REV',
   'settlement/cash': 'CASH', 'settlement/receivables': 'PAY', slot: 'BK', sources: 'SYS', supply: 'BK',
-  'top-performers': 'ID', trip: 'BK', trips: 'BK', unauthorized: 'COND', unit: 'REV', 'unit/assets': 'VEH',
+  'top-performers': 'ID', trip: 'BK',
+  /* Low performers and its watch lists (2026-10-19): each driver's fares
+     against their share of the target — earnings, so EARN; names follow ID. */
+  watchlist: 'EARN', trips: 'BK', unauthorized: 'COND', unit: 'REV', 'unit/assets': 'VEH',
   'unit/drivers': 'ID', vehicle: 'VEH', 'vehicle/drivers': 'ID', 'vehicle/earnings': 'REV',
   'vehicle/movement': 'LOC', 'vehicle/safety': 'COND', 'vehicle/trips': 'BK', vehicles: 'VEH',
   /* The account and access pages decide for themselves. */
@@ -197,6 +200,7 @@ export const PHONE_SUBJECT = Object.freeze({
   today: 'REV', overview: 'REV', money: 'REV', finance: 'REV', unit: 'REV', settlement: 'REV', revenue: 'REV',
   people: 'ID', drivers: 'ID', 'online-time': 'ID', fleet: 'VEH', vehicles: 'VEH', vehicle: 'VEH', driver: 'ID',
   live: 'LOC', safety: 'VEH', unauthorized: 'COND', sources: 'SYS', trips: 'BK', more: null, payouts: 'PAY',
+  'low-performers': 'EARN', watchlist: 'EARN',
   corporate: 'REV', analyst: 'REV', optimise: 'LOC', credentials: 'CRED', deposits: 'CASH', account: null,
 });
 const VEHICLE_COHORT = /^(vehicles|safety|unit-(idle-documented|moved-unpaid|still))/;

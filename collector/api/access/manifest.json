@@ -8186,6 +8186,339 @@
  },
  {
   "method": "GET",
+  "path": "/api/lowperf",
+  "subject": "EARN",
+  "carries": [
+   "BK",
+   "CASH",
+   "COND",
+   "EARN",
+   "ID",
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].name",
+     "rows[].driver_ext_id",
+     "rows[].pk",
+     "rows[].ids"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "rows[].gross",
+     "rows[].gross_target",
+     "rows[].gross_short",
+     "rows[].gross_pct",
+     "rows[].per_day_driven",
+     "rows[].per_day_target",
+     "rows[].days[].fares",
+     "rows[].days[].share",
+     "rows[].weeks[].gross",
+     "rows[].weeks[].target",
+     "rows[].weeks[].pct",
+     "rows[].trend.change",
+     "rows[].trend.rest_change",
+     "rows[].trend.relative",
+     "yardstick.rest.gross",
+     "yardstick.rest.target",
+     "yardstick.rest.pct",
+     "yardstick.rest.weeks[].gross",
+     "yardstick.rest.weeks[].target",
+     "yardstick.rest.weeks[].pct",
+     "yardstick.below.gross",
+     "yardstick.below.target",
+     "yardstick.below.pct",
+     "yardstick.below.weeks[].gross",
+     "yardstick.below.weeks[].target",
+     "yardstick.below.weeks[].pct",
+     "totals.below_gross",
+     "totals.below_target",
+     "totals.below_short"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "rows[].trips",
+     "rows[].trips_pct",
+     "rows[].bookings",
+     "rows[].completed",
+     "rows[].completion_pct",
+     "rows[].by_platform",
+     "rows[].last_booking",
+     "rows[].days[].trips"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "rows[].cash_bookings",
+     "rows[].cash_pct"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "rows[].online_h",
+     "rows[].online_days"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "rows[].plate"
+    ]
+   },
+   {
+    "class": "REV",
+    "paths": [
+     "days[].plan",
+     "days[].share",
+     "totals.plan"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "left_out[].why",
+     "days[].why"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "rows",
+  "fleetRows": [
+   "rows[]"
+  ],
+  "fleetKey": "fleet",
+  "notes": "api/lowperf_routes.js + api/lowperf.js (2026-10-19). The Low performers page: every driver below their target over a period (default the month so far), furthest behind first, banded under 50% / 50-80% / 80-100%, with the day-by-day grid, three weeks and the trend against everyone else. A driver's target is the Month target page's: each settled day's plan shared equally among that day's active drivers (a completed trip in the 8 days to it); a day active and not driven still asks its share. Hotel-only drivers hidden by default (?hotel=). The rows are each one fleet's and are dropped for a reader who does not see that fleet; the totals and yardsticks cover both (mixed), the Month target page's convention. Names ID, a driver's money EARN, trips and bookings BK, cash rides CASH, Uber hours online COND, the car VEH."
+ },
+ {
+  "method": "GET",
+  "path": "/api/export/lowperf.xlsx",
+  "subject": "EARN",
+  "carries": [
+   "BK",
+   "CASH",
+   "COND",
+   "EARN",
+   "ID",
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "auditRead": true,
+  "notes": "api/lowperf_routes.js + api/lowperf_workbook.js (2026-10-19). The Low performers page as an .xlsx: Summary, Below target, Day by day (AED), Day by day (% of target). Body is a FILE, so the shaper never sees it: the route writes \"(withheld)\" in every cell of a class the signed-in reader's role does not hold in full (LOWPERF_FILE_CLASSES), the Month target workbook's rule."
+ },
+ {
+  "method": "GET",
+  "path": "/api/lowperf/watch",
+  "subject": "EARN",
+  "carries": [
+   "EARN",
+   "SYS"
+  ],
+  "grain": "list",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "notes": "api/lowperf_routes.js (2026-10-19). The saved watch lists: name, the day saved, the period and settings it was drawn from, how many members. No member is named here and no figure; who saved a list is not part of the answer."
+ },
+ {
+  "method": "POST",
+  "path": "/api/lowperf/watch",
+  "subject": "EARN",
+  "carries": [
+   "EARN",
+   "ID"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "watchlist.edit",
+  "notes": "api/lowperf_routes.js (2026-10-19). Save a watch list: the server computes the period's below-target people and stores them with their figures at the save (never the page's). The Owner and the Operations managers (watchlist.edit); the handler also refuses a visitor who is not signed in, which open mode would otherwise let through."
+ },
+ {
+  "method": "GET",
+  "path": "/api/lowperf/watch/:id",
+  "subject": "EARN",
+  "carries": [
+   "BK",
+   "CASH",
+   "COND",
+   "EARN",
+   "ID",
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].name",
+     "rows[].driver_ext_id",
+     "rows[].pk",
+     "rows[].ids",
+     "rows[].saved_pk",
+     "missing[].name"
+    ]
+   },
+   {
+    "class": "EARN",
+    "paths": [
+     "rows[].gross",
+     "rows[].gross_target",
+     "rows[].gross_short",
+     "rows[].gross_pct",
+     "rows[].per_day_driven",
+     "rows[].per_day_target",
+     "rows[].days[].fares",
+     "rows[].days[].share",
+     "rows[].at_save",
+     "rows[].a.gross",
+     "rows[].a.target",
+     "rows[].a.pct",
+     "rows[].b.gross",
+     "rows[].b.target",
+     "rows[].b.pct",
+     "rows[].move.change",
+     "rows[].move.rest_change",
+     "rows[].move.relative",
+     "list.a.gross",
+     "list.a.target",
+     "list.a.pct",
+     "list.b.gross",
+     "list.b.target",
+     "list.b.pct",
+     "list.change",
+     "rest.a.gross",
+     "rest.a.target",
+     "rest.a.pct",
+     "rest.b.gross",
+     "rest.b.target",
+     "rest.b.pct",
+     "rest.change"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "rows[].trips",
+     "rows[].trips_pct",
+     "rows[].bookings",
+     "rows[].completed",
+     "rows[].completion_pct",
+     "rows[].by_platform",
+     "rows[].last_booking",
+     "rows[].days[].trips",
+     "rows[].a.trips",
+     "rows[].b.trips"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "rows[].cash_bookings",
+     "rows[].cash_pct"
+    ]
+   },
+   {
+    "class": "COND",
+    "paths": [
+     "rows[].online_h",
+     "rows[].online_days"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "rows[].plate"
+    ]
+   },
+   {
+    "class": "REV",
+    "paths": [
+     "days[].plan",
+     "days[].share"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "days[].why"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "rows",
+  "fleetRows": [
+   "rows[]"
+  ],
+  "fleetKey": "fleet",
+  "notes": "api/lowperf_routes.js + api/lowperf.js watchOf (2026-10-19). One watch list followed: each member day by day from 14 days before the save, two spans compared (default: the 14 days before against the days since; ?a=, ?b=), each member's move against everyone else's. A driver's target is the Month target page's: each settled day's plan shared equally among that day's active drivers (a completed trip in the 8 days to it); a day active and not driven still asks its share. Rows are each one fleet's; the list and everyone-else sums cover both (mixed)."
+ },
+ {
+  "method": "POST",
+  "path": "/api/lowperf/watch/:id",
+  "subject": "EARN",
+  "carries": [
+   "EARN",
+   "ID"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "watchlist.edit",
+  "notes": "api/lowperf_routes.js (2026-10-19). Rename, note, add or remove members (removal stamps, never deletes), archive. watchlist.edit; a visitor who is not signed in is refused by the handler."
+ },
+ {
+  "method": "GET",
+  "path": "/api/export/lowperf-watch.xlsx",
+  "subject": "EARN",
+  "carries": [
+   "BK",
+   "CASH",
+   "COND",
+   "EARN",
+   "ID",
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "auditRead": true,
+  "notes": "api/lowperf_routes.js + api/lowperf_workbook.js (2026-10-19). One watch list followed, as an .xlsx: Watch list, Members, Day by day (AED), Day by day (% of target). A FILE: \"(withheld)\" in every cell of a class the reader does not hold in full."
+ },
+ {
+  "method": "GET",
   "path": "/api/agent/state",
   "subject": "SYS",
   "carries": [

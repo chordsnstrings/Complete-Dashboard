@@ -377,7 +377,7 @@ export const NO_RANGE = ['reconcile', 'compare',
      page and named in its caption. A range chip above them changes nothing and
      reads as though it does — and worse, rides along into every link leaving
      the page. */
-  'top-performers', 'low-performers', 'performer',
+  'top-performers', 'performer',
   /* #payouts is the register of every transfer that ever reached the bank, and
      a transfer is a SPARSE event — 91 dates across twenty-one months. Under
      the shell's default window the page rendered "AED 319,015 · 6 transfers on
@@ -428,6 +428,11 @@ export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'ac
      Month target page is the same month, so the same: its month is its own
      address (#month-target/2026-09), never the range above it. */
   'target', 'month-target',
+  /* Low performers carries its own period, hotel switch and fleet in its
+     address (#low-performers/FROM..TO/HOTEL.FLEET), and a watch list its own
+     two spans: the shell's range, grouping and channel chips would govern
+     nothing on either (./lowperf.js). */
+  'low-performers', 'watchlist',
   /* Sign-in and access pages: about people and settings, never a window. */
   'account', 'access', 'fleet-names', 'approvals',
   'online-time', 'online-hours',

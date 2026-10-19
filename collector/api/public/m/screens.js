@@ -40,6 +40,7 @@ import { targetHoursLive, todayHtml, hoursNearHtml, REFRESH_MS } from '../target
 /* The three words the desktop page uses for the three states it refuses to
    colour. Imported rather than retyped — see the comment on GREY there. */
 import { GREY } from '../onlinetime.js';
+import { parseParam, pageHref, listUrl, watchUrl, parseSpans, HOTEL_WORD, shortDay as lpDay } from '../lowperf.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
@@ -82,6 +83,8 @@ export function titleFor(view, param) {
        because a header reading "performance" is the router's word for the page
        and not the product's. */
     performance: ['Better or worse', 'Against each driver\u2019s own record'],
+    'low-performers': ['Below target', 'Each driver against their share of the target'],
+    watchlist: ['Watch list', 'Followed from the day it was saved'],
     fleet: ['Fleet', WINDOW_NOTE()],
     more: ['More', 'Everything else'],
     trips: ['Every trip', WINDOW_NOTE()],
@@ -943,6 +946,9 @@ async function moneyScreen(deck, ctx) {
 
 /* ── People ─────────────────────────────────────────────────────────────── */
 async function people(deck, ctx) {
+  /* Low performers (2026-10-19): who is below their target this month, one
+     tap from the people list. */
+  rows(deck, [row({ title: 'Below target', sub: 'everyone under their share of the target, and who is improving', value: '›', to: href('low-performers') })]);
   const bar = el('div');
   bar.style.cssText = 'display:flex;flex-direction:column;gap:10px';
   deck.append(bar);
@@ -1489,6 +1495,7 @@ async function more(deck) {
        no phone screen goes. It has one now. */
     row({ title: 'To the bank', sub: 'every transfer a platform made', value: '›', to: href('payouts') }),
     row({ title: 'Analyst', sub: 'claims the data was asked to settle', value: '›', to: href('analyst') }),
+    row({ title: 'Below target', sub: 'drivers under their share, and watch lists', value: '›', to: href('low-performers') }),
   ]);
   deck.append(el('p', 'm-sec', 'Operate'));
   rows(deck, [
@@ -3013,10 +3020,82 @@ async function fallback(deck, ctx) {
   deck.append(wrap);
 }
 
+/* ── below target, and a watch list followed (../lowperf.js) ────────────
+   The desktop page's list as cards: grouped by how far below target, each
+   person's share of their target, what they are short by, their days off and
+   whether last week was better than the one before against everyone else.
+   The grid and the written lines stay on the desktop: a fortnight of numbers
+   across 390 pixels is the wide table this app exists not to squeeze. */
+const LP_TREND = { improving: '▲ improving', slipping: '▼ slipping', steady: '– steady' };
+const lpPct = (v) => (v == null ? '—' : `${fmt(v, 1)}%`);
+async function lowPerformers(deck, ctx) {
+  const r = parseParam(ctx.param === 'month' ? null : ctx.param, ctx.sub);
+  const top = el('div');
+  deck.append(top);
+  chips(top, [{ id: 'hide', label: 'Hide hotel-only' }, { id: 'mostly', label: 'Hide mostly hotel' }, { id: 'show', label: 'Everyone' }],
+    r.hotel, (h) => { location.hash = pageHref({ ...r, hotel: h }); });
+  const list = el('div');
+  deck.append(list);
+  skeleton(list, 5);
+  const [v, lists] = await Promise.all([api(listUrl(r)).catch((e) => ({ _err: e })), api('/api/lowperf/watch').catch(() => ({ lists: [] }))]);
+  if (!ctx.alive()) return;
+  list.innerHTML = '';
+  if (v._err) { failed(list, v._err); return; }
+  if (v.why) { empty(list, 'Nothing to judge yet', v.why); return; }
+  const rowsIn = v.rows || [];
+  const span = `${lpDay(v.from)} – ${lpDay(v.to)}`;
+  lede(list, { claim: `${fmt(rowsIn.length)} of ${fmt(v.totals.population)} drivers below their target`,
+    sub: `${span} · ${HOTEL_WORD[v.hotel]} · everyone else at ${lpPct(v.yardstick?.rest?.pct)} of their targets`, tone: rowsIn.length ? 'critical' : null });
+  const band = (k) => rowsIn.filter((x) => x.band === k);
+  stats(list, [
+    { label: 'Under half', value: fmt(band('lt50').length) },
+    { label: 'Half to 80%', value: fmt(band('lt80').length) },
+    { label: '80% to target', value: fmt(band('lt100').length) },
+  ], true);
+  for (const [k, title] of [['lt50', 'Under half of target'], ['lt80', 'Half to 80% of target'], ['lt100', '80% to target']]) {
+    const b = band(k);
+    if (!b.length) continue;
+    const c = card(title, `${fmt(b.length)} ${b.length === 1 ? 'driver' : 'drivers'}`);
+    rows(c.body, b.map((x) => row({ title: x.name || '(withheld)',
+      sub: `${lpPct(x.gross_pct)} of target${x.days_off ? ` · ${fmt(x.days_off)} ${x.days_off === 1 ? 'day' : 'days'} off` : ''} · ${LP_TREND[x.trend?.verdict] || 'too few days to say'}`,
+      value: x.gross_short ? `▼ ${money(x.gross_short)}` : '—', tone: 'critical', to: x.driver_ext_id ? href('driver', x.driver_ext_id) : undefined })));
+    list.append(c.card);
+  }
+  if (v.left_out?.length) list.append(el('p', 'm-cap', `Not counted: ${v.left_out.map((d) => d.label).join(', ')} — a day is judged once every channel has delivered it and its fares are in.`));
+  const ls = (lists?.lists || []);
+  if (ls.length) {
+    const c = card('Watch lists', 'saved on a day, followed from then on');
+    rows(c.body, ls.map((l) => row({ title: l.name, sub: `saved ${lpDay(l.saved_day)} · ${fmt(l.members)} people`, value: '›', to: href('watchlist', String(l.id)) })));
+    list.append(c.card);
+  }
+}
+async function watchList(deck, ctx) {
+  if (!ctx.param) { location.hash = href('low-performers'); return; }
+  skeleton(deck, 4);
+  const w = await api(watchUrl(ctx.param, parseSpans(ctx.sub))).catch((e) => ({ _err: e }));
+  if (!ctx.alive()) return;
+  deck.innerHTML = '';
+  if (w._err) { failed(deck, w._err); return; }
+  const ch = (x) => (x == null ? '' : ` (${x >= 0 ? '+' : '−'}${fmt(Math.abs(x), 1)} points)`);
+  lede(deck, { claim: w.watch.name, sub: `saved ${lpDay(w.watch.saved_day)} · ${w.rows.length} people · the list ${lpPct(w.list.a.pct)} → ${lpPct(w.list.b.pct)}${ch(w.list.change)}, everyone else ${lpPct(w.rest.a.pct)} → ${lpPct(w.rest.b.pct)}` });
+  stats(deck, [
+    { label: 'Improving', value: fmt(w.moves.improving) },
+    { label: 'Steady', value: fmt(w.moves.steady) },
+    { label: 'Slipping', value: fmt(w.moves.slipping) },
+  ], true);
+  const c = card(`${w.a.label} → ${w.b.label}`, 'each against everyone else’s move');
+  rows(c.body, w.rows.map((x) => row({ title: x.name || '(withheld)', sub: `${lpPct(x.a.pct)} → ${lpPct(x.b.pct)}`,
+    value: LP_TREND[x.move?.verdict] || '—', tone: x.move?.verdict === 'slipping' ? 'critical' : null,
+    to: x.driver_ext_id ? href('driver', x.driver_ext_id) : undefined })));
+  deck.append(c.card);
+  if (w.missing.length) deck.append(el('p', 'm-cap', `${w.missing.length} saved ${w.missing.length === 1 ? 'person was' : 'people were'} not found on any day shown.`));
+}
+
 export const SCREENS = {
   today, money: moneyScreen, people, fleet, live, safety, unauthorized, sources, more,
   corporate, analyst, credentials, optimise, trips: tripsScreen, fallback,
   'online-time': onlineTime, payouts,
+  'low-performers': lowPerformers, watchlist: watchList,
   /* The one screen here that WRITES. See its own block comment. */
   deposits,
   /* A driver or vehicle with no sub-page gets the phone screen; a sub-page

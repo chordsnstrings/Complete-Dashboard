@@ -339,4 +339,8 @@ export const SCHEMA_FILES = [
      Mohammad Shahazan" folded into the person row holding his Uber account
      (v105's recorded merge, for this one person). */
   'schema_v108.sql',
+  /* v109: low-performer watch lists — a below-target list saved on a day and
+     followed from then on (api/lowperf_routes.js), kept by the Owner and the
+     Operations managers. */
+  'schema_v109.sql',
 ];

@@ -21,6 +21,8 @@ import { shape, windowOf, driverRecord, fleetRecord } from './api/performance_ro
 import { computeMonth, addDays as tgAddDays, monthOf as tgMonthOf, daysIn as tgDaysIn, monthName as tgMonthName } from './api/revenue_target.js';
 import { hoursOf } from './api/target_hours.js';
 import { monthViewOf, monthWorkbookOf } from './api/target_month.js';
+import { lowperfOf, watchOf, periodOf, spansOf, HOTEL_MODES as LP_HOTEL } from './api/lowperf.js';
+import { lowperfWorkbookOf, watchWorkbookOf } from './api/lowperf_workbook.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -4899,6 +4901,103 @@ app.get('/api/export/target-month.xlsx', (req, r) => {
   r.set('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   r.set('content-disposition', `attachment; filename="${name}"`);
   r.end(wb.toBuffer());
+});
+/* /api/lowperf and its watch lists (api/lowperf.js): lowperfOf and watchOf
+   themselves over the Month target mock's fleet, so the targets are that
+   page's to the fils. The 46 made-up drivers earn AED 36 to 44 a trip against
+   a share of about AED 510 a day, so most sit below target in every band;
+   Driver 03 and Driver 06 drive only for the hotel channel and Driver 09
+   mostly does, so the hotel switch has someone to hide. One list is kept in
+   memory, saved fourteen days ago from the eight furthest behind. */
+const lpBundle = (from, to, today) => {
+  const lo = [from, tgAddDays(to, -27)].sort()[0];
+  const facts = tgFacts(tgAddDays(lo, -9), to, today);
+  /* Driver 14 stops driving five days before the end: five days off that
+     still ask their share, the grid's "off". */
+  for (const [d, ppl] of facts.personDays) if (d > tgAddDays(to, -5)) ppl.delete('p13');
+  const months = [];
+  for (let d = lo; d <= to; d = tgAddDays(d, 1)) if (!months.some((m) => m.month === tgMonthOf(d))) months.push({ month: tgMonthOf(d), rows: tgRows(tgMonthOf(d)), facts, mw: null });
+  const byDay = new Map();
+  for (const [d, ppl] of facts.personDays) {
+    /* Every eleventh driver takes AED 17 a trip: under half of target. */
+    byDay.set(d, new Map([...ppl].map(([pk, n]) => [pk, { trips: n,
+      gross: Math.round(n * (Number(pk.slice(1)) % 11 === 4 ? 17 : 36 + (Number(pk.slice(1)) % 9)) * 100) / 100 }])));
+  }
+  const who = new Map(Array.from({ length: 46 }, (_, k) => [`p${k}`, { pk: `p${k}`, name: `Driver ${String(k + 1).padStart(2, '0')}`,
+    driver_ext_id: `drv-${k + 1}`, fleet: k % 2 ? 'egari' : 'ecosine', platforms: [2, 5].includes(k) ? ['hotel'] : k % 3 ? ['uber'] : ['bolt', 'uber'] }]));
+  const extras = new Map(Array.from({ length: 46 }, (_, k) => {
+    const b = 180 + (k * 7) % 60;
+    const hotel = [2, 5].includes(k) ? b : k === 8 ? Math.round(b * 0.7) : 0;
+    return [`p${k}`, { bookings_w: b, hotel_w: hotel, bookings: b, completed: b - 6 - (k % 9), cash: Math.round(b * ((k % 5) / 10)),
+      by_platform: hotel === b ? { hotel: b } : { uber: b - hotel, ...(hotel ? { hotel } : {}) }, plate: `M${40100 + (k % 40)}`,
+      last_booking: to, ids: [`drv-${k + 1}`] }];
+  }));
+  const hours = new Map(Array.from({ length: 46 }, (_, k) => [`p${k}`, k % 4 ? { online_min: 2400 + k * 31, online_days: 9 } : null]).filter(([, h]) => h));
+  return { from, to, lo, today, min: 12, months, dd: { byDay, who }, extras, hours };
+};
+const lpView = (q) => {
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(q.asof || '')) ? String(q.asof) : dubaiDay(new Date());
+  const p = periodOf({ from: q.from || null, to: q.to || null, today });
+  return lowperfOf({ ...lpBundle(p.from, p.to, today), hotel: LP_HOTEL.includes(q.hotel) ? q.hotel : 'hide',
+    fleet: ['ecosine', 'egari'].includes(q.fleet) ? q.fleet : null, notes: p.notes });
+};
+const lpLists = [];
+const lpList = () => {
+  if (!lpLists.length) {
+    const today = dubaiDay(new Date());
+    const saved = tgAddDays(today, -14);
+    const v = lpView({ from: `${tgAddDays(saved, -1).slice(0, 7)}-01`, to: tgAddDays(saved, -1), asof: saved });
+    lpLists.push({ id: 1, name: 'Furthest behind, first half of the month', saved_day: saved, period_from: v.from, period_to: v.to,
+      hotel: 'hide', fleet: null, note: null, created_at: `${saved}T06:00:00Z`, archived: false,
+      members: v.rows.slice(0, 8).map((r) => ({ pk: r.pk, ids: r.ids, name: r.name, at_save: { gross: r.gross, target: r.gross_target, pct: r.gross_pct } })) });
+  }
+  return lpLists;
+};
+const lpRow = (l) => ({ id: l.id, name: l.name, saved_day: l.saved_day, period_from: l.period_from, period_to: l.period_to, hotel: l.hotel,
+  fleet: l.fleet, note: l.note, created_at: l.created_at, archived: l.archived, members: l.members.length });
+const lpFollow = (l, q) => {
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(q.asof || '')) ? String(q.asof) : dubaiDay(new Date());
+  const sp = spansOf({ saved: l.saved_day, today, a: q.a, b: q.b });
+  const lo = [tgAddDays(l.saved_day, -14), sp.a.from, sp.b.from].sort()[0];
+  const to = [tgAddDays(today, -1), sp.a.to, sp.b.to].sort().pop();
+  const b = lpBundle(lo, to, today);
+  return { ...watchOf({ watch: lpRow(l), members: l.members, a: sp.a, b: sp.b, ...b, lo, to }), default_spans: sp.defaults };
+};
+const lpFile = (r, { wb, name }) => {
+  r.set('Cache-Control', 'private, no-store');
+  r.set('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  r.set('content-disposition', `attachment; filename="${name}"`);
+  r.end(wb.toBuffer());
+};
+app.get('/api/lowperf', (req, r) => r.set('cache-control', 'private, no-store').json(lpView(req.query)));
+app.get('/api/export/lowperf.xlsx', (req, r) => lpFile(r, lowperfWorkbookOf(lpView(req.query))));
+app.get('/api/lowperf/watch', (req, r) => r.set('cache-control', 'private, no-store')
+  .json({ lists: lpList().filter((l) => req.query.archived === '1' || !l.archived).map(lpRow) }));
+app.get('/api/lowperf/watch/:id', (req, r) => {
+  const l = lpList().find((x) => String(x.id) === String(req.params.id));
+  if (!l) return r.status(404).json({ error: 'not_found', detail: 'No watch list has that number.' });
+  return r.set('cache-control', 'private, no-store').json(lpFollow(l, req.query));
+});
+app.get('/api/export/lowperf-watch.xlsx', (req, r) => {
+  const l = lpList().find((x) => String(x.id) === String(req.query.id));
+  if (!l) return r.status(404).json({ error: 'not_found', detail: 'No watch list has that number.' });
+  return lpFile(r, watchWorkbookOf(lpFollow(l, req.query)));
+});
+app.post('/api/lowperf/watch', (req, r) => {
+  const v = lpView({ from: req.body?.from, to: req.body?.to, hotel: req.body?.hotel, fleet: req.body?.fleet });
+  const l = { id: lpList().length + 1, name: String(req.body?.name || 'Watch list').slice(0, 120), saved_day: dubaiDay(new Date()),
+    period_from: v.from, period_to: v.to, hotel: v.hotel, fleet: v.fleet, note: null, created_at: new Date().toISOString(), archived: false,
+    members: v.rows.map((x) => ({ pk: x.pk, ids: x.ids, name: x.name, at_save: { gross: x.gross, target: x.gross_target, pct: x.gross_pct } })) };
+  lpLists.push(l);
+  r.json({ ok: true, list: lpRow(l) });
+});
+app.post('/api/lowperf/watch/:id', (req, r) => {
+  const l = lpList().find((x) => String(x.id) === String(req.params.id));
+  if (!l) return r.status(404).json({ error: 'not_found', detail: 'No watch list has that number.' });
+  if (req.body?.name) l.name = String(req.body.name).slice(0, 120);
+  if (req.body?.archive === true) l.archived = true;
+  if (Array.isArray(req.body?.remove)) l.members = l.members.filter((m) => !req.body.remove.includes(m.pk));
+  return r.json({ ok: true, list: lpRow(l), added: 0, removed: (req.body?.remove || []).length, unknown: null });
 });
 /* The chat assistant's state (api/agent_routes.js). The mock has no model,
    so it answers what the real route answers with no key: not available, no

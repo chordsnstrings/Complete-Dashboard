@@ -120,6 +120,10 @@ const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/t
      Its hour-by-hour view is "so far today" and "by this minute", which a
      cached answer would freeze at the minute it was cached. */
   '/api/target', '/api/target/hours',
+  /* THE LOW PERFORMERS AND THEIR WATCH LISTS (api/lowperf_routes.js): every
+     figure is a share of the revenue target, which the Owner's save moves,
+     and a watch list changes on a click — neither advances the version. */
+  '/api/lowperf',
   /* THE CREDENTIAL BANNER, which a Settings save changes.
      ───────────────────────────────────────────────────────────────────────
      A save tests the value it stored and rewrites the banner rows

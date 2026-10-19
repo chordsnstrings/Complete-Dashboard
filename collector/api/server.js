@@ -16,6 +16,7 @@ import { insightListSql } from './insights_sql.js';
 /* The monthly revenue target and the Today workbook (api/target_routes.js);
    the deploy seed of the operator's first target (api/revenue_target.js). */
 import { targetRoutes } from './target_routes.js';
+import { lowperfRoutes } from './lowperf_routes.js';
 import { agentRoutes } from './agent_routes.js';
 import { applyTargetSeed, applyWeightCutover } from './revenue_target.js';
 import { getConfig as accessConfig } from './access/service.js';
@@ -6876,6 +6877,8 @@ smsRoutes(app, { q, wrap, access: smsAccess });
    file withholds its own, per sheet. */
 moneyExportRoutes(app, { q, wrap, winDays, log });
 targetRoutes(app, { q, wrap, log });
+/* The Low performers page and its watch lists (api/lowperf_routes.js). */
+lowperfRoutes(app, { q, wrap, log });
 /* The chat assistant (api/agent_routes.js): a read-only conversation over the
    dashboard's own routes, as the person asking; it forgets after 24 hours. */
 agentRoutes(app, { q, wrap });

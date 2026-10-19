@@ -241,7 +241,8 @@ export const APPLIES_WHY = {
   compare: 'it carries its own two days in its address',
   causes: 'it is the whole record’s monthly trend',
   'top-performers': 'it is a fixed Monday-to-Sunday week, chosen on the page',
-  'low-performers': 'it is a fixed Monday-to-Sunday week, chosen on the page',
+  'low-performers': 'it carries its own period, hotel drivers and fleet, chosen on the page',
+  watchlist: 'it follows a saved list over its own two spans, chosen on the page',
   performer: 'it is a fixed Monday-to-Sunday week, chosen on the page',
   payouts: 'it is the register of every transfer that ever reached the bank',
   /* NO_PLATFORM_FLEET: the platform and the fleet */

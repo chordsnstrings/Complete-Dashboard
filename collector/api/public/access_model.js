@@ -92,6 +92,10 @@ export const CAPS = Object.freeze([
      "for now anyone" (the operator, 2026-10-09) — and it reads nothing a role
      cannot already read: each of its tools is that role's own GET. */
   { code: 'agent.ask', name: 'Ask the assistant', note: 'Reads only what this role can already see; remembers for 24 hours' },
+  /* Low-performer watch lists (api/lowperf_routes.js): save the people below
+     target on a day and follow them. The Owner and the Operations managers —
+     the operator's ruling of 2026-10-19. */
+  { code: 'watchlist.edit', name: 'Keep low-performer watch lists', note: 'Save, rename, add to, remove from and archive a list' },
 ]);
 export const CAP_CODES = Object.freeze(CAPS.map((c) => c.code));
 export const CAP = Object.freeze(Object.fromEntries(CAPS.map((c) => [c.code, c])));
@@ -122,7 +126,7 @@ export const ROLES = Object.freeze([
   { code: 'OPS', name: 'Operations manager',
     desc: 'Runs the fleets day to day: drivers, trips, conduct, earnings and the live map.',
     levels: lv('ID CT EARN COND ACCUSE REV BK LOC VEH SYS PAX:A'),
-    caps: ['collector.run', 'calendar.edit', 'finding.own', 'export', 'agent.ask'] },
+    caps: ['collector.run', 'calendar.edit', 'finding.own', 'watchlist.edit', 'export', 'agent.ask'] },
   { code: 'DSP', name: 'Dispatcher',
     desc: 'Live map, bookings and driver contact. Conduct as totals only; no money.',
     levels: lv('ID CT COND:A BK LOC VEH SYS PAX:A'),

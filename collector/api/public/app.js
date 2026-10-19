@@ -17,6 +17,7 @@ import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
 import { targetPage } from './targetpage.js';
 import { monthTargetPage, workbookUrl as monthWorkbookUrl } from './targetmonth.js';
+import { lowPerformersPage, watchListPage } from './lowperf.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
   applyWindow, MONTH_SHORT, dayLabel } from './data.js';
@@ -483,7 +484,7 @@ const VIEWS = [
   { id: 'cancellations', label: 'Cancellations', ic: '⊘', sec: 'People', sub: 'Every driver with a cancelled booking, and whether they or the rider called it off' },
   { id: 'roster', label: 'Driver roster', ic: '☰', sec: 'People', sub: 'Every driver on the books on each platform, and who is earning nothing' },
   { id: 'top-performers', label: 'Top performers', ic: '▲', sec: 'People', sub: 'The best drivers of the last complete week, and what they did differently' },
-  { id: 'low-performers', label: 'Low performers', ic: '▼', sec: 'People', sub: 'The weakest drivers of the last complete week, and what the data cannot explain' },
+  { id: 'low-performers', label: 'Low performers', ic: '▼', sec: 'People', sub: 'Everyone below their target over a period, day by day, and whether they are getting better' },
   /* Beneath the two ranking pages because it is the question they cannot
      answer. They rank a week; this one measures each driver against their OWN
      record, so a steadily excellent driver never appears on it and one in the
@@ -615,7 +616,7 @@ const SECTIONS = [
    rail now shows, and covered by a test that walks every key of V and every
    VIEWS id — so the next view added cannot repeat it. */
 const DRILL_SECTION = {
-  driver: 'People', performer: 'People', cohort: 'People',
+  driver: 'People', performer: 'People', cohort: 'People', watchlist: 'People',
   vehicle: 'Fleet', segments: 'Fleet', segment: 'Fleet',
   property: 'Money',
   day: 'Work', slot: 'Work', trip: 'Work',
@@ -693,7 +694,7 @@ function renderSectionTabs() {
 }
 /* Which page inside the section a drill-down belongs to. Only for lighting the
    strip — the section itself comes from sectionOf, which covers more keys. */
-const DRILL_PAGE = { driver: 'drivers', performer: 'top-performers', vehicle: 'vehicles',
+const DRILL_PAGE = { driver: 'drivers', performer: 'top-performers', watchlist: 'low-performers', vehicle: 'vehicles',
   property: 'corporate', day: 'demand', slot: 'demand', trip: 'trips',
   segments: 'unauthorized', segment: 'unauthorized', action: 'insights' };
 function setHeader(detail) {
@@ -773,6 +774,16 @@ function setHeader(detail) {
     crumb.innerHTML = `<a href="${href('top-performers', isWeek(state.sub) ? state.sub : null)}">`
       + `Top performers</a><span>/</span>`
       + `<b>${esc(detail?.name || state.param || '')}</b>`;
+    crumb.style.display = 'flex';
+  } else if (state.view === 'watchlist') {
+    /* A saved list from Low performers, followed (./lowperf.js). Its name is
+       only known once the list is read. */
+    $('#viewTitle').textContent = detail?.name || 'Watch lists';
+    $('#viewSub').textContent = state.param
+      ? 'The people saved below target on a day, followed from then on — each against everyone else'
+      : 'Lists saved from Low performers, each followed from the day it was saved';
+    crumb.innerHTML = `<a href="${href('low-performers')}">Low performers</a><span>/</span>`
+      + `<b>${esc(state.param ? (detail?.name || '') : 'Watch lists')}</b>`;
     crumb.style.display = 'flex';
   } else if (state.view === 'compare') {
     /* The default is today against yesterday, but the page takes any two days,
@@ -2933,7 +2944,11 @@ V.provenance = async (root) => renderProvenance(root);
 /* The first screen: the fleet as a ledger rather than as a trip count. */
 V.unit = async (root) => renderEconomics(root);
 V['top-performers'] = async (root) => renderPerformers(root, 'top');
-V['low-performers'] = async (root) => renderPerformers(root, 'low');
+/* The Low performers page (./lowperf.js, 2026-10-19): everyone below their
+   target over a period — the Month target page's targets — day by day, and
+   whether they are improving; #watchlist/<id> follows a list saved from it. */
+V['low-performers'] = async (root) => lowPerformersPage(root, state.param, state.sub);
+V.watchlist = async (root) => watchListPage(root, state.param, state.sub);
 /* `#performance` is the latest complete period; `#performance/<YYYY-MM-DD>` is
    the period starting that day, so a reader can send somebody the exact week
    they are looking at rather than "the one that was showing". */
