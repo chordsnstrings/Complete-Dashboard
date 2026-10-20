@@ -3055,13 +3055,23 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
 /* PRINT: the controls and watch-list forms gone, the grid at full width.
    The landscape A4 itself is a <style> the page adds only while it is open
    (./lowperf.js landscape()), so no other page's print changes. */
+/* The print rule's type and padding, on screen for the one moment
+   ./lowperf.js fitGrids() measures the grid before a print; keep the two in step. */
+.lp-measure .lp-grid{font-size:var(--t1);width:max-content}
+.lp-measure .lp-grid th,.lp-measure .lp-grid td{padding:1px 2px}
+.lp-measure .lp-grid .lp-who{position:static;max-width:20ch}
+.lp-measure .lp-grid thead .lp-who{white-space:normal;text-overflow:clip}
 @media print{
+  .lp-grid{zoom:var(--lp-fit,1)}
   .lp-page .lp-t .lp-meta{white-space:normal}
   .lp-noprint,.lp-page .lp-ctl{display:none !important}
   .lp-page .lp-gridwrap,.lp-page .tablewrap{overflow:visible}
   .lp-grid{font-size:var(--t1)}
   .lp-grid th,.lp-grid td{padding:1px 2px}
   .lp-grid .lp-who{position:static;max-width:20ch}
+  /* "Asked of each, AED" names the unit the cells print bare; cut to 20ch
+     it read "ASKED OF EACH, A…". Wrapped, never cut. */
+  .lp-grid thead .lp-who{white-space:normal;text-overflow:clip}
   .lp-t{font-size:var(--t2)}
   .lp-t .lp-read{max-width:none}
   .lp-page .panel{break-inside:auto}

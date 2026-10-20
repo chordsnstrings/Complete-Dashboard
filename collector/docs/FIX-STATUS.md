@@ -4966,3 +4966,13 @@ patterns — on the page, in Excel and in the printout.
 | LPG7 | Excel: both averages and the reference rows on both grid sheets; sixteen more columns on Below target; new sheets Day detail (a row a driver a day), Why below target, Weekdays, Hours; the watch list's file gains Day detail | yes | — | `lowperf` §5 and §8 read the files back |
 | LPG8 | Access: every new field classed on the manifest — times, hours on jobs, km, trips and bookings, platforms, hours by hour BK; abandoned, declined and Uber online COND; the day's car VEH; averages, AED an hour and weekday shares EARN; the medians and causes as the measure they are | yes | — | `rows[].days[].first` left off the manifest → 1 fails |
 | LPG9 | Phone: the count of each cause at the top; per person both averages a day and their causes in words | yes | — | rendered |
+| LPG10 | The grid's fares to the fils (ruling 2): the day cells, both row averages, the rows under the head and the key, by `fils()` — the figure alone, because the row ("Asked of each, AED") or the switch names the currency. The opened driver, the phone and Excel already printed the fils; only the grid rounded to whole dirhams (2026-10-20) | yes | — | `arkiv_fils` on `e542bdb`: "AED 457 457 457…" → 1 fails, alone and in the full run; `lowperf` §8 now asks for `106.67` (2,240 ÷ 21) where it asked for `107` → the rounded grid fails 1 |
+| LPG11 | The printed grid fits a landscape A4, however many days: `fitGrids()` measures it before a print under the print rule's own type and padding (`.lp-measure`), at its own width, and sets `--lp-fit`, which only `@media print` reads as `zoom`. On a real PDF of the mock: 19 days at 0.872 (1,206 px on 1,054), all of September at 0.593 — whole dirhams had fitted 19 days to the pixel and cut a 31-day month's averages off the right edge. The head's row labels wrap in print instead of being cut to "ASKED OF EACH, A…" (2026-10-20) | yes | — | `lowperf` §7: the zoom left out of the print rule → 1 fails; the head labels left to be cut → 1 fails |
+
+`arkiv_people` "#low: the grid has a row per person and a cell per day" read
+21 cells a row against 19 days on `e542bdb` (`[39,19]`): the two averages
+LPG1 adds are cells too. It now counts the days and the averages apart and
+asks for both — a row without its averages fails it. Both LPG failures were
+found by a full suite the 2026-10-19 session started and never read (the
+wrapper exited 0; the container was replaced before anyone looked) — see
+`docs/HANDOFF.md`.

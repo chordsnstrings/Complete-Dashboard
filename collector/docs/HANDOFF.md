@@ -24,9 +24,9 @@ stale document.
 | # | what | why now | who |
 |---|---|---|---|
 | 0.1 | **Both Bolt portal refresh tokens expire 2026-10-20 09:18:15Z (Ecosine) and 09:19:57Z (Egari)** — 13:18 / 13:20 Dubai. | After that Bolt trips and fares stop for both fleets until new tokens are pasted. They last exactly 7 days and cannot be extended. | **Operator only** — standing rule: never sign in to the Bolt portal interactively. Capture one fleet, paste it in Settings, then check the *other* fleet's token still works before capturing it. That also settles COVERAGE's open question of whether one owner's sign-in kills the other's (the two were minted 102 s apart on 10-13 and both survived the week, which suggests not). Re-check expiry with `GET /api/settings` (expiry fields only; never print a value). |
-| 0.2 | **LPG1–9 ("Low performers, more granular", `e542bdb`) is committed and pushed but NOT deployed, and must not be deployed as it stands.** | A full suite run here on `e542bdb` ends `384 files, 14143 assertions, 4 file(s) failing`. Two failures are new and caused by LPG (§4.1). The previous session never read its own suite result: the wrapper exited 0 and the container died before anyone looked. | Next session: fix both, prove each by revert, re-run `arkiv_fils`, `arkiv_people`, `lowperf`, then deploy and check every LPG row on production, including the page's load time (the last thing promised to the operator). |
+| 0.2 | **LPG ("Low performers, more granular") is fixed and committed on `claude/practical-galileo-p92zg8` (LPG10–11), but NOT deployed.** | `e542bdb` failed two suites. The 2026-10-20 fix: the grid prints its fares to the fils, the people-grid test counts the days and the two averages apart, and the printed grid now fits a landscape A4 at any period length. FIX-STATUS LPG10–11 and AUDIT.md hold the proof. The previous session never read its own suite result. | Deploy (§0.3, §0.4), then check every LPG row on production, including the page's load time (the last thing promised to the operator). |
 | 0.3 | **The deploy path is gone.** | Every deploy went through `$S/ulm/deploy_cabman_egari.py --build` and a token file `$S/do_token`, both in the old session's scratchpad. That container was replaced on 2026-10-19 15:25Z and the scratchpad went with it. This environment has no DigitalOcean variable, no `doctl`, and the repo has no deploy script and no app spec. Nothing deploys on push (production is still on `86d0f5e`, two commits behind). | Operator: supply the DO API token and the app id again, **outside the repo**. Then: `POST https://api.digitalocean.com/v2/apps/$APP_ID/deployments` with `{"force_build":true}`, poll **the deployment id that call returned** until `phase` is `ACTIVE`, then read `services[].source_commit_hash` and compare it with the branch (COVERAGE trap 25: an app-spec update redeploys the last *built* commit, not the branch head). |
-| 0.4 | **Production builds from `claude/ecosine-egari-tracking-apis-rf9ong`, and that branch's head is `e542bdb` — the commit with the two failures.** | Any forced build today ships LPG with its failures. | Push the LPG fix before the first deploy, or deploy a known-good commit on purpose. |
+| 0.4 | **Production builds from `claude/ecosine-egari-tracking-apis-rf9ong`. That branch's head is still `e542bdb`, the commit with the two failures; the fix is on `claude/practical-galileo-p92zg8` (PR #4).** | A forced build of the production branch as it stands ships LPG without the fix. | Merge PR #4 into the production branch first. It is a fast-forward, docs plus the LPG fix. Then force-build. |
 | 0.5 | **The operator has an unanswered question from 2026-10-19 14:29Z** (garage history, §5). | They asked for the garage audit, plan and build to come straight after LPG. The session asked how the existing garage history should reach production and got no answer, because the session died. | Ask again, in the same terms (§5). |
 
 ---
@@ -111,17 +111,16 @@ export (`/api/export/lowperf.xlsx`) now cover the same ground.
 
 ### 4.1 In flight (the previous session stopped mid-way)
 
-- **LPG suite failures on `e542bdb`.**
-  - `arkiv_fils.test.mjs`: "#low-performers: every AED amount carries its
-    fils". The new reference rows ("A DAY DRIVEN ASKED OF EACH, AED 457 …",
-    "THEIR AVERAGE", "EVERYONE ELSE") print whole dirhams. That breaks
-    operator ruling 2: money to the fils everywhere.
-  - `arkiv_people.test.mjs`: "#low: the grid has a row per person and a cell
-    per day of the period", got `[39,19]`. The added reference and average
-    rows break the grid-shape check. This file was 241/241 on `6cd7d7b`.
-  - Decide whether those rows belong in `thead`/`tfoot` (the likely right
-    answer, since they are not people) or whether the test's expectation
-    should change. Then prove the fix by revert.
+- **LPG suite failures on `e542bdb`: fixed 2026-10-20, not deployed.**
+  - `arkiv_fils` read "AED 457 457 …" off the head's rows. The grid rounded
+    every fares figure to whole dirhams, against ruling 2. It now prints them
+    with `fils()` (LPG10).
+  - `arkiv_people` read `[39,19]`: 21 cells a row against 19 days. The two
+    averages are cells too, so the check now counts days and averages apart.
+  - Printing: with the fils, the 19-day grid ran 150 px past a landscape A4,
+    and a 31-day month had overflowed even before. It now zooms to fit, print
+    only (LPG11).
+  - Each fix was proven by revert.
 - **Then deploy LPG and prove it.** Prove every LPG row on production: both
   averages side by side, grid upgrades, the day-by-day detail, "why below
   target", weekday and hour patterns, all on the page, in Excel and in print.
