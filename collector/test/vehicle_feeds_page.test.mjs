@@ -222,7 +222,7 @@ check('a working pad: the seat occupied during 40 of 40 bookings, with the kilom
 check('a pad reading nobody says so in the route’s words', /never read occupied during any of 40 bookings — the pad is not reporting passengers/i.test(rowOf('Q10002')),
   rowOf('Q10002'));
 check('a silent unit names its last reading and the bookings the car did without it',
-  /not receiving/i.test(rowOf('Q10006')) && /last reading/.test(rowOf('Q10006')) && /while the car completed 5 bookings since its last reading/.test(rowOf('Q10006')),
+  /not receiving/i.test(rowOf('Q10006')) && /last reading/.test(rowOf('Q10006')) && /while the car completed 5 bookings in the last 7 days/.test(rowOf('Q10006')),
   rowOf('Q10006'));
 check('a unit that never moved says "did not move", not a distance', /did not move/.test(rowOf('Q20001')), rowOf('Q20001'));
 check('under the table: the plates CABMAN stopped listing, counted, and whether any was ours',
@@ -231,7 +231,8 @@ check('under the table: the plates CABMAN stopped listing, counted, and whether 
 check('and the rules it judges by: movement on CABMAN’s own readings, the trip flag no second witness, the booking span, the thresholds',
   /Movement: CABMAN’s own readings that carry a position, never another tracker’s/.test(cab.text) && /Engaged, is the same pad’s state/.test(cab.text)
   && /2 minutes before the booking was requested — never before the previous booking’s drop-off — to 2 minutes after drop-off/.test(cab.text)
-  && /working at 80% or more/.test(cab.text) && /2 km and 10 minutes or more/.test(cab.text) && /A day is 24 hours counted back from now/.test(cab.text),
+  && /working at 80% or more/.test(cab.text) && /2 km and 10 minutes or more/.test(cab.text) && /covering 70% of it/.test(cab.text)
+  && /closing time is not a drop-off, so it runs from its start for about 2 minutes a km/.test(cab.text) && /A day is 24 hours counted back from now/.test(cab.text),
   cab.text.slice(-900));
 check('a unit that said nothing through its bookings is a red verdict of its own, not "nothing to check against"',
   chipOf('Q10009').includes('not reporting during bookings') && /4 bookings in 7 days and no seat reading fell inside any of them/.test(rowOf('Q10009')),

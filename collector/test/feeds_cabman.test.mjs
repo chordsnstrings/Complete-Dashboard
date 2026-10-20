@@ -25,7 +25,8 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
-import { CAB_DAYS, CAB_GAP_MIN, CAB_HOP_KM, cabmanSeat } from '../api/feed_routes.js';
+import { CAB_DAYS, CAB_GAP_MIN, CAB_HOP_KM, cabmanSeat, hotelEndMs } from '../api/feed_routes.js';
+import { bookingWindow } from '../src/reconcile.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -158,7 +159,7 @@ check('B: never during any of its 4 bookings, and its one occupied reading named
   JSON.stringify([by.QB0001.verdict_text, by.QB0001.notes]));
 check('C: "only 2 of 5"', by.QC0001.verdict_text === 'the seat read occupied during only 2 of 5 bookings' && by.QC0001.bookings.seat_pct === 40,
   by.QC0001.verdict_text);
-check('D: the unit may be in, or filed under, another car', /standing still through 3 of 3 bookings of 2 km or more — the unit may be fitted to, or filed under, another car/.test(by.QD0001.verdict_text),
+check('D: the unit may be in, or filed under, another car', /standing still through 3 of the 3 bookings long enough to measure — the unit may be fitted to, or filed under, another car/.test(by.QD0001.verdict_text),
   by.QD0001.verdict_text);
 check('E: silent — and the car worked while it was: two bookings since its last reading', /no CABMAN reading in the last 24 hours — the unit is silent, while the car completed 2 bookings since its last reading/.test(by.QE0001.verdict_text)
   && by.QE0001.receiving === false, by.QE0001.verdict_text);
@@ -241,8 +242,8 @@ const B = (plate, from, to, km = 6, platform = 'uber') => ({ plate, platform, re
   const fx = []; const bk = [];
   for (const h of [9, 6, 3]) { for (let k = 0; k <= 4; k++) fx.push({ ...F('QL0001', h * 60 - k * 5, 25.2, null), speed: 0 }); bk.push(B('QL0001', h * 60, h * 60 - 20)); }
   const r = run(fx, bk).rows[0];
-  check('3. standing still "through 3 of 3 bookings of 2 km or more" — the denominator is the bookings measured',
-    r.verdict === 'elsewhere' && /standing still through 3 of 3 bookings of 2 km or more/.test(r.verdict_text) && r.bookings.still_checked === 3,
+  check('3. standing still "through 3 of the 3 bookings long enough to measure" — the denominator is the bookings measured',
+    r.verdict === 'elsewhere' && /standing still through 3 of the 3 bookings long enough to measure/.test(r.verdict_text) && r.bookings.still_checked === 3,
     r.verdict_text);
 }
 {
@@ -320,6 +321,73 @@ const B = (plate, from, to, km = 6, platform = 'uber') => ({ plate, platform, re
   const r = run([F('QU0001', 30, 25.2), F('QU0001', 25, 25.21)], [B('QU0001', 32, 24)]).rows[0];
   check('11. "only 1 booking with a seat reading inside — too few to judge the pad"',
     r.verdict === 'few' && r.verdict_text === 'only 1 booking with a seat reading inside — too few to judge the pad', r.verdict_text);
+}
+
+/* ── 9. what the second review found (in the fixes for the first) ──────── */
+console.log('\n9. the second review of 2026-10-20');
+{
+  /* N1. A unit last heard from long before the window: the bookings counted
+     are the window's, so the sentence says the window — never "since its last
+     reading", which for a unit silent since 2024 is a far larger number. */
+  const bk = [2, 3, 4].map((dd) => B('QW0001', dd * 1440, dd * 1440 - 20, 6, 'hotel'));
+  const last = [{ plate: 'QW0001', captured_at: at(60 * 24 * 200), status: 'Active', speed: 0 }];
+  const r = run([], bk, { last }).rows[0];
+  check('N1. silent since long before the window: "3 bookings in the last 7 days", not "since its last reading"',
+    /while the car completed 3 bookings in the last 7 days/.test(r.verdict_text) && !/since its last reading/.test(r.verdict_text), r.verdict_text);
+}
+{
+  /* N2. A hotel booking that "closed" 55 hours after it began must not empty
+     the spans of the Uber rides after it: a hotel booking runs for the
+     reconciler's distance estimate, not to its close. */
+  const fx = []; const bk = [B('QX1001', 60 * 50, -60 * 5, 10, 'hotel')];   // began 50 h ago, "closed" 55 h later
+  for (const h of [40, 30, 20, 10]) { for (let k = 0; k <= 4; k++) fx.push(F('QX1001', h * 60 - k * 5, 25.2 + k * 0.01, true)); bk.push(B('QX1001', h * 60, h * 60 - 20)); }
+  const r = run(fx, bk).rows[0];
+  check('N2. a hotel booking closed 55 hours on does not swallow the four Uber rides after it: occupied during 4 of 4',
+    r.bookings.read === 4 && r.bookings.seat_seen === 4 && r.verdict === 'ok', JSON.stringify([r.verdict, r.bookings]));
+  check('N2. the hotel estimate is the reconciler’s own (src/reconcile.js bookingWindow)',
+    [0, 4.42, 13.41, 42.46, 200].every((km) => {
+      const t0 = Date.parse('2026-10-16T04:29:00Z');
+      const [, end] = bookingWindow({ requested_at: new Date(t0).toISOString(), distance_km: km || null });
+      return hotelEndMs(t0, km || null) === end;
+    }));
+}
+{
+  /* N3. Three readings at the pickup and none after: not a car standing still. */
+  const fx = []; const bk = [];
+  for (const h of [9, 6, 3]) {
+    for (const m of [-1, 4, 9]) fx.push({ ...F('QY0001', h * 60 - m, 25.2), speed: 0 });
+    fx.push(F('QY0001', h * 60 - 45, 25.4));
+    bk.push(B('QY0001', h * 60, h * 60 - 35, 17));
+  }
+  const r = run(fx, bk).rows[0];
+  check('N3. readings only at the pickup are not "standing still through the booking"', r.verdict !== 'elsewhere' && r.bookings.still_checked === 0,
+    JSON.stringify([r.verdict, r.bookings]));
+}
+{
+  /* N5. Readings inside the bookings, none with a seat value, seat values only
+     outside: the unit WAS reporting — its readings carry no seat value. */
+  const fx = []; const bk = [];
+  for (const h of [9, 6, 3]) { for (let k = 0; k <= 4; k++) fx.push(F('QZ0001', h * 60 - k * 5, 25.2 + k * 0.01, null)); bk.push(B('QZ0001', h * 60, h * 60 - 20)); }
+  fx.push(F('QZ0001', 30, 25.5, false), F('QZ0001', 25, 25.51, false));
+  const r = run(fx, bk).rows[0];
+  check('N5. "its readings inside them carry no seat value", not "the unit is not reporting"',
+    r.verdict === 'unreported' && /its readings inside them carry no seat value/.test(r.verdict_text), r.verdict_text);
+}
+{
+  /* N6. The last passenger, still read a minute after drop-off, is not the
+     next booking's: the span opens after the previous span closes. */
+  const fx = [F('QA1001', 58, 25.2), F('QA1001', 53, 25.21), F('QA1001', 48, 25.22), F('QA1001', 43, 25.23),
+    F('QA1001', 39, 25.24, true), F('QA1001', 35, 25.25, false), F('QA1001', 30, 25.26, false), F('QA1001', 25, 25.27, false)];
+  const r = run(fx, [B('QA1001', 60, 40), B('QA1001', 45, 22)]).rows[0];
+  check('N6. a reading in the previous ride’s pad is not this ride’s passenger: occupied during 1 of 2', r.bookings.seat_seen === 1 && r.bookings.read === 2,
+    JSON.stringify(r.bookings));
+}
+{
+  /* N8. A roster of only not-yet-admitted plates is not a list to stand on. */
+  const out = run([F('QB1001', 60, 25.2), F('QB1001', 55, 25.21)], [], {
+    rosters: [{ fleet_id: 'ecosine', value: JSON.stringify({ plates: { QB1001: { admitted: false, departed: false } } }) }] });
+  check('N8. only pending plates: the readings stand in, and the answer says so', out.roster.known === false && out.rows.length === 1
+    && /holds no admitted car yet/.test(out.roster.basis_reason || ''), JSON.stringify(out.roster));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

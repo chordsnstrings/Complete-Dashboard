@@ -5025,6 +5025,29 @@ moving with the car (L45243, 13 of 36), 6 pads reading nobody, 3 missing
 passengers, 1 too few, 5 with nothing to check, and 16 working. The seat was
 occupied during 512 of 752 bookings with a seat reading inside.
 
+**The second review (2026-10-20), of the fixes above,** confirmed nine of
+the eleven closed and found new defects. Two of them were on production with
+deployment `9cf3fe85` (`bb96140`). All are fixed, each with a case in
+`feeds_cabman` §9 that fails when its fix is reverted (45/0; six mutations,
+six caught):
+
+| # | defect | fixed by |
+|---|---|---|
+| N1 | "while the car completed 62 bookings **since its last reading**" for a unit last heard from on 2025-12-07. The count is the window's. **Seen on production:** L45240, L45232, L76099 | "since its last reading" only when that reading is inside the window, otherwise "in the last 7 days" |
+| N2 | the span clip used the hotel `ended_at`, which is a booking close. One L27976 booking "ended" 55 h after it began and emptied the spans of every ride after it | a hotel booking runs for the reconciler's distance estimate (`bookingWindow`: about 2 min a km, at most 3 h); a test holds the two equal |
+| N3 | readings only at the pickup read "standing still … another car" | the measured steps must cover 70% of the booking |
+| N4 | "3 of 3 bookings of 2 km or more" named the wrong set | "of the 3 bookings long enough to measure" |
+| N5 | "the unit is not reporting" when its readings carried no seat value | names which of the two it was |
+| N6 | the last passenger, read in the previous ride's 2-minute pad, was counted as this booking's | the span opens after the previous SPAN closes |
+| N7 | a plate on two rosters could change fleet between requests | the roster query is ordered |
+| N8 | a roster of only not-yet-admitted plates showed an empty table | the readings stand in, as with no roster |
+
+On the production week after these fixes: 14 silent, 1 not moving with the
+car (L45243, 12 of 31), 6 reading nobody, 6 missing passengers, 1 too few,
+5 with nothing to check and 13 working. The hotel cars moved, because their
+spans now follow the distance: L46706 to 24 of 31, L47118 to 8 of 12,
+L63970 to 6 of 12.
+
 The classic skin's frozen `#feeds` moved, because the table is in both
 skins. Removing exactly the new panel (10,961 characters) and its
 source-line row from the new rendering hashes back to the recorded
