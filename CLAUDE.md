@@ -15,6 +15,7 @@ A finding nobody can look up later is a finding that gets found again.
 
 | file | what it answers |
 |---|---|
+| `collector/docs/HANDOFF.md` | **Start here.** Where everything stands as of the last handoff: what is live vs. HEAD, what was left mid-way, what waits on the operator, and which lines of the notes below are stale. Reconciled against code, git and production. Keep it current: strike a row in the same commit that finishes it. |
 | `collector/docs/COVERAGE.md` | What we actually hold per provider, measured — coverage by month, what each provider does **not** give us, credential shapes and lifetimes, when each collector runs, and a **"Traps that have cost time more than once"** section. **Read the traps section first.** |
 | `collector/docs/AUDIT.md` | Every view at every width: what each rendering pass found and what was done. How to reproduce a pass. |
 | `collector/docs/FIX-STATUS.md` | What is written vs. what is on production vs. what is *proven*, per fix. "Fixed" is four different states here. |
@@ -33,7 +34,7 @@ collector/
   api/           server.js (read API) + public/ (the front end, plain ESM)
   api/public/    one file per view; ui.js = shared components; charts.js = SVG
   sql/           schema_vNN.sql, replayed in order on every boot
-  test/          376 .test.mjs files, run with `npm test`
+  test/          384 .test.mjs files, run with `npm test`
   bin/           audit + local-serving tools
   docs/          the standing notes above
 ```
@@ -94,7 +95,7 @@ modal filled. The production API caches — always append `&_=$RANDOM`.
 
 ```bash
 cd collector
-npm test                        # all 376 suites; ONE run at a time (see traps)
+npm test                        # all 384 suites; ONE run at a time (see traps)
 node bin/live-ui.mjs            # :8100 — working-tree UI against production data
 node bin/prod-mirror.mjs        # :8200 — production bytes, exactly as deployed
 npm run audit:pages             # every endpoint behind every view, five windows
@@ -110,6 +111,14 @@ https://api.digitalocean.com/v2/apps/$APP_ID/deployments`, then poll the
 deployment's `phase` until `ACTIVE`. The app id and token are held outside the
 repo. Both services are `basic-xxs` with ephemeral disk — nothing may be
 written to local disk and expected to survive.
+
+Production builds from `claude/ecosine-egari-tracking-apis-rf9ong`; nothing
+deploys on push. Send `{"force_build":true}` and poll the deployment id that
+POST returned — an app-spec update redeploys the last *built* commit
+(COVERAGE trap 25). The deploy script and token file used to live in a
+session scratchpad and were lost with that container on 2026-10-19: a
+scratchpad is not storage. `/api/health` carries no sha; HANDOFF.md §9 shows
+how to tell which commit is live from `sw.js`.
 
 ## Working style here
 
