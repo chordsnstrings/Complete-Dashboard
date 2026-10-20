@@ -2742,3 +2742,25 @@ week with one car per verdict, on Arkiv at 1440 and 390 wide and Classic at
 
 To repeat: `PORT=8099 node mockapi.mjs`, then `#feeds` at 1440 and 390 in
 both skins (`?skin=classic`), screenshot `[data-panel="feeds-cabman"]`.
+
+### On production — 2026-10-20, `6368228` (deployment `32850f02`)
+
+Rendered through bin/prod-mirror.mjs, which serves production's own bytes and
+was checked to serve `fleet-936fdefe51ad`, the shell hash of `6368228`:
+
+- **What rendered:** `#feeds` in Arkiv and Classic at 1440 and Arkiv at 390,
+  and `#low-performers` in the same three. No page error, no API response
+  of 400 or more, no sideways scroll on any of them.
+- **The CABMAN table:** 52 rows, 18 silent units first among the working
+  cars. The verdict sentences are the corrected ones ("62 bookings in the
+  last 7 days" for L45240, whose unit went quiet on 2025-12-07).
+- **The Low performers grid:** prints fils; the print fit is 0.781 for 20
+  days; a driver's detail opens.
+- **Found on production and fixed in between:**
+  - The "since its last reading" sentence (`bb96140`).
+  - Hotel pickups read "not moving with the car" (L27976). The car was
+    waiting at the terminal (`b2c1a56`).
+
+  Both are in FIX-STATUS CST (N1, N2b).
+- **First-paint times through the mirror:** `#feeds` 3.7–13 s, and
+  `#low-performers` 3.3–10.7 s. The time is spent in `/api/lowperf`.

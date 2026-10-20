@@ -24,9 +24,9 @@ stale document.
 | # | what | why now | who |
 |---|---|---|---|
 | 0.1 | **Both Bolt portal refresh tokens expire 2026-10-20 09:18:15Z (Ecosine) and 09:19:57Z (Egari)** — 13:18 / 13:20 Dubai. | After that Bolt trips and fares stop for both fleets until new tokens are pasted. They last exactly 7 days and cannot be extended. | **Operator only** — standing rule: never sign in to the Bolt portal interactively. Capture one fleet, paste it in Settings, then check the *other* fleet's token still works before capturing it. That also settles COVERAGE's open question of whether one owner's sign-in kills the other's (the two were minted 102 s apart on 10-13 and both survived the week, which suggests not). Re-check expiry with `GET /api/settings` (expiry fields only; never print a value). |
-| 0.2 | **LPG ("Low performers, more granular") is fixed and committed on `claude/practical-galileo-p92zg8` (LPG10–11), but NOT deployed.** | `e542bdb` failed two suites. The 2026-10-20 fix: the grid prints its fares to the fils, the people-grid test counts the days and the two averages apart, and the printed grid now fits a landscape A4 at any period length. FIX-STATUS LPG10–11 and AUDIT.md hold the proof. The previous session never read its own suite result. | Deploy (§0.3, §0.4), then check every LPG row on production, including the page's load time (the last thing promised to the operator). |
-| 0.3 | **The deploy path is gone.** The old deploy script and token file lived in the 2026-10-19 session's scratchpad, which went with its container. | Checked through the DigitalOcean API on 2026-10-20: the `fleet-dashboard` app builds two components, the `api` service and the `collector` worker, both `basic-xxs`, from `claude/ecosine-egari-tracking-apis-rf9ong`. **`deploy_on_push` is off on both.** Every deployment in its history is `manual`, so `e542bdb` was never built: nobody triggered one. The operator's other apps do deploy on push; this one does not. | The operator gave a token for the 2026-10-20 session. It is not stored anywhere that survives, so the next deploy needs one again, kept outside the repo. Then `POST /v2/apps/$APP_ID/deployments` with `{"force_build":true}`, poll **the deployment id that call returned** until `ACTIVE`, and compare `services[].source_commit_hash` with the branch (COVERAGE trap 25). |
-| 0.4 | **Production builds from `claude/ecosine-egari-tracking-apis-rf9ong`. That branch's head is still `e542bdb`, the commit with the two failures; the fix is on `claude/practical-galileo-p92zg8` (PR #4).** | A forced build of the production branch as it stands ships LPG without the fix. | Merge PR #4 into the production branch first. It is a fast-forward, docs plus the LPG fix. Then force-build. |
+| 0.2 | ~~LPG not deployed~~ **Done 2026-10-20:** LPG1–11 are on production and proven (FIX-STATUS LPG, deployment `9cf3fe85`). | — | What is still open is the page's speed: `/api/lowperf` takes 6.5–10.5 s on the page's own URL, against about 4 s before LPG. |
+| 0.3 | **Deploying needs a DigitalOcean token, and none is stored.** The operator pasted one into the 2026-10-20 session; it lived only in that session's scratchpad. | Checked through the API: the `fleet-dashboard` app builds two components, the `api` service and the `collector` worker (both `basic-xxs`), from `claude/ecosine-egari-tracking-apis-rf9ong`. **`deploy_on_push` is off on both, so nothing deploys on a merge.** | Get a token from the operator for each deploying session, kept outside the repo; suggest they revoke tokens pasted into chat. Then `POST /v2/apps/$APP_ID/deployments` with `{"force_build":true}`, poll that deployment id to `ACTIVE`, and compare `services[].source_commit_hash` and the `sw.js` fingerprint (§9) with the branch. |
+| 0.4 | Production is at `6368228` (deployment `32850f02`, 2026-10-20): PRs #4, #5 and #6 merged and force-built. | — | Merge work into the production branch through a PR, then force-build (§0.3). |
 | 0.5 | **The operator has an unanswered question from 2026-10-19 14:29Z** (garage history, §5). | They asked for the garage audit, plan and build to come straight after LPG. The session asked how the existing garage history should reach production and got no answer, because the session died. | Ask again, in the same terms (§5). |
 
 ---
@@ -36,7 +36,7 @@ stale document.
 | | where it is |
 |---|---|
 | HEAD | `e542bdb` (2026-10-19 14:26Z). `claude/ulm-access-control`, `claude/ecosine-egari-tracking-apis-rf9ong` and `claude/practical-galileo-p92zg8` all point at it. Working tree clean. 1,180 commits since 2026-08-21. |
-| Production | `86d0f5e` (deployment `c602a386`, 2026-10-19). Only `eb90aa8` (docs) and `e542bdb` (LPG) are on HEAD and not on production. **Everything earlier on the branch is deployed**, whatever older FIX-STATUS rows say (§7). |
+| Production | `6368228` (deployment `32850f02`, 2026-10-20 07:01Z): everything through the CABMAN table is live. `sw.js` serves `fleet-936fdefe51ad`. Before that it was `86d0f5e` (deployment `c602a386`, 2026-10-19). |
 | How to tell which commit is live | Production does not expose a sha (`/api/health` is `{ok, migrating}`). It does stamp `sw.js` with `VERSION = 'fleet-<first 12 hex of sha256 over api/public>'` (`api/server.js` `shellHash`). Recompute that for a commit with the recipe in §9 and compare. `86d0f5e` → `fleet-c8696f07a063`, which is what production served on 2026-10-20; `e542bdb` → `fleet-0a44fa83522e`. **Limit:** this only sees the front end. A deploy that changes only server code leaves the hash alone, so for API changes check a field the new code adds (LPG adds `avg_active`, `causes`, `weekdays` to `/api/lowperf` rows). |
 | Collectors | Running (`/api/status`: incremental 04:01Z, CABMAN 04:15Z on 10-20). |
 | Access control (ULM) | Built and deployed (`a1429529`, 2026-09-28) but in **open** mode. `/api/auth/me` → `mode: "open"`. Anonymous readers get every page (§6.1). |
@@ -111,20 +111,9 @@ export (`/api/export/lowperf.xlsx`) now cover the same ground.
 
 ### 4.1 In flight (the previous session stopped mid-way)
 
-- **LPG suite failures on `e542bdb`: fixed 2026-10-20, not deployed.**
-  - `arkiv_fils` read "AED 457 457 …" off the head's rows. The grid rounded
-    every fares figure to whole dirhams, against ruling 2. It now prints them
-    with `fils()` (LPG10).
-  - `arkiv_people` read `[39,19]`: 21 cells a row against 19 days. The two
-    averages are cells too, so the check now counts days and averages apart.
-  - Printing: with the fils, the 19-day grid ran 150 px past a landscape A4,
-    and a 31-day month had overflowed even before. It now zooms to fit, print
-    only (LPG11).
-  - Each fix was proven by revert.
-- **Then deploy LPG and prove it.** Prove every LPG row on production: both
-  averages side by side, grid upgrades, the day-by-day detail, "why below
-  target", weekday and hour patterns, all on the page, in Excel and in print.
-  Also time the page's load, which was promised to the operator.
+- **LPG: fixed, deployed and proven, 2026-10-20** (FIX-STATUS LPG, and the
+  "Deployed and proven" paragraph under CST). Still open is the page's
+  speed: 6.5–10.5 s for `/api/lowperf`.
 - **Watch lists** (LP-5) are deployed (`schema_v109`) but have never been used.
   `/api/lowperf/watch` → `{lists: []}`. Saving needs a signed-in Owner or
   Operations manager, and nobody signs in (§6.1). The 14-Oct list was never
@@ -143,14 +132,19 @@ export (`/api/export/lowperf.xlsx`) now cover the same ground.
   The operator said "go" on 10-14 08:19 and asked again on 10-19. What blocks
   it is the history-load question (§5).
 
-- **The CABMAN table on `#feeds` (CST1–7, 2026-10-20): written and tested,
-  not deployed.** It ships with the next build of the production branch.
-  Prove it on production then: the 46 cars, the verdict counts against
-  COVERAGE's 14/1/6/3/1/5/16, and screenshots at 1440 and 390 in both
-  skins. The pads it names for a physical check are L44295, L44259,
-  L45227, L64998, L27976 and L44286 (reading nobody); L77059, L12615 and
-  L76092 (missing most); L76099 (unit silent since 2024-04-16 on a working
-  car); and L45243 (unit not moving with the car).
+- **The CABMAN table on `#feeds` (CST, 2026-10-20): deployed and proven.**
+  Two independent reviews found 11 and then 9 defects; all were fixed
+  (FIX-STATUS CST R1–R11, N1–N8, N2b). What remains is for the operator:
+  - **Pads to check physically** (production, 14–20 Oct):
+    - reading nobody: L44295, L44259, L45235, L45227, L44286, L27976,
+      L64998;
+    - missing most passengers: L77059, L12615, L47118, L76092, L46706.
+  - **Units silent on working cars:** L44289, L45240, L45232 and L76099.
+  - **A unit not moving with its car:** L45243, the dual-tracker car.
+  - **Judgement rules are mine, not the operator's:** the pad works at 80%
+    or more of bookings; standing still is under 0.5 km on bookings of
+    10 minutes or more; hotel bookings are judged generously. The
+    operator may want different lines.
 
 ### 4.2 Deployed but not proven on production
 
