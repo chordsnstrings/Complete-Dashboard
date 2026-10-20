@@ -12,9 +12,10 @@
 --                                       push is retried on the next pass. NULL
 --                                       severity = never told (a new row).
 --   seen_severity/seen_state/seen_since what the banner has said, unchanged,
---                                       since when. A change is sent only once it
---                                       has held for two passes: a refusal fixed
---                                       by the next run is never a buzz.
+--                                       since when. A change is sent only once a
+--                                       later run (or re-check) still says it: a
+--                                       refusal fixed by the next run is never a
+--                                       buzz (api/alerts.js).
 CREATE TABLE IF NOT EXISTS alert_state (
   key            TEXT PRIMARY KEY,
   severity       TEXT,
@@ -25,3 +26,12 @@ CREATE TABLE IF NOT EXISTS alert_state (
   seen_state     TEXT,
   seen_since     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Converge a table made by the first shape of this file (b413c9c — never on
+-- production, but pushed): the ledger re-runs an edited file, and CREATE
+-- TABLE IF NOT EXISTS alone would leave the old columns in place.
+ALTER TABLE alert_state ALTER COLUMN severity DROP NOT NULL;
+ALTER TABLE alert_state ALTER COLUMN notified_at DROP NOT NULL;
+ALTER TABLE alert_state ADD COLUMN IF NOT EXISTS seen_severity TEXT;
+ALTER TABLE alert_state ADD COLUMN IF NOT EXISTS seen_state TEXT;
+ALTER TABLE alert_state ADD COLUMN IF NOT EXISTS seen_since TIMESTAMPTZ NOT NULL DEFAULT now();

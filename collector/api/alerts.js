@@ -29,11 +29,20 @@
    has said since when. So:
      - a restart or a deploy re-announces nothing;
      - a push that failed is simply tried again on the next pass;
-     - A BLIP IS NOT NEWS. A changed verdict is sent only once it has held for
-       two passes (CONFIRM_MS). One refused CABMAN login, fixed by the run
-       after it, would otherwise be a "Stopped" and a "Working again" for
-       nothing — and an alert channel that cries wolf is muted, after which it
-       reports nothing at all.
+     - A BLIP IS NOT NEWS. A changed verdict is sent only once the source has
+       been OBSERVED AGAIN and still says it: a run of that source finished,
+       or the credential was re-checked, after the watcher first saw the
+       change. Passes are not observations — most sources run half-hourly, so
+       a verdict from one failed run survives every pass until the next run,
+       and "two passes" (the second version) still buzzed twice for one
+       failed Yango run (review of c2a9ccb). One refused login fixed by the
+       next run is now nothing at all — and an alert channel that cries wolf
+       is muted, after which it reports nothing.
+       Two exceptions. A pure stall (no successful run past the source's
+       limit) has no later run to wait for — the silence IS the evidence —
+       so it is confirmed by holding for two passes (CONFIRM_MS). And any
+       verdict held for an hour (HOLD_MAX_MS) is sent whatever else, so a
+       refusal followed by a dead worker is not silent forever.
      - and a row is told at most once per half hour (ALERT_GAP_MS), so a stall
        clock sitting on its limit cannot buzz on every crossing.
    Changes found in the same pass go out as ONE message: a deploy that breaks
@@ -54,8 +63,11 @@ import { get, loadSettings } from '../src/settings.js';
 import { log as defaultLog } from '../src/log.js';
 
 export const ALERT_GAP_MS = 30 * 60e3;
-/* Two passes at the five-minute cadence, less a little for timer drift. */
+/* A stall is confirmed by holding for two passes at the five-minute cadence
+   (less a little for timer drift); anything else by a later observation, or
+   by holding for an hour. */
 export const CONFIRM_MS = 9 * 60e3;
+export const HOLD_MAX_MS = 60 * 60e3;
 const RANK = { ok: 0, missing: 1, degraded: 2, 'at-risk': 3, stopped: 4 };
 const PRIORITY = { ok: 2, missing: 3, degraded: 3, 'at-risk': 4, stopped: 4 };
 const WORD = { ok: 'Working again', missing: 'Not configured', degraded: 'Degraded',
@@ -159,7 +171,7 @@ async function settings() {
  */
 export async function alertTick({
   q, publish = ntfyPublish, now = Date.now(), gapMs = ALERT_GAP_MS, confirmMs = CONFIRM_MS,
-  config = settings,
+  holdMaxMs = HOLD_MAX_MS, config = settings,
 } = {}) {
   const { topic, click } = await config();
   if (!topic) return { sent: 0, skipped: 'NTFY_TOPIC is not set' };
@@ -173,6 +185,15 @@ export async function alertTick({
   if (!rows.length) return { sent: 0, skipped: 'every row is waiting for its first test' };
   const prev = new Map((await q(`SELECT key, severity, state, notified_at, seen_severity, seen_state, seen_since
                                    FROM alert_state`)).map((r) => [r.key, r]));
+  /* The freshest finish per source and fleet, any status — the clock of
+     "observed again". The fleet's own runs, else the source's fleet-less
+     ones, as the banner's own clock reads them. */
+  const lastRun = new Map((await q(`SELECT source, coalesce(fleet_id,'*') AS fleet_id, max(finished_at) AS at
+                                      FROM collection_run GROUP BY 1, 2`).catch(() => []))
+    .map((r) => [`${r.source}|${r.fleet_id}`, r.at]));
+  const observedSince = (r, since) => [r.checked_at,
+    lastRun.get(`${r.provider}|${r.fleet_id}`) ?? lastRun.get(`${r.provider}|*`)]
+    .some((t) => t != null && Date.parse(t) > Date.parse(since));
 
   if (!prev.size) {
     const sent = await publish(firstMessage(rows, click));
@@ -211,7 +232,10 @@ export async function alertTick({
       await q('UPDATE alert_state SET severity = $2, state = $3 WHERE key = $1', [key, r.severity, r.state]);
       continue;
     }
-    if (now - Date.parse(p.seen_since) < confirmMs) continue;      // not held long enough yet
+    const held = now - Date.parse(p.seen_since);
+    const stall = r.severity === 'at-risk' && r.state === 'ok';
+    const confirmed = stall ? held >= confirmMs : (observedSince(r, p.seen_since) || held >= holdMaxMs);
+    if (!confirmed) continue;                                       // not observed again yet
     if (p.notified_at && now - Date.parse(p.notified_at) < gapMs) continue;
     changes.push({ r, from: p.severity == null ? null : p });
   }

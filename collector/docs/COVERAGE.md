@@ -10225,11 +10225,15 @@ the alert. FIX-STATUS NTFY has what is sent, at which priority, and why.
   never in the repository. Messages carry credential KEY names, fleets and the
   banner's reason ("refresh token expired …"), never a value. For a private
   channel, use a self-hosted server or a reserved topic with `NTFY_TOKEN`.
-* **Timing.** A change is pushed once the banner has said it on two passes
-  (~10 minutes), and a credential is told at most once per 30 minutes, so the
-  fastest a real stop reaches the phone is about ten minutes after the
-  collector records it. A Bolt or CABMAN refusal that the next run clears is
-  never sent.
+* **Timing.** A change is pushed once the source has been observed again and
+  still says it: a later run of that source, or a re-check of the credential.
+  So a real stop reaches the phone one run after it is recorded — about 10
+  minutes for CABMAN, about 35 for the half-hourly sources — and a refusal
+  that the next run clears is never sent. A pure stall is pushed after two
+  passes (the silence is the evidence), anything else after an hour at most,
+  and a credential is told at most once per 30 minutes. **Do not confirm by
+  watcher passes:** a half-hourly source's verdict from one failed run
+  survives every pass until its next run (found by review, 2026-10-20).
 * **One row per credential, not per surface.** `credential_state` keeps one
   row per provider|fleet|credential and overwrites `surface` on every write
   (a healthy Bolt run ends on getPayouts; an expired token is written on

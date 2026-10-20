@@ -6,7 +6,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { noteCredential } from '../src/auth_state.js';
-import { alertTick, compose, reasonOf, alertKey, ALERT_GAP_MS, CONFIRM_MS } from '../api/alerts.js';
+import { alertTick, compose, reasonOf, alertKey, ALERT_GAP_MS, CONFIRM_MS, HOLD_MAX_MS } from '../api/alerts.js';
 import { publish, clip } from '../src/ntfy.js';
 
 const db = new PGlite();
@@ -27,8 +27,19 @@ const run = (src, fleet, status, rows, h) => q(
   [src, fleet, status, rows, h]);
 const note = (o) => noteCredential(db, o);
 const advance = (ms) => { clock += ms; };
-/* A change is sent once it has held for two passes: see it, then confirm it. */
-const settle = async () => { const a = await tick(); advance(CONFIRM_MS + 60e3); const b = await tick(); return [a, b]; };
+/* A run of a source at the test's clock — "observed again". */
+const runAt = (src, fleet, status = 'ok', rows = 5, at = clock) => q(
+  `INSERT INTO collection_run (source, fleet_id, mode, status, rows_written, started_at, finished_at)
+   VALUES ($1, $2, 'incremental', $3, $4, $5, $5)`, [src, fleet, status, rows, new Date(at).toISOString()]);
+/* A change is sent once the source has been observed again and still says
+   it: see it, let a later run of the named sources land, confirm it. */
+const settle = async (...sources) => {
+  const a = await tick();
+  advance(CONFIRM_MS + 60e3);
+  for (const [src, fleet] of sources) await runAt(src, fleet, 'ok', 5, clock - 30e3);
+  const b = await tick();
+  return [a, b];
+};
 const told = async (k) => (await q('SELECT severity, state FROM alert_state WHERE key = $1', [k]))[0];
 
 console.log('off until a topic is set');
@@ -71,15 +82,15 @@ const BOLT = 'bolt|egari|BOLT_REFRESH_TOKEN_EGARI', CAB = 'cabman|ecosine|CABMAN
   check('nothing changed, nothing sent', again.sent === 0 && sent.length === 1, JSON.stringify(again));
 }
 
-console.log('\na source stops — sent once it holds for two passes');
+console.log('\na source stops — sent once a later run still says so');
 advance(ALERT_GAP_MS);
 await note({ provider: 'bolt', fleet: 'egari', credential: 'BOLT_REFRESH_TOKEN_EGARI', state: 'invalid',
   detail: 'refresh token expired 2026-10-20T09:19:57.000Z — re-capture from the portal', surface: 'orderHistory' });
 {
-  const [a, b] = await settle();
+  const [a, b] = await settle(['bolt', 'egari']);
   const m = sent.at(-1);
   check('first sighting: held', a.sent === 0, JSON.stringify(a));
-  check('still so on the next pass: one push', b.sent === 1 && b.changes === 1 && sent.length === 2, JSON.stringify(b));
+  check('the next run still refused: one push', b.sent === 1 && b.changes === 1 && sent.length === 2, JSON.stringify(b));
   check('titled with what stopped', m.title === 'Stopped: bolt · Egari (BOLT_REFRESH_TOKEN_EGARI)', m.title);
   check('carrying the reason the banner gives', /refresh token expired 2026-10-20T09:19:57/.test(m.message), m.message);
   check('high priority', m.priority === 4);
@@ -94,13 +105,13 @@ console.log('\nthe recovery and the NEXT expiry, though the surface moved (revie
      and the next week's expiry was silent. */
   advance(ALERT_GAP_MS);
   await note({ provider: 'bolt', fleet: 'egari', credential: 'BOLT_REFRESH_TOKEN_EGARI', state: 'ok', surface: 'getPayouts' });
-  const [, b] = await settle();
+  const [, b] = await settle(['bolt', 'egari']);
   check('a new token that works is "Working again", whatever surface wrote it',
     b.sent === 1 && sent.at(-1).title === 'Working again: bolt · Egari (BOLT_REFRESH_TOKEN_EGARI)', sent.at(-1).title);
   advance(ALERT_GAP_MS);
   await note({ provider: 'bolt', fleet: 'egari', credential: 'BOLT_REFRESH_TOKEN_EGARI', state: 'invalid',
     detail: 'refresh token expired 2026-10-27T09:19:57.000Z — re-capture from the portal', surface: 'orderHistory' });
-  const [, d] = await settle();
+  const [, d] = await settle(['bolt', 'egari']);
   check('…and the next expiry is sent too', d.sent === 1 && /2026-10-27/.test(sent.at(-1).message), sent.at(-1).message);
   check('one memory row per credential', (await q(`SELECT count(*)::int n FROM alert_state WHERE key LIKE 'bolt|egari|%'`))[0].n === 1
     && alertKey({ provider: 'bolt', fleet_id: 'egari', credential: 'BOLT_REFRESH_TOKEN_EGARI', surface: 'x' }) === BOLT);
@@ -112,6 +123,7 @@ await note({ provider: 'cabman', fleet: 'ecosine', credential: 'CABMAN_ECOSINE_P
 {
   await tick();
   advance(CONFIRM_MS + 60e3);
+  await runAt('cabman', null, 'error', 0, clock - 30e3);
   down = true;
   const r = await tick();
   check('ntfy down: nothing is recorded as sent', r.sent === 0 && /502/.test(r.error), JSON.stringify(r));
@@ -123,11 +135,11 @@ await note({ provider: 'cabman', fleet: 'ecosine', credential: 'CABMAN_ECOSINE_P
     JSON.stringify(r2) + sent.at(-1)?.title);
 }
 
-console.log('\na blip is never sent (review finding 2)');
+console.log('\na blip is never sent (review findings 2 and 5)');
 {
   const n0 = sent.length;
   /* A quiet row: refused once, fixed by the next run. */
-  await run('yango', 'ecosine', 'ok', 5, 0.2);
+  await runAt('yango', 'ecosine', 'ok', 5, clock - 60e3);
   await note({ provider: 'yango', fleet: 'ecosine', credential: 'YANGO_API_KEY', state: 'ok', surface: 'transactions' });
   advance(5 * 60e3);
   const r0 = await tick();
@@ -135,29 +147,54 @@ console.log('\na blip is never sent (review finding 2)');
   await note({ provider: 'yango', fleet: 'ecosine', credential: 'YANGO_API_KEY', state: 'invalid', detail: '401', surface: 'transactions' });
   advance(5 * 60e3);
   const r1 = await tick();
+  advance(25 * 60e3);
   await note({ provider: 'yango', fleet: 'ecosine', credential: 'YANGO_API_KEY', state: 'ok', surface: 'transactions' });
-  advance(CONFIRM_MS + 60e3);
+  await runAt('yango', 'ecosine', 'ok', 5, clock - 30e3);
+  advance(5 * 60e3);
   const r2 = await tick();
-  check('one refused pass on a quiet row, fixed by the next: no buzz at all', r1.sent === 0 && r2.sent === 0 && sent.length === n0,
+  check('one refused run on a quiet row, fixed by the next: no buzz at all', r1.sent === 0 && r2.sent === 0 && sent.length === n0,
     JSON.stringify([r1, r2]));
-  /* And the same on a stopped row that blips "ok" for one pass. */
+  /* Review of c2a9ccb: a half-hourly source's verdict from ONE failed run
+     survives every pass until the next run. YANGO_CONSOLE is blocked, so it
+     is degraded while Yango collects and stopped while it does not; one
+     errored run flipped it for half an hour, which two passes confirmed. */
+  await note({ provider: 'yango', fleet: 'ecosine', credential: 'YANGO_CONSOLE', state: 'blocked',
+    detail: '403 from a CDN edge', surface: 'reports-api' });
+  const [, d0] = await settle(['yango', 'ecosine']);
+  check('a known refused surface is announced once, as degraded', d0.sent === 1 && /^Degraded: yango/.test(sent.at(-1).title), sent.at(-1).title);
+  const n1 = sent.length;
+  advance(ALERT_GAP_MS + 1);
+  await runAt('yango', 'ecosine', 'error', 0, clock - 30e3);
+  const e1 = await tick();
+  advance(5 * 60e3); const e2 = await tick();
+  advance(5 * 60e3); const e3 = await tick();
+  advance(5 * 60e3); const e4 = await tick();
+  advance(10 * 60e3);
+  await runAt('yango', 'ecosine', 'ok', 5, clock - 30e3);
+  const e5 = await tick();
+  check('one failed half-hourly run under a degraded surface: no "Stopped", no "Degraded" after it',
+    [e1, e2, e3, e4, e5].every((x) => x.sent === 0) && sent.length === n1, JSON.stringify([e1, e2, e3, e4, e5]));
+  /* And a stopped row that reads "ok" for one run. */
   advance(ALERT_GAP_MS);
   await note({ provider: 'cabman', fleet: 'ecosine', credential: 'CABMAN_ECOSINE_PASS', state: 'ok', surface: 'IVDData' });
+  await runAt('cabman', null, 'ok', 5, clock - 30e3);
   const r3 = await tick();
+  advance(5 * 60e3);
   await note({ provider: 'cabman', fleet: 'ecosine', credential: 'CABMAN_ECOSINE_PASS', state: 'expired',
     detail: 'login refused', surface: 'IVDData' });
-  advance(CONFIRM_MS + 60e3);
+  await runAt('cabman', null, 'error', 0, clock - 30e3);
+  advance(5 * 60e3);
   const r4 = await tick();
-  check('one "ok" pass on a stopped row: no "Working again"', r3.sent === 0 && r4.sent === 0 && sent.length === n0,
+  check('one "ok" run on a stopped row: no "Working again"', r3.sent === 0 && r4.sent === 0 && sent.length === n1,
     JSON.stringify([r3, r4]));
 }
 
 console.log('\na real recovery is sent, at low priority');
 {
   await note({ provider: 'cabman', fleet: 'ecosine', credential: 'CABMAN_ECOSINE_PASS', state: 'ok', surface: 'IVDData' });
-  const [, b] = await settle();
+  const [, b] = await settle(['cabman', null]);
   const m = sent.at(-1);
-  check('sent once it holds', b.sent === 1 && m.title === 'Working again: cabman · Ecosine (CABMAN_ECOSINE_PASS)', m?.title);
+  check('sent once a later run agrees', b.sent === 1 && m.title === 'Working again: cabman · Ecosine (CABMAN_ECOSINE_PASS)', m?.title);
   check('…saying what it was and when that was first reported',
     m.priority === 2 && /\nWas stopped, first reported \d+ \w{3}, \d\d:\d\d Dubai\.$/.test(m.message), m.message);
 }
@@ -170,7 +207,9 @@ await run('uber', 'egari', 'ok', 5, 40);
 await note({ provider: 'uber', fleet: 'egari', credential: 'UBER_WEB_COOKIE_EGARI', state: 'ok', surface: 'supplier graphql' });
 {
   const n0 = sent.length;
-  const [, r] = await settle();
+  /* The stall has no later run to wait for — the silence is the evidence —
+     so it is confirmed by holding for two passes. */
+  const [, r] = await settle(['bolt', 'egari'], ['hotel', 'egari']);
   const m = sent.at(-1);
   check('three changes, one push', r.sent === 1 && r.changes === 3 && sent.length === n0 + 1, JSON.stringify(r));
   check('the title counts them, worst first', m.title === '3 sources changed: 1 not collecting, 2 working again', m.title);
@@ -185,7 +224,7 @@ console.log('\nsaved-but-untested is neither news nor forgotten');
   advance(ALERT_GAP_MS + 1);
   await note({ provider: 'hotel', fleet: 'egari', credential: 'HOTEL_EGARI_TOKEN', state: 'saved',
     detail: 'saved — not yet tested', surface: 'get-trip-report' });
-  const [a, b] = await settle();
+  const [a, b] = await settle(['hotel', 'egari']);
   check('pending is not sent', a.sent === 0 && b.sent === 0, JSON.stringify([a, b]));
   check('…and does not overwrite the last thing said', (await told('hotel|egari|HOTEL_EGARI_TOKEN'))?.severity === 'ok');
 }
@@ -195,27 +234,29 @@ console.log('\na new state inside "stopped" is a different errand');
   advance(ALERT_GAP_MS + 1);
   await note({ provider: 'cabman', fleet: 'ecosine', credential: 'CABMAN_ECOSINE_PASS', state: 'expired',
     detail: 'login refused', surface: 'IVDData' });
-  await settle();
+  await settle(['cabman', null]);
   advance(ALERT_GAP_MS + 1);
   await note({ provider: 'cabman', fleet: 'ecosine', credential: 'CABMAN_ECOSINE_PASS', state: 'moved',
     detail: 'redirected — the endpoint has moved', surface: 'IVDData' });
   const n0 = sent.length;
-  const [, r] = await settle();
+  const [, r] = await settle(['cabman', null]);
   check('a moved URL after a refused login is news', r.sent === 1 && sent.length === n0 + 1 && /endpoint has moved/.test(sent.at(-1).message), JSON.stringify(r));
   advance(ALERT_GAP_MS + 1);
-  const [c, d] = await settle();
+  const [c, d] = await settle(['cabman', null]);
   check('…once', c.sent === 0 && d.sent === 0, JSON.stringify([c, d]));
 }
 
 console.log('\na new credential, broken and mended before anyone was told');
 {
   const n0 = sent.length;
-  await run('fms', 'egari', 'ok', 9, 0.2);
+  await runAt('fms', 'egari', 'ok', 9, clock - 60e3);
   await note({ provider: 'fms', fleet: 'egari', credential: 'FMS_EGARI_PASS', state: 'invalid', detail: 'login refused', surface: 'Login' });
   const a = await tick();
   await note({ provider: 'fms', fleet: 'egari', credential: 'FMS_EGARI_PASS', state: 'ok', surface: 'Login' });
+  await runAt('fms', 'egari', 'ok', 9, clock + 60e3);
   advance(CONFIRM_MS + 60e3);
   const b = await tick();
+  await runAt('fms', 'egari', 'ok', 9, clock + 60e3);
   advance(CONFIRM_MS + 60e3);
   const c = await tick();
   check('no "Working again" for a fault nobody heard of', a.sent === 0 && b.sent === 0 && c.sent === 0 && sent.length === n0,
@@ -223,21 +264,48 @@ console.log('\na new credential, broken and mended before anyone was told');
   check('…and it is remembered as working', (await told('fms|egari|FMS_EGARI_PASS'))?.severity === 'ok');
 }
 
+console.log('\nconfirmed by a re-check, or by an hour');
+{
+  /* A credential re-tested (a save's check, a probe) is an observation as
+     much as a run is. */
+  advance(ALERT_GAP_MS + 1);
+  await note({ provider: 'fms', fleet: 'egari', credential: 'FMS_EGARI_PASS', state: 'invalid', detail: 'login refused', surface: 'Login' });
+  const a = await tick();
+  advance(5 * 60e3);
+  await q(`UPDATE credential_state SET checked_at = $1 WHERE credential = 'FMS_EGARI_PASS'`, [new Date(clock - 30e3).toISOString()]);
+  const b = await tick();
+  check('re-checked and still refused: sent', a.sent === 0 && b.sent === 1 && /Stopped: fms · Egari/.test(sent.at(-1).title),
+    JSON.stringify([a, b]));
+  /* A refusal, then nothing at all — a worker that died after the failing
+     run. No later run will ever confirm it; an hour does. */
+  advance(ALERT_GAP_MS + 1);
+  await note({ provider: 'fms', fleet: 'egari', credential: 'FMS_EGARI_PASS', state: 'ok', surface: 'Login' });
+  await settle(['fms', 'egari']);
+  advance(ALERT_GAP_MS + 1);
+  await note({ provider: 'hotel', fleet: 'egari', credential: 'HOTEL_EGARI_TOKEN', state: 'invalid',
+    detail: 'token refused (401)', surface: 'get-trip-report' });
+  const n0 = sent.length;
+  const h1 = await tick();
+  advance(HOLD_MAX_MS / 2); const h2 = await tick();
+  check('no later observation: held for under an hour', h1.sent === 0 && h2.sent === 0 && sent.length === n0, JSON.stringify([h1, h2]));
+  advance(HOLD_MAX_MS / 2 + 60e3); const h3 = await tick();
+  check('…and sent once it has held for an hour', h3.sent === 1 && /Stopped: hotel · Egari/.test(sent.at(-1).title), JSON.stringify(h3));
+}
+
 console.log('\na row is told at most once per half hour');
 {
-  /* Confirmed both ways inside thirty minutes — a stall clock sitting on its
-     limit, a token pasted wrong and then right. The second message waits for
-     the gap; it is not dropped. */
+  /* Confirmed both ways inside thirty minutes — a token pasted wrong and then
+     right. The second message waits for the gap; it is not dropped. */
   advance(ALERT_GAP_MS + 1);
   await note({ provider: 'yango', fleet: 'ecosine', credential: 'YANGO_API_KEY', state: 'invalid', detail: '401', surface: 'transactions' });
-  const [, a1] = await settle();
-  check('stopped, confirmed: sent', a1.sent === 1 && /Stopped: yango/.test(sent.at(-1).title), sent.at(-1).title);
+  const [, a1] = await settle(['yango', 'ecosine']);
+  check('stopped, confirmed: sent', a1.sent === 1 && /Stopped: yango · Ecosine \(YANGO_API_KEY\)/.test(sent.at(-1).title), sent.at(-1).title);
   await note({ provider: 'yango', fleet: 'ecosine', credential: 'YANGO_API_KEY', state: 'ok', surface: 'transactions' });
-  const [b1, b2] = await settle();
+  const [b1, b2] = await settle(['yango', 'ecosine']);
   check('back ten minutes later, confirmed: held by the gap', b1.sent === 0 && b2.sent === 0, JSON.stringify([b1, b2]));
   advance(ALERT_GAP_MS);
   const c = await tick();
-  check('…and sent once the gap has passed', c.sent === 1 && /Working again: yango/.test(sent.at(-1).title), sent.at(-1).title);
+  check('…and sent once the gap has passed', c.sent === 1 && /Working again: yango · Ecosine \(YANGO_API_KEY\)/.test(sent.at(-1).title), sent.at(-1).title);
 }
 
 console.log('\nwording');
