@@ -53,19 +53,27 @@ await person(4, 'Test Driver D', 'egari', [['uber', 'u-d'], ['yango', 'y-d']], {
    person, where rounding each account first made 20 (DR1-DR3, km). */
 await person(5, 'Test Driver E', 'ecosine', [['uber', 'u-e']]);
 await person(6, 'Test Driver F', 'ecosine', [['uber', 'u-f'], ['bolt', 'b-f']]);
+/* G: two accounts and no distance on either (hotel bookings carry none) —
+   km stays absent, not 0. H: one cash trip with no price and no Uber figure
+   yet — cash taken is unknown, not 0.00. I: paid in the dates, no booking in
+   them — the page shows the Paid figure, so the file carries the row. */
+await person(7, 'Test Driver G', 'egari', [['uber', 'u-g'], ['hotel', 'h-g']]);
+await person(8, 'Test Driver H', 'ecosine', [['uber', 'u-h']]);
+await person(9, 'Test Driver I', 'ecosine', [['uber', 'u-i']]);
 /* An account nobody has placed on a person yet, with its own number. */
 await q(`INSERT INTO driver_compliance (platform, driver_ext_id, fleet_id, full_name, phone) VALUES ('bolt', 'b-x', 'ecosine', 'Loose Bolt', '0509999999')`);
 
 /* What each account files as the driver's name on a trip — the person's own
    name, as on production, so the Drivers page names them as the record does. */
 const NAMES = { 'u-a': 'Test Driver A', 'b-a': 'Test Driver A', 'u-b': 'Test Driver B', 'u-c': 'Test Driver C',
-  'u-d': 'Test Driver D', 'y-d': 'Test Driver D', 'u-e': 'Test Driver E Ehsan Longname', 'u-f': 'Test Driver F', 'b-f': 'Test Driver F' };
+  'u-d': 'Test Driver D', 'y-d': 'Test Driver D', 'u-e': 'Test Driver E Ehsan Longname', 'u-f': 'Test Driver F', 'b-f': 'Test Driver F',
+  'u-g': 'Test Driver G', 'h-g': 'Test Driver G', 'u-h': 'Test Driver H', 'u-i': 'Test Driver I' };
 const T = (id, o) => q(
   `INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, plate, requested_at, ended_at, status,
                      payment_type, price, currency, distance_km, raw)
    VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $7::timestamptz + interval '20 minutes', $8, $9, $10, 'AED', $11, $12::jsonb)`,
   [o.platform || 'uber', id, o.fleet || 'ecosine', o.driver, o.name ?? NAMES[o.driver] ?? 'x', o.plate || 'P1', o.at, o.status || 'completed',
-    o.pay || 'cash', o.price ?? null, o.km ?? 10,
+    o.pay || 'cash', o.price ?? null, 'km' in o ? o.km : 10,
     JSON.stringify({ ...(o.cash != null ? { uber_payments: { cash_collected: -o.cash, ...(o.fee ? { service_fee: -o.fee } : {}) } } : {}) })]);
 /* Range: 2026-09-01 .. 2026-09-07 (Dubai). Times are UTC; Dubai is +4. */
 await T('a1', { driver: 'u-a', at: '2026-09-01T06:00:00Z', price: 40, cash: 45, fee: 10 });       // Uber's figure 45, not 40
@@ -86,6 +94,12 @@ await T('f2', { driver: 'b-f', platform: 'bolt', at: '2026-09-04T09:00:00Z', pri
 /* A booking filed with no driver name: the page cannot list it (it keys a
    person on a name), the file holds it — so it must be shown, not dropped. */
 await T('z1', { driver: 'u-z', name: '', at: '2026-09-05T08:00:00Z', price: 25, pay: 'card' });
+await T('g1', { driver: 'u-g', fleet: 'egari', at: '2026-09-03T08:00:00Z', price: 30, pay: 'card', km: null });
+await T('g2', { driver: 'h-g', platform: 'hotel', fleet: 'egari', at: '2026-09-04T08:00:00Z', price: 90, pay: 'card', km: null });
+await T('h1', { driver: 'u-h', at: '2026-09-04T12:00:00Z' });                                            // cash, no price, no Uber figure
+await T('i0', { driver: 'u-i', at: '2026-08-20T08:00:00Z', price: 30, pay: 'card' });                    // before the dates: on the books
+await q(`INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, day, period_start, period_end, period_days, earnings)
+         VALUES ('uber', 'ecosine', 'u-i', '2026-09-03', '2026-08-31', '2026-09-06', 7, 41.5)`);
 /* Money and Paid, the page's two money columns, for A. */
 await q(`INSERT INTO driver_day (driver_ext_id, day, fleet_id, money, money_period_days, money_source)
          VALUES ('u-a', '2026-09-02', 'ecosine', 123.45, 7, 'statement')`);
@@ -160,7 +174,7 @@ check('a card-only driver is not on the cash sheet', !cc.some((r) => r.Driver ==
 
 const rm = text(all.file, 'Read me');
 check('the notes give the definition in words', /To hand in = cash from trips \+ advances recorded − hand-ins recorded/.test(rm));
-check('…name the platform whose trips are not priced, and why', /Uber: 1 cash trip has no amount yet — Uber publishes a trip’s amount on its payments report hours after the ride/.test(rm) && /read every hour/.test(rm));
+check('…name the platform whose trips are not priced, and why', /Uber: 2 cash trips have no amount yet — Uber publishes a trip’s amount on its payments report hours after the ride/.test(rm) && /read every hour/.test(rm));
 check('…say a failed collection by name', /Bolt — Ecosine \| The latest collection \(2026-09-07 23:55\) FAILED; the last good one was 2026-09-06 00:00/.test(rm), rm.split('\n').filter((l) => /Bolt —/.test(l)).join(' / '));
 check('…say payouts are by the day they arrived', /Listed by the day the money ARRIVED/.test(rm) && /Yango \| Yango does not publish a transfer/.test(rm));
 check('…and carry the summary total to hand in', (sheetNamed(all.file, 'Read me').rows.find((r) => r[0] === 'To hand in (AED)') || [])[1] === 67 + 77.5 + 16.25 + 12 + 60);
@@ -187,7 +201,7 @@ check('…an Uber wire says the week it pays for', w1?.['Pays for, from'] instan
 check('…a Bolt payout says Bolt does not say', bp.find((r) => r['Amount (AED)'] === 800)?.['Pays for, from'] === 'Bolt does not say');
 check('…and one only Bolt’s ledger shows is marked as such', /^not yet/.test(bp.find((r) => r['Amount (AED)'] === 321)?.['Listed by the platform'] || ''));
 check('the platform’s own statement is carried as it filed it', table(all.file, 'Platform statements')[0]?.['To the bank (AED)'] === 12345.67);
-check('every trip, cash or card, for a week — fourteen bookings, the two outside the dates left out', table(all.file, 'Every trip').length === 14, String(table(all.file, 'Every trip').length));
+check('every trip, cash or card, for a week — seventeen bookings, the three outside the dates left out', table(all.file, 'Every trip').length === 17, String(table(all.file, 'Every trip').length));
 
 console.log('\n2. the chips, one driver, a longer range');
 const eg = await make({ fleet: 'egari' });
@@ -224,7 +238,7 @@ console.log('\n4. the Drivers sheet is the Drivers page (DR1-DR3, 2026-10-20)');
    the km check fails with 20. */
 {
   const rows = await pageRows();
-  const page = rows.filter((r) => Number(r.trips) > 0);
+  const page = rows.filter((r) => Number(r.trips) > 0 || Number(r.money) || Number(r.payout));
   const sheet = table(all.file, 'Drivers');
   const listed = sheet.filter((r) => !/not on the Drivers page/.test(r.Driver));
   check('one row per person the page lists, in the page\u2019s order, under the page\u2019s name',
@@ -266,6 +280,25 @@ console.log('\n4. the Drivers sheet is the Drivers page (DR1-DR3, 2026-10-20)');
     && table(named.file, 'Cash to collect')[0]?.Driver === 'Test Driver A As Their Page Names Them');
   const wE = await make({ hide: new Set(['EARN']) });
   check('a role without driver earnings finds Money and Paid withheld', table(wE.file, 'Drivers').find((r) => r.Driver === 'Test Driver A')?.['Money (AED)'] === '(withheld)');
+  /* The independent review of 2026-10-20.
+     REVERSIONS (run 2026-10-20): the fold's `+(cur.km || 0) + +(r.km || 0)`
+     — "G … absent" fails with 0; the trips-only row filter — "I … carries
+     the row" fails; `r2(sumOf(cashTaken))` for an all-unpriced row — both
+     "H … unknown" checks fail with 0. */
+  const G = listed.find((r) => r.Driver === 'Test Driver G');
+  check('G: two accounts and no distance on either reads no km — absent, as on their page, not 0',
+    G && G.Km == null && page.find((r) => r.driver_name === 'Test Driver G')?.km === null, JSON.stringify(G));
+  const I = listed.find((r) => r.Driver === 'Test Driver I');
+  check('I: paid in the dates with no booking in them — the page shows the Paid, so the file carries the row',
+    I && I.Bookings === 0 && I['Paid (AED)'] === 41.5, JSON.stringify(I));
+  const H = listed.find((r) => r.Driver === 'Test Driver H');
+  check('H: a cash trip with no price yet — cash from trips is unknown, not 0.00, and says one is not priced',
+    H && H['Cash trips'] === 1 && H['Cash from trips (AED)'] == null && H['Cash not priced yet'] === 1, JSON.stringify(H));
+  const h1 = table((await make({ person: { id: 8, name: 'Test Driver H' } })).file, 'Driver')[0];
+  check('…and their own file says the same: no Cash collected figure, one trip not priced yet',
+    h1 && h1['Cash collected (AED)'] == null && h1['Not priced yet'] === 1 && h1['Cash trips'] === 1, JSON.stringify(h1));
+  check('A, partly priced: the priced part, and the one waiting named beside it',
+    A?.['Cash from trips (AED)'] === 97 && A?.['Cash not priced yet'] === 1, JSON.stringify(A));
   let threw = false;
   try { await buildMoneyWorkbook({ q, from: '2026-09-01', to: '2026-09-07', now: NOW }); } catch { threw = true; }
   check('without the page\u2019s rows the file is refused, never built from a second set of queries', threw);

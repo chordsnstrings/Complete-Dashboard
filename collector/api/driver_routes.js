@@ -884,7 +884,13 @@ export async function loadDirectory(q, { from, to, platform = null, fleet = null
     cur.completed += r.completed; cur.bookable += r.bookable;
     cur.priced_trips += r.priced_trips;
     cur.lifetime_trips += r.lifetime_trips;
-    cur.km = +(cur.km || 0) + +(r.km || 0);
+    /* Absent until an account measured it. `+(cur.km || 0) + +(r.km || 0)`
+       made "no distance on any account" a 0 for everyone with two accounts
+       or more, while a one-account person with none read absent — and the
+       money workbook now copies this figure (independent review of
+       2026-10-20: 1-2 people a window with hotel-only work read "0 km" here
+       and absent on their own page). */
+    if (r.km != null) cur.km = +(cur.km || 0) + +r.km;
     cur.revenue = +(cur.revenue || 0) + +(r.revenue || 0);
     /* Payouts DO sum across a person's accounts: two provider ids are two
        separate statements for the same human, and both reached the fleet. */

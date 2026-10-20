@@ -1582,8 +1582,11 @@ app.get('/api/driver/kpis', (req, r) => {
        cash trips and what they took (the platform's own figure, the fare
        otherwise) — fewer than the cash-paid bookings above, because a
        cancelled cash booking is not cash taken. Driver 4 has one not valued. */
-    cash_trips: i === 4 ? 7 : (i % 3 === 0 ? 0 : 10 + i),
-    cash_taken: i === 4 ? 268.4 : (i % 3 === 0 ? null : 228 + i * 11.5),
+    /* Consistent with this mock's /api/driver/mix, which gives every driver
+       44 bookings paid in cash: 41 of them completed, at Uber's own figure
+       (the fare plus tolls the rider paid in cash). */
+    cash_trips: i === 4 ? 7 : 41,
+    cash_taken: i === 4 ? 268.4 : 1642.5,
     cash_unvalued: i === 4 ? 1 : 0,
     day_stmt_days: i === 4 ? 0 : 7,
     day_cash_days: i === 4 ? 0 : 7,

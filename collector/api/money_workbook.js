@@ -454,7 +454,7 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
     ['Cash trips', 'Every trip on which a driver took cash: when, which car, how much, and how the amount was valued.'],
     ['Hand-ins & advances', 'Every cash hand-in and cash advance recorded in FleetMirror in these dates.'],
     ...(person ? [] : [
-      ['Drivers', 'The Drivers page for these dates, row for row: the same names, bookings, fares, money, paid, km and days, with cash, commission and fares by platform beside them.'],
+      ['Drivers', 'The Drivers page for these dates, row for row, for everyone with a booking or with Money or Paid: the same names, bookings, fares, money, paid, km and days, with cash, commission and fares by platform beside them.'],
       ['Money by day', 'Per day, fleet and platform: bookings, fares, cash taken, commission.'],
       ['Bank payouts', 'Every transfer a platform made to the company’s bank in these dates.'],
       ['Platform statements', 'Each platform’s own daily account figures, where it publishes them.'],
@@ -484,16 +484,19 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
     const mine = directory.find((r) => (person.id != null ? String(r.person_id) === String(person.id)
       : (r.ids || []).includes(person.account)));
     const es = everyone.filter((e) => (person.id != null ? e.placed && String(e.person) === String(person.id) : true));
-    const cashTaken = r2(es.reduce((a, e) => a + e.cashTaken, 0));
     const cashTrips = es.reduce((a, e) => a + e.cashTrips, 0);
-    const sd = wb.sheet('Driver', { widths: [34, 10, 10, 16, 10, 14, 18, 14, 18, 10, 10, 10] });
+    const cashUnpriced = es.reduce((a, e) => a + e.unpriced, 0);
+    /* All still waiting for a price: the page's tile reads "not reported",
+       so this is empty, never a 0.00 that looks measured. */
+    const cashTaken = cashTrips && cashUnpriced === cashTrips ? null : r2(es.reduce((a, e) => a + e.cashTaken, 0));
+    const sd = wb.sheet('Driver', { widths: [34, 10, 10, 16, 10, 14, 18, 14, 18, 10, 12, 10, 10] });
     sd.header(['Driver', 'Bookings', 'Completed', 'Booked revenue (AED)', 'Priced', 'Average fare (AED)', 'Platform earnings (AED)',
-      'Money (AED)', 'Cash collected (AED)', 'Cash trips', 'Km', 'Days worked'],
-    ['text', 'int', 'int', 'money', 'int', 'money', 'money', 'money', 'money', 'int', 'int', 'int']);
+      'Money (AED)', 'Cash collected (AED)', 'Cash trips', 'Not priced yet', 'Km', 'Days worked'],
+    ['text', 'int', 'int', 'money', 'int', 'money', 'money', 'money', 'money', 'int', 'int', 'int', 'int']);
     const priced = Number(mine?.priced_trips) || 0;
     sd.row([h('ID', person.name || person.account || mine?.driver_name || ''), Number(mine?.trips) || 0, Number(mine?.completed) || 0,
       h('REV', priced ? r2(mine.revenue) : null), priced, h('REV', priced ? r2(Number(mine.revenue) / priced) : null),
-      h('EARN', r2(mine?.payout)), h('EARN', r2(mine?.money)), h('CASH', cashTaken), cashTrips,
+      h('EARN', r2(mine?.payout)), h('EARN', r2(mine?.money)), h('CASH', cashTaken), cashTrips, cashUnpriced,
       mine?.km == null ? null : Number(mine.km), Number(mine?.days) || 0]);
     if (!mine) sd.text('No booking of theirs is on record for these dates and filters.', 'dim');
   }
@@ -552,12 +555,12 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
        commission and fares by platform are this file's, attached through
        the person (the spine id the page folded on) or, for an account no
        person holds, the account itself. */
-    const dr = wb.sheet('Drivers', { widths: [34, 16, 20, 10, 10, 14, 13, 13, 13, 13, 14, 22, 14, 10, 14, 14, 10, 9] });
+    const dr = wb.sheet('Drivers', { widths: [34, 16, 20, 10, 10, 14, 13, 13, 13, 13, 14, 22, 14, 10, 14, 12, 14, 10, 9] });
     const PL = ['uber', 'bolt', 'yango', 'hotel'].filter((p) => !platform || p === platform);
     dr.header(['Driver', 'Fleet', 'Platforms', 'Bookings', 'Completed', 'Fares (AED)',
       ...PL.map((p) => `${plat(p)} fares (AED)`), 'Money (AED)', 'Money is', 'Paid (AED)', 'Cash trips', 'Cash from trips (AED)',
-      'Uber commission (AED)', 'Km', 'Days worked'],
-    ['text', 'text', 'text', 'int', 'int', 'money', ...PL.map(() => 'money'), 'money', 'text', 'money', 'int', 'money', 'money', 'int', 'int']);
+      'Cash not priced yet', 'Uber commission (AED)', 'Km', 'Days worked'],
+    ['text', 'text', 'text', 'int', 'int', 'money', ...PL.map(() => 'money'), 'money', 'text', 'money', 'int', 'money', 'int', 'money', 'int', 'int']);
     const byAcctKey = new Map();
     for (const e of everyone) {
       for (const a of e.accounts) byAcctKey.set(a.slice(a.indexOf(':') + 1), e);
@@ -577,18 +580,27 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
       : r.money_period_days == null ? 'part from a statement that does not say its period'
         : r.money_period_days > 1 ? `${r.money_period_days}-day statements spread across their days`
           : r.money_source === 'fares' ? 'fares' : r.money_source === 'mixed' ? 'statements and fares' : 'filed per day');
-    for (const r of directory.filter((x) => Number(x.trips) > 0)) {
+    /* A row with no booking still carries the page's Money (a statement
+       spread across its days) or Paid when either is not nought — dropping it
+       left those figures on the page and out of the file (independent review,
+       2026-10-20). Rows with neither a booking nor any money are the idle
+       roster, which this sheet does not repeat. */
+    for (const r of directory.filter((x) => Number(x.trips) > 0 || Number(x.money) || Number(x.payout))) {
       const es = entriesOf(r);
       es.forEach((e) => attached.add(e));
       const sumOf = (f) => es.reduce((a, e) => a + (Number(f(e)) || 0), 0);
       const faresBy = {};
       for (const e of es) for (const [p, v] of Object.entries(e.faresBy)) faresBy[p] = (faresBy[p] || 0) + v;
       const commission = sumOf((e) => e.commission);
+      /* Every cash trip still waiting for a price is an unknown, not a nought:
+         the page's tile reads "not reported" for it, so the cell is empty. */
+      const cashN = sumOf((e) => e.cashTrips);
+      const cashUnpriced = sumOf((e) => e.unpriced);
       dr.row([h('ID', r.driver_name), r.fleet_id ? fleetName(r.fleet_id) : '', (r.platforms || []).map(plat).join(', '),
         Number(r.trips) || 0, Number(r.completed) || 0, h('REV', Number(r.priced_trips) ? r2(r.revenue) : null),
         ...PL.map((p) => h('REV', faresBy[p] == null ? null : r2(faresBy[p]))),
         h('EARN', r2(r.money)), moneyIs(r), h('EARN', r2(r.payout)),
-        sumOf((e) => e.cashTrips), h('CASH', r2(sumOf((e) => e.cashTaken))),
+        cashN, h('CASH', cashN && cashUnpriced === cashN ? null : r2(sumOf((e) => e.cashTaken))), cashUnpriced,
         h('REV', commission ? r2(commission) : null), r.km == null ? null : Number(r.km), Number(r.days) || 0]);
     }
     /* Anything this file holds that no row of the page could take — never
@@ -597,7 +609,8 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
     for (const e of loose) {
       dr.row([h('ID', `${nameOf(e)} — not on the Drivers page for these dates`), fleetsOf(e), platsOf(e), e.bookings, e.completed,
         h('REV', e.priced ? r2(e.fares) : null), ...PL.map((p) => h('REV', e.faresBy[p] == null ? null : r2(e.faresBy[p]))),
-        null, '', null, e.cashTrips, h('CASH', r2(e.cashTaken)), h('REV', e.commission ? r2(e.commission) : null), null, null]);
+        null, '', null, e.cashTrips, h('CASH', e.cashTrips && e.unpriced === e.cashTrips ? null : r2(e.cashTaken)), e.unpriced,
+        h('REV', e.commission ? r2(e.commission) : null), null, null]);
     }
 
     /* ── Money by day ──────────────────────────────────────────────────── */

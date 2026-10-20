@@ -211,6 +211,28 @@ const F = {
     earnings: { components: [], periods: [], tips: 25, tip_pct: 0.46, statement_days: 20,
       fare: 5413.42, statement_cash: 1804.94 },
   },
+  /* CASH-LIKE LABELS THAT ARE NOT CASH IN HAND (independent review,
+     2026-10-20). pos-driver is a card terminal, cash-supervisor is collected
+     by a supervisor: trip_cash counts neither, the driver's Excel reads 0.00,
+     and so must the tile — it printed AED 1,585 of card fares for one such
+     driver on 1-20 October. */
+  posonly: {
+    profile: { name: 'Pos Only', id: 'posonly', platforms: ['hotel'], ids: ['z10'],
+      accounts: [UBER_ACC(900, '2025-10-17T04:00:00Z', '2026-09-15T18:00:00Z')],
+      span: { trips: 60, days_worked: 12, vehicles: 1, first_trip: '2026-09-01T05:00:00Z',
+        last_trip: '2026-09-15T18:00:00Z' },
+      compliance: [], standing: [], vehicles: [], identity_withheld: [], identity_held: [],
+      banned_on: [], platform_compliance: [] },
+    kpis: { trips: 60, days_worked: 12, bookings: 60, priced_trips: 60, outcome_n: 60,
+      revenue: 3640, km: 700, avg_fare: 60.7, reported_earnings: null, cash_earnings: null,
+      statement_fares: null, cash_bookings: 0, cash_trips: 0, cash_taken: null, cash_unvalued: 0 },
+    mix: { distance: [], product: [], status: [], platform: [],
+      payment: [{ label: 'pos-driver', n: 29, revenue: 1230 }, { label: 'cash-supervisor', n: 9, revenue: 355 },
+        { label: 'room-charge', n: 22, revenue: 2055 }] },
+    daily: [{ day: '2026-09-01', trips: 5, km: 60, revenue: 300, first_hour: 9.5, cancelled: 0 }],
+    earnings: { components: [], periods: [], tips: null, tip_pct: null, statement_days: 0,
+      fare: null, statement_cash: null },
+  },
   /* WORKED, AND NOBODY RECORDED HOW ANY OF IT WAS PAID. /api/driver/mix
      coalesces a null payment_type to 'unknown', so the row exists and never
      matches CASH_LABEL. AED 0 here claims a measurement over rows where none
@@ -484,6 +506,15 @@ check('the tile reads cash taken, as the driver\u2019s Excel does: AED 2,445.99'
   ct && ct.value === 'AED 2,445.99', JSON.stringify(ct));
 check('…over the 44 completed cash trips, and says the 12 not completed are not counted',
   ct && /44 completed cash trips/.test(ct.sub) && /12 cash bookings not completed, not counted/.test(ct.sub), ct && ct.sub);
+
+/* REVERSION (run 2026-10-20): the first cut's guard, `k.cash_trips != null
+   && !(+k.cash_trips === 0 && !(+k.cash_bookings) && cashTrips > 0)` — both
+   checks fail: AED 1,585.00 over "38 cash trips". */
+const po = tile(await render('posonly', 'earnings'), 'Cash collected');
+check('card-terminal and supervisor-collected bookings are not cash the driver took: AED 0.00, as their Excel says',
+  po && po.value === 'AED 0.00', JSON.stringify(po));
+check('…and the sub says why, naming the labels',
+  po && /none of these bookings was cash in the driver/.test(po.sub) && /29 pos-driver/.test(po.sub), po && po.sub);
 
 console.log('\na population is not coverage: nobody recorded how any of it was paid');
 

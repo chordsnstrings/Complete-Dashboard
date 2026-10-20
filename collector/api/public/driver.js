@@ -1914,12 +1914,17 @@ async function tabEarnings(root, id, prof) {
   const cashKnown = cashRows.filter((p) => p.revenue != null);
   const cashValue = cashKnown.length ? cashKnown.reduce((a, p) => a + (+p.revenue || 0), 0) : null;
   /* Whether the Cash collected tile can state cash TAKEN (trip_cash, as the
-     driver's Excel does — see the tile). Not when the trip record marks no
-     booking as cash in hand at all while the payment labels show some: the
-     two sources disagree, and "AED 0.00" over "44 cash trips" would be the
-     tile contradicting itself. That case keeps the older reading, which says
-     what the labels and statements hold. */
-  const cashTakenKnown = k.cash_trips != null && !(+k.cash_trips === 0 && !(+k.cash_bookings) && cashTrips > 0);
+     driver's Excel does — see the tile): whenever the API sends it. trip_cash
+     counts the bookings the driver holds the cash of — `cash` and
+     `cash-driver` (trip_ext.driver_holds_cash, sql/schema_v62.sql:57).
+     `cash-supervisor` is collected by a supervisor and `pos-driver` is paid
+     by card at the driver's terminal, so a driver whose only cash-LIKE labels
+     are those took AED 0 in hand — the 0.00 the Excel shows. A first cut kept
+     the older label reading for that case, which printed the card fares
+     under "Cash collected" (independent review of 2026-10-20: AED 1,585 for
+     one driver, AED 1,620 for another, both 0.00 in their files). An older
+     API without cash_trips still takes the older chain. */
+  const cashTakenKnown = k.cash_trips != null;
   /* A POPULATION IS NOT COVERAGE, AND cashTrips === 0 HAS A THIRD CAUSE.
      ─────────────────────────────────────────────────────────────────────────
      The cash tile was repaired by gating on whether the driver WORKED, which
@@ -2128,6 +2133,9 @@ async function tabEarnings(root, id, prof) {
           + (open ? ` \u00b7 ${countOf(open, 'cash booking')} not completed, not counted` : '')
           + ' \u00b7 the platform\u2019s own cash figure where it has filed one, the fare otherwise';
       })()
+      : cashTakenKnown && cashTrips
+      ? `none of these bookings was cash in the driver\u2019s hand: ${cashRows.map((p) => `${fmt(+p.n)} ${p.label}`).join(', ')}`
+        + ' \u2014 cash-supervisor is collected by a supervisor and pos-driver is paid by card at the driver\u2019s terminal'
       : cashTrips
       ? (() => {
         const labels = cashRows.map((p) => p.label);
