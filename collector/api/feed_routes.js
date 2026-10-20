@@ -379,12 +379,33 @@ export const CAB_TRIP_KM = 2;
    a 5-minute poll caught twice each: the booking's own times, not the unit. */
 export const CAB_STILL_MIN = 10;
 export const CAB_STILL_READINGS = 3;
+/* …and its readings' measured steps must cover most of the booking: three
+   readings at the pickup and none after say nothing about the drive (the
+   second review's N3). */
+export const CAB_STILL_COVER = 0.7;
+/* A HOTEL BOOKING ENDS WHERE ITS DISTANCE SAYS, NOT AT ITS ended_at.
+   ─────────────────────────────────────────────────────────────────────────
+   The hotel channel's ended_at is a booking CLOSE, not a drop-off
+   (docs/COVERAGE.md, "TWO CARS AT ONCE"; api/identity_map.js): on production
+   one L27976 booking closed 55 hours after it started, others 0.3 minutes
+   after one of 42 km. A span to the close made one booking cover two days
+   and clipped every Uber ride after it to nothing (the second review's N2);
+   a span of 0.3 minutes judged a 42 km ride on its pickup alone. So a hotel
+   booking runs from its start for the reconciler's own estimate —
+   src/reconcile.js bookingWindow(): about 2 minutes a km, at most 3 hours,
+   30 minutes with no distance — which test/feeds_cabman.test.mjs holds
+   equal to that function. */
+export const hotelEndMs = (startMs, km) => startMs
+  + (Number(km) > 0 ? Math.min(Number(km) * 2 * 60000, 3 * 3600e3) : 30 * 60000);
+const bookingEnd = (bk) => (bk.platform === 'hotel'
+  ? hotelEndMs(ms(bk.requested_at), bk.distance_km) : ms(bk.ended_at));
 /* Standing still through this share of a car's bookings (and at least three)
    is the unit in another car or filed under another plate, not a pause. */
 export const CAB_ELSEWHERE_SHARE = 0.3;
 
+/* Ordered, so a plate on two fleets' rosters is always given the same fleet. */
 export const CAB_ROSTER_SQL = `
-  SELECT fleet_id, value FROM source_state WHERE source = 'cabman' AND key = 'roster'`;
+  SELECT fleet_id, value FROM source_state WHERE source = 'cabman' AND key = 'roster' ORDER BY fleet_id`;
 /* The newest reading per plate, whenever it was: a unit silent since 2024 is
    still a unit CABMAN lists. A reading dated in the future is a clock running
    ahead, so only readings up to now count, as in FEEDS_SQL. */
@@ -440,6 +461,10 @@ export function readRosters(rows) {
     }
   }
   for (const p of members.keys()) departed.delete(p);
+  /* Known once the roster holds a car it has admitted or let go. A roster of
+     only not-yet-admitted plates (its first three polls) is not a list the
+     table can stand on, and the readings stand in for it as before. */
+  known = known && members.size + departed.size > 0;
   return { known, members: [...members.values()], departed: [...departed.values()] };
 }
 
@@ -514,24 +539,34 @@ function cabmanCar({ plate, fleet_id, last, fixes, bookings, nowMs, days }) {
   const pad = CAB_PAD_MIN * 6e4;
   const plat = {};
   const bks = [...bookings].sort((x, y) => ms(x.requested_at) - ms(y.requested_at));
-  let read = 0; let seen = 0; let noReading = 0; let still = 0; let stillChecked = 0;
-  let prevEnd = -Infinity;
+  let read = 0; let seen = 0; let noReading = 0; let still = 0; let stillChecked = 0; let anyInside = 0;
+  /* Each span opens no earlier than the END OF THE PREVIOUS SPAN — its
+     drop-off plus the pad — or the last passenger, still read a minute after
+     drop-off, is counted as this booking's (the second review's N6). Where
+     two bookings overlap so far that the clip leaves nothing, the booking is
+     judged on its own span unclipped rather than not at all. */
+  let prevSpanEnd = -Infinity;
   for (const bk of bks) {
-    const from = Math.max(ms(bk.requested_at) - pad, prevEnd + 1); const to = ms(bk.ended_at) + pad;
-    prevEnd = Math.max(prevEnd, ms(bk.ended_at));
+    const start = ms(bk.requested_at); const end = bookingEnd(bk);
+    let from = Math.max(start - pad, prevSpanEnd + 1); const to = end + pad;
+    if (from > to) from = start - pad;
+    prevSpanEnd = Math.max(prevSpanEnd, to);
     plat[bk.platform] = (plat[bk.platform] || 0) + 1;
     const inside = pts.filter((f) => f.t >= from && f.t <= to);
+    if (inside.length) anyInside++;
     /* Standing still is judged only where movement was MEASURED inside the
-       booking (CAB_STILL_MIN, CAB_STILL_READINGS).
-       Readings 26 minutes apart are not a car standing still; they are a
-       unit reporting in bursts, and calling that "another car" was the
-       review's case 5. And the first and last readings inside must be close
-       too, so a step the walk refused cannot hide a drive. */
+       booking (CAB_STILL_MIN, CAB_STILL_READINGS, CAB_STILL_COVER). Readings 26
+       minutes apart are a unit reporting in bursts, not a car standing still,
+       and calling that "another car" was the first review's case 5; three
+       readings at the pickup and none after was the second review's N3. The
+       first and last readings inside must be close too, so a step the walk
+       refused cannot hide a drive. */
     const here = inside.filter(placed);
     const inSteps = steps.filter((x) => x.a >= from && x.b <= to);
-    const lasts = (ms(bk.ended_at) - ms(bk.requested_at)) / 6e4;
+    const lasts = end - start;
+    const cover = inSteps.reduce((x, y) => x + Math.max(0, Math.min(y.b, end) - Math.max(y.a, start)), 0);
     if (here.length >= CAB_STILL_READINGS && inSteps.length >= CAB_STILL_READINGS - 1
-      && lasts >= CAB_STILL_MIN && Number(bk.distance_km) >= CAB_TRIP_KM) {
+      && lasts >= CAB_STILL_MIN * 6e4 && cover >= CAB_STILL_COVER * lasts && Number(bk.distance_km) >= CAB_TRIP_KM) {
       stillChecked++;
       const moved = inSteps.reduce((x, y) => x + y.d, 0);
       if (moved < CAB_STILL_KM && hopKm(here[0], here[here.length - 1]) < CAB_STILL_KM) still++;
@@ -546,6 +581,11 @@ function cabmanCar({ plate, fleet_id, last, fixes, bookings, nowMs, days }) {
   const lastAt = last?.captured_at ? ms(last.captured_at) : null;
   const receiving = lastAt != null && lastAt > nowMs - FEED_WINDOW_H * 3600e3;
   const since = receiving ? null : bks.filter((b) => lastAt == null || ms(b.requested_at) > lastAt).length;
+  /* "Since its last reading" only where that reading is inside the window:
+     the bookings counted are the window's, so for a unit last heard from in
+     2024 the true count since is far larger (the second review's N1 —
+     L76099, L45240 and L45232 printed it on production). */
+  const sinceInWindow = lastAt != null && lastAt > nowMs - days * 864e5;
   /* The verdict, and the sentence that is true of it. */
   const share = read ? seen / read : null;
   let verdict; let text;
@@ -553,10 +593,10 @@ function cabmanCar({ plate, fleet_id, last, fixes, bookings, nowMs, days }) {
     verdict = 'silent';
     text = (lastAt == null ? 'CABMAN lists this car but has never sent a reading for it'
       : `no CABMAN reading in the last ${FEED_WINDOW_H} hours — the unit is silent`)
-      + (since ? `, while the car completed ${many(since, 'booking')} ${lastAt == null ? `in ${days} days` : 'since its last reading'}` : '');
+      + (since ? `, while the car completed ${many(since, 'booking')} ${sinceInWindow ? 'since its last reading' : `in the last ${days} days`}` : '');
   } else if (still >= CAB_MIN_BOOKINGS && still / stillChecked >= CAB_ELSEWHERE_SHARE) {
     verdict = 'elsewhere';
-    text = `CABMAN had the car standing still through ${still} of ${many(stillChecked, 'booking')} of ${CAB_TRIP_KM} km or more — `
+    text = `CABMAN had the car standing still through ${still} of the ${many(stillChecked, 'booking')} long enough to measure — `
       + 'the unit may be fitted to, or filed under, another car';
   } else if (pts.length && !seat.length) {
     /* Readings arrive and none carries a seat value: nothing is reported for
@@ -567,7 +607,8 @@ function cabmanCar({ plate, fleet_id, last, fixes, bookings, nowMs, days }) {
     /* The car worked and the unit said nothing while it did — not "nothing
        to check": every one of those bookings is a gap (the review's S2). */
     verdict = 'unreported';
-    text = `${many(bks.length, 'booking')} in ${days} days and no seat reading fell inside any of them — the unit is not reporting while the car works`;
+    text = `${many(bks.length, 'booking')} in ${days} days and no seat reading fell inside any of them — `
+      + (anyInside ? 'its readings inside them carry no seat value' : 'the unit is not reporting while the car works');
   } else if (read >= CAB_MIN_BOOKINGS && seen === 0) {
     verdict = 'pad_dead';
     text = `the seat never read occupied during any of ${many(read, 'booking')} — the pad is not reporting passengers`;
@@ -590,7 +631,7 @@ function cabmanCar({ plate, fleet_id, last, fixes, bookings, nowMs, days }) {
   if (verdict === 'pad_dead' && occupied.length) {
     notes.push(`it read occupied ${many(occupied.length, 'time')} in the window, never during a booking`);
   }
-  if (still && verdict !== 'elsewhere') notes.push(`standing still through ${many(still, 'booking')} of ${CAB_TRIP_KM} km or more`);
+  if (still && verdict !== 'elsewhere') notes.push(`standing still through ${many(still, 'booking')} long enough to measure`);
   if (noReading && read) notes.push(`${many(noReading, 'booking')} with no seat reading inside`);
   if (disagree >= 20 && disagree >= 0.1 * seat.length) {
     notes.push(`CABMAN's own trip flag (Engaged) disagrees with the seat on ${disagree} of ${seat.length} readings`);
@@ -659,10 +700,10 @@ export function cabmanSeat({ rosterRows = [], last = [], fixes = [], bookings = 
     as_of: new Date(nowMs).toISOString(), days, window_hours: FEED_WINDOW_H,
     roster: { known: roster.known, basis: roster.known ? 'roster' : 'readings',
       basis_reason: roster.known ? null
-        : 'CABMAN’s own list has not been read yet, so the cars with a CABMAN reading in the window stand in for it' },
+        : 'CABMAN’s own list has not been read yet, or holds no admitted car yet, so the cars with a CABMAN reading in the window stand in for it' },
     rules: { gap_min: CAB_GAP_MIN, hop_km: CAB_HOP_KM, pad_min: CAB_PAD_MIN, min_bookings: CAB_MIN_BOOKINGS,
       ok_share: CAB_OK_SHARE, still_km: CAB_STILL_KM, trip_km: CAB_TRIP_KM, elsewhere_share: CAB_ELSEWHERE_SHARE,
-      still_min: CAB_STILL_MIN, still_readings: CAB_STILL_READINGS },
+      still_min: CAB_STILL_MIN, still_readings: CAB_STILL_READINGS, still_cover: CAB_STILL_COVER },
     totals: {
       cars: rows.length, verdicts,
       bookings: sum((r) => r.bookings.total), bookings_read: sum((r) => r.bookings.read),

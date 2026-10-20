@@ -10176,6 +10176,16 @@ over the 7 Dubai days 14–20 Oct, unless it says otherwise.
   a 5-minute poll catches a short job twice at best. Judge "standing still"
   only on bookings of 10 minutes or more with 3 or more readings inside. A
   looser rule named L78465, a working car, "not moving with the car".
+* **A hotel booking's span is its start plus the distance estimate, never its
+  `ended_at`.** The close can come 55 hours later (L27976, 16 Oct) or 0.3
+  minutes after a 42 km ride. Use the reconciler's estimate
+  (`src/reconcile.js bookingWindow`). A span built on the close swallowed
+  every ride after it, and a clip at the previous booking's end then
+  emptied them.
+* **A count over the window is not a count "since" anything older.** A unit
+  last heard from in December 2025 has had more bookings since then than the
+  7 days hold. Say "in the last 7 days" unless the event is inside the
+  window.
 * **CABMAN keeps listing a dead unit.** L76099's last reading is 2024-04-16
   and it is in the current poll. "On CABMAN's list" is not "reporting";
   judge receiving on the newest reading, as `#feeds` does.
