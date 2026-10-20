@@ -136,6 +136,7 @@ export (`/api/export/lowperf.xlsx`) now cover the same ground.
   measured. If it recurs: memo the salt in-process and have the three save
   routes (target, trips-a-day, weights) clear it. That is exact while the
   API runs as one instance, which it does (`basic-xxs`, one container).
+- **The Drivers page and its Excel disagree on names and days** (found 2026-10-20, FIXLIST DR1–DR3, nothing changed yet; DR3 is one driver's Cash collected tile against "Excel ⤓ this driver"). Figures agree person by person; 57 of 115 names differ and the workbook undercounts days for multi-account drivers. Waiting on the operator to say fix.
 - **A cache hit carries no route `Cache-Control`** (the review of LPS): a
   route's own `private, no-store` is set only when the route runs. Harmless
   under open mode's deliberate policy; a ruling for the operator if
