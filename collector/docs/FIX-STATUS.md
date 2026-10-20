@@ -5152,19 +5152,58 @@ taken.
 
 | id | what | written | production | proven |
 |---|---|---|---|---|
-| DRX1 | `loadDirectory(q, {from, to, platform, fleet})` in api/driver_routes.js. `/api/drivers/directory` answers with it, and the workbook's Drivers sheet is built from it, row for row, in its order, under its names. Each row carries `person_id` from the spine | yes | pending | `money_workbook` §4: the old workbook fails 12 checks |
-| DRX2 | The Drivers sheet carries the page's Money (with what it is made of) and Paid columns, guarded as EARN like the page (`FILE_CLASSES` + manifest). Cash, Uber commission and fares by platform are attached through the person or the account. A booking the page cannot list (no driver name) is shown with a marker, never dropped | yes | pending | loose loop removed → 2 fail; EARN withheld check |
-| DRX3 | Days: distinct days across a person's accounts, the page's rule (the file took the most days on any one account) | yes | pending | A: 4 days, not 3 |
-| DRX4 | Km is rounded once per person, not per account, so the list, the driver page and the file agree (Wisal 3,565 on #driver/p114, 3,564 on the list) | yes | pending | per-account rounding restored → F reads 20, not 21 |
-| DRX5 | Every sheet of the all-drivers file names each person as the Drivers page does. One driver's file names them as their own page's header does, resolved by `driverScope().resolve`, the profile's own resolution | yes | pending | person-record name restored → 2 fail |
-| DRX6 | "Excel ⤓ this driver" opens with a Driver sheet: their page's bookings, completed, booked revenue, average fare, platform earnings, money, cash collected, cash trips, km and days | yes | pending | `money_workbook` §4 |
-| DRX7 | `/api/driver/kpis` sends `cash_trips`, `cash_taken` and `cash_unvalued` from trip_cash, and the Earnings tile "Cash collected" reads them: completed cash trips at the platform's own cash-collected figure, the fare otherwise, the operator's definition and the file's. The sub names the cash-paid bookings not completed. When the trip record marks no cash at all while the payment labels show some, the tile keeps its older reading rather than print AED 0.00 over "N cash trips" | yes | pending | `driver_routes` (45 not 55, 1 not 2); `driver_empty_window_page` cashtaken scenario: the old tile reads exactly production's "AED 2,310.58 · 56 cash trips" |
+| DRX1 | `loadDirectory(q, {from, to, platform, fleet})` in api/driver_routes.js. `/api/drivers/directory` answers with it, and the workbook's Drivers sheet is built from it, row for row, in its order, under its names. Each row carries `person_id` from the spine | yes | **on production** `b882f09d` (`c9ef23a`), 2026-10-20 | `money_workbook` §4: the old workbook fails 12 checks |
+| DRX2 | The Drivers sheet carries the page's Money (with what it is made of) and Paid columns, guarded as EARN like the page (`FILE_CLASSES` + manifest). Cash, Uber commission and fares by platform are attached through the person or the account. A booking the page cannot list (no driver name) is shown with a marker, never dropped | yes | **on production** `b882f09d` (`c9ef23a`), 2026-10-20 | loose loop removed → 2 fail; EARN withheld check |
+| DRX3 | Days: distinct days across a person's accounts, the page's rule (the file took the most days on any one account) | yes | **on production** `b882f09d` (`c9ef23a`), 2026-10-20 | A: 4 days, not 3 |
+| DRX4 | Km is rounded once per person, not per account, so the list, the driver page and the file agree (Wisal 3,565 on #driver/p114, 3,564 on the list) | yes | **on production** `b882f09d` (`c9ef23a`), 2026-10-20 | per-account rounding restored → F reads 20, not 21 |
+| DRX5 | Every sheet of the all-drivers file names each person as the Drivers page does. One driver's file names them as their own page's header does, resolved by `driverScope().resolve`, the profile's own resolution | yes | **on production** `b882f09d` (`c9ef23a`), 2026-10-20 | person-record name restored → 2 fail |
+| DRX6 | "Excel ⤓ this driver" opens with a Driver sheet: their page's bookings, completed, booked revenue, average fare, platform earnings, money, cash collected, cash trips, km and days | yes | **on production** `b882f09d` (`c9ef23a`), 2026-10-20 | `money_workbook` §4 |
+| DRX7 | `/api/driver/kpis` sends `cash_trips`, `cash_taken` and `cash_unvalued` from trip_cash, and the Earnings tile "Cash collected" reads them: completed cash trips at the platform's own cash-collected figure, the fare otherwise, the operator's definition and the file's. The sub names the cash-paid bookings not completed. When the trip record marks no cash at all while the payment labels show some, the tile keeps its older reading rather than print AED 0.00 over "N cash trips" | yes | **on production** `b882f09d` (`c9ef23a`), 2026-10-20 | `driver_routes` (45 not 55, 1 not 2); `driver_empty_window_page` cashtaken scenario: the old tile reads exactly production's "AED 2,310.58 · 56 cash trips" |
 
 Mock: `/api/driver/kpis` in mockapi.mjs sends the three new fields. The frozen
 `driver/drv-0/earnings` keeps its recorded hash. With the old mock and the new
 page it hashes to the recorded `4ec2043da6db1a58`. With the new mock, the
 guard keeps the labels' reading for that driver, whose trip record marks no
 cash.
+
+**The independent review (2026-10-20, three lenses, a skeptic per finding)**
+confirmed four, all fixed in `3520d33` and each proven by reversion:
+- km stays absent until an account measured it (the fold made it 0 for
+  multi-account people);
+- an all-unpriced cash total is empty with the count named, never 0.00;
+- rows with Money or Paid and no booking are carried;
+- the tile states cash taken whenever the API sends it. The first cut kept
+  the label reading for `pos-driver` / `cash-supervisor`, which printed card
+  fares as cash collected.
+
+**Deployed and proven on production, 2026-10-20** (PR #11, merge `c9ef23a`,
+deployment `b882f09d`, ACTIVE 10:37:46Z). The page's own data
+(`/api/drivers/directory`, cache-busted) was compared with the Excel
+downloaded for the same dates, row for row, on name, bookings, completed,
+fares, money, paid, km and days:
+
+| window | rows | differences |
+|---|---|---|
+| this month (1–20 Oct) | 117 = 117 | **0** |
+| September | 118 = 118 | **0** |
+| this month, Egari | 37 = 37 | **0** |
+
+One driver's page against "Excel ⤓ this driver", this month:
+- **p51 Sana Ullah Sher Zamin:** bookings 165, completed 147, booked revenue
+  8,691.62, platform earnings 4,343.18, cash collected 2,445.99 over 44
+  trips, km 1,794 and days 19 — all equal. The live tile reads "AED 2,445.99
+  · 44 completed cash trips · 12 cash bookings not completed, not counted".
+- **p114 Wisal:** equal throughout, with km 3,582 on both and the header name
+  on both.
+- **p292 Joseph Wandera and p286 Majid Shah:** cash-like labels that are not
+  cash in hand. The live tile reads "AED 0.00 · none of these bookings was
+  cash in the driver's hand: 29 pos-driver, 9 cash-supervisor …", and the
+  file reads 0.00. The tile used to show AED 1,585 and AED 1,620.
+
+Cost: every workbook now computes the Drivers page first, about 2.5 s for a
+month and 22 s at 365 days, measured on production. For "Excel ⤓ this driver"
+a person-scoped directory would be cheaper. That is noted in HANDOFF and is
+not a defect.
 
 Not changed: which name a person carries. Three surfaces use three rules: the
 list, the longest account name; the driver page, the longest spelling across
