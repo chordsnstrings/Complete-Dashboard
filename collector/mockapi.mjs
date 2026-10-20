@@ -1267,6 +1267,9 @@ app.get('/api/money/sources', (_, r) => r.json({
 app.get('/api/drivers/directory', (_, r) => r.json([
   ...drivers.map((name, i) => ({
     driver_ext_id: `drv-${i}`, ids: [`drv-${i}`], driver_name: name,
+    /* The spine's person the row folded on (loadDirectory, 2026-10-20), so the
+       money workbook can attach its cash to exactly this row. */
+    person_id: 100 + i,
     // The stored fold the directory groups on — the same key the overview counts.
     person_key: name.toLowerCase(), fleet_id: i % 3 ? 'ecosine' : 'egari',
     trips: 420 - i * 37, completed: 400 - i * 36, bookable: 420 - i * 37,
