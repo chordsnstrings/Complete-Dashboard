@@ -385,6 +385,74 @@ second, bookings as evidence only. What that showed, for whoever imports it:
   car. 35 of the 139 had none since 1 Oct 2026; L26153 none since 15 Oct 2025,
   yet it went to a garage seven times after that, the last on 29 Sep 2026.
 
+## The work done most often, and the price sheet (2026-10-20)
+
+The operator re-supplied both files on 2026-10-20 (session uploads, not in the
+repository). **The team's log is also a live Google Sheet,
+`Garage_Maintenance_Log`, shared with the operator's Google account and edited
+by the team** (last edit 2026-10-20 07:21Z). The upload and the Drive copy were
+identical: 373 rows. Of those, 357 are jobs. The rest are 11 blank rows, one
+"MMS AUGUST TOTAL" subtotal row (255), and three rows that repeat a job: 53 and
+109 record jobs 52 and 108 twice, and 126 is Zeefek's parts for the job on 125.
+
+**The distinct invoices reproduce exactly**: 239 invoices, AED 423,841.96, out
+of 367 documents. The rules that reproduce it:
+- an identical repeat (same vendor, invoice number, car, date and total) is a copy: 120;
+- an undated document with the same vendor, car and total as a dated one is a copy: 5;
+- R0368 (the cheque cover page) and R0378 (the payment advice) are payments, not invoices;
+- R0396 (CCF_000082) is the revised copy of R0395 (CCF_000081).
+
+The 126 copies match the earlier count. The earlier split, 110 identical and
+15 undated, used a stricter "identical".
+
+**Itemisation is a judgement, and the rule is now written down.** 1,443 of the
+audit's 1,715 lines are scaled pro rata to their invoice's total. So "the lines
+add up" proves nothing. The test that does is the invoice total divided by the
+lines' pre-VAT sum: within 1% of 1.00 or 1.05. On that test 202 invoices (450
+lines) are itemised and 37 (AED 156,107.21) are left whole: 31 whose lines do
+not fit, and 6 bundled totals. The 2026-10-14 consolidation itemised 216
+(AED 111,777.21 left whole) by a rule it did not record.
+
+**What the log says is done most** (357 jobs; a job naming several pieces of
+work counts under each; 124 jobs name more than one):
+
+| work type | jobs | cars |
+|---|---|---|
+| Tyres | 108 | 74 |
+| A/C & cooling | 80 | 66 |
+| Suspension & steering | 53 | 42 |
+| Exterior/underbody components | 50 | 42 |
+| Body & paint | 47 | 39 |
+| Recovery/towing | 39 | 27 |
+| Alignment & balancing | 32 | 28 |
+| Battery & electrical | 27 | 22 |
+| Engine/mechanical/drivetrain | 27 | 21 |
+| Routine servicing | 25 | 11 |
+| Programming & diagnostics | 24 | 20 |
+| Glass/windows/mirrors | 23 | 22 |
+| Brakes | 16 | 15 |
+| Wheel/rim work | 14 | 14 |
+| SRS/safety systems | 3 | 2 |
+
+Specific jobs, most often first: tyre change 108, A/C service 76, dent and
+paint 43, tow 39, lower and control arms 35, A/C filter 33, wheel alignment
+32, wheel bearing 26, programming 24, oil and filter 19, 12/16 V battery 19.
+
+The money is spread differently. On the 450 itemised lines, battery and
+electrical is AED 78,771, mostly two high-voltage battery jobs. Suspension
+and steering is AED 32,313, and Tyres is AED 13,796 on lines, while the
+AED 52,670 tyre-stock invoice is a bundled total.
+
+**The garage price sheet** (artifact
+https://claude.ai/artifact/MGqiK9J7SyM3cSBpVupSPa, private, and a PDF) is a
+quotation form. It lists 113 jobs under the fifteen types plus a "General"
+group (labour rate, diagnostics, washing). Each job has its unit and its
+count in the log, and there are six blank price columns, eight write-in
+rows, and a details box for each garage. One sheet is printed per car
+model. It is the starting list for the signed price lists of ruling 8. The
+scripts that made it lived in a session scratchpad: the job list and its
+patterns are reproducible from the log by the rules above, and are not kept.
+
 ## Inputs needed from the operator
 
 The four questions asked 2026-10-14 are answered (rulings 13–16).

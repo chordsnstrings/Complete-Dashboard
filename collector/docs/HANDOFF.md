@@ -27,7 +27,7 @@ stale document.
 | 0.2 | ~~LPG not deployed~~ **Done 2026-10-20:** LPG1–11 are on production and proven (FIX-STATUS LPG, deployment `9cf3fe85`). | — | ~~The page's speed~~ **Done 2026-10-20 (FIX-STATUS LPS):** `/api/lowperf` is cached under a key that carries the target; the default view answers in 0.3–0.6 s (was 6.2–7.7 s), and the page opens in 4.96 s on desktop and 1.82 s on the phone (was 12.4 / 12.2 s). |
 | 0.3 | **Deploying needs a DigitalOcean token, and none is stored.** The operator pasted one into the 2026-10-20 session; it lived only in that session's scratchpad. | Checked through the API: the `fleet-dashboard` app builds two components, the `api` service and the `collector` worker (both `basic-xxs`), from `claude/ecosine-egari-tracking-apis-rf9ong`. **`deploy_on_push` is off on both, so nothing deploys on a merge.** | Get a token from the operator for each deploying session, kept outside the repo; suggest they revoke tokens pasted into chat. Then `POST /v2/apps/$APP_ID/deployments` with `{"force_build":true}`, poll that deployment id to `ACTIVE`, and compare `services[].source_commit_hash` and the `sw.js` fingerprint (§9) with the branch. |
 | 0.4 | Production is at `92779d9` (deployment `c358d4d8`, 2026-10-20 07:45Z): PRs #4–#8 merged and force-built. | — | Merge work into the production branch through a PR, then force-build (§0.3). |
-| 0.5 | **The operator has an unanswered question from 2026-10-19 14:29Z** (garage history, §5). | They asked for the garage audit, plan and build to come straight after LPG. The session asked how the existing garage history should reach production and got no answer, because the session died. | Ask again, in the same terms (§5). |
+| 0.5 | **The operator has an unanswered question from 2026-10-19 14:29Z** (garage history, §5). | They asked for the garage audit, plan and build to come straight after LPG. The session asked how the existing garage history should reach production and got no answer, because the session died. **2026-10-20:** the two source files were re-supplied (session uploads; the log is also a live Google Sheet), the distinct invoices reproduce at 239 / AED 423,841.96, and a printable six-garage price sheet was made (GARAGE-PLAN.md, "The work done most often"). The import-route question was put again and is still open. | Ask again, in the same terms (§5). |
 
 ---
 
@@ -122,8 +122,20 @@ export (`/api/export/lowperf.xlsx`) now cover the same ground.
   desktop page waits on before it routes. For an anonymous reader it is one
   read of `fleet`, cached 60 s (`api/access/service.js allFleets`), so the
   spread is a wait for a database connection; measured in the first minutes
-  after a deploy, while the boot warm pass runs every window. Re-time it at
-  rest before working on it.
+  after a deploy, while the boot warm pass runs every window. **Re-timed at
+  rest (08:05Z, 20 min after the deploy): 0.28–0.73 s, the same as
+  `/api/health` (0.46–0.74 s)**, so it is not a problem of its own. The
+  desktop then drew #low-performers in 6.1 s and the phone in 2.3 s. The list
+  answered in 0.2–0.3 s; the rest was module loading through the mirror.
+- **One `stale` read of `/api/lowperf` took 5.1 s at rest** (1 of 5;
+  the others 0.34–0.71 s). A stale serve computes nothing, so the wait was
+  before it. Every request waits for the target salt query, and the version
+  re-read every 30 s, on the shared 8-connection pool (`src/db.js`). The
+  stale refresh behind the previous reader runs the list's dozen aggregates
+  on that same pool. That points at a connection wait, though it was not
+  measured. If it recurs: memo the salt in-process and have the three save
+  routes (target, trips-a-day, weights) clear it. That is exact while the
+  API runs as one instance, which it does (`basic-xxs`, one container).
 - **A cache hit carries no route `Cache-Control`** (the review of LPS): a
   route's own `private, no-store` is set only when the route runs. Harmless
   under open mode's deliberate policy; a ruling for the operator if
