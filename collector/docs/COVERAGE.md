@@ -899,6 +899,16 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **The banner's run age is the last run that DELIVERED, per fleet — and
+  until 2026-10-20 it was not.** A fleet whose freshest run failed fell back
+  to the source's fleet-less runs, and Bolt still has those from before its
+  runs were split by fleet: the banner said Bolt Ecosine last ran "986h ago"
+  the morning after it delivered 739 bookings. Without a fleet-less run, a
+  fleet failing every run read 'ok' under a working credential. Never read a
+  stall from "the freshest run, if it delivered". `run_age_h` = last delivery;
+  `still_collecting` = the freshest run delivered (api/auth_routes.js,
+  FIXLIST "The banner's clock").
+
 * **EVERY MONEY FIGURE IS PRINTED TO THE FILS, AND THE API HAS TO SEND THE
   FILS.** The operator ruled on 2026-09-23 that money is precise everywhere
   (AED 1,275.14), in both skins. Five things follow, and each has already
@@ -10196,3 +10206,52 @@ over the 7 Dubai days 14–20 Oct, unless it says otherwise.
 * **CABMAN keeps listing a dead unit.** L76099's last reading is 2024-04-16
   and it is in the current poll. "On CABMAN's list" is not "reporting";
   judge receiving on the newest reading, as `#feeds` does.
+
+## ntfy phone alerts — built 2026-10-20
+
+The credential banner's verdicts (`/api/auth`, `authHealth` in
+api/auth_routes.js), pushed to the operator's phone through ntfy when a row
+changes. api/alerts.js runs in the API every 5 minutes, and src/ntfy.js posts
+the alert. FIX-STATUS NTFY has what is sent, at which priority, and why.
+
+* **Setup.** In the ntfy app (Android or iOS), subscribe to the topic held in
+  `NTFY_TOPIC`, on server `NTFY_URL` (default https://ntfy.sh). Set it on the
+  Settings page under "ntfy (phone alerts)" or as an app env secret. Empty
+  means off. The first pass after a topic is set sends "Fleet dashboard alerts
+  are on", listing everything currently wrong. That message is the
+  end-to-end proof.
+* **The topic is the lock.** On ntfy.sh anyone who knows the topic name can
+  read every message and post to it. Treat it as a credential: long, random,
+  never in the repository. Messages carry credential KEY names, fleets and the
+  banner's reason ("refresh token expired …"), never a value. For a private
+  channel, use a self-hosted server or a reserved topic with `NTFY_TOKEN`.
+* **Timing.** A change is pushed once the source has been observed again and
+  still says it: a later run of that source, or a re-check of the credential.
+  So a real stop reaches the phone one run after it is recorded — about 10
+  minutes for CABMAN, about 35 for the half-hourly sources — and a refusal
+  that the next run clears is never sent. A pure stall is pushed after two
+  passes (the silence is the evidence), anything else after an hour at most,
+  and a credential is told at most once per 30 minutes. **Do not confirm by
+  watcher passes:** a half-hourly source's verdict from one failed run
+  survives every pass until its next run (found by review, 2026-10-20).
+* **One row per credential, not per surface.** `credential_state` keeps one
+  row per provider|fleet|credential and overwrites `surface` on every write
+  (a healthy Bolt run ends on getPayouts; an expired token is written on
+  orderHistory). Anything that remembers a banner row must key on the
+  credential, or a recovery and the next fault land on different keys.
+* **Re-announcing.** `alert_state` (schema_v110) holds what was last TOLD.
+  To make the watcher say hello again (for example after changing the topic),
+  `DELETE FROM alert_state`. The next pass sends the "alerts are on" summary.
+* **What it does not watch.** Sources with no credential row: `events`
+  (GDELT, routinely throttled), `external` (weather) and `ledger` (manual).
+  It also cannot see the API's own death. The worker's death shows through
+  the stall clocks.
+* **ntfy.sh limits** (docs.ntfy.sh/publish, read 2026-10-20): a message over
+  4,096 bytes is sent as an attachment (clipped at 3,900 here). Requests are
+  limited per visitor and refill at one per 5 seconds, and **ntfy.sh allows
+  250 messages a day**. The watcher sends at most one message per 5-minute
+  pass (288 a day at the very worst, and only if a row changed on every
+  pass), and the 30-minute quiet gap per row keeps real traffic far below
+  that.
+* Reachable from this sandbox through the proxy (`GET https://ntfy.sh/v1/health`
+  → `{"healthy":true}`, 2026-10-20).

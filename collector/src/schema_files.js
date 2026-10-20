@@ -343,4 +343,7 @@ export const SCHEMA_FILES = [
      followed from then on (api/lowperf_routes.js), kept by the Owner and the
      Operations managers. */
   'schema_v109.sql',
+  /* v110: what the ntfy watcher last told the operator about each banner row
+     (api/alerts.js), so a restart re-announces nothing. */
+  'schema_v110.sql',
 ];
