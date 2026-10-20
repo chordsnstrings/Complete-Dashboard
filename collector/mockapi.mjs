@@ -1267,6 +1267,9 @@ app.get('/api/money/sources', (_, r) => r.json({
 app.get('/api/drivers/directory', (_, r) => r.json([
   ...drivers.map((name, i) => ({
     driver_ext_id: `drv-${i}`, ids: [`drv-${i}`], driver_name: name,
+    /* The spine's person the row folded on (loadDirectory, 2026-10-20), so the
+       money workbook can attach its cash to exactly this row. */
+    person_id: 100 + i,
     // The stored fold the directory groups on — the same key the overview counts.
     person_key: name.toLowerCase(), fleet_id: i % 3 ? 'ecosine' : 'egari',
     trips: 420 - i * 37, completed: 400 - i * 36, bookable: 420 - i * 37,
@@ -1575,6 +1578,16 @@ app.get('/api/driver/kpis', (req, r) => {
     cash_bookings_priced: i === 4 ? 7 : (i % 3 === 0 ? 0 : 9 + i),
     cash_booking_value: i === 4 ? 310 : (i % 3 === 0 ? null : 240 + i * 12),
     cash_booking_platforms: i === 4 ? ['bolt'] : ['uber', 'bolt'],
+    /* trip_cash, as /api/driver/kpis sends it since 2026-10-20: the completed
+       cash trips and what they took (the platform's own figure, the fare
+       otherwise) — fewer than the cash-paid bookings above, because a
+       cancelled cash booking is not cash taken. Driver 4 has one not valued. */
+    /* Consistent with this mock's /api/driver/mix, which gives every driver
+       44 bookings paid in cash: 41 of them completed, at Uber's own figure
+       (the fare plus tolls the rider paid in cash). */
+    cash_trips: i === 4 ? 7 : 41,
+    cash_taken: i === 4 ? 268.4 : 1642.5,
+    cash_unvalued: i === 4 ? 1 : 0,
     day_stmt_days: i === 4 ? 0 : 7,
     day_cash_days: i === 4 ? 0 : 7,
     day_payout_days: 7,

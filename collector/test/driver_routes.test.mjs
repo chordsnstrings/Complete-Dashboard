@@ -534,6 +534,29 @@ console.log('\nthe account fold closes, whichever door it is entered by');
 }
 
 
+/* ── Cash collected is cash taken (2026-10-20, docs/FIXLIST DR3) ───────────
+   The Earnings tab's Cash collected tile read the fare of every cash-PAID
+   booking, cancelled ones included; "Excel ⤓ this driver" reads trip_cash —
+   completed cash trips at Uber's own cash-collected figure, the fare
+   otherwise. /api/driver/kpis now sends trip_cash's count and total, and the
+   tile reads them first. One completed Uber cash trip whose fare is 40 and
+   whose cash collected (fare plus a toll the rider paid in cash) is 45, and
+   one cancelled cash booking priced 15.
+   REVERSION (run 2026-10-20): read the tile's figure from trip_ext's cash
+   bookings again (FROM trip_ext … AND driver_holds_cash, sum(price)) — "one
+   completed cash trip" and "at Uber's figure" fail with 2 and 55. */
+{
+  await trip('uber', 'cash-ok', 'u-cashy', 'Cash Driver', 'L10001', '2026-08-20', 10, { pay: 'cash', price: 40 });
+  await q(`UPDATE trip SET raw = '{"uber_payments":{"cash_collected":-45}}'::jsonb WHERE external_id = 'cash-ok'`);
+  await trip('uber', 'cash-cx', 'u-cashy', 'Cash Driver', 'L10001', '2026-08-20', 12, { pay: 'cash', price: 15, status: 'rider_cancelled' });
+  const ck = (await get('/api/driver/kpis?id=u-cashy&from=2026-08-20&to=2026-08-20')).body;
+  check('Cash collected: one completed cash trip, the cancelled cash booking not counted', ck.cash_trips === 1 && ck.cash_bookings === 2, JSON.stringify(ck));
+  check('…at Uber\u2019s own cash-collected figure, not the fare', Number(ck.cash_taken) === 45, String(ck.cash_taken));
+  const page = readFileSync('api/public/driver.js', 'utf8');
+  check('the Earnings tile reads cash_trips and cash_taken before any older figure',
+    /if \(cashTakenKnown\) \{\s*if \(\+k\.cash_trips > 0\) return k\.cash_taken != null \? money\(k\.cash_taken\)/.test(page));
+}
+
 server.close();
 
 console.log(`\n${pass} passed, ${fail} failed`);

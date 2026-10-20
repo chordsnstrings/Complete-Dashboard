@@ -410,16 +410,627 @@ export function driverScope({ q, wrap }) {
   return { resolve, withDriver };
 }
 
+/* The person key: a provider id where there is one, the synthesised name: key
+   where there is not. Every query over trip/trip_norm keys on this, never on
+   the raw column — keyed raw, a driver the provider names without an id has
+   no matchable rows and every panel on their page comes back empty while the
+   directory row that linked there says they drove. Module-level since
+   2026-10-20, so loadDirectory() and the routes share one definition. */
+const PKEY = `coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || ${CANON('driver_name')})`;
+
+/* ── THE DRIVERS LIST, AS ONE FUNCTION (2026-10-20) ─────────────────────
+   /api/drivers/directory answers with it, and the money workbook's Drivers
+   sheet is built from it, so "Excel ⤓" on Drivers carries the page's own
+   names, counts, days, km and money by construction rather than by a second
+   set of queries that agreed on most of them. The two disagreed on 57 of 115
+   names and on the days of every driver with several accounts on 1-20
+   October 2026 (docs/FIXLIST-2026-09-05.md DR1-DR2). */
+export async function loadDirectory(q, { from, to, platform = null, fleet = null }) {
+  const P = [from, to, platform, fleet];
+  const filtered = !!(platform || fleet);
+  /* "Has this person ever driven, and when last" is the one question here
+     with no window, so answering it live means grouping the entire trip
+     history on every request — two hundred and fifteen thousand rows to
+     decorate eight hundred directory rows. driver_lifetime holds it,
+     rebuilt after every collection from the SAME SQL that is the fallback
+     below, so the two cannot disagree; the fallback runs on a fresh
+     database or a deploy that lands before the first rollup.
+
+     A seq-scan predicate on purpose, in both. Written as
+       WHERE person_key IS NOT NULL AND person_key <> ''
+     it matches the partial index's own predicate exactly, so the planner
+     chose an index scan and then fetched the heap row for essentially every
+     row in the table: this endpoint went from 4.3s to 41s. The projection
+     still uses person_key, which is where the saving actually was. */
+  const lifetimeReady = (await q('SELECT 1 FROM driver_lifetime LIMIT 1')).length > 0;
+  /* The placeholder licence date, detected the way /api/compliance/drivers
+     and src/insights.js already detect it: one date on at least half the
+     dated rows, over at least five of them, is what this source writes when
+     the field was never filled in.
+     ─────────────────────────────────────────────────────────────────────
+     The directory did not know about it. All 77 rows carrying licence number
+     123456 and the identical date 2026-01-01 were served with a past expiry,
+     and the page counted them into "77 with an expired licence" and painted
+     red EXPIRED pills — while /api/compliance/drivers, describing the same
+     people, reported expired: 0. Two pages of one product disagreeing about
+     whether 77 named people may legally drive. */
+  const [phRow] = await q(
+    `SELECT to_char(licence_expires, 'YYYY-MM-DD') AS d, count(*)::int n,
+            (SELECT count(*)::int FROM driver_compliance WHERE licence_expires IS NOT NULL) AS with_date
+     FROM driver_compliance WHERE licence_expires IS NOT NULL
+     GROUP BY licence_expires ORDER BY n DESC LIMIT 1`);
+  const placeholderDate = phRow && phRow.with_date && phRow.n >= 5
+    && phRow.n / phRow.with_date >= 0.5 ? phRow.d : null;
+  /* The lifetime CTE carries identity now, not just counts.
+     ─────────────────────────────────────────────────────────────────────
+     Measured on production over thirty days: 361 rows, 244 of them with no
+     fleet, no channel list and no vehicle — one of those people has 2,393
+     trips on record. Every one of those columns was read from the WINDOW's
+     trips, and a person who last drove in June has none. A driver's fleet is
+     not a fact about a date range, so it is answered over the whole history
+     and used only where the window has nothing to say. The fallback below
+     computes the same three columns, so a fresh database behaves
+     identically. */
+  const everSql = lifetimeReady
+    ? `SELECT driver_ext_id, driver_name, last_ever, lifetime,
+              last_fleet, platforms AS ever_platforms, last_plate
+         FROM driver_lifetime`
+    : `SELECT coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || person_key) AS driver_ext_id,
+              max(driver_name) AS driver_name,
+              max(requested_at) last_ever, count(*)::int lifetime,
+              (array_agg(fleet_id ORDER BY requested_at DESC NULLS LAST)
+                 FILTER (WHERE fleet_id IS NOT NULL))[1] AS last_fleet,
+              array_agg(DISTINCT platform)
+                FILTER (WHERE platform IS NOT NULL AND platform <> '') AS ever_platforms,
+              (array_agg(plate ORDER BY requested_at DESC NULLS LAST)
+                 FILTER (WHERE plate IS NOT NULL AND btrim(plate) <> ''))[1] AS last_plate
+         FROM trip WHERE driver_name IS NOT NULL AND btrim(driver_name) <> '' GROUP BY 1`;
+  const rows = await q(
+    `WITH ever AS (${everSql}),
+     work AS (
+       /* The synthesised key from the STORED fold. Written with the fold
+          inline it ran two nested regexes over every row in the window as
+          the GROUP BY key, which is nineteen twentieths of this CTE's cost
+          (schema_v20 measured 2,434ms against 129ms) — and it is the same
+          value, because person_key IS that expression, generated and
+          stored. The filter still tests driver_name: matching the partial
+          index's own predicate is what took this endpoint from 4.3s to 41s. */
+       SELECT coalesce(nullif(btrim(n.driver_ext_id), ''),
+                       'name:' || bt.person_key) AS driver_ext_id,
+              max(n.driver_name) AS work_name,
+              /* The STORED fold of the name this person drove under, carried
+                 out so the fold below can key on it. See the note at the
+                 fold. */
+              max(bt.person_key) AS person_key,
+              min(n.fleet_id) fleet_id,
+              count(*) FILTER (WHERE n.is_booking)::int trips,
+              count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
+              count(*) FILTER (WHERE n.outcome IS NOT NULL)::int bookable,
+              count(DISTINCT n.local_day)::int days,
+              /* Unrounded here and rounded ONCE per person in the fold below.
+                 Rounded per account it was summed from whole numbers, so a
+                 person with three accounts read up to 1.5 km off their own
+                 page, which sums first and rounds after: Wisal Muhammad,
+                 3,564 here and 3,565 on #driver/p114 for 1-20 October
+                 2026 (docs/FIXLIST-2026-09-05.md DR1-DR3). */
+              sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance)::numeric km,
+              round(sum(n.price) FILTER (WHERE n.has_fare)::numeric, 2) revenue,
+              count(*) FILTER (WHERE n.has_fare)::int priced_trips,
+              max(n.requested_at) last_trip, min(n.requested_at) first_trip,
+              array_agg(DISTINCT n.platform) platforms,
+              mode() WITHIN GROUP (ORDER BY n.plate) AS plate
+       FROM trip_norm n JOIN trip bt ON bt.platform = n.platform AND bt.external_id = n.external_id
+       -- Grouped on the SAME synthesised key as the ids CTE below. Keyed on
+       -- the raw column, a driver named without an id had an ids row and no
+       -- work to join to it, so they appeared with a permanent zero, which is
+       -- worse than absent: it reads as somebody who did nothing.
+       WHERE n.local_day BETWEEN $1::date AND $2::date
+         AND coalesce(btrim(n.driver_name), '') <> ''
+         AND ($3::text IS NULL OR n.platform = $3)
+         AND ($4::text IS NULL OR n.fleet_id = $4)
+       GROUP BY 1
+     ),
+     ids AS (
+       /* Everyone we know of, from any source, whether or not they drove.
+          A name with no id is still a person: the id is synthesised from the
+          canonical name so they key identically here, in the work CTE below,
+          and in vehicle_driver_day. Requiring an id here made those people
+          vanish from the directory entirely.
+
+          The trip branch reads the CTE above rather than scanning the table
+          a second time. The who CTE takes max(driver_name) per key, so
+          collapsing the several names a key may carry to their max here
+          leaves that maximum unchanged. */
+       /* The all-time branch carries no platform or fleet — driver_lifetime
+          is keyed on the person alone — so under a filter it would readmit
+          the whole roster with its work zeroed, which reads as "everybody is
+          idle on Bolt". Under a filter the population is exactly the people
+          the three filterable sources name. */
+       SELECT driver_ext_id, driver_name FROM ever
+         WHERE $3::text IS NULL AND $4::text IS NULL
+       UNION
+       SELECT w.driver_ext_id, w.work_name FROM work w
+       UNION
+       SELECT coalesce(nullif(btrim(driver_ext_id), ''),
+                       'name:' || ${CANON('full_name')}), full_name FROM driver_compliance
+         WHERE coalesce(btrim(full_name), '') <> ''
+           AND ($3::text IS NULL OR platform = $3) AND ($4::text IS NULL OR fleet_id = $4)
+       UNION
+       SELECT coalesce(nullif(btrim(driver_ext_id), ''),
+                       'name:' || ${CANON('full_name')}), full_name FROM driver_platform_state
+         WHERE coalesce(btrim(full_name), '') <> ''
+           AND ($3::text IS NULL OR platform = $3) AND ($4::text IS NULL OR fleet_id = $4)
+     ),
+     who AS (
+       SELECT driver_ext_id, max(driver_name) AS driver_name FROM ids GROUP BY 1
+     ),
+     /* What actually reached the fleet for this person's work.
+        ─────────────────────────────────────────────────────────────────────
+        The revenue column beside this one is sum(trip.price), and the Uber
+        trip export has no fare column at all (sql/schema_v18.sql:73). Uber is
+        236,000 of the fleet's 253,000 trips, so on a seven-day window 101
+        people drove and 21 had a fare — eighty rows of a table whose job is
+        to rank people showed a dash in the only money column it had.
+
+        The money exists; it is simply not a fare. driver_payout_day carries
+        what each account was PAID, and that is what an operator ranking
+        drivers is actually asking about. Keyed on the account id and summed
+        over the window's days, so overlapping report periods cannot double
+        count — that resolution already happened when the table was built
+        (sql/schema_v23.sql). */
+     pay AS (
+       SELECT driver_ext_id,
+              round(sum(earnings)::numeric, 2) AS payout,
+              count(DISTINCT day)::int AS payout_days
+         FROM driver_payout_day
+        WHERE day BETWEEN $1::date AND $2::date
+          AND ($3::text IS NULL OR platform = $3)
+          AND ($4::text IS NULL OR fleet_id = $4)
+        GROUP BY 1
+     ),
+     /* One money column that answers for everybody.
+        ─────────────────────────────────────────────────────────────────────
+        The two columns beside it each answer for about half the roster and
+        for different halves: revenue is the fares on the trips, which 44 of
+        119 active drivers have, because Uber's export carries no fare at all;
+        payout is what the platform paid, which 96 have. Between them nobody
+        is missing — and a reader ranking drivers is reading one column for
+        one person and a different, incomparable one for the next.
+
+        driver_day.money is the resolution this fleet already made: per
+        platform, the statement's net where a channel filed one and its fares
+        where it did not, then summed (src/rollup.js). money_period_days
+        travels with it because most of it is a weekly statement divided
+        across its days, and the coarsest window on a person's days is what
+        limits what can be said about their total.
+
+        Keyed on the account and summed: the money lands on ONE account per
+        person-day by design (the owner CTE in src/rollup.js), so a person
+        holding two accounts is added, not doubled. */
+     dmoney AS (
+       SELECT driver_ext_id,
+              round(sum(money)::numeric, 2) AS money,
+              count(*) FILTER (WHERE money IS NOT NULL)::int AS money_days,
+              CASE WHEN bool_or(money IS NOT NULL AND money_period_days IS NULL) THEN NULL
+                   ELSE max(money_period_days) END AS money_period_days,
+              CASE WHEN count(DISTINCT money_source) FILTER (WHERE money_source <> 'none') > 1
+                   THEN 'mixed'
+                   ELSE max(money_source) FILTER (WHERE money_source <> 'none') END AS money_source
+         FROM driver_day
+        WHERE day BETWEEN $1::date AND $2::date
+          AND ($4::text IS NULL OR fleet_id = $4)
+        GROUP BY 1
+     )
+     /* The lifetime figures come from the CTE at the top of this statement:
+        the last trip EVER, so "has not driven in this window" and "has never
+        driven" are different rows rather than the same blank — and keyed on
+        person_key rather than the fold, because that scan is unbounded and
+        folding 175,000 names per request is what the stored, indexed column
+        exists to avoid. */
+     SELECT who.driver_ext_id, who.driver_name, w.person_key,
+            coalesce(w.trips, 0) AS trips, coalesce(w.completed, 0) AS completed,
+            coalesce(w.bookable, 0) AS bookable, coalesce(w.days, 0) AS days,
+            w.km, w.revenue, coalesce(w.priced_trips, 0) AS priced_trips,
+            pay.payout, coalesce(pay.payout_days, 0) AS payout_days,
+            dm.money, coalesce(dm.money_days, 0) AS money_days,
+            dm.money_period_days, dm.money_source,
+            w.last_trip, w.first_trip,
+            /* Window first, whole history second. The window answer is the
+               one that describes THIS range; the lifetime answer exists so
+               that a person the range does not cover is still identified
+               rather than shown as four blanks under their own name.
+               ever_* is never used to overwrite a window value. */
+            coalesce(w.plate, ev.last_plate) AS plate,
+            /* …and the books, third. 129 of the people still blank after
+               the history fallback have never driven at all, so no trip can
+               name their fleet — but every one of them holds a standing or a
+               compliance record, and BOTH of those tables carry fleet_id
+               (this query already filters on it). A person on the books with
+               no fleet beside their name is the page failing to read a
+               column it is already joined to. */
+            coalesce(w.fleet_id, ev.last_fleet, dc.fleet_id, dps.fleet_id) AS fleet_id,
+            coalesce(w.platforms, ev.ever_platforms, ARRAY[]::text[]) AS platforms,
+            /* So a reader can tell a measurement from an identity: true
+               where these three describe work outside the window. */
+            (w.trips IS NULL OR w.trips = 0) AND coalesce(ev.lifetime, 0) > 0
+              AS identity_from_history,
+            ev.last_ever, coalesce(ev.lifetime, 0) AS lifetime_trips,
+            dc.state, dc.licence_expires, dc.rating,
+            /* Whether this product HOLDS the person's photograph, so every
+               list that draws them can draw their face rather than two
+               letters.
+               ─────────────────────────────────────────────────────────────
+               Not dc.picture_url. That column holds what Uber returned: a
+               CloudFront URL signed for twelve hours, written weekly, and
+               therefore dead for about 93% of its life — measured on
+               production, 156 of them expired together on 4 September and
+               every one answered 403 behind an <img> that deletes itself.
+               A row in driver_photo means the bytes are on this origin, and
+               the address is built from the key rather than stored. This
+               reads two key columns and never an image.
+
+               dp.platform, not this row's platform. The first cut of this
+               built the address out of r.platform in the fold below — and
+               THIS select has no bare platform column at all. It has
+               platforms (an array), compliance_platform, state_platform;
+               the other three routes that draw a face happen to select a
+               scalar platform column, so they worked and this one silently handed
+               434 of 434 people a null. Measured on production after the
+               first real profile run: compliance 157 addresses, leaderboard
+               81, profile 1, directory 0.
+
+               Taking it from dp is also the correct source on its own terms.
+               The address must name the row the bytes are actually under; a
+               person with a hotel compliance record and an Uber photograph
+               would otherwise be sent to /api/driver/photo/hotel/<id>, which
+               is a 404 by construction. */
+            dp.platform AS photo_platform,
+            (dp.platform IS NOT NULL) AS has_photo,
+            /* And why not, when there is a reason worth telling. Same shape
+               as dp: one row out however many are in. */
+            pm.reason AS photo_absent_reason,
+            (dc.licence_expires - now()::date) AS licence_days_left,
+            ($5::text IS NOT NULL
+             AND to_char(dc.licence_expires,'YYYY-MM-DD') = $5) AS licence_placeholder,
+            /* Which platform said it. 241 of the people in this directory
+               have never driven — the panel exists for them — and every
+               column describing them was blank because the source platform
+               was dropped on the way out. A compliance record from Uber and
+               a standing from Bolt are different claims and the page could
+               not tell them apart, or say which one it was showing. */
+            dc.platform AS compliance_platform,
+            dps.state AS platform_state, dps.can_earn,
+            dps.platform AS state_platform, dps.plate AS state_plate,
+            /* The platform's own rating, which is what this column was always
+               meant to show. It read driver_compliance.rating — the hotel
+               channel's document register, which has never carried one — so
+               the column was empty on all 365 people and the sentence under
+               it blamed the channels. coalesce, not replace: if a channel
+               ever files one through compliance it still counts. */
+            coalesce(dps.rating, dc.rating) AS platform_rating,
+            dps.lifetime_trips AS platform_lifetime_trips,
+            dps.is_banned, dps.compliance_status AS platform_compliance
+     FROM who
+     LEFT JOIN work w ON w.driver_ext_id = who.driver_ext_id
+     LEFT JOIN pay ON pay.driver_ext_id = who.driver_ext_id
+     LEFT JOIN dmoney dm ON dm.driver_ext_id = who.driver_ext_id
+     LEFT JOIN ever ev ON ev.driver_ext_id = who.driver_ext_id
+     LEFT JOIN driver_compliance dc ON dc.driver_ext_id = who.driver_ext_id
+     /* LATERAL … LIMIT 1, not a plain join. driver_photo's key is
+        (platform, driver_ext_id), so one account id can carry a row per
+        channel — and a plain LEFT JOIN on the id alone would then return
+        that person's work row TWICE, which the fold below adds up. A
+        decoration that changes the trip count is not a decoration. One row
+        out, however many are in. */
+     LEFT JOIN LATERAL (
+       SELECT p2.platform FROM driver_photo p2
+        WHERE p2.driver_ext_id = who.driver_ext_id LIMIT 1) dp ON true
+     LEFT JOIN LATERAL (
+       SELECT m2.reason FROM driver_photo_miss m2
+        WHERE m2.driver_ext_id = who.driver_ext_id LIMIT 1) pm ON true
+     LEFT JOIN driver_platform_state dps ON dps.driver_ext_id = who.driver_ext_id
+     /* THE CAP THAT STARTED BITING THIS MONTH.
+        ─────────────────────────────────────────────────────────────
+        It was 800, and on 2026-09-21 the roster reached 810 accounts. So
+        this page — headed "All drivers · Everyone on the books, even people
+        with no trip in this window" — silently dropped the ten accounts
+        with the fewest trips and the latest names, which was three whole
+        people: two Zubairs and a Zeeshan. The claim in the heading stopped
+        being true and nothing said so.
+
+        It is the same defect #payouts shipped as "6 transfers on 2 dates"
+        over a register of 217. A bound that a growing roster walks into is
+        worse than no bound, because it looks like an answer.
+
+        4000 is five times the current account count, and the page reports
+        its own row count against the person spine (see the drivers view),
+        so if this ever bites again the page says so rather than quietly
+        showing fewer people than the fleet has. */
+     ORDER BY coalesce(w.trips, 0) DESC, who.driver_name LIMIT 4000`, [...P, placeholderDate]);
+
+  /* Fold per-platform rows into one row per person, so the directory lists
+     humans rather than accounts. Counts are carried through and the ratios
+     are computed ONCE at the end — folding a pre-computed percentage keeps
+     one account's number and calls it the person's. */
+  /* Keyed on the STORED fold where the window has one.
+     ─────────────────────────────────────────────────────────────────────
+     This folded on canonName(who.driver_name), and who.driver_name is a max
+     over four sources — the window's trips, the whole trip history, a
+     compliance record and a platform standing. So the directory could be
+     folding on a spelling from March while every other page in the product
+     folds on the one from this window, and the two then answer "how many
+     people drove" differently: 118 here against 119 on the overview, live,
+     for the same fleet on the same days. Neither number was wrong and
+     nothing on either page could explain the other.
+
+     person_key is that same fold, generated and stored on the trip row
+     (sql/schema_v20.sql), and it is what /api/kpis, the ranking and the
+     vehicle pages count. Using it here makes the directory's headcount the
+     overview's headcount by construction rather than by coincidence.
+
+     canonName stays as the fallback for the people the window has no work
+     for — a name on the books and nothing else — where there is no stored
+     key to prefer. It is the same rule; test/consistency.test.mjs runs both
+     over the same names and requires the same answer. */
+  /* Read once for the whole fold, not once per row: sixty rows behind a
+     thirty-second cache, and a per-row await would make the directory's cost
+     depend on how many people the fleet has. */
+  const links = await identityLinks(q);
+  /* One answer to "who is this", read from the table src/persons.js builds
+     on every collector pass. */
+  const spine = await personMap(q);
+  /* Still built, for the accounts the spine has not placed yet. */
+  const resolveKey = keyResolver(links, linkedKey);
+  const byName = new Map();
+  for (const r of rows) {
+    /* The register first, then the stored fold, then the name.
+       ─────────────────────────────────────────────────────────────────
+       The stored key already carries the register, so for a person the
+       window measured this changes nothing. It is the OTHER rows this is
+       for: a record with no work in the window has no w.person_key and
+       falls through to the name — and a great many of the merged records
+       are exactly that. Fifty-six of the register's hundred and thirty
+       alias ids have never filed a trip at all (Bolt standings and hotel
+       ObjectIds carrying a phone number and nothing else), so without this
+       the directory would still list them as separate people while every
+       aggregate in the product counted them as one. */
+    /* The register, then the roster's own proof, then the stored fold, then
+       the name.
+       ─────────────────────────────────────────────────────────────────
+       The link layer sits SECOND on purpose. ALIAS_KEY is a list a person
+       checked pair by pair against production; driver_identity_link is a
+       rule that ran, and a rule must never overrule the person who looked.
+       It sits above person_key because the stored key is the folded NAME,
+       and the whole finding is that the two channels file different names
+       for one human: "MUHAMMAD KHALIFA AFZAL KHALID" on the hotel roster and
+       "Muhammad Khalid" on Uber, one phone number, 4,461 Uber trips reported
+       under a row that showed 822. */
+    const own = r.person_key || canonName(r.driver_name);
+    /* OVER THE WHOLE COMPONENT, not one id at a time.
+       ─────────────────────────────────────────────────────────────────
+       This was `ALIAS_KEY.get(id) || linkedKey(links, id) || …`, resolved
+       per id and first-wins. The argument above for that ORDER is right and
+       is unchanged; what was wrong was the SCOPE. The register names some of
+       a person's ids and the link chain names the rest, and the two key the
+       same person differently — the register on whichever record it was
+       written against, the chain on its terminal. So the ids the register
+       named folded one way, the ids it did not folded another, and one human
+       rendered as two rows.
+
+       Measured on production 2026-09-21: 38 people, every one the same shape
+       — a short filed name against a long one. api/fold_key.js carries the
+       reasoning and the property that makes it safe: it merges nobody new,
+       because the component is built only from edges a human-reviewed
+       decision already asserts. */
+    /* THE SPINE FIRST, AND THE NAME FOLD IS GONE.
+       ─────────────────────────────────────────────────────────────────
+       src/persons.js materialises one row per human into driver +
+       driver_platform_id, from reviewed decisions only, and this asks it.
+       Every other surface asks the same table, so "how many drivers" has
+       one answer instead of the four it had on 2026-09-21 — 347 here, 437
+       on #compliance, 508 in the money picker, 0 on exposure, over the
+       same 800 accounts.
+
+       `linkedByName` is deliberately no longer consulted. It let an
+       account in NO link inherit a person because its folded name matched
+       some linked alias's, and that rule alone made 92 of the 347 rows:
+       44 supported by a matching phone, 37 with no evidence either way,
+       and NINE CONTRADICTED by different phone numbers on the records it
+       joined — the worst carrying seven accounts and three numbers, filed
+       variously as 'ZAHID KHAN ISMAIL ISMAIL' and 'Zahid Khan Mohabbat
+       Khan'. CLAUDE.md forbids it in as many words: never a name rule.
+       Those pairs are now PROPOSALS on #same-person, where a person
+       answers them.
+
+       The count goes UP as a result, and that is the honest direction:
+       what it goes up to is what the evidence supports.
+
+       The register/link fallback stays for accounts the spine has not
+       placed yet — every account until it has run once against a
+       database, and after that only arrivals since the last pass. */
+    const fromSpine = spine.byAccount.get(r.driver_ext_id);
+    const k = fromSpine != null
+      ? `person:${fromSpine}`
+      : resolveKey(
+        ALIAS_KEY.get(r.driver_ext_id)
+        || linkedKey(links, r.driver_ext_id)
+        || own,
+      );
+    const cur = byName.get(k);
+    if (!cur) {
+      /* person_id: the spine's person, when the fold keyed on it, so a
+         consumer outside this route (the money workbook's Drivers sheet)
+         can attach what it holds per person to exactly this row. */
+      byName.set(k, { ...r, person_id: fromSpine ?? null, ids: [r.driver_ext_id], platforms: [...(r.platforms || [])],
+        /* An unknown window on the SEEDING row counts the same as on any
+           other: money_period_days is null both when nothing reported money
+           and when what reported it could not say over what period, and only
+           the second makes the person's total unstatable. */
+        _grainUnknown: r.money != null && r.money_period_days == null,
+        _ratingTrips: r.platform_rating != null ? (r.platform_lifetime_trips || 0) : -1,
+        /* WHICH account carries the face. A person with a hotel record and an
+           Uber one has two rows here and only Uber files a photograph, so the
+           fold has to keep the account the picture is under rather than
+           whichever row happened to seed the person. */
+        _photo: r.has_photo ? { platform: r.photo_platform, id: r.driver_ext_id } : null,
+        _photoMiss: r.has_photo ? null : (r.photo_absent_reason || null),
+        _days: new Set() });
+      continue;
+    }
+    cur.ids.push(r.driver_ext_id);
+    if (!cur._photo && r.has_photo) cur._photo = { platform: r.photo_platform, id: r.driver_ext_id };
+    if (!cur._photoMiss && r.photo_absent_reason) cur._photoMiss = r.photo_absent_reason;
+    cur.trips += r.trips;
+    cur.completed += r.completed; cur.bookable += r.bookable;
+    cur.priced_trips += r.priced_trips;
+    cur.lifetime_trips += r.lifetime_trips;
+    /* Absent until an account measured it. `+(cur.km || 0) + +(r.km || 0)`
+       made "no distance on any account" a 0 for everyone with two accounts
+       or more, while a one-account person with none read absent — and the
+       money workbook now copies this figure (independent review of
+       2026-10-20: 1-2 people a window with hotel-only work read "0 km" here
+       and absent on their own page). */
+    if (r.km != null) cur.km = +(cur.km || 0) + +r.km;
+    cur.revenue = +(cur.revenue || 0) + +(r.revenue || 0);
+    /* Payouts DO sum across a person's accounts: two provider ids are two
+       separate statements for the same human, and both reached the fleet. */
+    if (r.payout != null) cur.payout = +(cur.payout || 0) + +r.payout;
+    cur.payout_days = Math.max(cur.payout_days || 0, r.payout_days || 0);
+    /* Summed across the person's accounts, like the payout beside it — the
+       money is on one account per person-day by construction, so this adds
+       rather than doubles. The GRAIN takes the coarsest of the accounts, and
+       an account that cannot state its window makes the person's total
+       unstated too: a figure that is partly a measurement and partly a share
+       of a week is not a measurement. */
+    if (r.money != null) cur.money = +(cur.money || 0) + +r.money;
+    cur.money_days = (cur.money_days || 0) + (r.money_days || 0);
+    if (r.money_period_days == null && r.money != null) cur._grainUnknown = true;
+    else if (r.money_period_days != null) {
+      cur.money_period_days = Math.max(cur.money_period_days || 0, r.money_period_days);
+    }
+    if (r.money_source && r.money_source !== cur.money_source) {
+      cur.money_source = cur.money_source ? 'mixed' : r.money_source;
+    }
+    /* The platform's own opinion of the person, folded across their
+       accounts. NOT averaged: two platforms rating the same human are two
+       opinions on two scales and a mean of them is a number neither provider
+       would recognise. The best-attested one wins — most lifetime trips
+       behind it — and a ban on any account bans the person, because a
+       constraint that holds anywhere holds. */
+    if (r.platform_rating != null
+        && (cur.platform_rating == null
+            || (r.platform_lifetime_trips || 0) > (cur._ratingTrips || 0))) {
+      cur.platform_rating = r.platform_rating;
+      cur._ratingTrips = r.platform_lifetime_trips || 0;
+    }
+    if (r.platform_lifetime_trips != null) {
+      cur.platform_lifetime_trips = Math.max(cur.platform_lifetime_trips || 0, r.platform_lifetime_trips);
+    }
+    if (r.is_banned === true) cur.is_banned = true;
+    cur.platform_compliance = cur.platform_compliance || r.platform_compliance;
+    cur.platforms = [...new Set([...cur.platforms, ...(r.platforms || [])])];
+    if ((r.driver_name || '').length > (cur.driver_name || '').length) cur.driver_name = r.driver_name;
+    if (r.last_trip > cur.last_trip) cur.last_trip = r.last_trip;
+    if (r.first_trip && (!cur.first_trip || r.first_trip < cur.first_trip)) cur.first_trip = r.first_trip;
+    if (r.last_ever > cur.last_ever) cur.last_ever = r.last_ever;
+    cur.state = cur.state || r.state;
+    cur.platform_state = cur.platform_state || r.platform_state;
+    cur.compliance_platform = cur.compliance_platform || r.compliance_platform;
+    cur.state_platform = cur.state_platform || r.state_platform;
+    cur.state_plate = cur.state_plate || r.state_plate;
+    if (cur.can_earn == null) cur.can_earn = r.can_earn;
+    if (r.licence_days_left != null && (cur.licence_days_left == null || r.licence_days_left < cur.licence_days_left)) {
+      cur.licence_days_left = r.licence_days_left; cur.licence_expires = r.licence_expires;
+      cur.licence_placeholder = r.licence_placeholder;
+    }
+    cur._multiAccountDays = true;
+  }
+
+  /* Distinct working days across ALL of a person's accounts. Taking the max
+     of pre-aggregated per-account counts discarded every day worked on one
+     platform and not another. Only asked for the people who actually have
+     more than one account. */
+  const multi = [...byName.values()].filter((p) => p.ids.length > 1);
+  if (multi.length) {
+    const dayRows = await q(
+      `SELECT ${PKEY} AS driver_ext_id, local_day FROM trip_norm
+       WHERE local_day BETWEEN $1::date AND $2::date
+         AND ($3::text IS NULL OR platform = $3) AND ($4::text IS NULL OR fleet_id = $4)
+         AND ${PKEY} = ANY($5)`,
+      [from, to, platform, fleet, multi.flatMap((x) => x.ids)]);
+    const idToPerson = new Map();
+    multi.forEach((p) => p.ids.forEach((id) => idToPerson.set(id, p)));
+    const days = new Map();
+    for (const d of dayRows) {
+      const person = idToPerson.get(d.driver_ext_id);
+      if (!person) continue;
+      const set = days.get(person) || new Set();
+      /* isoDay, not String(d.local_day).slice(0, 10).
+         ───────────────────────────────────────────────────────────────
+         local_day is a bare DATE — sql/schema_v18.sql:67 builds it as
+         `(requested_at AT TIME ZONE 'Asia/Dubai')::date` and the SELECT
+         above does not wrap it in to_char — so node-postgres parses it into
+         a JS Date, and those ten characters are "Fri Aug 14": the head of a
+         Date toString, with the YEAR cut off. That exact string was measured
+         coming out of this very column on /api/day, and the identical
+         mistake shipped to production in src/sources/ledger.js and printed
+         "covering days up to Fri Aug 21" on the Data-sources page.
+
+         Nothing but the Set's SIZE escapes here — it becomes `days` on a
+         /api/drivers/directory row — so the figure was right while the key
+         was wrong, and right by luck rather than by construction: dropping
+         the year leaves (weekday, month, day), which stays injective only
+         while the window is short. Production on 2026-09-02 returned 395
+         rows, 52 of them multi-account, whose `days` read 28/29/30 inside a
+         30-day window — the correct counts, for the wrong reason. But
+         api/window.js accepts days up to 3660 and from/to are unclamped, so
+         "Tue Oct 01" is both 2019-10-01 and 2024-10-01 in a window a caller
+         can ask for TODAY, and a person who drove one of those days on Uber
+         and the other on Yango silently loses a day worked. Same trap and
+         same containment as api/economics_routes.js:920, which is where the
+         702-days-0-collisions count comes from. */
+      set.add(isoDay(d.local_day));
+      days.set(person, set);
+    }
+    days.forEach((set, person) => { person.days = set.size; });
+  }
+
+  return [...byName.values()].map((p) => {
+    /* One unstatable account makes the person's grain unstatable. Resolved
+       here rather than in the fold so the flag cannot survive into the
+       payload as a private field somebody starts reading. */
+    if (p._grainUnknown) p.money_period_days = null;
+    /* This origin's address for the copy we hold, or null. Never Uber's
+       signed URL — see photoHref in api/redact.js. */
+    p.picture_url = photoHref(p._photo?.platform, p._photo?.id);
+    /* Only when there is nothing to show AND something to say.
+       Dropped first, because the fold seeds a person with `{ ...r }` and the
+       raw column rides along — so a driver with nothing to explain carried
+       `photo_absent_reason: null`, and a key that is present-and-null is a
+       different claim from a key that is absent. The whole point of this
+       field is that its presence means something. */
+    delete p.photo_absent_reason;
+    if (!p.picture_url && p._photoMiss) p.photo_absent_reason = p._photoMiss;
+    delete p._days; delete p._multiAccountDays; delete p._grainUnknown; delete p._ratingTrips;
+    delete p._photo; delete p._photoMiss; delete p.has_photo; delete p.photo_platform;
+    return {
+      ...p,
+      km: p.km == null ? null : Math.round(Number(p.km)),
+      // Computed once, over the whole person.
+      completion_pct: p.bookable ? Math.round((p.completed / p.bookable) * 100) : null,
+      // "No trip in this window" and "never driven" are different facts.
+      active_in_window: p.trips > 0,
+      ever_driven: (p.lifetime_trips || 0) > 0,
+      /* Not expired — never entered. Reported per row so a page cannot count
+         a data-quality artefact as 77 people who must stand down. */
+      licence_placeholder: !!p.licence_placeholder,
+    };
+  }).sort((a, b) => b.trips - a.trips || String(a.driver_name).localeCompare(String(b.driver_name)));
+}
+
 export function driverRoutes(app, { q, wrap, endOfDay }) {
 
   const { resolve, withDriver } = driverScope({ q, wrap });
-
-  /* The person key: a provider id where there is one, the synthesised name: key
-     where there is not. Every query over trip/trip_norm keys on this, never on
-     the raw column — keyed raw, a driver the provider names without an id has
-     no matchable rows and every panel on their page comes back empty while the
-     directory row that linked there says they drove. */
-  const PKEY = `coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || ${CANON('driver_name')})`;
 
   /* The window, as Dubai calendar days — the same expression trip_norm.local_day
      is built from (sql/schema_v18.sql:67) and driver_day is keyed on.
@@ -598,592 +1209,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        it is winDays plus the two chips, so it is spelled out here rather than
        threading a new dependency through every route module. */
     const [from, to] = winDays(req);
-    const platform = req.query.platform || null;
-    const fleet = req.query.fleet || null;
-    const P = [from, to, platform, fleet];
-    const filtered = !!(platform || fleet);
-    /* "Has this person ever driven, and when last" is the one question here
-       with no window, so answering it live means grouping the entire trip
-       history on every request — two hundred and fifteen thousand rows to
-       decorate eight hundred directory rows. driver_lifetime holds it,
-       rebuilt after every collection from the SAME SQL that is the fallback
-       below, so the two cannot disagree; the fallback runs on a fresh
-       database or a deploy that lands before the first rollup.
-
-       A seq-scan predicate on purpose, in both. Written as
-         WHERE person_key IS NOT NULL AND person_key <> ''
-       it matches the partial index's own predicate exactly, so the planner
-       chose an index scan and then fetched the heap row for essentially every
-       row in the table: this endpoint went from 4.3s to 41s. The projection
-       still uses person_key, which is where the saving actually was. */
-    const lifetimeReady = (await q('SELECT 1 FROM driver_lifetime LIMIT 1')).length > 0;
-    /* The placeholder licence date, detected the way /api/compliance/drivers
-       and src/insights.js already detect it: one date on at least half the
-       dated rows, over at least five of them, is what this source writes when
-       the field was never filled in.
-       ─────────────────────────────────────────────────────────────────────
-       The directory did not know about it. All 77 rows carrying licence number
-       123456 and the identical date 2026-01-01 were served with a past expiry,
-       and the page counted them into "77 with an expired licence" and painted
-       red EXPIRED pills — while /api/compliance/drivers, describing the same
-       people, reported expired: 0. Two pages of one product disagreeing about
-       whether 77 named people may legally drive. */
-    const [phRow] = await q(
-      `SELECT to_char(licence_expires, 'YYYY-MM-DD') AS d, count(*)::int n,
-              (SELECT count(*)::int FROM driver_compliance WHERE licence_expires IS NOT NULL) AS with_date
-       FROM driver_compliance WHERE licence_expires IS NOT NULL
-       GROUP BY licence_expires ORDER BY n DESC LIMIT 1`);
-    const placeholderDate = phRow && phRow.with_date && phRow.n >= 5
-      && phRow.n / phRow.with_date >= 0.5 ? phRow.d : null;
-    /* The lifetime CTE carries identity now, not just counts.
-       ─────────────────────────────────────────────────────────────────────
-       Measured on production over thirty days: 361 rows, 244 of them with no
-       fleet, no channel list and no vehicle — one of those people has 2,393
-       trips on record. Every one of those columns was read from the WINDOW's
-       trips, and a person who last drove in June has none. A driver's fleet is
-       not a fact about a date range, so it is answered over the whole history
-       and used only where the window has nothing to say. The fallback below
-       computes the same three columns, so a fresh database behaves
-       identically. */
-    const everSql = lifetimeReady
-      ? `SELECT driver_ext_id, driver_name, last_ever, lifetime,
-                last_fleet, platforms AS ever_platforms, last_plate
-           FROM driver_lifetime`
-      : `SELECT coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || person_key) AS driver_ext_id,
-                max(driver_name) AS driver_name,
-                max(requested_at) last_ever, count(*)::int lifetime,
-                (array_agg(fleet_id ORDER BY requested_at DESC NULLS LAST)
-                   FILTER (WHERE fleet_id IS NOT NULL))[1] AS last_fleet,
-                array_agg(DISTINCT platform)
-                  FILTER (WHERE platform IS NOT NULL AND platform <> '') AS ever_platforms,
-                (array_agg(plate ORDER BY requested_at DESC NULLS LAST)
-                   FILTER (WHERE plate IS NOT NULL AND btrim(plate) <> ''))[1] AS last_plate
-           FROM trip WHERE driver_name IS NOT NULL AND btrim(driver_name) <> '' GROUP BY 1`;
-    const rows = await q(
-      `WITH ever AS (${everSql}),
-       work AS (
-         /* The synthesised key from the STORED fold. Written with the fold
-            inline it ran two nested regexes over every row in the window as
-            the GROUP BY key, which is nineteen twentieths of this CTE's cost
-            (schema_v20 measured 2,434ms against 129ms) — and it is the same
-            value, because person_key IS that expression, generated and
-            stored. The filter still tests driver_name: matching the partial
-            index's own predicate is what took this endpoint from 4.3s to 41s. */
-         SELECT coalesce(nullif(btrim(n.driver_ext_id), ''),
-                         'name:' || bt.person_key) AS driver_ext_id,
-                max(n.driver_name) AS work_name,
-                /* The STORED fold of the name this person drove under, carried
-                   out so the fold below can key on it. See the note at the
-                   fold. */
-                max(bt.person_key) AS person_key,
-                min(n.fleet_id) fleet_id,
-                count(*) FILTER (WHERE n.is_booking)::int trips,
-                count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
-                count(*) FILTER (WHERE n.outcome IS NOT NULL)::int bookable,
-                count(DISTINCT n.local_day)::int days,
-                round(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance)::numeric,0) km,
-                round(sum(n.price) FILTER (WHERE n.has_fare)::numeric, 2) revenue,
-                count(*) FILTER (WHERE n.has_fare)::int priced_trips,
-                max(n.requested_at) last_trip, min(n.requested_at) first_trip,
-                array_agg(DISTINCT n.platform) platforms,
-                mode() WITHIN GROUP (ORDER BY n.plate) AS plate
-         FROM trip_norm n JOIN trip bt ON bt.platform = n.platform AND bt.external_id = n.external_id
-         -- Grouped on the SAME synthesised key as the ids CTE below. Keyed on
-         -- the raw column, a driver named without an id had an ids row and no
-         -- work to join to it, so they appeared with a permanent zero, which is
-         -- worse than absent: it reads as somebody who did nothing.
-         WHERE n.local_day BETWEEN $1::date AND $2::date
-           AND coalesce(btrim(n.driver_name), '') <> ''
-           AND ($3::text IS NULL OR n.platform = $3)
-           AND ($4::text IS NULL OR n.fleet_id = $4)
-         GROUP BY 1
-       ),
-       ids AS (
-         /* Everyone we know of, from any source, whether or not they drove.
-            A name with no id is still a person: the id is synthesised from the
-            canonical name so they key identically here, in the work CTE below,
-            and in vehicle_driver_day. Requiring an id here made those people
-            vanish from the directory entirely.
-
-            The trip branch reads the CTE above rather than scanning the table
-            a second time. The who CTE takes max(driver_name) per key, so
-            collapsing the several names a key may carry to their max here
-            leaves that maximum unchanged. */
-         /* The all-time branch carries no platform or fleet — driver_lifetime
-            is keyed on the person alone — so under a filter it would readmit
-            the whole roster with its work zeroed, which reads as "everybody is
-            idle on Bolt". Under a filter the population is exactly the people
-            the three filterable sources name. */
-         SELECT driver_ext_id, driver_name FROM ever
-           WHERE $3::text IS NULL AND $4::text IS NULL
-         UNION
-         SELECT w.driver_ext_id, w.work_name FROM work w
-         UNION
-         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
-                         'name:' || ${CANON('full_name')}), full_name FROM driver_compliance
-           WHERE coalesce(btrim(full_name), '') <> ''
-             AND ($3::text IS NULL OR platform = $3) AND ($4::text IS NULL OR fleet_id = $4)
-         UNION
-         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
-                         'name:' || ${CANON('full_name')}), full_name FROM driver_platform_state
-           WHERE coalesce(btrim(full_name), '') <> ''
-             AND ($3::text IS NULL OR platform = $3) AND ($4::text IS NULL OR fleet_id = $4)
-       ),
-       who AS (
-         SELECT driver_ext_id, max(driver_name) AS driver_name FROM ids GROUP BY 1
-       ),
-       /* What actually reached the fleet for this person's work.
-          ─────────────────────────────────────────────────────────────────────
-          The revenue column beside this one is sum(trip.price), and the Uber
-          trip export has no fare column at all (sql/schema_v18.sql:73). Uber is
-          236,000 of the fleet's 253,000 trips, so on a seven-day window 101
-          people drove and 21 had a fare — eighty rows of a table whose job is
-          to rank people showed a dash in the only money column it had.
-
-          The money exists; it is simply not a fare. driver_payout_day carries
-          what each account was PAID, and that is what an operator ranking
-          drivers is actually asking about. Keyed on the account id and summed
-          over the window's days, so overlapping report periods cannot double
-          count — that resolution already happened when the table was built
-          (sql/schema_v23.sql). */
-       pay AS (
-         SELECT driver_ext_id,
-                round(sum(earnings)::numeric, 2) AS payout,
-                count(DISTINCT day)::int AS payout_days
-           FROM driver_payout_day
-          WHERE day BETWEEN $1::date AND $2::date
-            AND ($3::text IS NULL OR platform = $3)
-            AND ($4::text IS NULL OR fleet_id = $4)
-          GROUP BY 1
-       ),
-       /* One money column that answers for everybody.
-          ─────────────────────────────────────────────────────────────────────
-          The two columns beside it each answer for about half the roster and
-          for different halves: revenue is the fares on the trips, which 44 of
-          119 active drivers have, because Uber's export carries no fare at all;
-          payout is what the platform paid, which 96 have. Between them nobody
-          is missing — and a reader ranking drivers is reading one column for
-          one person and a different, incomparable one for the next.
-
-          driver_day.money is the resolution this fleet already made: per
-          platform, the statement's net where a channel filed one and its fares
-          where it did not, then summed (src/rollup.js). money_period_days
-          travels with it because most of it is a weekly statement divided
-          across its days, and the coarsest window on a person's days is what
-          limits what can be said about their total.
-
-          Keyed on the account and summed: the money lands on ONE account per
-          person-day by design (the owner CTE in src/rollup.js), so a person
-          holding two accounts is added, not doubled. */
-       dmoney AS (
-         SELECT driver_ext_id,
-                round(sum(money)::numeric, 2) AS money,
-                count(*) FILTER (WHERE money IS NOT NULL)::int AS money_days,
-                CASE WHEN bool_or(money IS NOT NULL AND money_period_days IS NULL) THEN NULL
-                     ELSE max(money_period_days) END AS money_period_days,
-                CASE WHEN count(DISTINCT money_source) FILTER (WHERE money_source <> 'none') > 1
-                     THEN 'mixed'
-                     ELSE max(money_source) FILTER (WHERE money_source <> 'none') END AS money_source
-           FROM driver_day
-          WHERE day BETWEEN $1::date AND $2::date
-            AND ($4::text IS NULL OR fleet_id = $4)
-          GROUP BY 1
-       )
-       /* The lifetime figures come from the CTE at the top of this statement:
-          the last trip EVER, so "has not driven in this window" and "has never
-          driven" are different rows rather than the same blank — and keyed on
-          person_key rather than the fold, because that scan is unbounded and
-          folding 175,000 names per request is what the stored, indexed column
-          exists to avoid. */
-       SELECT who.driver_ext_id, who.driver_name, w.person_key,
-              coalesce(w.trips, 0) AS trips, coalesce(w.completed, 0) AS completed,
-              coalesce(w.bookable, 0) AS bookable, coalesce(w.days, 0) AS days,
-              w.km, w.revenue, coalesce(w.priced_trips, 0) AS priced_trips,
-              pay.payout, coalesce(pay.payout_days, 0) AS payout_days,
-              dm.money, coalesce(dm.money_days, 0) AS money_days,
-              dm.money_period_days, dm.money_source,
-              w.last_trip, w.first_trip,
-              /* Window first, whole history second. The window answer is the
-                 one that describes THIS range; the lifetime answer exists so
-                 that a person the range does not cover is still identified
-                 rather than shown as four blanks under their own name.
-                 ever_* is never used to overwrite a window value. */
-              coalesce(w.plate, ev.last_plate) AS plate,
-              /* …and the books, third. 129 of the people still blank after
-                 the history fallback have never driven at all, so no trip can
-                 name their fleet — but every one of them holds a standing or a
-                 compliance record, and BOTH of those tables carry fleet_id
-                 (this query already filters on it). A person on the books with
-                 no fleet beside their name is the page failing to read a
-                 column it is already joined to. */
-              coalesce(w.fleet_id, ev.last_fleet, dc.fleet_id, dps.fleet_id) AS fleet_id,
-              coalesce(w.platforms, ev.ever_platforms, ARRAY[]::text[]) AS platforms,
-              /* So a reader can tell a measurement from an identity: true
-                 where these three describe work outside the window. */
-              (w.trips IS NULL OR w.trips = 0) AND coalesce(ev.lifetime, 0) > 0
-                AS identity_from_history,
-              ev.last_ever, coalesce(ev.lifetime, 0) AS lifetime_trips,
-              dc.state, dc.licence_expires, dc.rating,
-              /* Whether this product HOLDS the person's photograph, so every
-                 list that draws them can draw their face rather than two
-                 letters.
-                 ─────────────────────────────────────────────────────────────
-                 Not dc.picture_url. That column holds what Uber returned: a
-                 CloudFront URL signed for twelve hours, written weekly, and
-                 therefore dead for about 93% of its life — measured on
-                 production, 156 of them expired together on 4 September and
-                 every one answered 403 behind an <img> that deletes itself.
-                 A row in driver_photo means the bytes are on this origin, and
-                 the address is built from the key rather than stored. This
-                 reads two key columns and never an image.
-
-                 dp.platform, not this row's platform. The first cut of this
-                 built the address out of r.platform in the fold below — and
-                 THIS select has no bare platform column at all. It has
-                 platforms (an array), compliance_platform, state_platform;
-                 the other three routes that draw a face happen to select a
-                 scalar platform column, so they worked and this one silently handed
-                 434 of 434 people a null. Measured on production after the
-                 first real profile run: compliance 157 addresses, leaderboard
-                 81, profile 1, directory 0.
-
-                 Taking it from dp is also the correct source on its own terms.
-                 The address must name the row the bytes are actually under; a
-                 person with a hotel compliance record and an Uber photograph
-                 would otherwise be sent to /api/driver/photo/hotel/<id>, which
-                 is a 404 by construction. */
-              dp.platform AS photo_platform,
-              (dp.platform IS NOT NULL) AS has_photo,
-              /* And why not, when there is a reason worth telling. Same shape
-                 as dp: one row out however many are in. */
-              pm.reason AS photo_absent_reason,
-              (dc.licence_expires - now()::date) AS licence_days_left,
-              ($5::text IS NOT NULL
-               AND to_char(dc.licence_expires,'YYYY-MM-DD') = $5) AS licence_placeholder,
-              /* Which platform said it. 241 of the people in this directory
-                 have never driven — the panel exists for them — and every
-                 column describing them was blank because the source platform
-                 was dropped on the way out. A compliance record from Uber and
-                 a standing from Bolt are different claims and the page could
-                 not tell them apart, or say which one it was showing. */
-              dc.platform AS compliance_platform,
-              dps.state AS platform_state, dps.can_earn,
-              dps.platform AS state_platform, dps.plate AS state_plate,
-              /* The platform's own rating, which is what this column was always
-                 meant to show. It read driver_compliance.rating — the hotel
-                 channel's document register, which has never carried one — so
-                 the column was empty on all 365 people and the sentence under
-                 it blamed the channels. coalesce, not replace: if a channel
-                 ever files one through compliance it still counts. */
-              coalesce(dps.rating, dc.rating) AS platform_rating,
-              dps.lifetime_trips AS platform_lifetime_trips,
-              dps.is_banned, dps.compliance_status AS platform_compliance
-       FROM who
-       LEFT JOIN work w ON w.driver_ext_id = who.driver_ext_id
-       LEFT JOIN pay ON pay.driver_ext_id = who.driver_ext_id
-       LEFT JOIN dmoney dm ON dm.driver_ext_id = who.driver_ext_id
-       LEFT JOIN ever ev ON ev.driver_ext_id = who.driver_ext_id
-       LEFT JOIN driver_compliance dc ON dc.driver_ext_id = who.driver_ext_id
-       /* LATERAL … LIMIT 1, not a plain join. driver_photo's key is
-          (platform, driver_ext_id), so one account id can carry a row per
-          channel — and a plain LEFT JOIN on the id alone would then return
-          that person's work row TWICE, which the fold below adds up. A
-          decoration that changes the trip count is not a decoration. One row
-          out, however many are in. */
-       LEFT JOIN LATERAL (
-         SELECT p2.platform FROM driver_photo p2
-          WHERE p2.driver_ext_id = who.driver_ext_id LIMIT 1) dp ON true
-       LEFT JOIN LATERAL (
-         SELECT m2.reason FROM driver_photo_miss m2
-          WHERE m2.driver_ext_id = who.driver_ext_id LIMIT 1) pm ON true
-       LEFT JOIN driver_platform_state dps ON dps.driver_ext_id = who.driver_ext_id
-       /* THE CAP THAT STARTED BITING THIS MONTH.
-          ─────────────────────────────────────────────────────────────
-          It was 800, and on 2026-09-21 the roster reached 810 accounts. So
-          this page — headed "All drivers · Everyone on the books, even people
-          with no trip in this window" — silently dropped the ten accounts
-          with the fewest trips and the latest names, which was three whole
-          people: two Zubairs and a Zeeshan. The claim in the heading stopped
-          being true and nothing said so.
-
-          It is the same defect #payouts shipped as "6 transfers on 2 dates"
-          over a register of 217. A bound that a growing roster walks into is
-          worse than no bound, because it looks like an answer.
-
-          4000 is five times the current account count, and the page reports
-          its own row count against the person spine (see the drivers view),
-          so if this ever bites again the page says so rather than quietly
-          showing fewer people than the fleet has. */
-       ORDER BY coalesce(w.trips, 0) DESC, who.driver_name LIMIT 4000`, [...P, placeholderDate]);
-
-    /* Fold per-platform rows into one row per person, so the directory lists
-       humans rather than accounts. Counts are carried through and the ratios
-       are computed ONCE at the end — folding a pre-computed percentage keeps
-       one account's number and calls it the person's. */
-    /* Keyed on the STORED fold where the window has one.
-       ─────────────────────────────────────────────────────────────────────
-       This folded on canonName(who.driver_name), and who.driver_name is a max
-       over four sources — the window's trips, the whole trip history, a
-       compliance record and a platform standing. So the directory could be
-       folding on a spelling from March while every other page in the product
-       folds on the one from this window, and the two then answer "how many
-       people drove" differently: 118 here against 119 on the overview, live,
-       for the same fleet on the same days. Neither number was wrong and
-       nothing on either page could explain the other.
-
-       person_key is that same fold, generated and stored on the trip row
-       (sql/schema_v20.sql), and it is what /api/kpis, the ranking and the
-       vehicle pages count. Using it here makes the directory's headcount the
-       overview's headcount by construction rather than by coincidence.
-
-       canonName stays as the fallback for the people the window has no work
-       for — a name on the books and nothing else — where there is no stored
-       key to prefer. It is the same rule; test/consistency.test.mjs runs both
-       over the same names and requires the same answer. */
-    /* Read once for the whole fold, not once per row: sixty rows behind a
-       thirty-second cache, and a per-row await would make the directory's cost
-       depend on how many people the fleet has. */
-    const links = await identityLinks(q);
-    /* One answer to "who is this", read from the table src/persons.js builds
-       on every collector pass. */
-    const spine = await personMap(q);
-    /* Still built, for the accounts the spine has not placed yet. */
-    const resolveKey = keyResolver(links, linkedKey);
-    const byName = new Map();
-    for (const r of rows) {
-      /* The register first, then the stored fold, then the name.
-         ─────────────────────────────────────────────────────────────────
-         The stored key already carries the register, so for a person the
-         window measured this changes nothing. It is the OTHER rows this is
-         for: a record with no work in the window has no w.person_key and
-         falls through to the name — and a great many of the merged records
-         are exactly that. Fifty-six of the register's hundred and thirty
-         alias ids have never filed a trip at all (Bolt standings and hotel
-         ObjectIds carrying a phone number and nothing else), so without this
-         the directory would still list them as separate people while every
-         aggregate in the product counted them as one. */
-      /* The register, then the roster's own proof, then the stored fold, then
-         the name.
-         ─────────────────────────────────────────────────────────────────
-         The link layer sits SECOND on purpose. ALIAS_KEY is a list a person
-         checked pair by pair against production; driver_identity_link is a
-         rule that ran, and a rule must never overrule the person who looked.
-         It sits above person_key because the stored key is the folded NAME,
-         and the whole finding is that the two channels file different names
-         for one human: "MUHAMMAD KHALIFA AFZAL KHALID" on the hotel roster and
-         "Muhammad Khalid" on Uber, one phone number, 4,461 Uber trips reported
-         under a row that showed 822. */
-      const own = r.person_key || canonName(r.driver_name);
-      /* OVER THE WHOLE COMPONENT, not one id at a time.
-         ─────────────────────────────────────────────────────────────────
-         This was `ALIAS_KEY.get(id) || linkedKey(links, id) || …`, resolved
-         per id and first-wins. The argument above for that ORDER is right and
-         is unchanged; what was wrong was the SCOPE. The register names some of
-         a person's ids and the link chain names the rest, and the two key the
-         same person differently — the register on whichever record it was
-         written against, the chain on its terminal. So the ids the register
-         named folded one way, the ids it did not folded another, and one human
-         rendered as two rows.
-
-         Measured on production 2026-09-21: 38 people, every one the same shape
-         — a short filed name against a long one. api/fold_key.js carries the
-         reasoning and the property that makes it safe: it merges nobody new,
-         because the component is built only from edges a human-reviewed
-         decision already asserts. */
-      /* THE SPINE FIRST, AND THE NAME FOLD IS GONE.
-         ─────────────────────────────────────────────────────────────────
-         src/persons.js materialises one row per human into driver +
-         driver_platform_id, from reviewed decisions only, and this asks it.
-         Every other surface asks the same table, so "how many drivers" has
-         one answer instead of the four it had on 2026-09-21 — 347 here, 437
-         on #compliance, 508 in the money picker, 0 on exposure, over the
-         same 800 accounts.
-
-         `linkedByName` is deliberately no longer consulted. It let an
-         account in NO link inherit a person because its folded name matched
-         some linked alias's, and that rule alone made 92 of the 347 rows:
-         44 supported by a matching phone, 37 with no evidence either way,
-         and NINE CONTRADICTED by different phone numbers on the records it
-         joined — the worst carrying seven accounts and three numbers, filed
-         variously as 'ZAHID KHAN ISMAIL ISMAIL' and 'Zahid Khan Mohabbat
-         Khan'. CLAUDE.md forbids it in as many words: never a name rule.
-         Those pairs are now PROPOSALS on #same-person, where a person
-         answers them.
-
-         The count goes UP as a result, and that is the honest direction:
-         what it goes up to is what the evidence supports.
-
-         The register/link fallback stays for accounts the spine has not
-         placed yet — every account until it has run once against a
-         database, and after that only arrivals since the last pass. */
-      const fromSpine = spine.byAccount.get(r.driver_ext_id);
-      const k = fromSpine != null
-        ? `person:${fromSpine}`
-        : resolveKey(
-          ALIAS_KEY.get(r.driver_ext_id)
-          || linkedKey(links, r.driver_ext_id)
-          || own,
-        );
-      const cur = byName.get(k);
-      if (!cur) {
-        byName.set(k, { ...r, ids: [r.driver_ext_id], platforms: [...(r.platforms || [])],
-          /* An unknown window on the SEEDING row counts the same as on any
-             other: money_period_days is null both when nothing reported money
-             and when what reported it could not say over what period, and only
-             the second makes the person's total unstatable. */
-          _grainUnknown: r.money != null && r.money_period_days == null,
-          _ratingTrips: r.platform_rating != null ? (r.platform_lifetime_trips || 0) : -1,
-          /* WHICH account carries the face. A person with a hotel record and an
-             Uber one has two rows here and only Uber files a photograph, so the
-             fold has to keep the account the picture is under rather than
-             whichever row happened to seed the person. */
-          _photo: r.has_photo ? { platform: r.photo_platform, id: r.driver_ext_id } : null,
-          _photoMiss: r.has_photo ? null : (r.photo_absent_reason || null),
-          _days: new Set() });
-        continue;
-      }
-      cur.ids.push(r.driver_ext_id);
-      if (!cur._photo && r.has_photo) cur._photo = { platform: r.photo_platform, id: r.driver_ext_id };
-      if (!cur._photoMiss && r.photo_absent_reason) cur._photoMiss = r.photo_absent_reason;
-      cur.trips += r.trips;
-      cur.completed += r.completed; cur.bookable += r.bookable;
-      cur.priced_trips += r.priced_trips;
-      cur.lifetime_trips += r.lifetime_trips;
-      cur.km = +(cur.km || 0) + +(r.km || 0);
-      cur.revenue = +(cur.revenue || 0) + +(r.revenue || 0);
-      /* Payouts DO sum across a person's accounts: two provider ids are two
-         separate statements for the same human, and both reached the fleet. */
-      if (r.payout != null) cur.payout = +(cur.payout || 0) + +r.payout;
-      cur.payout_days = Math.max(cur.payout_days || 0, r.payout_days || 0);
-      /* Summed across the person's accounts, like the payout beside it — the
-         money is on one account per person-day by construction, so this adds
-         rather than doubles. The GRAIN takes the coarsest of the accounts, and
-         an account that cannot state its window makes the person's total
-         unstated too: a figure that is partly a measurement and partly a share
-         of a week is not a measurement. */
-      if (r.money != null) cur.money = +(cur.money || 0) + +r.money;
-      cur.money_days = (cur.money_days || 0) + (r.money_days || 0);
-      if (r.money_period_days == null && r.money != null) cur._grainUnknown = true;
-      else if (r.money_period_days != null) {
-        cur.money_period_days = Math.max(cur.money_period_days || 0, r.money_period_days);
-      }
-      if (r.money_source && r.money_source !== cur.money_source) {
-        cur.money_source = cur.money_source ? 'mixed' : r.money_source;
-      }
-      /* The platform's own opinion of the person, folded across their
-         accounts. NOT averaged: two platforms rating the same human are two
-         opinions on two scales and a mean of them is a number neither provider
-         would recognise. The best-attested one wins — most lifetime trips
-         behind it — and a ban on any account bans the person, because a
-         constraint that holds anywhere holds. */
-      if (r.platform_rating != null
-          && (cur.platform_rating == null
-              || (r.platform_lifetime_trips || 0) > (cur._ratingTrips || 0))) {
-        cur.platform_rating = r.platform_rating;
-        cur._ratingTrips = r.platform_lifetime_trips || 0;
-      }
-      if (r.platform_lifetime_trips != null) {
-        cur.platform_lifetime_trips = Math.max(cur.platform_lifetime_trips || 0, r.platform_lifetime_trips);
-      }
-      if (r.is_banned === true) cur.is_banned = true;
-      cur.platform_compliance = cur.platform_compliance || r.platform_compliance;
-      cur.platforms = [...new Set([...cur.platforms, ...(r.platforms || [])])];
-      if ((r.driver_name || '').length > (cur.driver_name || '').length) cur.driver_name = r.driver_name;
-      if (r.last_trip > cur.last_trip) cur.last_trip = r.last_trip;
-      if (r.first_trip && (!cur.first_trip || r.first_trip < cur.first_trip)) cur.first_trip = r.first_trip;
-      if (r.last_ever > cur.last_ever) cur.last_ever = r.last_ever;
-      cur.state = cur.state || r.state;
-      cur.platform_state = cur.platform_state || r.platform_state;
-      cur.compliance_platform = cur.compliance_platform || r.compliance_platform;
-      cur.state_platform = cur.state_platform || r.state_platform;
-      cur.state_plate = cur.state_plate || r.state_plate;
-      if (cur.can_earn == null) cur.can_earn = r.can_earn;
-      if (r.licence_days_left != null && (cur.licence_days_left == null || r.licence_days_left < cur.licence_days_left)) {
-        cur.licence_days_left = r.licence_days_left; cur.licence_expires = r.licence_expires;
-        cur.licence_placeholder = r.licence_placeholder;
-      }
-      cur._multiAccountDays = true;
-    }
-
-    /* Distinct working days across ALL of a person's accounts. Taking the max
-       of pre-aggregated per-account counts discarded every day worked on one
-       platform and not another. Only asked for the people who actually have
-       more than one account. */
-    const multi = [...byName.values()].filter((p) => p.ids.length > 1);
-    if (multi.length) {
-      const dayRows = await q(
-        `SELECT ${PKEY} AS driver_ext_id, local_day FROM trip_norm
-         WHERE local_day BETWEEN $1::date AND $2::date
-           AND ($3::text IS NULL OR platform = $3) AND ($4::text IS NULL OR fleet_id = $4)
-           AND ${PKEY} = ANY($5)`,
-        [from, to, platform, fleet, multi.flatMap((x) => x.ids)]);
-      const idToPerson = new Map();
-      multi.forEach((p) => p.ids.forEach((id) => idToPerson.set(id, p)));
-      const days = new Map();
-      for (const d of dayRows) {
-        const person = idToPerson.get(d.driver_ext_id);
-        if (!person) continue;
-        const set = days.get(person) || new Set();
-        /* isoDay, not String(d.local_day).slice(0, 10).
-           ───────────────────────────────────────────────────────────────
-           local_day is a bare DATE — sql/schema_v18.sql:67 builds it as
-           `(requested_at AT TIME ZONE 'Asia/Dubai')::date` and the SELECT
-           above does not wrap it in to_char — so node-postgres parses it into
-           a JS Date, and those ten characters are "Fri Aug 14": the head of a
-           Date toString, with the YEAR cut off. That exact string was measured
-           coming out of this very column on /api/day, and the identical
-           mistake shipped to production in src/sources/ledger.js and printed
-           "covering days up to Fri Aug 21" on the Data-sources page.
-
-           Nothing but the Set's SIZE escapes here — it becomes `days` on a
-           /api/drivers/directory row — so the figure was right while the key
-           was wrong, and right by luck rather than by construction: dropping
-           the year leaves (weekday, month, day), which stays injective only
-           while the window is short. Production on 2026-09-02 returned 395
-           rows, 52 of them multi-account, whose `days` read 28/29/30 inside a
-           30-day window — the correct counts, for the wrong reason. But
-           api/window.js accepts days up to 3660 and from/to are unclamped, so
-           "Tue Oct 01" is both 2019-10-01 and 2024-10-01 in a window a caller
-           can ask for TODAY, and a person who drove one of those days on Uber
-           and the other on Yango silently loses a day worked. Same trap and
-           same containment as api/economics_routes.js:920, which is where the
-           702-days-0-collisions count comes from. */
-        set.add(isoDay(d.local_day));
-        days.set(person, set);
-      }
-      days.forEach((set, person) => { person.days = set.size; });
-    }
-
-    res.json([...byName.values()].map((p) => {
-      /* One unstatable account makes the person's grain unstatable. Resolved
-         here rather than in the fold so the flag cannot survive into the
-         payload as a private field somebody starts reading. */
-      if (p._grainUnknown) p.money_period_days = null;
-      /* This origin's address for the copy we hold, or null. Never Uber's
-         signed URL — see photoHref in api/redact.js. */
-      p.picture_url = photoHref(p._photo?.platform, p._photo?.id);
-      /* Only when there is nothing to show AND something to say.
-         Dropped first, because the fold seeds a person with `{ ...r }` and the
-         raw column rides along — so a driver with nothing to explain carried
-         `photo_absent_reason: null`, and a key that is present-and-null is a
-         different claim from a key that is absent. The whole point of this
-         field is that its presence means something. */
-      delete p.photo_absent_reason;
-      if (!p.picture_url && p._photoMiss) p.photo_absent_reason = p._photoMiss;
-      delete p._days; delete p._multiAccountDays; delete p._grainUnknown; delete p._ratingTrips;
-      delete p._photo; delete p._photoMiss; delete p.has_photo; delete p.photo_platform;
-      return {
-        ...p,
-        // Computed once, over the whole person.
-        completion_pct: p.bookable ? Math.round((p.completed / p.bookable) * 100) : null,
-        // "No trip in this window" and "never driven" are different facts.
-        active_in_window: p.trips > 0,
-        ever_driven: (p.lifetime_trips || 0) > 0,
-        /* Not expired — never entered. Reported per row so a page cannot count
-           a data-quality artefact as 77 people who must stand down. */
-        licence_placeholder: !!p.licence_placeholder,
-      };
-    }).sort((a, b) => b.trips - a.trips || String(a.driver_name).localeCompare(String(b.driver_name))));
+    return res.json(await loadDirectory(q, { from, to, platform: req.query.platform || null, fleet: req.query.fleet || null }));
   }));
 
   /* ── who this is: identity, credentials, platforms, tenure ─────────── */
@@ -2051,6 +2077,25 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               round(sum(price)::numeric, 2)                    AS cash_booking_value,
               array_remove(array_agg(DISTINCT platform), NULL) AS cash_booking_platforms
          FROM trip_ext WHERE ${TW} AND driver_holds_cash`, p);
+    /* CASH TAKEN, as the money workbook states it (2026-10-20).
+       ───────────────────────────────────────────────────────────────────
+       The Cash collected tile read the FARE of every cash-paid booking,
+       cancelled ones included: for Sana Ullah Sher Zamin (p51) on 1-20
+       October, "AED 2,310.58 · 56 cash trips", where "Excel ⤓ this driver"
+       said 44 cash trips and AED 2,445.99. Both were exact. 12 of the 56
+       were never completed (5 carried a fare, AED 93.00), and on the 44
+       that were, Uber's own cash-collected figure is the fare plus the tolls
+       the rider paid in cash (AED 228.41 here). trip_cash (sql/schema_v80)
+       is the operator's definition of cash taken (2026-09-22) and the one
+       the workbook and the 07:00 report already use, so the tile reads it
+       too: completed cash trips, at the platform's figure, the fare
+       otherwise; a trip with neither is counted and named, never a nought
+       (docs/FIXLIST-2026-09-05.md DR3). */
+    const [taken] = await q(
+      `SELECT count(*)::int AS cash_trips,
+              round(sum(cash_amount)::numeric, 2) AS cash_taken,
+              count(*) FILTER (WHERE cash_amount IS NULL)::int AS cash_unvalued
+         FROM trip_cash WHERE ${TW}`, p);
 
     const num = (v) => (v == null ? null : Number(v));
     const hoursOnline = num(kept?.online_h);
@@ -2105,6 +2150,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       cash_bookings: cashTrips?.cash_bookings ?? 0,
       cash_bookings_priced: cashTrips?.cash_bookings_priced ?? 0,
       cash_booking_value: num(cashTrips?.cash_booking_value),
+      cash_trips: taken?.cash_trips ?? 0,
+      cash_taken: num(taken?.cash_taken),
+      cash_unvalued: taken?.cash_unvalued ?? 0,
       cash_booking_platforms: cashTrips?.cash_booking_platforms ?? [],
       hours_online: hoursOnline,
       /* on_job, not on_trip: request to dropoff, which contains the approach

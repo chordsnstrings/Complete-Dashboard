@@ -1913,6 +1913,18 @@ async function tabEarnings(root, id, prof) {
   const cashTrips = cashRows.reduce((a, p) => a + (+p.n || 0), 0);
   const cashKnown = cashRows.filter((p) => p.revenue != null);
   const cashValue = cashKnown.length ? cashKnown.reduce((a, p) => a + (+p.revenue || 0), 0) : null;
+  /* Whether the Cash collected tile can state cash TAKEN (trip_cash, as the
+     driver's Excel does — see the tile): whenever the API sends it. trip_cash
+     counts the bookings the driver holds the cash of — `cash` and
+     `cash-driver` (trip_ext.driver_holds_cash, sql/schema_v62.sql:57).
+     `cash-supervisor` is collected by a supervisor and `pos-driver` is paid
+     by card at the driver's terminal, so a driver whose only cash-LIKE labels
+     are those took AED 0 in hand — the 0.00 the Excel shows. A first cut kept
+     the older label reading for that case, which printed the card fares
+     under "Cash collected" (independent review of 2026-10-20: AED 1,585 for
+     one driver, AED 1,620 for another, both 0.00 in their files). An older
+     API without cash_trips still takes the older chain. */
+  const cashTakenKnown = k.cash_trips != null;
   /* A POPULATION IS NOT COVERAGE, AND cashTrips === 0 HAS A THIRD CAUSE.
      ─────────────────────────────────────────────────────────────────────────
      The cash tile was repaired by gating on whether the driver WORKED, which
@@ -2070,6 +2082,21 @@ async function tabEarnings(root, id, prof) {
        count of nought is still a true count \u2014 TRIPS 0 stays 0 on the overview
        \u2014 but a MONEY figure over an empty population is not a figure. */
     { label: 'Cash collected', value: (() => {
+      /* CASH TAKEN, AS THE MONEY WORKBOOK STATES IT (2026-10-20).
+         ─────────────────────────────────────────────────────────────────
+         Completed cash trips at the platform's own cash-collected figure,
+         the fare otherwise: trip_cash, the operator's definition of cash
+         taken (2026-09-22), read by /api/driver/kpis as cash_trips and
+         cash_taken. This tile read the fare of every cash-PAID booking,
+         cancelled ones included — "AED 2,310.58 · 56 cash trips" on p51 for
+         1-20 October where "Excel ⤓ this driver" said AED 2,445.99 over 44,
+         and both were right about different things
+         (docs/FIXLIST-2026-09-05.md DR3). The older chain below stays for
+         an API that does not yet send cash_trips. */
+      if (cashTakenKnown) {
+        if (+k.cash_trips > 0) return k.cash_taken != null ? money(k.cash_taken) : 'not reported';
+        return worked && labelledTrips ? money(0) : '\u2014';
+      }
       // The clawback line in the payout breakdown is the same money seen from
       // the other side, and is the only figure present when no cash trip
       // carries a fare.
@@ -2098,7 +2125,18 @@ async function tabEarnings(root, id, prof) {
     })(),
     /* "73 cash trips across cash" — the label list is usually the single word
        "cash", and naming it after "across" made the sentence eat itself. */
-    sub: cashTrips
+    sub: cashTakenKnown && (+k.cash_trips > 0 || +k.cash_bookings > 0)
+      ? (() => {
+        const open = Math.max(0, (+k.cash_bookings || 0) - (+k.cash_trips || 0));
+        return `${countOf(+k.cash_trips, 'completed cash trip')}`
+          + (+k.cash_unvalued ? ` \u00b7 ${countOf(+k.cash_unvalued, 'not valued yet', 'not valued yet')}` : '')
+          + (open ? ` \u00b7 ${countOf(open, 'cash booking')} not completed, not counted` : '')
+          + ' \u00b7 the platform\u2019s own cash figure where it has filed one, the fare otherwise';
+      })()
+      : cashTakenKnown && cashTrips
+      ? `none of these bookings was cash in the driver\u2019s hand: ${cashRows.map((p) => `${fmt(+p.n)} ${p.label}`).join(', ')}`
+        + ' \u2014 cash-supervisor is collected by a supervisor and pos-driver is paid by card at the driver\u2019s terminal'
+      : cashTrips
       ? (() => {
         const labels = cashRows.map((p) => p.label);
         const named = labels.length > 1 ? `, across ${labels.join(', ')}`
@@ -2129,7 +2167,8 @@ async function tabEarnings(root, id, prof) {
             + 'so whether any of it was cash is not something anybody measured'
           : 'no booking of any kind in this window, so no cash was measured either way'
             + (lastWorked ? ` \u2014 this person\u2019s last trip was ${dateStr(lastWorked)}` : ''),
-    tone: cashTrips && cashKnown.length < cashRows.length ? 'warn' : null },
+    tone: cashTakenKnown ? (+k.cash_unvalued ? 'warn' : null)
+      : (cashTrips && cashKnown.length < cashRows.length ? 'warn' : null) },
     // Priced fares over the distance of the priced trips. Dividing by the whole
     // distance mixes two populations and understates it by however much of the
     // work carries no fare.

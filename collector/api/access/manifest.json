@@ -1751,7 +1751,10 @@
      "cash_bookings",
      "cash_bookings_priced",
      "cash_booking_value",
-     "cash_booking_platforms"
+     "cash_booking_platforms",
+     "cash_trips",
+     "cash_taken",
+     "cash_unvalued"
     ]
    },
    {
@@ -2945,6 +2948,7 @@
    "BK",
    "CASH",
    "CT",
+   "EARN",
    "ID",
    "PAY",
    "REV",

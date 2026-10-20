@@ -62,7 +62,7 @@ const num = (n) => (n == null || n === '' ? null : Number(n));
    which would read as "nothing recorded". */
 const WITHHELD = '(withheld)';
 const CLASS_WORDS = { ID: 'who drivers are', CT: 'contact details', CASH: 'cash', REV: 'revenue',
-  PAY: 'bank payouts', VEH: 'vehicles', BK: 'bookings' };
+  PAY: 'bank payouts', VEH: 'vehicles', BK: 'bookings', EARN: 'driver earnings' };
 
 /* A driver's account, the way every page keys one: the platform id, or for a
    hotel driver with none, their name folded exactly as api/register_routes.js
@@ -201,8 +201,34 @@ export async function cashToCollect({ q, from, to }) {
  * @param hide     Set of access classes this reader does not hold in full
  * @param now      the moment the file is made (tests pin it)
  */
+/* THE DRIVERS SHEET IS THE DRIVERS PAGE (2026-10-20).
+   ─────────────────────────────────────────────────────────────────────────
+   "downloaded excel and the dashboard for drivers shows different numbers"
+   (the operator, 2026-10-20). Measured on production for 1-20 October and
+   for September, the two agreed for every driver on bookings, completed and
+   fares — and still read as two different tables. Fifty-seven of 115
+   drivers were named differently: the page keeps the longest name across a
+   person's accounts, this file printed the person record's. "Days worked"
+   was the most days on any ONE account, so a driver who worked Uber on
+   Monday and Bolt on Tuesday read 1 here and 2 on the page. The page's
+   Money and Paid columns were not in the file at all
+   (docs/FIXLIST-2026-09-05.md DR1-DR3).
+
+   So the sheet is now built FROM the page: `directory` is what
+   loadDirectory() (api/driver_routes.js) returns for the same dates and
+   chips — the very function /api/drivers/directory answers with — and each
+   of its rows is a row here, in its order, under its name. What only this
+   file holds (cash, Uber's commission, fares by platform) is attached to
+   the row through the person's accounts, and anything that cannot be
+   attached is listed, never dropped. The other sheets name each person the
+   same way, so one person reads the same throughout the file.
+
+   Passed in rather than imported: src/report_findings.js imports this
+   module into the collector worker, which has no business loading the API's
+   route modules. */
 export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform = null, person = null,
-  hide = new Set(), now = new Date() }) {
+  directory, hide = new Set(), now = new Date() }) {
+  if (!Array.isArray(directory)) throw new Error('buildMoneyWorkbook needs the Drivers page rows (loadDirectory)');
   const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1;
   const h = (cls, v) => (hide.has(cls) && v != null && v !== '' ? WITHHELD : v);
 
@@ -325,7 +351,18 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
       note: n ? 'From this account’s own record: the account is not yet placed on a person.'
         : 'No mobile on this account’s record, and the account is not yet placed on a person.' };
   };
-  const nameOf = (e) => (e.placed ? e.name : `${e.name} (${plat(e.acctPlatform)} account, not yet placed on a person)`);
+  /* The name the Drivers page prints for this person (or account), or, in
+     one driver's own file, the name on their own page. */
+  const pageNameByPerson = new Map();
+  const pageNameByAcct = new Map();
+  for (const r of directory) {
+    if (r.person_id != null) pageNameByPerson.set(String(r.person_id), r.driver_name);
+    for (const id of r.ids || []) if (!pageNameByAcct.has(id)) pageNameByAcct.set(id, r.driver_name);
+  }
+  const shownName = (e) => (person?.name && e.placed && String(e.person) === String(person.id) ? person.name
+    : e.placed ? (pageNameByPerson.get(String(e.person)) || e.name)
+      : (pageNameByAcct.get(e.acct) || e.name));
+  const nameOf = (e) => (e.placed ? shownName(e) : `${shownName(e)} (${plat(e.acctPlatform)} account, not yet placed on a person)`);
   const fleetsOf = (e) => [...(e.fleets.size ? e.fleets : new Set(e.homeFleet ? [e.homeFleet] : []))].map(fleetName).join(' & ');
   const platsOf = (e) => [...e.platforms].map(plat).join(', ');
 
@@ -411,12 +448,13 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
   rm.blank();
   rm.text('The sheets', 'bold');
   const guide = [
+    ...(person ? [['Driver', 'This driver as their own page shows them for these dates: bookings, booked revenue, platform earnings, money, cash collected, km and days.']] : []),
     ['Cash to collect', 'One row per driver: cash from trips, advanced, handed in, and to hand in, with the mobile.'],
     ['Cash by day', 'The same, per driver per day, with a running total to hand in across the dates.'],
     ['Cash trips', 'Every trip on which a driver took cash: when, which car, how much, and how the amount was valued.'],
     ['Hand-ins & advances', 'Every cash hand-in and cash advance recorded in FleetMirror in these dates.'],
     ...(person ? [] : [
-      ['Drivers', 'Every driver who worked in these dates: bookings, fares by platform, cash, commission, km.'],
+      ['Drivers', 'The Drivers page for these dates, row for row, for everyone with a booking or with Money or Paid: the same names, bookings, fares, money, paid, km and days, with cash, commission and fares by platform beside them.'],
       ['Money by day', 'Per day, fleet and platform: bookings, fares, cash taken, commission.'],
       ['Bank payouts', 'Every transfer a platform made to the company’s bank in these dates.'],
       ['Platform statements', 'Each platform’s own daily account figures, where it publishes them.'],
@@ -432,6 +470,35 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
     rm.blank();
     rm.text(`Cells reading ${WITHHELD} held a value your role does not include: ${[...hide].map((c) => CLASS_WORDS[c] || c).join(', ')}. `
       + 'An empty cell never had one.', 'bold');
+  }
+
+  /* ── Driver: one driver's file, their page's figures ─────────────────
+     "excel this driver button should show the same thing then?" (the
+     operator, 2026-10-20). The page's Earnings tiles, from the Drivers
+     page's own row for this person (bookings, revenue, platform earnings,
+     money, km and days agree with /api/driver/kpis by construction of the
+     same fold) and this file's cash, which is the page's Cash collected
+     tile since the same day: completed cash trips at the platform's own
+     cash-collected figure, the fare otherwise. */
+  if (person) {
+    const mine = directory.find((r) => (person.id != null ? String(r.person_id) === String(person.id)
+      : (r.ids || []).includes(person.account)));
+    const es = everyone.filter((e) => (person.id != null ? e.placed && String(e.person) === String(person.id) : true));
+    const cashTrips = es.reduce((a, e) => a + e.cashTrips, 0);
+    const cashUnpriced = es.reduce((a, e) => a + e.unpriced, 0);
+    /* All still waiting for a price: the page's tile reads "not reported",
+       so this is empty, never a 0.00 that looks measured. */
+    const cashTaken = cashTrips && cashUnpriced === cashTrips ? null : r2(es.reduce((a, e) => a + e.cashTaken, 0));
+    const sd = wb.sheet('Driver', { widths: [34, 10, 10, 16, 10, 14, 18, 14, 18, 10, 12, 10, 10] });
+    sd.header(['Driver', 'Bookings', 'Completed', 'Booked revenue (AED)', 'Priced', 'Average fare (AED)', 'Platform earnings (AED)',
+      'Money (AED)', 'Cash collected (AED)', 'Cash trips', 'Not priced yet', 'Km', 'Days worked'],
+    ['text', 'int', 'int', 'money', 'int', 'money', 'money', 'money', 'money', 'int', 'int', 'int', 'int']);
+    const priced = Number(mine?.priced_trips) || 0;
+    sd.row([h('ID', person.name || person.account || mine?.driver_name || ''), Number(mine?.trips) || 0, Number(mine?.completed) || 0,
+      h('REV', priced ? r2(mine.revenue) : null), priced, h('REV', priced ? r2(Number(mine.revenue) / priced) : null),
+      h('EARN', r2(mine?.payout)), h('EARN', r2(mine?.money)), h('CASH', cashTaken), cashTrips, cashUnpriced,
+      mine?.km == null ? null : Number(mine.km), Number(mine?.days) || 0]);
+    if (!mine) sd.text('No booking of theirs is on record for these dates and filters.', 'dim');
   }
 
   /* ── Cash to collect ─────────────────────────────────────────────────── */
@@ -482,17 +549,68 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
   if (!ledgerRows.length) hi.text('Nothing recorded in these dates. Hand-ins are recorded on Money → Cash handed in.', 'dim');
 
   if (!person) {
-    /* ── Drivers ───────────────────────────────────────────────────────── */
-    const dr = wb.sheet('Drivers', { widths: [34, 16, 20, 10, 10, 14, 13, 13, 13, 13, 14, 14, 10, 9] });
+    /* ── Drivers: the Drivers page, row for row ──────────────────────────
+       See the note above buildMoneyWorkbook. Bookings, completed, fares,
+       money, paid, km and days are the page's own figures; cash, Uber's
+       commission and fares by platform are this file's, attached through
+       the person (the spine id the page folded on) or, for an account no
+       person holds, the account itself. */
+    const dr = wb.sheet('Drivers', { widths: [34, 16, 20, 10, 10, 14, 13, 13, 13, 13, 14, 22, 14, 10, 14, 12, 14, 10, 9] });
     const PL = ['uber', 'bolt', 'yango', 'hotel'].filter((p) => !platform || p === platform);
     dr.header(['Driver', 'Fleet', 'Platforms', 'Bookings', 'Completed', 'Fares (AED)',
-      ...PL.map((p) => `${plat(p)} fares (AED)`), 'Cash trips', 'Cash from trips (AED)', 'Uber commission (AED)', 'Km', 'Days worked'],
-    ['text', 'text', 'text', 'int', 'int', 'money', ...PL.map(() => 'money'), 'int', 'money', 'money', 'num1', 'int']);
-    const worked = everyone.filter((e) => e.bookings).sort((a, b) => (b.fares - a.fares) || a.name.localeCompare(b.name));
-    for (const e of worked) {
-      dr.row([h('ID', nameOf(e)), fleetsOf(e), platsOf(e), e.bookings, e.completed, h('REV', e.priced ? r2(e.fares) : null),
-        ...PL.map((p) => h('REV', e.faresBy[p] == null ? null : r2(e.faresBy[p]))), e.cashTrips, h('CASH', r2(e.cashTaken)),
-        h('REV', e.commission ? r2(e.commission) : null), r1(e.km), e.daysWorked]);
+      ...PL.map((p) => `${plat(p)} fares (AED)`), 'Money (AED)', 'Money is', 'Paid (AED)', 'Cash trips', 'Cash from trips (AED)',
+      'Cash not priced yet', 'Uber commission (AED)', 'Km', 'Days worked'],
+    ['text', 'text', 'text', 'int', 'int', 'money', ...PL.map(() => 'money'), 'money', 'text', 'money', 'int', 'money', 'int', 'money', 'int', 'int']);
+    const byAcctKey = new Map();
+    for (const e of everyone) {
+      for (const a of e.accounts) byAcctKey.set(a.slice(a.indexOf(':') + 1), e);
+    }
+    const attached = new Set();
+    const entriesOf = (r) => {
+      const out = new Set();
+      if (r.person_id != null && who.has(`p${r.person_id}`)) out.add(who.get(`p${r.person_id}`));
+      for (const id of r.ids || []) {
+        const e = byAcctKey.get(id);
+        if (e && (r.person_id == null ? !e.placed : String(e.person) === String(r.person_id))) out.add(e);
+      }
+      return [...out];
+    };
+    /* The page's own words for what its Money figure is made of. */
+    const moneyIs = (r) => (r.money == null ? ''
+      : r.money_period_days == null ? 'part from a statement that does not say its period'
+        : r.money_period_days > 1 ? `${r.money_period_days}-day statements spread across their days`
+          : r.money_source === 'fares' ? 'fares' : r.money_source === 'mixed' ? 'statements and fares' : 'filed per day');
+    /* A row with no booking still carries the page's Money (a statement
+       spread across its days) or Paid when either is not nought — dropping it
+       left those figures on the page and out of the file (independent review,
+       2026-10-20). Rows with neither a booking nor any money are the idle
+       roster, which this sheet does not repeat. */
+    for (const r of directory.filter((x) => Number(x.trips) > 0 || Number(x.money) || Number(x.payout))) {
+      const es = entriesOf(r);
+      es.forEach((e) => attached.add(e));
+      const sumOf = (f) => es.reduce((a, e) => a + (Number(f(e)) || 0), 0);
+      const faresBy = {};
+      for (const e of es) for (const [p, v] of Object.entries(e.faresBy)) faresBy[p] = (faresBy[p] || 0) + v;
+      const commission = sumOf((e) => e.commission);
+      /* Every cash trip still waiting for a price is an unknown, not a nought:
+         the page's tile reads "not reported" for it, so the cell is empty. */
+      const cashN = sumOf((e) => e.cashTrips);
+      const cashUnpriced = sumOf((e) => e.unpriced);
+      dr.row([h('ID', r.driver_name), r.fleet_id ? fleetName(r.fleet_id) : '', (r.platforms || []).map(plat).join(', '),
+        Number(r.trips) || 0, Number(r.completed) || 0, h('REV', Number(r.priced_trips) ? r2(r.revenue) : null),
+        ...PL.map((p) => h('REV', faresBy[p] == null ? null : r2(faresBy[p]))),
+        h('EARN', r2(r.money)), moneyIs(r), h('EARN', r2(r.payout)),
+        cashN, h('CASH', cashN && cashUnpriced === cashN ? null : r2(sumOf((e) => e.cashTaken))), cashUnpriced,
+        h('REV', commission ? r2(commission) : null), r.km == null ? null : Number(r.km), Number(r.days) || 0]);
+    }
+    /* Anything this file holds that no row of the page could take — never
+       dropped. Measured zero on production when this was written. */
+    const loose = everyone.filter((e) => !attached.has(e) && (e.bookings || e.cashTrips));
+    for (const e of loose) {
+      dr.row([h('ID', `${nameOf(e)} — not on the Drivers page for these dates`), fleetsOf(e), platsOf(e), e.bookings, e.completed,
+        h('REV', e.priced ? r2(e.fares) : null), ...PL.map((p) => h('REV', e.faresBy[p] == null ? null : r2(e.faresBy[p]))),
+        null, '', null, e.cashTrips, h('CASH', e.cashTrips && e.unpriced === e.cashTrips ? null : r2(e.cashTaken)), e.unpriced,
+        h('REV', e.commission ? r2(e.commission) : null), null, null]);
     }
 
     /* ── Money by day ──────────────────────────────────────────────────── */
