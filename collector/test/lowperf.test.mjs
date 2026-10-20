@@ -292,7 +292,14 @@ const t1 = (await api.get(`/api/lowperf?from=2026-10-01&to=2026-10-06&hotel=show
 check('Test Driver 1 (Uber and Bolt) is one person: a cash ride in four is 25%, completed 100%',
   t1.rows.every((r) => r.fleet === 'ecosine') && (!lr['Test Driver 1'] || (lr['Test Driver 1'].cash_pct === 25 && lr['Test Driver 1'].completion_pct === 100)),
   j(lr['Test Driver 1'] || t1.rows.map((r) => r.name)));
-check('…not held by the response cache: /api/lowperf is on its never list', /'\/api\/lowperf',/.test(readFileSync('api/cache.js', 'utf8')));
+/* Cached since 2026-10-20, keyed on the target as well as the data
+   (test/cache.test.mjs "the low performers" proves the key); the watch lists
+   stay on the never list. */
+{
+  const src = readFileSync('api/cache.js', 'utf8');
+  check('the watch lists are on the response cache\u2019s never list; the list itself is not, and is keyed on the target',
+    /^\s*'\/api\/lowperf\/',/m.test(src) && !/^\s*'\/api\/lowperf',/m.test(src) && /\['\/api\/lowperf', TARGET_SALT_SQL\]/.test(src));
+}
 
 const body = { name: 'First week of October', from: '2026-10-01', to: '2026-10-06', hotel: 'show' };
 as = null;
@@ -389,6 +396,16 @@ globalThis.window ??= globalThis;
 globalThis.document ??= { documentElement: { dataset: {}, getAttribute: () => null } };
 const pg = await import('../api/public/lowperf.js');
 const rt = pg.parseParam('2026-10-01..2026-10-21', 'mostly.egari');
+/* The address the warmer fills is the one a first open really sends — on the
+   page and on the phone, which both build it with listUrl(parseParam(…)).
+   A warmer one character off fills a key nobody asks for, and the page stays
+   cold while the log says it is warm (api/warm.js, windowQs, twice). */
+{
+  const { LOWPERF_DEFAULT } = await import('../api/warm.js');
+  check('the warmer fills the address a first open of #low-performers sends',
+    LOWPERF_DEFAULT === pg.listUrl(pg.parseParam(null, null)),
+    `${LOWPERF_DEFAULT} vs ${pg.listUrl(pg.parseParam(null, null))}`);
+}
 check('the address carries the period, the hotel switch and the fleet, and reads back',
   rt.from === '2026-10-01' && rt.to === '2026-10-21' && rt.hotel === 'mostly' && rt.fleet === 'egari'
   && pg.pageHref(rt) === '#low-performers/2026-10-01..2026-10-21/mostly.egari'

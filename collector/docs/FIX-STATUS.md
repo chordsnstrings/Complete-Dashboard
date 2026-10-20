@@ -5077,3 +5077,25 @@ The classic skin's frozen `#feeds` moved, because the table is in both
 skins. Removing exactly the new panel (10,961 characters) and its
 source-line row from the new rendering hashes back to the recorded
 `d0565df0fe07e7cf`; it was then re-recorded from the committed tree.
+
+## LPS — the Low performers page, slow to open (2026-10-20)
+
+The operator: "fix low performnce page slow loading". Measured on production
+before any change (`6368228`): `/api/lowperf?hotel=hide`, the address the
+page and the phone both open with, 7.04 s, 6.17 s and 7.72 s on three reads,
+406 kB (60 kB brotli). The time was all the server's: the route was on the
+response cache's NEVER list, so every open ran the dozen aggregates behind
+it (the month arithmetic per month, the people's days, extras, hours and the
+day detail). It was there for a true reason — every figure is a share of the
+revenue target, and the Owner's save, the trips-a-day setting and a month's
+learned weights all move it without moving the cache's data version.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| LPS1 | `/api/lowperf` cached under a key salted with the three target tables (count and latest write of `revenue_target`, `target_weights`, `access_config`) and the Dubai day, read on every request (api/cache.js `SALTED`, `TARGET_SALT_SQL`). A save or a new day is a key nobody has asked for: a miss, computed live, never the answer from before it. Data moving underneath is stale-while-revalidate, as for every page. The salt rides as a URL fragment, which the stale refresh's own request never sends, so a refresh files under the key current when it lands. A salt that cannot be read caches nothing | yes | pending | `cache` 56/0; '/api/lowperf' back on NEVER → 11 fail; salt left out → 4 fail (three saves, the new day); day left out → 1 fails; a failed salt read cached → 1 fails |
+| LPS2 | The watch lists stay uncached: NEVER holds `'/api/lowperf/'`, which matches `/api/lowperf/watch` and `/api/lowperf/watch/:id` and not the list | yes | pending | taken off NEVER → 2 fail |
+| LPS3 | The default view warmed on every pass (api/warm.js `LOWPERF_DEFAULT`), so the first open after a new day or a save is not the reader's wait; `test/lowperf.test.mjs` holds the string to `listUrl(parseParam(null, null))`, what the page and the phone really send | yes | pending | the key changed to `/api/lowperf` → fails |
+
+Not changed: the workbook (`/api/export/lowperf.xlsx`) answers with
+`res.end`, which the cache never holds, and a period other than the default
+is still computed on its first open and held after.

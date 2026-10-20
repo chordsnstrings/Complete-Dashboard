@@ -386,6 +386,103 @@ check('and the hit rate is visible, so a cache that stopped working can be seen'
   check('…and a past day of it is served from the cache', o2.body.n === o1.body.n && o2.cache === 'hit', JSON.stringify([o1, o2]));
 }
 
+console.log('\ncache: the low performers — keyed on the target as well as the data');
+
+/* /api/lowperf sat on NEVER because the Owner's target save, the trips-a-day
+   setting and a month's learned weights all move it without moving the
+   version — and so every open was a 6-7 s aggregate (production 2026-10-20).
+   It is cached now under a key salted with those three tables and the Dubai
+   day (api/cache.js SALTED). What must hold: it IS cached; a save of any of
+   the three, or a new day, is answered fresh on the very next read and never
+   from before it; the data moving underneath is stale-while-revalidate like
+   every other page; the watch lists stay uncached; and a salt that cannot be
+   read caches nothing.
+   REVERSION (each run 2026-10-20): '/api/lowperf' back on NEVER — "…is
+   served from the cache" fails; the salt left out of the key — the three
+   save checks and the new-day check fail, each answered 'hit' with the body
+   from before; dropping `dayOf()` from the salt — only the new-day check
+   fails; '/api/lowperf/' taken off NEVER — the watch-list check fails. */
+{
+  let day = '2026-10-20';
+  let saltBroken = false;
+  const pool3 = { query: (t, p) => (saltBroken && t.includes('FROM revenue_target')
+    ? Promise.reject(new Error('down')) : db.query(t, p)) };
+  let n = 0;
+  const app3 = express();
+  const c3 = responseCache({ pool: pool3, ttlMs: 0, dayOf: () => day });
+  app3.use('/api', c3);
+  app3.get('/api/lowperf', (req, res) => { n++; res.json({ n, hotel: req.query.hotel || null }); });
+  app3.get('/api/lowperf/watch', (_q, res) => { n++; res.json({ n }); });
+  app3.get('/api/lowperf/watch/:id', (_q, res) => { n++; res.json({ n }); });
+  const s3 = app3.listen(0);
+  c3.setPort(s3.address().port);
+  const get3 = async (p) => {
+    const r = await fetch(`http://127.0.0.1:${s3.address().port}${p}`);
+    return { cache: r.headers.get('x-cache'), body: await r.json() };
+  };
+  const L = '/api/lowperf?hotel=hide';
+
+  const a1 = await get3(L);
+  const a2 = await get3(L);
+  check('the low performers list is cached: the second open is served from the cache',
+    a1.cache === 'miss' && a2.cache === 'hit' && a2.body.n === a1.body.n, JSON.stringify([a1, a2]));
+  check('…and one period is not another\u2019s answer',
+    (await get3('/api/lowperf?hotel=show')).cache === 'miss');
+
+  const saves = [
+    ['the Owner\u2019s target save', `INSERT INTO revenue_target (month, gross_target, cars, rate, set_day)
+      VALUES ('2026-10-01', 100000, 10, 300, '2026-10-20')`],
+    ['the trips-a-day setting', `INSERT INTO access_config (key, value, updated_at) VALUES ('trips_target', '9', now())
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`],
+    ['a month\u2019s learned weights', `INSERT INTO target_weights (month, from_day, basis)
+      VALUES ('2026-11-01', '2026-11-01', '{}')`],
+  ];
+  for (const [what, sql] of saves) {
+    const before = (await get3(L)).body.n;
+    await db.query(sql);
+    const r = await get3(L);
+    check(`${what} is answered fresh on the very next read — never from before it`,
+      r.cache === 'miss' && r.body.n > before, `${before} -> ${JSON.stringify(r)}`);
+    check('…and then held again', (await get3(L)).cache === 'hit');
+  }
+
+  const beforeDay = (await get3(L)).body.n;
+  day = '2026-10-21';
+  const nd = await get3(L);
+  check('a new Dubai day is a new key: "the month so far, to yesterday" moved at midnight',
+    nd.cache === 'miss' && nd.body.n > beforeDay, JSON.stringify(nd));
+
+  /* The data moving is the version, as for every page: the reader is handed
+     the previous answer at once and the refresh — which requests the key as
+     a URL, salt fragment and all — lands under the same key behind them. */
+  const held = (await get3(L)).body.n;
+  await db.query(`INSERT INTO collection_run (source, mode, status, finished_at)
+                  VALUES ('uber', 'incremental', 'ok', now() + interval '3 seconds')`);
+  const st = await get3(L);
+  check('a collection run under it is stale-while-revalidate, as for every other page',
+    st.cache === 'stale' && st.body.n === held, JSON.stringify(st));
+  for (let i = 0; i < 50 && n === held; i++) await new Promise((r) => setTimeout(r, 20));
+  await new Promise((r) => setTimeout(r, 50));
+  const rf = await get3(L);
+  check('…and the refresh behind the reader lands under the key the next reader asks for',
+    rf.cache === 'hit' && rf.body.n > held, JSON.stringify(rf));
+
+  for (const w of ['/api/lowperf/watch', '/api/lowperf/watch/7']) {
+    const x = await get3(w);
+    const y = await get3(w);
+    check(`${w} is never cached — a list changes on a click`,
+      y.body.n === x.body.n + 1 && x.cache !== 'hit' && y.cache !== 'hit', JSON.stringify([x, y]));
+  }
+
+  saltBroken = true;
+  const b1 = await get3(L);
+  const b2 = await get3(L);
+  check('a target that cannot be read caches nothing: the list is answered live',
+    b2.body.n === b1.body.n + 1 && b1.cache !== 'hit' && b2.cache !== 'hit', JSON.stringify([b1, b2]));
+  saltBroken = false;
+  s3.close();
+}
+
 const app2 = express();
 app2.use('/api', responseCache({ pool, enabled: false }));
 let n2 = 0;
