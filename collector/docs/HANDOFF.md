@@ -24,9 +24,9 @@ stale document.
 | # | what | why now | who |
 |---|---|---|---|
 | 0.1 | **Both Bolt portal refresh tokens expire 2026-10-20 09:18:15Z (Ecosine) and 09:19:57Z (Egari)** — 13:18 / 13:20 Dubai. | After that Bolt trips and fares stop for both fleets until new tokens are pasted. They last exactly 7 days and cannot be extended. | **Operator only** — standing rule: never sign in to the Bolt portal interactively. Capture one fleet, paste it in Settings, then check the *other* fleet's token still works before capturing it. That also settles COVERAGE's open question of whether one owner's sign-in kills the other's (the two were minted 102 s apart on 10-13 and both survived the week, which suggests not). Re-check expiry with `GET /api/settings` (expiry fields only; never print a value). |
-| 0.2 | ~~LPG not deployed~~ **Done 2026-10-20:** LPG1–11 are on production and proven (FIX-STATUS LPG, deployment `9cf3fe85`). | — | What is still open is the page's speed: `/api/lowperf` takes 6.5–10.5 s on the page's own URL, against about 4 s before LPG. |
+| 0.2 | ~~LPG not deployed~~ **Done 2026-10-20:** LPG1–11 are on production and proven (FIX-STATUS LPG, deployment `9cf3fe85`). | — | ~~The page's speed~~ **Done 2026-10-20 (FIX-STATUS LPS):** `/api/lowperf` is cached under a key that carries the target; the default view answers in 0.3–0.6 s (was 6.2–7.7 s), and the page opens in 4.96 s on desktop and 1.82 s on the phone (was 12.4 / 12.2 s). |
 | 0.3 | **Deploying needs a DigitalOcean token, and none is stored.** The operator pasted one into the 2026-10-20 session; it lived only in that session's scratchpad. | Checked through the API: the `fleet-dashboard` app builds two components, the `api` service and the `collector` worker (both `basic-xxs`), from `claude/ecosine-egari-tracking-apis-rf9ong`. **`deploy_on_push` is off on both, so nothing deploys on a merge.** | Get a token from the operator for each deploying session, kept outside the repo; suggest they revoke tokens pasted into chat. Then `POST /v2/apps/$APP_ID/deployments` with `{"force_build":true}`, poll that deployment id to `ACTIVE`, and compare `services[].source_commit_hash` and the `sw.js` fingerprint (§9) with the branch. |
-| 0.4 | Production is at `6368228` (deployment `32850f02`, 2026-10-20): PRs #4, #5 and #6 merged and force-built. | — | Merge work into the production branch through a PR, then force-build (§0.3). |
+| 0.4 | Production is at `92779d9` (deployment `c358d4d8`, 2026-10-20 07:45Z): PRs #4–#8 merged and force-built. | — | Merge work into the production branch through a PR, then force-build (§0.3). |
 | 0.5 | **The operator has an unanswered question from 2026-10-19 14:29Z** (garage history, §5). | They asked for the garage audit, plan and build to come straight after LPG. The session asked how the existing garage history should reach production and got no answer, because the session died. | Ask again, in the same terms (§5). |
 
 ---
@@ -112,8 +112,23 @@ export (`/api/export/lowperf.xlsx`) now cover the same ground.
 ### 4.1 In flight (the previous session stopped mid-way)
 
 - **LPG: fixed, deployed and proven, 2026-10-20** (FIX-STATUS LPG, and the
-  "Deployed and proven" paragraph under CST). Still open is the page's
-  speed: 6.5–10.5 s for `/api/lowperf`.
+  "Deployed and proven" paragraph under CST). The page's speed was fixed
+  and proven on production the same day (FIX-STATUS LPS).
+- **What still costs a desktop page its first seconds** (measured
+  2026-10-20 opening #low-performers through `bin/prod-mirror.mjs`): about
+  2.7 s loading ~90 ES modules (the mirror fetches each from production, so
+  a real browser with its service worker is faster), then `/api/auth/me`,
+  0.5–3.1 s from outside against 0.3–0.4 s for `/api/health`, which every
+  desktop page waits on before it routes. For an anonymous reader it is one
+  read of `fleet`, cached 60 s (`api/access/service.js allFleets`), so the
+  spread is a wait for a database connection; measured in the first minutes
+  after a deploy, while the boot warm pass runs every window. Re-time it at
+  rest before working on it.
+- **A cache hit carries no route `Cache-Control`** (the review of LPS): a
+  route's own `private, no-store` is set only when the route runs. Harmless
+  under open mode's deliberate policy; a ruling for the operator if
+  sign-in becomes required, and a three-line change in `api/cache.js` if so
+  (FIX-STATUS LPS).
 - **Watch lists** (LP-5) are deployed (`schema_v109`) but have never been used.
   `/api/lowperf/watch` → `{lists: []}`. Saving needs a signed-in Owner or
   Operations manager, and nobody signs in (§6.1). The 14-Oct list was never
@@ -443,6 +458,11 @@ watermarks), and settings per connection.
 ---
 
 ## 8. The test suite
+
+Full run (`npm test`), 2026-10-20 ~07:20Z, on LPS (`e46d0e5`): **385
+files, 14,222 assertions, 2 files failing** — `access_pages` (no Postgres)
+and `arkiv_classic_frozen`, the six pre-existing Leaflet routes only
+(re-run alone against a fresh `mockapi.mjs`: 147/6, the same six hashes).
 
 Full run (`npm test`), 2026-10-20 ~04:00Z: **384 files, 14,143 assertions, 4 files failing.**
 
