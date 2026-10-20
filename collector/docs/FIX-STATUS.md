@@ -5041,6 +5041,7 @@ six caught):
 | N6 | the last passenger, read in the previous ride's 2-minute pad, was counted as this booking's | the span opens after the previous SPAN closes |
 | N7 | a plate on two rosters could change fleet between requests | the roster query is ordered |
 | N8 | a roster of only not-yet-admitted plates showed an empty table | the readings stand in, as with no roster |
+| N2b | **on production after N2 (deployment `dcf07b08`, `b2c1a56`):** L27976 read "not moving with the car" on three airport pickups. The car was waiting at the terminal for its guest, because a hotel booking's start is not its ride's start | hotel bookings are never judged for standing still; their seat is judged from start to close, at least the estimate and at most 3 h; only the estimate clips the next span |
 
 On the production week after these fixes: 14 silent, 1 not moving with the
 car (L45243, 12 of 31), 6 reading nobody, 6 missing passengers, 1 too few,

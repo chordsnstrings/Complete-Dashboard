@@ -10176,6 +10176,13 @@ over the 7 Dubai days 14–20 Oct, unless it says otherwise.
   a 5-minute poll catches a short job twice at best. Judge "standing still"
   only on bookings of 10 minutes or more with 3 or more readings inside. A
   looser rule named L78465, a working car, "not moving with the car".
+* **A hotel booking's start is not its ride's start either.** On airport
+  pickups the car waits at the terminal for its guest: L27976 on 15 Oct
+  "started" 10:47 and stood at Garhoud, seat empty, for an hour, and the
+  booking closed 13:58. Never judge a hotel booking for standing still. Judge
+  its seat from start to close, at least the distance estimate and at most
+  3 hours, but let only the estimate decide where the next booking's span
+  may open (api/feed_routes.js `bookingEnd` / `clipEnd`).
 * **A hotel booking's span is its start plus the distance estimate, never its
   `ended_at`.** The close can come 55 hours later (L27976, 16 Oct) or 0.3
   minutes after a 42 km ride. Use the reconciler's estimate

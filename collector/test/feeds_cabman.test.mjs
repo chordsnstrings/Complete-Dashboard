@@ -352,6 +352,23 @@ console.log('\n9. the second review of 2026-10-20');
     }));
 }
 {
+  /* N2b, found on production after N2: L27976's airport pickups. The booking
+     "starts", the car waits at the terminal an hour with the seat empty, then
+     drives its guest; the booking closes after that. Never "standing still",
+     and the guest counts — the seat is judged from start to close, at most
+     3 hours. An Uber ride in that hour is not clipped by the late close. */
+  const fx = []; const bk = [];
+  for (const h of [30, 20, 10]) {
+    for (let m = 0; m <= 60; m += 5) fx.push({ ...F('QC1001', h * 60 - m, 25.25, false), speed: 0 });
+    for (let m = 65; m <= 95; m += 5) fx.push(F('QC1001', h * 60 - m, 25.25 + (m - 60) * 0.004, true));
+    const b = B('QC1001', h * 60, h * 60 - 100, 16.7, 'hotel'); bk.push(b);
+  }
+  const r = run(fx, bk).rows[0];
+  check('N2b. a hotel pickup that waits an hour at the terminal is never "standing still", and its guest counts: 3 of 3',
+    r.verdict === 'ok' && r.bookings.still_checked === 0 && r.bookings.seat_seen === 3 && r.bookings.read === 3,
+    JSON.stringify([r.verdict, r.bookings]));
+}
+{
   /* N3. Three readings at the pickup and none after: not a car standing still. */
   const fx = []; const bk = [];
   for (const h of [9, 6, 3]) {

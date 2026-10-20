@@ -397,8 +397,24 @@ export const CAB_STILL_COVER = 0.7;
    equal to that function. */
 export const hotelEndMs = (startMs, km) => startMs
   + (Number(km) > 0 ? Math.min(Number(km) * 2 * 60000, 3 * 3600e3) : 30 * 60000);
-const bookingEnd = (bk) => (bk.platform === 'hotel'
-  ? hotelEndMs(ms(bk.requested_at), bk.distance_km) : ms(bk.ended_at));
+/* …and its START is not the ride's either. On production, after that change,
+   L27976 read "not moving with the car" on three airport pickups: on 15 Oct the
+   booking "started" 10:47 and the car stood at Garhoud by the terminal, seat
+   empty, for an hour — the booking closed at 13:58. It was waiting for its
+   guest. So a hotel booking's SEAT is judged from its start to its close, at
+   least its distance estimate and at most 3 hours (generous, as the reconciler
+   is: an over-covered booking can only flatter the pad, an under-covered one
+   accuses it), and it is NEVER judged for standing still. Where the next
+   booking's span may open is still the estimate, so a late close never
+   swallows the rides after it. */
+export const HOTEL_SEAT_MAX_MS = 3 * 3600e3;
+const bookingEnd = (bk) => {
+  if (bk.platform !== 'hotel') return ms(bk.ended_at);
+  const start = ms(bk.requested_at); const est = hotelEndMs(start, bk.distance_km);
+  const close = ms(bk.ended_at);
+  return Number.isFinite(close) ? Math.max(est, Math.min(close, start + HOTEL_SEAT_MAX_MS)) : est;
+};
+const clipEnd = (bk) => (bk.platform === 'hotel' ? hotelEndMs(ms(bk.requested_at), bk.distance_km) : ms(bk.ended_at));
 /* Standing still through this share of a car's bookings (and at least three)
    is the unit in another car or filed under another plate, not a pause. */
 export const CAB_ELSEWHERE_SHARE = 0.3;
@@ -550,7 +566,7 @@ function cabmanCar({ plate, fleet_id, last, fixes, bookings, nowMs, days }) {
     const start = ms(bk.requested_at); const end = bookingEnd(bk);
     let from = Math.max(start - pad, prevSpanEnd + 1); const to = end + pad;
     if (from > to) from = start - pad;
-    prevSpanEnd = Math.max(prevSpanEnd, to);
+    prevSpanEnd = Math.max(prevSpanEnd, clipEnd(bk) + pad);
     plat[bk.platform] = (plat[bk.platform] || 0) + 1;
     const inside = pts.filter((f) => f.t >= from && f.t <= to);
     if (inside.length) anyInside++;
@@ -565,7 +581,7 @@ function cabmanCar({ plate, fleet_id, last, fixes, bookings, nowMs, days }) {
     const inSteps = steps.filter((x) => x.a >= from && x.b <= to);
     const lasts = end - start;
     const cover = inSteps.reduce((x, y) => x + Math.max(0, Math.min(y.b, end) - Math.max(y.a, start)), 0);
-    if (here.length >= CAB_STILL_READINGS && inSteps.length >= CAB_STILL_READINGS - 1
+    if (bk.platform !== 'hotel' && here.length >= CAB_STILL_READINGS && inSteps.length >= CAB_STILL_READINGS - 1
       && lasts >= CAB_STILL_MIN * 6e4 && cover >= CAB_STILL_COVER * lasts && Number(bk.distance_km) >= CAB_TRIP_KM) {
       stillChecked++;
       const moved = inSteps.reduce((x, y) => x + y.d, 0);
