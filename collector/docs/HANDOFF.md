@@ -475,6 +475,17 @@ watermarks), and settings per connection.
 
 ## 8. The test suite
 
+Full run (`npm test`), 2026-10-20 ~12:30Z, on NTFY (`b413c9c`→`19446bd`): **386
+files, 14,305 assertions, 3 files failing**:
+- `access_pages`: no Postgres.
+- `arkiv_classic_frozen`: the six known Leaflet routes.
+- `timezone`: the UTC-day lint flagged api/alerts.js's local `iso(now)`, a
+  full timestamp whose name collided with src/util.js's day helper. Renamed
+  `stamp`, then 19/0 alone.
+
+`auth_banner`, `ntfy_alerts` and `timezone` were re-run alone on the final
+commit.
+
 Full run (`npm test`), 2026-10-20 ~07:20Z, on LPS (`e46d0e5`): **385
 files, 14,222 assertions, 2 files failing** — `access_pages` (no Postgres)
 and `arkiv_classic_frozen`, the six pre-existing Leaflet routes only

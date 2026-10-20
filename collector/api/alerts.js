@@ -147,7 +147,9 @@ export function firstMessage(rows, click = null) {
   };
 }
 
-const iso = (t) => new Date(t).toISOString();
+/* A full timestamp for a TIMESTAMPTZ column — not a calendar day (src/util.js's
+   stamp() is the UTC DAY, which test/timezone.test.mjs forbids on a clock). */
+const stamp = (t) => new Date(t).toISOString();
 
 /* Different news, not merely a different moment: another verdict, or inside a
    fault another STATE (a refused token is replaced, a moved URL is changed —
@@ -157,7 +159,7 @@ const differs = (a, b) => a.severity !== b.severity
 
 async function told(q, r, at) {
   await q(`UPDATE alert_state SET severity = $2, state = $3, label = $4, notified_at = $5 WHERE key = $1`,
-    [alertKey(r), r.severity, r.state, label(r), iso(at)]);
+    [alertKey(r), r.severity, r.state, label(r), stamp(at)]);
 }
 
 async function settings() {
@@ -201,7 +203,7 @@ export async function alertTick({
     for (const r of rows) {
       await q(`INSERT INTO alert_state (key, severity, state, label, notified_at, seen_severity, seen_state, seen_since)
                VALUES ($1, $2, $3, $4, $5, $2, $3, $5) ON CONFLICT (key) DO NOTHING`,
-      [alertKey(r), r.severity, r.state, label(r), iso(now)]);
+      [alertKey(r), r.severity, r.state, label(r), stamp(now)]);
     }
     return { sent: 1, first: true, changes: 0 };
   }
@@ -217,14 +219,14 @@ export async function alertTick({
       const quiet = r.severity === 'ok';
       await q(`INSERT INTO alert_state (key, severity, state, label, notified_at, seen_severity, seen_state, seen_since)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (key) DO NOTHING`,
-      [key, quiet ? r.severity : null, quiet ? r.state : null, label(r), quiet ? iso(now) : null,
-        r.severity, r.state, iso(now)]);
+      [key, quiet ? r.severity : null, quiet ? r.state : null, label(r), quiet ? stamp(now) : null,
+        r.severity, r.state, stamp(now)]);
       if (quiet) continue;
-      p = { severity: null, state: null, notified_at: null, seen_since: iso(now) };
+      p = { severity: null, state: null, notified_at: null, seen_since: stamp(now) };
     } else if (differs({ severity: p.seen_severity, state: p.seen_state }, r)) {
       await q('UPDATE alert_state SET seen_severity = $2, seen_state = $3, seen_since = $4 WHERE key = $1',
-        [key, r.severity, r.state, iso(now)]);
-      p = { ...p, seen_since: iso(now) };
+        [key, r.severity, r.state, stamp(now)]);
+      p = { ...p, seen_since: stamp(now) };
     }
     if (p.severity != null && !differs(p, r)) continue;            // already told
     /* Broken when it appeared, mended before anybody was told: nothing to say. */
