@@ -1,5 +1,6 @@
 import { internalHeaders, isInternal } from './access/internal.js';
 import { dubaiIso } from '../src/util.js';
+import { createHash } from 'node:crypto';
 /* Response cache for read endpoints.
    ─────────────────────────────────────────────────────────────────────────
    Every /api GET here answers a question about data that changes only when the
@@ -120,10 +121,13 @@ const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/t
      Its hour-by-hour view is "so far today" and "by this minute", which a
      cached answer would freeze at the minute it was cached. */
   '/api/target', '/api/target/hours',
-  /* THE LOW PERFORMERS AND THEIR WATCH LISTS (api/lowperf_routes.js): every
-     figure is a share of the revenue target, which the Owner's save moves,
-     and a watch list changes on a click — neither advances the version. */
-  '/api/lowperf',
+  /* THE LOW PERFORMERS' WATCH LISTS (api/lowperf_routes.js): a list changes
+     on a click, which advances no version. The trailing slash is the point:
+     /api/lowperf/watch and /api/lowperf/watch/:id are never cached, while the
+     list itself, /api/lowperf, IS — under a key that carries the revenue
+     target as well as the data (SALTED below). It sat here whole until
+     2026-10-20, and every open of the page was a 6-7 s aggregate. */
+  '/api/lowperf/',
   /* THE CREDENTIAL BANNER, which a Settings save changes.
      ───────────────────────────────────────────────────────────────────────
      A save tests the value it stored and rewrites the banner rows
@@ -159,8 +163,43 @@ const neverToday = (req, path) => (path === '/api/driver/day'
   || (path === '/api/online/hours'
     && (String(req.query?.day || '').slice(0, 10) || dubaiIso()) === dubaiIso());
 
+/* AN ANSWER THAT ALSO MOVES WITH THE TARGET, KEYED ON IT (2026-10-20).
+   ─────────────────────────────────────────────────────────────────────────
+   /api/lowperf was on NEVER because every figure in it is a share of the
+   revenue target, and the Owner's save (revenue_target), the trips-a-day
+   setting (access_config) and the weekday weights a month learns
+   (target_weights) all move it without moving the version. That was correct
+   and it cost every reader the whole aggregate: measured on production
+   2026-10-20, 6.2-7.7 s for the default view, 406 kB, every open, on the
+   page and on the phone alike.
+
+   Rather than leave it uncached, the key says what the answer was computed
+   AGAINST. Three counts and three latest-write times over three small tables
+   — every write to them is an INSERT or an upsert that stamps its time, so
+   any save changes one of the six — and the Dubai day, because the default
+   period ("the month so far, to yesterday") and which days count both turn
+   at midnight. A save or a new day is then a key nobody has asked for yet:
+   a miss, computed live, never the answer from before it. The data moving
+   underneath is the version, as for every other page: stale-while-
+   revalidate, at most one collection behind and saying so in x-cache.
+
+   Carried in the key as a FRAGMENT. The stale refresh re-requests its key as
+   a URL, and a fragment is never sent: the refresh reaches the same route,
+   which salts its own key afresh — so a refresh that lands after a save
+   files its answer under the new key, never the old one.
+
+   Read on every request, unlike the version: a save must show on the very
+   next read, which is the whole reason the route was on NEVER. One
+   round-trip over three tables of a few hundred rows.
+   test/cache.test.mjs "the low performers". */
+export const TARGET_SALT_SQL = `SELECT
+  (SELECT count(*)::text || '/' || coalesce(max(set_at)::text, '-') FROM revenue_target) AS t,
+  (SELECT count(*)::text || '/' || coalesce(max(created_at)::text, '-') FROM target_weights) AS w,
+  (SELECT count(*)::text || '/' || coalesce(max(updated_at)::text, '-') FROM access_config) AS c`;
+const SALTED = new Map([['/api/lowperf', TARGET_SALT_SQL]]);
+
 export function responseCache({ pool, ttlMs = 30000, enabled = true, port, refreshConcurrency = 2,
-  maxBytes = MAX_BYTES } = {}) {
+  maxBytes = MAX_BYTES, dayOf = dubaiIso } = {}) {
   /* The port to re-request a stale key on. Set after listen, because with
      PORT=0 the real one does not exist until then. */
   let boundPort = port || null;
@@ -267,7 +306,18 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port, refre
     /* The access gate narrows a one-fleet reader's filter to their fleet and
        says so in fmCacheKey; the answer is cached under what was actually
        computed, never under the address typed. */
-    const key = req.fmCacheKey || req.originalUrl;
+    let key = req.fmCacheKey || req.originalUrl;
+    if (SALTED.has(path)) {
+      /* If the target cannot be read, nothing can say whether it moved: the
+         route answers live and nothing is kept, as when the version cannot
+         be read. */
+      let salt;
+      try {
+        const { rows } = await pool.query(SALTED.get(path));
+        salt = createHash('sha1').update(`${dayOf()}|${rows[0]?.t}|${rows[0]?.w}|${rows[0]?.c}`).digest('hex').slice(0, 16);
+      } catch { stats.skip++; return next(); }
+      key = `${key}#t=${salt}`;
+    }
     const v = await currentVersion();
     const hit = store.get(key);
     /* The version this answer describes, on every response — cached, stale or

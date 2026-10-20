@@ -30,8 +30,12 @@
    the list to some of its people (pks), never add someone the period does not
    hold.
 
-   NEVER CACHED (api/cache.js NEVER): a list changes on a click and the target
-   on the Owner's save, and neither moves the response cache's version. */
+   THE WATCH LISTS ARE NEVER CACHED (api/cache.js NEVER, '/api/lowperf/'): a
+   list changes on a click, which moves no version. THE LIST ITSELF IS, since
+   2026-10-20 — under a key that carries the revenue target and the Dubai day
+   as well as the data (api/cache.js SALTED), so the Owner's save is a fresh
+   answer on the very next read; api/warm.js LOWPERF_DEFAULT keeps the default
+   view warm. The workbook is written with res.end and is never held. */
 import {
   lowperfView, spansOf, loadWatch, watchOf, periodOf, loadLowperf, lowperfOf, loadExtras, HOTEL_MODES,
 } from './lowperf.js';

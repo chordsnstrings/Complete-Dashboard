@@ -131,6 +131,17 @@ const WINDOWS = [30, 7, 90, 365];
    api/public/segments.js): 21–31 s cold on production 2026-10-05, the slowest
    first open left once the driver route was fixed. Default window only. */
 const MONTH_ONLY_UNAUTH = '/api/unauthorized/attributed?verdict=unauthorized&limit=500';
+/* #low-performers' list as the page and the phone first ask for it: no period
+   (the month so far, to yesterday) and hotel-only drivers hidden — listUrl()
+   in api/public/lowperf.js on parseParam(null, null). 6.2-7.7 s cold on
+   production 2026-10-20, and it was never cached at all until that day
+   (api/cache.js SALTED). Its own constant rather than BARE_PATHS: the page
+   builds the address with listUrl(), so the bare-call cross-check in
+   test/warm.test.mjs cannot see it; test/lowperf.test.mjs holds this string
+   to what listUrl() really sends instead. Warmed on every pass, because the
+   key also turns with the Dubai day and the target, and the first reader
+   after either would otherwise wait the whole aggregate. */
+export const LOWPERF_DEFAULT = '/api/lowperf?hotel=hide';
 /* ONE FULL PASS AT BOOT, THEN THE TWO WINDOWS PEOPLE OPEN, AT MOST TWICE AN HOUR.
    ─────────────────────────────────────────────────────────────────────────
    This warmer re-ran all 89 aggregates every time the data version moved, and
@@ -229,6 +240,7 @@ export function startWarmer({ port, pool, everyMs = 60000, enabled = true, minGa
         if (stopped) return;
         await hit(`http://127.0.0.1:${port}${path}`);
       }
+      if (!stopped) await hit(`http://127.0.0.1:${port}${LOWPERF_DEFAULT}`);
       /* #capacity's channel provenance, over the window its rota is fitted on
          rather than the reader's — the page has no range control, so it asks
          for CAPACITY_WINDOW_DAYS and nothing in WINDOWS below matches it. The
