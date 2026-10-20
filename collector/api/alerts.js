@@ -7,7 +7,9 @@
    a second rule — every five minutes and posts to ntfy when a row changes:
 
      stopped    a credential or surface refused, nothing collected      prio 4
-     at-risk    no successful collection inside the source's limit       prio 4
+     at-risk    "Not collecting": no successful run inside the limit     prio 4
+                "At risk": a state the dashboard cannot vouch for
+                (a check that could not run) on a source still collecting
      degraded   one surface refused, the channel still collecting        prio 3
      missing    a credential that is not configured at all               prio 3
      ok         back to working after any of the above                   prio 2
@@ -75,6 +77,18 @@ const WORD = { ok: 'Working again', missing: 'Not configured', degraded: 'Degrad
 const TAG = { ok: 'white_check_mark', missing: 'grey_question', degraded: 'large_orange_diamond',
   'at-risk': 'warning', stopped: 'rotating_light' };
 
+/* "Not collecting" is the STALL: a working credential whose source has had
+   no successful run past its limit. 'at-risk' also covers a state this
+   dashboard cannot vouch for — 'unknown', a check that could not run — on a
+   source that IS collecting. The first message sent on production
+   (2026-10-20 12:06Z) titled YANGO_COOKIE "Not collecting" while Yango
+   delivered every half hour: its own reason line said "not checked", and
+   the word in front of it said something false. */
+export function wordOf(r) {
+  if (r.severity === 'at-risk' && r.state != null && r.state !== 'ok') return 'At risk';
+  return WORD[r.severity] || r.severity;
+}
+
 export const alertKey = (r) => [r.provider, r.fleet_id, r.credential].join('|');
 
 const dubai = (t) => new Date(t).toLocaleString('en-GB', { timeZone: 'Asia/Dubai',
@@ -102,12 +116,12 @@ export function reasonOf(r) {
    that it stopped is the news. */
 function wasOf(from, r) {
   if (!from || from.severity === r.severity || from.severity === 'ok') return null;
-  return `was ${WORD[from.severity]?.toLowerCase() || from.severity}, first reported ${dubai(from.notified_at)} Dubai`;
+  return `was ${wordOf(from).toLowerCase()}, first reported ${dubai(from.notified_at)} Dubai`;
 }
 
 function line({ r, from }) {
   const was = wasOf(from, r);
-  return `${WORD[r.severity]}: ${label(r)} — ${reasonOf(r)}${was ? ` (${was})` : ''}`;
+  return `${wordOf(r)}: ${label(r)} — ${reasonOf(r)}${was ? ` (${was})` : ''}`;
 }
 
 /** One message for every change found in one pass. */
@@ -117,15 +131,19 @@ export function compose(changes, click = null) {
   if (changes.length === 1) {
     const [c] = changes;
     const was = wasOf(c.from, c.r);
-    return { title: `${WORD[c.r.severity]}: ${label(c.r)}`,
+    return { title: `${wordOf(c.r)}: ${label(c.r)}`,
       message: `${reasonOf(c.r)}${was ? `\n${was[0].toUpperCase()}${was.slice(1)}.` : ''}`,
       priority, tags: [TAG[c.r.severity]], click };
   }
-  const n = {};
-  for (const c of changes) n[c.r.severity] = (n[c.r.severity] || 0) + 1;
-  const counts = Object.keys(RANK).reverse().filter((s) => n[s])
-    .map((s) => `${n[s]} ${WORD[s].toLowerCase()}`).join(', ');
-  const sorted = [...changes].sort((a, b) => RANK[b.r.severity] - RANK[a.r.severity]);
+  /* Worst first; inside 'at-risk' a stall before a check that could not run —
+     a source that has stopped outranks one that cannot be vouched for. */
+  const rankOf = (r) => RANK[r.severity] + (wordOf(r) === 'Not collecting' ? 0.5 : 0);
+  const sorted = [...changes].sort((a, b) => rankOf(b.r) - rankOf(a.r));
+  /* Counted by the word printed, worst first, so the title and the lines
+     below it cannot disagree. */
+  const n = new Map();
+  for (const c of sorted) n.set(wordOf(c.r), (n.get(wordOf(c.r)) || 0) + 1);
+  const counts = [...n].map(([w, k]) => `${k} ${w.toLowerCase()}`).join(', ');
   return { title: `${changes.length} sources changed: ${counts}`,
     message: sorted.map(line).join('\n'), priority, tags: [TAG[worst]], click };
 }
@@ -141,7 +159,7 @@ export function firstMessage(rows, click = null) {
     message: bad.length
       ? `${intro}\n\nRight now ${bad.length} of the ${rows.length} credentials watched `
         + `${bad.length === 1 ? 'is' : 'are'} not working:\n`
-        + bad.map((r) => `${WORD[r.severity]}: ${label(r)} — ${reasonOf(r)}`).join('\n')
+        + bad.map((r) => `${wordOf(r)}: ${label(r)} — ${reasonOf(r)}`).join('\n')
       : `${intro}\n\nRight now all ${rows.length} credentials watched are collecting.`,
     priority: 3, tags: ['bell'], click,
   };

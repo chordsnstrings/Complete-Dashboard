@@ -6,7 +6,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { noteCredential } from '../src/auth_state.js';
-import { alertTick, compose, reasonOf, alertKey, ALERT_GAP_MS, CONFIRM_MS, HOLD_MAX_MS } from '../api/alerts.js';
+import { alertTick, compose, firstMessage, reasonOf, alertKey, wordOf, ALERT_GAP_MS, CONFIRM_MS, HOLD_MAX_MS } from '../api/alerts.js';
 import { publish, clip } from '../src/ntfy.js';
 
 const db = new PGlite();
@@ -313,6 +313,19 @@ console.log('\nwording');
   const row = { provider: 'bolt', fleet_id: 'ecosine', credential: 'BOLT_CLIENT_ID', surface: 'getDrivers',
     state: 'unentitled', severity: 'degraded', detail: 'not entitled to company 142868' };
   check('degraded says the channel is still collecting', /still collecting/.test(reasonOf(row)), reasonOf(row));
+  /* Production's first message, 2026-10-20: YANGO_COOKIE is 'unknown' — its
+     check could not run — on a Yango channel collecting every half hour. */
+  const unverified = { provider: 'yango', fleet_id: 'ecosine', credential: 'YANGO_COOKIE', surface: 'reports',
+    state: 'unknown', severity: 'at-risk', detail: 'not checked — the edge refused this server', run_age_h: 0.1,
+    stall_limit_h: 12, still_collecting: true };
+  check('an unverified credential on a collecting source is "At risk", never "Not collecting"',
+    wordOf(unverified) === 'At risk', wordOf(unverified));
+  check('…in the first message too', /At risk: yango · Ecosine \(YANGO_COOKIE\) — not checked/.test(firstMessage([unverified]).message)
+    && !/Not collecting/.test(firstMessage([unverified]).message), firstMessage([unverified]).message);
+  const stalled = { ...unverified, credential: 'YANGO_API_KEY', state: 'ok', run_age_h: 40, still_collecting: false };
+  check('a stall is still "Not collecting"', wordOf(stalled) === 'Not collecting', wordOf(stalled));
+  const two = compose([{ r: unverified, from: null }, { r: stalled, from: null }]);
+  check('a title counts by the word its lines print', two.title === '2 sources changed: 1 not collecting, 1 at risk', two.title);
   check('keys follow credential_state\'s own key, not the surface', alertKey(row) === 'bolt|ecosine|BOLT_CLIENT_ID');
   const big = compose(Array.from({ length: 80 }, (_, i) => ({ r: { ...row, credential: `K${i}`, severity: 'stopped',
     detail: 'x'.repeat(80) }, from: null })));
