@@ -25,7 +25,7 @@ stale document.
 |---|---|---|---|
 | 0.1 | **Both Bolt portal refresh tokens expire 2026-10-20 09:18:15Z (Ecosine) and 09:19:57Z (Egari)** — 13:18 / 13:20 Dubai. | After that Bolt trips and fares stop for both fleets until new tokens are pasted. They last exactly 7 days and cannot be extended. | **Operator only** — standing rule: never sign in to the Bolt portal interactively. Capture one fleet, paste it in Settings, then check the *other* fleet's token still works before capturing it. That also settles COVERAGE's open question of whether one owner's sign-in kills the other's (the two were minted 102 s apart on 10-13 and both survived the week, which suggests not). Re-check expiry with `GET /api/settings` (expiry fields only; never print a value). |
 | 0.2 | **LPG ("Low performers, more granular") is fixed and committed on `claude/practical-galileo-p92zg8` (LPG10–11), but NOT deployed.** | `e542bdb` failed two suites. The 2026-10-20 fix: the grid prints its fares to the fils, the people-grid test counts the days and the two averages apart, and the printed grid now fits a landscape A4 at any period length. FIX-STATUS LPG10–11 and AUDIT.md hold the proof. The previous session never read its own suite result. | Deploy (§0.3, §0.4), then check every LPG row on production, including the page's load time (the last thing promised to the operator). |
-| 0.3 | **The deploy path is gone.** | Every deploy went through `$S/ulm/deploy_cabman_egari.py --build` and a token file `$S/do_token`, both in the old session's scratchpad. That container was replaced on 2026-10-19 15:25Z and the scratchpad went with it. This environment has no DigitalOcean variable, no `doctl`, and the repo has no deploy script and no app spec. Nothing deploys on push (production is still on `86d0f5e`, two commits behind). | Operator: supply the DO API token and the app id again, **outside the repo**. Then: `POST https://api.digitalocean.com/v2/apps/$APP_ID/deployments` with `{"force_build":true}`, poll **the deployment id that call returned** until `phase` is `ACTIVE`, then read `services[].source_commit_hash` and compare it with the branch (COVERAGE trap 25: an app-spec update redeploys the last *built* commit, not the branch head). |
+| 0.3 | **The deploy path is gone.** The old deploy script and token file lived in the 2026-10-19 session's scratchpad, which went with its container. | Checked through the DigitalOcean API on 2026-10-20: the `fleet-dashboard` app builds two components, the `api` service and the `collector` worker, both `basic-xxs`, from `claude/ecosine-egari-tracking-apis-rf9ong`. **`deploy_on_push` is off on both.** Every deployment in its history is `manual`, so `e542bdb` was never built: nobody triggered one. The operator's other apps do deploy on push; this one does not. | The operator gave a token for the 2026-10-20 session. It is not stored anywhere that survives, so the next deploy needs one again, kept outside the repo. Then `POST /v2/apps/$APP_ID/deployments` with `{"force_build":true}`, poll **the deployment id that call returned** until `ACTIVE`, and compare `services[].source_commit_hash` with the branch (COVERAGE trap 25). |
 | 0.4 | **Production builds from `claude/ecosine-egari-tracking-apis-rf9ong`. That branch's head is still `e542bdb`, the commit with the two failures; the fix is on `claude/practical-galileo-p92zg8` (PR #4).** | A forced build of the production branch as it stands ships LPG without the fix. | Merge PR #4 into the production branch first. It is a fast-forward, docs plus the LPG fix. Then force-build. |
 | 0.5 | **The operator has an unanswered question from 2026-10-19 14:29Z** (garage history, §5). | They asked for the garage audit, plan and build to come straight after LPG. The session asked how the existing garage history should reach production and got no answer, because the session died. | Ask again, in the same terms (§5). |
 
@@ -439,7 +439,7 @@ watermarks), and settings per connection.
 
 ---
 
-## 8. The test suite on `e542bdb`
+## 8. The test suite
 
 Full run (`npm test`), 2026-10-20 ~04:00Z: **384 files, 14,143 assertions, 4 files failing.**
 
@@ -460,6 +460,23 @@ So the two LPG failures are real, not caused by concurrency.
 `access_pages` printed nothing again, as expected with no Postgres.
 `arkiv_classic_frozen` failed again, 147/6, with the same six hashes as the
 full run, so that failure is pre-existing.
+
+**On the fix (`76325c5`), 2026-10-20 ~05:10Z: 384 files, 14,143 assertions,
+2 files failing.** `access_pages` fails for want of a Postgres.
+`arkiv_classic_frozen` fails 10:
+
+- the six pre-existing Leaflet routes;
+- `low-performers` and `low-performers/2026-09-01..2026-09-20/show.egari`;
+- `watchlist/1` and `watchlist/1/2026-09-15_2026-09-22`.
+
+Those last four pages draw the shared grid, so the old skin moved with the
+fils, as ruling 2 intends in both skins. Before re-recording I proved the
+fils was the only change. Each failing page's written HTML had its
+`fils()` figures rounded back to whole dirhams (898, 427, 290 and 290
+figures) and the legend's three samples restored, and every page then hashed
+back to its recorded value exactly. The four were re-recorded from a clean
+`git archive 76325c5` (COVERAGE trap 24), and the test passes on them, 6/6
+with `ONLY=low-performers,watchlist`.
 
 The evening-UTC and month-boundary flakes (`payout_scope`,
 `phone_today_only`, `forecast_yoy`) passed in this run, which started around
