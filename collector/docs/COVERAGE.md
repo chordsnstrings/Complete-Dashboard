@@ -10225,6 +10225,16 @@ the alert. FIX-STATUS NTFY has what is sent, at which priority, and why.
   never in the repository. Messages carry credential KEY names, fleets and the
   banner's reason ("refresh token expired …"), never a value. For a private
   channel, use a self-hosted server or a reserved topic with `NTFY_TOKEN`.
+* **Timing.** A change is pushed once the banner has said it on two passes
+  (~10 minutes), and a credential is told at most once per 30 minutes, so the
+  fastest a real stop reaches the phone is about ten minutes after the
+  collector records it. A Bolt or CABMAN refusal that the next run clears is
+  never sent.
+* **One row per credential, not per surface.** `credential_state` keeps one
+  row per provider|fleet|credential and overwrites `surface` on every write
+  (a healthy Bolt run ends on getPayouts; an expired token is written on
+  orderHistory). Anything that remembers a banner row must key on the
+  credential, or a recovery and the next fault land on different keys.
 * **Re-announcing.** `alert_state` (schema_v110) holds what was last TOLD.
   To make the watcher say hello again (for example after changing the topic),
   `DELETE FROM alert_state`. The next pass sends the "alerts are on" summary.

@@ -257,23 +257,28 @@ export async function authHealth(q) {
          the true one, and the ntfy alerts (api/alerts.js) would have pushed
          it to a phone.
 
-         Two clocks now, both per fleet, and '*' only for a fleet that has no
-         runs of its own at all:
-           runAge     — the last run that delivered, whatever came after it.
-                        It is the number printed, and a source whose every
-                        run has failed for three days now SAYS three days,
-                        where before a failing freshest run left it with no
-                        clock at all and a working credential read 'ok'
-                        over a source that had stopped.
-           collecting — the freshest run delivered. "Still collecting" is a
-                        claim about now, and a channel whose last run wrote
-                        nothing is not making it, however recent the run
-                        before was. This is what kept the stopped verdict on
-                        Bolt Ecosine's refused surface, and it is unchanged. */
+         Two clocks now:
+           runAge     — the last run that delivered FOR THIS FLEET, whatever
+                        came after it. It is the number printed, and a source
+                        whose every run has failed for three days now SAYS
+                        three days, where before a failing freshest run left
+                        it with no clock at all and a working credential read
+                        'ok' over a source that had stopped. The fleet-less
+                        runs only for a fleet that has never delivered on its
+                        own (CABMAN's two fleets; a fleet newly added to a
+                        source with fleet-less history, which reads the
+                        source's last delivery rather than no clock at all).
+           collecting — the freshest run delivered, the fleet's own if it has
+                        any. "Still collecting" is a claim about now, and a
+                        channel whose last run wrote nothing is not making it,
+                        however recent the run before was. This is what kept
+                        the stopped verdict on Bolt Ecosine's refused surface,
+                        and it is unchanged. */
       const own = `${c.provider}|${c.fleet_id}`;
-      const k = latest.has(own) ? own : `${c.provider}|*`;
-      const runAge = ageH(lastOk.get(k));
-      const collecting = latest.has(k) && delivered(latest.get(k));
+      const any = `${c.provider}|*`;
+      const runAge = ageH(lastOk.get(own) ?? lastOk.get(any));
+      const fresh = latest.get(own) ?? latest.get(any);
+      const collecting = !!fresh && delivered(fresh);
       /* ABOUT A VALUE THAT HAS SINCE BEEN REPLACED.
          ─────────────────────────────────────────────────────────────────
          A row observed with one stored value says nothing about the next. On

@@ -16,14 +16,26 @@
    never recorded: it is neither a fault nor a recovery, and the verdict that
    replaces it is the one worth a push.
 
+   ONE ROW PER CREDENTIAL, provider|fleet_id|credential, the key
+   credential_state upserts on. Not the surface: noteCredential overwrites it
+   on every write, and a healthy Bolt run ends on getPayouts while an expired
+   token is written on orderHistory. Keyed on the surface (the first version,
+   caught by review before it shipped), the recovery landed on a key that was
+   already 'ok' and the NEXT expiry on a key still reading 'stopped' — so the
+   routine weekly Bolt expiry would have been silent.
+
    What it remembers (alert_state, schema_v110) is what it last TOLD the
-   operator, written only once ntfy has accepted the push. So:
+   operator, written only once ntfy has accepted the push, and what the banner
+   has said since when. So:
      - a restart or a deploy re-announces nothing;
      - a push that failed is simply tried again on the next pass;
-     - FLAPPING. A verdict that changes and changes back inside the quiet gap
-       (30 minutes per row) is never sent. A stall clock sitting on its limit
-       would otherwise buzz the phone twice an hour — and an alert channel
-       that cries wolf is muted, after which it reports nothing at all.
+     - A BLIP IS NOT NEWS. A changed verdict is sent only once it has held for
+       two passes (CONFIRM_MS). One refused CABMAN login, fixed by the run
+       after it, would otherwise be a "Stopped" and a "Working again" for
+       nothing — and an alert channel that cries wolf is muted, after which it
+       reports nothing at all.
+     - and a row is told at most once per half hour (ALERT_GAP_MS), so a stall
+       clock sitting on its limit cannot buzz on every crossing.
    Changes found in the same pass go out as ONE message: a deploy that breaks
    six rows is one buzz with six lines, not six buzzes.
 
@@ -42,6 +54,8 @@ import { get, loadSettings } from '../src/settings.js';
 import { log as defaultLog } from '../src/log.js';
 
 export const ALERT_GAP_MS = 30 * 60e3;
+/* Two passes at the five-minute cadence, less a little for timer drift. */
+export const CONFIRM_MS = 9 * 60e3;
 const RANK = { ok: 0, missing: 1, degraded: 2, 'at-risk': 3, stopped: 4 };
 const PRIORITY = { ok: 2, missing: 3, degraded: 3, 'at-risk': 4, stopped: 4 };
 const WORD = { ok: 'Working again', missing: 'Not configured', degraded: 'Degraded',
@@ -49,7 +63,7 @@ const WORD = { ok: 'Working again', missing: 'Not configured', degraded: 'Degrad
 const TAG = { ok: 'white_check_mark', missing: 'grey_question', degraded: 'large_orange_diamond',
   'at-risk': 'warning', stopped: 'rotating_light' };
 
-export const alertKey = (r) => [r.provider, r.fleet_id, r.credential, r.surface ?? ''].join('|');
+export const alertKey = (r) => [r.provider, r.fleet_id, r.credential].join('|');
 
 const dubai = (t) => new Date(t).toLocaleString('en-GB', { timeZone: 'Asia/Dubai',
   day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -113,21 +127,25 @@ export function firstMessage(rows, click = null) {
   return {
     title: 'Fleet dashboard alerts are on',
     message: bad.length
-      ? `${intro}\n\nRight now, ${bad.length} of ${rows.length} are not working:\n`
+      ? `${intro}\n\nRight now ${bad.length} of the ${rows.length} credentials watched `
+        + `${bad.length === 1 ? 'is' : 'are'} not working:\n`
         + bad.map((r) => `${WORD[r.severity]}: ${label(r)} — ${reasonOf(r)}`).join('\n')
-      : `${intro}\n\nRight now all ${rows.length} are collecting.`,
+      : `${intro}\n\nRight now all ${rows.length} credentials watched are collecting.`,
     priority: 3, tags: ['bell'], click,
   };
 }
 
-async function remember(q, rows, at) {
-  for (const r of rows) {
-    await q(`INSERT INTO alert_state (key, severity, state, label, notified_at)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (key) DO UPDATE SET severity = EXCLUDED.severity, state = EXCLUDED.state,
-               label = EXCLUDED.label, notified_at = EXCLUDED.notified_at`,
-    [alertKey(r), r.severity, r.state, label(r), new Date(at).toISOString()]);
-  }
+const iso = (t) => new Date(t).toISOString();
+
+/* Different news, not merely a different moment: another verdict, or inside a
+   fault another STATE (a refused token is replaced, a moved URL is changed —
+   two errands). A growing stall age under the same verdict is not news. */
+const differs = (a, b) => a.severity !== b.severity
+  || (b.severity !== 'ok' && (a.state ?? null) !== (b.state ?? null));
+
+async function told(q, r, at) {
+  await q(`UPDATE alert_state SET severity = $2, state = $3, label = $4, notified_at = $5 WHERE key = $1`,
+    [alertKey(r), r.severity, r.state, label(r), iso(at)]);
 }
 
 async function settings() {
@@ -140,7 +158,8 @@ async function settings() {
  * @returns { sent, changes?, first?, skipped?, error? }
  */
 export async function alertTick({
-  q, publish = ntfyPublish, now = Date.now(), gapMs = ALERT_GAP_MS, config = settings,
+  q, publish = ntfyPublish, now = Date.now(), gapMs = ALERT_GAP_MS, confirmMs = CONFIRM_MS,
+  config = settings,
 } = {}) {
   const { topic, click } = await config();
   if (!topic) return { sent: 0, skipped: 'NTFY_TOPIC is not set' };
@@ -149,39 +168,57 @@ export async function alertTick({
      claim, including "all collecting". */
   if (!health.observed) return { sent: 0, skipped: 'nothing observed yet' };
   const rows = health.rows.filter((r) => r.severity !== 'pending' && r.severity in RANK);
-  const prev = new Map((await q('SELECT key, severity, state, notified_at FROM alert_state'))
-    .map((r) => [r.key, r]));
+  /* Every row saved and not yet tested: there is no verdict to report, and
+     "all 0 are collecting" would be a claim about nothing. */
+  if (!rows.length) return { sent: 0, skipped: 'every row is waiting for its first test' };
+  const prev = new Map((await q(`SELECT key, severity, state, notified_at, seen_severity, seen_state, seen_since
+                                   FROM alert_state`)).map((r) => [r.key, r]));
 
   if (!prev.size) {
     const sent = await publish(firstMessage(rows, click));
     if (!sent.ok) return { sent: 0, error: sent.error };
-    await remember(q, rows, now);
+    for (const r of rows) {
+      await q(`INSERT INTO alert_state (key, severity, state, label, notified_at, seen_severity, seen_state, seen_since)
+               VALUES ($1, $2, $3, $4, $5, $2, $3, $5) ON CONFLICT (key) DO NOTHING`,
+      [alertKey(r), r.severity, r.state, label(r), iso(now)]);
+    }
     return { sent: 1, first: true, changes: 0 };
   }
 
-  const changes = []; const quiet = [];
+  const changes = [];
   for (const r of rows) {
-    const p = prev.get(alertKey(r));
+    const key = alertKey(r);
+    let p = prev.get(key);
+    /* What the banner says now, and since when it has said it. */
     if (!p) {
-      /* A row the banner did not have before: new credential, new surface.
-         Healthy, it is recorded without a word; broken, it is news. */
-      if (r.severity === 'ok') quiet.push(r); else changes.push({ r, from: null });
+      /* A row the banner did not have before: a new credential. Healthy, it
+         is recorded as told without a word; broken, it is news once it holds. */
+      const quiet = r.severity === 'ok';
+      await q(`INSERT INTO alert_state (key, severity, state, label, notified_at, seen_severity, seen_state, seen_since)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (key) DO NOTHING`,
+      [key, quiet ? r.severity : null, quiet ? r.state : null, label(r), quiet ? iso(now) : null,
+        r.severity, r.state, iso(now)]);
+      if (quiet) continue;
+      p = { severity: null, state: null, notified_at: null, seen_since: iso(now) };
+    } else if (differs({ severity: p.seen_severity, state: p.seen_state }, r)) {
+      await q('UPDATE alert_state SET seen_severity = $2, seen_state = $3, seen_since = $4 WHERE key = $1',
+        [key, r.severity, r.state, iso(now)]);
+      p = { ...p, seen_since: iso(now) };
+    }
+    if (p.severity != null && !differs(p, r)) continue;            // already told
+    /* Broken when it appeared, mended before anybody was told: nothing to say. */
+    if (p.severity == null && r.severity === 'ok') {
+      await q('UPDATE alert_state SET severity = $2, state = $3 WHERE key = $1', [key, r.severity, r.state]);
       continue;
     }
-    /* Same verdict. Inside 'stopped', a different STATE is a different errand
-       (a refused token vs. a moved URL), so it is news; a growing stall age
-       under the same verdict is not. */
-    if (p.severity === r.severity && (r.severity === 'ok' || p.state === r.state)) continue;
-    if (now - Date.parse(p.notified_at) < gapMs) continue;
-    changes.push({ r, from: p });
+    if (now - Date.parse(p.seen_since) < confirmMs) continue;      // not held long enough yet
+    if (p.notified_at && now - Date.parse(p.notified_at) < gapMs) continue;
+    changes.push({ r, from: p.severity == null ? null : p });
   }
-  if (!changes.length) {
-    if (quiet.length) await remember(q, quiet, now);
-    return { sent: 0, changes: 0 };
-  }
+  if (!changes.length) return { sent: 0, changes: 0 };
   const sent = await publish(compose(changes, click));
   if (!sent.ok) return { sent: 0, changes: changes.length, error: sent.error };
-  await remember(q, [...changes.map((c) => c.r), ...quiet], now);
+  for (const c of changes) await told(q, c.r, now);
   return { sent: 1, changes: changes.length };
 }
 

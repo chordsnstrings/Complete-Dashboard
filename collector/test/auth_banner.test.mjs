@@ -444,6 +444,18 @@ console.log('\nand a run that wrote nothing does not reset the stall clock');
   check('a source failing every run for three days under a working credential is at risk',
     r?.severity === 'at-risk' && near(r?.run_age_h, 72), JSON.stringify(r));
 
+  /* A fleet that has runs of its own and has never delivered (newly added
+     to a source with fleet-less history) reads the source's last delivery,
+     as it did before — not no clock at all, which read 'ok'. Review finding
+     4 on the first version of this fix. */
+  await run('clk4', null, 'partial', 500, 900);
+  await run('clk4', 'newco', 'error', 0, 1);
+  await noteCredential(db, { provider: 'clk4', fleet: 'newco', credential: 'CLK4_KEY',
+    state: 'ok', surface: 'trips' });
+  r = await row('clk4', 'newco');
+  check('a fleet that has never delivered on its own reads the source\'s last delivery',
+    r?.severity === 'at-risk' && near(r?.run_age_h, 900) && r?.still_collecting === false, JSON.stringify(r));
+
   /* A source that never records a fleet (CABMAN writes one run for both)
      still reads its fleet-less runs. */
   await run('clk3', null, 'ok', 52, 0.2);

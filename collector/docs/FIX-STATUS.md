@@ -5223,10 +5223,20 @@ at 09:18 and 09:19Z on 2026-10-20 and nothing told anyone.
 |---|---|---|---|---|
 | NT1 | `authHealth(q)` in api/auth_routes.js: the banner's whole verdict as a function. `/api/auth` answers with it and the watcher reads it, so a push and the banner cannot disagree | yes | not yet | `auth_banner` 78/0 unchanged by the move |
 | NT2 | src/ntfy.js `publish()`: JSON to the server root (title, message, priority, tags, click), bearer token only when set, 10 s timeout, never throws, body clipped under ntfy's 4096-byte attachment limit | yes | not yet | `ntfy_alerts` "the publisher", 8 checks |
-| NT3 | api/alerts.js `alertTick`/`startAlerts`: every 5 min from 90 s after boot, in the API. Sends on a CHANGE of a row's verdict — stopped (prio 4), not collecting (4), degraded (3), not configured (3), working again (2) — and a new state inside "stopped" (a different errand). One message per pass. 'pending' is neither sent nor recorded. First pass on a new topic: one "alerts are on" message listing what is wrong now | yes | not yet | `ntfy_alerts` 42/0 |
-| NT4 | `alert_state` (schema_v110): the last verdict TOLD, written only once ntfy accepted the push — a restart re-announces nothing, a failed push is retried, a flip-and-flip-back inside 30 min per row is never sent | yes | not yet | mutations: no gap → 2 fail; record on refusal → 3 fail; pending unfiltered → 2 fail |
+| NT3 | api/alerts.js `alertTick`/`startAlerts`: every 5 min from 90 s after boot, in the API. Sends on a CHANGE of a row's verdict — stopped (prio 4), not collecting (4), degraded (3), not configured (3), working again (2) — and a new state inside "stopped" (a different errand). A change is sent once it has held for two passes (`CONFIRM_MS`, 9 min), so a refusal fixed by the next run is never a buzz; a row is told at most once per 30 min (`ALERT_GAP_MS`). One message per pass. 'pending' is neither sent nor recorded; a pass where every row is pending sends nothing. First pass on a new topic: one "alerts are on" message listing what is wrong now | yes | not yet | `ntfy_alerts` 53/0 |
+| NT4 | `alert_state` (schema_v110), one row per CREDENTIAL (provider\|fleet\|credential, credential_state's own key — not the surface, which noteCredential overwrites): the verdict last TOLD, written only once ntfy accepted the push, and the verdict SEEN since when. A restart re-announces nothing, a failed push is retried | yes | not yet | mutations, each failing its checks: surface back in the key → 10; no confirmation → 13; no all-pending guard → 6; no quiet gap → 2; never recorded as told → 14; "mended before told" guard off → 1 |
 | NT5 | `NTFY_TOPIC` (secret), `NTFY_URL` (default https://ntfy.sh), `NTFY_TOKEN` (secret, optional) on the Settings page under "ntfy (phone alerts)", and in .env.example. Empty topic = off. `ALERTS=off` disables the watcher | yes | not yet | `settings_page_layout` 20/0, `credential_visibility` 19/0 |
 | BCL | **The banner's run clock read a run from September** (FIXLIST "The banner's clock"). Two clocks per fleet: `run_age_h` = the last run that delivered, whatever came after; `still_collecting` = the freshest run delivered. Fleet-less runs only for a fleet with none of its own | yes | not yet | `auth_banner` §"a run that wrote nothing": the old file fails 4 (900 h on a fleet that delivered 10 h ago; 'ok' over three days of failed runs) |
+
+**The independent review of `b413c9c`** found four, all fixed before merge:
+(1) BLOCKING — the memory was keyed on the surface, so a Bolt token renewed
+on getPayouts was never "Working again" and the next weekly expiry on
+orderHistory was silent; (2) the quiet gap delayed only the trailing edge, so
+one refused pass buzzed twice; (3) a pass with every row pending sent "all 0
+are collecting" every five minutes; (4) a fleet with runs of its own that had
+never delivered lost its clock and read 'ok' (BCL now falls back to the
+source's fleet-less runs for exactly that case; `auth_banner` 79/0, the old
+rule fails it).
 
 What the watcher cannot see: its own death. It runs in the API; if the API is
 down nothing runs. The worker's death is seen — every stall clock runs out,
