@@ -5001,6 +5001,30 @@ readings and bookings for 14–20 Oct, pulled through the API and run through
 data. That run caught a real bug, a millisecond time passed back through
 `Date.parse`.
 
+**The independent review (2026-10-20) found eleven defects in `1384b0c`,**
+five of them sentences that were false for inputs the code accepted. All are
+fixed, and each has its own case in `feeds_cabman` §8 that fails when its fix
+is reverted. `feeds_cabman` is 38/0, and all nine mutations are caught.
+
+| # | defect | fixed by |
+|---|---|---|
+| R1 | "moved on 8 of 7 days": a rolling 7×24 h window touches 8 Dubai dates at any hour but midnight | days are 24-hour buckets counted back from now; the page says "of the last 7 days" |
+| R2 | a car parked since yesterday was ranked first as "silent, while the car completed 20 bookings" — all of them before it went quiet | the clause and the rank count only bookings after the last reading |
+| R3 | "standing still through 3 of 0 bookings": the denominator counted seat readings | standing still is the share of the bookings it was measured on |
+| R4 | no measured step printed "did not move" and "0 km" | absent with the reason (e.g. "no two readings within 20 minutes"); passenger km absent with no seat step |
+| R5 | a unit reporting in bursts (readings 26 min apart) read "standing still … another car" | judged only with measured steps and a small first-to-last displacement — and, found running the fix over production, only on bookings of ≥10 min with ≥3 readings (a looser rule named L78465, a working car) |
+| R6 | a car whose unit said nothing through its bookings read "nothing to check against" | its own red verdict, "not reporting during bookings" |
+| R7 | a reading with no position became (0, 0) and cost the real steps around it | no position is skipped |
+| R8 | a plate on two rosters was two rows; a car moved between fleets was in the table and counted as gone | members deduped by plate; a member anywhere is never departed |
+| R9 | the headline said "of 752 completed bookings" for the 752 with a seat reading (781 completed) | it names both |
+| R10 | the span said "before pickup" for a request time, and a chained Uber request borrowed the last ride's passenger | worded as requested; the span starts no earlier than the previous drop-off |
+| R11 | the few-bookings sentence said "CABMAN reading" for a seat reading; the rules omitted thresholds; header figures carried the FMS-contaminated count; "1 readings"; an empty-list note that was not always true | each corrected |
+
+On the production week after the fixes, the verdicts are: 14 silent, 1 not
+moving with the car (L45243, 13 of 36), 6 pads reading nobody, 3 missing
+passengers, 1 too few, 5 with nothing to check, and 16 working. The seat was
+occupied during 512 of 752 bookings with a seat reading inside.
+
 The classic skin's frozen `#feeds` moved, because the table is in both
 skins. Removing exactly the new panel (10,961 characters) and its
 source-line row from the new rendering hashes back to the recorded

@@ -10131,7 +10131,10 @@ over the 7 Dubai days 14–20 Oct, unless it says otherwise.
 * **The pad against the bookings.** 781 completed bookings ran on the 46 cars,
   counting Uber, Bolt, Yango and hotel, and not FMS journeys. 752 had a
   CABMAN seat reading between 2 minutes before pickup and 2 minutes after
-  drop-off, and **the seat read occupied during 513 of them (68%)**.
+  drop-off, and **the seat read occupied during 512 of them (68%)**. An
+  independent count of the same data gave 513; the one booking between them
+  is a chained Uber request whose span the table clips at the previous
+  drop-off, so it does not count the last ride's passenger.
   - Working pads: L64921 56/56, L75125 46/46, L44271 27/27, L77062 38/39
     and L44305 46/47.
   - Pads that read nobody all week while the car drove its bookings:
@@ -10148,7 +10151,8 @@ over the 7 Dubai days 14–20 Oct, unless it says otherwise.
   - The other thirteen are on cars with no booking either, mostly silent for
     months.
 * **L45243's CABMAN unit does not move with the car.** It stood still through
-  17 of its 44 Uber bookings. This is the car whose two trackers sit
+  13 of the 36 of its 44 Uber bookings that were long enough to measure
+  (10 minutes or more, with 3 or more readings inside). This is the car whose two trackers sit
   25.6 km apart at the same minute (trap below; "TRAP: on the only two cars
   with both trackers").
 
@@ -10167,6 +10171,11 @@ over the 7 Dubai days 14–20 Oct, unless it says otherwise.
   no seat value inside a booking says where the car was, not who sat in it.
   Counting it as "seat empty" would call a unit that reports no pad "a pad
   reading nobody".
+* **A short booking cannot show a car standing still.** Booking times on the
+  hotel channel are loose (a 13.41 km booking completed in six minutes), and
+  a 5-minute poll catches a short job twice at best. Judge "standing still"
+  only on bookings of 10 minutes or more with 3 or more readings inside. A
+  looser rule named L78465, a working car, "not moving with the car".
 * **CABMAN keeps listing a dead unit.** L76099's last reading is 2024-04-16
   and it is in the current poll. "On CABMAN's list" is not "reporting";
   judge receiving on the newest reading, as `#feeds` does.

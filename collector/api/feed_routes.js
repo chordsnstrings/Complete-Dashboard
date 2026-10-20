@@ -315,12 +315,14 @@ function judge(feed, r, ctx) {
    that the two are far apart. Measured on production over 14–20 Oct, the 46
    cars on CABMAN's list, every completed booking on each:
 
-     - 838 bookings; the seat read occupied during 555 of them (66%).
+     - 781 completed bookings (FMS journeys are not bookings); 752 with a
+       seat reading inside, and the seat occupied during 512 of them (68%).
      - Five cars drove all week, 4 to 52 bookings each, and their seat never
        once read occupied (L44295: 52 Uber bookings, 1,413 km).
      - L44286 read occupied 20 times in the week and never during a booking.
      - L76099 completed 17 hotel bookings; its unit last reported 16 Apr 2024.
-     - L45243's unit stood still through 48 of its bookings — the car whose
+     - L45243's unit stood still through 13 of its 36 bookings long enough to
+       measure — the car whose
        CABMAN and FMS put it 25.6 km apart at the same minute (COVERAGE).
 
    CABMAN's own trip flag is no second witness. Over the same week its
@@ -349,16 +351,17 @@ function judge(feed, r, ctx) {
    ── BOOKINGS ──────────────────────────────────────────────────────────────
    trip_norm, is_booking (an FMS journey is the tracker's own record, not a
    booking — channels_sql.js) and outcome 'completed', with an end time. A
-   booking is checked on the CABMAN readings from two minutes before pickup
-   to two minutes after drop-off — the pad's 5-minute poll is coarse, and a
-   reading that lands just outside the booking is still about it. A booking
-   with no reading inside that span says nothing about the pad and is counted
-   apart, never as a miss. */
+   booking is checked on the CABMAN readings from two minutes before it was
+   requested to two minutes after drop-off — the pad's 5-minute poll is
+   coarse, and a reading just outside the booking is still about it — never
+   from before the previous booking's drop-off. A booking with no SEAT reading
+   inside that span says nothing about the pad and is counted apart, never as
+   a miss. */
 export const CAB_DAYS = 7;
 export const CAB_GAP_MIN = 20;
 export const CAB_HOP_KM = 60;
 export const CAB_PAD_MIN = 2;
-/* A verdict on the pad needs this many bookings with a reading inside them:
+/* A verdict on the pad needs this many bookings with a seat reading inside:
    one or two short rides can fall between five-minute polls on a working pad. */
 export const CAB_MIN_BOOKINGS = 3;
 /* At or above this share of bookings the pad is working. The fleet's working
@@ -369,6 +372,13 @@ export const CAB_OK_SHARE = 0.8;
    booking of at least 2 km, with at least two readings inside it. */
 export const CAB_STILL_KM = 0.5;
 export const CAB_TRIP_KM = 2;
+/* …and only where movement can be MEASURED: a booking of at least 10 minutes
+   with at least 3 readings inside it (2 measured steps). On the production
+   week a looser rule (2 readings) named L78465 "not moving with the car" on
+   three 4–6 minute hotel jobs — one booked at 13.41 km in six minutes — that
+   a 5-minute poll caught twice each: the booking's own times, not the unit. */
+export const CAB_STILL_MIN = 10;
+export const CAB_STILL_READINGS = 3;
 /* Standing still through this share of a car's bookings (and at least three)
    is the unit in another car or filed under another plate, not a pause. */
 export const CAB_ELSEWHERE_SHARE = 0.3;
@@ -406,22 +416,31 @@ export const CAB_EVER_SQL = `
    WHERE is_booking AND plate = ANY($1::text[]) GROUP BY plate`;
 
 /* The roster rows as the collector writes them, read into members and
-   departures. `known` is false when no fleet has a roster yet. */
+   departures. `known` is true once any fleet's roster has been written.
+   A plate is one car whatever its fleet: on two rosters it is one row (the
+   first fleet's), and a plate that is a member anywhere is never also counted
+   as departed — a car moved between fleets is departed on one and listed on
+   the other, and printing it in the table AND under it as gone is two answers
+   about one car (the review of 2026-10-20). */
 export function readRosters(rows) {
-  const members = []; const departed = [];
+  const members = new Map(); const departed = new Map();
+  let known = false;
   for (const r of rows || []) {
     let v = null;
     try { v = typeof r.value === 'string' ? JSON.parse(r.value) : r.value; } catch { v = null; }
-    if (!v || typeof v !== 'object' || !v.plates) continue;
+    if (!v || typeof v !== 'object' || !v.plates || typeof v.plates !== 'object') continue;
+    known = true;
     for (const [plate, e] of Object.entries(v.plates)) {
-      if (e?.admitted && !e?.departed) members.push({ plate, fleet_id: r.fleet_id });
-      else if (e?.departed) {
-        departed.push({ plate, fleet_id: r.fleet_id, last_seen: e.last_seen || null,
+      if (e?.admitted && !e?.departed) {
+        if (!members.has(plate)) members.set(plate, { plate, fleet_id: r.fleet_id });
+      } else if (e?.departed && !departed.has(plate)) {
+        departed.set(plate, { plate, fleet_id: r.fleet_id, last_seen: e.last_seen || null,
           departed_at: e.departed_at || null });
       }
     }
   }
-  return { known: members.length + departed.length > 0, members, departed };
+  for (const p of members.keys()) departed.delete(p);
+  return { known, members: [...members.values()], departed: [...departed.values()] };
 }
 
 const RAD = Math.PI / 180;
@@ -432,59 +451,91 @@ const hopKm = (a, b) => {
 };
 const ms = (v) => (typeof v === 'number' ? v : v instanceof Date ? v.getTime() : Date.parse(v));
 const iso = (v) => (v == null ? null : new Date(ms(v)).toISOString());
-const DUBAI_MS = 4 * 3600e3;
-const dubaiDayOf = (t) => new Date(t + DUBAI_MS).toISOString().slice(0, 10);
+/* A coordinate the provider did not send is not 0: Number(null) is 0, and a
+   reading at (0, 0) beside Dubai is a 6,000 km hop that the 60 km guard then
+   throws away together with the two real steps either side of it. */
+const coord = (v) => (v == null || v === '' ? NaN : Number(v));
+const dubaiDayOf = (t) => new Date(t + 4 * 3600e3).toISOString().slice(0, 10);
 const r1 = (x) => Math.round(x * 10) / 10;
 const pctOf = (n, d) => (d ? Math.round((1000 * n) / d) / 10 : null);
 const many = (n, one, more = `${one}s`) => `${n} ${n === 1 ? one : more}`;
 
 /* Worst first. The order is the order a person should ring about them. */
-export const CAB_VERDICTS = ['silent', 'elsewhere', 'no_seat', 'pad_dead', 'pad_misses', 'few', 'no_bookings', 'ok'];
-/* …except a silent unit on a car that took no booking either. On 2026-10-20
-   thirteen of the fourteen silent units were on cars with no booking all
-   week — off the road, most last heard from months ago — and ranked first
-   they buried the one silent unit on a car that was working (L76099, 17
-   hotel bookings) and every pad reading wrong on a busy car. Those go last. */
-export const cabRank = (r) => (r.verdict === 'silent' && !r.bookings.total
+export const CAB_VERDICTS = ['silent', 'elsewhere', 'no_seat', 'unreported', 'pad_dead', 'pad_misses', 'few', 'no_bookings', 'ok'];
+/* …except a silent unit on a car that took no booking since it went quiet.
+   On 2026-10-20 thirteen of the fourteen silent units were on cars with no
+   booking all week — off the road, most last heard from months ago — and
+   ranked first they buried the one silent unit on a car that was working
+   (L76099, 17 hotel bookings) and every pad reading wrong on a busy car.
+   Counted from the last reading, not over the week: a car that worked all
+   week and has been parked since yesterday is a parked car, not a silent
+   unit on a working one (the review of 2026-10-20). */
+export const cabRank = (r) => (r.verdict === 'silent' && !r.bookings.since_last_reading
   ? CAB_VERDICTS.length : CAB_VERDICTS.indexOf(r.verdict));
 
 /** One car: its readings and bookings in the window, measured and judged. */
 function cabmanCar({ plate, fleet_id, last, fixes, bookings, nowMs, days }) {
-  const pts = fixes.map((f) => ({ ...f, t: ms(f.captured_at), lat: Number(f.lat), lng: Number(f.lng) }))
+  const pts = fixes.map((f) => ({ ...f, t: ms(f.captured_at), lat: coord(f.lat), lng: coord(f.lng) }))
     .filter((f) => Number.isFinite(f.t)).sort((a, b) => a.t - b.t);
+  const placed = (f) => Number.isFinite(f.lat) && Number.isFinite(f.lng);
   const seat = pts.filter((f) => f.seat_occupied != null);
   const occupied = seat.filter((f) => f.seat_occupied === true);
   const engaged = pts.filter((f) => f.status === 'Engaged');
   const disagree = seat.filter((f) => (f.status === 'Engaged') !== (f.seat_occupied === true)).length;
-  /* Walked once: kilometres, kilometres with the seat occupied (the step
-     after an occupied reading, as /api/map/journey counts it), the days moved
-     and the last movement. */
-  let km = 0; let okm = 0; let measured = 0; let lastMoved = null;
-  const dayKm = {};
+  /* Walked once over the readings that carry a position: kilometres,
+     kilometres with the seat occupied (the step after an occupied reading,
+     as /api/map/journey counts it), the days moved and the last movement.
+     A DAY is 24 hours counted back from now, so a 7-day window holds 7 of
+     them — counted by Dubai calendar date it touched 8 at any hour but
+     midnight, and printed "moved on 8 of 7 days" (the review of 2026-10-20). */
+  const geo = pts.filter(placed);
+  let km = 0; let okm = 0; let measured = 0; let nSteps = 0; let nSeatSteps = 0; let lastMoved = null;
+  const dayKm = new Array(days).fill(0);
   const steps = [];
-  for (let i = 1; i < pts.length; i++) {
-    const a = pts[i - 1]; const b = pts[i];
-    if (!Number.isFinite(a.lat) || !Number.isFinite(b.lat)) continue;
+  for (let i = 1; i < geo.length; i++) {
+    const a = geo[i - 1]; const b = geo[i];
     const gap = (b.t - a.t) / 6e4;
     const d = hopKm(a, b);
     if (gap > CAB_GAP_MIN || d >= CAB_HOP_KM) continue;
+    nSteps++;
     km += d;
-    dayKm[dubaiDayOf(b.t)] = (dayKm[dubaiDayOf(b.t)] || 0) + d;
-    if (a.seat_occupied != null) { measured += d; if (a.seat_occupied === true) okm += d; }
+    const back = Math.floor((nowMs - b.t) / 864e5);
+    if (back >= 0 && back < days) dayKm[back] += d;
+    if (a.seat_occupied != null) { nSeatSteps++; measured += d; if (a.seat_occupied === true) okm += d; }
     if (d >= 0.2 || (b.speed || 0) > 0) lastMoved = b.t;
     steps.push({ a: a.t, b: b.t, d });
   }
   /* Each booking, on the readings inside it and the distance the unit moved
-     inside it. */
+     inside it. The span opens 2 minutes before the booking was REQUESTED
+     (Uber's trip request time, Bolt's created, Yango's created_at — not the
+     pickup) and closes 2 minutes after drop-off; it never opens before the
+     previous booking's drop-off, or a chained Uber request would count the
+     last ride's passenger as this one's (the review of 2026-10-20). */
   const pad = CAB_PAD_MIN * 6e4;
   const plat = {};
-  let read = 0; let seen = 0; let noReading = 0; let still = 0;
-  for (const bk of bookings) {
-    const from = ms(bk.requested_at) - pad; const to = ms(bk.ended_at) + pad;
+  const bks = [...bookings].sort((x, y) => ms(x.requested_at) - ms(y.requested_at));
+  let read = 0; let seen = 0; let noReading = 0; let still = 0; let stillChecked = 0;
+  let prevEnd = -Infinity;
+  for (const bk of bks) {
+    const from = Math.max(ms(bk.requested_at) - pad, prevEnd + 1); const to = ms(bk.ended_at) + pad;
+    prevEnd = Math.max(prevEnd, ms(bk.ended_at));
     plat[bk.platform] = (plat[bk.platform] || 0) + 1;
     const inside = pts.filter((f) => f.t >= from && f.t <= to);
-    const moved = steps.filter((s) => s.a >= from && s.b <= to).reduce((x, s) => x + s.d, 0);
-    if (inside.length >= 2 && moved < CAB_STILL_KM && Number(bk.distance_km) >= CAB_TRIP_KM) still++;
+    /* Standing still is judged only where movement was MEASURED inside the
+       booking (CAB_STILL_MIN, CAB_STILL_READINGS).
+       Readings 26 minutes apart are not a car standing still; they are a
+       unit reporting in bursts, and calling that "another car" was the
+       review's case 5. And the first and last readings inside must be close
+       too, so a step the walk refused cannot hide a drive. */
+    const here = inside.filter(placed);
+    const inSteps = steps.filter((x) => x.a >= from && x.b <= to);
+    const lasts = (ms(bk.ended_at) - ms(bk.requested_at)) / 6e4;
+    if (here.length >= CAB_STILL_READINGS && inSteps.length >= CAB_STILL_READINGS - 1
+      && lasts >= CAB_STILL_MIN && Number(bk.distance_km) >= CAB_TRIP_KM) {
+      stillChecked++;
+      const moved = inSteps.reduce((x, y) => x + y.d, 0);
+      if (moved < CAB_STILL_KM && hopKm(here[0], here[here.length - 1]) < CAB_STILL_KM) still++;
+    }
     /* The pad is judged on SEAT readings: a reading with no seat value inside
        a booking says where the car was, not who sat in it. */
     const seatIn = inside.filter((f) => f.seat_occupied != null);
@@ -494,6 +545,7 @@ function cabmanCar({ plate, fleet_id, last, fixes, bookings, nowMs, days }) {
   }
   const lastAt = last?.captured_at ? ms(last.captured_at) : null;
   const receiving = lastAt != null && lastAt > nowMs - FEED_WINDOW_H * 3600e3;
+  const since = receiving ? null : bks.filter((b) => lastAt == null || ms(b.requested_at) > lastAt).length;
   /* The verdict, and the sentence that is true of it. */
   const share = read ? seen / read : null;
   let verdict; let text;
@@ -501,16 +553,21 @@ function cabmanCar({ plate, fleet_id, last, fixes, bookings, nowMs, days }) {
     verdict = 'silent';
     text = (lastAt == null ? 'CABMAN lists this car but has never sent a reading for it'
       : `no CABMAN reading in the last ${FEED_WINDOW_H} hours — the unit is silent`)
-      + (bookings.length ? `, while the car completed ${many(bookings.length, 'booking')} in ${days} days` : '');
-  } else if (still >= CAB_MIN_BOOKINGS && still / Math.max(read, 1) >= CAB_ELSEWHERE_SHARE) {
+      + (since ? `, while the car completed ${many(since, 'booking')} ${lastAt == null ? `in ${days} days` : 'since its last reading'}` : '');
+  } else if (still >= CAB_MIN_BOOKINGS && still / stillChecked >= CAB_ELSEWHERE_SHARE) {
     verdict = 'elsewhere';
-    text = `CABMAN had the car standing still through ${still} of ${many(read, 'booking')} — `
+    text = `CABMAN had the car standing still through ${still} of ${many(stillChecked, 'booking')} of ${CAB_TRIP_KM} km or more — `
       + 'the unit may be fitted to, or filed under, another car';
   } else if (pts.length && !seat.length) {
     /* Readings arrive and none carries a seat value: nothing is reported for
        the pad at all, which is not the same as a pad reading nobody. */
     verdict = 'no_seat';
     text = `the unit sent ${many(pts.length, 'reading')} in ${days} days and none carries a seat value — CABMAN reports no pad on this car`;
+  } else if (!read && bks.length >= CAB_MIN_BOOKINGS) {
+    /* The car worked and the unit said nothing while it did — not "nothing
+       to check": every one of those bookings is a gap (the review's S2). */
+    verdict = 'unreported';
+    text = `${many(bks.length, 'booking')} in ${days} days and no seat reading fell inside any of them — the unit is not reporting while the car works`;
   } else if (read >= CAB_MIN_BOOKINGS && seen === 0) {
     verdict = 'pad_dead';
     text = `the seat never read occupied during any of ${many(read, 'booking')} — the pad is not reporting passengers`;
@@ -520,24 +577,32 @@ function cabmanCar({ plate, fleet_id, last, fixes, bookings, nowMs, days }) {
   } else if (read >= CAB_MIN_BOOKINGS) {
     verdict = 'ok';
     text = `the seat read occupied during ${seen} of ${many(read, 'booking')}`;
-  } else if (read > 0) {
+  } else if (bks.length) {
     verdict = 'few';
-    text = `only ${many(read, 'booking')} with a CABMAN reading inside — too few to judge the pad`;
+    text = read
+      ? `only ${many(read, 'booking')} with a seat reading inside — too few to judge the pad`
+      : `only ${many(bks.length, 'booking')} in ${days} days, none with a seat reading inside — too few to judge the pad`;
   } else {
     verdict = 'no_bookings';
-    text = bookings.length
-      ? `${many(bookings.length, 'booking')} in ${days} days, and no seat reading fell inside any of them`
-      : `no completed booking in ${days} days to hold the seat against`;
+    text = `no completed booking in ${days} days to hold the seat against`;
   }
   const notes = [];
   if (verdict === 'pad_dead' && occupied.length) {
     notes.push(`it read occupied ${many(occupied.length, 'time')} in the window, never during a booking`);
   }
-  if (still && verdict !== 'elsewhere') notes.push(`standing still through ${many(still, 'booking')} of 2 km or more`);
-  if (noReading && !['no_bookings', 'silent', 'no_seat'].includes(verdict)) notes.push(`${many(noReading, 'booking')} with no seat reading inside`);
+  if (still && verdict !== 'elsewhere') notes.push(`standing still through ${many(still, 'booking')} of ${CAB_TRIP_KM} km or more`);
+  if (noReading && read) notes.push(`${many(noReading, 'booking')} with no seat reading inside`);
   if (disagree >= 20 && disagree >= 0.1 * seat.length) {
     notes.push(`CABMAN's own trip flag (Engaged) disagrees with the seat on ${disagree} of ${seat.length} readings`);
   }
+  /* Absent, never 0, when there was nothing to measure — and the reason. No
+     accepted step means no distance was MEASURED, which is not a car that did
+     not move (the review's case 4); no step after a seat reading means no
+     passenger distance was measured. */
+  const kmReason = nSteps ? null
+    : !pts.length ? `no CABMAN reading in ${days} days`
+      : geo.length < 2 ? 'fewer than two readings carry a position'
+        : `no two readings within ${CAB_GAP_MIN} minutes of each other, so no distance could be measured`;
   return {
     plate, fleet_id, vehicle_page: true,
     last_at: iso(lastAt), last_status: last?.status ?? null, last_speed: last?.speed ?? null,
@@ -545,16 +610,16 @@ function cabmanCar({ plate, fleet_id, last, fixes, bookings, nowMs, days }) {
     readings: pts.length, seat_readings: seat.length, occupied_readings: occupied.length,
     occupied_pct: pctOf(occupied.length, seat.length), engaged_readings: engaged.length,
     flag_disagrees: disagree,
-    /* Absent, never 0, when there was nothing to measure: no reading means no
-       distance was measured, and no seat reading means no passenger distance. */
-    km: pts.length ? r1(km) : null,
-    occupied_km: measured ? r1(okm) : (seat.length ? 0 : null),
-    occupied_km_pct: measured ? pctOf(okm, measured) : null,
-    days_moved: pts.length ? Object.values(dayKm).filter((d) => d >= 1).length : null,
+    steps: nSteps,
+    km: nSteps ? r1(km) : null, km_reason: kmReason,
+    occupied_km: nSeatSteps ? r1(okm) : null,
+    occupied_km_pct: nSeatSteps && measured > 0 ? pctOf(okm, measured) : null,
+    days_moved: nSteps ? dayKm.filter((d) => d >= 1).length : null,
     last_moved_at: iso(lastMoved),
     last_occupied_at: occupied.length ? iso(occupied[occupied.length - 1].t) : null,
-    bookings: { total: bookings.length, read, seat_seen: seen, seat_pct: pctOf(seen, read),
-      no_reading: noReading, standing_still: still, platforms: plat },
+    bookings: { total: bks.length, read, seat_seen: seen, seat_pct: pctOf(seen, read),
+      no_reading: noReading, standing_still: still, still_checked: stillChecked, since_last_reading: since,
+      platforms: plat },
     verdict, verdict_text: text, notes,
   };
 }
@@ -596,7 +661,8 @@ export function cabmanSeat({ rosterRows = [], last = [], fixes = [], bookings = 
       basis_reason: roster.known ? null
         : 'CABMAN’s own list has not been read yet, so the cars with a CABMAN reading in the window stand in for it' },
     rules: { gap_min: CAB_GAP_MIN, hop_km: CAB_HOP_KM, pad_min: CAB_PAD_MIN, min_bookings: CAB_MIN_BOOKINGS,
-      ok_share: CAB_OK_SHARE, still_km: CAB_STILL_KM, trip_km: CAB_TRIP_KM, elsewhere_share: CAB_ELSEWHERE_SHARE },
+      ok_share: CAB_OK_SHARE, still_km: CAB_STILL_KM, trip_km: CAB_TRIP_KM, elsewhere_share: CAB_ELSEWHERE_SHARE,
+      still_min: CAB_STILL_MIN, still_readings: CAB_STILL_READINGS },
     totals: {
       cars: rows.length, verdicts,
       bookings: sum((r) => r.bookings.total), bookings_read: sum((r) => r.bookings.read),

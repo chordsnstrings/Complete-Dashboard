@@ -2,7 +2,7 @@
    and its bookings (GET /api/vehicles/feeds/cabman).
    ─────────────────────────────────────────────────────────────────────────
    Asked for on 2026-10-20 after an audit of the 46 cars on CABMAN's list
-   found the pad reading occupied during only 66% of their bookings, five
+   found the pad reading occupied during only 68% of their bookings, five
    pads reading nobody all week, a unit silent since 2024 on a working car,
    and a unit standing still through its car's bookings. Every verdict the
    table prints is a claim about a device in a car somebody will be asked to
@@ -131,8 +131,8 @@ check('A: every kilometre of it with the seat occupied, measured from the occupi
 check('D: stood still — 0 km, and "moved on 0 days"', by.QD0001.km === 0 && by.QD0001.days_moved === 0, JSON.stringify([by.QD0001.km, by.QD0001.days_moved]));
 check('E: its readings three days ago count, the one eight days ago does not', by.QE0001.readings === 2, String(by.QE0001.readings));
 check('F: a reading dated tomorrow is not its newest reading', Date.parse(by.QF0001.last_at) <= Date.now(), by.QF0001.last_at);
-check('G: no reading in the window — no distance measured, absent rather than 0', by.QG0001.km === null && by.QG0001.days_moved === null,
-  JSON.stringify([by.QG0001.km, by.QG0001.days_moved]));
+check('G: no reading in the window — no distance measured, absent rather than 0, and the reason', by.QG0001.km === null && by.QG0001.days_moved === null
+  && by.QG0001.km_reason === 'no CABMAN reading in 7 days', JSON.stringify([by.QG0001.km, by.QG0001.days_moved, by.QG0001.km_reason]));
 
 console.log('\n3. bookings');
 check('A: four completed Uber bookings, the seat occupied during all four', by.QA0001.bookings.total === 4
@@ -158,9 +158,9 @@ check('B: never during any of its 4 bookings, and its one occupied reading named
   JSON.stringify([by.QB0001.verdict_text, by.QB0001.notes]));
 check('C: "only 2 of 5"', by.QC0001.verdict_text === 'the seat read occupied during only 2 of 5 bookings' && by.QC0001.bookings.seat_pct === 40,
   by.QC0001.verdict_text);
-check('D: the unit may be in, or filed under, another car', /standing still through 3 of 3 bookings — the unit may be fitted to, or filed under, another car/.test(by.QD0001.verdict_text),
+check('D: the unit may be in, or filed under, another car', /standing still through 3 of 3 bookings of 2 km or more — the unit may be fitted to, or filed under, another car/.test(by.QD0001.verdict_text),
   by.QD0001.verdict_text);
-check('E: silent — and the car worked while it was', /no CABMAN reading in the last 24 hours — the unit is silent, while the car completed 2 bookings in 7 days/.test(by.QE0001.verdict_text)
+check('E: silent — and the car worked while it was: two bookings since its last reading', /no CABMAN reading in the last 24 hours — the unit is silent, while the car completed 2 bookings since its last reading/.test(by.QE0001.verdict_text)
   && by.QE0001.receiving === false, by.QE0001.verdict_text);
 check('H: a unit with no seat value is "no pad reported", never "reads nobody", and has no passenger distance',
   /none carries a seat value — CABMAN reports no pad on this car/.test(by.QH0001.verdict_text)
@@ -196,6 +196,131 @@ console.log('\n7. the function the mock runs is the function the route runs');
 const mockShape = cabmanSeat({ rosterRows: [], now: new Date().toISOString() });
 check('an empty week answers with every key the page reads', ['as_of', 'days', 'window_hours', 'roster', 'rules', 'totals', 'departed', 'rows']
   .every((k) => k in mockShape) && mockShape.rows.length === 0, JSON.stringify(Object.keys(mockShape)));
+
+/* ── 8. what the independent review of 2026-10-20 found ──────────────────
+   Eleven defects, five of them sentences that were false for an input the
+   code accepted. Each is pinned here on the function itself, one car per
+   case, so they cannot disturb the scenario above. */
+console.log('\n8. the review of 2026-10-20');
+const NOW = Date.parse('2026-10-20T06:00:00Z');              // 10:00 Dubai, not midnight
+const at = (min) => new Date(NOW - min * 60e3).toISOString();
+const run = (fixes, bookings, { last = null, rosters = null } = {}) => {
+  const plates = [...new Set([...fixes, ...bookings].map((x) => x.plate))];
+  const lastRows = last || plates.map((p) => {
+    const mine = fixes.filter((f) => f.plate === p).sort((a, b) => Date.parse(b.captured_at) - Date.parse(a.captured_at));
+    return { plate: p, captured_at: mine[0]?.captured_at ?? null, status: 'Active', speed: 0 };
+  });
+  return cabmanSeat({ rosterRows: rosters || [{ fleet_id: 'ecosine', value: JSON.stringify({ plates: Object.fromEntries(plates.map((p) => [p, { admitted: true, departed: false }])) }) }],
+    last: lastRows, fixes, bookings, now: new Date(NOW).toISOString(), days: 7 });
+};
+const F = (plate, min, lat, seat = true, lng = 55.3) => ({ plate, captured_at: at(min), lat, lng, speed: 30, status: seat ? 'Engaged' : 'Active', seat_occupied: seat });
+const B = (plate, from, to, km = 6, platform = 'uber') => ({ plate, platform, requested_at: at(from), ended_at: at(to), distance_km: km });
+{
+  /* 1. A car that drove every day: the window is 7 × 24 hours and touches 8
+     Dubai dates at 10:00 — it moved on 7 of the last 7 days, never "8 of 7". */
+  const fx = [];
+  for (const m of [10, 1450, 2890, 4330, 5770, 7210, 8650, 10070]) fx.push(F('QJ0001', m, 25.2), F('QJ0001', m - 5, 25.21));
+  const r = run(fx, []).rows[0];
+  check('1. moved on 7 of the last 7 days — never more days than the window holds', r.days_moved === 7, String(r.days_moved));
+}
+{
+  /* 2. Silent 26 hours, after a week of bookings the pad read: a parked car.
+     No "while the car completed" — none came after the last reading — and it
+     goes to the bottom with the idle ones. */
+  const fx = []; const bk = [];
+  for (let k = 2; k <= 6; k++) { fx.push(F('QK0001', k * 1440, 25.2), F('QK0001', k * 1440 - 5, 25.21)); bk.push(B('QK0001', k * 1440 + 2, k * 1440 - 6)); }
+  const lastK = [{ plate: 'QK0001', captured_at: at(26 * 60), status: 'Active', speed: 0 }];
+  const r = run(fx, bk, { last: lastK }).rows[0];
+  check('2. a unit silent since the car was parked names no booking it missed, and ranks with the idle',
+    r.verdict === 'silent' && !/while the car/.test(r.verdict_text) && r.bookings.since_last_reading === 0 && r.rank === 9,
+    JSON.stringify([r.verdict_text, r.bookings.since_last_reading, r.rank]));
+}
+{
+  /* 3. A unit with no seat value standing still through three bookings: the
+     share is of the bookings it was measured on — "3 of 3", never "3 of 0". */
+  const fx = []; const bk = [];
+  for (const h of [9, 6, 3]) { for (let k = 0; k <= 4; k++) fx.push({ ...F('QL0001', h * 60 - k * 5, 25.2, null), speed: 0 }); bk.push(B('QL0001', h * 60, h * 60 - 20)); }
+  const r = run(fx, bk).rows[0];
+  check('3. standing still "through 3 of 3 bookings of 2 km or more" — the denominator is the bookings measured',
+    r.verdict === 'elsewhere' && /standing still through 3 of 3 bookings of 2 km or more/.test(r.verdict_text) && r.bookings.still_checked === 3,
+    r.verdict_text);
+}
+{
+  /* 4. Readings 30 minutes apart: no step the walk accepts, so no distance was
+     MEASURED — absent with that reason, not "did not move", not "0 km". */
+  const fx = []; for (let k = 0; k < 10; k++) fx.push(F('QM0001', 300 - k * 30, 25.2 + k * 0.05));
+  const r = run(fx, []).rows[0];
+  check('4. no measured step: km, days moved and passenger km absent, with the reason',
+    r.km === null && r.days_moved === null && r.occupied_km === null && r.steps === 0
+    && /no two readings within 20 minutes of each other/.test(r.km_reason || ''), JSON.stringify([r.km, r.occupied_km, r.km_reason]));
+}
+{
+  /* 5. A unit that reports in bursts: two readings 26 minutes apart and 11 km
+     apart inside each booking is not a car standing still. */
+  const fx = []; const bk = [];
+  for (const h of [9, 6, 3]) { fx.push(F('QN0001', h * 60 - 2, 25.2), F('QN0001', h * 60 - 28, 25.3)); bk.push(B('QN0001', h * 60, h * 60 - 30, 12)); }
+  const r = run(fx, bk).rows[0];
+  check('5. readings too far apart to measure a booking are never "standing still"',
+    r.verdict !== 'elsewhere' && r.bookings.standing_still === 0 && r.bookings.still_checked === 0, JSON.stringify([r.verdict, r.bookings]));
+}
+{
+  /* 5b. Found running the fixed code over production's week: three 6-minute
+     hotel jobs booked at 13 km, two readings each, standing still — booking
+     times too loose and a poll too coarse to call the unit "in another car". */
+  const fx = []; const bk = [];
+  for (const h of [9, 6, 3]) { fx.push({ ...F('QV0001', h * 60 - 1, 25.2), speed: 0 }, { ...F('QV0001', h * 60 - 5, 25.2), speed: 0 }); bk.push(B('QV0001', h * 60, h * 60 - 6, 13.41, 'hotel')); }
+  const r = run(fx, bk).rows[0];
+  check('5b. a booking under 10 minutes, or with under 3 readings, is not measured for standing still',
+    r.verdict !== 'elsewhere' && r.bookings.still_checked === 0, JSON.stringify([r.verdict, r.bookings]));
+}
+{
+  /* 6. Back today after four bookings with nothing inside them: not "nothing
+     to check against" — the unit was not reporting while the car worked. */
+  const fx = [F('QO0001', 30, 25.2, false), F('QO0001', 25, 25.21, false)];
+  const bk = [2, 3, 4, 5].map((dd) => B('QO0001', dd * 1440, dd * 1440 - 20));
+  const r = run(fx, bk).rows[0];
+  check('6. four bookings and no seat reading inside any: "not reporting while the car works", a red verdict ranked above the pads',
+    r.verdict === 'unreported' && /4 bookings in 7 days and no seat reading fell inside any of them — the unit is not reporting while the car works/.test(r.verdict_text)
+    && r.rank < 4, JSON.stringify([r.verdict, r.verdict_text, r.rank]));
+}
+{
+  /* 7. A reading with no position between two that have one: skipped, not
+     placed at (0, 0) — the drive either side of it is still measured. */
+  const fx = [F('QQ0001', 20, 25.2), { ...F('QQ0001', 15, null), lng: null }, F('QQ0001', 10, 25.25)];
+  const r = run(fx, []).rows[0];
+  const want = Math.round(hav(25.2, 25.25) * 10) / 10;
+  check(`7. a reading with no position does not cost the drive around it: ${want} km`, r.km === want && r.steps === 1, JSON.stringify([r.km, r.steps]));
+}
+{
+  /* 8. One plate on two rosters is one car; a car moved between fleets is
+     never both in the table and counted as gone. */
+  const fx = [F('QS0001', 30, 25.2), F('QS0001', 25, 25.21), F('QT0001', 30, 25.2), F('QT0001', 25, 25.21)];
+  const rosters = [
+    { fleet_id: 'ecosine', value: JSON.stringify({ plates: { QS0001: { admitted: true, departed: false }, QT0001: { admitted: true, departed: false } } }) },
+    { fleet_id: 'egari', value: JSON.stringify({ plates: { QS0001: { admitted: true, departed: false }, QT0001: { admitted: true, departed: true, last_seen: at(9000) } } }) },
+  ];
+  const out = run(fx, [], { rosters });
+  check('8. a plate on both rosters is one row; a member anywhere is not counted as departed',
+    out.rows.length === 2 && out.totals.cars === 2 && out.departed.plates === 0, JSON.stringify([out.rows.map((x) => x.plate), out.departed]));
+}
+{
+  /* 10. A chained Uber request: the next booking was requested while the last
+     ride was still going. Its span starts at that ride's drop-off, so the last
+     passenger is not counted as this one's. */
+  const fx = [F('QR0001', 58, 25.2), F('QR0001', 53, 25.21), F('QR0001', 48, 25.22), F('QR0001', 43, 25.23),
+    F('QR0001', 35, 25.24, false), F('QR0001', 30, 25.25, false), F('QR0001', 25, 25.26, false)];
+  const bk = [B('QR0001', 60, 40), B('QR0001', 45, 22)];
+  const r = run(fx, bk).rows[0];
+  check('10. a chained request does not borrow the last ride’s passenger: occupied during 1 of 2',
+    r.bookings.read === 2 && r.bookings.seat_seen === 1, JSON.stringify(r.bookings));
+}
+{
+  /* 11. The few-bookings sentence names a SEAT reading, and a lone reading is
+     "1 reading", not "1 readings". */
+  const r = run([F('QU0001', 30, 25.2), F('QU0001', 25, 25.21)], [B('QU0001', 32, 24)]).rows[0];
+  check('11. "only 1 booking with a seat reading inside — too few to judge the pad"',
+    r.verdict === 'few' && r.verdict_text === 'only 1 booking with a seat reading inside — too few to judge the pad', r.verdict_text);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

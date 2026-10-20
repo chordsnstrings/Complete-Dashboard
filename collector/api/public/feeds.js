@@ -95,6 +95,7 @@ const CAB_CHIP = {
   silent: { word: 'unit silent', bad: true },
   elsewhere: { word: 'not moving with the car', bad: true },
   no_seat: { word: 'sends no seat reading', bad: true },
+  unreported: { word: 'not reporting during bookings', bad: true },
   pad_dead: { word: 'pad reads nobody', bad: true },
   pad_misses: { word: 'pad misses passengers', bad: true },
   few: { word: 'too few to judge', bad: false },
@@ -128,10 +129,12 @@ function cabUnitCell(r, hours) {
 }
 
 function cabMoveCell(r, days) {
-  if (r.km == null) return `<span class="ent-off">no CABMAN reading in ${esc(String(days))} days</span>`;
-  if (!r.km) return `did not move<div class="dim">${fmt(r.readings)} readings, all in one place</div>`;
+  /* Absent with the route's reason: no measured step is not a car that did
+     not move. */
+  if (r.km == null) return `<span class="ent-off">${esc(r.km_reason || `no CABMAN reading in ${days} days`)}</span>`;
+  if (!r.km) return `did not move<div class="dim">under 0.1 km over ${esc(countOf(r.steps, 'measured step'))}</div>`;
   return `${fmt(r.km, 1)} km`
-    + `<div class="dim">moved on ${fmt(r.days_moved)} of ${fmt(days)} days</div>`
+    + `<div class="dim">moved on ${fmt(r.days_moved)} of the last ${fmt(days)} days</div>`
     + `${r.last_moved_at ? `<div class="dim">last moved ${esc(dtStr(r.last_moved_at))}</div>` : ''}`;
 }
 
@@ -139,7 +142,7 @@ function cabSeatCell(r, days) {
   if (!r.seat_readings) return `<span class="ent-off">no seat reading in ${esc(String(days))} days</span>`;
   const head = r.occupied_readings
     ? `occupied on ${fmt(r.occupied_readings)} of ${fmt(r.seat_readings)} readings${pct1(r.occupied_pct)}`
-    : `never occupied — ${fmt(r.seat_readings)} readings, all empty`;
+    : `never occupied — ${countOf(r.seat_readings, 'reading')}, all empty`;
   const km = r.occupied_km == null ? ''
     : `<div class="dim">${fmt(r.occupied_km, 1)} km with the seat occupied${r.occupied_km_pct == null ? '' : ` (${fmt(r.occupied_km_pct, 1)}% of km)`}</div>`;
   const last = r.last_occupied_at ? `<div class="dim">last occupied ${esc(dtStr(r.last_occupied_at))}</div>` : '';
@@ -168,6 +171,7 @@ function renderCabman(host, d) {
     v.silent ? `${fmt(v.silent)} silent` : null,
     v.elsewhere ? `${fmt(v.elsewhere)} not moving with the car` : null,
     v.no_seat ? `${fmt(v.no_seat)} sending no seat reading` : null,
+    v.unreported ? `${fmt(v.unreported)} not reporting during bookings` : null,
     v.pad_dead ? `${fmt(v.pad_dead)} reading nobody` : null,
     v.pad_misses ? `${fmt(v.pad_misses)} missing passengers` : null,
     v.ok ? `${fmt(v.ok)} working` : null,
@@ -175,13 +179,14 @@ function renderCabman(host, d) {
   const p = panel(`CABMAN — seat sensor and movement, last ${days} days`,
     `${countOf(rows.length, 'car')} on CABMAN’s list${counts.length ? ` · ${counts.join(' · ')}` : ''}. `
     + (t.bookings_read
-      ? `Across them the seat read occupied during ${fmt(t.bookings_seat_seen)} of ${fmt(t.bookings_read)} completed bookings${pct1(Math.round((1000 * t.bookings_seat_seen) / t.bookings_read) / 10)}. `
+      ? `Across them, of ${fmt(t.bookings)} completed bookings, ${fmt(t.bookings_read)} had a seat reading inside, and the seat read occupied during ${fmt(t.bookings_seat_seen)} of those${pct1(Math.round((1000 * t.bookings_seat_seen) / t.bookings_read) / 10)}. `
       : '')
     + `Readings to ${dtStr(d.as_of)}. The cars to look at come first.`, 'feeds-cabman');
   host.append(p.panel);
   if (d.roster && !d.roster.known && d.roster.basis_reason) p.body.append(note(cap1(d.roster.basis_reason), 'warn'));
   if (!rows.length) {
-    p.body.append(note('CABMAN lists no car, and no CABMAN reading arrived in the window.', 'warn'));
+    p.body.append(note(d.roster?.known ? 'CABMAN’s list holds no car of either fleet.'
+      : `CABMAN’s list has not been read, and no CABMAN reading arrived in the last ${days} days.`, 'warn'));
   } else {
     p.body.append(tableFrom(rows, [
       { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.vehicle_page ? r.plate : null, r.plate)
@@ -203,10 +208,10 @@ function renderCabman(host, d) {
     dep.plates ? ['Not in the table', `${countOf(dep.plates, 'plate')} CABMAN has stopped listing (${andList(when)}${(dep.groups || []).length > 3 ? ', and others' : ''}). `
       + (dep.with_bookings ? `${fmt(dep.with_bookings)} of them did have bookings with us — those are worth a look on Vehicles.`
         : 'Not one of them ever had a booking with either fleet: they are other companies’ cars CABMAN used to send.')] : null,
-    ['Movement', `CABMAN’s own readings only, never another tracker’s: a step counts when the readings are at most ${r.gap_min} minutes apart and under ${r.hop_km} km apart. A day counts as moved at 1 km.`],
+    ['Movement', `CABMAN’s own readings that carry a position, never another tracker’s: a step counts when the readings are at most ${r.gap_min} minutes apart and under ${r.hop_km} km apart. With no such step nothing is measured, and the cell says why. A day is 24 hours counted back from now, and counts as moved at 1 km.`],
     ['Seat sensor', 'CABMAN’s seat pad, a passenger count stored as occupied (1 or more) or empty. CABMAN’s own trip flag, Engaged, is the same pad’s state, so it is no second witness — the bookings and the movement are.'],
-    ['Against bookings', `every completed booking on the car (Uber, Bolt, Yango, hotel — an FMS journey is not a booking), checked on the CABMAN readings from ${r.pad_min} minutes before pickup to ${r.pad_min} minutes after drop-off. A booking with no seat reading inside says nothing about the pad and is counted apart.`],
-    ['What it shows', `the pad is working at ${fmt(Math.round((r.ok_share || 0) * 100))}% of bookings or more, and judged only on ${fmt(r.min_bookings)} bookings or more; standing still means under ${r.still_km} km moved through a booking of ${r.trip_km} km or more, and through ${fmt(Math.round((r.elsewhere_share || 0) * 100))}% of bookings it is the unit, not the car.`],
+    ['Against bookings', `every completed booking on the car (Uber, Bolt, Yango, hotel — an FMS journey is not a booking), checked on the CABMAN readings from ${r.pad_min} minutes before the booking was requested — never before the previous booking’s drop-off — to ${r.pad_min} minutes after drop-off. A booking with no seat reading inside says nothing about the pad and is counted apart.`],
+    ['What it shows', `the pad is judged on the bookings with a seat reading inside, only from ${fmt(r.min_bookings)} of them, and is working at ${fmt(Math.round((r.ok_share || 0) * 100))}% or more. A booking of ${r.trip_km} km and ${r.still_min} minutes or more counts as standing still when the unit’s readings inside it — at least ${r.still_readings} — moved under ${r.still_km} km; through ${fmt(r.min_bookings)} or more such bookings and ${fmt(Math.round((r.elsewhere_share || 0) * 100))}% of them, it is the unit, not the car. Silent is no reading in ${d.window_hours} hours.`],
   ].filter(Boolean);
   p.body.append(el('div', 'cap', lines.map(([k, x]) => `<div><b>${esc(k)}:</b> ${esc(x)}</div>`).join('')));
 }

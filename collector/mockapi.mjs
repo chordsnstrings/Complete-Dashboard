@@ -2556,13 +2556,17 @@ app.get('/api/vehicles/feeds/cabman', (_, r) => {
   last.push({ plate: 'Q10007', fleet_id: 'ecosine', captured_at: at(60 * 24 * 200), speed: 0, status: 'Active', seat_occupied: false });
   for (let i = 0; i < 30; i++) fixes.push({ plate: 'Q10008', fleet_id: 'ecosine', captured_at: at(30 + i * 300), lat: 25.1, lng: 55.2, speed: 0, status: 'Active', seat_occupied: false });
   last.push({ plate: 'Q10008', fleet_id: 'ecosine', captured_at: at(30), speed: 0, status: 'Active', seat_occupied: false });
+  /* Back today after four bookings with no reading inside any of them. */
+  for (let k = 0; k < 3; k++) fixes.push({ plate: 'Q10009', fleet_id: 'ecosine', captured_at: at(40 - k * 5), lat: 25.15 + k * 0.01, lng: 55.25, speed: 30, status: 'Active', seat_occupied: false });
+  for (let dd = 2; dd <= 5; dd++) bookings.push({ plate: 'Q10009', platform: 'uber', requested_at: at(dd * 1440), ended_at: at(dd * 1440 - 20), distance_km: 8 });
+  last.push({ plate: 'Q10009', fleet_id: 'ecosine', captured_at: at(30), speed: 30, status: 'Active', seat_occupied: false });
   const members = (fleet, plates) => ({ fleet_id: fleet, value: JSON.stringify({ plates: {
     ...Object.fromEntries(plates.map((p) => [p, { admitted: true, departed: false }])),
     ...(fleet === 'ecosine' ? { Q90001: { admitted: true, departed: true, last_seen: at(60 * 24 * 6) },
       Q90002: { admitted: true, departed: true, last_seen: at(60 * 24 * 6) },
       Q90003: { admitted: true, departed: true, last_seen: at(60 * 24 * 13) } } : {}) } }) });
   r.json(cabmanSeat({
-    rosterRows: [members('ecosine', ['Q10001', 'Q10002', 'Q10003', 'Q10005', 'Q10006', 'Q10007', 'Q10008']), members('egari', ['Q20001'])],
+    rosterRows: [members('ecosine', ['Q10001', 'Q10002', 'Q10003', 'Q10005', 'Q10006', 'Q10007', 'Q10008', 'Q10009']), members('egari', ['Q20001'])],
     last, fixes, bookings, ever: [], now: new Date(now).toISOString(), days: 7,
   }));
 });
