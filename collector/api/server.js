@@ -55,6 +55,7 @@ import { resolveOpenFill, applyFillToPlatforms } from './statement_fill_sql.js';
 import { teslaRoutes } from './tesla_routes.js';
 import { cancellationRoutes } from './cancellation_routes.js';
 import { startWarmer } from './warm.js';
+import { startAlerts } from './alerts.js';
 import { log } from '../src/log.js';
 /* Money in a sentence the server writes, to the fils like every page (the
    ruling of 2026-09-23). test/mount.mjs injects it into the mounted slice. */
@@ -7387,5 +7388,8 @@ migrate()
       enabled: String(process.env.WARM || '').toLowerCase() !== 'off'
         && String(process.env.CACHE || '').toLowerCase() !== 'off',
     });
+    /* The credential banner, pushed to the operator's phone through ntfy when
+       a row changes. Silent until NTFY_TOPIC is set. See api/alerts.js. */
+    startAlerts({ q, enabled: String(process.env.ALERTS || '').toLowerCase() !== 'off' });
   })
   .catch((e) => { log.error('api', 'migrate failed — refusing to serve', { err: String(e) }); process.exit(1); });

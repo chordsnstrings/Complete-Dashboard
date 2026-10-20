@@ -127,6 +127,9 @@ export const SETTING_DEFAULTS = {
      on 2026-09-28; it delivers although the gateway's sender list still says
      "Requested" for it (docs/COVERAGE.md "SMSala"). */
   SMSALA_BASE: 'https://api2.smsala.com',
+  /* ntfy push alerts (src/ntfy.js, api/alerts.js). The public server unless
+     the operator runs their own. */
+  NTFY_URL: 'https://ntfy.sh',
   /* The 07:00 daily report email (src/daily_report.js). GLM 5.2 on ModelArk
      writes its commentary — the operator's choice, 2026-09-29, and the model
      measured right about Ramadan 1448 where MiniMax was a year stale
@@ -372,6 +375,17 @@ export const SETTING_DEFS = [
   { key: 'SMSALA_SENDER', group: 'SMSala (SMS)', label: 'Sender name', secret: false,
     hint: 'The name drivers see. ECOSINE by default; VOLT and AD-VOLT are the other senders the account can use.' },
   { key: 'SMSALA_BASE', group: 'SMSala (SMS)', label: 'API base url', secret: false },
+
+  /* Push alerts to a phone when a source stops or comes back (api/alerts.js).
+     The topic is a secret on the public server: whoever knows the name can
+     read every message and post to it, so it is stored like a credential. */
+  { key: 'NTFY_TOPIC', group: 'ntfy (phone alerts)', label: 'Topic', secret: true,
+    hint: 'Subscribe to this topic in the ntfy app. Long and unguessable — on ntfy.sh the name is the '
+      + 'only lock. Empty turns the alerts off.' },
+  { key: 'NTFY_URL', group: 'ntfy (phone alerts)', label: 'Server', secret: false,
+    hint: 'https://ntfy.sh unless you run your own ntfy server.' },
+  { key: 'NTFY_TOKEN', group: 'ntfy (phone alerts)', label: 'Access token (optional)', secret: true,
+    hint: 'Only for a protected topic or a private server.' },
 
   /* The daily report email. Recipients are managed on the Access page by the
      Owner and Access admins; REPORT_RECIPIENTS only seeds that list the first

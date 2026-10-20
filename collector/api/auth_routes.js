@@ -192,8 +192,16 @@ export const ERRANDS = {
 const SURFACE_STATES = new Set(['unentitled', 'blocked']);
 
 export function authRoutes(app, { q, wrap }) {
-  app.get('/api/auth', wrap(async (_req, res) => {
-    const [creds, runs] = await Promise.all([
+  app.get('/api/auth', wrap(async (_req, res) => res.json(await authHealth(q))));
+}
+
+/* The banner's whole verdict, as a function rather than a route body, so the
+   ntfy watcher (api/alerts.js) reads exactly what the banner prints and the
+   two cannot drift: a push that says one thing while the page says another is
+   a second source of truth, and this file exists to be the only one. */
+export async function authHealth(q) {
+  {
+    const [creds, runs, goods] = await Promise.all([
       /* With the version each row was observed with and the version stored
          now, so a row about a value that has since been replaced can be read
          as exactly that (schema_v82). Correlated subqueries rather than a
@@ -212,23 +220,60 @@ export function authRoutes(app, { q, wrap }) {
                 source, coalesce(fleet_id,'*') AS fleet_id, status, finished_at, rows_written
            FROM collection_run
           ORDER BY source, coalesce(fleet_id,'*'), finished_at DESC NULLS LAST`).catch(() => []),
+      /* The last run that DELIVERED, per source and fleet — whatever came
+         after it. See "THE CLOCK READ A RUN FROM SEPTEMBER" below. */
+      q(`SELECT source, coalesce(fleet_id,'*') AS fleet_id, max(finished_at) AS finished_at
+           FROM collection_run
+          WHERE status = 'ok' OR (status = 'partial' AND rows_written > 0)
+          GROUP BY 1, 2`).catch(() => []),
     ]);
 
     const now = Date.now();
     const ageH = (t) => (t ? (now - Date.parse(t)) / 3600e3 : null);
-    const lastOk = new Map();
-    for (const r of runs) {
-      if (r.status !== 'ok' && r.status !== 'partial') continue;
-      /* A partial that wrote nothing is not evidence that anything works, and
-         this clock is the product's only measure of "the credential is still
-         collecting". Rows are what a working credential produces. */
-      if (r.status === 'partial' && !(Number(r.rows_written) > 0)) continue;
-      lastOk.set(`${r.source}|${r.fleet_id}`, r.finished_at);
-    }
+    /* A partial that wrote nothing is not evidence that anything works, and
+       this clock is the product's only measure of "the credential is still
+       collecting". Rows are what a working credential produces. */
+    const delivered = (r) => r.status === 'ok'
+      || (r.status === 'partial' && Number(r.rows_written) > 0);
+    const latest = new Map(runs.map((r) => [`${r.source}|${r.fleet_id}`, r]));
+    const lastOk = new Map(goods.map((r) => [`${r.source}|${r.fleet_id}`, r.finished_at]));
 
     const rows = creds.map(({ stored_version: stored, value_version: seen, ...c }) => {
-      const runAge = ageH(lastOk.get(`${c.provider}|${c.fleet_id}`)
-        ?? lastOk.get(`${c.provider}|*`));
+      /* THE CLOCK READ A RUN FROM SEPTEMBER.
+         ─────────────────────────────────────────────────────────────────
+         This took the freshest run per source and fleet, kept it only if it
+         delivered, and otherwise fell back to the source's fleet-less ('*')
+         runs. The fallback exists for sources that never record a fleet
+         (CABMAN writes one run for both). But it also fired whenever a
+         fleet's freshest run FAILED — and Bolt still carries fleet-less runs
+         from before its runs were split per fleet.
+
+         Measured on production 2026-10-20: Bolt Ecosine's 11:01 run failed
+         (its portal token expired at 09:18), so the clock fell through to a
+         fleet-less run of 2026-09-09 and the banner read "bolt · Ecosine
+         (BOLT_REFRESH_TOKEN), last run 986h ago" — while the same fleet had
+         delivered 739 bookings at 21:27 the night before. A number nobody can
+         reconcile with the data on the next page is the reason that is not
+         the true one, and the ntfy alerts (api/alerts.js) would have pushed
+         it to a phone.
+
+         Two clocks now, both per fleet, and '*' only for a fleet that has no
+         runs of its own at all:
+           runAge     — the last run that delivered, whatever came after it.
+                        It is the number printed, and a source whose every
+                        run has failed for three days now SAYS three days,
+                        where before a failing freshest run left it with no
+                        clock at all and a working credential read 'ok'
+                        over a source that had stopped.
+           collecting — the freshest run delivered. "Still collecting" is a
+                        claim about now, and a channel whose last run wrote
+                        nothing is not making it, however recent the run
+                        before was. This is what kept the stopped verdict on
+                        Bolt Ecosine's refused surface, and it is unchanged. */
+      const own = `${c.provider}|${c.fleet_id}`;
+      const k = latest.has(own) ? own : `${c.provider}|*`;
+      const runAge = ageH(lastOk.get(k));
+      const collecting = latest.has(k) && delivered(latest.get(k));
       /* ABOUT A VALUE THAT HAS SINCE BEEN REPLACED.
          ─────────────────────────────────────────────────────────────────
          A row observed with one stored value says nothing about the next. On
@@ -261,7 +306,7 @@ export function authRoutes(app, { q, wrap }) {
            credential's surface is doing. runAge comes from lastOk, which
            counts a run only if it finished and wrote rows — so this is
            evidence, not optimism. */
-        still_collecting: runAge != null && runAge <= limit,
+        still_collecting: collecting && runAge != null && runAge <= limit,
       };
       /* Pending, whatever it said: its state and detail were about the value
          before, and are kept under their own names for anyone who needs them
@@ -299,7 +344,7 @@ export function authRoutes(app, { q, wrap }) {
              degraded, not stopped. See SEVERITY_OF: saying "collecting
              nothing" over 34,897 collected bookings is the failure this
              guards against. */
-          : (SURFACE_STATES.has(c.state) && runAge != null && runAge <= limit
+          : (SURFACE_STATES.has(c.state) && collecting && runAge != null && runAge <= limit
             ? 'degraded'
             : SEVERITY_OF[c.state] || 'at-risk'),
       };
@@ -309,7 +354,7 @@ export function authRoutes(app, { q, wrap }) {
     const degraded = rows.filter((r) => r.severity === 'degraded');
     const warn = rows.filter((r) => r.severity === 'at-risk');
     const pending = rows.filter((r) => r.severity === 'pending');
-    res.json({
+    return {
       rows,
       stopped: bad.length,
       at_risk: warn.length,
@@ -386,13 +431,13 @@ export function authRoutes(app, { q, wrap }) {
       /* Absent, not healthy. A brand-new database has recorded nothing, and
          "every credential is fine" is not a claim an empty table supports. */
       observed: rows.length > 0,
-    });
-  }));
+    };
+  }
 }
 
 /** "Uber · Egari (UBER_WEB_COOKIE_EGARI)" — the provider, the fleet it fails
     for, and the key a person has to go and replace. */
-function label(r) {
+export function label(r) {
   const fleet = r.fleet_id && r.fleet_id !== '*'
     ? ` · ${r.fleet_id[0].toUpperCase()}${r.fleet_id.slice(1)}` : '';
   return `${r.provider}${fleet} (${r.credential})`;

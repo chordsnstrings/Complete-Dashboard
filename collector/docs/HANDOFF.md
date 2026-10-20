@@ -27,6 +27,7 @@ stale document.
 | 0.2 | ~~LPG not deployed~~ **Done 2026-10-20:** LPG1–11 are on production and proven (FIX-STATUS LPG, deployment `9cf3fe85`). | — | ~~The page's speed~~ **Done 2026-10-20 (FIX-STATUS LPS):** `/api/lowperf` is cached under a key that carries the target; the default view answers in 0.3–0.6 s (was 6.2–7.7 s), and the page opens in 4.96 s on desktop and 1.82 s on the phone (was 12.4 / 12.2 s). |
 | 0.3 | **Deploying needs a DigitalOcean token, and none is stored.** The operator pasted one into the 2026-10-20 session; it lived only in that session's scratchpad. | Checked through the API: the `fleet-dashboard` app builds two components, the `api` service and the `collector` worker (both `basic-xxs`), from `claude/ecosine-egari-tracking-apis-rf9ong`. **`deploy_on_push` is off on both, so nothing deploys on a merge.** | Get a token from the operator for each deploying session, kept outside the repo; suggest they revoke tokens pasted into chat. Then `POST /v2/apps/$APP_ID/deployments` with `{"force_build":true}`, poll that deployment id to `ACTIVE`, and compare `services[].source_commit_hash` and the `sw.js` fingerprint (§9) with the branch. |
 | 0.4 | Production is at `c9ef23a` (deployment `b882f09d`, 2026-10-20 10:37Z): PRs #4–#11 merged and force-built. | — | Merge work into the production branch through a PR, then force-build (§0.3). |
+| 0.6 | **ntfy phone alerts** (FIX-STATUS NTFY): the banner's verdicts pushed when a row changes, and the banner's run clock fixed (BCL). | Written and tested 2026-10-20. The topic is a secret held in the app's env (`NTFY_TOPIC`) or on the Settings page, never in the repo. | Deploy, then confirm the "alerts are on" message arrives (COVERAGE "ntfy phone alerts"). |
 | 0.5 | **The operator has an unanswered question from 2026-10-19 14:29Z** (garage history, §5). | They asked for the garage audit, plan and build to come straight after LPG. The session asked how the existing garage history should reach production and got no answer, because the session died. **2026-10-20:** the two source files were re-supplied (session uploads; the log is also a live Google Sheet), the distinct invoices reproduce at 239 / AED 423,841.96, and a printable six-garage price sheet was made (GARAGE-PLAN.md, "The work done most often"). The import-route question was put again and is still open. | Ask again, in the same terms (§5). |
 
 ---
@@ -41,8 +42,8 @@ stale document.
 | Collectors | Running (`/api/status`: incremental 04:01Z, CABMAN 04:15Z on 10-20). |
 | Access control (ULM) | Built and deployed (`a1429529`, 2026-09-28) but in **open** mode. `/api/auth/me` → `mode: "open"`. Anonymous readers get every page (§6.1). |
 | Identity register | 461 entries over 237 people, PENDING 0, REFUSED 3. `test/identity_register_counts.test.mjs` passes 16/16, and `node bin/gen-schema-v53.mjs --check` matches. CLAUDE.md's counts are right. |
-| Migrations | 108 files (`schema.sql` + `schema_v2`…`v109`; v60 never existed). All registered in `src/schema_files.js`, in order, none missing (checked mechanically). |
-| Tests | **384** `.test.mjs` files plus 15 helpers. CLAUDE.md said 376; corrected in the same commit as this note. |
+| Migrations | 109 files (`schema.sql` + `schema_v2`…`v110`; v60 never existed). v110 = `alert_state`, the ntfy watcher's memory. All registered in `src/schema_files.js`, in order, none missing (checked mechanically). |
+| Tests | **386** `.test.mjs` files plus 15 helpers (2026-10-20, with `ntfy_alerts`). CLAUDE.md carries the same count. |
 
 ---
 

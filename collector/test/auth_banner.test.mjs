@@ -384,13 +384,74 @@ console.log('\nand a run that wrote nothing does not reset the stall clock');
 {
   /* lastOk counted any 'partial' as the source still collecting. A partial
      that wrote no rows is not evidence that anything works — and it is what an
-     all-but-one-window failure looked like before logRun learned to escalate. */
-  const src = await import('node:fs').then((fs) => fs.readFileSync('api/auth_routes.js', 'utf8'));
+     all-but-one-window failure looked like before logRun learned to escalate.
+     Held by behaviour since 2026-10-20: the check this replaced read the
+     source text for one spelling of the guard, and the guard moved. */
+  const run = (src, fleet, status, rows, h) => db.query(
+    `INSERT INTO collection_run (source, fleet_id, mode, status, rows_written, started_at, finished_at)
+     VALUES ($1, $2, 'incremental', $3, $4, now() - $5 * interval '1 hour', now() - $5 * interval '1 hour')`,
+    [src, fleet, status, rows, h]);
+  const row = async (provider, fleet) => (await get('/api/auth')).rows
+    .find((r) => r.provider === provider && r.fleet_id === fleet);
+  const near = (v, h) => v != null && Math.abs(v - h) < 0.2;
+
+  /* THE CLOCK READ A RUN FROM SEPTEMBER (api/auth_routes.js). Production's
+     shape on 2026-10-20: a fleet-less run from before Bolt's runs were split
+     per fleet, a run that delivered last night, and this morning's run
+     refused. The clock fell through to the September run. */
+  await run('clk', null, 'partial', 48415, 900);
+  await run('clk', 'ecosine', 'partial', 739, 10);
+  await run('clk', 'ecosine', 'error', 0, 1);
+  await noteCredential(db, { provider: 'clk', fleet: 'ecosine', credential: 'CLK_TOKEN',
+    state: 'ok', surface: 'orderHistory' });
+  let r = await row('clk', 'ecosine');
+  check('a failed freshest run does not send the clock to a fleet-less run from weeks ago',
+    near(r?.run_age_h, 10), JSON.stringify(r));
+  check('…so a source that delivered ten hours ago is not reported as stalled for 900',
+    r?.severity === 'ok', JSON.stringify(r));
+  check('…and a channel whose freshest run delivered nothing is not "still collecting"',
+    r?.still_collecting === false, JSON.stringify(r));
+
+  await run('clk', 'ecosine', 'partial', 0, 0.5);
+  r = await row('clk', 'ecosine');
   check('a partial with no rows is skipped when measuring the last good run',
-    /r\.status === 'partial' && !\(Number\(r\.rows_written\) > 0\)/.test(src),
-    'the clock must not be reset by a run that produced nothing');
-  check('…and rows_written is actually selected, or the guard reads undefined',
-    /status, finished_at, rows_written/.test(src));
+    near(r?.run_age_h, 10), JSON.stringify(r));
+
+  /* A refused SURFACE on that fleet is stopped, not degraded: the newest run
+     wrote nothing, so nothing says the channel is still delivering. */
+  await noteCredential(db, { provider: 'clk', fleet: 'ecosine', credential: 'CLK_CLIENT_ID',
+    state: 'unentitled', detail: 'not entitled to the company', surface: 'getDrivers' });
+  r = (await get('/api/auth')).rows.find((x) => x.credential === 'CLK_CLIENT_ID');
+  check('a refused surface on a channel whose freshest run wrote nothing is stopped',
+    r?.severity === 'stopped', JSON.stringify(r));
+  await run('clk', 'egari', 'ok', 40, 1);
+  await noteCredential(db, { provider: 'clk', fleet: 'egari', credential: 'CLK_CLIENT_ID',
+    state: 'unentitled', detail: 'not entitled to the company', surface: 'getDrivers' });
+  r = await row('clk', 'egari');
+  check('…and degraded where the freshest run delivered',
+    r?.severity === 'degraded' && near(r?.run_age_h, 1), JSON.stringify(r));
+
+  /* The hole the old clock left: a fleet whose every run since Friday has
+     failed, under a credential nothing refused (a network fault, a parser
+     that throws). The freshest run failed, so there was no clock at all,
+     the stall could not fire, and the banner read 'ok' over a source that
+     had stopped. This is the case the ntfy alerts most need to see. */
+  await run('clk2', 'egari', 'ok', 40, 72);
+  await run('clk2', 'egari', 'error', 0, 1);
+  await noteCredential(db, { provider: 'clk2', fleet: 'egari', credential: 'CLK2_KEY',
+    state: 'ok', surface: 'trips' });
+  r = await row('clk2', 'egari');
+  check('a source failing every run for three days under a working credential is at risk',
+    r?.severity === 'at-risk' && near(r?.run_age_h, 72), JSON.stringify(r));
+
+  /* A source that never records a fleet (CABMAN writes one run for both)
+     still reads its fleet-less runs. */
+  await run('clk3', null, 'ok', 52, 0.2);
+  await noteCredential(db, { provider: 'clk3', fleet: 'egari', credential: 'CLK3_PASS',
+    state: 'ok', surface: 'IVDData' });
+  r = await row('clk3', 'egari');
+  check('a fleet with no runs of its own reads the source\'s fleet-less runs',
+    r?.severity === 'ok' && near(r?.run_age_h, 0.2) && r?.still_collecting === true, JSON.stringify(r));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
