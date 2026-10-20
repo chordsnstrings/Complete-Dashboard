@@ -5228,7 +5228,7 @@ at 09:18 and 09:19Z on 2026-10-20 and nothing told anyone.
 | NT5 | `NTFY_TOPIC` (secret), `NTFY_URL` (default https://ntfy.sh), `NTFY_TOKEN` (secret, optional) on the Settings page under "ntfy (phone alerts)", and in .env.example. Empty topic = off. `ALERTS=off` disables the watcher | yes | **on production** `8ac1f45f` (`faa9845`), 2026-10-20 | `settings_page_layout` 20/0, `credential_visibility` 19/0 |
 | BCL | **The banner's run clock read a run from September** (FIXLIST "The banner's clock"). Two clocks per fleet: `run_age_h` = the last run that delivered, whatever came after; `still_collecting` = the freshest run delivered. Fleet-less runs only for a fleet with none of its own | yes | **on production** `8ac1f45f` (`faa9845`), 2026-10-20 | `auth_banner` §"a run that wrote nothing": the old file fails 4 (900 h on a fleet that delivered 10 h ago; 'ok' over three days of failed runs) |
 
-| NT6 | "At risk" vs "Not collecting": an at-risk row whose state the dashboard cannot vouch for (`unknown` — a check that could not run) on a source that IS collecting is titled "At risk"; "Not collecting" is kept for the stall. Titles count by the word their lines print | yes | not yet | `ntfy_alerts` 62/0; `wordOf` reverted → 3 fail |
+| NT6 | "At risk" vs "Not collecting": an at-risk row whose state the dashboard cannot vouch for (`unknown` — a check that could not run) on a source that IS collecting is titled "At risk"; "Not collecting" is kept for the stall. Titles count by the word their lines print | yes | **on production** `cb6407aa` (`8fac6dd`), 2026-10-20 | `ntfy_alerts` 62/0; `wordOf` reverted → 3 fail |
 
 **Proven on production, 2026-10-20.** Deployment `8ac1f45f` (`faa9845`) went
 ACTIVE at 12:05:49Z, with `NTFY_TOPIC` set as an app secret on the api service.
@@ -5242,6 +5242,10 @@ ACTIVE at 12:05:49Z, with `NTFY_TOPIC` set as an app secret on the api service.
   (it was 986.4), and the legacy `BOLT_REFRESH_TOKEN` row is ok (it was
   at-risk). The stopped rows are unchanged, because `still_collecting` is
   false.
+- **A restart re-announces nothing.** Deployment `cb6407aa` (`8fac6dd`, NT6)
+  restarted the API at 12:12Z. At 12:17:22Z the topic still held exactly
+  that one message: `alert_state` survived the deploy, and the new process's
+  passes found nothing new to say.
 - **One wording defect showed in that message:** YANGO_COOKIE was titled
   "Not collecting" while Yango collects every half hour. Its reason line said
   "not checked". Fixed as NT6.
