@@ -232,7 +232,7 @@ check('and the rules it judges by: movement on CABMAN’s own readings, the trip
   /Movement: CABMAN’s own readings that carry a position, never another tracker’s/.test(cab.text) && /Engaged, is the same pad’s state/.test(cab.text)
   && /2 minutes before the booking was requested — never before the previous booking’s drop-off — to 2 minutes after drop-off/.test(cab.text)
   && /working at 80% or more/.test(cab.text) && /2 km and 10 minutes or more/.test(cab.text) && /covering 70% of it/.test(cab.text)
-  && /closing time is not a drop-off, so it runs from its start for about 2 minutes a km/.test(cab.text) && /A day is 24 hours counted back from now/.test(cab.text),
+  && /its seat is judged from its start to its close — at least about 2 minutes a km/.test(cab.text) && /never judged for standing still/.test(cab.text) && /A day is 24 hours counted back from now/.test(cab.text),
   cab.text.slice(-900));
 check('a unit that said nothing through its bookings is a red verdict of its own, not "nothing to check against"',
   chipOf('Q10009').includes('not reporting during bookings') && /4 bookings in 7 days and no seat reading fell inside any of them/.test(rowOf('Q10009')),
