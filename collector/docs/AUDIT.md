@@ -2721,3 +2721,24 @@ the grid took their fils:
 
 To repeat: as above, then `pdftotext -layout` to find the sheet carrying
 "Average a day" and `pdftoppm -r 110` to look at it.
+
+## #feeds — the CABMAN table, seat sensor and movement (2026-10-20)
+
+Against the mock, which runs the route's own `cabmanSeat()` over a synthetic
+week with one car per verdict, on Arkiv at 1440 and 390 wide and Classic at
+1440:
+
+- The panel sits under the table above at all three. It has eight rows, no
+  page error and no sideways scroll; at 390 each car is a card with labelled
+  lines.
+- Found and fixed: the control bar said "judged on the last day", which is
+  not true of a 7-day table, and now names both tables. The page's source
+  line said no booking is read here; it now names the one table that reads
+  bookings.
+- On production data, through the function (not yet rendered on production,
+  which is not deployed): 46 cars. 14 silent, 1 not moving with the car,
+  6 pads reading nobody, 3 missing passengers, 1 too few, 5 with nothing to
+  check, 16 working.
+
+To repeat: `PORT=8099 node mockapi.mjs`, then `#feeds` at 1440 and 390 in
+both skins (`?skin=classic`), screenshot `[data-panel="feeds-cabman"]`.

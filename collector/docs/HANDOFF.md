@@ -143,6 +143,15 @@ export (`/api/export/lowperf.xlsx`) now cover the same ground.
   The operator said "go" on 10-14 08:19 and asked again on 10-19. What blocks
   it is the history-load question (§5).
 
+- **The CABMAN table on `#feeds` (CST1–7, 2026-10-20): written and tested,
+  not deployed.** It ships with the next build of the production branch.
+  Prove it on production then: the 46 cars, the verdict counts against
+  COVERAGE's 14/1/6/3/1/5/16, and screenshots at 1440 and 390 in both
+  skins. The pads it names for a physical check are L44295, L44259,
+  L45227, L64998, L27976 and L44286 (reading nobody); L77059, L12615 and
+  L76092 (missing most); L76099 (unit silent since 2024-04-16 on a working
+  car); and L45243 (unit not moving with the car).
+
 ### 4.2 Deployed but not proven on production
 
 - **V1–V12.** `/api/vehicles/directory` already carries `last_trip_ever`,

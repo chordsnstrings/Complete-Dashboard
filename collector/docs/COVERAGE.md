@@ -10090,3 +10090,83 @@ holds, and what it does not:
   the hours or trips, 85% of the rate, two hours later AND short days, a
   quarter of active days off AND twice everyone else's share, 3 abandons AND
   5% AND twice everyone else's rate). A rate needs 3 days driven.
+
+## CABMAN's seat pad held against movement and bookings — measured 2026-10-20
+
+Asked for by the operator over `#feeds` ("since there are some discrepancies
+let's add a separate seat sensor table for cabman as well where we can see
+seat sensor data and cabman movement data"). Built as the second table on
+`#feeds`, `GET /api/vehicles/feeds/cabman` (api/feed_routes.js `cabmanSeat`).
+Everything below was measured on production through the API, cache-busted,
+over the 7 Dubai days 14–20 Oct, unless it says otherwise.
+
+* **CABMAN's list is 46 cars: 41 Ecosine and 5 Egari.** That is the plates in
+  the latest poll (05:45Z). `telemetry_snapshot` holds 178 CABMAN plates, and
+  132 of them are no longer listed:
+  - 65 were last listed at **2026-10-14 12:35Z**, moving and Engaged up to
+    12:33.
+  - 41 were last listed at 2026-10-07 16:25Z.
+  - 26 had gone earlier: 22 last listed 2026-08-30 and 4 on 2026-09-04.
+
+  **Not one of the 106 that went in October has ever had a booking with
+  either fleet**: `last_trip_ever` is null on all of them in
+  `/api/vehicles/directory`. They are the other companies' cars the Ecosine
+  interface carried (Sahalat, Star Skyline, VOLYA; see "Egari's CABMAN cars
+  are never asked for"). CABMAN dropped them, and the roster in
+  `source_state` has marked them departed. Every one of the 46 that remain
+  has bookings.
+* **CABMAN's `Status` is the pad.** Over the 7 days, 22,265 readings:
+  - `SeatSensorStatus` "Active" 6,304 and `Status` "Engaged" 6,304.
+  - `SeatSensorStatus` "Not Active" 15,961 and `Status` "Active" 15,961.
+
+  "Engaged" is not a meter or trip flag independent of the pad; it is the
+  pad's own state. It is never a second witness for a passenger. Per
+  reading it still disagrees with `SeatSensorValue > 0` on 758 of 20,631
+  readings. L46706 read occupied 206 times and was never Engaged; L27976
+  was Engaged 16 times and never occupied.
+* **`SeatSensorValue` is a count, 0–4 this week.** The counts were 0 on 16,245
+  readings, 1 on 4,671, 2 on 1,062, 3 on 272 and 4 on 15. It is stored
+  flattened as `seat_occupied` (1 or more), and the count survives only in
+  `raw`.
+* **The pad against the bookings.** 781 completed bookings ran on the 46 cars,
+  counting Uber, Bolt, Yango and hotel, and not FMS journeys. 752 had a
+  CABMAN seat reading between 2 minutes before pickup and 2 minutes after
+  drop-off, and **the seat read occupied during 513 of them (68%)**.
+  - Working pads: L64921 56/56, L75125 46/46, L44271 27/27, L77062 38/39
+    and L44305 46/47.
+  - Pads that read nobody all week while the car drove its bookings:
+    L44295 (52 Uber, 1,415 km), L44259 (46), L45227 (34), L64998 (4) and
+    L27976 (6 hotel).
+  - L44286 read occupied 20 times in the week, never once during any of its
+    35 bookings.
+  - Pads that miss most passengers: L77059 6/17, L12615 5/16, L76092 16/23.
+    L12615's full week, 13–20 Oct, was delivered to the operator as a
+    workbook.
+* **Fourteen of the 46 have sent nothing for a day or more.**
+  - L76099 completed 17 hotel bookings this week; its unit last reported on
+    **2024-04-16**.
+  - The other thirteen are on cars with no booking either, mostly silent for
+    months.
+* **L45243's CABMAN unit does not move with the car.** It stood still through
+  17 of its 44 Uber bookings. This is the car whose two trackers sit
+  25.6 km apart at the same minute (trap below; "TRAP: on the only two cars
+  with both trackers").
+
+### Traps this added to the list
+
+* **`/api/map/journey`'s `distance_km` walks every provider's fixes in one
+  line.** On a car with two trackers it steps between them every reading:
+  L45243 came to **26,528.8 km in a week**. Its own CABMAN readings measure
+  1,024.7 km. The route's per-provider `occupancy_by_source` is right; the
+  day's `distance_km` and `moving_km` are not, on L44251 and L45243. Measure
+  movement on one provider's own fixes (api/feed_routes.js does).
+* **An FMS journey sits in `trip` and is not a booking.** A per-car "bookings"
+  count from `/api/vehicle/trips` includes `platform = 'fms'` rows: 57 of
+  L45243's 101 that week. Read `trip_norm.is_booking`.
+* **A pad is judged on seat readings, not on readings.** A CABMAN reading with
+  no seat value inside a booking says where the car was, not who sat in it.
+  Counting it as "seat empty" would call a unit that reports no pad "a pad
+  reading nobody".
+* **CABMAN keeps listing a dead unit.** L76099's last reading is 2024-04-16
+  and it is in the current poll. "On CABMAN's list" is not "reporting";
+  judge receiving on the newest reading, as `#feeds` does.

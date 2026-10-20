@@ -4976,3 +4976,32 @@ asks for both — a row without its averages fails it. Both LPG failures were
 found by a full suite the 2026-10-19 session started and never read (the
 wrapper exited 0; the container was replaced before anyone looked) — see
 `docs/HANDOFF.md`.
+
+## CST — #feeds: CABMAN's seat sensor held against movement and bookings (2026-10-20)
+
+The operator, over `#feeds`: "since there are some discrepancies let's add a
+separate seat sensor table for cabman as well where we can see seat sensor
+data and cabman movement data. go through the api and check and audit, plan
+execute." The audit is in `docs/COVERAGE.md`, "CABMAN's seat pad held
+against movement and bookings".
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| CST1 | `GET /api/vehicles/feeds/cabman` (api/feed_routes.js `cabmanSeat`). One row per car on CABMAN's roster, members only, both fleets; with no roster written, the cars with a CABMAN reading in the window, and the answer says so. The plates CABMAN stopped listing are counted under the table, with whether any ever had a booking | yes | — | `feeds_cabman` §1, §5, §6 |
+| CST2 | Movement on CABMAN's own readings only: a step counts at ≤20 min apart and under 60 km, which is /api/map/journey's rule. Km, days moved (≥1 km), last moved | yes | — | the hop rule dropped → 2 fail; an FMS fix on the plate and a 35-min gap add nothing |
+| CST3 | Seat: readings occupied of seat readings, km with the seat occupied (absent, never 0, where nothing was measured), last occupied, and CABMAN's Engaged flag disagreeing with the seat | yes | — | `feeds_cabman` §2, §4 (H) |
+| CST4 | Against bookings: completed, `is_booking` (an FMS journey is not one), in the window. Judged on the SEAT readings from 2 min before pickup to 2 min after drop-off; a booking with none is counted apart. Standing still: under 0.5 km through a booking of ≥2 km with ≥2 readings | yes | — | FMS journeys counted → 3 fail; the pad judged on any reading → 2 fail |
+| CST5 | Verdicts, worst first: silent (24 h) · not moving with the car (still through ≥3 and ≥30% of bookings) · sends no seat reading · pad reads nobody · pad misses passengers (<80%, ≥3 bookings) · too few to judge · nothing to check · pad working. A silent unit on an idle car goes last | yes | — | idle silent not sent last → 1 fails; `no_seat` removed → 4 fail |
+| CST6 | `#feeds`: the second table in both skins (unit, movement, seat, seat against bookings, what it shows), cards at phone width; the rules and the departed plates under it; its own request, so a failure costs only this table; the control-bar sentence and the page's source line say what it reads | yes | — | `vehicle_feeds_page` 54/0; the old `feeds.js` → 11 fail |
+| CST7 | Access: the route on the manifest (VEH, carries SYS·VEH, whole SYS, mixed fleet). Counts only, no booking ids, people or coordinates | yes | — | `access_manifest` 17/0 |
+
+Checked against production data before any test was written: the 46 cars'
+readings and bookings for 14–20 Oct, pulled through the API and run through
+`cabmanSeat()`, agree car by car with an independent measurement of the same
+data. That run caught a real bug, a millisecond time passed back through
+`Date.parse`.
+
+The classic skin's frozen `#feeds` moved, because the table is in both
+skins. Removing exactly the new panel (10,961 characters) and its
+source-line row from the new rendering hashes back to the recorded
+`d0565df0fe07e7cf`; it was then re-recorded from the committed tree.

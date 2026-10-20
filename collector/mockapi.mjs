@@ -23,6 +23,7 @@ import { hoursOf } from './api/target_hours.js';
 import { monthViewOf, monthWorkbookOf } from './api/target_month.js';
 import { lowperfOf, watchOf, periodOf, spansOf, HOTEL_MODES as LP_HOTEL } from './api/lowperf.js';
 import { lowperfWorkbookOf, watchWorkbookOf } from './api/lowperf_workbook.js';
+import { cabmanSeat } from './api/feed_routes.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -2523,6 +2524,47 @@ app.get('/api/vehicles/feeds', (_, r) => {
       seat: tally('seat'), fms_seat: tally('fms_seat'), fms: tally('fms') },
     rows,
   });
+});
+
+/* #feeds' CABMAN table: the real cabmanSeat() over a synthetic week, one car
+   for every verdict, so the mock's shape cannot drift from the route's. Q
+   plates, synthetic times relative to now. */
+app.get('/api/vehicles/feeds/cabman', (_, r) => {
+  const now = Date.now();
+  const at = (min) => new Date(now - min * 60e3).toISOString();
+  const fixes = []; const bookings = []; const last = [];
+  /* A car that drives a booking every three hours for a week: the unit moves
+     ~1 km a reading through each one, the seat reads `seat(i)` during it. */
+  const drive = (plate, fleet, { seat = () => true, still = false, n = 40, gapMin = 180, platform = 'uber' } = {}) => {
+    for (let i = 0; i < n; i++) {
+      const start = 10 + i * gapMin;
+      for (let k = 0; k < 4; k++) {
+        fixes.push({ plate, fleet_id: fleet, captured_at: at(start + 15 - k * 5), lat: 25.2 + (still ? 0 : (i + k * 0.25) * 0.009),
+          lng: 55.3, speed: still ? 0 : 40, status: seat(i) ? 'Engaged' : 'Active', seat_occupied: seat(i) });
+      }
+      bookings.push({ plate, platform, requested_at: at(start + 15), ended_at: at(start), distance_km: 6 });
+    }
+    last.push({ plate, fleet_id: fleet, captured_at: at(10), speed: still ? 0 : 40, status: 'Active', seat_occupied: false });
+  };
+  drive('Q10001', 'ecosine');                                  // working
+  drive('Q10002', 'ecosine', { seat: () => false });           // reads nobody
+  drive('Q10003', 'ecosine', { seat: (i) => i % 3 === 0 });    // misses two in three
+  drive('Q20001', 'egari', { still: true, n: 12 });            // standing still through its bookings
+  drive('Q10005', 'ecosine', { n: 2, platform: 'hotel' });     // too few to judge
+  last.push({ plate: 'Q10006', fleet_id: 'ecosine', captured_at: at(60 * 24 * 40), speed: 0, status: 'Active', seat_occupied: false });
+  for (let i = 0; i < 5; i++) bookings.push({ plate: 'Q10006', platform: 'hotel', requested_at: at(300 + i * 600), ended_at: at(280 + i * 600), distance_km: 12 });
+  last.push({ plate: 'Q10007', fleet_id: 'ecosine', captured_at: at(60 * 24 * 200), speed: 0, status: 'Active', seat_occupied: false });
+  for (let i = 0; i < 30; i++) fixes.push({ plate: 'Q10008', fleet_id: 'ecosine', captured_at: at(30 + i * 300), lat: 25.1, lng: 55.2, speed: 0, status: 'Active', seat_occupied: false });
+  last.push({ plate: 'Q10008', fleet_id: 'ecosine', captured_at: at(30), speed: 0, status: 'Active', seat_occupied: false });
+  const members = (fleet, plates) => ({ fleet_id: fleet, value: JSON.stringify({ plates: {
+    ...Object.fromEntries(plates.map((p) => [p, { admitted: true, departed: false }])),
+    ...(fleet === 'ecosine' ? { Q90001: { admitted: true, departed: true, last_seen: at(60 * 24 * 6) },
+      Q90002: { admitted: true, departed: true, last_seen: at(60 * 24 * 6) },
+      Q90003: { admitted: true, departed: true, last_seen: at(60 * 24 * 13) } } : {}) } }) });
+  r.json(cabmanSeat({
+    rosterRows: [members('ecosine', ['Q10001', 'Q10002', 'Q10003', 'Q10005', 'Q10006', 'Q10007', 'Q10008']), members('egari', ['Q20001'])],
+    last, fixes, bookings, ever: [], now: new Date(now).toISOString(), days: 7,
+  }));
 });
 
 /* Handover gaps. Shaped like the real one: a few cars with several
