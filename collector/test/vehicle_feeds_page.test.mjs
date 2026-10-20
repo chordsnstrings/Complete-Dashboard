@@ -176,9 +176,69 @@ for (const [k, re] of [
   ['the driver and phone', /Driver: whoever Uber assigns to the car/],
 ]) check(`states ${k}`, re.test(body));
 /* Those lines ARE the page's provenance. The shell stamps a count of
-   bookings under any page without one, and this page reads no booking. */
+   bookings under any page without one; only the CABMAN table reads bookings,
+   and its own line says so. */
 check('and no generic bookings provenance is stamped under them',
   !/Built from/.test(body) && (await page.$$('#view .srcline')).length === 1, body.slice(-300));
+check('the CABMAN table’s reading of bookings is named among them',
+  /CABMAN table: CABMAN’s own readings for the cars on its list, held against the completed bookings on each car/.test(body));
+
+/* ── the CABMAN table (2026-10-20) ─────────────────────────────────────────
+   The mock runs the route's own cabmanSeat() over a synthetic week with one
+   car per verdict (mockapi.mjs), so what this reads is what the route says. */
+console.log('\nthe CABMAN table — the seat against the car’s movement and bookings');
+const want = await (await fetch(`${base}/api/vehicles/feeds/cabman`)).json();
+const cab = await page.evaluate(() => {
+  const pn = document.querySelector('[data-panel="feeds-cabman"]');
+  return {
+    title: pn?.querySelector('.ph, h2, h3')?.textContent.trim() || '',
+    heads: [...(pn?.querySelectorAll('thead th') || [])].map((t) => t.textContent.trim()),
+    rows: [...(pn?.querySelectorAll('tbody tr') || [])].map((tr) => ({
+      plate: tr.querySelector('td')?.textContent.trim().slice(0, 6),
+      chips: [...tr.querySelectorAll('.pill')].map((x) => [x.textContent.trim(), x.className]),
+      text: tr.innerText,
+    })),
+    text: pn?.innerText || '',
+  };
+});
+check('a panel of its own, under the table above, named for what it holds', /CABMAN — seat sensor and movement, last 7 days/.test(cab.title) || /CABMAN — seat sensor and movement, last 7 days/.test(cab.text),
+  cab.title);
+check('six columns: the car, its unit, its movement, its seat, the seat against bookings, and what it shows',
+  JSON.stringify(cab.heads.map((h) => h.replace(/\s+/g, ' '))) === JSON.stringify(['Vehicle', 'CABMAN unit', 'Movement, 7 days', 'Seat sensor', 'Seat against bookings', 'What it shows']),
+  JSON.stringify(cab.heads));
+check('a row per car on CABMAN’s list, in the route’s order: the cars to look at first',
+  JSON.stringify(cab.rows.map((x) => x.plate)) === JSON.stringify(want.rows.map((x) => x.plate)), JSON.stringify(cab.rows.map((x) => x.plate)));
+const chipOf = (plate) => (cab.rows.find((x) => x.plate === plate)?.chips || []).map((c) => c[0]);
+check('every verdict carries its word, and the bad ones the verdict red: unit silent, not moving with the car, reads nobody, misses passengers',
+  chipOf('Q10006').includes('unit silent') && chipOf('Q20001').includes('not moving with the car')
+  && chipOf('Q10002').includes('pad reads nobody') && chipOf('Q10003').includes('pad misses passengers')
+  && chipOf('Q10001').includes('pad working')
+  && cab.rows.find((x) => x.plate === 'Q10002').chips.some(([w, c]) => w === 'pad reads nobody' && /\bbad\b/.test(c)),
+  JSON.stringify(cab.rows.map((x) => [x.plate, x.chips])));
+const rowOf = (plate) => cab.rows.find((x) => x.plate === plate)?.text || '';
+check('a working pad: the seat occupied during 40 of 40 bookings, with the kilometres it drove and the share with a passenger',
+  /occupied during 40 of 40 bookings \(100%\)/.test(rowOf('Q10001')) && /30 km/.test(rowOf('Q10001'))
+  && /30 km with the seat occupied \(100% of km\)/.test(rowOf('Q10001')), rowOf('Q10001'));
+check('a pad reading nobody says so in the route’s words', /never read occupied during any of 40 bookings — the pad is not reporting passengers/i.test(rowOf('Q10002')),
+  rowOf('Q10002'));
+check('a silent unit names its last reading and the bookings the car did without it',
+  /not receiving/i.test(rowOf('Q10006')) && /last reading/.test(rowOf('Q10006')) && /while the car completed 5 bookings since its last reading/.test(rowOf('Q10006')),
+  rowOf('Q10006'));
+check('a unit that never moved says "did not move", not a distance', /did not move/.test(rowOf('Q20001')), rowOf('Q20001'));
+check('under the table: the plates CABMAN stopped listing, counted, and whether any was ours',
+  /Not in the table: 3 plates CABMAN has stopped listing/.test(cab.text) && /Not one of them ever had a booking with either fleet/.test(cab.text),
+  cab.text.slice(-900));
+check('and the rules it judges by: movement on CABMAN’s own readings, the trip flag no second witness, the booking span, the thresholds',
+  /Movement: CABMAN’s own readings that carry a position, never another tracker’s/.test(cab.text) && /Engaged, is the same pad’s state/.test(cab.text)
+  && /2 minutes before the booking was requested — never before the previous booking’s drop-off — to 2 minutes after drop-off/.test(cab.text)
+  && /working at 80% or more/.test(cab.text) && /2 km and 10 minutes or more/.test(cab.text) && /A day is 24 hours counted back from now/.test(cab.text),
+  cab.text.slice(-900));
+check('a unit that said nothing through its bookings is a red verdict of its own, not "nothing to check against"',
+  chipOf('Q10009').includes('not reporting during bookings') && /4 bookings in 7 days and no seat reading fell inside any of them/.test(rowOf('Q10009')),
+  rowOf('Q10009'));
+check('the headline names both totals: the bookings completed and those with a seat reading inside',
+  /of \d+ completed bookings, \d+ had a seat reading inside, and the seat read occupied during \d+ of those/.test(cab.text), cab.text.slice(0, 400));
+check('still no page error with both tables drawn', errs.length === 0, errs.join(' | '));
 
 await browser.close();
 srv.close();

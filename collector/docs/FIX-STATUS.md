@@ -4966,3 +4966,66 @@ patterns — on the page, in Excel and in the printout.
 | LPG7 | Excel: both averages and the reference rows on both grid sheets; sixteen more columns on Below target; new sheets Day detail (a row a driver a day), Why below target, Weekdays, Hours; the watch list's file gains Day detail | yes | — | `lowperf` §5 and §8 read the files back |
 | LPG8 | Access: every new field classed on the manifest — times, hours on jobs, km, trips and bookings, platforms, hours by hour BK; abandoned, declined and Uber online COND; the day's car VEH; averages, AED an hour and weekday shares EARN; the medians and causes as the measure they are | yes | — | `rows[].days[].first` left off the manifest → 1 fails |
 | LPG9 | Phone: the count of each cause at the top; per person both averages a day and their causes in words | yes | — | rendered |
+| LPG10 | The grid's fares to the fils (ruling 2): the day cells, both row averages, the rows under the head and the key, by `fils()` — the figure alone, because the row ("Asked of each, AED") or the switch names the currency. The opened driver, the phone and Excel already printed the fils; only the grid rounded to whole dirhams (2026-10-20) | yes | — | `arkiv_fils` on `e542bdb`: "AED 457 457 457…" → 1 fails, alone and in the full run; `lowperf` §8 now asks for `106.67` (2,240 ÷ 21) where it asked for `107` → the rounded grid fails 1 |
+| LPG11 | The printed grid fits a landscape A4, however many days: `fitGrids()` measures it before a print under the print rule's own type and padding (`.lp-measure`), at its own width, and sets `--lp-fit`, which only `@media print` reads as `zoom`. On a real PDF of the mock: 19 days at 0.872 (1,206 px on 1,054), all of September at 0.593 — whole dirhams had fitted 19 days to the pixel and cut a 31-day month's averages off the right edge. The head's row labels wrap in print instead of being cut to "ASKED OF EACH, A…" (2026-10-20) | yes | — | `lowperf` §7: the zoom left out of the print rule → 1 fails; the head labels left to be cut → 1 fails |
+
+`arkiv_people` "#low: the grid has a row per person and a cell per day" read
+21 cells a row against 19 days on `e542bdb` (`[39,19]`): the two averages
+LPG1 adds are cells too. It now counts the days and the averages apart and
+asks for both — a row without its averages fails it. Both LPG failures were
+found by a full suite the 2026-10-19 session started and never read (the
+wrapper exited 0; the container was replaced before anyone looked) — see
+`docs/HANDOFF.md`.
+
+## CST — #feeds: CABMAN's seat sensor held against movement and bookings (2026-10-20)
+
+The operator, over `#feeds`: "since there are some discrepancies let's add a
+separate seat sensor table for cabman as well where we can see seat sensor
+data and cabman movement data. go through the api and check and audit, plan
+execute." The audit is in `docs/COVERAGE.md`, "CABMAN's seat pad held
+against movement and bookings".
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| CST1 | `GET /api/vehicles/feeds/cabman` (api/feed_routes.js `cabmanSeat`). One row per car on CABMAN's roster, members only, both fleets; with no roster written, the cars with a CABMAN reading in the window, and the answer says so. The plates CABMAN stopped listing are counted under the table, with whether any ever had a booking | yes | — | `feeds_cabman` §1, §5, §6 |
+| CST2 | Movement on CABMAN's own readings only: a step counts at ≤20 min apart and under 60 km, which is /api/map/journey's rule. Km, days moved (≥1 km), last moved | yes | — | the hop rule dropped → 2 fail; an FMS fix on the plate and a 35-min gap add nothing |
+| CST3 | Seat: readings occupied of seat readings, km with the seat occupied (absent, never 0, where nothing was measured), last occupied, and CABMAN's Engaged flag disagreeing with the seat | yes | — | `feeds_cabman` §2, §4 (H) |
+| CST4 | Against bookings: completed, `is_booking` (an FMS journey is not one), in the window. Judged on the SEAT readings from 2 min before pickup to 2 min after drop-off; a booking with none is counted apart. Standing still: under 0.5 km through a booking of ≥2 km with ≥2 readings | yes | — | FMS journeys counted → 3 fail; the pad judged on any reading → 2 fail |
+| CST5 | Verdicts, worst first: silent (24 h) · not moving with the car (still through ≥3 and ≥30% of bookings) · sends no seat reading · pad reads nobody · pad misses passengers (<80%, ≥3 bookings) · too few to judge · nothing to check · pad working. A silent unit on an idle car goes last | yes | — | idle silent not sent last → 1 fails; `no_seat` removed → 4 fail |
+| CST6 | `#feeds`: the second table in both skins (unit, movement, seat, seat against bookings, what it shows), cards at phone width; the rules and the departed plates under it; its own request, so a failure costs only this table; the control-bar sentence and the page's source line say what it reads | yes | — | `vehicle_feeds_page` 54/0; the old `feeds.js` → 11 fail |
+| CST7 | Access: the route on the manifest (VEH, carries SYS·VEH, whole SYS, mixed fleet). Counts only, no booking ids, people or coordinates | yes | — | `access_manifest` 17/0 |
+
+Checked against production data before any test was written: the 46 cars'
+readings and bookings for 14–20 Oct, pulled through the API and run through
+`cabmanSeat()`, agree car by car with an independent measurement of the same
+data. That run caught a real bug, a millisecond time passed back through
+`Date.parse`.
+
+**The independent review (2026-10-20) found eleven defects in `1384b0c`,**
+five of them sentences that were false for inputs the code accepted. All are
+fixed, and each has its own case in `feeds_cabman` §8 that fails when its fix
+is reverted. `feeds_cabman` is 38/0, and all nine mutations are caught.
+
+| # | defect | fixed by |
+|---|---|---|
+| R1 | "moved on 8 of 7 days": a rolling 7×24 h window touches 8 Dubai dates at any hour but midnight | days are 24-hour buckets counted back from now; the page says "of the last 7 days" |
+| R2 | a car parked since yesterday was ranked first as "silent, while the car completed 20 bookings" — all of them before it went quiet | the clause and the rank count only bookings after the last reading |
+| R3 | "standing still through 3 of 0 bookings": the denominator counted seat readings | standing still is the share of the bookings it was measured on |
+| R4 | no measured step printed "did not move" and "0 km" | absent with the reason (e.g. "no two readings within 20 minutes"); passenger km absent with no seat step |
+| R5 | a unit reporting in bursts (readings 26 min apart) read "standing still … another car" | judged only with measured steps and a small first-to-last displacement — and, found running the fix over production, only on bookings of ≥10 min with ≥3 readings (a looser rule named L78465, a working car) |
+| R6 | a car whose unit said nothing through its bookings read "nothing to check against" | its own red verdict, "not reporting during bookings" |
+| R7 | a reading with no position became (0, 0) and cost the real steps around it | no position is skipped |
+| R8 | a plate on two rosters was two rows; a car moved between fleets was in the table and counted as gone | members deduped by plate; a member anywhere is never departed |
+| R9 | the headline said "of 752 completed bookings" for the 752 with a seat reading (781 completed) | it names both |
+| R10 | the span said "before pickup" for a request time, and a chained Uber request borrowed the last ride's passenger | worded as requested; the span starts no earlier than the previous drop-off |
+| R11 | the few-bookings sentence said "CABMAN reading" for a seat reading; the rules omitted thresholds; header figures carried the FMS-contaminated count; "1 readings"; an empty-list note that was not always true | each corrected |
+
+On the production week after the fixes, the verdicts are: 14 silent, 1 not
+moving with the car (L45243, 13 of 36), 6 pads reading nobody, 3 missing
+passengers, 1 too few, 5 with nothing to check, and 16 working. The seat was
+occupied during 512 of 752 bookings with a seat reading inside.
+
+The classic skin's frozen `#feeds` moved, because the table is in both
+skins. Removing exactly the new panel (10,961 characters) and its
+source-line row from the new rendering hashes back to the recorded
+`d0565df0fe07e7cf`; it was then re-recorded from the committed tree.

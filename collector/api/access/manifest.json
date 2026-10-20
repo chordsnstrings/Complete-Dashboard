@@ -7305,6 +7305,25 @@
  },
  {
   "method": "GET",
+  "path": "/api/vehicles/feeds/cabman",
+  "subject": "VEH",
+  "carries": [
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [],
+  "whole": [
+   "SYS"
+  ],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/feed_routes.js feedRoutes(), the second handler; cabmanSeat() builds the answer. One row per plate on CABMAN's roster (source_state 'cabman'/'roster', members only), both fleets, no fleet predicate. Per car: the newest CABMAN reading's time, status, speed and ignition (no coordinates); readings, seat readings and occupied counts over 7 days; km measured along CABMAN's own fixes; days moved; and counts of the completed bookings on the car (trip_norm, is_booking) with how many had the seat occupied inside them \u2014 counts only, no booking ids, times, people or places. departed{} counts the plates CABMAN stopped listing and how many ever had a booking. Classed as the feeds list beside it: the vehicle's device health (VEH) and the system's feed state (SYS), whole on SYS."
+ },
+ {
+  "method": "GET",
   "path": "/api/vehicles/handover",
   "subject": "VEH",
   "carries": [

@@ -48,7 +48,7 @@
    the first PDF was the shell's header and the credentials banner stretched
    over a whole page, the list starting on the second. */
 import { api, alive, currentGen, href } from './data.js';
-import { el, esc, money, countOf, sourceLabel, panel, secHead, loading, contract } from './ui.js';
+import { el, esc, money, fils, countOf, sourceLabel, panel, secHead, loading, contract } from './ui.js';
 import { fmt } from './charts.js';
 import { withheldSentence } from './access_model.js';
 import { downloadFile } from './target.js';
@@ -107,10 +107,32 @@ export function landscape(host) {
     document.getElementById(PRINT_ID)?.remove();
     window.removeEventListener('hashchange', later);
     window.removeEventListener('beforeprint', off);
+    window.removeEventListener('beforeprint', fit);
   };
   const later = () => setTimeout(off, 250);
+  const fit = () => fitGrids(host);
   window.addEventListener('hashchange', later);
   window.addEventListener('beforeprint', off);
+  window.addEventListener('beforeprint', fit);
+}
+/* The grid fitted to the printed page's width, however many days it holds.
+   ─────────────────────────────────────────────────────────────────────────
+   The averages close each row, on the right — the first thing a page too
+   narrow cuts off. With the fares to the fils the mock's 22-day grid printed
+   1,206 px wide on a landscape A4 of 1,054 px (297 mm less two 9 mm margins
+   at 96 px an inch); in whole dirhams it had fitted to the pixel, so a
+   31-day month overflowed even then. Before a print the grid is measured
+   under the print rule's own type and padding (.lp-measure, app.css), at
+   its own width rather than the frame's it stretches to, and given the zoom
+   that brings it inside the page, as --lp-fit, which only the print rule
+   reads — the screen never changes. */
+export const PRINT_W = Math.floor(((297 - 2 * 9) / 25.4) * 96);
+export const fitOf = (w, page = PRINT_W) => (w > page ? Math.floor((page / w) * 1000) / 1000 : 1);
+export function fitGrids(host) {
+  if (!host?.isConnected) return;
+  document.body.classList.add('lp-measure');
+  for (const g of host.querySelectorAll('.lp-grid')) g.style.setProperty('--lp-fit', String(fitOf(g.scrollWidth)));
+  document.body.classList.remove('lp-measure');
 }
 /* Today in Dubai, by the shared clock rule (./tz.js), never the UTC day. */
 const dubaiToday = () => dubaiDay(new Date());
@@ -295,6 +317,15 @@ export const GRID_METRICS = [
   { key: 'hours', label: 'Hours on jobs' },
   { key: 'start', label: 'First request' },
 ];
+/* The grid's fares are to the fils, like every other money figure (ruling 2).
+   ─────────────────────────────────────────────────────────────────────────
+   The day cells, the row averages and the rows under the head printed whole
+   dirhams — fmt(Math.round(x)) — while the opened driver, the phone and the
+   Excel sheets printed the same figures with their fils. LPG put "Asked of
+   each, AED" at the head of a row of those rounded figures, and arkiv_fils
+   read "AED 457 457 457…" off the rendered page on e542bdb: 79 passed, 1
+   failed, alone and in the full run. The cells print the figure alone, by
+   fils(), because the row or the switch already names the currency. */
 export function cellText(c, metric = 'fares') {
   const k = cellClass(c);
   if (k === 'lp-c-off') return 'off';
@@ -303,7 +334,7 @@ export function cellText(c, metric = 'fares') {
   if (metric === 'trips') return fmt(c.trips);
   if (metric === 'hours') return c.job_min == null ? '—' : fmt(Math.round(c.job_min / 6) / 10, 1);
   if (metric === 'start') return hhmm(c.first);
-  return c.fares == null ? '—' : fmt(Math.round(c.fares));
+  return c.fares == null ? '—' : fils(c.fares);
 }
 /** The days a row's averages are taken over: counted, active, and (for the
     second) driven — the same days the gross and the target are counted on. */
@@ -324,7 +355,7 @@ export function rowAverages(r, metric = 'fares') {
     return ['', f.length ? hhmm(f[Math.floor((f.length - 1) / 2)]) : '—'];
   }
   if (metric === 'pct') return [r.avg_active_pct, r.avg_driven_pct].map((x) => (x == null ? '—' : `${fmt(x, 1)}%`));
-  return [r.avg_active, r.avg_driven].map((x) => (x == null ? '—' : fmt(Math.round(x))));
+  return [r.avg_active, r.avg_driven].map((x) => (x == null ? '—' : fils(x)));
 }
 /** Under the fares averages, each as a share of the target a day. */
 const avgPct = (r, metric) => (metric !== 'fares' ? ['', ''] : [r.avg_active_pct, r.avg_driven_pct]
@@ -360,7 +391,7 @@ export function gridHtml(v, { saved = null, metric = 'fares' } = {}) {
     if (metric === 'start') return hhmm(Math.round(x));
     if (metric === 'pct') return `${fmt(Math.round(x))}%`;
     if (metric === 'trips' || metric === 'hours') return fmt(Math.round(x * 10) / 10, 1);
-    return fmt(Math.round(x));
+    return fils(x);
   };
   const refEnd = (who) => {
     const xs = days.filter((d) => d.counted).map((d) => refOf(d, who)).filter((x) => x != null);
@@ -394,8 +425,8 @@ export function gridHtml(v, { saved = null, metric = 'fares' } = {}) {
       }).join('')
       + `<td class="lp-avg">${esc(avgs[0])}${pcs[0]}</td><td class="lp-avg">${esc(avgs[1])}${pcs[1]}</td></tr>`;
   }).join('');
-  const key = '<p class="lp-key"><span class="lp-k lp-c-over">812</span>at or above that day’s target'
-    + '<span class="lp-k lp-c-mid">402</span>half to target<span class="lp-k lp-c-low">96</span>under half'
+  const key = '<p class="lp-key"><span class="lp-k lp-c-over">812.40</span>at or above that day’s target'
+    + '<span class="lp-k lp-c-mid">402.15</span>half to target<span class="lp-k lp-c-low">96.80</span>under half'
     + '<span class="lp-k lp-c-off">off</span>active and did not drive<span class="lp-k lp-c-blank"></span>not active — the day asked nothing'
     + (saved ? '<span class="lp-k lp-k-saved"></span>the day the list was saved' : '')
     + '<span>The shade is always the day’s fares against its target; a figure opens that driver’s day.</span></p>';

@@ -1002,7 +1002,9 @@ if (want('performers')) {
         cells,
         bands: [...document.querySelectorAll('#view .lp-t tr.lp-band th')].map((t) => t.textContent.trim()),
         rows: document.querySelectorAll('#view .lp-t tbody tr[data-pk]').length,
-        grid: [...document.querySelectorAll('#view .lp-grid tbody tr')].map((tr) => tr.querySelectorAll('td').length),
+        /* A row is a cell per day of the period, then its two averages (LPG,
+           2026-10-19) — counted apart, or the averages read as two more days. */
+        grid: [...document.querySelectorAll('#view .lp-grid tbody tr')].map((tr) => [tr.querySelectorAll('td:not(.lp-avg)').length, tr.querySelectorAll('td.lp-avg').length]),
         off: document.querySelectorAll('#view .lp-grid td.lp-c-off').length,
         print: !!document.getElementById('lp-print'),
       };
@@ -1014,8 +1016,8 @@ if (want('performers')) {
     check('#low: four cells', r.cells.length === 4, JSON.stringify(r.cells.map((c) => c[0])));
     check('#low: every person below target listed once, grouped by how far below', r.rows === rows.length
       && r.bands.length === new Set(rows.map((x) => x.band)).size, JSON.stringify([r.rows, rows.length, r.bands]));
-    check('#low: the grid has a row per person and a cell per day of the period', r.grid.length === rows.length
-      && r.grid.every((n) => n === d.days.length), JSON.stringify([r.grid.length, d.days.length]));
+    check('#low: the grid has a row per person, a cell per day of the period and its two averages', r.grid.length === rows.length
+      && r.grid.every(([n, a]) => n === d.days.length && a === 2), JSON.stringify([r.grid.length, d.days.length, r.grid[0]]));
     check('#low: a day active and not driven reads "off" — as many as the answer has', r.off
       === rows.reduce((a, x) => a + x.days.filter((c) => c.share != null && !c.trips && !c.fares).length, 0), String(r.off));
     check('#low: a landscape print rule while the page is open', r.print);

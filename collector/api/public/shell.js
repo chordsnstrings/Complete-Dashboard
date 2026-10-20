@@ -229,7 +229,7 @@ export const APPLIES_WHY = {
   map: 'it has its own car-and-day picker',
   segment: 'it is one occupancy segment, addressed by plate and time',
   trip: 'it is one booking, addressed by the provider’s own id',
-  feeds: 'it is every car Uber lists as active now, judged on the last day',
+  feeds: 'it is every car Uber lists as active now, judged on the last day — and under it every car on CABMAN\u2019s list, over the last 7 days',
   /* The first page (./targetpage.js): the month's target is set for the
      calendar month and both fleets together, and the hours are today's. */
   target: 'it is this month and today against the target set for both fleets on every channel',

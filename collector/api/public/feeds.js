@@ -84,9 +84,144 @@ function phoneCell(r) {
   }).join('<br>');
 }
 
+/* ── CABMAN: the seat sensor against the car's own movement and bookings ──
+   The operator, 2026-10-20: "a separate seat sensor table for cabman … where
+   we can see seat sensor data and cabman movement data". The table above says
+   whether a reading ARRIVED; this one says whether it can be believed, by the
+   two things the pad cannot influence — where CABMAN says the car went, and
+   whether a booking says somebody was aboard. Every rule and threshold is
+   decided in api/feed_routes.js (cabmanSeat) and printed under the table. */
+const CAB_CHIP = {
+  silent: { word: 'unit silent', bad: true },
+  elsewhere: { word: 'not moving with the car', bad: true },
+  no_seat: { word: 'sends no seat reading', bad: true },
+  unreported: { word: 'not reporting during bookings', bad: true },
+  pad_dead: { word: 'pad reads nobody', bad: true },
+  pad_misses: { word: 'pad misses passengers', bad: true },
+  few: { word: 'too few to judge', bad: false },
+  no_bookings: { word: 'nothing to check against', bad: false },
+  ok: { word: 'pad working', bad: false, good: true },
+};
+const pct1 = (x) => (x == null ? '' : ` (${fmt(x, 1)}%)`);
+const cap1 = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+function cabChip(r) {
+  const c = CAB_CHIP[r.verdict] || { word: r.verdict };
+  if (contract()) {
+    return c.bad ? `<span class="pill" style="color:var(--sem-neg)">${esc(c.word)}</span>` : pill(c.word);
+  }
+  return pill(c.word, c.bad ? 'bad' : c.good ? 'ok' : null);
+}
+
+function cabUnitCell(r, hours) {
+  const chip = contract()
+    ? (r.receiving ? pill('receiving') : '<span class="pill" style="color:var(--sem-neg)">not receiving</span>')
+    : r.receiving ? pill('receiving', 'ok') : pill('not receiving', 'bad');
+  if (!r.last_at) return `${chip}<div class="dim">never sent a reading</div>`;
+  /* What the unit said at its newest reading: CABMAN's own flag, and whether
+     the car was moving. "Engaged" is the seat pad's own state (see the rules
+     below), so it is named as CABMAN's flag and nothing more. */
+  const flag = r.last_status ? `CABMAN flag ${r.last_status}` : null;
+  const moving = r.last_speed == null ? null : Number(r.last_speed) > 0 ? `moving, ${fmt(r.last_speed)} km/h` : 'standing';
+  return `${chip}<div class="dim">last reading ${esc(dtStr(r.last_at))}</div>`
+    + `${[flag, moving].filter(Boolean).length ? `<div class="dim">${esc([flag, moving].filter(Boolean).join(' · '))}</div>` : ''}`
+    + `${!r.receiving ? `<div class="dim">no reading in the last ${esc(String(hours))} hours</div>` : ''}`;
+}
+
+function cabMoveCell(r, days) {
+  /* Absent with the route's reason: no measured step is not a car that did
+     not move. */
+  if (r.km == null) return `<span class="ent-off">${esc(r.km_reason || `no CABMAN reading in ${days} days`)}</span>`;
+  if (!r.km) return `did not move<div class="dim">under 0.1 km over ${esc(countOf(r.steps, 'measured step'))}</div>`;
+  return `${fmt(r.km, 1)} km`
+    + `<div class="dim">moved on ${fmt(r.days_moved)} of the last ${fmt(days)} days</div>`
+    + `${r.last_moved_at ? `<div class="dim">last moved ${esc(dtStr(r.last_moved_at))}</div>` : ''}`;
+}
+
+function cabSeatCell(r, days) {
+  if (!r.seat_readings) return `<span class="ent-off">no seat reading in ${esc(String(days))} days</span>`;
+  const head = r.occupied_readings
+    ? `occupied on ${fmt(r.occupied_readings)} of ${fmt(r.seat_readings)} readings${pct1(r.occupied_pct)}`
+    : `never occupied — ${countOf(r.seat_readings, 'reading')}, all empty`;
+  const km = r.occupied_km == null ? ''
+    : `<div class="dim">${fmt(r.occupied_km, 1)} km with the seat occupied${r.occupied_km_pct == null ? '' : ` (${fmt(r.occupied_km_pct, 1)}% of km)`}</div>`;
+  const last = r.last_occupied_at ? `<div class="dim">last occupied ${esc(dtStr(r.last_occupied_at))}</div>` : '';
+  return `${head}${km}${last}`;
+}
+
+function cabBookCell(r, days) {
+  const b = r.bookings || {};
+  if (!b.total) return `<span class="ent-off">no completed booking in ${esc(String(days))} days</span>`;
+  const ch = Object.entries(b.platforms || {}).sort((x, y) => y[1] - x[1])
+    .map(([p, n]) => `${sourceLabel(p)} ${fmt(n)}`).join(' · ');
+  const head = b.read
+    ? `occupied during ${fmt(b.seat_seen)} of ${fmt(b.read)} bookings${pct1(b.seat_pct)}`
+    : `${countOf(b.total, 'booking')}, none with a seat reading inside`;
+  return `${head}<div class="dim">${esc(ch)}</div>`
+    + `${b.read && b.no_reading ? `<div class="dim">${esc(countOf(b.no_reading, 'booking'))} with no seat reading inside</div>` : ''}`
+    + `${b.standing_still ? `<div class="dim">standing still through ${esc(countOf(b.standing_still, 'booking'))}</div>` : ''}`;
+}
+
+function renderCabman(host, d) {
+  const rows = d.rows || [];
+  const t = d.totals || {};
+  const v = t.verdicts || {};
+  const days = d.days;
+  const counts = [
+    v.silent ? `${fmt(v.silent)} silent` : null,
+    v.elsewhere ? `${fmt(v.elsewhere)} not moving with the car` : null,
+    v.no_seat ? `${fmt(v.no_seat)} sending no seat reading` : null,
+    v.unreported ? `${fmt(v.unreported)} not reporting during bookings` : null,
+    v.pad_dead ? `${fmt(v.pad_dead)} reading nobody` : null,
+    v.pad_misses ? `${fmt(v.pad_misses)} missing passengers` : null,
+    v.ok ? `${fmt(v.ok)} working` : null,
+  ].filter(Boolean);
+  const p = panel(`CABMAN — seat sensor and movement, last ${days} days`,
+    `${countOf(rows.length, 'car')} on CABMAN’s list${counts.length ? ` · ${counts.join(' · ')}` : ''}. `
+    + (t.bookings_read
+      ? `Across them, of ${fmt(t.bookings)} completed bookings, ${fmt(t.bookings_read)} had a seat reading inside, and the seat read occupied during ${fmt(t.bookings_seat_seen)} of those${pct1(Math.round((1000 * t.bookings_seat_seen) / t.bookings_read) / 10)}. `
+      : '')
+    + `Readings to ${dtStr(d.as_of)}. The cars to look at come first.`, 'feeds-cabman');
+  host.append(p.panel);
+  if (d.roster && !d.roster.known && d.roster.basis_reason) p.body.append(note(cap1(d.roster.basis_reason), 'warn'));
+  if (!rows.length) {
+    p.body.append(note(d.roster?.known ? 'CABMAN’s list holds no car of either fleet.'
+      : `CABMAN’s list has not been read, and no CABMAN reading arrived in the last ${days} days.`, 'warn'));
+  } else {
+    p.body.append(tableFrom(rows, [
+      { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.vehicle_page ? r.plate : null, r.plate)
+        + `<div class="dim">${esc(sourceLabel(r.fleet_id))}</div>` },
+      { label: 'CABMAN unit', key: 'receiving', sortValue: (r) => (r.receiving ? 1 : 0), render: (r) => cabUnitCell(r, d.window_hours) },
+      { label: `Movement, ${days} days`, key: 'km', sortValue: (r) => r.km, render: (r) => cabMoveCell(r, days) },
+      { label: 'Seat sensor', key: 'occupied_readings', sortValue: (r) => r.occupied_pct, render: (r) => cabSeatCell(r, days) },
+      { label: 'Seat against bookings', key: 'bookings', sortValue: (r) => r.bookings?.seat_pct ?? null, render: (r) => cabBookCell(r, days) },
+      { label: 'What it shows', key: 'verdict', sortValue: (r) => r.rank, render: (r) => `${cabChip(r)}<div>${esc(cap1(r.verdict_text))}</div>`
+        + (r.notes || []).map((n) => `<div class="dim">${esc(cap1(n))}</div>`).join('') },
+    ], { sortable: true, sortId: 'feeds-cabman', cards: true, cardLead: 'plate' }));
+  }
+  /* The plates CABMAN stopped listing — counted, with the check that says
+     whether any of them was ever ours, never silently dropped. */
+  const dep = d.departed || {};
+  const when = (dep.groups || []).slice(0, 3).map((g) => `${fmt(g.plates)} last listed ${g.day ? dayStr(`${g.day}T12:00:00`) : 'on an unrecorded day'}`);
+  const r = d.rules || {};
+  const lines = [
+    dep.plates ? ['Not in the table', `${countOf(dep.plates, 'plate')} CABMAN has stopped listing (${andList(when)}${(dep.groups || []).length > 3 ? ', and others' : ''}). `
+      + (dep.with_bookings ? `${fmt(dep.with_bookings)} of them did have bookings with us — those are worth a look on Vehicles.`
+        : 'Not one of them ever had a booking with either fleet: they are other companies’ cars CABMAN used to send.')] : null,
+    ['Movement', `CABMAN’s own readings that carry a position, never another tracker’s: a step counts when the readings are at most ${r.gap_min} minutes apart and under ${r.hop_km} km apart. With no such step nothing is measured, and the cell says why. A day is 24 hours counted back from now, and counts as moved at 1 km.`],
+    ['Seat sensor', 'CABMAN’s seat pad, a passenger count stored as occupied (1 or more) or empty. CABMAN’s own trip flag, Engaged, is the same pad’s state, so it is no second witness — the bookings and the movement are.'],
+    ['Against bookings', `every completed booking on the car (Uber, Bolt, Yango, hotel — an FMS journey is not a booking), checked on the CABMAN readings from ${r.pad_min} minutes before the booking was requested — never before the previous booking’s drop-off — to ${r.pad_min} minutes after drop-off. A booking with no seat reading inside says nothing about the pad and is counted apart.`],
+    ['What it shows', `the pad is judged on the bookings with a seat reading inside, only from ${fmt(r.min_bookings)} of them, and is working at ${fmt(Math.round((r.ok_share || 0) * 100))}% or more. A booking of ${r.trip_km} km and ${r.still_min} minutes or more counts as standing still when the unit’s readings inside it — at least ${r.still_readings} — moved under ${r.still_km} km; through ${fmt(r.min_bookings)} or more such bookings and ${fmt(Math.round((r.elsewhere_share || 0) * 100))}% of them, it is the unit, not the car. Silent is no reading in ${d.window_hours} hours.`],
+  ].filter(Boolean);
+  p.body.append(el('div', 'cap', lines.map(([k, x]) => `<div><b>${esc(k)}:</b> ${esc(x)}</div>`).join('')));
+}
+
 export async function renderFeeds(root) {
   root.innerHTML = '';
   loading(root);
+  /* Asked at the same time as the table above, and settled on its own: a
+     failure here costs this table, never the one above it. */
+  const cabP = api('/api/vehicles/feeds/cabman').then((x) => ({ x }), (e) => ({ e }));
   let d;
   try { d = await api('/api/vehicles/feeds'); } catch (e) {
     root.innerHTML = '';
@@ -193,15 +328,22 @@ export async function renderFeeds(root) {
     ], { sortable: true, sortId: 'feeds', cards: true, cardLead: 'plate' }));
   }
 
+  const cab = await cabP;
+  if (cab.x) renderCabman(root, cab.x);
+  else if (cab.e?.name === 'WithheldError') {
+    root.append(closedBlock({ view: 'feeds', title: 'The CABMAN table is not shown to your role', detail: cab.e.message }));
+  } else root.append(note(`The CABMAN table could not be read: ${cab.e?.message || 'no answer'}`, 'err'));
+
   /* One short line per rule. The fleets holding each account come from the
      collector's own configuration, so these lines cannot drift from it.
 
      They are also THIS PAGE'S SOURCE LINE, and carry .srcline for that
      reason. The shell stamps every page that has none with "Built from the
-     whole record — Uber N · Hotel N …", a count of bookings — and not one
-     booking is read here: the page is built from Uber's vehicle list and two
-     tracker feeds, which is exactly what these lines name. A second, generic
-     provenance under them would attribute this table to the wrong things. */
+     whole record — Uber N · Hotel N …", a count of bookings — and the page
+     is built from Uber's vehicle list and two tracker feeds, which is exactly
+     what these lines name. Only the CABMAN table reads bookings, a week of
+     them for the cars on its list, and its line says so. A second, generic
+     provenance under them would attribute these tables to the wrong things. */
   const names = (list) => andList((list || []).map((f) => sourceLabel(f)));
   const rules = [
     ['Active on Uber', 'Uber’s own vehicle list marks the car ACTIVE. It is read every 30 minutes, for both fleets.'],
@@ -210,6 +352,7 @@ export async function renderFeeds(root) {
     ['FMS data', `InfoTrack's live telematics, with an account for ${names(d.accounts?.fms) || 'no fleet'}.`],
     ['Receiving', `a reading in the last ${hours} hours. Trackers report every few minutes while driving but go quiet for hours when parked, so a shorter window would turn parked cars red.`],
     ['Matched by', 'the plate, as every feed stores it: upper case, no spaces or dashes.'],
+    ['CABMAN table', 'CABMAN\u2019s own readings for the cars on its list, held against the completed bookings on each car — the one place on this page a booking is read.'],
     ['Driver', 'whoever Uber assigns to the car in that list, or where it assigns nobody, whoever drove it most on the latest day with a trip. The phone is from their roster record.'],
   ];
   root.append(el('div', 'cap srcline',

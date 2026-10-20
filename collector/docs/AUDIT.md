@@ -2696,3 +2696,49 @@ both skins, and the print as shown and with every driver opened:
 To repeat: the mock as above, `node lp_inter.mjs` (open the first driver,
 click each figure, screenshot the frame) and print with `emulateMedia('print')`
 before and after clicking every `[data-open]`.
+
+### The grid to the fils, and fitted to the printed page — 2026-10-20 (FIX-STATUS LPG10, LPG11)
+
+Against the mock (`PORT=8099 node mockapi.mjs`), Arkiv, after the fares in
+the grid took their fils:
+
+- 1440 wide: the grid is 1,368 px in a 1,368 px frame. The two averages are
+  on screen with no sideways scroll, and every row label reads in full
+  ("ASKED OF EACH, AED").
+- 390 wide: the grid is 1,250 px in a 354 px frame (795 px in whole
+  dirhams). The frame scrolls, as it did before; the page itself does not.
+- Print, as a real PDF (`page.pdf({ preferCSSPageSize: true })` after a
+  dispatched `beforeprint`):
+  - 19 days print at zoom 0.872.
+  - All of September (`#low-performers/2026-09-01..2026-09-30`, 30 days)
+    prints at 0.593, small but whole.
+  - On both, the averages column ends inside the sheet.
+  - The rows under the head repeat on every sheet the grid runs onto.
+  - Without the fit, the 19 days measured 1,206 px on a 1,054 px sheet. In
+    whole dirhams they had fitted to the pixel.
+- Found and fixed: in print the head's row labels were cut to "ASKED OF
+  EACH, A…", losing the only place the unit is named. They now wrap.
+
+To repeat: as above, then `pdftotext -layout` to find the sheet carrying
+"Average a day" and `pdftoppm -r 110` to look at it.
+
+## #feeds — the CABMAN table, seat sensor and movement (2026-10-20)
+
+Against the mock, which runs the route's own `cabmanSeat()` over a synthetic
+week with one car per verdict, on Arkiv at 1440 and 390 wide and Classic at
+1440:
+
+- The panel sits under the table above at all three. It has eight rows, no
+  page error and no sideways scroll; at 390 each car is a card with labelled
+  lines.
+- Found and fixed: the control bar said "judged on the last day", which is
+  not true of a 7-day table, and now names both tables. The page's source
+  line said no booking is read here; it now names the one table that reads
+  bookings.
+- On production data, through the function (not yet rendered on production,
+  which is not deployed): 46 cars. 14 silent, 1 not moving with the car,
+  6 pads reading nobody, 3 missing passengers, 1 too few, 5 with nothing to
+  check, 16 working.
+
+To repeat: `PORT=8099 node mockapi.mjs`, then `#feeds` at 1440 and 390 in
+both skins (`?skin=classic`), screenshot `[data-panel="feeds-cabman"]`.

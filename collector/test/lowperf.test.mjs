@@ -426,6 +426,23 @@ const css = readFileSync('api/public/app.css', 'utf8');
 check('printing is a landscape A4 of this page’s own — a rule it adds while open, never one every page prints under',
   pg.PRINT_CSS === '@media print{@page{size:A4 landscape;margin:9mm}}' && !/@page/.test(css.slice(css.indexOf('── Low performers'))),
   pg.PRINT_CSS);
+/* The grid printed wider than the page once its fares carried their fils
+   (1,206 px on 1,054, the averages cut off the right edge), and a 31-day
+   month overflowed even in whole dirhams. Measured on a real landscape A4 PDF
+   of the mock: 19 days print at 0.872, all of September at 0.593. */
+check('the printed grid fits the landscape page: 297 mm less two 9 mm margins is 1,054 px, a wider grid zoomed down to it, a narrower one left at 1',
+  pg.PRINT_W === 1054 && pg.fitOf(1206) === 0.873 && pg.fitOf(2108) === 0.5 && pg.fitOf(1054) === 1 && pg.fitOf(800) === 1,
+  JSON.stringify([pg.PRINT_W, pg.fitOf(1206), pg.fitOf(2108)]));
+{
+  const pr = css.slice(css.indexOf('@media print', css.indexOf('── Low performers')));
+  const ms = css.slice(css.indexOf('.lp-measure .lp-grid{'), css.indexOf('@media print', css.indexOf('── Low performers')));
+  check('only the print rule reads the fit, and the measure is taken under the print rule’s own type, padding and name column',
+    /\.lp-grid\{zoom:var\(--lp-fit,1\)\}/.test(pr) && !/zoom/.test(css.slice(0, css.indexOf('@media print', css.indexOf('── Low performers'))).slice(css.indexOf('── Low performers')))
+    && /font-size:var\(--t1\)/.test(ms) && /padding:1px 2px/.test(ms) && /max-width:20ch/.test(ms)
+    && /\.lp-grid\{font-size:var\(--t1\)\}/.test(pr) && /\.lp-grid th,\.lp-grid td\{padding:1px 2px\}/.test(pr)
+    && /\.lp-grid thead \.lp-who\{white-space:normal;text-overflow:clip\}/.test(pr) && /thead \.lp-who\{white-space:normal;text-overflow:clip\}/.test(ms),
+    ms.slice(0, 300));
+}
 
 /* ── 8. more granular: the averages, the day in detail, why, when ─────── */
 console.log('\n8. averages, the day in detail, why below target, weekdays and hours');
@@ -482,7 +499,7 @@ check('a rate needs three days driven: two days say nothing about an hour, a tri
 const ref = pg.gridHtml(G);
 check('the grid ends each row in both averages, and carries the day’s asked, their average and everyone else’s under the head',
   /Average a day active/.test(ref) && /Average a day driven/.test(ref) && /Their average, AED/.test(ref) && /Everyone else, AED/.test(ref)
-  && /Asked of each, AED/.test(ref) && />107<small class="tg-under">56%<\/small>/.test(ref), ref.slice(ref.indexOf('Driver X'), ref.indexOf('Driver X') + 2600).slice(-500));
+  && /Asked of each, AED/.test(ref) && />106\.67<small class="tg-under">56%<\/small>/.test(ref), ref.slice(ref.indexOf('Driver X'), ref.indexOf('Driver X') + 2600).slice(-500));
 const refStart = pg.gridHtml(G, { metric: 'start' });
 check('the cell switch: the first request in the cells and the rows under the head, never fares against a start time', />10:00</.test(refStart)
   && /Everyone else, start<\/th><td[^>]*>07:00</.test(refStart) && !/Asked of each/.test(refStart) && !/Everyone else, AED/.test(refStart), refStart.slice(0, 400));
