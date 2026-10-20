@@ -459,6 +459,8 @@ a time:
 
 So the two LPG failures are real, not caused by concurrency.
 `access_pages` printed nothing again, as expected with no Postgres.
+`arkiv_classic_frozen` failed again, 147/6, with the same six hashes as the
+full run, so that failure is pre-existing.
 
 The evening-UTC and month-boundary flakes (`payout_scope`,
 `phone_today_only`, `forecast_yoy`) passed in this run, which started around
