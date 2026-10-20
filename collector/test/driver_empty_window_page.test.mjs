@@ -149,7 +149,9 @@ const F = {
     kpis: { trips: 84, days_worked: 19, bookings: 84, priced_trips: 84, outcome_n: 84,
       revenue: 12400, km: 980, avg_fare: 147.6, completion_pct: 97, reported_earnings: 9300,
       cash_earnings: null, cash_bookings: 0, statement_fares: null, priced_km: 980,
-      priced_measured_revenue: 12400, priced_measured_trips: 84 },
+      priced_measured_revenue: 12400, priced_measured_trips: 84,
+      // What /api/driver/kpis sends since 2026-10-20 (trip_cash): none taken.
+      cash_trips: 0, cash_taken: null, cash_unvalued: 0 },
     mix: { distance: [], product: [], status: [], platform: [{ label: 'uber', n: 84 }],
       payment: [{ label: 'card', n: 84, revenue: 12400 }] },
     daily: [{ day: '2026-09-01', trips: 6, km: 70, revenue: 900, first_hour: 7.5, cancelled: 0 }],
@@ -177,12 +179,37 @@ const F = {
       banned_on: [], platform_compliance: [] },
     kpis: { trips: 84, days_worked: 19, bookings: 84, priced_trips: 84, outcome_n: 84,
       revenue: 12400, km: 980, avg_fare: 147.6, reported_earnings: 9300, cash_earnings: 0,
-      statement_fares: null, priced_km: 980, priced_measured_revenue: 12400, priced_measured_trips: 84 },
+      statement_fares: null, priced_km: 980, priced_measured_revenue: 12400, priced_measured_trips: 84,
+      // trip_cash over the same twelve rides: valued, at nought.
+      cash_bookings: 12, cash_trips: 12, cash_taken: 0, cash_unvalued: 0 },
     mix: { distance: [], product: [], status: [], platform: [],
       payment: [{ label: 'cash', n: 12, revenue: 0 }, { label: 'card', n: 72, revenue: 12400 }] },
     daily: [{ day: '2026-09-01', trips: 6, km: 70, revenue: 900, first_hour: 7.5, cancelled: 0 }],
     earnings: { components: [], periods: [], tips: null, tip_pct: null, statement_days: 0,
       fare: null, statement_cash: null },
+  },
+  /* CASH COLLECTED IS CASH TAKEN (2026-10-20, docs/FIXLIST DR3). The shape of
+     Sana Ullah Sher Zamin's 1-20 October: 56 bookings paid in cash, 12 never
+     completed; the 44 that were total AED 2,445.99 at Uber's own
+     cash-collected figure. The tile read AED 2,310.58 — the fares of all 56 —
+     where "Excel ⤓ this driver" read AED 2,445.99 over 44. */
+  cashtaken: {
+    profile: { name: 'Cash Taken', id: 'cashtaken', platforms: ['uber'], ids: ['z9'],
+      accounts: [UBER_ACC(900, '2025-10-17T04:00:00Z', '2026-09-15T18:00:00Z')],
+      span: { trips: 165, days_worked: 19, vehicles: 1, first_trip: '2026-09-01T05:00:00Z',
+        last_trip: '2026-09-15T18:00:00Z' },
+      compliance: [], standing: [], vehicles: [], identity_withheld: [], identity_held: [],
+      banned_on: [], platform_compliance: [] },
+    kpis: { trips: 165, days_worked: 19, bookings: 165, priced_trips: 151, outcome_n: 165,
+      revenue: 8644.30, km: 1794, avg_fare: 57.25, reported_earnings: 4343.18, cash_earnings: null,
+      statement_fares: null, priced_km: 1784, priced_measured_revenue: 8584.30, priced_measured_trips: 147,
+      cash_bookings: 56, cash_bookings_priced: 49, cash_booking_value: 2310.58,
+      cash_trips: 44, cash_taken: 2445.99, cash_unvalued: 0 },
+    mix: { distance: [], product: [], status: [], platform: [],
+      payment: [{ label: 'cash', n: 56, revenue: 2310.58 }, { label: 'braintree', n: 109, revenue: 6333.72 }] },
+    daily: [{ day: '2026-09-01', trips: 9, km: 90, revenue: 450, first_hour: 10.5, cancelled: 1 }],
+    earnings: { components: [], periods: [], tips: 25, tip_pct: 0.46, statement_days: 20,
+      fare: 5413.42, statement_cash: 1804.94 },
   },
   /* WORKED, AND NOBODY RECORDED HOW ANY OF IT WAS PAID. /api/driver/mix
      coalesces a null payment_type to 'unknown', so the row exists and never
@@ -197,7 +224,7 @@ const F = {
       banned_on: [], platform_compliance: [] },
     kpis: { trips: 84, days_worked: 19, bookings: 84, priced_trips: 84, outcome_n: 84,
       revenue: 12400, km: 980, avg_fare: 147.6, reported_earnings: 9300, cash_earnings: null,
-      statement_fares: null },
+      statement_fares: null, cash_bookings: 0, cash_trips: 0, cash_taken: null, cash_unvalued: 0 },
     mix: { distance: [], product: [], status: [], platform: [],
       payment: [{ label: 'unknown', n: 84, revenue: null }] },
     daily: [{ day: '2026-09-01', trips: 6, km: 70, revenue: 900, first_hour: 7.5, cancelled: 0 }],
@@ -448,6 +475,15 @@ check('a cash figure the platform published AT nought still reads AED 0.00',
   zt && zt.value === 'AED 0.00', JSON.stringify(zt));
 check('…and is never described as not reported',
   zt && zt.value !== 'not reported', zt && zt.value);
+
+/* REVERSION (run 2026-10-20): take the `if (cashTakenKnown)` branch
+   out of the tile — "the tile reads cash taken" fails with AED 2,310.58, and
+   the sub returns to "56 cash trips". */
+const ct = tile(await render('cashtaken', 'earnings'), 'Cash collected');
+check('the tile reads cash taken, as the driver\u2019s Excel does: AED 2,445.99',
+  ct && ct.value === 'AED 2,445.99', JSON.stringify(ct));
+check('…over the 44 completed cash trips, and says the 12 not completed are not counted',
+  ct && /44 completed cash trips/.test(ct.sub) && /12 cash bookings not completed, not counted/.test(ct.sub), ct && ct.sub);
 
 console.log('\na population is not coverage: nobody recorded how any of it was paid');
 

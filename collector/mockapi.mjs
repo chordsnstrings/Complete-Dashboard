@@ -1575,6 +1575,13 @@ app.get('/api/driver/kpis', (req, r) => {
     cash_bookings_priced: i === 4 ? 7 : (i % 3 === 0 ? 0 : 9 + i),
     cash_booking_value: i === 4 ? 310 : (i % 3 === 0 ? null : 240 + i * 12),
     cash_booking_platforms: i === 4 ? ['bolt'] : ['uber', 'bolt'],
+    /* trip_cash, as /api/driver/kpis sends it since 2026-10-20: the completed
+       cash trips and what they took (the platform's own figure, the fare
+       otherwise) — fewer than the cash-paid bookings above, because a
+       cancelled cash booking is not cash taken. Driver 4 has one not valued. */
+    cash_trips: i === 4 ? 7 : (i % 3 === 0 ? 0 : 10 + i),
+    cash_taken: i === 4 ? 268.4 : (i % 3 === 0 ? null : 228 + i * 11.5),
+    cash_unvalued: i === 4 ? 1 : 0,
     day_stmt_days: i === 4 ? 0 : 7,
     day_cash_days: i === 4 ? 0 : 7,
     day_payout_days: 7,

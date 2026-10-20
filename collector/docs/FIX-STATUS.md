@@ -5138,3 +5138,36 @@ mode the browser keeping the body is the mode's deliberate behaviour, already
 live on CASH routes. Left as is; storing the route's header with the entry
 and re-applying it on a hit is the three-line change if the operator rules
 otherwise (HANDOFF §4.1).
+
+## DRX — the Drivers page and its Excel say the same thing (2026-10-20)
+
+The operator: "we need to fix it on production. audit, plan, then execute. the
+data should match what's being shown". The audit is FIXLIST DR1–DR3: the page
+and the workbook agreed on bookings, completed and fares for every driver, and
+read as two different tables. A name differed for 57 of 115 people. Days were
+lower in the file for every multi-account driver. The page's Money and Paid
+columns were missing from the file. On one driver's page, the "Cash collected"
+tile counted cash-paid bookings at their fare, where the file counted cash
+taken.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| DRX1 | `loadDirectory(q, {from, to, platform, fleet})` in api/driver_routes.js. `/api/drivers/directory` answers with it, and the workbook's Drivers sheet is built from it, row for row, in its order, under its names. Each row carries `person_id` from the spine | yes | pending | `money_workbook` §4: the old workbook fails 12 checks |
+| DRX2 | The Drivers sheet carries the page's Money (with what it is made of) and Paid columns, guarded as EARN like the page (`FILE_CLASSES` + manifest). Cash, Uber commission and fares by platform are attached through the person or the account. A booking the page cannot list (no driver name) is shown with a marker, never dropped | yes | pending | loose loop removed → 2 fail; EARN withheld check |
+| DRX3 | Days: distinct days across a person's accounts, the page's rule (the file took the most days on any one account) | yes | pending | A: 4 days, not 3 |
+| DRX4 | Km is rounded once per person, not per account, so the list, the driver page and the file agree (Wisal 3,565 on #driver/p114, 3,564 on the list) | yes | pending | per-account rounding restored → F reads 20, not 21 |
+| DRX5 | Every sheet of the all-drivers file names each person as the Drivers page does. One driver's file names them as their own page's header does, resolved by `driverScope().resolve`, the profile's own resolution | yes | pending | person-record name restored → 2 fail |
+| DRX6 | "Excel ⤓ this driver" opens with a Driver sheet: their page's bookings, completed, booked revenue, average fare, platform earnings, money, cash collected, cash trips, km and days | yes | pending | `money_workbook` §4 |
+| DRX7 | `/api/driver/kpis` sends `cash_trips`, `cash_taken` and `cash_unvalued` from trip_cash, and the Earnings tile "Cash collected" reads them: completed cash trips at the platform's own cash-collected figure, the fare otherwise, the operator's definition and the file's. The sub names the cash-paid bookings not completed. When the trip record marks no cash at all while the payment labels show some, the tile keeps its older reading rather than print AED 0.00 over "N cash trips" | yes | pending | `driver_routes` (45 not 55, 1 not 2); `driver_empty_window_page` cashtaken scenario: the old tile reads exactly production's "AED 2,310.58 · 56 cash trips" |
+
+Mock: `/api/driver/kpis` in mockapi.mjs sends the three new fields. The frozen
+`driver/drv-0/earnings` keeps its recorded hash. With the old mock and the new
+page it hashes to the recorded `4ec2043da6db1a58`. With the new mock, the
+guard keeps the labels' reading for that driver, whose trip record marks no
+cash.
+
+Not changed: which name a person carries. Three surfaces use three rules: the
+list, the longest account name; the driver page, the longest spelling across
+all records; the person record. Each file now follows the page it was
+downloaded from. One name everywhere is a ruling for the operator (HANDOFF
+§4.1).
