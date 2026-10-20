@@ -2722,6 +2722,25 @@ the grid took their fils:
 To repeat: as above, then `pdftotext -layout` to find the sheet carrying
 "Average a day" and `pdftoppm -r 110` to look at it.
 
+### Speed — 2026-10-20 (FIX-STATUS LPS)
+
+The page took 12.4 s on the desktop and 12.2 s on the phone from navigation
+to the first row drawn; `/api/lowperf` was uncached and 6.2–7.7 s of that.
+After `92779d9` (deployment `c358d4d8`): **4.96 s and 1.82 s**, every panel
+filled, no page error, the same 70 of 105 at both widths.
+
+The desktop's remaining time is the shell's, not this page's: the list is
+asked 4.4 s in and answered 0.2–0.8 s later. Before it, ~90 ES modules load
+(~2.7 s through the mirror) and `/api/auth/me` answers (1.9 s in this run).
+HANDOFF §4.1 has what is known about that call.
+
+To repeat: `node bin/prod-mirror.mjs`, then a fresh Playwright context per
+width at `http://127.0.0.1:8200/?ui=desktop#low-performers` (1440×900,
+wait for `#view .lp-grid, #view table tbody tr`) and `?ui=phone#low-performers`
+(390×844, wait for `.m-row, .m-card, [data-pk]`), timing from `goto` to the
+selector and recording the `/api/lowperf?` request's start and finish. The
+mirror passes no `x-cache` header; read that with curl against production.
+
 ## #feeds — the CABMAN table, seat sensor and movement (2026-10-20)
 
 Against the mock, which runs the route's own `cabmanSeat()` over a synthetic

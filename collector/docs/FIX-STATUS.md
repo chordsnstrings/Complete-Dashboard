@@ -5092,10 +5092,49 @@ learned weights all move it without moving the cache's data version.
 
 | id | what | written | production | proven |
 |---|---|---|---|---|
-| LPS1 | `/api/lowperf` cached under a key salted with the three target tables (count and latest write of `revenue_target`, `target_weights`, `access_config`) and the Dubai day, read on every request (api/cache.js `SALTED`, `TARGET_SALT_SQL`). A save or a new day is a key nobody has asked for: a miss, computed live, never the answer from before it. Data moving underneath is stale-while-revalidate, as for every page. The salt rides as a URL fragment, which the stale refresh's own request never sends, so a refresh files under the key current when it lands. A salt that cannot be read caches nothing | yes | pending | `cache` 56/0; '/api/lowperf' back on NEVER → 11 fail; salt left out → 4 fail (three saves, the new day); day left out → 1 fails; a failed salt read cached → 1 fails |
-| LPS2 | The watch lists stay uncached: NEVER holds `'/api/lowperf/'`, which matches `/api/lowperf/watch` and `/api/lowperf/watch/:id` and not the list | yes | pending | taken off NEVER → 2 fail |
-| LPS3 | The default view warmed on every pass (api/warm.js `LOWPERF_DEFAULT`), so the first open after a new day or a save is not the reader's wait; `test/lowperf.test.mjs` holds the string to `listUrl(parseParam(null, null))`, what the page and the phone really send | yes | pending | the key changed to `/api/lowperf` → fails |
+| LPS1 | `/api/lowperf` cached under a key salted with the three target tables (count and latest write of `revenue_target`, `target_weights`, `access_config`) and the Dubai day, read on every request (api/cache.js `SALTED`, `TARGET_SALT_SQL`). A save or a new day is a key nobody has asked for: a miss, computed live, never the answer from before it. Data moving underneath is stale-while-revalidate, as for every page. The salt rides as a URL fragment, which the stale refresh's own request never sends, so a refresh files under the key current when it lands. A salt that cannot be read caches nothing | yes | **on production** `c358d4d8` (`92779d9`), 2026-10-20 | `cache` 56/0; '/api/lowperf' back on NEVER → 11 fail; salt left out → 4 fail (three saves, the new day); day left out → 1 fails; a failed salt read cached → 1 fails |
+| LPS2 | The watch lists stay uncached: NEVER holds `'/api/lowperf/'`, which matches `/api/lowperf/watch` and `/api/lowperf/watch/:id` and not the list | yes | **on production** `c358d4d8` (`92779d9`), 2026-10-20 | taken off NEVER → 2 fail |
+| LPS3 | The default view warmed on every pass (api/warm.js `LOWPERF_DEFAULT`), so the first open after a new day or a save is not the reader's wait; `test/lowperf.test.mjs` holds the string to `listUrl(parseParam(null, null))`, what the page and the phone really send | yes | **on production** `c358d4d8` (`92779d9`), 2026-10-20 | the key changed to `/api/lowperf` → fails |
 
 Not changed: the workbook (`/api/export/lowperf.xlsx`) answers with
 `res.end`, which the cache never holds, and a period other than the default
 is still computed on its first open and held after.
+
+**Deployed and proven on production, 2026-10-20** (PR #8, merge `92779d9`,
+deployment `c358d4d8`, ACTIVE 07:45:15Z; front end unchanged, `sw.js` still
+`fleet-936fdefe51ad`). Measured from outside, brotli as a browser asks:
+
+| request | before (`6368228`) | after |
+|---|---|---|
+| `/api/lowperf?hotel=hide`, the default, first read after the deploy | 6.17-7.72 s, no `x-cache` | 0.38 s, `hit` — the boot warm pass had filled it |
+| the same, repeated over 70 s while the version moved four times | 6-7 s every read | 0.30-0.63 s; `stale` for ~10 s after each move, then `hit` (one read 1.57 s) |
+| a period nobody had asked for (`&_=` busting the key) | 6-7 s | 6.64 s `miss`, then 0.59 s `hit` |
+| `?hotel=show` / `?fleet=egari`, first and second read | 6-7 s each | 6.61 / 7.29 s `miss`, then 0.39 / 0.34 s `hit` |
+| `/api/lowperf/watch` | 0.27 s, uncached | 0.28 s, still no `x-cache` — never cached |
+
+The page itself, opened through `bin/prod-mirror.mjs` in a fresh Chromium
+context, timed from navigation to the first row drawn: **desktop at 1440 px
+12.4 s → 4.96 s; phone at 390 px 12.2 s → 1.82 s**, both with every panel
+filled and no page error (70 of 105 below target, the same on both). On the
+desktop the list's own request now runs 0.8 s of that; it is not asked until
+4.4 s in — about 2.7 s of loading ~90 ES modules through the mirror and then
+`/api/auth/me` (see HANDOFF §4.1, a cost of every desktop page, not this
+one's).
+
+Not proven on production: that a target save is a fresh answer on the next
+read. Saving the target is the Owner's act and moves every figure, so it was
+not done to test this; `test/cache.test.mjs` proves it for all three tables,
+each by reversion.
+
+**The independent review (2026-10-20, three lenses, each finding put to a
+skeptic):** freshness found nothing — every other input moves the version or
+goes stale for one collection at most, like every cached page. Access and
+runtime both raised one point and both skeptics refuted it as a defect: a
+cache hit is answered without running the route, so the route's own
+`Cache-Control: private, no-store` is not on it. True of EVERY cached route
+that sets it (ledger, payouts, the driver pages); for a signed-in reader the
+gate sets no-store before the cache runs, and for an anonymous reader in open
+mode the browser keeping the body is the mode's deliberate behaviour, already
+live on CASH routes. Left as is; storing the route's header with the entry
+and re-applying it on a hit is the three-line change if the operator rules
+otherwise (HANDOFF §4.1).
