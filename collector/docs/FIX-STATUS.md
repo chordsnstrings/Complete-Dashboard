@@ -5271,3 +5271,28 @@ the false "986h" row going to ok, and no row whose severity is now false.
 What the watcher cannot see: its own death. It runs in the API; if the API is
 down nothing runs. The worker's death is seen — every stall clock runs out,
 CABMAN's first, at two hours.
+
+## MON — month by month under the wires (2026-10-21)
+
+The operator, on `#payouts` under "Each wire against our own figure": "this should have monthly
+reconciliation at the bottom for a quick overview which will help us understand actual monthly
+income on separate table below this which will be live till date. audit, plan, execute."
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| MON1 | `months` on `GET /api/finance/payouts/reconcile` (api/payout_routes.js `monthlyOf`): per month **by the date the money arrived**, the transfers, the money by platform, our figure and the difference over the **weeks our figure fully covers**, and the rest under `not_compared`, grouped by kind. Also `earned`, the sum of `driver_payout_day.earnings` over the month's own days, for the platforms that wire only (Uber and Bolt; Yango has no transfers). Each row now carries `days_with_rows` and `period_days` | yes | not yet | `payout_monthly` 18/0. Mutations: part weeks counted → 2 fail; Yango counted → 1; never flag → 1 |
+| MON2 | A month whose counted weeks are more than 5% apart is flagged `unusual` and names the weeks that carry it. It is not smoothed. Seven measured weeks were within 0.72% in both directions (COVERAGE) | yes | not yet | as above |
+| MON3 | `pending`, the live part: per fleet whose wires state their week (Uber), what our figure says was earned after the last settled week, which the next Monday wire is expected to bring | yes | not yet | `payout_monthly` "live to date" |
+| MON4 | The "Month by month" panel, directly under the wire table in both skins. Columns: Month (the current one "to date"), Transfers, Uber, Bolt, Reached the bank, Our figure for the same transfers (k of n), Difference, Earned in the month. Notes say why the two bases differ, what the month holds so far and what is pending, and name any unusual month's weeks and every not-compared kind. Columns a selection cannot fill drop out | yes | not yet | `payout_page_reconcile` §6, 63/0 (panel removed → 8 fail; the month share read from the row → 1). `payout_mobile` 39/0 at 390 px, five card tables. `arkiv_finance` 130/0 |
+| MON5 | The frozen `#payouts` snapshot was re-recorded. Proof: the new page with the Month by month panel stripped hashes to exactly the old fixture, `26ae8f309f3bf090` | yes | — | trap 24 procedure |
+
+**Found, not changed: the totals line under the wire table overstates the gap.** It reads "a
+difference of +AED 362,986" over the whole record. Nearly all of that is two February 2026 weeks:
+- the wire of 9 Feb, where our figure covers 3 of 7 days;
+- the wire of 16 Feb, where our figure is AED 36,289 and 12,507 against wires of 184,724 and 82,177,
+  although every day carries rows.
+
+Uber's per-driver rows begin on 2026-02-06. Every week settled from 23 Feb onward agrees within
+about 1.5%. The monthly table counts full weeks only, and flags February with the 16 Feb weeks
+named. The totals line was left as it is: why the 16 Feb week is low is not yet known, and a rule
+that dropped it would be a guess (HANDOFF 0.8).

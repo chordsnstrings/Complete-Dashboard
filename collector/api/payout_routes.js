@@ -233,6 +233,149 @@ export const ALL_PAYOUTS = `
   ),
   allp AS (SELECT * FROM reg UNION ALL SELECT * FROM led)`;
 
+/* MONTH BY MONTH — WHAT REACHED THE BANK, AND WHAT WE EARNED.
+   ─────────────────────────────────────────────────────────────────────────
+   Asked for by the operator on 2026-10-21 under "Each wire against our own
+   figure": "this should have monthly reconciliation at the bottom for a quick
+   overview which will help us understand actual monthly income … live till
+   date".
+
+   A MONTH HERE IS THE MONTH THE MONEY ARRIVED, because that is what the bank
+   statement shows and what "income in October" means to the person reading
+   it. A Monday wire settles the Mon–Sun week before it, so the last days of
+   one month are paid in the next: September's last week arrived on 5 October.
+   That is why each month also carries `earned` — sum(driver_payout_day.earnings)
+   over the month's OWN days, the quantity Bank reconciliation calls "bank
+   payout" — so the two bases sit side by side and neither is passed off as the
+   other. Only the platforms that publish transfers (Uber, Bolt) are summed into
+   `earned`: Yango files per-driver rows and no transfer, and putting its
+   earnings beside a wire total it can never appear in would read as money that
+   failed to arrive.
+
+   THE DIFFERENCE IS COUNTED ONLY OVER WEEKS OUR FIGURE FULLY COVERS. A wire's
+   own row may carry a figure built from 3 of 7 days (Uber's per-driver rows
+   start on 2026-02-06), and summing that into a month printed February 2026 as
+   +AED 362k when every complete week agrees within about 1.5%. Such a week is
+   kept on its row above, where its coverage is stated, and is listed here
+   under not_compared with its reason rather than folded into a total.
+
+   `pending` is the live part: for each fleet whose wires state the week they
+   settle, what our figure says was earned AFTER the last settled week — money
+   the next Monday wire is expected to bring. It is our figure, not a promise
+   from the provider, and the page says so. */
+async function monthlyOf(q, out, { from, to, platform, fleet }) {
+  const today = dubaiIso();
+  const nowMonth = today.slice(0, 7);
+  const r2m = (n) => Math.round(n * 100) / 100;
+  const by = new Map();
+  for (const x of out) {
+    const m = x.paid_on.slice(0, 7);
+    if (!by.has(m)) {
+      by.set(m, { month: m, transfers: 0, wire: 0, wire_by_platform: {},
+        compared: { rows: 0, wire: 0, calculated: 0, delta: 0, weeks: [] },
+        not_compared: { rows: 0, wire: 0, why: {} } });
+    }
+    const b = by.get(m);
+    b.transfers += 1;
+    b.wire += x.wire || 0;
+    b.wire_by_platform[x.platform] = (b.wire_by_platform[x.platform] || 0) + (x.wire || 0);
+    const full = x.calculated != null && x.days_with_rows != null && x.days_with_rows === x.period_days;
+    if (full) {
+      b.compared.rows += 1;
+      b.compared.wire += x.wire || 0;
+      b.compared.calculated += x.calculated;
+      b.compared.delta += x.delta;
+      b.compared.weeks.push({ platform: x.platform, fleet_id: x.fleet_id, paid_on: x.paid_on,
+        delta_pct: x.delta_pct });
+    } else {
+      const why = x.calculated != null ? 'part_week' : (x.calculated_absent || 'not_compared');
+      b.not_compared.rows += 1;
+      b.not_compared.wire += x.wire || 0;
+      const w = b.not_compared.why[why] || (b.not_compared.why[why] = { rows: 0, wire: 0 });
+      w.rows += 1;
+      w.wire = r2m(w.wire + (x.wire || 0));
+    }
+  }
+
+  // What the drivers earned on each month's own days — the platforms that wire only.
+  const earned = await q(
+    `SELECT to_char(d.day, 'YYYY-MM') AS m,
+            round(sum(d.earnings)::numeric, 2) AS earned,
+            count(DISTINCT d.day)::int AS days,
+            to_char(max(d.day), 'YYYY-MM-DD') AS through
+       FROM driver_payout_day d
+      WHERE d.day BETWEEN $1::date AND LEAST($2::date, $5::date)
+        AND d.platform IN ('uber', 'bolt')
+        AND ($3::text IS NULL OR d.platform = $3)
+        AND ($4::text IS NULL OR d.fleet_id = $4)
+      GROUP BY 1`, [from, to, platform, fleet, today]).catch(() => []);
+  const earnedBy = new Map(earned.map((e) => [e.m, e]));
+  for (const e of earned) {
+    if (!by.has(e.m)) {
+      by.set(e.m, { month: e.m, transfers: 0, wire: 0, wire_by_platform: {},
+        compared: { rows: 0, wire: 0, calculated: 0, delta: 0, weeks: [] },
+        not_compared: { rows: 0, wire: 0, why: {} } });
+    }
+  }
+
+  const months = [...by.values()].sort((a, b) => (a.month < b.month ? 1 : -1)).map((b) => {
+    const e = earnedBy.get(b.month);
+    const c = b.compared;
+    const deltaPct = c.rows && c.wire ? r2m((c.delta / c.wire) * 100) : null;
+    /* A month whose counted weeks are, together, more than 5% apart is not
+       what seven measured weeks looked like (largest 0.72%, both signs —
+       docs/COVERAGE.md). It is flagged, with the weeks that carry it, rather
+       than smoothed: the page names them and the rows above hold each one. */
+    const unusual = deltaPct != null && Math.abs(deltaPct) > 5;
+    return {
+      month: b.month,
+      to_date: b.month === nowMonth,
+      through: b.month === nowMonth ? today : null,
+      transfers: b.transfers,
+      wire: r2m(b.wire),
+      wire_by_platform: Object.fromEntries(Object.entries(b.wire_by_platform).map(([k, v]) => [k, r2m(v)])),
+      compared: c.rows
+        ? { rows: c.rows, wire: r2m(c.wire), calculated: r2m(c.calculated), delta: r2m(c.delta),
+          delta_pct: deltaPct, unusual,
+          unusual_weeks: unusual
+            ? c.weeks.filter((w) => w.delta_pct != null && Math.abs(w.delta_pct) > 5) : [] }
+        : null,
+      not_compared: b.not_compared.rows
+        ? { rows: b.not_compared.rows, wire: r2m(b.not_compared.wire), why: b.not_compared.why }
+        : null,
+      earned: e ? Number(e.earned) : null,
+      earned_days: e ? e.days : 0,
+      earned_through: e ? e.through : null,
+    };
+  });
+
+  /* THE LIVE PART: earned since the last week a wire has settled, per fleet.
+     Only where wires state their week (Uber): Bolt states no period, so "since
+     the last settled week" has no meaning there, and is not invented. */
+  const lastSettled = new Map();
+  for (const x of out) {
+    if (!x.period_end) continue;
+    const k = `${x.platform}|${x.fleet_id}`;
+    if (!lastSettled.has(k) || x.period_end > lastSettled.get(k)) lastSettled.set(k, x.period_end);
+  }
+  const pending = [];
+  for (const [k, end] of lastSettled) {
+    const [pl, fl] = k.split('|');
+    const [row] = await q(
+      `SELECT round(sum(earnings)::numeric, 2) AS earned, count(DISTINCT day)::int AS days,
+              to_char(min(day), 'YYYY-MM-DD') AS first, to_char(max(day), 'YYYY-MM-DD') AS last
+         FROM driver_payout_day
+        WHERE platform = $1 AND fleet_id = $2 AND day > $3::date AND day <= $4::date`,
+      [pl, fl, end, today]).catch(() => []);
+    pending.push({
+      platform: pl, fleet_id: fl, settled_through: end,
+      earned: row && row.earned != null ? Number(row.earned) : null,
+      days: row ? row.days : 0, from: row ? row.first : null, through: row ? row.last : null,
+    });
+  }
+  return { months, pending };
+}
+
 /* Every provider this page is entitled to speak about, and what each one
    publishes. Written down rather than derived from the rows, because "we
    have no Yango payouts" and "Yango does not publish payouts" are different
@@ -803,6 +946,12 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
            absences this is, so the page can group by kind rather than by the
            sentence — see the block above the if-chain. */
         calculated_absent: code ?? null,
+        /* How much of the settled week our figure covers: days carrying driver
+           rows out of the days in the period. A week with fewer is shown with
+           its difference but is not COUNTED in a month's difference — see
+           monthlyOf(). Null where nothing was compared. */
+        days_with_rows: calculated == null ? null : Number(row.days_with_rows),
+        period_days: calculated == null ? null : Number(row.period_days),
         delta,
         delta_pct: (delta == null || !wire) ? null : r2((delta / wire) * 100),
         opening_balance: openingBalance,
@@ -850,6 +999,8 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
           + 'subtract calculated from. Subtracting calculated from wire would compare two '
           + 'different populations.',
     };
+
+    const { months, pending } = await monthlyOf(q, out, { from, to, platform, fleet });
 
     /* THE DAYS NOBODY HAS ASKED ABOUT.
        ────────────────────────────────────────────────────────────────────
@@ -1046,6 +1197,9 @@ export function payoutRoutes(app, { q, wrap, range, uber = LIVE_UBER }) {
       filters: { platform, fleet },
       rows: out,
       totals,
+      /* Month by month, by the date the money ARRIVED — see monthlyOf(). */
+      months,
+      pending,
       unchecked,
       audit: {
         windows: audit,

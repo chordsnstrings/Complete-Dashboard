@@ -645,6 +645,77 @@ console.log('\nthe panel and its notes name what they hold');
   await page.close();
 }
 
+/* ══ 6. MONTH BY MONTH, UNDER THE WIRES ══════════════════════════════════
+   The operator, 2026-10-21: "this should have monthly reconciliation at the
+   bottom for a quick overview which will help us understand actual monthly
+   income … live till date". The panel must sit BELOW the wire table, mark the
+   month in progress as to date, say what was earned since the last settled
+   week, flag a month far outside ±1% with the week that carries it, say why a
+   transfer was not compared — and drop the columns a selection cannot fill. */
+console.log('\nmonth by month, under the wires');
+{
+  const M = (o) => ({ to_date: false, through: null, transfers: 2, wire: 1000, wire_by_platform: { uber: 1000 },
+    compared: null, not_compared: null, earned: null, earned_days: 0, earned_through: null, ...o });
+  const REC3 = { ...REC, months: [
+    M({ month: '2026-10', to_date: true, through: '2026-10-21', transfers: 3, wire: 578321.21,
+      wire_by_platform: { uber: 572962.63, bolt: 5358.58 },
+      compared: { rows: 2, wire: 572962.63, calculated: 573487.5, delta: -524.87, delta_pct: -0.09,
+        unusual: false, unusual_weeks: [] },
+      not_compared: { rows: 1, wire: 5358.58, why: { provider_states_no_period: { rows: 1, wire: 5358.58 } } },
+      earned: 562134.79, earned_days: 21, earned_through: '2026-10-21' }),
+    M({ month: '2026-02', transfers: 4, wire: 606861.82, wire_by_platform: { uber: 606861.82 },
+      compared: { rows: 3, wire: 443754.55, calculated: 223358.43, delta: 220396.12, delta_pct: 49.67,
+        unusual: true, unusual_weeks: [{ platform: 'uber', fleet_id: 'ecosine', paid_on: '2026-02-16', delta_pct: 80.35 }] },
+      not_compared: { rows: 1, wire: 163093.27, why: { part_week: { rows: 1, wire: 163093.27 } } },
+      earned: 389574.55, earned_days: 23, earned_through: '2026-02-28' }),
+  ], pending: [{ platform: 'uber', fleet_id: 'ecosine', settled_through: '2026-10-18', earned: 18234.4,
+    days: 3, from: '2026-10-19', through: '2026-10-21' }] };
+  const page = await render({ ...BASE, '/api/finance/payouts/reconcile': { body: REC3 } });
+  const r = await page.evaluate(() => {
+    const panels = [...document.querySelectorAll('[data-panel]')].map((x) => x.dataset.panel);
+    const p = document.querySelector('[data-panel="payout-monthly"]');
+    if (!p) return { missing: true, panels };
+    const heads = [...p.querySelectorAll('thead th')].map((h) => h.textContent.trim());
+    const rows = [...p.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')]
+      .map((td) => td.textContent.replace(/\s+/g, ' ').trim()));
+    const notes = [...p.querySelectorAll('.note')].map((n) => n.textContent.replace(/\s+/g, ' ').trim());
+    return { panels, heads, rows, notes };
+  });
+  check('a "Month by month" panel is drawn directly below the wire table',
+    !r.missing && r.panels.indexOf('payout-monthly') === r.panels.indexOf('payout-reconcile') + 1,
+    JSON.stringify(r.panels));
+  check('…with the money, our figure, the difference and what was earned',
+    ['Month', 'Reached the bank', 'Our figure, same transfers', 'Difference', 'Earned in the month']
+      .every((h) => (r.heads || []).includes(h)), JSON.stringify(r.heads));
+  check('the month in progress says it is to date', /Oct 2026 · to (21 Oct 2026|Oct 21, 2026)/.test((r.rows || [])[0]?.[0] || ''),
+    JSON.stringify((r.rows || [])[0]));
+  check('a month far outside ±1% is marked unusual in its row', (r.rows || [])[1]?.some((c) => /unusual/.test(c)),
+    JSON.stringify((r.rows || [])[1]));
+  check('…and a warning names the week that carries it', (r.notes || []).some((t) => /Feb 2026/.test(t)
+    && /Uber · Ecosine paid (16 Feb 2026|Feb 16, 2026)/.test(t) && /\+80\.35%/.test(t)
+    && /\+49\.67%/.test(t)), JSON.stringify(r.notes));
+  check('the live part: what was earned since the last settled week, and that it is our figure',
+    (r.notes || []).some((t) => /Oct 2026 so far/.test(t) && /AED 18,234\.40 earned (19 Oct 2026 – 21 Oct 2026|Oct 19, 2026 – Oct 21, 2026)/.test(t)
+      && /next Monday wire/.test(t) && /not the provider’s/.test(t)), JSON.stringify(r.notes));
+  check('why transfers were not compared is said once per kind, never as a zero',
+    (r.notes || []).some((t) => /^1 transfer \(AED 163,093\.27\) is counted/.test(t) && /only part of the week/.test(t)
+      && /not a difference of zero/.test(t))
+    && (r.notes || []).some((t) => /does not say which week/.test(t)), JSON.stringify(r.notes));
+  await page.close();
+
+  /* A Bolt-only selection: no Uber money, nothing earned — those columns go. */
+  const BOLT = { ...REC, months: [M({ month: '2026-10', to_date: true, through: '2026-10-21', transfers: 1,
+    wire: 813.4, wire_by_platform: { bolt: 813.4 },
+    not_compared: { rows: 1, wire: 813.4, why: { provider_states_no_period: { rows: 1, wire: 813.4 } } } })],
+    pending: [] };
+  const pb = await render({ ...BASE, '/api/finance/payouts/reconcile': { body: BOLT } });
+  const h = await pb.evaluate(() => [...document.querySelectorAll('[data-panel="payout-monthly"] thead th')]
+    .map((x) => x.textContent.trim()));
+  check('a Bolt-only selection drops the Uber and Earned columns rather than printing dashes',
+    h.includes('Bolt') && !h.includes('Uber') && !h.includes('Earned in the month'), JSON.stringify(h));
+  await pb.close();
+}
+
 await browser.close();
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -6589,6 +6589,28 @@ app.get('/api/finance/payouts/reconcile', (_, r) => {
         opening_balance: null, balance_delta: null,
         checked_at: null, source: 'fleetOwnerPortal/getPayouts' },
     ],
+    /* Month by month (api/payout_routes.js monthlyOf), from the four rows above:
+       September is the month in progress — live to the 17th — and carries the
+       Bolt transfer and the uncompared 7 Sep wire under not_compared, by kind. */
+    months: [
+      { month: '2026-09', to_date: true, through: '2026-09-17', transfers: 3, wire: 216877.76,
+        wire_by_platform: { uber: 214747.2, bolt: 2130.56 },
+        compared: { rows: 1, wire: 111179.66, calculated: 110962.09, delta: 217.57, delta_pct: 0.2,
+          unusual: false, unusual_weeks: [] },
+        not_compared: { rows: 2, wire: 105698.1, why: {
+          no_driver_day_rows: { rows: 1, wire: 103567.54 },
+          provider_states_no_period: { rows: 1, wire: 2130.56 } } },
+        earned: 248310.45, earned_days: 17, earned_through: '2026-09-17' },
+      { month: '2026-08', to_date: false, through: null, transfers: 1, wire: 288456.78,
+        wire_by_platform: { uber: 288456.78 },
+        compared: { rows: 1, wire: 288456.78, calculated: 288900.33, delta: -443.55, delta_pct: -0.15,
+          unusual: false, unusual_weeks: [] },
+        not_compared: null, earned: 401220.1, earned_days: 31, earned_through: '2026-08-31' },
+    ],
+    pending: [
+      { platform: 'uber', fleet_id: 'ecosine', settled_through: '2026-09-13', earned: 62345.1,
+        days: 4, from: '2026-09-14', through: '2026-09-17' },
+    ],
     totals: { wire: 216877.76, wire_comparable: 111179.66, calculated: 110962.09,
       delta: 217.57, rows: 3, comparable_rows: 1,
       basis: 'wire totals every transfer in the window; calculated and delta cover only the '

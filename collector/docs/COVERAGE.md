@@ -10265,6 +10265,37 @@ provider's own fixes.
   only HTTPS leaves the box. Audits go through the read API: `/api/track` for 60 days per plate is 1–3.5 MB
   and about 2 s, and `/api/map/journey` per plate-day is the only bulk source of FMS's live seat count.
 
+## Wires month by month — measured 2026-10-21
+
+Built as "Month by month" on `#payouts` (FIX-STATUS MON). Production at 03:40Z, whole record:
+**349 transfers**, Uber and Bolt both fleets, 23 Dec 2024 – 19 Oct 2026.
+
+* **Two bases, never one passed off as the other.**
+  - **Reached the bank** is by the date the money arrived. A Monday wire pays the Mon–Sun week
+    before it, so a month's last days arrive in the next month: September's last week arrived on
+    5 October.
+  - **Earned** is `driver_payout_day.earnings` over the month's own days. That is Bank
+    reconciliation's "bank payout". For October it was AED 562,135 over all 21 days to date.
+* **Our figure exists from 2026-02-06 (Uber), and the first two settled weeks are not
+  comparable.** The 9 Feb wire's week has rows on 3 of 7 days. The 16 Feb wire's week has rows
+  on 7 of 7 days and 1,078 driver-days, yet sums to AED 36,289 against a wire of AED 184,724.
+  From the week settled on 23 Feb, every week is within about 1.5%. A sum over all comparable
+  rows is therefore dominated by February: the totals line under the wire table reads
+  +AED 362,986 over the record.
+* **Uber's wires by arrival month**, AED: Sep 2025 900,056 · Dec 2025 1,065,793 · Mar 2026 290,690 ·
+  Jun 2026 395,213 · Sep 2026 696,932 · Oct 2026 (to the 21st) 572,963. Bolt wires were
+  AED 3,000–26,000 a month. Yango publishes no transfer, so it is in neither column.
+
+### Traps this added to the list
+
+* **"Days with rows = days in the period" does not mean a week is fully covered.** The 16 Feb
+  2026 week passes that test and holds about 20% of the money. A coverage test on days alone
+  would have counted it.
+* **A month built from wires and a month built from earnings differ by a week of money at every
+  month end.** Comparing them as if they were one quantity makes every month look short or long.
+  Compare a wire only with the week it settles, and show the earned month beside it as its own
+  column.
+
 ## ntfy phone alerts — built 2026-10-20
 
 The credential banner's verdicts (`/api/auth`, `authHealth` in

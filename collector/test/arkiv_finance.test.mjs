@@ -279,7 +279,7 @@ if (want('receipts')) {
 if (want('payouts')) {
   console.log('\n#payouts');
   const HEADS = ['At a glance', 'Every Uber transfer, and our own figure beside it', 'The difference, per transfer',
-    'Each wire against our own figure', 'What we have not asked Uber about', 'Uber, by month', 'Bolt, by month',
+    'Each wire against our own figure', 'Month by month', 'What we have not asked Uber about', 'Uber, by month', 'Bolt, by month',
     'Every transfer, by the date it arrived', 'Every transfer date, by channel',
     'What each platform publishes about its own transfers', 'The provider’s own books, day by day', '† What this page does not know'];
   let classic = {};
