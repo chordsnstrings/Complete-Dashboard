@@ -5280,11 +5280,27 @@ income on separate table below this which will be live till date. audit, plan, e
 
 | id | what | written | production | proven |
 |---|---|---|---|---|
-| MON1 | `months` on `GET /api/finance/payouts/reconcile` (api/payout_routes.js `monthlyOf`): per month **by the date the money arrived**, the transfers, the money by platform, our figure and the difference over the **weeks our figure fully covers**, and the rest under `not_compared`, grouped by kind. Also `earned`, the sum of `driver_payout_day.earnings` over the month's own days, for the platforms that wire only (Uber and Bolt; Yango has no transfers). Each row now carries `days_with_rows` and `period_days` | yes | not yet | `payout_monthly` 18/0. Mutations: part weeks counted → 2 fail; Yango counted → 1; never flag → 1 |
-| MON2 | A month whose counted weeks are more than 5% apart is flagged `unusual` and names the weeks that carry it. It is not smoothed. Seven measured weeks were within 0.72% in both directions (COVERAGE) | yes | not yet | as above |
-| MON3 | `pending`, the live part: per fleet whose wires state their week (Uber), what our figure says was earned after the last settled week, which the next Monday wire is expected to bring | yes | not yet | `payout_monthly` "live to date" |
-| MON4 | The "Month by month" panel, directly under the wire table in both skins. Columns: Month (the current one "to date"), Transfers, Uber, Bolt, Reached the bank, Our figure for the same transfers (k of n), Difference, Earned in the month. Notes say why the two bases differ, what the month holds so far and what is pending, and name any unusual month's weeks and every not-compared kind. Columns a selection cannot fill drop out | yes | not yet | `payout_page_reconcile` §6, 63/0 (panel removed → 8 fail; the month share read from the row → 1). `payout_mobile` 39/0 at 390 px, five card tables. `arkiv_finance` 130/0 |
+| MON1 | `months` on `GET /api/finance/payouts/reconcile` (api/payout_routes.js `monthlyOf`): per month **by the date the money arrived**, the transfers, the money by platform, our figure and the difference over the **weeks our figure fully covers**, and the rest under `not_compared`, grouped by kind. Also `earned`, the sum of `driver_payout_day.earnings` over the month's own days, for the platforms that wire only (Uber and Bolt; Yango has no transfers). Each row now carries `days_with_rows` and `period_days` | yes | **on production** `be419230` (`0edde9d`), 2026-10-21 | `payout_monthly` 18/0. Mutations: part weeks counted → 2 fail; Yango counted → 1; never flag → 1 |
+| MON2 | A month whose counted weeks are more than 5% apart is flagged `unusual` and names the weeks that carry it. It is not smoothed. Seven measured weeks were within 0.72% in both directions (COVERAGE) | yes | **on production** `be419230` (`0edde9d`), 2026-10-21 | as above |
+| MON3 | `pending`, the live part: per fleet whose wires state their week (Uber), what our figure says was earned after the last settled week, which the next Monday wire is expected to bring | yes | **on production** `be419230` (`0edde9d`), 2026-10-21 | `payout_monthly` "live to date" |
+| MON4 | The "Month by month" panel, directly under the wire table in both skins. Columns: Month (the current one "to date"), Transfers, Uber, Bolt, Reached the bank, Our figure for the same transfers (k of n), Difference, Earned in the month. Notes say why the two bases differ, what the month holds so far and what is pending, and name any unusual month's weeks and every not-compared kind. Columns a selection cannot fill drop out | yes | **on production** `be419230` (`0edde9d`), 2026-10-21 | `payout_page_reconcile` §6, 63/0 (panel removed → 8 fail; the month share read from the row → 1). `payout_mobile` 39/0 at 390 px, five card tables. `arkiv_finance` 130/0 |
 | MON5 | The frozen `#payouts` snapshot was re-recorded. Proof: the new page with the Month by month panel stripped hashes to exactly the old fixture, `26ae8f309f3bf090` | yes | — | trap 24 procedure |
+
+**Proven on production, 2026-10-21.** Deployment `be419230` (`0edde9d`) went active at 09:57Z.
+`/api/finance/payouts/reconcile`, cache-busted, returned 23 months:
+- **Oct 2026, to the 21st:** 12 transfers, AED 578,321.21 reached the bank, −0.09% against our
+  figure over 6 compared transfers. AED 559,572.20 was earned on the month's days.
+- **Sep 2026:** AED 707,928.91, +0.07%.
+- **Mar–Aug 2026:** each within ±0.23%.
+- **Feb 2026:** flagged unusual (+49.67%), carried by the two 16 Feb wires (+80.35% and +84.78%).
+- **Jan 2026 and earlier:** "not compared", because Uber's per-driver figure starts on 6 Feb.
+- **Pending:** Uber Ecosine AED 46,185.44 and Egari AED 22,834.07, earned 19–21 Oct after the week
+  settled on the 18th.
+
+Rendered through `bin/prod-mirror.mjs`:
+- **Desktop, 1440 px:** the panel sits directly after `payout-reconcile`, with all eight columns
+  and every note.
+- **Phone, 390 px:** card layout, document width 390, no sideways scroll.
 
 **Found, not changed: the totals line under the wire table overstates the gap.** It reads "a
 difference of +AED 362,986" over the whole record. Nearly all of that is two February 2026 weeks:
