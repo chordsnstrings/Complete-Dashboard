@@ -10207,6 +10207,64 @@ over the 7 Dubai days 14–20 Oct, unless it says otherwise.
   and it is in the current poll. "On CABMAN's list" is not "reporting";
   judge receiving on the newest reading, as `#feeds` does.
 
+## CABMAN vs FMS against 60 days of bookings — measured 2026-10-21
+
+Asked for by the operator: "audit between cabman and fms about location tracking and seat sensor data for
+the last 60 days. Match it with trip data and find out accuracy for both". Delivered as a PDF
+(CABMAN-vs-FMS-audit.pdf). Window: Dubai days 22 Aug – 20 Oct 2026, 41,113 completed
+bookings on 113 cars. Everything was read through the production read API. The numbers were then re-derived
+from the raw data by an independent check, which found two defects that moved headlines; both were fixed
+before release. The method mirrors `#feeds` (api/feed_routes.js `cabmanSeat`) and is applied to each
+provider's own fixes.
+
+| | CABMAN (33 cars) | FMS (77 cars) |
+|---|---|---|
+| bookings judged | 8,142 | 32,357 |
+| a fix inside the booking | 92.7% | 95.3% |
+| path ≤ 1 km of both booked ends, hotel | 62.4% of 950 | 48.7% of 788 |
+| …hotel, ≥ 6 fixes (equal sampling) | 58.8% of 590 | 57.1% of 380 |
+| …Yango (exact times) | — | 88.9% of 135 |
+| moved with the car | 99.9% of 5,042 | 99.3% of 22,568 |
+| seat read a passenger (FMS from 23 Sep) | 72.2% of 7,544 | 76.6% of 15,483 |
+| seat readings with no booking that read empty | 81.6% | 97.5% |
+| occupied drives ≥ 2 km with no booking | 2,477 (31,087 km) | 501 (6,149 km) |
+| pads accurate both ways | 6 (+13 over-read) | 37 (+1 over-reads) |
+
+* **Position is equal once sampling is equal.** CABMAN logs a median 5 fixes per booking and FMS 4. The
+  ends test measures position and sampling together. Hotel times are loose, which caps it near 60% for
+  both.
+* **CABMAN's seat problem is false readings, not only misses.** 13 of its
+  33 pads read passengers on at least 80% of bookings, yet read occupied on 14–61% of their
+  readings when no booking holds the car. FMS has 2 units above 10%.
+* **L45243's CABMAN unit is in L26356.** It sits a median 133 m from
+  L26356's FMS unit over 2,977 same-minute pairs, and 17.1 km from L45243's.
+  This settles the 2026-09-23 trap below ("the two devices are in different places"): on L45243 the
+  CABMAN unit is misfiled. L44251's CABMAN unit is a median 12.9 km from its FMS unit and near no tracked
+  car; that FMS unit moved with 500 of 501 bookings. L44289's CABMAN unit sent 3 readings in 60 days.
+* FMS L59829 stood still through 27% of 286 measurable bookings, and L46185 through 10% of 560, spread
+  over the whole window. Either the unit or the plate on those bookings is wrong; not settled.
+
+### Traps this added to the list
+
+* **A pad's detection rate alone flatters it.** A pad stuck on "occupied" catches every passenger.
+  Judge a seat sensor both ways: the share of bookings in which it read a passenger, AND the share of
+  readings with no booking in which it read empty. L64921 is 593 of 613 on detection and occupied on
+  52% of its readings with no booking.
+* **The drop-off must be looked for after the pickup.** An unbounded "closest approach to the drop-off"
+  matched the drive to the rider, or a hotel car's next job up to the 3-hour close. On its own, the fix
+  took CABMAN from 65.0% to 61.8% (62.4% once the misfiled units were also left out).
+* **Leave a misfiled unit out of its provider's totals.** L45243's and L44251's CABMAN readings
+  describe other cars. Kept in, they moved CABMAN's seat detection from 72.2% to 69.2%.
+* **Only a documented collection gap is excluded.** CABMAN's Egari login was first read on 6 Oct (761
+  bookings before it). A unit that simply had not reported yet counts as not reporting.
+* **Uber and Bolt bookings carry no coordinates and no pickup time through the API.**
+  `/api/export/trips.csv` withholds addresses and carries no FMS journeys. `/api/trip` returns
+  coordinates for hotel and Yango. Uber's job stages (DJ_PICKUP etc., `driver_timeline_event`) would
+  give exact pickup times, but no read endpoint serves them in bulk.
+* **This sandbox cannot reach the database.** Raw TCP to `fleet-dashboard-db`:25060 times out, because
+  only HTTPS leaves the box. Audits go through the read API: `/api/track` for 60 days per plate is 1–3.5 MB
+  and about 2 s, and `/api/map/journey` per plate-day is the only bulk source of FMS's live seat count.
+
 ## ntfy phone alerts — built 2026-10-20
 
 The credential banner's verdicts (`/api/auth`, `authHealth` in

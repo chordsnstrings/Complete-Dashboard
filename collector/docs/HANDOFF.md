@@ -27,6 +27,7 @@ stale document.
 | 0.2 | ~~LPG not deployed~~ **Done 2026-10-20:** LPG1–11 are on production and proven (FIX-STATUS LPG, deployment `9cf3fe85`). | — | ~~The page's speed~~ **Done 2026-10-20 (FIX-STATUS LPS):** `/api/lowperf` is cached under a key that carries the target; the default view answers in 0.3–0.6 s (was 6.2–7.7 s), and the page opens in 4.96 s on desktop and 1.82 s on the phone (was 12.4 / 12.2 s). |
 | 0.3 | **Deploying needs a DigitalOcean token, and none is stored.** The operator pasted one into the 2026-10-20 session; it lived only in that session's scratchpad. | Checked through the API: the `fleet-dashboard` app builds two components, the `api` service and the `collector` worker (both `basic-xxs`), from `claude/ecosine-egari-tracking-apis-rf9ong`. **`deploy_on_push` is off on both, so nothing deploys on a merge.** | Get a token from the operator for each deploying session, kept outside the repo; suggest they revoke tokens pasted into chat. Then `POST /v2/apps/$APP_ID/deployments` with `{"force_build":true}`, poll that deployment id to `ACTIVE`, and compare `services[].source_commit_hash` and the `sw.js` fingerprint (§9) with the branch. |
 | 0.4 | Production is at `8fac6dd` (deployment `cb6407aa`, 2026-10-20 12:12Z): PRs #4–#14 merged and force-built. `NTFY_TOPIC` is an app secret on the api service (set through the DO API; the value is held outside the repo). | — | Merge work into the production branch through a PR, then force-build (§0.3). |
+| 0.7 | **CABMAN vs FMS audit, 60 days (2026-10-21; COVERAGE "CABMAN vs FMS against 60 days of bookings").** L45243's CABMAN unit is in L26356, and L44251's is in an unknown car. 13 CABMAN pads over-read; 9 CABMAN and 11 FMS units miss most or all passengers. | Each wrong-car CABMAN reading feeds `#feeds`, the seat table and unauthorized-trip verdicts for the wrong plate. | Operator: ask CABMAN to re-map the units. The car lists are in the PDF delivered that day. |
 | 0.6 | ~~ntfy phone alerts~~ **Live 2026-10-20** (FIX-STATUS NTFY): the banner's verdicts are pushed when a row changes, and the run clock is fixed (BCL). The first message reached the topic at 12:06:31Z. | The topic is a secret: the app env holds `NTFY_TOPIC`, and the Settings page can override it. It is never in the repo. The operator subscribes in the ntfy app. | NT6 ("At risk" wording) has been on production since `cb6407aa`. The operator still has to subscribe to the topic in the ntfy app. |
 | 0.5 | **The operator has an unanswered question from 2026-10-19 14:29Z** (garage history, §5). | They asked for the garage audit, plan and build to come straight after LPG. The session asked how the existing garage history should reach production and got no answer, because the session died. **2026-10-20:** the two source files were re-supplied (session uploads; the log is also a live Google Sheet), the distinct invoices reproduce at 239 / AED 423,841.96, and a printable six-garage price sheet was made (GARAGE-PLAN.md, "The work done most often"). The import-route question was put again and is still open. | Ask again, in the same terms (§5). |
 
@@ -323,6 +324,12 @@ the garage audit, plan and build."
   - make Emirates ID and licence number on `/api/driver/profile` admin-only
     (one `isAdmin(req)` check);
   - gate `POST /api/same-person/decide`.
+- **The production database accepts connections from any address** (found
+  2026-10-21). `fleet-dashboard-db` (DO managed Postgres, fra1) has **no
+  trusted sources**, and neither do the account's other four clusters. Only its
+  password stands between it and the internet. Adding the app as the one
+  trusted source is a DigitalOcean setting (Databases → fleet-dashboard-db →
+  Settings → Trusted sources). Left for the operator: nothing was changed.
 
 ### 6.2 Fleet names have regressed on production (new, found 2026-10-20)
 
