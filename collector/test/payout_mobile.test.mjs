@@ -57,15 +57,17 @@ console.log('\nthe page asks for cards and folds the long tables');
 {
   const page = readFileSync(new URL('../api/public/payouts.js', import.meta.url), 'utf8');
   const asks = (page.match(/cards:\s*true/g) || []).length;
-  check('all four of its tables ask for cards', asks === 4, `${asks} of 4`);
+  /* Five since 2026-10-21: "Month by month" under the wires (api/public/payouts.js
+     drawMonthly), a table like the others. */
+  check('all five of its tables ask for cards', asks === 5, `${asks} of 5`);
   /* A lead names the field the card is ABOUT — the same column .tscroll pins
      on the left at desktop width. Without one the first column is used, which
      is right by luck here and not a thing to rely on. */
   check('…and each names the column that heads the card',
-    (page.match(/cardLead:\s*'/g) || []).length === 4,
+    (page.match(/cardLead:\s*'/g) || []).length === 5,
     String((page.match(/cardLead:\s*'/g) || []).length));
-  check('the three long tables are folded, never truncated',
-    (page.match(/foldRows\(/g) || []).length === 3,
+  check('the four long tables are folded, never truncated',
+    (page.match(/foldRows\(/g) || []).length === 4,
     String((page.match(/foldRows\(/g) || []).length));
 
   const css = readFileSync(new URL('../api/public/app.css', import.meta.url), 'utf8');
@@ -174,7 +176,7 @@ const ph = await look(390, 844);
    first experience of this page: the whole document slid. */
 check('the document does not scroll sideways', ph.docScroll <= ph.vw,
   `scrollWidth ${ph.docScroll} against a ${ph.vw} viewport`);
-check('all four tables are in card mode', ph.blocks === 4, String(ph.blocks));
+check('all five tables are in card mode', ph.blocks === 5, String(ph.blocks));
 check('every card fits inside the page', ph.labelled.every((b) => b.rowW <= ph.vw),
   JSON.stringify(ph.labelled.map((b) => b.rowW)));
 check('the rows are laid out as blocks, not table rows',

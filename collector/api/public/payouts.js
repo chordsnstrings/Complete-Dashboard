@@ -1015,7 +1015,155 @@ function drawReconcile(hostEl, rec, run) {
 
   if (rec.note) p.body.append(note(rec.note));
 
+  drawMonthly(hostEl, rec);
   drawUnchecked(hostEl, rec, run);
+}
+
+/* ── MONTH BY MONTH ───────────────────────────────────────────────────────
+   ═════════════════════════════════════════════════════════════════════════
+   The operator, 2026-10-21, under the table above: "this should have monthly
+   reconciliation at the bottom for a quick overview which will help us
+   understand actual monthly income … live till date".
+
+   A month is the month the money REACHED THE BANK — what the bank statement
+   shows. Beside it, what the drivers earned on the month's own days (our
+   figure, Bank reconciliation's "bank payout"), because a Monday wire pays the
+   week before it and the two differ by that week at every month end; printing
+   one as if it were the other would make every month look short or long by a
+   week's money. The difference is counted only over weeks our figure fully
+   covers (api/payout_routes.js monthlyOf), and a month far outside the usual
+   ±1% is flagged with the weeks that carry it rather than smoothed. The
+   current month is live: everything up to today, and what has been earned
+   since the last settled week, which the next Monday wire is expected to
+   bring. */
+const monthLabel = (m) => new Date(`${m}-01T00:00:00Z`)
+  .toLocaleString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+const WHY_MONTH = {
+  provider_states_no_period: 'the provider does not say which week a transfer settles, so there is '
+    + 'no week to sum our figure over (Bolt)',
+  uber_period_not_derived: 'an Uber transfer stored without the week it settles',
+  no_driver_day_rows: 'our figure has not been collected for the week the transfer settles',
+  part_week: 'our figure covers only part of the week the transfer settles, so the week is shown '
+    + 'on its own row above but not counted here',
+};
+
+function drawMonthly(hostEl, rec) {
+  const months = Array.isArray(rec.months) ? rec.months : [];
+  if (!months.length) return;
+  const p = panel('Month by month',
+    'What reached the bank each month, by the date it arrived, against our own figure for the '
+    + 'same transfers — and what the drivers earned on the month’s own days. The current month '
+    + 'is live to today.',
+    'payout-monthly');
+  hostEl.append(p.panel);
+
+  const rows = months.map((m) => ({
+    ...m,
+    wire_uber: m.wire_by_platform?.uber ?? null,
+    wire_bolt: m.wire_by_platform?.bolt ?? null,
+    calculated: m.compared ? m.compared.calculated : null,
+    delta: m.compared ? m.compared.delta : null,
+    delta_pct: m.compared ? m.compared.delta_pct : null,
+  }));
+  const reasonOf = (m) => (m.not_compared
+    ? Object.entries(m.not_compared.why).map(([k, v]) => `${countOf(v.rows, 'transfer')} `
+      + `(${money(v.wire, 'AED', 2)}): ${WHY_MONTH[k] || k}`).join('; ')
+    : '');
+
+  const t = tableFrom(rows, [
+    { label: 'Month', key: 'month',
+      render: (m) => `<b>${esc(monthLabel(m.month))}</b>`
+        + (m.to_date ? `<span class="dim"> · to ${esc(dateStr(m.through))}</span>` : '') },
+    { label: 'Transfers', key: 'transfers', num: true, render: (m) => esc(fmt(m.transfers)) },
+    { label: 'Uber', key: 'wire_uber', num: true,
+      absent: 'no Uber transfer is in this selection.',
+      render: (m) => (m.wire_uber == null ? absent('—', 'no Uber transfer arrived this month')
+        : money(m.wire_uber, 'AED', 2)) },
+    { label: 'Bolt', key: 'wire_bolt', num: true,
+      absent: 'no Bolt transfer is in this selection.',
+      render: (m) => (m.wire_bolt == null ? absent('—', 'no Bolt transfer arrived this month')
+        : money(m.wire_bolt, 'AED', 2)) },
+    { label: 'Reached the bank', key: 'wire', num: true,
+      render: (m) => (m.transfers ? `<b>${money(m.wire, 'AED', 2)}</b>`
+        : absent('no transfer yet', m.to_date
+          ? 'no transfer has arrived this month so far'
+          : 'no transfer arrived in this month')) },
+    { label: 'Our figure, same transfers', key: 'calculated', num: true,
+      render: (m) => (m.compared
+        ? `${money(m.compared.calculated, 'AED', 2)}<span class="dim"> · ${m.compared.rows} of `
+          + `${m.transfers}</span>`
+        : absent(m.transfers ? 'not compared' : '—', reasonOf(m) || 'nothing arrived to compare')) },
+    { label: 'Difference', key: 'delta', num: true,
+      cellCls: (m) => (m.compared && !m.compared.unusual ? deltaTone(m.delta, m.delta_pct) || '' : ''),
+      render: (m) => (m.compared
+        ? `<b class="dl">${esc(signedMoney(m.delta))}</b>`
+          + `<span class="dim">&nbsp;·&nbsp;${esc(signedPct(m.delta_pct))}</span>`
+          + (m.compared.unusual
+            ? '<span class="ent-off" title="far outside the ±1% the other months show — the weeks '
+              + 'carrying it are named under this table">&nbsp;· unusual</span>' : '')
+        : absent('—', reasonOf(m) || 'nothing compared this month')) },
+    { label: 'Earned in the month', key: 'earned', num: true,
+      absent: 'no per-driver earnings are held for the platforms in this selection — Bolt files none.',
+      render: (m) => (m.earned == null
+        ? absent('—', 'no per-driver earnings are held for this month')
+        : `<span title="sum of driver_payout_day.earnings over ${m.earned_days} days of the month">`
+          + `${money(m.earned, 'AED', 2)}</span>`
+          + (m.to_date && m.earned_through
+            ? `<span class="dim"> · to ${esc(dateStr(m.earned_through))}</span>` : '')) },
+  ], { sortable: true, sortId: 'payout-monthly', cards: true, cardLead: 'month' });
+  foldRows(p.body, t, { shown: 12, noun: 'month', key: 'payout-monthly' });
+
+  p.body.append(note('Reached the bank is each month by the date the money arrived, as the bank '
+    + 'statement shows it. Earned in the month is our own figure for the month’s own days. They '
+    + 'differ by timing as well as by any gap: a Monday wire pays the week before it, so the last '
+    + 'days of every month arrive in the next. The difference is counted only over transfers whose '
+    + 'week our figure fully covers.'));
+
+  /* THE LIVE PART, said in words: what the current month holds so far, and
+     what has been earned since the last week a wire settled. */
+  const now = months.find((m) => m.to_date);
+  const pend = (Array.isArray(rec.pending) ? rec.pending : []).filter((x) => x.earned != null && x.days);
+  if (now || pend.length) {
+    const parts = [];
+    if (now) {
+      parts.push(`${monthLabel(now.month)} so far (to ${dateStr(now.through)}): `
+        + (now.transfers ? `${money(now.wire, 'AED', 2)} reached the bank in `
+          + `${countOf(now.transfers, 'transfer')}` : 'no transfer has arrived yet')
+        + (now.earned != null ? `; the drivers earned ${money(now.earned, 'AED', 2)} on the `
+          + `month’s days to ${dateStr(now.earned_through)}` : '') + '.');
+    }
+    for (const x of pend) {
+      parts.push(`${sourceLabel(x.platform)} · ${sourceLabel(x.fleet_id) || x.fleet_id}: `
+        + `${money(x.earned, 'AED', 2)} earned ${dateStr(x.from)} – ${dateStr(x.through)}, after `
+        + `the last settled week (to ${dateStr(x.settled_through)}) — the next Monday wire is `
+        + 'expected to bring it. This is our figure, not the provider’s.');
+    }
+    p.body.append(note(parts.join(' ')));
+  }
+
+  for (const m of months.filter((x) => x.compared && x.compared.unusual)) {
+    const weeks = m.compared.unusual_weeks.map((w) => `${sourceLabel(w.platform)} · `
+      + `${sourceLabel(w.fleet_id) || w.fleet_id} paid ${dateStr(w.paid_on)} (${signedPct(w.delta_pct)})`);
+    p.body.append(note(`${monthLabel(m.month)}: the transfers compared are ${signedPct(m.compared.delta_pct)} `
+      + 'apart, far outside the ±1% the other months show. It is carried by '
+      + `${weeks.length ? weeks.join(', ') : 'its weeks taken together'} — each is a row in the `
+      + 'table above, where its coverage is stated.', 'warn'));
+  }
+
+  /* Why transfers were not compared, once for the whole table, by kind. */
+  const why = {};
+  for (const m of months) {
+    for (const [k, v] of Object.entries(m.not_compared?.why || {})) {
+      const w = why[k] || (why[k] = { rows: 0, wire: 0 });
+      w.rows += v.rows; w.wire += v.wire;
+    }
+  }
+  for (const [k, v] of Object.entries(why)) {
+    p.body.append(note(`${countOf(v.rows, 'transfer')} (${money(v.wire, 'AED', 2)}) `
+      + `${v.rows === 1 ? 'is' : 'are'} counted in Reached the bank and not compared: `
+      + `${WHY_MONTH[k] || k}. That is not a difference of zero.`));
+  }
 }
 
 /* ── WHAT WE HAVE NOT ASKED UBER ABOUT ───────────────────────────────────
