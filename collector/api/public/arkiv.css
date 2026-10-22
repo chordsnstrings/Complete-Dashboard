@@ -608,7 +608,7 @@
 :root[data-skin="arkiv"] .hp td{border-top-color:var(--hair)}
 :root[data-skin="arkiv"] .mf thead th,:root[data-skin="arkiv"] .hp thead th{font-family:var(--mono);letter-spacing:.07em}
 :root[data-skin="arkiv"] .mf tbody th{font-family:var(--mono);font-size:var(--t3);letter-spacing:.06em;text-transform:uppercase}
-:root[data-skin="arkiv"] .hp tbody th,:root[data-skin="arkiv"] .hc .hc-x{font-family:var(--mono)}
+:root[data-skin="arkiv"] .hp tbody th,:root[data-skin="arkiv"] .hc .hc-x,:root[data-skin="arkiv"] .hc .hc-p{font-family:var(--mono)}
 :root[data-skin="arkiv"] .hp-key{font-family:var(--mono);font-size:var(--t2);letter-spacing:.04em}
 /* The Month target page (./targetmonth.js): its tables and charts in the
    skin's mono for figures and hairlines for rules, as the hours above. */

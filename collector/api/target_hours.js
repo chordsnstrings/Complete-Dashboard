@@ -81,11 +81,28 @@
 
    No revenue target set: the revenue panel is absent with that reason; the
    trips minimum always exists. Fewer than 7 days of history: no hourly
-   target, said so. */
+   target, said so.
+
+   PEOPLE AT WORK, AND WHAT EACH BROUGHT IN (the operator, 2026-10-22, on the
+   revenue chart: "show average active driver that hour as well, with average
+   per driver gross earning"). Each revenue hour carries how many people
+   worked it — today, and on the usual day — and its gross per person.
+   "Active" is what #compare's hourly people and the Drivers out tile already
+   mean: a person who took a booking requested in that Dubai hour, on any
+   channel, folded on the stored person key (peopleCountStored over
+   JOIN_TRIP), so driving two accounts is one person. The usual count is the
+   average over the SAME days the hour's fares are learned from (shapeOf's
+   picked days, through the day before yesterday), so the usual per person is
+   the usual hour's fares over the usual hour's people — one population, never
+   a fares day divided by a different day's headcount. Today's per person
+   divides the hour's done, which carries the live strip's estimate, so it is
+   an estimate exactly when that is. An hour nobody worked has no per-person
+   figure (null), never AED 0 over nobody. */
 import { monthTarget, addDays, BOOKING_SOURCES } from './revenue_target.js';
 import { buildDay } from './day_routes.js';
 import { spreadByHour } from './projection_sql.js';
 import { dubaiDay } from './window.js';
+import { peopleCountStored, JOIN_TRIP } from './custody_sql.js';
 
 export const HISTORY_DAYS = 28;
 export const HISTORY_MIN_DAYS = 7;
@@ -143,7 +160,16 @@ export function shapeOf(rows, { today, from, to }) {
       text: `over the last ${n} ${n === 1 ? 'day' : 'days'} (${from} to ${to})`,
       why: `Only ${same.length} of the last ${HOUR_WEEKS} ${weekday} ${same.length === 1 ? 'is' : 'are'} on record, so the hours are shared the way every day of the last ${HISTORY_DAYS} ran.` };
   return { days: n, from: basis.from, to: basis.to, ok: (useSame || n >= HISTORY_MIN_DAYS) && T > 0,
-    share: tot.map((v) => (T ? v / T : 0)), usual: tot.map((v) => (n ? v / n : 0)), basis };
+    share: tot.map((v) => (T ? v / T : 0)), usual: tot.map((v) => (n ? v / n : 0)), basis,
+    picked: pick.map(([d]) => d) };
+}
+
+/* The usual people per hour, over exactly the days `picked` (rows {d, h, p}). */
+export function usualPeople(rows, picked) {
+  const days = new Set(picked);
+  const tot = Array(24).fill(0);
+  for (const r of rows) if (days.has(r.d)) tot[r.h] += Number(r.p) || 0;
+  return tot.map((v) => (days.size ? v / days.size : 0));
 }
 
 /** The usual day, by Dubai hour, before `today`: completed trips (to
@@ -159,18 +185,53 @@ export async function usualDay(q, today) {
          FROM trip_norm n
         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking AND n.outcome = 'completed'
         GROUP BY 1, 2`, [from, tripsTo]),
+    /* The people per hour ride on the fares' own scan: JOIN_TRIP is on
+       trip's primary key, so it is 1:1 and leaves the sum untouched. */
     q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS d, n.local_hour AS h,
-              coalesce(sum(n.price) FILTER (WHERE n.has_fare), 0)::float AS v
-         FROM trip_norm n
+              coalesce(sum(n.price) FILTER (WHERE n.has_fare), 0)::float AS v,
+              ${peopleCountStored('t.person_key', 'n.driver_ext_id')}
+                FILTER (WHERE n.driver_ext_id IS NOT NULL)::int AS p
+         FROM trip_norm n ${JOIN_TRIP}
         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
         GROUP BY 1, 2`, [faresFrom, faresTo]),
   ]);
   /* `window` is the whole span read — what seenCurve pools over, since when
      a trip reaches us does not depend on the weekday. */
+  const f = shapeOf(fares, { today, from: faresFrom, to: faresTo });
   return {
     trips: { ...shapeOf(trips, { today, from, to: tripsTo }), window: { from, to: tripsTo } },
-    fares: { ...shapeOf(fares, { today, from: faresFrom, to: faresTo }), window: { from: faresFrom, to: faresTo } },
+    fares: { ...f, people: usualPeople(fares, f.picked), window: { from: faresFrom, to: faresTo } },
   };
+}
+
+/* Today's people per hour: a booking requested in the hour, folded. */
+async function todayPeople(q, today) {
+  const rows = await q(`SELECT n.local_hour AS h,
+                               ${peopleCountStored('t.person_key', 'n.driver_ext_id')}
+                                 FILTER (WHERE n.driver_ext_id IS NOT NULL)::int AS p
+                          FROM trip_norm n ${JOIN_TRIP}
+                         WHERE n.local_day = $1::date AND n.is_booking
+                         GROUP BY 1`, [today]);
+  const out = Array(24).fill(0);
+  for (const r of rows) out[r.h] = Number(r.p) || 0;
+  return out;
+}
+
+/** Each hour's people and gross per person, today and on the usual day
+    (`people` today by hour, `usual` the usual day's by hour); hours after
+    `cur` have no today. Shared with mockapi.mjs, so the fixture cannot draw
+    a different shape from the route. */
+export function withPeople(x, { people, usual, cur }) {
+  const each = (v, n) => (v != null && n > 0 ? r2(v / n) : null);
+  const hours = x.hours.map((r) => {
+    const now = r.h <= cur ? people[r.h] || 0 : null;
+    return { ...r, drivers: now, usual_drivers: r1(usual[r.h] || 0),
+      per_driver: now == null ? null : each(r.done, now), usual_per_driver: each(r.usual, usual[r.h]) };
+  });
+  const th = hours[cur];
+  return { ...x, hours,
+    this_hour: x.this_hour && th ? { ...x.this_hour, drivers: th.drivers, usual_drivers: th.usual_drivers,
+      per_driver: th.per_driver, usual_per_driver: th.usual_per_driver } : x.this_hour };
 }
 
 /** How much of each hour a usual day had REPORTED by the cut's clock time
@@ -307,12 +368,13 @@ const countDays = (n) => `${n} ${n === 1 ? 'day' : 'days'}`;
 /** Everything the first page's two hourly panels print. */
 export async function targetHours(q, { now = new Date(), min = null } = {}) {
   const today = dubaiDay(now);
-  const [t, usual, rows, day, ran] = await Promise.all([
+  const [t, usual, rows, day, ran, people] = await Promise.all([
     monthTarget(q, { today, now, min }),
     usualDay(q, today),
     todayByHour(q, today),
     buildDay(q, today).catch(() => null),
     collectedTo(q, today),
+    todayPeople(q, today),
   ]);
   const newest = (k) => rows.reduce((m, r) => (r[k] && (!m || new Date(r[k]) > m) ? new Date(r[k]) : m), null);
   const latestBooking = newest('latest');
@@ -353,8 +415,9 @@ export async function targetHours(q, { now = new Date(), min = null } = {}) {
     : !usual.fares.ok
       ? { absent: `An hour's revenue target needs ${HISTORY_MIN_DAYS} days of priced fares to learn the usual day from; `
         + `${usual.fares.days} ${usual.fares.days === 1 ? 'is' : 'are'} on record.` }
-      : { ...hoursOf({ target: t.summary.today_needs, share: usual.fares.share, usual: usual.fares.usual,
+      : { ...withPeople(hoursOf({ target: t.summary.today_needs, share: usual.fares.share, usual: usual.fares.usual,
         done: faresDone, cur, gone, seen: fSeen.seen, next: fSeen.next, money: true }),
+      { people, usual: usual.fares.people, cur }),
       estimate: projected > 0, projected: r2(projected), measured: r2(rows.reduce((s, r) => s + Number(r.fares), 0)),
       basis: usual.fares.basis,
       timing: timing(fSeen, 'fares') };

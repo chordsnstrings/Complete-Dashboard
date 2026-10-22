@@ -10296,6 +10296,42 @@ Built as "Month by month" on `#payouts` (FIX-STATUS MON). Production at 03:40Z, 
   Compare a wire only with the week it settles, and show the earned month beside it as its own
   column.
 
+## What the fleet receives from Uber and Bolt — measured 2026-10-22
+
+Asked by the operator after a table of gross fares: "what does the fleet receive?" Read from
+production through `/api/finance/payouts/reconcile` (every transfer), `/api/trend/monthly`
+(gross) and `/api/settlement/mix?platform=` per month (the `cash` class).
+
+* **Two flows, never one.** The bank gets the weekly transfer. The cash a rider hands the
+  driver never passes through Uber's or Bolt's books; it sits with the driver until handed in.
+  "Received" is bank + cash, and the two have different month bases: the bank month is the
+  month a transfer ARRIVED, the cash month is the month of the trip.
+* **Whole record, per AED 100 of gross:** Uber 61.6 to the bank + 15.4 cash with drivers;
+  Bolt 30.0 to the bank + 49.0 cash. Bolt's take is therefore about 21. Bolt publishes its
+  commission only in the balance ledger (`commissions_in_app`, `commissions_cash`), stored
+  since 2026-09-23 and served by no read route, so that 21 is a remainder, not a reading.
+  Totals: bank AED 11,573,840 (Uber 11,169,503 · Bolt 404,337) = the reconcile route's own
+  `totals.wire`; cash AED 3,453,275 (Uber 2,793,897 · Bolt 659,378).
+* **Uber, three closed statement weeks 7–27 Sep 2026, both fleets:** statement fare
+  842,722.45 against trip gross 845,885.30 (99.6%); service fee −210,774.95 (25.0 per 100);
+  tax on the fee −10,815.13 (1.3); tips +4,835.70; cash collected −121,415.96 (14.4);
+  transfers of 14, 21 and 28 Sep 542,595.21 (64.4). The transfers exceed
+  fare − fee − tax + tips − cash by about 35,700 (4.2 per 100): the reimbursements
+  (Salik, Sharjah surcharge, airport fees) that `api/reconcile_routes.js` already names as
+  the floor under the Uber gap. Repaid costs, not income.
+
+### Traps this added to the list
+
+* **The trip-level `cash` class understates Uber's cash by about 10%.** Same three weeks:
+  `settlement/mix` cash AED 109,862.95 against the statement's `cash_collected` 121,415.96.
+  The statement is Uber's own figure; quote the trip figure as a floor for Uber.
+* **`/api/earnings/components` counts only statement periods wholly inside the window.** Ask
+  it for September and it answers 7–27 Sep (`first_period`/`last_period`), not a month. Read
+  those two fields before calling anything from it monthly.
+* **The dashboard's Bolt "money" is the gross.** `/api/finance/daily?platform=bolt` reports
+  `money_source: "fares"`, because no Bolt payout is tied to a period. Bolt's bank share is
+  30% of that figure; nothing that reads "money" for Bolt is what reached the fleet.
+
 ## ntfy phone alerts — built 2026-10-20
 
 The credential banner's verdicts (`/api/auth`, `authHealth` in

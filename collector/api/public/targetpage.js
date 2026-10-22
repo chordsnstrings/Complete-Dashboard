@@ -56,6 +56,13 @@ const sign = (v, f) => (v >= 0 ? `▲ ${f(v)} ahead` : `▼ ${f(-v)} behind`);
 const tone = (v) => (v == null ? null : v >= 0 ? 'over' : 'under');
 const trips = (v) => { if (v == null) return '—'; const n = Math.round(v) || 0; return `${fmt(n)} ${n === 1 ? 'trip' : 'trips'}`; };
 const aed = (v) => (v == null ? '—' : money(v));
+/* The revenue hours' people and gross per person (api/target_hours.js
+   withPeople). Today's count is whole; the usual is an average over days, to
+   one place. A person's gross in whole dirhams: fils on a per-head figure
+   are noise beside the hour's own total. */
+const drivers = (v) => (v == null ? '—' : `${fmt(v, 1)} ${v === 1 ? 'driver' : 'drivers'}`);
+const each = (v) => (v == null ? '—' : `AED ${fmt(Math.round(v))}`);
+const hasPeople = (x) => !!x?.hours?.some((r) => r.usual_drivers != null);
 const approx = (v, est) => (v == null ? '—' : `${est ? '≈ ' : ''}${money(v)}`);
 /* Weekday weights (index 0 Sunday) as the fleet reads a week, Monday first. */
 const WD3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -161,8 +168,15 @@ export function todayHtml(h) {
 export function hourChart(x, { isMoney, W = 1300, every = 3 }) {
   /* Drawn at the width it is shown at (a full-width panel, ~1,300px at a
      1440 screen; the phone's card, 360), so the hour labels stay at reading
-     size — the phone labels every sixth hour. */
-  const H = W < 600 ? 120 : 190, pl = 6, pr = 6, pt = 10, pb = 22;
+     size — the phone labels every sixth hour.
+     The revenue chart on a desktop also prints, under each hour, the drivers
+     a usual day has at work in it and the gross each brings in (the
+     operator, 2026-10-22: "show average active driver that hour as well,
+     with average per driver gross earning"), two rows named in a left
+     gutter. The phone's 360px has no room for 48 more figures; its summary
+     line carries this hour's. */
+  const ppl = isMoney && W >= 600 && hasPeople(x);
+  const H = (W < 600 ? 120 : 190) + (ppl ? 36 : 0), pl = ppl ? 74 : 6, pr = 6, pt = 10, pb = ppl ? 58 : 22;
   const iw = W - pl - pr, ih = H - pt - pb, step = iw / 24, bw = step * 0.62;
   const hi = Math.max(1, ...x.hours.map((r) => Math.max(r.need || 0, r.done || 0, r.usual || 0, r.catch_up || 0)));
   const y = (v) => pt + ih - (ih * (v || 0)) / hi;
@@ -173,7 +187,9 @@ export function hourChart(x, { isMoney, W = 1300, every = 3 }) {
     const tip = `${r.label}: target ${f(r.need)}, usually ${f(r.usual)}`
       + (r.done != null ? `, done ${isMoney && x.estimate ? '≈ ' : ''}${f(r.done)}` : '')
       + (r.state === 'arriving' ? ` so far — still arriving; the usual day had ${f(r.expect)} of it reported by now` : '')
-      + (r.catch_up != null ? `, to land the day ${f(r.catch_up)}` : '');
+      + (r.catch_up != null ? `, to land the day ${f(r.catch_up)}` : '')
+      + (ppl ? `; drivers usually ${drivers(r.usual_drivers)}, ${each(r.usual_per_driver)} each`
+        + (r.drivers != null ? `, today ${drivers(r.drivers)}, ${isMoney && x.estimate && r.per_driver != null ? '≈ ' : ''}${each(r.per_driver)} each` : '') : '');
     const g = [`<g class="hc-h hc-${r.state}"><title>${esc(tip)}</title>`];
     if (r.done != null && r.done > 0) g.push(`<rect class="hc-done" x="${bx.toFixed(1)}" y="${y(r.done).toFixed(1)}" width="${bw.toFixed(1)}" height="${(pt + ih - y(r.done)).toFixed(1)}"/>`);
     if (r.need > 0) g.push(`<rect class="hc-need" x="${bx.toFixed(1)}" y="${y(r.need).toFixed(1)}" width="${bw.toFixed(1)}" height="${(pt + ih - y(r.need)).toFixed(1)}"/>`);
@@ -182,9 +198,20 @@ export function hourChart(x, { isMoney, W = 1300, every = 3 }) {
     g.push('</g>');
     parts.push(g.join(''));
     /* The first label starts at its bar, so the edge does not clip it. */
-    if (i % every === 0) parts.push(`<text class="hc-x" x="${(i ? bx + bw / 2 : bx).toFixed(1)}" y="${H - 6}" text-anchor="${i ? 'middle' : 'start'}">${r.label}</text>`);
+    if (i % every === 0) parts.push(`<text class="hc-x" x="${(i ? bx + bw / 2 : bx).toFixed(1)}" y="${pt + ih + 16}" text-anchor="${i ? 'middle' : 'start'}">${r.label}</text>`);
+    /* An hour a usual day has nobody at work in prints nothing: a per-head
+       figure over nobody is not a figure. */
+    if (ppl && r.usual_drivers > 0) {
+      const cx = (bx + bw / 2).toFixed(1);
+      parts.push(`<text class="hc-p" x="${cx}" y="${pt + ih + 34}" text-anchor="middle">${fmt(Math.round(r.usual_drivers))}</text>`
+        + (r.usual_per_driver != null ? `<text class="hc-p" x="${cx}" y="${pt + ih + 51}" text-anchor="middle">${fmt(Math.round(r.usual_per_driver))}</text>` : ''));
+    }
   });
-  return `<svg class="hc" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(`Each hour today: its target, what it usually does, and what it did`)}">`
+  if (ppl) {
+    parts.push(`<text class="hc-x hc-pl" x="0" y="${pt + ih + 34}">drivers</text>`
+      + `<text class="hc-x hc-pl" x="0" y="${pt + ih + 51}">AED each</text>`);
+  }
+  return `<svg class="hc${ppl ? ' hc-ppl' : ''}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(`Each hour today: its target, what it usually does, and what it did${ppl ? '; under each hour, the drivers usually at work in it and the gross each usually brings in' : ''}`)}">`
     + `<line class="hc-base" x1="${pl}" x2="${W - pr}" y1="${pt + ih}" y2="${pt + ih}"/>${parts.join('')}</svg>`;
 }
 
@@ -213,6 +240,9 @@ function ledeHtml(x, h, { isMoney }) {
     + `${esc(`Left for today: ${f(x.left)}.`)}`
     + (x.arriving ? ` ${esc(`${x.arriving === 1 ? 'The hour just gone is' : `${x.arriving} hours just gone are`} still arriving — a trip reaches us about half an hour after it is requested, so an hour is called under only once it has settled.`)}` : '')
     + (x.this_hour ? ` ${esc(`This hour, ${x.this_hour.label}: ${plain(x.this_hour.catch_up ?? x.this_hour.need)} in what is left of it to land the day (its target ${plain(x.this_hour.need)}).`)}` : '')
+    + (isMoney && x.this_hour?.drivers != null
+      ? ` ${esc(`At work in it so far: ${drivers(x.this_hour.drivers)}${x.this_hour.drivers ? `, ${est && x.this_hour.per_driver != null ? '≈ ' : ''}${each(x.this_hour.per_driver)} each` : ''}; `
+        + (x.this_hour.usual_drivers > 0 ? `a usual day has ${drivers(x.this_hour.usual_drivers)} at ${each(x.this_hour.usual_per_driver)} each.` : 'a usual day has nobody at work in it.'))}` : '')
     + '</p>';
 }
 
@@ -245,22 +275,38 @@ export function hoursHtml(x, h, { isMoney }) {
     + '<span class="hk hk-done-under"></span>done, under<span class="hk hk-done-arriving"></span>ended, still arriving'
     + '<span class="hk hk-done-now"></span>this hour so far'
     + '<span class="hk hk-need"></span>target<span class="hk hk-catch"></span>to land the day'
-    + '<span class="hk hk-usual"></span>what the hour usually does</p>';
+    + '<span class="hk hk-usual"></span>what the hour usually does'
+    + (isMoney && hasPeople(x) ? '<span class="hk-ppl">under each hour: drivers usually at work, AED each usually brings in</span>' : '') + '</p>';
+  /* Drivers and gross per driver, today beside the usual day (revenue only:
+     api/target_hours.js withPeople). An hour to come has only the usual. */
+  const ppl = isMoney && hasPeople(x);
+  const usually = (v) => `<span class="hp-dim">${esc(`usually ${v}`)}</span>`;
+  const peopleTds = (r) => {
+    if (!ppl) return '';
+    const none = !r.usual_drivers && !r.drivers;
+    const d = none ? '<span class="hp-dim">—</span>' : r.drivers == null ? usually(fmt(r.usual_drivers, 1))
+      : `${esc(fmt(r.drivers))} ${usually(fmt(r.usual_drivers, 1))}`;
+    const e = none ? '<span class="hp-dim">—</span>' : r.drivers == null ? usually(each(r.usual_per_driver))
+      : `${esc(`${est && r.per_driver != null ? '≈ ' : ''}${each(r.per_driver)}`)} ${usually(each(r.usual_per_driver))}`;
+    return `<td>${d}</td><td>${e}</td>`;
+  };
   const rows = x.hours.map((r) => {
     const status = statusHtml(r, plain);
     const quiet = !r.need && !r.done && !r.usual ? ' class="hp-quiet"' : (r.state === 'now' ? ' class="hp-cur"' : '');
     return `<tr${quiet}><th scope="row">${r.label}</th><td>${esc(plain(r.usual))}</td><td>${esc(plain(r.need))}</td>`
-      + `<td>${r.done == null ? '<span class="hp-dim">—</span>' : esc(f(r.done))}</td><td>${status}</td>`
+      + `<td>${r.done == null ? '<span class="hp-dim">—</span>' : esc(f(r.done))}</td>${peopleTds(r)}<td class="hp-st">${status}</td>`
       + `<td>${r.catch_up == null ? '<span class="hp-dim">—</span>' : esc(plain(r.catch_up))}</td>`
       + `<td>${r.cum_done == null ? '<span class="hp-dim">—</span>' : esc(`${f(r.cum_done)} / ${plain(r.cum_need)}`)}</td></tr>`;
   }).join('');
   const timing = x.timing?.why ? ` ${x.timing.why}`
     : x.timing?.days ? ` “Due by now” is what the usual day had reported by this time of day — a trip reaches us after it is over — over the ${countOf(x.timing.days, 'day')} collected live; an hour gone is still arriving while the usual day would add more of it within the hour.` : '';
   const basis = `<p class="cap hp-basis">${esc(`Each hour’s target is today’s ${plain(x.target)} × the share of a day’s ${isMoney ? 'fares' : 'completed trips'} that hour carried ${x.basis?.text || `over the last ${countOf(x.basis?.days, 'day')} (${x.basis?.from} to ${x.basis?.to})`}.${x.basis?.why ? ` ${x.basis.why}` : ''} “To land the day” shares what is still to do over the hours left in the same proportions.${timing}`)}`
-    + (est ? ` ${esc('Today’s revenue is the live strip’s estimate — fares on record plus each channel’s unpriced bookings at its settled per-booking rate — until Uber publishes the day’s fares, which are fetched every hour.')}` : '') + '</p>';
+    + (est ? ` ${esc('Today’s revenue is the live strip’s estimate — fares on record plus each channel’s unpriced bookings at its settled per-booking rate — until Uber publishes the day’s fares, which are fetched every hour.')}` : '')
+    + (ppl ? ` ${esc(`Drivers are the people who took a booking requested in that hour, on any channel, each counted once however many accounts they drive; the usual is their average over the same days the hour’s share is learned from, and the gross per driver is the hour’s fares over them${est ? ' — today’s carries the same estimate as the hour’s revenue' : ''}. A driver on a long trip counts in the hour it was requested.`)}` : '')
+    + '</p>';
   return `${head}${hourChart(x, { isMoney })}${key}`
     + `<div class="tablewrap"><table class="hp"><thead><tr><th scope="col">Hour</th><th scope="col">Usually</th><th scope="col">Target</th>`
-    + `<th scope="col">Done</th><th scope="col">On target?</th><th scope="col">To land the day</th><th scope="col">Running, done / target</th></tr></thead>`
+    + `<th scope="col">Done</th>${ppl ? '<th scope="col">Drivers</th><th scope="col">Per driver</th>' : ''}<th scope="col">On target?</th><th scope="col">To land the day</th><th scope="col">Running, done / target</th></tr></thead>`
     + `<tbody>${rows}</tbody></table></div>${basis}`;
 }
 
