@@ -5364,7 +5364,7 @@ hour as well, with average per driver gross earning".
 | DRVH2 | `api/access/manifest.json`: `per_driver` / `usual_per_driver` are REV, withheld with the rest of the revenue; the counts are unclassed like `trips.active` and /api/compare's `a_drivers` | yes | **on production** `8760fe2f` (`96dfe5e1`), 2026-10-22 | `target_hours` §5 |
 | DRVH3 | `api/public/targetpage.js`: the revenue table gains Drivers and Per driver (today, then "usually …"; an hour to come shows only the usual); the desktop chart prints the usual drivers and AED each under every hour worked, in two rows named in a left gutter; the summary line names this hour's drivers and gross each against the usual. The phone's 360 px chart is unchanged; its summary line carries this hour's. The trips panel is unchanged | yes | **on production** `8760fe2f` (`96dfe5e1`), 2026-10-22 | `target_hours` §8; screenshots against the mock, light 1440 and dark 1280, no overflow |
 | DRVH4 | `app.css`: the verdict column is aligned by its class (`td.hp-st`), not as the 5th cell, since the revenue table now has two cells before it | yes | **on production** `8760fe2f` (`96dfe5e1`), 2026-10-22 | `arkiv_skin` 119/0, `type_scale`, `chart_*` green |
-| DRVH5 | An hour whose completed trips are not all priced, on a channel the strip's estimate cannot value, has its drivers and only part of its money: its per-driver figure is absent and `fares_pending` says how many fares are still to come ("45 fares not in yet"). Found on production the hour DRVH1 went live (18:33 Dubai): the 17:00 hour held 54 people over AED 786.23 — most of its Uber trips unpriced and the day's `projection_parts` empty — and read AED 14.56 a driver against a usual AED 80.06. `fares_pending` is BK in the manifest | yes | — | `target_hours` §10, 69/0; with `open: null` 67/2 |
+| DRVH5 | An hour whose completed trips are not all priced, on a channel the strip's estimate cannot value, has its drivers and only part of its money: its per-driver figure is absent and `fares_pending` says how many fares are still to come ("45 fares not in yet"). Found on production the hour DRVH1 went live (18:33 Dubai): the 17:00 hour held 54 people over AED 786.23 — most of its Uber trips unpriced and the day's `projection_parts` empty — and read AED 14.56 a driver against a usual AED 80.06. `fares_pending` is BK in the manifest | yes | **on production** `b9ee52b3` (`d8935c3e`), 2026-10-22 | `target_hours` §10, 69/0; with `open: null` 67/2 |
 
 **Revert proof.** Against the 67 checks in `target_hours`: `revenue.hours[].per_driver` taken out
 of the manifest → 66/1 (the REV withholding); today's people counted per account instead of per
@@ -5377,3 +5377,11 @@ at 18:33 Dubai: every revenue hour carries the four fields (usual basis "the las
 e.g. 15:00 — 59 drivers against a usual 59.5, AED 86.67 each against 80.68. Response time
 0.51–0.74 s warm, as before the deploy (0.47–0.81 s); the first call after the restart 4.45 s,
 as before (4.11 s). DRVH5 is the defect that reading found.
+
+**DRVH5 live, 2026-10-22.** chordsnstrings/Complete-Dashboard#22 merged as `d8935c3e`, force-built
+as deployment `b9ee52b3`; `sw.js` serves `fleet-3a104a464833`. At 18:41 Dubai the 16:00, 17:00
+and 18:00 hours carried 5, 56 and 10 fares not in yet and no per-driver figure; every settled
+hour kept its own (15:00: 59 drivers, AED 86.67 each against a usual 80.68). Through
+`bin/prod-mirror.mjs` at 1440×900, light and dark: the chart's two rows, the table's two
+columns and "15 drivers (10 fares not in yet, so nothing each yet)" in the summary; no overflow,
+no script error.
