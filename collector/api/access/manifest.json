@@ -8038,6 +8038,8 @@
      "trips.hours[].cum_done",
      "trips.hours[].catch_up",
      "trips.hours[].expect",
+     "revenue.hours[].fares_pending",
+     "revenue.this_hour.fares_pending",
      "trips.this_hour.need",
      "trips.this_hour.catch_up",
      "trips.this_hour.done",

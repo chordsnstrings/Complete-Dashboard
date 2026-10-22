@@ -64,7 +64,9 @@
    and, 2026-10-22, against the 67 with §10 (drivers and gross per driver):
      per_driver left out of the manifest ............ 66 passed,  1 FAILED
      today's people counted per account ............. 66 passed,  1 FAILED
-     the usual over every day read, not the picked .. 66 passed,  1 FAILED */
+     the usual over every day read, not the picked .. 66 passed,  1 FAILED
+   and against the 69, a per-driver figure over an hour whose fares are not
+   all in (production read AED 14.56 against a usual 80.06) . 67 passed, 2 FAILED */
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { applySchema } from './schema.mjs';
@@ -413,6 +415,22 @@ check('a second account of the same person adds nobody; a new person adds one; a
   at(two, 8).drivers === 10 && at(two, 18).drivers === 11 && at(two, 8).usual_drivers === 10 && at(two, 8).usual_per_driver === 150,
   j([at(two, 8).drivers, at(two, 18).drivers, at(two, 8).usual_drivers, at(two, 8).usual_per_driver]));
 await q(`DELETE FROM trip WHERE external_id IN ('p1', 'p2', 'p3')`);
+/* A fare not in yet, on a channel the strip's estimate cannot value (no
+   settled Yango day to rate it from): the 18:00 hour keeps its 10 drivers and
+   has only part of its money, so it has no figure each and says why
+   (production, 2026-10-22 18:33: 54 people over AED 786.23 read AED 14.56). */
+await q(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, plate, requested_at, ended_at, status, payment_type, price, currency, raw)
+         VALUES ('yango', 'p4', 'ecosine', 'y-3', 'Test Driver 3', 'C3', '2026-10-02T18:20:00+04:00', '2026-10-02T18:40:00+04:00', 'completed', 'card', NULL, 'AED', '{}'::jsonb)`);
+const openH = await targetHours(q, { now: NOW });
+const op = openH.revenue;
+check('an hour with a fare not in yet: its drivers, no figure each, and how many fares are missing; the hours around it unchanged',
+  at(op, 18).drivers === 10 && at(op, 18).per_driver === null && at(op, 18).fares_pending === 1
+  && at(op, 8).per_driver === 150 && at(op, 8).fares_pending === 0 && at(op, 20).fares_pending === null,
+  j([at(op, 18).drivers, at(op, 18).per_driver, at(op, 18).fares_pending, at(op, 8).per_driver, at(op, 20).fares_pending]));
+const oh = Object.fromEntries(rowsOf(hoursHtml(op, openH, { isMoney: true })).map((r) => [r.h, r]));
+check('…and the page says "1 fare not in yet" in its place, beside the usual',
+  /<td><span class="hp-dim">1 fare not in yet<\/span> <span class="hp-dim">usually AED 250<\/span><\/td>/.test(oh['18:00'].html), oh['18:00'].html);
+await q(`DELETE FROM trip WHERE external_id = 'p4'`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 api.server.close();

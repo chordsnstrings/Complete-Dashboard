@@ -63,6 +63,11 @@ const aed = (v) => (v == null ? '—' : money(v));
 const drivers = (v) => (v == null ? '—' : `${fmt(v, 1)} ${v === 1 ? 'driver' : 'drivers'}`);
 const each = (v) => (v == null ? '—' : `AED ${fmt(Math.round(v))}`);
 const hasPeople = (x) => !!x?.hours?.some((r) => r.usual_drivers != null);
+/* Today's gross per driver, or why there is none: an hour whose completed
+   trips are not all priced (and not estimated) has a headcount and only part
+   of its money, so it says what is missing rather than dividing. */
+const eachToday = (r, est) => (r.per_driver != null ? `${est ? '≈ ' : ''}${each(r.per_driver)}`
+  : r.fares_pending > 0 ? `${countOf(r.fares_pending, 'fare')} not in yet` : '—');
 const approx = (v, est) => (v == null ? '—' : `${est ? '≈ ' : ''}${money(v)}`);
 /* Weekday weights (index 0 Sunday) as the fleet reads a week, Monday first. */
 const WD3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -189,7 +194,7 @@ export function hourChart(x, { isMoney, W = 1300, every = 3 }) {
       + (r.state === 'arriving' ? ` so far — still arriving; the usual day had ${f(r.expect)} of it reported by now` : '')
       + (r.catch_up != null ? `, to land the day ${f(r.catch_up)}` : '')
       + (ppl ? `; drivers usually ${drivers(r.usual_drivers)}, ${each(r.usual_per_driver)} each`
-        + (r.drivers != null ? `, today ${drivers(r.drivers)}, ${isMoney && x.estimate && r.per_driver != null ? '≈ ' : ''}${each(r.per_driver)} each` : '') : '');
+        + (r.drivers != null ? `, today ${drivers(r.drivers)}, ${eachToday(r, isMoney && x.estimate)}${r.per_driver != null ? ' each' : ''}` : '') : '');
     const g = [`<g class="hc-h hc-${r.state}"><title>${esc(tip)}</title>`];
     if (r.done != null && r.done > 0) g.push(`<rect class="hc-done" x="${bx.toFixed(1)}" y="${y(r.done).toFixed(1)}" width="${bw.toFixed(1)}" height="${(pt + ih - y(r.done)).toFixed(1)}"/>`);
     if (r.need > 0) g.push(`<rect class="hc-need" x="${bx.toFixed(1)}" y="${y(r.need).toFixed(1)}" width="${bw.toFixed(1)}" height="${(pt + ih - y(r.need)).toFixed(1)}"/>`);
@@ -241,7 +246,8 @@ function ledeHtml(x, h, { isMoney }) {
     + (x.arriving ? ` ${esc(`${x.arriving === 1 ? 'The hour just gone is' : `${x.arriving} hours just gone are`} still arriving — a trip reaches us about half an hour after it is requested, so an hour is called under only once it has settled.`)}` : '')
     + (x.this_hour ? ` ${esc(`This hour, ${x.this_hour.label}: ${plain(x.this_hour.catch_up ?? x.this_hour.need)} in what is left of it to land the day (its target ${plain(x.this_hour.need)}).`)}` : '')
     + (isMoney && x.this_hour?.drivers != null
-      ? ` ${esc(`At work in it so far: ${drivers(x.this_hour.drivers)}${x.this_hour.drivers ? `, ${est && x.this_hour.per_driver != null ? '≈ ' : ''}${each(x.this_hour.per_driver)} each` : ''}; `
+      ? ` ${esc(`At work in it so far: ${drivers(x.this_hour.drivers)}${x.this_hour.drivers ? (x.this_hour.per_driver != null ? `, ${eachToday(x.this_hour, est)} each`
+        : x.this_hour.fares_pending > 0 ? ` (${eachToday(x.this_hour, est)}, so nothing each yet)` : '') : ''}; `
         + (x.this_hour.usual_drivers > 0 ? `a usual day has ${drivers(x.this_hour.usual_drivers)} at ${each(x.this_hour.usual_per_driver)} each.` : 'a usual day has nobody at work in it.'))}` : '')
     + '</p>';
 }
@@ -287,7 +293,7 @@ export function hoursHtml(x, h, { isMoney }) {
     const d = none ? '<span class="hp-dim">—</span>' : r.drivers == null ? usually(fmt(r.usual_drivers, 1))
       : `${esc(fmt(r.drivers))} ${usually(fmt(r.usual_drivers, 1))}`;
     const e = none ? '<span class="hp-dim">—</span>' : r.drivers == null ? usually(each(r.usual_per_driver))
-      : `${esc(`${est && r.per_driver != null ? '≈ ' : ''}${each(r.per_driver)}`)} ${usually(each(r.usual_per_driver))}`;
+      : `${r.per_driver == null && r.fares_pending > 0 ? `<span class="hp-dim">${esc(eachToday(r, est))}</span>` : esc(eachToday(r, est))} ${usually(each(r.usual_per_driver))}`;
     return `<td>${d}</td><td>${e}</td>`;
   };
   const rows = x.hours.map((r) => {
@@ -302,7 +308,7 @@ export function hoursHtml(x, h, { isMoney }) {
     : x.timing?.days ? ` “Due by now” is what the usual day had reported by this time of day — a trip reaches us after it is over — over the ${countOf(x.timing.days, 'day')} collected live; an hour gone is still arriving while the usual day would add more of it within the hour.` : '';
   const basis = `<p class="cap hp-basis">${esc(`Each hour’s target is today’s ${plain(x.target)} × the share of a day’s ${isMoney ? 'fares' : 'completed trips'} that hour carried ${x.basis?.text || `over the last ${countOf(x.basis?.days, 'day')} (${x.basis?.from} to ${x.basis?.to})`}.${x.basis?.why ? ` ${x.basis.why}` : ''} “To land the day” shares what is still to do over the hours left in the same proportions.${timing}`)}`
     + (est ? ` ${esc('Today’s revenue is the live strip’s estimate — fares on record plus each channel’s unpriced bookings at its settled per-booking rate — until Uber publishes the day’s fares, which are fetched every hour.')}` : '')
-    + (ppl ? ` ${esc(`Drivers are the people who took a booking requested in that hour, on any channel, each counted once however many accounts they drive; the usual is their average over the same days the hour’s share is learned from, and the gross per driver is the hour’s fares over them${est ? ' — today’s carries the same estimate as the hour’s revenue' : ''}. A driver on a long trip counts in the hour it was requested.`)}` : '')
+    + (ppl ? ` ${esc(`Drivers are the people who took a booking requested in that hour, on any channel, each counted once however many accounts they drive; the usual is their average over the same days the hour’s share is learned from, and the gross per driver is the hour’s fares over them${est ? ' — today’s carries the same estimate as the hour’s revenue' : ''}. A driver on a long trip counts in the hour it was requested. While some of an hour’s completed trips have no fare yet (Uber prices a trip hours after it) and no estimate stands in for them, the hour has its drivers and only part of its money, so it says how many fares are still to come instead of a figure each.`)}` : '')
     + '</p>';
   return `${head}${hourChart(x, { isMoney })}${key}`
     + `<div class="tablewrap"><table class="hp"><thead><tr><th scope="col">Hour</th><th scope="col">Usually</th><th scope="col">Target</th>`
