@@ -1542,3 +1542,35 @@
 :root[data-skin="arkiv"] .sup-c.b0::after{content:'▾';position:absolute;inset:0;display:grid;place-items:center;
   color:var(--sem-neg);font-size:var(--t1);line-height:1}
 :root[data-skin="arkiv"] .sup-c.none,:root[data-skin="arkiv"] .sw.none{background:none;box-shadow:inset 0 0 0 1px var(--abs-outline)}
+
+/* ── FOCUS (focus.js, 2026-10-22) ─────────────────────────────────────────
+   "It's not a dashboard, it's a manuscript." focus.js marks each long
+   explanation; these rules hide it until its panel's "ⓘ notes" is opened,
+   where it shows in its own place. Nothing is removed. [data-focus="off"]
+   (the control bar's ⓘ button) shows every word as before. */
+:root[data-skin="arkiv"][data-focus="on"] [data-fx="fold"]:not(.fx-open [data-fx="fold"]){display:none}
+:root[data-skin="arkiv"][data-focus="on"] :is([data-fx="lead"],[data-fx="flag"],[data-fx="clamp"]):not(.fx-open *){
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;line-clamp:1;overflow:hidden}
+:root[data-skin="arkiv"][data-focus="on"] [data-fx="flag"]::before{content:"";display:inline-block;width:7px;height:7px;
+  border-radius:50%;background:var(--sem-neg);margin-right:8px;vertical-align:1px}
+:root[data-skin="arkiv"][data-focus="off"] .fx-more{display:none}
+:root[data-skin="arkiv"] .fx-more{display:flex;align-items:center;gap:6px;width:100%;margin:10px 0 0;padding:6px 0 0;
+  border:0;border-top:1px dashed var(--hair);background:none;font-family:var(--sans);font-size:var(--t3);
+  color:var(--grey);text-align:left;cursor:pointer}
+:root[data-skin="arkiv"] .fx-more:hover{color:var(--ink)}
+:root[data-skin="arkiv"] .fx-more:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+:root[data-skin="arkiv"] #pageFoot>.fx-more{border-top:0;margin-top:4px}
+:root[data-skin="arkiv"] #focusBtn[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+/* The shell, shorter: the masthead loses its second line (the window is in
+   the control bar), the bar's "does not apply" sentence becomes its tooltip,
+   and the Today strip is one row of figures outside the Today pages. */
+:root[data-skin="arkiv"][data-focus="on"] .mast{padding-top:12px;padding-bottom:8px}
+:root[data-skin="arkiv"][data-focus="on"] .mast-org,
+:root[data-skin="arkiv"][data-focus="on"] #mastWin,
+:root[data-skin="arkiv"][data-focus="on"] #mastWinSub,
+:root[data-skin="arkiv"][data-focus="on"] #fApplies,
+:root[data-skin="arkiv"][data-focus="on"] .todaynow .lb-scope{display:none}
+:root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow{padding-top:6px;padding-bottom:6px}
+:root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow :is(.tn-sub,.lb-notes,.tn-links a:not(:first-child)){display:none}
+:root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow .lb-figs{gap:4px 0}
+:root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow .lb-figs .tn-f b{font-size:var(--t6)}
