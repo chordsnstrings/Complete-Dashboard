@@ -326,7 +326,8 @@ console.log('\n2 · the shell: wordmark or back, the control bar, the sheet, the
         meta: [...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.content) };
     });
     check(`${theme}: the phone draws on the Arkiv dark paper, in the dark ink`,
-      d.paper.toLowerCase() === '#111113' && d.body === 'rgb(17, 17, 19)' && d.h1 === 'rgb(240, 240, 241)',
+      // The grey paper (2026-10-22, "dark gray not black"); it was #111113.
+      d.paper.toLowerCase() === '#1e1f22' && d.body === 'rgb(30, 31, 34)' && d.h1 === 'rgb(240, 240, 241)',
       JSON.stringify(d));
     check(`${theme}: …and the browser chrome follows it`, d.meta.every((c) => c === d.paper), d.meta.join(' '));
     await dk.close();

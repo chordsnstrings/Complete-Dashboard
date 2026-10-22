@@ -303,17 +303,57 @@ export const BRIDGE = Object.freeze({
    paper: enough for a mark (≥ 3:1, so the absence outline reads), still
    under the 4.5:1 of text, and lintTokens() keeps it there. The light grey-2
    is 2.90:1, as the design approved it. */
+/* ══ THE GREY PAPER (2026-10-22) ══════════════════════════════════════════
+   The operator: "the arkiv dark is too dark. let's have a lighter dark — as
+   in dark gray not black." The paper moved from the near-black #111113 to
+   #1E1F22, a dark grey with the same faint cool cast, and every value below
+   was re-solved against it. The ruling above (#111113 and the numbers quoted
+   in this section's older comments) is the history of how the first set was
+   found; the values in the objects are the grey set.
+
+   WHY #1E1F22 AND NOT LIGHTER. Three identities (Uber, Yango, CABMAN) carry
+   the light ink as the label inside their fill, so each must sit in a window:
+   3:1 against the paper to read as a mark, and dark enough that the ink on it
+   still clears 4.5:1. As the paper lightens the window closes; past about
+   #1E1F22 it is empty and no colour can satisfy both. #202124 and #222327
+   were tried (docs/ARKIV-DARK.md §H) and miss.
+
+   THE NEUTRALS keep their contrast against their own paper: paper-2
+   1.11, faint 1.23, hair 1.5, grey-2 3.44, grey 5.74 (5.19 on
+   paper-2), ink-2 12.51. The ink is unchanged, so it now measures 14.47:1
+   rather than 16.56 — still far over the 4.5 of body text.
+
+   THE IDENTITIES AND THE SEMANTICS were solved together, not one at a time.
+   Lightening each colour just enough to clear its own contrast broke the
+   pairs between them (the green and red met under deuteranopia, CABMAN met
+   FMS in normal vision). So all eight moved at once, within 2.8° of each
+   channel's light hue and within 6° of each semantic's hue, under every gate
+   lintMeasures() holds. The search and its runs are in docs/ARKIV-DARK.md §H.
+
+   WHAT THE GREY PAPER COSTS, measured. The semantics colour delta text, so
+   both must clear 4.5:1 on the lighter paper, which lifts them toward the
+   same lightness. Positive × negative now measures CVD 6.73 (was 8.1), and the
+   worst channel against a semantic 6.70, Hotel × negative (was 7.04). Both sit in the validator's
+   6–8 band, which is legal only with secondary encoding, and L3 already
+   gives every semantic its glyph and its sign (▲ + / ▼ −) and never lets one
+   be an area fill. CVD_GATE.dark holds both at what was measured, so nothing
+   can drift lower unnoticed.
+
+   THE LABEL ON A LIGHT FILL is no longer the paper. Bolt, Hotel and FMS used
+   the near-black paper as the text inside their fill. The grey paper is too
+   light for that, so they now take --deep, which is the old paper, #111113
+   (DEEP below). The label looks exactly as it did. */
 export const NEUTRAL_DARK = Object.freeze({
-  paper:  '#111113',
-  paper2: '#1B1B1D',
+  paper:  '#1E1F22',
+  paper2: '#272729',
   ink:    '#F0F0F1',
-  ink2:   '#D2D2D5',
-  grey:   '#8D8D92',   // 5.71:1 on paper, 5.21:1 on paper-2
-  grey2:  '#68686D',   // 3.40:1 — RULES AND OUTLINES ONLY, never text
-  hair:   '#333336',
-  faint:  '#252527',
+  ink2:   '#E0E0E3',
+  grey:   '#98989D',   // 5.74:1 on paper, 5.19:1 on paper-2
+  grey2:  '#727277',   // 3.44:1 — RULES AND OUTLINES ONLY, never text
+  hair:   '#3C3C3F',
+  faint:  '#2F2F31',
   signal: '#F0F0F1',   // the retired red, still overridden to ink
-  absOutline: '#68686D' // === grey2: the outline absence mark, ≥ 3:1
+  absOutline: '#727277' // === grey2: the outline absence mark, ≥ 3:1
 });
 
 /* The six identities on dark. SAME HUE as light, within 2.3° (one colour per
@@ -337,12 +377,12 @@ export const NEUTRAL_DARK = Object.freeze({
    three and dark text on the lighter three, the same as light mode; the
    token NAMES swap because paper and ink swapped. ON_CHANNEL records it. */
 export const CHANNEL_DARK = Object.freeze({
-  uber:   '#4366A5',   // L 0.514 C 0.108 H 261.4 · 3.31:1
-  bolt:   '#2EA3C7',   // L 0.668 C 0.112 H 223.4 · 6.45:1
-  yango:  '#BE118E',   // L 0.540 C 0.223 H 343.9 · 3.29:1
-  hotel:  '#B29200',   // L 0.670 C 0.137 H  93.2 · 6.29:1
-  cabman: '#8D2CD7',   // L 0.529 C 0.240 H 304.8 · 3.12:1
-  fms:    '#9C78FA'    // L 0.667 C 0.186 H 293.5 · 5.82:1
+  uber:   '#3E69AD',   // L 0.523 C 0.118 H 259.2 · 3.00:1
+  bolt:   '#21A3CA',   // L 0.667 C 0.118 H 224.2 · 5.62:1
+  yango:  '#C50A93',   // L 0.553 C 0.232 H 343.9 · 3.01:1
+  hotel:  '#B29200',   // L 0.670 C 0.137 H  93.2 · 5.50:1 — unchanged from the first dark set
+  cabman: '#9D1BEF',   // L 0.558 C 0.275 H 305.8 · 3.01:1
+  fms:    '#9879FA'    // L 0.665 C 0.185 H 291.6 · 5.06:1
 });
 
 /* The ramps on dark run LIGHTER from the identity, dL 0.065, constant hue and
@@ -358,12 +398,12 @@ export const CHANNEL_DARK = Object.freeze({
    so idle is the brightest step; the ramp is read by its legend, and its
    order is the one the law fixes. */
 export const RAMP_DARK = Object.freeze({
-  uber:   Object.freeze({ engaged:'#4366A5', available:'#5579BA', idle:'#688DCF' }),
-  bolt:   Object.freeze({ engaged:'#2EA3C7', available:'#48B8DC', idle:'#60CDF2' }),
-  yango:  Object.freeze({ engaged:'#BE118E', available:'#D532A2', idle:'#EC4BB7' }),
+  uber:   Object.freeze({ engaged:'#3E69AD', available:'#507CC2', idle:'#6390D8' }),
+  bolt:   Object.freeze({ engaged:'#21A3CA', available:'#3FB8DF', idle:'#58CDF5' }),
+  yango:  Object.freeze({ engaged:'#C50A93', available:'#DC31A8', idle:'#F44ABC' }),
   hotel:  Object.freeze({ engaged:'#B29200', available:'#C7A62C', idle:'#DCBB47' }),
-  cabman: Object.freeze({ engaged:'#8D2CD7', available:'#A146EE', idle:'#B361FF' }),
-  fms:    Object.freeze({ engaged:'#9C78FA', available:'#AE93FF', idle:'#C0AFFF' })
+  cabman: Object.freeze({ engaged:'#9D1BEF', available:'#AF46FF', idle:'#BB71FE' }),
+  fms:    Object.freeze({ engaged:'#9879FA', available:'#AA94FF', idle:'#BDAFFE' })
 });
 
 /* The washes on dark: the same 14% form, laid over the dark paper instead of
@@ -374,15 +414,15 @@ export const RAMP_DARK = Object.freeze({
    11.56:1 (the ink plate). */
 export const WASH_ALPHA = Object.freeze({ light: 0.14, dark: 0.14 });
 export const WASH_DARK = Object.freeze({
-  uber:   '#181D27',
-  bolt:   '#15252C',
-  yango:  '#291124',
-  hotel:  '#282310',
-  cabman: '#22152E',
-  fms:    '#241F33',
-  positive: '#0F231E',
-  negative: '#2D1A1A',
-  ink:      '#303032'
+  uber:   '#222935',
+  bolt:   '#1E313A',
+  yango:  '#351C32',
+  hotel:  '#332F1D',
+  cabman: '#301E3F',
+  fms:    '#2F2C40',
+  positive: '#1A302B',
+  negative: '#39292B',
+  ink:      '#3B3C3F'
 });
 
 /* The semantic pair on dark. Both colour delta text, so both clear 4.5:1 on
@@ -394,9 +434,9 @@ export const WASH_DARK = Object.freeze({
    Yango × positive, which falls from 9.6 to 7.9 — a channel against a
    semantic, where the semantic always carries its glyph and sign (run A4). */
 export const SEMANTIC_DARK = Object.freeze({
-  positive: '#008E60',   // L 0.571 H 161.7 · 4.52:1 — always with ▲ and a sign
-  negative: '#D65044',   // L 0.609 H  28.3 · 4.57:1 — always with ▼ and a sign
-  neutral:  '#8D8D92'    // === NEUTRAL_DARK.grey — a dash, no sign
+  positive: '#009A64',   // 4.56:1 on the grey paper — always with ▲ and a sign
+  negative: '#DE6463',   // 4.79:1 on the grey paper — always with ▼ and a sign
+  neutral:  '#98989D'    // === NEUTRAL_DARK.grey — a dash, no sign
 });
 
 /* The graphite ramp on dark, anchor FLIPPED: step 0 is the one nearest the
@@ -406,8 +446,9 @@ export const SEMANTIC_DARK = Object.freeze({
    chroma (≤ 0.017), dL 0.10. arkiv.css's --s1..--s8 and --b100..--b700
    point at steps by index, so they flip with it and keep their meaning. */
 export const SEQUENTIAL_DARK = Object.freeze([
-  '#484D56', '#646972', '#818690', '#9FA5AF', '#BEC4CF', '#DFE5F0'
-]);
+  '#4B5059', '#676C75', '#848993', '#A2A8B2', '#C1C7D2', '#E2E8F3'
+]);   // the grey paper (2026-10-22): step 0 at 2.03:1, the ordinal floor, and no
+      // higher — step 1 carries the ink label in the dominance bar (4.63:1)
 
 /* THE HATCH (SPEC §5: a projection or an unfinished period, in the mark's
    OWN colour at 45%, 45°, 4px pitch). It has no hex of its own; it has an
@@ -418,13 +459,20 @@ export const SEQUENTIAL_DARK = Object.freeze([
    every dark hatch line is at least as strong as the weakest light one
    (1.66:1). Emitted as --hatch-a; charts.js adopts it with the rest of
    SPEC §5 in STEP 2. The OUTLINE absence mark is absOutline above. */
-export const HATCH = Object.freeze({ light: 0.45, dark: 0.53 });
+export const HATCH = Object.freeze({ light: 0.45, dark: 0.56 });   // dark re-measured on the grey paper (2026-10-22)
 
 /* ADDED: which ink labels a channel fill. Measured, per theme, as whichever of
-   paper and ink clears 4.5:1 on the fill (lintTokens() re-measures it). */
+   paper, ink or deep clears 4.5:1 on the fill (lintTokens() re-measures it).
+
+   DEEP (2026-10-22) is the darkest neutral, kept only for text inside a light
+   fill. On light it is the ink. On dark it is the old near-black paper,
+   #111113: once the paper turned grey it was too light to label Bolt, Hotel
+   and FMS, and DEEP keeps those labels exactly as they read before. It is
+   emitted as --deep by themeDeclarations() and is never a surface. */
+export const DEEP = Object.freeze({ light: '#0A0A0B', dark: '#111113' });
 export const ON_CHANNEL = Object.freeze({
   light: Object.freeze({ uber:'paper', bolt:'ink', yango:'paper', hotel:'ink', cabman:'paper', fms:'ink' }),
-  dark:  Object.freeze({ uber:'ink', bolt:'paper', yango:'ink', hotel:'paper', cabman:'ink', fms:'paper' })
+  dark:  Object.freeze({ uber:'ink', bolt:'deep', yango:'ink', hotel:'deep', cabman:'ink', fms:'deep' })
 });
 
 /* The two themes, as one lookup. */
@@ -543,6 +591,7 @@ export function allTokenHexes(theme = 'light') {
     for (const v of Object.values(t.WASH)) out.add(v.toUpperCase());
     for (const v of Object.values(t.SEMANTIC)) out.add(v.toUpperCase());
     for (const v of t.SEQUENTIAL) out.add(v.toUpperCase());
+    out.add(DEEP[name].toUpperCase());   // the label on a light fill (2026-10-22)
   }
   return out;
 }
@@ -602,6 +651,7 @@ export function themeDeclarations(theme = 'light') {
   T_(theme);
   return [
     `--hatch-a:${HATCH[theme]}`,
+    `--deep:${DEEP[theme]}`,
     ...CHANNEL_ORDER.map((k) => `--on-c-${k}:var(--${ON_CHANNEL[theme][k]})`)
   ];
 }
@@ -726,10 +776,15 @@ export function mixHex(bg, fg, t) {
    fill, and SPEC §4 already makes a direct label mandatory on every Hotel
    mark. The gate is 7.0, not the validator's 6.0: a change that makes the
    worst pair worse than what was measured fails, instead of drifting down to
-   the legal floor unnoticed. */
+   the legal floor unnoticed.
+     · pair (2026-10-22, the grey paper) — positive × negative, measured 6.73
+       on the grey paper (8.1 on the near-black one), and collision measured
+       6.70 (7.04). Both are ratchets in the same sense: the operator chose a
+       lighter dark, which costs this much and no more, and a later change
+       that costs more fails here. Light keeps the validator's 8.0 for both. */
 export const CVD_GATE = Object.freeze({
-  light: Object.freeze({ cvd: 8.0, collision: 8.0, tritan: 8.0, normal: 15.0 }),
-  dark:  Object.freeze({ cvd: 8.0, collision: 7.0, tritan: 8.0, normal: 15.0 })
+  light: Object.freeze({ cvd: 8.0, pair: 8.0, collision: 8.0, tritan: 8.0, normal: 15.0 }),
+  dark:  Object.freeze({ cvd: 8.0, pair: 6.7, collision: 6.65, tritan: 8.0, normal: 15.0 })
 });
 /* The validator's lightness band for a categorical colour, per mode. */
 export const BAND = Object.freeze({ light: Object.freeze([0.43, 0.77]), dark: Object.freeze([0.48, 0.67]) });
@@ -789,8 +844,8 @@ export function lintMeasures(theme = 'light') {
     if (cr(S[k], W[k]) < 3) v.push(`${tag} WASH the ${k} dot on its own wash is ${cr(S[k], W[k]).toFixed(2)}:1, under 3`);
   // The label printed inside a channel fill.
   for (const k of CHANNEL_ORDER) {
-    const ink = ON_CHANNEL[theme]?.[k] === 'paper' ? N.paper : ON_CHANNEL[theme]?.[k] === 'ink' ? N.ink : null;
-    if (!ink) v.push(`${tag} ON_CHANNEL.${k} must be 'paper' or 'ink'`);
+    const ink = { paper: N.paper, ink: N.ink, deep: DEEP[theme] }[ON_CHANNEL[theme]?.[k]] || null;
+    if (!ink) v.push(`${tag} ON_CHANNEL.${k} must be 'paper', 'ink' or 'deep'`);
     else if (cr(ink, C[k]) < 4.5) v.push(`${tag} LABEL ${ON_CHANNEL[theme][k]} on --c-${k} is ${cr(ink, C[k]).toFixed(2)}:1, under 4.5`);
   }
   // The hatch: on dark, no channel's hatch line may be fainter than the
@@ -811,7 +866,7 @@ export function lintMeasures(theme = 'light') {
     if (t < G.tritan) v.push(`${tag} A2 ${a} × ${b} tritan ΔE ${t.toFixed(2)} under ${G.tritan}`);
   }
   const s3 = cvdSeparation(S.positive, S.negative);
-  if (s3 < G.cvd) v.push(`${tag} A3 positive × negative CVD ΔE ${s3.toFixed(2)} under ${G.cvd}`);
+  if (s3 < G.pair) v.push(`${tag} A3 positive × negative CVD ΔE ${s3.toFixed(2)} under ${G.pair}`);
   const eight = [...ids, ...sems];
   for (let i = 0; i < eight.length; i++) for (let j = i + 1; j < eight.length; j++) {
     const n = deltaE(eight[i][1], eight[j][1]);
@@ -961,7 +1016,7 @@ export default {
   CHANNEL, CHANNEL_ORDER, RAMP, RAMP_STATES, WASH, SEMANTIC, SEQUENTIAL,
   NEUTRAL, FORM, MARK, RESERVED_HUE, BRIDGE,
   NEUTRAL_DARK, CHANNEL_DARK, RAMP_DARK, WASH_DARK, WASH_ALPHA, SEMANTIC_DARK, SEQUENTIAL_DARK,
-  HATCH, ON_CHANNEL, THEMES, CVD_GATE, BAND,
+  HATCH, DEEP, ON_CHANNEL, THEMES, CVD_GATE, BAND,
   channelOf, channelKey, stateOf, washOf, semanticOf, sequentialOf, sequentialIndex,
   allTokenHexes, cssDeclarations, bridgeDeclarations, themeDeclarations, markDeclarations, cssTokens,
   oklch, contrast, isReservedHue, deltaE, cvdSeparation, mixHex, lintMeasures, lintTokens
