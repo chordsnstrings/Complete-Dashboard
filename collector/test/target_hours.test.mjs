@@ -29,7 +29,10 @@
         the hour; settled, it is judged against what the usual day had in by
         now, never against the part that comes overnight; over is final at
         once; days not collected live are left out, and under 7 of them the
-        clock stands in and says so.
+        clock stands in and says so;
+    10. each revenue hour's drivers and gross per driver, today and on the
+        usual day (the same days its fares are learned from), one person
+        however many accounts, no per-driver figure over nobody.
    Synthetic plates (C…) and drivers (Test Driver …) only.
 
    REVERSIONS, run 2026-10-02 against the 38 checks below — each rule
@@ -57,7 +60,11 @@
      an arriving hour drawn as "▼ Under" ............ 54 passed,  1 FAILED
      on pace drawn as a bare "▲ On target" .......... 54 passed,  1 FAILED
    and against the 56, the cut blind to rows a run has stored before it
-   finished ......................................... 55 passed,  1 FAILED */
+   finished ......................................... 55 passed,  1 FAILED
+   and, 2026-10-22, against the 67 with §10 (drivers and gross per driver):
+     per_driver left out of the manifest ............ 66 passed,  1 FAILED
+     today's people counted per account ............. 66 passed,  1 FAILED
+     the usual over every day read, not the picked .. 66 passed,  1 FAILED */
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { applySchema } from './schema.mjs';
@@ -204,7 +211,7 @@ console.log('\n5. withheld by class; never cached');
 const { shapeBody } = await import('../api/access/shape.js');
 const { lookupEntry } = await import('../api/access/manifest.js');
 const entry = lookupEntry('GET', '/api/target/hours');
-const nums = (o) => JSON.stringify(o).match(/"(target|done|left|need_by_now|ahead|usual_day|projected|measured|usual|need|diff|cum_need|cum_done|catch_up|expect)":-?\d/g) || [];
+const nums = (o) => JSON.stringify(o).match(/"(target|done|left|need_by_now|ahead|usual_day|projected|measured|usual|need|diff|cum_need|cum_done|catch_up|expect|per_driver|usual_per_driver)":-?\d/g) || [];
 const noRev = shapeBody(JSON.parse(j(h)), entry, { BK: 'F' }).body;
 check('without REV: not one revenue figure left, and _withheld says so', nums(noRev.revenue).length === 0 && noRev._withheld?.REV === '', nums(noRev.revenue).slice(0, 4).join(' '));
 const noBk = shapeBody(JSON.parse(j(h)), entry, { REV: 'F' }).body;
@@ -269,6 +276,22 @@ const mf = monthFiguresHtml(m);
 check('the month in figures: what every day left must bring, the average day, where the month lands, and each fleet',
   /Every day left must bring<\/th><td><b>AED 5,000\.00<\/b>/.test(mf) && /At this pace the month ends at<\/th><td><b class="tg-over">AED 155,000\.00<\/b>/.test(mf)
   && /<th scope="row">Ecosine<\/th><td><b>AED 3,500\.00<\/b>/.test(mf) && /<th scope="row">Egari<\/th>/.test(mf), mf.slice(0, 300));
+/* The revenue panel's drivers and gross per driver (2026-10-22): two columns
+   today beside the usual day, two rows under the chart, this hour in the
+   summary — and none of it on the trips panel. */
+const rr = Object.fromEntries(rowsOf(rh).map((r) => [r.h, r]));
+check('revenue: Drivers and Per driver columns, today beside the usual — 10 usually 10, ≈ AED 150 usually AED 150',
+  /<th scope="col">Drivers<\/th><th scope="col">Per driver<\/th>/.test(rh)
+  && /<td>10 <span class="hp-dim">usually 10<\/span><\/td><td>≈ AED 150 <span class="hp-dim">usually AED 150<\/span><\/td><td class="hp-st">/.test(rr['08:00'].html), rr['08:00'].html);
+check('…an hour to come has only the usual, and an hour nobody works is a dash, not AED 0',
+  /<td><span class="hp-dim">usually 10<\/span><\/td><td><span class="hp-dim">usually AED 100<\/span><\/td>/.test(rr['22:00'].html)
+  && /<td><span class="hp-dim">—<\/span><\/td><td><span class="hp-dim">—<\/span><\/td>/.test(rr['12:00'].html), rr['22:00'].html + ' | ' + rr['12:00'].html);
+check('the chart names its two rows and prints the usual under each hour worked (10 drivers, 250 each at 18:00)',
+  /class="hc hc-ppl"/.test(rh) && />drivers<\/text>/.test(rh) && />AED each<\/text>/.test(rh)
+  && /<text class="hc-p" x="[\d.]+" y="[\d.]+" text-anchor="middle">250<\/text>/.test(rh), (rh.match(/<text class="hc-p"[^>]*>[^<]*<\/text>/g) || []).slice(0, 4).join(''));
+check('the summary says who is at work this hour, and that a usual day has nobody in it',
+  /At work in it so far: 1 driver, ≈ AED 50 each; a usual day has nobody at work in it\./.test(rh), rh.slice(0, 700));
+check('the trips panel carries none of it', !/Per driver|hc-ppl|At work in it/.test(ph));
 check('nothing undefined, NaN or null anywhere on the page', ![ph, rh, th, mf].some((x) => /undefined|NaN|\bnull\b|\[object Object\]/.test(x)));
 check('read by the clock, the basis says why', /fewer than the 7 needed, so the day is read by the clock/.test(ph), ph.slice(-500));
 
@@ -356,6 +379,40 @@ check('today: right now is 550 ahead, against what the usual day had reported by
   /Right now, 19:00<\/span><b class="tg-v">▲ ≈ AED 550\.00 ahead<\/b>/.test(lt) && /the usual day had AED 3,000\.00 reported by now/.test(lt), lt.slice(0, 600));
 check('nothing undefined, NaN or null on the lagged page', ![lh, lt].some((x) => /undefined|NaN|\bnull\b|\[object Object\]/.test(x)));
 await q(`DELETE FROM collection_run`);
+
+/* ── 10. people at work, and the gross each brought in ────────────────────
+   The operator, 2026-10-22: "show average active driver that hour as well,
+   with average per driver gross earning". The usual day is the 4 Fridays the
+   fares are learned from (4, 11, 18 and 25 Sept): 10 people in each of the
+   08:00, 18:00 and 22:00 hours, AED 1,500 / 2,500 / 1,000 among them. Today
+   (h, section 1): 10 people at 08:00 and 18:00, one so far at 19:00, the
+   hour's revenue the strip's estimate, AED 50 a booking. */
+console.log('\n10. drivers at work each hour, and the gross each brought in');
+check('usually 10 drivers at 08:00, 18:00 and 22:00, and nobody at noon', at(R, 8).usual_drivers === 10
+  && at(R, 18).usual_drivers === 10 && at(R, 22).usual_drivers === 10 && at(R, 12).usual_drivers === 0,
+  j([8, 12, 18, 22].map((x) => at(R, x).usual_drivers)));
+check('usually AED 150 / 250 / 100 each — the usual hour over its people — and no figure over nobody',
+  at(R, 8).usual_per_driver === 150 && at(R, 18).usual_per_driver === 250 && at(R, 22).usual_per_driver === 100
+  && at(R, 12).usual_per_driver === null, j([8, 12, 18, 22].map((x) => at(R, x).usual_per_driver)));
+check('today: 10 at 08:00 and 18:00, 1 so far at 19:00, nobody at noon, nothing yet for an hour to come',
+  at(R, 8).drivers === 10 && at(R, 18).drivers === 10 && at(R, 19).drivers === 1 && at(R, 12).drivers === 0
+  && at(R, 20).drivers === null && at(R, 20).per_driver === null, j([8, 12, 18, 19, 20].map((x) => at(R, x).drivers)));
+check('today each: the hour done over its people — AED 150, 200 and 50 — and none at noon',
+  at(R, 8).per_driver === 150 && at(R, 18).per_driver === 200 && at(R, 19).per_driver === 50 && at(R, 12).per_driver === null,
+  j([8, 12, 18, 19].map((x) => at(R, x).per_driver)));
+check('this hour carries them too', R.this_hour?.drivers === 1 && R.this_hour?.per_driver === 50
+  && R.this_hour?.usual_drivers === 0 && R.this_hour?.usual_per_driver === null, j(R.this_hour));
+/* One person on two accounts is one person; somebody new is one more; and a
+   Thursday never enters a Friday's usual. */
+await q(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, plate, requested_at, ended_at, status, payment_type, price, currency, raw)
+         VALUES ('bolt', 'p1', 'ecosine', 'b-2', 'Test Driver 2', 'C2', '2026-10-02T08:40:00+04:00', '2026-10-02T08:55:00+04:00', 'completed', 'card', NULL, 'AED', '{}'::jsonb),
+                ('uber', 'p2', 'egari', 'u-Test Driver 11', 'Test Driver 11', 'C11', '2026-10-02T18:40:00+04:00', '2026-10-02T18:55:00+04:00', 'completed', 'card', NULL, 'AED', '{}'::jsonb),
+                ('uber', 'p3', 'egari', 'u-Test Driver 12', 'Test Driver 12', 'C12', '2026-09-24T08:40:00+04:00', '2026-09-24T08:55:00+04:00', 'completed', 'card', 50, 'AED', '{}'::jsonb)`);
+const two = (await targetHours(q, { now: NOW })).revenue;
+check('a second account of the same person adds nobody; a new person adds one; a Thursday leaves the Friday usual alone',
+  at(two, 8).drivers === 10 && at(two, 18).drivers === 11 && at(two, 8).usual_drivers === 10 && at(two, 8).usual_per_driver === 150,
+  j([at(two, 8).drivers, at(two, 18).drivers, at(two, 8).usual_drivers, at(two, 8).usual_per_driver]));
+await q(`DELETE FROM trip WHERE external_id IN ('p1', 'p2', 'p3')`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 api.server.close();

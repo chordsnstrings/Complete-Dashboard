@@ -5352,3 +5352,20 @@ folding off → on, visible prose words (cut lines still counted whole): #payout
 title rises 87 px outside the Today pages and 29 px on them. Dark: `--paper` resolves to
 `#1E1F22`. The phone build (`/m/`, 390 px) carries no mark and no sideways scroll.
 
+
+## DRVH — drivers at work and the gross each brings in, hour by hour (2026-10-22)
+
+The operator, on #target's "Revenue, hour by hour" chart: "here, show average active driver that
+hour as well, with average per driver gross earning".
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| DRVH1 | `api/target_hours.js` `withPeople`: each revenue hour (and `this_hour`) carries `drivers` today and `usual_drivers`, and the gross per driver, `per_driver` and `usual_per_driver`. A driver is a person with a booking requested in that Dubai hour, on any channel, folded on the stored person key (the count #compare's hourly people use). The usual is averaged over the SAME days the hour's fares are learned from (`shapeOf`'s `picked`), so the usual per driver is one population's fares over its own people. An hour nobody worked has no per-driver figure (null), never AED 0 | yes | — | `target_hours` §10 |
+| DRVH2 | `api/access/manifest.json`: `per_driver` / `usual_per_driver` are REV, withheld with the rest of the revenue; the counts are unclassed like `trips.active` and /api/compare's `a_drivers` | yes | — | `target_hours` §5 |
+| DRVH3 | `api/public/targetpage.js`: the revenue table gains Drivers and Per driver (today, then "usually …"; an hour to come shows only the usual); the desktop chart prints the usual drivers and AED each under every hour worked, in two rows named in a left gutter; the summary line names this hour's drivers and gross each against the usual. The phone's 360 px chart is unchanged; its summary line carries this hour's. The trips panel is unchanged | yes | — | `target_hours` §8; screenshots against the mock, light 1440 and dark 1280, no overflow |
+| DRVH4 | `app.css`: the verdict column is aligned by its class (`td.hp-st`), not as the 5th cell, since the revenue table now has two cells before it | yes | — | `arkiv_skin` 119/0, `type_scale`, `chart_*` green |
+
+**Revert proof.** Against the 67 checks in `target_hours`: `revenue.hours[].per_driver` taken out
+of the manifest → 66/1 (the REV withholding); today's people counted per account instead of per
+person → 66/1 (a second account adds one); the usual averaged over every day read instead of the
+picked Fridays → 66/1 (AED 149.47 a driver, not 150). Each restored and its md5 checked.

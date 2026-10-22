@@ -19,7 +19,7 @@ import { shape, windowOf, driverRecord, fleetRecord } from './api/performance_ro
    made-up month, for the same reason: a fixture typed by hand would certify
    a shape the server stopped returning. */
 import { computeMonth, addDays as tgAddDays, monthOf as tgMonthOf, daysIn as tgDaysIn, monthName as tgMonthName } from './api/revenue_target.js';
-import { hoursOf } from './api/target_hours.js';
+import { hoursOf, withPeople } from './api/target_hours.js';
 import { monthViewOf, monthWorkbookOf } from './api/target_month.js';
 import { lowperfOf, watchOf, periodOf, spansOf, HOTEL_MODES as LP_HOTEL } from './api/lowperf.js';
 import { lowperfWorkbookOf, watchWorkbookOf } from './api/lowperf_workbook.js';
@@ -5143,12 +5143,17 @@ app.get('/api/target/hours', (req, r) => {
   const next = share.map((_, h) => (h < cur - 1 ? 1 : h === cur - 1 ? 0.96 : h === cur ? Math.min(1, gone * 0.3 + 0.5) : 0));
   const doneTrips = usualTrips.map((v, h) => (h <= cur ? Math.round(v * seen[h] * (h % 3 === 0 ? 1.1 : 0.85)) : 0));
   const doneAed = doneTrips.map((v) => Math.round(v * 39.4 * 100) / 100);
+  /* People at work by hour (withPeople): the usual day follows the curve,
+     today runs near it, the hour now only partly in. */
+  const usualPeople = curve.map((v) => 6 + v * 5.5);
+  const peopleNow = usualPeople.map((v, h) => (h <= cur ? Math.round(v * (h === cur ? 0.6 : h % 3 === 0 ? 1.05 : 0.9)) : 0));
   const clock = local.toISOString().slice(11, 16);
   const basis = { days: 28, from: tgAddDays(today, -28), to: tgAddDays(today, -1) };
   r.set('cache-control', 'private, no-store').json({
     today, clock, hour: cur, now_clock: clock, at: new Date().toISOString(), cut_at: new Date().toISOString(),
     cut_by: 'collection', lag_min: 0, latest_at: new Date().toISOString(), month: t.month, month_name: t.month_name,
-    revenue: { ...hoursOf({ target: t.summary.today_needs, share, usual: usualAed, done: doneAed, cur, gone, seen, next, money: true }),
+    revenue: { ...withPeople(hoursOf({ target: t.summary.today_needs, share, usual: usualAed, done: doneAed, cur, gone, seen, next, money: true }),
+      { people: peopleNow, usual: usualPeople, cur }),
       estimate: true, projected: 4100, measured: 980.5, basis, timing: { days: 28 } },
     trips: { ...hoursOf({ target: td.trips_target || 552, share, usual: usualTrips, done: doneTrips, cur, gone, seen, next }),
       active: td.active_drivers || 46, min: 12, basis, timing: { days: 28 } },
