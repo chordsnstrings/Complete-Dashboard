@@ -97,7 +97,16 @@
    a fares day divided by a different day's headcount. Today's per person
    divides the hour's done, which carries the live strip's estimate, so it is
    an estimate exactly when that is. An hour nobody worked has no per-person
-   figure (null), never AED 0 over nobody. */
+   figure (null), never AED 0 over nobody.
+   Nor has an hour whose fares are not all in. Measured on production the
+   hour this went live, 2026-10-22 18:33 Dubai: the 17:00 hour held 54 people
+   and 62 completed trips but AED 786.23 of fares — Uber had not priced most
+   of them, and the strip had no estimate for them (its projection_parts were
+   empty) — so it read AED 14.56 a driver against a usual AED 80.06. That is
+   not a slow hour; it is a numerator that has not arrived over a headcount
+   that has. So `fares_pending` counts the hour's completed, chargeable trips
+   that carry neither a fare nor a share of an estimate, and while it is above
+   zero the hour's per-person figure is absent and the page says why. */
 import { monthTarget, addDays, BOOKING_SOURCES } from './revenue_target.js';
 import { buildDay } from './day_routes.js';
 import { spreadByHour } from './projection_sql.js';
@@ -221,17 +230,29 @@ async function todayPeople(q, today) {
     (`people` today by hour, `usual` the usual day's by hour); hours after
     `cur` have no today. Shared with mockapi.mjs, so the fixture cannot draw
     a different shape from the route. */
-export function withPeople(x, { people, usual, cur }) {
+export function withPeople(x, { people, usual, cur, open = null }) {
   const each = (v, n) => (v != null && n > 0 ? r2(v / n) : null);
   const hours = x.hours.map((r) => {
     const now = r.h <= cur ? people[r.h] || 0 : null;
+    const pending = now == null ? null : (open?.[r.h] || 0);
     return { ...r, drivers: now, usual_drivers: r1(usual[r.h] || 0),
-      per_driver: now == null ? null : each(r.done, now), usual_per_driver: each(r.usual, usual[r.h]) };
+      per_driver: now == null || pending ? null : each(r.done, now), fares_pending: pending,
+      usual_per_driver: each(r.usual, usual[r.h]) };
   });
   const th = hours[cur];
   return { ...x, hours,
     this_hour: x.this_hour && th ? { ...x.this_hour, drivers: th.drivers, usual_drivers: th.usual_drivers,
-      per_driver: th.per_driver, usual_per_driver: th.usual_per_driver } : x.this_hour };
+      per_driver: th.per_driver, fares_pending: th.fares_pending, usual_per_driver: th.usual_per_driver } : x.this_hour };
+}
+
+/* Per hour, the completed chargeable trips with no fare on record on a
+   channel the strip's estimate does not value (no projection part): what is
+   still missing from the hour's revenue. */
+export function unvaluedByHour(parts, rows) {
+  const valued = new Set(parts.filter((p) => Number(p.value) > 0).map((p) => p.platform));
+  const out = Array(24).fill(0);
+  for (const r of rows) if (!valued.has(r.platform)) out[r.h] += Math.max(0, Number(r.pending) || 0);
+  return out;
 }
 
 /** How much of each hour a usual day had REPORTED by the cut's clock time
@@ -417,7 +438,7 @@ export async function targetHours(q, { now = new Date(), min = null } = {}) {
         + `${usual.fares.days} ${usual.fares.days === 1 ? 'is' : 'are'} on record.` }
       : { ...withPeople(hoursOf({ target: t.summary.today_needs, share: usual.fares.share, usual: usual.fares.usual,
         done: faresDone, cur, gone, seen: fSeen.seen, next: fSeen.next, money: true }),
-      { people, usual: usual.fares.people, cur }),
+      { people, usual: usual.fares.people, cur, open: unvaluedByHour(parts, rows) }),
       estimate: projected > 0, projected: r2(projected), measured: r2(rows.reduce((s, r) => s + Number(r.fares), 0)),
       basis: usual.fares.basis,
       timing: timing(fSeen, 'fares') };
