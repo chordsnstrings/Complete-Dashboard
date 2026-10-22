@@ -329,7 +329,12 @@ for (const [run, a, b, cvdW, normW] of [
    ceiling (docs/ARKIV-DARK.md §E), inside the validator's 6–8 band that is
    legal only because every semantic carries its glyph and sign. */
 const D = T.THEMES.dark, DP = D.NEUTRAL.paper;
-check('the dark paper is #111113, near-black with Arkiv\u2019s cool cast', DP === '#111113' && T.oklch(DP).C < 0.01);
+/* 2026-10-22, the operator: "the arkiv dark is too dark … dark gray not black".
+   The paper is a dark grey now; the old near-black survives only as --deep,
+   the label inside a light channel fill (tokens.js DEEP). */
+check('the dark paper is #1E1F22, a dark grey with Arkiv\u2019s cool cast (not the near-black #111113)',
+  DP === '#1E1F22' && T.oklch(DP).C < 0.01 && T.oklch(DP).L > T.oklch('#111113').L + 0.04);
+check('--deep keeps the old near-black, and only for labels on a fill', T.DEEP.dark === '#111113' && T.DEEP.light === T.NEUTRAL.ink);
 for (const [name, hex] of [['ink', D.NEUTRAL.ink], ['ink-2', D.NEUTRAL.ink2], ['grey', D.NEUTRAL.grey],
   ['sem-pos', D.SEMANTIC.positive], ['sem-neg', D.SEMANTIC.negative]])
   check(`dark --${name} ${hex} is body text on the dark paper (${T.contrast(hex, DP).toFixed(2)}:1 ≥ 4.5)`,
@@ -347,7 +352,12 @@ for (const k of T.CHANNEL_ORDER) {
   check(`dark --c-${k} is the same channel: ${gap.toFixed(1)}° from its light hue (≤ 3)`, gap <= 3);
 }
 const pairsOf = (xs) => xs.flatMap((a, i) => xs.slice(i + 1).map((b) => [a, b]));
-for (const [theme, collision] of [['light', 8.0], ['dark', 7.0]]) {
+/* The semantic pair and the collision floor are LITERALS per theme. On dark
+   they are what the grey paper measured (2026-10-22): the pair 6.73 (8.1 on
+   the near-black paper) and the collision 6.70 (7.04). Both sit in the
+   validator's 6–8 band, legal only because every semantic carries its glyph
+   and sign (L3). A change that costs more than this fails here. */
+for (const [theme, collision, pair] of [['light', 8.0, 8.0], ['dark', 6.65, 6.7]]) {
   const t = T.THEMES[theme];
   const ch = T.CHANNEL_ORDER.map((k) => [k, t.CHANNEL[k]]);
   const worst = (ps, f) => ps.map(([[a, x], [b, y]]) => [`${a} × ${b}`, f(x, y)]).sort((p, q) => p[1] - q[1])[0];
@@ -355,7 +365,7 @@ for (const [theme, collision] of [['light', 8.0], ['dark', 7.0]]) {
   check(`${theme}: six channels, all pairs, protan/deutan ΔE ≥ 8.0 (worst ${pc[0]} ${pc[1].toFixed(2)})`, pc[1] >= 8.0);
   check(`${theme}: six channels, all pairs, tritan ΔE ≥ 8.0 (worst ${pt[0]} ${pt[1].toFixed(2)})`, pt[1] >= 8.0);
   const sp = T.cvdSeparation(t.SEMANTIC.positive, t.SEMANTIC.negative);
-  check(`${theme}: the semantic pair, CVD ΔE ≥ 8.0 (${sp.toFixed(2)})`, sp >= 8.0);
+  check(`${theme}: the semantic pair, CVD ΔE ≥ ${pair} (${sp.toFixed(2)})`, sp >= pair);
   const eight = [...ch, ['positive', t.SEMANTIC.positive], ['negative', t.SEMANTIC.negative]];
   const pn = worst(pairsOf(eight), (x, y) => T.deltaE(x, y));
   check(`${theme}: all eight, normal-vision ΔE ≥ 15.0 (worst ${pn[0]} ${pn[1].toFixed(2)})`, pn[1] >= 15.0);
@@ -367,7 +377,7 @@ for (const [theme, collision] of [['light', 8.0], ['dark', 7.0]]) {
   check(`${theme}: …and normal-vision ≥ 15.0 (worst ${Math.min(...sweep.map((x) => x[2])).toFixed(2)})`,
     Math.min(...sweep.map((x) => x[2])) >= 15.0);
   for (const k of T.CHANNEL_ORDER) {
-    const on = t.NEUTRAL[T.ON_CHANNEL[theme][k]];
+    const on = T.ON_CHANNEL[theme][k] === 'deep' ? T.DEEP[theme] : t.NEUTRAL[T.ON_CHANNEL[theme][k]];
     check(`${theme}: the label on a ${k} fill (${T.ON_CHANNEL[theme][k]}) clears 4.5:1 (${T.contrast(on, t.CHANNEL[k]).toFixed(2)})`,
       T.contrast(on, t.CHANNEL[k]) >= 4.5);
   }

@@ -5312,3 +5312,33 @@ Uber's per-driver rows begin on 2026-02-06. Every week settled from 23 Feb onwar
 about 1.5%. The monthly table counts full weeks only, and flags February with the 16 Feb weeks
 named. The totals line was left as it is: why the 16 Feb week is low is not yet known, and a rule
 that dropped it would be a guess (HANDOFF 0.8).
+
+## FOCUS — the explanations fold under ⓘ; the figures stay (2026-10-22)
+
+The operator: "It's not a dashboard, it's a manuscript", and after a 106-page demo, "change in
+production, go live". The audit is docs/AUDIT.md "Verbosity".
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| FOCUS1 | `api/public/focus.js`: each long prose block in `#view` and the page footer is judged once and MARKED (`data-fx` = keep / fold / lead / flag / clamp); a MutationObserver marks whatever panels add later. Nothing is removed or moved, no text is rewritten | yes | pending deploy | `focus_layout` 54/0 |
+| FOCUS2 | `arkiv.css`: a folded block is hidden until its panel's "ⓘ N notes" toggle opens it in place; the first caption under a panel heading and every warning stay visible, cut to one line (a warning with a red dot); a tile sub-line over 8 words is cut to one line and keeps the whole line as its title | yes | pending deploy | `focus_layout` §1–2: no folded block holds a table, chart or tile; opening every toggle shows exactly what folding off shows, numbers included |
+| FOCUS3 | The shell, shorter: the masthead's second line goes (the window is in the control bar), the control bar's "does not apply" sentence becomes its tooltip, and outside the Today pages the Today strip is one row of figures | yes | pending deploy | screenshots, live-ui against production |
+| FOCUS4 | The control bar's "ⓘ notes" button turns it off and on, remembered in `fleet.focus`; `index.html` stamps the choice before first paint, under the Arkiv skin only | yes | pending deploy | `focus_layout` §3 |
+| FOCUS5 | The Classic skin is never touched (no mark, no button, no `data-focus`) — it is held byte-frozen | yes | pending deploy | `focus_layout` §5 |
+| FOCUS6 | `bin/prose-audit.mjs`: the audit's measuring walk, kept as a tool (`FOCUS=off` measures the unfolded page) | yes | — | run against live-ui |
+| FOCUS7 | What never folds, found by the full suite (the first run had 13 files failing on folded text): an error; an empty state (charts.js `empty()`); what a role may not see (`access-closed`, `access-withheld`, any "… shown to your role"); the person's identity card; a `.phone-only` line. A statement that a figure is absent, refused, missing or not compared stays visible cut to one line (`data-fx="absent"`), as does a block that links somewhere. A panel with no figure in it keeps its first line | yes | pending deploy | `collection_debt`, `compare_hours`, `corridor_time`, `driver_day_page`, `payout_mobile`, `person_address`, `settings_page_layout` all green with no change to the tests |
+| FOCUS8 | Tests changed, each for a stated reason: `arkiv_shell` (the control bar now holds `focusBtn`); `arkiv_skin` (focus.js asks `--pg-shell` through `shellContract()`, never the skin attribute; no comma inside `:is()`); `chart_marks` (dark hatch 0.56, GREY); `forecast_page` and `ledger_ui` read the page after opening the notes (`test/browser.mjs` `openNotes`), because what they assert is method and policy text the operator asked to fold. `spacing`: a folded caption took its gap with it, so a `.tblock` after a fold keeps 10px | yes | — | each green alone; `arkiv_classic_frozen` fails only the six Leaflet routes it failed before this change (HANDOFF §8) |
+
+**Revert proof.** With the `startFocus()` call taken out of `app.js`, `focus_layout` fails at the
+wiring check and at the first page (no button, no folds); restored, 54/0.
+
+## GREY — the dark paper is a dark grey (2026-10-22)
+
+The operator: "the arkiv dark is too dark. let's have a lighter dark — as in dark gray not black."
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| GREY1 | The dark paper `#111113` → `#1E1F22`; every dark neutral re-stepped to keep its contrast; the six identities and both semantics re-solved together under every gate (`api/public/tokens.js`, docs/ARKIV-DARK.md §H); Hotel keeps its gold | yes | pending deploy | `tokens` 150/0, lintTokens 0 violations |
+| GREY2 | `--deep` (= the old `#111113`) labels the light fills (Bolt, Hotel, FMS), so those labels read as before; graphite step 0 at the 2:1 floor so step 1 keeps its ink label (4.63:1) | yes | pending deploy | `arkiv_skin` 119/0 (failed at 4.25 with the ramp lifted further) |
+| GREY3 | The measured cost, held as ratchets: positive × negative CVD 6.73 (was 8.1), worst channel × semantic 6.70 (was 7.04), both in the validator's band that is legal with the glyph and sign every semantic carries | yes | pending deploy | `tokens` §9 literals |
+| GREY4 | `signin.html` carries its own copy of the dark neutrals and the pair; moved with the paper | yes | pending deploy | `signin_page` needs Postgres (not in this sandbox) |

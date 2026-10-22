@@ -47,3 +47,11 @@ export function launchChromium(opts = {}) {
   const p = chromiumPath();
   return chromium.launch({ ...(p ? { executablePath: p } : {}), ...opts });
 }
+
+/* FOCUS (api/public/focus.js, 2026-10-22) folds each long explanation under
+   its panel's "ⓘ notes". A test that asserts what a page SAYS in its method
+   or policy text opens the notes first, as a reader would; focus_layout
+   proves that opening them shows exactly what folding off shows. */
+export async function openNotes(page) {
+  await page.$$eval('.fx-more[aria-expanded="false"]', (bs) => bs.forEach((b) => b.click()));
+}

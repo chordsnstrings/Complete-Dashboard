@@ -25,6 +25,7 @@ import { volatilePath } from './swr.js';
 import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
 import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
+import { startFocus } from './focus.js';
 /* Sign-in and access (collector/docs/ULM-DESIGN.md). The server decides; these
    only draw what it decided — which pages open, and the true reason where
    something is not shown. */
@@ -9442,6 +9443,9 @@ async function render() {
      calls return at once and the DOM is index.html's. */
   const ruled = buildShell();
   renderNav(); renderSectionTabs(); setHeader(); tzNote(); shellFrame(); xlsxButton();
+  /* FOCUS (focus.js): once, after the first shell build so its button lands
+     in the control bar beside the theme; its observer then marks every page. */
+  startFocus({ section: () => sectionOf(state.view, state.param) });
   const root = freshView();
   /* The shell footer's basis and colophon belong to the page that wrote them
      (ui.js pageFoot); the principle line is the shell's and stays. */

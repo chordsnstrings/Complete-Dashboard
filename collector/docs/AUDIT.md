@@ -2783,3 +2783,54 @@ was checked to serve `fleet-936fdefe51ad`, the shell hash of `6368228`:
   Both are in FIX-STATUS CST (N1, N2b).
 - **First-paint times through the mirror:** `#feeds` 3.7–13 s, and
   `#low-performers` 3.3–10.7 s. The time is spent in `/api/lowperf`.
+
+## Verbosity — 2026-10-22: a dashboard that read like a manuscript
+
+The operator: *"audit every page. It feels the site is extremely verbose. People have to read
+through everything to understand what is being shown and what the action points are … It's not
+a dashboard, it's a manuscript."*
+
+**How it was measured.** `bin/prose-audit.mjs` walked 141 routes on production through
+`bin/prod-mirror.mjs`, at 1440×900, and classed every visible text node as prose, table cell,
+tile figure, tile label, heading, control or chart. Hidden text and tooltips were not counted.
+The 40 longest prose blocks per page (103,370 words) were then sorted by purpose with keyword
+rules, so read those shares as proportions, not counts.
+
+| measure, median page | before |
+|---|---|
+| visible prose | **620 words** (budget 120, docs/UI-REDESIGN-PLAN.md); 129 of 141 pages over it, 30 over 1,000 |
+| first screen | 110 prose words against **5** figures; 30 pages show no figure there at all |
+| prose before the first figure | 54 words |
+| height | 3.9 screens; 46 pages over 5 |
+| longest visible block | 74 words (157 on #payouts) |
+| shell share of the first screen | 42% (375 of 900 px: masthead, two rows, banner, control bar, Today strip) |
+
+What the long blocks were for: explanation 53%, method 17%, why a figure is absent 13%, scope and
+filters 13%, **what to do 3%**, history of fixes 1%. The causes, each repeated across the site:
+the same shell on every page; method above the data (2,092 caption paragraphs on 141 pages);
+every absence explained in full where it occurs; table names on screen; glance paragraphs that
+retell the tiles; cards where a table would do (1,362 tiles on one group page).
+
+**The demo, then the build.** A demo of 106 pages was built from a production snapshot, with a
+Now/Proposed switch: generic rules for every page, plus a hand-written answer line and Act-on
+strip per page, checked by a second reviewer (171 corrections) and by a script that every number
+on the page survived. The generic rules alone took the median page from 614 visible words to
+194 and its longest visible block from 74 words to 15. The operator then asked for it live.
+
+**What shipped (FIX-STATUS FOCUS).** The generic rules, as `api/public/focus.js` plus a block of
+`arkiv.css`, under the Arkiv skin. Nothing is removed or moved: a long explanation is marked and
+hidden until its panel's "ⓘ notes" opens it in place. The first caption under a panel's heading
+and every warning stay visible, cut to one line; tile sub-lines over 8 words are cut to one
+line; blocks of 15 words or fewer and blocks that are mostly figures stay as they are. The
+masthead loses its second line, the control bar's "does not apply" sentence becomes its
+tooltip, and the Today strip is one row of figures outside the Today pages. The ⓘ button in the
+control bar shows every word again (fleet.focus). Never folded: errors, empty states, what a
+role may not see, the identity card, phone-only lines; a statement that a figure is absent,
+refused or missing, and a block that links somewhere, stay visible cut to one line; a panel
+with no figure in it keeps its first line. Measured through `bin/live-ui.mjs` against
+production data, folding off → on: #payouts 2,327 → 976 visible words, #overview 861 → 362,
+#low-performers 508 → 148 (cut lines still counted whole).
+
+**Not shipped yet:** the answer line and the Act-on strip computed per page from live data
+(the demo's were written from one snapshot), tile values that are whole sentences, cards that
+should be tables, and the phone build (`/m/`), which has its own stylesheet.

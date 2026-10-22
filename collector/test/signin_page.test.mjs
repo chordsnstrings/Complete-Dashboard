@@ -286,7 +286,7 @@ try {
             marks: marks.map((i) => ({ src: new URL(i.src).pathname, ok: i.complete && i.naturalWidth > 0 })) };
         }, w === 390);
         if (m.sw > m.iw) bad.push(`${w}/${scheme}: scrolls sideways (${m.sw} > ${m.iw})`);
-        const wantBg = scheme === 'dark' ? 'rgb(17, 17, 19)' : 'rgb(255, 255, 255)';
+        const wantBg = scheme === 'dark' ? 'rgb(30, 31, 34)' : 'rgb(255, 255, 255)';   // the grey paper, 2026-10-22
         if (m.bg !== wantBg) bad.push(`${w}/${scheme}: paper is ${m.bg}, not ${wantBg}`);
         const wantMark = scheme === 'dark' ? '/brand/mark-dark.png' : '/brand/mark.png';
         if (m.marks.length !== 1 || m.marks[0].src !== wantMark || !m.marks[0].ok) {

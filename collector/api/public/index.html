@@ -99,6 +99,12 @@
     var t = localStorage.getItem('theme');
     if (t === 'light' || t === 'dark') r.setAttribute('data-theme', t);
   } catch (e) { /* default to the OS preference */ }
+  /* FOCUS (focus.js): stamped before the first paint, so a reader who turned
+     the folding off never watches a page fold and then unfold. */
+  if (r.dataset.skin === 'arkiv') {   // the Classic skin is held byte-frozen
+    try { r.dataset.focus = localStorage.getItem('fleet.focus') === 'off' ? 'off' : 'on'; }
+    catch (e) { r.dataset.focus = 'on'; }
+  }
   if (phone) {
     var css = document.createElement('link');
     css.rel = 'stylesheet'; css.href = '/m/m.css';

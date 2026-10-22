@@ -23,34 +23,42 @@ label). Why it cannot reach 8.0, and what was tried, is in §E and §F.
 
 ## The set
 
-| role | light | dark | dark contrast on #111113 |
+**2026-10-22 — the paper is a dark grey now.** The operator: *"the arkiv dark is
+too dark. let's have a lighter dark — as in dark gray not black."* The paper
+moved from `#111113` to `#1E1F22`, and every value was re-solved against it
+(§H says how, and what it cost). The near-black set this file was first
+written about is in git history and in the runs below (§A–§F), which are kept
+as the record of how the first set was found. The table is the grey set.
+
+| role | light | dark | dark contrast on #1E1F22 |
 |---|---|---|---|
-| paper | `#FFFFFF` | `#111113` | — |
-| paper-2 | `#F6F6F7` | `#1B1B1D` | 1.10 (light 1.08) |
-| faint (grid) | `#E9E9EB` | `#252527` | 1.23 (1.21) |
-| hair (rules) | `#D6D6D9` | `#333336` | 1.50 (1.45) |
-| grey-2 / abs-outline | `#97979D` | `#68686D` | **3.40** — a mark, still rules-only |
-| grey (secondary text) | `#6D6D72` | `#8D8D92` | **5.71** (5.21 on paper-2) |
-| ink-2 | `#2E2E31` | `#D2D2D5` | 12.50 |
-| ink | `#0A0A0B` | `#F0F0F1` | 16.56 |
-| Uber | `#2362D3` | `#4366A5` | 3.31 |
-| Bolt | `#0398BA` | `#2EA3C7` | 6.45 |
-| Yango | `#B4358A` | `#BE118E` | 3.29 |
-| Hotel | `#A38902` | `#B29200` | 6.29 |
-| CABMAN | `#6B259F` | `#8D2CD7` | 3.12 |
-| FMS | `#9974F5` | `#9C78FA` | 5.82 |
-| positive | `#007E44` | `#008E60` | **4.52** (text) |
-| negative | `#961111` | `#D65044` | **4.57** (text) |
-| graphite 0…5 | `#ACB0B7`…`#13171F` | `#484D56` `#646972` `#818690` `#9FA5AF` `#BEC4CF` `#DFE5F0` | 2.22 … 14.91 |
-| wash | 14% of the token on white | 14% of the token on `#111113` | ink on the worst 11.56 |
-| hatch opacity | 0.45 | 0.53 | faintest line 1.66 (light 1.65) |
+| paper | `#FFFFFF` | `#1E1F22` | — (was `#111113`) |
+| paper-2 | `#F6F6F7` | `#272729` | 1.11 (light 1.08) |
+| faint (grid) | `#E9E9EB` | `#2F2F31` | 1.23 (1.21) |
+| hair (rules) | `#D6D6D9` | `#3C3C3F` | 1.50 (1.45) |
+| grey-2 / abs-outline | `#97979D` | `#727277` | **3.44** — a mark, still rules-only |
+| grey (secondary text) | `#6D6D72` | `#98989D` | **5.74** (5.19 on paper-2) |
+| ink-2 | `#2E2E31` | `#E0E0E3` | 12.51 |
+| ink | `#0A0A0B` | `#F0F0F1` | 14.47 (unchanged hex; 16.56 on the old paper) |
+| deep (label on a light fill only) | `#0A0A0B` (= ink) | `#111113` (the old paper) | — never a surface |
+| Uber | `#2362D3` | `#3E69AD` | 3.00 |
+| Bolt | `#0398BA` | `#21A3CA` | 5.62 |
+| Yango | `#B4358A` | `#C50A93` | 3.01 |
+| Hotel | `#A38902` | `#B29200` | 5.50 (hex unchanged) |
+| CABMAN | `#6B259F` | `#9D1BEF` | 3.01 |
+| FMS | `#9974F5` | `#9879FA` | 5.06 |
+| positive | `#007E44` | `#009A64` | **4.56** (text) |
+| negative | `#961111` | `#DE6463` | **4.79** (text) |
+| graphite 0…5 | `#ACB0B7`…`#13171F` | `#4B5059` `#676C75` `#848993` `#A2A8B2` `#C1C7D2` `#E2E8F3` | 2.03 … 13.40 |
+| wash | 14% of the token on white | 14% of the token on `#1E1F22` | ink on the worst 9.68 |
+| hatch opacity | 0.45 | 0.56 | faintest line 1.67 (light 1.65) |
 
 The ramps run lighter from each identity by dL 0.065, as on light (§C). The
 label printed inside a channel fill (the dominance bar) is ink on Uber, Yango
-and CABMAN and paper on Bolt, Hotel and FMS in dark: light text on the deeper
-three and dark text on the lighter three, which is what light mode does too.
-The token names swap because paper and ink did (`--on-c-*`, tokens.js
-`ON_CHANNEL`).
+and CABMAN (4.82, 4.80, 4.81:1) and **deep** on Bolt, Hotel and FMS (6.43,
+6.29, 5.79:1): light text on the deeper three, near-black text on the lighter
+three, as light mode does. Before the grey paper the near-black was the paper
+itself; now it is its own token, `--deep` (tokens.js `DEEP`, `ON_CHANNEL`).
 
 ## How it was solved
 
@@ -634,3 +642,57 @@ applies without `data-skin="arkiv"`, so production's look does not move.
 `test/arkiv_skin.test.mjs` §2 resolves every old colour name in a browser in
 four states (OS light; OS dark; light OS with dark chosen; dark OS with light
 chosen), and §7 draws the components in dark.
+
+## H · The grey paper (2026-10-22)
+
+**The ask.** *"the arkiv dark is too dark. let's have a lighter dark — as in
+dark gray not black."* The paper was `#111113` (OKLab L 0.18). It is now
+`#1E1F22` (L 0.24), the same faint cool cast, a dark grey and not a black.
+
+**Why not lighter.** Uber, Yango and CABMAN carry the light ink as the label
+inside their fill, so each has to sit in a window: at least 3:1 against the
+paper (a mark) and dark enough that the ink on it clears 4.5:1. The window is
+a band of luminance whose bottom rises with the paper. At `#1E1F22` it is
+about 0.01 of luminance wide; a little past it there is no colour that does
+both. `#202124` and `#222327` were searched and fail the band (Bolt, Hotel)
+or need the semantic pair below 6.5.
+
+**How it was solved.** Lightening each colour just enough for its own
+contrast was tried first and broke the pairs between them (positive met
+negative under deuteranopia, CABMAN met FMS in normal vision, Hotel met the
+negative at CVD 5.2). So the six identities and both semantics were searched
+together: a simulated-annealing walk over L, C and H for all eight, scored
+against every gate `lintMeasures('dark')` holds, with each identity held
+within 2.8° of its light hue and each semantic within 6° of its own (the
+first unconstrained run pushed the negative to a pink, `#CB7891`, which was
+refused: a loss must still read as red). Neutrals were stepped to keep their
+contrast against their own paper. Hotel keeps its exact gold, `#B29200`,
+because the search's `#B39200` sat 0.001 over the band. The graphite ramp's
+step 0 sits at the 2:1 ordinal floor (2.03) and no higher, because step 1
+carries the ink label in the dominance bar and needs 4.5:1 (it measures
+4.63; a ramp lifted to keep the old 2.22 failed `arkiv_skin` at 4.25).
+
+**What it costs, measured.**
+
+| gate | near-black paper | grey paper | gate now |
+|---|---|---|---|
+| six identities, all pairs, CVD | 8.1 | **8.40** (uber × yango) | 8.0 |
+| tritan | 10.9 | 10.28 | 8.0 |
+| all eight, normal vision | 15.4 | 15.06 (cabman × fms) | 15.0 |
+| positive × negative, CVD | 8.1 | **6.73** | 6.7 (ratchet) |
+| every ramp step × semantic, CVD | 7.04 (Hotel × negative) | **6.70** (Hotel × negative) | 6.65 (ratchet) |
+| semantics as text | 4.52 / 4.57 | 4.56 / 4.79 | 4.5 |
+
+The two ratchets sit in the validator's 6–8 band, which it calls legal only
+with secondary encoding. That encoding is already the law: every semantic
+carries its glyph and sign (▲ + / ▼ −) and is never an area fill (L3), and
+every Hotel mark carries a direct label (SPEC §4). `CVD_GATE.dark` and
+`test/tokens.test.mjs` both hold the measured floors, so a later change that
+costs more fails instead of drifting to 6.0.
+
+**Where it lives.** `api/public/tokens.js` (the objects, `DEEP`,
+`CVD_GATE.dark.pair`), regenerated into `app.css` by `bin/gen-tokens-css.mjs`;
+`api/public/signin.html` carries its own copy of the neutrals and the pair.
+Tests that read the paper: `tokens.test.mjs`, `phone_arkiv.test.mjs`,
+`signin_page.test.mjs`, `arkiv_skin.test.mjs` (the dominance bar label).
+
