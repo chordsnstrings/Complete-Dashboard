@@ -30,8 +30,9 @@
    · What stays visible as it is: a block of 15 words or fewer; a block that
      is mostly figures (a figure cell that happens to be styled as prose); an
      error. What stays visible cut to ONE line: the first caption under a
-     panel's heading — the line that says how to read the chart — and every
-     warning, with a red dot (data-fx="lead" / "flag"). A tile's sub-line
+     panel's heading — the line that says how to read the chart — every
+     warning, with a red dot, and every statement that a figure is absent,
+     refused or not compared (data-fx="lead" / "flag" / "absent"). A tile's sub-line
      over 8 words is cut to one line too, and keeps the whole line as its
      title (data-fx="clamp"). Opening the panel's notes uncuts all of them.
    · A container that holds both prose and figures is left whole: hiding it
@@ -50,6 +51,8 @@
    stale copies. A mark rides with its node, a re-render that drops the node
    drops the mark, and the observer below marks whatever arrives. */
 
+import { shellContract } from './shell.js';
+
 const KEY = 'fleet.focus';
 const WORDS = /[A-Za-z0-9][A-Za-z0-9'’.,%+−\-/:]*/g;
 const NUMS = /\d[\d,]*(?:\.\d+)?/g;
@@ -64,12 +67,30 @@ const NOT_PROSE = 'svg, td, th, button, select, option, input, label, textarea, 
 const HOLDS_DATA = 'table, svg, canvas, .kpi, .kpis, .panel, .cband, .chartscroll, .hbars, button, select, input, details';
 const HOST = '.panel, section.cband, section, form, fieldset';
 
+/* A statement that a figure is ABSENT, refused or not compared stays on the
+   face of the page, cut to one line: the house principle is that a figure
+   that cannot be measured is shown absent WITH its reason, and a fold would
+   leave the reader a blank where the page used to say why. The first line
+   says that it is absent; the rest opens with the panel's notes. The words
+   are the audit's own (docs/AUDIT.md "Verbosity": 13% of the long blocks). */
+const ABSENT = new RegExp([
+  'not a (?:difference|figure|value) of zero', '\\bnot (?:a )?zero\\b', '\\babsent\\b',
+  '\\bnot (?:yet )?(?:collected|measured|stated|compared|known|reported|recorded|priced|held|published|sent|filed|served)\\b',
+  '\\bno (?:[A-Za-z-]+ ){0,2}(?:data|reading|figure|statement|period|record|report|fare|position|price|row)s?\\b',
+  '\\bnothing (?:was|is|has been) (?:measured|compared|collected|recorded)\\b', '\\bcannot (?:be|say|tell)\\b',
+  '\\bnever (?:as|shown as) zero\\b', '\\bunknown\\b', '\\brefus(?:e|ed|es)\\b', '\\bwithheld\\b',
+  '\\bpredates?\\b', '\\bnot on record\\b', '\\bhas not been\\b', '\\bis missing\\b',
+  '\\b(?:shown|open) to your role\\b'].join('|'), 'i');
+
 const LEAD_WORDS = 15;     // a block this short is a line, not an explanation
 const SUB_WORDS = 8;       // a tile's sub-line past this is cut to one line
 const DENSE = 0.25;        // numbers per word above which a block is a figure cell
 
 export const focusOn = () => { try { return localStorage.getItem(KEY) !== 'off'; } catch { return true; } };
-const arkiv = () => document.documentElement.dataset.skin === 'arkiv';
+/* Which skin is a TOKEN, as for the shell (shell.js shellContract: --pg-shell is
+   0 in app.css and 1 in arkiv.css). No module reads the skin attribute
+   (arkiv_skin §4), so the Classic skin's DOM is never marked. */
+const arkiv = () => shellContract();
 
 /** The verdict for one prose block: keep, fold, lead (one line), or flag (one line, red dot). */
 export function decide(b, view, foot) {
@@ -77,12 +98,20 @@ export function decide(b, view, foot) {
   const w = words(t);
   if (!w) return 'keep';
   if (foot && foot.contains(b)) return b.closest('.pf-basis, .pf-principle') ? 'fold' : 'keep';
-  if (b.closest('.err, .error, .failbox, .closed-block, [role="alert"]')) return 'keep';
+  /* Never folded: an error; what a role may not see (access.js says so in
+     its own words, and a fold would read as "no data"); an empty state
+     (charts.js empty(): "Nothing to show", with the reason); the person's identity
+     card at the head of a driver page; and a line that only exists at the
+     width where it is true (.phone-only, e.g. "scroll the chart"). */
+  if (b.closest('.err, .error, .failbox, .empty, .access-closed, .access-withheld, .idcard, .phone-only, [role="alert"]')) return 'keep';
   const warn = b.matches('.note.warn, .note.err, .warn') || !!b.closest('.note.warn, .note.err');
   if (w <= LEAD_WORDS) return 'keep';
   if (warn) return 'flag';
+  if (ABSENT.test(t)) return 'absent';
   if (nums(t) / w > DENSE || b.querySelector('.n, .num, b.big, .tg-v')) return 'keep';
   if (b.matches('p.cap') && b.previousElementSibling?.matches('h3') && b.parentElement?.matches('.panel')) return 'lead';
+  // A block that links somewhere is where a reader goes next: one line, not a fold.
+  if (b.querySelector('a[href]')) return 'lead';
   return 'fold';
 }
 
@@ -116,7 +145,7 @@ const hostOf = (b, view, foot) => {
 function toggleFor(host, view) {
   let btn = [...host.children].find((c) => c.classList?.contains('fx-more'));
   const hidden = host.querySelectorAll('[data-fx="fold"]').length;
-  const cut = host.querySelectorAll('[data-fx="lead"], [data-fx="flag"], [data-fx="clamp"]').length;
+  const cut = host.querySelectorAll('[data-fx="lead"], [data-fx="flag"], [data-fx="absent"], [data-fx="clamp"]').length;
   if (!hidden && !cut) { btn?.remove(); return; }
   if (!btn) {
     btn = document.createElement('button');
@@ -155,6 +184,15 @@ export function focusView() {
       if (!s.title) s.title = t;
       hosts.add(hostOf(s, view, null));
     } else s.dataset.fx = 'keep';
+  }
+  /* A panel that holds no figure at all (a status message, a policy, a form's
+     explanation) keeps its first line on the face of it: folding all of it
+     would leave a heading over nothing. */
+  for (const h of hosts) {
+    if (h === view || h === foot || h.querySelector('table, svg, canvas, .kpi, .hbars')) continue;
+    const said = [...h.querySelectorAll('[data-fx]')].some((m) => m.dataset.fx !== 'fold' && words(clean(m.textContent)) >= 4);
+    const first = h.querySelector('[data-fx="fold"]');
+    if (!said && first) first.dataset.fx = 'lead';
   }
   // Re-count every host that holds a mark, not only the new ones: a panel
   // whose body re-rendered may have lost marks and must say so.

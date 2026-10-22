@@ -25,6 +25,7 @@
 import { chromium, devices } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { app } from '../mockapi.mjs';
+import { openNotes } from './browser.mjs';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -63,6 +64,9 @@ console.log('\nthe advances register');
   const page = await ctx.newPage();
   await page.goto(`${base}/#advances`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-panel="advance-register"] table', { timeout: 15000 });
+  // The policy wording is folded under its panel's "ⓘ notes" (focus.js): open them as a reader would.
+  await page.waitForTimeout(400);
+  await openNotes(page);
 
   const body = await page.evaluate(() => document.body.innerText);
   check('the policy is stated with the date it took effect',

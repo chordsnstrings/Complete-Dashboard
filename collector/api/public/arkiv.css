@@ -1549,11 +1549,17 @@
    where it shows in its own place. Nothing is removed. [data-focus="off"]
    (the control bar's ⓘ button) shows every word as before. */
 :root[data-skin="arkiv"][data-focus="on"] [data-fx="fold"]:not(.fx-open [data-fx="fold"]){display:none}
-:root[data-skin="arkiv"][data-focus="on"] :is([data-fx="lead"],[data-fx="flag"],[data-fx="clamp"]):not(.fx-open *){
+:root[data-skin="arkiv"][data-focus="on"] [data-fx="lead"]:not(.fx-open *),
+:root[data-skin="arkiv"][data-focus="on"] [data-fx="flag"]:not(.fx-open *),
+:root[data-skin="arkiv"][data-focus="on"] [data-fx="absent"]:not(.fx-open *),
+:root[data-skin="arkiv"][data-focus="on"] [data-fx="clamp"]:not(.fx-open *){
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;line-clamp:1;overflow:hidden}
 :root[data-skin="arkiv"][data-focus="on"] [data-fx="flag"]::before{content:"";display:inline-block;width:7px;height:7px;
   border-radius:50%;background:var(--sem-neg);margin-right:8px;vertical-align:1px}
 :root[data-skin="arkiv"][data-focus="off"] .fx-more{display:none}
+/* A folded caption took its spacing with it: the block after it keeps the
+   house's 10px gap (spacing.test, #finance legend → table). */
+:root[data-skin="arkiv"][data-focus="on"] [data-fx="fold"]:not(.fx-open *) + .tblock{margin-top:10px}
 :root[data-skin="arkiv"] .fx-more{display:flex;align-items:center;gap:6px;width:100%;margin:10px 0 0;padding:6px 0 0;
   border:0;border-top:1px dashed var(--hair);background:none;font-family:var(--sans);font-size:var(--t3);
   color:var(--grey);text-align:left;cursor:pointer}
@@ -1571,6 +1577,8 @@
 :root[data-skin="arkiv"][data-focus="on"] #fApplies,
 :root[data-skin="arkiv"][data-focus="on"] .todaynow .lb-scope{display:none}
 :root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow{padding-top:6px;padding-bottom:6px}
-:root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow :is(.tn-sub,.lb-notes,.tn-links a:not(:first-child)){display:none}
+:root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow .tn-sub,
+:root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow .lb-notes,
+:root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow .tn-links a:not(:first-child){display:none}
 :root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow .lb-figs{gap:4px 0}
 :root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow .lb-figs .tn-f b{font-size:var(--t6)}

@@ -215,7 +215,8 @@ console.log('\n3 · the sheet, under the skin');
      (app.js xlsxButton): the money workbook is "based on the range", so it
      sits with the range's own controls. */
   check('the control bar holds the six controls and the workbook, then the theme, the sentence and the clock note',
-    o.ctl.join(' ') === 'fRange fGrain fPlatform fFleet refreshBtn xlsxBtn xlsxMsg zenBtn themeBtn fApplies tzNote', o.ctl.join(' '));
+    // focusBtn (focus.js, 2026-10-22): the "ⓘ notes" switch sits beside the theme, the other per-reader choice.
+    o.ctl.join(' ') === 'fRange fGrain fPlatform fFleet refreshBtn xlsxBtn xlsxMsg zenBtn focusBtn themeBtn fApplies tzNote', o.ctl.join(' '));
   check('…and it is the one thing that sticks', o.sticky === 'sticky' && o.top === '0px'
     && o.titleSticky === 'static' && o.tabsSticky === 'static', `${o.sticky} ${o.top} ${o.titleSticky} ${o.tabsSticky}`);
   check('the rail is gone and the sheet is shown', o.side === 'none' && o.vis === 'visible', `${o.side} ${o.vis}`);

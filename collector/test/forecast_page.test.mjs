@@ -87,6 +87,7 @@
         34 passed, 1 FAILED. */
 import { chromium } from 'playwright';
 import { app } from '../mockapi.mjs';
+import { openNotes } from './browser.mjs';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -121,6 +122,10 @@ await page.goto(`${base}/#forecast`, { waitUntil: 'networkidle' });
    Wait for something that is always there, then ASSERT the thing under test
    exists. */
 await page.waitForSelector('#view [data-panel="fc-months"] table', { timeout: 30000 });
+/* The captions below are method, folded under each panel's "ⓘ notes"
+   (focus.js): read the page as a reader does once they open them. */
+await page.waitForTimeout(400);
+await openNotes(page);
 const body = await page.evaluate(() => document.body.innerText);
 
 check('the year-on-year panel is rendered at all',

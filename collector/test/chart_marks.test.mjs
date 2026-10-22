@@ -234,7 +234,8 @@ check('the words follow the form: solid in the old skin, hatched in Arkiv',
 {
   const { ctx, page } = await open('arkiv', { scheme: 'dark' });
   const dk = await page.evaluate(RENDER, ['barChart', 900, fc, { x: 'd', y: 'n', projectedKey: 'proj' }]);
-  check('dark: the hatch line takes the dark opacity (0.53)', Math.abs(+dk.pats[0]?.line.opNow - 0.53) < 0.001,
+  // 0.56 on the grey paper (2026-10-22; it was 0.53 on #111113): tokens.js HATCH.dark.
+  check('dark: the hatch line takes the dark opacity (0.56)', Math.abs(+dk.pats[0]?.line.opNow - 0.56) < 0.001,
     JSON.stringify(dk.pats[0]));
   await ctx.close();
 }

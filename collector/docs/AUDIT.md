@@ -2824,7 +2824,10 @@ and every warning stay visible, cut to one line; tile sub-lines over 8 words are
 line; blocks of 15 words or fewer and blocks that are mostly figures stay as they are. The
 masthead loses its second line, the control bar's "does not apply" sentence becomes its
 tooltip, and the Today strip is one row of figures outside the Today pages. The ⓘ button in the
-control bar shows every word again (fleet.focus). Measured through `bin/live-ui.mjs` against
+control bar shows every word again (fleet.focus). Never folded: errors, empty states, what a
+role may not see, the identity card, phone-only lines; a statement that a figure is absent,
+refused or missing, and a block that links somewhere, stay visible cut to one line; a panel
+with no figure in it keeps its first line. Measured through `bin/live-ui.mjs` against
 production data, folding off → on: #payouts 2,327 → 976 visible words, #overview 861 → 362,
 #low-performers 508 → 148 (cut lines still counted whole).
 
