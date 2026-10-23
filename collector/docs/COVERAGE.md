@@ -10353,8 +10353,24 @@ AED 383 per day worked; Model Y 2025 501 a day, Model Y 2023 379, Model Y 2024 3
   Lexus ES 78, Toyota Highlander 69); the Teslas ran 26–36% less every month. Gross per km is
   flat across the Teslas (AED 4.44–4.61), so their lower takings are distance, not price.
 
+* **The car or the driver** (asked the same day). Read per car from `/api/vehicle/drivers`
+  (`vehicle_driver_day`: plate × day × account × channel; its revenue is within about 2% of the
+  trip fares per car-month), folded to one person per `ALIAS_KEY` / `foldName` exactly as
+  `personKey()` folds, into person-days in one kind of car (94 of 28,974 split across a Tesla
+  and another car, left out); each day indexed to the fleet's mean person-day in its month.
+  Tesla days index 0.85 against 1.10. 69% of Tesla person-days are by 87 people who never drove
+  another car (index 0.77); the 60 who also drove another car 10+ days ran 1.05 in the Tesla
+  against 1.06 in their other cars. The 48 with 10+ days in each: −3% in the Tesla
+  (days-weighted, bootstrap 95% −9% to +3%). Ranked split-half (odd days rank, even days
+  compare, so luck does not pass for skill), the top half ran −2% in a Tesla. So the Tesla gap
+  is mostly the lineup, not the car.
+
 ### Traps this added to the list
 
+* **Ranking drivers on the days you then compare them on manufactures the result.** Ranked on
+  all their other-car days, the top quarter "fell" 8% in a Tesla and the bottom quarter "rose"
+  7% — regression to the mean. Ranked on odd-dated days and compared on even-dated ones, the
+  top quarter is −2% and the bottom +2%.
 * **The Vehicles directory's `revenue` is not gross from February 2026.** It follows the income
   rule one channel at a time, so once Uber payouts exist it carries Uber as the drivers' net
   payout (`attributed`) and drops Uber's fares. Summed over all plates it equals the fleet's gross
