@@ -10332,6 +10332,67 @@ production through `/api/finance/payouts/reconcile` (every transfer), `/api/tren
   `money_source: "fares"`, because no Bolt payout is tied to a period. Bolt's bank share is
   30% of that figure; nothing that reads "money" for Bolt is what reached the fleet.
 
+## Gross per car by month — measured 2026-10-23
+
+Asked for: every Tesla's revenue by month for a year, with its model year. 80 Teslas in the
+register (Model Y 2023 ×54, Model Y 2024 ×10, Model 3 2024 ×10, Model Y 2025 ×6; make, model and
+year from `vehicle_plate`, Uber's profile first). Nov 2025 – 22 Oct 2026: AED 4,304,508 gross,
+AED 383 per day worked; Model Y 2025 501 a day, Model Y 2023 379, Model Y 2024 376, Model 3 2024
+283. Three Model Y 2023 (L25970, L44279, L45199) had no booking in the twelve months.
+
+* **Per-car gross is `/api/vehicle/earnings` `daily[].fares`, summed by month.** Every booking
+  carries its plate (278,153 of 278,390 over Oct 2025 – Oct 2026), so the plates hold the whole
+  fleet's fares.
+
+* **Per-car distance is the directory's `km`, month by month** — booked km, pickup to drop-off,
+  over bookings that carry a distance (78–90% of bookings; the rest are cancellations). The
+  income rule does not touch it, and its `days` equals the days with a booking in the earnings
+  route's `daily` (0 mismatches over 80 cars × 13 months). It is not odometer distance: empty
+  km between trips exists only for cars with an FMS tracker. Nov 2025 – 22 Oct 2026, per day
+  worked: Teslas 84 km, the 60 other registered cars 113 (BYD Han EV 115, Polestar 4 111,
+  Lexus ES 78, Toyota Highlander 69); the Teslas ran 26–36% less every month. Gross per km is
+  flat across the Teslas (AED 4.44–4.61), so their lower takings are distance, not price.
+
+* **The car or the driver** (asked the same day). Read per car from `/api/vehicle/drivers`
+  (`vehicle_driver_day`: plate × day × account × channel; its revenue is within about 2% of the
+  trip fares per car-month), folded to one person per `ALIAS_KEY` / `foldName` exactly as
+  `personKey()` folds, into person-days in one kind of car (94 of 28,974 split across a Tesla
+  and another car, left out); each day indexed to the fleet's mean person-day in its month.
+  Tesla days index 0.85 against 1.10. 69% of Tesla person-days are by 87 people who never drove
+  another car (index 0.77); the 60 who also drove another car 10+ days ran 1.05 in the Tesla
+  against 1.06 in their other cars. The 48 with 10+ days in each: −3% in the Tesla
+  (days-weighted, bootstrap 95% −9% to +3%). Ranked split-half (odd days rank, even days
+  compare, so luck does not pass for skill), the top half ran −2% in a Tesla. So the Tesla gap
+  is mostly the lineup, not the car.
+* **…and where that stops, measured the same day by an independent recompute and an adversarial
+  review.** Utilisation is the larger gap: 39% vs 74% of calendar car-days, 56% vs 78% between
+  each car's first and last booking, 77–81% vs 91% among cars that worked in Sep/Oct; 28 Teslas
+  had no booking 1 Sep – 22 Oct (18 last booked before June) against 3 other cars, and in most
+  idle Tesla spells the car's last driver kept working in another car. Teslas carry 1.04 drivers
+  per working car-day against 1.12, 14% of trips on Bolt against 9%, AED 51.55 per Uber trip
+  against 53.88. Same driver by model, pooled over days, people with 10+ other-car days:
+  Model Y 2023 1.00 (0.94–1.06, 50 people), Model Y 2024 0.89 (0.77–0.98, 16), Model Y 2025 1.01
+  (6), Model 3 2024 0.98 (4 — untestable). Same driver within one month (41 driver-months, 32
+  people): median 0.81 (0.76–0.96), pooled 0.88. So: operational for the Model Y 2023 and for
+  utilisation; not settled for the parked cars (the data holds bookings, not why a car stopped),
+  the Model Y 2024, or a car effect up to ~15%. Age and make are mixed: 56 of the 60 other cars
+  are 2025, 54 of the 80 Teslas 2023. The idle-capacity figure that survives (Teslas in service
+  to the other cars' rate plus the 7 parked since Jul–Aug, 1 Sep – 22 Oct) is AED 277k gross;
+  673k needs every parked car drivable and ~31 more drivers a day.
+
+### Traps this added to the list
+
+* **Ranking drivers on the days you then compare them on manufactures the result.** Ranked on
+  all their other-car days, the top quarter "fell" 8% in a Tesla and the bottom quarter "rose"
+  7% — regression to the mean. Ranked on odd-dated days and compared on even-dated ones, the
+  top quarter is −2% and the bottom +2%.
+* **The Vehicles directory's `revenue` is not gross from February 2026.** It follows the income
+  rule one channel at a time, so once Uber payouts exist it carries Uber as the drivers' net
+  payout (`attributed`) and drops Uber's fares. Summed over all plates it equals the fleet's gross
+  to the dirham for Oct 2025 – Jan 2026 (e.g. 1,779,338 of 1,779,452 trip value in Oct 2025), then
+  falls to 9% (Feb), 4–5% (Apr–Jun) and 9–17% (Jul–Oct) of it. For gross per car use the earnings
+  route above; for the Teslas the two agree exactly through January (883,551 in Oct 2025).
+
 ## ntfy phone alerts — built 2026-10-20
 
 The credential banner's verdicts (`/api/auth`, `authHealth` in
