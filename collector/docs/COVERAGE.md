@@ -10344,6 +10344,15 @@ AED 383 per day worked; Model Y 2025 501 a day, Model Y 2023 379, Model Y 2024 3
   carries its plate (278,153 of 278,390 over Oct 2025 – Oct 2026), so the plates hold the whole
   fleet's fares.
 
+* **Per-car distance is the directory's `km`, month by month** — booked km, pickup to drop-off,
+  over bookings that carry a distance (78–90% of bookings; the rest are cancellations). The
+  income rule does not touch it, and its `days` equals the days with a booking in the earnings
+  route's `daily` (0 mismatches over 80 cars × 13 months). It is not odometer distance: empty
+  km between trips exists only for cars with an FMS tracker. Nov 2025 – 22 Oct 2026, per day
+  worked: Teslas 84 km, the 60 other registered cars 113 (BYD Han EV 115, Polestar 4 111,
+  Lexus ES 78, Toyota Highlander 69); the Teslas ran 26–36% less every month. Gross per km is
+  flat across the Teslas (AED 4.44–4.61), so their lower takings are distance, not price.
+
 ### Traps this added to the list
 
 * **The Vehicles directory's `revenue` is not gross from February 2026.** It follows the income
