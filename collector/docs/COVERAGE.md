@@ -10364,6 +10364,21 @@ AED 383 per day worked; Model Y 2025 501 a day, Model Y 2023 379, Model Y 2024 3
   (days-weighted, bootstrap 95% −9% to +3%). Ranked split-half (odd days rank, even days
   compare, so luck does not pass for skill), the top half ran −2% in a Tesla. So the Tesla gap
   is mostly the lineup, not the car.
+* **…and where that stops, measured the same day by an independent recompute and an adversarial
+  review.** Utilisation is the larger gap: 39% vs 74% of calendar car-days, 56% vs 78% between
+  each car's first and last booking, 77–81% vs 91% among cars that worked in Sep/Oct; 28 Teslas
+  had no booking 1 Sep – 22 Oct (18 last booked before June) against 3 other cars, and in most
+  idle Tesla spells the car's last driver kept working in another car. Teslas carry 1.04 drivers
+  per working car-day against 1.12, 14% of trips on Bolt against 9%, AED 51.55 per Uber trip
+  against 53.88. Same driver by model, pooled over days, people with 10+ other-car days:
+  Model Y 2023 1.00 (0.94–1.06, 50 people), Model Y 2024 0.89 (0.77–0.98, 16), Model Y 2025 1.01
+  (6), Model 3 2024 0.98 (4 — untestable). Same driver within one month (41 driver-months, 32
+  people): median 0.81 (0.76–0.96), pooled 0.88. So: operational for the Model Y 2023 and for
+  utilisation; not settled for the parked cars (the data holds bookings, not why a car stopped),
+  the Model Y 2024, or a car effect up to ~15%. Age and make are mixed: 56 of the 60 other cars
+  are 2025, 54 of the 80 Teslas 2023. The idle-capacity figure that survives (Teslas in service
+  to the other cars' rate plus the 7 parked since Jul–Aug, 1 Sep – 22 Oct) is AED 277k gross;
+  673k needs every parked car drivable and ~31 more drivers a day.
 
 ### Traps this added to the list
 
