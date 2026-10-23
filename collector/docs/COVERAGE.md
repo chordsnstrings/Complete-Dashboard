@@ -10332,6 +10332,27 @@ production through `/api/finance/payouts/reconcile` (every transfer), `/api/tren
   `money_source: "fares"`, because no Bolt payout is tied to a period. Bolt's bank share is
   30% of that figure; nothing that reads "money" for Bolt is what reached the fleet.
 
+## Gross per car by month — measured 2026-10-23
+
+Asked for: every Tesla's revenue by month for a year, with its model year. 80 Teslas in the
+register (Model Y 2023 ×54, Model Y 2024 ×10, Model 3 2024 ×10, Model Y 2025 ×6; make, model and
+year from `vehicle_plate`, Uber's profile first). Nov 2025 – 22 Oct 2026: AED 4,304,508 gross,
+AED 383 per day worked; Model Y 2025 501 a day, Model Y 2023 379, Model Y 2024 376, Model 3 2024
+283. Three Model Y 2023 (L25970, L44279, L45199) had no booking in the twelve months.
+
+* **Per-car gross is `/api/vehicle/earnings` `daily[].fares`, summed by month.** Every booking
+  carries its plate (278,153 of 278,390 over Oct 2025 – Oct 2026), so the plates hold the whole
+  fleet's fares.
+
+### Traps this added to the list
+
+* **The Vehicles directory's `revenue` is not gross from February 2026.** It follows the income
+  rule one channel at a time, so once Uber payouts exist it carries Uber as the drivers' net
+  payout (`attributed`) and drops Uber's fares. Summed over all plates it equals the fleet's gross
+  to the dirham for Oct 2025 – Jan 2026 (e.g. 1,779,338 of 1,779,452 trip value in Oct 2025), then
+  falls to 9% (Feb), 4–5% (Apr–Jun) and 9–17% (Jul–Oct) of it. For gross per car use the earnings
+  route above; for the Teslas the two agree exactly through January (883,551 in Oct 2025).
+
 ## ntfy phone alerts — built 2026-10-20
 
 The credential banner's verdicts (`/api/auth`, `authHealth` in
